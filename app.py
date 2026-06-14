@@ -81,7 +81,13 @@ def upload_drive(caminho_local, nome_arquivo, subpasta_nome=None):
         return {'ok': False, 'erro': msg}
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(32)
+# ─── CHAVE SECRETA FIXA PARA SESSÕES PERSISTENTES ───────────────────────
+# Se usar secrets.token_hex(32) toda vez, a session cai após restart!
+app.secret_key = os.environ.get('SECRET_KEY') or 'serenus-job-secret-key-2025-fixo-para-sessoes'
+app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS only
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Sem acesso JS
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
+app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 30  # 30 dias
 
 # ─── AUTO-INICIALIZAR BANCO DE DADOS ──────────────────────────────────────
 # Garante que o banco é inicializado tanto em dev (python app.py) 
