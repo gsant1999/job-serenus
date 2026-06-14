@@ -541,11 +541,11 @@ def init_db():
             VALUES (?,?,?,?,?,?,?,?,?,?)""", r)
     
     # Admin padrão
-    admin = conn.execute("SELECT id FROM usuarios WHERE email='guilherme@serenus.com.br'").fetchone()
+    admin = conn.execute("SELECT id FROM usuarios WHERE email='guilherme@serenuscorretora.com.br'").fetchone()
     if not admin:
         conn.execute("""INSERT INTO usuarios (nome,email,senha_hash,perfil,regime_base)
             VALUES (?,?,?,?,?)""",
-            ('Guilherme Santos','guilherme@serenus.com.br',hashlib.sha256("serenus2025".encode()).hexdigest(),'admin','com_fixo_lead'))
+            ('Guilherme Santos','guilherme@serenuscorretora.com.br',hashlib.sha256("serenus2025".encode()).hexdigest(),'admin','com_fixo_lead'))
     
     # Comissões padrão
     com_default = [
@@ -1935,7 +1935,7 @@ if __name__ == '__main__':
     print("="*52)
     port = int(os.environ.get('PORT', 8080))
     print(f"  Rodando na porta {port}")
-    print("  Admin:  guilherme@serenus.com.br / serenus2025")
+    print("  Admin:  guilherme@serenuscorretora.com.br / serenus2025")
     print("="*52 + "\n")
     app.run(debug=False, host='0.0.0.0', port=port)
 
