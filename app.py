@@ -1940,7 +1940,9 @@ if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=port)
 
 # ─── DEBUG INFO PARA PRODUÇÃO ────────────────────────────────────────────
-print(f"\n[STARTUP] Modo BD: {DB_MODE.upper()}")
+print(f"\n[STARTUP] DATABASE_URL: {os.environ.get('DATABASE_URL', 'NÃO ENCONTRADA')[:80]}")
+print(f"[STARTUP] HAS_POSTGRES: {HAS_POSTGRES}")
+print(f"[STARTUP] Modo BD selecionado: {DB_MODE.upper()}")
 if DB_MODE == 'postgres':
     db_url = os.environ.get('DATABASE_URL', '')
     print(f"[STARTUP] PostgreSQL: {db_url[:60]}..." if db_url else "[STARTUP] PostgreSQL: NÃO CONFIGURADO")
