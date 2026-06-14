@@ -83,6 +83,26 @@ def upload_drive(caminho_local, nome_arquivo, subpasta_nome=None):
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
 
+# ─── AUTO-INICIALIZAR BANCO DE DADOS ──────────────────────────────────────
+# Garante que o banco é inicializado tanto em dev (python app.py) 
+# quanto em produção (gunicorn) na primeira requisição
+_db_initialized = False
+
+@app.before_request
+def _ensure_db_initialized():
+    global _db_initialized
+    if not _db_initialized:
+        try:
+            init_db()
+            _db_initialized = True
+            if DB_MODE == 'postgres':
+                print("[DB] ✅ PostgreSQL inicializado")
+            else:
+                print("[DB] ✅ SQLite inicializado")
+        except Exception as e:
+            print(f"[DB] ⚠️ Erro ao inicializar: {e}")
+            _db_initialized = True  # Evita loop infinito
+
 @app.template_filter('from_json')
 def _from_json(s):
     try: return json.loads(s) if s else []
@@ -1918,3 +1938,11 @@ if __name__ == '__main__':
     print("  Admin:  guilherme@serenus.com.br / serenus2025")
     print("="*52 + "\n")
     app.run(debug=False, host='0.0.0.0', port=port)
+
+# ─── DEBUG INFO PARA PRODUÇÃO ────────────────────────────────────────────
+print(f"\n[STARTUP] Modo BD: {DB_MODE.upper()}")
+if DB_MODE == 'postgres':
+    db_url = os.environ.get('DATABASE_URL', '')
+    print(f"[STARTUP] PostgreSQL: {db_url[:60]}..." if db_url else "[STARTUP] PostgreSQL: NÃO CONFIGURADO")
+else:
+    print(f"[STARTUP] SQLite: {DB}")
