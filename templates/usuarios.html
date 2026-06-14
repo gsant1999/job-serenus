@@ -1,0 +1,215 @@
+{% extends 'base.html' %}
+{% block title %}Usuários{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Usuários</h1>
+    <div class="sub">Gestão de acessos ao JOB</div>
+  </div>
+  <div><button class="btn" onclick="abrirNovo()">Novo usuário</button></div>
+</div>
+
+<div class="page">
+
+  {% if request.args.get('link_token') %}
+  {% set token = request.args.get('link_token') %}
+  <div class="card" style="background:rgba(250,204,21,.07); border-color:rgba(250,204,21,.3); margin-bottom:18px;">
+    <div style="padding:22px 26px;">
+      <div style="display:flex; align-items:flex-start; gap:14px;">
+        <div style="flex:1;">
+          <div style="font-family:'Sora',sans-serif; font-size:16px; font-weight:600; color:#854d0e; margin-bottom:6px;">Link de criação de senha gerado</div>
+          <div style="font-size:13px; color:#854d0e; margin-bottom:14px;">
+            Copie e envie para o usuário (WhatsApp, e-mail, etc). O link expira em <strong>7 dias</strong>.
+          </div>
+          <div style="background:var(--panel-2); border:1px solid rgba(250,204,21,.35); color:var(--texto); padding:11px 14px; border-radius:7px; font-family:monospace; font-size:12.5px; word-break:break-all;" id="link">
+            {{ host }}/setup/{{ token }}
+          </div>
+        </div>
+        <button class="btn" onclick="copiarLink()" style="background:#854d0e;">Copiar link</button>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <table>
+      <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Regime</th><th>Status</th><th>Ação</th></tr></thead>
+      <tbody>
+        {% for u in usuarios %}
+        <tr>
+          <td style="display:flex; align-items:center; gap:10px;">
+            {% if u.foto %}<img src="/anexos/{{ u.foto }}" alt="" style="width:36px; height:36px; border-radius:50%; object-fit:cover; border:1px solid var(--borda);">
+            {% else %}<div style="width:36px; height:36px; border-radius:50%; background:var(--panel-3); display:flex; align-items:center; justify-content:center; font-size:13px; color:var(--cinza);">{{ u.nome[0]|upper }}</div>{% endif %}
+            <strong>{{ u.nome }}</strong>
+          </td>
+          <td>{{ u.email }}</td>
+          <td><span class="tag {{ 'tag-verde' if u.perfil=='admin' else 'tag-info' if u.perfil=='supervisor' else 'tag-am' }}">{{ u.perfil }}</span></td>
+          <td style="font-size:11.5px; color:var(--cinza);">
+            {% if u.regime_base == 'com_fixo_lead' %}Com Fixo + Com Lead
+            {% elif u.regime_base == 'com_lead' %}Com Lead (escalonado N1/N2/N3)
+            {% else %}Sem Lead e Sem Fixo{% endif %}
+          </td>
+          <td>
+            {% if not u.senha_hash %}<span class="tag tag-am">Pendente senha</span>
+            {% elif u.ativo %}<span class="tag tag-verde">Ativo</span>
+            {% else %}<span class="tag tag-off">Inativo</span>{% endif %}
+          </td>
+          <td>
+            <button class="btn-ghost" onclick='editar({{ u.id }}, {{ u.nome|tojson }}, {{ u.email|tojson }}, "{{ u.perfil }}", "{{ u.regime_base }}", {{ u.ativo }}, {{ (u.valor_fixo or 0)|tojson }}, {{ (u.chave_pix or "")|tojson }}, {{ (u.foto or "")|tojson }})'>Editar</button>
+            {% if not u.senha_hash %}<a href="/usuario/regenerar-link/{{ u.id }}" class="btn-ghost" style="color:var(--info);">Novo link</a>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- MODAL NOVO -->
+<div class="modal-overlay" id="modal-novo">
+  <div class="modal">
+    <h3>Novo usuário</h3>
+    <p style="font-size:12.5px; color:var(--cinza); margin-bottom:18px;">Após criar, o sistema gera um link único — você envia ao usuário para criar a senha.</p>
+    <form method="POST" action="/usuario/novo">
+      <div class="campo" style="margin-bottom:12px;">
+        <label>Nome completo</label>
+        <input type="text" name="nome" required>
+      </div>
+      <div class="campo" style="margin-bottom:12px;">
+        <label>E-mail</label>
+        <input type="email" name="email" required>
+      </div>
+      <div class="form-row form-row-2" style="margin-bottom:14px;">
+        <div class="campo">
+          <label>Perfil</label>
+          <select name="perfil" id="n-perfil" required onchange="toggleRegime('n')">
+            <option value="consultor">Consultor (vende)</option>
+            <option value="supervisor">Supervisor (não vende)</option>
+            <option value="admin">Administrador (não vende)</option>
+          </select>
+        </div>
+        <div class="campo" id="n-regime-wrap">
+          <label>Regime de comissão</label>
+          <select name="regime_base" id="n-regime">
+            <option value="sem_lead_sem_fixo">Sem Lead e Sem Fixo</option>
+            <option value="com_lead">Com Lead (escalonado N1/N2/N3)</option>
+            <option value="com_fixo_lead">Com Fixo + Com Lead</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button type="submit" class="btn" style="flex:1;">Gerar link de cadastro</button>
+        <button type="button" class="btn-outline" onclick="fechar('modal-novo')">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL EDITAR -->
+<div class="modal-overlay" id="modal-editar">
+  <div class="modal">
+    <h3>Editar usuário</h3>
+    <form method="POST" id="form-editar" enctype="multipart/form-data">
+      <input type="hidden" name="id" id="e-id">
+      <div class="campo" style="margin-bottom:12px;">
+        <label>Foto de perfil</label>
+        <div style="display:flex; align-items:center; gap:14px;">
+          <img id="e-foto-preview" src="" alt="" style="width:56px; height:56px; border-radius:50%; object-fit:cover; background:var(--panel-3); border:1px solid var(--borda);">
+          <input type="file" name="foto" id="e-foto" accept="image/*" style="font-size:12px;">
+        </div>
+      </div>
+      <div class="campo" style="margin-bottom:12px;">
+        <label>Nome</label>
+        <input type="text" name="nome" id="e-nome" required>
+      </div>
+      <div class="campo" style="margin-bottom:12px;">
+        <label>E-mail</label>
+        <input type="email" name="email" id="e-email" required>
+      </div>
+      <div class="form-row form-row-2" style="margin-bottom:12px;">
+        <div class="campo">
+          <label>Perfil</label>
+          <select name="perfil" id="e-perfil" onchange="toggleRegime('e')">
+            <option value="consultor">Consultor (vende)</option>
+            <option value="supervisor">Supervisor (não vende)</option>
+            <option value="admin">Administrador (não vende)</option>
+          </select>
+        </div>
+        <div class="campo" id="e-regime-wrap">
+          <label>Regime</label>
+          <select name="regime_base" id="e-regime">
+            <option value="sem_lead_sem_fixo">Sem Lead e Sem Fixo</option>
+            <option value="com_lead">Com Lead (escalonado N1/N2/N3)</option>
+            <option value="com_fixo_lead">Com Fixo + Com Lead</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row form-row-2" style="margin-bottom:14px;" id="e-fixopix-wrap">
+        <div class="campo" id="e-fixo-wrap">
+          <label>Fixo mensal (R$)</label>
+          <input type="text" name="valor_fixo" id="e-fixo" placeholder="0,00">
+          <div class="hint">Só p/ "Com Fixo + Com Lead". Pago dia 15 e 30.</div>
+        </div>
+        <div class="campo">
+          <label>Chave PIX</label>
+          <input type="text" name="chave_pix" id="e-pix" placeholder="CPF, e-mail, telefone...">
+        </div>
+      </div>
+      <div class="campo" style="margin-bottom:14px;">
+        <label class="radio" style="display:inline-flex;">
+          <input type="checkbox" name="ativo" id="e-ativo" value="1">
+          <span>Usuário ativo</span>
+        </label>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button type="submit" class="btn" style="flex:1;">Salvar alterações</button>
+        <button type="button" class="btn-outline" onclick="fechar('modal-editar')">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function abrirNovo() { document.getElementById('modal-novo').classList.add('open'); }
+function fechar(id) { document.getElementById(id).classList.remove('open'); }
+function toggleRegime(prefix) {
+  const perfil = document.getElementById(prefix+'-perfil').value;
+  const vende = (perfil === 'consultor');
+  const rw = document.getElementById(prefix+'-regime-wrap');
+  if (rw) rw.style.display = vende ? '' : 'none';
+  // fixo só no editar e só p/ com_fixo_lead
+  const fpw = document.getElementById(prefix+'-fixopix-wrap');
+  if (fpw) {
+    fpw.style.display = vende ? '' : 'none';
+    const fw = document.getElementById(prefix+'-fixo-wrap');
+    const reg = document.getElementById(prefix+'-regime');
+    if (fw && reg) fw.style.display = (reg.value === 'com_fixo_lead') ? '' : 'none';
+  }
+}
+function editar(id, nome, email, perfil, regime, ativo, fixo, pix, foto) {
+  document.getElementById('form-editar').action = '/usuario/editar/' + id;
+  document.getElementById('e-id').value = id;
+  document.getElementById('e-nome').value = nome;
+  document.getElementById('e-email').value = email;
+  document.getElementById('e-perfil').value = perfil;
+  document.getElementById('e-regime').value = regime;
+  document.getElementById('e-ativo').checked = !!ativo;
+  document.getElementById('e-fixo').value = fixo ? String(fixo).replace('.',',') : '';
+  document.getElementById('e-pix').value = pix || '';
+  const prev = document.getElementById('e-foto-preview');
+  prev.src = foto ? '/anexos/'+foto : 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="56" height="56"%3E%3Crect width="56" height="56" fill="%23223"/%3E%3C/svg%3E';
+  document.getElementById('e-foto').onchange = (e) => { if(e.target.files[0]) prev.src = URL.createObjectURL(e.target.files[0]); };
+  document.getElementById('e-regime').onchange = () => toggleRegime('e');
+  toggleRegime('e');
+  document.getElementById('modal-editar').classList.add('open');
+}
+function copiarLink() {
+  const link = document.getElementById('link').textContent.trim();
+  navigator.clipboard.writeText(link).then(() => toast('Link copiado','ok'));
+}
+</script>
+{% endblock %}

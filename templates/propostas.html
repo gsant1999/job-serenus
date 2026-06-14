@@ -1,0 +1,107 @@
+{% extends 'base.html' %}
+{% block title %}Propostas{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Propostas</h1>
+    <div class="sub">{{ propostas|length }} registro{% if propostas|length != 1 %}s{% endif %}</div>
+  </div>
+  <div>
+    <button class="btn-outline" onclick="exportar()">Exportar CSV</button>
+    <a href="/nova-proposta" class="btn">Nova proposta</a>
+  </div>
+</div>
+
+<div class="page">
+
+  <div class="toolbar">
+    <input type="text" id="busca" placeholder="Buscar cliente, consultor, operadora..." oninput="filtrar()">
+    <select id="fModal" onchange="filtrar()">
+      <option value="">Todas modalidades</option>
+      <option>ADESÃO</option><option>PF</option><option>PME PORTE 1</option>
+      <option>PME PORTE 2</option><option>PJ</option>
+      <option>PME PORTE 2 (ODONTO)</option><option>PJ (ODONTO)</option>
+    </select>
+    <select id="fTipo" onchange="filtrar()">
+      <option value="">Saúde + Odonto</option>
+      <option>Saúde</option><option>Odonto</option>
+    </select>
+  </div>
+
+  <div class="card">
+    {% if propostas %}
+    <table id="t">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Cliente</th>
+          {% if session.perfil == 'admin' %}<th>Consultor</th>{% endif %}
+          <th>Operadora</th>
+          <th>Modalidade</th>
+          <th>Tipo</th>
+          <th>Vidas</th>
+          <th>Valor</th>
+          {% if session.perfil == 'admin' %}
+          <th>Comissão bruta</th>
+          <th>Repasse</th>
+          <th>Líquido</th>
+          {% else %}
+          <th>Minha comissão</th>
+          {% endif %}
+          <th>Vigência</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in propostas %}
+        <tr data-m="{{ p.modalidade }}" data-t="{{ p.tipo_contrato }}"
+            data-s="{{ p.razao_social|lower }} {{ p.consultor|lower }} {{ p.adm_operadora|lower }}">
+          <td><a href="/proposta/{{ p.id }}" style="color:var(--verde); font-weight:500;">#{{ p.id }}</a></td>
+          <td><strong>{{ p.razao_social }}</strong></td>
+          {% if session.perfil == 'admin' %}<td>{{ p.consultor }}</td>{% endif %}
+          <td>{{ p.adm_operadora or '—' }}</td>
+          <td><span class="tag tag-verde">{{ p.modalidade }}</span></td>
+          <td><span class="tag {{ 'tag-info' if p.tipo_contrato=='Saúde' else 'tag-rosa' }}">{{ p.tipo_contrato }}</span></td>
+          <td class="td-mono">{{ p.total_vidas }}</td>
+          <td class="td-mono">R$ {{ "%.2f"|format(p.valor)|replace('.',',') }}</td>
+          {% if session.perfil == 'admin' %}
+          <td class="td-mono">R$ {{ "%.2f"|format(p.comissao_total_corretora or 0)|replace('.',',') }}</td>
+          <td class="td-mono" style="color:var(--erro);">R$ {{ "%.2f"|format(p.comissao_consultor or 0)|replace('.',',') }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(p.comissao_corretora_liquida or 0)|replace('.',',') }}</td>
+          {% else %}
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(p.comissao_consultor or 0)|replace('.',',') }}</td>
+          {% endif %}
+          <td>{{ p.vigencia }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">Nenhuma proposta cadastrada. <a href="/nova-proposta">Cadastrar a primeira →</a></div>{% endif %}
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filtrar() {
+  const b = busca.value.toLowerCase(), m = fModal.value, t = fTipo.value;
+  document.querySelectorAll('#t tbody tr').forEach(tr => {
+    const ok = (!b||(tr.dataset.s||'').includes(b))&&(!m||tr.dataset.m===m)&&(!t||tr.dataset.t===t);
+    tr.style.display = ok?'':'none';
+  });
+}
+function exportar() {
+  const rows = [];
+  document.querySelectorAll('#t thead th, #t tbody tr').forEach((el,i)=>{
+    if (i===0) rows.push([...el.querySelectorAll('th')].map(x=>`"${x.innerText}"`));
+    else if (el.style.display!=='none') rows.push([...el.querySelectorAll('td')].map(x=>`"${x.innerText.trim()}"`));
+  });
+  const csv = rows.map(r=>r.join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(csv);
+  a.download = `job_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+</script>
+{% endblock %}

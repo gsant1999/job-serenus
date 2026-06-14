@@ -1,0 +1,197 @@
+{% extends 'base.html' %}
+{% block title %}Regimes de Comissão{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Regimes de Comissão</h1>
+    <div class="sub">5 modelos · Distribuição de parcelas editável</div>
+  </div>
+</div>
+
+<div class="page">
+
+  <div class="card" style="background:rgba(250,204,21,.07); border-color:rgba(250,204,21,.3); margin-bottom:16px;">
+    <div style="padding:16px 22px; font-size:13px; color:#854d0e; line-height:1.65;">
+      <strong>Distribuição de parcelas:</strong> Defina quanto (%) da comissão total será pago em cada parcela.
+      A soma deve ser exatamente 100%. Exemplo: 60%;40% → 1ª parcela recebe 60%, 2ª recebe 40%.<br>
+      <strong>Com Lead:</strong> o sistema aplica automaticamente N1/N2/N3 conforme a produção mensal do consultor naquele mês.
+    </div>
+  </div>
+
+  <div style="display:grid; gap:14px; grid-template-columns:1fr 1fr;">
+    {% for r in regimes %}
+    <div class="card" style="margin-bottom:0;">
+      <div class="card-header" style="background:{% if 'com_fixo' in r.codigo %}rgba(59,130,246,.1){% elif 'lead_n' in r.codigo %}var(--verde-soft){% else %}var(--panel-2){% endif %};">
+        <div>
+          <h3>{{ r.nome }}</h3>
+          <div style="font-size:11px; color:var(--cinza); margin-top:2px;">{{ r.codigo }}</div>
+        </div>
+        <button class="btn-outline" onclick='abrirEditar({{ r.id }}, {{ r.nome|tojson }}, {{ (r.descricao or "")|tojson }}, {{ r.valor_fixo or 0 }}, {{ r.num_parcelas }}, {{ r.distribuicao_parcelas|tojson }}, {{ r.faixa_min if r.faixa_min is not none else "null" }}, {{ r.faixa_max if r.faixa_max is not none else "null" }}, {{ r.coluna_comissao|tojson }})'>Editar</button>
+      </div>
+      <div class="card-body" style="padding:18px 22px;">
+        {% if r.descricao %}
+        <p style="font-size:12.5px; color:var(--cinza); margin-bottom:14px; line-height:1.55;">{{ r.descricao }}</p>
+        {% endif %}
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+          <div>
+            <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">Fixo mensal</div>
+            <div style="font-family:'Sora',sans-serif; font-size:16px; color:var(--texto);">{% if r.valor_fixo %}R$ {{ "%.2f"|format(r.valor_fixo)|replace('.',',') }}{% else %}—{% endif %}</div>
+          </div>
+          <div>
+            <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">Coluna comissão</div>
+            <div style="font-family:monospace; font-size:12px; color:var(--info);">{{ r.coluna_comissao }}</div>
+          </div>
+        </div>
+        <!-- Distribuição visual -->
+        <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px;">Distribuição das parcelas</div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          {% set partes = r.distribuicao_parcelas.split(';') if r.distribuicao_parcelas else ['100'] %}
+          {% for parte in partes %}
+          <div style="background:var(--verde-soft); border:1px solid #d1e7db; padding:5px 10px; border-radius:6px; text-align:center; min-width:50px;">
+            <div style="font-size:11px; color:var(--cinza);">P{{ loop.index }}</div>
+            <div style="font-family:'Sora',sans-serif; font-size:15px; color:var(--verde); font-weight:600;">{{ parte.strip() }}%</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% if r.faixa_min is not none or r.faixa_max is not none %}
+        <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--borda);">
+          <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">Faixa de produção</div>
+          <div style="font-size:12.5px; color:var(--texto);">
+            {% if r.faixa_min is not none and r.faixa_max is not none %}R$ {{ "%.0f"|format(r.faixa_min) }} – R$ {{ "%.0f"|format(r.faixa_max) }}
+            {% elif r.faixa_min is not none %}Acima de R$ {{ "%.0f"|format(r.faixa_min) }}
+            {% else %}Até R$ {{ "%.0f"|format(r.faixa_max) }}{% endif %}
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+</div>
+
+<!-- Modal editar -->
+<div class="modal-overlay" id="modal">
+  <div class="modal" style="max-width:560px;">
+    <h3 id="m-titulo">Editar regime</h3>
+    <form method="POST" action="/regime/salvar" id="form-regime">
+      <input type="hidden" name="id" id="r-id">
+      <div class="campo" style="margin-bottom:12px;">
+        <label>Nome de exibição</label>
+        <input type="text" name="nome" id="r-nome" required>
+      </div>
+      <div class="campo" style="margin-bottom:12px;">
+        <label>Descrição</label>
+        <textarea name="descricao" id="r-desc" style="min-height:50px;"></textarea>
+      </div>
+      <div class="form-row form-row-2" style="margin-bottom:12px;">
+        <div class="campo">
+          <label>Valor fixo mensal (R$)</label>
+          <input type="text" name="valor_fixo" id="r-fixo" placeholder="0,00">
+          <div class="hint">Salário fixo, se houver</div>
+        </div>
+        <div class="campo">
+          <label>Coluna de comissão</label>
+          <select name="coluna_comissao" id="r-coluna" required>
+            <option value="perc_sem_leads">Sem leads</option>
+            <option value="perc_n1">N1</option>
+            <option value="perc_n2">N2</option>
+            <option value="perc_n3">N3</option>
+            <option value="perc_com_fixo">Com fixo</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row form-row-2" style="margin-bottom:14px;">
+        <div class="campo">
+          <label>Faixa mínima (R$)</label>
+          <input type="text" name="faixa_min" id="r-min" placeholder="Sem limite mínimo">
+        </div>
+        <div class="campo">
+          <label>Faixa máxima (R$)</label>
+          <input type="text" name="faixa_max" id="r-max" placeholder="Sem limite máximo">
+        </div>
+      </div>
+
+      <!-- Distribuição dinâmica das parcelas -->
+      <div class="campo" style="margin-bottom:14px;">
+        <label>Distribuição das parcelas (%)</label>
+        <div class="hint" style="margin-bottom:8px;">Defina o % de cada parcela. A soma deve ser 100%.</div>
+        <input type="hidden" name="num_parcelas" id="r-num">
+        <input type="hidden" name="distribuicao_parcelas" id="r-dist">
+        <div id="dist-container" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;"></div>
+        <button type="button" class="btn-ghost" style="color:var(--verde); font-size:13px; padding:6px 12px;" onclick="addParcela()">+ Parcela</button>
+        <div id="soma-display" style="font-size:12px; margin-top:6px; font-weight:500;"></div>
+        <div id="dist-erro" style="color:var(--erro); font-size:12px; margin-top:4px; display:none; font-weight:500;">⚠ A soma deve ser exatamente 100%.</div>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button type="submit" class="btn" style="flex:1;">Salvar alterações</button>
+        <button type="button" class="btn-outline" onclick="fechar()">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let distArr = [];
+
+function renderDist() {
+  const c = document.getElementById('dist-container'); c.innerHTML = '';
+  distArr.forEach((p, i) => {
+    c.innerHTML += `<div style="background:var(--panel-3); padding:8px 10px; border-radius:7px; display:flex; align-items:center; gap:7px;">
+      <span style="font-size:11px; color:var(--cinza); font-weight:600;">P${i+1}</span>
+      <input type="number" step="0.1" min="0.1" max="100" value="${p}"
+        style="width:62px; padding:5px 7px; border:1px solid var(--borda); border-radius:5px;"
+        onchange="distArr[${i}]=parseFloat(this.value)||0; atualizarSoma()">
+      <span style="font-size:12px; color:var(--cinza);">%</span>
+      ${distArr.length > 1 ? `<button type="button" onclick="removerParcela(${i})" style="border:none; background:none; color:var(--erro); cursor:pointer; font-size:16px; line-height:1;">&times;</button>` : ''}
+    </div>`;
+  });
+  atualizarSoma();
+}
+
+function atualizarSoma() {
+  const soma = distArr.reduce((a,b) => a+b, 0);
+  const display = document.getElementById('soma-display');
+  const ok = Math.abs(soma - 100) < 0.01;
+  display.textContent = `Soma: ${soma.toFixed(1)}% ${ok ? '✓' : '(falta ' + (100-soma).toFixed(1) + '%)'}`;
+  display.style.color = ok ? 'var(--verde)' : 'var(--erro)';
+  document.getElementById('dist-erro').style.display = ok ? 'none' : 'none';
+}
+
+function addParcela() { distArr.push(0); renderDist(); }
+function removerParcela(i) { distArr.splice(i, 1); renderDist(); }
+
+function abrirEditar(id, nome, desc, fixo, parcelas, distStr, fmin, fmax, coluna) {
+  document.getElementById('r-id').value = id;
+  document.getElementById('r-nome').value = nome;
+  document.getElementById('r-desc').value = desc;
+  document.getElementById('r-fixo').value = fixo > 0 ? fixo.toString().replace('.',',') : '';
+  document.getElementById('r-coluna').value = coluna;
+  document.getElementById('r-min').value = fmin !== null ? fmin : '';
+  document.getElementById('r-max').value = fmax !== null ? fmax : '';
+  try { distArr = distStr.split(';').map(Number).filter(n => !isNaN(n) && n > 0); }
+  catch(e) { distArr = [100]; }
+  if (distArr.length === 0) distArr = [100];
+  renderDist();
+  document.getElementById('modal').classList.add('open');
+}
+
+function fechar() { document.getElementById('modal').classList.remove('open'); }
+
+document.getElementById('form-regime').addEventListener('submit', function(e) {
+  const soma = distArr.reduce((a,b) => a+b, 0);
+  if (Math.abs(soma - 100) > 0.1) {
+    e.preventDefault();
+    document.getElementById('dist-erro').style.display = 'block';
+    toast('A distribuição deve somar exatamente 100%', 'err');
+    return;
+  }
+  document.getElementById('r-num').value = distArr.length;
+  document.getElementById('r-dist').value = distArr.join(';');
+});
+</script>
+{% endblock %}

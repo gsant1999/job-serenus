@@ -1,0 +1,122 @@
+{% extends 'base.html' %}
+{% block title %}Operadoras{% endblock %}
+
+{% block head %}
+<style>
+.op-row { display:grid; grid-template-columns:1.6fr .8fr .8fr .8fr auto; gap:12px; align-items:center; padding:13px 20px; border-bottom:1px solid var(--borda); }
+.op-row:last-child { border-bottom:none; }
+.op-head { font-size:10.5px; color:var(--cinza-2); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+.op-nome { font-size:13.5px; color:#fff; font-weight:500; }
+.op-nome small { display:block; color:var(--cinza-2); font-size:11px; font-weight:400; }
+.mens { font-family:'Sora',sans-serif; font-size:14px; color:var(--teal); font-weight:600; }
+.mens small { color:var(--cinza-2); font-weight:400; font-size:10px; }
+.mens.vazio { color:var(--cinza-2); font-weight:400; }
+.busca { width:100%; padding:11px 14px; margin-bottom:14px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Operadoras</h1>
+    <div class="sub">Recebimento da corretora, em nº de mensalidades, por tipo de plano</div>
+  </div>
+  <div><button class="btn" onclick="abrirNovo()">+ Nova operadora</button></div>
+</div>
+
+<div class="page" style="max-width:900px;">
+
+  <div class="card" style="background:linear-gradient(135deg,rgba(31,216,164,.08),rgba(59,130,246,.06)); border-color:var(--borda-2); margin-bottom:18px;">
+    <div style="padding:16px 22px; font-size:13px; color:var(--cinza); line-height:1.7;">
+      Quanto a corretora <strong style="color:#fff;">recebe da operadora</strong>, em número de mensalidades. Ex: <code style="color:var(--teal);">2.8</code> = 2,8 mensalidades (280%). Valores vindos da sua planilha (aba Affinity). Edite o que precisar.
+    </div>
+  </div>
+
+  <input type="text" class="busca" id="busca" placeholder="Buscar operadora..." onkeyup="filtrar()">
+
+  <div class="card">
+    <div class="op-row">
+      <div class="op-head">Operadora</div>
+      <div class="op-head">PME</div>
+      <div class="op-head">PF</div>
+      <div class="op-head">Adesão</div>
+      <div class="op-head"></div>
+    </div>
+    <div id="lista">
+      {% for g in grupos %}
+      <div class="op-row item" data-nome="{{ g.operadora|lower }} {{ g.obs|lower }}">
+        <div class="op-nome">{{ g.operadora }}{% if g.obs %}<small>{{ g.obs }}</small>{% endif %}</div>
+        <div class="mens {{ 'vazio' if g.PME is none }}">{% if g.PME is not none %}{{ g.PME }}<small> mens</small>{% else %}—{% endif %}</div>
+        <div class="mens {{ 'vazio' if g.PF is none }}">{% if g.PF is not none %}{{ g.PF }}<small> mens</small>{% else %}—{% endif %}</div>
+        <div class="mens {{ 'vazio' if g.ADESAO is none }}">{% if g.ADESAO is not none %}{{ g.ADESAO }}<small> mens</small>{% else %}—{% endif %}</div>
+        <button class="btn-ghost" onclick='editar({{ g.operadora|tojson }}, {{ g.obs|tojson }}, {{ g.PME|tojson }}, {{ g.PF|tojson }}, {{ g.ADESAO|tojson }})'>Editar</button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal" style="max-width:520px;">
+    <h3 id="m-titulo">Nova operadora</h3>
+    <div class="campo" style="margin-bottom:12px;">
+      <label>Operadora *</label>
+      <input type="text" id="m-nome" placeholder="Ex: SulAmérica">
+    </div>
+    <div class="campo" style="margin-bottom:12px;">
+      <label>Observação / variação (opcional)</label>
+      <input type="text" id="m-obs" placeholder="Ex: Hapvida, Premium...">
+    </div>
+    <div class="form-row form-row-3" style="margin-bottom:18px;">
+      <div class="campo"><label>PME (mens)</label><input type="number" step="0.1" id="m-pme" placeholder="—"></div>
+      <div class="campo"><label>PF (mens)</label><input type="number" step="0.1" id="m-pf" placeholder="—"></div>
+      <div class="campo"><label>Adesão (mens)</label><input type="number" step="0.1" id="m-ades" placeholder="—"></div>
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn" style="flex:1;" onclick="salvar()">Salvar</button>
+      <button class="btn-outline" onclick="fechar()">Cancelar</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filtrar() {
+  const q = document.getElementById('busca').value.toLowerCase();
+  document.querySelectorAll('.item').forEach(el => {
+    el.style.display = el.dataset.nome.includes(q) ? '' : 'none';
+  });
+}
+function abrirNovo() {
+  document.getElementById('m-titulo').textContent = 'Nova operadora';
+  ['m-nome','m-obs','m-pme','m-pf','m-ades'].forEach(i=>document.getElementById(i).value='');
+  document.getElementById('modal').classList.add('open');
+}
+function editar(nome, obs, pme, pf, ades) {
+  document.getElementById('m-titulo').textContent = 'Editar ' + nome;
+  document.getElementById('m-nome').value = nome;
+  document.getElementById('m-obs').value = obs || '';
+  document.getElementById('m-pme').value = pme ?? '';
+  document.getElementById('m-pf').value = pf ?? '';
+  document.getElementById('m-ades').value = ades ?? '';
+  document.getElementById('modal').classList.add('open');
+}
+function fechar() { document.getElementById('modal').classList.remove('open'); }
+async function salvar() {
+  const nome = document.getElementById('m-nome').value.trim();
+  if (!nome) { toast('Informe o nome', 'err'); return; }
+  const body = {
+    operadora: nome, obs: document.getElementById('m-obs').value.trim(),
+    PME: document.getElementById('m-pme').value, PF: document.getElementById('m-pf').value,
+    ADESAO: document.getElementById('m-ades').value
+  };
+  try {
+    const r = await fetch('/operadora/salvar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    if ((await r.json()).ok) { toast('Salvo', 'ok'); setTimeout(()=>location.reload(), 600); }
+    else toast('Erro', 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,116 @@
+{% extends 'base.html' %}
+{% block title %}Meu Dashboard{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Olá, {{ session.nome.split()[0] }}</h1>
+    <div class="sub">Sua produção pessoal</div>
+  </div>
+  <div><a href="/nova-proposta" class="btn">Nova proposta</a></div>
+</div>
+
+<div class="page">
+
+  {% if m.regime_label %}
+  <div class="card" style="background:linear-gradient(135deg,#17b88a,#3b82f6 60%,#8b5cf6); box-shadow:0 10px 36px rgba(59,130,246,.25); color:#fff; border:none; margin-bottom:18px;">
+    <div style="padding:20px 24px; display:flex; justify-content:space-between; align-items:center; gap:20px; flex-wrap:wrap;">
+      <div>
+        <div style="font-size:11px; color:rgba(255,255,255,.7); text-transform:uppercase; letter-spacing:1px; font-weight:500;">Seu regime atual</div>
+        <div style="font-family:'Sora',sans-serif; font-size:22px; font-weight:600; margin-top:5px;">{{ m.regime_label }}</div>
+        {% if m.valor_fixo and m.valor_fixo > 0 %}
+        <div style="font-size:12px; color:rgba(255,255,255,.85); margin-top:4px;">+ R$ {{ "%.2f"|format(m.valor_fixo)|replace('.',',') }} fixo mensal</div>
+        {% endif %}
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:11px; color:rgba(255,255,255,.7);">Produção do mês</div>
+        <div style="font-family:'Sora',sans-serif; font-size:22px; color:#facc15; font-weight:600;">R$ {{ "%.0f"|format(m.mes_producao)|replace(',','.') }}</div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Mês atual -->
+  <div class="metricas m-3" style="margin-bottom:14px;">
+    <div class="metrica">
+      <div class="lbl">Mês atual · propostas</div>
+      <div class="val">{{ m.mes_propostas }}</div>
+      <div class="sub">vendas no mês</div>
+    </div>
+    <div class="metrica verde">
+      <div class="lbl">Mês atual · produção</div>
+      <div class="val">R$ {{ "%.0f"|format(m.mes_producao)|replace(',','.') }}</div>
+      <div class="sub">mensalidades captadas</div>
+    </div>
+    <div class="metrica verde">
+      <div class="lbl">Mês atual · comissão</div>
+      <div class="val">R$ {{ "%.0f"|format(m.mes_comissao)|replace(',','.') }}</div>
+      <div class="sub">a receber neste mês</div>
+    </div>
+  </div>
+
+  <!-- Acumulado -->
+  <div class="metricas m-4">
+    <div class="metrica">
+      <div class="lbl">Total · propostas</div>
+      <div class="val" style="font-size:22px;">{{ m.propostas }}</div>
+    </div>
+    <div class="metrica">
+      <div class="lbl">Total · vidas</div>
+      <div class="val" style="font-size:22px;">{{ m.vidas }}</div>
+    </div>
+    <div class="metrica">
+      <div class="lbl">Total · produção</div>
+      <div class="val" style="font-size:22px;">R$ {{ "%.0f"|format(m.producao)|replace(',','.') }}</div>
+    </div>
+    <div class="metrica verde">
+      <div class="lbl">Total · comissão</div>
+      <div class="val" style="font-size:22px;">R$ {{ "%.0f"|format(m.minha_comissao)|replace(',','.') }}</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Minha produção por operadora</h3></div>
+    <div class="card-body">
+      <canvas id="chartOp" style="max-height:220px;"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3>Minhas últimas propostas</h3>
+      <a href="/propostas" class="btn-outline">Ver todas</a>
+    </div>
+    {% if ultimas %}
+    <table>
+      <thead><tr><th>ID</th><th>Cliente</th><th>Operadora</th><th>Vidas</th><th>Valor</th><th>Minha comissão</th><th>Vigência</th></tr></thead>
+      <tbody>
+        {% for p in ultimas %}
+        <tr>
+          <td><a href="/proposta/{{ p.id }}" style="color:var(--verde); font-weight:500;">#{{ p.id }}</a></td>
+          <td><strong>{{ p.razao_social }}</strong></td>
+          <td>{{ p.adm_operadora or '—' }}</td>
+          <td class="td-mono">{{ p.total_vidas }}</td>
+          <td class="td-mono">R$ {{ "%.2f"|format(p.valor)|replace('.',',') }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(p.comissao_consultor or 0)|replace('.',',') }}</td>
+          <td>{{ p.vigencia }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">Você ainda não cadastrou propostas. <a href="/nova-proposta">Cadastrar a primeira →</a></div>{% endif %}
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+new Chart(document.getElementById('chartOp'),{
+  type:'bar',
+  data:{ labels:[{% for o in por_operadora %}'{{ o.adm_operadora or "—" }}',{% endfor %}],
+    datasets:[{ data:[{% for o in por_operadora %}{{ o.valor }},{% endfor %}], backgroundColor:'#1fd8a4', borderRadius:5, barThickness:28 }]},
+  options:{ responsive:true, plugins:{legend:{display:false}}, scales:{ y:{ ticks:{ callback:v=>'R$'+v.toLocaleString('pt-BR') }, grid:{color:'rgba(255,255,255,.06)'} }, x:{ grid:{display:false} } } }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,511 @@
+{% extends 'base.html' %}
+{% block title %}Nova proposta{% endblock %}
+
+{% block head %}
+<style>
+.upload-box { border:1.5px dashed var(--borda-2); border-radius:11px; padding:20px; text-align:center; cursor:pointer; background:var(--panel-2); transition:.18s; }
+.upload-box:hover { border-color:var(--azul); background:var(--panel-3); }
+.upload-box.tem-arquivo { border-color:var(--teal); border-style:solid; background:rgba(31,216,164,.06); }
+.upload-box .nome-arq { font-size:12px; color:var(--teal); margin-top:8px; font-weight:500; word-break:break-all; }
+.upload-ic { width:22px; height:22px; stroke:var(--cinza); margin-bottom:4px; }
+.upload-box.tem-arquivo .upload-ic { stroke:var(--teal); }
+#file-list { margin-top:10px; font-size:12px; color:var(--teal); }
+.btn-salvar { background:linear-gradient(135deg,#1fd8a4,#3b82f6,#8b5cf6); background-size:180% 180%; color:#fff; border:none; padding:15px 28px; border-radius:11px; font-size:15px; font-weight:600; cursor:pointer; font-family:inherit; width:100%; transition:all .3s ease; box-shadow:0 6px 24px rgba(59,130,246,.3); }
+.btn-salvar:hover { background-position:100% 50%; transform:translateY(-2px); box-shadow:0 12px 34px rgba(59,130,246,.45); }
+.btn-salvar:disabled { background:#3a3a4c; cursor:not-allowed; transform:none; box-shadow:none; }
+.preview { background:linear-gradient(135deg,rgba(31,216,164,.08),rgba(59,130,246,.06)); border:1px solid rgba(31,216,164,.25); border-radius:12px; padding:20px 22px; margin-top:16px; display:none; }
+.preview h4 { font-family:'Sora',sans-serif; font-size:14px; color:#fff; margin-bottom:14px; font-weight:600; }
+.preview .row { display:flex; justify-content:space-between; padding:6px 0; font-size:13px; color:var(--cinza); }
+.preview .row span:last-child { color:var(--texto); font-weight:500; }
+.preview .row:not(:last-child) { border-bottom:1px solid var(--borda); }
+.preview .total span { color:var(--teal) !important; font-weight:700 !important; font-size:14px; }
+.preview .total { padding-top:10px; border-top:1.5px solid var(--borda-2) !important; margin-top:4px; }
+.preview .regime-info { background:rgba(255,255,255,.05); padding:9px 12px; border-radius:8px; font-size:12px; color:var(--cinza); margin-bottom:14px; }
+.preview .regime-info strong { color:#fff; }
+.cronograma { background:rgba(0,0,0,.2); border-radius:9px; padding:12px 14px; margin-top:12px; }
+.cronograma .titulo { font-size:10.5px; color:var(--cinza-2); font-weight:600; text-transform:uppercase; letter-spacing:.6px; margin-bottom:9px; }
+.cronograma .parcela { display:flex; justify-content:space-between; padding:5px 0; font-size:12.5px; color:var(--texto); border-bottom:1px dashed var(--borda); }
+.cronograma .parcela:last-child { border-bottom:none; }
+.aviso { font-size:11px; color:var(--cinza-2); background:var(--panel-3); border:1px solid var(--borda); padding:5px 9px; border-radius:6px; margin-top:5px; display:inline-block; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Nova proposta</h1>
+    <div class="sub">Cadastro de venda</div>
+  </div>
+  <div><a href="/propostas" class="btn-outline">Voltar</a></div>
+</div>
+
+<div class="page" style="max-width:860px;">
+<form id="form">
+
+  <div class="form-secao">
+    <h3>Informações internas</h3>
+    <div class="form-row form-row-2">
+      <div class="campo">
+        <label>Consultor</label>
+        <input type="text" name="consultor" value="{{ session.nome }}" required>
+      </div>
+      <div class="campo">
+        <label>Quem está subindo a venda</label>
+        <select name="quem_subiu">
+          <option value="Consultor">O próprio consultor</option>
+          <option value="Supervisor">Supervisor</option>
+          <option value="Gestor ADM">Gestor ADM</option>
+        </select>
+      </div>
+      <div class="campo">
+        <label>Supervisora da proposta</label>
+        <select name="supervisora_id">
+          <option value="">— Selecione —</option>
+          {% for s in supervisoras %}<option value="{{ s.id }}">{{ s.nome }}</option>{% endfor %}
+        </select>
+        {% if not supervisoras %}<div class="aviso">Nenhuma supervisora cadastrada. {% if session.perfil == 'admin' %}<a href="/supervisoras" style="color:var(--azul); font-weight:600;">Cadastrar →</a>{% endif %}</div>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="form-secao">
+    <h3>Proposta</h3>
+
+    <div class="campo" style="margin-bottom:14px;">
+      <label>Proposta possui número?</label>
+      <div class="radios">
+        <label class="radio"><input type="radio" name="proposta_tem_numero" value="Sim" onchange="toggleNum(this)"><span>Sim</span></label>
+        <label class="radio"><input type="radio" name="proposta_tem_numero" value="Não" onchange="toggleNum(this)" checked><span>Não</span></label>
+      </div>
+    </div>
+    <div class="campo" id="campo-num" style="display:none; margin-bottom:14px;">
+      <label>Nº da proposta</label>
+      <input type="text" name="numero_proposta">
+    </div>
+
+    <div class="form-row form-row-2">
+      <div class="campo">
+        <label>Vigência</label>
+        <input type="date" name="vigencia" required>
+        <div class="aviso">Somente mês atual. Retroativas: justificar nas observações.</div>
+      </div>
+      <div class="campo">
+        <label>Tipo de pessoa</label>
+        <select name="tipo_pessoa" id="tipo_pessoa" required onchange="toggleDocs()">
+          <option value="">— Selecione —</option>
+          <option value="PF">PF (Pessoa Física)</option>
+          <option value="PME">PME (Empresarial)</option>
+          <option value="PJ">PJ (Empresarial)</option>
+          <option value="Adesão">Adesão</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row form-row-2" id="bloco-docs" style="display:none;">
+      <div class="campo" id="campo-cnpj" style="display:none;">
+        <label>CNPJ da empresa</label>
+        <input type="text" name="cnpj" id="cnpj" placeholder="00.000.000/0000-00" oninput="mascaraCNPJ(this)">
+      </div>
+      <div class="campo">
+        <label>CPF do titular</label>
+        <input type="text" name="cpf_titular" id="cpf_titular" placeholder="000.000.000-00" oninput="mascaraCPF(this)">
+      </div>
+    </div>
+
+    <div class="campo" style="margin-bottom:14px;">
+      <label>Modalidade</label>
+      <div class="hint">PORTE 1: até 28 vidas · PORTE 2: 29 a 99 vidas · PJ: 99+ vidas</div>
+      <div class="radios" style="margin-top:8px;">
+        <label class="radio"><input type="radio" name="modalidade" value="ADESÃO" required><span>ADESÃO</span></label>
+        <label class="radio"><input type="radio" name="modalidade" value="PF"><span>PF</span></label>
+        <label class="radio"><input type="radio" name="modalidade" value="PME PORTE 1"><span>PME P1</span></label>
+        <label class="radio"><input type="radio" name="modalidade" value="PME PORTE 2"><span>PME P2</span></label>
+        <label class="radio"><input type="radio" name="modalidade" value="PJ"><span>PJ</span></label>
+        <label class="radio"><input type="radio" name="modalidade" value="PME PORTE 2 (ODONTO)"><span>PME P2 Odonto</span></label>
+        <label class="radio"><input type="radio" name="modalidade" value="PJ (ODONTO)"><span>PJ Odonto</span></label>
+      </div>
+    </div>
+
+    <div class="form-row form-row-2">
+      <div class="campo">
+        <label>Operadora / Administradora</label>
+        <select name="adm_operadora" required onchange="calcPreview()">
+          <option value="">— Selecione —</option>
+          {% for o in operadoras %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="campo">
+        <label>Produto / Plano</label>
+        <input type="text" name="produto" id="produto" list="lista-produtos" placeholder="Selecione ou digite">
+        <datalist id="lista-produtos"></datalist>
+        <div class="hint">Os planos cadastrados em Produtos aparecem aqui ao escolher a operadora.</div>
+      </div>
+    </div>
+
+    <div class="campo" style="margin-bottom:14px;">
+      <label>Razão Social / Beneficiário</label>
+      <input type="text" name="razao_social" required>
+    </div>
+
+    <div class="campo" style="margin-bottom:14px;">
+      <label>Titular e dependentes</label>
+      <div class="form-row form-row-2" style="margin-bottom:8px;">
+        <input type="text" name="nome_titular" id="nome_titular" placeholder="Nome do titular">
+        <input type="date" name="data_nasc_titular" id="data_nasc_titular" title="Nascimento do titular">
+      </div>
+      <div id="lista-dependentes"></div>
+      <button type="button" class="btn-ghost" style="font-size:12px; margin-top:6px;" onclick="addDependente()">+ Adicionar dependente</button>
+      <textarea name="titular_dependentes" id="titular_dependentes" style="display:none;"></textarea>
+      <input type="hidden" name="dependentes_json" id="dependentes_json" value="[]">
+    </div>
+
+    <div class="campo" style="margin-bottom:14px; padding:14px 16px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px;">
+      <label class="radio" style="display:inline-flex; margin-bottom:0;">
+        <input type="checkbox" name="tem_repique" id="tem_repique" value="1" onchange="toggleRepique()">
+        <span>Tem vida em repique</span>
+      </label>
+      <div id="bloco-repique" style="display:none; margin-top:12px;">
+        <div class="form-row form-row-3">
+          <div class="campo"><label>Nome (vida do repique)</label><input type="text" name="repique_nome" placeholder="Nome da vida"></div>
+          <div class="campo"><label>Tipo</label><select name="repique_tipo"><option value="Titular">Titular</option><option value="Dependente">Dependente</option></select></div>
+          <div class="campo"><label>Valor do repique (R$)</label><input type="text" name="repique_valor" placeholder="0,00" oninput="formatarValor(this)"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-row form-row-3">
+      <div class="campo">
+        <label>Tipo de contrato</label>
+        <div class="radios" style="margin-top:4px;">
+          <label class="radio"><input type="radio" name="tipo_contrato" value="Saúde" required><span>Saúde</span></label>
+          <label class="radio"><input type="radio" name="tipo_contrato" value="Odonto"><span>Odonto</span></label>
+        </div>
+      </div>
+      <div class="campo">
+        <label>Acomodação</label>
+        <div class="radios" style="margin-top:4px;">
+          <label class="radio"><input type="radio" name="acomodacao" value="Enfermaria" required><span>Enf.</span></label>
+          <label class="radio"><input type="radio" name="acomodacao" value="Apartamento"><span>Apto.</span></label>
+        </div>
+      </div>
+      <div class="campo">
+        <label>Coparticipação</label>
+        <div class="radios" style="margin-top:4px;">
+          <label class="radio"><input type="radio" name="fator_moderador" value="Com coparticipação" required><span>Com</span></label>
+          <label class="radio"><input type="radio" name="fator_moderador" value="Sem coparticipação"><span>Sem</span></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-row form-row-2" style="margin-top:14px;">
+      <div class="campo">
+        <label>Total de vidas</label>
+        <input type="number" name="total_vidas" min="1" required oninput="calcPreview()">
+        <div class="aviso">Sem repique</div>
+      </div>
+      <div class="campo">
+        <label>Valor mensal (R$)</label>
+        <input type="text" name="valor" id="valor" placeholder="0,00" required oninput="formatarValor(this); calcPreview()">
+        <div class="aviso">Sem taxas, sem IOF</div>
+      </div>
+    </div>
+
+    <div class="preview" id="preview">
+      <h4>Simulação de comissão</h4>
+      <div class="regime-info" id="regime-info"></div>
+      <div class="row"><span>Comissão total (corretora)</span><span id="p-total">—</span></div>
+      <div class="row"><span>Repasse total ao consultor</span><span id="p-consul">—</span></div>
+      <div class="row total"><span>Líquido Serenus</span><span id="p-liq">—</span></div>
+      <div class="cronograma" id="cronograma">
+        <div class="titulo">Cronograma de pagamento da comissão do consultor</div>
+        <div id="parcelas-list"></div>
+      </div>
+    </div>
+
+    <div class="campo" style="margin-top:14px;">
+      <label>Status da venda</label>
+      <select name="venda_status">
+        <option value="Sim">Confirmada</option>
+        <option value="Pendente">Pendente</option>
+        <option value="Não">Cancelada</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="form-secao">
+    <h3>Financeiro</h3>
+    <div class="form-row form-row-2">
+      <div class="campo"><label>Vencimento da 1ª mensalidade</label><input type="date" name="vencimento_1" required></div>
+      <div class="campo"><label>Previsão de pagamento da 1ª</label><input type="date" name="previsao_1" required></div>
+      <div class="campo">
+        <label>Dia de vencimento das demais mensalidades</label>
+        <input type="number" name="dia_vencimento" min="1" max="28" placeholder="Ex: 10" oninput="calcPreview()">
+        <div class="hint">Dia do mês em que o cliente paga as próximas mensalidades. Define o cronograma de comissões futuras.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-secao">
+    <h3>Contatos</h3>
+    <div class="campo" style="margin-bottom:14px;">
+      <label>Responsável pelo contrato</label>
+      <input type="text" name="resp_contrato" required>
+    </div>
+    <div class="form-row form-row-2">
+      <div class="campo"><label>E-mail</label><input type="email" name="email_resp_contrato" required></div>
+      <div class="campo"><label>Telefone</label><input type="tel" name="tel_resp_contrato" required></div>
+    </div>
+    <hr style="border:none; border-top:1px solid var(--borda); margin:16px 0;">
+    <div class="campo" style="margin-bottom:14px;">
+      <label>Responsável pela negociação</label>
+      <input type="text" name="resp_negociacao" required>
+    </div>
+    <div class="form-row form-row-2">
+      <div class="campo"><label>E-mail</label><input type="email" name="email_resp_negociacao" required></div>
+      <div class="campo"><label>Telefone</label><input type="tel" name="tel_resp_negociacao" required></div>
+    </div>
+    <div class="campo" style="margin-top:14px;">
+      <label>Contatos adicionais? (RH, Financeiro, DP)</label>
+      <div class="radios">
+        <label class="radio"><input type="radio" name="contatos_adicionais" value="Sim" onchange="toggleContatos(this)"><span>Sim</span></label>
+        <label class="radio"><input type="radio" name="contatos_adicionais" value="Não" onchange="toggleContatos(this)" checked><span>Não</span></label>
+      </div>
+      <div id="area-contatos" style="display:none; margin-top:10px;">
+        <textarea name="desc_contatos_adicionais" placeholder="Nome, cargo, telefone, e-mail..."></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-secao" id="secao-custom" style="display:none;">
+    <h3>Informações adicionais</h3>
+    <div id="campos-custom"></div>
+  </div>
+
+  <div class="form-secao">
+    <h3>Documentos</h3>
+    <div class="form-row form-row-2">
+      <div class="campo">
+        <label>Contrato assinado</label>
+        <div class="upload-box" id="box-contrato" onclick="document.getElementById('contratoInput').click()">
+          <svg class="upload-ic" viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <div style="font-size:12.5px;">Anexar contrato</div>
+          <div style="font-size:10.5px; color:var(--cinza-2); margin-top:2px;">PDF, JPG ou PNG</div>
+          <input type="file" id="contratoInput" name="contrato_arquivo" accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="marcarArquivo(this,'box-contrato')">
+          <div class="nome-arq" id="nome-contrato"></div>
+        </div>
+      </div>
+      <div class="campo">
+        <label>Comprovante de pagamento do 1º boleto</label>
+        <div class="upload-box" id="box-boleto" onclick="document.getElementById('boletoInput').click()">
+          <svg class="upload-ic" viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+          <div style="font-size:12.5px;">Anexar comprovante</div>
+          <div style="font-size:10.5px; color:var(--cinza-2); margin-top:2px;">PDF, JPG ou PNG</div>
+          <input type="file" id="boletoInput" name="comprovante_boleto" accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="marcarArquivo(this,'box-boleto')">
+          <div class="nome-arq" id="nome-boleto"></div>
+        </div>
+      </div>
+    </div>
+    <div class="campo" style="margin-top:14px;">
+      <label>Outros documentos (opcional)</label>
+      <div class="upload-box" onclick="document.getElementById('fileInput').click()">
+        <div style="font-size:12.5px;">Anexar outros arquivos</div>
+        <div style="font-size:10.5px; color:var(--cinza-2); margin-top:2px;">Múltiplos arquivos</div>
+        <input type="file" id="fileInput" name="anexos" multiple accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="listarArquivos(this)">
+        <div id="file-list"></div>
+      </div>
+    </div>
+    <div class="campo" style="margin-top:14px;">
+      <label>Observações</label>
+      <textarea name="observacoes"></textarea>
+    </div>
+  </div>
+
+  <button type="button" class="btn-salvar" onclick="enviar()">Salvar proposta</button>
+
+</form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let RECEBIMENTO = {}, REPASSES = {}, NIVEIS = [];
+const MODELO = '{{ session.regime_base }}';
+const TEM_META = (MODELO === 'com_lead');
+
+function mapTipoPlano(modalidade) {
+  const m = (modalidade||'').toUpperCase();
+  if (m.includes('ADES')) return 'ADESAO';
+  if (m === 'PF') return 'PF';
+  return 'PME';
+}
+function nivelPorProducao(prod) {
+  for (const n of NIVEIS) {
+    const mn = (n.faixa_min==null) ? 0 : n.faixa_min;
+    const mx = (n.faixa_max==null) ? Infinity : n.faixa_max;
+    if (prod >= mn && prod <= mx) return n.codigo;
+  }
+  return NIVEIS.length ? NIVEIS[NIVEIS.length-1].codigo : 'n1';
+}
+function brl(v) { return 'R$ ' + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+// ─── Produtos por operadora ───
+async function carregarProdutos() {
+  const op = document.querySelector('[name=adm_operadora]').value;
+  if (!op) return;
+  try {
+    const r = await fetch('/api/produtos?operadora='+encodeURIComponent(op));
+    const prods = await r.json();
+    const dl = document.getElementById('lista-produtos');
+    dl.innerHTML = prods.map(p => `<option value="${p.nome}">${p.tipo_plano||''} ${p.acomodacao||''}</option>`).join('');
+  } catch(e){}
+}
+document.querySelector('[name=adm_operadora]').addEventListener('change', carregarProdutos);
+
+// ─── Dependentes ───
+let DEPS = [];
+function addDependente() {
+  DEPS.push({nome:'', nasc:'', parentesco:''});
+  renderDeps();
+}
+function renderDeps() {
+  const c = document.getElementById('lista-dependentes');
+  c.innerHTML = DEPS.map((d,i)=>`
+    <div class="form-row" style="grid-template-columns:1.5fr 1fr 1fr auto; gap:8px; margin-bottom:6px;">
+      <input type="text" placeholder="Nome do dependente" value="${d.nome}" onchange="DEPS[${i}].nome=this.value;syncDeps()">
+      <input type="date" value="${d.nasc}" onchange="DEPS[${i}].nasc=this.value;syncDeps()" title="Nascimento">
+      <input type="text" placeholder="Parentesco" value="${d.parentesco}" onchange="DEPS[${i}].parentesco=this.value;syncDeps()">
+      <button type="button" class="btn-ghost" style="color:var(--rosa);" onclick="DEPS.splice(${i},1);renderDeps();syncDeps()">×</button>
+    </div>`).join('');
+  syncDeps();
+}
+function syncDeps() {
+  const tit = document.getElementById('nome_titular').value;
+  let txt = tit ? ('Titular: '+tit) : '';
+  DEPS.forEach(d=>{ if(d.nome) txt += '\nDependente: '+d.nome+(d.parentesco?' ('+d.parentesco+')':''); });
+  document.getElementById('titular_dependentes').value = txt;
+  document.getElementById('dependentes_json').value = JSON.stringify(DEPS.filter(d=>d.nome));
+}
+document.getElementById('nome_titular').addEventListener('input', syncDeps);
+
+// ─── Repique ───
+function toggleRepique() {
+  document.getElementById('bloco-repique').style.display = document.getElementById('tem_repique').checked ? 'block' : 'none';
+}
+
+function calcPreview() {
+  const op = document.querySelector('[name=adm_operadora]').value;
+  const v = parseFloat((document.getElementById('valor').value||'0').replace(/\./g,'').replace(',','.')) || 0;
+  const modEl = document.querySelector('[name=modalidade]:checked');
+  const modalidade = modEl ? modEl.value : '';
+  const tipo = mapTipoPlano(modalidade);
+  const receb = RECEBIMENTO[`${op}|${tipo}`];
+  if (!op || !v || receb == null) { document.getElementById('preview').style.display='none'; return; }
+
+  const totalCor = v * receb;                              // recebimento em mensalidades
+  const nivel = TEM_META ? nivelPorProducao(v) : '';
+  const rep = REPASSES[`${op}|${tipo}|${MODELO}|${nivel}`];
+  let consultor = 0, ehTaxa = false, regua = [];
+  if (rep && rep.taxa) { ehTaxa = true; }
+  else if (rep) { consultor = v * (rep.total||0); regua = (rep.regua||'').split(';').map(Number).filter(n=>!isNaN(n)); }
+  const liq = totalCor - consultor;
+
+  document.getElementById('p-total').textContent = brl(totalCor);
+  document.getElementById('p-consul').textContent = ehTaxa ? 'Taxa direta do cliente' : brl(consultor);
+  document.getElementById('p-liq').textContent = brl(liq);
+
+  const nomeNivel = {n1:'N1',n2:'N2',n3:'N3'}[nivel] || '';
+  let infoTxt = `Recebimento da operadora: <strong>${receb} mens</strong> (${(receb*100).toFixed(0)}%)`;
+  if (TEM_META && nomeNivel) infoTxt += ` · Nível <strong>${nomeNivel}</strong>`;
+  if (!ehTaxa && rep) infoTxt += ` · Repasse <strong>${rep.total} mens</strong>`;
+  if (ehTaxa) infoTxt += ` · <strong style="color:var(--am);">Adesão: taxa direta (sem custo)</strong>`;
+  if (!rep) infoTxt += ` · <strong style="color:var(--am);">Repasse não configurado p/ esta operadora</strong>`;
+  document.getElementById('regime-info').innerHTML = infoTxt;
+
+  const vigencia = document.querySelector('[name=vigencia]').value;
+  let html = '';
+  const parc = ehTaxa ? [] : (regua.length ? regua : (consultor>0 ? [rep.total] : []));
+  for (let i = 0; i < parc.length; i++) {
+    const vCon = v * parc[i];
+    let dataStr = '—';
+    if (vigencia) { const d = new Date(vigencia + 'T12:00:00'); d.setMonth(d.getMonth()+i+1); dataStr = d.toLocaleDateString('pt-BR'); }
+    html += `<div class="parcela"><span>${i+1}ª parcela <strong style="color:var(--teal);">(${parc[i]} mens)</strong> · ${dataStr}</span><span>você recebe ${brl(vCon)}</span></div>`;
+  }
+  if (ehTaxa) html = `<div class="parcela"><span>Adesão</span><span style="color:var(--am);">Taxa paga direto pelo cliente</span></div>`;
+  document.getElementById('parcelas-list').innerHTML = html;
+  document.getElementById('preview').style.display = 'block';
+}
+
+document.querySelector('[name=vigencia]').addEventListener('change', calcPreview);
+document.querySelectorAll('[name=modalidade]').forEach(el => el.addEventListener('change', calcPreview));
+
+function toggleDocs() {
+  const tipo = document.getElementById('tipo_pessoa').value;
+  const bloco = document.getElementById('bloco-docs');
+  const campoCnpj = document.getElementById('campo-cnpj');
+  if (!tipo) { bloco.style.display = 'none'; return; }
+  bloco.style.display = 'grid';
+  const empresarial = (tipo === 'PME' || tipo === 'PJ');
+  campoCnpj.style.display = empresarial ? 'block' : 'none';
+  document.getElementById('cnpj').required = empresarial;
+  document.getElementById('cpf_titular').required = true;
+}
+function mascaraCPF(el) {
+  let v = el.value.replace(/\D/g,'').slice(0,11);
+  v = v.replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d{1,2})$/,'$1-$2');
+  el.value = v;
+}
+function mascaraCNPJ(el) {
+  let v = el.value.replace(/\D/g,'').slice(0,14);
+  v = v.replace(/(\d{2})(\d)/,'$1.$2').replace(/(\d{3})(\d)/,'$1.$2').replace(/(\d{3})(\d)/,'$1/$2').replace(/(\d{4})(\d{1,2})$/,'$1-$2');
+  el.value = v;
+}
+function toggleNum(el) { document.getElementById('campo-num').style.display = el.value==='Sim'?'block':'none'; }
+function toggleContatos(el) { document.getElementById('area-contatos').style.display = el.value==='Sim'?'block':'none'; }
+function listarArquivos(input) { document.getElementById('file-list').innerHTML = Array.from(input.files).map(f=>'• '+f.name).join('<br>'); }
+function marcarArquivo(input, boxId) {
+  const box = document.getElementById(boxId); const nomeEl = box.querySelector('.nome-arq');
+  if (input.files[0]) { box.classList.add('tem-arquivo'); nomeEl.textContent = '✓ ' + input.files[0].name; }
+  else { box.classList.remove('tem-arquivo'); nomeEl.textContent = ''; }
+}
+function formatarValor(el) {
+  let v = el.value.replace(/\D/g,'');
+  if (!v) { el.value=''; return; }
+  v = (parseInt(v)/100).toFixed(2);
+  el.value = v.replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+}
+function renderCampoCustom(c) {
+  const req = c.obrigatorio ? 'required' : '';
+  const reqMark = c.obrigatorio ? ' <span style="color:var(--rosa);">*</span>' : '';
+  const ajuda = c.ajuda ? `<div class="hint">${c.ajuda}</div>` : '';
+  const nome = 'custom__' + c.nome;
+  let input = '';
+  if (c.tipo === 'textarea') input = `<textarea name="${nome}" placeholder="${c.placeholder||''}" ${req}></textarea>`;
+  else if (c.tipo === 'select') input = `<select name="${nome}" ${req}><option value="">— Selecione —</option>` + c.opcoes.map(o=>`<option>${o}</option>`).join('') + `</select>`;
+  else if (c.tipo === 'radio') input = `<div class="radios" style="margin-top:4px;">` + c.opcoes.map(o=>`<label class="radio"><input type="radio" name="${nome}" value="${o}" ${req}><span>${o}</span></label>`).join('') + `</div>`;
+  else if (c.tipo === 'checkbox') input = `<div class="radios" style="margin-top:4px;">` + c.opcoes.map(o=>`<label class="radio"><input type="checkbox" name="${nome}" value="${o}"><span>${o}</span></label>`).join('') + `</div>`;
+  else { const t = ['number','email','tel','date'].includes(c.tipo) ? c.tipo : 'text'; input = `<input type="${t}" name="${nome}" placeholder="${c.placeholder||''}" ${req}>`; }
+  return `<div class="campo" style="margin-bottom:14px;"><label>${c.label}${reqMark}</label>${input}${ajuda}</div>`;
+}
+async function enviar() {
+  const form = document.getElementById('form');
+  for (const r of ['modalidade','tipo_contrato','acomodacao','fator_moderador']) {
+    if (!form.querySelector(`[name=${r}]:checked`)) { toast('Selecione: '+r.replace(/_/g,' '),'err'); return; }
+  }
+  const btn = document.querySelector('.btn-salvar');
+  btn.textContent='Salvando...'; btn.disabled=true;
+  try {
+    const res = await fetch('/salvar-proposta', {method:'POST', body:new FormData(form)});
+    const data = await res.json();
+    if (data.ok) { toast('Proposta salva','ok'); setTimeout(()=>location.href='/propostas',900); }
+    else { toast('Erro: '+data.msg,'err'); btn.textContent='Salvar proposta'; btn.disabled=false; }
+  } catch(e) { toast('Erro de conexão','err'); btn.textContent='Salvar proposta'; btn.disabled=false; }
+}
+fetch('/api/comissoes-publicas').then(r=>r.json()).then(d=>{ RECEBIMENTO = d.recebimento||{}; REPASSES = d.repasses||{}; NIVEIS = d.niveis||[]; });
+fetch('/api/campos-ativos').then(r=>r.json()).then(campos=>{
+  if (campos && campos.length) {
+    document.getElementById('campos-custom').innerHTML = campos.map(renderCampoCustom).join('');
+    document.getElementById('secao-custom').style.display = 'block';
+  }
+});
+</script>
+{% endblock %}

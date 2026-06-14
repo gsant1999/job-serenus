@@ -1,0 +1,137 @@
+{% extends 'base.html' %}
+{% block title %}Comissões{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Tabela de comissões</h1>
+    <div class="sub">Base de cálculo · % aplicados sobre o valor mensal da proposta</div>
+  </div>
+  <div><button class="btn" onclick="abrirNova()">Nova operadora</button></div>
+</div>
+
+<div class="page">
+
+  <div class="card" style="background:rgba(250,204,21,.07); border-color:rgba(250,204,21,.3); margin-bottom:16px;">
+    <div style="padding:18px 22px; font-size:13px; color:#854d0e; line-height:1.6;">
+      <strong>Como funciona o cálculo:</strong> O <em>Total Corretora</em> é o quanto a Serenus recebe da operadora.
+      O <em>Repasse ao consultor</em> varia conforme o regime do consultor:<br>
+      • <strong>Sem leads/sem fixo:</strong> coluna "Sem leads"<br>
+      • <strong>Com lead (sem fixo):</strong> N1 (0–3K), N2 (3K–7K), N3 (7K+) baseado na produção mensal<br>
+      • <strong>Com fixo + com lead:</strong> coluna "Com fixo"
+    </div>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Operadora</th>
+          <th>Total corretora</th>
+          <th>Sem leads</th>
+          <th>N1</th>
+          <th>N2</th>
+          <th>N3</th>
+          <th>Com fixo</th>
+          <th>Ação</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in comissoes %}
+        <tr>
+          <td><strong>{{ c.operadora }}</strong>{% if c.observacao %}<div style="font-size:11px; color:var(--cinza); margin-top:2px;">{{ c.observacao }}</div>{% endif %}</td>
+          <td class="td-mono">{{ "%.3f"|format(c.perc_total) }}</td>
+          <td class="td-mono">{{ "%.3f"|format(c.perc_sem_leads) }}</td>
+          <td class="td-mono">{{ "%.3f"|format(c.perc_n1) }}</td>
+          <td class="td-mono">{{ "%.3f"|format(c.perc_n2) }}</td>
+          <td class="td-mono">{{ "%.3f"|format(c.perc_n3) }}</td>
+          <td class="td-mono" style="color:var(--info);">{{ "%.3f"|format(c.perc_com_fixo or 0) }}</td>
+          <td>
+            <button class="btn-ghost" onclick='editar({{ c.id }}, {{ c.operadora|tojson }}, {{ c.perc_total }}, {{ c.perc_sem_leads }}, {{ c.perc_n1 }}, {{ c.perc_n2 }}, {{ c.perc_n3 }}, {{ c.perc_com_fixo or 0 }}, {{ (c.observacao or "")|tojson }})'>Editar</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h3 id="m-titulo">Nova operadora</h3>
+    <p style="font-size:12.5px; color:var(--cinza); margin-bottom:18px;">Os valores são multiplicadores aplicados ao valor mensal da proposta. Use ponto ou vírgula para decimais.</p>
+    <form method="POST" action="/comissao/salvar">
+      <input type="hidden" name="id" id="c-id">
+      <div class="campo" style="margin-bottom:14px;">
+        <label>Operadora</label>
+        <input type="text" name="operadora" id="c-op" required>
+      </div>
+      <div class="form-row form-row-2" style="margin-bottom:12px;">
+        <div class="campo">
+          <label>Total corretora</label>
+          <input type="text" name="perc_total" id="c-total" placeholder="2.8" required>
+          <div class="hint">% recebido da operadora</div>
+        </div>
+        <div class="campo">
+          <label>Sem leads</label>
+          <input type="text" name="perc_sem_leads" id="c-sem" placeholder="0.7" required>
+          <div class="hint">repasse padrão</div>
+        </div>
+      </div>
+      <div class="form-row form-row-3" style="margin-bottom:14px;">
+        <div class="campo">
+          <label>N1 (até 3K)</label>
+          <input type="text" name="perc_n1" id="c-n1" placeholder="1.2">
+        </div>
+        <div class="campo">
+          <label>N2 (3K–7K)</label>
+          <input type="text" name="perc_n2" id="c-n2" placeholder="1.5">
+        </div>
+        <div class="campo">
+          <label>N3 (7K+)</label>
+          <input type="text" name="perc_n3" id="c-n3" placeholder="1.8">
+        </div>
+      </div>
+      <div class="campo" style="margin-bottom:14px;">
+        <label>Com fixo (regime "Com Fixo + Com Lead")</label>
+        <input type="text" name="perc_com_fixo" id="c-fixo" placeholder="1.8">
+        <div class="hint">% repassado para consultor com salário fixo</div>
+      </div>
+      <div class="campo" style="margin-bottom:14px;">
+        <label>Observação (opcional)</label>
+        <input type="text" name="observacao" id="c-obs" placeholder="Ex: Apenas RJ, ou produto específico">
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button type="submit" class="btn" style="flex:1;">Salvar</button>
+        <button type="button" class="btn-outline" onclick="fechar()">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function abrirNova() {
+  document.getElementById('m-titulo').textContent = 'Nova operadora';
+  document.getElementById('c-id').value = '';
+  ['c-op','c-total','c-sem','c-n1','c-n2','c-n3','c-fixo','c-obs'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('modal').classList.add('open');
+}
+function editar(id, op, total, sem, n1, n2, n3, fixo, obs) {
+  document.getElementById('m-titulo').textContent = 'Editar comissão · ' + op;
+  document.getElementById('c-id').value = id;
+  document.getElementById('c-op').value = op;
+  document.getElementById('c-total').value = total;
+  document.getElementById('c-sem').value = sem;
+  document.getElementById('c-n1').value = n1;
+  document.getElementById('c-n2').value = n2;
+  document.getElementById('c-n3').value = n3;
+  document.getElementById('c-fixo').value = fixo;
+  document.getElementById('c-obs').value = obs;
+  document.getElementById('modal').classList.add('open');
+}
+function fechar() { document.getElementById('modal').classList.remove('open'); }
+</script>
+{% endblock %}

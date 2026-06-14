@@ -1,0 +1,168 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Dashboard</h1>
+    <div class="sub">Visão geral da operação</div>
+  </div>
+  <div><a href="/nova-proposta" class="btn">Nova proposta</a></div>
+</div>
+
+<div class="page">
+
+  <div class="metricas m-4">
+    <div class="metrica">
+      <div class="lbl">Propostas</div>
+      <div class="val">{{ m.propostas }}</div>
+      <div class="sub">contratos ativos</div>
+    </div>
+    <div class="metrica">
+      <div class="lbl">Vidas</div>
+      <div class="val">{{ m.vidas }}</div>
+      <div class="sub">beneficiários</div>
+    </div>
+    <div class="metrica verde">
+      <div class="lbl">Produção</div>
+      <div class="val">R$ {{ "%.0f"|format(m.producao)|replace(',','.') }}</div>
+      <div class="sub">mensalidades captadas</div>
+    </div>
+    <div class="metrica verde">
+      <div class="lbl">Margem Líquida</div>
+      <div class="val">R$ {{ "%.0f"|format(m.com_liquido)|replace(',','.') }}</div>
+      <div class="sub">Serenus, após repasses</div>
+    </div>
+  </div>
+
+  <!-- Fluxo de caixa -->
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; margin-top:4px;">
+    <div style="font-size:12px; font-weight:600; color:var(--cinza); text-transform:uppercase; letter-spacing:.6px;">Fluxo de Caixa · Comissões</div>
+    <a href="/fluxo-caixa" style="font-size:12px; color:var(--verde); text-decoration:none; font-weight:500;">Ver detalhes →</a>
+  </div>
+  <div class="metricas m-4" style="margin-bottom:24px;">
+    <div class="metrica" style="border-left:3px solid #f59e0b;">
+      <div class="lbl">Pendente de receber</div>
+      <div class="val" style="font-size:18px; color:#d97706;">R$ {{ "%.0f"|format(m.fc_pendente)|replace(',','.') }}</div>
+      <div class="sub">aguardando operadora</div>
+    </div>
+    <div class="metrica" style="border-left:3px solid #1d4ed8;">
+      <div class="lbl">Em caixa (não repassado)</div>
+      <div class="val" style="font-size:18px; color:var(--info);">R$ {{ "%.0f"|format(m.fc_caixa)|replace(',','.') }}</div>
+      <div class="sub">recebido, pendente de repasse</div>
+    </div>
+    <div class="metrica" style="border-left:3px solid var(--verde);">
+      <div class="lbl">Liberado p/ corretor</div>
+      <div class="val" style="font-size:18px; color:var(--verde);">R$ {{ "%.0f"|format(m.fc_liberado)|replace(',','.') }}</div>
+      <div class="sub">lote aguardando aceite</div>
+    </div>
+    <div class="metrica" style="border-left:3px solid #64748b;">
+      <div class="lbl">Pago ao corretor</div>
+      <div class="val" style="font-size:18px; color:var(--cinza);">R$ {{ "%.0f"|format(m.fc_pago)|replace(',','.') }}</div>
+      <div class="sub">histórico de pagamentos</div>
+    </div>
+  </div>
+  {% if m.fc_antecip > 0 %}
+  <div style="background:rgba(244,63,94,.1); border:1px solid rgba(244,63,94,.3); padding:12px 18px; border-radius:8px; margin-bottom:18px; display:flex; align-items:center; gap:12px;">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <div>
+      <strong style="color:#dc2626; font-size:13px;">{{ m.fc_antecip }} comprovante{{ 's' if m.fc_antecip > 1 else '' }} aguardando sua aprovação</strong>
+      <span style="font-size:12px; color:#64748b; margin-left:8px;">— <a href="/fluxo-caixa#antecipacoes" style="color:#dc2626;">Aprovar agora →</a></span>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="metricas m-3">
+    <div class="metrica info">
+      <div class="lbl">Comissão bruta (corretora)</div>
+      <div class="val" style="font-size:20px;">R$ {{ "%.2f"|format(m.com_bruta)|replace('.',',') }}</div>
+      <div class="sub">total recebido das operadoras</div>
+    </div>
+    <div class="metrica erro">
+      <div class="lbl">Repasse a consultores</div>
+      <div class="val" style="font-size:20px;">R$ {{ "%.2f"|format(m.com_repasse)|replace('.',',') }}</div>
+      <div class="sub">a pagar para a equipe</div>
+    </div>
+    <div class="metrica verde">
+      <div class="lbl">Líquido Serenus</div>
+      <div class="val" style="font-size:20px;">R$ {{ "%.2f"|format(m.com_liquido)|replace('.',',') }}</div>
+      <div class="sub">margem após repasses</div>
+    </div>
+  </div>
+
+  <div class="charts-grid">
+    <div class="chart-card">
+      <div class="chart-title">Produção por operadora</div>
+      <canvas id="chartOp"></canvas>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Distribuição da produção entre consultores</div>
+      <canvas id="chartCon"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h3>Últimas propostas</h3>
+      <a href="/propostas" class="btn-outline">Ver todas</a>
+    </div>
+    {% if ultimas %}
+    <table>
+      <thead><tr><th>ID</th><th>Cliente</th><th>Consultor</th><th>Operadora</th><th>Vidas</th><th>Valor</th><th>Comissão</th><th>Vigência</th></tr></thead>
+      <tbody>
+        {% for p in ultimas %}
+        <tr>
+          <td><a href="/proposta/{{ p.id }}" style="color:var(--verde); font-weight:500;">#{{ p.id }}</a></td>
+          <td><strong>{{ p.razao_social }}</strong></td>
+          <td>{{ p.consultor }}</td>
+          <td>{{ p.adm_operadora or '—' }}</td>
+          <td class="td-mono">{{ p.total_vidas }}</td>
+          <td class="td-mono">R$ {{ "%.2f"|format(p.valor)|replace('.',',') }}</td>
+          <td class="td-mono" style="color:var(--verde);">R$ {{ "%.2f"|format(p.comissao_corretora_liquida or 0)|replace('.',',') }}</td>
+          <td>{{ p.vigencia }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty">Nenhuma proposta cadastrada. <a href="/nova-proposta">Cadastrar primeira →</a></div>{% endif %}
+  </div>
+
+  {% if por_consultor %}
+  <div class="card">
+    <div class="card-header"><h3>Ranking de consultores</h3></div>
+    <table>
+      <thead><tr><th>Consultor</th><th>Propostas</th><th>Produção</th><th>Comissão a pagar</th></tr></thead>
+      <tbody>
+        {% for c in por_consultor %}
+        <tr>
+          <td><strong>{{ c.consultor }}</strong></td>
+          <td class="td-mono">{{ c.qtd }}</td>
+          <td class="td-mono">R$ {{ "%.2f"|format(c.valor)|replace('.',',') }}</td>
+          <td class="td-mono" style="color:var(--erro);">R$ {{ "%.2f"|format(c.com or 0)|replace('.',',') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const CORES = ['#1fd8a4','#3b82f6','#8b5cf6','#f43f7c','#fb923c','#facc15','#22d3ee','#a3e635'];
+new Chart(document.getElementById('chartOp'),{
+  type:'bar',
+  data:{ labels:[{% for o in por_operadora %}'{{ o.adm_operadora or "—" }}',{% endfor %}],
+    datasets:[{ data:[{% for o in por_operadora %}{{ o.valor }},{% endfor %}], backgroundColor:'#3b82f6', borderRadius:5, barThickness:24 }]},
+  options:{ responsive:true, plugins:{legend:{display:false}}, scales:{ y:{ ticks:{ callback:v=>'R$'+v.toLocaleString('pt-BR') }, grid:{color:'rgba(255,255,255,.06)'} }, x:{ grid:{display:false} } } }
+});
+new Chart(document.getElementById('chartCon'),{
+  type:'doughnut',
+  data:{ labels:[{% for c in por_consultor %}'{{ c.consultor }}',{% endfor %}],
+    datasets:[{ data:[{% for c in por_consultor %}{{ c.valor }},{% endfor %}], backgroundColor:CORES, borderWidth:3, borderColor:'#15151e' }]},
+  options:{ responsive:true, plugins:{ legend:{ position:'right', labels:{ padding:14, font:{size:12} } } } }
+});
+</script>
+{% endblock %}

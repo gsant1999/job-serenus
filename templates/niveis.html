@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+{% block title %}Níveis de Produção{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Níveis de Produção</h1>
+    <div class="sub">Desenhe livremente as faixas do regime "Sem Fixo + Com Leads"</div>
+  </div>
+  <div style="display:flex; gap:10px;">
+    <button class="btn-outline" onclick="addNivel()">+ Adicionar nível</button>
+    <button class="btn" onclick="salvarNiveis()">Salvar</button>
+  </div>
+</div>
+
+<div class="page" style="max-width:760px;">
+
+  <div class="card" style="background:linear-gradient(135deg,rgba(59,130,246,.07),rgba(31,216,164,.06)); border-color:var(--borda-2); margin-bottom:18px;">
+    <div style="padding:18px 24px; font-size:13px; color:var(--cinza); line-height:1.7;">
+      O nível é definido pela <strong style="color:#fff;">produção acumulada do mês no momento da venda</strong>. Crie quantos níveis quiser e ajuste as faixas — o motor de cálculo e a tela de Repasses se adaptam sozinhos. A produção <strong style="color:var(--teal);">zera todo mês</strong>. Deixe "Até" em branco no último nível para "em diante".
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>Faixas</h3></div>
+    <div class="card-body">
+      <div id="lista-niveis"></div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const RAW = [{% for n in niveis %}{codigo:"{{ n.codigo }}", label:"{{ n.label }}", faixa_min:{{ n.faixa_min or 0 }}, faixa_max:{{ n.faixa_max if n.faixa_max is not none else 'null' }}}{% if not loop.last %},{% endif %}{% endfor %}];
+
+function render() {
+  const c = document.getElementById('lista-niveis'); c.innerHTML = '';
+  RAW.forEach((n, i) => {
+    const row = document.createElement('div');
+    row.className = 'nivel-row';
+    row.style = 'display:grid; grid-template-columns:1fr 90px 1fr 1fr auto; gap:10px; align-items:end; padding:12px 0; border-bottom:1px solid var(--borda);';
+    row.innerHTML = `
+      <div><div style="font-size:10px; color:var(--cinza-2); margin-bottom:3px;">Nome</div><input value="${n.label||''}" class="f-label" style="padding:8px; font-weight:600;"></div>
+      <div><div style="font-size:10px; color:var(--cinza-2); margin-bottom:3px;">Código</div><input value="${n.codigo||''}" class="f-cod" placeholder="n1" style="padding:8px;"></div>
+      <div><div style="font-size:10px; color:var(--cinza-2); margin-bottom:3px;">De (R$)</div><input type="number" value="${n.faixa_min??0}" class="f-min" style="padding:8px;"></div>
+      <div><div style="font-size:10px; color:var(--cinza-2); margin-bottom:3px;">Até (R$)</div><input type="number" value="${n.faixa_max??''}" class="f-max" placeholder="Em diante" style="padding:8px;"></div>
+      <button class="btn-ghost" style="color:var(--rosa); font-size:18px;" onclick="removerNivel(${i})">&times;</button>`;
+    c.appendChild(row);
+  });
+}
+function addNivel() {
+  const next = RAW.length + 1;
+  RAW.push({codigo:'n'+next, label:'N'+next, faixa_min:0, faixa_max:null});
+  render();
+}
+function removerNivel(i) { RAW.splice(i,1); render(); }
+async function salvarNiveis() {
+  const niveis = [];
+  document.querySelectorAll('.nivel-row').forEach(r => {
+    niveis.push({
+      codigo: r.querySelector('.f-cod').value,
+      label: r.querySelector('.f-label').value,
+      faixa_min: r.querySelector('.f-min').value,
+      faixa_max: r.querySelector('.f-max').value
+    });
+  });
+  if (!niveis.length) { toast('Adicione ao menos um nível', 'err'); return; }
+  const res = await fetch('/nivel/salvar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({niveis})});
+  if ((await res.json()).ok) { toast('Níveis salvos', 'ok'); setTimeout(()=>location.reload(), 700); }
+  else toast('Erro', 'err');
+}
+render();
+</script>
+{% endblock %}

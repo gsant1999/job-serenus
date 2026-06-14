@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/png" href="/static/favicon.png">
+  <title>Criar senha · JOB Serenus</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Inter',sans-serif; background:#0a0a10; min-height:100vh;
+    display:flex; align-items:center; justify-content:center; color:#eef0f6; -webkit-font-smoothing:antialiased; }
+  body::before { content:''; position:fixed; inset:0; pointer-events:none;
+    background:
+      radial-gradient(700px 450px at 80% 10%, rgba(59,130,246,.13), transparent 60%),
+      radial-gradient(600px 450px at 10% 90%, rgba(244,63,124,.10), transparent 60%); }
+  @keyframes spinSlow { to { transform:rotate(360deg); } }
+  @keyframes spinRev  { to { transform:rotate(-360deg); } }
+  @keyframes fadeUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+  @media (prefers-reduced-motion:reduce) { *{animation-duration:.001s!important} }
+
+  .card { background:rgba(21,21,30,.75); backdrop-filter:blur(20px); border:1px solid rgba(255,255,255,.09);
+    border-radius:22px; padding:46px 44px; width:92%; max-width:440px; position:relative; z-index:2;
+    box-shadow:0 36px 100px rgba(0,0,0,.6); animation:fadeUp .6s ease both; text-align:center; }
+  .logo svg { width:110px; height:110px; }
+  .arc-f { transform-origin:50% 50%; animation:spinSlow 16s linear infinite; }
+  .arc-q { transform-origin:50% 50%; animation:spinRev 22s linear infinite; }
+  h1 { font-family:'Sora',sans-serif; font-size:22px; font-weight:700; margin:18px 0 6px; color:#fff; }
+  .desc { font-size:13px; color:#9aa1b5; margin-bottom:28px; }
+  .campo { margin-bottom:15px; text-align:left; }
+  .campo label { display:block; font-size:12px; font-weight:500; color:#9aa1b5; margin-bottom:6px; }
+  .campo input { width:100%; padding:13px 15px; border:1px solid rgba(255,255,255,.12); border-radius:11px;
+    font-size:14px; font-family:'Inter',sans-serif; outline:none; transition:.22s;
+    background:rgba(255,255,255,.045); color:#fff; }
+  .campo input:focus { border-color:#3b82f6; box-shadow:0 0 0 4px rgba(59,130,246,.16); }
+  .btn { width:100%; padding:14px; border:none; border-radius:11px; margin-top:8px;
+    font-size:14px; font-weight:600; cursor:pointer; font-family:'Inter',sans-serif; color:#fff;
+    background:linear-gradient(135deg,#1fd8a4,#3b82f6,#8b5cf6); background-size:180% 180%;
+    transition:all .3s ease; box-shadow:0 6px 24px rgba(59,130,246,.3); }
+  .btn:hover { background-position:100% 50%; transform:translateY(-2px); }
+  .erro { background:rgba(244,63,94,.12); color:#fb8497; border:1px solid rgba(244,63,94,.3);
+    padding:12px 15px; border-radius:10px; font-size:13px; margin-bottom:16px; text-align:left; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="gF" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#1fd8a4"/><stop offset="55%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#8b5cf6"/>
+        </linearGradient>
+        <linearGradient id="gQ" x1="100%" y1="100%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#facc15"/><stop offset="50%" stop-color="#fb923c"/><stop offset="100%" stop-color="#f43f7c"/>
+        </linearGradient>
+      </defs>
+      <g class="arc-f"><circle cx="120" cy="120" r="100" fill="none" stroke="url(#gF)" stroke-width="14" stroke-linecap="round" stroke-dasharray="255 374" stroke-dashoffset="-40"/></g>
+      <g class="arc-q"><circle cx="120" cy="120" r="100" fill="none" stroke="url(#gQ)" stroke-width="14" stroke-linecap="round" stroke-dasharray="255 374" stroke-dashoffset="274"/></g>
+      <text x="120" y="138" font-family="Sora,sans-serif" font-size="56" font-weight="800" fill="#fff" text-anchor="middle" letter-spacing="2">J<tspan fill="url(#gF)">O</tspan>B</text>
+    </svg>
+  </div>
+  <h1>Olá, {{ nome }}!</h1>
+  <p class="desc">Crie sua senha de acesso ao JOB.</p>
+
+  {% with msgs = get_flashed_messages() %}
+  {% if msgs %}<div class="erro">{{ msgs[0] }}</div>{% endif %}
+  {% endwith %}
+
+  <form method="POST">
+    <div class="campo">
+      <label>Nova senha</label>
+      <input type="password" name="senha" minlength="6" required autofocus>
+    </div>
+    <div class="campo">
+      <label>Confirmar senha</label>
+      <input type="password" name="senha2" minlength="6" required>
+    </div>
+    <button class="btn">Criar senha e entrar</button>
+  </form>
+</div>
+</body>
+</html>

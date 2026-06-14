@@ -1,0 +1,4195 @@
+{
+ "recebimento": [
+  {
+   "operadora": "SulAmérica",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.8
+  },
+  {
+   "operadora": "Affix",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.3
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.0
+  },
+  {
+   "operadora": "Porto Seguro",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.8
+  },
+  {
+   "operadora": "Affix",
+   "obs": "Ativia / Unimed Jundiaí",
+   "plano": "ADESAO",
+   "total": 1.5
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "Litoral I e Litoral E",
+   "plano": "PF",
+   "total": 1.9
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PME",
+   "total": 3.3
+  },
+  {
+   "operadora": "Affix",
+   "obs": "Hapvida",
+   "plano": "ADESAO",
+   "total": 1.5
+  },
+  {
+   "operadora": "Med Senior SP/RJ",
+   "obs": "",
+   "plano": "PF",
+   "total": 1.8
+  },
+  {
+   "operadora": "Amil",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.8
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Premium",
+   "plano": "ADESAO",
+   "total": 2.4
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.0
+  },
+  {
+   "operadora": "MedSênior",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.8
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Prime",
+   "plano": "ADESAO",
+   "total": 2.1
+  },
+  {
+   "operadora": "Saúde Beneficência",
+   "obs": "",
+   "plano": "PF",
+   "total": 1.0
+  },
+  {
+   "operadora": "Vera Cruz",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.6
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Plus",
+   "plano": "ADESAO",
+   "total": 1.9
+  },
+  {
+   "operadora": "Única Saúde",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.2
+  },
+  {
+   "operadora": "Bradesco",
+   "obs": "",
+   "plano": "PME",
+   "total": 3.3
+  },
+  {
+   "operadora": "Supermed",
+   "obs": "SP/RJ",
+   "plano": "ADESAO",
+   "total": 1.0
+  },
+  {
+   "operadora": "Assim Saúde",
+   "obs": "Memorial",
+   "plano": "PF",
+   "total": 2.4
+  },
+  {
+   "operadora": "Alice",
+   "obs": "",
+   "plano": "PME",
+   "total": 3.0
+  },
+  {
+   "operadora": "Abplus",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.0
+  },
+  {
+   "operadora": "Ativia",
+   "obs": "",
+   "plano": "PF",
+   "total": 1.2
+  },
+  {
+   "operadora": "Allcare (Unimed Fluminense)",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.6
+  },
+  {
+   "operadora": "Allcare",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.5
+  },
+  {
+   "operadora": "Biovida",
+   "obs": "",
+   "plano": "PF",
+   "total": 3.2
+  },
+  {
+   "operadora": "Allcare Humana",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.2
+  },
+  {
+   "operadora": "Alter Ben.",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Bluemed",
+   "obs": "",
+   "plano": "PF",
+   "total": 1.7
+  },
+  {
+   "operadora": "Ameplan",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.7
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Interclinicas / Univida",
+   "plano": "ADESAO",
+   "total": 1.3
+  },
+  {
+   "operadora": "Ever",
+   "obs": "",
+   "plano": "PF",
+   "total": 1.1
+  },
+  {
+   "operadora": "Affix (Hapvida)",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.5
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Health Med",
+   "plano": "ADESAO",
+   "total": 1.15
+  },
+  {
+   "operadora": "Gs Garantia de Saúde",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.7
+  },
+  {
+   "operadora": "Ana Costa",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Quallity Ambulatorial",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Hapvida - SJC",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.3
+  },
+  {
+   "operadora": "Assim Saúde",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Quallity Completo",
+   "plano": "ADESAO",
+   "total": 1.1
+  },
+  {
+   "operadora": "HBC",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.0
+  },
+  {
+   "operadora": "Assim Saúde",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Top Life",
+   "plano": "ADESAO",
+   "total": 1.6
+  },
+  {
+   "operadora": "Leve Saúde RJ",
+   "obs": "",
+   "plano": "PF",
+   "total": 1.2
+  },
+  {
+   "operadora": "Assim Saúde",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "Ameplan Saude",
+   "plano": "ADESAO",
+   "total": 1.5
+  },
+  {
+   "operadora": "Livri Saúde",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.0
+  },
+  {
+   "operadora": "Assim Saúde",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "total": 1.4
+  },
+  {
+   "operadora": "Medtour",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.0
+  },
+  {
+   "operadora": "Ativia Saúde",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.3
+  },
+  {
+   "operadora": "Medtour",
+   "obs": "12 de Outubro",
+   "plano": "PF",
+   "total": 1.8
+  },
+  {
+   "operadora": "Ativia Saúde",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.5
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "São Camilo",
+   "plano": "ADESAO",
+   "total": 1.4
+  },
+  {
+   "operadora": "Plena Saude",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.2
+  },
+  {
+   "operadora": "Biovida",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Dix Med",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.0
+  },
+  {
+   "operadora": "Prevent Senior",
+   "obs": "",
+   "plano": "PF",
+   "total": 1.5
+  },
+  {
+   "operadora": "Blue Saúde",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Dix Med",
+   "obs": "Assim / Klini",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Sagrada Família",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.4
+  },
+  {
+   "operadora": "Blue Saúde",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.0
+  },
+  {
+   "operadora": "Easyplan",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.3
+  },
+  {
+   "operadora": "Samoc",
+   "obs": "0 A 8 Anos",
+   "plano": "PF",
+   "total": 0.7
+  },
+  {
+   "operadora": "Bluemed",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.8
+  },
+  {
+   "operadora": "G2C",
+   "obs": "Klini Saúde",
+   "plano": "ADESAO",
+   "total": 1.4
+  },
+  {
+   "operadora": "Samoc",
+   "obs": "09 A 58 Anos",
+   "plano": "PF",
+   "total": 2.2
+  },
+  {
+   "operadora": "Care Plus",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.0
+  },
+  {
+   "operadora": "G2C",
+   "obs": "Demais",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Samoc",
+   "obs": "59+",
+   "plano": "PF",
+   "total": 1.3
+  },
+  {
+   "operadora": "Cruz Azul",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.8
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.5
+  },
+  {
+   "operadora": "Santa Casa De Mauá",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.4
+  },
+  {
+   "operadora": "Cruz Azul",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.0
+  },
+  {
+   "operadora": "Hebrom",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.5
+  },
+  {
+   "operadora": "São Cristóvão",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.0
+  },
+  {
+   "operadora": "Easyplan Adm",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.2
+  },
+  {
+   "operadora": "Hub Health",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 2.0
+  },
+  {
+   "operadora": "São Francisco",
+   "obs": "",
+   "plano": "PF",
+   "total": 1.4
+  },
+  {
+   "operadora": "Easyplan Adm",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.2
+  },
+  {
+   "operadora": "Mount Hermon",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "São Miguel",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.9
+  },
+  {
+   "operadora": "Easyplan Adm",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.0
+  },
+  {
+   "operadora": "Nacional Saúde",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "SB Saúde",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.4
+  },
+  {
+   "operadora": "Ever",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.3
+  },
+  {
+   "operadora": "Trasmontano",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.0
+  },
+  {
+   "operadora": "Plural",
+   "obs": "Ndi/Totalmedcare/Sbc",
+   "plano": "ADESAO",
+   "total": 1.5
+  },
+  {
+   "operadora": "HBC",
+   "obs": "",
+   "plano": "PF",
+   "total": 2.0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.9
+  },
+  {
+   "operadora": "Plural",
+   "obs": "CEMERU",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Unihosp",
+   "obs": "",
+   "plano": "PF",
+   "total": 3.0
+  },
+  {
+   "operadora": "Gs Garantia",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.7
+  },
+  {
+   "operadora": "Plural RJ",
+   "obs": "Ndi E Health Med",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Hapvida - SJC",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.3
+  },
+  {
+   "operadora": "Qualicorp RJ",
+   "obs": "Premium",
+   "plano": "ADESAO",
+   "total": 2.5
+  },
+  {
+   "operadora": "Hapvida - SJC",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.0
+  },
+  {
+   "operadora": "Qv",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Integral Saúde",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Qv RJ e SP",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "total": 1.4
+  },
+  {
+   "operadora": "Klini Saude",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Safe",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Leve Saude",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.5
+  },
+  {
+   "operadora": "Tec Group",
+   "obs": "Adventist Health",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Leve Saude",
+   "obs": "",
+   "plano": "PME",
+   "total": 0.2
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Livri Saúde",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.0
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "Unimed Santos",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Medtour",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.2
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "São Cristóvão",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.0
+  },
+  {
+   "operadora": "Uniconsult",
+   "obs": "Qualicorp",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.8
+  },
+  {
+   "operadora": "Valor Saúde",
+   "obs": "Golden Cross",
+   "plano": "ADESAO",
+   "total": 1.1
+  },
+  {
+   "operadora": "Omint",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Você Clube",
+   "obs": "",
+   "plano": "ADESAO",
+   "total": 1.2
+  },
+  {
+   "operadora": "Plena Saude",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "QUALICORP",
+   "obs": "",
+   "plano": "PME",
+   "total": 3.0
+  },
+  {
+   "operadora": "Sagrada Família",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Samoc",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Samoc",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.5
+  },
+  {
+   "operadora": "Sami",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Sami",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Sami",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Santa Casa De Mauá",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Santa Helena",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Santa Tereza",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.5
+  },
+  {
+   "operadora": "Santa Tereza",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.0
+  },
+  {
+   "operadora": "São Cristóvão",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.3
+  },
+  {
+   "operadora": "São Cristóvão",
+   "obs": "",
+   "plano": "PME",
+   "total": 0.0
+  },
+  {
+   "operadora": "São Francisco",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.4
+  },
+  {
+   "operadora": "São Miguel",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.9
+  },
+  {
+   "operadora": "São Miguel",
+   "obs": "",
+   "plano": "PME",
+   "total": 0.5
+  },
+  {
+   "operadora": "São Miguel",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.0
+  },
+  {
+   "operadora": "Saúde Beneficência",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.0
+  },
+  {
+   "operadora": "SB Saúde",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.1
+  },
+  {
+   "operadora": "Seguros Unimed",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Sobam",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "HBC",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.0
+  },
+  {
+   "operadora": "Total Medcare",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.5
+  },
+  {
+   "operadora": "Trasmontano",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.7
+  },
+  {
+   "operadora": "Tec Group",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Tec Group",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.4
+  },
+  {
+   "operadora": "Única Saúde",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.2
+  },
+  {
+   "operadora": "Unihosp",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Unimed FERJ",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.2
+  },
+  {
+   "operadora": "Unimed GRU",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Unimed GRU",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.9
+  },
+  {
+   "operadora": "Unimed Jundiaí",
+   "obs": "",
+   "plano": "PME",
+   "total": 3.0
+  },
+  {
+   "operadora": "Unimed Os Bandeirantes",
+   "obs": "",
+   "plano": "PME",
+   "total": 2.4
+  },
+  {
+   "operadora": "Unimed SJC",
+   "obs": "",
+   "plano": "PME",
+   "total": 1.1
+  },
+  {
+   "operadora": "Samaritano",
+   "obs": "",
+   "plano": "PME",
+   "total": 0.0
+  }
+ ],
+ "repasse": [
+  {
+   "operadora": "SulAmérica",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 1.2,
+   "regua": [
+    0.7,
+    0.25,
+    0.25
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "SulAmérica",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 1.5,
+   "regua": [
+    0.7,
+    0.4,
+    0.4
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "SulAmérica",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 1.8,
+   "regua": [
+    0.7,
+    0.55,
+    0.55
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Porto Seguro",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 1.2,
+   "regua": [
+    0.7,
+    0.25,
+    0.25
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Porto Seguro",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 1.5,
+   "regua": [
+    0.7,
+    0.4,
+    0.4
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Porto Seguro",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 1.8,
+   "regua": [
+    0.7,
+    0.55,
+    0.55
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 1.5,
+   "regua": [
+    0.8,
+    0.35,
+    0.35
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 1.8,
+   "regua": [
+    0.8,
+    0.5,
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 2.1,
+   "regua": [
+    0.8,
+    0.65,
+    0.65
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Amil",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 1.2,
+   "regua": [
+    0.7,
+    0.25,
+    0.25
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Amil",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 1.5,
+   "regua": [
+    0.7,
+    0.4,
+    0.4
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Amil",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 1.8,
+   "regua": [
+    0.7,
+    0.55,
+    0.55
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "MedSênior",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0.8,
+   "regua": [
+    0.45,
+    0.18,
+    0.18
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "MedSênior",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 1.0,
+   "regua": [
+    0.45,
+    0.28,
+    0.28
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "MedSênior",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 1.1,
+   "regua": [
+    0.45,
+    0.33,
+    0.33
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Vera Cruz",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0.7,
+   "regua": [
+    0.4,
+    0.15,
+    0.15
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Vera Cruz",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0.9,
+   "regua": [
+    0.4,
+    0.25,
+    0.25
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Vera Cruz",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 1.0,
+   "regua": [
+    0.4,
+    0.3,
+    0.3
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Bradesco",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 1.5,
+   "regua": [
+    0.8,
+    0.35,
+    0.35
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Bradesco",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 1.8,
+   "regua": [
+    0.8,
+    0.5,
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Bradesco",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 2.1,
+   "regua": [
+    0.8,
+    0.65,
+    0.65
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "SulAmérica",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Porto Seguro",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Amil",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "MedSênior",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Vera Cruz",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Bradesco",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "SulAmérica",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 2.2,
+   "regua": [
+    1.0,
+    0.6,
+    0.3,
+    0.3
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Porto Seguro",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 2.2,
+   "regua": [
+    1.0,
+    0.6,
+    0.3,
+    0.3
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 2.6,
+   "regua": [
+    1.0,
+    0.8,
+    0.4,
+    0.4
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Amil",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 2.2,
+   "regua": [
+    1.0,
+    0.6,
+    0.3,
+    0.3
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "MedSênior",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 1.4,
+   "regua": [
+    1.0,
+    0.2,
+    0.1,
+    0.1
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Vera Cruz",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 1.3,
+   "regua": [
+    1.0,
+    0.15,
+    0.08,
+    0.08
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Bradesco",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 2.6,
+   "regua": [
+    1.0,
+    0.8,
+    0.4,
+    0.4
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "SulAmérica",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_com_fixo",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Porto Seguro",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_com_fixo",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_com_fixo",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Amil",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_com_fixo",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "MedSênior",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_com_fixo",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Vera Cruz",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_com_fixo",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Bradesco",
+   "obs": "",
+   "plano": "PME",
+   "modelo": "sem_lead_com_fixo",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0.9,
+   "regua": [
+    0.5,
+    0.2,
+    0.2
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 1.1,
+   "regua": [
+    0.5,
+    0.3,
+    0.3
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 1.3,
+   "regua": [
+    0.5,
+    0.4,
+    0.4
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "Litoral I e Litoral E",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0.8,
+   "regua": [
+    0.5,
+    0.15,
+    0.15
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "Litoral I e Litoral E",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 1.0,
+   "regua": [
+    0.5,
+    0.25,
+    0.25
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "Litoral I e Litoral E",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 1.2,
+   "regua": [
+    0.5,
+    0.35,
+    0.35
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Med Senior SP/RJ",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0.8,
+   "regua": [
+    0.4,
+    0.2,
+    0.2
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Med Senior SP/RJ",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 1.0,
+   "regua": [
+    0.4,
+    0.3,
+    0.3
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Med Senior SP/RJ",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 1.1,
+   "regua": [
+    0.4,
+    0.35,
+    0.35
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0.9,
+   "regua": [
+    0.5,
+    0.2,
+    0.2
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 1.1,
+   "regua": [
+    0.5,
+    0.3,
+    0.3
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 1.3,
+   "regua": [
+    0.5,
+    0.4,
+    0.4
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Saúde Beneficência",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0.4,
+   "regua": [
+    0.2,
+    0.1,
+    0.1
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Saúde Beneficência",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0.5,
+   "regua": [
+    0.2,
+    0.15,
+    0.15
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Saúde Beneficência",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0.6,
+   "regua": [
+    0.2,
+    0.2,
+    0.2
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Única Saúde",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 1.0,
+   "regua": [
+    0.5,
+    0.25,
+    0.25
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Única Saúde",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 1.2,
+   "regua": [
+    0.5,
+    0.35,
+    0.35
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Única Saúde",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 1.4,
+   "regua": [
+    0.5,
+    0.45,
+    0.45
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "Litoral I e Litoral E",
+   "plano": "PF",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Med Senior SP/RJ",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0.4,
+   "regua": [
+    0.4
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Saúde Beneficência",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0.2,
+   "regua": [
+    0.2
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Única Saúde",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 1.6,
+   "regua": [
+    0.5,
+    0.55,
+    0.28,
+    0.28
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "Litoral I e Litoral E",
+   "plano": "PF",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 1.5,
+   "regua": [
+    0.5,
+    0.5,
+    0.25,
+    0.25
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Med Senior SP/RJ",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 1.4,
+   "regua": [
+    0.4,
+    0.5,
+    0.25,
+    0.25
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 1.6,
+   "regua": [
+    0.5,
+    0.55,
+    0.28,
+    0.28
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Saúde Beneficência",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0.8,
+   "regua": [
+    0.2,
+    0.3,
+    0.15,
+    0.15
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Única Saúde",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 1.7,
+   "regua": [
+    0.5,
+    0.6,
+    0.3,
+    0.3
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "sem_lead_com_fixo",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "Litoral I e Litoral E",
+   "plano": "PF",
+   "modelo": "sem_lead_com_fixo",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Med Senior SP/RJ",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "sem_lead_com_fixo",
+   "nivel": "",
+   "total": 0.4,
+   "regua": [
+    0.4
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Ndi",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "sem_lead_com_fixo",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Saúde Beneficência",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "sem_lead_com_fixo",
+   "nivel": "",
+   "total": 0.2,
+   "regua": [
+    0.2
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Única Saúde",
+   "obs": "",
+   "plano": "PF",
+   "modelo": "sem_lead_com_fixo",
+   "nivel": "",
+   "total": 0.5,
+   "regua": [
+    0.5
+   ],
+   "taxa": 0
+  },
+  {
+   "operadora": "Affix",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "Ativia / Unimed Jundiaí",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "Ativia / Unimed Jundiaí",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "Ativia / Unimed Jundiaí",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "Ativia / Unimed Jundiaí",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "Ativia / Unimed Jundiaí",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "Hapvida",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "Hapvida",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "Hapvida",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "Hapvida",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Affix",
+   "obs": "Hapvida",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Premium",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Premium",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Premium",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Premium",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Premium",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Prime",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Prime",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Prime",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Prime",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Prime",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Plus",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Plus",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Plus",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Plus",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp SP",
+   "obs": "Plus",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Supermed",
+   "obs": "SP/RJ",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Supermed",
+   "obs": "SP/RJ",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Supermed",
+   "obs": "SP/RJ",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Supermed",
+   "obs": "SP/RJ",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Supermed",
+   "obs": "SP/RJ",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Abplus",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Abplus",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Abplus",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Abplus",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Abplus",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Allcare",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Allcare",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Allcare",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Allcare",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Allcare",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Alter Ben.",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Alter Ben.",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Alter Ben.",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Alter Ben.",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Alter Ben.",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Interclinicas / Univida",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Interclinicas / Univida",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Interclinicas / Univida",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Interclinicas / Univida",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Interclinicas / Univida",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Health Med",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Health Med",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Health Med",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Health Med",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Health Med",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Quallity Ambulatorial",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Quallity Ambulatorial",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Quallity Ambulatorial",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Quallity Ambulatorial",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Quallity Ambulatorial",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Quallity Completo",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Quallity Completo",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Quallity Completo",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Quallity Completo",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Quallity Completo",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Top Life",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Top Life",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Top Life",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Top Life",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Capital Admin",
+   "obs": "Top Life",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "Ameplan Saude",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "Ameplan Saude",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "Ameplan Saude",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "Ameplan Saude",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "Ameplan Saude",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "São Camilo",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "São Camilo",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "São Camilo",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "São Camilo",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Corpe",
+   "obs": "São Camilo",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Dix Med",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Dix Med",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Dix Med",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Dix Med",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Dix Med",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Dix Med",
+   "obs": "Assim / Klini",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Dix Med",
+   "obs": "Assim / Klini",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Dix Med",
+   "obs": "Assim / Klini",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Dix Med",
+   "obs": "Assim / Klini",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Dix Med",
+   "obs": "Assim / Klini",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Easyplan",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Easyplan",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Easyplan",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Easyplan",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Easyplan",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "G2C",
+   "obs": "Klini Saúde",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "G2C",
+   "obs": "Klini Saúde",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "G2C",
+   "obs": "Klini Saúde",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "G2C",
+   "obs": "Klini Saúde",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "G2C",
+   "obs": "Klini Saúde",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "G2C",
+   "obs": "Demais",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "G2C",
+   "obs": "Demais",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "G2C",
+   "obs": "Demais",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "G2C",
+   "obs": "Demais",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "G2C",
+   "obs": "Demais",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Gocare",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Hebrom",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Hebrom",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Hebrom",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Hebrom",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Hebrom",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Hub Health",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Hub Health",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Hub Health",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Hub Health",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Hub Health",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Mount Hermon",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Mount Hermon",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Mount Hermon",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Mount Hermon",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Mount Hermon",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Nacional Saúde",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Nacional Saúde",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Nacional Saúde",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Nacional Saúde",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Nacional Saúde",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "Ndi/Totalmedcare/Sbc",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "Ndi/Totalmedcare/Sbc",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "Ndi/Totalmedcare/Sbc",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "Ndi/Totalmedcare/Sbc",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "Ndi/Totalmedcare/Sbc",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "CEMERU",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "CEMERU",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "CEMERU",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "CEMERU",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural",
+   "obs": "CEMERU",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural RJ",
+   "obs": "Ndi E Health Med",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural RJ",
+   "obs": "Ndi E Health Med",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural RJ",
+   "obs": "Ndi E Health Med",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural RJ",
+   "obs": "Ndi E Health Med",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Plural RJ",
+   "obs": "Ndi E Health Med",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp RJ",
+   "obs": "Premium",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp RJ",
+   "obs": "Premium",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp RJ",
+   "obs": "Premium",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp RJ",
+   "obs": "Premium",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qualicorp RJ",
+   "obs": "Premium",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qv",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qv",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qv",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qv",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qv",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qv RJ e SP",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qv RJ e SP",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qv RJ e SP",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qv RJ e SP",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Qv RJ e SP",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Safe",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Safe",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Safe",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Safe",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Safe",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Group",
+   "obs": "Adventist Health",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Group",
+   "obs": "Adventist Health",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Group",
+   "obs": "Adventist Health",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Group",
+   "obs": "Adventist Health",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Group",
+   "obs": "Adventist Health",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "NDI",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "Unimed Santos",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "Unimed Santos",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "Unimed Santos",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "Unimed Santos",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "Unimed Santos",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "São Cristóvão",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "São Cristóvão",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "São Cristóvão",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "São Cristóvão",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Tec Saúde",
+   "obs": "São Cristóvão",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Uniconsult",
+   "obs": "Qualicorp",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Uniconsult",
+   "obs": "Qualicorp",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Uniconsult",
+   "obs": "Qualicorp",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Uniconsult",
+   "obs": "Qualicorp",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Uniconsult",
+   "obs": "Qualicorp",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Valor Saúde",
+   "obs": "Golden Cross",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Valor Saúde",
+   "obs": "Golden Cross",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Valor Saúde",
+   "obs": "Golden Cross",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Valor Saúde",
+   "obs": "Golden Cross",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Valor Saúde",
+   "obs": "Golden Cross",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Você Clube",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_fixo_lead",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Você Clube",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "sem_lead_sem_fixo",
+   "nivel": "",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Você Clube",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n1",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Você Clube",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n2",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  },
+  {
+   "operadora": "Você Clube",
+   "obs": "",
+   "plano": "ADESAO",
+   "modelo": "com_lead",
+   "nivel": "n3",
+   "total": 0,
+   "regua": [],
+   "taxa": 1
+  }
+ ]
+}

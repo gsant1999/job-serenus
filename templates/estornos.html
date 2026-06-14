@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+{% block title %}Estornos{% endblock %}
+
+{% block head %}
+<style>
+.tbl { width:100%; border-collapse:collapse; }
+.tbl th { text-align:left; font-size:10.5px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.4px; padding:10px 12px; border-bottom:1px solid var(--borda-2); }
+.tbl td { padding:11px 12px; border-bottom:1px solid var(--borda); font-size:13px; }
+.add-row { display:grid; grid-template-columns:1.6fr .9fr 1.1fr 1.4fr auto; gap:10px; align-items:end; margin-bottom:16px; padding:16px; background:var(--panel-2); border:1px solid var(--borda); border-radius:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Estornos</h1>
+    <div class="sub">Regras de estorno por operadora e propostas estornadas</div>
+  </div>
+</div>
+
+<div class="page" style="max-width:920px;">
+
+  <div class="card" style="background:rgba(244,63,124,.05); border-color:rgba(244,63,124,.2); margin-bottom:18px;">
+    <div style="padding:16px 22px; font-size:13px; color:var(--cinza); line-height:1.7;">
+      Cada operadora tem uma regra: <strong style="color:#fff;">quanto % da comissão estorna</strong> e <strong style="color:#fff;">até qual mensalidade</strong> o estorno se aplica. Se o cliente cancelar dentro dessa janela, a comissão é estornada; depois dela, não.
+    </div>
+  </div>
+
+  <div class="add-row">
+    <div class="campo"><label>Operadora</label>
+      <select id="e-op"><option value="">— Selecione —</option>{% for o in operadoras %}<option>{{ o }}</option>{% endfor %}</select>
+    </div>
+    <div class="campo"><label>% estorna</label><input type="number" id="e-perc" value="100" min="0" max="100"></div>
+    <div class="campo"><label>Até a Nª mensalidade</label><input type="number" id="e-ate" value="3" min="1"></div>
+    <div class="campo"><label>Observação</label><input type="text" id="e-obs" placeholder="Opcional"></div>
+    <button class="btn" onclick="salvarRegra()">Salvar</button>
+  </div>
+
+  <div class="card" style="margin-bottom:22px;">
+    <div class="card-header"><h3>Regras por operadora</h3><span class="tag tag-info">{{ regras|length }}</span></div>
+    <table class="tbl">
+      <thead><tr><th>Operadora</th><th>% estorna</th><th>Até mensalidade</th><th>Observação</th><th></th></tr></thead>
+      <tbody>
+        {% for r in regras %}
+        <tr>
+          <td><strong>{{ r.operadora }}</strong></td>
+          <td>{{ r.perc_estorno|round(0)|int }}%</td>
+          <td>Até a {{ r.ate_mensalidade }}ª</td>
+          <td style="color:var(--cinza);">{{ r.observacao or '—' }}</td>
+          <td><button class="btn-ghost" onclick='editar({{ r.operadora|tojson }}, {{ r.perc_estorno }}, {{ r.ate_mensalidade }}, {{ (r.observacao or "")|tojson }})'>Editar</button></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" style="color:var(--cinza-2);">Nenhuma regra cadastrada. Cadastre acima a regra de cada operadora.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if estornadas %}
+  <div class="card">
+    <div class="card-header"><h3>Propostas estornadas</h3></div>
+    <table class="tbl">
+      <thead><tr><th>Proposta</th><th>Operadora</th><th>Detalhe</th></tr></thead>
+      <tbody>
+        {% for p in estornadas %}
+        <tr><td>#{{ p.id }} {{ p.razao_social }}</td><td>{{ p.adm_operadora }}</td><td style="color:var(--cinza); font-size:12px;">{{ p.estorno_info }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function salvarRegra() {
+  const op = document.getElementById('e-op').value;
+  if (!op) { toast('Selecione a operadora', 'err'); return; }
+  const body = {operadora:op, perc_estorno:document.getElementById('e-perc').value,
+    ate_mensalidade:document.getElementById('e-ate').value, observacao:document.getElementById('e-obs').value};
+  const r = await fetch('/regra-estorno/salvar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if ((await r.json()).ok) { toast('Regra salva', 'ok'); setTimeout(()=>location.reload(), 500); }
+}
+function editar(op, perc, ate, obs) {
+  document.getElementById('e-op').value = op;
+  document.getElementById('e-perc').value = perc;
+  document.getElementById('e-ate').value = ate;
+  document.getElementById('e-obs').value = obs;
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+</script>
+{% endblock %}

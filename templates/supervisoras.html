@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+{% block title %}Supervisoras{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Supervisoras</h1>
+    <div class="sub">Cadastro das supervisoras de proposta</div>
+  </div>
+  <div><button class="btn" onclick="abrirNova()">Nova supervisora</button></div>
+</div>
+
+<div class="page">
+
+  <div class="card">
+    {% if supervisoras %}
+    <table>
+      <thead><tr><th>Nome</th><th>E-mail</th><th>Telefone</th><th>Status</th><th>Ação</th></tr></thead>
+      <tbody>
+        {% for s in supervisoras %}
+        <tr>
+          <td><strong>{{ s.nome }}</strong></td>
+          <td>{{ s.email or '—' }}</td>
+          <td>{{ s.telefone or '—' }}</td>
+          <td>{% if s.ativo %}<span class="tag tag-verde">Ativa</span>{% else %}<span class="tag tag-off">Inativa</span>{% endif %}</td>
+          <td><button class="btn-ghost" onclick='editar({{ s.id }}, {{ s.nome|tojson }}, {{ (s.email or "")|tojson }}, {{ (s.telefone or "")|tojson }}, {{ s.ativo }})'>Editar</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">
+      Nenhuma supervisora cadastrada.<br>
+      <button class="btn-outline" style="margin-top:14px;" onclick="abrirNova()">Cadastrar primeira</button>
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h3 id="m-titulo">Nova supervisora</h3>
+    <form method="POST" action="/supervisora/salvar">
+      <input type="hidden" name="id" id="s-id">
+      <div class="campo" style="margin-bottom:12px;">
+        <label>Nome completo</label>
+        <input type="text" name="nome" id="s-nome" required>
+      </div>
+      <div class="campo" style="margin-bottom:12px;">
+        <label>E-mail</label>
+        <input type="email" name="email" id="s-email">
+      </div>
+      <div class="campo" style="margin-bottom:14px;">
+        <label>Telefone</label>
+        <input type="tel" name="telefone" id="s-telefone">
+      </div>
+      <div class="campo" style="margin-bottom:14px;">
+        <label class="radio" style="display:inline-flex;">
+          <input type="checkbox" name="ativo" id="s-ativo" value="1" checked>
+          <span>Supervisora ativa</span>
+        </label>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button type="submit" class="btn" style="flex:1;">Salvar</button>
+        <button type="button" class="btn-outline" onclick="fechar()">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function abrirNova() {
+  document.getElementById('m-titulo').textContent = 'Nova supervisora';
+  document.getElementById('s-id').value = '';
+  document.getElementById('s-nome').value = '';
+  document.getElementById('s-email').value = '';
+  document.getElementById('s-telefone').value = '';
+  document.getElementById('s-ativo').checked = true;
+  document.getElementById('modal').classList.add('open');
+}
+function editar(id, nome, email, tel, ativo) {
+  document.getElementById('m-titulo').textContent = 'Editar supervisora';
+  document.getElementById('s-id').value = id;
+  document.getElementById('s-nome').value = nome;
+  document.getElementById('s-email').value = email;
+  document.getElementById('s-telefone').value = tel;
+  document.getElementById('s-ativo').checked = !!ativo;
+  document.getElementById('modal').classList.add('open');
+}
+function fechar() { document.getElementById('modal').classList.remove('open'); }
+</script>
+{% endblock %}

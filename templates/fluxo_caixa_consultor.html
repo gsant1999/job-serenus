@@ -1,0 +1,154 @@
+{% extends 'base.html' %}
+{% block title %}Meu Financeiro{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Meu Financeiro</h1>
+    <div class="sub">Suas comissões e pagamentos</div>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- Cards -->
+  <div class="metricas m-3" style="margin-bottom:22px;">
+    <div class="metrica verde">
+      <div class="lbl">A receber</div>
+      <div class="val">R$ {{ "%.0f"|format(total_a_receber)|replace(',','.') }}</div>
+      <div class="sub">liberado pela corretora</div>
+    </div>
+    <div class="metrica">
+      <div class="lbl">Em análise</div>
+      <div class="val" style="font-size:22px;">{{ em_analise|length }}</div>
+      <div class="sub">parcelas sendo processadas</div>
+    </div>
+    <div class="metrica">
+      <div class="lbl">Total recebido</div>
+      <div class="val" style="font-size:22px; color:var(--cinza);">R$ {{ "%.0f"|format(total_pago)|replace(',','.') }}</div>
+      <div class="sub">histórico</div>
+    </div>
+  </div>
+
+  <!-- Próximo ciclo -->
+  <div class="card" style="background:var(--verde-soft); border-color:#d1e7db; margin-bottom:18px;">
+    <div style="padding:16px 22px; display:flex; gap:24px; flex-wrap:wrap; align-items:center;">
+      <div>
+        <div style="font-size:11px; color:var(--verde); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Ciclo de apuração</div>
+        <div style="font-size:15px; color:var(--verde); font-weight:500; margin-top:3px;">{{ ciclo.inicio }} → {{ ciclo.fim }}</div>
+      </div>
+      <div style="border-left:1px solid #d1e7db; padding-left:24px;">
+        <div style="font-size:11px; color:var(--verde); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Pagamento previsto</div>
+        <div style="font-size:15px; color:var(--verde); font-weight:600; margin-top:3px;">{{ ciclo.pagamento }} (sexta)</div>
+      </div>
+    </div>
+  </div>
+
+  {% if fixo_mes and fixo_mes > 0 %}
+  <div class="card" style="margin-bottom:18px;">
+    <div class="card-header"><h3>Fixo do mês</h3><span class="tag tag-info">R$ {{ "%.2f"|format(fixo_mes)|replace('.',',') }}</span></div>
+    <div style="padding:6px 22px 16px;">
+      {% for f in fixo_parcelas %}
+      <div style="display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--borda); font-size:13px;">
+        <span>{{ f.descricao }} · {{ f.data_lancamento }}</span>
+        <span><strong>R$ {{ "%.2f"|format(f.valor)|replace('.',',') }}</strong> · {{ f.status }}</span>
+      </div>
+      {% endfor %}
+      <div style="font-size:11.5px; color:var(--cinza); margin-top:10px;">Pago em dois fluxos (dia 15 e 30), respeitando o calendário da semana.</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- A receber (liberado) -->
+  {% if a_receber %}
+  <div class="card" style="margin-bottom:18px; border-color:#d1e7db;">
+    <div class="card-header" style="background:var(--verde-soft);">
+      <h3>Liberado para pagamento</h3>
+      <span class="tag tag-verde">Pagamento em {{ ciclo.pagamento }}</span>
+    </div>
+    <table>
+      <thead><tr><th>Proposta / Cliente</th><th>Parc.</th><th>Valor</th><th>Ação</th></tr></thead>
+      <tbody>
+        {% for a in a_receber %}
+        <tr>
+          <td><a href="/proposta/{{ a.proposta_id }}" style="color:var(--verde); font-weight:500;">{{ a.razao_social }}</a><div style="font-size:11px; color:var(--cinza);">{{ a.adm_operadora }}</div></td>
+          <td class="td-mono">{{ a.numero }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(a.valor)|replace('.',',') }}</td>
+          <td>
+            {% if not a.aceite_corretor %}
+            <button class="btn" style="padding:6px 12px; font-size:11.5px;" onclick="darAceite({{ a.id }})">✓ Conferido e De Acordo</button>
+            {% else %}
+            <span class="tag tag-verde">✓ Aceite registrado</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Em análise -->
+  {% if em_analise %}
+  <div class="card" style="margin-bottom:18px;">
+    <div class="card-header">
+      <h3>Em análise</h3>
+      <span class="tag tag-cinza">{{ em_analise|length }} parcelas</span>
+    </div>
+    <table>
+      <thead><tr><th>Proposta / Cliente</th><th>Parc.</th><th>Valor</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for a in em_analise %}
+        <tr>
+          <td><a href="/proposta/{{ a.proposta_id }}" style="color:var(--verde); font-weight:500;">{{ a.razao_social }}</a><div style="font-size:11px; color:var(--cinza);">{{ a.adm_operadora }}</div></td>
+          <td class="td-mono">{{ a.numero }}</td>
+          <td class="td-mono">R$ {{ "%.2f"|format(a.valor)|replace('.',',') }}</td>
+          <td>
+            {% if 'Antecipação' in a.status %}
+            <span class="tag tag-info">{{ a.status }}</span>
+            {% else %}
+            <span class="tag tag-cinza">Em análise</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Histórico -->
+  {% if pagos %}
+  <div class="card">
+    <div class="card-header"><h3>Histórico de recebimentos</h3></div>
+    <table>
+      <thead><tr><th>Cliente</th><th>Parc.</th><th>Valor</th></tr></thead>
+      <tbody>
+        {% for p in pagos %}
+        <tr>
+          <td>{{ p.razao_social }}<div style="font-size:11px; color:var(--cinza);">{{ p.adm_operadora }}</div></td>
+          <td class="td-mono">{{ p.numero }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(p.valor)|replace('.',',') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty" style="padding:30px;">Nenhum pagamento recebido ainda.</div>
+  {% endif %}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function darAceite(id) {
+  if (!confirm('Confirma que o valor está correto e de acordo com o combinado?')) return;
+  try {
+    const res = await fetch(`/parcela/${id}/aceite`, { method: 'POST' });
+    if ((await res.json()).ok) { toast('Aceite registrado!', 'ok'); setTimeout(() => location.reload(), 800); }
+  } catch(e) { toast('Erro', 'err'); }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,147 @@
+{% extends 'base.html' %}
+{% block title %}Repasses ao Corretor{% endblock %}
+
+{% block head %}
+<style>
+.sel-op { width:100%; max-width:420px; padding:11px 14px; margin-bottom:18px; font-size:14px; }
+.rep-bloco { margin-bottom:16px; }
+.rep-head { display:flex; align-items:center; gap:10px; padding:14px 20px; }
+.rep-head h3 { font-family:'Sora',sans-serif; font-size:15px; color:#fff; }
+.meta-tag { font-size:10px; padding:2px 9px; border-radius:5px; background:rgba(139,92,246,.15); color:#b79bf5; font-weight:600; }
+.taxa-tag { font-size:10px; padding:2px 9px; border-radius:5px; background:rgba(250,204,21,.12); color:var(--am); font-weight:600; }
+.rep-grid { padding:6px 20px 18px; display:grid; gap:10px; }
+.rep-line { display:grid; grid-template-columns:80px 110px 1fr auto; gap:12px; align-items:center; padding:10px 0; border-bottom:1px solid var(--borda); }
+.rep-line:last-child { border-bottom:none; }
+.niv-badge { font-size:10px; color:#7baefb; font-weight:700; background:rgba(59,130,246,.12); padding:3px 8px; border-radius:5px; text-align:center; }
+.inp-tot { width:90px; padding:7px; text-align:center; font-family:'Sora',sans-serif; }
+.inp-regua { width:100%; padding:7px 10px; font-family:monospace; font-size:12.5px; }
+.lbl-mini { font-size:10px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.4px; margin-bottom:3px; }
+.taxa-toggle { font-size:10px; padding:4px 9px; border-radius:6px; cursor:pointer; user-select:none; background:var(--panel-3); color:var(--cinza); white-space:nowrap; }
+.taxa-toggle.on { background:rgba(250,204,21,.15); color:var(--am); }
+.plano-tabs { display:flex; gap:8px; margin-bottom:16px; }
+.plano-tab { padding:8px 18px; border-radius:9px; background:var(--panel-2); border:1px solid var(--borda); color:var(--cinza); cursor:pointer; font-size:13px; font-weight:500; }
+.plano-tab.active { background:rgba(31,216,164,.12); border-color:rgba(31,216,164,.4); color:var(--teal); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Repasses ao Corretor</h1>
+    <div class="sub">Quanto o corretor recebe, em nº de mensalidades, por operadora × modelo × nível</div>
+  </div>
+  <div><button class="btn" onclick="salvarTudo()">Salvar alterações</button></div>
+</div>
+
+<div class="page" style="max-width:880px;">
+
+  <div class="card" style="background:linear-gradient(135deg,rgba(139,92,246,.07),rgba(59,130,246,.06)); border-color:var(--borda-2); margin-bottom:18px;">
+    <div style="padding:16px 22px; font-size:13px; color:var(--cinza); line-height:1.7;">
+      Valores em <strong style="color:#fff;">número de mensalidades</strong>. O <strong>total</strong> é quanto o corretor recebe; a <strong>régua</strong> é o escalonamento por parcela (ex <code style="color:var(--teal);">0.7;0.25;0.25</code>). Dados vindos da sua planilha — edite o que precisar.<br>
+      <strong style="color:#b79bf5;">Sem Fixo + Com Leads</strong> tem meta (N1/N2/N3). <strong style="color:var(--am);">Adesão</strong> em "Taxa" = ato da venda, custo zero.
+    </div>
+  </div>
+
+  <select class="sel-op" id="sel-op" onchange="carregar()">
+    <option value="">— Selecione a operadora —</option>
+    {% for o in operadoras %}
+    <option value="{{ o.operadora }}|{{ o.obs }}">{{ o.operadora }}{% if o.obs %} · {{ o.obs }}{% endif %}</option>
+    {% endfor %}
+  </select>
+
+  <div class="plano-tabs" id="plano-tabs" style="display:none;">
+    <div class="plano-tab active" data-plano="PME" onclick="trocarPlano('PME')">PME</div>
+    <div class="plano-tab" data-plano="PF" onclick="trocarPlano('PF')">PF</div>
+    <div class="plano-tab" data-plano="ADESAO" onclick="trocarPlano('ADESAO')">Adesão</div>
+  </div>
+
+  <div id="conteudo"></div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const REP_MAP = {{ rep_map|tojson }};
+const NIVEIS = {{ niveis|tojson }};
+const MODELOS = [
+  {cod:'com_fixo_lead', nome:'Com Fixo + Com Leads', meta:false},
+  {cod:'com_lead', nome:'Sem Fixo + Com Leads', meta:true},
+  {cod:'sem_lead_sem_fixo', nome:'Sem Fixo + Sem Leads', meta:false},
+];
+let planoAtual = 'PME';
+
+function carregar() {
+  const v = document.getElementById('sel-op').value;
+  document.getElementById('plano-tabs').style.display = v ? 'flex' : 'none';
+  if (!v) { document.getElementById('conteudo').innerHTML = ''; return; }
+  render();
+}
+function trocarPlano(p) {
+  planoAtual = p;
+  document.querySelectorAll('.plano-tab').forEach(t => t.classList.toggle('active', t.dataset.plano===p));
+  render();
+}
+function getRep(op, obs, plano, modelo, nivel) {
+  return REP_MAP[`${op}|${obs}|${plano}|${modelo}|${nivel}`] || null;
+}
+function linha(op, obs, modelo, nivel, label) {
+  const r = getRep(op, obs, planoAtual, modelo, nivel);
+  const taxa = r && r.taxa;
+  const tot = r ? r.total : '';
+  const reg = r && r.regua ? r.regua : '';
+  return `<div class="rep-line" data-modelo="${modelo}" data-nivel="${nivel}">
+    <div>${label ? `<span class="niv-badge">${label}</span>` : '<span style="color:var(--cinza-2);font-size:12px;">único</span>'}</div>
+    <div><div class="lbl-mini">Total</div><input type="number" step="0.1" class="inp-tot" value="${tot}"></div>
+    <div><div class="lbl-mini">Régua (parcelas)</div><input type="text" class="inp-regua" value="${reg}" placeholder="ex: 0.7;0.25;0.25"></div>
+    <div class="taxa-toggle ${taxa?'on':''}" onclick="toggleTaxa(this)" title="Marque se também há taxa de adesão paga pelo cliente no ato">${taxa?'+ Taxa ✓':'+ taxa adesão'}</div>
+  </div>`;
+}
+function render() {
+  const [op, obs] = document.getElementById('sel-op').value.split('|');
+  let html = '';
+  for (const m of MODELOS) {
+    html += `<div class="card rep-bloco"><div class="rep-head"><h3>${m.nome}</h3>
+      <span style="font-size:11px;color:var(--cinza-2);">${m.cod}</span>
+      ${m.meta?'<span class="meta-tag">COM META</span>':''}</div><div class="rep-grid">`;
+    if (m.meta) {
+      for (const n of NIVEIS) {
+        const faixa = n.faixa_max ? `R$ ${Math.round(n.faixa_min)}–${Math.round(n.faixa_max)}` : `R$ ${Math.round(n.faixa_min)}+`;
+        html += linha(op, obs, m.cod, n.codigo, n.label + ' · ' + faixa);
+      }
+    } else {
+      html += linha(op, obs, m.cod, '', '');
+    }
+    html += `</div></div>`;
+  }
+  document.getElementById('conteudo').innerHTML = html;
+}
+function toggleTaxa(el) {
+  el.classList.toggle('on');
+  const on = el.classList.contains('on');
+  el.textContent = on ? '+ Taxa ✓' : '+ taxa adesão';
+}
+async function salvarTudo() {
+  const sel = document.getElementById('sel-op').value;
+  if (!sel) { toast('Selecione uma operadora', 'err'); return; }
+  const [op, obs] = sel.split('|');
+  const repasses = [];
+  document.querySelectorAll('.rep-line').forEach(line => {
+    const taxa = line.querySelector('.taxa-toggle').classList.contains('on') ? 1 : 0;
+    const tot = line.querySelector('.inp-tot').value;
+    const reg = line.querySelector('.inp-regua').value.trim();
+    if (!taxa && !tot && !reg) return;
+    repasses.push({operadora:op, obs:obs, plano:planoAtual, modelo:line.dataset.modelo,
+      nivel:line.dataset.nivel, total:tot||0, regua:reg, taxa:taxa});
+  });
+  try {
+    const r = await fetch('/repasse/salvar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({repasses})});
+    if ((await r.json()).ok) {
+      toast('Repasses salvos', 'ok');
+      // atualiza cache local
+      repasses.forEach(x => { REP_MAP[`${x.operadora}|${x.obs}|${x.plano}|${x.modelo}|${x.nivel}`] = {total:parseFloat(x.total)||0, regua:x.regua, taxa:x.taxa}; });
+    } else toast('Erro', 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+</script>
+{% endblock %}

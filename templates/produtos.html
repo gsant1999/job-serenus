@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block title %}Produtos / Planos{% endblock %}
+{% block head %}
+<style>
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{text-align:left;font-size:10.5px;color:var(--cinza-2);text-transform:uppercase;letter-spacing:.4px;padding:10px 12px;border-bottom:1px solid var(--borda-2)}
+.tbl td{padding:11px 12px;border-bottom:1px solid var(--borda);font-size:13px}
+.add-row{display:grid;grid-template-columns:1fr 1.4fr 1fr 1fr 1fr auto;gap:10px;align-items:end;margin-bottom:16px;padding:16px;background:var(--panel-2);border:1px solid var(--borda);border-radius:12px}
+</style>
+{% endblock %}
+{% block content %}
+<div class="topbar"><div><h1>Produtos / Planos</h1><div class="sub">Catálogo de planos por operadora — usado nas propostas</div></div></div>
+<div class="page" style="max-width:980px;">
+  <div class="add-row">
+    <div class="campo"><label>Operadora</label>
+      <input list="ops" id="p-op" placeholder="Operadora">
+      <datalist id="ops">{% for o in operadoras %}<option value="{{ o }}">{% endfor %}</datalist>
+    </div>
+    <div class="campo"><label>Nome do plano</label><input id="p-nome" placeholder="Ex: Santa Tereza Regional"></div>
+    <div class="campo"><label>Tipo</label><select id="p-tipo"><option value="PME">PME</option><option value="PF">PF</option><option value="ADESAO">Adesão</option></select></div>
+    <div class="campo"><label>Acomodação</label><input id="p-acom" placeholder="Enfermaria/Apto"></div>
+    <div class="campo"><label>Coparticipação</label><input id="p-copar" placeholder="Com/Sem"></div>
+    <button class="btn" onclick="salvar()">Adicionar</button>
+  </div>
+  <div class="card">
+    <div class="card-header"><h3>Planos cadastrados</h3><span class="tag tag-info">{{ produtos|length }}</span></div>
+    <table class="tbl">
+      <thead><tr><th>Operadora</th><th>Plano</th><th>Tipo</th><th>Acomodação</th><th>Copart.</th><th></th></tr></thead>
+      <tbody>
+        {% for p in produtos %}
+        <tr><td><strong>{{ p.operadora }}</strong></td><td>{{ p.nome }}</td><td>{{ p.tipo_plano }}</td><td>{{ p.acomodacao or '—' }}</td><td>{{ p.coparticipacao or '—' }}</td>
+          <td><button class="btn-ghost" style="color:var(--rosa);" onclick="excluir({{ p.id }})">×</button></td></tr>
+        {% else %}<tr><td colspan="6" style="color:var(--cinza-2);">Nenhum plano. Cadastre acima os planos de cada operadora.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function salvar(){
+  const b={operadora:v('p-op'),nome:v('p-nome'),tipo_plano:v('p-tipo'),acomodacao:v('p-acom'),coparticipacao:v('p-copar')};
+  if(!b.operadora||!b.nome){toast('Operadora e nome','err');return;}
+  const r=await fetch('/produto/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  if((await r.json()).ok){toast('Plano salvo','ok');setTimeout(()=>location.reload(),500);}
+}
+function v(id){return document.getElementById(id).value;}
+async function excluir(id){if(!confirm('Excluir plano?'))return;
+  const r=await fetch('/produto/excluir/'+id,{method:'POST'});
+  if((await r.json()).ok){toast('Excluído','ok');setTimeout(()=>location.reload(),400);}}
+</script>
+{% endblock %}

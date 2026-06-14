@@ -1,0 +1,565 @@
+{% extends 'base.html' %}
+{% block title %}Proposta #{{ p.id }}{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Proposta #{{ p.id }}</h1>
+    <div class="sub">{{ p.criado_em[:10] if p.criado_em else '' }}</div>
+  </div>
+  <div><a href="/propostas" class="btn-outline">Voltar</a></div>
+</div>
+
+<div class="page" style="max-width:920px;">
+
+  <!-- Etiquetas CRM -->
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header"><h3>Etiquetas (CRM)</h3>{% if session.perfil == 'admin' %}<button class="btn-ghost" style="font-size:12px;" onclick="novaEtiqueta()">+ Nova</button>{% endif %}</div>
+    <div style="padding:14px 22px; display:flex; gap:8px; flex-wrap:wrap;" id="chips-etiquetas">
+      <span style="color:var(--cinza-2); font-size:13px;">Carregando...</span>
+    </div>
+  </div>
+
+  <!-- Fase do processo -->
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header"><h3>Fase do processo</h3>{% if session.perfil == 'admin' %}<button class="btn-ghost" style="font-size:12px;" onclick="document.getElementById('hist-box').classList.toggle('hidden')">Ver histórico</button>{% endif %}</div>
+    <div style="padding:14px 22px;">
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <span style="font-weight:600; color:var(--teal);" id="fase-atual">{{ p.fase or 'Proposta cadastrada' }}</span>
+        {% if session.perfil == 'admin' %}
+        <select id="sel-fase" style="max-width:280px; font-size:12px; padding:7px;">
+          <option>Proposta cadastrada</option><option>Em análise na operadora</option>
+          <option>Aprovada / aguardando comprovante</option><option>Comprovante anexado</option>
+          <option>Entrada confirmada</option><option>Finalizada</option>
+        </select>
+        <button class="btn" style="font-size:12px; padding:7px 14px;" onclick="mudarFase()">Avançar fase</button>
+        {% endif %}
+      </div>
+      <div id="aviso-fase" style="margin-top:10px; font-size:12.5px; color:var(--am); display:none;"></div>
+      <div id="hist-box" class="hidden" style="margin-top:16px; border-top:1px solid var(--borda); padding-top:14px;">
+        <div style="font-size:11px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px;">Linha do tempo de alterações</div>
+        <div id="timeline"><span style="color:var(--cinza-2); font-size:13px;">Carregando...</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Header da proposta -->
+  <div class="card" style="background:linear-gradient(135deg,#101720,#0f1f33 50%,#1a1330); border:1px solid var(--borda-2)!important; border:none; margin-bottom:16px;">
+    <div style="padding:28px 32px; display:flex; justify-content:space-between; align-items:flex-start; gap:20px; flex-wrap:wrap;">
+      <div>
+        <h2 style="font-family:'Sora',sans-serif; font-size:22px; color:#fff; font-weight:600;">{{ p.razao_social }}</h2>
+        <div style="margin-top:10px; display:flex; gap:7px; flex-wrap:wrap;">
+          <span style="background:rgba(255,255,255,.15); color:#fff; padding:3px 10px; border-radius:5px; font-size:12px;">{{ p.modalidade }}</span>
+          <span style="background:var(--grad-quente); color:#1a1205; padding:3px 10px; border-radius:5px; font-size:12px; font-weight:600;">{{ p.tipo_contrato }}</span>
+          <span style="background:rgba(255,255,255,.1); color:#fff; padding:3px 10px; border-radius:5px; font-size:12px;">{{ p.acomodacao }}</span>
+          <span style="background:rgba(255,255,255,.1); color:#fff; padding:3px 10px; border-radius:5px; font-size:12px;">{{ p.fator_moderador }}</span>
+        </div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-family:'Sora',sans-serif; font-size:28px; color:#facc15; font-weight:600;">R$ {{ "%.2f"|format(p.valor)|replace('.',',') }}</div>
+        <div style="font-size:11px; color:rgba(255,255,255,.6);">mensalidade · {{ p.total_vidas }} vida{{ 's' if p.total_vidas != 1 else '' }}</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Comissões -->
+  {% if session.perfil == 'admin' %}
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header"><h3>Comissões</h3></div>
+    <div class="card-body" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
+      <div style="background:rgba(59,130,246,.12); padding:14px; border-radius:8px; text-align:center;">
+        <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Bruto corretora</div>
+        <div style="font-family:'Sora',sans-serif; font-size:20px; color:var(--info); margin-top:5px;">R$ {{ "%.2f"|format(p.comissao_total_corretora or 0)|replace('.',',') }}</div>
+      </div>
+      <div style="background:rgba(244,63,94,.1); padding:14px; border-radius:8px; text-align:center;">
+        <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Repasse consultor</div>
+        <div style="font-family:'Sora',sans-serif; font-size:20px; color:var(--erro); margin-top:5px;">R$ {{ "%.2f"|format(p.comissao_consultor or 0)|replace('.',',') }}</div>
+        <div style="font-size:10px; color:var(--cinza); margin-top:3px;">{{ regime.nome if regime else (p.regime_aplicado or '—') }}</div>
+      </div>
+      <div style="background:var(--verde-soft); padding:14px; border-radius:8px; text-align:center;">
+        <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Líquido Serenus</div>
+        <div style="font-family:'Sora',sans-serif; font-size:20px; color:var(--verde); margin-top:5px;">R$ {{ "%.2f"|format(p.comissao_corretora_liquida or 0)|replace('.',',') }}</div>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header"><h3>Minha comissão</h3></div>
+    <div class="card-body">
+      <div style="background:var(--verde-soft); padding:16px 20px; border-radius:8px; max-width:280px;">
+        <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Total a receber</div>
+        <div style="font-family:'Sora',sans-serif; font-size:24px; color:var(--verde); margin-top:5px;">R$ {{ "%.2f"|format(p.comissao_consultor or 0)|replace('.',',') }}</div>
+        <div style="font-size:11px; color:var(--cinza); margin-top:3px;">{{ regime.nome if regime else (p.regime_aplicado or '—') }}</div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Cronograma e Fluxo de Caixa -->
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header">
+      <h3>Cronograma de comissão · Fluxo de Caixa</h3>
+      <span class="tag tag-info">{{ p.num_parcelas }} parcela{{ 's' if p.num_parcelas != 1 else '' }}</span>
+    </div>
+
+    {% if parcelas %}
+    <table>
+      <thead>
+        <tr>
+          <th>Parc.</th>
+          <th>Data prevista</th>
+          <th>Valor</th>
+          <th>Fatia</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for parc in parcelas %}
+        <tr id="row-parc-{{ parc.id }}">
+          <td><strong>{{ parc.numero }}/{{ p.num_parcelas }}</strong></td>
+          <td>{{ parc.data_prevista }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(parc.valor)|replace('.',',') }}</td>
+          <td><span class="tag tag-cinza">{{ parc.percentual }}%</span></td>
+          <td>
+
+            {# ─── VISÃO ADMIN: ESTEIRA DO GESTOR ─── #}
+            {% if session.perfil == 'admin' %}
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                {% set st = parc.status %}
+                <span class="tag {{ 'tag-cinza' if st=='Pendente de receber' else 'tag-info' if 'Antecip' in st else 'tag-am' if st=='Recebido e não repassado' else 'tag-verde' if st in ['Liberado para o corretor','Pago ao corretor'] else 'tag-cinza' }}" style="font-size:10.5px;">{{ st }}</span>
+
+                {% if st == 'Pendente de receber' %}
+                <button class="btn" style="padding:7px 13px; font-size:12px;" onclick="acao({{ parc.id }},'receber')">Operadora pagou → Recebido</button>
+                {% elif st == 'Antecipação - Aguardando ADM' %}
+                <div style="background:rgba(244,63,94,.1); border:1px solid rgba(244,63,94,.3); padding:9px 11px; border-radius:7px; font-size:12px;">
+                  <strong style="color:#fb8497;">Comprovante do cliente enviado</strong>
+                  {% if parc.comprovante_antecipacao %}<br><a href="/anexos/{{ parc.comprovante_antecipacao }}" target="_blank" style="color:#fb8497; font-size:11px;">Ver comprovante →</a>{% endif %}
+                  <br><button class="btn" style="background:linear-gradient(135deg,#d3325e,#e0742c); padding:6px 12px; font-size:11.5px; margin-top:7px;" onclick="aprovarAntecip({{ parc.id }})">Pedir 48h à operadora</button>
+                </div>
+                {% elif st == 'Antecipação Solicitada à Operadora' %}
+                <button class="btn" style="padding:7px 13px; font-size:12px;" onclick="acao({{ parc.id }},'receber')">Operadora pagou → Recebido</button>
+                {% elif st == 'Recebido e não repassado' %}
+                <button class="btn" style="padding:8px 13px; font-size:12px;" onclick="acao({{ parc.id }},'liberar')">✓ Conferir e Liberar p/ corretor</button>
+                <div style="font-size:10.5px; color:var(--cinza-2);">Confirmação do gestor — libera no lote de quinta</div>
+                {% elif st == 'Liberado para o corretor' %}
+                  {% if parc.aceite_corretor %}
+                  <button class="btn" style="padding:8px 13px; font-size:12px;" onclick="acao({{ parc.id }},'pagar')">Confirmar pagamento (sexta)</button>
+                  <span class="tag tag-verde" style="font-size:10.5px;">✓ Corretor de acordo · {{ parc.data_aceite[:10] if parc.data_aceite else '' }}</span>
+                  {% else %}
+                  <span style="font-size:11px; color:var(--am);">Aguardando aceite do corretor</span>
+                  {% endif %}
+                {% elif st == 'Pago ao corretor' %}
+                <span style="font-size:11px; color:var(--teal);">✓ Pago{% if parc.data_pagamento %} · {{ parc.data_pagamento[:10] }}{% endif %}</span>
+                {% endif %}
+
+                {% if parc.confirmado_gestor and st != 'Pendente de receber' %}
+                <span style="font-size:10px; color:var(--cinza-2);">Gestor liberou · {{ parc.data_confirmacao_gestor[:10] if parc.data_confirmacao_gestor else '' }}</span>
+                {% endif %}
+
+                <details style="margin-top:2px;">
+                  <summary style="font-size:10.5px; color:var(--cinza-2); cursor:pointer;">Alterar manualmente</summary>
+                  <select onchange="mudarStatus({{ parc.id }}, this.value)" style="font-size:11px; padding:5px 7px; border:1px solid var(--borda-2); border-radius:6px; background:var(--panel-2); color:var(--texto); cursor:pointer; margin-top:5px;">
+                    {% for s in ['Pendente de receber','Antecipação - Aguardando ADM','Antecipação Solicitada à Operadora','Recebido e não repassado','Liberado para o corretor','Pago ao corretor'] %}
+                    <option value="{{ s }}" {% if parc.status == s %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                  </select>
+                </details>
+              </div>
+
+            {# ─── VISÃO CONSULTOR ─── #}
+            {% else %}
+              {% if parc.status == 'Pago ao corretor' %}
+                <span class="tag tag-verde">Pago</span>
+
+              {% elif parc.status == 'Liberado para o corretor' %}
+                <span class="tag tag-am">A receber · Lote de sexta</span>
+                {% if not parc.aceite_corretor %}
+                <div style="margin-top:7px;">
+                  <button class="btn" style="background:var(--verde); padding:7px 13px; font-size:12px;"
+                    onclick="darAceite({{ parc.id }})">✓ Conferido e De Acordo</button>
+                </div>
+                {% else %}
+                <div style="margin-top:5px;"><span class="tag tag-verde" style="font-size:11px;">✓ Aceite registrado · aguardando pagamento</span></div>
+                {% endif %}
+
+              {% elif parc.status in ['Antecipação - Aguardando ADM', 'Antecipação Solicitada à Operadora'] %}
+                <span class="tag tag-info">Antecipação em análise</span>
+                <div style="font-size:11px; color:var(--cinza); margin-top:4px;">Comprovante enviado · aguardando operadora</div>
+
+              {% else %}
+                <span class="tag tag-cinza">Em análise</span>
+                {% if parc.numero == 1 and not parc.comprovante_antecipacao %}
+                <div style="margin-top:7px;">
+                  <label style="display:inline-flex; align-items:center; gap:5px; cursor:pointer;
+                    color:var(--info); font-size:11.5px; font-weight:500; text-decoration:underline;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    Subir comprovante · Pedir antecipação 48h
+                    <input type="file" style="display:none;" accept=".pdf,.jpg,.jpeg,.png"
+                      onchange="enviarComprovante({{ parc.id }}, this)">
+                  </label>
+                  <div style="font-size:10.5px; color:var(--cinza); margin-top:3px;">Somente para a 1ª parcela · cliente já pagou</div>
+                </div>
+                {% elif parc.numero == 1 and parc.comprovante_antecipacao %}
+                <div style="margin-top:5px;"><span class="tag tag-info">Comprovante enviado</span></div>
+                {% endif %}
+              {% endif %}
+            {% endif %}
+
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">Nenhuma parcela gerada para esta proposta.</div>
+    {% endif %}
+  </div>
+
+  <!-- Dados da proposta -->
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header">
+      <h3>Dados da proposta</h3>
+      {% if session.perfil == 'admin' %}<div style="display:flex; gap:8px; flex-wrap:wrap;"><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEdicao()">Editar dados</button><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEmailAffinity()">E-mail Affinity</button><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirConsultor()">Editar consultor</button><button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.3); color:var(--rosa);" onclick="abrirEstorno()">Estornar</button></div>{% endif %}
+    </div>
+    <div class="card-body" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      {% for label, valor in [
+        ('Consultor', p.consultor),
+        ('Quem subiu a venda', p.quem_subiu),
+        ('Supervisora', p.supervisora_nome),
+        ('Nº Proposta', p.numero_proposta or 'Não possui'),
+        ('Vigência', p.vigencia),
+        ('Tipo de pessoa', p.tipo_pessoa),
+        ('CPF do titular', p.cpf_titular),
+        ('CNPJ', p.cnpj),
+        ('Operadora', p.adm_operadora),
+        ('Produto', p.produto),
+        ('Vencimento 1ª', p.vencimento_1),
+        ('Previsão 1ª', p.previsao_1),
+        ('Status da venda', p.venda_status),
+      ] %}
+      {% if valor %}
+      <div>
+        <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">{{ label }}</div>
+        <div style="font-size:13px;">{{ valor }}</div>
+      </div>
+      {% endif %}
+      {% endfor %}
+      {% for e in extras %}
+      <div>
+        <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">{{ e.label }}</div>
+        <div style="font-size:13px;">{{ e.valor }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Documentos -->
+  {% if p.contrato_arquivo or p.comprovante_boleto or p.anexos and p.anexos != '[]' %}
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header"><h3>Documentos</h3></div>
+    <div class="card-body" style="display:flex; gap:12px; flex-wrap:wrap;">
+      {% if p.contrato_arquivo %}
+      <a href="/anexos/{{ p.contrato_arquivo }}" target="_blank" class="btn-outline" style="font-size:12.5px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Contrato assinado
+      </a>
+      {% endif %}
+      {% if p.comprovante_boleto %}
+      <a href="/anexos/{{ p.comprovante_boleto }}" target="_blank" class="btn-outline" style="font-size:12.5px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+        Comprovante 1º boleto
+      </a>
+      {% endif %}
+      {% if p.anexos and p.anexos != '[]' %}
+        {% for arq in p.anexos|from_json %}
+        <a href="/anexos/{{ arq }}" target="_blank" class="btn-outline" style="font-size:12.5px;">Documento {{ loop.index }}</a>
+        {% endfor %}
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Contatos -->
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header"><h3>Contatos</h3></div>
+    <div class="card-body" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <div>
+        <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">Resp. contrato</div>
+        <div style="font-size:13px;">{{ p.resp_contrato }}<br>
+          <span style="color:var(--cinza); font-size:12px;">{{ p.email_resp_contrato }} · {{ p.tel_resp_contrato }}</span></div>
+      </div>
+      <div>
+        <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">Resp. negociação</div>
+        <div style="font-size:13px;">{{ p.resp_negociacao }}<br>
+          <span style="color:var(--cinza); font-size:12px;">{{ p.email_resp_negociacao }} · {{ p.tel_resp_negociacao }}</span></div>
+      </div>
+    </div>
+  </div>
+
+  {% if p.observacoes %}
+  <div class="card">
+    <div class="card-header"><h3>Observações</h3></div>
+    <div class="card-body" style="font-size:13px; line-height:1.7; white-space:pre-line;">{{ p.observacoes }}</div>
+  </div>
+  {% endif %}
+
+</div>
+
+<!-- Modal editar consultor -->
+<div class="modal-overlay" id="modal-consultor">
+  <div class="modal" style="max-width:480px;">
+    <h3>Remanejar consultor</h3>
+    <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">
+      A comissão será recalculada pelo regime do novo consultor (produção do mês dele + esta venda). Parcelas já em fluxo são mantidas.
+    </p>
+    <div class="campo" style="margin-bottom:18px;">
+      <label>Novo consultor</label>
+      <select id="sel-consultor"></select>
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn" style="flex:1;" onclick="salvarConsultor()">Remanejar e recalcular</button>
+      <button class="btn-outline" onclick="fecharConsultor()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal estorno -->
+<div class="modal-overlay" id="modal-estorno">
+  <div class="modal" style="max-width:460px;">
+    <h3>Estornar comissão</h3>
+    <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">
+      O sistema aplica a regra da operadora ({{ p.adm_operadora }}): % que estorna e até qual mensalidade. Informe em qual mensalidade o cliente parou de pagar.
+    </p>
+    <div class="campo" style="margin-bottom:18px;">
+      <label>Cliente parou de pagar na mensalidade nº</label>
+      <input type="number" id="mens-cancelou" min="1" value="1">
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn" style="flex:1; background:var(--rosa);" onclick="confirmarEstorno()">Aplicar estorno</button>
+      <button class="btn-outline" onclick="document.getElementById('modal-estorno').classList.remove('open')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal e-mail Affinity -->
+<div class="modal-overlay" id="modal-email">
+  <div class="modal" style="max-width:640px;">
+    <h3>E-mail para a Affinity</h3>
+    <div class="campo" style="margin-bottom:10px;">
+      <label>Para</label>
+      <input type="text" id="em-dest" style="font-size:12px;">
+    </div>
+    <div class="campo" style="margin-bottom:10px;">
+      <label>Assunto</label>
+      <input type="text" id="em-assunto">
+    </div>
+    <div class="campo" style="margin-bottom:14px;">
+      <label>Mensagem (edite o que precisar antes de enviar)</label>
+      <textarea id="em-corpo" style="min-height:280px; font-size:13px; line-height:1.5;"></textarea>
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn" style="flex:1;" onclick="copiarEmail()">Copiar tudo</button>
+      <button class="btn" style="flex:1;" onclick="abrirNoEmail()">Abrir no e-mail</button>
+      <button class="btn-outline" onclick="document.getElementById('modal-email').classList.remove('open')">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal editar dados -->
+<div class="modal-overlay" id="modal-edicao">
+  <div class="modal" style="max-width:560px;">
+    <h3>Editar dados da proposta</h3>
+    <p style="font-size:12px; color:var(--cinza); margin-bottom:14px;">Toda alteração fica registrada na linha do tempo.</p>
+    <div class="form-row form-row-2" style="margin-bottom:10px;">
+      <div class="campo"><label>Razão social</label><input id="ed-razao_social"></div>
+      <div class="campo"><label>Operadora</label><input id="ed-adm_operadora"></div>
+    </div>
+    <div class="form-row form-row-2" style="margin-bottom:10px;">
+      <div class="campo"><label>Produto</label><input id="ed-produto"></div>
+      <div class="campo"><label>Valor (R$)</label><input id="ed-valor"></div>
+    </div>
+    <div class="form-row form-row-2" style="margin-bottom:10px;">
+      <div class="campo"><label>Vigência</label><input id="ed-vigencia" type="date"></div>
+      <div class="campo"><label>Dia vencimento</label><input id="ed-dia_vencimento" type="number" min="1" max="28"></div>
+    </div>
+    <div class="form-row form-row-2" style="margin-bottom:10px;">
+      <div class="campo"><label>Coparticipação</label><input id="ed-fator_moderador"></div>
+      <div class="campo"><label>Vidas</label><input id="ed-total_vidas" type="number"></div>
+    </div>
+    <div class="campo" style="margin-bottom:14px;"><label>Observações</label><textarea id="ed-observacoes" style="min-height:70px;"></textarea></div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn" style="flex:1;" onclick="salvarEdicao()">Salvar alterações</button>
+      <button class="btn-outline" onclick="document.getElementById('modal-edicao').classList.remove('open')">Cancelar</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PROP_ID = {{ p.id }};
+let ETIQUETAS_MARCADAS = [];
+async function carregarEtiquetas() {
+  const r = await fetch(`/api/etiquetas?proposta_id=${PROP_ID}`);
+  const d = await r.json();
+  ETIQUETAS_MARCADAS = d.marcadas || [];
+  const c = document.getElementById('chips-etiquetas');
+  c.innerHTML = d.todas.map(e => {
+    const on = ETIQUETAS_MARCADAS.includes(e.id);
+    return `<span onclick="toggleEtiqueta(${e.id})" style="cursor:pointer; user-select:none; font-size:12px; font-weight:600; padding:5px 12px; border-radius:20px; border:1.5px solid ${e.cor}; background:${on?e.cor:'transparent'}; color:${on?'#0a0e14':e.cor};">${e.nome}${on?' ✓':''}</span>`;
+  }).join('') || '<span style="color:var(--cinza-2); font-size:13px;">Nenhuma etiqueta.</span>';
+}
+async function toggleEtiqueta(id) {
+  const i = ETIQUETAS_MARCADAS.indexOf(id);
+  if (i>=0) ETIQUETAS_MARCADAS.splice(i,1); else ETIQUETAS_MARCADAS.push(id);
+  await fetch(`/proposta/${PROP_ID}/etiquetas`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({etiquetas:ETIQUETAS_MARCADAS})});
+  carregarEtiquetas();
+}
+async function novaEtiqueta() {
+  const nome = prompt('Nome da etiqueta:');
+  if (!nome) return;
+  const cor = prompt('Cor (hex):', '#1fd8a4') || '#1fd8a4';
+  await fetch('/etiqueta/criar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({nome,cor})});
+  carregarEtiquetas();
+}
+carregarEtiquetas();
+
+// ─── Fase + Timeline + Edição ───
+const P_DADOS = {
+  razao_social: {{ (p.razao_social or '')|tojson }}, adm_operadora: {{ (p.adm_operadora or '')|tojson }},
+  produto: {{ (p.produto or '')|tojson }}, valor: {{ (p.valor or 0)|tojson }},
+  vigencia: {{ (p.vigencia or '')|tojson }}, dia_vencimento: {{ (p.dia_vencimento or '')|tojson }},
+  fator_moderador: {{ (p.fator_moderador or '')|tojson }}, total_vidas: {{ (p.total_vidas or '')|tojson }},
+  observacoes: {{ (p.observacoes or '')|tojson }}
+};
+async function mudarFase() {
+  const fase = document.getElementById('sel-fase').value;
+  const r = await fetch(`/proposta/${PROP_ID}/fase`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({fase})});
+  const d = await r.json();
+  if (d.ok) {
+    document.getElementById('fase-atual').textContent = fase;
+    if (d.aviso) { const a=document.getElementById('aviso-fase'); a.textContent='⚠ '+d.aviso; a.style.display='block'; }
+    toast('Fase atualizada', 'ok'); carregarTimeline();
+  }
+}
+async function carregarTimeline() {
+  const r = await fetch(`/proposta/${PROP_ID}/historico`);
+  const h = await r.json();
+  const c = document.getElementById('timeline'); if (!c) return;
+  if (!h.length) { c.innerHTML = '<span style="color:var(--cinza-2); font-size:13px;">Sem alterações ainda.</span>'; return; }
+  c.innerHTML = h.map(x=>`<div style="display:flex; gap:10px; padding:8px 0; border-bottom:1px solid var(--borda); font-size:12.5px;">
+    <span style="color:var(--cinza-2); white-space:nowrap;">${(x.criado_em||'').slice(0,16)}</span>
+    <span><strong>${x.campo}</strong>: <span style="color:var(--cinza);">${x.valor_antes}</span> → <span style="color:var(--teal);">${x.valor_depois}</span> <span style="color:var(--cinza-2);">(${x.usuario_nome})</span></span>
+  </div>`).join('');
+}
+carregarTimeline();
+function abrirEdicao() {
+  for (const k in P_DADOS) { const el = document.getElementById('ed-'+k); if (el) el.value = P_DADOS[k]; }
+  document.getElementById('modal-edicao').classList.add('open');
+}
+async function salvarEdicao() {
+  const body = {};
+  for (const k in P_DADOS) { const el = document.getElementById('ed-'+k); if (el) body[k] = el.value; }
+  const r = await fetch(`/proposta/${PROP_ID}/editar`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const d = await r.json();
+  if (d.ok) { toast(d.mudou.length ? ('Alterado: '+d.mudou.join(', ')) : 'Nada mudou', 'ok'); setTimeout(()=>location.reload(), 1200); }
+}
+async function abrirConsultor() {
+  let modal = document.getElementById('modal-consultor');
+  const res = await fetch('/api/consultores');
+  const lista = await res.json();
+  const opts = lista.map(c => `<option value="${c.id}">${c.nome} — ${c.regime}</option>`).join('');
+  modal.querySelector('#sel-consultor').innerHTML = opts;
+  modal.classList.add('open');
+}
+function fecharConsultor() { document.getElementById('modal-consultor').classList.remove('open'); }
+function abrirEstorno() { document.getElementById('modal-estorno').classList.add('open'); }
+async function abrirEmailAffinity() {
+  const res = await fetch(`/proposta/${PROP_ID}/email-affinity`);
+  const d = await res.json();
+  if (!d.ok) { toast('Erro ao gerar', 'err'); return; }
+  document.getElementById('em-dest').value = d.destinatarios;
+  document.getElementById('em-assunto').value = d.assunto;
+  document.getElementById('em-corpo').value = d.corpo;
+  document.getElementById('modal-email').classList.add('open');
+}
+function copiarEmail() {
+  const txt = `Para: ${document.getElementById('em-dest').value}\nAssunto: ${document.getElementById('em-assunto').value}\n\n${document.getElementById('em-corpo').value}`;
+  navigator.clipboard.writeText(txt).then(()=>toast('E-mail copiado', 'ok'));
+}
+function abrirNoEmail() {
+  const dest = document.getElementById('em-dest').value;
+  const assunto = encodeURIComponent(document.getElementById('em-assunto').value);
+  const corpo = encodeURIComponent(document.getElementById('em-corpo').value);
+  window.location.href = `mailto:${dest}?subject=${assunto}&body=${corpo}`;
+}
+async function confirmarEstorno() {
+  const mens = document.getElementById('mens-cancelou').value;
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/estornar`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mensalidade_cancelou: mens}) });
+    const data = await res.json();
+    if (data.ok) { toast(data.info, data.estorna ? 'err' : 'ok'); setTimeout(()=>location.reload(), 1600); }
+    else toast('Erro', 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+async function salvarConsultor() {
+  const uid = document.getElementById('sel-consultor').value;
+  const fd = new FormData(); fd.append('usuario_id', uid);
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/consultor`, { method:'POST', body:fd });
+    const data = await res.json();
+    if (data.ok) { toast(data.msg || 'Consultor remanejado', 'ok'); setTimeout(()=>location.reload(), 1100); }
+    else toast('Erro: ' + (data.msg||''), 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+
+async function acao(id, tipo) {
+  const msgs = {receber:'Confirmar que a operadora pagou esta parcela?', liberar:'Conferir e liberar esta parcela para o corretor? (confirmação do gestor)', pagar:'Confirmar o pagamento ao corretor?'};
+  if (!confirm(msgs[tipo] || 'Confirmar ação?')) return;
+  const fd = new FormData(); fd.append('acao', tipo);
+  try {
+    const res = await fetch(`/parcela/${id}/acao`, { method:'POST', body:fd });
+    if ((await res.json()).ok) { toast('Atualizado', 'ok'); setTimeout(()=>location.reload(), 700); }
+    else toast('Erro', 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+
+async function mudarStatus(id, status) {
+  const fd = new FormData(); fd.append('status', status);
+  try {
+    const res = await fetch(`/parcela/${id}/status`, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.ok) toast('Status atualizado', 'ok');
+    else toast('Erro: ' + data.msg, 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+
+async function aprovarAntecip(id) {
+  if (!confirm('Confirma que vai solicitar a antecipação de 48h à operadora?')) return;
+  try {
+    const res = await fetch(`/parcela/${id}/aprovar-antecipacao`, { method: 'POST' });
+    if ((await res.json()).ok) { toast('Antecipação solicitada à operadora', 'ok'); setTimeout(() => location.reload(), 800); }
+  } catch(e) { toast('Erro', 'err'); }
+}
+
+async function enviarComprovante(id, input) {
+  if (!input.files[0]) return;
+  const fd = new FormData(); fd.append('comprovante', input.files[0]);
+  toast('Enviando comprovante...', 'ok');
+  try {
+    const res = await fetch(`/parcela/${id}/antecipar`, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.ok) { toast('Comprovante enviado! Aguardando aprovação.', 'ok'); setTimeout(() => location.reload(), 1000); }
+    else toast('Erro: ' + data.msg, 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+
+async function darAceite(id) {
+  if (!confirm('Confirma que o valor está correto e de acordo com o combinado?')) return;
+  try {
+    const res = await fetch(`/parcela/${id}/aceite`, { method: 'POST' });
+    if ((await res.json()).ok) { toast('Aceite registrado!', 'ok'); setTimeout(() => location.reload(), 800); }
+  } catch(e) { toast('Erro', 'err'); }
+}
+</script>
+{% endblock %}
