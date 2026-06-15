@@ -673,6 +673,54 @@ def init_db():
 
 
 
+# ─── ESTRUTURA DO FLUXO SEMANAL AUTOMÁTICO ──────────────────────────────────
+FLUXO_SEMANAL = {
+    'coleta': {
+        'id': 'coleta',
+        'nome': 'Coleta de Propostas',
+        'desc': 'Período de coleta: consultores subem propostas',
+        'dias_semana': 'quinta a terça',
+        'acao': 'Propostas são registradas',
+        'cor': 'info',
+        'ordem': 1,
+    },
+    'analise': {
+        'id': 'analise',
+        'nome': 'Análise & Aprovação',
+        'desc': 'Admin analisa e aprova propostas',
+        'dias_semana': 'quarta-feira',
+        'acao': 'Comissões são calculadas',
+        'cor': 'azul',
+        'ordem': 2,
+    },
+    'pagamento': {
+        'id': 'pagamento',
+        'nome': 'Pagamento & Repasse',
+        'desc': 'Processamento de repasses consultores',
+        'dias_semana': 'sexta-feira seguinte',
+        'acao': 'Repasses realizados',
+        'cor': 'verde',
+        'ordem': 3,
+    }
+}
+
+def detectar_fase_atual():
+    """Detecta automaticamente qual fase estamos (coleta, analise ou pagamento)."""
+    hoje = date.today()
+    dia_semana = hoje.weekday()  # 0=seg, 3=qui, 4=sex, 5=sab, 6=dom
+    
+    # Quinta a terça = COLETA (dias 3,4,5,6,0,1,2)
+    if dia_semana in [3, 4, 5, 6, 0, 1, 2]:
+        if dia_semana in [3, 4, 5, 6, 0, 1, 2]:
+            return 'coleta'
+    
+    # Quarta = ANÁLISE
+    if dia_semana == 2:
+        return 'analise'
+    
+    # Sexta próxima = PAGAMENTO (calculado)
+    return 'coleta'  # padrão
+
 def ciclo_atual():
     """
     Ciclo: de QUINTA-FEIRA da semana anterior até QUARTA-FEIRA da semana atual.
@@ -698,6 +746,7 @@ def ciclo_atual():
         'fim': fim_ciclo.strftime('%d/%m/%Y'),
         'liberacao': liberacao.strftime('%d/%m/%Y'),
         'pagamento': pagamento.strftime('%d/%m/%Y'),
+        'fase_atual': detectar_fase_atual(),
         'inicio_iso': inicio_ciclo.isoformat(),
         'fim_iso': fim_ciclo.isoformat(),
     }
@@ -1782,6 +1831,82 @@ def repasse_salvar():
     return jsonify({"ok": True})
 
 # ─── NÍVEIS (faixas de produção) ──────────────────────────────────────────────────
+@app.route('/producao')
+@login_required
+@admin_required
+def producao():
+    """Dashboard de Nível de Produção com fluxo temporal e timeline."""
+    conn = db()
+    ciclo = ciclo_atual()
+    
+    # Consultores com produção do ciclo atual
+    consultores = conn.execute("""
+        SELECT u.id, u.nome, u.valor_fixo, u.regime_base,
+               COUNT(DISTINCT p.id) qtd_propostas,
+               COUNT(DISTINCT CASE WHEN p.venda_status IN ('Entrada confirmada','Proposta aprovada') THEN p.id END) qtd_aprovadas,
+               COALESCE(SUM(CASE WHEN par.status='Pago ao corretor' THEN par.valor ELSE 0 END), 0) comissao_paga,
+               COALESCE(SUM(CASE WHEN par.status!='Pago ao corretor' THEN par.valor ELSE 0 END), 0) comissao_pendente
+        FROM usuarios u
+        LEFT JOIN propostas p ON p.usuario_id=u.id
+        LEFT JOIN parcelas par ON par.proposta_id=p.id
+        WHERE u.ativo=1 AND u.perfil='consultor'
+        GROUP BY u.id, u.nome, u.valor_fixo, u.regime_base
+        ORDER BY qtd_propostas DESC
+    """).fetchall()
+    
+    # Estatísticas gerais do ciclo
+    stats = conn.execute("""
+        SELECT 
+            COUNT(DISTINCT id) qtd_propostas,
+            COUNT(DISTINCT CASE WHEN venda_status IN ('Entrada confirmada','Proposta aprovada') THEN id END) qtd_aprovadas,
+            COUNT(DISTINCT CASE WHEN venda_status IN ('Entrada confirmada','Proposta aprovada') THEN id END) entrada_confirmada,
+            COUNT(DISTINCT CASE WHEN venda_status='Em análise na operadora' THEN id END) em_analise,
+            COUNT(DISTINCT CASE WHEN venda_status='Proposta cadastrada' THEN id END) cadastradas
+        FROM propostas
+    """).fetchone()
+    
+    # Comissões por fase
+    comissoes_fase = conn.execute("""
+        SELECT 
+            CASE WHEN par.status='Pendente de receber' THEN 'Pendente Operadora'
+                 WHEN par.status='Recebido e não repassado' THEN 'Recebido'
+                 WHEN par.status='Liberado para o corretor' THEN 'Liberado'
+                 WHEN par.status='Pago ao corretor' THEN 'Pago'
+                 ELSE par.status END as fase,
+            COUNT(*) qtd,
+            COALESCE(SUM(par.valor_corretora), 0) valor,
+            COALESCE(SUM(par.valor), 0) valor_consultor
+        FROM parcelas par
+        GROUP BY par.status
+    """).fetchall()
+    
+    conn.close()
+    
+    return render_template('producao.html',
+        ciclo=ciclo,
+        consultores=consultores,
+        stats=stats,
+        comissoes_fase=comissoes_fase,
+        fluxo_semanal=FLUXO_SEMANAL,
+        fase_atual=ciclo['fase_atual'])
+
+@app.route('/producao/fase', methods=['POST'])
+@login_required
+@admin_required
+def producao_mudar_fase():
+    """Admin pode forçar mudança de fase manualmente."""
+    nova_fase = (request.json or {}).get('fase')
+    if nova_fase not in FLUXO_SEMANAL:
+        return jsonify({"ok": False, "erro": "Fase inválida"}), 400
+    
+    conn = db()
+    conn.execute("""INSERT INTO historico_proposta (proposta_id, usuario_nome, campo, valor_antes, valor_depois)
+        VALUES (NULL, ?, 'Fluxo Semanal', ?, ?)""", 
+        (session.get('nome','admin'), detectar_fase_atual(), nova_fase))
+    conn.commit(); conn.close()
+    
+    return jsonify({"ok": True, "nova_fase": nova_fase})
+
 @app.route('/niveis')
 @login_required
 @admin_required
