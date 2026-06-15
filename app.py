@@ -705,50 +705,42 @@ FLUXO_SEMANAL = {
 }
 
 def detectar_fase_atual():
-    """Detecta automaticamente qual fase estamos (coleta, analise ou pagamento)."""
-    hoje = date.today()
-    dia_semana = hoje.weekday()  # 0=seg, 3=qui, 4=sex, 5=sab, 6=dom
-    
-    # Quinta a terça = COLETA (dias 3,4,5,6,0,1,2)
-    if dia_semana in [3, 4, 5, 6, 0, 1, 2]:
-        if dia_semana in [3, 4, 5, 6, 0, 1, 2]:
-            return 'coleta'
-    
-    # Quarta = ANÁLISE
-    if dia_semana == 2:
-        return 'analise'
-    
-    # Sexta próxima = PAGAMENTO (calculado)
-    return 'coleta'  # padrão
+    """Detecta automaticamente qual fase estamos: coleta, analise ou pagamento.
+    Thu→Tue = Coleta | Quarta = Análise | Sexta = Pagamento
+    """
+    dia = date.today().weekday()  # 0=seg,1=ter,2=qua,3=qui,4=sex,5=sab,6=dom
+    if dia == 2: return 'analise'    # Quarta
+    if dia == 4: return 'pagamento'  # Sexta
+    return 'coleta'  # Qui, Sab, Dom, Seg, Ter
 
 def ciclo_atual():
     """
-    Ciclo: de QUINTA-FEIRA da semana anterior até QUARTA-FEIRA da semana atual.
-    Liberação: QUINTA-FEIRA seguinte.
-    Pagamento: SEXTA-FEIRA seguinte.
+    Ciclo semanal: começa na QUINTA-FEIRA e vai até TERÇA-FEIRA seguinte (coleta).
+    Quarta = Análise. Próxima Quinta = Liberação. Próxima Sexta = Pagamento.
     """
     hoje = date.today()
-    dia_semana = hoje.weekday()  # 0=seg, 3=qui, 4=sex, 5=sab, 6=dom
-    # Encontra a última quinta-feira (início do ciclo)
-    dias_desde_quinta = (dia_semana - 3) % 7
-    ultima_quinta = hoje - timedelta(days=dias_desde_quinta)
-    # Início do ciclo = quinta da semana ANTERIOR
-    inicio_ciclo = ultima_quinta - timedelta(days=7)
-    # Fim do ciclo = quarta da semana atual (dia antes da última quinta)
-    fim_ciclo = ultima_quinta - timedelta(days=1)
-    # Liberação = quinta atual
-    liberacao = ultima_quinta
-    # Pagamento = sexta atual
-    pagamento = ultima_quinta + timedelta(days=1)
+    dia = hoje.weekday()  # 0=seg,1=ter,2=qua,3=qui,4=sex,5=sab,6=dom
+    # Volta até a quinta mais recente (inclusive hoje se for quinta)
+    dias_desde_quinta = (dia - 3) % 7
+    inicio_ciclo = hoje - timedelta(days=dias_desde_quinta)
+    # Fim coleta = terça (6 dias após a quinta)
+    fim_ciclo = inicio_ciclo + timedelta(days=6)
+    # Liberação = próxima quinta (7 dias após início)
+    liberacao = inicio_ciclo + timedelta(days=7)
+    # Pagamento = sexta após liberação
+    pagamento = liberacao + timedelta(days=1)
 
+    DIAS_PT = ['Segunda','Terça','Quarta','Quinta','Sexta','Sábado','Domingo']
     return {
-        'inicio': inicio_ciclo.strftime('%d/%m/%Y'),
-        'fim': fim_ciclo.strftime('%d/%m/%Y'),
-        'liberacao': liberacao.strftime('%d/%m/%Y'),
-        'pagamento': pagamento.strftime('%d/%m/%Y'),
-        'fase_atual': detectar_fase_atual(),
-        'inicio_iso': inicio_ciclo.isoformat(),
-        'fim_iso': fim_ciclo.isoformat(),
+        'inicio':      inicio_ciclo.strftime('%d/%m/%Y'),
+        'fim':         fim_ciclo.strftime('%d/%m/%Y'),
+        'liberacao':   liberacao.strftime('%d/%m/%Y'),
+        'liberacao_dia': DIAS_PT[liberacao.weekday()],
+        'pagamento':   pagamento.strftime('%d/%m/%Y'),
+        'pagamento_dia': DIAS_PT[pagamento.weekday()],
+        'fase_atual':  detectar_fase_atual(),
+        'inicio_iso':  inicio_ciclo.isoformat(),
+        'fim_iso':     fim_ciclo.isoformat(),
     }
 
 # ─── AUTH ────────────────────────────────────────────────────────────────────────
@@ -1543,39 +1535,45 @@ def usuario_novo():
 @app.route('/usuario/foto/upload', methods=['POST'])
 @login_required
 def usuario_foto_upload():
-    """Upload de foto de perfil via AJAX."""
+    """Upload de foto de perfil via AJAX.
+    Admin pode enviar ?uid=X para alterar foto de outro usuário.
+    """
     fimg = request.files.get('foto')
-    if not fimg:
+    if not fimg or not fimg.filename:
         return jsonify({"ok": False, "erro": "Arquivo não enviado"}), 400
-    
-    # Valida extensão
+
     ext = os.path.splitext(fimg.filename)[1].lower()
     if ext not in ('.png', '.jpg', '.jpeg', '.webp'):
         return jsonify({"ok": False, "erro": "Formato inválido. Use PNG, JPG ou WebP"}), 400
-    
-    # Valida tamanho (máx 2MB)
+
     fimg.seek(0, os.SEEK_END)
-    tamanho = fimg.tell()
-    if tamanho > 2*1024*1024:
+    if fimg.tell() > 2 * 1024 * 1024:
         return jsonify({"ok": False, "erro": "Arquivo muito grande (máx 2MB)"}), 400
     fimg.seek(0)
-    
-    # Salva arquivo
-    uid = session.get('user_id')
-    foto_nome = f"perfil_{uid}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
-    fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
-    
-    # Atualiza banco
+
+    # Admin pode alterar foto de outro usuário
+    uid_logado = session.get('user_id')
+    uid_alvo = request.form.get('uid', uid_logado)
+    if str(uid_alvo) != str(uid_logado) and session.get('perfil') != 'admin':
+        return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    uid_alvo = int(uid_alvo)
+
     conn = db()
-    # Deleta foto antiga se existir
-    foto_antiga = conn.execute("SELECT foto FROM usuarios WHERE id=?", (uid,)).fetchone()
+    foto_antiga = conn.execute("SELECT foto FROM usuarios WHERE id=?", (uid_alvo,)).fetchone()
     if foto_antiga and foto_antiga['foto']:
         try: os.remove(os.path.join(UPLOAD_FOLDER, foto_antiga['foto']))
         except: pass
-    
-    conn.execute("UPDATE usuarios SET foto=? WHERE id=?", (foto_nome, uid))
+
+    foto_nome = f"perfil_{uid_alvo}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+    fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
+
+    conn.execute("UPDATE usuarios SET foto=? WHERE id=?", (foto_nome, uid_alvo))
     conn.commit(); conn.close()
-    
+
+    # Se é a própria foto, atualiza a sessão para aparecer na sidebar
+    if uid_alvo == uid_logado:
+        session['foto'] = foto_nome
+
     return jsonify({"ok": True, "foto": foto_nome})
 
 @app.route('/usuario/editar/<int:uid>', methods=['POST'])

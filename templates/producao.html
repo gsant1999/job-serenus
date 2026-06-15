@@ -138,15 +138,18 @@
         <div class="nivel-card">
           <div class="nivel-header">
             <div>
-              <div class="nivel-label">{{ n.label or 'Nível' }}</div>
-              <div class="nivel-faixa">Faixa: R$ {{ (n.faixa_min or 0)|int }} a {% if n.faixa_max %}R$ {{ n.faixa_max|int }}{% else %}∞{% endif %}</div>
+              <div class="nivel-label">{{ n.label or n.codigo }}</div>
+              <div class="nivel-faixa">
+                Faixa: R$ {{ (n.faixa_min or 0)|int }}
+                {% if n.faixa_max %} até R$ {{ n.faixa_max|int }}{% else %} em diante{% endif %}
+              </div>
             </div>
           </div>
           <div class="nivel-inputs">
-            <input type="text" placeholder="Label (ex: N1)" value="{{ n.label or '' }}" data-id="{{ n.id }}" data-field="label">
-            <input type="number" placeholder="Faixa mínima" value="{{ n.faixa_min or 0 }}" data-id="{{ n.id }}" data-field="faixa_min" step="0.01">
-            <input type="number" placeholder="Faixa máxima" value="{{ n.faixa_max or 0 }}" data-id="{{ n.id }}" data-field="faixa_max" step="0.01">
-            <input type="number" placeholder="Ordem" value="{{ n.ordem or 1 }}" data-id="{{ n.id }}" data-field="ordem">
+            <input type="text" placeholder="Label (ex: N1)" value="{{ n.label or '' }}" data-codigo="{{ n.codigo }}" data-field="label">
+            <input type="number" placeholder="Faixa mínima" value="{{ n.faixa_min or 0 }}" data-codigo="{{ n.codigo }}" data-field="faixa_min" step="0.01">
+            <input type="number" placeholder="Faixa máxima" value="{{ n.faixa_max or 0 }}" data-codigo="{{ n.codigo }}" data-field="faixa_max" step="0.01">
+            <input type="number" placeholder="Ordem" value="{{ n.ordem or 1 }}" data-codigo="{{ n.codigo }}" data-field="ordem">
           </div>
         </div>
         {% endfor %}
@@ -169,17 +172,26 @@ function mudarFase(nova_fase) {
 function salvarNiveis(e) {
   e.preventDefault();
   const inputs = document.querySelectorAll('.nivel-inputs input');
-  const niveis = {};
+  const niveis = [];
+  const temp = {};
   inputs.forEach(inp => {
-    const id = inp.dataset.id;
-    if (!niveis[id]) niveis[id] = {};
-    niveis[id][inp.dataset.field] = inp.value;
+    const codigo = inp.dataset.codigo;
+    if (!temp[codigo]) temp[codigo] = {codigo};
+    temp[codigo][inp.dataset.field] = inp.value;
   });
+  Object.values(temp).forEach(n => niveis.push(n));
   
-  fetch('/nivel/salvar', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({niveis: Object.values(niveis)})})
+  fetch('/nivel/salvar', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({niveis})
+  })
     .then(r => r.json())
-    .then(d => { if (d.ok) { toast('Níveis salvos!', 'ok'); } else toast('Erro ao salvar', 'err'); })
-    .catch(e => toast('Erro', 'err'));
+    .then(d => {
+      if (d.ok) { toast('Níveis salvos!', 'ok'); }
+      else toast('Erro ao salvar: ' + (d.erro || ''), 'err');
+    })
+    .catch(() => toast('Erro de rede', 'err'));
 }
 </script>
 {% endblock %}

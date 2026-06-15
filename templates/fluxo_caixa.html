@@ -20,11 +20,11 @@
       </div>
       <div style="border-left:1px solid rgba(255,255,255,.15); padding-left:32px;">
         <div style="font-size:10px; color:rgba(255,255,255,.6); text-transform:uppercase; letter-spacing:1px; font-weight:600; margin-bottom:4px;">Liberação p/ corretor</div>
-        <div style="font-size:16px; color:#facc15; font-weight:600;">{{ ciclo.liberacao }} (quinta-feira)</div>
+        <div style="font-size:16px; color:#facc15; font-weight:600;">{{ ciclo.liberacao }} ({{ ciclo.liberacao_dia or "quinta-feira" }})</div>
       </div>
       <div style="border-left:1px solid rgba(255,255,255,.15); padding-left:32px;">
         <div style="font-size:10px; color:rgba(255,255,255,.6); text-transform:uppercase; letter-spacing:1px; font-weight:600; margin-bottom:4px;">Pagamento ao corretor</div>
-        <div style="font-size:16px; color:#facc15; font-weight:600;">{{ ciclo.pagamento }} (sexta-feira)</div>
+        <div style="font-size:16px; color:#facc15; font-weight:600;">{{ ciclo.pagamento }} ({{ ciclo.pagamento_dia or "sexta-feira" }})</div>
       </div>
     </div>
   </div>

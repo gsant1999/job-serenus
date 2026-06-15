@@ -194,30 +194,42 @@ function toggleRegime(prefix) {
   }
 }
 
-/* Upload de foto via AJAX */
+/* Upload de foto via AJAX - envia uid do usuário alvo */
+let _editandoUid = null;
+
 function uploadFoto(inputElement) {
   const file = inputElement.files[0];
   if (!file) return;
-  
+  const preview = document.getElementById('e-foto-preview');
+  preview.style.opacity = '0.5';
+
   const fd = new FormData();
   fd.append('foto', file);
-  
+  if (_editandoUid) fd.append('uid', _editandoUid);
+
   fetch('/usuario/foto/upload', {method: 'POST', body: fd})
     .then(r => r.json())
     .then(d => {
+      preview.style.opacity = '1';
       if (d.ok) {
-        document.getElementById('e-foto-preview').src = '/anexos/' + d.foto;
-        toast('Foto atualizada!', 'ok');
-        // Atualiza avatar na sidebar
-        const avatarImg = document.querySelector('.sidebar-user img');
-        if (avatarImg) avatarImg.src = '/anexos/' + d.foto + '?t=' + Date.now();
+        const url = '/anexos/' + d.foto + '?t=' + Date.now();
+        preview.src = url;
+        // Atualiza avatar na sidebar (caso seja o próprio usuário)
+        const sideImg = document.querySelector('.sidebar-user img');
+        if (sideImg) sideImg.src = url;
+        // Atualiza mini foto na lista de usuários
+        const listaImg = document.querySelector(`img[data-uid="${_editandoUid}"]`);
+        if (listaImg) listaImg.src = url;
+        toast('Foto salva!', 'ok');
       } else {
         toast('Erro: ' + d.erro, 'err');
       }
     })
-    .catch(e => toast('Erro ao fazer upload', 'err'));
+    .catch(() => { preview.style.opacity = '1'; toast('Erro ao fazer upload', 'err'); });
 }
+
 function editar(id, nome, email, perfil, regime, ativo, fixo, pix, foto) {
+  _editandoUid = id;
   document.getElementById('form-editar').action = '/usuario/editar/' + id;
   document.getElementById('e-id').value = id;
   document.getElementById('e-nome').value = nome;
@@ -229,7 +241,7 @@ function editar(id, nome, email, perfil, regime, ativo, fixo, pix, foto) {
   document.getElementById('e-pix').value = pix || '';
   const prev = document.getElementById('e-foto-preview');
   prev.src = foto ? '/anexos/'+foto : 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="56" height="56"%3E%3Crect width="56" height="56" fill="%23223"/%3E%3C/svg%3E';
-  document.getElementById('e-foto').onchange = (e) => { if(e.target.files[0]) prev.src = URL.createObjectURL(e.target.files[0]); };
+  // NÃO redefine onchange aqui - o HTML já tem onchange="uploadFoto(this)"
   document.getElementById('e-regime').onchange = () => toggleRegime('e');
   toggleRegime('e');
   document.getElementById('modal-editar').classList.add('open');
