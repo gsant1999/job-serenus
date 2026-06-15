@@ -24,17 +24,34 @@
   .box-val { font-family:'Sora',sans-serif; font-size:16px; font-weight:700; color:var(--teal); }
   .box-lbl { font-size:10px; color:var(--cinza); text-transform:uppercase; margin-top:6px; }
   
-  .nivel-card { background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:14px; margin-bottom:10px; }
-  .nivel-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
-  .nivel-label { font-weight:600; color:#fff; }
-  .nivel-faixa { font-size:11px; color:var(--cinza-2); }
-  .nivel-inputs { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px; }
-  .nivel-inputs input { padding:8px; border:1px solid var(--borda-2); border-radius:8px; background:var(--panel-2); color:#fff; font-size:12px; }
+  /* ═══ NIVEIS ═══ */
+  .niveis-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:20px; }
+  .nivel-card {
+    border-radius:14px; padding:0; overflow:hidden; position:relative;
+    transition:transform .2s, box-shadow .2s;
+  }
+  .nivel-card:hover { transform:translateY(-2px); box-shadow:0 8px 32px rgba(0,0,0,.3); }
+  .nivel-card.n1 { background:linear-gradient(145deg,#1a1810,#2a2510); border:1px solid rgba(205,127,50,.3); }
+  .nivel-card.n2 { background:linear-gradient(145deg,#141820,#1c2233); border:1px solid rgba(192,192,192,.3); }
+  .nivel-card.n3 { background:linear-gradient(145deg,#171412,#261e10); border:1px solid rgba(255,200,50,.3); }
+  .nivel-top { padding:18px 18px 14px; display:flex; align-items:center; gap:12px; border-bottom:1px solid rgba(255,255,255,.06); }
+  .nivel-medal { font-size:28px; line-height:1; }
+  .nivel-info h4 { font-family:'Sora',sans-serif; font-size:16px; font-weight:700; color:#fff; margin:0 0 2px; }
+  .nivel-info .nivel-faixa { font-size:11px; color:var(--cinza-2); }
+  .nivel-body { padding:14px 18px; }
+  .nivel-field { margin-bottom:10px; }
+  .nivel-field label { display:block; font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.7px; margin-bottom:4px; }
+  .nivel-field input { width:100%; padding:8px 10px; border:1px solid rgba(255,255,255,.1); border-radius:8px; background:rgba(0,0,0,.25); color:#fff; font-size:13px; font-family:'Inter',sans-serif; outline:none; transition:border-color .15s; }
+  .nivel-field input:focus { border-color:var(--azul); }
+  .nivel-range { height:3px; border-radius:3px; margin:10px 0 0; }
+  .nivel-card.n1 .nivel-range { background:linear-gradient(90deg,#cd7f32,#a0522d); }
+  .nivel-card.n2 .nivel-range { background:linear-gradient(90deg,#c0c0c0,#808080); }
+  .nivel-card.n3 .nivel-range { background:linear-gradient(90deg,#ffd700,#ffa500); }
   
   @media (max-width:768px) {
     .stats-grid { grid-template-columns:repeat(2,1fr); }
     .grid-2, .grid-4 { grid-template-columns:1fr; }
-    .nivel-inputs { grid-template-columns:1fr; }
+    .niveis-grid { grid-template-columns:1fr; }
   }
 </style>
 {% endblock %}
@@ -130,33 +147,50 @@
   </div>
 
   <!-- 🔧 CONFIGURAÇÃO DE NÍVEIS N1, N2, N3 -->
-  <h3 class="secao-titulo">🔧 Níveis de Produção (N1, N2, N3)</h3>
-  <div class="card">
-    <div class="card-body">
-      <form id="niveis-form" onsubmit="salvarNiveis(event)">
-        {% for n in niveis %}
-        <div class="nivel-card">
-          <div class="nivel-header">
-            <div>
-              <div class="nivel-label">{{ n.label or n.codigo }}</div>
-              <div class="nivel-faixa">
-                Faixa: R$ {{ (n.faixa_min or 0)|int }}
-                {% if n.faixa_max %} até R$ {{ n.faixa_max|int }}{% else %} em diante{% endif %}
-              </div>
+  <h3 class="secao-titulo">🏅 Níveis de Produção</h3>
+  <form id="niveis-form" onsubmit="salvarNiveis(event)">
+    <div class="niveis-grid">
+      {% for n in niveis %}
+      {% set medal = ['🥉','🥈','🥇'] %}
+      {% set cls = ['n1','n2','n3'] %}
+      {% set idx = loop.index0 %}
+      <div class="nivel-card {{ cls[idx] if idx < 3 else 'n1' }}">
+        <div class="nivel-top">
+          <div class="nivel-medal">{{ medal[idx] if idx < 3 else '🏅' }}</div>
+          <div class="nivel-info">
+            <h4>{{ n.label or n.codigo }}</h4>
+            <div class="nivel-faixa">
+              R$ {{ (n.faixa_min or 0)|int }}
+              {% if n.faixa_max and n.faixa_max < 999999 %} → R$ {{ n.faixa_max|int }}{% else %} em diante{% endif %}
             </div>
           </div>
-          <div class="nivel-inputs">
-            <input type="text" placeholder="Label (ex: N1)" value="{{ n.label or '' }}" data-codigo="{{ n.codigo }}" data-field="label">
-            <input type="number" placeholder="Faixa mínima" value="{{ n.faixa_min or 0 }}" data-codigo="{{ n.codigo }}" data-field="faixa_min" step="0.01">
-            <input type="number" placeholder="Faixa máxima" value="{{ n.faixa_max or 0 }}" data-codigo="{{ n.codigo }}" data-field="faixa_max" step="0.01">
-            <input type="number" placeholder="Ordem" value="{{ n.ordem or 1 }}" data-codigo="{{ n.codigo }}" data-field="ordem">
+        </div>
+        <div class="nivel-range"></div>
+        <div class="nivel-body">
+          <div class="nivel-field">
+            <label>Nome do nível</label>
+            <input type="text" placeholder="Ex: N1" value="{{ n.label or '' }}"
+              data-codigo="{{ n.codigo }}" data-field="label">
+          </div>
+          <div class="nivel-field">
+            <label>Faixa mínima (R$)</label>
+            <input type="number" placeholder="0" value="{{ (n.faixa_min or 0)|int }}"
+              data-codigo="{{ n.codigo }}" data-field="faixa_min" step="1" min="0">
+          </div>
+          <div class="nivel-field">
+            <label>Faixa máxima (R$) <span style="color:var(--cinza-2); font-weight:400;">deixe 0 = sem limite</span></label>
+            <input type="number" placeholder="0 = sem limite"
+              value="{{ n.faixa_max|int if n.faixa_max and n.faixa_max < 999999 else 0 }}"
+              data-codigo="{{ n.codigo }}" data-field="faixa_max" step="1" min="0">
           </div>
         </div>
-        {% endfor %}
-        <button type="submit" class="btn" style="margin-top:14px;">💾 Salvar Níveis</button>
-      </form>
+      </div>
+      {% endfor %}
     </div>
-  </div>
+    <button type="submit" class="btn" style="width:100%; justify-content:center; padding:12px;">
+      💾 Salvar configuração dos níveis
+    </button>
+  </form>
 
 </div>
 
@@ -171,16 +205,19 @@ function mudarFase(nova_fase) {
 
 function salvarNiveis(e) {
   e.preventDefault();
-  const inputs = document.querySelectorAll('.nivel-inputs input');
-  const niveis = [];
+  const btn = e.submitter || e.target.querySelector('[type=submit]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  
+  const inputs = document.querySelectorAll('.nivel-body input');
   const temp = {};
   inputs.forEach(inp => {
     const codigo = inp.dataset.codigo;
+    if (!codigo) return;
     if (!temp[codigo]) temp[codigo] = {codigo};
     temp[codigo][inp.dataset.field] = inp.value;
   });
-  Object.values(temp).forEach(n => niveis.push(n));
-  
+  const niveis = Object.values(temp);
+
   fetch('/nivel/salvar', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -188,10 +225,14 @@ function salvarNiveis(e) {
   })
     .then(r => r.json())
     .then(d => {
-      if (d.ok) { toast('Níveis salvos!', 'ok'); }
+      if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar configuração dos níveis'; }
+      if (d.ok) { toast('✅ Níveis salvos com sucesso!', 'ok'); }
       else toast('Erro ao salvar: ' + (d.erro || ''), 'err');
     })
-    .catch(() => toast('Erro de rede', 'err'));
+    .catch(() => {
+      if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar configuração dos níveis'; }
+      toast('Erro de rede', 'err');
+    });
 }
 </script>
 {% endblock %}
