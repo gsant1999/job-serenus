@@ -236,6 +236,7 @@
         ('Vencimento 1ª', p.vencimento_1),
         ('Previsão 1ª', p.previsao_1),
         ('Status da venda', p.venda_status),
+        ('Nasc. do Titular', p.data_nasc_titular),
       ] %}
       {% if valor %}
       <div>
@@ -252,6 +253,28 @@
       {% endfor %}
     </div>
   </div>
+
+  <!-- Repique e Dependentes -->
+  {% if p.tem_repique or p.dependentes_json %}
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header"><h3>Vidas & Repique</h3></div>
+    <div class="card-body">
+      {% if p.tem_repique and p.repique_json %}
+        {% set rep = p.repique_json|tojson %}
+        <div style="background:var(--panel-2); border-radius:8px; padding:12px; margin-bottom:12px; border-left:3px solid var(--laranja);">
+          <div style="font-size:11px; color:var(--laranja); font-weight:600; text-transform:uppercase; letter-spacing:.6px; margin-bottom:6px;">⚡ Repique</div>
+          <div style="font-size:13px;" id="repique-display">{{ p.repique_json }}</div>
+        </div>
+      {% endif %}
+      {% if p.dependentes_json %}
+        <div style="background:var(--panel-2); border-radius:8px; padding:12px; border-left:3px solid var(--teal);">
+          <div style="font-size:11px; color:var(--teal); font-weight:600; text-transform:uppercase; letter-spacing:.6px; margin-bottom:6px;">👥 Dependentes</div>
+          <div id="dependentes-display" style="font-size:13px;"></div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 
   <!-- Documentos -->
   {% if p.contrato_arquivo or p.comprovante_boleto or p.anexos and p.anexos != '[]' %}
@@ -386,7 +409,29 @@
       <div class="campo"><label>Coparticipação</label><input id="ed-fator_moderador"></div>
       <div class="campo"><label>Vidas</label><input id="ed-total_vidas" type="number"></div>
     </div>
-    <div class="campo" style="margin-bottom:14px;"><label>Observações</label><textarea id="ed-observacoes" style="min-height:70px;"></textarea></div>
+    <div class="form-row form-row-2" style="margin-bottom:10px;">
+      <div class="campo"><label>Nascimento do Titular</label><input id="ed-data_nasc_titular" type="date"></div>
+      <div class="campo"><label>CPF do Titular</label><input id="ed-cpf_titular" type="text" placeholder="000.000.000-00"></div>
+    </div>
+    <div class="campo" style="margin-bottom:10px;"><label>Observações</label><textarea id="ed-observacoes" style="min-height:70px;"></textarea></div>
+    <div class="campo" style="margin-bottom:10px;">
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+        <input type="checkbox" id="ed-tem_repique" style="width:16px;height:16px;accent-color:var(--laranja);"> Possui Repique?
+      </label>
+    </div>
+    <div id="wrap-repique" style="display:none; background:var(--panel-2); border-radius:8px; padding:12px; margin-bottom:10px;">
+      <div style="font-size:11px; color:var(--laranja); font-weight:600; margin-bottom:8px;">⚡ Dados do Repique</div>
+      <div class="form-row form-row-2" style="margin-bottom:8px;">
+        <div class="campo"><label>Vida do Repique</label>
+          <select id="ed-repique_tipo">
+            <option value="titular">Titular</option>
+            <option value="dependente">Dependente</option>
+          </select>
+        </div>
+        <div class="campo"><label>Nome</label><input id="ed-repique_nome" placeholder="Nome da vida"></div>
+      </div>
+      <div class="campo"><label>Valor do Repique (R$)</label><input id="ed-repique_valor" type="number" placeholder="0,00" step="0.01"></div>
+    </div>
     <div style="display:flex; gap:10px;">
       <button class="btn" style="flex:1;" onclick="salvarEdicao()">Salvar alterações</button>
       <button class="btn-outline" onclick="document.getElementById('modal-edicao').classList.remove('open')">Cancelar</button>
@@ -430,8 +475,51 @@ const P_DADOS = {
   produto: {{ (p.produto or '')|tojson }}, valor: {{ (p.valor or 0)|tojson }},
   vigencia: {{ (p.vigencia or '')|tojson }}, dia_vencimento: {{ (p.dia_vencimento or '')|tojson }},
   fator_moderador: {{ (p.fator_moderador or '')|tojson }}, total_vidas: {{ (p.total_vidas or '')|tojson }},
-  observacoes: {{ (p.observacoes or '')|tojson }}
+  observacoes: {{ (p.observacoes or '')|tojson }},
+  data_nasc_titular: {{ (p.data_nasc_titular or '')|tojson }},
+  cpf_titular: {{ (p.cpf_titular or '')|tojson }},
 };
+// Repique separado (checkbox + campos)
+const REP = {{ p.repique_json|tojson if p.repique_json else 'null' }};
+const TEM_REPIQUE = {{ '1' if p.tem_repique else '0' }};
+document.addEventListener('DOMContentLoaded', () => {
+  // Inicia checkbox de repique
+  const cb = document.getElementById('ed-tem_repique');
+  if (cb) {
+    cb.checked = !!TEM_REPIQUE;
+    document.getElementById('wrap-repique').style.display = TEM_REPIQUE ? 'block' : 'none';
+    cb.addEventListener('change', () => {
+      document.getElementById('wrap-repique').style.display = cb.checked ? 'block' : 'none';
+    });
+  }
+  if (REP && typeof REP === 'object') {
+    const el = document.getElementById('repique-display');
+    if (el) el.textContent = `Vida: ${REP.nome || '—'} (${REP.tipo || '—'}) — Valor: R$ ${(REP.valor||0).toFixed(2).replace('.',',')}`;
+    const elDep = document.getElementById('ed-repique_nome');
+    if (elDep) elDep.value = REP.nome || '';
+    const elTipo = document.getElementById('ed-repique_tipo');
+    if (elTipo) elTipo.value = REP.tipo || 'titular';
+    const elVal = document.getElementById('ed-repique_valor');
+    if (elVal) elVal.value = REP.valor || '';
+  }
+  // Dependentes
+  {% if p.dependentes_json %}
+  try {
+    const deps = JSON.parse({{ p.dependentes_json|tojson }});
+    const el = document.getElementById('dependentes-display');
+    if (el && deps.length) {
+      el.innerHTML = deps.map((d, i) => `<div style="padding:6px 0; border-bottom:1px solid var(--borda);">
+        <strong>${d.nome || 'Dependente ' + (i+1)}</strong>
+        ${d.nasc ? ` — Nasc: ${d.nasc}` : ''}
+        ${d.parentesco ? ` — ${d.parentesco}` : ''}
+      </div>`).join('');
+    } else if (el) { el.textContent = 'Nenhum dependente.'; }
+  } catch(e) {
+    const el = document.getElementById('dependentes-display');
+    if (el) el.textContent = {{ p.dependentes_json|tojson }};
+  }
+  {% endif %}
+});
 async function mudarFase() {
   const fase = document.getElementById('sel-fase').value;
   const r = await fetch(`/proposta/${PROP_ID}/fase`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({fase})});
@@ -460,9 +548,26 @@ function abrirEdicao() {
 async function salvarEdicao() {
   const body = {};
   for (const k in P_DADOS) { const el = document.getElementById('ed-'+k); if (el) body[k] = el.value; }
+  // Repique
+  const cb = document.getElementById('ed-tem_repique');
+  body.tem_repique = cb && cb.checked ? 1 : 0;
+  if (cb && cb.checked) {
+    body.repique_json = JSON.stringify({
+      tipo: document.getElementById('ed-repique_tipo').value,
+      nome: document.getElementById('ed-repique_nome').value,
+      valor: parseFloat(document.getElementById('ed-repique_valor').value || 0)
+    });
+  } else {
+    body.repique_json = null;
+  }
   const r = await fetch(`/proposta/${PROP_ID}/editar`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const d = await r.json();
-  if (d.ok) { toast(d.mudou.length ? ('Alterado: '+d.mudou.join(', ')) : 'Nada mudou', 'ok'); setTimeout(()=>location.reload(), 1200); }
+  if (d.ok) {
+    toast(d.mudou.length ? ('✅ Alterado: '+d.mudou.join(', ')) : 'Nada mudou', 'ok');
+    setTimeout(()=>location.reload(), 1200);
+  } else {
+    toast('Erro ao salvar', 'err');
+  }
 }
 async function abrirConsultor() {
   let modal = document.getElementById('modal-consultor');

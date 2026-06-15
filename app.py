@@ -1231,11 +1231,12 @@ def api_produtos():
 
 # ─── EDITAR PROPOSTA + TIMELINE (só admin) ────────────────────────────────────────
 CAMPOS_EDITAVEIS = {
-    'razao_social':'Razão social','cnpj':'CNPJ','cpf_titular':'Titular','produto':'Produto',
+    'razao_social':'Razão social','cnpj':'CNPJ','cpf_titular':'CPF do titular','produto':'Produto',
     'adm_operadora':'Operadora','valor':'Valor','vigencia':'Vigência','dia_vencimento':'Dia vencimento',
     'fator_moderador':'Coparticipação','acomodacao':'Acomodação','total_vidas':'Vidas',
-    'data_nasc_titular':'Nascimento titular','observacoes':'Observações','fase':'Fase',
+    'data_nasc_titular':'Nascimento do titular','observacoes':'Observações','fase':'Fase',
     'email_resp_contrato':'E-mail contato','tel_resp_contrato':'Telefone contato',
+    'tem_repique':'Repique','repique_json':'Dados do repique',
 }
 @app.route('/proposta/<int:pid>/editar', methods=['POST'])
 @login_required
