@@ -34,7 +34,7 @@
 
   <div class="card">
     <table>
-      <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Regime</th><th>Status</th><th>Ação</th></tr></thead>
+      <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th class="hide-admin">Regime</th><th>Status</th><th>Ação</th></tr></thead>
       <tbody>
         {% for u in usuarios %}
         <tr>
@@ -45,10 +45,12 @@
           </td>
           <td>{{ u.email }}</td>
           <td><span class="tag {{ 'tag-verde' if u.perfil=='admin' else 'tag-info' if u.perfil=='supervisor' else 'tag-am' }}">{{ u.perfil }}</span></td>
-          <td style="font-size:11.5px; color:var(--cinza);">
-            {% if u.regime_base == 'com_fixo_lead' %}Com Fixo + Com Lead
-            {% elif u.regime_base == 'com_lead' %}Com Lead (escalonado N1/N2/N3)
-            {% else %}Sem Lead e Sem Fixo{% endif %}
+          <td class="hide-admin" style="font-size:11.5px; color:var(--cinza);">
+            {% if u.perfil in ['admin','supervisor','gestor'] %}
+              <span style="color:var(--cinza-2)">—</span>
+            {% elif u.regime_base == 'com_fixo_lead' %}Com Fixo + Lead
+            {% elif u.regime_base == 'com_lead' %}Com Lead N1/N2/N3
+            {% else %}Sem Lead/Fixo{% endif %}
           </td>
           <td>
             {% if not u.senha_hash %}<span class="tag tag-am">Pendente senha</span>
