@@ -3,50 +3,38 @@
 
 {% block head %}
 <style>
-  .timeline { display:flex; gap:16px; margin:24px 0; position:relative; }
+  .secao-titulo { font-family:'Sora',sans-serif; font-size:15px; font-weight:600; color:#fff; margin:24px 0 16px; padding-bottom:12px; border-bottom:2px solid var(--grad-frio); }
+  .timeline { display:flex; gap:16px; margin:20px 0; position:relative; }
   .timeline::before { content:''; position:absolute; left:0; right:0; top:18px; height:2px; background:var(--borda); z-index:0; }
   .timeline-item { flex:1; position:relative; z-index:1; }
   .timeline-dot { width:36px; height:36px; border-radius:50%; background:var(--panel); border:2px solid var(--borda);
-    display:flex; align-items:center; justify-content:center; margin-bottom:12px; font-weight:600; font-size:13px;
-    transition:all .2s; }
+    display:flex; align-items:center; justify-content:center; margin-bottom:12px; font-weight:600; font-size:13px; }
   .timeline-item.ativo .timeline-dot { background:var(--grad-frio); border-color:var(--teal); color:#fff; transform:scale(1.15); }
-  .timeline-item.prox .timeline-dot { background:var(--panel-3); border-color:var(--azul); color:var(--azul); }
-  .timeline-label { font-size:12px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.8px; font-weight:600; margin-bottom:4px; }
-  .timeline-desc { font-size:13px; color:var(--texto); margin-bottom:4px; }
-  .timeline-acao { font-size:11px; color:var(--teal); font-weight:500; }
-
-  .stats-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin:20px 0; }
-  .stat-box { background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:14px;
-    text-align:center; transition:all .2s; }
-  .stat-box:hover { border-color:var(--borda-2); transform:translateY(-2px); }
-  .stat-val { font-family:'Sora',sans-serif; font-size:24px; font-weight:700; color:var(--teal); }
-  .stat-lbl { font-size:11px; color:var(--cinza-2); margin-top:6px; text-transform:uppercase; letter-spacing:.7px; }
-
-  .consultor-card { background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:14px;
-    margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; }
-  .consultor-info { flex:1; }
-  .consultor-nome { font-weight:600; color:#fff; margin-bottom:4px; }
-  .consultor-stats { display:flex; gap:16px; font-size:11px; color:var(--cinza); }
-  .consultor-numeros { display:flex; gap:12px; align-items:center; }
-  .numero { text-align:center; }
-  .numero-val { font-family:'Sora',sans-serif; font-size:16px; font-weight:700; color:var(--teal); }
-  .numero-lbl { font-size:9px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.6px; }
-
-  .comissoes-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:20px 0; }
-  .comissao-box { background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:14px; text-align:center; }
-  .comissao-fase { font-size:11px; color:var(--cinza); text-transform:uppercase; letter-spacing:.7px; margin-bottom:6px; }
-  .comissao-qtd { font-family:'Sora',sans-serif; font-size:18px; font-weight:700; color:var(--texto); }
-  .comissao-valor { font-size:11px; color:var(--teal); margin-top:4px; }
-
-  .acoes-admin { display:flex; gap:8px; margin-top:14px; }
-  .acoes-admin button { flex:1; padding:10px; }
-
+  .timeline-label { font-size:11px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.8px; font-weight:600; margin-bottom:4px; }
+  .timeline-desc { font-size:12px; color:var(--texto); margin-bottom:4px; }
+  
+  .stats-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin:16px 0; }
+  .stat-box { background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:12px; text-align:center; }
+  .stat-val { font-family:'Sora',sans-serif; font-size:20px; font-weight:700; color:var(--teal); }
+  .stat-lbl { font-size:10px; color:var(--cinza-2); margin-top:4px; text-transform:uppercase; letter-spacing:.7px; }
+  
+  .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:16px 0; }
+  .grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:16px 0; }
+  .box { background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:14px; }
+  .box-val { font-family:'Sora',sans-serif; font-size:16px; font-weight:700; color:var(--teal); }
+  .box-lbl { font-size:10px; color:var(--cinza); text-transform:uppercase; margin-top:6px; }
+  
+  .nivel-card { background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:14px; margin-bottom:10px; }
+  .nivel-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  .nivel-label { font-weight:600; color:#fff; }
+  .nivel-faixa { font-size:11px; color:var(--cinza-2); }
+  .nivel-inputs { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px; }
+  .nivel-inputs input { padding:8px; border:1px solid var(--borda-2); border-radius:8px; background:var(--panel-2); color:#fff; font-size:12px; }
+  
   @media (max-width:768px) {
-    .stats-grid, .comissoes-grid { grid-template-columns:repeat(2,1fr); }
-    .timeline { flex-direction:column; }
-    .timeline::before { display:none; }
-    .consultor-stats { flex-direction:column; gap:6px; }
-    .consultor-numeros { flex-direction:column; }
+    .stats-grid { grid-template-columns:repeat(2,1fr); }
+    .grid-2, .grid-4 { grid-template-columns:1fr; }
+    .nivel-inputs { grid-template-columns:1fr; }
   }
 </style>
 {% endblock %}
@@ -55,32 +43,26 @@
 <div class="topbar">
   <div>
     <h1>📊 Nível de Produção</h1>
-    <div class="sub">Ciclo: {{ ciclo.inicio }} até {{ ciclo.fim }}</div>
-  </div>
-  <div style="text-align:right; font-size:12px; color:var(--cinza);">
-    Fase Atual: <strong style="color:var(--teal);">{{ fluxo_semanal[fase_atual].nome }}</strong>
+    <div class="sub">Ciclo: {{ ciclo.inicio }} até {{ ciclo.fim }} | Fase: <strong style="color:var(--teal);">{{ fluxo_semanal[fase_atual].nome }}</strong></div>
   </div>
 </div>
 
 <div class="page">
 
-  <!-- TIMELINE DO FLUXO SEMANAL -->
+  <!-- ⏱️ TIMELINE DE FLUXO SEMANAL -->
+  <h3 class="secao-titulo">⏱️ Timeline de Fluxo Semanal</h3>
   <div class="card">
-    <div class="card-header">
-      <h3>⏱️ Timeline de Fluxo Semanal</h3>
-    </div>
     <div class="card-body">
       <div class="timeline">
         {% for chave, fase in fluxo_semanal.items() %}
-        <div class="timeline-item {% if chave == fase_atual %}ativo{% elif chave == 'analise' and fase_atual == 'coleta' %}prox{% endif %}">
+        <div class="timeline-item {% if chave == fase_atual %}ativo{% endif %}">
           <div class="timeline-dot">{{ fase.ordem }}</div>
           <div class="timeline-label">{{ fase.nome }}</div>
           <div class="timeline-desc">{{ fase.dias_semana }}</div>
-          <div class="timeline-acao">{{ fase.acao }}</div>
         </div>
         {% endfor %}
       </div>
-      <div class="acoes-admin" style="margin-top:20px; border-top:1px solid var(--borda); padding-top:14px;">
+      <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--borda); display:flex; gap:8px;">
         <button class="btn-outline btn-sm" onclick="mudarFase('coleta')" style="{% if fase_atual == 'coleta' %}opacity:.5{% endif %}">Coleta</button>
         <button class="btn-outline btn-sm" onclick="mudarFase('analise')" style="{% if fase_atual == 'analise' %}opacity:.5{% endif %}">Análise</button>
         <button class="btn-outline btn-sm" onclick="mudarFase('pagamento')" style="{% if fase_atual == 'pagamento' %}opacity:.5{% endif %}">Pagamento</button>
@@ -88,89 +70,88 @@
     </div>
   </div>
 
-  <!-- ESTATÍSTICAS GERAIS -->
-  <div style="margin-top:20px;">
-    <h3 style="font-family:'Sora',sans-serif; margin-bottom:14px; color:#fff;">📈 Resumo do Ciclo</h3>
-    <div class="stats-grid">
-      <div class="stat-box">
-        <div class="stat-val">{{ stats.qtd_propostas or 0 }}</div>
-        <div class="stat-lbl">Propostas</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-val">{{ stats.qtd_aprovadas or 0 }}</div>
-        <div class="stat-lbl">Aprovadas</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-val">{{ stats.entrada_confirmada or 0 }}</div>
-        <div class="stat-lbl">Em Produção</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-val">{{ stats.em_analise or 0 }}</div>
-        <div class="stat-lbl">Em Análise</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-val">{{ stats.cadastradas or 0 }}</div>
-        <div class="stat-lbl">Cadastradas</div>
-      </div>
-    </div>
+  <!-- 📈 RESUMO DO CICLO -->
+  <h3 class="secao-titulo">📈 Resumo do Ciclo</h3>
+  <div class="stats-grid">
+    <div class="stat-box"><div class="stat-val">{{ stats.qtd_propostas or 0 }}</div><div class="stat-lbl">Total</div></div>
+    <div class="stat-box"><div class="stat-val">{{ stats.qtd_aprovadas or 0 }}</div><div class="stat-lbl">Aprovadas</div></div>
+    <div class="stat-box"><div class="stat-val">{{ stats.entrada_confirmada or 0 }}</div><div class="stat-lbl">Em Produção</div></div>
+    <div class="stat-box"><div class="stat-val">{{ stats.em_analise or 0 }}</div><div class="stat-lbl">Em Análise</div></div>
+    <div class="stat-box"><div class="stat-val">{{ stats.cadastradas or 0 }}</div><div class="stat-lbl">Cadastradas</div></div>
   </div>
 
-  <!-- COMISSÕES POR FASE -->
-  <div style="margin-top:20px;">
-    <h3 style="font-family:'Sora',sans-serif; margin-bottom:14px; color:#fff;">💰 Comissões por Fase</h3>
-    <div class="comissoes-grid">
-      {% for comissao in comissoes_fase %}
-      <div class="comissao-box">
-        <div class="comissao-fase">{{ comissao.fase }}</div>
-        <div class="comissao-qtd">{{ comissao.qtd }}</div>
-        <div class="comissao-valor">{{ brl(comissao.valor_consultor) }}</div>
-        <div style="font-size:10px; color:var(--cinza-2); margin-top:4px;">Corretora: {{ brl(comissao.valor) }}</div>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-
-  <!-- PRODUÇÃO POR CONSULTOR -->
-  <div style="margin-top:20px;">
-    <h3 style="font-family:'Sora',sans-serif; margin-bottom:14px; color:#fff;">👥 Produção por Consultor</h3>
-    <div class="card">
-      <div class="card-body" style="padding:0;">
-        {% if consultores %}
-          {% for c in consultores %}
-          <div class="consultor-card">
-            <div class="consultor-info">
-              <div class="consultor-nome">{{ c.nome }}</div>
-              <div class="consultor-stats">
-                <span>Regime: <strong>{% if c.regime_base == 'com_fixo_lead' %}Com Fixo + Lead{% elif c.regime_base == 'com_lead' %}Com Lead{% else %}Sem Fixo{% endif %}</strong></span>
-                {% if c.valor_fixo %}<span>Fixo: <strong>{{ brl(c.valor_fixo) }}</strong></span>{% endif %}
-              </div>
+  <!-- 💰 COMISSÕES + 👥 PRODUÇÃO -->
+  <div class="grid-2">
+    <div>
+      <h3 class="secao-titulo">💰 Comissões por Fase</h3>
+      <div class="card">
+        <div class="card-body" style="padding:0;">
+          {% for comissao in comissoes_fase %}
+          <div style="padding:12px; border-bottom:1px solid var(--borda); display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-size:11px; color:var(--cinza); text-transform:uppercase; letter-spacing:.6px;">{{ comissao.fase }}</div>
+              <div style="font-size:13px; color:#fff; font-weight:600; margin-top:2px;">{{ comissao.qtd }} parcelas</div>
             </div>
-            <div class="consultor-numeros">
-              <div class="numero">
-                <div class="numero-val">{{ c.qtd_propostas }}</div>
-                <div class="numero-lbl">Propostas</div>
-              </div>
-              <div class="numero">
-                <div class="numero-val">{{ c.qtd_aprovadas }}</div>
-                <div class="numero-lbl">Aprovadas</div>
-              </div>
-              <div class="numero">
-                <div class="numero-val">{{ brl(c.comissao_paga) }}</div>
-                <div class="numero-lbl">Paga</div>
-              </div>
-              <div class="numero">
-                <div class="numero-val">{{ brl(c.comissao_pendente) }}</div>
-                <div class="numero-lbl">Pendente</div>
-              </div>
+            <div style="text-align:right;">
+              <div style="font-size:12px; color:var(--teal); font-weight:600;">{{ brl(comissao.valor_consultor) }}</div>
+              <div style="font-size:10px; color:var(--cinza-2);">Corr: {{ brl(comissao.valor) }}</div>
             </div>
           </div>
           {% endfor %}
-        {% else %}
-        <div style="padding:40px 20px; text-align:center; color:var(--cinza);">
-          Nenhum consultor encontrado neste ciclo.
         </div>
-        {% endif %}
       </div>
+    </div>
+
+    <div>
+      <h3 class="secao-titulo">👥 Produção por Consultor</h3>
+      <div class="card">
+        <div class="card-body" style="padding:0;">
+          {% if consultores %}
+            {% for c in consultores %}
+            <div style="padding:12px; border-bottom:1px solid var(--borda); display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div style="font-weight:600; color:#fff;">{{ c.nome }}</div>
+                <div style="font-size:11px; color:var(--cinza); margin-top:2px;">
+                  {% if c.regime_base == 'com_fixo_lead' %}Com Fixo + Lead{% else %}{{ c.regime_base }}{% endif %}
+                </div>
+              </div>
+              <div style="text-align:right; display:flex; gap:12px;">
+                <div><div style="font-size:13px; font-weight:700; color:var(--teal);">{{ c.qtd_propostas }}</div><div style="font-size:9px; color:var(--cinza-2);">Prop</div></div>
+                <div><div style="font-size:13px; font-weight:700; color:var(--teal);">{{ c.qtd_aprovadas }}</div><div style="font-size:9px; color:var(--cinza-2);">Aprov</div></div>
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+          <div style="padding:20px; text-align:center; color:var(--cinza);">Nenhum consultor cadastrado</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 🔧 CONFIGURAÇÃO DE NÍVEIS N1, N2, N3 -->
+  <h3 class="secao-titulo">🔧 Níveis de Produção (N1, N2, N3)</h3>
+  <div class="card">
+    <div class="card-body">
+      <form id="niveis-form" onsubmit="salvarNiveis(event)">
+        {% for n in niveis %}
+        <div class="nivel-card">
+          <div class="nivel-header">
+            <div>
+              <div class="nivel-label">{{ n.label or 'Nível' }}</div>
+              <div class="nivel-faixa">Faixa: R$ {{ (n.faixa_min or 0)|int }} a {% if n.faixa_max %}R$ {{ n.faixa_max|int }}{% else %}∞{% endif %}</div>
+            </div>
+          </div>
+          <div class="nivel-inputs">
+            <input type="text" placeholder="Label (ex: N1)" value="{{ n.label or '' }}" data-id="{{ n.id }}" data-field="label">
+            <input type="number" placeholder="Faixa mínima" value="{{ n.faixa_min or 0 }}" data-id="{{ n.id }}" data-field="faixa_min" step="0.01">
+            <input type="number" placeholder="Faixa máxima" value="{{ n.faixa_max or 0 }}" data-id="{{ n.id }}" data-field="faixa_max" step="0.01">
+            <input type="number" placeholder="Ordem" value="{{ n.ordem or 1 }}" data-id="{{ n.id }}" data-field="ordem">
+          </div>
+        </div>
+        {% endfor %}
+        <button type="submit" class="btn" style="margin-top:14px;">💾 Salvar Níveis</button>
+      </form>
     </div>
   </div>
 
@@ -178,23 +159,27 @@
 
 <script>
 function mudarFase(nova_fase) {
-  if (!confirm(`Mudar fase para "${nova_fase.toUpperCase()}"? Esta ação afeta todo o sistema.`)) return;
+  if (!confirm(`Mudar fase para "${nova_fase.toUpperCase()}"?`)) return;
+  fetch('/producao/fase', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fase: nova_fase})})
+    .then(r => r.json())
+    .then(d => { if (d.ok) { toast('Fase alterada!', 'ok'); setTimeout(() => location.reload(), 800); } else toast('Erro: ' + d.erro, 'err'); })
+    .catch(e => toast('Erro', 'err'));
+}
+
+function salvarNiveis(e) {
+  e.preventDefault();
+  const inputs = document.querySelectorAll('.nivel-inputs input');
+  const niveis = {};
+  inputs.forEach(inp => {
+    const id = inp.dataset.id;
+    if (!niveis[id]) niveis[id] = {};
+    niveis[id][inp.dataset.field] = inp.value;
+  });
   
-  fetch('/producao/fase', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({fase: nova_fase})
-  })
-  .then(r => r.json())
-  .then(d => {
-    if (d.ok) {
-      toast('Fase alterada com sucesso!', 'ok');
-      setTimeout(() => location.reload(), 800);
-    } else {
-      toast('Erro: ' + (d.erro || 'desconhecido'), 'err');
-    }
-  })
-  .catch(e => toast('Erro: ' + e, 'err'));
+  fetch('/nivel/salvar', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({niveis: Object.values(niveis)})})
+    .then(r => r.json())
+    .then(d => { if (d.ok) { toast('Níveis salvos!', 'ok'); } else toast('Erro ao salvar', 'err'); })
+    .catch(e => toast('Erro', 'err'));
 }
 </script>
 {% endblock %}

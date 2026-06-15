@@ -9,8 +9,11 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from app import app, init_db
+from backup_db import backup_database
 
 if __name__ == '__main__':
+    print("[BACKUP] Iniciando backup do banco antes de deploy...")
+    backup_database()
     print("[INIT] Inicializando banco de dados para produção...")
     
     try:

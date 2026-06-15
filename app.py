@@ -1540,6 +1540,44 @@ def usuario_novo():
     conn.close()
     return redirect(url_for('usuarios', link_token=token))
 
+@app.route('/usuario/foto/upload', methods=['POST'])
+@login_required
+def usuario_foto_upload():
+    """Upload de foto de perfil via AJAX."""
+    fimg = request.files.get('foto')
+    if not fimg:
+        return jsonify({"ok": False, "erro": "Arquivo não enviado"}), 400
+    
+    # Valida extensão
+    ext = os.path.splitext(fimg.filename)[1].lower()
+    if ext not in ('.png', '.jpg', '.jpeg', '.webp'):
+        return jsonify({"ok": False, "erro": "Formato inválido. Use PNG, JPG ou WebP"}), 400
+    
+    # Valida tamanho (máx 2MB)
+    fimg.seek(0, os.SEEK_END)
+    tamanho = fimg.tell()
+    if tamanho > 2*1024*1024:
+        return jsonify({"ok": False, "erro": "Arquivo muito grande (máx 2MB)"}), 400
+    fimg.seek(0)
+    
+    # Salva arquivo
+    uid = session.get('user_id')
+    foto_nome = f"perfil_{uid}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+    fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
+    
+    # Atualiza banco
+    conn = db()
+    # Deleta foto antiga se existir
+    foto_antiga = conn.execute("SELECT foto FROM usuarios WHERE id=?", (uid,)).fetchone()
+    if foto_antiga and foto_antiga['foto']:
+        try: os.remove(os.path.join(UPLOAD_FOLDER, foto_antiga['foto']))
+        except: pass
+    
+    conn.execute("UPDATE usuarios SET foto=? WHERE id=?", (foto_nome, uid))
+    conn.commit(); conn.close()
+    
+    return jsonify({"ok": True, "foto": foto_nome})
+
 @app.route('/usuario/editar/<int:uid>', methods=['POST'])
 @login_required
 @admin_required
@@ -1835,7 +1873,7 @@ def repasse_salvar():
 @login_required
 @admin_required
 def producao():
-    """Dashboard de Nível de Produção com fluxo temporal e timeline."""
+    """Dashboard de Nível de Produção com fluxo temporal, timeline e configuração de níveis."""
     conn = db()
     ciclo = ciclo_atual()
     
@@ -1880,6 +1918,9 @@ def producao():
         GROUP BY par.status
     """).fetchall()
     
+    # Níveis de produção (N1, N2, N3)
+    niveis = conn.execute("SELECT * FROM niveis ORDER BY ordem").fetchall()
+    
     conn.close()
     
     return render_template('producao.html',
@@ -1887,6 +1928,7 @@ def producao():
         consultores=consultores,
         stats=stats,
         comissoes_fase=comissoes_fase,
+        niveis=niveis,
         fluxo_semanal=FLUXO_SEMANAL,
         fase_atual=ciclo['fase_atual'])
 

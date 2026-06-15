@@ -74,7 +74,7 @@
   <div class="modal">
     <h3>Novo usuário</h3>
     <p style="font-size:12.5px; color:var(--cinza); margin-bottom:18px;">Após criar, o sistema gera um link único — você envia ao usuário para criar a senha.</p>
-    <form method="POST" action="/usuario/novo">
+    <form method="POST" action="/usuario/novo" enctype="multipart/form-data">
       <div class="campo" style="margin-bottom:12px;">
         <label>Nome completo</label>
         <input type="text" name="nome" required>
@@ -118,8 +118,9 @@
       <div class="campo" style="margin-bottom:12px;">
         <label>Foto de perfil</label>
         <div style="display:flex; align-items:center; gap:14px;">
-          <img id="e-foto-preview" src="" alt="" style="width:56px; height:56px; border-radius:50%; object-fit:cover; background:var(--panel-3); border:1px solid var(--borda);">
-          <input type="file" name="foto" id="e-foto" accept="image/*" style="font-size:12px;">
+          <img id="e-foto-preview" src="" alt="" style="width:56px; height:56px; border-radius:50%; object-fit:cover; background:var(--panel-3); border:1px solid var(--borda); cursor:pointer;" onclick="document.getElementById('e-foto').click();" title="Clique para alterar foto">
+          <input type="file" name="foto" id="e-foto" accept="image/*" style="display:none;" onchange="uploadFoto(this)">
+          <small style="color:var(--cinza-2); display:block; margin-top:6px;">Clique na foto para alterar</small>
         </div>
       </div>
       <div class="campo" style="margin-bottom:12px;">
@@ -191,6 +192,30 @@ function toggleRegime(prefix) {
     const reg = document.getElementById(prefix+'-regime');
     if (fw && reg) fw.style.display = (reg.value === 'com_fixo_lead') ? '' : 'none';
   }
+}
+
+/* Upload de foto via AJAX */
+function uploadFoto(inputElement) {
+  const file = inputElement.files[0];
+  if (!file) return;
+  
+  const fd = new FormData();
+  fd.append('foto', file);
+  
+  fetch('/usuario/foto/upload', {method: 'POST', body: fd})
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        document.getElementById('e-foto-preview').src = '/anexos/' + d.foto;
+        toast('Foto atualizada!', 'ok');
+        // Atualiza avatar na sidebar
+        const avatarImg = document.querySelector('.sidebar-user img');
+        if (avatarImg) avatarImg.src = '/anexos/' + d.foto + '?t=' + Date.now();
+      } else {
+        toast('Erro: ' + d.erro, 'err');
+      }
+    })
+    .catch(e => toast('Erro ao fazer upload', 'err'));
 }
 function editar(id, nome, email, perfil, regime, ativo, fixo, pix, foto) {
   document.getElementById('form-editar').action = '/usuario/editar/' + id;
