@@ -141,6 +141,7 @@ MODELO_NOME = {
     'com_lead_sem_fixo': 'Com Lead / Sem Fixo',
     'com_fixo_lead': 'Com Fixo + Lead',
     'com_fixo_sem_lead': 'Com Fixo / Sem Lead',
+    'gestor_vendedor': 'Gestor Vendedor (100%)',
     'n1': 'Nível 1',
     'n2': 'Nível 2',
     'n3': 'Nível 3',
@@ -151,10 +152,27 @@ MODELO_TEM_META = {
     'com_lead_sem_fixo': True,
     'com_fixo_lead': True,
     'com_fixo_sem_lead': False,
+    'gestor_vendedor': False,
     'n1': False,
     'n2': False,
     'n3': False,
 }
+
+def _build_pg_url(raw_url):
+    """Garante que o @ na senha seja codificado corretamente."""
+    try:
+        from urllib.parse import urlparse, urlunparse, quote
+        p = urlparse(raw_url)
+        # Re-codifica só o password (pode ter @ sem encode)
+        password = p.password or ''
+        user = p.username or ''
+        host = p.hostname or ''
+        port = p.port or 5432
+        path = p.path or '/postgres'
+        clean = f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}{path}?sslmode=require"
+        return clean
+    except Exception:
+        return raw_url + ('?sslmode=require' if '?' not in raw_url else '&sslmode=require')
 
 def db():
     """Retorna conexão ao banco. PostgreSQL na nuvem, SQLite localmente."""
@@ -162,16 +180,25 @@ def db():
     if DB_MODE == 'postgres':
         if _pg_pool is None:
             try:
-                _pg_pool = psycopg2.pool.SimpleConnectionPool(1, 5, os.environ['DATABASE_URL'])
+                url = _build_pg_url(os.environ['DATABASE_URL'])
+                _pg_pool = psycopg2.pool.SimpleConnectionPool(1, 5, url)
+                print("[DB] ✅ PostgreSQL conectado!")
             except Exception as e:
-                print(f"Erro ao conectar Postgres: {e}"); exit(1)
-        conn = _pg_pool.getconn()
-        conn.autocommit = False
-        return conn
-    else:
-        conn = sqlite3.connect(DB)
-        conn.row_factory = sqlite3.Row
-        return conn
+                print(f"[DB] ⚠️ Postgres falhou ({e}), usando SQLite como fallback")
+                return _sqlite_conn()
+        try:
+            conn = _pg_pool.getconn()
+            conn.autocommit = False
+            return conn
+        except Exception as e:
+            print(f"[DB] ⚠️ Pool falhou ({e}), usando SQLite")
+            return _sqlite_conn()
+    return _sqlite_conn()
+
+def _sqlite_conn():
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def close_db(conn):
     """Fecha conexão respeitando o modo."""
@@ -359,6 +386,32 @@ def init_db():
                 total REAL DEFAULT 0, regua TEXT DEFAULT '', taxa INTEGER DEFAULT 0,
                 UNIQUE(operadora, obs, plano, modelo, nivel)
             )""",
+            # ─── CRM ─────────────────────────────────────
+            """CREATE TABLE IF NOT EXISTS crm_leads (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL,
+                telefone TEXT,
+                email TEXT,
+                empresa TEXT,
+                origem TEXT DEFAULT 'manual',
+                etapa TEXT DEFAULT 'topo',
+                responsavel_id INTEGER,
+                proposta_id INTEGER,
+                valor_estimado REAL,
+                observacoes TEXT,
+                dados_extras TEXT,
+                perdido_motivo TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS crm_atividades (
+                id SERIAL PRIMARY KEY,
+                lead_id INTEGER NOT NULL,
+                usuario_nome TEXT,
+                tipo TEXT DEFAULT 'nota',
+                descricao TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
         ]
         for sql in tables_sql:
             try: cur.execute(sql)
@@ -528,6 +581,31 @@ def init_db():
             modelo TEXT NOT NULL, nivel TEXT DEFAULT '',
             total REAL DEFAULT 0, regua TEXT DEFAULT '', taxa INTEGER DEFAULT 0,
             UNIQUE(operadora, obs, plano, modelo, nivel)
+        );
+        CREATE TABLE IF NOT EXISTS crm_leads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            telefone TEXT,
+            email TEXT,
+            empresa TEXT,
+            origem TEXT DEFAULT 'manual',
+            etapa TEXT DEFAULT 'topo',
+            responsavel_id INTEGER,
+            proposta_id INTEGER,
+            valor_estimado REAL,
+            observacoes TEXT,
+            dados_extras TEXT,
+            perdido_motivo TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS crm_atividades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER NOT NULL,
+            usuario_nome TEXT,
+            tipo TEXT DEFAULT 'nota',
+            descricao TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
     
@@ -742,6 +820,133 @@ def ciclo_atual():
         'inicio_iso':  inicio_ciclo.isoformat(),
         'fim_iso':     fim_ciclo.isoformat(),
     }
+
+# ─── CÁLCULO DE COMISSÃO ─────────────────────────────────────────────────────────
+def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidade=''):
+    """Calcula a comissão de uma venda baseado no regime do consultor e nas tabelas do banco."""
+    conn = _sqlite_conn()
+    com = conn.execute("SELECT * FROM comissoes WHERE operadora=?", (operadora,)).fetchone()
+    if not com:
+        com = conn.execute("SELECT * FROM comissoes LIMIT 1").fetchone()
+    conn.close()
+
+    perc_total = float(com['perc_total'] if com else 2.0)
+    total_corretora = round(valor_venda * perc_total / 100, 2)
+
+    # ─── GESTOR VENDEDOR (100% da corretora) ───
+    if regime_base == 'gestor_vendedor':
+        return {
+            'codigo': 'gestor_vendedor',
+            'num_parcelas': 1,
+            'dist_corretora': '100',
+            'total_corretora': total_corretora,
+            'consultor': total_corretora,
+            'liquido': 0.0,
+        }
+
+    # ─── SEM LEAD / SEM FIXO ───
+    if regime_base in ('sem_lead_sem_fixo', 'com_fixo_sem_lead'):
+        perc_c = float(com['perc_sem_leads'] if com else 0.5)
+        val_c = round(valor_venda * perc_c / 100, 2)
+        return {
+            'codigo': regime_base,
+            'num_parcelas': 1,
+            'dist_corretora': '100',
+            'total_corretora': total_corretora,
+            'consultor': val_c,
+            'liquido': round(total_corretora - val_c, 2),
+        }
+
+    # ─── COM LEAD (N1/N2/N3 por produção acumulada) ───
+    if regime_base in ('com_lead', 'com_lead_sem_fixo', 'n1', 'n2', 'n3'):
+        if prod_acumulada <= 3000 or regime_base == 'n1':
+            cod = 'n1'; perc_c = float(com['perc_n1'] if com else 0.9)
+            n_parc = 2; dist = '60;40'
+        elif prod_acumulada <= 7000 or regime_base == 'n2':
+            cod = 'n2'; perc_c = float(com['perc_n2'] if com else 1.1)
+            n_parc = 3; dist = '50;30;20'
+        else:
+            cod = 'n3'; perc_c = float(com['perc_n3'] if com else 1.3)
+            n_parc = 4; dist = '40;25;20;15'
+        val_c = round(valor_venda * perc_c / 100, 2)
+        return {
+            'codigo': cod,
+            'num_parcelas': n_parc,
+            'dist_corretora': dist,
+            'total_corretora': total_corretora,
+            'consultor': val_c,
+            'liquido': round(total_corretora - val_c, 2),
+        }
+
+    # ─── COM FIXO + COM LEAD ───
+    if regime_base == 'com_fixo_lead':
+        perc_c = float(com['perc_com_fixo'] if com else 1.3)
+        val_c = round(valor_venda * perc_c / 100, 2)
+        return {
+            'codigo': 'com_fixo_lead',
+            'num_parcelas': 4,
+            'dist_corretora': '25;25;25;25',
+            'total_corretora': total_corretora,
+            'consultor': val_c,
+            'liquido': round(total_corretora - val_c, 2),
+        }
+
+    # Fallback: sem lead
+    val_c = round(valor_venda * 0.5 / 100, 2)
+    return {
+        'codigo': regime_base or 'sem_lead_sem_fixo',
+        'num_parcelas': 1,
+        'dist_corretora': '100',
+        'total_corretora': total_corretora,
+        'consultor': val_c,
+        'liquido': round(total_corretora - val_c, 2),
+    }
+
+
+def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None):
+    """Gera a lista de parcelas baseada no cálculo de comissão."""
+    from dateutil.relativedelta import relativedelta
+    try:
+        if vigencia and len(vigencia) >= 7:
+            base = datetime.strptime(vigencia[:7], '%Y-%m')
+        else:
+            base = datetime.now().replace(day=1)
+    except Exception:
+        base = datetime.now().replace(day=1)
+
+    dia = int(dia_vencimento) if dia_vencimento else base.day
+    dist_str = c.get('dist_corretora', '100') or '100'
+    percs = [float(x) for x in dist_str.split(';') if x.strip()]
+    if not percs:
+        percs = [100.0]
+    n = c.get('num_parcelas', len(percs))
+    total_c = float(c.get('consultor', 0))
+    total_cor = float(c.get('total_corretora', 0))
+
+    parcelas = []
+    for i, perc in enumerate(percs[:n]):
+        mes_ref = base + relativedelta(months=i)
+        try:
+            data = mes_ref.replace(day=min(dia, 28)).strftime('%Y-%m-%d')
+        except Exception:
+            data = mes_ref.strftime('%Y-%m-01')
+        competencia = mes_ref.strftime('%Y-%m')
+        val_c = round(total_c * perc / 100, 2)
+        val_cor = round(total_cor * perc / 100, 2)
+        parcelas.append({
+            'proposta_id': proposta_id,
+            'numero': i + 1,
+            'percentual': perc,
+            'valor': val_c,
+            'valor_corretora': val_cor,
+            'perc_cliente': perc,
+            'data_prevista': data,
+            'status': 'Pendente de receber',
+            'competencia': competencia,
+            'mensalidade_ref': i + 1,
+        })
+    return parcelas
+
 
 # ─── AUTH ────────────────────────────────────────────────────────────────────────
 def hash_senha(s): return hashlib.sha256(s.encode()).hexdigest()
@@ -2168,6 +2373,267 @@ def api_propostas():
         rows = conn.execute("SELECT * FROM propostas WHERE usuario_id=? ORDER BY id DESC",(uid,)).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
+
+
+# ─── CRM ─────────────────────────────────────────────────────────────────────────
+CRM_ETAPAS = [
+    {'id': 'topo',     'nome': 'Topo do Funil',   'cor': '#3b82f6', 'desc': 'Leads novos, primeiro contato'},
+    {'id': 'meio',     'nome': 'Meio do Funil',    'cor': '#f59e0b', 'desc': 'Em negociação, proposta enviada'},
+    {'id': 'fim',      'nome': 'Fundo do Funil',   'cor': '#10b981', 'desc': 'Pronto para fechar'},
+    {'id': 'ganho',    'nome': 'Ganho ✓',          'cor': '#1fd8a4', 'desc': 'Convertido em proposta'},
+    {'id': 'perdido',  'nome': 'Perdido',           'cor': '#ef4444', 'desc': 'Lead perdido'},
+]
+
+@app.route('/crm')
+@login_required
+def crm():
+    conn = db()
+    uid = session['user_id']
+    eh_admin = session.get('perfil') == 'admin'
+    filtro = request.args.get('etapa', '')
+    responsaveis = conn.execute(
+        "SELECT id, nome FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome"
+    ).fetchall() if eh_admin else []
+
+    # Carrega todos os leads com responsável
+    q = """SELECT l.*, u.nome as responsavel_nome
+           FROM crm_leads l
+           LEFT JOIN usuarios u ON u.id = l.responsavel_id
+           WHERE 1=1 """
+    params = []
+    if not eh_admin:
+        q += " AND l.responsavel_id=?"
+        params.append(uid)
+    if filtro:
+        q += " AND l.etapa=?"
+        params.append(filtro)
+    q += " ORDER BY l.atualizado_em DESC"
+    leads = conn.execute(q, params).fetchall()
+
+    # Agrupa por etapa
+    kanban = {e['id']: [] for e in CRM_ETAPAS}
+    for lead in leads:
+        etapa = lead['etapa'] or 'topo'
+        if etapa in kanban:
+            kanban[etapa].append(lead)
+
+    # Stats
+    total = len(leads)
+    conn.close()
+    return render_template('crm.html', kanban=kanban, etapas=CRM_ETAPAS,
+                           total=total, responsaveis=responsaveis, eh_admin=eh_admin)
+
+
+@app.route('/crm/lead/novo', methods=['POST'])
+@login_required
+def crm_lead_novo():
+    d = request.json or request.form
+    uid = session['user_id']
+    eh_admin = session.get('perfil') == 'admin'
+    resp_id = int(d.get('responsavel_id') or uid) if eh_admin else uid
+    conn = db()
+    conn.execute("""INSERT INTO crm_leads (nome, telefone, email, empresa, origem,
+                    etapa, responsavel_id, valor_estimado, observacoes)
+                    VALUES (?,?,?,?,?,?,?,?,?)""",
+        (d.get('nome'), d.get('telefone'), d.get('email'), d.get('empresa'),
+         d.get('origem', 'manual'), d.get('etapa', 'topo'), resp_id,
+         float(d.get('valor_estimado') or 0) or None, d.get('observacoes')))
+    lead_id = conn.execute("SELECT last_insert_rowid() id").fetchone()['id']
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                 (lead_id, session.get('nome'), 'criacao', 'Lead criado'))
+    conn.commit(); conn.close()
+    return jsonify({"ok": True, "id": lead_id})
+
+
+@app.route('/crm/lead/<int:lid>')
+@login_required
+def crm_lead_detalhe(lid):
+    conn = db()
+    lead = conn.execute("""SELECT l.*, u.nome as responsavel_nome
+        FROM crm_leads l LEFT JOIN usuarios u ON u.id=l.responsavel_id
+        WHERE l.id=?""", (lid,)).fetchone()
+    if not lead:
+        conn.close(); return jsonify({"ok": False}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
+        conn.close(); return jsonify({"ok": False, "erro": "Acesso negado"}), 403
+    atividades = conn.execute(
+        "SELECT * FROM crm_atividades WHERE lead_id=? ORDER BY id DESC", (lid,)).fetchall()
+    conn.close()
+    return jsonify({
+        "lead": dict(lead),
+        "atividades": [dict(a) for a in atividades]
+    })
+
+
+@app.route('/crm/lead/<int:lid>/mover', methods=['POST'])
+@login_required
+def crm_lead_mover(lid):
+    nova_etapa = (request.json or {}).get('etapa')
+    if nova_etapa not in [e['id'] for e in CRM_ETAPAS]:
+        return jsonify({"ok": False, "erro": "Etapa inválida"}), 400
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        conn.close(); return jsonify({"ok": False}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
+        conn.close(); return jsonify({"ok": False}), 403
+    etapa_ant = lead['etapa']
+    conn.execute("UPDATE crm_leads SET etapa=?, atualizado_em=CURRENT_TIMESTAMP WHERE id=?",
+                 (nova_etapa, lid))
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                 (lid, session.get('nome'), 'movimentacao',
+                  f'Movido de "{etapa_ant}" para "{nova_etapa}"'))
+    conn.commit(); conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/lead/<int:lid>/atividade', methods=['POST'])
+@login_required
+def crm_lead_atividade(lid):
+    d = request.json or {}
+    conn = db()
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                 (lid, session.get('nome'), d.get('tipo', 'nota'), d.get('descricao', '')))
+    conn.execute("UPDATE crm_leads SET atualizado_em=CURRENT_TIMESTAMP WHERE id=?", (lid,))
+    conn.commit(); conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/lead/<int:lid>/editar', methods=['POST'])
+@login_required
+def crm_lead_editar(lid):
+    d = request.json or {}
+    conn = db()
+    conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, email=?, empresa=?,
+                    valor_estimado=?, observacoes=?, atualizado_em=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+        (d.get('nome'), d.get('telefone'), d.get('email'), d.get('empresa'),
+         float(d.get('valor_estimado') or 0) or None, d.get('observacoes'), lid))
+    conn.commit(); conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/lead/<int:lid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_lead_excluir(lid):
+    conn = db()
+    conn.execute("DELETE FROM crm_atividades WHERE lead_id=?", (lid,))
+    conn.execute("DELETE FROM crm_leads WHERE id=?", (lid,))
+    conn.commit(); conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/stats')
+@login_required
+def crm_stats():
+    conn = db()
+    uid = session['user_id']; eh_admin = session.get('perfil') == 'admin'
+    q_filter = "" if eh_admin else f" AND responsavel_id={uid}"
+    stats = {}
+    for e in CRM_ETAPAS:
+        row = conn.execute(f"SELECT COUNT(*) c, COALESCE(SUM(valor_estimado),0) v FROM crm_leads WHERE etapa=?{q_filter}", (e['id'],)).fetchone()
+        stats[e['id']] = {'qtd': row['c'], 'valor': row['v']}
+    conn.close()
+    return jsonify(stats)
+
+
+# ─── WEBHOOK META / GOOGLE LEADS ─────────────────────────────────────────────────
+@app.route('/webhook/meta', methods=['GET', 'POST'])
+def webhook_meta():
+    """Recebe leads do Meta (Facebook/Instagram) Lead Ads."""
+    if request.method == 'GET':
+        # Verificação do webhook
+        verify_token = request.args.get('hub.verify_token', '')
+        challenge = request.args.get('hub.challenge', '')
+        cfg_token = get_cfg('meta_verify_token', 'serenus_meta_2025')
+        if verify_token == cfg_token:
+            return challenge, 200
+        return 'Unauthorized', 403
+
+    try:
+        data = request.get_json(force=True) or {}
+        conn = db()
+        for entry in data.get('entry', []):
+            for change in entry.get('changes', []):
+                if change.get('field') == 'leadgen':
+                    valor = change.get('value', {})
+                    field_data = {f['name']: f.get('values', [''])[0]
+                                  for f in valor.get('field_data', [])}
+                    nome = field_data.get('full_name') or field_data.get('name', 'Lead Meta')
+                    telefone = field_data.get('phone_number') or field_data.get('phone', '')
+                    email = field_data.get('email', '')
+                    empresa = field_data.get('company_name', '')
+                    conn.execute("""INSERT INTO crm_leads
+                        (nome, telefone, email, empresa, origem, etapa, dados_extras)
+                        VALUES (?,?,?,?,?,?,?)""",
+                        (nome, telefone, email, empresa, 'meta', 'topo',
+                         json.dumps(valor, ensure_ascii=False)))
+                    lead_id = conn.execute("SELECT last_insert_rowid() id").fetchone()['id']
+                    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                                 (lead_id, 'Meta Ads', 'criacao', f'Lead capturado via Meta Ads'))
+        conn.commit(); conn.close()
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)}), 200  # Sempre 200 pro Meta
+
+
+@app.route('/webhook/google', methods=['POST'])
+def webhook_google():
+    """Recebe leads do Google Lead Form Extensions."""
+    try:
+        data = request.get_json(force=True) or {}
+        user_column_data = {c.get('column_id', ''): c.get('string_value', '')
+                            for c in data.get('user_column_data', [])}
+        nome = (user_column_data.get('FULL_NAME') or
+                data.get('lead_id', 'Lead Google'))
+        telefone = user_column_data.get('PHONE_NUMBER', '')
+        email = user_column_data.get('EMAIL', '')
+        empresa = user_column_data.get('COMPANY_NAME', '')
+        conn = db()
+        conn.execute("""INSERT INTO crm_leads
+            (nome, telefone, email, empresa, origem, etapa, dados_extras)
+            VALUES (?,?,?,?,?,?,?)""",
+            (nome, telefone, email, empresa, 'google', 'topo',
+             json.dumps(data, ensure_ascii=False)))
+        lead_id = conn.execute("SELECT last_insert_rowid() id").fetchone()['id']
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                     (lead_id, 'Google Ads', 'criacao', 'Lead capturado via Google Lead Form'))
+        conn.commit(); conn.close()
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)}), 200
+
+
+# ─── UPLOAD DE FOTO (próprio usuário, sem ser admin) ─────────────────────────────
+@app.route('/minha-foto', methods=['POST'])
+@login_required
+def minha_foto():
+    """Qualquer usuário pode atualizar sua própria foto."""
+    fimg = request.files.get('foto')
+    if not fimg or not fimg.filename:
+        return jsonify({"ok": False, "erro": "Arquivo não enviado"}), 400
+    ext = os.path.splitext(fimg.filename)[1].lower()
+    if ext not in ('.png', '.jpg', '.jpeg', '.webp'):
+        return jsonify({"ok": False, "erro": "Formato inválido"}), 400
+    fimg.seek(0, os.SEEK_END)
+    if fimg.tell() > 2 * 1024 * 1024:
+        return jsonify({"ok": False, "erro": "Máximo 2MB"}), 400
+    fimg.seek(0)
+    uid = session['user_id']
+    foto_nome = f"perfil_{uid}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+    conn = db()
+    foto_antiga = conn.execute("SELECT foto FROM usuarios WHERE id=?", (uid,)).fetchone()
+    if foto_antiga and foto_antiga['foto']:
+        try: os.remove(os.path.join(UPLOAD_FOLDER, foto_antiga['foto']))
+        except: pass
+    fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
+    conn.execute("UPDATE usuarios SET foto=? WHERE id=?", (foto_nome, uid))
+    conn.commit(); conn.close()
+    session['foto'] = foto_nome
+    return jsonify({"ok": True, "foto": foto_nome})
+
+
 
 if __name__ == '__main__':
     import os

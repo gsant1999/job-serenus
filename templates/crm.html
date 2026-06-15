@@ -1,0 +1,341 @@
+{% extends "base.html" %}
+{% block title %}CRM{% endblock %}
+
+{% block head %}
+<style>
+  .kanban-wrap { display:flex; gap:14px; overflow-x:auto; padding-bottom:20px; min-height:calc(100vh - 200px); -webkit-overflow-scrolling:touch; }
+  .kanban-col { min-width:280px; width:280px; flex-shrink:0; display:flex; flex-direction:column; background:var(--panel); border-radius:14px; border:1px solid var(--borda); overflow:hidden; }
+  .col-header { padding:14px 16px 10px; border-bottom:1px solid var(--borda); }
+  .col-title { font-family:'Sora',sans-serif; font-size:13px; font-weight:600; color:#fff; display:flex; align-items:center; gap:8px; }
+  .col-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+  .col-count { background:rgba(255,255,255,.1); color:var(--cinza); font-size:11px; padding:2px 7px; border-radius:10px; margin-left:auto; }
+  .col-valor { font-size:11px; color:var(--cinza-2); margin-top:3px; }
+  .col-body { flex:1; padding:10px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; min-height:200px; }
+  .col-body.drag-over { background:rgba(59,130,246,.08); }
+  .lead-card { background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px; cursor:pointer; transition:box-shadow .15s, transform .15s; user-select:none; }
+  .lead-card:hover { box-shadow:0 4px 20px rgba(0,0,0,.3); transform:translateY(-1px); }
+  .lead-card.dragging { opacity:.5; transform:scale(.97); }
+  .lead-nome { font-size:13px; font-weight:600; color:#fff; margin-bottom:4px; }
+  .lead-empresa { font-size:11.5px; color:var(--cinza); }
+  .lead-tags { display:flex; gap:5px; flex-wrap:wrap; margin-top:7px; }
+  .lead-origem { font-size:10px; padding:2px 7px; border-radius:10px; font-weight:600; }
+  .origem-meta    { background:rgba(24,119,242,.2); color:#7baefb; }
+  .origem-google  { background:rgba(234,67,53,.2); color:#fb9187; }
+  .origem-manual  { background:rgba(255,255,255,.07); color:var(--cinza); }
+  .lead-valor { font-size:11px; color:var(--teal); margin-top:6px; font-weight:600; }
+  .lead-data { font-size:10px; color:var(--cinza-2); margin-top:3px; }
+  .col-add { margin:0 10px 10px; }
+  .col-add button { width:100%; padding:8px; background:transparent; border:1px dashed var(--borda); border-radius:8px; color:var(--cinza-2); font-size:12px; cursor:pointer; transition:.15s; }
+  .col-add button:hover { border-color:var(--azul); color:var(--azul); }
+
+  /* Modal lead */
+  .lead-detail-atividades { max-height:220px; overflow-y:auto; }
+  .ativ-item { padding:8px 0; border-bottom:1px solid var(--borda); font-size:12.5px; }
+  .ativ-tipo { display:inline-block; padding:2px 7px; border-radius:5px; font-size:10px; font-weight:600; margin-right:6px; }
+  .ativ-nota { background:rgba(59,130,246,.15); color:#7baefb; }
+  .ativ-ligacao { background:rgba(34,197,94,.15); color:#4ade80; }
+  .ativ-whatsapp { background:rgba(34,197,94,.15); color:#4ade80; }
+  .ativ-email { background:rgba(251,191,36,.15); color:#fde047; }
+  .ativ-movimentacao { background:rgba(139,92,246,.15); color:#c4b5fd; }
+  .ativ-criacao { background:rgba(255,255,255,.07); color:var(--cinza); }
+
+  @media (max-width:768px) {
+    .kanban-wrap { gap:10px; }
+    .kanban-col { min-width:260px; width:260px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>🎯 CRM</h1>
+    <div class="sub">Pipeline de vendas · {{ total }} leads ativos</div>
+  </div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <button class="btn-outline btn-sm" onclick="abrirNovoLead('topo')">+ Novo Lead</button>
+    <button class="btn-outline btn-sm" onclick="location.href='/crm/config'">⚙️ Config</button>
+  </div>
+</div>
+
+<div class="page" style="padding-right:0;">
+
+  <!-- Stats rápidas -->
+  <div class="metricas m-4" style="margin-bottom:18px; padding-right:28px;">
+    {% for e in etapas[:4] %}
+    <div class="metrica">
+      <div class="lbl" style="display:flex; align-items:center; gap:6px;">
+        <span style="width:8px;height:8px;border-radius:50%;background:{{ e.cor }};flex-shrink:0;"></span>
+        {{ e.nome }}
+      </div>
+      <div class="val" id="stat-{{ e.id }}-qtd">{{ kanban[e.id]|length }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Kanban -->
+  <div class="kanban-wrap" id="kanban">
+    {% for etapa in etapas %}
+    <div class="kanban-col" id="col-{{ etapa.id }}" data-etapa="{{ etapa.id }}"
+         ondragover="dragOver(event)" ondrop="drop(event, '{{ etapa.id }}')">
+      <div class="col-header">
+        <div class="col-title">
+          <span class="col-dot" style="background:{{ etapa.cor }};"></span>
+          {{ etapa.nome }}
+          <span class="col-count" id="count-{{ etapa.id }}">{{ kanban[etapa.id]|length }}</span>
+        </div>
+        <div class="col-valor" id="valor-{{ etapa.id }}">
+          {% set total_val = namespace(v=0) %}
+          {% for l in kanban[etapa.id] %}{% if l.valor_estimado %}{% set total_val.v = total_val.v + l.valor_estimado %}{% endif %}{% endfor %}
+          {% if total_val.v > 0 %}R$ {{ "%.0f"|format(total_val.v)|replace(".", "") }}{% endif %}
+        </div>
+      </div>
+      <div class="col-body" id="body-{{ etapa.id }}">
+        {% for lead in kanban[etapa.id] %}
+        <div class="lead-card" id="card-{{ lead.id }}"
+             draggable="true"
+             ondragstart="dragStart(event, {{ lead.id }})"
+             ondragend="dragEnd(event)"
+             onclick="verLead({{ lead.id }})">
+          <div class="lead-nome">{{ lead.nome }}</div>
+          {% if lead.empresa %}<div class="lead-empresa">{{ lead.empresa }}</div>{% endif %}
+          <div class="lead-tags">
+            <span class="lead-origem origem-{{ lead.origem or 'manual' }}">
+              {{ '📘 Meta' if lead.origem=='meta' else '🔵 Google' if lead.origem=='google' else '👤 Manual' }}
+            </span>
+            {% if lead.telefone %}<span class="tag tag-cinza" style="font-size:10px;">📞 {{ lead.telefone }}</span>{% endif %}
+          </div>
+          {% if lead.valor_estimado %}<div class="lead-valor">R$ {{ "%.2f"|format(lead.valor_estimado)|replace(".",",") }}</div>{% endif %}
+          <div class="lead-data">{{ (lead.atualizado_em or lead.criado_em or '')[:10] }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="col-add">
+        <button onclick="abrirNovoLead('{{ etapa.id }}')">+ Adicionar lead</button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+</div>
+
+<!-- Modal: Novo Lead -->
+<div class="modal-overlay" id="modal-novo-lead">
+  <div class="modal" style="max-width:500px;">
+    <button class="modal-close" onclick="fechar('modal-novo-lead')">✕</button>
+    <h3>Novo Lead</h3>
+    <div class="form-row form-row-2" style="margin-bottom:10px;">
+      <div class="campo"><label>Nome *</label><input id="nl-nome" placeholder="Nome do lead"></div>
+      <div class="campo"><label>Telefone</label><input id="nl-telefone" placeholder="(11) 9xxxx-xxxx" type="tel"></div>
+    </div>
+    <div class="form-row form-row-2" style="margin-bottom:10px;">
+      <div class="campo"><label>E-mail</label><input id="nl-email" type="email" placeholder="email@empresa.com"></div>
+      <div class="campo"><label>Empresa</label><input id="nl-empresa" placeholder="Nome da empresa"></div>
+    </div>
+    <div class="form-row form-row-2" style="margin-bottom:10px;">
+      <div class="campo"><label>Origem</label>
+        <select id="nl-origem">
+          <option value="manual">👤 Manual</option>
+          <option value="meta">📘 Meta Ads</option>
+          <option value="google">🔵 Google Ads</option>
+          <option value="indicacao">🤝 Indicação</option>
+          <option value="site">🌐 Site</option>
+        </select>
+      </div>
+      <div class="campo"><label>Etapa inicial</label>
+        <select id="nl-etapa">
+          {% for e in etapas[:4] %}<option value="{{ e.id }}">{{ e.nome }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="form-row form-row-2" style="margin-bottom:10px;">
+      <div class="campo"><label>Valor estimado (R$)</label><input id="nl-valor" type="number" placeholder="0,00" step="0.01" min="0"></div>
+      {% if eh_admin %}
+      <div class="campo"><label>Responsável</label>
+        <select id="nl-responsavel">
+          {% for r in responsaveis %}<option value="{{ r.id }}">{{ r.nome }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+    </div>
+    <div class="campo" style="margin-bottom:14px;"><label>Observações</label><textarea id="nl-obs" style="min-height:60px;"></textarea></div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn" style="flex:1;" onclick="salvarLead()">Salvar Lead</button>
+      <button class="btn-outline" onclick="fechar('modal-novo-lead')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Detalhe do Lead -->
+<div class="modal-overlay" id="modal-lead">
+  <div class="modal" style="max-width:540px;">
+    <button class="modal-close" onclick="fechar('modal-lead')">✕</button>
+    <div id="lead-detalhe-content">Carregando...</div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _dragId = null;
+
+function dragStart(e, id) {
+  _dragId = id;
+  e.target.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+function dragEnd(e) {
+  e.target.classList.remove('dragging');
+  document.querySelectorAll('.col-body').forEach(c => c.classList.remove('drag-over'));
+}
+function dragOver(e) {
+  e.preventDefault();
+  e.currentTarget.querySelector('.col-body')?.classList.add('drag-over');
+}
+async function drop(e, etapa) {
+  e.preventDefault();
+  document.querySelectorAll('.col-body').forEach(c => c.classList.remove('drag-over'));
+  if (!_dragId) return;
+  const card = document.getElementById('card-' + _dragId);
+  const col = document.getElementById('body-' + etapa);
+  if (card && col) { col.appendChild(card); }
+  await fetch(`/crm/lead/${_dragId}/mover`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({etapa})
+  });
+  atualizarContadores();
+  _dragId = null;
+}
+
+function atualizarContadores() {
+  document.querySelectorAll('.kanban-col').forEach(col => {
+    const etapa = col.dataset.etapa;
+    const qtd = col.querySelectorAll('.lead-card').length;
+    const el = document.getElementById('count-' + etapa);
+    if (el) el.textContent = qtd;
+  });
+}
+
+let _etapaNovoLead = 'topo';
+function abrirNovoLead(etapa) {
+  _etapaNovoLead = etapa || 'topo';
+  document.getElementById('nl-etapa').value = _etapaNovoLead;
+  ['nl-nome','nl-telefone','nl-email','nl-empresa','nl-obs'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  const v = document.getElementById('nl-valor'); if(v) v.value = '';
+  document.getElementById('modal-novo-lead').classList.add('open');
+  setTimeout(() => document.getElementById('nl-nome')?.focus(), 100);
+}
+function fechar(id) { document.getElementById(id).classList.remove('open'); }
+
+async function salvarLead() {
+  const nome = document.getElementById('nl-nome').value.trim();
+  if (!nome) { toast('Nome é obrigatório', 'err'); return; }
+  const body = {
+    nome,
+    telefone: document.getElementById('nl-telefone')?.value || '',
+    email: document.getElementById('nl-email')?.value || '',
+    empresa: document.getElementById('nl-empresa')?.value || '',
+    origem: document.getElementById('nl-origem')?.value || 'manual',
+    etapa: document.getElementById('nl-etapa')?.value || _etapaNovoLead,
+    valor_estimado: document.getElementById('nl-valor')?.value || 0,
+    observacoes: document.getElementById('nl-obs')?.value || '',
+  };
+  const resp = document.getElementById('nl-responsavel');
+  if (resp) body.responsavel_id = resp.value;
+
+  const r = await fetch('/crm/lead/novo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const d = await r.json();
+  if (d.ok) {
+    toast('Lead criado!', 'ok');
+    fechar('modal-novo-lead');
+    setTimeout(() => location.reload(), 800);
+  } else toast('Erro ao salvar', 'err');
+}
+
+async function verLead(id) {
+  document.getElementById('lead-detalhe-content').innerHTML = 'Carregando...';
+  document.getElementById('modal-lead').classList.add('open');
+  const r = await fetch(`/crm/lead/${id}`);
+  const d = await r.json();
+  if (!d.ok && !d.lead) { document.getElementById('lead-detalhe-content').innerHTML = 'Erro.'; return; }
+  const l = d.lead; const ativs = d.atividades || [];
+  const etapasHtml = [
+    {id:'topo',nome:'Topo'},{id:'meio',nome:'Meio'},{id:'fim',nome:'Fundo'},
+    {id:'ganho',nome:'Ganho ✓'},{id:'perdido',nome:'Perdido'}
+  ].map(e => `<option value="${e.id}" ${l.etapa===e.id?'selected':''}>${e.nome}</option>`).join('');
+  const tiposAtiv = ['nota','ligacao','whatsapp','email','reuniao'].map(t => `<option value="${t}">${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('');
+  document.getElementById('lead-detalhe-content').innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; gap:10px;">
+      <div>
+        <h3 style="font-family:'Sora',sans-serif; font-size:17px; color:#fff; margin-bottom:4px;">${l.nome}</h3>
+        ${l.empresa ? `<div style="font-size:12px; color:var(--cinza);">${l.empresa}</div>` : ''}
+        ${l.responsavel_nome ? `<div style="font-size:11px; color:var(--cinza-2);">Responsável: ${l.responsavel_nome}</div>` : ''}
+      </div>
+      <select onchange="moverLead(${l.id}, this.value)" style="font-size:12px; padding:6px 10px; border:1px solid var(--borda-2); border-radius:8px; background:var(--panel-2); color:#fff;">${etapasHtml}</select>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; font-size:12.5px;">
+      ${l.telefone ? `<div><span style="color:var(--cinza);">📞</span> <a href="tel:${l.telefone}" style="color:var(--teal);">${l.telefone}</a></div>` : ''}
+      ${l.email ? `<div><span style="color:var(--cinza);">✉️</span> <a href="mailto:${l.email}" style="color:var(--teal);">${l.email}</a></div>` : ''}
+      ${l.valor_estimado ? `<div><span style="color:var(--cinza);">💰</span> R$ ${parseFloat(l.valor_estimado).toFixed(2).replace('.',',')}</div>` : ''}
+      <div><span style="color:var(--cinza);">Origem:</span> ${l.origem || 'manual'}</div>
+    </div>
+    ${l.observacoes ? `<div style="background:var(--panel-2); border-radius:8px; padding:10px; font-size:12.5px; margin-bottom:14px; color:var(--cinza);">${l.observacoes}</div>` : ''}
+
+    <div style="border-top:1px solid var(--borda); padding-top:12px; margin-bottom:10px;">
+      <div style="font-size:11px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.6px; margin-bottom:8px;">Registrar atividade</div>
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <select id="ativ-tipo-${l.id}" style="font-size:12px; padding:7px; border:1px solid var(--borda-2); border-radius:8px; background:var(--panel-2); color:#fff; flex-shrink:0;">${tiposAtiv}</select>
+        <input id="ativ-desc-${l.id}" placeholder="Descreva a atividade..." style="flex:1; padding:7px 10px; border:1px solid var(--borda-2); border-radius:8px; background:var(--panel-2); color:#fff; font-size:12.5px; font-family:inherit;">
+        <button onclick="addAtiv(${l.id})" class="btn btn-sm" style="flex-shrink:0;">+ Add</button>
+      </div>
+    </div>
+
+    <div class="lead-detail-atividades">
+      ${ativs.map(a => `
+        <div class="ativ-item">
+          <span class="ativ-tipo ativ-${a.tipo||'nota'}">${a.tipo||'nota'}</span>
+          <span>${a.descricao||''}</span>
+          <span style="color:var(--cinza-2); font-size:10px; float:right;">${(a.criado_em||'').slice(0,16)} · ${a.usuario_nome||''}</span>
+        </div>`).join('') || '<div style="color:var(--cinza-2); font-size:12px; padding:10px 0;">Sem atividades ainda.</div>'}
+    </div>
+
+    <div style="display:flex; gap:8px; margin-top:16px; justify-content:flex-end;">
+      <button class="btn-outline btn-sm" style="color:var(--rosa);" onclick="excluirLead(${l.id})">Excluir</button>
+      <button class="btn-outline btn-sm" onclick="fechar('modal-lead')">Fechar</button>
+    </div>
+  `;
+}
+
+async function moverLead(id, etapa) {
+  await fetch(`/crm/lead/${id}/mover`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({etapa})});
+  toast('Lead movido!', 'ok');
+  setTimeout(() => location.reload(), 600);
+}
+
+async function addAtiv(id) {
+  const tipo = document.getElementById('ativ-tipo-'+id)?.value;
+  const desc = document.getElementById('ativ-desc-'+id)?.value?.trim();
+  if (!desc) { toast('Digite a atividade', 'err'); return; }
+  await fetch(`/crm/lead/${id}/atividade`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({tipo, descricao: desc})
+  });
+  toast('Atividade registrada!', 'ok');
+  verLead(id);
+}
+
+async function excluirLead(id) {
+  if (!confirm('Excluir este lead?')) return;
+  await fetch(`/crm/lead/${id}/excluir`, {method:'POST'});
+  fechar('modal-lead');
+  const card = document.getElementById('card-'+id);
+  if (card) card.remove();
+  atualizarContadores();
+  toast('Lead excluído', 'ok');
+}
+</script>
+{% endblock %}

@@ -306,12 +306,16 @@
     <button class="sidebar-close" onclick="closeSidebar()" aria-label="Fechar menu">✕</button>
   </div>
 
-  <div class="sidebar-user">
-    {% if session.get('foto') %}
-    <img src="/anexos/{{ session.foto }}" alt="" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;">
-    {% else %}
-    <div class="avatar">{{ (session.nome or '?')[0]|upper }}</div>
-    {% endif %}
+  <div class="sidebar-user" style="position:relative;" title="Clique na foto para alterar">
+    <label style="cursor:pointer; flex-shrink:0; position:relative;" title="Clique para mudar foto">
+      {% if session.get('foto') %}
+      <img src="/anexos/{{ session.foto }}" alt="" style="width:32px;height:32px;border-radius:50%;object-fit:cover;" id="sidebar-avatar-img">
+      {% else %}
+      <div class="avatar" id="sidebar-avatar-div">{{ (session.nome or '?')[0]|upper }}</div>
+      {% endif %}
+      <input type="file" accept="image/*" style="display:none;" id="minha-foto-input"
+        onchange="uploadMinhaFoto(this)">
+    </label>
     <div style="min-width:0;">
       <div class="nome">{{ session.nome }}</div>
       <div class="perfil">{{ session.perfil }}</div>
@@ -335,6 +339,10 @@
     <a href="/fluxo-caixa" class="nav-link {% if '/fluxo' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
       {% if session.perfil == 'admin' %}Fluxo de Caixa{% else %}Meu Financeiro{% endif %}
+    </a>
+    <a href="/crm" class="nav-link {% if '/crm' in request.path %}active{% endif %}" onclick="closeSidebar()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="23" y1="21" x2="23" y2="19"/><line x1="20" y1="16" x2="20" y2="21"/><line x1="17" y1="18" x2="17" y2="21"/></svg>
+      CRM
     </a>
     <a href="/bi" class="nav-link {% if request.path == '/bi' %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
@@ -425,6 +433,33 @@ function toast(msg, tipo='ok') {
 
 /* ── Util ── */
 function brl(v) { return 'R$ ' + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+async function uploadMinhaFoto(input) {
+  const file = input.files[0]; if (!file) return;
+  const preview = document.getElementById('sidebar-avatar-img') || document.getElementById('sidebar-avatar-div');
+  if (preview) preview.style.opacity = '0.5';
+  const fd = new FormData(); fd.append('foto', file);
+  try {
+    const r = await fetch('/minha-foto', {method:'POST', body:fd});
+    const d = await r.json();
+    if (d.ok) {
+      const url = '/anexos/' + d.foto + '?t=' + Date.now();
+      let img = document.getElementById('sidebar-avatar-img');
+      if (!img) {
+        // Substitui o div avatar por img
+        const div = document.getElementById('sidebar-avatar-div');
+        if (div) {
+          img = document.createElement('img');
+          img.id = 'sidebar-avatar-img';
+          img.style.cssText = 'width:32px;height:32px;border-radius:50%;object-fit:cover;';
+          div.parentNode.replaceChild(img, div);
+        }
+      }
+      if (img) { img.style.opacity = '1'; img.src = url; }
+      toast('Foto atualizada!', 'ok');
+    } else { toast(d.erro || 'Erro no upload', 'err'); if (preview) preview.style.opacity='1'; }
+  } catch(e) { toast('Erro de rede', 'err'); if (preview) preview.style.opacity='1'; }
+}
 
 /* ── Chart.js defaults ── */
 document.addEventListener('DOMContentLoaded', () => {
