@@ -126,6 +126,36 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 DB_MODE = 'postgres' if (os.environ.get('DATABASE_URL') and HAS_POSTGRES) else 'sqlite'
 _pg_pool = None
 
+# ─── VARIÁVEIS GLOBAIS NECESSÁRIAS ──────────────────────────────────────────
+STATUS_FLUXO = [
+    'Pendente de receber',
+    'Recebido e não repassado',
+    'Liberado para o corretor',
+    'Pago ao corretor',
+    'Antecipação Solicitada à Operadora',
+    'Antecipação - Aguardando ADM',
+]
+
+MODELO_NOME = {
+    'sem_lead_sem_fixo': 'Sem Lead / Sem Fixo',
+    'com_lead_sem_fixo': 'Com Lead / Sem Fixo',
+    'com_fixo_lead': 'Com Fixo + Lead',
+    'com_fixo_sem_lead': 'Com Fixo / Sem Lead',
+    'n1': 'Nível 1',
+    'n2': 'Nível 2',
+    'n3': 'Nível 3',
+}
+
+MODELO_TEM_META = {
+    'sem_lead_sem_fixo': False,
+    'com_lead_sem_fixo': True,
+    'com_fixo_lead': True,
+    'com_fixo_sem_lead': False,
+    'n1': False,
+    'n2': False,
+    'n3': False,
+}
+
 def db():
     """Retorna conexão ao banco. PostgreSQL na nuvem, SQLite localmente."""
     global _pg_pool
@@ -599,6 +629,46 @@ def init_db():
     conn.commit()
     if is_pg:
         conn.cursor().close()
+
+    # ─── MIGRAÇÕES: adiciona colunas novas em tabelas existentes ─────────
+    migracoes = [
+        ("propostas", "estornada", "INTEGER DEFAULT 0"),
+        ("propostas", "estorno_info", "TEXT"),
+        ("propostas", "cpf_titular", "TEXT"),
+        ("propostas", "cnpj", "TEXT"),
+        ("propostas", "contrato_arquivo", "TEXT"),
+        ("propostas", "comprovante_boleto", "TEXT"),
+        ("propostas", "campos_extras", "TEXT"),
+        ("propostas", "quem_subiu", "TEXT"),
+        ("propostas", "operadora_obs", "TEXT"),
+        ("propostas", "dia_vencimento", "INTEGER"),
+        ("propostas", "data_nasc_titular", "TEXT"),
+        ("propostas", "dependentes_json", "TEXT"),
+        ("propostas", "tem_repique", "INTEGER DEFAULT 0"),
+        ("propostas", "repique_json", "TEXT"),
+        ("propostas", "fase", "TEXT DEFAULT 'Proposta cadastrada'"),
+        ("propostas", "produto_id", "INTEGER"),
+        ("parcelas", "competencia", "TEXT"),
+        ("parcelas", "mensalidade_ref", "INTEGER"),
+        ("parcelas", "ok_entrada", "INTEGER DEFAULT 0"),
+        ("parcelas", "tipo_origem", "TEXT DEFAULT 'comissao'"),
+        ("parcelas", "confirmado_gestor", "INTEGER DEFAULT 0"),
+        ("parcelas", "data_confirmacao_gestor", "TEXT"),
+        ("parcelas", "valor_corretora", "REAL DEFAULT 0"),
+        ("parcelas", "perc_cliente", "REAL DEFAULT 100"),
+        ("usuarios", "valor_fixo", "REAL DEFAULT 0"),
+        ("usuarios", "chave_pix", "TEXT"),
+        ("usuarios", "foto", "TEXT"),
+    ]
+
+    if not is_pg:
+        for tabela, coluna, tipo in migracoes:
+            try:
+                conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
+            except Exception:
+                pass  # Coluna já existe
+        conn.commit()
+
     conn.close()
 
 
