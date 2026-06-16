@@ -8,6 +8,7 @@
     <div class="sub">{{ propostas|length }} registro{% if propostas|length != 1 %}s{% endif %}</div>
   </div>
   <div>
+    {% if session.perfil == 'admin' %}<button class="btn-outline" onclick="recalcularTodas(this)">Recalcular comissões</button>{% endif %}
     <button class="btn-outline" onclick="exportar()">Exportar CSV</button>
     <a href="/nova-proposta" class="btn">Nova proposta</a>
   </div>
@@ -102,6 +103,29 @@ function exportar() {
   a.href = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(csv);
   a.download = `job_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
+}
+async function recalcularTodas(btn) {
+  if (!confirm('Recalcular a comissão de TODAS as propostas com o motor atual?\n\nParcelas que já entraram no fluxo são preservadas; só as pendentes são regeradas.')) return;
+  const txt = btn.textContent;
+  btn.textContent = 'Recalculando...'; btn.disabled = true;
+  try {
+    const r = await fetch('/propostas/recalcular-todas', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      let msg = `✅ ${d.recalculadas} propostas recalculadas.`;
+      if (d.avisos && d.avisos.length) {
+        msg += `\n\n⚠️ ${d.avisos.length} proposta(s) com cadastro faltando:\n\n`;
+        msg += d.avisos.map(a => `#${a.id} ${a.cliente} (${a.operadora||'sem operadora'})\n   → ${a.aviso}`).join('\n\n');
+      } else {
+        msg += '\n\nNenhum cadastro faltando. 🎉';
+      }
+      alert(msg);
+      location.reload();
+    } else {
+      alert('Erro: ' + (d.erro || 'falha'));
+    }
+  } catch(e) { alert('Erro de rede ao recalcular.'); }
+  finally { btn.textContent = txt; btn.disabled = false; }
 }
 </script>
 {% endblock %}

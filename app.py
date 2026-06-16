@@ -831,130 +831,157 @@ def ciclo_atual():
     }
 
 # ─── CÁLCULO DE COMISSÃO ─────────────────────────────────────────────────────────
-def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidade=''):
-    """Calcula a comissão de uma venda baseado no regime do consultor e nas tabelas do banco."""
+# ─── HELPERS DO MOTOR DE CÁLCULO ────────────────────────────────────────────────
+REGIME_TO_MODELO = {
+    'sem_lead_sem_fixo': 'sem_lead_sem_fixo',
+    'com_fixo_sem_lead': 'sem_lead_com_fixo',   # nome no repasse_corretor
+    'com_lead': 'com_lead',
+    'com_lead_sem_fixo': 'com_lead',
+    'n1': 'com_lead', 'n2': 'com_lead', 'n3': 'com_lead',
+    'com_fixo_lead': 'com_fixo_lead',
+}
+
+def _plano_from_modalidade(modalidade, tipo_pessoa=''):
+    """Mapeia a modalidade/tipo da proposta para o plano da tabela: PME / PF / ADESAO."""
+    s = ((modalidade or '') + ' ' + (tipo_pessoa or '')).upper()
+    if 'ADES' in s:
+        return 'ADESAO'
+    if ' PF' in (' ' + s) or 'PESSOA F' in s or 'INDIVID' in s or 'FAMILIAR' in s or s.strip() == 'PF':
+        return 'PF'
+    return 'PME'  # PME, Coletivo, Empresarial, Porte N → PME
+
+def _split_operadora(operadora):
+    """'Affix · Hapvida' -> ('Affix', 'Hapvida'). Sem separador -> (nome, '')."""
+    op = (operadora or '').strip()
+    for sep in (' · ', ' - ', '·', ' / '):
+        if sep in op:
+            a, b = op.split(sep, 1)
+            return a.strip(), b.strip()
+    return op, ''
+
+def _nivel_por_producao(prod, conn):
+    """Determina o nível (n1/n2/n3) pela produção acumulada, respeitando a tabela niveis."""
+    try:
+        niveis = conn.execute("SELECT codigo,faixa_min,faixa_max FROM niveis ORDER BY ordem").fetchall()
+    except Exception:
+        niveis = []
+    for nv in niveis:
+        mn = float(nv['faixa_min'] or 0)
+        mx = nv['faixa_max']
+        if prod >= mn and (mx is None or prod <= float(mx)):
+            return nv['codigo']
+    # fallback fixo
+    if prod <= 3000: return 'n1'
+    if prod <= 7000: return 'n2'
+    return 'n3'
+
+
+def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidade='', tipo_pessoa=''):
+    """Motor de comissão — lê de recebimento (corretora) + repasse_corretor (consultor).
+    Tudo em NÚMERO DE MENSALIDADES (1.8 = 1,8 mensalidade = 180%). Sem dividir por 100."""
     conn = _sqlite_conn()
-    com = conn.execute("SELECT * FROM comissoes WHERE operadora=?", (operadora,)).fetchone()
-    if not com:
-        com = conn.execute("SELECT * FROM comissoes LIMIT 1").fetchone()
-    conn.close()
+    valor = float(valor_venda or 0)
+    op_nome, op_obs = _split_operadora(operadora)
+    plano = _plano_from_modalidade(modalidade, tipo_pessoa)
 
-    perc_total = float(com['perc_total'] if com else 2.0)
-    total_corretora = round(valor_venda * perc_total / 100, 2)
+    # ─── 1) Recebimento da corretora (mensalidades) ───
+    receb = conn.execute(
+        "SELECT total FROM recebimento WHERE operadora=? AND obs=? AND plano=?",
+        (op_nome, op_obs, plano)).fetchone()
+    if not receb:
+        receb = conn.execute(
+            "SELECT total FROM recebimento WHERE operadora=? AND plano=? ORDER BY (obs='') DESC LIMIT 1",
+            (op_nome, plano)).fetchone()
+    receb_mens = float(receb['total']) if receb else 0.0
+    total_corretora = round(valor * receb_mens, 2)
 
-    # ─── GESTOR VENDEDOR (100% da corretora) ───
+    # ─── GESTOR VENDEDOR: leva 100% da corretora ───
     if regime_base == 'gestor_vendedor':
+        conn.close()
+        regua = [receb_mens] if receb_mens else [1.0]
         return {
-            'codigo': 'gestor_vendedor',
-            'num_parcelas': 1,
-            'dist_corretora': '100',
-            'total_corretora': total_corretora,
-            'consultor': total_corretora,
-            'liquido': 0.0,
+            'codigo': 'gestor_vendedor', 'modelo': 'gestor_vendedor', 'nivel': '', 'plano': plano,
+            'num_parcelas': 1, 'dist_corretora': str(receb_mens or 1.0),
+            'regua_mens': regua, 'receb_mens': receb_mens, 'rep_mens': receb_mens, 'taxa': 0,
+            'valor': valor, 'total_corretora': total_corretora,
+            'consultor': total_corretora, 'liquido': 0.0,
         }
 
-    # ─── SEM LEAD / SEM FIXO ───
-    if regime_base in ('sem_lead_sem_fixo', 'com_fixo_sem_lead'):
-        perc_c = float(com['perc_sem_leads'] if com else 0.5)
-        val_c = round(valor_venda * perc_c / 100, 2)
-        return {
-            'codigo': regime_base,
-            'num_parcelas': 1,
-            'dist_corretora': '100',
-            'total_corretora': total_corretora,
-            'consultor': val_c,
-            'liquido': round(total_corretora - val_c, 2),
-        }
+    # ─── 2) Modelo + nível ───
+    modelo = REGIME_TO_MODELO.get(regime_base, 'sem_lead_sem_fixo')
+    nivel = ''
+    if modelo == 'com_lead':
+        nivel = regime_base if regime_base in ('n1', 'n2', 'n3') else _nivel_por_producao(prod_acumulada, conn)
 
-    # ─── COM LEAD (N1/N2/N3 por produção acumulada) ───
-    if regime_base in ('com_lead', 'com_lead_sem_fixo', 'n1', 'n2', 'n3'):
-        if prod_acumulada <= 3000 or regime_base == 'n1':
-            cod = 'n1'; perc_c = float(com['perc_n1'] if com else 0.9)
-            n_parc = 2; dist = '60;40'
-        elif prod_acumulada <= 7000 or regime_base == 'n2':
-            cod = 'n2'; perc_c = float(com['perc_n2'] if com else 1.1)
-            n_parc = 3; dist = '50;30;20'
-        else:
-            cod = 'n3'; perc_c = float(com['perc_n3'] if com else 1.3)
-            n_parc = 4; dist = '40;25;20;15'
-        val_c = round(valor_venda * perc_c / 100, 2)
-        return {
-            'codigo': cod,
-            'num_parcelas': n_parc,
-            'dist_corretora': dist,
-            'total_corretora': total_corretora,
-            'consultor': val_c,
-            'liquido': round(total_corretora - val_c, 2),
-        }
+    # ─── 3) Repasse ao corretor (mensalidades + régua) ───
+    rep = conn.execute(
+        "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND obs=? AND plano=? AND modelo=? AND nivel=?",
+        (op_nome, op_obs, plano, modelo, nivel)).fetchone()
+    if not rep:
+        rep = conn.execute(
+            "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND plano=? AND modelo=? AND nivel=? ORDER BY (obs='') DESC LIMIT 1",
+            (op_nome, plano, modelo, nivel)).fetchone()
+    rep_mens = float(rep['total']) if rep else 0.0
+    regua_str = (rep['regua'] if rep and rep['regua'] else '') or ''
+    taxa = int(rep['taxa']) if rep and rep['taxa'] is not None else 0
+    consultor = round(valor * rep_mens, 2)
+    liquido = round(total_corretora - consultor, 2)
 
-    # ─── COM FIXO + COM LEAD ───
-    if regime_base == 'com_fixo_lead':
-        perc_c = float(com['perc_com_fixo'] if com else 1.3)
-        val_c = round(valor_venda * perc_c / 100, 2)
-        return {
-            'codigo': 'com_fixo_lead',
-            'num_parcelas': 4,
-            'dist_corretora': '25;25;25;25',
-            'total_corretora': total_corretora,
-            'consultor': val_c,
-            'liquido': round(total_corretora - val_c, 2),
-        }
+    # ─── 4) Régua de parcelas (mensalidades por parcela) ───
+    regua = [float(x) for x in regua_str.split(';') if x.strip()]
+    if not regua:
+        regua = [rep_mens] if rep_mens else [0.0]
 
-    # Fallback: sem lead
-    val_c = round(valor_venda * 0.5 / 100, 2)
+    conn.close()
+    avisos = []
+    if receb_mens == 0:
+        avisos.append(f"Falta cadastrar o RECEBIMENTO da corretora para {op_nome} / {plano}")
+    if rep_mens == 0:
+        avisos.append(f"Falta cadastrar o REPASSE ao corretor para {op_nome} / {plano} / {MODELO_NOME.get(modelo, modelo)}{(' / ' + nivel.upper()) if nivel else ''}")
+
     return {
-        'codigo': regime_base or 'sem_lead_sem_fixo',
-        'num_parcelas': 1,
-        'dist_corretora': '100',
-        'total_corretora': total_corretora,
-        'consultor': val_c,
-        'liquido': round(total_corretora - val_c, 2),
+        'codigo': nivel or modelo, 'modelo': modelo, 'nivel': nivel, 'plano': plano,
+        'num_parcelas': len(regua), 'dist_corretora': regua_str or ';'.join(str(x) for x in regua),
+        'regua_mens': regua, 'receb_mens': receb_mens, 'rep_mens': rep_mens, 'taxa': taxa,
+        'valor': valor, 'total_corretora': total_corretora,
+        'consultor': consultor, 'liquido': liquido,
+        'aviso': ' · '.join(avisos),
     }
 
 
 def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None):
-    """Gera a lista de parcelas baseada no cálculo de comissão."""
+    """Gera parcelas usando a régua REAL (mensalidades por parcela).
+    Parcela consultor i = valor × regua[i]. Corretora distribuída proporcional à régua."""
     from dateutil.relativedelta import relativedelta
     try:
-        if vigencia and len(vigencia) >= 7:
-            base = datetime.strptime(vigencia[:7], '%Y-%m')
-        else:
-            base = datetime.now().replace(day=1)
+        base = datetime.strptime(vigencia[:7], '%Y-%m') if (vigencia and len(vigencia) >= 7) else datetime.now().replace(day=1)
     except Exception:
         base = datetime.now().replace(day=1)
 
     dia = int(dia_vencimento) if dia_vencimento else base.day
-    dist_str = c.get('dist_corretora', '100') or '100'
-    percs = [float(x) for x in dist_str.split(';') if x.strip()]
-    if not percs:
-        percs = [100.0]
-    n = c.get('num_parcelas', len(percs))
-    total_c = float(c.get('consultor', 0))
+    regua = c.get('regua_mens') or [float(x) for x in (c.get('dist_corretora','') or '').split(';') if x.strip()] or [1.0]
+    valor = float(c.get('valor', 0))
     total_cor = float(c.get('total_corretora', 0))
+    soma_regua = sum(regua) or 1.0
 
     parcelas = []
-    for i, perc in enumerate(percs[:n]):
+    for i, mens in enumerate(regua):
         mes_ref = base + relativedelta(months=i)
         try:
             data = mes_ref.replace(day=min(dia, 28)).strftime('%Y-%m-%d')
         except Exception:
             data = mes_ref.strftime('%Y-%m-01')
-        competencia = mes_ref.strftime('%Y-%m')
-        val_c = round(total_c * perc / 100, 2)
-        val_cor = round(total_cor * perc / 100, 2)
+        val_c = round(valor * mens, 2)                          # consultor nesta parcela
+        val_cor = round(total_cor * (mens / soma_regua), 2)     # corretora proporcional
+        perc = round((mens / soma_regua) * 100, 2)
         parcelas.append({
-            'proposta_id': proposta_id,
-            'numero': i + 1,
-            'percentual': perc,
-            'valor': val_c,
-            'valor_corretora': val_cor,
-            'perc_cliente': perc,
-            'data_prevista': data,
-            'status': 'Pendente de receber',
-            'competencia': competencia,
-            'mensalidade_ref': i + 1,
+            'proposta_id': proposta_id, 'numero': i + 1, 'percentual': perc,
+            'valor': val_c, 'valor_corretora': val_cor, 'perc_cliente': perc,
+            'data_prevista': data, 'status': 'Pendente de receber',
+            'competencia': mes_ref.strftime('%Y-%m'), 'mensalidade_ref': i + 1,
         })
     return parcelas
+
 
 
 # ─── AUTH ────────────────────────────────────────────────────────────────────────
@@ -1324,7 +1351,7 @@ def salvar_proposta():
         # (Regra: o nível é o da produção do dia em que a venda subiu, incluindo ela.)
         prod_antes = cur.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=? AND strftime('%Y-%m',criado_em)=?",(session['user_id'],ma)).fetchone()['v']
         prod_acumulada = prod_antes + valor
-        c = calc_comissao(operadora, regime_base, prod_acumulada, valor, modalidade)
+        c = calc_comissao(operadora, regime_base, prod_acumulada, valor, modalidade, d.get('tipo_pessoa',''))
         cur.execute("""INSERT INTO propostas (
             usuario_id,consultor,supervisora_id,proposta_tem_numero,numero_proposta,
             vigencia,modalidade,tipo_pessoa,adm_operadora,produto,razao_social,
@@ -1437,7 +1464,7 @@ def editar_consultor(pid):
     prod_antes = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM propostas
         WHERE usuario_id=? AND substr(criado_em,1,7)=? AND id<>?""", (novo_uid, ma, pid)).fetchone()['v']
     prod_acumulada = prod_antes + (p['valor'] or 0)
-    c = calc_comissao(p['adm_operadora'], u['regime_base'], prod_acumulada, p['valor'] or 0, p['modalidade'])
+    c = calc_comissao(p['adm_operadora'], u['regime_base'], prod_acumulada, p['valor'] or 0, p['modalidade'], p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
 
     conn.execute("""UPDATE propostas SET usuario_id=?, consultor=?, regime_aplicado=?,
         num_parcelas=?, distribuicao_parcelas=?, comissao_total_corretora=?, comissao_consultor=?,
@@ -1459,6 +1486,48 @@ def editar_consultor(pid):
         msg = "Consultor trocado. Parcelas já em fluxo foram mantidas; só novas seguem o novo regime."
     conn.commit(); conn.close()
     return jsonify({"ok": True, "msg": msg})
+
+@app.route('/propostas/recalcular-todas', methods=['POST'])
+@login_required
+@admin_required
+def recalcular_todas():
+    """Recalcula a comissão de TODAS as propostas com o motor atual.
+    Só regenera parcelas que ainda não entraram no fluxo. Retorna relatório de avisos."""
+    conn = db()
+    props = conn.execute("""SELECT p.*, u.regime_base FROM propostas p
+        LEFT JOIN usuarios u ON u.id=p.usuario_id WHERE COALESCE(p.estornada,0)=0""").fetchall()
+    recalc, avisos = 0, []
+    for p in props:
+        regime = p['regime_base'] or 'sem_lead_sem_fixo'
+        ma = (p['criado_em'] or '')[:7]
+        prod_antes = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM propostas
+            WHERE usuario_id=? AND substr(criado_em,1,7)=? AND id<>?""",
+            (p['usuario_id'], ma, p['id'])).fetchone()['v']
+        prod_acum = prod_antes + (p['valor'] or 0)
+        tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
+        c = calc_comissao(p['adm_operadora'], regime, prod_acum, p['valor'] or 0, p['modalidade'], tp)
+        conn.execute("""UPDATE propostas SET regime_aplicado=?, num_parcelas=?, distribuicao_parcelas=?,
+            comissao_total_corretora=?, comissao_consultor=?, comissao_corretora_liquida=? WHERE id=?""",
+            (c['codigo'], c['num_parcelas'], c['dist_corretora'],
+             c['total_corretora'], c['consultor'], c['liquido'], p['id']))
+        # Regenera só parcelas ainda pendentes de receber
+        pagas = conn.execute("""SELECT COUNT(*) n FROM parcelas
+            WHERE proposta_id=? AND status<>'Pendente de receber'""", (p['id'],)).fetchone()['n']
+        if pagas == 0:
+            conn.execute("DELETE FROM parcelas WHERE proposta_id=?", (p['id'],))
+            for parc in gerar_parcelas(p['id'], p['vigencia'] or '', c,
+                                       p['dia_vencimento'] if 'dia_vencimento' in p.keys() else None):
+                conn.execute("""INSERT INTO parcelas (proposta_id,numero,percentual,valor,valor_corretora,perc_cliente,data_prevista,status,competencia,mensalidade_ref,tipo_origem)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""",
+                    (parc['proposta_id'],parc['numero'],parc['percentual'],parc['valor'],
+                     parc['valor_corretora'],parc['perc_cliente'],parc['data_prevista'],
+                     parc['status'],parc['competencia'],parc['mensalidade_ref']))
+        recalc += 1
+        if c.get('aviso'):
+            avisos.append({'id': p['id'], 'cliente': p['razao_social'],
+                           'operadora': p['adm_operadora'], 'aviso': c['aviso']})
+    conn.commit(); conn.close()
+    return jsonify({"ok": True, "recalculadas": recalc, "avisos": avisos})
 
 @app.route('/api/consultores')
 @login_required
