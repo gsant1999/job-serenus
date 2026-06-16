@@ -607,6 +607,12 @@ def init_db():
             descricao TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS webhook_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            evento_id TEXT UNIQUE,
+            evento TEXT,
+            processado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """)
     
     # ─── MIGRAÇÕES: adicionar colunas novas se não existirem ───
@@ -1003,20 +1009,26 @@ def asaas_request(method, path, payload=None):
 
 
 def asaas_detectar_tipo_chave(chave):
-    """Detecta o tipo da chave PIX pelo formato."""
+    """Detecta o tipo da chave PIX pelo formato (RFC 3986)."""
     chave = (chave or '').strip()
     if not chave:
         return None
     apenas_digitos = re.sub(r'\D', '', chave)
+    
+    # EMAIL: contém @
     if '@' in chave:
         return 'EMAIL'
-    if len(apenas_digitos) == 11 and apenas_digitos == chave.replace('.', '').replace('-', ''):
+    # CPF: exatamente 11 dígitos
+    if len(apenas_digitos) == 11:
         return 'CPF'
+    # CNPJ: exatamente 14 dígitos
     if len(apenas_digitos) == 14:
         return 'CNPJ'
+    # PHONE: começa com +55 ou +, com 10-11 dígitos
     if chave.startswith('+55') or (len(apenas_digitos) in (10, 11) and chave.startswith('+')):
         return 'PHONE'
-    if len(chave) == 32 and re.match(r'^[a-f0-9\-]+$', chave.replace('-', '')):
+    # EVP: UUID format (36 chars: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+    if len(chave) == 36 and re.match(r'^[a-f0-9\-]+$', chave, re.IGNORECASE):
         return 'EVP'
     # fallback: assume EVP (chave aleatória) se não bate com nenhum padrão
     return 'EVP'
@@ -1093,8 +1105,19 @@ def webhook_asaas():
     """Recebe eventos do Asaas (status de transferências e cobranças)."""
     try:
         data = request.get_json(force=True) or {}
+        evento_id = data.get('id')  # ID único do evento do Asaas
         evento = data.get('event', '')
+        
+        if not evento_id:
+            return jsonify({"ok": True}), 200  # Ignora webhooks sem ID
+        
         conn = db()
+        
+        # Idempotência: verifica se já processou este webhook
+        já_proc = conn.execute("SELECT 1 FROM webhook_log WHERE evento_id=?", (evento_id,)).fetchone()
+        if já_proc:
+            conn.close()
+            return jsonify({"ok": True, "duplicado": True}), 200  # Webhook duplicado, ignora
 
         if evento.startswith('TRANSFER_'):
             transfer = data.get('transfer', {})
@@ -1119,6 +1142,9 @@ def webhook_asaas():
             # Reservado para uso futuro (cobranças recebidas de clientes)
             pass
 
+        # Registra webhook processado
+        conn.execute("INSERT INTO webhook_log (evento_id, evento) VALUES (?,?)", (evento_id, evento))
+        conn.commit()
         conn.close()
         return jsonify({"ok": True}), 200
     except Exception as e:
@@ -2789,8 +2815,11 @@ def minha_foto():
     if fimg.tell() > 2 * 1024 * 1024:
         return jsonify({"ok": False, "erro": "Máximo 2MB"}), 400
     fimg.seek(0)
+    
+    # Sanitiza nome de arquivo (apenas alfanumérico e underscore)
     uid = session['user_id']
-    foto_nome = f"perfil_{uid}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+    foto_nome = f"perfil_{uid}_{int(datetime.now().timestamp())}{ext}"
+    
     conn = db()
     foto_antiga = conn.execute("SELECT foto FROM usuarios WHERE id=?", (uid,)).fetchone()
     if foto_antiga and foto_antiga['foto']:
