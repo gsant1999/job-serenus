@@ -116,7 +116,12 @@ def _from_json(s):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ─── PERSISTÊNCIA: dados em pasta FIXA no computador, fora das pastas de versão ───
 # Assim os dados NUNCA somem ao trocar de versão. Pode sobrescrever via variável de ambiente.
-DATA_DIR = os.environ.get("JOB_DATA_DIR") or "/data" if os.path.exists("/data") else os.path.join(os.path.expanduser("~"), "JOB_Serenus_Dados")
+DATA_DIR = os.environ.get("JOB_DATA_DIR") or os.path.join(os.path.expanduser("~"), "JOB_Serenus_Dados")
+# Se /data/job.db existe e tem dados, usa /data. Senão volta pro home.
+if not os.path.exists(os.path.join(DATA_DIR, 'job.db')):
+    alt_data = '/data'
+    if os.path.exists(os.path.join(alt_data, 'job.db')):
+        DATA_DIR = alt_data
 os.makedirs(DATA_DIR, exist_ok=True)
 DB = os.path.join(DATA_DIR, "job.db")
 UPLOAD_FOLDER = os.path.join(DATA_DIR, "anexos")
@@ -1074,7 +1079,49 @@ def asaas_teste():
     return jsonify({"ok": False, "erro": data.get('_erro') or data.get('errors') or data, "status": status}), 400
 
 
-@app.route('/parcela/<int:pid>/pagar-asaas', methods=['POST'])
+@app.route('/admin/emergency/status')
+@login_required
+@admin_required
+def emergency_status():
+    """Diagnóstico de emergência — mostra qual banco está sendo usado e dados dentro dele."""
+    import os
+    conn = db()
+    n_props = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
+    n_parcelas = conn.execute("SELECT COUNT(*) c FROM parcelas").fetchone()['c']
+    props = conn.execute("SELECT id, razao_social, adm_operadora, valor FROM propostas ORDER BY id").fetchall()
+    conn.close()
+    
+    db_path = os.path.join(DATA_DIR, 'job.db')
+    return jsonify({
+        "data_dir": DATA_DIR,
+        "db_path": db_path,
+        "db_exists": os.path.exists(db_path),
+        "db_size_kb": round(os.path.getsize(db_path) / 1024, 1) if os.path.exists(db_path) else 0,
+        "propostas_count": n_props,
+        "parcelas_count": n_parcelas,
+        "propostas": [dict(p) for p in props[:10]],
+    })
+
+@app.route('/admin/emergency/exportar-json')
+@login_required
+@admin_required
+def emergency_exportar():
+    """Exporta TODAS as propostas e parcelas em JSON para backup emergencial."""
+    conn = db()
+    props = conn.execute("SELECT * FROM propostas ORDER BY id").fetchall()
+    parc = conn.execute("SELECT * FROM parcelas ORDER BY proposta_id, numero").fetchall()
+    conn.close()
+    
+    data = {
+        "timestamp": datetime.now().isoformat(),
+        "propostas": [dict(p) for p in props],
+        "parcelas": [dict(p) for p in parc],
+    }
+    resp = jsonify(data)
+    resp.headers['Content-Disposition'] = f'attachment; filename="job_emergencia_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json"'
+    return resp
+
+
 @login_required
 @admin_required
 def parcela_pagar_asaas(pid):
