@@ -2515,9 +2515,14 @@ def crm_lead_editar(lid):
 
 @app.route('/crm/lead/<int:lid>/excluir', methods=['POST'])
 @login_required
-@admin_required
 def crm_lead_excluir(lid):
     conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        conn.close(); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    # Admin pode excluir qualquer lead; consultor só os seus próprios
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
+        conn.close(); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
     conn.execute("DELETE FROM crm_atividades WHERE lead_id=?", (lid,))
     conn.execute("DELETE FROM crm_leads WHERE id=?", (lid,))
     conn.commit(); conn.close()
