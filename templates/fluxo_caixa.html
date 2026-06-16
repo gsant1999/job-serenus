@@ -100,7 +100,7 @@
     {% if lote %}
     <table>
       <thead>
-        <tr><th>Consultor</th><th>Cliente</th><th>Parc.</th><th>Valor</th><th>Aceite</th><th>Status</th></tr>
+        <tr><th>Consultor</th><th>Cliente</th><th>Parc.</th><th>Valor</th><th>Aceite</th><th>Status</th><th>Pagamento</th></tr>
       </thead>
       <tbody>
         {% set ns = namespace(consultor_atual='') %}
@@ -123,6 +123,21 @@
               <option value="{{ s }}" {% if l.status == s %}selected{% endif %}>{{ s }}</option>
               {% endfor %}
             </select>
+          </td>
+          <td>
+            {% if l.asaas_transfer_id %}
+              {% if l.asaas_status == 'DONE' %}
+              <span class="tag tag-verde">✓ PIX enviado</span>
+              {% elif l.asaas_status in ('FAILED','CANCELLED') %}
+              <span class="tag tag-rosa" title="{{ l.asaas_erro or '' }}">✗ Falhou</span>
+              {% else %}
+              <span class="tag tag-am">⏳ Processando</span>
+              {% endif %}
+            {% elif l.chave_pix %}
+              <button class="btn-outline btn-sm" onclick="pagarAsaas({{ l.id }}, '{{ l.consultor }}', {{ l.valor }})">💳 Pagar PIX</button>
+            {% else %}
+              <span style="font-size:10px; color:var(--cinza-2);">sem chave PIX</span>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -202,6 +217,24 @@ async function aprovarAntecip(id) {
     const res = await fetch(`/parcela/${id}/aprovar-antecipacao`, { method: 'POST' });
     if ((await res.json()).ok) { toast('Antecipação aprovada', 'ok'); setTimeout(() => location.reload(), 800); }
   } catch(e) { toast('Erro', 'err'); }
+}
+
+async function pagarAsaas(id, consultor, valor) {
+  const valorFmt = 'R$ ' + valor.toFixed(2).replace('.', ',');
+  if (!confirm(`Confirma o envio de ${valorFmt} via PIX para ${consultor}?\\n\\nEssa ação envia dinheiro real e não pode ser desfeita.`)) return;
+  // segunda confirmação - dinheiro real
+  if (!confirm(`Tem certeza? ${valorFmt} será transferido AGORA para ${consultor}.`)) return;
+
+  try {
+    const res = await fetch(`/parcela/${id}/pagar-asaas`, { method: 'POST' });
+    const d = await res.json();
+    if (d.ok) {
+      toast('PIX enviado! Aguardando confirmação do Asaas...', 'ok');
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      toast('Erro: ' + (d.erro || 'falha desconhecida'), 'err');
+    }
+  } catch(e) { toast('Erro de rede ao tentar pagar', 'err'); }
 }
 </script>
 {% endblock %}

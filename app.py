@@ -1,4 +1,4 @@
-import os, sqlite3, json, hashlib, secrets
+import os, sqlite3, json, hashlib, secrets, re
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, abort
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -736,6 +736,9 @@ def init_db():
         ("parcelas", "perc_cliente", "REAL DEFAULT 100"),
         ("usuarios", "valor_fixo", "REAL DEFAULT 0"),
         ("usuarios", "chave_pix", "TEXT"),
+        ("parcelas", "asaas_transfer_id", "TEXT"),
+        ("parcelas", "asaas_status", "TEXT"),
+        ("parcelas", "asaas_erro", "TEXT"),
         ("usuarios", "foto", "TEXT"),
     ]
 
@@ -964,6 +967,164 @@ def admin_required(f):
         if session.get('perfil') != 'admin': return redirect(url_for('dashboard'))
         return f(*a, **kw)
     return w
+
+# ─── INTEGRAÇÃO ASAAS (pagamentos PIX para consultores) ──────────────────────────
+import requests as _requests
+
+ASAAS_API_KEY = os.environ.get('ASAAS_API_KEY', '')
+# Detecta automaticamente sandbox vs produção pelo prefixo da chave
+if ASAAS_API_KEY.startswith('$aact_prod') or ASAAS_API_KEY.startswith('aact_prod'):
+    ASAAS_BASE_URL = 'https://api.asaas.com/v3'
+else:
+    ASAAS_BASE_URL = os.environ.get('ASAAS_BASE_URL', 'https://api-sandbox.asaas.com/v3')
+
+def asaas_configurado():
+    return bool(ASAAS_API_KEY)
+
+def asaas_request(method, path, payload=None):
+    """Wrapper para chamadas à API do Asaas. Nunca loga a chave."""
+    if not asaas_configurado():
+        return {"_erro": "ASAAS_API_KEY não configurada no ambiente"}, 0
+    url = f"{ASAAS_BASE_URL}{path}"
+    headers = {
+        "Content-Type": "application/json",
+        "access_token": ASAAS_API_KEY,
+        "User-Agent": "JOB-Serenus/1.0",
+    }
+    try:
+        r = _requests.request(method, url, headers=headers, json=payload, timeout=20)
+        try:
+            data = r.json()
+        except Exception:
+            data = {"_erro": "Resposta inválida do Asaas", "_raw": r.text[:300]}
+        return data, r.status_code
+    except _requests.exceptions.RequestException as e:
+        return {"_erro": f"Falha de conexão: {e}"}, 0
+
+
+def asaas_detectar_tipo_chave(chave):
+    """Detecta o tipo da chave PIX pelo formato."""
+    chave = (chave or '').strip()
+    if not chave:
+        return None
+    apenas_digitos = re.sub(r'\D', '', chave)
+    if '@' in chave:
+        return 'EMAIL'
+    if len(apenas_digitos) == 11 and apenas_digitos == chave.replace('.', '').replace('-', ''):
+        return 'CPF'
+    if len(apenas_digitos) == 14:
+        return 'CNPJ'
+    if chave.startswith('+55') or (len(apenas_digitos) in (10, 11) and chave.startswith('+')):
+        return 'PHONE'
+    if len(chave) == 32 and re.match(r'^[a-f0-9\-]+$', chave.replace('-', '')):
+        return 'EVP'
+    # fallback: assume EVP (chave aleatória) se não bate com nenhum padrão
+    return 'EVP'
+
+
+@app.route('/admin/asaas/teste')
+@login_required
+@admin_required
+def asaas_teste():
+    """Testa a conexão com o Asaas (somente leitura - consulta saldo)."""
+    if not asaas_configurado():
+        return jsonify({"ok": False, "erro": "ASAAS_API_KEY não está configurada nas variáveis de ambiente do Railway."}), 400
+    data, status = asaas_request('GET', '/finance/balance')
+    if status == 200:
+        return jsonify({"ok": True, "saldo": data.get('balance'), "ambiente": "produção" if "api.asaas.com" in ASAAS_BASE_URL else "sandbox"})
+    return jsonify({"ok": False, "erro": data.get('_erro') or data.get('errors') or data, "status": status}), 400
+
+
+@app.route('/parcela/<int:pid>/pagar-asaas', methods=['POST'])
+@login_required
+@admin_required
+def parcela_pagar_asaas(pid):
+    """Cria uma transferência PIX real via Asaas para pagar a comissão do consultor."""
+    if not asaas_configurado():
+        return jsonify({"ok": False, "erro": "Asaas não configurado. Adicione ASAAS_API_KEY no Railway."}), 400
+
+    conn = db()
+    parc = conn.execute("""SELECT pa.*, p.consultor, p.usuario_id, p.razao_social
+        FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id WHERE pa.id=?""", (pid,)).fetchone()
+    if not parc:
+        conn.close(); return jsonify({"ok": False, "erro": "Parcela não encontrada"}), 404
+    if parc['status'] != 'Liberado para o corretor':
+        conn.close(); return jsonify({"ok": False, "erro": "Só é possível pagar parcelas liberadas para o corretor"}), 400
+    if parc['asaas_transfer_id']:
+        conn.close(); return jsonify({"ok": False, "erro": "Esta parcela já tem um pagamento Asaas iniciado"}), 400
+
+    consultor = conn.execute("SELECT chave_pix, nome FROM usuarios WHERE id=?", (parc['usuario_id'],)).fetchone()
+    chave_pix = (consultor['chave_pix'] if consultor else '') or ''
+    if not chave_pix.strip():
+        conn.close(); return jsonify({"ok": False, "erro": f"{parc['consultor']} não tem chave PIX cadastrada. Cadastre em Usuários."}), 400
+
+    tipo_chave = asaas_detectar_tipo_chave(chave_pix)
+    valor = round(float(parc['valor']), 2)
+
+    payload = {
+        "value": valor,
+        "pixAddressKey": chave_pix.strip(),
+        "pixAddressKeyType": tipo_chave,
+        "description": f"Comissão {parc['razao_social']} - Parcela {parc['numero']}"[:140],
+        "externalReference": f"parcela_{pid}",
+    }
+    data, status = asaas_request('POST', '/transfers', payload)
+
+    if status in (200, 201) and data.get('id'):
+        conn.execute("""UPDATE parcelas SET asaas_transfer_id=?, asaas_status=?, asaas_erro=NULL WHERE id=?""",
+                     (data['id'], data.get('status', 'PENDING'), pid))
+        conn.execute("""INSERT INTO historico_proposta (proposta_id, usuario_nome, campo, valor_antes, valor_depois)
+                        VALUES (?,?,?,?,?)""",
+                     (parc['proposta_id'] if 'proposta_id' in parc.keys() else None, session.get('nome'),
+                      'Pagamento PIX (Asaas)', '', f"R$ {valor:.2f} para {parc['consultor']} — transfer {data['id']}"))
+        conn.commit(); conn.close()
+        return jsonify({"ok": True, "transfer_id": data['id'], "status": data.get('status')})
+    else:
+        erro_msg = data.get('_erro')
+        if not erro_msg and data.get('errors'):
+            erro_msg = '; '.join([e.get('description', str(e)) for e in data['errors']])
+        conn.execute("UPDATE parcelas SET asaas_erro=? WHERE id=?", (str(erro_msg)[:300], pid))
+        conn.commit(); conn.close()
+        return jsonify({"ok": False, "erro": erro_msg or "Erro desconhecido do Asaas", "status": status}), 400
+
+
+@app.route('/webhook/asaas', methods=['POST'])
+def webhook_asaas():
+    """Recebe eventos do Asaas (status de transferências e cobranças)."""
+    try:
+        data = request.get_json(force=True) or {}
+        evento = data.get('event', '')
+        conn = db()
+
+        if evento.startswith('TRANSFER_'):
+            transfer = data.get('transfer', {})
+            transfer_id = transfer.get('id')
+            novo_status = transfer.get('status')
+            if transfer_id:
+                parc = conn.execute("SELECT id, proposta_id FROM parcelas WHERE asaas_transfer_id=?", (transfer_id,)).fetchone()
+                if parc:
+                    conn.execute("UPDATE parcelas SET asaas_status=? WHERE id=?", (novo_status, parc['id']))
+                    if evento == 'TRANSFER_DONE':
+                        conn.execute("""UPDATE parcelas SET status='Pago ao corretor', data_pagamento=? WHERE id=?""",
+                                     (transfer.get('effectiveDate') or datetime.now().strftime('%Y-%m-%d'), parc['id']))
+                        conn.execute("""INSERT INTO historico_proposta (proposta_id, usuario_nome, campo, valor_antes, valor_depois)
+                                        VALUES (?,?,?,?,?)""",
+                                     (parc['proposta_id'], 'Asaas (webhook)', 'Status do pagamento', 'Pendente', 'Pago ao corretor (PIX confirmado)'))
+                    elif evento in ('TRANSFER_FAILED', 'TRANSFER_CANCELLED'):
+                        motivo = transfer.get('failReason') or 'Transferência falhou ou foi cancelada'
+                        conn.execute("UPDATE parcelas SET asaas_erro=? WHERE id=?", (str(motivo)[:300], parc['id']))
+                    conn.commit()
+
+        elif evento.startswith('PAYMENT_'):
+            # Reservado para uso futuro (cobranças recebidas de clientes)
+            pass
+
+        conn.close()
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)}), 200  # 200 para o Asaas não reenviar em loop
+
+
 
 # ─── SERVIR ARQUIVOS (contratos, comprovantes) ──────────────────────────────────
 @app.route('/anexos/<path:nome>')
@@ -1626,8 +1787,11 @@ def fluxo_caixa():
 
         # Lote do ciclo atual (liberados para o corretor)
         lote = conn.execute("""
-            SELECT pa.*, p.razao_social, p.consultor, p.adm_operadora, p.id as proposta_id
-            FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
+            SELECT pa.*, p.razao_social, p.consultor, p.adm_operadora, p.id as proposta_id,
+                   u.chave_pix
+            FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            LEFT JOIN usuarios u ON u.id=p.usuario_id
             WHERE pa.status='Liberado para o corretor' ORDER BY p.consultor, pa.id
         """).fetchall()
 
