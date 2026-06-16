@@ -1,0 +1,21 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS"
+  },
+  "deploy": {
+    "startCommand": "python3 app.py",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3
+  },
+  "volumes": [
+    {
+      "name": "job-data",
+      "mountPath": "/data"
+    }
+  ],
+  "variables": {
+    "JOB_DATA_DIR": "/data",
+    "ASAAS_API_KEY": "$aact_prod_000MzkwODA2MWY2OGM3MWRlMDU2NWM3MzJlNzZmNGZhZGY6OjY5MGNjNzA4LTFjMzAtNDAzNi04NjQxLWViZWYzOGE0ODliNzo6JGFhY2hfZDk3Y2NhYmEtOTA0OC00YzVmLTgyNjMtNjc5ZjEyNDgxYjc0"
+  }
+}

@@ -116,7 +116,7 @@ def _from_json(s):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ─── PERSISTÊNCIA: dados em pasta FIXA no computador, fora das pastas de versão ───
 # Assim os dados NUNCA somem ao trocar de versão. Pode sobrescrever via variável de ambiente.
-DATA_DIR = os.environ.get("JOB_DATA_DIR") or os.path.join(os.path.expanduser("~"), "JOB_Serenus_Dados")
+DATA_DIR = os.environ.get("JOB_DATA_DIR") or "/data" if os.path.exists("/data") else os.path.join(os.path.expanduser("~"), "JOB_Serenus_Dados")
 os.makedirs(DATA_DIR, exist_ok=True)
 DB = os.path.join(DATA_DIR, "job.db")
 UPLOAD_FOLDER = os.path.join(DATA_DIR, "anexos")
