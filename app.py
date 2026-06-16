@@ -760,6 +760,28 @@ def init_db():
             except Exception:
                 pass  # Coluna já existe
         conn.commit()
+    
+    # ─── RECOVERY: Se banco zerado, carrega seed de recuperação ───
+    try:
+        n_props = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
+        if n_props == 0:  # Banco vazio — carrega seed
+            seed_path = os.path.join(BASE_DIR, "seed_recovery.sql")
+            if os.path.exists(seed_path):
+                print("[RECOVERY] Banco vazio detectado. Carregando seed_recovery.sql...")
+                with open(seed_path, 'r', encoding='utf-8') as f:
+                    sql_statements = f.read().split(';')
+                for stmt in sql_statements:
+                    stmt = stmt.strip()
+                    if stmt:
+                        try:
+                            conn.execute(stmt)
+                        except Exception as e:
+                            print(f"[RECOVERY] Erro ao executar: {e}")
+                conn.commit()
+                n_props_after = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
+                print(f"[RECOVERY] ✅ {n_props_after} propostas carregadas do seed")
+    except Exception as e:
+        print(f"[RECOVERY] Erro: {e}")
 
     conn.close()
 
