@@ -1102,6 +1102,57 @@ def emergency_status():
         "propostas": [dict(p) for p in props[:10]],
     })
 
+@app.route('/admin/emergency/carregar-backup-master', methods=['POST'])
+@login_required
+@admin_required
+def emergency_carregar_backup():
+    """Carrega o backup master com 5 propostas."""
+    import os
+    import shutil
+    
+    backup_master = os.path.join(os.path.expanduser("~"), "JOB_Serenus_Dados", "backups", "job_backup_20260616_212404.db")
+    db_path = os.path.join(DATA_DIR, 'job.db')
+    
+    if not os.path.exists(backup_master):
+        return jsonify({"ok": False, "erro": "Backup master não encontrado"}), 500
+    
+    try:
+        shutil.copy2(backup_master, db_path)
+        
+        conn = sqlite3.connect(db_path)
+        n_props = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
+        n_parcs = conn.execute("SELECT COUNT(*) c FROM parcelas").fetchone()['c']
+        conn.close()
+        
+        return jsonify({
+            "ok": True, 
+            "msg": f"✅ Backup carregado: {n_props} propostas, {n_parcs} parcelas",
+            "propostas": n_props,
+            "parcelas": n_parcs,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)}), 500
+
+
+    """Diagnóstico de emergência — mostra qual banco está sendo usado e dados dentro dele."""
+    import os
+    conn = db()
+    n_props = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
+    n_parcelas = conn.execute("SELECT COUNT(*) c FROM parcelas").fetchone()['c']
+    props = conn.execute("SELECT id, razao_social, adm_operadora, valor FROM propostas ORDER BY id").fetchall()
+    conn.close()
+    
+    db_path = os.path.join(DATA_DIR, 'job.db')
+    return jsonify({
+        "data_dir": DATA_DIR,
+        "db_path": db_path,
+        "db_exists": os.path.exists(db_path),
+        "db_size_kb": round(os.path.getsize(db_path) / 1024, 1) if os.path.exists(db_path) else 0,
+        "propostas_count": n_props,
+        "parcelas_count": n_parcelas,
+        "propostas": [dict(p) for p in props[:10]],
+    })
+
 @app.route('/admin/emergency/exportar-json')
 @login_required
 @admin_required
