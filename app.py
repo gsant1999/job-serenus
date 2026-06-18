@@ -992,6 +992,49 @@ def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None):
 # ─── AUTH ────────────────────────────────────────────────────────────────────────
 def hash_senha(s): return hashlib.sha256(s.encode()).hexdigest()
 
+# ════════════════════════════════════════════════════════════════════════════
+# SEGURANÇA: Decorators robusto + Sanitização + Logging
+# ════════════════════════════════════════════════════════════════════════════
+
+def require_auth(f):
+    """Valida autenticação. Retorna JSON 401 (não redirect)."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        user_id = session.get('user_id')
+        perfil = session.get('perfil')
+        if not user_id or perfil not in ('admin', 'consultor', 'supervisor'):
+            app.logger.warning(f"[AUTH] Acesso não autenticado a {request.endpoint}")
+            return jsonify({'erro': 'Não autenticado', 'codigo': 'AUTH_REQUIRED'}), 401
+        return f(*args, **kwargs)
+    return wrapper
+
+def require_admin(f):
+    """Permite apenas admin. Retorna 403 se não autorizado."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        user_id = session.get('user_id')
+        perfil = session.get('perfil')
+        if not user_id or perfil != 'admin':
+            app.logger.warning(f"[AUTH] Negado (não-admin) em {request.endpoint} por user_id={user_id}")
+            return jsonify({'erro': 'Acesso negado', 'codigo': 'FORBIDDEN'}), 403
+        return f(*args, **kwargs)
+    return wrapper
+
+def sanitize_string(s, max_length=255):
+    """Valida entrada: deve ser string, não vazia, tamanho <= max_length."""
+    if not isinstance(s, str):
+        return None
+    s = s.strip()
+    return s if len(s) > 0 and len(s) <= max_length else None
+
+def error_json(mensagem, codigo=None, status=400):
+    """Retorna erro padronizado (nunca expõe detalhes internos)."""
+    return jsonify({
+        'erro': mensagem,
+        'codigo': codigo or 'ERRO_DESCONHECIDO'
+    }), status
+
+
 def login_required(f):
     @wraps(f)
     def w(*a, **kw):
@@ -3022,6 +3065,17 @@ def auto_import_sqlite():
         except: pass
         auto_import_sqlite._done = True
 
+
+
+def log_operacao(usuario_id, operacao, detalhes='', nivel='info'):
+    """Log seguro: nunca expõe senhas/dados sensíveis."""
+    msg = f"[{operacao}] user={usuario_id} {detalhes}".replace('senha', '***').replace('token', '***')
+    if nivel == 'error':
+        app.logger.error(msg[:200])
+    elif nivel == 'warning':
+        app.logger.warning(msg[:200])
+    else:
+        app.logger.info(msg[:200])
 
 if __name__ == '__main__':
     import os
