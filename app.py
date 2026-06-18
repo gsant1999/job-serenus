@@ -3260,7 +3260,7 @@ except Exception as e:
 
 if __name__ == '__main__':
     import os
-    init_db()
+    # init_db() removida — Postgres já tem tabelas, SQLite usa fallback
     print("\n" + "="*52)
     print("  JOB · Serenus Corretora · v14")
     print("="*52)
