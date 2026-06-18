@@ -3023,6 +3023,324 @@ def auto_import_sqlite():
         auto_import_sqlite._done = True
 
 
+
+# ════════════════════════════════════════════════════════════════════════════
+# SISTEMA DE BACKUP AUTOMÁTICO — REDUNDÂNCIA MÁXIMA
+# ────────────────────────────────────────────────────────────────────────────
+# Camada 1 (a cada 1 minuto): 5 snapshots rotativos dentro do próprio Postgres
+#           → protege contra erro humano / bug que apague ou corrompa dados
+# Camada 2 (1x por dia, 03h BRT): snapshot completo guardado no Postgres
+#           (últimos 30 dias) E enviado para uma pasta /backups no GitHub
+#           → protege mesmo se o Supabase/Railway saírem do ar
+# Camada 3: backup nativo diário do próprio Supabase (já existe, fora do nosso
+#           controle, mas soma como mais uma camada de redundância)
+#
+# Tudo isolado em try/except: se o backup falhar por qualquer motivo, o
+# sistema principal CONTINUA funcionando normalmente — nunca derruba o site.
+# ════════════════════════════════════════════════════════════════════════════
+
+_TABELAS_EXCLUIDAS_BACKUP = {
+    'webhook_log', 'system_backups_rotativos', 'system_backups_diarios', 'sqlite_sequence'
+}
+
+def _listar_tabelas_negocio():
+    """Descobre dinamicamente todas as tabelas de dados reais (exclui logs/backups)."""
+    conn = db()
+    try:
+        cur = conn.cursor()
+        if DB_MODE == 'postgres':
+            cur.execute("""
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+            """)
+        else:
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        nomes = [r[0] for r in cur.fetchall()]
+        return sorted([n for n in nomes if n not in _TABELAS_EXCLUIDAS_BACKUP])
+    finally:
+        close_db(conn)
+
+def _serializar_valor_backup(v):
+    if isinstance(v, (datetime, date)):
+        return v.isoformat()
+    if isinstance(v, bytes):
+        try: return v.decode('utf-8')
+        except Exception: return str(v)
+    return v
+
+def _exportar_dados_completos():
+    """Exporta todas as tabelas de negócio para um dict 100% serializável em JSON."""
+    conn = db()
+    dados = {'gerado_em': datetime.utcnow().isoformat(), 'tabelas': {}}
+    try:
+        for tabela in _listar_tabelas_negocio():
+            cur = conn.cursor()
+            try:
+                cur.execute(f"SELECT * FROM {tabela}")
+                if DB_MODE == 'postgres':
+                    cols = [d[0] for d in cur.description]
+                    linhas = [
+                        {c: _serializar_valor_backup(v) for c, v in zip(cols, row)}
+                        for row in cur.fetchall()
+                    ]
+                else:
+                    linhas = [
+                        {k: _serializar_valor_backup(row[k]) for k in row.keys()}
+                        for row in cur.fetchall()
+                    ]
+                dados['tabelas'][tabela] = linhas
+            except Exception as e:
+                dados['tabelas'][tabela] = {'__erro__': str(e)}
+        return dados
+    finally:
+        close_db(conn)
+
+def _garantir_tabelas_backup():
+    """Cria as tabelas que guardam os próprios backups, se ainda não existirem."""
+    conn = db()
+    try:
+        cur = conn.cursor()
+        if DB_MODE == 'postgres':
+            cur.execute("""CREATE TABLE IF NOT EXISTS system_backups_rotativos (
+                slot INTEGER PRIMARY KEY, criado_em TIMESTAMP, dados JSONB)""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS system_backups_diarios (
+                id SERIAL PRIMARY KEY, data_referencia DATE UNIQUE,
+                criado_em TIMESTAMP, dados JSONB)""")
+        else:
+            cur.execute("""CREATE TABLE IF NOT EXISTS system_backups_rotativos (
+                slot INTEGER PRIMARY KEY, criado_em TEXT, dados TEXT)""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS system_backups_diarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, data_referencia TEXT UNIQUE,
+                criado_em TEXT, dados TEXT)""")
+        conn.commit()
+    finally:
+        close_db(conn)
+
+_LOCK_BACKUP_MINUTO = 914501
+_LOCK_BACKUP_DIARIO = 914502
+
+def fazer_backup_rotativo():
+    """Roda a cada 1 minuto. Mantém 5 slots (0 a 4) que se sobrescrevem em rodízio.
+    Usa advisory lock do Postgres para garantir que, mesmo com vários workers do
+    Gunicorn rodando o agendador, só UM execute o backup por vez (sem duplicar)."""
+    if DB_MODE != 'postgres':
+        return
+    conn = db()
+    obteve_lock = False
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT pg_try_advisory_lock(%s)", (_LOCK_BACKUP_MINUTO,))
+        obteve_lock = cur.fetchone()[0]
+        if not obteve_lock:
+            return
+        dados = _exportar_dados_completos()
+        slot = int(datetime.utcnow().timestamp() // 60) % 5
+        cur.execute("""
+            INSERT INTO system_backups_rotativos (slot, criado_em, dados)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (slot) DO UPDATE SET criado_em = EXCLUDED.criado_em, dados = EXCLUDED.dados
+        """, (slot, datetime.utcnow(), psycopg2.extras.Json(dados)))
+        conn.commit()
+    except Exception as e:
+        print(f"[Backup/min] ⚠️ {e}")
+        try: conn.rollback()
+        except Exception: pass
+    finally:
+        if obteve_lock:
+            try:
+                cur2 = conn.cursor()
+                cur2.execute("SELECT pg_advisory_unlock(%s)", (_LOCK_BACKUP_MINUTO,))
+                conn.commit()
+            except Exception: pass
+        close_db(conn)
+
+def _enviar_backup_github(data_referencia_iso, dados_json_str):
+    """Sobe uma cópia do backup diário para /backups no GitHub (fora de Railway/Supabase)."""
+    token = os.environ.get('GITHUB_TOKEN')
+    if not token:
+        return  # camada opcional — sem token configurado, simplesmente não envia
+    repo = os.environ.get('GITHUB_REPO', 'gsant1999/job-serenus')
+    try:
+        import base64, urllib.request
+        caminho = f"backups/backup_{data_referencia_iso}.json"
+        api_url = f"https://api.github.com/repos/{repo}/contents/{caminho}"
+        headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github+json'}
+
+        sha_existente = None
+        try:
+            req = urllib.request.Request(api_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                sha_existente = json.loads(resp.read().decode('utf-8')).get('sha')
+        except Exception:
+            pass
+
+        body = {
+            'message': f'Backup automático {data_referencia_iso}',
+            'content': base64.b64encode(dados_json_str.encode('utf-8')).decode('utf-8'),
+            'branch': 'main',
+        }
+        if sha_existente:
+            body['sha'] = sha_existente
+
+        req = urllib.request.Request(
+            api_url, data=json.dumps(body).encode('utf-8'),
+            headers={**headers, 'Content-Type': 'application/json'}, method='PUT'
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            print(f"[Backup/dia] ✅ Enviado ao GitHub: {caminho} (status {resp.status})")
+    except Exception as e:
+        print(f"[Backup/dia] ⚠️ Não foi possível enviar ao GitHub: {e}")
+
+def fazer_backup_diario():
+    """Roda 1x por dia (03h BRT). Guarda snapshot completo no Postgres (30 dias)
+    e envia uma cópia para o GitHub — redundância fora da infraestrutura atual."""
+    if DB_MODE != 'postgres':
+        return
+    conn = db()
+    obteve_lock = False
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT pg_try_advisory_lock(%s)", (_LOCK_BACKUP_DIARIO,))
+        obteve_lock = cur.fetchone()[0]
+        if not obteve_lock:
+            return
+
+        hoje = datetime.utcnow().date()
+        dados = _exportar_dados_completos()
+        dados_json_str = json.dumps(dados, ensure_ascii=False)
+
+        cur.execute("""
+            INSERT INTO system_backups_diarios (data_referencia, criado_em, dados)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (data_referencia) DO UPDATE SET criado_em = EXCLUDED.criado_em, dados = EXCLUDED.dados
+        """, (hoje, datetime.utcnow(), psycopg2.extras.Json(dados)))
+        cur.execute("DELETE FROM system_backups_diarios WHERE data_referencia < %s",
+                    (hoje - timedelta(days=30),))
+        conn.commit()
+        print(f"[Backup/dia] ✅ Snapshot de {hoje} salvo no Postgres")
+
+        _enviar_backup_github(hoje.isoformat(), dados_json_str)
+    except Exception as e:
+        print(f"[Backup/dia] ⚠️ {e}")
+        try: conn.rollback()
+        except Exception: pass
+    finally:
+        if obteve_lock:
+            try:
+                cur2 = conn.cursor()
+                cur2.execute("SELECT pg_advisory_unlock(%s)", (_LOCK_BACKUP_DIARIO,))
+                conn.commit()
+            except Exception: pass
+        close_db(conn)
+
+_scheduler_backup_iniciado = False
+
+def _iniciar_scheduler_backup():
+    """Liga o agendador (1x por processo). Se a biblioteca não estiver disponível
+    ou algo falhar, o site continua rodando normalmente — backup é best-effort."""
+    global _scheduler_backup_iniciado
+    if _scheduler_backup_iniciado or DB_MODE != 'postgres':
+        return
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        _garantir_tabelas_backup()
+        sched = BackgroundScheduler(daemon=True, timezone='UTC')
+        sched.add_job(fazer_backup_rotativo, 'interval', minutes=1,
+                      id='backup_rotativo', max_instances=1, coalesce=True)
+        sched.add_job(fazer_backup_diario, 'cron', hour=6, minute=0,
+                      id='backup_diario', max_instances=1, coalesce=True)
+        sched.start()
+        _scheduler_backup_iniciado = True
+        print("[Backup] ✅ Agendador iniciado — 1 snapshot/min (5 rotativos) + 1 snapshot/dia")
+    except Exception as e:
+        print(f"[Backup] ⚠️ Agendador não iniciado: {e}")
+
+try:
+    _iniciar_scheduler_backup()
+except Exception as _e:
+    print(f"[Backup] ⚠️ Falha ao tentar iniciar agendador: {_e}")
+
+
+# ─── PAINEL DE BACKUPS (somente admin) ───────────────────────────────────────
+@app.route('/admin/backups')
+@login_required
+@admin_required
+def admin_listar_backups():
+    """Mostra o status de todos os backups disponíveis para conferência rápida."""
+    if DB_MODE != 'postgres':
+        return jsonify({'ok': False, 'msg': 'Backup automático só roda em produção (Postgres).'})
+    conn = db()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT slot, criado_em, dados FROM system_backups_rotativos ORDER BY slot")
+        rotativos = []
+        for slot, criado_em, dados in cur.fetchall():
+            n_propostas = len(dados.get('tabelas', {}).get('propostas', [])) if isinstance(dados, dict) else None
+            rotativos.append({'slot': slot, 'criado_em': criado_em.isoformat() if criado_em else None,
+                               'propostas': n_propostas})
+
+        cur.execute("SELECT data_referencia, criado_em FROM system_backups_diarios ORDER BY data_referencia DESC LIMIT 30")
+        diarios = [{'data': d.isoformat(), 'criado_em': c.isoformat() if c else None}
+                   for d, c in cur.fetchall()]
+
+        return jsonify({'ok': True, 'rotativos_1_por_min': rotativos, 'diarios_30_dias': diarios,
+                         'github_configurado': bool(os.environ.get('GITHUB_TOKEN'))})
+    finally:
+        close_db(conn)
+
+@app.route('/admin/backups/forcar', methods=['POST'])
+@login_required
+@admin_required
+def admin_forcar_backup():
+    """Dispara um backup manual imediatamente (rotativo + diário), sem esperar o agendador."""
+    fazer_backup_rotativo()
+    fazer_backup_diario()
+    return jsonify({'ok': True, 'msg': 'Backup manual executado.'})
+
+@app.route('/admin/backups/restaurar/<tipo>/<identificador>', methods=['POST'])
+@login_required
+@admin_required
+def admin_restaurar_backup(tipo, identificador):
+    """Restaura um snapshot específico. tipo = 'rotativo' (identificador = slot 0-4)
+    ou 'diario' (identificador = AAAA-MM-DD). Sobrescreve os dados atuais — use com cuidado."""
+    if DB_MODE != 'postgres':
+        return jsonify({'ok': False, 'erro': 'Disponível somente em produção (Postgres).'}), 400
+    conn = db()
+    try:
+        cur = conn.cursor()
+        if tipo == 'rotativo':
+            cur.execute("SELECT dados FROM system_backups_rotativos WHERE slot = %s", (int(identificador),))
+        elif tipo == 'diario':
+            cur.execute("SELECT dados FROM system_backups_diarios WHERE data_referencia = %s", (identificador,))
+        else:
+            return jsonify({'ok': False, 'erro': "tipo deve ser 'rotativo' ou 'diario'"}), 400
+
+        row = cur.fetchone()
+        if not row:
+            return jsonify({'ok': False, 'erro': 'Backup não encontrado'}), 404
+
+        dados = row[0]
+        restaurado = {}
+        for tabela, linhas in dados.get('tabelas', {}).items():
+            if isinstance(linhas, dict) and '__erro__' in linhas:
+                continue
+            cur.execute(f"DELETE FROM {tabela}")
+            for linha in linhas:
+                cols = list(linha.keys())
+                vals = [linha[c] for c in cols]
+                placeholders = ", ".join(["%s"] * len(cols))
+                cur.execute(f"INSERT INTO {tabela} ({', '.join(cols)}) VALUES ({placeholders})", vals)
+            restaurado[tabela] = len(linhas)
+
+        conn.commit()
+        return jsonify({'ok': True, 'restaurado_de': dados.get('gerado_em'), 'tabelas': restaurado})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+    finally:
+        close_db(conn)
+
+
 if __name__ == '__main__':
     import os
     init_db()
