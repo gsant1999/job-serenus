@@ -199,6 +199,28 @@ _STRFTIME_PG = {
     '%H:%M:%S': 'HH24:MI:SS',
 }
 
+from decimal import Decimal as _Decimal
+
+def _val_sqlite_like(v):
+    """Converte um valor do Postgres para o que o SQLite devolveria.
+    O sistema inteiro foi escrito assumindo que datas vêm como TEXTO
+    (faz fromisoformat, fatia [:7] etc.) — o psycopg2 devolve datetime/Decimal."""
+    if isinstance(v, datetime):
+        return v.strftime('%Y-%m-%d %H:%M:%S')
+    if isinstance(v, date):
+        return v.strftime('%Y-%m-%d')
+    if isinstance(v, _Decimal):
+        return float(v)
+    return v
+
+def _row_sqlite_like(row):
+    """Aplica a conversão em todas as colunas de um RealDictRow (in-place)."""
+    if row is None:
+        return None
+    for k in list(row.keys()):
+        row[k] = _val_sqlite_like(row[k])
+    return row
+
 def _traduzir_sql_pg(sql):
     """Traduz uma query em sintaxe SQLite para PostgreSQL.
     SQL já nativo de Postgres (com %s e/ou ON CONFLICT, sem '?') passa intacto."""
@@ -237,10 +259,11 @@ class _CursorCompat:
         else:
             self._c.execute(s, params)
         return self
-    def fetchone(self):  return self._c.fetchone()
-    def fetchall(self):  return self._c.fetchall()
+    def fetchone(self):  return _row_sqlite_like(self._c.fetchone())
+    def fetchall(self):  return [_row_sqlite_like(r) for r in self._c.fetchall()]
     def fetchmany(self, size=None):
-        return self._c.fetchmany(size) if size is not None else self._c.fetchmany()
+        rows = self._c.fetchmany(size) if size is not None else self._c.fetchmany()
+        return [_row_sqlite_like(r) for r in rows]
     @property
     def description(self): return self._c.description
     @property
@@ -250,7 +273,9 @@ class _CursorCompat:
     def close(self):
         try: self._c.close()
         except Exception: pass
-    def __iter__(self): return iter(self._c)
+    def __iter__(self):
+        for r in self._c:
+            yield _row_sqlite_like(r)
 
 class _ConnCompat:
     """Imita sqlite3.Connection sobre uma conexão psycopg2."""
