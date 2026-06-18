@@ -7,7 +7,7 @@ from dateutil.relativedelta import relativedelta
 # ─── SUPORTE A PostgreSQL (Railway/Supabase) ──────────────────────────────────
 try:
     import psycopg2, psycopg2.extras, psycopg2.pool
-    HAS_POSTGRES = False  # DESABILITADO: forçar SQLite
+    HAS_POSTGRES = True   # REABILITADO: usar PostgreSQL do Railway
 except ImportError:
     HAS_POSTGRES = False
 
