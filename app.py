@@ -7,7 +7,7 @@ from dateutil.relativedelta import relativedelta
 # ─── SUPORTE A PostgreSQL (Railway/Supabase) ──────────────────────────────────
 try:
     import psycopg2, psycopg2.extras, psycopg2.pool
-    HAS_POSTGRES = True   # REABILITADO: usar PostgreSQL do Railway
+    HAS_POSTGRES = False  # TEMPORÁRIO: SQLite para criar tabelas com init_db()
 except ImportError:
     HAS_POSTGRES = False
 
@@ -3260,7 +3260,7 @@ except Exception as e:
 
 if __name__ == '__main__':
     import os
-    # init_db() removida — Postgres já tem tabelas, SQLite usa fallback
+    init_db()  # REABILITADO: criar tabelas em SQLite
     print("\n" + "="*52)
     print("  JOB · Serenus Corretora · v14")
     print("="*52)
