@@ -3000,6 +3000,29 @@ def minha_foto():
 
 
 
+
+# Auto-import SQLite → PostgreSQL na primeira requisição
+@app.before_request
+def auto_import_sqlite():
+    if not hasattr(auto_import_sqlite, '_done'):
+        try:
+            import os, sqlite3
+            sqlite_db = os.path.expanduser("~/JOB_Serenus_Dados/job.db")
+            if os.path.exists(sqlite_db) and DB_MODE == 'postgres':
+                conn = db()
+                sqlite_conn = sqlite3.connect(sqlite_db)
+                for row in sqlite_conn.execute("SELECT * FROM propostas"):
+                    cols = ", ".join([k for k in dict(row).keys()])
+                    vals = ", ".join([f"'{str(v).replace(chr(39), chr(39)*2)}'" if v else "NULL" for v in dict(row).values()])
+                    conn.execute(f"INSERT INTO propostas ({cols}) VALUES ({vals})")
+                conn.commit()
+                close_db(conn)
+                sqlite_conn.close()
+                print("✅ Dados SQLite importados!")
+        except: pass
+        auto_import_sqlite._done = True
+
+
 if __name__ == '__main__':
     import os
     init_db()
