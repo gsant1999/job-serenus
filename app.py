@@ -179,6 +179,36 @@ def _build_pg_url(raw_url):
     except Exception:
         return raw_url + ('?sslmode=require' if '?' not in raw_url else '&sslmode=require')
 
+
+# ════════════════════════════════════════════════════════════════════════════
+# COMPATIBILIDADE SQLite ↔ PostgreSQL
+# ════════════════════════════════════════════════════════════════════════════
+
+def execute_sql(conn, sql, params=()):
+    """Executa SQL em SQLite ou PostgreSQL (usa API correta pra cada um)."""
+    if DB_MODE == 'postgres':
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        return cur
+    else:
+        # SQLite
+        return conn.execute(sql, params)
+
+def fetchall_compat(result):
+    """Pega todos os resultados (compatível com ambos)."""
+    if DB_MODE == 'postgres':
+        return result.fetchall()
+    else:
+        return result.fetchall()
+
+def fetchone_compat(result):
+    """Pega um resultado (compatível com ambos)."""
+    if DB_MODE == 'postgres':
+        return result.fetchone()
+    else:
+        return result.fetchone()
+
+
 def db():
     """Retorna conexão ao banco. PostgreSQL na nuvem, SQLite localmente."""
     global _pg_pool
@@ -634,18 +664,18 @@ def init_db():
     # Colunas que ja estao nas tabelas acima, então não precisa add_col
     # (tudo já tá no CREATE TABLE IF NOT EXISTS)
     
-    conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)", 
+    execute_sql(conn, "INSERT INTO config (chave,valor) VALUES (?,?)", 
         ('affinity_destinatarios', 'pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br'))
-    conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)",
+    execute_sql(conn, "INSERT INTO config (chave,valor) VALUES (?,?)",
         ('affinity_contato', 'Pamela'))
-    conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)",
+    execute_sql(conn, "INSERT INTO config (chave,valor) VALUES (?,?)",
         ('affinity_remetente', 'guilherme@serenuscorretora.com.br'))
     
     # Etiquetas padrão
     etq_default = [('Renovação','#3b82f6'),('Reajuste','#fb923c'),('Pós-venda','#1fd8a4'),
                    ('Campanha','#8b5cf6'),('Atenção estorno','#f43f7c'),('Indicação','#facc15')]
     for nome, cor in etq_default:
-        conn.execute("INSERT OR IGNORE INTO etiquetas (nome,cor) VALUES (?,?)", (nome, cor))
+        execute_sql(conn, "INSERT INTO etiquetas (nome,cor) VALUES (?,?)", (nome, cor))
     
     # Regimes padrão
     regimes_default = [
@@ -697,7 +727,7 @@ def init_db():
         ('n3','N3', 7000.01, None, 3),
     ]
     for n in niveis_default:
-        conn.execute("INSERT OR IGNORE INTO niveis (codigo,label,faixa_min,faixa_max,ordem) VALUES (?,?,?,?,?)", n)
+        execute_sql(conn, "INSERT INTO niveis (codigo,label,faixa_min,faixa_max,ordem) VALUES (?,?,?,?,?)", n)
     
     # Seed de comissões (se arquivo existe)
     ja_tem = conn.execute("SELECT COUNT(*) as c FROM recebimento").fetchone()
@@ -1780,7 +1810,7 @@ def proposta_etiquetas(pid):
     conn = db()
     conn.execute("DELETE FROM proposta_etiquetas WHERE proposta_id=?", (pid,))
     for eid in ids:
-        conn.execute("INSERT OR IGNORE INTO proposta_etiquetas (proposta_id,etiqueta_id) VALUES (?,?)", (pid, eid))
+        execute_sql(conn, "INSERT INTO proposta_etiquetas (proposta_id,etiqueta_id) VALUES (?,?)", (pid, eid))
     conn.commit(); conn.close()
     return jsonify({"ok": True})
 
