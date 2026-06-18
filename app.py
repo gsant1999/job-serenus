@@ -7,7 +7,7 @@ from dateutil.relativedelta import relativedelta
 # ─── SUPORTE A PostgreSQL (Railway/Supabase) ──────────────────────────────────
 try:
     import psycopg2, psycopg2.extras, psycopg2.pool
-    HAS_POSTGRES = False  # TEMPORÁRIO: SQLite para criar tabelas com init_db()
+    HAS_POSTGRES = True   # PostgreSQL do Railway — persiste entre deploys (definitivo)
 except ImportError:
     HAS_POSTGRES = False
 
@@ -129,7 +129,6 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ─── MODO DO BANCO: PostgreSQL (Railway) ou SQLite (local) ──────────────────
 DB_MODE = 'postgres' if (os.environ.get('DATABASE_URL') and HAS_POSTGRES) else 'sqlite'
-_pg_pool = None
 
 # ─── VARIÁVEIS GLOBAIS NECESSÁRIAS ──────────────────────────────────────────
 STATUS_FLUXO = [
@@ -179,24 +178,117 @@ def _build_pg_url(raw_url):
     except Exception:
         return raw_url + ('?sslmode=require' if '?' not in raw_url else '&sslmode=require')
 
+# ════════════════════════════════════════════════════════════════════════════
+# CAMADA DE COMPATIBILIDADE  SQLite ↔ PostgreSQL
+# Faz o psycopg2 se comportar EXATAMENTE como o sqlite3, para que TODO o código
+# escrito em sintaxe SQLite (conn.execute, placeholders "?", INSERT OR IGNORE,
+# strftime) funcione no PostgreSQL sem reescrever as ~240 consultas do sistema.
+#   • conn.execute(sql, params)  → devolve um cursor (igual sqlite3)
+#   • cursor.execute(...)        → encadeável: .execute(...).fetchone()
+#   • rows acessíveis por nome   → row['coluna']  e  dict(row)
+#   • tradução automática de SQL SQLite → PostgreSQL
+# SQL já em sintaxe Postgres (%s, ON CONFLICT) passa intacto pela tradução.
+# ════════════════════════════════════════════════════════════════════════════
+
+# strftime('%Y-%m', col) (SQLite) → TO_CHAR((col)::timestamp, 'YYYY-MM') (Postgres)
+_STRFTIME_PG = {
+    '%Y-%m-%d %H:%M:%S': 'YYYY-MM-DD HH24:MI:SS',
+    '%Y-%m-%d': 'YYYY-MM-DD',
+    '%Y-%m': 'YYYY-MM',
+    '%Y': 'YYYY', '%m': 'MM', '%d': 'DD',
+    '%H:%M:%S': 'HH24:MI:SS',
+}
+
+def _traduzir_sql_pg(sql):
+    """Traduz uma query em sintaxe SQLite para PostgreSQL.
+    SQL já nativo de Postgres (com %s e/ou ON CONFLICT, sem '?') passa intacto."""
+    s = sql
+    # 1) strftime('fmt', coluna) → TO_CHAR((coluna)::timestamp, 'FMT')
+    if 'strftime' in s:
+        def _rep_strf(m):
+            fmt = m.group(1)
+            col = m.group(2).strip()
+            pg = _STRFTIME_PG.get(fmt) or (fmt.replace('%Y', 'YYYY').replace('%m', 'MM')
+                 .replace('%d', 'DD').replace('%H', 'HH24').replace('%M', 'MI').replace('%S', 'SS'))
+            return f"TO_CHAR(({col})::timestamp, '{pg}')"
+        s = re.sub(r"strftime\(\s*'([^']*)'\s*,\s*([^()]+?)\s*\)", _rep_strf, s, flags=re.I)
+    # 2) INSERT OR IGNORE INTO ... → INSERT INTO ... ON CONFLICT DO NOTHING
+    if re.search(r'INSERT\s+OR\s+IGNORE\s+INTO', s, re.I):
+        s = re.sub(r'INSERT\s+OR\s+IGNORE\s+INTO', 'INSERT INTO', s, count=1, flags=re.I)
+        s_strip = s.rstrip().rstrip(';').rstrip()
+        if 'ON CONFLICT' not in s_strip.upper():
+            s = s_strip + ' ON CONFLICT DO NOTHING'
+    # 3) AUTOINCREMENT (DDL) → SERIAL
+    if 'AUTOINCREMENT' in s.upper():
+        s = re.sub(r'INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT', 'SERIAL PRIMARY KEY', s, flags=re.I)
+        s = re.sub(r'\s+AUTOINCREMENT', '', s, flags=re.I)
+    # 4) placeholders ? → %s  (as queries SQLite deste sistema não têm % literal)
+    s = s.replace('?', '%s')
+    return s
+
+class _CursorCompat:
+    """Imita sqlite3.Cursor: execute() encadeável + rows por nome (RealDictRow)."""
+    def __init__(self, raw):
+        self._c = raw
+    def execute(self, sql, params=None):
+        s = _traduzir_sql_pg(sql)
+        if params is None:
+            self._c.execute(s)
+        else:
+            self._c.execute(s, params)
+        return self
+    def fetchone(self):  return self._c.fetchone()
+    def fetchall(self):  return self._c.fetchall()
+    def fetchmany(self, size=None):
+        return self._c.fetchmany(size) if size is not None else self._c.fetchmany()
+    @property
+    def description(self): return self._c.description
+    @property
+    def rowcount(self):    return self._c.rowcount
+    @property
+    def lastrowid(self):   return None  # Postgres: ver _last_insert_id()
+    def close(self):
+        try: self._c.close()
+        except Exception: pass
+    def __iter__(self): return iter(self._c)
+
+class _ConnCompat:
+    """Imita sqlite3.Connection sobre uma conexão psycopg2."""
+    def __init__(self, raw):
+        self._conn = raw
+    def _novo_cursor(self):
+        return _CursorCompat(self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor))
+    def execute(self, sql, params=None):
+        return self._novo_cursor().execute(sql, params)
+    def executescript(self, script):
+        cur = self._conn.cursor()
+        cur.execute(_traduzir_sql_pg(script))
+        cur.close()
+        return self
+    def cursor(self):
+        return self._novo_cursor()
+    def commit(self):   self._conn.commit()
+    def rollback(self):
+        try: self._conn.rollback()
+        except Exception: pass
+    def close(self):
+        try: self._conn.close()
+        except Exception: pass
+    @property
+    def raw(self): return self._conn
+
 def db():
-    """Retorna conexão ao banco. PostgreSQL na nuvem, SQLite localmente."""
-    global _pg_pool
+    """Conexão ao banco. PostgreSQL (Railway, persiste entre deploys) ou SQLite.
+    Sem pool: cada chamada abre uma conexão nova e curta — robusto e sem
+    'connection pool exhausted'. Em Postgres devolve o wrapper de compatibilidade."""
     if DB_MODE == 'postgres':
-        if _pg_pool is None:
-            try:
-                url = _build_pg_url(os.environ['DATABASE_URL'])
-                _pg_pool = psycopg2.pool.SimpleConnectionPool(1, 5, url)
-                print("[DB] ✅ PostgreSQL conectado!")
-            except Exception as e:
-                print(f"[DB] ⚠️ Postgres falhou ({e}), usando SQLite como fallback")
-                return _sqlite_conn()
         try:
-            conn = _pg_pool.getconn()
-            conn.autocommit = False
-            return conn
+            url = _build_pg_url(os.environ['DATABASE_URL'])
+            raw = psycopg2.connect(url)
+            raw.autocommit = False
+            return _ConnCompat(raw)
         except Exception as e:
-            print(f"[DB] ⚠️ Pool falhou ({e}), usando SQLite")
+            print(f"[DB] ⚠️ Postgres indisponível ({e}); usando SQLite como rede de segurança")
             return _sqlite_conn()
     return _sqlite_conn()
 
@@ -206,12 +298,21 @@ def _sqlite_conn():
     return conn
 
 def close_db(conn):
-    """Fecha conexão respeitando o modo."""
-    global _pg_pool
-    if DB_MODE == 'postgres' and _pg_pool:
-        _pg_pool.putconn(conn)
-    else:
+    """Fecha a conexão (cada requisição abre/fecha a sua — sem pool)."""
+    try:
         conn.close()
+    except Exception:
+        pass
+
+def _last_insert_id(cur):
+    """Emula cur.lastrowid. Em Postgres usa lastval() (sequência da sessão atual)."""
+    if DB_MODE == 'postgres':
+        try:
+            cur.execute("SELECT lastval() AS id")
+            return cur.fetchone()['id']
+        except Exception:
+            return None
+    return cur.lastrowid
 
 def init_db():
     conn = db()
@@ -770,12 +871,18 @@ def init_db():
         ("usuarios", "foto", "TEXT"),
     ]
 
+    for tabela, coluna, tipo in migracoes:
+        try:
+            ddl = f"ALTER TABLE {tabela} ADD COLUMN {'IF NOT EXISTS ' if is_pg else ''}{coluna} {tipo}"
+            conn.execute(ddl)
+            if is_pg:
+                conn.commit()
+        except Exception:
+            if is_pg:
+                try: conn.rollback()
+                except Exception: pass
+            # SQLite: coluna já existe → ignora
     if not is_pg:
-        for tabela, coluna, tipo in migracoes:
-            try:
-                conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
-            except Exception:
-                pass  # Coluna já existe
         conn.commit()
 
     conn.close()
@@ -1539,7 +1646,7 @@ def salvar_proposta():
             d.get('observacoes'),json.dumps(nomes),contrato_arq,comprovante_arq,
             json.dumps(extras, ensure_ascii=False),d.get('quem_subiu','Consultor')
         ))
-        proposta_id = cur.lastrowid
+        proposta_id = _last_insert_id(cur)
         dia_venc = d.get('dia_vencimento') or None
         if dia_venc:
             try: cur.execute("UPDATE propostas SET dia_vencimento=? WHERE id=?", (int(dia_venc), proposta_id))
@@ -3144,11 +3251,8 @@ def _fazer_snapshot_emergencia():
             cur = conn.cursor()
             try:
                 cur.execute(f"SELECT * FROM {tabela}")
-                if DB_MODE == 'postgres':
-                    cols = [d[0] for d in cur.description or []]
-                    snapshot['tabelas'][tabela] = [dict(zip(cols, row)) for row in cur.fetchall()]
-                else:
-                    snapshot['tabelas'][tabela] = [dict(row) for row in cur.fetchall()]
+                # RealDictRow (Postgres) e sqlite3.Row (SQLite) convertem direto para dict
+                snapshot['tabelas'][tabela] = [dict(row) for row in cur.fetchall()]
             except Exception as e:
                 app.logger.warning(f"[resilience] Erro ao ler {tabela}: {e}")
                 snapshot['tabelas'][tabela] = []
@@ -3231,6 +3335,16 @@ def _verificar_banco_vazio():
         app.logger.error(f"[resilience] Erro ao verificar banco: {e}")
         return False
 
+# ─── INICIALIZAÇÃO DO SCHEMA (no import — Railway roda `python app.py`) ───────
+# Cria/atualiza as tabelas ANTES de qualquer verificação ou requisição.
+# Funciona tanto em PostgreSQL (persiste) quanto em SQLite (fallback local).
+try:
+    init_db()
+    _db_initialized = True
+    print(f"[STARTUP] ✅ Schema pronto ({DB_MODE.upper()})")
+except Exception as _e:
+    print(f"[STARTUP] ⚠️ init_db falhou no import ({_e}); será tentado por requisição")
+
 # Executar ao iniciar
 _verificar_banco_vazio()
 
@@ -3260,7 +3374,7 @@ except Exception as e:
 
 if __name__ == '__main__':
     import os
-    init_db()  # REABILITADO: criar tabelas em SQLite
+    # init_db() já roda no import acima
     print("\n" + "="*52)
     print("  JOB · Serenus Corretora · v14")
     print("="*52)
