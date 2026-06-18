@@ -224,7 +224,7 @@ def db():
         try:
             conn = _pg_pool.getconn()
             conn.autocommit = False
-            return conn
+            return _PgWrapper(conn)
         except Exception as e:
             print(f"[DB] ⚠️ Pool falhou ({e}), usando SQLite")
             return _sqlite_conn()
@@ -235,11 +235,185 @@ def _sqlite_conn():
     conn.row_factory = sqlite3.Row
     return conn
 
+# ─── WRAPPER PostgreSQL → interface compatível com SQLite ────────────────────────
+# Traduz automaticamente: ? → %s, INSERT OR IGNORE → ON CONFLICT DO NOTHING,
+# strftime('%Y-%m',...) → TO_CHAR(...,'YYYY-MM'), last_insert_rowid() → lastrowid,
+# e retorna linhas como dicionários (igual ao sqlite3.Row).
+
+import re as _re
+
+def _pg_adapt_sql(sql):
+    """Adapta SQL SQLite para PostgreSQL."""
+    # INSERT OR IGNORE → INSERT ... ON CONFLICT DO NOTHING
+    had_or_ignore = bool(_re.search(r'(?i)\bINSERT\s+OR\s+IGNORE\b', sql))
+    sql = _re.sub(r'(?i)\bINSERT\s+OR\s+IGNORE\b', 'INSERT', sql)
+    if had_or_ignore:
+        sql = sql.rstrip().rstrip(';') + ' ON CONFLICT DO NOTHING'
+    # strftime('%Y-%m', col) → TO_CHAR(col, 'YYYY-MM')
+    sql = _re.sub(r"strftime\('%Y-%m',\s*([^)]+)\)", r"TO_CHAR(\1, 'YYYY-MM')", sql)
+    # strftime('%Y-%m-%d', col) → TO_CHAR(col, 'YYYY-MM-DD')
+    sql = _re.sub(r"strftime\('%Y-%m-%d',\s*([^)]+)\)", r"TO_CHAR(\1, 'YYYY-MM-DD')", sql)
+    # ? → %s (parameter placeholder)
+    sql = sql.replace('?', '%s')
+    return sql
+
+
+class _PgRow(dict):
+    """Linha de resultado PostgreSQL com acesso por chave e por índice."""
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
+    def keys(self):
+        return super().keys()
+
+class _PgCursor:
+    """Cursor psycopg2 com interface compatível com sqlite3."""
+    def __init__(self, raw_cursor):
+        self._cur = raw_cursor
+        self.lastrowid = None
+        self.description = None
+        self._was_insert = False
+
+    def execute(self, sql, params=()):
+        adapted = _pg_adapt_sql(sql)
+        # Detecta SELECT last_insert_rowid() — não executa, retorna self com lastrowid
+        if _re.search(r'(?i)SELECT\s+last_insert_rowid\(\)', adapted):
+            self.description = None
+            return self
+        # Para INSERT, tenta capturar o lastrowid via RETURNING id
+        is_insert = bool(_re.match(r'\s*INSERT\b', adapted, _re.IGNORECASE))
+        self._was_insert = is_insert
+        if is_insert and 'RETURNING' not in adapted.upper():
+            # Detecta se a tabela tem coluna 'id' pelo nome da tabela no INSERT
+            m_table = _re.match(r'\s*INSERT\s+INTO\s+(\w+)', adapted, _re.IGNORECASE)
+            tables_with_id = {
+                'usuarios', 'supervisoras', 'regimes', 'comissoes', 'propostas',
+                'parcelas', 'campos_custom', 'repasses', 'lancamentos', 'regras_estorno',
+                'etiquetas', 'produtos', 'historico_proposta',
+                'recebimento', 'repasse_corretor', 'crm_leads', 'crm_atividades',
+                'webhook_log',
+            }
+            table_name = m_table.group(1).lower() if m_table else ''
+            if table_name in tables_with_id:
+                adapted = adapted.rstrip().rstrip(';') + ' RETURNING id'
+        self._cur.execute(adapted, params or ())
+        self.description = self._cur.description
+        if is_insert:
+            if self.description and self._cur.description and self._cur.description[0][0] == 'id':
+                try:
+                    row = self._cur.fetchone()
+                    if row:
+                        self.lastrowid = row[0]
+                except Exception:
+                    pass
+            self.description = None
+        return self
+
+    def fetchone(self):
+        # Se foi INSERT ou SELECT last_insert_rowid(), não há mais linhas para buscar
+        if self._was_insert or (self.lastrowid is not None and self.description is None):
+            return None
+        row = self._cur.fetchone()
+        if row is None:
+            return None
+        if self._cur.description:
+            cols = [d[0] for d in self._cur.description]
+            return _PgRow(zip(cols, row))
+        return row
+
+    def fetchall(self):
+        # Se foi INSERT, não há linhas para buscar
+        if self._was_insert:
+            return []
+        rows = self._cur.fetchall()
+        if not rows:
+            return []
+        if self._cur.description:
+            cols = [d[0] for d in self._cur.description]
+            return [_PgRow(zip(cols, r)) for r in rows]
+        return rows
+
+    def close(self):
+        try:
+            self._cur.close()
+        except Exception:
+            pass
+
+class _PgWrapper:
+    """Wrapper sobre conexão psycopg2 com interface compatível com sqlite3.Connection."""
+    def __init__(self, raw_conn):
+        self._conn = raw_conn
+        self._last_cursor = None
+
+    def cursor(self):
+        raw = self._conn.cursor()
+        cur = _PgCursor(raw)
+        self._last_cursor = cur
+        return cur
+
+    def execute(self, sql, params=()):
+        adapted = _pg_adapt_sql(sql)
+        # SELECT last_insert_rowid() — retorna cursor com lastrowid do último INSERT
+        if _re.search(r'(?i)SELECT\s+last_insert_rowid\(\)', adapted):
+            class _FakeCursor:
+                def __init__(self, lid): self._lid = lid
+                def fetchone(self): return _PgRow({'id': self._lid})
+                def fetchall(self): return [_PgRow({'id': self._lid})]
+                def close(self): pass
+            lid = self._last_cursor.lastrowid if self._last_cursor else None
+            return _FakeCursor(lid)
+        raw = self._conn.cursor()
+        pg_cur = _PgCursor(raw)
+        pg_cur.execute(sql, params)
+        self._last_cursor = pg_cur
+        return pg_cur
+
+    def fetchone(self):
+        if self._last_cursor:
+            return self._last_cursor.fetchone()
+        return None
+
+    def fetchall(self):
+        if self._last_cursor:
+            return self._last_cursor.fetchall()
+        return []
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        """Devolve a conexão ao pool (PostgreSQL) ou fecha (SQLite)."""
+        global _pg_pool
+        if _pg_pool is not None:
+            try:
+                _pg_pool.putconn(self._conn)
+            except Exception:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+        else:
+            self._conn.close()
+
+    def executescript(self, sql):
+        """Compatibilidade: não usado no caminho PostgreSQL."""
+        pass
+
+    @property
+    def autocommit(self):
+        return self._conn.autocommit
+
+    @autocommit.setter
+    def autocommit(self, value):
+        self._conn.autocommit = value
+
 def close_db(conn):
     """Fecha conexão respeitando o modo."""
     global _pg_pool
+    raw = conn._conn if isinstance(conn, _PgWrapper) else conn
     if DB_MODE == 'postgres' and _pg_pool:
-        _pg_pool.putconn(conn)
+        _pg_pool.putconn(raw)
     else:
         conn.close()
 
@@ -323,6 +497,9 @@ def init_db():
                 perc_cliente REAL DEFAULT 100,
                 competencia TEXT, mensalidade_ref INTEGER, ok_entrada INTEGER DEFAULT 0,
                 tipo_origem TEXT DEFAULT 'comissao',
+                asaas_transfer_id TEXT,
+                asaas_status TEXT,
+                asaas_erro TEXT,
                 FOREIGN KEY(proposta_id) REFERENCES propostas(id)
             )""",
             """CREATE TABLE IF NOT EXISTS campos_custom (
@@ -446,6 +623,12 @@ def init_db():
                 tipo TEXT DEFAULT 'nota',
                 descricao TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS webhook_log (
+                id SERIAL PRIMARY KEY,
+                evento_id TEXT UNIQUE,
+                evento TEXT,
+                processado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
         ]
         for sql in tables_sql:
@@ -783,13 +966,12 @@ def init_db():
         ("usuarios", "foto", "TEXT"),
     ]
 
-    if not is_pg:
-        for tabela, coluna, tipo in migracoes:
-            try:
-                conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
-            except Exception:
-                pass  # Coluna já existe
-        conn.commit()
+    for tabela, coluna, tipo in migracoes:
+        try:
+            conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
+            conn.commit()
+        except Exception:
+            pass  # Coluna já existe
 
     conn.close()
 
@@ -914,7 +1096,7 @@ def _nivel_por_producao(prod, conn):
 def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidade='', tipo_pessoa=''):
     """Motor de comissão — lê de recebimento (corretora) + repasse_corretor (consultor).
     Tudo em NÚMERO DE MENSALIDADES (1.8 = 1,8 mensalidade = 180%). Sem dividir por 100."""
-    conn = _sqlite_conn()
+    conn = db()
     valor = float(valor_venda or 0)
     op_nome, op_obs = _split_operadora(operadora)
     plano = _plano_from_modalidade(modalidade, tipo_pessoa)
@@ -925,7 +1107,7 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
         (op_nome, op_obs, plano)).fetchone()
     if not receb:
         receb = conn.execute(
-            "SELECT total FROM recebimento WHERE operadora=? AND plano=? ORDER BY (obs='') DESC LIMIT 1",
+            "SELECT total FROM recebimento WHERE operadora=? AND plano=? ORDER BY CASE WHEN obs='' THEN 0 ELSE 1 END DESC LIMIT 1",
             (op_nome, plano)).fetchone()
     receb_mens = float(receb['total']) if receb else 0.0
     total_corretora = round(valor * receb_mens, 2)
@@ -954,7 +1136,7 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
         (op_nome, op_obs, plano, modelo, nivel)).fetchone()
     if not rep:
         rep = conn.execute(
-            "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND plano=? AND modelo=? AND nivel=? ORDER BY (obs='') DESC LIMIT 1",
+            "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND plano=? AND modelo=? AND nivel=? ORDER BY CASE WHEN obs='' THEN 0 ELSE 1 END DESC LIMIT 1",
             (op_nome, plano, modelo, nivel)).fetchone()
     rep_mens = float(rep['total']) if rep else 0.0
     regua_str = (rep['regua'] if rep and rep['regua'] else '') or ''
@@ -1799,7 +1981,7 @@ def etiqueta_criar():
     try:
         conn.execute("INSERT INTO etiquetas (nome,cor) VALUES (?,?)", (d['nome'], d.get('cor','#1fd8a4')))
         conn.commit()
-    except sqlite3.IntegrityError: pass
+    except Exception: pass  # UniqueViolation (PG) ou IntegrityError (SQLite)
     conn.close()
     return jsonify({"ok": True})
 
@@ -2163,7 +2345,7 @@ def usuario_novo():
             VALUES (?,?,?,?,?,?)""",(nome,email,d.get('perfil','consultor'),
             (d.get('regime_base','sem_lead_sem_fixo') if d.get('perfil','consultor')=='consultor' else ''),token,expira))
         conn.commit()
-    except sqlite3.IntegrityError:
+    except Exception:
         flash('E-mail já cadastrado.'); conn.close(); return redirect(url_for('usuarios'))
     conn.close()
     return redirect(url_for('usuarios', link_token=token))
@@ -3157,11 +3339,7 @@ def _fazer_snapshot_emergencia():
             cur = conn.cursor()
             try:
                 cur.execute(f"SELECT * FROM {tabela}")
-                if DB_MODE == 'postgres':
-                    cols = [d[0] for d in cur.description or []]
-                    snapshot['tabelas'][tabela] = [dict(zip(cols, row)) for row in cur.fetchall()]
-                else:
-                    snapshot['tabelas'][tabela] = [dict(row) for row in cur.fetchall()]
+                snapshot['tabelas'][tabela] = [dict(row) for row in cur.fetchall()]
             except Exception as e:
                 app.logger.warning(f"[resilience] Erro ao ler {tabela}: {e}")
                 snapshot['tabelas'][tabela] = []
@@ -3229,7 +3407,8 @@ def _verificar_banco_vazio():
         conn = db()
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) c FROM propostas")
-        count = cur.fetchone()[0] if DB_MODE == 'sqlite' else cur.fetchone()['c']
+        row = cur.fetchone()
+        count = row[0] if isinstance(row, tuple) else row['c']
         close_db(conn)
         
         if count == 0:
