@@ -3077,6 +3077,144 @@ def log_operacao(usuario_id, operacao, detalhes='', nivel='info'):
     else:
         app.logger.info(msg[:200])
 
+# ════════════════════════════════════════════════════════════════════════════
+# DATA RESILIENCE: Sincronização + Backup + Recuperação automática
+# ════════════════════════════════════════════════════════════════════════════
+
+_RESILIENCE_BACKUP_DIR = os.path.join(os.path.expanduser("~"), "JOB_Serenus_Dados", "backups", "resilience")
+
+def _garantir_dir_backup():
+    """Garante que o diretório de backup existe."""
+    os.makedirs(_RESILIENCE_BACKUP_DIR, exist_ok=True)
+
+def _fazer_snapshot_emergencia():
+    """Faz snapshot de TODAS as tabelas pra arquivo JSON local (fallback extremo)."""
+    try:
+        _garantir_dir_backup()
+        conn = db()
+        snapshot = {'timestamp': datetime.utcnow().isoformat(), 'tabelas': {}}
+        
+        tabelas = ['usuarios', 'propostas', 'parcelas', 'comissoes', 'recebimento', 
+                   'repasse_corretor', 'supervisoras', 'regimes', 'niveis', 'produtos']
+        
+        for tabela in tabelas:
+            cur = conn.cursor()
+            try:
+                cur.execute(f"SELECT * FROM {tabela}")
+                if DB_MODE == 'postgres':
+                    cols = [d[0] for d in cur.description or []]
+                    snapshot['tabelas'][tabela] = [dict(zip(cols, row)) for row in cur.fetchall()]
+                else:
+                    snapshot['tabelas'][tabela] = [dict(row) for row in cur.fetchall()]
+            except Exception as e:
+                app.logger.warning(f"[resilience] Erro ao ler {tabela}: {e}")
+                snapshot['tabelas'][tabela] = []
+        
+        close_db(conn)
+        
+        # Salvar
+        arquivo = os.path.join(_RESILIENCE_BACKUP_DIR, f"snapshot_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json")
+        with open(arquivo, 'w') as f:
+            json.dump(snapshot, f, default=str)
+        
+        # Manter apenas últimos 10
+        backups = sorted(os.listdir(_RESILIENCE_BACKUP_DIR))
+        if len(backups) > 10:
+            for old in backups[:-10]:
+                try: os.remove(os.path.join(_RESILIENCE_BACKUP_DIR, old))
+                except: pass
+        
+        app.logger.info(f"[resilience] Snapshot salvo: {arquivo}")
+    except Exception as e:
+        app.logger.error(f"[resilience] Erro ao fazer snapshot: {e}")
+
+def _restaurar_de_snapshot(arquivo=None):
+    """Restaura banco do snapshot JSON mais recente."""
+    try:
+        _garantir_dir_backup()
+        if not arquivo:
+            backups = sorted(os.listdir(_RESILIENCE_BACKUP_DIR), reverse=True)
+            if not backups:
+                app.logger.warning("[resilience] Nenhum snapshot encontrado")
+                return False
+            arquivo = os.path.join(_RESILIENCE_BACKUP_DIR, backups[0])
+        
+        with open(arquivo, 'r') as f:
+            snapshot = json.load(f)
+        
+        conn = db()
+        restaurado = 0
+        
+        for tabela, linhas in snapshot.get('tabelas', {}).items():
+            try:
+                conn.execute(f"DELETE FROM {tabela}")
+                if linhas:
+                    # Pega as colunas do primeiro registro
+                    cols = list(linhas[0].keys())
+                    for linha in linhas:
+                        placeholders = ", ".join(["?"] * len(cols))
+                        vals = [linha.get(c) for c in cols]
+                        conn.execute(f"INSERT INTO {tabela} ({', '.join(cols)}) VALUES ({placeholders})", vals)
+                    restaurado += len(linhas)
+            except Exception as e:
+                app.logger.warning(f"[resilience] Erro ao restaurar {tabela}: {e}")
+        
+        conn.commit()
+        close_db(conn)
+        app.logger.info(f"[resilience] ✅ Restaurado de {arquivo}: {restaurado} registros")
+        return True
+    except Exception as e:
+        app.logger.error(f"[resilience] Erro ao restaurar: {e}")
+        return False
+
+def _verificar_banco_vazio():
+    """Se banco está vazio, restaura do snapshot mais recente."""
+    try:
+        conn = db()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) c FROM propostas")
+        count = cur.fetchone()[0] if DB_MODE == 'sqlite' else cur.fetchone()['c']
+        close_db(conn)
+        
+        if count == 0:
+            app.logger.warning("[resilience] Banco vazio! Tentando restaurar...")
+            if _restaurar_de_snapshot():
+                return True
+            else:
+                app.logger.warning("[resilience] Falha ao restaurar. Banco permanece vazio.")
+                return False
+        return True
+    except Exception as e:
+        app.logger.error(f"[resilience] Erro ao verificar banco: {e}")
+        return False
+
+# Executar ao iniciar
+_verificar_banco_vazio()
+
+# Agendador de backup
+_SCHEDULER_INICIADO = False
+
+def _iniciar_scheduler_backup():
+    """Liga agendador de backup automático (1x por dia, 3h BRT)."""
+    global _SCHEDULER_INICIADO
+    if _SCHEDULER_INICIADO or DB_MODE != 'postgres':
+        return
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        sched = BackgroundScheduler(daemon=True, timezone='America/Sao_Paulo')
+        sched.add_job(_fazer_snapshot_emergencia, 'cron', hour=3, minute=0, max_instances=1)
+        sched.start()
+        _SCHEDULER_INICIADO = True
+        app.logger.info("[resilience] ✅ Scheduler iniciado — backup diário 3h BRT")
+    except Exception as e:
+        app.logger.warning(f"[resilience] Scheduler não iniciado: {e}")
+
+try:
+    _iniciar_scheduler_backup()
+except Exception as e:
+    app.logger.warning(f"[resilience] Falha ao iniciar scheduler: {e}")
+
+
 if __name__ == '__main__':
     import os
     init_db()
