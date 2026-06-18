@@ -6,7 +6,7 @@ from dateutil.relativedelta import relativedelta
 
 # ─── SUPORTE A PostgreSQL (Railway/Supabase) ──────────────────────────────────
 try:
-    import psycopg2, psycopg2.extras
+    import psycopg2, psycopg2.extras, psycopg2.pool
     HAS_POSTGRES = True
 except ImportError:
     HAS_POSTGRES = False
