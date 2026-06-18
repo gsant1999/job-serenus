@@ -2208,14 +2208,40 @@ def usuario_editar(uid):
     return redirect(url_for('usuarios'))
 
 @app.route('/usuario/regenerar-link/<int:uid>')
-@login_required
-@admin_required
+@require_auth
+@require_admin
 def usuario_regenerar(uid):
-    token=secrets.token_urlsafe(32); expira=(datetime.now()+timedelta(days=7)).isoformat()
-    conn = db()
-    conn.execute("UPDATE usuarios SET token_setup=?,token_expira=?,senha_hash=NULL WHERE id=?",(token,expira,uid))
-    conn.commit(); conn.close()
-    return redirect(url_for('usuarios', link_token=token))
+    """Regenera link de setup pra usuário."""
+    try:
+        if not uid or uid <= 0:
+            app.logger.warning(f"[usuarios] ID inválido pra regenerar-link: {uid}")
+            flash('ID de usuário inválido', 'error')
+            return redirect(url_for('usuarios')), 400
+        
+        conn = db()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM usuarios WHERE id=?", (uid,))
+        user = cur.fetchone()
+        
+        if not user:
+            app.logger.warning(f"[usuarios] Usuário não encontrado: {uid}")
+            flash('Usuário não encontrado', 'error')
+            return redirect(url_for('usuarios')), 404
+        
+        token = secrets.token_urlsafe(32)
+        expira = (datetime.now() + timedelta(days=7)).isoformat()
+        cur.execute("UPDATE usuarios SET token_setup=?, token_expira=?, senha_hash=NULL WHERE id=?", 
+                    (token, expira, uid))
+        conn.commit()
+        close_db(conn)
+        
+        app.logger.info(f"[usuarios] Link regenerado pra user_id={uid}")
+        flash('Link enviado com sucesso', 'success')
+        return redirect(url_for('usuarios', link_token=token))
+    except Exception as e:
+        app.logger.error(f"[usuarios] Erro ao regenerar link: {type(e).__name__}")
+        flash('Erro ao gerar link', 'error')
+        return redirect(url_for('usuarios')), 500
 
 # ─── SUPERVISORAS ────────────────────────────────────────────────────────────────
 @app.route('/supervisoras')

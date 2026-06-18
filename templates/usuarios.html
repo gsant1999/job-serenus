@@ -59,7 +59,7 @@
           </td>
           <td>
             <button class="btn-ghost" onclick='editar({{ u.id }}, {{ u.nome|tojson }}, {{ u.email|tojson }}, "{{ u.perfil }}", "{{ u.regime_base }}", {{ u.ativo }}, {{ (u.valor_fixo or 0)|tojson }}, {{ (u.chave_pix or "")|tojson }}, {{ (u.foto or "")|tojson }})'>Editar</button>
-            {% if not u.senha_hash %}<a href="/usuario/regenerar-link/{{ u.id }}" class="btn-ghost" style="color:var(--info);">Novo link</a>{% endif %}
+            {% if not u.senha_hash and u.id %}<a href="/usuario/regenerar-link/{{ u.id }}" class="btn-ghost" style="color:var(--info);">Novo link</a>{% endif %}
           </td>
         </tr>
         {% endfor %}
