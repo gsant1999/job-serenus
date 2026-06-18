@@ -634,18 +634,35 @@ def init_db():
     # Colunas que ja estao nas tabelas acima, então não precisa add_col
     # (tudo já tá no CREATE TABLE IF NOT EXISTS)
     
-    conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)", 
-        ('affinity_destinatarios', 'pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br'))
-    conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)",
-        ('affinity_contato', 'Pamela'))
-    conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)",
-        ('affinity_remetente', 'guilherme@serenuscorretora.com.br'))
+    # Insert config — compatível com SQLite e Postgres
+    if is_pg:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO config (chave,valor) VALUES (%s,%s) ON CONFLICT (chave) DO NOTHING", 
+            ('affinity_destinatarios', 'pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br'))
+        cur.execute("INSERT INTO config (chave,valor) VALUES (%s,%s) ON CONFLICT (chave) DO NOTHING",
+            ('affinity_contato', 'Pamela'))
+        cur.execute("INSERT INTO config (chave,valor) VALUES (%s,%s) ON CONFLICT (chave) DO NOTHING",
+            ('affinity_remetente', 'guilherme@serenuscorretora.com.br'))
+        conn.commit()
+    else:
+        conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)", 
+            ('affinity_destinatarios', 'pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br'))
+        conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)",
+            ('affinity_contato', 'Pamela'))
+        conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)",
+            ('affinity_remetente', 'guilherme@serenuscorretora.com.br'))
     
     # Etiquetas padrão
     etq_default = [('Renovação','#3b82f6'),('Reajuste','#fb923c'),('Pós-venda','#1fd8a4'),
                    ('Campanha','#8b5cf6'),('Atenção estorno','#f43f7c'),('Indicação','#facc15')]
-    for nome, cor in etq_default:
-        conn.execute("INSERT OR IGNORE INTO etiquetas (nome,cor) VALUES (?,?)", (nome, cor))
+    if is_pg:
+        cur = conn.cursor()
+        for nome, cor in etq_default:
+            cur.execute("INSERT INTO etiquetas (nome,cor) VALUES (%s,%s) ON CONFLICT (nome) DO NOTHING", (nome, cor))
+        conn.commit()
+    else:
+        for nome, cor in etq_default:
+            conn.execute("INSERT OR IGNORE INTO etiquetas (nome,cor) VALUES (?,?)", (nome, cor))
     
     # Regimes padrão
     regimes_default = [
