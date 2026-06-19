@@ -1281,7 +1281,7 @@ def asaas_teste():
 def fix_recebimento():
     """Emergência: recriar tabela recebimento se deletada."""
     try:
-        conn = get_db()
+        conn = db()
         conn.execute("""CREATE TABLE IF NOT EXISTS recebimento (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
@@ -1304,6 +1304,7 @@ def fix_recebimento():
             conn.execute("""INSERT OR IGNORE INTO recebimento (operadora,obs,plano,total) 
                            VALUES (?,?,?,?)""", (op, obs, plano, total))
         conn.commit()
+        close_db(conn)
         return jsonify({'ok': True, 'msg': 'Tabela recebimento recriada com sucesso'}), 200
     except Exception as e:
         return jsonify({'ok': False, 'erro': str(e)}), 500
