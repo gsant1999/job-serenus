@@ -1291,13 +1291,18 @@ def testar_smtp():
         return jsonify(resultado)
     try:
         resultado['etapas'].append('Conectando...')
-        s = smtplib.SMTP(host, port, timeout=15)
-        resultado['etapas'].append('✅ Conexão TCP OK')
-        s.ehlo()
-        resultado['etapas'].append('✅ EHLO OK')
-        s.starttls()
-        resultado['etapas'].append('✅ STARTTLS OK')
-        s.ehlo()
+        if port == 465:
+            import ssl as _ssl
+            s = smtplib.SMTP_SSL(host, port, timeout=15, context=_ssl.create_default_context())
+            resultado['etapas'].append('✅ Conexão SSL OK')
+        else:
+            s = smtplib.SMTP(host, port, timeout=15)
+            resultado['etapas'].append('✅ Conexão TCP OK')
+            s.ehlo()
+            resultado['etapas'].append('✅ EHLO OK')
+            s.starttls()
+            resultado['etapas'].append('✅ STARTTLS OK')
+            s.ehlo()
         s.login(user, senha)
         resultado['etapas'].append('✅ Login OK')
         # Envia email de teste pro próprio admin
@@ -1539,7 +1544,7 @@ def _enviar_email(destinatario, assunto, corpo_html):
 
     def _enviar():
         try:
-            import smtplib
+            import smtplib, ssl as _ssl
             from email.mime.multipart import MIMEMultipart
             from email.mime.text import MIMEText
             msg = MIMEMultipart('alternative')
@@ -1547,12 +1552,19 @@ def _enviar_email(destinatario, assunto, corpo_html):
             msg['From']    = f"JOB Serenus <{user}>"
             msg['To']      = destinatario
             msg.attach(MIMEText(corpo_html, 'html', 'utf-8'))
-            with smtplib.SMTP(host, port, timeout=15) as s:
-                s.ehlo()
-                s.starttls()
-                s.ehlo()
-                s.login(user, senha)
-                s.sendmail(user, destinatario, msg.as_string())
+            # Porta 465 = SSL direto (Titan); porta 587 = STARTTLS
+            if port == 465:
+                ctx = _ssl.create_default_context()
+                with smtplib.SMTP_SSL(host, port, timeout=15, context=ctx) as s:
+                    s.login(user, senha)
+                    s.sendmail(user, destinatario, msg.as_string())
+            else:
+                with smtplib.SMTP(host, port, timeout=15) as s:
+                    s.ehlo()
+                    s.starttls()
+                    s.ehlo()
+                    s.login(user, senha)
+                    s.sendmail(user, destinatario, msg.as_string())
             print(f"[EMAIL] ✅ Enviado: {assunto} → {destinatario}")
         except Exception as e:
             print(f"[EMAIL] ❌ Erro ao enviar para {destinatario}: {e}")
