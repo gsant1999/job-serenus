@@ -14,75 +14,6 @@ try:
 except ImportError:
     HAS_POSTGRES = False
 
-# ─── GOOGLE DRIVE ─────────────────────────────────────────────────────────────
-# Suporta DOIS modos:
-#  1) OAuth (RECOMENDADO p/ Gmail comum): usa token_drive.json (gerado por gerar_token_drive.py).
-#     Sobe os arquivos COMO VOCÊ, usando seus 15GB. Resolve o erro de cota da conta de serviço.
-#  2) Service Account: só funciona com Drive Compartilhado (Workspace pago).
-try:
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
-    from google.oauth2.service_account import Credentials as SACredentials
-    from google.oauth2.credentials import Credentials as UserCredentials
-    from google.auth.transport.requests import Request as GoogleRequest
-    _GDIR = os.path.dirname(os.path.abspath(__file__))
-    DRIVE_TOKEN_FILE = os.path.join(_GDIR, "token_drive.json")          # OAuth (preferido)
-    DRIVE_CREDENTIALS_FILE = os.path.join(_GDIR, "serenus-job-5ed98225e711.json")  # Service Account
-    DRIVE_FOLDER_ID = "1Hb0prM75_L-t2SOfN_KMS_W5r_D3dLsl"
-    DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
-    DRIVE_OAUTH = os.path.exists(DRIVE_TOKEN_FILE)
-    DRIVE_ENABLED = DRIVE_OAUTH or os.path.exists(DRIVE_CREDENTIALS_FILE)
-except ImportError:
-    DRIVE_ENABLED = False; DRIVE_OAUTH = False
-
-def _drive_service():
-    """Retorna o serviço do Drive. Prefere OAuth (cota do usuário); cai p/ service account."""
-    if DRIVE_OAUTH:
-        creds = UserCredentials.from_authorized_user_file(DRIVE_TOKEN_FILE, DRIVE_SCOPES)
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(GoogleRequest())
-            with open(DRIVE_TOKEN_FILE, 'w') as f: f.write(creds.to_json())
-        return build("drive", "v3", credentials=creds)
-    creds = SACredentials.from_service_account_file(DRIVE_CREDENTIALS_FILE, scopes=DRIVE_SCOPES)
-    return build("drive", "v3", credentials=creds)
-
-def upload_drive(caminho_local, nome_arquivo, subpasta_nome=None):
-    """Upload p/ o Drive. Cria subpasta (cliente) se necessário.
-    Retorna {'ok':bool,'id'|'erro':...}."""
-    if not DRIVE_ENABLED:
-        return {'ok': False, 'erro': 'Drive não configurado'}
-    if not os.path.exists(caminho_local):
-        return {'ok': False, 'erro': f'Arquivo local não encontrado: {caminho_local}'}
-    try:
-        service = _drive_service()
-        pasta_destino = DRIVE_FOLDER_ID
-        if subpasta_nome:
-            safe = subpasta_nome.replace("'", " ")
-            query = (f"name='{safe}' and mimeType='application/vnd.google-apps.folder' "
-                     f"and '{DRIVE_FOLDER_ID}' in parents and trashed=false")
-            res = service.files().list(q=query, fields="files(id)",
-                                       supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
-            if res.get('files'):
-                pasta_destino = res['files'][0]['id']
-            else:
-                meta = {"name": safe, "mimeType": "application/vnd.google-apps.folder", "parents": [DRIVE_FOLDER_ID]}
-                pasta = service.files().create(body=meta, fields="id", supportsAllDrives=True).execute()
-                pasta_destino = pasta['id']
-        file_meta = {"name": nome_arquivo, "parents": [pasta_destino]}
-        media = MediaFileUpload(caminho_local, resumable=True)
-        f = service.files().create(body=file_meta, media_body=media, fields="id",
-                                   supportsAllDrives=True).execute()
-        print(f"[Drive] OK ({'OAuth' if DRIVE_OAUTH else 'SA'}): {nome_arquivo} → {f.get('id')}")
-        return {'ok': True, 'id': f.get("id")}
-    except Exception as e:
-        msg = str(e)
-        if ('storageQuotaExceeded' in msg or 'quota' in msg.lower()) and not DRIVE_OAUTH:
-            print("[Drive] ERRO DE COTA: a conta de serviço não tem armazenamento. "
-                  "Gere o token OAuth com 'python3 gerar_token_drive.py' para subir como você (15GB).")
-        else:
-            print(f"[Drive] Erro: {msg}")
-        return {'ok': False, 'erro': msg}
-
 app = Flask(__name__)
 # ─── CHAVE SECRETA FIXA PARA SESSÕES PERSISTENTES ───────────────────────
 # Se usar secrets.token_hex(32) toda vez, a session cai após restart!
@@ -1861,16 +1792,14 @@ def nova_proposta():
 def salvar_proposta():
     try:
         d = request.form
-        razao_pasta = (d.get('razao_social') or 'sem_nome')[:40].strip().replace('/', '-')
 
         def salvar_arquivo(file_field, prefixo):
-            """Salva um único arquivo e sobe pro Drive. Retorna o nome ou None."""
+            """Salva um único arquivo localmente e retorna o nome ou None."""
             f = request.files.get(file_field)
             if f and f.filename:
                 n = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{prefixo}_{f.filename}"
                 caminho = os.path.join(UPLOAD_FOLDER, n)
                 f.save(caminho)
-                upload_drive(caminho, n, subpasta_nome=razao_pasta)
                 return n
             return None
 
@@ -1880,8 +1809,8 @@ def salvar_proposta():
             if f and f.filename:
                 n = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_doc_{f.filename}"
                 caminho = os.path.join(UPLOAD_FOLDER, n)
-                f.save(caminho); nomes.append(n)
-                upload_drive(caminho, n, subpasta_nome=razao_pasta)
+                f.save(caminho)
+                nomes.append(n)
 
         # Uploads dedicados
         contrato_arq = salvar_arquivo('contrato_arquivo', 'CONTRATO')
@@ -2367,24 +2296,29 @@ def parcela_antecipar(pid):
     """Corretor sobe comprovante de pagamento do cliente (somente parcela 1)."""
     if 'comprovante' not in request.files:
         return jsonify({"ok": False, "msg": "Nenhum arquivo enviado"}), 400
+    
     f = request.files['comprovante']
     nome = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_antecip_{f.filename}"
     caminho = os.path.join(UPLOAD_FOLDER, nome)
     f.save(caminho)
+    
     conn = db()
     # Valida que é parcela 1 e pertence ao consultor
-    parc = conn.execute("""SELECT pa.*, p.usuario_id, p.razao_social FROM parcelas pa
+    parc = conn.execute("""SELECT pa.*, p.usuario_id FROM parcelas pa
         JOIN propostas p ON p.id=pa.proposta_id WHERE pa.id=?""",(pid,)).fetchone()
+        
     if not parc or parc['numero'] != 1:
-        close_db(conn); return jsonify({"ok": False, "msg": "Antecipação só disponível para a 1ª parcela"}), 400
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Antecipação só disponível para a 1ª parcela"}), 400
+        
     if session['perfil'] != 'admin' and parc['usuario_id'] != session['user_id']:
-        close_db(conn); return jsonify({"ok": False, "msg": "Acesso negado"}), 403
-    # Upload para Drive na subpasta do cliente
-    razao_pasta = (parc['razao_social'] or 'sem_nome')[:40].strip().replace('/', '-')
-    upload_drive(caminho, nome, subpasta_nome=razao_pasta)
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Acesso negado"}), 403
+        
     conn.execute("UPDATE parcelas SET comprovante_antecipacao=?,status='Antecipação - Aguardando ADM' WHERE id=?",
                  (nome, pid))
-    conn.commit(); close_db(conn)
+    conn.commit()
+    close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/parcela/<int:pid>/aprovar-antecipacao', methods=['POST'])
