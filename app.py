@@ -1488,6 +1488,17 @@ def backup_agendar():
     except Exception as e:
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
+@app.route('/admin/emergency/init-db', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def emergency_init_db():
+    """Inicializa banco de dados (cria todas as tabelas)."""
+    try:
+        init_db()
+        return jsonify({'ok': True, 'msg': 'Banco inicializado com sucesso!'})
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
 @app.route('/admin/testar-smtp')
 @login_required
 @admin_required
