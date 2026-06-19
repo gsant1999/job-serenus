@@ -3789,24 +3789,62 @@ _verificar_banco_vazio()
 _SCHEDULER_INICIADO = False
 
 def _iniciar_scheduler_backup():
-    """Liga agendador de backup automático (1x por dia, 3h BRT)."""
+    """Liga agendador de backup automático JSON (22:00 SP todo dia)."""
     global _SCHEDULER_INICIADO
-    if _SCHEDULER_INICIADO or DB_MODE != 'postgres':
+    if _SCHEDULER_INICIADO:
         return
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
-        sched = BackgroundScheduler(daemon=True, timezone='America/Sao_Paulo')
-        sched.add_job(_fazer_snapshot_emergencia, 'cron', hour=3, minute=0, max_instances=1)
+        
+        def fazer_backup_agendado():
+            """Função que roda automaticamente às 22:00 SP."""
+            try:
+                conn = db()
+                propostas = conn.execute("SELECT * FROM propostas").fetchall()
+                parcelas = conn.execute("SELECT * FROM parcelas").fetchall()
+                usuarios = conn.execute("SELECT * FROM usuarios").fetchall()
+                operadoras = conn.execute("SELECT * FROM operadoras").fetchall()
+                recebimento = conn.execute("SELECT * FROM recebimento").fetchall()
+                repasse_corretor = conn.execute("SELECT * FROM repasse_corretor").fetchall()
+                
+                backup = {
+                    'versao': 'v14',
+                    'data_backup': datetime.now(TZ_SP).isoformat(),
+                    'total_propostas': len(propostas),
+                    'propostas': [dict(p) for p in propostas],
+                    'parcelas': [dict(p) for p in parcelas],
+                    'usuarios': [dict(u) for u in usuarios],
+                    'operadoras': [dict(o) for o in operadoras],
+                    'recebimento': [dict(r) for r in recebimento],
+                    'repasse_corretor': [dict(r) for r in repasse_corretor],
+                }
+                
+                close_db(conn)
+                
+                os.makedirs('/data/backups', exist_ok=True)
+                timestamp = datetime.now(TZ_SP).strftime('%Y%m%d-%H%M%S')
+                backup_file = f"/data/backups/backup-{timestamp}.json"
+                
+                with open(backup_file, 'w', encoding='utf-8') as f:
+                    json.dump(backup, f, indent=2, default=str, ensure_ascii=False)
+                
+                app.logger.info(f"[BACKUP AUTO] ✅ {backup_file} ({len(propostas)} propostas)")
+            except Exception as e:
+                app.logger.error(f"[BACKUP AUTO] ❌ {e}")
+        
+        # Agendar para 22:00 (SP) todos os dias
+        sched = BackgroundScheduler(daemon=True, timezone=TZ_SP)
+        sched.add_job(fazer_backup_agendado, 'cron', hour=22, minute=0, max_instances=1)
         sched.start()
         _SCHEDULER_INICIADO = True
-        app.logger.info("[resilience] ✅ Scheduler iniciado — backup diário 3h BRT")
+        app.logger.info("[SCHEDULER] ✅ Backup automático agendado para 22:00 (São Paulo)")
     except Exception as e:
-        app.logger.warning(f"[resilience] Scheduler não iniciado: {e}")
+        app.logger.warning(f"[SCHEDULER] ❌ Falha ao iniciar: {e}")
 
 try:
     _iniciar_scheduler_backup()
 except Exception as e:
-    app.logger.warning(f"[resilience] Falha ao iniciar scheduler: {e}")
+    app.logger.warning(f"[SCHEDULER] Falha final: {e}")
 
 
 if __name__ == '__main__':
