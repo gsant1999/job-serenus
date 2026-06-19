@@ -130,8 +130,8 @@ DB = os.path.join(DATA_DIR, "job.db")
 UPLOAD_FOLDER = os.path.join(DATA_DIR, "anexos")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# ─── MODO DO BANCO: FORÇADO SQLITE (Postgres pode vir depois com rewrite) ───────
-DB_MODE = 'sqlite'  # Force SQLite até rewrite de compatibilidade Postgres estar pronto
+# ─── MODO DO BANCO: PostgreSQL (Railway) com fallback SQLite ────────────────
+DB_MODE = 'postgres' if (os.environ.get('DATABASE_URL') and HAS_POSTGRES) else 'sqlite'
 
 # ─── VARIÁVEIS GLOBAIS NECESSÁRIAS ──────────────────────────────────────────
 STATUS_FLUXO = [
