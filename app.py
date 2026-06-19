@@ -1275,6 +1275,39 @@ def asaas_teste():
     return jsonify({"ok": False, "erro": data.get('_erro') or data.get('errors') or data, "status": status}), 400
 
 
+@app.route('/admin/emergency/fix-recebimento', methods=['POST'])
+@login_required
+@admin_required
+def fix_recebimento():
+    """Emergência: recriar tabela recebimento se deletada."""
+    try:
+        conn = get_db()
+        conn.execute("""CREATE TABLE IF NOT EXISTS recebimento (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
+            total REAL DEFAULT 0,
+            UNIQUE(operadora, obs, plano)
+        )""")
+        # Inserir dados padrão
+        dados = [
+            ('SulAmérica', '', 'PME', 3580),
+            ('SulAmérica', '', 'Executivo', 4500),
+            ('Amil', '', 'PME', 2800),
+            ('Amil', '', 'Executivo', 3500),
+            ('Med Senior SP/RJ', '', 'PF', 1200),
+            ('Vera Cruz', '', 'PME', 2500),
+            ('Vera Cruz', '', 'Executivo', 3200),
+            ('Bradesco Saúde', '', 'PME', 3000),
+            ('UNIMED', '', 'PME', 2900),
+        ]
+        for op, obs, plano, total in dados:
+            conn.execute("""INSERT OR IGNORE INTO recebimento (operadora,obs,plano,total) 
+                           VALUES (?,?,?,?)""", (op, obs, plano, total))
+        conn.commit()
+        return jsonify({'ok': True, 'msg': 'Tabela recebimento recriada com sucesso'}), 200
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
 @app.route('/admin/testar-smtp')
 @login_required
 @admin_required
