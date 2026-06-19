@@ -1275,6 +1275,49 @@ def asaas_teste():
     return jsonify({"ok": False, "erro": data.get('_erro') or data.get('errors') or data, "status": status}), 400
 
 
+@app.route('/admin/testar-smtp')
+@login_required
+@admin_required
+def testar_smtp():
+    """Testa conexão SMTP e envia email de teste para o admin."""
+    import smtplib, socket, ssl as _ssl
+    host  = os.environ.get('SMTP_HOST','')
+    port  = int(os.environ.get('SMTP_PORT', 587))
+    user  = os.environ.get('SMTP_USER','')
+    senha = os.environ.get('SMTP_PASS','')
+    resultado = {'host': host, 'port': port, 'user': user, 'etapas': []}
+    if not host or not user:
+        resultado['erro'] = 'SMTP_HOST ou SMTP_USER não configurados.'
+        return jsonify(resultado)
+    try:
+        resultado['etapas'].append('Conectando...')
+        s = smtplib.SMTP(host, port, timeout=15)
+        resultado['etapas'].append('✅ Conexão TCP OK')
+        s.ehlo()
+        resultado['etapas'].append('✅ EHLO OK')
+        s.starttls()
+        resultado['etapas'].append('✅ STARTTLS OK')
+        s.ehlo()
+        s.login(user, senha)
+        resultado['etapas'].append('✅ Login OK')
+        # Envia email de teste pro próprio admin
+        from email.mime.text import MIMEText
+        msg = MIMEText('<p>Teste SMTP do JOB Serenus — funcionando! ✅</p>', 'html', 'utf-8')
+        msg['Subject'] = 'JOB · Teste SMTP'
+        msg['From'] = user
+        msg['To'] = user
+        s.sendmail(user, user, msg.as_string())
+        s.quit()
+        resultado['etapas'].append(f'✅ Email enviado para {user}')
+        resultado['ok'] = True
+    except socket.timeout:
+        resultado['etapas'].append('❌ TIMEOUT — servidor não responde')
+        resultado['erro'] = 'Timeout ao conectar no SMTP'
+    except Exception as e:
+        resultado['etapas'].append(f'❌ Erro: {type(e).__name__}: {e}')
+        resultado['erro'] = str(e)
+    return jsonify(resultado)
+
 @app.route('/admin/emergency/status')
 @login_required
 @admin_required
