@@ -1279,47 +1279,36 @@ def asaas_teste():
 @login_required
 @admin_required
 def testar_smtp():
-    """Testa conexão SMTP e envia email de teste para o admin."""
-    import smtplib, socket, ssl as _ssl
-    host  = os.environ.get('SMTP_HOST','')
-    port  = int(os.environ.get('SMTP_PORT', 587))
-    user  = os.environ.get('SMTP_USER','')
-    senha = os.environ.get('SMTP_PASS','')
-    resultado = {'host': host, 'port': port, 'user': user, 'etapas': []}
-    if not host or not user:
-        resultado['erro'] = 'SMTP_HOST ou SMTP_USER não configurados.'
+    """Testa envio de email via API do Brevo."""
+    import urllib.request, json as _json
+    api_key  = os.environ.get('BREVO_API_KEY','')
+    remetente = os.environ.get('SMTP_USER','noreply@serenuscorretora.com.br')
+    destinatario = session.get('email') or remetente
+    resultado = {'api': 'Brevo HTTP API', 'remetente': remetente, 'etapas': []}
+    if not api_key:
+        resultado['erro'] = 'BREVO_API_KEY não configurada no Railway.'
         return jsonify(resultado)
     try:
-        resultado['etapas'].append('Conectando...')
-        if port == 465:
-            import ssl as _ssl
-            s = smtplib.SMTP_SSL(host, port, timeout=15, context=_ssl.create_default_context())
-            resultado['etapas'].append('✅ Conexão SSL OK')
-        else:
-            s = smtplib.SMTP(host, port, timeout=15)
-            resultado['etapas'].append('✅ Conexão TCP OK')
-            s.ehlo()
-            resultado['etapas'].append('✅ EHLO OK')
-            s.starttls()
-            resultado['etapas'].append('✅ STARTTLS OK')
-            s.ehlo()
-        s.login(user, senha)
-        resultado['etapas'].append('✅ Login OK')
-        # Envia email de teste pro próprio admin
-        from email.mime.text import MIMEText
-        msg = MIMEText('<p>Teste SMTP do JOB Serenus — funcionando! ✅</p>', 'html', 'utf-8')
-        msg['Subject'] = 'JOB · Teste SMTP'
-        msg['From'] = user
-        msg['To'] = user
-        s.sendmail(user, user, msg.as_string())
-        s.quit()
-        resultado['etapas'].append(f'✅ Email enviado para {user}')
-        resultado['ok'] = True
-    except socket.timeout:
-        resultado['etapas'].append('❌ TIMEOUT — servidor não responde')
-        resultado['erro'] = 'Timeout ao conectar no SMTP'
+        resultado['etapas'].append('Chamando API Brevo...')
+        payload = _json.dumps({
+            "sender":  {"name": "JOB Serenus", "email": remetente},
+            "to":      [{"email": remetente}],
+            "subject": "JOB · Teste de email",
+            "htmlContent": "<p>✅ Email de teste do JOB Serenus funcionando!</p>"
+        }).encode('utf-8')
+        req = urllib.request.Request(
+            "https://api.brevo.com/v3/smtp/email",
+            data=payload,
+            headers={"Content-Type":"application/json","api-key":api_key},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = resp.read().decode()
+            resultado['etapas'].append(f'✅ HTTP {resp.status} — Email enviado para {remetente}')
+            resultado['ok'] = True
+            resultado['resposta'] = body
     except Exception as e:
-        resultado['etapas'].append(f'❌ Erro: {type(e).__name__}: {e}')
+        resultado['etapas'].append(f'❌ Erro: {e}')
         resultado['erro'] = str(e)
     return jsonify(resultado)
 
@@ -1532,42 +1521,42 @@ def servir_anexo(nome):
 
 # ─── EMAIL UTILITÁRIO ────────────────────────────────────────────────────────
 def _enviar_email(destinatario, assunto, corpo_html):
-    """Envia email via SMTP em thread background (não trava a requisição).
-    Configura SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS no Railway."""
-    host  = os.environ.get('SMTP_HOST','')
-    port  = int(os.environ.get('SMTP_PORT', 587))
-    user  = os.environ.get('SMTP_USER','')
-    senha = os.environ.get('SMTP_PASS','')
-    if not host or not user:
-        print(f"[EMAIL] ⚠️ SMTP não configurado. Assunto: {assunto} → {destinatario}")
+    """Envia email via API do Brevo (HTTPS porta 443 — nunca bloqueada pelo Railway).
+    Configure BREVO_API_KEY no Railway. SMTP_USER define o remetente."""
+    api_key = os.environ.get('BREVO_API_KEY','')
+    remetente = os.environ.get('SMTP_USER','noreply@serenuscorretora.com.br')
+
+    if not api_key:
+        print(f"[EMAIL] ⚠️ BREVO_API_KEY não configurada. Assunto: {assunto} → {destinatario}")
         return False
 
     def _enviar():
         try:
-            import smtplib, ssl as _ssl
-            from email.mime.multipart import MIMEMultipart
-            from email.mime.text import MIMEText
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = assunto
-            msg['From']    = f"JOB Serenus <{user}>"
-            msg['To']      = destinatario
-            msg.attach(MIMEText(corpo_html, 'html', 'utf-8'))
-            # Porta 465 = SSL direto (Titan); porta 587 = STARTTLS
-            if port == 465:
-                ctx = _ssl.create_default_context()
-                with smtplib.SMTP_SSL(host, port, timeout=15, context=ctx) as s:
-                    s.login(user, senha)
-                    s.sendmail(user, destinatario, msg.as_string())
-            else:
-                with smtplib.SMTP(host, port, timeout=15) as s:
-                    s.ehlo()
-                    s.starttls()
-                    s.ehlo()
-                    s.login(user, senha)
-                    s.sendmail(user, destinatario, msg.as_string())
-            print(f"[EMAIL] ✅ Enviado: {assunto} → {destinatario}")
+            import urllib.request, json as _json
+            payload = _json.dumps({
+                "sender":  {"name": "JOB Serenus", "email": remetente},
+                "to":      [{"email": destinatario}],
+                "subject": assunto,
+                "htmlContent": corpo_html
+            }).encode('utf-8')
+            req = urllib.request.Request(
+                "https://api.brevo.com/v3/smtp/email",
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "api-key": api_key,
+                },
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                status = resp.status
+            print(f"[EMAIL] ✅ Enviado via Brevo API (HTTP {status}): {assunto} → {destinatario}")
         except Exception as e:
             print(f"[EMAIL] ❌ Erro ao enviar para {destinatario}: {e}")
+
+    import threading
+    threading.Thread(target=_enviar, daemon=True).start()
+    return True
 
     import threading
     threading.Thread(target=_enviar, daemon=True).start()
