@@ -1312,6 +1312,24 @@ def fix_recebimento():
     except Exception as e:
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
+@app.route('/admin/emergency/limpar-duplicatas', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def limpar_duplicatas():
+    """Emergência: remover propostas duplicadas."""
+    try:
+        conn = db()
+        # Manter apenas a primeira de cada cliente
+        conn.execute("""DELETE FROM propostas WHERE id NOT IN (
+            SELECT MIN(id) FROM propostas GROUP BY razao_social
+        )""")
+        conn.commit()
+        count = conn.total_changes
+        close_db(conn)
+        return jsonify({'ok': True, 'msg': f'Removidas {count} duplicatas'}), 200
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
 @app.route('/admin/emergency/restaurar-dados', methods=['GET', 'POST'])
 @login_required
 @admin_required
