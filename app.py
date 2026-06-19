@@ -1312,6 +1312,39 @@ def fix_recebimento():
     except Exception as e:
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
+@app.route('/admin/emergency/restaurar-dados', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def restaurar_dados():
+    """Emergência: restaurar as 5 propostas perdidas."""
+    try:
+        conn = db()
+        # Usuários
+        conn.execute("""INSERT OR IGNORE INTO usuarios (id, nome, email, perfil, regime_base, ativo) 
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                     (1, 'Guilherme Santos', 'guilherme@serenuscorretora.com.br', 'admin', '', 1))
+        conn.execute("""INSERT OR IGNORE INTO usuarios (id, nome, email, perfil, regime_base, ativo) 
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                     (2, 'Bianca Sampaio', 'bianca@serenuscorretora.com.br', 'consultor', 'com_fixo_lead', 1))
+        # Propostas
+        propostas = [
+            (1, 'Guilherme Santos', 'GC CALDEIRARIA & SERVICOS LTDA', 'PJ', 'SulAmérica PME', 'PME PORTE 1', 'Enfermaria', 'Sem', 1, 3580, '2026-06-18'),
+            (2, 'Bianca Sampaio', 'MAURO JUAREZ TULESKI', 'PF', 'Med Senior SP/RJ', 'Saúde', 'Enfermaria', 'Sem', 1, 767.95, '2026-06-18'),
+            (2, 'Bianca Sampaio', 'ARLETE KAZUE MORI TULESKI', 'PF', 'Med Senior SP/RJ', 'Saúde', 'Enfermaria', 'Sem', 1, 767.95, '2026-06-18'),
+            (1, 'Guilherme Santos', 'WILLAMI HANDERSON DE OLIVEIRA', 'PJ', 'Amil PME', 'PME PORTE 1', 'Enfermaria', 'Sem', 1, 2800, '2026-06-18'),
+            (1, 'Guilherme Santos', 'RANIELLY VICTORIA SILVA DE PAIVA', 'PJ', 'Vera Cruz PME', 'PME PORTE 1', 'Enfermaria', 'Sem', 1, 2500, '2026-06-18'),
+        ]
+        for u, c, r, t, m, tc, a, f, v, val, vig in propostas:
+            conn.execute("""INSERT INTO propostas (usuario_id, consultor, razao_social, tipo_pessoa, modalidade, 
+                           tipo_contrato, acomodacao, fator_moderador, total_vidas, valor, vigencia, status, criado_em)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Ativo', CURRENT_TIMESTAMP)""",
+                         (u, c, r, t, m, tc, a, f, v, val, vig))
+        conn.commit()
+        close_db(conn)
+        return jsonify({'ok': True, 'msg': '5 propostas restauradas com sucesso'}), 200
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
 @app.route('/admin/testar-smtp')
 @login_required
 @admin_required
