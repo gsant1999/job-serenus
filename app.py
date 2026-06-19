@@ -438,6 +438,12 @@ def init_db():
                 valor_depois TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS operadoras (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT UNIQUE NOT NULL,
+                obs TEXT DEFAULT '',
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS recebimento (
                 id SERIAL PRIMARY KEY,
                 operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
