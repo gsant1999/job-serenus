@@ -1275,7 +1275,7 @@ def asaas_teste():
     return jsonify({"ok": False, "erro": data.get('_erro') or data.get('errors') or data, "status": status}), 400
 
 
-@app.route('/admin/emergency/fix-recebimento', methods=['POST'])
+@app.route('/admin/emergency/fix-recebimento', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def fix_recebimento():
