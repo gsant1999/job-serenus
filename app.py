@@ -1294,6 +1294,200 @@ def restaurar_dados():
     except Exception as e:
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
+@app.route('/admin/backup/exportar-json', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def backup_exportar_json():
+    """Exporta banco inteiro como JSON para backup/restauração."""
+    try:
+        conn = db()
+        
+        # Exportar todas as tabelas críticas
+        propostas = conn.execute("SELECT * FROM propostas ORDER BY id").fetchall()
+        parcelas = conn.execute("SELECT * FROM parcelas ORDER BY id").fetchall()
+        usuarios = conn.execute("SELECT * FROM usuarios ORDER BY id").fetchall()
+        operadoras = conn.execute("SELECT * FROM operadoras ORDER BY id").fetchall()
+        recebimento = conn.execute("SELECT * FROM recebimento ORDER BY id").fetchall()
+        repasse_corretor = conn.execute("SELECT * FROM repasse_corretor ORDER BY id").fetchall()
+        
+        backup = {
+            'versao': 'v14',
+            'data_backup': datetime.now(TZ_SP).isoformat(),
+            'total_propostas': len(propostas),
+            'total_parcelas': len(parcelas),
+            'total_usuarios': len(usuarios),
+            'propostas': [dict(p) for p in propostas],
+            'parcelas': [dict(p) for p in parcelas],
+            'usuarios': [dict(u) for u in usuarios],
+            'operadoras': [dict(o) for o in operadoras],
+            'recebimento': [dict(r) for r in recebimento],
+            'repasse_corretor': [dict(r) for r in repasse_corretor],
+        }
+        
+        close_db(conn)
+        
+        # Salvar arquivo com timestamp
+        os.makedirs('/data/backups', exist_ok=True)
+        timestamp = datetime.now(TZ_SP).strftime('%Y%m%d-%H%M%S')
+        backup_file = f"/data/backups/backup-{timestamp}.json"
+        
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            json.dump(backup, f, indent=2, default=str, ensure_ascii=False)
+        
+        print(f"[BACKUP] ✅ Exportado: {backup_file} ({len(propostas)} propostas)")
+        
+        return send_file(
+            backup_file,
+            as_attachment=True,
+            download_name=f"JOB-Serenus-Backup-{timestamp}.json"
+        )
+    except Exception as e:
+        print(f"[BACKUP] ❌ Erro: {e}")
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+@app.route('/admin/backup/listar', methods=['GET'])
+@login_required
+@admin_required
+def backup_listar():
+    """Lista todos os backups disponíveis em /data/backups."""
+    try:
+        backup_dir = '/data/backups'
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        backups = []
+        for arquivo in sorted(os.listdir(backup_dir), reverse=True):
+            if arquivo.endswith('.json'):
+                caminho = os.path.join(backup_dir, arquivo)
+                tamanho = os.path.getsize(caminho) / (1024*1024)  # MB
+                data_mod = datetime.fromtimestamp(os.path.getmtime(caminho), TZ_SP)
+                backups.append({
+                    'arquivo': arquivo,
+                    'tamanho_mb': f"{tamanho:.2f}",
+                    'data': data_mod.isoformat(),
+                })
+        
+        return jsonify({'ok': True, 'backups': backups})
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+@app.route('/admin/backup/restaurar/<arquivo>', methods=['POST'])
+@login_required
+@admin_required
+def backup_restaurar(arquivo):
+    """Restaura banco a partir de backup JSON."""
+    try:
+        if '..' in arquivo or '/' in arquivo:
+            return jsonify({'ok': False, 'erro': 'Arquivo inválido'}), 400
+        
+        backup_file = f"/data/backups/{arquivo}"
+        if not os.path.exists(backup_file):
+            return jsonify({'ok': False, 'erro': 'Arquivo não encontrado'}), 404
+        
+        with open(backup_file, 'r', encoding='utf-8') as f:
+            backup = json.load(f)
+        
+        conn = db()
+        
+        # Limpar tabelas existentes
+        tabelas = ['propostas', 'parcelas', 'usuarios', 'operadoras', 'recebimento', 'repasse_corretor']
+        for tabela in tabelas:
+            conn.execute(f"DELETE FROM {tabela}")
+        
+        # Restaurar dados
+        for usuario in backup.get('usuarios', []):
+            cols = ', '.join(usuario.keys())
+            vals = ', '.join(['?' for _ in usuario.values()])
+            conn.execute(f"INSERT INTO usuarios ({cols}) VALUES ({vals})", tuple(usuario.values()))
+        
+        for operadora in backup.get('operadoras', []):
+            cols = ', '.join(operadora.keys())
+            vals = ', '.join(['?' for _ in operadora.values()])
+            conn.execute(f"INSERT INTO operadoras ({cols}) VALUES ({vals})", tuple(operadora.values()))
+        
+        for proposta in backup.get('propostas', []):
+            cols = ', '.join(proposta.keys())
+            vals = ', '.join(['?' for _ in proposta.values()])
+            conn.execute(f"INSERT INTO propostas ({cols}) VALUES ({vals})", tuple(proposta.values()))
+        
+        for parcela in backup.get('parcelas', []):
+            cols = ', '.join(parcela.keys())
+            vals = ', '.join(['?' for _ in parcela.values()])
+            conn.execute(f"INSERT INTO parcelas ({cols}) VALUES ({vals})", tuple(parcela.values()))
+        
+        for receb in backup.get('recebimento', []):
+            cols = ', '.join(receb.keys())
+            vals = ', '.join(['?' for _ in receb.values()])
+            conn.execute(f"INSERT INTO recebimento ({cols}) VALUES ({vals})", tuple(receb.values()))
+        
+        for repasse in backup.get('repasse_corretor', []):
+            cols = ', '.join(repasse.keys())
+            vals = ', '.join(['?' for _ in repasse.values()])
+            conn.execute(f"INSERT INTO repasse_corretor ({cols}) VALUES ({vals})", tuple(repasse.values()))
+        
+        conn.commit()
+        close_db(conn)
+        
+        print(f"[BACKUP] ✅ Restaurado: {arquivo}")
+        return jsonify({'ok': True, 'msg': f"Restaurado {backup['total_propostas']} propostas"})
+    except Exception as e:
+        print(f"[BACKUP] ❌ Erro na restauração: {e}")
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+@app.route('/admin/backup/auto-agendar', methods=['POST'])
+@login_required
+@admin_required
+def backup_agendar():
+    """Agenda backup automático diariamente às 22:00 (SP)."""
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        
+        def fazer_backup():
+            """Função que roda no agendador."""
+            try:
+                conn = db()
+                propostas = conn.execute("SELECT * FROM propostas").fetchall()
+                parcelas = conn.execute("SELECT * FROM parcelas").fetchall()
+                usuarios = conn.execute("SELECT * FROM usuarios").fetchall()
+                operadoras = conn.execute("SELECT * FROM operadoras").fetchall()
+                recebimento = conn.execute("SELECT * FROM recebimento").fetchall()
+                repasse_corretor = conn.execute("SELECT * FROM repasse_corretor").fetchall()
+                
+                backup = {
+                    'versao': 'v14',
+                    'data_backup': datetime.now(TZ_SP).isoformat(),
+                    'total_propostas': len(propostas),
+                    'propostas': [dict(p) for p in propostas],
+                    'parcelas': [dict(p) for p in parcelas],
+                    'usuarios': [dict(u) for u in usuarios],
+                    'operadoras': [dict(o) for o in operadoras],
+                    'recebimento': [dict(r) for r in recebimento],
+                    'repasse_corretor': [dict(r) for r in repasse_corretor],
+                }
+                
+                close_db(conn)
+                
+                os.makedirs('/data/backups', exist_ok=True)
+                timestamp = datetime.now(TZ_SP).strftime('%Y%m%d-%H%M%S')
+                backup_file = f"/data/backups/backup-{timestamp}.json"
+                
+                with open(backup_file, 'w', encoding='utf-8') as f:
+                    json.dump(backup, f, indent=2, default=str, ensure_ascii=False)
+                
+                print(f"[BACKUP AUTO] ✅ {backup_file}")
+            except Exception as e:
+                print(f"[BACKUP AUTO] ❌ {e}")
+        
+        # Agendar
+        if not hasattr(app, 'scheduler'):
+            app.scheduler = BackgroundScheduler(timezone=TZ_SP)
+            app.scheduler.add_job(fazer_backup, 'cron', hour=22, minute=0)  # 22:00 SP
+            app.scheduler.start()
+            print("[SCHEDULER] ✅ Backup automático agendado para 22:00 (São Paulo)")
+        
+        return jsonify({'ok': True, 'msg': 'Backup automático agendado para 22:00 diariamente'})
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
 @app.route('/admin/testar-smtp')
 @login_required
 @admin_required
