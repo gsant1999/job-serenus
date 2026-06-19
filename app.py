@@ -3,6 +3,9 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 from datetime import datetime, timedelta, date
 from functools import wraps
 from dateutil.relativedelta import relativedelta
+import pytz
+
+TZ_SP = pytz.timezone('America/Sao_Paulo')  # Campinas, SP
 
 # ─── SUPORTE A PostgreSQL (Railway/Supabase) ──────────────────────────────────
 try:
@@ -297,7 +300,7 @@ class _ConnCompat:
         try: self._conn.rollback()
         except Exception: pass
     def close(self):
-        try: self._conn.close()
+        try: self._close_db(conn)
         except Exception: pass
     @property
     def raw(self): return self._conn
@@ -325,7 +328,7 @@ def _sqlite_conn():
 def close_db(conn):
     """Fecha a conexão (cada requisição abre/fecha a sua — sem pool)."""
     try:
-        conn.close()
+        close_db(conn)
     except Exception:
         pass
 
@@ -914,7 +917,7 @@ def init_db():
     if not is_pg:
         conn.commit()
 
-    conn.close()
+    close_db(conn)
 
 
 
@@ -1055,7 +1058,7 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
 
     # ─── GESTOR VENDEDOR: leva 100% da corretora ───
     if regime_base == 'gestor_vendedor':
-        conn.close()
+        close_db(conn)
         regua = [receb_mens] if receb_mens else [1.0]
         return {
             'codigo': 'gestor_vendedor', 'modelo': 'gestor_vendedor', 'nivel': '', 'plano': plano,
@@ -1090,7 +1093,7 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
     if not regua:
         regua = [rep_mens] if rep_mens else [0.0]
 
-    conn.close()
+    close_db(conn)
     avisos = []
     if receb_mens == 0:
         avisos.append(f"Falta cadastrar o RECEBIMENTO da corretora para {op_nome} / {plano}")
@@ -1356,7 +1359,7 @@ def emergency_status():
     n_props = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
     n_parcelas = conn.execute("SELECT COUNT(*) c FROM parcelas").fetchone()['c']
     props = conn.execute("SELECT id, razao_social, adm_operadora, valor FROM propostas ORDER BY id").fetchall()
-    conn.close()
+    close_db(conn)
     
     db_path = os.path.join(DATA_DIR, 'job.db')
     return jsonify({
@@ -1389,7 +1392,7 @@ def emergency_carregar_backup():
         conn = sqlite3.connect(db_path)
         n_props = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
         n_parcs = conn.execute("SELECT COUNT(*) c FROM parcelas").fetchone()['c']
-        conn.close()
+        close_db(conn)
         
         return jsonify({
             "ok": True, 
@@ -1407,7 +1410,7 @@ def emergency_carregar_backup():
     n_props = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
     n_parcelas = conn.execute("SELECT COUNT(*) c FROM parcelas").fetchone()['c']
     props = conn.execute("SELECT id, razao_social, adm_operadora, valor FROM propostas ORDER BY id").fetchall()
-    conn.close()
+    close_db(conn)
     
     db_path = os.path.join(DATA_DIR, 'job.db')
     return jsonify({
@@ -1428,7 +1431,7 @@ def emergency_exportar():
     conn = db()
     props = conn.execute("SELECT * FROM propostas ORDER BY id").fetchall()
     parc = conn.execute("SELECT * FROM parcelas ORDER BY proposta_id, numero").fetchall()
-    conn.close()
+    close_db(conn)
     
     data = {
         "timestamp": datetime.now().isoformat(),
@@ -1451,16 +1454,16 @@ def parcela_pagar_asaas(pid):
     parc = conn.execute("""SELECT pa.*, p.consultor, p.usuario_id, p.razao_social
         FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id WHERE pa.id=?""", (pid,)).fetchone()
     if not parc:
-        conn.close(); return jsonify({"ok": False, "erro": "Parcela não encontrada"}), 404
+        close_db(conn); return jsonify({"ok": False, "erro": "Parcela não encontrada"}), 404
     if parc['status'] != 'Liberado para o corretor':
-        conn.close(); return jsonify({"ok": False, "erro": "Só é possível pagar parcelas liberadas para o corretor"}), 400
+        close_db(conn); return jsonify({"ok": False, "erro": "Só é possível pagar parcelas liberadas para o corretor"}), 400
     if parc['asaas_transfer_id']:
-        conn.close(); return jsonify({"ok": False, "erro": "Esta parcela já tem um pagamento Asaas iniciado"}), 400
+        close_db(conn); return jsonify({"ok": False, "erro": "Esta parcela já tem um pagamento Asaas iniciado"}), 400
 
     consultor = conn.execute("SELECT chave_pix, nome FROM usuarios WHERE id=?", (parc['usuario_id'],)).fetchone()
     chave_pix = (consultor['chave_pix'] if consultor else '') or ''
     if not chave_pix.strip():
-        conn.close(); return jsonify({"ok": False, "erro": f"{parc['consultor']} não tem chave PIX cadastrada. Cadastre em Usuários."}), 400
+        close_db(conn); return jsonify({"ok": False, "erro": f"{parc['consultor']} não tem chave PIX cadastrada. Cadastre em Usuários."}), 400
 
     tipo_chave = asaas_detectar_tipo_chave(chave_pix)
     valor = round(float(parc['valor']), 2)
@@ -1481,14 +1484,14 @@ def parcela_pagar_asaas(pid):
                         VALUES (?,?,?,?,?)""",
                      (parc['proposta_id'] if 'proposta_id' in parc.keys() else None, session.get('nome'),
                       'Pagamento PIX (Asaas)', '', f"R$ {valor:.2f} para {parc['consultor']} — transfer {data['id']}"))
-        conn.commit(); conn.close()
+        conn.commit(); close_db(conn)
         return jsonify({"ok": True, "transfer_id": data['id'], "status": data.get('status')})
     else:
         erro_msg = data.get('_erro')
         if not erro_msg and data.get('errors'):
             erro_msg = '; '.join([e.get('description', str(e)) for e in data['errors']])
         conn.execute("UPDATE parcelas SET asaas_erro=? WHERE id=?", (str(erro_msg)[:300], pid))
-        conn.commit(); conn.close()
+        conn.commit(); close_db(conn)
         return jsonify({"ok": False, "erro": erro_msg or "Erro desconhecido do Asaas", "status": status}), 400
 
 
@@ -1508,7 +1511,7 @@ def webhook_asaas():
         # Idempotência: verifica se já processou este webhook
         já_proc = conn.execute("SELECT 1 FROM webhook_log WHERE evento_id=?", (evento_id,)).fetchone()
         if já_proc:
-            conn.close()
+            close_db(conn)
             return jsonify({"ok": True, "duplicado": True}), 200  # Webhook duplicado, ignora
 
         if evento.startswith('TRANSFER_'):
@@ -1537,7 +1540,7 @@ def webhook_asaas():
         # Registra webhook processado
         conn.execute("INSERT INTO webhook_log (evento_id, evento) VALUES (?,?)", (evento_id, evento))
         conn.commit()
-        conn.close()
+        close_db(conn)
         return jsonify({"ok": True}), 200
     except Exception as e:
         return jsonify({"ok": False, "erro": str(e)}), 200  # 200 para o Asaas não reenviar em loop
@@ -1606,14 +1609,14 @@ def esqueci_senha():
     conn = db()
     u = conn.execute("SELECT id,nome,ativo FROM usuarios WHERE email=?", (email,)).fetchone()
     if not u or not u['ativo']:
-        conn.close()
+        close_db(conn)
         # Mensagem genérica por segurança (não revela se e-mail existe)
         return render_template('esqueci_senha.html', enviado=True)
     import random
     codigo = f"{random.randint(0,999999):06d}"
     expira = (datetime.now() + timedelta(minutes=15)).isoformat()
     conn.execute("UPDATE usuarios SET reset_code=?, reset_expira=? WHERE id=?", (codigo, expira, u['id']))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     corpo = f"""
     <div style="font-family:sans-serif; max-width:420px; margin:auto; padding:30px;">
       <h2 style="color:#1fd8a4;">JOB · Corretora Serenus</h2>
@@ -1651,11 +1654,11 @@ def redefinir_senha():
     elif s1 != s2:
         erro = 'Senhas não conferem.'
     if erro:
-        conn.close()
+        close_db(conn)
         return render_template('redefinir_senha.html', email=email, erro=erro)
     conn.execute("UPDATE usuarios SET senha_hash=?, reset_code=NULL, reset_expira=NULL WHERE id=?",
                  (hash_senha(s1), u['id']))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return render_template('redefinir_senha.html', sucesso=True)
 
 # ─── RESET DE SENHA PELO GESTOR (admin define senha nova direto) ─────────────
@@ -1670,7 +1673,7 @@ def usuario_reset_senha(uid):
     conn = db()
     conn.execute("UPDATE usuarios SET senha_hash=?, token_setup=NULL, reset_code=NULL WHERE id=?",
                  (hash_senha(nova), uid))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     flash('Senha redefinida com sucesso.', 'success')
     return redirect(url_for('usuarios'))
 
@@ -1686,7 +1689,7 @@ def usuario_excluir(uid):
     # Reatribui propostas ao admin antes de excluir
     conn.execute("UPDATE propostas SET usuario_id=? WHERE usuario_id=?", (session['user_id'], uid))
     conn.execute("DELETE FROM usuarios WHERE id=?", (uid,))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     flash('Usuário excluído.', 'success')
     return redirect(url_for('usuarios'))
 
@@ -1697,7 +1700,7 @@ def login():
         senha = hash_senha(request.form.get('senha',''))
         conn = db()
         u = conn.execute("SELECT * FROM usuarios WHERE email=? AND senha_hash=? AND ativo=1",(email,senha)).fetchone()
-        conn.close()
+        close_db(conn)
         if u:
             session.update({'user_id':u['id'],'nome':u['nome'],'perfil':u['perfil'],'regime_base':u['regime_base'],'foto':u['foto'] or ''})
             return redirect(url_for('dashboard'))
@@ -1712,16 +1715,16 @@ def logout():
 def setup_senha(token):
     conn = db()
     u = conn.execute("SELECT * FROM usuarios WHERE token_setup=? AND ativo=1",(token,)).fetchone()
-    if not u: conn.close(); return render_template('setup_senha.html', erro='Link inválido ou já utilizado.')
+    if not u: close_db(conn); return render_template('setup_senha.html', erro='Link inválido ou já utilizado.')
     expira = datetime.fromisoformat(u['token_expira']) if u['token_expira'] else None
-    if expira and expira < datetime.now(): conn.close(); return render_template('setup_senha.html', erro='Link expirado.')
+    if expira and expira < datetime.now(): close_db(conn); return render_template('setup_senha.html', erro='Link expirado.')
     if request.method == 'POST':
         s1=request.form.get('senha',''); s2=request.form.get('senha2','')
-        if len(s1)<6: conn.close(); return render_template('setup_senha.html',usuario=u,erro='Mínimo 6 caracteres.')
-        if s1!=s2: conn.close(); return render_template('setup_senha.html',usuario=u,erro='Senhas não conferem.')
+        if len(s1)<6: close_db(conn); return render_template('setup_senha.html',usuario=u,erro='Mínimo 6 caracteres.')
+        if s1!=s2: close_db(conn); return render_template('setup_senha.html',usuario=u,erro='Senhas não conferem.')
         conn.execute("UPDATE usuarios SET senha_hash=?,token_setup=NULL,token_expira=NULL WHERE id=?",(hash_senha(s1),u['id']))
-        conn.commit(); conn.close(); flash('Senha criada! Faça login.'); return redirect(url_for('login'))
-    conn.close()
+        conn.commit(); close_db(conn); flash('Senha criada! Faça login.'); return redirect(url_for('login'))
+    close_db(conn)
     return render_template('setup_senha.html', usuario=u)
 
 # ─── DASHBOARD ───────────────────────────────────────────────────────────────────
@@ -1748,7 +1751,7 @@ def dashboard():
             FROM propostas GROUP BY adm_operadora ORDER BY valor DESC LIMIT 8""").fetchall()
         por_consultor = conn.execute("""SELECT consultor,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,COALESCE(SUM(comissao_consultor),0) com
             FROM propostas GROUP BY consultor ORDER BY valor DESC""").fetchall()
-        conn.close()
+        close_db(conn)
         return render_template('dashboard_admin.html', m=m, ultimas=ultimas,
                                por_operadora=por_operadora, por_consultor=por_consultor,
                                ciclo=ciclo_atual())
@@ -1788,7 +1791,7 @@ def dashboard():
         ultimas = conn.execute("SELECT * FROM propostas WHERE usuario_id=? ORDER BY id DESC LIMIT 5",(uid,)).fetchall()
         por_operadora = conn.execute("""SELECT adm_operadora,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
             FROM propostas WHERE usuario_id=? GROUP BY adm_operadora ORDER BY valor DESC LIMIT 6""",(uid,)).fetchall()
-        conn.close()
+        close_db(conn)
         return render_template('dashboard_consultor.html', m=m, ultimas=ultimas,
                                por_operadora=por_operadora, pendentes_aceite=pendentes_aceite)
 
@@ -1799,7 +1802,7 @@ def nova_proposta():
     conn = db()
     sups = conn.execute("SELECT * FROM supervisoras WHERE ativo=1 ORDER BY nome").fetchall()
     ops = conn.execute("SELECT DISTINCT operadora FROM recebimento ORDER BY operadora").fetchall()
-    conn.close()
+    close_db(conn)
     return render_template('form.html', supervisoras=sups, operadoras=[o['operadora'] for o in ops])
 
 @app.route('/salvar-proposta', methods=['POST'])
@@ -1905,7 +1908,7 @@ def salvar_proposta():
                 VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""", (parc['proposta_id'],parc['numero'],parc['percentual'],
                                           parc['valor'],parc['valor_corretora'],parc['perc_cliente'],
                                           parc['data_prevista'],parc['status'],parc['competencia'],parc['mensalidade_ref']))
-        conn.commit(); conn.close()
+        conn.commit(); close_db(conn)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
@@ -1920,7 +1923,7 @@ def listar_propostas():
     else:
         rows = conn.execute("""SELECT p.*,s.nome as supervisora_nome FROM propostas p
             LEFT JOIN supervisoras s ON s.id=p.supervisora_id WHERE p.usuario_id=? ORDER BY p.id DESC""",(uid,)).fetchall()
-    conn.close()
+    close_db(conn)
     return render_template('propostas.html', propostas=rows)
 
 @app.route('/proposta/<int:pid>')
@@ -1933,7 +1936,7 @@ def ver_proposta(pid):
     if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']: return "Acesso negado", 403
     parcelas = conn.execute("SELECT * FROM parcelas WHERE proposta_id=? ORDER BY numero ASC",(pid,)).fetchall()
     campos_def = conn.execute("SELECT * FROM campos_custom ORDER BY ordem,id").fetchall()
-    conn.close()
+    close_db(conn)
     # Nome legível do modelo/regime aplicado
     cod = p['regime_aplicado'] or ''
     nome_regime = MODELO_NOME.get(cod, cod or '—')
@@ -1959,7 +1962,7 @@ def editar_consultor(pid):
     u = conn.execute("SELECT * FROM usuarios WHERE id=?", (novo_uid,)).fetchone()
     p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
     if not u or not p:
-        conn.close(); return jsonify({"ok": False, "msg": "Consultor ou proposta inválidos"}), 400
+        close_db(conn); return jsonify({"ok": False, "msg": "Consultor ou proposta inválidos"}), 400
 
     # Produção do mês do NOVO consultor (exceto esta proposta) + esta venda
     ma = (p['criado_em'] or '')[:7]
@@ -1986,7 +1989,7 @@ def editar_consultor(pid):
         msg = "Consultor remanejado e comissão recalculada."
     else:
         msg = "Consultor trocado. Parcelas já em fluxo foram mantidas; só novas seguem o novo regime."
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True, "msg": msg})
 
 @app.route('/propostas/recalcular-todas', methods=['POST'])
@@ -2028,7 +2031,7 @@ def recalcular_todas():
         if c.get('aviso'):
             avisos.append({'id': p['id'], 'cliente': p['razao_social'],
                            'operadora': p['adm_operadora'], 'aviso': c['aviso']})
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True, "recalculadas": recalc, "avisos": avisos})
 
 @app.route('/api/consultores')
@@ -2037,14 +2040,14 @@ def recalcular_todas():
 def api_consultores():
     conn = db()
     rows = conn.execute("SELECT id,nome,regime_base FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome").fetchall()
-    conn.close()
+    close_db(conn)
     return jsonify([{'id': r['id'], 'nome': r['nome'],
                      'regime': MODELO_NOME.get(r['regime_base'], r['regime_base'] or '—')} for r in rows])
 
 def get_cfg(chave, default=''):
     conn = db()
     r = conn.execute("SELECT valor FROM config WHERE chave=?", (chave,)).fetchone()
-    conn.close()
+    close_db(conn)
     return r['valor'] if r else default
 
 @app.route('/proposta/<int:pid>/email-affinity')
@@ -2053,7 +2056,7 @@ def email_affinity(pid):
     """Monta o e-mail-padrão de solicitação de protocolo para a Affinity."""
     conn = db()
     p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
-    conn.close()
+    close_db(conn)
     if not p: return jsonify({"ok": False}), 404
     contato = get_cfg('affinity_contato', 'equipe')
     dest = get_cfg('affinity_destinatarios', '')
@@ -2106,7 +2109,7 @@ def config_affinity():
     for k in ['affinity_destinatarios','affinity_contato','affinity_remetente']:
         if k in d:
             conn.execute("INSERT INTO config (chave,valor) VALUES (?,?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor", (k, d[k]))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/api/etiquetas')
@@ -2118,7 +2121,7 @@ def api_etiquetas():
     marcadas = []
     if pid:
         marcadas = [r['etiqueta_id'] for r in conn.execute("SELECT etiqueta_id FROM proposta_etiquetas WHERE proposta_id=?", (pid,)).fetchall()]
-    conn.close()
+    close_db(conn)
     return jsonify({'todas': [dict(e) for e in todas], 'marcadas': marcadas})
 
 @app.route('/etiqueta/criar', methods=['POST'])
@@ -2131,7 +2134,7 @@ def etiqueta_criar():
         conn.execute("INSERT INTO etiquetas (nome,cor) VALUES (?,?)", (d['nome'], d.get('cor','#1fd8a4')))
         conn.commit()
     except sqlite3.IntegrityError: pass
-    conn.close()
+    close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/proposta/<int:pid>/etiquetas', methods=['POST'])
@@ -2142,7 +2145,7 @@ def proposta_etiquetas(pid):
     conn.execute("DELETE FROM proposta_etiquetas WHERE proposta_id=?", (pid,))
     for eid in ids:
         conn.execute("INSERT OR IGNORE INTO proposta_etiquetas (proposta_id,etiqueta_id) VALUES (?,?)", (pid, eid))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 # ─── DIAGNÓSTICO DO DRIVE ─────────────────────────────────────────────────────────
@@ -2154,7 +2157,7 @@ def produtos():
     conn = db()
     rows = conn.execute("SELECT * FROM produtos WHERE ativo=1 ORDER BY operadora, nome").fetchall()
     ops = conn.execute("SELECT DISTINCT operadora FROM recebimento ORDER BY operadora").fetchall()
-    conn.close()
+    close_db(conn)
     return render_template('produtos.html', produtos=rows, operadoras=[o['operadora'] for o in ops])
 
 @app.route('/produto/salvar', methods=['POST'])
@@ -2169,7 +2172,7 @@ def produto_salvar():
     else:
         conn.execute("""INSERT INTO produtos (operadora,nome,tipo_plano,acomodacao,coparticipacao,observacao) VALUES (?,?,?,?,?,?)""",
             (d['operadora'],d['nome'],d.get('tipo_plano',''),d.get('acomodacao',''),d.get('coparticipacao',''),d.get('observacao','')))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/produto/excluir/<int:prid>', methods=['POST'])
@@ -2177,7 +2180,7 @@ def produto_salvar():
 @admin_required
 def produto_excluir(prid):
     conn = db(); conn.execute("UPDATE produtos SET ativo=0 WHERE id=?", (prid,))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/api/produtos')
@@ -2189,7 +2192,7 @@ def api_produtos():
         rows = conn.execute("SELECT * FROM produtos WHERE ativo=1 AND operadora=? ORDER BY nome", (op,)).fetchall()
     else:
         rows = conn.execute("SELECT * FROM produtos WHERE ativo=1 ORDER BY operadora,nome").fetchall()
-    conn.close()
+    close_db(conn)
     return jsonify([dict(r) for r in rows])
 
 # ─── EDITAR PROPOSTA + TIMELINE (só admin) ────────────────────────────────────────
@@ -2208,7 +2211,7 @@ def proposta_editar(pid):
     d = request.json or {}
     conn = db()
     p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
-    if not p: conn.close(); return jsonify({"ok": False}), 404
+    if not p: close_db(conn); return jsonify({"ok": False}), 404
     nome_user = session.get('nome','admin')
     NUMERICOS = {'valor','total_vidas','dia_vencimento'}
     def conv(campo, v):
@@ -2227,7 +2230,7 @@ def proposta_editar(pid):
                 conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_nome,campo,valor_antes,valor_depois)
                     VALUES (?,?,?,?,?)""", (pid, nome_user, label, str(antes or '—'), str(depois or '—')))
                 mudou.append(label)
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True, "mudou": mudou})
 
 @app.route('/proposta/<int:pid>/historico')
@@ -2235,7 +2238,7 @@ def proposta_editar(pid):
 def proposta_historico(pid):
     conn = db()
     h = conn.execute("""SELECT * FROM historico_proposta WHERE proposta_id=? ORDER BY id DESC""", (pid,)).fetchall()
-    conn.close()
+    close_db(conn)
     return jsonify([dict(x) for x in h])
 
 # ─── FASES DA PROPOSTA (fluxo com avisos lógicos) ─────────────────────────────────
@@ -2254,7 +2257,7 @@ def proposta_fase(pid):
     nova = (request.json or {}).get('fase')
     conn = db()
     p = conn.execute("SELECT fase,contrato_arquivo,comprovante_boleto FROM propostas WHERE id=?", (pid,)).fetchone()
-    if not p: conn.close(); return jsonify({"ok": False}), 404
+    if not p: close_db(conn); return jsonify({"ok": False}), 404
     fase_info = next((f for f in FASES if f['id']==nova), None)
     aviso = ''
     if fase_info and fase_info['falta']=='comprovante' and not p['comprovante_boleto']:
@@ -2262,7 +2265,7 @@ def proposta_fase(pid):
     conn.execute("UPDATE propostas SET fase=? WHERE id=?", (nova, pid))
     conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_nome,campo,valor_antes,valor_depois)
         VALUES (?,?,?,?,?)""", (pid, session.get('nome','admin'), 'Fase', p['fase'] or '—', nova))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True, "aviso": aviso})
 
 # ─── ROTAS DE PARCELAS (FLUXO DE CAIXA) ─────────────────────────────────────────
@@ -2282,7 +2285,7 @@ def parcela_status(pid):
                      (novo, datetime.now().isoformat(), pid))
     else:
         conn.execute("UPDATE parcelas SET status=? WHERE id=?", (novo, pid))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/parcela/<int:pid>/acao', methods=['POST'])
@@ -2303,8 +2306,8 @@ def parcela_acao(pid):
     elif acao == 'voltar':
         conn.execute("UPDATE parcelas SET status='Pendente de receber',confirmado_gestor=0,aceite_corretor=0 WHERE id=?", (pid,))
     else:
-        conn.close(); return jsonify({"ok": False, "msg": "Ação inválida"}), 400
-    conn.commit(); conn.close()
+        close_db(conn); return jsonify({"ok": False, "msg": "Ação inválida"}), 400
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/parcela/<int:pid>/antecipar', methods=['POST'])
@@ -2322,15 +2325,15 @@ def parcela_antecipar(pid):
     parc = conn.execute("""SELECT pa.*, p.usuario_id, p.razao_social FROM parcelas pa
         JOIN propostas p ON p.id=pa.proposta_id WHERE pa.id=?""",(pid,)).fetchone()
     if not parc or parc['numero'] != 1:
-        conn.close(); return jsonify({"ok": False, "msg": "Antecipação só disponível para a 1ª parcela"}), 400
+        close_db(conn); return jsonify({"ok": False, "msg": "Antecipação só disponível para a 1ª parcela"}), 400
     if session['perfil'] != 'admin' and parc['usuario_id'] != session['user_id']:
-        conn.close(); return jsonify({"ok": False, "msg": "Acesso negado"}), 403
+        close_db(conn); return jsonify({"ok": False, "msg": "Acesso negado"}), 403
     # Upload para Drive na subpasta do cliente
     razao_pasta = (parc['razao_social'] or 'sem_nome')[:40].strip().replace('/', '-')
     upload_drive(caminho, nome, subpasta_nome=razao_pasta)
     conn.execute("UPDATE parcelas SET comprovante_antecipacao=?,status='Antecipação - Aguardando ADM' WHERE id=?",
                  (nome, pid))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/parcela/<int:pid>/aprovar-antecipacao', methods=['POST'])
@@ -2340,7 +2343,7 @@ def parcela_aprovar_antecip(pid):
     """ADM aprova o comprovante e solicita os 48h à operadora."""
     conn = db()
     conn.execute("UPDATE parcelas SET status='Antecipação Solicitada à Operadora' WHERE id=?", (pid,))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/parcela/<int:pid>/aceite', methods=['POST'])
@@ -2350,12 +2353,12 @@ def parcela_aceite(pid):
     conn = db()
     parc = conn.execute("""SELECT pa.*, p.usuario_id FROM parcelas pa
         JOIN propostas p ON p.id=pa.proposta_id WHERE pa.id=?""",(pid,)).fetchone()
-    if not parc: conn.close(); return jsonify({"ok": False, "msg": "Parcela não encontrada"}), 404
+    if not parc: close_db(conn); return jsonify({"ok": False, "msg": "Parcela não encontrada"}), 404
     if session['perfil'] != 'admin' and parc['usuario_id'] != session['user_id']:
-        conn.close(); return jsonify({"ok": False, "msg": "Acesso negado"}), 403
+        close_db(conn); return jsonify({"ok": False, "msg": "Acesso negado"}), 403
     conn.execute("UPDATE parcelas SET aceite_corretor=1,data_aceite=? WHERE id=?",
                  (datetime.now().isoformat(), pid))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 # ─── FLUXO DE CAIXA ──────────────────────────────────────────────────────────────
@@ -2406,7 +2409,7 @@ def fluxo_caixa():
             WHERE pa.status='Pago ao corretor' ORDER BY pa.id DESC LIMIT 30
         """).fetchall()
 
-        conn.close()
+        close_db(conn)
         return render_template('fluxo_caixa.html', ciclo=ciclo, totais=totais,
                                antecipacoes=antecipacoes, lote=lote,
                                recebidos=recebidos, pagos=pagos,
@@ -2431,7 +2434,7 @@ def fluxo_caixa():
             WHERE tipo='fixo' AND usuario_id=? AND data_competencia=?""", (uid, mes)).fetchone()['v']
         fixo_parcelas = conn.execute("""SELECT descricao,valor,data_lancamento,status FROM lancamentos
             WHERE tipo='fixo' AND usuario_id=? AND data_competencia=? ORDER BY data_lancamento""", (uid, mes)).fetchall()
-        conn.close()
+        close_db(conn)
         return render_template('fluxo_caixa_consultor.html', ciclo=ciclo,
                                a_receber=a_receber, em_analise=em_analise,
                                pagos=pagos_consul, total_a_receber=total_a_receber,
@@ -2465,7 +2468,7 @@ def bi():
         por_modalidade = conn.execute("""SELECT modalidade,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
             FROM propostas WHERE usuario_id=? GROUP BY modalidade ORDER BY valor DESC""",(uid,)).fetchall()
         por_consultor = []
-    conn.close()
+    close_db(conn)
     return render_template('bi.html', por_mes=por_mes, por_operadora=por_operadora,
                            por_modalidade=por_modalidade, por_consultor=por_consultor)
 
@@ -2476,7 +2479,7 @@ def bi():
 def usuarios():
     conn = db()
     rows = conn.execute("SELECT * FROM usuarios ORDER BY id").fetchall()
-    conn.close()
+    close_db(conn)
     return render_template('usuarios.html', usuarios=rows, host=request.host_url.rstrip('/'))
 
 @app.route('/usuario/novo', methods=['POST'])
@@ -2496,8 +2499,8 @@ def usuario_novo():
             (d.get('regime_base','sem_lead_sem_fixo') if d.get('perfil','consultor')=='consultor' else ''),token,expira,cpf or None))
         conn.commit()
     except sqlite3.IntegrityError:
-        flash('E-mail já cadastrado.'); conn.close(); return redirect(url_for('usuarios'))
-    conn.close()
+        flash('E-mail já cadastrado.'); close_db(conn); return redirect(url_for('usuarios'))
+    close_db(conn)
     return redirect(url_for('usuarios', link_token=token))
 
 @app.route('/usuario/foto/upload', methods=['POST'])
@@ -2536,7 +2539,7 @@ def usuario_foto_upload():
     fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
 
     conn.execute("UPDATE usuarios SET foto=? WHERE id=?", (foto_nome, uid_alvo))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
 
     # Se é a própria foto, atualiza a sessão para aparecer na sidebar
     if uid_alvo == uid_logado:
@@ -2566,7 +2569,7 @@ def usuario_editar(uid):
     conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=? WHERE id=?""",
         (d['nome'],d['email'].lower(),d['perfil'],
          (d['regime_base'] if d['perfil']=='consultor' else ''),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,uid))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return redirect(url_for('usuarios'))
 
 @app.route('/usuario/regenerar-link/<int:uid>')
@@ -2612,7 +2615,7 @@ def usuario_regenerar(uid):
 def supervisoras():
     conn = db()
     rows = conn.execute("SELECT * FROM supervisoras ORDER BY ativo DESC,nome").fetchall()
-    conn.close()
+    close_db(conn)
     return render_template('supervisoras.html', supervisoras=rows)
 
 @app.route('/supervisora/salvar', methods=['POST'])
@@ -2626,7 +2629,7 @@ def supervisora_salvar():
     else:
         conn.execute("INSERT INTO supervisoras (nome,email,telefone) VALUES (?,?,?)",
             (d['nome'],d.get('email'),d.get('telefone')))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return redirect(url_for('supervisoras'))
 
 # ─── REGIMES ─────────────────────────────────────────────────────────────────────
@@ -2636,7 +2639,7 @@ def supervisora_salvar():
 def regimes():
     conn = db()
     rows = conn.execute("SELECT * FROM regimes ORDER BY ordem").fetchall()
-    conn.close()
+    close_db(conn)
     return render_template('regimes.html', regimes=rows)
 
 @app.route('/regime/salvar', methods=['POST'])
@@ -2656,7 +2659,7 @@ def regime_salvar():
             distribuicao_parcelas=?,faixa_min=?,faixa_max=?,coluna_comissao=? WHERE id=?""",
             (d['nome'],d.get('descricao'),f('valor_fixo'),int(d.get('num_parcelas',1) or 1),
              d.get('distribuicao_parcelas','100'),fmin,fmax,d.get('coluna_comissao'),d['id']))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return redirect(url_for('regimes'))
 
 # ─── COMISSÕES ───────────────────────────────────────────────────────────────────
@@ -2666,7 +2669,7 @@ def regime_salvar():
 def comissoes():
     conn = db()
     rows = conn.execute("SELECT * FROM comissoes ORDER BY operadora").fetchall()
-    conn.close()
+    close_db(conn)
     return render_template('comissoes.html', comissoes=rows)
 
 @app.route('/comissao/salvar', methods=['POST'])
@@ -2689,7 +2692,7 @@ def comissao_salvar():
             perc_n1,perc_n2,perc_n3,perc_com_fixo,observacao) VALUES (?,?,?,?,?,?,?,?)""",
             (d['operadora'],num('perc_total'),num('perc_sem_leads'),num('perc_n1'),
              num('perc_n2'),num('perc_n3'),num('perc_com_fixo'),d.get('observacao')))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return redirect(url_for('comissoes'))
 
 # ─── CAMPOS PERSONALIZADOS (FORM BUILDER) ────────────────────────────────────────
@@ -2699,7 +2702,7 @@ def comissao_salvar():
 def campos():
     conn = db()
     rows = conn.execute("SELECT * FROM campos_custom ORDER BY ordem,id").fetchall()
-    conn.close()
+    close_db(conn)
     return render_template('campos.html', campos=rows)
 
 @app.route('/campo/salvar', methods=['POST'])
@@ -2734,7 +2737,7 @@ def campo_salvar():
         conn.execute("""INSERT INTO campos_custom (label,nome_tecnico,tipo,opcoes,placeholder,ajuda,obrigatorio,ativo,ordem)
             VALUES (?,?,?,?,?,?,?,?,?)""",
             (label, nome, tipo, json.dumps(opcoes, ensure_ascii=False), placeholder, ajuda, obrig, ativo, ordem))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/campo/excluir/<int:cid>', methods=['POST'])
@@ -2743,7 +2746,7 @@ def campo_salvar():
 def campo_excluir(cid):
     conn = db()
     conn.execute("DELETE FROM campos_custom WHERE id=?", (cid,))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/campo/ordem', methods=['POST'])
@@ -2755,7 +2758,7 @@ def campo_ordem():
     conn = db()
     for i, cid in enumerate(ids):
         conn.execute("UPDATE campos_custom SET ordem=? WHERE id=?", (i+1, cid))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/api/campos-ativos')
@@ -2763,7 +2766,7 @@ def campo_ordem():
 def api_campos_ativos():
     conn = db()
     rows = conn.execute("SELECT * FROM campos_custom WHERE ativo=1 ORDER BY ordem,id").fetchall()
-    conn.close()
+    close_db(conn)
     out = []
     for r in rows:
         try: opc = json.loads(r['opcoes']) if r['opcoes'] else []
@@ -2780,7 +2783,7 @@ def api_campos_ativos():
 def operadoras():
     conn = db()
     rows = conn.execute("SELECT * FROM recebimento ORDER BY operadora,plano").fetchall()
-    conn.close()
+    close_db(conn)
     # agrupa por operadora+obs, com colunas por plano
     grupos = {}
     for r in rows:
@@ -2809,7 +2812,7 @@ def operadora_salvar():
         conn.execute("""INSERT INTO recebimento (operadora,obs,plano,total) VALUES (?,?,?,?)
             ON CONFLICT(operadora,obs,plano) DO UPDATE SET total=excluded.total""",
             (nome, obs, plano, total))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/operadora/excluir', methods=['POST'])
@@ -2820,7 +2823,7 @@ def operadora_excluir():
     conn = db()
     conn.execute("DELETE FROM recebimento WHERE operadora=? AND obs=?", (d.get('operadora'), d.get('obs','')))
     conn.execute("DELETE FROM repasse_corretor WHERE operadora=? AND obs=?", (d.get('operadora'), d.get('obs','')))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 # ─── REPASSES AO CORRETOR (mensalidades por operadora × plano × modelo × nível) ────
@@ -2832,7 +2835,7 @@ def repasses():
     ops = conn.execute("SELECT DISTINCT operadora,obs FROM recebimento ORDER BY operadora").fetchall()
     reps = conn.execute("SELECT * FROM repasse_corretor").fetchall()
     niveis = conn.execute("SELECT * FROM niveis ORDER BY ordem").fetchall()
-    conn.close()
+    close_db(conn)
     rep_map = {f"{r['operadora']}|{r['obs'] or ''}|{r['plano']}|{r['modelo']}|{r['nivel']}": dict(r) for r in reps}
     return render_template('repasses.html',
                            operadoras=[{'operadora': o['operadora'], 'obs': o['obs'] or ''} for o in ops],
@@ -2857,7 +2860,7 @@ def repasse_salvar():
             ON CONFLICT(operadora,obs,plano,modelo,nivel) DO UPDATE SET
             total=excluded.total, regua=excluded.regua, taxa=excluded.taxa""",
             (op, obs, plano, modelo, nivel, total, regua, taxa))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 # ─── NÍVEIS (faixas de produção) ──────────────────────────────────────────────────
@@ -2913,7 +2916,7 @@ def producao():
     # Níveis de produção (N1, N2, N3)
     niveis = conn.execute("SELECT * FROM niveis ORDER BY ordem").fetchall()
     
-    conn.close()
+    close_db(conn)
     
     return render_template('producao.html',
         ciclo=ciclo,
@@ -2937,7 +2940,7 @@ def producao_mudar_fase():
     conn.execute("""INSERT INTO historico_proposta (proposta_id, usuario_nome, campo, valor_antes, valor_depois)
         VALUES (NULL, ?, 'Fluxo Semanal', ?, ?)""", 
         (session.get('nome','admin'), detectar_fase_atual(), nova_fase))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     
     return jsonify({"ok": True, "nova_fase": nova_fase})
 
@@ -2947,7 +2950,7 @@ def producao_mudar_fase():
 def niveis():
     conn = db()
     rows = conn.execute("SELECT * FROM niveis ORDER BY ordem").fetchall()
-    conn.close()
+    close_db(conn)
     return render_template('niveis.html', niveis=rows)
 
 @app.route('/nivel/salvar', methods=['POST'])
@@ -2970,7 +2973,7 @@ def nivel_salvar():
     if codigos:
         ph = ','.join('?'*len(codigos))
         conn.execute(f"DELETE FROM niveis WHERE codigo NOT IN ({ph})", codigos)
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 # ─── FINANCEIRO: fixo, custos, aporte, comissões futuras, estorno ─────────────────
@@ -2995,7 +2998,7 @@ def gerar_fixo_mes(ano_mes):
                     VALUES ('fixo','Fixo consultor',?,?,?,?,?,'Previsto')""",
                     (f"Fixo {u['nome']} — dia {dia}", metade, ano_mes, f"{ano_mes}-{dia:02d}", u['id']))
                 criados += 1
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return criados
 
 @app.route('/financeiro')
@@ -3034,7 +3037,7 @@ def financeiro():
     }
     dre['margem_bruta'] = dre['receita_bruta'] - dre['repasse_consultores']
     dre['resultado'] = dre['margem_bruta'] - dre['custos_operacionais'] - dre['fixos'] + dre['aportes']
-    conn.close()
+    close_db(conn)
     return render_template('financeiro.html', mes=mes, futuras=futuras,
         custos=custos, aportes=aportes, fixos=fixos,
         receber_mes=receber_mes, pagar_consultor=pagar_consultor,
@@ -3051,7 +3054,7 @@ def lancamento_salvar():
         (d.get('tipo'), d.get('categoria',''), d.get('descricao'), float(d.get('valor') or 0),
          d.get('data_competencia') or competencia_atual(), d.get('data_lancamento',''),
          d.get('socio',''), 1 if d.get('recorrente') else 0, 'Previsto'))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/lancamento/excluir/<int:lid>', methods=['POST'])
@@ -3059,7 +3062,7 @@ def lancamento_salvar():
 @admin_required
 def lancamento_excluir(lid):
     conn = db(); conn.execute("DELETE FROM lancamentos WHERE id=?", (lid,))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/fixo/gerar', methods=['POST'])
@@ -3080,7 +3083,7 @@ def estornos():
         FROM regras_estorno r ORDER BY operadora""").fetchall()
     ops = conn.execute("SELECT DISTINCT operadora FROM recebimento ORDER BY operadora").fetchall()
     estornadas = conn.execute("SELECT * FROM propostas WHERE estornada=1 ORDER BY id DESC LIMIT 30").fetchall()
-    conn.close()
+    close_db(conn)
     return render_template('estornos.html', regras=regras,
         operadoras=[o['operadora'] for o in ops], estornadas=estornadas)
 
@@ -3095,7 +3098,7 @@ def regra_estorno_salvar():
         ON CONFLICT(operadora) DO UPDATE SET perc_estorno=excluded.perc_estorno,
         ate_mensalidade=excluded.ate_mensalidade, observacao=excluded.observacao""",
         (d.get('operadora'), float(d.get('perc_estorno') or 100), int(d.get('ate_mensalidade') or 3), d.get('observacao','')))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/proposta/<int:pid>/estornar', methods=['POST'])
@@ -3108,7 +3111,7 @@ def estornar_proposta(pid):
     conn = db()
     p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
     if not p:
-        conn.close(); return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+        close_db(conn); return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
     regra = conn.execute("SELECT * FROM regras_estorno WHERE operadora=?", (p['adm_operadora'],)).fetchone()
     perc = (regra['perc_estorno'] if regra else 100)
     ate = (regra['ate_mensalidade'] if regra else 3)
@@ -3125,7 +3128,7 @@ def estornar_proposta(pid):
     info = f"Cliente parou na {mens_cancelou}ª mensalidade. Regra {p['adm_operadora']}: estorna {perc:.0f}% até a {ate}ª. " + \
            (f"Estorno de R$ {valor_estorno:.2f}." if estorna else "Fora da janela — sem estorno.")
     conn.execute("UPDATE propostas SET estornada=?, estorno_info=? WHERE id=?", (1 if estorna else 0, info, pid))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True, "estorna": estorna, "valor": valor_estorno, "info": info})
 
 # ─── APIs ────────────────────────────────────────────────────────────────────────
@@ -3135,7 +3138,7 @@ def api_com_pub():
     rec = conn.execute("SELECT * FROM recebimento").fetchall()
     reps = conn.execute("SELECT * FROM repasse_corretor").fetchall()
     niveis = conn.execute("SELECT * FROM niveis ORDER BY ordem").fetchall()
-    conn.close()
+    close_db(conn)
     # recebimento indexado por "operadora|plano" (pega entrada sem obs preferencialmente)
     rec_map = {}
     for r in rec:
@@ -3159,7 +3162,7 @@ def api_propostas():
         rows = conn.execute("SELECT * FROM propostas ORDER BY id DESC").fetchall()
     else:
         rows = conn.execute("SELECT * FROM propostas WHERE usuario_id=? ORDER BY id DESC",(uid,)).fetchall()
-    conn.close()
+    close_db(conn)
     return jsonify([dict(r) for r in rows])
 
 
@@ -3207,7 +3210,7 @@ def crm():
 
     # Stats
     total = len(leads)
-    conn.close()
+    close_db(conn)
     return render_template('crm.html', kanban=kanban, etapas=CRM_ETAPAS,
                            total=total, responsaveis=responsaveis, eh_admin=eh_admin)
 
@@ -3229,7 +3232,7 @@ def crm_lead_novo():
     lead_id = conn.execute("SELECT last_insert_rowid() id").fetchone()['id']
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                  (lead_id, session.get('nome'), 'criacao', 'Lead criado'))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True, "id": lead_id})
 
 
@@ -3241,12 +3244,12 @@ def crm_lead_detalhe(lid):
         FROM crm_leads l LEFT JOIN usuarios u ON u.id=l.responsavel_id
         WHERE l.id=?""", (lid,)).fetchone()
     if not lead:
-        conn.close(); return jsonify({"ok": False}), 404
+        close_db(conn); return jsonify({"ok": False}), 404
     if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
-        conn.close(); return jsonify({"ok": False, "erro": "Acesso negado"}), 403
+        close_db(conn); return jsonify({"ok": False, "erro": "Acesso negado"}), 403
     atividades = conn.execute(
         "SELECT * FROM crm_atividades WHERE lead_id=? ORDER BY id DESC", (lid,)).fetchall()
-    conn.close()
+    close_db(conn)
     return jsonify({
         "lead": dict(lead),
         "atividades": [dict(a) for a in atividades]
@@ -3262,16 +3265,16 @@ def crm_lead_mover(lid):
     conn = db()
     lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
     if not lead:
-        conn.close(); return jsonify({"ok": False}), 404
+        close_db(conn); return jsonify({"ok": False}), 404
     if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
-        conn.close(); return jsonify({"ok": False}), 403
+        close_db(conn); return jsonify({"ok": False}), 403
     etapa_ant = lead['etapa']
     conn.execute("UPDATE crm_leads SET etapa=?, atualizado_em=CURRENT_TIMESTAMP WHERE id=?",
                  (nova_etapa, lid))
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                  (lid, session.get('nome'), 'movimentacao',
                   f'Movido de "{etapa_ant}" para "{nova_etapa}"'))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 
@@ -3283,7 +3286,7 @@ def crm_lead_atividade(lid):
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                  (lid, session.get('nome'), d.get('tipo', 'nota'), d.get('descricao', '')))
     conn.execute("UPDATE crm_leads SET atualizado_em=CURRENT_TIMESTAMP WHERE id=?", (lid,))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 
@@ -3297,7 +3300,7 @@ def crm_lead_editar(lid):
                     WHERE id=?""",
         (d.get('nome'), d.get('telefone'), d.get('email'), d.get('empresa'),
          float(d.get('valor_estimado') or 0) or None, d.get('observacoes'), lid))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 
@@ -3307,13 +3310,13 @@ def crm_lead_excluir(lid):
     conn = db()
     lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
     if not lead:
-        conn.close(); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
     # Admin pode excluir qualquer lead; consultor só os seus próprios
     if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
-        conn.close(); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
     conn.execute("DELETE FROM crm_atividades WHERE lead_id=?", (lid,))
     conn.execute("DELETE FROM crm_leads WHERE id=?", (lid,))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 
@@ -3327,7 +3330,7 @@ def crm_stats():
     for e in CRM_ETAPAS:
         row = conn.execute(f"SELECT COUNT(*) c, COALESCE(SUM(valor_estimado),0) v FROM crm_leads WHERE etapa=?{q_filter}", (e['id'],)).fetchone()
         stats[e['id']] = {'qtd': row['c'], 'valor': row['v']}
-    conn.close()
+    close_db(conn)
     return jsonify(stats)
 
 
@@ -3365,7 +3368,7 @@ def webhook_meta():
                     lead_id = conn.execute("SELECT last_insert_rowid() id").fetchone()['id']
                     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                                  (lead_id, 'Meta Ads', 'criacao', f'Lead capturado via Meta Ads'))
-        conn.commit(); conn.close()
+        conn.commit(); close_db(conn)
         return jsonify({"ok": True}), 200
     except Exception as e:
         return jsonify({"ok": False, "erro": str(e)}), 200  # Sempre 200 pro Meta
@@ -3392,7 +3395,7 @@ def webhook_google():
         lead_id = conn.execute("SELECT last_insert_rowid() id").fetchone()['id']
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                      (lead_id, 'Google Ads', 'criacao', 'Lead capturado via Google Lead Form'))
-        conn.commit(); conn.close()
+        conn.commit(); close_db(conn)
         return jsonify({"ok": True}), 200
     except Exception as e:
         return jsonify({"ok": False, "erro": str(e)}), 200
@@ -3425,7 +3428,7 @@ def minha_foto():
         except: pass
     fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
     conn.execute("UPDATE usuarios SET foto=? WHERE id=?", (foto_nome, uid))
-    conn.commit(); conn.close()
+    conn.commit(); close_db(conn)
     session['foto'] = foto_nome
     return jsonify({"ok": True, "foto": foto_nome})
 
@@ -3448,7 +3451,7 @@ def auto_import_sqlite():
                     conn.execute(f"INSERT INTO propostas ({cols}) VALUES ({vals})")
                 conn.commit()
                 close_db(conn)
-                sqlite_conn.close()
+                sqlite_close_db(conn)
                 print("✅ Dados SQLite importados!")
         except: pass
         auto_import_sqlite._done = True
