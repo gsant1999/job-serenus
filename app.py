@@ -1484,7 +1484,8 @@ def servir_anexo(nome):
 
 # ─── EMAIL UTILITÁRIO ────────────────────────────────────────────────────────
 def _enviar_email(destinatario, assunto, corpo_html):
-    """Envia email via SMTP. Configura SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS no Railway."""
+    """Envia email via SMTP em thread background (não trava a requisição).
+    Configura SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS no Railway."""
     host  = os.environ.get('SMTP_HOST','')
     port  = int(os.environ.get('SMTP_PORT', 587))
     user  = os.environ.get('SMTP_USER','')
@@ -1492,24 +1493,30 @@ def _enviar_email(destinatario, assunto, corpo_html):
     if not host or not user:
         print(f"[EMAIL] ⚠️ SMTP não configurado. Assunto: {assunto} → {destinatario}")
         return False
-    try:
-        import smtplib
-        from email.mime.multipart import MIMEMultipart
-        from email.mime.text import MIMEText
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = assunto
-        msg['From']    = f"JOB Serenus <{user}>"
-        msg['To']      = destinatario
-        msg.attach(MIMEText(corpo_html, 'html', 'utf-8'))
-        with smtplib.SMTP(host, port, timeout=10) as s:
-            s.starttls()
-            s.login(user, senha)
-            s.sendmail(user, destinatario, msg.as_string())
-        print(f"[EMAIL] ✅ Enviado: {assunto} → {destinatario}")
-        return True
-    except Exception as e:
-        print(f"[EMAIL] ❌ Erro: {e}")
-        return False
+
+    def _enviar():
+        try:
+            import smtplib
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.text import MIMEText
+            msg = MIMEMultipart('alternative')
+            msg['Subject'] = assunto
+            msg['From']    = f"JOB Serenus <{user}>"
+            msg['To']      = destinatario
+            msg.attach(MIMEText(corpo_html, 'html', 'utf-8'))
+            with smtplib.SMTP(host, port, timeout=15) as s:
+                s.ehlo()
+                s.starttls()
+                s.ehlo()
+                s.login(user, senha)
+                s.sendmail(user, destinatario, msg.as_string())
+            print(f"[EMAIL] ✅ Enviado: {assunto} → {destinatario}")
+        except Exception as e:
+            print(f"[EMAIL] ❌ Erro ao enviar para {destinatario}: {e}")
+
+    import threading
+    threading.Thread(target=_enviar, daemon=True).start()
+    return True  # retorna imediatamente; envio ocorre em background
 
 # ─── RECUPERAÇÃO DE SENHA (usuário) ─────────────────────────────────────────
 @app.route('/esqueci-senha', methods=['GET','POST'])
