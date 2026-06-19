@@ -894,6 +894,10 @@ def init_db():
         ("parcelas", "asaas_status", "TEXT"),
         ("parcelas", "asaas_erro", "TEXT"),
         ("usuarios", "foto", "TEXT"),
+        # Novos campos v15
+        ("usuarios", "cpf", "TEXT"),
+        ("usuarios", "reset_code", "TEXT"),
+        ("usuarios", "reset_expira", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -1477,6 +1481,129 @@ def servir_anexo(nome):
     if not os.path.exists(os.path.join(UPLOAD_FOLDER, nome)):
         abort(404)
     return send_from_directory(UPLOAD_FOLDER, nome)
+
+# ─── EMAIL UTILITÁRIO ────────────────────────────────────────────────────────
+def _enviar_email(destinatario, assunto, corpo_html):
+    """Envia email via SMTP. Configura SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS no Railway."""
+    host  = os.environ.get('SMTP_HOST','')
+    port  = int(os.environ.get('SMTP_PORT', 587))
+    user  = os.environ.get('SMTP_USER','')
+    senha = os.environ.get('SMTP_PASS','')
+    if not host or not user:
+        print(f"[EMAIL] ⚠️ SMTP não configurado. Assunto: {assunto} → {destinatario}")
+        return False
+    try:
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = assunto
+        msg['From']    = f"JOB Serenus <{user}>"
+        msg['To']      = destinatario
+        msg.attach(MIMEText(corpo_html, 'html', 'utf-8'))
+        with smtplib.SMTP(host, port, timeout=10) as s:
+            s.starttls()
+            s.login(user, senha)
+            s.sendmail(user, destinatario, msg.as_string())
+        print(f"[EMAIL] ✅ Enviado: {assunto} → {destinatario}")
+        return True
+    except Exception as e:
+        print(f"[EMAIL] ❌ Erro: {e}")
+        return False
+
+# ─── RECUPERAÇÃO DE SENHA (usuário) ─────────────────────────────────────────
+@app.route('/esqueci-senha', methods=['GET','POST'])
+def esqueci_senha():
+    """Passo 1: usuário informa o e-mail → recebe código de 6 dígitos."""
+    if request.method == 'GET':
+        return render_template('esqueci_senha.html')
+    email = request.form.get('email','').strip().lower()
+    conn = db()
+    u = conn.execute("SELECT id,nome,ativo FROM usuarios WHERE email=?", (email,)).fetchone()
+    if not u or not u['ativo']:
+        conn.close()
+        # Mensagem genérica por segurança (não revela se e-mail existe)
+        return render_template('esqueci_senha.html', enviado=True)
+    import random
+    codigo = f"{random.randint(0,999999):06d}"
+    expira = (datetime.now() + timedelta(minutes=15)).isoformat()
+    conn.execute("UPDATE usuarios SET reset_code=?, reset_expira=? WHERE id=?", (codigo, expira, u['id']))
+    conn.commit(); conn.close()
+    corpo = f"""
+    <div style="font-family:sans-serif; max-width:420px; margin:auto; padding:30px;">
+      <h2 style="color:#1fd8a4;">JOB · Corretora Serenus</h2>
+      <p>Olá, <strong>{u['nome']}</strong>.</p>
+      <p>Recebemos uma solicitação de redefinição de senha. Use o código abaixo:</p>
+      <div style="font-size:36px; font-weight:700; letter-spacing:10px; text-align:center;
+                  background:#f3f4f6; padding:20px; border-radius:8px; margin:24px 0; color:#111;">
+        {codigo}
+      </div>
+      <p style="color:#666;">O código expira em <strong>15 minutos</strong>.</p>
+      <p style="color:#666;">Se não foi você, ignore este e-mail.</p>
+    </div>"""
+    _enviar_email(email, "JOB · Código de redefinição de senha", corpo)
+    return render_template('esqueci_senha.html', enviado=True, email=email)
+
+@app.route('/redefinir-senha', methods=['GET','POST'])
+def redefinir_senha():
+    """Passo 2: usuário informa código + nova senha."""
+    email = request.args.get('email','') or request.form.get('email','')
+    if request.method == 'GET':
+        return render_template('redefinir_senha.html', email=email)
+    email  = request.form.get('email','').strip().lower()
+    codigo = request.form.get('codigo','').strip()
+    s1 = request.form.get('senha','')
+    s2 = request.form.get('senha2','')
+    conn = db()
+    u = conn.execute("SELECT id,reset_code,reset_expira FROM usuarios WHERE email=? AND ativo=1", (email,)).fetchone()
+    erro = None
+    if not u or u['reset_code'] != codigo:
+        erro = 'Código inválido ou e-mail não encontrado.'
+    elif u['reset_expira'] and datetime.fromisoformat(str(u['reset_expira'])) < datetime.now():
+        erro = 'Código expirado. Solicite um novo.'
+    elif len(s1) < 6:
+        erro = 'Senha deve ter pelo menos 6 caracteres.'
+    elif s1 != s2:
+        erro = 'Senhas não conferem.'
+    if erro:
+        conn.close()
+        return render_template('redefinir_senha.html', email=email, erro=erro)
+    conn.execute("UPDATE usuarios SET senha_hash=?, reset_code=NULL, reset_expira=NULL WHERE id=?",
+                 (hash_senha(s1), u['id']))
+    conn.commit(); conn.close()
+    return render_template('redefinir_senha.html', sucesso=True)
+
+# ─── RESET DE SENHA PELO GESTOR (admin define senha nova direto) ─────────────
+@app.route('/usuario/reset-senha/<int:uid>', methods=['POST'])
+@login_required
+@admin_required
+def usuario_reset_senha(uid):
+    nova = request.form.get('nova_senha','').strip()
+    if len(nova) < 6:
+        flash('Senha deve ter pelo menos 6 caracteres.', 'error')
+        return redirect(url_for('usuarios'))
+    conn = db()
+    conn.execute("UPDATE usuarios SET senha_hash=?, token_setup=NULL, reset_code=NULL WHERE id=?",
+                 (hash_senha(nova), uid))
+    conn.commit(); conn.close()
+    flash('Senha redefinida com sucesso.', 'success')
+    return redirect(url_for('usuarios'))
+
+# ─── EXCLUIR USUÁRIO ─────────────────────────────────────────────────────────
+@app.route('/usuario/excluir/<int:uid>', methods=['POST'])
+@login_required
+@admin_required
+def usuario_excluir(uid):
+    if uid == session.get('user_id'):
+        flash('Você não pode excluir seu próprio usuário.', 'error')
+        return redirect(url_for('usuarios'))
+    conn = db()
+    # Reatribui propostas ao admin antes de excluir
+    conn.execute("UPDATE propostas SET usuario_id=? WHERE usuario_id=?", (session['user_id'], uid))
+    conn.execute("DELETE FROM usuarios WHERE id=?", (uid,))
+    conn.commit(); conn.close()
+    flash('Usuário excluído.', 'success')
+    return redirect(url_for('usuarios'))
 
 @app.route('/login', methods=['GET','POST'])
 def login():
@@ -2276,11 +2403,12 @@ def usuario_novo():
     if not nome or not email:
         flash('Nome e e-mail obrigatórios.'); return redirect(url_for('usuarios'))
     token=secrets.token_urlsafe(32); expira=(datetime.now()+timedelta(days=7)).isoformat()
+    cpf = d.get('cpf','').strip()
     conn = db()
     try:
-        conn.execute("""INSERT INTO usuarios (nome,email,perfil,regime_base,token_setup,token_expira)
-            VALUES (?,?,?,?,?,?)""",(nome,email,d.get('perfil','consultor'),
-            (d.get('regime_base','sem_lead_sem_fixo') if d.get('perfil','consultor')=='consultor' else ''),token,expira))
+        conn.execute("""INSERT INTO usuarios (nome,email,perfil,regime_base,token_setup,token_expira,cpf)
+            VALUES (?,?,?,?,?,?,?)""",(nome,email,d.get('perfil','consultor'),
+            (d.get('regime_base','sem_lead_sem_fixo') if d.get('perfil','consultor')=='consultor' else ''),token,expira,cpf or None))
         conn.commit()
     except sqlite3.IntegrityError:
         flash('E-mail já cadastrado.'); conn.close(); return redirect(url_for('usuarios'))
@@ -2350,9 +2478,9 @@ def usuario_editar(uid):
         if ext in ('.png','.jpg','.jpeg','.webp'):
             foto_nome = f"perfil_{uid}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
             fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
-    conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=? WHERE id=?""",
+    conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=? WHERE id=?""",
         (d['nome'],d['email'].lower(),d['perfil'],
-         (d['regime_base'] if d['perfil']=='consultor' else ''),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,uid))
+         (d['regime_base'] if d['perfil']=='consultor' else ''),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,uid))
     conn.commit(); conn.close()
     return redirect(url_for('usuarios'))
 

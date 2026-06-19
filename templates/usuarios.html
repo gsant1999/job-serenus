@@ -12,6 +12,14 @@
 
 <div class="page">
 
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+  {% if msgs %}
+    {% for cat, msg in msgs %}
+    <div class="alert {{ 'alert-ok' if cat=='success' else 'alert-err' }}" style="margin-bottom:14px;">{{ msg }}</div>
+    {% endfor %}
+  {% endif %}
+  {% endwith %}
+
   {% if request.args.get('link_token') %}
   {% set token = request.args.get('link_token') %}
   <div class="card" style="background:rgba(250,204,21,.07); border-color:rgba(250,204,21,.3); margin-bottom:18px;">
@@ -34,7 +42,7 @@
 
   <div class="card">
     <table>
-      <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th class="hide-admin">Regime</th><th>Status</th><th>Ação</th></tr></thead>
+      <thead><tr><th>Nome</th><th>E-mail</th><th>CPF</th><th>Perfil</th><th class="hide-admin">Regime</th><th>Status</th><th>Ação</th></tr></thead>
       <tbody>
         {% for u in usuarios %}
         <tr>
@@ -44,10 +52,19 @@
             <strong>{{ u.nome }}</strong>
           </td>
           <td>{{ u.email }}</td>
-          <td><span class="tag {{ 'tag-verde' if u.perfil=='admin' else 'tag-info' if u.perfil=='supervisor' else 'tag-am' }}">{{ u.perfil }}</span></td>
+          <td style="font-size:12px; color:var(--cinza);">{{ u.cpf or '—' }}</td>
+          <td>
+            {% if u.perfil == 'gestor_vendedor' %}
+              <span class="tag" style="background:rgba(139,92,246,.18); color:#a78bfa;">gestor vendedor</span>
+            {% else %}
+              <span class="tag {{ 'tag-verde' if u.perfil=='admin' else 'tag-info' if u.perfil=='supervisor' else 'tag-am' }}">{{ u.perfil }}</span>
+            {% endif %}
+          </td>
           <td class="hide-admin" style="font-size:11.5px; color:var(--cinza);">
-            {% if u.perfil in ['admin','supervisor','gestor'] %}
+            {% if u.perfil in ['admin','supervisor'] %}
               <span style="color:var(--cinza-2)">—</span>
+            {% elif u.perfil == 'gestor_vendedor' %}
+              <span style="color:#a78bfa;">100% corretora</span>
             {% elif u.regime_base == 'com_fixo_lead' %}Com Fixo + Lead
             {% elif u.regime_base == 'com_lead' %}Com Lead N1/N2/N3
             {% else %}Sem Lead/Fixo{% endif %}
@@ -57,8 +74,8 @@
             {% elif u.ativo %}<span class="tag tag-verde">Ativo</span>
             {% else %}<span class="tag tag-off">Inativo</span>{% endif %}
           </td>
-          <td>
-            <button class="btn-ghost" onclick='editar({{ u.id }}, {{ u.nome|tojson }}, {{ u.email|tojson }}, "{{ u.perfil }}", "{{ u.regime_base }}", {{ u.ativo }}, {{ (u.valor_fixo or 0)|tojson }}, {{ (u.chave_pix or "")|tojson }}, {{ (u.foto or "")|tojson }})'>Editar</button>
+          <td style="white-space:nowrap;">
+            <button class="btn-ghost" onclick='editar({{ u|tojson }})'>Editar</button>
             {% if not u.senha_hash and u.id %}<a href="/usuario/regenerar-link/{{ u.id }}" class="btn-ghost" style="color:var(--info);">Novo link</a>{% endif %}
           </td>
         </tr>
@@ -75,9 +92,15 @@
     <h3>Novo usuário</h3>
     <p style="font-size:12.5px; color:var(--cinza); margin-bottom:18px;">Após criar, o sistema gera um link único — você envia ao usuário para criar a senha.</p>
     <form method="POST" action="/usuario/novo" enctype="multipart/form-data">
-      <div class="campo" style="margin-bottom:12px;">
-        <label>Nome completo</label>
-        <input type="text" name="nome" required>
+      <div class="form-row form-row-2" style="margin-bottom:12px;">
+        <div class="campo">
+          <label>Nome completo</label>
+          <input type="text" name="nome" required>
+        </div>
+        <div class="campo">
+          <label>CPF</label>
+          <input type="text" name="cpf" placeholder="000.000.000-00" maxlength="14" oninput="mascaraCPF(this)">
+        </div>
       </div>
       <div class="campo" style="margin-bottom:12px;">
         <label>E-mail</label>
@@ -88,6 +111,7 @@
           <label>Perfil</label>
           <select name="perfil" id="n-perfil" required onchange="toggleRegime('n')">
             <option value="consultor">Consultor (vende)</option>
+            <option value="gestor_vendedor">Gestor Vendedor (100% corretora)</option>
             <option value="supervisor">Supervisor (não vende)</option>
             <option value="admin">Administrador (não vende)</option>
           </select>
@@ -111,21 +135,30 @@
 
 <!-- MODAL EDITAR -->
 <div class="modal-overlay" id="modal-editar">
-  <div class="modal">
+  <div class="modal" style="max-width:560px;">
     <h3>Editar usuário</h3>
     <form method="POST" id="form-editar" enctype="multipart/form-data">
       <input type="hidden" name="id" id="e-id">
+
+      <!-- Foto -->
       <div class="campo" style="margin-bottom:12px;">
         <label>Foto de perfil</label>
         <div style="display:flex; align-items:center; gap:14px;">
           <img id="e-foto-preview" src="" alt="" style="width:56px; height:56px; border-radius:50%; object-fit:cover; background:var(--panel-3); border:1px solid var(--borda); cursor:pointer;" onclick="document.getElementById('e-foto').click();" title="Clique para alterar foto">
           <input type="file" name="foto" id="e-foto" accept="image/*" style="display:none;" onchange="uploadFoto(this)">
-          <small style="color:var(--cinza-2); display:block; margin-top:6px;">Clique na foto para alterar</small>
+          <small style="color:var(--cinza-2);">Clique na foto para alterar</small>
         </div>
       </div>
-      <div class="campo" style="margin-bottom:12px;">
-        <label>Nome</label>
-        <input type="text" name="nome" id="e-nome" required>
+
+      <div class="form-row form-row-2" style="margin-bottom:12px;">
+        <div class="campo">
+          <label>Nome</label>
+          <input type="text" name="nome" id="e-nome" required>
+        </div>
+        <div class="campo">
+          <label>CPF</label>
+          <input type="text" name="cpf" id="e-cpf" placeholder="000.000.000-00" maxlength="14" oninput="mascaraCPF(this)">
+        </div>
       </div>
       <div class="campo" style="margin-bottom:12px;">
         <label>E-mail</label>
@@ -136,6 +169,7 @@
           <label>Perfil</label>
           <select name="perfil" id="e-perfil" onchange="toggleRegime('e')">
             <option value="consultor">Consultor (vende)</option>
+            <option value="gestor_vendedor">Gestor Vendedor (100% corretora)</option>
             <option value="supervisor">Supervisor (não vende)</option>
             <option value="admin">Administrador (não vende)</option>
           </select>
@@ -171,42 +205,72 @@
         <button type="button" class="btn-outline" onclick="fechar('modal-editar')">Cancelar</button>
       </div>
     </form>
+
+    <!-- Resetar senha (admin define direto) -->
+    <div style="margin-top:20px; padding-top:18px; border-top:1px solid var(--borda);">
+      <div style="font-size:12px; font-weight:600; color:var(--cinza); margin-bottom:10px; text-transform:uppercase; letter-spacing:.5px;">🔑 Redefinir senha</div>
+      <form method="POST" id="form-reset" style="display:flex; gap:8px; align-items:flex-end;">
+        <div class="campo" style="flex:1; margin:0;">
+          <input type="password" name="nova_senha" id="e-nova-senha" placeholder="Nova senha (mín. 6 caracteres)" minlength="6">
+        </div>
+        <button type="button" class="btn-outline" onclick="confirmarReset()" style="white-space:nowrap; padding:11px 14px;">Salvar senha</button>
+      </form>
+    </div>
+
+    <!-- Excluir usuário -->
+    <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--borda);">
+      <button type="button" onclick="confirmarExcluir()" style="background:none; border:none; color:#f43f7c; font-size:12.5px; cursor:pointer; padding:4px 0; text-decoration:underline;">
+        🗑 Excluir este usuário permanentemente
+      </button>
+    </div>
+
   </div>
 </div>
+
+<!-- Form hidden para excluir -->
+<form method="POST" id="form-excluir" style="display:none;">
+  <input type="hidden" name="_method" value="POST">
+</form>
 {% endblock %}
 
 {% block scripts %}
 <script>
+let _editandoUid = null;
+
 function abrirNovo() { document.getElementById('modal-novo').classList.add('open'); }
 function fechar(id) { document.getElementById(id).classList.remove('open'); }
+
+function mascaraCPF(el) {
+  let v = el.value.replace(/\D/g,'').substring(0,11);
+  if (v.length > 9) v = v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/,'$1.$2.$3-$4');
+  else if (v.length > 6) v = v.replace(/(\d{3})(\d{3})(\d{1,3})/,'$1.$2.$3');
+  else if (v.length > 3) v = v.replace(/(\d{3})(\d{1,3})/,'$1.$2');
+  el.value = v;
+}
+
 function toggleRegime(prefix) {
   const perfil = document.getElementById(prefix+'-perfil').value;
   const vende = (perfil === 'consultor');
+  const gestor = (perfil === 'gestor_vendedor');
   const rw = document.getElementById(prefix+'-regime-wrap');
   if (rw) rw.style.display = vende ? '' : 'none';
-  // fixo só no editar e só p/ com_fixo_lead
   const fpw = document.getElementById(prefix+'-fixopix-wrap');
   if (fpw) {
-    fpw.style.display = vende ? '' : 'none';
+    fpw.style.display = (vende || gestor) ? '' : 'none';
     const fw = document.getElementById(prefix+'-fixo-wrap');
     const reg = document.getElementById(prefix+'-regime');
-    if (fw && reg) fw.style.display = (reg.value === 'com_fixo_lead') ? '' : 'none';
+    if (fw && reg) fw.style.display = (reg && reg.value === 'com_fixo_lead') ? '' : 'none';
   }
 }
-
-/* Upload de foto via AJAX - envia uid do usuário alvo */
-let _editandoUid = null;
 
 function uploadFoto(inputElement) {
   const file = inputElement.files[0];
   if (!file) return;
   const preview = document.getElementById('e-foto-preview');
   preview.style.opacity = '0.5';
-
   const fd = new FormData();
   fd.append('foto', file);
   if (_editandoUid) fd.append('uid', _editandoUid);
-
   fetch('/usuario/foto/upload', {method: 'POST', body: fd})
     .then(r => r.json())
     .then(d => {
@@ -214,41 +278,55 @@ function uploadFoto(inputElement) {
       if (d.ok) {
         const url = '/anexos/' + d.foto + '?t=' + Date.now();
         preview.src = url;
-        // Atualiza avatar na sidebar (caso seja o próprio usuário)
         const sideImg = document.querySelector('.sidebar-user img');
         if (sideImg) sideImg.src = url;
-        // Atualiza mini foto na lista de usuários
-        const listaImg = document.querySelector(`img[data-uid="${_editandoUid}"]`);
-        if (listaImg) listaImg.src = url;
         toast('Foto salva!', 'ok');
-      } else {
-        toast('Erro: ' + d.erro, 'err');
-      }
+      } else { toast('Erro: ' + d.erro, 'err'); }
     })
     .catch(() => { preview.style.opacity = '1'; toast('Erro ao fazer upload', 'err'); });
 }
 
-function editar(id, nome, email, perfil, regime, ativo, fixo, pix, foto) {
-  _editandoUid = id;
-  document.getElementById('form-editar').action = '/usuario/editar/' + id;
-  document.getElementById('e-id').value = id;
-  document.getElementById('e-nome').value = nome;
-  document.getElementById('e-email').value = email;
-  document.getElementById('e-perfil').value = perfil;
-  document.getElementById('e-regime').value = regime;
-  document.getElementById('e-ativo').checked = !!ativo;
-  document.getElementById('e-fixo').value = fixo ? String(fixo).replace('.',',') : '';
-  document.getElementById('e-pix').value = pix || '';
+function editar(u) {
+  _editandoUid = u.id;
+  document.getElementById('form-editar').action = '/usuario/editar/' + u.id;
+  document.getElementById('form-reset').action  = '/usuario/reset-senha/' + u.id;
+  document.getElementById('form-excluir').action = '/usuario/excluir/' + u.id;
+  document.getElementById('e-nome').value   = u.nome || '';
+  document.getElementById('e-cpf').value    = u.cpf  || '';
+  document.getElementById('e-email').value  = u.email || '';
+  document.getElementById('e-perfil').value = u.perfil || 'consultor';
+  document.getElementById('e-regime').value = u.regime_base || '';
+  document.getElementById('e-ativo').checked = !!u.ativo;
+  document.getElementById('e-fixo').value   = u.valor_fixo ? String(u.valor_fixo).replace('.',',') : '';
+  document.getElementById('e-pix').value    = u.chave_pix || '';
+  document.getElementById('e-nova-senha').value = '';
   const prev = document.getElementById('e-foto-preview');
-  prev.src = foto ? '/anexos/'+foto : 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="56" height="56"%3E%3Crect width="56" height="56" fill="%23223"/%3E%3C/svg%3E';
-  // NÃO redefine onchange aqui - o HTML já tem onchange="uploadFoto(this)"
+  prev.src = u.foto ? '/anexos/'+u.foto : 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="56" height="56"%3E%3Crect width="56" height="56" fill="%23223"/%3E%3C/svg%3E';
   document.getElementById('e-regime').onchange = () => toggleRegime('e');
   toggleRegime('e');
   document.getElementById('modal-editar').classList.add('open');
 }
+
+function confirmarReset() {
+  const nova = document.getElementById('e-nova-senha').value.trim();
+  if (nova.length < 6) { toast('Senha deve ter pelo menos 6 caracteres.', 'err'); return; }
+  if (!confirm('Redefinir senha deste usuário para "' + nova + '"?')) return;
+  document.getElementById('form-reset').submit();
+}
+
+function confirmarExcluir() {
+  if (!confirm('⚠️ Excluir este usuário PERMANENTEMENTE?\n\nAs propostas dele serão reatribuídas ao admin.\n\nEssa ação não pode ser desfeita.')) return;
+  document.getElementById('form-excluir').submit();
+}
+
 function copiarLink() {
   const link = document.getElementById('link').textContent.trim();
   navigator.clipboard.writeText(link).then(() => toast('Link copiado','ok'));
 }
+
+// Estilos alert inline
+const st = document.createElement('style');
+st.textContent = '.alert{padding:12px 16px;border-radius:8px;font-size:13.5px;}.alert-ok{background:rgba(31,216,164,.1);color:#4fe3b8;border:1px solid rgba(31,216,164,.3);}.alert-err{background:rgba(244,63,94,.12);color:#fb8497;border:1px solid rgba(244,63,94,.3);}';
+document.head.appendChild(st);
 </script>
 {% endblock %}
