@@ -12,6 +12,21 @@
 
 <div class="page">
 
+{% if m.auditoria_pendente > 0 %}
+<a href="/admin/auditoria" style="text-decoration:none;">
+  <div style="background:linear-gradient(135deg,rgba(244,63,124,.18),rgba(244,63,124,.08));border:1px solid rgba(244,63,124,.35);border-radius:10px;padding:14px 20px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span style="font-size:22px;">🔔</span>
+      <div>
+        <div style="font-weight:700;color:var(--rosa);font-size:14px;">{{ m.auditoria_pendente }} proposta{{ 's' if m.auditoria_pendente > 1 else '' }} aguardando na esteira de implantação</div>
+        <div style="font-size:12px;color:var(--cinza);margin-top:2px;">Clique para gerenciar o status operacional e liberar o fluxo financeiro</div>
+      </div>
+    </div>
+    <span style="color:var(--rosa);font-size:18px;">→</span>
+  </div>
+</a>
+{% endif %}
+
   <div class="metricas m-4">
     <div class="metrica">
       <div class="lbl">Propostas</div>

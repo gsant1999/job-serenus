@@ -12,6 +12,30 @@
 
 <div class="page">
 
+  {% if pendencias_comprovante %}
+  <div style="background:linear-gradient(135deg,rgba(244,63,124,.18),rgba(244,63,124,.08));border:1px solid rgba(244,63,124,.35);border-radius:10px;padding:18px 20px;margin-bottom:20px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+      <span style="font-size:20px;">🔴</span>
+      <div style="font-weight:700;color:var(--rosa);font-size:14px;">Minhas Pendências — Comissões Bloqueadas</div>
+    </div>
+    <p style="font-size:12.5px;color:var(--cinza);margin-bottom:12px;">As propostas abaixo têm comissões bloqueadas por falta de comprovante de pagamento. Anexe o comprovante para liberar.</p>
+    {% for pend in pendencias_comprovante %}
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:rgba(0,0,0,.2);border-radius:8px;margin-bottom:8px;gap:12px;flex-wrap:wrap;" id="pend-card-{{ pend.id }}">
+      <div>
+        <a href="/proposta/{{ pend.id }}" style="color:var(--rosa);font-weight:600;font-size:13px;text-decoration:none;">#{{ pend.id }} — {{ pend.razao_social or '—' }}</a>
+        <div style="font-size:11.5px;color:var(--cinza);margin-top:2px;">{{ pend.adm_operadora or '—' }} · {{ pend.qtd_bloq }} parcela{{ 's' if pend.qtd_bloq > 1 else '' }} bloqueada{{ 's' if pend.qtd_bloq > 1 else '' }}</div>
+      </div>
+      <div>
+        <label class="btn-outline" style="font-size:11px;padding:5px 12px;cursor:pointer;border-color:rgba(244,63,124,.5);color:var(--rosa);">
+          📎 Anexar comprovante
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="uploadComprovante({{ pend.id }}, this)">
+        </label>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   {% if m.regime_label %}
   <div class="card" style="background:linear-gradient(135deg,#17b88a,#3b82f6 60%,#8b5cf6); box-shadow:0 10px 36px rgba(59,130,246,.25); color:#fff; border:none; margin-bottom:18px;">
     <div style="padding:20px 24px; display:flex; justify-content:space-between; align-items:center; gap:20px; flex-wrap:wrap;">
@@ -112,5 +136,26 @@ new Chart(document.getElementById('chartOp'),{
     datasets:[{ data:[{% for o in por_operadora %}{{ o.valor }},{% endfor %}], backgroundColor:'#1fd8a4', borderRadius:5, barThickness:28 }]},
   options:{ responsive:true, plugins:{legend:{display:false}}, scales:{ y:{ ticks:{ callback:v=>'R$'+v.toLocaleString('pt-BR') }, grid:{color:'rgba(255,255,255,.06)'} }, x:{ grid:{display:false} } } }
 });
+
+async function uploadComprovante(pid, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('comprovante_boleto', file);
+  const res = await fetch(`/proposta/${pid}/comprovante-upload`, {method:'POST', body:fd});
+  const d = await res.json();
+  if (d.ok) {
+    document.getElementById('pend-card-' + pid).style.opacity = '0.4';
+    setTimeout(() => document.getElementById('pend-card-' + pid).remove(), 800);
+    toast(d.msg, 'ok');
+  } else { toast(d.msg || 'Erro', 'err'); }
+}
+function toast(msg, tipo) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = `position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;background:${tipo==='ok'?'#1fd8a4':'#f43f7c'};color:#fff;font-size:13px;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.3);`;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
 </script>
 {% endblock %}

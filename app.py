@@ -1120,9 +1120,10 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
     }
 
 
-def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None):
+def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None, status_override=None):
     """Gera parcelas usando a régua REAL (mensalidades por parcela).
-    Parcela consultor i = valor × regua[i]. Corretora distribuída proporcional à régua."""
+    Parcela consultor i = valor × regua[i]. Corretora distribuída proporcional à régua.
+    status_override: força um status fixo em todas as parcelas (ex: 'Bloqueado - Falta Comprovante')."""
     from dateutil.relativedelta import relativedelta
     try:
         base = datetime.strptime(vigencia[:7], '%Y-%m') if (vigencia and len(vigencia) >= 7) else datetime.now(TZ_SP).replace(day=1)
@@ -1142,13 +1143,14 @@ def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None):
             data = mes_ref.replace(day=min(dia, 28)).strftime('%Y-%m-%d')
         except Exception:
             data = mes_ref.strftime('%Y-%m-01')
-        val_c = round(valor * mens, 2)                          # consultor nesta parcela
-        val_cor = round(total_cor * (mens / soma_regua), 2)     # corretora proporcional
+        val_c = round(valor * mens, 2)
+        val_cor = round(total_cor * (mens / soma_regua), 2)
         perc = round((mens / soma_regua) * 100, 2)
         parcelas.append({
             'proposta_id': proposta_id, 'numero': i + 1, 'percentual': perc,
             'valor': val_c, 'valor_corretora': val_cor, 'perc_cliente': perc,
-            'data_prevista': data, 'status': 'Pendente de receber',
+            'data_prevista': data,
+            'status': status_override if status_override else 'Pendente de receber',
             'competencia': mes_ref.strftime('%Y-%m'), 'mensalidade_ref': i + 1,
         })
     return parcelas
@@ -2135,12 +2137,24 @@ def dashboard():
         m['com_bruta'] = conn.execute("SELECT COALESCE(SUM(comissao_total_corretora),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
         m['com_repasse'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
         m['com_liquido'] = conn.execute("SELECT COALESCE(SUM(comissao_corretora_liquida),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
-        # Fluxo de caixa (parcelas)
-        m['fc_pendente'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM parcelas WHERE status='Pendente de receber'").fetchone()['v']
-        m['fc_caixa'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM parcelas WHERE status='Recebido e não repassado'").fetchone()['v']
-        m['fc_liberado'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM parcelas WHERE status='Liberado para o corretor'").fetchone()['v']
-        m['fc_pago'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM parcelas WHERE status='Pago ao corretor'").fetchone()['v']
+        # Fluxo de caixa: apenas propostas Emitida/Ativa (trava financeira)
+        m['fc_pendente'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Pendente de receber' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
+        m['fc_caixa'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Recebido e não repassado' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
+        m['fc_liberado'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Liberado para o corretor' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
+        m['fc_pago'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Pago ao corretor' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
         m['fc_antecip'] = conn.execute("SELECT COUNT(*) c FROM parcelas WHERE status='Antecipação - Aguardando ADM'").fetchone()['c']
+        # Alerta auditoria: propostas que precisam evoluir o status operacional
+        m['auditoria_pendente'] = conn.execute("""SELECT COUNT(*) c FROM propostas
+            WHERE status != 'Excluída' AND status_operacional NOT IN ('Emitida/Ativa')
+            AND status_operacional IS NOT NULL""").fetchone()['c']
         ultimas = conn.execute("SELECT * FROM propostas WHERE status != 'Excluída' ORDER BY id DESC LIMIT 5").fetchall()
         por_operadora = conn.execute("""SELECT adm_operadora,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
             FROM propostas WHERE status != 'Excluída' GROUP BY adm_operadora ORDER BY valor DESC LIMIT 8""").fetchall()
@@ -2152,21 +2166,31 @@ def dashboard():
                                ciclo=ciclo_atual())
     else:
         m = {}
+        ma = datetime.now(TZ_SP).strftime('%Y-%m')
         m['propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas WHERE usuario_id=? AND status != 'Excluída'",(uid,)).fetchone()['c']
         m['vidas'] = conn.execute("SELECT COALESCE(SUM(total_vidas),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída'",(uid,)).fetchone()['v']
         m['producao'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída'",(uid,)).fetchone()['v']
         m['minha_comissao'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída'",(uid,)).fetchone()['v']
-        ma = datetime.now(TZ_SP).strftime('%Y-%m')
-        m['mes_propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas WHERE usuario_id=? AND status != 'Excluída' AND strftime('%Y-%m',criado_em)=?",(uid,ma)).fetchone()['c']
-        m['mes_producao'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída' AND strftime('%Y-%m',criado_em)=?",(uid,ma)).fetchone()['v']
-        m['mes_comissao'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída' AND strftime('%Y-%m',criado_em)=?",(uid,ma)).fetchone()['v']
-        # Saldo do consultor por status de parcelas
+        # mes_meta para metas comerciais (usa coluna mes_meta, não criado_em)
+        m['mes_propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas WHERE usuario_id=? AND status != 'Excluída' AND mes_meta=?",(uid,ma)).fetchone()['c']
+        m['mes_producao'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída' AND mes_meta=?",(uid,ma)).fetchone()['v']
+        m['mes_comissao'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída' AND mes_meta=?",(uid,ma)).fetchone()['v']
+        # Saldo do consultor por status de parcelas (apenas Emitida/Ativa)
         m['a_receber'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
-            JOIN propostas p ON p.id=pa.proposta_id WHERE p.usuario_id=? AND pa.status='Liberado para o corretor'""",(uid,)).fetchone()['v']
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE p.usuario_id=? AND pa.status='Liberado para o corretor' AND p.status_operacional='Emitida/Ativa'""",(uid,)).fetchone()['v']
         m['pago_total'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
             JOIN propostas p ON p.id=pa.proposta_id WHERE p.usuario_id=? AND pa.status='Pago ao corretor'""",(uid,)).fetchone()['v']
         m['antecip_solicitadas'] = conn.execute("""SELECT COUNT(*) c FROM parcelas pa
             JOIN propostas p ON p.id=pa.proposta_id WHERE p.usuario_id=? AND pa.comprovante_antecipacao IS NOT NULL""",(uid,)).fetchone()['c']
+        # Pendências: parcelas bloqueadas por falta de comprovante
+        m['bloqueadas'] = conn.execute("""SELECT COUNT(*) c FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE p.usuario_id=? AND pa.status='Bloqueado - Falta Comprovante'""",(uid,)).fetchone()['c']
+        pendencias_comprovante = conn.execute("""SELECT p.id, p.razao_social, p.adm_operadora, COUNT(pa.id) qtd_bloq
+            FROM propostas p JOIN parcelas pa ON pa.proposta_id=p.id
+            WHERE p.usuario_id=? AND pa.status='Bloqueado - Falta Comprovante'
+            GROUP BY p.id ORDER BY p.id DESC""",(uid,)).fetchall()
         rb = session.get('regime_base')
         if rb == 'com_lead':
             if m['mes_producao'] <= 3000: m['regime_label'] = 'Com Lead — N1 (até R$ 3.000)'
@@ -2178,17 +2202,17 @@ def dashboard():
         if rb == 'com_fixo_lead':
             r = conn.execute("SELECT valor_fixo FROM regimes WHERE codigo='com_fixo_lead'").fetchone()
             m['valor_fixo'] = r['valor_fixo'] if r else 0
-        # Parcelas liberadas aguardando aceite
         pendentes_aceite = conn.execute("""SELECT pa.*, p.razao_social, p.adm_operadora FROM parcelas pa
             JOIN propostas p ON p.id=pa.proposta_id
             WHERE p.usuario_id=? AND pa.status='Liberado para o corretor' AND pa.aceite_corretor=0
             ORDER BY pa.id""",(uid,)).fetchall()
-        ultimas = conn.execute("SELECT * FROM propostas WHERE usuario_id=? ORDER BY id DESC LIMIT 5",(uid,)).fetchall()
+        ultimas = conn.execute("SELECT * FROM propostas WHERE usuario_id=? AND status != 'Excluída' ORDER BY id DESC LIMIT 5",(uid,)).fetchall()
         por_operadora = conn.execute("""SELECT adm_operadora,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
-            FROM propostas WHERE usuario_id=? GROUP BY adm_operadora ORDER BY valor DESC LIMIT 6""",(uid,)).fetchall()
+            FROM propostas WHERE usuario_id=? AND status != 'Excluída' GROUP BY adm_operadora ORDER BY valor DESC LIMIT 6""",(uid,)).fetchall()
         close_db(conn)
         return render_template('dashboard_consultor.html', m=m, ultimas=ultimas,
-                               por_operadora=por_operadora, pendentes_aceite=pendentes_aceite)
+                               por_operadora=por_operadora, pendentes_aceite=pendentes_aceite,
+                               pendencias_comprovante=pendencias_comprovante)
 
 # ─── PROPOSTAS ───────────────────────────────────────────────────────────────────
 @app.route('/nova-proposta')
@@ -2250,6 +2274,13 @@ def salvar_proposta():
         prod_antes = cur.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=? AND strftime('%Y-%m',criado_em)=?",(session['user_id'],ma)).fetchone()['v']
         prod_acumulada = prod_antes + valor
         c = calc_comissao(operadora, regime_base, prod_acumulada, valor, modalidade, d.get('tipo_pessoa',''))
+        # mes_meta = mês do fechamento (data_fechamento do form, ou mês atual)
+        data_fechamento = d.get('data_fechamento','').strip()
+        mes_meta = data_fechamento[:7] if (data_fechamento and len(data_fechamento) >= 7) else datetime.now(TZ_SP).strftime('%Y-%m')
+
+        # status parcelas: bloqueado se sem comprovante
+        status_parcela_inicial = 'Bloqueado - Falta Comprovante' if not comprovante_arq else 'Pendente de receber'
+
         cur.execute("""INSERT INTO propostas (
             usuario_id,consultor,supervisora_id,proposta_tem_numero,numero_proposta,
             vigencia,modalidade,tipo_pessoa,adm_operadora,produto,razao_social,
@@ -2260,8 +2291,9 @@ def salvar_proposta():
             contatos_adicionais,desc_contatos_adicionais,
             regime_aplicado,num_parcelas,distribuicao_parcelas,
             comissao_total_corretora,comissao_consultor,comissao_corretora_liquida,
-            observacoes,anexos,contrato_arquivo,comprovante_boleto,campos_extras,quem_subiu
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            observacoes,anexos,contrato_arquivo,comprovante_boleto,campos_extras,quem_subiu,
+            mes_meta,status_operacional
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
             session['user_id'],d.get('consultor'),d.get('supervisora_id') or None,
             d.get('proposta_tem_numero'),d.get('numero_proposta'),
             d.get('vigencia'),d.get('modalidade'),d.get('tipo_pessoa'),
@@ -2277,7 +2309,8 @@ def salvar_proposta():
             c['codigo'],c['num_parcelas'],c['dist_corretora'],
             c['total_corretora'],c['consultor'],c['liquido'],
             d.get('observacoes'),json.dumps(nomes),contrato_arq,comprovante_arq,
-            json.dumps(extras, ensure_ascii=False),d.get('quem_subiu','Consultor')
+            json.dumps(extras, ensure_ascii=False),d.get('quem_subiu','Consultor'),
+            mes_meta,'Aguardando Documentos'
         ))
         proposta_id = _last_insert_id(cur)
         dia_venc = d.get('dia_vencimento') or None
@@ -2296,7 +2329,7 @@ def salvar_proposta():
         cur.execute("""UPDATE propostas SET data_nasc_titular=?, dependentes_json=?, tem_repique=?, repique_json=? WHERE id=?""",
             (d.get('data_nasc_titular',''), json.dumps(deps, ensure_ascii=False),
              1 if d.get('tem_repique') else 0, json.dumps(repique, ensure_ascii=False) if repique else None, proposta_id))
-        for parc in gerar_parcelas(proposta_id, d.get('vigencia',''), c, dia_venc):
+        for parc in gerar_parcelas(proposta_id, d.get('vigencia',''), c, dia_venc, status_override=status_parcela_inicial):
             cur.execute("""INSERT INTO parcelas (proposta_id,numero,percentual,valor,valor_corretora,perc_cliente,data_prevista,status,competencia,mensalidade_ref,tipo_origem)
                 VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""", (parc['proposta_id'],parc['numero'],parc['percentual'],
                                           parc['valor'],parc['valor_corretora'],parc['perc_cliente'],
@@ -3706,7 +3739,88 @@ def propostas_excluidas():
                           motivos=motivos,
                           excluidas=excluidas)
 
-@app.route('/proposta/<int:pid>/estornar', methods=['POST'])
+@app.route('/admin/auditoria')
+@login_required
+@admin_required
+def admin_auditoria():
+    """Esteira operacional: propostas que ainda não chegaram em Emitida/Ativa."""
+    conn = db()
+    em_espera = conn.execute("""
+        SELECT p.*, u.nome as nome_consultor
+        FROM propostas p
+        LEFT JOIN usuarios u ON u.id = p.usuario_id
+        WHERE p.status != 'Excluída'
+          AND (p.status_operacional IS NULL OR p.status_operacional != 'Emitida/Ativa')
+        ORDER BY p.id DESC
+    """).fetchall()
+    total = len(em_espera)
+    close_db(conn)
+    return render_template('auditoria.html', propostas=em_espera, total=total)
+
+@app.route('/proposta/<int:pid>/status-operacional', methods=['POST'])
+@login_required
+@admin_required
+def atualizar_status_operacional(pid):
+    """Atualiza o status operacional de uma proposta e libera parcelas se Emitida/Ativa."""
+    d = request.json or {}
+    novo_status = d.get('status_operacional','').strip()
+    VALIDOS = ['Aguardando Documentos','Em Análise Operadora','Emitida/Ativa','Suspensa','Cancelada']
+    if novo_status not in VALIDOS:
+        return jsonify({"ok": False, "msg": f"Status inválido. Use: {VALIDOS}"}), 400
+
+    conn = db()
+    p = conn.execute("SELECT status_operacional, comprovante_boleto FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn); return jsonify({"ok": False}), 404
+
+    conn.execute("UPDATE propostas SET status_operacional=? WHERE id=?", (novo_status, pid))
+
+    # Se chegou em Emitida/Ativa: libera parcelas bloqueadas por falta de comprovante
+    if novo_status == 'Emitida/Ativa':
+        conn.execute("""UPDATE parcelas SET status='Pendente de receber'
+            WHERE proposta_id=? AND status='Bloqueado - Falta Comprovante'""", (pid,))
+
+    # Histórico
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'status_operacional', f"Status operacional: {p['status_operacional'] or '—'} → {novo_status}", datetime.now(TZ_SP)))
+
+    # Atualizar pendencias_json se enviado
+    if 'pendencias_json' in d:
+        conn.execute("UPDATE propostas SET pendencias_json=? WHERE id=?",
+                     (json.dumps(d['pendencias_json'], ensure_ascii=False), pid))
+
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": f"Status atualizado para '{novo_status}'"})
+
+@app.route('/proposta/<int:pid>/comprovante-upload', methods=['POST'])
+@login_required
+def upload_comprovante(pid):
+    """Upload de comprovante de pagamento. Libera parcelas bloqueadas."""
+    conn = db()
+    p = conn.execute("SELECT usuario_id FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p: close_db(conn); return jsonify({"ok": False}), 404
+    if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False}), 403
+
+    f = request.files.get('comprovante_boleto')
+    if not f or not f.filename:
+        close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
+
+    nome = f"COMPROVANTE_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
+    f.save(os.path.join(UPLOAD_FOLDER, nome))
+
+    conn.execute("UPDATE propostas SET comprovante_boleto=? WHERE id=?", (nome, pid))
+    # Desbloqueia parcelas
+    conn.execute("""UPDATE parcelas SET status='Pendente de receber'
+        WHERE proposta_id=? AND status='Bloqueado - Falta Comprovante'""", (pid,))
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'comprovante', f"Comprovante de pagamento anexado: {nome}", datetime.now(TZ_SP)))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": "Comprovante salvo. Parcelas desbloqueadas."})
+
+
 @login_required
 @admin_required
 def estornar_proposta(pid):
