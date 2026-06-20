@@ -493,9 +493,26 @@ def init_db():
             )""",
         ]
         for sql in tables_sql:
-            try: cur.execute(sql)
-            except: pass
+            try: 
+                cur.execute(sql)
+            except Exception as e:
+                app.logger.error(f"[INIT_DB] Erro SQL: {e}")
         conn.commit()
+        
+        # GARANTIR que recebimento existe
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS recebimento (
+                    id SERIAL PRIMARY KEY,
+                    operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
+                    total REAL DEFAULT 0,
+                    UNIQUE(operadora, obs, plano)
+                )
+            """)
+            conn.commit()
+            app.logger.info("[INIT_DB] ✅ Tabela recebimento garantida")
+        except Exception as e:
+            app.logger.error(f"[INIT_DB] Erro ao criar recebimento: {e}")
     else:
         # SQLite: usar executescript
         conn.executescript("""
