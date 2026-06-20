@@ -219,7 +219,7 @@
   <div class="card" style="margin-bottom:16px;">
     <div class="card-header">
       <h3>Dados da proposta</h3>
-      {% if session.perfil == 'admin' %}<div style="display:flex; gap:8px; flex-wrap:wrap;"><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEdicao()">Editar dados</button><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEmailAffinity()">E-mail Affinity</button><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirConsultor()">Editar consultor</button><button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.3); color:var(--rosa);" onclick="abrirEstorno()">Estornar</button></div>{% endif %}
+      {% if session.perfil == 'admin' %}<div style="display:flex; gap:8px; flex-wrap:wrap;"><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEdicao()">Editar dados</button><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEmailAffinity()">E-mail Affinity</button><button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(31,216,164,.4); color:var(--verde, #1fd8a4);" onclick="abrirPlataforma()">📨 Enviar à plataforma</button><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirConsultor()">Editar consultor</button><button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.3); color:var(--rosa);" onclick="abrirEstorno()">Estornar</button><button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.5); color:var(--rosa);" onclick="abrirExclusao()">🗑️ Excluir</button></div>{% endif %}
     </div>
     <div class="card-body" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
       {% for label, valor in [
@@ -360,6 +360,51 @@
     <div style="display:flex; gap:10px;">
       <button class="btn" style="flex:1; background:var(--rosa);" onclick="confirmarEstorno()">Aplicar estorno</button>
       <button class="btn-outline" onclick="document.getElementById('modal-estorno').classList.remove('open')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Enviar à plataforma (Affinity / Brevo) -->
+<div class="modal-overlay" id="modal-plataforma">
+  <div class="modal" style="max-width:480px;">
+    <h3>📨 Enviar à plataforma</h3>
+    <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">
+      Dispara o e-mail de implantação para a equipe Affinity (com cópia para a Serenus) e move o status operacional para <strong>Em Análise Operadora</strong>.
+    </p>
+    <div style="background:rgba(31,216,164,.08); border:1px solid rgba(31,216,164,.25); border-radius:8px; padding:12px; font-size:12.5px; line-height:1.7; margin-bottom:18px;">
+      <strong>Para:</strong> Pâmela, Kaique e Equipe PL (Affinity)<br>
+      <strong>Cópia:</strong> guilherme@serenuscorretora.com.br
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn" style="flex:1; background:var(--verde, #1fd8a4);" onclick="confirmarPlataforma()">Confirmar envio</button>
+      <button class="btn-outline" onclick="document.getElementById('modal-plataforma').classList.remove('open')">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Excluir proposta (Soft Delete) -->
+<div class="modal-overlay" id="modal-exclusao">
+  <div class="modal" style="max-width:480px;">
+    <h3 style="color:var(--rosa);">🗑️ Excluir proposta</h3>
+    <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">
+      A proposta sairá dos dashboards e relatórios, e as parcelas pendentes serão canceladas/estornadas. O registro é mantido para auditoria.
+    </p>
+    <div class="campo" style="margin-bottom:14px;">
+      <label>Motivo da exclusão</label>
+      <select id="exc-motivo">
+        <option value="Cancelado pelo cliente">Cancelado pelo cliente</option>
+        <option value="Recusado pela operadora">Recusado pela operadora</option>
+        <option value="Erro de digitação">Erro de digitação</option>
+        <option value="Outro">Outro</option>
+      </select>
+    </div>
+    <div class="campo" style="margin-bottom:18px;">
+      <label>Detalhe (opcional)</label>
+      <textarea id="exc-detalhe" style="min-height:70px; font-size:13px;" placeholder="Observações adicionais..."></textarea>
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn" style="flex:1; background:var(--rosa);" onclick="confirmarExclusao()">Excluir proposta</button>
+      <button class="btn-outline" onclick="document.getElementById('modal-exclusao').classList.remove('open')">Cancelar</button>
     </div>
   </div>
 </div>
@@ -579,6 +624,41 @@ async function abrirConsultor() {
 }
 function fecharConsultor() { document.getElementById('modal-consultor').classList.remove('open'); }
 function abrirEstorno() { document.getElementById('modal-estorno').classList.add('open'); }
+
+// ─── Enviar à plataforma (Affinity / Brevo) ───
+function abrirPlataforma() { document.getElementById('modal-plataforma').classList.add('open'); }
+async function confirmarPlataforma() {
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/enviar-plataforma`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
+    const d = await res.json();
+    if (d.ok) {
+      toast(d.msg || 'E-mail enviado à plataforma', 'ok');
+      document.getElementById('modal-plataforma').classList.remove('open');
+      setTimeout(()=>location.reload(), 1400);
+    } else {
+      toast(d.msg || 'Falha ao enviar', 'err');
+    }
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+
+// ─── Exclusão lógica (Soft Delete) ───
+function abrirExclusao() { document.getElementById('modal-exclusao').classList.add('open'); }
+async function confirmarExclusao() {
+  const motivo = document.getElementById('exc-motivo').value;
+  const detalhe = document.getElementById('exc-detalhe').value;
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/excluir`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({motivo_exclusao: motivo, detalhe_exclusao: detalhe}) });
+    const d = await res.json();
+    if (d.ok) {
+      toast(d.msg || 'Proposta excluída', 'ok');
+      document.getElementById('modal-exclusao').classList.remove('open');
+      setTimeout(()=>location.href = '/propostas', 1400);
+    } else {
+      toast(d.msg || 'Falha ao excluir', 'err');
+    }
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+
 async function abrirEmailAffinity() {
   const res = await fetch(`/proposta/${PROP_ID}/email-affinity`);
   const d = await res.json();
