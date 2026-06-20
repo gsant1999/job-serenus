@@ -1061,6 +1061,26 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
     consultor = round(valor * rep_mens, 2)
     liquido = round(total_corretora - consultor, 2)
 
+    # ─── ADESÃO: parcela única = % cadastrado × taxa de adesão (1 mensalidade) ───
+    # A taxa de adesão cobrada do cliente = 1 mensalidade (= valor da venda).
+    # O JOB gera o boleto e a corretora recolhe a taxa inteira.
+    # O consultor recebe um % cadastrado na tela Repasses (campo total), parcela única.
+    if plano == 'ADESAO':
+        close_db(conn)
+        pct_consultor = rep_mens                          # ex: 0.5 = 50% cadastrado em Repasses
+        consultor_ade = round(valor * pct_consultor, 2)   # ex: 500 × 0.5 = R$ 250
+        liquido_ade   = round(valor - consultor_ade, 2)   # corretora recolhe a taxa toda
+        aviso = '' if pct_consultor > 0 else f"Falta cadastrar % de comissão da ADESÃO em Repasses: {op_nome}"
+        return {
+            'codigo': 'adesao', 'modelo': modelo, 'nivel': '', 'plano': 'ADESAO',
+            'num_parcelas': 1, 'dist_corretora': str(pct_consultor),
+            'regua_mens': [pct_consultor] if pct_consultor else [0.0],
+            'receb_mens': receb_mens, 'rep_mens': pct_consultor, 'taxa': 1,
+            'valor': valor, 'total_corretora': valor,     # corretora recolhe 1 mensalidade
+            'consultor': consultor_ade, 'liquido': liquido_ade,
+            'aviso': aviso,
+        }
+
     # ─── 4) Régua de parcelas (mensalidades por parcela) ───
     regua = [float(x) for x in regua_str.split(';') if x.strip()]
     if not regua:
