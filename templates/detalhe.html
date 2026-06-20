@@ -54,6 +54,24 @@
           <span style="background:rgba(255,255,255,.1); color:#fff; padding:3px 10px; border-radius:5px; font-size:12px;">{{ p.acomodacao }}</span>
           <span style="background:rgba(255,255,255,.1); color:#fff; padding:3px 10px; border-radius:5px; font-size:12px;">{{ p.fator_moderador }}</span>
         </div>
+        <!-- Badges de status -->
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          {% set so = p.status_operacional or 'Aguardando Documentos' %}
+          {% if so == 'Emitida/Ativa' %}
+            <span style="background:#d1fae5; color:#065f46; padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;">Emitida / Ativa</span>
+          {% elif so == 'Em Análise Operadora' %}
+            <span style="background:#dbeafe; color:#1e40af; padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;">Em Análise Operadora</span>
+          {% elif so == 'Suspensa' %}
+            <span style="background:#fef9c3; color:#854d0e; padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;">Suspensa</span>
+          {% elif so == 'Cancelada' %}
+            <span style="background:#fee2e2; color:#991b1b; padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;">Cancelada</span>
+          {% else %}
+            <span style="background:#f1f5f9; color:#475569; padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;">{{ so }}</span>
+          {% endif %}
+          {% if p.estornada %}
+            <span style="background:#fee2e2; color:#991b1b; padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;">Estornada</span>
+          {% endif %}
+        </div>
       </div>
       <div style="text-align:right;">
         <div style="font-family:'Sora',sans-serif; font-size:28px; color:#facc15; font-weight:600;">R$ {{ "%.2f"|format(p.valor)|replace('.',',') }}</div>
@@ -219,7 +237,14 @@
   <div class="card" style="margin-bottom:16px;">
     <div class="card-header">
       <h3>Dados da proposta</h3>
-      {% if session.perfil == 'admin' %}<div style="display:flex; gap:8px; flex-wrap:wrap;"><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEdicao()">Editar dados</button><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEmailAffinity()">E-mail Affinity</button><button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(31,216,164,.4); color:var(--verde, #1fd8a4);" onclick="abrirPlataforma()">📨 Enviar à plataforma</button><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirConsultor()">Editar consultor</button><button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.3); color:var(--rosa);" onclick="abrirEstorno()">Estornar</button><button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.5); color:var(--rosa);" onclick="abrirExclusao()">🗑️ Excluir</button></div>{% endif %}
+      {% if session.perfil == 'admin' %}<div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEdicao()">Editar proposta</button>
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEmailAffinity()">E-mail Affinity</button>
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirPlataforma()">Enviar à plataforma</button>
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirConsultor()">Trocar consultor</button>
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.3); color:var(--rosa);" onclick="abrirEstorno()">Estornar</button>
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.5); color:var(--rosa);" onclick="abrirExclusao()">Excluir</button>
+      </div>{% endif %}
     </div>
     <div class="card-body" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
       {% for label, valor in [
@@ -348,17 +373,13 @@
 
 <!-- Modal estorno -->
 <div class="modal-overlay" id="modal-estorno">
-  <div class="modal" style="max-width:460px;">
-    <h3>Estornar comissão</h3>
-    <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">
-      O sistema aplica a regra da operadora ({{ p.adm_operadora }}): % que estorna e até qual mensalidade. Informe em qual mensalidade o cliente parou de pagar.
+  <div class="modal" style="max-width:420px;">
+    <h3>Confirmar estorno</h3>
+    <p style="font-size:13px; color:var(--cinza); margin-bottom:20px; line-height:1.6;">
+      As parcelas pendentes de receber desta proposta serão canceladas e o status será marcado como estornado. Esta ação não pode ser desfeita.
     </p>
-    <div class="campo" style="margin-bottom:18px;">
-      <label>Cliente parou de pagar na mensalidade nº</label>
-      <input type="number" id="mens-cancelou" min="1" value="1">
-    </div>
     <div style="display:flex; gap:10px;">
-      <button class="btn" style="flex:1; background:var(--rosa);" onclick="confirmarEstorno()">Aplicar estorno</button>
+      <button class="btn" style="flex:1; background:var(--rosa);" onclick="confirmarEstorno()">Confirmar estorno</button>
       <button class="btn-outline" onclick="document.getElementById('modal-estorno').classList.remove('open')">Cancelar</button>
     </div>
   </div>
@@ -367,7 +388,7 @@
 <!-- Modal Enviar à plataforma (Affinity / Brevo) -->
 <div class="modal-overlay" id="modal-plataforma">
   <div class="modal" style="max-width:480px;">
-    <h3>📨 Enviar à plataforma</h3>
+    <h3>Enviar à plataforma</h3>
     <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">
       Dispara o e-mail de implantação para a equipe Affinity (com cópia para a Serenus) e move o status operacional para <strong>Em Análise Operadora</strong>.
     </p>
@@ -385,7 +406,7 @@
 <!-- Modal Excluir proposta (Soft Delete) -->
 <div class="modal-overlay" id="modal-exclusao">
   <div class="modal" style="max-width:480px;">
-    <h3 style="color:var(--rosa);">🗑️ Excluir proposta</h3>
+    <h3 style="color:var(--rosa);">Excluir proposta</h3>
     <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">
       A proposta sairá dos dashboards e relatórios, e as parcelas pendentes serão canceladas/estornadas. O registro é mantido para auditoria.
     </p>
@@ -700,12 +721,14 @@ function abrirNoEmail() {
   window.location.href = `mailto:${dest}?subject=${assunto}&body=${corpo}`;
 }
 async function confirmarEstorno() {
-  const mens = document.getElementById('mens-cancelou').value;
   try {
-    const res = await fetch(`/proposta/${PROP_ID}/estornar`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mensalidade_cancelou: mens}) });
+    const res = await fetch(`/proposta/${PROP_ID}/estornar`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
     const data = await res.json();
-    if (data.ok) { toast(data.info, data.estorna ? 'err' : 'ok'); setTimeout(()=>location.reload(), 1600); }
-    else toast('Erro', 'err');
+    if (data.ok) {
+      document.getElementById('modal-estorno').classList.remove('open');
+      toast(data.msg || 'Estorno aplicado', 'ok');
+      setTimeout(()=>location.reload(), 1400);
+    } else toast(data.msg || 'Erro', 'err');
   } catch(e) { toast('Erro de conexão', 'err'); }
 }
 async function salvarConsultor() {

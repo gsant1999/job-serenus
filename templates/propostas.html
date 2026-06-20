@@ -50,6 +50,7 @@
           {% else %}
           <th>Minha comissão</th>
           {% endif %}
+          <th>Status</th>
           <th>Vigência</th>
         </tr>
       </thead>
@@ -72,6 +73,20 @@
           {% else %}
           <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(p.comissao_consultor or 0)|replace('.',',') }}</td>
           {% endif %}
+          <td>
+            {% set so = p.status_operacional or 'Aguardando Doc.' %}
+            {% if so == 'Emitida/Ativa' %}
+              <span style="background:#d1fae5;color:#065f46;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;">Emitida</span>
+            {% elif so == 'Em Análise Operadora' %}
+              <span style="background:#dbeafe;color:#1e40af;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;">Em Análise</span>
+            {% elif so == 'Suspensa' %}
+              <span style="background:#fef9c3;color:#854d0e;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;">Suspensa</span>
+            {% elif so == 'Cancelada' %}
+              <span style="background:#fee2e2;color:#991b1b;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;">Cancelada</span>
+            {% else %}
+              <span style="background:#f1f5f9;color:#475569;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;">Ag. Doc.</span>
+            {% endif %}
+          </td>
           <td>{{ p.vigencia }}</td>
         </tr>
         {% endfor %}
@@ -112,9 +127,9 @@ async function recalcularTodas(btn) {
     const r = await fetch('/propostas/recalcular-todas', { method: 'POST' });
     const d = await r.json();
     if (d.ok) {
-      let msg = `✅ ${d.recalculadas} propostas recalculadas.`;
+      let msg = `Recalculadas: ${d.recalculadas} propostas recalculadas.`;
       if (d.avisos && d.avisos.length) {
-        msg += `\n\n⚠️ ${d.avisos.length} proposta(s) com cadastro faltando:\n\n`;
+        msg += `\n\nAvisos: ${d.avisos.length} proposta(s) com cadastro faltando:\n\n`;
         msg += d.avisos.map(a => `#${a.id} ${a.cliente} (${a.operadora||'sem operadora'})\n   → ${a.aviso}`).join('\n\n');
       } else {
         msg += '\n\nNenhum cadastro faltando. 🎉';

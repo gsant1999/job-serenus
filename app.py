@@ -2351,10 +2351,14 @@ def listar_propostas():
     conn = db(); uid = session['user_id']
     if session['perfil'] == 'admin':
         rows = conn.execute("""SELECT p.*,s.nome as supervisora_nome FROM propostas p
-            LEFT JOIN supervisoras s ON s.id=p.supervisora_id ORDER BY p.id DESC""").fetchall()
+            LEFT JOIN supervisoras s ON s.id=p.supervisora_id
+            WHERE p.status != 'Excluída'
+            ORDER BY p.id DESC""").fetchall()
     else:
         rows = conn.execute("""SELECT p.*,s.nome as supervisora_nome FROM propostas p
-            LEFT JOIN supervisoras s ON s.id=p.supervisora_id WHERE p.usuario_id=? ORDER BY p.id DESC""",(uid,)).fetchall()
+            LEFT JOIN supervisoras s ON s.id=p.supervisora_id
+            WHERE p.usuario_id=? AND p.status != 'Excluída'
+            ORDER BY p.id DESC""",(uid,)).fetchall()
     close_db(conn)
     return render_template('propostas.html', propostas=rows)
 
@@ -3821,34 +3825,31 @@ def upload_comprovante(pid):
     return jsonify({"ok": True, "msg": "Comprovante salvo. Parcelas desbloqueadas."})
 
 
+@app.route('/proposta/<int:pid>/estornar', methods=['POST'])
 @login_required
 @admin_required
 def estornar_proposta(pid):
-    """Estorna a comissão conforme a regra da operadora: % e até qual mensalidade.
-    mensalidade_cancelou = em qual mensalidade o cliente parou de pagar."""
-    mens_cancelou = int((request.json or {}).get('mensalidade_cancelou') or 1)
+    """Estorno simplificado: cancela parcelas pendentes e marca proposta como estornada."""
     conn = db()
     p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
     if not p:
         close_db(conn); return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
-    regra = conn.execute("SELECT * FROM regras_estorno WHERE operadora=?", (p['adm_operadora'],)).fetchone()
-    perc = (regra['perc_estorno'] if regra else 100)
-    ate = (regra['ate_mensalidade'] if regra else 3)
-    # Estorna se o cliente cancelou DENTRO da janela de estorno
-    estorna = mens_cancelou <= ate
-    valor_estorno = 0.0
-    if estorna:
-        # estorna o % das parcelas já pagas/liberadas
-        pagas = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM parcelas
-            WHERE proposta_id=? AND status IN ('Pago ao corretor','Liberado para o corretor')""", (pid,)).fetchone()['v']
-        valor_estorno = round(pagas * perc/100, 2)
-        # parcelas futuras são canceladas
-        conn.execute("""UPDATE parcelas SET status='Estornada' WHERE proposta_id=? AND status='Pendente de receber'""", (pid,))
-    info = f"Cliente parou na {mens_cancelou}ª mensalidade. Regra {p['adm_operadora']}: estorna {perc:.0f}% até a {ate}ª. " + \
-           (f"Estorno de R$ {valor_estorno:.2f}." if estorna else "Fora da janela — sem estorno.")
-    conn.execute("UPDATE propostas SET estornada=?, estorno_info=? WHERE id=?", (1 if estorna else 0, info, pid))
+
+    # Cancela todas as parcelas pendentes
+    canceladas = conn.execute("""UPDATE parcelas SET status='Cancelada / Estornada'
+        WHERE proposta_id=? AND status IN ('Pendente de receber','Bloqueado - Falta Comprovante')""", (pid,)).rowcount
+
+    # Marca proposta como estornada
+    info = f"Estorno confirmado por {session.get('nome','admin')} em {datetime.now(TZ_SP).strftime('%d/%m/%Y %H:%M')}. {canceladas} parcela(s) cancelada(s)."
+    conn.execute("UPDATE propostas SET estornada=1, estorno_info=? WHERE id=?", (info, pid))
+
+    # Histórico
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'estorno', info, datetime.now(TZ_SP)))
+
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "estorna": estorna, "valor": valor_estorno, "info": info})
+    return jsonify({"ok": True, "msg": info})
 
 # ─── APIs ────────────────────────────────────────────────────────────────────────
 @login_required

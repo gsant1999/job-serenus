@@ -4,7 +4,7 @@
 
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
     <div>
-      <h2 style="margin:0;font-size:22px;">🔔 Esteira de Implantação</h2>
+      <h2 style="margin:0;font-size:22px;">Esteira de Implantação</h2>
       <p style="margin:4px 0 0;color:var(--cinza);font-size:13px;">Propostas que precisam evoluir o status operacional</p>
     </div>
     <span style="background:var(--rosa);color:#fff;padding:6px 16px;border-radius:20px;font-weight:700;font-size:15px;">
@@ -31,7 +31,7 @@
           </div>
           {% if p.pendencias_json %}
           <div style="margin-top:8px;font-size:12px;color:var(--rosa);">
-            ⚠️ Pendências: {{ p.pendencias_json }}
+            Pendências: {{ p.pendencias_json }}
           </div>
           {% endif %}
         </div>
@@ -41,9 +41,9 @@
             {{ p.status_operacional or 'Aguardando Documentos' }}
           </span>
           <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
-            <button class="btn-outline" style="font-size:11px;padding:5px 10px;" onclick="evoluir({{ p.id }}, 'Em Análise Operadora')">→ Em Análise</button>
-            <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--verde);" onclick="evoluir({{ p.id }}, 'Emitida/Ativa')">✅ Emitida/Ativa</button>
-            <button class="btn-outline" style="font-size:11px;padding:5px 10px;border-color:rgba(244,63,124,.4);color:var(--rosa);" onclick="evoluir({{ p.id }}, 'Suspensa')">⏸ Suspensa</button>
+            <button class="btn-outline" style="font-size:11px;padding:5px 10px;" onclick="evoluir({{ p.id }}, 'Em Análise Operadora')">Em Análise</button>
+            <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--verde);" onclick="evoluir({{ p.id }}, 'Emitida/Ativa')">Emitida/Ativa</button>
+            <button class="btn-outline" style="font-size:11px;padding:5px 10px;border-color:rgba(244,63,124,.4);color:var(--rosa);" onclick="evoluir({{ p.id }}, 'Suspensa')">Suspensa</button>
           </div>
           <div style="margin-top:10px;">
             <input type="text" id="pend-{{ p.id }}" placeholder="Registrar pendência (ex: falta contrato)" 
@@ -57,7 +57,7 @@
   </div>
   {% else %}
   <div class="card" style="text-align:center;padding:48px;color:var(--cinza);">
-    <div style="font-size:48px;margin-bottom:12px;">✅</div>
+    
     <div style="font-size:18px;font-weight:600;">Tudo em dia!</div>
     <div style="font-size:13px;margin-top:8px;">Não há propostas aguardando auditoria.</div>
   </div>

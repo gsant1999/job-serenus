@@ -15,7 +15,7 @@
   {% if pendencias_comprovante %}
   <div style="background:linear-gradient(135deg,rgba(244,63,124,.18),rgba(244,63,124,.08));border:1px solid rgba(244,63,124,.35);border-radius:10px;padding:18px 20px;margin-bottom:20px;">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-      <span style="font-size:20px;">🔴</span>
+      
       <div style="font-weight:700;color:var(--rosa);font-size:14px;">Minhas Pendências — Comissões Bloqueadas</div>
     </div>
     <p style="font-size:12.5px;color:var(--cinza);margin-bottom:12px;">As propostas abaixo têm comissões bloqueadas por falta de comprovante de pagamento. Anexe o comprovante para liberar.</p>
@@ -27,7 +27,7 @@
       </div>
       <div>
         <label class="btn-outline" style="font-size:11px;padding:5px 12px;cursor:pointer;border-color:rgba(244,63,124,.5);color:var(--rosa);">
-          📎 Anexar comprovante
+          Anexar comprovante
           <input type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="uploadComprovante({{ pend.id }}, this)">
         </label>
       </div>
