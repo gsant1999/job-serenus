@@ -1011,14 +1011,13 @@ def _nivel_por_producao(prod, conn):
 
 
 def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidade='', tipo_pessoa=''):
-    """Motor de comissão — lê de recebimento (corretora) + repasse_corretor (consultor).
-    Tudo em NÚMERO DE MENSALIDADES (1.8 = 1,8 mensalidade = 180%). Sem dividir por 100."""
-    conn = db()  # ✅ Respeita DB_MODE (postgres ou sqlite)
+    """Motor de comissão isolando a regra da Taxa de Adesão."""
+    conn = db()
     valor = float(valor_venda or 0)
     op_nome, op_obs = _split_operadora(operadora)
     plano = _plano_from_modalidade(modalidade, tipo_pessoa)
 
-    # ─── 1) Recebimento da corretora (mensalidades) ───
+    # 1) Recebimento da corretora (mensalidades / resíduo)
     receb = conn.execute(
         "SELECT total FROM recebimento WHERE operadora=? AND obs=? AND plano=?",
         (op_nome, op_obs, plano)).fetchone()
@@ -1029,7 +1028,7 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
     receb_mens = float(receb['total']) if receb else 0.0
     total_corretora = round(valor * receb_mens, 2)
 
-    # ─── GESTOR VENDEDOR: leva 100% da corretora ───
+    # GESTOR VENDEDOR: leva 100% da corretora
     if regime_base == 'gestor_vendedor':
         close_db(conn)
         regua = [receb_mens] if receb_mens else [1.0]
@@ -1039,15 +1038,16 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
             'regua_mens': regua, 'receb_mens': receb_mens, 'rep_mens': receb_mens, 'taxa': 0,
             'valor': valor, 'total_corretora': total_corretora,
             'consultor': total_corretora, 'liquido': 0.0,
+            'aviso': ''
         }
 
-    # ─── 2) Modelo + nível ───
+    # 2) Modelo + nível
     modelo = REGIME_TO_MODELO.get(regime_base, 'sem_lead_sem_fixo')
     nivel = ''
     if modelo == 'com_lead':
         nivel = regime_base if regime_base in ('n1', 'n2', 'n3') else _nivel_por_producao(prod_acumulada, conn)
 
-    # ─── 3) Repasse ao corretor (mensalidades + régua) ───
+    # 3) Repasse ao corretor
     rep = conn.execute(
         "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND obs=? AND plano=? AND modelo=? AND nivel=?",
         (op_nome, op_obs, plano, modelo, nivel)).fetchone()
@@ -1055,33 +1055,40 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
         rep = conn.execute(
             "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND plano=? AND modelo=? AND nivel=? ORDER BY (obs='') DESC LIMIT 1",
             (op_nome, plano, modelo, nivel)).fetchone()
+            
     rep_mens = float(rep['total']) if rep else 0.0
     regua_str = (rep['regua'] if rep and rep['regua'] else '') or ''
     taxa = int(rep['taxa']) if rep and rep['taxa'] is not None else 0
+
+    # ==========================================
+    # --- RAMO ISOLADO: ADESÃO ---
+    # ==========================================
+    if plano == 'ADESAO':
+        # Na Adesão, a corretora recolhe a taxa. O consultor ganha um % apenas sobre essa 1ª mensalidade.
+        consultor = round(valor * rep_mens, 2)
+        # O líquido da corretora = Total de recebíveis da operadora - O que foi pago de taxa pro consultor
+        liquido = round(total_corretora - consultor, 2)
+        close_db(conn)
+        
+        avisos = []
+        if receb_mens == 0: avisos.append(f"Falta RECEBIMENTO: {op_nome} / ADESAO")
+        if rep_mens == 0: avisos.append(f"Falta REPASSE: {op_nome} / ADESAO / {MODELO_NOME.get(modelo, modelo)}")
+        
+        return {
+            'codigo': nivel or modelo, 'modelo': modelo, 'nivel': nivel, 'plano': plano,
+            'num_parcelas': 1, 'dist_corretora': '100',
+            'regua_mens': [rep_mens] if rep_mens else [0.0], 'receb_mens': receb_mens, 'rep_mens': rep_mens, 'taxa': 1,
+            'valor': valor, 'total_corretora': total_corretora,
+            'consultor': consultor, 'liquido': liquido,
+            'aviso': ' · '.join(avisos),
+        }
+
+    # ==========================================
+    # --- RAMO PADRÃO: PME / PF ---
+    # ==========================================
     consultor = round(valor * rep_mens, 2)
     liquido = round(total_corretora - consultor, 2)
 
-    # ─── ADESÃO: parcela única = % cadastrado × taxa de adesão (1 mensalidade) ───
-    # A taxa de adesão cobrada do cliente = 1 mensalidade (= valor da venda).
-    # O JOB gera o boleto e a corretora recolhe a taxa inteira.
-    # O consultor recebe um % cadastrado na tela Repasses (campo total), parcela única.
-    if plano == 'ADESAO':
-        close_db(conn)
-        pct_consultor = rep_mens                          # ex: 0.5 = 50% cadastrado em Repasses
-        consultor_ade = round(valor * pct_consultor, 2)   # ex: 500 × 0.5 = R$ 250
-        liquido_ade   = round(valor - consultor_ade, 2)   # corretora recolhe a taxa toda
-        aviso = '' if pct_consultor > 0 else f"Falta cadastrar % de comissão da ADESÃO em Repasses: {op_nome}"
-        return {
-            'codigo': 'adesao', 'modelo': modelo, 'nivel': '', 'plano': 'ADESAO',
-            'num_parcelas': 1, 'dist_corretora': str(pct_consultor),
-            'regua_mens': [pct_consultor] if pct_consultor else [0.0],
-            'receb_mens': receb_mens, 'rep_mens': pct_consultor, 'taxa': 1,
-            'valor': valor, 'total_corretora': valor,     # corretora recolhe 1 mensalidade
-            'consultor': consultor_ade, 'liquido': liquido_ade,
-            'aviso': aviso,
-        }
-
-    # ─── 4) Régua de parcelas (mensalidades por parcela) ───
     regua = [float(x) for x in regua_str.split(';') if x.strip()]
     if not regua:
         regua = [rep_mens] if rep_mens else [0.0]
@@ -1089,9 +1096,9 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
     close_db(conn)
     avisos = []
     if receb_mens == 0:
-        avisos.append(f"Falta cadastrar o RECEBIMENTO da corretora para {op_nome} / {plano}")
+        avisos.append(f"Falta RECEBIMENTO: {op_nome} / {plano}")
     if rep_mens == 0:
-        avisos.append(f"Falta cadastrar o REPASSE ao corretor para {op_nome} / {plano} / {MODELO_NOME.get(modelo, modelo)}{(' / ' + nivel.upper()) if nivel else ''}")
+        avisos.append(f"Falta REPASSE: {op_nome} / {plano} / {MODELO_NOME.get(modelo, modelo)}{(' / ' + nivel.upper()) if nivel else ''}")
 
     return {
         'codigo': nivel or modelo, 'modelo': modelo, 'nivel': nivel, 'plano': plano,
