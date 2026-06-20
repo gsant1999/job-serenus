@@ -2247,7 +2247,13 @@ def salvar_proposta():
         conn.commit(); close_db(conn)
         return jsonify({"ok": True})
     except Exception as e:
-        return jsonify({"ok": False, "msg": str(e)}), 500
+        import traceback
+        tb = traceback.format_exc()
+        app.logger.error(f"[SALVAR-PROPOSTA] ❌ Erro: {e}")
+        app.logger.error(f"[SALVAR-PROPOSTA] Traceback:\n{tb}")
+        print(f"[SALVAR-PROPOSTA] ❌ Erro: {e}")
+        print(f"[SALVAR-PROPOSTA] Traceback:\n{tb}")
+        return jsonify({"ok": False, "msg": str(e), "db_mode": DB_MODE}), 500
 
 @app.route('/propostas')
 @login_required
