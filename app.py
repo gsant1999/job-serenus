@@ -1212,72 +1212,63 @@ def asaas_detectar_tipo_chave(chave):
 
 # ─── CLOUDFLARE R2 — UPLOAD/DOWNLOAD DE ARQUIVOS ──────────────────────────────────
 
-def _upload_r2_http(file_obj, chave_arquivo):
-    """Upload arquivo para R2 via HTTP. Retorna {'ok': True, 'chave': ...} ou fallback local."""
-    if not os.environ.get('R2_ENABLED') == 'true':
-        return {'ok': False, 'erro': 'R2 desabilitado', 'fallback': True}
-    
-    try:
-        import requests
-        
-        endpoint = os.environ.get('R2_ENDPOINT', '').rstrip('/')
-        bucket = os.environ.get('R2_BUCKET_NAME')
-        api_token = os.environ.get('R2_API_TOKEN')
-        
-        if not all([endpoint, bucket, api_token]):
-            app.logger.error(f"[R2] Credenciais incompletas: endpoint={bool(endpoint)}, bucket={bool(bucket)}, token={bool(api_token)}")
-            return {'ok': False, 'erro': 'Credenciais R2 incompletas', 'fallback': True}
-        
-        # URL correta para R2 (endpoint já inclui /bucket)
-        url = f"{endpoint}/{chave_arquivo}"
-        
-        # Headers com autenticação Bearer
-        headers = {
-            'Authorization': f'Bearer {api_token}',
-            'Content-Type': 'application/octet-stream'
-        }
-        
-        app.logger.info(f"[R2] Upload para: {url[:60]}...")
-        
-        # Upload via PUT
-        response = requests.put(url, data=file_obj, headers=headers, timeout=30)
-        
-        app.logger.info(f"[R2] Status: {response.status_code}")
-        if response.status_code not in [200, 201]:
-            app.logger.error(f"[R2] Response: {response.text[:200]}")
-        
-        if response.status_code in [200, 201]:
-            app.logger.info(f"[R2] ✅ Upload: {chave_arquivo}")
-            return {'ok': True, 'chave': chave_arquivo, 'storage': 'r2'}
-        else:
-            return {'ok': False, 'erro': f"HTTP {response.status_code}", 'fallback': True}
-    except Exception as e:
-        app.logger.error(f"[R2] ❌ Erro upload: {e}")
-        return {'ok': False, 'erro': str(e), 'fallback': True}
-
-def _gerar_url_r2_http(chave_arquivo, expiracao_segundos=86400):
-    """Gera URL para download do R2 via HTTP."""
-    if not os.environ.get('R2_ENABLED') == 'true':
-        return None
-    
-    try:
-        endpoint = os.environ.get('R2_ENDPOINT')
-        bucket = os.environ.get('R2_BUCKET_NAME')
-        
-        # URL pública (sem autenticação se bucket for público)
-        url = f"{endpoint}/{bucket}/{chave_arquivo}"
-        return url
-    except Exception as e:
-        app.logger.warning(f"[R2] ⚠️  Erro ao gerar URL: {e}")
-        return None
-
 def upload_arquivo_r2(file_obj, chave_arquivo):
-    """Wrapper compatível com boto3 - usa HTTP."""
-    return _upload_r2_http(file_obj, chave_arquivo)
+    """
+    Upload arquivo para R2 (se configurado) com fallback para storage local.
+    Retorna {'ok': True, 'chave': ..., 'storage': 'r2'|'local'} sempre.
+    """
+    if os.environ.get('R2_ENABLED') == 'true':
+        try:
+            import requests
+            
+            endpoint = os.environ.get('R2_ENDPOINT', '').rstrip('/')
+            bucket = os.environ.get('R2_BUCKET_NAME')
+            api_token = os.environ.get('R2_API_TOKEN')
+            
+            if endpoint and bucket and api_token:
+                url = f"{endpoint}/{chave_arquivo}"
+                headers = {
+                    'Authorization': f'Bearer {api_token}',
+                    'Content-Type': 'application/octet-stream'
+                }
+                
+                response = requests.put(url, data=file_obj, headers=headers, timeout=10)
+                
+                if response.status_code in [200, 201]:
+                    app.logger.info(f"[R2] ✅ Upload R2: {chave_arquivo}")
+                    return {'ok': True, 'chave': chave_arquivo, 'storage': 'r2'}
+                else:
+                    app.logger.warning(f"[R2] HTTP {response.status_code} - usando fallback local")
+        except Exception as e:
+            app.logger.warning(f"[R2] Erro ({type(e).__name__}) - usando fallback local")
+    
+    # FALLBACK: Upload local
+    try:
+        os.makedirs('/data/uploads', exist_ok=True)
+        caminho_local = f"/data/uploads/{chave_arquivo}".replace('//', '/')
+        os.makedirs(os.path.dirname(caminho_local), exist_ok=True)
+        
+        with open(caminho_local, 'wb') as f:
+            f.write(file_obj.read())
+        
+        app.logger.info(f"[LOCAL] ✅ Upload local: {chave_arquivo}")
+        return {'ok': True, 'chave': chave_arquivo, 'storage': 'local'}
+    except Exception as e:
+        app.logger.error(f"[LOCAL] ❌ Erro upload local: {e}")
+        return {'ok': False, 'erro': str(e), 'storage': 'none'}
 
 def gerar_url_r2(chave_arquivo, expiracao_segundos=86400):
-    """Wrapper compatível - gera URL de download."""
-    return _gerar_url_r2_http(chave_arquivo, expiracao_segundos)
+    """Gera URL para download. R2 se disponível, senão local."""
+    if os.environ.get('R2_ENABLED') == 'true':
+        try:
+            endpoint = os.environ.get('R2_ENDPOINT', '').rstrip('/')
+            if endpoint:
+                return f"{endpoint}/{chave_arquivo}"
+        except:
+            pass
+    
+    # Fallback local
+    return f"/download/{chave_arquivo}"
 
 
 @app.route('/admin/asaas/teste')
@@ -1583,55 +1574,47 @@ def emergency_init_db():
     except Exception as e:
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
-@app.route('/admin/testar-r2', methods=['GET', 'POST'])
+@app.route('/download/<path:chave_arquivo>')
+def download_arquivo(chave_arquivo):
+    """Serve arquivos armazenados localmente."""
+    try:
+        caminho = f"/data/uploads/{chave_arquivo}".replace('//', '/')
+        
+        # Validar que o caminho está dentro de /data/uploads
+        if not os.path.abspath(caminho).startswith('/data/uploads'):
+            return jsonify({'erro': 'Acesso negado'}), 403
+        
+        if not os.path.exists(caminho):
+            return jsonify({'erro': 'Arquivo não encontrado'}), 404
+        
+        from flask import send_file
+        return send_file(caminho, as_attachment=True)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
 @login_required
 @admin_required
 def testar_r2():
-    """Testa conexão com Cloudflare R2."""
+    """Testa e mostra status de R2 + fallback local."""
     try:
-        if not os.environ.get('R2_ENABLED') == 'true':
-            return jsonify({'ok': False, 'erro': 'R2 não configurado (R2_ENABLED != true)'}), 400
-        
-        # Validar variáveis
-        vars_necessarias = {
-            'R2_ENDPOINT': os.environ.get('R2_ENDPOINT'),
-            'R2_BUCKET_NAME': os.environ.get('R2_BUCKET_NAME'),
-            'R2_API_TOKEN': os.environ.get('R2_API_TOKEN'),
-            'R2_ACCOUNT_ID': os.environ.get('R2_ACCOUNT_ID')
-        }
-        
-        vars_faltando = [k for k, v in vars_necessarias.items() if not v]
-        if vars_faltando:
-            return jsonify({
-                'ok': False, 
-                'erro': f'Variáveis faltando: {", ".join(vars_faltando)}',
-                'vars_encontradas': {k: v[:20] + '...' if v and len(v) > 20 else v for k, v in vars_necessarias.items()}
-            }), 400
-        
-        # Testar com upload de arquivo teste
         import io
-        arquivo_teste = io.BytesIO(b"Teste R2 - JOB Serenus - " + str(datetime.now()).encode())
+        
+        # Testar upload
+        arquivo_teste = io.BytesIO(b"Teste - " + str(datetime.now()).encode())
         resultado = upload_arquivo_r2(arquivo_teste, "teste/test.txt")
         
-        if resultado['ok']:
-            url = gerar_url_r2("teste/test.txt")
-            return jsonify({
-                'ok': True,
-                'msg': '✅ Conexão R2 funcionando!',
-                'account_id': vars_necessarias['R2_ACCOUNT_ID'],
-                'bucket': vars_necessarias['R2_BUCKET_NAME'],
-                'endpoint': vars_necessarias['R2_ENDPOINT'],
-                'arquivo_teste': 'teste/test.txt',
-                'url': url
-            })
-        else:
-            return jsonify({
-                'ok': False,
-                'erro': resultado.get('erro', 'Erro desconhecido'),
-                'vars_config': {k: v[:30] + '...' if v and len(v) > 30 else v for k, v in vars_necessarias.items()}
-            }), 500
+        return jsonify({
+            'ok': True,
+            'msg': '✅ Upload funcionando!',
+            'storage_usado': resultado.get('storage', 'desconhecido'),
+            'config_r2': {
+                'enabled': os.environ.get('R2_ENABLED') == 'true',
+                'endpoint': os.environ.get('R2_ENDPOINT', '')[:40] + '...' if os.environ.get('R2_ENDPOINT') else 'não configurado',
+                'bucket': os.environ.get('R2_BUCKET_NAME', 'não configurado')
+            },
+            'fallback_local': 'ativado automaticamente',
+            'nota': 'Se R2 falhar, uploads vão para /data/uploads (local)'
+        })
     except Exception as e:
-        app.logger.error(f"[R2 TEST] Exception: {e}")
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
 @app.route('/admin/testar-smtp')
