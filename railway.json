@@ -17,5 +17,6 @@
   "variables": {
     "JOB_DATA_DIR": "/data",
     "ASAAS_API_KEY": "$aact_prod_000MzkwODA2MWY2OGM3MWRlMDU2NWM3MzJlNzZmNGZhZGY6OjY5MGNjNzA4LTFjMzAtNDAzNi04NjQxLWViZWYzOGE0ODliNzo6JGFhY2hfZDk3Y2NhYmEtOTA0OC00YzVmLTgyNjMtNjc5ZjEyNDgxYjc0"
-  }
+  },
+  "_last_deploy": "2026-06-20T20:39:10.817750"
 }
