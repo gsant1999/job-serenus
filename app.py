@@ -14,6 +14,14 @@ try:
 except ImportError:
     HAS_POSTGRES = False
 
+# ─── SUPORTE A CLOUDFLARE R2 ──────────────────────────────────────────────
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+    HAS_BOTO3 = True
+except ImportError:
+    HAS_BOTO3 = False
+
 app = Flask(__name__)
 # ─── CHAVE SECRETA FIXA PARA SESSÕES PERSISTENTES ───────────────────────
 # Se usar secrets.token_hex(32) toda vez, a session cai após restart!
@@ -1202,6 +1210,61 @@ def asaas_detectar_tipo_chave(chave):
     return 'EVP'
 
 
+# ─── CLOUDFLARE R2 — UPLOAD/DOWNLOAD DE ARQUIVOS ──────────────────────────────────
+
+def _get_r2_client():
+    """Retorna cliente R2 configurado ou None se desabilitado."""
+    if not HAS_BOTO3 or not os.environ.get('R2_ENABLED') == 'true':
+        return None
+    try:
+        return boto3.client(
+            's3',
+            endpoint_url=os.environ.get('R2_ENDPOINT'),
+            aws_access_key_id=os.environ.get('R2_ACCESS_KEY'),
+            aws_secret_access_key=os.environ.get('R2_SECRET_KEY'),
+            region_name='auto'
+        )
+    except Exception as e:
+        app.logger.warning(f"[R2] ⚠️  Erro ao conectar: {e}")
+        return None
+
+def upload_arquivo_r2(file_obj, chave_arquivo):
+    """Upload arquivo para R2. Retorna {'ok': True, 'chave': ...} ou {'ok': False, 'erro': ...}"""
+    client = _get_r2_client()
+    if not client:
+        return {'ok': False, 'erro': 'R2 desabilitado', 'fallback': True}
+    
+    try:
+        client.upload_fileobj(
+            file_obj,
+            os.environ.get('R2_BUCKET_NAME'),
+            chave_arquivo,
+            ExtraArgs={'ContentType': 'application/pdf'}
+        )
+        app.logger.info(f"[R2] ✅ Upload: {chave_arquivo}")
+        return {'ok': True, 'chave': chave_arquivo, 'storage': 'r2'}
+    except ClientError as e:
+        app.logger.error(f"[R2] ❌ Upload falhou: {e}")
+        return {'ok': False, 'erro': str(e), 'fallback': True}
+
+def gerar_url_r2(chave_arquivo, expiracao_segundos=86400):
+    """Gera URL pré-assinada (válida por 24h por padrão) para download."""
+    client = _get_r2_client()
+    if not client:
+        return None
+    
+    try:
+        url = client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': os.environ.get('R2_BUCKET_NAME'), 'Key': chave_arquivo},
+            ExpiresIn=expiracao_segundos
+        )
+        return url
+    except Exception as e:
+        app.logger.warning(f"[R2] ⚠️  Erro ao gerar URL: {e}")
+        return None
+
+
 @app.route('/admin/asaas/teste')
 @login_required
 @admin_required
@@ -1502,6 +1565,34 @@ def emergency_init_db():
     try:
         init_db()
         return jsonify({'ok': True, 'msg': 'Banco inicializado com sucesso!'})
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+@app.route('/admin/testar-r2', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def testar_r2():
+    """Testa conexão com Cloudflare R2."""
+    try:
+        if not os.environ.get('R2_ENABLED') == 'true':
+            return jsonify({'ok': False, 'erro': 'R2 não configurado (R2_ENABLED != true)'}), 400
+        
+        client = _get_r2_client()
+        if not client:
+            return jsonify({'ok': False, 'erro': 'Não conseguiu conectar ao R2'}), 500
+        
+        # Testar listando buckets
+        response = client.list_buckets()
+        buckets = [b['Name'] for b in response.get('Buckets', [])]
+        
+        return jsonify({
+            'ok': True,
+            'msg': 'Conexão R2 ✅',
+            'buckets': buckets,
+            'bucket_ativo': os.environ.get('R2_BUCKET_NAME'),
+            'account_id': os.environ.get('R2_ACCOUNT_ID'),
+            'endpoint': os.environ.get('R2_ENDPOINT')
+        })
     except Exception as e:
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
