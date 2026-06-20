@@ -239,8 +239,7 @@
       <h3>Dados da proposta</h3>
       {% if session.perfil == 'admin' %}<div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEdicao()">Editar proposta</button>
-        <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEmailAffinity()">E-mail Affinity</button>
-        <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirPlataforma()">Enviar à plataforma</button>
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEmailAffinity()">Enviar à Affinity</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirConsultor()">Trocar consultor</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.3); color:var(--rosa);" onclick="abrirEstorno()">Estornar</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.5); color:var(--rosa);" onclick="abrirExclusao()">Excluir</button>
@@ -386,20 +385,48 @@
 </div>
 
 <!-- Modal Enviar à plataforma (Affinity / Brevo) -->
-<div class="modal-overlay" id="modal-plataforma">
-  <div class="modal" style="max-width:480px;">
-    <h3>Enviar à plataforma</h3>
-    <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">
-      Dispara o e-mail de implantação para a equipe Affinity (com cópia para a Serenus) e move o status operacional para <strong>Em Análise Operadora</strong>.
-    </p>
-    <div style="background:rgba(31,216,164,.08); border:1px solid rgba(31,216,164,.25); border-radius:8px; padding:12px; font-size:12.5px; line-height:1.7; margin-bottom:18px;">
-      <strong>Para:</strong> Pâmela, Kaique e Equipe PL (Affinity)<br>
+<div class="modal-overlay" id="modal-email-affinity">
+  <div class="modal" style="max-width:700px;max-height:90vh;overflow-y:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <h3 style="margin:0;">Enviar à Affinity — Solicitação de Protocolo</h3>
+      <button class="btn-outline" style="font-size:12px;padding:4px 10px;" onclick="fecharEmailAffinity()">Fechar</button>
+    </div>
+
+    <!-- Alerta sem documentos -->
+    <div id="ea-aviso-doc" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#92400e;">
+      Atenção: esta proposta não tem documentos anexados. O envio está bloqueado até que ao menos um arquivo seja carregado.
+    </div>
+
+    <!-- Destinatários (info) -->
+    <div style="background:var(--panel-2,#1b1b27);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;line-height:1.8;">
+      <strong>Para:</strong> Pâmela Lima, Kaique Silva, Equipe PL (Affinity)<br>
       <strong>Cópia:</strong> guilherme@serenuscorretora.com.br
     </div>
-    <div style="display:flex; gap:10px;">
-      <button class="btn" style="flex:1; background:var(--verde, #1fd8a4);" onclick="confirmarPlataforma()">Confirmar envio</button>
-      <button class="btn-outline" onclick="document.getElementById('modal-plataforma').classList.remove('open')">Cancelar</button>
+
+    <!-- Assunto editável -->
+    <div class="campo" style="margin-bottom:12px;">
+      <label>Assunto</label>
+      <input type="text" id="ea-assunto" style="font-size:13px;">
     </div>
+
+    <!-- Corpo editável -->
+    <div class="campo" style="margin-bottom:12px;">
+      <label>Corpo do e-mail <span style="color:var(--cinza);font-weight:400;font-size:11px;">— edite livremente antes de enviar</span></label>
+      <textarea id="ea-corpo" style="min-height:320px;font-size:13px;line-height:1.7;font-family:monospace;"></textarea>
+    </div>
+
+    <!-- Particularidades do contrato -->
+    <div class="campo" style="margin-bottom:20px;">
+      <label>Particularidades / Regra de carência <span style="color:var(--cinza);font-weight:400;font-size:11px;">— será inserido no final do e-mail</span></label>
+      <textarea id="ea-particularidades" style="min-height:80px;font-size:13px;line-height:1.6;" placeholder="Ex: O grupo possui plano anterior com a Amil. Solicito redução de carência por portabilidade..."></textarea>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn" style="flex:1;min-width:160px;" id="ea-btn-enviar" onclick="enviarEmailAffinity()">Enviar para a Affinity</button>
+      <button class="btn-outline" style="flex:1;min-width:120px;" onclick="copiarEmailAffinity()">Copiar texto</button>
+      <button class="btn-outline" onclick="fecharEmailAffinity()">Cancelar</button>
+    </div>
+    <div id="ea-status" style="margin-top:12px;font-size:12.5px;color:var(--cinza);display:none;"></div>
   </div>
 </div>
 
@@ -426,30 +453,6 @@
     <div style="display:flex; gap:10px;">
       <button class="btn" style="flex:1; background:var(--rosa);" onclick="confirmarExclusao()">Excluir proposta</button>
       <button class="btn-outline" onclick="document.getElementById('modal-exclusao').classList.remove('open')">Cancelar</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal e-mail Affinity -->
-<div class="modal-overlay" id="modal-email">
-  <div class="modal" style="max-width:640px;">
-    <h3>E-mail para a Affinity</h3>
-    <div class="campo" style="margin-bottom:10px;">
-      <label>Para</label>
-      <input type="text" id="em-dest" style="font-size:12px;">
-    </div>
-    <div class="campo" style="margin-bottom:10px;">
-      <label>Assunto</label>
-      <input type="text" id="em-assunto">
-    </div>
-    <div class="campo" style="margin-bottom:14px;">
-      <label>Mensagem (edite o que precisar antes de enviar)</label>
-      <textarea id="em-corpo" style="min-height:280px; font-size:13px; line-height:1.5;"></textarea>
-    </div>
-    <div style="display:flex; gap:10px;">
-      <button class="btn" style="flex:1;" onclick="copiarEmail()">Copiar tudo</button>
-      <button class="btn" style="flex:1;" onclick="abrirNoEmail()">Abrir no e-mail</button>
-      <button class="btn-outline" onclick="document.getElementById('modal-email').classList.remove('open')">Fechar</button>
     </div>
   </div>
 </div>
@@ -668,25 +671,86 @@ function fecharConsultor() { document.getElementById('modal-consultor').classLis
 function abrirEstorno() { document.getElementById('modal-estorno').classList.add('open'); }
 
 // ─── Enviar à plataforma (Affinity / Brevo) ───
-function abrirPlataforma() { document.getElementById('modal-plataforma').classList.add('open'); }
-async function confirmarPlataforma() {
-  try {
-    const res = await fetch(`/proposta/${PROP_ID}/enviar-plataforma`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
-    const d = await res.json();
-    if (d.ok) {
-      toast(d.msg || 'E-mail enviado à plataforma', 'ok');
-      document.getElementById('modal-plataforma').classList.remove('open');
-      setTimeout(()=>location.reload(), 1400);
-    } else {
-      toast(d.msg || 'Falha ao enviar', 'err');
-    }
-  } catch(e) { toast('Erro de conexão', 'err'); }
+// ─── E-MAIL AFFINITY (unificado) ─────────────────────────────────────────────
+async function abrirEmailAffinity() {
+  const res = await fetch(`/proposta/${PROP_ID}/email-affinity`);
+  const d = await res.json();
+  if (!d.ok) { toast('Erro ao montar e-mail', 'err'); return; }
+
+  document.getElementById('ea-assunto').value = d.assunto || '';
+  document.getElementById('ea-corpo').value = d.corpo || '';
+  document.getElementById('ea-particularidades').value = '';
+
+  const aviso = document.getElementById('ea-aviso-doc');
+  const btnEnviar = document.getElementById('ea-btn-enviar');
+  if (d.aviso_anexo) {
+    aviso.style.display = 'block';
+    btnEnviar.disabled = true;
+    btnEnviar.style.opacity = '0.4';
+    btnEnviar.style.cursor = 'not-allowed';
+  } else {
+    aviso.style.display = 'none';
+    btnEnviar.disabled = false;
+    btnEnviar.style.opacity = '1';
+    btnEnviar.style.cursor = '';
+  }
+
+  document.getElementById('ea-status').style.display = 'none';
+  document.getElementById('modal-email-affinity').classList.add('open');
 }
 
-// ─── Exclusão lógica (Soft Delete) ───
+function fecharEmailAffinity() {
+  document.getElementById('modal-email-affinity').classList.remove('open');
+}
+
+async function enviarEmailAffinity() {
+  const assunto = document.getElementById('ea-assunto').value.trim();
+  const corpo   = document.getElementById('ea-corpo').value.trim();
+  const partic  = document.getElementById('ea-particularidades').value.trim();
+  const status  = document.getElementById('ea-status');
+
+  if (!assunto || !corpo) { toast('Preencha assunto e corpo do e-mail', 'err'); return; }
+
+  const btn = document.getElementById('ea-btn-enviar');
+  btn.disabled = true; btn.textContent = 'Enviando...';
+  status.style.display = 'block'; status.textContent = 'Aguarde, enviando via Brevo...';
+
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/enviar-plataforma`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ assunto, corpo, particularidades: partic })
+    });
+    const d = await res.json();
+    if (d.ok) {
+      toast(d.msg || 'E-mail enviado', 'ok');
+      fecharEmailAffinity();
+      setTimeout(() => location.reload(), 1400);
+    } else {
+      toast(d.msg || 'Falha ao enviar', 'err');
+      status.textContent = d.msg || 'Erro';
+      btn.disabled = false; btn.textContent = 'Enviar para a Affinity';
+    }
+  } catch(e) {
+    toast('Erro de conexão', 'err');
+    btn.disabled = false; btn.textContent = 'Enviar para a Affinity';
+  }
+}
+
+function copiarEmailAffinity() {
+  const assunto = document.getElementById('ea-assunto').value;
+  const corpo   = document.getElementById('ea-corpo').value;
+  const partic  = document.getElementById('ea-particularidades').value;
+  let txt = `Assunto: ${assunto}\n\n${corpo}`;
+  if (partic) txt += `\n\n${partic}`;
+  navigator.clipboard.writeText(txt).then(() => toast('E-mail copiado', 'ok'));
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Exclusão lógica ─────────────────────────────────────────────────────────
 function abrirExclusao() { document.getElementById('modal-exclusao').classList.add('open'); }
 async function confirmarExclusao() {
-  const motivo = document.getElementById('exc-motivo').value;
+  const motivo  = document.getElementById('exc-motivo').value;
   const detalhe = document.getElementById('exc-detalhe').value;
   try {
     const res = await fetch(`/proposta/${PROP_ID}/excluir`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({motivo_exclusao: motivo, detalhe_exclusao: detalhe}) });
@@ -694,32 +758,11 @@ async function confirmarExclusao() {
     if (d.ok) {
       toast(d.msg || 'Proposta excluída', 'ok');
       document.getElementById('modal-exclusao').classList.remove('open');
-      setTimeout(()=>location.href = '/propostas', 1400);
-    } else {
-      toast(d.msg || 'Falha ao excluir', 'err');
-    }
+      setTimeout(() => location.href = '/propostas', 1400);
+    } else { toast(d.msg || 'Falha ao excluir', 'err'); }
   } catch(e) { toast('Erro de conexão', 'err'); }
 }
-
-async function abrirEmailAffinity() {
-  const res = await fetch(`/proposta/${PROP_ID}/email-affinity`);
-  const d = await res.json();
-  if (!d.ok) { toast('Erro ao gerar', 'err'); return; }
-  document.getElementById('em-dest').value = d.destinatarios;
-  document.getElementById('em-assunto').value = d.assunto;
-  document.getElementById('em-corpo').value = d.corpo;
-  document.getElementById('modal-email').classList.add('open');
-}
-function copiarEmail() {
-  const txt = `Para: ${document.getElementById('em-dest').value}\nAssunto: ${document.getElementById('em-assunto').value}\n\n${document.getElementById('em-corpo').value}`;
-  navigator.clipboard.writeText(txt).then(()=>toast('E-mail copiado', 'ok'));
-}
-function abrirNoEmail() {
-  const dest = document.getElementById('em-dest').value;
-  const assunto = encodeURIComponent(document.getElementById('em-assunto').value);
-  const corpo = encodeURIComponent(document.getElementById('em-corpo').value);
-  window.location.href = `mailto:${dest}?subject=${assunto}&body=${corpo}`;
-}
+// ─────────────────────────────────────────────────────────────────────────────
 async function confirmarEstorno() {
   try {
     const res = await fetch(`/proposta/${PROP_ID}/estornar`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });

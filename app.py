@@ -2489,40 +2489,100 @@ def get_cfg(chave, default=''):
 @app.route('/proposta/<int:pid>/email-affinity')
 @login_required
 def email_affinity(pid):
-    """Monta o e-mail-padrão de solicitação de protocolo para a Affinity."""
+    """Monta o e-mail completo no padrão Serenus para a Affinity."""
     conn = db()
     p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
     close_db(conn)
     if not p: return jsonify({"ok": False}), 404
-    contato = get_cfg('affinity_contato', 'equipe')
-    dest = get_cfg('affinity_destinatarios', '')
-    rem = get_cfg('affinity_remetente', '')
-    tipo = (p['tipo_pessoa'] or '').upper()
-    doc = (f"CNPJ: {p['cnpj']}" if p['cnpj'] else (f"CPF: {p['cpf_titular']}" if p['cpf_titular'] else ''))
-    alvo = p['razao_social'] or p['cpf_titular'] or 'cliente'
-    vidas = p['total_vidas'] or '—'
-    valor_fmt = f"{(p['valor'] or 0):,.2f}".replace(',','X').replace('.',',').replace('X','.')
-    dia_v = p['dia_vencimento'] or '—'
-    corpo = f"""Olá, {contato}, tudo bem?
 
-Gostaria de solicitar o protocolo de venda referente ao contrato do plano de saúde {p['adm_operadora'] or ''} para {('a empresa ' + alvo) if p['cnpj'] else alvo}{(' - ' + doc) if doc else ''}.
+    # Dados base
+    tipo_pessoa = (p['tipo_pessoa'] or '').upper()
+    eh_empresa = bool(p['cnpj'])
+    nome = p['razao_social'] or p['cpf_titular'] or 'Cliente'
+    operadora = p['adm_operadora'] or '—'
+    plano = p['produto'] or '—'
+    valor_fmt = f"R$ {(p['valor'] or 0):,.2f}".replace(',','X').replace('.',',').replace('X','.')
+    vidas = p['total_vidas'] or 1
+
+    # Dependentes
+    deps = []
+    try: deps = json.loads(p['dependentes_json'] or '[]')
+    except: pass
+
+    # Monta linha de identificação
+    if eh_empresa:
+        ident = f"a empresa {nome} - CNPJ: {p['cnpj']}"
+        linha_intro = f"ao contrato do plano de saúde {operadora} para {ident}"
+    else:
+        ident = nome
+        if p['cpf_titular']:
+            ident += f" (CPF: {p['cpf_titular']})"
+        linha_intro = f"à proposta do plano de saúde {operadora} para o grupo familiar de {ident}"
+
+    # Monta composição do grupo
+    composicao = []
+    titular_linha = f"Titular: {nome}"
+    if p['cpf_titular']: titular_linha += f" (CPF: {p['cpf_titular']})"
+    if p['data_nasc_titular']: titular_linha += f" - Nasc.: {p['data_nasc_titular']}"
+    composicao.append(titular_linha)
+    for dep in deps:
+        dep_nome = dep.get('nome','')
+        dep_tipo = dep.get('parentesco') or dep.get('tipo','Dependente')
+        dep_cpf  = dep.get('cpf','')
+        dep_linha = f"Dependente ({dep_tipo}): {dep_nome}"
+        if dep_cpf: dep_linha += f" (CPF: {dep_cpf})"
+        composicao.append(dep_linha)
+
+    # Dados de contato
+    email_contato = p['email_resp_contrato'] or p['email_resp_negociacao'] or ''
+    tel_contato   = p['tel_resp_contrato'] or p['tel_resp_negociacao'] or ''
+
+    # Endereço
+    campos_extras = {}
+    try: campos_extras = json.loads(p['campos_extras'] or '{}')
+    except: pass
+    endereco_parts = [
+        campos_extras.get('endereco',''),
+        campos_extras.get('numero',''),
+        campos_extras.get('complemento',''),
+        campos_extras.get('bairro',''),
+        campos_extras.get('cidade',''),
+        campos_extras.get('estado',''),
+        campos_extras.get('cep',''),
+    ]
+    endereco = '\n'.join(x for x in endereco_parts if x)
+
+    # Assunto
+    tipo_label = 'Empresa' if eh_empresa else 'PF'
+    assunto = f"Solicitação de Protocolo - Venda {operadora} - {tipo_label} - {nome}"
+
+    # Corpo em texto puro (editável no modal)
+    comp_str = '\n'.join(composicao)
+    end_str  = endereco or '(não informado)'
+
+    corpo = f"""Olá, Pamela, tudo bem?
+
+Gostaria de solicitar o protocolo de venda referente {linha_intro}.
 
 Seguem os detalhes da proposta para conferência:
-Plano: {p['produto'] or '—'}
+Plano: {plano}
 
 Condição: {p['fator_moderador'] or '—'}
 
-Valor do grupo: R$ {valor_fmt}
+Valor do grupo: {valor_fmt}
 
-Titular: {p['cpf_titular'] or alvo}
-Total de pessoas: {vidas} vidas
+Composição do Grupo ({vidas} {'vida' if int(vidas)==1 else 'vidas'}):
+{comp_str}
 
 DADOS DE CONTATO:
-EMAIL: {p['email_resp_contrato'] or ''}
-TELEFONE: {p['tel_resp_contrato'] or ''}
+E-MAIL: {email_contato}
+TELEFONE: {tel_contato}
+
+DADOS DO ENDEREÇO:
+{end_str}
 
 SOLICITO VIGÊNCIA: {p['vigencia'] or '—'}
-VENCIMENTO DIA: {dia_v} de cada mês.
+VENCIMENTO DIA: {p['dia_vencimento'] or '—'} de cada mês.
 
 {p['observacoes'] or ''}
 
@@ -2532,29 +2592,33 @@ Poderia me enviar o protocolo para darmos prosseguimento ao processo junto ao cl
 Fico no aguardo e agradeço desde já.
 
 Atenciosamente,
-{session.get('nome','')}"""
-    assunto = f"Solicitação de Protocolo - Venda {p['produto'] or p['adm_operadora'] or ''} - {alvo}"
-    return jsonify({"ok": True, "destinatarios": dest, "remetente": rem, "assunto": assunto, "corpo": corpo})
+{session.get('nome','Guilherme Augusto Santos')}
+Serenus Corretora de Saúde"""
 
-@app.route('/config/affinity', methods=['POST'])
-@login_required
-@admin_required
-def config_affinity():
-    d = request.json or {}
-    conn = db()
-    for k in ['affinity_destinatarios','affinity_contato','affinity_remetente']:
-        if k in d:
-            conn.execute("INSERT INTO config (chave,valor) VALUES (?,?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor", (k, d[k]))
-    conn.commit(); close_db(conn)
-    return jsonify({"ok": True})
+    tem_comprovante = bool(p['comprovante_boleto'])
+    tem_contrato    = bool(p['contrato_arquivo'])
+
+    return jsonify({
+        "ok": True,
+        "assunto": assunto,
+        "corpo": corpo,
+        "tem_comprovante": tem_comprovante,
+        "tem_contrato": tem_contrato,
+        "aviso_anexo": not (tem_comprovante or tem_contrato),
+    })
 
 @app.route('/proposta/<int:pid>/enviar-plataforma', methods=['POST'])
 @login_required
 @admin_required
 def enviar_plataforma(pid):
-    """Dispara o e-mail de implantação para a equipe Affinity via Brevo (com CC para a Serenus)."""
+    """Envia o e-mail de protocolo para a Affinity via Brevo com HTML profissional."""
     DEST_AFFINITY = "pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br"
     CC_SERENUS = "guilherme@serenuscorretora.com.br"
+
+    d = request.json or {}
+    assunto      = d.get('assunto', '').strip()
+    corpo_texto  = d.get('corpo', '').strip()
+    particularidades = d.get('particularidades', '').strip()
 
     conn = db()
     p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
@@ -2562,51 +2626,94 @@ def enviar_plataforma(pid):
         close_db(conn)
         return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
 
-    nome = p['razao_social'] or p['cpf_titular'] or 'Cliente'
-    doc = (f"CNPJ: {p['cnpj']}" if p['cnpj'] else (f"CPF: {p['cpf_titular']}" if p['cpf_titular'] else '—'))
-    operadora = p['adm_operadora'] or '—'
-    plano = p['produto'] or '—'
-    valor_fmt = f"{(p['valor'] or 0):,.2f}".replace(',','X').replace('.',',').replace('X','.')
+    # Trava: exige ao menos um documento
+    if not p['comprovante_boleto'] and not p['contrato_arquivo']:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Não é possível enviar sem documentos anexados. Anexe pelo menos o comprovante de pagamento ou o contrato antes de enviar."}), 400
 
-    assunto = f"Implantação de Proposta — {operadora} — {nome}"
-    corpo_html = f"""
-    <div style="font-family:Arial,sans-serif; max-width:560px; margin:auto; color:#222;">
-      <div style="background:#1fd8a4; padding:16px 24px; border-radius:8px 8px 0 0;">
-        <h2 style="margin:0; color:#fff;">JOB · Serenus Corretora</h2>
-        <p style="margin:4px 0 0; color:#063;">Solicitação de Implantação</p>
-      </div>
-      <div style="border:1px solid #e5e7eb; border-top:none; padding:24px; border-radius:0 0 8px 8px;">
-        <p>Olá, equipe Affinity,</p>
-        <p>Segue uma nova proposta para implantação. Detalhes abaixo:</p>
-        <table style="width:100%; border-collapse:collapse; margin:16px 0;">
-          <tr><td style="padding:8px; border-bottom:1px solid #eee; font-weight:bold;">Nome / Razão Social</td><td style="padding:8px; border-bottom:1px solid #eee;">{nome}</td></tr>
-          <tr><td style="padding:8px; border-bottom:1px solid #eee; font-weight:bold;">CPF / CNPJ</td><td style="padding:8px; border-bottom:1px solid #eee;">{doc}</td></tr>
-          <tr><td style="padding:8px; border-bottom:1px solid #eee; font-weight:bold;">Operadora</td><td style="padding:8px; border-bottom:1px solid #eee;">{operadora}</td></tr>
-          <tr><td style="padding:8px; border-bottom:1px solid #eee; font-weight:bold;">Plano</td><td style="padding:8px; border-bottom:1px solid #eee;">{plano}</td></tr>
-          <tr><td style="padding:8px; border-bottom:1px solid #eee; font-weight:bold;">Valor</td><td style="padding:8px; border-bottom:1px solid #eee;">R$ {valor_fmt}</td></tr>
-        </table>
-        <p>Ficamos no aguardo do protocolo para prosseguir.</p>
-        <p style="margin-top:24px; color:#666;">Atenciosamente,<br><strong>{session.get('nome','Equipe Serenus')}</strong></p>
-      </div>
-    </div>
-    """
+    if not assunto or not corpo_texto:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Assunto e corpo do e-mail são obrigatórios."}), 400
+
+    # Monta HTML profissional com logo Serenus
+    # Logo hospedado na URL pública do sistema
+    logo_url = "https://job-serenus-production.up.railway.app/static/logo_arcos.png"
+
+    # Converte corpo texto em HTML (preserva quebras)
+    corpo_html_body = corpo_texto.replace('\n', '<br>')
+    if particularidades:
+        corpo_html_body += f'<br><br><strong>Observação adicional:</strong><br>{particularidades.replace(chr(10), "<br>")}'
+
+    corpo_html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;">
+  <tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08);">
+
+      <!-- HEADER -->
+      <tr>
+        <td style="background:#0f1f33;padding:24px 32px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td>
+                <img src="{logo_url}" alt="Serenus Corretora" height="36" style="display:block;">
+              </td>
+              <td align="right">
+                <span style="color:#1fd8a4;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;">Solicitação de Protocolo</span>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- LINHA VERDE -->
+      <tr><td style="background:#1fd8a4;height:3px;"></td></tr>
+
+      <!-- BODY -->
+      <tr>
+        <td style="padding:32px 36px;color:#1a1d2e;font-size:14px;line-height:1.75;">
+          {corpo_html_body}
+        </td>
+      </tr>
+
+      <!-- FOOTER -->
+      <tr>
+        <td style="background:#f8f9fb;border-top:1px solid #e5e9f0;padding:20px 36px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="font-size:11px;color:#8c93a8;line-height:1.6;">
+                <strong style="color:#1a1d2e;">Serenus Corretora de Saúde</strong><br>
+                guilherme@serenuscorretora.com.br<br>
+                Este e-mail foi gerado automaticamente pelo Sistema JOB — #{pid}
+              </td>
+              <td align="right" style="font-size:11px;color:#8c93a8;">
+                {datetime.now(TZ_SP).strftime('%d/%m/%Y %H:%M')}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>"""
 
     enviado = _enviar_email(DEST_AFFINITY, assunto, corpo_html, cc=CC_SERENUS)
 
     if enviado:
-        # Evolui o status operacional e registra no histórico
         conn.execute("UPDATE propostas SET status_operacional='Em Análise Operadora' WHERE id=?", (pid,))
-        conn.execute("""
-            INSERT INTO historico_proposta (proposta_id, usuario_id, usuario_nome, tipo, descricao, criado_em)
-            VALUES (?, ?, ?, 'plataforma', ?, ?)
-        """, (pid, session['user_id'], session.get('nome','admin'),
-              f"E-mail de implantação enviado à Affinity. Status → Em Análise Operadora", datetime.now(TZ_SP)))
-        conn.commit()
-        close_db(conn)
-        return jsonify({"ok": True, "msg": "E-mail enviado à plataforma. Status atualizado para 'Em Análise Operadora'."})
+        conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+            VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+            'plataforma', f"E-mail de protocolo enviado à Affinity. Assunto: {assunto}", datetime.now(TZ_SP)))
+        conn.commit(); close_db(conn)
+        return jsonify({"ok": True, "msg": "E-mail enviado. Status atualizado para 'Em Análise Operadora'."})
     else:
         close_db(conn)
-        return jsonify({"ok": False, "msg": "BREVO_API_KEY não configurada. E-mail não enviado."}), 500
+        return jsonify({"ok": False, "msg": "BREVO_API_KEY não configurada no Railway. E-mail não enviado."}), 500
 
 
 @app.route('/api/etiquetas')
