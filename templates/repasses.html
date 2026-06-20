@@ -38,7 +38,7 @@
   <div class="card" style="background:linear-gradient(135deg,rgba(139,92,246,.07),rgba(59,130,246,.06)); border-color:var(--borda-2); margin-bottom:18px;">
     <div style="padding:16px 22px; font-size:13px; color:var(--cinza); line-height:1.7;">
       Valores em <strong style="color:#fff;">número de mensalidades</strong>. O <strong>total</strong> é quanto o corretor recebe; a <strong>régua</strong> é o escalonamento por parcela (ex <code style="color:var(--teal);">0.7;0.25;0.25</code>). Dados vindos da sua planilha — edite o que precisar.<br>
-      <strong style="color:#b79bf5;">Sem Fixo + Com Leads</strong> tem meta (N1/N2/N3). <strong style="color:var(--am);">Adesão</strong> em "Taxa" = ato da venda, custo zero.
+      <strong style="color:#b79bf5;">Sem Fixo + Com Leads</strong> tem meta (N1/N2/N3). <strong style="color:var(--am);">Adesão:</strong> no campo <strong>Total</strong> coloque o % do consultor sobre a taxa de adesão (ex <code style="color:var(--am);">0.5</code> = 50% · taxa = 1 mensalidade, parcela única no ato da venda).
     </div>
   </div>
 
@@ -90,6 +90,16 @@ function linha(op, obs, modelo, nivel, label) {
   const taxa = r && r.taxa;
   const tot = r ? r.total : '';
   const reg = r && r.regua ? r.regua : '';
+  const isAdesao = planoAtual === 'ADESAO';
+  if (isAdesao) {
+    // Adesão: parcela única. Total = % do consultor sobre a taxa (1 mensalidade).
+    return `<div class="rep-line" data-modelo="${modelo}" data-nivel="${nivel}">
+      <div>${label ? `<span class="niv-badge">${label}</span>` : '<span style="color:var(--cinza-2);font-size:12px;">único</span>'}</div>
+      <div><div class="lbl-mini" style="color:var(--am);">% Consultor (ex 0.5 = 50%)</div><input type="number" step="0.05" min="0" max="1" class="inp-tot" value="${tot}" placeholder="0.5"></div>
+      <div style="opacity:.4;"><div class="lbl-mini">Régua</div><input type="text" class="inp-regua" value="" placeholder="parcela única" disabled></div>
+      <div style="font-size:11px;color:var(--cinza-2);align-self:center;">taxa = 1 mensalidade · ato da venda</div>
+    </div>`;
+  }
   return `<div class="rep-line" data-modelo="${modelo}" data-nivel="${nivel}">
     <div>${label ? `<span class="niv-badge">${label}</span>` : '<span style="color:var(--cinza-2);font-size:12px;">único</span>'}</div>
     <div><div class="lbl-mini">Total</div><input type="number" step="0.1" class="inp-tot" value="${tot}"></div>
@@ -125,12 +135,15 @@ async function salvarTudo() {
   const sel = document.getElementById('sel-op').value;
   if (!sel) { toast('Selecione uma operadora', 'err'); return; }
   const [op, obs] = sel.split('|');
+  const isAdesao = planoAtual === 'ADESAO';
   const repasses = [];
   document.querySelectorAll('.rep-line').forEach(line => {
-    const taxa = line.querySelector('.taxa-toggle').classList.contains('on') ? 1 : 0;
+    const toggle = line.querySelector('.taxa-toggle');
+    const taxa = isAdesao ? 1 : (toggle && toggle.classList.contains('on') ? 1 : 0);
     const tot = line.querySelector('.inp-tot').value;
-    const reg = line.querySelector('.inp-regua').value.trim();
+    const reg = isAdesao ? '' : line.querySelector('.inp-regua').value.trim();
     if (!taxa && !tot && !reg) return;
+    if (isAdesao && !tot) return;  // adesão sem % não grava
     repasses.push({operadora:op, obs:obs, plano:planoAtual, modelo:line.dataset.modelo,
       nivel:line.dataset.nivel, total:tot||0, regua:reg, taxa:taxa});
   });
