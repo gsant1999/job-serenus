@@ -72,6 +72,11 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # ─── MODO DO BANCO: PostgreSQL (Railway) com fallback SQLite ────────────────
 DB_MODE = 'postgres' if (os.environ.get('DATABASE_URL') and HAS_POSTGRES) else 'sqlite'
 
+# Log inicial
+print(f"[APP] DATABASE_URL presente: {bool(os.environ.get('DATABASE_URL'))}")
+print(f"[APP] HAS_POSTGRES: {HAS_POSTGRES}")
+print(f"[APP] DB_MODE: {DB_MODE}")
+
 # ─── VARIÁVEIS GLOBAIS NECESSÁRIAS ──────────────────────────────────────────
 STATUS_FLUXO = [
     'Pendente de receber',
@@ -1586,9 +1591,20 @@ def backup_agendar():
 def emergency_init_db():
     """Inicializa banco de dados (cria todas as tabelas)."""
     try:
+        print(f"\n[INIT-DB] DB_MODE: {DB_MODE}")
+        print(f"[INIT-DB] DATABASE_URL: {os.environ.get('DATABASE_URL', 'não setada')[:50]}...")
+        
         init_db()
-        return jsonify({'ok': True, 'msg': 'Banco inicializado com sucesso!'})
+        
+        print(f"[INIT-DB] ✅ Sucesso!")
+        return jsonify({
+            'ok': True, 
+            'msg': 'Banco inicializado com sucesso!',
+            'db_mode': DB_MODE,
+            'database_url_presente': bool(os.environ.get('DATABASE_URL'))
+        })
     except Exception as e:
+        print(f"[INIT-DB] ❌ Erro: {e}")
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
 @app.route('/download/<path:chave_arquivo>')
