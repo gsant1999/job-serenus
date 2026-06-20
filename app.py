@@ -1212,57 +1212,65 @@ def asaas_detectar_tipo_chave(chave):
 
 # ─── CLOUDFLARE R2 — UPLOAD/DOWNLOAD DE ARQUIVOS ──────────────────────────────────
 
-def _get_r2_client():
-    """Retorna cliente R2 configurado ou None se desabilitado."""
-    if not HAS_BOTO3 or not os.environ.get('R2_ENABLED') == 'true':
-        return None
-    try:
-        return boto3.client(
-            's3',
-            endpoint_url=os.environ.get('R2_ENDPOINT'),
-            aws_access_key_id=os.environ.get('R2_ACCESS_KEY'),
-            aws_secret_access_key=os.environ.get('R2_SECRET_KEY'),
-            region_name='auto'
-        )
-    except Exception as e:
-        app.logger.warning(f"[R2] ⚠️  Erro ao conectar: {e}")
-        return None
-
-def upload_arquivo_r2(file_obj, chave_arquivo):
-    """Upload arquivo para R2. Retorna {'ok': True, 'chave': ...} ou {'ok': False, 'erro': ...}"""
-    client = _get_r2_client()
-    if not client:
+def _upload_r2_http(file_obj, chave_arquivo):
+    """Upload arquivo para R2 via HTTP. Retorna {'ok': True, 'chave': ...} ou fallback local."""
+    if not os.environ.get('R2_ENABLED') == 'true':
         return {'ok': False, 'erro': 'R2 desabilitado', 'fallback': True}
     
     try:
-        client.upload_fileobj(
-            file_obj,
-            os.environ.get('R2_BUCKET_NAME'),
-            chave_arquivo,
-            ExtraArgs={'ContentType': 'application/pdf'}
-        )
-        app.logger.info(f"[R2] ✅ Upload: {chave_arquivo}")
-        return {'ok': True, 'chave': chave_arquivo, 'storage': 'r2'}
-    except ClientError as e:
-        app.logger.error(f"[R2] ❌ Upload falhou: {e}")
+        import requests
+        
+        endpoint = os.environ.get('R2_ENDPOINT')
+        bucket = os.environ.get('R2_BUCKET_NAME')
+        api_token = os.environ.get('R2_API_TOKEN')
+        
+        if not all([endpoint, bucket, api_token]):
+            return {'ok': False, 'erro': 'Credenciais R2 incompletas', 'fallback': True}
+        
+        # URL do arquivo no R2
+        url = f"{endpoint}/{bucket}/{chave_arquivo}"
+        
+        # Headers com autenticação Bearer
+        headers = {
+            'Authorization': f'Bearer {api_token}'
+        }
+        
+        # Upload via PUT
+        response = requests.put(url, data=file_obj, headers=headers, timeout=30)
+        
+        if response.status_code in [200, 201]:
+            app.logger.info(f"[R2] ✅ Upload: {chave_arquivo}")
+            return {'ok': True, 'chave': chave_arquivo, 'storage': 'r2'}
+        else:
+            app.logger.error(f"[R2] ❌ Upload falhou ({response.status_code}): {response.text}")
+            return {'ok': False, 'erro': f"HTTP {response.status_code}", 'fallback': True}
+    except Exception as e:
+        app.logger.error(f"[R2] ❌ Erro upload: {e}")
         return {'ok': False, 'erro': str(e), 'fallback': True}
 
-def gerar_url_r2(chave_arquivo, expiracao_segundos=86400):
-    """Gera URL pré-assinada (válida por 24h por padrão) para download."""
-    client = _get_r2_client()
-    if not client:
+def _gerar_url_r2_http(chave_arquivo, expiracao_segundos=86400):
+    """Gera URL para download do R2 via HTTP."""
+    if not os.environ.get('R2_ENABLED') == 'true':
         return None
     
     try:
-        url = client.generate_presigned_url(
-            'get_object',
-            Params={'Bucket': os.environ.get('R2_BUCKET_NAME'), 'Key': chave_arquivo},
-            ExpiresIn=expiracao_segundos
-        )
+        endpoint = os.environ.get('R2_ENDPOINT')
+        bucket = os.environ.get('R2_BUCKET_NAME')
+        
+        # URL pública (sem autenticação se bucket for público)
+        url = f"{endpoint}/{bucket}/{chave_arquivo}"
         return url
     except Exception as e:
         app.logger.warning(f"[R2] ⚠️  Erro ao gerar URL: {e}")
         return None
+
+def upload_arquivo_r2(file_obj, chave_arquivo):
+    """Wrapper compatível com boto3 - usa HTTP."""
+    return _upload_r2_http(file_obj, chave_arquivo)
+
+def gerar_url_r2(chave_arquivo, expiracao_segundos=86400):
+    """Wrapper compatível - gera URL de download."""
+    return _gerar_url_r2_http(chave_arquivo, expiracao_segundos)
 
 
 @app.route('/admin/asaas/teste')
@@ -1577,22 +1585,34 @@ def testar_r2():
         if not os.environ.get('R2_ENABLED') == 'true':
             return jsonify({'ok': False, 'erro': 'R2 não configurado (R2_ENABLED != true)'}), 400
         
-        client = _get_r2_client()
-        if not client:
-            return jsonify({'ok': False, 'erro': 'Não conseguiu conectar ao R2'}), 500
+        # Validar variáveis
+        vars_necessarias = ['R2_ENDPOINT', 'R2_BUCKET_NAME', 'R2_API_TOKEN', 'R2_ACCOUNT_ID']
+        vars_faltando = [v for v in vars_necessarias if not os.environ.get(v)]
         
-        # Testar listando buckets
-        response = client.list_buckets()
-        buckets = [b['Name'] for b in response.get('Buckets', [])]
+        if vars_faltando:
+            return jsonify({'ok': False, 'erro': f'Variáveis faltando: {", ".join(vars_faltando)}'}), 400
         
-        return jsonify({
-            'ok': True,
-            'msg': 'Conexão R2 ✅',
-            'buckets': buckets,
-            'bucket_ativo': os.environ.get('R2_BUCKET_NAME'),
-            'account_id': os.environ.get('R2_ACCOUNT_ID'),
-            'endpoint': os.environ.get('R2_ENDPOINT')
-        })
+        # Testar com upload de arquivo teste
+        import io
+        arquivo_teste = io.BytesIO(b"Teste R2 - JOB Serenus")
+        resultado = upload_arquivo_r2(arquivo_teste, "teste/test.txt")
+        
+        if resultado['ok']:
+            url = gerar_url_r2("teste/test.txt")
+            return jsonify({
+                'ok': True,
+                'msg': 'Conexão R2 ✅',
+                'account_id': os.environ.get('R2_ACCOUNT_ID'),
+                'bucket': os.environ.get('R2_BUCKET_NAME'),
+                'endpoint': os.environ.get('R2_ENDPOINT'),
+                'arquivo_teste': 'teste/test.txt',
+                'url': url
+            })
+        else:
+            return jsonify({
+                'ok': False,
+                'erro': resultado.get('erro', 'Erro desconhecido')
+            }), 500
     except Exception as e:
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
