@@ -510,19 +510,6 @@ def init_db():
                 app.logger.error(f"[INIT_DB] Erro SQL: {e}")
         conn.commit()
         
-        # MIGRAÇÃO: Adicionar coluna motivo_exclusao se não existir
-        try:
-            if is_pg:
-                cur.execute("ALTER TABLE propostas ADD COLUMN motivo_exclusao TEXT DEFAULT NULL")
-            else:
-                cur.execute("ALTER TABLE propostas ADD COLUMN motivo_exclusao TEXT DEFAULT NULL")
-            conn.commit()
-            app.logger.info("[INIT_DB] ✅ Coluna motivo_exclusao adicionada")
-        except Exception as e:
-            # Coluna já existe, faz ROLLBACK
-            conn.rollback()
-            app.logger.info(f"[INIT_DB] ℹ️ motivo_exclusao já existe ou erro menor: {e}")
-        
         # GARANTIR que recebimento existe
         try:
             cur.execute("""
@@ -887,6 +874,15 @@ def init_db():
         ("usuarios", "cpf", "TEXT"),
         ("usuarios", "reset_code", "TEXT"),
         ("usuarios", "reset_expira", "TEXT"),
+        # ─── FASE 1: ERP Backoffice ───
+        ("propostas", "status_operacional", "TEXT DEFAULT 'Aguardando Documentos'"),
+        ("propostas", "mes_meta", "TEXT"),
+        ("propostas", "pendencias_json", "TEXT"),
+        ("propostas", "motivo_exclusao", "TEXT"),
+        ("propostas", "detalhe_exclusao", "TEXT"),
+        ("historico_proposta", "usuario_id", "INTEGER"),
+        ("historico_proposta", "tipo", "TEXT DEFAULT 'edicao'"),
+        ("historico_proposta", "descricao", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -1941,25 +1937,43 @@ def servir_anexo(nome):
     return send_from_directory(UPLOAD_FOLDER, nome)
 
 # ─── EMAIL UTILITÁRIO ────────────────────────────────────────────────────────
-def _enviar_email(destinatario, assunto, corpo_html):
+def _enviar_email(destinatario, assunto, corpo_html, cc=None):
     """Envia email via API do Brevo (HTTPS porta 443 — nunca bloqueada pelo Railway).
-    Configure BREVO_API_KEY no Railway. SMTP_USER define o remetente."""
+    Configure BREVO_API_KEY no Railway. SMTP_USER define o remetente.
+    destinatario: string (1 email) ou lista de emails.
+    cc: string ou lista de emails para cópia (opcional)."""
     api_key = os.environ.get('BREVO_API_KEY','')
     remetente = os.environ.get('SMTP_USER','noreply@serenuscorretora.com.br')
 
+    # Normaliza destinatários e cópia para listas
+    if isinstance(destinatario, str):
+        to_list = [e.strip() for e in destinatario.replace(';', ',').split(',') if e.strip()]
+    else:
+        to_list = [e.strip() for e in destinatario if e and e.strip()]
+
+    cc_list = []
+    if cc:
+        if isinstance(cc, str):
+            cc_list = [e.strip() for e in cc.replace(';', ',').split(',') if e.strip()]
+        else:
+            cc_list = [e.strip() for e in cc if e and e.strip()]
+
     if not api_key:
-        print(f"[EMAIL] ⚠️ BREVO_API_KEY não configurada. Assunto: {assunto} → {destinatario}")
+        print(f"[EMAIL] ⚠️ BREVO_API_KEY não configurada. Assunto: {assunto} → {to_list} (cc: {cc_list})")
         return False
 
     def _enviar():
         try:
             import urllib.request, json as _json
-            payload = _json.dumps({
+            corpo_payload = {
                 "sender":  {"name": "JOB Serenus", "email": remetente},
-                "to":      [{"email": destinatario}],
+                "to":      [{"email": e} for e in to_list],
                 "subject": assunto,
                 "htmlContent": corpo_html
-            }).encode('utf-8')
+            }
+            if cc_list:
+                corpo_payload["cc"] = [{"email": e} for e in cc_list]
+            payload = _json.dumps(corpo_payload).encode('utf-8')
             req = urllib.request.Request(
                 "https://api.brevo.com/v3/smtp/email",
                 data=payload,
@@ -1971,13 +1985,9 @@ def _enviar_email(destinatario, assunto, corpo_html):
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
                 status = resp.status
-            print(f"[EMAIL] ✅ Enviado via Brevo API (HTTP {status}): {assunto} → {destinatario}")
+            print(f"[EMAIL] ✅ Enviado via Brevo API (HTTP {status}): {assunto} → {to_list} (cc: {cc_list})")
         except Exception as e:
-            print(f"[EMAIL] ❌ Erro ao enviar para {destinatario}: {e}")
-
-    import threading
-    threading.Thread(target=_enviar, daemon=True).start()
-    return True
+            print(f"[EMAIL] ❌ Erro ao enviar para {to_list}: {e}")
 
     import threading
     threading.Thread(target=_enviar, daemon=True).start()
@@ -2499,6 +2509,67 @@ def config_affinity():
             conn.execute("INSERT INTO config (chave,valor) VALUES (?,?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor", (k, d[k]))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+@app.route('/proposta/<int:pid>/enviar-plataforma', methods=['POST'])
+@login_required
+@admin_required
+def enviar_plataforma(pid):
+    """Dispara o e-mail de implantação para a equipe Affinity via Brevo (com CC para a Serenus)."""
+    DEST_AFFINITY = "pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br"
+    CC_SERENUS = "guilherme@serenuscorretora.com.br"
+
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    nome = p['razao_social'] or p['cpf_titular'] or 'Cliente'
+    doc = (f"CNPJ: {p['cnpj']}" if p['cnpj'] else (f"CPF: {p['cpf_titular']}" if p['cpf_titular'] else '—'))
+    operadora = p['adm_operadora'] or '—'
+    plano = p['produto'] or '—'
+    valor_fmt = f"{(p['valor'] or 0):,.2f}".replace(',','X').replace('.',',').replace('X','.')
+
+    assunto = f"Implantação de Proposta — {operadora} — {nome}"
+    corpo_html = f"""
+    <div style="font-family:Arial,sans-serif; max-width:560px; margin:auto; color:#222;">
+      <div style="background:#1fd8a4; padding:16px 24px; border-radius:8px 8px 0 0;">
+        <h2 style="margin:0; color:#fff;">JOB · Serenus Corretora</h2>
+        <p style="margin:4px 0 0; color:#063;">Solicitação de Implantação</p>
+      </div>
+      <div style="border:1px solid #e5e7eb; border-top:none; padding:24px; border-radius:0 0 8px 8px;">
+        <p>Olá, equipe Affinity,</p>
+        <p>Segue uma nova proposta para implantação. Detalhes abaixo:</p>
+        <table style="width:100%; border-collapse:collapse; margin:16px 0;">
+          <tr><td style="padding:8px; border-bottom:1px solid #eee; font-weight:bold;">Nome / Razão Social</td><td style="padding:8px; border-bottom:1px solid #eee;">{nome}</td></tr>
+          <tr><td style="padding:8px; border-bottom:1px solid #eee; font-weight:bold;">CPF / CNPJ</td><td style="padding:8px; border-bottom:1px solid #eee;">{doc}</td></tr>
+          <tr><td style="padding:8px; border-bottom:1px solid #eee; font-weight:bold;">Operadora</td><td style="padding:8px; border-bottom:1px solid #eee;">{operadora}</td></tr>
+          <tr><td style="padding:8px; border-bottom:1px solid #eee; font-weight:bold;">Plano</td><td style="padding:8px; border-bottom:1px solid #eee;">{plano}</td></tr>
+          <tr><td style="padding:8px; border-bottom:1px solid #eee; font-weight:bold;">Valor</td><td style="padding:8px; border-bottom:1px solid #eee;">R$ {valor_fmt}</td></tr>
+        </table>
+        <p>Ficamos no aguardo do protocolo para prosseguir.</p>
+        <p style="margin-top:24px; color:#666;">Atenciosamente,<br><strong>{session.get('nome','Equipe Serenus')}</strong></p>
+      </div>
+    </div>
+    """
+
+    enviado = _enviar_email(DEST_AFFINITY, assunto, corpo_html, cc=CC_SERENUS)
+
+    if enviado:
+        # Evolui o status operacional e registra no histórico
+        conn.execute("UPDATE propostas SET status_operacional='Em Análise Operadora' WHERE id=?", (pid,))
+        conn.execute("""
+            INSERT INTO historico_proposta (proposta_id, usuario_id, usuario_nome, tipo, descricao, criado_em)
+            VALUES (?, ?, ?, 'plataforma', ?, ?)
+        """, (pid, session['user_id'], session.get('nome','admin'),
+              f"E-mail de implantação enviado à Affinity. Status → Em Análise Operadora", datetime.now(TZ_SP)))
+        conn.commit()
+        close_db(conn)
+        return jsonify({"ok": True, "msg": "E-mail enviado à plataforma. Status atualizado para 'Em Análise Operadora'."})
+    else:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "BREVO_API_KEY não configurada. E-mail não enviado."}), 500
+
 
 @app.route('/api/etiquetas')
 @login_required
@@ -3560,40 +3631,42 @@ def regra_estorno_salvar():
 @login_required
 @admin_required
 def excluir_proposta_logica(pid):
-    """Soft Delete: marca proposta como Excluída e altera parcelas para Cancelada."""
+    """Soft Delete: marca proposta como Excluída, cancela parcelas e registra motivo + detalhe."""
     d = request.json or {}
-    motivo = d.get('motivo_exclusao', 'Não especificado')
-    
+    motivo = (d.get('motivo_exclusao') or 'Outro').strip()
+    detalhe = (d.get('detalhe_exclusao') or '').strip()
+    nome_user = session.get('nome', 'admin')
+
     conn = db()
     p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
     if not p:
         close_db(conn)
         return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
-    
-    # Atualizar status da proposta
+
+    # Atualizar status da proposta (exclusão lógica)
     conn.execute("""
-        UPDATE propostas 
-        SET status='Excluída', motivo_exclusao=?, quem_subiu=?
+        UPDATE propostas
+        SET status='Excluída', motivo_exclusao=?, detalhe_exclusao=?
         WHERE id=?
-    """, (motivo, session.get('user_name', 'desconhecido'), pid))
-    
-    # Cancelar todas as parcelas pendentes
+    """, (motivo, detalhe, pid))
+
+    # Estornar/cancelar todas as parcelas pendentes de receber
     conn.execute("""
-        UPDATE parcelas 
-        SET status='Cancelada'
+        UPDATE parcelas
+        SET status='Cancelada / Estornada'
         WHERE proposta_id=? AND status='Pendente de receber'
     """, (pid,))
-    
+
     # Registrar no histórico
+    desc = f"Proposta excluída. Motivo: {motivo}" + (f" — {detalhe}" if detalhe else "")
     conn.execute("""
         INSERT INTO historico_proposta (proposta_id, usuario_id, usuario_nome, tipo, descricao, criado_em)
         VALUES (?, ?, ?, 'exclusao', ?, ?)
-    """, (pid, session['user_id'], session.get('user_name', 'desconhecido'), 
-          f"Proposta excluída. Motivo: {motivo}", datetime.now(TZ_SP)))
-    
+    """, (pid, session['user_id'], nome_user, desc, datetime.now(TZ_SP)))
+
     conn.commit()
     close_db(conn)
-    return jsonify({"ok": True, "msg": "Proposta excluída com sucesso. Parcelas canceladas."})
+    return jsonify({"ok": True, "msg": "Proposta excluída. Parcelas pendentes canceladas/estornadas."})
 
 @app.route('/admin/propostas-excluidas')
 @login_required
