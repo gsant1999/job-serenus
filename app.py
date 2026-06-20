@@ -3920,16 +3920,68 @@ def upload_comprovante(pid):
 
     nome = f"COMPROVANTE_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
     f.save(os.path.join(UPLOAD_FOLDER, nome))
-
     conn.execute("UPDATE propostas SET comprovante_boleto=? WHERE id=?", (nome, pid))
-    # Desbloqueia parcelas
     conn.execute("""UPDATE parcelas SET status='Pendente de receber'
         WHERE proposta_id=? AND status='Bloqueado - Falta Comprovante'""", (pid,))
     conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
         VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
         'comprovante', f"Comprovante de pagamento anexado: {nome}", datetime.now(TZ_SP)))
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "msg": "Comprovante salvo. Parcelas desbloqueadas."})
+    return jsonify({"ok": True, "msg": "Comprovante salvo. Parcelas desbloqueadas.", "nome": nome})
+
+@app.route('/proposta/<int:pid>/contrato-upload', methods=['POST'])
+@login_required
+def upload_contrato(pid):
+    """Upload do contrato / proposta assinada."""
+    conn = db()
+    p = conn.execute("SELECT usuario_id FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p: close_db(conn); return jsonify({"ok": False}), 404
+    if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False}), 403
+
+    f = request.files.get('contrato_arquivo')
+    if not f or not f.filename:
+        close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
+
+    nome = f"CONTRATO_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
+    f.save(os.path.join(UPLOAD_FOLDER, nome))
+    conn.execute("UPDATE propostas SET contrato_arquivo=? WHERE id=?", (nome, pid))
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'contrato', f"Contrato/proposta anexado: {nome}", datetime.now(TZ_SP)))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": "Contrato salvo.", "nome": nome})
+
+@app.route('/proposta/<int:pid>/doc-upload', methods=['POST'])
+@login_required
+def upload_doc_extra(pid):
+    """Upload de documento extra (bordo). Adiciona ao array de anexos."""
+    conn = db()
+    p = conn.execute("SELECT usuario_id, anexos FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p: close_db(conn); return jsonify({"ok": False}), 404
+    if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False}), 403
+
+    f = request.files.get('documento')
+    tipo = (request.form.get('tipo') or 'Documento').strip()
+    if not f or not f.filename:
+        close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
+
+    prefixo = tipo.upper().replace(' ', '_').replace('/', '_')[:20]
+    nome = f"{prefixo}_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
+    f.save(os.path.join(UPLOAD_FOLDER, nome))
+
+    try: anexos = json.loads(p['anexos'] or '[]')
+    except: anexos = []
+    anexos.append(nome)
+    conn.execute("UPDATE propostas SET anexos=? WHERE id=?", (json.dumps(anexos), pid))
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'documento', f"Documento anexado ({tipo}): {nome}", datetime.now(TZ_SP)))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": f"{tipo} salvo.", "nome": nome})
+
+
 
 
 @app.route('/proposta/<int:pid>/estornar', methods=['POST'])

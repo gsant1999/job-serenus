@@ -301,30 +301,94 @@
   {% endif %}
 
   <!-- Documentos -->
-  {% if p.contrato_arquivo or p.comprovante_boleto or p.anexos and p.anexos != '[]' %}
-  <div class="card" style="margin-bottom:16px;">
-    <div class="card-header"><h3>Documentos</h3></div>
-    <div class="card-body" style="display:flex; gap:12px; flex-wrap:wrap;">
-      {% if p.contrato_arquivo %}
-      <a href="/anexos/{{ p.contrato_arquivo }}" target="_blank" class="btn-outline" style="font-size:12.5px;">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        Contrato assinado
-      </a>
-      {% endif %}
-      {% if p.comprovante_boleto %}
-      <a href="/anexos/{{ p.comprovante_boleto }}" target="_blank" class="btn-outline" style="font-size:12.5px;">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-        Comprovante 1º boleto
-      </a>
-      {% endif %}
+  <div class="card" style="margin-bottom:16px;" id="card-documentos">
+    <div class="card-header">
+      <h3>Documentos</h3>
+      <span style="font-size:11px; color:var(--cinza);">Comprovante e contrato são necessários para enviar à Affinity</span>
+    </div>
+    <div class="card-body">
+
+      <!-- Comprovante de pagamento -->
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--borda); gap:12px; flex-wrap:wrap;" id="row-comprovante">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:8px; height:8px; border-radius:50%; background:{% if p.comprovante_boleto %}#10b981{% else %}#f43f7c{% endif %}; flex-shrink:0;"></div>
+          <div>
+            <div style="font-size:13px; font-weight:500;">Comprovante de pagamento (1º boleto)</div>
+            <div style="font-size:11.5px; color:var(--cinza); margin-top:2px;">
+              {% if p.comprovante_boleto %}
+                Anexado: <a href="/anexos/{{ p.comprovante_boleto }}" target="_blank" style="color:var(--verde);">{{ p.comprovante_boleto.split('_',3)[-1] if '_' in p.comprovante_boleto else p.comprovante_boleto }}</a>
+              {% else %}
+                Pendente — necessário para liberar comissões e enviar à Affinity
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <label class="btn-outline" style="font-size:12px; padding:6px 14px; cursor:pointer; {% if p.comprovante_boleto %}opacity:.6;{% endif %}">
+          {% if p.comprovante_boleto %}Substituir{% else %}Anexar{% endif %}
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="uploadDoc('comprovante', this)">
+        </label>
+      </div>
+
+      <!-- Contrato / proposta assinada -->
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--borda); gap:12px; flex-wrap:wrap;" id="row-contrato">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:8px; height:8px; border-radius:50%; background:{% if p.contrato_arquivo %}#10b981{% else %}#f59e0b{% endif %}; flex-shrink:0;"></div>
+          <div>
+            <div style="font-size:13px; font-weight:500;">Contrato / Proposta assinada</div>
+            <div style="font-size:11.5px; color:var(--cinza); margin-top:2px;">
+              {% if p.contrato_arquivo %}
+                Anexado: <a href="/anexos/{{ p.contrato_arquivo }}" target="_blank" style="color:var(--verde);">{{ p.contrato_arquivo.split('_',3)[-1] if '_' in p.contrato_arquivo else p.contrato_arquivo }}</a>
+              {% else %}
+                Pendente
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <label class="btn-outline" style="font-size:12px; padding:6px 14px; cursor:pointer; {% if p.contrato_arquivo %}opacity:.6;{% endif %}">
+          {% if p.contrato_arquivo %}Substituir{% else %}Anexar{% endif %}
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="uploadDoc('contrato', this)">
+        </label>
+      </div>
+
+      <!-- Documentos extras (bordo) -->
       {% if p.anexos and p.anexos != '[]' %}
-        {% for arq in p.anexos|from_json %}
-        <a href="/anexos/{{ arq }}" target="_blank" class="btn-outline" style="font-size:12.5px;">Documento {{ loop.index }}</a>
-        {% endfor %}
+      <div style="padding:12px 0; border-bottom:1px solid var(--borda);">
+        <div style="font-size:12px; font-weight:600; color:var(--cinza); text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px;">Documentos adicionais</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;" id="lista-docs-extras">
+          {% for arq in p.anexos|from_json %}
+          <a href="/anexos/{{ arq }}" target="_blank" class="btn-outline" style="font-size:12px; padding:5px 12px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            {{ arq.split('_',4)[-1] if arq.count('_') >= 4 else 'Documento ' ~ loop.index }}
+          </a>
+          {% endfor %}
+        </div>
+      </div>
       {% endif %}
+
+      <!-- Adicionar documento extra -->
+      <div style="padding:14px 0 4px; display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:180px;">
+          <div style="font-size:11px; color:var(--cinza); margin-bottom:5px; font-weight:500;">Tipo do documento</div>
+          <select id="tipo-doc-extra" style="font-size:12px; padding:7px 10px; width:100%;">
+            <option value="Contrato Social">Contrato Social / CCMEI</option>
+            <option value="Cartão CNPJ">Cartão CNPJ</option>
+            <option value="RG CPF CNH">RG / CPF / CNH do Titular</option>
+            <option value="RG Dependente">RG / Certidão dos Dependentes</option>
+            <option value="Comprovante Endereco">Comprovante de Endereço</option>
+            <option value="Certidão Casamento">Certidão de Casamento / União Estável</option>
+            <option value="Carta Permanência">Carta de Permanência</option>
+            <option value="Plano Anterior">Comprovante Plano Anterior</option>
+            <option value="Outros">Outros</option>
+          </select>
+        </div>
+        <label class="btn-outline" style="font-size:12px; padding:7px 16px; cursor:pointer; white-space:nowrap;">
+          + Adicionar documento
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="uploadDocExtra(this)">
+        </label>
+      </div>
+
     </div>
   </div>
-  {% endif %}
 
   <!-- Contatos -->
   <div class="card" style="margin-bottom:16px;">
@@ -668,6 +732,50 @@ async function abrirConsultor() {
   modal.classList.add('open');
 }
 function fecharConsultor() { document.getElementById('modal-consultor').classList.remove('open'); }
+// ─── Upload de documentos inline ─────────────────────────────────────────────
+async function uploadDoc(tipo, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  const rotaMap = { comprovante: 'comprovante-upload', contrato: 'contrato-upload' };
+  const fieldMap = { comprovante: 'comprovante_boleto', contrato: 'contrato_arquivo' };
+  fd.append(fieldMap[tipo], file);
+
+  toast('Enviando...', 'ok');
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/${rotaMap[tipo]}`, { method: 'POST', body: fd });
+    const d = await res.json();
+    if (d.ok) {
+      toast(d.msg || 'Arquivo salvo', 'ok');
+      setTimeout(() => location.reload(), 900);
+    } else {
+      toast(d.msg || 'Erro ao enviar', 'err');
+    }
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+
+async function uploadDocExtra(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const tipo = document.getElementById('tipo-doc-extra').value;
+  const fd = new FormData();
+  fd.append('documento', file);
+  fd.append('tipo', tipo);
+
+  toast('Enviando documento...', 'ok');
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/doc-upload`, { method: 'POST', body: fd });
+    const d = await res.json();
+    if (d.ok) {
+      toast(d.msg || 'Documento salvo', 'ok');
+      setTimeout(() => location.reload(), 900);
+    } else {
+      toast(d.msg || 'Erro ao enviar', 'err');
+    }
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function abrirEstorno() { document.getElementById('modal-estorno').classList.add('open'); }
 
 // ─── Enviar à plataforma (Affinity / Brevo) ───
