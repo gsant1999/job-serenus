@@ -1,3 +1,4 @@
+# HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
 import os, sqlite3, json, hashlib, secrets, re
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort
 from datetime import datetime, timedelta, date
