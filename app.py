@@ -1220,29 +1220,36 @@ def _upload_r2_http(file_obj, chave_arquivo):
     try:
         import requests
         
-        endpoint = os.environ.get('R2_ENDPOINT')
+        endpoint = os.environ.get('R2_ENDPOINT', '').rstrip('/')
         bucket = os.environ.get('R2_BUCKET_NAME')
         api_token = os.environ.get('R2_API_TOKEN')
         
         if not all([endpoint, bucket, api_token]):
+            app.logger.error(f"[R2] Credenciais incompletas: endpoint={bool(endpoint)}, bucket={bool(bucket)}, token={bool(api_token)}")
             return {'ok': False, 'erro': 'Credenciais R2 incompletas', 'fallback': True}
         
-        # URL do arquivo no R2
-        url = f"{endpoint}/{bucket}/{chave_arquivo}"
+        # URL correta para R2 (endpoint já inclui /bucket)
+        url = f"{endpoint}/{chave_arquivo}"
         
         # Headers com autenticação Bearer
         headers = {
-            'Authorization': f'Bearer {api_token}'
+            'Authorization': f'Bearer {api_token}',
+            'Content-Type': 'application/octet-stream'
         }
+        
+        app.logger.info(f"[R2] Upload para: {url[:60]}...")
         
         # Upload via PUT
         response = requests.put(url, data=file_obj, headers=headers, timeout=30)
+        
+        app.logger.info(f"[R2] Status: {response.status_code}")
+        if response.status_code not in [200, 201]:
+            app.logger.error(f"[R2] Response: {response.text[:200]}")
         
         if response.status_code in [200, 201]:
             app.logger.info(f"[R2] ✅ Upload: {chave_arquivo}")
             return {'ok': True, 'chave': chave_arquivo, 'storage': 'r2'}
         else:
-            app.logger.error(f"[R2] ❌ Upload falhou ({response.status_code}): {response.text}")
             return {'ok': False, 'erro': f"HTTP {response.status_code}", 'fallback': True}
     except Exception as e:
         app.logger.error(f"[R2] ❌ Erro upload: {e}")
@@ -1586,34 +1593,45 @@ def testar_r2():
             return jsonify({'ok': False, 'erro': 'R2 não configurado (R2_ENABLED != true)'}), 400
         
         # Validar variáveis
-        vars_necessarias = ['R2_ENDPOINT', 'R2_BUCKET_NAME', 'R2_API_TOKEN', 'R2_ACCOUNT_ID']
-        vars_faltando = [v for v in vars_necessarias if not os.environ.get(v)]
+        vars_necessarias = {
+            'R2_ENDPOINT': os.environ.get('R2_ENDPOINT'),
+            'R2_BUCKET_NAME': os.environ.get('R2_BUCKET_NAME'),
+            'R2_API_TOKEN': os.environ.get('R2_API_TOKEN'),
+            'R2_ACCOUNT_ID': os.environ.get('R2_ACCOUNT_ID')
+        }
         
+        vars_faltando = [k for k, v in vars_necessarias.items() if not v]
         if vars_faltando:
-            return jsonify({'ok': False, 'erro': f'Variáveis faltando: {", ".join(vars_faltando)}'}), 400
+            return jsonify({
+                'ok': False, 
+                'erro': f'Variáveis faltando: {", ".join(vars_faltando)}',
+                'vars_encontradas': {k: v[:20] + '...' if v and len(v) > 20 else v for k, v in vars_necessarias.items()}
+            }), 400
         
         # Testar com upload de arquivo teste
         import io
-        arquivo_teste = io.BytesIO(b"Teste R2 - JOB Serenus")
+        arquivo_teste = io.BytesIO(b"Teste R2 - JOB Serenus - " + str(datetime.now()).encode())
         resultado = upload_arquivo_r2(arquivo_teste, "teste/test.txt")
         
         if resultado['ok']:
             url = gerar_url_r2("teste/test.txt")
             return jsonify({
                 'ok': True,
-                'msg': 'Conexão R2 ✅',
-                'account_id': os.environ.get('R2_ACCOUNT_ID'),
-                'bucket': os.environ.get('R2_BUCKET_NAME'),
-                'endpoint': os.environ.get('R2_ENDPOINT'),
+                'msg': '✅ Conexão R2 funcionando!',
+                'account_id': vars_necessarias['R2_ACCOUNT_ID'],
+                'bucket': vars_necessarias['R2_BUCKET_NAME'],
+                'endpoint': vars_necessarias['R2_ENDPOINT'],
                 'arquivo_teste': 'teste/test.txt',
                 'url': url
             })
         else:
             return jsonify({
                 'ok': False,
-                'erro': resultado.get('erro', 'Erro desconhecido')
+                'erro': resultado.get('erro', 'Erro desconhecido'),
+                'vars_config': {k: v[:30] + '...' if v and len(v) > 30 else v for k, v in vars_necessarias.items()}
             }), 500
     except Exception as e:
+        app.logger.error(f"[R2 TEST] Exception: {e}")
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
 @app.route('/admin/testar-smtp')
