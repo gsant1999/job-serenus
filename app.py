@@ -513,18 +513,15 @@ def init_db():
         # MIGRAÇÃO: Adicionar coluna motivo_exclusao se não existir
         try:
             if is_pg:
-                cur.execute("""
-                    ALTER TABLE propostas ADD COLUMN motivo_exclusao TEXT DEFAULT NULL;
-                """)
+                cur.execute("ALTER TABLE propostas ADD COLUMN motivo_exclusao TEXT DEFAULT NULL")
             else:
-                cur.execute("""
-                    ALTER TABLE propostas ADD COLUMN motivo_exclusao TEXT DEFAULT NULL
-                """)
+                cur.execute("ALTER TABLE propostas ADD COLUMN motivo_exclusao TEXT DEFAULT NULL")
             conn.commit()
             app.logger.info("[INIT_DB] ✅ Coluna motivo_exclusao adicionada")
         except Exception as e:
-            # Coluna já existe, normal
-            pass
+            # Coluna já existe, faz ROLLBACK
+            conn.rollback()
+            app.logger.info(f"[INIT_DB] ℹ️ motivo_exclusao já existe ou erro menor: {e}")
         
         # GARANTIR que recebimento existe
         try:
