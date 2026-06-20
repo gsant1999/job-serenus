@@ -244,7 +244,7 @@ class _ConnCompat:
         try: self._conn.rollback()
         except Exception: pass
     def close(self):
-        try: self._close_db(conn)
+        try: self._conn.close()
         except Exception: pass
     @property
     def raw(self): return self._conn
@@ -260,7 +260,10 @@ def db():
             raw.autocommit = False
             return _ConnCompat(raw)
         except Exception as e:
-            print(f"[DB] ⚠️ Postgres indisponível ({e}); usando SQLite como rede de segurança")
+            import traceback
+            print(f"\n🔴🔴🔴 [DB] FALLBACK SQLITE! Postgres falhou: {e}")
+            print(f"[DB] Traceback:\n{traceback.format_exc()}")
+            print(f"[DB] SQLite path: {DB}")
             return _sqlite_conn()
     return _sqlite_conn()
 
@@ -272,7 +275,10 @@ def _sqlite_conn():
 def close_db(conn):
     """Fecha a conexão (cada requisição abre/fecha a sua — sem pool)."""
     try:
-        close_db(conn)
+        if hasattr(conn, '_conn'):
+            conn._conn.close()
+        else:
+            conn.close()
     except Exception:
         pass
 
@@ -1013,22 +1019,13 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
     plano = _plano_from_modalidade(modalidade, tipo_pessoa)
 
     # ─── 1) Recebimento da corretora (mensalidades) ───
-    if DB_MODE == 'postgres':
+    receb = conn.execute(
+        "SELECT total FROM recebimento WHERE operadora=? AND obs=? AND plano=?",
+        (op_nome, op_obs, plano)).fetchone()
+    if not receb:
         receb = conn.execute(
-            "SELECT total FROM recebimento WHERE operadora=%s AND obs=%s AND plano=%s",
-            (op_nome, op_obs, plano)).fetchone()
-        if not receb:
-            receb = conn.execute(
-                "SELECT total FROM recebimento WHERE operadora=%s AND plano=%s ORDER BY (CASE WHEN obs='' THEN 0 ELSE 1 END) LIMIT 1",
-                (op_nome, plano)).fetchone()
-    else:
-        receb = conn.execute(
-            "SELECT total FROM recebimento WHERE operadora=? AND obs=? AND plano=?",
-            (op_nome, op_obs, plano)).fetchone()
-        if not receb:
-            receb = conn.execute(
-                "SELECT total FROM recebimento WHERE operadora=? AND plano=? ORDER BY (obs='') DESC LIMIT 1",
-                (op_nome, plano)).fetchone()
+            "SELECT total FROM recebimento WHERE operadora=? AND plano=? ORDER BY (obs='') DESC LIMIT 1",
+            (op_nome, plano)).fetchone()
     receb_mens = float(receb['total']) if receb else 0.0
     total_corretora = round(valor * receb_mens, 2)
 
@@ -1051,22 +1048,13 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
         nivel = regime_base if regime_base in ('n1', 'n2', 'n3') else _nivel_por_producao(prod_acumulada, conn)
 
     # ─── 3) Repasse ao corretor (mensalidades + régua) ───
-    if DB_MODE == 'postgres':
+    rep = conn.execute(
+        "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND obs=? AND plano=? AND modelo=? AND nivel=?",
+        (op_nome, op_obs, plano, modelo, nivel)).fetchone()
+    if not rep:
         rep = conn.execute(
-            "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=%s AND obs=%s AND plano=%s AND modelo=%s AND nivel=%s",
-            (op_nome, op_obs, plano, modelo, nivel)).fetchone()
-        if not rep:
-            rep = conn.execute(
-                "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=%s AND plano=%s AND modelo=%s AND nivel=%s ORDER BY (CASE WHEN obs='' THEN 0 ELSE 1 END) LIMIT 1",
-                (op_nome, plano, modelo, nivel)).fetchone()
-    else:
-        rep = conn.execute(
-            "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND obs=? AND plano=? AND modelo=? AND nivel=?",
-            (op_nome, op_obs, plano, modelo, nivel)).fetchone()
-        if not rep:
-            rep = conn.execute(
-                "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND plano=? AND modelo=? AND nivel=? ORDER BY (obs='') DESC LIMIT 1",
-                (op_nome, plano, modelo, nivel)).fetchone()
+            "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND plano=? AND modelo=? AND nivel=? ORDER BY (obs='') DESC LIMIT 1",
+            (op_nome, plano, modelo, nivel)).fetchone()
     rep_mens = float(rep['total']) if rep else 0.0
     regua_str = (rep['regua'] if rep and rep['regua'] else '') or ''
     taxa = int(rep['taxa']) if rep and rep['taxa'] is not None else 0
