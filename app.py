@@ -1739,6 +1739,51 @@ def testar_smtp():
         resultado['erro'] = str(e)
     return jsonify(resultado)
 
+@app.route('/admin/emergency/diag-anexos')
+@login_required
+@admin_required
+def diag_anexos():
+    """Diagnóstico: mostra o que está no disco vs o que o banco espera."""
+    import os
+    # Lista arquivos físicos no UPLOAD_FOLDER
+    arquivos_disco = []
+    try:
+        arquivos_disco = sorted(os.listdir(UPLOAD_FOLDER))
+    except Exception as e:
+        arquivos_disco = [f"ERRO ao listar: {e}"]
+
+    # Cruza com o que o banco aponta
+    conn = db()
+    props = conn.execute("SELECT id, razao_social, comprovante_boleto, contrato_arquivo, anexos FROM propostas ORDER BY id").fetchall()
+    close_db(conn)
+
+    detalhe = []
+    for p in props:
+        itens = []
+        for campo in ('comprovante_boleto', 'contrato_arquivo'):
+            nome = p[campo]
+            if nome:
+                caminho = os.path.join(UPLOAD_FOLDER, os.path.basename(nome))
+                itens.append({"campo": campo, "nome": nome, "existe_no_disco": os.path.exists(caminho)})
+        try:
+            extras = json.loads(p['anexos']) if p['anexos'] else []
+        except Exception:
+            extras = []
+        for nome in extras:
+            if nome:
+                caminho = os.path.join(UPLOAD_FOLDER, os.path.basename(nome))
+                itens.append({"campo": "anexo_extra", "nome": nome, "existe_no_disco": os.path.exists(caminho)})
+        if itens:
+            detalhe.append({"proposta_id": p['id'], "cliente": p['razao_social'], "anexos": itens})
+
+    return jsonify({
+        "upload_folder": UPLOAD_FOLDER,
+        "upload_folder_existe": os.path.isdir(UPLOAD_FOLDER),
+        "total_arquivos_no_disco": len([a for a in arquivos_disco if not a.startswith('ERRO')]),
+        "arquivos_no_disco": arquivos_disco,
+        "propostas_com_anexos": detalhe,
+    })
+
 @app.route('/admin/emergency/status')
 @login_required
 @admin_required
