@@ -1418,6 +1418,80 @@ def asaas_teste():
     return jsonify({"ok": False, "erro": data.get('_erro') or data.get('errors') or data, "status": status}), 400
 
 
+@app.route('/api/caixa-empresa')
+@login_required
+@admin_required
+def api_caixa_empresa():
+    """Consolida dados financeiros da conta Asaas: saldo, extrato e resumo de cobranças.
+    Somente leitura. Usado pelo Caixa da Empresa no fluxo de caixa."""
+    if not asaas_configurado():
+        return jsonify({"ok": False, "erro": "Asaas não configurado (defina ASAAS_API_KEY no Railway)."}), 400
+
+    resultado = {"ok": True, "ambiente": "produção" if "api.asaas.com" in ASAAS_BASE_URL else "sandbox"}
+
+    # 1) Saldo atual da conta
+    saldo_data, st = asaas_request('GET', '/finance/balance')
+    resultado['saldo'] = saldo_data.get('balance', 0) if st == 200 else None
+    if st != 200:
+        resultado['saldo_erro'] = saldo_data.get('_erro') or saldo_data.get('errors')
+
+    # 2) Extrato financeiro (entradas e saídas) — últimos lançamentos
+    #    Filtro opcional por período via query string (?inicio=YYYY-MM-DD&fim=YYYY-MM-DD)
+    inicio = request.args.get('inicio', '')
+    fim = request.args.get('fim', '')
+    q_ext = '/financialTransactions?limit=50&order=desc'
+    if inicio: q_ext += f'&startDate={inicio}'
+    if fim:    q_ext += f'&finishDate={fim}'
+    ext_data, st_ext = asaas_request('GET', q_ext)
+    extrato = []
+    if st_ext == 200 and isinstance(ext_data.get('data'), list):
+        for t in ext_data['data']:
+            extrato.append({
+                'data': t.get('date', ''),
+                'valor': t.get('value', 0),
+                'saldo': t.get('balance', 0),
+                'tipo': t.get('type', ''),
+                'descricao': t.get('description', '') or _traduz_tipo_asaas(t.get('type', '')),
+            })
+    else:
+        resultado['extrato_erro'] = ext_data.get('_erro') or ext_data.get('errors')
+    resultado['extrato'] = extrato
+
+    # 3) Resumo de cobranças: total recebido, pendente, vencido
+    hoje = datetime.now(TZ_SP).strftime('%Y-%m-%d')
+    recebidas, st1 = asaas_request('GET', '/payments?status=RECEIVED&limit=1')
+    confirmadas, st2 = asaas_request('GET', '/payments?status=CONFIRMED&limit=1')
+    pendentes, st3 = asaas_request('GET', '/payments?status=PENDING&limit=1')
+    vencidas, st4 = asaas_request('GET', '/payments?status=OVERDUE&limit=1')
+    resultado['cobrancas'] = {
+        'recebidas_qtd': recebidas.get('totalCount', 0) if st1 == 200 else 0,
+        'confirmadas_qtd': confirmadas.get('totalCount', 0) if st2 == 200 else 0,
+        'pendentes_qtd': pendentes.get('totalCount', 0) if st3 == 200 else 0,
+        'vencidas_qtd': vencidas.get('totalCount', 0) if st4 == 200 else 0,
+    }
+
+    return jsonify(resultado)
+
+
+def _traduz_tipo_asaas(tipo):
+    """Traduz o tipo de transação financeira do Asaas para português."""
+    mapa = {
+        'PAYMENT_RECEIVED': 'Cobrança recebida',
+        'PAYMENT_CONFIRMED': 'Cobrança confirmada',
+        'TRANSFER': 'Transferência enviada',
+        'PIX_TRANSACTION_DEBIT': 'PIX enviado',
+        'PIX_TRANSACTION_CREDIT': 'PIX recebido',
+        'BANK_SLIP_FEE': 'Taxa de boleto',
+        'TRANSFER_FEE': 'Taxa de transferência',
+        'PAYMENT_FEE': 'Taxa de cobrança',
+        'REFUND': 'Estorno',
+        'CHARGEBACK': 'Chargeback',
+        'CREDIT': 'Crédito',
+        'DEBIT': 'Débito',
+    }
+    return mapa.get(tipo, tipo.replace('_', ' ').title() if tipo else 'Lançamento')
+
+
 @app.route('/admin/emergency/fix-recebimento', methods=['GET', 'POST'])
 @login_required
 @admin_required
