@@ -1623,7 +1623,13 @@ def corrigir_operadoras():
                 u = conn.execute("SELECT regime_base FROM usuarios WHERE id=?", (p['usuario_id'],)).fetchone()
                 regime = (u['regime_base'] if u else None) or 'sem_lead_sem_fixo'
                 tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
-                c = calc_comissao(nova_op, regime, p['valor'] or 0, p['valor'] or 0, p['modalidade'], tp)
+                # Produção acumulada do mês (igual ao recálculo oficial) para nível correto
+                ma = (p['criado_em'] or '')[:7]
+                prod_antes = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM propostas
+                    WHERE usuario_id=? AND substr(criado_em,1,7)=? AND id<>?""",
+                    (p['usuario_id'], ma, pid)).fetchone()['v']
+                prod_acum = prod_antes + (p['valor'] or 0)
+                c = calc_comissao(nova_op, regime, prod_acum, p['valor'] or 0, p['modalidade'], tp)
                 conn.execute("""UPDATE propostas SET comissao_total_corretora=?, comissao_consultor=?,
                     comissao_corretora_liquida=?, regime_aplicado=?, num_parcelas=?, distribuicao_parcelas=? WHERE id=?""",
                     (c['total_corretora'], c['consultor'], c['liquido'], c['codigo'],
