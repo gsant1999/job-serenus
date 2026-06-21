@@ -525,6 +525,18 @@ def init_db():
                 valor_depois TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS solicitacoes_edicao (
+                id SERIAL PRIMARY KEY,
+                proposta_id INTEGER NOT NULL,
+                usuario_id INTEGER NOT NULL,
+                usuario_nome TEXT,
+                alteracoes TEXT,
+                status TEXT DEFAULT 'Pendente',
+                motivo_recusa TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                resolvido_em TIMESTAMP,
+                resolvido_por TEXT
+            )""",
             """CREATE TABLE IF NOT EXISTS operadoras (
                 id SERIAL PRIMARY KEY,
                 operadora TEXT UNIQUE NOT NULL,
@@ -787,6 +799,18 @@ def init_db():
             evento_id TEXT UNIQUE,
             evento TEXT,
             processado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS solicitacoes_edicao (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposta_id INTEGER NOT NULL,
+            usuario_id INTEGER NOT NULL,
+            usuario_nome TEXT,
+            alteracoes TEXT,
+            status TEXT DEFAULT 'Pendente',
+            motivo_recusa TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            resolvido_em TIMESTAMP,
+            resolvido_por TEXT
         );
         """)
     
@@ -2679,7 +2703,25 @@ def ver_proposta(pid):
     for c in campos_def:
         if c['nome_tecnico'] in extras and extras[c['nome_tecnico']]:
             extras_view.append({'label': c['label'], 'valor': extras[c['nome_tecnico']]})
-    return render_template('detalhe.html', p=p, parcelas=parcelas, regime=regime, extras=extras_view)
+    # Valores atuais dos campos editáveis (para preencher o formulário de edição)
+    valores_edit = {}
+    for campo in CAMPOS_EDITAVEIS.keys():
+        valores_edit[campo] = (p[campo] if campo in p.keys() else '') or ''
+
+    # Solicitação de edição pendente (para o admin ver e aprovar/recusar)
+    solic_pendente = None
+    if session.get('perfil') == 'admin':
+        sp = conn2 = db()
+        row = conn2.execute("SELECT * FROM solicitacoes_edicao WHERE proposta_id=? AND status='Pendente' ORDER BY criado_em DESC LIMIT 1", (pid,)).fetchone()
+        close_db(conn2)
+        if row:
+            solic_pendente = dict(row)
+            try: solic_pendente['alteracoes_parsed'] = json.loads(row['alteracoes']) if row['alteracoes'] else {}
+            except Exception: solic_pendente['alteracoes_parsed'] = {}
+
+    return render_template('detalhe.html', p=p, parcelas=parcelas, regime=regime, extras=extras_view,
+                           campos_secoes=CAMPOS_EDIT_SECOES, valores_edit=valores_edit,
+                           solic_pendente=solic_pendente)
 
 @app.route('/proposta/<int:pid>/consultor', methods=['POST'])
 @login_required
@@ -3366,20 +3408,55 @@ def api_produtos():
     close_db(conn)
     return jsonify([dict(r) for r in rows])
 
-# ─── EDITAR PROPOSTA + TIMELINE (só admin) ────────────────────────────────────────
-CAMPOS_EDITAVEIS = {
-    'razao_social':'Razão social','cnpj':'CNPJ','cpf_titular':'CPF do titular','produto':'Produto',
-    'adm_operadora':'Operadora','valor':'Valor','vigencia':'Vigência','dia_vencimento':'Dia vencimento',
-    'fator_moderador':'Coparticipação','acomodacao':'Acomodação','total_vidas':'Vidas',
-    'data_nasc_titular':'Nascimento do titular','observacoes':'Observações','fase':'Fase',
-    'email_resp_contrato':'E-mail contato','tel_resp_contrato':'Telefone contato',
-    'tem_repique':'Repique','repique_json':'Dados do repique',
-}
+# ─── EDITAR PROPOSTA + TIMELINE ───────────────────────────────────────────────────
+# Campos editáveis organizados por seção (usado no modal de edição completa).
+# 'tipo' define o input no front: text, number, date, money, select, textarea.
+CAMPOS_EDIT_SECOES = [
+    {'secao': 'Cliente', 'campos': [
+        {'k': 'razao_social',       'label': 'Razão social / Nome',   'tipo': 'text'},
+        {'k': 'cnpj',               'label': 'CNPJ',                   'tipo': 'text'},
+        {'k': 'cpf_titular',        'label': 'CPF do titular',        'tipo': 'text'},
+        {'k': 'data_nasc_titular',  'label': 'Nascimento do titular', 'tipo': 'date'},
+        {'k': 'total_vidas',        'label': 'Total de vidas',        'tipo': 'number'},
+        {'k': 'titular_dependentes','label': 'Titular + dependentes', 'tipo': 'text'},
+    ]},
+    {'secao': 'Plano', 'campos': [
+        {'k': 'adm_operadora',  'label': 'Operadora',        'tipo': 'text'},
+        {'k': 'produto',        'label': 'Produto / Plano',  'tipo': 'text'},
+        {'k': 'modalidade',     'label': 'Modalidade',       'tipo': 'text'},
+        {'k': 'tipo_pessoa',    'label': 'Tipo de pessoa',   'tipo': 'select', 'opcoes': ['PF','PJ']},
+        {'k': 'tipo_contrato',  'label': 'Tipo de contrato', 'tipo': 'text'},
+        {'k': 'acomodacao',     'label': 'Acomodação',       'tipo': 'text'},
+        {'k': 'fator_moderador','label': 'Coparticipação',   'tipo': 'text'},
+    ]},
+    {'secao': 'Valores e Datas', 'campos': [
+        {'k': 'valor',          'label': 'Valor (mensalidade)', 'tipo': 'money'},
+        {'k': 'vigencia',       'label': 'Vigência',            'tipo': 'date'},
+        {'k': 'dia_vencimento', 'label': 'Dia de vencimento',   'tipo': 'number'},
+        {'k': 'numero_proposta','label': 'Número da proposta',  'tipo': 'text'},
+    ]},
+    {'secao': 'Responsável pelo contrato', 'campos': [
+        {'k': 'resp_contrato',       'label': 'Nome',     'tipo': 'text'},
+        {'k': 'email_resp_contrato', 'label': 'E-mail',   'tipo': 'text'},
+        {'k': 'tel_resp_contrato',   'label': 'Telefone', 'tipo': 'text'},
+    ]},
+    {'secao': 'Responsável pela negociação', 'campos': [
+        {'k': 'resp_negociacao',       'label': 'Nome',     'tipo': 'text'},
+        {'k': 'email_resp_negociacao', 'label': 'E-mail',   'tipo': 'text'},
+        {'k': 'tel_resp_negociacao',   'label': 'Telefone', 'tipo': 'text'},
+    ]},
+    {'secao': 'Observações', 'campos': [
+        {'k': 'observacoes', 'label': 'Observações', 'tipo': 'textarea'},
+    ]},
+]
+# Mapa plano {campo: label} derivado das seções (compatível com código existente).
+CAMPOS_EDITAVEIS = {c['k']: c['label'] for s in CAMPOS_EDIT_SECOES for c in s['campos']}
+
 @app.route('/proposta/<int:pid>/editar', methods=['POST'])
 @login_required
 @admin_required
 def proposta_editar(pid):
-    """Edição completa de propostas — todos os campos."""
+    """Edição completa de propostas — todos os campos (admin)."""
     d = request.json or {}
     conn = db()
     p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
@@ -3465,6 +3542,128 @@ def proposta_editar(pid):
     
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "mudou": mudou})
+
+
+# ─── SOLICITAÇÃO DE EDIÇÃO (consultor pede, admin aprova) ─────────────────────────
+@app.route('/proposta/<int:pid>/solicitar-edicao', methods=['POST'])
+@login_required
+def solicitar_edicao(pid):
+    """Consultor envia pedido de alteração; fica Pendente até o admin decidir."""
+    d = request.json or {}
+    alteracoes = d.get('alteracoes') or {}   # {campo: novo_valor}
+    if not alteracoes:
+        return jsonify({"ok": False, "msg": "Nenhuma alteração informada."}), 400
+
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn); return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    # Consultor só solicita nas próprias propostas; admin pode editar direto (não usa isto)
+    if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False, "msg": "Sem permissão"}), 403
+
+    # Monta diff legível: só campos que realmente mudam
+    diff = {}
+    for campo, novo in alteracoes.items():
+        if campo not in CAMPOS_EDITAVEIS:
+            continue
+        atual = p[campo] if campo in p.keys() else ''
+        if str(atual or '') != str(novo or ''):
+            diff[campo] = {'label': CAMPOS_EDITAVEIS[campo], 'de': str(atual or '—'), 'para': str(novo or '—'), 'valor': novo}
+    if not diff:
+        close_db(conn); return jsonify({"ok": False, "msg": "Os valores enviados são iguais aos atuais."}), 400
+
+    # Evita duplicar pedido pendente para a mesma proposta
+    ja = conn.execute("SELECT id FROM solicitacoes_edicao WHERE proposta_id=? AND status='Pendente'", (pid,)).fetchone()
+    if ja:
+        close_db(conn); return jsonify({"ok": False, "msg": "Já existe uma solicitação pendente para esta proposta. Aguarde o admin avaliar."}), 400
+
+    conn.execute("""INSERT INTO solicitacoes_edicao (proposta_id,usuario_id,usuario_nome,alteracoes,status,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','consultor'),
+        json.dumps(diff, ensure_ascii=False), 'Pendente', datetime.now(TZ_SP)))
+    # Registra no histórico da proposta
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+        VALUES (?,?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','consultor'),
+        'solicitacao_edicao', '', f"{len(diff)} campo(s) solicitado(s) para alteração", datetime.now(TZ_SP)))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": f"Solicitação enviada ({len(diff)} alteração(ões)). O administrador vai avaliar."})
+
+
+@app.route('/admin/solicitacoes-edicao')
+@login_required
+@admin_required
+def listar_solicitacoes():
+    """Lista solicitações de edição pendentes (admin)."""
+    conn = db()
+    rows = conn.execute("""SELECT se.*, p.razao_social
+        FROM solicitacoes_edicao se JOIN propostas p ON p.id=se.proposta_id
+        WHERE se.status='Pendente' ORDER BY se.criado_em DESC""").fetchall()
+    close_db(conn)
+    out = []
+    for r in rows:
+        d = dict(r)
+        try: d['alteracoes_parsed'] = json.loads(r['alteracoes']) if r['alteracoes'] else {}
+        except Exception: d['alteracoes_parsed'] = {}
+        out.append(d)
+    return jsonify({"ok": True, "solicitacoes": out, "total": len(out)})
+
+
+@app.route('/admin/solicitacao-edicao/<int:sid>/resolver', methods=['POST'])
+@login_required
+@admin_required
+def resolver_solicitacao(sid):
+    """Admin aprova (aplica as mudanças) ou recusa uma solicitação."""
+    d = request.json or {}
+    acao = d.get('acao')  # 'aprovar' | 'recusar'
+    motivo = (d.get('motivo') or '').strip()
+
+    conn = db()
+    s = conn.execute("SELECT * FROM solicitacoes_edicao WHERE id=?", (sid,)).fetchone()
+    if not s:
+        close_db(conn); return jsonify({"ok": False, "msg": "Solicitação não encontrada"}), 404
+    if s['status'] != 'Pendente':
+        close_db(conn); return jsonify({"ok": False, "msg": "Esta solicitação já foi resolvida."}), 400
+
+    pid = s['proposta_id']
+    try: alteracoes = json.loads(s['alteracoes']) if s['alteracoes'] else {}
+    except Exception: alteracoes = {}
+
+    if acao == 'aprovar':
+        p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+        NUMERICOS = {'valor','total_vidas','dia_vencimento'}
+        aplicados = []
+        for campo, info in alteracoes.items():
+            if campo not in CAMPOS_EDITAVEIS:
+                continue
+            novo = info.get('valor') if isinstance(info, dict) else info
+            if campo in NUMERICOS:
+                s_val = str(novo or '').replace('.','').replace(',','.') if campo == 'valor' else str(novo or '')
+                try: novo = float(s_val) if campo == 'valor' else int(s_val or 0)
+                except: novo = 0
+            antes = p[campo] if campo in p.keys() else ''
+            conn.execute(f"UPDATE propostas SET {campo}=? WHERE id=?", (novo, pid))
+            conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+                VALUES (?,?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+                CAMPOS_EDITAVEIS[campo], str(antes or '—'), str(novo or '—'), datetime.now(TZ_SP)))
+            aplicados.append(CAMPOS_EDITAVEIS[campo])
+        conn.execute("""UPDATE solicitacoes_edicao SET status='Aprovada', resolvido_em=?, resolvido_por=? WHERE id=?""",
+            (datetime.now(TZ_SP), session.get('nome','admin'), sid))
+        conn.commit(); close_db(conn)
+        return jsonify({"ok": True, "msg": f"Aprovada. {len(aplicados)} campo(s) atualizado(s): {', '.join(aplicados)}."})
+
+    elif acao == 'recusar':
+        conn.execute("""UPDATE solicitacoes_edicao SET status='Recusada', motivo_recusa=?, resolvido_em=?, resolvido_por=? WHERE id=?""",
+            (motivo or 'Sem motivo informado', datetime.now(TZ_SP), session.get('nome','admin'), sid))
+        conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+            VALUES (?,?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+            'solicitacao_recusada', '', f"Solicitação de edição recusada. {('Motivo: '+motivo) if motivo else ''}", datetime.now(TZ_SP)))
+        conn.commit(); close_db(conn)
+        return jsonify({"ok": True, "msg": "Solicitação recusada."})
+
+    close_db(conn)
+    return jsonify({"ok": False, "msg": "Ação inválida."}), 400
+
 
 @app.route('/proposta/<int:pid>/historico')
 @login_required

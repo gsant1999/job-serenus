@@ -241,6 +241,32 @@
     {% endif %}
   </div>
 
+  <!-- Solicitação de edição pendente (admin) -->
+  {% if solic_pendente %}
+  <div class="card" style="margin-bottom:16px; border:1px solid rgba(245,158,11,.4); background:rgba(245,158,11,.05);">
+    <div class="card-header" style="border-bottom:1px solid rgba(245,158,11,.2);">
+      <h3 style="color:#f59e0b;">Solicitação de alteração pendente</h3>
+      <span style="font-size:11.5px; color:var(--cinza);">por {{ solic_pendente.usuario_nome }}</span>
+    </div>
+    <div class="card-body">
+      <p style="font-size:12.5px; color:var(--cinza); margin-bottom:14px;">O consultor solicitou as seguintes alterações. Revise e decida:</p>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+        {% for campo, info in solic_pendente.alteracoes_parsed.items() %}
+        <div style="display:grid; grid-template-columns:140px 1fr; gap:10px; align-items:center; padding:8px 12px; background:var(--panel-2,#1b1b27); border-radius:7px; font-size:13px;">
+          <div style="font-weight:600; color:var(--texto,#fff);">{{ info.label }}</div>
+          <div><span style="color:#f43f7c; text-decoration:line-through;">{{ info.de }}</span> <span style="color:var(--cinza);">→</span> <span style="color:var(--teal); font-weight:600;">{{ info.para }}</span></div>
+        </div>
+        {% endfor %}
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn" style="flex:1; min-width:140px;" onclick="resolverSolic({{ solic_pendente.id }}, 'aprovar')">Aprovar e aplicar</button>
+        <button class="btn-outline" style="flex:1; min-width:140px; border-color:rgba(244,63,124,.4); color:var(--rosa);" onclick="resolverSolic({{ solic_pendente.id }}, 'recusar')">Recusar</button>
+      </div>
+      <div id="solic-status" style="display:none; margin-top:12px; font-size:12.5px;"></div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Dados da proposta -->
   <div class="card" style="margin-bottom:16px;">
     <div class="card-header">
@@ -252,6 +278,8 @@
         <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirConsultor()">Trocar consultor</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.3); color:var(--rosa);" onclick="abrirEstorno()">Estornar</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.5); color:var(--rosa);" onclick="abrirExclusao()">Excluir</button>
+      </div>{% else %}<div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(31,216,164,.4); color:var(--teal);" onclick="abrirEdicao()">Solicitar alteração</button>
       </div>{% endif %}
     </div>
     <div class="card-body" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
@@ -589,50 +617,52 @@
 
 <!-- Modal editar dados -->
 <div class="modal-overlay" id="modal-edicao">
-  <div class="modal" style="max-width:560px;">
+  <div class="modal" style="max-width:680px; max-height:90vh; overflow-y:auto;">
+    {% if session.perfil == 'admin' %}
     <h3>Editar dados da proposta</h3>
-    <p style="font-size:12px; color:var(--cinza); margin-bottom:14px;">Toda alteração fica registrada na linha do tempo.</p>
-    <div class="form-row form-row-2" style="margin-bottom:10px;">
-      <div class="campo"><label>Razão social</label><input id="ed-razao_social"></div>
-      <div class="campo"><label>Operadora</label><input id="ed-adm_operadora"></div>
-    </div>
-    <div class="form-row form-row-2" style="margin-bottom:10px;">
-      <div class="campo"><label>Produto</label><input id="ed-produto"></div>
-      <div class="campo"><label>Valor (R$)</label><input id="ed-valor"></div>
-    </div>
-    <div class="form-row form-row-2" style="margin-bottom:10px;">
-      <div class="campo"><label>Vigência</label><input id="ed-vigencia" type="date"></div>
-      <div class="campo"><label>Dia vencimento</label><input id="ed-dia_vencimento" type="number" min="1" max="28"></div>
-    </div>
-    <div class="form-row form-row-2" style="margin-bottom:10px;">
-      <div class="campo"><label>Coparticipação</label><input id="ed-fator_moderador"></div>
-      <div class="campo"><label>Vidas</label><input id="ed-total_vidas" type="number"></div>
-    </div>
-    <div class="form-row form-row-2" style="margin-bottom:10px;">
-      <div class="campo"><label>Nascimento do Titular</label><input id="ed-data_nasc_titular" type="date"></div>
-      <div class="campo"><label>CPF do Titular</label><input id="ed-cpf_titular" type="text" placeholder="000.000.000-00"></div>
-    </div>
-    <div class="campo" style="margin-bottom:10px;"><label>Observações</label><textarea id="ed-observacoes" style="min-height:70px;"></textarea></div>
-    <div class="campo" style="margin-bottom:10px;">
-      <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-        <input type="checkbox" id="ed-tem_repique" style="width:16px;height:16px;accent-color:var(--laranja);"> Possui Repique?
-      </label>
-    </div>
-    <div id="wrap-repique" style="display:none; background:var(--panel-2); border-radius:8px; padding:12px; margin-bottom:10px;">
-      <div style="font-size:11px; color:var(--laranja); font-weight:600; margin-bottom:8px;">⚡ Dados do Repique</div>
-      <div class="form-row form-row-2" style="margin-bottom:8px;">
-        <div class="campo"><label>Vida do Repique</label>
-          <select id="ed-repique_tipo">
-            <option value="titular">Titular</option>
-            <option value="dependente">Dependente</option>
+    <p style="font-size:12px; color:var(--cinza); margin-bottom:16px;">Edição completa. Toda alteração fica registrada na linha do tempo.</p>
+    {% else %}
+    <h3>Solicitar alteração</h3>
+    <p style="font-size:12px; color:var(--cinza); margin-bottom:16px;">Altere os campos que precisar. Sua solicitação será enviada ao administrador para aprovação.</p>
+    {% endif %}
+
+    {% for secao in campos_secoes %}
+    <div style="margin-bottom:18px;">
+      <div style="font-size:11px; font-weight:700; color:var(--teal); text-transform:uppercase; letter-spacing:.6px; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid var(--borda);">{{ secao.secao }}</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        {% for c in secao.campos %}
+        <div class="campo" {% if c.tipo == 'textarea' %}style="grid-column:1/-1;"{% endif %}>
+          <label style="font-size:11.5px;">{{ c.label }}</label>
+          {% if c.tipo == 'textarea' %}
+          <textarea id="ed-{{ c.k }}" data-campo="{{ c.k }}" class="ed-field" style="min-height:60px; font-size:13px;">{{ valores_edit[c.k] }}</textarea>
+          {% elif c.tipo == 'select' %}
+          <select id="ed-{{ c.k }}" data-campo="{{ c.k }}" class="ed-field" style="font-size:13px;">
+            <option value="">—</option>
+            {% for op in c.opcoes %}<option value="{{ op }}" {% if valores_edit[c.k]|string == op %}selected{% endif %}>{{ op }}</option>{% endfor %}
           </select>
+          {% elif c.tipo == 'date' %}
+          <input id="ed-{{ c.k }}" data-campo="{{ c.k }}" class="ed-field" type="date" value="{{ valores_edit[c.k] }}" style="font-size:13px;">
+          {% elif c.tipo == 'number' %}
+          <input id="ed-{{ c.k }}" data-campo="{{ c.k }}" class="ed-field" type="number" value="{{ valores_edit[c.k] }}" style="font-size:13px;">
+          {% elif c.tipo == 'money' %}
+          <input id="ed-{{ c.k }}" data-campo="{{ c.k }}" class="ed-field" type="text" value="{{ valores_edit[c.k] }}" placeholder="0,00" style="font-size:13px;">
+          {% else %}
+          <input id="ed-{{ c.k }}" data-campo="{{ c.k }}" class="ed-field" type="text" value="{{ valores_edit[c.k] }}" style="font-size:13px;">
+          {% endif %}
         </div>
-        <div class="campo"><label>Nome</label><input id="ed-repique_nome" placeholder="Nome da vida"></div>
+        {% endfor %}
       </div>
-      <div class="campo"><label>Valor do Repique (R$)</label><input id="ed-repique_valor" type="number" placeholder="0,00" step="0.01"></div>
     </div>
-    <div style="display:flex; gap:10px;">
+    {% endfor %}
+
+    <div id="ed-status" style="display:none; margin-bottom:12px; font-size:12.5px; padding:10px 14px; border-radius:8px;"></div>
+
+    <div style="display:flex; gap:10px; position:sticky; bottom:0; background:var(--modal-bg,#16161f); padding-top:8px;">
+      {% if session.perfil == 'admin' %}
       <button class="btn" style="flex:1;" onclick="salvarEdicao()">Salvar alterações</button>
+      {% else %}
+      <button class="btn" style="flex:1;" onclick="solicitarEdicao()">Enviar solicitação ao admin</button>
+      {% endif %}
       <button class="btn-outline" onclick="document.getElementById('modal-edicao').classList.remove('open')">Cancelar</button>
     </div>
   </div>
@@ -761,34 +791,93 @@ async function carregarTimeline() {
   }).join('');
 }
 carregarTimeline();
+
 function abrirEdicao() {
-  for (const k in P_DADOS) { const el = document.getElementById('ed-'+k); if (el) el.value = P_DADOS[k]; }
+  // Os campos já vêm preenchidos pelo template (value/selected). Só abre o modal.
   document.getElementById('modal-edicao').classList.add('open');
 }
-async function salvarEdicao() {
+
+function _coletarCamposEditados() {
+  // Lê todos os campos .ed-field e retorna {campo: valor}
   const body = {};
-  for (const k in P_DADOS) { const el = document.getElementById('ed-'+k); if (el) body[k] = el.value; }
-  // Repique
-  const cb = document.getElementById('ed-tem_repique');
-  body.tem_repique = cb && cb.checked ? 1 : 0;
-  if (cb && cb.checked) {
-    body.repique_json = JSON.stringify({
-      tipo: document.getElementById('ed-repique_tipo').value,
-      nome: document.getElementById('ed-repique_nome').value,
-      valor: parseFloat(document.getElementById('ed-repique_valor').value || 0)
+  document.querySelectorAll('.ed-field').forEach(el => {
+    const campo = el.dataset.campo;
+    if (campo) body[campo] = el.value;
+  });
+  return body;
+}
+
+function _mostrarStatusEd(msg, tipo) {
+  const s = document.getElementById('ed-status');
+  if (!s) return;
+  s.style.display = 'block';
+  s.textContent = msg;
+  if (tipo === 'err') { s.style.background = 'rgba(244,63,124,.1)'; s.style.color = '#f43f7c'; }
+  else if (tipo === 'ok') { s.style.background = 'rgba(31,216,164,.12)'; s.style.color = 'var(--teal)'; }
+  else { s.style.background = 'var(--panel-2,#1b1b27)'; s.style.color = 'var(--cinza)'; }
+}
+
+async function salvarEdicao() {
+  const body = _coletarCamposEditados();
+  _mostrarStatusEd('Salvando...', 'info');
+  try {
+    const r = await fetch(`/proposta/${PROP_ID}/editar`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const d = await r.json();
+    if (d.ok) {
+      toast(d.mudou && d.mudou.length ? ('Alterado: '+d.mudou.join(', ')) : 'Nada mudou', 'ok');
+      setTimeout(()=>location.reload(), 1000);
+    } else {
+      _mostrarStatusEd(d.msg || 'Erro ao salvar', 'err');
+    }
+  } catch(e) { _mostrarStatusEd('Erro de conexão', 'err'); }
+}
+
+async function solicitarEdicao() {
+  const body = _coletarCamposEditados();
+  _mostrarStatusEd('Enviando solicitação...', 'info');
+  try {
+    const r = await fetch(`/proposta/${PROP_ID}/solicitar-edicao`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({alteracoes: body})
     });
+    const d = await r.json();
+    if (d.ok) {
+      _mostrarStatusEd(d.msg, 'ok');
+      toast(d.msg, 'ok');
+      setTimeout(()=>{ document.getElementById('modal-edicao').classList.remove('open'); }, 1500);
+    } else {
+      _mostrarStatusEd(d.msg || 'Erro ao enviar', 'err');
+    }
+  } catch(e) { _mostrarStatusEd('Erro de conexão', 'err'); }
+}
+
+async function resolverSolic(sid, acao) {
+  let motivo = '';
+  if (acao === 'recusar') {
+    motivo = prompt('Motivo da recusa (opcional):') || '';
   } else {
-    body.repique_json = null;
+    if (!confirm('Aprovar e aplicar essas alterações na proposta?')) return;
   }
-  const r = await fetch(`/proposta/${PROP_ID}/editar`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  const d = await r.json();
-  if (d.ok) {
-    toast(d.mudou.length ? ('✅ Alterado: '+d.mudou.join(', ')) : 'Nada mudou', 'ok');
-    setTimeout(()=>location.reload(), 1200);
-  } else {
-    toast('Erro ao salvar', 'err');
+  const st = document.getElementById('solic-status');
+  if (st) { st.style.display = 'block'; st.style.color = 'var(--cinza)'; st.textContent = 'Processando...'; }
+  try {
+    const r = await fetch(`/admin/solicitacao-edicao/${sid}/resolver`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({acao, motivo})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      toast(d.msg, 'ok');
+      setTimeout(()=>location.reload(), 1000);
+    } else {
+      if (st) { st.style.color = '#f43f7c'; st.textContent = d.msg || 'Erro'; }
+      toast(d.msg || 'Erro', 'err');
+    }
+  } catch(e) {
+    if (st) { st.style.color = '#f43f7c'; st.textContent = 'Erro de conexão'; }
   }
 }
+
 async function abrirConsultor() {
   let modal = document.getElementById('modal-consultor');
   const res = await fetch('/api/consultores');
