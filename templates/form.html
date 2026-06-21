@@ -85,10 +85,17 @@
 
     <div class="form-row form-row-2">
       <div class="campo">
-        <label>Vigência</label>
+        <label>Vigência <span style="color:var(--cinza);font-size:11px;">(data de início do plano)</span></label>
         <input type="date" name="vigencia" required>
         <div class="aviso">Somente mês atual. Retroativas: justificar nas observações.</div>
       </div>
+      <div class="campo">
+        <label>Data de Fechamento <span style="color:var(--cinza);font-size:11px;">(mês da meta comercial)</span></label>
+        <input type="date" name="data_fechamento" id="data_fechamento">
+        <div class="aviso">Deixe em branco para usar o mês atual como meta.</div>
+      </div>
+    </div>
+    <div class="form-row form-row-2">
       <div class="campo">
         <label>Tipo de pessoa</label>
         <select name="tipo_pessoa" id="tipo_pessoa" required onchange="toggleDocs()">

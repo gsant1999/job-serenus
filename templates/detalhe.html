@@ -62,6 +62,24 @@
           <span style="background:rgba(255,255,255,.1); color:#fff; padding:3px 10px; border-radius:5px; font-size:12px;">{{ p.acomodacao }}</span>
           <span style="background:rgba(255,255,255,.1); color:#fff; padding:3px 10px; border-radius:5px; font-size:12px;">{{ p.fator_moderador }}</span>
         </div>
+        <!-- Badges de status -->
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          {% set so = p.status_operacional or 'Aguardando Documentos' %}
+          {% if so == 'Emitida/Ativa' %}
+            <span style="background:#d1fae5; color:#065f46; padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;">Emitida / Ativa</span>
+          {% elif so == 'Em Análise Operadora' %}
+            <span style="background:#dbeafe; color:#1e40af; padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;">Em Análise Operadora</span>
+          {% elif so == 'Suspensa' %}
+            <span style="background:#fef9c3; color:#854d0e; padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;">Suspensa</span>
+          {% elif so == 'Cancelada' %}
+            <span style="background:#fee2e2; color:#991b1b; padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;">Cancelada</span>
+          {% else %}
+            <span style="background:#f1f5f9; color:#475569; padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;">{{ so }}</span>
+          {% endif %}
+          {% if p.estornada %}
+            <span style="background:#fee2e2; color:#991b1b; padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;">Estornada</span>
+          {% endif %}
+        </div>
       </div>
       <div style="text-align:right;">
         <div style="font-family:'Sora',sans-serif; font-size:28px; color:#facc15; font-weight:600;">R$ {{ "%.2f"|format(p.valor)|replace('.',',') }}</div>
@@ -227,7 +245,13 @@
   <div class="card" style="margin-bottom:16px;">
     <div class="card-header">
       <h3>Dados da proposta</h3>
-      {% if session.perfil == 'admin' %}<div style="display:flex; gap:8px; flex-wrap:wrap;"><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEdicao()">Editar dados</button><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEmailAffinity()">E-mail Affinity</button><button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirConsultor()">Editar consultor</button><button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.3); color:var(--rosa);" onclick="abrirEstorno()">Estornar</button></div>{% endif %}
+      {% if session.perfil == 'admin' %}<div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEdicao()">Editar proposta</button>
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEmailAffinity()">Enviar à Affinity</button>
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirConsultor()">Trocar consultor</button>
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.3); color:var(--rosa);" onclick="abrirEstorno()">Estornar</button>
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.5); color:var(--rosa);" onclick="abrirExclusao()">Excluir</button>
+      </div>{% endif %}
     </div>
     <div class="card-body" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
       {% for label, valor in [
@@ -285,39 +309,104 @@
   {% endif %}
 
   <!-- Documentos -->
-  {% if p.contrato_arquivo or p.comprovante_boleto or p.anexos and p.anexos != '[]' %}
-  <div class="card" style="margin-bottom:16px;">
-    <div class="card-header"><h3>Documentos</h3></div>
-    <div class="card-body" style="display:flex; gap:12px; flex-wrap:wrap;">
-      {% if p.contrato_arquivo %}
-      <div style="display:inline-flex; align-items:center; gap:4px;">
-        <a href="/anexos/{{ p.contrato_arquivo }}" target="_blank" class="btn-outline" style="font-size:12.5px;">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          Contrato assinado
-        </a>
-        {% if session.perfil == 'admin' %}<button onclick="excluirAnexo('contrato','')" class="btn-del-anexo" title="Excluir contrato">×</button>{% endif %}
-      </div>
-      {% endif %}
-      {% if p.comprovante_boleto %}
-      <div style="display:inline-flex; align-items:center; gap:4px;">
-        <a href="/anexos/{{ p.comprovante_boleto }}" target="_blank" class="btn-outline" style="font-size:12.5px;">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-          Comprovante 1º boleto
-        </a>
-        {% if session.perfil == 'admin' %}<button onclick="excluirAnexo('comprovante','')" class="btn-del-anexo" title="Excluir comprovante">×</button>{% endif %}
-      </div>
-      {% endif %}
-      {% if p.anexos and p.anexos != '[]' %}
-        {% for arq in p.anexos|from_json %}
-        <div style="display:inline-flex; align-items:center; gap:4px;">
-          <a href="/anexos/{{ arq }}" target="_blank" class="btn-outline" style="font-size:12.5px;">Documento {{ loop.index }}</a>
-          {% if session.perfil == 'admin' %}<button onclick="excluirAnexo('doc','{{ arq }}')" class="btn-del-anexo" title="Excluir documento">×</button>{% endif %}
+  <!-- Documentos -->
+  <div class="card" style="margin-bottom:16px;" id="card-documentos">
+    <div class="card-header">
+      <h3>Documentos</h3>
+      <span style="font-size:11px; color:var(--cinza);">Comprovante e contrato são necessários para enviar à Affinity</span>
+    </div>
+    <div class="card-body">
+
+      <!-- Comprovante de pagamento -->
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--borda); gap:12px; flex-wrap:wrap;" id="row-comprovante">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:8px; height:8px; border-radius:50%; background:{% if p.comprovante_boleto %}#10b981{% else %}#f43f7c{% endif %}; flex-shrink:0;"></div>
+          <div>
+            <div style="font-size:13px; font-weight:500;">Comprovante de pagamento (1º boleto)</div>
+            <div style="font-size:11.5px; color:var(--cinza); margin-top:2px;">
+              {% if p.comprovante_boleto %}
+                Anexado: <a href="/anexos/{{ p.comprovante_boleto }}" target="_blank" style="color:var(--verde);">{{ p.comprovante_boleto.split('_',3)[-1] if '_' in p.comprovante_boleto else p.comprovante_boleto }}</a>
+              {% else %}
+                Pendente — necessário para liberar comissões e enviar à Affinity
+              {% endif %}
+            </div>
+          </div>
         </div>
-        {% endfor %}
+        <div style="display:flex; align-items:center; gap:6px;">
+          <label class="btn-outline" style="font-size:12px; padding:6px 14px; cursor:pointer; {% if p.comprovante_boleto %}opacity:.6;{% endif %}">
+            {% if p.comprovante_boleto %}Substituir{% else %}Anexar{% endif %}
+            <input type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="uploadDoc('comprovante', this)">
+          </label>
+          {% if p.comprovante_boleto and session.perfil == 'admin' %}<button onclick="excluirAnexo('comprovante','')" class="btn-del-anexo" title="Excluir comprovante">×</button>{% endif %}
+        </div>
+      </div>
+
+      <!-- Contrato / proposta assinada -->
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--borda); gap:12px; flex-wrap:wrap;" id="row-contrato">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:8px; height:8px; border-radius:50%; background:{% if p.contrato_arquivo %}#10b981{% else %}#f59e0b{% endif %}; flex-shrink:0;"></div>
+          <div>
+            <div style="font-size:13px; font-weight:500;">Contrato / Proposta assinada</div>
+            <div style="font-size:11.5px; color:var(--cinza); margin-top:2px;">
+              {% if p.contrato_arquivo %}
+                Anexado: <a href="/anexos/{{ p.contrato_arquivo }}" target="_blank" style="color:var(--verde);">{{ p.contrato_arquivo.split('_',3)[-1] if '_' in p.contrato_arquivo else p.contrato_arquivo }}</a>
+              {% else %}
+                Pendente
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <label class="btn-outline" style="font-size:12px; padding:6px 14px; cursor:pointer; {% if p.contrato_arquivo %}opacity:.6;{% endif %}">
+            {% if p.contrato_arquivo %}Substituir{% else %}Anexar{% endif %}
+            <input type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="uploadDoc('contrato', this)">
+          </label>
+          {% if p.contrato_arquivo and session.perfil == 'admin' %}<button onclick="excluirAnexo('contrato','')" class="btn-del-anexo" title="Excluir contrato">×</button>{% endif %}
+        </div>
+      </div>
+
+      <!-- Documentos extras (bordo) -->
+      {% if p.anexos and p.anexos != '[]' %}
+      <div style="padding:12px 0; border-bottom:1px solid var(--borda);">
+        <div style="font-size:12px; font-weight:600; color:var(--cinza); text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px;">Documentos adicionais</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;" id="lista-docs-extras">
+          {% for arq in p.anexos|from_json %}
+          <div style="display:inline-flex; align-items:center; gap:4px;">
+            <a href="/anexos/{{ arq }}" target="_blank" class="btn-outline" style="font-size:12px; padding:5px 12px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              {{ arq.split('_',4)[-1] if arq.count('_') >= 4 else 'Documento ' ~ loop.index }}
+            </a>
+            {% if session.perfil == 'admin' %}<button onclick="excluirAnexo('doc','{{ arq }}')" class="btn-del-anexo" title="Excluir documento">×</button>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
       {% endif %}
+
+      <!-- Adicionar documento extra -->
+      <div style="padding:14px 0 4px; display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:180px;">
+          <div style="font-size:11px; color:var(--cinza); margin-bottom:5px; font-weight:500;">Tipo do documento</div>
+          <select id="tipo-doc-extra" style="font-size:12px; padding:7px 10px; width:100%;">
+            <option value="Contrato Social">Contrato Social / CCMEI</option>
+            <option value="Cartão CNPJ">Cartão CNPJ</option>
+            <option value="RG CPF CNH">RG / CPF / CNH do Titular</option>
+            <option value="RG Dependente">RG / Certidão dos Dependentes</option>
+            <option value="Comprovante Endereco">Comprovante de Endereço</option>
+            <option value="Certidão Casamento">Certidão de Casamento / União Estável</option>
+            <option value="Carta Permanência">Carta de Permanência</option>
+            <option value="Plano Anterior">Comprovante Plano Anterior</option>
+            <option value="Outros">Outros</option>
+          </select>
+        </div>
+        <label class="btn-outline" style="font-size:12px; padding:7px 16px; cursor:pointer; white-space:nowrap;">
+          + Adicionar documento
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="uploadDocExtra(this)">
+        </label>
+      </div>
+
     </div>
   </div>
-  {% endif %}
 
   <!-- Contatos -->
   <div class="card" style="margin-bottom:16px;">
@@ -365,42 +454,88 @@
 
 <!-- Modal estorno -->
 <div class="modal-overlay" id="modal-estorno">
-  <div class="modal" style="max-width:460px;">
-    <h3>Estornar comissão</h3>
-    <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">
-      O sistema aplica a regra da operadora ({{ p.adm_operadora }}): % que estorna e até qual mensalidade. Informe em qual mensalidade o cliente parou de pagar.
+  <div class="modal" style="max-width:420px;">
+    <h3>Confirmar estorno</h3>
+    <p style="font-size:13px; color:var(--cinza); margin-bottom:20px; line-height:1.6;">
+      As parcelas pendentes de receber desta proposta serão canceladas e o status será marcado como estornado. Esta ação não pode ser desfeita.
     </p>
-    <div class="campo" style="margin-bottom:18px;">
-      <label>Cliente parou de pagar na mensalidade nº</label>
-      <input type="number" id="mens-cancelou" min="1" value="1">
-    </div>
     <div style="display:flex; gap:10px;">
-      <button class="btn" style="flex:1; background:var(--rosa);" onclick="confirmarEstorno()">Aplicar estorno</button>
+      <button class="btn" style="flex:1; background:var(--rosa);" onclick="confirmarEstorno()">Confirmar estorno</button>
       <button class="btn-outline" onclick="document.getElementById('modal-estorno').classList.remove('open')">Cancelar</button>
     </div>
   </div>
 </div>
 
-<!-- Modal e-mail Affinity -->
-<div class="modal-overlay" id="modal-email">
-  <div class="modal" style="max-width:640px;">
-    <h3>E-mail para a Affinity</h3>
-    <div class="campo" style="margin-bottom:10px;">
-      <label>Para</label>
-      <input type="text" id="em-dest" style="font-size:12px;">
+<!-- Modal Enviar à plataforma (Affinity / Brevo) -->
+<div class="modal-overlay" id="modal-email-affinity">
+  <div class="modal" style="max-width:700px;max-height:90vh;overflow-y:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <h3 style="margin:0;">Enviar à Affinity — Solicitação de Protocolo</h3>
+      <button class="btn-outline" style="font-size:12px;padding:4px 10px;" onclick="fecharEmailAffinity()">Fechar</button>
     </div>
-    <div class="campo" style="margin-bottom:10px;">
+
+    <!-- Alerta sem documentos -->
+    <div id="ea-aviso-doc" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#92400e;">
+      Atenção: esta proposta não tem documentos anexados. O envio está bloqueado até que ao menos um arquivo seja carregado.
+    </div>
+
+    <!-- Destinatários (info) -->
+    <div style="background:var(--panel-2,#1b1b27);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;line-height:1.8;">
+      <strong>Para:</strong> Pâmela Lima, Kaique Silva, Equipe PL (Affinity)<br>
+      <strong>Cópia:</strong> guilherme@serenuscorretora.com.br
+    </div>
+
+    <!-- Assunto editável -->
+    <div class="campo" style="margin-bottom:12px;">
       <label>Assunto</label>
-      <input type="text" id="em-assunto">
+      <input type="text" id="ea-assunto" style="font-size:13px;">
     </div>
+
+    <!-- Corpo editável -->
+    <div class="campo" style="margin-bottom:12px;">
+      <label>Corpo do e-mail <span style="color:var(--cinza);font-weight:400;font-size:11px;">— edite livremente antes de enviar</span></label>
+      <textarea id="ea-corpo" style="min-height:320px;font-size:13px;line-height:1.7;font-family:monospace;"></textarea>
+    </div>
+
+    <!-- Particularidades do contrato -->
+    <div class="campo" style="margin-bottom:20px;">
+      <label>Particularidades / Regra de carência <span style="color:var(--cinza);font-weight:400;font-size:11px;">— será inserido no final do e-mail</span></label>
+      <textarea id="ea-particularidades" style="min-height:80px;font-size:13px;line-height:1.6;" placeholder="Ex: O grupo possui plano anterior com a Amil. Solicito redução de carência por portabilidade..."></textarea>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn" style="flex:1;min-width:160px;" id="ea-btn-enviar" onclick="enviarEmailAffinity()">Enviar para a Affinity</button>
+      <button class="btn-outline" style="flex:1;min-width:160px;" id="ea-btn-teste" onclick="enviarEmailTeste()">Enviar teste para mim</button>
+      <button class="btn-outline" style="flex:1;min-width:120px;" onclick="copiarEmailAffinity()">Copiar texto</button>
+      <button class="btn-outline" onclick="fecharEmailAffinity()">Cancelar</button>
+    </div>
+    <div id="ea-status" style="margin-top:12px;font-size:12.5px;color:var(--cinza);display:none;"></div>
+  </div>
+</div>
+
+<!-- Modal Excluir proposta (Soft Delete) -->
+<div class="modal-overlay" id="modal-exclusao">
+  <div class="modal" style="max-width:480px;">
+    <h3 style="color:var(--rosa);">Excluir proposta</h3>
+    <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">
+      A proposta sairá dos dashboards e relatórios, e as parcelas pendentes serão canceladas/estornadas. O registro é mantido para auditoria.
+    </p>
     <div class="campo" style="margin-bottom:14px;">
-      <label>Mensagem (edite o que precisar antes de enviar)</label>
-      <textarea id="em-corpo" style="min-height:280px; font-size:13px; line-height:1.5;"></textarea>
+      <label>Motivo da exclusão</label>
+      <select id="exc-motivo">
+        <option value="Cancelado pelo cliente">Cancelado pelo cliente</option>
+        <option value="Recusado pela operadora">Recusado pela operadora</option>
+        <option value="Erro de digitação">Erro de digitação</option>
+        <option value="Outro">Outro</option>
+      </select>
+    </div>
+    <div class="campo" style="margin-bottom:18px;">
+      <label>Detalhe (opcional)</label>
+      <textarea id="exc-detalhe" style="min-height:70px; font-size:13px;" placeholder="Observações adicionais..."></textarea>
     </div>
     <div style="display:flex; gap:10px;">
-      <button class="btn" style="flex:1;" onclick="copiarEmail()">Copiar tudo</button>
-      <button class="btn" style="flex:1;" onclick="abrirNoEmail()">Abrir no e-mail</button>
-      <button class="btn-outline" onclick="document.getElementById('modal-email').classList.remove('open')">Fechar</button>
+      <button class="btn" style="flex:1; background:var(--rosa);" onclick="confirmarExclusao()">Excluir proposta</button>
+      <button class="btn-outline" onclick="document.getElementById('modal-exclusao').classList.remove('open')">Cancelar</button>
     </div>
   </div>
 </div>
@@ -551,11 +686,32 @@ async function carregarTimeline() {
   const r = await fetch(`/proposta/${PROP_ID}/historico`);
   const h = await r.json();
   const c = document.getElementById('timeline'); if (!c) return;
-  if (!h.length) { c.innerHTML = '<span style="color:var(--cinza-2); font-size:13px;">Sem alterações ainda.</span>'; return; }
-  c.innerHTML = h.map(x=>`<div style="display:flex; gap:10px; padding:8px 0; border-bottom:1px solid var(--borda); font-size:12.5px;">
-    <span style="color:var(--cinza-2); white-space:nowrap;">${(x.criado_em||'').slice(0,16)}</span>
-    <span><strong>${x.campo}</strong>: <span style="color:var(--cinza);">${x.valor_antes}</span> → <span style="color:var(--teal);">${x.valor_depois}</span> <span style="color:var(--cinza-2);">(${x.usuario_nome})</span></span>
-  </div>`).join('');
+  if (!h.length) { c.innerHTML = '<span style="color:var(--cinza); font-size:13px;">Sem eventos ainda.</span>'; return; }
+  c.innerHTML = h.map(x => {
+    const nome = x.usuario_nome || 'Sistema';
+    const inicial = nome.charAt(0).toUpperCase();
+    const dt = (x.criado_em||'').slice(0,16).replace('T',' ');
+    // Cor do avatar por tipo
+    const cores = {exclusao:'#f43f7c', plataforma:'#3b82f6', status_operacional:'#f59e0b', comprovante:'#10b981', edicao:'#8b5cf6'};
+    const cor = cores[x.tipo] || '#1fd8a4';
+    // Conteúdo da linha
+    let conteudo = '';
+    if (x.tipo && x.descricao) {
+      conteudo = `<span style="color:var(--cinza)">${x.descricao}</span>`;
+    } else if (x.campo) {
+      conteudo = `<strong>${x.campo}</strong>: <span style="opacity:.7">${x.valor_antes||'—'}</span> → <span style="color:${cor}">${x.valor_depois||'—'}</span>`;
+    } else {
+      conteudo = `<span style="opacity:.7">${x.descricao || '—'}</span>`;
+    }
+    return `
+    <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--borda,rgba(255,255,255,.07));">
+      <div style="width:28px;height:28px;border-radius:50%;background:${cor};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0;">${inicial}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12.5px;">${conteudo}</div>
+        <div style="font-size:11px;color:var(--cinza);margin-top:3px;">${nome} · ${dt}</div>
+      </div>
+    </div>`;
+  }).join('');
 }
 carregarTimeline();
 function abrirEdicao() {
@@ -595,33 +751,174 @@ async function abrirConsultor() {
   modal.classList.add('open');
 }
 function fecharConsultor() { document.getElementById('modal-consultor').classList.remove('open'); }
+// ─── Upload de documentos inline ─────────────────────────────────────────────
+async function uploadDoc(tipo, input) {
+  const file = input.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  const rotaMap = { comprovante: 'comprovante-upload', contrato: 'contrato-upload' };
+  const fieldMap = { comprovante: 'comprovante_boleto', contrato: 'contrato_arquivo' };
+  fd.append(fieldMap[tipo], file);
+
+  toast('Enviando...', 'ok');
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/${rotaMap[tipo]}`, { method: 'POST', body: fd });
+    const d = await res.json();
+    if (d.ok) {
+      toast(d.msg || 'Arquivo salvo', 'ok');
+      setTimeout(() => location.reload(), 900);
+    } else {
+      toast(d.msg || 'Erro ao enviar', 'err');
+    }
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+
+async function uploadDocExtra(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const tipo = document.getElementById('tipo-doc-extra').value;
+  const fd = new FormData();
+  fd.append('documento', file);
+  fd.append('tipo', tipo);
+
+  toast('Enviando documento...', 'ok');
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/doc-upload`, { method: 'POST', body: fd });
+    const d = await res.json();
+    if (d.ok) {
+      toast(d.msg || 'Documento salvo', 'ok');
+      setTimeout(() => location.reload(), 900);
+    } else {
+      toast(d.msg || 'Erro ao enviar', 'err');
+    }
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function abrirEstorno() { document.getElementById('modal-estorno').classList.add('open'); }
+
+// ─── Enviar à plataforma (Affinity / Brevo) ───
+// ─── E-MAIL AFFINITY (unificado) ─────────────────────────────────────────────
 async function abrirEmailAffinity() {
   const res = await fetch(`/proposta/${PROP_ID}/email-affinity`);
   const d = await res.json();
-  if (!d.ok) { toast('Erro ao gerar', 'err'); return; }
-  document.getElementById('em-dest').value = d.destinatarios;
-  document.getElementById('em-assunto').value = d.assunto;
-  document.getElementById('em-corpo').value = d.corpo;
-  document.getElementById('modal-email').classList.add('open');
+  if (!d.ok) { toast('Erro ao montar e-mail', 'err'); return; }
+
+  document.getElementById('ea-assunto').value = d.assunto || '';
+  document.getElementById('ea-corpo').value = d.corpo || '';
+  document.getElementById('ea-particularidades').value = '';
+
+  const aviso = document.getElementById('ea-aviso-doc');
+  const btnEnviar = document.getElementById('ea-btn-enviar');
+  if (d.aviso_anexo) {
+    aviso.style.display = 'block';
+    btnEnviar.disabled = true;
+    btnEnviar.style.opacity = '0.4';
+    btnEnviar.style.cursor = 'not-allowed';
+  } else {
+    aviso.style.display = 'none';
+    btnEnviar.disabled = false;
+    btnEnviar.style.opacity = '1';
+    btnEnviar.style.cursor = '';
+  }
+
+  document.getElementById('ea-status').style.display = 'none';
+  document.getElementById('modal-email-affinity').classList.add('open');
 }
-function copiarEmail() {
-  const txt = `Para: ${document.getElementById('em-dest').value}\nAssunto: ${document.getElementById('em-assunto').value}\n\n${document.getElementById('em-corpo').value}`;
-  navigator.clipboard.writeText(txt).then(()=>toast('E-mail copiado', 'ok'));
+
+function fecharEmailAffinity() {
+  document.getElementById('modal-email-affinity').classList.remove('open');
 }
-function abrirNoEmail() {
-  const dest = document.getElementById('em-dest').value;
-  const assunto = encodeURIComponent(document.getElementById('em-assunto').value);
-  const corpo = encodeURIComponent(document.getElementById('em-corpo').value);
-  window.location.href = `mailto:${dest}?subject=${assunto}&body=${corpo}`;
-}
-async function confirmarEstorno() {
-  const mens = document.getElementById('mens-cancelou').value;
+
+async function enviarEmailTeste() {
+  const assunto = document.getElementById('ea-assunto').value.trim();
+  const corpo   = document.getElementById('ea-corpo').value.trim();
+  const partic  = document.getElementById('ea-particularidades').value.trim();
+  if (!assunto || !corpo) { toast('Preencha assunto e corpo', 'err'); return; }
+
+  const btn = document.getElementById('ea-btn-teste');
+  btn.disabled = true; btn.textContent = 'Enviando teste...';
   try {
-    const res = await fetch(`/proposta/${PROP_ID}/estornar`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mensalidade_cancelou: mens}) });
+    const res = await fetch(`/proposta/${PROP_ID}/enviar-teste`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ assunto, corpo, particularidades: partic })
+    });
+    const d = await res.json();
+    toast(d.msg || (d.ok ? 'Teste enviado' : 'Erro'), d.ok ? 'ok' : 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
+  btn.disabled = false; btn.textContent = 'Enviar teste para mim';
+}
+
+async function enviarEmailAffinity() {
+  const assunto = document.getElementById('ea-assunto').value.trim();
+  const corpo   = document.getElementById('ea-corpo').value.trim();
+  const partic  = document.getElementById('ea-particularidades').value.trim();
+  const status  = document.getElementById('ea-status');
+
+  if (!assunto || !corpo) { toast('Preencha assunto e corpo do e-mail', 'err'); return; }
+
+  const btn = document.getElementById('ea-btn-enviar');
+  btn.disabled = true; btn.textContent = 'Enviando...';
+  status.style.display = 'block'; status.textContent = 'Aguarde, enviando via Brevo...';
+
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/enviar-plataforma`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ assunto, corpo, particularidades: partic })
+    });
+    const d = await res.json();
+    if (d.ok) {
+      toast(d.msg || 'E-mail enviado', 'ok');
+      fecharEmailAffinity();
+      setTimeout(() => location.reload(), 1400);
+    } else {
+      toast(d.msg || 'Falha ao enviar', 'err');
+      status.textContent = d.msg || 'Erro';
+      btn.disabled = false; btn.textContent = 'Enviar para a Affinity';
+    }
+  } catch(e) {
+    toast('Erro de conexão', 'err');
+    btn.disabled = false; btn.textContent = 'Enviar para a Affinity';
+  }
+}
+
+function copiarEmailAffinity() {
+  const assunto = document.getElementById('ea-assunto').value;
+  const corpo   = document.getElementById('ea-corpo').value;
+  const partic  = document.getElementById('ea-particularidades').value;
+  let txt = `Assunto: ${assunto}\n\n${corpo}`;
+  if (partic) txt += `\n\n${partic}`;
+  navigator.clipboard.writeText(txt).then(() => toast('E-mail copiado', 'ok'));
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Exclusão lógica ─────────────────────────────────────────────────────────
+function abrirExclusao() { document.getElementById('modal-exclusao').classList.add('open'); }
+async function confirmarExclusao() {
+  const motivo  = document.getElementById('exc-motivo').value;
+  const detalhe = document.getElementById('exc-detalhe').value;
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/excluir`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({motivo_exclusao: motivo, detalhe_exclusao: detalhe}) });
+    const d = await res.json();
+    if (d.ok) {
+      toast(d.msg || 'Proposta excluída', 'ok');
+      document.getElementById('modal-exclusao').classList.remove('open');
+      setTimeout(() => location.href = '/propostas', 1400);
+    } else { toast(d.msg || 'Falha ao excluir', 'err'); }
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+async function confirmarEstorno() {
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/estornar`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
     const data = await res.json();
-    if (data.ok) { toast(data.info, data.estorna ? 'err' : 'ok'); setTimeout(()=>location.reload(), 1600); }
-    else toast('Erro', 'err');
+    if (data.ok) {
+      document.getElementById('modal-estorno').classList.remove('open');
+      toast(data.msg || 'Estorno aplicado', 'ok');
+      setTimeout(()=>location.reload(), 1400);
+    } else toast(data.msg || 'Erro', 'err');
   } catch(e) { toast('Erro de conexão', 'err'); }
 }
 async function salvarConsultor() {

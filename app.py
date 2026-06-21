@@ -1,3 +1,4 @@
+# HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
 import os, sqlite3, json, hashlib, secrets, re
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort
 from datetime import datetime, timedelta, date
@@ -881,6 +882,15 @@ def init_db():
         ("usuarios", "cpf", "TEXT"),
         ("usuarios", "reset_code", "TEXT"),
         ("usuarios", "reset_expira", "TEXT"),
+        # ─── FASE 1: ERP Backoffice ───
+        ("propostas", "status_operacional", "TEXT DEFAULT 'Aguardando Documentos'"),
+        ("propostas", "mes_meta", "TEXT"),
+        ("propostas", "pendencias_json", "TEXT"),
+        ("propostas", "motivo_exclusao", "TEXT"),
+        ("propostas", "detalhe_exclusao", "TEXT"),
+        ("historico_proposta", "usuario_id", "INTEGER"),
+        ("historico_proposta", "tipo", "TEXT DEFAULT 'edicao'"),
+        ("historico_proposta", "descricao", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -1018,14 +1028,13 @@ def _nivel_por_producao(prod, conn):
 
 
 def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidade='', tipo_pessoa=''):
-    """Motor de comissão — lê de recebimento (corretora) + repasse_corretor (consultor).
-    Tudo em NÚMERO DE MENSALIDADES (1.8 = 1,8 mensalidade = 180%). Sem dividir por 100."""
-    conn = db()  # ✅ Respeita DB_MODE (postgres ou sqlite)
+    """Motor de comissão isolando a regra da Taxa de Adesão."""
+    conn = db()
     valor = float(valor_venda or 0)
     op_nome, op_obs = _split_operadora(operadora)
     plano = _plano_from_modalidade(modalidade, tipo_pessoa)
 
-    # ─── 1) Recebimento da corretora (mensalidades) ───
+    # 1) Recebimento da corretora (mensalidades / resíduo)
     receb = conn.execute(
         "SELECT total FROM recebimento WHERE operadora=? AND obs=? AND plano=?",
         (op_nome, op_obs, plano)).fetchone()
@@ -1036,7 +1045,7 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
     receb_mens = float(receb['total']) if receb else 0.0
     total_corretora = round(valor * receb_mens, 2)
 
-    # ─── GESTOR VENDEDOR: leva 100% da corretora ───
+    # GESTOR VENDEDOR: leva 100% da corretora
     if regime_base == 'gestor_vendedor':
         close_db(conn)
         regua = [receb_mens] if receb_mens else [1.0]
@@ -1046,15 +1055,16 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
             'regua_mens': regua, 'receb_mens': receb_mens, 'rep_mens': receb_mens, 'taxa': 0,
             'valor': valor, 'total_corretora': total_corretora,
             'consultor': total_corretora, 'liquido': 0.0,
+            'aviso': ''
         }
 
-    # ─── 2) Modelo + nível ───
+    # 2) Modelo + nível
     modelo = REGIME_TO_MODELO.get(regime_base, 'sem_lead_sem_fixo')
     nivel = ''
     if modelo == 'com_lead':
         nivel = regime_base if regime_base in ('n1', 'n2', 'n3') else _nivel_por_producao(prod_acumulada, conn)
 
-    # ─── 3) Repasse ao corretor (mensalidades + régua) ───
+    # 3) Repasse ao corretor
     rep = conn.execute(
         "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND obs=? AND plano=? AND modelo=? AND nivel=?",
         (op_nome, op_obs, plano, modelo, nivel)).fetchone()
@@ -1062,33 +1072,40 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
         rep = conn.execute(
             "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND plano=? AND modelo=? AND nivel=? ORDER BY (obs='') DESC LIMIT 1",
             (op_nome, plano, modelo, nivel)).fetchone()
+            
     rep_mens = float(rep['total']) if rep else 0.0
     regua_str = (rep['regua'] if rep and rep['regua'] else '') or ''
     taxa = int(rep['taxa']) if rep and rep['taxa'] is not None else 0
+
+    # ==========================================
+    # --- RAMO ISOLADO: ADESÃO ---
+    # ==========================================
+    if plano == 'ADESAO':
+        # Na Adesão, a corretora recolhe a taxa. O consultor ganha um % apenas sobre essa 1ª mensalidade.
+        consultor = round(valor * rep_mens, 2)
+        # O líquido da corretora = Total de recebíveis da operadora - O que foi pago de taxa pro consultor
+        liquido = round(total_corretora - consultor, 2)
+        close_db(conn)
+        
+        avisos = []
+        if receb_mens == 0: avisos.append(f"Falta RECEBIMENTO: {op_nome} / ADESAO")
+        if rep_mens == 0: avisos.append(f"Falta REPASSE: {op_nome} / ADESAO / {MODELO_NOME.get(modelo, modelo)}")
+        
+        return {
+            'codigo': nivel or modelo, 'modelo': modelo, 'nivel': nivel, 'plano': plano,
+            'num_parcelas': 1, 'dist_corretora': '100',
+            'regua_mens': [rep_mens] if rep_mens else [0.0], 'receb_mens': receb_mens, 'rep_mens': rep_mens, 'taxa': 1,
+            'valor': valor, 'total_corretora': total_corretora,
+            'consultor': consultor, 'liquido': liquido,
+            'aviso': ' · '.join(avisos),
+        }
+
+    # ==========================================
+    # --- RAMO PADRÃO: PME / PF ---
+    # ==========================================
     consultor = round(valor * rep_mens, 2)
     liquido = round(total_corretora - consultor, 2)
 
-    # ─── ADESÃO: parcela única = % cadastrado × taxa de adesão (1 mensalidade) ───
-    # A taxa de adesão cobrada do cliente = 1 mensalidade (= valor da venda).
-    # O JOB gera o boleto e a corretora recolhe a taxa inteira.
-    # O consultor recebe um % cadastrado na tela Repasses (campo total), parcela única.
-    if plano == 'ADESAO':
-        close_db(conn)
-        pct_consultor = rep_mens                          # ex: 0.5 = 50% cadastrado em Repasses
-        consultor_ade = round(valor * pct_consultor, 2)   # ex: 500 × 0.5 = R$ 250
-        liquido_ade   = round(valor - consultor_ade, 2)   # corretora recolhe a taxa toda
-        aviso = '' if pct_consultor > 0 else f"Falta cadastrar % de comissão da ADESÃO em Repasses: {op_nome}"
-        return {
-            'codigo': 'adesao', 'modelo': modelo, 'nivel': '', 'plano': 'ADESAO',
-            'num_parcelas': 1, 'dist_corretora': str(pct_consultor),
-            'regua_mens': [pct_consultor] if pct_consultor else [0.0],
-            'receb_mens': receb_mens, 'rep_mens': pct_consultor, 'taxa': 1,
-            'valor': valor, 'total_corretora': valor,     # corretora recolhe 1 mensalidade
-            'consultor': consultor_ade, 'liquido': liquido_ade,
-            'aviso': aviso,
-        }
-
-    # ─── 4) Régua de parcelas (mensalidades por parcela) ───
     regua = [float(x) for x in regua_str.split(';') if x.strip()]
     if not regua:
         regua = [rep_mens] if rep_mens else [0.0]
@@ -1096,9 +1113,9 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
     close_db(conn)
     avisos = []
     if receb_mens == 0:
-        avisos.append(f"Falta cadastrar o RECEBIMENTO da corretora para {op_nome} / {plano}")
+        avisos.append(f"Falta RECEBIMENTO: {op_nome} / {plano}")
     if rep_mens == 0:
-        avisos.append(f"Falta cadastrar o REPASSE ao corretor para {op_nome} / {plano} / {MODELO_NOME.get(modelo, modelo)}{(' / ' + nivel.upper()) if nivel else ''}")
+        avisos.append(f"Falta REPASSE: {op_nome} / {plano} / {MODELO_NOME.get(modelo, modelo)}{(' / ' + nivel.upper()) if nivel else ''}")
 
     return {
         'codigo': nivel or modelo, 'modelo': modelo, 'nivel': nivel, 'plano': plano,
@@ -1110,14 +1127,15 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
     }
 
 
-def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None):
+def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None, status_override=None):
     """Gera parcelas usando a régua REAL (mensalidades por parcela).
-    Parcela consultor i = valor × regua[i]. Corretora distribuída proporcional à régua."""
+    Parcela consultor i = valor × regua[i]. Corretora distribuída proporcional à régua.
+    status_override: força um status fixo em todas as parcelas (ex: 'Bloqueado - Falta Comprovante')."""
     from dateutil.relativedelta import relativedelta
     try:
-        base = datetime.strptime(vigencia[:7], '%Y-%m') if (vigencia and len(vigencia) >= 7) else datetime.now().replace(day=1)
+        base = datetime.strptime(vigencia[:7], '%Y-%m') if (vigencia and len(vigencia) >= 7) else datetime.now(TZ_SP).replace(day=1)
     except Exception:
-        base = datetime.now().replace(day=1)
+        base = datetime.now(TZ_SP).replace(day=1)
 
     dia = int(dia_vencimento) if dia_vencimento else base.day
     regua = c.get('regua_mens') or [float(x) for x in (c.get('dist_corretora','') or '').split(';') if x.strip()] or [1.0]
@@ -1132,13 +1150,14 @@ def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None):
             data = mes_ref.replace(day=min(dia, 28)).strftime('%Y-%m-%d')
         except Exception:
             data = mes_ref.strftime('%Y-%m-01')
-        val_c = round(valor * mens, 2)                          # consultor nesta parcela
-        val_cor = round(total_cor * (mens / soma_regua), 2)     # corretora proporcional
+        val_c = round(valor * mens, 2)
+        val_cor = round(total_cor * (mens / soma_regua), 2)
         perc = round((mens / soma_regua) * 100, 2)
         parcelas.append({
             'proposta_id': proposta_id, 'numero': i + 1, 'percentual': perc,
             'valor': val_c, 'valor_corretora': val_cor, 'perc_cliente': perc,
-            'data_prevista': data, 'status': 'Pendente de receber',
+            'data_prevista': data,
+            'status': status_override if status_override else 'Pendente de receber',
             'competencia': mes_ref.strftime('%Y-%m'), 'mensalidade_ref': i + 1,
         })
     return parcelas
@@ -1665,7 +1684,7 @@ def testar_r2():
         import io
         
         # Testar upload
-        arquivo_teste = io.BytesIO(b"Teste - " + str(datetime.now()).encode())
+        arquivo_teste = io.BytesIO(b"Teste - " + str(datetime.now(TZ_SP)).encode())
         resultado = upload_arquivo_r2(arquivo_teste, "teste/test.txt")
         
         return jsonify({
@@ -1805,12 +1824,12 @@ def emergency_exportar():
     close_db(conn)
     
     data = {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(TZ_SP).isoformat(),
         "propostas": [dict(p) for p in props],
         "parcelas": [dict(p) for p in parc],
     }
     resp = jsonify(data)
-    resp.headers['Content-Disposition'] = f'attachment; filename="job_emergencia_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json"'
+    resp.headers['Content-Disposition'] = f'attachment; filename="job_emergencia_{datetime.now(TZ_SP).strftime("%Y%m%d_%H%M%S")}.json"'
     return resp
 
 
@@ -1895,7 +1914,7 @@ def webhook_asaas():
                     conn.execute("UPDATE parcelas SET asaas_status=? WHERE id=?", (novo_status, parc['id']))
                     if evento == 'TRANSFER_DONE':
                         conn.execute("""UPDATE parcelas SET status='Pago ao corretor', data_pagamento=? WHERE id=?""",
-                                     (transfer.get('effectiveDate') or datetime.now().strftime('%Y-%m-%d'), parc['id']))
+                                     (transfer.get('effectiveDate') or datetime.now(TZ_SP).strftime('%Y-%m-%d'), parc['id']))
                         conn.execute("""INSERT INTO historico_proposta (proposta_id, usuario_nome, campo, valor_antes, valor_depois)
                                         VALUES (?,?,?,?,?)""",
                                      (parc['proposta_id'], 'Asaas (webhook)', 'Status do pagamento', 'Pendente', 'Pago ao corretor (PIX confirmado)'))
@@ -1971,25 +1990,43 @@ def excluir_anexo(pid):
     return jsonify({"ok": True})
 
 # ─── EMAIL UTILITÁRIO ────────────────────────────────────────────────────────
-def _enviar_email(destinatario, assunto, corpo_html):
+def _enviar_email(destinatario, assunto, corpo_html, cc=None):
     """Envia email via API do Brevo (HTTPS porta 443 — nunca bloqueada pelo Railway).
-    Configure BREVO_API_KEY no Railway. SMTP_USER define o remetente."""
+    Configure BREVO_API_KEY no Railway. SMTP_USER define o remetente.
+    destinatario: string (1 email) ou lista de emails.
+    cc: string ou lista de emails para cópia (opcional)."""
     api_key = os.environ.get('BREVO_API_KEY','')
     remetente = os.environ.get('SMTP_USER','noreply@serenuscorretora.com.br')
 
+    # Normaliza destinatários e cópia para listas
+    if isinstance(destinatario, str):
+        to_list = [e.strip() for e in destinatario.replace(';', ',').split(',') if e.strip()]
+    else:
+        to_list = [e.strip() for e in destinatario if e and e.strip()]
+
+    cc_list = []
+    if cc:
+        if isinstance(cc, str):
+            cc_list = [e.strip() for e in cc.replace(';', ',').split(',') if e.strip()]
+        else:
+            cc_list = [e.strip() for e in cc if e and e.strip()]
+
     if not api_key:
-        print(f"[EMAIL] ⚠️ BREVO_API_KEY não configurada. Assunto: {assunto} → {destinatario}")
+        print(f"[EMAIL] ⚠️ BREVO_API_KEY não configurada. Assunto: {assunto} → {to_list} (cc: {cc_list})")
         return False
 
     def _enviar():
         try:
             import urllib.request, json as _json
-            payload = _json.dumps({
+            corpo_payload = {
                 "sender":  {"name": "JOB Serenus", "email": remetente},
-                "to":      [{"email": destinatario}],
+                "to":      [{"email": e} for e in to_list],
                 "subject": assunto,
                 "htmlContent": corpo_html
-            }).encode('utf-8')
+            }
+            if cc_list:
+                corpo_payload["cc"] = [{"email": e} for e in cc_list]
+            payload = _json.dumps(corpo_payload).encode('utf-8')
             req = urllib.request.Request(
                 "https://api.brevo.com/v3/smtp/email",
                 data=payload,
@@ -2001,13 +2038,9 @@ def _enviar_email(destinatario, assunto, corpo_html):
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
                 status = resp.status
-            print(f"[EMAIL] ✅ Enviado via Brevo API (HTTP {status}): {assunto} → {destinatario}")
+            print(f"[EMAIL] ✅ Enviado via Brevo API (HTTP {status}): {assunto} → {to_list} (cc: {cc_list})")
         except Exception as e:
-            print(f"[EMAIL] ❌ Erro ao enviar para {destinatario}: {e}")
-
-    import threading
-    threading.Thread(target=_enviar, daemon=True).start()
-    return True
+            print(f"[EMAIL] ❌ Erro ao enviar para {to_list}: {e}")
 
     import threading
     threading.Thread(target=_enviar, daemon=True).start()
@@ -2028,7 +2061,7 @@ def esqueci_senha():
         return render_template('esqueci_senha.html', enviado=True)
     import random
     codigo = f"{random.randint(0,999999):06d}"
-    expira = (datetime.now() + timedelta(minutes=15)).isoformat()
+    expira = (datetime.now(TZ_SP) + timedelta(minutes=15)).isoformat()
     conn.execute("UPDATE usuarios SET reset_code=?, reset_expira=? WHERE id=?", (codigo, expira, u['id']))
     conn.commit(); close_db(conn)
     corpo = f"""
@@ -2061,7 +2094,7 @@ def redefinir_senha():
     erro = None
     if not u or u['reset_code'] != codigo:
         erro = 'Código inválido ou e-mail não encontrado.'
-    elif u['reset_expira'] and datetime.fromisoformat(str(u['reset_expira'])) < datetime.now():
+    elif u['reset_expira'] and datetime.fromisoformat(str(u['reset_expira'])) < datetime.now(TZ_SP):
         erro = 'Código expirado. Solicite um novo.'
     elif len(s1) < 6:
         erro = 'Senha deve ter pelo menos 6 caracteres.'
@@ -2131,7 +2164,7 @@ def setup_senha(token):
     u = conn.execute("SELECT * FROM usuarios WHERE token_setup=? AND ativo=1",(token,)).fetchone()
     if not u: close_db(conn); return render_template('setup_senha.html', erro='Link inválido ou já utilizado.')
     expira = datetime.fromisoformat(u['token_expira']) if u['token_expira'] else None
-    if expira and expira < datetime.now(): close_db(conn); return render_template('setup_senha.html', erro='Link expirado.')
+    if expira and expira < datetime.now(TZ_SP): close_db(conn); return render_template('setup_senha.html', erro='Link expirado.')
     if request.method == 'POST':
         s1=request.form.get('senha',''); s2=request.form.get('senha2','')
         if len(s1)<6: close_db(conn); return render_template('setup_senha.html',usuario=u,erro='Mínimo 6 caracteres.')
@@ -2148,44 +2181,66 @@ def dashboard():
     conn = db(); uid = session['user_id']
     if session['perfil'] == 'admin':
         m = {}
-        m['propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
-        m['vidas'] = conn.execute("SELECT COALESCE(SUM(total_vidas),0) v FROM propostas").fetchone()['v']
-        m['producao'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas").fetchone()['v']
-        m['com_bruta'] = conn.execute("SELECT COALESCE(SUM(comissao_total_corretora),0) v FROM propostas").fetchone()['v']
-        m['com_repasse'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas").fetchone()['v']
-        m['com_liquido'] = conn.execute("SELECT COALESCE(SUM(comissao_corretora_liquida),0) v FROM propostas").fetchone()['v']
-        # Fluxo de caixa (parcelas)
-        m['fc_pendente'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM parcelas WHERE status='Pendente de receber'").fetchone()['v']
-        m['fc_caixa'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM parcelas WHERE status='Recebido e não repassado'").fetchone()['v']
-        m['fc_liberado'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM parcelas WHERE status='Liberado para o corretor'").fetchone()['v']
-        m['fc_pago'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM parcelas WHERE status='Pago ao corretor'").fetchone()['v']
+        m['propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas WHERE status != 'Excluída'").fetchone()['c']
+        m['vidas'] = conn.execute("SELECT COALESCE(SUM(total_vidas),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
+        m['producao'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
+        m['com_bruta'] = conn.execute("SELECT COALESCE(SUM(comissao_total_corretora),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
+        m['com_repasse'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
+        m['com_liquido'] = conn.execute("SELECT COALESCE(SUM(comissao_corretora_liquida),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
+        # Fluxo de caixa: apenas propostas Emitida/Ativa (trava financeira)
+        m['fc_pendente'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Pendente de receber' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
+        m['fc_caixa'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Recebido e não repassado' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
+        m['fc_liberado'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Liberado para o corretor' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
+        m['fc_pago'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Pago ao corretor' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
         m['fc_antecip'] = conn.execute("SELECT COUNT(*) c FROM parcelas WHERE status='Antecipação - Aguardando ADM'").fetchone()['c']
-        ultimas = conn.execute("SELECT * FROM propostas ORDER BY id DESC LIMIT 5").fetchall()
+        # Alerta auditoria: propostas que precisam evoluir o status operacional
+        m['auditoria_pendente'] = conn.execute("""SELECT COUNT(*) c FROM propostas
+            WHERE status != 'Excluída' AND status_operacional NOT IN ('Emitida/Ativa')
+            AND status_operacional IS NOT NULL""").fetchone()['c']
+        ultimas = conn.execute("SELECT * FROM propostas WHERE status != 'Excluída' ORDER BY id DESC LIMIT 5").fetchall()
         por_operadora = conn.execute("""SELECT adm_operadora,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
-            FROM propostas GROUP BY adm_operadora ORDER BY valor DESC LIMIT 8""").fetchall()
+            FROM propostas WHERE status != 'Excluída' GROUP BY adm_operadora ORDER BY valor DESC LIMIT 8""").fetchall()
         por_consultor = conn.execute("""SELECT consultor,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,COALESCE(SUM(comissao_consultor),0) com
-            FROM propostas GROUP BY consultor ORDER BY valor DESC""").fetchall()
+            FROM propostas WHERE status != 'Excluída' GROUP BY consultor ORDER BY valor DESC""").fetchall()
         close_db(conn)
         return render_template('dashboard_admin.html', m=m, ultimas=ultimas,
                                por_operadora=por_operadora, por_consultor=por_consultor,
                                ciclo=ciclo_atual())
     else:
         m = {}
-        m['propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas WHERE usuario_id=?",(uid,)).fetchone()['c']
-        m['vidas'] = conn.execute("SELECT COALESCE(SUM(total_vidas),0) v FROM propostas WHERE usuario_id=?",(uid,)).fetchone()['v']
-        m['producao'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=?",(uid,)).fetchone()['v']
-        m['minha_comissao'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE usuario_id=?",(uid,)).fetchone()['v']
-        ma = datetime.now().strftime('%Y-%m')
-        m['mes_propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas WHERE usuario_id=? AND strftime('%Y-%m',criado_em)=?",(uid,ma)).fetchone()['c']
-        m['mes_producao'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=? AND strftime('%Y-%m',criado_em)=?",(uid,ma)).fetchone()['v']
-        m['mes_comissao'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE usuario_id=? AND strftime('%Y-%m',criado_em)=?",(uid,ma)).fetchone()['v']
-        # Saldo do consultor por status de parcelas
+        ma = datetime.now(TZ_SP).strftime('%Y-%m')
+        m['propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas WHERE usuario_id=? AND status != 'Excluída'",(uid,)).fetchone()['c']
+        m['vidas'] = conn.execute("SELECT COALESCE(SUM(total_vidas),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída'",(uid,)).fetchone()['v']
+        m['producao'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída'",(uid,)).fetchone()['v']
+        m['minha_comissao'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída'",(uid,)).fetchone()['v']
+        # mes_meta para metas comerciais (usa coluna mes_meta, não criado_em)
+        m['mes_propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas WHERE usuario_id=? AND status != 'Excluída' AND mes_meta=?",(uid,ma)).fetchone()['c']
+        m['mes_producao'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída' AND mes_meta=?",(uid,ma)).fetchone()['v']
+        m['mes_comissao'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída' AND mes_meta=?",(uid,ma)).fetchone()['v']
+        # Saldo do consultor por status de parcelas (apenas Emitida/Ativa)
         m['a_receber'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
-            JOIN propostas p ON p.id=pa.proposta_id WHERE p.usuario_id=? AND pa.status='Liberado para o corretor'""",(uid,)).fetchone()['v']
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE p.usuario_id=? AND pa.status='Liberado para o corretor' AND p.status_operacional='Emitida/Ativa'""",(uid,)).fetchone()['v']
         m['pago_total'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
             JOIN propostas p ON p.id=pa.proposta_id WHERE p.usuario_id=? AND pa.status='Pago ao corretor'""",(uid,)).fetchone()['v']
         m['antecip_solicitadas'] = conn.execute("""SELECT COUNT(*) c FROM parcelas pa
             JOIN propostas p ON p.id=pa.proposta_id WHERE p.usuario_id=? AND pa.comprovante_antecipacao IS NOT NULL""",(uid,)).fetchone()['c']
+        # Pendências: parcelas bloqueadas por falta de comprovante
+        m['bloqueadas'] = conn.execute("""SELECT COUNT(*) c FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE p.usuario_id=? AND pa.status='Bloqueado - Falta Comprovante'""",(uid,)).fetchone()['c']
+        pendencias_comprovante = conn.execute("""SELECT p.id, p.razao_social, p.adm_operadora, COUNT(pa.id) qtd_bloq
+            FROM propostas p JOIN parcelas pa ON pa.proposta_id=p.id
+            WHERE p.usuario_id=? AND pa.status='Bloqueado - Falta Comprovante'
+            GROUP BY p.id ORDER BY p.id DESC""",(uid,)).fetchall()
         rb = session.get('regime_base')
         if rb == 'com_lead':
             if m['mes_producao'] <= 3000: m['regime_label'] = 'Com Lead — N1 (até R$ 3.000)'
@@ -2197,17 +2252,17 @@ def dashboard():
         if rb == 'com_fixo_lead':
             r = conn.execute("SELECT valor_fixo FROM regimes WHERE codigo='com_fixo_lead'").fetchone()
             m['valor_fixo'] = r['valor_fixo'] if r else 0
-        # Parcelas liberadas aguardando aceite
         pendentes_aceite = conn.execute("""SELECT pa.*, p.razao_social, p.adm_operadora FROM parcelas pa
             JOIN propostas p ON p.id=pa.proposta_id
             WHERE p.usuario_id=? AND pa.status='Liberado para o corretor' AND pa.aceite_corretor=0
             ORDER BY pa.id""",(uid,)).fetchall()
-        ultimas = conn.execute("SELECT * FROM propostas WHERE usuario_id=? ORDER BY id DESC LIMIT 5",(uid,)).fetchall()
+        ultimas = conn.execute("SELECT * FROM propostas WHERE usuario_id=? AND status != 'Excluída' ORDER BY id DESC LIMIT 5",(uid,)).fetchall()
         por_operadora = conn.execute("""SELECT adm_operadora,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
-            FROM propostas WHERE usuario_id=? GROUP BY adm_operadora ORDER BY valor DESC LIMIT 6""",(uid,)).fetchall()
+            FROM propostas WHERE usuario_id=? AND status != 'Excluída' GROUP BY adm_operadora ORDER BY valor DESC LIMIT 6""",(uid,)).fetchall()
         close_db(conn)
         return render_template('dashboard_consultor.html', m=m, ultimas=ultimas,
-                               por_operadora=por_operadora, pendentes_aceite=pendentes_aceite)
+                               por_operadora=por_operadora, pendentes_aceite=pendentes_aceite,
+                               pendencias_comprovante=pendencias_comprovante)
 
 # ─── PROPOSTAS ───────────────────────────────────────────────────────────────────
 @app.route('/nova-proposta')
@@ -2229,7 +2284,7 @@ def salvar_proposta():
             """Salva um único arquivo localmente e retorna o nome ou None."""
             f = request.files.get(file_field)
             if f and f.filename:
-                n = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{prefixo}_{f.filename}"
+                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{prefixo}_{f.filename}"
                 caminho = os.path.join(UPLOAD_FOLDER, n)
                 f.save(caminho)
                 return n
@@ -2239,7 +2294,7 @@ def salvar_proposta():
         nomes = []
         for f in request.files.getlist('anexos'):
             if f and f.filename:
-                n = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_doc_{f.filename}"
+                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_doc_{f.filename}"
                 caminho = os.path.join(UPLOAD_FOLDER, n)
                 f.save(caminho)
                 nomes.append(n)
@@ -2263,12 +2318,19 @@ def salvar_proposta():
         modalidade = d.get('modalidade','')
         regime_base = session.get('regime_base','sem_lead_sem_fixo')
         conn = db(); cur = conn.cursor()
-        ma = datetime.now().strftime('%Y-%m')
+        ma = datetime.now(TZ_SP).strftime('%Y-%m')
         # Produção do mês ANTES desta venda + esta venda = produção que define o nível.
         # (Regra: o nível é o da produção do dia em que a venda subiu, incluindo ela.)
         prod_antes = cur.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=? AND strftime('%Y-%m',criado_em)=?",(session['user_id'],ma)).fetchone()['v']
         prod_acumulada = prod_antes + valor
         c = calc_comissao(operadora, regime_base, prod_acumulada, valor, modalidade, d.get('tipo_pessoa',''))
+        # mes_meta = mês do fechamento (data_fechamento do form, ou mês atual)
+        data_fechamento = d.get('data_fechamento','').strip()
+        mes_meta = data_fechamento[:7] if (data_fechamento and len(data_fechamento) >= 7) else datetime.now(TZ_SP).strftime('%Y-%m')
+
+        # status parcelas: bloqueado se sem comprovante
+        status_parcela_inicial = 'Bloqueado - Falta Comprovante' if not comprovante_arq else 'Pendente de receber'
+
         cur.execute("""INSERT INTO propostas (
             usuario_id,consultor,supervisora_id,proposta_tem_numero,numero_proposta,
             vigencia,modalidade,tipo_pessoa,adm_operadora,produto,razao_social,
@@ -2279,8 +2341,9 @@ def salvar_proposta():
             contatos_adicionais,desc_contatos_adicionais,
             regime_aplicado,num_parcelas,distribuicao_parcelas,
             comissao_total_corretora,comissao_consultor,comissao_corretora_liquida,
-            observacoes,anexos,contrato_arquivo,comprovante_boleto,campos_extras,quem_subiu
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            observacoes,anexos,contrato_arquivo,comprovante_boleto,campos_extras,quem_subiu,
+            mes_meta,status_operacional
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
             session['user_id'],d.get('consultor'),d.get('supervisora_id') or None,
             d.get('proposta_tem_numero'),d.get('numero_proposta'),
             d.get('vigencia'),d.get('modalidade'),d.get('tipo_pessoa'),
@@ -2296,7 +2359,8 @@ def salvar_proposta():
             c['codigo'],c['num_parcelas'],c['dist_corretora'],
             c['total_corretora'],c['consultor'],c['liquido'],
             d.get('observacoes'),json.dumps(nomes),contrato_arq,comprovante_arq,
-            json.dumps(extras, ensure_ascii=False),d.get('quem_subiu','Consultor')
+            json.dumps(extras, ensure_ascii=False),d.get('quem_subiu','Consultor'),
+            mes_meta,'Aguardando Documentos'
         ))
         proposta_id = _last_insert_id(cur)
         dia_venc = d.get('dia_vencimento') or None
@@ -2315,7 +2379,7 @@ def salvar_proposta():
         cur.execute("""UPDATE propostas SET data_nasc_titular=?, dependentes_json=?, tem_repique=?, repique_json=? WHERE id=?""",
             (d.get('data_nasc_titular',''), json.dumps(deps, ensure_ascii=False),
              1 if d.get('tem_repique') else 0, json.dumps(repique, ensure_ascii=False) if repique else None, proposta_id))
-        for parc in gerar_parcelas(proposta_id, d.get('vigencia',''), c, dia_venc):
+        for parc in gerar_parcelas(proposta_id, d.get('vigencia',''), c, dia_venc, status_override=status_parcela_inicial):
             cur.execute("""INSERT INTO parcelas (proposta_id,numero,percentual,valor,valor_corretora,perc_cliente,data_prevista,status,competencia,mensalidade_ref,tipo_origem)
                 VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""", (parc['proposta_id'],parc['numero'],parc['percentual'],
                                           parc['valor'],parc['valor_corretora'],parc['perc_cliente'],
@@ -2337,10 +2401,14 @@ def listar_propostas():
     conn = db(); uid = session['user_id']
     if session['perfil'] == 'admin':
         rows = conn.execute("""SELECT p.*,s.nome as supervisora_nome FROM propostas p
-            LEFT JOIN supervisoras s ON s.id=p.supervisora_id ORDER BY p.id DESC""").fetchall()
+            LEFT JOIN supervisoras s ON s.id=p.supervisora_id
+            WHERE p.status != 'Excluída'
+            ORDER BY p.id DESC""").fetchall()
     else:
         rows = conn.execute("""SELECT p.*,s.nome as supervisora_nome FROM propostas p
-            LEFT JOIN supervisoras s ON s.id=p.supervisora_id WHERE p.usuario_id=? ORDER BY p.id DESC""",(uid,)).fetchall()
+            LEFT JOIN supervisoras s ON s.id=p.supervisora_id
+            WHERE p.usuario_id=? AND p.status != 'Excluída'
+            ORDER BY p.id DESC""",(uid,)).fetchall()
     close_db(conn)
     return render_template('propostas.html', propostas=rows)
 
@@ -2471,40 +2539,100 @@ def get_cfg(chave, default=''):
 @app.route('/proposta/<int:pid>/email-affinity')
 @login_required
 def email_affinity(pid):
-    """Monta o e-mail-padrão de solicitação de protocolo para a Affinity."""
+    """Monta o e-mail completo no padrão Serenus para a Affinity."""
     conn = db()
     p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
     close_db(conn)
     if not p: return jsonify({"ok": False}), 404
-    contato = get_cfg('affinity_contato', 'equipe')
-    dest = get_cfg('affinity_destinatarios', '')
-    rem = get_cfg('affinity_remetente', '')
-    tipo = (p['tipo_pessoa'] or '').upper()
-    doc = (f"CNPJ: {p['cnpj']}" if p['cnpj'] else (f"CPF: {p['cpf_titular']}" if p['cpf_titular'] else ''))
-    alvo = p['razao_social'] or p['cpf_titular'] or 'cliente'
-    vidas = p['total_vidas'] or '—'
-    valor_fmt = f"{(p['valor'] or 0):,.2f}".replace(',','X').replace('.',',').replace('X','.')
-    dia_v = p['dia_vencimento'] or '—'
-    corpo = f"""Olá, {contato}, tudo bem?
 
-Gostaria de solicitar o protocolo de venda referente ao contrato do plano de saúde {p['adm_operadora'] or ''} para {('a empresa ' + alvo) if p['cnpj'] else alvo}{(' - ' + doc) if doc else ''}.
+    # Dados base
+    tipo_pessoa = (p['tipo_pessoa'] or '').upper()
+    eh_empresa = bool(p['cnpj'])
+    nome = p['razao_social'] or p['cpf_titular'] or 'Cliente'
+    operadora = p['adm_operadora'] or '—'
+    plano = p['produto'] or '—'
+    valor_fmt = f"R$ {(p['valor'] or 0):,.2f}".replace(',','X').replace('.',',').replace('X','.')
+    vidas = p['total_vidas'] or 1
+
+    # Dependentes
+    deps = []
+    try: deps = json.loads(p['dependentes_json'] or '[]')
+    except: pass
+
+    # Monta linha de identificação
+    if eh_empresa:
+        ident = f"a empresa {nome} - CNPJ: {p['cnpj']}"
+        linha_intro = f"ao contrato do plano de saúde {operadora} para {ident}"
+    else:
+        ident = nome
+        if p['cpf_titular']:
+            ident += f" (CPF: {p['cpf_titular']})"
+        linha_intro = f"à proposta do plano de saúde {operadora} para o grupo familiar de {ident}"
+
+    # Monta composição do grupo
+    composicao = []
+    titular_linha = f"Titular: {nome}"
+    if p['cpf_titular']: titular_linha += f" (CPF: {p['cpf_titular']})"
+    if p['data_nasc_titular']: titular_linha += f" - Nasc.: {p['data_nasc_titular']}"
+    composicao.append(titular_linha)
+    for dep in deps:
+        dep_nome = dep.get('nome','')
+        dep_tipo = dep.get('parentesco') or dep.get('tipo','Dependente')
+        dep_cpf  = dep.get('cpf','')
+        dep_linha = f"Dependente ({dep_tipo}): {dep_nome}"
+        if dep_cpf: dep_linha += f" (CPF: {dep_cpf})"
+        composicao.append(dep_linha)
+
+    # Dados de contato
+    email_contato = p['email_resp_contrato'] or p['email_resp_negociacao'] or ''
+    tel_contato   = p['tel_resp_contrato'] or p['tel_resp_negociacao'] or ''
+
+    # Endereço
+    campos_extras = {}
+    try: campos_extras = json.loads(p['campos_extras'] or '{}')
+    except: pass
+    endereco_parts = [
+        campos_extras.get('endereco',''),
+        campos_extras.get('numero',''),
+        campos_extras.get('complemento',''),
+        campos_extras.get('bairro',''),
+        campos_extras.get('cidade',''),
+        campos_extras.get('estado',''),
+        campos_extras.get('cep',''),
+    ]
+    endereco = '\n'.join(x for x in endereco_parts if x)
+
+    # Assunto
+    tipo_label = 'Empresa' if eh_empresa else 'PF'
+    assunto = f"Solicitação de Protocolo - Venda {operadora} - {tipo_label} - {nome}"
+
+    # Corpo em texto puro (editável no modal)
+    comp_str = '\n'.join(composicao)
+    end_str  = endereco or '(não informado)'
+
+    corpo = f"""Olá, Pamela, tudo bem?
+
+Gostaria de solicitar o protocolo de venda referente {linha_intro}.
 
 Seguem os detalhes da proposta para conferência:
-Plano: {p['produto'] or '—'}
+Plano: {plano}
 
 Condição: {p['fator_moderador'] or '—'}
 
-Valor do grupo: R$ {valor_fmt}
+Valor do grupo: {valor_fmt}
 
-Titular: {p['cpf_titular'] or alvo}
-Total de pessoas: {vidas} vidas
+Composição do Grupo ({vidas} {'vida' if int(vidas)==1 else 'vidas'}):
+{comp_str}
 
 DADOS DE CONTATO:
-EMAIL: {p['email_resp_contrato'] or ''}
-TELEFONE: {p['tel_resp_contrato'] or ''}
+E-MAIL: {email_contato}
+TELEFONE: {tel_contato}
+
+DADOS DO ENDEREÇO:
+{end_str}
 
 SOLICITO VIGÊNCIA: {p['vigencia'] or '—'}
-VENCIMENTO DIA: {dia_v} de cada mês.
+VENCIMENTO DIA: {p['dia_vencimento'] or '—'} de cada mês.
 
 {p['observacoes'] or ''}
 
@@ -2514,21 +2642,174 @@ Poderia me enviar o protocolo para darmos prosseguimento ao processo junto ao cl
 Fico no aguardo e agradeço desde já.
 
 Atenciosamente,
-{session.get('nome','')}"""
-    assunto = f"Solicitação de Protocolo - Venda {p['produto'] or p['adm_operadora'] or ''} - {alvo}"
-    return jsonify({"ok": True, "destinatarios": dest, "remetente": rem, "assunto": assunto, "corpo": corpo})
+{session.get('nome','Guilherme Augusto Santos')}
+Serenus Corretora de Saúde"""
 
-@app.route('/config/affinity', methods=['POST'])
+    tem_comprovante = bool(p['comprovante_boleto'])
+    tem_contrato    = bool(p['contrato_arquivo'])
+
+    return jsonify({
+        "ok": True,
+        "assunto": assunto,
+        "corpo": corpo,
+        "tem_comprovante": tem_comprovante,
+        "tem_contrato": tem_contrato,
+        "aviso_anexo": not (tem_comprovante or tem_contrato),
+    })
+
+def _montar_email_html_profissional(corpo_texto, particularidades='', eh_teste=False, pid=None):
+    """Monta HTML profissional e elegante para o e-mail de protocolo."""
+    logo_url = "https://job-serenus-production.up.railway.app/static/logo_arcos.png"
+    
+    # Converte corpo texto em HTML preservando quebras de linha e formatação
+    linhas_html = []
+    for linha in corpo_texto.split('\n'):
+        linha_limpa = linha.strip()
+        if not linha_limpa:
+            linhas_html.append('</p><p style="margin:12px 0;">')
+        elif ':' in linha_limpa and any(x in linha_limpa.upper() for x in ['PLANO:', 'OPERADORA:', 'TITULAR:', 'DADOS', 'VIGÊNCIA', 'VENCIMENTO', 'VALOR']):
+            # Linhas com dados
+            partes = linha_limpa.split(':', 1)
+            label = partes[0].strip()
+            valor = partes[1].strip() if len(partes) > 1 else ''
+            linhas_html.append(f'<strong style="color:#0f1f33;">{label}:</strong> <span style="color:#666;">{valor}</span><br>')
+        else:
+            linhas_html.append(f'{linha_limpa}<br>')
+    
+    corpo_html_body = ''.join(linhas_html).replace('<br></p>', '</p>').replace('<p style="margin:12px 0;"><br>', '<p style="margin:12px 0;">')
+    
+    if particularidades:
+        corpo_html_body += f'<p style="margin-top:20px; padding:14px; background:#f8f9fb; border-left:3px solid #1fd8a4;"><strong style="color:#0f1f33;">Observações importantes:</strong><br>{particularidades.replace(chr(10),"<br>")}</p>'
+    
+    html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; }}
+    .wrapper {{ background: #f5f7fa; padding: 24px; }}
+    .container {{ max-width: 640px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
+    .header {{ background: linear-gradient(135deg, #0f1f33 0%, #1a2f4a 100%); padding: 32px; text-align: center; }}
+    .logo {{ height: 40px; margin-bottom: 16px; display: block; margin-left: auto; margin-right: auto; }}
+    .header-title {{ color: white; font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.5px; }}
+    .header-subtitle {{ color: #1fd8a4; font-size: 12px; font-weight: 600; margin: 10px 0 0; letter-spacing: 0.8px; text-transform: uppercase; }}
+    .stripe {{ background: #1fd8a4; height: 4px; }}
+    .content {{ padding: 40px 36px; }}
+    .content p {{ margin: 16px 0; line-height: 1.7; font-size: 14px; }}
+    .content p:first-child {{ margin-top: 0; }}
+    .section-title {{ font-size: 13px; font-weight: 700; color: #0f1f33; text-transform: uppercase; letter-spacing: 0.8px; margin: 28px 0 16px; padding-bottom: 10px; border-bottom: 2px solid #1fd8a4; }}
+    .footer {{ background: #f0f2f5; border-top: 1px solid #e5e9f0; padding: 24px 36px; font-size: 12px; color: #666; line-height: 1.8; }}
+    .footer-brand {{ font-weight: 700; color: #0f1f33; margin-bottom: 4px; }}
+    .footer-small {{ font-size: 11px; color: #999; margin-top: 12px; padding-top: 12px; border-top: 1px solid #d1d5db; }}
+    .test-banner {{ background: #f43f7c; color: white; padding: 14px 36px; text-align: center; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; }}
+    .cta {{ background: #f8f9fb; border-left: 4px solid #1fd8a4; padding: 16px; margin: 24px 0; font-size: 13px; color: #333; }}
+    .cta strong {{ color: #0f1f33; }}
+    br {{ display: block; line-height: 1.2; }}
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="container">
+      {"<div class='test-banner'>MODO TESTE — Este e-mail foi enviado apenas para você. A Affinity não recebeu.</div>" if eh_teste else ""}
+      
+      <div class="header">
+        <img src="{logo_url}" alt="Serenus" class="logo">
+        <h1 class="header-title">Solicitação de Protocolo</h1>
+        <p class="header-subtitle">Implantação de Proposta · Sistema JOB</p>
+      </div>
+      
+      <div class="stripe"></div>
+      
+      <div class="content">
+        <p>{corpo_html_body}</p>
+        
+        <div class="cta">
+          <strong style="color: #0f1f33;">Próximos passos:</strong><br>
+          Por favor, analise a proposta e nos envie o protocolo de implantação para prosseguirmos junto ao cliente.
+        </div>
+      </div>
+      
+      <div class="footer">
+        <div class="footer-brand">Serenus Corretora de Saúde</div>
+        <div>guilherme@serenuscorretora.com.br</div>
+        <div class="footer-small">
+          Sistema JOB{f' • Proposta #{pid}' if pid else ''} • {datetime.now(TZ_SP).strftime('%d/%m/%Y às %H:%M')}
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>"""
+    
+    return html
+
+
+@app.route('/proposta/<int:pid>/enviar-teste', methods=['POST'])
 @login_required
 @admin_required
-def config_affinity():
+def enviar_email_teste(pid):
+    """Envia o e-mail de protocolo APENAS para guilherme@serenuscorretora.com.br (modo teste)."""
+    DEST_TESTE = "guilherme@serenuscorretora.com.br"
+
     d = request.json or {}
+    assunto      = d.get('assunto', '').strip()
+    corpo_texto  = d.get('corpo', '').strip()
+    particularidades = d.get('particularidades', '').strip()
+
+    if not assunto or not corpo_texto:
+        return jsonify({"ok": False, "msg": "Assunto e corpo são obrigatórios."}), 400
+
+    corpo_html = _montar_email_html_profissional(corpo_texto, particularidades, eh_teste=True, pid=pid)
+    enviado = _enviar_email(DEST_TESTE, f"[TESTE] {assunto}", corpo_html)
+    
+    if enviado:
+        return jsonify({"ok": True, "msg": f"E-mail de teste enviado para {DEST_TESTE}. Verifique sua caixa de entrada."})
+    else:
+        return jsonify({"ok": False, "msg": "BREVO_API_KEY não configurada no Railway."}), 500
+
+@app.route('/proposta/<int:pid>/enviar-plataforma', methods=['POST'])
+@login_required
+@admin_required
+def enviar_plataforma(pid):
+    """Envia o e-mail de protocolo para a Affinity via Brevo com HTML profissional."""
+    DEST_AFFINITY = "pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br"
+    CC_SERENUS = "guilherme@serenuscorretora.com.br"
+
+    d = request.json or {}
+    assunto      = d.get('assunto', '').strip()
+    corpo_texto  = d.get('corpo', '').strip()
+    particularidades = d.get('particularidades', '').strip()
+
     conn = db()
-    for k in ['affinity_destinatarios','affinity_contato','affinity_remetente']:
-        if k in d:
-            conn.execute("INSERT INTO config (chave,valor) VALUES (?,?) ON CONFLICT(chave) DO UPDATE SET valor=excluded.valor", (k, d[k]))
-    conn.commit(); close_db(conn)
-    return jsonify({"ok": True})
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    # Trava: exige ao menos um documento
+    if not p['comprovante_boleto'] and not p['contrato_arquivo']:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Não é possível enviar sem documentos anexados. Anexe pelo menos o comprovante de pagamento ou o contrato antes de enviar."}), 400
+
+    if not assunto or not corpo_texto:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Assunto e corpo do e-mail são obrigatórios."}), 400
+
+    corpo_html = _montar_email_html_profissional(corpo_texto, particularidades, eh_teste=False, pid=pid)
+    enviado = _enviar_email(DEST_AFFINITY, assunto, corpo_html, cc=CC_SERENUS)
+
+    if enviado:
+        conn.execute("UPDATE propostas SET status_operacional='Em Análise Operadora' WHERE id=?", (pid,))
+        conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+            VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+            'plataforma', f"E-mail de protocolo enviado à Affinity. Assunto: {assunto}", datetime.now(TZ_SP)))
+        conn.commit(); close_db(conn)
+        return jsonify({"ok": True, "msg": "E-mail enviado. Status atualizado para 'Em Análise Operadora'."})
+    else:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "BREVO_API_KEY não configurada no Railway. E-mail não enviado."}), 500
+
 
 @app.route('/api/etiquetas')
 @login_required
@@ -2626,28 +2907,90 @@ CAMPOS_EDITAVEIS = {
 @login_required
 @admin_required
 def proposta_editar(pid):
+    """Edição completa de propostas — todos os campos."""
     d = request.json or {}
     conn = db()
     p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
     if not p: close_db(conn); return jsonify({"ok": False}), 404
+    
     nome_user = session.get('nome','admin')
-    NUMERICOS = {'valor','total_vidas','dia_vencimento'}
+    user_id = session.get('user_id')
+    
+    # Campos numéricos para conversão
+    NUMERICOS = {'valor','total_vidas','dia_vencimento','num_parcelas','comissao_total_corretora','comissao_consultor','comissao_corretora_liquida'}
+    
     def conv(campo, v):
         if campo in NUMERICOS:
-            s = str(v or '').replace('.','').replace(',','.') if campo=='valor' else str(v or '')
-            try: return float(s) if campo=='valor' else int(s or 0)
+            s = str(v or '').replace('.','').replace(',','.') if campo in ('valor','comissao_total_corretora','comissao_consultor','comissao_corretora_liquida') else str(v or '')
+            try: return float(s) if campo in ('valor','comissao_total_corretora','comissao_consultor','comissao_corretora_liquida') else int(s or 0)
             except: return 0
         return v
+    
     mudou = []
+    
+    # Edição restrita a CAMPOS_EDITAVEIS (mantém compatibilidade)
     for campo, label in CAMPOS_EDITAVEIS.items():
         if campo in d:
             antes = p[campo] if campo in p.keys() else ''
             depois = conv(campo, d[campo])
             if str(antes or '') != str(depois or ''):
                 conn.execute(f"UPDATE propostas SET {campo}=? WHERE id=?", (depois, pid))
-                conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_nome,campo,valor_antes,valor_depois)
-                    VALUES (?,?,?,?,?)""", (pid, nome_user, label, str(antes or '—'), str(depois or '—')))
+                conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+                    VALUES (?,?,?,?,?,?,?)""", (pid, user_id, nome_user, label, str(antes or '—'), str(depois or '—'), datetime.now(TZ_SP)))
                 mudou.append(label)
+    
+    # Edição expandida: campos adicionais fora de CAMPOS_EDITAVEIS
+    CAMPOS_ADICIONAIS = {
+        'razao_social': 'Razão Social',
+        'cpf_titular': 'CPF Titular',
+        'cnpj': 'CNPJ',
+        'valor': 'Valor da Venda',
+        'vigencia': 'Vigência',
+        'modalidade': 'Modalidade',
+        'tipo_pessoa': 'Tipo Pessoa',
+        'adm_operadora': 'Operadora',
+        'produto': 'Produto',
+        'total_vidas': 'Total de Vidas',
+        'regime_aplicado': 'Regime Aplicado',
+        'observacoes': 'Observações',
+        'campos_extras': 'Campos Extras (JSON)',
+    }
+    
+    for campo, label in CAMPOS_ADICIONAIS.items():
+        if campo in d and campo not in CAMPOS_EDITAVEIS:
+            antes = p[campo] if campo in p.keys() else ''
+            depois = conv(campo, d[campo])
+            if str(antes or '') != str(depois or ''):
+                conn.execute(f"UPDATE propostas SET {campo}=? WHERE id=?", (depois, pid))
+                conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+                    VALUES (?,?,?,?,?,?,?)""", (pid, user_id, nome_user, label, str(antes or '—'), str(depois or '—'), datetime.now(TZ_SP)))
+                mudou.append(label)
+    
+    # Se valor foi alterado, recalcular e regenerar parcelas se necessário
+    if 'valor' in d:
+        novo_valor = float(str(d['valor'] or 0).replace('.','').replace(',','.'))
+        operadora = p['adm_operadora']
+        regime = p['regime_aplicado']
+        mod = p['modalidade']
+        tipo_p = p['tipo_pessoa']
+        prod_acum = 0  # Simplificado
+        
+        # Recalcular comissão
+        calc = calc_comissao(operadora, regime, prod_acum, novo_valor, mod, tipo_p)
+        
+        # Atualizar comissões na proposta
+        conn.execute("""
+            UPDATE propostas 
+            SET comissao_total_corretora=?, comissao_consultor=?, comissao_corretora_liquida=?,
+                num_parcelas=?, distribuicao_parcelas=?
+            WHERE id=?
+        """, (calc['total_corretora'], calc['consultor'], calc['liquido'], 
+              calc['num_parcelas'], calc['dist_corretora'], pid))
+        
+        # Regenerar parcelas pendentes
+        gerar_parcelas(pid, p['vigencia'], 'c', p.get('dia_vencimento'))
+        mudou.append("Parcelas recalculadas")
+    
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "mudou": mudou})
 
@@ -2697,10 +3040,10 @@ def parcela_status(pid):
     extra = ""
     if novo == 'Liberado para o corretor':
         conn.execute("UPDATE parcelas SET status=?,confirmado_gestor=1,data_confirmacao_gestor=? WHERE id=?",
-                     (novo, datetime.now().isoformat(), pid))
+                     (novo, datetime.now(TZ_SP).isoformat(), pid))
     elif novo == 'Pago ao corretor':
         conn.execute("UPDATE parcelas SET status=?,data_pagamento=? WHERE id=?",
-                     (novo, datetime.now().isoformat(), pid))
+                     (novo, datetime.now(TZ_SP).isoformat(), pid))
     else:
         conn.execute("UPDATE parcelas SET status=? WHERE id=?", (novo, pid))
     conn.commit(); close_db(conn)
@@ -2713,7 +3056,7 @@ def parcela_acao(pid):
     """Avança a parcela um passo no fluxo, com confirmação do gestor."""
     acao = request.form.get('acao')
     conn = db()
-    agora = datetime.now().isoformat()
+    agora = datetime.now(TZ_SP).isoformat()
     if acao == 'receber':
         conn.execute("UPDATE parcelas SET status='Recebido e não repassado' WHERE id=?", (pid,))
     elif acao == 'liberar':  # confirmação do gestor
@@ -2736,7 +3079,7 @@ def parcela_antecipar(pid):
         return jsonify({"ok": False, "msg": "Nenhum arquivo enviado"}), 400
     
     f = request.files['comprovante']
-    nome = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_antecip_{f.filename}"
+    nome = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_antecip_{f.filename}"
     caminho = os.path.join(UPLOAD_FOLDER, nome)
     f.save(caminho)
     
@@ -2780,7 +3123,7 @@ def parcela_aceite(pid):
     if session['perfil'] != 'admin' and parc['usuario_id'] != session['user_id']:
         close_db(conn); return jsonify({"ok": False, "msg": "Acesso negado"}), 403
     conn.execute("UPDATE parcelas SET aceite_corretor=1,data_aceite=? WHERE id=?",
-                 (datetime.now().isoformat(), pid))
+                 (datetime.now(TZ_SP).isoformat(), pid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
@@ -2913,7 +3256,7 @@ def usuario_novo():
     nome=d.get('nome','').strip(); email=d.get('email','').strip().lower()
     if not nome or not email:
         flash('Nome e e-mail obrigatórios.'); return redirect(url_for('usuarios'))
-    token=secrets.token_urlsafe(32); expira=(datetime.now()+timedelta(days=7)).isoformat()
+    token=secrets.token_urlsafe(32); expira=(datetime.now(TZ_SP)+timedelta(days=7)).isoformat()
     cpf = d.get('cpf','').strip()
     conn = db()
     try:
@@ -2958,7 +3301,7 @@ def usuario_foto_upload():
         try: os.remove(os.path.join(UPLOAD_FOLDER, foto_antiga['foto']))
         except: pass
 
-    foto_nome = f"perfil_{uid_alvo}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+    foto_nome = f"perfil_{uid_alvo}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}{ext}"
     fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
 
     conn.execute("UPDATE usuarios SET foto=? WHERE id=?", (foto_nome, uid_alvo))
@@ -2987,7 +3330,7 @@ def usuario_editar(uid):
     if fimg and fimg.filename:
         ext = os.path.splitext(fimg.filename)[1].lower()
         if ext in ('.png','.jpg','.jpeg','.webp'):
-            foto_nome = f"perfil_{uid}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+            foto_nome = f"perfil_{uid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}{ext}"
             fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
     conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=? WHERE id=?""",
         (d['nome'],d['email'].lower(),d['perfil'],
@@ -3017,7 +3360,7 @@ def usuario_regenerar(uid):
             return redirect(url_for('usuarios')), 404
         
         token = secrets.token_urlsafe(32)
-        expira = (datetime.now() + timedelta(days=7)).isoformat()
+        expira = (datetime.now(TZ_SP) + timedelta(days=7)).isoformat()
         cur.execute("UPDATE usuarios SET token_setup=?, token_expira=?, senha_hash=NULL WHERE id=?", 
                     (token, expira, uid))
         conn.commit()
@@ -3524,35 +3867,243 @@ def regra_estorno_salvar():
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
+@app.route('/proposta/<int:pid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def excluir_proposta_logica(pid):
+    """Soft Delete: marca proposta como Excluída, cancela parcelas e registra motivo + detalhe."""
+    d = request.json or {}
+    motivo = (d.get('motivo_exclusao') or 'Outro').strip()
+    detalhe = (d.get('detalhe_exclusao') or '').strip()
+    nome_user = session.get('nome', 'admin')
+
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    # Atualizar status da proposta (exclusão lógica)
+    conn.execute("""
+        UPDATE propostas
+        SET status='Excluída', motivo_exclusao=?, detalhe_exclusao=?
+        WHERE id=?
+    """, (motivo, detalhe, pid))
+
+    # Estornar/cancelar todas as parcelas pendentes de receber
+    conn.execute("""
+        UPDATE parcelas
+        SET status='Cancelada / Estornada'
+        WHERE proposta_id=? AND status='Pendente de receber'
+    """, (pid,))
+
+    # Registrar no histórico
+    desc = f"Proposta excluída. Motivo: {motivo}" + (f" — {detalhe}" if detalhe else "")
+    conn.execute("""
+        INSERT INTO historico_proposta (proposta_id, usuario_id, usuario_nome, tipo, descricao, criado_em)
+        VALUES (?, ?, ?, 'exclusao', ?, ?)
+    """, (pid, session['user_id'], nome_user, desc, datetime.now(TZ_SP)))
+
+    conn.commit()
+    close_db(conn)
+    return jsonify({"ok": True, "msg": "Proposta excluída. Parcelas pendentes canceladas/estornadas."})
+
+@app.route('/admin/propostas-excluidas')
+@login_required
+@admin_required
+def propostas_excluidas():
+    """Dashboard de propostas excluídas para auditoria."""
+    conn = db()
+    
+    # Métricas
+    total_excluidas = conn.execute("SELECT COUNT(*) c FROM propostas WHERE status='Excluída'").fetchone()['c']
+    valor_excluido = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE status='Excluída'").fetchone()['v']
+    com_bruta_excluida = conn.execute("SELECT COALESCE(SUM(comissao_total_corretora),0) v FROM propostas WHERE status='Excluída'").fetchone()['v']
+    
+    # Motivos mais frequentes
+    motivos = conn.execute("""
+        SELECT motivo_exclusao, COUNT(*) qtd
+        FROM propostas 
+        WHERE status='Excluída' AND motivo_exclusao IS NOT NULL
+        GROUP BY motivo_exclusao
+        ORDER BY qtd DESC
+    """).fetchall()
+    
+    # Lista completa
+    excluidas = conn.execute("""
+        SELECT id, razao_social, consultor, valor, motivo_exclusao, quem_subiu
+        FROM propostas 
+        WHERE status='Excluída'
+        ORDER BY id DESC
+    """).fetchall()
+    
+    close_db(conn)
+    return render_template('propostas_excluidas.html', 
+                          total=total_excluidas, 
+                          valor=valor_excluido,
+                          com_bruta=com_bruta_excluida,
+                          motivos=motivos,
+                          excluidas=excluidas)
+
+@app.route('/admin/auditoria')
+@login_required
+@admin_required
+def admin_auditoria():
+    """Esteira operacional: propostas que ainda não chegaram em Emitida/Ativa."""
+    conn = db()
+    em_espera = conn.execute("""
+        SELECT p.*, u.nome as nome_consultor
+        FROM propostas p
+        LEFT JOIN usuarios u ON u.id = p.usuario_id
+        WHERE p.status != 'Excluída'
+          AND (p.status_operacional IS NULL OR p.status_operacional != 'Emitida/Ativa')
+        ORDER BY p.id DESC
+    """).fetchall()
+    total = len(em_espera)
+    close_db(conn)
+    return render_template('auditoria.html', propostas=em_espera, total=total)
+
+@app.route('/proposta/<int:pid>/status-operacional', methods=['POST'])
+@login_required
+@admin_required
+def atualizar_status_operacional(pid):
+    """Atualiza o status operacional de uma proposta e libera parcelas se Emitida/Ativa."""
+    d = request.json or {}
+    novo_status = d.get('status_operacional','').strip()
+    VALIDOS = ['Aguardando Documentos','Em Análise Operadora','Emitida/Ativa','Suspensa','Cancelada']
+    if novo_status not in VALIDOS:
+        return jsonify({"ok": False, "msg": f"Status inválido. Use: {VALIDOS}"}), 400
+
+    conn = db()
+    p = conn.execute("SELECT status_operacional, comprovante_boleto FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn); return jsonify({"ok": False}), 404
+
+    conn.execute("UPDATE propostas SET status_operacional=? WHERE id=?", (novo_status, pid))
+
+    # Se chegou em Emitida/Ativa: libera parcelas bloqueadas por falta de comprovante
+    if novo_status == 'Emitida/Ativa':
+        conn.execute("""UPDATE parcelas SET status='Pendente de receber'
+            WHERE proposta_id=? AND status='Bloqueado - Falta Comprovante'""", (pid,))
+
+    # Histórico
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'status_operacional', f"Status operacional: {p['status_operacional'] or '—'} → {novo_status}", datetime.now(TZ_SP)))
+
+    # Atualizar pendencias_json se enviado
+    if 'pendencias_json' in d:
+        conn.execute("UPDATE propostas SET pendencias_json=? WHERE id=?",
+                     (json.dumps(d['pendencias_json'], ensure_ascii=False), pid))
+
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": f"Status atualizado para '{novo_status}'"})
+
+@app.route('/proposta/<int:pid>/comprovante-upload', methods=['POST'])
+@login_required
+def upload_comprovante(pid):
+    """Upload de comprovante de pagamento. Libera parcelas bloqueadas."""
+    conn = db()
+    p = conn.execute("SELECT usuario_id FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p: close_db(conn); return jsonify({"ok": False}), 404
+    if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False}), 403
+
+    f = request.files.get('comprovante_boleto')
+    if not f or not f.filename:
+        close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
+
+    nome = f"COMPROVANTE_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
+    f.save(os.path.join(UPLOAD_FOLDER, nome))
+    conn.execute("UPDATE propostas SET comprovante_boleto=? WHERE id=?", (nome, pid))
+    conn.execute("""UPDATE parcelas SET status='Pendente de receber'
+        WHERE proposta_id=? AND status='Bloqueado - Falta Comprovante'""", (pid,))
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'comprovante', f"Comprovante de pagamento anexado: {nome}", datetime.now(TZ_SP)))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": "Comprovante salvo. Parcelas desbloqueadas.", "nome": nome})
+
+@app.route('/proposta/<int:pid>/contrato-upload', methods=['POST'])
+@login_required
+def upload_contrato(pid):
+    """Upload do contrato / proposta assinada."""
+    conn = db()
+    p = conn.execute("SELECT usuario_id FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p: close_db(conn); return jsonify({"ok": False}), 404
+    if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False}), 403
+
+    f = request.files.get('contrato_arquivo')
+    if not f or not f.filename:
+        close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
+
+    nome = f"CONTRATO_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
+    f.save(os.path.join(UPLOAD_FOLDER, nome))
+    conn.execute("UPDATE propostas SET contrato_arquivo=? WHERE id=?", (nome, pid))
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'contrato', f"Contrato/proposta anexado: {nome}", datetime.now(TZ_SP)))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": "Contrato salvo.", "nome": nome})
+
+@app.route('/proposta/<int:pid>/doc-upload', methods=['POST'])
+@login_required
+def upload_doc_extra(pid):
+    """Upload de documento extra (bordo). Adiciona ao array de anexos."""
+    conn = db()
+    p = conn.execute("SELECT usuario_id, anexos FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p: close_db(conn); return jsonify({"ok": False}), 404
+    if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False}), 403
+
+    f = request.files.get('documento')
+    tipo = (request.form.get('tipo') or 'Documento').strip()
+    if not f or not f.filename:
+        close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
+
+    prefixo = tipo.upper().replace(' ', '_').replace('/', '_')[:20]
+    nome = f"{prefixo}_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
+    f.save(os.path.join(UPLOAD_FOLDER, nome))
+
+    try: anexos = json.loads(p['anexos'] or '[]')
+    except: anexos = []
+    anexos.append(nome)
+    conn.execute("UPDATE propostas SET anexos=? WHERE id=?", (json.dumps(anexos), pid))
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'documento', f"Documento anexado ({tipo}): {nome}", datetime.now(TZ_SP)))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": f"{tipo} salvo.", "nome": nome})
+
+
+
+
 @app.route('/proposta/<int:pid>/estornar', methods=['POST'])
 @login_required
 @admin_required
 def estornar_proposta(pid):
-    """Estorna a comissão conforme a regra da operadora: % e até qual mensalidade.
-    mensalidade_cancelou = em qual mensalidade o cliente parou de pagar."""
-    mens_cancelou = int((request.json or {}).get('mensalidade_cancelou') or 1)
+    """Estorno simplificado: cancela parcelas pendentes e marca proposta como estornada."""
     conn = db()
     p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
     if not p:
         close_db(conn); return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
-    regra = conn.execute("SELECT * FROM regras_estorno WHERE operadora=?", (p['adm_operadora'],)).fetchone()
-    perc = (regra['perc_estorno'] if regra else 100)
-    ate = (regra['ate_mensalidade'] if regra else 3)
-    # Estorna se o cliente cancelou DENTRO da janela de estorno
-    estorna = mens_cancelou <= ate
-    valor_estorno = 0.0
-    if estorna:
-        # estorna o % das parcelas já pagas/liberadas
-        pagas = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM parcelas
-            WHERE proposta_id=? AND status IN ('Pago ao corretor','Liberado para o corretor')""", (pid,)).fetchone()['v']
-        valor_estorno = round(pagas * perc/100, 2)
-        # parcelas futuras são canceladas
-        conn.execute("""UPDATE parcelas SET status='Estornada' WHERE proposta_id=? AND status='Pendente de receber'""", (pid,))
-    info = f"Cliente parou na {mens_cancelou}ª mensalidade. Regra {p['adm_operadora']}: estorna {perc:.0f}% até a {ate}ª. " + \
-           (f"Estorno de R$ {valor_estorno:.2f}." if estorna else "Fora da janela — sem estorno.")
-    conn.execute("UPDATE propostas SET estornada=?, estorno_info=? WHERE id=?", (1 if estorna else 0, info, pid))
+
+    # Cancela todas as parcelas pendentes
+    canceladas = conn.execute("""UPDATE parcelas SET status='Cancelada / Estornada'
+        WHERE proposta_id=? AND status IN ('Pendente de receber','Bloqueado - Falta Comprovante')""", (pid,)).rowcount
+
+    # Marca proposta como estornada
+    info = f"Estorno confirmado por {session.get('nome','admin')} em {datetime.now(TZ_SP).strftime('%d/%m/%Y %H:%M')}. {canceladas} parcela(s) cancelada(s)."
+    conn.execute("UPDATE propostas SET estornada=1, estorno_info=? WHERE id=?", (info, pid))
+
+    # Histórico
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'estorno', info, datetime.now(TZ_SP)))
+
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "estorna": estorna, "valor": valor_estorno, "info": info})
+    return jsonify({"ok": True, "msg": info})
 
 # ─── APIs ────────────────────────────────────────────────────────────────────────
 @login_required
@@ -3842,7 +4393,7 @@ def minha_foto():
     
     # Sanitiza nome de arquivo (apenas alfanumérico e underscore)
     uid = session['user_id']
-    foto_nome = f"perfil_{uid}_{int(datetime.now().timestamp())}{ext}"
+    foto_nome = f"perfil_{uid}_{int(datetime.now(TZ_SP).timestamp())}{ext}"
     
     conn = db()
     foto_antiga = conn.execute("SELECT foto FROM usuarios WHERE id=?", (uid,)).fetchone()
