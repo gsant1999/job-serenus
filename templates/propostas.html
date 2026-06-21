@@ -8,7 +8,15 @@
     <div class="sub">{{ propostas|length }} registro{% if propostas|length != 1 %}s{% endif %}</div>
   </div>
   <div>
-    {% if session.perfil == 'admin' %}<button class="btn-outline" onclick="recalcularTodas(this)">Recalcular comissões</button>{% endif %}
+    {% if session.perfil == 'admin' %}
+    <label id="toggle-modo-teste" onclick="toggleModoTeste(event)" title="Modo Teste: habilita botões de teste de e-mail (só você vê). Some ao deslogar." style="display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--cinza);padding:6px 12px;border:1px solid {% if session.modo_teste %}rgba(245,158,11,.5){% else %}var(--borda,rgba(255,255,255,.1)){% endif %};border-radius:8px;margin-right:8px;{% if session.modo_teste %}background:rgba(245,158,11,.08);{% endif %}">
+      <span style="position:relative;display:inline-block;width:32px;height:18px;">
+        <span style="position:absolute;inset:0;border-radius:18px;background:{% if session.modo_teste %}#f59e0b{% else %}#3a3a4a{% endif %};transition:.2s;"></span>
+        <span style="position:absolute;top:2px;left:{% if session.modo_teste %}16px{% else %}2px{% endif %};width:14px;height:14px;border-radius:50%;background:#fff;transition:.2s;"></span>
+      </span>
+      <span style="color:{% if session.modo_teste %}#f59e0b{% else %}var(--cinza){% endif %};font-weight:{% if session.modo_teste %}600{% else %}400{% endif %};">🧪 Modo Teste</span>
+    </label>
+    <button class="btn-outline" onclick="recalcularTodas(this)">Recalcular comissões</button>{% endif %}
     <button class="btn-outline" onclick="exportar()">Exportar CSV</button>
     <a href="/nova-proposta" class="btn">Nova proposta</a>
   </div>
@@ -100,6 +108,21 @@
 
 {% block scripts %}
 <script>
+async function toggleModoTeste(ev) {
+  ev.preventDefault();
+  try {
+    const res = await fetch('/admin/modo-teste/toggle', {method: 'POST'});
+    const j = await res.json();
+    if (j.ok) {
+      if (typeof toast === 'function') {
+        toast(j.modo_teste ? '🧪 Modo Teste LIGADO — botões de teste de e-mail habilitados' : 'Modo Teste desligado', j.modo_teste ? 'ok' : 'ok');
+      }
+      setTimeout(() => location.reload(), 600);
+    }
+  } catch(e) {
+    if (typeof toast === 'function') toast('Erro ao alternar modo teste', 'err');
+  }
+}
 function filtrar() {
   const b = busca.value.toLowerCase(), m = fModal.value, t = fTipo.value;
   document.querySelectorAll('#t tbody tr').forEach(tr => {

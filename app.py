@@ -2567,7 +2567,16 @@ def listar_propostas():
             WHERE p.usuario_id=? AND p.status != 'Excluída'
             ORDER BY p.id DESC""",(uid,)).fetchall()
     close_db(conn)
-    return render_template('propostas.html', propostas=rows)
+    return render_template('propostas.html', propostas=rows, modo_teste=session.get('modo_teste', False))
+
+@app.route('/admin/modo-teste/toggle', methods=['POST'])
+@login_required
+@admin_required
+def toggle_modo_teste():
+    """Liga/desliga o Modo Teste (só admin, vive na sessão — some ao deslogar)."""
+    novo = not session.get('modo_teste', False)
+    session['modo_teste'] = novo
+    return jsonify({"ok": True, "modo_teste": novo})
 
 @app.route('/proposta/<int:pid>')
 @login_required
