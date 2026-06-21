@@ -2797,14 +2797,24 @@ def enviar_email_teste(pid):
     conn = db()
     p = conn.execute("SELECT comprovante_boleto, contrato_arquivo, anexos FROM propostas WHERE id=?", (pid,)).fetchone()
     close_db(conn)
+    print(f"[TESTE EMAIL pid={pid}] comprovante_boleto={p['comprovante_boleto'] if p else 'N/A'}")
+    print(f"[TESTE EMAIL pid={pid}] contrato_arquivo={p['contrato_arquivo'] if p else 'N/A'}")
+    print(f"[TESTE EMAIL pid={pid}] UPLOAD_FOLDER={UPLOAD_FOLDER}")
     if p:
-        if p['comprovante_boleto']: lista_anexos.append(p['comprovante_boleto'])
-        if p['contrato_arquivo']:   lista_anexos.append(p['contrato_arquivo'])
+        if p['comprovante_boleto']:
+            caminho = os.path.join(UPLOAD_FOLDER, os.path.basename(p['comprovante_boleto']))
+            print(f"[TESTE EMAIL] comprovante existe no disco: {os.path.exists(caminho)} → {caminho}")
+            lista_anexos.append(p['comprovante_boleto'])
+        if p['contrato_arquivo']:
+            caminho = os.path.join(UPLOAD_FOLDER, os.path.basename(p['contrato_arquivo']))
+            print(f"[TESTE EMAIL] contrato existe no disco: {os.path.exists(caminho)} → {caminho}")
+            lista_anexos.append(p['contrato_arquivo'])
         try:
             extras = json.loads(p['anexos']) if p['anexos'] else []
             lista_anexos.extend([a for a in extras if a])
         except Exception:
             pass
+    print(f"[TESTE EMAIL] lista_anexos final ({len(lista_anexos)}): {lista_anexos}")
 
     corpo_html = _montar_email_html_profissional(corpo_texto, particularidades, eh_teste=True, pid=pid)
     enviado = _enviar_email(DEST_TESTE, f"[TESTE] {assunto}", corpo_html, anexos=lista_anexos)
