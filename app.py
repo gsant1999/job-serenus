@@ -1565,6 +1565,86 @@ def asaas_teste():
     return jsonify({"ok": False, "erro": data.get('_erro') or data.get('errors') or data, "status": status}), 400
 
 
+@app.route('/admin/db/corrigir-operadoras', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def corrigir_operadoras():
+    """Corrige propostas com adm_operadora NULL extraindo a operadora da modalidade.
+    GET = simula (mostra o que faria). POST = aplica e recalcula a comissão."""
+    aplicar = request.method == 'POST'
+    conn = db()
+
+    # Operadoras conhecidas (do recebimento) para casar com o texto da modalidade
+    ops_rows = conn.execute("SELECT DISTINCT operadora FROM recebimento").fetchall()
+    operadoras = [r['operadora'] for r in ops_rows]
+
+    # Propostas com operadora vazia mas com modalidade preenchida
+    alvo = conn.execute("""SELECT * FROM propostas
+        WHERE (adm_operadora IS NULL OR adm_operadora='')
+        AND modalidade IS NOT NULL AND modalidade<>''
+        AND status NOT IN ('Excluída')""").fetchall()
+
+    plano_de = []
+    nao_resolvidas = []
+    for p in alvo:
+        modalidade = p['modalidade'] or ''
+        # Tenta achar uma operadora conhecida dentro do texto da modalidade
+        achou = None
+        modal_norm = _normaliza_op(modalidade)
+        for op in operadoras:
+            op_norm = _normaliza_op(op)
+            if op_norm and (op_norm in modal_norm or modal_norm.startswith(op_norm)):
+                # pega o match mais longo (mais específico)
+                if not achou or len(op_norm) > len(_normaliza_op(achou)):
+                    achou = op
+        if achou:
+            plano_de.append({'id': p['id'], 'cliente': p['razao_social'],
+                             'modalidade_atual': modalidade, 'operadora_detectada': achou})
+        else:
+            nao_resolvidas.append({'id': p['id'], 'cliente': p['razao_social'], 'modalidade': modalidade})
+
+    resultado = {
+        "modo": "APLICADO" if aplicar else "SIMULAÇÃO (nada alterado)",
+        "vao_corrigir": plano_de,
+        "nao_resolvidas": nao_resolvidas,
+        "total_corrigir": len(plano_de),
+    }
+
+    if aplicar and plano_de:
+        corrigidas = []
+        for item in plano_de:
+            pid = item['id']
+            nova_op = item['operadora_detectada']
+            try:
+                # Atualiza a operadora
+                conn.execute("UPDATE propostas SET adm_operadora=? WHERE id=?", (nova_op, pid))
+                # Recalcula a comissão com a operadora correta
+                p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+                u = conn.execute("SELECT regime_base FROM usuarios WHERE id=?", (p['usuario_id'],)).fetchone()
+                regime = (u['regime_base'] if u else None) or 'sem_lead_sem_fixo'
+                tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
+                c = calc_comissao(nova_op, regime, p['valor'] or 0, p['valor'] or 0, p['modalidade'], tp)
+                conn.execute("""UPDATE propostas SET comissao_total_corretora=?, comissao_consultor=?,
+                    comissao_corretora_liquida=?, regime_aplicado=?, num_parcelas=?, distribuicao_parcelas=? WHERE id=?""",
+                    (c['total_corretora'], c['consultor'], c['liquido'], c['codigo'],
+                     c['num_parcelas'], c['dist_corretora'], pid))
+                conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+                    VALUES (?,?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+                    'Operadora corrigida', 'NULL', nova_op, datetime.now(TZ_SP)))
+                conn.commit()
+                corrigidas.append({'id': pid, 'operadora': nova_op,
+                                   'comissao_corretora': c['total_corretora'], 'comissao_consultor': c['consultor']})
+            except Exception as e:
+                if DB_MODE == 'postgres':
+                    try: conn.rollback()
+                    except Exception: pass
+                corrigidas.append({'id': pid, 'erro': str(e)[:100]})
+        resultado["corrigidas"] = corrigidas
+
+    close_db(conn)
+    return jsonify(resultado)
+
+
 @app.route('/admin/db/detalhes')
 @login_required
 @admin_required
