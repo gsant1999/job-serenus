@@ -1565,6 +1565,51 @@ def asaas_teste():
     return jsonify({"ok": False, "erro": data.get('_erro') or data.get('errors') or data, "status": status}), 400
 
 
+@app.route('/admin/db/detalhes')
+@login_required
+@admin_required
+def db_detalhes():
+    """Mostra QUAIS registros geraram os avisos da validação (sem expor senhas)."""
+    conn = db()
+    out = {}
+
+    # Usuários ativos sem senha (quem não consegue logar)
+    try:
+        rows = conn.execute("SELECT id, nome, email, perfil, token_setup IS NOT NULL as tem_token_setup FROM usuarios WHERE (senha_hash IS NULL OR senha_hash='') AND ativo=1").fetchall()
+        out["usuarios_sem_senha"] = [dict(r) for r in rows]
+    except Exception as e:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        out["usuarios_sem_senha_erro"] = str(e)[:100]
+
+    # Propostas com comissão zerada (operadora/plano sem recebimento)
+    try:
+        rows = conn.execute("""SELECT id, razao_social, adm_operadora, modalidade, tipo_pessoa, valor, status
+            FROM propostas WHERE status NOT IN ('Excluída')
+            AND (comissao_total_corretora IS NULL OR comissao_total_corretora=0)
+            ORDER BY id""").fetchall()
+        out["propostas_comissao_zerada"] = [dict(r) for r in rows]
+    except Exception as e:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        out["propostas_comissao_zerada_erro"] = str(e)[:100]
+
+    # Operadoras distintas que existem em recebimento (já que a tabela operadoras está vazia)
+    try:
+        rows = conn.execute("SELECT DISTINCT operadora FROM recebimento ORDER BY operadora").fetchall()
+        out["operadoras_em_recebimento"] = [r['operadora'] for r in rows]
+    except Exception as e:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        out["operadoras_erro"] = str(e)[:100]
+
+    close_db(conn)
+    return jsonify(out)
+
+
 @app.route('/admin/db/validar')
 @login_required
 @admin_required
