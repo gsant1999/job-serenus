@@ -1875,8 +1875,13 @@ def asaas_diag():
         "comeca_com_cifrao": raw.startswith('$') if raw else False,
         "comeca_com_aspas": (raw.startswith('"') or raw.startswith("'")) if raw else False,
         "prefixo_visivel": (raw[:10] + '...') if len(raw) > 10 else raw,
+        "sufixo_visivel": ('...' + raw[-6:]) if len(raw) > 16 else '',
         "tem_espacos_nas_bordas": raw != raw.strip() if raw else False,
+        "tem_quebra_de_linha": ('\n' in raw or '\r' in raw) if raw else False,
+        "tem_char_nao_ascii": any(ord(c) > 127 for c in raw) if raw else False,
         "chave_processada_prefixo": (ASAAS_API_KEY[:10] + '...') if len(ASAAS_API_KEY) > 10 else ASAAS_API_KEY,
+        "chave_processada_sufixo": ('...' + ASAAS_API_KEY[-6:]) if len(ASAAS_API_KEY) > 16 else '',
+        "chave_processada_comprimento": len(ASAAS_API_KEY),
         "ambiente_detectado": "produção" if "api.asaas.com" in ASAAS_BASE_URL else "sandbox",
         "base_url": ASAAS_BASE_URL,
     }
