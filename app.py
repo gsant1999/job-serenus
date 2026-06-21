@@ -1287,9 +1287,13 @@ def admin_required(f):
 # ─── INTEGRAÇÃO ASAAS (pagamentos PIX para consultores) ──────────────────────────
 import requests as _requests
 
-ASAAS_API_KEY = os.environ.get('ASAAS_API_KEY', '')
+# Lê a chave e remove lixo comum: aspas, espaços e o '$' inicial que o Railway
+# interpreta como referência de variável (a chave real começa com 'aact_').
+ASAAS_API_KEY = (os.environ.get('ASAAS_API_KEY', '') or '').strip().strip('"').strip("'")
+if ASAAS_API_KEY.startswith('$'):
+    ASAAS_API_KEY = ASAAS_API_KEY[1:]
 # Detecta automaticamente sandbox vs produção pelo prefixo da chave
-if ASAAS_API_KEY.startswith('$aact_prod') or ASAAS_API_KEY.startswith('aact_prod'):
+if ASAAS_API_KEY.startswith('aact_prod'):
     ASAAS_BASE_URL = 'https://api.asaas.com/v3'
 else:
     ASAAS_BASE_URL = os.environ.get('ASAAS_BASE_URL', 'https://api-sandbox.asaas.com/v3')
@@ -1425,7 +1429,7 @@ def api_caixa_empresa():
     """Consolida dados financeiros da conta Asaas: saldo, extrato e resumo de cobranças.
     Somente leitura. Usado pelo Caixa da Empresa no fluxo de caixa."""
     if not asaas_configurado():
-        return jsonify({"ok": False, "erro": "Asaas não configurado (defina ASAAS_API_KEY no Railway)."}), 400
+        return jsonify({"ok": False, "erro": "Asaas não configurado. No Railway, a variável ASAAS_API_KEY precisa conter a chave que começa com 'aact_prod_' SEM o cifrão ($) na frente. Edite a variável no painel do serviço e remova o $ inicial."}), 400
 
     resultado = {"ok": True, "ambiente": "produção" if "api.asaas.com" in ASAAS_BASE_URL else "sandbox"}
 
