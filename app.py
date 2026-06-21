@@ -26,11 +26,20 @@ except ImportError:
 app = Flask(__name__)
 # ─── CHAVE SECRETA FIXA PARA SESSÕES PERSISTENTES ───────────────────────
 # Se usar secrets.token_hex(32) toda vez, a session cai após restart!
-app.secret_key = os.environ.get('SECRET_KEY') or 'serenus-job-secret-key-2025-fixo-para-sessoes'
-app.config['SESSION_COOKIE_SECURE'] = True  # HTTPS only
-app.config['SESSION_COOKIE_HTTPONLY'] = True  # Sem acesso JS
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
-app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 30  # 30 dias
+# SECRET_KEY: usa a variável de ambiente. Se não houver (dev), gera uma aleatória
+# por execução — assim NUNCA há uma chave fixa pública no código que permita
+# forjar sessões. Em produção, defina SECRET_KEY no Railway (fixa, para as
+# sessões sobreviverem a deploys).
+_secret_env = os.environ.get('SECRET_KEY')
+if _secret_env:
+    app.secret_key = _secret_env
+else:
+    app.secret_key = secrets.token_hex(32)
+    print("[SEGURANÇA] ⚠️ SECRET_KEY não definida — gerada aleatória (sessões caem a cada deploy). Defina SECRET_KEY no Railway.")
+app.config['SESSION_COOKIE_SECURE'] = True   # HTTPS only
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Sem acesso JS (protege de XSS)
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Proteção CSRF
+app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # 7 dias (sistema financeiro)
 
 # ─── AUTO-INICIALIZAR BANCO DE DADOS ──────────────────────────────────────
 # Garante que o banco é inicializado tanto em dev (python app.py) 
@@ -51,6 +60,57 @@ def _ensure_db_initialized():
         except Exception as e:
             print(f"[DB] ⚠️ Erro ao inicializar: {e}")
             _db_initialized = True  # Evita loop infinito
+        # Inicia o backup automático diário (uma única vez por processo)
+        _iniciar_backup_automatico()
+
+
+_backup_scheduler_iniciado = False
+
+def _fazer_backup_automatico():
+    """Gera um snapshot JSON do banco em /data/backups. Mantém os últimos 30."""
+    try:
+        conn = db()
+        dados = {'versao': 'v14', 'data_backup': datetime.now(TZ_SP).isoformat()}
+        for tabela in ('propostas','parcelas','usuarios','operadoras','recebimento','repasse_corretor','historico_proposta','solicitacoes_edicao'):
+            try:
+                rows = conn.execute(f"SELECT * FROM {tabela}").fetchall()
+                dados[tabela] = [dict(r) for r in rows]
+            except Exception:
+                dados[tabela] = []
+        close_db(conn)
+        if not os.path.isdir('/data'):
+            return  # sem volume persistente, não adianta
+        os.makedirs('/data/backups', exist_ok=True)
+        ts = datetime.now(TZ_SP).strftime('%Y%m%d-%H%M%S')
+        caminho = f"/data/backups/backup-{ts}.json"
+        with open(caminho, 'w', encoding='utf-8') as f:
+            json.dump(dados, f, indent=2, default=str, ensure_ascii=False)
+        print(f"[BACKUP AUTO] ✅ {caminho} ({dados.get('total_propostas', len(dados.get('propostas', [])))} propostas)")
+        # Retenção: mantém só os 30 backups mais recentes
+        try:
+            arqs = sorted([f for f in os.listdir('/data/backups') if f.startswith('backup-') and f.endswith('.json')])
+            for antigo in arqs[:-30]:
+                os.remove(os.path.join('/data/backups', antigo))
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[BACKUP AUTO] ❌ {e}")
+
+def _iniciar_backup_automatico():
+    """Liga o agendador de backup diário às 22:00 (SP). Roda uma vez por processo."""
+    global _backup_scheduler_iniciado
+    if _backup_scheduler_iniciado:
+        return
+    _backup_scheduler_iniciado = True
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        sched = BackgroundScheduler(timezone=TZ_SP)
+        sched.add_job(_fazer_backup_automatico, 'cron', hour=22, minute=0)
+        sched.start()
+        app.scheduler = sched
+        print("[SCHEDULER] ✅ Backup automático diário ligado (22:00 São Paulo)")
+    except Exception as e:
+        print(f"[SCHEDULER] ⚠️ Não foi possível iniciar backup automático: {e}")
 
 @app.template_filter('from_json')
 def _from_json(s):
@@ -879,9 +939,10 @@ def init_db():
     # Admin padrão
     admin = conn.execute("SELECT id FROM usuarios WHERE email='guilherme@serenuscorretora.com.br'").fetchone()
     if not admin:
+        from werkzeug.security import generate_password_hash as _gph
         conn.execute("""INSERT INTO usuarios (nome,email,senha_hash,perfil,regime_base)
             VALUES (?,?,?,?,?)""",
-            ('Guilherme Santos','guilherme@serenuscorretora.com.br',hashlib.sha256("serenus2025".encode()).hexdigest(),'admin','com_fixo_lead'))
+            ('Guilherme Santos','guilherme@serenuscorretora.com.br',_gph("serenus2025", method='pbkdf2:sha256', salt_length=16),'admin','com_fixo_lead'))
     
     # Comissões padrão
     com_default = [
@@ -1249,7 +1310,33 @@ def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None, status_overrid
 
 
 # ─── AUTH ────────────────────────────────────────────────────────────────────────
-def hash_senha(s): return hashlib.sha256(s.encode()).hexdigest()
+# Hash de senha: PBKDF2-SHA256 com salt (via Werkzeug). Mantém retrocompatibilidade
+# com senhas antigas em SHA-256 puro — essas são migradas no próximo login.
+from werkzeug.security import generate_password_hash, check_password_hash
+
+def hash_senha(s):
+    """Gera hash seguro PBKDF2 (com salt automático) para uma senha nova."""
+    return generate_password_hash(s or '', method='pbkdf2:sha256', salt_length=16)
+
+def _eh_sha256_legado(h):
+    """Detecta o formato antigo: SHA-256 puro = 64 caracteres hexadecimais."""
+    return isinstance(h, str) and len(h) == 64 and all(c in '0123456789abcdef' for c in h.lower())
+
+def verifica_senha(senha_digitada, hash_armazenado):
+    """Verifica senha aceitando tanto o formato novo (PBKDF2) quanto o antigo (SHA-256).
+    Retorna (ok: bool, precisa_migrar: bool)."""
+    if not hash_armazenado:
+        return False, False
+    if _eh_sha256_legado(hash_armazenado):
+        # Formato antigo — compara SHA-256 puro
+        ok = hashlib.sha256((senha_digitada or '').encode()).hexdigest() == hash_armazenado
+        return ok, ok  # se acertou, sinaliza para migrar
+    # Formato novo — PBKDF2
+    try:
+        return check_password_hash(hash_armazenado, senha_digitada or ''), False
+    except Exception:
+        return False, False
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # SEGURANÇA: Decorators robusto + Sanitização + Logging
@@ -2403,13 +2490,23 @@ def usuario_excluir(uid):
 def login():
     if request.method == 'POST':
         email = request.form.get('email','').strip().lower()
-        senha = hash_senha(request.form.get('senha',''))
+        senha_digitada = request.form.get('senha','')
         conn = db()
-        u = conn.execute("SELECT * FROM usuarios WHERE email=? AND senha_hash=? AND ativo=1",(email,senha)).fetchone()
-        close_db(conn)
+        u = conn.execute("SELECT * FROM usuarios WHERE email=? AND ativo=1",(email,)).fetchone()
         if u:
-            session.update({'user_id':u['id'],'nome':u['nome'],'perfil':u['perfil'],'regime_base':u['regime_base'],'foto':u['foto'] or ''})
-            return redirect(url_for('dashboard'))
+            ok, precisa_migrar = verifica_senha(senha_digitada, u['senha_hash'])
+            if ok:
+                # Migra senha antiga (SHA-256) para o formato seguro (PBKDF2) silenciosamente
+                if precisa_migrar:
+                    try:
+                        conn.execute("UPDATE usuarios SET senha_hash=? WHERE id=?", (hash_senha(senha_digitada), u['id']))
+                        conn.commit()
+                    except Exception:
+                        pass
+                close_db(conn)
+                session.update({'user_id':u['id'],'nome':u['nome'],'perfil':u['perfil'],'regime_base':u['regime_base'],'foto':u['foto'] or ''})
+                return redirect(url_for('dashboard'))
+        close_db(conn)
         flash('E-mail ou senha incorretos.')
     return render_template('login.html')
 
