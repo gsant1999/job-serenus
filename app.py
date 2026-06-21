@@ -1204,6 +1204,33 @@ def _nivel_por_producao(prod, conn):
     return 'n3'
 
 
+def _producao_mes(conn, usuario_id, criado_em, excluir_pid=None):
+    """Soma a produção (valor) do consultor no mês de criado_em, exceto a própria proposta.
+    Usa range de datas — compatível com PostgreSQL (timestamp) e SQLite (texto).
+    Evita substr()/to_char() que diferem entre os bancos."""
+    ma = str(criado_em or '')[:7]  # 'YYYY-MM'
+    if len(ma) != 7:
+        return 0
+    try:
+        ini = ma + '-01'
+        ano, mes = int(ma[:4]), int(ma[5:7])
+        fim = f"{ano+1}-01-01" if mes == 12 else f"{ano}-{mes+1:02d}-01"
+        if excluir_pid is not None:
+            r = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM propostas
+                WHERE usuario_id=? AND criado_em>=? AND criado_em<? AND id<>?""",
+                (usuario_id, ini, fim, excluir_pid)).fetchone()
+        else:
+            r = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM propostas
+                WHERE usuario_id=? AND criado_em>=? AND criado_em<?""",
+                (usuario_id, ini, fim)).fetchone()
+        return r['v'] if r else 0
+    except Exception:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        return 0
+
+
 def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidade='', tipo_pessoa=''):
     """Motor de comissão isolando a regra da Taxa de Adesão."""
     conn = db()
@@ -1624,10 +1651,7 @@ def corrigir_operadoras():
                 regime = (u['regime_base'] if u else None) or 'sem_lead_sem_fixo'
                 tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
                 # Produção acumulada do mês (igual ao recálculo oficial) para nível correto
-                ma = (p['criado_em'] or '')[:7]
-                prod_antes = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM propostas
-                    WHERE usuario_id=? AND substr(criado_em,1,7)=? AND id<>?""",
-                    (p['usuario_id'], ma, pid)).fetchone()['v']
+                prod_antes = _producao_mes(conn, p['usuario_id'], p['criado_em'], excluir_pid=pid)
                 prod_acum = prod_antes + (p['valor'] or 0)
                 c = calc_comissao(nova_op, regime, prod_acum, p['valor'] or 0, p['modalidade'], tp)
                 conn.execute("""UPDATE propostas SET comissao_total_corretora=?, comissao_consultor=?,
@@ -3141,9 +3165,7 @@ def editar_consultor(pid):
         close_db(conn); return jsonify({"ok": False, "msg": "Consultor ou proposta inválidos"}), 400
 
     # Produção do mês do NOVO consultor (exceto esta proposta) + esta venda
-    ma = (p['criado_em'] or '')[:7]
-    prod_antes = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM propostas
-        WHERE usuario_id=? AND substr(criado_em,1,7)=? AND id<>?""", (novo_uid, ma, pid)).fetchone()['v']
+    prod_antes = _producao_mes(conn, novo_uid, p['criado_em'], excluir_pid=pid)
     prod_acumulada = prod_antes + (p['valor'] or 0)
     c = calc_comissao(p['adm_operadora'], u['regime_base'], prod_acumulada, p['valor'] or 0, p['modalidade'], p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
 
@@ -3180,10 +3202,7 @@ def recalcular_todas():
     recalc, avisos = 0, []
     for p in props:
         regime = p['regime_base'] or 'sem_lead_sem_fixo'
-        ma = (p['criado_em'] or '')[:7]
-        prod_antes = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM propostas
-            WHERE usuario_id=? AND substr(criado_em,1,7)=? AND id<>?""",
-            (p['usuario_id'], ma, p['id'])).fetchone()['v']
+        prod_antes = _producao_mes(conn, p['usuario_id'], p['criado_em'], excluir_pid=p['id'])
         prod_acum = prod_antes + (p['valor'] or 0)
         tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
         c = calc_comissao(p['adm_operadora'], regime, prod_acum, p['valor'] or 0, p['modalidade'], tp)
