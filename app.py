@@ -1052,6 +1052,32 @@ def init_db():
     if not is_pg:
         conn.commit()
 
+    # ─── ÍNDICES: aceleram as queries mais frequentes (seguro, não altera dados) ───
+    indices = [
+        "CREATE INDEX IF NOT EXISTS idx_propostas_usuario ON propostas(usuario_id)",
+        "CREATE INDEX IF NOT EXISTS idx_propostas_status ON propostas(status)",
+        "CREATE INDEX IF NOT EXISTS idx_propostas_criado ON propostas(criado_em)",
+        "CREATE INDEX IF NOT EXISTS idx_parcelas_proposta ON parcelas(proposta_id)",
+        "CREATE INDEX IF NOT EXISTS idx_parcelas_status ON parcelas(status)",
+        "CREATE INDEX IF NOT EXISTS idx_historico_proposta ON historico_proposta(proposta_id)",
+        "CREATE INDEX IF NOT EXISTS idx_solic_proposta ON solicitacoes_edicao(proposta_id)",
+        "CREATE INDEX IF NOT EXISTS idx_solic_status ON solicitacoes_edicao(status)",
+        "CREATE INDEX IF NOT EXISTS idx_recebimento_op ON recebimento(operadora, plano)",
+        "CREATE INDEX IF NOT EXISTS idx_repasse_op ON repasse_corretor(operadora, plano, modelo, nivel)",
+        "CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email)",
+        "CREATE INDEX IF NOT EXISTS idx_parcelas_competencia ON parcelas(competencia)",
+    ]
+    for idx in indices:
+        try:
+            conn.execute(idx)
+            if is_pg: conn.commit()
+        except Exception:
+            if is_pg:
+                try: conn.rollback()
+                except Exception: pass
+    if not is_pg:
+        conn.commit()
+
     close_db(conn)
 
 
