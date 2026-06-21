@@ -1533,6 +1533,38 @@ def asaas_teste():
     return jsonify({"ok": False, "erro": data.get('_erro') or data.get('errors') or data, "status": status}), 400
 
 
+@app.route('/admin/asaas/diag')
+@login_required
+@admin_required
+def asaas_diag():
+    """Diagnóstico do Asaas — mostra o estado da chave SEM expô-la, e o erro real."""
+    raw = os.environ.get('ASAAS_API_KEY', '')
+    info = {
+        "variavel_existe": bool(raw),
+        "comprimento": len(raw),
+        "comeca_com_cifrao": raw.startswith('$') if raw else False,
+        "comeca_com_aspas": (raw.startswith('"') or raw.startswith("'")) if raw else False,
+        "prefixo_visivel": (raw[:10] + '...') if len(raw) > 10 else raw,
+        "tem_espacos_nas_bordas": raw != raw.strip() if raw else False,
+        "chave_processada_prefixo": (ASAAS_API_KEY[:10] + '...') if len(ASAAS_API_KEY) > 10 else ASAAS_API_KEY,
+        "ambiente_detectado": "produção" if "api.asaas.com" in ASAAS_BASE_URL else "sandbox",
+        "base_url": ASAAS_BASE_URL,
+    }
+    # Testa a conexão de fato
+    if asaas_configurado():
+        data, status = asaas_request('GET', '/finance/balance')
+        info["conexao_status_http"] = status
+        if status == 200:
+            info["conexao"] = "OK"
+            info["saldo"] = data.get('balance')
+        else:
+            info["conexao"] = "FALHOU"
+            info["erro_asaas"] = data.get('_erro') or data.get('errors') or str(data)[:300]
+    else:
+        info["conexao"] = "chave vazia após processamento"
+    return jsonify(info)
+
+
 @app.route('/api/caixa-empresa')
 @login_required
 @admin_required
