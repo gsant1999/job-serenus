@@ -2,6 +2,14 @@
 {% block title %}Proposta #{{ p.id }}{% endblock %}
 
 {% block content %}
+<style>
+.btn-del-anexo {
+  background: rgba(251,132,151,.12); color: #fb8497; border: 1px solid rgba(251,132,151,.3);
+  border-radius: 6px; width: 24px; height: 24px; font-size: 16px; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0; transition: all .15s;
+}
+.btn-del-anexo:hover { background: rgba(251,132,151,.25); border-color: #fb8497; }
+</style>
 <div class="topbar">
   <div>
     <h1>Proposta #{{ p.id }}</h1>
@@ -282,20 +290,29 @@
     <div class="card-header"><h3>Documentos</h3></div>
     <div class="card-body" style="display:flex; gap:12px; flex-wrap:wrap;">
       {% if p.contrato_arquivo %}
-      <a href="/anexos/{{ p.contrato_arquivo }}" target="_blank" class="btn-outline" style="font-size:12.5px;">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        Contrato assinado
-      </a>
+      <div style="display:inline-flex; align-items:center; gap:4px;">
+        <a href="/anexos/{{ p.contrato_arquivo }}" target="_blank" class="btn-outline" style="font-size:12.5px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Contrato assinado
+        </a>
+        {% if session.perfil == 'admin' %}<button onclick="excluirAnexo('contrato','')" class="btn-del-anexo" title="Excluir contrato">×</button>{% endif %}
+      </div>
       {% endif %}
       {% if p.comprovante_boleto %}
-      <a href="/anexos/{{ p.comprovante_boleto }}" target="_blank" class="btn-outline" style="font-size:12.5px;">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-        Comprovante 1º boleto
-      </a>
+      <div style="display:inline-flex; align-items:center; gap:4px;">
+        <a href="/anexos/{{ p.comprovante_boleto }}" target="_blank" class="btn-outline" style="font-size:12.5px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+          Comprovante 1º boleto
+        </a>
+        {% if session.perfil == 'admin' %}<button onclick="excluirAnexo('comprovante','')" class="btn-del-anexo" title="Excluir comprovante">×</button>{% endif %}
+      </div>
       {% endif %}
       {% if p.anexos and p.anexos != '[]' %}
         {% for arq in p.anexos|from_json %}
-        <a href="/anexos/{{ arq }}" target="_blank" class="btn-outline" style="font-size:12.5px;">Documento {{ loop.index }}</a>
+        <div style="display:inline-flex; align-items:center; gap:4px;">
+          <a href="/anexos/{{ arq }}" target="_blank" class="btn-outline" style="font-size:12.5px;">Documento {{ loop.index }}</a>
+          {% if session.perfil == 'admin' %}<button onclick="excluirAnexo('doc','{{ arq }}')" class="btn-del-anexo" title="Excluir documento">×</button>{% endif %}
+        </div>
         {% endfor %}
       {% endif %}
     </div>
@@ -665,6 +682,21 @@ async function darAceite(id) {
     const res = await fetch(`/parcela/${id}/aceite`, { method: 'POST' });
     if ((await res.json()).ok) { toast('Aceite registrado!', 'ok'); setTimeout(() => location.reload(), 800); }
   } catch(e) { toast('Erro', 'err'); }
+}
+
+async function excluirAnexo(tipo, nome) {
+  const label = tipo === 'contrato' ? 'o contrato' : (tipo === 'comprovante' ? 'o comprovante' : 'este documento');
+  if (!confirm(`Excluir ${label}? Esta ação não pode ser desfeita.`)) return;
+  try {
+    const res = await fetch(`/proposta/{{ p.id }}/anexo/excluir`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({tipo, nome})
+    });
+    const j = await res.json();
+    if (j.ok) { toast('Anexo excluído', 'ok'); setTimeout(() => location.reload(), 700); }
+    else toast(j.msg || 'Erro ao excluir', 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
 }
 </script>
 {% endblock %}

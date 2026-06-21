@@ -66,7 +66,14 @@ if not os.path.exists(os.path.join(DATA_DIR, 'job.db')):
         DATA_DIR = alt_data
 os.makedirs(DATA_DIR, exist_ok=True)
 DB = os.path.join(DATA_DIR, "job.db")
-UPLOAD_FOLDER = os.path.join(DATA_DIR, "anexos")
+
+# Anexos: SEMPRE no volume persistente /data/anexos quando o volume existir.
+# Em Postgres o job.db não fica em /data, mas os ANEXOS precisam persistir entre
+# deploys — então priorizamos /data (volume Railway) independente do DB_MODE.
+if os.path.isdir('/data'):
+    UPLOAD_FOLDER = '/data/anexos'
+else:
+    UPLOAD_FOLDER = os.path.join(DATA_DIR, "anexos")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ─── MODO DO BANCO: PostgreSQL (Railway) com fallback SQLite ────────────────
@@ -1919,6 +1926,49 @@ def servir_anexo(nome):
     if not os.path.exists(os.path.join(UPLOAD_FOLDER, nome)):
         abort(404)
     return send_from_directory(UPLOAD_FOLDER, nome)
+
+@app.route('/proposta/<int:pid>/anexo/excluir', methods=['POST'])
+@login_required
+@admin_required
+def excluir_anexo(pid):
+    """Exclui um anexo de uma proposta. Apenas admin.
+    tipo: 'contrato' | 'comprovante' | 'doc' (com 'nome' do arquivo no array anexos)."""
+    d = request.json or {}
+    tipo = (d.get('tipo') or '').strip()
+    nome = os.path.basename((d.get('nome') or '').strip())
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn); return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    arquivo_remover = None
+    if tipo == 'contrato':
+        arquivo_remover = p['contrato_arquivo']
+        conn.execute("UPDATE propostas SET contrato_arquivo=NULL WHERE id=?", (pid,))
+    elif tipo == 'comprovante':
+        arquivo_remover = p['comprovante_boleto']
+        conn.execute("UPDATE propostas SET comprovante_boleto=NULL WHERE id=?", (pid,))
+    elif tipo == 'doc':
+        try:
+            lista = json.loads(p['anexos']) if p['anexos'] else []
+        except Exception:
+            lista = []
+        if nome in lista:
+            lista.remove(nome)
+            arquivo_remover = nome
+            conn.execute("UPDATE propostas SET anexos=? WHERE id=?", (json.dumps(lista), pid))
+    else:
+        close_db(conn); return jsonify({"ok": False, "msg": "Tipo inválido"}), 400
+
+    conn.commit(); close_db(conn)
+
+    # Remove o arquivo físico (best-effort; não falha se já sumiu)
+    if arquivo_remover:
+        try:
+            os.remove(os.path.join(UPLOAD_FOLDER, os.path.basename(arquivo_remover)))
+        except Exception:
+            pass
+    return jsonify({"ok": True})
 
 # ─── EMAIL UTILITÁRIO ────────────────────────────────────────────────────────
 def _enviar_email(destinatario, assunto, corpo_html):
