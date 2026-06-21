@@ -487,6 +487,7 @@
 
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       <button class="btn" style="flex:1;min-width:160px;" id="ea-btn-enviar" onclick="enviarEmailAffinity()">Enviar para a Affinity</button>
+      <button class="btn-outline" style="flex:1;min-width:160px;" id="ea-btn-teste" onclick="enviarEmailTeste()">Enviar teste para mim</button>
       <button class="btn-outline" style="flex:1;min-width:120px;" onclick="copiarEmailAffinity()">Copiar texto</button>
       <button class="btn-outline" onclick="fecharEmailAffinity()">Cancelar</button>
     </div>
@@ -809,6 +810,26 @@ async function abrirEmailAffinity() {
 
 function fecharEmailAffinity() {
   document.getElementById('modal-email-affinity').classList.remove('open');
+}
+
+async function enviarEmailTeste() {
+  const assunto = document.getElementById('ea-assunto').value.trim();
+  const corpo   = document.getElementById('ea-corpo').value.trim();
+  const partic  = document.getElementById('ea-particularidades').value.trim();
+  if (!assunto || !corpo) { toast('Preencha assunto e corpo', 'err'); return; }
+
+  const btn = document.getElementById('ea-btn-teste');
+  btn.disabled = true; btn.textContent = 'Enviando teste...';
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/enviar-teste`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ assunto, corpo, particularidades: partic })
+    });
+    const d = await res.json();
+    toast(d.msg || (d.ok ? 'Teste enviado' : 'Erro'), d.ok ? 'ok' : 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
+  btn.disabled = false; btn.textContent = 'Enviar teste para mim';
 }
 
 async function enviarEmailAffinity() {
