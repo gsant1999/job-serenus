@@ -57,25 +57,38 @@ def _from_json(s):
     try: return json.loads(s) if s else []
     except: return []
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# ─── PERSISTÊNCIA: dados em pasta FIXA no computador, fora das pastas de versão ───
-# Assim os dados NUNCA somem ao trocar de versão. Pode sobrescrever via variável de ambiente.
-DATA_DIR = os.environ.get("JOB_DATA_DIR") or os.path.join(os.path.expanduser("~"), "JOB_Serenus_Dados")
-# Se /data/job.db existe e tem dados, usa /data. Senão volta pro home.
-if not os.path.exists(os.path.join(DATA_DIR, 'job.db')):
-    alt_data = '/data'
-    if os.path.exists(os.path.join(alt_data, 'job.db')):
-        DATA_DIR = alt_data
-os.makedirs(DATA_DIR, exist_ok=True)
+# ─── PERSISTÊNCIA: dados em pasta FIXA, fora das pastas de versão ───
+
+def _eh_gravavel(caminho):
+    """Testa de verdade se dá para criar pasta e escrever arquivo no caminho."""
+    try:
+        os.makedirs(caminho, exist_ok=True)
+        teste = os.path.join(caminho, '.write_test')
+        with open(teste, 'w') as f:
+            f.write('ok')
+        os.remove(teste)
+        return True
+    except Exception:
+        return False
+
+# Prioridade de diretório persistente:
+# 1) JOB_DATA_DIR (se setado e gravável)  2) /data (volume Railway, se gravável)  3) ~/JOB_Serenus_Dados
+_env_dir = os.environ.get("JOB_DATA_DIR")
+if _env_dir and _eh_gravavel(_env_dir):
+    DATA_DIR = _env_dir
+elif _eh_gravavel('/data'):
+    DATA_DIR = '/data'
+else:
+    DATA_DIR = os.path.join(os.path.expanduser("~"), "JOB_Serenus_Dados")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    print(f"[PERSIST] ⚠️ ATENÇÃO: volume persistente indisponível! Usando pasta EFÊMERA {DATA_DIR} — anexos somem a cada deploy.")
+
 DB = os.path.join(DATA_DIR, "job.db")
 
-# Anexos: SEMPRE no volume persistente /data/anexos quando o volume existir.
-# Em Postgres o job.db não fica em /data, mas os ANEXOS precisam persistir entre
-# deploys — então priorizamos /data (volume Railway) independente do DB_MODE.
-if os.path.isdir('/data'):
-    UPLOAD_FOLDER = '/data/anexos'
-else:
-    UPLOAD_FOLDER = os.path.join(DATA_DIR, "anexos")
+# Anexos no MESMO diretório persistente escolhido acima.
+UPLOAD_FOLDER = os.path.join(DATA_DIR, "anexos")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+print(f"[PERSIST] DATA_DIR={DATA_DIR} | UPLOAD_FOLDER={UPLOAD_FOLDER} | gravável={_eh_gravavel(UPLOAD_FOLDER)}")
 
 # ─── MODO DO BANCO: PostgreSQL (Railway) com fallback SQLite ────────────────
 DB_MODE = 'postgres' if (os.environ.get('DATABASE_URL') and HAS_POSTGRES) else 'sqlite'
