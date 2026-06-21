@@ -506,7 +506,7 @@
 
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       <button class="btn" style="flex:1;min-width:160px;" id="ea-btn-enviar" onclick="enviarEmailAffinity()">Enviar para a Affinity</button>
-      {% if session.modo_teste %}<button class="btn-outline" style="flex:1;min-width:160px;border-color:rgba(245,158,11,.5);color:#f59e0b;" id="ea-btn-teste" onclick="enviarEmailTeste()">🧪 Enviar teste para mim</button>{% endif %}
+      {% if session.modo_teste %}<button class="btn-outline" style="flex:1;min-width:160px;border-color:rgba(245,158,11,.5);color:#f59e0b;" id="ea-btn-teste" onclick="enviarEmailTeste()">Enviar teste para mim</button>{% endif %}
       <button class="btn-outline" style="flex:1;min-width:120px;" onclick="copiarEmailAffinity()">Copiar texto</button>
       <button class="btn-outline" onclick="fecharEmailAffinity()">Cancelar</button>
     </div>
@@ -551,7 +551,7 @@
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn" style="flex:1;min-width:160px;" id="ant-btn-enviar" onclick="enviarAntecipacao(false)">Enviar à Affinity</button>
-        {% if session.modo_teste %}<button class="btn-outline" style="flex:1;min-width:160px;border-color:rgba(245,158,11,.5);color:#f59e0b;" onclick="enviarAntecipacao(true)">🧪 Enviar teste para mim</button>{% endif %}
+        {% if session.modo_teste %}<button class="btn-outline" style="flex:1;min-width:160px;border-color:rgba(245,158,11,.5);color:#f59e0b;" onclick="enviarAntecipacao(true)">Enviar teste para mim</button>{% endif %}
         <button class="btn-outline" onclick="fecharAntecipacao()">Cancelar</button>
       </div>
     </div>

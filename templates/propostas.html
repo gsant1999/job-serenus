@@ -14,7 +14,7 @@
         <span style="position:absolute;inset:0;border-radius:18px;background:{% if session.modo_teste %}#f59e0b{% else %}#3a3a4a{% endif %};transition:.2s;"></span>
         <span style="position:absolute;top:2px;left:{% if session.modo_teste %}16px{% else %}2px{% endif %};width:14px;height:14px;border-radius:50%;background:#fff;transition:.2s;"></span>
       </span>
-      <span style="color:{% if session.modo_teste %}#f59e0b{% else %}var(--cinza){% endif %};font-weight:{% if session.modo_teste %}600{% else %}400{% endif %};">🧪 Modo Teste</span>
+      <span style="color:{% if session.modo_teste %}#f59e0b{% else %}var(--cinza){% endif %};font-weight:{% if session.modo_teste %}600{% else %}400{% endif %};">Modo Teste</span>
     </label>
     <button class="btn-outline" onclick="recalcularTodas(this)">Recalcular comissões</button>{% endif %}
     <button class="btn-outline" onclick="exportar()">Exportar CSV</button>
@@ -115,7 +115,7 @@ async function toggleModoTeste(ev) {
     const j = await res.json();
     if (j.ok) {
       if (typeof toast === 'function') {
-        toast(j.modo_teste ? '🧪 Modo Teste LIGADO — botões de teste de e-mail habilitados' : 'Modo Teste desligado', j.modo_teste ? 'ok' : 'ok');
+        toast(j.modo_teste ? 'Modo Teste LIGADO — botões de teste de e-mail habilitados' : 'Modo Teste desligado', j.modo_teste ? 'ok' : 'ok');
       }
       setTimeout(() => location.reload(), 600);
     }

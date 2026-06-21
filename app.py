@@ -3102,7 +3102,7 @@ def antecipacao_enviar(pid):
     linha_cliente = f"{linha_cliente} (Contrato Nº {numero_contrato})"
 
     assunto = "Solicitação de Antecipação de Comissão - Contratos"
-    corpo_html = _montar_email_antecipacao_html([linha_cliente])
+    corpo_html = _montar_email_antecipacao_html([linha_cliente], eh_teste=eh_teste, pid=pid)
 
     # Anexos: contrato + comprovante (+ extras)
     lista_anexos = [p['comprovante_boleto'], p['contrato_arquivo']]
@@ -3132,9 +3132,10 @@ def antecipacao_enviar(pid):
         return jsonify({"ok": False, "msg": f"Falha no envio: {erro}"}), 500
 
 
-def _montar_email_antecipacao_html(linhas_clientes):
-    """Monta o HTML do e-mail de antecipação no padrão Serenus.
+def _montar_email_antecipacao_html(linhas_clientes, eh_teste=False, pid=None):
+    """Monta o HTML do e-mail de antecipação no MESMO padrão visual do e-mail de proposta.
     linhas_clientes: lista de strings (ex: '63 299 486 WILLAMI ... (Contrato Nº 97106295)')."""
+    logo_url = "https://job-serenus-production.up.railway.app/static/logo_arcos.png"
     plural = len(linhas_clientes) > 1
     termo_contrato = "aos contratos recém-implantados" if plural else "ao contrato recém-implantado"
     termo_dados = "os dados dos clientes" if plural else "os dados do cliente"
@@ -3142,33 +3143,79 @@ def _montar_email_antecipacao_html(linhas_clientes):
                    if plural else
                    "O contrato assinado e o respectivo comprovante de pagamento já estão anexados a este e-mail.")
     itens = ''.join(
-        f'<li style="margin:4px 0; font-weight:600; color:#1f2937;">{l}</li>' for l in linhas_clientes
+        f'<div style="padding:10px 14px; background:#f8f9fb; border-left:3px solid #1fd8a4; margin:8px 0; font-size:14px; color:#0f1f33; font-weight:600;">{l}</div>'
+        for l in linhas_clientes
     )
-    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head>
-<body style="margin:0; padding:0; background:#f4f6f9; font-family:Arial,Helvetica,sans-serif;">
-  <div style="max-width:620px; margin:0 auto; padding:28px;">
-    <div style="background:#fff; border-radius:12px; padding:30px; border:1px solid #e5e7eb;">
-      <p style="font-size:14.5px; color:#374151; line-height:1.7;">Prezada Pamela,</p>
-      <p style="font-size:14.5px; color:#374151; line-height:1.7;">
-        Gostaria de solicitar a antecipação do pagamento da comissão referente {termo_contrato}.
-        Seguem abaixo {termo_dados} para conferência:
-      </p>
-      <ul style="font-size:14px; color:#1f2937; line-height:1.7; padding-left:20px;">{itens}</ul>
-      <p style="font-size:14.5px; color:#374151; line-height:1.7;">{termo_anexo}</p>
-      <p style="font-size:14.5px; color:#374151; line-height:1.7;">
-        Poderiam me confirmar o recebimento e o prazo para a liberação da antecipação?
-      </p>
-      <p style="font-size:14.5px; color:#374151; line-height:1.7;">
-        Fico à disposição caso precisem de mais alguma informação ou documentação adicional.
-      </p>
-      <p style="font-size:14.5px; color:#374151; line-height:1.7; margin-top:24px;">Atenciosamente,</p>
-      <div style="margin-top:8px; padding-top:16px; border-top:1px solid #e5e7eb;">
-        <div style="font-weight:700; color:#0f172a; font-size:14px;">Serenus Corretora de Saúde</div>
-        <div style="color:#64748b; font-size:12.5px; margin-top:2px;">guilherme@serenuscorretora.com.br</div>
+
+    html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; }}
+    .wrapper {{ background: #f5f7fa; padding: 24px; }}
+    .container {{ max-width: 640px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
+    .header {{ background: linear-gradient(135deg, #0f1f33 0%, #1a2f4a 100%); padding: 32px; text-align: center; }}
+    .logo {{ height: 40px; margin-bottom: 16px; display: block; margin-left: auto; margin-right: auto; }}
+    .header-title {{ color: white; font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.5px; }}
+    .header-subtitle {{ color: #1fd8a4; font-size: 12px; font-weight: 600; margin: 10px 0 0; letter-spacing: 0.8px; text-transform: uppercase; }}
+    .stripe {{ background: #1fd8a4; height: 4px; }}
+    .content {{ padding: 40px 36px; }}
+    .content p {{ margin: 16px 0; line-height: 1.7; font-size: 14px; }}
+    .content p:first-child {{ margin-top: 0; }}
+    .section-title {{ font-size: 13px; font-weight: 700; color: #0f1f33; text-transform: uppercase; letter-spacing: 0.8px; margin: 28px 0 14px; padding-bottom: 10px; border-bottom: 2px solid #1fd8a4; }}
+    .footer {{ background: #f0f2f5; border-top: 1px solid #e5e9f0; padding: 24px 36px; font-size: 12px; color: #666; line-height: 1.8; }}
+    .footer-brand {{ font-weight: 700; color: #0f1f33; margin-bottom: 4px; }}
+    .footer-small {{ font-size: 11px; color: #999; margin-top: 12px; padding-top: 12px; border-top: 1px solid #d1d5db; }}
+    .test-banner {{ background: #f43f7c; color: white; padding: 14px 36px; text-align: center; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; }}
+    .cta {{ background: #f8f9fb; border-left: 4px solid #1fd8a4; padding: 16px; margin: 24px 0; font-size: 13px; color: #333; }}
+    .cta strong {{ color: #0f1f33; }}
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="container">
+      {"<div class='test-banner'>MODO TESTE — Este e-mail foi enviado apenas para você. A Affinity não recebeu.</div>" if eh_teste else ""}
+
+      <div class="header">
+        <img src="{logo_url}" alt="Serenus" class="logo">
+        <h1 class="header-title">Antecipação de Comissão</h1>
+        <p class="header-subtitle">Solicitação de Antecipação · Sistema JOB</p>
+      </div>
+
+      <div class="stripe"></div>
+
+      <div class="content">
+        <p>Prezada Pamela,</p>
+        <p>Gostaria de solicitar a antecipação do pagamento da comissão referente {termo_contrato}. Seguem abaixo {termo_dados} para conferência:</p>
+
+        <div class="section-title">Dados para Conferência</div>
+        {itens}
+
+        <p>{termo_anexo}</p>
+        <p>Poderiam me confirmar o recebimento e o prazo para a liberação da antecipação?</p>
+
+        <div class="cta">
+          <strong>À disposição:</strong><br>
+          Fico à disposição caso precisem de mais alguma informação ou documentação adicional.
+        </div>
+
+        <p style="margin-top:24px;">Atenciosamente,</p>
+      </div>
+
+      <div class="footer">
+        <div class="footer-brand">Serenus Corretora de Saúde</div>
+        <div>guilherme@serenuscorretora.com.br</div>
+        <div class="footer-small">
+          Sistema JOB{f' • Proposta #{pid}' if pid else ''} • {datetime.now(TZ_SP).strftime('%d/%m/%Y às %H:%M')}
+        </div>
       </div>
     </div>
   </div>
-</body></html>"""
+</body>
+</html>"""
+    return html
 
 
 @app.route('/api/etiquetas')
