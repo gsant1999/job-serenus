@@ -92,7 +92,7 @@
   {% if session.perfil == 'admin' %}
   <div class="card" style="margin-bottom:16px;">
     <div class="card-header"><h3>Comissões</h3></div>
-    <div class="card-body" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
+    <div class="card-body dados-grid" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
       <div style="background:rgba(59,130,246,.12); padding:14px; border-radius:8px; text-align:center;">
         <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Bruto corretora</div>
         <div style="font-family:'Sora',sans-serif; font-size:20px; color:var(--info); margin-top:5px;">R$ {{ "%.2f"|format(p.comissao_total_corretora or 0)|replace('.',',') }}</div>
@@ -252,7 +252,7 @@
       <p style="font-size:12.5px; color:var(--cinza); margin-bottom:14px;">O consultor solicitou as seguintes alterações. Revise e decida:</p>
       <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
         {% for campo, info in solic_pendente.alteracoes_parsed.items() %}
-        <div style="display:grid; grid-template-columns:140px 1fr; gap:10px; align-items:center; padding:8px 12px; background:var(--panel-2,#1b1b27); border-radius:7px; font-size:13px;">
+        <div class="solic-diff" style="display:grid; grid-template-columns:140px 1fr; gap:10px; align-items:center; padding:8px 12px; background:var(--panel-2,#1b1b27); border-radius:7px; font-size:13px;">
           <div style="font-weight:600; color:var(--texto,#fff);">{{ info.label }}</div>
           <div><span style="color:#f43f7c; text-decoration:line-through;">{{ info.de }}</span> <span style="color:var(--cinza);">→</span> <span style="color:var(--teal); font-weight:600;">{{ info.para }}</span></div>
         </div>
@@ -271,18 +271,18 @@
   <div class="card" style="margin-bottom:16px;">
     <div class="card-header">
       <h3>Dados da proposta</h3>
-      {% if session.perfil == 'admin' %}<div style="display:flex; gap:8px; flex-wrap:wrap;">
+      {% if session.perfil == 'admin' %}<div class="acoes-proposta" style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEdicao()">Editar proposta</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEmailAffinity()">Enviar à Affinity</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(31,216,164,.4); color:var(--teal);" onclick="abrirAntecipacao()">Solicitar antecipação</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirConsultor()">Trocar consultor</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.3); color:var(--rosa);" onclick="abrirEstorno()">Estornar</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.5); color:var(--rosa);" onclick="abrirExclusao()">Excluir</button>
-      </div>{% else %}<div style="display:flex; gap:8px; flex-wrap:wrap;">
+      </div>{% else %}<div class="acoes-proposta" style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(31,216,164,.4); color:var(--teal);" onclick="abrirEdicao()">Solicitar alteração</button>
       </div>{% endif %}
     </div>
-    <div class="card-body" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+    <div class="card-body dados-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
       {% for label, valor in [
         ('Consultor', p.consultor),
         ('Quem subiu a venda', p.quem_subiu),
@@ -440,7 +440,7 @@
   <!-- Contatos -->
   <div class="card" style="margin-bottom:16px;">
     <div class="card-header"><h3>Contatos</h3></div>
-    <div class="card-body" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+    <div class="card-body dados-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
       <div>
         <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">Resp. contrato</div>
         <div style="font-size:13px;">{{ p.resp_contrato }}<br>
@@ -629,7 +629,7 @@
     {% for secao in campos_secoes %}
     <div style="margin-bottom:18px;">
       <div style="font-size:11px; font-weight:700; color:var(--teal); text-transform:uppercase; letter-spacing:.6px; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid var(--borda);">{{ secao.secao }}</div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <div class="edit-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
         {% for c in secao.campos %}
         <div class="campo" {% if c.tipo == 'textarea' %}style="grid-column:1/-1;"{% endif %}>
           <label style="font-size:11.5px;">{{ c.label }}</label>

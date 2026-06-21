@@ -288,6 +288,42 @@
     .m-4, .m-3 { grid-template-columns:1fr; }
     .topbar h1 { font-size:14px; }
     .topbar .sub { display:none; }
+
+    /* ─── Caixa da Empresa: cards empilham 2x2 depois 1 coluna ─── */
+    .cx-grid { grid-template-columns:1fr 1fr !important; }
+    .cx-saldo-val { font-size:23px !important; }
+    .cx-card-val { font-size:18px !important; }
+    .cx-extrato-tbl { font-size:12px !important; }
+    .cx-extrato-tbl th, .cx-extrato-tbl td { padding:7px 4px !important; }
+
+    /* ─── Modal de edição: 1 coluna, ocupa quase tela toda ─── */
+    .edit-grid { grid-template-columns:1fr !important; }
+    .solic-diff { grid-template-columns:1fr !important; gap:4px !important; }
+    .solic-diff > div:first-child { font-size:11px; color:var(--cinza); }
+
+    /* ─── Botões de ação da proposta: largura total, empilhados ─── */
+    .acoes-proposta { flex-direction:column !important; }
+    .acoes-proposta button { width:100% !important; justify-content:center; }
+
+    /* ─── Dados da proposta: 1 coluna no celular ─── */
+    .dados-grid { grid-template-columns:1fr !important; }
+  }
+
+  /* ═══ MOBILE GERAL: pega grids inline das telas novas (≤600px) ═══ */
+  @media (max-width:600px) {
+    /* Qualquer grid de 4 ou 5 colunas vira 2 colunas */
+    .cx-grid { grid-template-columns:1fr 1fr !important; }
+    .metricas[style*="repeat(5"] { grid-template-columns:1fr 1fr !important; }
+    /* Tabela de extrato: esconde coluna de saldo (menos essencial) */
+    .cx-extrato-tbl .col-saldo { display:none !important; }
+    /* Modais ocupam altura cheia e rolam */
+    .modal { max-height:92vh !important; }
+    /* Cards de comissão/valores na proposta empilham */
+    .dados-grid, .edit-grid { grid-template-columns:1fr !important; }
+    /* Botões grandes e tocáveis */
+    .btn, .btn-outline { min-height:42px; }
+    /* Inputs maiores (evita zoom do iOS ao focar) */
+    input, select, textarea { font-size:16px !important; }
   }
 
   /* ═══ TABLET ═══ */
