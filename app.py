@@ -2926,35 +2926,25 @@ def enviar_email_teste(pid):
     if not assunto or not corpo_texto:
         return jsonify({"ok": False, "msg": "Assunto e corpo são obrigatórios."}), 400
 
-    # Busca a proposta para anexar os mesmos documentos que iriam à Affinity
+    # Busca a proposta — anexa SÓ os documentos iniciais (extras), igual ao envio real.
+    # Comprovante e proposta assinada NÃO vão no protocolo (são da antecipação).
     lista_anexos = []
     conn = db()
-    p = conn.execute("SELECT comprovante_boleto, contrato_arquivo, anexos FROM propostas WHERE id=?", (pid,)).fetchone()
+    p = conn.execute("SELECT anexos FROM propostas WHERE id=?", (pid,)).fetchone()
     close_db(conn)
-    print(f"[TESTE EMAIL pid={pid}] comprovante_boleto={p['comprovante_boleto'] if p else 'N/A'}")
-    print(f"[TESTE EMAIL pid={pid}] contrato_arquivo={p['contrato_arquivo'] if p else 'N/A'}")
-    print(f"[TESTE EMAIL pid={pid}] UPLOAD_FOLDER={UPLOAD_FOLDER}")
     if p:
-        if p['comprovante_boleto']:
-            caminho = os.path.join(UPLOAD_FOLDER, os.path.basename(p['comprovante_boleto']))
-            print(f"[TESTE EMAIL] comprovante existe no disco: {os.path.exists(caminho)} → {caminho}")
-            lista_anexos.append(p['comprovante_boleto'])
-        if p['contrato_arquivo']:
-            caminho = os.path.join(UPLOAD_FOLDER, os.path.basename(p['contrato_arquivo']))
-            print(f"[TESTE EMAIL] contrato existe no disco: {os.path.exists(caminho)} → {caminho}")
-            lista_anexos.append(p['contrato_arquivo'])
         try:
             extras = json.loads(p['anexos']) if p['anexos'] else []
             lista_anexos.extend([a for a in extras if a])
         except Exception:
             pass
-    print(f"[TESTE EMAIL] lista_anexos final ({len(lista_anexos)}): {lista_anexos}")
+    print(f"[TESTE PROTOCOLO pid={pid}] anexos iniciais ({len(lista_anexos)}): {lista_anexos} | UPLOAD_FOLDER={UPLOAD_FOLDER}")
 
     corpo_html = _montar_email_html_profissional(corpo_texto, particularidades, eh_teste=True, pid=pid)
     enviado = _enviar_email(DEST_TESTE, f"[TESTE] {assunto}", corpo_html, anexos=lista_anexos)
 
     if enviado:
-        return jsonify({"ok": True, "msg": f"E-mail de teste enviado para {DEST_TESTE} com {len(lista_anexos)} anexo(s). Verifique sua caixa de entrada."})
+        return jsonify({"ok": True, "msg": f"E-mail de teste enviado para {DEST_TESTE} com {len(lista_anexos)} documento(s) inicial(is). Verifique sua caixa de entrada."})
     else:
         erro = getattr(_enviar_email, 'ultimo_erro', None) or "BREVO_API_KEY não configurada no Railway."
         return jsonify({"ok": False, "msg": f"Falha no envio: {erro}"}), 500
@@ -2978,26 +2968,26 @@ def enviar_plataforma(pid):
         close_db(conn)
         return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
 
-    # Trava: exige ao menos um documento
-    if not p['comprovante_boleto'] and not p['contrato_arquivo']:
+    # Coleta SÓ os documentos iniciais (extras): Contrato Social, RG, CNPJ, etc.
+    # O comprovante de pagamento e a proposta assinada NÃO vão no protocolo —
+    # são documentos finais, usados apenas na antecipação de comissão.
+    lista_anexos = []
+    try:
+        extras = json.loads(p['anexos']) if p['anexos'] else []
+        lista_anexos.extend([a for a in extras if a])
+    except Exception:
+        pass
+
+    # Trava: exige ao menos um documento inicial anexado
+    if not lista_anexos:
         close_db(conn)
-        return jsonify({"ok": False, "msg": "Não é possível enviar sem documentos anexados. Anexe pelo menos o comprovante de pagamento ou o contrato antes de enviar."}), 400
+        return jsonify({"ok": False, "msg": "Anexe ao menos um documento inicial (Contrato Social, RG, CNPJ, etc.) antes de enviar o protocolo à Affinity."}), 400
 
     if not assunto or not corpo_texto:
         close_db(conn)
         return jsonify({"ok": False, "msg": "Assunto e corpo do e-mail são obrigatórios."}), 400
 
     corpo_html = _montar_email_html_profissional(corpo_texto, particularidades, eh_teste=False, pid=pid)
-
-    # Coleta todos os anexos da proposta: comprovante + contrato + documentos extras
-    lista_anexos = []
-    if p['comprovante_boleto']: lista_anexos.append(p['comprovante_boleto'])
-    if p['contrato_arquivo']:   lista_anexos.append(p['contrato_arquivo'])
-    try:
-        extras = json.loads(p['anexos']) if p['anexos'] else []
-        lista_anexos.extend([a for a in extras if a])
-    except Exception:
-        pass
 
     enviado = _enviar_email(DEST_AFFINITY, assunto, corpo_html, cc=CC_SERENUS, anexos=lista_anexos)
 
@@ -3104,13 +3094,10 @@ def antecipacao_enviar(pid):
     assunto = "Solicitação de Antecipação de Comissão - Contratos"
     corpo_html = _montar_email_antecipacao_html([linha_cliente], eh_teste=eh_teste, pid=pid)
 
-    # Anexos: contrato + comprovante (+ extras)
+    # Anexos da ANTECIPAÇÃO: SOMENTE comprovante de pagamento + contrato/proposta assinada
+    # (documentos finais). Os documentos iniciais/extras NÃO entram aqui.
     lista_anexos = [p['comprovante_boleto'], p['contrato_arquivo']]
-    try:
-        extras = json.loads(p['anexos']) if p['anexos'] else []
-        lista_anexos.extend([a for a in extras if a])
-    except Exception:
-        pass
+    lista_anexos = [a for a in lista_anexos if a]
 
     destino = CC_SERENUS if eh_teste else DEST_AFFINITY
     assunto_final = f"[TESTE] {assunto}" if eh_teste else assunto
@@ -4513,21 +4500,35 @@ def estornar_proposta(pid):
     return jsonify({"ok": True, "msg": info})
 
 # ─── APIs ────────────────────────────────────────────────────────────────────────
+@app.route('/api/comissoes-publicas')
 @login_required
 def api_com_pub():
+    eh_admin = session.get('perfil') == 'admin'
     conn = db()
     rec = conn.execute("SELECT * FROM recebimento").fetchall()
     reps = conn.execute("SELECT * FROM repasse_corretor").fetchall()
     niveis = conn.execute("SELECT * FROM niveis ORDER BY ordem").fetchall()
     close_db(conn)
-    # recebimento indexado por "operadora|plano" (pega entrada sem obs preferencialmente)
-    rec_map = {}
-    for r in rec:
-        k = f"{r['operadora']}|{r['plano']}"
-        if k not in rec_map or not r['obs']:
-            rec_map[k] = r['total']
+    # repasse: o que o consultor recebe (pode ver). Removemos nada aqui.
     rep_map = {f"{r['operadora']}|{r['plano']}|{r['modelo']}|{r['nivel']}": dict(r) for r in reps}
     operadoras = sorted({r['operadora'] for r in rec})
+
+    if eh_admin:
+        # Admin enxerga o recebimento da corretora (para o preview completo).
+        rec_map = {}
+        for r in rec:
+            k = f"{r['operadora']}|{r['plano']}"
+            if k not in rec_map or not r['obs']:
+                rec_map[k] = r['total']
+    else:
+        # CONSULTOR: NÃO recebe o recebimento da corretora (sigilo de margem).
+        # Enviamos um placeholder só para o preview saber que a operadora existe,
+        # sem revelar o multiplicador real (valor neutro 1 — não usado no cálculo da comissão dele).
+        rec_map = {}
+        for r in rec:
+            k = f"{r['operadora']}|{r['plano']}"
+            rec_map[k] = 1  # presença da chave habilita o preview; não revela margem
+
     return jsonify({
         'recebimento': rec_map,
         'repasses': rep_map,
@@ -4539,12 +4540,22 @@ def api_com_pub():
 @login_required
 def api_propostas():
     conn = db(); uid = session['user_id']
-    if session['perfil'] == 'admin':
+    eh_admin = session['perfil'] == 'admin'
+    if eh_admin:
         rows = conn.execute("SELECT * FROM propostas ORDER BY id DESC").fetchall()
     else:
         rows = conn.execute("SELECT * FROM propostas WHERE usuario_id=? ORDER BY id DESC",(uid,)).fetchall()
     close_db(conn)
-    return jsonify([dict(r) for r in rows])
+    # Colunas sensíveis de margem da corretora — nunca expor ao consultor.
+    SENSIVEIS = {'comissao_total_corretora', 'comissao_corretora_liquida'}
+    saida = []
+    for r in rows:
+        d = dict(r)
+        if not eh_admin:
+            for col in SENSIVEIS:
+                d.pop(col, None)
+        saida.append(d)
+    return jsonify(saida)
 
 
 # ─── CRM ─────────────────────────────────────────────────────────────────────────
