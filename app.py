@@ -515,6 +515,12 @@ def init_db():
                 ordem INTEGER DEFAULT 0,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS webhook_log (
+                id SERIAL PRIMARY KEY,
+                evento_id TEXT UNIQUE,
+                evento TEXT,
+                processado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS niveis (
                 codigo TEXT PRIMARY KEY,
                 label TEXT NOT NULL,
@@ -1584,12 +1590,19 @@ def db_validar():
     relatorio = {"modo": DB_MODE, "ok": True, "problemas": [], "avisos": [], "tabelas": {}, "integridade": {}}
     conn = db()
 
+    def _rollback_seguro():
+        """Após erro no Postgres, limpa a transação abortada para os próximos checks."""
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+
     # 1) Tabelas existem? + contagem de linhas
     for t in TABELAS_ESPERADAS:
         try:
             n = conn.execute(f"SELECT COUNT(*) c FROM {t}").fetchone()['c']
             relatorio["tabelas"][t] = n
-        except Exception as e:
+        except Exception:
+            _rollback_seguro()
             relatorio["tabelas"][t] = "AUSENTE"
             relatorio["problemas"].append(f"Tabela ausente ou inacessível: {t}")
             relatorio["ok"] = False
@@ -1611,7 +1624,8 @@ def db_validar():
                 relatorio["problemas"].append(f"{tabela}: colunas faltando → {', '.join(faltando)}")
                 relatorio["ok"] = False
         except Exception as e:
-            relatorio["avisos"].append(f"Não foi possível checar colunas de {tabela}: {e}")
+            _rollback_seguro()
+            relatorio["avisos"].append(f"Não foi possível checar colunas de {tabela}: {str(e)[:80]}")
 
     # 3) Integridade referencial
     try:
@@ -1621,7 +1635,8 @@ def db_validar():
         if orfas > 0:
             relatorio["avisos"].append(f"{orfas} parcela(s) apontam para proposta inexistente")
     except Exception as e:
-        relatorio["avisos"].append(f"Check parcelas órfãs falhou: {e}")
+        _rollback_seguro()
+        relatorio["avisos"].append(f"Check parcelas órfãs falhou: {str(e)[:80]}")
 
     try:
         sem_user = conn.execute("""SELECT COUNT(*) c FROM propostas p
@@ -1630,7 +1645,8 @@ def db_validar():
         if sem_user > 0:
             relatorio["avisos"].append(f"{sem_user} proposta(s) sem usuário válido")
     except Exception as e:
-        relatorio["avisos"].append(f"Check propostas sem usuário falhou: {e}")
+        _rollback_seguro()
+        relatorio["avisos"].append(f"Check propostas sem usuário falhou: {str(e)[:80]}")
 
     # 4) Usuários sem senha (não conseguem logar)
     try:
@@ -1639,7 +1655,8 @@ def db_validar():
         if sem_senha > 0:
             relatorio["avisos"].append(f"{sem_senha} usuário(s) ativo(s) sem senha definida")
     except Exception as e:
-        relatorio["avisos"].append(f"Check usuários sem senha falhou: {e}")
+        _rollback_seguro()
+        relatorio["avisos"].append(f"Check usuários sem senha falhou: {str(e)[:80]}")
 
     # 5) Propostas com comissão zerada (possível erro de cálculo)
     try:
@@ -1649,7 +1666,8 @@ def db_validar():
         if com_zero > 0:
             relatorio["avisos"].append(f"{com_zero} proposta(s) ativa(s) com comissão da corretora zerada (verificar cadastro de recebimento)")
     except Exception as e:
-        relatorio["avisos"].append(f"Check comissão zerada falhou: {e}")
+        _rollback_seguro()
+        relatorio["avisos"].append(f"Check comissão zerada falhou: {str(e)[:80]}")
 
     close_db(conn)
     relatorio["resumo"] = (
