@@ -2015,7 +2015,7 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None):
     # Monta lista de anexos em base64 (Brevo: attachment=[{content, name}])
     attach_payload = []
     if anexos:
-        import base64
+        import base64, re as _re
         total_bytes = 0
         LIMITE_BYTES = 9 * 1024 * 1024  # ~9MB de arquivos brutos (Brevo aceita até ~10MB no payload)
         for nome in anexos:
@@ -2033,11 +2033,19 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None):
                 with open(caminho, 'rb') as fh:
                     conteudo_b64 = base64.b64encode(fh.read()).decode('ascii')
                 total_bytes += tam
-                # Nome amigável: remove o prefixo de timestamp/categoria
+                # Nome amigável: remove prefixo timestamp/categoria
                 nome_limpo = os.path.basename(nome)
                 partes = nome_limpo.split('_', 3)
                 nome_exibe = partes[-1] if len(partes) >= 2 else nome_limpo
-                attach_payload.append({"content": conteudo_b64, "name": nome_exibe})
+                # SANITIZA: Brevo rejeita nomes com espaços/acentos/caracteres especiais.
+                base_nome, ext = os.path.splitext(nome_exibe)
+                base_nome = _re.sub(r'[^A-Za-z0-9._-]', '_', base_nome)   # troca espaço/acento por _
+                base_nome = _re.sub(r'_+', '_', base_nome).strip('_')      # colapsa __ e remove bordas
+                if not base_nome:
+                    base_nome = 'documento'
+                nome_seguro = (base_nome + ext.lower())[:120]
+                attach_payload.append({"content": conteudo_b64, "name": nome_seguro})
+                print(f"[EMAIL] 📎 Anexo preparado: {nome_seguro} ({tam} bytes)")
             except Exception as e:
                 print(f"[EMAIL] ⚠️ Falha ao ler anexo {caminho}: {e}")
 
@@ -2045,38 +2053,50 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None):
         print(f"[EMAIL] ⚠️ BREVO_API_KEY não configurada. Assunto: {assunto} → {to_list} (cc: {cc_list})")
         return False
 
-    def _enviar():
+    def _construir_e_enviar():
+        import urllib.request, urllib.error, json as _json
+        corpo_payload = {
+            "sender":  {"name": "JOB Serenus", "email": remetente},
+            "to":      [{"email": e} for e in to_list],
+            "subject": assunto,
+            "htmlContent": corpo_html
+        }
+        if cc_list:
+            corpo_payload["cc"] = [{"email": e} for e in cc_list]
+        if attach_payload:
+            corpo_payload["attachment"] = attach_payload
+        payload = _json.dumps(corpo_payload).encode('utf-8')
+        req = urllib.request.Request(
+            "https://api.brevo.com/v3/smtp/email",
+            data=payload,
+            headers={"Content-Type": "application/json", "api-key": api_key},
+            method="POST"
+        )
         try:
-            import urllib.request, json as _json
-            corpo_payload = {
-                "sender":  {"name": "JOB Serenus", "email": remetente},
-                "to":      [{"email": e} for e in to_list],
-                "subject": assunto,
-                "htmlContent": corpo_html
-            }
-            if cc_list:
-                corpo_payload["cc"] = [{"email": e} for e in cc_list]
-            if attach_payload:
-                corpo_payload["attachment"] = attach_payload
-            payload = _json.dumps(corpo_payload).encode('utf-8')
-            req = urllib.request.Request(
-                "https://api.brevo.com/v3/smtp/email",
-                data=payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "api-key": api_key,
-                },
-                method="POST"
-            )
             with urllib.request.urlopen(req, timeout=30) as resp:
-                status = resp.status
-            print(f"[EMAIL] ✅ Enviado via Brevo API (HTTP {status}): {assunto} → {to_list} (cc: {cc_list}, {len(attach_payload)} anexos)")
+                print(f"[EMAIL] ✅ Enviado via Brevo (HTTP {resp.status}): {assunto} → {to_list} (cc: {cc_list}, {len(attach_payload)} anexos)")
+            return True, None
+        except urllib.error.HTTPError as e:
+            erro_corpo = ''
+            try: erro_corpo = e.read().decode()
+            except Exception: pass
+            print(f"[EMAIL] ❌ Brevo HTTP {e.code}: {erro_corpo}")
+            return False, f"Brevo HTTP {e.code}: {erro_corpo}"
         except Exception as e:
             print(f"[EMAIL] ❌ Erro ao enviar para {to_list}: {e}")
+            return False, str(e)
 
-    import threading
-    threading.Thread(target=_enviar, daemon=True).start()
-    return True  # retorna imediatamente; envio ocorre em background
+    # Com anexos: envia SÍNCRONO para capturar e reportar erros reais do Brevo.
+    # Sem anexos: mantém envio em background (rápido para o usuário).
+    if attach_payload:
+        ok, _erro = _construir_e_enviar()
+        _enviar_email.ultimo_erro = _erro
+        return ok
+    else:
+        import threading
+        threading.Thread(target=lambda: _construir_e_enviar(), daemon=True).start()
+        _enviar_email.ultimo_erro = None
+        return True
 
 # ─── RECUPERAÇÃO DE SENHA (usuário) ─────────────────────────────────────────
 @app.route('/esqueci-senha', methods=['GET','POST'])
@@ -2822,7 +2842,8 @@ def enviar_email_teste(pid):
     if enviado:
         return jsonify({"ok": True, "msg": f"E-mail de teste enviado para {DEST_TESTE} com {len(lista_anexos)} anexo(s). Verifique sua caixa de entrada."})
     else:
-        return jsonify({"ok": False, "msg": "BREVO_API_KEY não configurada no Railway."}), 500
+        erro = getattr(_enviar_email, 'ultimo_erro', None) or "BREVO_API_KEY não configurada no Railway."
+        return jsonify({"ok": False, "msg": f"Falha no envio: {erro}"}), 500
 
 @app.route('/proposta/<int:pid>/enviar-plataforma', methods=['POST'])
 @login_required
