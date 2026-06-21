@@ -1533,6 +1533,106 @@ def asaas_teste():
     return jsonify({"ok": False, "erro": data.get('_erro') or data.get('errors') or data, "status": status}), 400
 
 
+@app.route('/admin/db/validar')
+@login_required
+@admin_required
+def db_validar():
+    """Validação completa do banco: tabelas, colunas críticas e integridade referencial."""
+    TABELAS_ESPERADAS = [
+        'usuarios','propostas','parcelas','operadoras','recebimento','repasse_corretor',
+        'historico_proposta','solicitacoes_edicao','comissoes','config','crm_leads',
+        'crm_atividades','etiquetas','lancamentos','niveis','produtos','proposta_etiquetas',
+        'regimes','regras_estorno','repasses','supervisoras','webhook_log','campos_custom',
+    ]
+    COLUNAS_CRITICAS = {
+        'propostas': ['id','usuario_id','razao_social','valor','adm_operadora','status',
+                      'comissao_total_corretora','comissao_consultor','comissao_corretora_liquida',
+                      'contrato_arquivo','comprovante_boleto','anexos'],
+        'usuarios': ['id','email','senha_hash','perfil','ativo'],
+        'parcelas': ['id','proposta_id','valor','status'],
+        'recebimento': ['operadora','plano','total'],
+        'repasse_corretor': ['operadora','plano','modelo','nivel','total','regua','taxa'],
+        'solicitacoes_edicao': ['id','proposta_id','usuario_id','alteracoes','status'],
+    }
+
+    relatorio = {"modo": DB_MODE, "ok": True, "problemas": [], "avisos": [], "tabelas": {}, "integridade": {}}
+    conn = db()
+
+    # 1) Tabelas existem? + contagem de linhas
+    for t in TABELAS_ESPERADAS:
+        try:
+            n = conn.execute(f"SELECT COUNT(*) c FROM {t}").fetchone()['c']
+            relatorio["tabelas"][t] = n
+        except Exception as e:
+            relatorio["tabelas"][t] = "AUSENTE"
+            relatorio["problemas"].append(f"Tabela ausente ou inacessível: {t}")
+            relatorio["ok"] = False
+
+    # 2) Colunas críticas presentes?
+    for tabela, cols in COLUNAS_CRITICAS.items():
+        if relatorio["tabelas"].get(tabela) == "AUSENTE":
+            continue
+        try:
+            if DB_MODE == 'postgres':
+                rows = conn.execute(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name=%s", (tabela,)).fetchall()
+                existentes = {r['column_name'] for r in rows}
+            else:
+                rows = conn.execute(f"PRAGMA table_info({tabela})").fetchall()
+                existentes = {r['name'] for r in rows}
+            faltando = [c for c in cols if c not in existentes]
+            if faltando:
+                relatorio["problemas"].append(f"{tabela}: colunas faltando → {', '.join(faltando)}")
+                relatorio["ok"] = False
+        except Exception as e:
+            relatorio["avisos"].append(f"Não foi possível checar colunas de {tabela}: {e}")
+
+    # 3) Integridade referencial
+    try:
+        orfas = conn.execute("""SELECT COUNT(*) c FROM parcelas pa
+            LEFT JOIN propostas p ON p.id=pa.proposta_id WHERE p.id IS NULL""").fetchone()['c']
+        relatorio["integridade"]["parcelas_orfas"] = orfas
+        if orfas > 0:
+            relatorio["avisos"].append(f"{orfas} parcela(s) apontam para proposta inexistente")
+    except Exception as e:
+        relatorio["avisos"].append(f"Check parcelas órfãs falhou: {e}")
+
+    try:
+        sem_user = conn.execute("""SELECT COUNT(*) c FROM propostas p
+            LEFT JOIN usuarios u ON u.id=p.usuario_id WHERE u.id IS NULL""").fetchone()['c']
+        relatorio["integridade"]["propostas_sem_usuario"] = sem_user
+        if sem_user > 0:
+            relatorio["avisos"].append(f"{sem_user} proposta(s) sem usuário válido")
+    except Exception as e:
+        relatorio["avisos"].append(f"Check propostas sem usuário falhou: {e}")
+
+    # 4) Usuários sem senha (não conseguem logar)
+    try:
+        sem_senha = conn.execute("SELECT COUNT(*) c FROM usuarios WHERE (senha_hash IS NULL OR senha_hash='') AND ativo=1").fetchone()['c']
+        relatorio["integridade"]["usuarios_ativos_sem_senha"] = sem_senha
+        if sem_senha > 0:
+            relatorio["avisos"].append(f"{sem_senha} usuário(s) ativo(s) sem senha definida")
+    except Exception as e:
+        relatorio["avisos"].append(f"Check usuários sem senha falhou: {e}")
+
+    # 5) Propostas com comissão zerada (possível erro de cálculo)
+    try:
+        com_zero = conn.execute("""SELECT COUNT(*) c FROM propostas
+            WHERE status NOT IN ('Excluída') AND (comissao_total_corretora IS NULL OR comissao_total_corretora=0)""").fetchone()['c']
+        relatorio["integridade"]["propostas_comissao_zerada"] = com_zero
+        if com_zero > 0:
+            relatorio["avisos"].append(f"{com_zero} proposta(s) ativa(s) com comissão da corretora zerada (verificar cadastro de recebimento)")
+    except Exception as e:
+        relatorio["avisos"].append(f"Check comissão zerada falhou: {e}")
+
+    close_db(conn)
+    relatorio["resumo"] = (
+        "Banco íntegro." if relatorio["ok"] and not relatorio["avisos"]
+        else ("Estrutura OK, com avisos." if relatorio["ok"] else "PROBLEMAS ESTRUTURAIS encontrados.")
+    )
+    return jsonify(relatorio)
+
+
 @app.route('/admin/asaas/diag')
 @login_required
 @admin_required
