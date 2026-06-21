@@ -1377,6 +1377,37 @@ def hash_senha(s):
     """Gera hash seguro PBKDF2 (com salt automático) para uma senha nova."""
     return generate_password_hash(s or '', method='pbkdf2:sha256', salt_length=16)
 
+def _parse_dt_seguro(valor):
+    """Converte um valor de data/hora para datetime, aceitando:
+    - datetime já pronto (PostgreSQL retorna assim)
+    - string ISO (SQLite retorna assim)
+    Retorna None se vazio ou inválido."""
+    if not valor:
+        return None
+    if isinstance(valor, datetime):
+        return valor
+    try:
+        return datetime.fromisoformat(str(valor))
+    except Exception:
+        try:
+            return datetime.strptime(str(valor)[:19], '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            return None
+
+def _data_expirada(valor):
+    """True se a data/hora informada já passou. Trata datetime (PG) e string (SQLite),
+    e lida com timezone de forma segura (sem erro de naive vs aware)."""
+    expira = _parse_dt_seguro(valor)
+    if not expira:
+        return False
+    agora = datetime.now(TZ_SP)
+    try:
+        if expira.tzinfo is None:
+            agora = agora.replace(tzinfo=None)
+        return expira < agora
+    except Exception:
+        return False
+
 def _eh_sha256_legado(h):
     """Detecta o formato antigo: SHA-256 puro = 64 caracteres hexadecimais."""
     return isinstance(h, str) and len(h) == 64 and all(c in '0123456789abcdef' for c in h.lower())
@@ -2771,7 +2802,7 @@ def redefinir_senha():
     erro = None
     if not u or u['reset_code'] != codigo:
         erro = 'Código inválido ou e-mail não encontrado.'
-    elif u['reset_expira'] and datetime.fromisoformat(str(u['reset_expira'])) < datetime.now(TZ_SP):
+    elif _data_expirada(u['reset_expira']):
         erro = 'Código expirado. Solicite um novo.'
     elif len(s1) < 6:
         erro = 'Senha deve ter pelo menos 6 caracteres.'
@@ -2850,8 +2881,9 @@ def setup_senha(token):
     conn = db()
     u = conn.execute("SELECT * FROM usuarios WHERE token_setup=? AND ativo=1",(token,)).fetchone()
     if not u: close_db(conn); return render_template('setup_senha.html', erro='Link inválido ou já utilizado.')
-    expira = datetime.fromisoformat(u['token_expira']) if u['token_expira'] else None
-    if expira and expira < datetime.now(TZ_SP): close_db(conn); return render_template('setup_senha.html', erro='Link expirado.')
+    # token_expira pode vir como datetime (Postgres) ou string (SQLite). Comparação segura.
+    if _data_expirada(u['token_expira']):
+        close_db(conn); return render_template('setup_senha.html', erro='Link expirado.')
     if request.method == 'POST':
         s1=request.form.get('senha',''); s2=request.form.get('senha2','')
         if len(s1)<6: close_db(conn); return render_template('setup_senha.html',usuario=u,erro='Mínimo 6 caracteres.')
