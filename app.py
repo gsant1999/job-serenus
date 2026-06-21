@@ -2607,95 +2607,112 @@ Serenus Corretora de Saúde"""
         "aviso_anexo": not (tem_comprovante or tem_contrato),
     })
 
+def _montar_email_html_profissional(corpo_texto, particularidades='', eh_teste=False, pid=None):
+    """Monta HTML profissional e elegante para o e-mail de protocolo."""
+    logo_url = "https://job-serenus-production.up.railway.app/static/logo_arcos.png"
+    
+    # Converte corpo texto em HTML preservando quebras de linha e formatação
+    linhas_html = []
+    for linha in corpo_texto.split('\n'):
+        linha_limpa = linha.strip()
+        if not linha_limpa:
+            linhas_html.append('</p><p style="margin:12px 0;">')
+        elif ':' in linha_limpa and any(x in linha_limpa.upper() for x in ['PLANO:', 'OPERADORA:', 'TITULAR:', 'DADOS', 'VIGÊNCIA', 'VENCIMENTO', 'VALOR']):
+            # Linhas com dados
+            partes = linha_limpa.split(':', 1)
+            label = partes[0].strip()
+            valor = partes[1].strip() if len(partes) > 1 else ''
+            linhas_html.append(f'<strong style="color:#0f1f33;">{label}:</strong> <span style="color:#666;">{valor}</span><br>')
+        else:
+            linhas_html.append(f'{linha_limpa}<br>')
+    
+    corpo_html_body = ''.join(linhas_html).replace('<br></p>', '</p>').replace('<p style="margin:12px 0;"><br>', '<p style="margin:12px 0;">')
+    
+    if particularidades:
+        corpo_html_body += f'<p style="margin-top:20px; padding:14px; background:#f8f9fb; border-left:3px solid #1fd8a4;"><strong style="color:#0f1f33;">Observações importantes:</strong><br>{particularidades.replace(chr(10),"<br>")}</p>'
+    
+    html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; }}
+    .wrapper {{ background: #f5f7fa; padding: 24px; }}
+    .container {{ max-width: 640px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
+    .header {{ background: linear-gradient(135deg, #0f1f33 0%, #1a2f4a 100%); padding: 32px; text-align: center; }}
+    .logo {{ height: 40px; margin-bottom: 16px; display: block; margin-left: auto; margin-right: auto; }}
+    .header-title {{ color: white; font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.5px; }}
+    .header-subtitle {{ color: #1fd8a4; font-size: 12px; font-weight: 600; margin: 10px 0 0; letter-spacing: 0.8px; text-transform: uppercase; }}
+    .stripe {{ background: #1fd8a4; height: 4px; }}
+    .content {{ padding: 40px 36px; }}
+    .content p {{ margin: 16px 0; line-height: 1.7; font-size: 14px; }}
+    .content p:first-child {{ margin-top: 0; }}
+    .section-title {{ font-size: 13px; font-weight: 700; color: #0f1f33; text-transform: uppercase; letter-spacing: 0.8px; margin: 28px 0 16px; padding-bottom: 10px; border-bottom: 2px solid #1fd8a4; }}
+    .footer {{ background: #f0f2f5; border-top: 1px solid #e5e9f0; padding: 24px 36px; font-size: 12px; color: #666; line-height: 1.8; }}
+    .footer-brand {{ font-weight: 700; color: #0f1f33; margin-bottom: 4px; }}
+    .footer-small {{ font-size: 11px; color: #999; margin-top: 12px; padding-top: 12px; border-top: 1px solid #d1d5db; }}
+    .test-banner {{ background: #f43f7c; color: white; padding: 14px 36px; text-align: center; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; }}
+    .cta {{ background: #f8f9fb; border-left: 4px solid #1fd8a4; padding: 16px; margin: 24px 0; font-size: 13px; color: #333; }}
+    .cta strong {{ color: #0f1f33; }}
+    br {{ display: block; line-height: 1.2; }}
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="container">
+      {"<div class='test-banner'>MODO TESTE — Este e-mail foi enviado apenas para você. A Affinity não recebeu.</div>" if eh_teste else ""}
+      
+      <div class="header">
+        <img src="{logo_url}" alt="Serenus" class="logo">
+        <h1 class="header-title">Solicitação de Protocolo</h1>
+        <p class="header-subtitle">Implantação de Proposta · Sistema JOB</p>
+      </div>
+      
+      <div class="stripe"></div>
+      
+      <div class="content">
+        <p>{corpo_html_body}</p>
+        
+        <div class="cta">
+          <strong style="color: #0f1f33;">Próximos passos:</strong><br>
+          Por favor, analise a proposta e nos envie o protocolo de implantação para prosseguirmos junto ao cliente.
+        </div>
+      </div>
+      
+      <div class="footer">
+        <div class="footer-brand">Serenus Corretora de Saúde</div>
+        <div>guilherme@serenuscorretora.com.br</div>
+        <div class="footer-small">
+          Sistema JOB{f' • Proposta #{pid}' if pid else ''} • {datetime.now(TZ_SP).strftime('%d/%m/%Y às %H:%M')}
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>"""
+    
+    return html
+
+
 @app.route('/proposta/<int:pid>/enviar-teste', methods=['POST'])
 @login_required
 @admin_required
 def enviar_email_teste(pid):
-    """Envia o e-mail de protocolo APENAS para guilherme@serenuscorretora.com.br (modo teste).
-    Não altera status_operacional. Não registra no histórico como envio real."""
+    """Envia o e-mail de protocolo APENAS para guilherme@serenuscorretora.com.br (modo teste)."""
     DEST_TESTE = "guilherme@serenuscorretora.com.br"
 
     d = request.json or {}
-    assunto     = d.get('assunto', '').strip()
-    corpo_texto = d.get('corpo', '').strip()
+    assunto      = d.get('assunto', '').strip()
+    corpo_texto  = d.get('corpo', '').strip()
     particularidades = d.get('particularidades', '').strip()
 
     if not assunto or not corpo_texto:
         return jsonify({"ok": False, "msg": "Assunto e corpo são obrigatórios."}), 400
 
-    logo_url = "https://job-serenus-production.up.railway.app/static/logo_arcos.png"
-    corpo_html_body = corpo_texto.replace('\n', '<br>')
-    if particularidades:
-        corpo_html_body += f'<br><br><strong>Observação adicional:</strong><br>{particularidades.replace(chr(10),"<br>")}'
-
-    corpo_html = f"""<!DOCTYPE html>
-<html lang="pt-BR">
-<head><meta charset="UTF-8"></head>
-<body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;">
-  <tr><td align="center">
-    <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08);">
-
-      <!-- FAIXA DE TESTE -->
-      <tr>
-        <td style="background:#f43f7c;padding:10px 32px;text-align:center;">
-          <span style="color:#fff;font-size:13px;font-weight:700;letter-spacing:1px;">
-            MODO TESTE — este e-mail foi enviado apenas para você. A Affinity NÃO recebeu.
-          </span>
-        </td>
-      </tr>
-
-      <!-- HEADER -->
-      <tr>
-        <td style="background:#0f1f33;padding:24px 32px;">
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td>
-                <img src="{logo_url}" alt="Serenus Corretora" height="36" style="display:block;">
-              </td>
-              <td align="right">
-                <span style="color:#1fd8a4;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;">Solicitação de Protocolo</span>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-
-      <!-- LINHA VERDE -->
-      <tr><td style="background:#1fd8a4;height:3px;"></td></tr>
-
-      <!-- BODY -->
-      <tr>
-        <td style="padding:32px 36px;color:#1a1d2e;font-size:14px;line-height:1.75;">
-          {corpo_html_body}
-        </td>
-      </tr>
-
-      <!-- FOOTER -->
-      <tr>
-        <td style="background:#f8f9fb;border-top:1px solid #e5e9f0;padding:20px 36px;">
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td style="font-size:11px;color:#8c93a8;line-height:1.6;">
-                <strong style="color:#1a1d2e;">Serenus Corretora de Saúde</strong><br>
-                guilherme@serenuscorretora.com.br<br>
-                TESTE — Sistema JOB · Proposta #{pid}
-              </td>
-              <td align="right" style="font-size:11px;color:#8c93a8;">
-                {datetime.now(TZ_SP).strftime('%d/%m/%Y %H:%M')}
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-
-    </table>
-  </td></tr>
-</table>
-</body>
-</html>"""
-
+    corpo_html = _montar_email_html_profissional(corpo_texto, particularidades, eh_teste=True, pid=pid)
     enviado = _enviar_email(DEST_TESTE, f"[TESTE] {assunto}", corpo_html)
+    
     if enviado:
         return jsonify({"ok": True, "msg": f"E-mail de teste enviado para {DEST_TESTE}. Verifique sua caixa de entrada."})
     else:
@@ -2729,73 +2746,7 @@ def enviar_plataforma(pid):
         close_db(conn)
         return jsonify({"ok": False, "msg": "Assunto e corpo do e-mail são obrigatórios."}), 400
 
-    # Monta HTML profissional com logo Serenus
-    # Logo hospedado na URL pública do sistema
-    logo_url = "https://job-serenus-production.up.railway.app/static/logo_arcos.png"
-
-    # Converte corpo texto em HTML (preserva quebras)
-    corpo_html_body = corpo_texto.replace('\n', '<br>')
-    if particularidades:
-        corpo_html_body += f'<br><br><strong>Observação adicional:</strong><br>{particularidades.replace(chr(10), "<br>")}'
-
-    corpo_html = f"""<!DOCTYPE html>
-<html lang="pt-BR">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;">
-  <tr><td align="center">
-    <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08);">
-
-      <!-- HEADER -->
-      <tr>
-        <td style="background:#0f1f33;padding:24px 32px;">
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td>
-                <img src="{logo_url}" alt="Serenus Corretora" height="36" style="display:block;">
-              </td>
-              <td align="right">
-                <span style="color:#1fd8a4;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;">Solicitação de Protocolo</span>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-
-      <!-- LINHA VERDE -->
-      <tr><td style="background:#1fd8a4;height:3px;"></td></tr>
-
-      <!-- BODY -->
-      <tr>
-        <td style="padding:32px 36px;color:#1a1d2e;font-size:14px;line-height:1.75;">
-          {corpo_html_body}
-        </td>
-      </tr>
-
-      <!-- FOOTER -->
-      <tr>
-        <td style="background:#f8f9fb;border-top:1px solid #e5e9f0;padding:20px 36px;">
-          <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td style="font-size:11px;color:#8c93a8;line-height:1.6;">
-                <strong style="color:#1a1d2e;">Serenus Corretora de Saúde</strong><br>
-                guilherme@serenuscorretora.com.br<br>
-                Este e-mail foi gerado automaticamente pelo Sistema JOB — #{pid}
-              </td>
-              <td align="right" style="font-size:11px;color:#8c93a8;">
-                {datetime.now(TZ_SP).strftime('%d/%m/%Y %H:%M')}
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-
-    </table>
-  </td></tr>
-</table>
-</body>
-</html>"""
-
+    corpo_html = _montar_email_html_profissional(corpo_texto, particularidades, eh_teste=False, pid=pid)
     enviado = _enviar_email(DEST_AFFINITY, assunto, corpo_html, cc=CC_SERENUS)
 
     if enviado:
