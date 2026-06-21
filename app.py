@@ -1990,11 +1990,12 @@ def excluir_anexo(pid):
     return jsonify({"ok": True})
 
 # ─── EMAIL UTILITÁRIO ────────────────────────────────────────────────────────
-def _enviar_email(destinatario, assunto, corpo_html, cc=None):
+def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None):
     """Envia email via API do Brevo (HTTPS porta 443 — nunca bloqueada pelo Railway).
     Configure BREVO_API_KEY no Railway. SMTP_USER define o remetente.
     destinatario: string (1 email) ou lista de emails.
-    cc: string ou lista de emails para cópia (opcional)."""
+    cc: string ou lista de emails para cópia (opcional).
+    anexos: lista de nomes de arquivo (em UPLOAD_FOLDER) a anexar (opcional)."""
     api_key = os.environ.get('BREVO_API_KEY','')
     remetente = os.environ.get('SMTP_USER','noreply@serenuscorretora.com.br')
 
@@ -2011,6 +2012,35 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None):
         else:
             cc_list = [e.strip() for e in cc if e and e.strip()]
 
+    # Monta lista de anexos em base64 (Brevo: attachment=[{content, name}])
+    attach_payload = []
+    if anexos:
+        import base64
+        total_bytes = 0
+        LIMITE_BYTES = 9 * 1024 * 1024  # ~9MB de arquivos brutos (Brevo aceita até ~10MB no payload)
+        for nome in anexos:
+            if not nome:
+                continue
+            caminho = os.path.join(UPLOAD_FOLDER, os.path.basename(nome))
+            if not os.path.exists(caminho):
+                print(f"[EMAIL] ⚠️ Anexo não encontrado, ignorando: {caminho}")
+                continue
+            try:
+                tam = os.path.getsize(caminho)
+                if total_bytes + tam > LIMITE_BYTES:
+                    print(f"[EMAIL] ⚠️ Limite de anexos atingido (~9MB). Pulando: {caminho} ({tam} bytes)")
+                    continue
+                with open(caminho, 'rb') as fh:
+                    conteudo_b64 = base64.b64encode(fh.read()).decode('ascii')
+                total_bytes += tam
+                # Nome amigável: remove o prefixo de timestamp/categoria
+                nome_limpo = os.path.basename(nome)
+                partes = nome_limpo.split('_', 3)
+                nome_exibe = partes[-1] if len(partes) >= 2 else nome_limpo
+                attach_payload.append({"content": conteudo_b64, "name": nome_exibe})
+            except Exception as e:
+                print(f"[EMAIL] ⚠️ Falha ao ler anexo {caminho}: {e}")
+
     if not api_key:
         print(f"[EMAIL] ⚠️ BREVO_API_KEY não configurada. Assunto: {assunto} → {to_list} (cc: {cc_list})")
         return False
@@ -2026,6 +2056,8 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None):
             }
             if cc_list:
                 corpo_payload["cc"] = [{"email": e} for e in cc_list]
+            if attach_payload:
+                corpo_payload["attachment"] = attach_payload
             payload = _json.dumps(corpo_payload).encode('utf-8')
             req = urllib.request.Request(
                 "https://api.brevo.com/v3/smtp/email",
@@ -2036,9 +2068,9 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None):
                 },
                 method="POST"
             )
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:
                 status = resp.status
-            print(f"[EMAIL] ✅ Enviado via Brevo API (HTTP {status}): {assunto} → {to_list} (cc: {cc_list})")
+            print(f"[EMAIL] ✅ Enviado via Brevo API (HTTP {status}): {assunto} → {to_list} (cc: {cc_list}, {len(attach_payload)} anexos)")
         except Exception as e:
             print(f"[EMAIL] ❌ Erro ao enviar para {to_list}: {e}")
 
@@ -2760,11 +2792,25 @@ def enviar_email_teste(pid):
     if not assunto or not corpo_texto:
         return jsonify({"ok": False, "msg": "Assunto e corpo são obrigatórios."}), 400
 
+    # Busca a proposta para anexar os mesmos documentos que iriam à Affinity
+    lista_anexos = []
+    conn = db()
+    p = conn.execute("SELECT comprovante_boleto, contrato_arquivo, anexos FROM propostas WHERE id=?", (pid,)).fetchone()
+    close_db(conn)
+    if p:
+        if p['comprovante_boleto']: lista_anexos.append(p['comprovante_boleto'])
+        if p['contrato_arquivo']:   lista_anexos.append(p['contrato_arquivo'])
+        try:
+            extras = json.loads(p['anexos']) if p['anexos'] else []
+            lista_anexos.extend([a for a in extras if a])
+        except Exception:
+            pass
+
     corpo_html = _montar_email_html_profissional(corpo_texto, particularidades, eh_teste=True, pid=pid)
-    enviado = _enviar_email(DEST_TESTE, f"[TESTE] {assunto}", corpo_html)
-    
+    enviado = _enviar_email(DEST_TESTE, f"[TESTE] {assunto}", corpo_html, anexos=lista_anexos)
+
     if enviado:
-        return jsonify({"ok": True, "msg": f"E-mail de teste enviado para {DEST_TESTE}. Verifique sua caixa de entrada."})
+        return jsonify({"ok": True, "msg": f"E-mail de teste enviado para {DEST_TESTE} com {len(lista_anexos)} anexo(s). Verifique sua caixa de entrada."})
     else:
         return jsonify({"ok": False, "msg": "BREVO_API_KEY não configurada no Railway."}), 500
 
@@ -2797,7 +2843,18 @@ def enviar_plataforma(pid):
         return jsonify({"ok": False, "msg": "Assunto e corpo do e-mail são obrigatórios."}), 400
 
     corpo_html = _montar_email_html_profissional(corpo_texto, particularidades, eh_teste=False, pid=pid)
-    enviado = _enviar_email(DEST_AFFINITY, assunto, corpo_html, cc=CC_SERENUS)
+
+    # Coleta todos os anexos da proposta: comprovante + contrato + documentos extras
+    lista_anexos = []
+    if p['comprovante_boleto']: lista_anexos.append(p['comprovante_boleto'])
+    if p['contrato_arquivo']:   lista_anexos.append(p['contrato_arquivo'])
+    try:
+        extras = json.loads(p['anexos']) if p['anexos'] else []
+        lista_anexos.extend([a for a in extras if a])
+    except Exception:
+        pass
+
+    enviado = _enviar_email(DEST_AFFINITY, assunto, corpo_html, cc=CC_SERENUS, anexos=lista_anexos)
 
     if enviado:
         conn.execute("UPDATE propostas SET status_operacional='Em Análise Operadora' WHERE id=?", (pid,))
