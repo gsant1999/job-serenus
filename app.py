@@ -130,6 +130,53 @@ MODELO_TEM_META = {
     'n3': False,
 }
 
+# ─── ANTECIPAÇÃO DE COMISSÃO (Affinity) ──────────────────────────────────────
+# Operadoras que permitem antecipação da 1ª mensalidade, por plano.
+# Fonte: regras da Affinity Corretora. Vera Cruz NÃO é contemplada.
+# Comparação é feita de forma normalizada (minúsculas, sem acento/espaço extra).
+ANTECIPACAO_PERMITIDA = {
+    'PME': [
+        'Alice', 'Allcare', 'Allcare Integral RJ', 'Allcare Unimed Leste F-RJ',
+        'Amil', 'Ana Costa', 'Assim Saúde', 'Bradesco', 'Hapvida', 'Klini Saúde',
+        'Leve Saúde', 'MedSênior', 'Medsenior', 'Omint', 'Porto Seguro', 'Sami',
+        'Santa Helena', 'São Cristóvão', 'Seguros Unimed', 'Sobam', 'SulAmérica',
+        'Sul América', 'Trasmontano',
+    ],
+    'ADESAO': [
+        'Allcare',
+    ],
+    'PF': [
+        'Assim Saúde', 'Leve Saúde', 'MedSênior', 'Medsenior', 'Hapvida',
+        'Prevent Senior', 'Sobam', 'Trasmontano',
+    ],
+}
+
+def _normaliza_op(txt):
+    """Normaliza nome de operadora para comparação (minúsculas, sem acento/espaço extra)."""
+    import unicodedata
+    t = (txt or '').strip().lower()
+    t = ''.join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
+    return ' '.join(t.split())
+
+def antecipacao_permitida(operadora, plano):
+    """Retorna True se a operadora permite antecipação de comissão no plano dado."""
+    lista = ANTECIPACAO_PERMITIDA.get((plano or '').upper(), [])
+    alvo = _normaliza_op(operadora)
+    # split_operadora pode trazer 'Nome - obs'; pega só o nome base
+    alvo_base = _normaliza_op(alvo.split(' - ')[0]) if ' - ' in alvo else alvo
+    # 'med senior sp/rj' → tira sufixos de praça comuns para casar com 'med senior'
+    alvo_base = alvo_base.replace('/', ' ').replace('  ', ' ')
+    for permitida in lista:
+        p = _normaliza_op(permitida)
+        # casa se um contém o outro como palavra inicial (cobre 'med senior sp rj' vs 'medsenior'/'med senior')
+        p_compact = p.replace(' ', '')
+        alvo_compact = alvo_base.replace(' ', '')
+        if (alvo_base == p or alvo == p
+                or alvo_base.startswith(p) or p.startswith(alvo_base)
+                or alvo_compact.startswith(p_compact) or p_compact.startswith(alvo_compact)):
+            return True
+    return False
+
 def _build_pg_url(raw_url):
     """Garante que o @ na senha seja codificado corretamente."""
     try:
@@ -2955,6 +3002,164 @@ def enviar_plataforma(pid):
     else:
         close_db(conn)
         return jsonify({"ok": False, "msg": "BREVO_API_KEY não configurada no Railway. E-mail não enviado."}), 500
+
+
+# ─── ANTECIPAÇÃO DE COMISSÃO (Affinity) ──────────────────────────────────────
+@app.route('/proposta/<int:pid>/antecipacao/preview')
+@login_required
+@admin_required
+def antecipacao_preview(pid):
+    """Verifica elegibilidade e monta o rascunho do e-mail de antecipação."""
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    close_db(conn)
+    if not p:
+        return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    operadora = p['adm_operadora'] or ''
+    tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
+    plano = _plano_from_modalidade(p['modalidade'], tp)
+    op_nome, _ = _split_operadora(operadora)
+    permitido = antecipacao_permitida(op_nome, plano)
+
+    # Documentos disponíveis
+    tem_contrato = bool(p['contrato_arquivo'])
+    tem_comprovante = bool(p['comprovante_boleto'])
+
+    cliente = p['razao_social'] or ''
+    # Documento do titular (CPF formatado se PF, CNPJ se PME)
+    doc = (p['cpf_titular'] if 'cpf_titular' in p.keys() and p['cpf_titular'] else
+           (p['cnpj'] if 'cnpj' in p.keys() and p['cnpj'] else ''))
+
+    return jsonify({
+        "ok": True,
+        "permitido": permitido,
+        "operadora": op_nome,
+        "plano": plano,
+        "cliente": cliente,
+        "documento": doc,
+        "tem_contrato": tem_contrato,
+        "tem_comprovante": tem_comprovante,
+        "motivo_bloqueio": "" if permitido else f"A operadora {op_nome} não permite antecipação de comissão no plano {plano} (regra Affinity).",
+    })
+
+
+@app.route('/proposta/<int:pid>/antecipacao/enviar', methods=['POST'])
+@login_required
+@admin_required
+def antecipacao_enviar(pid):
+    """Envia o e-mail de solicitação de antecipação de comissão à Affinity, com anexos.
+    Registra no histórico da proposta."""
+    DEST_AFFINITY = "pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br"
+    CC_SERENUS = "guilherme@serenuscorretora.com.br"
+
+    d = request.json or {}
+    numero_contrato = (d.get('numero_contrato') or '').strip()
+    eh_teste = bool(d.get('teste'))
+
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    operadora = p['adm_operadora'] or ''
+    tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
+    plano = _plano_from_modalidade(p['modalidade'], tp)
+    op_nome, _ = _split_operadora(operadora)
+
+    # Trava 1: operadora precisa permitir antecipação
+    if not antecipacao_permitida(op_nome, plano):
+        close_db(conn)
+        return jsonify({"ok": False, "msg": f"A operadora {op_nome} não permite antecipação de comissão no plano {plano} (regra Affinity)."}), 400
+
+    # Trava 2: precisa do contrato E do comprovante anexados
+    if not p['contrato_arquivo'] or not p['comprovante_boleto']:
+        close_db(conn)
+        faltam = []
+        if not p['contrato_arquivo']: faltam.append("contrato assinado")
+        if not p['comprovante_boleto']: faltam.append("comprovante de pagamento")
+        return jsonify({"ok": False, "msg": f"Para solicitar antecipação é necessário anexar: {' e '.join(faltam)}."}), 400
+
+    # Trava 3: número do contrato é obrigatório
+    if not numero_contrato:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Informe o número do contrato."}), 400
+
+    cliente = p['razao_social'] or ''
+    doc = (p['cpf_titular'] if 'cpf_titular' in p.keys() and p['cpf_titular'] else
+           (p['cnpj'] if 'cnpj' in p.keys() and p['cnpj'] else ''))
+    linha_cliente = f"{doc} {cliente}".strip() if doc else cliente
+    linha_cliente = f"{linha_cliente} (Contrato Nº {numero_contrato})"
+
+    assunto = "Solicitação de Antecipação de Comissão - Contratos"
+    corpo_html = _montar_email_antecipacao_html([linha_cliente])
+
+    # Anexos: contrato + comprovante (+ extras)
+    lista_anexos = [p['comprovante_boleto'], p['contrato_arquivo']]
+    try:
+        extras = json.loads(p['anexos']) if p['anexos'] else []
+        lista_anexos.extend([a for a in extras if a])
+    except Exception:
+        pass
+
+    destino = CC_SERENUS if eh_teste else DEST_AFFINITY
+    assunto_final = f"[TESTE] {assunto}" if eh_teste else assunto
+    cc = None if eh_teste else CC_SERENUS
+    enviado = _enviar_email(destino, assunto_final, corpo_html, cc=cc, anexos=lista_anexos)
+
+    if enviado:
+        if not eh_teste:
+            conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+                VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+                'antecipacao', f"Solicitação de antecipação de comissão enviada à Affinity. Contrato Nº {numero_contrato} · {op_nome}/{plano}.", datetime.now(TZ_SP)))
+            conn.commit()
+        close_db(conn)
+        destino_msg = "para você (teste)" if eh_teste else "à Affinity"
+        return jsonify({"ok": True, "msg": f"Solicitação de antecipação enviada {destino_msg} com {len(lista_anexos)} anexo(s)."})
+    else:
+        close_db(conn)
+        erro = getattr(_enviar_email, 'ultimo_erro', None) or "BREVO_API_KEY não configurada no Railway."
+        return jsonify({"ok": False, "msg": f"Falha no envio: {erro}"}), 500
+
+
+def _montar_email_antecipacao_html(linhas_clientes):
+    """Monta o HTML do e-mail de antecipação no padrão Serenus.
+    linhas_clientes: lista de strings (ex: '63 299 486 WILLAMI ... (Contrato Nº 97106295)')."""
+    plural = len(linhas_clientes) > 1
+    termo_contrato = "aos contratos recém-implantados" if plural else "ao contrato recém-implantado"
+    termo_dados = "os dados dos clientes" if plural else "os dados do cliente"
+    termo_anexo = ("Os contratos assinados e os respectivos comprovantes de pagamento já estão anexados a este e-mail."
+                   if plural else
+                   "O contrato assinado e o respectivo comprovante de pagamento já estão anexados a este e-mail.")
+    itens = ''.join(
+        f'<li style="margin:4px 0; font-weight:600; color:#1f2937;">{l}</li>' for l in linhas_clientes
+    )
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="margin:0; padding:0; background:#f4f6f9; font-family:Arial,Helvetica,sans-serif;">
+  <div style="max-width:620px; margin:0 auto; padding:28px;">
+    <div style="background:#fff; border-radius:12px; padding:30px; border:1px solid #e5e7eb;">
+      <p style="font-size:14.5px; color:#374151; line-height:1.7;">Prezada Pamela,</p>
+      <p style="font-size:14.5px; color:#374151; line-height:1.7;">
+        Gostaria de solicitar a antecipação do pagamento da comissão referente {termo_contrato}.
+        Seguem abaixo {termo_dados} para conferência:
+      </p>
+      <ul style="font-size:14px; color:#1f2937; line-height:1.7; padding-left:20px;">{itens}</ul>
+      <p style="font-size:14.5px; color:#374151; line-height:1.7;">{termo_anexo}</p>
+      <p style="font-size:14.5px; color:#374151; line-height:1.7;">
+        Poderiam me confirmar o recebimento e o prazo para a liberação da antecipação?
+      </p>
+      <p style="font-size:14.5px; color:#374151; line-height:1.7;">
+        Fico à disposição caso precisem de mais alguma informação ou documentação adicional.
+      </p>
+      <p style="font-size:14.5px; color:#374151; line-height:1.7; margin-top:24px;">Atenciosamente,</p>
+      <div style="margin-top:8px; padding-top:16px; border-top:1px solid #e5e7eb;">
+        <div style="font-weight:700; color:#0f172a; font-size:14px;">Serenus Corretora de Saúde</div>
+        <div style="color:#64748b; font-size:12.5px; margin-top:2px;">guilherme@serenuscorretora.com.br</div>
+      </div>
+    </div>
+  </div>
+</body></html>"""
 
 
 @app.route('/api/etiquetas')

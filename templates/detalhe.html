@@ -248,6 +248,7 @@
       {% if session.perfil == 'admin' %}<div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEdicao()">Editar proposta</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEmailAffinity()">Enviar à Affinity</button>
+        <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(31,216,164,.4); color:var(--teal);" onclick="abrirAntecipacao()">Solicitar antecipação</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirConsultor()">Trocar consultor</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.3); color:var(--rosa);" onclick="abrirEstorno()">Estornar</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.5); color:var(--rosa);" onclick="abrirExclusao()">Excluir</button>
@@ -513,6 +514,52 @@
   </div>
 </div>
 
+<!-- Modal Solicitar Antecipação de Comissão -->
+<div class="modal-overlay" id="modal-antecipacao">
+  <div class="modal" style="max-width:600px;max-height:90vh;overflow-y:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <h3 style="margin:0;">Solicitar Antecipação de Comissão</h3>
+      <button class="btn-outline" style="font-size:12px;padding:4px 10px;" onclick="fecharAntecipacao()">Fechar</button>
+    </div>
+
+    <!-- Bloqueio: operadora não permite -->
+    <div id="ant-bloqueio" style="display:none;background:#fee2e2;border:1px solid #f43f7c;border-radius:8px;padding:14px 16px;margin-bottom:16px;font-size:13px;color:#991b1b;line-height:1.6;"></div>
+
+    <!-- Aviso documentos -->
+    <div id="ant-aviso-doc" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#92400e;line-height:1.6;"></div>
+
+    <!-- Conteúdo (só quando permitido) -->
+    <div id="ant-conteudo" style="display:none;">
+      <div style="background:var(--panel-2,#1b1b27);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;line-height:1.8;">
+        <strong>Para:</strong> Pâmela Lima, Kaique Silva, Equipe PL (Affinity)<br>
+        <strong>Cópia:</strong> guilherme@serenuscorretora.com.br<br>
+        <strong>Cliente:</strong> <span id="ant-cliente">—</span><br>
+        <strong>Operadora / Plano:</strong> <span id="ant-operadora">—</span>
+        <span id="ant-badge-ok" style="display:inline-block;margin-left:6px;background:rgba(31,216,164,.15);color:var(--teal);border-radius:5px;padding:1px 8px;font-size:11px;">antecipação permitida ✓</span>
+      </div>
+
+      <div class="campo" style="margin-bottom:14px;">
+        <label>Número do contrato <span style="color:var(--rosa);">*</span></label>
+        <input type="text" id="ant-num-contrato" placeholder="ex: 97106295" style="font-size:13px;">
+        <div style="font-size:11px;color:var(--cinza);margin-top:4px;">Número do contrato na operadora (obrigatório para a Affinity localizar).</div>
+      </div>
+
+      <div style="background:var(--panel-2,#1b1b27);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:var(--cinza);line-height:1.7;">
+        <strong style="color:var(--texto,#fff);">Anexos que serão enviados:</strong><br>
+        <span id="ant-anexos-lista">Contrato assinado + Comprovante de pagamento</span>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn" style="flex:1;min-width:160px;" id="ant-btn-enviar" onclick="enviarAntecipacao(false)">Enviar à Affinity</button>
+        <button class="btn-outline" style="flex:1;min-width:160px;" onclick="enviarAntecipacao(true)">Enviar teste para mim</button>
+        <button class="btn-outline" onclick="fecharAntecipacao()">Cancelar</button>
+      </div>
+    </div>
+
+    <div id="ant-status" style="margin-top:12px;font-size:12.5px;color:var(--cinza);display:none;"></div>
+  </div>
+</div>
+
 <!-- Modal Excluir proposta (Soft Delete) -->
 <div class="modal-overlay" id="modal-exclusao">
   <div class="modal" style="max-width:480px;">
@@ -692,7 +739,7 @@ async function carregarTimeline() {
     const inicial = nome.charAt(0).toUpperCase();
     const dt = (x.criado_em||'').slice(0,16).replace('T',' ');
     // Cor do avatar por tipo
-    const cores = {exclusao:'#f43f7c', plataforma:'#3b82f6', status_operacional:'#f59e0b', comprovante:'#10b981', edicao:'#8b5cf6'};
+    const cores = {exclusao:'#f43f7c', plataforma:'#3b82f6', status_operacional:'#f59e0b', comprovante:'#10b981', edicao:'#8b5cf6', antecipacao:'#1fd8a4'};
     const cor = cores[x.tipo] || '#1fd8a4';
     // Conteúdo da linha
     let conteudo = '';
@@ -994,6 +1041,83 @@ async function excluirAnexo(tipo, nome) {
     if (j.ok) { toast('Anexo excluído', 'ok'); setTimeout(() => location.reload(), 700); }
     else toast(j.msg || 'Erro ao excluir', 'err');
   } catch(e) { toast('Erro de conexão', 'err'); }
+}
+
+// ─── ANTECIPAÇÃO DE COMISSÃO ───
+async function abrirAntecipacao() {
+  const modal = document.getElementById('modal-antecipacao');
+  // reset
+  document.getElementById('ant-bloqueio').style.display = 'none';
+  document.getElementById('ant-aviso-doc').style.display = 'none';
+  document.getElementById('ant-conteudo').style.display = 'none';
+  document.getElementById('ant-status').style.display = 'none';
+  modal.classList.add('open');
+
+  try {
+    const res = await fetch(`/proposta/{{ p.id }}/antecipacao/preview`);
+    const d = await res.json();
+    if (!d.ok) { toast(d.msg || 'Erro', 'err'); return; }
+
+    if (!d.permitido) {
+      const bloq = document.getElementById('ant-bloqueio');
+      bloq.innerHTML = `<strong>Antecipação não permitida.</strong><br>${d.motivo_bloqueio}`;
+      bloq.style.display = 'block';
+      return;
+    }
+
+    // Permitido: preenche dados
+    document.getElementById('ant-cliente').textContent = (d.documento ? d.documento + ' ' : '') + d.cliente;
+    document.getElementById('ant-operadora').textContent = `${d.operadora} / ${d.plano}`;
+
+    // Checa documentos
+    if (!d.tem_contrato || !d.tem_comprovante) {
+      const faltam = [];
+      if (!d.tem_contrato) faltam.push('contrato assinado');
+      if (!d.tem_comprovante) faltam.push('comprovante de pagamento');
+      const aviso = document.getElementById('ant-aviso-doc');
+      aviso.innerHTML = `<strong>Documentos faltando:</strong> ${faltam.join(' e ')}.<br>Anexe os documentos na seção "Documentos" antes de solicitar a antecipação.`;
+      aviso.style.display = 'block';
+      return;
+    }
+
+    document.getElementById('ant-conteudo').style.display = 'block';
+  } catch(e) {
+    toast('Erro ao carregar', 'err');
+  }
+}
+
+function fecharAntecipacao() {
+  document.getElementById('modal-antecipacao').classList.remove('open');
+}
+
+async function enviarAntecipacao(eh_teste) {
+  const num = document.getElementById('ant-num-contrato').value.trim();
+  if (!num) { toast('Informe o número do contrato', 'err'); return; }
+  const btn = document.getElementById('ant-btn-enviar');
+  const status = document.getElementById('ant-status');
+  status.style.display = 'block';
+  status.textContent = eh_teste ? 'Enviando teste...' : 'Enviando à Affinity...';
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/proposta/{{ p.id }}/antecipacao/enviar`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({numero_contrato: num, teste: eh_teste})
+    });
+    const j = await res.json();
+    status.textContent = j.msg;
+    if (j.ok) {
+      toast(j.msg, 'ok');
+      if (!eh_teste) setTimeout(() => location.reload(), 1200);
+    } else {
+      toast(j.msg || 'Erro', 'err');
+    }
+  } catch(e) {
+    status.textContent = 'Erro de conexão.';
+    toast('Erro de conexão', 'err');
+  } finally {
+    btn.disabled = false;
+  }
 }
 </script>
 {% endblock %}
