@@ -679,6 +679,15 @@ def init_db():
                 descricao TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS crm_etapas (
+                id SERIAL PRIMARY KEY,
+                slug TEXT UNIQUE NOT NULL,
+                nome TEXT NOT NULL,
+                cor TEXT DEFAULT '#3b82f6',
+                ordem INTEGER DEFAULT 0,
+                tipo TEXT DEFAULT 'normal',
+                ativo INTEGER DEFAULT 1
+            )""",
         ]
         for sql in tables_sql:
             try: 
@@ -891,6 +900,15 @@ def init_db():
             descricao TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS crm_etapas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT UNIQUE NOT NULL,
+            nome TEXT NOT NULL,
+            cor TEXT DEFAULT '#3b82f6',
+            ordem INTEGER DEFAULT 0,
+            tipo TEXT DEFAULT 'normal',
+            ativo INTEGER DEFAULT 1
+        );
         CREATE TABLE IF NOT EXISTS webhook_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             evento_id TEXT UNIQUE,
@@ -954,6 +972,32 @@ def init_db():
     else:
         for nome, cor in etq_default:
             conn.execute("INSERT OR IGNORE INTO etiquetas (nome,cor) VALUES (?,?)", (nome, cor))
+
+    # Etapas do funil CRM padrão (só insere se a tabela estiver vazia — preserva customizações)
+    etapas_default = [
+        ('topo',    'Topo do Funil',  '#3b82f6', 1, 'normal'),
+        ('meio',    'Meio do Funil',  '#f59e0b', 2, 'normal'),
+        ('fim',     'Fundo do Funil', '#10b981', 3, 'normal'),
+        ('ganho',   'Ganho',          '#1fd8a4', 4, 'ganho'),
+        ('perdido', 'Perdido',        '#ef4444', 5, 'perdido'),
+    ]
+    try:
+        ja_tem = conn.execute("SELECT COUNT(*) c FROM crm_etapas").fetchone()['c']
+    except Exception:
+        ja_tem = 0
+    if not ja_tem:
+        if is_pg:
+            cur = conn.cursor()
+            for slug, nome, cor, ordem, tipo in etapas_default:
+                cur.execute("INSERT INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES (%s,%s,%s,%s,%s) ON CONFLICT (slug) DO NOTHING",
+                            (slug, nome, cor, ordem, tipo))
+            conn.commit()
+        else:
+            for slug, nome, cor, ordem, tipo in etapas_default:
+                conn.execute("INSERT OR IGNORE INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES (?,?,?,?,?)",
+                             (slug, nome, cor, ordem, tipo))
+            conn.commit()
+
     
     # Regimes padrão
     regimes_default = [
@@ -5544,13 +5588,32 @@ def api_propostas():
 
 
 # ─── CRM ─────────────────────────────────────────────────────────────────────────
-CRM_ETAPAS = [
-    {'id': 'topo',     'nome': 'Topo do Funil',   'cor': '#3b82f6', 'desc': 'Leads novos, primeiro contato'},
-    {'id': 'meio',     'nome': 'Meio do Funil',    'cor': '#f59e0b', 'desc': 'Em negociação, proposta enviada'},
-    {'id': 'fim',      'nome': 'Fundo do Funil',   'cor': '#10b981', 'desc': 'Pronto para fechar'},
-    {'id': 'ganho',    'nome': 'Ganho ✓',          'cor': '#1fd8a4', 'desc': 'Convertido em proposta'},
-    {'id': 'perdido',  'nome': 'Perdido',           'cor': '#ef4444', 'desc': 'Lead perdido'},
-]
+def carregar_etapas_crm(conn=None):
+    """Lê as etapas do funil do banco, ordenadas. Cria conexão própria se não receber uma."""
+    fechar = False
+    if conn is None:
+        conn = db(); fechar = True
+    try:
+        rows = conn.execute(
+            "SELECT slug, nome, cor, ordem, tipo FROM crm_etapas WHERE ativo=1 ORDER BY ordem, id"
+        ).fetchall()
+        etapas = [{'id': r['slug'], 'slug': r['slug'], 'nome': r['nome'],
+                   'cor': r['cor'], 'ordem': r['ordem'], 'tipo': r['tipo']} for r in rows]
+    except Exception:
+        etapas = []
+    finally:
+        if fechar:
+            close_db(conn)
+    # Fallback: se a tabela ainda não existir/estiver vazia, usa as etapas padrão
+    if not etapas:
+        etapas = [
+            {'id': 'topo', 'slug': 'topo', 'nome': 'Topo do Funil', 'cor': '#3b82f6', 'ordem': 1, 'tipo': 'normal'},
+            {'id': 'meio', 'slug': 'meio', 'nome': 'Meio do Funil', 'cor': '#f59e0b', 'ordem': 2, 'tipo': 'normal'},
+            {'id': 'fim', 'slug': 'fim', 'nome': 'Fundo do Funil', 'cor': '#10b981', 'ordem': 3, 'tipo': 'normal'},
+            {'id': 'ganho', 'slug': 'ganho', 'nome': 'Ganho', 'cor': '#1fd8a4', 'ordem': 4, 'tipo': 'ganho'},
+            {'id': 'perdido', 'slug': 'perdido', 'nome': 'Perdido', 'cor': '#ef4444', 'ordem': 5, 'tipo': 'perdido'},
+        ]
+    return etapas
 
 @app.route('/crm')
 @login_required
@@ -5578,17 +5641,24 @@ def crm():
     q += " ORDER BY l.atualizado_em DESC"
     leads = conn.execute(q, params).fetchall()
 
+    # Etapas dinâmicas do banco
+    etapas = carregar_etapas_crm(conn)
+
     # Agrupa por etapa
-    kanban = {e['id']: [] for e in CRM_ETAPAS}
+    kanban = {e['id']: [] for e in etapas}
+    primeira = etapas[0]['id'] if etapas else 'topo'
     for lead in leads:
-        etapa = lead['etapa'] or 'topo'
+        etapa = lead['etapa'] or primeira
         if etapa in kanban:
             kanban[etapa].append(lead)
+        else:
+            # Lead com etapa órfã (etapa foi removida) cai na primeira coluna
+            kanban[primeira].append(lead)
 
     # Stats
     total = len(leads)
     close_db(conn)
-    return render_template('crm.html', kanban=kanban, etapas=CRM_ETAPAS,
+    return render_template('crm.html', kanban=kanban, etapas=etapas,
                            total=total, responsaveis=responsaveis, eh_admin=eh_admin)
 
 
@@ -5637,7 +5707,8 @@ def crm_lead_detalhe(lid):
 @login_required
 def crm_lead_mover(lid):
     nova_etapa = (request.json or {}).get('etapa')
-    if nova_etapa not in [e['id'] for e in CRM_ETAPAS]:
+    etapas_validas = [e['id'] for e in carregar_etapas_crm()]
+    if nova_etapa not in etapas_validas:
         return jsonify({"ok": False, "erro": "Etapa inválida"}), 400
     conn = db()
     lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
@@ -5704,11 +5775,109 @@ def crm_stats():
     uid = session['user_id']; eh_admin = session.get('perfil') == 'admin'
     q_filter = "" if eh_admin else f" AND responsavel_id={uid}"
     stats = {}
-    for e in CRM_ETAPAS:
+    for e in carregar_etapas_crm(conn):
         row = conn.execute(f"SELECT COUNT(*) c, COALESCE(SUM(valor_estimado),0) v FROM crm_leads WHERE etapa=?{q_filter}", (e['id'],)).fetchone()
         stats[e['id']] = {'qtd': row['c'], 'valor': row['v']}
     close_db(conn)
     return jsonify(stats)
+
+
+# ─── GESTÃO DE ETAPAS DO FUNIL (admin) ───────────────────────────────────────
+import unicodedata as _unicodedata
+
+def _slugify(texto):
+    """Gera um slug seguro a partir do nome da etapa."""
+    txt = _unicodedata.normalize('NFKD', texto or '').encode('ascii', 'ignore').decode('ascii')
+    txt = re.sub(r'[^a-zA-Z0-9]+', '_', txt).strip('_').lower()
+    return txt[:40] or ('etapa_' + secrets.token_hex(3))
+
+
+@app.route('/crm/etapas')
+@login_required
+def crm_etapas_listar():
+    """Retorna as etapas do funil (para o gerenciador)."""
+    return jsonify({"etapas": carregar_etapas_crm()})
+
+
+@app.route('/crm/etapas/nova', methods=['POST'])
+@login_required
+@admin_required
+def crm_etapa_nova():
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    if not nome:
+        return jsonify({"ok": False, "erro": "Nome obrigatório"}), 400
+    cor = (d.get('cor') or '#3b82f6').strip()
+    conn = db()
+    # slug único
+    base = _slugify(nome)
+    slug = base
+    tent = 1
+    while conn.execute("SELECT 1 FROM crm_etapas WHERE slug=?", (slug,)).fetchone():
+        tent += 1
+        slug = f"{base}_{tent}"
+    # ordem: vai pro fim (antes de ganho/perdido se existirem)
+    maxord = conn.execute("SELECT COALESCE(MAX(ordem),0) m FROM crm_etapas").fetchone()['m']
+    conn.execute("INSERT INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES (?,?,?,?,?)",
+                 (slug, nome, cor, maxord + 1, 'normal'))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "slug": slug})
+
+
+@app.route('/crm/etapas/<slug>/editar', methods=['POST'])
+@login_required
+@admin_required
+def crm_etapa_editar(slug):
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    cor = (d.get('cor') or '').strip()
+    conn = db()
+    et = conn.execute("SELECT * FROM crm_etapas WHERE slug=?", (slug,)).fetchone()
+    if not et:
+        close_db(conn); return jsonify({"ok": False, "erro": "Etapa não encontrada"}), 404
+    novo_nome = nome or et['nome']
+    nova_cor = cor or et['cor']
+    conn.execute("UPDATE crm_etapas SET nome=?, cor=? WHERE slug=?", (novo_nome, nova_cor, slug))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/etapas/<slug>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_etapa_excluir(slug):
+    conn = db()
+    et = conn.execute("SELECT * FROM crm_etapas WHERE slug=?", (slug,)).fetchone()
+    if not et:
+        close_db(conn); return jsonify({"ok": False, "erro": "Etapa não encontrada"}), 404
+    # Não deixa excluir se for a última etapa normal
+    total = conn.execute("SELECT COUNT(*) c FROM crm_etapas WHERE ativo=1").fetchone()['c']
+    if total <= 1:
+        close_db(conn); return jsonify({"ok": False, "erro": "Não é possível excluir a última etapa"}), 400
+    # Move leads dessa etapa para a primeira etapa restante
+    restante = conn.execute(
+        "SELECT slug FROM crm_etapas WHERE ativo=1 AND slug<>? ORDER BY ordem, id LIMIT 1", (slug,)
+    ).fetchone()
+    destino = restante['slug'] if restante else 'topo'
+    conn.execute("UPDATE crm_leads SET etapa=? WHERE etapa=?", (destino, slug))
+    conn.execute("DELETE FROM crm_etapas WHERE slug=?", (slug,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "leads_movidos_para": destino})
+
+
+@app.route('/crm/etapas/reordenar', methods=['POST'])
+@login_required
+@admin_required
+def crm_etapas_reordenar():
+    """Recebe lista de slugs na nova ordem."""
+    ordem = (request.json or {}).get('ordem', [])
+    if not isinstance(ordem, list) or not ordem:
+        return jsonify({"ok": False, "erro": "Ordem inválida"}), 400
+    conn = db()
+    for i, slug in enumerate(ordem, start=1):
+        conn.execute("UPDATE crm_etapas SET ordem=? WHERE slug=?", (i, slug))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
 
 
 # ─── WEBHOOK META / GOOGLE LEADS ─────────────────────────────────────────────────
