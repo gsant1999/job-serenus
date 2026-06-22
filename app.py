@@ -1985,49 +1985,67 @@ def asaas_testar_chave():
         </body></html>
         """
 
-    # POST: testa a chave enviada
+    # POST: testa a chave enviada — TESTA COM E SEM o cifrão, para descobrir qual o Asaas aceita
     d = request.get_json(silent=True) or {}
-    chave = (d.get('chave') or '').strip().strip('"').strip("'")
-    if chave.startswith('$'):
-        chave = chave[1:]
+    chave_original = (d.get('chave') or '').strip().strip('"').strip("'")
 
-    if not chave:
+    if not chave_original:
         return jsonify({"valida": False, "erro": "Nenhuma chave informada"})
 
-    base = 'https://api.asaas.com/v3' if chave.startswith('aact_prod') else 'https://api-sandbox.asaas.com/v3'
-    headers = {
-        "Content-Type": "application/json",
-        "access_token": chave,
-        "User-Agent": "JOB-Serenus/1.0",
-    }
-    resultado = {
-        "comprimento": len(chave),
-        "prefixo": chave[:15] + '...',
-        "sufixo": '...' + chave[-10:],
-        "ambiente": "produção" if chave.startswith('aact_prod') else "sandbox",
-        "base_url": base,
-    }
-    try:
-        r = _requests.get(f"{base}/finance/balance", headers=headers, timeout=20)
-        resultado["status_http"] = r.status_code
+    def _testa(chave):
+        """Testa uma variação da chave contra o Asaas."""
+        if not chave:
+            return {"valida": False, "erro": "vazia"}
+        base = 'https://api.asaas.com/v3' if 'aact_prod' in chave else 'https://api-sandbox.asaas.com/v3'
+        headers = {
+            "Content-Type": "application/json",
+            "access_token": chave,
+            "User-Agent": "JOB-Serenus/1.0",
+        }
+        r_out = {
+            "comprimento": len(chave),
+            "prefixo": chave[:18] + '...',
+            "comeca_com_cifrao": chave.startswith('$'),
+        }
         try:
-            body = r.json()
-        except Exception:
-            body = {"_raw": r.text[:300]}
-        if r.status_code == 200:
-            resultado["valida"] = True
-            resultado["saldo"] = body.get('balance')
-            resultado["mensagem"] = "✅ CHAVE VÁLIDA! Pode salvar esta no Railway."
-        else:
-            resultado["valida"] = False
-            resultado["erro_asaas"] = body.get('errors') or body
-            resultado["mensagem"] = "❌ Chave inválida ou rejeitada pelo Asaas."
-    except Exception as e:
-        resultado["valida"] = False
-        resultado["erro"] = str(e)[:200]
-        resultado["mensagem"] = "❌ Falha de conexão ao Asaas."
+            r = _requests.get(f"{base}/finance/balance", headers=headers, timeout=20)
+            r_out["status_http"] = r.status_code
+            try:
+                body = r.json()
+            except Exception:
+                body = {"_raw": r.text[:200]}
+            if r.status_code == 200:
+                r_out["valida"] = True
+                r_out["saldo"] = body.get('balance')
+            else:
+                r_out["valida"] = False
+                r_out["erro_asaas"] = body.get('errors') or body
+        except Exception as e:
+            r_out["valida"] = False
+            r_out["erro"] = str(e)[:150]
+        return r_out
 
-    return jsonify(resultado)
+    # Prepara as duas variações
+    chave_sem = chave_original[1:] if chave_original.startswith('$') else chave_original
+    chave_com = chave_original if chave_original.startswith('$') else ('$' + chave_original)
+
+    res_sem = _testa(chave_sem)
+    res_com = _testa(chave_com)
+
+    valida_geral = res_sem.get('valida') or res_com.get('valida')
+    if res_sem.get('valida'):
+        msg = "✅ CHAVE VÁLIDA — use ela SEM o cifrão ($) no Railway."
+    elif res_com.get('valida'):
+        msg = "✅ CHAVE VÁLIDA — use ela COM o cifrão ($) no Railway! (o $ faz parte da chave)"
+    else:
+        msg = "❌ Ambas as variações falharam. A chave foi revogada/expirada no Asaas, OU a conta tem restrição de IP/segurança ativa."
+
+    return jsonify({
+        "valida": valida_geral,
+        "mensagem": msg,
+        "teste_SEM_cifrao": res_sem,
+        "teste_COM_cifrao": res_com,
+    })
 
 
 
