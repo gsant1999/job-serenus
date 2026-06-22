@@ -5676,7 +5676,7 @@ def crm_lead_novo():
         (d.get('nome'), d.get('telefone'), d.get('email'), d.get('empresa'),
          d.get('origem', 'manual'), d.get('etapa', 'topo'), resp_id,
          float(d.get('valor_estimado') or 0) or None, d.get('observacoes')))
-    lead_id = conn.execute("SELECT last_insert_rowid() id").fetchone()['id']
+    lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                  (lead_id, session.get('nome'), 'criacao', 'Lead criado'))
     conn.commit(); close_db(conn)
@@ -5911,7 +5911,7 @@ def webhook_meta():
                         VALUES (?,?,?,?,?,?,?)""",
                         (nome, telefone, email, empresa, 'meta', 'topo',
                          json.dumps(valor, ensure_ascii=False)))
-                    lead_id = conn.execute("SELECT last_insert_rowid() id").fetchone()['id']
+                    lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
                     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                                  (lead_id, 'Meta Ads', 'criacao', f'Lead capturado via Meta Ads'))
         conn.commit(); close_db(conn)
@@ -5938,7 +5938,7 @@ def webhook_google():
             VALUES (?,?,?,?,?,?,?)""",
             (nome, telefone, email, empresa, 'google', 'topo',
              json.dumps(data, ensure_ascii=False)))
-        lead_id = conn.execute("SELECT last_insert_rowid() id").fetchone()['id']
+        lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                      (lead_id, 'Google Ads', 'criacao', 'Lead capturado via Google Lead Form'))
         conn.commit(); close_db(conn)
@@ -6042,7 +6042,7 @@ def webhook_sheets():
                 VALUES (?, ?, ?, ?, ?, 'topo', ?, ?)
             """, (nome, telefone, email, cidade, origem, responsavel_id, obs))
 
-            lead_id = conn.execute("SELECT last_insert_rowid() id").fetchone()['id']
+            lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             conn.execute("""
                 INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
                 VALUES (?, ?, 'criacao', ?)
@@ -6065,6 +6065,43 @@ def webhook_sheets():
         app.logger.error(f"[WEBHOOK_SHEETS] Erro: {e}")
         return jsonify({"ok": False, "erro": str(e)}), 200
 
+
+
+# ─── CRM CONFIG ───────────────────────────────────────────────────
+@app.route('/crm/config')
+@login_required
+def crm_config():
+    """Pgágina de configuração do CRM — gerenciar etapas do funil."""
+    conn = db()
+    etapas = carregar_etapas_crm(conn)
+    close_db(conn)
+    is_admin = session.get('perfil') == 'admin'
+    usuario = session.get('usuario')
+    # Renderiza inline (sem template separado)
+    etapas_html = ''.join([
+        f'<div class="etapa-item" style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:8px;">'
+        f'<span style="width:12px;height:12px;border-radius:50%;background:{e["cor"]};flex-shrink:0;"></span>'
+        f'<strong style="flex:1">{e["nome"]}</strong>'
+        f'<span style="color:#9ca3af;font-size:12px">{e["tipo"]}</span>'
+        f'</div>' for e in etapas
+    ])
+    html = f"""<!DOCTYPE html><html><head><title>Config CRM</title>
+    <style>body{{font-family:Arial;background:#f4f6f9;padding:40px;}}
+    .container{{max-width:700px;margin:0 auto;background:white;padding:30px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1);}}
+    h1{{color:#333;}} a{{color:#3b82f6;text-decoration:none;}}
+    .btn{{background:#3b82f6;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-size:14px;text-decoration:none;}}
+    </style></head><body>
+    <div class='container'>
+    <p><a href='/crm'>← Voltar ao CRM</a></p>
+    <h1>⚙️ Configurações do CRM</h1>
+    <h2 style='font-size:16px;margin-top:30px;'>Etapas do Funil</h2>
+    {etapas_html}
+    {'<p style="margin-top:20px;"><a class="btn" href="/crm/etapas">Gerenciar Etapas</a></p>' if is_admin else ''}
+    <h2 style='font-size:16px;margin-top:30px;'>Importação de Leads</h2>
+    <p>Leads do Facebook e Google chegam automaticamente via Apps Script.</p>
+    {'<p><a class="btn" href="/crm/importar">Importar Leads Manualmente</a></p>' if is_admin else ''}
+    </div></body></html>"""
+    return html
 
 # ─── UPLOAD DE FOTO (próprio usuário, sem ser admin) ─────────────────────────────
 @app.route('/minha-foto', methods=['POST'])
