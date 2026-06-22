@@ -1934,6 +1934,104 @@ def asaas_diag():
     return jsonify(info)
 
 
+@app.route('/admin/asaas/testar-chave', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def asaas_testar_chave():
+    """Testa QUALQUER chave Asaas ao vivo, sem precisar salvar variável/deploy.
+    Uso: cole a chave no campo e veja na hora se funciona.
+    GET mostra o formulário; POST testa a chave enviada."""
+    if request.method == 'GET':
+        return """
+        <html><head><meta charset="utf-8"><title>Testar Chave Asaas</title>
+        <style>
+            body{font-family:system-ui;max-width:760px;margin:40px auto;padding:0 20px;background:#0f1117;color:#e6e6e6}
+            h2{color:#1fd8a4}
+            textarea{width:100%;height:120px;padding:12px;font-family:monospace;font-size:13px;
+                     border:1px solid #333;border-radius:8px;background:#1a1d27;color:#fff;box-sizing:border-box}
+            button{margin-top:12px;padding:12px 28px;background:#1fd8a4;color:#000;border:none;
+                   border-radius:8px;font-weight:700;font-size:15px;cursor:pointer}
+            button:hover{opacity:.9}
+            #resultado{margin-top:24px;padding:16px;border-radius:8px;white-space:pre-wrap;
+                       font-family:monospace;font-size:13px;background:#1a1d27;border:1px solid #333;display:none}
+            .ok{border-color:#1fd8a4 !important;color:#1fd8a4}
+            .erro{border-color:#ff5470 !important;color:#ff5470}
+            label{font-size:14px;color:#aaa}
+        </style></head><body>
+        <h2>Testar Chave Asaas (ao vivo)</h2>
+        <p style="color:#aaa">Cole a chave da API do Asaas abaixo (com ou sem o $ na frente) e clique em testar.
+        Isto testa direto contra o Asaas <b>sem salvar nada</b> — só pra confirmar se a chave é válida.</p>
+        <label>Chave da API:</label>
+        <textarea id="chave" placeholder="aact_prod_..."></textarea>
+        <button onclick="testar()">Testar agora</button>
+        <div id="resultado"></div>
+        <script>
+        async function testar(){
+            const chave = document.getElementById('chave').value.trim();
+            const box = document.getElementById('resultado');
+            box.style.display='block'; box.className=''; box.textContent='Testando contra o Asaas...';
+            try {
+                const r = await fetch('/admin/asaas/testar-chave', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({chave: chave})
+                });
+                const d = await r.json();
+                box.className = d.valida ? 'ok' : 'erro';
+                box.textContent = JSON.stringify(d, null, 2);
+            } catch(e){ box.className='erro'; box.textContent='Erro: '+e; }
+        }
+        </script>
+        </body></html>
+        """
+
+    # POST: testa a chave enviada
+    d = request.get_json(silent=True) or {}
+    chave = (d.get('chave') or '').strip().strip('"').strip("'")
+    if chave.startswith('$'):
+        chave = chave[1:]
+
+    if not chave:
+        return jsonify({"valida": False, "erro": "Nenhuma chave informada"})
+
+    base = 'https://api.asaas.com/v3' if chave.startswith('aact_prod') else 'https://api-sandbox.asaas.com/v3'
+    headers = {
+        "Content-Type": "application/json",
+        "access_token": chave,
+        "User-Agent": "JOB-Serenus/1.0",
+    }
+    resultado = {
+        "comprimento": len(chave),
+        "prefixo": chave[:15] + '...',
+        "sufixo": '...' + chave[-10:],
+        "ambiente": "produção" if chave.startswith('aact_prod') else "sandbox",
+        "base_url": base,
+    }
+    try:
+        r = _requests.get(f"{base}/finance/balance", headers=headers, timeout=20)
+        resultado["status_http"] = r.status_code
+        try:
+            body = r.json()
+        except Exception:
+            body = {"_raw": r.text[:300]}
+        if r.status_code == 200:
+            resultado["valida"] = True
+            resultado["saldo"] = body.get('balance')
+            resultado["mensagem"] = "✅ CHAVE VÁLIDA! Pode salvar esta no Railway."
+        else:
+            resultado["valida"] = False
+            resultado["erro_asaas"] = body.get('errors') or body
+            resultado["mensagem"] = "❌ Chave inválida ou rejeitada pelo Asaas."
+    except Exception as e:
+        resultado["valida"] = False
+        resultado["erro"] = str(e)[:200]
+        resultado["mensagem"] = "❌ Falha de conexão ao Asaas."
+
+    return jsonify(resultado)
+
+
+
+
 @app.route('/api/caixa-empresa')
 @login_required
 @admin_required
