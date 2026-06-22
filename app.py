@@ -1519,13 +1519,12 @@ def admin_required(f):
 # ─── INTEGRAÇÃO ASAAS (pagamentos PIX para consultores) ──────────────────────────
 import requests as _requests
 
-# Lê a chave e remove lixo comum: aspas, espaços e o '$' inicial que o Railway
-# interpreta como referência de variável (a chave real começa com 'aact_').
+# CORREÇÃO 21.06.2026: o cifrão ($) FAZ PARTE da chave do Asaas (formato $aact_prod_...).
+# Removê-lo invalida a chave (erro invalid_access_token / 401). Confirmado via teste ao vivo:
+# COM $ → 200 OK; SEM $ → 401. Então só limpamos espaços e aspas, NUNCA o cifrão.
 ASAAS_API_KEY = (os.environ.get('ASAAS_API_KEY', '') or '').strip().strip('"').strip("'")
-if ASAAS_API_KEY.startswith('$'):
-    ASAAS_API_KEY = ASAAS_API_KEY[1:]
-# Detecta automaticamente sandbox vs produção pelo prefixo da chave
-if ASAAS_API_KEY.startswith('aact_prod'):
+# Detecta sandbox vs produção pelo prefixo (com ou sem o cifrão na frente)
+if 'aact_prod' in ASAAS_API_KEY[:15]:
     ASAAS_BASE_URL = 'https://api.asaas.com/v3'
 else:
     ASAAS_BASE_URL = os.environ.get('ASAAS_BASE_URL', 'https://api-sandbox.asaas.com/v3')
