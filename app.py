@@ -5947,6 +5947,125 @@ def webhook_google():
         return jsonify({"ok": False, "erro": str(e)}), 200
 
 
+@app.route('/webhook/sheets', methods=['POST'])
+def webhook_sheets():
+    """
+    Recebe leads do Google Sheets via Apps Script.
+    Payload esperado:
+    {
+      "token": "SEU_TOKEN_AQUI",
+      "origem": "Facebook" | "Google" | "MedSenior",
+      "leads": [
+        {
+          "data_hora": "28/05/2026 10:35",
+          "consultor": "DANILO",
+          "nome": "Fulano",
+          "telefone": "19999999999",
+          "email": "fulano@gmail.com",
+          "cidade": "Campinas",
+          "tipo": "PF",
+          "num_pessoas": "1"
+        }, ...
+      ]
+    }
+    """
+    try:
+        data = request.get_json(force=True) or {}
+
+        # Validar token
+        token_esperado = os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
+        token_recebido = data.get('token', '')
+        if token_recebido != token_esperado:
+            app.logger.warning(f"[WEBHOOK_SHEETS] Token inválido: '{token_recebido}'")
+            return jsonify({"ok": False, "erro": "Token inválido"}), 401
+
+        origem = data.get('origem', 'Sheets')
+        leads_raw = data.get('leads', [])
+
+        if not leads_raw:
+            return jsonify({"ok": True, "importados": 0, "msg": "Nenhum lead enviado"}), 200
+
+        conn = db()
+        importados = 0
+        duplicados = 0
+        ignorados = 0
+
+        for lead in leads_raw:
+            nome     = (lead.get('nome') or '').strip()
+            telefone = (lead.get('telefone') or '').strip()
+            email    = (lead.get('email') or '').strip()
+            cidade   = (lead.get('cidade') or '').strip()
+            tipo     = (lead.get('tipo') or 'PF').strip()
+            num_pess = (lead.get('num_pessoas') or '').strip()
+            cons_raw = (lead.get('consultor') or '').strip()
+
+            # Filtro: "teste" no nome ou email
+            if nome and 'teste' in nome.lower():
+                ignorados += 1; continue
+            if email and 'teste' in email.lower():
+                ignorados += 1; continue
+            if not nome:
+                ignorados += 1; continue
+
+            # Normalizar consultor
+            consultor = _normalizar_consultor(cons_raw) or 'Guilherme'
+            resp = conn.execute(
+                "SELECT id FROM usuarios WHERE nome = ?", (consultor,)
+            ).fetchone()
+            responsavel_id = resp[0] if resp else None
+
+            # Dedup por telefone
+            if telefone:
+                dup = conn.execute(
+                    "SELECT id FROM crm_leads WHERE telefone = ? AND deletado = 0",
+                    (telefone,)
+                ).fetchone()
+                if dup:
+                    duplicados += 1; continue
+
+            # Dedup por email
+            if email:
+                dup = conn.execute(
+                    "SELECT id FROM crm_leads WHERE email = ? AND deletado = 0",
+                    (email,)
+                ).fetchone()
+                if dup:
+                    duplicados += 1; continue
+
+            obs = f"Tipo: {tipo}"
+            if num_pess:
+                obs += f" | Pessoas: {num_pess}"
+
+            conn.execute("""
+                INSERT INTO crm_leads
+                    (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes)
+                VALUES (?, ?, ?, ?, ?, 'topo', ?, ?)
+            """, (nome, telefone, email, cidade, origem, responsavel_id, obs))
+
+            lead_id = conn.execute("SELECT last_insert_rowid() id").fetchone()['id']
+            conn.execute("""
+                INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
+                VALUES (?, ?, 'criacao', ?)
+            """, (lead_id, consultor, f'Lead importado via {origem} (Apps Script)'))
+
+            importados += 1
+
+        conn.commit()
+        close_db(conn)
+
+        app.logger.info(f"[WEBHOOK_SHEETS] origem={origem} importados={importados} dup={duplicados} ign={ignorados}")
+        return jsonify({
+            "ok": True,
+            "importados": importados,
+            "duplicados": duplicados,
+            "ignorados": ignorados
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"[WEBHOOK_SHEETS] Erro: {e}")
+        return jsonify({"ok": False, "erro": str(e)}), 200
+
+
 # ─── UPLOAD DE FOTO (próprio usuário, sem ser admin) ─────────────────────────────
 @app.route('/minha-foto', methods=['POST'])
 @login_required
