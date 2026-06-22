@@ -41,6 +41,37 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True  # Sem acesso JS (protege de XSS)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Proteção CSRF
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # 7 dias (sistema financeiro)
 
+# ─── CAPTURA GLOBAL DE ERROS (para diagnóstico de 500) ────────────────────────
+# Guarda os últimos erros em memória para inspeção rápida via /admin/ultimo-erro,
+# e loga o traceback completo no Railway (aparece em "View Logs").
+import logging, traceback as _tb
+logging.basicConfig(level=logging.INFO)
+_ULTIMOS_ERROS = []
+
+@app.errorhandler(500)
+@app.errorhandler(Exception)
+def _handler_erro_global(e):
+    from werkzeug.exceptions import HTTPException
+    # Deixa erros HTTP normais (404, 403, redirects) seguirem o fluxo padrão
+    if isinstance(e, HTTPException) and e.code and e.code < 500:
+        return e
+    tb_str = _tb.format_exc()
+    rota = request.path if request else '?'
+    metodo = request.method if request else '?'
+    app.logger.error(f"[ERRO-500] {metodo} {rota}\n{tb_str}")
+    _ULTIMOS_ERROS.insert(0, {
+        "rota": rota,
+        "metodo": metodo,
+        "erro": str(e)[:500],
+        "traceback": tb_str[-3000:],
+        "quando": datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S'),
+    })
+    del _ULTIMOS_ERROS[10:]  # mantém só os 10 mais recentes
+    # Tenta liberar conexões pendentes que possam ter ficado abertas
+    return ("Internal Server Error — o erro foi registrado. "
+            "Admin: acesse /admin/ultimo-erro para ver o detalhe."), 500
+
+
 # ─── AUTO-INICIALIZAR BANCO DE DADOS ──────────────────────────────────────
 # Garante que o banco é inicializado tanto em dev (python app.py) 
 # quanto em produção (gunicorn) na primeira requisição
@@ -2652,14 +2683,21 @@ def webhook_asaas():
 def webhook_diagnostico():
     """Mostra os últimos webhooks do Asaas recebidos, para diagnóstico."""
     conn = db()
-    
-    # Últimos 20 webhooks
-    webhooks = conn.execute(
-        "SELECT id, evento_id, evento, processado_em FROM webhook_log ORDER BY processado_em DESC LIMIT 20"
-    ).fetchall()
-    
-    close_db(conn)
-    
+    try:
+        # Últimos 20 webhooks
+        webhooks = conn.execute(
+            "SELECT id, evento_id, evento, processado_em FROM webhook_log ORDER BY processado_em DESC LIMIT 20"
+        ).fetchall()
+
+        total = conn.execute("SELECT COUNT(*) AS cnt FROM webhook_log").fetchone()
+        total_webhooks = total['cnt'] if total else 0
+    except Exception as e:
+        app.logger.error(f"[WEBHOOK-DIAG] Erro ao consultar webhook_log: {e}")
+        webhooks = []
+        total_webhooks = 0
+    finally:
+        close_db(conn)
+
     resultado = {
         "config": {
             "asaas_configurado": asaas_configurado(),
@@ -2672,15 +2710,25 @@ def webhook_diagnostico():
                 "id": w['id'],
                 "evento_id": w['evento_id'],
                 "evento": w['evento'],
-                "processado_em": w['processado_em']
+                "processado_em": str(w['processado_em']),
             }
             for w in webhooks
         ],
-        "total_webhooks": conn.execute("SELECT COUNT(*) as cnt FROM webhook_log").fetchone()['cnt'] if conn else 0
+        "total_webhooks": total_webhooks,
     }
-    
+
     return jsonify(resultado), 200
 
+
+@app.route('/admin/ultimo-erro', methods=['GET'])
+@login_required
+@admin_required
+def admin_ultimo_erro():
+    """Mostra os últimos erros 500 capturados, com traceback. Para diagnóstico."""
+    return jsonify({
+        "total": len(_ULTIMOS_ERROS),
+        "erros": _ULTIMOS_ERROS,
+    }), 200
 
 
 # ─── SERVIR ARQUIVOS (contratos, comprovantes) ──────────────────────────────────
