@@ -54,6 +54,7 @@
   </div>
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
     <button class="btn-outline btn-sm" onclick="abrirNovoLead('topo')">+ Novo Lead</button>
+    {% if eh_admin %}<button class="btn-outline btn-sm" onclick="abrirGerenciadorEtapas()">⚙️ Gerenciar Etapas</button>{% endif %}
     <button class="btn-outline btn-sm" onclick="location.href='/crm/config'">⚙️ Config</button>
   </div>
 </div>
@@ -171,6 +172,28 @@
   <div class="modal" style="max-width:540px;">
     <button class="modal-close" onclick="fechar('modal-lead')">✕</button>
     <div id="lead-detalhe-content">Carregando...</div>
+  </div>
+</div>
+
+<!-- Modal: Gerenciar Etapas do Funil -->
+<div class="modal-overlay" id="modal-etapas">
+  <div class="modal" style="max-width:560px;">
+    <button class="modal-close" onclick="fecharGerenciador()">✕</button>
+    <h3 style="font-family:'Sora',sans-serif; margin-bottom:6px;">Gerenciar Etapas do Funil</h3>
+    <p style="color:var(--cinza-2); font-size:12.5px; margin-bottom:16px;">
+      Arraste para reordenar · Clique no nome para renomear · Clique na cor para mudar
+    </p>
+
+    <div id="etapas-lista" style="margin-bottom:18px;"></div>
+
+    <div style="display:flex; gap:8px; align-items:center; padding-top:14px; border-top:1px solid var(--borda);">
+      <input type="color" id="nova-etapa-cor" value="#8b5cf6"
+             style="width:38px; height:38px; border:none; border-radius:8px; background:none; cursor:pointer; padding:0;">
+      <input type="text" id="nova-etapa-nome" placeholder="Nome da nova etapa..."
+             onkeydown="if(event.key==='Enter')novaEtapa()"
+             style="flex:1; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:10px 12px; color:#fff; font-size:13px;">
+      <button class="btn-primary btn-sm" onclick="novaEtapa()">+ Adicionar</button>
+    </div>
   </div>
 </div>
 
@@ -336,6 +359,100 @@ async function excluirLead(id) {
   if (card) card.remove();
   atualizarContadores();
   toast('Lead excluído', 'ok');
+}
+
+// ─── GERENCIADOR DE ETAPAS ───────────────────────────────────────
+let _etapasCache = [];
+
+async function abrirGerenciadorEtapas() {
+  const r = await fetch('/crm/etapas');
+  const d = await r.json();
+  _etapasCache = d.etapas || [];
+  renderGerenciador();
+  document.getElementById('modal-etapas').classList.add('open');
+}
+
+function renderGerenciador() {
+  const lista = _etapasCache.map((e, idx) => `
+    <div class="etapa-row" draggable="true"
+         ondragstart="etDragStart(event, ${idx})"
+         ondragover="event.preventDefault()"
+         ondrop="etDrop(event, ${idx})"
+         style="display:flex; align-items:center; gap:10px; padding:10px 12px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; margin-bottom:8px; cursor:grab;">
+      <span style="color:var(--cinza-2); font-size:14px;">⠿</span>
+      <input type="color" value="${e.cor}" onchange="editarEtapa('${e.slug}', null, this.value)"
+             style="width:32px; height:32px; border:none; border-radius:6px; background:none; cursor:pointer; padding:0;">
+      <input type="text" value="${e.nome.replace(/"/g,'&quot;')}" onblur="editarEtapa('${e.slug}', this.value, null)"
+             style="flex:1; background:var(--panel); border:1px solid var(--borda); border-radius:8px; padding:8px 10px; color:#fff; font-size:13px;">
+      ${e.tipo !== 'normal' ? `<span class="tag tag-cinza" style="font-size:10px;">${e.tipo}</span>` : ''}
+      <button onclick="excluirEtapa('${e.slug}', '${e.nome.replace(/'/g,"")}')"
+              style="background:rgba(239,68,68,.12); color:#f87171; border:none; border-radius:7px; padding:7px 10px; cursor:pointer; font-size:12px;">🗑</button>
+    </div>
+  `).join('');
+
+  document.getElementById('etapas-lista').innerHTML = lista || '<p style="color:var(--cinza-2);">Nenhuma etapa.</p>';
+}
+
+let _etDragIdx = null;
+function etDragStart(e, idx) { _etDragIdx = idx; }
+function etDrop(e, idx) {
+  e.preventDefault();
+  if (_etDragIdx === null || _etDragIdx === idx) return;
+  const item = _etapasCache.splice(_etDragIdx, 1)[0];
+  _etapasCache.splice(idx, 0, item);
+  _etDragIdx = null;
+  renderGerenciador();
+  salvarOrdem();
+}
+
+async function salvarOrdem() {
+  const ordem = _etapasCache.map(e => e.slug);
+  await fetch('/crm/etapas/reordenar', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ordem})
+  });
+  toast('Ordem salva', 'ok');
+}
+
+async function novaEtapa() {
+  const nome = document.getElementById('nova-etapa-nome').value.trim();
+  if (!nome) { toast('Digite o nome da etapa', 'err'); return; }
+  const cor = document.getElementById('nova-etapa-cor').value;
+  const r = await fetch('/crm/etapas/nova', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({nome, cor})
+  });
+  const d = await r.json();
+  if (d.ok) {
+    document.getElementById('nova-etapa-nome').value = '';
+    toast('Etapa criada!', 'ok');
+    abrirGerenciadorEtapas();
+  } else { toast(d.erro || 'Erro', 'err'); }
+}
+
+async function editarEtapa(slug, nome, cor) {
+  const body = {};
+  if (nome !== null) body.nome = nome;
+  if (cor !== null) body.cor = cor;
+  await fetch(`/crm/etapas/${slug}/editar`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  toast('Etapa atualizada', 'ok');
+}
+
+async function excluirEtapa(slug, nome) {
+  if (!confirm(`Excluir a etapa "${nome}"? Os leads dela serão movidos para a primeira etapa.`)) return;
+  const r = await fetch(`/crm/etapas/${slug}/excluir`, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+  const d = await r.json();
+  if (d.ok) { toast('Etapa excluída', 'ok'); abrirGerenciadorEtapas(); }
+  else { toast(d.erro || 'Erro', 'err'); }
+}
+
+function fecharGerenciador() {
+  document.getElementById('modal-etapas').classList.remove('open');
+  // Recarrega a página para refletir as novas colunas
+  location.reload();
 }
 </script>
 {% endblock %}
