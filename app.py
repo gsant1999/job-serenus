@@ -6017,7 +6017,7 @@ def webhook_sheets():
             # Dedup por telefone
             if telefone:
                 dup = conn.execute(
-                    "SELECT id FROM crm_leads WHERE telefone = ? AND deletado = 0",
+                    "SELECT id FROM crm_leads WHERE telefone = ?",
                     (telefone,)
                 ).fetchone()
                 if dup:
@@ -6026,7 +6026,7 @@ def webhook_sheets():
             # Dedup por email
             if email:
                 dup = conn.execute(
-                    "SELECT id FROM crm_leads WHERE email = ? AND deletado = 0",
+                    "SELECT id FROM crm_leads WHERE email = ?",
                     (email,)
                 ).fetchone()
                 if dup:
@@ -6410,7 +6410,7 @@ def _processar_lead(row, conn):
     # Filtro 2: Duplicado (telefone ou email)
     if telefone:
         dup = conn.execute(
-            "SELECT id FROM crm_leads WHERE telefone = ? AND deletado = 0",
+            "SELECT id FROM crm_leads WHERE telefone = ?",
             (telefone,)
         ).fetchone()
         if dup:
@@ -6418,7 +6418,7 @@ def _processar_lead(row, conn):
     
     if email:
         dup = conn.execute(
-            "SELECT id FROM crm_leads WHERE email = ? AND deletado = 0",
+            "SELECT id FROM crm_leads WHERE email = ?",
             (email,)
         ).fetchone()
         if dup:
