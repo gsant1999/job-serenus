@@ -5696,10 +5696,18 @@ def crm_lead_detalhe(lid):
         close_db(conn); return jsonify({"ok": False, "erro": "Acesso negado"}), 403
     atividades = conn.execute(
         "SELECT * FROM crm_atividades WHERE lead_id=? ORDER BY id DESC", (lid,)).fetchall()
+    # Usuários disponíveis para atribuição (admin vê todos)
+    usuarios = []
+    if session.get('perfil') == 'admin':
+        usuarios = [dict(u) for u in conn.execute(
+            "SELECT id, nome, perfil FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()]
+    etapas = [dict(e) for e in carregar_etapas_crm(conn)]
     close_db(conn)
     return jsonify({
         "lead": dict(lead),
-        "atividades": [dict(a) for a in atividades]
+        "atividades": [dict(a) for a in atividades],
+        "usuarios": usuarios,
+        "etapas": etapas
     })
 
 
@@ -5743,13 +5751,90 @@ def crm_lead_atividade(lid):
 def crm_lead_editar(lid):
     d = request.json or {}
     conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+
+    eh_admin = session.get('perfil') == 'admin'
+
+    # Campos que qualquer um pode editar
+    nome       = d.get('nome', lead['nome'])
+    telefone   = d.get('telefone', lead['telefone'])
+    email      = d.get('email', lead['email'])
+    empresa    = d.get('empresa', lead['empresa'])
+    observacoes= d.get('observacoes', lead['observacoes'])
+    valor      = float(d.get('valor_estimado') or 0) or None
+    origem     = d.get('origem', lead['origem'])
+
+    # Campos que só admin pode alterar
+    responsavel_id = int(d['responsavel_id']) if eh_admin and d.get('responsavel_id') else lead['responsavel_id']
+    etapa          = d.get('etapa', lead['etapa']) if eh_admin else lead['etapa']
+
+    # Detectar mudanças para timeline
+    changes = []
+    if nome != lead['nome']: changes.append(f'Nome: "{lead["nome"]}" → "{nome}"')
+    if telefone != lead['telefone']: changes.append(f'Telefone atualizado')
+    if email != lead['email']: changes.append(f'Email atualizado')
+    if etapa != lead['etapa']: changes.append(f'Etapa: "{lead["etapa"]}" → "{etapa}"')
+    if str(responsavel_id) != str(lead['responsavel_id']): changes.append(f'Responsável alterado')
+
     conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, email=?, empresa=?,
-                    valor_estimado=?, observacoes=?, atualizado_em=CURRENT_TIMESTAMP
+                    valor_estimado=?, observacoes=?, origem=?,
+                    responsavel_id=?, etapa=?, atualizado_em=CURRENT_TIMESTAMP
                     WHERE id=?""",
-        (d.get('nome'), d.get('telefone'), d.get('email'), d.get('empresa'),
-         float(d.get('valor_estimado') or 0) or None, d.get('observacoes'), lid))
+        (nome, telefone, email, empresa, valor, observacoes, origem,
+         responsavel_id, etapa, lid))
+
+    if changes:
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                     (lid, session.get('nome'), 'edicao', '; '.join(changes)))
+
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+
+@app.route('/crm/lead/<int:lid>/anexo', methods=['POST'])
+@login_required
+def crm_lead_anexo(lid):
+    """Upload de anexo (conversa, documento) para um lead."""
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+
+    arquivo = request.files.get('arquivo')
+    if not arquivo or not arquivo.filename:
+        close_db(conn); return jsonify({"ok": False, "erro": "Arquivo não enviado"}), 400
+
+    ext = os.path.splitext(arquivo.filename)[1].lower()
+    exts_ok = ('.pdf', '.png', '.jpg', '.jpeg', '.webp', '.doc', '.docx', '.txt', '.mp3', '.mp4', '.ogg')
+    if ext not in exts_ok:
+        close_db(conn); return jsonify({"ok": False, "erro": "Formato não permitido"}), 400
+
+    arquivo.seek(0, os.SEEK_END)
+    if arquivo.tell() > 20 * 1024 * 1024:
+        close_db(conn); return jsonify({"ok": False, "erro": "Máximo 20MB"}), 400
+    arquivo.seek(0)
+
+    import re as _re
+    nome_safe = _re.sub(r'[^\w\-.]', '_', arquivo.filename)
+    ts = int(datetime.now(TZ_SP).timestamp())
+    nome_final = f"lead_{lid}_{ts}_{nome_safe}"
+    caminho = os.path.join(UPLOAD_FOLDER, nome_final)
+    arquivo.save(caminho)
+
+    # Registra na timeline
+    descricao_tipo = request.form.get('tipo_anexo', 'Documento')
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                 (lid, session.get('nome'), 'anexo',
+                  f'{descricao_tipo}: [{nome_safe}](/uploads/{nome_final})'))
+    conn.execute("UPDATE crm_leads SET atualizado_em=CURRENT_TIMESTAMP WHERE id=?", (lid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "arquivo": nome_final})
 
 
 @app.route('/crm/lead/<int:lid>/excluir', methods=['POST'])
