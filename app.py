@@ -6304,6 +6304,83 @@ def crm_lead_whatsapp(lid):
 
 
 # ─── CRM CONFIG ───────────────────────────────────────────────────
+@app.route('/admin/crm/analise-quantitativos')
+@login_required
+def admin_crm_analise_quantitativos():
+    """Análise completa de quantitativos do CRM para debug de divergências."""
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
+
+    conn = db()
+    try:
+        # Total de leads
+        total = conn.execute("SELECT COUNT(*) c FROM crm_leads").fetchone()['c']
+
+        # Por etapa
+        por_etapa = conn.execute("""
+            SELECT etapa, COUNT(*) c FROM crm_leads GROUP BY etapa ORDER BY c DESC
+        """).fetchall()
+
+        # Por origem
+        por_origem = conn.execute("""
+            SELECT origem, COUNT(*) c FROM crm_leads GROUP BY origem ORDER BY c DESC
+        """).fetchall()
+
+        # Por responsável
+        por_resp = conn.execute("""
+            SELECT COALESCE(u.nome, 'SEM RESPONSÁVEL') as resp, COUNT(*) c
+            FROM crm_leads l
+            LEFT JOIN usuarios u ON u.id = l.responsavel_id
+            GROUP BY resp ORDER BY c DESC
+        """).fetchall()
+
+        # Leads com "teste" no nome (que foram ignorados na importação)
+        # Verifica se há no banco (não deveria ter)
+        com_teste = conn.execute("""
+            SELECT COUNT(*) c FROM crm_leads WHERE LOWER(nome) LIKE '%teste%'
+        """).fetchone()['c']
+
+        # Leads sem telefone E sem email (impossível deduplicar futuramente)
+        sem_contato = conn.execute("""
+            SELECT COUNT(*) c FROM crm_leads
+            WHERE (telefone IS NULL OR telefone = '')
+            AND (email IS NULL OR email = '')
+        """).fetchone()['c']
+
+        # Leads duplicados por telefone (mesmo tel, IDs diferentes)
+        dup_tel = conn.execute("""
+            SELECT telefone, COUNT(*) c FROM crm_leads
+            WHERE telefone IS NOT NULL AND telefone != ''
+            GROUP BY telefone HAVING c > 1
+        """).fetchall()
+
+        # Leads duplicados por email
+        dup_email = conn.execute("""
+            SELECT email, COUNT(*) c FROM crm_leads
+            WHERE email IS NOT NULL AND email != ''
+            GROUP BY email HAVING c > 1
+        """).fetchall()
+
+        close_db(conn)
+
+        def rows(rs): return [dict(r) if hasattr(r,'keys') else {'k':r[0],'c':r[1]} for r in rs]
+
+        return jsonify({
+            'ok': True,
+            'total_leads': total,
+            'por_etapa': rows(por_etapa),
+            'por_origem': rows(por_origem),
+            'por_responsavel': rows(por_resp),
+            'com_teste_no_nome': com_teste,
+            'sem_telefone_e_email': sem_contato,
+            'duplicados_tel': {'count': len(dup_tel), 'exemplos': rows(dup_tel[:10])},
+            'duplicados_email': {'count': len(dup_email), 'exemplos': rows(dup_email[:10])},
+        })
+    except Exception as e:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+
 @app.route('/admin/crm/diagnostico-leads', methods=['POST'])
 @login_required
 def admin_crm_diagnostico_leads():
