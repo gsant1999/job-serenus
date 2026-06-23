@@ -6349,16 +6349,16 @@ def admin_crm_analise_quantitativos():
 
         # Leads duplicados por telefone (mesmo tel, IDs diferentes)
         dup_tel = conn.execute("""
-            SELECT telefone, COUNT(*) c FROM crm_leads
+            SELECT telefone, COUNT(*) as cnt FROM crm_leads
             WHERE telefone IS NOT NULL AND telefone != ''
-            GROUP BY telefone HAVING c > 1
+            GROUP BY telefone HAVING COUNT(*) > 1
         """).fetchall()
 
         # Leads duplicados por email
         dup_email = conn.execute("""
-            SELECT email, COUNT(*) c FROM crm_leads
+            SELECT email, COUNT(*) as cnt FROM crm_leads
             WHERE email IS NOT NULL AND email != ''
-            GROUP BY email HAVING c > 1
+            GROUP BY email HAVING COUNT(*) > 1
         """).fetchall()
 
         close_db(conn)
