@@ -228,7 +228,7 @@ MODELO_TEM_META = {
 ANTECIPACAO_PERMITIDA = {
     'PME': [
         'Alice', 'Allcare', 'Allcare Integral RJ', 'Allcare Unimed Leste F-RJ',
-        'Amil', 'Ana Costa', 'Assim Saúde', 'Bradesco', 'Hapvida', 'Klini Saúde',
+        'Amil', 'Amil Dental', 'Ana Costa', 'Assim Saúde', 'Bradesco', 'Hapvida', 'Klini Saúde',
         'Leve Saúde', 'MedSênior', 'Medsenior', 'Omint', 'Porto Seguro', 'Sami',
         'Santa Helena', 'São Cristóvão', 'Seguros Unimed', 'Sobam', 'SulAmérica',
         'Sul América', 'Trasmontano',
@@ -237,7 +237,7 @@ ANTECIPACAO_PERMITIDA = {
         'Allcare',
     ],
     'PF': [
-        'Assim Saúde', 'Leve Saúde', 'MedSênior', 'Medsenior', 'Hapvida',
+        'Amil Dental', 'Assim Saúde', 'Leve Saúde', 'MedSênior', 'Medsenior', 'Hapvida',
         'Prevent Senior', 'Sobam', 'Trasmontano',
     ],
 }
