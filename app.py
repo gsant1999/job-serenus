@@ -6145,6 +6145,7 @@ def webhook_sheets():
 
         origem = data.get('origem', 'Sheets')
         leads_raw = data.get('leads', [])
+        modo = data.get('modo', 'normal')  # 'normal' reativa leads; 'historico' não reativa
 
         if not leads_raw:
             return jsonify({"ok": True, "importados": 0, "msg": "Nenhum lead enviado"}), 200
@@ -6192,23 +6193,37 @@ def webhook_sheets():
             lead_existente = None
             if telefone:
                 lead_existente = conn.execute(
-                    "SELECT id, etapa, nome FROM crm_leads WHERE telefone = ?",
+                    "SELECT id, etapa, nome, criado_em FROM crm_leads WHERE telefone = ?",
                     (telefone,)
                 ).fetchone()
             if not lead_existente and email:
                 lead_existente = conn.execute(
-                    "SELECT id, etapa, nome FROM crm_leads WHERE email = ?",
+                    "SELECT id, etapa, nome, criado_em FROM crm_leads WHERE email = ?",
                     (email,)
                 ).fetchone()
 
             if lead_existente:
-                # ── REATIVAÇÃO: lead voltou a solicitar ──
                 lid = lead_existente['id'] if hasattr(lead_existente, 'keys') else lead_existente[0]
                 etapa_anterior = lead_existente['etapa'] if hasattr(lead_existente, 'keys') else lead_existente[1]
+                criado_existente = lead_existente['criado_em'] if hasattr(lead_existente, 'keys') else lead_existente[3]
 
-                # Só reativa se não estiver já em lead_novo (evita loops)
-                if etapa_anterior != 'lead_novo':
-                    # Atualiza dados e move para lead_novo
+                # Converte criado_existente para date para comparar
+                data_criacao_banco = _parse_data_lead(str(criado_existente)) if criado_existente else None
+
+                # ── DECISÃO: reativar ou apenas atualizar? ──
+                # Reativa SOMENTE se a nova solicitação for MAIS RECENTE que a criação
+                # do lead E o modo não for 'historico'. Isso evita que reimportação
+                # de histórico mova todos os leads para "lead_novo".
+                eh_nova_solicitacao = (
+                    modo != 'historico'
+                    and data_lead is not None
+                    and data_criacao_banco is not None
+                    and data_lead > data_criacao_banco
+                    and etapa_anterior != 'lead_novo'
+                )
+
+                if eh_nova_solicitacao:
+                    # Lead voltou a solicitar de verdade → move para lead_novo
                     conn.execute("""
                         UPDATE crm_leads SET
                             nome = COALESCE(NULLIF(?, ''), nome),
@@ -6219,16 +6234,23 @@ def webhook_sheets():
                             atualizado_em = CURRENT_TIMESTAMP
                         WHERE id = ?
                     """, (nome, email, cidade, origem, lid))
-
-                    # Registra na timeline
                     conn.execute("""
                         INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
                         VALUES (?, ?, 'movimentacao', ?)
                     """, (lid, consultor,
                           f'🔄 Nova solicitação em {data_str} via {origem} — retornou de "{etapa_anterior}" para Lead Novo'))
-
                     importados += 1
                 else:
+                    # É reimportação OU registro antigo/duplicado.
+                    # Apenas corrige a data de criação se a do banco estiver errada
+                    # (importada com data do dia) e tivermos uma data real da planilha.
+                    if data_lead and criado_existente:
+                        criado_str = str(criado_existente)
+                        if ('2026-06-22' in criado_str or '2026-06-23' in criado_str or '2026-06-24' in criado_str):
+                            conn.execute(
+                                "UPDATE crm_leads SET criado_em=? WHERE id=?",
+                                (data_lead.strftime('%Y-%m-%d 12:00:00'), lid)
+                            )
                     duplicados += 1
                 continue
 
@@ -6512,6 +6534,69 @@ def admin_crm_diagnostico_leads():
 
     return jsonify(resultado)
 
+
+
+@app.route('/admin/crm/restaurar-etapas', methods=['POST'])
+@login_required
+def admin_crm_restaurar_etapas():
+    """
+    Restaura leads que foram movidos incorretamente para 'lead_novo' durante
+    a reimportação de histórico. Identifica pela atividade 'movimentacao' de hoje
+    com texto 'Nova solicitação' e devolve o lead para a etapa anterior.
+    """
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
+
+    conn = db()
+    try:
+        # Busca atividades de movimentação criadas hoje que moveram para lead_novo
+        # Extrai a etapa anterior do texto: '... retornou de "ETAPA" para Lead Novo'
+        movimentacoes = conn.execute("""
+            SELECT a.lead_id, a.descricao
+            FROM crm_atividades a
+            JOIN crm_leads l ON l.id = a.lead_id
+            WHERE a.tipo = 'movimentacao'
+            AND a.descricao LIKE '%Nova solicitação%retornou de%'
+            AND l.etapa = 'lead_novo'
+            AND DATE(a.criado_em) >= DATE('2026-06-22')
+        """).fetchall()
+
+        restaurados = 0
+        for mov in movimentacoes:
+            lid = mov['lead_id'] if hasattr(mov, 'keys') else mov[0]
+            desc = mov['descricao'] if hasattr(mov, 'keys') else mov[1]
+
+            # Extrai etapa anterior entre aspas: retornou de "topo" para
+            import re
+            m = re.search(r'retornou de "([^"]+)" para', desc)
+            if not m:
+                continue
+            etapa_anterior = m.group(1)
+
+            # Só restaura se a etapa anterior for uma etapa válida (não lead_novo)
+            if etapa_anterior and etapa_anterior != 'lead_novo':
+                conn.execute(
+                    "UPDATE crm_leads SET etapa=? WHERE id=? AND etapa='lead_novo'",
+                    (etapa_anterior, lid)
+                )
+                # Remove a atividade falsa de movimentação
+                conn.execute(
+                    "DELETE FROM crm_atividades WHERE lead_id=? AND tipo='movimentacao' AND descricao LIKE '%Nova solicitação%retornou de%'",
+                    (lid,)
+                )
+                restaurados += 1
+
+        conn.commit()
+        close_db(conn)
+        return jsonify({
+            'ok': True,
+            'restaurados': restaurados,
+            'msg': f'{restaurados} leads restaurados para suas etapas originais'
+        })
+    except Exception as e:
+        close_db(conn)
+        app.logger.error(f"[RESTAURAR_ETAPAS] {e}")
+        return jsonify({'ok': False, 'erro': str(e)}), 500
 
 
 @app.route('/webhook/corrigir-datas', methods=['POST'])
