@@ -1,0 +1,6763 @@
+# HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
+import os, sqlite3, json, hashlib, secrets, re
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort
+from datetime import datetime, timedelta, date
+from functools import wraps
+from dateutil.relativedelta import relativedelta
+import pytz
+
+TZ_SP = pytz.timezone('America/Sao_Paulo')  # Campinas, SP
+
+# ─── SUPORTE A PostgreSQL (Railway/Supabase) ──────────────────────────────────
+try:
+    import psycopg2, psycopg2.extras, psycopg2.pool
+    HAS_POSTGRES = True   # PostgreSQL do Railway — persiste entre deploys (definitivo)
+except ImportError:
+    HAS_POSTGRES = False
+
+# ─── SUPORTE A CLOUDFLARE R2 ──────────────────────────────────────────────
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+    HAS_BOTO3 = True
+except ImportError:
+    HAS_BOTO3 = False
+
+app = Flask(__name__)
+# ─── CHAVE SECRETA FIXA PARA SESSÕES PERSISTENTES ───────────────────────
+# Se usar secrets.token_hex(32) toda vez, a session cai após restart!
+# SECRET_KEY: usa a variável de ambiente. Se não houver (dev), gera uma aleatória
+# por execução — assim NUNCA há uma chave fixa pública no código que permita
+# forjar sessões. Em produção, defina SECRET_KEY no Railway (fixa, para as
+# sessões sobreviverem a deploys).
+_secret_env = os.environ.get('SECRET_KEY')
+if _secret_env:
+    app.secret_key = _secret_env
+else:
+    app.secret_key = secrets.token_hex(32)
+    print("[SEGURANÇA] ⚠️ SECRET_KEY não definida — gerada aleatória (sessões caem a cada deploy). Defina SECRET_KEY no Railway.")
+app.config['SESSION_COOKIE_SECURE'] = True   # HTTPS only
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Sem acesso JS (protege de XSS)
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Proteção CSRF
+app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # 7 dias (sistema financeiro)
+
+# ─── CAPTURA GLOBAL DE ERROS (para diagnóstico de 500) ────────────────────────
+# Guarda os últimos erros em memória para inspeção rápida via /admin/ultimo-erro,
+# e loga o traceback completo no Railway (aparece em "View Logs").
+import logging, traceback as _tb
+logging.basicConfig(level=logging.INFO)
+_ULTIMOS_ERROS = []
+
+@app.errorhandler(500)
+@app.errorhandler(Exception)
+def _handler_erro_global(e):
+    from werkzeug.exceptions import HTTPException
+    # Deixa erros HTTP normais (404, 403, redirects) seguirem o fluxo padrão
+    if isinstance(e, HTTPException) and e.code and e.code < 500:
+        return e
+    tb_str = _tb.format_exc()
+    rota = request.path if request else '?'
+    metodo = request.method if request else '?'
+    app.logger.error(f"[ERRO-500] {metodo} {rota}\n{tb_str}")
+    _ULTIMOS_ERROS.insert(0, {
+        "rota": rota,
+        "metodo": metodo,
+        "erro": str(e)[:500],
+        "traceback": tb_str[-3000:],
+        "quando": datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S'),
+    })
+    del _ULTIMOS_ERROS[10:]  # mantém só os 10 mais recentes
+    # Tenta liberar conexões pendentes que possam ter ficado abertas
+    return ("Internal Server Error — o erro foi registrado. "
+            "Admin: acesse /admin/ultimo-erro para ver o detalhe."), 500
+
+
+# ─── AUTO-INICIALIZAR BANCO DE DADOS ──────────────────────────────────────
+# Garante que o banco é inicializado tanto em dev (python app.py) 
+# quanto em produção (gunicorn) na primeira requisição
+_db_initialized = False
+
+@app.before_request
+def _ensure_db_initialized():
+    global _db_initialized
+    if not _db_initialized:
+        try:
+            init_db()
+            _db_initialized = True
+            if DB_MODE == 'postgres':
+                print("[DB] ✅ PostgreSQL inicializado")
+            else:
+                print("[DB] ✅ SQLite inicializado")
+        except Exception as e:
+            print(f"[DB] ⚠️ Erro ao inicializar: {e}")
+            _db_initialized = True  # Evita loop infinito
+        # Inicia o backup automático diário (uma única vez por processo)
+        _iniciar_backup_automatico()
+
+
+_backup_scheduler_iniciado = False
+
+def _fazer_backup_automatico():
+    """Gera um snapshot JSON do banco em /data/backups. Mantém os últimos 30."""
+    try:
+        conn = db()
+        dados = {'versao': 'v14', 'data_backup': datetime.now(TZ_SP).isoformat()}
+        for tabela in ('propostas','parcelas','usuarios','operadoras','recebimento','repasse_corretor','historico_proposta','solicitacoes_edicao'):
+            try:
+                rows = conn.execute(f"SELECT * FROM {tabela}").fetchall()
+                dados[tabela] = [dict(r) for r in rows]
+            except Exception:
+                dados[tabela] = []
+        close_db(conn)
+        if not os.path.isdir('/data'):
+            return  # sem volume persistente, não adianta
+        os.makedirs('/data/backups', exist_ok=True)
+        ts = datetime.now(TZ_SP).strftime('%Y%m%d-%H%M%S')
+        caminho = f"/data/backups/backup-{ts}.json"
+        with open(caminho, 'w', encoding='utf-8') as f:
+            json.dump(dados, f, indent=2, default=str, ensure_ascii=False)
+        print(f"[BACKUP AUTO] ✅ {caminho} ({dados.get('total_propostas', len(dados.get('propostas', [])))} propostas)")
+        # Retenção: mantém só os 30 backups mais recentes
+        try:
+            arqs = sorted([f for f in os.listdir('/data/backups') if f.startswith('backup-') and f.endswith('.json')])
+            for antigo in arqs[:-30]:
+                os.remove(os.path.join('/data/backups', antigo))
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[BACKUP AUTO] ❌ {e}")
+
+def _iniciar_backup_automatico():
+    """Liga o agendador de backup diário às 22:00 (SP). Roda uma vez por processo."""
+    global _backup_scheduler_iniciado
+    if _backup_scheduler_iniciado:
+        return
+    _backup_scheduler_iniciado = True
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        sched = BackgroundScheduler(timezone=TZ_SP)
+        sched.add_job(_fazer_backup_automatico, 'cron', hour=22, minute=0)
+        sched.start()
+        app.scheduler = sched
+        print("[SCHEDULER] ✅ Backup automático diário ligado (22:00 São Paulo)")
+    except Exception as e:
+        print(f"[SCHEDULER] ⚠️ Não foi possível iniciar backup automático: {e}")
+
+@app.template_filter('from_json')
+def _from_json(s):
+    try: return json.loads(s) if s else []
+    except: return []
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# ─── PERSISTÊNCIA: dados em pasta FIXA, fora das pastas de versão ───
+
+def _eh_gravavel(caminho):
+    """Testa de verdade se dá para criar pasta e escrever arquivo no caminho."""
+    try:
+        os.makedirs(caminho, exist_ok=True)
+        teste = os.path.join(caminho, '.write_test')
+        with open(teste, 'w') as f:
+            f.write('ok')
+        os.remove(teste)
+        return True
+    except Exception:
+        return False
+
+# Prioridade de diretório persistente:
+# 1) JOB_DATA_DIR (se setado e gravável)  2) /data (volume Railway, se gravável)  3) ~/JOB_Serenus_Dados
+_env_dir = os.environ.get("JOB_DATA_DIR")
+if _env_dir and _eh_gravavel(_env_dir):
+    DATA_DIR = _env_dir
+elif _eh_gravavel('/data'):
+    DATA_DIR = '/data'
+else:
+    DATA_DIR = os.path.join(os.path.expanduser("~"), "JOB_Serenus_Dados")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    print(f"[PERSIST] ⚠️ ATENÇÃO: volume persistente indisponível! Usando pasta EFÊMERA {DATA_DIR} — anexos somem a cada deploy.")
+
+DB = os.path.join(DATA_DIR, "job.db")
+
+# Anexos no MESMO diretório persistente escolhido acima.
+UPLOAD_FOLDER = os.path.join(DATA_DIR, "anexos")
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+print(f"[PERSIST] DATA_DIR={DATA_DIR} | UPLOAD_FOLDER={UPLOAD_FOLDER} | gravável={_eh_gravavel(UPLOAD_FOLDER)}")
+
+# ─── MODO DO BANCO: PostgreSQL (Railway) com fallback SQLite ────────────────
+DB_MODE = 'postgres' if (os.environ.get('DATABASE_URL') and HAS_POSTGRES) else 'sqlite'
+
+# Log inicial
+print(f"[APP] DATABASE_URL presente: {bool(os.environ.get('DATABASE_URL'))}")
+print(f"[APP] HAS_POSTGRES: {HAS_POSTGRES}")
+print(f"[APP] DB_MODE: {DB_MODE}")
+
+# ─── VARIÁVEIS GLOBAIS NECESSÁRIAS ──────────────────────────────────────────
+STATUS_FLUXO = [
+    'Pendente de receber',
+    'Recebido e não repassado',
+    'Liberado para o corretor',
+    'Pago ao corretor',
+    'Antecipação Solicitada à Operadora',
+    'Antecipação - Aguardando ADM',
+]
+
+MODELO_NOME = {
+    'sem_lead_sem_fixo': 'Sem Lead / Sem Fixo',
+    'com_lead_sem_fixo': 'Com Lead / Sem Fixo',
+    'com_fixo_lead': 'Com Fixo + Lead',
+    'com_fixo_sem_lead': 'Com Fixo / Sem Lead',
+    'gestor_vendedor': 'Gestor Vendedor (100%)',
+    'n1': 'Nível 1',
+    'n2': 'Nível 2',
+    'n3': 'Nível 3',
+}
+
+MODELO_TEM_META = {
+    'sem_lead_sem_fixo': False,
+    'com_lead_sem_fixo': True,
+    'com_fixo_lead': True,
+    'com_fixo_sem_lead': False,
+    'gestor_vendedor': False,
+    'n1': False,
+    'n2': False,
+    'n3': False,
+}
+
+# ─── ANTECIPAÇÃO DE COMISSÃO (Affinity) ──────────────────────────────────────
+# Operadoras que permitem antecipação da 1ª mensalidade, por plano.
+# Fonte: regras da Affinity Corretora. Vera Cruz NÃO é contemplada.
+# Comparação é feita de forma normalizada (minúsculas, sem acento/espaço extra).
+ANTECIPACAO_PERMITIDA = {
+    'PME': [
+        'Alice', 'Allcare', 'Allcare Integral RJ', 'Allcare Unimed Leste F-RJ',
+        'Amil', 'Ana Costa', 'Assim Saúde', 'Bradesco', 'Hapvida', 'Klini Saúde',
+        'Leve Saúde', 'MedSênior', 'Medsenior', 'Omint', 'Porto Seguro', 'Sami',
+        'Santa Helena', 'São Cristóvão', 'Seguros Unimed', 'Sobam', 'SulAmérica',
+        'Sul América', 'Trasmontano',
+    ],
+    'ADESAO': [
+        'Allcare',
+    ],
+    'PF': [
+        'Assim Saúde', 'Leve Saúde', 'MedSênior', 'Medsenior', 'Hapvida',
+        'Prevent Senior', 'Sobam', 'Trasmontano',
+    ],
+}
+
+def _normaliza_op(txt):
+    """Normaliza nome de operadora para comparação (minúsculas, sem acento/espaço extra)."""
+    import unicodedata
+    t = (txt or '').strip().lower()
+    t = ''.join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
+    return ' '.join(t.split())
+
+def antecipacao_permitida(operadora, plano):
+    """Retorna True se a operadora permite antecipação de comissão no plano dado."""
+    lista = ANTECIPACAO_PERMITIDA.get((plano or '').upper(), [])
+    alvo = _normaliza_op(operadora)
+    # split_operadora pode trazer 'Nome - obs'; pega só o nome base
+    alvo_base = _normaliza_op(alvo.split(' - ')[0]) if ' - ' in alvo else alvo
+    # 'med senior sp/rj' → tira sufixos de praça comuns para casar com 'med senior'
+    alvo_base = alvo_base.replace('/', ' ').replace('  ', ' ')
+    for permitida in lista:
+        p = _normaliza_op(permitida)
+        # casa se um contém o outro como palavra inicial (cobre 'med senior sp rj' vs 'medsenior'/'med senior')
+        p_compact = p.replace(' ', '')
+        alvo_compact = alvo_base.replace(' ', '')
+        if (alvo_base == p or alvo == p
+                or alvo_base.startswith(p) or p.startswith(alvo_base)
+                or alvo_compact.startswith(p_compact) or p_compact.startswith(alvo_compact)):
+            return True
+    return False
+
+def _build_pg_url(raw_url):
+    """Garante que o @ na senha seja codificado corretamente."""
+    try:
+        from urllib.parse import urlparse, urlunparse, quote
+        p = urlparse(raw_url)
+        # Re-codifica só o password (pode ter @ sem encode)
+        password = p.password or ''
+        user = p.username or ''
+        host = p.hostname or ''
+        port = p.port or 5432
+        path = p.path or '/postgres'
+        clean = f"postgresql://{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}{path}?sslmode=require"
+        return clean
+    except Exception:
+        return raw_url + ('?sslmode=require' if '?' not in raw_url else '&sslmode=require')
+
+# ════════════════════════════════════════════════════════════════════════════
+# CAMADA DE COMPATIBILIDADE  SQLite ↔ PostgreSQL
+# Faz o psycopg2 se comportar EXATAMENTE como o sqlite3, para que TODO o código
+# escrito em sintaxe SQLite (conn.execute, placeholders "?", INSERT OR IGNORE,
+# strftime) funcione no PostgreSQL sem reescrever as ~240 consultas do sistema.
+#   • conn.execute(sql, params)  → devolve um cursor (igual sqlite3)
+#   • cursor.execute(...)        → encadeável: .execute(...).fetchone()
+#   • rows acessíveis por nome   → row['coluna']  e  dict(row)
+#   • tradução automática de SQL SQLite → PostgreSQL
+# SQL já em sintaxe Postgres (%s, ON CONFLICT) passa intacto pela tradução.
+# ════════════════════════════════════════════════════════════════════════════
+
+# strftime('%Y-%m', col) (SQLite) → TO_CHAR((col)::timestamp, 'YYYY-MM') (Postgres)
+_STRFTIME_PG = {
+    '%Y-%m-%d %H:%M:%S': 'YYYY-MM-DD HH24:MI:SS',
+    '%Y-%m-%d': 'YYYY-MM-DD',
+    '%Y-%m': 'YYYY-MM',
+    '%Y': 'YYYY', '%m': 'MM', '%d': 'DD',
+    '%H:%M:%S': 'HH24:MI:SS',
+}
+
+from decimal import Decimal as _Decimal
+
+def _val_sqlite_like(v):
+    """Converte um valor do Postgres para o que o SQLite devolveria.
+    O sistema inteiro foi escrito assumindo que datas vêm como TEXTO
+    (faz fromisoformat, fatia [:7] etc.) — o psycopg2 devolve datetime/Decimal."""
+    if isinstance(v, datetime):
+        return v.strftime('%Y-%m-%d %H:%M:%S')
+    if isinstance(v, date):
+        return v.strftime('%Y-%m-%d')
+    if isinstance(v, _Decimal):
+        return float(v)
+    return v
+
+def _row_sqlite_like(row):
+    """Aplica a conversão em todas as colunas de um RealDictRow (in-place)."""
+    if row is None:
+        return None
+    for k in list(row.keys()):
+        row[k] = _val_sqlite_like(row[k])
+    return row
+
+def _traduzir_sql_pg(sql):
+    """Traduz uma query em sintaxe SQLite para PostgreSQL.
+    SQL já nativo de Postgres (com %s e/ou ON CONFLICT, sem '?') passa intacto."""
+    s = sql
+    # 1) strftime('fmt', coluna) → TO_CHAR((coluna)::timestamp, 'FMT')
+    if 'strftime' in s:
+        def _rep_strf(m):
+            fmt = m.group(1)
+            col = m.group(2).strip()
+            pg = _STRFTIME_PG.get(fmt) or (fmt.replace('%Y', 'YYYY').replace('%m', 'MM')
+                 .replace('%d', 'DD').replace('%H', 'HH24').replace('%M', 'MI').replace('%S', 'SS'))
+            return f"TO_CHAR(({col})::timestamp, '{pg}')"
+        s = re.sub(r"strftime\(\s*'([^']*)'\s*,\s*([^()]+?)\s*\)", _rep_strf, s, flags=re.I)
+    # 2) INSERT OR IGNORE INTO ... → INSERT INTO ... ON CONFLICT DO NOTHING
+    if re.search(r'INSERT\s+OR\s+IGNORE\s+INTO', s, re.I):
+        s = re.sub(r'INSERT\s+OR\s+IGNORE\s+INTO', 'INSERT INTO', s, count=1, flags=re.I)
+        s_strip = s.rstrip().rstrip(';').rstrip()
+        if 'ON CONFLICT' not in s_strip.upper():
+            s = s_strip + ' ON CONFLICT DO NOTHING'
+    # 3) AUTOINCREMENT (DDL) → SERIAL
+    if 'AUTOINCREMENT' in s.upper():
+        s = re.sub(r'INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT', 'SERIAL PRIMARY KEY', s, flags=re.I)
+        s = re.sub(r'\s+AUTOINCREMENT', '', s, flags=re.I)
+    # 4) placeholders ? → %s  (as queries SQLite deste sistema não têm % literal)
+    s = s.replace('?', '%s')
+    return s
+
+class _CursorCompat:
+    """Imita sqlite3.Cursor: execute() encadeável + rows por nome (RealDictRow)."""
+    def __init__(self, raw):
+        self._c = raw
+    def execute(self, sql, params=None):
+        s = _traduzir_sql_pg(sql)
+        if params is None:
+            self._c.execute(s)
+        else:
+            self._c.execute(s, params)
+        return self
+    def fetchone(self):  return _row_sqlite_like(self._c.fetchone())
+    def fetchall(self):  return [_row_sqlite_like(r) for r in self._c.fetchall()]
+    def fetchmany(self, size=None):
+        rows = self._c.fetchmany(size) if size is not None else self._c.fetchmany()
+        return [_row_sqlite_like(r) for r in rows]
+    @property
+    def description(self): return self._c.description
+    @property
+    def rowcount(self):    return self._c.rowcount
+    @property
+    def lastrowid(self):   return None  # Postgres: ver _last_insert_id()
+    def close(self):
+        try: self._c.close()
+        except Exception: pass
+    def __iter__(self):
+        for r in self._c:
+            yield _row_sqlite_like(r)
+
+class _ConnCompat:
+    """Imita sqlite3.Connection sobre uma conexão psycopg2."""
+    def __init__(self, raw):
+        self._conn = raw
+    def _novo_cursor(self):
+        return _CursorCompat(self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor))
+    def execute(self, sql, params=None):
+        return self._novo_cursor().execute(sql, params)
+    def executescript(self, script):
+        cur = self._conn.cursor()
+        cur.execute(_traduzir_sql_pg(script))
+        cur.close()
+        return self
+    def cursor(self):
+        return self._novo_cursor()
+    def commit(self):   self._conn.commit()
+    def rollback(self):
+        try: self._conn.rollback()
+        except Exception: pass
+    def close(self):
+        try: self._conn.close()
+        except Exception: pass
+    @property
+    def raw(self): return self._conn
+
+def db():
+    """Conexão ao banco. PostgreSQL (Railway, persiste entre deploys) ou SQLite.
+    Sem pool: cada chamada abre uma conexão nova e curta — robusto e sem
+    'connection pool exhausted'. Em Postgres devolve o wrapper de compatibilidade."""
+    if DB_MODE == 'postgres':
+        try:
+            url = _build_pg_url(os.environ['DATABASE_URL'])
+            raw = psycopg2.connect(url)
+            raw.autocommit = False
+            return _ConnCompat(raw)
+        except Exception as e:
+            import traceback
+            print(f"\n🔴🔴🔴 [DB] FALLBACK SQLITE! Postgres falhou: {e}")
+            print(f"[DB] Traceback:\n{traceback.format_exc()}")
+            print(f"[DB] SQLite path: {DB}")
+            return _sqlite_conn()
+    return _sqlite_conn()
+
+def _sqlite_conn():
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def close_db(conn):
+    """Fecha a conexão (cada requisição abre/fecha a sua — sem pool)."""
+    try:
+        if hasattr(conn, '_conn'):
+            conn._conn.close()
+        else:
+            conn.close()
+    except Exception:
+        pass
+
+def _last_insert_id(cur):
+    """Emula cur.lastrowid. Em Postgres usa lastval() (sequência da sessão atual)."""
+    if DB_MODE == 'postgres':
+        try:
+            cur.execute("SELECT lastval() AS id")
+            return cur.fetchone()['id']
+        except Exception:
+            return None
+    return cur.lastrowid
+
+def init_db():
+    conn = db()
+    is_pg = DB_MODE == 'postgres'
+    
+    if is_pg:
+        # PostgreSQL: CREATE TABLE um por um
+        cur = conn.cursor()
+        tables_sql = [
+            """CREATE TABLE IF NOT EXISTS usuarios (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL, email TEXT UNIQUE NOT NULL, senha_hash TEXT,
+                token_setup TEXT, token_expira TIMESTAMP,
+                perfil TEXT DEFAULT 'consultor',
+                regime_base TEXT DEFAULT 'sem_lead_sem_fixo',
+                ativo INTEGER DEFAULT 1, valor_fixo REAL DEFAULT 0, chave_pix TEXT, foto TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS supervisoras (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL, email TEXT, telefone TEXT,
+                ativo INTEGER DEFAULT 1, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS regimes (
+                id SERIAL PRIMARY KEY,
+                codigo TEXT UNIQUE NOT NULL, nome TEXT NOT NULL, descricao TEXT,
+                valor_fixo REAL DEFAULT 0, num_parcelas INTEGER DEFAULT 1,
+                distribuicao_parcelas TEXT DEFAULT '100',
+                faixa_min REAL, faixa_max REAL,
+                coluna_comissao TEXT, ordem INTEGER DEFAULT 0
+            )""",
+            """CREATE TABLE IF NOT EXISTS comissoes (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT UNIQUE NOT NULL,
+                perc_total REAL DEFAULT 2.0, perc_sem_leads REAL DEFAULT 0.5,
+                perc_n1 REAL DEFAULT 0.9, perc_n2 REAL DEFAULT 1.1, perc_n3 REAL DEFAULT 1.3,
+                perc_com_fixo REAL DEFAULT 1.3, dist_corretora TEXT DEFAULT '100', observacao TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS propostas (
+                id SERIAL PRIMARY KEY,
+                usuario_id INTEGER NOT NULL, consultor TEXT NOT NULL, supervisora_id INTEGER,
+                proposta_tem_numero TEXT, numero_proposta TEXT, vigencia TEXT NOT NULL,
+                modalidade TEXT NOT NULL, tipo_pessoa TEXT,
+                adm_operadora TEXT, produto TEXT, razao_social TEXT NOT NULL,
+                titular_dependentes TEXT, tipo_contrato TEXT NOT NULL,
+                acomodacao TEXT NOT NULL, fator_moderador TEXT NOT NULL,
+                total_vidas INTEGER NOT NULL, valor REAL NOT NULL,
+                dia_comissao TEXT, venda_status TEXT DEFAULT 'Sim', elegivel_campanha TEXT,
+                vencimento_1 TEXT, previsao_1 TEXT,
+                resp_contrato TEXT, email_resp_contrato TEXT, tel_resp_contrato TEXT,
+                resp_negociacao TEXT, email_resp_negociacao TEXT, tel_resp_negociacao TEXT,
+                contatos_adicionais TEXT, desc_contatos_adicionais TEXT,
+                regime_aplicado TEXT, num_parcelas INTEGER DEFAULT 1,
+                distribuicao_parcelas TEXT DEFAULT '100',
+                comissao_total_corretora REAL, comissao_consultor REAL, comissao_corretora_liquida REAL,
+                observacoes TEXT, anexos TEXT, status TEXT DEFAULT 'Ativo',
+                cpf_titular TEXT, cnpj TEXT, contrato_arquivo TEXT, comprovante_boleto TEXT,
+                campos_extras TEXT, quem_subiu TEXT, operadora_obs TEXT, dia_vencimento INTEGER,
+                estornada INTEGER DEFAULT 0, estorno_info TEXT,
+                data_nasc_titular TEXT, dependentes_json TEXT, tem_repique INTEGER DEFAULT 0,
+                repique_json TEXT, fase TEXT DEFAULT 'Proposta cadastrada', produto_id INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS parcelas (
+                id SERIAL PRIMARY KEY,
+                proposta_id INTEGER NOT NULL,
+                numero INTEGER NOT NULL,
+                percentual REAL NOT NULL DEFAULT 100,
+                valor REAL NOT NULL,
+                data_prevista TEXT,
+                status TEXT DEFAULT 'Pendente de receber',
+                comprovante_antecipacao TEXT,
+                data_pagamento TEXT,
+                aceite_corretor INTEGER DEFAULT 0,
+                data_aceite TEXT,
+                confirmado_gestor INTEGER DEFAULT 0,
+                data_confirmacao_gestor TEXT,
+                valor_corretora REAL DEFAULT 0,
+                perc_cliente REAL DEFAULT 100,
+                competencia TEXT, mensalidade_ref INTEGER, ok_entrada INTEGER DEFAULT 0,
+                tipo_origem TEXT DEFAULT 'comissao',
+                FOREIGN KEY(proposta_id) REFERENCES propostas(id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS campos_custom (
+                id SERIAL PRIMARY KEY,
+                label TEXT NOT NULL,
+                nome_tecnico TEXT UNIQUE NOT NULL,
+                tipo TEXT NOT NULL DEFAULT 'text',
+                opcoes TEXT,
+                placeholder TEXT,
+                ajuda TEXT,
+                obrigatorio INTEGER DEFAULT 0,
+                ativo INTEGER DEFAULT 1,
+                ordem INTEGER DEFAULT 0,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS webhook_log (
+                id SERIAL PRIMARY KEY,
+                evento_id TEXT UNIQUE,
+                evento TEXT,
+                processado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS niveis (
+                codigo TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                faixa_min REAL DEFAULT 0,
+                faixa_max REAL,
+                ordem INTEGER DEFAULT 0
+            )""",
+            """CREATE TABLE IF NOT EXISTS repasses (
+                id SERIAL PRIMARY KEY,
+                modelo TEXT NOT NULL,
+                nivel TEXT DEFAULT '',
+                tipo_plano TEXT NOT NULL,
+                percentual REAL DEFAULT 0,
+                eh_taxa_adesao INTEGER DEFAULT 0,
+                UNIQUE(modelo, nivel, tipo_plano)
+            )""",
+            """CREATE TABLE IF NOT EXISTS lancamentos (
+                id SERIAL PRIMARY KEY,
+                tipo TEXT NOT NULL,
+                categoria TEXT,
+                descricao TEXT NOT NULL,
+                valor REAL NOT NULL,
+                data_competencia TEXT,
+                data_lancamento TEXT,
+                recorrente INTEGER DEFAULT 0,
+                socio TEXT,
+                usuario_id INTEGER,
+                status TEXT DEFAULT 'Previsto',
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS regras_estorno (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT UNIQUE NOT NULL,
+                perc_estorno REAL DEFAULT 100,
+                ate_mensalidade INTEGER DEFAULT 3,
+                observacao TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS config (
+                chave TEXT PRIMARY KEY,
+                valor TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS etiquetas (
+                id SERIAL PRIMARY KEY,
+                nome TEXT UNIQUE NOT NULL,
+                cor TEXT DEFAULT '#1fd8a4'
+            )""",
+            """CREATE TABLE IF NOT EXISTS proposta_etiquetas (
+                proposta_id INTEGER,
+                etiqueta_id INTEGER,
+                UNIQUE(proposta_id, etiqueta_id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS produtos (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT NOT NULL,
+                nome TEXT NOT NULL,
+                tipo_plano TEXT,
+                acomodacao TEXT,
+                coparticipacao TEXT,
+                observacao TEXT,
+                ativo INTEGER DEFAULT 1
+            )""",
+            """CREATE TABLE IF NOT EXISTS historico_proposta (
+                id SERIAL PRIMARY KEY,
+                proposta_id INTEGER NOT NULL,
+                usuario_nome TEXT,
+                campo TEXT,
+                valor_antes TEXT,
+                valor_depois TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS solicitacoes_edicao (
+                id SERIAL PRIMARY KEY,
+                proposta_id INTEGER NOT NULL,
+                usuario_id INTEGER NOT NULL,
+                usuario_nome TEXT,
+                alteracoes TEXT,
+                status TEXT DEFAULT 'Pendente',
+                motivo_recusa TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                resolvido_em TIMESTAMP,
+                resolvido_por TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS operadoras (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT UNIQUE NOT NULL,
+                obs TEXT DEFAULT '',
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS recebimento (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
+                total REAL DEFAULT 0,
+                UNIQUE(operadora, obs, plano)
+            )""",
+            """CREATE TABLE IF NOT EXISTS repasse_corretor (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
+                modelo TEXT NOT NULL, nivel TEXT DEFAULT '',
+                total REAL DEFAULT 0, regua TEXT DEFAULT '', taxa INTEGER DEFAULT 0,
+                UNIQUE(operadora, obs, plano, modelo, nivel)
+            )""",
+            # ─── CRM ─────────────────────────────────────
+            """CREATE TABLE IF NOT EXISTS crm_leads (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL,
+                telefone TEXT,
+                email TEXT,
+                empresa TEXT,
+                origem TEXT DEFAULT 'manual',
+                etapa TEXT DEFAULT 'topo',
+                responsavel_id INTEGER,
+                proposta_id INTEGER,
+                valor_estimado REAL,
+                observacoes TEXT,
+                dados_extras TEXT,
+                perdido_motivo TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS crm_atividades (
+                id SERIAL PRIMARY KEY,
+                lead_id INTEGER NOT NULL,
+                usuario_nome TEXT,
+                tipo TEXT DEFAULT 'nota',
+                descricao TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS crm_etapas (
+                id SERIAL PRIMARY KEY,
+                slug TEXT UNIQUE NOT NULL,
+                nome TEXT NOT NULL,
+                cor TEXT DEFAULT '#3b82f6',
+                ordem INTEGER DEFAULT 0,
+                tipo TEXT DEFAULT 'normal',
+                ativo INTEGER DEFAULT 1
+            )""",
+        ]
+        for sql in tables_sql:
+            try: 
+                cur.execute(sql)
+            except Exception as e:
+                app.logger.error(f"[INIT_DB] Erro SQL: {e}")
+        conn.commit()
+        
+        # GARANTIR que recebimento existe
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS recebimento (
+                    id SERIAL PRIMARY KEY,
+                    operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
+                    total REAL DEFAULT 0,
+                    UNIQUE(operadora, obs, plano)
+                )
+            """)
+            conn.commit()
+            app.logger.info("[INIT_DB] ✅ Tabela recebimento garantida")
+        except Exception as e:
+            app.logger.error(f"[INIT_DB] Erro ao criar recebimento: {e}")
+    else:
+        # SQLite: usar executescript
+        conn.executescript("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL, email TEXT UNIQUE NOT NULL, senha_hash TEXT,
+            token_setup TEXT, token_expira TIMESTAMP,
+            perfil TEXT DEFAULT 'consultor',
+            regime_base TEXT DEFAULT 'sem_lead_sem_fixo',
+            ativo INTEGER DEFAULT 1,
+            valor_fixo REAL DEFAULT 0, chave_pix TEXT, foto TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS supervisoras (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL, email TEXT, telefone TEXT,
+            ativo INTEGER DEFAULT 1, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS regimes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo TEXT UNIQUE NOT NULL, nome TEXT NOT NULL, descricao TEXT,
+            valor_fixo REAL DEFAULT 0, num_parcelas INTEGER DEFAULT 1,
+            distribuicao_parcelas TEXT DEFAULT '100',
+            faixa_min REAL, faixa_max REAL,
+            coluna_comissao TEXT, ordem INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS comissoes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operadora TEXT UNIQUE NOT NULL,
+            perc_total REAL DEFAULT 2.0, perc_sem_leads REAL DEFAULT 0.5,
+            perc_n1 REAL DEFAULT 0.9, perc_n2 REAL DEFAULT 1.1, perc_n3 REAL DEFAULT 1.3,
+            perc_com_fixo REAL DEFAULT 1.3, dist_corretora TEXT DEFAULT '100', observacao TEXT
+        );
+        CREATE TABLE IF NOT EXISTS propostas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL, consultor TEXT NOT NULL, supervisora_id INTEGER,
+            proposta_tem_numero TEXT, numero_proposta TEXT, vigencia TEXT NOT NULL,
+            modalidade TEXT NOT NULL, tipo_pessoa TEXT,
+            adm_operadora TEXT, produto TEXT, razao_social TEXT NOT NULL,
+            titular_dependentes TEXT, tipo_contrato TEXT NOT NULL,
+            acomodacao TEXT NOT NULL, fator_moderador TEXT NOT NULL,
+            total_vidas INTEGER NOT NULL, valor REAL NOT NULL,
+            dia_comissao TEXT, venda_status TEXT DEFAULT 'Sim', elegivel_campanha TEXT,
+            vencimento_1 TEXT, previsao_1 TEXT,
+            resp_contrato TEXT, email_resp_contrato TEXT, tel_resp_contrato TEXT,
+            resp_negociacao TEXT, email_resp_negociacao TEXT, tel_resp_negociacao TEXT,
+            contatos_adicionais TEXT, desc_contatos_adicionais TEXT,
+            regime_aplicado TEXT, num_parcelas INTEGER DEFAULT 1,
+            distribuicao_parcelas TEXT DEFAULT '100',
+            comissao_total_corretora REAL, comissao_consultor REAL, comissao_corretora_liquida REAL,
+            observacoes TEXT, anexos TEXT, status TEXT DEFAULT 'Ativo',
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS parcelas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposta_id INTEGER NOT NULL,
+            numero INTEGER NOT NULL,
+            percentual REAL NOT NULL DEFAULT 100,
+            valor REAL NOT NULL,
+            data_prevista TEXT,
+            status TEXT DEFAULT 'Pendente de receber',
+            comprovante_antecipacao TEXT,
+            data_pagamento TEXT,
+            aceite_corretor INTEGER DEFAULT 0,
+            data_aceite TEXT,
+            confirmado_gestor INTEGER DEFAULT 0,
+            data_confirmacao_gestor TEXT,
+            FOREIGN KEY(proposta_id) REFERENCES propostas(id)
+        );
+        CREATE TABLE IF NOT EXISTS campos_custom (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            label TEXT NOT NULL,
+            nome_tecnico TEXT UNIQUE NOT NULL,
+            tipo TEXT NOT NULL DEFAULT 'text',
+            opcoes TEXT,
+            placeholder TEXT,
+            ajuda TEXT,
+            obrigatorio INTEGER DEFAULT 0,
+            ativo INTEGER DEFAULT 1,
+            ordem INTEGER DEFAULT 0,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS niveis (
+            codigo TEXT PRIMARY KEY,
+            label TEXT NOT NULL,
+            faixa_min REAL DEFAULT 0,
+            faixa_max REAL,
+            ordem INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS repasses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            modelo TEXT NOT NULL,
+            nivel TEXT DEFAULT '',
+            tipo_plano TEXT NOT NULL,
+            percentual REAL DEFAULT 0,
+            eh_taxa_adesao INTEGER DEFAULT 0,
+            UNIQUE(modelo, nivel, tipo_plano)
+        );
+        CREATE TABLE IF NOT EXISTS lancamentos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo TEXT NOT NULL,
+            categoria TEXT,
+            descricao TEXT NOT NULL,
+            valor REAL NOT NULL,
+            data_competencia TEXT,
+            data_lancamento TEXT,
+            recorrente INTEGER DEFAULT 0,
+            socio TEXT,
+            usuario_id INTEGER,
+            status TEXT DEFAULT 'Previsto',
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS regras_estorno (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operadora TEXT UNIQUE NOT NULL,
+            perc_estorno REAL DEFAULT 100,
+            ate_mensalidade INTEGER DEFAULT 3,
+            observacao TEXT
+        );
+        CREATE TABLE IF NOT EXISTS config (
+            chave TEXT PRIMARY KEY,
+            valor TEXT
+        );
+        CREATE TABLE IF NOT EXISTS etiquetas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT UNIQUE NOT NULL,
+            cor TEXT DEFAULT '#1fd8a4'
+        );
+        CREATE TABLE IF NOT EXISTS proposta_etiquetas (
+            proposta_id INTEGER,
+            etiqueta_id INTEGER,
+            UNIQUE(proposta_id, etiqueta_id)
+        );
+        CREATE TABLE IF NOT EXISTS produtos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operadora TEXT NOT NULL,
+            nome TEXT NOT NULL,
+            tipo_plano TEXT,
+            acomodacao TEXT,
+            coparticipacao TEXT,
+            observacao TEXT,
+            ativo INTEGER DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS historico_proposta (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposta_id INTEGER NOT NULL,
+            usuario_nome TEXT,
+            campo TEXT,
+            valor_antes TEXT,
+            valor_depois TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS recebimento (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
+            total REAL DEFAULT 0,
+            UNIQUE(operadora, obs, plano)
+        );
+        CREATE TABLE IF NOT EXISTS repasse_corretor (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
+            modelo TEXT NOT NULL, nivel TEXT DEFAULT '',
+            total REAL DEFAULT 0, regua TEXT DEFAULT '', taxa INTEGER DEFAULT 0,
+            UNIQUE(operadora, obs, plano, modelo, nivel)
+        );
+        CREATE TABLE IF NOT EXISTS crm_leads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            telefone TEXT,
+            email TEXT,
+            empresa TEXT,
+            origem TEXT DEFAULT 'manual',
+            etapa TEXT DEFAULT 'topo',
+            responsavel_id INTEGER,
+            proposta_id INTEGER,
+            valor_estimado REAL,
+            observacoes TEXT,
+            dados_extras TEXT,
+            perdido_motivo TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS crm_atividades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER NOT NULL,
+            usuario_nome TEXT,
+            tipo TEXT DEFAULT 'nota',
+            descricao TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS crm_etapas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT UNIQUE NOT NULL,
+            nome TEXT NOT NULL,
+            cor TEXT DEFAULT '#3b82f6',
+            ordem INTEGER DEFAULT 0,
+            tipo TEXT DEFAULT 'normal',
+            ativo INTEGER DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS webhook_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            evento_id TEXT UNIQUE,
+            evento TEXT,
+            processado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS solicitacoes_edicao (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposta_id INTEGER NOT NULL,
+            usuario_id INTEGER NOT NULL,
+            usuario_nome TEXT,
+            alteracoes TEXT,
+            status TEXT DEFAULT 'Pendente',
+            motivo_recusa TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            resolvido_em TIMESTAMP,
+            resolvido_por TEXT
+        );
+        """)
+    
+    # ─── MIGRAÇÕES: adicionar colunas novas se não existirem ───
+    def add_col(tabela, coluna, tipo):
+        if is_pg:
+            try:
+                conn.cursor().execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
+                conn.commit()
+            except: pass
+        else:
+            try: conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
+            except sqlite3.OperationalError: pass
+    
+    # Colunas que ja estao nas tabelas acima, então não precisa add_col
+    # (tudo já tá no CREATE TABLE IF NOT EXISTS)
+    
+    # Insert config — compatível com SQLite e Postgres
+    if is_pg:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO config (chave,valor) VALUES (%s,%s) ON CONFLICT (chave) DO NOTHING", 
+            ('affinity_destinatarios', 'pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br'))
+        cur.execute("INSERT INTO config (chave,valor) VALUES (%s,%s) ON CONFLICT (chave) DO NOTHING",
+            ('affinity_contato', 'Pamela'))
+        cur.execute("INSERT INTO config (chave,valor) VALUES (%s,%s) ON CONFLICT (chave) DO NOTHING",
+            ('affinity_remetente', 'guilherme@serenuscorretora.com.br'))
+        conn.commit()
+    else:
+        conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)", 
+            ('affinity_destinatarios', 'pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br'))
+        conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)",
+            ('affinity_contato', 'Pamela'))
+        conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)",
+            ('affinity_remetente', 'guilherme@serenuscorretora.com.br'))
+    
+    # Etiquetas padrão
+    etq_default = [('Renovação','#3b82f6'),('Reajuste','#fb923c'),('Pós-venda','#1fd8a4'),
+                   ('Campanha','#8b5cf6'),('Atenção estorno','#f43f7c'),('Indicação','#facc15')]
+    if is_pg:
+        cur = conn.cursor()
+        for nome, cor in etq_default:
+            cur.execute("INSERT INTO etiquetas (nome,cor) VALUES (%s,%s) ON CONFLICT (nome) DO NOTHING", (nome, cor))
+        conn.commit()
+    else:
+        for nome, cor in etq_default:
+            conn.execute("INSERT OR IGNORE INTO etiquetas (nome,cor) VALUES (?,?)", (nome, cor))
+
+    # Etapas do funil CRM padrão (só insere se a tabela estiver vazia — preserva customizações)
+    etapas_default = [
+        ('topo',    'Topo do Funil',  '#3b82f6', 1, 'normal'),
+        ('meio',    'Meio do Funil',  '#f59e0b', 2, 'normal'),
+        ('fim',     'Fundo do Funil', '#10b981', 3, 'normal'),
+        ('ganho',   'Ganho',          '#1fd8a4', 4, 'ganho'),
+        ('perdido', 'Perdido',        '#ef4444', 5, 'perdido'),
+    ]
+    try:
+        ja_tem = conn.execute("SELECT COUNT(*) c FROM crm_etapas").fetchone()['c']
+    except Exception:
+        ja_tem = 0
+    if not ja_tem:
+        if is_pg:
+            cur = conn.cursor()
+            for slug, nome, cor, ordem, tipo in etapas_default:
+                cur.execute("INSERT INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES (%s,%s,%s,%s,%s) ON CONFLICT (slug) DO NOTHING",
+                            (slug, nome, cor, ordem, tipo))
+            conn.commit()
+        else:
+            for slug, nome, cor, ordem, tipo in etapas_default:
+                conn.execute("INSERT OR IGNORE INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES (?,?,?,?,?)",
+                             (slug, nome, cor, ordem, tipo))
+            conn.commit()
+
+    
+    # Regimes padrão
+    regimes_default = [
+        ('sem_lead_sem_fixo','Sem Lead e Sem Fixo','Corretor autônomo. Comissão variável, paga à vista.',
+         0.0, 1, '100', None, None, 'perc_sem_leads', 1),
+        ('lead_n1','Com Lead (Sem Fixo) — N1','Recebe leads. Produção: R$ 0 a R$ 3.000.',
+         0.0, 2, '60;40', 0.0, 3000.0, 'perc_n1', 2),
+        ('lead_n2','Com Lead (Sem Fixo) — N2','Recebe leads. Produção: R$ 3.001 a R$ 7.000.',
+         0.0, 3, '50;30;20', 3000.01, 7000.0, 'perc_n2', 3),
+        ('lead_n3','Com Lead (Sem Fixo) — N3','Recebe leads. Produção: R$ 7.001 em diante.',
+         0.0, 4, '40;25;20;15', 7000.01, None, 'perc_n3', 4),
+        ('com_fixo_lead','Com Fixo + Com Lead','Salário fixo R$ 1.000 + leads + comissão variável.',
+         1000.0, 4, '25;25;25;25', None, None, 'perc_com_fixo', 5),
+    ]
+    for r in regimes_default:
+        conn.execute("""INSERT OR IGNORE INTO regimes
+            (codigo,nome,descricao,valor_fixo,num_parcelas,distribuicao_parcelas,faixa_min,faixa_max,coluna_comissao,ordem)
+            VALUES (?,?,?,?,?,?,?,?,?,?)""", r)
+    
+    # Admin padrão
+    admin = conn.execute("SELECT id FROM usuarios WHERE email='guilherme@serenuscorretora.com.br'").fetchone()
+    if not admin:
+        from werkzeug.security import generate_password_hash as _gph
+        conn.execute("""INSERT INTO usuarios (nome,email,senha_hash,perfil,regime_base)
+            VALUES (?,?,?,?,?)""",
+            ('Guilherme Santos','guilherme@serenuscorretora.com.br',_gph("serenus2025", method='pbkdf2:sha256', salt_length=16),'admin','com_fixo_lead'))
+    
+    # Comissões padrão
+    com_default = [
+        ("SulAmérica",2.8,0.7,1.2,1.5,1.8,1.8,"100;100;80"),("Porto Seguro",2.8,0.7,1.2,1.5,1.8,1.8,"100;100;80"),
+        ("Porto",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),("Amil",2.8,0.7,1.2,1.5,1.8,1.8,"100;100;80"),
+        ("Bradesco",3.3,0.8,1.5,1.8,2.1,2.1,"100;100;80;50"),("MedSênior",1.7,0.45,0.8,1.0,1.1,1.1,"100;50;20"),
+        ("Vera Cruz",1.6,0.4,0.7,0.9,1.0,1.0,"100;60"),("Hapvida",2.3,0.575,1.035,1.265,1.495,1.495,"100;80;50"),
+        ("Unimed Jundiaí",3.0,0.75,1.35,1.65,1.95,1.95,"100;100;100"),("Unimed Sorocaba",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),
+        ("Santa Helena",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),("Santa Tereza",1.5,0.375,0.675,0.825,0.975,0.975,"100;50"),
+        ("Sobam",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),("Beneficência",1.0,0.25,0.45,0.55,0.65,0.65,"100"),
+        ("Affix",1.5,0.375,0.675,0.825,0.975,0.975,"100;50"),("Qualicorp",3.0,0.75,1.35,1.65,1.95,1.95,"100;100;100"),
+        ("Allcare",1.6,0.4,0.72,0.88,1.04,1.04,"100;60"),("Amhemed",2.0,0.5,0.9,1.1,1.3,1.3,"100;100"),
+        ("Ana Costa",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),("Supermed",2.8,0.7,1.2,1.5,1.8,1.8,"100;100;80"),
+        ("EVA",1.6,0.4,0.7,0.9,1.0,1.0,"100;60"),("Lancers",1.6,0.4,0.7,0.9,1.0,1.0,"100;60"),
+    ]
+    for c in com_default:
+        conn.execute("""INSERT OR IGNORE INTO comissoes
+            (operadora,perc_total,perc_sem_leads,perc_n1,perc_n2,perc_n3,perc_com_fixo,dist_corretora) VALUES (?,?,?,?,?,?,?,?)""", c)
+    
+    # Níveis padrão
+    niveis_default = [
+        ('n1','N1', 0.0, 3000.0, 1),
+        ('n2','N2', 3000.01, 7000.0, 2),
+        ('n3','N3', 7000.01, None, 3),
+    ]
+    for n in niveis_default:
+        conn.execute("INSERT OR IGNORE INTO niveis (codigo,label,faixa_min,faixa_max,ordem) VALUES (?,?,?,?,?)", n)
+    
+    # Seed de comissões (se arquivo existe)
+    ja_tem = conn.execute("SELECT COUNT(*) as c FROM recebimento").fetchone()
+    if ja_tem and ja_tem[0] == 0 if isinstance(ja_tem, tuple) else ja_tem['c'] == 0:
+        seed_path = os.path.join(BASE_DIR, "seed_comissoes.json")
+        if os.path.exists(seed_path):
+            seed = json.load(open(seed_path, encoding='utf-8'))
+            for r in seed.get('recebimento', []):
+                conn.execute("""INSERT OR IGNORE INTO recebimento (operadora,obs,plano,total)
+                    VALUES (?,?,?,?)""", (r['operadora'], r.get('obs',''), r['plano'], r.get('total') or 0))
+            for r in seed.get('repasse', []):
+                regua = ';'.join(str(x) for x in r.get('regua', []))
+                conn.execute("""INSERT OR IGNORE INTO repasse_corretor
+                    (operadora,obs,plano,modelo,nivel,total,regua,taxa) VALUES (?,?,?,?,?,?,?,?)""",
+                    (r['operadora'], r.get('obs',''), r['plano'], r['modelo'], r.get('nivel',''),
+                     r.get('total') or 0, regua, r.get('taxa', 0)))
+    
+    conn.commit()
+    if is_pg:
+        conn.cursor().close()
+
+    # ─── MIGRAÇÕES: adiciona colunas novas em tabelas existentes ─────────
+    migracoes = [
+        ("propostas", "estornada", "INTEGER DEFAULT 0"),
+        ("propostas", "estorno_info", "TEXT"),
+        ("propostas", "cpf_titular", "TEXT"),
+        ("propostas", "cnpj", "TEXT"),
+        ("propostas", "contrato_arquivo", "TEXT"),
+        ("propostas", "comprovante_boleto", "TEXT"),
+        ("propostas", "campos_extras", "TEXT"),
+        ("propostas", "quem_subiu", "TEXT"),
+        ("propostas", "operadora_obs", "TEXT"),
+        ("propostas", "dia_vencimento", "INTEGER"),
+        ("propostas", "data_nasc_titular", "TEXT"),
+        ("propostas", "dependentes_json", "TEXT"),
+        ("propostas", "tem_repique", "INTEGER DEFAULT 0"),
+        ("propostas", "repique_json", "TEXT"),
+        ("propostas", "fase", "TEXT DEFAULT 'Proposta cadastrada'"),
+        ("propostas", "produto_id", "INTEGER"),
+        ("parcelas", "competencia", "TEXT"),
+        ("parcelas", "mensalidade_ref", "INTEGER"),
+        ("parcelas", "ok_entrada", "INTEGER DEFAULT 0"),
+        ("parcelas", "tipo_origem", "TEXT DEFAULT 'comissao'"),
+        ("parcelas", "confirmado_gestor", "INTEGER DEFAULT 0"),
+        ("parcelas", "data_confirmacao_gestor", "TEXT"),
+        ("parcelas", "valor_corretora", "REAL DEFAULT 0"),
+        ("parcelas", "perc_cliente", "REAL DEFAULT 100"),
+        ("usuarios", "valor_fixo", "REAL DEFAULT 0"),
+        ("usuarios", "chave_pix", "TEXT"),
+        ("parcelas", "asaas_transfer_id", "TEXT"),
+        ("parcelas", "asaas_status", "TEXT"),
+        ("parcelas", "asaas_erro", "TEXT"),
+        ("usuarios", "foto", "TEXT"),
+        # Novos campos v15
+        ("usuarios", "cpf", "TEXT"),
+        ("usuarios", "reset_code", "TEXT"),
+        ("usuarios", "reset_expira", "TEXT"),
+        # ─── FASE 1: ERP Backoffice ───
+        ("propostas", "status_operacional", "TEXT DEFAULT 'Aguardando Documentos'"),
+        ("propostas", "mes_meta", "TEXT"),
+        ("propostas", "pendencias_json", "TEXT"),
+        ("propostas", "motivo_exclusao", "TEXT"),
+        ("propostas", "detalhe_exclusao", "TEXT"),
+        ("historico_proposta", "usuario_id", "INTEGER"),
+        ("historico_proposta", "tipo", "TEXT DEFAULT 'edicao'"),
+        ("historico_proposta", "descricao", "TEXT"),
+    ]
+
+    for tabela, coluna, tipo in migracoes:
+        try:
+            ddl = f"ALTER TABLE {tabela} ADD COLUMN {'IF NOT EXISTS ' if is_pg else ''}{coluna} {tipo}"
+            conn.execute(ddl)
+            if is_pg:
+                conn.commit()
+        except Exception:
+            if is_pg:
+                try: conn.rollback()
+                except Exception: pass
+            # SQLite: coluna já existe → ignora
+    if not is_pg:
+        conn.commit()
+
+    # ─── ÍNDICES: aceleram as queries mais frequentes (seguro, não altera dados) ───
+    indices = [
+        "CREATE INDEX IF NOT EXISTS idx_propostas_usuario ON propostas(usuario_id)",
+        "CREATE INDEX IF NOT EXISTS idx_propostas_status ON propostas(status)",
+        "CREATE INDEX IF NOT EXISTS idx_propostas_criado ON propostas(criado_em)",
+        "CREATE INDEX IF NOT EXISTS idx_parcelas_proposta ON parcelas(proposta_id)",
+        "CREATE INDEX IF NOT EXISTS idx_parcelas_status ON parcelas(status)",
+        "CREATE INDEX IF NOT EXISTS idx_historico_proposta ON historico_proposta(proposta_id)",
+        "CREATE INDEX IF NOT EXISTS idx_solic_proposta ON solicitacoes_edicao(proposta_id)",
+        "CREATE INDEX IF NOT EXISTS idx_solic_status ON solicitacoes_edicao(status)",
+        "CREATE INDEX IF NOT EXISTS idx_recebimento_op ON recebimento(operadora, plano)",
+        "CREATE INDEX IF NOT EXISTS idx_repasse_op ON repasse_corretor(operadora, plano, modelo, nivel)",
+        "CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email)",
+        "CREATE INDEX IF NOT EXISTS idx_parcelas_competencia ON parcelas(competencia)",
+    ]
+    for idx in indices:
+        try:
+            conn.execute(idx)
+            if is_pg: conn.commit()
+        except Exception:
+            if is_pg:
+                try: conn.rollback()
+                except Exception: pass
+    if not is_pg:
+        conn.commit()
+
+    close_db(conn)
+
+
+
+# ─── ESTRUTURA DO FLUXO SEMANAL AUTOMÁTICO ──────────────────────────────────
+FLUXO_SEMANAL = {
+    'coleta': {
+        'id': 'coleta',
+        'nome': 'Coleta de Propostas',
+        'desc': 'Período de coleta: consultores subem propostas',
+        'dias_semana': 'quinta a terça',
+        'acao': 'Propostas são registradas',
+        'cor': 'info',
+        'ordem': 1,
+    },
+    'analise': {
+        'id': 'analise',
+        'nome': 'Análise & Aprovação',
+        'desc': 'Admin analisa e aprova propostas',
+        'dias_semana': 'quarta-feira',
+        'acao': 'Comissões são calculadas',
+        'cor': 'azul',
+        'ordem': 2,
+    },
+    'pagamento': {
+        'id': 'pagamento',
+        'nome': 'Pagamento & Repasse',
+        'desc': 'Processamento de repasses consultores',
+        'dias_semana': 'sexta-feira seguinte',
+        'acao': 'Repasses realizados',
+        'cor': 'verde',
+        'ordem': 3,
+    }
+}
+
+def detectar_fase_atual():
+    """Detecta automaticamente qual fase estamos: coleta, analise ou pagamento.
+    Thu→Tue = Coleta | Quarta = Análise | Sexta = Pagamento
+    """
+    dia = date.today().weekday()  # 0=seg,1=ter,2=qua,3=qui,4=sex,5=sab,6=dom
+    if dia == 2: return 'analise'    # Quarta
+    if dia == 4: return 'pagamento'  # Sexta
+    return 'coleta'  # Qui, Sab, Dom, Seg, Ter
+
+def ciclo_atual():
+    """
+    Ciclo semanal: começa na QUINTA-FEIRA e vai até TERÇA-FEIRA seguinte (coleta).
+    Quarta = Análise. Próxima Quinta = Liberação. Próxima Sexta = Pagamento.
+    """
+    hoje = date.today()
+    dia = hoje.weekday()  # 0=seg,1=ter,2=qua,3=qui,4=sex,5=sab,6=dom
+    # Volta até a quinta mais recente (inclusive hoje se for quinta)
+    dias_desde_quinta = (dia - 3) % 7
+    inicio_ciclo = hoje - timedelta(days=dias_desde_quinta)
+    # Fim coleta = terça (6 dias após a quinta)
+    fim_ciclo = inicio_ciclo + timedelta(days=6)
+    # Liberação = próxima quinta (7 dias após início)
+    liberacao = inicio_ciclo + timedelta(days=7)
+    # Pagamento = sexta após liberação
+    pagamento = liberacao + timedelta(days=1)
+
+    DIAS_PT = ['Segunda','Terça','Quarta','Quinta','Sexta','Sábado','Domingo']
+    return {
+        'inicio':      inicio_ciclo.strftime('%d/%m/%Y'),
+        'fim':         fim_ciclo.strftime('%d/%m/%Y'),
+        'liberacao':   liberacao.strftime('%d/%m/%Y'),
+        'liberacao_dia': DIAS_PT[liberacao.weekday()],
+        'pagamento':   pagamento.strftime('%d/%m/%Y'),
+        'pagamento_dia': DIAS_PT[pagamento.weekday()],
+        'fase_atual':  detectar_fase_atual(),
+        'inicio_iso':  inicio_ciclo.isoformat(),
+        'fim_iso':     fim_ciclo.isoformat(),
+    }
+
+# ─── CÁLCULO DE COMISSÃO ─────────────────────────────────────────────────────────
+# ─── HELPERS DO MOTOR DE CÁLCULO ────────────────────────────────────────────────
+REGIME_TO_MODELO = {
+    'sem_lead_sem_fixo': 'sem_lead_sem_fixo',
+    'com_fixo_sem_lead': 'sem_lead_com_fixo',   # nome no repasse_corretor
+    'com_lead': 'com_lead',
+    'com_lead_sem_fixo': 'com_lead',
+    'n1': 'com_lead', 'n2': 'com_lead', 'n3': 'com_lead',
+    'com_fixo_lead': 'com_fixo_lead',
+}
+
+def _plano_from_modalidade(modalidade, tipo_pessoa=''):
+    """Mapeia a modalidade/tipo da proposta para o plano da tabela: PME / PF / ADESAO."""
+    s = ((modalidade or '') + ' ' + (tipo_pessoa or '')).upper()
+    if 'ADES' in s:
+        return 'ADESAO'
+    if ' PF' in (' ' + s) or 'PESSOA F' in s or 'INDIVID' in s or 'FAMILIAR' in s or s.strip() == 'PF':
+        return 'PF'
+    return 'PME'  # PME, Coletivo, Empresarial, Porte N → PME
+
+def _split_operadora(operadora):
+    """'Affix · Hapvida' -> ('Affix', 'Hapvida'). Sem separador -> (nome, '')."""
+    op = (operadora or '').strip()
+    for sep in (' · ', ' - ', '·', ' / '):
+        if sep in op:
+            a, b = op.split(sep, 1)
+            return a.strip(), b.strip()
+    return op, ''
+
+def _nivel_por_producao(prod, conn):
+    """Determina o nível (n1/n2/n3) pela produção acumulada, respeitando a tabela niveis."""
+    try:
+        niveis = conn.execute("SELECT codigo,faixa_min,faixa_max FROM niveis ORDER BY ordem").fetchall()
+    except Exception:
+        niveis = []
+    for nv in niveis:
+        mn = float(nv['faixa_min'] or 0)
+        mx = nv['faixa_max']
+        if prod >= mn and (mx is None or prod <= float(mx)):
+            return nv['codigo']
+    # fallback fixo
+    if prod <= 3000: return 'n1'
+    if prod <= 7000: return 'n2'
+    return 'n3'
+
+
+def _producao_mes(conn, usuario_id, criado_em, excluir_pid=None):
+    """Soma a produção (valor) do consultor no mês de criado_em, exceto a própria proposta.
+    Usa range de datas — compatível com PostgreSQL (timestamp) e SQLite (texto).
+    Evita substr()/to_char() que diferem entre os bancos."""
+    ma = str(criado_em or '')[:7]  # 'YYYY-MM'
+    if len(ma) != 7:
+        return 0
+    try:
+        ini = ma + '-01'
+        ano, mes = int(ma[:4]), int(ma[5:7])
+        fim = f"{ano+1}-01-01" if mes == 12 else f"{ano}-{mes+1:02d}-01"
+        if excluir_pid is not None:
+            r = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM propostas
+                WHERE usuario_id=? AND criado_em>=? AND criado_em<? AND id<>?""",
+                (usuario_id, ini, fim, excluir_pid)).fetchone()
+        else:
+            r = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM propostas
+                WHERE usuario_id=? AND criado_em>=? AND criado_em<?""",
+                (usuario_id, ini, fim)).fetchone()
+        return r['v'] if r else 0
+    except Exception:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        return 0
+
+
+def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidade='', tipo_pessoa=''):
+    """Motor de comissão isolando a regra da Taxa de Adesão."""
+    conn = db()
+    valor = float(valor_venda or 0)
+    op_nome, op_obs = _split_operadora(operadora)
+    plano = _plano_from_modalidade(modalidade, tipo_pessoa)
+
+    # 1) Recebimento da corretora (mensalidades / resíduo)
+    receb = conn.execute(
+        "SELECT total FROM recebimento WHERE operadora=? AND obs=? AND plano=?",
+        (op_nome, op_obs, plano)).fetchone()
+    if not receb:
+        receb = conn.execute(
+            "SELECT total FROM recebimento WHERE operadora=? AND plano=? ORDER BY (obs='') DESC LIMIT 1",
+            (op_nome, plano)).fetchone()
+    receb_mens = float(receb['total']) if receb else 0.0
+    total_corretora = round(valor * receb_mens, 2)
+
+    # GESTOR VENDEDOR: leva 100% da corretora
+    if regime_base == 'gestor_vendedor':
+        close_db(conn)
+        regua = [receb_mens] if receb_mens else [1.0]
+        return {
+            'codigo': 'gestor_vendedor', 'modelo': 'gestor_vendedor', 'nivel': '', 'plano': plano,
+            'num_parcelas': 1, 'dist_corretora': str(receb_mens or 1.0),
+            'regua_mens': regua, 'receb_mens': receb_mens, 'rep_mens': receb_mens, 'taxa': 0,
+            'valor': valor, 'total_corretora': total_corretora,
+            'consultor': total_corretora, 'liquido': 0.0,
+            'aviso': ''
+        }
+
+    # 2) Modelo + nível
+    modelo = REGIME_TO_MODELO.get(regime_base, 'sem_lead_sem_fixo')
+    nivel = ''
+    if modelo == 'com_lead':
+        nivel = regime_base if regime_base in ('n1', 'n2', 'n3') else _nivel_por_producao(prod_acumulada, conn)
+
+    # 3) Repasse ao corretor
+    rep = conn.execute(
+        "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND obs=? AND plano=? AND modelo=? AND nivel=?",
+        (op_nome, op_obs, plano, modelo, nivel)).fetchone()
+    if not rep:
+        rep = conn.execute(
+            "SELECT total,regua,taxa FROM repasse_corretor WHERE operadora=? AND plano=? AND modelo=? AND nivel=? ORDER BY (obs='') DESC LIMIT 1",
+            (op_nome, plano, modelo, nivel)).fetchone()
+            
+    rep_mens = float(rep['total']) if rep else 0.0
+    regua_str = (rep['regua'] if rep and rep['regua'] else '') or ''
+    taxa = int(rep['taxa']) if rep and rep['taxa'] is not None else 0
+
+    # ==========================================
+    # --- RAMO ISOLADO: ADESÃO ---
+    # ==========================================
+    if plano == 'ADESAO':
+        # Na Adesão, a corretora recolhe a taxa. O consultor ganha um % apenas sobre essa 1ª mensalidade.
+        consultor = round(valor * rep_mens, 2)
+        # O líquido da corretora = Total de recebíveis da operadora - O que foi pago de taxa pro consultor
+        liquido = round(total_corretora - consultor, 2)
+        close_db(conn)
+        
+        avisos = []
+        if receb_mens == 0: avisos.append(f"Falta RECEBIMENTO: {op_nome} / ADESAO")
+        if rep_mens == 0: avisos.append(f"Falta REPASSE: {op_nome} / ADESAO / {MODELO_NOME.get(modelo, modelo)}")
+        
+        return {
+            'codigo': nivel or modelo, 'modelo': modelo, 'nivel': nivel, 'plano': plano,
+            'num_parcelas': 1, 'dist_corretora': '100',
+            'regua_mens': [rep_mens] if rep_mens else [0.0], 'receb_mens': receb_mens, 'rep_mens': rep_mens, 'taxa': 1,
+            'valor': valor, 'total_corretora': total_corretora,
+            'consultor': consultor, 'liquido': liquido,
+            'aviso': ' · '.join(avisos),
+        }
+
+    # ==========================================
+    # --- RAMO PADRÃO: PME / PF ---
+    # ==========================================
+    consultor = round(valor * rep_mens, 2)
+    liquido = round(total_corretora - consultor, 2)
+
+    regua = [float(x) for x in regua_str.split(';') if x.strip()]
+    if not regua:
+        regua = [rep_mens] if rep_mens else [0.0]
+
+    close_db(conn)
+    avisos = []
+    if receb_mens == 0:
+        avisos.append(f"Falta RECEBIMENTO: {op_nome} / {plano}")
+    if rep_mens == 0:
+        avisos.append(f"Falta REPASSE: {op_nome} / {plano} / {MODELO_NOME.get(modelo, modelo)}{(' / ' + nivel.upper()) if nivel else ''}")
+
+    return {
+        'codigo': nivel or modelo, 'modelo': modelo, 'nivel': nivel, 'plano': plano,
+        'num_parcelas': len(regua), 'dist_corretora': regua_str or ';'.join(str(x) for x in regua),
+        'regua_mens': regua, 'receb_mens': receb_mens, 'rep_mens': rep_mens, 'taxa': taxa,
+        'valor': valor, 'total_corretora': total_corretora,
+        'consultor': consultor, 'liquido': liquido,
+        'aviso': ' · '.join(avisos),
+    }
+
+
+def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None, status_override=None):
+    """Gera parcelas usando a régua REAL (mensalidades por parcela).
+    Parcela consultor i = valor × regua[i]. Corretora distribuída proporcional à régua.
+    status_override: força um status fixo em todas as parcelas (ex: 'Bloqueado - Falta Comprovante')."""
+    from dateutil.relativedelta import relativedelta
+    try:
+        base = datetime.strptime(vigencia[:7], '%Y-%m') if (vigencia and len(vigencia) >= 7) else datetime.now(TZ_SP).replace(day=1)
+    except Exception:
+        base = datetime.now(TZ_SP).replace(day=1)
+
+    dia = int(dia_vencimento) if dia_vencimento else base.day
+    regua = c.get('regua_mens') or [float(x) for x in (c.get('dist_corretora','') or '').split(';') if x.strip()] or [1.0]
+    valor = float(c.get('valor', 0))
+    total_cor = float(c.get('total_corretora', 0))
+    soma_regua = sum(regua) or 1.0
+
+    parcelas = []
+    for i, mens in enumerate(regua):
+        mes_ref = base + relativedelta(months=i)
+        try:
+            data = mes_ref.replace(day=min(dia, 28)).strftime('%Y-%m-%d')
+        except Exception:
+            data = mes_ref.strftime('%Y-%m-01')
+        val_c = round(valor * mens, 2)
+        val_cor = round(total_cor * (mens / soma_regua), 2)
+        perc = round((mens / soma_regua) * 100, 2)
+        parcelas.append({
+            'proposta_id': proposta_id, 'numero': i + 1, 'percentual': perc,
+            'valor': val_c, 'valor_corretora': val_cor, 'perc_cliente': perc,
+            'data_prevista': data,
+            'status': status_override if status_override else 'Pendente de receber',
+            'competencia': mes_ref.strftime('%Y-%m'), 'mensalidade_ref': i + 1,
+        })
+    return parcelas
+
+
+
+# ─── AUTH ────────────────────────────────────────────────────────────────────────
+# Hash de senha: PBKDF2-SHA256 com salt (via Werkzeug). Mantém retrocompatibilidade
+# com senhas antigas em SHA-256 puro — essas são migradas no próximo login.
+from werkzeug.security import generate_password_hash, check_password_hash
+
+def hash_senha(s):
+    """Gera hash seguro PBKDF2 (com salt automático) para uma senha nova."""
+    return generate_password_hash(s or '', method='pbkdf2:sha256', salt_length=16)
+
+def _parse_dt_seguro(valor):
+    """Converte um valor de data/hora para datetime, aceitando:
+    - datetime já pronto (PostgreSQL retorna assim)
+    - string ISO (SQLite retorna assim)
+    Retorna None se vazio ou inválido."""
+    if not valor:
+        return None
+    if isinstance(valor, datetime):
+        return valor
+    try:
+        return datetime.fromisoformat(str(valor))
+    except Exception:
+        try:
+            return datetime.strptime(str(valor)[:19], '%Y-%m-%d %H:%M:%S')
+        except Exception:
+            return None
+
+def _data_expirada(valor):
+    """True se a data/hora informada já passou. Trata datetime (PG) e string (SQLite),
+    e lida com timezone de forma segura (sem erro de naive vs aware)."""
+    expira = _parse_dt_seguro(valor)
+    if not expira:
+        return False
+    agora = datetime.now(TZ_SP)
+    try:
+        if expira.tzinfo is None:
+            agora = agora.replace(tzinfo=None)
+        return expira < agora
+    except Exception:
+        return False
+
+def _eh_sha256_legado(h):
+    """Detecta o formato antigo: SHA-256 puro = 64 caracteres hexadecimais."""
+    return isinstance(h, str) and len(h) == 64 and all(c in '0123456789abcdef' for c in h.lower())
+
+def verifica_senha(senha_digitada, hash_armazenado):
+    """Verifica senha aceitando tanto o formato novo (PBKDF2) quanto o antigo (SHA-256).
+    Retorna (ok: bool, precisa_migrar: bool)."""
+    if not hash_armazenado:
+        return False, False
+    if _eh_sha256_legado(hash_armazenado):
+        # Formato antigo — compara SHA-256 puro
+        ok = hashlib.sha256((senha_digitada or '').encode()).hexdigest() == hash_armazenado
+        return ok, ok  # se acertou, sinaliza para migrar
+    # Formato novo — PBKDF2
+    try:
+        return check_password_hash(hash_armazenado, senha_digitada or ''), False
+    except Exception:
+        return False, False
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# SEGURANÇA: Decorators robusto + Sanitização + Logging
+# ════════════════════════════════════════════════════════════════════════════
+
+def require_auth(f):
+    """Valida autenticação. Retorna JSON 401 (não redirect)."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        user_id = session.get('user_id')
+        perfil = session.get('perfil')
+        if not user_id or perfil not in ('admin', 'consultor', 'supervisor'):
+            app.logger.warning(f"[AUTH] Acesso não autenticado a {request.endpoint}")
+            return jsonify({'erro': 'Não autenticado', 'codigo': 'AUTH_REQUIRED'}), 401
+        return f(*args, **kwargs)
+    return wrapper
+
+def require_admin(f):
+    """Permite apenas admin. Retorna 403 se não autorizado."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        user_id = session.get('user_id')
+        perfil = session.get('perfil')
+        if not user_id or perfil != 'admin':
+            app.logger.warning(f"[AUTH] Negado (não-admin) em {request.endpoint} por user_id={user_id}")
+            return jsonify({'erro': 'Acesso negado', 'codigo': 'FORBIDDEN'}), 403
+        return f(*args, **kwargs)
+    return wrapper
+
+def sanitize_string(s, max_length=255):
+    """Valida entrada: deve ser string, não vazia, tamanho <= max_length."""
+    if not isinstance(s, str):
+        return None
+    s = s.strip()
+    return s if len(s) > 0 and len(s) <= max_length else None
+
+def error_json(mensagem, codigo=None, status=400):
+    """Retorna erro padronizado (nunca expõe detalhes internos)."""
+    return jsonify({
+        'erro': mensagem,
+        'codigo': codigo or 'ERRO_DESCONHECIDO'
+    }), status
+
+
+def login_required(f):
+    @wraps(f)
+    def w(*a, **kw):
+        if 'user_id' not in session: return redirect(url_for('login'))
+        return f(*a, **kw)
+    return w
+
+def admin_required(f):
+    @wraps(f)
+    def w(*a, **kw):
+        if session.get('perfil') != 'admin': return redirect(url_for('dashboard'))
+        return f(*a, **kw)
+    return w
+
+# ─── INTEGRAÇÃO ASAAS (pagamentos PIX para consultores) ──────────────────────────
+import requests as _requests
+
+# CORREÇÃO 21.06.2026: o cifrão ($) FAZ PARTE da chave do Asaas (formato $aact_prod_...).
+# Removê-lo invalida a chave (erro invalid_access_token / 401). Confirmado via teste ao vivo:
+# COM $ → 200 OK; SEM $ → 401. Então só limpamos espaços e aspas, NUNCA o cifrão.
+ASAAS_API_KEY = (os.environ.get('ASAAS_API_KEY', '') or '').strip().strip('"').strip("'")
+# Detecta sandbox vs produção pelo prefixo (com ou sem o cifrão na frente)
+if 'aact_prod' in ASAAS_API_KEY[:15]:
+    ASAAS_BASE_URL = 'https://api.asaas.com/v3'
+else:
+    ASAAS_BASE_URL = os.environ.get('ASAAS_BASE_URL', 'https://api-sandbox.asaas.com/v3')
+
+# Token de autenticação do webhook Asaas (opcional, configurado na interface do Asaas)
+ASAAS_WEBHOOK_TOKEN = os.environ.get('ASAAS_WEBHOOK_TOKEN', '')
+
+def asaas_configurado():
+    return bool(ASAAS_API_KEY)
+
+def asaas_request(method, path, payload=None):
+    """Wrapper para chamadas à API do Asaas. Nunca loga a chave."""
+    if not asaas_configurado():
+        return {"_erro": "ASAAS_API_KEY não configurada no ambiente"}, 0
+    url = f"{ASAAS_BASE_URL}{path}"
+    headers = {
+        "Content-Type": "application/json",
+        "access_token": ASAAS_API_KEY,
+        "User-Agent": "JOB-Serenus/1.0",
+    }
+    try:
+        r = _requests.request(method, url, headers=headers, json=payload, timeout=20)
+        try:
+            data = r.json()
+        except Exception:
+            data = {"_erro": "Resposta inválida do Asaas", "_raw": r.text[:300]}
+        return data, r.status_code
+    except _requests.exceptions.RequestException as e:
+        return {"_erro": f"Falha de conexão: {e}"}, 0
+
+
+def asaas_detectar_tipo_chave(chave):
+    """Detecta o tipo da chave PIX pelo formato (RFC 3986)."""
+    chave = (chave or '').strip()
+    if not chave:
+        return None
+    apenas_digitos = re.sub(r'\D', '', chave)
+    
+    # EMAIL: contém @
+    if '@' in chave:
+        return 'EMAIL'
+    # CPF: exatamente 11 dígitos
+    if len(apenas_digitos) == 11:
+        return 'CPF'
+    # CNPJ: exatamente 14 dígitos
+    if len(apenas_digitos) == 14:
+        return 'CNPJ'
+    # PHONE: começa com +55 ou +, com 10-11 dígitos
+    if chave.startswith('+55') or (len(apenas_digitos) in (10, 11) and chave.startswith('+')):
+        return 'PHONE'
+    # EVP: UUID format (36 chars: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+    if len(chave) == 36 and re.match(r'^[a-f0-9\-]+$', chave, re.IGNORECASE):
+        return 'EVP'
+    # fallback: assume EVP (chave aleatória) se não bate com nenhum padrão
+    return 'EVP'
+
+
+# ─── CLOUDFLARE R2 — UPLOAD/DOWNLOAD DE ARQUIVOS ──────────────────────────────────
+
+def upload_arquivo_r2(file_obj, chave_arquivo):
+    """
+    Upload arquivo para R2 (se configurado) com fallback para storage local.
+    Retorna {'ok': True, 'chave': ..., 'storage': 'r2'|'local'} sempre.
+    """
+    if os.environ.get('R2_ENABLED') == 'true':
+        try:
+            import requests
+            
+            endpoint = os.environ.get('R2_ENDPOINT', '').rstrip('/')
+            bucket = os.environ.get('R2_BUCKET_NAME')
+            api_token = os.environ.get('R2_API_TOKEN')
+            
+            if endpoint and bucket and api_token:
+                url = f"{endpoint}/{chave_arquivo}"
+                headers = {
+                    'Authorization': f'Bearer {api_token}',
+                    'Content-Type': 'application/octet-stream'
+                }
+                
+                response = requests.put(url, data=file_obj, headers=headers, timeout=10)
+                
+                if response.status_code in [200, 201]:
+                    app.logger.info(f"[R2] ✅ Upload R2: {chave_arquivo}")
+                    return {'ok': True, 'chave': chave_arquivo, 'storage': 'r2'}
+                else:
+                    app.logger.warning(f"[R2] HTTP {response.status_code} - usando fallback local")
+        except Exception as e:
+            app.logger.warning(f"[R2] Erro ({type(e).__name__}) - usando fallback local")
+    
+    # FALLBACK: Upload local
+    try:
+        os.makedirs('/data/uploads', exist_ok=True)
+        caminho_local = f"/data/uploads/{chave_arquivo}".replace('//', '/')
+        os.makedirs(os.path.dirname(caminho_local), exist_ok=True)
+        
+        with open(caminho_local, 'wb') as f:
+            f.write(file_obj.read())
+        
+        app.logger.info(f"[LOCAL] ✅ Upload local: {chave_arquivo}")
+        return {'ok': True, 'chave': chave_arquivo, 'storage': 'local'}
+    except Exception as e:
+        app.logger.error(f"[LOCAL] ❌ Erro upload local: {e}")
+        return {'ok': False, 'erro': str(e), 'storage': 'none'}
+
+def gerar_url_r2(chave_arquivo, expiracao_segundos=86400):
+    """Gera URL para download. R2 se disponível, senão local."""
+    if os.environ.get('R2_ENABLED') == 'true':
+        try:
+            endpoint = os.environ.get('R2_ENDPOINT', '').rstrip('/')
+            if endpoint:
+                return f"{endpoint}/{chave_arquivo}"
+        except:
+            pass
+    
+    # Fallback local
+    return f"/download/{chave_arquivo}"
+
+
+@app.route('/admin/asaas/teste')
+@login_required
+@admin_required
+def asaas_teste():
+    """Testa a conexão com o Asaas (somente leitura - consulta saldo)."""
+    if not asaas_configurado():
+        return jsonify({"ok": False, "erro": "ASAAS_API_KEY não está configurada nas variáveis de ambiente do Railway."}), 400
+    data, status = asaas_request('GET', '/finance/balance')
+    if status == 200:
+        return jsonify({"ok": True, "saldo": data.get('balance'), "ambiente": "produção" if "api.asaas.com" in ASAAS_BASE_URL else "sandbox"})
+    return jsonify({"ok": False, "erro": data.get('_erro') or data.get('errors') or data, "status": status}), 400
+
+
+@app.route('/admin/db/corrigir-operadoras', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def corrigir_operadoras():
+    """Corrige propostas com adm_operadora NULL extraindo a operadora da modalidade.
+    GET = simula (mostra o que faria). POST = aplica e recalcula a comissão."""
+    aplicar = request.method == 'POST'
+    conn = db()
+
+    # Operadoras conhecidas (do recebimento) para casar com o texto da modalidade
+    ops_rows = conn.execute("SELECT DISTINCT operadora FROM recebimento").fetchall()
+    operadoras = [r['operadora'] for r in ops_rows]
+
+    # Propostas com operadora vazia mas com modalidade preenchida
+    alvo = conn.execute("""SELECT * FROM propostas
+        WHERE (adm_operadora IS NULL OR adm_operadora='')
+        AND modalidade IS NOT NULL AND modalidade<>''
+        AND status NOT IN ('Excluída')""").fetchall()
+
+    plano_de = []
+    nao_resolvidas = []
+    for p in alvo:
+        modalidade = p['modalidade'] or ''
+        # Tenta achar uma operadora conhecida dentro do texto da modalidade
+        achou = None
+        modal_norm = _normaliza_op(modalidade)
+        for op in operadoras:
+            op_norm = _normaliza_op(op)
+            if op_norm and (op_norm in modal_norm or modal_norm.startswith(op_norm)):
+                # pega o match mais longo (mais específico)
+                if not achou or len(op_norm) > len(_normaliza_op(achou)):
+                    achou = op
+        if achou:
+            plano_de.append({'id': p['id'], 'cliente': p['razao_social'],
+                             'modalidade_atual': modalidade, 'operadora_detectada': achou})
+        else:
+            nao_resolvidas.append({'id': p['id'], 'cliente': p['razao_social'], 'modalidade': modalidade})
+
+    resultado = {
+        "modo": "APLICADO" if aplicar else "SIMULAÇÃO (nada alterado)",
+        "vao_corrigir": plano_de,
+        "nao_resolvidas": nao_resolvidas,
+        "total_corrigir": len(plano_de),
+    }
+
+    if aplicar and plano_de:
+        corrigidas = []
+        for item in plano_de:
+            pid = item['id']
+            nova_op = item['operadora_detectada']
+            try:
+                # Atualiza a operadora
+                conn.execute("UPDATE propostas SET adm_operadora=? WHERE id=?", (nova_op, pid))
+                # Recalcula a comissão com a operadora correta
+                p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+                u = conn.execute("SELECT regime_base FROM usuarios WHERE id=?", (p['usuario_id'],)).fetchone()
+                regime = (u['regime_base'] if u else None) or 'sem_lead_sem_fixo'
+                tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
+                # Produção acumulada do mês (igual ao recálculo oficial) para nível correto
+                prod_antes = _producao_mes(conn, p['usuario_id'], p['criado_em'], excluir_pid=pid)
+                prod_acum = prod_antes + (p['valor'] or 0)
+                c = calc_comissao(nova_op, regime, prod_acum, p['valor'] or 0, p['modalidade'], tp)
+                conn.execute("""UPDATE propostas SET comissao_total_corretora=?, comissao_consultor=?,
+                    comissao_corretora_liquida=?, regime_aplicado=?, num_parcelas=?, distribuicao_parcelas=? WHERE id=?""",
+                    (c['total_corretora'], c['consultor'], c['liquido'], c['codigo'],
+                     c['num_parcelas'], c['dist_corretora'], pid))
+                conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+                    VALUES (?,?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+                    'Operadora corrigida', 'NULL', nova_op, datetime.now(TZ_SP)))
+                conn.commit()
+                corrigidas.append({'id': pid, 'operadora': nova_op,
+                                   'comissao_corretora': c['total_corretora'], 'comissao_consultor': c['consultor']})
+            except Exception as e:
+                if DB_MODE == 'postgres':
+                    try: conn.rollback()
+                    except Exception: pass
+                corrigidas.append({'id': pid, 'erro': str(e)[:100]})
+        resultado["corrigidas"] = corrigidas
+
+    close_db(conn)
+    return jsonify(resultado)
+
+
+@app.route('/admin/db/detalhes')
+@login_required
+@admin_required
+def db_detalhes():
+    """Mostra QUAIS registros geraram os avisos da validação (sem expor senhas)."""
+    conn = db()
+    out = {}
+
+    # Usuários ativos sem senha (quem não consegue logar)
+    try:
+        rows = conn.execute("SELECT id, nome, email, perfil, token_setup IS NOT NULL as tem_token_setup FROM usuarios WHERE (senha_hash IS NULL OR senha_hash='') AND ativo=1").fetchall()
+        out["usuarios_sem_senha"] = [dict(r) for r in rows]
+    except Exception as e:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        out["usuarios_sem_senha_erro"] = str(e)[:100]
+
+    # Propostas com comissão zerada (operadora/plano sem recebimento)
+    try:
+        rows = conn.execute("""SELECT id, razao_social, adm_operadora, modalidade, tipo_pessoa, valor, status
+            FROM propostas WHERE status NOT IN ('Excluída')
+            AND (comissao_total_corretora IS NULL OR comissao_total_corretora=0)
+            ORDER BY id""").fetchall()
+        out["propostas_comissao_zerada"] = [dict(r) for r in rows]
+    except Exception as e:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        out["propostas_comissao_zerada_erro"] = str(e)[:100]
+
+    # Operadoras distintas que existem em recebimento (já que a tabela operadoras está vazia)
+    try:
+        rows = conn.execute("SELECT DISTINCT operadora FROM recebimento ORDER BY operadora").fetchall()
+        out["operadoras_em_recebimento"] = [r['operadora'] for r in rows]
+    except Exception as e:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+        out["operadoras_erro"] = str(e)[:100]
+
+    close_db(conn)
+    return jsonify(out)
+
+
+@app.route('/admin/db/validar')
+@login_required
+@admin_required
+def db_validar():
+    """Validação completa do banco: tabelas, colunas críticas e integridade referencial."""
+    TABELAS_ESPERADAS = [
+        'usuarios','propostas','parcelas','operadoras','recebimento','repasse_corretor',
+        'historico_proposta','solicitacoes_edicao','comissoes','config','crm_leads',
+        'crm_atividades','etiquetas','lancamentos','niveis','produtos','proposta_etiquetas',
+        'regimes','regras_estorno','repasses','supervisoras','webhook_log','campos_custom',
+    ]
+    COLUNAS_CRITICAS = {
+        'propostas': ['id','usuario_id','razao_social','valor','adm_operadora','status',
+                      'comissao_total_corretora','comissao_consultor','comissao_corretora_liquida',
+                      'contrato_arquivo','comprovante_boleto','anexos'],
+        'usuarios': ['id','email','senha_hash','perfil','ativo'],
+        'parcelas': ['id','proposta_id','valor','status'],
+        'recebimento': ['operadora','plano','total'],
+        'repasse_corretor': ['operadora','plano','modelo','nivel','total','regua','taxa'],
+        'solicitacoes_edicao': ['id','proposta_id','usuario_id','alteracoes','status'],
+    }
+
+    relatorio = {"modo": DB_MODE, "ok": True, "problemas": [], "avisos": [], "tabelas": {}, "integridade": {}}
+    conn = db()
+
+    def _rollback_seguro():
+        """Após erro no Postgres, limpa a transação abortada para os próximos checks."""
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+
+    # 1) Tabelas existem? + contagem de linhas
+    for t in TABELAS_ESPERADAS:
+        try:
+            n = conn.execute(f"SELECT COUNT(*) c FROM {t}").fetchone()['c']
+            relatorio["tabelas"][t] = n
+        except Exception:
+            _rollback_seguro()
+            relatorio["tabelas"][t] = "AUSENTE"
+            relatorio["problemas"].append(f"Tabela ausente ou inacessível: {t}")
+            relatorio["ok"] = False
+
+    # 2) Colunas críticas presentes?
+    for tabela, cols in COLUNAS_CRITICAS.items():
+        if relatorio["tabelas"].get(tabela) == "AUSENTE":
+            continue
+        try:
+            if DB_MODE == 'postgres':
+                rows = conn.execute(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name=%s", (tabela,)).fetchall()
+                existentes = {r['column_name'] for r in rows}
+            else:
+                rows = conn.execute(f"PRAGMA table_info({tabela})").fetchall()
+                existentes = {r['name'] for r in rows}
+            faltando = [c for c in cols if c not in existentes]
+            if faltando:
+                relatorio["problemas"].append(f"{tabela}: colunas faltando → {', '.join(faltando)}")
+                relatorio["ok"] = False
+        except Exception as e:
+            _rollback_seguro()
+            relatorio["avisos"].append(f"Não foi possível checar colunas de {tabela}: {str(e)[:80]}")
+
+    # 3) Integridade referencial
+    try:
+        orfas = conn.execute("""SELECT COUNT(*) c FROM parcelas pa
+            LEFT JOIN propostas p ON p.id=pa.proposta_id WHERE p.id IS NULL""").fetchone()['c']
+        relatorio["integridade"]["parcelas_orfas"] = orfas
+        if orfas > 0:
+            relatorio["avisos"].append(f"{orfas} parcela(s) apontam para proposta inexistente")
+    except Exception as e:
+        _rollback_seguro()
+        relatorio["avisos"].append(f"Check parcelas órfãs falhou: {str(e)[:80]}")
+
+    try:
+        sem_user = conn.execute("""SELECT COUNT(*) c FROM propostas p
+            LEFT JOIN usuarios u ON u.id=p.usuario_id WHERE u.id IS NULL""").fetchone()['c']
+        relatorio["integridade"]["propostas_sem_usuario"] = sem_user
+        if sem_user > 0:
+            relatorio["avisos"].append(f"{sem_user} proposta(s) sem usuário válido")
+    except Exception as e:
+        _rollback_seguro()
+        relatorio["avisos"].append(f"Check propostas sem usuário falhou: {str(e)[:80]}")
+
+    # 4) Usuários sem senha (não conseguem logar)
+    try:
+        sem_senha = conn.execute("SELECT COUNT(*) c FROM usuarios WHERE (senha_hash IS NULL OR senha_hash='') AND ativo=1").fetchone()['c']
+        relatorio["integridade"]["usuarios_ativos_sem_senha"] = sem_senha
+        if sem_senha > 0:
+            relatorio["avisos"].append(f"{sem_senha} usuário(s) ativo(s) sem senha definida")
+    except Exception as e:
+        _rollback_seguro()
+        relatorio["avisos"].append(f"Check usuários sem senha falhou: {str(e)[:80]}")
+
+    # 5) Propostas com comissão zerada (possível erro de cálculo)
+    try:
+        com_zero = conn.execute("""SELECT COUNT(*) c FROM propostas
+            WHERE status NOT IN ('Excluída') AND (comissao_total_corretora IS NULL OR comissao_total_corretora=0)""").fetchone()['c']
+        relatorio["integridade"]["propostas_comissao_zerada"] = com_zero
+        if com_zero > 0:
+            relatorio["avisos"].append(f"{com_zero} proposta(s) ativa(s) com comissão da corretora zerada (verificar cadastro de recebimento)")
+    except Exception as e:
+        _rollback_seguro()
+        relatorio["avisos"].append(f"Check comissão zerada falhou: {str(e)[:80]}")
+
+    close_db(conn)
+    relatorio["resumo"] = (
+        "Banco íntegro." if relatorio["ok"] and not relatorio["avisos"]
+        else ("Estrutura OK, com avisos." if relatorio["ok"] else "PROBLEMAS ESTRUTURAIS encontrados.")
+    )
+    return jsonify(relatorio)
+
+
+@app.route('/admin/asaas/diag')
+@login_required
+@admin_required
+def asaas_diag():
+    """Diagnóstico do Asaas — mostra o estado da chave SEM expô-la, e o erro real."""
+    raw = os.environ.get('ASAAS_API_KEY', '')
+    info = {
+        "variavel_existe": bool(raw),
+        "comprimento": len(raw),
+        "comeca_com_cifrao": raw.startswith('$') if raw else False,
+        "comeca_com_aspas": (raw.startswith('"') or raw.startswith("'")) if raw else False,
+        "prefixo_visivel": (raw[:10] + '...') if len(raw) > 10 else raw,
+        "sufixo_visivel": ('...' + raw[-6:]) if len(raw) > 16 else '',
+        "tem_espacos_nas_bordas": raw != raw.strip() if raw else False,
+        "tem_quebra_de_linha": ('\n' in raw or '\r' in raw) if raw else False,
+        "tem_char_nao_ascii": any(ord(c) > 127 for c in raw) if raw else False,
+        "chave_processada_prefixo": (ASAAS_API_KEY[:10] + '...') if len(ASAAS_API_KEY) > 10 else ASAAS_API_KEY,
+        "chave_processada_sufixo": ('...' + ASAAS_API_KEY[-6:]) if len(ASAAS_API_KEY) > 16 else '',
+        "chave_processada_comprimento": len(ASAAS_API_KEY),
+        "ambiente_detectado": "produção" if "api.asaas.com" in ASAAS_BASE_URL else "sandbox",
+        "base_url": ASAAS_BASE_URL,
+    }
+    # Testa a conexão de fato
+    if asaas_configurado():
+        data, status = asaas_request('GET', '/finance/balance')
+        info["conexao_status_http"] = status
+        if status == 200:
+            info["conexao"] = "OK"
+            info["saldo"] = data.get('balance')
+        else:
+            info["conexao"] = "FALHOU"
+            info["erro_asaas"] = data.get('_erro') or data.get('errors') or str(data)[:300]
+    else:
+        info["conexao"] = "chave vazia após processamento"
+    return jsonify(info)
+
+
+@app.route('/admin/asaas/testar-chave', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def asaas_testar_chave():
+    """Testa QUALQUER chave Asaas ao vivo, sem precisar salvar variável/deploy.
+    Uso: cole a chave no campo e veja na hora se funciona.
+    GET mostra o formulário; POST testa a chave enviada."""
+    if request.method == 'GET':
+        return """
+        <html><head><meta charset="utf-8"><title>Testar Chave Asaas</title>
+        <style>
+            body{font-family:system-ui;max-width:760px;margin:40px auto;padding:0 20px;background:#0f1117;color:#e6e6e6}
+            h2{color:#1fd8a4}
+            textarea{width:100%;height:120px;padding:12px;font-family:monospace;font-size:13px;
+                     border:1px solid #333;border-radius:8px;background:#1a1d27;color:#fff;box-sizing:border-box}
+            button{margin-top:12px;padding:12px 28px;background:#1fd8a4;color:#000;border:none;
+                   border-radius:8px;font-weight:700;font-size:15px;cursor:pointer}
+            button:hover{opacity:.9}
+            #resultado{margin-top:24px;padding:16px;border-radius:8px;white-space:pre-wrap;
+                       font-family:monospace;font-size:13px;background:#1a1d27;border:1px solid #333;display:none}
+            .ok{border-color:#1fd8a4 !important;color:#1fd8a4}
+            .erro{border-color:#ff5470 !important;color:#ff5470}
+            label{font-size:14px;color:#aaa}
+        </style></head><body>
+        <h2>Testar Chave Asaas (ao vivo)</h2>
+        <p style="color:#aaa">Cole a chave da API do Asaas abaixo (com ou sem o $ na frente) e clique em testar.
+        Isto testa direto contra o Asaas <b>sem salvar nada</b> — só pra confirmar se a chave é válida.</p>
+        <label>Chave da API:</label>
+        <textarea id="chave" placeholder="aact_prod_..."></textarea>
+        <button onclick="testar()">Testar agora</button>
+        <div id="resultado"></div>
+        <script>
+        async function testar(){
+            const chave = document.getElementById('chave').value.trim();
+            const box = document.getElementById('resultado');
+            box.style.display='block'; box.className=''; box.textContent='Testando contra o Asaas...';
+            try {
+                const r = await fetch('/admin/asaas/testar-chave', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({chave: chave})
+                });
+                const d = await r.json();
+                box.className = d.valida ? 'ok' : 'erro';
+                box.textContent = JSON.stringify(d, null, 2);
+            } catch(e){ box.className='erro'; box.textContent='Erro: '+e; }
+        }
+        </script>
+        </body></html>
+        """
+
+    # POST: testa a chave enviada — TESTA COM E SEM o cifrão, para descobrir qual o Asaas aceita
+    d = request.get_json(silent=True) or {}
+    chave_original = (d.get('chave') or '').strip().strip('"').strip("'")
+
+    if not chave_original:
+        return jsonify({"valida": False, "erro": "Nenhuma chave informada"})
+
+    def _testa(chave):
+        """Testa uma variação da chave contra o Asaas."""
+        if not chave:
+            return {"valida": False, "erro": "vazia"}
+        base = 'https://api.asaas.com/v3' if 'aact_prod' in chave else 'https://api-sandbox.asaas.com/v3'
+        headers = {
+            "Content-Type": "application/json",
+            "access_token": chave,
+            "User-Agent": "JOB-Serenus/1.0",
+        }
+        r_out = {
+            "comprimento": len(chave),
+            "prefixo": chave[:18] + '...',
+            "comeca_com_cifrao": chave.startswith('$'),
+        }
+        try:
+            r = _requests.get(f"{base}/finance/balance", headers=headers, timeout=20)
+            r_out["status_http"] = r.status_code
+            try:
+                body = r.json()
+            except Exception:
+                body = {"_raw": r.text[:200]}
+            if r.status_code == 200:
+                r_out["valida"] = True
+                r_out["saldo"] = body.get('balance')
+            else:
+                r_out["valida"] = False
+                r_out["erro_asaas"] = body.get('errors') or body
+        except Exception as e:
+            r_out["valida"] = False
+            r_out["erro"] = str(e)[:150]
+        return r_out
+
+    # Prepara as duas variações
+    chave_sem = chave_original[1:] if chave_original.startswith('$') else chave_original
+    chave_com = chave_original if chave_original.startswith('$') else ('$' + chave_original)
+
+    res_sem = _testa(chave_sem)
+    res_com = _testa(chave_com)
+
+    valida_geral = res_sem.get('valida') or res_com.get('valida')
+    if res_sem.get('valida'):
+        msg = "✅ CHAVE VÁLIDA — use ela SEM o cifrão ($) no Railway."
+    elif res_com.get('valida'):
+        msg = "✅ CHAVE VÁLIDA — use ela COM o cifrão ($) no Railway! (o $ faz parte da chave)"
+    else:
+        msg = "❌ Ambas as variações falharam. A chave foi revogada/expirada no Asaas, OU a conta tem restrição de IP/segurança ativa."
+
+    return jsonify({
+        "valida": valida_geral,
+        "mensagem": msg,
+        "teste_SEM_cifrao": res_sem,
+        "teste_COM_cifrao": res_com,
+    })
+
+
+
+
+@app.route('/api/caixa-empresa')
+@login_required
+@admin_required
+def api_caixa_empresa():
+    """Consolida dados financeiros da conta Asaas: saldo, extrato e resumo de cobranças.
+    Somente leitura. Usado pelo Caixa da Empresa no fluxo de caixa."""
+    if not asaas_configurado():
+        return jsonify({"ok": False, "erro": "Asaas não configurado. No Railway, a variável ASAAS_API_KEY precisa conter a chave que começa com 'aact_prod_' SEM o cifrão ($) na frente. Edite a variável no painel do serviço e remova o $ inicial."}), 400
+
+    resultado = {"ok": True, "ambiente": "produção" if "api.asaas.com" in ASAAS_BASE_URL else "sandbox"}
+
+    # 1) Saldo atual da conta
+    saldo_data, st = asaas_request('GET', '/finance/balance')
+    resultado['saldo'] = saldo_data.get('balance', 0) if st == 200 else None
+    if st != 200:
+        resultado['saldo_erro'] = saldo_data.get('_erro') or saldo_data.get('errors')
+
+    # 2) Extrato financeiro (entradas e saídas) — últimos lançamentos
+    #    Filtro opcional por período via query string (?inicio=YYYY-MM-DD&fim=YYYY-MM-DD)
+    inicio = request.args.get('inicio', '')
+    fim = request.args.get('fim', '')
+    q_ext = '/financialTransactions?limit=50&order=desc'
+    if inicio: q_ext += f'&startDate={inicio}'
+    if fim:    q_ext += f'&finishDate={fim}'
+    ext_data, st_ext = asaas_request('GET', q_ext)
+    extrato = []
+    if st_ext == 200 and isinstance(ext_data.get('data'), list):
+        for t in ext_data['data']:
+            extrato.append({
+                'data': t.get('date', ''),
+                'valor': t.get('value', 0),
+                'saldo': t.get('balance', 0),
+                'tipo': t.get('type', ''),
+                'descricao': t.get('description', '') or _traduz_tipo_asaas(t.get('type', '')),
+            })
+    else:
+        resultado['extrato_erro'] = ext_data.get('_erro') or ext_data.get('errors')
+    resultado['extrato'] = extrato
+
+    # 3) Resumo de cobranças: total recebido, pendente, vencido
+    hoje = datetime.now(TZ_SP).strftime('%Y-%m-%d')
+    recebidas, st1 = asaas_request('GET', '/payments?status=RECEIVED&limit=1')
+    confirmadas, st2 = asaas_request('GET', '/payments?status=CONFIRMED&limit=1')
+    pendentes, st3 = asaas_request('GET', '/payments?status=PENDING&limit=1')
+    vencidas, st4 = asaas_request('GET', '/payments?status=OVERDUE&limit=1')
+    resultado['cobrancas'] = {
+        'recebidas_qtd': recebidas.get('totalCount', 0) if st1 == 200 else 0,
+        'confirmadas_qtd': confirmadas.get('totalCount', 0) if st2 == 200 else 0,
+        'pendentes_qtd': pendentes.get('totalCount', 0) if st3 == 200 else 0,
+        'vencidas_qtd': vencidas.get('totalCount', 0) if st4 == 200 else 0,
+    }
+
+    return jsonify(resultado)
+
+
+def _traduz_tipo_asaas(tipo):
+    """Traduz o tipo de transação financeira do Asaas para português."""
+    mapa = {
+        'PAYMENT_RECEIVED': 'Cobrança recebida',
+        'PAYMENT_CONFIRMED': 'Cobrança confirmada',
+        'TRANSFER': 'Transferência enviada',
+        'PIX_TRANSACTION_DEBIT': 'PIX enviado',
+        'PIX_TRANSACTION_CREDIT': 'PIX recebido',
+        'BANK_SLIP_FEE': 'Taxa de boleto',
+        'TRANSFER_FEE': 'Taxa de transferência',
+        'PAYMENT_FEE': 'Taxa de cobrança',
+        'REFUND': 'Estorno',
+        'CHARGEBACK': 'Chargeback',
+        'CREDIT': 'Crédito',
+        'DEBIT': 'Débito',
+    }
+    return mapa.get(tipo, tipo.replace('_', ' ').title() if tipo else 'Lançamento')
+
+
+@app.route('/admin/emergency/fix-recebimento', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def fix_recebimento():
+    """Emergência: recriar tabela recebimento se deletada."""
+    try:
+        conn = db()
+        conn.execute("""CREATE TABLE IF NOT EXISTS recebimento (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operadora TEXT NOT NULL, obs TEXT DEFAULT '', plano TEXT NOT NULL,
+            total REAL DEFAULT 0,
+            UNIQUE(operadora, obs, plano)
+        )""")
+        # Inserir dados padrão
+        dados = [
+            ('SulAmérica', '', 'PME', 3580),
+            ('SulAmérica', '', 'Executivo', 4500),
+            ('Amil', '', 'PME', 2800),
+            ('Amil', '', 'Executivo', 3500),
+            ('Med Senior SP/RJ', '', 'PF', 1200),
+            ('Vera Cruz', '', 'PME', 2500),
+            ('Vera Cruz', '', 'Executivo', 3200),
+            ('Bradesco Saúde', '', 'PME', 3000),
+            ('UNIMED', '', 'PME', 2900),
+        ]
+        for op, obs, plano, total in dados:
+            conn.execute("""INSERT OR IGNORE INTO recebimento (operadora,obs,plano,total) 
+                           VALUES (?,?,?,?)""", (op, obs, plano, total))
+        conn.commit()
+        close_db(conn)
+        return jsonify({'ok': True, 'msg': 'Tabela recebimento recriada com sucesso'}), 200
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+@app.route('/admin/emergency/limpar-duplicatas', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def limpar_duplicatas():
+    """Emergência: remover propostas duplicadas."""
+    try:
+        conn = db()
+        # Manter apenas a primeira de cada cliente
+        conn.execute("""DELETE FROM propostas WHERE id NOT IN (
+            SELECT MIN(id) FROM propostas GROUP BY razao_social
+        )""")
+        conn.commit()
+        count = conn.total_changes
+        close_db(conn)
+        return jsonify({'ok': True, 'msg': f'Removidas {count} duplicatas'}), 200
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+@app.route('/admin/emergency/restaurar-dados', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def restaurar_dados():
+    """Emergência: restaurar as 5 propostas perdidas."""
+    try:
+        conn = db()
+        # Usuários
+        conn.execute("""INSERT OR IGNORE INTO usuarios (id, nome, email, perfil, regime_base, ativo) 
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                     (1, 'Guilherme Santos', 'guilherme@serenuscorretora.com.br', 'admin', '', 1))
+        conn.execute("""INSERT OR IGNORE INTO usuarios (id, nome, email, perfil, regime_base, ativo) 
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                     (2, 'Bianca Sampaio', 'bianca@serenuscorretora.com.br', 'consultor', 'com_fixo_lead', 1))
+        # Propostas
+        propostas = [
+            (1, 'Guilherme Santos', 'GC CALDEIRARIA & SERVICOS LTDA', 'PJ', 'SulAmérica PME', 'PME PORTE 1', 'Enfermaria', 'Sem', 1, 3580, '2026-06-18'),
+            (2, 'Bianca Sampaio', 'MAURO JUAREZ TULESKI', 'PF', 'Med Senior SP/RJ', 'Saúde', 'Enfermaria', 'Sem', 1, 767.95, '2026-06-18'),
+            (2, 'Bianca Sampaio', 'ARLETE KAZUE MORI TULESKI', 'PF', 'Med Senior SP/RJ', 'Saúde', 'Enfermaria', 'Sem', 1, 767.95, '2026-06-18'),
+            (1, 'Guilherme Santos', 'WILLAMI HANDERSON DE OLIVEIRA', 'PJ', 'Amil PME', 'PME PORTE 1', 'Enfermaria', 'Sem', 1, 2800, '2026-06-18'),
+            (1, 'Guilherme Santos', 'RANIELLY VICTORIA SILVA DE PAIVA', 'PJ', 'Vera Cruz PME', 'PME PORTE 1', 'Enfermaria', 'Sem', 1, 2500, '2026-06-18'),
+        ]
+        for u, c, r, t, m, tc, a, f, v, val, vig in propostas:
+            conn.execute("""INSERT INTO propostas (usuario_id, consultor, razao_social, tipo_pessoa, modalidade, 
+                           tipo_contrato, acomodacao, fator_moderador, total_vidas, valor, vigencia, status, criado_em)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Ativo', CURRENT_TIMESTAMP)""",
+                         (u, c, r, t, m, tc, a, f, v, val, vig))
+        conn.commit()
+        close_db(conn)
+        return jsonify({'ok': True, 'msg': '5 propostas restauradas com sucesso'}), 200
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+@app.route('/admin/backup/exportar-json', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def backup_exportar_json():
+    """Exporta banco inteiro como JSON para backup/restauração."""
+    try:
+        conn = db()
+        
+        # Exportar todas as tabelas críticas
+        propostas = conn.execute("SELECT * FROM propostas ORDER BY id").fetchall()
+        parcelas = conn.execute("SELECT * FROM parcelas ORDER BY id").fetchall()
+        usuarios = conn.execute("SELECT * FROM usuarios ORDER BY id").fetchall()
+        operadoras = conn.execute("SELECT * FROM operadoras ORDER BY id").fetchall()
+        recebimento = conn.execute("SELECT * FROM recebimento ORDER BY id").fetchall()
+        repasse_corretor = conn.execute("SELECT * FROM repasse_corretor ORDER BY id").fetchall()
+        
+        backup = {
+            'versao': 'v14',
+            'data_backup': datetime.now(TZ_SP).isoformat(),
+            'total_propostas': len(propostas),
+            'total_parcelas': len(parcelas),
+            'total_usuarios': len(usuarios),
+            'propostas': [dict(p) for p in propostas],
+            'parcelas': [dict(p) for p in parcelas],
+            'usuarios': [dict(u) for u in usuarios],
+            'operadoras': [dict(o) for o in operadoras],
+            'recebimento': [dict(r) for r in recebimento],
+            'repasse_corretor': [dict(r) for r in repasse_corretor],
+        }
+        
+        close_db(conn)
+        
+        # Salvar arquivo com timestamp
+        os.makedirs('/data/backups', exist_ok=True)
+        timestamp = datetime.now(TZ_SP).strftime('%Y%m%d-%H%M%S')
+        backup_file = f"/data/backups/backup-{timestamp}.json"
+        
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            json.dump(backup, f, indent=2, default=str, ensure_ascii=False)
+        
+        print(f"[BACKUP] ✅ Exportado: {backup_file} ({len(propostas)} propostas)")
+        
+        return send_file(
+            backup_file,
+            as_attachment=True,
+            download_name=f"JOB-Serenus-Backup-{timestamp}.json"
+        )
+    except Exception as e:
+        print(f"[BACKUP] ❌ Erro: {e}")
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+@app.route('/admin/backup/listar', methods=['GET'])
+@login_required
+@admin_required
+def backup_listar():
+    """Lista todos os backups disponíveis em /data/backups."""
+    try:
+        backup_dir = '/data/backups'
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        backups = []
+        for arquivo in sorted(os.listdir(backup_dir), reverse=True):
+            if arquivo.endswith('.json'):
+                caminho = os.path.join(backup_dir, arquivo)
+                tamanho = os.path.getsize(caminho) / (1024*1024)  # MB
+                data_mod = datetime.fromtimestamp(os.path.getmtime(caminho), TZ_SP)
+                backups.append({
+                    'arquivo': arquivo,
+                    'tamanho_mb': f"{tamanho:.2f}",
+                    'data': data_mod.isoformat(),
+                })
+        
+        return jsonify({'ok': True, 'backups': backups})
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+@app.route('/admin/backup/restaurar/<arquivo>', methods=['POST'])
+@login_required
+@admin_required
+def backup_restaurar(arquivo):
+    """Restaura banco a partir de backup JSON."""
+    try:
+        if '..' in arquivo or '/' in arquivo:
+            return jsonify({'ok': False, 'erro': 'Arquivo inválido'}), 400
+        
+        backup_file = f"/data/backups/{arquivo}"
+        if not os.path.exists(backup_file):
+            return jsonify({'ok': False, 'erro': 'Arquivo não encontrado'}), 404
+        
+        with open(backup_file, 'r', encoding='utf-8') as f:
+            backup = json.load(f)
+        
+        conn = db()
+        
+        # Limpar tabelas existentes
+        tabelas = ['propostas', 'parcelas', 'usuarios', 'operadoras', 'recebimento', 'repasse_corretor']
+        for tabela in tabelas:
+            conn.execute(f"DELETE FROM {tabela}")
+        
+        # Restaurar dados
+        for usuario in backup.get('usuarios', []):
+            cols = ', '.join(usuario.keys())
+            vals = ', '.join(['?' for _ in usuario.values()])
+            conn.execute(f"INSERT INTO usuarios ({cols}) VALUES ({vals})", tuple(usuario.values()))
+        
+        for operadora in backup.get('operadoras', []):
+            cols = ', '.join(operadora.keys())
+            vals = ', '.join(['?' for _ in operadora.values()])
+            conn.execute(f"INSERT INTO operadoras ({cols}) VALUES ({vals})", tuple(operadora.values()))
+        
+        for proposta in backup.get('propostas', []):
+            cols = ', '.join(proposta.keys())
+            vals = ', '.join(['?' for _ in proposta.values()])
+            conn.execute(f"INSERT INTO propostas ({cols}) VALUES ({vals})", tuple(proposta.values()))
+        
+        for parcela in backup.get('parcelas', []):
+            cols = ', '.join(parcela.keys())
+            vals = ', '.join(['?' for _ in parcela.values()])
+            conn.execute(f"INSERT INTO parcelas ({cols}) VALUES ({vals})", tuple(parcela.values()))
+        
+        for receb in backup.get('recebimento', []):
+            cols = ', '.join(receb.keys())
+            vals = ', '.join(['?' for _ in receb.values()])
+            conn.execute(f"INSERT INTO recebimento ({cols}) VALUES ({vals})", tuple(receb.values()))
+        
+        for repasse in backup.get('repasse_corretor', []):
+            cols = ', '.join(repasse.keys())
+            vals = ', '.join(['?' for _ in repasse.values()])
+            conn.execute(f"INSERT INTO repasse_corretor ({cols}) VALUES ({vals})", tuple(repasse.values()))
+        
+        conn.commit()
+        close_db(conn)
+        
+        print(f"[BACKUP] ✅ Restaurado: {arquivo}")
+        return jsonify({'ok': True, 'msg': f"Restaurado {backup['total_propostas']} propostas"})
+    except Exception as e:
+        print(f"[BACKUP] ❌ Erro na restauração: {e}")
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+@app.route('/admin/backup/auto-agendar', methods=['POST'])
+@login_required
+@admin_required
+def backup_agendar():
+    """Agenda backup automático diariamente às 22:00 (SP)."""
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        
+        def fazer_backup():
+            """Função que roda no agendador."""
+            try:
+                conn = db()
+                propostas = conn.execute("SELECT * FROM propostas").fetchall()
+                parcelas = conn.execute("SELECT * FROM parcelas").fetchall()
+                usuarios = conn.execute("SELECT * FROM usuarios").fetchall()
+                operadoras = conn.execute("SELECT * FROM operadoras").fetchall()
+                recebimento = conn.execute("SELECT * FROM recebimento").fetchall()
+                repasse_corretor = conn.execute("SELECT * FROM repasse_corretor").fetchall()
+                
+                backup = {
+                    'versao': 'v14',
+                    'data_backup': datetime.now(TZ_SP).isoformat(),
+                    'total_propostas': len(propostas),
+                    'propostas': [dict(p) for p in propostas],
+                    'parcelas': [dict(p) for p in parcelas],
+                    'usuarios': [dict(u) for u in usuarios],
+                    'operadoras': [dict(o) for o in operadoras],
+                    'recebimento': [dict(r) for r in recebimento],
+                    'repasse_corretor': [dict(r) for r in repasse_corretor],
+                }
+                
+                close_db(conn)
+                
+                os.makedirs('/data/backups', exist_ok=True)
+                timestamp = datetime.now(TZ_SP).strftime('%Y%m%d-%H%M%S')
+                backup_file = f"/data/backups/backup-{timestamp}.json"
+                
+                with open(backup_file, 'w', encoding='utf-8') as f:
+                    json.dump(backup, f, indent=2, default=str, ensure_ascii=False)
+                
+                print(f"[BACKUP AUTO] ✅ {backup_file}")
+            except Exception as e:
+                print(f"[BACKUP AUTO] ❌ {e}")
+        
+        # Agendar
+        if not hasattr(app, 'scheduler'):
+            app.scheduler = BackgroundScheduler(timezone=TZ_SP)
+            app.scheduler.add_job(fazer_backup, 'cron', hour=22, minute=0)  # 22:00 SP
+            app.scheduler.start()
+            print("[SCHEDULER] ✅ Backup automático agendado para 22:00 (São Paulo)")
+        
+        return jsonify({'ok': True, 'msg': 'Backup automático agendado para 22:00 diariamente'})
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+@app.route('/admin/emergency/init-db', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def emergency_init_db():
+    """Inicializa banco de dados (cria todas as tabelas)."""
+    try:
+        print(f"\n[INIT-DB] DB_MODE: {DB_MODE}")
+        print(f"[INIT-DB] DATABASE_URL: {os.environ.get('DATABASE_URL', 'não setada')[:50]}...")
+        
+        init_db()
+        
+        print(f"[INIT-DB] ✅ Sucesso!")
+        return jsonify({
+            'ok': True, 
+            'msg': 'Banco inicializado com sucesso!',
+            'db_mode': DB_MODE,
+            'database_url_presente': bool(os.environ.get('DATABASE_URL'))
+        })
+    except Exception as e:
+        print(f"[INIT-DB] ❌ Erro: {e}")
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+@app.route('/download/<path:chave_arquivo>')
+def download_arquivo(chave_arquivo):
+    """Serve arquivos armazenados localmente."""
+    try:
+        caminho = f"/data/uploads/{chave_arquivo}".replace('//', '/')
+        
+        # Validar que o caminho está dentro de /data/uploads
+        if not os.path.abspath(caminho).startswith('/data/uploads'):
+            return jsonify({'erro': 'Acesso negado'}), 403
+        
+        if not os.path.exists(caminho):
+            return jsonify({'erro': 'Arquivo não encontrado'}), 404
+        
+        from flask import send_file
+        return send_file(caminho, as_attachment=True)
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500
+@login_required
+@admin_required
+def testar_r2():
+    """Testa e mostra status de R2 + fallback local."""
+    try:
+        import io
+        
+        # Testar upload
+        arquivo_teste = io.BytesIO(b"Teste - " + str(datetime.now(TZ_SP)).encode())
+        resultado = upload_arquivo_r2(arquivo_teste, "teste/test.txt")
+        
+        return jsonify({
+            'ok': True,
+            'msg': '✅ Upload funcionando!',
+            'storage_usado': resultado.get('storage', 'desconhecido'),
+            'config_r2': {
+                'enabled': os.environ.get('R2_ENABLED') == 'true',
+                'endpoint': os.environ.get('R2_ENDPOINT', '')[:40] + '...' if os.environ.get('R2_ENDPOINT') else 'não configurado',
+                'bucket': os.environ.get('R2_BUCKET_NAME', 'não configurado')
+            },
+            'fallback_local': 'ativado automaticamente',
+            'nota': 'Se R2 falhar, uploads vão para /data/uploads (local)'
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+@app.route('/admin/testar-smtp')
+@login_required
+@admin_required
+def testar_smtp():
+    """Testa envio de email via API do Brevo."""
+    import urllib.request, json as _json
+    api_key  = os.environ.get('BREVO_API_KEY','')
+    remetente = os.environ.get('SMTP_USER','noreply@serenuscorretora.com.br')
+    destinatario = session.get('email') or remetente
+    resultado = {'api': 'Brevo HTTP API', 'remetente': remetente, 'etapas': []}
+    if not api_key:
+        resultado['erro'] = 'BREVO_API_KEY não configurada no Railway.'
+        return jsonify(resultado)
+    try:
+        resultado['etapas'].append('Chamando API Brevo...')
+        payload = _json.dumps({
+            "sender":  {"name": "JOB Serenus", "email": remetente},
+            "to":      [{"email": remetente}],
+            "subject": "JOB · Teste de email",
+            "htmlContent": "<p>✅ Email de teste do JOB Serenus funcionando!</p>"
+        }).encode('utf-8')
+        req = urllib.request.Request(
+            "https://api.brevo.com/v3/smtp/email",
+            data=payload,
+            headers={"Content-Type":"application/json","api-key":api_key},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = resp.read().decode()
+            resultado['etapas'].append(f'✅ HTTP {resp.status} — Email enviado para {remetente}')
+            resultado['ok'] = True
+            resultado['resposta'] = body
+    except Exception as e:
+        resultado['etapas'].append(f'❌ Erro: {e}')
+        resultado['erro'] = str(e)
+    return jsonify(resultado)
+
+@app.route('/admin/emergency/diag-anexos')
+@login_required
+@admin_required
+def diag_anexos():
+    """Diagnóstico: mostra o que está no disco vs o que o banco espera."""
+    import os
+    # Lista arquivos físicos no UPLOAD_FOLDER
+    arquivos_disco = []
+    try:
+        arquivos_disco = sorted(os.listdir(UPLOAD_FOLDER))
+    except Exception as e:
+        arquivos_disco = [f"ERRO ao listar: {e}"]
+
+    # Cruza com o que o banco aponta
+    conn = db()
+    props = conn.execute("SELECT id, razao_social, comprovante_boleto, contrato_arquivo, anexos FROM propostas ORDER BY id").fetchall()
+    close_db(conn)
+
+    detalhe = []
+    for p in props:
+        itens = []
+        for campo in ('comprovante_boleto', 'contrato_arquivo'):
+            nome = p[campo]
+            if nome:
+                caminho = os.path.join(UPLOAD_FOLDER, os.path.basename(nome))
+                itens.append({"campo": campo, "nome": nome, "existe_no_disco": os.path.exists(caminho)})
+        try:
+            extras = json.loads(p['anexos']) if p['anexos'] else []
+        except Exception:
+            extras = []
+        for nome in extras:
+            if nome:
+                caminho = os.path.join(UPLOAD_FOLDER, os.path.basename(nome))
+                itens.append({"campo": "anexo_extra", "nome": nome, "existe_no_disco": os.path.exists(caminho)})
+        if itens:
+            detalhe.append({"proposta_id": p['id'], "cliente": p['razao_social'], "anexos": itens})
+
+    return jsonify({
+        "upload_folder": UPLOAD_FOLDER,
+        "upload_folder_existe": os.path.isdir(UPLOAD_FOLDER),
+        "total_arquivos_no_disco": len([a for a in arquivos_disco if not a.startswith('ERRO')]),
+        "arquivos_no_disco": arquivos_disco,
+        "propostas_com_anexos": detalhe,
+    })
+
+@app.route('/admin/emergency/status')
+@login_required
+@admin_required
+def emergency_status():
+    """Diagnóstico de emergência — mostra qual banco está sendo usado e dados dentro dele."""
+    import os
+    conn = db()
+    n_props = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
+    n_parcelas = conn.execute("SELECT COUNT(*) c FROM parcelas").fetchone()['c']
+    props = conn.execute("SELECT id, razao_social, adm_operadora, valor FROM propostas ORDER BY id").fetchall()
+    close_db(conn)
+    
+    db_path = os.path.join(DATA_DIR, 'job.db')
+    return jsonify({
+        "data_dir": DATA_DIR,
+        "db_path": db_path,
+        "db_exists": os.path.exists(db_path),
+        "db_size_kb": round(os.path.getsize(db_path) / 1024, 1) if os.path.exists(db_path) else 0,
+        "propostas_count": n_props,
+        "parcelas_count": n_parcelas,
+        "propostas": [dict(p) for p in props[:10]],
+    })
+
+@app.route('/admin/emergency/carregar-backup-master', methods=['POST'])
+@login_required
+@admin_required
+def emergency_carregar_backup():
+    """Carrega o backup master com 5 propostas."""
+    import os
+    import shutil
+    
+    backup_master = os.path.join(os.path.expanduser("~"), "JOB_Serenus_Dados", "backups", "job_backup_20260616_212404.db")
+    db_path = os.path.join(DATA_DIR, 'job.db')
+    
+    if not os.path.exists(backup_master):
+        return jsonify({"ok": False, "erro": "Backup master não encontrado"}), 500
+    
+    try:
+        shutil.copy2(backup_master, db_path)
+        
+        conn = sqlite3.connect(db_path)
+        n_props = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
+        n_parcs = conn.execute("SELECT COUNT(*) c FROM parcelas").fetchone()['c']
+        close_db(conn)
+        
+        return jsonify({
+            "ok": True, 
+            "msg": f"✅ Backup carregado: {n_props} propostas, {n_parcs} parcelas",
+            "propostas": n_props,
+            "parcelas": n_parcs,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)}), 500
+
+
+    """Diagnóstico de emergência — mostra qual banco está sendo usado e dados dentro dele."""
+    import os
+    conn = db()
+    n_props = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
+    n_parcelas = conn.execute("SELECT COUNT(*) c FROM parcelas").fetchone()['c']
+    props = conn.execute("SELECT id, razao_social, adm_operadora, valor FROM propostas ORDER BY id").fetchall()
+    close_db(conn)
+    
+    db_path = os.path.join(DATA_DIR, 'job.db')
+    return jsonify({
+        "data_dir": DATA_DIR,
+        "db_path": db_path,
+        "db_exists": os.path.exists(db_path),
+        "db_size_kb": round(os.path.getsize(db_path) / 1024, 1) if os.path.exists(db_path) else 0,
+        "propostas_count": n_props,
+        "parcelas_count": n_parcelas,
+        "propostas": [dict(p) for p in props[:10]],
+    })
+
+@app.route('/admin/emergency/exportar-json')
+@login_required
+@admin_required
+def emergency_exportar():
+    """Exporta TODAS as propostas e parcelas em JSON para backup emergencial."""
+    conn = db()
+    props = conn.execute("SELECT * FROM propostas ORDER BY id").fetchall()
+    parc = conn.execute("SELECT * FROM parcelas ORDER BY proposta_id, numero").fetchall()
+    close_db(conn)
+    
+    data = {
+        "timestamp": datetime.now(TZ_SP).isoformat(),
+        "propostas": [dict(p) for p in props],
+        "parcelas": [dict(p) for p in parc],
+    }
+    resp = jsonify(data)
+    resp.headers['Content-Disposition'] = f'attachment; filename="job_emergencia_{datetime.now(TZ_SP).strftime("%Y%m%d_%H%M%S")}.json"'
+    return resp
+
+
+@login_required
+@admin_required
+def parcela_pagar_asaas(pid):
+    """Cria uma transferência PIX real via Asaas para pagar a comissão do consultor."""
+    if not asaas_configurado():
+        return jsonify({"ok": False, "erro": "Asaas não configurado. Adicione ASAAS_API_KEY no Railway."}), 400
+
+    conn = db()
+    parc = conn.execute("""SELECT pa.*, p.consultor, p.usuario_id, p.razao_social
+        FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id WHERE pa.id=?""", (pid,)).fetchone()
+    if not parc:
+        close_db(conn); return jsonify({"ok": False, "erro": "Parcela não encontrada"}), 404
+    if parc['status'] != 'Liberado para o corretor':
+        close_db(conn); return jsonify({"ok": False, "erro": "Só é possível pagar parcelas liberadas para o corretor"}), 400
+    if parc['asaas_transfer_id']:
+        close_db(conn); return jsonify({"ok": False, "erro": "Esta parcela já tem um pagamento Asaas iniciado"}), 400
+
+    consultor = conn.execute("SELECT chave_pix, nome FROM usuarios WHERE id=?", (parc['usuario_id'],)).fetchone()
+    chave_pix = (consultor['chave_pix'] if consultor else '') or ''
+    if not chave_pix.strip():
+        close_db(conn); return jsonify({"ok": False, "erro": f"{parc['consultor']} não tem chave PIX cadastrada. Cadastre em Usuários."}), 400
+
+    tipo_chave = asaas_detectar_tipo_chave(chave_pix)
+    valor = round(float(parc['valor']), 2)
+
+    payload = {
+        "value": valor,
+        "pixAddressKey": chave_pix.strip(),
+        "pixAddressKeyType": tipo_chave,
+        "description": f"Comissão {parc['razao_social']} - Parcela {parc['numero']}"[:140],
+        "externalReference": f"parcela_{pid}",
+    }
+    data, status = asaas_request('POST', '/transfers', payload)
+
+    if status in (200, 201) and data.get('id'):
+        conn.execute("""UPDATE parcelas SET asaas_transfer_id=?, asaas_status=?, asaas_erro=NULL WHERE id=?""",
+                     (data['id'], data.get('status', 'PENDING'), pid))
+        conn.execute("""INSERT INTO historico_proposta (proposta_id, usuario_nome, campo, valor_antes, valor_depois)
+                        VALUES (?,?,?,?,?)""",
+                     (parc['proposta_id'] if 'proposta_id' in parc.keys() else None, session.get('nome'),
+                      'Pagamento PIX (Asaas)', '', f"R$ {valor:.2f} para {parc['consultor']} — transfer {data['id']}"))
+        conn.commit(); close_db(conn)
+        return jsonify({"ok": True, "transfer_id": data['id'], "status": data.get('status')})
+    else:
+        erro_msg = data.get('_erro')
+        if not erro_msg and data.get('errors'):
+            erro_msg = '; '.join([e.get('description', str(e)) for e in data['errors']])
+        conn.execute("UPDATE parcelas SET asaas_erro=? WHERE id=?", (str(erro_msg)[:300], pid))
+        conn.commit(); close_db(conn)
+        return jsonify({"ok": False, "erro": erro_msg or "Erro desconhecido do Asaas", "status": status}), 400
+
+
+@app.route('/webhook/asaas', methods=['POST'])
+def webhook_asaas():
+    """Recebe e processa eventos do Asaas (transferências, cobranças).
+    
+    Segurança:
+    - Valida token asaas-access-token se configurado
+    - Implementa idempotência via webhook_log
+    - Loga cada etapa para diagnóstico
+    
+    Retorna sempre 200 para não gerar fila de retentativas infinita.
+    """
+    try:
+        # 1. VALIDAÇÃO DO TOKEN (se configurado)
+        if ASAAS_WEBHOOK_TOKEN:
+            token_recebido = request.headers.get('asaas-access-token', '')
+            if token_recebido != ASAAS_WEBHOOK_TOKEN:
+                app.logger.warning(f"[WEBHOOK] ❌ Token inválido ou faltante (recebido: '{token_recebido[:20] if token_recebido else 'VAZIO'}'...)")
+                return jsonify({"ok": False, "erro": "Token inválido"}), 200
+            app.logger.info("[WEBHOOK] ✅ Token validado com sucesso")
+        
+        # 2. PARSE DO JSON
+        data = request.get_json(force=True) or {}
+        evento_id = data.get('id', '')
+        evento = data.get('event', '')
+        
+        app.logger.info(f"[WEBHOOK] Evento recebido: id={evento_id[:30] if evento_id else 'VAZIO'}, event={evento}")
+        
+        if not evento_id:
+            app.logger.warning("[WEBHOOK] ⚠️ evento_id vazio, ignorando")
+            return jsonify({"ok": True, "msg": "evento_id vazio, ignorado"}), 200
+        
+        # 3. VERIFICAR IDEMPOTÊNCIA (já processado?)
+        conn = db()
+        já_proc = conn.execute("SELECT 1 FROM webhook_log WHERE evento_id=?", (evento_id,)).fetchone()
+        if já_proc:
+            app.logger.info(f"[WEBHOOK] ⏭️  Evento duplicado (id={evento_id[:30]}), ignorando")
+            close_db(conn)
+            return jsonify({"ok": True, "msg": "duplicado, ignorado"}), 200
+        
+        # 4. PROCESSAR EVENTOS DE TRANSFERÊNCIA
+        if evento.startswith('TRANSFER_'):
+            app.logger.info(f"[WEBHOOK] 🔄 Processando transferência: evento={evento}")
+            transfer = data.get('transfer', {})
+            transfer_id = transfer.get('id', '')
+            novo_status = transfer.get('status', '')
+            
+            if transfer_id:
+                parc = conn.execute(
+                    "SELECT id, proposta_id FROM parcelas WHERE asaas_transfer_id=?",
+                    (transfer_id,)
+                ).fetchone()
+                
+                if parc:
+                    app.logger.info(f"[WEBHOOK] ✅ Parcela encontrada: id={parc['id']}, proposta_id={parc['proposta_id']}")
+                    
+                    # Atualizar status
+                    conn.execute("UPDATE parcelas SET asaas_status=? WHERE id=?", (novo_status, parc['id']))
+                    
+                    if evento == 'TRANSFER_DONE':
+                        data_efetiva = transfer.get('effectiveDate') or datetime.now(TZ_SP).strftime('%Y-%m-%d')
+                        conn.execute(
+                            "UPDATE parcelas SET status='Pago ao corretor', data_pagamento=? WHERE id=?",
+                            (data_efetiva, parc['id'])
+                        )
+                        conn.execute(
+                            "INSERT INTO historico_proposta (proposta_id, usuario_nome, campo, valor_antes, valor_depois) VALUES (?,?,?,?,?)",
+                            (parc['proposta_id'], 'Asaas (webhook)', 'Status do pagamento', 'Pendente', 'Pago ao corretor (PIX confirmado)')
+                        )
+                        app.logger.info(f"[WEBHOOK] 💰 Transferência concluída: parcela {parc['id']} marcada como 'Pago ao corretor'")
+                    
+                    elif evento in ('TRANSFER_FAILED', 'TRANSFER_CANCELLED'):
+                        motivo = transfer.get('failReason') or 'Transferência falhou ou foi cancelada'
+                        conn.execute("UPDATE parcelas SET asaas_erro=? WHERE id=?", (str(motivo)[:300], parc['id']))
+                        app.logger.warning(f"[WEBHOOK] ❌ Transferência falhou: parcela {parc['id']}, motivo={motivo[:50]}")
+                    
+                    conn.commit()
+                else:
+                    app.logger.warning(f"[WEBHOOK] ⚠️  Transferência não encontrada: asaas_transfer_id={transfer_id}")
+            else:
+                app.logger.warning(f"[WEBHOOK] ⚠️  transfer.id vazio no payload")
+        
+        elif evento.startswith('PAYMENT_'):
+            app.logger.info(f"[WEBHOOK] 💳 Evento de cobrança: {evento} (implementação futura)")
+        
+        # 5. REGISTRAR WEBHOOK PROCESSADO
+        conn.execute("INSERT INTO webhook_log (evento_id, evento) VALUES (?,?)", (evento_id, evento))
+        conn.commit()
+        close_db(conn)
+        
+        app.logger.info(f"[WEBHOOK] ✅ Webhook processado com sucesso: {evento_id[:30]}")
+        return jsonify({"ok": True, "msg": "processado"}), 200
+    
+    except Exception as e:
+        app.logger.error(f"[WEBHOOK] 🔴 ERRO: {str(e)}", exc_info=True)
+        return jsonify({"ok": False, "erro": str(e)[:100]}), 200
+
+
+@app.route('/admin/webhook-diagnostico', methods=['GET'])
+@login_required
+@admin_required
+def webhook_diagnostico():
+    """Mostra os últimos webhooks do Asaas recebidos, para diagnóstico."""
+    conn = db()
+    try:
+        # Últimos 20 webhooks
+        webhooks = conn.execute(
+            "SELECT id, evento_id, evento, processado_em FROM webhook_log ORDER BY processado_em DESC LIMIT 20"
+        ).fetchall()
+
+        total = conn.execute("SELECT COUNT(*) AS cnt FROM webhook_log").fetchone()
+        total_webhooks = total['cnt'] if total else 0
+    except Exception as e:
+        app.logger.error(f"[WEBHOOK-DIAG] Erro ao consultar webhook_log: {e}")
+        webhooks = []
+        total_webhooks = 0
+    finally:
+        close_db(conn)
+
+    resultado = {
+        "config": {
+            "asaas_configurado": asaas_configurado(),
+            "asaas_webhook_token_configurado": bool(ASAAS_WEBHOOK_TOKEN),
+            "asaas_base_url": ASAAS_BASE_URL,
+            "ambiente": "produção" if "api.asaas.com" in ASAAS_BASE_URL else "sandbox",
+        },
+        "ultimos_webhooks": [
+            {
+                "id": w['id'],
+                "evento_id": w['evento_id'],
+                "evento": w['evento'],
+                "processado_em": str(w['processado_em']),
+            }
+            for w in webhooks
+        ],
+        "total_webhooks": total_webhooks,
+    }
+
+    return jsonify(resultado), 200
+
+
+@app.route('/admin/ultimo-erro', methods=['GET'])
+@login_required
+@admin_required
+def admin_ultimo_erro():
+    """Mostra os últimos erros 500 capturados, com traceback. Para diagnóstico."""
+    return jsonify({
+        "total": len(_ULTIMOS_ERROS),
+        "erros": _ULTIMOS_ERROS,
+    }), 200
+
+
+# ─── SERVIR ARQUIVOS (contratos, comprovantes) ──────────────────────────────────
+@app.route('/anexos/<path:nome>')
+@login_required
+def servir_anexo(nome):
+    nome = os.path.basename(nome)
+    if not os.path.exists(os.path.join(UPLOAD_FOLDER, nome)):
+        abort(404)
+    return send_from_directory(UPLOAD_FOLDER, nome)
+
+@app.route('/proposta/<int:pid>/anexo/excluir', methods=['POST'])
+@login_required
+@admin_required
+def excluir_anexo(pid):
+    """Exclui um anexo de uma proposta. Apenas admin.
+    tipo: 'contrato' | 'comprovante' | 'doc' (com 'nome' do arquivo no array anexos)."""
+    d = request.json or {}
+    tipo = (d.get('tipo') or '').strip()
+    nome = os.path.basename((d.get('nome') or '').strip())
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn); return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    arquivo_remover = None
+    if tipo == 'contrato':
+        arquivo_remover = p['contrato_arquivo']
+        conn.execute("UPDATE propostas SET contrato_arquivo=NULL WHERE id=?", (pid,))
+    elif tipo == 'comprovante':
+        arquivo_remover = p['comprovante_boleto']
+        conn.execute("UPDATE propostas SET comprovante_boleto=NULL WHERE id=?", (pid,))
+    elif tipo == 'doc':
+        try:
+            lista = json.loads(p['anexos']) if p['anexos'] else []
+        except Exception:
+            lista = []
+        if nome in lista:
+            lista.remove(nome)
+            arquivo_remover = nome
+            conn.execute("UPDATE propostas SET anexos=? WHERE id=?", (json.dumps(lista), pid))
+    else:
+        close_db(conn); return jsonify({"ok": False, "msg": "Tipo inválido"}), 400
+
+    conn.commit(); close_db(conn)
+
+    # Remove o arquivo físico (best-effort; não falha se já sumiu)
+    if arquivo_remover:
+        try:
+            os.remove(os.path.join(UPLOAD_FOLDER, os.path.basename(arquivo_remover)))
+        except Exception:
+            pass
+    return jsonify({"ok": True})
+
+# ─── EMAIL UTILITÁRIO ────────────────────────────────────────────────────────
+def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None):
+    """Envia email via API do Brevo (HTTPS porta 443 — nunca bloqueada pelo Railway).
+    Configure BREVO_API_KEY no Railway. SMTP_USER define o remetente.
+    destinatario: string (1 email) ou lista de emails.
+    cc: string ou lista de emails para cópia (opcional).
+    anexos: lista de nomes de arquivo (em UPLOAD_FOLDER) a anexar (opcional)."""
+    api_key = os.environ.get('BREVO_API_KEY','')
+    remetente = os.environ.get('SMTP_USER','noreply@serenuscorretora.com.br')
+
+    # Normaliza destinatários e cópia para listas
+    if isinstance(destinatario, str):
+        to_list = [e.strip() for e in destinatario.replace(';', ',').split(',') if e.strip()]
+    else:
+        to_list = [e.strip() for e in destinatario if e and e.strip()]
+
+    cc_list = []
+    if cc:
+        if isinstance(cc, str):
+            cc_list = [e.strip() for e in cc.replace(';', ',').split(',') if e.strip()]
+        else:
+            cc_list = [e.strip() for e in cc if e and e.strip()]
+
+    # Monta lista de anexos em base64 (Brevo: attachment=[{content, name}])
+    attach_payload = []
+    if anexos:
+        import base64, re as _re
+        total_bytes = 0
+        LIMITE_BYTES = 9 * 1024 * 1024  # ~9MB de arquivos brutos (Brevo aceita até ~10MB no payload)
+        for nome in anexos:
+            if not nome:
+                continue
+            caminho = os.path.join(UPLOAD_FOLDER, os.path.basename(nome))
+            if not os.path.exists(caminho):
+                print(f"[EMAIL] ⚠️ Anexo não encontrado, ignorando: {caminho}")
+                continue
+            try:
+                tam = os.path.getsize(caminho)
+                if total_bytes + tam > LIMITE_BYTES:
+                    print(f"[EMAIL] ⚠️ Limite de anexos atingido (~9MB). Pulando: {caminho} ({tam} bytes)")
+                    continue
+                with open(caminho, 'rb') as fh:
+                    conteudo_b64 = base64.b64encode(fh.read()).decode('ascii')
+                total_bytes += tam
+                # Nome amigável: remove prefixo timestamp/categoria
+                nome_limpo = os.path.basename(nome)
+                partes = nome_limpo.split('_', 3)
+                nome_exibe = partes[-1] if len(partes) >= 2 else nome_limpo
+                # SANITIZA: Brevo rejeita nomes com espaços/acentos/caracteres especiais.
+                base_nome, ext = os.path.splitext(nome_exibe)
+                base_nome = _re.sub(r'[^A-Za-z0-9._-]', '_', base_nome)   # troca espaço/acento por _
+                base_nome = _re.sub(r'_+', '_', base_nome).strip('_')      # colapsa __ e remove bordas
+                if not base_nome:
+                    base_nome = 'documento'
+                nome_seguro = (base_nome + ext.lower())[:120]
+                attach_payload.append({"content": conteudo_b64, "name": nome_seguro})
+                print(f"[EMAIL] 📎 Anexo preparado: {nome_seguro} ({tam} bytes)")
+            except Exception as e:
+                print(f"[EMAIL] ⚠️ Falha ao ler anexo {caminho}: {e}")
+
+    if not api_key:
+        print(f"[EMAIL] ⚠️ BREVO_API_KEY não configurada. Assunto: {assunto} → {to_list} (cc: {cc_list})")
+        return False
+
+    def _construir_e_enviar():
+        import urllib.request, urllib.error, json as _json
+        corpo_payload = {
+            "sender":  {"name": "JOB Serenus", "email": remetente},
+            "to":      [{"email": e} for e in to_list],
+            "subject": assunto,
+            "htmlContent": corpo_html
+        }
+        if cc_list:
+            corpo_payload["cc"] = [{"email": e} for e in cc_list]
+        if attach_payload:
+            corpo_payload["attachment"] = attach_payload
+        payload = _json.dumps(corpo_payload).encode('utf-8')
+        req = urllib.request.Request(
+            "https://api.brevo.com/v3/smtp/email",
+            data=payload,
+            headers={"Content-Type": "application/json", "api-key": api_key},
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                print(f"[EMAIL] ✅ Enviado via Brevo (HTTP {resp.status}): {assunto} → {to_list} (cc: {cc_list}, {len(attach_payload)} anexos)")
+            return True, None
+        except urllib.error.HTTPError as e:
+            erro_corpo = ''
+            try: erro_corpo = e.read().decode()
+            except Exception: pass
+            print(f"[EMAIL] ❌ Brevo HTTP {e.code}: {erro_corpo}")
+            return False, f"Brevo HTTP {e.code}: {erro_corpo}"
+        except Exception as e:
+            print(f"[EMAIL] ❌ Erro ao enviar para {to_list}: {e}")
+            return False, str(e)
+
+    # Com anexos: envia SÍNCRONO para capturar e reportar erros reais do Brevo.
+    # Sem anexos: mantém envio em background (rápido para o usuário).
+    if attach_payload:
+        ok, _erro = _construir_e_enviar()
+        _enviar_email.ultimo_erro = _erro
+        return ok
+    else:
+        import threading
+        threading.Thread(target=lambda: _construir_e_enviar(), daemon=True).start()
+        _enviar_email.ultimo_erro = None
+        return True
+
+# ─── RECUPERAÇÃO DE SENHA (usuário) ─────────────────────────────────────────
+@app.route('/esqueci-senha', methods=['GET','POST'])
+def esqueci_senha():
+    """Passo 1: usuário informa o e-mail → recebe código de 6 dígitos."""
+    if request.method == 'GET':
+        return render_template('esqueci_senha.html')
+    email = request.form.get('email','').strip().lower()
+    conn = db()
+    u = conn.execute("SELECT id,nome,ativo FROM usuarios WHERE email=?", (email,)).fetchone()
+    if not u or not u['ativo']:
+        close_db(conn)
+        # Mensagem genérica por segurança (não revela se e-mail existe)
+        return render_template('esqueci_senha.html', enviado=True)
+    import random
+    codigo = f"{random.randint(0,999999):06d}"
+    expira = (datetime.now(TZ_SP) + timedelta(minutes=15)).isoformat()
+    conn.execute("UPDATE usuarios SET reset_code=?, reset_expira=? WHERE id=?", (codigo, expira, u['id']))
+    conn.commit(); close_db(conn)
+    corpo = f"""
+    <div style="font-family:sans-serif; max-width:420px; margin:auto; padding:30px;">
+      <h2 style="color:#1fd8a4;">JOB · Corretora Serenus</h2>
+      <p>Olá, <strong>{u['nome']}</strong>.</p>
+      <p>Recebemos uma solicitação de redefinição de senha. Use o código abaixo:</p>
+      <div style="font-size:36px; font-weight:700; letter-spacing:10px; text-align:center;
+                  background:#f3f4f6; padding:20px; border-radius:8px; margin:24px 0; color:#111;">
+        {codigo}
+      </div>
+      <p style="color:#666;">O código expira em <strong>15 minutos</strong>.</p>
+      <p style="color:#666;">Se não foi você, ignore este e-mail.</p>
+    </div>"""
+    _enviar_email(email, "JOB · Código de redefinição de senha", corpo)
+    return render_template('esqueci_senha.html', enviado=True, email=email)
+
+@app.route('/redefinir-senha', methods=['GET','POST'])
+def redefinir_senha():
+    """Passo 2: usuário informa código + nova senha."""
+    email = request.args.get('email','') or request.form.get('email','')
+    if request.method == 'GET':
+        return render_template('redefinir_senha.html', email=email)
+    email  = request.form.get('email','').strip().lower()
+    codigo = request.form.get('codigo','').strip()
+    s1 = request.form.get('senha','')
+    s2 = request.form.get('senha2','')
+    conn = db()
+    u = conn.execute("SELECT id,reset_code,reset_expira FROM usuarios WHERE email=? AND ativo=1", (email,)).fetchone()
+    erro = None
+    if not u or u['reset_code'] != codigo:
+        erro = 'Código inválido ou e-mail não encontrado.'
+    elif _data_expirada(u['reset_expira']):
+        erro = 'Código expirado. Solicite um novo.'
+    elif len(s1) < 6:
+        erro = 'Senha deve ter pelo menos 6 caracteres.'
+    elif s1 != s2:
+        erro = 'Senhas não conferem.'
+    if erro:
+        close_db(conn)
+        return render_template('redefinir_senha.html', email=email, erro=erro)
+    conn.execute("UPDATE usuarios SET senha_hash=?, reset_code=NULL, reset_expira=NULL WHERE id=?",
+                 (hash_senha(s1), u['id']))
+    conn.commit(); close_db(conn)
+    return render_template('redefinir_senha.html', sucesso=True)
+
+# ─── RESET DE SENHA PELO GESTOR (admin define senha nova direto) ─────────────
+@app.route('/usuario/reset-senha/<int:uid>', methods=['POST'])
+@login_required
+@admin_required
+def usuario_reset_senha(uid):
+    nova = request.form.get('nova_senha','').strip()
+    if len(nova) < 6:
+        flash('Senha deve ter pelo menos 6 caracteres.', 'error')
+        return redirect(url_for('usuarios'))
+    conn = db()
+    conn.execute("UPDATE usuarios SET senha_hash=?, token_setup=NULL, reset_code=NULL WHERE id=?",
+                 (hash_senha(nova), uid))
+    conn.commit(); close_db(conn)
+    flash('Senha redefinida com sucesso.', 'success')
+    return redirect(url_for('usuarios'))
+
+# ─── EXCLUIR USUÁRIO ─────────────────────────────────────────────────────────
+@app.route('/usuario/excluir/<int:uid>', methods=['POST'])
+@login_required
+@admin_required
+def usuario_excluir(uid):
+    if uid == session.get('user_id'):
+        flash('Você não pode excluir seu próprio usuário.', 'error')
+        return redirect(url_for('usuarios'))
+    conn = db()
+    # Reatribui propostas ao admin antes de excluir
+    conn.execute("UPDATE propostas SET usuario_id=? WHERE usuario_id=?", (session['user_id'], uid))
+    conn.execute("DELETE FROM usuarios WHERE id=?", (uid,))
+    conn.commit(); close_db(conn)
+    flash('Usuário excluído.', 'success')
+    return redirect(url_for('usuarios'))
+
+@app.route('/login', methods=['GET','POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form.get('email','').strip().lower()
+        senha_digitada = request.form.get('senha','')
+        conn = db()
+        u = conn.execute("SELECT * FROM usuarios WHERE email=? AND ativo=1",(email,)).fetchone()
+        if u:
+            ok, precisa_migrar = verifica_senha(senha_digitada, u['senha_hash'])
+            if ok:
+                # Migra senha antiga (SHA-256) para o formato seguro (PBKDF2) silenciosamente
+                if precisa_migrar:
+                    try:
+                        conn.execute("UPDATE usuarios SET senha_hash=? WHERE id=?", (hash_senha(senha_digitada), u['id']))
+                        conn.commit()
+                    except Exception:
+                        pass
+                close_db(conn)
+                session.update({'user_id':u['id'],'nome':u['nome'],'perfil':u['perfil'],'regime_base':u['regime_base'],'foto':u['foto'] or ''})
+                return redirect(url_for('dashboard'))
+        close_db(conn)
+        flash('E-mail ou senha incorretos.')
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear(); return redirect(url_for('login'))
+
+@app.route('/setup/<token>', methods=['GET','POST'])
+def setup_senha(token):
+    conn = db()
+    u = conn.execute("SELECT * FROM usuarios WHERE token_setup=? AND ativo=1",(token,)).fetchone()
+    if not u: close_db(conn); return render_template('setup_senha.html', erro='Link inválido ou já utilizado.')
+    # token_expira pode vir como datetime (Postgres) ou string (SQLite). Comparação segura.
+    if _data_expirada(u['token_expira']):
+        close_db(conn); return render_template('setup_senha.html', erro='Link expirado.')
+    if request.method == 'POST':
+        s1=request.form.get('senha',''); s2=request.form.get('senha2','')
+        if len(s1)<6: close_db(conn); return render_template('setup_senha.html',usuario=u,erro='Mínimo 6 caracteres.')
+        if s1!=s2: close_db(conn); return render_template('setup_senha.html',usuario=u,erro='Senhas não conferem.')
+        conn.execute("UPDATE usuarios SET senha_hash=?,token_setup=NULL,token_expira=NULL WHERE id=?",(hash_senha(s1),u['id']))
+        conn.commit(); close_db(conn); flash('Senha criada! Faça login.'); return redirect(url_for('login'))
+    close_db(conn)
+    return render_template('setup_senha.html', usuario=u)
+
+# ─── DASHBOARD ───────────────────────────────────────────────────────────────────
+@app.route('/')
+@login_required
+def dashboard():
+    conn = db(); uid = session['user_id']
+    if session['perfil'] == 'admin':
+        m = {}
+        m['propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas WHERE status != 'Excluída'").fetchone()['c']
+        m['vidas'] = conn.execute("SELECT COALESCE(SUM(total_vidas),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
+        m['producao'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
+        m['com_bruta'] = conn.execute("SELECT COALESCE(SUM(comissao_total_corretora),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
+        m['com_repasse'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
+        m['com_liquido'] = conn.execute("SELECT COALESCE(SUM(comissao_corretora_liquida),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
+        # Fluxo de caixa: apenas propostas Emitida/Ativa (trava financeira)
+        m['fc_pendente'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Pendente de receber' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
+        m['fc_caixa'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Recebido e não repassado' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
+        m['fc_liberado'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Liberado para o corretor' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
+        m['fc_pago'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Pago ao corretor' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
+        m['fc_antecip'] = conn.execute("SELECT COUNT(*) c FROM parcelas WHERE status='Antecipação - Aguardando ADM'").fetchone()['c']
+        # Alerta auditoria: propostas que precisam evoluir o status operacional
+        m['auditoria_pendente'] = conn.execute("""SELECT COUNT(*) c FROM propostas
+            WHERE status != 'Excluída' AND status_operacional NOT IN ('Emitida/Ativa')
+            AND status_operacional IS NOT NULL""").fetchone()['c']
+        ultimas = conn.execute("SELECT * FROM propostas WHERE status != 'Excluída' ORDER BY id DESC LIMIT 5").fetchall()
+        por_operadora = conn.execute("""SELECT adm_operadora,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
+            FROM propostas WHERE status != 'Excluída' GROUP BY adm_operadora ORDER BY valor DESC LIMIT 8""").fetchall()
+        por_consultor = conn.execute("""SELECT consultor,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,COALESCE(SUM(comissao_consultor),0) com
+            FROM propostas WHERE status != 'Excluída' GROUP BY consultor ORDER BY valor DESC""").fetchall()
+        close_db(conn)
+        return render_template('dashboard_admin.html', m=m, ultimas=ultimas,
+                               por_operadora=por_operadora, por_consultor=por_consultor,
+                               ciclo=ciclo_atual())
+    else:
+        m = {}
+        ma = datetime.now(TZ_SP).strftime('%Y-%m')
+        m['propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas WHERE usuario_id=? AND status != 'Excluída'",(uid,)).fetchone()['c']
+        m['vidas'] = conn.execute("SELECT COALESCE(SUM(total_vidas),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída'",(uid,)).fetchone()['v']
+        m['producao'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída'",(uid,)).fetchone()['v']
+        m['minha_comissao'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída'",(uid,)).fetchone()['v']
+        # mes_meta para metas comerciais (usa coluna mes_meta, não criado_em)
+        m['mes_propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas WHERE usuario_id=? AND status != 'Excluída' AND mes_meta=?",(uid,ma)).fetchone()['c']
+        m['mes_producao'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída' AND mes_meta=?",(uid,ma)).fetchone()['v']
+        m['mes_comissao'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE usuario_id=? AND status != 'Excluída' AND mes_meta=?",(uid,ma)).fetchone()['v']
+        # Saldo do consultor por status de parcelas (apenas Emitida/Ativa)
+        m['a_receber'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE p.usuario_id=? AND pa.status='Liberado para o corretor' AND p.status_operacional='Emitida/Ativa'""",(uid,)).fetchone()['v']
+        m['pago_total'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id WHERE p.usuario_id=? AND pa.status='Pago ao corretor'""",(uid,)).fetchone()['v']
+        m['antecip_solicitadas'] = conn.execute("""SELECT COUNT(*) c FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id WHERE p.usuario_id=? AND pa.comprovante_antecipacao IS NOT NULL""",(uid,)).fetchone()['c']
+        # Pendências: parcelas bloqueadas por falta de comprovante
+        m['bloqueadas'] = conn.execute("""SELECT COUNT(*) c FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE p.usuario_id=? AND pa.status='Bloqueado - Falta Comprovante'""",(uid,)).fetchone()['c']
+        pendencias_comprovante = conn.execute("""SELECT p.id, p.razao_social, p.adm_operadora, COUNT(pa.id) qtd_bloq
+            FROM propostas p JOIN parcelas pa ON pa.proposta_id=p.id
+            WHERE p.usuario_id=? AND pa.status='Bloqueado - Falta Comprovante'
+            GROUP BY p.id ORDER BY p.id DESC""",(uid,)).fetchall()
+        rb = session.get('regime_base')
+        if rb == 'com_lead':
+            if m['mes_producao'] <= 3000: m['regime_label'] = 'Com Lead — N1 (até R$ 3.000)'
+            elif m['mes_producao'] <= 7000: m['regime_label'] = 'Com Lead — N2 (até R$ 7.000)'
+            else: m['regime_label'] = 'Com Lead — N3 (acima de R$ 7.000)'
+        elif rb == 'com_fixo_lead': m['regime_label'] = 'Com Fixo + Com Lead'
+        else: m['regime_label'] = 'Sem Lead e Sem Fixo'
+        m['valor_fixo'] = 0
+        if rb == 'com_fixo_lead':
+            r = conn.execute("SELECT valor_fixo FROM regimes WHERE codigo='com_fixo_lead'").fetchone()
+            m['valor_fixo'] = r['valor_fixo'] if r else 0
+        pendentes_aceite = conn.execute("""SELECT pa.*, p.razao_social, p.adm_operadora FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            WHERE p.usuario_id=? AND pa.status='Liberado para o corretor' AND pa.aceite_corretor=0
+            ORDER BY pa.id""",(uid,)).fetchall()
+        ultimas = conn.execute("SELECT * FROM propostas WHERE usuario_id=? AND status != 'Excluída' ORDER BY id DESC LIMIT 5",(uid,)).fetchall()
+        por_operadora = conn.execute("""SELECT adm_operadora,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
+            FROM propostas WHERE usuario_id=? AND status != 'Excluída' GROUP BY adm_operadora ORDER BY valor DESC LIMIT 6""",(uid,)).fetchall()
+        close_db(conn)
+        return render_template('dashboard_consultor.html', m=m, ultimas=ultimas,
+                               por_operadora=por_operadora, pendentes_aceite=pendentes_aceite,
+                               pendencias_comprovante=pendencias_comprovante)
+
+# ─── PROPOSTAS ───────────────────────────────────────────────────────────────────
+@app.route('/nova-proposta')
+@login_required
+def nova_proposta():
+    conn = db()
+    sups = conn.execute("SELECT * FROM supervisoras WHERE ativo=1 ORDER BY nome").fetchall()
+    ops = conn.execute("SELECT DISTINCT operadora FROM recebimento ORDER BY operadora").fetchall()
+    close_db(conn)
+    return render_template('form.html', supervisoras=sups, operadoras=[o['operadora'] for o in ops])
+
+@app.route('/salvar-proposta', methods=['POST'])
+@login_required
+def salvar_proposta():
+    try:
+        d = request.form
+
+        def salvar_arquivo(file_field, prefixo):
+            """Salva um único arquivo localmente e retorna o nome ou None."""
+            f = request.files.get(file_field)
+            if f and f.filename:
+                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{prefixo}_{f.filename}"
+                caminho = os.path.join(UPLOAD_FOLDER, n)
+                f.save(caminho)
+                return n
+            return None
+
+        # Anexos genéricos (múltiplos)
+        nomes = []
+        for f in request.files.getlist('anexos'):
+            if f and f.filename:
+                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_doc_{f.filename}"
+                caminho = os.path.join(UPLOAD_FOLDER, n)
+                f.save(caminho)
+                nomes.append(n)
+
+        # Uploads dedicados
+        contrato_arq = salvar_arquivo('contrato_arquivo', 'CONTRATO')
+        comprovante_arq = salvar_arquivo('comprovante_boleto', 'BOLETO1')
+
+        # Campos personalizados (form builder)
+        conn0 = db()
+        campos_def = conn0.execute("SELECT nome_tecnico FROM campos_custom WHERE ativo=1").fetchall()
+        conn0.close()
+        extras = {}
+        for c in campos_def:
+            chave = f"custom__{c['nome_tecnico']}"
+            if chave in d:
+                extras[c['nome_tecnico']] = d.get(chave)
+
+        valor = float((d.get('valor','0') or '0').replace('.','').replace(',','.'))
+        operadora = d.get('adm_operadora','')
+        modalidade = d.get('modalidade','')
+        regime_base = session.get('regime_base','sem_lead_sem_fixo')
+        conn = db(); cur = conn.cursor()
+        ma = datetime.now(TZ_SP).strftime('%Y-%m')
+        # Produção do mês ANTES desta venda + esta venda = produção que define o nível.
+        # (Regra: o nível é o da produção do dia em que a venda subiu, incluindo ela.)
+        prod_antes = cur.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=? AND strftime('%Y-%m',criado_em)=?",(session['user_id'],ma)).fetchone()['v']
+        prod_acumulada = prod_antes + valor
+        c = calc_comissao(operadora, regime_base, prod_acumulada, valor, modalidade, d.get('tipo_pessoa',''))
+        # mes_meta = mês do fechamento (data_fechamento do form, ou mês atual)
+        data_fechamento = d.get('data_fechamento','').strip()
+        mes_meta = data_fechamento[:7] if (data_fechamento and len(data_fechamento) >= 7) else datetime.now(TZ_SP).strftime('%Y-%m')
+
+        # status parcelas: bloqueado se sem comprovante
+        status_parcela_inicial = 'Bloqueado - Falta Comprovante' if not comprovante_arq else 'Pendente de receber'
+
+        cur.execute("""INSERT INTO propostas (
+            usuario_id,consultor,supervisora_id,proposta_tem_numero,numero_proposta,
+            vigencia,modalidade,tipo_pessoa,adm_operadora,produto,razao_social,
+            cpf_titular,cnpj,titular_dependentes,tipo_contrato,acomodacao,fator_moderador,
+            total_vidas,valor,venda_status,
+            vencimento_1,previsao_1,resp_contrato,email_resp_contrato,tel_resp_contrato,
+            resp_negociacao,email_resp_negociacao,tel_resp_negociacao,
+            contatos_adicionais,desc_contatos_adicionais,
+            regime_aplicado,num_parcelas,distribuicao_parcelas,
+            comissao_total_corretora,comissao_consultor,comissao_corretora_liquida,
+            observacoes,anexos,contrato_arquivo,comprovante_boleto,campos_extras,quem_subiu,
+            mes_meta,status_operacional
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            session['user_id'],d.get('consultor'),d.get('supervisora_id') or None,
+            d.get('proposta_tem_numero'),d.get('numero_proposta'),
+            d.get('vigencia'),d.get('modalidade'),d.get('tipo_pessoa'),
+            operadora,d.get('produto'),d.get('razao_social'),
+            d.get('cpf_titular'),d.get('cnpj'),d.get('titular_dependentes'),
+            d.get('tipo_contrato'),d.get('acomodacao'),d.get('fator_moderador'),
+            int(d.get('total_vidas') or 0),valor,
+            d.get('venda_status','Sim'),
+            d.get('vencimento_1'),d.get('previsao_1'),
+            d.get('resp_contrato'),d.get('email_resp_contrato'),d.get('tel_resp_contrato'),
+            d.get('resp_negociacao'),d.get('email_resp_negociacao'),d.get('tel_resp_negociacao'),
+            d.get('contatos_adicionais'),d.get('desc_contatos_adicionais'),
+            c['codigo'],c['num_parcelas'],c['dist_corretora'],
+            c['total_corretora'],c['consultor'],c['liquido'],
+            d.get('observacoes'),json.dumps(nomes),contrato_arq,comprovante_arq,
+            json.dumps(extras, ensure_ascii=False),d.get('quem_subiu','Consultor'),
+            mes_meta,'Aguardando Documentos'
+        ))
+        proposta_id = _last_insert_id(cur)
+        dia_venc = d.get('dia_vencimento') or None
+        if dia_venc:
+            try: cur.execute("UPDATE propostas SET dia_vencimento=? WHERE id=?", (int(dia_venc), proposta_id))
+            except: pass
+        # Repique, datas de nascimento e dependentes
+        try: deps = json.loads(d.get('dependentes_json') or '[]')
+        except: deps = []
+        repique = None
+        if d.get('tem_repique'):
+            rv = (d.get('repique_valor','') or '').replace('.','').replace(',','.')
+            try: rv = float(rv) if rv else 0
+            except: rv = 0
+            repique = {'nome': d.get('repique_nome',''), 'tipo': d.get('repique_tipo',''), 'valor': rv}
+        cur.execute("""UPDATE propostas SET data_nasc_titular=?, dependentes_json=?, tem_repique=?, repique_json=? WHERE id=?""",
+            (d.get('data_nasc_titular',''), json.dumps(deps, ensure_ascii=False),
+             1 if d.get('tem_repique') else 0, json.dumps(repique, ensure_ascii=False) if repique else None, proposta_id))
+        for parc in gerar_parcelas(proposta_id, d.get('vigencia',''), c, dia_venc, status_override=status_parcela_inicial):
+            cur.execute("""INSERT INTO parcelas (proposta_id,numero,percentual,valor,valor_corretora,perc_cliente,data_prevista,status,competencia,mensalidade_ref,tipo_origem)
+                VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""", (parc['proposta_id'],parc['numero'],parc['percentual'],
+                                          parc['valor'],parc['valor_corretora'],parc['perc_cliente'],
+                                          parc['data_prevista'],parc['status'],parc['competencia'],parc['mensalidade_ref']))
+        conn.commit(); close_db(conn)
+        return jsonify({"ok": True})
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        app.logger.error(f"[SALVAR-PROPOSTA] ❌ Erro: {e}")
+        app.logger.error(f"[SALVAR-PROPOSTA] Traceback:\n{tb}")
+        print(f"[SALVAR-PROPOSTA] ❌ Erro: {e}")
+        print(f"[SALVAR-PROPOSTA] Traceback:\n{tb}")
+        return jsonify({"ok": False, "msg": str(e), "db_mode": DB_MODE}), 500
+
+@app.route('/propostas')
+@login_required
+def listar_propostas():
+    conn = db(); uid = session['user_id']
+    if session['perfil'] == 'admin':
+        rows = conn.execute("""SELECT p.*,s.nome as supervisora_nome FROM propostas p
+            LEFT JOIN supervisoras s ON s.id=p.supervisora_id
+            WHERE p.status != 'Excluída'
+            ORDER BY p.id DESC""").fetchall()
+    else:
+        rows = conn.execute("""SELECT p.*,s.nome as supervisora_nome FROM propostas p
+            LEFT JOIN supervisoras s ON s.id=p.supervisora_id
+            WHERE p.usuario_id=? AND p.status != 'Excluída'
+            ORDER BY p.id DESC""",(uid,)).fetchall()
+    close_db(conn)
+    return render_template('propostas.html', propostas=rows, modo_teste=session.get('modo_teste', False))
+
+@app.route('/admin/modo-teste/toggle', methods=['POST'])
+@login_required
+@admin_required
+def toggle_modo_teste():
+    """Liga/desliga o Modo Teste (só admin, vive na sessão — some ao deslogar)."""
+    novo = not session.get('modo_teste', False)
+    session['modo_teste'] = novo
+    return jsonify({"ok": True, "modo_teste": novo})
+
+@app.route('/proposta/<int:pid>')
+@login_required
+def ver_proposta(pid):
+    conn = db()
+    p = conn.execute("""SELECT p.*,s.nome as supervisora_nome FROM propostas p
+        LEFT JOIN supervisoras s ON s.id=p.supervisora_id WHERE p.id=?""",(pid,)).fetchone()
+    if not p: return "Não encontrada", 404
+    if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']: return "Acesso negado", 403
+    parcelas = conn.execute("SELECT * FROM parcelas WHERE proposta_id=? ORDER BY numero ASC",(pid,)).fetchall()
+    campos_def = conn.execute("SELECT * FROM campos_custom ORDER BY ordem,id").fetchall()
+    close_db(conn)
+    # Nome legível do modelo/regime aplicado
+    cod = p['regime_aplicado'] or ''
+    nome_regime = MODELO_NOME.get(cod, cod or '—')
+    regime = {'nome': nome_regime}
+    # Decodifica valores dos campos custom
+    try:
+        extras = json.loads(p['campos_extras']) if p['campos_extras'] else {}
+    except: extras = {}
+    extras_view = []
+    for c in campos_def:
+        if c['nome_tecnico'] in extras and extras[c['nome_tecnico']]:
+            extras_view.append({'label': c['label'], 'valor': extras[c['nome_tecnico']]})
+    # Valores atuais dos campos editáveis (para preencher o formulário de edição)
+    valores_edit = {}
+    for campo in CAMPOS_EDITAVEIS.keys():
+        valores_edit[campo] = (p[campo] if campo in p.keys() else '') or ''
+
+    # Solicitação de edição pendente (para o admin ver e aprovar/recusar)
+    solic_pendente = None
+    if session.get('perfil') == 'admin':
+        sp = conn2 = db()
+        row = conn2.execute("SELECT * FROM solicitacoes_edicao WHERE proposta_id=? AND status='Pendente' ORDER BY criado_em DESC LIMIT 1", (pid,)).fetchone()
+        close_db(conn2)
+        if row:
+            solic_pendente = dict(row)
+            try: solic_pendente['alteracoes_parsed'] = json.loads(row['alteracoes']) if row['alteracoes'] else {}
+            except Exception: solic_pendente['alteracoes_parsed'] = {}
+
+    return render_template('detalhe.html', p=p, parcelas=parcelas, regime=regime, extras=extras_view,
+                           campos_secoes=CAMPOS_EDIT_SECOES, valores_edit=valores_edit,
+                           solic_pendente=solic_pendente)
+
+@app.route('/proposta/<int:pid>/consultor', methods=['POST'])
+@login_required
+@admin_required
+def editar_consultor(pid):
+    """Remaneja a proposta para outro consultor e RECALCULA a comissão pelo regime dele.
+    Só regenera as parcelas que ainda NÃO entraram no fluxo (Pendente de receber)."""
+    novo_uid = request.form.get('usuario_id')
+    conn = db()
+    u = conn.execute("SELECT * FROM usuarios WHERE id=?", (novo_uid,)).fetchone()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not u or not p:
+        close_db(conn); return jsonify({"ok": False, "msg": "Consultor ou proposta inválidos"}), 400
+
+    # Produção do mês do NOVO consultor (exceto esta proposta) + esta venda
+    prod_antes = _producao_mes(conn, novo_uid, p['criado_em'], excluir_pid=pid)
+    prod_acumulada = prod_antes + (p['valor'] or 0)
+    c = calc_comissao(p['adm_operadora'], u['regime_base'], prod_acumulada, p['valor'] or 0, p['modalidade'], p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
+
+    conn.execute("""UPDATE propostas SET usuario_id=?, consultor=?, regime_aplicado=?,
+        num_parcelas=?, distribuicao_parcelas=?, comissao_total_corretora=?, comissao_consultor=?,
+        comissao_corretora_liquida=? WHERE id=?""",
+        (novo_uid, u['nome'], c['codigo'], c['num_parcelas'], c['dist_corretora'],
+         c['total_corretora'], c['consultor'], c['liquido'], pid))
+
+    # Regenera apenas parcelas ainda "Pendente de receber"
+    pagas = conn.execute("""SELECT COUNT(*) n FROM parcelas WHERE proposta_id=? AND status<>'Pendente de receber'""", (pid,)).fetchone()['n']
+    if pagas == 0:
+        conn.execute("DELETE FROM parcelas WHERE proposta_id=?", (pid,))
+        for parc in gerar_parcelas(pid, p['vigencia'] or '', c, p['dia_vencimento'] if 'dia_vencimento' in p.keys() else None):
+            conn.execute("""INSERT INTO parcelas (proposta_id,numero,percentual,valor,valor_corretora,perc_cliente,data_prevista,status,competencia,mensalidade_ref,tipo_origem)
+                VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""", (parc['proposta_id'],parc['numero'],parc['percentual'],
+                    parc['valor'],parc['valor_corretora'],parc['perc_cliente'],parc['data_prevista'],parc['status'],
+                    parc['competencia'],parc['mensalidade_ref']))
+        msg = "Consultor remanejado e comissão recalculada."
+    else:
+        msg = "Consultor trocado. Parcelas já em fluxo foram mantidas; só novas seguem o novo regime."
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": msg})
+
+@app.route('/propostas/recalcular-todas', methods=['POST'])
+@login_required
+@admin_required
+def recalcular_todas():
+    """Recalcula a comissão de TODAS as propostas com o motor atual.
+    Só regenera parcelas que ainda não entraram no fluxo. Retorna relatório de avisos."""
+    conn = db()
+    props = conn.execute("""SELECT p.*, u.regime_base FROM propostas p
+        LEFT JOIN usuarios u ON u.id=p.usuario_id WHERE COALESCE(p.estornada,0)=0""").fetchall()
+    recalc, avisos = 0, []
+    for p in props:
+        regime = p['regime_base'] or 'sem_lead_sem_fixo'
+        prod_antes = _producao_mes(conn, p['usuario_id'], p['criado_em'], excluir_pid=p['id'])
+        prod_acum = prod_antes + (p['valor'] or 0)
+        tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
+        c = calc_comissao(p['adm_operadora'], regime, prod_acum, p['valor'] or 0, p['modalidade'], tp)
+        conn.execute("""UPDATE propostas SET regime_aplicado=?, num_parcelas=?, distribuicao_parcelas=?,
+            comissao_total_corretora=?, comissao_consultor=?, comissao_corretora_liquida=? WHERE id=?""",
+            (c['codigo'], c['num_parcelas'], c['dist_corretora'],
+             c['total_corretora'], c['consultor'], c['liquido'], p['id']))
+        # Regenera só parcelas ainda pendentes de receber
+        pagas = conn.execute("""SELECT COUNT(*) n FROM parcelas
+            WHERE proposta_id=? AND status<>'Pendente de receber'""", (p['id'],)).fetchone()['n']
+        if pagas == 0:
+            conn.execute("DELETE FROM parcelas WHERE proposta_id=?", (p['id'],))
+            for parc in gerar_parcelas(p['id'], p['vigencia'] or '', c,
+                                       p['dia_vencimento'] if 'dia_vencimento' in p.keys() else None):
+                conn.execute("""INSERT INTO parcelas (proposta_id,numero,percentual,valor,valor_corretora,perc_cliente,data_prevista,status,competencia,mensalidade_ref,tipo_origem)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""",
+                    (parc['proposta_id'],parc['numero'],parc['percentual'],parc['valor'],
+                     parc['valor_corretora'],parc['perc_cliente'],parc['data_prevista'],
+                     parc['status'],parc['competencia'],parc['mensalidade_ref']))
+        recalc += 1
+        if c.get('aviso'):
+            avisos.append({'id': p['id'], 'cliente': p['razao_social'],
+                           'operadora': p['adm_operadora'], 'aviso': c['aviso']})
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "recalculadas": recalc, "avisos": avisos})
+
+@app.route('/api/consultores')
+@login_required
+@admin_required
+def api_consultores():
+    conn = db()
+    rows = conn.execute("SELECT id,nome,regime_base FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome").fetchall()
+    close_db(conn)
+    return jsonify([{'id': r['id'], 'nome': r['nome'],
+                     'regime': MODELO_NOME.get(r['regime_base'], r['regime_base'] or '—')} for r in rows])
+
+def get_cfg(chave, default=''):
+    conn = db()
+    r = conn.execute("SELECT valor FROM config WHERE chave=?", (chave,)).fetchone()
+    close_db(conn)
+    return r['valor'] if r else default
+
+@app.route('/proposta/<int:pid>/email-affinity')
+@login_required
+def email_affinity(pid):
+    """Monta o e-mail completo no padrão Serenus para a Affinity."""
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    close_db(conn)
+    if not p: return jsonify({"ok": False}), 404
+
+    # Dados base
+    tipo_pessoa = (p['tipo_pessoa'] or '').upper()
+    eh_empresa = bool(p['cnpj'])
+    nome = p['razao_social'] or p['cpf_titular'] or 'Cliente'
+    operadora = p['adm_operadora'] or '—'
+    plano = p['produto'] or '—'
+    valor_fmt = f"R$ {(p['valor'] or 0):,.2f}".replace(',','X').replace('.',',').replace('X','.')
+    vidas = p['total_vidas'] or 1
+
+    # Dependentes
+    deps = []
+    try: deps = json.loads(p['dependentes_json'] or '[]')
+    except: pass
+
+    # Monta linha de identificação
+    if eh_empresa:
+        ident = f"a empresa {nome} - CNPJ: {p['cnpj']}"
+        linha_intro = f"ao contrato do plano de saúde {operadora} para {ident}"
+    else:
+        ident = nome
+        if p['cpf_titular']:
+            ident += f" (CPF: {p['cpf_titular']})"
+        linha_intro = f"à proposta do plano de saúde {operadora} para o grupo familiar de {ident}"
+
+    # Monta composição do grupo
+    composicao = []
+    titular_linha = f"Titular: {nome}"
+    if p['cpf_titular']: titular_linha += f" (CPF: {p['cpf_titular']})"
+    if p['data_nasc_titular']: titular_linha += f" - Nasc.: {p['data_nasc_titular']}"
+    composicao.append(titular_linha)
+    for dep in deps:
+        dep_nome = dep.get('nome','')
+        dep_tipo = dep.get('parentesco') or dep.get('tipo','Dependente')
+        dep_cpf  = dep.get('cpf','')
+        dep_linha = f"Dependente ({dep_tipo}): {dep_nome}"
+        if dep_cpf: dep_linha += f" (CPF: {dep_cpf})"
+        composicao.append(dep_linha)
+
+    # Dados de contato
+    email_contato = p['email_resp_contrato'] or p['email_resp_negociacao'] or ''
+    tel_contato   = p['tel_resp_contrato'] or p['tel_resp_negociacao'] or ''
+
+    # Endereço
+    campos_extras = {}
+    try: campos_extras = json.loads(p['campos_extras'] or '{}')
+    except: pass
+    endereco_parts = [
+        campos_extras.get('endereco',''),
+        campos_extras.get('numero',''),
+        campos_extras.get('complemento',''),
+        campos_extras.get('bairro',''),
+        campos_extras.get('cidade',''),
+        campos_extras.get('estado',''),
+        campos_extras.get('cep',''),
+    ]
+    endereco = '\n'.join(x for x in endereco_parts if x)
+
+    # Assunto
+    tipo_label = 'Empresa' if eh_empresa else 'PF'
+    assunto = f"Solicitação de Protocolo - Venda {operadora} - {tipo_label} - {nome}"
+
+    # Corpo em texto puro (editável no modal)
+    comp_str = '\n'.join(composicao)
+    end_str  = endereco or '(não informado)'
+
+    corpo = f"""Olá, Pamela, tudo bem?
+
+Gostaria de solicitar o protocolo de venda referente {linha_intro}.
+
+Seguem os detalhes da proposta para conferência:
+Plano: {plano}
+
+Condição: {p['fator_moderador'] or '—'}
+
+Valor do grupo: {valor_fmt}
+
+Composição do Grupo ({vidas} {'vida' if int(vidas)==1 else 'vidas'}):
+{comp_str}
+
+DADOS DE CONTATO:
+E-MAIL: {email_contato}
+TELEFONE: {tel_contato}
+
+DADOS DO ENDEREÇO:
+{end_str}
+
+SOLICITO VIGÊNCIA: {p['vigencia'] or '—'}
+VENCIMENTO DIA: {p['dia_vencimento'] or '—'} de cada mês.
+
+{p['observacoes'] or ''}
+
+Seguem em anexo todos os documentos necessários para a formalização.
+Poderia me enviar o protocolo para darmos prosseguimento ao processo junto ao cliente?
+
+Fico no aguardo e agradeço desde já.
+
+Atenciosamente,
+{session.get('nome','Guilherme Augusto Santos')}
+Serenus Corretora de Saúde"""
+
+    tem_comprovante = bool(p['comprovante_boleto'])
+    tem_contrato    = bool(p['contrato_arquivo'])
+
+    return jsonify({
+        "ok": True,
+        "assunto": assunto,
+        "corpo": corpo,
+        "tem_comprovante": tem_comprovante,
+        "tem_contrato": tem_contrato,
+        "aviso_anexo": not (tem_comprovante or tem_contrato),
+    })
+
+def _montar_email_html_profissional(corpo_texto, particularidades='', eh_teste=False, pid=None):
+    """Monta HTML profissional e elegante para o e-mail de protocolo."""
+    logo_url = "https://job-serenus-production.up.railway.app/static/logo_arcos.png"
+    
+    # Converte corpo texto em HTML preservando quebras de linha e formatação
+    linhas_html = []
+    for linha in corpo_texto.split('\n'):
+        linha_limpa = linha.strip()
+        if not linha_limpa:
+            linhas_html.append('</p><p style="margin:12px 0;">')
+        elif ':' in linha_limpa and any(x in linha_limpa.upper() for x in ['PLANO:', 'OPERADORA:', 'TITULAR:', 'DADOS', 'VIGÊNCIA', 'VENCIMENTO', 'VALOR']):
+            # Linhas com dados
+            partes = linha_limpa.split(':', 1)
+            label = partes[0].strip()
+            valor = partes[1].strip() if len(partes) > 1 else ''
+            linhas_html.append(f'<strong style="color:#0f1f33;">{label}:</strong> <span style="color:#666;">{valor}</span><br>')
+        else:
+            linhas_html.append(f'{linha_limpa}<br>')
+    
+    corpo_html_body = ''.join(linhas_html).replace('<br></p>', '</p>').replace('<p style="margin:12px 0;"><br>', '<p style="margin:12px 0;">')
+    
+    if particularidades:
+        corpo_html_body += f'<p style="margin-top:20px; padding:14px; background:#f8f9fb; border-left:3px solid #1fd8a4;"><strong style="color:#0f1f33;">Observações importantes:</strong><br>{particularidades.replace(chr(10),"<br>")}</p>'
+    
+    html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; }}
+    .wrapper {{ background: #f5f7fa; padding: 24px; }}
+    .container {{ max-width: 640px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
+    .header {{ background: linear-gradient(135deg, #0f1f33 0%, #1a2f4a 100%); padding: 32px; text-align: center; }}
+    .logo {{ height: 40px; margin-bottom: 16px; display: block; margin-left: auto; margin-right: auto; }}
+    .header-title {{ color: white; font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.5px; }}
+    .header-subtitle {{ color: #1fd8a4; font-size: 12px; font-weight: 600; margin: 10px 0 0; letter-spacing: 0.8px; text-transform: uppercase; }}
+    .stripe {{ background: #1fd8a4; height: 4px; }}
+    .content {{ padding: 40px 36px; }}
+    .content p {{ margin: 16px 0; line-height: 1.7; font-size: 14px; }}
+    .content p:first-child {{ margin-top: 0; }}
+    .section-title {{ font-size: 13px; font-weight: 700; color: #0f1f33; text-transform: uppercase; letter-spacing: 0.8px; margin: 28px 0 16px; padding-bottom: 10px; border-bottom: 2px solid #1fd8a4; }}
+    .footer {{ background: #f0f2f5; border-top: 1px solid #e5e9f0; padding: 24px 36px; font-size: 12px; color: #666; line-height: 1.8; }}
+    .footer-brand {{ font-weight: 700; color: #0f1f33; margin-bottom: 4px; }}
+    .footer-small {{ font-size: 11px; color: #999; margin-top: 12px; padding-top: 12px; border-top: 1px solid #d1d5db; }}
+    .test-banner {{ background: #f43f7c; color: white; padding: 14px 36px; text-align: center; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; }}
+    .cta {{ background: #f8f9fb; border-left: 4px solid #1fd8a4; padding: 16px; margin: 24px 0; font-size: 13px; color: #333; }}
+    .cta strong {{ color: #0f1f33; }}
+    br {{ display: block; line-height: 1.2; }}
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="container">
+      {"<div class='test-banner'>MODO TESTE — Este e-mail foi enviado apenas para você. A Affinity não recebeu.</div>" if eh_teste else ""}
+      
+      <div class="header">
+        <img src="{logo_url}" alt="Serenus" class="logo">
+        <h1 class="header-title">Solicitação de Protocolo</h1>
+        <p class="header-subtitle">Implantação de Proposta · Sistema JOB</p>
+      </div>
+      
+      <div class="stripe"></div>
+      
+      <div class="content">
+        <p>{corpo_html_body}</p>
+        
+        <div class="cta">
+          <strong style="color: #0f1f33;">Próximos passos:</strong><br>
+          Por favor, analise a proposta e nos envie o protocolo de implantação para prosseguirmos junto ao cliente.
+        </div>
+      </div>
+      
+      <div class="footer">
+        <div class="footer-brand">Serenus Corretora de Saúde</div>
+        <div>guilherme@serenuscorretora.com.br</div>
+        <div class="footer-small">
+          Sistema JOB{f' • Proposta #{pid}' if pid else ''} • {datetime.now(TZ_SP).strftime('%d/%m/%Y às %H:%M')}
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>"""
+    
+    return html
+
+
+@app.route('/proposta/<int:pid>/enviar-teste', methods=['POST'])
+@login_required
+@admin_required
+def enviar_email_teste(pid):
+    """Envia o e-mail de protocolo APENAS para guilherme@serenuscorretora.com.br (modo teste)."""
+    DEST_TESTE = "guilherme@serenuscorretora.com.br"
+
+    d = request.json or {}
+    assunto      = d.get('assunto', '').strip()
+    corpo_texto  = d.get('corpo', '').strip()
+    particularidades = d.get('particularidades', '').strip()
+
+    if not assunto or not corpo_texto:
+        return jsonify({"ok": False, "msg": "Assunto e corpo são obrigatórios."}), 400
+
+    # Busca a proposta — anexa SÓ os documentos iniciais (extras), igual ao envio real.
+    # Comprovante e proposta assinada NÃO vão no protocolo (são da antecipação).
+    lista_anexos = []
+    conn = db()
+    p = conn.execute("SELECT anexos FROM propostas WHERE id=?", (pid,)).fetchone()
+    close_db(conn)
+    if p:
+        try:
+            extras = json.loads(p['anexos']) if p['anexos'] else []
+            lista_anexos.extend([a for a in extras if a])
+        except Exception:
+            pass
+    print(f"[TESTE PROTOCOLO pid={pid}] anexos iniciais ({len(lista_anexos)}): {lista_anexos} | UPLOAD_FOLDER={UPLOAD_FOLDER}")
+
+    corpo_html = _montar_email_html_profissional(corpo_texto, particularidades, eh_teste=True, pid=pid)
+    enviado = _enviar_email(DEST_TESTE, f"[TESTE] {assunto}", corpo_html, anexos=lista_anexos)
+
+    if enviado:
+        return jsonify({"ok": True, "msg": f"E-mail de teste enviado para {DEST_TESTE} com {len(lista_anexos)} documento(s) inicial(is). Verifique sua caixa de entrada."})
+    else:
+        erro = getattr(_enviar_email, 'ultimo_erro', None) or "BREVO_API_KEY não configurada no Railway."
+        return jsonify({"ok": False, "msg": f"Falha no envio: {erro}"}), 500
+
+@app.route('/proposta/<int:pid>/enviar-plataforma', methods=['POST'])
+@login_required
+@admin_required
+def enviar_plataforma(pid):
+    """Envia o e-mail de protocolo para a Affinity via Brevo com HTML profissional."""
+    DEST_AFFINITY = "pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br"
+    CC_SERENUS = "guilherme@serenuscorretora.com.br"
+
+    d = request.json or {}
+    assunto      = d.get('assunto', '').strip()
+    corpo_texto  = d.get('corpo', '').strip()
+    particularidades = d.get('particularidades', '').strip()
+
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    # Coleta SÓ os documentos iniciais (extras): Contrato Social, RG, CNPJ, etc.
+    # O comprovante de pagamento e a proposta assinada NÃO vão no protocolo —
+    # são documentos finais, usados apenas na antecipação de comissão.
+    lista_anexos = []
+    try:
+        extras = json.loads(p['anexos']) if p['anexos'] else []
+        lista_anexos.extend([a for a in extras if a])
+    except Exception:
+        pass
+
+    # Trava: exige ao menos um documento inicial anexado
+    if not lista_anexos:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Anexe ao menos um documento inicial (Contrato Social, RG, CNPJ, etc.) antes de enviar o protocolo à Affinity."}), 400
+
+    if not assunto or not corpo_texto:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Assunto e corpo do e-mail são obrigatórios."}), 400
+
+    corpo_html = _montar_email_html_profissional(corpo_texto, particularidades, eh_teste=False, pid=pid)
+
+    enviado = _enviar_email(DEST_AFFINITY, assunto, corpo_html, cc=CC_SERENUS, anexos=lista_anexos)
+
+    if enviado:
+        conn.execute("UPDATE propostas SET status_operacional='Em Análise Operadora' WHERE id=?", (pid,))
+        conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+            VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+            'plataforma', f"E-mail de protocolo enviado à Affinity. Assunto: {assunto}", datetime.now(TZ_SP)))
+        conn.commit(); close_db(conn)
+        return jsonify({"ok": True, "msg": "E-mail enviado. Status atualizado para 'Em Análise Operadora'."})
+    else:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "BREVO_API_KEY não configurada no Railway. E-mail não enviado."}), 500
+
+
+# ─── ANTECIPAÇÃO DE COMISSÃO (Affinity) ──────────────────────────────────────
+@app.route('/proposta/<int:pid>/antecipacao/preview')
+@login_required
+@admin_required
+def antecipacao_preview(pid):
+    """Verifica elegibilidade e monta o rascunho do e-mail de antecipação."""
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    close_db(conn)
+    if not p:
+        return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    operadora = p['adm_operadora'] or ''
+    tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
+    plano = _plano_from_modalidade(p['modalidade'], tp)
+    op_nome, _ = _split_operadora(operadora)
+    permitido = antecipacao_permitida(op_nome, plano)
+
+    # Documentos disponíveis
+    tem_contrato = bool(p['contrato_arquivo'])
+    tem_comprovante = bool(p['comprovante_boleto'])
+
+    cliente = p['razao_social'] or ''
+    # Documento do titular (CPF formatado se PF, CNPJ se PME)
+    doc = (p['cpf_titular'] if 'cpf_titular' in p.keys() and p['cpf_titular'] else
+           (p['cnpj'] if 'cnpj' in p.keys() and p['cnpj'] else ''))
+
+    return jsonify({
+        "ok": True,
+        "permitido": permitido,
+        "operadora": op_nome,
+        "plano": plano,
+        "cliente": cliente,
+        "documento": doc,
+        "tem_contrato": tem_contrato,
+        "tem_comprovante": tem_comprovante,
+        "motivo_bloqueio": "" if permitido else f"A operadora {op_nome} não permite antecipação de comissão no plano {plano} (regra Affinity).",
+    })
+
+
+@app.route('/proposta/<int:pid>/antecipacao/enviar', methods=['POST'])
+@login_required
+@admin_required
+def antecipacao_enviar(pid):
+    """Envia o e-mail de solicitação de antecipação de comissão à Affinity, com anexos.
+    Registra no histórico da proposta."""
+    DEST_AFFINITY = "pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br"
+    CC_SERENUS = "guilherme@serenuscorretora.com.br"
+
+    d = request.json or {}
+    numero_contrato = (d.get('numero_contrato') or '').strip()
+    eh_teste = bool(d.get('teste'))
+
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    operadora = p['adm_operadora'] or ''
+    tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
+    plano = _plano_from_modalidade(p['modalidade'], tp)
+    op_nome, _ = _split_operadora(operadora)
+
+    # Trava 1: operadora precisa permitir antecipação
+    if not antecipacao_permitida(op_nome, plano):
+        close_db(conn)
+        return jsonify({"ok": False, "msg": f"A operadora {op_nome} não permite antecipação de comissão no plano {plano} (regra Affinity)."}), 400
+
+    # Trava 2: precisa do contrato E do comprovante anexados
+    if not p['contrato_arquivo'] or not p['comprovante_boleto']:
+        close_db(conn)
+        faltam = []
+        if not p['contrato_arquivo']: faltam.append("contrato assinado")
+        if not p['comprovante_boleto']: faltam.append("comprovante de pagamento")
+        return jsonify({"ok": False, "msg": f"Para solicitar antecipação é necessário anexar: {' e '.join(faltam)}."}), 400
+
+    # Trava 3: número do contrato é obrigatório
+    if not numero_contrato:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Informe o número do contrato."}), 400
+
+    cliente = p['razao_social'] or ''
+    doc = (p['cpf_titular'] if 'cpf_titular' in p.keys() and p['cpf_titular'] else
+           (p['cnpj'] if 'cnpj' in p.keys() and p['cnpj'] else ''))
+    linha_cliente = f"{doc} {cliente}".strip() if doc else cliente
+    linha_cliente = f"{linha_cliente} (Contrato Nº {numero_contrato})"
+
+    assunto = "Solicitação de Antecipação de Comissão - Contratos"
+    corpo_html = _montar_email_antecipacao_html([linha_cliente], eh_teste=eh_teste, pid=pid)
+
+    # Anexos da ANTECIPAÇÃO: SOMENTE comprovante de pagamento + contrato/proposta assinada
+    # (documentos finais). Os documentos iniciais/extras NÃO entram aqui.
+    lista_anexos = [p['comprovante_boleto'], p['contrato_arquivo']]
+    lista_anexos = [a for a in lista_anexos if a]
+
+    destino = CC_SERENUS if eh_teste else DEST_AFFINITY
+    assunto_final = f"[TESTE] {assunto}" if eh_teste else assunto
+    cc = None if eh_teste else CC_SERENUS
+    enviado = _enviar_email(destino, assunto_final, corpo_html, cc=cc, anexos=lista_anexos)
+
+    if enviado:
+        if not eh_teste:
+            conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+                VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+                'antecipacao', f"Solicitação de antecipação de comissão enviada à Affinity. Contrato Nº {numero_contrato} · {op_nome}/{plano}.", datetime.now(TZ_SP)))
+            conn.commit()
+        close_db(conn)
+        destino_msg = "para você (teste)" if eh_teste else "à Affinity"
+        return jsonify({"ok": True, "msg": f"Solicitação de antecipação enviada {destino_msg} com {len(lista_anexos)} anexo(s)."})
+    else:
+        close_db(conn)
+        erro = getattr(_enviar_email, 'ultimo_erro', None) or "BREVO_API_KEY não configurada no Railway."
+        return jsonify({"ok": False, "msg": f"Falha no envio: {erro}"}), 500
+
+
+def _montar_email_antecipacao_html(linhas_clientes, eh_teste=False, pid=None):
+    """Monta o HTML do e-mail de antecipação no MESMO padrão visual do e-mail de proposta.
+    linhas_clientes: lista de strings (ex: '63 299 486 WILLAMI ... (Contrato Nº 97106295)')."""
+    logo_url = "https://job-serenus-production.up.railway.app/static/logo_arcos.png"
+    plural = len(linhas_clientes) > 1
+    termo_contrato = "aos contratos recém-implantados" if plural else "ao contrato recém-implantado"
+    termo_dados = "os dados dos clientes" if plural else "os dados do cliente"
+    termo_anexo = ("Os contratos assinados e os respectivos comprovantes de pagamento já estão anexados a este e-mail."
+                   if plural else
+                   "O contrato assinado e o respectivo comprovante de pagamento já estão anexados a este e-mail.")
+    itens = ''.join(
+        f'<div style="padding:10px 14px; background:#f8f9fb; border-left:3px solid #1fd8a4; margin:8px 0; font-size:14px; color:#0f1f33; font-weight:600;">{l}</div>'
+        for l in linhas_clientes
+    )
+
+    html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; }}
+    .wrapper {{ background: #f5f7fa; padding: 24px; }}
+    .container {{ max-width: 640px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
+    .header {{ background: linear-gradient(135deg, #0f1f33 0%, #1a2f4a 100%); padding: 32px; text-align: center; }}
+    .logo {{ height: 40px; margin-bottom: 16px; display: block; margin-left: auto; margin-right: auto; }}
+    .header-title {{ color: white; font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.5px; }}
+    .header-subtitle {{ color: #1fd8a4; font-size: 12px; font-weight: 600; margin: 10px 0 0; letter-spacing: 0.8px; text-transform: uppercase; }}
+    .stripe {{ background: #1fd8a4; height: 4px; }}
+    .content {{ padding: 40px 36px; }}
+    .content p {{ margin: 16px 0; line-height: 1.7; font-size: 14px; }}
+    .content p:first-child {{ margin-top: 0; }}
+    .section-title {{ font-size: 13px; font-weight: 700; color: #0f1f33; text-transform: uppercase; letter-spacing: 0.8px; margin: 28px 0 14px; padding-bottom: 10px; border-bottom: 2px solid #1fd8a4; }}
+    .footer {{ background: #f0f2f5; border-top: 1px solid #e5e9f0; padding: 24px 36px; font-size: 12px; color: #666; line-height: 1.8; }}
+    .footer-brand {{ font-weight: 700; color: #0f1f33; margin-bottom: 4px; }}
+    .footer-small {{ font-size: 11px; color: #999; margin-top: 12px; padding-top: 12px; border-top: 1px solid #d1d5db; }}
+    .test-banner {{ background: #f43f7c; color: white; padding: 14px 36px; text-align: center; font-size: 13px; font-weight: 700; letter-spacing: 0.5px; }}
+    .cta {{ background: #f8f9fb; border-left: 4px solid #1fd8a4; padding: 16px; margin: 24px 0; font-size: 13px; color: #333; }}
+    .cta strong {{ color: #0f1f33; }}
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="container">
+      {"<div class='test-banner'>MODO TESTE — Este e-mail foi enviado apenas para você. A Affinity não recebeu.</div>" if eh_teste else ""}
+
+      <div class="header">
+        <img src="{logo_url}" alt="Serenus" class="logo">
+        <h1 class="header-title">Antecipação de Comissão</h1>
+        <p class="header-subtitle">Solicitação de Antecipação · Sistema JOB</p>
+      </div>
+
+      <div class="stripe"></div>
+
+      <div class="content">
+        <p>Prezada Pamela,</p>
+        <p>Gostaria de solicitar a antecipação do pagamento da comissão referente {termo_contrato}. Seguem abaixo {termo_dados} para conferência:</p>
+
+        <div class="section-title">Dados para Conferência</div>
+        {itens}
+
+        <p>{termo_anexo}</p>
+        <p>Poderiam me confirmar o recebimento e o prazo para a liberação da antecipação?</p>
+
+        <div class="cta">
+          <strong>À disposição:</strong><br>
+          Fico à disposição caso precisem de mais alguma informação ou documentação adicional.
+        </div>
+
+        <p style="margin-top:24px;">Atenciosamente,</p>
+      </div>
+
+      <div class="footer">
+        <div class="footer-brand">Serenus Corretora de Saúde</div>
+        <div>guilherme@serenuscorretora.com.br</div>
+        <div class="footer-small">
+          Sistema JOB{f' • Proposta #{pid}' if pid else ''} • {datetime.now(TZ_SP).strftime('%d/%m/%Y às %H:%M')}
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>"""
+    return html
+
+
+@app.route('/api/etiquetas')
+@login_required
+def api_etiquetas():
+    conn = db()
+    todas = conn.execute("SELECT * FROM etiquetas ORDER BY nome").fetchall()
+    pid = request.args.get('proposta_id')
+    marcadas = []
+    if pid:
+        marcadas = [r['etiqueta_id'] for r in conn.execute("SELECT etiqueta_id FROM proposta_etiquetas WHERE proposta_id=?", (pid,)).fetchall()]
+    close_db(conn)
+    return jsonify({'todas': [dict(e) for e in todas], 'marcadas': marcadas})
+
+@app.route('/etiqueta/criar', methods=['POST'])
+@login_required
+@admin_required
+def etiqueta_criar():
+    d = request.json or {}
+    conn = db()
+    try:
+        conn.execute("INSERT INTO etiquetas (nome,cor) VALUES (?,?)", (d['nome'], d.get('cor','#1fd8a4')))
+        conn.commit()
+    except sqlite3.IntegrityError: pass
+    close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/proposta/<int:pid>/etiquetas', methods=['POST'])
+@login_required
+def proposta_etiquetas(pid):
+    ids = (request.json or {}).get('etiquetas', [])
+    conn = db()
+    conn.execute("DELETE FROM proposta_etiquetas WHERE proposta_id=?", (pid,))
+    for eid in ids:
+        conn.execute("INSERT OR IGNORE INTO proposta_etiquetas (proposta_id,etiqueta_id) VALUES (?,?)", (pid, eid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+# ─── DIAGNÓSTICO DO DRIVE ─────────────────────────────────────────────────────────
+# ─── PRODUTOS / PLANOS POR OPERADORA ──────────────────────────────────────────────
+@app.route('/produtos')
+@login_required
+@admin_required
+def produtos():
+    conn = db()
+    rows = conn.execute("SELECT * FROM produtos WHERE ativo=1 ORDER BY operadora, nome").fetchall()
+    ops = conn.execute("SELECT DISTINCT operadora FROM recebimento ORDER BY operadora").fetchall()
+    close_db(conn)
+    return render_template('produtos.html', produtos=rows, operadoras=[o['operadora'] for o in ops])
+
+@app.route('/produto/salvar', methods=['POST'])
+@login_required
+@admin_required
+def produto_salvar():
+    d = request.json or {}
+    conn = db()
+    if d.get('id'):
+        conn.execute("""UPDATE produtos SET operadora=?,nome=?,tipo_plano=?,acomodacao=?,coparticipacao=?,observacao=? WHERE id=?""",
+            (d['operadora'],d['nome'],d.get('tipo_plano',''),d.get('acomodacao',''),d.get('coparticipacao',''),d.get('observacao',''),d['id']))
+    else:
+        conn.execute("""INSERT INTO produtos (operadora,nome,tipo_plano,acomodacao,coparticipacao,observacao) VALUES (?,?,?,?,?,?)""",
+            (d['operadora'],d['nome'],d.get('tipo_plano',''),d.get('acomodacao',''),d.get('coparticipacao',''),d.get('observacao','')))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/produto/excluir/<int:prid>', methods=['POST'])
+@login_required
+@admin_required
+def produto_excluir(prid):
+    conn = db(); conn.execute("UPDATE produtos SET ativo=0 WHERE id=?", (prid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/api/produtos')
+@login_required
+def api_produtos():
+    op = request.args.get('operadora','')
+    conn = db()
+    if op:
+        rows = conn.execute("SELECT * FROM produtos WHERE ativo=1 AND operadora=? ORDER BY nome", (op,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM produtos WHERE ativo=1 ORDER BY operadora,nome").fetchall()
+    close_db(conn)
+    return jsonify([dict(r) for r in rows])
+
+# ─── EDITAR PROPOSTA + TIMELINE ───────────────────────────────────────────────────
+# Campos editáveis organizados por seção (usado no modal de edição completa).
+# 'tipo' define o input no front: text, number, date, money, select, textarea.
+CAMPOS_EDIT_SECOES = [
+    {'secao': 'Cliente', 'campos': [
+        {'k': 'razao_social',       'label': 'Razão social / Nome',   'tipo': 'text'},
+        {'k': 'cnpj',               'label': 'CNPJ',                   'tipo': 'text'},
+        {'k': 'cpf_titular',        'label': 'CPF do titular',        'tipo': 'text'},
+        {'k': 'data_nasc_titular',  'label': 'Nascimento do titular', 'tipo': 'date'},
+        {'k': 'total_vidas',        'label': 'Total de vidas',        'tipo': 'number'},
+        {'k': 'titular_dependentes','label': 'Titular + dependentes', 'tipo': 'text'},
+    ]},
+    {'secao': 'Plano', 'campos': [
+        {'k': 'adm_operadora',  'label': 'Operadora',        'tipo': 'text'},
+        {'k': 'produto',        'label': 'Produto / Plano',  'tipo': 'text'},
+        {'k': 'modalidade',     'label': 'Modalidade',       'tipo': 'text'},
+        {'k': 'tipo_pessoa',    'label': 'Tipo de pessoa',   'tipo': 'select', 'opcoes': ['PF','PJ']},
+        {'k': 'tipo_contrato',  'label': 'Tipo de contrato', 'tipo': 'text'},
+        {'k': 'acomodacao',     'label': 'Acomodação',       'tipo': 'text'},
+        {'k': 'fator_moderador','label': 'Coparticipação',   'tipo': 'text'},
+    ]},
+    {'secao': 'Valores e Datas', 'campos': [
+        {'k': 'valor',          'label': 'Valor (mensalidade)', 'tipo': 'money'},
+        {'k': 'vigencia',       'label': 'Vigência',            'tipo': 'date'},
+        {'k': 'dia_vencimento', 'label': 'Dia de vencimento',   'tipo': 'number'},
+        {'k': 'numero_proposta','label': 'Número da proposta',  'tipo': 'text'},
+    ]},
+    {'secao': 'Responsável pelo contrato', 'campos': [
+        {'k': 'resp_contrato',       'label': 'Nome',     'tipo': 'text'},
+        {'k': 'email_resp_contrato', 'label': 'E-mail',   'tipo': 'text'},
+        {'k': 'tel_resp_contrato',   'label': 'Telefone', 'tipo': 'text'},
+    ]},
+    {'secao': 'Responsável pela negociação', 'campos': [
+        {'k': 'resp_negociacao',       'label': 'Nome',     'tipo': 'text'},
+        {'k': 'email_resp_negociacao', 'label': 'E-mail',   'tipo': 'text'},
+        {'k': 'tel_resp_negociacao',   'label': 'Telefone', 'tipo': 'text'},
+    ]},
+    {'secao': 'Observações', 'campos': [
+        {'k': 'observacoes', 'label': 'Observações', 'tipo': 'textarea'},
+    ]},
+]
+# Mapa plano {campo: label} derivado das seções (compatível com código existente).
+CAMPOS_EDITAVEIS = {c['k']: c['label'] for s in CAMPOS_EDIT_SECOES for c in s['campos']}
+
+@app.route('/proposta/<int:pid>/editar', methods=['POST'])
+@login_required
+@admin_required
+def proposta_editar(pid):
+    """Edição completa de propostas — todos os campos (admin)."""
+    d = request.json or {}
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p: close_db(conn); return jsonify({"ok": False}), 404
+    
+    nome_user = session.get('nome','admin')
+    user_id = session.get('user_id')
+    
+    # Campos numéricos para conversão
+    NUMERICOS = {'valor','total_vidas','dia_vencimento','num_parcelas','comissao_total_corretora','comissao_consultor','comissao_corretora_liquida'}
+    
+    def conv(campo, v):
+        if campo in NUMERICOS:
+            s = str(v or '').replace('.','').replace(',','.') if campo in ('valor','comissao_total_corretora','comissao_consultor','comissao_corretora_liquida') else str(v or '')
+            try: return float(s) if campo in ('valor','comissao_total_corretora','comissao_consultor','comissao_corretora_liquida') else int(s or 0)
+            except: return 0
+        return v
+    
+    mudou = []
+    
+    # Edição restrita a CAMPOS_EDITAVEIS (mantém compatibilidade)
+    for campo, label in CAMPOS_EDITAVEIS.items():
+        if campo in d:
+            antes = p[campo] if campo in p.keys() else ''
+            depois = conv(campo, d[campo])
+            if str(antes or '') != str(depois or ''):
+                conn.execute(f"UPDATE propostas SET {campo}=? WHERE id=?", (depois, pid))
+                conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+                    VALUES (?,?,?,?,?,?,?)""", (pid, user_id, nome_user, label, str(antes or '—'), str(depois or '—'), datetime.now(TZ_SP)))
+                mudou.append(label)
+    
+    # Edição expandida: campos adicionais fora de CAMPOS_EDITAVEIS
+    CAMPOS_ADICIONAIS = {
+        'razao_social': 'Razão Social',
+        'cpf_titular': 'CPF Titular',
+        'cnpj': 'CNPJ',
+        'valor': 'Valor da Venda',
+        'vigencia': 'Vigência',
+        'modalidade': 'Modalidade',
+        'tipo_pessoa': 'Tipo Pessoa',
+        'adm_operadora': 'Operadora',
+        'produto': 'Produto',
+        'total_vidas': 'Total de Vidas',
+        'regime_aplicado': 'Regime Aplicado',
+        'observacoes': 'Observações',
+        'campos_extras': 'Campos Extras (JSON)',
+    }
+    
+    for campo, label in CAMPOS_ADICIONAIS.items():
+        if campo in d and campo not in CAMPOS_EDITAVEIS:
+            antes = p[campo] if campo in p.keys() else ''
+            depois = conv(campo, d[campo])
+            if str(antes or '') != str(depois or ''):
+                conn.execute(f"UPDATE propostas SET {campo}=? WHERE id=?", (depois, pid))
+                conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+                    VALUES (?,?,?,?,?,?,?)""", (pid, user_id, nome_user, label, str(antes or '—'), str(depois or '—'), datetime.now(TZ_SP)))
+                mudou.append(label)
+    
+    # Se valor foi alterado, recalcular e regenerar parcelas se necessário
+    if 'valor' in d:
+        novo_valor = float(str(d['valor'] or 0).replace('.','').replace(',','.'))
+        operadora = p['adm_operadora']
+        regime = p['regime_aplicado']
+        mod = p['modalidade']
+        tipo_p = p['tipo_pessoa']
+        prod_acum = 0  # Simplificado
+        
+        # Recalcular comissão
+        calc = calc_comissao(operadora, regime, prod_acum, novo_valor, mod, tipo_p)
+        
+        # Atualizar comissões na proposta
+        conn.execute("""
+            UPDATE propostas 
+            SET comissao_total_corretora=?, comissao_consultor=?, comissao_corretora_liquida=?,
+                num_parcelas=?, distribuicao_parcelas=?
+            WHERE id=?
+        """, (calc['total_corretora'], calc['consultor'], calc['liquido'], 
+              calc['num_parcelas'], calc['dist_corretora'], pid))
+        
+        # Regenerar parcelas pendentes
+        gerar_parcelas(pid, p['vigencia'], 'c', p.get('dia_vencimento'))
+        mudou.append("Parcelas recalculadas")
+    
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "mudou": mudou})
+
+
+# ─── SOLICITAÇÃO DE EDIÇÃO (consultor pede, admin aprova) ─────────────────────────
+@app.route('/proposta/<int:pid>/solicitar-edicao', methods=['POST'])
+@login_required
+def solicitar_edicao(pid):
+    """Consultor envia pedido de alteração; fica Pendente até o admin decidir."""
+    d = request.json or {}
+    alteracoes = d.get('alteracoes') or {}   # {campo: novo_valor}
+    if not alteracoes:
+        return jsonify({"ok": False, "msg": "Nenhuma alteração informada."}), 400
+
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn); return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    # Consultor só solicita nas próprias propostas; admin pode editar direto (não usa isto)
+    if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False, "msg": "Sem permissão"}), 403
+
+    # Monta diff legível: só campos que realmente mudam
+    diff = {}
+    for campo, novo in alteracoes.items():
+        if campo not in CAMPOS_EDITAVEIS:
+            continue
+        atual = p[campo] if campo in p.keys() else ''
+        if str(atual or '') != str(novo or ''):
+            diff[campo] = {'label': CAMPOS_EDITAVEIS[campo], 'de': str(atual or '—'), 'para': str(novo or '—'), 'valor': novo}
+    if not diff:
+        close_db(conn); return jsonify({"ok": False, "msg": "Os valores enviados são iguais aos atuais."}), 400
+
+    # Evita duplicar pedido pendente para a mesma proposta
+    ja = conn.execute("SELECT id FROM solicitacoes_edicao WHERE proposta_id=? AND status='Pendente'", (pid,)).fetchone()
+    if ja:
+        close_db(conn); return jsonify({"ok": False, "msg": "Já existe uma solicitação pendente para esta proposta. Aguarde o admin avaliar."}), 400
+
+    conn.execute("""INSERT INTO solicitacoes_edicao (proposta_id,usuario_id,usuario_nome,alteracoes,status,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','consultor'),
+        json.dumps(diff, ensure_ascii=False), 'Pendente', datetime.now(TZ_SP)))
+    # Registra no histórico da proposta
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+        VALUES (?,?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','consultor'),
+        'solicitacao_edicao', '', f"{len(diff)} campo(s) solicitado(s) para alteração", datetime.now(TZ_SP)))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": f"Solicitação enviada ({len(diff)} alteração(ões)). O administrador vai avaliar."})
+
+
+@app.route('/admin/solicitacoes-edicao')
+@login_required
+@admin_required
+def listar_solicitacoes():
+    """Lista solicitações de edição pendentes (admin)."""
+    conn = db()
+    rows = conn.execute("""SELECT se.*, p.razao_social
+        FROM solicitacoes_edicao se JOIN propostas p ON p.id=se.proposta_id
+        WHERE se.status='Pendente' ORDER BY se.criado_em DESC""").fetchall()
+    close_db(conn)
+    out = []
+    for r in rows:
+        d = dict(r)
+        try: d['alteracoes_parsed'] = json.loads(r['alteracoes']) if r['alteracoes'] else {}
+        except Exception: d['alteracoes_parsed'] = {}
+        out.append(d)
+    return jsonify({"ok": True, "solicitacoes": out, "total": len(out)})
+
+
+@app.route('/admin/solicitacao-edicao/<int:sid>/resolver', methods=['POST'])
+@login_required
+@admin_required
+def resolver_solicitacao(sid):
+    """Admin aprova (aplica as mudanças) ou recusa uma solicitação."""
+    d = request.json or {}
+    acao = d.get('acao')  # 'aprovar' | 'recusar'
+    motivo = (d.get('motivo') or '').strip()
+
+    conn = db()
+    s = conn.execute("SELECT * FROM solicitacoes_edicao WHERE id=?", (sid,)).fetchone()
+    if not s:
+        close_db(conn); return jsonify({"ok": False, "msg": "Solicitação não encontrada"}), 404
+    if s['status'] != 'Pendente':
+        close_db(conn); return jsonify({"ok": False, "msg": "Esta solicitação já foi resolvida."}), 400
+
+    pid = s['proposta_id']
+    try: alteracoes = json.loads(s['alteracoes']) if s['alteracoes'] else {}
+    except Exception: alteracoes = {}
+
+    if acao == 'aprovar':
+        p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+        NUMERICOS = {'valor','total_vidas','dia_vencimento'}
+        aplicados = []
+        for campo, info in alteracoes.items():
+            if campo not in CAMPOS_EDITAVEIS:
+                continue
+            novo = info.get('valor') if isinstance(info, dict) else info
+            if campo in NUMERICOS:
+                s_val = str(novo or '').replace('.','').replace(',','.') if campo == 'valor' else str(novo or '')
+                try: novo = float(s_val) if campo == 'valor' else int(s_val or 0)
+                except: novo = 0
+            antes = p[campo] if campo in p.keys() else ''
+            conn.execute(f"UPDATE propostas SET {campo}=? WHERE id=?", (novo, pid))
+            conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+                VALUES (?,?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+                CAMPOS_EDITAVEIS[campo], str(antes or '—'), str(novo or '—'), datetime.now(TZ_SP)))
+            aplicados.append(CAMPOS_EDITAVEIS[campo])
+        conn.execute("""UPDATE solicitacoes_edicao SET status='Aprovada', resolvido_em=?, resolvido_por=? WHERE id=?""",
+            (datetime.now(TZ_SP), session.get('nome','admin'), sid))
+        conn.commit(); close_db(conn)
+        return jsonify({"ok": True, "msg": f"Aprovada. {len(aplicados)} campo(s) atualizado(s): {', '.join(aplicados)}."})
+
+    elif acao == 'recusar':
+        conn.execute("""UPDATE solicitacoes_edicao SET status='Recusada', motivo_recusa=?, resolvido_em=?, resolvido_por=? WHERE id=?""",
+            (motivo or 'Sem motivo informado', datetime.now(TZ_SP), session.get('nome','admin'), sid))
+        conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
+            VALUES (?,?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+            'solicitacao_recusada', '', f"Solicitação de edição recusada. {('Motivo: '+motivo) if motivo else ''}", datetime.now(TZ_SP)))
+        conn.commit(); close_db(conn)
+        return jsonify({"ok": True, "msg": "Solicitação recusada."})
+
+    close_db(conn)
+    return jsonify({"ok": False, "msg": "Ação inválida."}), 400
+
+
+@app.route('/proposta/<int:pid>/historico')
+@login_required
+def proposta_historico(pid):
+    conn = db()
+    h = conn.execute("""SELECT * FROM historico_proposta WHERE proposta_id=? ORDER BY id DESC""", (pid,)).fetchall()
+    close_db(conn)
+    return jsonify([dict(x) for x in h])
+
+# ─── FASES DA PROPOSTA (fluxo com avisos lógicos) ─────────────────────────────────
+FASES = [
+    {'id':'Proposta cadastrada','desc':'Venda registrada pelo consultor. Próximo: enviar à operadora para análise.','falta':'comprovante'},
+    {'id':'Em análise na operadora','desc':'Aguardando a operadora analisar. Pode subir sem o comprovante ainda. Próximo: anexar o comprovante quando a operadora aprovar.','falta':'comprovante'},
+    {'id':'Aprovada / aguardando comprovante','desc':'Operadora aprovou. Falta anexar o comprovante de pagamento da 1ª mensalidade.','falta':'comprovante'},
+    {'id':'Comprovante anexado','desc':'Comprovante recebido. Próximo: gestor confirmar a entrada do pagamento.','falta':None},
+    {'id':'Entrada confirmada','desc':'Pagamento confirmado pelo gestor. Comissão liberada para o fluxo.','falta':None},
+    {'id':'Finalizada','desc':'Processo concluído.','falta':None},
+]
+@app.route('/proposta/<int:pid>/fase', methods=['POST'])
+@login_required
+@admin_required
+def proposta_fase(pid):
+    nova = (request.json or {}).get('fase')
+    conn = db()
+    p = conn.execute("SELECT fase,contrato_arquivo,comprovante_boleto FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p: close_db(conn); return jsonify({"ok": False}), 404
+    fase_info = next((f for f in FASES if f['id']==nova), None)
+    aviso = ''
+    if fase_info and fase_info['falta']=='comprovante' and not p['comprovante_boleto']:
+        aviso = 'Atenção: esta proposta ainda está sem comprovante anexado. Você pode prosseguir, mas lembre de anexar quando a operadora aprovar.'
+    conn.execute("UPDATE propostas SET fase=? WHERE id=?", (nova, pid))
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_nome,campo,valor_antes,valor_depois)
+        VALUES (?,?,?,?,?)""", (pid, session.get('nome','admin'), 'Fase', p['fase'] or '—', nova))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "aviso": aviso})
+
+# ─── ROTAS DE PARCELAS (FLUXO DE CAIXA) ─────────────────────────────────────────
+@app.route('/parcela/<int:pid>/status', methods=['POST'])
+@login_required
+@admin_required
+def parcela_status(pid):
+    """Mudança manual de status (select do admin)."""
+    novo = request.form.get('status')
+    conn = db()
+    extra = ""
+    if novo == 'Liberado para o corretor':
+        conn.execute("UPDATE parcelas SET status=?,confirmado_gestor=1,data_confirmacao_gestor=? WHERE id=?",
+                     (novo, datetime.now(TZ_SP).isoformat(), pid))
+    elif novo == 'Pago ao corretor':
+        conn.execute("UPDATE parcelas SET status=?,data_pagamento=? WHERE id=?",
+                     (novo, datetime.now(TZ_SP).isoformat(), pid))
+    else:
+        conn.execute("UPDATE parcelas SET status=? WHERE id=?", (novo, pid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/parcela/<int:pid>/acao', methods=['POST'])
+@login_required
+@admin_required
+def parcela_acao(pid):
+    """Avança a parcela um passo no fluxo, com confirmação do gestor."""
+    acao = request.form.get('acao')
+    conn = db()
+    agora = datetime.now(TZ_SP).isoformat()
+    if acao == 'receber':
+        conn.execute("UPDATE parcelas SET status='Recebido e não repassado' WHERE id=?", (pid,))
+    elif acao == 'liberar':  # confirmação do gestor
+        conn.execute("UPDATE parcelas SET status='Liberado para o corretor',confirmado_gestor=1,data_confirmacao_gestor=? WHERE id=?",
+                     (agora, pid))
+    elif acao == 'pagar':
+        conn.execute("UPDATE parcelas SET status='Pago ao corretor',data_pagamento=? WHERE id=?", (agora, pid))
+    elif acao == 'voltar':
+        conn.execute("UPDATE parcelas SET status='Pendente de receber',confirmado_gestor=0,aceite_corretor=0 WHERE id=?", (pid,))
+    else:
+        close_db(conn); return jsonify({"ok": False, "msg": "Ação inválida"}), 400
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/parcela/<int:pid>/antecipar', methods=['POST'])
+@login_required
+def parcela_antecipar(pid):
+    """Corretor sobe comprovante de pagamento do cliente (somente parcela 1)."""
+    if 'comprovante' not in request.files:
+        return jsonify({"ok": False, "msg": "Nenhum arquivo enviado"}), 400
+    
+    f = request.files['comprovante']
+    nome = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_antecip_{f.filename}"
+    caminho = os.path.join(UPLOAD_FOLDER, nome)
+    f.save(caminho)
+    
+    conn = db()
+    # Valida que é parcela 1 e pertence ao consultor
+    parc = conn.execute("""SELECT pa.*, p.usuario_id FROM parcelas pa
+        JOIN propostas p ON p.id=pa.proposta_id WHERE pa.id=?""",(pid,)).fetchone()
+        
+    if not parc or parc['numero'] != 1:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Antecipação só disponível para a 1ª parcela"}), 400
+        
+    if session['perfil'] != 'admin' and parc['usuario_id'] != session['user_id']:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Acesso negado"}), 403
+        
+    conn.execute("UPDATE parcelas SET comprovante_antecipacao=?,status='Antecipação - Aguardando ADM' WHERE id=?",
+                 (nome, pid))
+    conn.commit()
+    close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/parcela/<int:pid>/aprovar-antecipacao', methods=['POST'])
+@login_required
+@admin_required
+def parcela_aprovar_antecip(pid):
+    """ADM aprova o comprovante e solicita os 48h à operadora."""
+    conn = db()
+    conn.execute("UPDATE parcelas SET status='Antecipação Solicitada à Operadora' WHERE id=?", (pid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/parcela/<int:pid>/aceite', methods=['POST'])
+@login_required
+def parcela_aceite(pid):
+    """Consultor confirma 'Conferido e De Acordo' quando parcela está liberada."""
+    conn = db()
+    parc = conn.execute("""SELECT pa.*, p.usuario_id FROM parcelas pa
+        JOIN propostas p ON p.id=pa.proposta_id WHERE pa.id=?""",(pid,)).fetchone()
+    if not parc: close_db(conn); return jsonify({"ok": False, "msg": "Parcela não encontrada"}), 404
+    if session['perfil'] != 'admin' and parc['usuario_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False, "msg": "Acesso negado"}), 403
+    conn.execute("UPDATE parcelas SET aceite_corretor=1,data_aceite=? WHERE id=?",
+                 (datetime.now(TZ_SP).isoformat(), pid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+# ─── FLUXO DE CAIXA ──────────────────────────────────────────────────────────────
+@app.route('/fluxo-caixa')
+@login_required
+def fluxo_caixa():
+    conn = db(); uid = session['user_id']
+    ciclo = ciclo_atual()
+    eh_admin = session['perfil'] == 'admin'
+
+    if eh_admin:
+        # Totais por status
+        totais = {}
+        for s in ["Pendente de receber","Recebido e não repassado","Liberado para o corretor","Pago ao corretor"]:
+            totais[s] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM parcelas WHERE status=?", (s,)).fetchone()['v']
+        totais['antecipacoes'] = conn.execute(
+            "SELECT COALESCE(SUM(valor),0) v FROM parcelas WHERE status IN ('Antecipação - Aguardando ADM','Antecipação Solicitada à Operadora')").fetchone()['v']
+        totais['total_em_aberto'] = sum(totais[s] for s in ["Pendente de receber","Recebido e não repassado","Liberado para o corretor"])
+
+        # Antecipações aguardando aprovação ADM
+        antecipacoes = conn.execute("""
+            SELECT pa.*, p.razao_social, p.consultor, p.adm_operadora, p.valor as val_proposta
+            FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Antecipação - Aguardando ADM' ORDER BY pa.id DESC
+        """).fetchall()
+
+        # Lote do ciclo atual (liberados para o corretor)
+        lote = conn.execute("""
+            SELECT pa.*, p.razao_social, p.consultor, p.adm_operadora, p.id as proposta_id,
+                   u.chave_pix
+            FROM parcelas pa
+            JOIN propostas p ON p.id=pa.proposta_id
+            LEFT JOIN usuarios u ON u.id=p.usuario_id
+            WHERE pa.status='Liberado para o corretor' ORDER BY p.consultor, pa.id
+        """).fetchall()
+
+        # Todos os recebidos aguardando repasse
+        recebidos = conn.execute("""
+            SELECT pa.*, p.razao_social, p.consultor, p.adm_operadora, p.id as proposta_id
+            FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Recebido e não repassado' ORDER BY pa.id DESC
+        """).fetchall()
+
+        # Histórico de pagos (últimos 30)
+        pagos = conn.execute("""
+            SELECT pa.*, p.razao_social, p.consultor, p.adm_operadora
+            FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
+            WHERE pa.status='Pago ao corretor' ORDER BY pa.id DESC LIMIT 30
+        """).fetchall()
+
+        close_db(conn)
+        return render_template('fluxo_caixa.html', ciclo=ciclo, totais=totais,
+                               antecipacoes=antecipacoes, lote=lote,
+                               recebidos=recebidos, pagos=pagos,
+                               status_fluxo=STATUS_FLUXO)
+    else:
+        # Visão do consultor
+        a_receber = conn.execute("""SELECT pa.*, p.razao_social, p.adm_operadora, p.id as proposta_id
+            FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
+            WHERE p.usuario_id=? AND pa.status='Liberado para o corretor' ORDER BY pa.id""",(uid,)).fetchall()
+        em_analise = conn.execute("""SELECT pa.*, p.razao_social, p.adm_operadora, p.id as proposta_id
+            FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
+            WHERE p.usuario_id=? AND pa.status NOT IN ('Liberado para o corretor','Pago ao corretor')
+            ORDER BY pa.id DESC""",(uid,)).fetchall()
+        pagos_consul = conn.execute("""SELECT pa.*, p.razao_social, p.adm_operadora
+            FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
+            WHERE p.usuario_id=? AND pa.status='Pago ao corretor' ORDER BY pa.id DESC LIMIT 30""",(uid,)).fetchall()
+        total_a_receber = sum(p['valor'] for p in a_receber)
+        total_pago = sum(p['valor'] for p in pagos_consul)
+        # Fixo do mês do consultor (se houver)
+        mes = competencia_atual()
+        fixo_mes = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM lancamentos
+            WHERE tipo='fixo' AND usuario_id=? AND data_competencia=?""", (uid, mes)).fetchone()['v']
+        fixo_parcelas = conn.execute("""SELECT descricao,valor,data_lancamento,status FROM lancamentos
+            WHERE tipo='fixo' AND usuario_id=? AND data_competencia=? ORDER BY data_lancamento""", (uid, mes)).fetchall()
+        close_db(conn)
+        return render_template('fluxo_caixa_consultor.html', ciclo=ciclo,
+                               a_receber=a_receber, em_analise=em_analise,
+                               pagos=pagos_consul, total_a_receber=total_a_receber,
+                               total_pago=total_pago, fixo_mes=fixo_mes, fixo_parcelas=fixo_parcelas)
+
+# ─── BI ──────────────────────────────────────────────────────────────────────────
+@app.route('/bi')
+@login_required
+def bi():
+    conn = db(); uid = session['user_id']; ea = session['perfil'] == 'admin'
+    if ea:
+        por_mes = conn.execute("""SELECT strftime('%Y-%m',criado_em) mes,COUNT(*) qtd,
+            COALESCE(SUM(valor),0) valor,COALESCE(SUM(comissao_total_corretora),0) com_total,
+            COALESCE(SUM(comissao_consultor),0) com_consultor,COALESCE(SUM(comissao_corretora_liquida),0) com_liquido
+            FROM propostas GROUP BY mes ORDER BY mes""").fetchall()
+        por_operadora = conn.execute("""SELECT adm_operadora op,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,
+            COALESCE(SUM(comissao_total_corretora),0) com,COALESCE(SUM(total_vidas),0) vidas
+            FROM propostas GROUP BY adm_operadora ORDER BY valor DESC""").fetchall()
+        por_modalidade = conn.execute("""SELECT modalidade,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
+            FROM propostas GROUP BY modalidade ORDER BY valor DESC""").fetchall()
+        por_consultor = conn.execute("""SELECT consultor,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,
+            COALESCE(SUM(comissao_consultor),0) com,COALESCE(SUM(total_vidas),0) vidas
+            FROM propostas GROUP BY consultor ORDER BY valor DESC""").fetchall()
+    else:
+        por_mes = conn.execute("""SELECT strftime('%Y-%m',criado_em) mes,COUNT(*) qtd,
+            COALESCE(SUM(valor),0) valor,COALESCE(SUM(comissao_consultor),0) com_consultor
+            FROM propostas WHERE usuario_id=? GROUP BY mes ORDER BY mes""",(uid,)).fetchall()
+        por_operadora = conn.execute("""SELECT adm_operadora op,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,
+            COALESCE(SUM(comissao_consultor),0) com,COALESCE(SUM(total_vidas),0) vidas
+            FROM propostas WHERE usuario_id=? GROUP BY adm_operadora ORDER BY valor DESC""",(uid,)).fetchall()
+        por_modalidade = conn.execute("""SELECT modalidade,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
+            FROM propostas WHERE usuario_id=? GROUP BY modalidade ORDER BY valor DESC""",(uid,)).fetchall()
+        por_consultor = []
+    close_db(conn)
+    return render_template('bi.html', por_mes=por_mes, por_operadora=por_operadora,
+                           por_modalidade=por_modalidade, por_consultor=por_consultor)
+
+# ─── USUÁRIOS ────────────────────────────────────────────────────────────────────
+@app.route('/usuarios')
+@login_required
+@admin_required
+def usuarios():
+    conn = db()
+    rows = conn.execute("SELECT * FROM usuarios ORDER BY id").fetchall()
+    close_db(conn)
+    return render_template('usuarios.html', usuarios=rows, host=request.host_url.rstrip('/'))
+
+@app.route('/usuario/novo', methods=['POST'])
+@login_required
+@admin_required
+def usuario_novo():
+    d = request.form
+    nome=d.get('nome','').strip(); email=d.get('email','').strip().lower()
+    if not nome or not email:
+        flash('Nome e e-mail obrigatórios.'); return redirect(url_for('usuarios'))
+    token=secrets.token_urlsafe(32); expira=(datetime.now(TZ_SP)+timedelta(days=7)).isoformat()
+    cpf = d.get('cpf','').strip()
+    conn = db()
+    try:
+        conn.execute("""INSERT INTO usuarios (nome,email,perfil,regime_base,token_setup,token_expira,cpf)
+            VALUES (?,?,?,?,?,?,?)""",(nome,email,d.get('perfil','consultor'),
+            (d.get('regime_base','sem_lead_sem_fixo') if d.get('perfil','consultor')=='consultor' else ''),token,expira,cpf or None))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        flash('E-mail já cadastrado.'); close_db(conn); return redirect(url_for('usuarios'))
+    close_db(conn)
+    return redirect(url_for('usuarios', link_token=token))
+
+@app.route('/usuario/foto/upload', methods=['POST'])
+@login_required
+def usuario_foto_upload():
+    """Upload de foto de perfil via AJAX.
+    Admin pode enviar ?uid=X para alterar foto de outro usuário.
+    """
+    fimg = request.files.get('foto')
+    if not fimg or not fimg.filename:
+        return jsonify({"ok": False, "erro": "Arquivo não enviado"}), 400
+
+    ext = os.path.splitext(fimg.filename)[1].lower()
+    if ext not in ('.png', '.jpg', '.jpeg', '.webp'):
+        return jsonify({"ok": False, "erro": "Formato inválido. Use PNG, JPG ou WebP"}), 400
+
+    fimg.seek(0, os.SEEK_END)
+    if fimg.tell() > 2 * 1024 * 1024:
+        return jsonify({"ok": False, "erro": "Arquivo muito grande (máx 2MB)"}), 400
+    fimg.seek(0)
+
+    # Admin pode alterar foto de outro usuário
+    uid_logado = session.get('user_id')
+    uid_alvo = request.form.get('uid', uid_logado)
+    if str(uid_alvo) != str(uid_logado) and session.get('perfil') != 'admin':
+        return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    uid_alvo = int(uid_alvo)
+
+    conn = db()
+    foto_antiga = conn.execute("SELECT foto FROM usuarios WHERE id=?", (uid_alvo,)).fetchone()
+    if foto_antiga and foto_antiga['foto']:
+        try: os.remove(os.path.join(UPLOAD_FOLDER, foto_antiga['foto']))
+        except: pass
+
+    foto_nome = f"perfil_{uid_alvo}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}{ext}"
+    fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
+
+    conn.execute("UPDATE usuarios SET foto=? WHERE id=?", (foto_nome, uid_alvo))
+    conn.commit(); close_db(conn)
+
+    # Se é a própria foto, atualiza a sessão para aparecer na sidebar
+    if uid_alvo == uid_logado:
+        session['foto'] = foto_nome
+
+    return jsonify({"ok": True, "foto": foto_nome})
+
+@app.route('/usuario/editar/<int:uid>', methods=['POST'])
+@login_required
+@admin_required
+def usuario_editar(uid):
+    d = request.form; conn = db()
+    ativo = 1 if d.get('ativo') else 0   # checkbox: ausente = inativo
+    def fnum(k):
+        v = (d.get(k,'') or '').replace('.','').replace(',','.')
+        try: return float(v) if v else 0
+        except: return 0
+    # Foto de perfil (upload opcional)
+    foto_atual = conn.execute("SELECT foto FROM usuarios WHERE id=?", (uid,)).fetchone()
+    foto_nome = foto_atual['foto'] if foto_atual else None
+    fimg = request.files.get('foto')
+    if fimg and fimg.filename:
+        ext = os.path.splitext(fimg.filename)[1].lower()
+        if ext in ('.png','.jpg','.jpeg','.webp'):
+            foto_nome = f"perfil_{uid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}{ext}"
+            fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
+    conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=? WHERE id=?""",
+        (d['nome'],d['email'].lower(),d['perfil'],
+         (d['regime_base'] if d['perfil']=='consultor' else ''),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,uid))
+    conn.commit(); close_db(conn)
+    return redirect(url_for('usuarios'))
+
+@app.route('/usuario/regenerar-link/<int:uid>')
+@require_auth
+@require_admin
+def usuario_regenerar(uid):
+    """Regenera link de setup pra usuário."""
+    try:
+        if not uid or uid <= 0:
+            app.logger.warning(f"[usuarios] ID inválido pra regenerar-link: {uid}")
+            flash('ID de usuário inválido', 'error')
+            return redirect(url_for('usuarios')), 400
+        
+        conn = db()
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM usuarios WHERE id=?", (uid,))
+        user = cur.fetchone()
+        
+        if not user:
+            app.logger.warning(f"[usuarios] Usuário não encontrado: {uid}")
+            flash('Usuário não encontrado', 'error')
+            return redirect(url_for('usuarios')), 404
+        
+        token = secrets.token_urlsafe(32)
+        expira = (datetime.now(TZ_SP) + timedelta(days=7)).isoformat()
+        cur.execute("UPDATE usuarios SET token_setup=?, token_expira=?, senha_hash=NULL WHERE id=?", 
+                    (token, expira, uid))
+        conn.commit()
+        close_db(conn)
+        
+        app.logger.info(f"[usuarios] Link regenerado pra user_id={uid}")
+        flash('Link enviado com sucesso', 'success')
+        return redirect(url_for('usuarios', link_token=token))
+    except Exception as e:
+        app.logger.error(f"[usuarios] Erro ao regenerar link: {type(e).__name__}")
+        flash('Erro ao gerar link', 'error')
+        return redirect(url_for('usuarios')), 500
+
+# ─── SUPERVISORAS ────────────────────────────────────────────────────────────────
+@app.route('/supervisoras')
+@login_required
+@admin_required
+def supervisoras():
+    conn = db()
+    rows = conn.execute("SELECT * FROM supervisoras ORDER BY ativo DESC,nome").fetchall()
+    close_db(conn)
+    return render_template('supervisoras.html', supervisoras=rows)
+
+@app.route('/supervisora/salvar', methods=['POST'])
+@login_required
+@admin_required
+def supervisora_salvar():
+    d = request.form; conn = db()
+    if d.get('id'):
+        conn.execute("UPDATE supervisoras SET nome=?,email=?,telefone=?,ativo=? WHERE id=?",
+            (d['nome'],d.get('email'),d.get('telefone'),int(d.get('ativo',1) or 0),d['id']))
+    else:
+        conn.execute("INSERT INTO supervisoras (nome,email,telefone) VALUES (?,?,?)",
+            (d['nome'],d.get('email'),d.get('telefone')))
+    conn.commit(); close_db(conn)
+    return redirect(url_for('supervisoras'))
+
+# ─── REGIMES ─────────────────────────────────────────────────────────────────────
+@app.route('/regimes')
+@login_required
+@admin_required
+def regimes():
+    conn = db()
+    rows = conn.execute("SELECT * FROM regimes ORDER BY ordem").fetchall()
+    close_db(conn)
+    return render_template('regimes.html', regimes=rows)
+
+@app.route('/regime/salvar', methods=['POST'])
+@login_required
+@admin_required
+def regime_salvar():
+    d = request.form
+    def f(k,default=0):
+        v=(d.get(k,'') or '').replace(',','.')
+        try: return float(v) if v else default
+        except: return default
+    conn = db()
+    fmin = f('faixa_min', None) if d.get('faixa_min') else None
+    fmax = f('faixa_max', None) if d.get('faixa_max') else None
+    if d.get('id'):
+        conn.execute("""UPDATE regimes SET nome=?,descricao=?,valor_fixo=?,num_parcelas=?,
+            distribuicao_parcelas=?,faixa_min=?,faixa_max=?,coluna_comissao=? WHERE id=?""",
+            (d['nome'],d.get('descricao'),f('valor_fixo'),int(d.get('num_parcelas',1) or 1),
+             d.get('distribuicao_parcelas','100'),fmin,fmax,d.get('coluna_comissao'),d['id']))
+    conn.commit(); close_db(conn)
+    return redirect(url_for('regimes'))
+
+# ─── COMISSÕES ───────────────────────────────────────────────────────────────────
+@app.route('/comissoes')
+@login_required
+@admin_required
+def comissoes():
+    conn = db()
+    rows = conn.execute("SELECT * FROM comissoes ORDER BY operadora").fetchall()
+    close_db(conn)
+    return render_template('comissoes.html', comissoes=rows)
+
+@app.route('/comissao/salvar', methods=['POST'])
+@login_required
+@admin_required
+def comissao_salvar():
+    d = request.form
+    def num(k):
+        v=(d.get(k,'0') or '0').replace(',','.')
+        try: return float(v)
+        except: return 0.0
+    conn = db()
+    if d.get('id'):
+        conn.execute("""UPDATE comissoes SET operadora=?,perc_total=?,perc_sem_leads=?,
+            perc_n1=?,perc_n2=?,perc_n3=?,perc_com_fixo=?,observacao=? WHERE id=?""",
+            (d['operadora'],num('perc_total'),num('perc_sem_leads'),num('perc_n1'),
+             num('perc_n2'),num('perc_n3'),num('perc_com_fixo'),d.get('observacao'),d['id']))
+    else:
+        conn.execute("""INSERT INTO comissoes (operadora,perc_total,perc_sem_leads,
+            perc_n1,perc_n2,perc_n3,perc_com_fixo,observacao) VALUES (?,?,?,?,?,?,?,?)""",
+            (d['operadora'],num('perc_total'),num('perc_sem_leads'),num('perc_n1'),
+             num('perc_n2'),num('perc_n3'),num('perc_com_fixo'),d.get('observacao')))
+    conn.commit(); close_db(conn)
+    return redirect(url_for('comissoes'))
+
+# ─── CAMPOS PERSONALIZADOS (FORM BUILDER) ────────────────────────────────────────
+@app.route('/campos')
+@login_required
+@admin_required
+def campos():
+    conn = db()
+    rows = conn.execute("SELECT * FROM campos_custom ORDER BY ordem,id").fetchall()
+    close_db(conn)
+    return render_template('campos.html', campos=rows)
+
+@app.route('/campo/salvar', methods=['POST'])
+@login_required
+@admin_required
+def campo_salvar():
+    import re
+    d = request.form
+    label = (d.get('label') or '').strip()
+    if not label:
+        return jsonify({"ok": False, "msg": "Informe o nome do campo"}), 400
+    tipo = d.get('tipo', 'text')
+    # opções (para select/radio/checkbox) — uma por linha
+    opcoes_raw = (d.get('opcoes') or '').strip()
+    opcoes = [o.strip() for o in opcoes_raw.split('\n') if o.strip()] if opcoes_raw else []
+    obrig = 1 if d.get('obrigatorio') else 0
+    ativo = 1 if d.get('ativo') else 0
+    placeholder = d.get('placeholder', '')
+    ajuda = d.get('ajuda', '')
+    conn = db()
+    if d.get('id'):
+        conn.execute("""UPDATE campos_custom SET label=?,tipo=?,opcoes=?,placeholder=?,ajuda=?,
+            obrigatorio=?,ativo=? WHERE id=?""",
+            (label, tipo, json.dumps(opcoes, ensure_ascii=False), placeholder, ajuda, obrig, ativo, d['id']))
+    else:
+        # gera nome técnico único a partir do label
+        base = re.sub(r'[^a-z0-9]+', '_', label.lower()).strip('_') or 'campo'
+        nome = base; i = 1
+        while conn.execute("SELECT 1 FROM campos_custom WHERE nome_tecnico=?", (nome,)).fetchone():
+            i += 1; nome = f"{base}_{i}"
+        ordem = (conn.execute("SELECT COALESCE(MAX(ordem),0) m FROM campos_custom").fetchone()['m'] or 0) + 1
+        conn.execute("""INSERT INTO campos_custom (label,nome_tecnico,tipo,opcoes,placeholder,ajuda,obrigatorio,ativo,ordem)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (label, nome, tipo, json.dumps(opcoes, ensure_ascii=False), placeholder, ajuda, obrig, ativo, ordem))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/campo/excluir/<int:cid>', methods=['POST'])
+@login_required
+@admin_required
+def campo_excluir(cid):
+    conn = db()
+    conn.execute("DELETE FROM campos_custom WHERE id=?", (cid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/campo/ordem', methods=['POST'])
+@login_required
+@admin_required
+def campo_ordem():
+    """Recebe lista de IDs na nova ordem."""
+    ids = request.json.get('ids', [])
+    conn = db()
+    for i, cid in enumerate(ids):
+        conn.execute("UPDATE campos_custom SET ordem=? WHERE id=?", (i+1, cid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/api/campos-ativos')
+@login_required
+def api_campos_ativos():
+    conn = db()
+    rows = conn.execute("SELECT * FROM campos_custom WHERE ativo=1 ORDER BY ordem,id").fetchall()
+    close_db(conn)
+    out = []
+    for r in rows:
+        try: opc = json.loads(r['opcoes']) if r['opcoes'] else []
+        except: opc = []
+        out.append({'label': r['label'], 'nome': r['nome_tecnico'], 'tipo': r['tipo'],
+                    'opcoes': opc, 'placeholder': r['placeholder'] or '',
+                    'ajuda': r['ajuda'] or '', 'obrigatorio': r['obrigatorio']})
+    return jsonify(out)
+
+# ─── OPERADORAS (régua de recebimento) ───────────────────────────────────────────
+@app.route('/operadoras')
+@login_required
+@admin_required
+def operadoras():
+    conn = db()
+    rows = conn.execute("SELECT * FROM recebimento ORDER BY operadora,plano").fetchall()
+    close_db(conn)
+    # agrupa por operadora+obs, com colunas por plano
+    grupos = {}
+    for r in rows:
+        key = (r['operadora'], r['obs'] or '')
+        grupos.setdefault(key, {'operadora': r['operadora'], 'obs': r['obs'] or '', 'PME': None, 'PF': None, 'ADESAO': None, 'ids': {}})
+        grupos[key][r['plano']] = r['total']
+        grupos[key]['ids'][r['plano']] = r['id']
+    return render_template('operadoras.html', grupos=list(grupos.values()))
+
+@app.route('/operadora/salvar', methods=['POST'])
+@login_required
+@admin_required
+def operadora_salvar():
+    """Salva o recebimento (mensalidades) de uma operadora por plano."""
+    d = request.json or {}
+    nome = (d.get('operadora') or '').strip()
+    obs = (d.get('obs') or '').strip()
+    if not nome:
+        return jsonify({"ok": False, "msg": "Informe o nome"}), 400
+    conn = db()
+    for plano in ['PME', 'PF', 'ADESAO']:
+        val = d.get(plano)
+        if val in (None, ''): continue
+        try: total = float(val)
+        except: continue
+        conn.execute("""INSERT INTO recebimento (operadora,obs,plano,total) VALUES (?,?,?,?)
+            ON CONFLICT(operadora,obs,plano) DO UPDATE SET total=excluded.total""",
+            (nome, obs, plano, total))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/operadora/excluir', methods=['POST'])
+@login_required
+@admin_required
+def operadora_excluir():
+    d = request.json or {}
+    conn = db()
+    conn.execute("DELETE FROM recebimento WHERE operadora=? AND obs=?", (d.get('operadora'), d.get('obs','')))
+    conn.execute("DELETE FROM repasse_corretor WHERE operadora=? AND obs=?", (d.get('operadora'), d.get('obs','')))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+# ─── REPASSES AO CORRETOR (mensalidades por operadora × plano × modelo × nível) ────
+@app.route('/repasses')
+@login_required
+@admin_required
+def repasses():
+    conn = db()
+    ops = conn.execute("SELECT DISTINCT operadora,obs FROM recebimento ORDER BY operadora").fetchall()
+    reps = conn.execute("SELECT * FROM repasse_corretor").fetchall()
+    niveis = conn.execute("SELECT * FROM niveis ORDER BY ordem").fetchall()
+    close_db(conn)
+    rep_map = {f"{r['operadora']}|{r['obs'] or ''}|{r['plano']}|{r['modelo']}|{r['nivel']}": dict(r) for r in reps}
+    return render_template('repasses.html',
+                           operadoras=[{'operadora': o['operadora'], 'obs': o['obs'] or ''} for o in ops],
+                           rep_map=rep_map, niveis=[dict(n) for n in niveis],
+                           modelo_nome=MODELO_NOME, modelo_tem_meta=MODELO_TEM_META)
+
+@app.route('/repasse/salvar', methods=['POST'])
+@login_required
+@admin_required
+def repasse_salvar():
+    """Salva os repasses (total + régua em mensalidades, ou taxa)."""
+    dados = (request.json or {}).get('repasses', [])
+    conn = db()
+    for r in dados:
+        op, obs, plano = r['operadora'], r.get('obs',''), r['plano']
+        modelo, nivel = r['modelo'], r.get('nivel','')
+        taxa = 1 if r.get('taxa') else 0
+        total = float(r.get('total') or 0)
+        regua = (r.get('regua') or '').strip()
+        conn.execute("""INSERT INTO repasse_corretor (operadora,obs,plano,modelo,nivel,total,regua,taxa)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(operadora,obs,plano,modelo,nivel) DO UPDATE SET
+            total=excluded.total, regua=excluded.regua, taxa=excluded.taxa""",
+            (op, obs, plano, modelo, nivel, total, regua, taxa))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+# ─── NÍVEIS (faixas de produção) ──────────────────────────────────────────────────
+@app.route('/producao')
+@login_required
+@admin_required
+def producao():
+    """Dashboard de Nível de Produção com fluxo temporal, timeline e configuração de níveis."""
+    conn = db()
+    ciclo = ciclo_atual()
+    
+    # Consultores com produção do ciclo atual
+    consultores = conn.execute("""
+        SELECT u.id, u.nome, u.valor_fixo, u.regime_base,
+               COUNT(DISTINCT p.id) qtd_propostas,
+               COUNT(DISTINCT CASE WHEN p.venda_status IN ('Entrada confirmada','Proposta aprovada') THEN p.id END) qtd_aprovadas,
+               COALESCE(SUM(CASE WHEN par.status='Pago ao corretor' THEN par.valor ELSE 0 END), 0) comissao_paga,
+               COALESCE(SUM(CASE WHEN par.status!='Pago ao corretor' THEN par.valor ELSE 0 END), 0) comissao_pendente
+        FROM usuarios u
+        LEFT JOIN propostas p ON p.usuario_id=u.id
+        LEFT JOIN parcelas par ON par.proposta_id=p.id
+        WHERE u.ativo=1 AND u.perfil='consultor'
+        GROUP BY u.id, u.nome, u.valor_fixo, u.regime_base
+        ORDER BY qtd_propostas DESC
+    """).fetchall()
+    
+    # Estatísticas gerais do ciclo
+    stats = conn.execute("""
+        SELECT 
+            COUNT(DISTINCT id) qtd_propostas,
+            COUNT(DISTINCT CASE WHEN venda_status IN ('Entrada confirmada','Proposta aprovada') THEN id END) qtd_aprovadas,
+            COUNT(DISTINCT CASE WHEN venda_status IN ('Entrada confirmada','Proposta aprovada') THEN id END) entrada_confirmada,
+            COUNT(DISTINCT CASE WHEN venda_status='Em análise na operadora' THEN id END) em_analise,
+            COUNT(DISTINCT CASE WHEN venda_status='Proposta cadastrada' THEN id END) cadastradas
+        FROM propostas
+    """).fetchone()
+    
+    # Comissões por fase
+    comissoes_fase = conn.execute("""
+        SELECT 
+            CASE WHEN par.status='Pendente de receber' THEN 'Pendente Operadora'
+                 WHEN par.status='Recebido e não repassado' THEN 'Recebido'
+                 WHEN par.status='Liberado para o corretor' THEN 'Liberado'
+                 WHEN par.status='Pago ao corretor' THEN 'Pago'
+                 ELSE par.status END as fase,
+            COUNT(*) qtd,
+            COALESCE(SUM(par.valor_corretora), 0) valor,
+            COALESCE(SUM(par.valor), 0) valor_consultor
+        FROM parcelas par
+        GROUP BY par.status
+    """).fetchall()
+    
+    # Níveis de produção (N1, N2, N3)
+    niveis = conn.execute("SELECT * FROM niveis ORDER BY ordem").fetchall()
+    
+    close_db(conn)
+    
+    return render_template('producao.html',
+        ciclo=ciclo,
+        consultores=consultores,
+        stats=stats,
+        comissoes_fase=comissoes_fase,
+        niveis=niveis,
+        fluxo_semanal=FLUXO_SEMANAL,
+        fase_atual=ciclo['fase_atual'])
+
+@app.route('/producao/fase', methods=['POST'])
+@login_required
+@admin_required
+def producao_mudar_fase():
+    """Admin pode forçar mudança de fase manualmente."""
+    nova_fase = (request.json or {}).get('fase')
+    if nova_fase not in FLUXO_SEMANAL:
+        return jsonify({"ok": False, "erro": "Fase inválida"}), 400
+    
+    conn = db()
+    conn.execute("""INSERT INTO historico_proposta (proposta_id, usuario_nome, campo, valor_antes, valor_depois)
+        VALUES (NULL, ?, 'Fluxo Semanal', ?, ?)""", 
+        (session.get('nome','admin'), detectar_fase_atual(), nova_fase))
+    conn.commit(); close_db(conn)
+    
+    return jsonify({"ok": True, "nova_fase": nova_fase})
+
+@app.route('/niveis')
+@login_required
+@admin_required
+def niveis():
+    conn = db()
+    rows = conn.execute("SELECT * FROM niveis ORDER BY ordem").fetchall()
+    close_db(conn)
+    return render_template('niveis.html', niveis=rows)
+
+@app.route('/nivel/salvar', methods=['POST'])
+@login_required
+@admin_required
+def nivel_salvar():
+    """Sincroniza a lista completa de níveis: cria, atualiza e remove."""
+    dados = request.json.get('niveis', [])
+    conn = db()
+    codigos = []
+    for i, n in enumerate(dados):
+        cod = (n.get('codigo') or '').strip().lower() or f"n{i+1}"
+        label = (n.get('label') or cod.upper()).strip()
+        fmin = float(n['faixa_min']) if n.get('faixa_min') not in (None,'') else 0
+        fmax = float(n['faixa_max']) if n.get('faixa_max') not in (None,'') else None
+        codigos.append(cod)
+        conn.execute("""INSERT INTO niveis (codigo,label,faixa_min,faixa_max,ordem) VALUES (?,?,?,?,?)
+            ON CONFLICT(codigo) DO UPDATE SET label=excluded.label, faixa_min=excluded.faixa_min,
+            faixa_max=excluded.faixa_max, ordem=excluded.ordem""", (cod, label, fmin, fmax, i+1))
+    if codigos:
+        ph = ','.join('?'*len(codigos))
+        conn.execute(f"DELETE FROM niveis WHERE codigo NOT IN ({ph})", codigos)
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+# ─── FINANCEIRO: fixo, custos, aporte, comissões futuras, estorno ─────────────────
+def competencia_atual():
+    return date.today().strftime('%Y-%m')
+
+def gerar_fixo_mes(ano_mes):
+    """Gera os lançamentos de FIXO do mês para cada consultor com fixo.
+    Pago em 2 fluxos: dia 15 e dia 30 (metade em cada), conforme o calendário."""
+    conn = db()
+    consultores = conn.execute("""SELECT id,nome,valor_fixo FROM usuarios
+        WHERE ativo=1 AND regime_base='com_fixo_lead' AND COALESCE(valor_fixo,0)>0""").fetchall()
+    criados = 0
+    for u in consultores:
+        metade = round((u['valor_fixo'] or 0)/2, 2)
+        for dia in (15, 30):
+            ja = conn.execute("""SELECT id FROM lancamentos WHERE tipo='fixo' AND usuario_id=?
+                AND data_competencia=? AND descricao LIKE ?""",
+                (u['id'], ano_mes, f"%dia {dia}%")).fetchone()
+            if not ja:
+                conn.execute("""INSERT INTO lancamentos (tipo,categoria,descricao,valor,data_competencia,data_lancamento,usuario_id,status)
+                    VALUES ('fixo','Fixo consultor',?,?,?,?,?,'Previsto')""",
+                    (f"Fixo {u['nome']} — dia {dia}", metade, ano_mes, f"{ano_mes}-{dia:02d}", u['id']))
+                criados += 1
+    conn.commit(); close_db(conn)
+    return criados
+
+@app.route('/financeiro')
+@login_required
+@admin_required
+def financeiro():
+    mes = request.args.get('mes', competencia_atual())
+    conn = db()
+    # Comissões a receber (futuras) agrupadas por competência
+    futuras = conn.execute("""SELECT competencia,
+            COALESCE(SUM(valor),0) consultor, COALESCE(SUM(valor_corretora),0) corretora, COUNT(*) qtd
+        FROM parcelas WHERE status NOT IN ('Pago ao corretor') AND competencia IS NOT NULL
+        GROUP BY competencia ORDER BY competencia""").fetchall()
+    # Lançamentos do mês
+    custos = conn.execute("SELECT * FROM lancamentos WHERE tipo='custo' AND data_competencia=? ORDER BY id DESC", (mes,)).fetchall()
+    aportes = conn.execute("SELECT * FROM lancamentos WHERE tipo='aporte' AND data_competencia=? ORDER BY id DESC", (mes,)).fetchall()
+    fixos = conn.execute("""SELECT l.*, u.nome consultor_nome FROM lancamentos l
+        LEFT JOIN usuarios u ON u.id=l.usuario_id WHERE l.tipo='fixo' AND l.data_competencia=? ORDER BY l.data_lancamento""", (mes,)).fetchall()
+    # Totais do mês
+    receber_mes = conn.execute("""SELECT COALESCE(SUM(valor_corretora),0) v FROM parcelas
+        WHERE competencia=? AND status NOT IN ('Pago ao corretor')""", (mes,)).fetchone()['v']
+    pagar_consultor = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM parcelas
+        WHERE competencia=? AND status NOT IN ('Pago ao corretor')""", (mes,)).fetchone()['v']
+    total_custos = sum(c['valor'] for c in custos) + sum(f['valor'] for f in fixos)
+    total_aportes = sum(a['valor'] for a in aportes)
+    saldo = receber_mes - pagar_consultor - sum(c['valor'] for c in custos) - sum(f['valor'] for f in fixos) + total_aportes
+    # ─── DRE do mês ───
+    comissao_recebida = conn.execute("""SELECT COALESCE(SUM(valor_corretora),0) v FROM parcelas
+        WHERE competencia=? AND status='Pago ao corretor'""", (mes,)).fetchone()['v']
+    dre = {
+        'receita_bruta': receber_mes,                          # comissões a receber das operadoras
+        'repasse_consultores': pagar_consultor,                # (-) repasses
+        'custos_operacionais': sum(c['valor'] for c in custos),# (-) custos lançados
+        'fixos': sum(f['valor'] for f in fixos),               # (-) fixos
+        'aportes': total_aportes,                              # (+) aportes
+    }
+    dre['margem_bruta'] = dre['receita_bruta'] - dre['repasse_consultores']
+    dre['resultado'] = dre['margem_bruta'] - dre['custos_operacionais'] - dre['fixos'] + dre['aportes']
+    close_db(conn)
+    return render_template('financeiro.html', mes=mes, futuras=futuras,
+        custos=custos, aportes=aportes, fixos=fixos,
+        receber_mes=receber_mes, pagar_consultor=pagar_consultor,
+        total_custos=total_custos, total_aportes=total_aportes, saldo=saldo, dre=dre)
+
+@app.route('/lancamento/salvar', methods=['POST'])
+@login_required
+@admin_required
+def lancamento_salvar():
+    d = request.json or {}
+    conn = db()
+    conn.execute("""INSERT INTO lancamentos (tipo,categoria,descricao,valor,data_competencia,data_lancamento,socio,recorrente,status)
+        VALUES (?,?,?,?,?,?,?,?,?)""",
+        (d.get('tipo'), d.get('categoria',''), d.get('descricao'), float(d.get('valor') or 0),
+         d.get('data_competencia') or competencia_atual(), d.get('data_lancamento',''),
+         d.get('socio',''), 1 if d.get('recorrente') else 0, 'Previsto'))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/lancamento/excluir/<int:lid>', methods=['POST'])
+@login_required
+@admin_required
+def lancamento_excluir(lid):
+    conn = db(); conn.execute("DELETE FROM lancamentos WHERE id=?", (lid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/fixo/gerar', methods=['POST'])
+@login_required
+@admin_required
+def fixo_gerar():
+    mes = (request.json or {}).get('mes', competencia_atual())
+    n = gerar_fixo_mes(mes)
+    return jsonify({"ok": True, "criados": n})
+
+# ─── ESTORNO ──────────────────────────────────────────────────────────────────────
+@app.route('/estornos')
+@login_required
+@admin_required
+def estornos():
+    conn = db()
+    regras = conn.execute("""SELECT r.*, COALESCE((SELECT 1 FROM recebimento WHERE operadora=r.operadora LIMIT 1),0) tem_op
+        FROM regras_estorno r ORDER BY operadora""").fetchall()
+    ops = conn.execute("SELECT DISTINCT operadora FROM recebimento ORDER BY operadora").fetchall()
+    estornadas = conn.execute("SELECT * FROM propostas WHERE estornada=1 ORDER BY id DESC LIMIT 30").fetchall()
+    close_db(conn)
+    return render_template('estornos.html', regras=regras,
+        operadoras=[o['operadora'] for o in ops], estornadas=estornadas)
+
+@app.route('/regra-estorno/salvar', methods=['POST'])
+@login_required
+@admin_required
+def regra_estorno_salvar():
+    d = request.json or {}
+    conn = db()
+    conn.execute("""INSERT INTO regras_estorno (operadora,perc_estorno,ate_mensalidade,observacao)
+        VALUES (?,?,?,?)
+        ON CONFLICT(operadora) DO UPDATE SET perc_estorno=excluded.perc_estorno,
+        ate_mensalidade=excluded.ate_mensalidade, observacao=excluded.observacao""",
+        (d.get('operadora'), float(d.get('perc_estorno') or 100), int(d.get('ate_mensalidade') or 3), d.get('observacao','')))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+@app.route('/proposta/<int:pid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def excluir_proposta_logica(pid):
+    """Soft Delete: marca proposta como Excluída, cancela parcelas e registra motivo + detalhe."""
+    d = request.json or {}
+    motivo = (d.get('motivo_exclusao') or 'Outro').strip()
+    detalhe = (d.get('detalhe_exclusao') or '').strip()
+    nome_user = session.get('nome', 'admin')
+
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    # Atualizar status da proposta (exclusão lógica)
+    conn.execute("""
+        UPDATE propostas
+        SET status='Excluída', motivo_exclusao=?, detalhe_exclusao=?
+        WHERE id=?
+    """, (motivo, detalhe, pid))
+
+    # Estornar/cancelar todas as parcelas pendentes de receber
+    conn.execute("""
+        UPDATE parcelas
+        SET status='Cancelada / Estornada'
+        WHERE proposta_id=? AND status='Pendente de receber'
+    """, (pid,))
+
+    # Registrar no histórico
+    desc = f"Proposta excluída. Motivo: {motivo}" + (f" — {detalhe}" if detalhe else "")
+    conn.execute("""
+        INSERT INTO historico_proposta (proposta_id, usuario_id, usuario_nome, tipo, descricao, criado_em)
+        VALUES (?, ?, ?, 'exclusao', ?, ?)
+    """, (pid, session['user_id'], nome_user, desc, datetime.now(TZ_SP)))
+
+    conn.commit()
+    close_db(conn)
+    return jsonify({"ok": True, "msg": "Proposta excluída. Parcelas pendentes canceladas/estornadas."})
+
+@app.route('/admin/propostas-excluidas')
+@login_required
+@admin_required
+def propostas_excluidas():
+    """Dashboard de propostas excluídas para auditoria."""
+    conn = db()
+    
+    # Métricas
+    total_excluidas = conn.execute("SELECT COUNT(*) c FROM propostas WHERE status='Excluída'").fetchone()['c']
+    valor_excluido = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE status='Excluída'").fetchone()['v']
+    com_bruta_excluida = conn.execute("SELECT COALESCE(SUM(comissao_total_corretora),0) v FROM propostas WHERE status='Excluída'").fetchone()['v']
+    
+    # Motivos mais frequentes
+    motivos = conn.execute("""
+        SELECT motivo_exclusao, COUNT(*) qtd
+        FROM propostas 
+        WHERE status='Excluída' AND motivo_exclusao IS NOT NULL
+        GROUP BY motivo_exclusao
+        ORDER BY qtd DESC
+    """).fetchall()
+    
+    # Lista completa
+    excluidas = conn.execute("""
+        SELECT id, razao_social, consultor, valor, motivo_exclusao, quem_subiu
+        FROM propostas 
+        WHERE status='Excluída'
+        ORDER BY id DESC
+    """).fetchall()
+    
+    close_db(conn)
+    return render_template('propostas_excluidas.html', 
+                          total=total_excluidas, 
+                          valor=valor_excluido,
+                          com_bruta=com_bruta_excluida,
+                          motivos=motivos,
+                          excluidas=excluidas)
+
+@app.route('/admin/auditoria')
+@login_required
+@admin_required
+def admin_auditoria():
+    """Esteira operacional: propostas que ainda não chegaram em Emitida/Ativa."""
+    conn = db()
+    em_espera = conn.execute("""
+        SELECT p.*, u.nome as nome_consultor
+        FROM propostas p
+        LEFT JOIN usuarios u ON u.id = p.usuario_id
+        WHERE p.status != 'Excluída'
+          AND (p.status_operacional IS NULL OR p.status_operacional != 'Emitida/Ativa')
+        ORDER BY p.id DESC
+    """).fetchall()
+    total = len(em_espera)
+    close_db(conn)
+    return render_template('auditoria.html', propostas=em_espera, total=total)
+
+@app.route('/proposta/<int:pid>/status-operacional', methods=['POST'])
+@login_required
+@admin_required
+def atualizar_status_operacional(pid):
+    """Atualiza o status operacional de uma proposta e libera parcelas se Emitida/Ativa."""
+    d = request.json or {}
+    novo_status = d.get('status_operacional','').strip()
+    VALIDOS = ['Aguardando Documentos','Em Análise Operadora','Emitida/Ativa','Suspensa','Cancelada']
+    if novo_status not in VALIDOS:
+        return jsonify({"ok": False, "msg": f"Status inválido. Use: {VALIDOS}"}), 400
+
+    conn = db()
+    p = conn.execute("SELECT status_operacional, comprovante_boleto FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn); return jsonify({"ok": False}), 404
+
+    conn.execute("UPDATE propostas SET status_operacional=? WHERE id=?", (novo_status, pid))
+
+    # Se chegou em Emitida/Ativa: libera parcelas bloqueadas por falta de comprovante
+    if novo_status == 'Emitida/Ativa':
+        conn.execute("""UPDATE parcelas SET status='Pendente de receber'
+            WHERE proposta_id=? AND status='Bloqueado - Falta Comprovante'""", (pid,))
+
+    # Histórico
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'status_operacional', f"Status operacional: {p['status_operacional'] or '—'} → {novo_status}", datetime.now(TZ_SP)))
+
+    # Atualizar pendencias_json se enviado
+    if 'pendencias_json' in d:
+        conn.execute("UPDATE propostas SET pendencias_json=? WHERE id=?",
+                     (json.dumps(d['pendencias_json'], ensure_ascii=False), pid))
+
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": f"Status atualizado para '{novo_status}'"})
+
+@app.route('/proposta/<int:pid>/comprovante-upload', methods=['POST'])
+@login_required
+def upload_comprovante(pid):
+    """Upload de comprovante de pagamento. Libera parcelas bloqueadas."""
+    conn = db()
+    p = conn.execute("SELECT usuario_id FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p: close_db(conn); return jsonify({"ok": False}), 404
+    if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False}), 403
+
+    f = request.files.get('comprovante_boleto')
+    if not f or not f.filename:
+        close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
+
+    nome = f"COMPROVANTE_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
+    f.save(os.path.join(UPLOAD_FOLDER, nome))
+    conn.execute("UPDATE propostas SET comprovante_boleto=? WHERE id=?", (nome, pid))
+    conn.execute("""UPDATE parcelas SET status='Pendente de receber'
+        WHERE proposta_id=? AND status='Bloqueado - Falta Comprovante'""", (pid,))
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'comprovante', f"Comprovante de pagamento anexado: {nome}", datetime.now(TZ_SP)))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": "Comprovante salvo. Parcelas desbloqueadas.", "nome": nome})
+
+@app.route('/proposta/<int:pid>/contrato-upload', methods=['POST'])
+@login_required
+def upload_contrato(pid):
+    """Upload do contrato / proposta assinada."""
+    conn = db()
+    p = conn.execute("SELECT usuario_id FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p: close_db(conn); return jsonify({"ok": False}), 404
+    if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False}), 403
+
+    f = request.files.get('contrato_arquivo')
+    if not f or not f.filename:
+        close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
+
+    nome = f"CONTRATO_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
+    f.save(os.path.join(UPLOAD_FOLDER, nome))
+    conn.execute("UPDATE propostas SET contrato_arquivo=? WHERE id=?", (nome, pid))
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'contrato', f"Contrato/proposta anexado: {nome}", datetime.now(TZ_SP)))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": "Contrato salvo.", "nome": nome})
+
+@app.route('/proposta/<int:pid>/doc-upload', methods=['POST'])
+@login_required
+def upload_doc_extra(pid):
+    """Upload de documento extra (bordo). Adiciona ao array de anexos."""
+    conn = db()
+    p = conn.execute("SELECT usuario_id, anexos FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p: close_db(conn); return jsonify({"ok": False}), 404
+    if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False}), 403
+
+    f = request.files.get('documento')
+    tipo = (request.form.get('tipo') or 'Documento').strip()
+    if not f or not f.filename:
+        close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
+
+    prefixo = tipo.upper().replace(' ', '_').replace('/', '_')[:20]
+    nome = f"{prefixo}_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
+    f.save(os.path.join(UPLOAD_FOLDER, nome))
+
+    try: anexos = json.loads(p['anexos'] or '[]')
+    except: anexos = []
+    anexos.append(nome)
+    conn.execute("UPDATE propostas SET anexos=? WHERE id=?", (json.dumps(anexos), pid))
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'documento', f"Documento anexado ({tipo}): {nome}", datetime.now(TZ_SP)))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": f"{tipo} salvo.", "nome": nome})
+
+
+
+
+@app.route('/proposta/<int:pid>/estornar', methods=['POST'])
+@login_required
+@admin_required
+def estornar_proposta(pid):
+    """Estorno simplificado: cancela parcelas pendentes e marca proposta como estornada."""
+    conn = db()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn); return jsonify({"ok": False, "msg": "Proposta não encontrada"}), 404
+
+    # Cancela todas as parcelas pendentes
+    canceladas = conn.execute("""UPDATE parcelas SET status='Cancelada / Estornada'
+        WHERE proposta_id=? AND status IN ('Pendente de receber','Bloqueado - Falta Comprovante')""", (pid,)).rowcount
+
+    # Marca proposta como estornada
+    info = f"Estorno confirmado por {session.get('nome','admin')} em {datetime.now(TZ_SP).strftime('%d/%m/%Y %H:%M')}. {canceladas} parcela(s) cancelada(s)."
+    conn.execute("UPDATE propostas SET estornada=1, estorno_info=? WHERE id=?", (info, pid))
+
+    # Histórico
+    conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
+        VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
+        'estorno', info, datetime.now(TZ_SP)))
+
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "msg": info})
+
+# ─── APIs ────────────────────────────────────────────────────────────────────────
+@app.route('/api/comissoes-publicas')
+@login_required
+def api_com_pub():
+    eh_admin = session.get('perfil') == 'admin'
+    conn = db()
+    rec = conn.execute("SELECT * FROM recebimento").fetchall()
+    reps = conn.execute("SELECT * FROM repasse_corretor").fetchall()
+    niveis = conn.execute("SELECT * FROM niveis ORDER BY ordem").fetchall()
+    close_db(conn)
+    # repasse: o que o consultor recebe (pode ver). Removemos nada aqui.
+    rep_map = {f"{r['operadora']}|{r['plano']}|{r['modelo']}|{r['nivel']}": dict(r) for r in reps}
+    operadoras = sorted({r['operadora'] for r in rec})
+
+    if eh_admin:
+        # Admin enxerga o recebimento da corretora (para o preview completo).
+        rec_map = {}
+        for r in rec:
+            k = f"{r['operadora']}|{r['plano']}"
+            if k not in rec_map or not r['obs']:
+                rec_map[k] = r['total']
+    else:
+        # CONSULTOR: NÃO recebe o recebimento da corretora (sigilo de margem).
+        # Enviamos um placeholder só para o preview saber que a operadora existe,
+        # sem revelar o multiplicador real (valor neutro 1 — não usado no cálculo da comissão dele).
+        rec_map = {}
+        for r in rec:
+            k = f"{r['operadora']}|{r['plano']}"
+            rec_map[k] = 1  # presença da chave habilita o preview; não revela margem
+
+    return jsonify({
+        'recebimento': rec_map,
+        'repasses': rep_map,
+        'operadoras': operadoras,
+        'niveis': [dict(n) for n in niveis],
+    })
+
+@app.route('/api/propostas')
+@login_required
+def api_propostas():
+    conn = db(); uid = session['user_id']
+    eh_admin = session['perfil'] == 'admin'
+    if eh_admin:
+        rows = conn.execute("SELECT * FROM propostas ORDER BY id DESC").fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM propostas WHERE usuario_id=? ORDER BY id DESC",(uid,)).fetchall()
+    close_db(conn)
+    # Colunas sensíveis de margem da corretora — nunca expor ao consultor.
+    SENSIVEIS = {'comissao_total_corretora', 'comissao_corretora_liquida'}
+    saida = []
+    for r in rows:
+        d = dict(r)
+        if not eh_admin:
+            for col in SENSIVEIS:
+                d.pop(col, None)
+        saida.append(d)
+    return jsonify(saida)
+
+
+# ─── CRM ─────────────────────────────────────────────────────────────────────────
+def carregar_etapas_crm(conn=None):
+    """Lê as etapas do funil do banco, ordenadas. Cria conexão própria se não receber uma."""
+    fechar = False
+    if conn is None:
+        conn = db(); fechar = True
+    try:
+        rows = conn.execute(
+            "SELECT slug, nome, cor, ordem, tipo FROM crm_etapas WHERE ativo=1 ORDER BY ordem, id"
+        ).fetchall()
+        etapas = [{'id': r['slug'], 'slug': r['slug'], 'nome': r['nome'],
+                   'cor': r['cor'], 'ordem': r['ordem'], 'tipo': r['tipo']} for r in rows]
+    except Exception:
+        etapas = []
+    finally:
+        if fechar:
+            close_db(conn)
+    # Fallback: se a tabela ainda não existir/estiver vazia, usa as etapas padrão
+    if not etapas:
+        etapas = [
+            {'id': 'topo', 'slug': 'topo', 'nome': 'Topo do Funil', 'cor': '#3b82f6', 'ordem': 1, 'tipo': 'normal'},
+            {'id': 'meio', 'slug': 'meio', 'nome': 'Meio do Funil', 'cor': '#f59e0b', 'ordem': 2, 'tipo': 'normal'},
+            {'id': 'fim', 'slug': 'fim', 'nome': 'Fundo do Funil', 'cor': '#10b981', 'ordem': 3, 'tipo': 'normal'},
+            {'id': 'ganho', 'slug': 'ganho', 'nome': 'Ganho', 'cor': '#1fd8a4', 'ordem': 4, 'tipo': 'ganho'},
+            {'id': 'perdido', 'slug': 'perdido', 'nome': 'Perdido', 'cor': '#ef4444', 'ordem': 5, 'tipo': 'perdido'},
+        ]
+    return etapas
+
+@app.route('/crm')
+@login_required
+def crm():
+    conn = db()
+    uid = session['user_id']
+    eh_admin = session.get('perfil') == 'admin'
+    filtro = request.args.get('etapa', '')
+    responsaveis = conn.execute(
+        "SELECT id, nome FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome"
+    ).fetchall() if eh_admin else []
+
+    # Carrega todos os leads com responsável
+    q = """SELECT l.*, u.nome as responsavel_nome
+           FROM crm_leads l
+           LEFT JOIN usuarios u ON u.id = l.responsavel_id
+           WHERE 1=1 """
+    params = []
+    if not eh_admin:
+        q += " AND l.responsavel_id=?"
+        params.append(uid)
+    if filtro:
+        q += " AND l.etapa=?"
+        params.append(filtro)
+    q += " ORDER BY l.atualizado_em DESC"
+    leads = conn.execute(q, params).fetchall()
+
+    # Etapas dinâmicas do banco
+    etapas = carregar_etapas_crm(conn)
+
+    # Agrupa por etapa
+    kanban = {e['id']: [] for e in etapas}
+    primeira = etapas[0]['id'] if etapas else 'topo'
+    for lead in leads:
+        etapa = lead['etapa'] or primeira
+        if etapa in kanban:
+            kanban[etapa].append(lead)
+        else:
+            # Lead com etapa órfã (etapa foi removida) cai na primeira coluna
+            kanban[primeira].append(lead)
+
+    # Stats
+    total = len(leads)
+    close_db(conn)
+    return render_template('crm.html', kanban=kanban, etapas=etapas,
+                           total=total, responsaveis=responsaveis, eh_admin=eh_admin)
+
+
+@app.route('/crm/lead/novo', methods=['POST'])
+@login_required
+def crm_lead_novo():
+    d = request.json or request.form
+    uid = session['user_id']
+    eh_admin = session.get('perfil') == 'admin'
+    resp_id = int(d.get('responsavel_id') or uid) if eh_admin else uid
+    conn = db()
+    conn.execute("""INSERT INTO crm_leads (nome, telefone, email, empresa, origem,
+                    etapa, responsavel_id, valor_estimado, observacoes)
+                    VALUES (?,?,?,?,?,?,?,?,?)""",
+        (d.get('nome'), d.get('telefone'), d.get('email'), d.get('empresa'),
+         d.get('origem', 'manual'), d.get('etapa', 'topo'), resp_id,
+         float(d.get('valor_estimado') or 0) or None, d.get('observacoes')))
+    lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                 (lead_id, session.get('nome'), 'criacao', 'Lead criado'))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "id": lead_id})
+
+
+@app.route('/crm/lead/<int:lid>')
+@login_required
+def crm_lead_detalhe(lid):
+    conn = db()
+    lead = conn.execute("""SELECT l.*, u.nome as responsavel_nome
+        FROM crm_leads l LEFT JOIN usuarios u ON u.id=l.responsavel_id
+        WHERE l.id=?""", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False, "erro": "Acesso negado"}), 403
+    atividades = conn.execute(
+        "SELECT * FROM crm_atividades WHERE lead_id=? ORDER BY id DESC", (lid,)).fetchall()
+    # Usuários disponíveis para atribuição (admin vê todos)
+    usuarios = []
+    if session.get('perfil') == 'admin':
+        usuarios = [dict(u) for u in conn.execute(
+            "SELECT id, nome, perfil FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()]
+    etapas = [dict(e) for e in carregar_etapas_crm(conn)]
+    close_db(conn)
+    return jsonify({
+        "lead": dict(lead),
+        "atividades": [dict(a) for a in atividades],
+        "usuarios": usuarios,
+        "etapas": etapas
+    })
+
+
+@app.route('/crm/lead/<int:lid>/mover', methods=['POST'])
+@login_required
+def crm_lead_mover(lid):
+    nova_etapa = (request.json or {}).get('etapa')
+    etapas_validas = [e['id'] for e in carregar_etapas_crm()]
+    if nova_etapa not in etapas_validas:
+        return jsonify({"ok": False, "erro": "Etapa inválida"}), 400
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False}), 403
+    etapa_ant = lead['etapa']
+    conn.execute("UPDATE crm_leads SET etapa=?, atualizado_em=CURRENT_TIMESTAMP WHERE id=?",
+                 (nova_etapa, lid))
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                 (lid, session.get('nome'), 'movimentacao',
+                  f'Movido de "{etapa_ant}" para "{nova_etapa}"'))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/lead/<int:lid>/atividade', methods=['POST'])
+@login_required
+def crm_lead_atividade(lid):
+    d = request.json or {}
+    conn = db()
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                 (lid, session.get('nome'), d.get('tipo', 'nota'), d.get('descricao', '')))
+    conn.execute("UPDATE crm_leads SET atualizado_em=CURRENT_TIMESTAMP WHERE id=?", (lid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/lead/<int:lid>/editar', methods=['POST'])
+@login_required
+def crm_lead_editar(lid):
+    d = request.json or {}
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+
+    eh_admin = session.get('perfil') == 'admin'
+
+    # Campos que qualquer um pode editar
+    nome       = d.get('nome', lead['nome'])
+    telefone   = d.get('telefone', lead['telefone'])
+    email      = d.get('email', lead['email'])
+    empresa    = d.get('empresa', lead['empresa'])
+    observacoes= d.get('observacoes', lead['observacoes'])
+    valor      = float(d.get('valor_estimado') or 0) or None
+    origem     = d.get('origem', lead['origem'])
+
+    # Campos que só admin pode alterar
+    responsavel_id = int(d['responsavel_id']) if eh_admin and d.get('responsavel_id') else lead['responsavel_id']
+    etapa          = d.get('etapa', lead['etapa']) if eh_admin else lead['etapa']
+
+    # Detectar mudanças para timeline
+    changes = []
+    if nome != lead['nome']: changes.append(f'Nome: "{lead["nome"]}" → "{nome}"')
+    if telefone != lead['telefone']: changes.append(f'Telefone atualizado')
+    if email != lead['email']: changes.append(f'Email atualizado')
+    if etapa != lead['etapa']: changes.append(f'Etapa: "{lead["etapa"]}" → "{etapa}"')
+    if str(responsavel_id) != str(lead['responsavel_id']): changes.append(f'Responsável alterado')
+
+    conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, email=?, empresa=?,
+                    valor_estimado=?, observacoes=?, origem=?,
+                    responsavel_id=?, etapa=?, atualizado_em=CURRENT_TIMESTAMP
+                    WHERE id=?""",
+        (nome, telefone, email, empresa, valor, observacoes, origem,
+         responsavel_id, etapa, lid))
+
+    if changes:
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                     (lid, session.get('nome'), 'edicao', '; '.join(changes)))
+
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/lead/<int:lid>/anexo', methods=['POST'])
+@login_required
+def crm_lead_anexo(lid):
+    """Upload de anexo (conversa, documento) para um lead."""
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+
+    arquivo = request.files.get('arquivo')
+    if not arquivo or not arquivo.filename:
+        close_db(conn); return jsonify({"ok": False, "erro": "Arquivo não enviado"}), 400
+
+    ext = os.path.splitext(arquivo.filename)[1].lower()
+    exts_ok = ('.pdf', '.png', '.jpg', '.jpeg', '.webp', '.doc', '.docx', '.txt', '.mp3', '.mp4', '.ogg')
+    if ext not in exts_ok:
+        close_db(conn); return jsonify({"ok": False, "erro": "Formato não permitido"}), 400
+
+    arquivo.seek(0, os.SEEK_END)
+    if arquivo.tell() > 20 * 1024 * 1024:
+        close_db(conn); return jsonify({"ok": False, "erro": "Máximo 20MB"}), 400
+    arquivo.seek(0)
+
+    import re as _re
+    nome_safe = _re.sub(r'[^\w\-.]', '_', arquivo.filename)
+    ts = int(datetime.now(TZ_SP).timestamp())
+    nome_final = f"lead_{lid}_{ts}_{nome_safe}"
+    caminho = os.path.join(UPLOAD_FOLDER, nome_final)
+    arquivo.save(caminho)
+
+    # Registra na timeline
+    descricao_tipo = request.form.get('tipo_anexo', 'Documento')
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                 (lid, session.get('nome'), 'anexo',
+                  f'{descricao_tipo}: [{nome_safe}](/uploads/{nome_final})'))
+    conn.execute("UPDATE crm_leads SET atualizado_em=CURRENT_TIMESTAMP WHERE id=?", (lid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "arquivo": nome_final})
+
+
+@app.route('/crm/lead/<int:lid>/excluir', methods=['POST'])
+@login_required
+def crm_lead_excluir(lid):
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    # Admin pode excluir qualquer lead; consultor só os seus próprios
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    conn.execute("DELETE FROM crm_atividades WHERE lead_id=?", (lid,))
+    conn.execute("DELETE FROM crm_leads WHERE id=?", (lid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/stats')
+@login_required
+def crm_stats():
+    conn = db()
+    uid = session['user_id']; eh_admin = session.get('perfil') == 'admin'
+    q_filter = "" if eh_admin else f" AND responsavel_id={uid}"
+    stats = {}
+    for e in carregar_etapas_crm(conn):
+        row = conn.execute(f"SELECT COUNT(*) c, COALESCE(SUM(valor_estimado),0) v FROM crm_leads WHERE etapa=?{q_filter}", (e['id'],)).fetchone()
+        stats[e['id']] = {'qtd': row['c'], 'valor': row['v']}
+    close_db(conn)
+    return jsonify(stats)
+
+
+# ─── GESTÃO DE ETAPAS DO FUNIL (admin) ───────────────────────────────────────
+import unicodedata as _unicodedata
+
+def _slugify(texto):
+    """Gera um slug seguro a partir do nome da etapa."""
+    txt = _unicodedata.normalize('NFKD', texto or '').encode('ascii', 'ignore').decode('ascii')
+    txt = re.sub(r'[^a-zA-Z0-9]+', '_', txt).strip('_').lower()
+    return txt[:40] or ('etapa_' + secrets.token_hex(3))
+
+
+@app.route('/crm/etapas')
+@login_required
+def crm_etapas_listar():
+    """Retorna as etapas do funil (para o gerenciador)."""
+    return jsonify({"etapas": carregar_etapas_crm()})
+
+
+@app.route('/crm/etapas/nova', methods=['POST'])
+@login_required
+@admin_required
+def crm_etapa_nova():
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    if not nome:
+        return jsonify({"ok": False, "erro": "Nome obrigatório"}), 400
+    cor = (d.get('cor') or '#3b82f6').strip()
+    conn = db()
+    # slug único
+    base = _slugify(nome)
+    slug = base
+    tent = 1
+    while conn.execute("SELECT 1 FROM crm_etapas WHERE slug=?", (slug,)).fetchone():
+        tent += 1
+        slug = f"{base}_{tent}"
+    # ordem: vai pro fim (antes de ganho/perdido se existirem)
+    maxord = conn.execute("SELECT COALESCE(MAX(ordem),0) m FROM crm_etapas").fetchone()['m']
+    conn.execute("INSERT INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES (?,?,?,?,?)",
+                 (slug, nome, cor, maxord + 1, 'normal'))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "slug": slug})
+
+
+@app.route('/crm/etapas/<slug>/editar', methods=['POST'])
+@login_required
+@admin_required
+def crm_etapa_editar(slug):
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    cor = (d.get('cor') or '').strip()
+    conn = db()
+    et = conn.execute("SELECT * FROM crm_etapas WHERE slug=?", (slug,)).fetchone()
+    if not et:
+        close_db(conn); return jsonify({"ok": False, "erro": "Etapa não encontrada"}), 404
+    novo_nome = nome or et['nome']
+    nova_cor = cor or et['cor']
+    conn.execute("UPDATE crm_etapas SET nome=?, cor=? WHERE slug=?", (novo_nome, nova_cor, slug))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/etapas/<slug>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_etapa_excluir(slug):
+    conn = db()
+    et = conn.execute("SELECT * FROM crm_etapas WHERE slug=?", (slug,)).fetchone()
+    if not et:
+        close_db(conn); return jsonify({"ok": False, "erro": "Etapa não encontrada"}), 404
+    # Não deixa excluir se for a última etapa normal
+    total = conn.execute("SELECT COUNT(*) c FROM crm_etapas WHERE ativo=1").fetchone()['c']
+    if total <= 1:
+        close_db(conn); return jsonify({"ok": False, "erro": "Não é possível excluir a última etapa"}), 400
+    # Move leads dessa etapa para a primeira etapa restante
+    restante = conn.execute(
+        "SELECT slug FROM crm_etapas WHERE ativo=1 AND slug<>? ORDER BY ordem, id LIMIT 1", (slug,)
+    ).fetchone()
+    destino = restante['slug'] if restante else 'topo'
+    conn.execute("UPDATE crm_leads SET etapa=? WHERE etapa=?", (destino, slug))
+    conn.execute("DELETE FROM crm_etapas WHERE slug=?", (slug,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "leads_movidos_para": destino})
+
+
+@app.route('/crm/etapas/reordenar', methods=['POST'])
+@login_required
+@admin_required
+def crm_etapas_reordenar():
+    """Recebe lista de slugs na nova ordem."""
+    ordem = (request.json or {}).get('ordem', [])
+    if not isinstance(ordem, list) or not ordem:
+        return jsonify({"ok": False, "erro": "Ordem inválida"}), 400
+    conn = db()
+    for i, slug in enumerate(ordem, start=1):
+        conn.execute("UPDATE crm_etapas SET ordem=? WHERE slug=?", (i, slug))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+# ─── WEBHOOK META / GOOGLE LEADS ─────────────────────────────────────────────────
+@app.route('/webhook/meta', methods=['GET', 'POST'])
+def webhook_meta():
+    """Recebe leads do Meta (Facebook/Instagram) Lead Ads."""
+    if request.method == 'GET':
+        # Verificação do webhook
+        verify_token = request.args.get('hub.verify_token', '')
+        challenge = request.args.get('hub.challenge', '')
+        cfg_token = get_cfg('meta_verify_token', 'serenus_meta_2025')
+        if verify_token == cfg_token:
+            return challenge, 200
+        return 'Unauthorized', 403
+
+    try:
+        data = request.get_json(force=True) or {}
+        conn = db()
+        for entry in data.get('entry', []):
+            for change in entry.get('changes', []):
+                if change.get('field') == 'leadgen':
+                    valor = change.get('value', {})
+                    field_data = {f['name']: f.get('values', [''])[0]
+                                  for f in valor.get('field_data', [])}
+                    nome = field_data.get('full_name') or field_data.get('name', 'Lead Meta')
+                    telefone = field_data.get('phone_number') or field_data.get('phone', '')
+                    email = field_data.get('email', '')
+                    empresa = field_data.get('company_name', '')
+                    conn.execute("""INSERT INTO crm_leads
+                        (nome, telefone, email, empresa, origem, etapa, dados_extras)
+                        VALUES (?,?,?,?,?,?,?)""",
+                        (nome, telefone, email, empresa, 'meta', 'topo',
+                         json.dumps(valor, ensure_ascii=False)))
+                    lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+                    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                                 (lead_id, 'Meta Ads', 'criacao', f'Lead capturado via Meta Ads'))
+        conn.commit(); close_db(conn)
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)}), 200  # Sempre 200 pro Meta
+
+
+@app.route('/webhook/google', methods=['POST'])
+def webhook_google():
+    """Recebe leads do Google Lead Form Extensions."""
+    try:
+        data = request.get_json(force=True) or {}
+        user_column_data = {c.get('column_id', ''): c.get('string_value', '')
+                            for c in data.get('user_column_data', [])}
+        nome = (user_column_data.get('FULL_NAME') or
+                data.get('lead_id', 'Lead Google'))
+        telefone = user_column_data.get('PHONE_NUMBER', '')
+        email = user_column_data.get('EMAIL', '')
+        empresa = user_column_data.get('COMPANY_NAME', '')
+        conn = db()
+        conn.execute("""INSERT INTO crm_leads
+            (nome, telefone, email, empresa, origem, etapa, dados_extras)
+            VALUES (?,?,?,?,?,?,?)""",
+            (nome, telefone, email, empresa, 'google', 'topo',
+             json.dumps(data, ensure_ascii=False)))
+        lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                     (lead_id, 'Google Ads', 'criacao', 'Lead capturado via Google Lead Form'))
+        conn.commit(); close_db(conn)
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)}), 200
+
+
+@app.route('/webhook/sheets', methods=['POST'])
+def webhook_sheets():
+    """
+    Recebe leads do Google Sheets via Apps Script.
+    Payload esperado:
+    {
+      "token": "SEU_TOKEN_AQUI",
+      "origem": "Facebook" | "Google" | "MedSenior",
+      "leads": [
+        {
+          "data_hora": "28/05/2026 10:35",
+          "consultor": "DANILO",
+          "nome": "Fulano",
+          "telefone": "19999999999",
+          "email": "fulano@gmail.com",
+          "cidade": "Campinas",
+          "tipo": "PF",
+          "num_pessoas": "1"
+        }, ...
+      ]
+    }
+    """
+    try:
+        data = request.get_json(force=True) or {}
+
+        # Validar token
+        token_esperado = os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
+        token_recebido = data.get('token', '')
+        if token_recebido != token_esperado:
+            app.logger.warning(f"[WEBHOOK_SHEETS] Token inválido: '{token_recebido}'")
+            return jsonify({"ok": False, "erro": "Token inválido"}), 401
+
+        origem = data.get('origem', 'Sheets')
+        leads_raw = data.get('leads', [])
+
+        if not leads_raw:
+            return jsonify({"ok": True, "importados": 0, "msg": "Nenhum lead enviado"}), 200
+
+        conn = db()
+        importados = 0
+        duplicados = 0
+        ignorados = 0
+
+        for lead in leads_raw:
+            nome     = (lead.get('nome') or '').strip()
+            telefone = (lead.get('telefone') or '').strip()
+            email    = (lead.get('email') or '').strip()
+            cidade   = (lead.get('cidade') or '').strip()
+            tipo     = (lead.get('tipo') or 'PF').strip()
+            num_pess = (lead.get('num_pessoas') or '').strip()
+            cons_raw = (lead.get('consultor') or '').strip()
+
+            # Filtro: "teste" no nome ou email
+            if nome and 'teste' in nome.lower():
+                ignorados += 1; continue
+            if email and 'teste' in email.lower():
+                ignorados += 1; continue
+            if not nome:
+                ignorados += 1; continue
+
+            # Normalizar consultor
+            consultor = _normalizar_consultor(cons_raw) or 'Guilherme'
+            resp = conn.execute(
+                "SELECT id FROM usuarios WHERE nome = ?", (consultor,)
+            ).fetchone()
+            responsavel_id = resp[0] if resp else None
+
+            # Dedup por telefone
+            if telefone:
+                dup = conn.execute(
+                    "SELECT id FROM crm_leads WHERE telefone = ?",
+                    (telefone,)
+                ).fetchone()
+                if dup:
+                    duplicados += 1; continue
+
+            # Dedup por email
+            if email:
+                dup = conn.execute(
+                    "SELECT id FROM crm_leads WHERE email = ?",
+                    (email,)
+                ).fetchone()
+                if dup:
+                    duplicados += 1; continue
+
+            obs = f"Tipo: {tipo}"
+            if num_pess:
+                obs += f" | Pessoas: {num_pess}"
+
+            conn.execute("""
+                INSERT INTO crm_leads
+                    (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes)
+                VALUES (?, ?, ?, ?, ?, 'topo', ?, ?)
+            """, (nome, telefone, email, cidade, origem, responsavel_id, obs))
+
+            lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+            conn.execute("""
+                INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
+                VALUES (?, ?, 'criacao', ?)
+            """, (lead_id, consultor, f'Lead importado via {origem} (Apps Script)'))
+
+            importados += 1
+
+        conn.commit()
+        close_db(conn)
+
+        app.logger.info(f"[WEBHOOK_SHEETS] origem={origem} importados={importados} dup={duplicados} ign={ignorados}")
+        return jsonify({
+            "ok": True,
+            "importados": importados,
+            "duplicados": duplicados,
+            "ignorados": ignorados
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"[WEBHOOK_SHEETS] Erro: {e}")
+        return jsonify({"ok": False, "erro": str(e)}), 200
+
+
+
+# ─── CRM CONFIG ───────────────────────────────────────────────────
+@app.route('/crm/config')
+@login_required
+def crm_config():
+    """Pgágina de configuração do CRM — gerenciar etapas do funil."""
+    conn = db()
+    etapas = carregar_etapas_crm(conn)
+    close_db(conn)
+    is_admin = session.get('perfil') == 'admin'
+    usuario = session.get('usuario')
+    # Renderiza inline (sem template separado)
+    etapas_html = ''.join([
+        f'<div class="etapa-item" style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:8px;">'
+        f'<span style="width:12px;height:12px;border-radius:50%;background:{e["cor"]};flex-shrink:0;"></span>'
+        f'<strong style="flex:1">{e["nome"]}</strong>'
+        f'<span style="color:#9ca3af;font-size:12px">{e["tipo"]}</span>'
+        f'</div>' for e in etapas
+    ])
+    html = f"""<!DOCTYPE html><html><head><title>Config CRM</title>
+    <style>body{{font-family:Arial;background:#f4f6f9;padding:40px;}}
+    .container{{max-width:700px;margin:0 auto;background:white;padding:30px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1);}}
+    h1{{color:#333;}} a{{color:#3b82f6;text-decoration:none;}}
+    .btn{{background:#3b82f6;color:white;padding:10px 18px;border:none;border-radius:4px;cursor:pointer;font-size:14px;text-decoration:none;}}
+    </style></head><body>
+    <div class='container'>
+    <p><a href='/crm'>← Voltar ao CRM</a></p>
+    <h1>⚙️ Configurações do CRM</h1>
+    <h2 style='font-size:16px;margin-top:30px;'>Etapas do Funil</h2>
+    {etapas_html}
+    {'<p style="margin-top:20px;"><a class="btn" href="/crm/etapas">Gerenciar Etapas</a></p>' if is_admin else ''}
+    <h2 style='font-size:16px;margin-top:30px;'>Importação de Leads</h2>
+    <p>Leads do Facebook e Google chegam automaticamente via Apps Script.</p>
+    {'<p><a class="btn" href="/crm/importar">Importar Leads Manualmente</a></p>' if is_admin else ''}
+    </div></body></html>"""
+    return html
+
+# ─── UPLOAD DE FOTO (próprio usuário, sem ser admin) ─────────────────────────────
+@app.route('/minha-foto', methods=['POST'])
+@login_required
+def minha_foto():
+    """Qualquer usuário pode atualizar sua própria foto."""
+    fimg = request.files.get('foto')
+    if not fimg or not fimg.filename:
+        return jsonify({"ok": False, "erro": "Arquivo não enviado"}), 400
+    ext = os.path.splitext(fimg.filename)[1].lower()
+    if ext not in ('.png', '.jpg', '.jpeg', '.webp'):
+        return jsonify({"ok": False, "erro": "Formato inválido"}), 400
+    fimg.seek(0, os.SEEK_END)
+    if fimg.tell() > 2 * 1024 * 1024:
+        return jsonify({"ok": False, "erro": "Máximo 2MB"}), 400
+    fimg.seek(0)
+    
+    # Sanitiza nome de arquivo (apenas alfanumérico e underscore)
+    uid = session['user_id']
+    foto_nome = f"perfil_{uid}_{int(datetime.now(TZ_SP).timestamp())}{ext}"
+    
+    conn = db()
+    foto_antiga = conn.execute("SELECT foto FROM usuarios WHERE id=?", (uid,)).fetchone()
+    if foto_antiga and foto_antiga['foto']:
+        try: os.remove(os.path.join(UPLOAD_FOLDER, foto_antiga['foto']))
+        except: pass
+    fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
+    conn.execute("UPDATE usuarios SET foto=? WHERE id=?", (foto_nome, uid))
+    conn.commit(); close_db(conn)
+    session['foto'] = foto_nome
+    return jsonify({"ok": True, "foto": foto_nome})
+
+
+
+
+# Auto-import SQLite → PostgreSQL na primeira requisição
+@app.before_request
+def auto_import_sqlite():
+    if not hasattr(auto_import_sqlite, '_done'):
+        try:
+            import os, sqlite3
+            sqlite_db = os.path.expanduser("~/JOB_Serenus_Dados/job.db")
+            if os.path.exists(sqlite_db) and DB_MODE == 'postgres':
+                conn = db()
+                sqlite_conn = sqlite3.connect(sqlite_db)
+                for row in sqlite_conn.execute("SELECT * FROM propostas"):
+                    cols = ", ".join([k for k in dict(row).keys()])
+                    vals = ", ".join([f"'{str(v).replace(chr(39), chr(39)*2)}'" if v else "NULL" for v in dict(row).values()])
+                    conn.execute(f"INSERT INTO propostas ({cols}) VALUES ({vals})")
+                conn.commit()
+                close_db(conn)
+                sqlite_close_db(conn)
+                print("✅ Dados SQLite importados!")
+        except: pass
+        auto_import_sqlite._done = True
+
+
+
+def log_operacao(usuario_id, operacao, detalhes='', nivel='info'):
+    """Log seguro: nunca expõe senhas/dados sensíveis."""
+    msg = f"[{operacao}] user={usuario_id} {detalhes}".replace('senha', '***').replace('token', '***')
+    if nivel == 'error':
+        app.logger.error(msg[:200])
+    elif nivel == 'warning':
+        app.logger.warning(msg[:200])
+    else:
+        app.logger.info(msg[:200])
+
+# ════════════════════════════════════════════════════════════════════════════
+# DATA RESILIENCE: Sincronização + Backup + Recuperação automática
+# ════════════════════════════════════════════════════════════════════════════
+
+_RESILIENCE_BACKUP_DIR = os.path.join(os.path.expanduser("~"), "JOB_Serenus_Dados", "backups", "resilience")
+
+def _garantir_dir_backup():
+    """Garante que o diretório de backup existe."""
+    os.makedirs(_RESILIENCE_BACKUP_DIR, exist_ok=True)
+
+def _fazer_snapshot_emergencia():
+    """Faz snapshot de TODAS as tabelas pra arquivo JSON local (fallback extremo)."""
+    try:
+        _garantir_dir_backup()
+        conn = db()
+        snapshot = {'timestamp': datetime.utcnow().isoformat(), 'tabelas': {}}
+        
+        tabelas = ['usuarios', 'propostas', 'parcelas', 'comissoes', 'recebimento', 
+                   'repasse_corretor', 'supervisoras', 'regimes', 'niveis', 'produtos']
+        
+        for tabela in tabelas:
+            cur = conn.cursor()
+            try:
+                cur.execute(f"SELECT * FROM {tabela}")
+                # RealDictRow (Postgres) e sqlite3.Row (SQLite) convertem direto para dict
+                snapshot['tabelas'][tabela] = [dict(row) for row in cur.fetchall()]
+            except Exception as e:
+                app.logger.warning(f"[resilience] Erro ao ler {tabela}: {e}")
+                snapshot['tabelas'][tabela] = []
+        
+        close_db(conn)
+        
+        # Salvar
+        arquivo = os.path.join(_RESILIENCE_BACKUP_DIR, f"snapshot_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json")
+        with open(arquivo, 'w') as f:
+            json.dump(snapshot, f, default=str)
+        
+        # Manter apenas últimos 10
+        backups = sorted(os.listdir(_RESILIENCE_BACKUP_DIR))
+        if len(backups) > 10:
+            for old in backups[:-10]:
+                try: os.remove(os.path.join(_RESILIENCE_BACKUP_DIR, old))
+                except: pass
+        
+        app.logger.info(f"[resilience] Snapshot salvo: {arquivo}")
+    except Exception as e:
+        app.logger.error(f"[resilience] Erro ao fazer snapshot: {e}")
+
+def _restaurar_de_snapshot(arquivo=None):
+    """Restaura banco do snapshot JSON mais recente."""
+    try:
+        _garantir_dir_backup()
+        if not arquivo:
+            backups = sorted(os.listdir(_RESILIENCE_BACKUP_DIR), reverse=True)
+            if not backups:
+                app.logger.warning("[resilience] Nenhum snapshot encontrado")
+                return False
+            arquivo = os.path.join(_RESILIENCE_BACKUP_DIR, backups[0])
+        
+        with open(arquivo, 'r') as f:
+            snapshot = json.load(f)
+        
+        conn = db()
+        restaurado = 0
+        
+        for tabela, linhas in snapshot.get('tabelas', {}).items():
+            try:
+                conn.execute(f"DELETE FROM {tabela}")
+                if linhas:
+                    # Pega as colunas do primeiro registro
+                    cols = list(linhas[0].keys())
+                    for linha in linhas:
+                        placeholders = ", ".join(["?"] * len(cols))
+                        vals = [linha.get(c) for c in cols]
+                        conn.execute(f"INSERT INTO {tabela} ({', '.join(cols)}) VALUES ({placeholders})", vals)
+                    restaurado += len(linhas)
+            except Exception as e:
+                app.logger.warning(f"[resilience] Erro ao restaurar {tabela}: {e}")
+        
+        conn.commit()
+        close_db(conn)
+        app.logger.info(f"[resilience] ✅ Restaurado de {arquivo}: {restaurado} registros")
+        return True
+    except Exception as e:
+        app.logger.error(f"[resilience] Erro ao restaurar: {e}")
+        return False
+
+def _verificar_banco_vazio():
+    """Se banco está vazio, restaura do snapshot mais recente."""
+    try:
+        conn = db()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) c FROM propostas")
+        count = cur.fetchone()[0] if DB_MODE == 'sqlite' else cur.fetchone()['c']
+        close_db(conn)
+        
+        if count == 0:
+            app.logger.warning("[resilience] Banco vazio! Tentando restaurar...")
+            if _restaurar_de_snapshot():
+                return True
+            else:
+                app.logger.warning("[resilience] Falha ao restaurar. Banco permanece vazio.")
+                return False
+        return True
+    except Exception as e:
+        app.logger.error(f"[resilience] Erro ao verificar banco: {e}")
+        return False
+
+# ─── INICIALIZAÇÃO DO SCHEMA (no import — Railway roda `python app.py`) ───────
+# Cria/atualiza as tabelas ANTES de qualquer verificação ou requisição.
+# Funciona tanto em PostgreSQL (persiste) quanto em SQLite (fallback local).
+try:
+    init_db()
+    _db_initialized = True
+    print(f"[STARTUP] ✅ Schema pronto ({DB_MODE.upper()})")
+except Exception as _e:
+    print(f"[STARTUP] ⚠️ init_db falhou no import ({_e}); será tentado por requisição")
+
+# Executar ao iniciar
+_verificar_banco_vazio()
+
+# Agendador de backup
+_SCHEDULER_INICIADO = False
+
+def _iniciar_scheduler_backup():
+    """Liga agendador de backup automático JSON (22:00 SP todo dia)."""
+    global _SCHEDULER_INICIADO
+    if _SCHEDULER_INICIADO:
+        return
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        
+        def fazer_backup_agendado():
+            """Função que roda automaticamente às 22:00 SP."""
+            try:
+                conn = db()
+                propostas = conn.execute("SELECT * FROM propostas").fetchall()
+                parcelas = conn.execute("SELECT * FROM parcelas").fetchall()
+                usuarios = conn.execute("SELECT * FROM usuarios").fetchall()
+                operadoras = conn.execute("SELECT * FROM operadoras").fetchall()
+                recebimento = conn.execute("SELECT * FROM recebimento").fetchall()
+                repasse_corretor = conn.execute("SELECT * FROM repasse_corretor").fetchall()
+                
+                backup = {
+                    'versao': 'v14',
+                    'data_backup': datetime.now(TZ_SP).isoformat(),
+                    'total_propostas': len(propostas),
+                    'propostas': [dict(p) for p in propostas],
+                    'parcelas': [dict(p) for p in parcelas],
+                    'usuarios': [dict(u) for u in usuarios],
+                    'operadoras': [dict(o) for o in operadoras],
+                    'recebimento': [dict(r) for r in recebimento],
+                    'repasse_corretor': [dict(r) for r in repasse_corretor],
+                }
+                
+                close_db(conn)
+                
+                os.makedirs('/data/backups', exist_ok=True)
+                timestamp = datetime.now(TZ_SP).strftime('%Y%m%d-%H%M%S')
+                backup_file = f"/data/backups/backup-{timestamp}.json"
+                
+                with open(backup_file, 'w', encoding='utf-8') as f:
+                    json.dump(backup, f, indent=2, default=str, ensure_ascii=False)
+                
+                app.logger.info(f"[BACKUP AUTO] ✅ {backup_file} ({len(propostas)} propostas)")
+            except Exception as e:
+                app.logger.error(f"[BACKUP AUTO] ❌ {e}")
+        
+        # Agendar para 22:00 (SP) todos os dias
+        sched = BackgroundScheduler(daemon=True, timezone=TZ_SP)
+        sched.add_job(fazer_backup_agendado, 'cron', hour=22, minute=0, max_instances=1)
+        sched.start()
+        _SCHEDULER_INICIADO = True
+        app.logger.info("[SCHEDULER] ✅ Backup automático agendado para 22:00 (São Paulo)")
+    except Exception as e:
+        app.logger.warning(f"[SCHEDULER] ❌ Falha ao iniciar: {e}")
+
+try:
+    _iniciar_scheduler_backup()
+except Exception as e:
+    app.logger.warning(f"[SCHEDULER] Falha final: {e}")
+
+
+# ──── IMPORTAÇÃO DE LEADS DO GOOGLE SHEETS ─────────────────────────────────
+# Mapeamento de apelidos de consultores → nomes reais
+CONSULTOR_ALIASES = {
+    'guilherme': 'Guilherme',
+    'gui': 'Guilherme',
+    'gui santos': 'Guilherme',
+    'danilo': 'Danilo',
+    'danilo sampaio': 'Danilo',
+    'bianca': 'Bianca',
+    'bianca sampaio': 'Bianca',
+    'gabriel': 'Gabriel',
+    'gabriel maggiotto': 'Gabriel',
+}
+
+def _normalizar_consultor(nome_raw):
+    """Normaliza apelido/nome para pessoa real. Retorna None se não encontrado."""
+    if not nome_raw:
+        return None
+    nome_lower = nome_raw.strip().lower()
+    return CONSULTOR_ALIASES.get(nome_lower, None)
+
+def _ler_google_sheets(sheet_id, aba):
+    """Lê Google Sheets público como CSV. Retorna lista de dicts."""
+    import csv
+    from io import StringIO
+    try:
+        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={aba}"
+        import urllib.request
+        response = urllib.request.urlopen(url, timeout=10)
+        csv_text = response.read().decode('utf-8-sig')
+        reader = csv.DictReader(StringIO(csv_text))
+        return list(reader) if reader else []
+    except Exception as e:
+        app.logger.error(f"[LEAD_IMPORT] Erro ao ler sheets {sheet_id}/{aba}: {e}")
+        return []
+
+def _listar_leads_do_sheets():
+    """Lê ambas as planilhas (Facebook e Google) e retorna lista de leads brutos."""
+    leads = []
+    
+    # Facebook: "LEADS GERAIS"
+    facebook_id = '1VOChFfTkuVO4eO0FCAkBjrP9qDFnvWZnk5rLdUrNm64'
+    facebook_leads = _ler_google_sheets(facebook_id, 'LEADS GERAIS')
+    for row in facebook_leads:
+        row['_origem'] = 'Facebook'
+        leads.append(row)
+    
+    # Google: "Página1" e "MEDSENIOR"
+    google_id = '1QT8y8rfbMaHb5POrYFZKjdccpgMLLY3WRjBjxFmold8'
+    for aba in ['Página1', 'MEDSENIOR']:
+        google_leads = _ler_google_sheets(google_id, aba)
+        for row in google_leads:
+            row['_origem'] = f'Google ({aba})'
+            leads.append(row)
+    
+    return leads
+
+def _processar_lead(row, conn):
+    """
+    Processa um lead bruto da planilha:
+    - Normaliza consultor
+    - Filtra "teste"
+    - Detecta duplicados
+    - Retorna (sucesso, msg, dados_processados)
+    """
+    # Colunas esperadas
+    nome = row.get('Nome', '').strip()
+    telefone = row.get('Celular', '').strip()
+    email = row.get('Email', '').strip()
+    cidade = row.get('Cidade', '').strip()
+    tipo = row.get('Tipo', 'PF').strip()
+    num_pessoas = row.get('numero de pessoas', '').strip()
+    consultor_raw = row.get('CONSULTOR', '').strip()
+    origem = row.get('_origem', 'Google Sheets')
+    
+    # Filtro 1: "teste" em nome ou email
+    if nome and 'teste' in nome.lower():
+        return (False, 'Ignorado (teste no nome)', None)
+    if email and 'teste' in email.lower():
+        return (False, 'Ignorado (teste no email)', None)
+    
+    # Normalizar consultor
+    consultor = _normalizar_consultor(consultor_raw) or 'Guilherme'  # default
+    
+    # Buscar responsavel_id
+    resp = conn.execute(
+        "SELECT id FROM usuarios WHERE nome = ?",
+        (consultor,)
+    ).fetchone()
+    responsavel_id = resp[0] if resp else None
+    
+    # Filtro 2: Duplicado (telefone ou email)
+    if telefone:
+        dup = conn.execute(
+            "SELECT id FROM crm_leads WHERE telefone = ?",
+            (telefone,)
+        ).fetchone()
+        if dup:
+            return (False, f'Duplicado (tel {telefone})', None)
+    
+    if email:
+        dup = conn.execute(
+            "SELECT id FROM crm_leads WHERE email = ?",
+            (email,)
+        ).fetchone()
+        if dup:
+            return (False, f'Duplicado (email {email})', None)
+    
+    # Validação mínima
+    if not nome:
+        return (False, 'Nome vazio', None)
+    
+    return (True, 'OK', {
+        'nome': nome,
+        'telefone': telefone,
+        'email': email,
+        'empresa': cidade,
+        'origem': origem,
+        'etapa': 'topo',
+        'responsavel_id': responsavel_id,
+        'valor_estimado': None,
+        'observacoes': f"Tipo: {tipo}, Pessoas: {num_pessoas}".strip('Tipo: , Pessoas: ')
+    })
+
+@app.route('/crm/importar', methods=['GET', 'POST'])
+@login_required
+def crm_importar():
+    """GET: mostra form com seletor de datas. POST: processa importação."""
+    usuario = session.get('usuario')
+    if not usuario or usuario.get('role') not in ['admin', 'gestor']:
+        return jsonify({'erro': 'Acesso negado'}), 403
+    
+    conn = db()
+    
+    if request.method == 'GET':
+        # Buscar min/max datas nas planilhas
+        leads_raw = _listar_leads_do_sheets()
+        datas = []
+        for row in leads_raw:
+            data_str = row.get('DATA e HORA', '') or row.get('28/05/2026', '')
+            if data_str:
+                datas.append(data_str[:10])  # YYYY-MM-DD ou DD/MM/YYYY
+        
+        min_data = min(datas) if datas else '2026-01-01'
+        max_data = max(datas) if datas else date.today().isoformat()
+        
+        html = f"""
+        <html><head><title>Importar Leads</title>
+        <style>
+            body {{ font-family: Arial; background: #f4f6f9; padding: 40px; }}
+            .container {{ max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+            h1 {{ color: #333; }}
+            .form-group {{ margin: 20px 0; }}
+            label {{ display: block; font-weight: bold; margin-bottom: 8px; color: #555; }}
+            input, select {{ width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }}
+            button {{ background: #3b82f6; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }}
+            button:hover {{ background: #2563eb; }}
+            .info {{ background: #e3f2fd; padding: 15px; border-radius: 4px; margin: 20px 0; color: #1976d2; }}
+        </style>
+        </head><body>
+        <div class="container">
+            <h1>📥 Importar Leads das Planilhas</h1>
+            <form method="POST">
+                <div class="info">
+                    ✓ Facebook (aba "LEADS GERAIS")<br>
+                    ✓ Google (abas "Página1" + "MEDSENIOR")<br><br>
+                    <strong>Filtros automáticos:</strong> remove "teste" + duplicados (tel/email)
+                </div>
+                
+                <div class="form-group">
+                    <label>Data Inicial:</label>
+                    <input type="date" name="data_inicio" required value="{min_data}">
+                </div>
+                
+                <div class="form-group">
+                    <label>Data Final:</label>
+                    <input type="date" name="data_fim" required value="{max_data}">
+                </div>
+                
+                <div class="form-group">
+                    <button type="submit">Importar Leads</button>
+                </div>
+            </form>
+            <p style="margin-top: 30px; text-align: center;">
+                <a href="/crm" style="color: #3b82f6; text-decoration: none;">← Voltar ao CRM</a>
+            </p>
+        </div>
+        </body></html>
+        """
+        close_db(conn)
+        return html
+    
+    # POST: processar importação
+    data_inicio = request.form.get('data_inicio', '')
+    data_fim = request.form.get('data_fim', '')
+    
+    if not data_inicio or not data_fim:
+        close_db(conn)
+        return jsonify({'erro': 'Datas obrigatórias'}), 400
+    
+    # Parse datas (YYYY-MM-DD)
+    try:
+        di = datetime.strptime(data_inicio, '%Y-%m-%d').date()
+        df = datetime.strptime(data_fim, '%Y-%m-%d').date()
+    except:
+        close_db(conn)
+        return jsonify({'erro': 'Formato de data inválido'}), 400
+    
+    # Ler planilhas
+    leads_raw = _listar_leads_do_sheets()
+    
+    total = 0
+    importados = 0
+    ignorados = []
+    
+    for row in leads_raw:
+        # Parse data da linha
+        data_str = row.get('DATA e HORA', '')
+        if not data_str:
+            continue
+        
+        # Tentar vários formatos
+        data_lead = None
+        for fmt in ['%Y-%m-%dT%H:%M:%S.%f%z', '%d/%m/%Y %H:%M', '%d/%m/%Y']:
+            try:
+                data_lead = datetime.strptime(data_str[:19], fmt.split('T')[0] if 'T' in fmt else fmt).date()
+                break
+            except:
+                pass
+        
+        if not data_lead:
+            continue
+        
+        # Filtrar por intervalo de datas
+        if not (di <= data_lead <= df):
+            continue
+        
+        total += 1
+        sucesso, msg, dados = _processar_lead(row, conn)
+        
+        if sucesso:
+            try:
+                conn.execute(
+                    """INSERT INTO crm_leads 
+                       (nome, telefone, email, empresa, origem, etapa, responsavel_id, valor_estimado, observacoes)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (dados['nome'], dados['telefone'], dados['email'], dados['empresa'],
+                     dados['origem'], dados['etapa'], dados['responsavel_id'],
+                     dados['valor_estimado'], dados['observacoes'])
+                )
+                importados += 1
+            except Exception as e:
+                ignorados.append(f"{dados['nome']}: {str(e)}")
+        else:
+            ignorados.append(f"{row.get('Nome', 'SEM NOME')}: {msg}")
+    
+    conn.commit()
+    close_db(conn)
+    
+    html = f"""
+    <html><head><title>Resultado da Importação</title>
+    <style>
+        body {{ font-family: Arial; background: #f4f6f9; padding: 40px; }}
+        .container {{ max-width: 700px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }}
+        h1 {{ color: #333; }}
+        .stats {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 30px 0; }}
+        .stat {{ background: #f0f4f8; padding: 20px; border-radius: 6px; text-align: center; }}
+        .stat-num {{ font-size: 32px; font-weight: bold; color: #3b82f6; }}
+        .stat-label {{ color: #666; margin-top: 8px; }}
+        .ignorados {{ background: #fff3cd; padding: 15px; border-radius: 6px; max-height: 300px; overflow-y: auto; }}
+        .ignorados p {{ margin: 5px 0; font-size: 13px; color: #856404; }}
+        a {{ color: #3b82f6; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+    </style>
+    </head><body>
+    <div class="container">
+        <h1>✅ Importação Concluída</h1>
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-num">{importados}</div>
+                <div class="stat-label">Leads Importados</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num">{len(ignorados)}</div>
+                <div class="stat-label">Ignorados/Duplicados</div>
+            </div>
+        </div>
+        
+        <p><strong>Período:</strong> {data_inicio} até {data_fim}</p>
+        <p><strong>Total analisado:</strong> {total}</p>
+        
+        {f'<div class="ignorados"><strong>Ignorados:</strong>' + ''.join(f'<p>• {ig}</p>' for ig in ignorados[:20]) + (f'<p><em>... e mais {len(ignorados)-20}</em></p>' if len(ignorados) > 20 else '') + '</div>' if ignorados else ''}
+        
+        <p style="margin-top: 30px; text-align: center;">
+            <a href="/crm">← Voltar ao CRM</a>
+        </p>
+    </div>
+    </body></html>
+    """
+    
+    return html
+
+if __name__ == '__main__':
+    import os
+    # init_db() já roda no import acima
+    print("\n" + "="*52)
+    print("  JOB · Serenus Corretora · v14")
+    print("="*52)
+    port = int(os.environ.get('PORT', 8080))
+    print(f"  Rodando na porta {port}")
+    print("  Admin:  guilherme@serenuscorretora.com.br / serenus2025")
+    print("="*52 + "\n")
+    app.run(debug=False, host='0.0.0.0', port=port)
+
+# ─── DEBUG INFO PARA PRODUÇÃO ────────────────────────────────────────────
+print(f"\n[STARTUP] DATABASE_URL: {os.environ.get('DATABASE_URL', 'NÃO ENCONTRADA')[:80]}")
+print(f"[STARTUP] HAS_POSTGRES: {HAS_POSTGRES}")
+print(f"[STARTUP] Modo BD selecionado: {DB_MODE.upper()}")
+if DB_MODE == 'postgres':
+    db_url = os.environ.get('DATABASE_URL', '')
+    print(f"[STARTUP] PostgreSQL: {db_url[:60]}..." if db_url else "[STARTUP] PostgreSQL: NÃO CONFIGURADO")
+else:
+    print(f"[STARTUP] SQLite: {DB}")
