@@ -10,6 +10,7 @@
 }
 .btn-del-anexo:hover { background: rgba(251,132,151,.25); border-color: #fb8497; }
 </style>
+
 <div class="topbar">
   <div>
     <h1>Proposta #{{ p.id }}</h1>
@@ -20,25 +21,34 @@
 
 <div class="page" style="max-width:920px;">
 
-  <!-- Etiquetas CRM -->
+  <!-- ── ETIQUETAS CRM ── -->
   <div class="card" style="margin-bottom:16px;">
-    <div class="card-header"><h3>Etiquetas (CRM)</h3>{% if session.perfil == 'admin' %}<button class="btn-ghost" style="font-size:12px;" onclick="novaEtiqueta()">+ Nova</button>{% endif %}</div>
+    <div class="card-header">
+      <h3>Etiquetas (CRM)</h3>
+      {% if session.perfil == 'admin' %}<button class="btn-ghost" style="font-size:12px;" onclick="novaEtiqueta()">+ Nova</button>{% endif %}
+    </div>
     <div style="padding:14px 22px; display:flex; gap:8px; flex-wrap:wrap;" id="chips-etiquetas">
       <span style="color:var(--cinza-2); font-size:13px;">Carregando...</span>
     </div>
   </div>
 
-  <!-- Fase do processo -->
+  <!-- ── FASE DO PROCESSO ── -->
   <div class="card" style="margin-bottom:16px;">
-    <div class="card-header"><h3>Fase do processo</h3>{% if session.perfil == 'admin' %}<button class="btn-ghost" style="font-size:12px;" onclick="document.getElementById('hist-box').classList.toggle('hidden')">Ver histórico</button>{% endif %}</div>
+    <div class="card-header">
+      <h3>Fase do processo</h3>
+      {% if session.perfil == 'admin' %}
+        <button class="btn-ghost" style="font-size:12px;" onclick="document.getElementById('hist-box').classList.toggle('hidden')">Ver histórico</button>
+      {% endif %}
+    </div>
     <div style="padding:14px 22px;">
       <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         <span style="font-weight:600; color:var(--teal);" id="fase-atual">{{ p.fase or 'Proposta cadastrada' }}</span>
         {% if session.perfil == 'admin' %}
         <select id="sel-fase" style="max-width:280px; font-size:12px; padding:7px;">
-          <option>Proposta cadastrada</option><option>Em análise na operadora</option>
-          <option>Aprovada / aguardando comprovante</option><option>Comprovante anexado</option>
-          <option>Entrada confirmada</option><option>Finalizada</option>
+          {% set fase_atual = p.fase or 'Proposta cadastrada' %}
+          {% for f in ['Proposta cadastrada','Em análise na operadora','Aprovada / aguardando comprovante','Comprovante anexado','Entrada confirmada','Finalizada'] %}
+          <option {% if fase_atual == f %}selected{% endif %}>{{ f }}</option>
+          {% endfor %}
         </select>
         <button class="btn" style="font-size:12px; padding:7px 14px;" onclick="mudarFase()">Avançar fase</button>
         {% endif %}
@@ -51,8 +61,8 @@
     </div>
   </div>
 
-  <!-- Header da proposta -->
-  <div class="card" style="background:linear-gradient(135deg,#101720,#0f1f33 50%,#1a1330); border:1px solid var(--borda-2)!important; border:none; margin-bottom:16px;">
+  <!-- ── HEADER DA PROPOSTA ── -->
+  <div class="card" style="background:linear-gradient(135deg,#101720,#0f1f33 50%,#1a1330); border:1px solid var(--borda-2)!important; margin-bottom:16px;">
     <div style="padding:28px 32px; display:flex; justify-content:space-between; align-items:flex-start; gap:20px; flex-wrap:wrap;">
       <div>
         <h2 style="font-family:'Sora',sans-serif; font-size:22px; color:#fff; font-weight:600;">{{ p.razao_social }}</h2>
@@ -62,7 +72,6 @@
           <span style="background:rgba(255,255,255,.1); color:#fff; padding:3px 10px; border-radius:5px; font-size:12px;">{{ p.acomodacao }}</span>
           <span style="background:rgba(255,255,255,.1); color:#fff; padding:3px 10px; border-radius:5px; font-size:12px;">{{ p.fator_moderador }}</span>
         </div>
-        <!-- Badges de status -->
         <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
           {% set so = p.status_operacional or 'Aguardando Documentos' %}
           {% if so == 'Emitida/Ativa' %}
@@ -88,7 +97,7 @@
     </div>
   </div>
 
-  <!-- Comissões -->
+  <!-- ── COMISSÕES ── -->
   {% if session.perfil == 'admin' %}
   <div class="card" style="margin-bottom:16px;">
     <div class="card-header"><h3>Comissões</h3></div>
@@ -121,23 +130,16 @@
   </div>
   {% endif %}
 
-  <!-- Cronograma e Fluxo de Caixa -->
+  <!-- ── CRONOGRAMA E FLUXO DE CAIXA ── -->
   <div class="card" style="margin-bottom:16px;">
     <div class="card-header">
       <h3>Cronograma de comissão · Fluxo de Caixa</h3>
       <span class="tag tag-info">{{ p.num_parcelas }} parcela{{ 's' if p.num_parcelas != 1 else '' }}</span>
     </div>
-
     {% if parcelas %}
     <table>
       <thead>
-        <tr>
-          <th>Parc.</th>
-          <th>Data prevista</th>
-          <th>Valor</th>
-          <th>Fatia</th>
-          <th>Status</th>
-        </tr>
+        <tr><th>Parc.</th><th>Data prevista</th><th>Valor</th><th>Fatia</th><th>Status</th></tr>
       </thead>
       <tbody>
         {% for parc in parcelas %}
@@ -147,41 +149,36 @@
           <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(parc.valor)|replace('.',',') }}</td>
           <td><span class="tag tag-cinza">{{ parc.percentual }}%</span></td>
           <td>
-
-            {# ─── VISÃO ADMIN: ESTEIRA DO GESTOR ─── #}
             {% if session.perfil == 'admin' %}
               <div style="display:flex; flex-direction:column; gap:8px;">
                 {% set st = parc.status %}
                 <span class="tag {{ 'tag-cinza' if st=='Pendente de receber' else 'tag-info' if 'Antecip' in st else 'tag-am' if st=='Recebido e não repassado' else 'tag-verde' if st in ['Liberado para o corretor','Pago ao corretor'] else 'tag-cinza' }}" style="font-size:10.5px;">{{ st }}</span>
-
                 {% if st == 'Pendente de receber' %}
-                <button class="btn" style="padding:7px 13px; font-size:12px;" onclick="acao({{ parc.id }},'receber')">Operadora pagou → Recebido</button>
+                  <button class="btn" style="padding:7px 13px; font-size:12px;" onclick="acao({{ parc.id }},'receber')">Operadora pagou → Recebido</button>
                 {% elif st == 'Antecipação - Aguardando ADM' %}
-                <div style="background:rgba(244,63,94,.1); border:1px solid rgba(244,63,94,.3); padding:9px 11px; border-radius:7px; font-size:12px;">
-                  <strong style="color:#fb8497;">Comprovante do cliente enviado</strong>
-                  {% if parc.comprovante_antecipacao %}<br><a href="/anexos/{{ parc.comprovante_antecipacao }}" target="_blank" style="color:#fb8497; font-size:11px;">Ver comprovante →</a>{% endif %}
-                  <br><button class="btn" style="background:linear-gradient(135deg,#d3325e,#e0742c); padding:6px 12px; font-size:11.5px; margin-top:7px;" onclick="aprovarAntecip({{ parc.id }})">Pedir 48h à operadora</button>
-                </div>
+                  <div style="background:rgba(244,63,94,.1); border:1px solid rgba(244,63,94,.3); padding:9px 11px; border-radius:7px; font-size:12px;">
+                    <strong style="color:#fb8497;">Comprovante do cliente enviado</strong>
+                    {% if parc.comprovante_antecipacao %}<br><a href="/anexos/{{ parc.comprovante_antecipacao }}" target="_blank" style="color:#fb8497; font-size:11px;">Ver comprovante →</a>{% endif %}
+                    <br><button class="btn" style="background:linear-gradient(135deg,#d3325e,#e0742c); padding:6px 12px; font-size:11.5px; margin-top:7px;" onclick="aprovarAntecip({{ parc.id }})">Pedir 48h à operadora</button>
+                  </div>
                 {% elif st == 'Antecipação Solicitada à Operadora' %}
-                <button class="btn" style="padding:7px 13px; font-size:12px;" onclick="acao({{ parc.id }},'receber')">Operadora pagou → Recebido</button>
+                  <button class="btn" style="padding:7px 13px; font-size:12px;" onclick="acao({{ parc.id }},'receber')">Operadora pagou → Recebido</button>
                 {% elif st == 'Recebido e não repassado' %}
-                <button class="btn" style="padding:8px 13px; font-size:12px;" onclick="acao({{ parc.id }},'liberar')">✓ Conferir e Liberar p/ corretor</button>
-                <div style="font-size:10.5px; color:var(--cinza-2);">Confirmação do gestor — libera no lote de quinta</div>
+                  <button class="btn" style="padding:8px 13px; font-size:12px;" onclick="acao({{ parc.id }},'liberar')">✓ Conferir e Liberar p/ corretor</button>
+                  <div style="font-size:10.5px; color:var(--cinza-2);">Confirmação do gestor — libera no lote de quinta</div>
                 {% elif st == 'Liberado para o corretor' %}
                   {% if parc.aceite_corretor %}
-                  <button class="btn" style="padding:8px 13px; font-size:12px;" onclick="acao({{ parc.id }},'pagar')">Confirmar pagamento (sexta)</button>
-                  <span class="tag tag-verde" style="font-size:10.5px;">✓ Corretor de acordo · {{ parc.data_aceite[:10] if parc.data_aceite else '' }}</span>
+                    <button class="btn" style="padding:8px 13px; font-size:12px;" onclick="acao({{ parc.id }},'pagar')">Confirmar pagamento (sexta)</button>
+                    <span class="tag tag-verde" style="font-size:10.5px;">✓ Corretor de acordo · {{ parc.data_aceite[:10] if parc.data_aceite else '' }}</span>
                   {% else %}
-                  <span style="font-size:11px; color:var(--am);">Aguardando aceite do corretor</span>
+                    <span style="font-size:11px; color:var(--am);">Aguardando aceite do corretor</span>
                   {% endif %}
                 {% elif st == 'Pago ao corretor' %}
-                <span style="font-size:11px; color:var(--teal);">✓ Pago{% if parc.data_pagamento %} · {{ parc.data_pagamento[:10] }}{% endif %}</span>
+                  <span style="font-size:11px; color:var(--teal);">✓ Pago{% if parc.data_pagamento %} · {{ parc.data_pagamento[:10] }}{% endif %}</span>
                 {% endif %}
-
                 {% if parc.confirmado_gestor and st != 'Pendente de receber' %}
-                <span style="font-size:10px; color:var(--cinza-2);">Gestor liberou · {{ parc.data_confirmacao_gestor[:10] if parc.data_confirmacao_gestor else '' }}</span>
+                  <span style="font-size:10px; color:var(--cinza-2);">Gestor liberou · {{ parc.data_confirmacao_gestor[:10] if parc.data_confirmacao_gestor else '' }}</span>
                 {% endif %}
-
                 <details style="margin-top:2px;">
                   <summary style="font-size:10.5px; color:var(--cinza-2); cursor:pointer;">Alterar manualmente</summary>
                   <select onchange="mudarStatus({{ parc.id }}, this.value)" style="font-size:11px; padding:5px 7px; border:1px solid var(--borda-2); border-radius:6px; background:var(--panel-2); color:var(--texto); cursor:pointer; margin-top:5px;">
@@ -191,37 +188,29 @@
                   </select>
                 </details>
               </div>
-
-            {# ─── VISÃO CONSULTOR ─── #}
             {% else %}
               {% if parc.status == 'Pago ao corretor' %}
                 <span class="tag tag-verde">Pago</span>
-
               {% elif parc.status == 'Liberado para o corretor' %}
                 <span class="tag tag-am">A receber · Lote de sexta</span>
                 {% if not parc.aceite_corretor %}
                 <div style="margin-top:7px;">
-                  <button class="btn" style="background:var(--verde); padding:7px 13px; font-size:12px;"
-                    onclick="darAceite({{ parc.id }})">✓ Conferido e De Acordo</button>
+                  <button class="btn" style="background:var(--verde); padding:7px 13px; font-size:12px;" onclick="darAceite({{ parc.id }})">✓ Conferido e De Acordo</button>
                 </div>
                 {% else %}
                 <div style="margin-top:5px;"><span class="tag tag-verde" style="font-size:11px;">✓ Aceite registrado · aguardando pagamento</span></div>
                 {% endif %}
-
               {% elif parc.status in ['Antecipação - Aguardando ADM', 'Antecipação Solicitada à Operadora'] %}
                 <span class="tag tag-info">Antecipação em análise</span>
                 <div style="font-size:11px; color:var(--cinza); margin-top:4px;">Comprovante enviado · aguardando operadora</div>
-
               {% else %}
                 <span class="tag tag-cinza">Em análise</span>
                 {% if parc.numero == 1 and not parc.comprovante_antecipacao %}
                 <div style="margin-top:7px;">
-                  <label style="display:inline-flex; align-items:center; gap:5px; cursor:pointer;
-                    color:var(--info); font-size:11.5px; font-weight:500; text-decoration:underline;">
+                  <label style="display:inline-flex; align-items:center; gap:5px; cursor:pointer; color:var(--info); font-size:11.5px; font-weight:500; text-decoration:underline;">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                     Subir comprovante · Pedir antecipação 48h
-                    <input type="file" style="display:none;" accept=".pdf,.jpg,.jpeg,.png"
-                      onchange="enviarComprovante({{ parc.id }}, this)">
+                    <input type="file" style="display:none;" accept=".pdf,.jpg,.jpeg,.png" onchange="enviarComprovante({{ parc.id }}, this)">
                   </label>
                   <div style="font-size:10.5px; color:var(--cinza); margin-top:3px;">Somente para a 1ª parcela · cliente já pagou</div>
                 </div>
@@ -230,7 +219,6 @@
                 {% endif %}
               {% endif %}
             {% endif %}
-
           </td>
         </tr>
         {% endfor %}
@@ -241,7 +229,7 @@
     {% endif %}
   </div>
 
-  <!-- Solicitação de edição pendente (admin) -->
+  <!-- ── SOLICITAÇÃO DE EDIÇÃO PENDENTE (admin) ── -->
   {% if solic_pendente %}
   <div class="card" style="margin-bottom:16px; border:1px solid rgba(245,158,11,.4); background:rgba(245,158,11,.05);">
     <div class="card-header" style="border-bottom:1px solid rgba(245,158,11,.2);">
@@ -252,7 +240,7 @@
       <p style="font-size:12.5px; color:var(--cinza); margin-bottom:14px;">O consultor solicitou as seguintes alterações. Revise e decida:</p>
       <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
         {% for campo, info in solic_pendente.alteracoes_parsed.items() %}
-        <div class="solic-diff" style="display:grid; grid-template-columns:140px 1fr; gap:10px; align-items:center; padding:8px 12px; background:var(--panel-2,#1b1b27); border-radius:7px; font-size:13px;">
+        <div style="display:grid; grid-template-columns:140px 1fr; gap:10px; align-items:center; padding:8px 12px; background:var(--panel-2,#1b1b27); border-radius:7px; font-size:13px;">
           <div style="font-weight:600; color:var(--texto,#fff);">{{ info.label }}</div>
           <div><span style="color:#f43f7c; text-decoration:line-through;">{{ info.de }}</span> <span style="color:var(--cinza);">→</span> <span style="color:var(--teal); font-weight:600;">{{ info.para }}</span></div>
         </div>
@@ -267,20 +255,24 @@
   </div>
   {% endif %}
 
-  <!-- Dados da proposta -->
+  <!-- ── DADOS DA PROPOSTA ── -->
   <div class="card" style="margin-bottom:16px;">
     <div class="card-header">
       <h3>Dados da proposta</h3>
-      {% if session.perfil == 'admin' %}<div class="acoes-proposta" style="display:flex; gap:8px; flex-wrap:wrap;">
+      {% if session.perfil == 'admin' %}
+      <div class="acoes-proposta" style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEdicao()">Editar proposta</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirEmailAffinity()">Enviar à Affinity</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(31,216,164,.4); color:var(--teal);" onclick="abrirAntecipacao()">Solicitar antecipação</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px;" onclick="abrirConsultor()">Trocar consultor</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.3); color:var(--rosa);" onclick="abrirEstorno()">Estornar</button>
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(244,63,124,.5); color:var(--rosa);" onclick="abrirExclusao()">Excluir</button>
-      </div>{% else %}<div class="acoes-proposta" style="display:flex; gap:8px; flex-wrap:wrap;">
+      </div>
+      {% else %}
+      <div class="acoes-proposta" style="display:flex; gap:8px;">
         <button class="btn-outline" style="font-size:12px; padding:7px 14px; border-color:rgba(31,216,164,.4); color:var(--teal);" onclick="abrirEdicao()">Solicitar alteração</button>
-      </div>{% endif %}
+      </div>
+      {% endif %}
     </div>
     <div class="card-body dados-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
       {% for label, valor in [
@@ -315,29 +307,52 @@
     </div>
   </div>
 
-  <!-- Repique e Dependentes -->
-  {% if p.tem_repique or p.dependentes_json %}
+  <!-- ── TITULAR E DEPENDENTES ── -->
+  {% set deps_raw = p.dependentes_json %}
+  {% if p.data_nasc_titular or deps_raw %}
   <div class="card" style="margin-bottom:16px;">
-    <div class="card-header"><h3>Vidas & Repique</h3></div>
+    <div class="card-header">
+      <h3>Titular e Dependentes</h3>
+      <span class="tag tag-cinza">{{ p.total_vidas }} vida{{ 's' if p.total_vidas != 1 else '' }}</span>
+    </div>
     <div class="card-body">
-      {% if p.tem_repique and p.repique_json %}
-        {% set rep = p.repique_json|tojson %}
-        <div style="background:var(--panel-2); border-radius:8px; padding:12px; margin-bottom:12px; border-left:3px solid var(--laranja);">
-          <div style="font-size:11px; color:var(--laranja); font-weight:600; text-transform:uppercase; letter-spacing:.6px; margin-bottom:6px;">⚡ Repique</div>
-          <div style="font-size:13px;" id="repique-display">{{ p.repique_json }}</div>
+
+      <!-- Titular -->
+      <div style="display:flex; align-items:center; gap:14px; padding:12px 0; border-bottom:1px solid var(--borda);">
+        <div style="width:36px; height:36px; border-radius:50%; background:rgba(31,216,164,.15); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
         </div>
-      {% endif %}
-      {% if p.dependentes_json %}
-        <div style="background:var(--panel-2); border-radius:8px; padding:12px; border-left:3px solid var(--teal);">
-          <div style="font-size:11px; color:var(--teal); font-weight:600; text-transform:uppercase; letter-spacing:.6px; margin-bottom:6px;">👥 Dependentes</div>
-          <div id="dependentes-display" style="font-size:13px;"></div>
+        <div>
+          <div style="font-size:13px; font-weight:600;">{{ p.razao_social }}</div>
+          <div style="font-size:11.5px; color:var(--cinza); margin-top:2px;">
+            <span style="background:rgba(31,216,164,.12); color:var(--teal); padding:1px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px;">Titular</span>
+            {% if p.data_nasc_titular %}Nasc: {{ p.data_nasc_titular }}{% endif %}
+            {% if p.cpf_titular %} · CPF: {{ p.cpf_titular }}{% endif %}
+          </div>
         </div>
-      {% endif %}
+      </div>
+
+      <!-- Dependentes (renderizados via JS) -->
+      <div id="lista-dependentes"></div>
+
     </div>
   </div>
   {% endif %}
 
-  <!-- ── TAXA DE ADESÃO ─────────────────────────────────────────── -->
+  <!-- ── REPIQUE ── -->
+  {% if p.tem_repique and p.repique_json %}
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header">
+      <h3>⚡ Repique</h3>
+      <span style="font-size:11px; color:var(--cinza);">Vida adicional com valor diferenciado</span>
+    </div>
+    <div class="card-body" id="repique-display">
+      <span style="color:var(--cinza); font-size:13px;">Carregando...</span>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ── TAXA DE ADESÃO ── -->
   {% set adesao_cor = '#10b981' if p.adesao_status == 'Pago' else '#ef4444' if p.adesao_status == 'Vencido' else '#f59e0b' if p.adesao_status == 'Aguardando Pagamento' else '#6b7280' %}
   <div class="card" style="margin-bottom:16px; border:1px solid {{ adesao_cor }}22 !important;" id="card-boleto-adesao">
     <div class="card-header" style="border-bottom:1px solid var(--borda);">
@@ -350,97 +365,58 @@
       </div>
       <div style="display:flex; align-items:center; gap:8px;">
         {% if p.adesao_status and p.adesao_status != 'Não gerado' %}
-          <span style="
-            padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;
-            background:{{ adesao_cor }}22; color:{{ adesao_cor }}; border:1px solid {{ adesao_cor }}44;">
+          <span style="padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600; background:{{ adesao_cor }}22; color:{{ adesao_cor }}; border:1px solid {{ adesao_cor }}44;">
             {{ p.adesao_status }}
           </span>
         {% endif %}
         {% if session.perfil in ('admin', 'consultor') %}
-          <button onclick="abrirModalBoleto()" style="
-            padding:6px 16px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; border:none;
-            {% if p.adesao_boleto_url %}background:#f59e0b22; color:#f59e0b; border:1px solid #f59e0b44;
-            {% else %}background:var(--azul); color:#fff;{% endif %}">
+          <button onclick="abrirModalBoleto()" style="padding:6px 16px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; {% if p.adesao_boleto_url %}background:#f59e0b22; color:#f59e0b; border:1px solid #f59e0b44;{% else %}background:var(--azul); color:#fff; border:none;{% endif %}">
             {% if p.adesao_boleto_url %}🔁 Gerar Novo{% else %}+ Gerar Boleto{% endif %}
           </button>
         {% endif %}
       </div>
     </div>
-
     <div class="card-body">
       {% if p.adesao_boleto_url %}
-        <!-- Boleto gerado: mostra detalhes em grid -->
         <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-bottom:16px;">
           <div style="background:var(--panel-2); padding:14px; border-radius:8px; text-align:center;">
             <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Valor</div>
-            <div style="font-family:'Sora',sans-serif; font-size:22px; color:var(--texto); margin-top:5px; font-weight:600;">
-              R$ {{ '%.2f'|format(p.adesao_valor or 0)|replace('.',',') }}
-            </div>
+            <div style="font-family:'Sora',sans-serif; font-size:22px; color:var(--texto); margin-top:5px; font-weight:600;">R$ {{ '%.2f'|format(p.adesao_valor or 0)|replace('.',',') }}</div>
           </div>
           <div style="background:var(--panel-2); padding:14px; border-radius:8px; text-align:center;">
             <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Vencimento</div>
             <div style="font-family:'Sora',sans-serif; font-size:18px; color:var(--texto); margin-top:5px; font-weight:600;">
-              {% if p.adesao_vencimento %}
-                {{ p.adesao_vencimento.split('-')|reverse|join('/') if '-' in (p.adesao_vencimento or '') else p.adesao_vencimento }}
-              {% else %}—{% endif %}
+              {% if p.adesao_vencimento %}{{ p.adesao_vencimento.split('-')|reverse|join('/') if '-' in (p.adesao_vencimento or '') else p.adesao_vencimento }}{% else %}—{% endif %}
             </div>
           </div>
           <div style="background:{{ adesao_cor }}15; padding:14px; border-radius:8px; text-align:center; border:1px solid {{ adesao_cor }}33;">
             <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Status</div>
-            <div style="font-size:15px; color:{{ adesao_cor }}; margin-top:5px; font-weight:700;">
-              {{ p.adesao_status or '—' }}
-            </div>
+            <div style="font-size:15px; color:{{ adesao_cor }}; margin-top:5px; font-weight:700;">{{ p.adesao_status or '—' }}</div>
           </div>
         </div>
-
-        <!-- Linha digitável -->
         {% if p.adesao_linha_digitavel %}
           <div style="background:var(--panel-2); border-radius:8px; padding:12px 16px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
             <div>
               <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Linha Digitável</div>
               <div id="linha-digitavel-txt" style="font-family:monospace; font-size:12px; color:var(--texto); letter-spacing:.5px;">{{ p.adesao_linha_digitavel }}</div>
             </div>
-            <button onclick="copiarLinha()" style="
-              padding:7px 14px; border-radius:8px; background:var(--azul); color:#fff;
-              border:none; cursor:pointer; font-size:12px; font-weight:600; white-space:nowrap;">
-              📋 Copiar
-            </button>
+            <button onclick="copiarLinha()" style="padding:7px 14px; border-radius:8px; background:var(--azul); color:#fff; border:none; cursor:pointer; font-size:12px; font-weight:600;">📋 Copiar</button>
           </div>
         {% endif %}
-
-        <!-- Ações -->
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <a href="/proposta/{{ p.id }}/boleto-adesao" target="_blank" style="
-            display:inline-flex; align-items:center; gap:6px;
-            padding:9px 20px; border-radius:8px; background:#10b981; color:#fff;
-            font-weight:600; font-size:13px; text-decoration:none;">
-            📄 Baixar Boleto (PDF)
-          </a>
-          <button onclick="verificarStatusBoleto()" style="
-            padding:9px 20px; border-radius:8px; background:var(--panel-2); color:var(--texto);
-            border:1px solid var(--borda); cursor:pointer; font-size:13px; font-weight:600;">
-            🔄 Verificar pagamento
-          </button>
+          <a href="/proposta/{{ p.id }}/boleto-adesao" target="_blank" style="display:inline-flex; align-items:center; gap:6px; padding:9px 20px; border-radius:8px; background:#10b981; color:#fff; font-weight:600; font-size:13px; text-decoration:none;">📄 Baixar Boleto (PDF)</a>
+          <button onclick="verificarStatusBoleto()" style="padding:9px 20px; border-radius:8px; background:var(--panel-2); color:var(--texto); border:1px solid var(--borda); cursor:pointer; font-size:13px; font-weight:600;">🔄 Verificar pagamento</button>
         </div>
-
       {% else %}
-        <!-- Boleto ainda não gerado -->
         <div style="text-align:center; padding:24px 0; color:var(--cinza);">
           <div style="font-size:32px; margin-bottom:8px; opacity:.4;">💳</div>
           <div style="font-size:14px; font-weight:500; margin-bottom:4px; color:var(--texto);">Nenhum boleto gerado</div>
           <div style="font-size:12px; margin-bottom:16px;">Gere o boleto para cobrar a taxa de adesão do cliente.</div>
           {% if not p.cpf_titular and not p.cnpj %}
-            <div style="display:inline-block; background:#ef444415; border:1px solid #ef444433; border-radius:8px; padding:8px 16px; font-size:12px; color:#ef4444; margin-bottom:12px;">
-              ⚠️ CPF/CNPJ não preenchido na proposta — edite antes de gerar o boleto
-            </div>
-            <br>
+            <div style="display:inline-block; background:#ef444415; border:1px solid #ef444433; border-radius:8px; padding:8px 16px; font-size:12px; color:#ef4444; margin-bottom:12px;">⚠️ CPF/CNPJ não preenchido — edite a proposta antes de gerar o boleto</div><br>
           {% endif %}
           {% if session.perfil in ('admin', 'consultor') %}
-            <button onclick="abrirModalBoleto()" style="
-              padding:10px 24px; border-radius:8px; background:var(--azul); color:#fff;
-              border:none; cursor:pointer; font-size:14px; font-weight:600;">
-              💳 Gerar Boleto de Adesão
-            </button>
+            <button onclick="abrirModalBoleto()" style="padding:10px 24px; border-radius:8px; background:var(--azul); color:#fff; border:none; cursor:pointer; font-size:14px; font-weight:600;">💳 Gerar Boleto de Adesão</button>
           {% endif %}
         </div>
       {% endif %}
@@ -465,41 +441,34 @@
       </div>
       <div style="margin-bottom:14px;">
         <label style="font-size:12px; color:var(--cinza); display:block; margin-bottom:6px; font-weight:500;">Valor (R$)</label>
-        <input type="number" id="boleto-valor" step="0.01" min="0.01" placeholder="0,00"
-          style="width:100%; padding:11px 14px; border:1px solid var(--borda); border-radius:8px; background:var(--bg); color:var(--texto); font-size:16px; font-weight:600; box-sizing:border-box;">
+        <input type="number" id="boleto-valor" step="0.01" min="0.01" placeholder="0,00" style="width:100%; padding:11px 14px; border:1px solid var(--borda); border-radius:8px; background:var(--bg); color:var(--texto); font-size:16px; font-weight:600; box-sizing:border-box;">
         <div style="font-size:11px; color:var(--cinza); margin-top:4px;">Informe o valor final — pode aplicar desconto.</div>
       </div>
       <div style="margin-bottom:22px;">
         <label style="font-size:12px; color:var(--cinza); display:block; margin-bottom:6px; font-weight:500;">Vencimento</label>
-        <input type="date" id="boleto-vencimento"
-          style="width:100%; padding:11px 14px; border:1px solid var(--borda); border-radius:8px; background:var(--bg); color:var(--texto); font-size:14px; box-sizing:border-box;">
+        <input type="date" id="boleto-vencimento" style="width:100%; padding:11px 14px; border:1px solid var(--borda); border-radius:8px; background:var(--bg); color:var(--texto); font-size:14px; box-sizing:border-box;">
       </div>
       <div style="display:flex; gap:8px;">
         <button onclick="fecharModalBoleto()" class="btn-outline" style="flex:1; padding:11px;">Cancelar</button>
-        <button onclick="gerarBoletoAdesao()" id="btn-gerar-boleto"
-          style="flex:2; padding:11px; background:var(--azul); color:#fff; border:none; border-radius:8px; font-weight:600; cursor:pointer; font-size:14px;">
-          Gerar Boleto
-        </button>
+        <button onclick="gerarBoletoAdesao()" id="btn-gerar-boleto" style="flex:2; padding:11px; background:var(--azul); color:#fff; border:none; border-radius:8px; font-weight:600; cursor:pointer; font-size:14px;">Gerar Boleto</button>
       </div>
       <div id="boleto-resultado" style="display:none; margin-top:16px; padding:14px; border-radius:8px; background:#10b98115; border:1px solid #10b98144; text-align:center;">
         <div style="font-size:13px; color:#10b981; font-weight:600; margin-bottom:10px;">✅ Boleto gerado com sucesso!</div>
-        <a id="boleto-link" href="#" target="_blank"
-          style="display:inline-block; padding:9px 22px; background:#10b981; color:#fff; border-radius:8px; font-weight:600; text-decoration:none; font-size:13px;">
-          📄 Baixar Boleto
-        </a>
+        <a id="boleto-link" href="#" target="_blank" style="display:inline-block; padding:9px 22px; background:#10b981; color:#fff; border-radius:8px; font-weight:600; text-decoration:none; font-size:13px;">📄 Baixar Boleto</a>
       </div>
       <div id="boleto-erro" style="display:none; margin-top:12px; padding:10px 14px; border-radius:8px; background:#ef444415; border:1px solid #ef444433; font-size:12px; color:#ef4444;"></div>
     </div>
   </div>
 
-  <!-- Documentos -->
+  <!-- ── DOCUMENTOS ── -->
+  <div class="card" style="margin-bottom:16px;" id="card-documentos">
     <div class="card-header">
       <h3>Documentos</h3>
       <span style="font-size:11px; color:var(--cinza);">Comprovante e contrato são necessários para enviar à Affinity</span>
     </div>
     <div class="card-body">
 
-      <!-- Comprovante de pagamento -->
+      <!-- Comprovante de pagamento (1º boleto) -->
       <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--borda); gap:12px; flex-wrap:wrap;" id="row-comprovante">
         <div style="display:flex; align-items:center; gap:10px;">
           <div style="width:8px; height:8px; border-radius:50%; background:{% if p.comprovante_boleto %}#10b981{% else %}#f43f7c{% endif %}; flex-shrink:0;"></div>
@@ -508,9 +477,7 @@
             <div style="font-size:11.5px; color:var(--cinza); margin-top:2px;">
               {% if p.comprovante_boleto %}
                 Anexado: <a href="/anexos/{{ p.comprovante_boleto }}" target="_blank" style="color:var(--verde);">{{ p.comprovante_boleto.split('_',3)[-1] if '_' in p.comprovante_boleto else p.comprovante_boleto }}</a>
-              {% else %}
-                Pendente — necessário para liberar comissões e enviar à Affinity
-              {% endif %}
+              {% else %}Pendente — necessário para liberar comissões e enviar à Affinity{% endif %}
             </div>
           </div>
         </div>
@@ -522,6 +489,8 @@
           {% if p.comprovante_boleto and session.perfil == 'admin' %}<button onclick="excluirAnexo('comprovante','')" class="btn-del-anexo" title="Excluir comprovante">×</button>{% endif %}
         </div>
       </div>
+
+      <!-- Contrato / proposta assinada -->
       <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--borda); gap:12px; flex-wrap:wrap;" id="row-contrato">
         <div style="display:flex; align-items:center; gap:10px;">
           <div style="width:8px; height:8px; border-radius:50%; background:{% if p.contrato_arquivo %}#10b981{% else %}#f59e0b{% endif %}; flex-shrink:0;"></div>
@@ -530,9 +499,7 @@
             <div style="font-size:11.5px; color:var(--cinza); margin-top:2px;">
               {% if p.contrato_arquivo %}
                 Anexado: <a href="/anexos/{{ p.contrato_arquivo }}" target="_blank" style="color:var(--verde);">{{ p.contrato_arquivo.split('_',3)[-1] if '_' in p.contrato_arquivo else p.contrato_arquivo }}</a>
-              {% else %}
-                Pendente
-              {% endif %}
+              {% else %}Pendente{% endif %}
             </div>
           </div>
         </div>
@@ -545,7 +512,7 @@
         </div>
       </div>
 
-      <!-- Documentos extras (bordo) -->
+      <!-- Documentos adicionais -->
       {% if p.anexos and p.anexos != '[]' %}
       <div style="padding:12px 0; border-bottom:1px solid var(--borda);">
         <div style="font-size:12px; font-weight:600; color:var(--cinza); text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px;">Documentos adicionais</div>
@@ -588,19 +555,21 @@
     </div>
   </div>
 
-  <!-- Contatos -->
+  <!-- ── CONTATOS ── -->
   <div class="card" style="margin-bottom:16px;">
     <div class="card-header"><h3>Contatos</h3></div>
     <div class="card-body dados-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
       <div>
         <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">Resp. contrato</div>
         <div style="font-size:13px;">{{ p.resp_contrato }}<br>
-          <span style="color:var(--cinza); font-size:12px;">{{ p.email_resp_contrato }} · {{ p.tel_resp_contrato }}</span></div>
+          <span style="color:var(--cinza); font-size:12px;">{{ p.email_resp_contrato }} · {{ p.tel_resp_contrato }}</span>
+        </div>
       </div>
       <div>
         <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">Resp. negociação</div>
         <div style="font-size:13px;">{{ p.resp_negociacao }}<br>
-          <span style="color:var(--cinza); font-size:12px;">{{ p.email_resp_negociacao }} · {{ p.tel_resp_negociacao }}</span></div>
+          <span style="color:var(--cinza); font-size:12px;">{{ p.email_resp_negociacao }} · {{ p.tel_resp_negociacao }}</span>
+        </div>
       </div>
     </div>
   </div>
@@ -614,17 +583,14 @@
 
 </div>
 
-<!-- Modal editar consultor -->
+<!-- ── MODAIS ── -->
+
+<!-- Editar consultor -->
 <div class="modal-overlay" id="modal-consultor">
   <div class="modal" style="max-width:480px;">
     <h3>Remanejar consultor</h3>
-    <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">
-      A comissão será recalculada pelo regime do novo consultor (produção do mês dele + esta venda). Parcelas já em fluxo são mantidas.
-    </p>
-    <div class="campo" style="margin-bottom:18px;">
-      <label>Novo consultor</label>
-      <select id="sel-consultor"></select>
-    </div>
+    <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">A comissão será recalculada pelo regime do novo consultor. Parcelas já em fluxo são mantidas.</p>
+    <div class="campo" style="margin-bottom:18px;"><label>Novo consultor</label><select id="sel-consultor"></select></div>
     <div style="display:flex; gap:10px;">
       <button class="btn" style="flex:1;" onclick="salvarConsultor()">Remanejar e recalcular</button>
       <button class="btn-outline" onclick="fecharConsultor()">Cancelar</button>
@@ -632,13 +598,11 @@
   </div>
 </div>
 
-<!-- Modal estorno -->
+<!-- Estorno -->
 <div class="modal-overlay" id="modal-estorno">
   <div class="modal" style="max-width:420px;">
     <h3>Confirmar estorno</h3>
-    <p style="font-size:13px; color:var(--cinza); margin-bottom:20px; line-height:1.6;">
-      As parcelas pendentes de receber desta proposta serão canceladas e o status será marcado como estornado. Esta ação não pode ser desfeita.
-    </p>
+    <p style="font-size:13px; color:var(--cinza); margin-bottom:20px; line-height:1.6;">As parcelas pendentes serão canceladas e o status será marcado como estornado. Não pode ser desfeito.</p>
     <div style="display:flex; gap:10px;">
       <button class="btn" style="flex:1; background:var(--rosa);" onclick="confirmarEstorno()">Confirmar estorno</button>
       <button class="btn-outline" onclick="document.getElementById('modal-estorno').classList.remove('open')">Cancelar</button>
@@ -646,106 +610,72 @@
   </div>
 </div>
 
-<!-- Modal Enviar à plataforma (Affinity / Brevo) -->
+<!-- Enviar à Affinity -->
 <div class="modal-overlay" id="modal-email-affinity">
-  <div class="modal" style="max-width:700px;max-height:90vh;overflow-y:auto;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+  <div class="modal" style="max-width:700px; max-height:90vh; overflow-y:auto;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
       <h3 style="margin:0;">Enviar à Affinity — Solicitação de Protocolo</h3>
-      <button class="btn-outline" style="font-size:12px;padding:4px 10px;" onclick="fecharEmailAffinity()">Fechar</button>
+      <button class="btn-outline" style="font-size:12px; padding:4px 10px;" onclick="fecharEmailAffinity()">Fechar</button>
     </div>
-
-    <!-- Alerta sem documentos -->
-    <div id="ea-aviso-doc" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#92400e;">
-      Atenção: esta proposta não tem documentos anexados. O envio está bloqueado até que ao menos um arquivo seja carregado.
-    </div>
-
-    <!-- Destinatários (info) -->
-    <div style="background:var(--panel-2,#1b1b27);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;line-height:1.8;">
+    <div id="ea-aviso-doc" style="display:none; background:#fef3c7; border:1px solid #f59e0b; border-radius:8px; padding:12px 16px; margin-bottom:16px; font-size:13px; color:#92400e;">Atenção: esta proposta não tem documentos anexados. O envio está bloqueado até que ao menos um arquivo seja carregado.</div>
+    <div style="background:var(--panel-2,#1b1b27); border-radius:8px; padding:12px 16px; margin-bottom:16px; font-size:12.5px; line-height:1.8;">
       <strong>Para:</strong> Pâmela Lima, Kaique Silva, Equipe PL (Affinity)<br>
       <strong>Cópia:</strong> guilherme@serenuscorretora.com.br
     </div>
-
-    <!-- Assunto editável -->
-    <div class="campo" style="margin-bottom:12px;">
-      <label>Assunto</label>
-      <input type="text" id="ea-assunto" style="font-size:13px;">
-    </div>
-
-    <!-- Corpo editável -->
-    <div class="campo" style="margin-bottom:12px;">
-      <label>Corpo do e-mail <span style="color:var(--cinza);font-weight:400;font-size:11px;">— edite livremente antes de enviar</span></label>
-      <textarea id="ea-corpo" style="min-height:320px;font-size:13px;line-height:1.7;font-family:monospace;"></textarea>
-    </div>
-
-    <!-- Particularidades do contrato -->
-    <div class="campo" style="margin-bottom:20px;">
-      <label>Particularidades / Regra de carência <span style="color:var(--cinza);font-weight:400;font-size:11px;">— será inserido no final do e-mail</span></label>
-      <textarea id="ea-particularidades" style="min-height:80px;font-size:13px;line-height:1.6;" placeholder="Ex: O grupo possui plano anterior com a Amil. Solicito redução de carência por portabilidade..."></textarea>
-    </div>
-
-    <div style="display:flex;gap:10px;flex-wrap:wrap;">
-      <button class="btn" style="flex:1;min-width:160px;" id="ea-btn-enviar" onclick="enviarEmailAffinity()">Enviar para a Affinity</button>
-      {% if session.modo_teste %}<button class="btn-outline" style="flex:1;min-width:160px;border-color:rgba(245,158,11,.5);color:#f59e0b;" id="ea-btn-teste" onclick="enviarEmailTeste()">Enviar teste para mim</button>{% endif %}
-      <button class="btn-outline" style="flex:1;min-width:120px;" onclick="copiarEmailAffinity()">Copiar texto</button>
+    <div class="campo" style="margin-bottom:12px;"><label>Assunto</label><input type="text" id="ea-assunto" style="font-size:13px;"></div>
+    <div class="campo" style="margin-bottom:12px;"><label>Corpo do e-mail <span style="color:var(--cinza); font-weight:400; font-size:11px;">— edite livremente antes de enviar</span></label><textarea id="ea-corpo" style="min-height:320px; font-size:13px; line-height:1.7; font-family:monospace;"></textarea></div>
+    <div class="campo" style="margin-bottom:20px;"><label>Particularidades / Regra de carência</label><textarea id="ea-particularidades" style="min-height:80px; font-size:13px; line-height:1.6;" placeholder="Ex: O grupo possui plano anterior com a Amil. Solicito redução de carência por portabilidade..."></textarea></div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <button class="btn" style="flex:1; min-width:160px;" id="ea-btn-enviar" onclick="enviarEmailAffinity()">Enviar para a Affinity</button>
+      {% if session.modo_teste %}<button class="btn-outline" style="flex:1; min-width:160px; border-color:rgba(245,158,11,.5); color:#f59e0b;" id="ea-btn-teste" onclick="enviarEmailTeste()">Enviar teste para mim</button>{% endif %}
+      <button class="btn-outline" style="flex:1; min-width:120px;" onclick="copiarEmailAffinity()">Copiar texto</button>
       <button class="btn-outline" onclick="fecharEmailAffinity()">Cancelar</button>
     </div>
-    <div id="ea-status" style="margin-top:12px;font-size:12.5px;color:var(--cinza);display:none;"></div>
+    <div id="ea-status" style="margin-top:12px; font-size:12.5px; color:var(--cinza); display:none;"></div>
   </div>
 </div>
 
-<!-- Modal Solicitar Antecipação de Comissão -->
+<!-- Antecipação de Comissão -->
 <div class="modal-overlay" id="modal-antecipacao">
-  <div class="modal" style="max-width:600px;max-height:90vh;overflow-y:auto;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+  <div class="modal" style="max-width:600px; max-height:90vh; overflow-y:auto;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
       <h3 style="margin:0;">Solicitar Antecipação de Comissão</h3>
-      <button class="btn-outline" style="font-size:12px;padding:4px 10px;" onclick="fecharAntecipacao()">Fechar</button>
+      <button class="btn-outline" style="font-size:12px; padding:4px 10px;" onclick="fecharAntecipacao()">Fechar</button>
     </div>
-
-    <!-- Bloqueio: operadora não permite -->
-    <div id="ant-bloqueio" style="display:none;background:#fee2e2;border:1px solid #f43f7c;border-radius:8px;padding:14px 16px;margin-bottom:16px;font-size:13px;color:#991b1b;line-height:1.6;"></div>
-
-    <!-- Aviso documentos -->
-    <div id="ant-aviso-doc" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#92400e;line-height:1.6;"></div>
-
-    <!-- Conteúdo (só quando permitido) -->
+    <div id="ant-bloqueio" style="display:none; background:#fee2e2; border:1px solid #f43f7c; border-radius:8px; padding:14px 16px; margin-bottom:16px; font-size:13px; color:#991b1b; line-height:1.6;"></div>
+    <div id="ant-aviso-doc" style="display:none; background:#fef3c7; border:1px solid #f59e0b; border-radius:8px; padding:12px 16px; margin-bottom:16px; font-size:13px; color:#92400e; line-height:1.6;"></div>
     <div id="ant-conteudo" style="display:none;">
-      <div style="background:var(--panel-2,#1b1b27);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;line-height:1.8;">
+      <div style="background:var(--panel-2,#1b1b27); border-radius:8px; padding:12px 16px; margin-bottom:16px; font-size:12.5px; line-height:1.8;">
         <strong>Para:</strong> Pâmela Lima, Kaique Silva, Equipe PL (Affinity)<br>
         <strong>Cópia:</strong> guilherme@serenuscorretora.com.br<br>
         <strong>Cliente:</strong> <span id="ant-cliente">—</span><br>
         <strong>Operadora / Plano:</strong> <span id="ant-operadora">—</span>
-        <span id="ant-badge-ok" style="display:inline-block;margin-left:6px;background:rgba(31,216,164,.15);color:var(--teal);border-radius:5px;padding:1px 8px;font-size:11px;">antecipação permitida ✓</span>
+        <span id="ant-badge-ok" style="display:inline-block; margin-left:6px; background:rgba(31,216,164,.15); color:var(--teal); border-radius:5px; padding:1px 8px; font-size:11px;">antecipação permitida ✓</span>
       </div>
-
       <div class="campo" style="margin-bottom:14px;">
         <label>Número do contrato <span style="color:var(--rosa);">*</span></label>
         <input type="text" id="ant-num-contrato" placeholder="ex: 97106295" style="font-size:13px;">
-        <div style="font-size:11px;color:var(--cinza);margin-top:4px;">Número do contrato na operadora (obrigatório para a Affinity localizar).</div>
+        <div style="font-size:11px; color:var(--cinza); margin-top:4px;">Número do contrato na operadora (obrigatório para a Affinity localizar).</div>
       </div>
-
-      <div style="background:var(--panel-2,#1b1b27);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12px;color:var(--cinza);line-height:1.7;">
+      <div style="background:var(--panel-2,#1b1b27); border-radius:8px; padding:12px 16px; margin-bottom:16px; font-size:12px; color:var(--cinza); line-height:1.7;">
         <strong style="color:var(--texto,#fff);">Anexos que serão enviados:</strong><br>
         <span id="ant-anexos-lista">Contrato assinado + Comprovante de pagamento</span>
       </div>
-
-      <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        <button class="btn" style="flex:1;min-width:160px;" id="ant-btn-enviar" onclick="enviarAntecipacao(false)">Enviar à Affinity</button>
-        {% if session.modo_teste %}<button class="btn-outline" style="flex:1;min-width:160px;border-color:rgba(245,158,11,.5);color:#f59e0b;" onclick="enviarAntecipacao(true)">Enviar teste para mim</button>{% endif %}
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn" style="flex:1; min-width:160px;" id="ant-btn-enviar" onclick="enviarAntecipacao(false)">Enviar à Affinity</button>
+        {% if session.modo_teste %}<button class="btn-outline" style="flex:1; min-width:160px; border-color:rgba(245,158,11,.5); color:#f59e0b;" onclick="enviarAntecipacao(true)">Enviar teste para mim</button>{% endif %}
         <button class="btn-outline" onclick="fecharAntecipacao()">Cancelar</button>
       </div>
     </div>
-
-    <div id="ant-status" style="margin-top:12px;font-size:12.5px;color:var(--cinza);display:none;"></div>
+    <div id="ant-status" style="margin-top:12px; font-size:12.5px; color:var(--cinza); display:none;"></div>
   </div>
 </div>
 
-<!-- Modal Excluir proposta (Soft Delete) -->
+<!-- Excluir proposta -->
 <div class="modal-overlay" id="modal-exclusao">
   <div class="modal" style="max-width:480px;">
     <h3 style="color:var(--rosa);">Excluir proposta</h3>
-    <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">
-      A proposta sairá dos dashboards e relatórios, e as parcelas pendentes serão canceladas/estornadas. O registro é mantido para auditoria.
-    </p>
+    <p style="font-size:13px; color:var(--cinza); margin-bottom:16px; line-height:1.6;">A proposta sairá dos dashboards e relatórios, e as parcelas pendentes serão canceladas. O registro é mantido para auditoria.</p>
     <div class="campo" style="margin-bottom:14px;">
       <label>Motivo da exclusão</label>
       <select id="exc-motivo">
@@ -766,7 +696,7 @@
   </div>
 </div>
 
-<!-- Modal editar dados -->
+<!-- Editar dados -->
 <div class="modal-overlay" id="modal-edicao">
   <div class="modal" style="max-width:680px; max-height:90vh; overflow-y:auto;">
     {% if session.perfil == 'admin' %}
@@ -776,7 +706,6 @@
     <h3>Solicitar alteração</h3>
     <p style="font-size:12px; color:var(--cinza); margin-bottom:16px;">Altere os campos que precisar. Sua solicitação será enviada ao administrador para aprovação.</p>
     {% endif %}
-
     {% for secao in campos_secoes %}
     <div style="margin-bottom:18px;">
       <div style="font-size:11px; font-weight:700; color:var(--teal); text-transform:uppercase; letter-spacing:.6px; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid var(--borda);">{{ secao.secao }}</div>
@@ -805,9 +734,7 @@
       </div>
     </div>
     {% endfor %}
-
     <div id="ed-status" style="display:none; margin-bottom:12px; font-size:12.5px; padding:10px 14px; border-radius:8px;"></div>
-
     <div style="display:flex; gap:10px; position:sticky; bottom:0; background:var(--modal-bg,#16161f); padding-top:8px;">
       {% if session.perfil == 'admin' %}
       <button class="btn" style="flex:1;" onclick="salvarEdicao()">Salvar alterações</button>
@@ -818,12 +745,15 @@
     </div>
   </div>
 </div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
 const PROP_ID = {{ p.id }};
 let ETIQUETAS_MARCADAS = [];
+
+// ── Etiquetas ──
 async function carregarEtiquetas() {
   const r = await fetch(`/api/etiquetas?proposta_id=${PROP_ID}`);
   const d = await r.json();
@@ -831,109 +761,122 @@ async function carregarEtiquetas() {
   const c = document.getElementById('chips-etiquetas');
   c.innerHTML = d.todas.map(e => {
     const on = ETIQUETAS_MARCADAS.includes(e.id);
-    return `<span onclick="toggleEtiqueta(${e.id})" style="cursor:pointer; user-select:none; font-size:12px; font-weight:600; padding:5px 12px; border-radius:20px; border:1.5px solid ${e.cor}; background:${on?e.cor:'transparent'}; color:${on?'#0a0e14':e.cor};">${e.nome}${on?' ✓':''}</span>`;
-  }).join('') || '<span style="color:var(--cinza-2); font-size:13px;">Nenhuma etiqueta.</span>';
+    return `<span onclick="toggleEtiqueta(${e.id})" style="cursor:pointer;user-select:none;font-size:12px;font-weight:600;padding:5px 12px;border-radius:20px;border:1.5px solid ${e.cor};background:${on?e.cor:'transparent'};color:${on?'#0a0e14':e.cor};">${e.nome}${on?' ✓':''}</span>`;
+  }).join('') || '<span style="color:var(--cinza-2);font-size:13px;">Nenhuma etiqueta.</span>';
 }
 async function toggleEtiqueta(id) {
   const i = ETIQUETAS_MARCADAS.indexOf(id);
   if (i>=0) ETIQUETAS_MARCADAS.splice(i,1); else ETIQUETAS_MARCADAS.push(id);
-  await fetch(`/proposta/${PROP_ID}/etiquetas`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({etiquetas:ETIQUETAS_MARCADAS})});
+  await fetch(`/proposta/${PROP_ID}/etiquetas`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({etiquetas:ETIQUETAS_MARCADAS})});
   carregarEtiquetas();
 }
 async function novaEtiqueta() {
-  const nome = prompt('Nome da etiqueta:');
-  if (!nome) return;
-  const cor = prompt('Cor (hex):', '#1fd8a4') || '#1fd8a4';
-  await fetch('/etiqueta/criar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({nome,cor})});
+  const nome = prompt('Nome da etiqueta:'); if (!nome) return;
+  const cor = prompt('Cor (hex):','#1fd8a4') || '#1fd8a4';
+  await fetch('/etiqueta/criar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome,cor})});
   carregarEtiquetas();
 }
 carregarEtiquetas();
 
-// ─── Fase + Timeline + Edição ───
-const P_DADOS = {
-  razao_social: {{ (p.razao_social or '')|tojson }}, adm_operadora: {{ (p.adm_operadora or '')|tojson }},
-  produto: {{ (p.produto or '')|tojson }}, valor: {{ (p.valor or 0)|tojson }},
-  vigencia: {{ (p.vigencia or '')|tojson }}, dia_vencimento: {{ (p.dia_vencimento or '')|tojson }},
-  fator_moderador: {{ (p.fator_moderador or '')|tojson }}, total_vidas: {{ (p.total_vidas or '')|tojson }},
-  observacoes: {{ (p.observacoes or '')|tojson }},
-  data_nasc_titular: {{ (p.data_nasc_titular or '')|tojson }},
-  cpf_titular: {{ (p.cpf_titular or '')|tojson }},
-};
-// Repique separado (checkbox + campos)
+// ── Dependentes e Repique ──
 const REP = {{ p.repique_json|tojson if p.repique_json else 'null' }};
-const TEM_REPIQUE = {{ '1' if p.tem_repique else '0' }};
+const DEPS_JSON = {{ p.dependentes_json|tojson if p.dependentes_json else '"[]"' }};
+
+const TIPO_LABELS = {
+  'conjuge': 'Cônjuge / Companheiro(a)',
+  'filho': 'Filho(a)',
+  'filha': 'Filho(a)',
+  'pai': 'Pai',
+  'mae': 'Mãe',
+  'sogro': 'Sogro(a)',
+  'sogra': 'Sogro(a)',
+  'irmao': 'Irmão/Irmã',
+  'irma': 'Irmão/Irmã',
+  'neto': 'Neto(a)',
+  'neta': 'Neto(a)',
+  'titular': 'Titular',
+};
+const TIPO_CORES = {
+  'conjuge': '#8b5cf6', 'filho': '#3b82f6', 'filha': '#3b82f6',
+  'pai': '#f59e0b', 'mae': '#f59e0b', 'sogro': '#f59e0b', 'sogra': '#f59e0b',
+  'irmao': '#10b981', 'irma': '#10b981', 'neto': '#06b6d4', 'neta': '#06b6d4',
+  'titular': '#1fd8a4',
+};
+
 document.addEventListener('DOMContentLoaded', () => {
-  // Inicia checkbox de repique
-  const cb = document.getElementById('ed-tem_repique');
-  if (cb) {
-    cb.checked = !!TEM_REPIQUE;
-    document.getElementById('wrap-repique').style.display = TEM_REPIQUE ? 'block' : 'none';
-    cb.addEventListener('change', () => {
-      document.getElementById('wrap-repique').style.display = cb.checked ? 'block' : 'none';
-    });
+  // Renderiza dependentes
+  const elDeps = document.getElementById('lista-dependentes');
+  if (elDeps) {
+    try {
+      const deps = JSON.parse(DEPS_JSON);
+      if (deps && deps.length > 0) {
+        elDeps.innerHTML = deps.map((d, i) => {
+          const tp = (d.parentesco || d.tipo || 'dependente').toLowerCase().replace(/\s+/g,'');
+          const label = TIPO_LABELS[tp] || (d.parentesco || d.tipo || 'Dependente');
+          const cor = TIPO_CORES[tp] || '#6b7280';
+          return `<div style="display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--borda);">
+            <div style="width:36px;height:36px;border-radius:50%;background:${cor}22;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${cor}" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:600;">${d.nome || 'Dependente ' + (i+1)}</div>
+              <div style="font-size:11.5px;color:var(--cinza);margin-top:2px;">
+                <span style="background:${cor}20;color:${cor};padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-right:6px;">${label}</span>
+                ${d.nasc ? 'Nasc: '+d.nasc : ''}
+              </div>
+            </div>
+          </div>`;
+        }).join('');
+      } else {
+        elDeps.innerHTML = '<div style="font-size:13px;color:var(--cinza);padding:8px 0;">Nenhum dependente cadastrado.</div>';
+      }
+    } catch(e) {
+      elDeps.innerHTML = `<div style="font-size:13px;color:var(--cinza);padding:8px 0;">${DEPS_JSON}</div>`;
+    }
   }
-  if (REP && typeof REP === 'object') {
-    const el = document.getElementById('repique-display');
-    if (el) el.textContent = `Vida: ${REP.nome || '—'} (${REP.tipo || '—'}) — Valor: R$ ${(REP.valor||0).toFixed(2).replace('.',',')}`;
-    const elDep = document.getElementById('ed-repique_nome');
-    if (elDep) elDep.value = REP.nome || '';
-    const elTipo = document.getElementById('ed-repique_tipo');
-    if (elTipo) elTipo.value = REP.tipo || 'titular';
-    const elVal = document.getElementById('ed-repique_valor');
-    if (elVal) elVal.value = REP.valor || '';
+
+  // Renderiza repique
+  const elRep = document.getElementById('repique-display');
+  if (elRep && REP) {
+    elRep.innerHTML = `<div style="display:flex;align-items:center;gap:14px;">
+      <div style="width:36px;height:36px;border-radius:50%;background:rgba(245,158,11,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:600;">${REP.nome || '—'}</div>
+        <div style="font-size:11.5px;color:var(--cinza);margin-top:2px;">
+          <span style="background:#f59e0b20;color:#f59e0b;padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-right:6px;">${REP.tipo || 'Repique'}</span>
+          Valor: <strong>R$ ${(REP.valor||0).toFixed(2).replace('.',',')}</strong>
+        </div>
+      </div>
+    </div>`;
   }
-  // Dependentes
-  {% if p.dependentes_json %}
-  try {
-    const deps = JSON.parse({{ p.dependentes_json|tojson }});
-    const el = document.getElementById('dependentes-display');
-    if (el && deps.length) {
-      el.innerHTML = deps.map((d, i) => `<div style="padding:6px 0; border-bottom:1px solid var(--borda);">
-        <strong>${d.nome || 'Dependente ' + (i+1)}</strong>
-        ${d.nasc ? ` — Nasc: ${d.nasc}` : ''}
-        ${d.parentesco ? ` — ${d.parentesco}` : ''}
-      </div>`).join('');
-    } else if (el) { el.textContent = 'Nenhum dependente.'; }
-  } catch(e) {
-    const el = document.getElementById('dependentes-display');
-    if (el) el.textContent = {{ p.dependentes_json|tojson }};
-  }
-  {% endif %}
 });
+
+// ── Fase + Timeline ──
 async function mudarFase() {
   const fase = document.getElementById('sel-fase').value;
-  const r = await fetch(`/proposta/${PROP_ID}/fase`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({fase})});
+  const r = await fetch(`/proposta/${PROP_ID}/fase`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fase})});
   const d = await r.json();
   if (d.ok) {
     document.getElementById('fase-atual').textContent = fase;
     if (d.aviso) { const a=document.getElementById('aviso-fase'); a.textContent='⚠ '+d.aviso; a.style.display='block'; }
-    toast('Fase atualizada', 'ok'); carregarTimeline();
+    toast('Fase atualizada','ok'); carregarTimeline();
   }
 }
 async function carregarTimeline() {
   const r = await fetch(`/proposta/${PROP_ID}/historico`);
   const h = await r.json();
   const c = document.getElementById('timeline'); if (!c) return;
-  if (!h.length) { c.innerHTML = '<span style="color:var(--cinza); font-size:13px;">Sem eventos ainda.</span>'; return; }
+  if (!h.length) { c.innerHTML='<span style="color:var(--cinza);font-size:13px;">Sem eventos ainda.</span>'; return; }
+  const cores = {exclusao:'#f43f7c',plataforma:'#3b82f6',status_operacional:'#f59e0b',comprovante:'#10b981',edicao:'#8b5cf6',antecipacao:'#1fd8a4'};
   c.innerHTML = h.map(x => {
-    const nome = x.usuario_nome || 'Sistema';
-    const inicial = nome.charAt(0).toUpperCase();
+    const nome = x.usuario_nome||'Sistema';
+    const cor = cores[x.tipo]||'#1fd8a4';
     const dt = (x.criado_em||'').slice(0,16).replace('T',' ');
-    // Cor do avatar por tipo
-    const cores = {exclusao:'#f43f7c', plataforma:'#3b82f6', status_operacional:'#f59e0b', comprovante:'#10b981', edicao:'#8b5cf6', antecipacao:'#1fd8a4'};
-    const cor = cores[x.tipo] || '#1fd8a4';
-    // Conteúdo da linha
-    let conteudo = '';
-    if (x.tipo && x.descricao) {
-      conteudo = `<span style="color:var(--cinza)">${x.descricao}</span>`;
-    } else if (x.campo) {
-      conteudo = `<strong>${x.campo}</strong>: <span style="opacity:.7">${x.valor_antes||'—'}</span> → <span style="color:${cor}">${x.valor_depois||'—'}</span>`;
-    } else {
-      conteudo = `<span style="opacity:.7">${x.descricao || '—'}</span>`;
-    }
-    return `
-    <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--borda,rgba(255,255,255,.07));">
-      <div style="width:28px;height:28px;border-radius:50%;background:${cor};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0;">${inicial}</div>
+    let conteudo = x.descricao ? `<span style="color:var(--cinza)">${x.descricao}</span>` : x.campo ? `<strong>${x.campo}</strong>: <span style="opacity:.7">${x.valor_antes||'—'}</span> → <span style="color:${cor}">${x.valor_depois||'—'}</span>` : `<span style="opacity:.7">${x.descricao||'—'}</span>`;
+    return `<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--borda,rgba(255,255,255,.07));">
+      <div style="width:28px;height:28px;border-radius:50%;background:${cor};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0;">${nome.charAt(0).toUpperCase()}</div>
       <div style="flex:1;min-width:0;">
         <div style="font-size:12.5px;">${conteudo}</div>
         <div style="font-size:11px;color:var(--cinza);margin-top:3px;">${nome} · ${dt}</div>
@@ -943,502 +886,310 @@ async function carregarTimeline() {
 }
 carregarTimeline();
 
-function abrirEdicao() {
-  // Os campos já vêm preenchidos pelo template (value/selected). Só abre o modal.
-  document.getElementById('modal-edicao').classList.add('open');
-}
-
+// ── Edição ──
+function abrirEdicao() { document.getElementById('modal-edicao').classList.add('open'); }
 function _coletarCamposEditados() {
-  // Lê todos os campos .ed-field e retorna {campo: valor}
   const body = {};
-  document.querySelectorAll('.ed-field').forEach(el => {
-    const campo = el.dataset.campo;
-    if (campo) body[campo] = el.value;
-  });
+  document.querySelectorAll('.ed-field').forEach(el => { if (el.dataset.campo) body[el.dataset.campo] = el.value; });
   return body;
 }
-
-function _mostrarStatusEd(msg, tipo) {
-  const s = document.getElementById('ed-status');
-  if (!s) return;
-  s.style.display = 'block';
-  s.textContent = msg;
-  if (tipo === 'err') { s.style.background = 'rgba(244,63,124,.1)'; s.style.color = '#f43f7c'; }
-  else if (tipo === 'ok') { s.style.background = 'rgba(31,216,164,.12)'; s.style.color = 'var(--teal)'; }
-  else { s.style.background = 'var(--panel-2,#1b1b27)'; s.style.color = 'var(--cinza)'; }
+function _mostrarStatusEd(msg,tipo) {
+  const s = document.getElementById('ed-status'); if (!s) return;
+  s.style.display='block'; s.textContent=msg;
+  if (tipo==='err'){s.style.background='rgba(244,63,124,.1)';s.style.color='#f43f7c';}
+  else if(tipo==='ok'){s.style.background='rgba(31,216,164,.12)';s.style.color='var(--teal)';}
+  else{s.style.background='var(--panel-2,#1b1b27)';s.style.color='var(--cinza)';}
 }
-
 async function salvarEdicao() {
   const body = _coletarCamposEditados();
-  _mostrarStatusEd('Salvando...', 'info');
+  _mostrarStatusEd('Salvando...','info');
   try {
-    const r = await fetch(`/proposta/${PROP_ID}/editar`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const r = await fetch(`/proposta/${PROP_ID}/editar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d = await r.json();
-    if (d.ok) {
-      toast(d.mudou && d.mudou.length ? ('Alterado: '+d.mudou.join(', ')) : 'Nada mudou', 'ok');
-      setTimeout(()=>location.reload(), 1000);
-    } else {
-      _mostrarStatusEd(d.msg || 'Erro ao salvar', 'err');
-    }
-  } catch(e) { _mostrarStatusEd('Erro de conexão', 'err'); }
+    if (d.ok) { toast(d.mudou&&d.mudou.length?('Alterado: '+d.mudou.join(', ')):'Nada mudou','ok'); setTimeout(()=>location.reload(),1000); }
+    else _mostrarStatusEd(d.msg||'Erro ao salvar','err');
+  } catch(e) { _mostrarStatusEd('Erro de conexão','err'); }
 }
-
 async function solicitarEdicao() {
   const body = _coletarCamposEditados();
-  _mostrarStatusEd('Enviando solicitação...', 'info');
+  _mostrarStatusEd('Enviando solicitação...','info');
   try {
-    const r = await fetch(`/proposta/${PROP_ID}/solicitar-edicao`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({alteracoes: body})
-    });
+    const r = await fetch(`/proposta/${PROP_ID}/solicitar-edicao`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({alteracoes:body})});
     const d = await r.json();
-    if (d.ok) {
-      _mostrarStatusEd(d.msg, 'ok');
-      toast(d.msg, 'ok');
-      setTimeout(()=>{ document.getElementById('modal-edicao').classList.remove('open'); }, 1500);
-    } else {
-      _mostrarStatusEd(d.msg || 'Erro ao enviar', 'err');
-    }
-  } catch(e) { _mostrarStatusEd('Erro de conexão', 'err'); }
+    if (d.ok) { _mostrarStatusEd(d.msg,'ok'); toast(d.msg,'ok'); setTimeout(()=>{document.getElementById('modal-edicao').classList.remove('open');},1500); }
+    else _mostrarStatusEd(d.msg||'Erro ao enviar','err');
+  } catch(e) { _mostrarStatusEd('Erro de conexão','err'); }
 }
-
 async function resolverSolic(sid, acao) {
   let motivo = '';
-  if (acao === 'recusar') {
-    motivo = prompt('Motivo da recusa (opcional):') || '';
-  } else {
-    if (!confirm('Aprovar e aplicar essas alterações na proposta?')) return;
-  }
+  if (acao==='recusar') { motivo = prompt('Motivo da recusa (opcional):')||''; }
+  else { if (!confirm('Aprovar e aplicar essas alterações na proposta?')) return; }
   const st = document.getElementById('solic-status');
-  if (st) { st.style.display = 'block'; st.style.color = 'var(--cinza)'; st.textContent = 'Processando...'; }
+  if (st) {st.style.display='block';st.style.color='var(--cinza)';st.textContent='Processando...';}
   try {
-    const r = await fetch(`/admin/solicitacao-edicao/${sid}/resolver`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({acao, motivo})
-    });
+    const r = await fetch(`/admin/solicitacao-edicao/${sid}/resolver`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao,motivo})});
     const d = await r.json();
-    if (d.ok) {
-      toast(d.msg, 'ok');
-      setTimeout(()=>location.reload(), 1000);
-    } else {
-      if (st) { st.style.color = '#f43f7c'; st.textContent = d.msg || 'Erro'; }
-      toast(d.msg || 'Erro', 'err');
-    }
-  } catch(e) {
-    if (st) { st.style.color = '#f43f7c'; st.textContent = 'Erro de conexão'; }
-  }
+    if (d.ok) { toast(d.msg,'ok'); setTimeout(()=>location.reload(),1000); }
+    else { if(st){st.style.color='#f43f7c';st.textContent=d.msg||'Erro';} toast(d.msg||'Erro','err'); }
+  } catch(e) { if(st){st.style.color='#f43f7c';st.textContent='Erro de conexão';} }
 }
 
+// ── Consultor ──
 async function abrirConsultor() {
-  let modal = document.getElementById('modal-consultor');
   const res = await fetch('/api/consultores');
   const lista = await res.json();
-  const opts = lista.map(c => `<option value="${c.id}">${c.nome} — ${c.regime}</option>`).join('');
-  modal.querySelector('#sel-consultor').innerHTML = opts;
-  modal.classList.add('open');
+  document.querySelector('#sel-consultor').innerHTML = lista.map(c=>`<option value="${c.id}">${c.nome} — ${c.regime}</option>`).join('');
+  document.getElementById('modal-consultor').classList.add('open');
 }
 function fecharConsultor() { document.getElementById('modal-consultor').classList.remove('open'); }
-// ─── Upload de documentos inline ─────────────────────────────────────────────
+
+// ── Upload documentos ──
 async function uploadDoc(tipo, input) {
-  const file = input.files[0];
-  if (!file) return;
+  const file = input.files[0]; if (!file) return;
   const fd = new FormData();
-  const rotaMap = { comprovante: 'comprovante-upload', contrato: 'contrato-upload' };
-  const fieldMap = { comprovante: 'comprovante_boleto', contrato: 'contrato_arquivo' };
+  const rotaMap = {comprovante:'comprovante-upload',contrato:'contrato-upload'};
+  const fieldMap = {comprovante:'comprovante_boleto',contrato:'contrato_arquivo'};
   fd.append(fieldMap[tipo], file);
-
-  toast('Enviando...', 'ok');
+  toast('Enviando...','ok');
   try {
-    const res = await fetch(`/proposta/${PROP_ID}/${rotaMap[tipo]}`, { method: 'POST', body: fd });
+    const res = await fetch(`/proposta/${PROP_ID}/${rotaMap[tipo]}`,{method:'POST',body:fd});
     const d = await res.json();
-    if (d.ok) {
-      toast(d.msg || 'Arquivo salvo', 'ok');
-      setTimeout(() => location.reload(), 900);
-    } else {
-      toast(d.msg || 'Erro ao enviar', 'err');
-    }
-  } catch(e) { toast('Erro de conexão', 'err'); }
+    if (d.ok) { toast(d.msg||'Arquivo salvo','ok'); setTimeout(()=>location.reload(),900); }
+    else toast(d.msg||'Erro ao enviar','err');
+  } catch(e) { toast('Erro de conexão','err'); }
 }
-
 async function uploadDocExtra(input) {
-  const file = input.files[0];
-  if (!file) return;
+  const file = input.files[0]; if (!file) return;
   const tipo = document.getElementById('tipo-doc-extra').value;
-  const fd = new FormData();
-  fd.append('documento', file);
-  fd.append('tipo', tipo);
-
-  toast('Enviando documento...', 'ok');
+  const fd = new FormData(); fd.append('documento',file); fd.append('tipo',tipo);
+  toast('Enviando documento...','ok');
   try {
-    const res = await fetch(`/proposta/${PROP_ID}/doc-upload`, { method: 'POST', body: fd });
+    const res = await fetch(`/proposta/${PROP_ID}/doc-upload`,{method:'POST',body:fd});
     const d = await res.json();
-    if (d.ok) {
-      toast(d.msg || 'Documento salvo', 'ok');
-      setTimeout(() => location.reload(), 900);
-    } else {
-      toast(d.msg || 'Erro ao enviar', 'err');
-    }
-  } catch(e) { toast('Erro de conexão', 'err'); }
+    if (d.ok) { toast(d.msg||'Documento salvo','ok'); setTimeout(()=>location.reload(),900); }
+    else toast(d.msg||'Erro ao enviar','err');
+  } catch(e) { toast('Erro de conexão','err'); }
 }
-// ─────────────────────────────────────────────────────────────────────────────
+async function excluirAnexo(tipo, nome) {
+  const label = tipo==='contrato'?'o contrato':tipo==='comprovante'?'o comprovante':'este documento';
+  if (!confirm(`Excluir ${label}? Esta ação não pode ser desfeita.`)) return;
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/anexo/excluir`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tipo,nome})});
+    const j = await res.json();
+    if (j.ok) { toast('Anexo excluído','ok'); setTimeout(()=>location.reload(),700); }
+    else toast(j.msg||'Erro ao excluir','err');
+  } catch(e) { toast('Erro de conexão','err'); }
+}
 
+// ── Estorno e Exclusão ──
 function abrirEstorno() { document.getElementById('modal-estorno').classList.add('open'); }
-
-// ─── Enviar à plataforma (Affinity / Brevo) ───
-// ─── E-MAIL AFFINITY (unificado) ─────────────────────────────────────────────
-async function abrirEmailAffinity() {
-  const res = await fetch(`/proposta/${PROP_ID}/email-affinity`);
-  const d = await res.json();
-  if (!d.ok) { toast('Erro ao montar e-mail', 'err'); return; }
-
-  document.getElementById('ea-assunto').value = d.assunto || '';
-  document.getElementById('ea-corpo').value = d.corpo || '';
-  document.getElementById('ea-particularidades').value = '';
-
-  const aviso = document.getElementById('ea-aviso-doc');
-  const btnEnviar = document.getElementById('ea-btn-enviar');
-  if (d.aviso_anexo) {
-    aviso.style.display = 'block';
-    btnEnviar.disabled = true;
-    btnEnviar.style.opacity = '0.4';
-    btnEnviar.style.cursor = 'not-allowed';
-  } else {
-    aviso.style.display = 'none';
-    btnEnviar.disabled = false;
-    btnEnviar.style.opacity = '1';
-    btnEnviar.style.cursor = '';
-  }
-
-  document.getElementById('ea-status').style.display = 'none';
-  document.getElementById('modal-email-affinity').classList.add('open');
-}
-
-function fecharEmailAffinity() {
-  document.getElementById('modal-email-affinity').classList.remove('open');
-}
-
-async function enviarEmailTeste() {
-  const assunto = document.getElementById('ea-assunto').value.trim();
-  const corpo   = document.getElementById('ea-corpo').value.trim();
-  const partic  = document.getElementById('ea-particularidades').value.trim();
-  if (!assunto || !corpo) { toast('Preencha assunto e corpo', 'err'); return; }
-
-  const btn = document.getElementById('ea-btn-teste');
-  btn.disabled = true; btn.textContent = 'Enviando teste...';
-  try {
-    const res = await fetch(`/proposta/${PROP_ID}/enviar-teste`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ assunto, corpo, particularidades: partic })
-    });
-    const d = await res.json();
-    toast(d.msg || (d.ok ? 'Teste enviado' : 'Erro'), d.ok ? 'ok' : 'err');
-  } catch(e) { toast('Erro de conexão', 'err'); }
-  btn.disabled = false; btn.textContent = 'Enviar teste para mim';
-}
-
-async function enviarEmailAffinity() {
-  const assunto = document.getElementById('ea-assunto').value.trim();
-  const corpo   = document.getElementById('ea-corpo').value.trim();
-  const partic  = document.getElementById('ea-particularidades').value.trim();
-  const status  = document.getElementById('ea-status');
-
-  if (!assunto || !corpo) { toast('Preencha assunto e corpo do e-mail', 'err'); return; }
-
-  const btn = document.getElementById('ea-btn-enviar');
-  btn.disabled = true; btn.textContent = 'Enviando...';
-  status.style.display = 'block'; status.textContent = 'Aguarde, enviando via Brevo...';
-
-  try {
-    const res = await fetch(`/proposta/${PROP_ID}/enviar-plataforma`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ assunto, corpo, particularidades: partic })
-    });
-    const d = await res.json();
-    if (d.ok) {
-      toast(d.msg || 'E-mail enviado', 'ok');
-      fecharEmailAffinity();
-      setTimeout(() => location.reload(), 1400);
-    } else {
-      toast(d.msg || 'Falha ao enviar', 'err');
-      status.textContent = d.msg || 'Erro';
-      btn.disabled = false; btn.textContent = 'Enviar para a Affinity';
-    }
-  } catch(e) {
-    toast('Erro de conexão', 'err');
-    btn.disabled = false; btn.textContent = 'Enviar para a Affinity';
-  }
-}
-
-function copiarEmailAffinity() {
-  const assunto = document.getElementById('ea-assunto').value;
-  const corpo   = document.getElementById('ea-corpo').value;
-  const partic  = document.getElementById('ea-particularidades').value;
-  let txt = `Assunto: ${assunto}\n\n${corpo}`;
-  if (partic) txt += `\n\n${partic}`;
-  navigator.clipboard.writeText(txt).then(() => toast('E-mail copiado', 'ok'));
-}
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─── Exclusão lógica ─────────────────────────────────────────────────────────
-function abrirExclusao() { document.getElementById('modal-exclusao').classList.add('open'); }
-async function confirmarExclusao() {
-  const motivo  = document.getElementById('exc-motivo').value;
-  const detalhe = document.getElementById('exc-detalhe').value;
-  try {
-    const res = await fetch(`/proposta/${PROP_ID}/excluir`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({motivo_exclusao: motivo, detalhe_exclusao: detalhe}) });
-    const d = await res.json();
-    if (d.ok) {
-      toast(d.msg || 'Proposta excluída', 'ok');
-      document.getElementById('modal-exclusao').classList.remove('open');
-      setTimeout(() => location.href = '/propostas', 1400);
-    } else { toast(d.msg || 'Falha ao excluir', 'err'); }
-  } catch(e) { toast('Erro de conexão', 'err'); }
-}
-// ─────────────────────────────────────────────────────────────────────────────
 async function confirmarEstorno() {
   try {
-    const res = await fetch(`/proposta/${PROP_ID}/estornar`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
+    const res = await fetch(`/proposta/${PROP_ID}/estornar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
     const data = await res.json();
-    if (data.ok) {
-      document.getElementById('modal-estorno').classList.remove('open');
-      toast(data.msg || 'Estorno aplicado', 'ok');
-      setTimeout(()=>location.reload(), 1400);
-    } else toast(data.msg || 'Erro', 'err');
-  } catch(e) { toast('Erro de conexão', 'err'); }
+    if (data.ok) { document.getElementById('modal-estorno').classList.remove('open'); toast(data.msg||'Estorno aplicado','ok'); setTimeout(()=>location.reload(),1400); }
+    else toast(data.msg||'Erro','err');
+  } catch(e) { toast('Erro de conexão','err'); }
+}
+function abrirExclusao() { document.getElementById('modal-exclusao').classList.add('open'); }
+async function confirmarExclusao() {
+  const motivo = document.getElementById('exc-motivo').value;
+  const detalhe = document.getElementById('exc-detalhe').value;
+  try {
+    const res = await fetch(`/proposta/${PROP_ID}/excluir`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({motivo_exclusao:motivo,detalhe_exclusao:detalhe})});
+    const d = await res.json();
+    if (d.ok) { toast(d.msg||'Proposta excluída','ok'); document.getElementById('modal-exclusao').classList.remove('open'); setTimeout(()=>location.href='/propostas',1400); }
+    else toast(d.msg||'Falha ao excluir','err');
+  } catch(e) { toast('Erro de conexão','err'); }
 }
 async function salvarConsultor() {
   const uid = document.getElementById('sel-consultor').value;
-  const fd = new FormData(); fd.append('usuario_id', uid);
+  const fd = new FormData(); fd.append('usuario_id',uid);
   try {
-    const res = await fetch(`/proposta/${PROP_ID}/consultor`, { method:'POST', body:fd });
+    const res = await fetch(`/proposta/${PROP_ID}/consultor`,{method:'POST',body:fd});
     const data = await res.json();
-    if (data.ok) { toast(data.msg || 'Consultor remanejado', 'ok'); setTimeout(()=>location.reload(), 1100); }
-    else toast('Erro: ' + (data.msg||''), 'err');
-  } catch(e) { toast('Erro de conexão', 'err'); }
+    if (data.ok) { toast(data.msg||'Consultor remanejado','ok'); setTimeout(()=>location.reload(),1100); }
+    else toast('Erro: '+(data.msg||''),'err');
+  } catch(e) { toast('Erro de conexão','err'); }
 }
 
+// ── Parcelas ──
 async function acao(id, tipo) {
-  const msgs = {receber:'Confirmar que a operadora pagou esta parcela?', liberar:'Conferir e liberar esta parcela para o corretor? (confirmação do gestor)', pagar:'Confirmar o pagamento ao corretor?'};
-  if (!confirm(msgs[tipo] || 'Confirmar ação?')) return;
-  const fd = new FormData(); fd.append('acao', tipo);
+  const msgs = {receber:'Confirmar que a operadora pagou esta parcela?',liberar:'Conferir e liberar esta parcela para o corretor?',pagar:'Confirmar o pagamento ao corretor?'};
+  if (!confirm(msgs[tipo]||'Confirmar ação?')) return;
+  const fd = new FormData(); fd.append('acao',tipo);
   try {
-    const res = await fetch(`/parcela/${id}/acao`, { method:'POST', body:fd });
-    if ((await res.json()).ok) { toast('Atualizado', 'ok'); setTimeout(()=>location.reload(), 700); }
-    else toast('Erro', 'err');
-  } catch(e) { toast('Erro de conexão', 'err'); }
+    const res = await fetch(`/parcela/${id}/acao`,{method:'POST',body:fd});
+    if ((await res.json()).ok) { toast('Atualizado','ok'); setTimeout(()=>location.reload(),700); }
+    else toast('Erro','err');
+  } catch(e) { toast('Erro de conexão','err'); }
 }
-
 async function mudarStatus(id, status) {
-  const fd = new FormData(); fd.append('status', status);
+  const fd = new FormData(); fd.append('status',status);
   try {
-    const res = await fetch(`/parcela/${id}/status`, { method: 'POST', body: fd });
+    const res = await fetch(`/parcela/${id}/status`,{method:'POST',body:fd});
     const data = await res.json();
-    if (data.ok) toast('Status atualizado', 'ok');
-    else toast('Erro: ' + data.msg, 'err');
-  } catch(e) { toast('Erro de conexão', 'err'); }
+    if (data.ok) toast('Status atualizado','ok');
+    else toast('Erro: '+data.msg,'err');
+  } catch(e) { toast('Erro de conexão','err'); }
 }
-
 async function aprovarAntecip(id) {
   if (!confirm('Confirma que vai solicitar a antecipação de 48h à operadora?')) return;
   try {
-    const res = await fetch(`/parcela/${id}/aprovar-antecipacao`, { method: 'POST' });
-    if ((await res.json()).ok) { toast('Antecipação solicitada à operadora', 'ok'); setTimeout(() => location.reload(), 800); }
-  } catch(e) { toast('Erro', 'err'); }
+    const res = await fetch(`/parcela/${id}/aprovar-antecipacao`,{method:'POST'});
+    if ((await res.json()).ok) { toast('Antecipação solicitada à operadora','ok'); setTimeout(()=>location.reload(),800); }
+  } catch(e) { toast('Erro','err'); }
 }
-
 async function enviarComprovante(id, input) {
   if (!input.files[0]) return;
-  const fd = new FormData(); fd.append('comprovante', input.files[0]);
-  toast('Enviando comprovante...', 'ok');
+  const fd = new FormData(); fd.append('comprovante',input.files[0]);
+  toast('Enviando comprovante...','ok');
   try {
-    const res = await fetch(`/parcela/${id}/antecipar`, { method: 'POST', body: fd });
+    const res = await fetch(`/parcela/${id}/antecipar`,{method:'POST',body:fd});
     const data = await res.json();
-    if (data.ok) { toast('Comprovante enviado! Aguardando aprovação.', 'ok'); setTimeout(() => location.reload(), 1000); }
-    else toast('Erro: ' + data.msg, 'err');
-  } catch(e) { toast('Erro de conexão', 'err'); }
+    if (data.ok) { toast('Comprovante enviado! Aguardando aprovação.','ok'); setTimeout(()=>location.reload(),1000); }
+    else toast('Erro: '+data.msg,'err');
+  } catch(e) { toast('Erro de conexão','err'); }
 }
-
 async function darAceite(id) {
   if (!confirm('Confirma que o valor está correto e de acordo com o combinado?')) return;
   try {
-    const res = await fetch(`/parcela/${id}/aceite`, { method: 'POST' });
-    if ((await res.json()).ok) { toast('Aceite registrado!', 'ok'); setTimeout(() => location.reload(), 800); }
-  } catch(e) { toast('Erro', 'err'); }
+    const res = await fetch(`/parcela/${id}/aceite`,{method:'POST'});
+    if ((await res.json()).ok) { toast('Aceite registrado!','ok'); setTimeout(()=>location.reload(),800); }
+  } catch(e) { toast('Erro','err'); }
 }
 
-async function excluirAnexo(tipo, nome) {
-  const label = tipo === 'contrato' ? 'o contrato' : (tipo === 'comprovante' ? 'o comprovante' : 'este documento');
-  if (!confirm(`Excluir ${label}? Esta ação não pode ser desfeita.`)) return;
+// ── E-mail Affinity ──
+async function abrirEmailAffinity() {
+  const res = await fetch(`/proposta/${PROP_ID}/email-affinity`);
+  const d = await res.json();
+  if (!d.ok) { toast('Erro ao montar e-mail','err'); return; }
+  document.getElementById('ea-assunto').value = d.assunto||'';
+  document.getElementById('ea-corpo').value = d.corpo||'';
+  document.getElementById('ea-particularidades').value = '';
+  const aviso = document.getElementById('ea-aviso-doc');
+  const btnEnviar = document.getElementById('ea-btn-enviar');
+  if (d.aviso_anexo) { aviso.style.display='block'; btnEnviar.disabled=true; btnEnviar.style.opacity='.4'; btnEnviar.style.cursor='not-allowed'; }
+  else { aviso.style.display='none'; btnEnviar.disabled=false; btnEnviar.style.opacity='1'; btnEnviar.style.cursor=''; }
+  document.getElementById('ea-status').style.display='none';
+  document.getElementById('modal-email-affinity').classList.add('open');
+}
+function fecharEmailAffinity() { document.getElementById('modal-email-affinity').classList.remove('open'); }
+async function enviarEmailTeste() {
+  const assunto=document.getElementById('ea-assunto').value.trim();
+  const corpo=document.getElementById('ea-corpo').value.trim();
+  const partic=document.getElementById('ea-particularidades').value.trim();
+  if (!assunto||!corpo) { toast('Preencha assunto e corpo','err'); return; }
+  const btn=document.getElementById('ea-btn-teste'); btn.disabled=true; btn.textContent='Enviando teste...';
   try {
-    const res = await fetch(`/proposta/{{ p.id }}/anexo/excluir`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({tipo, nome})
-    });
-    const j = await res.json();
-    if (j.ok) { toast('Anexo excluído', 'ok'); setTimeout(() => location.reload(), 700); }
-    else toast(j.msg || 'Erro ao excluir', 'err');
-  } catch(e) { toast('Erro de conexão', 'err'); }
+    const res=await fetch(`/proposta/${PROP_ID}/enviar-teste`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assunto,corpo,particularidades:partic})});
+    const d=await res.json(); toast(d.msg||(d.ok?'Teste enviado':'Erro'),d.ok?'ok':'err');
+  } catch(e){toast('Erro de conexão','err');}
+  btn.disabled=false; btn.textContent='Enviar teste para mim';
+}
+async function enviarEmailAffinity() {
+  const assunto=document.getElementById('ea-assunto').value.trim();
+  const corpo=document.getElementById('ea-corpo').value.trim();
+  const partic=document.getElementById('ea-particularidades').value.trim();
+  const status=document.getElementById('ea-status');
+  if (!assunto||!corpo) { toast('Preencha assunto e corpo do e-mail','err'); return; }
+  const btn=document.getElementById('ea-btn-enviar'); btn.disabled=true; btn.textContent='Enviando...';
+  status.style.display='block'; status.textContent='Aguarde, enviando via Brevo...';
+  try {
+    const res=await fetch(`/proposta/${PROP_ID}/enviar-plataforma`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assunto,corpo,particularidades:partic})});
+    const d=await res.json();
+    if (d.ok) { toast(d.msg||'E-mail enviado','ok'); fecharEmailAffinity(); setTimeout(()=>location.reload(),1400); }
+    else { toast(d.msg||'Falha ao enviar','err'); status.textContent=d.msg||'Erro'; btn.disabled=false; btn.textContent='Enviar para a Affinity'; }
+  } catch(e) { toast('Erro de conexão','err'); btn.disabled=false; btn.textContent='Enviar para a Affinity'; }
+}
+function copiarEmailAffinity() {
+  const assunto=document.getElementById('ea-assunto').value;
+  const corpo=document.getElementById('ea-corpo').value;
+  const partic=document.getElementById('ea-particularidades').value;
+  let txt=`Assunto: ${assunto}\n\n${corpo}`;
+  if (partic) txt+=`\n\n${partic}`;
+  navigator.clipboard.writeText(txt).then(()=>toast('E-mail copiado','ok'));
 }
 
-// ─── ANTECIPAÇÃO DE COMISSÃO ───
+// ── Antecipação ──
 async function abrirAntecipacao() {
   const modal = document.getElementById('modal-antecipacao');
-  // reset
-  document.getElementById('ant-bloqueio').style.display = 'none';
-  document.getElementById('ant-aviso-doc').style.display = 'none';
-  document.getElementById('ant-conteudo').style.display = 'none';
-  document.getElementById('ant-status').style.display = 'none';
+  ['ant-bloqueio','ant-aviso-doc','ant-conteudo','ant-status'].forEach(id=>document.getElementById(id).style.display='none');
   modal.classList.add('open');
-
   try {
-    const res = await fetch(`/proposta/{{ p.id }}/antecipacao/preview`);
+    const res = await fetch(`/proposta/${PROP_ID}/antecipacao/preview`);
     const d = await res.json();
-    if (!d.ok) { toast(d.msg || 'Erro', 'err'); return; }
-
+    if (!d.ok) { toast(d.msg||'Erro','err'); return; }
     if (!d.permitido) {
-      const bloq = document.getElementById('ant-bloqueio');
-      bloq.innerHTML = `<strong>Antecipação não permitida.</strong><br>${d.motivo_bloqueio}`;
-      bloq.style.display = 'block';
-      return;
+      const bloq=document.getElementById('ant-bloqueio');
+      bloq.innerHTML=`<strong>Antecipação não permitida.</strong><br>${d.motivo_bloqueio}`;
+      bloq.style.display='block'; return;
     }
-
-    // Permitido: preenche dados
-    document.getElementById('ant-cliente').textContent = (d.documento ? d.documento + ' ' : '') + d.cliente;
-    document.getElementById('ant-operadora').textContent = `${d.operadora} / ${d.plano}`;
-
-    // Checa documentos
-    if (!d.tem_contrato || !d.tem_comprovante) {
-      const faltam = [];
-      if (!d.tem_contrato) faltam.push('contrato assinado');
-      if (!d.tem_comprovante) faltam.push('comprovante de pagamento');
-      const aviso = document.getElementById('ant-aviso-doc');
-      aviso.innerHTML = `<strong>Documentos faltando:</strong> ${faltam.join(' e ')}.<br>Anexe os documentos na seção "Documentos" antes de solicitar a antecipação.`;
-      aviso.style.display = 'block';
-      return;
+    document.getElementById('ant-cliente').textContent=(d.documento?d.documento+' ':'')+d.cliente;
+    document.getElementById('ant-operadora').textContent=`${d.operadora} / ${d.plano}`;
+    if (!d.tem_contrato||!d.tem_comprovante) {
+      const faltam=[]; if(!d.tem_contrato)faltam.push('contrato assinado'); if(!d.tem_comprovante)faltam.push('comprovante de pagamento');
+      const aviso=document.getElementById('ant-aviso-doc');
+      aviso.innerHTML=`<strong>Documentos faltando:</strong> ${faltam.join(' e ')}.<br>Anexe os documentos na seção "Documentos" antes de solicitar a antecipação.`;
+      aviso.style.display='block'; return;
     }
-
-    document.getElementById('ant-conteudo').style.display = 'block';
-  } catch(e) {
-    toast('Erro ao carregar', 'err');
-  }
+    document.getElementById('ant-conteudo').style.display='block';
+  } catch(e) { toast('Erro ao carregar','err'); }
 }
-
-function fecharAntecipacao() {
-  document.getElementById('modal-antecipacao').classList.remove('open');
-}
-
+function fecharAntecipacao() { document.getElementById('modal-antecipacao').classList.remove('open'); }
 async function enviarAntecipacao(eh_teste) {
-  const num = document.getElementById('ant-num-contrato').value.trim();
-  if (!num) { toast('Informe o número do contrato', 'err'); return; }
-  const btn = document.getElementById('ant-btn-enviar');
-  const status = document.getElementById('ant-status');
-  status.style.display = 'block';
-  status.textContent = eh_teste ? 'Enviando teste...' : 'Enviando à Affinity...';
-  btn.disabled = true;
+  const num=document.getElementById('ant-num-contrato').value.trim();
+  if (!num) { toast('Informe o número do contrato','err'); return; }
+  const btn=document.getElementById('ant-btn-enviar');
+  const status=document.getElementById('ant-status');
+  status.style.display='block'; status.textContent=eh_teste?'Enviando teste...':'Enviando à Affinity...';
+  btn.disabled=true;
   try {
-    const res = await fetch(`/proposta/{{ p.id }}/antecipacao/enviar`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({numero_contrato: num, teste: eh_teste})
-    });
-    const j = await res.json();
-    status.textContent = j.msg;
-    if (j.ok) {
-      toast(j.msg, 'ok');
-      if (!eh_teste) setTimeout(() => location.reload(), 1200);
-    } else {
-      toast(j.msg || 'Erro', 'err');
-    }
-  } catch(e) {
-    status.textContent = 'Erro de conexão.';
-    toast('Erro de conexão', 'err');
-  } finally {
-    btn.disabled = false;
-  }
+    const res=await fetch(`/proposta/${PROP_ID}/antecipacao/enviar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({numero_contrato:num,teste:eh_teste})});
+    const j=await res.json(); status.textContent=j.msg;
+    if (j.ok) { toast(j.msg,'ok'); if(!eh_teste)setTimeout(()=>location.reload(),1200); }
+    else toast(j.msg||'Erro','err');
+  } catch(e) { status.textContent='Erro de conexão.'; toast('Erro de conexão','err'); }
+  finally { btn.disabled=false; }
 }
 
-// ─── BOLETO DE ADESÃO ────────────────────────────────────────
+// ── Boleto de Adesão ──
 function abrirModalBoleto() {
-  document.getElementById('modal-boleto-adesao').style.display = 'flex';
-  document.getElementById('boleto-resultado').style.display = 'none';
-  document.getElementById('boleto-erro').style.display = 'none';
-  // Sugere vencimento para 3 dias a partir de hoje
-  const d = new Date(); d.setDate(d.getDate() + 3);
-  document.getElementById('boleto-vencimento').value = d.toISOString().split('T')[0];
+  document.getElementById('modal-boleto-adesao').style.display='flex';
+  document.getElementById('boleto-resultado').style.display='none';
+  document.getElementById('boleto-erro').style.display='none';
+  const d=new Date(); d.setDate(d.getDate()+3);
+  document.getElementById('boleto-vencimento').value=d.toISOString().split('T')[0];
   document.getElementById('boleto-valor').focus();
 }
-
-function fecharModalBoleto() {
-  document.getElementById('modal-boleto-adesao').style.display = 'none';
-}
-
+function fecharModalBoleto() { document.getElementById('modal-boleto-adesao').style.display='none'; }
 async function gerarBoletoAdesao() {
-  const valor = document.getElementById('boleto-valor').value;
-  const vencimento = document.getElementById('boleto-vencimento').value;
-  const btn = document.getElementById('btn-gerar-boleto');
-  const erroEl = document.getElementById('boleto-erro');
-  const resEl = document.getElementById('boleto-resultado');
-
-  erroEl.style.display = 'none';
-  resEl.style.display = 'none';
-
-  if (!valor || parseFloat(valor) <= 0) {
-    erroEl.textContent = 'Informe o valor da taxa de adesão.';
-    erroEl.style.display = 'block'; return;
-  }
-  if (!vencimento) {
-    erroEl.textContent = 'Informe a data de vencimento.';
-    erroEl.style.display = 'block'; return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = 'Gerando...';
-
+  const valor=document.getElementById('boleto-valor').value;
+  const vencimento=document.getElementById('boleto-vencimento').value;
+  const btn=document.getElementById('btn-gerar-boleto');
+  const erroEl=document.getElementById('boleto-erro');
+  const resEl=document.getElementById('boleto-resultado');
+  erroEl.style.display='none'; resEl.style.display='none';
+  if (!valor||parseFloat(valor)<=0){erroEl.textContent='Informe o valor da taxa de adesão.';erroEl.style.display='block';return;}
+  if (!vencimento){erroEl.textContent='Informe a data de vencimento.';erroEl.style.display='block';return;}
+  btn.disabled=true; btn.textContent='Gerando...';
   try {
-    const r = await fetch('/proposta/{{ p.id }}/gerar-boleto-adesao', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({valor: parseFloat(valor), vencimento})
-    });
-    const d = await r.json();
-    if (d.ok) {
-      document.getElementById('boleto-link').href = '/proposta/{{ p.id }}/boleto-adesao';
-      resEl.style.display = 'block';
-      // Atualiza a linha digitável na tela
-      setTimeout(() => location.reload(), 3000);
-    } else {
-      erroEl.textContent = d.erro || 'Erro ao gerar boleto.';
-      erroEl.style.display = 'block';
-    }
-  } catch(e) {
-    erroEl.textContent = 'Erro de conexão.';
-    erroEl.style.display = 'block';
-  }
-
-  btn.disabled = false;
-  btn.textContent = 'Gerar Boleto';
+    const r=await fetch(`/proposta/${PROP_ID}/gerar-boleto-adesao`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({valor:parseFloat(valor),vencimento})});
+    const d=await r.json();
+    if (d.ok) { document.getElementById('boleto-link').href=`/proposta/${PROP_ID}/boleto-adesao`; resEl.style.display='block'; setTimeout(()=>location.reload(),3000); }
+    else { erroEl.textContent=d.erro||'Erro ao gerar boleto.'; erroEl.style.display='block'; }
+  } catch(e) { erroEl.textContent='Erro de conexão.'; erroEl.style.display='block'; }
+  btn.disabled=false; btn.textContent='Gerar Boleto';
 }
-
 async function verificarStatusBoleto() {
-  const r = await fetch('/proposta/{{ p.id }}/boleto-adesao/status');
-  const d = await r.json();
-  if (d.ok) {
-    alert(`Status do boleto: ${d.status}`);
-    if (d.pago) location.reload();
-  } else {
-    alert('Erro ao consultar: ' + (d.erro || ''));
-  }
+  const r=await fetch(`/proposta/${PROP_ID}/boleto-adesao/status`);
+  const d=await r.json();
+  if (d.ok) { alert(`Status do boleto: ${d.status}`); if(d.pago)location.reload(); }
+  else alert('Erro ao consultar: '+(d.erro||''));
 }
-
 function copiarLinha() {
-  const txt = document.getElementById('linha-digitavel-txt');
-  if (txt) {
-    navigator.clipboard.writeText(txt.textContent.trim());
-    alert('Linha digitável copiada!');
-  }
+  const txt=document.getElementById('linha-digitavel-txt');
+  if (txt) { navigator.clipboard.writeText(txt.textContent.trim()); alert('Linha digitável copiada!'); }
 }
 </script>
 {% endblock %}
