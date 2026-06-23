@@ -975,6 +975,7 @@ def init_db():
 
     # Etapas do funil CRM padrão (só insere se a tabela estiver vazia — preserva customizações)
     etapas_default = [
+        ('lead_novo', 'Lead Novo',      '#6366f1', 0, 'normal'),
         ('topo',    'Topo do Funil',  '#3b82f6', 1, 'normal'),
         ('meio',    'Meio do Funil',  '#f59e0b', 2, 'normal'),
         ('fim',     'Fundo do Funil', '#10b981', 3, 'normal'),
@@ -997,6 +998,16 @@ def init_db():
                 conn.execute("INSERT OR IGNORE INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES (?,?,?,?,?)",
                              (slug, nome, cor, ordem, tipo))
             conn.commit()
+    else:
+        # Garante que lead_novo existe mesmo em bancos já populados
+        try:
+            if is_pg:
+                conn.execute("INSERT INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES ('lead_novo','Lead Novo','#6366f1',0,'normal') ON CONFLICT (slug) DO NOTHING")
+            else:
+                conn.execute("INSERT OR IGNORE INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES ('lead_novo','Lead Novo','#6366f1',0,'normal')")
+            conn.commit()
+        except Exception:
+            pass
 
     
     # Regimes padrão
@@ -6041,7 +6052,7 @@ def webhook_meta():
                     conn.execute("""INSERT INTO crm_leads
                         (nome, telefone, email, empresa, origem, etapa, dados_extras)
                         VALUES (?,?,?,?,?,?,?)""",
-                        (nome, telefone, email, empresa, 'meta', 'topo',
+                        (nome, telefone, email, empresa, 'meta', 'lead_novo',
                          json.dumps(valor, ensure_ascii=False)))
                     lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
                     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
@@ -6068,7 +6079,7 @@ def webhook_google():
         conn.execute("""INSERT INTO crm_leads
             (nome, telefone, email, empresa, origem, etapa, dados_extras)
             VALUES (?,?,?,?,?,?,?)""",
-            (nome, telefone, email, empresa, 'google', 'topo',
+            (nome, telefone, email, empresa, 'google', 'lead_novo',
              json.dumps(data, ensure_ascii=False)))
         lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
@@ -6129,7 +6140,10 @@ def webhook_sheets():
             cidade   = (lead.get('cidade') or '').strip()
             tipo     = (lead.get('tipo') or 'PF').strip()
             num_pess = (lead.get('num_pessoas') or '').strip()
-            cons_raw = (lead.get('consultor') or '').strip()
+            # Consultor: tenta campo 'consultor', se vazio tenta 'consultor_2'
+            cons_raw = (lead.get('consultor') or lead.get('consultor_2') or '').strip()
+            # Data: aceita 'data_hora' ou 'data'
+            data_hora_raw = (lead.get('data_hora') or lead.get('data') or '').strip()
 
             # Filtro: "teste" no nome ou email
             if nome and 'teste' in nome.lower():
@@ -6143,8 +6157,8 @@ def webhook_sheets():
             consultor = _normalizar_consultor(cons_raw) or 'Guilherme'
             responsavel_id = _buscar_responsavel_id(conn, consultor)
 
-            # Data do lead (vinda da planilha) → guardamos em criado_em se válida
-            data_lead = _parse_data_lead(lead.get('data_hora') or '')
+            # Data do lead (vinda da planilha)
+            data_lead = _parse_data_lead(data_hora_raw)
 
             # Dedup por telefone
             if telefone:
@@ -6172,14 +6186,14 @@ def webhook_sheets():
                 conn.execute("""
                     INSERT INTO crm_leads
                         (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes, criado_em)
-                    VALUES (?, ?, ?, ?, ?, 'topo', ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?)
                 """, (nome, telefone, email, cidade, origem, responsavel_id, obs,
                       data_lead.strftime('%Y-%m-%d 12:00:00')))
             else:
                 conn.execute("""
                     INSERT INTO crm_leads
                         (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes)
-                    VALUES (?, ?, ?, ?, ?, 'topo', ?, ?)
+                    VALUES (?, ?, ?, ?, ?, 'lead_novo', ?, ?)
                 """, (nome, telefone, email, cidade, origem, responsavel_id, obs))
 
             lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
@@ -6674,17 +6688,34 @@ except Exception as e:
 # ──── IMPORTAÇÃO DE LEADS DO GOOGLE SHEETS ─────────────────────────────────
 # Mapeamento de apelidos de consultores → nomes reais
 CONSULTOR_ALIASES = {
+    # Guilherme
     'guilherme': 'Guilherme',
+    'guilherme santos': 'Guilherme',
     'gui': 'Guilherme',
     'gui santos': 'Guilherme',
-    'guilherme santos': 'Guilherme',
+    'gui2': 'Guilherme',
+    'guilherme2': 'Guilherme',
+    # Danilo
     'danilo': 'Danilo',
     'danilo sampaio': 'Danilo',
+    'danilo2': 'Danilo',
+    'danilo 2': 'Danilo',
+    # Bianca
     'bianca': 'Bianca',
     'bianca sampaio': 'Bianca',
+    'bianca2': 'Bianca',
+    'bianca 2': 'Bianca',
+    # Gabriel
     'gabriel': 'Gabriel',
     'gabriel maggiotto': 'Gabriel',
     'gabriel humberto maggiotto': 'Gabriel',
+    'gabriel2': 'Gabriel',
+    'gabriel 2': 'Gabriel',
+    # Juliana (supervisora)
+    'juliana': 'Juliana',
+    # Jack / JACK
+    'jack': 'Jack',
+    'jack2': 'Jack',
 }
 
 def _normalizar_consultor(nome_raw):
