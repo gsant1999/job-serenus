@@ -1138,7 +1138,15 @@ def init_db():
         # ─── CRM: WhatsApp WaSpeed + filtros ───
         ("usuarios", "waspeed_token", "TEXT"),
         ("crm_leads", "telefone_norm", "TEXT"),
-        ("crm_leads", "consultor_externo", "TEXT"),  # nome original da planilha (consultores não cadastrados)
+        ("crm_leads", "consultor_externo", "TEXT"),  # nome original da planilha
+        # ─── Boleto de Adesão via Asaas ───
+        ("propostas", "adesao_asaas_customer_id", "TEXT"),
+        ("propostas", "adesao_asaas_payment_id", "TEXT"),
+        ("propostas", "adesao_boleto_url", "TEXT"),
+        ("propostas", "adesao_linha_digitavel", "TEXT"),
+        ("propostas", "adesao_valor", "REAL"),
+        ("propostas", "adesao_vencimento", "TEXT"),
+        ("propostas", "adesao_status", "TEXT DEFAULT 'Não gerado'"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -5444,7 +5452,212 @@ def atualizar_status_operacional(pid):
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "msg": f"Status atualizado para '{novo_status}'"})
 
-@app.route('/proposta/<int:pid>/comprovante-upload', methods=['POST'])
+
+# ─── BOLETO DE ADESÃO ──────────────────────────────────────────────────────────
+
+@app.route('/proposta/<int:pid>/gerar-boleto-adesao', methods=['POST'])
+@login_required
+def gerar_boleto_adesao(pid):
+    """
+    Gera boleto de taxa de adesão via Asaas.
+    Payload: {valor: 150.00, vencimento: '2026-07-01'}
+    """
+    if not asaas_configurado():
+        return jsonify({'ok': False, 'erro': 'Asaas não configurado. Verifique ASAAS_API_KEY no Railway.'}), 500
+
+    conn = db()
+    p = conn.execute("""
+        SELECT id, razao_social, tipo_pessoa, cpf_titular, cnpj,
+               email_resp_contrato, tel_resp_contrato, produto,
+               resp_contrato, adesao_asaas_customer_id
+        FROM propostas WHERE id=?
+    """, (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Proposta não encontrada'}), 404
+
+    d = request.get_json(force=True) or {}
+    valor_raw = d.get('valor', '')
+    vencimento = (d.get('vencimento') or '').strip()  # YYYY-MM-DD
+
+    # Valida valor
+    try:
+        valor = float(str(valor_raw).replace(',', '.'))
+        if valor <= 0:
+            raise ValueError()
+    except Exception:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Valor inválido. Informe o valor da taxa de adesão.'}), 400
+
+    # Valida vencimento
+    if not vencimento:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Informe a data de vencimento do boleto.'}), 400
+
+    # CPF ou CNPJ conforme tipo de pessoa
+    tipo_pessoa = (p['tipo_pessoa'] if hasattr(p, 'keys') else p[2] or 'PF').upper()
+    if 'J' in tipo_pessoa or 'JURIDICA' in tipo_pessoa or 'EMPRESA' in tipo_pessoa:
+        doc = (p['cnpj'] if hasattr(p, 'keys') else p[4] or '').strip()
+        doc = ''.join(c for c in doc if c.isdigit())
+        tipo_doc = 'CNPJ'
+    else:
+        doc = (p['cpf_titular'] if hasattr(p, 'keys') else p[3] or '').strip()
+        doc = ''.join(c for c in doc if c.isdigit())
+        tipo_doc = 'CPF'
+
+    if not doc or len(doc) < 11:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': f'{tipo_doc} do cliente não preenchido na proposta. Edite a proposta e adicione o {tipo_doc}.'}), 400
+
+    razao_social = p['razao_social'] if hasattr(p, 'keys') else p[1]
+    email = p['email_resp_contrato'] if hasattr(p, 'keys') else p[5] or ''
+    telefone = p['tel_resp_contrato'] if hasattr(p, 'keys') else p[6] or ''
+    produto = p['produto'] if hasattr(p, 'keys') else p[7] or ''
+    asaas_customer_id = p['adesao_asaas_customer_id'] if hasattr(p, 'keys') else p[9]
+
+    # ── 1. Criar/reutilizar cliente no Asaas ──
+    if not asaas_customer_id:
+        payload_cliente = {
+            "name": razao_social,
+            "cpfCnpj": doc,
+            "email": email,
+            "mobilePhone": _normalizar_telefone(telefone) if telefone else None,
+            "notificationDisabled": False,
+        }
+        # Remove campos None
+        payload_cliente = {k: v for k, v in payload_cliente.items() if v}
+
+        cliente_data, status_code = asaas_request("POST", "/customers", payload_cliente)
+
+        if status_code not in (200, 201) or 'id' not in cliente_data:
+            close_db(conn)
+            erro = cliente_data.get('errors', [{}])[0].get('description', str(cliente_data)) if 'errors' in cliente_data else str(cliente_data)
+            return jsonify({'ok': False, 'erro': f'Erro ao criar cliente no Asaas: {erro}'}), 500
+
+        asaas_customer_id = cliente_data['id']
+        conn.execute("UPDATE propostas SET adesao_asaas_customer_id=? WHERE id=?", (asaas_customer_id, pid))
+
+    # ── 2. Criar cobrança BOLETO ──
+    payload_cobranca = {
+        "customer": asaas_customer_id,
+        "billingType": "BOLETO",
+        "value": valor,
+        "dueDate": vencimento,
+        "description": f"Taxa de Adesão — {produto or 'Plano de Saúde'} (Proposta #{pid})",
+        "externalReference": f"proposta_{pid}",
+    }
+
+    cobranca_data, status_code = asaas_request("POST", "/payments", payload_cobranca)
+
+    if status_code not in (200, 201) or 'id' not in cobranca_data:
+        close_db(conn)
+        erro = cobranca_data.get('errors', [{}])[0].get('description', str(cobranca_data)) if 'errors' in cobranca_data else str(cobranca_data)
+        return jsonify({'ok': False, 'erro': f'Erro ao criar boleto no Asaas: {erro}'}), 500
+
+    payment_id  = cobranca_data.get('id', '')
+    boleto_url  = cobranca_data.get('bankSlipUrl', '')
+    linha_dig   = cobranca_data.get('identificationField', '')
+
+    # ── 3. Salva na proposta ──
+    conn.execute("""
+        UPDATE propostas SET
+            adesao_asaas_payment_id = ?,
+            adesao_boleto_url       = ?,
+            adesao_linha_digitavel  = ?,
+            adesao_valor            = ?,
+            adesao_vencimento       = ?,
+            adesao_status           = 'Aguardando Pagamento'
+        WHERE id = ?
+    """, (payment_id, boleto_url, linha_dig, valor, vencimento, pid))
+
+    # Histórico
+    conn.execute("""
+        INSERT INTO historico_proposta (proposta_id, usuario_id, usuario_nome, tipo, descricao, criado_em)
+        VALUES (?, ?, ?, 'boleto_adesao', ?, ?)
+    """, (pid, session['user_id'], session.get('nome', ''),
+          f'Boleto de adesão gerado — R$ {valor:.2f} — venc. {vencimento}',
+          datetime.now(TZ_SP)))
+
+    conn.commit()
+    close_db(conn)
+
+    return jsonify({
+        'ok': True,
+        'payment_id':     payment_id,
+        'boleto_url':     boleto_url,
+        'linha_digitavel': linha_dig,
+        'valor':          valor,
+        'vencimento':     vencimento,
+        'msg':            f'Boleto gerado com sucesso! Vencimento: {vencimento}'
+    })
+
+
+@app.route('/proposta/<int:pid>/boleto-adesao')
+@login_required
+def ver_boleto_adesao(pid):
+    """Redireciona para o boleto de adesão gerado no Asaas (download/visualização)."""
+    conn = db()
+    p = conn.execute(
+        "SELECT adesao_boleto_url, adesao_status, razao_social FROM propostas WHERE id=?",
+        (pid,)
+    ).fetchone()
+    close_db(conn)
+
+    if not p:
+        flash('Proposta não encontrada.', 'error')
+        return redirect(url_for('listar_propostas'))
+
+    boleto_url = p['adesao_boleto_url'] if hasattr(p, 'keys') else p[0]
+    if not boleto_url:
+        flash('Boleto não gerado ainda. Gere o boleto primeiro.', 'warning')
+        return redirect(url_for('detalhe_proposta', pid=pid))
+
+    return redirect(boleto_url)
+
+
+@app.route('/proposta/<int:pid>/boleto-adesao/status')
+@login_required
+def status_boleto_adesao(pid):
+    """Consulta status do boleto de adesão no Asaas e atualiza no banco."""
+    conn = db()
+    p = conn.execute(
+        "SELECT adesao_asaas_payment_id, adesao_status FROM propostas WHERE id=?",
+        (pid,)
+    ).fetchone()
+
+    payment_id = p['adesao_asaas_payment_id'] if hasattr(p, 'keys') else p[0]
+
+    if not payment_id:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Boleto não gerado'}), 404
+
+    # Consulta no Asaas
+    data, sc = asaas_request("GET", f"/payments/{payment_id}")
+
+    if sc == 200 and 'status' in data:
+        status_asaas = data['status']
+        # Mapeia status Asaas → status legível
+        STATUS_MAP = {
+            'PENDING':    'Aguardando Pagamento',
+            'RECEIVED':   'Pago',
+            'CONFIRMED':  'Pago',
+            'OVERDUE':    'Vencido',
+            'REFUNDED':   'Estornado',
+            'CANCELED':   'Cancelado',
+        }
+        status_legivel = STATUS_MAP.get(status_asaas, status_asaas)
+        conn.execute("UPDATE propostas SET adesao_status=? WHERE id=?", (status_legivel, pid))
+        conn.commit()
+        close_db(conn)
+        return jsonify({
+            'ok': True,
+            'status_asaas':  status_asaas,
+            'status':        status_legivel,
+            'pago':          status_asaas in ('RECEIVED', 'CONFIRMED'),
+        })
+
+    close_db(conn)
+    return jsonify({'ok': False, 'erro': f'Erro ao consultar Asaas: {data}'}), 500
 @login_required
 def upload_comprovante(pid):
     """Upload de comprovante de pagamento. Libera parcelas bloqueadas."""
