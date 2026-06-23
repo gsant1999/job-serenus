@@ -6513,6 +6513,67 @@ def admin_crm_diagnostico_leads():
     return jsonify(resultado)
 
 
+
+@app.route('/webhook/corrigir-datas', methods=['POST'])
+def webhook_corrigir_datas():
+    """
+    Recebe lote de {telefone, email, data_hora} e corrige criado_em dos leads.
+    Usado pelo Apps Script para corrigir datas historicas.
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        token_esperado = os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
+        if data.get('token') != token_esperado:
+            return jsonify({"ok": False, "erro": "Token invalido"}), 401
+
+        registros = data.get('registros', [])
+        if not registros:
+            return jsonify({"ok": True, "corrigidos": 0, "nao_encontrados": 0})
+
+        conn = db()
+        corrigidos = 0
+        nao_encontrados = 0
+
+        for reg in registros:
+            telefone  = (reg.get('telefone') or '').strip()
+            email     = (reg.get('email') or '').strip()
+            data_hora = (reg.get('data_hora') or '').strip()
+
+            if not data_hora:
+                nao_encontrados += 1; continue
+
+            data_obj = _parse_data_lead(data_hora)
+            if not data_obj:
+                nao_encontrados += 1; continue
+
+            data_iso = data_obj.strftime('%Y-%m-%d 12:00:00')
+
+            lead = None
+            if telefone:
+                lead = conn.execute("SELECT id, criado_em FROM crm_leads WHERE telefone=?", (telefone,)).fetchone()
+            if not lead and email:
+                lead = conn.execute("SELECT id, criado_em FROM crm_leads WHERE email=?", (email,)).fetchone()
+
+            if not lead:
+                nao_encontrados += 1; continue
+
+            lid = lead['id'] if hasattr(lead, 'keys') else lead[0]
+            criado_atual = str(lead['criado_em'] if hasattr(lead, 'keys') else lead[1] or '')
+
+            # So atualiza se a data atual for do dia do import (data errada)
+            if '2026-06-22' in criado_atual or '2026-06-23' in criado_atual or '2026-06-24' in criado_atual:
+                conn.execute("UPDATE crm_leads SET criado_em=? WHERE id=?", (data_iso, lid))
+                corrigidos += 1
+
+        conn.commit()
+        close_db(conn)
+        return jsonify({"ok": True, "corrigidos": corrigidos, "nao_encontrados": nao_encontrados})
+    except Exception as e:
+        app.logger.error(f"[CORRIGIR_DATAS] {e}")
+        return jsonify({"ok": False, "erro": str(e)}), 500
+
+
+
 @app.route('/admin/crm/corrigir-leads', methods=['POST'])
 @login_required
 def admin_crm_corrigir_leads():
