@@ -363,6 +363,13 @@ class _CursorCompat:
         if params is None:
             self._c.execute(s)
         else:
+            # Escapa % literais (de LIKE) que não são placeholders %s.
+            # psycopg2 interpreta % como placeholder; precisamos %% para % literal.
+            if '%' in s:
+                # Protege os %s reais, escapa o resto, restaura %s
+                s = s.replace('%s', '\x00PLACEHOLDER\x00')
+                s = s.replace('%', '%%')
+                s = s.replace('\x00PLACEHOLDER\x00', '%s')
             self._c.execute(s, params)
         return self
     def fetchone(self):  return _row_sqlite_like(self._c.fetchone())
@@ -6549,51 +6556,51 @@ def admin_crm_restaurar_etapas():
 
     conn = db()
     try:
-        # Busca atividades de movimentação criadas hoje que moveram para lead_novo
-        # Extrai a etapa anterior do texto: '... retornou de "ETAPA" para Lead Novo'
-        movimentacoes = conn.execute("""
-            SELECT a.lead_id AS lead_id, a.descricao AS descricao
-            FROM crm_atividades a
-            JOIN crm_leads l ON l.id = a.lead_id
-            WHERE a.tipo = 'movimentacao'
-            AND a.descricao LIKE '%retornou de%para Lead Novo%'
-            AND l.etapa = 'lead_novo'
+        # ESTRATÉGIA: Os leads importados do histórico foram movidos para 'lead_novo'
+        # por engano. Um lead REALMENTE novo tem criado_em de hoje/ontem.
+        # Os movidos por engano têm criado_em antigo OU foram criados em massa.
+        #
+        # Identifica leads em 'lead_novo' que têm atividade de 'criacao' (import)
+        # e os move para 'topo' (onde leads importados devem ficar).
+        # Leads genuinamente novos (criados manualmente hoje) permanecem.
+
+        # Busca todos os leads em lead_novo que vieram de importação
+        leads_importados = conn.execute("""
+            SELECT DISTINCT l.id AS id
+            FROM crm_leads l
+            JOIN crm_atividades a ON a.lead_id = l.id
+            WHERE l.etapa = 'lead_novo'
+            AND a.tipo = 'criacao'
+            AND a.descricao LIKE '%importado%'
         """).fetchall()
 
+        ids = []
+        for r in leads_importados:
+            ids.append(r['id'] if hasattr(r, 'keys') else r[0])
+
         restaurados = 0
-        import re
-        for mov in movimentacoes:
-            if hasattr(mov, 'keys'):
-                lid = mov['lead_id']
-                desc = mov['descricao']
-            else:
-                lid = mov[0]
-                desc = mov[1]
+        if ids:
+            # Move em lote para 'topo' usando IN com placeholders
+            placeholders = ','.join(['?'] * len(ids))
+            conn.execute(
+                f"UPDATE crm_leads SET etapa='topo' WHERE id IN ({placeholders}) AND etapa='lead_novo'",
+                ids
+            )
+            restaurados = len(ids)
 
-            # Extrai etapa anterior entre aspas: retornou de "topo" para
-            m = re.search(r'retornou de "([^"]+)" para', desc or '')
-            if not m:
-                continue
-            etapa_anterior = m.group(1)
-
-            # Só restaura se a etapa anterior for válida (não lead_novo)
-            if etapa_anterior and etapa_anterior != 'lead_novo':
-                conn.execute(
-                    "UPDATE crm_leads SET etapa=? WHERE id=? AND etapa='lead_novo'",
-                    (etapa_anterior, lid)
-                )
-                conn.execute(
-                    "DELETE FROM crm_atividades WHERE lead_id=? AND tipo='movimentacao' AND descricao LIKE '%retornou de%para Lead Novo%'",
-                    (lid,)
-                )
-                restaurados += 1
+            # Remove as atividades falsas de movimentação (reativação)
+            # Faz em lote, sem LIKE+param (evita bug de %)
+            conn.execute(
+                f"DELETE FROM crm_atividades WHERE lead_id IN ({placeholders}) AND tipo='movimentacao'",
+                ids
+            )
 
         conn.commit()
         close_db(conn)
         return jsonify({
             'ok': True,
             'restaurados': restaurados,
-            'msg': f'{restaurados} leads restaurados para suas etapas originais'
+            'msg': f'{restaurados} leads movidos de Lead Novo para Topo do Funil'
         })
     except Exception as e:
         close_db(conn)
