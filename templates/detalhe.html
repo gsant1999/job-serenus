@@ -337,9 +337,162 @@
   </div>
   {% endif %}
 
+  <!-- ── TAXA DE ADESÃO ─────────────────────────────────────────── -->
+  {% set adesao_cor = '#10b981' if p.adesao_status == 'Pago' else '#ef4444' if p.adesao_status == 'Vencido' else '#f59e0b' if p.adesao_status == 'Aguardando Pagamento' else '#6b7280' %}
+  <div class="card" style="margin-bottom:16px; border:1px solid {{ adesao_cor }}22 !important;" id="card-boleto-adesao">
+    <div class="card-header" style="border-bottom:1px solid var(--borda);">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-size:18px;">💳</span>
+        <div>
+          <h3 style="margin:0;">Taxa de Adesão</h3>
+          <div style="font-size:11px; color:var(--cinza); margin-top:1px;">Boleto gerado via Asaas</div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        {% if p.adesao_status and p.adesao_status != 'Não gerado' %}
+          <span style="
+            padding:3px 12px; border-radius:20px; font-size:11.5px; font-weight:600;
+            background:{{ adesao_cor }}22; color:{{ adesao_cor }}; border:1px solid {{ adesao_cor }}44;">
+            {{ p.adesao_status }}
+          </span>
+        {% endif %}
+        {% if session.perfil in ('admin', 'consultor') %}
+          <button onclick="abrirModalBoleto()" style="
+            padding:6px 16px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; border:none;
+            {% if p.adesao_boleto_url %}background:#f59e0b22; color:#f59e0b; border:1px solid #f59e0b44;
+            {% else %}background:var(--azul); color:#fff;{% endif %}">
+            {% if p.adesao_boleto_url %}🔁 Gerar Novo{% else %}+ Gerar Boleto{% endif %}
+          </button>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card-body">
+      {% if p.adesao_boleto_url %}
+        <!-- Boleto gerado: mostra detalhes em grid -->
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-bottom:16px;">
+          <div style="background:var(--panel-2); padding:14px; border-radius:8px; text-align:center;">
+            <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Valor</div>
+            <div style="font-family:'Sora',sans-serif; font-size:22px; color:var(--texto); margin-top:5px; font-weight:600;">
+              R$ {{ '%.2f'|format(p.adesao_valor or 0)|replace('.',',') }}
+            </div>
+          </div>
+          <div style="background:var(--panel-2); padding:14px; border-radius:8px; text-align:center;">
+            <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Vencimento</div>
+            <div style="font-family:'Sora',sans-serif; font-size:18px; color:var(--texto); margin-top:5px; font-weight:600;">
+              {% if p.adesao_vencimento %}
+                {{ p.adesao_vencimento.split('-')|reverse|join('/') if '-' in (p.adesao_vencimento or '') else p.adesao_vencimento }}
+              {% else %}—{% endif %}
+            </div>
+          </div>
+          <div style="background:{{ adesao_cor }}15; padding:14px; border-radius:8px; text-align:center; border:1px solid {{ adesao_cor }}33;">
+            <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px;">Status</div>
+            <div style="font-size:15px; color:{{ adesao_cor }}; margin-top:5px; font-weight:700;">
+              {{ p.adesao_status or '—' }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Linha digitável -->
+        {% if p.adesao_linha_digitavel %}
+          <div style="background:var(--panel-2); border-radius:8px; padding:12px 16px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+            <div>
+              <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">Linha Digitável</div>
+              <div id="linha-digitavel-txt" style="font-family:monospace; font-size:12px; color:var(--texto); letter-spacing:.5px;">{{ p.adesao_linha_digitavel }}</div>
+            </div>
+            <button onclick="copiarLinha()" style="
+              padding:7px 14px; border-radius:8px; background:var(--azul); color:#fff;
+              border:none; cursor:pointer; font-size:12px; font-weight:600; white-space:nowrap;">
+              📋 Copiar
+            </button>
+          </div>
+        {% endif %}
+
+        <!-- Ações -->
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <a href="/proposta/{{ p.id }}/boleto-adesao" target="_blank" style="
+            display:inline-flex; align-items:center; gap:6px;
+            padding:9px 20px; border-radius:8px; background:#10b981; color:#fff;
+            font-weight:600; font-size:13px; text-decoration:none;">
+            📄 Baixar Boleto (PDF)
+          </a>
+          <button onclick="verificarStatusBoleto()" style="
+            padding:9px 20px; border-radius:8px; background:var(--panel-2); color:var(--texto);
+            border:1px solid var(--borda); cursor:pointer; font-size:13px; font-weight:600;">
+            🔄 Verificar pagamento
+          </button>
+        </div>
+
+      {% else %}
+        <!-- Boleto ainda não gerado -->
+        <div style="text-align:center; padding:24px 0; color:var(--cinza);">
+          <div style="font-size:32px; margin-bottom:8px; opacity:.4;">💳</div>
+          <div style="font-size:14px; font-weight:500; margin-bottom:4px; color:var(--texto);">Nenhum boleto gerado</div>
+          <div style="font-size:12px; margin-bottom:16px;">Gere o boleto para cobrar a taxa de adesão do cliente.</div>
+          {% if not p.cpf_titular and not p.cnpj %}
+            <div style="display:inline-block; background:#ef444415; border:1px solid #ef444433; border-radius:8px; padding:8px 16px; font-size:12px; color:#ef4444; margin-bottom:12px;">
+              ⚠️ CPF/CNPJ não preenchido na proposta — edite antes de gerar o boleto
+            </div>
+            <br>
+          {% endif %}
+          {% if session.perfil in ('admin', 'consultor') %}
+            <button onclick="abrirModalBoleto()" style="
+              padding:10px 24px; border-radius:8px; background:var(--azul); color:#fff;
+              border:none; cursor:pointer; font-size:14px; font-weight:600;">
+              💳 Gerar Boleto de Adesão
+            </button>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- MODAL: Gerar Boleto de Adesão -->
+  <div id="modal-boleto-adesao" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:var(--card); border-radius:12px; padding:28px; width:100%; max-width:420px; box-shadow:0 20px 60px rgba(0,0,0,.4);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <h3 style="margin:0; font-size:16px;">💳 Gerar Boleto de Adesão</h3>
+        <button onclick="fecharModalBoleto()" style="background:none; border:none; color:var(--cinza); font-size:22px; cursor:pointer; line-height:1;">×</button>
+      </div>
+      <div style="background:var(--panel-2); border-radius:8px; padding:12px; margin-bottom:18px;">
+        <div style="font-size:11px; color:var(--cinza); margin-bottom:3px;">Cliente</div>
+        <div style="font-size:14px; font-weight:600;">{{ p.razao_social }}</div>
+        <div style="font-size:12px; color:var(--cinza); margin-top:2px;">
+          {% if p.cpf_titular %}CPF: {{ p.cpf_titular }}
+          {% elif p.cnpj %}CNPJ: {{ p.cnpj }}
+          {% else %}<span style="color:#ef4444;">⚠️ CPF/CNPJ não preenchido — edite a proposta</span>{% endif %}
+        </div>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12px; color:var(--cinza); display:block; margin-bottom:6px; font-weight:500;">Valor (R$)</label>
+        <input type="number" id="boleto-valor" step="0.01" min="0.01" placeholder="0,00"
+          style="width:100%; padding:11px 14px; border:1px solid var(--borda); border-radius:8px; background:var(--bg); color:var(--texto); font-size:16px; font-weight:600; box-sizing:border-box;">
+        <div style="font-size:11px; color:var(--cinza); margin-top:4px;">Informe o valor final — pode aplicar desconto.</div>
+      </div>
+      <div style="margin-bottom:22px;">
+        <label style="font-size:12px; color:var(--cinza); display:block; margin-bottom:6px; font-weight:500;">Vencimento</label>
+        <input type="date" id="boleto-vencimento"
+          style="width:100%; padding:11px 14px; border:1px solid var(--borda); border-radius:8px; background:var(--bg); color:var(--texto); font-size:14px; box-sizing:border-box;">
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button onclick="fecharModalBoleto()" class="btn-outline" style="flex:1; padding:11px;">Cancelar</button>
+        <button onclick="gerarBoletoAdesao()" id="btn-gerar-boleto"
+          style="flex:2; padding:11px; background:var(--azul); color:#fff; border:none; border-radius:8px; font-weight:600; cursor:pointer; font-size:14px;">
+          Gerar Boleto
+        </button>
+      </div>
+      <div id="boleto-resultado" style="display:none; margin-top:16px; padding:14px; border-radius:8px; background:#10b98115; border:1px solid #10b98144; text-align:center;">
+        <div style="font-size:13px; color:#10b981; font-weight:600; margin-bottom:10px;">✅ Boleto gerado com sucesso!</div>
+        <a id="boleto-link" href="#" target="_blank"
+          style="display:inline-block; padding:9px 22px; background:#10b981; color:#fff; border-radius:8px; font-weight:600; text-decoration:none; font-size:13px;">
+          📄 Baixar Boleto
+        </a>
+      </div>
+      <div id="boleto-erro" style="display:none; margin-top:12px; padding:10px 14px; border-radius:8px; background:#ef444415; border:1px solid #ef444433; font-size:12px; color:#ef4444;"></div>
+    </div>
+  </div>
+
   <!-- Documentos -->
-  <!-- Documentos -->
-  <div class="card" style="margin-bottom:16px;" id="card-documentos">
     <div class="card-header">
       <h3>Documentos</h3>
       <span style="font-size:11px; color:var(--cinza);">Comprovante e contrato são necessários para enviar à Affinity</span>
@@ -367,92 +520,6 @@
             <input type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="uploadDoc('comprovante', this)">
           </label>
           {% if p.comprovante_boleto and session.perfil == 'admin' %}<button onclick="excluirAnexo('comprovante','')" class="btn-del-anexo" title="Excluir comprovante">×</button>{% endif %}
-        </div>
-      </div>
-
-      <!-- Boleto de Taxa de Adesão -->
-      <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--borda); gap:12px; flex-wrap:wrap;" id="row-boleto-adesao">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <div style="width:8px; height:8px; border-radius:50%;
-            background:{% if p.adesao_status == 'Pago' %}#10b981{% elif p.adesao_status == 'Aguardando Pagamento' %}#f59e0b{% elif p.adesao_status == 'Vencido' %}#ef4444{% else %}#6b7280{% endif %};
-            flex-shrink:0;"></div>
-          <div>
-            <div style="font-size:13px; font-weight:500;">Taxa de Adesão</div>
-            <div style="font-size:11.5px; color:var(--cinza); margin-top:2px;" id="adesao-status-texto">
-              {% if p.adesao_boleto_url %}
-                <span style="color:{% if p.adesao_status == 'Pago' %}#10b981{% elif p.adesao_status == 'Vencido' %}#ef4444{% else %}#f59e0b{% endif %}; font-weight:600;">
-                  {{ p.adesao_status or 'Aguardando Pagamento' }}
-                </span>
-                — R$ {{ '%.2f'|format(p.adesao_valor or 0) }} · Venc. {{ p.adesao_vencimento or '' }}
-                {% if p.adesao_linha_digitavel %}
-                  <br><span style="font-family:monospace; font-size:10.5px; color:var(--cinza);" id="linha-digitavel-txt">{{ p.adesao_linha_digitavel }}</span>
-                  <button onclick="copiarLinha()" style="background:none; border:none; cursor:pointer; color:var(--azul); font-size:11px;" title="Copiar linha digitável">📋</button>
-                {% endif %}
-              {% else %}
-                Não gerado — clique em "Gerar Boleto" para emitir
-              {% endif %}
-            </div>
-          </div>
-        </div>
-        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-          {% if p.adesao_boleto_url %}
-            <a href="/proposta/{{ p.id }}/boleto-adesao" target="_blank"
-               class="btn-outline" style="font-size:12px; padding:6px 14px; text-decoration:none; color:var(--verde); border-color:var(--verde);">
-              📄 Baixar Boleto
-            </a>
-            <button onclick="verificarStatusBoleto()" class="btn-outline" style="font-size:12px; padding:6px 14px;">
-              🔄 Verificar pagamento
-            </button>
-          {% endif %}
-          {% if session.perfil == 'admin' or session.perfil == 'consultor' %}
-            <button onclick="abrirModalBoleto()" class="btn-outline"
-              style="font-size:12px; padding:6px 14px; {% if p.adesao_boleto_url %}border-color:#f59e0b; color:#f59e0b;{% else %}background:var(--azul); color:#fff; border-color:var(--azul);{% endif %}">
-              {% if p.adesao_boleto_url %}🔁 Gerar Novo Boleto{% else %}💳 Gerar Boleto{% endif %}
-            </button>
-          {% endif %}
-        </div>
-      </div>
-
-      <!-- MODAL: Gerar Boleto de Adesão -->
-      <div id="modal-boleto-adesao" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:9999; align-items:center; justify-content:center;">
-        <div style="background:var(--card); border-radius:12px; padding:28px; width:100%; max-width:420px; box-shadow:0 20px 60px rgba(0,0,0,.4);">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <h3 style="margin:0; font-size:16px;">💳 Gerar Boleto de Adesão</h3>
-            <button onclick="fecharModalBoleto()" style="background:none; border:none; color:var(--cinza); font-size:20px; cursor:pointer;">×</button>
-          </div>
-          <div style="margin-bottom:14px;">
-            <label style="font-size:12px; color:var(--cinza); display:block; margin-bottom:4px;">Cliente</label>
-            <div style="font-size:14px; font-weight:500;">{{ p.razao_social }}</div>
-            <div style="font-size:12px; color:var(--cinza);">
-              {% if p.cpf_titular %}CPF: {{ p.cpf_titular }}{% elif p.cnpj %}CNPJ: {{ p.cnpj }}{% else %}<span style="color:#ef4444;">⚠️ CPF/CNPJ não preenchido — edite a proposta</span>{% endif %}
-            </div>
-          </div>
-          <div style="margin-bottom:14px;">
-            <label style="font-size:12px; color:var(--cinza); display:block; margin-bottom:4px;">Valor da Taxa de Adesão (R$)</label>
-            <input type="number" id="boleto-valor" step="0.01" min="0.01" placeholder="Ex: 150.00"
-              style="width:100%; padding:10px 12px; border:1px solid var(--borda); border-radius:8px; background:var(--bg); color:var(--texto); font-size:14px; box-sizing:border-box;">
-            <div style="font-size:11px; color:var(--cinza); margin-top:4px;">Você pode dar desconto — apenas informe o valor final cobrado.</div>
-          </div>
-          <div style="margin-bottom:20px;">
-            <label style="font-size:12px; color:var(--cinza); display:block; margin-bottom:4px;">Data de Vencimento</label>
-            <input type="date" id="boleto-vencimento"
-              style="width:100%; padding:10px 12px; border:1px solid var(--borda); border-radius:8px; background:var(--bg); color:var(--texto); font-size:14px; box-sizing:border-box;">
-          </div>
-          <div style="display:flex; gap:8px;">
-            <button onclick="fecharModalBoleto()" class="btn-outline" style="flex:1; padding:10px;">Cancelar</button>
-            <button onclick="gerarBoletoAdesao()" id="btn-gerar-boleto"
-              style="flex:2; padding:10px; background:var(--azul); color:#fff; border:none; border-radius:8px; font-weight:600; cursor:pointer; font-size:14px;">
-              Gerar Boleto
-            </button>
-          </div>
-          <div id="boleto-resultado" style="display:none; margin-top:16px; padding:12px; border-radius:8px; background:rgba(31,216,164,.1); border:1px solid #1fd8a4; text-align:center;">
-            <div style="font-size:13px; color:#1fd8a4; font-weight:600; margin-bottom:8px;">✅ Boleto gerado com sucesso!</div>
-            <a id="boleto-link" href="#" target="_blank"
-              style="display:inline-block; padding:8px 20px; background:#1fd8a4; color:#000; border-radius:8px; font-weight:600; text-decoration:none; font-size:13px;">
-              📄 Baixar / Visualizar Boleto
-            </a>
-          </div>
-          <div id="boleto-erro" style="display:none; margin-top:12px; padding:10px; border-radius:8px; background:rgba(239,68,68,.1); border:1px solid #ef4444; font-size:12px; color:#ef4444;"></div>
         </div>
       </div>
       <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--borda); gap:12px; flex-wrap:wrap;" id="row-contrato">
