@@ -6159,29 +6159,57 @@ def webhook_sheets():
 
             # Data do lead (vinda da planilha)
             data_lead = _parse_data_lead(data_hora_raw)
-
-            # Dedup por telefone
-            if telefone:
-                dup = conn.execute(
-                    "SELECT id FROM crm_leads WHERE telefone = ?",
-                    (telefone,)
-                ).fetchone()
-                if dup:
-                    duplicados += 1; continue
-
-            # Dedup por email
-            if email:
-                dup = conn.execute(
-                    "SELECT id FROM crm_leads WHERE email = ?",
-                    (email,)
-                ).fetchone()
-                if dup:
-                    duplicados += 1; continue
+            data_str = data_lead.strftime('%d/%m/%Y') if data_lead else _fmt_data_br(datetime.now(TZ_SP))
 
             obs = f"Tipo: {tipo}"
             if num_pess:
                 obs += f" | Pessoas: {num_pess}"
 
+            # ── Verificar se lead já existe (por telefone ou email) ──
+            lead_existente = None
+            if telefone:
+                lead_existente = conn.execute(
+                    "SELECT id, etapa, nome FROM crm_leads WHERE telefone = ?",
+                    (telefone,)
+                ).fetchone()
+            if not lead_existente and email:
+                lead_existente = conn.execute(
+                    "SELECT id, etapa, nome FROM crm_leads WHERE email = ?",
+                    (email,)
+                ).fetchone()
+
+            if lead_existente:
+                # ── REATIVAÇÃO: lead voltou a solicitar ──
+                lid = lead_existente['id'] if hasattr(lead_existente, 'keys') else lead_existente[0]
+                etapa_anterior = lead_existente['etapa'] if hasattr(lead_existente, 'keys') else lead_existente[1]
+
+                # Só reativa se não estiver já em lead_novo (evita loops)
+                if etapa_anterior != 'lead_novo':
+                    # Atualiza dados e move para lead_novo
+                    conn.execute("""
+                        UPDATE crm_leads SET
+                            nome = COALESCE(NULLIF(?, ''), nome),
+                            email = COALESCE(NULLIF(?, ''), email),
+                            empresa = COALESCE(NULLIF(?, ''), empresa),
+                            origem = ?,
+                            etapa = 'lead_novo',
+                            atualizado_em = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (nome, email, cidade, origem, lid))
+
+                    # Registra na timeline
+                    conn.execute("""
+                        INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
+                        VALUES (?, ?, 'movimentacao', ?)
+                    """, (lid, consultor,
+                          f'🔄 Nova solicitação em {data_str} via {origem} — retornou de "{etapa_anterior}" para Lead Novo'))
+
+                    importados += 1
+                else:
+                    duplicados += 1
+                continue
+
+            # ── NOVO LEAD: não existe no banco ──
             if data_lead:
                 conn.execute("""
                     INSERT INTO crm_leads
@@ -6200,7 +6228,7 @@ def webhook_sheets():
             conn.execute("""
                 INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
                 VALUES (?, ?, 'criacao', ?)
-            """, (lead_id, consultor, f'Lead importado via {origem} (Apps Script)'))
+            """, (lead_id, consultor, f'Lead importado via {origem} em {data_str}'))
 
             importados += 1
 
