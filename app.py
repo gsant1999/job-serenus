@@ -6164,7 +6164,7 @@ def webhook_sheets():
 
         for lead in leads_raw:
             nome     = (lead.get('nome') or '').strip()
-            telefone = (lead.get('telefone') or '').strip()
+            telefone_raw = (lead.get('telefone') or '').strip()
             email    = (lead.get('email') or '').strip()
             cidade   = (lead.get('cidade') or '').strip()
             tipo     = (lead.get('tipo') or 'PF').strip()
@@ -6173,6 +6173,10 @@ def webhook_sheets():
             cons_raw = (lead.get('consultor') or lead.get('consultor_2') or '').strip()
             # Data: aceita 'data_hora' ou 'data'
             data_hora_raw = (lead.get('data_hora') or lead.get('data') or '').strip()
+
+            # Telefone: formata bonito p/ exibição + normaliza p/ dedup
+            telefone = _formatar_telefone(telefone_raw)   # (19) 99104-6030
+            telefone_norm = _normalizar_telefone(telefone_raw)  # 19991046030
 
             # Filtro: "teste" no nome ou email
             if nome and 'teste' in nome.lower():
@@ -6196,16 +6200,23 @@ def webhook_sheets():
             if num_pess:
                 obs += f" | Pessoas: {num_pess}"
 
-            # ── Verificar se lead já existe (por telefone ou email) ──
+            # ── Verificar se lead já existe (por telefone OU email) ──
+            # Usa telefone_norm (só dígitos) comparado contra telefone_norm do banco
             lead_existente = None
-            if telefone:
+            if telefone_norm:
                 lead_existente = conn.execute(
-                    "SELECT id, etapa, nome, criado_em FROM crm_leads WHERE telefone = ?",
-                    (telefone,)
+                    "SELECT id, etapa, nome, criado_em FROM crm_leads WHERE telefone_norm = ?",
+                    (telefone_norm,)
+                ).fetchone()
+            # Fallback: compara só dígitos do telefone bruto armazenado
+            if not lead_existente and telefone_norm and len(telefone_norm) >= 8:
+                lead_existente = conn.execute(
+                    "SELECT id, etapa, nome, criado_em FROM crm_leads WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(telefone,'-',''),' ',''),'(',''),')',''),'+','') LIKE ?",
+                    (f'%{telefone_norm[-8:]}',)
                 ).fetchone()
             if not lead_existente and email:
                 lead_existente = conn.execute(
-                    "SELECT id, etapa, nome, criado_em FROM crm_leads WHERE email = ?",
+                    "SELECT id, etapa, nome, criado_em FROM crm_leads WHERE LOWER(email) = LOWER(?)",
                     (email,)
                 ).fetchone()
 
@@ -6265,16 +6276,16 @@ def webhook_sheets():
             if data_lead:
                 conn.execute("""
                     INSERT INTO crm_leads
-                        (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes, criado_em, consultor_externo)
-                    VALUES (?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?, ?)
-                """, (nome, telefone, email, cidade, origem, responsavel_id, obs,
+                        (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id, observacoes, criado_em, consultor_externo)
+                    VALUES (?, ?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?, ?)
+                """, (nome, telefone, telefone_norm, email, cidade, origem, responsavel_id, obs,
                       data_lead.strftime('%Y-%m-%d 12:00:00'), consultor_externo))
             else:
                 conn.execute("""
                     INSERT INTO crm_leads
-                        (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes, consultor_externo)
-                    VALUES (?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?)
-                """, (nome, telefone, email, cidade, origem, responsavel_id, obs, consultor_externo))
+                        (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id, observacoes, consultor_externo)
+                    VALUES (?, ?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?)
+                """, (nome, telefone, telefone_norm, email, cidade, origem, responsavel_id, obs, consultor_externo))
 
             lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             conn.execute("""
@@ -6608,6 +6619,42 @@ def admin_crm_restaurar_etapas():
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
 
+@app.route('/admin/crm/formatar-telefones', methods=['POST'])
+@login_required
+def admin_crm_formatar_telefones():
+    """
+    Formata todos os telefones existentes para (XX) XXXXX-XXXX e
+    preenche a coluna telefone_norm (só dígitos) para dedup futura.
+    """
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
+
+    conn = db()
+    try:
+        leads = conn.execute("SELECT id, telefone FROM crm_leads WHERE telefone IS NOT NULL AND telefone != ''").fetchall()
+        formatados = 0
+        for lead in leads:
+            lid = lead['id'] if hasattr(lead, 'keys') else lead[0]
+            tel = lead['telefone'] if hasattr(lead, 'keys') else lead[1]
+
+            tel_bonito = _formatar_telefone(tel)
+            tel_norm = _normalizar_telefone(tel)
+
+            conn.execute(
+                "UPDATE crm_leads SET telefone=?, telefone_norm=? WHERE id=?",
+                (tel_bonito, tel_norm, lid)
+            )
+            formatados += 1
+
+        conn.commit()
+        close_db(conn)
+        return jsonify({'ok': True, 'formatados': formatados, 'msg': f'{formatados} telefones formatados'})
+    except Exception as e:
+        close_db(conn)
+        app.logger.error(f"[FORMATAR_TEL] {e}")
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+
 @app.route('/admin/crm/debug-datas')
 @login_required
 def admin_crm_debug_datas():
@@ -6683,20 +6730,19 @@ def webhook_corrigir_datas():
 
             lead = None
 
-            # 1) Busca por telefone exato
-            if telefone:
-                lead = conn.execute("SELECT id, criado_em FROM crm_leads WHERE telefone=?", (telefone,)).fetchone()
+            # Normaliza o telefone recebido
+            tel_norm = _normalizar_telefone(telefone)
 
-            # 2) Busca por telefone normalizado (só dígitos, últimos 8)
-            if not lead and telefone:
-                tel_digitos = _so_digitos(telefone)
-                if len(tel_digitos) >= 8:
-                    ultimos8 = tel_digitos[-8:]
-                    # Compara os últimos 8 dígitos do telefone (ignora DDD/55 prefixo)
-                    lead = conn.execute(
-                        "SELECT id, criado_em FROM crm_leads WHERE REPLACE(REPLACE(REPLACE(REPLACE(telefone,'-',''),' ',''),'(',''),')','') LIKE ?",
-                        (f'%{ultimos8}',)
-                    ).fetchone()
+            # 1) Busca por telefone_norm (campo dedicado)
+            if tel_norm:
+                lead = conn.execute("SELECT id, criado_em FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone()
+
+            # 2) Busca por últimos 8 dígitos no telefone formatado
+            if not lead and tel_norm and len(tel_norm) >= 8:
+                lead = conn.execute(
+                    "SELECT id, criado_em FROM crm_leads WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(telefone,'-',''),' ',''),'(',''),')',''),'+','') LIKE ?",
+                    (f'%{tel_norm[-8:]}',)
+                ).fetchone()
 
             # 3) Busca por email (case-insensitive)
             if not lead and email:
@@ -6708,8 +6754,16 @@ def webhook_corrigir_datas():
             lid = lead['id'] if hasattr(lead, 'keys') else lead[0]
             criado_atual = str(lead['criado_em'] if hasattr(lead, 'keys') else lead[1] or '')
 
-            # So atualiza se a data atual for do dia do import (data errada)
-            if '2026-06-22' in criado_atual or '2026-06-23' in criado_atual or '2026-06-24' in criado_atual:
+            # Atualiza se: (a) data atual é do dia do import (errada), OU
+            # (b) a data da planilha é diferente da data atual registrada.
+            # Compara apenas a parte da data (YYYY-MM-DD).
+            data_planilha_ymd = data_obj.strftime('%Y-%m-%d')
+            data_atual_ymd = criado_atual[:10] if len(criado_atual) >= 10 else ''
+
+            eh_data_import = ('2026-06-22' in criado_atual or '2026-06-23' in criado_atual or '2026-06-24' in criado_atual)
+            datas_diferentes = (data_atual_ymd and data_atual_ymd != data_planilha_ymd)
+
+            if eh_data_import or datas_diferentes:
                 conn.execute("UPDATE crm_leads SET criado_em=? WHERE id=?", (data_iso, lid))
                 corrigidos += 1
 
@@ -7135,6 +7189,46 @@ CONSULTOR_ALIASES = {
     'jack': 'Jack',
     'jack2': 'Jack',
 }
+
+def _normalizar_telefone(tel_raw):
+    """
+    Extrai só os dígitos do telefone e normaliza para o padrão brasileiro.
+    Retorna apenas dígitos: '5519991046030' ou '19991046030'.
+    Usado para comparação/dedup.
+    """
+    if not tel_raw:
+        return ''
+    import re
+    dig = re.sub(r'\D', '', str(tel_raw))
+    # Remove código do país 55 se tiver 12-13 dígitos (55 + DDD + número)
+    if len(dig) >= 12 and dig.startswith('55'):
+        dig = dig[2:]
+    return dig
+
+def _formatar_telefone(tel_raw):
+    """
+    Formata telefone para exibição bonita: (19) 99104-6030 ou (19) 3104-6030.
+    Aceita qualquer formato de entrada (com 55, com traços, espaços, etc.).
+    """
+    if not tel_raw:
+        return ''
+    dig = _normalizar_telefone(tel_raw)
+    if not dig:
+        return str(tel_raw).strip()
+    # Celular com DDD: 11 dígitos → (XX) XXXXX-XXXX
+    if len(dig) == 11:
+        return f'({dig[0:2]}) {dig[2:7]}-{dig[7:11]}'
+    # Fixo com DDD: 10 dígitos → (XX) XXXX-XXXX
+    if len(dig) == 10:
+        return f'({dig[0:2]}) {dig[2:6]}-{dig[6:10]}'
+    # Celular sem DDD: 9 dígitos → XXXXX-XXXX
+    if len(dig) == 9:
+        return f'{dig[0:5]}-{dig[5:9]}'
+    # Fixo sem DDD: 8 dígitos → XXXX-XXXX
+    if len(dig) == 8:
+        return f'{dig[0:4]}-{dig[4:8]}'
+    # Outros tamanhos: retorna os dígitos como estão
+    return dig
 
 def _normalizar_consultor(nome_raw):
     """Normaliza apelido/nome para o primeiro nome real. Retorna None se vazio."""
