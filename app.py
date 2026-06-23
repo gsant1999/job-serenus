@@ -1117,6 +1117,9 @@ def init_db():
         ("historico_proposta", "usuario_id", "INTEGER"),
         ("historico_proposta", "tipo", "TEXT DEFAULT 'edicao'"),
         ("historico_proposta", "descricao", "TEXT"),
+        # ─── CRM: WhatsApp WaSpeed + filtros ───
+        ("usuarios", "waspeed_token", "TEXT"),
+        ("crm_leads", "telefone_norm", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -5621,23 +5624,61 @@ def crm():
     conn = db()
     uid = session['user_id']
     eh_admin = session.get('perfil') == 'admin'
-    filtro = request.args.get('etapa', '')
-    responsaveis = conn.execute(
-        "SELECT id, nome FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome"
-    ).fetchall() if eh_admin else []
 
-    # Carrega todos os leads com responsável
+    # ── Filtros ──
+    f_etapa     = request.args.get('etapa', '').strip()
+    f_consultor = request.args.get('consultor', '').strip()  # id do responsável
+    f_origem    = request.args.get('origem', '').strip()
+    f_data_de   = request.args.get('data_de', '').strip()     # YYYY-MM-DD
+    f_data_ate  = request.args.get('data_ate', '').strip()    # YYYY-MM-DD
+    f_busca     = request.args.get('q', '').strip()
+
+    # Lista de consultores para o filtro (admin vê todos os usuários ativos)
+    responsaveis = []
+    if eh_admin:
+        responsaveis = conn.execute(
+            "SELECT id, nome, perfil FROM usuarios WHERE ativo=1 ORDER BY nome"
+        ).fetchall()
+
+    # Monta query
     q = """SELECT l.*, u.nome as responsavel_nome
            FROM crm_leads l
            LEFT JOIN usuarios u ON u.id = l.responsavel_id
            WHERE 1=1 """
     params = []
+
+    # Consultor só vê os próprios; admin pode filtrar por consultor
     if not eh_admin:
         q += " AND l.responsavel_id=?"
         params.append(uid)
-    if filtro:
+    elif f_consultor:
+        if f_consultor == 'sem':
+            q += " AND l.responsavel_id IS NULL"
+        else:
+            q += " AND l.responsavel_id=?"
+            params.append(int(f_consultor))
+
+    if f_etapa:
         q += " AND l.etapa=?"
-        params.append(filtro)
+        params.append(f_etapa)
+
+    if f_origem:
+        q += " AND l.origem LIKE ?"
+        params.append(f'%{f_origem}%')
+
+    # Filtro de data sobre criado_em (data do lead)
+    if f_data_de:
+        q += " AND DATE(l.criado_em) >= ?"
+        params.append(f_data_de)
+    if f_data_ate:
+        q += " AND DATE(l.criado_em) <= ?"
+        params.append(f_data_ate)
+
+    if f_busca:
+        q += " AND (LOWER(l.nome) LIKE ? OR l.telefone LIKE ? OR LOWER(l.email) LIKE ?)"
+        like = f'%{f_busca.lower()}%'
+        params.extend([like, f'%{f_busca}%', like])
+
     q += " ORDER BY l.atualizado_em DESC"
     leads = conn.execute(q, params).fetchall()
 
@@ -5652,14 +5693,20 @@ def crm():
         if etapa in kanban:
             kanban[etapa].append(lead)
         else:
-            # Lead com etapa órfã (etapa foi removida) cai na primeira coluna
             kanban[primeira].append(lead)
 
-    # Stats
     total = len(leads)
+
+    # Filtros ativos para repassar ao template
+    filtros_ativos = {
+        'etapa': f_etapa, 'consultor': f_consultor, 'origem': f_origem,
+        'data_de': f_data_de, 'data_ate': f_data_ate, 'q': f_busca
+    }
+
     close_db(conn)
     return render_template('crm.html', kanban=kanban, etapas=etapas,
-                           total=total, responsaveis=responsaveis, eh_admin=eh_admin)
+                           total=total, responsaveis=responsaveis, eh_admin=eh_admin,
+                           filtros=filtros_ativos)
 
 
 @app.route('/crm/lead/novo', methods=['POST'])
@@ -6092,12 +6139,12 @@ def webhook_sheets():
             if not nome:
                 ignorados += 1; continue
 
-            # Normalizar consultor
+            # Normalizar consultor + busca FLEXÍVEL do responsável
             consultor = _normalizar_consultor(cons_raw) or 'Guilherme'
-            resp = conn.execute(
-                "SELECT id FROM usuarios WHERE nome = ?", (consultor,)
-            ).fetchone()
-            responsavel_id = resp[0] if resp else None
+            responsavel_id = _buscar_responsavel_id(conn, consultor)
+
+            # Data do lead (vinda da planilha) → guardamos em criado_em se válida
+            data_lead = _parse_data_lead(lead.get('data_hora') or '')
 
             # Dedup por telefone
             if telefone:
@@ -6121,11 +6168,19 @@ def webhook_sheets():
             if num_pess:
                 obs += f" | Pessoas: {num_pess}"
 
-            conn.execute("""
-                INSERT INTO crm_leads
-                    (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes)
-                VALUES (?, ?, ?, ?, ?, 'topo', ?, ?)
-            """, (nome, telefone, email, cidade, origem, responsavel_id, obs))
+            if data_lead:
+                conn.execute("""
+                    INSERT INTO crm_leads
+                        (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes, criado_em)
+                    VALUES (?, ?, ?, ?, ?, 'topo', ?, ?, ?)
+                """, (nome, telefone, email, cidade, origem, responsavel_id, obs,
+                      data_lead.strftime('%Y-%m-%d 12:00:00')))
+            else:
+                conn.execute("""
+                    INSERT INTO crm_leads
+                        (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes)
+                    VALUES (?, ?, ?, ?, ?, 'topo', ?, ?)
+                """, (nome, telefone, email, cidade, origem, responsavel_id, obs))
 
             lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             conn.execute("""
@@ -6149,6 +6204,88 @@ def webhook_sheets():
     except Exception as e:
         app.logger.error(f"[WEBHOOK_SHEETS] Erro: {e}")
         return jsonify({"ok": False, "erro": str(e)}), 200
+
+
+# ─── INTEGRAÇÃO WHATSAPP (WaSpeed / Wascript) ────────────────────────────────────
+# Doc: https://api-whatsapp.wascript.com.br/api-docs/
+# Cada gestor pode ter seu próprio token (coluna usuarios.waspeed_token).
+# Fallback: variável de ambiente WASPEED_TOKEN.
+WASPEED_BASE = 'https://api-whatsapp.wascript.com.br'
+
+def _waspeed_token_do_usuario(conn, uid):
+    """Retorna o token WaSpeed do usuário, ou o global (env), ou None."""
+    try:
+        row = conn.execute("SELECT waspeed_token FROM usuarios WHERE id=?", (uid,)).fetchone()
+        if row:
+            tk = row['waspeed_token'] if hasattr(row, 'keys') else row[0]
+            if tk:
+                return tk
+    except Exception:
+        pass
+    return os.environ.get('WASPEED_TOKEN', '') or None
+
+def _waspeed_normaliza_fone(telefone):
+    """Garante formato 55DDDNUMERO (só dígitos)."""
+    import re as _re
+    n = _re.sub(r'\D', '', telefone or '')
+    if not n:
+        return ''
+    # Se não começa com 55 e tem 10-11 dígitos (DDD+numero), prefixa 55
+    if not n.startswith('55') and len(n) in (10, 11):
+        n = '55' + n
+    return n
+
+@app.route('/crm/lead/<int:lid>/whatsapp', methods=['POST'])
+@login_required
+def crm_lead_whatsapp(lid):
+    """Envia mensagem de texto via WaSpeed e registra na timeline do lead."""
+    import requests as _rq
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+
+    d = request.json or {}
+    mensagem = (d.get('mensagem') or '').strip()
+    if not mensagem:
+        close_db(conn); return jsonify({"ok": False, "erro": "Mensagem vazia"}), 400
+
+    token = _waspeed_token_do_usuario(conn, session['user_id'])
+    if not token:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Token WaSpeed não configurado. Configure em Usuários ou na variável WASPEED_TOKEN."}), 400
+
+    fone = _waspeed_normaliza_fone(lead['telefone'])
+    if not fone:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead sem telefone válido"}), 400
+
+    try:
+        url = f"{WASPEED_BASE}/api/enviar-texto/{token}"
+        resp = _rq.post(url, json={"phone": fone, "message": mensagem}, timeout=20)
+        ok_envio = False
+        try:
+            j = resp.json()
+            ok_envio = bool(j.get('success'))
+            msg_api = j.get('message', '')
+        except Exception:
+            msg_api = resp.text[:200]
+
+        if ok_envio:
+            conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
+                            VALUES (?,?,?,?)""",
+                         (lid, session.get('nome'), 'whatsapp', f'WhatsApp enviado: {mensagem}'))
+            conn.execute("UPDATE crm_leads SET atualizado_em=CURRENT_TIMESTAMP WHERE id=?", (lid,))
+            conn.commit(); close_db(conn)
+            return jsonify({"ok": True, "msg": "Mensagem enviada"})
+        else:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": f"WaSpeed: {msg_api}"}), 400
+    except Exception as e:
+        close_db(conn)
+        app.logger.error(f"[WASPEED] Erro lead {lid}: {e}")
+        return jsonify({"ok": False, "erro": f"Falha ao enviar: {e}"}), 500
 
 
 
@@ -6444,20 +6581,134 @@ CONSULTOR_ALIASES = {
     'guilherme': 'Guilherme',
     'gui': 'Guilherme',
     'gui santos': 'Guilherme',
+    'guilherme santos': 'Guilherme',
     'danilo': 'Danilo',
     'danilo sampaio': 'Danilo',
     'bianca': 'Bianca',
     'bianca sampaio': 'Bianca',
     'gabriel': 'Gabriel',
     'gabriel maggiotto': 'Gabriel',
+    'gabriel humberto maggiotto': 'Gabriel',
 }
 
 def _normalizar_consultor(nome_raw):
-    """Normaliza apelido/nome para pessoa real. Retorna None se não encontrado."""
+    """Normaliza apelido/nome para o primeiro nome real. Retorna None se vazio."""
     if not nome_raw:
         return None
     nome_lower = nome_raw.strip().lower()
-    return CONSULTOR_ALIASES.get(nome_lower, None)
+    # Tenta match exato no alias
+    if nome_lower in CONSULTOR_ALIASES:
+        return CONSULTOR_ALIASES[nome_lower]
+    # Tenta pelo primeiro nome
+    primeiro = nome_lower.split()[0] if nome_lower else ''
+    if primeiro in CONSULTOR_ALIASES:
+        return CONSULTOR_ALIASES[primeiro]
+    # Se não achou alias, retorna o nome capitalizado (pode ser consultor novo)
+    return nome_raw.strip().title() if nome_raw.strip() else None
+
+def _buscar_responsavel_id(conn, consultor_nome):
+    """
+    Busca o ID do usuário responsável de forma FLEXÍVEL.
+    Tenta: nome exato → primeiro nome (LIKE) → None.
+    Funciona mesmo que o banco tenha 'Guilherme Santos' e a planilha diga 'GUILHERME'.
+    """
+    if not consultor_nome:
+        return None
+    nome = consultor_nome.strip()
+    # 1) Match exato
+    resp = conn.execute(
+        "SELECT id FROM usuarios WHERE LOWER(nome) = LOWER(?) AND ativo=1 ORDER BY id LIMIT 1",
+        (nome,)
+    ).fetchone()
+    if resp:
+        return resp['id'] if hasattr(resp, 'keys') else resp[0]
+    # 2) Primeiro nome via LIKE (ex.: 'Guilherme' casa com 'Guilherme Santos')
+    primeiro = nome.split()[0] if nome else ''
+    if primeiro:
+        resp = conn.execute(
+            "SELECT id FROM usuarios WHERE LOWER(nome) LIKE LOWER(?) AND ativo=1 ORDER BY id LIMIT 1",
+            (primeiro + '%',)
+        ).fetchone()
+        if resp:
+            return resp['id'] if hasattr(resp, 'keys') else resp[0]
+    return None
+
+# ─── DATAS: parsing flexível e formatação dd/mm/aaaa ─────────────────────────────
+def _parse_data_lead(data_str):
+    """
+    Converte string de data da planilha em objeto date.
+    Aceita: 'YYYY-MM-DDTHH:MM:SS...', 'DD/MM/YYYY HH:MM', 'DD/MM/YYYY', 'YYYY-MM-DD'.
+    Retorna None se não conseguir.
+    """
+    if not data_str:
+        return None
+    s = str(data_str).strip()
+    if not s:
+        return None
+    # ISO: 2026-03-23T06:42:42.539-03:00
+    try:
+        if 'T' in s or (len(s) >= 10 and s[4] == '-'):
+            return datetime.fromisoformat(s.replace('Z', '+00:00').split('.')[0].split('T')[0]).date()
+    except Exception:
+        pass
+    # DD/MM/YYYY [HH:MM]
+    try:
+        parte_data = s.split()[0]  # remove hora se houver
+        if '/' in parte_data:
+            d, m, a = parte_data.split('/')
+            if len(a) == 2:
+                a = '20' + a
+            return date(int(a), int(m), int(d))
+    except Exception:
+        pass
+    # YYYY-MM-DD
+    try:
+        if '-' in s:
+            a, m, d = s.split()[0].split('-')
+            return date(int(a), int(m), int(d))
+    except Exception:
+        pass
+    return None
+
+def _fmt_data_br(valor):
+    """Formata qualquer data/datetime/string para dd/mm/aaaa. Vazio se não der."""
+    if not valor:
+        return ''
+    # Se já é date/datetime
+    if isinstance(valor, (datetime, date)):
+        return valor.strftime('%d/%m/%Y')
+    # String
+    d = _parse_data_lead(str(valor))
+    return d.strftime('%d/%m/%Y') if d else str(valor)[:10]
+
+def _fmt_datahora_br(valor):
+    """Formata para dd/mm/aaaa HH:MM."""
+    if not valor:
+        return ''
+    if isinstance(valor, (datetime, date)):
+        try:
+            return valor.strftime('%d/%m/%Y %H:%M')
+        except Exception:
+            return valor.strftime('%d/%m/%Y')
+    s = str(valor).replace('T', ' ')
+    d = _parse_data_lead(s)
+    if d:
+        # tenta extrair hora
+        hora = ''
+        try:
+            if ' ' in s and ':' in s:
+                hora = ' ' + s.split()[1][:5]
+        except Exception:
+            pass
+        return d.strftime('%d/%m/%Y') + hora
+    return str(valor)[:16]
+
+# Registra filtros Jinja para uso nos templates
+try:
+    app.jinja_env.filters['data_br'] = _fmt_data_br
+    app.jinja_env.filters['datahora_br'] = _fmt_datahora_br
+except Exception:
+    pass
 
 def _ler_google_sheets(sheet_id, aba):
     """Lê Google Sheets público como CSV. Retorna lista de dicts."""
@@ -6485,9 +6736,9 @@ def _listar_leads_do_sheets():
         row['_origem'] = 'Facebook'
         leads.append(row)
     
-    # Google: "Página1" e "MEDSENIOR"
+    # Google: "Página1", "Página2" e "MEDSENIOR"
     google_id = '1QT8y8rfbMaHb5POrYFZKjdccpgMLLY3WRjBjxFmold8'
-    for aba in ['Página1', 'MEDSENIOR']:
+    for aba in ['Página1', 'Página2', 'MEDSENIOR']:
         google_leads = _ler_google_sheets(google_id, aba)
         for row in google_leads:
             row['_origem'] = f'Google ({aba})'
@@ -6511,6 +6762,7 @@ def _processar_lead(row, conn):
     tipo = row.get('Tipo', 'PF').strip()
     num_pessoas = row.get('numero de pessoas', '').strip()
     consultor_raw = row.get('CONSULTOR', '').strip()
+    data_hora_raw = row.get('DATA e HORA', '') or row.get('Data', '')
     origem = row.get('_origem', 'Google Sheets')
     
     # Filtro 1: "teste" em nome ou email
@@ -6519,15 +6771,12 @@ def _processar_lead(row, conn):
     if email and 'teste' in email.lower():
         return (False, 'Ignorado (teste no email)', None)
     
-    # Normalizar consultor
-    consultor = _normalizar_consultor(consultor_raw) or 'Guilherme'  # default
+    # Normalizar consultor + busca FLEXÍVEL
+    consultor = _normalizar_consultor(consultor_raw) or 'Guilherme'
+    responsavel_id = _buscar_responsavel_id(conn, consultor)
     
-    # Buscar responsavel_id
-    resp = conn.execute(
-        "SELECT id FROM usuarios WHERE nome = ?",
-        (consultor,)
-    ).fetchone()
-    responsavel_id = resp[0] if resp else None
+    # Data do lead
+    data_lead = _parse_data_lead(data_hora_raw)
     
     # Filtro 2: Duplicado (telefone ou email)
     if telefone:
@@ -6559,6 +6808,8 @@ def _processar_lead(row, conn):
         'etapa': 'topo',
         'responsavel_id': responsavel_id,
         'valor_estimado': None,
+        'consultor_nome': consultor,
+        'data_lead': data_lead.strftime('%Y-%m-%d 12:00:00') if data_lead else None,
         'observacoes': f"Tipo: {tipo}, Pessoas: {num_pessoas}".strip('Tipo: , Pessoas: ')
     })
 
@@ -6567,7 +6818,7 @@ def _processar_lead(row, conn):
 def crm_importar():
     """GET: mostra form com seletor de datas. POST: processa importação."""
     usuario = session.get('usuario')
-    if not usuario or usuario.get('role') not in ['admin', 'gestor']:
+    if session.get('perfil') != 'admin':
         return jsonify({'erro': 'Acesso negado'}), 403
     
     conn = db()
