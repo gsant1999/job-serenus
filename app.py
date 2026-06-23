@@ -6608,6 +6608,41 @@ def admin_crm_restaurar_etapas():
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
 
+@app.route('/admin/crm/debug-datas')
+@login_required
+def admin_crm_debug_datas():
+    """Mostra amostra de telefones e datas no banco para debug."""
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
+    conn = db()
+    try:
+        # Amostra de 10 leads do Facebook
+        amostra = conn.execute("""
+            SELECT id, nome, telefone, email, criado_em, origem
+            FROM crm_leads
+            WHERE origem = 'Facebook'
+            ORDER BY id LIMIT 10
+        """).fetchall()
+
+        # Distribuição de datas
+        datas = conn.execute("""
+            SELECT SUBSTR(CAST(criado_em AS TEXT), 1, 10) AS dia, COUNT(*) AS qtd
+            FROM crm_leads
+            GROUP BY dia ORDER BY qtd DESC LIMIT 15
+        """).fetchall()
+
+        def rows(rs): return [dict(r) if hasattr(r,'keys') else {} for r in rs]
+        close_db(conn)
+        return jsonify({
+            'ok': True,
+            'amostra_facebook': rows(amostra),
+            'distribuicao_datas': rows(datas)
+        })
+    except Exception as e:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+
 @app.route('/webhook/corrigir-datas', methods=['POST'])
 def webhook_corrigir_datas():
     """
@@ -6628,6 +6663,10 @@ def webhook_corrigir_datas():
         corrigidos = 0
         nao_encontrados = 0
 
+        import re as _re
+        def _so_digitos(s):
+            return _re.sub(r'\D', '', s or '')
+
         for reg in registros:
             telefone  = (reg.get('telefone') or '').strip()
             email     = (reg.get('email') or '').strip()
@@ -6643,10 +6682,25 @@ def webhook_corrigir_datas():
             data_iso = data_obj.strftime('%Y-%m-%d 12:00:00')
 
             lead = None
+
+            # 1) Busca por telefone exato
             if telefone:
                 lead = conn.execute("SELECT id, criado_em FROM crm_leads WHERE telefone=?", (telefone,)).fetchone()
+
+            # 2) Busca por telefone normalizado (só dígitos, últimos 8)
+            if not lead and telefone:
+                tel_digitos = _so_digitos(telefone)
+                if len(tel_digitos) >= 8:
+                    ultimos8 = tel_digitos[-8:]
+                    # Compara os últimos 8 dígitos do telefone (ignora DDD/55 prefixo)
+                    lead = conn.execute(
+                        "SELECT id, criado_em FROM crm_leads WHERE REPLACE(REPLACE(REPLACE(REPLACE(telefone,'-',''),' ',''),'(',''),')','') LIKE ?",
+                        (f'%{ultimos8}',)
+                    ).fetchone()
+
+            # 3) Busca por email (case-insensitive)
             if not lead and email:
-                lead = conn.execute("SELECT id, criado_em FROM crm_leads WHERE email=?", (email,)).fetchone()
+                lead = conn.execute("SELECT id, criado_em FROM crm_leads WHERE LOWER(email)=LOWER(?)", (email,)).fetchone()
 
             if not lead:
                 nao_encontrados += 1; continue
