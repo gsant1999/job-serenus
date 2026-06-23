@@ -6304,6 +6304,87 @@ def crm_lead_whatsapp(lid):
 
 
 # ─── CRM CONFIG ───────────────────────────────────────────────────
+@app.route('/admin/crm/diagnostico-leads', methods=['POST'])
+@login_required
+def admin_crm_diagnostico_leads():
+    """
+    Analisa divergências de quantitativo entre planilha e banco.
+    Recebe JSON: {leads: [...]} (mesmo formato do webhook)
+    Retorna breakdown detalhado de por que cada lead foi ignorado/duplicado.
+    """
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
+
+    d = request.get_json(force=True) or {}
+    leads_raw = d.get('leads', [])
+    if not leads_raw:
+        return jsonify({'ok': False, 'erro': 'Envie {leads:[...]}'}), 400
+
+    conn = db()
+    resultado = {
+        'total_enviados': len(leads_raw),
+        'importaria': 0,
+        'ignorados_teste_nome': [],
+        'ignorados_teste_email': [],
+        'ignorados_sem_nome': [],
+        'duplicados_telefone': [],
+        'duplicados_email': [],
+        'importaveis': [],
+    }
+
+    for lead in leads_raw:
+        nome     = (lead.get('nome') or '').strip()
+        telefone = (lead.get('telefone') or '').strip()
+        email    = (lead.get('email') or '').strip()
+
+        if not nome:
+            resultado['ignorados_sem_nome'].append({'tel': telefone, 'email': email})
+            continue
+        if 'teste' in nome.lower():
+            resultado['ignorados_teste_nome'].append({'nome': nome})
+            continue
+        if email and 'teste' in email.lower():
+            resultado['ignorados_teste_email'].append({'nome': nome, 'email': email})
+            continue
+
+        dup_tel = False
+        dup_email = False
+        if telefone:
+            r = conn.execute("SELECT id FROM crm_leads WHERE telefone=?", (telefone,)).fetchone()
+            if r:
+                dup_tel = True
+                resultado['duplicados_telefone'].append({'nome': nome, 'tel': telefone})
+                continue
+        if email:
+            r = conn.execute("SELECT id FROM crm_leads WHERE email=?", (email,)).fetchone()
+            if r:
+                dup_email = True
+                resultado['duplicados_email'].append({'nome': nome, 'email': email})
+                continue
+
+        resultado['importaveis'].append({'nome': nome, 'tel': telefone, 'email': email})
+        resultado['importaria'] += 1
+
+    close_db(conn)
+
+    # Resumo
+    resultado['resumo'] = {
+        'total': resultado['total_enviados'],
+        'sem_nome': len(resultado['ignorados_sem_nome']),
+        'teste_nome': len(resultado['ignorados_teste_nome']),
+        'teste_email': len(resultado['ignorados_teste_email']),
+        'dup_tel': len(resultado['duplicados_telefone']),
+        'dup_email': len(resultado['duplicados_email']),
+        'importaria': resultado['importaria'],
+    }
+    # Limita listas para não estourar resposta
+    for k in ['ignorados_teste_nome','ignorados_teste_email','ignorados_sem_nome',
+              'duplicados_telefone','duplicados_email','importaveis']:
+        resultado[k] = resultado[k][:20]  # máximo 20 exemplos de cada
+
+    return jsonify(resultado)
+
+
 @app.route('/admin/crm/corrigir-leads', methods=['POST'])
 @login_required
 def admin_crm_corrigir_leads():
