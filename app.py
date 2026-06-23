@@ -6290,6 +6290,102 @@ def crm_lead_whatsapp(lid):
 
 
 # ─── CRM CONFIG ───────────────────────────────────────────────────
+@app.route('/admin/crm/corrigir-leads', methods=['POST'])
+@login_required
+def admin_crm_corrigir_leads():
+    """
+    Corrige retroativamente leads importados:
+    1. Atribui responsavel_id com base no texto da atividade de criação
+    2. Corrige criado_em com base na atividade de criação (que tem a data real)
+    Roda apenas para leads com responsavel_id IS NULL ou criado_em = data de hoje
+    """
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
+
+    conn = db()
+    try:
+        # Busca todos os usuários para o mapeamento
+        usuarios = conn.execute("SELECT id, nome FROM usuarios WHERE ativo=1").fetchall()
+        # Monta mapa: primeiro nome lower → id
+        mapa_usuarios = {}
+        for u in usuarios:
+            nome_completo = u['nome'] if hasattr(u, 'keys') else u[1]
+            uid = u['id'] if hasattr(u, 'keys') else u[0]
+            primeiro = nome_completo.strip().lower().split()[0]
+            mapa_usuarios[primeiro] = uid
+            mapa_usuarios[nome_completo.lower()] = uid
+
+        # Busca leads sem responsável ou com data suspeita (criados hoje mas atividade mais antiga)
+        leads = conn.execute("""
+            SELECT id, nome, responsavel_id, criado_em FROM crm_leads
+            WHERE responsavel_id IS NULL
+            ORDER BY id
+        """).fetchall()
+
+        corrigidos_resp = 0
+        corrigidos_data = 0
+
+        for lead in leads:
+            lid = lead['id'] if hasattr(lead, 'keys') else lead[0]
+
+            # Busca atividade de criação para extrair consultor e data
+            ativ = conn.execute("""
+                SELECT usuario_nome, descricao, criado_em FROM crm_atividades
+                WHERE lead_id=? AND tipo='criacao'
+                ORDER BY id LIMIT 1
+            """, (lid,)).fetchone()
+
+            if not ativ:
+                continue
+
+            usuario_nome = (ativ['usuario_nome'] if hasattr(ativ, 'keys') else ativ[0]) or ''
+            criado_em_ativ = ativ['criado_em'] if hasattr(ativ, 'keys') else ativ[2]
+
+            # Corrigir responsável
+            resp_id = None
+            if usuario_nome:
+                primeiro = usuario_nome.strip().lower().split()[0]
+                resp_id = mapa_usuarios.get(primeiro)
+                if not resp_id:
+                    resp_id = mapa_usuarios.get(usuario_nome.strip().lower())
+
+            if resp_id:
+                conn.execute("UPDATE crm_leads SET responsavel_id=? WHERE id=?", (resp_id, lid))
+                corrigidos_resp += 1
+
+        # Agora corrigir datas: leads onde criado_em difere da atividade de criação
+        # Para os leads importados da planilha, a data real está na descrição da atividade
+        # ou podemos usar a data da atividade como proxy
+        leads_data = conn.execute("""
+            SELECT l.id, l.criado_em, a.criado_em as ativ_criado_em
+            FROM crm_leads l
+            JOIN crm_atividades a ON a.lead_id = l.id AND a.tipo = 'criacao'
+            WHERE DATE(l.criado_em) = DATE(CURRENT_TIMESTAMP)
+            ORDER BY l.id
+        """).fetchall()
+
+        for lead in leads_data:
+            lid = lead['id'] if hasattr(lead, 'keys') else lead[0]
+            ativ_dt = lead['ativ_criado_em'] if hasattr(lead, 'keys') else lead[2]
+            if ativ_dt:
+                conn.execute("UPDATE crm_leads SET criado_em=? WHERE id=?", (ativ_dt, lid))
+                corrigidos_data += 1
+
+        conn.commit()
+        close_db(conn)
+        return jsonify({
+            'ok': True,
+            'corrigidos_responsavel': corrigidos_resp,
+            'corrigidos_data': corrigidos_data,
+            'msg': f'Corrigidos: {corrigidos_resp} responsáveis, {corrigidos_data} datas'
+        })
+    except Exception as e:
+        close_db(conn)
+        app.logger.error(f"[CORRIGIR_LEADS] {e}")
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+
+# ─── CRM CONFIG ───────────────────────────────────────────────────
 @app.route('/crm/config')
 @login_required
 def crm_config():
