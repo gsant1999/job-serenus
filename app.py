@@ -1131,6 +1131,7 @@ def init_db():
         # ─── CRM: WhatsApp WaSpeed + filtros ───
         ("usuarios", "waspeed_token", "TEXT"),
         ("crm_leads", "telefone_norm", "TEXT"),
+        ("crm_leads", "consultor_externo", "TEXT"),  # nome original da planilha (consultores não cadastrados)
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -5643,13 +5644,25 @@ def crm():
     f_data_de   = request.args.get('data_de', '').strip()     # YYYY-MM-DD
     f_data_ate  = request.args.get('data_ate', '').strip()    # YYYY-MM-DD
     f_busca     = request.args.get('q', '').strip()
+    f_externo   = request.args.get('externo', '').strip()  # consultor externo (não cadastrado)
 
     # Lista de consultores para o filtro (admin vê todos os usuários ativos)
     responsaveis = []
+    consultores_externos = []
     if eh_admin:
         responsaveis = conn.execute(
             "SELECT id, nome, perfil FROM usuarios WHERE ativo=1 ORDER BY nome"
         ).fetchall()
+        # Consultores externos que aparecem na planilha mas não são usuários
+        try:
+            ext = conn.execute("""
+                SELECT DISTINCT consultor_externo FROM crm_leads
+                WHERE consultor_externo IS NOT NULL AND consultor_externo != ''
+                ORDER BY consultor_externo
+            """).fetchall()
+            consultores_externos = [r['consultor_externo'] if hasattr(r,'keys') else r[0] for r in ext]
+        except Exception:
+            pass
 
     # Monta query
     q = """SELECT l.*, u.nome as responsavel_nome
@@ -5664,10 +5677,17 @@ def crm():
         params.append(uid)
     elif f_consultor:
         if f_consultor == 'sem':
-            q += " AND l.responsavel_id IS NULL"
+            q += " AND l.responsavel_id IS NULL AND (l.consultor_externo IS NULL OR l.consultor_externo='')"
+        elif f_consultor == 'externo':
+            q += " AND l.consultor_externo IS NOT NULL AND l.consultor_externo != ''"
         else:
             q += " AND l.responsavel_id=?"
             params.append(int(f_consultor))
+
+    # Filtro por consultor externo específico
+    if f_externo:
+        q += " AND LOWER(l.consultor_externo) LIKE LOWER(?)"
+        params.append(f'%{f_externo}%')
 
     if f_etapa:
         q += " AND l.etapa=?"
@@ -5686,9 +5706,9 @@ def crm():
         params.append(f_data_ate)
 
     if f_busca:
-        q += " AND (LOWER(l.nome) LIKE ? OR l.telefone LIKE ? OR LOWER(l.email) LIKE ?)"
+        q += " AND (LOWER(l.nome) LIKE ? OR l.telefone LIKE ? OR LOWER(l.email) LIKE ? OR LOWER(COALESCE(l.consultor_externo,'')) LIKE ?)"
         like = f'%{f_busca.lower()}%'
-        params.extend([like, f'%{f_busca}%', like])
+        params.extend([like, f'%{f_busca}%', like, like])
 
     q += " ORDER BY l.atualizado_em DESC"
     leads = conn.execute(q, params).fetchall()
@@ -5711,13 +5731,14 @@ def crm():
     # Filtros ativos para repassar ao template
     filtros_ativos = {
         'etapa': f_etapa, 'consultor': f_consultor, 'origem': f_origem,
-        'data_de': f_data_de, 'data_ate': f_data_ate, 'q': f_busca
+        'data_de': f_data_de, 'data_ate': f_data_ate, 'q': f_busca,
+        'externo': f_externo
     }
 
     close_db(conn)
     return render_template('crm.html', kanban=kanban, etapas=etapas,
                            total=total, responsaveis=responsaveis, eh_admin=eh_admin,
-                           filtros=filtros_ativos)
+                           filtros=filtros_ativos, consultores_externos=consultores_externos)
 
 
 @app.route('/crm/lead/novo', methods=['POST'])
@@ -6156,6 +6177,8 @@ def webhook_sheets():
             # Normalizar consultor + busca FLEXÍVEL do responsável
             consultor = _normalizar_consultor(cons_raw) or 'Guilherme'
             responsavel_id = _buscar_responsavel_id(conn, consultor)
+            # Se não achou no banco, guarda o nome original como externo
+            consultor_externo = cons_raw if (cons_raw and not responsavel_id) else None
 
             # Data do lead (vinda da planilha)
             data_lead = _parse_data_lead(data_hora_raw)
@@ -6213,16 +6236,16 @@ def webhook_sheets():
             if data_lead:
                 conn.execute("""
                     INSERT INTO crm_leads
-                        (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes, criado_em)
-                    VALUES (?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?)
+                        (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes, criado_em, consultor_externo)
+                    VALUES (?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?, ?)
                 """, (nome, telefone, email, cidade, origem, responsavel_id, obs,
-                      data_lead.strftime('%Y-%m-%d 12:00:00')))
+                      data_lead.strftime('%Y-%m-%d 12:00:00'), consultor_externo))
             else:
                 conn.execute("""
                     INSERT INTO crm_leads
-                        (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes)
-                    VALUES (?, ?, ?, ?, ?, 'lead_novo', ?, ?)
-                """, (nome, telefone, email, cidade, origem, responsavel_id, obs))
+                        (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes, consultor_externo)
+                    VALUES (?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?)
+                """, (nome, telefone, email, cidade, origem, responsavel_id, obs, consultor_externo))
 
             lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             conn.execute("""
