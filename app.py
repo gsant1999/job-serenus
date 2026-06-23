@@ -6552,36 +6552,38 @@ def admin_crm_restaurar_etapas():
         # Busca atividades de movimentação criadas hoje que moveram para lead_novo
         # Extrai a etapa anterior do texto: '... retornou de "ETAPA" para Lead Novo'
         movimentacoes = conn.execute("""
-            SELECT a.lead_id, a.descricao
+            SELECT a.lead_id AS lead_id, a.descricao AS descricao
             FROM crm_atividades a
             JOIN crm_leads l ON l.id = a.lead_id
             WHERE a.tipo = 'movimentacao'
-            AND a.descricao LIKE '%Nova solicitação%retornou de%'
+            AND a.descricao LIKE '%retornou de%para Lead Novo%'
             AND l.etapa = 'lead_novo'
-            AND DATE(a.criado_em) >= DATE('2026-06-22')
         """).fetchall()
 
         restaurados = 0
+        import re
         for mov in movimentacoes:
-            lid = mov['lead_id'] if hasattr(mov, 'keys') else mov[0]
-            desc = mov['descricao'] if hasattr(mov, 'keys') else mov[1]
+            if hasattr(mov, 'keys'):
+                lid = mov['lead_id']
+                desc = mov['descricao']
+            else:
+                lid = mov[0]
+                desc = mov[1]
 
             # Extrai etapa anterior entre aspas: retornou de "topo" para
-            import re
-            m = re.search(r'retornou de "([^"]+)" para', desc)
+            m = re.search(r'retornou de "([^"]+)" para', desc or '')
             if not m:
                 continue
             etapa_anterior = m.group(1)
 
-            # Só restaura se a etapa anterior for uma etapa válida (não lead_novo)
+            # Só restaura se a etapa anterior for válida (não lead_novo)
             if etapa_anterior and etapa_anterior != 'lead_novo':
                 conn.execute(
                     "UPDATE crm_leads SET etapa=? WHERE id=? AND etapa='lead_novo'",
                     (etapa_anterior, lid)
                 )
-                # Remove a atividade falsa de movimentação
                 conn.execute(
-                    "DELETE FROM crm_atividades WHERE lead_id=? AND tipo='movimentacao' AND descricao LIKE '%Nova solicitação%retornou de%'",
+                    "DELETE FROM crm_atividades WHERE lead_id=? AND tipo='movimentacao' AND descricao LIKE '%retornou de%para Lead Novo%'",
                     (lid,)
                 )
                 restaurados += 1
