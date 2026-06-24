@@ -5639,7 +5639,70 @@ def ver_boleto_adesao(pid):
     return redirect(boleto_url)
 
 
-@app.route('/proposta/<int:pid>/boleto-adesao/status')
+@app.route('/proposta/<int:pid>/boleto-adesao/cancelar', methods=['POST'])
+@login_required
+def cancelar_boleto_adesao(pid):
+    """Cancela o boleto de adesão no Asaas e limpa os dados na proposta."""
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Apenas administradores podem cancelar boletos.'}), 403
+
+    conn = db()
+    p = conn.execute(
+        "SELECT adesao_asaas_payment_id, adesao_status, razao_social FROM propostas WHERE id=?",
+        (pid,)
+    ).fetchone()
+
+    if not p:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Proposta não encontrada'}), 404
+
+    payment_id  = p['adesao_asaas_payment_id'] if hasattr(p, 'keys') else p[0]
+    status_atual = p['adesao_status'] if hasattr(p, 'keys') else p[1]
+
+    if not payment_id:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Nenhum boleto gerado para cancelar'}), 400
+
+    if status_atual == 'Pago':
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Boleto já foi pago — não pode ser cancelado'}), 400
+
+    # Cancela no Asaas (DELETE /payments/{id})
+    data, sc = asaas_request('DELETE', f'/payments/{payment_id}')
+
+    # Asaas retorna 200 com {"deleted": true} ou {"id": ..., "status": "CANCELLED"}
+    cancelado_asaas = sc in (200, 204) or data.get('deleted') or data.get('status') == 'CANCELLED'
+
+    if not cancelado_asaas:
+        close_db(conn)
+        erro = data.get('errors', [{}])[0].get('description', str(data)) if 'errors' in data else str(data)
+        return jsonify({'ok': False, 'erro': f'Erro ao cancelar no Asaas: {erro}'}), 500
+
+    # Limpa os dados do boleto na proposta
+    conn.execute("""
+        UPDATE propostas SET
+            adesao_asaas_payment_id = NULL,
+            adesao_boleto_url       = NULL,
+            adesao_linha_digitavel  = NULL,
+            adesao_valor            = NULL,
+            adesao_vencimento       = NULL,
+            adesao_status           = 'Cancelado'
+        WHERE id = ?
+    """, (pid,))
+
+    conn.execute("""
+        INSERT INTO historico_proposta (proposta_id, usuario_id, usuario_nome, tipo, descricao, criado_em)
+        VALUES (?, ?, ?, 'boleto_adesao', ?, ?)
+    """, (pid, session['user_id'], session.get('nome', ''),
+          f'Boleto de adesão cancelado (Asaas ID: {payment_id})',
+          datetime.now(TZ_SP)))
+
+    conn.commit()
+    close_db(conn)
+    return jsonify({'ok': True, 'msg': 'Boleto cancelado com sucesso.'})
+
+
+
 @login_required
 def status_boleto_adesao(pid):
     """Consulta status do boleto de adesão no Asaas e atualiza no banco."""
