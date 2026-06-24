@@ -2648,7 +2648,38 @@ def diag_anexos():
         "propostas_com_anexos": detalhe,
     })
 
-@app.route('/admin/emergency/buscar-anexos')
+@app.route('/admin/emergency/reenviar-anexo', methods=['POST'])
+@login_required
+@admin_required
+def emergency_reenviar_anexo():
+    """
+    Recebe um arquivo e o salva em UPLOAD_FOLDER com o nome exato informado.
+    Usado para recuperar anexos perdidos.
+    Payload multipart: file=<arquivo>, nome_original=<nome exato do banco>
+    """
+    nome_original = (request.form.get('nome_original') or '').strip()
+    f = request.files.get('file')
+
+    if not f or not f.filename:
+        return jsonify({'ok': False, 'erro': 'Nenhum arquivo enviado'}), 400
+    if not nome_original:
+        return jsonify({'ok': False, 'erro': 'Nome original não informado'}), 400
+
+    # Salva com o nome EXATO que está no banco
+    caminho = os.path.join(UPLOAD_FOLDER, nome_original)
+    try:
+        f.save(caminho)
+        return jsonify({
+            'ok': True,
+            'msg': f'Arquivo salvo: {nome_original}',
+            'caminho': caminho,
+            'tamanho': os.path.getsize(caminho)
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+
+@app.route('/admin/emergency/buscar-anexos', methods=['GET','POST'])
 @login_required
 @admin_required
 def emergency_buscar_anexos():
@@ -5526,6 +5557,59 @@ def propostas_excluidas():
                           com_bruta=com_bruta_excluida,
                           motivos=motivos,
                           excluidas=excluidas)
+
+@app.route('/admin/recovery-anexos')
+@login_required
+@admin_required
+def recovery_anexos():
+    """Página para reenviar anexos perdidos, organizado por proposta."""
+    conn = db()
+    rows = conn.execute("""
+        SELECT id, razao_social, comprovante_boleto, contrato_arquivo, anexos
+        FROM propostas
+        WHERE status != 'Excluído'
+        AND (comprovante_boleto IS NOT NULL
+             OR contrato_arquivo IS NOT NULL
+             OR (anexos IS NOT NULL AND anexos != '[]'))
+        ORDER BY id
+    """).fetchall()
+    close_db(conn)
+
+    propostas_faltando = []
+    for r in rows:
+        pid        = r['id'] if hasattr(r,'keys') else r[0]
+        razao      = r['razao_social'] if hasattr(r,'keys') else r[1]
+        comp       = r['comprovante_boleto'] if hasattr(r,'keys') else r[2]
+        cont       = r['contrato_arquivo']   if hasattr(r,'keys') else r[3]
+        anexos_raw = r['anexos'] if hasattr(r,'keys') else r[4]
+
+        faltando = []
+        for campo, nome in [('comprovante_boleto', comp), ('contrato_arquivo', cont)]:
+            if nome:
+                basename = os.path.basename(nome)
+                if not os.path.exists(os.path.join(UPLOAD_FOLDER, basename)):
+                    faltando.append({'campo': campo, 'nome': basename})
+
+        try:
+            extras = json.loads(anexos_raw or '[]')
+            for a in extras:
+                basename = os.path.basename(a)
+                if not os.path.exists(os.path.join(UPLOAD_FOLDER, basename)):
+                    faltando.append({'campo': 'anexo_extra', 'nome': basename})
+        except: pass
+
+        if faltando:
+            propostas_faltando.append({
+                'id': pid,
+                'razao_social': razao,
+                'faltando': faltando
+            })
+
+    return render_template('recovery_anexos.html',
+        propostas=propostas_faltando,
+        total_faltando=sum(len(p['faltando']) for p in propostas_faltando)
+    )
+
 
 @app.route('/admin/auditoria')
 @login_required
