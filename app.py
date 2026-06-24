@@ -1477,6 +1477,20 @@ def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None, status_overrid
 # Hash de senha: PBKDF2-SHA256 com salt (via Werkzeug). Mantém retrocompatibilidade
 # com senhas antigas em SHA-256 puro — essas são migradas no próximo login.
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+
+def _sanitizar_filename(nome):
+    """Remove espaços, acentos e caracteres especiais do nome do arquivo.
+    Mantém extensão. Ex: 'WhatsApp Image 2026.jpeg' → 'WhatsApp_Image_2026.jpeg'"""
+    import unicodedata, re as _re
+    # Normaliza unicode (remove acentos)
+    nome = unicodedata.normalize('NFD', nome)
+    nome = ''.join(c for c in nome if unicodedata.category(c) != 'Mn')
+    # Substitui espaços e caracteres problemáticos por _
+    nome = _re.sub(r'[\s\(\)\[\]]+', '_', nome)
+    nome = _re.sub(r'[^\w\.\-]', '', nome)
+    nome = _re.sub(r'_+', '_', nome).strip('_')
+    return nome or 'arquivo'
 
 def hash_senha(s):
     """Gera hash seguro PBKDF2 (com salt automático) para uma senha nova."""
@@ -2924,8 +2938,16 @@ def admin_ultimo_erro():
 @app.route('/anexos/<path:nome>')
 @login_required
 def servir_anexo(nome):
-    nome = os.path.basename(nome)
-    if not os.path.exists(os.path.join(UPLOAD_FOLDER, nome)):
+    # Sanitiza: pega só o basename e remove path traversal
+    from urllib.parse import unquote
+    nome = os.path.basename(unquote(nome))
+    caminho = os.path.join(UPLOAD_FOLDER, nome)
+    if not os.path.exists(caminho):
+        # Tenta também com espaços substituídos por underscore (compatibilidade legado)
+        nome_limpo = _sanitizar_filename(nome)
+        caminho_limpo = os.path.join(UPLOAD_FOLDER, nome_limpo)
+        if os.path.exists(caminho_limpo):
+            return send_from_directory(UPLOAD_FOLDER, nome_limpo)
         abort(404)
     return send_from_directory(UPLOAD_FOLDER, nome)
 
@@ -3330,7 +3352,8 @@ def salvar_proposta():
             """Salva um único arquivo localmente e retorna o nome ou None."""
             f = request.files.get(file_field)
             if f and f.filename:
-                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{prefixo}_{f.filename}"
+                nome_limpo = _sanitizar_filename(f.filename)
+                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{prefixo}_{nome_limpo}"
                 caminho = os.path.join(UPLOAD_FOLDER, n)
                 f.save(caminho)
                 return n
@@ -3340,7 +3363,8 @@ def salvar_proposta():
         nomes = []
         for f in request.files.getlist('anexos'):
             if f and f.filename:
-                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_doc_{f.filename}"
+                nome_limpo = _sanitizar_filename(f.filename)
+                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_doc_{nome_limpo}"
                 caminho = os.path.join(UPLOAD_FOLDER, n)
                 f.save(caminho)
                 nomes.append(n)
@@ -4532,7 +4556,7 @@ def parcela_antecipar(pid):
         return jsonify({"ok": False, "msg": "Nenhum arquivo enviado"}), 400
     
     f = request.files['comprovante']
-    nome = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_antecip_{f.filename}"
+    nome = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_antecip_{_sanitizar_filename(f.filename)}"
     caminho = os.path.join(UPLOAD_FOLDER, nome)
     f.save(caminho)
     
@@ -5671,7 +5695,7 @@ def upload_comprovante(pid):
     if not f or not f.filename:
         close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
 
-    nome = f"COMPROVANTE_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
+    nome = f"COMPROVANTE_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{_sanitizar_filename(f.filename)}"
     f.save(os.path.join(UPLOAD_FOLDER, nome))
     conn.execute("UPDATE propostas SET comprovante_boleto=? WHERE id=?", (nome, pid))
     conn.execute("""UPDATE parcelas SET status='Pendente de receber'
@@ -5696,7 +5720,7 @@ def upload_contrato(pid):
     if not f or not f.filename:
         close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
 
-    nome = f"CONTRATO_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
+    nome = f"CONTRATO_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{_sanitizar_filename(f.filename)}"
     f.save(os.path.join(UPLOAD_FOLDER, nome))
     conn.execute("UPDATE propostas SET contrato_arquivo=? WHERE id=?", (nome, pid))
     conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
@@ -5721,7 +5745,7 @@ def upload_doc_extra(pid):
         close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
 
     prefixo = tipo.upper().replace(' ', '_').replace('/', '_')[:20]
-    nome = f"{prefixo}_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
+    nome = f"{prefixo}_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{_sanitizar_filename(f.filename)}"
     f.save(os.path.join(UPLOAD_FOLDER, nome))
 
     try: anexos = json.loads(p['anexos'] or '[]')
