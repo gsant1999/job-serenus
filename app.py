@@ -1147,6 +1147,17 @@ def init_db():
         ("propostas", "adesao_valor", "REAL"),
         ("propostas", "adesao_vencimento", "TEXT"),
         ("propostas", "adesao_status", "TEXT DEFAULT 'Não gerado'"),
+        # Novas colunas do boleto
+        ("propostas", "adesao_descricao", "TEXT"),         # descrição editável do boleto
+        ("propostas", "adesao_boleto_pdf", "TEXT"),        # arquivo PDF do boleto salvo localmente
+        # Endereço do beneficiário (para NF no Asaas)
+        ("propostas", "end_logradouro", "TEXT"),
+        ("propostas", "end_numero", "TEXT"),
+        ("propostas", "end_complemento", "TEXT"),
+        ("propostas", "end_bairro", "TEXT"),
+        ("propostas", "end_cidade", "TEXT"),
+        ("propostas", "end_estado", "TEXT"),
+        ("propostas", "end_cep", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -5493,7 +5504,9 @@ def gerar_boleto_adesao(pid):
     p = conn.execute("""
         SELECT id, razao_social, tipo_pessoa, cpf_titular, cnpj,
                email_resp_contrato, tel_resp_contrato, produto,
-               resp_contrato, adesao_asaas_customer_id
+               resp_contrato, adesao_asaas_customer_id,
+               end_logradouro, end_numero, end_complemento,
+               end_bairro, end_cidade, end_estado, end_cep
         FROM propostas WHERE id=?
     """, (pid,)).fetchone()
     if not p:
@@ -5501,88 +5514,123 @@ def gerar_boleto_adesao(pid):
         return jsonify({'ok': False, 'erro': 'Proposta não encontrada'}), 404
 
     d = request.get_json(force=True) or {}
-    valor_raw = d.get('valor', '')
-    vencimento = (d.get('vencimento') or '').strip()  # YYYY-MM-DD
+    valor_raw  = d.get('valor', '')
+    vencimento = (d.get('vencimento') or '').strip()
+    descricao  = (d.get('descricao') or '').strip()
+    # Endereço — pode vir do payload (usuário digitou) ou já estar na proposta
+    end_log    = (d.get('end_logradouro')  or p['end_logradouro']  or '').strip() if hasattr(p,'keys') else (d.get('end_logradouro') or p[10] or '').strip()
+    end_num    = (d.get('end_numero')      or p['end_numero']      or '').strip() if hasattr(p,'keys') else (d.get('end_numero')     or p[11] or '').strip()
+    end_comp   = (d.get('end_complemento') or p['end_complemento'] or '').strip() if hasattr(p,'keys') else (d.get('end_complemento')or p[12] or '').strip()
+    end_bairro = (d.get('end_bairro')      or p['end_bairro']      or '').strip() if hasattr(p,'keys') else (d.get('end_bairro')     or p[13] or '').strip()
+    end_cidade = (d.get('end_cidade')      or p['end_cidade']      or '').strip() if hasattr(p,'keys') else (d.get('end_cidade')     or p[14] or '').strip()
+    end_estado = (d.get('end_estado')      or p['end_estado']      or '').strip() if hasattr(p,'keys') else (d.get('end_estado')     or p[15] or '').strip()
+    end_cep    = (d.get('end_cep')         or p['end_cep']         or '').strip() if hasattr(p,'keys') else (d.get('end_cep')        or p[16] or '').strip()
+    end_cep_dig = ''.join(c for c in end_cep if c.isdigit())
 
     # Valida valor
     try:
         valor = float(str(valor_raw).replace(',', '.'))
-        if valor <= 0:
-            raise ValueError()
+        if valor <= 0: raise ValueError()
     except Exception:
         close_db(conn)
-        return jsonify({'ok': False, 'erro': 'Valor inválido. Informe o valor da taxa de adesão.'}), 400
+        return jsonify({'ok': False, 'erro': 'Valor inválido.'}), 400
 
-    # Valida vencimento
     if not vencimento:
         close_db(conn)
-        return jsonify({'ok': False, 'erro': 'Informe a data de vencimento do boleto.'}), 400
+        return jsonify({'ok': False, 'erro': 'Informe a data de vencimento.'}), 400
 
-    # CPF ou CNPJ conforme tipo de pessoa
-    tipo_pessoa = (p['tipo_pessoa'] if hasattr(p, 'keys') else p[2] or 'PF').upper()
+    # CPF ou CNPJ
+    tipo_pessoa = (p['tipo_pessoa'] if hasattr(p,'keys') else 'PF') or 'PF'
+    tipo_pessoa = tipo_pessoa.upper()
     if 'J' in tipo_pessoa or 'JURIDICA' in tipo_pessoa or 'EMPRESA' in tipo_pessoa:
-        doc = (p['cnpj'] if hasattr(p, 'keys') else p[4] or '').strip()
-        doc = ''.join(c for c in doc if c.isdigit())
+        doc = ''.join(c for c in (p['cnpj'] if hasattr(p,'keys') else p[4] or '') if c.isdigit())
         tipo_doc = 'CNPJ'
     else:
-        doc = (p['cpf_titular'] if hasattr(p, 'keys') else p[3] or '').strip()
-        doc = ''.join(c for c in doc if c.isdigit())
+        doc = ''.join(c for c in (p['cpf_titular'] if hasattr(p,'keys') else p[3] or '') if c.isdigit())
         tipo_doc = 'CPF'
 
     if not doc or len(doc) < 11:
         close_db(conn)
-        return jsonify({'ok': False, 'erro': f'{tipo_doc} do cliente não preenchido na proposta. Edite a proposta e adicione o {tipo_doc}.'}), 400
+        return jsonify({'ok': False, 'erro': f'{tipo_doc} do cliente não preenchido. Edite a proposta.'}), 400
 
-    razao_social = p['razao_social'] if hasattr(p, 'keys') else p[1]
-    email = p['email_resp_contrato'] if hasattr(p, 'keys') else p[5] or ''
-    telefone = p['tel_resp_contrato'] if hasattr(p, 'keys') else p[6] or ''
-    produto = p['produto'] if hasattr(p, 'keys') else p[7] or ''
-    asaas_customer_id = p['adesao_asaas_customer_id'] if hasattr(p, 'keys') else p[9]
+    razao_social      = p['razao_social']         if hasattr(p,'keys') else p[1]
+    email             = p['email_resp_contrato']  if hasattr(p,'keys') else p[5] or ''
+    telefone          = p['tel_resp_contrato']    if hasattr(p,'keys') else p[6] or ''
+    produto           = p['produto']              if hasattr(p,'keys') else p[7] or ''
+    asaas_customer_id = p['adesao_asaas_customer_id'] if hasattr(p,'keys') else p[9]
 
-    # ── 1. Criar/reutilizar cliente no Asaas ──
+    # Descrição padrão se não veio do payload
+    if not descricao:
+        descricao = f"Taxa de Adesão — {produto or 'Plano de Saúde'} (Proposta #{pid})"
+
+    # ── 1. Salva endereço na proposta (para próxima vez auto-preencher) ──
+    if end_log or end_cidade or end_cep:
+        conn.execute("""UPDATE propostas SET
+            end_logradouro=?, end_numero=?, end_complemento=?,
+            end_bairro=?, end_cidade=?, end_estado=?, end_cep=?
+            WHERE id=?""",
+            (end_log, end_num, end_comp, end_bairro, end_cidade, end_estado, end_cep, pid))
+
+    # ── 2. Criar/atualizar cliente no Asaas (com endereço para NF) ──
+    payload_cliente = {
+        "name": razao_social,
+        "cpfCnpj": doc,
+        "email": email or None,
+        "mobilePhone": _normalizar_telefone(telefone) if telefone else None,
+        "notificationDisabled": False,
+    }
+    # Adiciona endereço se disponível
+    if end_cep_dig:
+        payload_cliente["postalCode"]   = end_cep_dig
+        payload_cliente["address"]      = end_log or None
+        payload_cliente["addressNumber"]= end_num or None
+        payload_cliente["complement"]   = end_comp or None
+        payload_cliente["province"]     = end_bairro or None
+    payload_cliente = {k: v for k, v in payload_cliente.items() if v}
+
     if not asaas_customer_id:
-        payload_cliente = {
-            "name": razao_social,
-            "cpfCnpj": doc,
-            "email": email,
-            "mobilePhone": _normalizar_telefone(telefone) if telefone else None,
-            "notificationDisabled": False,
-        }
-        # Remove campos None
-        payload_cliente = {k: v for k, v in payload_cliente.items() if v}
-
-        cliente_data, status_code = asaas_request("POST", "/customers", payload_cliente)
-
-        if status_code not in (200, 201) or 'id' not in cliente_data:
+        cliente_data, sc = asaas_request("POST", "/customers", payload_cliente)
+        if sc not in (200, 201) or 'id' not in cliente_data:
             close_db(conn)
-            erro = cliente_data.get('errors', [{}])[0].get('description', str(cliente_data)) if 'errors' in cliente_data else str(cliente_data)
+            erro = cliente_data.get('errors',[{}])[0].get('description', str(cliente_data)) if 'errors' in cliente_data else str(cliente_data)
             return jsonify({'ok': False, 'erro': f'Erro ao criar cliente no Asaas: {erro}'}), 500
-
         asaas_customer_id = cliente_data['id']
         conn.execute("UPDATE propostas SET adesao_asaas_customer_id=? WHERE id=?", (asaas_customer_id, pid))
+    else:
+        # Atualiza endereço no cliente existente
+        asaas_request("PUT", f"/customers/{asaas_customer_id}", payload_cliente)
 
-    # ── 2. Criar cobrança BOLETO ──
+    # ── 3. Criar cobrança BOLETO ──
     payload_cobranca = {
-        "customer": asaas_customer_id,
-        "billingType": "BOLETO",
-        "value": valor,
-        "dueDate": vencimento,
-        "description": f"Taxa de Adesão — {produto or 'Plano de Saúde'} (Proposta #{pid})",
+        "customer":          asaas_customer_id,
+        "billingType":       "BOLETO",
+        "value":             valor,
+        "dueDate":           vencimento,
+        "description":       descricao,
         "externalReference": f"proposta_{pid}",
     }
-
-    cobranca_data, status_code = asaas_request("POST", "/payments", payload_cobranca)
-
-    if status_code not in (200, 201) or 'id' not in cobranca_data:
+    cobranca_data, sc = asaas_request("POST", "/payments", payload_cobranca)
+    if sc not in (200, 201) or 'id' not in cobranca_data:
         close_db(conn)
-        erro = cobranca_data.get('errors', [{}])[0].get('description', str(cobranca_data)) if 'errors' in cobranca_data else str(cobranca_data)
+        erro = cobranca_data.get('errors',[{}])[0].get('description', str(cobranca_data)) if 'errors' in cobranca_data else str(cobranca_data)
         return jsonify({'ok': False, 'erro': f'Erro ao criar boleto no Asaas: {erro}'}), 500
 
-    payment_id  = cobranca_data.get('id', '')
-    boleto_url  = cobranca_data.get('bankSlipUrl', '')
-    linha_dig   = cobranca_data.get('identificationField', '')
+    payment_id = cobranca_data.get('id', '')
+    boleto_url = cobranca_data.get('bankSlipUrl', '')
+    linha_dig  = cobranca_data.get('identificationField', '')
 
-    # ── 3. Salva na proposta ──
+    # ── 4. Baixa o PDF do boleto e salva localmente ──
+    boleto_pdf_nome = None
+    if boleto_url:
+        try:
+            import urllib.request as _ur
+            boleto_pdf_nome = f"BOLETO_ADESAO_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}.pdf"
+            _ur.urlretrieve(boleto_url, os.path.join(UPLOAD_FOLDER, boleto_pdf_nome))
+        except Exception as e:
+            app.logger.warning(f"[GERAR_BOLETO] Não baixou PDF: {e}")
+            boleto_pdf_nome = None
+
+    # ── 5. Salva tudo na proposta ──
     conn.execute("""
         UPDATE propostas SET
             adesao_asaas_payment_id = ?,
@@ -5590,29 +5638,32 @@ def gerar_boleto_adesao(pid):
             adesao_linha_digitavel  = ?,
             adesao_valor            = ?,
             adesao_vencimento       = ?,
-            adesao_status           = 'Aguardando Pagamento'
+            adesao_status           = 'Aguardando Pagamento',
+            adesao_descricao        = ?,
+            adesao_boleto_pdf       = COALESCE(?, adesao_boleto_pdf)
         WHERE id = ?
-    """, (payment_id, boleto_url, linha_dig, valor, vencimento, pid))
+    """, (payment_id, boleto_url, linha_dig, valor, vencimento,
+          descricao, boleto_pdf_nome, pid))
 
-    # Histórico
     conn.execute("""
         INSERT INTO historico_proposta (proposta_id, usuario_id, usuario_nome, tipo, descricao, criado_em)
         VALUES (?, ?, ?, 'boleto_adesao', ?, ?)
-    """, (pid, session['user_id'], session.get('nome', ''),
-          f'Boleto de adesão gerado — R$ {valor:.2f} — venc. {vencimento}',
+    """, (pid, session['user_id'], session.get('nome',''),
+          f'Boleto de adesão gerado — R$ {valor:.2f} — venc. {vencimento} — "{descricao}"',
           datetime.now(TZ_SP)))
 
     conn.commit()
     close_db(conn)
-
     return jsonify({
-        'ok': True,
+        'ok':             True,
         'payment_id':     payment_id,
         'boleto_url':     boleto_url,
         'linha_digitavel': linha_dig,
         'valor':          valor,
         'vencimento':     vencimento,
-        'msg':            f'Boleto gerado com sucesso! Vencimento: {vencimento}'
+        'descricao':      descricao,
+        'boleto_pdf':     boleto_pdf_nome,
+        'msg':            f'Boleto gerado! Venc. {vencimento}'
     })
 
 
@@ -5703,51 +5754,95 @@ def cancelar_boleto_adesao(pid):
 
 
 
+@app.route('/proposta/<int:pid>/boleto-adesao/status')
 @login_required
 def status_boleto_adesao(pid):
-    """Consulta status do boleto de adesão no Asaas e atualiza no banco."""
+    """Consulta status do boleto de adesão no Asaas e atualiza no banco.
+    Se pago: baixa o PDF do boleto e salva o comprovante automaticamente."""
     conn = db()
     p = conn.execute(
-        "SELECT adesao_asaas_payment_id, adesao_status FROM propostas WHERE id=?",
+        "SELECT adesao_asaas_payment_id, adesao_status, adesao_boleto_url FROM propostas WHERE id=?",
         (pid,)
     ).fetchone()
 
-    payment_id = p['adesao_asaas_payment_id'] if hasattr(p, 'keys') else p[0]
+    if not p:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Proposta não encontrada'}), 404
+
+    payment_id   = p['adesao_asaas_payment_id'] if hasattr(p, 'keys') else p[0]
+    status_banco = p['adesao_status']            if hasattr(p, 'keys') else p[1]
+    boleto_url   = p['adesao_boleto_url']        if hasattr(p, 'keys') else p[2]
 
     if not payment_id:
         close_db(conn)
-        return jsonify({'ok': False, 'erro': 'Boleto não gerado'}), 404
+        return jsonify({'ok': False, 'erro': 'Boleto não gerado ainda'}), 404
 
     # Consulta no Asaas
     data, sc = asaas_request("GET", f"/payments/{payment_id}")
 
-    if sc == 200 and 'status' in data:
-        status_asaas = data['status']
-        # Mapeia status Asaas → status legível
-        STATUS_MAP = {
-            'PENDING':    'Aguardando Pagamento',
-            'RECEIVED':   'Pago',
-            'CONFIRMED':  'Pago',
-            'OVERDUE':    'Vencido',
-            'REFUNDED':   'Estornado',
-            'CANCELED':   'Cancelado',
-        }
-        status_legivel = STATUS_MAP.get(status_asaas, status_asaas)
-        conn.execute("UPDATE propostas SET adesao_status=? WHERE id=?", (status_legivel, pid))
-        conn.commit()
+    if sc != 200 or 'status' not in data:
         close_db(conn)
-        return jsonify({
-            'ok': True,
-            'status_asaas':  status_asaas,
-            'status':        status_legivel,
-            'pago':          status_asaas in ('RECEIVED', 'CONFIRMED'),
-        })
+        return jsonify({'ok': False, 'erro': f'Erro ao consultar Asaas: {data}'}), 500
 
+    status_asaas = data['status']
+    STATUS_MAP = {
+        'PENDING':   'Aguardando Pagamento',
+        'RECEIVED':  'Pago',
+        'CONFIRMED': 'Pago',
+        'OVERDUE':   'Vencido',
+        'REFUNDED':  'Estornado',
+        'CANCELED':  'Cancelado',
+    }
+    status_legivel = STATUS_MAP.get(status_asaas, status_asaas)
+    pago = status_asaas in ('RECEIVED', 'CONFIRMED')
+
+    # Atualiza status no banco
+    conn.execute("UPDATE propostas SET adesao_status=? WHERE id=?", (status_legivel, pid))
+
+    # Se foi pago agora (antes estava pendente): salva o boleto PDF como comprovante
+    comprovante_gerado = None
+    if pago and status_banco not in ('Pago',):
+        try:
+            import urllib.request as _ur
+            # Baixa o PDF do boleto do Asaas
+            boleto_pdf_url = data.get('bankSlipUrl') or boleto_url
+            if boleto_pdf_url:
+                nome_pdf = f"BOLETO_ADESAO_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}.pdf"
+                caminho_pdf = os.path.join(UPLOAD_FOLDER, nome_pdf)
+                _ur.urlretrieve(boleto_pdf_url, caminho_pdf)
+                # Salva como comprovante_boleto se ainda não tiver
+                p2 = conn.execute("SELECT comprovante_boleto FROM propostas WHERE id=?", (pid,)).fetchone()
+                comprovante_atual = p2['comprovante_boleto'] if hasattr(p2,'keys') else p2[0]
+                if not comprovante_atual:
+                    conn.execute("UPDATE propostas SET comprovante_boleto=? WHERE id=?", (nome_pdf, pid))
+                    conn.execute("""UPDATE parcelas SET status='Pendente de receber'
+                        WHERE proposta_id=? AND status='Bloqueado - Falta Comprovante'""", (pid,))
+                # Salva também como adesao_boleto_pdf (histórico do boleto emitido)
+                conn.execute("UPDATE propostas SET adesao_boleto_pdf=? WHERE id=?", (nome_pdf, pid))
+                conn.execute("""
+                    INSERT INTO historico_proposta (proposta_id, usuario_id, usuario_nome, tipo, descricao, criado_em)
+                    VALUES (?, ?, ?, 'boleto_adesao', ?, ?)
+                """, (pid, session['user_id'], session.get('nome','Sistema'),
+                      f'Boleto de adesão PAGO — comprovante salvo automaticamente: {nome_pdf}',
+                      datetime.now(TZ_SP)))
+                comprovante_gerado = nome_pdf
+        except Exception as e:
+            app.logger.warning(f"[BOLETO_STATUS] Não foi possível baixar PDF: {e}")
+
+    conn.commit()
     close_db(conn)
-    return jsonify({'ok': False, 'erro': f'Erro ao consultar Asaas: {data}'}), 500
+    return jsonify({
+        'ok':                True,
+        'status_asaas':      status_asaas,
+        'status':            status_legivel,
+        'pago':              pago,
+        'comprovante_gerado': comprovante_gerado,
+    })
+
+
+@app.route('/proposta/<int:pid>/comprovante-upload', methods=['POST'])
 @login_required
 def upload_comprovante(pid):
-    """Upload de comprovante de pagamento. Libera parcelas bloqueadas."""
     conn = db()
     p = conn.execute("SELECT usuario_id FROM propostas WHERE id=?", (pid,)).fetchone()
     if not p: close_db(conn); return jsonify({"ok": False}), 404
