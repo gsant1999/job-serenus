@@ -2648,6 +2648,100 @@ def diag_anexos():
         "propostas_com_anexos": detalhe,
     })
 
+@app.route('/admin/emergency/buscar-anexos')
+@login_required
+@admin_required
+def emergency_buscar_anexos():
+    """
+    Varre o filesystem em busca de arquivos de anexos que existem
+    no banco mas não estão em UPLOAD_FOLDER. Lista onde foram encontrados.
+    GET = diagnóstico / POST = copia para /data/anexos
+    """
+    import shutil
+
+    # Coleta todos os nomes de arquivo referenciados no banco
+    conn = db()
+    rows = conn.execute("""
+        SELECT id, comprovante_boleto, contrato_arquivo, anexos
+        FROM propostas
+        WHERE comprovante_boleto IS NOT NULL
+           OR contrato_arquivo IS NOT NULL
+           OR (anexos IS NOT NULL AND anexos != '[]')
+    """).fetchall()
+    close_db(conn)
+
+    nomes_banco = set()
+    for r in rows:
+        def _add(v):
+            if v: nomes_banco.add(os.path.basename(v))
+        _add(r['comprovante_boleto'] if hasattr(r,'keys') else r[1])
+        _add(r['contrato_arquivo']   if hasattr(r,'keys') else r[2])
+        try:
+            extras = json.loads((r['anexos'] if hasattr(r,'keys') else r[3]) or '[]')
+            for a in extras: _add(a)
+        except: pass
+
+    # Lugares para procurar
+    lugares = [
+        UPLOAD_FOLDER,
+        '/data/anexos',
+        '/data',
+        os.path.join(os.path.expanduser('~'), 'JOB_Serenus_Dados', 'anexos'),
+        os.path.join(os.path.expanduser('~'), 'JOB_Serenus_Dados'),
+        '/app/uploads',
+        '/app/anexos',
+        '/tmp/anexos',
+    ]
+
+    encontrados = {}   # nome → caminho_completo
+    nao_encontrados = []
+
+    # Varre todos os lugares
+    for lugar in lugares:
+        if not os.path.isdir(lugar): continue
+        try:
+            for arq in os.listdir(lugar):
+                caminho = os.path.join(lugar, arq)
+                if os.path.isfile(caminho) and arq in nomes_banco:
+                    if arq not in encontrados:
+                        encontrados[arq] = caminho
+        except: pass
+
+    for nome in sorted(nomes_banco):
+        if nome not in encontrados:
+            nao_encontrados.append(nome)
+
+    if request.method == 'POST':
+        # Copia arquivos encontrados para UPLOAD_FOLDER
+        copiados = 0
+        erros = []
+        for nome, origem in encontrados.items():
+            destino = os.path.join(UPLOAD_FOLDER, nome)
+            if os.path.exists(destino):
+                copiados += 1
+                continue
+            try:
+                shutil.copy2(origem, destino)
+                copiados += 1
+            except Exception as e:
+                erros.append(f"{nome}: {e}")
+        return jsonify({
+            'ok': True,
+            'copiados': copiados,
+            'erros': erros,
+            'ainda_faltando': nao_encontrados
+        })
+
+    return jsonify({
+        'ok': True,
+        'upload_folder': UPLOAD_FOLDER,
+        'total_no_banco': len(nomes_banco),
+        'encontrados_fora': {k: v for k, v in encontrados.items() if not v.startswith(UPLOAD_FOLDER)},
+        'nao_encontrados': nao_encontrados,
+        'lugares_verificados': [l for l in lugares if os.path.isdir(l)],
+    })
+
+
 @app.route('/admin/emergency/status')
 @login_required
 @admin_required
