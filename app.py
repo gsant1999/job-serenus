@@ -2652,7 +2652,8 @@ def diag_anexos():
                 caminho = os.path.join(UPLOAD_FOLDER, os.path.basename(nome))
                 itens.append({"campo": campo, "nome": nome, "existe_no_disco": os.path.exists(caminho)})
         try:
-            extras = json.loads(p['anexos']) if p['anexos'] else []
+            _raw = json.loads(p['anexos']) if p['anexos'] else []
+            extras = [x['nome'] if isinstance(x, dict) else x for x in _raw]
         except Exception:
             extras = []
         for nome in extras:
@@ -4018,7 +4019,8 @@ def enviar_email_teste(pid):
     close_db(conn)
     if p:
         try:
-            extras = json.loads(p['anexos']) if p['anexos'] else []
+            _raw = json.loads(p['anexos']) if p['anexos'] else []
+            extras = [x['nome'] if isinstance(x, dict) else x for x in _raw]
             lista_anexos.extend([a for a in extras if a])
         except Exception:
             pass
@@ -4057,7 +4059,8 @@ def enviar_plataforma(pid):
     # são documentos finais, usados apenas na antecipação de comissão.
     lista_anexos = []
     try:
-        extras = json.loads(p['anexos']) if p['anexos'] else []
+        _raw = json.loads(p['anexos']) if p['anexos'] else []
+        extras = [x['nome'] if isinstance(x, dict) else x for x in _raw]
         lista_anexos.extend([a for a in extras if a])
     except Exception:
         pass
@@ -6163,12 +6166,7 @@ def upload_doc_extra(pid):
     except: 
         anexos = []
     
-    anexos.append({
-        'nome': nome,
-        'tipo': tipo,
-        'storage': storage_tipo,
-        'criado_em': datetime.now(TZ_SP).isoformat()
-    })
+    anexos.append(nome)
     
     conn.execute("UPDATE propostas SET anexos=? WHERE id=?", (json.dumps(anexos), pid))
     conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
