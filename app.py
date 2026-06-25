@@ -147,6 +147,40 @@ def _iniciar_backup_automatico():
 def _from_json(s):
     try: return json.loads(s) if s else []
     except: return []
+
+@app.template_filter('moeda')
+def _moeda(v):
+    """R$ 10.104,66"""
+    try:
+        v = float(v or 0)
+        neg = v < 0
+        v = abs(v)
+        cents = f"{v:.2f}".split('.')[1]
+        inteiro = str(int(v))
+        grupos = []
+        while len(inteiro) > 3:
+            grupos.insert(0, inteiro[-3:])
+            inteiro = inteiro[:-3]
+        grupos.insert(0, inteiro)
+        return ('R$ -' if neg else 'R$ ') + '.'.join(grupos) + ',' + cents
+    except:
+        return 'R$ 0,00'
+
+@app.template_filter('numero')
+def _numero(v):
+    """10.104"""
+    try:
+        v = int(float(v or 0))
+        neg = v < 0
+        inteiro = str(abs(v))
+        grupos = []
+        while len(inteiro) > 3:
+            grupos.insert(0, inteiro[-3:])
+            inteiro = inteiro[:-3]
+        grupos.insert(0, inteiro)
+        return ('-' if neg else '') + '.'.join(grupos)
+    except:
+        return '0'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ─── PERSISTÊNCIA: dados em pasta FIXA, fora das pastas de versão ───
 

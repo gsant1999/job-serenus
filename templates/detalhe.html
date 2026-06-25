@@ -115,7 +115,7 @@
         </div>
       </div>
       <div style="text-align:right;flex-shrink:0;">
-        <div style="font-family:'Sora',sans-serif;font-size:30px;color:#facc15;font-weight:700;">R$ {{ "%.2f"|format(p.valor)|replace('.',',') }}</div>
+        <div style="font-family:'Sora',sans-serif;font-size:30px;color:#facc15;font-weight:700;">R$ {{ p.valor|moeda }}</div>
         <div style="font-size:11px;color:rgba(255,255,255,.6);">mensalidade · {{ p.total_vidas }} vida{{ 's' if p.total_vidas != 1 else '' }}</div>
       </div>
     </div>
@@ -177,16 +177,16 @@
         <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
           <div style="background:rgba(59,130,246,.12);padding:14px;border-radius:8px;text-align:center;">
             <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Bruto corretora</div>
-            <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--info);margin-top:5px;">R$ {{ "%.2f"|format(p.comissao_total_corretora or 0)|replace('.',',') }}</div>
+            <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--info);margin-top:5px;">R$ {{ p.comissao_total_corretora or 0|moeda }}</div>
           </div>
           <div style="background:rgba(244,63,94,.1);padding:14px;border-radius:8px;text-align:center;">
             <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Repasse consultor</div>
-            <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--erro);margin-top:5px;">R$ {{ "%.2f"|format(p.comissao_consultor or 0)|replace('.',',') }}</div>
+            <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--erro);margin-top:5px;">R$ {{ p.comissao_consultor or 0|moeda }}</div>
             <div style="font-size:10px;color:var(--cinza);margin-top:3px;">{{ regime.nome if regime else (p.regime_aplicado or '—') }}</div>
           </div>
           <div style="background:var(--verde-soft);padding:14px;border-radius:8px;text-align:center;">
             <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Líquido Serenus</div>
-            <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--verde);margin-top:5px;">R$ {{ "%.2f"|format(p.comissao_corretora_liquida or 0)|replace('.',',') }}</div>
+            <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--verde);margin-top:5px;">R$ {{ p.comissao_corretora_liquida or 0|moeda }}</div>
           </div>
         </div>
       </div>
@@ -196,7 +196,7 @@
         <div class="card-body">
           <div style="background:var(--verde-soft);padding:16px 20px;border-radius:8px;max-width:260px;">
             <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Total a receber</div>
-            <div style="font-family:'Sora',sans-serif;font-size:24px;color:var(--verde);margin-top:5px;">R$ {{ "%.2f"|format(p.comissao_consultor or 0)|replace('.',',') }}</div>
+            <div style="font-family:'Sora',sans-serif;font-size:24px;color:var(--verde);margin-top:5px;">R$ {{ p.comissao_consultor or 0|moeda }}</div>
             <div style="font-size:11px;color:var(--cinza);margin-top:3px;">{{ regime.nome if regime else (p.regime_aplicado or '—') }}</div>
           </div>
         </div>
@@ -217,7 +217,7 @@
             <tr id="row-parc-{{ parc.id }}">
               <td><strong>{{ parc.numero }}/{{ p.num_parcelas }}</strong></td>
               <td>{{ parc.data_prevista }}</td>
-              <td class="td-mono" style="color:var(--verde);font-weight:500;">R$ {{ "%.2f"|format(parc.valor)|replace('.',',') }}</td>
+              <td class="td-mono" style="color:var(--verde);font-weight:500;">R$ {{ parc.valor|moeda }}</td>
               <td><span class="tag tag-cinza">{{ parc.percentual }}%</span></td>
               <td>
                 {% if session.perfil == 'admin' %}
@@ -423,13 +423,11 @@
             <div style="font-size:11px;font-weight:600;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Documentos adicionais</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               {% for arq in p.anexos|from_json %}
-              {% set arq_nome = arq.nome if arq is mapping else arq %}
-              {% set arq_label = arq_nome.split('_',4)[-1] if '_' in arq_nome else ('Documento ' ~ loop.index) %}
               <div style="display:inline-flex;align-items:center;gap:4px;">
-                <a href="/anexos/{{ arq_nome }}" target="_blank" class="btn-outline" style="font-size:12px;padding:5px 12px;">
-                  📄 {{ arq_label }}
+                <a href="/anexos/{{ arq }}" target="_blank" class="btn-outline" style="font-size:12px;padding:5px 12px;">
+                  📄 {{ arq.split('_',4)[-1] if arq.count('_') >= 4 else 'Documento ' ~ loop.index }}
                 </a>
-                {% if session.perfil == 'admin' %}<button onclick="excluirAnexo('doc','{{ arq_nome }}')" class="btn-del-anexo">×</button>{% endif %}
+                {% if session.perfil == 'admin' %}<button onclick="excluirAnexo('doc','{{ arq }}')" class="btn-del-anexo">×</button>{% endif %}
               </div>
               {% endfor %}
             </div>
@@ -507,7 +505,7 @@
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
               <div style="background:var(--panel-2);padding:12px;border-radius:8px;text-align:center;">
                 <div style="font-size:9px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Valor</div>
-                <div style="font-family:'Sora',sans-serif;font-size:18px;color:var(--texto);margin-top:4px;font-weight:700;">R$ {{ '%.2f'|format(p.adesao_valor or 0)|replace('.',',') }}</div>
+                <div style="font-family:'Sora',sans-serif;font-size:18px;color:var(--texto);margin-top:4px;font-weight:700;">{{ p.adesao_valor or 0|moeda }}</div>
               </div>
               <div style="background:var(--panel-2);padding:12px;border-radius:8px;text-align:center;">
                 <div style="font-size:9px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Vencimento</div>

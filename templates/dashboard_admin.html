@@ -40,12 +40,12 @@
     </div>
     <div class="metrica verde">
       <div class="lbl">Produção</div>
-      <div class="val">R$ {{ "%.0f"|format(m.producao)|replace(',','.') }}</div>
+      <div class="val">R$ {{ m.producao|numero }}</div>
       <div class="sub">mensalidades captadas</div>
     </div>
     <div class="metrica verde">
       <div class="lbl">Margem Líquida</div>
-      <div class="val">R$ {{ "%.0f"|format(m.com_liquido)|replace(',','.') }}</div>
+      <div class="val">R$ {{ m.com_liquido|numero }}</div>
       <div class="sub">Serenus, após repasses</div>
     </div>
   </div>
@@ -58,22 +58,22 @@
   <div class="metricas m-4" style="margin-bottom:24px;">
     <div class="metrica" style="border-left:3px solid #f59e0b;">
       <div class="lbl">Pendente de receber</div>
-      <div class="val" style="font-size:18px; color:#d97706;">R$ {{ "%.0f"|format(m.fc_pendente)|replace(',','.') }}</div>
+      <div class="val" style="font-size:18px; color:#d97706;">R$ {{ m.fc_pendente|numero }}</div>
       <div class="sub">aguardando operadora</div>
     </div>
     <div class="metrica" style="border-left:3px solid #1d4ed8;">
       <div class="lbl">Em caixa (não repassado)</div>
-      <div class="val" style="font-size:18px; color:var(--info);">R$ {{ "%.0f"|format(m.fc_caixa)|replace(',','.') }}</div>
+      <div class="val" style="font-size:18px; color:var(--info);">R$ {{ m.fc_caixa|numero }}</div>
       <div class="sub">recebido, pendente de repasse</div>
     </div>
     <div class="metrica" style="border-left:3px solid var(--verde);">
       <div class="lbl">Liberado p/ corretor</div>
-      <div class="val" style="font-size:18px; color:var(--verde);">R$ {{ "%.0f"|format(m.fc_liberado)|replace(',','.') }}</div>
+      <div class="val" style="font-size:18px; color:var(--verde);">R$ {{ m.fc_liberado|numero }}</div>
       <div class="sub">lote aguardando aceite</div>
     </div>
     <div class="metrica" style="border-left:3px solid #64748b;">
       <div class="lbl">Pago ao corretor</div>
-      <div class="val" style="font-size:18px; color:var(--cinza);">R$ {{ "%.0f"|format(m.fc_pago)|replace(',','.') }}</div>
+      <div class="val" style="font-size:18px; color:var(--cinza);">R$ {{ m.fc_pago|numero }}</div>
       <div class="sub">histórico de pagamentos</div>
     </div>
   </div>
@@ -90,17 +90,17 @@
   <div class="metricas m-3">
     <div class="metrica info">
       <div class="lbl">Comissão bruta (corretora)</div>
-      <div class="val" style="font-size:20px;">R$ {{ "%.2f"|format(m.com_bruta)|replace('.',',') }}</div>
+      <div class="val" style="font-size:20px;">R$ {{ m.com_bruta|moeda }}</div>
       <div class="sub">total recebido das operadoras</div>
     </div>
     <div class="metrica erro">
       <div class="lbl">Repasse a consultores</div>
-      <div class="val" style="font-size:20px;">R$ {{ "%.2f"|format(m.com_repasse)|replace('.',',') }}</div>
+      <div class="val" style="font-size:20px;">R$ {{ m.com_repasse|moeda }}</div>
       <div class="sub">a pagar para a equipe</div>
     </div>
     <div class="metrica verde">
       <div class="lbl">Líquido Serenus</div>
-      <div class="val" style="font-size:20px;">R$ {{ "%.2f"|format(m.com_liquido)|replace('.',',') }}</div>
+      <div class="val" style="font-size:20px;">R$ {{ m.com_liquido|moeda }}</div>
       <div class="sub">margem após repasses</div>
     </div>
   </div>
@@ -132,8 +132,8 @@
           <td>{{ p.consultor }}</td>
           <td>{{ p.adm_operadora or '—' }}</td>
           <td class="td-mono">{{ p.total_vidas }}</td>
-          <td class="td-mono">R$ {{ "%.2f"|format(p.valor)|replace('.',',') }}</td>
-          <td class="td-mono" style="color:var(--verde);">R$ {{ "%.2f"|format(p.comissao_corretora_liquida or 0)|replace('.',',') }}</td>
+          <td class="td-mono">R$ {{ p.valor|moeda }}</td>
+          <td class="td-mono" style="color:var(--verde);">R$ {{ p.comissao_corretora_liquida or 0|moeda }}</td>
           <td>{{ p.vigencia }}</td>
         </tr>
         {% endfor %}
@@ -152,8 +152,8 @@
         <tr>
           <td><strong>{{ c.consultor }}</strong></td>
           <td class="td-mono">{{ c.qtd }}</td>
-          <td class="td-mono">R$ {{ "%.2f"|format(c.valor)|replace('.',',') }}</td>
-          <td class="td-mono" style="color:var(--erro);">R$ {{ "%.2f"|format(c.com or 0)|replace('.',',') }}</td>
+          <td class="td-mono">R$ {{ c.valor|moeda }}</td>
+          <td class="td-mono" style="color:var(--erro);">R$ {{ c.com or 0|moeda }}</td>
         </tr>
         {% endfor %}
       </tbody>

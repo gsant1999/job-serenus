@@ -110,8 +110,8 @@
               <div style="font-size:13px; color:#fff; font-weight:600; margin-top:2px;">{{ comissao.qtd }} parcelas</div>
             </div>
             <div style="text-align:right;">
-              <div style="font-size:12px; color:var(--teal); font-weight:600;">R$ {{ "%.2f"|format(comissao.valor_consultor or 0)|replace(".", ",") }}</div>
-              <div style="font-size:10px; color:var(--cinza-2);">Corr: R$ {{ "%.2f"|format(comissao.valor or 0)|replace(".", ",") }}</div>
+              <div style="font-size:12px; color:var(--teal); font-weight:600;">{{ comissao.valor_consultor or 0|moeda }}</div>
+              <div style="font-size:10px; color:var(--cinza-2);">Corr: {{ comissao.valor or 0|moeda }}</div>
             </div>
           </div>
           {% endfor %}

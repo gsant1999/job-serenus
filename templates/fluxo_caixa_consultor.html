@@ -15,7 +15,7 @@
   <div class="metricas m-3" style="margin-bottom:22px;">
     <div class="metrica verde">
       <div class="lbl">A receber</div>
-      <div class="val">R$ {{ "%.0f"|format(total_a_receber)|replace(',','.') }}</div>
+      <div class="val">R$ {{ total_a_receber|numero }}</div>
       <div class="sub">liberado pela corretora</div>
     </div>
     <div class="metrica">
@@ -25,7 +25,7 @@
     </div>
     <div class="metrica">
       <div class="lbl">Total recebido</div>
-      <div class="val" style="font-size:22px; color:var(--cinza);">R$ {{ "%.0f"|format(total_pago)|replace(',','.') }}</div>
+      <div class="val" style="font-size:22px; color:var(--cinza);">R$ {{ total_pago|numero }}</div>
       <div class="sub">histórico</div>
     </div>
   </div>
@@ -46,12 +46,12 @@
 
   {% if fixo_mes and fixo_mes > 0 %}
   <div class="card" style="margin-bottom:18px;">
-    <div class="card-header"><h3>Fixo do mês</h3><span class="tag tag-info">R$ {{ "%.2f"|format(fixo_mes)|replace('.',',') }}</span></div>
+    <div class="card-header"><h3>Fixo do mês</h3><span class="tag tag-info">R$ {{ fixo_mes|moeda }}</span></div>
     <div style="padding:6px 22px 16px;">
       {% for f in fixo_parcelas %}
       <div style="display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--borda); font-size:13px;">
         <span>{{ f.descricao }} · {{ f.data_lancamento }}</span>
-        <span><strong>R$ {{ "%.2f"|format(f.valor)|replace('.',',') }}</strong> · {{ f.status }}</span>
+        <span><strong>R$ {{ f.valor|moeda }}</strong> · {{ f.status }}</span>
       </div>
       {% endfor %}
       <div style="font-size:11.5px; color:var(--cinza); margin-top:10px;">Pago em dois fluxos (dia 15 e 30), respeitando o calendário da semana.</div>
@@ -73,7 +73,7 @@
         <tr>
           <td><a href="/proposta/{{ a.proposta_id }}" style="color:var(--verde); font-weight:500;">{{ a.razao_social }}</a><div style="font-size:11px; color:var(--cinza);">{{ a.adm_operadora }}</div></td>
           <td class="td-mono">{{ a.numero }}</td>
-          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(a.valor)|replace('.',',') }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ a.valor|moeda }}</td>
           <td>
             {% if not a.aceite_corretor %}
             <button class="btn" style="padding:6px 12px; font-size:11.5px;" onclick="darAceite({{ a.id }})">✓ Conferido e De Acordo</button>
@@ -102,7 +102,7 @@
         <tr>
           <td><a href="/proposta/{{ a.proposta_id }}" style="color:var(--verde); font-weight:500;">{{ a.razao_social }}</a><div style="font-size:11px; color:var(--cinza);">{{ a.adm_operadora }}</div></td>
           <td class="td-mono">{{ a.numero }}</td>
-          <td class="td-mono">R$ {{ "%.2f"|format(a.valor)|replace('.',',') }}</td>
+          <td class="td-mono">R$ {{ a.valor|moeda }}</td>
           <td>
             {% if 'Antecipação' in a.status %}
             <span class="tag tag-info">{{ a.status }}</span>
@@ -128,7 +128,7 @@
         <tr>
           <td>{{ p.razao_social }}<div style="font-size:11px; color:var(--cinza);">{{ p.adm_operadora }}</div></td>
           <td class="td-mono">{{ p.numero }}</td>
-          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(p.valor)|replace('.',',') }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ p.valor|moeda }}</td>
         </tr>
         {% endfor %}
       </tbody>

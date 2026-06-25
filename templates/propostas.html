@@ -73,13 +73,13 @@
           <td><span class="tag tag-verde">{{ p.modalidade }}</span></td>
           <td><span class="tag {{ 'tag-info' if p.tipo_contrato=='Saúde' else 'tag-rosa' }}">{{ p.tipo_contrato }}</span></td>
           <td class="td-mono">{{ p.total_vidas }}</td>
-          <td class="td-mono">R$ {{ "%.2f"|format(p.valor)|replace('.',',') }}</td>
+          <td class="td-mono">R$ {{ p.valor|moeda }}</td>
           {% if session.perfil == 'admin' %}
-          <td class="td-mono">R$ {{ "%.2f"|format(p.comissao_total_corretora or 0)|replace('.',',') }}</td>
-          <td class="td-mono" style="color:var(--erro);">R$ {{ "%.2f"|format(p.comissao_consultor or 0)|replace('.',',') }}</td>
-          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(p.comissao_corretora_liquida or 0)|replace('.',',') }}</td>
+          <td class="td-mono">R$ {{ p.comissao_total_corretora or 0|moeda }}</td>
+          <td class="td-mono" style="color:var(--erro);">R$ {{ p.comissao_consultor or 0|moeda }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ p.comissao_corretora_liquida or 0|moeda }}</td>
           {% else %}
-          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(p.comissao_consultor or 0)|replace('.',',') }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ p.comissao_consultor or 0|moeda }}</td>
           {% endif %}
           <td>
             {% set so = p.status_operacional or 'Aguardando Doc.' %}

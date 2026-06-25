@@ -43,12 +43,12 @@
         <div style="font-size:11px; color:rgba(255,255,255,.7); text-transform:uppercase; letter-spacing:1px; font-weight:500;">Seu regime atual</div>
         <div style="font-family:'Sora',sans-serif; font-size:22px; font-weight:600; margin-top:5px;">{{ m.regime_label }}</div>
         {% if m.valor_fixo and m.valor_fixo > 0 %}
-        <div style="font-size:12px; color:rgba(255,255,255,.85); margin-top:4px;">+ R$ {{ "%.2f"|format(m.valor_fixo)|replace('.',',') }} fixo mensal</div>
+        <div style="font-size:12px; color:rgba(255,255,255,.85); margin-top:4px;">+ R$ {{ m.valor_fixo|moeda }} fixo mensal</div>
         {% endif %}
       </div>
       <div style="text-align:right;">
         <div style="font-size:11px; color:rgba(255,255,255,.7);">Produção do mês</div>
-        <div style="font-family:'Sora',sans-serif; font-size:22px; color:#facc15; font-weight:600;">R$ {{ "%.0f"|format(m.mes_producao)|replace(',','.') }}</div>
+        <div style="font-family:'Sora',sans-serif; font-size:22px; color:#facc15; font-weight:600;">R$ {{ m.mes_producao|numero }}</div>
       </div>
     </div>
   </div>
@@ -63,12 +63,12 @@
     </div>
     <div class="metrica verde">
       <div class="lbl">Mês atual · produção</div>
-      <div class="val">R$ {{ "%.0f"|format(m.mes_producao)|replace(',','.') }}</div>
+      <div class="val">R$ {{ m.mes_producao|numero }}</div>
       <div class="sub">mensalidades captadas</div>
     </div>
     <div class="metrica verde">
       <div class="lbl">Mês atual · comissão</div>
-      <div class="val">R$ {{ "%.0f"|format(m.mes_comissao)|replace(',','.') }}</div>
+      <div class="val">R$ {{ m.mes_comissao|numero }}</div>
       <div class="sub">a receber neste mês</div>
     </div>
   </div>
@@ -85,11 +85,11 @@
     </div>
     <div class="metrica">
       <div class="lbl">Total · produção</div>
-      <div class="val" style="font-size:22px;">R$ {{ "%.0f"|format(m.producao)|replace(',','.') }}</div>
+      <div class="val" style="font-size:22px;">R$ {{ m.producao|numero }}</div>
     </div>
     <div class="metrica verde">
       <div class="lbl">Total · comissão</div>
-      <div class="val" style="font-size:22px;">R$ {{ "%.0f"|format(m.minha_comissao)|replace(',','.') }}</div>
+      <div class="val" style="font-size:22px;">R$ {{ m.minha_comissao|numero }}</div>
     </div>
   </div>
 
@@ -115,8 +115,8 @@
           <td><strong>{{ p.razao_social }}</strong></td>
           <td>{{ p.adm_operadora or '—' }}</td>
           <td class="td-mono">{{ p.total_vidas }}</td>
-          <td class="td-mono">R$ {{ "%.2f"|format(p.valor)|replace('.',',') }}</td>
-          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(p.comissao_consultor or 0)|replace('.',',') }}</td>
+          <td class="td-mono">R$ {{ p.valor|moeda }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ p.comissao_consultor or 0|moeda }}</td>
           <td>{{ p.vigencia }}</td>
         </tr>
         {% endfor %}

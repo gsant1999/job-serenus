@@ -230,7 +230,7 @@
         <div class="col-valor" id="valor-{{ etapa.id }}">
           {% set tv = namespace(v=0) %}
           {% for l in kanban[etapa.id] %}{% if l.valor_estimado %}{% set tv.v = tv.v + l.valor_estimado %}{% endif %}{% endfor %}
-          {% if tv.v > 0 %}R$ {{ "%.0f"|format(tv.v) }}{% endif %}
+          {% if tv.v > 0 %}R$ {{ tv.v|numero }}{% endif %}
         </div>
       </div>
       <div class="col-body" id="body-{{ etapa.id }}">

@@ -36,7 +36,7 @@
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
           <div>
             <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">Fixo mensal</div>
-            <div style="font-family:'Sora',sans-serif; font-size:16px; color:var(--texto);">{% if r.valor_fixo %}R$ {{ "%.2f"|format(r.valor_fixo)|replace('.',',') }}{% else %}—{% endif %}</div>
+            <div style="font-family:'Sora',sans-serif; font-size:16px; color:var(--texto);">{% if r.valor_fixo %}R$ {{ r.valor_fixo|moeda }}{% else %}—{% endif %}</div>
           </div>
           <div>
             <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">Coluna comissão</div>
@@ -58,9 +58,9 @@
         <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--borda);">
           <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">Faixa de produção</div>
           <div style="font-size:12.5px; color:var(--texto);">
-            {% if r.faixa_min is not none and r.faixa_max is not none %}R$ {{ "%.0f"|format(r.faixa_min) }} – R$ {{ "%.0f"|format(r.faixa_max) }}
-            {% elif r.faixa_min is not none %}Acima de R$ {{ "%.0f"|format(r.faixa_min) }}
-            {% else %}Até R$ {{ "%.0f"|format(r.faixa_max) }}{% endif %}
+            {% if r.faixa_min is not none and r.faixa_max is not none %}R$ {{ r.faixa_min|numero }} – R$ {{ r.faixa_max|numero }}
+            {% elif r.faixa_min is not none %}Acima de R$ {{ r.faixa_min|numero }}
+            {% else %}Até R$ {{ r.faixa_max|numero }}{% endif %}
           </div>
         </div>
         {% endif %}

@@ -93,27 +93,27 @@
   <div class="metricas" style="grid-template-columns:repeat(5,1fr); margin-bottom:22px;">
     <div class="metrica" style="border-top:3px solid #f59e0b;">
       <div class="lbl">Pendente de receber</div>
-      <div class="val" style="font-size:18px; color:#d97706;">R$ {{ "%.2f"|format(totais['Pendente de receber'])|replace('.',',') }}</div>
+      <div class="val" style="font-size:18px; color:#d97706;">R$ {{ totais['Pendente de receber']|moeda }}</div>
       <div class="sub">aguardando operadora</div>
     </div>
     <div class="metrica" style="border-top:3px solid var(--info);">
       <div class="lbl">Em caixa</div>
-      <div class="val" style="font-size:18px; color:var(--info);">R$ {{ "%.2f"|format(totais['Recebido e não repassado'])|replace('.',',') }}</div>
+      <div class="val" style="font-size:18px; color:var(--info);">R$ {{ totais['Recebido e não repassado']|moeda }}</div>
       <div class="sub">recebido, não repassado</div>
     </div>
     <div class="metrica" style="border-top:3px solid var(--verde);">
       <div class="lbl">Liberado p/ corretor</div>
-      <div class="val" style="font-size:18px; color:var(--verde);">R$ {{ "%.2f"|format(totais['Liberado para o corretor'])|replace('.',',') }}</div>
+      <div class="val" style="font-size:18px; color:var(--verde);">R$ {{ totais['Liberado para o corretor']|moeda }}</div>
       <div class="sub">aguardando aceite e sexta</div>
     </div>
     <div class="metrica" style="border-top:3px solid #64748b;">
       <div class="lbl">Pago total</div>
-      <div class="val" style="font-size:18px; color:var(--cinza);">R$ {{ "%.2f"|format(totais['Pago ao corretor'])|replace('.',',') }}</div>
+      <div class="val" style="font-size:18px; color:var(--cinza);">R$ {{ totais['Pago ao corretor']|moeda }}</div>
       <div class="sub">histórico</div>
     </div>
     <div class="metrica" style="border-top:3px solid var(--erro);">
       <div class="lbl">Total em aberto</div>
-      <div class="val" style="font-size:18px; color:var(--erro);">R$ {{ "%.2f"|format(totais['total_em_aberto'])|replace('.',',') }}</div>
+      <div class="val" style="font-size:18px; color:var(--erro);">R$ {{ totais['total_em_aberto']|moeda }}</div>
       <div class="sub">pendente + caixa + liberado</div>
     </div>
   </div>
@@ -133,7 +133,7 @@
           <td><strong>{{ a.consultor }}</strong></td>
           <td><a href="/proposta/{{ a.proposta_id }}" style="color:var(--verde); font-weight:500;">{{ a.razao_social }}</a></td>
           <td>{{ a.adm_operadora }}</td>
-          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(a.valor)|replace('.',',') }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ a.valor|moeda }}</td>
           <td>
             {% if a.comprovante_antecipacao %}
             <a href="/anexos/{{ a.comprovante_antecipacao }}" target="_blank" class="btn-outline" style="font-size:11.5px; padding:5px 10px; margin-right:6px;">Ver comprovante</a>
@@ -169,7 +169,7 @@
           <td><strong>{{ l.consultor }}</strong></td>
           <td><a href="/proposta/{{ l.proposta_id }}" style="color:var(--verde); font-weight:500;">{{ l.razao_social }}</a></td>
           <td class="td-mono">{{ l.numero }}/{{ l.valor }}</td>
-          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(l.valor)|replace('.',',') }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ l.valor|moeda }}</td>
           <td>
             {% if l.aceite_corretor %}
             <span class="tag tag-verde">✓ De acordo</span>
@@ -223,7 +223,7 @@
           <td><strong>{{ r.consultor }}</strong></td>
           <td><a href="/proposta/{{ r.proposta_id }}" style="color:var(--verde); font-weight:500;">{{ r.razao_social }}</a></td>
           <td class="td-mono">{{ r.numero }}</td>
-          <td class="td-mono" style="color:var(--info); font-weight:500;">R$ {{ "%.2f"|format(r.valor)|replace('.',',') }}</td>
+          <td class="td-mono" style="color:var(--info); font-weight:500;">R$ {{ r.valor|moeda }}</td>
           <td>
             <select onchange="mudarStatus({{ r.id }}, this.value)" style="font-size:11px; padding:4px; border:1px solid var(--borda); border-radius:4px; background:var(--panel-2); color:var(--texto);">
               {% for s in status_fluxo %}
@@ -250,7 +250,7 @@
           <td>{{ pg.consultor }}</td>
           <td>{{ pg.razao_social }}</td>
           <td class="td-mono">{{ pg.numero }}</td>
-          <td class="td-mono" style="color:var(--cinza); font-weight:500;">R$ {{ "%.2f"|format(pg.valor)|replace('.',',') }}</td>
+          <td class="td-mono" style="color:var(--cinza); font-weight:500;">R$ {{ pg.valor|moeda }}</td>
           <td style="font-size:12px; color:var(--cinza);">{{ pg.data_pagamento or '—' }}</td>
         </tr>
         {% endfor %}
