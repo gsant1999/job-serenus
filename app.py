@@ -6069,8 +6069,7 @@ def upload_comprovante(pid):
     app.logger.info(f"[UPLOAD] ✅ Comprovante {pid} salvo em {storage_tipo}")
     
     # Atualizar banco de dados
-    conn.execute("UPDATE propostas SET comprovante_boleto=?, storage_comprovante=? WHERE id=?", 
-                 (nome, storage_tipo, pid))
+    conn.execute("UPDATE propostas SET comprovante_boleto=? WHERE id=?", (nome, pid))
     conn.execute("""UPDATE parcelas SET status='Pendente de receber'
         WHERE proposta_id=? AND status='Bloqueado - Falta Comprovante'""", (pid,))
     conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
@@ -6115,8 +6114,7 @@ def upload_contrato(pid):
     app.logger.info(f"[UPLOAD] ✅ Contrato {pid} salvo em {storage_tipo}")
     
     # Atualizar banco de dados
-    conn.execute("UPDATE propostas SET contrato_arquivo=?, storage_contrato=? WHERE id=?", 
-                 (nome, storage_tipo, pid))
+    conn.execute("UPDATE propostas SET contrato_arquivo=? WHERE id=?", (nome, pid))
     conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
         VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
         'contrato', f"Contrato anexado: {nome} ({storage_tipo})", datetime.now(TZ_SP)))
