@@ -1686,51 +1686,56 @@ def asaas_detectar_tipo_chave(chave):
 def upload_arquivo_r2(file_obj, chave_arquivo):
     """
     Upload arquivo para R2 via boto3 (S3-compatible) com fallback para storage local.
-    Usa R2_ACCESS_KEY + R2_SECRET_KEY (credenciais S3 do Cloudflare R2).
+    Lê os bytes UMA vez para evitar 'I/O operation on closed file'.
     Retorna {'ok': True, 'chave': ..., 'storage': 'r2'|'local'} sempre.
     """
+    import io
+
+    # Lê todos os bytes UMA vez (funciona com FileStorage, BytesIO, ou bytes)
+    if hasattr(file_obj, 'read'):
+        try:
+            file_obj.seek(0)
+        except Exception:
+            pass
+        dados = file_obj.read()
+    else:
+        dados = file_obj
+
+    # Tenta R2 primeiro
     if os.environ.get('R2_ENABLED') == 'true':
         try:
             import boto3
-            from botocore.exceptions import ClientError
-            
             account_id = os.environ.get('R2_ACCOUNT_ID', '').strip()
             access_key = os.environ.get('R2_ACCESS_KEY', '').strip()
             secret_key = os.environ.get('R2_SECRET_KEY', '').strip()
             bucket     = os.environ.get('R2_BUCKET_NAME', '').strip()
-            
+
             if account_id and access_key and secret_key and bucket:
-                endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
-                
                 s3 = boto3.client(
                     's3',
-                    endpoint_url=endpoint_url,
+                    endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
                     aws_access_key_id=access_key,
                     aws_secret_access_key=secret_key,
                     region_name='auto'
                 )
-                
-                s3.upload_fileobj(file_obj, bucket, chave_arquivo)
-                app.logger.info(f"[R2] ✅ Upload R2 OK: {chave_arquivo}")
+                s3.upload_fileobj(io.BytesIO(dados), bucket, chave_arquivo)
+                app.logger.info(f"[R2] OK: {chave_arquivo}")
                 return {'ok': True, 'chave': chave_arquivo, 'storage': 'r2'}
             else:
-                app.logger.warning(f"[R2] ⚠️ Credenciais incompletas — fallback local")
+                app.logger.warning("[R2] Credenciais incompletas - fallback local")
         except Exception as e:
-            app.logger.warning(f"[R2] ❌ Erro boto3 ({type(e).__name__}: {e}) — fallback local")
-    
-    # FALLBACK: Upload local em /data/anexos (volume persistente Railway)
+            app.logger.warning(f"[R2] Erro ({type(e).__name__}: {e}) - fallback local")
+
+    # FALLBACK: salva local em UPLOAD_FOLDER (volume persistente Railway)
     try:
         destino = os.path.join(UPLOAD_FOLDER, os.path.basename(chave_arquivo))
         os.makedirs(os.path.dirname(destino), exist_ok=True)
-        
-        dados = file_obj.read() if hasattr(file_obj, 'read') else file_obj
-        with open(destino, 'wb') as f:
-            f.write(dados)
-        
-        app.logger.info(f"[LOCAL] ✅ Upload local: {destino}")
+        with open(destino, 'wb') as fp:
+            fp.write(dados)
+        app.logger.info(f"[LOCAL] OK: {destino}")
         return {'ok': True, 'chave': chave_arquivo, 'storage': 'local'}
     except Exception as e:
-        app.logger.error(f"[LOCAL] ❌ Erro upload local: {e}")
+        app.logger.error(f"[LOCAL] Erro: {e}")
         return {'ok': False, 'erro': str(e), 'storage': 'none'}
 
 def gerar_url_r2(chave_arquivo, expiracao_segundos=86400):
@@ -7758,6 +7763,40 @@ _verificar_banco_vazio()
 # Agendador de backup
 _SCHEDULER_INICIADO = False
 
+def _importar_leads_automatico():
+    """
+    Importa leads novos das planilhas automaticamente (sem filtro de data).
+    Roda a cada 30 minutos via scheduler. Só insere o que ainda não existe
+    (dedup por telefone/email já está no _processar_lead).
+    """
+    try:
+        conn = db()
+        leads_raw = _listar_leads_do_sheets()
+        importados = 0
+        for row in leads_raw:
+            try:
+                sucesso, msg, dados = _processar_lead(row, conn)
+                if sucesso:
+                    conn.execute(
+                        """INSERT INTO crm_leads 
+                           (nome, telefone, email, empresa, origem, etapa, responsavel_id, valor_estimado, observacoes)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (dados['nome'], dados['telefone'], dados['email'], dados['empresa'],
+                         dados['origem'], dados['etapa'], dados['responsavel_id'],
+                         dados['valor_estimado'], dados['observacoes'])
+                    )
+                    importados += 1
+            except Exception:
+                try: conn.rollback()
+                except Exception: pass
+        conn.commit()
+        close_db(conn)
+        if importados:
+            app.logger.info(f"[LEAD_AUTO] ✅ {importados} leads novos importados das planilhas")
+    except Exception as e:
+        app.logger.error(f"[LEAD_AUTO] ❌ {e}")
+
+
 def _iniciar_scheduler_backup():
     """Liga agendador de backup automático JSON (22:00 SP todo dia)."""
     global _SCHEDULER_INICIADO
@@ -7805,9 +7844,11 @@ def _iniciar_scheduler_backup():
         # Agendar para 22:00 (SP) todos os dias
         sched = BackgroundScheduler(daemon=True, timezone=TZ_SP)
         sched.add_job(fazer_backup_agendado, 'cron', hour=22, minute=0, max_instances=1)
+        # Importação automática de leads das planilhas a cada 30 minutos
+        sched.add_job(_importar_leads_automatico, 'interval', minutes=30, max_instances=1)
         sched.start()
         _SCHEDULER_INICIADO = True
-        app.logger.info("[SCHEDULER] ✅ Backup automático agendado para 22:00 (São Paulo)")
+        app.logger.info("[SCHEDULER] ✅ Backup (22:00 SP) + Importação de leads (a cada 30 min) agendados")
     except Exception as e:
         app.logger.warning(f"[SCHEDULER] ❌ Falha ao iniciar: {e}")
 
