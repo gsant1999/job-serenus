@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+{% block title %}Recuperar Anexos{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Recuperar Anexos Perdidos</h1>
+    <div class="sub">{{ total_faltando }} arquivo(s) ausentes do servidor</div>
+  </div>
+  <div><a href="/propostas" class="btn-outline">Voltar</a></div>
+</div>
+<div class="page" style="max-width:860px;">
+
+  {% if not propostas %}
+  <div class="card">
+    <div class="card-body" style="text-align:center;padding:40px;">
+      <div style="font-size:32px;margin-bottom:12px;">✓</div>
+      <div style="font-size:16px;font-weight:600;color:var(--verde);">Todos os anexos estão presentes no servidor.</div>
+    </div>
+  </div>
+  {% else %}
+
+  <div class="card" style="margin-bottom:16px;background:rgba(239,68,68,.05);border:1px solid rgba(239,68,68,.3);">
+    <div class="card-body" style="font-size:13px;line-height:1.7;color:var(--texto);">
+      <strong style="color:#ef4444;">O que aconteceu:</strong> Os arquivos foram enviados mas perdidos em um redeploy do Railway antes do volume <code>/data</code> estar configurado corretamente.
+      Os registros no banco estão intactos — só os arquivos físicos sumiram.<br><br>
+      <strong>Como recuperar:</strong> Para cada arquivo listado abaixo, clique em "Reenviar" e selecione o arquivo original do seu computador ou celular.
+      O sistema vai salvar com o nome exato para que o link funcione novamente.
+    </div>
+  </div>
+
+  {% for prop in propostas %}
+  <div class="card" style="margin-bottom:14px;">
+    <div class="card-header">
+      <h3>Proposta #{{ prop.id }} — {{ prop.razao_social }}</h3>
+      <span class="tag tag-err" style="background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.3);">{{ prop.faltando|length }} arquivo(s) faltando</span>
+    </div>
+    <div class="card-body">
+      {% for arq in prop.faltando %}
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--borda);gap:12px;flex-wrap:wrap;" id="row-{{ loop.index }}-{{ prop.id }}">
+        <div>
+          <div style="font-size:11px;color:var(--cinza);font-weight:600;text-transform:uppercase;margin-bottom:2px;">
+            {% if arq.campo == 'comprovante_boleto' %}Comprovante de pagamento
+            {% elif arq.campo == 'contrato_arquivo' %}Contrato / Proposta assinada
+            {% else %}Documento adicional{% endif %}
+          </div>
+          <div style="font-size:12px;font-family:monospace;color:var(--texto);word-break:break-all;">{{ arq.nome }}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;" id="status-{{ prop.id }}-{{ loop.index0 }}">
+          <span style="font-size:11px;color:#ef4444;font-weight:600;">Ausente</span>
+          <label class="btn" style="font-size:12px;padding:7px 16px;cursor:pointer;">
+            Reenviar arquivo
+            <input type="file" style="display:none;"
+              onchange="reenviarAnexo(this, '{{ arq.nome }}', {{ prop.id }}, {{ loop.index0 }})">
+          </label>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+  {% endif %}
+
+</div>
+<script>
+async function reenviarAnexo(input, nomeOriginal, propId, idx) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const statusEl = document.getElementById(`status-${propId}-${idx}`);
+  statusEl.innerHTML = '<span style="font-size:11px;color:var(--cinza);">Enviando...</span>';
+
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('nome_original', nomeOriginal);
+
+  try {
+    const r = await fetch('/admin/emergency/reenviar-anexo', {method:'POST', body:fd});
+    const d = await r.json();
+    if (d.ok) {
+      statusEl.innerHTML = `<span style="font-size:11px;color:#10b981;font-weight:600;">Salvo (${(d.tamanho/1024).toFixed(0)} KB)</span>`;
+      // Verifica se a linha pode ser marcada como resolvida
+      const row = statusEl.closest('[id^="row-"]');
+      if (row) row.style.opacity = '.5';
+    } else {
+      statusEl.innerHTML = `<span style="font-size:11px;color:#ef4444;">${d.erro}</span>
+        <label class="btn-outline" style="font-size:12px;padding:6px 14px;cursor:pointer;">
+          Tentar novamente
+          <input type="file" style="display:none;" onchange="reenviarAnexo(this,'${nomeOriginal}',${propId},${idx})">
+        </label>`;
+    }
+  } catch(e) {
+    statusEl.innerHTML = `<span style="font-size:11px;color:#ef4444;">Erro de conexão</span>`;
+  }
+}
+</script>
+{% endblock %}

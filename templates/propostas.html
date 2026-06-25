@@ -8,7 +8,15 @@
     <div class="sub">{{ propostas|length }} registro{% if propostas|length != 1 %}s{% endif %}</div>
   </div>
   <div>
-    {% if session.perfil == 'admin' %}<button class="btn-outline" onclick="recalcularTodas(this)">Recalcular comissões</button>{% endif %}
+    {% if session.perfil == 'admin' %}
+    <label id="toggle-modo-teste" onclick="toggleModoTeste(event)" title="Modo Teste: habilita botões de teste de e-mail (só você vê). Some ao deslogar." style="display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--cinza);padding:6px 12px;border:1px solid {% if session.modo_teste %}rgba(245,158,11,.5){% else %}var(--borda,rgba(255,255,255,.1)){% endif %};border-radius:8px;margin-right:8px;{% if session.modo_teste %}background:rgba(245,158,11,.08);{% endif %}">
+      <span style="position:relative;display:inline-block;width:32px;height:18px;">
+        <span style="position:absolute;inset:0;border-radius:18px;background:{% if session.modo_teste %}#f59e0b{% else %}#3a3a4a{% endif %};transition:.2s;"></span>
+        <span style="position:absolute;top:2px;left:{% if session.modo_teste %}16px{% else %}2px{% endif %};width:14px;height:14px;border-radius:50%;background:#fff;transition:.2s;"></span>
+      </span>
+      <span style="color:{% if session.modo_teste %}#f59e0b{% else %}var(--cinza){% endif %};font-weight:{% if session.modo_teste %}600{% else %}400{% endif %};">Modo Teste</span>
+    </label>
+    <button class="btn-outline" onclick="recalcularTodas(this)">Recalcular comissões</button>{% endif %}
     <button class="btn-outline" onclick="exportar()">Exportar CSV</button>
     <a href="/nova-proposta" class="btn">Nova proposta</a>
   </div>
@@ -50,6 +58,7 @@
           {% else %}
           <th>Minha comissão</th>
           {% endif %}
+          <th>Status</th>
           <th>Vigência</th>
         </tr>
       </thead>
@@ -72,6 +81,20 @@
           {% else %}
           <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ "%.2f"|format(p.comissao_consultor or 0)|replace('.',',') }}</td>
           {% endif %}
+          <td>
+            {% set so = p.status_operacional or 'Aguardando Doc.' %}
+            {% if so == 'Emitida/Ativa' %}
+              <span style="background:#d1fae5;color:#065f46;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;">Emitida</span>
+            {% elif so == 'Em Análise Operadora' %}
+              <span style="background:#dbeafe;color:#1e40af;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;">Em Análise</span>
+            {% elif so == 'Suspensa' %}
+              <span style="background:#fef9c3;color:#854d0e;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;">Suspensa</span>
+            {% elif so == 'Cancelada' %}
+              <span style="background:#fee2e2;color:#991b1b;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;">Cancelada</span>
+            {% else %}
+              <span style="background:#f1f5f9;color:#475569;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;">Ag. Doc.</span>
+            {% endif %}
+          </td>
           <td>{{ p.vigencia }}</td>
         </tr>
         {% endfor %}
@@ -85,6 +108,21 @@
 
 {% block scripts %}
 <script>
+async function toggleModoTeste(ev) {
+  ev.preventDefault();
+  try {
+    const res = await fetch('/admin/modo-teste/toggle', {method: 'POST'});
+    const j = await res.json();
+    if (j.ok) {
+      if (typeof toast === 'function') {
+        toast(j.modo_teste ? 'Modo Teste LIGADO — botões de teste de e-mail habilitados' : 'Modo Teste desligado', j.modo_teste ? 'ok' : 'ok');
+      }
+      setTimeout(() => location.reload(), 600);
+    }
+  } catch(e) {
+    if (typeof toast === 'function') toast('Erro ao alternar modo teste', 'err');
+  }
+}
 function filtrar() {
   const b = busca.value.toLowerCase(), m = fModal.value, t = fTipo.value;
   document.querySelectorAll('#t tbody tr').forEach(tr => {
@@ -112,9 +150,9 @@ async function recalcularTodas(btn) {
     const r = await fetch('/propostas/recalcular-todas', { method: 'POST' });
     const d = await r.json();
     if (d.ok) {
-      let msg = `✅ ${d.recalculadas} propostas recalculadas.`;
+      let msg = `Recalculadas: ${d.recalculadas} propostas recalculadas.`;
       if (d.avisos && d.avisos.length) {
-        msg += `\n\n⚠️ ${d.avisos.length} proposta(s) com cadastro faltando:\n\n`;
+        msg += `\n\nAvisos: ${d.avisos.length} proposta(s) com cadastro faltando:\n\n`;
         msg += d.avisos.map(a => `#${a.id} ${a.cliente} (${a.operadora||'sem operadora'})\n   → ${a.aviso}`).join('\n\n');
       } else {
         msg += '\n\nNenhum cadastro faltando. 🎉';

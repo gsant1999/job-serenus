@@ -85,10 +85,17 @@
 
     <div class="form-row form-row-2">
       <div class="campo">
-        <label>Vigência</label>
+        <label>Vigência <span style="color:var(--cinza);font-size:11px;">(data de início do plano)</span></label>
         <input type="date" name="vigencia" required>
         <div class="aviso">Somente mês atual. Retroativas: justificar nas observações.</div>
       </div>
+      <div class="campo">
+        <label>Data de Fechamento <span style="color:var(--cinza);font-size:11px;">(mês da meta comercial)</span></label>
+        <input type="date" name="data_fechamento" id="data_fechamento">
+        <div class="aviso">Deixe em branco para usar o mês atual como meta.</div>
+      </div>
+    </div>
+    <div class="form-row form-row-2">
       <div class="campo">
         <label>Tipo de pessoa</label>
         <select name="tipo_pessoa" id="tipo_pessoa" required onchange="toggleDocs()">
@@ -213,9 +220,13 @@
     <div class="preview" id="preview">
       <h4>Simulação de comissão</h4>
       <div class="regime-info" id="regime-info"></div>
+      {% if session.perfil == 'admin' %}
       <div class="row"><span>Comissão total (corretora)</span><span id="p-total">—</span></div>
       <div class="row"><span>Repasse total ao consultor</span><span id="p-consul">—</span></div>
       <div class="row total"><span>Líquido Serenus</span><span id="p-liq">—</span></div>
+      {% else %}
+      <div class="row total"><span>Total a receber</span><span id="p-consul">—</span></div>
+      {% endif %}
       <div class="cronograma" id="cronograma">
         <div class="titulo">Cronograma de pagamento da comissão do consultor</div>
         <div id="parcelas-list"></div>
@@ -328,6 +339,7 @@
 
 {% block scripts %}
 <script>
+const IS_ADMIN = {{ 'true' if session.perfil == 'admin' else 'false' }};
 let RECEBIMENTO = {}, REPASSES = {}, NIVEIS = [];
 const MODELO = '{{ session.regime_base }}';
 const TEM_META = (MODELO === 'com_lead');
@@ -409,16 +421,31 @@ function calcPreview() {
   else if (rep) { consultor = v * (rep.total||0); regua = (rep.regua||'').split(';').map(Number).filter(n=>!isNaN(n)); }
   const liq = totalCor - consultor;
 
-  document.getElementById('p-total').textContent = brl(totalCor);
-  document.getElementById('p-consul').textContent = ehTaxa ? 'Taxa direta do cliente' : brl(consultor);
-  document.getElementById('p-liq').textContent = brl(liq);
+  // Campos da CORRETORA: só admin (consultor nunca vê de onde vem o comissionamento)
+  if (IS_ADMIN) {
+    const elTotal = document.getElementById('p-total');
+    const elLiq = document.getElementById('p-liq');
+    if (elTotal) elTotal.textContent = brl(totalCor);
+    if (elLiq) elLiq.textContent = brl(liq);
+  }
+  const elConsul = document.getElementById('p-consul');
+  if (elConsul) elConsul.textContent = ehTaxa ? (IS_ADMIN ? 'Taxa direta do cliente' : brl(v * (rep && rep.total ? rep.total : 0))) : brl(consultor);
 
   const nomeNivel = {n1:'N1',n2:'N2',n3:'N3'}[nivel] || '';
-  let infoTxt = `Recebimento da operadora: <strong>${receb} mens</strong> (${(receb*100).toFixed(0)}%)`;
-  if (TEM_META && nomeNivel) infoTxt += ` · Nível <strong>${nomeNivel}</strong>`;
-  if (!ehTaxa && rep) infoTxt += ` · Repasse <strong>${rep.total} mens</strong>`;
-  if (ehTaxa) infoTxt += ` · <strong style="color:var(--am);">Adesão: taxa direta (sem custo)</strong>`;
-  if (!rep) infoTxt += ` · <strong style="color:var(--am);">Repasse não configurado p/ esta operadora</strong>`;
+  // Linha de info: para o consultor NÃO mostra recebimento da operadora (% da corretora)
+  let infoTxt = '';
+  if (IS_ADMIN) {
+    infoTxt = `Recebimento da operadora: <strong>${receb} mens</strong> (${(receb*100).toFixed(0)}%)`;
+    if (TEM_META && nomeNivel) infoTxt += ` · Nível <strong>${nomeNivel}</strong>`;
+    if (!ehTaxa && rep) infoTxt += ` · Repasse <strong>${rep.total} mens</strong>`;
+    if (ehTaxa) infoTxt += ` · <strong style="color:var(--am);">Adesão: taxa direta</strong>`;
+    if (!rep) infoTxt += ` · <strong style="color:var(--am);">Repasse não configurado p/ esta operadora</strong>`;
+  } else {
+    // Consultor: só o nível dele (se houver meta), nada da corretora
+    if (TEM_META && nomeNivel) infoTxt += `Nível <strong>${nomeNivel}</strong>`;
+    if (ehTaxa) infoTxt += `${infoTxt ? ' · ' : ''}<strong style="color:var(--am);">Adesão</strong>`;
+    if (!rep && !ehTaxa) infoTxt += `${infoTxt ? ' · ' : ''}<strong style="color:var(--am);">Comissão a confirmar</strong>`;
+  }
   document.getElementById('regime-info').innerHTML = infoTxt;
 
   const vigencia = document.querySelector('[name=vigencia]').value;
@@ -428,9 +455,10 @@ function calcPreview() {
     const vCon = v * parc[i];
     let dataStr = '—';
     if (vigencia) { const d = new Date(vigencia + 'T12:00:00'); d.setMonth(d.getMonth()+i+1); dataStr = d.toLocaleDateString('pt-BR'); }
-    html += `<div class="parcela"><span>${i+1}ª parcela <strong style="color:var(--teal);">(${parc[i]} mens)</strong> · ${dataStr}</span><span>você recebe ${brl(vCon)}</span></div>`;
+    const mensTxt = IS_ADMIN ? ` <strong style="color:var(--teal);">(${parc[i]} mens)</strong>` : '';
+    html += `<div class="parcela"><span>${i+1}ª parcela${mensTxt} · ${dataStr}</span><span>você recebe ${brl(vCon)}</span></div>`;
   }
-  if (ehTaxa) html = `<div class="parcela"><span>Adesão</span><span style="color:var(--am);">Taxa paga direto pelo cliente</span></div>`;
+  if (ehTaxa) html = `<div class="parcela"><span>Adesão</span><span style="color:var(--am);">${IS_ADMIN ? 'Taxa paga direto pelo cliente' : 'Pagamento no ato da venda'}</span></div>`;
   document.getElementById('parcelas-list').innerHTML = html;
   document.getElementById('preview').style.display = 'block';
 }

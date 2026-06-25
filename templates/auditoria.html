@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+{% block content %}
+<div style="max-width:1100px;margin:0 auto;padding:24px 16px;">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
+    <div>
+      <h2 style="margin:0;font-size:22px;">Esteira de Implantação</h2>
+      <p style="margin:4px 0 0;color:var(--cinza);font-size:13px;">Propostas que precisam evoluir o status operacional</p>
+    </div>
+    <span style="background:var(--rosa);color:#fff;padding:6px 16px;border-radius:20px;font-weight:700;font-size:15px;">
+      {{ total }} aguardando
+    </span>
+  </div>
+
+  {% if propostas %}
+  <div style="display:flex;flex-direction:column;gap:14px;">
+    {% for p in propostas %}
+    <div class="card" style="padding:18px 20px;" id="card-{{ p.id }}">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:220px;">
+          <div style="font-weight:600;font-size:15px;">
+            <a href="/proposta/{{ p.id }}" style="color:var(--verde);text-decoration:none;">#{{ p.id }} — {{ p.razao_social or p.cpf_titular or 'Cliente' }}</a>
+          </div>
+          <div style="font-size:12.5px;color:var(--cinza);margin-top:4px;">
+            {{ p.adm_operadora or '—' }} · {{ p.produto or '—' }} · {{ p.nome_consultor or p.consultor or '—' }}
+          </div>
+          <div style="margin-top:8px;font-size:12.5px;">
+            <strong>Valor:</strong> R$ {{ "%.2f"|format(p.valor or 0)|replace(".", "X")|replace(",",".")|replace("X",",") }}
+            &nbsp;·&nbsp;
+            <strong>Vigência:</strong> {{ p.vigencia or '—' }}
+          </div>
+          {% if p.pendencias_json %}
+          <div style="margin-top:8px;font-size:12px;color:var(--rosa);">
+            Pendências: {{ p.pendencias_json }}
+          </div>
+          {% endif %}
+        </div>
+        <div style="min-width:280px;">
+          <div style="font-size:12px;color:var(--cinza);margin-bottom:6px;">Status Operacional Atual</div>
+          <span style="background:rgba(244,63,124,.15);color:var(--rosa);padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;">
+            {{ p.status_operacional or 'Aguardando Documentos' }}
+          </span>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn-outline" style="font-size:11px;padding:5px 10px;" onclick="evoluir({{ p.id }}, 'Em Análise Operadora')">Em Análise</button>
+            <button class="btn" style="font-size:11px;padding:5px 10px;background:var(--verde);" onclick="evoluir({{ p.id }}, 'Emitida/Ativa')">Emitida/Ativa</button>
+            <button class="btn-outline" style="font-size:11px;padding:5px 10px;border-color:rgba(244,63,124,.4);color:var(--rosa);" onclick="evoluir({{ p.id }}, 'Suspensa')">Suspensa</button>
+          </div>
+          <div style="margin-top:10px;">
+            <input type="text" id="pend-{{ p.id }}" placeholder="Registrar pendência (ex: falta contrato)" 
+              style="font-size:12px;padding:6px 10px;border-radius:6px;border:1px solid var(--borda, #333);background:var(--card-bg,#111);color:inherit;width:100%;">
+            <button class="btn-outline" style="font-size:11px;padding:4px 10px;margin-top:4px;width:100%;" onclick="salvarPendencia({{ p.id }})">💾 Salvar pendência</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card" style="text-align:center;padding:48px;color:var(--cinza);">
+    
+    <div style="font-size:18px;font-weight:600;">Tudo em dia!</div>
+    <div style="font-size:13px;margin-top:8px;">Não há propostas aguardando auditoria.</div>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+async function evoluir(pid, status) {
+  const res = await fetch(`/proposta/${pid}/status-operacional`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({status_operacional: status})
+  });
+  const d = await res.json();
+  if (d.ok) {
+    const card = document.getElementById('card-' + pid);
+    if (status === 'Emitida/Ativa') {
+      card.style.opacity = '0.4';
+      card.style.pointerEvents = 'none';
+      setTimeout(() => card.remove(), 800);
+    } else {
+      card.querySelector('span').textContent = status;
+    }
+    toast(d.msg, 'ok');
+  } else { toast(d.msg || 'Erro', 'err'); }
+}
+async function salvarPendencia(pid) {
+  const txt = document.getElementById('pend-' + pid).value.trim();
+  if (!txt) return;
+  const res = await fetch(`/proposta/${pid}/status-operacional`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      status_operacional: '{{ "' + (p.status_operacional or 'Aguardando Documentos') + '"}}',
+      pendencias_json: txt
+    })
+  });
+  const d = await res.json();
+  toast(d.ok ? 'Pendência salva' : 'Erro', d.ok ? 'ok' : 'err');
+}
+function toast(msg, tipo) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = `position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;
+    background:${tipo==='ok'?'#1fd8a4':'#f43f7c'};color:#fff;font-size:13px;z-index:9999;
+    box-shadow:0 4px 16px rgba(0,0,0,.3);`;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<title>JOB · Nova senha</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Inter',sans-serif; background:#0a0a10; min-height:100vh;
+    display:flex; align-items:center; justify-content:center; color:#eef0f6;
+    -webkit-font-smoothing:antialiased; }
+  body::before { content:''; position:fixed; inset:0; pointer-events:none;
+    background:
+      radial-gradient(800px 500px at 80% 10%, rgba(59,130,246,.13), transparent 60%),
+      radial-gradient(700px 500px at 10% 90%, rgba(244,63,124,.10), transparent 60%); }
+  .box { width:92%; max-width:420px; background:rgba(21,21,30,.85); backdrop-filter:blur(20px);
+    border:1px solid rgba(255,255,255,.09); border-radius:20px; padding:44px 40px;
+    position:relative; z-index:2; }
+  h2 { font-family:'Sora',sans-serif; font-size:22px; font-weight:700; margin-bottom:8px; }
+  p { font-size:13.5px; color:#9aa1b5; margin-bottom:24px; line-height:1.6; }
+  label { display:block; font-size:12px; font-weight:500; color:#9aa1b5; margin-bottom:7px; }
+  input { width:100%; padding:13px 15px; border:1px solid rgba(255,255,255,.12); border-radius:10px;
+    font-size:14px; font-family:'Inter',sans-serif; outline:none; transition:.22s;
+    background:rgba(255,255,255,.045); color:#fff; margin-bottom:14px; }
+  input:focus { border-color:#3b82f6; box-shadow:0 0 0 4px rgba(59,130,246,.16); }
+  input#codigo { font-size:24px; font-weight:700; letter-spacing:10px; text-align:center; }
+  .btn { width:100%; padding:13px; border:none; border-radius:10px; margin-top:4px;
+    font-size:14px; font-weight:600; cursor:pointer; color:#fff;
+    background:linear-gradient(135deg,#1fd8a4,#3b82f6); transition:all .3s; }
+  .btn:hover { opacity:.9; transform:translateY(-1px); }
+  .erro { background:rgba(244,63,94,.12); color:#fb8497; border:1px solid rgba(244,63,94,.3);
+    padding:12px 15px; border-radius:10px; font-size:13px; margin-bottom:18px; }
+  .ok { background:rgba(31,216,164,.1); color:#4fe3b8; border:1px solid rgba(31,216,164,.3);
+    padding:16px; border-radius:10px; font-size:13.5px; margin-bottom:20px; line-height:1.6; }
+  .voltar { display:block; text-align:center; margin-top:20px; font-size:12.5px;
+    color:#9aa1b5; text-decoration:none; }
+  .voltar:hover { color:#fff; }
+  .icon { font-size:36px; margin-bottom:16px; }
+  .hint { font-size:11.5px; color:#646b80; margin-top:-10px; margin-bottom:14px; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="icon">🔐</div>
+  {% if sucesso %}
+    <h2>Senha redefinida!</h2>
+    <div class="ok">✅ Sua senha foi alterada com sucesso.</div>
+    <a href="/login" class="btn" style="display:block; text-align:center; text-decoration:none; line-height:2.5;">
+      Entrar no sistema →
+    </a>
+  {% else %}
+    <h2>Nova senha</h2>
+    <p>Digite o código de 6 dígitos enviado ao seu e-mail e escolha uma nova senha.</p>
+    {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+    <form method="POST">
+      <input type="hidden" name="email" value="{{ email }}">
+      <label>Código recebido por e-mail</label>
+      <input type="text" id="codigo" name="codigo" placeholder="000000" maxlength="6"
+             inputmode="numeric" pattern="\d{6}" required autofocus>
+      <label>Nova senha</label>
+      <input type="password" name="senha" placeholder="Mínimo 6 caracteres" required minlength="6">
+      <label>Confirmar nova senha</label>
+      <input type="password" name="senha2" placeholder="Repita a senha" required minlength="6">
+      <button class="btn" type="submit">Redefinir senha</button>
+    </form>
+    <a href="/esqueci-senha" class="voltar">← Solicitar novo código</a>
+  {% endif %}
+</div>
+</body>
+</html>

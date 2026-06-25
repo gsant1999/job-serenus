@@ -22,6 +22,27 @@
     --grad-frio:linear-gradient(135deg,#1fd8a4 0%,#3b82f6 50%,#8b5cf6 100%);
     --grad-quente:linear-gradient(135deg,#f43f7c 0%,#fb923c 55%,#facc15 100%);
     --sidebar-w: 236px;
+    --card-bg: #15151e;
+    --input-bg: #1b1b27;
+  }
+  /* ─── MODO CLARO CORPORATIVO ─── */
+  [data-theme="light"] {
+    --bg:#F4F6F9; --panel:#FFFFFF; --panel-2:#f0f2f5; --panel-3:#e8ebf0;
+    --borda:rgba(0,0,0,.08); --borda-2:rgba(0,0,0,.14);
+    --texto:#1a1d2e; --cinza:#5a6278; --cinza-2:#8c93a8;
+    --card-bg:#FFFFFF; --input-bg:#f8f9fb;
+    --verde:#17a882; --verde-2:#13906d; --verde-soft:rgba(23,168,130,.1);
+    --rosa:#e0265e; --info:#2563eb;
+  }
+  [data-theme="light"] .sidebar { background:#1a1d2e; }
+  [data-theme="light"] .sidebar .nav-link { color:#c5c9d8; }
+  [data-theme="light"] .sidebar .nav-link:hover,
+  [data-theme="light"] .sidebar .nav-link.active { background:rgba(255,255,255,.1); color:#fff; }
+  [data-theme="light"] .card, [data-theme="light"] .metrica {
+    box-shadow:0 2px 4px rgba(0,0,0,.05);
+  }
+  [data-theme="light"] select, [data-theme="light"] input, [data-theme="light"] textarea {
+    background:var(--input-bg); border-color:rgba(0,0,0,.12); color:var(--texto);
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   ::selection { background:rgba(59,130,246,.4); }
@@ -267,6 +288,42 @@
     .m-4, .m-3 { grid-template-columns:1fr; }
     .topbar h1 { font-size:14px; }
     .topbar .sub { display:none; }
+
+    /* ─── Caixa da Empresa: cards empilham 2x2 depois 1 coluna ─── */
+    .cx-grid { grid-template-columns:1fr 1fr !important; }
+    .cx-saldo-val { font-size:23px !important; }
+    .cx-card-val { font-size:18px !important; }
+    .cx-extrato-tbl { font-size:12px !important; }
+    .cx-extrato-tbl th, .cx-extrato-tbl td { padding:7px 4px !important; }
+
+    /* ─── Modal de edição: 1 coluna, ocupa quase tela toda ─── */
+    .edit-grid { grid-template-columns:1fr !important; }
+    .solic-diff { grid-template-columns:1fr !important; gap:4px !important; }
+    .solic-diff > div:first-child { font-size:11px; color:var(--cinza); }
+
+    /* ─── Botões de ação da proposta: largura total, empilhados ─── */
+    .acoes-proposta { flex-direction:column !important; }
+    .acoes-proposta button { width:100% !important; justify-content:center; }
+
+    /* ─── Dados da proposta: 1 coluna no celular ─── */
+    .dados-grid { grid-template-columns:1fr !important; }
+  }
+
+  /* ═══ MOBILE GERAL: pega grids inline das telas novas (≤600px) ═══ */
+  @media (max-width:600px) {
+    /* Qualquer grid de 4 ou 5 colunas vira 2 colunas */
+    .cx-grid { grid-template-columns:1fr 1fr !important; }
+    .metricas[style*="repeat(5"] { grid-template-columns:1fr 1fr !important; }
+    /* Tabela de extrato: esconde coluna de saldo (menos essencial) */
+    .cx-extrato-tbl .col-saldo { display:none !important; }
+    /* Modais ocupam altura cheia e rolam */
+    .modal { max-height:92vh !important; }
+    /* Cards de comissão/valores na proposta empilham */
+    .dados-grid, .edit-grid { grid-template-columns:1fr !important; }
+    /* Botões grandes e tocáveis */
+    .btn, .btn-outline { min-height:42px; }
+    /* Inputs maiores (evita zoom do iOS ao focar) */
+    input, select, textarea { font-size:16px !important; }
   }
 
   /* ═══ TABLET ═══ */
@@ -387,10 +444,22 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="14" y2="15"/><circle cx="18" cy="15" r="2"/></svg>
       Campos Personalizados
     </a>
+    <a href="/admin/auditoria" class="nav-link {% if '/auditoria' in request.path %}active{% endif %}" onclick="closeSidebar()" style="color:#f59e0b;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+      Esteira / Auditoria
+    </a>
+    <a href="/admin/propostas-excluidas" class="nav-link {% if '/propostas-excluidas' in request.path %}active{% endif %}" onclick="closeSidebar()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+      Propostas Excluídas
+    </a>
     {% endif %}
   </div>
 
   <div class="sidebar-bottom">
+    <a href="#" onclick="toggleTema();return false;" id="btn-tema">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      <span id="tema-label">Modo Claro</span>
+    </a>
     <a href="/logout" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
       Sair
@@ -468,7 +537,24 @@ document.addEventListener('DOMContentLoaded', () => {
     Chart.defaults.borderColor = 'rgba(255,255,255,.07)';
     Chart.defaults.font.family = 'Inter, system-ui, sans-serif';
   }
+  // Restaurar tema salvo
+  const temaAtual = localStorage.getItem('job_tema') || 'dark';
+  if (temaAtual === 'light') {
+    document.documentElement.setAttribute('data-theme','light');
+    const lbl = document.getElementById('tema-label');
+    if (lbl) lbl.textContent = 'Modo Escuro';
+  }
 });
+
+function toggleTema() {
+  const html = document.documentElement;
+  const atual = html.getAttribute('data-theme');
+  const novo = (atual === 'light') ? 'dark' : 'light';
+  html.setAttribute('data-theme', novo);
+  localStorage.setItem('job_tema', novo);
+  const lbl = document.getElementById('tema-label');
+  if (lbl) lbl.textContent = novo === 'light' ? 'Modo Escuro' : 'Modo Claro';
+}
 </script>
 {% block scripts %}{% endblock %}
 </body>
