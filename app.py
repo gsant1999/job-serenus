@@ -1685,61 +1685,83 @@ def asaas_detectar_tipo_chave(chave):
 
 def upload_arquivo_r2(file_obj, chave_arquivo):
     """
-    Upload arquivo para R2 (se configurado) com fallback para storage local.
+    Upload arquivo para R2 via boto3 (S3-compatible) com fallback para storage local.
+    Usa R2_ACCESS_KEY + R2_SECRET_KEY (credenciais S3 do Cloudflare R2).
     Retorna {'ok': True, 'chave': ..., 'storage': 'r2'|'local'} sempre.
     """
     if os.environ.get('R2_ENABLED') == 'true':
         try:
-            import requests
+            import boto3
+            from botocore.exceptions import ClientError
             
-            endpoint = os.environ.get('R2_ENDPOINT', '').rstrip('/')
-            bucket = os.environ.get('R2_BUCKET_NAME')
-            api_token = os.environ.get('R2_API_TOKEN')
+            account_id = os.environ.get('R2_ACCOUNT_ID', '').strip()
+            access_key = os.environ.get('R2_ACCESS_KEY', '').strip()
+            secret_key = os.environ.get('R2_SECRET_KEY', '').strip()
+            bucket     = os.environ.get('R2_BUCKET_NAME', '').strip()
             
-            if endpoint and bucket and api_token:
-                url = f"{endpoint}/{chave_arquivo}"
-                headers = {
-                    'Authorization': f'Bearer {api_token}',
-                    'Content-Type': 'application/octet-stream'
-                }
+            if account_id and access_key and secret_key and bucket:
+                endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
                 
-                response = requests.put(url, data=file_obj, headers=headers, timeout=10)
+                s3 = boto3.client(
+                    's3',
+                    endpoint_url=endpoint_url,
+                    aws_access_key_id=access_key,
+                    aws_secret_access_key=secret_key,
+                    region_name='auto'
+                )
                 
-                if response.status_code in [200, 201]:
-                    app.logger.info(f"[R2] ✅ Upload R2: {chave_arquivo}")
-                    return {'ok': True, 'chave': chave_arquivo, 'storage': 'r2'}
-                else:
-                    app.logger.warning(f"[R2] HTTP {response.status_code} - usando fallback local")
+                s3.upload_fileobj(file_obj, bucket, chave_arquivo)
+                app.logger.info(f"[R2] ✅ Upload R2 OK: {chave_arquivo}")
+                return {'ok': True, 'chave': chave_arquivo, 'storage': 'r2'}
+            else:
+                app.logger.warning(f"[R2] ⚠️ Credenciais incompletas — fallback local")
         except Exception as e:
-            app.logger.warning(f"[R2] Erro ({type(e).__name__}) - usando fallback local")
+            app.logger.warning(f"[R2] ❌ Erro boto3 ({type(e).__name__}: {e}) — fallback local")
     
-    # FALLBACK: Upload local
+    # FALLBACK: Upload local em /data/anexos (volume persistente Railway)
     try:
-        os.makedirs('/data/uploads', exist_ok=True)
-        caminho_local = f"/data/uploads/{chave_arquivo}".replace('//', '/')
-        os.makedirs(os.path.dirname(caminho_local), exist_ok=True)
+        destino = os.path.join(UPLOAD_FOLDER, os.path.basename(chave_arquivo))
+        os.makedirs(os.path.dirname(destino), exist_ok=True)
         
-        with open(caminho_local, 'wb') as f:
-            f.write(file_obj.read())
+        dados = file_obj.read() if hasattr(file_obj, 'read') else file_obj
+        with open(destino, 'wb') as f:
+            f.write(dados)
         
-        app.logger.info(f"[LOCAL] ✅ Upload local: {chave_arquivo}")
+        app.logger.info(f"[LOCAL] ✅ Upload local: {destino}")
         return {'ok': True, 'chave': chave_arquivo, 'storage': 'local'}
     except Exception as e:
         app.logger.error(f"[LOCAL] ❌ Erro upload local: {e}")
         return {'ok': False, 'erro': str(e), 'storage': 'none'}
 
 def gerar_url_r2(chave_arquivo, expiracao_segundos=86400):
-    """Gera URL para download. R2 se disponível, senão local."""
+    """Gera URL pré-assinada para download do R2 (válida por 24h). Fallback local."""
     if os.environ.get('R2_ENABLED') == 'true':
         try:
-            endpoint = os.environ.get('R2_ENDPOINT', '').rstrip('/')
-            if endpoint:
-                return f"{endpoint}/{chave_arquivo}"
-        except:
-            pass
+            import boto3
+            account_id = os.environ.get('R2_ACCOUNT_ID', '').strip()
+            access_key = os.environ.get('R2_ACCESS_KEY', '').strip()
+            secret_key = os.environ.get('R2_SECRET_KEY', '').strip()
+            bucket     = os.environ.get('R2_BUCKET_NAME', '').strip()
+            
+            if account_id and access_key and secret_key and bucket:
+                s3 = boto3.client(
+                    's3',
+                    endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+                    aws_access_key_id=access_key,
+                    aws_secret_access_key=secret_key,
+                    region_name='auto'
+                )
+                url = s3.generate_presigned_url(
+                    'get_object',
+                    Params={'Bucket': bucket, 'Key': chave_arquivo},
+                    ExpiresIn=expiracao_segundos
+                )
+                return url
+        except Exception as e:
+            app.logger.warning(f"[R2] Erro gerar URL: {e}")
     
     # Fallback local
-    return f"/download/{chave_arquivo}"
+    return f"/download/{os.path.basename(chave_arquivo)}"
 
 
 @app.route('/admin/asaas/teste')
