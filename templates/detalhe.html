@@ -115,7 +115,7 @@
         </div>
       </div>
       <div style="text-align:right;flex-shrink:0;">
-        <div style="font-family:'Sora',sans-serif;font-size:30px;color:#facc15;font-weight:700;">R$ {{ p.valor|moeda }}</div>
+        <div style="font-family:'Sora',sans-serif;font-size:30px;color:#facc15;font-weight:700;">{{ p.valor|moeda  }}</div>
         <div style="font-size:11px;color:rgba(255,255,255,.6);">mensalidade · {{ p.total_vidas }} vida{{ 's' if p.total_vidas != 1 else '' }}</div>
       </div>
     </div>
@@ -177,16 +177,16 @@
         <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;">
           <div style="background:rgba(59,130,246,.12);padding:14px;border-radius:8px;text-align:center;">
             <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Bruto corretora</div>
-            <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--info);margin-top:5px;">R$ {{ p.comissao_total_corretora or 0|moeda }}</div>
+            <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--info);margin-top:5px;">{{ (p.comissao_total_corretora or 0)|moeda  }}</div>
           </div>
           <div style="background:rgba(244,63,94,.1);padding:14px;border-radius:8px;text-align:center;">
             <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Repasse consultor</div>
-            <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--erro);margin-top:5px;">R$ {{ p.comissao_consultor or 0|moeda }}</div>
+            <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--erro);margin-top:5px;">{{ (p.comissao_consultor or 0)|moeda  }}</div>
             <div style="font-size:10px;color:var(--cinza);margin-top:3px;">{{ regime.nome if regime else (p.regime_aplicado or '—') }}</div>
           </div>
           <div style="background:var(--verde-soft);padding:14px;border-radius:8px;text-align:center;">
             <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Líquido Serenus</div>
-            <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--verde);margin-top:5px;">R$ {{ p.comissao_corretora_liquida or 0|moeda }}</div>
+            <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--verde);margin-top:5px;">{{ (p.comissao_corretora_liquida or 0)|moeda  }}</div>
           </div>
         </div>
       </div>
@@ -196,7 +196,7 @@
         <div class="card-body">
           <div style="background:var(--verde-soft);padding:16px 20px;border-radius:8px;max-width:260px;">
             <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Total a receber</div>
-            <div style="font-family:'Sora',sans-serif;font-size:24px;color:var(--verde);margin-top:5px;">R$ {{ p.comissao_consultor or 0|moeda }}</div>
+            <div style="font-family:'Sora',sans-serif;font-size:24px;color:var(--verde);margin-top:5px;">{{ (p.comissao_consultor or 0)|moeda  }}</div>
             <div style="font-size:11px;color:var(--cinza);margin-top:3px;">{{ regime.nome if regime else (p.regime_aplicado or '—') }}</div>
           </div>
         </div>
@@ -217,7 +217,7 @@
             <tr id="row-parc-{{ parc.id }}">
               <td><strong>{{ parc.numero }}/{{ p.num_parcelas }}</strong></td>
               <td>{{ parc.data_prevista }}</td>
-              <td class="td-mono" style="color:var(--verde);font-weight:500;">R$ {{ parc.valor|moeda }}</td>
+              <td class="td-mono" style="color:var(--verde);font-weight:500;">{{ parc.valor|moeda  }}</td>
               <td><span class="tag tag-cinza">{{ parc.percentual }}%</span></td>
               <td>
                 {% if session.perfil == 'admin' %}
@@ -505,7 +505,7 @@
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
               <div style="background:var(--panel-2);padding:12px;border-radius:8px;text-align:center;">
                 <div style="font-size:9px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Valor</div>
-                <div style="font-family:'Sora',sans-serif;font-size:18px;color:var(--texto);margin-top:4px;font-weight:700;">{{ p.adesao_valor or 0|moeda }}</div>
+                <div style="font-family:'Sora',sans-serif;font-size:18px;color:var(--texto);margin-top:4px;font-weight:700;">{{ (p.adesao_valor or 0)|moeda }}</div>
               </div>
               <div style="background:var(--panel-2);padding:12px;border-radius:8px;text-align:center;">
                 <div style="font-size:9px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Vencimento</div>

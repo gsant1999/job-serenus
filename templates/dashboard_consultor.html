@@ -43,7 +43,7 @@
         <div style="font-size:11px; color:rgba(255,255,255,.7); text-transform:uppercase; letter-spacing:1px; font-weight:500;">Seu regime atual</div>
         <div style="font-family:'Sora',sans-serif; font-size:22px; font-weight:600; margin-top:5px;">{{ m.regime_label }}</div>
         {% if m.valor_fixo and m.valor_fixo > 0 %}
-        <div style="font-size:12px; color:rgba(255,255,255,.85); margin-top:4px;">+ R$ {{ m.valor_fixo|moeda }} fixo mensal</div>
+        <div style="font-size:12px; color:rgba(255,255,255,.85); margin-top:4px;">+ {{ m.valor_fixo|moeda  }} fixo mensal</div>
         {% endif %}
       </div>
       <div style="text-align:right;">
@@ -115,8 +115,8 @@
           <td><strong>{{ p.razao_social }}</strong></td>
           <td>{{ p.adm_operadora or '—' }}</td>
           <td class="td-mono">{{ p.total_vidas }}</td>
-          <td class="td-mono">R$ {{ p.valor|moeda }}</td>
-          <td class="td-mono" style="color:var(--verde); font-weight:500;">R$ {{ p.comissao_consultor or 0|moeda }}</td>
+          <td class="td-mono">{{ p.valor|moeda  }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:500;">{{ (p.comissao_consultor or 0)|moeda  }}</td>
           <td>{{ p.vigencia }}</td>
         </tr>
         {% endfor %}

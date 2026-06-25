@@ -36,7 +36,7 @@
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
           <div>
             <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">Fixo mensal</div>
-            <div style="font-family:'Sora',sans-serif; font-size:16px; color:var(--texto);">{% if r.valor_fixo %}R$ {{ r.valor_fixo|moeda }}{% else %}—{% endif %}</div>
+            <div style="font-family:'Sora',sans-serif; font-size:16px; color:var(--texto);">{% if r.valor_fixo %}{{ r.valor_fixo|moeda  }}{% else %}—{% endif %}</div>
           </div>
           <div>
             <div style="font-size:10px; color:var(--cinza); font-weight:600; text-transform:uppercase; letter-spacing:.5px; margin-bottom:3px;">Coluna comissão</div>

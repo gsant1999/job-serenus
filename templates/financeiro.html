@@ -38,11 +38,11 @@
 <div class="page" style="max-width:1000px;">
 
   <div class="kpi-row">
-    <div class="kpi"><div class="lbl">A receber (operadoras)</div><div class="val pos">R$ {{ receber_mes|moeda }}</div></div>
-    <div class="kpi"><div class="lbl">A pagar (consultores)</div><div class="val neg">R$ {{ pagar_consultor|moeda }}</div></div>
-    <div class="kpi"><div class="lbl">Custos + fixos</div><div class="val neg">R$ {{ total_custos|moeda }}</div></div>
-    <div class="kpi"><div class="lbl">Aportes</div><div class="val pos">R$ {{ total_aportes|moeda }}</div></div>
-    <div class="kpi"><div class="lbl">Saldo do mês</div><div class="val {{ 'pos' if saldo>=0 else 'neg' }}">R$ {{ saldo|moeda }}</div></div>
+    <div class="kpi"><div class="lbl">A receber (operadoras)</div><div class="val pos">{{ receber_mes|moeda  }}</div></div>
+    <div class="kpi"><div class="lbl">A pagar (consultores)</div><div class="val neg">{{ pagar_consultor|moeda  }}</div></div>
+    <div class="kpi"><div class="lbl">Custos + fixos</div><div class="val neg">{{ total_custos|moeda  }}</div></div>
+    <div class="kpi"><div class="lbl">Aportes</div><div class="val pos">{{ total_aportes|moeda  }}</div></div>
+    <div class="kpi"><div class="lbl">Saldo do mês</div><div class="val {{ 'pos' if saldo>=0 else 'neg' }}">{{ saldo|moeda  }}</div></div>
   </div>
 
   <div class="fin-tabs">
@@ -59,13 +59,13 @@
       <div class="card-header"><h3>DRE — {{ mes }}</h3></div>
       <table class="tbl">
         <tbody>
-          <tr><td>Receita bruta (comissões a receber)</td><td class="pos" style="text-align:right;">R$ {{ dre.receita_bruta|moeda }}</td></tr>
-          <tr><td>(−) Repasse aos consultores</td><td class="neg" style="text-align:right;">− R$ {{ dre.repasse_consultores|moeda }}</td></tr>
-          <tr style="border-top:2px solid var(--borda-2);"><td><strong>Margem bruta</strong></td><td style="text-align:right;"><strong>R$ {{ dre.margem_bruta|moeda }}</strong></td></tr>
-          <tr><td>(−) Custos operacionais</td><td class="neg" style="text-align:right;">− R$ {{ dre.custos_operacionais|moeda }}</td></tr>
-          <tr><td>(−) Fixos dos consultores</td><td class="neg" style="text-align:right;">− R$ {{ dre.fixos|moeda }}</td></tr>
-          <tr><td>(+) Aportes de sócios</td><td class="pos" style="text-align:right;">+ R$ {{ dre.aportes|moeda }}</td></tr>
-          <tr style="border-top:2px solid var(--borda-2);"><td><strong>Resultado do mês</strong></td><td style="text-align:right;"><strong class="{{ 'pos' if dre.resultado>=0 else 'neg' }}">R$ {{ dre.resultado|moeda }}</strong></td></tr>
+          <tr><td>Receita bruta (comissões a receber)</td><td class="pos" style="text-align:right;">{{ dre.receita_bruta|moeda  }}</td></tr>
+          <tr><td>(−) Repasse aos consultores</td><td class="neg" style="text-align:right;">− {{ dre.repasse_consultores|moeda  }}</td></tr>
+          <tr style="border-top:2px solid var(--borda-2);"><td><strong>Margem bruta</strong></td><td style="text-align:right;"><strong>{{ dre.margem_bruta|moeda  }}</strong></td></tr>
+          <tr><td>(−) Custos operacionais</td><td class="neg" style="text-align:right;">− {{ dre.custos_operacionais|moeda  }}</td></tr>
+          <tr><td>(−) Fixos dos consultores</td><td class="neg" style="text-align:right;">− {{ dre.fixos|moeda  }}</td></tr>
+          <tr><td>(+) Aportes de sócios</td><td class="pos" style="text-align:right;">+ {{ dre.aportes|moeda  }}</td></tr>
+          <tr style="border-top:2px solid var(--borda-2);"><td><strong>Resultado do mês</strong></td><td style="text-align:right;"><strong class="{{ 'pos' if dre.resultado>=0 else 'neg' }}">{{ dre.resultado|moeda  }}</strong></td></tr>
         </tbody>
       </table>
     </div>
@@ -82,9 +82,9 @@
           <tr>
             <td><strong>{{ f.competencia }}</strong></td>
             <td>{{ f.qtd }}</td>
-            <td class="pos">R$ {{ f.corretora|moeda }}</td>
-            <td class="neg">R$ {{ f.consultor|moeda }}</td>
-            <td>R$ {{ f.corretora - f.consultor|moeda }}</td>
+            <td class="pos">{{ f.corretora|moeda  }}</td>
+            <td class="neg">{{ f.consultor|moeda  }}</td>
+            <td>{{ f.corretora - f.consultor|moeda  }}</td>
           </tr>
           {% else %}
           <tr><td colspan="5" style="color:var(--cinza-2);">Nenhuma comissão futura. As parcelas aparecem aqui quando há propostas com vencimentos cadastrados.</td></tr>
@@ -108,7 +108,7 @@
         <thead><tr><th>Descrição</th><th>Categoria</th><th>Data</th><th>Valor</th><th></th></tr></thead>
         <tbody>
           {% for c in custos %}
-          <tr><td>{{ c.descricao }}</td><td>{{ c.categoria }}</td><td>{{ c.data_lancamento or '—' }}</td><td class="neg">R$ {{ c.valor|moeda }}</td>
+          <tr><td>{{ c.descricao }}</td><td>{{ c.categoria }}</td><td>{{ c.data_lancamento or '—' }}</td><td class="neg">{{ c.valor|moeda  }}</td>
             <td><button class="btn-ghost" style="color:var(--rosa);" onclick="excluir({{ c.id }})">×</button></td></tr>
           {% else %}<tr><td colspan="5" style="color:var(--cinza-2);">Nenhum custo lançado neste mês.</td></tr>{% endfor %}
         </tbody>
@@ -132,7 +132,7 @@
         <thead><tr><th>Sócio</th><th>Descrição</th><th>Valor</th><th></th></tr></thead>
         <tbody>
           {% for a in aportes %}
-          <tr><td><strong>{{ a.socio }}</strong></td><td>{{ a.descricao }}</td><td class="pos">R$ {{ a.valor|moeda }}</td>
+          <tr><td><strong>{{ a.socio }}</strong></td><td>{{ a.descricao }}</td><td class="pos">{{ a.valor|moeda  }}</td>
             <td><button class="btn-ghost" style="color:var(--rosa);" onclick="excluir({{ a.id }})">×</button></td></tr>
           {% else %}<tr><td colspan="4" style="color:var(--cinza-2);">Nenhum aporte neste mês.</td></tr>{% endfor %}
         </tbody>
@@ -154,7 +154,7 @@
         <tbody>
           {% for f in fixos %}
           <tr><td>{{ f.consultor_nome }}</td><td>{{ f.descricao }}</td><td>{{ f.data_lancamento }}</td>
-            <td class="neg">R$ {{ f.valor|moeda }}</td><td>{{ f.status }}</td></tr>
+            <td class="neg">{{ f.valor|moeda  }}</td><td>{{ f.status }}</td></tr>
           {% else %}<tr><td colspan="5" style="color:var(--cinza-2);">Nenhum fixo gerado. Clique em "Gerar fixos deste mês".</td></tr>{% endfor %}
         </tbody>
       </table>

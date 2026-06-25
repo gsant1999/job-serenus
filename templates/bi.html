@@ -44,10 +44,10 @@
         <tr>
           <td><strong>{{ m.mes }}</strong></td>
           <td class="td-mono">{{ m.qtd }}</td>
-          <td class="td-mono">R$ {{ m.valor or 0|moeda }}</td>
-          <td class="td-mono" style="color:var(--info);">R$ {{ m.com_total or 0|moeda }}</td>
-          <td class="td-mono" style="color:var(--erro);">R$ {{ m.com_consultor or 0|moeda }}</td>
-          <td class="td-mono" style="color:var(--verde); font-weight:600;">R$ {{ m.com_liquido or 0|moeda }}</td>
+          <td class="td-mono">{{ (m.valor or 0)|moeda  }}</td>
+          <td class="td-mono" style="color:var(--info);">{{ (m.com_total or 0)|moeda  }}</td>
+          <td class="td-mono" style="color:var(--erro);">{{ (m.com_consultor or 0)|moeda  }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:600;">{{ (m.com_liquido or 0)|moeda  }}</td>
           <td><span class="tag {{ 'tag-verde' if margem > 50 else 'tag-am' }}">{{ "%.1f"|format(margem) }}%</span></td>
         </tr>
         {% else %}<tr><td colspan="7" class="empty">Sem dados ainda</td></tr>{% endfor %}
@@ -66,8 +66,8 @@
           <td><strong>{{ o.op or 'Não informado' }}</strong></td>
           <td class="td-mono">{{ o.qtd }}</td>
           <td class="td-mono">{{ o.vidas }}</td>
-          <td class="td-mono">R$ {{ o.valor or 0|moeda }}</td>
-          <td class="td-mono" style="color:var(--verde);">R$ {{ o.com or 0|moeda }}</td>
+          <td class="td-mono">{{ (o.valor or 0)|moeda  }}</td>
+          <td class="td-mono" style="color:var(--verde);">{{ (o.com or 0)|moeda  }}</td>
         </tr>
         {% else %}<tr><td colspan="5" class="empty">Sem dados ainda</td></tr>{% endfor %}
       </tbody>

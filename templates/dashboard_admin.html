@@ -90,17 +90,17 @@
   <div class="metricas m-3">
     <div class="metrica info">
       <div class="lbl">Comissão bruta (corretora)</div>
-      <div class="val" style="font-size:20px;">R$ {{ m.com_bruta|moeda }}</div>
+      <div class="val" style="font-size:20px;">{{ m.com_bruta|moeda  }}</div>
       <div class="sub">total recebido das operadoras</div>
     </div>
     <div class="metrica erro">
       <div class="lbl">Repasse a consultores</div>
-      <div class="val" style="font-size:20px;">R$ {{ m.com_repasse|moeda }}</div>
+      <div class="val" style="font-size:20px;">{{ m.com_repasse|moeda  }}</div>
       <div class="sub">a pagar para a equipe</div>
     </div>
     <div class="metrica verde">
       <div class="lbl">Líquido Serenus</div>
-      <div class="val" style="font-size:20px;">R$ {{ m.com_liquido|moeda }}</div>
+      <div class="val" style="font-size:20px;">{{ m.com_liquido|moeda  }}</div>
       <div class="sub">margem após repasses</div>
     </div>
   </div>
@@ -132,8 +132,8 @@
           <td>{{ p.consultor }}</td>
           <td>{{ p.adm_operadora or '—' }}</td>
           <td class="td-mono">{{ p.total_vidas }}</td>
-          <td class="td-mono">R$ {{ p.valor|moeda }}</td>
-          <td class="td-mono" style="color:var(--verde);">R$ {{ p.comissao_corretora_liquida or 0|moeda }}</td>
+          <td class="td-mono">{{ p.valor|moeda  }}</td>
+          <td class="td-mono" style="color:var(--verde);">{{ (p.comissao_corretora_liquida or 0)|moeda  }}</td>
           <td>{{ p.vigencia }}</td>
         </tr>
         {% endfor %}
@@ -152,8 +152,8 @@
         <tr>
           <td><strong>{{ c.consultor }}</strong></td>
           <td class="td-mono">{{ c.qtd }}</td>
-          <td class="td-mono">R$ {{ c.valor|moeda }}</td>
-          <td class="td-mono" style="color:var(--erro);">R$ {{ c.com or 0|moeda }}</td>
+          <td class="td-mono">{{ c.valor|moeda  }}</td>
+          <td class="td-mono" style="color:var(--erro);">{{ (c.com or 0)|moeda  }}</td>
         </tr>
         {% endfor %}
       </tbody>

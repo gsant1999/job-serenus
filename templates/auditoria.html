@@ -25,7 +25,7 @@
             {{ p.adm_operadora or '—' }} · {{ p.produto or '—' }} · {{ p.nome_consultor or p.consultor or '—' }}
           </div>
           <div style="margin-top:8px;font-size:12.5px;">
-            <strong>Valor:</strong> {{ p.valor or 0|moeda }}
+            <strong>Valor:</strong> {{ (p.valor or 0)|moeda }}
             &nbsp;·&nbsp;
             <strong>Vigência:</strong> {{ p.vigencia or '—' }}
           </div>
