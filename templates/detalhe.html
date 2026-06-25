@@ -423,11 +423,13 @@
             <div style="font-size:11px;font-weight:600;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Documentos adicionais</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               {% for arq in p.anexos|from_json %}
+              {% set arq_nome = arq.nome if arq is mapping else arq %}
+              {% set arq_label = arq_nome.split('_',4)[-1] if '_' in arq_nome else ('Documento ' ~ loop.index) %}
               <div style="display:inline-flex;align-items:center;gap:4px;">
-                <a href="/anexos/{{ arq }}" target="_blank" class="btn-outline" style="font-size:12px;padding:5px 12px;">
-                  📄 {{ arq.split('_',4)[-1] if arq.count('_') >= 4 else 'Documento ' ~ loop.index }}
+                <a href="/anexos/{{ arq_nome }}" target="_blank" class="btn-outline" style="font-size:12px;padding:5px 12px;">
+                  📄 {{ arq_label }}
                 </a>
-                {% if session.perfil == 'admin' %}<button onclick="excluirAnexo('doc','{{ arq }}')" class="btn-del-anexo">×</button>{% endif %}
+                {% if session.perfil == 'admin' %}<button onclick="excluirAnexo('doc','{{ arq_nome }}')" class="btn-del-anexo">×</button>{% endif %}
               </div>
               {% endfor %}
             </div>
