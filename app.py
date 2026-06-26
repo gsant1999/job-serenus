@@ -1173,6 +1173,13 @@ def init_db():
         ("usuarios", "waspeed_token", "TEXT"),
         ("crm_leads", "telefone_norm", "TEXT"),
         ("crm_leads", "consultor_externo", "TEXT"),  # nome original da planilha
+        # ─── CRM: Qualificação do lead ───
+        ("crm_leads", "qual_tipo_plano", "TEXT"),     # Para quem é o plano (próprio/família/funcionário)
+        ("crm_leads", "qual_idade", "TEXT"),          # Idade do beneficiário
+        ("crm_leads", "qual_cidade", "TEXT"),         # Cidade
+        ("crm_leads", "qual_cnpj", "TEXT"),           # CNPJ se tiver
+        ("crm_leads", "qual_plano_atual", "TEXT"),    # Plano atual se tiver
+        ("crm_leads", "qual_estagio2", "TEXT"),       # Qualificação específica do estágio 2 (livre)
         # ─── Boleto de Adesão via Asaas ───
         ("propostas", "adesao_asaas_customer_id", "TEXT"),
         ("propostas", "adesao_asaas_payment_id", "TEXT"),
@@ -6580,6 +6587,34 @@ def crm_lead_editar(lid):
     return jsonify({"ok": True})
 
 
+@app.route('/crm/lead/<int:lid>/qualificacao', methods=['POST'])
+@login_required
+def crm_lead_qualificacao(lid):
+    """Salva dados de qualificação do lead (estágio 1 e 2)."""
+    d = request.json or {}
+    conn = db()
+    lead = conn.execute("SELECT id, responsavel_id FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+
+    conn.execute("""UPDATE crm_leads SET
+        qual_tipo_plano=?, qual_idade=?, qual_cidade=?,
+        qual_cnpj=?, qual_plano_atual=?, qual_estagio2=?,
+        atualizado_em=CURRENT_TIMESTAMP
+        WHERE id=?""",
+        (d.get('qual_tipo_plano'), d.get('qual_idade'), d.get('qual_cidade'),
+         d.get('qual_cnpj'), d.get('qual_plano_atual'), d.get('qual_estagio2'),
+         lid))
+
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                 (lid, session.get('nome'), 'qualificacao', 'Dados de qualificação atualizados'))
+
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
 @app.route('/crm/lead/<int:lid>/anexo', methods=['POST'])
 @login_required
 def crm_lead_anexo(lid):
@@ -7799,9 +7834,8 @@ _SCHEDULER_INICIADO = False
 
 def _importar_leads_automatico():
     """
-    Importa leads novos das planilhas automaticamente (sem filtro de data).
-    Roda a cada 30 minutos via scheduler. Só insere o que ainda não existe
-    (dedup por telefone/email já está no _processar_lead).
+    Importa leads novos das planilhas automaticamente a cada 30 min.
+    Usa o mesmo INSERT completo do importador manual (com telefone_norm para dedup correto).
     """
     try:
         conn = db()
@@ -7810,23 +7844,32 @@ def _importar_leads_automatico():
         for row in leads_raw:
             try:
                 sucesso, msg, dados = _processar_lead(row, conn)
-                if sucesso:
-                    conn.execute(
-                        """INSERT INTO crm_leads 
-                           (nome, telefone, email, empresa, origem, etapa, responsavel_id, valor_estimado, observacoes)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (dados['nome'], dados['telefone'], dados['email'], dados['empresa'],
-                         dados['origem'], dados['etapa'], dados['responsavel_id'],
-                         dados['valor_estimado'], dados['observacoes'])
-                    )
-                    importados += 1
-            except Exception:
+                if not sucesso:
+                    continue
+                telefone_norm = _normalizar_telefone(dados.get('telefone', ''))
+                criado_em = dados.get('data_lead') or datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
+                conn.execute(
+                    """INSERT INTO crm_leads
+                       (nome, telefone, telefone_norm, email, empresa, origem, etapa,
+                        responsavel_id, valor_estimado, observacoes, criado_em, atualizado_em)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (dados['nome'], dados['telefone'], telefone_norm,
+                     dados['email'], dados['empresa'], dados['origem'],
+                     dados.get('etapa', 'lead_novo'), dados['responsavel_id'],
+                     dados['valor_estimado'], dados['observacoes'],
+                     criado_em, criado_em)
+                )
+                importados += 1
+            except Exception as e:
+                app.logger.warning(f"[LEAD_AUTO] linha ignorada: {e}")
                 try: conn.rollback()
                 except Exception: pass
         conn.commit()
         close_db(conn)
         if importados:
-            app.logger.info(f"[LEAD_AUTO] ✅ {importados} leads novos importados das planilhas")
+            app.logger.info(f"[LEAD_AUTO] ✅ {importados} leads novos importados")
+        else:
+            app.logger.info(f"[LEAD_AUTO] Nenhum lead novo (todos já existem ou sem novidades)")
     except Exception as e:
         app.logger.error(f"[LEAD_AUTO] ❌ {e}")
 

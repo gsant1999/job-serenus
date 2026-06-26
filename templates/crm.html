@@ -350,6 +350,7 @@
     <div class="ficha-right">
       <div class="ficha-tabs">
         <div class="ficha-tab ativo" onclick="mudarTab('timeline')">📋 Timeline</div>
+        <div class="ficha-tab" onclick="mudarTab('qualificacao')">🎯 Qualificação</div>
         <div class="ficha-tab" onclick="mudarTab('atividade')">➕ Atividade</div>
         <div class="ficha-tab" onclick="mudarTab('whatsapp')">💬 WhatsApp</div>
         <div class="ficha-tab" onclick="mudarTab('anexos')">📎 Anexos</div>
@@ -358,6 +359,49 @@
       <div class="ficha-tab-content">
         <div id="tab-timeline" class="ficha-tab-pane ativo">
           <div id="timeline-lista"></div>
+        </div>
+
+        <div id="tab-qualificacao" class="ficha-tab-pane">
+          <div style="padding:4px 0 12px;font-size:12px;font-weight:600;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;">
+            Estágio 1 — Qualificação inicial
+          </div>
+          <div class="campo-grupo">
+            <div class="campo-label">Para quem é o plano?</div>
+            <select id="qual-tipo-plano" class="campo-input campo-select">
+              <option value="">Não informado</option>
+              <option value="Próprio (Titular)">Próprio (Titular)</option>
+              <option value="Familiar">Familiar</option>
+              <option value="Funcionário (empresa)">Funcionário (empresa)</option>
+              <option value="Próprio + Família">Próprio + Família</option>
+            </select>
+          </div>
+          <div class="campo-grupo">
+            <div class="campo-label">Idade do beneficiário</div>
+            <input type="text" id="qual-idade" class="campo-input" placeholder="Ex: 35 anos">
+          </div>
+          <div class="campo-grupo">
+            <div class="campo-label">Cidade</div>
+            <input type="text" id="qual-cidade" class="campo-input" placeholder="Ex: Campinas - SP">
+          </div>
+          <div class="campo-grupo">
+            <div class="campo-label">Possui CNPJ? Qual?</div>
+            <input type="text" id="qual-cnpj" class="campo-input" placeholder="Ex: 12.345.678/0001-99 ou Não possui">
+          </div>
+          <div class="campo-grupo">
+            <div class="campo-label">Possui plano atualmente? Qual?</div>
+            <input type="text" id="qual-plano-atual" class="campo-input" placeholder="Ex: Unimed, Hapvida, Não possui">
+          </div>
+          <div style="padding:12px 0 8px;font-size:12px;font-weight:600;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;border-top:1px solid var(--borda);margin-top:8px;">
+            Estágio 2 — Qualificação específica
+          </div>
+          <div class="campo-grupo">
+            <div class="campo-label">Critérios / Elegibilidade</div>
+            <textarea id="qual-estagio2" class="campo-input" rows="4"
+              placeholder="Ex: Vera Cruz — se enquadra como funcionário do comércio&#10;Ex: Hapvida — MEI ativo&#10;Ex: SulAmérica PME — 2 a 29 vidas..."></textarea>
+          </div>
+          <button class="btn-ficha btn-salvar" style="width:100%;margin-top:8px;" onclick="salvarQualificacao()">
+            Salvar Qualificação
+          </button>
         </div>
 
         <div id="tab-atividade" class="ficha-tab-pane">
@@ -537,6 +581,15 @@ async function abrirFicha(id){
   document.getElementById('wpp-msg').value='';
 
   renderTimeline(d.atividades||[]);
+  
+  // Carregar dados de qualificação
+  document.getElementById('qual-tipo-plano').value = d.lead.qual_tipo_plano || '';
+  document.getElementById('qual-idade').value       = d.lead.qual_idade || '';
+  document.getElementById('qual-cidade').value      = d.lead.qual_cidade || '';
+  document.getElementById('qual-cnpj').value        = d.lead.qual_cnpj || '';
+  document.getElementById('qual-plano-atual').value = d.lead.qual_plano_atual || '';
+  document.getElementById('qual-estagio2').value    = d.lead.qual_estagio2 || '';
+
   mudarTab('timeline');
   document.getElementById('modal-ficha').classList.add('open');
 }
@@ -575,10 +628,29 @@ function fmtDataHoraBR(s){
 }
 
 function mudarTab(tab){
-  const tabs=['timeline','atividade','whatsapp','anexos'];
+  const tabs=['timeline','qualificacao','atividade','whatsapp','anexos'];
   document.querySelectorAll('.ficha-tab').forEach((t,i)=>t.classList.toggle('ativo',tabs[i]===tab));
   document.querySelectorAll('.ficha-tab-pane').forEach(p=>p.classList.remove('ativo'));
   document.getElementById('tab-'+tab)?.classList.add('ativo');
+}
+
+async function salvarQualificacao(){
+  if(!_leadAtual) return;
+  const payload = {
+    qual_tipo_plano: document.getElementById('qual-tipo-plano').value,
+    qual_idade:      document.getElementById('qual-idade').value.trim(),
+    qual_cidade:     document.getElementById('qual-cidade').value.trim(),
+    qual_cnpj:       document.getElementById('qual-cnpj').value.trim(),
+    qual_plano_atual:document.getElementById('qual-plano-atual').value.trim(),
+    qual_estagio2:   document.getElementById('qual-estagio2').value.trim(),
+  };
+  const r = await fetch('/crm/lead/'+_leadAtual.id+'/qualificacao', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const d = await r.json();
+  if(d.ok){ toast('Qualificação salva!','ok'); }
+  else { toast(d.erro||'Erro ao salvar','err'); }
 }
 
 document.querySelectorAll('.tipo-btn').forEach(btn=>{
