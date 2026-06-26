@@ -1,6 +1,6 @@
 # HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
 import os, sqlite3, json, hashlib, secrets, re
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response
 from datetime import datetime, timedelta, date
 from functools import wraps
 from dateutil.relativedelta import relativedelta
@@ -1173,13 +1173,6 @@ def init_db():
         ("usuarios", "waspeed_token", "TEXT"),
         ("crm_leads", "telefone_norm", "TEXT"),
         ("crm_leads", "consultor_externo", "TEXT"),  # nome original da planilha
-        # ─── CRM: Qualificação do lead ───
-        ("crm_leads", "qual_tipo_plano", "TEXT"),     # Para quem é o plano (próprio/família/funcionário)
-        ("crm_leads", "qual_idade", "TEXT"),          # Idade do beneficiário
-        ("crm_leads", "qual_cidade", "TEXT"),         # Cidade
-        ("crm_leads", "qual_cnpj", "TEXT"),           # CNPJ se tiver
-        ("crm_leads", "qual_plano_atual", "TEXT"),    # Plano atual se tiver
-        ("crm_leads", "qual_estagio2", "TEXT"),       # Qualificação específica do estágio 2 (livre)
         # ─── Boleto de Adesão via Asaas ───
         ("propostas", "adesao_asaas_customer_id", "TEXT"),
         ("propostas", "adesao_asaas_payment_id", "TEXT"),
@@ -3143,12 +3136,33 @@ def admin_ultimo_erro():
 @app.route('/anexos/<path:nome>')
 @login_required
 def servir_anexo(nome):
-    # Sanitiza: pega só o basename e remove path traversal
+    """Serve arquivo de R2 com fallback para local."""
     from urllib.parse import unquote
+    import io
     nome = os.path.basename(unquote(nome))
+    
+    # Tenta R2 primeiro
+    if R2_ENABLED:
+        try:
+            s3 = boto3.client(
+                's3',
+                endpoint_url=R2_ENDPOINT,
+                aws_access_key_id=R2_ACCESS_KEY,
+                aws_secret_access_key=R2_SECRET_KEY,
+                region_name='auto'
+            )
+            chave = f"anexos/{nome}"
+            resp = s3.get_object(Bucket=R2_BUCKET_NAME, Key=chave)
+            content = resp['Body'].read()
+            content_type = resp.get('ContentType', 'application/octet-stream')
+            return Response(content, mimetype=content_type, 
+                          headers={'Content-Disposition': f'inline; filename="{nome}"'})
+        except Exception:
+            pass  # Fallback para local
+    
+    # Fallback: tenta local
     caminho = os.path.join(UPLOAD_FOLDER, nome)
     if not os.path.exists(caminho):
-        # Tenta também com espaços substituídos por underscore (compatibilidade legado)
         nome_limpo = _sanitizar_filename(nome)
         caminho_limpo = os.path.join(UPLOAD_FOLDER, nome_limpo)
         if os.path.exists(caminho_limpo):
@@ -6587,34 +6601,6 @@ def crm_lead_editar(lid):
     return jsonify({"ok": True})
 
 
-@app.route('/crm/lead/<int:lid>/qualificacao', methods=['POST'])
-@login_required
-def crm_lead_qualificacao(lid):
-    """Salva dados de qualificação do lead (estágio 1 e 2)."""
-    d = request.json or {}
-    conn = db()
-    lead = conn.execute("SELECT id, responsavel_id FROM crm_leads WHERE id=?", (lid,)).fetchone()
-    if not lead:
-        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
-    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
-        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
-
-    conn.execute("""UPDATE crm_leads SET
-        qual_tipo_plano=?, qual_idade=?, qual_cidade=?,
-        qual_cnpj=?, qual_plano_atual=?, qual_estagio2=?,
-        atualizado_em=CURRENT_TIMESTAMP
-        WHERE id=?""",
-        (d.get('qual_tipo_plano'), d.get('qual_idade'), d.get('qual_cidade'),
-         d.get('qual_cnpj'), d.get('qual_plano_atual'), d.get('qual_estagio2'),
-         lid))
-
-    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
-                 (lid, session.get('nome'), 'qualificacao', 'Dados de qualificação atualizados'))
-
-    conn.commit(); close_db(conn)
-    return jsonify({"ok": True})
-
-
 @app.route('/crm/lead/<int:lid>/anexo', methods=['POST'])
 @login_required
 def crm_lead_anexo(lid):
@@ -7834,8 +7820,9 @@ _SCHEDULER_INICIADO = False
 
 def _importar_leads_automatico():
     """
-    Importa leads novos das planilhas automaticamente a cada 30 min.
-    Usa o mesmo INSERT completo do importador manual (com telefone_norm para dedup correto).
+    Importa leads novos das planilhas automaticamente (sem filtro de data).
+    Roda a cada 30 minutos via scheduler. Só insere o que ainda não existe
+    (dedup por telefone/email já está no _processar_lead).
     """
     try:
         conn = db()
@@ -7844,32 +7831,23 @@ def _importar_leads_automatico():
         for row in leads_raw:
             try:
                 sucesso, msg, dados = _processar_lead(row, conn)
-                if not sucesso:
-                    continue
-                telefone_norm = _normalizar_telefone(dados.get('telefone', ''))
-                criado_em = dados.get('data_lead') or datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
-                conn.execute(
-                    """INSERT INTO crm_leads
-                       (nome, telefone, telefone_norm, email, empresa, origem, etapa,
-                        responsavel_id, valor_estimado, observacoes, criado_em, atualizado_em)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (dados['nome'], dados['telefone'], telefone_norm,
-                     dados['email'], dados['empresa'], dados['origem'],
-                     dados.get('etapa', 'lead_novo'), dados['responsavel_id'],
-                     dados['valor_estimado'], dados['observacoes'],
-                     criado_em, criado_em)
-                )
-                importados += 1
-            except Exception as e:
-                app.logger.warning(f"[LEAD_AUTO] linha ignorada: {e}")
+                if sucesso:
+                    conn.execute(
+                        """INSERT INTO crm_leads 
+                           (nome, telefone, email, empresa, origem, etapa, responsavel_id, valor_estimado, observacoes)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (dados['nome'], dados['telefone'], dados['email'], dados['empresa'],
+                         dados['origem'], dados['etapa'], dados['responsavel_id'],
+                         dados['valor_estimado'], dados['observacoes'])
+                    )
+                    importados += 1
+            except Exception:
                 try: conn.rollback()
                 except Exception: pass
         conn.commit()
         close_db(conn)
         if importados:
-            app.logger.info(f"[LEAD_AUTO] ✅ {importados} leads novos importados")
-        else:
-            app.logger.info(f"[LEAD_AUTO] Nenhum lead novo (todos já existem ou sem novidades)")
+            app.logger.info(f"[LEAD_AUTO] ✅ {importados} leads novos importados das planilhas")
     except Exception as e:
         app.logger.error(f"[LEAD_AUTO] ❌ {e}")
 
