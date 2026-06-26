@@ -3136,31 +3136,36 @@ def admin_ultimo_erro():
 @app.route('/anexos/<path:nome>')
 @login_required
 def servir_anexo(nome):
-    """Serve arquivo de R2 com fallback para local."""
+    """Serve arquivo de R2 (se habilitado) com fallback para local."""
     from urllib.parse import unquote
     import io
     nome = os.path.basename(unquote(nome))
-    
-    # Tenta R2 primeiro
-    if R2_ENABLED:
+
+    # Tenta R2 primeiro (mesmo padrão de upload_arquivo_r2)
+    if os.environ.get('R2_ENABLED') == 'true':
         try:
-            s3 = boto3.client(
-                's3',
-                endpoint_url=R2_ENDPOINT,
-                aws_access_key_id=R2_ACCESS_KEY,
-                aws_secret_access_key=R2_SECRET_KEY,
-                region_name='auto'
-            )
-            chave = f"anexos/{nome}"
-            resp = s3.get_object(Bucket=R2_BUCKET_NAME, Key=chave)
-            content = resp['Body'].read()
-            content_type = resp.get('ContentType', 'application/octet-stream')
-            return Response(content, mimetype=content_type, 
-                          headers={'Content-Disposition': f'inline; filename="{nome}"'})
-        except Exception:
-            pass  # Fallback para local
-    
-    # Fallback: tenta local
+            import boto3
+            account_id = os.environ.get('R2_ACCOUNT_ID', '').strip()
+            access_key = os.environ.get('R2_ACCESS_KEY', '').strip()
+            secret_key = os.environ.get('R2_SECRET_KEY', '').strip()
+            bucket     = os.environ.get('R2_BUCKET_NAME', '').strip()
+            if account_id and access_key and secret_key and bucket:
+                s3 = boto3.client(
+                    's3',
+                    endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+                    aws_access_key_id=access_key,
+                    aws_secret_access_key=secret_key,
+                    region_name='auto'
+                )
+                resp = s3.get_object(Bucket=bucket, Key=nome)
+                content = resp['Body'].read()
+                ctype = resp.get('ContentType', 'application/octet-stream')
+                return Response(content, mimetype=ctype,
+                                headers={'Content-Disposition': f'inline; filename="{nome}"'})
+        except Exception as e:
+            app.logger.warning(f"[R2] Download falhou ({nome}): {e} - tentando local")
+
+    # FALLBACK: local em UPLOAD_FOLDER
     caminho = os.path.join(UPLOAD_FOLDER, nome)
     if not os.path.exists(caminho):
         nome_limpo = _sanitizar_filename(nome)
@@ -4970,9 +4975,7 @@ def usuario_novo():
 @app.route('/usuario/foto/upload', methods=['POST'])
 @login_required
 def usuario_foto_upload():
-    """Upload de foto de perfil via AJAX.
-    Admin pode enviar ?uid=X para alterar foto de outro usuário.
-    """
+    """Upload de foto de perfil via AJAX. Salva em R2 com fallback local."""
     fimg = request.files.get('foto')
     if not fimg or not fimg.filename:
         return jsonify({"ok": False, "erro": "Arquivo não enviado"}), 400
@@ -4995,12 +4998,16 @@ def usuario_foto_upload():
 
     conn = db()
     foto_antiga = conn.execute("SELECT foto FROM usuarios WHERE id=?", (uid_alvo,)).fetchone()
-    if foto_antiga and foto_antiga['foto']:
-        try: os.remove(os.path.join(UPLOAD_FOLDER, foto_antiga['foto']))
-        except: pass
 
     foto_nome = f"perfil_{uid_alvo}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}{ext}"
-    fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
+    
+    # Upload para R2 + fallback local
+    try:
+        upload_arquivo_r2(fimg, foto_nome)
+    except Exception as e:
+        app.logger.warning(f"[FOTO] R2 falhou, usando local: {e}")
+        fimg.seek(0)
+        fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
 
     conn.execute("UPDATE usuarios SET foto=? WHERE id=?", (foto_nome, uid_alvo))
     conn.commit(); close_db(conn)
