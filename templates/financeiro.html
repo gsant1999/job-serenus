@@ -84,7 +84,7 @@
             <td>{{ f.qtd }}</td>
             <td class="pos">{{ f.corretora|moeda  }}</td>
             <td class="neg">{{ f.consultor|moeda  }}</td>
-            <td>{{ f.corretora - f.consultor|moeda  }}</td>
+            <td>{{ (f.corretora - f.consultor)|moeda  }}</td>
           </tr>
           {% else %}
           <tr><td colspan="5" style="color:var(--cinza-2);">Nenhuma comissão futura. As parcelas aparecem aqui quando há propostas com vencimentos cadastrados.</td></tr>
