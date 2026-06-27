@@ -7069,7 +7069,10 @@ def webhook_sheets():
         modo = data.get('modo', 'normal')  # 'normal' reativa leads; 'historico' não reativa
 
         if not leads_raw:
+            app.logger.info(f"[WEBHOOK_SHEETS] {origem}: nenhum lead enviado")
             return jsonify({"ok": True, "importados": 0, "msg": "Nenhum lead enviado"}), 200
+
+        app.logger.info(f"[WEBHOOK_SHEETS] {origem}: recebidos {len(leads_raw)} leads brutos")
 
         conn = db()
         importados = 0
@@ -7098,6 +7101,7 @@ def webhook_sheets():
             if email and 'teste' in email.lower():
                 ignorados += 1; continue
             if not nome:
+                app.logger.warning(f"[WEBHOOK_SHEETS] {origem}: lead ignorado (nome vazio) | telefone={telefone_raw} email={email}")
                 ignorados += 1; continue
 
             # Normalizar consultor + busca FLEXÍVEL do responsável
@@ -7209,10 +7213,18 @@ def webhook_sheets():
 
             importados += 1
 
-        conn.commit()
-        close_db(conn)
+        try:
+            conn.commit()
+        except Exception as ec:
+            app.logger.error(f"[WEBHOOK_SHEETS] Erro ao fazer commit: {ec}")
+            try:
+                conn.rollback()
+            except:
+                pass
+        finally:
+            close_db(conn)
 
-        app.logger.info(f"[WEBHOOK_SHEETS] origem={origem} importados={importados} dup={duplicados} ign={ignorados}")
+        app.logger.info(f"[WEBHOOK_SHEETS] {origem}: importados={importados} duplicados={duplicados} ignorados={ignorados}")
         return jsonify({
             "ok": True,
             "importados": importados,
@@ -7221,8 +7233,10 @@ def webhook_sheets():
         }), 200
 
     except Exception as e:
-        app.logger.error(f"[WEBHOOK_SHEETS] Erro: {e}")
-        return jsonify({"ok": False, "erro": str(e)}), 200
+        import traceback as _tb2
+        tb = _tb2.format_exc()
+        app.logger.error(f"[WEBHOOK_SHEETS] Erro crítico: {e}\n{tb}")
+        return jsonify({"ok": False, "erro": str(e)[:200]}), 500
 
 
 # ─── INTEGRAÇÃO WHATSAPP (WaSpeed / Wascript) ────────────────────────────────────
