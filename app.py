@@ -1,6 +1,6 @@
 # HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
 import os, sqlite3, json, hashlib, secrets, re
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response
 from datetime import datetime, timedelta, date
 from functools import wraps
 from dateutil.relativedelta import relativedelta
@@ -147,6 +147,40 @@ def _iniciar_backup_automatico():
 def _from_json(s):
     try: return json.loads(s) if s else []
     except: return []
+
+@app.template_filter('moeda')
+def _moeda(v):
+    """R$ 10.104,66"""
+    try:
+        v = float(v or 0)
+        neg = v < 0
+        v = abs(v)
+        cents = f"{v:.2f}".split('.')[1]
+        inteiro = str(int(v))
+        grupos = []
+        while len(inteiro) > 3:
+            grupos.insert(0, inteiro[-3:])
+            inteiro = inteiro[:-3]
+        grupos.insert(0, inteiro)
+        return ('R$ -' if neg else 'R$ ') + '.'.join(grupos) + ',' + cents
+    except:
+        return 'R$ 0,00'
+
+@app.template_filter('numero')
+def _numero(v):
+    """10.104"""
+    try:
+        v = int(float(v or 0))
+        neg = v < 0
+        inteiro = str(abs(v))
+        grupos = []
+        while len(inteiro) > 3:
+            grupos.insert(0, inteiro[-3:])
+            inteiro = inteiro[:-3]
+        grupos.insert(0, inteiro)
+        return ('-' if neg else '') + '.'.join(grupos)
+    except:
+        return '0'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ─── PERSISTÊNCIA: dados em pasta FIXA, fora das pastas de versão ───
 
@@ -228,7 +262,7 @@ MODELO_TEM_META = {
 ANTECIPACAO_PERMITIDA = {
     'PME': [
         'Alice', 'Allcare', 'Allcare Integral RJ', 'Allcare Unimed Leste F-RJ',
-        'Amil', 'Ana Costa', 'Assim Saúde', 'Bradesco', 'Hapvida', 'Klini Saúde',
+        'Amil', 'Amil Dental', 'Ana Costa', 'Assim Saúde', 'Bradesco', 'Hapvida', 'Klini Saúde',
         'Leve Saúde', 'MedSênior', 'Medsenior', 'Omint', 'Porto Seguro', 'Sami',
         'Santa Helena', 'São Cristóvão', 'Seguros Unimed', 'Sobam', 'SulAmérica',
         'Sul América', 'Trasmontano',
@@ -237,7 +271,7 @@ ANTECIPACAO_PERMITIDA = {
         'Allcare',
     ],
     'PF': [
-        'Assim Saúde', 'Leve Saúde', 'MedSênior', 'Medsenior', 'Hapvida',
+        'Amil Dental', 'Assim Saúde', 'Leve Saúde', 'MedSênior', 'Medsenior', 'Hapvida',
         'Prevent Senior', 'Sobam', 'Trasmontano',
     ],
 }
@@ -363,6 +397,13 @@ class _CursorCompat:
         if params is None:
             self._c.execute(s)
         else:
+            # Escapa % literais (de LIKE) que não são placeholders %s.
+            # psycopg2 interpreta % como placeholder; precisamos %% para % literal.
+            if '%' in s:
+                # Protege os %s reais, escapa o resto, restaura %s
+                s = s.replace('%s', '\x00PLACEHOLDER\x00')
+                s = s.replace('%', '%%')
+                s = s.replace('\x00PLACEHOLDER\x00', '%s')
             self._c.execute(s, params)
         return self
     def fetchone(self):  return _row_sqlite_like(self._c.fetchone())
@@ -975,6 +1016,7 @@ def init_db():
 
     # Etapas do funil CRM padrão (só insere se a tabela estiver vazia — preserva customizações)
     etapas_default = [
+        ('lead_novo', 'Lead Novo',      '#6366f1', 0, 'normal'),
         ('topo',    'Topo do Funil',  '#3b82f6', 1, 'normal'),
         ('meio',    'Meio do Funil',  '#f59e0b', 2, 'normal'),
         ('fim',     'Fundo do Funil', '#10b981', 3, 'normal'),
@@ -997,6 +1039,16 @@ def init_db():
                 conn.execute("INSERT OR IGNORE INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES (?,?,?,?,?)",
                              (slug, nome, cor, ordem, tipo))
             conn.commit()
+    else:
+        # Garante que lead_novo existe mesmo em bancos já populados
+        try:
+            if is_pg:
+                conn.execute("INSERT INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES ('lead_novo','Lead Novo','#6366f1',0,'normal') ON CONFLICT (slug) DO NOTHING")
+            else:
+                conn.execute("INSERT OR IGNORE INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES ('lead_novo','Lead Novo','#6366f1',0,'normal')")
+            conn.commit()
+        except Exception:
+            pass
 
     
     # Regimes padrão
@@ -1120,6 +1172,26 @@ def init_db():
         # ─── CRM: WhatsApp WaSpeed + filtros ───
         ("usuarios", "waspeed_token", "TEXT"),
         ("crm_leads", "telefone_norm", "TEXT"),
+        ("crm_leads", "consultor_externo", "TEXT"),  # nome original da planilha
+        # ─── Boleto de Adesão via Asaas ───
+        ("propostas", "adesao_asaas_customer_id", "TEXT"),
+        ("propostas", "adesao_asaas_payment_id", "TEXT"),
+        ("propostas", "adesao_boleto_url", "TEXT"),
+        ("propostas", "adesao_linha_digitavel", "TEXT"),
+        ("propostas", "adesao_valor", "REAL"),
+        ("propostas", "adesao_vencimento", "TEXT"),
+        ("propostas", "adesao_status", "TEXT DEFAULT 'Não gerado'"),
+        # Novas colunas do boleto
+        ("propostas", "adesao_descricao", "TEXT"),         # descrição editável do boleto
+        ("propostas", "adesao_boleto_pdf", "TEXT"),        # arquivo PDF do boleto salvo localmente
+        # Endereço do beneficiário (para NF no Asaas)
+        ("propostas", "end_logradouro", "TEXT"),
+        ("propostas", "end_numero", "TEXT"),
+        ("propostas", "end_complemento", "TEXT"),
+        ("propostas", "end_bairro", "TEXT"),
+        ("propostas", "end_cidade", "TEXT"),
+        ("propostas", "end_estado", "TEXT"),
+        ("propostas", "end_cep", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -1450,6 +1522,20 @@ def gerar_parcelas(proposta_id, vigencia, c, dia_vencimento=None, status_overrid
 # Hash de senha: PBKDF2-SHA256 com salt (via Werkzeug). Mantém retrocompatibilidade
 # com senhas antigas em SHA-256 puro — essas são migradas no próximo login.
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+
+def _sanitizar_filename(nome):
+    """Remove espaços, acentos e caracteres especiais do nome do arquivo.
+    Mantém extensão. Ex: 'WhatsApp Image 2026.jpeg' → 'WhatsApp_Image_2026.jpeg'"""
+    import unicodedata, re as _re
+    # Normaliza unicode (remove acentos)
+    nome = unicodedata.normalize('NFD', nome)
+    nome = ''.join(c for c in nome if unicodedata.category(c) != 'Mn')
+    # Substitui espaços e caracteres problemáticos por _
+    nome = _re.sub(r'[\s\(\)\[\]]+', '_', nome)
+    nome = _re.sub(r'[^\w\.\-]', '', nome)
+    nome = _re.sub(r'_+', '_', nome).strip('_')
+    return nome or 'arquivo'
 
 def hash_senha(s):
     """Gera hash seguro PBKDF2 (com salt automático) para uma senha nova."""
@@ -1633,61 +1719,87 @@ def asaas_detectar_tipo_chave(chave):
 
 def upload_arquivo_r2(file_obj, chave_arquivo):
     """
-    Upload arquivo para R2 (se configurado) com fallback para storage local.
-    Retorna {'ok': True, 'chave': ..., 'storage': 'r2'|'local'} sempre.
+    Upload arquivo com PRIORIDADE LOCAL (volume persistente Railway).
+    Salva em /data/anexos PRIMEIRO (nunca perde).
+    Depois tenta R2 como redundância/backup (opcional).
+    Retorna {'ok': True, 'chave': ..., 'storage': 'local'|'r2'} sempre.
     """
-    if os.environ.get('R2_ENABLED') == 'true':
+    import io
+
+    # Lê todos os bytes UMA vez
+    if hasattr(file_obj, 'read'):
         try:
-            import requests
-            
-            endpoint = os.environ.get('R2_ENDPOINT', '').rstrip('/')
-            bucket = os.environ.get('R2_BUCKET_NAME')
-            api_token = os.environ.get('R2_API_TOKEN')
-            
-            if endpoint and bucket and api_token:
-                url = f"{endpoint}/{chave_arquivo}"
-                headers = {
-                    'Authorization': f'Bearer {api_token}',
-                    'Content-Type': 'application/octet-stream'
-                }
-                
-                response = requests.put(url, data=file_obj, headers=headers, timeout=10)
-                
-                if response.status_code in [200, 201]:
-                    app.logger.info(f"[R2] ✅ Upload R2: {chave_arquivo}")
-                    return {'ok': True, 'chave': chave_arquivo, 'storage': 'r2'}
-                else:
-                    app.logger.warning(f"[R2] HTTP {response.status_code} - usando fallback local")
-        except Exception as e:
-            app.logger.warning(f"[R2] Erro ({type(e).__name__}) - usando fallback local")
-    
-    # FALLBACK: Upload local
+            file_obj.seek(0)
+        except Exception:
+            pass
+        dados = file_obj.read()
+    else:
+        dados = file_obj
+
+    # PRIORIDADE 1: SALVA LOCAL (/data/anexos — volume persistente)
     try:
-        os.makedirs('/data/uploads', exist_ok=True)
-        caminho_local = f"/data/uploads/{chave_arquivo}".replace('//', '/')
-        os.makedirs(os.path.dirname(caminho_local), exist_ok=True)
+        destino = os.path.join(UPLOAD_FOLDER, os.path.basename(chave_arquivo))
+        os.makedirs(os.path.dirname(destino), exist_ok=True)
+        with open(destino, 'wb') as fp:
+            fp.write(dados)
+        app.logger.info(f"[LOCAL] ✅ {destino} (volume persistente)")
         
-        with open(caminho_local, 'wb') as f:
-            f.write(file_obj.read())
+        # PRIORIDADE 2: Tenta R2 como REDUNDÂNCIA (não é crítico se falhar)
+        if os.environ.get('R2_ENABLED') == 'true':
+            try:
+                import boto3
+                account_id = os.environ.get('R2_ACCOUNT_ID', '').strip()
+                access_key = os.environ.get('R2_ACCESS_KEY', '').strip()
+                secret_key = os.environ.get('R2_SECRET_KEY', '').strip()
+                bucket     = os.environ.get('R2_BUCKET_NAME', '').strip()
+
+                if account_id and access_key and secret_key and bucket:
+                    s3 = boto3.client(
+                        's3',
+                        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+                        aws_access_key_id=access_key,
+                        aws_secret_access_key=secret_key,
+                        region_name='auto'
+                    )
+                    s3.upload_fileobj(io.BytesIO(dados), bucket, chave_arquivo)
+                    app.logger.info(f"[R2] ✅ Backup: {chave_arquivo}")
+            except Exception as e:
+                app.logger.warning(f"[R2] ⚠️ Backup falhou (não é crítico): {type(e).__name__}: {e}")
         
-        app.logger.info(f"[LOCAL] ✅ Upload local: {chave_arquivo}")
         return {'ok': True, 'chave': chave_arquivo, 'storage': 'local'}
     except Exception as e:
-        app.logger.error(f"[LOCAL] ❌ Erro upload local: {e}")
+        app.logger.error(f"[LOCAL] ❌ Erro crítico ao salvar: {e}")
         return {'ok': False, 'erro': str(e), 'storage': 'none'}
 
 def gerar_url_r2(chave_arquivo, expiracao_segundos=86400):
-    """Gera URL para download. R2 se disponível, senão local."""
+    """Gera URL pré-assinada para download do R2 (válida por 24h). Fallback local."""
     if os.environ.get('R2_ENABLED') == 'true':
         try:
-            endpoint = os.environ.get('R2_ENDPOINT', '').rstrip('/')
-            if endpoint:
-                return f"{endpoint}/{chave_arquivo}"
-        except:
-            pass
+            import boto3
+            account_id = os.environ.get('R2_ACCOUNT_ID', '').strip()
+            access_key = os.environ.get('R2_ACCESS_KEY', '').strip()
+            secret_key = os.environ.get('R2_SECRET_KEY', '').strip()
+            bucket     = os.environ.get('R2_BUCKET_NAME', '').strip()
+            
+            if account_id and access_key and secret_key and bucket:
+                s3 = boto3.client(
+                    's3',
+                    endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+                    aws_access_key_id=access_key,
+                    aws_secret_access_key=secret_key,
+                    region_name='auto'
+                )
+                url = s3.generate_presigned_url(
+                    'get_object',
+                    Params={'Bucket': bucket, 'Key': chave_arquivo},
+                    ExpiresIn=expiracao_segundos
+                )
+                return url
+        except Exception as e:
+            app.logger.warning(f"[R2] Erro gerar URL: {e}")
     
     # Fallback local
-    return f"/download/{chave_arquivo}"
+    return f"/download/{os.path.basename(chave_arquivo)}"
 
 
 @app.route('/admin/asaas/teste')
@@ -2578,7 +2690,8 @@ def diag_anexos():
                 caminho = os.path.join(UPLOAD_FOLDER, os.path.basename(nome))
                 itens.append({"campo": campo, "nome": nome, "existe_no_disco": os.path.exists(caminho)})
         try:
-            extras = json.loads(p['anexos']) if p['anexos'] else []
+            _raw = json.loads(p['anexos']) if p['anexos'] else []
+            extras = [x['nome'] if isinstance(x, dict) else x for x in _raw]
         except Exception:
             extras = []
         for nome in extras:
@@ -2595,6 +2708,131 @@ def diag_anexos():
         "arquivos_no_disco": arquivos_disco,
         "propostas_com_anexos": detalhe,
     })
+
+@app.route('/admin/emergency/reenviar-anexo', methods=['POST'])
+@login_required
+@admin_required
+def emergency_reenviar_anexo():
+    """
+    Recebe um arquivo e o salva em UPLOAD_FOLDER com o nome exato informado.
+    Usado para recuperar anexos perdidos.
+    Payload multipart: file=<arquivo>, nome_original=<nome exato do banco>
+    """
+    nome_original = (request.form.get('nome_original') or '').strip()
+    f = request.files.get('file')
+
+    if not f or not f.filename:
+        return jsonify({'ok': False, 'erro': 'Nenhum arquivo enviado'}), 400
+    if not nome_original:
+        return jsonify({'ok': False, 'erro': 'Nome original não informado'}), 400
+
+    # Salva com o nome EXATO que está no banco
+    caminho = os.path.join(UPLOAD_FOLDER, nome_original)
+    try:
+        f.save(caminho)
+        return jsonify({
+            'ok': True,
+            'msg': f'Arquivo salvo: {nome_original}',
+            'caminho': caminho,
+            'tamanho': os.path.getsize(caminho)
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+
+@app.route('/admin/emergency/buscar-anexos', methods=['GET','POST'])
+@login_required
+@admin_required
+def emergency_buscar_anexos():
+    """
+    Varre o filesystem em busca de arquivos de anexos que existem
+    no banco mas não estão em UPLOAD_FOLDER. Lista onde foram encontrados.
+    GET = diagnóstico / POST = copia para /data/anexos
+    """
+    import shutil
+
+    # Coleta todos os nomes de arquivo referenciados no banco
+    conn = db()
+    rows = conn.execute("""
+        SELECT id, comprovante_boleto, contrato_arquivo, anexos
+        FROM propostas
+        WHERE comprovante_boleto IS NOT NULL
+           OR contrato_arquivo IS NOT NULL
+           OR (anexos IS NOT NULL AND anexos != '[]')
+    """).fetchall()
+    close_db(conn)
+
+    nomes_banco = set()
+    for r in rows:
+        def _add(v):
+            if v: nomes_banco.add(os.path.basename(v))
+        _add(r['comprovante_boleto'] if hasattr(r,'keys') else r[1])
+        _add(r['contrato_arquivo']   if hasattr(r,'keys') else r[2])
+        try:
+            extras = json.loads((r['anexos'] if hasattr(r,'keys') else r[3]) or '[]')
+            for a in extras: _add(a)
+        except: pass
+
+    # Lugares para procurar
+    lugares = [
+        UPLOAD_FOLDER,
+        '/data/anexos',
+        '/data',
+        os.path.join(os.path.expanduser('~'), 'JOB_Serenus_Dados', 'anexos'),
+        os.path.join(os.path.expanduser('~'), 'JOB_Serenus_Dados'),
+        '/app/uploads',
+        '/app/anexos',
+        '/tmp/anexos',
+    ]
+
+    encontrados = {}   # nome → caminho_completo
+    nao_encontrados = []
+
+    # Varre todos os lugares
+    for lugar in lugares:
+        if not os.path.isdir(lugar): continue
+        try:
+            for arq in os.listdir(lugar):
+                caminho = os.path.join(lugar, arq)
+                if os.path.isfile(caminho) and arq in nomes_banco:
+                    if arq not in encontrados:
+                        encontrados[arq] = caminho
+        except: pass
+
+    for nome in sorted(nomes_banco):
+        if nome not in encontrados:
+            nao_encontrados.append(nome)
+
+    if request.method == 'POST':
+        # Copia arquivos encontrados para UPLOAD_FOLDER
+        copiados = 0
+        erros = []
+        for nome, origem in encontrados.items():
+            destino = os.path.join(UPLOAD_FOLDER, nome)
+            if os.path.exists(destino):
+                copiados += 1
+                continue
+            try:
+                shutil.copy2(origem, destino)
+                copiados += 1
+            except Exception as e:
+                erros.append(f"{nome}: {e}")
+        return jsonify({
+            'ok': True,
+            'copiados': copiados,
+            'erros': erros,
+            'ainda_faltando': nao_encontrados
+        })
+
+    return jsonify({
+        'ok': True,
+        'upload_folder': UPLOAD_FOLDER,
+        'total_no_banco': len(nomes_banco),
+        'encontrados_fora': {k: v for k, v in encontrados.items() if not v.startswith(UPLOAD_FOLDER)},
+        'nao_encontrados': nao_encontrados,
+        'lugares_verificados': [l for l in lugares if os.path.isdir(l)],
+    })
+
 
 @app.route('/admin/emergency/status')
 @login_required
@@ -2897,10 +3135,86 @@ def admin_ultimo_erro():
 @app.route('/anexos/<path:nome>')
 @login_required
 def servir_anexo(nome):
-    nome = os.path.basename(nome)
-    if not os.path.exists(os.path.join(UPLOAD_FOLDER, nome)):
-        abort(404)
-    return send_from_directory(UPLOAD_FOLDER, nome)
+    """Serve arquivo LOCAL primeiro (volume persistente), depois tenta R2 como fallback."""
+    from urllib.parse import unquote
+    import io
+    nome = os.path.basename(unquote(nome))
+
+    # PRIORIDADE 1: LOCAL (/data/anexos — volume persistente)
+    caminho = os.path.join(UPLOAD_FOLDER, nome)
+    if os.path.exists(caminho):
+        app.logger.info(f"[SERVE] ✅ LOCAL: {nome}")
+        return send_from_directory(UPLOAD_FOLDER, nome)
+    
+    # Tenta com nome sanitizado
+    nome_limpo = _sanitizar_filename(nome)
+    caminho_limpo = os.path.join(UPLOAD_FOLDER, nome_limpo)
+    if os.path.exists(caminho_limpo):
+        app.logger.info(f"[SERVE] ✅ LOCAL (sanitizado): {nome_limpo}")
+        return send_from_directory(UPLOAD_FOLDER, nome_limpo)
+
+    # PRIORIDADE 2: R2 (fallback se local não tem)
+    if os.environ.get('R2_ENABLED') == 'true':
+        try:
+            import boto3
+            account_id = os.environ.get('R2_ACCOUNT_ID', '').strip()
+            access_key = os.environ.get('R2_ACCESS_KEY', '').strip()
+            secret_key = os.environ.get('R2_SECRET_KEY', '').strip()
+            bucket     = os.environ.get('R2_BUCKET_NAME', '').strip()
+            if account_id and access_key and secret_key and bucket:
+                s3 = boto3.client(
+                    's3',
+                    endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+                    aws_access_key_id=access_key,
+                    aws_secret_access_key=secret_key,
+                    region_name='auto'
+                )
+
+                # Lista de chaves R2 a tentar, em ordem
+                chaves_tentar = [nome, _sanitizar_filename(nome)]
+
+                # Os arquivos no R2 ficam dentro de pastas (ex: propostas/20/contrato/ARQ.pdf),
+                # mas a URL traz só o nome do arquivo. Então varremos o bucket procurando
+                # qualquer chave que TERMINE com esse nome de arquivo.
+                achou_key = None
+                for k in chaves_tentar:
+                    try:
+                        s3.head_object(Bucket=bucket, Key=k)
+                        achou_key = k
+                        break
+                    except Exception:
+                        pass
+
+                if not achou_key:
+                    try:
+                        paginator = s3.get_paginator('list_objects_v2')
+                        alvo = nome.lower()
+                        alvo_limpo = _sanitizar_filename(nome).lower()
+                        for page in paginator.paginate(Bucket=bucket):
+                            for obj in page.get('Contents', []):
+                                key = obj['Key']
+                                base = key.split('/')[-1].lower()
+                                if base == alvo or base == alvo_limpo:
+                                    achou_key = key
+                                    break
+                            if achou_key:
+                                break
+                    except Exception as e:
+                        app.logger.warning(f"[SERVE] ⚠️ R2 listagem falhou: {type(e).__name__}: {e}")
+
+                if achou_key:
+                    resp = s3.get_object(Bucket=bucket, Key=achou_key)
+                    content = resp['Body'].read()
+                    ctype = resp.get('ContentType', 'application/octet-stream')
+                    app.logger.info(f"[SERVE] ✅ R2 (fallback): {achou_key}")
+                    return Response(content, mimetype=ctype,
+                                    headers={'Content-Disposition': f'inline; filename="{nome}"'})
+        except Exception as e:
+            app.logger.warning(f"[SERVE] ⚠️ R2 falhou ({nome}): {type(e).__name__}: {e}")
+
+    # Não encontrou em lugar nenhum
+    app.logger.error(f"[SERVE] ❌ Arquivo não encontrado: {nome}")
+    abort(404)
 
 @app.route('/proposta/<int:pid>/anexo/excluir', methods=['POST'])
 @login_required
@@ -3303,7 +3617,8 @@ def salvar_proposta():
             """Salva um único arquivo localmente e retorna o nome ou None."""
             f = request.files.get(file_field)
             if f and f.filename:
-                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{prefixo}_{f.filename}"
+                nome_limpo = _sanitizar_filename(f.filename)
+                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{prefixo}_{nome_limpo}"
                 caminho = os.path.join(UPLOAD_FOLDER, n)
                 f.save(caminho)
                 return n
@@ -3313,7 +3628,8 @@ def salvar_proposta():
         nomes = []
         for f in request.files.getlist('anexos'):
             if f and f.filename:
-                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_doc_{f.filename}"
+                nome_limpo = _sanitizar_filename(f.filename)
+                n = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_doc_{nome_limpo}"
                 caminho = os.path.join(UPLOAD_FOLDER, n)
                 f.save(caminho)
                 nomes.append(n)
@@ -3809,7 +4125,8 @@ def enviar_email_teste(pid):
     close_db(conn)
     if p:
         try:
-            extras = json.loads(p['anexos']) if p['anexos'] else []
+            _raw = json.loads(p['anexos']) if p['anexos'] else []
+            extras = [x['nome'] if isinstance(x, dict) else x for x in _raw]
             lista_anexos.extend([a for a in extras if a])
         except Exception:
             pass
@@ -3848,7 +4165,8 @@ def enviar_plataforma(pid):
     # são documentos finais, usados apenas na antecipação de comissão.
     lista_anexos = []
     try:
-        extras = json.loads(p['anexos']) if p['anexos'] else []
+        _raw = json.loads(p['anexos']) if p['anexos'] else []
+        extras = [x['nome'] if isinstance(x, dict) else x for x in _raw]
         lista_anexos.extend([a for a in extras if a])
     except Exception:
         pass
@@ -4505,7 +4823,7 @@ def parcela_antecipar(pid):
         return jsonify({"ok": False, "msg": "Nenhum arquivo enviado"}), 400
     
     f = request.files['comprovante']
-    nome = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_antecip_{f.filename}"
+    nome = f"{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_antecip_{_sanitizar_filename(f.filename)}"
     caminho = os.path.join(UPLOAD_FOLDER, nome)
     f.save(caminho)
     
@@ -4698,9 +5016,7 @@ def usuario_novo():
 @app.route('/usuario/foto/upload', methods=['POST'])
 @login_required
 def usuario_foto_upload():
-    """Upload de foto de perfil via AJAX.
-    Admin pode enviar ?uid=X para alterar foto de outro usuário.
-    """
+    """Upload de foto de perfil via AJAX. Salva em R2 com fallback local."""
     fimg = request.files.get('foto')
     if not fimg or not fimg.filename:
         return jsonify({"ok": False, "erro": "Arquivo não enviado"}), 400
@@ -4723,12 +5039,16 @@ def usuario_foto_upload():
 
     conn = db()
     foto_antiga = conn.execute("SELECT foto FROM usuarios WHERE id=?", (uid_alvo,)).fetchone()
-    if foto_antiga and foto_antiga['foto']:
-        try: os.remove(os.path.join(UPLOAD_FOLDER, foto_antiga['foto']))
-        except: pass
 
     foto_nome = f"perfil_{uid_alvo}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}{ext}"
-    fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
+    
+    # Upload para R2 + fallback local
+    try:
+        upload_arquivo_r2(fimg, foto_nome)
+    except Exception as e:
+        app.logger.warning(f"[FOTO] R2 falhou, usando local: {e}")
+        fimg.seek(0)
+        fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
 
     conn.execute("UPDATE usuarios SET foto=? WHERE id=?", (foto_nome, uid_alvo))
     conn.commit(); close_db(conn)
@@ -5371,6 +5691,59 @@ def propostas_excluidas():
                           motivos=motivos,
                           excluidas=excluidas)
 
+@app.route('/admin/recovery-anexos')
+@login_required
+@admin_required
+def recovery_anexos():
+    """Página para reenviar anexos perdidos, organizado por proposta."""
+    conn = db()
+    rows = conn.execute("""
+        SELECT id, razao_social, comprovante_boleto, contrato_arquivo, anexos
+        FROM propostas
+        WHERE status != 'Excluído'
+        AND (comprovante_boleto IS NOT NULL
+             OR contrato_arquivo IS NOT NULL
+             OR (anexos IS NOT NULL AND anexos != '[]'))
+        ORDER BY id
+    """).fetchall()
+    close_db(conn)
+
+    propostas_faltando = []
+    for r in rows:
+        pid        = r['id'] if hasattr(r,'keys') else r[0]
+        razao      = r['razao_social'] if hasattr(r,'keys') else r[1]
+        comp       = r['comprovante_boleto'] if hasattr(r,'keys') else r[2]
+        cont       = r['contrato_arquivo']   if hasattr(r,'keys') else r[3]
+        anexos_raw = r['anexos'] if hasattr(r,'keys') else r[4]
+
+        faltando = []
+        for campo, nome in [('comprovante_boleto', comp), ('contrato_arquivo', cont)]:
+            if nome:
+                basename = os.path.basename(nome)
+                if not os.path.exists(os.path.join(UPLOAD_FOLDER, basename)):
+                    faltando.append({'campo': campo, 'nome': basename})
+
+        try:
+            extras = json.loads(anexos_raw or '[]')
+            for a in extras:
+                basename = os.path.basename(a)
+                if not os.path.exists(os.path.join(UPLOAD_FOLDER, basename)):
+                    faltando.append({'campo': 'anexo_extra', 'nome': basename})
+        except: pass
+
+        if faltando:
+            propostas_faltando.append({
+                'id': pid,
+                'razao_social': razao,
+                'faltando': faltando
+            })
+
+    return render_template('recovery_anexos.html',
+        propostas=propostas_faltando,
+        total_faltando=sum(len(p['faltando']) for p in propostas_faltando)
+    )
+
+
 @app.route('/admin/auditoria')
 @login_required
 @admin_required
@@ -5425,10 +5798,362 @@ def atualizar_status_operacional(pid):
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "msg": f"Status atualizado para '{novo_status}'"})
 
+
+# ─── BOLETO DE ADESÃO ──────────────────────────────────────────────────────────
+
+@app.route('/proposta/<int:pid>/gerar-boleto-adesao', methods=['POST'])
+@login_required
+def gerar_boleto_adesao(pid):
+    """
+    Gera boleto de taxa de adesão via Asaas.
+    Payload: {valor: 150.00, vencimento: '2026-07-01'}
+    """
+    if not asaas_configurado():
+        return jsonify({'ok': False, 'erro': 'Asaas não configurado. Verifique ASAAS_API_KEY no Railway.'}), 500
+
+    conn = db()
+    p = conn.execute("""
+        SELECT id, razao_social, tipo_pessoa, cpf_titular, cnpj,
+               email_resp_contrato, tel_resp_contrato, produto,
+               resp_contrato, adesao_asaas_customer_id,
+               end_logradouro, end_numero, end_complemento,
+               end_bairro, end_cidade, end_estado, end_cep
+        FROM propostas WHERE id=?
+    """, (pid,)).fetchone()
+    if not p:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Proposta não encontrada'}), 404
+
+    d = request.get_json(force=True) or {}
+    valor_raw  = d.get('valor', '')
+    vencimento = (d.get('vencimento') or '').strip()
+    descricao  = (d.get('descricao') or '').strip()
+    # Endereço — pode vir do payload (usuário digitou) ou já estar na proposta
+    end_log    = (d.get('end_logradouro')  or p['end_logradouro']  or '').strip() if hasattr(p,'keys') else (d.get('end_logradouro') or p[10] or '').strip()
+    end_num    = (d.get('end_numero')      or p['end_numero']      or '').strip() if hasattr(p,'keys') else (d.get('end_numero')     or p[11] or '').strip()
+    end_comp   = (d.get('end_complemento') or p['end_complemento'] or '').strip() if hasattr(p,'keys') else (d.get('end_complemento')or p[12] or '').strip()
+    end_bairro = (d.get('end_bairro')      or p['end_bairro']      or '').strip() if hasattr(p,'keys') else (d.get('end_bairro')     or p[13] or '').strip()
+    end_cidade = (d.get('end_cidade')      or p['end_cidade']      or '').strip() if hasattr(p,'keys') else (d.get('end_cidade')     or p[14] or '').strip()
+    end_estado = (d.get('end_estado')      or p['end_estado']      or '').strip() if hasattr(p,'keys') else (d.get('end_estado')     or p[15] or '').strip()
+    end_cep    = (d.get('end_cep')         or p['end_cep']         or '').strip() if hasattr(p,'keys') else (d.get('end_cep')        or p[16] or '').strip()
+    end_cep_dig = ''.join(c for c in end_cep if c.isdigit())
+
+    # Valida valor
+    try:
+        valor = float(str(valor_raw).replace(',', '.'))
+        if valor <= 0: raise ValueError()
+    except Exception:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Valor inválido.'}), 400
+
+    if not vencimento:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Informe a data de vencimento.'}), 400
+
+    # CPF ou CNPJ
+    tipo_pessoa = (p['tipo_pessoa'] if hasattr(p,'keys') else 'PF') or 'PF'
+    tipo_pessoa = tipo_pessoa.upper()
+    if 'J' in tipo_pessoa or 'JURIDICA' in tipo_pessoa or 'EMPRESA' in tipo_pessoa:
+        doc = ''.join(c for c in (p['cnpj'] if hasattr(p,'keys') else p[4] or '') if c.isdigit())
+        tipo_doc = 'CNPJ'
+    else:
+        doc = ''.join(c for c in (p['cpf_titular'] if hasattr(p,'keys') else p[3] or '') if c.isdigit())
+        tipo_doc = 'CPF'
+
+    if not doc or len(doc) < 11:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': f'{tipo_doc} do cliente não preenchido. Edite a proposta.'}), 400
+
+    razao_social      = p['razao_social']         if hasattr(p,'keys') else p[1]
+    email             = p['email_resp_contrato']  if hasattr(p,'keys') else p[5] or ''
+    telefone          = p['tel_resp_contrato']    if hasattr(p,'keys') else p[6] or ''
+    produto           = p['produto']              if hasattr(p,'keys') else p[7] or ''
+    asaas_customer_id = p['adesao_asaas_customer_id'] if hasattr(p,'keys') else p[9]
+
+    # Descrição padrão se não veio do payload
+    if not descricao:
+        descricao = f"Taxa de Adesão — {produto or 'Plano de Saúde'} (Proposta #{pid})"
+
+    # ── 1. Salva endereço na proposta (para próxima vez auto-preencher) ──
+    if end_log or end_cidade or end_cep:
+        conn.execute("""UPDATE propostas SET
+            end_logradouro=?, end_numero=?, end_complemento=?,
+            end_bairro=?, end_cidade=?, end_estado=?, end_cep=?
+            WHERE id=?""",
+            (end_log, end_num, end_comp, end_bairro, end_cidade, end_estado, end_cep, pid))
+
+    # ── 2. Criar/atualizar cliente no Asaas (com endereço para NF) ──
+    payload_cliente = {
+        "name": razao_social,
+        "cpfCnpj": doc,
+        "email": email or None,
+        "mobilePhone": _normalizar_telefone(telefone) if telefone else None,
+        "notificationDisabled": False,
+    }
+    # Adiciona endereço se disponível
+    if end_cep_dig:
+        payload_cliente["postalCode"]   = end_cep_dig
+        payload_cliente["address"]      = end_log or None
+        payload_cliente["addressNumber"]= end_num or None
+        payload_cliente["complement"]   = end_comp or None
+        payload_cliente["province"]     = end_bairro or None
+    payload_cliente = {k: v for k, v in payload_cliente.items() if v}
+
+    if not asaas_customer_id:
+        cliente_data, sc = asaas_request("POST", "/customers", payload_cliente)
+        if sc not in (200, 201) or 'id' not in cliente_data:
+            close_db(conn)
+            erro = cliente_data.get('errors',[{}])[0].get('description', str(cliente_data)) if 'errors' in cliente_data else str(cliente_data)
+            return jsonify({'ok': False, 'erro': f'Erro ao criar cliente no Asaas: {erro}'}), 500
+        asaas_customer_id = cliente_data['id']
+        conn.execute("UPDATE propostas SET adesao_asaas_customer_id=? WHERE id=?", (asaas_customer_id, pid))
+    else:
+        # Atualiza endereço no cliente existente
+        asaas_request("PUT", f"/customers/{asaas_customer_id}", payload_cliente)
+
+    # ── 3. Criar cobrança BOLETO ──
+    payload_cobranca = {
+        "customer":          asaas_customer_id,
+        "billingType":       "BOLETO",
+        "value":             valor,
+        "dueDate":           vencimento,
+        "description":       descricao,
+        "externalReference": f"proposta_{pid}",
+    }
+    cobranca_data, sc = asaas_request("POST", "/payments", payload_cobranca)
+    if sc not in (200, 201) or 'id' not in cobranca_data:
+        close_db(conn)
+        erro = cobranca_data.get('errors',[{}])[0].get('description', str(cobranca_data)) if 'errors' in cobranca_data else str(cobranca_data)
+        return jsonify({'ok': False, 'erro': f'Erro ao criar boleto no Asaas: {erro}'}), 500
+
+    payment_id = cobranca_data.get('id', '')
+    boleto_url = cobranca_data.get('bankSlipUrl', '')
+    linha_dig  = cobranca_data.get('identificationField', '')
+
+    # ── 4. Baixa o PDF do boleto e salva localmente ──
+    boleto_pdf_nome = None
+    if boleto_url:
+        try:
+            import urllib.request as _ur
+            boleto_pdf_nome = f"BOLETO_ADESAO_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}.pdf"
+            _ur.urlretrieve(boleto_url, os.path.join(UPLOAD_FOLDER, boleto_pdf_nome))
+        except Exception as e:
+            app.logger.warning(f"[GERAR_BOLETO] Não baixou PDF: {e}")
+            boleto_pdf_nome = None
+
+    # ── 5. Salva tudo na proposta ──
+    conn.execute("""
+        UPDATE propostas SET
+            adesao_asaas_payment_id = ?,
+            adesao_boleto_url       = ?,
+            adesao_linha_digitavel  = ?,
+            adesao_valor            = ?,
+            adesao_vencimento       = ?,
+            adesao_status           = 'Aguardando Pagamento',
+            adesao_descricao        = ?,
+            adesao_boleto_pdf       = COALESCE(?, adesao_boleto_pdf)
+        WHERE id = ?
+    """, (payment_id, boleto_url, linha_dig, valor, vencimento,
+          descricao, boleto_pdf_nome, pid))
+
+    conn.execute("""
+        INSERT INTO historico_proposta (proposta_id, usuario_id, usuario_nome, tipo, descricao, criado_em)
+        VALUES (?, ?, ?, 'boleto_adesao', ?, ?)
+    """, (pid, session['user_id'], session.get('nome',''),
+          f'Boleto de adesão gerado — R$ {valor:.2f} — venc. {vencimento} — "{descricao}"',
+          datetime.now(TZ_SP)))
+
+    conn.commit()
+    close_db(conn)
+    return jsonify({
+        'ok':             True,
+        'payment_id':     payment_id,
+        'boleto_url':     boleto_url,
+        'linha_digitavel': linha_dig,
+        'valor':          valor,
+        'vencimento':     vencimento,
+        'descricao':      descricao,
+        'boleto_pdf':     boleto_pdf_nome,
+        'msg':            f'Boleto gerado! Venc. {vencimento}'
+    })
+
+
+@app.route('/proposta/<int:pid>/boleto-adesao')
+@login_required
+def ver_boleto_adesao(pid):
+    """Redireciona para o boleto de adesão gerado no Asaas (download/visualização)."""
+    conn = db()
+    p = conn.execute(
+        "SELECT adesao_boleto_url, adesao_status, razao_social FROM propostas WHERE id=?",
+        (pid,)
+    ).fetchone()
+    close_db(conn)
+
+    if not p:
+        flash('Proposta não encontrada.', 'error')
+        return redirect(url_for('listar_propostas'))
+
+    boleto_url = p['adesao_boleto_url'] if hasattr(p, 'keys') else p[0]
+    if not boleto_url:
+        flash('Boleto não gerado ainda. Gere o boleto primeiro.', 'warning')
+        return redirect(url_for('detalhe_proposta', pid=pid))
+
+    return redirect(boleto_url)
+
+
+@app.route('/proposta/<int:pid>/boleto-adesao/cancelar', methods=['POST'])
+@login_required
+def cancelar_boleto_adesao(pid):
+    """Cancela o boleto de adesão no Asaas e limpa os dados na proposta."""
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Apenas administradores podem cancelar boletos.'}), 403
+
+    conn = db()
+    p = conn.execute(
+        "SELECT adesao_asaas_payment_id, adesao_status, razao_social FROM propostas WHERE id=?",
+        (pid,)
+    ).fetchone()
+
+    if not p:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Proposta não encontrada'}), 404
+
+    payment_id  = p['adesao_asaas_payment_id'] if hasattr(p, 'keys') else p[0]
+    status_atual = p['adesao_status'] if hasattr(p, 'keys') else p[1]
+
+    if not payment_id:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Nenhum boleto gerado para cancelar'}), 400
+
+    if status_atual == 'Pago':
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Boleto já foi pago — não pode ser cancelado'}), 400
+
+    # Cancela no Asaas (DELETE /payments/{id})
+    data, sc = asaas_request('DELETE', f'/payments/{payment_id}')
+
+    # Asaas retorna 200 com {"deleted": true} ou {"id": ..., "status": "CANCELLED"}
+    cancelado_asaas = sc in (200, 204) or data.get('deleted') or data.get('status') == 'CANCELLED'
+
+    if not cancelado_asaas:
+        close_db(conn)
+        erro = data.get('errors', [{}])[0].get('description', str(data)) if 'errors' in data else str(data)
+        return jsonify({'ok': False, 'erro': f'Erro ao cancelar no Asaas: {erro}'}), 500
+
+    # Limpa os dados do boleto na proposta
+    conn.execute("""
+        UPDATE propostas SET
+            adesao_asaas_payment_id = NULL,
+            adesao_boleto_url       = NULL,
+            adesao_linha_digitavel  = NULL,
+            adesao_valor            = NULL,
+            adesao_vencimento       = NULL,
+            adesao_status           = 'Cancelado'
+        WHERE id = ?
+    """, (pid,))
+
+    conn.execute("""
+        INSERT INTO historico_proposta (proposta_id, usuario_id, usuario_nome, tipo, descricao, criado_em)
+        VALUES (?, ?, ?, 'boleto_adesao', ?, ?)
+    """, (pid, session['user_id'], session.get('nome', ''),
+          f'Boleto de adesão cancelado (Asaas ID: {payment_id})',
+          datetime.now(TZ_SP)))
+
+    conn.commit()
+    close_db(conn)
+    return jsonify({'ok': True, 'msg': 'Boleto cancelado com sucesso.'})
+
+
+
+@app.route('/proposta/<int:pid>/boleto-adesao/status')
+@login_required
+def status_boleto_adesao(pid):
+    """Consulta status do boleto de adesão no Asaas e atualiza no banco.
+    Se pago: baixa o PDF do boleto e salva o comprovante automaticamente."""
+    conn = db()
+    p = conn.execute(
+        "SELECT adesao_asaas_payment_id, adesao_status, adesao_boleto_url FROM propostas WHERE id=?",
+        (pid,)
+    ).fetchone()
+
+    if not p:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Proposta não encontrada'}), 404
+
+    payment_id   = p['adesao_asaas_payment_id'] if hasattr(p, 'keys') else p[0]
+    status_banco = p['adesao_status']            if hasattr(p, 'keys') else p[1]
+    boleto_url   = p['adesao_boleto_url']        if hasattr(p, 'keys') else p[2]
+
+    if not payment_id:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': 'Boleto não gerado ainda'}), 404
+
+    # Consulta no Asaas
+    data, sc = asaas_request("GET", f"/payments/{payment_id}")
+
+    if sc != 200 or 'status' not in data:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': f'Erro ao consultar Asaas: {data}'}), 500
+
+    status_asaas = data['status']
+    STATUS_MAP = {
+        'PENDING':   'Aguardando Pagamento',
+        'RECEIVED':  'Pago',
+        'CONFIRMED': 'Pago',
+        'OVERDUE':   'Vencido',
+        'REFUNDED':  'Estornado',
+        'CANCELED':  'Cancelado',
+    }
+    status_legivel = STATUS_MAP.get(status_asaas, status_asaas)
+    pago = status_asaas in ('RECEIVED', 'CONFIRMED')
+
+    # Atualiza status no banco
+    conn.execute("UPDATE propostas SET adesao_status=? WHERE id=?", (status_legivel, pid))
+
+    # Se foi pago agora (antes estava pendente): salva o boleto PDF como comprovante
+    comprovante_gerado = None
+    if pago and status_banco not in ('Pago',):
+        try:
+            import urllib.request as _ur
+            # Baixa o PDF do boleto do Asaas
+            boleto_pdf_url = data.get('bankSlipUrl') or boleto_url
+            if boleto_pdf_url:
+                nome_pdf = f"BOLETO_ADESAO_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}.pdf"
+                caminho_pdf = os.path.join(UPLOAD_FOLDER, nome_pdf)
+                _ur.urlretrieve(boleto_pdf_url, caminho_pdf)
+                # Salva como comprovante_boleto se ainda não tiver
+                p2 = conn.execute("SELECT comprovante_boleto FROM propostas WHERE id=?", (pid,)).fetchone()
+                comprovante_atual = p2['comprovante_boleto'] if hasattr(p2,'keys') else p2[0]
+                if not comprovante_atual:
+                    conn.execute("UPDATE propostas SET comprovante_boleto=? WHERE id=?", (nome_pdf, pid))
+                    conn.execute("""UPDATE parcelas SET status='Pendente de receber'
+                        WHERE proposta_id=? AND status='Bloqueado - Falta Comprovante'""", (pid,))
+                # Salva também como adesao_boleto_pdf (histórico do boleto emitido)
+                conn.execute("UPDATE propostas SET adesao_boleto_pdf=? WHERE id=?", (nome_pdf, pid))
+                conn.execute("""
+                    INSERT INTO historico_proposta (proposta_id, usuario_id, usuario_nome, tipo, descricao, criado_em)
+                    VALUES (?, ?, ?, 'boleto_adesao', ?, ?)
+                """, (pid, session['user_id'], session.get('nome','Sistema'),
+                      f'Boleto de adesão PAGO — comprovante salvo automaticamente: {nome_pdf}',
+                      datetime.now(TZ_SP)))
+                comprovante_gerado = nome_pdf
+        except Exception as e:
+            app.logger.warning(f"[BOLETO_STATUS] Não foi possível baixar PDF: {e}")
+
+    conn.commit()
+    close_db(conn)
+    return jsonify({
+        'ok':                True,
+        'status_asaas':      status_asaas,
+        'status':            status_legivel,
+        'pago':              pago,
+        'comprovante_gerado': comprovante_gerado,
+    })
+
+
 @app.route('/proposta/<int:pid>/comprovante-upload', methods=['POST'])
 @login_required
 def upload_comprovante(pid):
-    """Upload de comprovante de pagamento. Libera parcelas bloqueadas."""
     conn = db()
     p = conn.execute("SELECT usuario_id FROM propostas WHERE id=?", (pid,)).fetchone()
     if not p: close_db(conn); return jsonify({"ok": False}), 404
@@ -5439,21 +6164,41 @@ def upload_comprovante(pid):
     if not f or not f.filename:
         close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
 
-    nome = f"COMPROVANTE_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
-    f.save(os.path.join(UPLOAD_FOLDER, nome))
+    # Gerar nome único
+    nome = f"COMPROVANTE_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{_sanitizar_filename(f.filename)}"
+    
+    # UPLOAD COM R2 + FALLBACK AUTOMÁTICO
+    chave_r2 = f"propostas/{pid}/comprovante/{nome}"
+    resultado = upload_arquivo_r2(f.stream, chave_r2)
+    
+    if not resultado.get('ok'):
+        close_db(conn)
+        app.logger.error(f"[UPLOAD] ❌ Erro upload comprovante {pid}: {resultado.get('erro', 'desconhecido')}")
+        return jsonify({"ok": False, "msg": f"Erro ao salvar arquivo: {resultado.get('erro', 'desconhecido')}"}), 500
+    
+    storage_tipo = resultado.get('storage', 'local')
+    app.logger.info(f"[UPLOAD] ✅ Comprovante {pid} salvo em {storage_tipo}")
+    
+    # Atualizar banco de dados
     conn.execute("UPDATE propostas SET comprovante_boleto=? WHERE id=?", (nome, pid))
     conn.execute("""UPDATE parcelas SET status='Pendente de receber'
         WHERE proposta_id=? AND status='Bloqueado - Falta Comprovante'""", (pid,))
     conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
         VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
-        'comprovante', f"Comprovante de pagamento anexado: {nome}", datetime.now(TZ_SP)))
+        'comprovante', f"Comprovante anexado: {nome} ({storage_tipo})", datetime.now(TZ_SP)))
+    
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "msg": "Comprovante salvo. Parcelas desbloqueadas.", "nome": nome})
+    return jsonify({
+        "ok": True, 
+        "msg": f"✅ Comprovante salvo em {storage_tipo}. Parcelas desbloqueadas.", 
+        "nome": nome,
+        "storage": storage_tipo
+    })
 
 @app.route('/proposta/<int:pid>/contrato-upload', methods=['POST'])
 @login_required
 def upload_contrato(pid):
-    """Upload do contrato / proposta assinada."""
+    """Upload do contrato / proposta assinada (com R2 + fallback)."""
     conn = db()
     p = conn.execute("SELECT usuario_id FROM propostas WHERE id=?", (pid,)).fetchone()
     if not p: close_db(conn); return jsonify({"ok": False}), 404
@@ -5464,19 +6209,39 @@ def upload_contrato(pid):
     if not f or not f.filename:
         close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
 
-    nome = f"CONTRATO_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
-    f.save(os.path.join(UPLOAD_FOLDER, nome))
+    # Gerar nome único
+    nome = f"CONTRATO_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{_sanitizar_filename(f.filename)}"
+    
+    # UPLOAD COM R2 + FALLBACK AUTOMÁTICO
+    chave_r2 = f"propostas/{pid}/contrato/{nome}"
+    resultado = upload_arquivo_r2(f.stream, chave_r2)
+    
+    if not resultado.get('ok'):
+        close_db(conn)
+        app.logger.error(f"[UPLOAD] ❌ Erro upload contrato {pid}: {resultado.get('erro', 'desconhecido')}")
+        return jsonify({"ok": False, "msg": f"Erro ao salvar arquivo: {resultado.get('erro', 'desconhecido')}"}), 500
+    
+    storage_tipo = resultado.get('storage', 'local')
+    app.logger.info(f"[UPLOAD] ✅ Contrato {pid} salvo em {storage_tipo}")
+    
+    # Atualizar banco de dados
     conn.execute("UPDATE propostas SET contrato_arquivo=? WHERE id=?", (nome, pid))
     conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
         VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
-        'contrato', f"Contrato/proposta anexado: {nome}", datetime.now(TZ_SP)))
+        'contrato', f"Contrato anexado: {nome} ({storage_tipo})", datetime.now(TZ_SP)))
+    
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "msg": "Contrato salvo.", "nome": nome})
+    return jsonify({
+        "ok": True, 
+        "msg": f"✅ Contrato salvo em {storage_tipo}.", 
+        "nome": nome,
+        "storage": storage_tipo
+    })
 
 @app.route('/proposta/<int:pid>/doc-upload', methods=['POST'])
 @login_required
 def upload_doc_extra(pid):
-    """Upload de documento extra (bordo). Adiciona ao array de anexos."""
+    """Upload de documento extra (bordo). Adiciona ao array de anexos (com R2 + fallback)."""
     conn = db()
     p = conn.execute("SELECT usuario_id, anexos FROM propostas WHERE id=?", (pid,)).fetchone()
     if not p: close_db(conn); return jsonify({"ok": False}), 404
@@ -5489,18 +6254,40 @@ def upload_doc_extra(pid):
         close_db(conn); return jsonify({"ok": False, "msg": "Arquivo não enviado"}), 400
 
     prefixo = tipo.upper().replace(' ', '_').replace('/', '_')[:20]
-    nome = f"{prefixo}_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{f.filename}"
-    f.save(os.path.join(UPLOAD_FOLDER, nome))
+    nome = f"{prefixo}_{pid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{_sanitizar_filename(f.filename)}"
+    
+    # UPLOAD COM R2 + FALLBACK AUTOMÁTICO
+    chave_r2 = f"propostas/{pid}/documentos/{nome}"
+    resultado = upload_arquivo_r2(f.stream, chave_r2)
+    
+    if not resultado.get('ok'):
+        close_db(conn)
+        app.logger.error(f"[UPLOAD] ❌ Erro upload documento {pid}: {resultado.get('erro', 'desconhecido')}")
+        return jsonify({"ok": False, "msg": f"Erro ao salvar arquivo: {resultado.get('erro', 'desconhecido')}"}), 500
+    
+    storage_tipo = resultado.get('storage', 'local')
+    app.logger.info(f"[UPLOAD] ✅ Documento {pid} ({tipo}) salvo em {storage_tipo}")
 
-    try: anexos = json.loads(p['anexos'] or '[]')
-    except: anexos = []
+    # Atualizar array de anexos
+    try: 
+        anexos = json.loads(p['anexos'] or '[]')
+    except: 
+        anexos = []
+    
     anexos.append(nome)
+    
     conn.execute("UPDATE propostas SET anexos=? WHERE id=?", (json.dumps(anexos), pid))
     conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
         VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
-        'documento', f"Documento anexado ({tipo}): {nome}", datetime.now(TZ_SP)))
+        'documento', f"Documento anexado ({tipo}): {nome} ({storage_tipo})", datetime.now(TZ_SP)))
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "msg": f"{tipo} salvo.", "nome": nome})
+    return jsonify({
+        "ok": True, 
+        "msg": f"✅ {tipo} salvo em {storage_tipo}.", 
+        "nome": nome,
+        "storage": storage_tipo,
+        "tipo": tipo
+    })
 
 
 
@@ -5632,13 +6419,25 @@ def crm():
     f_data_de   = request.args.get('data_de', '').strip()     # YYYY-MM-DD
     f_data_ate  = request.args.get('data_ate', '').strip()    # YYYY-MM-DD
     f_busca     = request.args.get('q', '').strip()
+    f_externo   = request.args.get('externo', '').strip()  # consultor externo (não cadastrado)
 
     # Lista de consultores para o filtro (admin vê todos os usuários ativos)
     responsaveis = []
+    consultores_externos = []
     if eh_admin:
         responsaveis = conn.execute(
             "SELECT id, nome, perfil FROM usuarios WHERE ativo=1 ORDER BY nome"
         ).fetchall()
+        # Consultores externos que aparecem na planilha mas não são usuários
+        try:
+            ext = conn.execute("""
+                SELECT DISTINCT consultor_externo FROM crm_leads
+                WHERE consultor_externo IS NOT NULL AND consultor_externo != ''
+                ORDER BY consultor_externo
+            """).fetchall()
+            consultores_externos = [r['consultor_externo'] if hasattr(r,'keys') else r[0] for r in ext]
+        except Exception:
+            pass
 
     # Monta query
     q = """SELECT l.*, u.nome as responsavel_nome
@@ -5653,10 +6452,17 @@ def crm():
         params.append(uid)
     elif f_consultor:
         if f_consultor == 'sem':
-            q += " AND l.responsavel_id IS NULL"
+            q += " AND l.responsavel_id IS NULL AND (l.consultor_externo IS NULL OR l.consultor_externo='')"
+        elif f_consultor == 'externo':
+            q += " AND l.consultor_externo IS NOT NULL AND l.consultor_externo != ''"
         else:
             q += " AND l.responsavel_id=?"
             params.append(int(f_consultor))
+
+    # Filtro por consultor externo específico
+    if f_externo:
+        q += " AND LOWER(l.consultor_externo) LIKE LOWER(?)"
+        params.append(f'%{f_externo}%')
 
     if f_etapa:
         q += " AND l.etapa=?"
@@ -5675,9 +6481,9 @@ def crm():
         params.append(f_data_ate)
 
     if f_busca:
-        q += " AND (LOWER(l.nome) LIKE ? OR l.telefone LIKE ? OR LOWER(l.email) LIKE ?)"
+        q += " AND (LOWER(l.nome) LIKE ? OR l.telefone LIKE ? OR LOWER(l.email) LIKE ? OR LOWER(COALESCE(l.consultor_externo,'')) LIKE ?)"
         like = f'%{f_busca.lower()}%'
-        params.extend([like, f'%{f_busca}%', like])
+        params.extend([like, f'%{f_busca}%', like, like])
 
     q += " ORDER BY l.atualizado_em DESC"
     leads = conn.execute(q, params).fetchall()
@@ -5700,13 +6506,14 @@ def crm():
     # Filtros ativos para repassar ao template
     filtros_ativos = {
         'etapa': f_etapa, 'consultor': f_consultor, 'origem': f_origem,
-        'data_de': f_data_de, 'data_ate': f_data_ate, 'q': f_busca
+        'data_de': f_data_de, 'data_ate': f_data_ate, 'q': f_busca,
+        'externo': f_externo
     }
 
     close_db(conn)
     return render_template('crm.html', kanban=kanban, etapas=etapas,
                            total=total, responsaveis=responsaveis, eh_admin=eh_admin,
-                           filtros=filtros_ativos)
+                           filtros=filtros_ativos, consultores_externos=consultores_externos)
 
 
 @app.route('/crm/lead/novo', methods=['POST'])
@@ -6041,7 +6848,7 @@ def webhook_meta():
                     conn.execute("""INSERT INTO crm_leads
                         (nome, telefone, email, empresa, origem, etapa, dados_extras)
                         VALUES (?,?,?,?,?,?,?)""",
-                        (nome, telefone, email, empresa, 'meta', 'topo',
+                        (nome, telefone, email, empresa, 'meta', 'lead_novo',
                          json.dumps(valor, ensure_ascii=False)))
                     lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
                     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
@@ -6068,7 +6875,7 @@ def webhook_google():
         conn.execute("""INSERT INTO crm_leads
             (nome, telefone, email, empresa, origem, etapa, dados_extras)
             VALUES (?,?,?,?,?,?,?)""",
-            (nome, telefone, email, empresa, 'google', 'topo',
+            (nome, telefone, email, empresa, 'google', 'lead_novo',
              json.dumps(data, ensure_ascii=False)))
         lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
@@ -6113,6 +6920,7 @@ def webhook_sheets():
 
         origem = data.get('origem', 'Sheets')
         leads_raw = data.get('leads', [])
+        modo = data.get('modo', 'normal')  # 'normal' reativa leads; 'historico' não reativa
 
         if not leads_raw:
             return jsonify({"ok": True, "importados": 0, "msg": "Nenhum lead enviado"}), 200
@@ -6124,12 +6932,19 @@ def webhook_sheets():
 
         for lead in leads_raw:
             nome     = (lead.get('nome') or '').strip()
-            telefone = (lead.get('telefone') or '').strip()
+            telefone_raw = (lead.get('telefone') or '').strip()
             email    = (lead.get('email') or '').strip()
             cidade   = (lead.get('cidade') or '').strip()
             tipo     = (lead.get('tipo') or 'PF').strip()
             num_pess = (lead.get('num_pessoas') or '').strip()
-            cons_raw = (lead.get('consultor') or '').strip()
+            # Consultor: tenta campo 'consultor', se vazio tenta 'consultor_2'
+            cons_raw = (lead.get('consultor') or lead.get('consultor_2') or '').strip()
+            # Data: aceita 'data_hora' ou 'data'
+            data_hora_raw = (lead.get('data_hora') or lead.get('data') or '').strip()
+
+            # Telefone: formata bonito p/ exibição + normaliza p/ dedup
+            telefone = _formatar_telefone(telefone_raw)   # (19) 99104-6030
+            telefone_norm = _normalizar_telefone(telefone_raw)  # 19991046030
 
             # Filtro: "teste" no nome ou email
             if nome and 'teste' in nome.lower():
@@ -6142,51 +6957,109 @@ def webhook_sheets():
             # Normalizar consultor + busca FLEXÍVEL do responsável
             consultor = _normalizar_consultor(cons_raw) or 'Guilherme'
             responsavel_id = _buscar_responsavel_id(conn, consultor)
+            # Se não achou no banco, guarda o nome original como externo
+            consultor_externo = cons_raw if (cons_raw and not responsavel_id) else None
 
-            # Data do lead (vinda da planilha) → guardamos em criado_em se válida
-            data_lead = _parse_data_lead(lead.get('data_hora') or '')
-
-            # Dedup por telefone
-            if telefone:
-                dup = conn.execute(
-                    "SELECT id FROM crm_leads WHERE telefone = ?",
-                    (telefone,)
-                ).fetchone()
-                if dup:
-                    duplicados += 1; continue
-
-            # Dedup por email
-            if email:
-                dup = conn.execute(
-                    "SELECT id FROM crm_leads WHERE email = ?",
-                    (email,)
-                ).fetchone()
-                if dup:
-                    duplicados += 1; continue
+            # Data do lead (vinda da planilha)
+            data_lead = _parse_data_lead(data_hora_raw)
+            data_str = data_lead.strftime('%d/%m/%Y') if data_lead else _fmt_data_br(datetime.now(TZ_SP))
 
             obs = f"Tipo: {tipo}"
             if num_pess:
                 obs += f" | Pessoas: {num_pess}"
 
+            # ── Verificar se lead já existe (por telefone OU email) ──
+            # Usa telefone_norm (só dígitos) comparado contra telefone_norm do banco
+            lead_existente = None
+            if telefone_norm:
+                lead_existente = conn.execute(
+                    "SELECT id, etapa, nome, criado_em FROM crm_leads WHERE telefone_norm = ?",
+                    (telefone_norm,)
+                ).fetchone()
+            # Fallback: compara só dígitos do telefone bruto armazenado
+            if not lead_existente and telefone_norm and len(telefone_norm) >= 8:
+                lead_existente = conn.execute(
+                    "SELECT id, etapa, nome, criado_em FROM crm_leads WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(telefone,'-',''),' ',''),'(',''),')',''),'+','') LIKE ?",
+                    (f'%{telefone_norm[-8:]}',)
+                ).fetchone()
+            if not lead_existente and email:
+                lead_existente = conn.execute(
+                    "SELECT id, etapa, nome, criado_em FROM crm_leads WHERE LOWER(email) = LOWER(?)",
+                    (email,)
+                ).fetchone()
+
+            if lead_existente:
+                lid = lead_existente['id'] if hasattr(lead_existente, 'keys') else lead_existente[0]
+                etapa_anterior = lead_existente['etapa'] if hasattr(lead_existente, 'keys') else lead_existente[1]
+                criado_existente = lead_existente['criado_em'] if hasattr(lead_existente, 'keys') else lead_existente[3]
+
+                # Converte criado_existente para date para comparar
+                data_criacao_banco = _parse_data_lead(str(criado_existente)) if criado_existente else None
+
+                # ── DECISÃO: reativar ou apenas atualizar? ──
+                # Reativa SOMENTE se a nova solicitação for MAIS RECENTE que a criação
+                # do lead E o modo não for 'historico'. Isso evita que reimportação
+                # de histórico mova todos os leads para "lead_novo".
+                eh_nova_solicitacao = (
+                    modo != 'historico'
+                    and data_lead is not None
+                    and data_criacao_banco is not None
+                    and data_lead > data_criacao_banco
+                    and etapa_anterior != 'lead_novo'
+                )
+
+                if eh_nova_solicitacao:
+                    # Lead voltou a solicitar de verdade → move para lead_novo
+                    conn.execute("""
+                        UPDATE crm_leads SET
+                            nome = COALESCE(NULLIF(?, ''), nome),
+                            email = COALESCE(NULLIF(?, ''), email),
+                            empresa = COALESCE(NULLIF(?, ''), empresa),
+                            origem = ?,
+                            etapa = 'lead_novo',
+                            atualizado_em = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (nome, email, cidade, origem, lid))
+                    conn.execute("""
+                        INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
+                        VALUES (?, ?, 'movimentacao', ?)
+                    """, (lid, consultor,
+                          f'🔄 Nova solicitação em {data_str} via {origem} — retornou de "{etapa_anterior}" para Lead Novo'))
+                    importados += 1
+                else:
+                    # É reimportação OU registro antigo/duplicado.
+                    # Apenas corrige a data de criação se a do banco estiver errada
+                    # (importada com data do dia) e tivermos uma data real da planilha.
+                    if data_lead and criado_existente:
+                        criado_str = str(criado_existente)
+                        if ('2026-06-22' in criado_str or '2026-06-23' in criado_str or '2026-06-24' in criado_str):
+                            conn.execute(
+                                "UPDATE crm_leads SET criado_em=? WHERE id=?",
+                                (data_lead.strftime('%Y-%m-%d 12:00:00'), lid)
+                            )
+                    duplicados += 1
+                continue
+
+            # ── NOVO LEAD: não existe no banco ──
             if data_lead:
                 conn.execute("""
                     INSERT INTO crm_leads
-                        (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes, criado_em)
-                    VALUES (?, ?, ?, ?, ?, 'topo', ?, ?, ?)
-                """, (nome, telefone, email, cidade, origem, responsavel_id, obs,
-                      data_lead.strftime('%Y-%m-%d 12:00:00')))
+                        (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id, observacoes, criado_em, consultor_externo)
+                    VALUES (?, ?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?, ?)
+                """, (nome, telefone, telefone_norm, email, cidade, origem, responsavel_id, obs,
+                      data_lead.strftime('%Y-%m-%d 12:00:00'), consultor_externo))
             else:
                 conn.execute("""
                     INSERT INTO crm_leads
-                        (nome, telefone, email, empresa, origem, etapa, responsavel_id, observacoes)
-                    VALUES (?, ?, ?, ?, ?, 'topo', ?, ?)
-                """, (nome, telefone, email, cidade, origem, responsavel_id, obs))
+                        (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id, observacoes, consultor_externo)
+                    VALUES (?, ?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?)
+                """, (nome, telefone, telefone_norm, email, cidade, origem, responsavel_id, obs, consultor_externo))
 
             lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             conn.execute("""
                 INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
                 VALUES (?, ?, 'criacao', ?)
-            """, (lead_id, consultor, f'Lead importado via {origem} (Apps Script)'))
+            """, (lead_id, consultor, f'Lead importado via {origem} em {data_str}'))
 
             importados += 1
 
@@ -6287,6 +7160,483 @@ def crm_lead_whatsapp(lid):
         app.logger.error(f"[WASPEED] Erro lead {lid}: {e}")
         return jsonify({"ok": False, "erro": f"Falha ao enviar: {e}"}), 500
 
+
+
+# ─── CRM CONFIG ───────────────────────────────────────────────────
+@app.route('/admin/crm/analise-quantitativos')
+@login_required
+def admin_crm_analise_quantitativos():
+    """Análise completa de quantitativos do CRM para debug de divergências."""
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
+
+    conn = db()
+    try:
+        # Total de leads
+        total = conn.execute("SELECT COUNT(*) c FROM crm_leads").fetchone()['c']
+
+        # Por etapa
+        por_etapa = conn.execute("""
+            SELECT etapa, COUNT(*) c FROM crm_leads GROUP BY etapa ORDER BY c DESC
+        """).fetchall()
+
+        # Por origem
+        por_origem = conn.execute("""
+            SELECT origem, COUNT(*) c FROM crm_leads GROUP BY origem ORDER BY c DESC
+        """).fetchall()
+
+        # Por responsável
+        por_resp = conn.execute("""
+            SELECT COALESCE(u.nome, 'SEM RESPONSÁVEL') as resp, COUNT(*) c
+            FROM crm_leads l
+            LEFT JOIN usuarios u ON u.id = l.responsavel_id
+            GROUP BY resp ORDER BY c DESC
+        """).fetchall()
+
+        # Leads com "teste" no nome (que foram ignorados na importação)
+        # Verifica se há no banco (não deveria ter)
+        com_teste = conn.execute("""
+            SELECT COUNT(*) c FROM crm_leads WHERE LOWER(nome) LIKE '%teste%'
+        """).fetchone()['c']
+
+        # Leads sem telefone E sem email (impossível deduplicar futuramente)
+        sem_contato = conn.execute("""
+            SELECT COUNT(*) c FROM crm_leads
+            WHERE (telefone IS NULL OR telefone = '')
+            AND (email IS NULL OR email = '')
+        """).fetchone()['c']
+
+        # Leads duplicados por telefone (mesmo tel, IDs diferentes)
+        dup_tel = conn.execute("""
+            SELECT telefone, COUNT(*) as cnt FROM crm_leads
+            WHERE telefone IS NOT NULL AND telefone != ''
+            GROUP BY telefone HAVING COUNT(*) > 1
+        """).fetchall()
+
+        # Leads duplicados por email
+        dup_email = conn.execute("""
+            SELECT email, COUNT(*) as cnt FROM crm_leads
+            WHERE email IS NOT NULL AND email != ''
+            GROUP BY email HAVING COUNT(*) > 1
+        """).fetchall()
+
+        close_db(conn)
+
+        def rows(rs): return [dict(r) if hasattr(r,'keys') else {'k':r[0],'c':r[1]} for r in rs]
+
+        return jsonify({
+            'ok': True,
+            'total_leads': total,
+            'por_etapa': rows(por_etapa),
+            'por_origem': rows(por_origem),
+            'por_responsavel': rows(por_resp),
+            'com_teste_no_nome': com_teste,
+            'sem_telefone_e_email': sem_contato,
+            'duplicados_tel': {'count': len(dup_tel), 'exemplos': rows(dup_tel[:10])},
+            'duplicados_email': {'count': len(dup_email), 'exemplos': rows(dup_email[:10])},
+        })
+    except Exception as e:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+
+@app.route('/admin/crm/diagnostico-leads', methods=['POST'])
+@login_required
+def admin_crm_diagnostico_leads():
+    """
+    Analisa divergências de quantitativo entre planilha e banco.
+    Recebe JSON: {leads: [...]} (mesmo formato do webhook)
+    Retorna breakdown detalhado de por que cada lead foi ignorado/duplicado.
+    """
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
+
+    d = request.get_json(force=True) or {}
+    leads_raw = d.get('leads', [])
+    if not leads_raw:
+        return jsonify({'ok': False, 'erro': 'Envie {leads:[...]}'}), 400
+
+    conn = db()
+    resultado = {
+        'total_enviados': len(leads_raw),
+        'importaria': 0,
+        'ignorados_teste_nome': [],
+        'ignorados_teste_email': [],
+        'ignorados_sem_nome': [],
+        'duplicados_telefone': [],
+        'duplicados_email': [],
+        'importaveis': [],
+    }
+
+    for lead in leads_raw:
+        nome     = (lead.get('nome') or '').strip()
+        telefone = (lead.get('telefone') or '').strip()
+        email    = (lead.get('email') or '').strip()
+
+        if not nome:
+            resultado['ignorados_sem_nome'].append({'tel': telefone, 'email': email})
+            continue
+        if 'teste' in nome.lower():
+            resultado['ignorados_teste_nome'].append({'nome': nome})
+            continue
+        if email and 'teste' in email.lower():
+            resultado['ignorados_teste_email'].append({'nome': nome, 'email': email})
+            continue
+
+        dup_tel = False
+        dup_email = False
+        if telefone:
+            r = conn.execute("SELECT id FROM crm_leads WHERE telefone=?", (telefone,)).fetchone()
+            if r:
+                dup_tel = True
+                resultado['duplicados_telefone'].append({'nome': nome, 'tel': telefone})
+                continue
+        if email:
+            r = conn.execute("SELECT id FROM crm_leads WHERE email=?", (email,)).fetchone()
+            if r:
+                dup_email = True
+                resultado['duplicados_email'].append({'nome': nome, 'email': email})
+                continue
+
+        resultado['importaveis'].append({'nome': nome, 'tel': telefone, 'email': email})
+        resultado['importaria'] += 1
+
+    close_db(conn)
+
+    # Resumo
+    resultado['resumo'] = {
+        'total': resultado['total_enviados'],
+        'sem_nome': len(resultado['ignorados_sem_nome']),
+        'teste_nome': len(resultado['ignorados_teste_nome']),
+        'teste_email': len(resultado['ignorados_teste_email']),
+        'dup_tel': len(resultado['duplicados_telefone']),
+        'dup_email': len(resultado['duplicados_email']),
+        'importaria': resultado['importaria'],
+    }
+    # Limita listas para não estourar resposta
+    for k in ['ignorados_teste_nome','ignorados_teste_email','ignorados_sem_nome',
+              'duplicados_telefone','duplicados_email','importaveis']:
+        resultado[k] = resultado[k][:20]  # máximo 20 exemplos de cada
+
+    return jsonify(resultado)
+
+
+
+@app.route('/admin/crm/restaurar-etapas', methods=['POST'])
+@login_required
+def admin_crm_restaurar_etapas():
+    """
+    Restaura leads que foram movidos incorretamente para 'lead_novo' durante
+    a reimportação de histórico. Identifica pela atividade 'movimentacao' de hoje
+    com texto 'Nova solicitação' e devolve o lead para a etapa anterior.
+    """
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
+
+    conn = db()
+    try:
+        # ESTRATÉGIA: Os leads importados do histórico foram movidos para 'lead_novo'
+        # por engano. Um lead REALMENTE novo tem criado_em de hoje/ontem.
+        # Os movidos por engano têm criado_em antigo OU foram criados em massa.
+        #
+        # Identifica leads em 'lead_novo' que têm atividade de 'criacao' (import)
+        # e os move para 'topo' (onde leads importados devem ficar).
+        # Leads genuinamente novos (criados manualmente hoje) permanecem.
+
+        # Busca todos os leads em lead_novo que vieram de importação
+        leads_importados = conn.execute("""
+            SELECT DISTINCT l.id AS id
+            FROM crm_leads l
+            JOIN crm_atividades a ON a.lead_id = l.id
+            WHERE l.etapa = 'lead_novo'
+            AND a.tipo = 'criacao'
+            AND a.descricao LIKE '%importado%'
+        """).fetchall()
+
+        ids = []
+        for r in leads_importados:
+            ids.append(r['id'] if hasattr(r, 'keys') else r[0])
+
+        restaurados = 0
+        if ids:
+            # Move em lote para 'topo' usando IN com placeholders
+            placeholders = ','.join(['?'] * len(ids))
+            conn.execute(
+                f"UPDATE crm_leads SET etapa='topo' WHERE id IN ({placeholders}) AND etapa='lead_novo'",
+                ids
+            )
+            restaurados = len(ids)
+
+            # Remove as atividades falsas de movimentação (reativação)
+            # Faz em lote, sem LIKE+param (evita bug de %)
+            conn.execute(
+                f"DELETE FROM crm_atividades WHERE lead_id IN ({placeholders}) AND tipo='movimentacao'",
+                ids
+            )
+
+        conn.commit()
+        close_db(conn)
+        return jsonify({
+            'ok': True,
+            'restaurados': restaurados,
+            'msg': f'{restaurados} leads movidos de Lead Novo para Topo do Funil'
+        })
+    except Exception as e:
+        close_db(conn)
+        app.logger.error(f"[RESTAURAR_ETAPAS] {e}")
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+
+@app.route('/admin/crm/formatar-telefones', methods=['POST'])
+@login_required
+def admin_crm_formatar_telefones():
+    """
+    Formata todos os telefones existentes para (XX) XXXXX-XXXX e
+    preenche a coluna telefone_norm (só dígitos) para dedup futura.
+    """
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
+
+    conn = db()
+    try:
+        leads = conn.execute("SELECT id, telefone FROM crm_leads WHERE telefone IS NOT NULL AND telefone != ''").fetchall()
+        formatados = 0
+        for lead in leads:
+            lid = lead['id'] if hasattr(lead, 'keys') else lead[0]
+            tel = lead['telefone'] if hasattr(lead, 'keys') else lead[1]
+
+            tel_bonito = _formatar_telefone(tel)
+            tel_norm = _normalizar_telefone(tel)
+
+            conn.execute(
+                "UPDATE crm_leads SET telefone=?, telefone_norm=? WHERE id=?",
+                (tel_bonito, tel_norm, lid)
+            )
+            formatados += 1
+
+        conn.commit()
+        close_db(conn)
+        return jsonify({'ok': True, 'formatados': formatados, 'msg': f'{formatados} telefones formatados'})
+    except Exception as e:
+        close_db(conn)
+        app.logger.error(f"[FORMATAR_TEL] {e}")
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+
+@app.route('/admin/crm/debug-datas')
+@login_required
+def admin_crm_debug_datas():
+    """Mostra amostra de telefones e datas no banco para debug."""
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
+    conn = db()
+    try:
+        # Amostra de 10 leads do Facebook
+        amostra = conn.execute("""
+            SELECT id, nome, telefone, email, criado_em, origem
+            FROM crm_leads
+            WHERE origem = 'Facebook'
+            ORDER BY id LIMIT 10
+        """).fetchall()
+
+        # Distribuição de datas
+        datas = conn.execute("""
+            SELECT SUBSTR(CAST(criado_em AS TEXT), 1, 10) AS dia, COUNT(*) AS qtd
+            FROM crm_leads
+            GROUP BY dia ORDER BY qtd DESC LIMIT 15
+        """).fetchall()
+
+        def rows(rs): return [dict(r) if hasattr(r,'keys') else {} for r in rs]
+        close_db(conn)
+        return jsonify({
+            'ok': True,
+            'amostra_facebook': rows(amostra),
+            'distribuicao_datas': rows(datas)
+        })
+    except Exception as e:
+        close_db(conn)
+        return jsonify({'ok': False, 'erro': str(e)}), 500
+
+
+@app.route('/webhook/corrigir-datas', methods=['POST'])
+def webhook_corrigir_datas():
+    """
+    Recebe lote de {telefone, email, data_hora} e corrige criado_em dos leads.
+    Usado pelo Apps Script para corrigir datas historicas.
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        token_esperado = os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
+        if data.get('token') != token_esperado:
+            return jsonify({"ok": False, "erro": "Token invalido"}), 401
+
+        registros = data.get('registros', [])
+        if not registros:
+            return jsonify({"ok": True, "corrigidos": 0, "nao_encontrados": 0})
+
+        conn = db()
+        corrigidos = 0
+        nao_encontrados = 0
+
+        import re as _re
+        def _so_digitos(s):
+            return _re.sub(r'\D', '', s or '')
+
+        for reg in registros:
+            telefone  = (reg.get('telefone') or '').strip()
+            email     = (reg.get('email') or '').strip()
+            data_hora = (reg.get('data_hora') or '').strip()
+
+            if not data_hora:
+                nao_encontrados += 1; continue
+
+            data_obj = _parse_data_lead(data_hora)
+            if not data_obj:
+                nao_encontrados += 1; continue
+
+            data_iso = data_obj.strftime('%Y-%m-%d 12:00:00')
+
+            lead = None
+
+            # Normaliza o telefone recebido
+            tel_norm = _normalizar_telefone(telefone)
+
+            # 1) Busca por telefone_norm (campo dedicado)
+            if tel_norm:
+                lead = conn.execute("SELECT id, criado_em FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone()
+
+            # 2) Busca por últimos 8 dígitos no telefone formatado
+            if not lead and tel_norm and len(tel_norm) >= 8:
+                lead = conn.execute(
+                    "SELECT id, criado_em FROM crm_leads WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(telefone,'-',''),' ',''),'(',''),')',''),'+','') LIKE ?",
+                    (f'%{tel_norm[-8:]}',)
+                ).fetchone()
+
+            # 3) Busca por email (case-insensitive)
+            if not lead and email:
+                lead = conn.execute("SELECT id, criado_em FROM crm_leads WHERE LOWER(email)=LOWER(?)", (email,)).fetchone()
+
+            if not lead:
+                nao_encontrados += 1; continue
+
+            lid = lead['id'] if hasattr(lead, 'keys') else lead[0]
+            criado_atual = str(lead['criado_em'] if hasattr(lead, 'keys') else lead[1] or '')
+
+            # Atualiza se: (a) data atual é do dia do import (errada), OU
+            # (b) a data da planilha é diferente da data atual registrada.
+            # Compara apenas a parte da data (YYYY-MM-DD).
+            data_planilha_ymd = data_obj.strftime('%Y-%m-%d')
+            data_atual_ymd = criado_atual[:10] if len(criado_atual) >= 10 else ''
+
+            eh_data_import = ('2026-06-22' in criado_atual or '2026-06-23' in criado_atual or '2026-06-24' in criado_atual)
+            datas_diferentes = (data_atual_ymd and data_atual_ymd != data_planilha_ymd)
+
+            if eh_data_import or datas_diferentes:
+                conn.execute("UPDATE crm_leads SET criado_em=? WHERE id=?", (data_iso, lid))
+                corrigidos += 1
+
+        conn.commit()
+        close_db(conn)
+        return jsonify({"ok": True, "corrigidos": corrigidos, "nao_encontrados": nao_encontrados})
+    except Exception as e:
+        app.logger.error(f"[CORRIGIR_DATAS] {e}")
+        return jsonify({"ok": False, "erro": str(e)}), 500
+
+
+
+@app.route('/admin/crm/corrigir-leads', methods=['POST'])
+@login_required
+def admin_crm_corrigir_leads():
+    """
+    Corrige retroativamente leads importados:
+    1. Atribui responsavel_id com base no texto da atividade de criação
+    2. Corrige criado_em com base na atividade de criação (que tem a data real)
+    Roda apenas para leads com responsavel_id IS NULL ou criado_em = data de hoje
+    """
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
+
+    conn = db()
+    try:
+        # Busca todos os usuários para o mapeamento
+        usuarios = conn.execute("SELECT id, nome FROM usuarios WHERE ativo=1").fetchall()
+        # Monta mapa: primeiro nome lower → id
+        mapa_usuarios = {}
+        for u in usuarios:
+            nome_completo = u['nome'] if hasattr(u, 'keys') else u[1]
+            uid = u['id'] if hasattr(u, 'keys') else u[0]
+            primeiro = nome_completo.strip().lower().split()[0]
+            mapa_usuarios[primeiro] = uid
+            mapa_usuarios[nome_completo.lower()] = uid
+
+        # Busca leads sem responsável ou com data suspeita (criados hoje mas atividade mais antiga)
+        leads = conn.execute("""
+            SELECT id, nome, responsavel_id, criado_em FROM crm_leads
+            WHERE responsavel_id IS NULL
+            ORDER BY id
+        """).fetchall()
+
+        corrigidos_resp = 0
+        corrigidos_data = 0
+
+        for lead in leads:
+            lid = lead['id'] if hasattr(lead, 'keys') else lead[0]
+
+            # Busca atividade de criação para extrair consultor e data
+            ativ = conn.execute("""
+                SELECT usuario_nome, descricao, criado_em FROM crm_atividades
+                WHERE lead_id=? AND tipo='criacao'
+                ORDER BY id LIMIT 1
+            """, (lid,)).fetchone()
+
+            if not ativ:
+                continue
+
+            usuario_nome = (ativ['usuario_nome'] if hasattr(ativ, 'keys') else ativ[0]) or ''
+            criado_em_ativ = ativ['criado_em'] if hasattr(ativ, 'keys') else ativ[2]
+
+            # Corrigir responsável
+            resp_id = None
+            if usuario_nome:
+                primeiro = usuario_nome.strip().lower().split()[0]
+                resp_id = mapa_usuarios.get(primeiro)
+                if not resp_id:
+                    resp_id = mapa_usuarios.get(usuario_nome.strip().lower())
+
+            if resp_id:
+                conn.execute("UPDATE crm_leads SET responsavel_id=? WHERE id=?", (resp_id, lid))
+                corrigidos_resp += 1
+
+        # Agora corrigir datas: leads onde criado_em difere da atividade de criação
+        # Para os leads importados da planilha, a data real está na descrição da atividade
+        # ou podemos usar a data da atividade como proxy
+        leads_data = conn.execute("""
+            SELECT l.id, l.criado_em, a.criado_em as ativ_criado_em
+            FROM crm_leads l
+            JOIN crm_atividades a ON a.lead_id = l.id AND a.tipo = 'criacao'
+            WHERE DATE(l.criado_em) = DATE(CURRENT_TIMESTAMP)
+            ORDER BY l.id
+        """).fetchall()
+
+        for lead in leads_data:
+            lid = lead['id'] if hasattr(lead, 'keys') else lead[0]
+            ativ_dt = lead['ativ_criado_em'] if hasattr(lead, 'keys') else lead[2]
+            if ativ_dt:
+                conn.execute("UPDATE crm_leads SET criado_em=? WHERE id=?", (ativ_dt, lid))
+                corrigidos_data += 1
+
+        conn.commit()
+        close_db(conn)
+        return jsonify({
+            'ok': True,
+            'corrigidos_responsavel': corrigidos_resp,
+            'corrigidos_data': corrigidos_data,
+            'msg': f'Corrigidos: {corrigidos_resp} responsáveis, {corrigidos_data} datas'
+        })
+    except Exception as e:
+        close_db(conn)
+        app.logger.error(f"[CORRIGIR_LEADS] {e}")
+        return jsonify({'ok': False, 'erro': str(e)}), 500
 
 
 # ─── CRM CONFIG ───────────────────────────────────────────────────
@@ -6516,6 +7866,40 @@ _verificar_banco_vazio()
 # Agendador de backup
 _SCHEDULER_INICIADO = False
 
+def _importar_leads_automatico():
+    """
+    Importa leads novos das planilhas automaticamente (sem filtro de data).
+    Roda a cada 30 minutos via scheduler. Só insere o que ainda não existe
+    (dedup por telefone/email já está no _processar_lead).
+    """
+    try:
+        conn = db()
+        leads_raw = _listar_leads_do_sheets()
+        importados = 0
+        for row in leads_raw:
+            try:
+                sucesso, msg, dados = _processar_lead(row, conn)
+                if sucesso:
+                    conn.execute(
+                        """INSERT INTO crm_leads 
+                           (nome, telefone, email, empresa, origem, etapa, responsavel_id, valor_estimado, observacoes)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (dados['nome'], dados['telefone'], dados['email'], dados['empresa'],
+                         dados['origem'], dados['etapa'], dados['responsavel_id'],
+                         dados['valor_estimado'], dados['observacoes'])
+                    )
+                    importados += 1
+            except Exception:
+                try: conn.rollback()
+                except Exception: pass
+        conn.commit()
+        close_db(conn)
+        if importados:
+            app.logger.info(f"[LEAD_AUTO] ✅ {importados} leads novos importados das planilhas")
+    except Exception as e:
+        app.logger.error(f"[LEAD_AUTO] ❌ {e}")
+
+
 def _iniciar_scheduler_backup():
     """Liga agendador de backup automático JSON (22:00 SP todo dia)."""
     global _SCHEDULER_INICIADO
@@ -6563,9 +7947,11 @@ def _iniciar_scheduler_backup():
         # Agendar para 22:00 (SP) todos os dias
         sched = BackgroundScheduler(daemon=True, timezone=TZ_SP)
         sched.add_job(fazer_backup_agendado, 'cron', hour=22, minute=0, max_instances=1)
+        # Importação automática de leads das planilhas a cada 30 minutos
+        sched.add_job(_importar_leads_automatico, 'interval', minutes=30, max_instances=1)
         sched.start()
         _SCHEDULER_INICIADO = True
-        app.logger.info("[SCHEDULER] ✅ Backup automático agendado para 22:00 (São Paulo)")
+        app.logger.info("[SCHEDULER] ✅ Backup (22:00 SP) + Importação de leads (a cada 30 min) agendados")
     except Exception as e:
         app.logger.warning(f"[SCHEDULER] ❌ Falha ao iniciar: {e}")
 
@@ -6578,18 +7964,75 @@ except Exception as e:
 # ──── IMPORTAÇÃO DE LEADS DO GOOGLE SHEETS ─────────────────────────────────
 # Mapeamento de apelidos de consultores → nomes reais
 CONSULTOR_ALIASES = {
+    # Guilherme
     'guilherme': 'Guilherme',
+    'guilherme santos': 'Guilherme',
     'gui': 'Guilherme',
     'gui santos': 'Guilherme',
-    'guilherme santos': 'Guilherme',
+    'gui2': 'Guilherme',
+    'guilherme2': 'Guilherme',
+    # Danilo
     'danilo': 'Danilo',
     'danilo sampaio': 'Danilo',
+    'danilo2': 'Danilo',
+    'danilo 2': 'Danilo',
+    # Bianca
     'bianca': 'Bianca',
     'bianca sampaio': 'Bianca',
+    'bianca2': 'Bianca',
+    'bianca 2': 'Bianca',
+    # Gabriel
     'gabriel': 'Gabriel',
     'gabriel maggiotto': 'Gabriel',
     'gabriel humberto maggiotto': 'Gabriel',
+    'gabriel2': 'Gabriel',
+    'gabriel 2': 'Gabriel',
+    # Juliana (supervisora)
+    'juliana': 'Juliana',
+    # Jack / JACK
+    'jack': 'Jack',
+    'jack2': 'Jack',
 }
+
+def _normalizar_telefone(tel_raw):
+    """
+    Extrai só os dígitos do telefone e normaliza para o padrão brasileiro.
+    Retorna apenas dígitos: '5519991046030' ou '19991046030'.
+    Usado para comparação/dedup.
+    """
+    if not tel_raw:
+        return ''
+    import re
+    dig = re.sub(r'\D', '', str(tel_raw))
+    # Remove código do país 55 se tiver 12-13 dígitos (55 + DDD + número)
+    if len(dig) >= 12 and dig.startswith('55'):
+        dig = dig[2:]
+    return dig
+
+def _formatar_telefone(tel_raw):
+    """
+    Formata telefone para exibição bonita: (19) 99104-6030 ou (19) 3104-6030.
+    Aceita qualquer formato de entrada (com 55, com traços, espaços, etc.).
+    """
+    if not tel_raw:
+        return ''
+    dig = _normalizar_telefone(tel_raw)
+    if not dig:
+        return str(tel_raw).strip()
+    # Celular com DDD: 11 dígitos → (XX) XXXXX-XXXX
+    if len(dig) == 11:
+        return f'({dig[0:2]}) {dig[2:7]}-{dig[7:11]}'
+    # Fixo com DDD: 10 dígitos → (XX) XXXX-XXXX
+    if len(dig) == 10:
+        return f'({dig[0:2]}) {dig[2:6]}-{dig[6:10]}'
+    # Celular sem DDD: 9 dígitos → XXXXX-XXXX
+    if len(dig) == 9:
+        return f'{dig[0:5]}-{dig[5:9]}'
+    # Fixo sem DDD: 8 dígitos → XXXX-XXXX
+    if len(dig) == 8:
+        return f'{dig[0:4]}-{dig[4:8]}'
+    # Outros tamanhos: retorna os dígitos como estão
+    return dig
 
 def _normalizar_consultor(nome_raw):
     """Normaliza apelido/nome para o primeiro nome real. Retorna None se vazio."""
