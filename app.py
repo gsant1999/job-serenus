@@ -91,8 +91,8 @@ def _ensure_db_initialized():
         except Exception as e:
             print(f"[DB] ⚠️ Erro ao inicializar: {e}")
             _db_initialized = True  # Evita loop infinito
-        # Inicia o backup automático diário (uma única vez por processo)
-        _iniciar_backup_automatico()
+        # Inicia o scheduler (backup + import de leads)
+        _iniciar_scheduler_backup()
 
 
 _backup_scheduler_iniciado = False
