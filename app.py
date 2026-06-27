@@ -7032,6 +7032,19 @@ def webhook_google():
         return jsonify({"ok": False, "erro": str(e)}), 200
 
 
+@app.route('/webhook/sheets/diagnostico', methods=['GET'])
+def webhook_sheets_diagnostico():
+    """Diagnóstico para AppScript validar conexão e token."""
+    token_env = os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
+    return jsonify({
+        "ok": True,
+        "webhook_url": "https://job-serenus-production.up.railway.app/webhook/sheets",
+        "token_esperado_prefixo": token_env[:10] + "...",
+        "status": "webhook pronto para receber dados",
+        "teste": "POST com token serenus_sheets_2026 para começar"
+    })
+
+
 @app.route('/webhook/sheets', methods=['POST'])
 def webhook_sheets():
     """
