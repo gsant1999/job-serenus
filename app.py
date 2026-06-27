@@ -1719,13 +1719,14 @@ def asaas_detectar_tipo_chave(chave):
 
 def upload_arquivo_r2(file_obj, chave_arquivo):
     """
-    Upload arquivo para R2 via boto3 (S3-compatible) com fallback para storage local.
-    Lê os bytes UMA vez para evitar 'I/O operation on closed file'.
-    Retorna {'ok': True, 'chave': ..., 'storage': 'r2'|'local'} sempre.
+    Upload arquivo com PRIORIDADE LOCAL (volume persistente Railway).
+    Salva em /data/anexos PRIMEIRO (nunca perde).
+    Depois tenta R2 como redundância/backup (opcional).
+    Retorna {'ok': True, 'chave': ..., 'storage': 'local'|'r2'} sempre.
     """
     import io
 
-    # Lê todos os bytes UMA vez (funciona com FileStorage, BytesIO, ou bytes)
+    # Lê todos os bytes UMA vez
     if hasattr(file_obj, 'read'):
         try:
             file_obj.seek(0)
@@ -1735,41 +1736,39 @@ def upload_arquivo_r2(file_obj, chave_arquivo):
     else:
         dados = file_obj
 
-    # Tenta R2 primeiro
-    if os.environ.get('R2_ENABLED') == 'true':
-        try:
-            import boto3
-            account_id = os.environ.get('R2_ACCOUNT_ID', '').strip()
-            access_key = os.environ.get('R2_ACCESS_KEY', '').strip()
-            secret_key = os.environ.get('R2_SECRET_KEY', '').strip()
-            bucket     = os.environ.get('R2_BUCKET_NAME', '').strip()
-
-            if account_id and access_key and secret_key and bucket:
-                s3 = boto3.client(
-                    's3',
-                    endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
-                    aws_access_key_id=access_key,
-                    aws_secret_access_key=secret_key,
-                    region_name='auto'
-                )
-                s3.upload_fileobj(io.BytesIO(dados), bucket, chave_arquivo)
-                app.logger.info(f"[R2] OK: {chave_arquivo}")
-                return {'ok': True, 'chave': chave_arquivo, 'storage': 'r2'}
-            else:
-                app.logger.warning("[R2] Credenciais incompletas - fallback local")
-        except Exception as e:
-            app.logger.warning(f"[R2] Erro ({type(e).__name__}: {e}) - fallback local")
-
-    # FALLBACK: salva local em UPLOAD_FOLDER (volume persistente Railway)
+    # PRIORIDADE 1: SALVA LOCAL (/data/anexos — volume persistente)
     try:
         destino = os.path.join(UPLOAD_FOLDER, os.path.basename(chave_arquivo))
         os.makedirs(os.path.dirname(destino), exist_ok=True)
         with open(destino, 'wb') as fp:
             fp.write(dados)
-        app.logger.info(f"[LOCAL] OK: {destino}")
+        app.logger.info(f"[LOCAL] ✅ {destino} (volume persistente)")
+        
+        # PRIORIDADE 2: Tenta R2 como REDUNDÂNCIA (não é crítico se falhar)
+        if os.environ.get('R2_ENABLED') == 'true':
+            try:
+                import boto3
+                account_id = os.environ.get('R2_ACCOUNT_ID', '').strip()
+                access_key = os.environ.get('R2_ACCESS_KEY', '').strip()
+                secret_key = os.environ.get('R2_SECRET_KEY', '').strip()
+                bucket     = os.environ.get('R2_BUCKET_NAME', '').strip()
+
+                if account_id and access_key and secret_key and bucket:
+                    s3 = boto3.client(
+                        's3',
+                        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+                        aws_access_key_id=access_key,
+                        aws_secret_access_key=secret_key,
+                        region_name='auto'
+                    )
+                    s3.upload_fileobj(io.BytesIO(dados), bucket, chave_arquivo)
+                    app.logger.info(f"[R2] ✅ Backup: {chave_arquivo}")
+            except Exception as e:
+                app.logger.warning(f"[R2] ⚠️ Backup falhou (não é crítico): {type(e).__name__}: {e}")
+        
         return {'ok': True, 'chave': chave_arquivo, 'storage': 'local'}
     except Exception as e:
-        app.logger.error(f"[LOCAL] Erro: {e}")
+        app.logger.error(f"[LOCAL] ❌ Erro crítico ao salvar: {e}")
         return {'ok': False, 'erro': str(e), 'storage': 'none'}
 
 def gerar_url_r2(chave_arquivo, expiracao_segundos=86400):
@@ -3136,12 +3135,25 @@ def admin_ultimo_erro():
 @app.route('/anexos/<path:nome>')
 @login_required
 def servir_anexo(nome):
-    """Serve arquivo de R2 (se habilitado) com fallback para local."""
+    """Serve arquivo LOCAL primeiro (volume persistente), depois tenta R2 como fallback."""
     from urllib.parse import unquote
     import io
     nome = os.path.basename(unquote(nome))
 
-    # Tenta R2 primeiro (mesmo padrão de upload_arquivo_r2)
+    # PRIORIDADE 1: LOCAL (/data/anexos — volume persistente)
+    caminho = os.path.join(UPLOAD_FOLDER, nome)
+    if os.path.exists(caminho):
+        app.logger.info(f"[SERVE] ✅ LOCAL: {nome}")
+        return send_from_directory(UPLOAD_FOLDER, nome)
+    
+    # Tenta com nome sanitizado
+    nome_limpo = _sanitizar_filename(nome)
+    caminho_limpo = os.path.join(UPLOAD_FOLDER, nome_limpo)
+    if os.path.exists(caminho_limpo):
+        app.logger.info(f"[SERVE] ✅ LOCAL (sanitizado): {nome_limpo}")
+        return send_from_directory(UPLOAD_FOLDER, nome_limpo)
+
+    # PRIORIDADE 2: R2 (fallback se local não tem)
     if os.environ.get('R2_ENABLED') == 'true':
         try:
             import boto3
@@ -3160,20 +3172,15 @@ def servir_anexo(nome):
                 resp = s3.get_object(Bucket=bucket, Key=nome)
                 content = resp['Body'].read()
                 ctype = resp.get('ContentType', 'application/octet-stream')
+                app.logger.info(f"[SERVE] ✅ R2 (fallback): {nome}")
                 return Response(content, mimetype=ctype,
                                 headers={'Content-Disposition': f'inline; filename="{nome}"'})
         except Exception as e:
-            app.logger.warning(f"[R2] Download falhou ({nome}): {e} - tentando local")
+            app.logger.warning(f"[SERVE] ⚠️ R2 falhou ({nome}): {type(e).__name__}: {e}")
 
-    # FALLBACK: local em UPLOAD_FOLDER
-    caminho = os.path.join(UPLOAD_FOLDER, nome)
-    if not os.path.exists(caminho):
-        nome_limpo = _sanitizar_filename(nome)
-        caminho_limpo = os.path.join(UPLOAD_FOLDER, nome_limpo)
-        if os.path.exists(caminho_limpo):
-            return send_from_directory(UPLOAD_FOLDER, nome_limpo)
-        abort(404)
-    return send_from_directory(UPLOAD_FOLDER, nome)
+    # Não encontrou em lugar nenhum
+    app.logger.error(f"[SERVE] ❌ Arquivo não encontrado: {nome}")
+    abort(404)
 
 @app.route('/proposta/<int:pid>/anexo/excluir', methods=['POST'])
 @login_required
