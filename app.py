@@ -7104,6 +7104,10 @@ def webhook_sheets():
             # Data: aceita 'data_hora' ou 'data'
             data_hora_raw = (lead.get('data_hora') or lead.get('data') or '').strip()
 
+            # DEBUG: primeiros 3 leads de cada origem, log a data
+            if importados + duplicados + ignorados < 3:
+                app.logger.info(f"[WEBHOOK_SHEETS] DEBUG {origem} lead {importados+duplicados+ignorados}: data_hora_raw='{data_hora_raw}' | nome='{nome[:30]}'")
+
             # Telefone: formata bonito p/ exibição + normaliza p/ dedup
             telefone = _formatar_telefone(telefone_raw)   # (19) 99104-6030
             telefone_norm = _normalizar_telefone(telefone_raw)  # 19991046030
@@ -7126,6 +7130,10 @@ def webhook_sheets():
             # Data do lead (vinda da planilha)
             data_lead = _parse_data_lead(data_hora_raw)
             data_str = data_lead.strftime('%d/%m/%Y') if data_lead else _fmt_data_br(datetime.now(TZ_SP))
+
+            # DEBUG: log para diagnosticar parsing de datas
+            if not data_lead:
+                app.logger.warning(f"[WEBHOOK_SHEETS] Data não parseada: '{data_hora_raw}' | nome={nome} | origem={origem}")
 
             obs = f"Tipo: {tipo}"
             if num_pess:
