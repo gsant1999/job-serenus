@@ -7212,19 +7212,15 @@ def webhook_sheets():
                 continue
 
             # ── NOVO LEAD: não existe no banco ──
-            if data_lead:
-                conn.execute("""
-                    INSERT INTO crm_leads
-                        (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id, observacoes, criado_em, consultor_externo)
+            # SEMPRE usa data_lead se disponível, senão usa hoje
+            data_criacao = data_lead.strftime('%Y-%m-%d 12:00:00') if data_lead else datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
+
+            conn.execute("""
+                INSERT INTO crm_leads
+                    (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id, observacoes, criado_em, consultor_externo)
                     VALUES (?, ?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?, ?)
-                """, (nome, telefone, telefone_norm, email, cidade, origem, responsavel_id, obs,
-                      data_lead.strftime('%Y-%m-%d 12:00:00'), consultor_externo))
-            else:
-                conn.execute("""
-                    INSERT INTO crm_leads
-                        (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id, observacoes, consultor_externo)
-                    VALUES (?, ?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?)
-                """, (nome, telefone, telefone_norm, email, cidade, origem, responsavel_id, obs, consultor_externo))
+            """, (nome, telefone, telefone_norm, email, cidade, origem, responsavel_id, obs,
+                  data_criacao, consultor_externo))
 
             lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             conn.execute("""
@@ -8261,7 +8257,7 @@ def _buscar_responsavel_id(conn, consultor_nome):
 def _parse_data_lead(data_str):
     """
     Converte string de data da planilha em objeto date.
-    Aceita: 'YYYY-MM-DDTHH:MM:SS...', 'DD/MM/YYYY HH:MM', 'DD/MM/YYYY', 'YYYY-MM-DD'.
+    Aceita múltiplos formatos: ISO, DD/MM/YYYY, YYYY-MM-DD, etc.
     Retorna None se não conseguir.
     """
     if not data_str:
@@ -8269,29 +8265,52 @@ def _parse_data_lead(data_str):
     s = str(data_str).strip()
     if not s:
         return None
-    # ISO: 2026-03-23T06:42:42.539-03:00
+
+    # 1. ISO com T: 2026-04-19T02:09:58.778-03:00
     try:
-        if 'T' in s or (len(s) >= 10 and s[4] == '-'):
-            return datetime.fromisoformat(s.replace('Z', '+00:00').split('.')[0].split('T')[0]).date()
+        if 'T' in s:
+            # Remove timezone e milissegundos
+            parte_iso = s.split('T')[0]  # pega 2026-04-19
+            a, m, d = parte_iso.split('-')
+            return date(int(a), int(m), int(d))
     except Exception:
         pass
-    # DD/MM/YYYY [HH:MM]
+
+    # 2. DD/MM/YYYY [HH:MM:SS]
     try:
         parte_data = s.split()[0]  # remove hora se houver
-        if '/' in parte_data:
-            d, m, a = parte_data.split('/')
-            if len(a) == 2:
-                a = '20' + a
-            return date(int(a), int(m), int(d))
+        if '/' in parte_data and parte_data.count('/') == 2:
+            partes = parte_data.split('/')
+            if len(partes[2]) == 4:  # YYYY tem 4 dígitos
+                d, m, a = partes
+                return date(int(a), int(m), int(d))
     except Exception:
         pass
-    # YYYY-MM-DD
+
+    # 3. YYYY-MM-DD [HH:MM:SS]
     try:
-        if '-' in s:
-            a, m, d = s.split()[0].split('-')
+        parte_data = s.split()[0]  # remove hora se houver
+        if '-' in parte_data and parte_data.count('-') == 2:
+            a, m, d = parte_data.split('-')
             return date(int(a), int(m), int(d))
     except Exception:
         pass
+
+    # Se chegou aqui e tem números, tenta extrair ano/mês/dia da forma que conseguir
+    try:
+        import re as _re
+        nums = _re.findall(r'\d+', s)
+        if len(nums) >= 3:
+            # Tenta várias combinações
+            # 1. DD MM YYYY
+            if len(nums[2]) == 4:
+                return date(int(nums[2]), int(nums[1]), int(nums[0]))
+            # 2. YYYY MM DD
+            elif len(nums[0]) == 4:
+                return date(int(nums[0]), int(nums[1]), int(nums[2]))
+    except Exception:
+        pass
+
     return None
 
 def _fmt_data_br(valor):
