@@ -7635,6 +7635,35 @@ def admin_crm_debug_datas():
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
 
+@app.route('/webhook/diag-datas', methods=['GET'])
+def webhook_diag_datas():
+    """Diagnóstico das datas e telefones dos leads. Protegido por token na query."""
+    if request.args.get('token') != os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026'):
+        return jsonify({"erro": "token invalido"}), 401
+    conn = db()
+    try:
+        total = conn.execute("SELECT COUNT(*) c FROM crm_leads").fetchone()['c']
+        com_tel_norm = conn.execute("SELECT COUNT(*) c FROM crm_leads WHERE telefone_norm IS NOT NULL AND telefone_norm != ''").fetchone()['c']
+        # Distribuicao por data de criacao (substring nao funciona igual; usa range simples)
+        dist = conn.execute("""
+            SELECT substr(CAST(criado_em AS TEXT),1,10) dia, COUNT(*) n
+            FROM crm_leads GROUP BY substr(CAST(criado_em AS TEXT),1,10)
+            ORDER BY n DESC LIMIT 15
+        """).fetchall()
+        amostra = conn.execute("SELECT id, nome, telefone, telefone_norm, CAST(criado_em AS TEXT) criado_em, origem FROM crm_leads ORDER BY id DESC LIMIT 8").fetchall()
+        close_db(conn)
+        return jsonify({
+            "total_leads": total,
+            "com_telefone_norm": com_tel_norm,
+            "sem_telefone_norm": total - com_tel_norm,
+            "distribuicao_datas": [dict(r) for r in dist],
+            "amostra": [dict(r) for r in amostra],
+        })
+    except Exception as e:
+        close_db(conn)
+        return jsonify({"erro": str(e)}), 500
+
+
 @app.route('/webhook/corrigir-datas', methods=['POST'])
 def webhook_corrigir_datas():
     """
