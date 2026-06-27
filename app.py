@@ -3120,6 +3120,91 @@ def webhook_diagnostico():
     return jsonify(resultado), 200
 
 
+@app.route('/admin/observabilidade')
+@login_required
+@admin_required
+def admin_observabilidade():
+    """Dashboard centralizado de observabilidade — logs, status, saúde do sistema."""
+    conn = db()
+
+    # === STATUS DO SCHEDULER ===
+    scheduler_status = {
+        'backup_agendado': 'Sim (22:00 SP)',
+        'lead_import_agendado': 'Sim (a cada 30 min)',
+        'app_scheduler': app.scheduler is not None if hasattr(app, 'scheduler') else False
+    }
+
+    # === SAÚDE DO BANCO ===
+    try:
+        stats = conn.execute("SELECT COUNT(*) as propostas FROM propostas").fetchone()
+        propostas_count = stats['propostas'] if stats else 0
+        leads_count = conn.execute("SELECT COUNT(*) as n FROM crm_leads").fetchone()['n']
+        usuarios_count = conn.execute("SELECT COUNT(*) as n FROM usuarios").fetchone()['n']
+        db_status = {'status': 'OK', 'propostas': propostas_count, 'leads': leads_count, 'usuarios': usuarios_count}
+    except Exception as e:
+        db_status = {'status': 'ERRO', 'msg': str(e)[:100]}
+
+    # === SAÚDE DO R2 ===
+    r2_status = {
+        'enabled': os.environ.get('R2_ENABLED') == 'true',
+        'configurado': all([os.environ.get(k) for k in ['R2_ACCOUNT_ID', 'R2_ACCESS_KEY', 'R2_SECRET_KEY', 'R2_BUCKET_NAME']]),
+        'endpoint': (os.environ.get('R2_ENDPOINT', '')[:50] + '...') if os.environ.get('R2_ENDPOINT') else 'não configurado'
+    }
+
+    # === ÚLTIMOS ERROS ===
+    erros_recentes = _ULTIMOS_ERROS[:5] if '_ULTIMOS_ERROS' in globals() else []
+
+    # === LOGS DO SCHEDULER ===
+    logs_lead_auto = [e for e in _ULTIMOS_ERROS if 'LEAD_AUTO' in e.get('erro', '') or 'LEAD_AUTO' in e.get('traceback', '')]
+
+    close_db(conn)
+
+    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Observabilidade — JOB Serenus</title><style>
+body {{font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 20px; background: #f5f5f5;}}
+.container {{max-width: 1200px; margin: 0 auto;}}
+h1 {{color: #333; border-bottom: 3px solid #6366f1; padding-bottom: 10px;}}
+.card {{background: white; padding: 20px; margin: 15px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);}}
+.card h2 {{margin-top: 0; color: #333; font-size: 18px;}}
+.status-ok {{color: #10b981; font-weight: bold;}}
+.status-erro {{color: #ef4444; font-weight: bold;}}
+.status-info {{color: #6366f1; font-weight: bold;}}
+table {{width: 100%; border-collapse: collapse; font-size: 14px;}}
+th, td {{padding: 10px; text-align: left; border-bottom: 1px solid #eee;}}
+th {{background: #f9fafb; font-weight: 600;}}
+.mono {{font-family: monospace; background: #f5f5f5; padding: 5px; border-radius: 3px;}}
+.metric-value {{font-size: 24px; font-weight: bold; color: #6366f1;}}
+.btn {{display: inline-block; padding: 10px 20px; background: #6366f1; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px;}}
+.btn:hover {{background: #4f46e5;}}
+    </style></head><body><div class="container">
+    <h1>📊 Observabilidade do Sistema</h1>
+    <p style="color: #666; font-size: 14px;">Atualizado: {datetime.now(TZ_SP).strftime('%d/%m/%Y %H:%M:%S')}</p>
+
+    <div class="card"><h2>📈 Banco de Dados</h2>
+    <div class="status-{'ok' if db_status['status'] == 'OK' else 'erro'}">Status: {db_status['status']}</div>
+    <table><tr><td><strong>Propostas:</strong></td><td style="font-size: 20px; color: #6366f1;"><b>{db_status.get('propostas', '?')}</b></td></tr>
+    <tr><td><strong>Leads CRM:</strong></td><td style="font-size: 20px; color: #6366f1;"><b>{db_status.get('leads', '?')}</b></td></tr>
+    <tr><td><strong>Usuários:</strong></td><td style="font-size: 20px; color: #6366f1;"><b>{db_status.get('usuarios', '?')}</b></td></tr></table></div>
+
+    <div class="card"><h2>⚙️ Scheduler (Tarefas Automáticas)</h2>
+    <table><tr><td><strong>APScheduler:</strong></td><td class="status-{'ok' if scheduler_status['app_scheduler'] else 'erro'}">{scheduler_status['app_scheduler']}</td></tr>
+    <tr><td><strong>Backup Diário:</strong></td><td class="status-info">{scheduler_status['backup_agendado']}</td></tr>
+    <tr><td><strong>Import Leads:</strong></td><td class="status-info">{scheduler_status['lead_import_agendado']}</td></tr></table></div>
+
+    <div class="card"><h2>🔒 Cloudflare R2 (Storage)</h2>
+    <table><tr><td><strong>Enabled:</strong></td><td class="status-{'ok' if r2_status['enabled'] else 'erro'}">{r2_status['enabled']}</td></tr>
+    <tr><td><strong>Configurado:</strong></td><td class="status-{'ok' if r2_status['configurado'] else 'erro'}">{r2_status['configurado']}</td></tr>
+    <tr><td><strong>Endpoint:</strong></td><td class="mono">{r2_status['endpoint']}</td></tr></table></div>
+
+    <div class="card"><h2>⚠️ Últimos Erros ({len(erros_recentes)})</h2>
+    {"<table><tr><th>Quando</th><th>Rota</th><th>Erro</th></tr>" + "".join(f"<tr><td>{e['quando']}</td><td class='mono'>{e['rota']}</td><td>{e['erro'][:60]}</td></tr>" for e in erros_recentes) + "</table>" if erros_recentes else "<p style='color: #10b981;'>✅ Sem erros recentes</p>"}</div>
+
+    <div class="card"><h2>📥 Importação de Leads</h2>
+    {"<p class='status-erro'>⚠️ " + str(len(logs_lead_auto)) + " erros na importação</p>" if logs_lead_auto else "<p style='color: #10b981;'>✅ Funcionando normalmente</p>"}</div>
+
+    <a href="/admin" class="btn">← Voltar</a></div></body></html>"""
+    return html
+
+
 @app.route('/admin/ultimo-erro', methods=['GET'])
 @login_required
 @admin_required
@@ -6375,6 +6460,67 @@ def api_propostas():
                 d.pop(col, None)
         saida.append(d)
     return jsonify(saida)
+
+
+@app.route('/api/bi/propostas')
+def api_bi_propostas():
+    """Power BI endpoint — propostas com filtros, sem login. Requer API_KEY no header."""
+    api_key = request.headers.get('X-API-Key', '').strip()
+    expected_key = os.environ.get('API_KEY_BI', '')
+    if not api_key or not expected_key or api_key != expected_key:
+        return jsonify({"erro": "API_KEY inválida ou não configurada"}), 401
+
+    # Filtros opcionais
+    data_inicio = request.args.get('data_inicio', '').strip()  # YYYY-MM-DD
+    data_fim = request.args.get('data_fim', '').strip()
+    status = request.args.get('status', '').strip()
+    operadora = request.args.get('operadora', '').strip()
+    pagina = int(request.args.get('pagina', 1))
+    limit = min(int(request.args.get('limit', 100)), 500)  # max 500
+    offset = (pagina - 1) * limit
+
+    conn = db()
+    query = "SELECT * FROM propostas WHERE 1=1"
+    params = []
+
+    if data_inicio:
+        query += " AND data_proposta >= ?"
+        params.append(data_inicio)
+    if data_fim:
+        query += " AND data_proposta <= ?"
+        params.append(data_fim)
+    if status:
+        query += " AND status = ?"
+        params.append(status)
+    if operadora:
+        query += " AND operadora LIKE ?"
+        params.append(f"%{operadora}%")
+
+    # Total com filtros
+    total = conn.execute(query.replace("SELECT *", "SELECT COUNT(*) as cnt"), params).fetchone()['cnt']
+
+    # Dados com paginação
+    query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    rows = conn.execute(query, params).fetchall()
+    close_db(conn)
+
+    # Campos úteis para BI
+    CAMPOS_BI = {'id', 'status', 'data_proposta', 'operadora', 'plano', 'valor_mensal',
+                 'numero_proposta', 'beneficiario', 'consultor', 'comissao_total_corretora'}
+
+    saida = []
+    for r in rows:
+        d = dict(r)
+        d_filtrado = {k: v for k, v in d.items() if k in CAMPOS_BI}
+        saida.append(d_filtrado)
+
+    return jsonify({
+        'total': total,
+        'pagina': pagina,
+        'limit': limit,
+        'dados': saida
+    })
 
 
 # ─── CRM ─────────────────────────────────────────────────────────────────────────
