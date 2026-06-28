@@ -6613,6 +6613,78 @@ def api_bi_comissoes():
     })
 
 
+@app.route('/api/bi/regras')
+def api_bi_regras():
+    """
+    Power BI / Google Sheets — REGRAS de comissão (configuração):
+    - recebimento: quanto a corretora recebe por operadora/plano (PME, PF, Adesão)
+    - repasse: quanto o corretor recebe por operadora/plano/modelo/nível
+    Retorna colunas + linhas já pivotadas e com cabeçalhos legíveis.
+    Requer header X-API-Key (env API_KEY_BI).
+    """
+    api_key = request.headers.get('X-API-Key', '').strip()
+    expected_key = os.environ.get('API_KEY_BI', '')
+    if not api_key or not expected_key or api_key != expected_key:
+        return jsonify({"erro": "API_KEY inválida ou não configurada"}), 401
+
+    def g(r, k):
+        return (r[k] if hasattr(r, 'keys') else None)
+
+    LABEL_PLANO = {'PME': 'PME (%)', 'PF': 'PF (%)', 'ADESAO': 'Adesão (%)'}
+    LABEL_MODELO = {
+        'sem_lead_sem_fixo': 'Sem Lead / Sem Fixo',
+        'com_lead': 'Com Lead / Sem Fixo',
+        'com_lead|n1': 'Nível 1', 'com_lead|n2': 'Nível 2', 'com_lead|n3': 'Nível 3',
+        'com_fixo_lead': 'Com Fixo + Lead',
+        'sem_lead_com_fixo': 'Com Fixo / Sem Lead', 'com_fixo_sem_lead': 'Com Fixo / Sem Lead',
+        'gestor_vendedor': 'Gestor Vendedor',
+    }
+    ORDEM_PLANO = ['PME', 'PF', 'ADESAO']
+    ORDEM_MODELO = ['sem_lead_sem_fixo', 'com_lead', 'com_lead|n1', 'com_lead|n2',
+                    'com_lead|n3', 'com_fixo_lead', 'sem_lead_com_fixo', 'com_fixo_sem_lead', 'gestor_vendedor']
+
+    conn = db()
+    rec = conn.execute("SELECT operadora, obs, plano, total FROM recebimento").fetchall()
+    reps = conn.execute("SELECT operadora, obs, plano, modelo, nivel, total FROM repasse_corretor").fetchall()
+    close_db(conn)
+
+    # ── RECEBIMENTO pivot por (operadora, obs) ──
+    rec_planos, rec_map = [], {}
+    for r in rec:
+        op, ob, pl, tot = g(r, 'operadora'), g(r, 'obs') or '', g(r, 'plano'), g(r, 'total')
+        if pl not in rec_planos:
+            rec_planos.append(pl)
+        rec_map.setdefault((op, ob), {})[pl] = tot
+    ordem_pl = [p for p in ORDEM_PLANO if p in rec_planos] + [p for p in rec_planos if p not in ORDEM_PLANO]
+    rec_colunas = ['Operadora', 'Obs'] + [LABEL_PLANO.get(p, p) for p in ordem_pl]
+    rec_linhas = sorted(
+        [[op, ob] + [vals.get(p, '') for p in ordem_pl] for (op, ob), vals in rec_map.items()],
+        key=lambda x: (x[0] or '', x[1] or '')
+    )
+
+    # ── REPASSE pivot por (operadora, obs, plano) ──
+    rep_cols_raw, rep_map = [], {}
+    for r in reps:
+        op, ob, pl = g(r, 'operadora'), g(r, 'obs') or '', g(r, 'plano')
+        mod, niv, tot = g(r, 'modelo'), g(r, 'nivel') or '', g(r, 'total')
+        col = mod if not niv else f"{mod}|{niv}"
+        if col not in rep_cols_raw:
+            rep_cols_raw.append(col)
+        rep_map.setdefault((op, ob, pl), {})[col] = tot
+    ordem_mod = [m for m in ORDEM_MODELO if m in rep_cols_raw] + [m for m in rep_cols_raw if m not in ORDEM_MODELO]
+    rep_colunas = ['Operadora', 'Obs', 'Plano'] + [LABEL_MODELO.get(m, m) for m in ordem_mod]
+    rep_linhas = sorted(
+        [[op, ob, pl] + [vals.get(m, '') for m in ordem_mod] for (op, ob, pl), vals in rep_map.items()],
+        key=lambda x: (x[0] or '', x[1] or '', x[2] or '')
+    )
+
+    return jsonify({
+        'gerado_em': datetime.now(TZ_SP).strftime('%d/%m/%Y %H:%M:%S'),
+        'recebimento': {'colunas': rec_colunas, 'linhas': rec_linhas},
+        'repasse': {'colunas': rep_colunas, 'linhas': rep_linhas},
+    })
+
+
 # ─── CRM ─────────────────────────────────────────────────────────────────────────
 def carregar_etapas_crm(conn=None):
     """Lê as etapas do funil do banco, ordenadas. Cria conexão própria se não receber uma."""
