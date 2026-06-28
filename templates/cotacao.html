@@ -34,11 +34,10 @@
     <h1 style="margin:0;">Cotação</h1>
     <div class="sub">Multicálculo de planos por faixa etária</div>
   </div>
-  {% if eh_admin %}
   <div style="display:flex; gap:8px;">
-    <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas'">Gerenciar tabelas</button>
+    <button class="btn-outline btn-sm" onclick="location.href='/cotacao/salvas'">Cotações salvas</button>
+    {% if eh_admin %}<button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas'">Gerenciar tabelas</button>{% endif %}
   </div>
-  {% endif %}
 </div>
 
 <form method="GET" action="/cotacao" class="cot-filtros">
@@ -81,29 +80,50 @@
 {% if idades_txt %}
   <div class="cot-resumo">{{ total_vidas }} vida(s) na cotação · {{ resultados|length }} plano(s) encontrado(s)</div>
   {% if resultados %}
-  <table class="cot">
-    <thead>
-      <tr><th>Operadora</th><th>Plano</th><th>Modalidade</th><th>Acomodação</th><th>Coparticipação</th><th style="text-align:right;">Total mensal</th></tr>
-    </thead>
-    <tbody>
-      {% for r in resultados %}
-      <tr class="{{ 'melhor' if loop.first and not r.incompleta }}">
-        <td>{{ r.operadora }}</td>
-        <td>
-          {{ r.plano }}
-          {% if loop.first and not r.incompleta %}<span class="tag tag-best">menor preço</span>{% endif %}
-          {% if r.incompleta %}<span class="tag tag-inc">tabela incompleta</span>{% endif %}
-          {% if r.abrangencia %}<div style="font-size:11px;color:var(--cinza-2);margin-top:2px;">{{ r.abrangencia }}</div>{% endif %}
-        </td>
-        <td><span class="tag">{{ r.modalidade }}</span></td>
-        <td>{{ r.acomodacao }}</td>
-        <td>{{ r.coparticipacao }}</td>
-        <td class="total">{{ r.total|moeda }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <div style="font-size:11px;color:var(--cinza-2);margin-top:10px;">"Tabela incompleta" = falta o preço de alguma faixa etária usada nesta cotação. Valores meramente referenciais.</div>
+  <form method="POST" action="/cotacao/salvar" id="form-cotacao">
+    <input type="hidden" name="idades" value="{{ idades_txt }}">
+    <table class="cot">
+      <thead>
+        <tr><th style="width:34px;"></th><th>Operadora</th><th>Plano</th><th>Modalidade</th><th>Acomodação</th><th>Coparticipação</th><th style="text-align:right;">Total mensal</th></tr>
+      </thead>
+      <tbody>
+        {% for r in resultados %}
+        <tr class="{{ 'melhor' if loop.first and not r.incompleta }}">
+          <td><input type="checkbox" name="tabela_id" value="{{ r.tabela_id }}" {{ 'checked' if loop.first }} style="width:16px;height:16px;accent-color:var(--azul);"></td>
+          <td>{{ r.operadora }}</td>
+          <td>
+            {{ r.plano }}
+            {% if loop.first and not r.incompleta %}<span class="tag tag-best">menor preço</span>{% endif %}
+            {% if r.incompleta %}<span class="tag tag-inc">tabela incompleta</span>{% endif %}
+            {% if r.abrangencia %}<div style="font-size:11px;color:var(--cinza-2);margin-top:2px;">{{ r.abrangencia }}</div>{% endif %}
+          </td>
+          <td><span class="tag">{{ r.modalidade }}</span></td>
+          <td>{{ r.acomodacao }}</td>
+          <td>{{ r.coparticipacao }}</td>
+          <td class="total">{{ r.total|moeda }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div style="font-size:11px;color:var(--cinza-2);margin:10px 0 20px;">Marque os planos que entram no documento. "Tabela incompleta" = falta o preço de alguma faixa usada. Valores referenciais.</div>
+
+    <div style="background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px;">
+      <h3 style="font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin:0 0 14px;">Gerar cotação para o cliente</h3>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:16px;">
+        <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Título da cotação</label>
+          <input type="text" name="titulo" value="Cotação" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
+        <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Nome do cliente</label>
+          <input type="text" name="cliente_nome" placeholder="Ex: João da Silva" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
+        <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">E-mail do cliente</label>
+          <input type="text" name="cliente_email" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
+        <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Telefone do cliente</label>
+          <input type="text" name="cliente_telefone" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
+        <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Seu telefone (corretor)</label>
+          <input type="text" name="corretor_telefone" placeholder="(19) 99999-9999" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
+      </div>
+      <button type="submit" class="btn-f" style="background:var(--azul);color:#fff;border:none;padding:11px 22px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">Gerar cotação do cliente</button>
+    </div>
+  </form>
   {% else %}
   <div class="vazio">Nenhum plano encontrado para esses filtros. {% if eh_admin %}Cadastre tabelas em <a href="/cotacao/tabelas" style="color:var(--azul);">Gerenciar tabelas</a>.{% endif %}</div>
   {% endif %}

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Cotações Salvas{% endblock %}
+
+{% block head %}
+<style>
+  table.cot { width:100%; border-collapse:collapse; font-size:13px; background:var(--panel); border:1px solid var(--borda); border-radius:12px; overflow:hidden; }
+  table.cot th { text-align:left; color:var(--cinza-2); font-size:10px; text-transform:uppercase; letter-spacing:.5px; font-weight:600; padding:12px 14px; border-bottom:1px solid var(--borda); background:var(--panel-2); }
+  table.cot td { padding:12px 14px; border-bottom:1px solid var(--borda); color:var(--texto); }
+  table.cot tr:last-child td { border-bottom:none; }
+  table.cot td.total { text-align:right; font-weight:700; color:var(--verde); font-variant-numeric:tabular-nums; }
+  .acoes { display:flex; gap:6px; justify-content:flex-end; }
+  .btn-abrir { background:var(--azul); color:#fff; border:none; border-radius:6px; padding:6px 12px; font-size:11px; cursor:pointer; text-decoration:none; }
+  .btn-del { background:transparent; border:1px solid var(--borda); color:var(--erro); border-radius:6px; padding:6px 10px; font-size:11px; cursor:pointer; }
+  .vazio { color:var(--cinza-2); font-size:13px; padding:30px; text-align:center; background:var(--panel); border:1px dashed var(--borda); border-radius:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Cotações Salvas</h1>
+    <div class="sub">{{ cotacoes|length }} cotação(ões)</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="location.href='/cotacao'">Nova cotação</button>
+  </div>
+</div>
+
+{% if cotacoes %}
+<table class="cot">
+  <thead>
+    <tr><th>Cliente</th><th>Título</th>{% if eh_admin %}<th>Corretor</th>{% endif %}<th>Data</th><th style="text-align:right;">Total</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for c in cotacoes %}
+    <tr>
+      <td>{{ c.cliente_nome or '-' }}</td>
+      <td>{{ c.titulo }}</td>
+      {% if eh_admin %}<td>{{ c.corretor_nome }}</td>{% endif %}
+      <td>{{ c.criado_em|data_br }}</td>
+      <td class="total">{{ c.total|moeda }}</td>
+      <td>
+        <div class="acoes">
+          <a class="btn-abrir" href="/cotacao/documento/{{ c.id }}">Abrir</a>
+          <button class="btn-del" onclick="excluir({{ c.id }}, '{{ (c.cliente_nome or c.titulo)|replace("'", "") }}')">Excluir</button>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="vazio">Nenhuma cotação salva ainda. Faça uma cotação e clique em "Gerar cotação do cliente".</div>
+{% endif %}
+
+<script>
+function excluir(id, nome) {
+  if (!confirm('Excluir a cotação de "' + nome + '"?')) return;
+  fetch('/cotacao/salvas/' + id + '/excluir', { method: 'POST' })
+    .then(r => r.json()).then(d => { if (d.ok) location.reload(); else alert('Erro ao excluir.'); })
+    .catch(() => alert('Erro de conexão.'));
+}
+</script>
+{% endblock %}

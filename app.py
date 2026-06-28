@@ -166,6 +166,24 @@ def _moeda(v):
     except:
         return 'R$ 0,00'
 
+@app.template_filter('moeda_doc')
+def _moeda_doc(v):
+    """1.234,56 (sem 'R$', para documentos de cotação)."""
+    try:
+        v = float(v or 0)
+        neg = v < 0
+        v = abs(v)
+        cents = f"{v:.2f}".split('.')[1]
+        inteiro = str(int(v))
+        grupos = []
+        while len(inteiro) > 3:
+            grupos.insert(0, inteiro[-3:])
+            inteiro = inteiro[:-3]
+        grupos.insert(0, inteiro)
+        return ('-' if neg else '') + '.'.join(grupos) + ',' + cents
+    except:
+        return '0,00'
+
 @app.template_filter('numero')
 def _numero(v):
     """10.104"""
@@ -742,6 +760,13 @@ def init_db():
                 tabela_id INTEGER NOT NULL,
                 faixa TEXT NOT NULL, preco REAL DEFAULT 0
             )""",
+            """CREATE TABLE IF NOT EXISTS cotacao_salva (
+                id SERIAL PRIMARY KEY,
+                corretor_id INTEGER, corretor_nome TEXT, corretor_email TEXT, corretor_telefone TEXT,
+                cliente_nome TEXT, cliente_email TEXT, cliente_telefone TEXT,
+                titulo TEXT, vidas_json TEXT, planos_json TEXT, total REAL DEFAULT 0,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
         ]
         for sql in tables_sql:
             try: 
@@ -981,6 +1006,13 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tabela_id INTEGER NOT NULL,
             faixa TEXT NOT NULL, preco REAL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS cotacao_salva (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            corretor_id INTEGER, corretor_nome TEXT, corretor_email TEXT, corretor_telefone TEXT,
+            cliente_nome TEXT, cliente_email TEXT, cliente_telefone TEXT,
+            titulo TEXT, vidas_json TEXT, planos_json TEXT, total REAL DEFAULT 0,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS solicitacoes_edicao (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -7269,6 +7301,7 @@ def cotacao():
                 total += preco * qtd
                 detalhe.append({'faixa': fx, 'qtd': qtd, 'preco_unit': preco, 'subtotal': preco * qtd})
             resultados.append({
+                'tabela_id': t['id'],
                 'operadora': t['operadora'], 'plano': t['plano'],
                 'modalidade': t['modalidade'], 'acomodacao': t['acomodacao'],
                 'coparticipacao': t['coparticipacao'], 'abrangencia': t['abrangencia'],
@@ -7342,6 +7375,135 @@ def cotacao_tabela_excluir(tid):
     conn = db()
     conn.execute("DELETE FROM cotacao_preco WHERE tabela_id=?", (tid,))
     conn.execute("DELETE FROM cotacao_tabela WHERE id=?", (tid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+def _faixa_label(fx):
+    """'24-28' -> '24 a 28'; '59+' -> '59 ou mais'; '00-18' -> '00 a 18'."""
+    if fx == '59+':
+        return '59 ou mais'
+    if '-' in fx:
+        a, b = fx.split('-')
+        return f'{a} a {b}'
+    return fx
+
+
+@app.route('/cotacao/salvar', methods=['POST'])
+@login_required
+def cotacao_salvar():
+    """Recalcula os planos selecionados (server-side), salva a cotação e abre o documento."""
+    d = request.form
+    idades = _parse_idades(d.get('idades', ''))
+    tabela_ids = [int(x) for x in request.form.getlist('tabela_id') if str(x).isdigit()]
+    if not idades or not tabela_ids:
+        return redirect('/cotacao?idades=' + (d.get('idades', '') or ''))
+
+    cont_faixa = {}
+    for idade in idades:
+        fx = _faixa_da_idade(idade)
+        if fx:
+            cont_faixa[fx] = cont_faixa.get(fx, 0) + 1
+
+    conn = db()
+    planos = []
+    total_geral = 0.0
+    for tid in tabela_ids:
+        t = conn.execute("SELECT * FROM cotacao_tabela WHERE id=?", (tid,)).fetchone()
+        if not t:
+            continue
+        precos = conn.execute("SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (tid,)).fetchall()
+        pmap = {p['faixa']: float(p['preco'] or 0) for p in precos}
+        linhas = []
+        total = 0.0
+        for fx in FAIXAS_ETARIAS:
+            qtd = cont_faixa.get(fx, 0)
+            if qtd <= 0:
+                continue
+            preco = pmap.get(fx, 0)
+            sub = preco * qtd
+            total += sub
+            linhas.append({'faixa': fx, 'label': _faixa_label(fx), 'qtd': qtd, 'preco': preco, 'subtotal': round(sub, 2)})
+        total_geral += total
+        planos.append({
+            'operadora': t['operadora'], 'plano': t['plano'], 'modalidade': t['modalidade'],
+            'acomodacao': t['acomodacao'], 'coparticipacao': t['coparticipacao'],
+            'abrangencia': t['abrangencia'], 'vigencia': t['vigencia'],
+            'linhas': linhas, 'total': round(total, 2),
+        })
+
+    # Dados do corretor (logado) — busca do banco para garantir nome/email
+    urow = conn.execute("SELECT nome, email FROM usuarios WHERE id=?", (session.get('user_id'),)).fetchone()
+    corretor_nome = (urow['nome'] if urow else None) or session.get('nome') or ''
+    corretor_email = (urow['email'] if urow else '') or ''
+    conn.execute("""INSERT INTO cotacao_salva
+        (corretor_id, corretor_nome, corretor_email, corretor_telefone,
+         cliente_nome, cliente_email, cliente_telefone, titulo, vidas_json, planos_json, total)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (session.get('user_id'), corretor_nome, corretor_email, (d.get('corretor_telefone') or '').strip(),
+         (d.get('cliente_nome') or '').strip(), (d.get('cliente_email') or '').strip(),
+         (d.get('cliente_telefone') or '').strip(), (d.get('titulo') or 'Cotação').strip(),
+         json.dumps(cont_faixa), json.dumps(planos), round(total_geral, 2)))
+    cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return redirect('/cotacao/documento/' + str(cid))
+
+
+@app.route('/cotacao/documento/<int:cid>')
+@login_required
+def cotacao_documento(cid):
+    """Documento da cotação (layout do cliente), pronto para PDF/imagem."""
+    conn = db()
+    c = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+    close_db(conn)
+    if not c:
+        abort(404)
+    # Consultor só vê as próprias
+    if session.get('perfil') != 'admin' and c['corretor_id'] != session.get('user_id'):
+        abort(403)
+    cot = dict(c)
+    try:
+        planos = json.loads(cot.get('planos_json') or '[]')
+    except Exception:
+        planos = []
+    cot['planos'] = planos
+    # Faixas usadas (mesma lista para todos os planos) e mapa faixa->subtotal por plano
+    faixas_usadas = []
+    if planos:
+        faixas_usadas = [{'faixa': l['faixa'], 'label': l.get('label') or _faixa_label(l['faixa']),
+                          'qtd': l['qtd']} for l in planos[0]['linhas']]
+    for p in planos:
+        p['precos'] = {l['faixa']: l['subtotal'] for l in p['linhas']}
+    cot['faixas_usadas'] = faixas_usadas
+    return render_template('cotacao_documento.html', cot=cot)
+
+
+@app.route('/cotacao/salvas')
+@login_required
+def cotacao_salvas():
+    """Lista de cotações salvas, por cliente e corretor."""
+    conn = db()
+    eh_admin = session.get('perfil') == 'admin'
+    if eh_admin:
+        rows = conn.execute("SELECT * FROM cotacao_salva ORDER BY id DESC").fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM cotacao_salva WHERE corretor_id=? ORDER BY id DESC",
+                            (session.get('user_id'),)).fetchall()
+    close_db(conn)
+    return render_template('cotacao_salvas.html', cotacoes=rows, eh_admin=eh_admin)
+
+
+@app.route('/cotacao/salvas/<int:cid>/excluir', methods=['POST'])
+@login_required
+def cotacao_salva_excluir(cid):
+    conn = db()
+    c = conn.execute("SELECT corretor_id FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn); return jsonify({"ok": False}), 404
+    if session.get('perfil') != 'admin' and c['corretor_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False}), 403
+    conn.execute("DELETE FROM cotacao_salva WHERE id=?", (cid,))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
