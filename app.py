@@ -7525,6 +7525,179 @@ def cotacao_import():
                                       'faixas_detectadas': sorted(faixa_idx.keys())})
 
 
+# ── Import de PDF do Painel do Corretor (parser por posição de coluna) ──
+def _norm_modalidade(s):
+    n = _norm_txt(s)
+    if 'pme' in n: return 'PME'
+    if 'adesao' in n: return 'Adesão'
+    if 'individual' in n or 'pessoa fisica' in n or n.strip() == 'pf' or n.endswith(' pf'): return 'PF'
+    return (s or '').strip() or 'PME'
+
+def _norm_acomod(s):
+    n = _norm_txt(s)
+    if 'apart' in n: return 'Apartamento'
+    if 'enferm' in n: return 'Enfermaria'
+    return (s or '').strip()
+
+def _norm_copart(s):
+    n = _norm_txt(s)
+    if 'sem' in n: return 'Sem'
+    if 'parcial' in n: return 'Parcial'
+    if 'complet' in n or 'total' in n: return 'Completa'
+    return (s or '').strip()
+
+
+def _parse_pdc_pdf(file_obj):
+    """Lê uma cotação PDF do Painel do Corretor e devolve a lista de planos (por coluna)."""
+    import pdfplumber
+    _price_re = re.compile(r'^\d{1,3}(?:\.\d{3})*,\d{2}$')
+    planos = []
+    with pdfplumber.open(file_obj) as pdf:
+        for page in pdf.pages:
+            words = page.extract_words()
+            if not words:
+                continue
+            lines = {}
+            for w in words:
+                lines.setdefault(round(w['top'] / 4) * 4, []).append(w)
+            ordered = [sorted(ws, key=lambda x: x['x0']) for _, ws in sorted(lines.items())]
+
+            band_rows = [(ws, [w for w in ws if _price_re.match(w['text'])]) for ws in ordered]
+            band_rows = [(ws, p) for ws, p in band_rows if len(p) >= 2]
+            if not band_rows:
+                continue
+
+            xs = sorted(w['x0'] for _, ps in band_rows for w in ps)
+            cols, cur = [], [xs[0]]
+            for x in xs[1:]:
+                if x - cur[-1] > 30:
+                    cols.append(sum(cur) / len(cur)); cur = [x]
+                else:
+                    cur.append(x)
+            cols.append(sum(cur) / len(cur))
+            N = len(cols)
+
+            def col_de(x0):
+                d = [abs(x0 - c) for c in cols]
+                i = d.index(min(d))
+                return i if d[i] < 55 else None
+
+            def label_de(ws):
+                return ' '.join(w['text'] for w in ws if w['x0'] < 140)
+
+            top_mod = min((w['top'] for ws in ordered for w in ws
+                           if _norm_txt(label_de(ws)).startswith('modalidade')), default=10 ** 9)
+
+            meta = {'modalidade': {}, 'acomodacao': {}, 'coparticipacao': {}}
+            for ws in ordered:
+                nl = _norm_txt(label_de(ws)).strip()
+                destino = ('modalidade' if nl.startswith('modalidade')
+                           else 'acomodacao' if nl.startswith('acomod')
+                           else 'coparticipacao' if nl.startswith('coparticip') else None)
+                if not destino:
+                    continue
+                buckets = {}
+                for w in ws:
+                    if w['x0'] < 140:
+                        continue
+                    c = col_de(w['x0'])
+                    if c is not None:
+                        buckets.setdefault(c, []).append(w['text'])
+                for c, vs in buckets.items():
+                    meta[destino][c] = ' '.join(vs)
+
+            precos = {i: {} for i in range(N)}
+            for ws, ps in band_rows:
+                lbl = ' '.join(w['text'] for w in ws
+                               if w['x0'] < 140 and not _price_re.match(w['text']) and w['text'].lower() != 'x')
+                fx = _match_faixa_header(lbl)
+                if not fx:
+                    continue
+                for w in ps:
+                    c = col_de(w['x0'])
+                    if c is not None:
+                        precos[c][fx] = _parse_preco_br(w['text'])
+
+            head_words = [w for ws in ordered for w in ws if w['top'] < top_mod - 2 and w['x0'] >= 140]
+            col_head = {i: {} for i in range(N)}
+            for w in head_words:
+                c = col_de(w['x0'])
+                if c is not None:
+                    col_head[c].setdefault(round(w['top'] / 4) * 4, []).append(w)
+
+            for c in range(N):
+                linhas_h = [' '.join(x['text'] for x in sorted(ws, key=lambda z: z['x0']))
+                            for _, ws in sorted(col_head[c].items())]
+                operadora = linhas_h[-1] if linhas_h else ''
+                plano = ' '.join(linhas_h[:-1]) if len(linhas_h) > 1 else (linhas_h[0] if linhas_h else '')
+                planos.append({
+                    'operadora': operadora.strip(), 'plano': plano.strip(),
+                    'modalidade': _norm_modalidade(meta['modalidade'].get(c, '')),
+                    'acomodacao': _norm_acomod(meta['acomodacao'].get(c, '')),
+                    'coparticipacao': _norm_copart(meta['coparticipacao'].get(c, '')),
+                    'precos': precos[c],
+                })
+            break  # usa a primeira página com tabela de planos
+    return planos
+
+
+@app.route('/cotacao/tabelas/importar-pdf', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def cotacao_import_pdf():
+    if request.method == 'GET':
+        return render_template('cotacao_import_pdf.html', faixas=FAIXAS_ETARIAS)
+    f = request.files.get('arquivo')
+    if not f or not f.filename:
+        return render_template('cotacao_import_pdf.html', faixas=FAIXAS_ETARIAS, erro='Selecione um arquivo PDF.')
+    try:
+        planos = _parse_pdc_pdf(f)
+    except Exception as e:
+        return render_template('cotacao_import_pdf.html', faixas=FAIXAS_ETARIAS,
+                               erro='Erro ao ler o PDF: ' + str(e)[:200])
+    if not planos:
+        return render_template('cotacao_import_pdf.html', faixas=FAIXAS_ETARIAS,
+                               erro='Não identifiquei a tabela de planos neste PDF. Confirme que é uma cotação do Painel do Corretor.')
+    # Pré-preenche os preços de cada plano por faixa (todas as 10 faixas, vazio onde faltar)
+    for p in planos:
+        p['precos_lista'] = [{'faixa': fx, 'label': _faixa_label(fx),
+                              'valor': (f"{p['precos'][fx]:.2f}".replace('.', ',') if fx in p['precos'] else '')}
+                             for fx in FAIXAS_ETARIAS]
+    return render_template('cotacao_import_pdf.html', faixas=FAIXAS_ETARIAS, planos=planos)
+
+
+@app.route('/cotacao/tabelas/importar-pdf/salvar', methods=['POST'])
+@login_required
+@admin_required
+def cotacao_import_pdf_salvar():
+    d = request.form
+    n = int(d.get('num_planos', '0') or 0)
+    conn = db()
+    salvas = 0
+    for j in range(n):
+        if not d.get(f'incluir_{j}'):
+            continue
+        operadora = (d.get(f'operadora_{j}') or '').strip()
+        plano = (d.get(f'plano_{j}') or '').strip()
+        if not operadora or not plano:
+            continue
+        conn.execute("""INSERT INTO cotacao_tabela
+            (operadora, plano, modalidade, acomodacao, coparticipacao, abrangencia, vigencia, ativo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
+            (operadora, plano, (d.get(f'modalidade_{j}') or 'PME').strip(),
+             (d.get(f'acomodacao_{j}') or 'Enfermaria').strip(), (d.get(f'coparticipacao_{j}') or 'Sem').strip(),
+             (d.get(f'abrangencia_{j}') or '').strip(), (d.get(f'vigencia_{j}') or '').strip()))
+        tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+               else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+        for k, fx in enumerate(FAIXAS_ETARIAS):
+            preco = _parse_preco_br(d.get(f'preco_{j}_{k}') or '0')
+            conn.execute("INSERT INTO cotacao_preco (tabela_id, faixa, preco) VALUES (?, ?, ?)", (tid, fx, preco))
+        conn.commit()
+        salvas += 1
+    close_db(conn)
+    return redirect('/cotacao/tabelas')
+
+
 @app.route('/cotacao/salvar', methods=['POST'])
 @login_required
 def cotacao_salvar():

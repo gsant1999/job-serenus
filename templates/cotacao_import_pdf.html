@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Importar PDF do Painel do Corretor{% endblock %}
+
+{% block head %}
+<style>
+  .box { max-width:880px; background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:22px; margin-bottom:16px; }
+  .box h2 { font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin:0 0 12px; }
+  .box p, .box li { font-size:13px; color:var(--cinza); line-height:1.7; }
+  .box code { background:var(--panel-2); border:1px solid var(--borda); border-radius:5px; padding:1px 6px; font-size:12px; color:var(--texto); }
+  .destaque { background:rgba(59,130,246,.08); border:1px solid rgba(59,130,246,.3); border-radius:10px; padding:12px 14px; font-size:13px; color:var(--texto); margin:12px 0; }
+  .upload { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+  input[type=file] { color:var(--cinza); font-size:13px; }
+  .btn-imp { background:var(--azul); color:#fff; border:none; padding:11px 22px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  .alert-erro { background:rgba(244,63,94,.1); border:1px solid var(--erro); color:var(--erro); border-radius:10px; padding:14px 16px; font-size:13px; margin-bottom:16px; }
+
+  .plano-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:16px 18px; margin-bottom:12px; }
+  .plano-card.off { opacity:.45; }
+  .pc-head { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .pc-head input[type=checkbox] { width:17px; height:17px; accent-color:var(--azul); }
+  .meta-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px; }
+  .fg { display:flex; flex-direction:column; gap:3px; }
+  .fg label { font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:600; }
+  .fg input, .fg select { background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:7px 9px; color:var(--texto); font-size:13px; outline:none; }
+  .precos-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(98px,1fr)); gap:8px; }
+  .preco-item label { font-size:10px; color:var(--cinza); font-weight:600; }
+  .preco-item input { width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:6px; padding:6px 8px; color:var(--texto); font-size:12.5px; outline:none; margin-top:2px; }
+  .preco-item input.vazio { border-color:rgba(250,204,21,.4); }
+  .barra-salvar { position:sticky; bottom:0; background:var(--bg); padding:14px 0; display:flex; gap:10px; align-items:center; border-top:1px solid var(--borda); margin-top:8px; }
+  .btn-salvar { background:var(--verde); color:#04221a; border:none; padding:12px 26px; border-radius:9px; font-size:14px; font-weight:700; cursor:pointer; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Importar PDF — Painel do Corretor</h1>
+    <div class="sub">Suba a cotação em PDF e o sistema extrai as tabelas de preço</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas'">Voltar às tabelas</button>
+  </div>
+</div>
+
+{% if erro %}<div class="alert-erro">{{ erro }}</div>{% endif %}
+
+{% if not planos %}
+<div class="box">
+  <h2>Como gerar o PDF certo no Painel do Corretor</h2>
+  <p>Para o sistema capturar a <b>tabela completa</b> (todas as faixas etárias), gere a cotação no Painel do Corretor com <b>uma vida em cada faixa</b>:</p>
+  <div class="destaque">No Painel do Corretor, faça a cotação com estas 10 idades (uma por faixa): <code>10, 20, 25, 30, 35, 40, 45, 50, 55, 60</code>. Assim o PDF traz o preço de todas as faixas de cada plano.</div>
+  <p>Depois é só baixar o PDF da cotação e enviar aqui. O sistema lê todos os planos (em colunas) de uma vez e mostra uma tela de conferência antes de salvar.</p>
+</div>
+
+<div class="box">
+  <h2>Enviar PDF</h2>
+  <form method="POST" action="/cotacao/tabelas/importar-pdf" enctype="multipart/form-data">
+    <div class="upload">
+      <input type="file" name="arquivo" accept=".pdf" required>
+      <button type="submit" class="btn-imp">Ler PDF</button>
+    </div>
+    <p style="margin-top:10px; font-size:11px; color:var(--cinza-2);">Funciona com o PDF de cotação do Painel do Corretor (texto). Nada é salvo até você confirmar na próxima tela.</p>
+  </form>
+</div>
+
+{% else %}
+<div class="box" style="padding:14px 18px;">
+  <p style="margin:0; font-size:13px; color:var(--texto);"><b>{{ planos|length }} plano(s) detectado(s).</b> Confira os dados, ajuste o que precisar e marque os que quer salvar. Campos de preço em amarelo estão vazios (faixa não veio no PDF).</p>
+</div>
+
+<form method="POST" action="/cotacao/tabelas/importar-pdf/salvar">
+  <input type="hidden" name="num_planos" value="{{ planos|length }}">
+  {% for p in planos %}
+  {% set pj = loop.index0 %}
+  <div class="plano-card" id="card-{{ loop.index0 }}">
+    <div class="pc-head">
+      <input type="checkbox" name="incluir_{{ loop.index0 }}" value="1" checked onchange="document.getElementById('card-{{ loop.index0 }}').classList.toggle('off', !this.checked)">
+      <strong style="color:var(--texto); font-size:14px;">{{ p.operadora }} — {{ p.plano }}</strong>
+    </div>
+    <div class="meta-grid">
+      <div class="fg"><label>Operadora</label><input type="text" name="operadora_{{ loop.index0 }}" value="{{ p.operadora }}"></div>
+      <div class="fg"><label>Plano</label><input type="text" name="plano_{{ loop.index0 }}" value="{{ p.plano }}"></div>
+      <div class="fg"><label>Modalidade</label>
+        <select name="modalidade_{{ loop.index0 }}">
+          {% for m in ['PME','PF','Adesão'] %}<option value="{{ m }}" {{ 'selected' if p.modalidade == m }}>{{ m }}</option>{% endfor %}
+        </select></div>
+      <div class="fg"><label>Acomodação</label>
+        <select name="acomodacao_{{ loop.index0 }}">
+          {% for a in ['Enfermaria','Apartamento'] %}<option value="{{ a }}" {{ 'selected' if p.acomodacao == a }}>{{ a }}</option>{% endfor %}
+        </select></div>
+      <div class="fg"><label>Coparticipação</label><input type="text" name="coparticipacao_{{ loop.index0 }}" value="{{ p.coparticipacao }}"></div>
+      <div class="fg"><label>Abrangência</label><input type="text" name="abrangencia_{{ loop.index0 }}" value=""></div>
+      <div class="fg"><label>Vigência</label><input type="text" name="vigencia_{{ loop.index0 }}" value=""></div>
+    </div>
+    <div class="precos-grid">
+      {% for item in p.precos_lista %}
+      <div class="preco-item">
+        <label>{{ item.label }}</label>
+        <input type="text" inputmode="decimal" name="preco_{{ pj }}_{{ loop.index0 }}" value="{{ item.valor }}" class="{{ 'vazio' if not item.valor }}">
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+  <div class="barra-salvar">
+    <button type="submit" class="btn-salvar">Salvar tabelas</button>
+    <a href="/cotacao/tabelas/importar-pdf" style="color:var(--cinza); font-size:13px; text-decoration:none;">Enviar outro PDF</a>
+  </div>
+</form>
+{% endif %}
+{% endblock %}
