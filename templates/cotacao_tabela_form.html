@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Nova Tabela de Cotação{% endblock %}
+
+{% block head %}
+<style>
+  .form-box { max-width:820px; background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:22px; }
+  .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:18px; }
+  .fg { display:flex; flex-direction:column; gap:4px; }
+  .fg label { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:600; }
+  .fg input, .fg select { background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 11px; color:var(--texto); font-size:13px; outline:none; }
+  .fg input:focus, .fg select:focus { border-color:var(--azul); }
+  h3 { font-family:'Sora',sans-serif; font-size:13px; color:var(--texto); margin:6px 0 12px; }
+  .precos-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:12px; margin-bottom:20px; }
+  .preco-item label { font-size:11px; color:var(--cinza); font-weight:600; }
+  .preco-item input { width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:8px 10px; color:var(--texto); font-size:13px; outline:none; margin-top:3px; }
+  .preco-item input:focus { border-color:var(--azul); }
+  .acoes { display:flex; gap:10px; }
+  .btn-salvar { background:var(--azul); color:#fff; border:none; padding:11px 24px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  .btn-cancelar { background:transparent; color:var(--cinza); border:1px solid var(--borda); padding:11px 18px; border-radius:8px; font-size:13px; cursor:pointer; text-decoration:none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Nova Tabela de Cotação</h1>
+    <div class="sub">Cadastre os preços por faixa etária de um plano</div>
+  </div>
+</div>
+
+<form method="POST" action="/cotacao/tabelas/nova" class="form-box">
+  <div class="form-grid">
+    <div class="fg"><label>Operadora</label><input type="text" name="operadora" required placeholder="Ex: Amil"></div>
+    <div class="fg"><label>Plano</label><input type="text" name="plano" required placeholder="Ex: Amil S380"></div>
+    <div class="fg"><label>Modalidade</label>
+      <select name="modalidade">{% for m in modalidades %}<option value="{{ m }}">{{ m }}</option>{% endfor %}</select>
+    </div>
+    <div class="fg"><label>Acomodação</label>
+      <select name="acomodacao">{% for a in acomodacoes %}<option value="{{ a }}">{{ a }}</option>{% endfor %}</select>
+    </div>
+    <div class="fg"><label>Coparticipação</label>
+      <select name="coparticipacao">{% for c in coparts %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select>
+    </div>
+    <div class="fg"><label>Abrangência / Região</label><input type="text" name="abrangencia" placeholder="Ex: Campinas"></div>
+    <div class="fg"><label>Vigência</label><input type="text" name="vigencia" placeholder="Ex: 07/2026"></div>
+  </div>
+
+  <h3>Preços por faixa etária (R$)</h3>
+  <div class="precos-grid">
+    {% for fx in faixas %}
+    <div class="preco-item">
+      <label>{{ fx }}</label>
+      <input type="text" name="preco_{{ fx }}" inputmode="decimal" placeholder="0,00">
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="acoes">
+    <button type="submit" class="btn-salvar">Salvar tabela</button>
+    <a href="/cotacao/tabelas" class="btn-cancelar">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

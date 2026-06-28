@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Cotação{% endblock %}
+
+{% block head %}
+<style>
+  .cot-filtros { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin:14px 0 22px; padding:16px; background:var(--panel); border:1px solid var(--borda); border-radius:12px; }
+  .cot-filtros .fg { display:flex; flex-direction:column; gap:3px; }
+  .cot-filtros label { font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:600; }
+  .cot-filtros input, .cot-filtros select { background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:8px 10px; color:var(--texto); font-size:13px; outline:none; }
+  .cot-filtros input:focus, .cot-filtros select:focus { border-color:var(--azul); }
+  .cot-filtros input.idades { min-width:240px; }
+  .cot-filtros .btn-f { background:var(--azul); color:#fff; border:none; padding:9px 18px; border-radius:7px; font-size:13px; font-weight:600; cursor:pointer; }
+  .cot-filtros .btn-l { background:transparent; color:var(--cinza); border:1px solid var(--borda); padding:9px 14px; border-radius:7px; font-size:13px; cursor:pointer; text-decoration:none; }
+
+  .cot-resumo { font-size:12px; color:var(--cinza); margin-bottom:14px; }
+  .cot-resumo b { color:var(--texto); }
+
+  table.cot { width:100%; border-collapse:collapse; font-size:13px; background:var(--panel); border:1px solid var(--borda); border-radius:12px; overflow:hidden; }
+  table.cot th { text-align:left; color:var(--cinza-2); font-size:10px; text-transform:uppercase; letter-spacing:.5px; font-weight:600; padding:12px 14px; border-bottom:1px solid var(--borda); background:var(--panel-2); }
+  table.cot td { padding:13px 14px; border-bottom:1px solid var(--borda); color:var(--texto); }
+  table.cot tr:last-child td { border-bottom:none; }
+  table.cot td.total { text-align:right; font-weight:700; font-variant-numeric:tabular-nums; color:var(--verde); white-space:nowrap; }
+  table.cot tr.melhor td { background:rgba(31,216,164,.06); }
+  .tag { display:inline-block; padding:2px 8px; border-radius:20px; font-size:10.5px; font-weight:600; background:rgba(255,255,255,.06); color:var(--cinza); }
+  .tag-best { background:var(--verde-soft); color:var(--verde); }
+  .tag-inc { background:rgba(250,204,21,.14); color:var(--amarelo); }
+  .vazio { color:var(--cinza-2); font-size:13px; padding:30px; text-align:center; background:var(--panel); border:1px dashed var(--borda); border-radius:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Cotação</h1>
+    <div class="sub">Multicálculo de planos por faixa etária</div>
+  </div>
+  {% if eh_admin %}
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas'">Gerenciar tabelas</button>
+  </div>
+  {% endif %}
+</div>
+
+<form method="GET" action="/cotacao" class="cot-filtros">
+  <div class="fg">
+    <label>Idades dos beneficiários</label>
+    <input class="idades" type="text" name="idades" value="{{ idades_txt }}" placeholder="Ex: 25, 30, 4 e 58" autofocus>
+  </div>
+  <div class="fg">
+    <label>Operadora</label>
+    <select name="operadora">
+      <option value="">Todas</option>
+      {% for o in operadoras %}<option value="{{ o }}" {{ 'selected' if filtros.operadora == o }}>{{ o }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="fg">
+    <label>Modalidade</label>
+    <select name="modalidade">
+      <option value="">Todas</option>
+      {% for m in modalidades %}<option value="{{ m }}" {{ 'selected' if filtros.modalidade == m }}>{{ m }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="fg">
+    <label>Acomodação</label>
+    <select name="acomodacao">
+      <option value="">Todas</option>
+      {% for a in acomodacoes %}<option value="{{ a }}" {{ 'selected' if filtros.acomodacao == a }}>{{ a }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="fg">
+    <label>Coparticipação</label>
+    <select name="coparticipacao">
+      <option value="">Todas</option>
+      {% for c in coparts %}<option value="{{ c }}" {{ 'selected' if filtros.coparticipacao == c }}>{{ c }}</option>{% endfor %}
+    </select>
+  </div>
+  <button type="submit" class="btn-f">Cotar</button>
+  <a class="btn-l" href="/cotacao">Limpar</a>
+</form>
+
+{% if idades_txt %}
+  <div class="cot-resumo">{{ total_vidas }} vida(s) na cotação · {{ resultados|length }} plano(s) encontrado(s)</div>
+  {% if resultados %}
+  <table class="cot">
+    <thead>
+      <tr><th>Operadora</th><th>Plano</th><th>Modalidade</th><th>Acomodação</th><th>Coparticipação</th><th style="text-align:right;">Total mensal</th></tr>
+    </thead>
+    <tbody>
+      {% for r in resultados %}
+      <tr class="{{ 'melhor' if loop.first and not r.incompleta }}">
+        <td>{{ r.operadora }}</td>
+        <td>
+          {{ r.plano }}
+          {% if loop.first and not r.incompleta %}<span class="tag tag-best">menor preço</span>{% endif %}
+          {% if r.incompleta %}<span class="tag tag-inc">tabela incompleta</span>{% endif %}
+          {% if r.abrangencia %}<div style="font-size:11px;color:var(--cinza-2);margin-top:2px;">{{ r.abrangencia }}</div>{% endif %}
+        </td>
+        <td><span class="tag">{{ r.modalidade }}</span></td>
+        <td>{{ r.acomodacao }}</td>
+        <td>{{ r.coparticipacao }}</td>
+        <td class="total">{{ r.total|moeda }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div style="font-size:11px;color:var(--cinza-2);margin-top:10px;">"Tabela incompleta" = falta o preço de alguma faixa etária usada nesta cotação. Valores meramente referenciais.</div>
+  {% else %}
+  <div class="vazio">Nenhum plano encontrado para esses filtros. {% if eh_admin %}Cadastre tabelas em <a href="/cotacao/tabelas" style="color:var(--azul);">Gerenciar tabelas</a>.{% endif %}</div>
+  {% endif %}
+{% else %}
+  <div class="vazio">Informe as idades dos beneficiários e clique em Cotar.</div>
+{% endif %}
+{% endblock %}

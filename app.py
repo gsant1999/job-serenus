@@ -729,6 +729,19 @@ def init_db():
                 tipo TEXT DEFAULT 'normal',
                 ativo INTEGER DEFAULT 1
             )""",
+            """CREATE TABLE IF NOT EXISTS cotacao_tabela (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT NOT NULL, plano TEXT NOT NULL,
+                modalidade TEXT DEFAULT 'PME', acomodacao TEXT DEFAULT 'Enfermaria',
+                coparticipacao TEXT DEFAULT 'Sem', abrangencia TEXT DEFAULT '',
+                vigencia TEXT DEFAULT '', ativo INTEGER DEFAULT 1,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS cotacao_preco (
+                id SERIAL PRIMARY KEY,
+                tabela_id INTEGER NOT NULL,
+                faixa TEXT NOT NULL, preco REAL DEFAULT 0
+            )""",
         ]
         for sql in tables_sql:
             try: 
@@ -955,6 +968,19 @@ def init_db():
             evento_id TEXT UNIQUE,
             evento TEXT,
             processado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS cotacao_tabela (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operadora TEXT NOT NULL, plano TEXT NOT NULL,
+            modalidade TEXT DEFAULT 'PME', acomodacao TEXT DEFAULT 'Enfermaria',
+            coparticipacao TEXT DEFAULT 'Sem', abrangencia TEXT DEFAULT '',
+            vigencia TEXT DEFAULT '', ativo INTEGER DEFAULT 1,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS cotacao_preco (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tabela_id INTEGER NOT NULL,
+            faixa TEXT NOT NULL, preco REAL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS solicitacoes_edicao (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -7159,6 +7185,165 @@ def crm_painel():
     return render_template('crm_painel.html', cards=cards, funil=funil, origens=origens,
                            consultores=consultores, perdas=perdas, eh_admin=eh_admin,
                            filtros={'data_de': f_de, 'data_ate': f_ate})
+
+
+# ─── COTAÇÃO / MULTICÁLCULO ──────────────────────────────────────────────────
+# Faixas etárias padrão ANS (10 faixas).
+FAIXAS_ETARIAS = ['00-18', '19-23', '24-28', '29-33', '34-38', '39-43', '44-48', '49-53', '54-58', '59+']
+COTACAO_MODALIDADES = ['PME', 'PF', 'Adesão']
+COTACAO_ACOMODACOES = ['Enfermaria', 'Apartamento']
+COTACAO_COPART = ['Sem', 'Parcial', 'Total']
+
+
+def _faixa_da_idade(idade):
+    """Retorna a faixa etária ANS para uma idade inteira."""
+    try:
+        i = int(idade)
+    except Exception:
+        return None
+    limites = [(18, '00-18'), (23, '19-23'), (28, '24-28'), (33, '29-33'), (38, '34-38'),
+               (43, '39-43'), (48, '44-48'), (53, '49-53'), (58, '54-58')]
+    for lim, faixa in limites:
+        if i <= lim:
+            return faixa
+    return '59+'
+
+
+def _parse_idades(texto):
+    """Extrai lista de idades inteiras de um texto livre (ex: '25, 30 e 4')."""
+    if not texto:
+        return []
+    return [int(n) for n in re.findall(r'\d+', str(texto))][:50]
+
+
+@app.route('/cotacao')
+@login_required
+def cotacao():
+    """Tela de cotação (multicálculo): idades + filtros -> comparativo de planos."""
+    conn = db()
+    # Opções de filtro a partir das tabelas cadastradas
+    try:
+        operadoras = [r['operadora'] for r in conn.execute(
+            "SELECT DISTINCT operadora FROM cotacao_tabela WHERE ativo=1 ORDER BY operadora").fetchall()]
+    except Exception:
+        operadoras = []
+
+    idades_txt = request.args.get('idades', '').strip()
+    f_modalidade = request.args.get('modalidade', '').strip()
+    f_acomodacao = request.args.get('acomodacao', '').strip()
+    f_copart = request.args.get('coparticipacao', '').strip()
+    f_operadora = request.args.get('operadora', '').strip()
+
+    resultados = []
+    idades = _parse_idades(idades_txt)
+    # Contagem de vidas por faixa
+    cont_faixa = {}
+    for idade in idades:
+        fx = _faixa_da_idade(idade)
+        if fx:
+            cont_faixa[fx] = cont_faixa.get(fx, 0) + 1
+
+    if idades:
+        q = "SELECT * FROM cotacao_tabela WHERE ativo=1"
+        params = []
+        if f_modalidade:
+            q += " AND modalidade=?"; params.append(f_modalidade)
+        if f_acomodacao:
+            q += " AND acomodacao=?"; params.append(f_acomodacao)
+        if f_copart:
+            q += " AND coparticipacao=?"; params.append(f_copart)
+        if f_operadora:
+            q += " AND operadora=?"; params.append(f_operadora)
+        tabelas = conn.execute(q, params).fetchall()
+
+        for t in tabelas:
+            precos = conn.execute("SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (t['id'],)).fetchall()
+            pmap = {p['faixa']: float(p['preco'] or 0) for p in precos}
+            total = 0.0
+            faltam = False
+            detalhe = []
+            for fx, qtd in cont_faixa.items():
+                preco = pmap.get(fx, 0)
+                if preco <= 0:
+                    faltam = True
+                total += preco * qtd
+                detalhe.append({'faixa': fx, 'qtd': qtd, 'preco_unit': preco, 'subtotal': preco * qtd})
+            resultados.append({
+                'operadora': t['operadora'], 'plano': t['plano'],
+                'modalidade': t['modalidade'], 'acomodacao': t['acomodacao'],
+                'coparticipacao': t['coparticipacao'], 'abrangencia': t['abrangencia'],
+                'vigencia': t['vigencia'], 'total': round(total, 2),
+                'incompleta': faltam, 'detalhe': sorted(detalhe, key=lambda x: x['faixa']),
+            })
+        resultados.sort(key=lambda x: x['total'])
+
+    close_db(conn)
+    return render_template('cotacao.html', operadoras=operadoras, resultados=resultados,
+                           idades_txt=idades_txt, total_vidas=len(idades),
+                           modalidades=COTACAO_MODALIDADES, acomodacoes=COTACAO_ACOMODACOES,
+                           coparts=COTACAO_COPART, eh_admin=(session.get('perfil') == 'admin'),
+                           filtros={'modalidade': f_modalidade, 'acomodacao': f_acomodacao,
+                                    'coparticipacao': f_copart, 'operadora': f_operadora})
+
+
+@app.route('/cotacao/tabelas')
+@login_required
+@admin_required
+def cotacao_tabelas():
+    """Lista as tabelas de preço cadastradas (admin)."""
+    conn = db()
+    tabelas = conn.execute("""
+        SELECT t.*, (SELECT COUNT(*) FROM cotacao_preco p WHERE p.tabela_id=t.id AND p.preco>0) AS precos_ok
+        FROM cotacao_tabela t ORDER BY t.operadora, t.plano
+    """).fetchall()
+    close_db(conn)
+    return render_template('cotacao_tabelas.html', tabelas=tabelas)
+
+
+@app.route('/cotacao/tabelas/nova', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def cotacao_tabela_nova():
+    """Cadastra uma tabela de preço com os valores por faixa etária."""
+    if request.method == 'GET':
+        return render_template('cotacao_tabela_form.html', faixas=FAIXAS_ETARIAS,
+                               modalidades=COTACAO_MODALIDADES, acomodacoes=COTACAO_ACOMODACOES,
+                               coparts=COTACAO_COPART)
+    d = request.form
+    operadora = (d.get('operadora') or '').strip()
+    plano = (d.get('plano') or '').strip()
+    if not operadora or not plano:
+        return redirect('/cotacao/tabelas/nova')
+
+    conn = db()
+    conn.execute("""INSERT INTO cotacao_tabela
+        (operadora, plano, modalidade, acomodacao, coparticipacao, abrangencia, vigencia, ativo)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
+        (operadora, plano, (d.get('modalidade') or 'PME').strip(),
+         (d.get('acomodacao') or 'Enfermaria').strip(), (d.get('coparticipacao') or 'Sem').strip(),
+         (d.get('abrangencia') or '').strip(), (d.get('vigencia') or '').strip()))
+    tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    for fx in FAIXAS_ETARIAS:
+        try:
+            preco = float((d.get('preco_' + fx) or '0').replace('.', '').replace(',', '.')) if d.get('preco_' + fx) else 0
+        except Exception:
+            preco = 0
+        conn.execute("INSERT INTO cotacao_preco (tabela_id, faixa, preco) VALUES (?, ?, ?)", (tid, fx, preco))
+    conn.commit()
+    close_db(conn)
+    return redirect('/cotacao/tabelas')
+
+
+@app.route('/cotacao/tabelas/<int:tid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def cotacao_tabela_excluir(tid):
+    conn = db()
+    conn.execute("DELETE FROM cotacao_preco WHERE tabela_id=?", (tid,))
+    conn.execute("DELETE FROM cotacao_tabela WHERE id=?", (tid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
 
 
 # ─── GESTÃO DE ETAPAS DO FUNIL (admin) ───────────────────────────────────────
