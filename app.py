@@ -7029,6 +7029,138 @@ def crm_stats():
     return jsonify(stats)
 
 
+def _normalizar_origem_label(origem):
+    """Agrupa as variações de origem em rótulos limpos para métricas."""
+    o = (origem or '').strip().lower()
+    if not o:
+        return 'Manual'
+    if 'face' in o or o == 'fb' or 'meta' in o:
+        return 'Meta'
+    if 'google' in o:
+        return 'Google'
+    if 'meds' in o:
+        return 'MedSênior'
+    if 'manual' in o:
+        return 'Manual'
+    return (origem or 'Outros').strip().split('(')[0].strip().title()
+
+
+@app.route('/crm/painel')
+@login_required
+def crm_painel():
+    """Painel RevOps do CRM: conversão, funil, origem, performance por consultor, SLA de contato."""
+    conn = db()
+    eh_admin = session.get('perfil') == 'admin'
+    uid = session['user_id']
+
+    f_de = request.args.get('data_de', '').strip()
+    f_ate = request.args.get('data_ate', '').strip()
+
+    etapas = conn.execute(
+        "SELECT slug, nome, tipo, ordem, cor FROM crm_etapas WHERE ativo=1 ORDER BY ordem, id"
+    ).fetchall()
+    etapa_tipo = {e['slug']: (e['tipo'] or 'normal') for e in etapas}
+    etapa_nome = {e['slug']: e['nome'] for e in etapas}
+    etapa_cor = {e['slug']: (e['cor'] or '#3b82f6') for e in etapas}
+    etapa_ordem = [e['slug'] for e in etapas]
+
+    q = "SELECT id, etapa, responsavel_id, origem, criado_em, valor_estimado, perdido_motivo FROM crm_leads WHERE 1=1"
+    params = []
+    if not eh_admin:
+        q += " AND responsavel_id=?"; params.append(uid)
+    if f_de:
+        q += " AND DATE(criado_em) >= ?"; params.append(f_de)
+    if f_ate:
+        q += " AND DATE(criado_em) <= ?"; params.append(f_ate)
+    leads = conn.execute(q, params).fetchall()
+
+    usuarios = {u['id']: u['nome'] for u in conn.execute("SELECT id, nome FROM usuarios").fetchall()}
+
+    # Leads que tiveram algum contato real (não só criação/movimentação automática)
+    contato_ids = set()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT lead_id FROM crm_atividades WHERE tipo IN ('whatsapp','atividade','nota','email','ligacao')"
+        ).fetchall()
+        contato_ids = {(r['lead_id'] if hasattr(r, 'keys') else r[0]) for r in rows}
+    except Exception:
+        pass
+    close_db(conn)
+
+    total = len(leads)
+    ganhos = perdidos = aberto = sem_contato = 0
+    pipeline_valor = 0.0
+    por_etapa = {s: 0 for s in etapa_ordem}
+    por_origem = {}
+    por_consultor = {}
+    motivos_perda = {}
+
+    for l in leads:
+        et = l['etapa'] or (etapa_ordem[0] if etapa_ordem else '')
+        tipo = etapa_tipo.get(et, 'normal')
+        por_etapa[et] = por_etapa.get(et, 0) + 1
+
+        if tipo == 'ganho':
+            ganhos += 1
+        elif tipo == 'perdido':
+            perdidos += 1
+            mot = (l['perdido_motivo'] or '').strip() or 'Não informado'
+            motivos_perda[mot] = motivos_perda.get(mot, 0) + 1
+        else:
+            aberto += 1
+            pipeline_valor += float(l['valor_estimado'] or 0)
+            if l['id'] not in contato_ids:
+                sem_contato += 1
+
+        org = _normalizar_origem_label(l['origem'])
+        do = por_origem.setdefault(org, {'total': 0, 'ganhos': 0})
+        do['total'] += 1
+        if tipo == 'ganho':
+            do['ganhos'] += 1
+
+        nome = usuarios.get(l['responsavel_id'], 'Sem responsável')
+        c = por_consultor.setdefault(nome, {'total': 0, 'ganhos': 0, 'perdidos': 0, 'aberto': 0})
+        c['total'] += 1
+        if tipo == 'ganho':
+            c['ganhos'] += 1
+        elif tipo == 'perdido':
+            c['perdidos'] += 1
+        else:
+            c['aberto'] += 1
+
+    decididos = ganhos + perdidos
+    taxa_conv = round(ganhos / decididos * 100, 1) if decididos else 0.0
+    taxa_contato = round((aberto - sem_contato) / aberto * 100, 1) if aberto else 0.0
+
+    # Monta estruturas ordenadas para o template
+    funil = [{'nome': etapa_nome.get(s, s), 'cor': etapa_cor.get(s, '#3b82f6'),
+              'qtd': por_etapa.get(s, 0),
+              'pct': round(por_etapa.get(s, 0) / total * 100, 1) if total else 0}
+             for s in etapa_ordem]
+    origens = sorted(
+        [{'nome': k, 'total': v['total'], 'ganhos': v['ganhos'],
+          'conv': round(v['ganhos'] / v['total'] * 100, 1) if v['total'] else 0,
+          'pct': round(v['total'] / total * 100, 1) if total else 0}
+         for k, v in por_origem.items()],
+        key=lambda x: -x['total'])
+    consultores = sorted(
+        [{'nome': k, **v,
+          'conv': round(v['ganhos'] / (v['ganhos'] + v['perdidos']) * 100, 1) if (v['ganhos'] + v['perdidos']) else 0}
+         for k, v in por_consultor.items()],
+        key=lambda x: -x['total'])
+    perdas = sorted([{'motivo': k, 'qtd': v} for k, v in motivos_perda.items()], key=lambda x: -x['qtd'])
+
+    cards = {
+        'total': total, 'ganhos': ganhos, 'perdidos': perdidos, 'aberto': aberto,
+        'taxa_conv': taxa_conv, 'pipeline_valor': pipeline_valor,
+        'sem_contato': sem_contato, 'taxa_contato': taxa_contato,
+    }
+
+    return render_template('crm_painel.html', cards=cards, funil=funil, origens=origens,
+                           consultores=consultores, perdas=perdas, eh_admin=eh_admin,
+                           filtros={'data_de': f_de, 'data_ate': f_ate})
+
+
 # ─── GESTÃO DE ETAPAS DO FUNIL (admin) ───────────────────────────────────────
 import unicodedata as _unicodedata
 
