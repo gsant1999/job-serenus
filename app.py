@@ -6523,6 +6523,96 @@ def api_bi_propostas():
     })
 
 
+@app.route('/api/bi/comissoes')
+def api_bi_comissoes():
+    """
+    Power BI / Google Sheets — comissões (parcelas) detalhadas + resumo por consultor/competência.
+    Requer header X-API-Key (env var API_KEY_BI). Filtros opcionais: competencia, consultor, status.
+    """
+    api_key = request.headers.get('X-API-Key', '').strip()
+    expected_key = os.environ.get('API_KEY_BI', '')
+    if not api_key or not expected_key or api_key != expected_key:
+        return jsonify({"erro": "API_KEY inválida ou não configurada"}), 401
+
+    f_competencia = request.args.get('competencia', '').strip()
+    f_consultor = request.args.get('consultor', '').strip()
+    f_status = request.args.get('status', '').strip()
+
+    conn = db()
+    # JOIN parcelas + propostas (dados do negócio)
+    rows = conn.execute("""
+        SELECT p.id AS parcela_id, p.proposta_id, p.numero, p.valor, p.valor_corretora,
+               p.perc_cliente, p.competencia, p.status, p.data_prevista, p.data_pagamento,
+               p.tipo_origem,
+               pr.consultor, pr.razao_social, pr.adm_operadora, pr.produto,
+               pr.numero_proposta, pr.modalidade, pr.tipo_pessoa
+        FROM parcelas p
+        JOIN propostas pr ON pr.id = p.proposta_id
+        WHERE pr.estornada = 0
+        ORDER BY p.proposta_id DESC, p.numero ASC
+    """).fetchall()
+    close_db(conn)
+
+    detalhado = []
+    resumo = {}  # chave: consultor|competencia
+    for r in rows:
+        d = dict(r)
+        # Filtros opcionais (em memória — compatível PG/SQLite)
+        if f_competencia and (d.get('competencia') or '') != f_competencia:
+            continue
+        if f_consultor and (d.get('consultor') or '').lower() != f_consultor.lower():
+            continue
+        if f_status and (d.get('status') or '') != f_status:
+            continue
+
+        linha = {
+            'proposta_id': d.get('proposta_id'),
+            'numero_proposta': d.get('numero_proposta') or '',
+            'parcela': d.get('numero'),
+            'cliente': d.get('razao_social') or '',
+            'consultor': d.get('consultor') or '',
+            'operadora': d.get('adm_operadora') or '',
+            'produto': d.get('produto') or '',
+            'modalidade': d.get('modalidade') or '',
+            'tipo_pessoa': d.get('tipo_pessoa') or '',
+            'valor_comissao': round(float(d.get('valor') or 0), 2),
+            'valor_corretora': round(float(d.get('valor_corretora') or 0), 2),
+            'competencia': d.get('competencia') or '',
+            'status': d.get('status') or '',
+            'data_prevista': d.get('data_prevista') or '',
+            'data_pagamento': d.get('data_pagamento') or '',
+            'tipo_origem': d.get('tipo_origem') or '',
+        }
+        detalhado.append(linha)
+
+        # Resumo por consultor + competência
+        chave = f"{linha['consultor']}|{linha['competencia']}"
+        if chave not in resumo:
+            resumo[chave] = {
+                'consultor': linha['consultor'],
+                'competencia': linha['competencia'],
+                'total_comissao': 0.0,
+                'total_recebido': 0.0,
+                'total_pendente': 0.0,
+                'qtd_parcelas': 0,
+            }
+        rs = resumo[chave]
+        rs['total_comissao'] = round(rs['total_comissao'] + linha['valor_comissao'], 2)
+        rs['qtd_parcelas'] += 1
+        status_lower = linha['status'].lower()
+        if 'pago' in status_lower or 'recebido' in status_lower:
+            rs['total_recebido'] = round(rs['total_recebido'] + linha['valor_comissao'], 2)
+        else:
+            rs['total_pendente'] = round(rs['total_pendente'] + linha['valor_comissao'], 2)
+
+    return jsonify({
+        'gerado_em': datetime.now(TZ_SP).strftime('%d/%m/%Y %H:%M:%S'),
+        'total_parcelas': len(detalhado),
+        'detalhado': detalhado,
+        'resumo': sorted(resumo.values(), key=lambda x: (x['consultor'], x['competencia'])),
+    })
+
+
 # ─── CRM ─────────────────────────────────────────────────────────────────────────
 def carregar_etapas_crm(conn=None):
     """Lê as etapas do funil do banco, ordenadas. Cria conexão própria se não receber uma."""
