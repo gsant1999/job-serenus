@@ -7641,6 +7641,26 @@ def webhook_diag_datas():
     if request.args.get('token') != os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026'):
         return jsonify({"erro": "token invalido"}), 401
     conn = db()
+
+    # Teste de match: ?tel=XXXX testa as 3 estrategias de busca
+    tel_teste = request.args.get('tel', '').strip()
+    if tel_teste:
+        try:
+            tn = _normalizar_telefone(tel_teste)
+            r1 = conn.execute("SELECT id, nome, telefone_norm, CAST(criado_em AS TEXT) c FROM crm_leads WHERE telefone_norm=?", (tn,)).fetchone()
+            r2 = None
+            if tn and len(tn) >= 8:
+                r2 = conn.execute("SELECT id, nome, telefone_norm, CAST(criado_em AS TEXT) c FROM crm_leads WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(telefone,'-',''),' ',''),'(',''),')',''),'+','') LIKE ?", (f'%{tn[-8:]}',)).fetchone()
+            r3 = conn.execute("SELECT id, nome, telefone_norm, CAST(criado_em AS TEXT) c FROM crm_leads WHERE telefone_norm LIKE ?", (f'%{tn[-8:]}',)).fetchone() if len(tn) >= 8 else None
+            close_db(conn)
+            return jsonify({
+                "tel_input": tel_teste, "tel_normalizado": tn, "ultimos8": tn[-8:] if len(tn)>=8 else tn,
+                "match_exato": dict(r1) if r1 else None,
+                "match_ultimos8_telefone": dict(r2) if r2 else None,
+                "match_ultimos8_telefonenorm": dict(r3) if r3 else None,
+            })
+        except Exception as e:
+            close_db(conn); return jsonify({"erro": str(e)}), 500
     try:
         total = conn.execute("SELECT COUNT(*) c FROM crm_leads").fetchone()['c']
         com_tel_norm = conn.execute("SELECT COUNT(*) c FROM crm_leads WHERE telefone_norm IS NOT NULL AND telefone_norm != ''").fetchone()['c']
