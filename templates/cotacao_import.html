@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Importar Tabelas de Cotação{% endblock %}
+
+{% block head %}
+<style>
+  .box { max-width:760px; background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:22px; margin-bottom:16px; }
+  .box h2 { font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin:0 0 12px; }
+  .box p, .box li { font-size:13px; color:var(--cinza); line-height:1.6; }
+  .box code { background:var(--panel-2); border:1px solid var(--borda); border-radius:5px; padding:1px 6px; font-size:12px; color:var(--texto); }
+  .cols { font-size:12px; color:var(--cinza); background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:10px 12px; margin:10px 0; overflow-x:auto; white-space:nowrap; }
+  .upload { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+  input[type=file] { color:var(--cinza); font-size:13px; }
+  .btn-imp { background:var(--azul); color:#fff; border:none; padding:11px 22px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  .btn-modelo { background:transparent; color:var(--azul); border:1px solid var(--azul); padding:9px 16px; border-radius:8px; font-size:13px; cursor:pointer; text-decoration:none; }
+  .alert-ok { background:var(--verde-soft); border:1px solid var(--verde); color:var(--verde); border-radius:10px; padding:14px 16px; font-size:13px; margin-bottom:16px; }
+  .alert-erro { background:rgba(244,63,94,.1); border:1px solid var(--erro); color:var(--erro); border-radius:10px; padding:14px 16px; font-size:13px; margin-bottom:16px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Importar Tabelas de Cotação</h1>
+    <div class="sub">Carregue várias tabelas de preço de uma vez (CSV ou Excel)</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas'">Voltar às tabelas</button>
+  </div>
+</div>
+
+{% if resultado %}
+<div class="alert-ok">
+  {{ resultado.importadas }} tabela(s) importada(s).{% if resultado.ignoradas %} {{ resultado.ignoradas }} linha(s) ignorada(s) (sem operadora/plano ou com erro).{% endif %}
+  {% if resultado.faixas_detectadas %}<br>Faixas detectadas: {{ resultado.faixas_detectadas|join(', ') }}.{% endif %}
+  <br><a href="/cotacao/tabelas" style="color:var(--verde);text-decoration:underline;">Ver tabelas cadastradas</a>
+</div>
+{% endif %}
+{% if erro %}
+<div class="alert-erro">{{ erro }}</div>
+{% endif %}
+
+<div class="box">
+  <h2>Como deve ser o arquivo</h2>
+  <p>Uma linha por plano. A primeira linha é o cabeçalho. Colunas aceitas (a ordem não importa):</p>
+  <ul>
+    <li><b>Obrigatórias:</b> <code>operadora</code> e <code>plano</code></li>
+    <li><b>Opcionais:</b> <code>modalidade</code>, <code>acomodacao</code>, <code>coparticipacao</code>, <code>abrangencia</code>, <code>vigencia</code></li>
+    <li><b>Preços por faixa etária</b> (uma coluna por faixa): {{ faixas|join(', ') }}</li>
+  </ul>
+  <p>Os títulos das faixas podem variar — ex.: <code>00-18</code>, <code>00 a 18</code>, <code>59+</code> ou <code>59 ou mais</code> são reconhecidos. Preços podem usar vírgula (<code>153,00</code>) ou ponto.</p>
+  <div class="cols">operadora;plano;modalidade;acomodacao;coparticipacao;abrangencia;vigencia;00-18;19-23;24-28;29-33;34-38;39-43;44-48;49-53;54-58;59+</div>
+  <a class="btn-modelo" href="/cotacao/tabelas/modelo.csv">Baixar modelo (CSV)</a>
+</div>
+
+<div class="box">
+  <h2>Enviar arquivo</h2>
+  <form method="POST" action="/cotacao/tabelas/importar" enctype="multipart/form-data">
+    <div class="upload">
+      <input type="file" name="arquivo" accept=".csv,.xlsx" required>
+      <button type="submit" class="btn-imp">Importar</button>
+    </div>
+    <p style="margin-top:10px; font-size:11px; color:var(--cinza-2);">Aceita .csv (delimitador ; ou ,) e .xlsx. Cada importação adiciona novas tabelas (não substitui as existentes).</p>
+  </form>
+</div>
+{% endblock %}

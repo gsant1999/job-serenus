@@ -7389,6 +7389,142 @@ def _faixa_label(fx):
     return fx
 
 
+# ── Import de tabelas de preço (CSV / Excel) ──
+def _norm_txt(s):
+    import unicodedata
+    s = unicodedata.normalize('NFKD', str(s or '')).encode('ascii', 'ignore').decode('ascii')
+    return s.strip().lower()
+
+
+# Mapeia o 1º número do cabeçalho da faixa -> faixa canônica (limite inferior de cada faixa ANS)
+_FAIXA_POR_NUM = {0: '00-18', 19: '19-23', 24: '24-28', 29: '29-33', 34: '34-38',
+                  39: '39-43', 44: '44-48', 49: '49-53', 54: '54-58', 59: '59+'}
+_COLMAP_META = {
+    'operadora': 'operadora', 'plano': 'plano', 'produto': 'plano',
+    'modalidade': 'modalidade', 'acomodacao': 'acomodacao',
+    'coparticipacao': 'coparticipacao', 'copart': 'coparticipacao',
+    'abrangencia': 'abrangencia', 'regiao': 'abrangencia', 'cidade': 'abrangencia',
+    'vigencia': 'vigencia', 'competencia': 'vigencia',
+}
+
+
+def _match_faixa_header(h):
+    nums = re.findall(r'\d+', str(h))
+    if not nums:
+        return None
+    return _FAIXA_POR_NUM.get(int(nums[0]))
+
+
+def _parse_preco_br(s):
+    s = str(s or '').strip().replace('R$', '').replace(' ', '')
+    if not s:
+        return 0.0
+    if '.' in s and ',' in s:
+        s = s.replace('.', '').replace(',', '.')
+    elif ',' in s:
+        s = s.replace(',', '.')
+    try:
+        return float(s)
+    except Exception:
+        return 0.0
+
+
+@app.route('/cotacao/tabelas/modelo.csv')
+@login_required
+@admin_required
+def cotacao_modelo_csv():
+    """Baixa um CSV modelo (delimitador ';') para preencher tabelas de preço."""
+    cab = ['operadora', 'plano', 'modalidade', 'acomodacao', 'coparticipacao', 'abrangencia', 'vigencia'] + FAIXAS_ETARIAS
+    exemplo = ['Vera Cruz', 'Vera Prata', 'PME', 'Enfermaria', 'Completa', 'Campinas', '07/2026',
+               '153,00', '180,00', '202,00', '218,00', '235,00', '271,00', '365,00', '417,00', '612,00', '870,00']
+    conteudo = '﻿' + ';'.join(cab) + '\r\n' + ';'.join(exemplo) + '\r\n'
+    return Response(conteudo, mimetype='text/csv',
+                    headers={'Content-Disposition': 'attachment; filename=modelo_tabelas_cotacao.csv'})
+
+
+@app.route('/cotacao/tabelas/importar', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def cotacao_import():
+    if request.method == 'GET':
+        return render_template('cotacao_import.html', faixas=FAIXAS_ETARIAS)
+
+    f = request.files.get('arquivo')
+    if not f or not f.filename:
+        return render_template('cotacao_import.html', faixas=FAIXAS_ETARIAS, erro='Selecione um arquivo.')
+
+    nome = f.filename.lower()
+    rows = []
+    try:
+        if nome.endswith('.xlsx'):
+            import openpyxl
+            wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
+            ws = wb.active
+            for r in ws.iter_rows(values_only=True):
+                rows.append(['' if c is None else str(c) for c in r])
+        else:
+            import csv, io
+            raw = f.read().decode('utf-8-sig', errors='replace')
+            primeira = raw.split('\n', 1)[0]
+            delim = ';' if primeira.count(';') >= primeira.count(',') else ','
+            rows = [list(r) for r in csv.reader(io.StringIO(raw), delimiter=delim)]
+    except Exception as e:
+        return render_template('cotacao_import.html', faixas=FAIXAS_ETARIAS, erro='Erro ao ler o arquivo: ' + str(e)[:200])
+
+    rows = [r for r in rows if any((str(c) or '').strip() for c in r)]
+    if len(rows) < 2:
+        return render_template('cotacao_import.html', faixas=FAIXAS_ETARIAS, erro='O arquivo não tem linhas de dados.')
+
+    header = rows[0]
+    meta_idx, faixa_idx = {}, {}
+    for i, h in enumerate(header):
+        nh = _norm_txt(h)
+        if nh in _COLMAP_META:
+            meta_idx[_COLMAP_META[nh]] = i
+        else:
+            fx = _match_faixa_header(h)
+            if fx and fx not in faixa_idx:
+                faixa_idx[fx] = i
+    if 'operadora' not in meta_idx or 'plano' not in meta_idx:
+        return render_template('cotacao_import.html', faixas=FAIXAS_ETARIAS,
+                               erro='Faltam as colunas obrigatórias "operadora" e "plano" no cabeçalho.')
+
+    conn = db()
+    importadas, ignoradas = 0, 0
+    for r in rows[1:]:
+        def cell(key, default=''):
+            i = meta_idx.get(key)
+            return (str(r[i]).strip() if (i is not None and i < len(r) and r[i] is not None) else default)
+        operadora, plano = cell('operadora'), cell('plano')
+        if not operadora or not plano:
+            ignoradas += 1
+            continue
+        try:
+            conn.execute("""INSERT INTO cotacao_tabela
+                (operadora, plano, modalidade, acomodacao, coparticipacao, abrangencia, vigencia, ativo)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
+                (operadora, plano, cell('modalidade', 'PME') or 'PME',
+                 cell('acomodacao', 'Enfermaria') or 'Enfermaria', cell('coparticipacao', 'Sem') or 'Sem',
+                 cell('abrangencia'), cell('vigencia')))
+            tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+            for fx, i in faixa_idx.items():
+                preco = _parse_preco_br(r[i]) if i < len(r) else 0
+                conn.execute("INSERT INTO cotacao_preco (tabela_id, faixa, preco) VALUES (?, ?, ?)", (tid, fx, preco))
+            conn.commit()
+            importadas += 1
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            ignoradas += 1
+    close_db(conn)
+    return render_template('cotacao_import.html', faixas=FAIXAS_ETARIAS,
+                           resultado={'importadas': importadas, 'ignoradas': ignoradas,
+                                      'faixas_detectadas': sorted(faixa_idx.keys())})
+
+
 @app.route('/cotacao/salvar', methods=['POST'])
 @login_required
 def cotacao_salvar():
