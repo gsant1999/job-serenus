@@ -7684,6 +7684,112 @@ def webhook_diag_datas():
         return jsonify({"erro": str(e)}), 500
 
 
+@app.route('/admin/crm/corrigir-datas-servidor', methods=['GET', 'POST'])
+def admin_corrigir_datas_servidor():
+    """
+    SOLUÇÃO DEFINITIVA: lê as 4 planilhas (Meta + Google P1/P2/MEDSENIOR) direto
+    no servidor via CSV, faz match em memória (telefone/email) e corrige criado_em
+    de cada lead com a data REAL da planilha. Tudo numa requisição.
+    Protegido por token (?token=) ou login admin.
+    """
+    token_ok = request.args.get('token') == os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
+    if not token_ok and session.get('perfil') != 'admin':
+        return jsonify({"erro": "acesso negado"}), 403
+
+    import csv, urllib.request, urllib.parse
+    from io import StringIO
+
+    # (sheet_id, aba, col_data, col_telefone, col_email)
+    FONTES = [
+        ('1VOChFfTkuVO4eO0FCAkBjrP9qDFnvWZnk5rLdUrNm64', 'LEADS GERAIS', 0, 8, 9),
+        ('1QT8y8rfbMaHb5POrYFZKjdccpgMLLY3WRjBjxFmold8', 'Página1', 0, 3, 4),
+        ('1QT8y8rfbMaHb5POrYFZKjdccpgMLLY3WRjBjxFmold8', 'Página2', 0, 2, 3),
+        ('1QT8y8rfbMaHb5POrYFZKjdccpgMLLY3WRjBjxFmold8', 'MEDSENIOR', 0, 3, 4),
+    ]
+
+    conn = db()
+    try:
+        # 1. Carrega TODOS os leads em memória (1 query) e monta índices de match
+        leads = conn.execute("SELECT id, telefone_norm, email, CAST(criado_em AS TEXT) criado_em FROM crm_leads").fetchall()
+        por_tel, por_8, por_email, criado_de = {}, {}, {}, {}
+        for l in leads:
+            lid = l['id'] if hasattr(l, 'keys') else l[0]
+            tn = (l['telefone_norm'] if hasattr(l, 'keys') else l[1]) or ''
+            em = ((l['email'] if hasattr(l, 'keys') else l[2]) or '').strip().lower()
+            criado_de[lid] = (l['criado_em'] if hasattr(l, 'keys') else l[3]) or ''
+            if tn:
+                por_tel.setdefault(tn, lid)
+                if len(tn) >= 8:
+                    por_8.setdefault(tn[-8:], lid)
+            if em:
+                por_email.setdefault(em, lid)
+
+        updates = {}  # lid -> data_str (mantém a MAIS ANTIGA = data de criação real)
+        lidos = 0
+        nao_encontrados = 0
+        erros = []
+
+        for sheet_id, aba, ci_data, ci_tel, ci_email in FONTES:
+            try:
+                url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={urllib.parse.quote(aba)}"
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                texto = urllib.request.urlopen(req, timeout=30).read().decode('utf-8-sig')
+                linhas = list(csv.reader(StringIO(texto)))
+                mx = max(ci_data, ci_tel, ci_email)
+                for r in linhas[1:]:
+                    if len(r) <= mx:
+                        continue
+                    data_obj = _parse_data_lead(r[ci_data])
+                    if not data_obj:
+                        continue
+                    tel_raw = (r[ci_tel] or '').strip()
+                    email = (r[ci_email] or '').strip().lower()
+                    if not tel_raw and not email:
+                        continue
+                    lidos += 1
+                    tn = _normalizar_telefone(tel_raw)
+                    lid = None
+                    if tn and tn in por_tel:
+                        lid = por_tel[tn]
+                    elif tn and len(tn) >= 8 and tn[-8:] in por_8:
+                        lid = por_8[tn[-8:]]
+                    elif email and email in por_email:
+                        lid = por_email[email]
+                    if lid is None:
+                        nao_encontrados += 1
+                        continue
+                    data_str = data_obj.strftime('%Y-%m-%d 12:00:00')
+                    # Mantém a menor data (primeira solicitação = criação real)
+                    if lid not in updates or data_str < updates[lid]:
+                        updates[lid] = data_str
+            except Exception as e:
+                erros.append(f"{aba}: {str(e)[:120]}")
+
+        # 2. Aplica updates (só quando a data muda de fato)
+        aplicados = 0
+        for lid, nova in updates.items():
+            if criado_de.get(lid, '')[:10] != nova[:10]:
+                conn.execute("UPDATE crm_leads SET criado_em=? WHERE id=?", (nova, lid))
+                aplicados += 1
+
+        conn.commit()
+        close_db(conn)
+        return jsonify({
+            "ok": True,
+            "leads_no_banco": len(leads),
+            "linhas_lidas_planilhas": lidos,
+            "datas_corrigidas": aplicados,
+            "nao_encontrados": nao_encontrados,
+            "erros": erros,
+        })
+    except Exception as e:
+        try:
+            conn.rollback(); close_db(conn)
+        except Exception:
+            pass
+        return jsonify({"ok": False, "erro": str(e)}), 500
+
+
 @app.route('/webhook/corrigir-datas', methods=['POST'])
 def webhook_corrigir_datas():
     """
