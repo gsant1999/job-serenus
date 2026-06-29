@@ -779,9 +779,15 @@ def init_db():
                 operadora TEXT, tipo TEXT, titulo TEXT NOT NULL, descricao TEXT, conteudo TEXT, arquivo TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS cotacao_legenda_modelo (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL,
+                corpo TEXT NOT NULL,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
         ]
         for sql in tables_sql:
-            try: 
+            try:
                 cur.execute(sql)
             except Exception as e:
                 app.logger.error(f"[INIT_DB] Erro SQL: {e}")
@@ -1036,6 +1042,12 @@ def init_db():
         CREATE TABLE IF NOT EXISTS material_apoio (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             operadora TEXT, tipo TEXT, titulo TEXT NOT NULL, descricao TEXT, conteudo TEXT, arquivo TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS cotacao_legenda_modelo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            corpo TEXT NOT NULL,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS solicitacoes_edicao (
@@ -8379,6 +8391,57 @@ def cotacao_ajustar(cid):
                  (json.dumps(planos), round(total_geral, 2), cid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+
+# ── Legendas: gerenciamento de modelos ──────────────────────────────────────
+
+@app.route('/cotacao/legendas')
+@login_required
+@admin_required
+def cotacao_legendas():
+    conn = db()
+    modelos = conn.execute("SELECT * FROM cotacao_legenda_modelo ORDER BY id DESC").fetchall()
+    close_db(conn)
+    return render_template('cotacao_legendas.html', modelos=modelos)
+
+
+@app.route('/cotacao/legendas/salvar', methods=['POST'])
+@login_required
+@admin_required
+def cotacao_legendas_salvar():
+    d = request.form
+    mid = (d.get('id') or '').strip()
+    nome = (d.get('nome') or '').strip()
+    corpo = (d.get('corpo') or '').strip()
+    if not nome or not corpo:
+        return redirect('/cotacao/legendas')
+    conn = db()
+    if mid.isdigit():
+        conn.execute("UPDATE cotacao_legenda_modelo SET nome=?, corpo=? WHERE id=?", (nome, corpo, int(mid)))
+    else:
+        conn.execute("INSERT INTO cotacao_legenda_modelo (nome, corpo) VALUES (?, ?)", (nome, corpo))
+    conn.commit(); close_db(conn)
+    return redirect('/cotacao/legendas')
+
+
+@app.route('/cotacao/legendas/<int:mid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def cotacao_legendas_excluir(mid):
+    conn = db()
+    conn.execute("DELETE FROM cotacao_legenda_modelo WHERE id=?", (mid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/cotacao/legendas/api')
+@login_required
+def cotacao_legendas_api():
+    """Retorna lista de modelos de legenda em JSON para uso no documento."""
+    conn = db()
+    modelos = [dict(r) for r in conn.execute("SELECT id, nome, corpo FROM cotacao_legenda_modelo ORDER BY id").fetchall()]
+    close_db(conn)
+    return jsonify(modelos)
 
 
 @app.route('/cotacao/salvas')

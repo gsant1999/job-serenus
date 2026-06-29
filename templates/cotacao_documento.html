@@ -91,7 +91,20 @@
   {% if not publico %}<a class="btn-voltar" href="/cotacao/salvas">Voltar</a>
   <a class="btn-voltar" href="/cotacao/{{ cot.id }}/reabrir" style="border-color:rgba(250,204,21,.6);color:#fde047;">Editar cotacao</a>{% endif %}
   <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="document.getElementById('documento').classList.toggle('destacar')">Destacar planos</button>
-  {% if cot.legenda %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLegenda()">Copiar legenda</button>{% endif %}
+  <div style="position:relative;display:inline-block;">
+    <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="toggleLegendas()">Legenda</button>
+    <div id="painel-legendas" style="display:none;position:absolute;top:calc(100% + 8px);right:0;width:360px;background:#2a2a34;border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:14px;z-index:999;box-shadow:0 8px 32px rgba(0,0,0,.5);">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#9a9aa6;font-weight:700;margin-bottom:8px;">Modelos de legenda</div>
+      <select id="sel-legenda" style="width:100%;background:#1c1c24;border:1px solid rgba(255,255,255,.15);border-radius:7px;padding:8px 10px;color:#f0f0f4;font-size:13px;outline:none;margin-bottom:8px;">
+        <option value="">Selecione um modelo...</option>
+      </select>
+      <textarea id="legenda-editavel" rows="6" style="width:100%;background:#1c1c24;border:1px solid rgba(255,255,255,.15);border-radius:7px;padding:9px 11px;color:#f0f0f4;font-size:12.5px;outline:none;resize:vertical;font-family:inherit;line-height:1.6;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button onclick="copiarLegendaEditavel()" style="flex:1;background:#3b82f6;color:#fff;border:none;border-radius:7px;padding:9px;font-size:13px;font-weight:600;cursor:pointer;">Copiar</button>
+        {% if not publico %}<a href="/cotacao/legendas" style="background:transparent;border:1px solid rgba(255,255,255,.2);color:#9a9aa6;border-radius:7px;padding:9px 12px;font-size:12px;text-decoration:none;white-space:nowrap;">Gerenciar</a>{% endif %}
+      </div>
+    </div>
+  </div>
   {% if not publico and cot.token %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLink()">Copiar link</button>{% endif %}
   {% if not publico %}<button class="btn-voltar" id="btn-editar" style="border-color:rgba(251,146,60,.7);color:#fb923c" onclick="toggleEditar()">Editar valores</button>
   <button class="btn-img" id="btn-salvar-aj" style="display:none;background:#fb923c;color:#1c1c24" onclick="salvarAjustes({{ cot.id }})">Salvar ajustes</button>{% endif %}
@@ -207,6 +220,79 @@ function copiarLegenda() {
   var t = document.getElementById('legenda-txt');
   if (navigator.clipboard) navigator.clipboard.writeText(t.value).then(function(){ alert('Legenda copiada! Cole no WhatsApp.'); }, function(){ t.style.left='10px'; t.select(); });
   else { t.style.left='10px'; t.select(); document.execCommand('copy'); }
+}
+
+// ── Painel de legendas ────────────────────────────────────────────────────
+var _legendaModelos = [];
+var _legendaPainelAberto = false;
+function toggleLegendas() {
+  var p = document.getElementById('painel-legendas');
+  _legendaPainelAberto = !_legendaPainelAberto;
+  p.style.display = _legendaPainelAberto ? 'block' : 'none';
+  if (_legendaPainelAberto && _legendaModelos.length === 0) carregarModelos();
+}
+document.addEventListener('click', function(e) {
+  if (!_legendaPainelAberto) return;
+  var p = document.getElementById('painel-legendas');
+  if (!p.contains(e.target) && !e.target.closest('[onclick="toggleLegendas()"]')) {
+    p.style.display = 'none'; _legendaPainelAberto = false;
+  }
+});
+function carregarModelos() {
+  fetch('/cotacao/legendas/api').then(r=>r.json()).then(function(lista) {
+    _legendaModelos = lista;
+    var sel = document.getElementById('sel-legenda');
+    lista.forEach(function(m) {
+      var o = document.createElement('option'); o.value = m.id; o.textContent = m.nome; sel.appendChild(o);
+    });
+    // pré-preenche com o modelo padrão (legenda automática)
+    document.getElementById('legenda-editavel').value = {{ cot.legenda|tojson }};
+  }).catch(function() {
+    document.getElementById('legenda-editavel').value = {{ cot.legenda|tojson }};
+  });
+}
+document.getElementById('sel-legenda').addEventListener('change', function() {
+  var mid = parseInt(this.value);
+  var modelo = _legendaModelos.find(function(m){ return m.id === mid; });
+  if (!modelo) {
+    document.getElementById('legenda-editavel').value = {{ cot.legenda|tojson }};
+    return;
+  }
+  // Substitui variáveis com dados reais
+  var nome = {{ (cot.cliente_nome or '')|tojson }};
+  var titulo = {{ (cot.titulo or 'Cotacao')|tojson }};
+  var planos = {{ cot.planos|tojson }};
+  var faixas = {{ cot.faixas_usadas|tojson }};
+  // Idades do maior para o menor
+  var todasIdades = [];
+  faixas.forEach(function(f) { for(var i=0;i<f.qtd;i++) todasIdades.push(f.label); });
+  var idades = todasIdades.slice().reverse().join(', ');
+  // Menor opção
+  var menor = planos.length ? planos[0] : null;
+  var total = menor ? menor.total.toFixed(2).replace('.', ',') : '';
+  var operadora = menor ? menor.operadora : '';
+  var plano = menor ? menor.plano : '';
+  var hoje = new Date();
+  var data = hoje.toLocaleDateString('pt-BR');
+  var txt = modelo.corpo
+    .replace(/{NOME}/g, nome)
+    .replace(/{TITULO}/g, titulo)
+    .replace(/{IDADES}/g, idades)
+    .replace(/{TOTAL}/g, 'R$ ' + total)
+    .replace(/{OPERADORA}/g, operadora)
+    .replace(/{PLANO}/g, plano)
+    .replace(/{DATA}/g, data);
+  document.getElementById('legenda-editavel').value = txt;
+});
+function copiarLegendaEditavel() {
+  var txt = document.getElementById('legenda-editavel').value;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(txt).then(function(){ alert('Legenda copiada!'); }).catch(function(){ _copiarFallback(txt); });
+  } else { _copiarFallback(txt); }
+}
+function _copiarFallback(txt) {
+  var t = document.createElement('textarea'); t.value = txt; t.style.position='fixed'; t.style.left='-9999px';
+  document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t);
 }
 async function copiarImagem() {
   var alvo = document.getElementById('documento');

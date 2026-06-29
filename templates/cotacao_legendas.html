@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Modelos de Legenda{% endblock %}
+
+{% block head %}
+<style>
+  .leg-card { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:16px 18px; margin-bottom:10px; }
+  .leg-nome { font-weight:700; color:var(--texto); font-size:14px; margin-bottom:6px; }
+  .leg-corpo { font-size:12.5px; color:var(--cinza); white-space:pre-wrap; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:10px 12px; line-height:1.6; }
+  .leg-acoes { display:flex; gap:8px; margin-top:10px; }
+  .b { border:1px solid var(--borda); background:transparent; border-radius:7px; padding:5px 12px; font-size:12px; cursor:pointer; color:var(--texto); text-decoration:none; }
+  .b-del { color:var(--erro); border-color:rgba(244,63,94,.3); }
+  .form-novo { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:18px; }
+  .fg { display:flex; flex-direction:column; gap:4px; margin-bottom:12px; }
+  .fg label { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:600; }
+  .fg input, .fg textarea { background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 11px; color:var(--texto); font-size:13px; outline:none; font-family:inherit; }
+  .fg textarea { min-height:120px; resize:vertical; }
+  .fg input:focus, .fg textarea:focus { border-color:var(--azul); }
+  .variaveis { font-size:12px; color:var(--cinza-2); background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:10px 14px; margin-bottom:14px; line-height:1.8; }
+  .variaveis code { background:rgba(59,130,246,.12); color:var(--azul); border-radius:4px; padding:1px 6px; font-size:12px; }
+  .btn-salvar { background:var(--azul); color:#fff; border:none; padding:10px 22px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  .vazio { color:var(--cinza-2); font-size:13px; padding:30px; text-align:center; background:var(--panel); border:1px dashed var(--borda); border-radius:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Modelos de Legenda</h1>
+    <div class="sub">Templates para copiar junto com a imagem da cotação</div>
+  </div>
+  <div><a class="btn-outline btn-sm" href="/cotacao/salvas">Voltar</a></div>
+</div>
+
+<div class="form-novo">
+  <h2 style="font-family:'Sora',sans-serif;font-size:14px;color:var(--texto);margin:0 0 12px;" id="form-titulo">Novo modelo</h2>
+  <div class="variaveis">
+    Variáveis disponíveis: <code>{NOME}</code> nome do cliente &nbsp;|&nbsp; <code>{IDADES}</code> idades do maior pro menor &nbsp;|&nbsp;
+    <code>{TITULO}</code> título da cotação &nbsp;|&nbsp; <code>{TOTAL}</code> total da menor opção &nbsp;|&nbsp;
+    <code>{OPERADORA}</code> operadora do plano mais barato &nbsp;|&nbsp; <code>{PLANO}</code> plano mais barato &nbsp;|&nbsp;
+    <code>{DATA}</code> data de hoje
+  </div>
+  <form method="POST" action="/cotacao/legendas/salvar" id="form-legenda">
+    <input type="hidden" name="id" id="f-id" value="">
+    <div class="fg"><label>Nome do modelo</label><input type="text" name="nome" id="f-nome" placeholder="Ex: PME padrão" required></div>
+    <div class="fg"><label>Corpo da legenda (use as variáveis acima)</label>
+      <textarea name="corpo" id="f-corpo" placeholder="Ex: Ola, {NOME}! Segue a cotação para {IDADES} vidas.&#10;Melhor opcao: {OPERADORA} - R$ {TOTAL}/mes."></textarea></div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button type="submit" class="btn-salvar">Salvar modelo</button>
+      <button type="button" class="b" onclick="cancelarEdicao()">Cancelar</button>
+    </div>
+  </form>
+</div>
+
+{% if modelos %}
+  {% for m in modelos %}
+  <div class="leg-card">
+    <div class="leg-nome">{{ m.nome }}</div>
+    <pre class="leg-corpo">{{ m.corpo }}</pre>
+    <div class="leg-acoes">
+      <button class="b" onclick="editarModelo({{ m.id }}, '{{ m.nome|replace("'","\\'")|replace('"','\\"') }}', {{ m.corpo|tojson }})">Editar</button>
+      <button class="b b-del" onclick="excluir({{ m.id }}, '{{ m.nome|replace("'","\\'") }}')">Excluir</button>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+<div class="vazio">Nenhum modelo cadastrado ainda. Use o formulário acima para criar.</div>
+{% endif %}
+
+<script>
+function editarModelo(id, nome, corpo) {
+  document.getElementById('f-id').value = id;
+  document.getElementById('f-nome').value = nome;
+  document.getElementById('f-corpo').value = corpo;
+  document.getElementById('form-titulo').textContent = 'Editar modelo';
+  document.getElementById('f-nome').focus();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function cancelarEdicao() {
+  document.getElementById('f-id').value = '';
+  document.getElementById('f-nome').value = '';
+  document.getElementById('f-corpo').value = '';
+  document.getElementById('form-titulo').textContent = 'Novo modelo';
+}
+function excluir(id, nome) {
+  if (!confirm('Excluir modelo "' + nome + '"?')) return;
+  fetch('/cotacao/legendas/' + id + '/excluir', {method:'POST'})
+    .then(r => r.json()).then(d => { if (d.ok) location.reload(); else alert('Erro.'); });
+}
+</script>
+{% endblock %}
