@@ -69,6 +69,7 @@
           <a class="b b-abrir" href="/cotacao/documento/{{ c.id }}">Abrir</a>
           {% if c.token %}<button class="b" onclick="copiarLink('{{ c.token }}')">Copiar link</button>{% endif %}
           {% if c.token and c.cliente_telefone %}<button class="b b-wpp" onclick="enviarWpp('{{ c.token }}', '{{ c.cliente_telefone }}', '{{ (c.cliente_nome or '')|replace("'", "") }}')">WhatsApp</button>{% endif %}
+          <button class="b" onclick="enviarEmail({{ c.id }}, '{{ (c.cliente_email or '')|replace("'", "") }}')">E-mail</button>
           <button class="b b-del" onclick="excluir({{ c.id }}, '{{ (c.cliente_nome or c.titulo)|replace("'", "") }}')">Excluir</button>
         </div>
       </td>
@@ -92,6 +93,13 @@ function enviarWpp(token, tel, nome){
   if (fone.length >= 10 && fone.indexOf('55') !== 0) fone = '55' + fone;
   var msg = 'Olá' + (nome ? ' ' + nome : '') + '! Segue sua cotação de plano de saúde: ' + linkDe(token);
   window.open('https://wa.me/' + fone + '?text=' + encodeURIComponent(msg), '_blank');
+}
+function enviarEmail(id, email){
+  var dest = email || window.prompt('E-mail do cliente:');
+  if(!dest) return;
+  fetch('/cotacao/'+id+'/enviar-email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:dest})})
+    .then(r=>r.json()).then(d=>{ alert(d.ok?('E-mail enviado para '+d.email):('Erro: '+(d.erro||''))); })
+    .catch(()=>alert('Erro de conexão.'));
 }
 function excluir(id, nome){
   if (!confirm('Excluir a cotação de "' + nome + '"?')) return;

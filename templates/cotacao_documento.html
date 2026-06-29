@@ -54,7 +54,25 @@
     table.doc td { padding:6px 8px; font-size:10px; }
     @page { size:A4 landscape; margin:8mm; }
   }
+
+  /* Vertical (um plano embaixo do outro) */
+  .vert { display:flex; flex-direction:column; gap:16px; }
+  .vcard { border:1px solid #e3e3ea; border-radius:12px; overflow:hidden; }
+  .vhead { display:flex; align-items:center; gap:14px; padding:14px 16px; background:#f7f8fa; border-bottom:1px solid #eef0f3; }
+  .vhead .vlogo { max-height:36px; max-width:120px; object-fit:contain; }
+  .vhead .vop { font-size:15px; font-weight:800; color:#3b3bd6; }
+  .vhead .vtit { flex:1; }
+  .vhead .vpn { font-size:16px; font-weight:700; color:#1c1c24; }
+  .vhead .vpo { font-size:11.5px; color:#8a8a96; margin-top:2px; }
+  .vhead .vtot { font-size:20px; font-weight:800; color:#1c1c24; white-space:nowrap; }
+  .vhead .vtot span { font-size:11px; font-weight:600; color:#8a8a96; }
+  table.vtab { width:100%; border-collapse:collapse; }
+  table.vtab td { padding:8px 16px; font-size:13px; border-bottom:1px solid #f1f2f5; color:#3a3a44; }
+  table.vtab tr:last-child td { border-bottom:none; }
+  table.vtab td.vv { text-align:right; font-variant-numeric:tabular-nums; color:#1c1c24; }
+  table.vtab .q { color:#3b82f6; font-weight:600; margin-left:6px; }
 </style>
+{% if cot.orientacao == 'vertical' %}<style>@media print { .scroll .folha { min-width:0; } @page { size:A4 portrait; margin:10mm; } }</style>{% endif %}
 </head>
 <body>
 
@@ -83,7 +101,29 @@
     </div>
   </div>
 
-  {% if cot.planos %}
+  {% if cot.planos and cot.orientacao == 'vertical' %}
+  <div class="vert">
+    {% for p in cot.planos %}
+    <div class="vcard">
+      <div class="vhead">
+        {% if p.logo %}<img src="{{ p.logo }}" alt="{{ p.operadora }}" class="vlogo">{% else %}<span class="vop">{{ p.operadora }}</span>{% endif %}
+        <div class="vtit">
+          <div class="vpn">{{ p.plano }}</div>
+          <div class="vpo">{{ p.operadora }} · {{ p.modalidade }} · {{ p.acomodacao }} · Copart. {{ p.coparticipacao }}</div>
+        </div>
+        <div class="vtot">{{ p.total|moeda_doc }}<span> /mês</span></div>
+      </div>
+      <table class="vtab">
+        {% for f in cot.faixas_usadas %}
+        <tr><td>{{ f.label }}<span class="q">{{ f.qtd }}x</span></td><td class="vv">{{ p.precos[f.faixa]|moeda_doc }}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if cot.planos and cot.orientacao != 'vertical' %}
   <table class="doc">
     <tr class="op">
       <td class="lbl"></td>

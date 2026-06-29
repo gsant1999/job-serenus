@@ -125,6 +125,11 @@
           <input type="text" name="cliente_telefone" value="{{ prefill.telefone if prefill else '' }}" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
         <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Seu telefone (corretor)</label>
           <input type="text" name="corretor_telefone" placeholder="(19) 99999-9999" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
+        <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Formato do documento</label>
+          <select name="orientacao" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;">
+            <option value="horizontal">Horizontal (tabela comparativa)</option>
+            <option value="vertical">Vertical (um plano embaixo do outro)</option>
+          </select></div>
       </div>
       <button type="submit" class="btn-f" style="background:var(--azul);color:#fff;border:none;padding:11px 22px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">Gerar cotação do cliente</button>
     </div>

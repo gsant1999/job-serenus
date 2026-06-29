@@ -7956,6 +7956,45 @@ def cotacao_publica(token):
     return render_template('cotacao_documento.html', cot=cot, publico=True)
 
 
+@app.route('/cotacao/<int:cid>/enviar-email', methods=['POST'])
+@login_required
+def cotacao_enviar_email(cid):
+    conn = db()
+    c = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn); return jsonify({"ok": False, "erro": "Cotação não encontrada"}), 404
+    if session.get('perfil') != 'admin' and c['corretor_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    cot = dict(c)
+    destino = ((request.json or {}).get('email') or cot.get('cliente_email') or '').strip()
+    if not destino:
+        close_db(conn); return jsonify({"ok": False, "erro": "Informe o e-mail do cliente"}), 400
+    token = cot.get('token')
+    if not token:
+        token = secrets.token_urlsafe(9)
+        conn.execute("UPDATE cotacao_salva SET token=? WHERE id=?", (token, cid)); conn.commit()
+    close_db(conn)
+    link = request.host_url.rstrip('/') + '/c/' + token
+    nome = cot.get('cliente_nome') or ''
+    corretor = cot.get('corretor_nome') or 'Serenus Corretora'
+    corpo = ("<p>Olá " + nome + ",</p><p>Segue a sua cotação de plano de saúde:</p>"
+             "<p><a href='" + link + "' style='background:#3b82f6;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;'>Ver minha cotação</a></p>"
+             "<p>Ou acesse: <a href='" + link + "'>" + link + "</a></p>"
+             "<p>Atenciosamente,<br>" + corretor + "<br>Serenus Corretora</p>")
+    try:
+        _enviar_email.ultimo_erro = None
+    except Exception:
+        pass
+    try:
+        _enviar_email(destino, "Sua cotação - " + (cot.get('titulo') or 'Serenus'), corpo)
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)[:200]}), 200
+    err = getattr(_enviar_email, 'ultimo_erro', None)
+    if err:
+        return jsonify({"ok": False, "erro": str(err)[:200]}), 200
+    return jsonify({"ok": True, "email": destino})
+
+
 @app.route('/cotacao/salvas')
 @login_required
 def cotacao_salvas():
