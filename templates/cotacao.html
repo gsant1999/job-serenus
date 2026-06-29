@@ -50,7 +50,7 @@
 {% block content %}
 {% if editar_id %}
 <div style="background:rgba(251,146,60,.12);border:1px solid rgba(251,146,60,.4);border-radius:10px;padding:11px 16px;margin-bottom:14px;font-size:13px;color:var(--texto);">
-  Editando cotação existente — ao salvar, o mesmo link do cliente é mantido.
+  Nova versão desta cotação — ao salvar, gera um <b>novo link</b>. A cotação original continua salva e acessível, sem alterações.
   <a href="/cotacao/documento/{{ editar_id }}" style="color:var(--azul);text-decoration:none;margin-left:10px;">Cancelar</a>
 </div>
 {% endif %}
@@ -125,7 +125,6 @@
   <form method="POST" action="/cotacao/salvar" id="form-cotacao">
     <input type="hidden" name="idades" value="{{ idades_txt }}">
     {% if prefill and prefill.lead_id %}<input type="hidden" name="lead_id" value="{{ prefill.lead_id }}">{% endif %}
-    {% if editar_id %}<input type="hidden" name="editar_id" value="{{ editar_id }}">{% endif %}
     <table class="cot">
       <thead>
         <tr><th style="width:34px;"></th><th>Operadora</th><th>Plano</th><th>Modalidade</th><th>Acomodação</th><th>Coparticipação</th><th style="text-align:right;">Total mensal</th><th style="width:130px;">Recomendação</th></tr>
@@ -180,7 +179,7 @@
             <option value="vertical" {{ 'selected' if editar_orientacao == 'vertical' }}>Vertical (um plano embaixo do outro)</option>
           </select></div>
       </div>
-      <button type="submit" class="btn-f" style="background:var(--azul);color:#fff;border:none;padding:11px 22px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">{{ 'Salvar alterações' if editar_id else 'Gerar cotação do cliente' }}</button>
+      <button type="submit" class="btn-f" style="background:var(--azul);color:#fff;border:none;padding:11px 22px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">{{ 'Gerar nova cotação (novo link)' if editar_id else 'Gerar cotação do cliente' }}</button>
     </div>
   </form>
   {% else %}

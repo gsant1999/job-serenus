@@ -89,7 +89,7 @@
 
 <div class="toolbar">
   {% if not publico %}<a class="btn-voltar" href="/cotacao/salvas">Voltar</a>
-  <a class="btn-voltar" href="/cotacao/{{ cot.id }}/reabrir" style="border-color:rgba(250,204,21,.6);color:#fde047;">Editar cotacao</a>{% endif %}
+  <a class="btn-voltar" href="/cotacao/{{ cot.id }}/reabrir" style="border-color:rgba(250,204,21,.6);color:#fde047;" title="Cria uma nova cotação (novo link) com base nesta">Nova versão</a>{% endif %}
   <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="document.getElementById('documento').classList.toggle('destacar')">Destacar planos</button>
   <div style="position:relative;display:inline-block;">
     <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="toggleLegendas()">Legenda</button>
@@ -273,6 +273,9 @@ document.getElementById('sel-legenda').addEventListener('change', function() {
   var total = menor ? menor.total.toFixed(2).replace('.', ',') : '';
   var operadora = menor ? menor.operadora : '';
   var plano = menor ? menor.plano : '';
+  var qtdVidas = todasIdades.length;
+  var TIPO_MAP = {'PME':'Empresarial','PF':'Pessoa Física','Adesão':'Pessoa Física Adesão'};
+  var tipoCotacao = menor ? (TIPO_MAP[menor.modalidade] || menor.modalidade || '') : '';
   var hoje = new Date();
   var data = hoje.toLocaleDateString('pt-BR');
   var txt = modelo.corpo
@@ -282,6 +285,9 @@ document.getElementById('sel-legenda').addEventListener('change', function() {
     .replace(/{TOTAL}/g, 'R$ ' + total)
     .replace(/{OPERADORA}/g, operadora)
     .replace(/{PLANO}/g, plano)
+    .replace(/{NOME_PLANO}/g, plano)
+    .replace(/{QTD_VIDAS}/g, String(qtdVidas))
+    .replace(/{TIPO_COTACAO}/g, tipoCotacao)
     .replace(/{DATA}/g, data);
   document.getElementById('legenda-editavel').value = txt;
 });

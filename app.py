@@ -8075,27 +8075,9 @@ def cotacao_salvar():
         if lead_row:
             lead_id = lead_row['id'] if hasattr(lead_row, 'keys') else lead_row[0]
     tabela_ids_json = json.dumps(tabela_ids)
-    editar_id_raw = (d.get('editar_id') or '').strip()
-    editar_id = int(editar_id_raw) if editar_id_raw.isdigit() else None
-
-    if editar_id:
-        # Edição: mantém token/link, atualiza os dados
-        old = conn.execute("SELECT id, token, corretor_id FROM cotacao_salva WHERE id=?", (editar_id,)).fetchone()
-        if old and (session.get('perfil') == 'admin' or old['corretor_id'] == session.get('user_id')):
-            conn.execute("""UPDATE cotacao_salva SET
-                orientacao=?, lead_id=?, corretor_nome=?, corretor_email=?, corretor_telefone=?,
-                cliente_nome=?, cliente_email=?, cliente_telefone=?, titulo=?,
-                vidas_json=?, planos_json=?, total=?, tabela_ids_json=?
-                WHERE id=?""",
-                (orientacao, lead_id, corretor_nome, corretor_email,
-                 (d.get('corretor_telefone') or '').strip(),
-                 (d.get('cliente_nome') or '').strip(), (d.get('cliente_email') or '').strip(),
-                 (d.get('cliente_telefone') or '').strip(), (d.get('titulo') or 'Cotação').strip(),
-                 json.dumps(cont_faixa), json.dumps(planos), round(total_geral, 2),
-                 tabela_ids_json, editar_id))
-            conn.commit(); close_db(conn)
-            return redirect('/cotacao/documento/' + str(editar_id))
-
+    # Edição (reabrir) sempre gera uma cotação NOVA, com link próprio — nunca sobrescreve
+    # a cotação original, que continua acessível com o link já enviado ao cliente.
+    # Ambas ficam agrupadas pelo mesmo lead_id na ficha do CRM.
     conn.execute("""INSERT INTO cotacao_salva
         (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email, corretor_telefone,
          cliente_nome, cliente_email, cliente_telefone, titulo, vidas_json, planos_json, total, tabela_ids_json)
