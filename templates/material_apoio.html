@@ -3,26 +3,55 @@
 
 {% block head %}
 <style>
-  .op-bloco { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:16px; }
-  .op-head { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
-  .op-logo { height:34px; max-width:120px; object-fit:contain; background:#fff; border-radius:6px; padding:2px 6px; }
-  .op-nome { font-family:'Sora',sans-serif; font-size:16px; font-weight:700; color:var(--texto); }
-  .caixas { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; }
-  .caixa { background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:14px; }
-  .caixa-tipo { font-size:10px; text-transform:uppercase; letter-spacing:.6px; color:var(--azul); font-weight:700; margin-bottom:10px; }
-  .mat { border-top:1px solid var(--borda); padding:10px 0; }
-  .mat:first-of-type { border-top:none; padding-top:0; }
-  .mat .t { font-size:13.5px; font-weight:600; color:var(--texto); }
-  .mat .d { font-size:12.5px; color:var(--cinza); margin-top:4px; line-height:1.5; }
-  .mat .d b, .mat .d strong { color:var(--texto); }
-  .mat .d mark { background:rgba(250,204,21,.25); color:var(--amarelo); padding:0 3px; border-radius:3px; }
-  .mat .d ul { margin:6px 0 6px 18px; }
-  .mat .d h3 { font-size:13px; color:var(--texto); margin:6px 0 4px; }
-  .mat .acoes { display:flex; gap:6px; margin-top:8px; }
+  /* Navegador de pastas */
+  .ma-layout { display:grid; grid-template-columns:260px 1fr; gap:0; background:var(--panel); border:1px solid var(--borda); border-radius:14px; overflow:hidden; min-height:500px; }
+  .ma-sidebar { border-right:1px solid var(--borda); }
+  .ma-sidebar-head { padding:14px 16px; border-bottom:1px solid var(--borda); font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:700; display:flex; align-items:center; justify-content:space-between; }
+  .op-item { display:flex; align-items:center; gap:10px; padding:11px 16px; cursor:pointer; border-bottom:1px solid var(--borda); transition:.12s; }
+  .op-item:hover { background:var(--panel-2); }
+  .op-item.ativo { background:rgba(59,130,246,.1); border-right:3px solid var(--azul); }
+  .op-item .op-logo { height:26px; max-width:70px; object-fit:contain; background:#fff; border-radius:5px; padding:2px 5px; flex-shrink:0; }
+  .op-item .op-nm { font-size:13px; font-weight:600; color:var(--texto); }
+  .op-item .op-cnt { margin-left:auto; font-size:10px; color:var(--cinza-2); background:var(--panel-2); border-radius:10px; padding:2px 7px; flex-shrink:0; }
+
+  /* Painel direito */
+  .ma-conteudo { background:var(--panel-2); }
+  .ma-breadcrumb { padding:14px 18px; border-bottom:1px solid var(--borda); display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--cinza-2); }
+  .ma-breadcrumb .sep { color:var(--cinza-2); }
+  .ma-breadcrumb .crumb { cursor:pointer; color:var(--azul); text-decoration:none; }
+  .ma-breadcrumb .crumb.atual { color:var(--texto); font-weight:600; cursor:default; }
+
+  /* Estado: lista de tipos (pastas) */
+  .pastas-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; padding:18px; }
+  .pasta-card { background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:16px 14px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:8px; transition:.14s; }
+  .pasta-card:hover { border-color:var(--azul); background:rgba(59,130,246,.06); }
+  .pasta-icon { font-size:28px; }
+  .pasta-nm { font-size:12.5px; font-weight:600; color:var(--texto); text-align:center; line-height:1.3; }
+  .pasta-cnt { font-size:11px; color:var(--cinza-2); }
+
+  /* Estado: lista de itens */
+  .itens-lista { padding:16px 18px; display:flex; flex-direction:column; gap:10px; }
+  .mat-item { background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:14px 16px; }
+  .mat-item .t { font-size:13.5px; font-weight:600; color:var(--texto); margin-bottom:4px; }
+  .mat-item .d { font-size:12.5px; color:var(--cinza); line-height:1.6; }
+  .mat-item .d b, .mat-item .d strong { color:var(--texto); }
+  .mat-item .d mark { background:rgba(250,204,21,.25); color:var(--amarelo); padding:0 3px; border-radius:3px; }
+  .mat-item .d ul { margin:6px 0 6px 18px; }
+  .mat-item .d h3 { font-size:13px; color:var(--texto); margin:6px 0 4px; }
+  .mat-item .acoes { display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
   .b { border:1px solid var(--borda); background:transparent; border-radius:7px; padding:5px 10px; font-size:11px; cursor:pointer; text-decoration:none; color:var(--texto); }
   .b-ver { background:var(--azul); color:#fff; border:none; }
   .b-del { color:var(--erro); border-color:rgba(244,63,94,.3); }
 
+  /* Estado vazio */
+  .ma-vazio { display:flex; align-items:center; justify-content:center; height:280px; color:var(--cinza-2); font-size:13px; flex-direction:column; gap:8px; }
+
+  /* Busca */
+  .busca-form { display:flex; gap:8px; max-width:480px; margin:0 0 16px; }
+  .busca-form input { flex:1; background:var(--panel-2); border:1px solid var(--borda); border-radius:9px; padding:10px 12px; color:var(--texto); font-size:13px; outline:none; }
+  .busca-form button { background:var(--azul); color:#fff; border:none; border-radius:9px; padding:10px 16px; font-size:13px; font-weight:600; cursor:pointer; }
+
+  /* Form de adicionar */
   .form-novo { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:18px; }
   .form-novo h2 { font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin:0 0 12px; }
   .fg { display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
@@ -36,7 +65,11 @@
   .rt-edit:focus { border-color:var(--azul); }
   .rt-edit mark { background:rgba(250,204,21,.3); }
   .btn-salvar { background:var(--azul); color:#fff; border:none; padding:10px 20px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
-  .vazio { color:var(--cinza-2); font-size:13px; padding:30px; text-align:center; background:var(--panel); border:1px dashed var(--borda); border-radius:12px; }
+
+  /* Resultados de busca */
+  .busca-resultado { background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:14px 16px; margin-bottom:8px; }
+  .busca-resultado .op-tag { font-size:10px; text-transform:uppercase; letter-spacing:.5px; font-weight:700; color:var(--azul); margin-bottom:4px; }
+  .busca-resultado .tipo-tag { font-size:10px; color:var(--cinza-2); margin-bottom:6px; }
 </style>
 {% endblock %}
 
@@ -48,9 +81,9 @@
   </div>
 </div>
 
-<form method="GET" action="/material-apoio" style="display:flex;gap:8px;max-width:480px;margin:14px 0 18px;">
-  <input type="text" name="q" value="{{ q or '' }}" placeholder="Buscar por operadora, regra, carência, documento..." style="flex:1;background:var(--panel-2);border:1px solid var(--borda);border-radius:9px;padding:10px 12px;color:var(--texto);font-size:13px;outline:none;">
-  <button type="submit" style="background:var(--azul);color:#fff;border:none;border-radius:9px;padding:10px 16px;font-size:13px;font-weight:600;cursor:pointer;">Buscar</button>
+<form class="busca-form" method="GET" action="/material-apoio">
+  <input type="text" name="q" value="{{ q or '' }}" placeholder="Buscar por operadora, tipo, título ou conteúdo...">
+  <button type="submit">Buscar</button>
   {% if q %}<a href="/material-apoio" style="align-self:center;color:var(--cinza);font-size:12px;text-decoration:none;">Limpar</a>{% endif %}
 </form>
 
@@ -63,7 +96,7 @@
         <input list="lista-ops" name="operadora" placeholder="Ex: Amil">
         <datalist id="lista-ops">{% for o in operadoras %}<option value="{{ o }}">{% endfor %}</datalist>
       </div>
-      <div class="fg"><label>Tipo (caixote)</label>
+      <div class="fg"><label>Pasta (tipo)</label>
         <input list="lista-tipos" name="tipo" placeholder="Ex: Regras comerciais">
         <datalist id="lista-tipos">
           <option value="Regras comerciais"><option value="Tabela de venda"><option value="Carências">
@@ -73,7 +106,7 @@
       <div class="fg"><label>Título</label><input type="text" name="titulo" required placeholder="Ex: PME 2 a 29 vidas"></div>
     </div>
     <div class="fg">
-      <label>Descrição (formate para chamar atenção)</label>
+      <label>Descrição</label>
       <div class="rt-toolbar">
         <button type="button" onclick="fmt('bold')"><b>N</b></button>
         <button type="button" onclick="fmt('italic')"><i>I</i></button>
@@ -92,35 +125,150 @@
 </div>
 {% endif %}
 
-{% if grupos %}
-  {% for g in grupos %}
-  <div class="op-bloco">
-    <div class="op-head">
-      {% if g.logo %}<img class="op-logo" src="{{ g.logo }}" alt="{{ g.operadora }}">{% endif %}
-      <div class="op-nome">{{ g.operadora }}</div>
-    </div>
-    <div class="caixas">
+{% if q %}
+  <!-- Modo busca: lista plana com operadora/tipo visíveis -->
+  {% if grupos %}
+    {% for g in grupos %}
       {% for cx in g.caixas %}
-      <div class="caixa">
-        <div class="caixa-tipo">{{ cx.tipo }}</div>
         {% for it in cx.itens %}
-        <div class="mat">
-          <div class="t">{{ it.titulo }}</div>
-          {% if it.descricao %}<div class="d">{{ it.descricao|safe }}</div>{% endif %}
-          {% if it.conteudo %}<details style="margin-top:6px;"><summary style="font-size:11.5px;color:var(--azul);cursor:pointer;">Ver conteúdo extraído do arquivo</summary><pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;color:var(--cinza);margin-top:6px;line-height:1.5;max-height:340px;overflow:auto;background:var(--panel);border:1px solid var(--borda);border-radius:8px;padding:10px;">{{ it.conteudo }}</pre></details>{% endif %}
-          <div class="acoes">
+        <div class="busca-resultado">
+          <div class="op-tag">{{ g.operadora }}</div>
+          <div class="tipo-tag">{{ cx.tipo }}</div>
+          <div class="t" style="font-size:13.5px;font-weight:600;color:var(--texto);">{{ it.titulo }}</div>
+          {% if it.descricao %}<div class="d" style="font-size:12.5px;color:var(--cinza);line-height:1.6;margin-top:4px;">{{ it.descricao|safe }}</div>{% endif %}
+          {% if it.conteudo %}<details style="margin-top:6px;"><summary style="font-size:11.5px;color:var(--azul);cursor:pointer;">Ver conteúdo extraído do arquivo</summary><pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;color:var(--cinza);margin-top:6px;line-height:1.5;max-height:260px;overflow:auto;background:var(--panel-2);border:1px solid var(--borda);border-radius:8px;padding:10px;">{{ it.conteudo }}</pre></details>{% endif %}
+          <div class="acoes" style="display:flex;gap:6px;margin-top:8px;">
             {% if it.arquivo %}<a class="b b-ver" href="/anexos/{{ it.arquivo }}" target="_blank">Abrir arquivo</a>{% endif %}
-            {% if eh_admin %}<button class="b b-del" onclick="excluirMat({{ it.id }}, '{{ it.titulo|replace("'", "") }}')">Excluir</button>{% endif %}
+            {% if eh_admin %}<button class="b b-del" onclick="excluirMat({{ it.id }}, '{{ it.titulo|replace("'","") }}')">Excluir</button>{% endif %}
           </div>
         </div>
         {% endfor %}
+      {% endfor %}
+    {% endfor %}
+  {% else %}
+  <div style="color:var(--cinza-2);font-size:13px;padding:24px;text-align:center;background:var(--panel);border:1px dashed var(--borda);border-radius:12px;">Nenhum resultado para "{{ q }}".</div>
+  {% endif %}
+
+{% elif grupos %}
+  <!-- Modo navegador de pastas -->
+  <div class="ma-layout">
+    <!-- Sidebar: lista de operadoras -->
+    <div class="ma-sidebar">
+      <div class="ma-sidebar-head">Operadoras <span style="font-size:10px;color:var(--cinza-2);text-transform:none;letter-spacing:0;">{{ grupos|length }}</span></div>
+      {% for g in grupos %}
+      {% set total_itens = g.caixas|map(attribute='itens')|map('length')|sum %}
+      <div class="op-item" id="op-{{ loop.index0 }}" onclick="abrirOperadora({{ loop.index0 }})">
+        {% if g.logo %}<img class="op-logo" src="{{ g.logo }}" alt="{{ g.operadora }}">{% endif %}
+        <span class="op-nm">{{ g.operadora }}</span>
+        <span class="op-cnt">{{ total_itens }}</span>
       </div>
       {% endfor %}
     </div>
+
+    <!-- Painel direito -->
+    <div class="ma-conteudo">
+      <div class="ma-breadcrumb" id="breadcrumb">
+        <span style="color:var(--cinza-2);">Selecione uma operadora</span>
+      </div>
+
+      <!-- Vista: pastas por tipo -->
+      <div id="vista-pastas" style="display:none;">
+        <div class="pastas-grid" id="pastas-grid"></div>
+      </div>
+
+      <!-- Vista: itens de um tipo -->
+      <div id="vista-itens" style="display:none;">
+        <div class="itens-lista" id="itens-lista"></div>
+      </div>
+
+      <!-- Vista inicial -->
+      <div id="vista-inicial" class="ma-vazio">
+        <div style="font-size:32px; opacity:.3;">&#128193;</div>
+        <div>Selecione uma operadora</div>
+      </div>
+    </div>
   </div>
-  {% endfor %}
+
+  <!-- Dados embutidos em JSON para o JS navegar sem roundtrip -->
+  <script>
+  var MA_DADOS = {{ grupos|tojson|safe }};
+  var opAtual = null, tipoAtual = null;
+
+  var PASTA_ICONES = {
+    'Regras comerciais': '&#128220;',
+    'Tabela de venda': '&#128200;',
+    'Carências': '&#128337;',
+    'Documentos necessários': '&#128196;',
+    'Reembolso': '&#128181;',
+    'Rede credenciada': '&#127973;',
+    'Promoções': '&#127775;',
+    'Geral': '&#128193;'
+  };
+
+  function abrirOperadora(idx) {
+    opAtual = idx; tipoAtual = null;
+    document.querySelectorAll('.op-item').forEach(function(el,i){ el.classList.toggle('ativo', i===idx); });
+    var g = MA_DADOS[idx];
+    // Breadcrumb
+    document.getElementById('breadcrumb').innerHTML = '<span class="crumb" onclick="voltarOps()">Início</span><span class="sep"> / </span><span class="crumb atual">' + g.operadora + '</span>';
+    // Pastas
+    var grid = document.getElementById('pastas-grid');
+    grid.innerHTML = '';
+    g.caixas.forEach(function(cx, ci) {
+      var icon = PASTA_ICONES[cx.tipo] || '&#128193;';
+      var card = document.createElement('div');
+      card.className = 'pasta-card';
+      card.innerHTML = '<div class="pasta-icon">' + icon + '</div><div class="pasta-nm">' + cx.tipo + '</div><div class="pasta-cnt">' + cx.itens.length + ' item(s)</div>';
+      card.onclick = function(){ abrirTipo(ci); };
+      grid.appendChild(card);
+    });
+    show('vista-pastas'); hide('vista-itens'); hide('vista-inicial');
+  }
+
+  function abrirTipo(ci) {
+    tipoAtual = ci;
+    var g = MA_DADOS[opAtual];
+    var cx = g.caixas[ci];
+    // Breadcrumb
+    document.getElementById('breadcrumb').innerHTML =
+      '<span class="crumb" onclick="voltarOps()">Início</span><span class="sep"> / </span>' +
+      '<span class="crumb" onclick="abrirOperadora(' + opAtual + ')">' + g.operadora + '</span>' +
+      '<span class="sep"> / </span><span class="crumb atual">' + cx.tipo + '</span>';
+    // Itens
+    var lista = document.getElementById('itens-lista');
+    lista.innerHTML = '';
+    cx.itens.forEach(function(it) {
+      var el = document.createElement('div');
+      el.className = 'mat-item';
+      var html = '<div class="t">' + it.titulo + '</div>';
+      if (it.descricao) html += '<div class="d">' + it.descricao + '</div>';
+      if (it.conteudo) html += '<details style="margin-top:6px;"><summary style="font-size:11.5px;color:var(--azul);cursor:pointer;">Ver conteúdo extraído do arquivo</summary><pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;color:var(--cinza);margin-top:6px;line-height:1.5;max-height:260px;overflow:auto;background:var(--panel-2);border:1px solid var(--borda);border-radius:8px;padding:10px;">' + escHtml(it.conteudo) + '</pre></details>';
+      html += '<div class="acoes">';
+      if (it.arquivo) html += '<a class="b b-ver" href="/anexos/' + it.arquivo + '" target="_blank">Abrir arquivo</a>';
+      {% if eh_admin %}
+      html += '<button class="b b-del" onclick="excluirMat(' + it.id + ', \'' + escHtml(it.titulo) + '\')">Excluir</button>';
+      {% endif %}
+      html += '</div>';
+      el.innerHTML = html;
+      lista.appendChild(el);
+    });
+    show('vista-itens'); hide('vista-pastas'); hide('vista-inicial');
+  }
+
+  function voltarOps() {
+    opAtual = null; tipoAtual = null;
+    document.querySelectorAll('.op-item').forEach(function(el){ el.classList.remove('ativo'); });
+    document.getElementById('breadcrumb').innerHTML = '<span style="color:var(--cinza-2);">Selecione uma operadora</span>';
+    show('vista-inicial'); hide('vista-pastas'); hide('vista-itens');
+  }
+
+  function show(id){ document.getElementById(id).style.display=''; }
+  function hide(id){ document.getElementById(id).style.display='none'; }
+  function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  </script>
+
 {% else %}
-<div class="vazio">Nenhum material cadastrado ainda.{% if eh_admin %} Use o formulário acima.{% endif %}</div>
+<div style="color:var(--cinza-2);font-size:13px;padding:30px;text-align:center;background:var(--panel);border:1px dashed var(--borda);border-radius:12px;">Nenhum material cadastrado ainda.{% if eh_admin %} Use o formulário acima.{% endif %}</div>
 {% endif %}
 
 <script>

@@ -7988,9 +7988,12 @@ def material_apoio_novo():
         try:
             upload_arquivo_r2(_io.BytesIO(data), f'material/{arquivo}')
         except Exception as e:
-            app.logger.error(f"[MATERIAL] {e}"); arquivo = None
+            app.logger.error(f"[MATERIAL] upload falhou: {e}"); arquivo = None
         if ext == '.pdf':
-            conteudo = _extrair_texto_pdf(_io.BytesIO(data))
+            try:
+                conteudo = _extrair_texto_pdf(_io.BytesIO(data))
+            except Exception as e:
+                app.logger.error(f"[MATERIAL] extracao de texto falhou: {e}"); conteudo = ''
     conn = db()
     conn.execute("INSERT INTO material_apoio (operadora, tipo, titulo, descricao, conteudo, arquivo) VALUES (?, ?, ?, ?, ?, ?)",
                  ((d.get('operadora') or '').strip(), (d.get('tipo') or '').strip(),
