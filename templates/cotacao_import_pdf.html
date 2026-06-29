@@ -69,6 +69,13 @@
 
 <form method="POST" action="/cotacao/tabelas/importar-pdf/salvar">
   <input type="hidden" name="num_planos" value="{{ planos|length }}">
+  <div class="plano-card" style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;">
+    <div class="fg"><label>Tipo de CNPJ (o PDF não traz — informe aqui, vale para todos)</label>
+      <input list="tcnpj" name="tipo_cnpj_global" placeholder="MEI, ME, LTDA, Todos os portes" style="min-width:220px;">
+      <datalist id="tcnpj"><option value="MEI"><option value="ME"><option value="LTDA"><option value="EIRELI"><option value="Demais portes"><option value="Todos os portes"></datalist>
+    </div>
+    <div class="fg"><label>Linha / observação (opcional)</label><input type="text" name="linha_global" placeholder="Ex: Linha Amil, Interior I"></div>
+  </div>
   {% for p in planos %}
   {% set pj = loop.index0 %}
   <div class="plano-card" id="card-{{ loop.index0 }}">

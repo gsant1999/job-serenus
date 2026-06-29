@@ -50,7 +50,10 @@
         {% if t.precos_ok >= 10 %}<span class="tag tag-ok">{{ t.precos_ok }}/10</span>
         {% else %}<span class="tag tag-inc">{{ t.precos_ok }}/10</span>{% endif %}
       </td>
-      <td><button class="btn-del" onclick="excluirTabela({{ t.id }}, '{{ t.operadora }} - {{ t.plano }}')">Excluir</button></td>
+      <td style="white-space:nowrap;">
+        <a href="/cotacao/tabelas/{{ t.id }}/editar" style="border:1px solid var(--azul);color:var(--azul);border-radius:6px;padding:5px 10px;font-size:11px;text-decoration:none;margin-right:4px;">Editar</a>
+        <button class="btn-del" onclick="excluirTabela({{ t.id }}, '{{ t.operadora }} - {{ t.plano }}')">Excluir</button>
+      </td>
     </tr>
     {% endfor %}
   </tbody>

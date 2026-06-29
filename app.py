@@ -7325,6 +7325,19 @@ def cotacao():
 
     resultados = []
     idades = _parse_idades(idades_txt)
+    # Também aceita distribuição por faixa etária (qtd por faixa) — converte em idades representativas
+    _REP_IDADE = [5, 20, 25, 30, 35, 40, 45, 50, 55, 60]
+    extra_idades = []
+    for i, fx in enumerate(FAIXAS_ETARIAS):
+        try:
+            n = int(request.args.get('fx_%d' % i, '') or 0)
+        except Exception:
+            n = 0
+        if n > 0:
+            extra_idades += [_REP_IDADE[i]] * n
+    if extra_idades:
+        idades = idades + extra_idades
+        idades_txt = ', '.join(str(x) for x in idades)
     cont_faixa = {}
     for idade in idades:
         fx = _faixa_da_idade(idade)
@@ -7343,7 +7356,7 @@ def cotacao():
         if f_ops:
             q += " AND operadora IN (" + ",".join(["?"] * len(f_ops)) + ")"; params.extend(f_ops)
         if f_mei:
-            q += " AND (COALESCE(tipo_cnpj,'')='' OR LOWER(tipo_cnpj)='todos' OR tipo_cnpj=?)"; params.append(f_mei)
+            q += " AND (COALESCE(tipo_cnpj,'')='' OR LOWER(tipo_cnpj) IN ('todos','todos os portes','todos os tipos') OR tipo_cnpj=?)"; params.append(f_mei)
         tabelas = conn.execute(q, params).fetchall()
 
         for t in tabelas:
@@ -7380,7 +7393,8 @@ def cotacao():
     return render_template('cotacao.html', operadoras=operadoras, operadoras_cards=operadoras_cards,
                            resultados=resultados, idades_txt=idades_txt, total_vidas=len(idades),
                            modalidades=COTACAO_MODALIDADES, acomodacoes=COTACAO_ACOMODACOES,
-                           coparts=COTACAO_COPART, tipos_cnpj=['MEI', 'Não MEI'],
+                           coparts=COTACAO_COPART, faixas=FAIXAS_ETARIAS,
+                           tipos_cnpj=['MEI', 'ME', 'LTDA', 'Demais portes', 'Todos os portes'],
                            eh_admin=(session.get('perfil') == 'admin'), prefill=prefill,
                            filtros={'modalidade': f_modalidade, 'acomodacao': f_acomodacao,
                                     'coparticipacao': f_copart, 'ops': f_ops, 'mei': f_mei})
@@ -7433,6 +7447,45 @@ def cotacao_tabela_nova():
         conn.execute("INSERT INTO cotacao_preco (tabela_id, faixa, preco) VALUES (?, ?, ?)", (tid, fx, preco))
     conn.commit()
     close_db(conn)
+    return redirect('/cotacao/tabelas')
+
+
+@app.route('/cotacao/tabelas/<int:tid>/editar', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def cotacao_tabela_editar(tid):
+    conn = db()
+    t = conn.execute("SELECT * FROM cotacao_tabela WHERE id=?", (tid,)).fetchone()
+    if not t:
+        close_db(conn); abort(404)
+    if request.method == 'GET':
+        pr = {p['faixa']: p['preco'] for p in conn.execute(
+            "SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (tid,)).fetchall()}
+        close_db(conn)
+        precos = {fx: (f"{float(pr[fx]):.2f}".replace('.', ',') if pr.get(fx) else '') for fx in FAIXAS_ETARIAS}
+        return render_template('cotacao_tabela_form.html', faixas=FAIXAS_ETARIAS,
+                               modalidades=COTACAO_MODALIDADES, acomodacoes=COTACAO_ACOMODACOES,
+                               coparts=COTACAO_COPART, tab=dict(t), precos=precos,
+                               form_action='/cotacao/tabelas/%d/editar' % tid)
+    d = request.form
+    conn.execute("""UPDATE cotacao_tabela SET operadora=?, plano=?, modalidade=?, acomodacao=?,
+        coparticipacao=?, linha=?, tipo_cnpj=?, abrangencia=?, vigencia=? WHERE id=?""",
+        ((d.get('operadora') or '').strip(), (d.get('plano') or '').strip(),
+         (d.get('modalidade') or 'PME').strip(), (d.get('acomodacao') or 'Enfermaria').strip(),
+         (d.get('coparticipacao') or 'Sem').strip(), (d.get('linha') or '').strip(),
+         (d.get('tipo_cnpj') or '').strip(), (d.get('abrangencia') or '').strip(),
+         (d.get('vigencia') or '').strip(), tid))
+    for fx in FAIXAS_ETARIAS:
+        try:
+            preco = float((d.get('preco_' + fx) or '0').replace('.', '').replace(',', '.')) if d.get('preco_' + fx) else 0
+        except Exception:
+            preco = 0
+        ex = conn.execute("SELECT id FROM cotacao_preco WHERE tabela_id=? AND faixa=?", (tid, fx)).fetchone()
+        if ex:
+            conn.execute("UPDATE cotacao_preco SET preco=? WHERE id=?", (preco, ex['id'] if hasattr(ex, 'keys') else ex[0]))
+        else:
+            conn.execute("INSERT INTO cotacao_preco (tabela_id, faixa, preco) VALUES (?, ?, ?)", (tid, fx, preco))
+    conn.commit(); close_db(conn)
     return redirect('/cotacao/tabelas')
 
 
@@ -7751,10 +7804,11 @@ def cotacao_import_pdf_salvar():
         if not operadora or not plano:
             continue
         conn.execute("""INSERT INTO cotacao_tabela
-            (operadora, plano, modalidade, acomodacao, coparticipacao, abrangencia, vigencia, ativo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
+            (operadora, plano, modalidade, acomodacao, coparticipacao, linha, tipo_cnpj, abrangencia, vigencia, ativo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
             (operadora, plano, (d.get(f'modalidade_{j}') or 'PME').strip(),
              (d.get(f'acomodacao_{j}') or 'Enfermaria').strip(), (d.get(f'coparticipacao_{j}') or 'Sem').strip(),
+             (d.get('linha_global') or '').strip(), (d.get('tipo_cnpj_global') or '').strip(),
              (d.get(f'abrangencia_{j}') or '').strip(), (d.get(f'vigencia_{j}') or '').strip()))
         tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])

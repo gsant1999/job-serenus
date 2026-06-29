@@ -28,26 +28,26 @@
   </div>
 </div>
 
-<form method="POST" action="/cotacao/tabelas/nova" class="form-box">
+<form method="POST" action="{{ form_action or '/cotacao/tabelas/nova' }}" class="form-box">
   <div class="form-grid">
-    <div class="fg"><label>Operadora</label><input type="text" name="operadora" required placeholder="Ex: Amil"></div>
-    <div class="fg"><label>Plano</label><input type="text" name="plano" required placeholder="Ex: Amil S380"></div>
+    <div class="fg"><label>Operadora</label><input type="text" name="operadora" required value="{{ tab.operadora if tab else '' }}" placeholder="Ex: Amil"></div>
+    <div class="fg"><label>Plano</label><input type="text" name="plano" required value="{{ tab.plano if tab else '' }}" placeholder="Ex: Amil S380"></div>
     <div class="fg"><label>Modalidade</label>
-      <select name="modalidade">{% for m in modalidades %}<option value="{{ m }}">{{ m }}</option>{% endfor %}</select>
+      <select name="modalidade">{% for m in modalidades %}<option value="{{ m }}" {{ 'selected' if tab and tab.modalidade == m }}>{{ m }}</option>{% endfor %}</select>
     </div>
     <div class="fg"><label>Acomodação</label>
-      <select name="acomodacao">{% for a in acomodacoes %}<option value="{{ a }}">{{ a }}</option>{% endfor %}</select>
+      <select name="acomodacao">{% for a in acomodacoes %}<option value="{{ a }}" {{ 'selected' if tab and tab.acomodacao == a }}>{{ a }}</option>{% endfor %}</select>
     </div>
     <div class="fg"><label>Coparticipação</label>
-      <select name="coparticipacao">{% for c in coparts %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select>
+      <select name="coparticipacao">{% for c in coparts %}<option value="{{ c }}" {{ 'selected' if tab and tab.coparticipacao == c }}>{{ c }}</option>{% endfor %}</select>
     </div>
-    <div class="fg"><label>Linha (uso interno do corretor)</label><input type="text" name="linha" placeholder="Ex: Linha Amil, Linha Black"></div>
-    <div class="fg"><label>Tipo de CNPJ (interno)</label>
-      <input list="tipos-cnpj" name="tipo_cnpj" placeholder="MEI / Não MEI / Empresa">
-      <datalist id="tipos-cnpj"><option value="MEI"><option value="Não MEI"><option value="Empresa"></datalist>
+    <div class="fg"><label>Tipo de CNPJ (interno do corretor)</label>
+      <input list="tipos-cnpj" name="tipo_cnpj" value="{{ tab.tipo_cnpj if tab else '' }}" placeholder="MEI, ME, LTDA, Todos os portes">
+      <datalist id="tipos-cnpj"><option value="MEI"><option value="ME"><option value="LTDA"><option value="EIRELI"><option value="Demais portes"><option value="Todos os portes"></datalist>
     </div>
-    <div class="fg"><label>Abrangência / Região</label><input type="text" name="abrangencia" placeholder="Ex: Campinas"></div>
-    <div class="fg"><label>Vigência</label><input type="text" name="vigencia" placeholder="Ex: 07/2026"></div>
+    <div class="fg"><label>Linha / observação (opcional, interno)</label><input type="text" name="linha" value="{{ tab.linha if tab else '' }}" placeholder="Ex: Linha Amil, Interior I"></div>
+    <div class="fg"><label>Abrangência / Região</label><input type="text" name="abrangencia" value="{{ tab.abrangencia if tab else '' }}" placeholder="Ex: Campinas"></div>
+    <div class="fg"><label>Vigência</label><input type="text" name="vigencia" value="{{ tab.vigencia if tab else '' }}" placeholder="Ex: 07/2026"></div>
   </div>
 
   <h3>Preços por faixa etária (R$)</h3>
@@ -55,7 +55,7 @@
     {% for fx in faixas %}
     <div class="preco-item">
       <label>{{ fx }}</label>
-      <input type="text" name="preco_{{ fx }}" inputmode="decimal" placeholder="0,00">
+      <input type="text" name="preco_{{ fx }}" value="{{ precos[fx] if precos else '' }}" inputmode="decimal" placeholder="0,00">
     </div>
     {% endfor %}
   </div>

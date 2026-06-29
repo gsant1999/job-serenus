@@ -79,6 +79,17 @@
       <div class="fg2"><label>Coparticipação</label>
         <select name="coparticipacao"><option value="">Todas</option>{% for c in coparts %}<option value="{{ c }}" {{ 'selected' if filtros.coparticipacao == c }}>{{ c }}</option>{% endfor %}</select></div>
     </div>
+    {% if faixas %}
+    <details style="margin-top:10px;">
+      <summary style="font-size:11.5px;color:var(--azul);cursor:pointer;">ou informe a quantidade de vidas por faixa etária</summary>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;margin-top:10px;">
+        {% for fx in faixas %}
+        <div class="fg2"><label>{{ fx }}</label>
+          <input type="number" min="0" name="fx_{{ loop.index0 }}" placeholder="0"></div>
+        {% endfor %}
+      </div>
+    </details>
+    {% endif %}
   </div>
 
   {% if operadoras_cards %}
