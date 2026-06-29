@@ -79,6 +79,9 @@
   #documento.destacar .vcard { border-left:6px solid var(--c); }
   #documento.destacar .vcard .vpn { color:var(--c); }
   #documento.destacar .vcard .vtot { color:var(--c); }
+
+  /* Modo edição (agravo) */
+  #documento.editando .preco-cell { background:#fff7e6; outline:1px dashed #fb923c; cursor:text; border-radius:4px; }
 </style>
 {% if cot.orientacao == 'vertical' %}<style>@media print { .scroll .folha { min-width:0; } @page { size:A4 portrait; margin:10mm; } }</style>{% endif %}
 </head>
@@ -89,6 +92,8 @@
   <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="document.getElementById('documento').classList.toggle('destacar')">Destacar planos</button>
   {% if cot.legenda %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLegenda()">Copiar legenda</button>{% endif %}
   {% if not publico and cot.token %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLink()">Copiar link</button>{% endif %}
+  {% if not publico %}<button class="btn-voltar" id="btn-editar" style="border-color:rgba(251,146,60,.7);color:#fb923c" onclick="toggleEditar()">Editar valores</button>
+  <button class="btn-img" id="btn-salvar-aj" style="display:none;background:#fb923c;color:#1c1c24" onclick="salvarAjustes({{ cot.id }})">Salvar ajustes</button>{% endif %}
   <button class="btn-img" onclick="copiarImagem()">Copiar imagem</button>
   <button class="btn-img" style="background:#9aa0b0;color:#1c1c24" onclick="baixarImagem()">Baixar</button>
   <button class="btn-pdf" onclick="window.print()">PDF</button>
@@ -116,6 +121,7 @@
   {% if cot.planos and cot.orientacao == 'vertical' %}
   <div class="vert">
     {% for p in cot.planos %}
+    {% set pidx = loop.index0 %}
     <div class="vcard" style="--c:{{ p.cor }}">
       <div class="vhead">
         {% if p.logo %}<img src="{{ p.logo }}" alt="{{ p.operadora }}" class="vlogo">{% else %}<span class="vop">{{ p.operadora }}</span>{% endif %}
@@ -123,11 +129,11 @@
           <div class="vpn">{{ p.plano }}</div>
           <div class="vpo">{{ p.operadora }} · {{ p.modalidade }} · {{ p.acomodacao }} · Copart. {{ p.coparticipacao }}</div>
         </div>
-        <div class="vtot">{{ p.total|moeda_doc }}<span> /mês</span></div>
+        <div class="vtot total-cell" data-p="{{ pidx }}">{{ p.total|moeda_doc }}<span> /mês</span></div>
       </div>
       <table class="vtab">
         {% for f in cot.faixas_usadas %}
-        <tr><td>{{ f.label }}<span class="q">{{ f.qtd }}x</span></td><td class="vv">{{ p.precos[f.faixa]|moeda_doc }}</td></tr>
+        <tr><td>{{ f.label }}<span class="q">{{ f.qtd }}x</span></td><td class="vv preco-cell" data-p="{{ pidx }}" data-f="{{ f.faixa }}">{{ p.precos[f.faixa]|moeda_doc }}</td></tr>
         {% endfor %}
       </table>
     </div>
@@ -151,12 +157,12 @@
     {% for f in cot.faixas_usadas %}
     <tr class="faixa">
       <td class="lbl">{{ f.label }}<span class="q">{{ f.qtd }}x</span></td>
-      {% for p in cot.planos %}<td class="val">{{ p.precos[f.faixa]|moeda_doc }}</td>{% endfor %}
+      {% for p in cot.planos %}<td class="val preco-cell" data-p="{{ loop.index0 }}" data-f="{{ f.faixa }}">{{ p.precos[f.faixa]|moeda_doc }}</td>{% endfor %}
     </tr>
     {% endfor %}
     <tr class="total">
       <td class="lbl">Total</td>
-      {% for p in cot.planos %}<td class="val" style="--c:{{ p.cor }}">{{ p.total|moeda_doc }}</td>{% endfor %}
+      {% for p in cot.planos %}<td class="val total-cell" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{{ p.total|moeda_doc }}</td>{% endfor %}
     </tr>
   </table>
   {% endif %}
@@ -175,6 +181,26 @@ function copiarLink() {
     navigator.clipboard.writeText(url).then(function(){ alert('Link copiado:\n' + url); },
       function(){ window.prompt('Copie o link da cotação:', url); });
   } else { window.prompt('Copie o link da cotação:', url); }
+}
+function toggleEditar() {
+  var doc = document.getElementById('documento');
+  var on = doc.classList.toggle('editando');
+  document.querySelectorAll('.preco-cell').forEach(function(c){ c.setAttribute('contenteditable', on ? 'true' : 'false'); });
+  document.getElementById('btn-editar').textContent = on ? 'Cancelar edição' : 'Editar valores';
+  document.getElementById('btn-salvar-aj').style.display = on ? 'inline-block' : 'none';
+}
+function _numBR(s){ s=(s||'').replace(/[^\d,.-]/g,'').replace(/\./g,'').replace(',','.'); var n=parseFloat(s); return isNaN(n)?0:n; }
+function salvarAjustes(cid) {
+  var ajustes = {};
+  document.querySelectorAll('.preco-cell').forEach(function(c){
+    var p=c.getAttribute('data-p'), f=c.getAttribute('data-f');
+    if(p===null||f===null) return;
+    if(!ajustes[p]) ajustes[p]={};
+    ajustes[p][f] = _numBR(c.textContent);
+  });
+  fetch('/cotacao/'+cid+'/ajustar', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ajustes:ajustes})})
+    .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert('Erro: '+(d.erro||'')); })
+    .catch(()=>alert('Erro de conexão.'));
 }
 function copiarLegenda() {
   var t = document.getElementById('legenda-txt');

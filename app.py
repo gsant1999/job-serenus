@@ -8222,6 +8222,42 @@ def cotacao_enviar_email(cid):
     return jsonify({"ok": True, "email": destino})
 
 
+@app.route('/cotacao/<int:cid>/ajustar', methods=['POST'])
+@login_required
+def cotacao_ajustar(cid):
+    """Agravo: ajusta os valores por faixa SÓ desta cotação (não mexe na tabela base)."""
+    conn = db()
+    c = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn); return jsonify({"ok": False, "erro": "Não encontrada"}), 404
+    if session.get('perfil') != 'admin' and c['corretor_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    cd = dict(c)
+    try:
+        planos = json.loads(cd.get('planos_json') or '[]')
+    except Exception:
+        planos = []
+    ajustes = (request.json or {}).get('ajustes') or {}
+    total_geral = 0.0
+    for i, p in enumerate(planos):
+        aj = ajustes.get(str(i)) or {}
+        tot = 0.0
+        for ln in p.get('linhas', []):
+            fx = ln.get('faixa')
+            if fx in aj:
+                try:
+                    ln['subtotal'] = round(float(aj[fx]), 2)
+                except Exception:
+                    pass
+            tot += float(ln.get('subtotal') or 0)
+        p['total'] = round(tot, 2)
+        total_geral += tot
+    conn.execute("UPDATE cotacao_salva SET planos_json=?, total=? WHERE id=?",
+                 (json.dumps(planos), round(total_geral, 2), cid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
 @app.route('/cotacao/salvas')
 @login_required
 def cotacao_salvas():
