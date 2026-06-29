@@ -767,6 +767,11 @@ def init_db():
                 titulo TEXT, vidas_json TEXT, planos_json TEXT, total REAL DEFAULT 0,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS operadora_logo (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT NOT NULL, arquivo TEXT NOT NULL,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
         ]
         for sql in tables_sql:
             try: 
@@ -1012,6 +1017,11 @@ def init_db():
             corretor_id INTEGER, corretor_nome TEXT, corretor_email TEXT, corretor_telefone TEXT,
             cliente_nome TEXT, cliente_email TEXT, cliente_telefone TEXT,
             titulo TEXT, vidas_json TEXT, planos_json TEXT, total REAL DEFAULT 0,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS operadora_logo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operadora TEXT NOT NULL, arquivo TEXT NOT NULL,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS solicitacoes_edicao (
@@ -7698,6 +7708,83 @@ def cotacao_import_pdf_salvar():
     return redirect('/cotacao/tabelas')
 
 
+# ── Logos das operadoras ──
+_LOGOS_BUNDLE = [
+    (('amil',), 'amil-saude.svg'),
+    (('go care', 'gocare', 'go-care'), 'go-care.svg'),
+    (('beneficencia',), 'saude_beneficencia.svg'),
+    (('vera cruz', 'veracruz'), 'vera-cruz.png'),
+    (('bradesco',), 'bradesco-saude.svg'),
+    (('sulamerica', 'sul america'), 'sulamerica-saude.svg'),
+    (('hapvida', 'notre', 'gndi', 'notredame'), 'Hapvida_notre.svg'),
+    (('medsenior', 'med senior'), 'medsenior.svg'),
+    (('porto',), 'porto-saude.svg'),
+    (('unica',), 'unica-saude.svg'),
+    (('santa tereza',), 'santa-tereza.png'),
+]
+
+
+def _logo_operadora_url(conn, nome):
+    """Resolve a URL do logo de uma operadora: 1) upload do usuário; 2) logo embutido."""
+    if not nome:
+        return None
+    n = _norm_txt(nome)
+    try:
+        rows = conn.execute("SELECT operadora, arquivo FROM operadora_logo ORDER BY id DESC").fetchall()
+    except Exception:
+        rows = []
+    for r in rows:
+        on = _norm_txt(r['operadora'] if hasattr(r, 'keys') else r[0])
+        arq = r['arquivo'] if hasattr(r, 'keys') else r[1]
+        if on and (on == n or on in n or n in on):
+            return '/logo-operadora/' + arq
+    for keys, arq in _LOGOS_BUNDLE:
+        if any(k in n for k in keys):
+            return '/static/operadoras/' + arq
+    return None
+
+
+@app.route('/logo-operadora/<path:nome>')
+def servir_logo_operadora(nome):
+    """Serve o logo de operadora (público, para a cotação aparecer com ou sem login)."""
+    nome = os.path.basename(nome)
+    if os.path.exists(os.path.join(UPLOAD_FOLDER, nome)):
+        return send_from_directory(UPLOAD_FOLDER, nome)
+    abort(404)
+
+
+@app.route('/cotacao/operadoras-logos', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def cotacao_operadoras_logos():
+    conn = db()
+    if request.method == 'POST':
+        operadora = (request.form.get('operadora') or '').strip()
+        f = request.files.get('logo')
+        if operadora and f and f.filename:
+            ext = os.path.splitext(f.filename)[1].lower() or '.png'
+            nome = _sanitizar_filename(f'logo_op_{_slugify(operadora)}_{secrets.token_hex(3)}{ext}')
+            try:
+                upload_arquivo_r2(f.stream, f'operadoras/{nome}')
+                conn.execute("DELETE FROM operadora_logo WHERE LOWER(operadora)=LOWER(?)", (operadora,))
+                conn.execute("INSERT INTO operadora_logo (operadora, arquivo) VALUES (?, ?)", (operadora, nome))
+                conn.commit()
+            except Exception as e:
+                app.logger.error(f"[LOGO_OP] {e}")
+        close_db(conn)
+        return redirect('/cotacao/operadoras-logos')
+
+    # GET: operadoras das tabelas + logos atuais
+    try:
+        operadoras = [r['operadora'] for r in conn.execute(
+            "SELECT DISTINCT operadora FROM cotacao_tabela ORDER BY operadora").fetchall()]
+    except Exception:
+        operadoras = []
+    itens = [{'operadora': op, 'logo': _logo_operadora_url(conn, op)} for op in operadoras]
+    close_db(conn)
+    return render_template('cotacao_logos.html', itens=itens)
+
+
 @app.route('/cotacao/salvar', methods=['POST'])
 @login_required
 def cotacao_salvar():
@@ -7765,12 +7852,11 @@ def cotacao_documento(cid):
     """Documento da cotação (layout do cliente), pronto para PDF/imagem."""
     conn = db()
     c = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
-    close_db(conn)
     if not c:
-        abort(404)
+        close_db(conn); abort(404)
     # Consultor só vê as próprias
     if session.get('perfil') != 'admin' and c['corretor_id'] != session.get('user_id'):
-        abort(403)
+        close_db(conn); abort(403)
     cot = dict(c)
     try:
         planos = json.loads(cot.get('planos_json') or '[]')
@@ -7784,7 +7870,9 @@ def cotacao_documento(cid):
                           'qtd': l['qtd']} for l in planos[0]['linhas']]
     for p in planos:
         p['precos'] = {l['faixa']: l['subtotal'] for l in p['linhas']}
+        p['logo'] = _logo_operadora_url(conn, p.get('operadora'))
     cot['faixas_usadas'] = faixas_usadas
+    close_db(conn)
     return render_template('cotacao_documento.html', cot=cot)
 
 

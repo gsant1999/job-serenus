@@ -86,7 +86,7 @@
   <table class="doc">
     <tr class="op">
       <td class="lbl"></td>
-      {% for p in cot.planos %}<td class="op-name">{{ p.operadora }}</td>{% endfor %}
+      {% for p in cot.planos %}<td class="op-name">{% if p.logo %}<img src="{{ p.logo }}" alt="{{ p.operadora }}" style="max-height:36px; max-width:130px; object-fit:contain;">{% else %}{{ p.operadora }}{% endif %}</td>{% endfor %}
     </tr>
     <tr class="head">
       <td class="lbl">Geral</td>

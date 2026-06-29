@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Logos das Operadoras{% endblock %}
+
+{% block head %}
+<style>
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; }
+  .card { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:16px; }
+  .card h3 { font-size:13px; color:var(--texto); margin:0 0 10px; font-family:'Sora',sans-serif; }
+  .logo-box { height:70px; display:flex; align-items:center; justify-content:center; background:#fff; border-radius:8px; margin-bottom:10px; }
+  .logo-box img { max-height:54px; max-width:90%; object-fit:contain; }
+  .sem-logo { color:#9aa0b0; font-size:12px; }
+  form.up { display:flex; gap:8px; align-items:center; }
+  form.up input[type=file] { font-size:11px; color:var(--cinza); max-width:140px; }
+  form.up button { background:var(--azul); color:#fff; border:none; border-radius:7px; padding:7px 12px; font-size:12px; font-weight:600; cursor:pointer; }
+  .vazio { color:var(--cinza-2); font-size:13px; padding:30px; text-align:center; background:var(--panel); border:1px dashed var(--borda); border-radius:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Logos das Operadoras</h1>
+    <div class="sub">Aparecem no topo de cada coluna da cotação</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas'">Voltar às tabelas</button>
+  </div>
+</div>
+
+{% if itens %}
+<div class="grid">
+  {% for it in itens %}
+  <div class="card">
+    <h3>{{ it.operadora }}</h3>
+    <div class="logo-box">
+      {% if it.logo %}<img src="{{ it.logo }}" alt="{{ it.operadora }}">{% else %}<span class="sem-logo">Sem logo</span>{% endif %}
+    </div>
+    <form class="up" method="POST" action="/cotacao/operadoras-logos" enctype="multipart/form-data">
+      <input type="hidden" name="operadora" value="{{ it.operadora }}">
+      <input type="file" name="logo" accept=".png,.jpg,.jpeg,.svg,.webp" required>
+      <button type="submit">Enviar</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+<p style="font-size:11px; color:var(--cinza-2); margin-top:14px;">As operadoras listadas vêm das tabelas de preço cadastradas. Logos das principais operadoras já vêm embutidos; envie aqui para trocar ou adicionar.</p>
+{% else %}
+<div class="vazio">Nenhuma operadora ainda. Cadastre tabelas de preço primeiro (Gerenciar tabelas).</div>
+{% endif %}
+{% endblock %}
