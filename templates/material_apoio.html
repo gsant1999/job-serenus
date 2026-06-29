@@ -48,6 +48,12 @@
   </div>
 </div>
 
+<form method="GET" action="/material-apoio" style="display:flex;gap:8px;max-width:480px;margin:14px 0 18px;">
+  <input type="text" name="q" value="{{ q or '' }}" placeholder="Buscar por operadora, regra, carência, documento..." style="flex:1;background:var(--panel-2);border:1px solid var(--borda);border-radius:9px;padding:10px 12px;color:var(--texto);font-size:13px;outline:none;">
+  <button type="submit" style="background:var(--azul);color:#fff;border:none;border-radius:9px;padding:10px 16px;font-size:13px;font-weight:600;cursor:pointer;">Buscar</button>
+  {% if q %}<a href="/material-apoio" style="align-self:center;color:var(--cinza);font-size:12px;text-decoration:none;">Limpar</a>{% endif %}
+</form>
+
 {% if eh_admin %}
 <div class="form-novo">
   <h2>Adicionar material</h2>
@@ -101,6 +107,7 @@
         <div class="mat">
           <div class="t">{{ it.titulo }}</div>
           {% if it.descricao %}<div class="d">{{ it.descricao|safe }}</div>{% endif %}
+          {% if it.conteudo %}<details style="margin-top:6px;"><summary style="font-size:11.5px;color:var(--azul);cursor:pointer;">Ver conteúdo extraído do arquivo</summary><pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;color:var(--cinza);margin-top:6px;line-height:1.5;max-height:340px;overflow:auto;background:var(--panel);border:1px solid var(--borda);border-radius:8px;padding:10px;">{{ it.conteudo }}</pre></details>{% endif %}
           <div class="acoes">
             {% if it.arquivo %}<a class="b b-ver" href="/anexos/{{ it.arquivo }}" target="_blank">Abrir arquivo</a>{% endif %}
             {% if eh_admin %}<button class="b b-del" onclick="excluirMat({{ it.id }}, '{{ it.titulo|replace("'", "") }}')">Excluir</button>{% endif %}

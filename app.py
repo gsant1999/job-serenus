@@ -776,7 +776,7 @@ def init_db():
             )""",
             """CREATE TABLE IF NOT EXISTS material_apoio (
                 id SERIAL PRIMARY KEY,
-                operadora TEXT, tipo TEXT, titulo TEXT NOT NULL, descricao TEXT, arquivo TEXT,
+                operadora TEXT, tipo TEXT, titulo TEXT NOT NULL, descricao TEXT, conteudo TEXT, arquivo TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
         ]
@@ -1035,7 +1035,7 @@ def init_db():
         );
         CREATE TABLE IF NOT EXISTS material_apoio (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            operadora TEXT, tipo TEXT, titulo TEXT NOT NULL, descricao TEXT, arquivo TEXT,
+            operadora TEXT, tipo TEXT, titulo TEXT NOT NULL, descricao TEXT, conteudo TEXT, arquivo TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS solicitacoes_edicao (
@@ -1279,6 +1279,7 @@ def init_db():
         ("cotacao_salva", "orientacao", "TEXT"),
         ("cotacao_salva", "lead_id", "INTEGER"),
         ("material_apoio", "tipo", "TEXT"),
+        ("material_apoio", "conteudo", "TEXT"),
         ("cotacao_salva", "aberturas", "INTEGER"),
         ("cotacao_salva", "ultima_abertura", "TEXT"),
         ("cotacao_tabela", "linha", "TEXT"),
@@ -7903,7 +7904,16 @@ def cotacao_operadoras_logos():
 def material_apoio():
     """Regras comerciais e tabelas de venda por operadora (apoio ao corretor)."""
     conn = db()
-    rows = conn.execute("SELECT * FROM material_apoio ORDER BY operadora, id DESC").fetchall()
+    q = (request.args.get('q') or '').strip()
+    if q:
+        like = f"%{q.lower()}%"
+        rows = conn.execute("""SELECT * FROM material_apoio
+            WHERE LOWER(COALESCE(operadora,'')) LIKE ? OR LOWER(titulo) LIKE ?
+               OR LOWER(COALESCE(tipo,'')) LIKE ? OR LOWER(COALESCE(descricao,'')) LIKE ?
+               OR LOWER(COALESCE(conteudo,'')) LIKE ?
+            ORDER BY operadora, id DESC""", (like, like, like, like, like)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM material_apoio ORDER BY operadora, id DESC").fetchall()
     grupos = {}
     for r in rows:
         d = dict(r)
@@ -7922,31 +7932,56 @@ def material_apoio():
     except Exception:
         operadoras = []
     close_db(conn)
-    return render_template('material_apoio.html', grupos=grupos_l,
+    return render_template('material_apoio.html', grupos=grupos_l, q=q,
                            operadoras=operadoras, eh_admin=(session.get('perfil') == 'admin'))
+
+
+def _extrair_texto_pdf(file_obj):
+    """Lê e limpa o texto de um PDF (regras/fichas de operadora)."""
+    import pdfplumber, io as _io
+    partes = []
+    try:
+        with pdfplumber.open(file_obj) as pdf:
+            for pg in pdf.pages:
+                t = pg.extract_text() or ''
+                if t.strip():
+                    partes.append(t)
+    except Exception:
+        return ''
+    txt = '\n'.join(partes)
+    txt = txt.replace('(cid:127)', '• ').replace('', '• ')
+    txt = re.sub(r'\(cid:\d+\)', '', txt)
+    txt = re.sub(r'[ \t]{2,}', ' ', txt)
+    txt = re.sub(r'\n{3,}', '\n\n', txt)
+    return txt.strip()
 
 
 @app.route('/material-apoio/novo', methods=['POST'])
 @login_required
 @admin_required
 def material_apoio_novo():
+    import io as _io
     d = request.form
     titulo = (d.get('titulo') or '').strip()
     if not titulo:
         return redirect('/material-apoio')
     arquivo = None
+    conteudo = ''
     f = request.files.get('arquivo')
     if f and f.filename:
+        data = f.read()
         ext = os.path.splitext(f.filename)[1].lower()
         arquivo = _sanitizar_filename(f'material_{secrets.token_hex(4)}{ext}')
         try:
-            upload_arquivo_r2(f.stream, f'material/{arquivo}')
+            upload_arquivo_r2(_io.BytesIO(data), f'material/{arquivo}')
         except Exception as e:
             app.logger.error(f"[MATERIAL] {e}"); arquivo = None
+        if ext == '.pdf':
+            conteudo = _extrair_texto_pdf(_io.BytesIO(data))
     conn = db()
-    conn.execute("INSERT INTO material_apoio (operadora, tipo, titulo, descricao, arquivo) VALUES (?, ?, ?, ?, ?)",
+    conn.execute("INSERT INTO material_apoio (operadora, tipo, titulo, descricao, conteudo, arquivo) VALUES (?, ?, ?, ?, ?, ?)",
                  ((d.get('operadora') or '').strip(), (d.get('tipo') or '').strip(),
-                  titulo, (d.get('descricao') or '').strip(), arquivo))
+                  titulo, (d.get('descricao') or '').strip(), conteudo, arquivo))
     conn.commit(); close_db(conn)
     return redirect('/material-apoio')
 
