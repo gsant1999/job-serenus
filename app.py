@@ -7941,16 +7941,25 @@ def cotacao_publica(token):
 @app.route('/cotacao/salvas')
 @login_required
 def cotacao_salvas():
-    """Lista de cotações salvas, por cliente e corretor."""
+    """Lista de cotações salvas (histórico), por cliente e corretor, com busca."""
     conn = db()
     eh_admin = session.get('perfil') == 'admin'
-    if eh_admin:
-        rows = conn.execute("SELECT * FROM cotacao_salva ORDER BY id DESC").fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM cotacao_salva WHERE corretor_id=? ORDER BY id DESC",
-                            (session.get('user_id'),)).fetchall()
+    q = (request.args.get('q') or '').strip()
+    base = "SELECT * FROM cotacao_salva WHERE 1=1"
+    params = []
+    if not eh_admin:
+        base += " AND corretor_id=?"; params.append(session.get('user_id'))
+    if q:
+        base += " AND (LOWER(cliente_nome) LIKE ? OR LOWER(titulo) LIKE ? OR cliente_telefone LIKE ?)"
+        like = f"%{q.lower()}%"
+        params.extend([like, like, f"%{q}%"])
+    base += " ORDER BY id DESC"
+    rows = conn.execute(base, params).fetchall()
+    total = conn.execute(
+        "SELECT COUNT(*) c FROM cotacao_salva" + ("" if eh_admin else " WHERE corretor_id=?"),
+        ([] if eh_admin else [session.get('user_id')])).fetchone()['c']
     close_db(conn)
-    return render_template('cotacao_salvas.html', cotacoes=rows, eh_admin=eh_admin)
+    return render_template('cotacao_salvas.html', cotacoes=rows, eh_admin=eh_admin, q=q, total=total)
 
 
 @app.route('/cotacao/salvas/<int:cid>/excluir', methods=['POST'])
