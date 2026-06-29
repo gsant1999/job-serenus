@@ -59,6 +59,7 @@
       <td>
         <div class="cli">{{ c.cliente_nome or 'Sem nome' }}</div>
         {% if c.cliente_telefone %}<div class="cli-sub">{{ c.cliente_telefone }}</div>{% endif %}
+        {% if c.aberturas %}<div class="cli-sub" style="color:var(--verde);">Aberta {{ c.aberturas }}x · {{ c.ultima_abertura }}</div>{% endif %}
       </td>
       <td>{{ c.titulo }}</td>
       {% if eh_admin %}<td>{{ c.corretor_nome }}</td>{% endif %}

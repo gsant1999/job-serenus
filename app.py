@@ -1277,6 +1277,8 @@ def init_db():
         ("cotacao_salva", "orientacao", "TEXT"),
         ("cotacao_salva", "lead_id", "INTEGER"),
         ("material_apoio", "tipo", "TEXT"),
+        ("cotacao_salva", "aberturas", "INTEGER"),
+        ("cotacao_salva", "ultima_abertura", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -8042,6 +8044,18 @@ def cotacao_publica(token):
     c = conn.execute("SELECT * FROM cotacao_salva WHERE token=?", (token,)).fetchone()
     if not c:
         close_db(conn); abort(404)
+    cd = dict(c)
+    # Rastreia abertura: conta + registra no pipeline do lead no CRM
+    try:
+        conn.execute("UPDATE cotacao_salva SET aberturas=COALESCE(aberturas,0)+1, ultima_abertura=? WHERE id=?",
+                     (datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S'), cd['id']))
+        if cd.get('lead_id'):
+            conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?, ?, ?, ?)",
+                         (cd['lead_id'], 'Sistema', 'abertura',
+                          'Cliente ABRIU a cotação "' + (cd.get('titulo') or 'Cotação') + '" pelo link'))
+        conn.commit()
+    except Exception:
+        pass
     cot = _build_cot(conn, c)
     close_db(conn)
     return render_template('cotacao_documento.html', cot=cot, publico=True)
@@ -8065,13 +8079,36 @@ def cotacao_enviar_email(cid):
         token = secrets.token_urlsafe(9)
         conn.execute("UPDATE cotacao_salva SET token=? WHERE id=?", (token, cid)); conn.commit()
     close_db(conn)
-    link = request.host_url.rstrip('/') + '/c/' + token
+    base = request.host_url.rstrip('/')
+    link = base + '/c/' + token
+    logo = base + '/static/logo_arcos.png'
     nome = cot.get('cliente_nome') or ''
     corretor = cot.get('corretor_nome') or 'Serenus Corretora'
-    corpo = ("<p>Olá " + nome + ",</p><p>Segue a sua cotação de plano de saúde:</p>"
-             "<p><a href='" + link + "' style='background:#3b82f6;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;'>Ver minha cotação</a></p>"
-             "<p>Ou acesse: <a href='" + link + "'>" + link + "</a></p>"
-             "<p>Atenciosamente,<br>" + corretor + "<br>Serenus Corretora</p>")
+    tel_corretor = cot.get('corretor_telefone') or ''
+    corpo = (
+        "<div style='font-family:Arial,Helvetica,sans-serif;background:#f4f5f7;padding:26px 12px;'>"
+        "<div style='max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #e7e9ee;'>"
+        "<div style='padding:24px 30px;border-bottom:1px solid #eef0f3;'>"
+        "<table role='presentation' cellpadding='0' cellspacing='0'><tr>"
+        "<td style='padding-right:12px;'><img src='" + logo + "' alt='Serenus' width='42' height='42' style='display:block;'></td>"
+        "<td><div style='font-size:21px;font-weight:800;color:#1c1c24;line-height:1;'>Serenus</div>"
+        "<div style='font-size:9px;letter-spacing:3px;color:#9aa0b0;text-transform:uppercase;margin-top:3px;'>Corretora</div></td>"
+        "</tr></table></div>"
+        "<div style='padding:30px;'>"
+        "<p style='font-size:15px;color:#2b2b33;margin:0 0 14px;'>Olá " + nome + ",</p>"
+        "<p style='font-size:15px;color:#2b2b33;line-height:1.65;margin:0 0 24px;'>Preparei uma cotação de plano de saúde personalizada para você. "
+        "Clique no botão abaixo para visualizar os planos, coberturas e valores:</p>"
+        "<div style='text-align:center;margin:28px 0;'>"
+        "<a href='" + link + "' style='background:#3b82f6;color:#ffffff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;display:inline-block;'>Ver minha cotação</a></div>"
+        "<p style='font-size:13px;color:#8a8a96;margin:0 0 4px;'>Se o botão não funcionar, copie e cole este link no navegador:</p>"
+        "<p style='font-size:13px;margin:0 0 24px;'><a href='" + link + "' style='color:#3b82f6;word-break:break-all;'>" + link + "</a></p>"
+        "<p style='font-size:14px;color:#2b2b33;margin:0;line-height:1.6;'>Qualquer dúvida, estou à disposição.<br>"
+        "Atenciosamente,<br><b>" + corretor + "</b>" + (("<br>" + tel_corretor) if tel_corretor else "") + "<br>Serenus Corretora</p>"
+        "</div>"
+        "<div style='padding:16px 30px;background:#fafbfc;border-top:1px solid #eef0f3;font-size:11px;color:#9aa0b0;line-height:1.5;'>"
+        "Informativo referencial: valores e demais condições são determinados pelas operadoras e podem ser alterados a qualquer momento. "
+        "Esta mensagem tem caráter informativo e não constitui contrato.</div>"
+        "</div></div>")
     try:
         _enviar_email.ultimo_erro = None
     except Exception:
