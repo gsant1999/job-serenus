@@ -71,6 +71,14 @@
   table.vtab tr:last-child td { border-bottom:none; }
   table.vtab td.vv { text-align:right; font-variant-numeric:tabular-nums; color:#1c1c24; }
   table.vtab .q { color:#3b82f6; font-weight:600; margin-left:6px; }
+
+  /* Destaque opcional por plano (cores automáticas) */
+  #documento.destacar tr.op td.op-name { outline:2px solid var(--c); outline-offset:-4px; border-radius:8px; }
+  #documento.destacar tr.head td.val .pn { color:var(--c); }
+  #documento.destacar tr.total td.val { color:var(--c); }
+  #documento.destacar .vcard { border-left:6px solid var(--c); }
+  #documento.destacar .vcard .vpn { color:var(--c); }
+  #documento.destacar .vcard .vtot { color:var(--c); }
 </style>
 {% if cot.orientacao == 'vertical' %}<style>@media print { .scroll .folha { min-width:0; } @page { size:A4 portrait; margin:10mm; } }</style>{% endif %}
 </head>
@@ -78,10 +86,14 @@
 
 <div class="toolbar">
   {% if not publico %}<a class="btn-voltar" href="/cotacao/salvas">Voltar</a>{% endif %}
+  <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="document.getElementById('documento').classList.toggle('destacar')">Destacar planos</button>
+  {% if cot.legenda %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLegenda()">Copiar legenda</button>{% endif %}
   {% if not publico and cot.token %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLink()">Copiar link</button>{% endif %}
-  <button class="btn-img" onclick="baixarImagem()">Baixar imagem</button>
-  <button class="btn-pdf" onclick="window.print()">Salvar PDF</button>
+  <button class="btn-img" onclick="copiarImagem()">Copiar imagem</button>
+  <button class="btn-img" style="background:#9aa0b0;color:#1c1c24" onclick="baixarImagem()">Baixar</button>
+  <button class="btn-pdf" onclick="window.print()">PDF</button>
 </div>
+<textarea id="legenda-txt" style="position:absolute;left:-9999px;top:0;">{{ cot.legenda }}</textarea>
 
 <div class="scroll">
 <div class="folha" id="documento">
@@ -104,7 +116,7 @@
   {% if cot.planos and cot.orientacao == 'vertical' %}
   <div class="vert">
     {% for p in cot.planos %}
-    <div class="vcard">
+    <div class="vcard" style="--c:{{ p.cor }}">
       <div class="vhead">
         {% if p.logo %}<img src="{{ p.logo }}" alt="{{ p.operadora }}" class="vlogo">{% else %}<span class="vop">{{ p.operadora }}</span>{% endif %}
         <div class="vtit">
@@ -127,11 +139,11 @@
   <table class="doc">
     <tr class="op">
       <td class="lbl"></td>
-      {% for p in cot.planos %}<td class="op-name">{% if p.logo %}<img src="{{ p.logo }}" alt="{{ p.operadora }}" style="max-height:36px; max-width:130px; object-fit:contain;">{% else %}{{ p.operadora }}{% endif %}</td>{% endfor %}
+      {% for p in cot.planos %}<td class="op-name" style="--c:{{ p.cor }}">{% if p.logo %}<img src="{{ p.logo }}" alt="{{ p.operadora }}" style="max-height:36px; max-width:130px; object-fit:contain;">{% else %}{{ p.operadora }}{% endif %}</td>{% endfor %}
     </tr>
     <tr class="head">
       <td class="lbl">Geral</td>
-      {% for p in cot.planos %}<td class="val"><div class="pn">{{ p.plano }}</div><div class="po">{{ p.operadora }}</div></td>{% endfor %}
+      {% for p in cot.planos %}<td class="val" style="--c:{{ p.cor }}"><div class="pn">{{ p.plano }}</div><div class="po">{{ p.operadora }}</div></td>{% endfor %}
     </tr>
     <tr><td class="lbl">Modalidade</td>{% for p in cot.planos %}<td class="val">{{ p.modalidade }}</td>{% endfor %}</tr>
     <tr><td class="lbl">Acomodação</td>{% for p in cot.planos %}<td class="val">{{ p.acomodacao }}</td>{% endfor %}</tr>
@@ -144,7 +156,7 @@
     {% endfor %}
     <tr class="total">
       <td class="lbl">Total</td>
-      {% for p in cot.planos %}<td class="val">{{ p.total|moeda_doc }}</td>{% endfor %}
+      {% for p in cot.planos %}<td class="val" style="--c:{{ p.cor }}">{{ p.total|moeda_doc }}</td>{% endfor %}
     </tr>
   </table>
   {% endif %}
@@ -163,6 +175,26 @@ function copiarLink() {
     navigator.clipboard.writeText(url).then(function(){ alert('Link copiado:\n' + url); },
       function(){ window.prompt('Copie o link da cotação:', url); });
   } else { window.prompt('Copie o link da cotação:', url); }
+}
+function copiarLegenda() {
+  var t = document.getElementById('legenda-txt');
+  if (navigator.clipboard) navigator.clipboard.writeText(t.value).then(function(){ alert('Legenda copiada! Cole no WhatsApp.'); }, function(){ t.style.left='10px'; t.select(); });
+  else { t.style.left='10px'; t.select(); document.execCommand('copy'); }
+}
+async function copiarImagem() {
+  var alvo = document.getElementById('documento');
+  try {
+    var canvas = await html2canvas(alvo, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+    canvas.toBlob(async function(blob) {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        alert('Imagem copiada! Agora é só colar (Ctrl/Cmd+V) no WhatsApp.');
+      } catch (e) {
+        var a = document.createElement('a'); a.download = 'cotacao.png'; a.href = canvas.toDataURL('image/png'); a.click();
+        alert('Seu navegador não permite copiar imagem direto; baixei o arquivo.');
+      }
+    });
+  } catch (e) { alert('Não foi possível gerar a imagem: ' + e); }
 }
 function baixarImagem() {
   var alvo = document.getElementById('documento');

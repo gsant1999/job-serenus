@@ -775,7 +775,7 @@ def init_db():
             )""",
             """CREATE TABLE IF NOT EXISTS material_apoio (
                 id SERIAL PRIMARY KEY,
-                operadora TEXT, titulo TEXT NOT NULL, descricao TEXT, arquivo TEXT,
+                operadora TEXT, tipo TEXT, titulo TEXT NOT NULL, descricao TEXT, arquivo TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
         ]
@@ -1033,7 +1033,7 @@ def init_db():
         );
         CREATE TABLE IF NOT EXISTS material_apoio (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            operadora TEXT, titulo TEXT NOT NULL, descricao TEXT, arquivo TEXT,
+            operadora TEXT, tipo TEXT, titulo TEXT NOT NULL, descricao TEXT, arquivo TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS solicitacoes_edicao (
@@ -1276,6 +1276,7 @@ def init_db():
         ("cotacao_salva", "token", "TEXT"),
         ("cotacao_salva", "orientacao", "TEXT"),
         ("cotacao_salva", "lead_id", "INTEGER"),
+        ("material_apoio", "tipo", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -7841,16 +7842,21 @@ def material_apoio():
     for r in rows:
         d = dict(r)
         op = d.get('operadora') or 'Geral'
+        tp = (d.get('tipo') or '').strip() or 'Geral'
         if op not in grupos:
-            grupos[op] = {'operadora': op, 'logo': _logo_operadora_url(conn, op), 'itens': []}
-        grupos[op]['itens'].append(d)
+            grupos[op] = {'operadora': op, 'logo': _logo_operadora_url(conn, op), 'tipos': {}}
+        grupos[op]['tipos'].setdefault(tp, []).append(d)
+    grupos_l = []
+    for g in grupos.values():
+        g['caixas'] = [{'tipo': t, 'itens': it} for t, it in g['tipos'].items()]
+        grupos_l.append(g)
     try:
         operadoras = [r['operadora'] for r in conn.execute(
             "SELECT DISTINCT operadora FROM cotacao_tabela ORDER BY operadora").fetchall()]
     except Exception:
         operadoras = []
     close_db(conn)
-    return render_template('material_apoio.html', grupos=list(grupos.values()),
+    return render_template('material_apoio.html', grupos=grupos_l,
                            operadoras=operadoras, eh_admin=(session.get('perfil') == 'admin'))
 
 
@@ -7872,8 +7878,9 @@ def material_apoio_novo():
         except Exception as e:
             app.logger.error(f"[MATERIAL] {e}"); arquivo = None
     conn = db()
-    conn.execute("INSERT INTO material_apoio (operadora, titulo, descricao, arquivo) VALUES (?, ?, ?, ?)",
-                 ((d.get('operadora') or '').strip(), titulo, (d.get('descricao') or '').strip(), arquivo))
+    conn.execute("INSERT INTO material_apoio (operadora, tipo, titulo, descricao, arquivo) VALUES (?, ?, ?, ?, ?)",
+                 ((d.get('operadora') or '').strip(), (d.get('tipo') or '').strip(),
+                  titulo, (d.get('descricao') or '').strip(), arquivo))
     conn.commit(); close_db(conn)
     return redirect('/material-apoio')
 
@@ -8006,6 +8013,25 @@ def _build_cot(conn, c):
         p['logo'] = _logo_operadora_url(conn, p.get('operadora'))
     cot['faixas_usadas'] = faixas_usadas
     cot['orientacao'] = cot.get('orientacao') or 'horizontal'
+    # Cores automáticas por plano (para destaque opcional) + legenda pronta p/ copiar
+    PALETA = [('VERDE', '#1fb88a'), ('LARANJA', '#fb923c'), ('AZUL', '#3b82f6'),
+              ('ROXO', '#8b5cf6'), ('ROSA', '#f43f7c'), ('CIANO', '#06b6d4')]
+    for i, p in enumerate(planos):
+        nome_cor, cor = PALETA[i % len(PALETA)]
+        p['cor'] = cor
+        p['cor_nome'] = nome_cor
+    try:
+        vidas = json.loads(cot.get('vidas_json') or '{}')
+        total_vidas = sum(int(v) for v in vidas.values())
+    except Exception:
+        total_vidas = 0
+    leg = ['*' + (cot.get('titulo') or 'Cotação') + '*']
+    if total_vidas:
+        leg.append(str(total_vidas) + ' vida(s)')
+    for p in planos:
+        leg.append('Em ' + p['cor_nome'] + ': ' + (p.get('operadora') or '') + ' ' + (p.get('plano') or '')
+                   + ' - copart. ' + (p.get('coparticipacao') or '') + ' - R$ ' + _moeda_doc(p.get('total')) + '/mês')
+    cot['legenda'] = '\n'.join(leg)
     return cot
 
 
