@@ -773,6 +773,11 @@ def init_db():
                 operadora TEXT NOT NULL, arquivo TEXT NOT NULL,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS material_apoio (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT, titulo TEXT NOT NULL, descricao TEXT, arquivo TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
         ]
         for sql in tables_sql:
             try: 
@@ -1024,6 +1029,11 @@ def init_db():
         CREATE TABLE IF NOT EXISTS operadora_logo (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             operadora TEXT NOT NULL, arquivo TEXT NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS material_apoio (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operadora TEXT, titulo TEXT NOT NULL, descricao TEXT, arquivo TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS solicitacoes_edicao (
@@ -7819,6 +7829,61 @@ def cotacao_operadoras_logos():
     itens = [{'operadora': op, 'logo': _logo_operadora_url(conn, op)} for op in operadoras]
     close_db(conn)
     return render_template('cotacao_logos.html', itens=itens)
+
+
+@app.route('/material-apoio')
+@login_required
+def material_apoio():
+    """Regras comerciais e tabelas de venda por operadora (apoio ao corretor)."""
+    conn = db()
+    rows = conn.execute("SELECT * FROM material_apoio ORDER BY operadora, id DESC").fetchall()
+    grupos = {}
+    for r in rows:
+        d = dict(r)
+        op = d.get('operadora') or 'Geral'
+        if op not in grupos:
+            grupos[op] = {'operadora': op, 'logo': _logo_operadora_url(conn, op), 'itens': []}
+        grupos[op]['itens'].append(d)
+    try:
+        operadoras = [r['operadora'] for r in conn.execute(
+            "SELECT DISTINCT operadora FROM cotacao_tabela ORDER BY operadora").fetchall()]
+    except Exception:
+        operadoras = []
+    close_db(conn)
+    return render_template('material_apoio.html', grupos=list(grupos.values()),
+                           operadoras=operadoras, eh_admin=(session.get('perfil') == 'admin'))
+
+
+@app.route('/material-apoio/novo', methods=['POST'])
+@login_required
+@admin_required
+def material_apoio_novo():
+    d = request.form
+    titulo = (d.get('titulo') or '').strip()
+    if not titulo:
+        return redirect('/material-apoio')
+    arquivo = None
+    f = request.files.get('arquivo')
+    if f and f.filename:
+        ext = os.path.splitext(f.filename)[1].lower()
+        arquivo = _sanitizar_filename(f'material_{secrets.token_hex(4)}{ext}')
+        try:
+            upload_arquivo_r2(f.stream, f'material/{arquivo}')
+        except Exception as e:
+            app.logger.error(f"[MATERIAL] {e}"); arquivo = None
+    conn = db()
+    conn.execute("INSERT INTO material_apoio (operadora, titulo, descricao, arquivo) VALUES (?, ?, ?, ?)",
+                 ((d.get('operadora') or '').strip(), titulo, (d.get('descricao') or '').strip(), arquivo))
+    conn.commit(); close_db(conn)
+    return redirect('/material-apoio')
+
+
+@app.route('/material-apoio/<int:mid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def material_apoio_excluir(mid):
+    conn = db(); conn.execute("DELETE FROM material_apoio WHERE id=?", (mid,)); conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
 
 
 @app.route('/cotacao/salvar', methods=['POST'])

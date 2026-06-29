@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Material de Apoio{% endblock %}
+
+{% block head %}
+<style>
+  .grupo { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:14px; }
+  .grupo-head { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+  .grupo-logo { height:34px; max-width:120px; object-fit:contain; background:#fff; border-radius:6px; padding:2px 6px; }
+  .grupo-nome { font-family:'Sora',sans-serif; font-size:15px; font-weight:700; color:var(--texto); }
+  .item { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; padding:11px 0; border-top:1px solid var(--borda); }
+  .item:first-child { border-top:none; }
+  .item .t { font-size:13.5px; font-weight:600; color:var(--texto); }
+  .item .d { font-size:12px; color:var(--cinza); margin-top:3px; white-space:pre-wrap; }
+  .item .acoes { display:flex; gap:6px; flex-shrink:0; }
+  .b { border:1px solid var(--borda); background:transparent; border-radius:7px; padding:6px 11px; font-size:11px; cursor:pointer; text-decoration:none; color:var(--texto); }
+  .b-ver { background:var(--azul); color:#fff; border:none; }
+  .b-del { color:var(--erro); border-color:rgba(244,63,94,.3); }
+  .form-novo { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:18px; }
+  .form-novo h2 { font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin:0 0 12px; }
+  .fg { display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+  .fg label { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:600; }
+  .fg input, .fg textarea, .fg select { background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:8px 10px; color:var(--texto); font-size:13px; outline:none; font-family:inherit; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .btn-salvar { background:var(--azul); color:#fff; border:none; padding:10px 20px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  .vazio { color:var(--cinza-2); font-size:13px; padding:30px; text-align:center; background:var(--panel); border:1px dashed var(--borda); border-radius:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Material de Apoio</h1>
+    <div class="sub">Regras comerciais e tabelas de venda por operadora</div>
+  </div>
+</div>
+
+{% if eh_admin %}
+<div class="form-novo">
+  <h2>Adicionar material</h2>
+  <form method="POST" action="/material-apoio/novo" enctype="multipart/form-data">
+    <div class="grid2">
+      <div class="fg"><label>Operadora</label>
+        <input list="lista-ops" name="operadora" placeholder="Ex: Amil">
+        <datalist id="lista-ops">{% for o in operadoras %}<option value="{{ o }}">{% endfor %}</datalist>
+      </div>
+      <div class="fg"><label>Título</label><input type="text" name="titulo" required placeholder="Ex: Regras comerciais PME 2026"></div>
+    </div>
+    <div class="fg"><label>Descrição / regras (texto livre)</label><textarea name="descricao" rows="3" placeholder="Carências, documentos, comissão, observações..."></textarea></div>
+    <div class="fg"><label>Arquivo (PDF, imagem, planilha) — opcional</label><input type="file" name="arquivo" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.csv,.doc,.docx"></div>
+    <button type="submit" class="btn-salvar">Salvar material</button>
+  </form>
+</div>
+{% endif %}
+
+{% if grupos %}
+  {% for g in grupos %}
+  <div class="grupo">
+    <div class="grupo-head">
+      {% if g.logo %}<img class="grupo-logo" src="{{ g.logo }}" alt="{{ g.operadora }}">{% endif %}
+      <div class="grupo-nome">{{ g.operadora }}</div>
+    </div>
+    {% for it in g.itens %}
+    <div class="item">
+      <div>
+        <div class="t">{{ it.titulo }}</div>
+        {% if it.descricao %}<div class="d">{{ it.descricao }}</div>{% endif %}
+      </div>
+      <div class="acoes">
+        {% if it.arquivo %}<a class="b b-ver" href="/anexos/{{ it.arquivo }}" target="_blank">Abrir arquivo</a>{% endif %}
+        {% if eh_admin %}<button class="b b-del" onclick="excluirMat({{ it.id }}, '{{ it.titulo|replace("'", "") }}')">Excluir</button>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+{% else %}
+<div class="vazio">Nenhum material cadastrado ainda.{% if eh_admin %} Use o formulário acima para adicionar regras comerciais e tabelas por operadora.{% endif %}</div>
+{% endif %}
+
+<script>
+function excluirMat(id, nome){
+  if(!confirm('Excluir "'+nome+'"?')) return;
+  fetch('/material-apoio/'+id+'/excluir',{method:'POST'})
+    .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert('Erro.'); })
+    .catch(()=>alert('Erro de conexão.'));
+}
+</script>
+{% endblock %}
