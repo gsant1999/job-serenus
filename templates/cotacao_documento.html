@@ -140,6 +140,7 @@
       <div class="vhead">
         {% if p.logo %}<img src="{{ p.logo }}" alt="{{ p.operadora }}" class="vlogo">{% else %}<span class="vop">{{ p.operadora }}</span>{% endif %}
         <div class="vtit">
+          {% if p.recomendacao %}<div style="font-size:10px;font-weight:700;letter-spacing:.4px;padding:2px 8px;border-radius:20px;display:inline-block;margin-bottom:4px;background:{% if p.recomendacao=='1ª opção' %}#1fb88a{% elif p.recomendacao=='2ª opção' %}#3b82f6{% else %}#8b5cf6{% endif %};color:#fff;">{{ p.recomendacao }}</div>{% endif %}
           <div class="vpn">{{ p.plano }}</div>
           <div class="vpo">{{ p.operadora }} · {{ p.modalidade }} · {{ p.acomodacao }} · Copart. {{ p.coparticipacao }}</div>
         </div>
@@ -163,7 +164,7 @@
     </tr>
     <tr class="head">
       <td class="lbl">Geral</td>
-      {% for p in cot.planos %}<td class="val" style="--c:{{ p.cor }}"><div class="pn">{{ p.plano }}</div><div class="po">{{ p.operadora }}</div></td>{% endfor %}
+      {% for p in cot.planos %}<td class="val" style="--c:{{ p.cor }}">{% if p.recomendacao %}<div style="font-size:9px;font-weight:700;letter-spacing:.3px;padding:2px 7px;border-radius:20px;display:inline-block;margin-bottom:3px;background:{% if p.recomendacao=='1ª opção' %}#1fb88a{% elif p.recomendacao=='2ª opção' %}#3b82f6{% else %}#8b5cf6{% endif %};color:#fff;">{{ p.recomendacao }}</div>{% endif %}<div class="pn">{{ p.plano }}</div><div class="po">{{ p.operadora }}</div></td>{% endfor %}
     </tr>
     <tr><td class="lbl">Modalidade</td>{% for p in cot.planos %}<td class="val">{{ p.modalidade }}</td>{% endfor %}</tr>
     <tr><td class="lbl">Acomodação</td>{% for p in cot.planos %}<td class="val">{{ p.acomodacao }}</td>{% endfor %}</tr>

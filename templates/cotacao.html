@@ -128,7 +128,7 @@
     {% if editar_id %}<input type="hidden" name="editar_id" value="{{ editar_id }}">{% endif %}
     <table class="cot">
       <thead>
-        <tr><th style="width:34px;"></th><th>Operadora</th><th>Plano</th><th>Modalidade</th><th>Acomodação</th><th>Coparticipação</th><th style="text-align:right;">Total mensal</th></tr>
+        <tr><th style="width:34px;"></th><th>Operadora</th><th>Plano</th><th>Modalidade</th><th>Acomodação</th><th>Coparticipação</th><th style="text-align:right;">Total mensal</th><th style="width:130px;">Recomendação</th></tr>
       </thead>
       <tbody>
         {% for r in resultados %}
@@ -138,7 +138,7 @@
           <td>{{ r.operadora }}</td>
           <td>
             {{ r.plano }}
-            {% if loop.first and not r.incompleta %}<span class="tag tag-best">menor preço</span>{% endif %}
+            {% if loop.first and not r.incompleta and not editar_id %}<span class="tag tag-best">menor preço</span>{% endif %}
             {% if r.incompleta %}<span class="tag tag-inc">tabela incompleta</span>{% endif %}
             {% if r.abrangencia %}<div style="font-size:11px;color:var(--cinza-2);margin-top:2px;">{{ r.abrangencia }}</div>{% endif %}
             {% if r.linha or r.tipo_cnpj %}<div style="font-size:10.5px;color:var(--cinza-2);margin-top:2px;">{{ r.linha }}{% if r.linha and r.tipo_cnpj %} · {% endif %}{{ r.tipo_cnpj }}</div>{% endif %}
@@ -147,6 +147,14 @@
           <td>{{ r.acomodacao }}</td>
           <td>{{ r.coparticipacao }}</td>
           <td class="total">{{ r.total|moeda }}</td>
+          <td>
+            <select name="rec_{{ r.tabela_id }}" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:6px;padding:5px 8px;color:var(--texto);font-size:12px;outline:none;">
+              <option value="">—</option>
+              <option value="1a">1ª opção</option>
+              <option value="2a">2ª opção</option>
+              <option value="3a">3ª opção</option>
+            </select>
+          </td>
         </tr>
         {% endfor %}
       </tbody>

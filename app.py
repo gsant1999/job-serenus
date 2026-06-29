@@ -8043,11 +8043,14 @@ def cotacao_salvar():
             total += sub
             linhas.append({'faixa': fx, 'label': _faixa_label(fx), 'qtd': qtd, 'preco': preco, 'subtotal': round(sub, 2)})
         total_geral += total
+        rec_map = {'1a': '1ª opção', '2a': '2ª opção', '3a': '3ª opção'}
+        rec_raw = (d.get(f'rec_{tid}') or '').strip()
         planos.append({
             'operadora': t['operadora'], 'plano': t['plano'], 'modalidade': t['modalidade'],
             'acomodacao': t['acomodacao'], 'coparticipacao': t['coparticipacao'],
             'abrangencia': t['abrangencia'], 'vigencia': t['vigencia'],
             'linhas': linhas, 'total': round(total, 2),
+            'recomendacao': rec_map.get(rec_raw, ''),
         })
 
     # Dados do corretor (logado) — busca do banco para garantir nome/email
