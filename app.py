@@ -7350,10 +7350,17 @@ def cotacao():
         resultados.sort(key=lambda x: x['total'])
 
     close_db(conn)
+    prefill = {
+        'lead_id': (request.args.get('lead_id') or '').strip(),
+        'nome': (request.args.get('cliente_nome') or '').strip(),
+        'telefone': (request.args.get('cliente_telefone') or '').strip(),
+        'email': (request.args.get('cliente_email') or '').strip(),
+    }
     return render_template('cotacao.html', operadoras=operadoras, resultados=resultados,
                            idades_txt=idades_txt, total_vidas=len(idades),
                            modalidades=COTACAO_MODALIDADES, acomodacoes=COTACAO_ACOMODACOES,
                            coparts=COTACAO_COPART, eh_admin=(session.get('perfil') == 'admin'),
+                           prefill=prefill,
                            filtros={'modalidade': f_modalidade, 'acomodacao': f_acomodacao,
                                     'coparticipacao': f_copart, 'operadora': f_operadora})
 
@@ -7867,6 +7874,17 @@ def cotacao_salvar():
         lead_id = int(d.get('lead_id')) if (d.get('lead_id') or '').strip().isdigit() else None
     except Exception:
         lead_id = None
+    # Vínculo automático com o lead do CRM por telefone/e-mail (se não veio escolhido)
+    if not lead_id:
+        tel_norm = _normalizar_telefone(d.get('cliente_telefone') or '')
+        email_cli = (d.get('cliente_email') or '').strip()
+        lead_row = None
+        if tel_norm:
+            lead_row = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone()
+        if not lead_row and email_cli:
+            lead_row = conn.execute("SELECT id FROM crm_leads WHERE LOWER(email)=LOWER(?)", (email_cli,)).fetchone()
+        if lead_row:
+            lead_id = lead_row['id'] if hasattr(lead_row, 'keys') else lead_row[0]
     conn.execute("""INSERT INTO cotacao_salva
         (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email, corretor_telefone,
          cliente_nome, cliente_email, cliente_telefone, titulo, vidas_json, planos_json, total)
@@ -7974,6 +7992,33 @@ def cotacao_salva_excluir(cid):
     conn.execute("DELETE FROM cotacao_salva WHERE id=?", (cid,))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+
+@app.route('/crm/lead/<int:lid>/cotacoes')
+@login_required
+def crm_lead_cotacoes(lid):
+    """Cotações vinculadas a um lead (por lead_id OU por telefone/e-mail do cliente)."""
+    conn = db()
+    lead = conn.execute("SELECT id, nome, telefone, telefone_norm, email FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "cotacoes": []}), 404
+    tel = (lead['telefone_norm'] if hasattr(lead, 'keys') else None) or _normalizar_telefone(lead['telefone'] or '')
+    email = (lead['email'] or '').strip().lower()
+    rows = conn.execute("""SELECT id, token, titulo, total, criado_em, cliente_telefone, cliente_email, lead_id
+                           FROM cotacao_salva ORDER BY id DESC""").fetchall()
+    close_db(conn)
+    out = []
+    for r in rows:
+        d = dict(r)
+        casa = (d.get('lead_id') == lid)
+        if not casa and tel and len(tel) >= 8:
+            casa = tel[-8:] in re.sub(r'\D', '', d.get('cliente_telefone') or '')
+        if not casa and email:
+            casa = (d.get('cliente_email') or '').strip().lower() == email
+        if casa:
+            out.append({'id': d['id'], 'token': d.get('token'), 'titulo': d.get('titulo'),
+                        'total': float(d.get('total') or 0), 'data': str(d.get('criado_em'))[:10]})
+    return jsonify({"ok": True, "cotacoes": out})
 
 
 # ─── GESTÃO DE ETAPAS DO FUNIL (admin) ───────────────────────────────────────

@@ -350,16 +350,21 @@
 
     <div class="ficha-right">
       <div class="ficha-tabs">
-        <div class="ficha-tab ativo" onclick="mudarTab('timeline')">📋 Timeline</div>
-        <div class="ficha-tab" onclick="mudarTab('qualificacao')">🎯 Qualificação</div>
-        <div class="ficha-tab" onclick="mudarTab('atividade')">➕ Atividade</div>
-        <div class="ficha-tab" onclick="mudarTab('whatsapp')">💬 WhatsApp</div>
-        <div class="ficha-tab" onclick="mudarTab('anexos')">📎 Anexos</div>
+        <div class="ficha-tab ativo" onclick="mudarTab('timeline')">Timeline</div>
+        <div class="ficha-tab" onclick="mudarTab('cotacoes')">Cotações</div>
+        <div class="ficha-tab" onclick="mudarTab('qualificacao')">Qualificação</div>
+        <div class="ficha-tab" onclick="mudarTab('atividade')">Atividade</div>
+        <div class="ficha-tab" onclick="mudarTab('whatsapp')">WhatsApp</div>
+        <div class="ficha-tab" onclick="mudarTab('anexos')">Anexos</div>
       </div>
 
       <div class="ficha-tab-content">
         <div id="tab-timeline" class="ficha-tab-pane ativo">
           <div id="timeline-lista"></div>
+        </div>
+        <div id="tab-cotacoes" class="ficha-tab-pane">
+          <button class="btn-outline btn-sm" onclick="novaCotacaoLead()" style="margin-bottom:12px;">+ Nova cotação para este lead</button>
+          <div id="cotacoes-lista"><div style="color:var(--cinza-2);font-size:12px;">Carregando...</div></div>
         </div>
 
         <div id="tab-qualificacao" class="ficha-tab-pane">
@@ -629,10 +634,40 @@ function fmtDataHoraBR(s){
 }
 
 function mudarTab(tab){
-  const tabs=['timeline','qualificacao','atividade','whatsapp','anexos'];
+  const tabs=['timeline','cotacoes','qualificacao','atividade','whatsapp','anexos'];
   document.querySelectorAll('.ficha-tab').forEach((t,i)=>t.classList.toggle('ativo',tabs[i]===tab));
   document.querySelectorAll('.ficha-tab-pane').forEach(p=>p.classList.remove('ativo'));
   document.getElementById('tab-'+tab)?.classList.add('ativo');
+  if(tab==='cotacoes') carregarCotacoes();
+}
+
+async function carregarCotacoes(){
+  if(!_leadAtual) return;
+  const box=document.getElementById('cotacoes-lista');
+  box.innerHTML='<div style="color:var(--cinza-2);font-size:12px;">Carregando...</div>';
+  try{
+    const d=await(await fetch('/crm/lead/'+_leadAtual.id+'/cotacoes')).json();
+    const cs=d.cotacoes||[];
+    if(!cs.length){ box.innerHTML='<div style="color:var(--cinza-2);font-size:12px;">Nenhuma cotação para este cliente ainda.</div>'; return; }
+    box.innerHTML=cs.map(c=>{
+      const link=window.location.origin+'/c/'+(c.token||'');
+      const total=(c.total||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+      return '<div style="border:1px solid var(--borda);border-radius:9px;padding:11px 13px;margin-bottom:8px;">'
+        +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">'
+        +'<div><div style="font-weight:600;color:var(--texto);font-size:13px;">'+(c.titulo||'Cotação')+'</div>'
+        +'<div style="font-size:11px;color:var(--cinza-2);margin-top:2px;">'+(c.data||'')+' · R$ '+total+'</div></div>'
+        +'<div style="display:flex;gap:6px;">'
+        +'<a href="/cotacao/documento/'+c.id+'" target="_blank" style="border:none;background:var(--azul);color:#fff;border-radius:6px;padding:5px 10px;font-size:11px;text-decoration:none;">Abrir</a>'
+        +(c.token?'<button onclick="navigator.clipboard.writeText(\''+link+'\');this.textContent=\'Copiado\'" style="border:1px solid var(--borda);background:transparent;color:var(--texto);border-radius:6px;padding:5px 10px;font-size:11px;cursor:pointer;">Copiar link</button>':'')
+        +'</div></div></div>';
+    }).join('');
+  }catch(e){ box.innerHTML='<div style="color:var(--erro);font-size:12px;">Erro ao carregar cotações.</div>'; }
+}
+
+function novaCotacaoLead(){
+  if(!_leadAtual) return;
+  const p=new URLSearchParams({lead_id:_leadAtual.id, cliente_nome:_leadAtual.nome||'', cliente_telefone:_leadAtual.telefone||'', cliente_email:_leadAtual.email||''});
+  window.open('/cotacao?'+p.toString(), '_blank');
 }
 
 async function salvarQualificacao(){

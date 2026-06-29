@@ -41,6 +41,10 @@
 </div>
 
 <form method="GET" action="/cotacao" class="cot-filtros">
+  {% if prefill and prefill.lead_id %}<input type="hidden" name="lead_id" value="{{ prefill.lead_id }}">{% endif %}
+  {% if prefill and prefill.nome %}<input type="hidden" name="cliente_nome" value="{{ prefill.nome }}">{% endif %}
+  {% if prefill and prefill.telefone %}<input type="hidden" name="cliente_telefone" value="{{ prefill.telefone }}">{% endif %}
+  {% if prefill and prefill.email %}<input type="hidden" name="cliente_email" value="{{ prefill.email }}">{% endif %}
   <div class="fg">
     <label>Idades ou datas de nascimento</label>
     <input class="idades" type="text" name="idades" value="{{ idades_txt }}" placeholder="Ex: 25, 30 e 15/03/1990" autofocus>
@@ -82,6 +86,7 @@
   {% if resultados %}
   <form method="POST" action="/cotacao/salvar" id="form-cotacao">
     <input type="hidden" name="idades" value="{{ idades_txt }}">
+    {% if prefill and prefill.lead_id %}<input type="hidden" name="lead_id" value="{{ prefill.lead_id }}">{% endif %}
     <table class="cot">
       <thead>
         <tr><th style="width:34px;"></th><th>Operadora</th><th>Plano</th><th>Modalidade</th><th>Acomodação</th><th>Coparticipação</th><th style="text-align:right;">Total mensal</th></tr>
@@ -113,11 +118,11 @@
         <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Título da cotação</label>
           <input type="text" name="titulo" value="Cotação" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
         <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Nome do cliente</label>
-          <input type="text" name="cliente_nome" placeholder="Ex: João da Silva" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
+          <input type="text" name="cliente_nome" value="{{ prefill.nome if prefill else '' }}" placeholder="Ex: João da Silva" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
         <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">E-mail do cliente</label>
-          <input type="text" name="cliente_email" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
+          <input type="text" name="cliente_email" value="{{ prefill.email if prefill else '' }}" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
         <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Telefone do cliente</label>
-          <input type="text" name="cliente_telefone" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
+          <input type="text" name="cliente_telefone" value="{{ prefill.telefone if prefill else '' }}" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
         <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Seu telefone (corretor)</label>
           <input type="text" name="corretor_telefone" placeholder="(19) 99999-9999" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
       </div>
