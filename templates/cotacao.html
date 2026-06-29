@@ -25,6 +25,25 @@
   .tag-best { background:var(--verde-soft); color:var(--verde); }
   .tag-inc { background:rgba(250,204,21,.14); color:var(--amarelo); }
   .vazio { color:var(--cinza-2); font-size:13px; padding:30px; text-align:center; background:var(--panel); border:1px dashed var(--borda); border-radius:12px; }
+
+  .cot-card-form { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin:14px 0 20px; }
+  .cot-sec { margin-bottom:16px; }
+  .cot-sec-tit { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--cinza-2); font-weight:700; margin-bottom:9px; }
+  .cot-row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
+  .fg2 { display:flex; flex-direction:column; gap:4px; }
+  .fg2 label { font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:600; }
+  .fg2 input, .fg2 select { background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 11px; color:var(--texto); font-size:13px; outline:none; }
+  .fg2 input:focus, .fg2 select:focus { border-color:var(--azul); }
+  .fg2 input.idades { min-width:250px; }
+  .ops-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(116px,1fr)); gap:10px; }
+  .op-card { position:relative; cursor:pointer; display:block; }
+  .op-card input { position:absolute; opacity:0; pointer-events:none; }
+  .op-card .face { height:60px; display:flex; align-items:center; justify-content:center; background:#fff; border:2px solid var(--borda); border-radius:10px; padding:8px; transition:.15s; }
+  .op-card .face img { max-height:40px; max-width:92%; object-fit:contain; }
+  .op-card .face .nm { font-size:12px; font-weight:700; color:#333; text-align:center; line-height:1.2; }
+  .op-card input:checked + .face { border-color:var(--azul); box-shadow:0 0 0 3px rgba(59,130,246,.25); }
+  .btn-cotar { background:var(--azul); color:#fff; border:none; padding:12px 30px; border-radius:9px; font-size:14px; font-weight:700; cursor:pointer; }
+  .btn-limpar2 { background:transparent; color:var(--cinza); border:1px solid var(--borda); padding:11px 18px; border-radius:9px; font-size:13px; cursor:pointer; text-decoration:none; }
 </style>
 {% endblock %}
 
@@ -40,45 +59,46 @@
   </div>
 </div>
 
-<form method="GET" action="/cotacao" class="cot-filtros">
+<form method="GET" action="/cotacao" class="cot-card-form">
   {% if prefill and prefill.lead_id %}<input type="hidden" name="lead_id" value="{{ prefill.lead_id }}">{% endif %}
   {% if prefill and prefill.nome %}<input type="hidden" name="cliente_nome" value="{{ prefill.nome }}">{% endif %}
   {% if prefill and prefill.telefone %}<input type="hidden" name="cliente_telefone" value="{{ prefill.telefone }}">{% endif %}
   {% if prefill and prefill.email %}<input type="hidden" name="cliente_email" value="{{ prefill.email }}">{% endif %}
-  <div class="fg">
-    <label>Idades ou datas de nascimento</label>
-    <input class="idades" type="text" name="idades" value="{{ idades_txt }}" placeholder="Ex: 25, 30 e 15/03/1990" autofocus>
+
+  <div class="cot-sec">
+    <div class="cot-sec-tit">1. Quem vai usar o plano</div>
+    <div class="cot-row">
+      <div class="fg2"><label>Idades ou datas de nascimento</label>
+        <input class="idades" type="text" name="idades" value="{{ idades_txt }}" placeholder="Ex: 25, 30 e 15/03/1990" autofocus></div>
+      <div class="fg2"><label>Modalidade</label>
+        <select name="modalidade"><option value="">Todas</option>{% for m in modalidades %}<option value="{{ m }}" {{ 'selected' if filtros.modalidade == m }}>{{ m }}</option>{% endfor %}</select></div>
+      <div class="fg2"><label>Tipo de CNPJ</label>
+        <select name="mei"><option value="">Todos</option>{% for tc in tipos_cnpj %}<option value="{{ tc }}" {{ 'selected' if filtros.mei == tc }}>{{ tc }}</option>{% endfor %}</select></div>
+      <div class="fg2"><label>Acomodação</label>
+        <select name="acomodacao"><option value="">Todas</option>{% for a in acomodacoes %}<option value="{{ a }}" {{ 'selected' if filtros.acomodacao == a }}>{{ a }}</option>{% endfor %}</select></div>
+      <div class="fg2"><label>Coparticipação</label>
+        <select name="coparticipacao"><option value="">Todas</option>{% for c in coparts %}<option value="{{ c }}" {{ 'selected' if filtros.coparticipacao == c }}>{{ c }}</option>{% endfor %}</select></div>
+    </div>
   </div>
-  <div class="fg">
-    <label>Operadora</label>
-    <select name="operadora">
-      <option value="">Todas</option>
-      {% for o in operadoras %}<option value="{{ o }}" {{ 'selected' if filtros.operadora == o }}>{{ o }}</option>{% endfor %}
-    </select>
+
+  {% if operadoras_cards %}
+  <div class="cot-sec">
+    <div class="cot-sec-tit">2. Operadoras <span style="text-transform:none;letter-spacing:0;color:var(--cinza-2);font-weight:400;">(deixe sem marcar para comparar todas)</span></div>
+    <div class="ops-grid">
+      {% for op in operadoras_cards %}
+      <label class="op-card">
+        <input type="checkbox" name="op" value="{{ op.nome }}" {{ 'checked' if op.nome in filtros.ops }}>
+        <span class="face">{% if op.logo %}<img src="{{ op.logo }}" alt="{{ op.nome }}">{% else %}<span class="nm">{{ op.nome }}</span>{% endif %}</span>
+      </label>
+      {% endfor %}
+    </div>
   </div>
-  <div class="fg">
-    <label>Modalidade</label>
-    <select name="modalidade">
-      <option value="">Todas</option>
-      {% for m in modalidades %}<option value="{{ m }}" {{ 'selected' if filtros.modalidade == m }}>{{ m }}</option>{% endfor %}
-    </select>
+  {% endif %}
+
+  <div class="cot-row" style="margin-top:4px;">
+    <button type="submit" class="btn-cotar">Cotar</button>
+    <a class="btn-limpar2" href="/cotacao">Limpar</a>
   </div>
-  <div class="fg">
-    <label>Acomodação</label>
-    <select name="acomodacao">
-      <option value="">Todas</option>
-      {% for a in acomodacoes %}<option value="{{ a }}" {{ 'selected' if filtros.acomodacao == a }}>{{ a }}</option>{% endfor %}
-    </select>
-  </div>
-  <div class="fg">
-    <label>Coparticipação</label>
-    <select name="coparticipacao">
-      <option value="">Todas</option>
-      {% for c in coparts %}<option value="{{ c }}" {{ 'selected' if filtros.coparticipacao == c }}>{{ c }}</option>{% endfor %}
-    </select>
-  </div>
-  <button type="submit" class="btn-f">Cotar</button>
-  <a class="btn-l" href="/cotacao">Limpar</a>
 </form>
 
 {% if idades_txt %}
@@ -101,6 +121,7 @@
             {% if loop.first and not r.incompleta %}<span class="tag tag-best">menor preço</span>{% endif %}
             {% if r.incompleta %}<span class="tag tag-inc">tabela incompleta</span>{% endif %}
             {% if r.abrangencia %}<div style="font-size:11px;color:var(--cinza-2);margin-top:2px;">{{ r.abrangencia }}</div>{% endif %}
+            {% if r.linha or r.tipo_cnpj %}<div style="font-size:10.5px;color:var(--cinza-2);margin-top:2px;">{{ r.linha }}{% if r.linha and r.tipo_cnpj %} · {% endif %}{{ r.tipo_cnpj }}</div>{% endif %}
           </td>
           <td><span class="tag">{{ r.modalidade }}</span></td>
           <td>{{ r.acomodacao }}</td>

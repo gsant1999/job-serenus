@@ -41,6 +41,11 @@
     <div class="fg"><label>Coparticipação</label>
       <select name="coparticipacao">{% for c in coparts %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select>
     </div>
+    <div class="fg"><label>Linha (uso interno do corretor)</label><input type="text" name="linha" placeholder="Ex: Linha Amil, Linha Black"></div>
+    <div class="fg"><label>Tipo de CNPJ (interno)</label>
+      <input list="tipos-cnpj" name="tipo_cnpj" placeholder="MEI / Não MEI / Empresa">
+      <datalist id="tipos-cnpj"><option value="MEI"><option value="Não MEI"><option value="Empresa"></datalist>
+    </div>
     <div class="fg"><label>Abrangência / Região</label><input type="text" name="abrangencia" placeholder="Ex: Campinas"></div>
     <div class="fg"><label>Vigência</label><input type="text" name="vigencia" placeholder="Ex: 07/2026"></div>
   </div>

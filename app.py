@@ -751,7 +751,8 @@ def init_db():
                 id SERIAL PRIMARY KEY,
                 operadora TEXT NOT NULL, plano TEXT NOT NULL,
                 modalidade TEXT DEFAULT 'PME', acomodacao TEXT DEFAULT 'Enfermaria',
-                coparticipacao TEXT DEFAULT 'Sem', abrangencia TEXT DEFAULT '',
+                coparticipacao TEXT DEFAULT 'Sem', linha TEXT DEFAULT '', tipo_cnpj TEXT DEFAULT '',
+                abrangencia TEXT DEFAULT '',
                 vigencia TEXT DEFAULT '', ativo INTEGER DEFAULT 1,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
@@ -1009,7 +1010,8 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             operadora TEXT NOT NULL, plano TEXT NOT NULL,
             modalidade TEXT DEFAULT 'PME', acomodacao TEXT DEFAULT 'Enfermaria',
-            coparticipacao TEXT DEFAULT 'Sem', abrangencia TEXT DEFAULT '',
+            coparticipacao TEXT DEFAULT 'Sem', linha TEXT DEFAULT '', tipo_cnpj TEXT DEFAULT '',
+            abrangencia TEXT DEFAULT '',
             vigencia TEXT DEFAULT '', ativo INTEGER DEFAULT 1,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -1279,6 +1281,8 @@ def init_db():
         ("material_apoio", "tipo", "TEXT"),
         ("cotacao_salva", "aberturas", "INTEGER"),
         ("cotacao_salva", "ultima_abertura", "TEXT"),
+        ("cotacao_tabela", "linha", "TEXT"),
+        ("cotacao_tabela", "tipo_cnpj", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -7305,22 +7309,22 @@ def _parse_idades(texto):
 def cotacao():
     """Tela de cotação (multicálculo): idades + filtros -> comparativo de planos."""
     conn = db()
-    # Opções de filtro a partir das tabelas cadastradas
     try:
         operadoras = [r['operadora'] for r in conn.execute(
             "SELECT DISTINCT operadora FROM cotacao_tabela WHERE ativo=1 ORDER BY operadora").fetchall()]
     except Exception:
         operadoras = []
+    operadoras_cards = [{'nome': op, 'logo': _logo_operadora_url(conn, op)} for op in operadoras]
 
     idades_txt = request.args.get('idades', '').strip()
     f_modalidade = request.args.get('modalidade', '').strip()
     f_acomodacao = request.args.get('acomodacao', '').strip()
     f_copart = request.args.get('coparticipacao', '').strip()
-    f_operadora = request.args.get('operadora', '').strip()
+    f_ops = [x.strip() for x in request.args.getlist('op') if x.strip()]
+    f_mei = request.args.get('mei', '').strip()
 
     resultados = []
     idades = _parse_idades(idades_txt)
-    # Contagem de vidas por faixa
     cont_faixa = {}
     for idade in idades:
         fx = _faixa_da_idade(idade)
@@ -7336,12 +7340,15 @@ def cotacao():
             q += " AND acomodacao=?"; params.append(f_acomodacao)
         if f_copart:
             q += " AND coparticipacao=?"; params.append(f_copart)
-        if f_operadora:
-            q += " AND operadora=?"; params.append(f_operadora)
+        if f_ops:
+            q += " AND operadora IN (" + ",".join(["?"] * len(f_ops)) + ")"; params.extend(f_ops)
+        if f_mei:
+            q += " AND (COALESCE(tipo_cnpj,'')='' OR LOWER(tipo_cnpj)='todos' OR tipo_cnpj=?)"; params.append(f_mei)
         tabelas = conn.execute(q, params).fetchall()
 
         for t in tabelas:
-            precos = conn.execute("SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (t['id'],)).fetchall()
+            td = dict(t)
+            precos = conn.execute("SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (td['id'],)).fetchall()
             pmap = {p['faixa']: float(p['preco'] or 0) for p in precos}
             total = 0.0
             faltam = False
@@ -7353,11 +7360,12 @@ def cotacao():
                 total += preco * qtd
                 detalhe.append({'faixa': fx, 'qtd': qtd, 'preco_unit': preco, 'subtotal': preco * qtd})
             resultados.append({
-                'tabela_id': t['id'],
-                'operadora': t['operadora'], 'plano': t['plano'],
-                'modalidade': t['modalidade'], 'acomodacao': t['acomodacao'],
-                'coparticipacao': t['coparticipacao'], 'abrangencia': t['abrangencia'],
-                'vigencia': t['vigencia'], 'total': round(total, 2),
+                'tabela_id': td['id'],
+                'operadora': td['operadora'], 'plano': td['plano'],
+                'modalidade': td['modalidade'], 'acomodacao': td['acomodacao'],
+                'coparticipacao': td['coparticipacao'], 'abrangencia': td.get('abrangencia'),
+                'linha': td.get('linha') or '', 'tipo_cnpj': td.get('tipo_cnpj') or '',
+                'vigencia': td.get('vigencia'), 'total': round(total, 2),
                 'incompleta': faltam, 'detalhe': sorted(detalhe, key=lambda x: x['faixa']),
             })
         resultados.sort(key=lambda x: x['total'])
@@ -7369,13 +7377,13 @@ def cotacao():
         'telefone': (request.args.get('cliente_telefone') or '').strip(),
         'email': (request.args.get('cliente_email') or '').strip(),
     }
-    return render_template('cotacao.html', operadoras=operadoras, resultados=resultados,
-                           idades_txt=idades_txt, total_vidas=len(idades),
+    return render_template('cotacao.html', operadoras=operadoras, operadoras_cards=operadoras_cards,
+                           resultados=resultados, idades_txt=idades_txt, total_vidas=len(idades),
                            modalidades=COTACAO_MODALIDADES, acomodacoes=COTACAO_ACOMODACOES,
-                           coparts=COTACAO_COPART, eh_admin=(session.get('perfil') == 'admin'),
-                           prefill=prefill,
+                           coparts=COTACAO_COPART, tipos_cnpj=['MEI', 'Não MEI'],
+                           eh_admin=(session.get('perfil') == 'admin'), prefill=prefill,
                            filtros={'modalidade': f_modalidade, 'acomodacao': f_acomodacao,
-                                    'coparticipacao': f_copart, 'operadora': f_operadora})
+                                    'coparticipacao': f_copart, 'ops': f_ops, 'mei': f_mei})
 
 
 @app.route('/cotacao/tabelas')
@@ -7409,10 +7417,11 @@ def cotacao_tabela_nova():
 
     conn = db()
     conn.execute("""INSERT INTO cotacao_tabela
-        (operadora, plano, modalidade, acomodacao, coparticipacao, abrangencia, vigencia, ativo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
+        (operadora, plano, modalidade, acomodacao, coparticipacao, linha, tipo_cnpj, abrangencia, vigencia, ativo)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
         (operadora, plano, (d.get('modalidade') or 'PME').strip(),
          (d.get('acomodacao') or 'Enfermaria').strip(), (d.get('coparticipacao') or 'Sem').strip(),
+         (d.get('linha') or '').strip(), (d.get('tipo_cnpj') or '').strip(),
          (d.get('abrangencia') or '').strip(), (d.get('vigencia') or '').strip()))
     tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
@@ -7462,6 +7471,7 @@ _COLMAP_META = {
     'operadora': 'operadora', 'plano': 'plano', 'produto': 'plano',
     'modalidade': 'modalidade', 'acomodacao': 'acomodacao',
     'coparticipacao': 'coparticipacao', 'copart': 'coparticipacao',
+    'linha': 'linha', 'tipo_cnpj': 'tipo_cnpj', 'tipocnpj': 'tipo_cnpj', 'cnpj': 'tipo_cnpj', 'mei': 'tipo_cnpj',
     'abrangencia': 'abrangencia', 'regiao': 'abrangencia', 'cidade': 'abrangencia',
     'vigencia': 'vigencia', 'competencia': 'vigencia',
 }
@@ -7493,8 +7503,8 @@ def _parse_preco_br(s):
 @admin_required
 def cotacao_modelo_csv():
     """Baixa um CSV modelo (delimitador ';') para preencher tabelas de preço."""
-    cab = ['operadora', 'plano', 'modalidade', 'acomodacao', 'coparticipacao', 'abrangencia', 'vigencia'] + FAIXAS_ETARIAS
-    exemplo = ['Vera Cruz', 'Vera Prata', 'PME', 'Enfermaria', 'Completa', 'Campinas', '07/2026',
+    cab = ['operadora', 'plano', 'modalidade', 'acomodacao', 'coparticipacao', 'linha', 'tipo_cnpj', 'abrangencia', 'vigencia'] + FAIXAS_ETARIAS
+    exemplo = ['Vera Cruz', 'Vera Prata', 'PME', 'Enfermaria', 'Completa', 'Linha Vera Cruz', 'Não MEI', 'Campinas', '07/2026',
                '153,00', '180,00', '202,00', '218,00', '235,00', '271,00', '365,00', '417,00', '612,00', '870,00']
     conteudo = '﻿' + ';'.join(cab) + '\r\n' + ';'.join(exemplo) + '\r\n'
     return Response(conteudo, mimetype='text/csv',
@@ -7560,11 +7570,11 @@ def cotacao_import():
             continue
         try:
             conn.execute("""INSERT INTO cotacao_tabela
-                (operadora, plano, modalidade, acomodacao, coparticipacao, abrangencia, vigencia, ativo)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
+                (operadora, plano, modalidade, acomodacao, coparticipacao, linha, tipo_cnpj, abrangencia, vigencia, ativo)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
                 (operadora, plano, cell('modalidade', 'PME') or 'PME',
                  cell('acomodacao', 'Enfermaria') or 'Enfermaria', cell('coparticipacao', 'Sem') or 'Sem',
-                 cell('abrangencia'), cell('vigencia')))
+                 cell('linha'), cell('tipo_cnpj'), cell('abrangencia'), cell('vigencia')))
             tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                    else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             for fx, i in faixa_idx.items():
