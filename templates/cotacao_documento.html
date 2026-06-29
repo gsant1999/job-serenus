@@ -59,7 +59,8 @@
 <body>
 
 <div class="toolbar">
-  <a class="btn-voltar" href="/cotacao/salvas">Voltar</a>
+  {% if not publico %}<a class="btn-voltar" href="/cotacao/salvas">Voltar</a>{% endif %}
+  {% if not publico and cot.token %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLink()">Copiar link</button>{% endif %}
   <button class="btn-img" onclick="baixarImagem()">Baixar imagem</button>
   <button class="btn-pdf" onclick="window.print()">Salvar PDF</button>
 </div>
@@ -116,6 +117,13 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script>
+function copiarLink() {
+  var url = window.location.origin + '/c/{{ cot.token }}';
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(function(){ alert('Link copiado:\n' + url); },
+      function(){ window.prompt('Copie o link da cotação:', url); });
+  } else { window.prompt('Copie o link da cotação:', url); }
+}
 function baixarImagem() {
   var alvo = document.getElementById('documento');
   html2canvas(alvo, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas) {

@@ -762,6 +762,7 @@ def init_db():
             )""",
             """CREATE TABLE IF NOT EXISTS cotacao_salva (
                 id SERIAL PRIMARY KEY,
+                token TEXT, orientacao TEXT DEFAULT 'horizontal', lead_id INTEGER,
                 corretor_id INTEGER, corretor_nome TEXT, corretor_email TEXT, corretor_telefone TEXT,
                 cliente_nome TEXT, cliente_email TEXT, cliente_telefone TEXT,
                 titulo TEXT, vidas_json TEXT, planos_json TEXT, total REAL DEFAULT 0,
@@ -1014,6 +1015,7 @@ def init_db():
         );
         CREATE TABLE IF NOT EXISTS cotacao_salva (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token TEXT, orientacao TEXT DEFAULT 'horizontal', lead_id INTEGER,
             corretor_id INTEGER, corretor_nome TEXT, corretor_email TEXT, corretor_telefone TEXT,
             cliente_nome TEXT, cliente_email TEXT, cliente_telefone TEXT,
             titulo TEXT, vidas_json TEXT, planos_json TEXT, total REAL DEFAULT 0,
@@ -1260,6 +1262,10 @@ def init_db():
         ("propostas", "end_cidade", "TEXT"),
         ("propostas", "end_estado", "TEXT"),
         ("propostas", "end_cep", "TEXT"),
+        # Cotação: link público imutável, orientação e vínculo com lead do CRM
+        ("cotacao_salva", "token", "TEXT"),
+        ("cotacao_salva", "orientacao", "TEXT"),
+        ("cotacao_salva", "lead_id", "INTEGER"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -7252,10 +7258,33 @@ def _faixa_da_idade(idade):
 
 
 def _parse_idades(texto):
-    """Extrai lista de idades inteiras de um texto livre (ex: '25, 30 e 4')."""
+    """Extrai idades de um texto livre. Aceita idade (ex: 25) OU data de nascimento
+    (ex: 15/03/1990) — converte a data em idade. Ex: '25, 30 e 15/03/1990'."""
     if not texto:
         return []
-    return [int(n) for n in re.findall(r'\d+', str(texto))][:50]
+    hoje = datetime.now(TZ_SP).date()
+    idades = []
+    for parte in re.split(r'[,;\n]| e ', str(texto)):
+        p = parte.strip()
+        if not p:
+            continue
+        m = re.match(r'^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$', p)
+        if m:
+            d, mo, a = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if a < 100:
+                a += 2000 if a <= 30 else 1900
+            try:
+                nasc = date(a, mo, d)
+                idade = hoje.year - nasc.year - ((hoje.month, hoje.day) < (nasc.month, nasc.day))
+                if 0 <= idade <= 120:
+                    idades.append(idade)
+                continue
+            except Exception:
+                pass
+        nums = re.findall(r'\d+', p)
+        if nums:
+            idades.append(int(nums[0]))
+    return idades[:50]
 
 
 @app.route('/cotacao')
@@ -7832,11 +7861,18 @@ def cotacao_salvar():
     urow = conn.execute("SELECT nome, email FROM usuarios WHERE id=?", (session.get('user_id'),)).fetchone()
     corretor_nome = (urow['nome'] if urow else None) or session.get('nome') or ''
     corretor_email = (urow['email'] if urow else '') or ''
+    token = secrets.token_urlsafe(9)
+    orientacao = (d.get('orientacao') or 'horizontal').strip()
+    try:
+        lead_id = int(d.get('lead_id')) if (d.get('lead_id') or '').strip().isdigit() else None
+    except Exception:
+        lead_id = None
     conn.execute("""INSERT INTO cotacao_salva
-        (corretor_id, corretor_nome, corretor_email, corretor_telefone,
+        (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email, corretor_telefone,
          cliente_nome, cliente_email, cliente_telefone, titulo, vidas_json, planos_json, total)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (session.get('user_id'), corretor_nome, corretor_email, (d.get('corretor_telefone') or '').strip(),
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (token, orientacao, lead_id, session.get('user_id'), corretor_nome, corretor_email,
+         (d.get('corretor_telefone') or '').strip(),
          (d.get('cliente_nome') or '').strip(), (d.get('cliente_email') or '').strip(),
          (d.get('cliente_telefone') or '').strip(), (d.get('titulo') or 'Cotação').strip(),
          json.dumps(cont_faixa), json.dumps(planos), round(total_geral, 2)))
@@ -7857,13 +7893,27 @@ def cotacao_documento(cid):
     # Consultor só vê as próprias
     if session.get('perfil') != 'admin' and c['corretor_id'] != session.get('user_id'):
         close_db(conn); abort(403)
+    cot = _build_cot(conn, c)
+    # Garante token (link público imutável) para cotações antigas
+    if not cot.get('token'):
+        novo = secrets.token_urlsafe(9)
+        try:
+            conn.execute("UPDATE cotacao_salva SET token=? WHERE id=?", (novo, cid)); conn.commit()
+            cot['token'] = novo
+        except Exception:
+            pass
+    close_db(conn)
+    return render_template('cotacao_documento.html', cot=cot)
+
+
+def _build_cot(conn, c):
+    """Monta o dicionário da cotação para o documento (planos, faixas, logos)."""
     cot = dict(c)
     try:
         planos = json.loads(cot.get('planos_json') or '[]')
     except Exception:
         planos = []
     cot['planos'] = planos
-    # Faixas usadas (mesma lista para todos os planos) e mapa faixa->subtotal por plano
     faixas_usadas = []
     if planos:
         faixas_usadas = [{'faixa': l['faixa'], 'label': l.get('label') or _faixa_label(l['faixa']),
@@ -7872,8 +7922,20 @@ def cotacao_documento(cid):
         p['precos'] = {l['faixa']: l['subtotal'] for l in p['linhas']}
         p['logo'] = _logo_operadora_url(conn, p.get('operadora'))
     cot['faixas_usadas'] = faixas_usadas
+    cot['orientacao'] = cot.get('orientacao') or 'horizontal'
+    return cot
+
+
+@app.route('/c/<token>')
+def cotacao_publica(token):
+    """Página pública e imutável da cotação (para enviar link ao cliente)."""
+    conn = db()
+    c = conn.execute("SELECT * FROM cotacao_salva WHERE token=?", (token,)).fetchone()
+    if not c:
+        close_db(conn); abort(404)
+    cot = _build_cot(conn, c)
     close_db(conn)
-    return render_template('cotacao_documento.html', cot=cot)
+    return render_template('cotacao_documento.html', cot=cot, publico=True)
 
 
 @app.route('/cotacao/salvas')
