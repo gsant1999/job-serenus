@@ -1284,6 +1284,7 @@ def init_db():
         ("cotacao_salva", "ultima_abertura", "TEXT"),
         ("cotacao_tabela", "linha", "TEXT"),
         ("cotacao_tabela", "tipo_cnpj", "TEXT"),
+        ("cotacao_salva", "tabela_ids_json", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -8058,15 +8059,37 @@ def cotacao_salvar():
             lead_row = conn.execute("SELECT id FROM crm_leads WHERE LOWER(email)=LOWER(?)", (email_cli,)).fetchone()
         if lead_row:
             lead_id = lead_row['id'] if hasattr(lead_row, 'keys') else lead_row[0]
+    tabela_ids_json = json.dumps(tabela_ids)
+    editar_id_raw = (d.get('editar_id') or '').strip()
+    editar_id = int(editar_id_raw) if editar_id_raw.isdigit() else None
+
+    if editar_id:
+        # Edição: mantém token/link, atualiza os dados
+        old = conn.execute("SELECT id, token, corretor_id FROM cotacao_salva WHERE id=?", (editar_id,)).fetchone()
+        if old and (session.get('perfil') == 'admin' or old['corretor_id'] == session.get('user_id')):
+            conn.execute("""UPDATE cotacao_salva SET
+                orientacao=?, lead_id=?, corretor_nome=?, corretor_email=?, corretor_telefone=?,
+                cliente_nome=?, cliente_email=?, cliente_telefone=?, titulo=?,
+                vidas_json=?, planos_json=?, total=?, tabela_ids_json=?
+                WHERE id=?""",
+                (orientacao, lead_id, corretor_nome, corretor_email,
+                 (d.get('corretor_telefone') or '').strip(),
+                 (d.get('cliente_nome') or '').strip(), (d.get('cliente_email') or '').strip(),
+                 (d.get('cliente_telefone') or '').strip(), (d.get('titulo') or 'Cotação').strip(),
+                 json.dumps(cont_faixa), json.dumps(planos), round(total_geral, 2),
+                 tabela_ids_json, editar_id))
+            conn.commit(); close_db(conn)
+            return redirect('/cotacao/documento/' + str(editar_id))
+
     conn.execute("""INSERT INTO cotacao_salva
         (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email, corretor_telefone,
-         cliente_nome, cliente_email, cliente_telefone, titulo, vidas_json, planos_json, total)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+         cliente_nome, cliente_email, cliente_telefone, titulo, vidas_json, planos_json, total, tabela_ids_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (token, orientacao, lead_id, session.get('user_id'), corretor_nome, corretor_email,
          (d.get('corretor_telefone') or '').strip(),
          (d.get('cliente_nome') or '').strip(), (d.get('cliente_email') or '').strip(),
          (d.get('cliente_telefone') or '').strip(), (d.get('titulo') or 'Cotação').strip(),
-         json.dumps(cont_faixa), json.dumps(planos), round(total_geral, 2)))
+         json.dumps(cont_faixa), json.dumps(planos), round(total_geral, 2), tabela_ids_json))
     cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     conn.commit(); close_db(conn)
@@ -8095,6 +8118,106 @@ def cotacao_documento(cid):
             pass
     close_db(conn)
     return render_template('cotacao_documento.html', cot=cot)
+
+
+@app.route('/cotacao/<int:cid>/reabrir')
+@login_required
+def cotacao_reabrir(cid):
+    """Reabre a cotação no construtor pré-preenchida (mantém o mesmo link ao salvar)."""
+    conn = db()
+    c = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn); abort(404)
+    if session.get('perfil') != 'admin' and c['corretor_id'] != session.get('user_id'):
+        close_db(conn); abort(403)
+
+    # Reconstrói idades a partir de vidas_json (faixa→qtd) usando idades representativas
+    _REP = {'00-18': 5, '19-23': 20, '24-28': 25, '29-33': 30, '34-38': 35,
+            '39-43': 40, '44-48': 45, '49-53': 50, '54-58': 55, '59+': 60}
+    try:
+        vidas = json.loads(c['vidas_json'] or '{}')
+    except Exception:
+        vidas = {}
+    idades_list = []
+    for fx, qtd in vidas.items():
+        rep = _REP.get(fx)
+        if rep and qtd:
+            idades_list += [str(rep)] * int(qtd)
+    idades_txt = ', '.join(idades_list)
+
+    # Tabelas previamente selecionadas
+    try:
+        tabela_ids = json.loads(c['tabela_ids_json'] or '[]')
+    except Exception:
+        tabela_ids = []
+    # Fallback: tenta casar por operadora+plano+modalidade+acomodacao+copart
+    if not tabela_ids:
+        try:
+            planos = json.loads(c['planos_json'] or '[]')
+        except Exception:
+            planos = []
+        for p in planos:
+            row = conn.execute(
+                "SELECT id FROM cotacao_tabela WHERE operadora=? AND plano=? AND modalidade=? AND acomodacao=? AND coparticipacao=?",
+                (p.get('operadora'), p.get('plano'), p.get('modalidade'), p.get('acomodacao'), p.get('coparticipacao'))
+            ).fetchone()
+            if row:
+                tabela_ids.append(row['id'])
+
+    # Operadoras para os cards
+    operadoras = [r['operadora'] for r in conn.execute(
+        "SELECT DISTINCT operadora FROM cotacao_tabela WHERE ativo=1 ORDER BY operadora").fetchall()]
+    operadoras_cards = [{'nome': op, 'logo': _logo_operadora_url(conn, op)} for op in operadoras]
+
+    # Monta resultados com os planos já selecionados (baseado nas tabelas pré-selecionadas)
+    cont_faixa = {}
+    for s in idades_list:
+        fx = _faixa_da_idade(int(s))
+        if fx:
+            cont_faixa[fx] = cont_faixa.get(fx, 0) + 1
+
+    resultados = []
+    if cont_faixa:
+        tabelas = conn.execute("SELECT * FROM cotacao_tabela WHERE ativo=1").fetchall()
+        for t in tabelas:
+            td = dict(t)
+            precos = conn.execute("SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (td['id'],)).fetchall()
+            pmap = {p['faixa']: float(p['preco'] or 0) for p in precos}
+            total = 0.0; faltam = False; detalhe = []
+            for fx, qtd in cont_faixa.items():
+                preco = pmap.get(fx, 0)
+                if preco <= 0: faltam = True
+                total += preco * qtd
+                detalhe.append({'faixa': fx, 'qtd': qtd, 'preco_unit': preco, 'subtotal': preco * qtd})
+            resultados.append({
+                'tabela_id': td['id'], 'operadora': td['operadora'], 'plano': td['plano'],
+                'modalidade': td['modalidade'], 'acomodacao': td['acomodacao'],
+                'coparticipacao': td['coparticipacao'], 'abrangencia': td.get('abrangencia'),
+                'linha': td.get('linha') or '', 'tipo_cnpj': td.get('tipo_cnpj') or '',
+                'vigencia': td.get('vigencia'), 'total': round(total, 2),
+                'incompleta': faltam, 'detalhe': sorted(detalhe, key=lambda x: x['faixa']),
+            })
+        resultados.sort(key=lambda x: x['total'])
+
+    close_db(conn)
+    cd = dict(c)
+    prefill = {
+        'lead_id': str(cd.get('lead_id') or ''),
+        'nome': cd.get('cliente_nome') or '',
+        'telefone': cd.get('cliente_telefone') or '',
+        'email': cd.get('cliente_email') or '',
+    }
+    return render_template('cotacao.html',
+        operadoras=operadoras, operadoras_cards=operadoras_cards,
+        resultados=resultados, idades_txt=idades_txt, total_vidas=len(idades_list),
+        modalidades=COTACAO_MODALIDADES, acomodacoes=COTACAO_ACOMODACOES,
+        coparts=COTACAO_COPART, faixas=FAIXAS_ETARIAS,
+        tipos_cnpj=['MEI', 'ME', 'LTDA', 'Demais portes', 'Todos os portes'],
+        eh_admin=(session.get('perfil') == 'admin'), prefill=prefill,
+        filtros={'modalidade': '', 'acomodacao': '', 'coparticipacao': '', 'ops': [], 'mei': ''},
+        editar_id=cid, presel_tabelas=tabela_ids,
+        editar_titulo=cd.get('titulo') or '', editar_orientacao=cd.get('orientacao') or 'horizontal',
+        editar_corretor_telefone=cd.get('corretor_telefone') or '')
 
 
 def _build_cot(conn, c):

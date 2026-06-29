@@ -48,6 +48,12 @@
 {% endblock %}
 
 {% block content %}
+{% if editar_id %}
+<div style="background:rgba(251,146,60,.12);border:1px solid rgba(251,146,60,.4);border-radius:10px;padding:11px 16px;margin-bottom:14px;font-size:13px;color:var(--texto);">
+  Editando cotação existente — ao salvar, o mesmo link do cliente é mantido.
+  <a href="/cotacao/documento/{{ editar_id }}" style="color:var(--azul);text-decoration:none;margin-left:10px;">Cancelar</a>
+</div>
+{% endif %}
 <div class="topbar">
   <div>
     <h1 style="margin:0;">Cotação</h1>
@@ -118,14 +124,16 @@
   <form method="POST" action="/cotacao/salvar" id="form-cotacao">
     <input type="hidden" name="idades" value="{{ idades_txt }}">
     {% if prefill and prefill.lead_id %}<input type="hidden" name="lead_id" value="{{ prefill.lead_id }}">{% endif %}
+    {% if editar_id %}<input type="hidden" name="editar_id" value="{{ editar_id }}">{% endif %}
     <table class="cot">
       <thead>
         <tr><th style="width:34px;"></th><th>Operadora</th><th>Plano</th><th>Modalidade</th><th>Acomodação</th><th>Coparticipação</th><th style="text-align:right;">Total mensal</th></tr>
       </thead>
       <tbody>
         {% for r in resultados %}
-        <tr class="{{ 'melhor' if loop.first and not r.incompleta }}">
-          <td><input type="checkbox" name="tabela_id" value="{{ r.tabela_id }}" {{ 'checked' if loop.first }} style="width:16px;height:16px;accent-color:var(--azul);"></td>
+        {% set presel = presel_tabelas and r.tabela_id in presel_tabelas %}
+        <tr class="{{ 'melhor' if loop.first and not r.incompleta and not editar_id }}">
+          <td><input type="checkbox" name="tabela_id" value="{{ r.tabela_id }}" {{ 'checked' if presel or (loop.first and not editar_id) }} style="width:16px;height:16px;accent-color:var(--azul);"></td>
           <td>{{ r.operadora }}</td>
           <td>
             {{ r.plano }}
@@ -148,7 +156,7 @@
       <h3 style="font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin:0 0 14px;">Gerar cotação para o cliente</h3>
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:16px;">
         <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Título da cotação</label>
-          <input type="text" name="titulo" value="Cotação" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
+          <input type="text" name="titulo" value="{{ editar_titulo or 'Cotação' }}" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
         <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Nome do cliente</label>
           <input type="text" name="cliente_nome" value="{{ prefill.nome if prefill else '' }}" placeholder="Ex: João da Silva" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
         <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">E-mail do cliente</label>
@@ -156,14 +164,14 @@
         <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Telefone do cliente</label>
           <input type="text" name="cliente_telefone" value="{{ prefill.telefone if prefill else '' }}" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
         <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Seu telefone (corretor)</label>
-          <input type="text" name="corretor_telefone" placeholder="(19) 99999-9999" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
+          <input type="text" name="corretor_telefone" value="{{ editar_corretor_telefone or '' }}" placeholder="(19) 99999-9999" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
         <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Formato do documento</label>
           <select name="orientacao" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;">
-            <option value="horizontal">Horizontal (tabela comparativa)</option>
-            <option value="vertical">Vertical (um plano embaixo do outro)</option>
+            <option value="horizontal" {{ 'selected' if editar_orientacao == 'horizontal' or not editar_orientacao }}>Horizontal (tabela comparativa)</option>
+            <option value="vertical" {{ 'selected' if editar_orientacao == 'vertical' }}>Vertical (um plano embaixo do outro)</option>
           </select></div>
       </div>
-      <button type="submit" class="btn-f" style="background:var(--azul);color:#fff;border:none;padding:11px 22px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">Gerar cotação do cliente</button>
+      <button type="submit" class="btn-f" style="background:var(--azul);color:#fff;border:none;padding:11px 22px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">{{ 'Salvar alterações' if editar_id else 'Gerar cotação do cliente' }}</button>
     </div>
   </form>
   {% else %}

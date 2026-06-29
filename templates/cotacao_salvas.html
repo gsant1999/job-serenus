@@ -68,6 +68,7 @@
       <td>
         <div class="acoes">
           <a class="b b-abrir" href="/cotacao/documento/{{ c.id }}">Abrir</a>
+          <a class="b" href="/cotacao/{{ c.id }}/reabrir" style="border-color:rgba(250,204,21,.5);color:#b45309;">Editar</a>
           {% if c.token %}<button class="b" onclick="copiarLink('{{ c.token }}')">Copiar link</button>{% endif %}
           {% if c.token and c.cliente_telefone %}<button class="b b-wpp" onclick="enviarWpp('{{ c.token }}', '{{ c.cliente_telefone }}', '{{ (c.cliente_nome or '')|replace("'", "") }}')">WhatsApp</button>{% endif %}
           <button class="b" onclick="enviarEmail({{ c.id }}, '{{ (c.cliente_email or '')|replace("'", "") }}')">E-mail</button>

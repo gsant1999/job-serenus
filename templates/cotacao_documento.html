@@ -88,7 +88,8 @@
 <body>
 
 <div class="toolbar">
-  {% if not publico %}<a class="btn-voltar" href="/cotacao/salvas">Voltar</a>{% endif %}
+  {% if not publico %}<a class="btn-voltar" href="/cotacao/salvas">Voltar</a>
+  <a class="btn-voltar" href="/cotacao/{{ cot.id }}/reabrir" style="border-color:rgba(250,204,21,.6);color:#fde047;">Editar cotacao</a>{% endif %}
   <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="document.getElementById('documento').classList.toggle('destacar')">Destacar planos</button>
   {% if cot.legenda %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLegenda()">Copiar legenda</button>{% endif %}
   {% if not publico and cot.token %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLink()">Copiar link</button>{% endif %}
