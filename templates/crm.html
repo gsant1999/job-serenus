@@ -155,6 +155,7 @@
   <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
     <button class="btn-outline btn-sm" onclick="abrirNovoLead()">+ Novo Lead</button>
     {% if eh_admin %}
+    <button class="btn-outline btn-sm" id="btn-buscar-leads" onclick="buscarLeadsAgora(this)">Buscar leads agora</button>
     <button class="btn-outline btn-sm" onclick="location.href='/crm/painel'">Painel</button>
     <button class="btn-outline btn-sm" onclick="location.href='/crm/importar'">Importar</button>
     <button class="btn-outline btn-sm" onclick="location.href='/crm/etapas'">Etapas</button>
@@ -516,6 +517,21 @@ let _tipoAtiv  = 'nota';
 let _usuarios  = [];
 let _etapas    = {{ etapas|tojson }};
 const IS_ADMIN = {{ 'true' if eh_admin else 'false' }};
+
+function buscarLeadsAgora(btn){
+  const txt = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Buscando...';
+  fetch('/crm/importar-agora', {method:'POST'})
+    .then(r => r.json())
+    .then(d => {
+      btn.disabled = false; btn.textContent = txt;
+      if (d.ok) {
+        if (d.importados > 0) { toast(d.importados + ' novo(s) lead(s) importado(s)!', 'ok'); setTimeout(()=>location.reload(), 900); }
+        else { toast('Nenhum lead novo nas planilhas (já estavam todos no sistema).', 'ok'); }
+      } else { toast('Erro ao buscar leads.', 'err'); }
+    })
+    .catch(() => { btn.disabled = false; btn.textContent = txt; toast('Erro de conexão.', 'err'); });
+}
 
 const WPP_TEMPLATES = [
   'Olá {nome}, tudo bem? Sou da Serenus Corretora. Vi seu interesse em plano de saúde e gostaria de te ajudar!',

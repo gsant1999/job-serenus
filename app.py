@@ -1,5 +1,5 @@
 # HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
-import os, sqlite3, json, hashlib, secrets, re
+import os, sqlite3, json, hashlib, secrets, re, threading, time
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -93,6 +93,16 @@ def _ensure_db_initialized():
             _db_initialized = True  # Evita loop infinito
         # Inicia o scheduler (backup + import de leads)
         _iniciar_scheduler_backup()
+
+
+@app.before_request
+def _auto_pull_leads_no_request():
+    """Safety net: importa leads das planilhas em background (throttle 10 min),
+    independente do APScheduler — assim os leads chegam mesmo após restarts."""
+    try:
+        _auto_pull_leads_throttled()
+    except Exception:
+        pass
 
 
 _backup_scheduler_iniciado = False
@@ -785,6 +795,16 @@ def init_db():
                 corpo TEXT NOT NULL,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS notificacoes (
+                id SERIAL PRIMARY KEY,
+                usuario_id INTEGER,
+                tipo TEXT,
+                titulo TEXT NOT NULL,
+                descricao TEXT,
+                link TEXT,
+                lida INTEGER DEFAULT 0,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
         ]
         for sql in tables_sql:
             try:
@@ -1048,6 +1068,16 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT NOT NULL,
             corpo TEXT NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS notificacoes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER,
+            tipo TEXT,
+            titulo TEXT NOT NULL,
+            descricao TEXT,
+            link TEXT,
+            lida INTEGER DEFAULT 0,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS solicitacoes_edicao (
@@ -3910,6 +3940,14 @@ def salvar_proposta():
                                           parc['valor'],parc['valor_corretora'],parc['perc_cliente'],
                                           parc['data_prevista'],parc['status'],parc['competencia'],parc['mensalidade_ref']))
         conn.commit(); close_db(conn)
+        try:
+            quem = session.get('nome') or c.get('consultor') or 'Consultor'
+            cliente_prop = d.get('razao_social') or d.get('resp_contrato') or 'novo cliente'
+            _notificar_admins('proposta', 'Nova proposta',
+                              f"{quem} cadastrou proposta de {cliente_prop} ({operadora})",
+                              '/proposta/' + str(proposta_id))
+        except Exception:
+            pass
         return jsonify({"ok": True})
     except Exception as e:
         import traceback
@@ -5002,7 +5040,24 @@ def parcela_acao(pid):
         conn.execute("UPDATE parcelas SET status='Pendente de receber',confirmado_gestor=0,aceite_corretor=0 WHERE id=?", (pid,))
     else:
         close_db(conn); return jsonify({"ok": False, "msg": "Ação inválida"}), 400
-    conn.commit(); close_db(conn)
+    conn.commit()
+    # Notifica o consultor quando a comissão é liberada ou paga
+    try:
+        if acao in ('liberar', 'pagar'):
+            row = conn.execute("""SELECT pr.usuario_id, pr.razao_social, pa.numero, pa.valor_corretora
+                                  FROM parcelas pa JOIN propostas pr ON pr.id = pa.proposta_id
+                                  WHERE pa.id=?""", (pid,)).fetchone()
+            if row:
+                rd = dict(row)
+                if rd.get('usuario_id'):
+                    verbo = 'liberada' if acao == 'liberar' else 'paga'
+                    _notificar(rd['usuario_id'], 'comissao', f'Comissão {verbo}',
+                               f"Parcela {rd.get('numero')} de {rd.get('razao_social') or 'proposta'} "
+                               f"({_moeda(rd.get('valor_corretora'))})",
+                               '/fluxo-caixa')
+    except Exception:
+        pass
+    close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/parcela/<int:pid>/antecipar', methods=['POST'])
@@ -8268,6 +8323,20 @@ def cotacao_publica(token):
         close_db(conn); abort(404)
     cd = dict(c)
     # Rastreia abertura: conta + registra no pipeline do lead no CRM
+    # Guarda: notifica o corretor no máximo 1x a cada 5 min por cotação (evita spam de refresh)
+    notificar_abertura = False
+    try:
+        ult = cd.get('ultima_abertura')
+        ult_dt = _parse_dt_seguro(ult) if ult else None
+        if not ult_dt:
+            notificar_abertura = True
+        else:
+            if ult_dt.tzinfo is None:
+                ult_dt = TZ_SP.localize(ult_dt)
+            if (datetime.now(TZ_SP) - ult_dt).total_seconds() > 300:
+                notificar_abertura = True
+    except Exception:
+        notificar_abertura = True
     try:
         conn.execute("UPDATE cotacao_salva SET aberturas=COALESCE(aberturas,0)+1, ultima_abertura=? WHERE id=?",
                      (datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S'), cd['id']))
@@ -8280,6 +8349,14 @@ def cotacao_publica(token):
         pass
     cot = _build_cot(conn, c)
     close_db(conn)
+    if notificar_abertura:
+        try:
+            cliente = cd.get('cliente_nome') or 'O cliente'
+            _notificar(cd.get('corretor_id'), 'cotacao', 'Cotação visualizada',
+                       f"{cliente} abriu a cotação \"{cd.get('titulo') or 'Cotação'}\"",
+                       '/cotacao/documento/' + str(cd['id']))
+        except Exception:
+            pass
     return render_template('cotacao_documento.html', cot=cot, publico=True)
 
 
@@ -8430,6 +8507,106 @@ def cotacao_legendas_api():
     modelos = [dict(r) for r in conn.execute("SELECT id, nome, corpo FROM cotacao_legenda_modelo ORDER BY id").fetchall()]
     close_db(conn)
     return jsonify(modelos)
+
+
+# ── NOTIFICAÇÕES (sininho) ──────────────────────────────────────────────────
+
+def _notificar(usuario_id, tipo, titulo, descricao='', link=''):
+    """Cria uma notificação. usuario_id=None → broadcast para todos os admins.
+    Nunca propaga erro (não pode derrubar o fluxo que a chamou)."""
+    try:
+        conn = db()
+        conn.execute(
+            "INSERT INTO notificacoes (usuario_id, tipo, titulo, descricao, link) VALUES (?, ?, ?, ?, ?)",
+            (usuario_id, tipo, titulo, descricao, link))
+        conn.commit()
+        close_db(conn)
+    except Exception as e:
+        try: app.logger.warning(f"[NOTIF] falha ao criar: {e}")
+        except Exception: pass
+
+
+def _notificar_admins(tipo, titulo, descricao='', link=''):
+    """Notifica todos os admins (broadcast: usuario_id NULL)."""
+    _notificar(None, tipo, titulo, descricao, link)
+
+
+@app.route('/api/notificacoes')
+@login_required
+def api_notificacoes():
+    """Lista as notificações do usuário logado (próprias + broadcast p/ admin)."""
+    uid = session.get('user_id')
+    eh_admin = session.get('perfil') == 'admin'
+    conn = db()
+    if eh_admin:
+        rows = conn.execute(
+            "SELECT * FROM notificacoes WHERE usuario_id=? OR usuario_id IS NULL ORDER BY id DESC LIMIT 30",
+            (uid,)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM notificacoes WHERE usuario_id=? ORDER BY id DESC LIMIT 30",
+            (uid,)).fetchall()
+    close_db(conn)
+    itens = []
+    nao_lidas = 0
+    for r in rows:
+        d = dict(r)
+        if not d.get('lida'):
+            nao_lidas += 1
+        itens.append({
+            'id': d['id'], 'tipo': d.get('tipo') or '', 'titulo': d.get('titulo') or '',
+            'descricao': d.get('descricao') or '', 'link': d.get('link') or '',
+            'lida': bool(d.get('lida')), 'quando': _tempo_relativo(d.get('criado_em')),
+        })
+    return jsonify({'nao_lidas': nao_lidas, 'itens': itens})
+
+
+@app.route('/api/notificacoes/marcar-lidas', methods=['POST'])
+@login_required
+def api_notificacoes_marcar_lidas():
+    """Marca como lidas as notificações do usuário (todas ou uma específica)."""
+    uid = session.get('user_id')
+    eh_admin = session.get('perfil') == 'admin'
+    nid = (request.json or {}).get('id') if request.is_json else None
+    conn = db()
+    if nid:
+        conn.execute("UPDATE notificacoes SET lida=1 WHERE id=? AND (usuario_id=? OR usuario_id IS NULL)",
+                     (nid, uid))
+    elif eh_admin:
+        conn.execute("UPDATE notificacoes SET lida=1 WHERE usuario_id=? OR usuario_id IS NULL", (uid,))
+    else:
+        conn.execute("UPDATE notificacoes SET lida=1 WHERE usuario_id=?", (uid,))
+    conn.commit()
+    close_db(conn)
+    return jsonify({'ok': True})
+
+
+def _tempo_relativo(quando):
+    """'há 5 min', 'há 2 h', 'há 3 d' a partir de um timestamp (str ou datetime)."""
+    try:
+        dt = _parse_dt_seguro(quando) if quando else None
+        if not dt:
+            return ''
+        if dt.tzinfo is None:
+            dt = TZ_SP.localize(dt)
+        delta = datetime.now(TZ_SP) - dt
+        seg = int(delta.total_seconds())
+        if seg < 60: return 'agora'
+        if seg < 3600: return f'há {seg // 60} min'
+        if seg < 86400: return f'há {seg // 3600} h'
+        return f'há {seg // 86400} d'
+    except Exception:
+        return ''
+
+
+@app.route('/crm/importar-agora', methods=['POST'])
+@login_required
+@admin_required
+def crm_importar_agora():
+    """Dispara a importação de leads das planilhas imediatamente (botão no CRM).
+    Substitui a necessidade de abrir o Apps Script do Google manualmente."""
+    importados, duplicados = _importar_leads_automatico()
+    return jsonify({'ok': True, 'importados': importados, 'duplicados': duplicados})
 
 
 @app.route('/cotacao/salvas')
@@ -9831,35 +10008,123 @@ _SCHEDULER_INICIADO = False
 def _importar_leads_automatico():
     """
     Importa leads novos das planilhas automaticamente (sem filtro de data).
-    Roda a cada 30 minutos via scheduler. Só insere o que ainda não existe
-    (dedup por telefone/email já está no _processar_lead).
+    Usa a MESMA lógica do webhook /webhook/sheets: dedup por telefone_norm/email,
+    grava telefone_norm + criado_em + etapa 'lead_novo' + consultor_externo e
+    registra atividade. Commit por lead (um lead com erro não derruba os outros).
+    Retorna (importados, duplicados). Seguro para rodar concorrente.
     """
+    importados = 0
+    duplicados = 0
+    ignorados = 0
+    MAX_POR_RODADA = 50  # teto por execução: se houver backlog, drena aos poucos
     try:
         conn = db()
         leads_raw = _listar_leads_do_sheets()
-        importados = 0
         for row in leads_raw:
+            if importados >= MAX_POR_RODADA:
+                break
             try:
                 sucesso, msg, dados = _processar_lead(row, conn)
-                if sucesso:
-                    conn.execute(
-                        """INSERT INTO crm_leads 
-                           (nome, telefone, email, empresa, origem, etapa, responsavel_id, valor_estimado, observacoes)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (dados['nome'], dados['telefone'], dados['email'], dados['empresa'],
-                         dados['origem'], dados['etapa'], dados['responsavel_id'],
-                         dados['valor_estimado'], dados['observacoes'])
-                    )
-                    importados += 1
+                if not sucesso:
+                    duplicados += 1
+                    continue
+                telefone = _formatar_telefone(dados['telefone'])
+                telefone_norm = _normalizar_telefone(dados['telefone'])
+                email = (dados.get('email') or '').strip()
+                # ANTI-FLOOD: sem telefone E sem email não há como deduplicar →
+                # nunca importa automaticamente (senão reinseriria a cada rodada).
+                if not telefone_norm and not email:
+                    ignorados += 1
+                    continue
+                # RECÊNCIA: pula apenas leads DATADOS e claramente antigos (>30 dias),
+                # para não re-despejar o histórico já trabalhado. Leads sem data
+                # (ex.: planilha Página1) passam — o dedup abaixo evita duplicar.
+                data_lead_str = dados.get('data_lead')
+                dt_lead = _parse_dt_seguro(data_lead_str) if data_lead_str else None
+                if dt_lead is not None:
+                    if dt_lead.tzinfo is None:
+                        dt_lead = TZ_SP.localize(dt_lead)
+                    if (datetime.now(TZ_SP) - dt_lead).days > 30:
+                        ignorados += 1
+                        continue
+                # Dedup por telefone_norm (alinhado ao webhook) + email
+                existe = None
+                if telefone_norm:
+                    existe = conn.execute(
+                        "SELECT id FROM crm_leads WHERE telefone_norm = ?", (telefone_norm,)
+                    ).fetchone()
+                if not existe and email:
+                    existe = conn.execute(
+                        "SELECT id FROM crm_leads WHERE LOWER(email) = LOWER(?)", (email,)
+                    ).fetchone()
+                if existe:
+                    duplicados += 1
+                    continue
+                criado_em = dados.get('data_lead') or datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
+                consultor = dados.get('consultor_nome') or 'Guilherme'
+                resp_id = dados.get('responsavel_id')
+                consultor_externo = consultor if not resp_id else None
+                conn.execute("""
+                    INSERT INTO crm_leads
+                        (nome, telefone, telefone_norm, email, empresa, origem, etapa,
+                         responsavel_id, observacoes, criado_em, consultor_externo)
+                    VALUES (?, ?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?, ?)
+                """, (dados['nome'], telefone, telefone_norm, email, dados.get('empresa') or '',
+                      dados.get('origem') or 'Planilha', resp_id, dados.get('observacoes') or '',
+                      criado_em, consultor_externo))
+                lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+                conn.execute("""
+                    INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
+                    VALUES (?, ?, 'criacao', ?)
+                """, (lead_id, consultor, f"Lead importado automaticamente via {dados.get('origem') or 'planilha'}"))
+                conn.commit()
+                importados += 1
             except Exception:
                 try: conn.rollback()
                 except Exception: pass
-        conn.commit()
         close_db(conn)
         if importados:
-            app.logger.info(f"[LEAD_AUTO] ✅ {importados} leads novos importados das planilhas")
+            app.logger.info(f"[LEAD_AUTO] ✅ {importados} leads novos importados (dup={duplicados}, ign={ignorados})")
+            # Uma única notificação-resumo (nunca uma por lead, p/ não floodar o sino)
+            try:
+                _notificar_admins('lead', f'{importados} novo(s) lead(s)',
+                                  'Importados das planilhas automaticamente', '/crm')
+            except Exception:
+                pass
     except Exception as e:
         app.logger.error(f"[LEAD_AUTO] ❌ {e}")
+    return importados, duplicados
+
+
+# ── Auto-pull de leads disparado por requisição (independe do APScheduler) ──
+# Garante que os leads cheguem "a todo momento" mesmo que o agendador em
+# background morra após restart/deploy no Railway. Throttle: no máximo 1x a
+# cada 10 min por processo. Roda em thread daemon: nunca bloqueia/derruba a página.
+_ULTIMO_AUTO_PULL = 0.0
+_AUTO_PULL_LOCK = threading.Lock()
+_AUTO_PULL_INTERVALO = 600  # segundos
+
+def _auto_pull_leads_throttled():
+    global _ULTIMO_AUTO_PULL
+    try:
+        agora = time.time()
+        if agora - _ULTIMO_AUTO_PULL < _AUTO_PULL_INTERVALO:
+            return
+        if not _AUTO_PULL_LOCK.acquire(blocking=False):
+            return
+        _ULTIMO_AUTO_PULL = agora
+        def _run():
+            try:
+                _importar_leads_automatico()
+            except Exception:
+                pass
+            finally:
+                try: _AUTO_PULL_LOCK.release()
+                except Exception: pass
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception:
+        pass
 
 
 def _iniciar_scheduler_backup():
@@ -9909,11 +10174,13 @@ def _iniciar_scheduler_backup():
         # Agendar para 22:00 (SP) todos os dias
         sched = BackgroundScheduler(daemon=True, timezone=TZ_SP)
         sched.add_job(fazer_backup_agendado, 'cron', hour=22, minute=0, max_instances=1)
-        # Importação automática de leads das planilhas a cada 30 minutos
-        sched.add_job(_importar_leads_automatico, 'interval', minutes=30, max_instances=1)
+        # Importação automática de leads das planilhas: roda LOGO ao subir e depois
+        # a cada 15 minutos (antes só rodava 30 min após o boot).
+        sched.add_job(_importar_leads_automatico, 'interval', minutes=15, max_instances=1,
+                      next_run_time=datetime.now(TZ_SP) + timedelta(seconds=20))
         sched.start()
         _SCHEDULER_INICIADO = True
-        app.logger.info("[SCHEDULER] ✅ Backup (22:00 SP) + Importação de leads (a cada 30 min) agendados")
+        app.logger.info("[SCHEDULER] ✅ Backup (22:00 SP) + Importação de leads (boot + a cada 15 min) agendados")
     except Exception as e:
         app.logger.warning(f"[SCHEDULER] ❌ Falha ao iniciar: {e}")
 
@@ -10139,13 +10406,17 @@ except Exception:
     pass
 
 def _ler_google_sheets(sheet_id, aba):
-    """Lê Google Sheets público como CSV. Retorna lista de dicts."""
+    """Lê Google Sheets público como CSV. Retorna lista de dicts.
+    IMPORTANTE: o nome da aba precisa ser URL-encoded — nomes com espaço
+    ('LEADS GERAIS') ou acento ('Página1') quebram a urlopen sem o quote."""
     import csv
     from io import StringIO
+    import urllib.request, urllib.parse
     try:
-        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={aba}"
-        import urllib.request
-        response = urllib.request.urlopen(url, timeout=10)
+        aba_q = urllib.parse.quote(aba)
+        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={aba_q}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (JOB Serenus)'})
+        response = urllib.request.urlopen(req, timeout=15)
         csv_text = response.read().decode('utf-8-sig')
         reader = csv.DictReader(StringIO(csv_text))
         return list(reader) if reader else []
@@ -10174,6 +10445,21 @@ def _listar_leads_do_sheets():
     
     return leads
 
+def _col(row, *names):
+    """Primeiro valor não-vazio entre várias colunas possíveis (case-insensitive).
+    As planilhas usam nomes diferentes: 'Celular' vs 'Whatsapp', 'Email' vs 'email',
+    'CONSULTOR' vs 'Consultor', 'DATA e HORA' vs 'Data', etc."""
+    low = {}
+    for k, v in row.items():
+        if k is not None:
+            low[str(k).strip().lower()] = v
+    for n in names:
+        v = low.get(str(n).strip().lower())
+        if v and str(v).strip():
+            return str(v).strip()
+    return ''
+
+
 def _processar_lead(row, conn):
     """
     Processa um lead bruto da planilha:
@@ -10182,15 +10468,15 @@ def _processar_lead(row, conn):
     - Detecta duplicados
     - Retorna (sucesso, msg, dados_processados)
     """
-    # Colunas esperadas
-    nome = row.get('Nome', '').strip()
-    telefone = row.get('Celular', '').strip()
-    email = row.get('Email', '').strip()
-    cidade = row.get('Cidade', '').strip()
-    tipo = row.get('Tipo', 'PF').strip()
-    num_pessoas = row.get('numero de pessoas', '').strip()
-    consultor_raw = row.get('CONSULTOR', '').strip()
-    data_hora_raw = row.get('DATA e HORA', '') or row.get('Data', '')
+    # Mapeamento FLEXÍVEL de colunas (cada planilha nomeia diferente)
+    nome = _col(row, 'Nome', 'nome')
+    telefone = _col(row, 'Celular', 'Whatsapp', 'WhatsApp', 'Telefone', 'Tel', 'Fone', 'Contato')
+    email = _col(row, 'Email', 'email', 'E-mail', 'e-mail')
+    cidade = _col(row, 'Cidade', 'Qual sua Cidade?', 'Qual sua cidade?', 'cidade')
+    tipo = _col(row, 'Tipo', 'tipo') or 'PF'
+    num_pessoas = _col(row, 'numero de pessoas', 'número de pessoas', 'Idades que tem interesse em cotar?', 'IDADE', 'Idade')
+    consultor_raw = _col(row, 'CONSULTOR', 'Consultor', 'Consultor 2', 'consultor')
+    data_hora_raw = _col(row, 'DATA e HORA', 'Data', 'data', 'Data e Hora')
     origem = row.get('_origem', 'Google Sheets')
     
     # Filtro 1: "teste" em nome ou email

@@ -119,6 +119,38 @@
   .topbar h1 { font-family:'Sora',sans-serif; font-size:18px; color:#fff; font-weight:700; letter-spacing:-.3px; }
   .topbar .sub { font-size:11.5px; color:var(--cinza); margin-top:2px; }
 
+  /* ═══ SINO DE NOTIFICAÇÕES ═══ */
+  #sino-wrap { position:fixed; top:14px; right:22px; z-index:150; }
+  #sino-btn { position:relative; width:40px; height:40px; border-radius:50%; border:1px solid var(--borda);
+    background:rgba(20,20,28,.9); color:var(--cinza); cursor:pointer; display:flex; align-items:center;
+    justify-content:center; backdrop-filter:blur(8px); transition:.15s; }
+  #sino-btn:hover { color:#fff; border-color:var(--azul); }
+  #sino-btn svg { width:19px; height:19px; }
+  #sino-btn.tem-nova { color:#fff; border-color:var(--azul); animation:sino-pulse 2s ease-in-out infinite; }
+  @keyframes sino-pulse { 0%,100%{ box-shadow:0 0 0 0 rgba(59,130,246,.4);} 50%{ box-shadow:0 0 0 6px rgba(59,130,246,0);} }
+  #sino-badge { position:absolute; top:-3px; right:-3px; min-width:18px; height:18px; padding:0 4px;
+    background:#f43f5e; color:#fff; border-radius:9px; font-size:11px; font-weight:700; display:flex;
+    align-items:center; justify-content:center; line-height:1; }
+  #sino-painel { display:none; position:absolute; top:48px; right:0; width:360px; max-width:calc(100vw - 32px);
+    background:var(--panel); border:1px solid var(--borda); border-radius:14px; box-shadow:0 18px 50px rgba(0,0,0,.5);
+    overflow:hidden; }
+  #sino-painel.aberto { display:block; }
+  #sino-head { display:flex; align-items:center; justify-content:space-between; padding:13px 16px; border-bottom:1px solid var(--borda); }
+  #sino-head span { font-family:'Sora',sans-serif; font-size:13.5px; font-weight:700; color:#fff; }
+  #sino-marcar { background:transparent; border:none; color:var(--azul); font-size:11.5px; cursor:pointer; }
+  #sino-marcar:hover { text-decoration:underline; }
+  #sino-lista { max-height:420px; overflow-y:auto; }
+  .sino-item { display:block; padding:12px 16px; border-bottom:1px solid var(--borda); text-decoration:none; cursor:pointer; transition:.12s; }
+  .sino-item:hover { background:var(--panel-2); }
+  .sino-item.nao-lida { background:rgba(59,130,246,.06); }
+  .sino-item .si-top { display:flex; align-items:center; gap:7px; margin-bottom:3px; }
+  .sino-item .si-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .sino-item .si-titulo { font-size:12.5px; font-weight:600; color:#fff; }
+  .sino-item .si-quando { margin-left:auto; font-size:10.5px; color:var(--cinza-2); white-space:nowrap; }
+  .sino-item .si-desc { font-size:12px; color:var(--cinza); line-height:1.4; padding-left:14px; }
+  .sino-vazio { padding:30px 16px; text-align:center; color:var(--cinza-2); font-size:12.5px; }
+  @media (max-width:760px){ #sino-wrap { top:11px; right:14px; } #sino-btn { width:36px; height:36px; } }
+
   /* ═══ BUTTONS ═══ */
   .btn { background:var(--grad-frio); color:#fff; text-decoration:none; padding:9px 17px;
     border-radius:9px; font-size:13px; font-weight:600; border:none; cursor:pointer;
@@ -476,6 +508,21 @@
 </nav>
 
 <div class="main">
+  {% if session.get('user_id') %}
+  <div id="sino-wrap">
+    <button id="sino-btn" onclick="toggleSino(event)" aria-label="Notificações" title="Notificações">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      <span id="sino-badge" style="display:none;">0</span>
+    </button>
+    <div id="sino-painel">
+      <div id="sino-head">
+        <span>Notificações</span>
+        <button onclick="marcarTodasLidas()" id="sino-marcar">Marcar todas como lidas</button>
+      </div>
+      <div id="sino-lista"><div class="sino-vazio">Carregando...</div></div>
+    </div>
+  </div>
+  {% endif %}
   {% block content %}{% endblock %}
 </div>
 
@@ -563,6 +610,70 @@ function toggleTema() {
   const lbl = document.getElementById('tema-label');
   if (lbl) lbl.textContent = novo === 'light' ? 'Modo Escuro' : 'Modo Claro';
 }
+
+/* ── Sino de notificações ── */
+(function(){
+  if (!document.getElementById('sino-wrap')) return;
+  var CORES = { cotacao:'#3b82f6', comissao:'#1fd8a4', proposta:'#8b5cf6', lead:'#f59e0b', sistema:'#9aa1b5' };
+  var painelAberto = false;
+
+  function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  window.carregarNotificacoes = function(){
+    fetch('/api/notificacoes').then(function(r){ return r.json(); }).then(function(d){
+      var badge = document.getElementById('sino-badge');
+      var btn = document.getElementById('sino-btn');
+      var n = d.nao_lidas || 0;
+      if (n > 0) { badge.textContent = n > 99 ? '99+' : n; badge.style.display='flex'; btn.classList.add('tem-nova'); }
+      else { badge.style.display='none'; btn.classList.remove('tem-nova'); }
+      var lista = document.getElementById('sino-lista');
+      if (!d.itens || !d.itens.length) { lista.innerHTML = '<div class="sino-vazio">Nenhuma notificação ainda.</div>'; return; }
+      lista.innerHTML = d.itens.map(function(it){
+        var cor = CORES[it.tipo] || CORES.sistema;
+        var cls = it.lida ? 'sino-item' : 'sino-item nao-lida';
+        var onclick = it.link ? (' onclick="location.href=\'' + it.link + '\'"') : '';
+        return '<div class="'+cls+'"'+onclick+'>'+
+          '<div class="si-top"><span class="si-dot" style="background:'+cor+'"></span>'+
+          '<span class="si-titulo">'+escapeHtml(it.titulo)+'</span>'+
+          '<span class="si-quando">'+escapeHtml(it.quando)+'</span></div>'+
+          (it.descricao ? '<div class="si-desc">'+escapeHtml(it.descricao)+'</div>' : '')+
+          '</div>';
+      }).join('');
+    }).catch(function(){});
+  };
+
+  window.toggleSino = function(e){
+    if (e) e.stopPropagation();
+    var p = document.getElementById('sino-painel');
+    painelAberto = !painelAberto;
+    p.classList.toggle('aberto', painelAberto);
+    if (painelAberto) {
+      carregarNotificacoes();
+      // marca como lidas após abrir (tira o badge), mas mantém destaque visual na lista atual
+      setTimeout(function(){
+        fetch('/api/notificacoes/marcar-lidas', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+          .then(function(){ var b=document.getElementById('sino-badge'); if(b) b.style.display='none';
+            var btn=document.getElementById('sino-btn'); if(btn) btn.classList.remove('tem-nova'); });
+      }, 1200);
+    }
+  };
+
+  window.marcarTodasLidas = function(){
+    fetch('/api/notificacoes/marcar-lidas', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+      .then(function(){ carregarNotificacoes(); });
+  };
+
+  document.addEventListener('click', function(e){
+    if (!painelAberto) return;
+    var wrap = document.getElementById('sino-wrap');
+    if (wrap && !wrap.contains(e.target)) { document.getElementById('sino-painel').classList.remove('aberto'); painelAberto=false; }
+  });
+
+  document.addEventListener('DOMContentLoaded', function(){
+    carregarNotificacoes();
+    setInterval(carregarNotificacoes, 30000);
+  });
+})();
 </script>
 {% block scripts %}{% endblock %}
 </body>
