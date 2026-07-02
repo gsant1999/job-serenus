@@ -208,7 +208,7 @@
 
     <!-- Resetar senha (admin define direto) -->
     <div style="margin-top:20px; padding-top:18px; border-top:1px solid var(--borda);">
-      <div style="font-size:12px; font-weight:600; color:var(--cinza); margin-bottom:10px; text-transform:uppercase; letter-spacing:.5px;">🔑 Redefinir senha</div>
+      <div style="font-size:12px; font-weight:600; color:var(--cinza); margin-bottom:10px; text-transform:uppercase; letter-spacing:.5px;">Redefinir senha</div>
       <form method="POST" id="form-reset" style="display:flex; gap:8px; align-items:flex-end;">
         <div class="campo" style="flex:1; margin:0;">
           <input type="password" name="nova_senha" id="e-nova-senha" placeholder="Nova senha (mín. 6 caracteres)" minlength="6">
@@ -220,7 +220,7 @@
     <!-- Excluir usuário -->
     <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--borda);">
       <button type="button" onclick="confirmarExcluir()" style="background:none; border:none; color:#f43f7c; font-size:12.5px; cursor:pointer; padding:4px 0; text-decoration:underline;">
-        🗑 Excluir este usuário permanentemente
+        Excluir este usuário permanentemente
       </button>
     </div>
 
@@ -315,7 +315,7 @@ function confirmarReset() {
 }
 
 function confirmarExcluir() {
-  if (!confirm('⚠️ Excluir este usuário PERMANENTEMENTE?\n\nAs propostas dele serão reatribuídas ao admin.\n\nEssa ação não pode ser desfeita.')) return;
+  if (!confirm('Excluir este usuário PERMANENTEMENTE?\n\nAs propostas dele serão reatribuídas ao admin.\n\nEssa ação não pode ser desfeita.')) return;
   document.getElementById('form-excluir').submit();
 }
 

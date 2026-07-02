@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="container mt-4">
-    <h1>📋 Propostas Excluídas — Auditoria</h1>
+    <h1>Propostas Excluídas — Auditoria</h1>
     <p class="text-muted">Dashboard de propostas marcadas como "Excluída" para análise de perdas e erros operacionais.</p>
 
     <!-- MÉTRICAS -->
@@ -53,7 +53,7 @@
         <div class="col-md-6">
             <div class="card">
                 <div class="card-header bg-light">
-                    <h5>🔍 Motivos Mais Frequentes</h5>
+                    <h5>Motivos Mais Frequentes</h5>
                 </div>
                 <div class="card-body">
                     <table class="table table-sm">
@@ -83,7 +83,7 @@
     <!-- LISTA DE EXCLUÍDAS -->
     <div class="card">
         <div class="card-header bg-light">
-            <h5>📑 Propostas Excluídas ({{ total }})</h5>
+            <h5>Propostas Excluídas ({{ total }})</h5>
         </div>
         <div class="table-responsive">
             <table class="table table-hover">
@@ -117,7 +117,7 @@
         </div>
         {% if not excluidas %}
         <div class="card-body text-center text-muted">
-            <p>✅ Nenhuma proposta foi excluída. Tudo em dia!</p>
+            <p>Nenhuma proposta foi excluída. Tudo em dia!</p>
         </div>
         {% endif %}
     </div>

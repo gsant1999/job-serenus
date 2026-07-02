@@ -191,10 +191,10 @@
               {% elif l.asaas_status in ('FAILED','CANCELLED') %}
               <span class="tag tag-rosa" title="{{ l.asaas_erro or '' }}">✗ Falhou</span>
               {% else %}
-              <span class="tag tag-am">⏳ Processando</span>
+              <span class="tag tag-am">Processando</span>
               {% endif %}
             {% elif l.chave_pix %}
-              <button class="btn-outline btn-sm" onclick="pagarAsaas({{ l.id }}, '{{ l.consultor }}', {{ l.valor }})">💳 Pagar PIX</button>
+              <button class="btn-outline btn-sm" onclick="pagarAsaas({{ l.id }}, '{{ l.consultor }}', {{ l.valor }})">Pagar PIX</button>
             {% else %}
               <span style="font-size:10px; color:var(--cinza-2);">sem chave PIX</span>
             {% endif %}

@@ -155,7 +155,7 @@ async function recalcularTodas(btn) {
         msg += `\n\nAvisos: ${d.avisos.length} proposta(s) com cadastro faltando:\n\n`;
         msg += d.avisos.map(a => `#${a.id} ${a.cliente} (${a.operadora||'sem operadora'})\n   → ${a.aviso}`).join('\n\n');
       } else {
-        msg += '\n\nNenhum cadastro faltando. 🎉';
+        msg += '\n\nNenhum cadastro faltando. ';
       }
       alert(msg);
       location.reload();

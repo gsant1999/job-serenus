@@ -59,7 +59,7 @@
 {% block content %}
 <div class="topbar">
   <div>
-    <h1>📊 Nível de Produção</h1>
+    <h1>Nível de Produção</h1>
     <div class="sub">Ciclo: {{ ciclo.inicio }} até {{ ciclo.fim }} | Fase: <strong style="color:var(--teal);">{{ fluxo_semanal[fase_atual].nome }}</strong></div>
   </div>
 </div>
@@ -87,8 +87,8 @@
     </div>
   </div>
 
-  <!-- 📈 RESUMO DO CICLO -->
-  <h3 class="secao-titulo">📈 Resumo do Ciclo</h3>
+  <!-- RESUMO DO CICLO -->
+  <h3 class="secao-titulo">Resumo do Ciclo</h3>
   <div class="stats-grid">
     <div class="stat-box"><div class="stat-val">{{ stats.qtd_propostas or 0 }}</div><div class="stat-lbl">Total</div></div>
     <div class="stat-box"><div class="stat-val">{{ stats.qtd_aprovadas or 0 }}</div><div class="stat-lbl">Aprovadas</div></div>
@@ -97,10 +97,10 @@
     <div class="stat-box"><div class="stat-val">{{ stats.cadastradas or 0 }}</div><div class="stat-lbl">Cadastradas</div></div>
   </div>
 
-  <!-- 💰 COMISSÕES + 👥 PRODUÇÃO -->
+  <!-- COMISSÕES + PRODUÇÃO -->
   <div class="grid-2">
     <div>
-      <h3 class="secao-titulo">💰 Comissões por Fase</h3>
+      <h3 class="secao-titulo">Comissões por Fase</h3>
       <div class="card">
         <div class="card-body" style="padding:0;">
           {% for comissao in comissoes_fase %}
@@ -120,7 +120,7 @@
     </div>
 
     <div>
-      <h3 class="secao-titulo">👥 Produção por Consultor</h3>
+      <h3 class="secao-titulo">Produção por Consultor</h3>
       <div class="card">
         <div class="card-body" style="padding:0;">
           {% if consultores %}
@@ -146,17 +146,17 @@
     </div>
   </div>
 
-  <!-- 🔧 CONFIGURAÇÃO DE NÍVEIS N1, N2, N3 -->
-  <h3 class="secao-titulo">🏅 Níveis de Produção</h3>
+  <!-- CONFIGURAÇÃO DE NÍVEIS N1, N2, N3 -->
+  <h3 class="secao-titulo">Níveis de Produção</h3>
   <form id="niveis-form" onsubmit="salvarNiveis(event)">
     <div class="niveis-grid">
       {% for n in niveis %}
-      {% set medal = ['🥉','🥈','🥇'] %}
+      {% set medal = ['N1','N2','N3'] %}
       {% set cls = ['n1','n2','n3'] %}
       {% set idx = loop.index0 %}
       <div class="nivel-card {{ cls[idx] if idx < 3 else 'n1' }}">
         <div class="nivel-top">
-          <div class="nivel-medal">{{ medal[idx] if idx < 3 else '🏅' }}</div>
+          <div class="nivel-medal">{{ medal[idx] if idx < 3 else 'N' ~ (idx + 1) }}</div>
           <div class="nivel-info">
             <h4>{{ n.label or n.codigo }}</h4>
             <div class="nivel-faixa">
@@ -188,7 +188,7 @@
       {% endfor %}
     </div>
     <button type="submit" class="btn" style="width:100%; justify-content:center; padding:12px;">
-      💾 Salvar configuração dos níveis
+      Salvar configuração dos níveis
     </button>
   </form>
 
@@ -225,12 +225,12 @@ function salvarNiveis(e) {
   })
     .then(r => r.json())
     .then(d => {
-      if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar configuração dos níveis'; }
-      if (d.ok) { toast('✅ Níveis salvos com sucesso!', 'ok'); }
+      if (btn) { btn.disabled = false; btn.textContent = 'Salvar configuração dos níveis'; }
+      if (d.ok) { toast('Níveis salvos com sucesso!', 'ok'); }
       else toast('Erro ao salvar: ' + (d.erro || ''), 'err');
     })
     .catch(() => {
-      if (btn) { btn.disabled = false; btn.textContent = '💾 Salvar configuração dos níveis'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Salvar configuração dos níveis'; }
       toast('Erro de rede', 'err');
     });
 }

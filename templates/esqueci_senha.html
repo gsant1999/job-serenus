@@ -39,11 +39,11 @@
 </head>
 <body>
 <div class="box">
-  <div class="icon">🔑</div>
+  <div class="icon"></div>
   {% if enviado %}
     <h2>Verifique seu e-mail</h2>
     <p>Se o e-mail <strong>{{ email }}</strong> estiver cadastrado no sistema, você receberá um código de 6 dígitos em instantes.</p>
-    <div class="ok">✅ Código enviado! Verifique sua caixa de entrada (e o spam).<br>O código expira em <strong>15 minutos</strong>.</div>
+    <div class="ok">Código enviado! Verifique sua caixa de entrada (e o spam).<br>O código expira em <strong>15 minutos</strong>.</div>
     <a href="/redefinir-senha?email={{ email }}" class="btn" style="display:block; text-align:center; text-decoration:none; line-height:2.5;">
       Inserir o código →
     </a>

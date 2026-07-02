@@ -2327,11 +2327,11 @@ def asaas_testar_chave():
 
     valida_geral = res_sem.get('valida') or res_com.get('valida')
     if res_sem.get('valida'):
-        msg = "✅ CHAVE VÁLIDA — use ela SEM o cifrão ($) no Railway."
+        msg = "CHAVE VÁLIDA — use ela SEM o cifrão ($) no Railway."
     elif res_com.get('valida'):
-        msg = "✅ CHAVE VÁLIDA — use ela COM o cifrão ($) no Railway! (o $ faz parte da chave)"
+        msg = "CHAVE VÁLIDA — use ela COM o cifrão ($) no Railway! (o $ faz parte da chave)"
     else:
-        msg = "❌ Ambas as variações falharam. A chave foi revogada/expirada no Asaas, OU a conta tem restrição de IP/segurança ativa."
+        msg = "Ambas as variações falharam. A chave foi revogada/expirada no Asaas, OU a conta tem restrição de IP/segurança ativa."
 
     return jsonify({
         "valida": valida_geral,
@@ -2748,7 +2748,7 @@ def testar_r2():
         
         return jsonify({
             'ok': True,
-            'msg': '✅ Upload funcionando!',
+            'msg': 'Upload funcionando!',
             'storage_usado': resultado.get('storage', 'desconhecido'),
             'config_r2': {
                 'enabled': os.environ.get('R2_ENABLED') == 'true',
@@ -2780,7 +2780,7 @@ def testar_smtp():
             "sender":  {"name": "JOB Serenus", "email": remetente},
             "to":      [{"email": remetente}],
             "subject": "JOB · Teste de email",
-            "htmlContent": "<p>✅ Email de teste do JOB Serenus funcionando!</p>"
+            "htmlContent": "<p>Email de teste do JOB Serenus funcionando!</p>"
         }).encode('utf-8')
         req = urllib.request.Request(
             "https://api.brevo.com/v3/smtp/email",
@@ -2790,11 +2790,11 @@ def testar_smtp():
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             body = resp.read().decode()
-            resultado['etapas'].append(f'✅ HTTP {resp.status} — Email enviado para {remetente}')
+            resultado['etapas'].append(f'HTTP {resp.status} — Email enviado para {remetente}')
             resultado['ok'] = True
             resultado['resposta'] = body
     except Exception as e:
-        resultado['etapas'].append(f'❌ Erro: {e}')
+        resultado['etapas'].append(f'Erro: {e}')
         resultado['erro'] = str(e)
     return jsonify(resultado)
 
@@ -3016,7 +3016,7 @@ def emergency_carregar_backup():
         
         return jsonify({
             "ok": True, 
-            "msg": f"✅ Backup carregado: {n_props} propostas, {n_parcs} parcelas",
+            "msg": f"Backup carregado: {n_props} propostas, {n_parcs} parcelas",
             "propostas": n_props,
             "parcelas": n_parcs,
         })
@@ -3311,10 +3311,10 @@ th {{background: #f9fafb; font-weight: 600;}}
 .btn {{display: inline-block; padding: 10px 20px; background: #6366f1; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px;}}
 .btn:hover {{background: #4f46e5;}}
     </style></head><body><div class="container">
-    <h1>📊 Observabilidade do Sistema</h1>
+    <h1>Observabilidade do Sistema</h1>
     <p style="color: #666; font-size: 14px;">Atualizado: {datetime.now(TZ_SP).strftime('%d/%m/%Y %H:%M:%S')}</p>
 
-    <div class="card"><h2>📈 Banco de Dados</h2>
+    <div class="card"><h2>Banco de Dados</h2>
     <div class="status-{'ok' if db_status['status'] == 'OK' else 'erro'}">Status: {db_status['status']}</div>
     <table><tr><td><strong>Propostas:</strong></td><td style="font-size: 20px; color: #6366f1;"><b>{db_status.get('propostas', '?')}</b></td></tr>
     <tr><td><strong>Leads CRM:</strong></td><td style="font-size: 20px; color: #6366f1;"><b>{db_status.get('leads', '?')}</b></td></tr>
@@ -3325,16 +3325,16 @@ th {{background: #f9fafb; font-weight: 600;}}
     <tr><td><strong>Backup Diário:</strong></td><td class="status-info">{scheduler_status['backup_agendado']}</td></tr>
     <tr><td><strong>Import Leads:</strong></td><td class="status-info">{scheduler_status['lead_import_agendado']}</td></tr></table></div>
 
-    <div class="card"><h2>🔒 Cloudflare R2 (Storage)</h2>
+    <div class="card"><h2>Cloudflare R2 (Storage)</h2>
     <table><tr><td><strong>Enabled:</strong></td><td class="status-{'ok' if r2_status['enabled'] else 'erro'}">{r2_status['enabled']}</td></tr>
     <tr><td><strong>Configurado:</strong></td><td class="status-{'ok' if r2_status['configurado'] else 'erro'}">{r2_status['configurado']}</td></tr>
     <tr><td><strong>Endpoint:</strong></td><td class="mono">{r2_status['endpoint']}</td></tr></table></div>
 
-    <div class="card"><h2>⚠️ Últimos Erros ({len(erros_recentes)})</h2>
-    {"<table><tr><th>Quando</th><th>Rota</th><th>Erro</th></tr>" + "".join(f"<tr><td>{e['quando']}</td><td class='mono'>{e['rota']}</td><td>{e['erro'][:60]}</td></tr>" for e in erros_recentes) + "</table>" if erros_recentes else "<p style='color: #10b981;'>✅ Sem erros recentes</p>"}</div>
+    <div class="card"><h2>Últimos Erros ({len(erros_recentes)})</h2>
+    {"<table><tr><th>Quando</th><th>Rota</th><th>Erro</th></tr>" + "".join(f"<tr><td>{e['quando']}</td><td class='mono'>{e['rota']}</td><td>{e['erro'][:60]}</td></tr>" for e in erros_recentes) + "</table>" if erros_recentes else "<p style='color: #10b981;'>Sem erros recentes</p>"}</div>
 
-    <div class="card"><h2>📥 Importação de Leads</h2>
-    {"<p class='status-erro'>⚠️ " + str(len(logs_lead_auto)) + " erros na importação</p>" if logs_lead_auto else "<p style='color: #10b981;'>✅ Funcionando normalmente</p>"}</div>
+    <div class="card"><h2>Importação de Leads</h2>
+    {"<p class='status-erro'>" + str(len(logs_lead_auto)) + " erros na importação</p>" if logs_lead_auto else "<p style='color: #10b981;'>Funcionando normalmente</p>"}</div>
 
     <a href="/admin" class="btn">← Voltar</a></div></body></html>"""
     return html
@@ -5235,7 +5235,15 @@ def usuarios():
     conn = db()
     rows = conn.execute("SELECT * FROM usuarios ORDER BY id").fetchall()
     close_db(conn)
-    return render_template('usuarios.html', usuarios=rows, host=request.host_url.rstrip('/'))
+    # dict simples: Row do SQLite não é serializável pelo |tojson do template,
+    # e o hash de senha não deve ir para o HTML
+    usuarios_l = []
+    for r in rows:
+        d = dict(r)
+        d['senha_hash'] = bool(d.get('senha_hash'))
+        d.pop('reset_token', None)
+        usuarios_l.append(d)
+    return render_template('usuarios.html', usuarios=usuarios_l, host=request.host_url.rstrip('/'))
 
 @app.route('/usuario/novo', methods=['POST'])
 @login_required
@@ -6435,7 +6443,7 @@ def upload_comprovante(pid):
     conn.commit(); close_db(conn)
     return jsonify({
         "ok": True, 
-        "msg": f"✅ Comprovante salvo em {storage_tipo}. Parcelas desbloqueadas.", 
+        "msg": f"Comprovante salvo em {storage_tipo}. Parcelas desbloqueadas.", 
         "nome": nome,
         "storage": storage_tipo
     })
@@ -6478,7 +6486,7 @@ def upload_contrato(pid):
     conn.commit(); close_db(conn)
     return jsonify({
         "ok": True, 
-        "msg": f"✅ Contrato salvo em {storage_tipo}.", 
+        "msg": f"Contrato salvo em {storage_tipo}.", 
         "nome": nome,
         "storage": storage_tipo
     })
@@ -6528,7 +6536,7 @@ def upload_doc_extra(pid):
     conn.commit(); close_db(conn)
     return jsonify({
         "ok": True, 
-        "msg": f"✅ {tipo} salvo em {storage_tipo}.", 
+        "msg": f"{tipo} salvo em {storage_tipo}.", 
         "nome": nome,
         "storage": storage_tipo,
         "tipo": tipo
@@ -9002,7 +9010,7 @@ def webhook_sheets():
                         INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
                         VALUES (?, ?, 'movimentacao', ?)
                     """, (lid, consultor,
-                          f'🔄 Nova solicitação em {data_str} via {origem} — retornou de "{etapa_anterior}" para Lead Novo'))
+                          f'Nova solicitação em {data_str} via {origem} — retornou de "{etapa_anterior}" para Lead Novo'))
                     importados += 1
                 else:
                     # É reimportação OU registro antigo/duplicado.
@@ -10564,7 +10572,7 @@ def crm_importar():
         </style>
         </head><body>
         <div class="container">
-            <h1>📥 Importar Leads das Planilhas</h1>
+            <h1>Importar Leads das Planilhas</h1>
             <form method="POST">
                 <div class="info">
                     ✓ Facebook (aba "LEADS GERAIS")<br>
@@ -10679,7 +10687,7 @@ def crm_importar():
     </style>
     </head><body>
     <div class="container">
-        <h1>✅ Importação Concluída</h1>
+        <h1>Importação Concluída</h1>
         <div class="stats">
             <div class="stat">
                 <div class="stat-num">{importados}</div>

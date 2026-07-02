@@ -363,7 +363,7 @@
       {# ── REPIQUE ── #}
       {% if p.tem_repique and p.repique_json %}
       <div class="card" style="margin-bottom:16px;">
-        <div class="card-header"><h3>⚡ Repique</h3></div>
+        <div class="card-header"><h3>Repique</h3></div>
         <div class="card-body" id="repique-display"></div>
       </div>
       {% endif %}
@@ -427,7 +427,7 @@
               {% set arq_label = arq_nome.split('_',4)[-1] if '_' in arq_nome else ('Documento ' ~ loop.index) %}
               <div style="display:inline-flex;align-items:center;gap:4px;">
                 <a href="/anexos/{{ arq_nome }}" target="_blank" class="btn-outline" style="font-size:12px;padding:5px 12px;">
-                  📄 {{ arq_label }}
+                  {{ arq_label }}
                 </a>
                 {% if session.perfil == 'admin' %}<button onclick="excluirAnexo('doc','{{ arq_nome }}')" class="btn-del-anexo">×</button>{% endif %}
               </div>
@@ -494,7 +494,7 @@
           <div>
             <div style="font-size:11px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Taxa de Adesão</div>
             <div style="font-size:13px;font-weight:600;margin-top:2px;display:flex;align-items:center;gap:8px;">
-              💳 Boleto Asaas
+              Boleto Asaas
               {% if p.adesao_status and p.adesao_status not in ('Não gerado', '') %}
               <span class="boleto-badge" style="background:{{ adesao_cor }}20;color:{{ adesao_cor }};border:1px solid {{ adesao_cor }}44;font-size:10px;">{{ p.adesao_status }}</span>
               {% endif %}
@@ -522,7 +522,7 @@
               <div style="font-size:9px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Linha Digitável</div>
               <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
                 <div id="linha-digitavel-txt" style="font-family:monospace;font-size:10px;color:var(--texto);line-height:1.4;word-break:break-all;">{{ p.adesao_linha_digitavel }}</div>
-                <button onclick="copiarLinha()" style="padding:5px 10px;border-radius:6px;background:var(--azul);color:#fff;border:none;cursor:pointer;font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0;">📋</button>
+                <button onclick="copiarLinha()" style="padding:5px 10px;border-radius:6px;background:var(--azul);color:#fff;border:none;cursor:pointer;font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0;"></button>
               </div>
             </div>
             {% endif %}
@@ -555,11 +555,11 @@
           {% else %}
             {# Sem boleto gerado #}
             <div style="text-align:center;padding:16px 0 8px;">
-              <div style="font-size:28px;margin-bottom:8px;opacity:.35;">💳</div>
+              <div style="font-size:28px;margin-bottom:8px;opacity:.35;"></div>
               <div style="font-size:13px;font-weight:500;color:var(--texto);margin-bottom:4px;">Nenhum boleto emitido</div>
               <div style="font-size:11.5px;color:var(--cinza);margin-bottom:16px;line-height:1.5;">
                 {% if not p.cpf_titular and not p.cnpj %}
-                  <span style="color:#ef4444;">⚠️ CPF/CNPJ não preenchido</span><br>Edite a proposta antes de gerar.
+                  <span style="color:#ef4444;">CPF/CNPJ não preenchido</span><br>Edite a proposta antes de gerar.
                 {% else %}
                   Gere o boleto para cobrar a<br>taxa de adesão do cliente.
                 {% endif %}
@@ -627,7 +627,7 @@
   <div class="modal-boleto-box">
     <div class="modal-boleto-header">
       <div>
-        <div style="font-size:18px;margin-bottom:2px;">💳 Boleto de Adesão</div>
+        <div style="font-size:18px;margin-bottom:2px;">Boleto de Adesão</div>
         <div style="font-size:12px;color:var(--cinza);">{{ p.razao_social }}</div>
       </div>
       <button onclick="fecharModalBoleto()" style="background:none;border:none;color:var(--cinza);font-size:24px;cursor:pointer;line-height:1;padding:0;">×</button>
@@ -644,7 +644,7 @@
           <div style="font-size:12px;color:var(--cinza);margin-top:2px;">
             {% if p.cpf_titular %}CPF: {{ p.cpf_titular }}
             {% elif p.cnpj %}CNPJ: {{ p.cnpj }}
-            {% else %}<span style="color:#ef4444;">⚠️ CPF/CNPJ não preenchido — edite a proposta antes</span>{% endif %}
+            {% else %}<span style="color:#ef4444;">CPF/CNPJ não preenchido — edite a proposta antes</span>{% endif %}
           </div>
         </div>
       </div>
@@ -714,7 +714,7 @@
 
       {# Feedback #}
       <div id="boleto-resultado" style="display:none;padding:16px;border-radius:10px;background:#10b98115;border:1px solid #10b98133;text-align:center;">
-        <div style="font-size:20px;margin-bottom:8px;">✅</div>
+        <div style="font-size:20px;margin-bottom:8px;"></div>
         <div style="font-size:14px;color:#10b981;font-weight:700;margin-bottom:10px;">Boleto emitido com sucesso!</div>
         <a id="boleto-link" href="#" target="_blank"
           style="display:inline-block;padding:10px 24px;background:#10b981;color:#fff;border-radius:8px;font-weight:600;text-decoration:none;font-size:13px;">
@@ -970,7 +970,7 @@ async function mudarFase() {
   const fase=document.getElementById('sel-fase').value;
   const r=await fetch(`/proposta/${PROP_ID}/fase`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fase})});
   const d=await r.json();
-  if(d.ok){document.getElementById('fase-atual').textContent=fase;if(d.aviso){const a=document.getElementById('aviso-fase');a.textContent='⚠ '+d.aviso;a.style.display='block';}toast('Fase atualizada','ok');carregarTimeline();}
+  if(d.ok){document.getElementById('fase-atual').textContent=fase;if(d.aviso){const a=document.getElementById('aviso-fase');a.textContent=''+d.aviso;a.style.display='block';}toast('Fase atualizada','ok');carregarTimeline();}
 }
 
 // ── EDIÇÃO ──
