@@ -50,7 +50,7 @@
     <div style="padding:6px 22px 16px;">
       {% for f in fixo_parcelas %}
       <div style="display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--borda); font-size:13px;">
-        <span>{{ f.descricao }} · {{ f.data_lancamento }}</span>
+        <span>{{ f.descricao }} · {{ f.data_lancamento|data_br }}</span>
         <span><strong>{{ f.valor|moeda  }}</strong> · {{ f.status }}</span>
       </div>
       {% endfor %}

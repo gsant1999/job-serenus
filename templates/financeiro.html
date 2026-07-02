@@ -153,7 +153,7 @@
         <thead><tr><th>Consultor</th><th>Parcela</th><th>Data</th><th>Valor</th><th>Status</th></tr></thead>
         <tbody>
           {% for f in fixos %}
-          <tr><td>{{ f.consultor_nome }}</td><td>{{ f.descricao }}</td><td>{{ f.data_lancamento }}</td>
+          <tr><td>{{ f.consultor_nome }}</td><td>{{ f.descricao }}</td><td>{{ f.data_lancamento|data_br }}</td>
             <td class="neg">{{ f.valor|moeda  }}</td><td>{{ f.status }}</td></tr>
           {% else %}<tr><td colspan="5" style="color:var(--cinza-2);">Nenhum fixo gerado. Clique em "Gerar fixos deste mês".</td></tr>{% endfor %}
         </tbody>

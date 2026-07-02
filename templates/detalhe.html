@@ -84,7 +84,7 @@
 <div class="topbar">
   <div>
     <h1>Proposta #{{ p.id }}</h1>
-    <div class="sub">{{ p.criado_em[:10] if p.criado_em else '' }} · {{ p.razao_social }}</div>
+    <div class="sub">{{ p.criado_em|data_br }} · {{ p.razao_social }}</div>
   </div>
   <div style="display:flex;gap:8px;">
     <a href="/propostas" class="btn-outline">Voltar</a>
@@ -216,7 +216,7 @@
             {% for parc in parcelas %}
             <tr id="row-parc-{{ parc.id }}">
               <td><strong>{{ parc.numero }}/{{ p.num_parcelas }}</strong></td>
-              <td>{{ parc.data_prevista }}</td>
+              <td>{{ parc.data_prevista|data_br }}</td>
               <td class="td-mono" style="color:var(--verde);font-weight:500;">{{ parc.valor|moeda  }}</td>
               <td><span class="tag tag-cinza">{{ parc.percentual }}%</span></td>
               <td>

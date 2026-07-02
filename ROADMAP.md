@@ -13,6 +13,9 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 ## CRM (feedback Danilo 30/06/2026)
 
 - [x] ESC fecha modais (global, todas as páginas)
+- [x] Fuso horário: todas as horas em São Paulo (timeline mostrava UTC, 3h à frente)
+- [x] Atribuição de consultor determinística (primeiro nome exato; ambíguo não atribui)
+- [x] Notificações também vão ao WhatsApp do consultor via WaSpeed (requer env WASPEED_TOKEN)
 - [ ] **Atividades futuras / agenda**: agendar conversa (data + assunto) no lead; visão "minha agenda do dia" como submódulo do CRM; lembrete por e-mail e por WhatsApp do consultor via WaSpeed (remetente: Guilherme (19) 99875-2758)
 - [ ] **WhatsApp integrado**: hoje há envio via WaSpeed no modal do lead — evoluir junto com a agenda (templates de mensagem, histórico no timeline)
 - [ ] **E-mails de correção de contato**: templates prontos no CRM (telefone errado → "chame o corretor" com link wa.me; sem sucesso no contato), e-mail bonito (padrão do e-mail de cotação), com rastreio de abertura (pixel) e de clique (link com redirect)
@@ -40,6 +43,9 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 ## Infra / qualidade
 
 - [x] Notificações (sino) — cotação aberta, proposta nova, comissão liberada/paga, leads importados
+- [x] Sino na sidebar (não sobrepõe conteúdo) + som ao chegar notificação
+- [x] Datas em dd/mm/aaaa nas listagens (financeiro, fluxo, detalhe, cotações salvas)
+- [x] Modo claro com contraste completo
 - [x] Leads automáticos das planilhas (pull 15 min + por request + botão)
 - [x] Emojis removidos de toda a interface
 - [x] Código morto removido (scheduler duplicado, migração legada)
