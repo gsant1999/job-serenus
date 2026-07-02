@@ -708,6 +708,17 @@ def init_db():
                 descricao TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS crm_email_log (
+                id SERIAL PRIMARY KEY,
+                lead_id INTEGER NOT NULL,
+                template TEXT,
+                email TEXT,
+                token TEXT UNIQUE,
+                aberto INTEGER DEFAULT 0, aberto_em TEXT,
+                clicado INTEGER DEFAULT 0, clicado_em TEXT,
+                enviado_por INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_agenda (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER NOT NULL,
@@ -986,6 +997,17 @@ def init_db():
             usuario_nome TEXT,
             tipo TEXT DEFAULT 'nota',
             descricao TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS crm_email_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER NOT NULL,
+            template TEXT,
+            email TEXT,
+            token TEXT UNIQUE,
+            aberto INTEGER DEFAULT 0, aberto_em TEXT,
+            clicado INTEGER DEFAULT 0, clicado_em TEXT,
+            enviado_por INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS crm_agenda (
@@ -1314,6 +1336,8 @@ def init_db():
         ("lancamentos", "fonte_pagamento", "TEXT"),
         ("lancamentos", "comprovante", "TEXT"),
         ("lancamentos", "upload_token", "TEXT"),
+        # Telefone do usuário (WhatsApp p/ notificações via WaSpeed e link wa.me nos e-mails)
+        ("usuarios", "telefone", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -5352,9 +5376,9 @@ def usuario_editar(uid):
         if ext in ('.png','.jpg','.jpeg','.webp'):
             foto_nome = f"perfil_{uid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}{ext}"
             fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
-    conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=? WHERE id=?""",
+    conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=?,telefone=? WHERE id=?""",
         (d['nome'],d['email'].lower(),d['perfil'],
-         (d['regime_base'] if d['perfil']=='consultor' else ''),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,uid))
+         (d['regime_base'] if d['perfil']=='consultor' else ''),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,d.get('telefone','').strip(),uid))
     conn.commit(); close_db(conn)
     return redirect(url_for('usuarios'))
 
@@ -8882,6 +8906,205 @@ def crm_agenda_excluir(aid):
     return jsonify({"ok": True})
 
 
+# ── E-MAILS DE CORREÇÃO DE CONTATO (com rastreio de abertura e clique) ──────
+
+_EMAIL_CONTATO_TEMPLATES = {
+    'telefone_errado': {
+        'nome': 'Telefone incorreto',
+        'assunto': 'Não conseguimos falar com você - Serenus Corretora',
+        'texto': ('Recebemos seu interesse em cotar um plano de saúde, mas o número de '
+                  'telefone informado parece estar incorreto e não conseguimos te ligar.'),
+        'cta': 'Chamar o corretor no WhatsApp',
+    },
+    'sem_contato': {
+        'nome': 'Sem sucesso no contato',
+        'assunto': 'Tentamos falar com você - Serenus Corretora',
+        'texto': ('Tentamos entrar em contato por telefone algumas vezes, mas não conseguimos '
+                  'falar com você. Sua cotação de plano de saúde continua disponível.'),
+        'cta': 'Falar com o corretor no WhatsApp',
+    },
+}
+
+
+def _corpo_email_contato(tpl, nome_lead, corretor_nome, link_click, pixel_url):
+    """HTML bonito no padrão do e-mail de cotação, com pixel + link rastreado."""
+    primeiro = (nome_lead or '').strip().split(' ')[0].title() if nome_lead else ''
+    saudacao = f"Olá{', ' + primeiro if primeiro else ''}!"
+    return (
+        "<div style='background:#f4f6f9;padding:30px 12px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;'>"
+        "<div style='max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;"
+        "box-shadow:0 4px 24px rgba(0,0,0,.08);'>"
+        "<div style='background:#1a1d2e;padding:22px 30px;'>"
+        "<span style='color:#fff;font-size:19px;font-weight:800;letter-spacing:2px;'>SERENUS</span>"
+        "<span style='color:#8c93a8;font-size:10px;letter-spacing:2px;display:block;margin-top:2px;'>CORRETORA DE SAÚDE</span></div>"
+        "<div style='padding:30px;'>"
+        f"<p style='font-size:16px;color:#1a1d2e;margin:0 0 14px;font-weight:600;'>{saudacao}</p>"
+        f"<p style='font-size:14px;color:#4a4f63;margin:0 0 22px;line-height:1.7;'>{tpl['texto']}</p>"
+        f"<p style='font-size:14px;color:#4a4f63;margin:0 0 26px;line-height:1.7;'>"
+        f"Para falar direto com o corretor <b>{corretor_nome}</b>, é só clicar no botão abaixo:</p>"
+        f"<div style='text-align:center;margin-bottom:26px;'><a href='{link_click}' "
+        "style='display:inline-block;background:#25d366;color:#fff;text-decoration:none;font-weight:700;"
+        f"font-size:15px;padding:14px 34px;border-radius:10px;'>{tpl['cta']}</a></div>"
+        "<p style='font-size:12px;color:#8c93a8;margin:0;line-height:1.6;'>Se o botão não funcionar, "
+        f"copie este link no navegador:<br><a href='{link_click}' style='color:#3b82f6;word-break:break-all;'>{link_click}</a></p>"
+        "</div>"
+        "<div style='padding:16px 30px;background:#fafbfc;border-top:1px solid #eef0f3;font-size:11px;"
+        "color:#9aa0b0;line-height:1.5;'>Serenus Corretora de Saúde. Você recebeu este e-mail porque "
+        "solicitou uma cotação de plano de saúde.</div>"
+        f"</div><img src='{pixel_url}' width='1' height='1' alt='' style='display:block;'></div>"
+    )
+
+
+@app.route('/crm/lead/<int:lid>/email-contato', methods=['POST'])
+@login_required
+def crm_lead_email_contato(lid):
+    """Envia e-mail de correção de contato ao lead, com rastreio de abertura e clique."""
+    d = request.json or {}
+    tpl_key = (d.get('template') or '').strip()
+    tpl = _EMAIL_CONTATO_TEMPLATES.get(tpl_key)
+    if not tpl:
+        return jsonify({"ok": False, "erro": "Template inválido"}), 400
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    ld = dict(lead)
+    email_lead = (ld.get('email') or '').strip()
+    if not email_lead or '@' not in email_lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead sem e-mail válido"}), 400
+    # Telefone do corretor: usuário logado → responsável do lead
+    urow = conn.execute("SELECT nome, telefone FROM usuarios WHERE id=?", (session.get('user_id'),)).fetchone()
+    corretor_nome = (urow['nome'] if urow else None) or session.get('nome') or 'Serenus'
+    corretor_tel = _waspeed_normaliza_fone((urow['telefone'] if urow else '') or '')
+    if not corretor_tel and ld.get('responsavel_id'):
+        rrow = conn.execute("SELECT nome, telefone FROM usuarios WHERE id=?", (ld['responsavel_id'],)).fetchone()
+        if rrow and rrow['telefone']:
+            corretor_nome = rrow['nome']
+            corretor_tel = _waspeed_normaliza_fone(rrow['telefone'])
+    if not corretor_tel:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Cadastre seu telefone em Usuários para gerar o link do WhatsApp"}), 400
+    token = secrets.token_urlsafe(12)
+    base = request.host_url.rstrip('/')
+    corpo = _corpo_email_contato(tpl, ld.get('nome'), corretor_nome,
+                                 base + '/r/' + token, base + '/t/' + token + '.gif')
+    try:
+        _enviar_email.ultimo_erro = None
+    except Exception:
+        pass
+    try:
+        _enviar_email(email_lead, tpl['assunto'], corpo)
+    except Exception as e:
+        close_db(conn); return jsonify({"ok": False, "erro": str(e)[:150]}), 200
+    err = getattr(_enviar_email, 'ultimo_erro', None)
+    if err:
+        close_db(conn); return jsonify({"ok": False, "erro": str(err)[:150]}), 200
+    conn.execute("""INSERT INTO crm_email_log (lead_id, template, email, token, enviado_por, criado_em)
+        VALUES (?, ?, ?, ?, ?, ?)""",
+        (lid, tpl_key, email_lead, token, session.get('user_id'), _agora_sp()))
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                 (lid, session.get('nome'), 'email',
+                  f"E-mail \"{tpl['nome']}\" enviado para {email_lead}", _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "email": email_lead})
+
+
+_PIXEL_GIF = (b'GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\x00\x00\x00!'
+              b'\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;')
+
+
+@app.route('/t/<token>.gif')
+def email_pixel(token):
+    """Pixel de abertura: marca o e-mail como aberto e avisa o corretor (1x só)."""
+    try:
+        conn = db()
+        r = conn.execute("SELECT * FROM crm_email_log WHERE token=?", (token,)).fetchone()
+        if r and not (r['aberto'] if hasattr(r, 'keys') else r[6]):
+            rd = dict(r)
+            conn.execute("UPDATE crm_email_log SET aberto=1, aberto_em=? WHERE id=?", (_agora_sp(), rd['id']))
+            conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                         (rd['lead_id'], 'Sistema', 'email', 'Cliente ABRIU o e-mail de contato', _agora_sp()))
+            conn.commit()
+            lead = conn.execute("SELECT nome, responsavel_id FROM crm_leads WHERE id=?", (rd['lead_id'],)).fetchone()
+            close_db(conn)
+            if lead:
+                _notificar(dict(lead).get('responsavel_id'), 'lead', 'E-mail aberto',
+                           f"{dict(lead).get('nome')} abriu o e-mail de contato", '/crm')
+        else:
+            close_db(conn)
+    except Exception:
+        pass
+    return Response(_PIXEL_GIF, mimetype='image/gif',
+                    headers={'Cache-Control': 'no-store, no-cache, must-revalidate'})
+
+
+@app.route('/r/<token>')
+def email_click(token):
+    """Clique no botão do e-mail: registra e redireciona pro WhatsApp do corretor."""
+    conn = db()
+    r = conn.execute("SELECT * FROM crm_email_log WHERE token=?", (token,)).fetchone()
+    if not r:
+        close_db(conn); abort(404)
+    rd = dict(r)
+    try:
+        if not rd.get('clicado'):
+            conn.execute("UPDATE crm_email_log SET clicado=1, clicado_em=?, aberto=1 WHERE id=?", (_agora_sp(), rd['id']))
+            conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                         (rd['lead_id'], 'Sistema', 'email', 'Cliente CLICOU no link do e-mail (WhatsApp)', _agora_sp()))
+            conn.commit()
+    except Exception:
+        pass
+    lead = conn.execute("SELECT nome, responsavel_id FROM crm_leads WHERE id=?", (rd['lead_id'],)).fetchone()
+    # Telefone do corretor de destino: quem enviou → responsável
+    tel = ''
+    urow = conn.execute("SELECT telefone FROM usuarios WHERE id=?", (rd.get('enviado_por'),)).fetchone()
+    if urow and urow['telefone']:
+        tel = _waspeed_normaliza_fone(urow['telefone'])
+    if not tel and lead and dict(lead).get('responsavel_id'):
+        rrow = conn.execute("SELECT telefone FROM usuarios WHERE id=?", (dict(lead)['responsavel_id'],)).fetchone()
+        if rrow and rrow['telefone']:
+            tel = _waspeed_normaliza_fone(rrow['telefone'])
+    close_db(conn)
+    if lead and not rd.get('clicado'):
+        try:
+            _notificar(dict(lead).get('responsavel_id'), 'lead', 'Cliente clicou no e-mail',
+                       f"{dict(lead).get('nome')} clicou para chamar no WhatsApp", '/crm')
+        except Exception:
+            pass
+    nome_lead = (dict(lead).get('nome') if lead else '') or ''
+    msg = f"Olá! Sou {nome_lead}, recebi o e-mail da Serenus sobre minha cotação de plano de saúde."
+    import urllib.parse as _up
+    if tel:
+        return redirect(f"https://wa.me/{tel}?text={_up.quote(msg)}")
+    return redirect("https://serenuscorretora.com.br")
+
+
+def _notificar_leads_parados():
+    """Diário: avisa cada consultor dos leads ativos sem atividade há 7+ dias."""
+    try:
+        conn = db()
+        limite = (datetime.now(TZ_SP) - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+        rows = conn.execute("""
+            SELECT l.responsavel_id, COUNT(*) qtd
+            FROM crm_leads l
+            WHERE l.responsavel_id IS NOT NULL
+              AND l.etapa NOT IN (SELECT slug FROM crm_etapas WHERE tipo IN ('ganho','perdido'))
+              AND COALESCE((SELECT MAX(a.criado_em) FROM crm_atividades a WHERE a.lead_id = l.id),
+                           l.atualizado_em, l.criado_em) <= ?
+            GROUP BY l.responsavel_id""", (limite,)).fetchall()
+        close_db(conn)
+        for r in rows:
+            rd = dict(r)
+            if rd.get('qtd'):
+                _notificar(rd['responsavel_id'], 'lead', 'Leads parados',
+                           f"{rd['qtd']} lead(s) sem atividade há mais de 7 dias", '/crm')
+    except Exception as e:
+        try: app.logger.warning(f"[LEADS-PARADOS] {e}")
+        except Exception: pass
+
+
 def _enviar_lembretes_agenda():
     """Roda no scheduler: notifica (sino + WhatsApp) atividades que vencem nos
     próximos 30 min ou já venceram sem lembrete. Marca para não repetir."""
@@ -10463,6 +10686,8 @@ def _iniciar_scheduler_backup():
         # Lembretes da agenda do CRM (sino + WhatsApp) a cada 5 min
         sched.add_job(_enviar_lembretes_agenda, 'interval', minutes=5, max_instances=1,
                       next_run_time=datetime.now(TZ_SP) + timedelta(seconds=40))
+        # Leads parados (7+ dias sem atividade): resumo diário às 09:00 SP
+        sched.add_job(_notificar_leads_parados, 'cron', hour=9, minute=0, max_instances=1)
         sched.start()
         _SCHEDULER_INICIADO = True
         app.logger.info("[SCHEDULER] ✅ Backup (22:00 SP) + Importação de leads (boot + a cada 15 min) agendados")

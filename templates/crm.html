@@ -346,7 +346,26 @@
 
       <div class="ficha-acoes">
         <button class="btn-ficha btn-salvar" onclick="salvarFicha()">Salvar</button>
+        <button class="btn-ficha" style="background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirEmailContato()">E-mail de contato</button>
         <button class="btn-ficha btn-excluir" onclick="excluirFicha()">Excluir</button>
+      </div>
+
+      <!-- Modal: e-mail de correção de contato -->
+      <div class="modal-overlay" id="modal-email-contato" style="z-index:1100;">
+        <div style="background:var(--panel); border:1px solid var(--borda); border-radius:16px; padding:22px; width:min(420px, 92vw); margin:auto;">
+          <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:6px;">E-mail de contato</h3>
+          <div style="font-size:12px; color:var(--cinza); margin-bottom:16px;" id="ec-destino"></div>
+          <button class="wpp-template" style="width:100%; margin-bottom:8px;" onclick="enviarEmailContato('telefone_errado')">
+            <strong style="color:var(--texto);">Telefone incorreto</strong><br>
+            <span style="font-size:11px;">"Não conseguimos te ligar — o número parece incorreto. Chame o corretor no WhatsApp."</span>
+          </button>
+          <button class="wpp-template" style="width:100%; margin-bottom:14px;" onclick="enviarEmailContato('sem_contato')">
+            <strong style="color:var(--texto);">Sem sucesso no contato</strong><br>
+            <span style="font-size:11px;">"Tentamos falar com você algumas vezes. Sua cotação continua disponível — fale com o corretor."</span>
+          </button>
+          <div style="font-size:11px; color:var(--cinza-2); margin-bottom:12px; line-height:1.5;">Você será avisado no sino e no WhatsApp quando o cliente abrir o e-mail e quando clicar no botão.</div>
+          <button class="btn-outline btn-sm" style="width:100%;" onclick="fechar('modal-email-contato')">Cancelar</button>
+        </div>
       </div>
     </div>
 
@@ -863,10 +882,36 @@ async function excluirFicha(){
   }
 }
 
+/* Helpers genéricos de modal (eram chamados mas não existiam — Novo Lead quebrava) */
+function abrir(id){ document.getElementById(id).classList.add('open'); }
+function fechar(id){ document.getElementById(id).classList.remove('open'); }
+
 function abrirNovoLead(etapa){
   const s=document.getElementById('nl-etapa');
   if(s&&etapa) s.value=etapa;
   abrir('modal-novo-lead');
+}
+
+/* ── E-mail de correção de contato (com rastreio) ── */
+function abrirEmailContato(){
+  if(!_leadAtual) return;
+  const em=(_leadAtual.email||'').trim();
+  if(!em || em.indexOf('@')===-1){ toast('Este lead não tem e-mail cadastrado','err'); return; }
+  document.getElementById('ec-destino').textContent='Será enviado para: '+em;
+  abrir('modal-email-contato');
+}
+async function enviarEmailContato(tpl){
+  if(!_leadAtual) return;
+  fechar('modal-email-contato');
+  toast('Enviando e-mail...','ok');
+  const r=await fetch('/crm/lead/'+_leadAtual.id+'/email-contato',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({template:tpl})});
+  const d=await r.json();
+  if(d.ok){
+    toast('E-mail enviado para '+d.email,'ok');
+    const dd=await(await fetch('/crm/lead/'+_leadAtual.id)).json();
+    renderTimeline(dd.atividades||[]);
+  } else { toast(d.erro||'Erro ao enviar','err'); }
 }
 async function criarLead(){
   const nome=document.getElementById('nl-nome')?.value?.trim();

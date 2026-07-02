@@ -160,9 +160,16 @@
           <input type="text" name="cpf" id="e-cpf" placeholder="000.000.000-00" maxlength="14" oninput="mascaraCPF(this)">
         </div>
       </div>
-      <div class="campo" style="margin-bottom:12px;">
-        <label>E-mail</label>
-        <input type="email" name="email" id="e-email" required>
+      <div class="form-row form-row-2" style="margin-bottom:12px;">
+        <div class="campo">
+          <label>E-mail</label>
+          <input type="email" name="email" id="e-email" required>
+        </div>
+        <div class="campo">
+          <label>WhatsApp / Telefone</label>
+          <input type="text" name="telefone" id="e-telefone" placeholder="(19) 99999-9999">
+          <div class="hint">Recebe notificações do JOB e vira o link "chamar corretor" nos e-mails</div>
+        </div>
       </div>
       <div class="form-row form-row-2" style="margin-bottom:12px;">
         <div class="campo">
@@ -294,6 +301,7 @@ function editar(u) {
   document.getElementById('e-nome').value   = u.nome || '';
   document.getElementById('e-cpf').value    = u.cpf  || '';
   document.getElementById('e-email').value  = u.email || '';
+  document.getElementById('e-telefone').value = u.telefone || '';
   document.getElementById('e-perfil').value = u.perfil || 'consultor';
   document.getElementById('e-regime').value = u.regime_base || '';
   document.getElementById('e-ativo').checked = !!u.ativo;

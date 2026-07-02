@@ -18,8 +18,8 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 - [x] Notificações também vão ao WhatsApp do consultor via WaSpeed (requer env WASPEED_TOKEN)
 - [x] **Atividades futuras / agenda**: agendar na ficha do lead (data/hora + assunto); página /crm/agenda (atrasadas/hoje/próximas, admin vê de todos); lembrete automático no sino + WhatsApp via WaSpeed ~30 min antes
 - [ ] **WhatsApp integrado**: hoje há envio via WaSpeed no modal do lead — evoluir junto com a agenda (templates de mensagem, histórico no timeline)
-- [ ] **E-mails de correção de contato**: templates prontos no CRM (telefone errado → "chame o corretor" com link wa.me; sem sucesso no contato), e-mail bonito (padrão do e-mail de cotação), com rastreio de abertura (pixel) e de clique (link com redirect)
-- [ ] Notificação de lead parado há X dias sem atividade (usa o sino)
+- [x] **E-mails de correção de contato**: 2 templates (telefone incorreto / sem sucesso), e-mail bonito, rastreio de abertura (pixel /t/) e clique (redirect /r/ → wa.me do corretor); avisa no sino+WhatsApp quando o cliente abre/clica
+- [x] Notificação de lead parado 7+ dias sem atividade (resumo diário 09:00 por consultor)
 
 ## Cotação
 
