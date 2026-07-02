@@ -708,6 +708,17 @@ def init_db():
                 descricao TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS crm_agenda (
+                id SERIAL PRIMARY KEY,
+                lead_id INTEGER NOT NULL,
+                usuario_id INTEGER,
+                assunto TEXT NOT NULL,
+                descricao TEXT,
+                data_hora TEXT NOT NULL,
+                status TEXT DEFAULT 'pendente',
+                lembrete_enviado INTEGER DEFAULT 0,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_etapas (
                 id SERIAL PRIMARY KEY,
                 slug TEXT UNIQUE NOT NULL,
@@ -975,6 +986,17 @@ def init_db():
             usuario_nome TEXT,
             tipo TEXT DEFAULT 'nota',
             descricao TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS crm_agenda (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER NOT NULL,
+            usuario_id INTEGER,
+            assunto TEXT NOT NULL,
+            descricao TEXT,
+            data_hora TEXT NOT NULL,
+            status TEXT DEFAULT 'pendente',
+            lembrete_enviado INTEGER DEFAULT 0,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS crm_etapas (
@@ -8754,6 +8776,140 @@ def crm_importar_agora():
     return jsonify({'ok': True, 'importados': importados, 'duplicados': duplicados})
 
 
+# ── AGENDA DO CRM: atividades futuras com lembrete ─────────────────────────
+
+@app.route('/crm/lead/<int:lid>/agendar', methods=['POST'])
+@login_required
+def crm_lead_agendar(lid):
+    """Agenda uma atividade futura (conversa, retorno...) para o lead."""
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    d = request.json or {}
+    assunto = (d.get('assunto') or '').strip()
+    data_hora = (d.get('data_hora') or '').strip().replace('T', ' ')[:16]
+    if not assunto or not data_hora:
+        close_db(conn); return jsonify({"ok": False, "erro": "Informe assunto e data/hora"}), 400
+    conn.execute("""INSERT INTO crm_agenda (lead_id, usuario_id, assunto, descricao, data_hora, criado_em)
+        VALUES (?, ?, ?, ?, ?, ?)""",
+        (lid, session.get('user_id'), assunto, (d.get('descricao') or '').strip(),
+         data_hora, _agora_sp()))
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                 (lid, session.get('nome'), 'agendamento',
+                  f"Atividade agendada para {_fmt_datahora_br(data_hora)}: {assunto}", _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/lead/<int:lid>/agenda')
+@login_required
+def crm_lead_agenda(lid):
+    """Agendamentos do lead (para a ficha)."""
+    conn = db()
+    rows = conn.execute("""SELECT a.*, u.nome usuario_nome FROM crm_agenda a
+        LEFT JOIN usuarios u ON u.id=a.usuario_id
+        WHERE a.lead_id=? ORDER BY a.status DESC, a.data_hora""", (lid,)).fetchall()
+    close_db(conn)
+    return jsonify([{**dict(r), 'data_hora_br': _fmt_datahora_br(dict(r).get('data_hora'))} for r in rows])
+
+
+@app.route('/crm/agenda')
+@login_required
+def crm_agenda():
+    """Minha agenda: atrasadas, hoje e próximas. Admin pode ver de todos."""
+    uid = session.get('user_id')
+    eh_admin = session.get('perfil') == 'admin'
+    conn = db()
+    if eh_admin and request.args.get('todos'):
+        rows = conn.execute("""SELECT a.*, l.nome lead_nome, l.telefone lead_tel, u.nome usuario_nome
+            FROM crm_agenda a JOIN crm_leads l ON l.id=a.lead_id
+            LEFT JOIN usuarios u ON u.id=a.usuario_id
+            WHERE a.status='pendente' ORDER BY a.data_hora""").fetchall()
+    else:
+        rows = conn.execute("""SELECT a.*, l.nome lead_nome, l.telefone lead_tel, u.nome usuario_nome
+            FROM crm_agenda a JOIN crm_leads l ON l.id=a.lead_id
+            LEFT JOIN usuarios u ON u.id=a.usuario_id
+            WHERE a.status='pendente' AND a.usuario_id=? ORDER BY a.data_hora""", (uid,)).fetchall()
+    close_db(conn)
+    hoje = datetime.now(TZ_SP).strftime('%Y-%m-%d')
+    atrasadas, de_hoje, proximas = [], [], []
+    for r in rows:
+        d = dict(r)
+        d['data_hora_br'] = _fmt_datahora_br(d.get('data_hora'))
+        dh = str(d.get('data_hora') or '')
+        if dh[:10] < hoje:
+            atrasadas.append(d)
+        elif dh[:10] == hoje:
+            de_hoje.append(d)
+        else:
+            proximas.append(d)
+    return render_template('crm_agenda.html', atrasadas=atrasadas, de_hoje=de_hoje,
+                           proximas=proximas, eh_admin=eh_admin,
+                           ver_todos=bool(request.args.get('todos')))
+
+
+@app.route('/crm/agenda/<int:aid>/concluir', methods=['POST'])
+@login_required
+def crm_agenda_concluir(aid):
+    conn = db()
+    a = conn.execute("SELECT * FROM crm_agenda WHERE id=?", (aid,)).fetchone()
+    if not a:
+        close_db(conn); return jsonify({"ok": False}), 404
+    if session.get('perfil') != 'admin' and a['usuario_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False}), 403
+    conn.execute("UPDATE crm_agenda SET status='concluida' WHERE id=?", (aid,))
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                 (a['lead_id'], session.get('nome'), 'agendamento',
+                  f"Atividade concluída: {a['assunto']}", _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/agenda/<int:aid>/excluir', methods=['POST'])
+@login_required
+def crm_agenda_excluir(aid):
+    conn = db()
+    a = conn.execute("SELECT usuario_id FROM crm_agenda WHERE id=?", (aid,)).fetchone()
+    if not a:
+        close_db(conn); return jsonify({"ok": False}), 404
+    if session.get('perfil') != 'admin' and a['usuario_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False}), 403
+    conn.execute("DELETE FROM crm_agenda WHERE id=?", (aid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+def _enviar_lembretes_agenda():
+    """Roda no scheduler: notifica (sino + WhatsApp) atividades que vencem nos
+    próximos 30 min ou já venceram sem lembrete. Marca para não repetir."""
+    try:
+        conn = db()
+        limite = (datetime.now(TZ_SP) + timedelta(minutes=30)).strftime('%Y-%m-%d %H:%M')
+        rows = conn.execute("""SELECT a.*, l.nome lead_nome, l.telefone lead_tel FROM crm_agenda a
+            JOIN crm_leads l ON l.id=a.lead_id
+            WHERE a.status='pendente' AND COALESCE(a.lembrete_enviado,0)=0 AND a.data_hora <= ?""",
+            (limite,)).fetchall()
+        for r in rows:
+            d = dict(r)
+            conn.execute("UPDATE crm_agenda SET lembrete_enviado=1 WHERE id=?", (d['id'],))
+            conn.commit()
+            try:
+                _notificar(d.get('usuario_id'), 'lead', 'Atividade agendada',
+                           f"{d.get('assunto')} — lead {d.get('lead_nome')} "
+                           f"({_fmt_datahora_br(d.get('data_hora'))})"
+                           + (f" tel {d.get('lead_tel')}" if d.get('lead_tel') else ''),
+                           '/crm/agenda')
+            except Exception:
+                pass
+        close_db(conn)
+    except Exception as e:
+        try: app.logger.warning(f"[AGENDA] lembretes: {e}")
+        except Exception: pass
+
+
 @app.route('/cotacao/salvas')
 @login_required
 def cotacao_salvas():
@@ -10241,6 +10397,10 @@ def _auto_pull_leads_throttled():
                 _importar_leads_automatico()
             except Exception:
                 pass
+            try:
+                _enviar_lembretes_agenda()
+            except Exception:
+                pass
             finally:
                 try: _AUTO_PULL_LOCK.release()
                 except Exception: pass
@@ -10300,6 +10460,9 @@ def _iniciar_scheduler_backup():
         # a cada 15 minutos (antes só rodava 30 min após o boot).
         sched.add_job(_importar_leads_automatico, 'interval', minutes=15, max_instances=1,
                       next_run_time=datetime.now(TZ_SP) + timedelta(seconds=20))
+        # Lembretes da agenda do CRM (sino + WhatsApp) a cada 5 min
+        sched.add_job(_enviar_lembretes_agenda, 'interval', minutes=5, max_instances=1,
+                      next_run_time=datetime.now(TZ_SP) + timedelta(seconds=40))
         sched.start()
         _SCHEDULER_INICIADO = True
         app.logger.info("[SCHEDULER] ✅ Backup (22:00 SP) + Importação de leads (boot + a cada 15 min) agendados")

@@ -154,6 +154,7 @@
   </div>
   <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
     <button class="btn-outline btn-sm" onclick="abrirNovoLead()">+ Novo Lead</button>
+    <button class="btn-outline btn-sm" onclick="location.href='/crm/agenda'">Agenda</button>
     {% if eh_admin %}
     <button class="btn-outline btn-sm" id="btn-buscar-leads" onclick="buscarLeadsAgora(this)">Buscar leads agora</button>
     <button class="btn-outline btn-sm" onclick="location.href='/crm/painel'">Painel</button>
@@ -426,6 +427,21 @@
               <button class="btn-ficha btn-salvar" style="flex:0;" onclick="salvarAtividade()">Registrar</button>
             </div>
           </div>
+
+          <!-- Agendar atividade futura -->
+          <div class="nova-ativ" style="margin-top:14px;">
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:700; margin-bottom:10px;">Agendar atividade futura</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+              <input type="text" id="ag-assunto" placeholder="Assunto (ex: Retornar ligação)" class="campo-input">
+              <input type="datetime-local" id="ag-data" class="campo-input">
+            </div>
+            <textarea id="ag-desc" placeholder="Detalhes da conversa agendada (opcional)..." style="min-height:50px;"></textarea>
+            <div class="nova-ativ-footer">
+              <span style="font-size:11px;color:var(--cinza);">Lembrete no sino e WhatsApp na hora marcada</span>
+              <button class="btn-ficha btn-salvar" style="flex:0;" onclick="agendarAtividade()">Agendar</button>
+            </div>
+            <div id="ag-lista" style="margin-top:12px;"></div>
+          </div>
         </div>
 
         <div id="tab-whatsapp" class="ficha-tab-pane">
@@ -580,6 +596,7 @@ async function abrirFicha(id){
   document.getElementById('ficha-origem').value=d.lead.origem||'manual';
   document.getElementById('ficha-avatar').textContent=(d.lead.nome||'?')[0].toUpperCase();
   document.getElementById('ficha-criado').value=fmtDataBR(d.lead.criado_em);
+  carregarAgendaLead();
 
   document.getElementById('ficha-etapa').value=d.lead.etapa||'';
   const eo=(d.etapas||_etapas).find(e=>e.id===d.lead.etapa);
@@ -754,6 +771,39 @@ async function salvarAtividade(){
     const dd=await(await fetch('/crm/lead/'+_leadAtual.id)).json();
     renderTimeline(dd.atividades||[]);
   }
+}
+
+/* ── Agenda: atividade futura no lead ── */
+async function agendarAtividade(){
+  if(!_leadAtual) return;
+  const assunto=document.getElementById('ag-assunto').value.trim();
+  const data=document.getElementById('ag-data').value;
+  if(!assunto || !data){ toast('Informe assunto e data/hora','err'); return; }
+  const r=await fetch('/crm/lead/'+_leadAtual.id+'/agendar',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({assunto, data_hora:data, descricao:document.getElementById('ag-desc').value.trim()})});
+  const d=await r.json();
+  if(d.ok){
+    document.getElementById('ag-assunto').value=''; document.getElementById('ag-data').value=''; document.getElementById('ag-desc').value='';
+    toast('Agendado! Lembrete no sino e WhatsApp.','ok');
+    carregarAgendaLead();
+  } else { toast(d.erro||'Erro ao agendar','err'); }
+}
+async function carregarAgendaLead(){
+  if(!_leadAtual) return;
+  const el=document.getElementById('ag-lista');
+  try{
+    const lista=await(await fetch('/crm/lead/'+_leadAtual.id+'/agenda')).json();
+    const pend=lista.filter(a=>a.status==='pendente');
+    if(!pend.length){ el.innerHTML=''; return; }
+    el.innerHTML='<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:700;margin-bottom:6px;">Agendadas</div>'+
+      pend.map(a=>'<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--panel-3);border:1px solid var(--borda);border-radius:8px;margin-bottom:5px;font-size:12px;">'+
+        '<strong>'+a.data_hora_br+'</strong><span style="flex:1;">'+a.assunto+'</span>'+
+        '<button class="tipo-btn" onclick="concluirAgLead('+a.id+')">Concluir</button></div>').join('');
+  }catch(e){ el.innerHTML=''; }
+}
+async function concluirAgLead(id){
+  const r=await fetch('/crm/agenda/'+id+'/concluir',{method:'POST'});
+  if((await r.json()).ok){ toast('Concluída','ok'); carregarAgendaLead(); }
 }
 
 // ── WhatsApp ──

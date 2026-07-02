@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Agenda{% endblock %}
+
+{% block head %}
+<style>
+  .ag-sec { margin-bottom:22px; }
+  .ag-tit { font-family:'Sora',sans-serif; font-size:13px; font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+  .ag-tit .n { font-size:11px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:1px 8px; color:var(--cinza); }
+  .ag-card { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:14px 16px; margin-bottom:8px;
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .ag-card.atrasada { border-left:3px solid var(--erro); }
+  .ag-card.hoje { border-left:3px solid var(--amarelo); }
+  .ag-card.proxima { border-left:3px solid var(--azul); }
+  .ag-hora { font-family:'Sora',sans-serif; font-size:14px; font-weight:700; white-space:nowrap; min-width:120px; }
+  .ag-info { flex:1; min-width:200px; }
+  .ag-assunto { font-size:13.5px; font-weight:600; color:var(--texto); }
+  .ag-lead { font-size:12px; color:var(--cinza); margin-top:2px; }
+  .ag-desc { font-size:12px; color:var(--cinza-2); margin-top:4px; }
+  .ag-resp { font-size:10.5px; padding:2px 8px; border-radius:8px; background:rgba(139,92,246,.15); color:#c4b5fd; font-weight:600; }
+  .ag-acoes { display:flex; gap:6px; }
+  .b { border:1px solid var(--borda); background:transparent; border-radius:7px; padding:6px 11px; font-size:11px; cursor:pointer; color:var(--texto); text-decoration:none; }
+  .b-ok { background:var(--verde); color:#04221a; border:none; font-weight:700; }
+  .b-del { color:var(--erro); border-color:rgba(244,63,94,.3); }
+  .b-wpp { color:#25d366; border-color:rgba(37,211,102,.4); }
+  .vazio { color:var(--cinza-2); font-size:13px; padding:24px; text-align:center; background:var(--panel); border:1px dashed var(--borda); border-radius:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Agenda</h1>
+    <div class="sub">Atividades agendadas nos leads do CRM</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    {% if eh_admin %}
+      {% if ver_todos %}<button class="btn-outline btn-sm" onclick="location.href='/crm/agenda'">Só as minhas</button>
+      {% else %}<button class="btn-outline btn-sm" onclick="location.href='/crm/agenda?todos=1'">Ver de todos</button>{% endif %}
+    {% endif %}
+    <button class="btn-outline btn-sm" onclick="location.href='/crm'">Voltar ao CRM</button>
+  </div>
+</div>
+
+{% macro card(a, classe) %}
+<div class="ag-card {{ classe }}">
+  <div class="ag-hora">{{ a.data_hora_br }}</div>
+  <div class="ag-info">
+    <div class="ag-assunto">{{ a.assunto }}</div>
+    <div class="ag-lead">Lead: <strong>{{ a.lead_nome }}</strong>{% if a.lead_tel %} · {{ a.lead_tel }}{% endif %}
+      {% if ver_todos and a.usuario_nome %} <span class="ag-resp">{{ a.usuario_nome }}</span>{% endif %}</div>
+    {% if a.descricao %}<div class="ag-desc">{{ a.descricao }}</div>{% endif %}
+  </div>
+  <div class="ag-acoes">
+    {% if a.lead_tel %}<a class="b b-wpp" target="_blank"
+      href="https://wa.me/55{{ a.lead_tel|replace('(','')|replace(')','')|replace('-','')|replace(' ','') }}">WhatsApp</a>{% endif %}
+    <a class="b" href="/crm?lead={{ a.lead_id }}">Abrir lead</a>
+    <button class="b b-ok" onclick="concluir({{ a.id }})">Concluir</button>
+    <button class="b b-del" onclick="excluirAg({{ a.id }})">Excluir</button>
+  </div>
+</div>
+{% endmacro %}
+
+<div class="ag-sec">
+  <div class="ag-tit" style="color:var(--erro);">Atrasadas <span class="n">{{ atrasadas|length }}</span></div>
+  {% for a in atrasadas %}{{ card(a, 'atrasada') }}{% else %}<div class="vazio">Nenhuma atividade atrasada.</div>{% endfor %}
+</div>
+
+<div class="ag-sec">
+  <div class="ag-tit" style="color:var(--amarelo);">Hoje <span class="n">{{ de_hoje|length }}</span></div>
+  {% for a in de_hoje %}{{ card(a, 'hoje') }}{% else %}<div class="vazio">Nada agendado para hoje.</div>{% endfor %}
+</div>
+
+<div class="ag-sec">
+  <div class="ag-tit" style="color:var(--azul);">Próximas <span class="n">{{ proximas|length }}</span></div>
+  {% for a in proximas %}{{ card(a, 'proxima') }}{% else %}<div class="vazio">Nenhuma atividade futura. Agende pela ficha do lead.</div>{% endfor %}
+</div>
+
+<script>
+async function concluir(id){
+  const r = await fetch('/crm/agenda/'+id+'/concluir', {method:'POST'});
+  if ((await r.json()).ok) { toast('Concluída', 'ok'); setTimeout(()=>location.reload(), 500); }
+}
+async function excluirAg(id){
+  if (!confirm('Excluir este agendamento?')) return;
+  const r = await fetch('/crm/agenda/'+id+'/excluir', {method:'POST'});
+  if ((await r.json()).ok) { toast('Excluído', 'ok'); setTimeout(()=>location.reload(), 500); }
+}
+</script>
+{% endblock %}

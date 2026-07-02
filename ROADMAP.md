@@ -16,7 +16,7 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 - [x] Fuso horário: todas as horas em São Paulo (timeline mostrava UTC, 3h à frente)
 - [x] Atribuição de consultor determinística (primeiro nome exato; ambíguo não atribui)
 - [x] Notificações também vão ao WhatsApp do consultor via WaSpeed (requer env WASPEED_TOKEN)
-- [ ] **Atividades futuras / agenda**: agendar conversa (data + assunto) no lead; visão "minha agenda do dia" como submódulo do CRM; lembrete por e-mail e por WhatsApp do consultor via WaSpeed (remetente: Guilherme (19) 99875-2758)
+- [x] **Atividades futuras / agenda**: agendar na ficha do lead (data/hora + assunto); página /crm/agenda (atrasadas/hoje/próximas, admin vê de todos); lembrete automático no sino + WhatsApp via WaSpeed ~30 min antes
 - [ ] **WhatsApp integrado**: hoje há envio via WaSpeed no modal do lead — evoluir junto com a agenda (templates de mensagem, histórico no timeline)
 - [ ] **E-mails de correção de contato**: templates prontos no CRM (telefone errado → "chame o corretor" com link wa.me; sem sucesso no contato), e-mail bonito (padrão do e-mail de cotação), com rastreio de abertura (pixel) e de clique (link com redirect)
 - [ ] Notificação de lead parado há X dias sem atividade (usa o sino)
