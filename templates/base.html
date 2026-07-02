@@ -546,6 +546,29 @@ function closeSidebar() {
   o.classList.remove('open');
 }
 
+/* ── ESC fecha modais (global, qualquer página) ── */
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Escape') return;
+  // Não fecha nada se o usuário está digitando num campo dentro de modal? Fecha mesmo assim (padrão de mercado).
+  var fechou = false;
+  // 1. Modais com convenção .open
+  document.querySelectorAll('.modal-overlay.open, #modal-ficha.open, #modal-novo-lead.open, .modal.open').forEach(function(m) {
+    m.classList.remove('open'); fechou = true;
+  });
+  // 2. Modais controlados por display
+  document.querySelectorAll('[data-modal]').forEach(function(m) {
+    if (m.style.display && m.style.display !== 'none') { m.style.display = 'none'; fechou = true; }
+  });
+  // 3. Sino de notificações
+  var sp = document.getElementById('sino-painel');
+  if (sp && sp.classList.contains('aberto')) { sp.classList.remove('aberto'); fechou = true; }
+  // 4. Sidebar mobile
+  var sb = document.getElementById('sidebar');
+  if (!fechou && sb && sb.classList.contains('open')) closeSidebar();
+  // 5. Hook por página: define window.onEscFechar() para lógica própria
+  if (typeof window.onEscFechar === 'function') window.onEscFechar();
+});
+
 /* ── Toast ── */
 function toast(msg, tipo='ok') {
   const el = document.getElementById('toast');

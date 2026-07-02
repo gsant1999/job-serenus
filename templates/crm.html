@@ -512,6 +512,7 @@
 {% block scripts %}
 <script>
 let _leadAtual = null;
+window.onEscFechar = function(){ _leadAtual = null; };
 let _tipoAtiv  = 'nota';
 let _usuarios  = [];
 let _etapas    = {{ etapas|tojson }};

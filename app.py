@@ -7413,7 +7413,10 @@ def cotacao():
                 'vigencia': td.get('vigencia'), 'total': round(total, 2),
                 'incompleta': faltam, 'detalhe': sorted(detalhe, key=lambda x: x['faixa']),
             })
-        resultados.sort(key=lambda x: x['total'])
+        resultados.sort(key=lambda x: (_norm_txt(x['operadora']), x['total']))  # operadora A-Z, depois menor preco
+        completas = [r for r in resultados if not r['incompleta']]
+        if completas:
+            min(completas, key=lambda x: x['total'])['melhor'] = True
 
     close_db(conn)
     prefill = {
@@ -7882,7 +7885,10 @@ def _logo_operadora_url(conn, nome):
         on = _norm_txt(r['operadora'] if hasattr(r, 'keys') else r[0])
         arq = r['arquivo'] if hasattr(r, 'keys') else r[1]
         if on and (on == n or on in n or n in on):
-            return '/logo-operadora/' + arq
+            # Uploads antigos (pré-volume 27/06) podem ter sumido do disco:
+            # só usa o upload se o arquivo ainda existir, senão cai pro embutido
+            if os.path.exists(os.path.join(UPLOAD_FOLDER, os.path.basename(arq))):
+                return '/logo-operadora/' + arq
     for keys, arq in _LOGOS_BUNDLE:
         if any(k in n for k in keys):
             return '/static/operadoras/' + arq
@@ -7895,6 +7901,10 @@ def servir_logo_operadora(nome):
     nome = os.path.basename(nome)
     if os.path.exists(os.path.join(UPLOAD_FOLDER, nome)):
         return send_from_directory(UPLOAD_FOLDER, nome)
+    # Fallback: upload sumiu (pré-volume) mas o nome bate com um logo embutido
+    static_dir = os.path.join(BASE_DIR, 'static', 'operadoras')
+    if os.path.exists(os.path.join(static_dir, nome)):
+        return send_from_directory(static_dir, nome)
     abort(404)
 
 
@@ -8215,7 +8225,10 @@ def cotacao_reabrir(cid):
                 'vigencia': td.get('vigencia'), 'total': round(total, 2),
                 'incompleta': faltam, 'detalhe': sorted(detalhe, key=lambda x: x['faixa']),
             })
-        resultados.sort(key=lambda x: x['total'])
+        resultados.sort(key=lambda x: (_norm_txt(x['operadora']), x['total']))  # operadora A-Z, depois menor preco
+        completas = [r for r in resultados if not r['incompleta']]
+        if completas:
+            min(completas, key=lambda x: x['total'])['melhor'] = True
 
     close_db(conn)
     cd = dict(c)

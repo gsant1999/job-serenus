@@ -132,12 +132,12 @@
       <tbody>
         {% for r in resultados %}
         {% set presel = presel_tabelas and r.tabela_id in presel_tabelas %}
-        <tr class="{{ 'melhor' if loop.first and not r.incompleta and not editar_id }}">
-          <td><input type="checkbox" name="tabela_id" value="{{ r.tabela_id }}" {{ 'checked' if presel or (loop.first and not editar_id) }} style="width:16px;height:16px;accent-color:var(--azul);"></td>
+        <tr class="{{ 'melhor' if r.melhor and not editar_id }}">
+          <td><input type="checkbox" name="tabela_id" value="{{ r.tabela_id }}" {{ 'checked' if presel or (r.melhor and not editar_id) }} style="width:16px;height:16px;accent-color:var(--azul);"></td>
           <td>{{ r.operadora }}</td>
           <td>
             {{ r.plano }}
-            {% if loop.first and not r.incompleta and not editar_id %}<span class="tag tag-best">menor preço</span>{% endif %}
+            {% if r.melhor and not editar_id %}<span class="tag tag-best">menor preço</span>{% endif %}
             {% if r.incompleta %}<span class="tag tag-inc">tabela incompleta</span>{% endif %}
             {% if r.abrangencia %}<div style="font-size:11px;color:var(--cinza-2);margin-top:2px;">{{ r.abrangencia }}</div>{% endif %}
             {% if r.linha or r.tipo_cnpj %}<div style="font-size:10.5px;color:var(--cinza-2);margin-top:2px;">{{ r.linha }}{% if r.linha and r.tipo_cnpj %} · {% endif %}{{ r.tipo_cnpj }}</div>{% endif %}
