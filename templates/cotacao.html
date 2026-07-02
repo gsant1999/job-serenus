@@ -76,7 +76,7 @@
     <div class="cot-sec-tit">1. Quem vai usar o plano</div>
     <div class="cot-row">
       <div class="fg2"><label>Idades ou datas de nascimento</label>
-        <input class="idades" type="text" name="idades" value="{{ idades_txt }}" placeholder="Ex: 25, 30 e 15/03/1990" autofocus></div>
+        <input class="idades" type="text" name="idades" value="{{ idades_txt }}" placeholder="Ex: 25, 30 e 15/03/1990" autocomplete="off" autofocus></div>
       <div class="fg2"><label>Modalidade</label>
         <select name="modalidade"><option value="">Todas</option>{% for m in modalidades %}<option value="{{ m }}" {{ 'selected' if filtros.modalidade == m }}>{{ m }}</option>{% endfor %}</select></div>
       <div class="fg2"><label>Tipo de CNPJ</label>
