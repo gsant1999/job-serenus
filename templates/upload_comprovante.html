@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Enviar comprovante · JOB Serenus</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#0c0c12; color:#eef0f6;
+    min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .box { width:100%; max-width:420px; background:#15151e; border:1px solid rgba(255,255,255,.08); border-radius:18px; padding:28px 24px; text-align:center; }
+  .marca { font-size:20px; font-weight:800; letter-spacing:2px; margin-bottom:4px; }
+  .marca span { color:#3b82f6; }
+  .sub { font-size:11px; color:#646b80; text-transform:uppercase; letter-spacing:1.5px; margin-bottom:22px; }
+  .info { background:#1b1b27; border:1px solid rgba(255,255,255,.07); border-radius:12px; padding:14px 16px; margin-bottom:20px; text-align:left; }
+  .info .d { font-size:15px; font-weight:600; }
+  .info .v { font-size:13px; color:#9aa1b5; margin-top:4px; }
+  .btn-foto { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; padding:18px;
+    background:#3b82f6; color:#fff; border:none; border-radius:14px; font-size:16px; font-weight:700; cursor:pointer; }
+  .btn-foto svg { width:22px; height:22px; }
+  .hint { font-size:12px; color:#646b80; margin-top:14px; line-height:1.5; }
+  .ok { background:rgba(31,216,164,.1); border:1px solid rgba(31,216,164,.35); color:#1fd8a4; border-radius:12px; padding:22px 16px; font-size:15px; font-weight:600; line-height:1.5; }
+  .erro { background:rgba(244,63,94,.1); border:1px solid rgba(244,63,94,.4); color:#f43f5e; border-radius:10px; padding:12px 14px; font-size:13px; margin-bottom:14px; }
+  .enviando { display:none; font-size:14px; color:#9aa1b5; margin-top:14px; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="marca">JOB <span>Serenus</span></div>
+  <div class="sub">Comprovante de pagamento</div>
+
+  <div class="info">
+    <div class="d">{{ l.descricao }}</div>
+    <div class="v">{{ l.valor|moeda }}{% if l.pago_por %} · pago por {{ l.pago_por }}{% endif %}{% if l.data_lancamento %} · {{ l.data_lancamento|data_br }}{% endif %}</div>
+  </div>
+
+  {% if enviado %}
+    <div class="ok">Comprovante enviado com sucesso!<br>Pode fechar esta página.</div>
+    {% if l.comprovante %}<div class="hint">Se precisar corrigir, é só tirar outra foto por este mesmo link.</div>
+    <form method="POST" enctype="multipart/form-data" id="form-envio" style="margin-top:14px;">
+      <input type="file" name="arquivo" id="arquivo" accept="image/*,.pdf" capture="environment" style="display:none;" onchange="enviar()">
+      <button type="button" class="btn-foto" style="background:#1b1b27;border:1px solid rgba(255,255,255,.15);" onclick="document.getElementById('arquivo').click()">Enviar outra foto</button>
+    </form>{% endif %}
+  {% else %}
+    {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+    <form method="POST" enctype="multipart/form-data" id="form-envio">
+      <input type="file" name="arquivo" id="arquivo" accept="image/*,.pdf" capture="environment" style="display:none;" onchange="enviar()">
+      <button type="button" class="btn-foto" onclick="document.getElementById('arquivo').click()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        Tirar foto do comprovante
+      </button>
+      <div class="enviando" id="enviando">Enviando, aguarde...</div>
+    </form>
+    <div class="hint">No celular abre a câmera direto. Também aceita arquivo da galeria ou PDF.
+      {% if l.comprovante %}<br>Já existe um comprovante — enviar outro substitui o anterior.{% endif %}</div>
+  {% endif %}
+</div>
+<script>
+function enviar(){
+  var f = document.getElementById('arquivo');
+  if (!f.files.length) return;
+  document.getElementById('enviando').style.display = 'block';
+  document.getElementById('form-envio').submit();
+}
+</script>
+</body>
+</html>

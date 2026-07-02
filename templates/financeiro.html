@@ -96,23 +96,60 @@
 
   <!-- CUSTOS -->
   <div class="fin-pane" id="pane-custos">
-    <div class="add-row" style="grid-template-columns:2fr 1fr 1fr 1fr auto;">
+    <div class="add-row" style="grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr auto;">
       <div class="campo"><label>Descrição do custo</label><input type="text" id="c-desc" placeholder="Ex: Aluguel, software, marketing..."></div>
       <div class="campo"><label>Categoria</label><input type="text" id="c-cat" placeholder="Ex: Fixo"></div>
       <div class="campo"><label>Data</label><input type="date" id="c-data"></div>
       <div class="campo"><label>Valor (R$)</label><input type="number" step="0.01" id="c-val"></div>
+      <div class="campo"><label>Quem pagou</label>
+        <select id="c-pagou">
+          <option value="">—</option>
+          <option>Gabriel</option><option>Guilherme</option><option>Karen</option>
+          <option>Danilo</option><option>Bianca</option><option>Caixa da empresa</option>
+        </select></div>
+      <div class="campo"><label>Fonte</label>
+        <select id="c-fonte">
+          <option value="">—</option>
+          <option value="Caixa">Caixa da empresa</option>
+          <option value="Terceiro">Recurso de terceiro</option>
+        </select></div>
       <button class="btn" onclick="addLanc('custo')">Adicionar</button>
     </div>
     <div class="card">
       <table class="tbl">
-        <thead><tr><th>Descrição</th><th>Categoria</th><th>Data</th><th>Valor</th><th></th></tr></thead>
+        <thead><tr><th>Descrição</th><th>Categoria</th><th>Data</th><th>Valor</th><th>Pago por</th><th>Fonte</th><th>Comprovante</th><th></th></tr></thead>
         <tbody>
           {% for c in custos %}
-          <tr><td>{{ c.descricao }}</td><td>{{ c.categoria }}</td><td>{{ c.data_lancamento or '—' }}</td><td class="neg">{{ c.valor|moeda  }}</td>
+          <tr><td>{{ c.descricao }}</td><td>{{ c.categoria }}</td><td>{{ c.data_lancamento|data_br or '—' }}</td><td class="neg">{{ c.valor|moeda  }}</td>
+            <td>{{ c.pago_por or '—' }}</td>
+            <td>{% if c.fonte_pagamento == 'Caixa' %}Caixa{% elif c.fonte_pagamento == 'Terceiro' %}Terceiro{% else %}—{% endif %}</td>
+            <td style="white-space:nowrap;">
+              {% if c.comprovante %}
+                <a class="btn-ghost" style="color:var(--verde);" href="/anexos/{{ c.comprovante }}" target="_blank">Ver</a>
+              {% endif %}
+              <button class="btn-ghost" onclick="anexarDesktop({{ c.id }})">{{ 'Trocar' if c.comprovante else 'Anexar' }}</button>
+              <button class="btn-ghost" style="color:var(--azul);" onclick="abrirQR({{ c.id }}, '{{ c.descricao|replace("'","") }}')">Celular</button>
+            </td>
             <td><button class="btn-ghost" style="color:var(--rosa);" onclick="excluir({{ c.id }})">×</button></td></tr>
-          {% else %}<tr><td colspan="5" style="color:var(--cinza-2);">Nenhum custo lançado neste mês.</td></tr>{% endfor %}
+          {% else %}<tr><td colspan="8" style="color:var(--cinza-2);">Nenhum custo lançado neste mês.</td></tr>{% endfor %}
         </tbody>
       </table>
+    </div>
+    <input type="file" id="file-comprovante" accept="image/*,.pdf" style="display:none;" onchange="enviarComprovante()">
+    <!-- Modal QR: subir comprovante pelo celular -->
+    <div class="modal-overlay" id="modal-qr">
+      <div style="background:var(--panel); border:1px solid var(--borda); border-radius:16px; padding:24px; width:min(360px, 92vw); text-align:center; margin:auto;">
+        <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:4px;">Comprovante pelo celular</h3>
+        <div id="qr-desc" style="font-size:12px; color:var(--cinza); margin-bottom:14px;"></div>
+        <div style="background:#fff; border-radius:12px; padding:12px; display:inline-block;">
+          <img id="qr-img" src="" alt="QR Code" style="width:200px; height:200px; display:block;">
+        </div>
+        <div style="font-size:12px; color:var(--cinza); margin:12px 0; line-height:1.5;">Aponte a câmera do celular para o QR.<br>O link abre a câmera para fotografar o comprovante.</div>
+        <div style="display:flex; gap:8px; justify-content:center;">
+          <button class="btn-outline btn-sm" onclick="copiarLinkQR()">Copiar link</button>
+          <button class="btn-outline btn-sm" onclick="fechar('modal-qr')">Fechar</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -173,12 +210,46 @@ function aba(p) {
 }
 async function addLanc(tipo) {
   let body = {tipo, data_competencia: MES};
-  if (tipo==='custo') { body.descricao=val('c-desc'); body.categoria=val('c-cat'); body.valor=val('c-val'); body.data_lancamento=val('c-data'); }
+  if (tipo==='custo') {
+    body.descricao=val('c-desc'); body.categoria=val('c-cat'); body.valor=val('c-val'); body.data_lancamento=val('c-data');
+    body.pago_por=val('c-pagou'); body.fonte_pagamento=val('c-fonte');
+  }
   else { body.socio=val('a-socio'); body.descricao=val('a-desc'); body.valor=val('a-val'); }
   if (!body.descricao || !body.valor) { toast('Preencha descrição e valor', 'err'); return; }
   const r = await fetch('/lancamento/salvar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   if ((await r.json()).ok) { toast('Lançado', 'ok'); setTimeout(()=>location.reload(), 500); }
 }
+
+/* ── Comprovante: upload desktop ── */
+let _lancUpload = null;
+function anexarDesktop(id) { _lancUpload = id; document.getElementById('file-comprovante').click(); }
+async function enviarComprovante() {
+  const inp = document.getElementById('file-comprovante');
+  if (!inp.files.length || !_lancUpload) return;
+  const fd = new FormData(); fd.append('arquivo', inp.files[0]);
+  const r = await fetch('/lancamento/' + _lancUpload + '/comprovante', {method:'POST', body:fd});
+  const d = await r.json();
+  inp.value = '';
+  if (d.ok) { toast('Comprovante anexado', 'ok'); setTimeout(()=>location.reload(), 600); }
+  else { toast(d.erro || 'Erro no upload', 'err'); }
+}
+
+/* ── Comprovante: link/QR para o celular ── */
+let _linkQR = '';
+async function abrirQR(id, desc) {
+  const r = await fetch('/lancamento/' + id + '/link-celular', {method:'POST'});
+  const d = await r.json();
+  if (!d.ok) { toast(d.erro || 'Erro ao gerar link', 'err'); return; }
+  _linkQR = d.url;
+  document.getElementById('qr-desc').textContent = desc;
+  document.getElementById('qr-img').src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(d.url);
+  document.getElementById('modal-qr').classList.add('open');
+}
+function copiarLinkQR() {
+  if (navigator.clipboard) navigator.clipboard.writeText(_linkQR).then(()=>toast('Link copiado', 'ok'));
+  else window.prompt('Copie o link:', _linkQR);
+}
+function fechar(id) { document.getElementById(id).classList.remove('open'); }
 function val(id){ return document.getElementById(id).value; }
 async function excluir(id) {
   if (!confirm('Excluir lançamento?')) return;

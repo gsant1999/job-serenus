@@ -31,6 +31,11 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 - [ ] Evitar tabelas duplicadas no import (avisar se operadora+plano+copart já existe)
 - [ ] Material de apoio: link público para enviar item ao cliente
 
+## Financeiro
+
+- [x] Custos com justificativa: quem pagou (Gabriel/Guilherme/Karen/Danilo/Bianca/Caixa) + fonte (Caixa ou Terceiro) + comprovante anexado
+- [x] Comprovante pelo celular: link tokenizado /u/<token> com QR — abre a câmera, fotografa e sobe direto
+
 ## Estratégicos (aguardando lapidação com o Guilherme)
 
 - (?) **RevOps de raiz** — MKT → Vendas → CS integrados: funil único (origem do lead → cotação → proposta → pós-venda/renovação), metas e taxas de conversão por etapa, receita por canal

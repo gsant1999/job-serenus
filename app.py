@@ -1287,6 +1287,11 @@ def init_db():
         ("cotacao_tabela", "linha", "TEXT"),
         ("cotacao_tabela", "tipo_cnpj", "TEXT"),
         ("cotacao_salva", "tabela_ids_json", "TEXT"),
+        # Financeiro: justificativa de custos (quem pagou, fonte, comprovante)
+        ("lancamentos", "pago_por", "TEXT"),
+        ("lancamentos", "fonte_pagamento", "TEXT"),
+        ("lancamentos", "comprovante", "TEXT"),
+        ("lancamentos", "upload_token", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -5808,13 +5813,96 @@ def financeiro():
 def lancamento_salvar():
     d = request.json or {}
     conn = db()
-    conn.execute("""INSERT INTO lancamentos (tipo,categoria,descricao,valor,data_competencia,data_lancamento,socio,recorrente,status)
-        VALUES (?,?,?,?,?,?,?,?,?)""",
+    conn.execute("""INSERT INTO lancamentos (tipo,categoria,descricao,valor,data_competencia,data_lancamento,socio,recorrente,status,pago_por,fonte_pagamento)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
         (d.get('tipo'), d.get('categoria',''), d.get('descricao'), float(d.get('valor') or 0),
          d.get('data_competencia') or competencia_atual(), d.get('data_lancamento',''),
-         d.get('socio',''), 1 if d.get('recorrente') else 0, 'Previsto'))
+         d.get('socio',''), 1 if d.get('recorrente') else 0, 'Previsto',
+         (d.get('pago_por') or '').strip(), (d.get('fonte_pagamento') or '').strip()))
+    lid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "id": lid})
+
+
+_COMPROVANTE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.pdf'}
+
+
+def _salvar_comprovante_lancamento(conn, lid, f):
+    """Valida e salva o arquivo de comprovante de um lançamento. Retorna (ok, msg/nome)."""
+    import io as _io
+    if not f or not f.filename:
+        return False, 'Nenhum arquivo enviado'
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in _COMPROVANTE_EXTS:
+        return False, 'Formato não aceito (use foto ou PDF)'
+    data = f.read()
+    if len(data) > 15 * 1024 * 1024:
+        return False, 'Arquivo muito grande (máx. 15 MB)'
+    nome = _sanitizar_filename(f'comprovante_lanc_{lid}_{secrets.token_hex(4)}{ext}')
+    upload_arquivo_r2(_io.BytesIO(data), f'financeiro/{nome}')
+    conn.execute("UPDATE lancamentos SET comprovante=? WHERE id=?", (nome, lid))
+    conn.commit()
+    return True, nome
+
+
+@app.route('/lancamento/<int:lid>/comprovante', methods=['POST'])
+@login_required
+@admin_required
+def lancamento_comprovante(lid):
+    """Upload do comprovante direto pelo desktop."""
+    conn = db()
+    l = conn.execute("SELECT id FROM lancamentos WHERE id=?", (lid,)).fetchone()
+    if not l:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lançamento não encontrado"}), 404
+    ok, res = _salvar_comprovante_lancamento(conn, lid, request.files.get('arquivo'))
+    close_db(conn)
+    if not ok:
+        return jsonify({"ok": False, "erro": res}), 400
+    return jsonify({"ok": True, "arquivo": res})
+
+
+@app.route('/lancamento/<int:lid>/link-celular', methods=['POST'])
+@login_required
+@admin_required
+def lancamento_link_celular(lid):
+    """Gera (ou reusa) o link tokenizado para subir o comprovante pelo celular."""
+    conn = db()
+    l = conn.execute("SELECT id, upload_token FROM lancamentos WHERE id=?", (lid,)).fetchone()
+    if not l:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lançamento não encontrado"}), 404
+    token = (l['upload_token'] if hasattr(l, 'keys') else l[1]) or ''
+    if not token:
+        token = secrets.token_urlsafe(12)
+        conn.execute("UPDATE lancamentos SET upload_token=? WHERE id=?", (token, lid))
+        conn.commit()
+    close_db(conn)
+    return jsonify({"ok": True, "url": request.host_url.rstrip('/') + '/u/' + token})
+
+
+@app.route('/u/<token>', methods=['GET', 'POST'])
+def upload_comprovante_publico(token):
+    """Página mobile (pública, tokenizada) para fotografar/subir o comprovante."""
+    conn = db()
+    l = conn.execute("SELECT * FROM lancamentos WHERE upload_token=?", (token,)).fetchone()
+    if not l:
+        close_db(conn); abort(404)
+    ld = dict(l)
+    enviado = False
+    erro = ''
+    if request.method == 'POST':
+        ok, res = _salvar_comprovante_lancamento(conn, ld['id'], request.files.get('arquivo'))
+        if ok:
+            enviado = True
+            try:
+                _notificar_admins('sistema', 'Comprovante recebido',
+                                  f"Custo \"{ld.get('descricao') or ''}\" ({_moeda(ld.get('valor'))})", '/financeiro')
+            except Exception:
+                pass
+        else:
+            erro = res
+    close_db(conn)
+    return render_template('upload_comprovante.html', l=ld, enviado=enviado, erro=erro)
 
 @app.route('/lancamento/excluir/<int:lid>', methods=['POST'])
 @login_required
