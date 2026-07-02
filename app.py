@@ -105,53 +105,8 @@ def _auto_pull_leads_no_request():
         pass
 
 
-_backup_scheduler_iniciado = False
-
-def _fazer_backup_automatico():
-    """Gera um snapshot JSON do banco em /data/backups. Mantém os últimos 30."""
-    try:
-        conn = db()
-        dados = {'versao': 'v14', 'data_backup': datetime.now(TZ_SP).isoformat()}
-        for tabela in ('propostas','parcelas','usuarios','operadoras','recebimento','repasse_corretor','historico_proposta','solicitacoes_edicao'):
-            try:
-                rows = conn.execute(f"SELECT * FROM {tabela}").fetchall()
-                dados[tabela] = [dict(r) for r in rows]
-            except Exception:
-                dados[tabela] = []
-        close_db(conn)
-        if not os.path.isdir('/data'):
-            return  # sem volume persistente, não adianta
-        os.makedirs('/data/backups', exist_ok=True)
-        ts = datetime.now(TZ_SP).strftime('%Y%m%d-%H%M%S')
-        caminho = f"/data/backups/backup-{ts}.json"
-        with open(caminho, 'w', encoding='utf-8') as f:
-            json.dump(dados, f, indent=2, default=str, ensure_ascii=False)
-        print(f"[BACKUP AUTO] ✅ {caminho} ({dados.get('total_propostas', len(dados.get('propostas', [])))} propostas)")
-        # Retenção: mantém só os 30 backups mais recentes
-        try:
-            arqs = sorted([f for f in os.listdir('/data/backups') if f.startswith('backup-') and f.endswith('.json')])
-            for antigo in arqs[:-30]:
-                os.remove(os.path.join('/data/backups', antigo))
-        except Exception:
-            pass
-    except Exception as e:
-        print(f"[BACKUP AUTO] ❌ {e}")
-
-def _iniciar_backup_automatico():
-    """Liga o agendador de backup diário às 22:00 (SP). Roda uma vez por processo."""
-    global _backup_scheduler_iniciado
-    if _backup_scheduler_iniciado:
-        return
-    _backup_scheduler_iniciado = True
-    try:
-        from apscheduler.schedulers.background import BackgroundScheduler
-        sched = BackgroundScheduler(timezone=TZ_SP)
-        sched.add_job(_fazer_backup_automatico, 'cron', hour=22, minute=0)
-        sched.start()
-        app.scheduler = sched
-        print("[SCHEDULER] ✅ Backup automático diário ligado (22:00 São Paulo)")
-    except Exception as e:
-        print(f"[SCHEDULER] ⚠️ Não foi possível iniciar backup automático: {e}")
+# O scheduler real (backup 22:00 + import de leads) é _iniciar_scheduler_backup,
+# definido mais abaixo no arquivo e chamado no _ensure_db_initialized acima.
 
 @app.template_filter('from_json')
 def _from_json(s):
@@ -9853,29 +9808,6 @@ def minha_foto():
     session['foto'] = foto_nome
     return jsonify({"ok": True, "foto": foto_nome})
 
-
-
-
-# Auto-import SQLite → PostgreSQL na primeira requisição
-@app.before_request
-def auto_import_sqlite():
-    if not hasattr(auto_import_sqlite, '_done'):
-        try:
-            import os, sqlite3
-            sqlite_db = os.path.expanduser("~/JOB_Serenus_Dados/job.db")
-            if os.path.exists(sqlite_db) and DB_MODE == 'postgres':
-                conn = db()
-                sqlite_conn = sqlite3.connect(sqlite_db)
-                for row in sqlite_conn.execute("SELECT * FROM propostas"):
-                    cols = ", ".join([k for k in dict(row).keys()])
-                    vals = ", ".join([f"'{str(v).replace(chr(39), chr(39)*2)}'" if v else "NULL" for v in dict(row).values()])
-                    conn.execute(f"INSERT INTO propostas ({cols}) VALUES ({vals})")
-                conn.commit()
-                close_db(conn)
-                sqlite_close_db(conn)
-                print("✅ Dados SQLite importados!")
-        except: pass
-        auto_import_sqlite._done = True
 
 
 
