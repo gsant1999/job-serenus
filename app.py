@@ -8,6 +8,11 @@ import pytz
 
 TZ_SP = pytz.timezone('America/Sao_Paulo')  # Campinas, SP
 
+def _agora_sp():
+    """Timestamp 'YYYY-MM-DD HH:MM:SS' na hora de São Paulo (para gravar no banco).
+    Nunca usar CURRENT_TIMESTAMP explícito em INSERT/UPDATE: no Postgres é UTC."""
+    return datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
+
 # ─── SUPORTE A PostgreSQL (Railway/Supabase) ──────────────────────────────────
 try:
     import psycopg2, psycopg2.extras, psycopg2.pool
@@ -1323,6 +1328,40 @@ def init_db():
                 except Exception: pass
     if not is_pg:
         conn.commit()
+
+    # ─── FUSO HORÁRIO: defaults em hora de São Paulo (o CURRENT_TIMESTAMP do
+    # Postgres grava UTC — timeline aparecia 3h no futuro). Idempotente. ───
+    if is_pg:
+        _TS_SP_DEFAULT = "(now() AT TIME ZONE 'America/Sao_Paulo')"
+        for tab, col in [
+            ('crm_atividades', 'criado_em'), ('crm_leads', 'criado_em'),
+            ('crm_leads', 'atualizado_em'), ('notificacoes', 'criado_em'),
+            ('cotacao_salva', 'criado_em'), ('cotacao_tabela', 'criado_em'),
+            ('material_apoio', 'criado_em'), ('operadora_logo', 'criado_em'),
+            ('cotacao_legenda_modelo', 'criado_em'), ('solicitacoes_edicao', 'criado_em'),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE {tab} ALTER COLUMN {col} SET DEFAULT {_TS_SP_DEFAULT}")
+                conn.commit()
+            except Exception:
+                try: conn.rollback()
+                except Exception: pass
+        # Backfill único: atividades e notificações antigas foram gravadas em UTC
+        # (todas via default) → desloca -3h. BR não tem mais horário de verão.
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+            conn.commit()
+            ja = conn.execute("SELECT 1 FROM meta_flags WHERE k='tzfix_20260702'").fetchone()
+            if not ja:
+                conn.execute("UPDATE crm_atividades SET criado_em = criado_em - INTERVAL '3 hours'")
+                conn.execute("UPDATE notificacoes SET criado_em = criado_em - INTERVAL '3 hours'")
+                conn.execute("INSERT INTO meta_flags (k) VALUES ('tzfix_20260702')")
+                conn.commit()
+                print("[TZFIX] Backfill -3h aplicado em crm_atividades e notificacoes")
+        except Exception as e:
+            try: conn.rollback()
+            except Exception: pass
+            print(f"[TZFIX] pulado: {e}")
 
     close_db(conn)
 
@@ -7010,8 +7049,8 @@ def crm_lead_mover(lid):
     if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
         close_db(conn); return jsonify({"ok": False}), 403
     etapa_ant = lead['etapa']
-    conn.execute("UPDATE crm_leads SET etapa=?, atualizado_em=CURRENT_TIMESTAMP WHERE id=?",
-                 (nova_etapa, lid))
+    conn.execute("UPDATE crm_leads SET etapa=?, atualizado_em=? WHERE id=?",
+                 (nova_etapa, _agora_sp(), lid))
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                  (lid, session.get('nome'), 'movimentacao',
                   f'Movido de "{etapa_ant}" para "{nova_etapa}"'))
@@ -7026,7 +7065,7 @@ def crm_lead_atividade(lid):
     conn = db()
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                  (lid, session.get('nome'), d.get('tipo', 'nota'), d.get('descricao', '')))
-    conn.execute("UPDATE crm_leads SET atualizado_em=CURRENT_TIMESTAMP WHERE id=?", (lid,))
+    conn.execute("UPDATE crm_leads SET atualizado_em=? WHERE id=?", (_agora_sp(), lid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
@@ -7067,10 +7106,10 @@ def crm_lead_editar(lid):
 
     conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, email=?, empresa=?,
                     valor_estimado=?, observacoes=?, origem=?,
-                    responsavel_id=?, etapa=?, atualizado_em=CURRENT_TIMESTAMP
+                    responsavel_id=?, etapa=?, atualizado_em=?
                     WHERE id=?""",
         (nome, telefone, email, empresa, valor, observacoes, origem,
-         responsavel_id, etapa, lid))
+         responsavel_id, etapa, _agora_sp(), lid))
 
     if changes:
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
@@ -7117,7 +7156,7 @@ def crm_lead_anexo(lid):
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                  (lid, session.get('nome'), 'anexo',
                   f'{descricao_tipo}: [{nome_safe}](/uploads/{nome_final})'))
-    conn.execute("UPDATE crm_leads SET atualizado_em=CURRENT_TIMESTAMP WHERE id=?", (lid,))
+    conn.execute("UPDATE crm_leads SET atualizado_em=? WHERE id=?", (_agora_sp(), lid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "arquivo": nome_final})
 
@@ -8489,16 +8528,55 @@ def cotacao_legendas_api():
 
 def _notificar(usuario_id, tipo, titulo, descricao='', link=''):
     """Cria uma notificação. usuario_id=None → broadcast para todos os admins.
+    Também envia WhatsApp via WaSpeed (do número do gestor) em background.
     Nunca propaga erro (não pode derrubar o fluxo que a chamou)."""
     try:
         conn = db()
         conn.execute(
-            "INSERT INTO notificacoes (usuario_id, tipo, titulo, descricao, link) VALUES (?, ?, ?, ?, ?)",
-            (usuario_id, tipo, titulo, descricao, link))
+            "INSERT INTO notificacoes (usuario_id, tipo, titulo, descricao, link, criado_em) VALUES (?, ?, ?, ?, ?, ?)",
+            (usuario_id, tipo, titulo, descricao, link,
+             datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')))
         conn.commit()
         close_db(conn)
     except Exception as e:
         try: app.logger.warning(f"[NOTIF] falha ao criar: {e}")
+        except Exception: pass
+    # WhatsApp em thread separada: nunca atrasa nem derruba a requisição
+    try:
+        threading.Thread(target=_notificar_whatsapp, args=(usuario_id, titulo, descricao), daemon=True).start()
+    except Exception:
+        pass
+
+
+def _notificar_whatsapp(usuario_id, titulo, descricao):
+    """Envia a notificação para o WhatsApp do(s) destinatário(s) via WaSpeed.
+    Usa o token global (WASPEED_TOKEN — número do Guilherme). Falha em silêncio."""
+    token = os.environ.get('WASPEED_TOKEN', '').strip()
+    if not token:
+        return
+    try:
+        import requests as _rq
+        conn = db()
+        if usuario_id:
+            rows = conn.execute("SELECT telefone FROM usuarios WHERE id=? AND ativo=1", (usuario_id,)).fetchall()
+        else:  # broadcast → todos os admins com telefone
+            rows = conn.execute("SELECT telefone FROM usuarios WHERE perfil='admin' AND ativo=1").fetchall()
+        close_db(conn)
+        fones = set()
+        for r in rows:
+            tel = r['telefone'] if hasattr(r, 'keys') else r[0]
+            f = _waspeed_normaliza_fone(tel or '')
+            if f:
+                fones.add(f)
+        msg = 'JOB - ' + titulo + ('\n' + descricao if descricao else '')
+        for f in fones:
+            try:
+                _rq.post(f"{WASPEED_BASE}/api/enviar-texto/{token}",
+                         json={"phone": f, "message": msg}, timeout=15)
+            except Exception:
+                pass
+    except Exception as e:
+        try: app.logger.warning(f"[NOTIF-WPP] {e}")
         except Exception: pass
 
 
@@ -8567,6 +8645,9 @@ def _tempo_relativo(quando):
             dt = TZ_SP.localize(dt)
         delta = datetime.now(TZ_SP) - dt
         seg = int(delta.total_seconds())
+        # Registro "no futuro" = linha antiga gravada em UTC → corrige -3h
+        if seg < -300:
+            seg += 3 * 3600
         if seg < 60: return 'agora'
         if seg < 3600: return f'há {seg // 60} min'
         if seg < 86400: return f'há {seg // 3600} h'
@@ -8971,9 +9052,9 @@ def webhook_sheets():
                             empresa = COALESCE(NULLIF(?, ''), empresa),
                             origem = ?,
                             etapa = 'lead_novo',
-                            atualizado_em = CURRENT_TIMESTAMP
+                            atualizado_em = ?
                         WHERE id = ?
-                    """, (nome, email, cidade, origem, lid))
+                    """, (nome, email, cidade, origem, _agora_sp(), lid))
                     conn.execute("""
                         INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
                         VALUES (?, ?, 'movimentacao', ?)
@@ -9109,7 +9190,7 @@ def crm_lead_whatsapp(lid):
             conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
                             VALUES (?,?,?,?)""",
                          (lid, session.get('nome'), 'whatsapp', f'WhatsApp enviado: {mensagem}'))
-            conn.execute("UPDATE crm_leads SET atualizado_em=CURRENT_TIMESTAMP WHERE id=?", (lid,))
+            conn.execute("UPDATE crm_leads SET atualizado_em=? WHERE id=?", (_agora_sp(), lid))
             conn.commit(); close_db(conn)
             return jsonify({"ok": True, "msg": "Mensagem enviada"})
         else:
@@ -9729,9 +9810,9 @@ def admin_crm_corrigir_leads():
             SELECT l.id, l.criado_em, a.criado_em as ativ_criado_em
             FROM crm_leads l
             JOIN crm_atividades a ON a.lead_id = l.id AND a.tipo = 'criacao'
-            WHERE DATE(l.criado_em) = DATE(CURRENT_TIMESTAMP)
+            WHERE DATE(l.criado_em) = ?
             ORDER BY l.id
-        """).fetchall()
+        """, (datetime.now(TZ_SP).strftime('%Y-%m-%d'),)).fetchall()
 
         for lead in leads_data:
             lid = lead['id'] if hasattr(lead, 'keys') else lead[0]
@@ -10233,29 +10314,37 @@ def _normalizar_consultor(nome_raw):
 
 def _buscar_responsavel_id(conn, consultor_nome):
     """
-    Busca o ID do usuário responsável de forma FLEXÍVEL.
-    Tenta: nome exato → primeiro nome (LIKE) → None.
-    Funciona mesmo que o banco tenha 'Guilherme Santos' e a planilha diga 'GUILHERME'.
+    Busca o ID do usuário responsável de forma DETERMINÍSTICA (sem acento/caixa):
+    nome completo exato → primeiro nome exato (palavra inteira) → None.
+    O LIKE por prefixo foi removido: 'Ana' casava com 'Anastácia' e atribuía
+    o lead ao consultor errado.
     """
     if not consultor_nome:
         return None
-    nome = consultor_nome.strip()
-    # 1) Match exato
-    resp = conn.execute(
-        "SELECT id FROM usuarios WHERE LOWER(nome) = LOWER(?) AND ativo=1 ORDER BY id LIMIT 1",
-        (nome,)
-    ).fetchone()
-    if resp:
-        return resp['id'] if hasattr(resp, 'keys') else resp[0]
-    # 2) Primeiro nome via LIKE (ex.: 'Guilherme' casa com 'Guilherme Santos')
-    primeiro = nome.split()[0] if nome else ''
-    if primeiro:
-        resp = conn.execute(
-            "SELECT id FROM usuarios WHERE LOWER(nome) LIKE LOWER(?) AND ativo=1 ORDER BY id LIMIT 1",
-            (primeiro + '%',)
-        ).fetchone()
-        if resp:
-            return resp['id'] if hasattr(resp, 'keys') else resp[0]
+    alvo = _norm_txt(consultor_nome)
+    if not alvo:
+        return None
+    alvo_primeiro = alvo.split()[0]
+    try:
+        rows = conn.execute("SELECT id, nome FROM usuarios WHERE ativo=1 ORDER BY id").fetchall()
+    except Exception:
+        return None
+    # 1) nome completo exato
+    for r in rows:
+        rid = r['id'] if hasattr(r, 'keys') else r[0]
+        rnome = _norm_txt(r['nome'] if hasattr(r, 'keys') else r[1])
+        if rnome == alvo:
+            return rid
+    # 2) primeiro nome exato (palavra inteira, não prefixo)
+    candidatos = []
+    for r in rows:
+        rid = r['id'] if hasattr(r, 'keys') else r[0]
+        rnome = _norm_txt(r['nome'] if hasattr(r, 'keys') else r[1])
+        if rnome.split() and rnome.split()[0] == alvo_primeiro:
+            candidatos.append(rid)
+    # Só atribui se houver UM único usuário com esse primeiro nome (ambíguo → None)
+    if len(candidatos) == 1:
+        return candidatos[0]
     return None
 
 # ─── DATAS: parsing flexível e formatação dd/mm/aaaa ─────────────────────────────
