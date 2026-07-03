@@ -26,11 +26,13 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 
 - [x] Ordenar por operadora A-Z + menor preço; badge segue o mais barato
 - [x] Logos com fallback (uploads sumidos pré-volume)
-- [ ] Destaque avançado no documento — confirmado: não existe nenhum sistema de destaque/marcação hoje (nem no montador `/cotacao` nem no documento final `/cotacao/documento/<id>`), só cores automáticas fixas por operadora para a legenda. Precisa ser construído do zero: cobrir coluna inteira, mix de cores, destacar acomodação/copart, múltiplos destaques por coluna
+- [x] **Destaque por cores (básico)**: botão "Destacar planos" no documento liga/desliga contorno colorido automático por operadora (cor fixa por plano, definida no `_build_cot`)
+- [ ] Destaque avançado no documento (correção 03/07: o básico já existe, isto é sobre a versão avançada) — o que falta de fato: escolher manualmente qual linha/coluna destacar (ex: só a acomodação ou só o copart de um plano específico), misturar cores por célula em vez de 1 cor fixa por plano inteiro, e permitir vários destaques simultâneos na mesma coluna
 - [ ] UX da montagem da cotação (Guilherme acha confusa; referência: Painel do Corretor) — sem escopo definido, precisa de conversa
-- [ ] Filtro por região/CEP; vigência/validade da cotação; dependentes — 3 features distintas, nenhuma existe hoje
+- [ ] Filtro por região/CEP e cotação com dependentes — confirmado: nenhum dos dois existe hoje em `/cotacao`
+- [ ] Validade da cotação (data de expiração exibida ao cliente no documento) — correção 03/07: "vigência" já existe, mas é campo da TABELA de preços (mês de referência, ex: "07/2026"), não uma data de validade da cotação em si mostrada pro cliente. São coisas diferentes, isto aqui ainda não existe
 - [ ] Evitar tabelas duplicadas no import — confirmado: hoje só existe limpeza manual reativa (`/admin/emergency/limpar-duplicatas`), sem nenhum aviso preventivo no momento do import. Precisa checar operadora+plano+copart antes de salvar e avisar se já existe
-- [ ] Material de apoio: link público para enviar item ao cliente — confirmado: não existe rota pública nenhuma hoje (`/material-apoio` é só interno, login obrigatório). Seguiria o mesmo padrão já usado em `/c/<token>` (cotação) e `/u/<token>` (upload de comprovante)
+- [ ] Material de apoio: link público para enviar item ao cliente — confirmado: não existe rota pública hoje (`/material-apoio` é só interno, login obrigatório; o módulo em si — pastas por operadora/tipo, editor de texto rico — já existe e está completo). Seguiria o mesmo padrão já usado em `/c/<token>` (cotação) e `/u/<token>` (upload de comprovante)
 
 ## Financeiro
 
@@ -39,12 +41,12 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 
 ## Estratégicos (aguardando lapidação com o Guilherme)
 
-- (?) **RevOps de raiz** — MKT → Vendas → CS integrados: funil único (origem do lead → cotação → proposta → pós-venda/renovação), metas e taxas de conversão por etapa, receita por canal
-- (?) **Manual de utilização** por perfil (admin / consultor / supervisora) — didático, dentro do sistema
-- (?) **IA interna (Llama 3/3.1)** — casos de uso e hospedagem a definir
-- (?) **Financeiro + BI ampliados** — /financeiro e /bi
-- [ ] Sincronização de comissões com Google Sheets (código preparado em sessão anterior)
-- [ ] Google Drive OAuth para contratos (baixa prioridade)
+- (?) **RevOps de raiz** — correção 03/07: já existe uma base real, não é do zero. `/crm/painel` (desde 28/06) já mostra KPIs (total, abertos, ganhos, perdidos, taxa de conversão, sem 1º contato, pipeline estimado), funil por etapa, leads por origem com conversão, ranking de consultores e motivos de perda, com filtro por período. O que falta pra virar "funil único MKT→Vendas→CS de raiz": estender a medição pra além do CRM (cotação → proposta → pós-venda/renovação), metas por etapa, receita por canal de origem
+- (?) **Manual de utilização** por perfil (admin / consultor / supervisora) — didático, dentro do sistema. Nada construído ainda
+- (?) **IA interna (Llama 3/3.1)** — casos de uso e hospedagem a definir. Nada construído ainda
+- (?) **Financeiro + BI ampliados** — correção 03/07: `/financeiro` já tem DRE mensal e comissões a receber por mês; `/bi` já tem evolução mensal, produção por consultor, detalhamento por operadora e por modalidade. Não é blank slate — falta o Guilherme dizer especificamente o que sente falta que essas telas não cobrem hoje
+- [ ] Sincronização de comissões com Google Sheets — correção 03/07: **não encontrei nenhum código nem commit correspondente no repositório.** A nota "código preparado em sessão anterior" no roadmap anterior não bate com o histórico real (228 commits revisados) — pode ter sido perdido, nunca commitado, ou é uma informação incorreta que entrou no roadmap por engano. Tratando como não iniciado até confirmação
+- [ ] Google Drive OAuth para contratos (baixa prioridade) — nota: Google Drive foi removido do sistema em 19/06/2026 (commit `117c0c7`, motivo: manter só armazenamento local/R2); este item seria uma reintegração pontual só pra contratos, não o Drive completo de volta
 
 ## Infra / qualidade
 
