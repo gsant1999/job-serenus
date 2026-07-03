@@ -312,7 +312,7 @@
         </div>
         <div class="campo-grupo">
           <div class="campo-label">Valor Estimado</div>
-          <input type="number" id="ficha-valor" class="campo-input" placeholder="0.00" step="0.01">
+          <input type="text" id="ficha-valor" class="campo-input" placeholder="0,00" inputmode="decimal" oninput="mascaraValorBR(this)">
         </div>
         <div class="campo-grupo">
           <div class="campo-label">Etapa</div>
@@ -657,7 +657,7 @@ async function abrirFicha(id){
   document.getElementById('ficha-telefone').value=d.lead.telefone||'';
   document.getElementById('ficha-email').value=d.lead.email||'';
   document.getElementById('ficha-empresa').value=d.lead.empresa||'';
-  document.getElementById('ficha-valor').value=d.lead.valor_estimado||'';
+  document.getElementById('ficha-valor').value=d.lead.valor_estimado?Number(d.lead.valor_estimado).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
   document.getElementById('ficha-obs').value=d.lead.observacoes||'';
   document.getElementById('ficha-origem').value=d.lead.origem||'manual';
   document.getElementById('ficha-avatar').textContent=(d.lead.nome||'?')[0].toUpperCase();
@@ -804,7 +804,7 @@ async function salvarFicha(){
     telefone:document.getElementById('ficha-telefone').value.trim(),
     email:document.getElementById('ficha-email').value.trim(),
     empresa:document.getElementById('ficha-empresa').value.trim(),
-    valor_estimado:document.getElementById('ficha-valor').value||null,
+    valor_estimado:_valorBRparaFloat(document.getElementById('ficha-valor').value),
     observacoes:document.getElementById('ficha-obs').value.trim(),
     origem:document.getElementById('ficha-origem').value,
     etapa:document.getElementById('ficha-etapa').value,
@@ -932,6 +932,19 @@ async function excluirFicha(){
 /* Helpers genéricos de modal (eram chamados mas não existiam — Novo Lead quebrava) */
 function abrir(id){ document.getElementById(id).classList.add('open'); }
 function fechar(id){ document.getElementById(id).classList.remove('open'); }
+
+/* Valor Estimado em formato brasileiro (vírgula decimal, ponto de milhar) — campo era number/americano */
+function mascaraValorBR(el){
+  let v=el.value.replace(/\D/g,'');
+  if(!v){ el.value=''; return; }
+  v=(parseInt(v,10)/100).toFixed(2);
+  el.value=Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function _valorBRparaFloat(s){
+  if(!s) return null;
+  const n=parseFloat(String(s).replace(/\./g,'').replace(',','.'));
+  return isNaN(n)?null:n;
+}
 
 function abrirNovoLead(etapa){
   const s=document.getElementById('nl-etapa');

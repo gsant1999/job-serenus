@@ -122,7 +122,7 @@
 {% if idades_txt %}
   <div class="cot-resumo">{{ total_vidas }} vida(s) na cotação · {{ resultados|length }} plano(s) encontrado(s)</div>
   {% if resultados %}
-  <form method="POST" action="/cotacao/salvar" id="form-cotacao">
+  <form method="POST" action="/cotacao/salvar" id="form-cotacao" target="_blank">
     <input type="hidden" name="idades" value="{{ idades_txt }}">
     {% if prefill and prefill.lead_id %}<input type="hidden" name="lead_id" value="{{ prefill.lead_id }}">{% endif %}
     <table class="cot">
