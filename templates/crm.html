@@ -868,6 +868,7 @@ async function carregarAgendaLead(){
       pend.map(a=>'<div style="padding:7px 10px;background:var(--panel-3);border:1px solid var(--borda);border-radius:8px;margin-bottom:5px;font-size:12px;">'+
         '<div style="display:flex;align-items:center;gap:8px;">'+
         '<strong>'+a.data_hora_br+'</strong><span style="flex:1;">'+a.assunto+'</span>'+
+        (a.confirmado_em ? '<span style="font-size:10px;color:var(--verde);white-space:nowrap;">Visto</span>' : '')+
         '<button class="tipo-btn" onclick="concluirAgLead('+a.id+')">Concluir</button></div>'+
         (a.mensagem_lead && !a.mensagem_lead_enviada ?
           '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--borda);display:flex;align-items:center;gap:8px;">'+

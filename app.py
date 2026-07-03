@@ -1353,6 +1353,9 @@ def init_db():
         # Mensagem pronta pro lead, escrita já no agendamento (fica 1 clique pra enviar quando o lembrete chegar)
         ("crm_agenda", "mensagem_lead", "TEXT"),
         ("crm_agenda", "mensagem_lead_enviada", "INTEGER DEFAULT 0"),
+        # Confirmação de leitura do lembrete: link de 1 toque na própria mensagem do WhatsApp
+        ("crm_agenda", "confirmar_token", "TEXT"),
+        ("crm_agenda", "confirmado_em", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -8766,9 +8769,11 @@ _SITE_BASE_URL = "https://job-serenus-production.up.railway.app"
 
 def _notificar_whatsapp(usuario_id, titulo, descricao, link=''):
     """Envia a notificação para o WhatsApp do(s) destinatário(s) via WaSpeed.
-    Usa o token global (WASPEED_TOKEN — número do Guilherme). Falha em silêncio."""
+    Usa o token global (WASPEED_TOKEN — número do Guilherme). Loga sucesso/falha
+    de cada envio — antes falhava 100% em silêncio e não dava pra saber por quê."""
     token = os.environ.get('WASPEED_TOKEN', '').strip()
     if not token:
+        app.logger.warning(f"[NOTIF-WPP] WASPEED_TOKEN não configurada — lembrete '{titulo}' NÃO enviado")
         return
     try:
         import requests as _rq
@@ -8784,20 +8789,33 @@ def _notificar_whatsapp(usuario_id, titulo, descricao, link=''):
             f = _waspeed_normaliza_fone(tel or '')
             if f:
                 fones.add(f)
+        if not fones:
+            app.logger.warning(f"[NOTIF-WPP] usuario_id={usuario_id} sem telefone válido cadastrado — lembrete '{titulo}' NÃO enviado")
+            return
         msg = f"*JOB Serenus*\n{titulo}"
         if descricao:
             msg += f"\n{descricao}"
-        if link:
+        # Se a descrição já traz um link (ex: confirmação de atividade), não duplica com o link genérico
+        if link and 'http' not in (descricao or ''):
             url = link if link.startswith('http') else _SITE_BASE_URL + link
             msg += f"\n\n{url}"
         for f in fones:
+            fone_mascarado = f[:4] + '****' + f[-2:]
             try:
-                _rq.post(f"{WASPEED_BASE}/api/enviar-texto/{token}",
-                         json={"phone": f, "message": msg}, timeout=15)
-            except Exception:
-                pass
+                resp = _rq.post(f"{WASPEED_BASE}/api/enviar-texto/{token}",
+                                json={"phone": f, "message": msg}, timeout=15)
+                try:
+                    j = resp.json()
+                except Exception:
+                    j = {}
+                if j.get('success'):
+                    app.logger.info(f"[NOTIF-WPP] OK -> {fone_mascarado} | '{titulo}'")
+                else:
+                    app.logger.warning(f"[NOTIF-WPP] FALHOU -> {fone_mascarado} | http={resp.status_code} | resposta={j or resp.text[:200]}")
+            except Exception as e:
+                app.logger.warning(f"[NOTIF-WPP] ERRO DE REDE -> {fone_mascarado} | {e}")
     except Exception as e:
-        try: app.logger.warning(f"[NOTIF-WPP] {e}")
+        try: app.logger.warning(f"[NOTIF-WPP] erro geral: {e}")
         except Exception: pass
 
 
@@ -9212,6 +9230,26 @@ def email_click(token):
     return redirect("https://serenuscorretora.com.br")
 
 
+@app.route('/a/<token>')
+def agenda_confirmar(token):
+    """Link de 1 toque dentro do lembrete do WhatsApp: consultor confirma que viu
+    a atividade e vai executar. Não exige login (aberto direto do celular)."""
+    conn = db()
+    a = conn.execute("SELECT * FROM crm_agenda WHERE confirmar_token=?", (token,)).fetchone()
+    if not a:
+        close_db(conn); abort(404)
+    ad = dict(a)
+    ja_confirmado = bool(ad.get('confirmado_em'))
+    if not ja_confirmado:
+        conn.execute("UPDATE crm_agenda SET confirmado_em=? WHERE id=?", (_agora_sp(), ad['id']))
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                     (ad['lead_id'], 'Sistema', 'agendamento',
+                      f'"{ad.get("assunto")}" — confirmado: viu o lembrete e vai executar', _agora_sp()))
+        conn.commit()
+    close_db(conn)
+    return render_template('agenda_confirmado.html', assunto=ad.get('assunto'), ja_confirmado=ja_confirmado)
+
+
 def _notificar_leads_parados():
     """Diário: avisa cada consultor dos leads ativos sem atividade há 7+ dias."""
     try:
@@ -9248,18 +9286,21 @@ def _enviar_lembretes_agenda():
             (limite,)).fetchall()
         for r in rows:
             d = dict(r)
-            conn.execute("UPDATE crm_agenda SET lembrete_enviado=1 WHERE id=?", (d['id'],))
+            token = d.get('confirmar_token') or secrets.token_urlsafe(9)
+            conn.execute("UPDATE crm_agenda SET lembrete_enviado=1, confirmar_token=? WHERE id=?", (token, d['id']))
             conn.commit()
+            app.logger.info(f"[AGENDA] disparando lembrete id={d['id']} usuario_id={d.get('usuario_id')} assunto={d.get('assunto')!r}")
             try:
                 partes = [f"Lead: {d.get('lead_nome')}", f"Quando: {_fmt_datahora_br(d.get('data_hora'))}"]
                 if d.get('lead_tel'):
                     partes.append(f"Telefone: {d.get('lead_tel')}")
                 if d.get('descricao'):
                     partes.append(f"Detalhes: {d.get('descricao')}")
+                partes.append(f"\nJá vi e vou executar: {_SITE_BASE_URL}/a/{token}")
                 _notificar(d.get('usuario_id'), 'lead', f"Lembrete: {d.get('assunto')}",
                            '\n'.join(partes), '/crm/agenda')
-            except Exception:
-                pass
+            except Exception as e:
+                app.logger.warning(f"[AGENDA] falha ao notificar lembrete id={d['id']}: {e}")
         close_db(conn)
     except Exception as e:
         try: app.logger.warning(f"[AGENDA] lembretes: {e}")

@@ -45,7 +45,7 @@
 <div class="ag-card {{ classe }}">
   <div class="ag-hora">{{ a.data_hora_br }}</div>
   <div class="ag-info">
-    <div class="ag-assunto">{{ a.assunto }}</div>
+    <div class="ag-assunto">{{ a.assunto }}{% if a.confirmado_em %} <span style="font-size:10px;color:var(--verde);font-weight:600;">· Visto e confirmado</span>{% endif %}</div>
     <div class="ag-lead">Lead: <strong>{{ a.lead_nome }}</strong>{% if a.lead_tel %} · {{ a.lead_tel }}{% endif %}
       {% if ver_todos and a.usuario_nome %} <span class="ag-resp">{{ a.usuario_nome }}</span>{% endif %}</div>
     {% if a.descricao %}<div class="ag-desc">{{ a.descricao }}</div>{% endif %}

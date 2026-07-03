@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Confirmar atividade · JOB Serenus</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; background:#0c0c12; color:#eef0f6;
+    min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .box { width:100%; max-width:420px; background:#15151e; border:1px solid rgba(255,255,255,.08); border-radius:18px; padding:28px 24px; text-align:center; }
+  .marca { font-size:20px; font-weight:800; letter-spacing:2px; margin-bottom:4px; }
+  .marca span { color:#3b82f6; }
+  .sub { font-size:11px; color:#646b80; text-transform:uppercase; letter-spacing:1.5px; margin-bottom:22px; }
+  .check { width:56px; height:56px; margin:0 auto 16px; border-radius:50%; background:rgba(31,216,164,.12); display:flex; align-items:center; justify-content:center; }
+  .check svg { width:28px; height:28px; }
+  .ok { color:#1fd8a4; font-size:16px; font-weight:700; margin-bottom:8px; }
+  .assunto { font-size:14px; color:#c8cdda; margin-bottom:4px; }
+  .hint { font-size:12px; color:#646b80; margin-top:16px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="marca">JOB <span>Serenus</span></div>
+  <div class="sub">Confirmação de atividade</div>
+  <div class="check"><svg viewBox="0 0 24 24" fill="none" stroke="#1fd8a4" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></div>
+  <div class="ok">{% if ja_confirmado %}Já estava confirmado{% else %}Confirmado!{% endif %}</div>
+  <div class="assunto">"{{ assunto }}"</div>
+  <div class="hint">Registrado no JOB que você viu este lembrete e vai executar.<br>Pode fechar esta página.</div>
+</div>
+</body>
+</html>
