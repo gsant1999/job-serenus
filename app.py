@@ -771,6 +771,12 @@ def init_db():
                 operadora TEXT, tipo TEXT, titulo TEXT NOT NULL, descricao TEXT, conteudo TEXT, arquivo TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS material_apoio_pasta (
+                id SERIAL PRIMARY KEY,
+                operadora TEXT NOT NULL, nome TEXT NOT NULL,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(operadora, nome)
+            )""",
             """CREATE TABLE IF NOT EXISTS cotacao_legenda_modelo (
                 id SERIAL PRIMARY KEY,
                 nome TEXT NOT NULL,
@@ -1067,6 +1073,12 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             operadora TEXT, tipo TEXT, titulo TEXT NOT NULL, descricao TEXT, conteudo TEXT, arquivo TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS material_apoio_pasta (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operadora TEXT NOT NULL, nome TEXT NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(operadora, nome)
         );
         CREATE TABLE IF NOT EXISTS cotacao_legenda_modelo (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -8136,6 +8148,14 @@ def material_apoio():
         if op not in grupos:
             grupos[op] = {'operadora': op, 'logo': _logo_operadora_url(conn, op), 'tipos': {}}
         grupos[op]['tipos'].setdefault(tp, []).append(d)
+    # Pastas criadas explicitamente (mesmo sem nenhum item ainda) — só faz sentido no navegador, não na busca
+    if not q:
+        for pr in conn.execute("SELECT operadora, nome FROM material_apoio_pasta ORDER BY operadora, nome").fetchall():
+            pd = dict(pr)
+            op = pd['operadora']
+            if op not in grupos:
+                grupos[op] = {'operadora': op, 'logo': _logo_operadora_url(conn, op), 'tipos': {}}
+            grupos[op]['tipos'].setdefault(pd['nome'], [])
     grupos_l = []
     for g in grupos.values():
         g['caixas'] = [{'tipo': t, 'itens': it} for t, it in g['tipos'].items()]
@@ -8175,21 +8195,24 @@ def _extrair_texto_pdf(file_obj):
 @admin_required
 def material_apoio_novo():
     import io as _io
+    from urllib.parse import quote
     d = request.form
     titulo = (d.get('titulo') or '').strip()
     if not titulo:
         return redirect('/material-apoio')
     arquivo = None
     conteudo = ''
+    falha_upload = False
     f = request.files.get('arquivo')
     if f and f.filename:
         data = f.read()
         ext = os.path.splitext(f.filename)[1].lower()
-        arquivo = _sanitizar_filename(f'material_{secrets.token_hex(4)}{ext}')
+        nome_gerado = _sanitizar_filename(f'material_{secrets.token_hex(4)}{ext}')
         try:
-            upload_arquivo_r2(_io.BytesIO(data), f'material/{arquivo}')
+            upload_arquivo_r2(_io.BytesIO(data), f'material/{nome_gerado}')
+            arquivo = nome_gerado
         except Exception as e:
-            app.logger.error(f"[MATERIAL] upload falhou: {e}"); arquivo = None
+            app.logger.error(f"[MATERIAL] upload falhou: {e}"); falha_upload = True
         if ext == '.pdf':
             try:
                 conteudo = _extrair_texto_pdf(_io.BytesIO(data))
@@ -8200,6 +8223,9 @@ def material_apoio_novo():
                  ((d.get('operadora') or '').strip(), (d.get('tipo') or '').strip(),
                   titulo, (d.get('descricao') or '').strip(), conteudo, arquivo))
     conn.commit(); close_db(conn)
+    if falha_upload:
+        return redirect('/material-apoio?erro=' + quote(
+            f'"{titulo}" foi salvo, mas o ARQUIVO não pôde ser anexado (falha no upload). Tente anexar de novo editando o item.'))
     return redirect('/material-apoio')
 
 
@@ -8208,6 +8234,41 @@ def material_apoio_novo():
 @admin_required
 def material_apoio_excluir(mid):
     conn = db(); conn.execute("DELETE FROM material_apoio WHERE id=?", (mid,)); conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/material-apoio/pasta/nova', methods=['POST'])
+@login_required
+@admin_required
+def material_apoio_pasta_nova():
+    """Cria uma pasta (tipo) vazia dentro de uma operadora — pra organizar antes de ter itens."""
+    d = request.json or {}
+    operadora = (d.get('operadora') or '').strip()
+    nome = (d.get('nome') or '').strip()
+    if not operadora or not nome:
+        return jsonify({"ok": False, "erro": "Operadora e nome da pasta são obrigatórios"}), 400
+    conn = db()
+    try:
+        conn.execute("INSERT INTO material_apoio_pasta (operadora, nome) VALUES (?, ?)", (operadora, nome))
+        conn.commit()
+    except Exception:
+        pass  # já existe (UNIQUE operadora+nome) — não é erro, pasta já está lá
+    close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/material-apoio/pasta/excluir', methods=['POST'])
+@login_required
+@admin_required
+def material_apoio_pasta_excluir():
+    """Exclui uma pasta vazia. Só remove o registro de pasta — nunca mexe em itens
+    (se a pasta tiver itens, ela reaparece automaticamente pois é inferida deles também)."""
+    d = request.json or {}
+    operadora = (d.get('operadora') or '').strip()
+    nome = (d.get('nome') or '').strip()
+    conn = db()
+    conn.execute("DELETE FROM material_apoio_pasta WHERE operadora=? AND nome=?", (operadora, nome))
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 
@@ -8324,7 +8385,9 @@ def cotacao_documento(cid):
 @app.route('/cotacao/<int:cid>/reabrir')
 @login_required
 def cotacao_reabrir(cid):
-    """Reabre a cotação no construtor pré-preenchida (mantém o mesmo link ao salvar)."""
+    """Reabre a cotação no construtor pré-preenchida. Ao salvar, SEMPRE cria uma cotação
+    nova com link próprio (ver comentário em /cotacao/salvar) — esta cotação original
+    não é alterada."""
     conn = db()
     c = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
     if not c:

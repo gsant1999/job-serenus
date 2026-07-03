@@ -89,7 +89,7 @@
 
 <div class="toolbar">
   {% if not publico %}<a class="btn-voltar" href="/cotacao/salvas">Voltar</a>
-  <a class="btn-voltar" href="/cotacao/{{ cot.id }}/reabrir" style="border-color:rgba(250,204,21,.6);color:#fde047;" title="Cria uma nova cotação (novo link) com base nesta">Nova versão</a>{% endif %}
+  <a class="btn-voltar" href="/cotacao/{{ cot.id }}/reabrir" style="border-color:rgba(250,204,21,.6);color:#fde047;font-weight:700;" title="Cria uma cotação nova com link próprio. Esta cotação atual não é alterada.">+ Nova cotação (link novo)</a>{% endif %}
   <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="document.getElementById('documento').classList.toggle('destacar')">Destacar planos</button>
   <div style="position:relative;display:inline-block;">
     <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="toggleLegendas()">Legenda</button>
@@ -106,8 +106,8 @@
     </div>
   </div>
   {% if not publico and cot.token %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLink()">Copiar link</button>{% endif %}
-  {% if not publico %}<button class="btn-voltar" id="btn-editar" style="border-color:rgba(251,146,60,.7);color:#fb923c" onclick="toggleEditar()">Editar valores</button>
-  <button class="btn-img" id="btn-salvar-aj" style="display:none;background:#fb923c;color:#1c1c24" onclick="salvarAjustes({{ cot.id }})">Salvar ajustes</button>{% endif %}
+  {% if not publico %}<button class="btn-voltar" id="btn-editar" style="border-color:rgba(251,146,60,.7);color:#fb923c" onclick="toggleEditar()" title="Corrige um valor SÓ nesta cotação, sem trocar o link. Se o cliente já tem este link, ele verá o valor corrigido.">Corrigir valor (mesmo link)</button>
+  <button class="btn-img" id="btn-salvar-aj" style="display:none;background:#fb923c;color:#1c1c24" onclick="salvarAjustes({{ cot.id }})">Salvar correção</button>{% endif %}
   <button class="btn-img" onclick="copiarImagem()">Copiar imagem</button>
   <button class="btn-img" style="background:#9aa0b0;color:#1c1c24" onclick="baixarImagem()">Baixar</button>
   <button class="btn-pdf" onclick="window.print()">PDF</button>
@@ -201,11 +201,12 @@ function toggleEditar() {
   var doc = document.getElementById('documento');
   var on = doc.classList.toggle('editando');
   document.querySelectorAll('.preco-cell').forEach(function(c){ c.setAttribute('contenteditable', on ? 'true' : 'false'); });
-  document.getElementById('btn-editar').textContent = on ? 'Cancelar edição' : 'Editar valores';
+  document.getElementById('btn-editar').textContent = on ? 'Cancelar' : 'Corrigir valor (mesmo link)';
   document.getElementById('btn-salvar-aj').style.display = on ? 'inline-block' : 'none';
 }
 function _numBR(s){ s=(s||'').replace(/[^\d,.-]/g,'').replace(/\./g,'').replace(',','.'); var n=parseFloat(s); return isNaN(n)?0:n; }
 function salvarAjustes(cid) {
+  if (!confirm('Isso corrige o valor NESTA cotação — o link continua o mesmo. Se o cliente já recebeu este link, ele vai ver o valor novo.\n\nPara criar uma cotação separada com link próprio, cancele e use "Nova cotação (link novo)".\n\nConfirmar correção?')) return;
   var ajustes = {};
   document.querySelectorAll('.preco-cell').forEach(function(c){
     var p=c.getAttribute('data-p'), f=c.getAttribute('data-f');

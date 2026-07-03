@@ -154,7 +154,9 @@
   <div class="ma-layout">
     <!-- Sidebar: lista de operadoras -->
     <div class="ma-sidebar">
-      <div class="ma-sidebar-head">Operadoras <span style="font-size:10px;color:var(--cinza-2);text-transform:none;letter-spacing:0;">{{ grupos|length }}</span></div>
+      <div class="ma-sidebar-head">Operadoras <span style="font-size:10px;color:var(--cinza-2);text-transform:none;letter-spacing:0;">{{ grupos|length }}</span>
+        {% if eh_admin %}<button onclick="novaPastaPrompt(null)" title="Nova pasta (escolha ou digite a operadora)" style="background:transparent;border:1px solid var(--borda);color:var(--azul);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;">+ Pasta</button>{% endif %}
+      </div>
       {% for g in grupos %}
       {% set total_itens = g.caixas|map(attribute='itens')|map('length')|sum %}
       <div class="op-item" id="op-{{ loop.index0 }}" onclick="abrirOperadora({{ loop.index0 }})">
@@ -218,10 +220,24 @@
       var icon = PASTA_ICONES[cx.tipo] || '&#128193;';
       var card = document.createElement('div');
       card.className = 'pasta-card';
-      card.innerHTML = '<div class="pasta-icon">' + icon + '</div><div class="pasta-nm">' + cx.tipo + '</div><div class="pasta-cnt">' + cx.itens.length + ' item(s)</div>';
-      card.onclick = function(){ abrirTipo(ci); };
+      var html = '<div class="pasta-icon">' + icon + '</div><div class="pasta-nm">' + cx.tipo + '</div><div class="pasta-cnt">' + cx.itens.length + ' item(s)</div>';
+      {% if eh_admin %}
+      if (cx.itens.length === 0) {
+        html += '<button onclick="event.stopPropagation();excluirPasta(\'' + escHtml(g.operadora) + '\',\'' + escHtml(cx.tipo) + '\')" style="margin-top:2px;background:transparent;border:1px solid rgba(244,63,94,.3);color:var(--erro);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;">Excluir pasta vazia</button>';
+      }
+      {% endif %}
+      card.innerHTML = html;
+      card.addEventListener('click', function(e){ if (e.target.tagName !== 'BUTTON') abrirTipo(ci); });
       grid.appendChild(card);
     });
+    {% if eh_admin %}
+    var addCard = document.createElement('div');
+    addCard.className = 'pasta-card';
+    addCard.style.borderStyle = 'dashed';
+    addCard.innerHTML = '<div class="pasta-icon">+</div><div class="pasta-nm">Nova pasta</div>';
+    addCard.onclick = function(){ novaPastaPrompt(g.operadora); };
+    grid.appendChild(addCard);
+    {% endif %}
     show('vista-pastas'); hide('vista-itens'); hide('vista-inicial');
   }
 
@@ -265,6 +281,29 @@
   function show(id){ document.getElementById(id).style.display=''; }
   function hide(id){ document.getElementById(id).style.display='none'; }
   function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  function novaPastaPrompt(operadoraFixa){
+    var operadora = operadoraFixa;
+    if(!operadora){
+      operadora = window.prompt('Nome da operadora (nova ou existente):');
+      if(!operadora || !operadora.trim()) return;
+      operadora = operadora.trim();
+    }
+    var nome = window.prompt('Nome da pasta (ex: Regras comerciais, Tabela de venda...):');
+    if(!nome || !nome.trim()) return;
+    fetch('/material-apoio/pasta/nova', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({operadora: operadora, nome: nome.trim()})})
+      .then(r=>r.json()).then(function(d){ if(d.ok) location.reload(); else toast(d.erro||'Erro ao criar pasta','err'); })
+      .catch(function(){ toast('Erro de conexão.','err'); });
+  }
+
+  function excluirPasta(operadora, nome){
+    if(!confirm('Excluir a pasta "'+nome+'"? (só funciona se estiver vazia)')) return;
+    fetch('/material-apoio/pasta/excluir', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({operadora: operadora, nome: nome})})
+      .then(r=>r.json()).then(function(d){ if(d.ok) location.reload(); else toast('Erro ao excluir pasta','err'); })
+      .catch(function(){ toast('Erro de conexão.','err'); });
+  }
   </script>
 
 {% else %}
@@ -272,6 +311,10 @@
 {% endif %}
 
 <script>
+(function(){
+  var erro = new URLSearchParams(window.location.search).get('erro');
+  if(erro){ toast(erro, 'err'); history.replaceState({}, '', '/material-apoio'); }
+})();
 function fmt(cmd){ document.getElementById('rt-edit').focus(); document.execCommand(cmd,false,null); }
 function fmtBloco(tag){ document.getElementById('rt-edit').focus(); document.execCommand('formatBlock',false,tag); }
 function destacar(){ document.getElementById('rt-edit').focus(); document.execCommand('hiliteColor',false,'#fde047') || document.execCommand('backColor',false,'#fde047'); }
