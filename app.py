@@ -9679,6 +9679,35 @@ def _waspeed_normaliza_fone(telefone):
         n = '55' + n
     return n
 
+
+@app.route('/admin/testar-whatsapp', methods=['POST'])
+@login_required
+@admin_required
+def testar_whatsapp():
+    """Testa envio de WhatsApp via WaSpeed (token global WASPEED_TOKEN) pra qualquer telefone.
+    Uso: diagnóstico rápido sem precisar criar lead/atividade."""
+    import requests as _rq
+    d = request.json or {}
+    fone = _waspeed_normaliza_fone(d.get('telefone') or '')
+    mensagem = (d.get('mensagem') or 'JOB - Teste de envio via WaSpeed').strip()
+    token = os.environ.get('WASPEED_TOKEN', '').strip()
+    if not token:
+        return jsonify({"ok": False, "erro": "WASPEED_TOKEN não configurada no Railway."}), 400
+    if not fone:
+        return jsonify({"ok": False, "erro": "Telefone inválido."}), 400
+    try:
+        r = _rq.post(f"{WASPEED_BASE}/api/enviar-texto/{token}",
+                      json={"phone": fone, "message": mensagem}, timeout=15)
+        try:
+            j = r.json()
+        except Exception:
+            j = {"raw": r.text[:300]}
+        return jsonify({"ok": bool(j.get('success')), "http_status": r.status_code,
+                        "resposta_waspeed": j, "telefone_normalizado": fone})
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)[:300]}), 200
+
+
 @app.route('/crm/lead/<int:lid>/whatsapp', methods=['POST'])
 @login_required
 def crm_lead_whatsapp(lid):
