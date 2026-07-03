@@ -190,6 +190,11 @@
           </select>
         </div>
       </div>
+      <div class="campo" style="margin-bottom:12px;">
+        <label>Token WhatsApp pessoal (WaSpeed) — opcional</label>
+        <input type="text" name="waspeed_token" id="e-waspeed-token" placeholder="Deixe em branco para usar o WhatsApp compartilhado (padrão)">
+        <div class="hint">Se preenchido, as mensagens enviadas a leads por este usuário saem do WhatsApp PESSOAL dele (conectado via WaSpeed), não do compartilhado. Pra conseguir o token: crie uma conta em wascript.com.br, conecte o WhatsApp desta pessoa escaneando o QR code, e cole aqui o token gerado.</div>
+      </div>
       <div class="form-row form-row-2" style="margin-bottom:14px;" id="e-fixopix-wrap">
         <div class="campo" id="e-fixo-wrap">
           <label>Fixo mensal (R$)</label>
@@ -302,6 +307,7 @@ function editar(u) {
   document.getElementById('e-cpf').value    = u.cpf  || '';
   document.getElementById('e-email').value  = u.email || '';
   document.getElementById('e-telefone').value = u.telefone || '';
+  document.getElementById('e-waspeed-token').value = u.waspeed_token || '';
   document.getElementById('e-perfil').value = u.perfil || 'consultor';
   document.getElementById('e-regime').value = u.regime_base || '';
   document.getElementById('e-ativo').checked = !!u.ativo;

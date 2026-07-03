@@ -5403,9 +5403,10 @@ def usuario_editar(uid):
         if ext in ('.png','.jpg','.jpeg','.webp'):
             foto_nome = f"perfil_{uid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}{ext}"
             fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
-    conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=?,telefone=? WHERE id=?""",
+    conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=?,telefone=?,waspeed_token=? WHERE id=?""",
         (d['nome'],d['email'].lower(),d['perfil'],
-         (d['regime_base'] if d['perfil']=='consultor' else ''),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,d.get('telefone','').strip(),uid))
+         (d['regime_base'] if d['perfil']=='consultor' else ''),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,
+         d.get('telefone','').strip(),d.get('waspeed_token','').strip() or None,uid))
     conn.commit(); close_db(conn)
     return redirect(url_for('usuarios'))
 
