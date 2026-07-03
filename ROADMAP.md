@@ -9,6 +9,7 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 - [ ] MedSênior PF — falta registro de `recebimento`
 - [ ] "Melhorar sistema de idades" na cotação (feedback Danilo — detalhar o que incomoda) (?)
 - [ ] Rotacionar chaves expostas (Postgres, ASAAS_API_KEY, BREVO_API_KEY)
+- [x] **Transferência em massa de leads**: filtros por etapa/data/busca, selecionar "de" e "para" consultor, transferir N leads de uma vez (admin only) com registro na timeline
 
 ## CRM (feedback Danilo 30/06/2026)
 

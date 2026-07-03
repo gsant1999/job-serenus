@@ -10303,6 +10303,77 @@ def admin_crm_corrigir_leads():
 
 
 # ─── CRM CONFIG ───────────────────────────────────────────────────
+@app.route('/crm/transferir-em-massa', methods=['POST'])
+@login_required
+def crm_transferir_em_massa():
+    """Transferência em massa de leads (filtros) de um consultor para outro. Admin only."""
+    if session.get('perfil') != 'admin':
+        return jsonify({"ok": False, "erro": "Apenas administrador"}), 403
+    d = request.json or {}
+    consultor_de = d.get('consultor_de', '').strip()
+    consultor_para = d.get('consultor_para', '').strip()
+    if not consultor_de or not consultor_para:
+        return jsonify({"ok": False, "erro": "Consultor de origem e destino obrigatórios"}), 400
+    if consultor_de == consultor_para:
+        return jsonify({"ok": False, "erro": "Consultor de origem e destino devem ser diferentes"}), 400
+    try:
+        cde = int(consultor_de)
+        cpa = int(consultor_para)
+    except ValueError:
+        return jsonify({"ok": False, "erro": "IDs de consultor inválidos"}), 400
+    conn = db()
+    # Valida que ambos os consultores existem
+    check_de = conn.execute("SELECT nome FROM usuarios WHERE id=? AND ativo=1", (cde,)).fetchone()
+    check_pa = conn.execute("SELECT nome FROM usuarios WHERE id=? AND ativo=1", (cpa,)).fetchone()
+    if not check_de or not check_pa:
+        close_db(conn); return jsonify({"ok": False, "erro": "Um ou ambos os consultores não existem"}), 404
+    nde = dict(check_de)['nome']
+    npa = dict(check_pa)['nome']
+    # Filtros (mesmos do GET /crm)
+    f_etapa = (d.get('etapa') or '').strip()
+    f_origem = (d.get('origem') or '').strip()
+    f_data_de = (d.get('data_de') or '').strip()
+    f_data_ate = (d.get('data_ate') or '').strip()
+    f_busca = (d.get('q') or '').strip()
+    # Monta query
+    sql = "SELECT id FROM crm_leads WHERE responsavel_id=?"
+    params = [cde]
+    if f_etapa:
+        sql += " AND etapa=?"
+        params.append(f_etapa)
+    if f_origem:
+        sql += " AND origem=?"
+        params.append(f_origem)
+    if f_data_de:
+        sql += " AND DATE(criado_em) >= ?"
+        params.append(f_data_de)
+    if f_data_ate:
+        sql += " AND DATE(criado_em) <= ?"
+        params.append(f_data_ate)
+    if f_busca:
+        sql += " AND (nome LIKE ? OR telefone LIKE ? OR email LIKE ?)"
+        busca_like = '%' + f_busca + '%'
+        params.extend([busca_like, busca_like, busca_like])
+    leads_a_transferir = conn.execute(sql, params).fetchall()
+    qtd = len(leads_a_transferir)
+    if not qtd:
+        close_db(conn)
+        return jsonify({"ok": True, "transferidos": 0, "msg": "Nenhum lead encontrado com esses filtros"})
+    # Transfere
+    for r in leads_a_transferir:
+        lid = dict(r)['id']
+        conn.execute("UPDATE crm_leads SET responsavel_id=?, atualizado_em=? WHERE id=?",
+                    (cpa, _agora_sp(), lid))
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                    (lid, 'Sistema', 'transferencia', f"Lead transferido de {nde} para {npa}", _agora_sp()))
+    conn.commit()
+    close_db(conn)
+    # Notifica o novo responsável (resumo)
+    _notificar(cpa, 'lead', 'Leads transferidos',
+               f"Você recebeu {qtd} lead(s) de {nde}", '/crm')
+    return jsonify({"ok": True, "transferidos": qtd, "de": nde, "para": npa})
+
+
 @app.route('/crm/config')
 @login_required
 def crm_config():
