@@ -368,52 +368,6 @@
           <button class="btn-outline btn-sm" style="width:100%;" onclick="fechar('modal-email-contato')">Cancelar</button>
         </div>
       </div>
-
-      <!-- Modal: Transferência em massa -->
-      <div class="modal-overlay" id="modal-transferencia" style="z-index:1100;">
-        <div style="background:var(--panel); border:1px solid var(--borda); border-radius:16px; padding:22px; width:min(500px, 92vw); margin:auto;">
-          <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:14px;">Transferência em massa de leads</h3>
-          <div style="display:grid; gap:12px; margin-bottom:16px;">
-            <div>
-              <label style="font-size:11px; font-weight:600; color:var(--cinza); text-transform:uppercase; display:block; margin-bottom:4px;">De (consultor origem)</label>
-              <select id="t-de" style="width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 10px; color:var(--texto); font-size:13px; outline:none;">
-                <option value="">Selecione</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:11px; font-weight:600; color:var(--cinza); text-transform:uppercase; display:block; margin-bottom:4px;">Para (consultor destino)</label>
-              <select id="t-para" style="width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 10px; color:var(--texto); font-size:13px; outline:none;">
-                <option value="">Selecione</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:11px; font-weight:600; color:var(--cinza); text-transform:uppercase; display:block; margin-bottom:4px;">Etapa (opcional)</label>
-              <select id="t-etapa" style="width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 10px; color:var(--texto); font-size:13px; outline:none;">
-                <option value="">Todas</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size:11px; font-weight:600; color:var(--cinza); text-transform:uppercase; display:block; margin-bottom:4px;">Data: De</label>
-              <input type="date" id="t-data-de" style="width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 10px; color:var(--texto); font-size:13px; outline:none;">
-            </div>
-            <div>
-              <label style="font-size:11px; font-weight:600; color:var(--cinza); text-transform:uppercase; display:block; margin-bottom:4px;">Data: Até</label>
-              <input type="date" id="t-data-ate" style="width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 10px; color:var(--texto); font-size:13px; outline:none;">
-            </div>
-            <div>
-              <label style="font-size:11px; font-weight:600; color:var(--cinza); text-transform:uppercase; display:block; margin-bottom:4px;">Buscar por (nome, telefone, email)</label>
-              <input type="text" id="t-busca" placeholder="Opcional" style="width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 10px; color:var(--texto); font-size:13px; outline:none;">
-            </div>
-          </div>
-          <div style="background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px; font-size:12px; color:var(--cinza-2); margin-bottom:16px; line-height:1.5;">
-            <strong>Como funciona:</strong> Selecione o consultor de origem, o consultor de destino e aplique filtros (data, etapa, busca). Clique em "Transferir" para mover todos os leads encontrados.
-          </div>
-          <div style="display:flex; gap:8px;">
-            <button class="btn-outline btn-sm" style="flex:1;" onclick="fechar('modal-transferencia')">Cancelar</button>
-            <button style="flex:1; background:var(--azul); color:#fff; border:none; padding:9px 14px; border-radius:7px; font-size:12px; font-weight:600; cursor:pointer;" onclick="executarTransferencia()">Transferir</button>
-          </div>
-        </div>
-      </div>
     </div>
 
     <div class="ficha-right">
@@ -551,6 +505,52 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Transferência em massa -->
+<div class="modal-overlay" id="modal-transferencia">
+  <div style="background:var(--panel); border:1px solid var(--borda); border-radius:16px; padding:22px; width:min(500px, 92vw); margin:auto;">
+    <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:14px;">Transferência em massa de leads</h3>
+    <div style="display:grid; gap:12px; margin-bottom:16px;">
+      <div>
+        <label style="font-size:11px; font-weight:600; color:var(--cinza); text-transform:uppercase; display:block; margin-bottom:4px;">De (consultor origem)</label>
+        <select id="t-de" style="width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 10px; color:var(--texto); font-size:13px; outline:none;">
+          <option value="">Selecione</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px; font-weight:600; color:var(--cinza); text-transform:uppercase; display:block; margin-bottom:4px;">Para (consultor destino)</label>
+        <select id="t-para" style="width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 10px; color:var(--texto); font-size:13px; outline:none;">
+          <option value="">Selecione</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px; font-weight:600; color:var(--cinza); text-transform:uppercase; display:block; margin-bottom:4px;">Etapa (opcional)</label>
+        <select id="t-etapa" style="width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 10px; color:var(--texto); font-size:13px; outline:none;">
+          <option value="">Todas</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px; font-weight:600; color:var(--cinza); text-transform:uppercase; display:block; margin-bottom:4px;">Data: De</label>
+        <input type="date" id="t-data-de" style="width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 10px; color:var(--texto); font-size:13px; outline:none;">
+      </div>
+      <div>
+        <label style="font-size:11px; font-weight:600; color:var(--cinza); text-transform:uppercase; display:block; margin-bottom:4px;">Data: Até</label>
+        <input type="date" id="t-data-ate" style="width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 10px; color:var(--texto); font-size:13px; outline:none;">
+      </div>
+      <div>
+        <label style="font-size:11px; font-weight:600; color:var(--cinza); text-transform:uppercase; display:block; margin-bottom:4px;">Buscar por (nome, telefone, email)</label>
+        <input type="text" id="t-busca" placeholder="Opcional" style="width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:9px 10px; color:var(--texto); font-size:13px; outline:none;">
+      </div>
+    </div>
+    <div style="background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px; font-size:12px; color:var(--cinza-2); margin-bottom:16px; line-height:1.5;">
+      <strong>Como funciona:</strong> Selecione o consultor de origem, o consultor de destino e aplique filtros (data, etapa, busca). Clique em "Transferir" para mover todos os leads encontrados.
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn-outline btn-sm" style="flex:1;" onclick="fechar('modal-transferencia')">Cancelar</button>
+      <button style="flex:1; background:var(--azul); color:#fff; border:none; padding:9px 14px; border-radius:7px; font-size:12px; font-weight:600; cursor:pointer;" onclick="executarTransferencia()">Transferir</button>
     </div>
   </div>
 </div>
