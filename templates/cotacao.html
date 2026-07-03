@@ -76,7 +76,9 @@
     <div class="cot-sec-tit">1. Quem vai usar o plano</div>
     <div class="cot-row">
       <div class="fg2"><label>Idades ou datas de nascimento</label>
-        <input class="idades" type="text" name="idades" value="{{ idades_txt }}" placeholder="Ex: 25, 30 e 15/03/1990" autocomplete="off" autofocus></div>
+        <input class="idades" type="text" name="idades" value="{{ idades_txt }}" placeholder="Ex: 25, 30 e 15/03/1990" autocomplete="off" autofocus>
+        <div style="font-size:11px; color:var(--cinza-2); margin-top:4px; line-height:1.5;">Separe cada pessoa por vírgula ou "e". Pode digitar a idade (ex: 25) ou a data de nascimento completa (ex: 15/03/1990) — os dois formatos podem se misturar na mesma cotação.</div>
+      </div>
       <div class="fg2"><label>Modalidade</label>
         <select name="modalidade"><option value="">Todas</option>{% for m in modalidades %}<option value="{{ m }}" {{ 'selected' if filtros.modalidade == m }}>{{ m }}</option>{% endfor %}</select></div>
       <div class="fg2"><label>Tipo de CNPJ</label>
