@@ -347,7 +347,7 @@
 
       <div class="ficha-acoes">
         <button class="btn-ficha btn-salvar" onclick="salvarFicha()">Salvar</button>
-        <button class="btn-ficha" style="background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirEmailContato()">E-mail de contato</button>
+        <button class="btn-ficha" style="background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirEmailContato()" title="Manda um e-mail pro lead pedindo pra chamar o corretor no WhatsApp — pra quando o telefone dele está errado ou não conseguiu falar por telefone">Corrigir contato (e-mail)</button>
         <button class="btn-ficha btn-excluir" onclick="excluirFicha()">Excluir</button>
       </div>
 
@@ -456,6 +456,7 @@
               <input type="datetime-local" id="ag-data" class="campo-input">
             </div>
             <textarea id="ag-desc" placeholder="Detalhes da conversa agendada (opcional)..." style="min-height:50px;"></textarea>
+            <textarea id="ag-msg-lead" placeholder="Mensagem pronta pro lead (opcional) — deixe já escrito o que vai mandar pro cliente. Fica disponível pra enviar com 1 clique quando o lembrete chegar." style="min-height:50px; margin-top:6px;"></textarea>
             <div class="nova-ativ-footer">
               <span style="font-size:11px;color:var(--cinza);">Lembrete no sino e WhatsApp na hora marcada</span>
               <button class="btn-ficha btn-salvar" style="flex:0;" onclick="agendarAtividade()">Agendar</button>
@@ -846,10 +847,12 @@ async function agendarAtividade(){
   const data=document.getElementById('ag-data').value;
   if(!assunto || !data){ toast('Informe assunto e data/hora','err'); return; }
   const r=await fetch('/crm/lead/'+_leadAtual.id+'/agendar',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({assunto, data_hora:data, descricao:document.getElementById('ag-desc').value.trim()})});
+    body:JSON.stringify({assunto, data_hora:data, descricao:document.getElementById('ag-desc').value.trim(),
+                          mensagem_lead:document.getElementById('ag-msg-lead').value.trim()})});
   const d=await r.json();
   if(d.ok){
-    document.getElementById('ag-assunto').value=''; document.getElementById('ag-data').value=''; document.getElementById('ag-desc').value='';
+    document.getElementById('ag-assunto').value=''; document.getElementById('ag-data').value='';
+    document.getElementById('ag-desc').value=''; document.getElementById('ag-msg-lead').value='';
     toast('Agendado! Lembrete no sino e WhatsApp.','ok');
     carregarAgendaLead();
   } else { toast(d.erro||'Erro ao agendar','err'); }
@@ -862,14 +865,28 @@ async function carregarAgendaLead(){
     const pend=lista.filter(a=>a.status==='pendente');
     if(!pend.length){ el.innerHTML=''; return; }
     el.innerHTML='<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:700;margin-bottom:6px;">Agendadas</div>'+
-      pend.map(a=>'<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--panel-3);border:1px solid var(--borda);border-radius:8px;margin-bottom:5px;font-size:12px;">'+
+      pend.map(a=>'<div style="padding:7px 10px;background:var(--panel-3);border:1px solid var(--borda);border-radius:8px;margin-bottom:5px;font-size:12px;">'+
+        '<div style="display:flex;align-items:center;gap:8px;">'+
         '<strong>'+a.data_hora_br+'</strong><span style="flex:1;">'+a.assunto+'</span>'+
-        '<button class="tipo-btn" onclick="concluirAgLead('+a.id+')">Concluir</button></div>').join('');
+        '<button class="tipo-btn" onclick="concluirAgLead('+a.id+')">Concluir</button></div>'+
+        (a.mensagem_lead && !a.mensagem_lead_enviada ?
+          '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--borda);display:flex;align-items:center;gap:8px;">'+
+          '<span style="flex:1;color:var(--cinza-2);font-size:11px;">Mensagem pronta pro lead</span>'+
+          '<button class="tipo-btn" style="background:#25d366;color:#04221a;border:none;font-weight:700;" onclick="enviarMsgLeadAg('+a.id+',this)">Enviar pro lead</button></div>' :
+          a.mensagem_lead_enviada ? '<div style="margin-top:4px;font-size:10.5px;color:var(--verde);">Mensagem já enviada ao lead</div>' : '')
+        +'</div>').join('');
   }catch(e){ el.innerHTML=''; }
 }
 async function concluirAgLead(id){
   const r=await fetch('/crm/agenda/'+id+'/concluir',{method:'POST'});
   if((await r.json()).ok){ toast('Concluída','ok'); carregarAgendaLead(); }
+}
+async function enviarMsgLeadAg(id, btn){
+  if(btn){ btn.disabled=true; btn.textContent='Enviando...'; }
+  const r=await fetch('/crm/agenda/'+id+'/enviar-lead',{method:'POST'});
+  const d=await r.json();
+  if(d.ok){ toast('Mensagem enviada ao lead!','ok'); carregarAgendaLead(); }
+  else { toast(d.erro||'Erro ao enviar','err'); if(btn){ btn.disabled=false; btn.textContent='Enviar pro lead'; } }
 }
 
 // ── WhatsApp ──

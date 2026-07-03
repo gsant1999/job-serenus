@@ -1350,6 +1350,9 @@ def init_db():
         ("lancamentos", "upload_token", "TEXT"),
         # Telefone do usuário (WhatsApp p/ notificações via WaSpeed e link wa.me nos e-mails)
         ("usuarios", "telefone", "TEXT"),
+        # Mensagem pronta pro lead, escrita já no agendamento (fica 1 clique pra enviar quando o lembrete chegar)
+        ("crm_agenda", "mensagem_lead", "TEXT"),
+        ("crm_agenda", "mensagem_lead_enviada", "INTEGER DEFAULT 0"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -8752,12 +8755,15 @@ def _notificar(usuario_id, tipo, titulo, descricao='', link=''):
         except Exception: pass
     # WhatsApp em thread separada: nunca atrasa nem derruba a requisição
     try:
-        threading.Thread(target=_notificar_whatsapp, args=(usuario_id, titulo, descricao), daemon=True).start()
+        threading.Thread(target=_notificar_whatsapp, args=(usuario_id, titulo, descricao, link), daemon=True).start()
     except Exception:
         pass
 
 
-def _notificar_whatsapp(usuario_id, titulo, descricao):
+_SITE_BASE_URL = "https://job-serenus-production.up.railway.app"
+
+
+def _notificar_whatsapp(usuario_id, titulo, descricao, link=''):
     """Envia a notificação para o WhatsApp do(s) destinatário(s) via WaSpeed.
     Usa o token global (WASPEED_TOKEN — número do Guilherme). Falha em silêncio."""
     token = os.environ.get('WASPEED_TOKEN', '').strip()
@@ -8777,7 +8783,12 @@ def _notificar_whatsapp(usuario_id, titulo, descricao):
             f = _waspeed_normaliza_fone(tel or '')
             if f:
                 fones.add(f)
-        msg = 'JOB - ' + titulo + ('\n' + descricao if descricao else '')
+        msg = f"*JOB Serenus*\n{titulo}"
+        if descricao:
+            msg += f"\n{descricao}"
+        if link:
+            url = link if link.startswith('http') else _SITE_BASE_URL + link
+            msg += f"\n\n{url}"
         for f in fones:
             try:
                 _rq.post(f"{WASPEED_BASE}/api/enviar-texto/{token}",
@@ -8892,10 +8903,10 @@ def crm_lead_agendar(lid):
     data_hora = (d.get('data_hora') or '').strip().replace('T', ' ')[:16]
     if not assunto or not data_hora:
         close_db(conn); return jsonify({"ok": False, "erro": "Informe assunto e data/hora"}), 400
-    conn.execute("""INSERT INTO crm_agenda (lead_id, usuario_id, assunto, descricao, data_hora, criado_em)
-        VALUES (?, ?, ?, ?, ?, ?)""",
+    conn.execute("""INSERT INTO crm_agenda (lead_id, usuario_id, assunto, descricao, data_hora, mensagem_lead, criado_em)
+        VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (lid, session.get('user_id'), assunto, (d.get('descricao') or '').strip(),
-         data_hora, _agora_sp()))
+         data_hora, (d.get('mensagem_lead') or '').strip() or None, _agora_sp()))
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                  (lid, session.get('nome'), 'agendamento',
                   f"Atividade agendada para {_fmt_datahora_br(data_hora)}: {assunto}", _agora_sp()))
@@ -8963,6 +8974,50 @@ def crm_agenda_concluir(aid):
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                  (a['lead_id'], session.get('nome'), 'agendamento',
                   f"Atividade concluída: {a['assunto']}", _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/agenda/<int:aid>/enviar-lead', methods=['POST'])
+@login_required
+def crm_agenda_enviar_lead(aid):
+    """Envia pro WhatsApp do lead a mensagem já escrita no momento do agendamento.
+    1 clique — não dispara sozinho, sempre precisa de alguém confirmar o envio."""
+    import requests as _rq
+    conn = db()
+    a = conn.execute("SELECT * FROM crm_agenda WHERE id=?", (aid,)).fetchone()
+    if not a:
+        close_db(conn); return jsonify({"ok": False, "erro": "Não encontrado"}), 404
+    ad = dict(a)
+    if session.get('perfil') != 'admin' and ad['usuario_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    mensagem = (ad.get('mensagem_lead') or '').strip()
+    if not mensagem:
+        close_db(conn); return jsonify({"ok": False, "erro": "Esta atividade não tem mensagem pronta pro lead"}), 400
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (ad['lead_id'],)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    ld = dict(lead)
+    token = _waspeed_token_do_usuario(conn, session.get('user_id'))
+    if not token:
+        close_db(conn); return jsonify({"ok": False, "erro": "Token WaSpeed não configurado"}), 400
+    fone = _waspeed_normaliza_fone(ld.get('telefone'))
+    if not fone:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead sem telefone válido"}), 400
+    try:
+        resp = _rq.post(f"{WASPEED_BASE}/api/enviar-texto/{token}",
+                        json={"phone": fone, "message": mensagem}, timeout=20)
+        try:
+            j = resp.json()
+        except Exception:
+            j = {}
+        if not j.get('success'):
+            close_db(conn); return jsonify({"ok": False, "erro": f"WaSpeed: {j.get('message','falhou')}"}), 400
+    except Exception as e:
+        close_db(conn); return jsonify({"ok": False, "erro": f"Falha ao enviar: {e}"}), 500
+    conn.execute("UPDATE crm_agenda SET mensagem_lead_enviada=1 WHERE id=?", (aid,))
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                (ad['lead_id'], session.get('nome'), 'whatsapp', f'WhatsApp enviado: {mensagem}', _agora_sp()))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
@@ -9195,11 +9250,13 @@ def _enviar_lembretes_agenda():
             conn.execute("UPDATE crm_agenda SET lembrete_enviado=1 WHERE id=?", (d['id'],))
             conn.commit()
             try:
-                _notificar(d.get('usuario_id'), 'lead', 'Atividade agendada',
-                           f"{d.get('assunto')} — lead {d.get('lead_nome')} "
-                           f"({_fmt_datahora_br(d.get('data_hora'))})"
-                           + (f" tel {d.get('lead_tel')}" if d.get('lead_tel') else ''),
-                           '/crm/agenda')
+                partes = [f"Lead: {d.get('lead_nome')}", f"Quando: {_fmt_datahora_br(d.get('data_hora'))}"]
+                if d.get('lead_tel'):
+                    partes.append(f"Telefone: {d.get('lead_tel')}")
+                if d.get('descricao'):
+                    partes.append(f"Detalhes: {d.get('descricao')}")
+                _notificar(d.get('usuario_id'), 'lead', f"Lembrete: {d.get('assunto')}",
+                           '\n'.join(partes), '/crm/agenda')
             except Exception:
                 pass
         close_db(conn)

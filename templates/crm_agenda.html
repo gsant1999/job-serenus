@@ -49,8 +49,16 @@
     <div class="ag-lead">Lead: <strong>{{ a.lead_nome }}</strong>{% if a.lead_tel %} · {{ a.lead_tel }}{% endif %}
       {% if ver_todos and a.usuario_nome %} <span class="ag-resp">{{ a.usuario_nome }}</span>{% endif %}</div>
     {% if a.descricao %}<div class="ag-desc">{{ a.descricao }}</div>{% endif %}
+    {% if a.mensagem_lead and not a.mensagem_lead_enviada %}
+    <div class="ag-desc" style="margin-top:6px; padding-top:6px; border-top:1px solid var(--borda); color:var(--cinza-2);">Mensagem pronta pro lead: "{{ a.mensagem_lead }}"</div>
+    {% elif a.mensagem_lead_enviada %}
+    <div class="ag-desc" style="margin-top:4px; color:var(--verde); font-size:10.5px;">Mensagem já enviada ao lead</div>
+    {% endif %}
   </div>
   <div class="ag-acoes">
+    {% if a.mensagem_lead and not a.mensagem_lead_enviada %}
+    <button class="b" style="background:#25d366;color:#04221a;border:none;font-weight:700;" onclick="enviarMsgLead({{ a.id }}, this)">Enviar pro lead</button>
+    {% endif %}
     {% if a.lead_tel %}<a class="b b-wpp" target="_blank"
       href="https://wa.me/55{{ a.lead_tel|replace('(','')|replace(')','')|replace('-','')|replace(' ','') }}">WhatsApp</a>{% endif %}
     <a class="b" href="/crm?lead={{ a.lead_id }}">Abrir lead</a>
@@ -84,6 +92,13 @@ async function excluirAg(id){
   if (!confirm('Excluir este agendamento?')) return;
   const r = await fetch('/crm/agenda/'+id+'/excluir', {method:'POST'});
   if ((await r.json()).ok) { toast('Excluído', 'ok'); setTimeout(()=>location.reload(), 500); }
+}
+async function enviarMsgLead(id, btn){
+  if(btn){ btn.disabled=true; btn.textContent='Enviando...'; }
+  const r = await fetch('/crm/agenda/'+id+'/enviar-lead', {method:'POST'});
+  const d = await r.json();
+  if (d.ok) { toast('Mensagem enviada ao lead!', 'ok'); setTimeout(()=>location.reload(), 500); }
+  else { toast(d.erro || 'Erro ao enviar', 'err'); if(btn){ btn.disabled=false; btn.textContent='Enviar pro lead'; } }
 }
 </script>
 {% endblock %}
