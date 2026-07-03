@@ -3791,13 +3791,20 @@ def dashboard():
     conn = db(); uid = session['user_id']
     if session['perfil'] == 'admin':
         m = {}
-        m['propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas WHERE status != 'Excluída'").fetchone()['c']
-        m['vidas'] = conn.execute("SELECT COALESCE(SUM(total_vidas),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
-        m['producao'] = conn.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
-        m['com_bruta'] = conn.execute("SELECT COALESCE(SUM(comissao_total_corretora),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
-        m['com_repasse'] = conn.execute("SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
-        m['com_liquido'] = conn.execute("SELECT COALESCE(SUM(comissao_corretora_liquida),0) v FROM propostas WHERE status != 'Excluída'").fetchone()['v']
-        # Fluxo de caixa: apenas propostas Emitida/Ativa (trava financeira)
+        # Filtro de mês (base mes_meta) — sem isso, virava o mês e a produção de todos os meses
+        # continuava somada junto (ex: junho + julho misturados). Default: mês atual.
+        f_mes = (request.args.get('mes') or '').strip() or datetime.now(TZ_SP).strftime('%Y-%m')
+        if f_mes == 'todos':
+            filtro_mes_sql, filtro_mes_params = "", []
+        else:
+            filtro_mes_sql, filtro_mes_params = " AND mes_meta=?", [f_mes]
+        m['propostas'] = conn.execute(f"SELECT COUNT(*) c FROM propostas WHERE status != 'Excluída'{filtro_mes_sql}", filtro_mes_params).fetchone()['c']
+        m['vidas'] = conn.execute(f"SELECT COALESCE(SUM(total_vidas),0) v FROM propostas WHERE status != 'Excluída'{filtro_mes_sql}", filtro_mes_params).fetchone()['v']
+        m['producao'] = conn.execute(f"SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE status != 'Excluída'{filtro_mes_sql}", filtro_mes_params).fetchone()['v']
+        m['com_bruta'] = conn.execute(f"SELECT COALESCE(SUM(comissao_total_corretora),0) v FROM propostas WHERE status != 'Excluída'{filtro_mes_sql}", filtro_mes_params).fetchone()['v']
+        m['com_repasse'] = conn.execute(f"SELECT COALESCE(SUM(comissao_consultor),0) v FROM propostas WHERE status != 'Excluída'{filtro_mes_sql}", filtro_mes_params).fetchone()['v']
+        m['com_liquido'] = conn.execute(f"SELECT COALESCE(SUM(comissao_corretora_liquida),0) v FROM propostas WHERE status != 'Excluída'{filtro_mes_sql}", filtro_mes_params).fetchone()['v']
+        # Fluxo de caixa: saldo ATUAL (todas as propostas Emitida/Ativa, não é "produção do mês" — não filtra por mês de propósito)
         m['fc_pendente'] = conn.execute("""SELECT COALESCE(SUM(pa.valor),0) v FROM parcelas pa
             JOIN propostas p ON p.id=pa.proposta_id
             WHERE pa.status='Pendente de receber' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
@@ -3815,15 +3822,20 @@ def dashboard():
         m['auditoria_pendente'] = conn.execute("""SELECT COUNT(*) c FROM propostas
             WHERE status != 'Excluída' AND status_operacional NOT IN ('Emitida/Ativa')
             AND status_operacional IS NOT NULL""").fetchone()['c']
-        ultimas = conn.execute("SELECT * FROM propostas WHERE status != 'Excluída' ORDER BY id DESC LIMIT 5").fetchall()
-        por_operadora = conn.execute("""SELECT adm_operadora,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
-            FROM propostas WHERE status != 'Excluída' GROUP BY adm_operadora ORDER BY valor DESC LIMIT 8""").fetchall()
-        por_consultor = conn.execute("""SELECT consultor,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,COALESCE(SUM(comissao_consultor),0) com
-            FROM propostas WHERE status != 'Excluída' GROUP BY consultor ORDER BY valor DESC""").fetchall()
+        ultimas = conn.execute(f"SELECT * FROM propostas WHERE status != 'Excluída'{filtro_mes_sql} ORDER BY id DESC LIMIT 5", filtro_mes_params).fetchall()
+        por_operadora = conn.execute(f"""SELECT adm_operadora,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
+            FROM propostas WHERE status != 'Excluída'{filtro_mes_sql} GROUP BY adm_operadora ORDER BY valor DESC LIMIT 8""", filtro_mes_params).fetchall()
+        por_consultor = conn.execute(f"""SELECT consultor,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,COALESCE(SUM(comissao_consultor),0) com
+            FROM propostas WHERE status != 'Excluída'{filtro_mes_sql} GROUP BY consultor ORDER BY valor DESC""", filtro_mes_params).fetchall()
+        meses_disponiveis = [r['mes_meta'] if hasattr(r,'keys') else r[0] for r in conn.execute(
+            "SELECT DISTINCT mes_meta FROM propostas WHERE mes_meta IS NOT NULL AND mes_meta != '' ORDER BY mes_meta DESC").fetchall()]
+        mes_atual_sp = datetime.now(TZ_SP).strftime('%Y-%m')
+        if mes_atual_sp not in meses_disponiveis:
+            meses_disponiveis.insert(0, mes_atual_sp)
         close_db(conn)
         return render_template('dashboard_admin.html', m=m, ultimas=ultimas,
                                por_operadora=por_operadora, por_consultor=por_consultor,
-                               ciclo=ciclo_atual())
+                               ciclo=ciclo_atual(), f_mes=f_mes, meses_disponiveis=meses_disponiveis)
     else:
         m = {}
         ma = datetime.now(TZ_SP).strftime('%Y-%m')

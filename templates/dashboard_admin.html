@@ -7,7 +7,15 @@
     <h1>Dashboard</h1>
     <div class="sub">Visão geral da operação</div>
   </div>
-  <div><a href="/nova-proposta" class="btn">Nova proposta</a></div>
+  <div style="display:flex; gap:10px; align-items:center;">
+    <select id="sel-mes-dash" onchange="location.href='/?mes='+this.value" style="background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; color:var(--texto); font-size:13px; outline:none;">
+      {% for mm in meses_disponiveis %}
+      <option value="{{ mm }}" {% if mm == f_mes %}selected{% endif %}>{{ {'01':'Janeiro','02':'Fevereiro','03':'Março','04':'Abril','05':'Maio','06':'Junho','07':'Julho','08':'Agosto','09':'Setembro','10':'Outubro','11':'Novembro','12':'Dezembro'}[mm[5:7]] }}/{{ mm[:4] }}</option>
+      {% endfor %}
+      <option value="todos" {% if f_mes == 'todos' %}selected{% endif %}>Todos os períodos</option>
+    </select>
+    <a href="/nova-proposta" class="btn">Nova proposta</a>
+  </div>
 </div>
 
 <div class="page">
