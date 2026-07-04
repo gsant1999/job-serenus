@@ -352,7 +352,26 @@
       <div class="ficha-acoes">
         <button class="btn-ficha btn-salvar" onclick="salvarFicha()">Salvar</button>
         <button class="btn-ficha" style="background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirEmailContato()" title="Manda um e-mail pro lead pedindo pra chamar o corretor no WhatsApp — pra quando o telefone dele está errado ou não conseguiu falar por telefone">Corrigir contato (e-mail)</button>
+        <button class="btn-ficha" style="background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirSmsReforco()" title="Ligou pro cliente e ele não atendeu? Manda um SMS reforçando que tentamos contato e que o consultor chamou no WhatsApp">SMS — Não atendeu</button>
         <button class="btn-ficha btn-excluir" onclick="excluirFicha()">Excluir</button>
+      </div>
+
+      <!-- Modal: SMS de reforço (1º contato sem sucesso por telefone) -->
+      <div class="modal-overlay" id="modal-sms-reforco" style="z-index:1100;">
+        <div style="background:var(--panel); border:1px solid var(--borda); border-radius:16px; padding:22px; width:min(420px, 92vw); margin:auto;">
+          <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:6px;">SMS — Reforço de contato</h3>
+          <div style="font-size:12px; color:var(--cinza); margin-bottom:14px;">Cliente não atendeu a ligação? Este SMS avisa que tentamos contato e que o consultor já chamou no WhatsApp.</div>
+          <div id="sr-carregando" style="font-size:12px; color:var(--cinza-2); padding:16px 0; text-align:center;">Montando prévia...</div>
+          <div id="sr-conteudo" style="display:none;">
+            <div style="background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px 14px; font-size:12.5px; color:var(--texto); line-height:1.5; margin-bottom:8px; white-space:pre-wrap;" id="sr-texto"></div>
+            <div style="font-size:11px; color:var(--cinza-2); margin-bottom:14px;" id="sr-info"></div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn-outline btn-sm" style="flex:1;" onclick="fechar('modal-sms-reforco')">Cancelar</button>
+              <button style="flex:1; background:var(--azul); color:#fff; border:none; padding:9px 14px; border-radius:7px; font-size:12px; font-weight:600; cursor:pointer;" id="sr-btn-enviar" onclick="enviarSmsReforco()">Enviar SMS</button>
+            </div>
+          </div>
+          <div id="sr-erro" style="display:none; font-size:12.5px; color:var(--erro); padding:10px 0;"></div>
+        </div>
       </div>
 
       <!-- Modal: e-mail de correção de contato -->
@@ -994,6 +1013,39 @@ async function enviarEmailContato(tpl){
     const dd=await(await fetch('/crm/lead/'+_leadAtual.id)).json();
     renderTimeline(dd.atividades||[]);
   } else { toast(d.erro||'Erro ao enviar','err'); }
+}
+
+async function abrirSmsReforco(){
+  if(!_leadAtual) return;
+  abrir('modal-sms-reforco');
+  document.getElementById('sr-carregando').style.display='block';
+  document.getElementById('sr-conteudo').style.display='none';
+  document.getElementById('sr-erro').style.display='none';
+  const r=await fetch('/crm/lead/'+_leadAtual.id+'/sms-reforco/preview');
+  const d=await r.json();
+  document.getElementById('sr-carregando').style.display='none';
+  if(d.ok){
+    document.getElementById('sr-texto').textContent=d.mensagem;
+    document.getElementById('sr-info').textContent='Vai pro '+d.telefone+' · '+d.caracteres+' caracteres';
+    document.getElementById('sr-conteudo').style.display='block';
+  } else {
+    document.getElementById('sr-erro').textContent=d.erro||'Erro ao montar prévia';
+    document.getElementById('sr-erro').style.display='block';
+  }
+}
+async function enviarSmsReforco(){
+  if(!_leadAtual) return;
+  const btn=document.getElementById('sr-btn-enviar');
+  btn.disabled=true; btn.textContent='Enviando...';
+  const r=await fetch('/crm/lead/'+_leadAtual.id+'/sms-reforco',{method:'POST'});
+  const d=await r.json();
+  btn.disabled=false; btn.textContent='Enviar SMS';
+  if(d.ok){
+    fechar('modal-sms-reforco');
+    toast('SMS enviado!','ok');
+    const dd=await(await fetch('/crm/lead/'+_leadAtual.id)).json();
+    renderTimeline(dd.atividades||[]);
+  } else { toast(d.erro||'Erro ao enviar SMS','err'); }
 }
 async function criarLead(){
   const nome=document.getElementById('nl-nome')?.value?.trim();

@@ -9847,6 +9847,28 @@ def _waspeed_normaliza_fone(telefone):
     return n
 
 
+# WhatsApp da corretora (BootConversa + API oficial Meta) — usado pelas 3 consultoras
+# de retrabalho. Os demais consultores usam o próprio WhatsApp pessoal (usuarios.telefone).
+NUMERO_WHATSAPP_SERENUS = '5519936196877'
+CONSULTORAS_BOOTCONVERSA = ('Prisciele Azevedo', 'Juliana Azevedo', 'Jenifer Aparecida Lobregat dos Santos')
+
+
+def _whatsapp_do_consultor(conn, responsavel_id):
+    """Retorna o número (só dígitos, com 55) que o LEAD deve chamar pra falar com
+    o consultor responsável. Prisciele/Juliana/Jenifer usam o WhatsApp oficial da
+    Serenus via BootConversa (número fixo); os demais usam o WhatsApp pessoal deles."""
+    if responsavel_id:
+        row = conn.execute("SELECT nome, telefone FROM usuarios WHERE id=?", (responsavel_id,)).fetchone()
+        if row:
+            rd = dict(row)
+            if rd['nome'] in CONSULTORAS_BOOTCONVERSA:
+                return NUMERO_WHATSAPP_SERENUS
+            fone = _waspeed_normaliza_fone(rd.get('telefone') or '')
+            if fone:
+                return fone
+    return NUMERO_WHATSAPP_SERENUS
+
+
 @app.route('/admin/testar-whatsapp', methods=['POST'])
 @login_required
 @admin_required
@@ -9939,6 +9961,62 @@ def crm_lead_whatsapp(lid):
         app.logger.error(f"[WASPEED] Erro lead {lid}: {e}")
         return jsonify({"ok": False, "erro": f"Falha ao enviar: {e}"}), 500
 
+
+def _montar_sms_reforco(conn, lead):
+    """Monta o texto do SMS de reforço (1o contato sem sucesso por telefone).
+    Sem acento/emoji de propósito — GSM-7 (fora disso vira UCS-2 e custa mais segmentos)."""
+    primeiro_nome = (lead.get('nome') or '').split()[0] or 'Ola'
+    responsavel_nome = 'nosso consultor'
+    if lead.get('responsavel_id'):
+        r = conn.execute("SELECT nome FROM usuarios WHERE id=?", (lead['responsavel_id'],)).fetchone()
+        if r:
+            responsavel_nome = dict(r)['nome'].split()[0]
+    numero_wpp = _whatsapp_do_consultor(conn, lead.get('responsavel_id'))
+    link = f"https://wa.me/{numero_wpp}"
+    return (f"JOB Serenus: Ola {primeiro_nome}! Recebemos seu pedido de cotacao de plano de saude. "
+            f"Tentamos falar por telefone e nao conseguimos. {responsavel_nome} ja te chamou no WhatsApp "
+            f"- responda por la pra continuarmos: {link}")
+
+
+@app.route('/crm/lead/<int:lid>/sms-reforco/preview')
+@login_required
+def crm_lead_sms_reforco_preview(lid):
+    """Mostra o texto do SMS de reforço antes de enviar de verdade (SMS custa credito, sem preview seria arriscado)."""
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    ld = dict(lead)
+    if session.get('perfil') != 'admin' and ld.get('responsavel_id') != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    if not ld.get('telefone'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead sem telefone cadastrado"}), 400
+    mensagem = _montar_sms_reforco(conn, ld)
+    close_db(conn)
+    return jsonify({"ok": True, "mensagem": mensagem, "telefone": ld['telefone'], "caracteres": len(mensagem)})
+
+
+@app.route('/crm/lead/<int:lid>/sms-reforco', methods=['POST'])
+@login_required
+def crm_lead_sms_reforco(lid):
+    """Envia o SMS de reforço (1o contato sem sucesso por telefone → reforça que chamamos no WhatsApp)."""
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    ld = dict(lead)
+    if session.get('perfil') != 'admin' and ld.get('responsavel_id') != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    if not ld.get('telefone'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead sem telefone cadastrado"}), 400
+    mensagem = _montar_sms_reforco(conn, ld)
+    ok, erro = _enviar_sms(ld['telefone'], mensagem)
+    if ok:
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                     (lid, session.get('nome'), 'sms', f'SMS de reforço enviado (1º contato sem resposta): {mensagem}', _agora_sp()))
+        conn.commit()
+    close_db(conn)
+    return jsonify({"ok": ok, "erro": erro})
 
 
 # ─── CRM CONFIG ───────────────────────────────────────────────────
