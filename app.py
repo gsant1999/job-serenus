@@ -8655,6 +8655,44 @@ def cotacao_publica(token):
     return render_template('cotacao_documento.html', cot=cot, publico=True)
 
 
+@app.route('/c/<token>/feedback', methods=['POST'])
+def cotacao_publica_feedback(token):
+    """Cliente clica 'Gostei dessa proposta' ou 'Me explique mais essa opção' no link
+    público. Avisa o corretor (sino + WhatsApp) e registra na timeline do lead."""
+    d = request.json or {}
+    tipo = (d.get('tipo') or '').strip()
+    if tipo not in ('gostei', 'explicar'):
+        return jsonify({"ok": False, "erro": "Tipo inválido"}), 400
+    conn = db()
+    c = conn.execute("SELECT * FROM cotacao_salva WHERE token=?", (token,)).fetchone()
+    if not c:
+        close_db(conn); return jsonify({"ok": False, "erro": "Cotação não encontrada"}), 404
+    cd = dict(c)
+    cliente = cd.get('cliente_nome') or 'O cliente'
+    titulo_cot = cd.get('titulo') or 'Cotação'
+    if tipo == 'gostei':
+        titulo_notif = 'Cliente gostou da cotação!'
+        desc = f'{cliente} clicou em "Gostei dessa proposta" na cotação "{titulo_cot}"'
+        desc_timeline = f'Cliente clicou em "Gostei dessa proposta" — "{titulo_cot}"'
+    else:
+        titulo_notif = 'Cliente quer mais explicação'
+        desc = f'{cliente} clicou em "Me explique mais essa opção" na cotação "{titulo_cot}" — vale ligar'
+        desc_timeline = f'Cliente clicou em "Me explique mais essa opção" — "{titulo_cot}"'
+    try:
+        if cd.get('lead_id'):
+            conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                         (cd['lead_id'], 'Sistema', 'feedback_cotacao', desc_timeline, _agora_sp()))
+            conn.commit()
+    except Exception:
+        pass
+    close_db(conn)
+    try:
+        _notificar(cd.get('corretor_id'), 'cotacao', titulo_notif, desc, '/cotacao/documento/' + str(cd['id']))
+    except Exception:
+        pass
+    return jsonify({"ok": True})
+
+
 @app.route('/cotacao/<int:cid>/enviar-email', methods=['POST'])
 @login_required
 def cotacao_enviar_email(cid):

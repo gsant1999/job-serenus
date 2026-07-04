@@ -87,9 +87,10 @@
 </head>
 <body>
 
+{% if not publico %}
 <div class="toolbar">
-  {% if not publico %}<a class="btn-voltar" href="/cotacao/salvas">Voltar</a>
-  <a class="btn-voltar" href="/cotacao/{{ cot.id }}/reabrir" style="border-color:rgba(250,204,21,.6);color:#fde047;font-weight:700;" title="Cria uma cotação nova com link próprio. Esta cotação atual não é alterada.">+ Nova cotação (link novo)</a>{% endif %}
+  <a class="btn-voltar" href="/cotacao/salvas">Voltar</a>
+  <a class="btn-voltar" href="/cotacao/{{ cot.id }}/reabrir" style="border-color:rgba(250,204,21,.6);color:#fde047;font-weight:700;" title="Cria uma cotação nova com link próprio. Esta cotação atual não é alterada.">+ Nova cotação (link novo)</a>
   <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="document.getElementById('documento').classList.toggle('destacar')">Destacar planos</button>
   <div style="position:relative;display:inline-block;">
     <button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="toggleLegendas()">Legenda</button>
@@ -101,17 +102,18 @@
       <textarea id="legenda-editavel" rows="6" style="width:100%;background:#1c1c24;border:1px solid rgba(255,255,255,.15);border-radius:7px;padding:9px 11px;color:#f0f0f4;font-size:12.5px;outline:none;resize:vertical;font-family:inherit;line-height:1.6;"></textarea>
       <div style="display:flex;gap:8px;margin-top:8px;">
         <button onclick="copiarLegendaEditavel()" style="flex:1;background:#3b82f6;color:#fff;border:none;border-radius:7px;padding:9px;font-size:13px;font-weight:600;cursor:pointer;">Copiar</button>
-        {% if not publico %}<a href="/cotacao/legendas" style="background:transparent;border:1px solid rgba(255,255,255,.2);color:#9a9aa6;border-radius:7px;padding:9px 12px;font-size:12px;text-decoration:none;white-space:nowrap;">Gerenciar</a>{% endif %}
+        <a href="/cotacao/legendas" style="background:transparent;border:1px solid rgba(255,255,255,.2);color:#9a9aa6;border-radius:7px;padding:9px 12px;font-size:12px;text-decoration:none;white-space:nowrap;">Gerenciar</a>
       </div>
     </div>
   </div>
-  {% if not publico and cot.token %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLink()">Copiar link</button>{% endif %}
-  {% if not publico %}<button class="btn-voltar" id="btn-editar" style="border-color:rgba(251,146,60,.7);color:#fb923c" onclick="toggleEditar()" title="Corrige um valor SÓ nesta cotação, sem trocar o link. Se o cliente já tem este link, ele verá o valor corrigido.">Corrigir valor (mesmo link)</button>
-  <button class="btn-img" id="btn-salvar-aj" style="display:none;background:#fb923c;color:#1c1c24" onclick="salvarAjustes({{ cot.id }})">Salvar correção</button>{% endif %}
+  {% if cot.token %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLink()">Copiar link</button>{% endif %}
+  <button class="btn-voltar" id="btn-editar" style="border-color:rgba(251,146,60,.7);color:#fb923c" onclick="toggleEditar()" title="Corrige um valor SÓ nesta cotação, sem trocar o link. Se o cliente já tem este link, ele verá o valor corrigido.">Corrigir valor (mesmo link)</button>
+  <button class="btn-img" id="btn-salvar-aj" style="display:none;background:#fb923c;color:#1c1c24" onclick="salvarAjustes({{ cot.id }})">Salvar correção</button>
   <button class="btn-img" onclick="copiarImagem()">Copiar imagem</button>
   <button class="btn-img" style="background:#9aa0b0;color:#1c1c24" onclick="baixarImagem()">Baixar</button>
   <button class="btn-pdf" onclick="window.print()">PDF</button>
 </div>
+{% endif %}
 <textarea id="legenda-txt" style="position:absolute;left:-9999px;top:0;">{{ cot.legenda }}</textarea>
 
 <div class="scroll">
@@ -186,10 +188,32 @@
     <b>Informativo Referencial:</b> valores e demais condições são determinadas pelas seguradoras e podem ser alteradas a qualquer momento. Reservamos o direito de corrigir eventuais erros, não vinculando esta oferta à prestação do serviço, que se dará apenas no ato da assinatura do contrato.
   </div>
 </div>
+
+{% if publico %}
+<div id="fb-cotacao" style="max-width:900px;margin:22px auto 0;padding:0 16px;text-align:center;">
+  <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+    <button onclick="enviarFeedbackCotacao('gostei', this)" style="background:#22c55e;color:#fff;border:none;border-radius:9px;padding:12px 22px;font-size:14px;font-weight:600;cursor:pointer;">Gostei dessa proposta</button>
+    <button onclick="enviarFeedbackCotacao('explicar', this)" style="background:#3b82f6;color:#fff;border:none;border-radius:9px;padding:12px 22px;font-size:14px;font-weight:600;cursor:pointer;">Me explique mais essa opção</button>
+  </div>
+  <div style="font-size:11.5px;color:#8a8a96;margin-top:10px;">Isso não é a contratação do plano — é só pra avisar seu corretor sobre o que você achou.</div>
+  <div id="fb-cotacao-ok" style="display:none;font-size:13px;color:#22c55e;font-weight:600;margin-top:12px;">Obrigado! Seu corretor já foi avisado.</div>
+</div>
+{% endif %}
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script>
+async function enviarFeedbackCotacao(tipo, btn) {
+  document.querySelectorAll('#fb-cotacao button').forEach(function(b){ b.disabled = true; b.style.opacity = '.6'; });
+  try {
+    await fetch(window.location.pathname + '/feedback', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({tipo: tipo})
+    });
+  } catch (e) {}
+  document.querySelectorAll('#fb-cotacao button').forEach(function(b){ b.style.display = 'none'; });
+  document.getElementById('fb-cotacao-ok').style.display = 'block';
+}
 function copiarLink() {
   var url = window.location.origin + '/c/{{ cot.token }}';
   if (navigator.clipboard) {
