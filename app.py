@@ -9635,8 +9635,9 @@ def webhook_sheets():
             cidade   = (lead.get('cidade') or '').strip()
             tipo     = (lead.get('tipo') or 'PF').strip()
             num_pess = (lead.get('num_pessoas') or '').strip()
-            # Consultor: tenta campo 'consultor', se vazio tenta 'consultor_2'
-            cons_raw = (lead.get('consultor') or lead.get('consultor_2') or '').strip()
+            # Consultor: SEMPRE só a coluna "Consultor" (nunca "Consultor 2" como fallback —
+            # pedido explícito do Guilherme, "Consultor 2" não é confiável pra atribuição)
+            cons_raw = (lead.get('consultor') or '').strip()
             # Data: aceita 'data_hora' ou 'data'
             data_hora_raw = (lead.get('data_hora') or lead.get('data') or '').strip()
 
@@ -11314,9 +11315,15 @@ def _processar_lead(row, conn):
     cidade = _col(row, 'Cidade', 'Qual sua Cidade?', 'Qual sua cidade?', 'cidade')
     tipo = _col(row, 'Tipo', 'tipo') or 'PF'
     num_pessoas = _col(row, 'numero de pessoas', 'número de pessoas', 'Idades que tem interesse em cotar?', 'IDADE', 'Idade')
-    consultor_raw = _col(row, 'CONSULTOR', 'Consultor', 'Consultor 2', 'consultor')
     data_hora_raw = _col(row, 'DATA e HORA', 'Data', 'data', 'Data e Hora')
     origem = row.get('_origem', 'Google Sheets')
+    # Planilha META/Facebook: SEMPRE só a coluna "Consultor" (nunca "Consultor 2" —
+    # pedido explícito do Guilherme, não é confiável pra atribuição). Outras planilhas
+    # mantêm o mapeamento flexível (nomeiam colunas de forma diferente).
+    if origem == 'Facebook':
+        consultor_raw = _col(row, 'Consultor')
+    else:
+        consultor_raw = _col(row, 'CONSULTOR', 'Consultor', 'Consultor 2', 'consultor')
     
     # Filtro 1: "teste" em nome ou email
     if nome and 'teste' in nome.lower():
