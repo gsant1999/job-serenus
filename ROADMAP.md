@@ -5,6 +5,7 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 
 ## Bugs / correções curtas
 
+- [x] **Lead duplicado indo pra dois consultores diferentes** (Gabriel, PDF 04/07) — resolvido pelas correções da mesma data: fallback "chuta Guilherme" removido, leitura da planilha corrigida (endpoint que estava desatualizado), preenchimento só quando responsável está NULL (nunca sobrescreve), + correção em massa de ~3000 leads mal atribuídos
 - [ ] Asaas API 401 — boleto/NF parados. Guilherme confirmou (03/07): não mexer por enquanto, está resolvido do lado dele. Existe ferramenta de diagnóstico pronta em `/admin/asaas/diag` (mostra estado da chave sem expô-la + testa conexão real) e `/admin/asaas/testar-chave` (testa qualquer chave ao vivo sem precisar redeploy) se precisar revisitar
 - [ ] MedSênior PF — falta registro de `recebimento` (tabela de comissão por operadora/plano). Já existe diagnóstico pronto: rota admin que lista `propostas_comissao_zerada` (propostas com `comissao_total_corretora` NULL/0 por falta de match na tabela `recebimento`). Falta: rodar o diagnóstico, identificar o(s) plano(s) MedSênior PF sem linha correspondente, e cadastrar o valor de comissão
 - [ ] "Melhorar sistema de idades" na cotação (feedback Danilo) (?) — hoje é um único campo de texto livre que mistura idade e data de nascimento (placeholder: "Ex: 25, 30 e 15/03/1990"), parseado no servidor. Provável fonte da confusão, mas falta o Guilherme/Danilo confirmarem o que exatamente incomoda antes de redesenhar
