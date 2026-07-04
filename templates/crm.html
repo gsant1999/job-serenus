@@ -191,6 +191,9 @@
         {% for r in responsaveis %}
         <option value="{{ r.id }}" {% if filtros.consultor == r.id|string %}selected{% endif %}>{{ r.nome }}</option>
         {% endfor %}
+        {% for ext in consultores_externos %}
+        <option value="externo:{{ ext }}" {% if filtros.consultor == 'externo:' + ext %}selected{% endif %}>{{ ext }}</option>
+        {% endfor %}
       </select>
     </div>
     {% endif %}
@@ -258,7 +261,8 @@
             <span class="lead-origem {{ obadge }}">
               {{ 'Meta' if 'Facebook' in orig else 'MedSênior' if 'MEDSENIOR' in orig else 'Google' if 'Google' in orig else 'Manual' }}
             </span>
-            {% if lead.responsavel_nome %}<span class="lead-resp">{{ lead.responsavel_nome.split()[0] }}</span>{% endif %}
+            {% if lead.responsavel_nome %}<span class="lead-resp">{{ lead.responsavel_nome.split()[0] }}</span>
+            {% elif lead.consultor_externo %}<span class="lead-resp" style="background:rgba(244,63,94,.12); color:var(--erro);" title="Sem consultor cadastrado no JOB — valor original da planilha">{{ lead.consultor_externo }}</span>{% endif %}
           </div>
           <div class="lead-meta-row">
             {% if lead.telefone %}<span>{{ lead.telefone }}</span>{% endif %}
@@ -1055,14 +1059,18 @@ function abrirModalTransferencia(){
           const opt = form.querySelector('select[name="consultor"]');
           if(opt) Array.from(opt.options).slice(1).forEach(o => {
             if(o.value && o.value !== 'sem') {
+              // "De" aceita consultor real E bucket externo (ex-funcionario/legado).
+              // "Para" so aceita consultor de verdade (nunca um bucket "externo:...").
               const el = document.getElementById('t-de');
               const opt = document.createElement('option');
               opt.value = o.value; opt.textContent = o.textContent;
               el.appendChild(opt);
-              const el2 = document.getElementById('t-para');
-              const opt2 = document.createElement('option');
-              opt2.value = o.value; opt2.textContent = o.textContent;
-              el2.appendChild(opt2);
+              if(!o.value.startsWith('externo:')){
+                const el2 = document.getElementById('t-para');
+                const opt2 = document.createElement('option');
+                opt2.value = o.value; opt2.textContent = o.textContent;
+                el2.appendChild(opt2);
+              }
             }
           });
         }

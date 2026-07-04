@@ -7121,6 +7121,9 @@ def crm():
             q += " AND l.responsavel_id IS NULL AND (l.consultor_externo IS NULL OR l.consultor_externo='')"
         elif f_consultor == 'externo':
             q += " AND l.consultor_externo IS NOT NULL AND l.consultor_externo != ''"
+        elif f_consultor.startswith('externo:'):
+            q += " AND l.consultor_externo=?"
+            params.append(f_consultor[len('externo:'):])
         else:
             q += " AND l.responsavel_id=?"
             params.append(int(f_consultor))
@@ -10581,19 +10584,26 @@ def crm_transferir_em_massa():
         return jsonify({"ok": False, "erro": "Consultor de origem e destino obrigatórios"}), 400
     if consultor_de == consultor_para:
         return jsonify({"ok": False, "erro": "Consultor de origem e destino devem ser diferentes"}), 400
+    # "De" pode ser um consultor real (ID numérico) ou um bucket externo/legado
+    # (ex-funcionário, valor cru da planilha sem usuário correspondente).
+    de_e_externo = consultor_de.startswith('externo:')
     try:
-        cde = int(consultor_de)
+        cde = None if de_e_externo else int(consultor_de)
         cpa = int(consultor_para)
     except ValueError:
         return jsonify({"ok": False, "erro": "IDs de consultor inválidos"}), 400
     conn = db()
-    # Valida que ambos os consultores existem
-    check_de = conn.execute("SELECT nome FROM usuarios WHERE id=? AND ativo=1", (cde,)).fetchone()
     check_pa = conn.execute("SELECT nome FROM usuarios WHERE id=? AND ativo=1", (cpa,)).fetchone()
-    if not check_de or not check_pa:
-        close_db(conn); return jsonify({"ok": False, "erro": "Um ou ambos os consultores não existem"}), 404
-    nde = dict(check_de)['nome']
+    if not check_pa:
+        close_db(conn); return jsonify({"ok": False, "erro": "Consultor de destino não existe"}), 404
     npa = dict(check_pa)['nome']
+    if de_e_externo:
+        nde = consultor_de[len('externo:'):]
+    else:
+        check_de = conn.execute("SELECT nome FROM usuarios WHERE id=? AND ativo=1", (cde,)).fetchone()
+        if not check_de:
+            close_db(conn); return jsonify({"ok": False, "erro": "Consultor de origem não existe"}), 404
+        nde = dict(check_de)['nome']
     # Filtros (mesmos do GET /crm)
     f_etapa = (d.get('etapa') or '').strip()
     f_origem = (d.get('origem') or '').strip()
@@ -10601,8 +10611,12 @@ def crm_transferir_em_massa():
     f_data_ate = (d.get('data_ate') or '').strip()
     f_busca = (d.get('q') or '').strip()
     # Monta query
-    sql = "SELECT id FROM crm_leads WHERE responsavel_id=?"
-    params = [cde]
+    if de_e_externo:
+        sql = "SELECT id FROM crm_leads WHERE consultor_externo=?"
+        params = [nde]
+    else:
+        sql = "SELECT id FROM crm_leads WHERE responsavel_id=?"
+        params = [cde]
     if f_etapa:
         sql += " AND etapa=?"
         params.append(f_etapa)
@@ -10627,7 +10641,7 @@ def crm_transferir_em_massa():
     # Transfere
     for r in leads_a_transferir:
         lid = dict(r)['id']
-        conn.execute("UPDATE crm_leads SET responsavel_id=?, atualizado_em=? WHERE id=?",
+        conn.execute("UPDATE crm_leads SET responsavel_id=?, consultor_externo=NULL, atualizado_em=? WHERE id=?",
                     (cpa, _agora_sp(), lid))
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                     (lid, 'Sistema', 'transferencia', f"Lead transferido de {nde} para {npa}", _agora_sp()))
