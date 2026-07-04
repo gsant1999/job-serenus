@@ -489,6 +489,11 @@
         </div>
 
         <div id="tab-whatsapp" class="ficha-tab-pane">
+          <div id="botconversa-box" style="display:none; background:rgba(37,211,102,.08); border:1px solid rgba(37,211,102,.3); border-radius:10px; padding:14px; margin-bottom:14px;">
+            <div style="font-size:13px; font-weight:600; color:var(--texto); margin-bottom:4px;">Este lead usa o WhatsApp oficial da Serenus (BotConversa)</div>
+            <div style="font-size:11.5px; color:var(--cinza); margin-bottom:10px;">Abre a conversa filtrada pelo telefone do lead numa janela separada.</div>
+            <button class="btn-ficha" style="width:100%; background:#25d366; color:#04221a; border:none; font-weight:700;" onclick="abrirBotConversa()">Abrir conversa no BotConversa</button>
+          </div>
           <div class="wpp-box">
             <div class="wpp-header">
                             <div>
@@ -713,6 +718,9 @@ async function abrirFicha(id){
   // WhatsApp tab
   const tel=(d.lead.telefone||'').replace(/\D/g,'');
   document.getElementById('wpp-tel-display').textContent=d.lead.telefone||'(sem telefone)';
+  const CONSULTORAS_BOOTCONVERSA=['Prisciele Azevedo','Juliana Azevedo','Jenifer Aparecida Lobregat dos Santos'];
+  document.getElementById('botconversa-box').style.display=
+    CONSULTORAS_BOOTCONVERSA.includes(d.lead.responsavel_nome) ? 'block' : 'none';
   document.getElementById('wpp-templates').innerHTML=WPP_TEMPLATES.map((t,i)=>
     `<button class="wpp-template" onclick="usarTemplate(${i})">${t.replace('{nome}', d.lead.nome||'')}</button>`).join('');
   document.getElementById('wpp-msg').value='';
@@ -950,6 +958,14 @@ function abrirWppWeb(){
 }
 function wppRapido(id, tel, nome){
   abrirFicha(id).then(()=>{ setTimeout(()=>mudarTab('whatsapp'),200); });
+}
+const BOTCONVERSA_COMPANY_ID='206993';
+function abrirBotConversa(){
+  if(!_leadAtual) return;
+  const tel=(_leadAtual.telefone||'').replace(/\D/g,'');
+  if(!tel){ toast('Lead sem telefone cadastrado','err'); return; }
+  const url='https://app.botconversa.com.br/'+BOTCONVERSA_COMPANY_ID+'/inbox?tab=all&status=all&search='+encodeURIComponent(tel);
+  window.open(url,'botconversa','width=1100,height=750,noopener');
 }
 
 async function uploadAnexo(files){
