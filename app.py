@@ -1311,6 +1311,7 @@ def init_db():
         ("historico_proposta", "descricao", "TEXT"),
         # ─── CRM: WhatsApp WaSpeed + filtros ───
         ("usuarios", "waspeed_token", "TEXT"),
+        ("usuarios", "som_notificacao", "TEXT"),  # NULL = padrao do sistema (thriller)
         ("crm_leads", "telefone_norm", "TEXT"),
         ("crm_leads", "consultor_externo", "TEXT"),  # nome original da planilha
         # ─── Boleto de Adesão via Asaas ───
@@ -8865,6 +8866,8 @@ def api_notificacoes():
     uid = session.get('user_id')
     eh_admin = session.get('perfil') == 'admin'
     conn = db()
+    som_row = conn.execute("SELECT som_notificacao FROM usuarios WHERE id=?", (uid,)).fetchone()
+    som_pref = (dict(som_row).get('som_notificacao') if som_row else None) or 'thriller'
     if eh_admin:
         rows = conn.execute(
             "SELECT * FROM notificacoes WHERE usuario_id=? OR usuario_id IS NULL ORDER BY id DESC LIMIT 30",
@@ -8885,7 +8888,7 @@ def api_notificacoes():
             'descricao': d.get('descricao') or '', 'link': d.get('link') or '',
             'lida': bool(d.get('lida')), 'quando': _tempo_relativo(d.get('criado_em')),
         })
-    return jsonify({'nao_lidas': nao_lidas, 'itens': itens})
+    return jsonify({'nao_lidas': nao_lidas, 'itens': itens, 'som': som_pref})
 
 
 @app.route('/api/notificacoes/marcar-lidas', methods=['POST'])
@@ -10718,6 +10721,38 @@ def minha_foto():
     conn.commit(); close_db(conn)
     session['foto'] = foto_nome
     return jsonify({"ok": True, "foto": foto_nome})
+
+
+SONS_NOTIFICACAO = {
+    'thriller': {'nome': 'Padrão do sistema (Thriller)', 'arquivo': '/static/sons/notificacao_thriller.mp3'},
+    'beep': {'nome': 'Bipe clássico', 'arquivo': None},  # sintetizado no navegador, sem arquivo
+    'mudo': {'nome': 'Sem som', 'arquivo': None},
+}
+
+
+@app.route('/configuracoes')
+@login_required
+def configuracoes():
+    """Configurações pessoais do usuário logado (som de notificação, etc)."""
+    conn = db()
+    row = conn.execute("SELECT som_notificacao FROM usuarios WHERE id=?", (session['user_id'],)).fetchone()
+    close_db(conn)
+    som_atual = (dict(row).get('som_notificacao') if row else None) or 'thriller'
+    return render_template('configuracoes.html', som_atual=som_atual, sons=SONS_NOTIFICACAO)
+
+
+@app.route('/configuracoes/som', methods=['POST'])
+@login_required
+def configuracoes_som():
+    """Salva a preferência de som de notificação do usuário logado."""
+    d = request.json or {}
+    som = (d.get('som') or '').strip()
+    if som not in SONS_NOTIFICACAO:
+        return jsonify({"ok": False, "erro": "Opção de som inválida"}), 400
+    conn = db()
+    conn.execute("UPDATE usuarios SET som_notificacao=? WHERE id=?", (som, session['user_id']))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
 
 
 
