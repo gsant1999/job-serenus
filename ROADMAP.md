@@ -65,3 +65,12 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 - [x] Código morto removido (scheduler duplicado, migração legada)
 - [ ] Dividir app.py em módulos (blueprints) — refactor grande, planejar janela. app.py está em 11.317 linhas (era ~10.4k), só cresce
 - [ ] Testes automatizados mínimos (smoke test de rotas) rodando antes do deploy — confirmado: zero arquivos de teste no repo hoje
+- (?) **Migrar Postgres do Railway pra banco na VPS** (pedido do Gabriel via PDF, 04/07/2026) — mais segurança e possibilidade de escala. Guilherme confirmou: não é pra agora, "vamos conversar mais pra frente" — só registrar como pendência, não iniciar sem sinal verde
+
+## BotConversa (integração — em construção a partir de 04/07/2026)
+
+- (?) API oficial mapeada: `POST /subscriber/{id}/send_message/` (mandar msg automática por etapa do CRM), `POST /subscriber/{id}/change_conversation_status/` (atribuir atendente via campo `manager`), `GET /subscriber/get_by_phone/{tel}/` (achar contato pelo telefone do lead). Auth: header `API-KEY`. Limite 600 req/min. Exige `has_opt_in_whatsapp:true` ao criar contato (política Meta)
+- Limitação confirmada: **não existe webhook oficial documentado pra saber quando o cliente responde** — API é só de saída (JOB → BotConversa). Não dá pra sincronizar resposta do cliente automaticamente
+- [~] Botão na ficha do lead pra abrir a conversa do BotConversa em popup (URL+ID do lead/subscriber) — pedido 04/07/2026, em construção
+- [ ] Enviar mensagem automática por mudança de etapa do CRM — depende de decidir regras (qual etapa dispara qual mensagem) e ter a chave API de produção
+- [ ] Sincronizar atendente responsável (JOB responsavel_id → BotConversa manager) — só faz sentido pras 3 consultoras que usam BootConversa (Prisciele/Juliana/Jenifer), ver [[canais-whatsapp-por-consultor]]
