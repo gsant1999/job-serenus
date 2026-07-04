@@ -3651,6 +3651,37 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None):
         _enviar_email.ultimo_erro = None
         return True
 
+
+def _enviar_sms(telefone, mensagem):
+    """Envia SMS via API da GTI SMS. Configure GTISMS_API_KEY no Railway.
+    telefone: string, com ou sem 55/DDD (normaliza sozinho pro formato 55+DDD+numero que a GTI espera).
+    Retorna (ok: bool, erro: str|None). Nunca lança exceção."""
+    api_key = os.environ.get('GTISMS_API_KEY', '').strip()
+    if not api_key:
+        return False, "GTISMS_API_KEY não configurada no Railway."
+    n = re.sub(r'\D', '', telefone or '')
+    if not n.startswith('55') and len(n) in (10, 11):
+        n = '55' + n
+    if len(n) not in (12, 13):
+        return False, f"Telefone inválido: {telefone!r}"
+    try:
+        import requests as _rq
+        resp = _rq.post(
+            "https://sms.gtisms.com/api/v3/sms/send",
+            json={"recipient": n, "message": mensagem},
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            timeout=15)
+        try:
+            j = resp.json()
+        except Exception:
+            j = {}
+        if resp.status_code in (200, 201):
+            return True, None
+        return False, f"GTI SMS: {j.get('message') or j.get('error') or resp.text[:200]}"
+    except Exception as e:
+        return False, f"Falha ao enviar SMS: {e}"
+
+
 # ─── RECUPERAÇÃO DE SENHA (usuário) ─────────────────────────────────────────
 @app.route('/esqueci-senha', methods=['GET','POST'])
 def esqueci_senha():
@@ -9817,6 +9848,18 @@ def testar_whatsapp():
                         "resposta_waspeed": j, "telefone_normalizado": fone})
     except Exception as e:
         return jsonify({"ok": False, "erro": str(e)[:300]}), 200
+
+
+@app.route('/admin/testar-sms', methods=['POST'])
+@login_required
+@admin_required
+def testar_sms():
+    """Testa envio de SMS via GTI SMS (GTISMS_API_KEY) pra qualquer telefone."""
+    d = request.json or {}
+    telefone = (d.get('telefone') or '').strip()
+    mensagem = (d.get('mensagem') or 'JOB Serenus - Teste de envio via GTI SMS').strip()
+    ok, erro = _enviar_sms(telefone, mensagem)
+    return jsonify({"ok": ok, "erro": erro})
 
 
 @app.route('/crm/lead/<int:lid>/whatsapp', methods=['POST'])
