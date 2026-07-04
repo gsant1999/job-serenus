@@ -26,15 +26,19 @@
   .tag-inc { background:rgba(250,204,21,.14); color:var(--amarelo); }
   .vazio { color:var(--cinza-2); font-size:13px; padding:30px; text-align:center; background:var(--panel); border:1px dashed var(--borda); border-radius:12px; }
 
-  .cot-card-form { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin:14px 0 20px; }
-  .cot-sec { margin-bottom:16px; }
-  .cot-sec-tit { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--cinza-2); font-weight:700; margin-bottom:9px; }
+  .cot-card-form { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:20px 22px; margin:14px 0 20px; }
+  .cot-sec { margin-bottom:22px; padding-bottom:22px; border-bottom:1px solid var(--borda); }
+  .cot-sec:last-of-type { margin-bottom:4px; padding-bottom:0; border-bottom:none; }
+  .cot-sec-tit { display:flex; align-items:center; gap:9px; font-size:13px; color:var(--texto); font-weight:700; margin-bottom:14px; }
+  .cot-sec-tit .num { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:var(--azul); color:#fff; font-size:11px; font-weight:700; flex-shrink:0; }
+  .cot-sec-tit .hint { text-transform:none; letter-spacing:0; color:var(--cinza-2); font-weight:400; font-size:12px; }
   .cot-row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
   .fg2 { display:flex; flex-direction:column; gap:4px; }
   .fg2 label { font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:600; }
   .fg2 input, .fg2 select { background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 11px; color:var(--texto); font-size:13px; outline:none; }
   .fg2 input:focus, .fg2 select:focus { border-color:var(--azul); }
   .fg2 input.idades { min-width:250px; }
+  .cot-ajuda { font-size:11px; color:var(--cinza-2); margin-top:6px; line-height:1.5; }
   .ops-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(116px,1fr)); gap:10px; }
   .op-card { position:relative; cursor:pointer; display:block; }
   .op-card input { position:absolute; opacity:0; pointer-events:none; }
@@ -44,6 +48,7 @@
   .op-card input:checked + .face { border-color:var(--azul); box-shadow:0 0 0 3px rgba(59,130,246,.25); }
   .btn-cotar { background:var(--azul); color:#fff; border:none; padding:12px 30px; border-radius:9px; font-size:14px; font-weight:700; cursor:pointer; }
   .btn-limpar2 { background:transparent; color:var(--cinza); border:1px solid var(--borda); padding:11px 18px; border-radius:9px; font-size:13px; cursor:pointer; text-decoration:none; }
+  .cot-gerar-box { background:var(--panel-2); border:1px solid var(--borda); border-radius:14px; padding:20px 22px; }
 </style>
 {% endblock %}
 
@@ -73,11 +78,11 @@
   {% if prefill and prefill.email %}<input type="hidden" name="cliente_email" value="{{ prefill.email }}">{% endif %}
 
   <div class="cot-sec">
-    <div class="cot-sec-tit">1. Quem vai usar o plano</div>
+    <div class="cot-sec-tit"><span class="num">1</span> Quem vai usar o plano</div>
     <div class="cot-row">
       <div class="fg2"><label>Idades ou datas de nascimento</label>
         <input class="idades" type="text" name="idades" value="{{ idades_txt }}" placeholder="Ex: 25, 30 e 15/03/1990" autocomplete="off" autofocus>
-        <div style="font-size:11px; color:var(--cinza-2); margin-top:4px; line-height:1.5;">Separe cada pessoa por vírgula ou "e". Pode digitar a idade (ex: 25) ou a data de nascimento completa (ex: 15/03/1990) — os dois formatos podem se misturar na mesma cotação.</div>
+        <div class="cot-ajuda">Separe cada pessoa por vírgula ou "e". Pode digitar a idade (ex: 25) ou a data de nascimento completa (ex: 15/03/1990) — os dois formatos podem se misturar na mesma cotação.</div>
       </div>
       <div class="fg2"><label>Modalidade</label>
         <select name="modalidade"><option value="">Todas</option>{% for m in modalidades %}<option value="{{ m }}" {{ 'selected' if filtros.modalidade == m }}>{{ m }}</option>{% endfor %}</select></div>
@@ -89,8 +94,8 @@
         <select name="coparticipacao"><option value="">Todas</option>{% for c in coparts %}<option value="{{ c }}" {{ 'selected' if filtros.coparticipacao == c }}>{{ c }}</option>{% endfor %}</select></div>
     </div>
     {% if faixas %}
-    <details style="margin-top:10px;">
-      <summary style="font-size:11.5px;color:var(--azul);cursor:pointer;">ou informe a quantidade de vidas por faixa etária</summary>
+    <details style="margin-top:12px;">
+      <summary style="font-size:11.5px;color:var(--azul);cursor:pointer;">Prefere informar por faixa etária em vez de idade individual? Clique aqui</summary>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;margin-top:10px;">
         {% for fx in faixas %}
         <div class="fg2"><label>{{ fx }}</label>
@@ -103,7 +108,7 @@
 
   {% if operadoras_cards %}
   <div class="cot-sec">
-    <div class="cot-sec-tit">2. Operadoras <span style="text-transform:none;letter-spacing:0;color:var(--cinza-2);font-weight:400;">(deixe sem marcar para comparar todas)</span></div>
+    <div class="cot-sec-tit"><span class="num">2</span> Operadoras <span class="hint">(opcional — deixe sem marcar para comparar todas)</span></div>
     <div class="ops-grid">
       {% for op in operadoras_cards %}
       <label class="op-card">
@@ -162,26 +167,26 @@
     </table>
     <div style="font-size:11px;color:var(--cinza-2);margin:10px 0 20px;">Marque os planos que entram no documento. "Tabela incompleta" = falta o preço de alguma faixa usada. Valores referenciais.</div>
 
-    <div style="background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px;">
-      <h3 style="font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin:0 0 14px;">Gerar cotação para o cliente</h3>
+    <div class="cot-gerar-box">
+      <div class="cot-sec-tit"><span class="num">3</span> Gerar cotação para o cliente</div>
       <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:16px;">
-        <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Título da cotação</label>
-          <input type="text" name="titulo" value="{{ editar_titulo or 'Cotação' }}" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
-        <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Nome do cliente</label>
-          <input type="text" name="cliente_nome" value="{{ prefill.nome if prefill else '' }}" placeholder="Ex: João da Silva" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
-        <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">E-mail do cliente</label>
-          <input type="text" name="cliente_email" value="{{ prefill.email if prefill else '' }}" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
-        <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Telefone do cliente</label>
-          <input type="text" name="cliente_telefone" value="{{ prefill.telefone if prefill else '' }}" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
-        <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Seu telefone (corretor)</label>
-          <input type="text" name="corretor_telefone" value="{{ editar_corretor_telefone or '' }}" placeholder="(19) 99999-9999" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;"></div>
-        <div class="fg"><label style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);font-weight:600;">Formato do documento</label>
-          <select name="orientacao" style="background:var(--panel-2);border:1px solid var(--borda);border-radius:7px;padding:8px 10px;color:var(--texto);font-size:13px;outline:none;">
+        <div class="fg2"><label>Título da cotação</label>
+          <input type="text" name="titulo" value="{{ editar_titulo or 'Cotação' }}"></div>
+        <div class="fg2"><label>Nome do cliente</label>
+          <input type="text" name="cliente_nome" value="{{ prefill.nome if prefill else '' }}" placeholder="Ex: João da Silva"></div>
+        <div class="fg2"><label>E-mail do cliente</label>
+          <input type="text" name="cliente_email" value="{{ prefill.email if prefill else '' }}"></div>
+        <div class="fg2"><label>Telefone do cliente</label>
+          <input type="text" name="cliente_telefone" value="{{ prefill.telefone if prefill else '' }}"></div>
+        <div class="fg2"><label>Seu telefone (corretor)</label>
+          <input type="text" name="corretor_telefone" value="{{ editar_corretor_telefone or '' }}" placeholder="(19) 99999-9999"></div>
+        <div class="fg2"><label>Formato do documento</label>
+          <select name="orientacao">
             <option value="horizontal" {{ 'selected' if editar_orientacao == 'horizontal' or not editar_orientacao }}>Horizontal (tabela comparativa)</option>
             <option value="vertical" {{ 'selected' if editar_orientacao == 'vertical' }}>Vertical (um plano embaixo do outro)</option>
           </select></div>
       </div>
-      <button type="submit" class="btn-f" style="background:var(--azul);color:#fff;border:none;padding:11px 22px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">{{ 'Gerar nova cotação (novo link)' if editar_id else 'Gerar cotação do cliente' }}</button>
+      <button type="submit" class="btn-cotar">{{ 'Gerar nova cotação (novo link)' if editar_id else 'Gerar cotação do cliente' }}</button>
     </div>
   </form>
   {% else %}
