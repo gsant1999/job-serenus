@@ -9657,9 +9657,11 @@ def webhook_sheets():
                 app.logger.warning(f"[WEBHOOK_SHEETS] {origem}: lead ignorado (nome vazio) | telefone={telefone_raw} email={email}")
                 ignorados += 1; continue
 
-            # Normalizar consultor + busca FLEXÍVEL do responsável
-            consultor = _normalizar_consultor(cons_raw) or 'Guilherme'
-            responsavel_id = _buscar_responsavel_id(conn, consultor)
+            # Normalizar consultor + busca FLEXÍVEL do responsável.
+            # Planilha sem Consultor preenchido → fica SEM responsável (nunca chuta
+            # 'Guilherme' por padrão — isso mascarava leads órfãos como se fossem dele).
+            consultor = _normalizar_consultor(cons_raw)
+            responsavel_id = _buscar_responsavel_id(conn, consultor) if consultor else None
             # Se não achou no banco, guarda o nome original como externo
             consultor_externo = cons_raw if (cons_raw and not responsavel_id) else None
 
@@ -9730,7 +9732,7 @@ def webhook_sheets():
                     conn.execute("""
                         INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
                         VALUES (?, ?, 'movimentacao', ?)
-                    """, (lid, consultor,
+                    """, (lid, consultor or 'Sistema',
                           f'Nova solicitação em {data_str} via {origem} — retornou de "{etapa_anterior}" para Lead Novo'))
                     importados += 1
                 else:
@@ -9762,7 +9764,7 @@ def webhook_sheets():
             conn.execute("""
                 INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
                 VALUES (?, ?, 'criacao', ?)
-            """, (lead_id, consultor, f'Lead importado via {origem} em {data_str}'))
+            """, (lead_id, consultor or 'Sistema', f'Lead importado via {origem} em {data_str}'))
 
             importados += 1
 
@@ -10879,9 +10881,11 @@ def _importar_leads_automatico():
                     duplicados += 1
                     continue
                 criado_em = dados.get('data_lead') or datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S')
-                consultor = dados.get('consultor_nome') or 'Guilherme'
+                # Sem consultor identificado na planilha → fica SEM responsável (nunca
+                # chuta 'Guilherme' — isso mascarava leads órfãos como se fossem dele).
+                consultor = dados.get('consultor_nome')
                 resp_id = dados.get('responsavel_id')
-                consultor_externo = consultor if not resp_id else None
+                consultor_externo = consultor if (consultor and not resp_id) else None
                 conn.execute("""
                     INSERT INTO crm_leads
                         (nome, telefone, telefone_norm, email, empresa, origem, etapa,
@@ -10895,7 +10899,7 @@ def _importar_leads_automatico():
                 conn.execute("""
                     INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
                     VALUES (?, ?, 'criacao', ?)
-                """, (lead_id, consultor, f"Lead importado automaticamente via {dados.get('origem') or 'planilha'}"))
+                """, (lead_id, consultor or 'Sistema', f"Lead importado automaticamente via {dados.get('origem') or 'planilha'}"))
                 conn.commit()
                 importados += 1
             except Exception:
@@ -11320,9 +11324,10 @@ def _processar_lead(row, conn):
     if email and 'teste' in email.lower():
         return (False, 'Ignorado (teste no email)', None)
     
-    # Normalizar consultor + busca FLEXÍVEL
-    consultor = _normalizar_consultor(consultor_raw) or 'Guilherme'
-    responsavel_id = _buscar_responsavel_id(conn, consultor)
+    # Normalizar consultor + busca FLEXÍVEL. Planilha sem Consultor preenchido →
+    # fica SEM responsável (nunca chuta 'Guilherme' — mascarava leads órfãos).
+    consultor = _normalizar_consultor(consultor_raw)
+    responsavel_id = _buscar_responsavel_id(conn, consultor) if consultor else None
     
     # Data do lead
     data_lead = _parse_data_lead(data_hora_raw)
