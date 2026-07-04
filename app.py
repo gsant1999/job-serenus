@@ -9706,6 +9706,22 @@ def webhook_sheets():
                 # Converte criado_existente para date para comparar
                 data_criacao_banco = _parse_data_lead(str(criado_existente)) if criado_existente else None
 
+                # ── PREENCHER RESPONSÁVEL SE ÓRFÃO ──
+                # Lead da Meta muitas vezes entra sem consultor (coluna B vazia na hora)
+                # e o nome é preenchido depois na planilha. Quando o Apps Script reenvia
+                # e agora vem consultor reconhecido, preenche o responsável SÓ SE estiver
+                # NULL. Nunca sobrescreve atribuição existente → protege transferências
+                # manuais (Danilo/Bianca/Gabriel/Guilherme → Prisciele/Jenifer/Juliana).
+                if responsavel_id:
+                    r_atual = conn.execute("SELECT responsavel_id FROM crm_leads WHERE id=?", (lid,)).fetchone()
+                    r_atual_val = (r_atual['responsavel_id'] if hasattr(r_atual, 'keys') else r_atual[0]) if r_atual else None
+                    if r_atual_val is None:
+                        conn.execute("UPDATE crm_leads SET responsavel_id=?, consultor_externo=NULL, atualizado_em=? WHERE id=? AND responsavel_id IS NULL",
+                                     (responsavel_id, _agora_sp(), lid))
+                        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                                     (lid, consultor or 'Sistema', 'movimentacao',
+                                      f'Consultor {consultor} atribuído da planilha (lead estava sem responsável)', _agora_sp()))
+
                 # ── DECISÃO: reativar ou apenas atualizar? ──
                 # Reativa SOMENTE se a nova solicitação for MAIS RECENTE que a criação
                 # do lead E o modo não for 'historico'. Isso evita que reimportação
