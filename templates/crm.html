@@ -3,6 +3,11 @@
 
 {% block head %}
 <style>
+  /* Topbar do CRM: menor e sempre com os botões visíveis (nunca corta "+ Novo Lead"/"Agenda"
+     em janela estreita — quebra pra 2ª linha em vez de sumir/cortar). Este <style> só carrega
+     nesta página, então a regra abaixo não afeta o topbar de outras telas. */
+  .topbar { padding-top:10px; padding-bottom:10px; flex-wrap:wrap; row-gap:8px; }
+
   /* ── Barra de Filtros ── */
   .crm-filtros { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; padding:14px; background:var(--panel); border:1px solid var(--borda); border-radius:12px; }
   .crm-filtros .filtro-grupo { display:flex; flex-direction:column; gap:3px; }
