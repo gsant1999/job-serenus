@@ -33,8 +33,9 @@
   .cot-sec-tit .num { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:var(--azul); color:#fff; font-size:11px; font-weight:700; flex-shrink:0; }
   .cot-sec-tit .hint { text-transform:none; letter-spacing:0; color:var(--cinza-2); font-weight:400; font-size:12px; }
   .cot-row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
-  .cot-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; align-items:end; }
-  .cot-grid .fg2.wide { grid-column:1 / -1; }
+  .cot-grid { display:grid; grid-template-columns:1fr; gap:12px; align-items:end; }
+  .cot-grid .fg2.wide { grid-column:1; }
+  .cot-grid-filtros { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:12px; margin-top:12px; }
   .fg2 { display:flex; flex-direction:column; gap:4px; min-width:0; }
   .fg2 label { font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:600; }
   .fg2 input, .fg2 select { background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 11px; color:var(--texto); font-size:13px; outline:none; width:100%; }
@@ -80,11 +81,12 @@
 
   <div class="cot-sec">
     <div class="cot-sec-tit"><span class="num">1</span> Quem vai usar o plano</div>
-    <div class="cot-grid">
-      <div class="fg2 wide"><label>Idades ou datas de nascimento</label>
-        <input class="idades" type="text" name="idades" value="{{ idades_txt }}" placeholder="Ex: 25, 30 e 15/03/1990" autocomplete="off" autofocus>
-        <div class="cot-ajuda">Separe cada pessoa por vírgula ou "e". Pode digitar a idade (ex: 25) ou a data de nascimento completa (ex: 15/03/1990) — os dois formatos podem se misturar na mesma cotação.</div>
-      </div>
+    <div class="fg2" style="margin-bottom:14px;">
+      <label>Idades ou datas de nascimento</label>
+      <input class="idades" type="text" name="idades" value="{{ idades_txt }}" placeholder="Ex: 25, 30 e 15/03/1990" autocomplete="off" autofocus>
+      <div class="cot-ajuda">Separe cada pessoa por vírgula ou "e". Pode digitar a idade (ex: 25) ou a data de nascimento completa (ex: 15/03/1990) — os dois formatos podem se misturar na mesma cotação.</div>
+    </div>
+    <div class="cot-grid-filtros">
       <div class="fg2"><label>Modalidade</label>
         <select name="modalidade"><option value="">Todas</option>{% for m in modalidades %}<option value="{{ m }}" {{ 'selected' if filtros.modalidade == m }}>{{ m }}</option>{% endfor %}</select></div>
       <div class="fg2"><label>Tipo de CNPJ</label>
