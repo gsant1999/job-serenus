@@ -11280,13 +11280,34 @@ def _ler_google_sheets(sheet_id, aba):
         app.logger.error(f"[LEAD_IMPORT] Erro ao ler sheets {sheet_id}/{aba}: {e}")
         return []
 
+
+def _ler_google_sheets_por_gid(sheet_id, gid):
+    """Lê Google Sheets público como CSV via /export (por gid, não por nome).
+    Usar quando /gviz/tq mostrar dado desatualizado (confirmado 04/07/2026 na
+    planilha META — /gviz cacheava a coluna Consultor com valor antigo mesmo
+    minutos/horas depois da edição; /export?format=csv reflete o valor real)."""
+    import csv
+    from io import StringIO
+    import urllib.request
+    try:
+        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (JOB Serenus)'})
+        response = urllib.request.urlopen(req, timeout=15)
+        csv_text = response.read().decode('utf-8-sig')
+        reader = csv.DictReader(StringIO(csv_text))
+        return list(reader) if reader else []
+    except Exception as e:
+        app.logger.error(f"[LEAD_IMPORT] Erro ao ler sheets (por gid) {sheet_id}/{gid}: {e}")
+        return []
+
 def _listar_leads_do_sheets():
     """Lê ambas as planilhas (Facebook e Google) e retorna lista de leads brutos."""
     leads = []
     
-    # Facebook: "LEADS GERAIS"
+    # Facebook: "LEADS GERAIS" (gid=0) — por gid, não por nome: /gviz cacheava
+    # a coluna Consultor desatualizada (confirmado 04/07/2026)
     facebook_id = '1VOChFfTkuVO4eO0FCAkBjrP9qDFnvWZnk5rLdUrNm64'
-    facebook_leads = _ler_google_sheets(facebook_id, 'LEADS GERAIS')
+    facebook_leads = _ler_google_sheets_por_gid(facebook_id, 0)
     for row in facebook_leads:
         row['_origem'] = 'Facebook'
         leads.append(row)
