@@ -79,8 +79,6 @@
   .btn-ficha    { padding:9px 14px; border-radius:7px; border:none; font-size:12px; font-weight:600; cursor:pointer; transition:.15s; flex:1; min-width:80px; }
   .btn-salvar   { background:var(--azul); color:#fff; }
   .btn-salvar:hover { background:#2563eb; }
-  .btn-excluir  { background:rgba(239,68,68,.15); color:#f87171; border:1px solid rgba(239,68,68,.3); flex:0; }
-  .btn-excluir:hover { background:rgba(239,68,68,.25); }
 
   .ficha-right  { flex:1; display:flex; flex-direction:column; overflow:hidden; }
   .ficha-tabs   { display:flex; border-bottom:1px solid var(--borda); padding:0 16px; gap:2px; }
@@ -351,9 +349,6 @@
 
       <div class="ficha-acoes">
         <button class="btn-ficha btn-salvar" onclick="salvarFicha()">Salvar</button>
-        <button class="btn-ficha" style="background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirEmailContato()" title="Manda um e-mail pro lead pedindo pra chamar o corretor no WhatsApp — pra quando o telefone dele está errado ou não conseguiu falar por telefone">Corrigir contato (e-mail)</button>
-        <button class="btn-ficha" style="background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirSmsReforco()" title="Ligou pro cliente e ele não atendeu? Manda um SMS reforçando que tentamos contato e que o consultor chamou no WhatsApp">SMS — Não atendeu</button>
-        <button class="btn-ficha btn-excluir" onclick="excluirFicha()">Excluir</button>
       </div>
 
       <!-- Modal: SMS de reforço (1º contato sem sucesso por telefone) -->
@@ -505,6 +500,14 @@
             </div>
             <div style="font-size:10px;color:var(--cinza-2);margin-top:8px;">
               A mensagem será enviada pelo seu número configurado no WaSpeed e registrada na timeline.
+            </div>
+          </div>
+
+          <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--borda);">
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:700; margin-bottom:10px;">Cliente não atendeu?</div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn-ficha" style="flex:1; background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirEmailContato()" title="Manda um e-mail pro lead pedindo pra chamar o corretor no WhatsApp — pra quando o telefone dele está errado ou não conseguiu falar por telefone">Corrigir contato (e-mail)</button>
+              <button class="btn-ficha" style="flex:1; background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirSmsReforco()" title="Ligou pro cliente e ele não atendeu? Manda um SMS reforçando que tentamos contato">SMS de reforço</button>
             </div>
           </div>
         </div>
@@ -957,16 +960,6 @@ async function uploadAnexo(files){
       const dd=await(await fetch('/crm/lead/'+_leadAtual.id)).json();
       renderTimeline(dd.atividades||[]);
     } else toast(d.erro||'Erro','err');
-  }
-}
-
-async function excluirFicha(){
-  if(!_leadAtual) return;
-  if(!confirm('Excluir este lead permanentemente?')) return;
-  const r=await fetch('/crm/lead/'+_leadAtual.id+'/excluir',{method:'POST'});
-  if((await r.json()).ok){
-    document.getElementById('card-'+_leadAtual.id)?.remove();
-    atualizarContadores(); fecharFicha(); toast('Lead excluído','ok');
   }
 }
 

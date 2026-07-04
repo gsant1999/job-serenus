@@ -1313,6 +1313,13 @@ def init_db():
         ("usuarios", "waspeed_token", "TEXT"),
         ("usuarios", "som_notificacao", "TEXT"),  # NULL = padrao do sistema (thriller)
         ("crm_leads", "telefone_norm", "TEXT"),
+        # Qualificação do lead (aba na ficha existia só no front — nunca teve rota nem coluna)
+        ("crm_leads", "qual_tipo_plano", "TEXT"),
+        ("crm_leads", "qual_idade", "TEXT"),
+        ("crm_leads", "qual_cidade", "TEXT"),
+        ("crm_leads", "qual_cnpj", "TEXT"),
+        ("crm_leads", "qual_plano_atual", "TEXT"),
+        ("crm_leads", "qual_estagio2", "TEXT"),
         ("crm_leads", "consultor_externo", "TEXT"),  # nome original da planilha
         # ─── Boleto de Adesão via Asaas ───
         ("propostas", "adesao_asaas_customer_id", "TEXT"),
@@ -7235,6 +7242,28 @@ def crm_lead_detalhe(lid):
     })
 
 
+@app.route('/crm/lead/<int:lid>/qualificacao', methods=['POST'])
+@login_required
+def crm_lead_qualificacao(lid):
+    """Salva os dados de qualificação (estágio 1 e 2) do lead."""
+    conn = db()
+    lead = conn.execute("SELECT id, responsavel_id FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and dict(lead)['responsavel_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    d = request.json or {}
+    conn.execute("""UPDATE crm_leads SET
+        qual_tipo_plano=?, qual_idade=?, qual_cidade=?, qual_cnpj=?, qual_plano_atual=?, qual_estagio2=?,
+        atualizado_em=? WHERE id=?""",
+        ((d.get('qual_tipo_plano') or '').strip(), (d.get('qual_idade') or '').strip(),
+         (d.get('qual_cidade') or '').strip(), (d.get('qual_cnpj') or '').strip(),
+         (d.get('qual_plano_atual') or '').strip(), (d.get('qual_estagio2') or '').strip(),
+         _agora_sp(), lid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
 @app.route('/crm/lead/<int:lid>/mover', methods=['POST'])
 @login_required
 def crm_lead_mover(lid):
@@ -9964,18 +9993,15 @@ def crm_lead_whatsapp(lid):
 
 def _montar_sms_reforco(conn, lead):
     """Monta o texto do SMS de reforço (1o contato sem sucesso por telefone).
-    Sem acento/emoji de propósito — GSM-7 (fora disso vira UCS-2 e custa mais segmentos)."""
-    primeiro_nome = (lead.get('nome') or '').split()[0] or 'Ola'
-    responsavel_nome = 'nosso consultor'
-    if lead.get('responsavel_id'):
-        r = conn.execute("SELECT nome FROM usuarios WHERE id=?", (lead['responsavel_id'],)).fetchone()
-        if r:
-            responsavel_nome = dict(r)['nome'].split()[0]
+    Sem acento/emoji de propósito — GSM-7 (fora disso vira UCS-2 e custa mais segmentos).
+    Curto de propósito: GTI SMS REJEITA (não só cobra mais) mensagem acima de 160
+    caracteres. Sem menção ao sistema nem ao nome do consultor — o WhatsApp já
+    identifica quem está falando, não precisa gastar caracteres com isso aqui."""
+    primeiro_nome = ((lead.get('nome') or '').split()[0] or 'Ola')[:20]
     numero_wpp = _whatsapp_do_consultor(conn, lead.get('responsavel_id'))
     link = f"https://wa.me/{numero_wpp}"
-    return (f"JOB Serenus: Ola {primeiro_nome}! Recebemos seu pedido de cotacao de plano de saude. "
-            f"Tentamos falar por telefone e nao conseguimos. {responsavel_nome} ja te chamou no WhatsApp "
-            f"- responda por la pra continuarmos: {link}")
+    return (f"Ola {primeiro_nome}! Recebemos seu pedido de cotacao mas nao conseguimos "
+            f"falar por telefone. Continue por aqui: {link}")
 
 
 @app.route('/crm/lead/<int:lid>/sms-reforco/preview')
