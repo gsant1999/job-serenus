@@ -44,6 +44,13 @@
   .lead-card.origem-google { border-left-color:#ea4335; }
   .lead-card.origem-manual { border-left-color:#8b5cf6; }
   .lead-card.origem-medsenior { border-left-color:#1fd8a4; }
+  .lead-card.card-esfriando { background:rgba(250,204,21,.08); }
+  .lead-card.card-frio { background:rgba(244,63,94,.08); }
+  .lead-esfriando-tag { font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:8px; white-space:nowrap; }
+  .card-esfriando .lead-esfriando-tag { background:rgba(250,204,21,.22); color:#eab308; }
+  .card-frio .lead-esfriando-tag { background:rgba(244,63,94,.22); color:#f43f5e; }
+  .lead-sub-status { width:100%; margin-top:8px; background:var(--panel); border:1px solid var(--borda); border-radius:6px; padding:4px 6px; font-size:10.5px; color:var(--cinza); outline:none; cursor:pointer; }
+  .lead-sub-status:focus { border-color:var(--azul); }
   .lead-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
   .lead-nome   { font-size:13.5px; font-weight:600; color:var(--texto); margin-bottom:2px; line-height:1.3; }
   .lead-cidade { font-size:11px; color:var(--cinza); display:flex; align-items:center; gap:4px; }
@@ -201,6 +208,16 @@
     </div>
     {% endif %}
     <div class="filtro-grupo">
+      <label>Status</label>
+      <select name="sub_status">
+        <option value="">Todos</option>
+        <option value="sem" {% if filtros.sub_status == 'sem' %}selected{% endif %}>Sem status</option>
+        {% for opt in sub_status_opcoes %}
+        {% if opt %}<option value="{{ opt }}" {% if filtros.sub_status == opt %}selected{% endif %}>{{ opt }}</option>{% endif %}
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filtro-grupo">
       <label>Origem</label>
       <select name="origem">
         <option value="">Todas</option>
@@ -247,7 +264,8 @@
         {% for lead in kanban[etapa.id] %}
         {% set orig = lead.origem or 'manual' %}
         {% set ocls = 'origem-fb' if 'Facebook' in orig else 'origem-medsenior' if 'MEDSENIOR' in orig else 'origem-google' if 'Google' in orig else 'origem-manual' %}
-        <div class="lead-card {{ ocls }}" id="card-{{ lead.id }}"
+        {% set esf = lead.atualizado_em|status_esfriando %}
+        <div class="lead-card {{ ocls }} {{ esf.classe }}" id="card-{{ lead.id }}"
              draggable="true"
              ondragstart="dragStart(event, {{ lead.id }})"
              ondragend="dragEnd(event)"
@@ -266,6 +284,7 @@
             </span>
             {% if lead.responsavel_nome %}<span class="lead-resp">{{ lead.responsavel_nome.split()[0] }}</span>
             {% elif lead.consultor_externo %}<span class="lead-resp" style="background:rgba(244,63,94,.12); color:var(--erro);" title="Sem consultor cadastrado no JOB — valor original da planilha">{{ lead.consultor_externo }}</span>{% endif %}
+            {% if esf.texto %}<span class="lead-esfriando-tag" title="Sem nenhuma ação registrada há um tempo">{{ esf.texto }}</span>{% endif %}
           </div>
           <div class="lead-meta-row">
             {% if lead.telefone %}<span>{{ lead.telefone }}</span>{% endif %}
@@ -276,6 +295,11 @@
           {% if lead.telefone %}
           <button class="lead-wpp-btn" onclick="event.stopPropagation(); wppRapido({{ lead.id }}, '{{ lead.telefone }}', '{{ lead.nome|replace("'", "") }}')" title="WhatsApp"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></button>
           {% endif %}
+          <select class="lead-sub-status" onclick="event.stopPropagation()" onchange="mudarSubStatus({{ lead.id }}, this)">
+            {% for opt in sub_status_opcoes %}
+            <option value="{{ opt }}" {% if (lead.sub_status or '') == opt %}selected{% endif %}>{{ opt or 'Sem status' }}</option>
+            {% endfor %}
+          </select>
         </div>
         {% endfor %}
       </div>
@@ -920,6 +944,13 @@ async function carregarAgendaLead(){
 async function concluirAgLead(id){
   const r=await fetch('/crm/agenda/'+id+'/concluir',{method:'POST'});
   if((await r.json()).ok){ toast('Concluída','ok'); carregarAgendaLead(); }
+}
+async function mudarSubStatus(id, sel){
+  const valor=sel.value;
+  const r=await fetch('/crm/lead/'+id+'/sub-status',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({sub_status:valor})});
+  const d=await r.json();
+  if(!d.ok){ toast(d.erro||'Erro ao mudar status','err'); }
 }
 async function enviarMsgLeadAg(id, btn){
   if(btn){ btn.disabled=true; btn.textContent='Enviando...'; }

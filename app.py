@@ -1320,6 +1320,8 @@ def init_db():
         ("crm_leads", "qual_cnpj", "TEXT"),
         ("crm_leads", "qual_plano_atual", "TEXT"),
         ("crm_leads", "qual_estagio2", "TEXT"),
+        # Sub-status dentro da etapa (ex: Follow up 1/2/3) — pedido do Gabriel via PDF 04/07
+        ("crm_leads", "sub_status", "TEXT"),
         ("crm_leads", "consultor_externo", "TEXT"),  # nome original da planilha
         # ─── Boleto de Adesão via Asaas ───
         ("propostas", "adesao_asaas_customer_id", "TEXT"),
@@ -7094,6 +7096,7 @@ def crm():
     f_data_ate  = request.args.get('data_ate', '').strip()    # YYYY-MM-DD
     f_busca     = request.args.get('q', '').strip()
     f_externo   = request.args.get('externo', '').strip()  # consultor externo (não cadastrado)
+    f_sub_status = request.args.get('sub_status', '').strip()
 
     # Lista de consultores para o filtro (admin vê todos os usuários ativos)
     responsaveis = []
@@ -7145,6 +7148,13 @@ def crm():
         q += " AND l.etapa=?"
         params.append(f_etapa)
 
+    if f_sub_status:
+        if f_sub_status == 'sem':
+            q += " AND (l.sub_status IS NULL OR l.sub_status='')"
+        else:
+            q += " AND l.sub_status=?"
+            params.append(f_sub_status)
+
     if f_origem:
         q += " AND l.origem LIKE ?"
         params.append(f'%{f_origem}%')
@@ -7184,13 +7194,14 @@ def crm():
     filtros_ativos = {
         'etapa': f_etapa, 'consultor': f_consultor, 'origem': f_origem,
         'data_de': f_data_de, 'data_ate': f_data_ate, 'q': f_busca,
-        'externo': f_externo
+        'externo': f_externo, 'sub_status': f_sub_status
     }
 
     close_db(conn)
     return render_template('crm.html', kanban=kanban, etapas=etapas,
                            total=total, responsaveis=responsaveis, eh_admin=eh_admin,
-                           filtros=filtros_ativos, consultores_externos=consultores_externos)
+                           filtros=filtros_ativos, consultores_externos=consultores_externos,
+                           sub_status_opcoes=SUB_STATUS_OPCOES)
 
 
 @app.route('/crm/lead/novo', methods=['POST'])
@@ -7287,6 +7298,32 @@ def crm_lead_mover(lid):
     return jsonify({"ok": True})
 
 
+SUB_STATUS_OPCOES = ['', 'Follow up 1', 'Follow up 2', 'Follow up 3+', 'Aguardando resposta', 'Sem interesse no momento']
+
+
+@app.route('/crm/lead/<int:lid>/sub-status', methods=['POST'])
+@login_required
+def crm_lead_sub_status(lid):
+    """Muda o sub-status do lead direto do card do Kanban, sem precisar abrir a
+    ficha inteira — pedido do Gabriel (PDF 04/07): saber de manhã quantos follow
+    ups já foram feitos com cada lead, sem trocar de coluna no funil."""
+    novo = (request.json or {}).get('sub_status', '')
+    if novo not in SUB_STATUS_OPCOES:
+        return jsonify({"ok": False, "erro": "Sub-status inválido"}), 400
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    anterior = lead['sub_status'] or '—'
+    conn.execute("UPDATE crm_leads SET sub_status=?, atualizado_em=? WHERE id=?", (novo or None, _agora_sp(), lid))
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                 (lid, session.get('nome'), 'edicao', f'Status: "{anterior}" → "{novo or "—"}"', _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
 @app.route('/crm/lead/<int:lid>/atividade', methods=['POST'])
 @login_required
 def crm_lead_atividade(lid):
@@ -7320,6 +7357,7 @@ def crm_lead_editar(lid):
     observacoes= d.get('observacoes', lead['observacoes'])
     valor      = float(d.get('valor_estimado') or 0) or None
     origem     = d.get('origem', lead['origem'])
+    sub_status = d.get('sub_status', lead['sub_status'])
 
     # Campos que só admin pode alterar
     responsavel_id = int(d['responsavel_id']) if eh_admin and d.get('responsavel_id') else lead['responsavel_id']
@@ -7332,12 +7370,13 @@ def crm_lead_editar(lid):
     if email != lead['email']: changes.append(f'Email atualizado')
     if etapa != lead['etapa']: changes.append(f'Etapa: "{lead["etapa"]}" → "{etapa}"')
     if str(responsavel_id) != str(lead['responsavel_id']): changes.append(f'Responsável alterado')
+    if sub_status != lead['sub_status']: changes.append(f'Status: "{lead["sub_status"] or "—"}" → "{sub_status or "—"}"')
 
     conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, email=?, empresa=?,
-                    valor_estimado=?, observacoes=?, origem=?,
+                    valor_estimado=?, observacoes=?, origem=?, sub_status=?,
                     responsavel_id=?, etapa=?, atualizado_em=?
                     WHERE id=?""",
-        (nome, telefone, email, empresa, valor, observacoes, origem,
+        (nome, telefone, email, empresa, valor, observacoes, origem, sub_status,
          responsavel_id, etapa, _agora_sp(), lid))
 
     if changes:
@@ -11445,10 +11484,27 @@ def _fmt_datahora_br(valor):
         return d.strftime('%d/%m/%Y') + hora
     return str(valor)[:16]
 
+def _status_esfriando(atualizado_em):
+    """Card do Kanban muda de cor conforme tempo sem nenhuma ação (pedido do
+    Gabriel via PDF 04/07: "esfriando" sem contato). Retorna classe CSS + texto."""
+    dt = _parse_dt_seguro(atualizado_em) if atualizado_em else None
+    if not dt:
+        return {'classe': '', 'texto': ''}
+    if dt.tzinfo is None:
+        dt = TZ_SP.localize(dt)
+    dias = int((datetime.now(TZ_SP) - dt).total_seconds() / 86400)
+    if dias >= 5:
+        return {'classe': 'card-frio', 'texto': f'Frio há {dias}d'}
+    if dias >= 2:
+        return {'classe': 'card-esfriando', 'texto': f'Esfriando há {dias}d'}
+    return {'classe': '', 'texto': ''}
+
+
 # Registra filtros Jinja para uso nos templates
 try:
     app.jinja_env.filters['data_br'] = _fmt_data_br
     app.jinja_env.filters['datahora_br'] = _fmt_datahora_br
+    app.jinja_env.filters['status_esfriando'] = _status_esfriando
 except Exception:
     pass
 
