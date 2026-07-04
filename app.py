@@ -9515,6 +9515,42 @@ def crm_lead_cotacoes(lid):
     return jsonify({"ok": True, "cotacoes": out})
 
 
+@app.route('/crm/lead/<int:lid>/timeline-cotacoes')
+@login_required
+def crm_lead_timeline_cotacoes(lid):
+    """Timeline visual de todas as cotações do cliente."""
+    conn = db()
+    lead = conn.execute("SELECT id, nome, telefone, telefone_norm, email FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); abort(404)
+    tel = (lead['telefone_norm'] if hasattr(lead, 'keys') else None) or _normalizar_telefone(lead['telefone'] or '')
+    email = (lead['email'] or '').strip().lower()
+    rows = conn.execute("""SELECT id, token, titulo, total, criado_em, cliente_nome, cliente_telefone, cliente_email, lead_id, planos_json
+                           FROM cotacao_salva ORDER BY criado_em DESC""").fetchall()
+    close_db(conn)
+    cotacoes = []
+    for r in rows:
+        d = dict(r)
+        casa = (d.get('lead_id') == lid)
+        if not casa and tel and len(tel) >= 8:
+            casa = tel[-8:] in re.sub(r'\D', '', d.get('cliente_telefone') or '')
+        if not casa and email:
+            casa = (d.get('cliente_email') or '').strip().lower() == email
+        if casa:
+            try:
+                planos = json.loads(d.get('planos_json') or '[]')
+                n_planos = len(planos)
+            except Exception:
+                n_planos = 0
+            cotacoes.append({
+                'id': d['id'], 'token': d.get('token'), 'titulo': d.get('titulo') or 'Cotação',
+                'total': float(d.get('total') or 0), 'data': str(d.get('criado_em'))[:10],
+                'hora': str(d.get('criado_em'))[11:16] if d.get('criado_em') else '',
+                'n_planos': n_planos
+            })
+    return render_template('crm_lead_timeline_cotacoes.html', lead=lead, cotacoes=cotacoes)
+
+
 # ─── GESTÃO DE ETAPAS DO FUNIL (admin) ───────────────────────────────────────
 import unicodedata as _unicodedata
 

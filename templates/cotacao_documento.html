@@ -122,6 +122,7 @@
     <div>
       <div class="titulo">{{ cot.titulo or 'Cotação' }}</div>
       <div class="corretor">
+        {% if cot.criado_em %}<div class="linha"><div class="k">Cotação</div><div class="v" style="font-size:11px;color:#7a7a86;">{{ cot.criado_em[:10] }} às {{ cot.criado_em[11:16] }}</div></div>{% endif %}
         <div class="linha"><div class="k">Corretor</div><div class="v">{{ cot.corretor_nome }}</div></div>
         {% if cot.corretor_email %}<div class="linha"><div class="k">E-mail</div><div class="v">{{ cot.corretor_email }}</div></div>{% endif %}
         {% if cot.corretor_telefone %}<div class="linha"><div class="k">Telefone</div><div class="v">{{ cot.corretor_telefone }}</div></div>{% endif %}
