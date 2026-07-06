@@ -2858,6 +2858,7 @@ def download_arquivo(chave_arquivo):
         return send_file(caminho, as_attachment=True)
     except Exception as e:
         return jsonify({'erro': str(e)}), 500
+@app.route('/admin/testar-r2')
 @login_required
 @admin_required
 def testar_r2():
