@@ -1983,29 +1983,42 @@ def upload_arquivo_r2(file_obj, chave_arquivo):
             fp.write(dados)
         app.logger.info(f"[LOCAL] ✅ {destino} (volume persistente)")
         
-        # PRIORIDADE 2: Tenta R2 como REDUNDÂNCIA (não é crítico se falhar)
+        # PRIORIDADE 2: Tenta R2 como REDUNDÂNCIA. Local já garantiu a gravação,
+        # então falha aqui nunca derruba o upload — mas tenta 3x (falha de rede
+        # transitória era descartada de primeira, sem nenhuma segunda chance,
+        # e ficava sem registro visível: só um log warning que ninguém via).
+        r2_ok = False
         if os.environ.get('R2_ENABLED') == 'true':
-            try:
-                import boto3
-                account_id = os.environ.get('R2_ACCOUNT_ID', '').strip()
-                access_key = os.environ.get('R2_ACCESS_KEY', '').strip()
-                secret_key = os.environ.get('R2_SECRET_KEY', '').strip()
-                bucket     = os.environ.get('R2_BUCKET_NAME', '').strip()
+            account_id = os.environ.get('R2_ACCOUNT_ID', '').strip()
+            access_key = os.environ.get('R2_ACCESS_KEY', '').strip()
+            secret_key = os.environ.get('R2_SECRET_KEY', '').strip()
+            bucket     = os.environ.get('R2_BUCKET_NAME', '').strip()
 
-                if account_id and access_key and secret_key and bucket:
-                    s3 = boto3.client(
-                        's3',
-                        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
-                        aws_access_key_id=access_key,
-                        aws_secret_access_key=secret_key,
-                        region_name='auto'
-                    )
-                    s3.upload_fileobj(io.BytesIO(dados), bucket, chave_arquivo)
-                    app.logger.info(f"[R2] ✅ Backup: {chave_arquivo}")
-            except Exception as e:
-                app.logger.warning(f"[R2] ⚠️ Backup falhou (não é crítico): {type(e).__name__}: {e}")
-        
-        return {'ok': True, 'chave': chave_arquivo, 'storage': 'local'}
+            if account_id and access_key and secret_key and bucket:
+                import boto3
+                s3 = boto3.client(
+                    's3',
+                    endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+                    aws_access_key_id=access_key,
+                    aws_secret_access_key=secret_key,
+                    region_name='auto'
+                )
+                ultimo_erro = None
+                for tentativa in range(1, 4):
+                    try:
+                        s3.upload_fileobj(io.BytesIO(dados), bucket, chave_arquivo)
+                        app.logger.info(f"[R2] ✅ Backup: {chave_arquivo} (tentativa {tentativa})")
+                        r2_ok = True
+                        break
+                    except Exception as e:
+                        ultimo_erro = e
+                        time.sleep(0.5 * tentativa)
+                if not r2_ok:
+                    # ERROR (não warning) — precisa aparecer nos logs de forma visível,
+                    # já que sem backup em R2 o arquivo só existe no volume local.
+                    app.logger.error(f"[R2] ❌ Backup falhou após 3 tentativas: {chave_arquivo} — {type(ultimo_erro).__name__}: {ultimo_erro}")
+
+        return {'ok': True, 'chave': chave_arquivo, 'storage': 'local', 'r2_ok': r2_ok}
     except Exception as e:
         app.logger.error(f"[LOCAL] ❌ Erro crítico ao salvar: {e}")
         return {'ok': False, 'erro': str(e), 'storage': 'none'}
@@ -2864,6 +2877,84 @@ def testar_r2():
         })
     except Exception as e:
         return jsonify({'ok': False, 'erro': str(e)}), 500
+
+
+@app.route('/admin/anexos/reconciliar-r2', methods=['POST'])
+@login_required
+@admin_required
+def reconciliar_anexos_r2():
+    """Varre contrato/comprovante/documentos de TODAS as propostas e sobe para o
+    R2 qualquer arquivo que só exista localmente — corrige uploads cujo backup
+    em R2 falhou silenciosamente (só ficava um log warning que ninguém via)."""
+    if os.environ.get('R2_ENABLED') != 'true':
+        return jsonify({"ok": False, "msg": "R2 não está habilitado (R2_ENABLED != true)."}), 400
+
+    import boto3, io
+    account_id = os.environ.get('R2_ACCOUNT_ID', '').strip()
+    access_key = os.environ.get('R2_ACCESS_KEY', '').strip()
+    secret_key = os.environ.get('R2_SECRET_KEY', '').strip()
+    bucket     = os.environ.get('R2_BUCKET_NAME', '').strip()
+    if not (account_id and access_key and secret_key and bucket):
+        return jsonify({"ok": False, "msg": "Credenciais R2 incompletas."}), 400
+
+    s3 = boto3.client('s3', endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+                       aws_access_key_id=access_key, aws_secret_access_key=secret_key, region_name='auto')
+
+    # Lista tudo que já está no R2 (só o nome do arquivo, sem o caminho da pasta)
+    ja_no_r2 = set()
+    try:
+        paginator = s3.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=bucket):
+            for obj in page.get('Contents', []):
+                ja_no_r2.add(obj['Key'].split('/')[-1])
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"Erro ao listar bucket: {e}"}), 500
+
+    conn = db()
+    props = conn.execute("SELECT id, contrato_arquivo, comprovante_boleto, anexos FROM propostas").fetchall()
+    close_db(conn)
+
+    subidos, sem_local_nem_r2, ja_ok = [], [], 0
+    for p in props:
+        pid = p['id']
+        itens = []
+        if p['contrato_arquivo']:
+            itens.append(('contrato', p['contrato_arquivo']))
+        if p['comprovante_boleto']:
+            itens.append(('comprovante', p['comprovante_boleto']))
+        try:
+            extras = json.loads(p['anexos']) if p['anexos'] else []
+            for x in extras:
+                nome_x = x['nome'] if isinstance(x, dict) else x
+                if nome_x:
+                    itens.append(('documentos', nome_x))
+        except Exception:
+            pass
+
+        for tipo, nome in itens:
+            if nome in ja_no_r2:
+                ja_ok += 1
+                continue
+            caminho_local = os.path.join(UPLOAD_FOLDER, os.path.basename(nome))
+            if not os.path.exists(caminho_local):
+                sem_local_nem_r2.append(f"proposta {pid}: {nome}")
+                continue
+            try:
+                with open(caminho_local, 'rb') as fh:
+                    dados = fh.read()
+                chave = f"propostas/{pid}/{tipo}/{nome}"
+                s3.upload_fileobj(io.BytesIO(dados), bucket, chave)
+                subidos.append(f"proposta {pid}: {nome}")
+                ja_no_r2.add(nome)
+            except Exception as e:
+                sem_local_nem_r2.append(f"proposta {pid}: {nome} (falhou upload: {type(e).__name__}: {e})")
+
+    return jsonify({
+        "ok": True,
+        "ja_estavam_no_r2": ja_ok,
+        "subidos_agora": subidos,
+        "faltando_local_e_r2": sem_local_nem_r2,
+    })
 
 @app.route('/admin/testar-smtp')
 @login_required
