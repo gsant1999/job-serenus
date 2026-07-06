@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Enviar Leads para as Meninas{% endblock %}
+{% block title %}Transferir Leads{% endblock %}
 
 {% block head %}
 <style>
@@ -7,7 +7,8 @@
   .box h2 { font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin:0 0 12px; }
   .box p, .box li { font-size:13px; color:var(--cinza); line-height:1.6; }
   .box code { background:var(--panel-2); border:1px solid var(--borda); border-radius:5px; padding:1px 6px; font-size:12px; color:var(--texto); }
-  .cols { font-size:12px; color:var(--cinza); background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:10px 12px; margin:10px 0; overflow-x:auto; white-space:nowrap; }
+  .cols { display:inline-flex; gap:6px; margin:10px 0; flex-wrap:wrap; }
+  .cols code { background:var(--panel-2); border:1px solid var(--borda); border-radius:6px; padding:5px 10px; font-size:12px; color:var(--texto); }
   .upload { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:14px; }
   input[type=file] { color:var(--cinza); font-size:13px; }
   .btn-imp { background:var(--azul); color:#fff; border:none; padding:11px 22px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
@@ -19,7 +20,7 @@
 {% block content %}
 <div class="topbar">
   <div>
-    <h1 style="margin:0;">Enviar Leads para as Meninas</h1>
+    <h1 style="margin:0;">Transferir Leads</h1>
     <div class="sub">Transfere leads já mandados por fora para Prisciele, Juliana e Jenifer — sem duplicar</div>
   </div>
   <div style="display:flex; gap:8px;">
@@ -40,8 +41,8 @@
     <li>Nenhum lead é duplicado — a checagem é sempre por telefone.</li>
   </ul>
   <p>Colunas do arquivo (a ordem não importa):</p>
-  <div class="cols">Nome;Telefone;Consultora</div>
-  <p>A coluna <b>Consultora</b> precisa ser um dos nomes: {{ meninas|join(', ') }} (ou só o primeiro nome — ex.: "Prisciele").</p>
+  <div class="cols"><code>Nome</code><code>Telefone</code><code>Consultora</code></div>
+  <p>A coluna <b>Consultora</b> precisa ser Prisciele, Juliana ou Jenifer (primeiro nome já resolve).</p>
   <a class="btn-modelo" href="/crm/importar-meninas/modelo">Baixar modelo (CSV)</a>
 </div>
 
