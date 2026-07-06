@@ -1395,6 +1395,12 @@ def init_db():
         ("lancamentos", "fonte_pagamento", "TEXT"),
         ("lancamentos", "comprovante", "TEXT"),
         ("lancamentos", "upload_token", "TEXT"),
+        ("lancamentos", "data_emissao", "TEXT"),
+        ("lancamentos", "data_vencimento", "TEXT"),
+        ("lancamentos", "data_pagamento", "TEXT"),
+        ("lancamentos", "grupo_parcela", "TEXT"),
+        ("lancamentos", "parcela_num", "INTEGER"),
+        ("lancamentos", "parcela_total", "INTEGER"),
         # Telefone do usuário (WhatsApp p/ notificações via WaSpeed e link wa.me nos e-mails)
         ("usuarios", "telefone", "TEXT"),
         # Mensagem pronta pro lead, escrita já no agendamento (fica 1 clique pra enviar quando o lembrete chegar)
@@ -6057,6 +6063,7 @@ def financeiro():
     # Lançamentos do mês
     custos = conn.execute("SELECT * FROM lancamentos WHERE tipo='custo' AND data_competencia=? ORDER BY id DESC", (mes,)).fetchall()
     aportes = conn.execute("SELECT * FROM lancamentos WHERE tipo='aporte' AND data_competencia=? ORDER BY id DESC", (mes,)).fetchall()
+    reembolsos = conn.execute("SELECT * FROM lancamentos WHERE tipo='reembolso' AND data_competencia=? ORDER BY id DESC", (mes,)).fetchall()
     fixos = conn.execute("""SELECT l.*, u.nome consultor_nome FROM lancamentos l
         LEFT JOIN usuarios u ON u.id=l.usuario_id WHERE l.tipo='fixo' AND l.data_competencia=? ORDER BY l.data_lancamento""", (mes,)).fetchall()
     # Totais do mês
@@ -6064,43 +6071,159 @@ def financeiro():
         WHERE competencia=? AND status NOT IN ('Pago ao corretor')""", (mes,)).fetchone()['v']
     pagar_consultor = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM parcelas
         WHERE competencia=? AND status NOT IN ('Pago ao corretor')""", (mes,)).fetchone()['v']
-    total_custos = sum(c['valor'] for c in custos) + sum(f['valor'] for f in fixos)
+    total_custos_puro = sum(c['valor'] for c in custos)
+    total_fixos = sum(f['valor'] for f in fixos)
+    total_custos = total_custos_puro + total_fixos
     total_aportes = sum(a['valor'] for a in aportes)
-    saldo = receber_mes - pagar_consultor - sum(c['valor'] for c in custos) - sum(f['valor'] for f in fixos) + total_aportes
+    total_reembolsos = sum(r['valor'] for r in reembolsos)
+    saldo = receber_mes - pagar_consultor - total_custos_puro - total_fixos + total_aportes - total_reembolsos
     # ─── DRE do mês ───
     comissao_recebida = conn.execute("""SELECT COALESCE(SUM(valor_corretora),0) v FROM parcelas
         WHERE competencia=? AND status='Pago ao corretor'""", (mes,)).fetchone()['v']
     dre = {
         'receita_bruta': receber_mes,                          # comissões a receber das operadoras
         'repasse_consultores': pagar_consultor,                # (-) repasses
-        'custos_operacionais': sum(c['valor'] for c in custos),# (-) custos lançados
-        'fixos': sum(f['valor'] for f in fixos),               # (-) fixos
+        'custos_operacionais': total_custos_puro,              # (-) custos lançados
+        'fixos': total_fixos,                                  # (-) fixos
         'aportes': total_aportes,                              # (+) aportes
+        'reembolsos': total_reembolsos,                        # (-) reembolsos pagos aos sócios
     }
     dre['margem_bruta'] = dre['receita_bruta'] - dre['repasse_consultores']
-    dre['resultado'] = dre['margem_bruta'] - dre['custos_operacionais'] - dre['fixos'] + dre['aportes']
+    dre['resultado'] = dre['margem_bruta'] - dre['custos_operacionais'] - dre['fixos'] + dre['aportes'] - dre['reembolsos']
+
+    # ─── Saldo entre sócios (histórico completo, não só do mês) ───
+    # Quanto a empresa deve a cada sócio: aportes que ele colocou + custos que
+    # ele pagou do próprio bolso (fonte_pagamento='Terceiro'), menos o que já
+    # foi reembolsado a ele. Não é "sócio A deve a sócio B" direto (não há % de
+    # sociedade cadastrado), é "quanto falta a empresa devolver a cada um".
+    socios_aportes = conn.execute("""SELECT socio, COALESCE(SUM(valor),0) v FROM lancamentos
+        WHERE tipo='aporte' AND socio IS NOT NULL AND socio != '' GROUP BY socio""").fetchall()
+    socios_adiantado = conn.execute("""SELECT pago_por AS socio, COALESCE(SUM(valor),0) v FROM lancamentos
+        WHERE tipo='custo' AND fonte_pagamento='Terceiro' AND pago_por IS NOT NULL AND pago_por != '' AND pago_por != 'Caixa da empresa'
+        GROUP BY pago_por""").fetchall()
+    socios_reembolsados = conn.execute("""SELECT socio, COALESCE(SUM(valor),0) v FROM lancamentos
+        WHERE tipo='reembolso' AND socio IS NOT NULL AND socio != '' GROUP BY socio""").fetchall()
+    saldo_socios = {}
+    for r in socios_aportes:
+        saldo_socios[r['socio']] = saldo_socios.get(r['socio'], 0) + r['v']
+    for r in socios_adiantado:
+        saldo_socios[r['socio']] = saldo_socios.get(r['socio'], 0) + r['v']
+    for r in socios_reembolsados:
+        saldo_socios[r['socio']] = saldo_socios.get(r['socio'], 0) - r['v']
+    saldo_socios_lista = sorted(
+        [{'socio': s, 'saldo': v} for s, v in saldo_socios.items() if abs(v) > 0.005],
+        key=lambda x: -x['saldo'])
+
     close_db(conn)
     return render_template('financeiro.html', mes=mes, futuras=futuras,
-        custos=custos, aportes=aportes, fixos=fixos,
+        custos=custos, aportes=aportes, fixos=fixos, reembolsos=reembolsos,
         receber_mes=receber_mes, pagar_consultor=pagar_consultor,
-        total_custos=total_custos, total_aportes=total_aportes, saldo=saldo, dre=dre)
+        total_custos=total_custos, total_custos_puro=total_custos_puro, total_fixos=total_fixos,
+        total_aportes=total_aportes, total_reembolsos=total_reembolsos,
+        saldo=saldo, dre=dre, saldo_socios=saldo_socios_lista)
+
+def _proximo_mes(competencia, n):
+    """Soma n meses a uma competência 'YYYY-MM'. Retorna 'YYYY-MM'."""
+    ano, mes = int(competencia[:4]), int(competencia[5:7])
+    total = (ano * 12 + (mes - 1)) + n
+    return f"{total // 12}-{(total % 12) + 1:02d}"
+
 
 @app.route('/lancamento/salvar', methods=['POST'])
 @login_required
 @admin_required
 def lancamento_salvar():
+    """Cria um lançamento. Se num_parcelas > 1, divide o valor em N lançamentos
+    mensais ligados por grupo_parcela (ex: compra parcelada no cartão) — cada
+    parcela cai na competência do mês correspondente à emissão + i meses.
+    A competência SEMPRE é derivada de data_emissao (nunca do mês que está
+    sendo visualizado na tela) — evita lançamento cair na competência errada."""
+    d = request.json or {}
+    tipo = d.get('tipo')
+    descricao = d.get('descricao')
+    valor_total = float(str(d.get('valor') or 0).replace('.', '').replace(',', '.')) if isinstance(d.get('valor'), str) and ',' in str(d.get('valor')) else float(d.get('valor') or 0)
+    data_emissao = (d.get('data_emissao') or d.get('data_lancamento') or '').strip()
+    data_vencimento = (d.get('data_vencimento') or '').strip()
+    try:
+        num_parcelas = max(1, int(d.get('num_parcelas') or 1))
+    except (ValueError, TypeError):
+        num_parcelas = 1
+
+    competencia_base = data_emissao[:7] if len(data_emissao) >= 7 else (d.get('data_competencia') or competencia_atual())
+
+    conn = db()
+    grupo = secrets.token_hex(6) if num_parcelas > 1 else None
+    valor_parcela = round(valor_total / num_parcelas, 2)
+    ids = []
+    for i in range(num_parcelas):
+        # Última parcela absorve a diferença de arredondamento
+        valor_i = round(valor_total - valor_parcela * (num_parcelas - 1), 2) if i == num_parcelas - 1 else valor_parcela
+        competencia_i = _proximo_mes(competencia_base, i) if competencia_base else competencia_atual()
+        desc_i = f"{descricao} ({i+1}/{num_parcelas})" if num_parcelas > 1 else descricao
+        conn.execute("""INSERT INTO lancamentos
+            (tipo,categoria,descricao,valor,data_competencia,data_lancamento,data_emissao,data_vencimento,
+             socio,recorrente,status,pago_por,fonte_pagamento,grupo_parcela,parcela_num,parcela_total)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (tipo, d.get('categoria', ''), desc_i, valor_i, competencia_i,
+             data_emissao or competencia_i, data_emissao or None, data_vencimento or None,
+             d.get('socio', ''), 1 if d.get('recorrente') else 0, 'Previsto',
+             (d.get('pago_por') or '').strip(), (d.get('fonte_pagamento') or '').strip(),
+             grupo, i + 1 if num_parcelas > 1 else None, num_parcelas if num_parcelas > 1 else None))
+        lid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+               else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+        ids.append(lid)
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "id": ids[0], "ids": ids, "parcelas_criadas": num_parcelas})
+
+
+@app.route('/lancamento/<int:lid>/editar', methods=['POST'])
+@login_required
+@admin_required
+def lancamento_editar(lid):
+    """Edição de um lançamento já criado — antes não existia nenhuma forma de
+    corrigir um lançamento, só excluir e recriar. Só atualiza os campos
+    enviados no payload — campo ausente preserva o valor atual (edição
+    parcial), em vez de apagar pago_por/fonte_pagamento/socio não reenviados."""
     d = request.json or {}
     conn = db()
-    conn.execute("""INSERT INTO lancamentos (tipo,categoria,descricao,valor,data_competencia,data_lancamento,socio,recorrente,status,pago_por,fonte_pagamento)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (d.get('tipo'), d.get('categoria',''), d.get('descricao'), float(d.get('valor') or 0),
-         d.get('data_competencia') or competencia_atual(), d.get('data_lancamento',''),
-         d.get('socio',''), 1 if d.get('recorrente') else 0, 'Previsto',
-         (d.get('pago_por') or '').strip(), (d.get('fonte_pagamento') or '').strip()))
-    lid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
-           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    atual = conn.execute("SELECT * FROM lancamentos WHERE id=?", (lid,)).fetchone()
+    if not atual:
+        close_db(conn); return jsonify({"ok": False, "msg": "Lançamento não encontrado"}), 404
+
+    def campo(chave, default=''):
+        return d[chave] if chave in d else (atual[chave] if chave in atual.keys() else default)
+
+    valor_raw = campo('valor', atual['valor'])
+    valor = float(str(valor_raw).replace('.', '').replace(',', '.')) if isinstance(valor_raw, str) and ',' in str(valor_raw) else float(valor_raw or 0)
+    data_emissao = (campo('data_emissao') or '').strip()
+    competencia = data_emissao[:7] if len(data_emissao) >= 7 else (campo('data_competencia') or atual['data_competencia'])
+
+    conn.execute("""UPDATE lancamentos SET descricao=?, categoria=?, valor=?, data_emissao=?, data_vencimento=?,
+        data_competencia=?, socio=?, pago_por=?, fonte_pagamento=?
+        WHERE id=?""",
+        (campo('descricao'), campo('categoria'), valor, data_emissao or None, (campo('data_vencimento') or '').strip() or None,
+         competencia, campo('socio'), (campo('pago_por') or '').strip(), (campo('fonte_pagamento') or '').strip(), lid))
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "id": lid})
+    return jsonify({"ok": True})
+
+
+@app.route('/lancamento/<int:lid>/conciliar', methods=['POST'])
+@login_required
+@admin_required
+def lancamento_conciliar(lid):
+    """Marca um lançamento como Pago/Conciliado (ou volta para Previsto)."""
+    d = request.json or {}
+    novo_status = d.get('status') or 'Pago'
+    if novo_status not in ('Previsto', 'Pago', 'Conciliado'):
+        return jsonify({"ok": False, "msg": "Status inválido"}), 400
+    conn = db()
+    l = conn.execute("SELECT id FROM lancamentos WHERE id=?", (lid,)).fetchone()
+    if not l:
+        close_db(conn); return jsonify({"ok": False, "msg": "Lançamento não encontrado"}), 404
+    data_pagamento = _fmt_data_br(datetime.now(TZ_SP)) if novo_status in ('Pago', 'Conciliado') else None
+    conn.execute("UPDATE lancamentos SET status=?, data_pagamento=? WHERE id=?", (novo_status, data_pagamento, lid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "status": novo_status})
 
 
 _COMPROVANTE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.pdf'}
