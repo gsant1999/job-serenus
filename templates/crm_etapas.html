@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}Gerenciar Etapas e Status{% endblock %}
+
+{% block head %}
+<style>
+  .ge-page { max-width:720px; margin:0 auto; }
+  .ge-sec { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:20px 22px; margin-bottom:20px; }
+  .ge-sec-tit { font-size:15px; font-weight:700; color:var(--texto); margin-bottom:4px; }
+  .ge-sec-sub { font-size:12px; color:var(--cinza-2); margin-bottom:16px; }
+
+  .ge-item { display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--borda); border-radius:9px; margin-bottom:8px; background:var(--panel-2); }
+  .ge-item .dot { width:12px; height:12px; border-radius:50%; flex-shrink:0; }
+  .ge-item .nome { flex:1; font-size:13.5px; font-weight:600; color:var(--texto); }
+  .ge-item .nome input { background:transparent; border:none; color:var(--texto); font-size:13.5px; font-weight:600; width:100%; outline:none; border-bottom:1px dashed transparent; }
+  .ge-item .nome input:focus { border-bottom-color:var(--azul); }
+  .ge-item .tipo-tag { font-size:9.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--cinza-2); background:var(--panel-3); padding:2px 8px; border-radius:20px; }
+  .ge-item .ge-btns { display:flex; gap:4px; }
+  .ge-btn-mini { background:transparent; border:1px solid var(--borda); color:var(--cinza); width:26px; height:26px; border-radius:6px; cursor:pointer; font-size:12px; display:flex; align-items:center; justify-content:center; }
+  .ge-btn-mini:hover { border-color:var(--azul); color:var(--azul); }
+  .ge-btn-mini.excluir:hover { border-color:var(--erro); color:var(--erro); }
+  .ge-item input[type="color"] { width:26px; height:26px; border:none; border-radius:6px; background:none; padding:0; cursor:pointer; flex-shrink:0; }
+
+  .ge-add { display:flex; gap:8px; margin-top:14px; }
+  .ge-add input[type="text"] { flex:1; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; color:var(--texto); font-size:13px; outline:none; }
+  .ge-add input[type="text"]:focus { border-color:var(--azul); }
+  .ge-add input[type="color"] { width:40px; height:38px; border:1px solid var(--borda); border-radius:8px; background:none; padding:2px; cursor:pointer; }
+  .ge-add button { background:var(--azul); color:#fff; border:none; padding:9px 18px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
+
+  .ge-vazio { text-align:center; padding:20px; color:var(--cinza-2); font-size:12.5px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ge-page">
+  <div class="topbar" style="margin-bottom:20px;">
+    <div>
+      <h1 style="margin:0;">Etapas e Status</h1>
+      <div class="sub">Gerencie as colunas do Kanban e as opções de status dos leads</div>
+    </div>
+    <div><button class="btn-outline btn-sm" onclick="location.href='/crm'">Voltar ao CRM</button></div>
+  </div>
+
+  <div class="ge-sec">
+    <div class="ge-sec-tit">Etapas do Funil</div>
+    <div class="ge-sec-sub">São as colunas do Kanban. Use as setas para reordenar. Ao excluir uma etapa, os leads dela são movidos automaticamente para a etapa seguinte.</div>
+    <div id="lista-etapas">
+      {% for e in etapas %}
+      <div class="ge-item" data-slug="{{ e.slug }}">
+        <input type="color" value="{{ e.cor }}" onchange="editarEtapa('{{ e.slug }}', {cor:this.value})">
+        <div class="nome"><input type="text" value="{{ e.nome }}" onblur="if(this.value.trim() && this.value!==this.defaultValue) editarEtapa('{{ e.slug }}', {nome:this.value.trim()})"></div>
+        {% if e.tipo != 'normal' %}<span class="tipo-tag">{{ e.tipo }}</span>{% endif %}
+        <div class="ge-btns">
+          <button class="ge-btn-mini" title="Mover para cima" onclick="moverEtapa('{{ e.slug }}', -1)">▲</button>
+          <button class="ge-btn-mini" title="Mover para baixo" onclick="moverEtapa('{{ e.slug }}', 1)">▼</button>
+          <button class="ge-btn-mini excluir" title="Excluir etapa" onclick="excluirEtapa('{{ e.slug }}', '{{ e.nome }}')">✕</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="ge-add">
+      <input type="color" id="nova-etapa-cor" value="#3b82f6">
+      <input type="text" id="nova-etapa-nome" placeholder="Nome da nova etapa (ex: Aguardando documentos)">
+      <button onclick="criarEtapa()">+ Adicionar etapa</button>
+    </div>
+  </div>
+
+  <div class="ge-sec">
+    <div class="ge-sec-tit">Status (follow-up)</div>
+    <div class="ge-sec-sub">Aparece no card do Kanban para marcar em que ponto do follow-up o lead está, sem precisar trocar de etapa.</div>
+    <div id="lista-status">
+      {% for s in status_opcoes %}
+      <div class="ge-item" data-id="{{ s.id }}">
+        <div class="nome"><input type="text" value="{{ s.nome }}" onblur="if(this.value.trim() && this.value!==this.defaultValue) editarStatus({{ s.id }}, this.value.trim())"></div>
+        <div class="ge-btns">
+          <button class="ge-btn-mini" title="Mover para cima" onclick="moverStatus({{ s.id }}, -1)">▲</button>
+          <button class="ge-btn-mini" title="Mover para baixo" onclick="moverStatus({{ s.id }}, 1)">▼</button>
+          <button class="ge-btn-mini excluir" title="Excluir status" onclick="excluirStatus({{ s.id }}, '{{ s.nome }}')">✕</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% if not status_opcoes %}<div class="ge-vazio">Nenhum status cadastrado.</div>{% endif %}
+    <div class="ge-add">
+      <input type="text" id="novo-status-nome" placeholder="Nome do novo status (ex: Follow up 4)">
+      <button onclick="criarStatus()">+ Adicionar status</button>
+    </div>
+  </div>
+</div>
+
+<script>
+async function _post(url, body) {
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})});
+  const d = await r.json();
+  if (!d.ok) { alert(d.erro || 'Erro ao processar'); }
+  return d;
+}
+
+// ── Etapas ──
+async function criarEtapa() {
+  const nome = document.getElementById('nova-etapa-nome').value.trim();
+  const cor = document.getElementById('nova-etapa-cor').value;
+  if (!nome) return;
+  const d = await _post('/crm/etapas/nova', {nome, cor});
+  if (d.ok) location.reload();
+}
+async function editarEtapa(slug, campos) {
+  const d = await _post('/crm/etapas/' + slug + '/editar', campos);
+  if (!d.ok) location.reload();
+}
+async function excluirEtapa(slug, nome) {
+  if (!confirm('Excluir a etapa "' + nome + '"? Os leads dela serão movidos para a etapa seguinte.')) return;
+  const d = await _post('/crm/etapas/' + slug + '/excluir', {});
+  if (d.ok) location.reload();
+}
+async function moverEtapa(slug, direcao) {
+  const itens = Array.from(document.querySelectorAll('#lista-etapas .ge-item'));
+  const slugs = itens.map(i => i.dataset.slug);
+  const idx = slugs.indexOf(slug);
+  const novoIdx = idx + direcao;
+  if (novoIdx < 0 || novoIdx >= slugs.length) return;
+  [slugs[idx], slugs[novoIdx]] = [slugs[novoIdx], slugs[idx]];
+  const d = await _post('/crm/etapas/reordenar', {ordem: slugs});
+  if (d.ok) location.reload();
+}
+
+// ── Status ──
+async function criarStatus() {
+  const nome = document.getElementById('novo-status-nome').value.trim();
+  if (!nome) return;
+  const d = await _post('/crm/status/nova', {nome});
+  if (d.ok) location.reload();
+}
+async function editarStatus(id, nome) {
+  const d = await _post('/crm/status/' + id + '/editar', {nome});
+  if (!d.ok) location.reload();
+}
+async function excluirStatus(id, nome) {
+  if (!confirm('Excluir o status "' + nome + '"? Leads com esse status ficarão sem status.')) return;
+  const d = await _post('/crm/status/' + id + '/excluir', {});
+  if (d.ok) location.reload();
+}
+async function moverStatus(id, direcao) {
+  const itens = Array.from(document.querySelectorAll('#lista-status .ge-item'));
+  const ids = itens.map(i => parseInt(i.dataset.id));
+  const idx = ids.indexOf(id);
+  const novoIdx = idx + direcao;
+  if (novoIdx < 0 || novoIdx >= ids.length) return;
+  [ids[idx], ids[novoIdx]] = [ids[novoIdx], ids[idx]];
+  const d = await _post('/crm/status/reordenar', {ordem: ids});
+  if (d.ok) location.reload();
+}
+</script>
+{% endblock %}

@@ -739,6 +739,12 @@ def init_db():
                 tipo TEXT DEFAULT 'normal',
                 ativo INTEGER DEFAULT 1
             )""",
+            """CREATE TABLE IF NOT EXISTS crm_status_opcoes (
+                id SERIAL PRIMARY KEY,
+                nome TEXT UNIQUE NOT NULL,
+                ordem INTEGER DEFAULT 0,
+                ativo INTEGER DEFAULT 1
+            )""",
             """CREATE TABLE IF NOT EXISTS cotacao_tabela (
                 id SERIAL PRIMARY KEY,
                 operadora TEXT NOT NULL, plano TEXT NOT NULL,
@@ -1036,6 +1042,12 @@ def init_db():
             tipo TEXT DEFAULT 'normal',
             ativo INTEGER DEFAULT 1
         );
+        CREATE TABLE IF NOT EXISTS crm_status_opcoes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT UNIQUE NOT NULL,
+            ordem INTEGER DEFAULT 0,
+            ativo INTEGER DEFAULT 1
+        );
         CREATE TABLE IF NOT EXISTS webhook_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             evento_id TEXT UNIQUE,
@@ -1190,7 +1202,24 @@ def init_db():
         except Exception:
             pass
 
-    
+    # Opções de status (sub-status) padrão — só insere se a tabela estiver vazia
+    status_default = ['Follow up 1', 'Follow up 2', 'Follow up 3+', 'Aguardando resposta', 'Sem interesse no momento']
+    try:
+        ja_tem_status = conn.execute("SELECT COUNT(*) c FROM crm_status_opcoes").fetchone()['c']
+    except Exception:
+        ja_tem_status = 0
+    if not ja_tem_status:
+        if is_pg:
+            cur = conn.cursor()
+            for i, nome in enumerate(status_default, start=1):
+                cur.execute("INSERT INTO crm_status_opcoes (nome,ordem) VALUES (%s,%s) ON CONFLICT (nome) DO NOTHING", (nome, i))
+            conn.commit()
+        else:
+            for i, nome in enumerate(status_default, start=1):
+                conn.execute("INSERT OR IGNORE INTO crm_status_opcoes (nome,ordem) VALUES (?,?)", (nome, i))
+            conn.commit()
+
+
     # Regimes padrão
     regimes_default = [
         ('sem_lead_sem_fixo','Sem Lead e Sem Fixo','Corretor autônomo. Comissão variável, paga à vista.',
@@ -7081,6 +7110,32 @@ def carregar_etapas_crm(conn=None):
         ]
     return etapas
 
+
+def carregar_status_crm(conn=None):
+    """Lê as opções de status (sub-status do card) do banco, ordenadas. Cria conexão própria se não receber uma."""
+    fechar = False
+    if conn is None:
+        conn = db(); fechar = True
+    try:
+        rows = conn.execute(
+            "SELECT id, nome, ordem FROM crm_status_opcoes WHERE ativo=1 ORDER BY ordem, id"
+        ).fetchall()
+        status = [{'id': r['id'], 'nome': r['nome'], 'ordem': r['ordem']} for r in rows]
+    except Exception:
+        status = []
+    finally:
+        if fechar:
+            close_db(conn)
+    if not status:
+        status = [
+            {'id': None, 'nome': 'Follow up 1', 'ordem': 1},
+            {'id': None, 'nome': 'Follow up 2', 'ordem': 2},
+            {'id': None, 'nome': 'Follow up 3+', 'ordem': 3},
+            {'id': None, 'nome': 'Aguardando resposta', 'ordem': 4},
+            {'id': None, 'nome': 'Sem interesse no momento', 'ordem': 5},
+        ]
+    return status
+
 @app.route('/crm')
 @login_required
 def crm():
@@ -7197,11 +7252,12 @@ def crm():
         'externo': f_externo, 'sub_status': f_sub_status
     }
 
+    sub_status_opcoes = _sub_status_opcoes_nomes(conn)
     close_db(conn)
     return render_template('crm.html', kanban=kanban, etapas=etapas,
                            total=total, responsaveis=responsaveis, eh_admin=eh_admin,
                            filtros=filtros_ativos, consultores_externos=consultores_externos,
-                           sub_status_opcoes=SUB_STATUS_OPCOES)
+                           sub_status_opcoes=sub_status_opcoes)
 
 
 @app.route('/crm/lead/novo', methods=['POST'])
@@ -7298,7 +7354,9 @@ def crm_lead_mover(lid):
     return jsonify({"ok": True})
 
 
-SUB_STATUS_OPCOES = ['', 'Follow up 1', 'Follow up 2', 'Follow up 3+', 'Aguardando resposta', 'Sem interesse no momento']
+def _sub_status_opcoes_nomes(conn=None):
+    """Lista de nomes de status válidos (com '' representando 'sem status' à frente)."""
+    return [''] + [s['nome'] for s in carregar_status_crm(conn)]
 
 
 @app.route('/crm/lead/<int:lid>/sub-status', methods=['POST'])
@@ -7308,7 +7366,7 @@ def crm_lead_sub_status(lid):
     ficha inteira — pedido do Gabriel (PDF 04/07): saber de manhã quantos follow
     ups já foram feitos com cada lead, sem trocar de coluna no funil."""
     novo = (request.json or {}).get('sub_status', '')
-    if novo not in SUB_STATUS_OPCOES:
+    if novo not in _sub_status_opcoes_nomes():
         return jsonify({"ok": False, "erro": "Sub-status inválido"}), 400
     conn = db()
     lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
@@ -9649,6 +9707,82 @@ def crm_etapas_reordenar():
     return jsonify({"ok": True})
 
 
+@app.route('/crm/etapas/gerenciar')
+@login_required
+@admin_required
+def crm_etapas_gerenciar():
+    """Tela de gerenciamento de etapas do funil e opções de status."""
+    conn = db()
+    etapas = carregar_etapas_crm(conn)
+    status_opcoes = carregar_status_crm(conn)
+    close_db(conn)
+    return render_template('crm_etapas.html', etapas=etapas, status_opcoes=status_opcoes)
+
+
+@app.route('/crm/status/nova', methods=['POST'])
+@login_required
+@admin_required
+def crm_status_nova():
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    if not nome:
+        return jsonify({"ok": False, "erro": "Nome obrigatório"}), 400
+    conn = db()
+    if conn.execute("SELECT 1 FROM crm_status_opcoes WHERE nome=?", (nome,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Já existe um status com esse nome"}), 400
+    maxord = conn.execute("SELECT COALESCE(MAX(ordem),0) m FROM crm_status_opcoes").fetchone()['m']
+    conn.execute("INSERT INTO crm_status_opcoes (nome,ordem) VALUES (?,?)", (nome, maxord + 1))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/status/<int:sid>/editar', methods=['POST'])
+@login_required
+@admin_required
+def crm_status_editar(sid):
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    if not nome:
+        return jsonify({"ok": False, "erro": "Nome obrigatório"}), 400
+    conn = db()
+    st = conn.execute("SELECT * FROM crm_status_opcoes WHERE id=?", (sid,)).fetchone()
+    if not st:
+        close_db(conn); return jsonify({"ok": False, "erro": "Status não encontrado"}), 404
+    conn.execute("UPDATE crm_leads SET sub_status=? WHERE sub_status=?", (nome, st['nome']))
+    conn.execute("UPDATE crm_status_opcoes SET nome=? WHERE id=?", (nome, sid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/status/<int:sid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_status_excluir(sid):
+    conn = db()
+    st = conn.execute("SELECT * FROM crm_status_opcoes WHERE id=?", (sid,)).fetchone()
+    if not st:
+        close_db(conn); return jsonify({"ok": False, "erro": "Status não encontrado"}), 404
+    conn.execute("UPDATE crm_leads SET sub_status=NULL WHERE sub_status=?", (st['nome'],))
+    conn.execute("DELETE FROM crm_status_opcoes WHERE id=?", (sid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/status/reordenar', methods=['POST'])
+@login_required
+@admin_required
+def crm_status_reordenar():
+    """Recebe lista de ids na nova ordem."""
+    ordem = (request.json or {}).get('ordem', [])
+    if not isinstance(ordem, list) or not ordem:
+        return jsonify({"ok": False, "erro": "Ordem inválida"}), 400
+    conn = db()
+    for i, sid in enumerate(ordem, start=1):
+        conn.execute("UPDATE crm_status_opcoes SET ordem=? WHERE id=?", (i, sid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
 # ─── WEBHOOK META / GOOGLE LEADS ─────────────────────────────────────────────────
 @app.route('/webhook/meta', methods=['GET', 'POST'])
 def webhook_meta():
@@ -10901,7 +11035,7 @@ def crm_config():
     <h1>⚙️ Configurações do CRM</h1>
     <h2 style='font-size:16px;margin-top:30px;'>Etapas do Funil</h2>
     {etapas_html}
-    {'<p style="margin-top:20px;"><a class="btn" href="/crm/etapas">Gerenciar Etapas</a></p>' if is_admin else ''}
+    {'<p style="margin-top:20px;"><a class="btn" href="/crm/etapas/gerenciar">Gerenciar Etapas e Status</a></p>' if is_admin else ''}
     <h2 style='font-size:16px;margin-top:30px;'>Importação de Leads</h2>
     <p>Leads do Facebook e Google chegam automaticamente via Apps Script.</p>
     {'<p><a class="btn" href="/crm/importar">Importar Leads Manualmente</a></p>' if is_admin else ''}
