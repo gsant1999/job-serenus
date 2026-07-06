@@ -3265,6 +3265,7 @@ def emergency_exportar():
     return resp
 
 
+@app.route('/parcela/<int:pid>/pagar-asaas', methods=['POST'])
 @login_required
 @admin_required
 def parcela_pagar_asaas(pid):
