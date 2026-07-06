@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Enviar Leads para as Meninas{% endblock %}
+
+{% block head %}
+<style>
+  .box { max-width:760px; background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:22px; margin-bottom:16px; }
+  .box h2 { font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin:0 0 12px; }
+  .box p, .box li { font-size:13px; color:var(--cinza); line-height:1.6; }
+  .box code { background:var(--panel-2); border:1px solid var(--borda); border-radius:5px; padding:1px 6px; font-size:12px; color:var(--texto); }
+  .cols { font-size:12px; color:var(--cinza); background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:10px 12px; margin:10px 0; overflow-x:auto; white-space:nowrap; }
+  .upload { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+  input[type=file] { color:var(--cinza); font-size:13px; }
+  .btn-imp { background:var(--azul); color:#fff; border:none; padding:11px 22px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  .btn-modelo { background:transparent; color:var(--azul); border:1px solid var(--azul); padding:9px 16px; border-radius:8px; font-size:13px; cursor:pointer; text-decoration:none; }
+  .alert-erro { background:rgba(244,63,94,.1); border:1px solid var(--erro); color:var(--erro); border-radius:10px; padding:14px 16px; font-size:13px; margin-bottom:16px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Enviar Leads para as Meninas</h1>
+    <div class="sub">Transfere leads já mandados por fora para Prisciele, Juliana e Jenifer — sem duplicar</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="location.href='/crm'">Voltar ao CRM</button>
+  </div>
+</div>
+
+{% if erro %}
+<div class="alert-erro">{{ erro }}</div>
+{% endif %}
+
+<div class="box">
+  <h2>Como funciona</h2>
+  <p>Suba a planilha com os leads que você já mandou por fora. Para cada linha, o sistema procura um lead com o mesmo telefone já cadastrado no JOB.</p>
+  <ul>
+    <li><b>Encontrado:</b> você confere e marca quais realmente devem ser transferidos para a consultora indicada.</li>
+    <li><b>Não encontrado:</b> o sistema avisa e pergunta se você quer criar o lead do zero, já atribuído à consultora.</li>
+    <li>Nenhum lead é duplicado — a checagem é sempre por telefone.</li>
+  </ul>
+  <p>Colunas do arquivo (a ordem não importa):</p>
+  <div class="cols">Nome;Telefone;Consultora</div>
+  <p>A coluna <b>Consultora</b> precisa ser um dos nomes: {{ meninas|join(', ') }} (ou só o primeiro nome — ex.: "Prisciele").</p>
+  <a class="btn-modelo" href="/crm/importar-meninas/modelo">Baixar modelo (CSV)</a>
+</div>
+
+<div class="box">
+  <h2>Enviar arquivo</h2>
+  <form method="POST" action="/crm/importar-meninas" enctype="multipart/form-data">
+    <div class="upload">
+      <input type="file" name="arquivo" accept=".csv,.xlsx" required>
+      <button type="submit" class="btn-imp">Analisar planilha</button>
+    </div>
+    <p style="margin-top:10px; font-size:11px; color:var(--cinza-2);">Aceita .csv (delimitador ; ou ,) e .xlsx. Nada é transferido ainda — a próxima tela deixa você conferir linha a linha.</p>
+  </form>
+</div>
+{% endblock %}

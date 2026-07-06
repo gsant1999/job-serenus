@@ -11828,6 +11828,194 @@ def _processar_lead(row, conn):
         'observacoes': f"Tipo: {tipo}, Pessoas: {num_pessoas}".strip('Tipo: , Pessoas: ')
     })
 
+
+@app.route('/crm/importar-meninas/modelo')
+@login_required
+@admin_required
+def crm_importar_meninas_modelo():
+    """Planilha modelo (CSV) para transferência assistida de leads às meninas."""
+    cab = ['Nome', 'Telefone', 'Consultora']
+    exemplo1 = ['Maria da Silva', '(19) 99104-6030', 'Prisciele Azevedo']
+    exemplo2 = ['João Souza', '(19) 98888-1234', 'Juliana Azevedo']
+    conteudo = '﻿' + ';'.join(cab) + '\r\n' + ';'.join(exemplo1) + '\r\n' + ';'.join(exemplo2) + '\r\n'
+    return Response(conteudo, mimetype='text/csv',
+                    headers={'Content-Disposition': 'attachment; filename=modelo_leads_meninas.csv'})
+
+
+@app.route('/crm/importar-meninas', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def crm_importar_meninas():
+    """Transferência assistida de leads (já mandados por fora p/ as meninas) via planilha.
+    Casa cada linha com um lead já existente no JOB (por telefone) e deixa o
+    admin conferir/flegar linha a linha antes de transferir — nunca duplica."""
+    if request.method == 'GET':
+        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_BOOTCONVERSA)
+
+    f = request.files.get('arquivo')
+    if not f or not f.filename:
+        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_BOOTCONVERSA,
+                               erro='Selecione um arquivo.')
+
+    nome_arq = f.filename.lower()
+    rows = []
+    try:
+        if nome_arq.endswith('.xlsx'):
+            import openpyxl
+            wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
+            ws = wb.active
+            for r in ws.iter_rows(values_only=True):
+                rows.append(['' if c is None else str(c) for c in r])
+        else:
+            import csv, io
+            raw = f.read().decode('utf-8-sig', errors='replace')
+            primeira = raw.split('\n', 1)[0]
+            delim = ';' if primeira.count(';') >= primeira.count(',') else ','
+            rows = [list(r) for r in csv.reader(io.StringIO(raw), delimiter=delim)]
+    except Exception as e:
+        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_BOOTCONVERSA,
+                               erro='Erro ao ler o arquivo: ' + str(e)[:200])
+
+    rows = [r for r in rows if any((str(c) or '').strip() for c in r)]
+    if len(rows) < 2:
+        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_BOOTCONVERSA,
+                               erro='O arquivo não tem linhas de dados.')
+
+    header = rows[0]
+    idx = {}
+    for i, h in enumerate(header):
+        nh = _norm_txt(h)
+        if nh in ('nome',):
+            idx['nome'] = i
+        elif nh in ('telefone', 'celular', 'whatsapp'):
+            idx['telefone'] = i
+        elif nh in ('consultora', 'consultor', 'menina', 'destino'):
+            idx['consultora'] = i
+    if 'nome' not in idx or 'telefone' not in idx or 'consultora' not in idx:
+        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_BOOTCONVERSA,
+                               erro='O arquivo precisa ter as colunas "Nome", "Telefone" e "Consultora". Baixe o modelo.')
+
+    conn = db()
+    encontrados, nao_encontrados = [], []
+    vistos_lead_ids = set()
+    for r in rows[1:]:
+        def cell(key):
+            i = idx.get(key)
+            return (str(r[i]).strip() if (i is not None and i < len(r) and r[i] is not None) else '')
+        nome_l = cell('nome')
+        tel_raw = cell('telefone')
+        consultora_raw = cell('consultora')
+        if not nome_l or not tel_raw:
+            continue
+        tel_norm = _normalizar_telefone(tel_raw)
+        menina_id = _buscar_responsavel_id(conn, consultora_raw)
+        menina_nome_resolvida = None
+        if menina_id:
+            u = conn.execute("SELECT nome FROM usuarios WHERE id=?", (menina_id,)).fetchone()
+            menina_nome_resolvida = u['nome'] if u else None
+        if not menina_id or menina_nome_resolvida not in CONSULTORAS_BOOTCONVERSA:
+            # Consultora não reconhecida como uma das meninas — não processa a linha
+            nao_encontrados.append({'nome': nome_l, 'telefone': tel_raw, 'consultora': consultora_raw,
+                                    'erro': 'Consultora não reconhecida'})
+            continue
+        lead_row = None
+        if tel_norm:
+            lead_row = conn.execute(
+                "SELECT id, nome, responsavel_id, telefone FROM crm_leads WHERE telefone_norm=?", (tel_norm,)
+            ).fetchone()
+        if not lead_row and tel_norm and len(tel_norm) >= 8:
+            lead_row = conn.execute(
+                "SELECT id, nome, responsavel_id, telefone FROM crm_leads WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(telefone,'-',''),' ',''),'(',''),')',''),'+','') LIKE ?",
+                (f'%{tel_norm[-8:]}',)
+            ).fetchone()
+        if lead_row:
+            lid = lead_row['id']
+            if lid in vistos_lead_ids:
+                continue
+            vistos_lead_ids.add(lid)
+            resp = conn.execute("SELECT nome FROM usuarios WHERE id=?", (lead_row['responsavel_id'],)).fetchone() if lead_row['responsavel_id'] else None
+            encontrados.append({
+                'lead_id': lid, 'nome': lead_row['nome'], 'telefone': lead_row['telefone'],
+                'responsavel_atual': resp['nome'] if resp else 'Sem responsável',
+                'menina_id': menina_id, 'menina_nome': menina_nome_resolvida,
+                'ja_e_a_mesma': (lead_row['responsavel_id'] == menina_id)
+            })
+        else:
+            nao_encontrados.append({'nome': nome_l, 'telefone': tel_raw, 'consultora': menina_nome_resolvida,
+                                    'menina_id': menina_id, 'erro': None})
+    close_db(conn)
+
+    return render_template('crm_importar_meninas_revisar.html', meninas=CONSULTORAS_BOOTCONVERSA,
+                           encontrados=encontrados, nao_encontrados=nao_encontrados)
+
+
+@app.route('/crm/importar-meninas/confirmar', methods=['POST'])
+@login_required
+@admin_required
+def crm_importar_meninas_confirmar():
+    """Aplica só as transferências marcadas (flegadas) pelo admin na tela de revisão."""
+    itens = (request.json or {}).get('itens', [])
+    if not isinstance(itens, list) or not itens:
+        return jsonify({"ok": False, "erro": "Nenhum item selecionado"}), 400
+    conn = db()
+    transferidos = 0
+    for item in itens:
+        lid = item.get('lead_id')
+        menina_id = item.get('menina_id')
+        if not lid or not menina_id:
+            continue
+        lead = conn.execute("SELECT nome, responsavel_id FROM crm_leads WHERE id=?", (lid,)).fetchone()
+        if not lead:
+            continue
+        menina = conn.execute("SELECT nome FROM usuarios WHERE id=?", (menina_id,)).fetchone()
+        if not menina or menina['nome'] not in CONSULTORAS_BOOTCONVERSA:
+            continue
+        conn.execute("UPDATE crm_leads SET responsavel_id=?, consultor_externo=NULL, atualizado_em=? WHERE id=?",
+                     (menina_id, _agora_sp(), lid))
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                     (lid, session.get('nome'), 'movimentacao',
+                      f'Transferido para {menina["nome"]} via importação de planilha (leads meninas)', _agora_sp()))
+        transferidos += 1
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "transferidos": transferidos})
+
+
+@app.route('/crm/importar-meninas/criar', methods=['POST'])
+@login_required
+@admin_required
+def crm_importar_meninas_criar():
+    """Cria um lead novo (linha não encontrada na revisão), já assinado à menina.
+    Reconfere duplicidade por telefone no momento da criação (proteção de corrida)."""
+    d = request.json or {}
+    nome_l = (d.get('nome') or '').strip()
+    tel_raw = (d.get('telefone') or '').strip()
+    menina_id = d.get('menina_id')
+    if not nome_l or not tel_raw or not menina_id:
+        return jsonify({"ok": False, "erro": "Dados incompletos"}), 400
+    conn = db()
+    menina = conn.execute("SELECT nome FROM usuarios WHERE id=?", (menina_id,)).fetchone()
+    if not menina or menina['nome'] not in CONSULTORAS_BOOTCONVERSA:
+        close_db(conn); return jsonify({"ok": False, "erro": "Consultora inválida"}), 400
+    tel_norm = _normalizar_telefone(tel_raw)
+    if tel_norm:
+        ja_existe = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone()
+        if ja_existe:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": "Esse telefone já existe no JOB — não foi criado para evitar duplicidade. Atualize a planilha e reenvie."}), 400
+    telefone_fmt = _formatar_telefone(tel_raw)
+    conn.execute("""
+        INSERT INTO crm_leads (nome, telefone, telefone_norm, origem, etapa, responsavel_id, criado_em, atualizado_em)
+        VALUES (?, ?, ?, 'manual', 'lead_novo', ?, ?, ?)
+    """, (nome_l, telefone_fmt, tel_norm, menina_id, _agora_sp(), _agora_sp()))
+    lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+               else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                 (lead_id, session.get('nome'), 'criacao',
+                  f'Lead criado via importação de planilha, atribuído a {menina["nome"]}', _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "lead_id": lead_id})
+
+
 @app.route('/crm/importar', methods=['GET', 'POST'])
 @login_required
 def crm_importar():

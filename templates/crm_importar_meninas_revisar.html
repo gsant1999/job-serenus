@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Revisar Importação — Leads Meninas{% endblock %}
+
+{% block head %}
+<style>
+  .rev-sec { max-width:920px; background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:20px 22px; margin-bottom:20px; }
+  .rev-sec-tit { font-size:15px; font-weight:700; color:var(--texto); margin-bottom:4px; }
+  .rev-sec-sub { font-size:12px; color:var(--cinza-2); margin-bottom:16px; }
+
+  table.rev { width:100%; border-collapse:collapse; font-size:13px; }
+  table.rev th { text-align:left; color:var(--cinza-2); font-size:10px; text-transform:uppercase; letter-spacing:.5px; font-weight:600; padding:9px 10px; border-bottom:1px solid var(--borda); }
+  table.rev td { padding:10px; border-bottom:1px solid var(--borda); color:var(--texto); vertical-align:middle; }
+  table.rev tr:last-child td { border-bottom:none; }
+  table.rev tr.mesma-consultora { opacity:.5; }
+
+  .arrow { color:var(--cinza-2); margin:0 6px; }
+  .tag-menina { display:inline-block; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600; background:var(--verde-soft); color:var(--verde); }
+  .tag-alerta { display:inline-block; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600; background:rgba(250,204,21,.14); color:var(--amarelo); }
+
+  .btn-criar { background:var(--azul); color:#fff; border:none; padding:7px 14px; border-radius:7px; font-size:12px; font-weight:600; cursor:pointer; }
+  .btn-criar:disabled { background:var(--panel-3); color:var(--cinza-2); cursor:default; }
+  .btn-confirmar { background:var(--verde); color:#04221a; border:none; padding:11px 24px; border-radius:9px; font-size:14px; font-weight:700; cursor:pointer; margin-top:14px; }
+  .btn-confirmar:disabled { background:var(--panel-3); color:var(--cinza-2); cursor:default; }
+
+  .vazio-rev { text-align:center; padding:24px; color:var(--cinza-2); font-size:13px; }
+  .resultado-msg { font-size:12.5px; color:var(--verde); margin-top:10px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Revisar Importação</h1>
+    <div class="sub">Confira cada lead antes de transferir. Nada é aplicado até você clicar em Confirmar.</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="location.href='/crm/importar-meninas'">Nova planilha</button>
+    <button class="btn-outline btn-sm" onclick="location.href='/crm'">Voltar ao CRM</button>
+  </div>
+</div>
+
+<div class="rev-sec">
+  <div class="rev-sec-tit">Encontrados no JOB ({{ encontrados|length }})</div>
+  <div class="rev-sec-sub">Marcados por padrão para transferir. Desmarque os que não devem mudar de consultora.</div>
+  {% if encontrados %}
+  <table class="rev">
+    <thead><tr><th style="width:26px;"></th><th>Lead</th><th>Telefone</th><th>De</th><th></th><th>Para</th></tr></thead>
+    <tbody>
+      {% for e in encontrados %}
+      <tr class="{{ 'mesma-consultora' if e.ja_e_a_mesma }}">
+        <td><input type="checkbox" class="chk-transferir" data-lead="{{ e.lead_id }}" data-menina="{{ e.menina_id }}" {{ 'checked' if not e.ja_e_a_mesma }} {{ 'disabled' if e.ja_e_a_mesma }}></td>
+        <td>{{ e.nome }}</td>
+        <td>{{ e.telefone }}</td>
+        <td>{{ e.responsavel_atual }}</td>
+        <td class="arrow">→</td>
+        <td>{% if e.ja_e_a_mesma %}<span class="tag-alerta">já é dela</span>{% else %}<span class="tag-menina">{{ e.menina_nome }}</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <button class="btn-confirmar" id="btn-confirmar" onclick="confirmarTransferencias()">Confirmar transferências marcadas</button>
+  <div class="resultado-msg" id="msg-confirmar"></div>
+  {% else %}
+  <div class="vazio-rev">Nenhum lead da planilha foi encontrado no JOB.</div>
+  {% endif %}
+</div>
+
+<div class="rev-sec">
+  <div class="rev-sec-tit">Não encontrados no JOB ({{ nao_encontrados|length }})</div>
+  <div class="rev-sec-sub">Esses telefones não existem no JOB ainda. Crie um por um se quiser cadastrá-los já atribuídos à consultora.</div>
+  {% if nao_encontrados %}
+  <table class="rev">
+    <thead><tr><th>Nome</th><th>Telefone</th><th>Consultora</th><th style="width:130px;"></th></tr></thead>
+    <tbody>
+      {% for n in nao_encontrados %}
+      <tr id="linha-nao-{{ loop.index0 }}">
+        <td>{{ n.nome }}</td>
+        <td>{{ n.telefone }}</td>
+        <td>{% if n.erro %}<span class="tag-alerta">{{ n.erro }}</span>{% else %}{{ n.consultora }}{% endif %}</td>
+        <td>
+          {% if not n.erro %}
+          <button class="btn-criar" onclick="criarLead(this, {{ loop.index0 }}, '{{ n.nome|replace("'", "\\'") }}', '{{ n.telefone }}', {{ n.menina_id }})">Criar lead</button>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="vazio-rev">Todos os leads da planilha já existem no JOB.</div>
+  {% endif %}
+</div>
+
+<script>
+async function confirmarTransferencias() {
+  const checks = Array.from(document.querySelectorAll('.chk-transferir:checked'));
+  const itens = checks.map(c => ({lead_id: parseInt(c.dataset.lead), menina_id: parseInt(c.dataset.menina)}));
+  const msg = document.getElementById('msg-confirmar');
+  if (!itens.length) { msg.textContent = 'Nenhum lead marcado.'; msg.style.color = 'var(--cinza-2)'; return; }
+  const btn = document.getElementById('btn-confirmar');
+  btn.disabled = true; btn.textContent = 'Transferindo...';
+  const r = await fetch('/crm/importar-meninas/confirmar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({itens})});
+  const d = await r.json();
+  if (d.ok) {
+    msg.textContent = d.transferidos + ' lead(s) transferido(s) com sucesso.';
+    msg.style.color = 'var(--verde)';
+    btn.textContent = 'Concluído';
+    checks.forEach(c => c.closest('tr').style.opacity = '.4');
+  } else {
+    msg.textContent = d.erro || 'Erro ao transferir.';
+    msg.style.color = 'var(--erro)';
+    btn.disabled = false; btn.textContent = 'Confirmar transferências marcadas';
+  }
+}
+
+async function criarLead(btn, idx, nome, telefone, meninaId) {
+  btn.disabled = true; btn.textContent = 'Criando...';
+  const r = await fetch('/crm/importar-meninas/criar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({nome, telefone, menina_id: meninaId})});
+  const d = await r.json();
+  if (d.ok) {
+    btn.textContent = 'Criado';
+  } else {
+    alert(d.erro || 'Erro ao criar lead');
+    btn.disabled = false; btn.textContent = 'Criar lead';
+  }
+}
+</script>
+{% endblock %}
