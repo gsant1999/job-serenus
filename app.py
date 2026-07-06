@@ -1,5 +1,5 @@
 # HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
-import os, sqlite3, json, hashlib, secrets, re, threading, time
+import os, sqlite3, json, hashlib, secrets, re, threading, time, mimetypes
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -250,7 +250,8 @@ MODELO_TEM_META = {
 ANTECIPACAO_PERMITIDA = {
     'PME': [
         'Alice', 'Allcare', 'Allcare Integral RJ', 'Allcare Unimed Leste F-RJ',
-        'Amil', 'Amil Dental', 'Ana Costa', 'Assim Saúde', 'Bradesco', 'Hapvida', 'Klini Saúde',
+        'Amil', 'Amil Dental', 'Ana Costa', 'Assim Saúde', 'Bradesco', 'Hapvida', 'Ndi',
+        'NotreDame Intermédica', 'Notre Dame Intermédica', 'Klini Saúde',
         'Leve Saúde', 'MedSênior', 'Medsenior', 'Omint', 'Porto Seguro', 'Sami',
         'Santa Helena', 'São Cristóvão', 'Seguros Unimed', 'Sobam', 'SulAmérica',
         'Sul América', 'Trasmontano',
@@ -259,7 +260,8 @@ ANTECIPACAO_PERMITIDA = {
         'Allcare',
     ],
     'PF': [
-        'Amil Dental', 'Assim Saúde', 'Leve Saúde', 'MedSênior', 'Medsenior', 'Hapvida',
+        'Amil Dental', 'Assim Saúde', 'Leve Saúde', 'MedSênior', 'Medsenior', 'Hapvida', 'Ndi',
+        'NotreDame Intermédica', 'Notre Dame Intermédica',
         'Prevent Senior', 'Sobam', 'Trasmontano',
     ],
 }
@@ -3454,26 +3456,24 @@ def admin_ultimo_erro():
 
 
 # ─── SERVIR ARQUIVOS (contratos, comprovantes) ──────────────────────────────────
-@app.route('/anexos/<path:nome>')
-@login_required
-def servir_anexo(nome):
-    """Serve arquivo LOCAL primeiro (volume persistente), depois tenta R2 como fallback."""
-    from urllib.parse import unquote
-    import io
-    nome = os.path.basename(unquote(nome))
+def _localizar_anexo(nome):
+    """Localiza um anexo por nome, local primeiro (volume persistente), depois no
+    R2 como fallback (tenta a chave exata e depois varre o bucket por sufixo, já
+    que no R2 os arquivos ficam dentro de pastas tipo propostas/<id>/<tipo>/).
+    Usado tanto para SERVIR (visualizar/baixar) quanto para ANEXAR EM E-MAIL —
+    mesma lógica nos dois casos, pra não perder anexo que só existe no R2.
+    Retorna (conteudo_bytes, content_type) ou (None, None) se não achou."""
+    nome = os.path.basename(nome or '')
+    if not nome:
+        return None, None
 
     # PRIORIDADE 1: LOCAL (/data/anexos — volume persistente)
-    caminho = os.path.join(UPLOAD_FOLDER, nome)
-    if os.path.exists(caminho):
-        app.logger.info(f"[SERVE] ✅ LOCAL: {nome}")
-        return send_from_directory(UPLOAD_FOLDER, nome)
-    
-    # Tenta com nome sanitizado
-    nome_limpo = _sanitizar_filename(nome)
-    caminho_limpo = os.path.join(UPLOAD_FOLDER, nome_limpo)
-    if os.path.exists(caminho_limpo):
-        app.logger.info(f"[SERVE] ✅ LOCAL (sanitizado): {nome_limpo}")
-        return send_from_directory(UPLOAD_FOLDER, nome_limpo)
+    for candidato in (nome, _sanitizar_filename(nome)):
+        caminho = os.path.join(UPLOAD_FOLDER, candidato)
+        if os.path.exists(caminho):
+            app.logger.info(f"[ANEXO] ✅ LOCAL: {candidato}")
+            with open(caminho, 'rb') as fh:
+                return fh.read(), None  # content_type None = deixa o chamador inferir pelo nome
 
     # PRIORIDADE 2: R2 (fallback se local não tem)
     if os.environ.get('R2_ENABLED') == 'true':
@@ -3496,7 +3496,7 @@ def servir_anexo(nome):
                 chaves_tentar = [nome, _sanitizar_filename(nome)]
 
                 # Os arquivos no R2 ficam dentro de pastas (ex: propostas/20/contrato/ARQ.pdf),
-                # mas a URL traz só o nome do arquivo. Então varremos o bucket procurando
+                # mas a gente só tem o nome do arquivo. Então varremos o bucket procurando
                 # qualquer chave que TERMINE com esse nome de arquivo.
                 achou_key = None
                 for k in chaves_tentar:
@@ -3522,21 +3522,34 @@ def servir_anexo(nome):
                             if achou_key:
                                 break
                     except Exception as e:
-                        app.logger.warning(f"[SERVE] ⚠️ R2 listagem falhou: {type(e).__name__}: {e}")
+                        app.logger.warning(f"[ANEXO] ⚠️ R2 listagem falhou: {type(e).__name__}: {e}")
 
                 if achou_key:
                     resp = s3.get_object(Bucket=bucket, Key=achou_key)
                     content = resp['Body'].read()
                     ctype = resp.get('ContentType', 'application/octet-stream')
-                    app.logger.info(f"[SERVE] ✅ R2 (fallback): {achou_key}")
-                    return Response(content, mimetype=ctype,
-                                    headers={'Content-Disposition': f'inline; filename="{nome}"'})
+                    app.logger.info(f"[ANEXO] ✅ R2 (fallback): {achou_key}")
+                    return content, ctype
         except Exception as e:
-            app.logger.warning(f"[SERVE] ⚠️ R2 falhou ({nome}): {type(e).__name__}: {e}")
+            app.logger.warning(f"[ANEXO] ⚠️ R2 falhou ({nome}): {type(e).__name__}: {e}")
 
-    # Não encontrou em lugar nenhum
-    app.logger.error(f"[SERVE] ❌ Arquivo não encontrado: {nome}")
-    abort(404)
+    return None, None
+
+
+@app.route('/anexos/<path:nome>')
+@login_required
+def servir_anexo(nome):
+    """Serve arquivo LOCAL primeiro (volume persistente), depois tenta R2 como fallback."""
+    from urllib.parse import unquote
+    nome = os.path.basename(unquote(nome))
+    conteudo, ctype = _localizar_anexo(nome)
+    if conteudo is None:
+        app.logger.error(f"[SERVE] ❌ Arquivo não encontrado: {nome}")
+        abort(404)
+    if ctype is None:
+        ctype = mimetypes.guess_type(nome)[0] or 'application/octet-stream'
+    return Response(conteudo, mimetype=ctype,
+                    headers={'Content-Disposition': f'inline; filename="{nome}"'})
 
 @app.route('/proposta/<int:pid>/anexo/excluir', methods=['POST'])
 @login_required
@@ -3605,6 +3618,9 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None):
             cc_list = [e.strip() for e in cc if e and e.strip()]
 
     # Monta lista de anexos em base64 (Brevo: attachment=[{content, name}])
+    # Usa _localizar_anexo (local → fallback R2) — antes só olhava o disco local,
+    # então um anexo que só existisse no R2 (ex: volume local reiniciado) sumia
+    # do e-mail sem aviso nenhum, mesmo a proposta tendo o arquivo cadastrado.
     attach_payload = []
     if anexos:
         import base64, re as _re
@@ -3613,17 +3629,16 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None):
         for nome in anexos:
             if not nome:
                 continue
-            caminho = os.path.join(UPLOAD_FOLDER, os.path.basename(nome))
-            if not os.path.exists(caminho):
-                print(f"[EMAIL] ⚠️ Anexo não encontrado, ignorando: {caminho}")
+            conteudo, _ctype = _localizar_anexo(nome)
+            if conteudo is None:
+                print(f"[EMAIL] ⚠️ Anexo não encontrado (local nem R2), ignorando: {nome}")
                 continue
             try:
-                tam = os.path.getsize(caminho)
+                tam = len(conteudo)
                 if total_bytes + tam > LIMITE_BYTES:
-                    print(f"[EMAIL] ⚠️ Limite de anexos atingido (~9MB). Pulando: {caminho} ({tam} bytes)")
+                    print(f"[EMAIL] ⚠️ Limite de anexos atingido (~9MB). Pulando: {nome} ({tam} bytes)")
                     continue
-                with open(caminho, 'rb') as fh:
-                    conteudo_b64 = base64.b64encode(fh.read()).decode('ascii')
+                conteudo_b64 = base64.b64encode(conteudo).decode('ascii')
                 total_bytes += tam
                 # Nome amigável: remove prefixo timestamp/categoria
                 nome_limpo = os.path.basename(nome)
@@ -3639,7 +3654,7 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None):
                 attach_payload.append({"content": conteudo_b64, "name": nome_seguro})
                 print(f"[EMAIL] 📎 Anexo preparado: {nome_seguro} ({tam} bytes)")
             except Exception as e:
-                print(f"[EMAIL] ⚠️ Falha ao ler anexo {caminho}: {e}")
+                print(f"[EMAIL] ⚠️ Falha ao processar anexo {nome}: {e}")
 
     if not api_key:
         print(f"[EMAIL] ⚠️ BREVO_API_KEY não configurada. Assunto: {assunto} → {to_list} (cc: {cc_list})")
