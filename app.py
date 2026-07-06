@@ -1050,6 +1050,12 @@ def init_db():
             ordem INTEGER DEFAULT 0,
             ativo INTEGER DEFAULT 1
         );
+        CREATE TABLE IF NOT EXISTS operadoras (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operadora TEXT UNIQUE NOT NULL,
+            obs TEXT DEFAULT '',
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE IF NOT EXISTS webhook_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             evento_id TEXT UNIQUE,
