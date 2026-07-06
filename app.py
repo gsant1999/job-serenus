@@ -4963,28 +4963,45 @@ def proposta_editar(pid):
     
     # Se valor foi alterado, recalcular e regenerar parcelas se necessário
     if 'valor' in d:
+        valor_antes = float(p['valor'] or 0)
         novo_valor = float(str(d['valor'] or 0).replace('.','').replace(',','.'))
-        operadora = p['adm_operadora']
-        regime = p['regime_aplicado']
-        mod = p['modalidade']
-        tipo_p = p['tipo_pessoa']
-        prod_acum = 0  # Simplificado
-        
-        # Recalcular comissão
-        calc = calc_comissao(operadora, regime, prod_acum, novo_valor, mod, tipo_p)
-        
-        # Atualizar comissões na proposta
-        conn.execute("""
-            UPDATE propostas 
-            SET comissao_total_corretora=?, comissao_consultor=?, comissao_corretora_liquida=?,
-                num_parcelas=?, distribuicao_parcelas=?
-            WHERE id=?
-        """, (calc['total_corretora'], calc['consultor'], calc['liquido'], 
-              calc['num_parcelas'], calc['dist_corretora'], pid))
-        
-        # Regenerar parcelas pendentes
-        gerar_parcelas(pid, p['vigencia'], 'c', p.get('dia_vencimento'))
-        mudou.append("Parcelas recalculadas")
+        # Só recalcula se o valor MUDOU de fato — 'valor' vem sempre no payload
+        # (o modal envia todos os campos), então checar só a presença disparava
+        # o recálculo em toda edição, mesmo de campos sem relação com valor.
+        if round(valor_antes, 2) != round(novo_valor, 2):
+            operadora = p['adm_operadora']
+            regime = p['regime_aplicado']
+            mod = p['modalidade']
+            tipo_p = p['tipo_pessoa']
+            prod_acum = 0  # Simplificado
+
+            # Recalcular comissão
+            calc = calc_comissao(operadora, regime, prod_acum, novo_valor, mod, tipo_p)
+
+            # Atualizar comissões na proposta
+            conn.execute("""
+                UPDATE propostas
+                SET comissao_total_corretora=?, comissao_consultor=?, comissao_corretora_liquida=?,
+                    num_parcelas=?, distribuicao_parcelas=?
+                WHERE id=?
+            """, (calc['total_corretora'], calc['consultor'], calc['liquido'],
+                  calc['num_parcelas'], calc['dist_corretora'], pid))
+
+            # Regenera só as parcelas ainda pendentes (protege parcelas já recebidas)
+            pagas = conn.execute(
+                "SELECT COUNT(*) n FROM parcelas WHERE proposta_id=? AND status<>'Pendente de receber'", (pid,)
+            ).fetchone()['n']
+            if pagas == 0:
+                conn.execute("DELETE FROM parcelas WHERE proposta_id=?", (pid,))
+                dia_venc_atual = p['dia_vencimento'] if 'dia_vencimento' in p.keys() else None
+                for parc in gerar_parcelas(pid, p['vigencia'], calc, dia_venc_atual):
+                    conn.execute("""INSERT INTO parcelas (proposta_id,numero,percentual,valor,valor_corretora,perc_cliente,data_prevista,status,competencia,mensalidade_ref,tipo_origem)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,'comissao')""", (parc['proposta_id'],parc['numero'],parc['percentual'],
+                            parc['valor'],parc['valor_corretora'],parc['perc_cliente'],parc['data_prevista'],parc['status'],
+                            parc['competencia'],parc['mensalidade_ref']))
+                mudou.append("Parcelas recalculadas")
+            else:
+                mudou.append("Comissão recalculada (parcelas já em fluxo foram mantidas)")
     
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "mudou": mudou})
