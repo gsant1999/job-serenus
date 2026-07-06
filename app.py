@@ -8681,6 +8681,9 @@ def _build_cot(conn, c):
                           'qtd': l['qtd']} for l in planos[0]['linhas']]
     for p in planos:
         p['precos'] = {l['faixa']: l['subtotal'] for l in p['linhas']}
+        p['precos_unit'] = {l['faixa']: (l['preco'] if l.get('preco') is not None
+                            else round(float(l.get('subtotal') or 0) / max(int(l.get('qtd') or 1), 1), 2))
+                            for l in p['linhas']}
         p['logo'] = _logo_operadora_url(conn, p.get('operadora'))
     cot['faixas_usadas'] = faixas_usadas
     cot['orientacao'] = cot.get('orientacao') or 'horizontal'
@@ -8876,7 +8879,13 @@ def cotacao_ajustar(cid):
             fx = ln.get('faixa')
             if fx in aj:
                 try:
-                    ln['subtotal'] = round(float(aj[fx]), 2)
+                    # aj[fx] é o valor INDIVIDUAL (por vida) digitado na correção —
+                    # precisa multiplicar pela quantidade de vidas da faixa, senão
+                    # faixas com 2+ vidas ficam com o subtotal errado (bug reportado).
+                    qtd = int(ln.get('qtd') or 1)
+                    novo_preco = round(float(aj[fx]), 2)
+                    ln['preco'] = novo_preco
+                    ln['subtotal'] = round(novo_preco * qtd, 2)
                 except Exception:
                     pass
             tot += float(ln.get('subtotal') or 0)

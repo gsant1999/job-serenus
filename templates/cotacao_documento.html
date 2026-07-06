@@ -151,7 +151,7 @@
       </div>
       <table class="vtab">
         {% for f in cot.faixas_usadas %}
-        <tr><td>{{ f.label }}<span class="q">{{ f.qtd }}x</span></td><td class="vv preco-cell" data-p="{{ pidx }}" data-f="{{ f.faixa }}">{{ p.precos[f.faixa]|moeda_doc }}</td></tr>
+        <tr><td>{{ f.label }}<span class="q">{{ f.qtd }}x</span></td><td class="vv preco-cell" data-p="{{ pidx }}" data-f="{{ f.faixa }}" data-qtd="{{ f.qtd }}" data-preco-unit="{{ p.precos_unit[f.faixa] }}">{{ p.precos[f.faixa]|moeda_doc }}</td></tr>
         {% endfor %}
       </table>
     </div>
@@ -175,7 +175,7 @@
     {% for f in cot.faixas_usadas %}
     <tr class="faixa">
       <td class="lbl">{{ f.label }}<span class="q">{{ f.qtd }}x</span></td>
-      {% for p in cot.planos %}<td class="val preco-cell" data-p="{{ loop.index0 }}" data-f="{{ f.faixa }}">{{ p.precos[f.faixa]|moeda_doc }}</td>{% endfor %}
+      {% for p in cot.planos %}<td class="val preco-cell" data-p="{{ loop.index0 }}" data-f="{{ f.faixa }}" data-qtd="{{ f.qtd }}" data-preco-unit="{{ p.precos_unit[f.faixa] }}">{{ p.precos[f.faixa]|moeda_doc }}</td>{% endfor %}
     </tr>
     {% endfor %}
     <tr class="total">
@@ -222,16 +222,29 @@ function copiarLink() {
       function(){ window.prompt('Copie o link da cotação:', url); });
   } else { window.prompt('Copie o link da cotação:', url); }
 }
+function _fmtBR(n){ return (n||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function toggleEditar() {
   var doc = document.getElementById('documento');
   var on = doc.classList.toggle('editando');
-  document.querySelectorAll('.preco-cell').forEach(function(c){ c.setAttribute('contenteditable', on ? 'true' : 'false'); });
+  document.querySelectorAll('.preco-cell').forEach(function(c){
+    c.setAttribute('contenteditable', on ? 'true' : 'false');
+    if (on) {
+      // Edição é sempre pelo valor INDIVIDUAL (por vida) — o subtotal exibido
+      // normalmente já vem multiplicado pela quantidade daquela faixa, então
+      // editar o subtotal direto faz o total sair errado em faixas com 2+ vidas.
+      c.dataset.subtotalTexto = c.textContent;
+      var precoUnit = parseFloat(c.getAttribute('data-preco-unit') || '0');
+      c.textContent = _fmtBR(precoUnit);
+    } else if (c.dataset.subtotalTexto !== undefined) {
+      c.textContent = c.dataset.subtotalTexto;
+    }
+  });
   document.getElementById('btn-editar').textContent = on ? 'Cancelar' : 'Corrigir valor (mesmo link)';
   document.getElementById('btn-salvar-aj').style.display = on ? 'inline-block' : 'none';
 }
 function _numBR(s){ s=(s||'').replace(/[^\d,.-]/g,'').replace(/\./g,'').replace(',','.'); var n=parseFloat(s); return isNaN(n)?0:n; }
 function salvarAjustes(cid) {
-  if (!confirm('Isso corrige o valor NESTA cotação — o link continua o mesmo. Se o cliente já recebeu este link, ele vai ver o valor novo.\n\nPara criar uma cotação separada com link próprio, cancele e use "Nova cotação (link novo)".\n\nConfirmar correção?')) return;
+  if (!confirm('Isso corrige o valor INDIVIDUAL (por vida) NESTA cotação — o sistema multiplica automaticamente pela quantidade de cada faixa, igual na cotação original. O link continua o mesmo; se o cliente já recebeu este link, ele vai ver o valor novo.\n\nPara criar uma cotação separada com link próprio, cancele e use "Nova cotação (link novo)".\n\nConfirmar correção?')) return;
   var ajustes = {};
   document.querySelectorAll('.preco-cell').forEach(function(c){
     var p=c.getAttribute('data-p'), f=c.getAttribute('data-f');
