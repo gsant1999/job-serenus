@@ -2879,7 +2879,7 @@ def testar_r2():
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
 
-@app.route('/admin/anexos/reconciliar-r2', methods=['POST'])
+@app.route('/admin/anexos/reconciliar-r2', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def reconciliar_anexos_r2():
