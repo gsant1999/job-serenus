@@ -58,6 +58,15 @@
       {% endfor %}
     </tbody>
   </table>
+  <div style="display:flex; align-items:center; gap:10px; margin-top:16px; flex-wrap:wrap;">
+    <label style="font-size:12px; color:var(--cinza-2);">Fase no funil ao transferir:</label>
+    <select id="sel-etapa-destino" style="background:var(--panel-2); border:1px solid var(--borda); border-radius:7px; padding:8px 10px; color:var(--texto); font-size:13px; outline:none;">
+      <option value="">Manter a fase atual de cada lead</option>
+      {% for et in etapas %}
+      <option value="{{ et.slug }}">{{ et.nome }}</option>
+      {% endfor %}
+    </select>
+  </div>
   <button class="btn-confirmar" id="btn-confirmar" onclick="confirmarTransferencias()">Confirmar transferências marcadas</button>
   <div class="resultado-msg" id="msg-confirmar"></div>
   {% else %}
@@ -97,9 +106,10 @@ async function confirmarTransferencias() {
   const itens = checks.map(c => ({lead_id: parseInt(c.dataset.lead), menina_id: parseInt(c.dataset.menina)}));
   const msg = document.getElementById('msg-confirmar');
   if (!itens.length) { msg.textContent = 'Nenhum lead marcado.'; msg.style.color = 'var(--cinza-2)'; return; }
+  const etapa = document.getElementById('sel-etapa-destino').value;
   const btn = document.getElementById('btn-confirmar');
   btn.disabled = true; btn.textContent = 'Transferindo...';
-  const r = await fetch('/crm/importar-meninas/confirmar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({itens})});
+  const r = await fetch('/crm/importar-meninas/confirmar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({itens, etapa})});
   const d = await r.json();
   if (d.ok) {
     msg.textContent = d.transferidos + ' lead(s) transferido(s) com sucesso.';

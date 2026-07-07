@@ -12209,38 +12209,52 @@ def crm_importar_meninas():
         else:
             nao_encontrados.append({'nome': nome_l, 'telefone': tel_raw, 'consultora': menina_nome_resolvida,
                                     'menina_id': menina_id, 'erro': None})
+    etapas = carregar_etapas_crm(conn)
     close_db(conn)
 
     return render_template('crm_importar_meninas_revisar.html', meninas=CONSULTORAS_BOOTCONVERSA,
-                           encontrados=encontrados, nao_encontrados=nao_encontrados)
+                           encontrados=encontrados, nao_encontrados=nao_encontrados, etapas=etapas)
 
 
 @app.route('/crm/importar-meninas/confirmar', methods=['POST'])
 @login_required
 @admin_required
 def crm_importar_meninas_confirmar():
-    """Aplica só as transferências marcadas (flegadas) pelo admin na tela de revisão."""
-    itens = (request.json or {}).get('itens', [])
+    """Aplica só as transferências marcadas (flegadas) pelo admin na tela de revisão.
+    Opcionalmente move os leads pra uma fase escolhida do funil (senão mantém a atual)."""
+    d = request.json or {}
+    itens = d.get('itens', [])
+    etapa_destino = (d.get('etapa') or '').strip()
     if not isinstance(itens, list) or not itens:
         return jsonify({"ok": False, "erro": "Nenhum item selecionado"}), 400
     conn = db()
+    if etapa_destino:
+        etapas_validas = {e['slug'] for e in carregar_etapas_crm(conn)}
+        if etapa_destino not in etapas_validas:
+            close_db(conn); return jsonify({"ok": False, "erro": "Fase inválida"}), 400
     transferidos = 0
     for item in itens:
         lid = item.get('lead_id')
         menina_id = item.get('menina_id')
         if not lid or not menina_id:
             continue
-        lead = conn.execute("SELECT nome, responsavel_id FROM crm_leads WHERE id=?", (lid,)).fetchone()
+        lead = conn.execute("SELECT nome, responsavel_id, etapa FROM crm_leads WHERE id=?", (lid,)).fetchone()
         if not lead:
             continue
         menina = conn.execute("SELECT nome FROM usuarios WHERE id=?", (menina_id,)).fetchone()
         if not menina or menina['nome'] not in CONSULTORAS_BOOTCONVERSA:
             continue
-        conn.execute("UPDATE crm_leads SET responsavel_id=?, consultor_externo=NULL, atualizado_em=? WHERE id=?",
-                     (menina_id, _agora_sp(), lid))
+        if etapa_destino:
+            conn.execute("UPDATE crm_leads SET responsavel_id=?, etapa=?, consultor_externo=NULL, atualizado_em=? WHERE id=?",
+                         (menina_id, etapa_destino, _agora_sp(), lid))
+        else:
+            conn.execute("UPDATE crm_leads SET responsavel_id=?, consultor_externo=NULL, atualizado_em=? WHERE id=?",
+                         (menina_id, _agora_sp(), lid))
+        desc = f'Transferido para {menina["nome"]} via importação de planilha (leads meninas)'
+        if etapa_destino and etapa_destino != lead['etapa']:
+            desc += f' — movido para "{etapa_destino}"'
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
-                     (lid, session.get('nome'), 'movimentacao',
-                      f'Transferido para {menina["nome"]} via importação de planilha (leads meninas)', _agora_sp()))
+                     (lid, session.get('nome'), 'movimentacao', desc, _agora_sp()))
         transferidos += 1
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "transferidos": transferidos})
