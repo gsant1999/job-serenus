@@ -6,6 +6,16 @@
 <meta name="theme-color" content="#0c0c12">
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <title>{% block title %}JOB{% endblock %} · Serenus</title>
+<script>
+  // Aplica o tema salvo ANTES da página pintar (evita o flash escuro→claro em toda
+  // navegação — antes isso só rodava no DOMContentLoaded, ou seja, depois que o
+  // navegador já tinha desenhado a página inteira no tema escuro padrão).
+  try {
+    if (localStorage.getItem('job_tema') === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  } catch (e) {}
+</script>
 <!-- Fonte local para performance -->
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet"></noscript>
@@ -633,10 +643,9 @@ document.addEventListener('DOMContentLoaded', () => {
     Chart.defaults.borderColor = 'rgba(255,255,255,.07)';
     Chart.defaults.font.family = 'Inter, system-ui, sans-serif';
   }
-  // Restaurar tema salvo
-  const temaAtual = localStorage.getItem('job_tema') || 'dark';
-  if (temaAtual === 'light') {
-    document.documentElement.setAttribute('data-theme','light');
+  // Tema em si já foi aplicado no <head> (script síncrono, evita flash); aqui só
+  // ajusta o texto do label agora que #tema-label já existe no DOM.
+  if (document.documentElement.getAttribute('data-theme') === 'light') {
     const lbl = document.getElementById('tema-label');
     if (lbl) lbl.textContent = 'Modo Escuro';
   }

@@ -8,6 +8,12 @@
      nesta página, então a regra abaixo não afeta o topbar de outras telas. */
   .topbar { padding-top:10px; padding-bottom:10px; flex-wrap:wrap; row-gap:8px; }
 
+  /* .page é filho flex de .main (flex-direction:column) — sem min-width:0 ele não
+     encolhe abaixo da largura do conteúdo, então o Kanban largo arrastava a PÁGINA
+     INTEIRA (topbar incluso) para scroll horizontal, além do scroll próprio do
+     Kanban. Trava a página na largura da tela; só o Kanban rola de lado. */
+  .page { min-width:0; overflow-x:hidden; }
+
   /* ── Barra de Filtros ── */
   .crm-filtros { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; padding:14px; background:var(--panel); border:1px solid var(--borda); border-radius:12px; }
   .crm-filtros .filtro-grupo { display:flex; flex-direction:column; gap:3px; }
@@ -23,7 +29,8 @@
   .filtro-chip .x:hover { opacity:1; color:#f87171; }
 
   /* ── Kanban ── */
-  .kanban-wrap { display:flex; gap:14px; overflow-x:auto; padding-bottom:20px; min-height:calc(100vh - 320px); -webkit-overflow-scrolling:touch; }
+  .kanban-wrap { display:flex; gap:14px; overflow-x:auto; padding-bottom:20px; min-height:calc(100vh - 320px); -webkit-overflow-scrolling:touch; scrollbar-width:none; -ms-overflow-style:none; }
+  .kanban-wrap::-webkit-scrollbar { display:none; }
   .kanban-col  { min-width:290px; width:290px; flex-shrink:0; display:flex; flex-direction:column; background:var(--panel); border-radius:14px; border:1px solid var(--borda); overflow:hidden; max-height:calc(100vh - 320px); }
   .col-header  { padding:14px 16px 10px; border-bottom:1px solid var(--borda); position:sticky; top:0; background:var(--panel); z-index:2; }
   .col-title   { font-family:'Sora',sans-serif; font-size:13px; font-weight:600; color:var(--texto); display:flex; align-items:center; gap:8px; }
@@ -253,12 +260,10 @@
         <div class="col-title">
           <span class="col-dot" style="background:{{ etapa.cor }};"></span>
           {{ etapa.nome }}
-          <span class="col-count" id="count-{{ etapa.id }}">{{ kanban[etapa.id]|length }}</span>
+          <span class="col-count" id="count-{{ etapa.id }}">{{ kanban_total[etapa.id] }}</span>
         </div>
         <div class="col-valor" id="valor-{{ etapa.id }}">
-          {% set tv = namespace(v=0) %}
-          {% for l in kanban[etapa.id] %}{% if l.valor_estimado %}{% set tv.v = tv.v + l.valor_estimado %}{% endif %}{% endfor %}
-          {% if tv.v > 0 %}R$ {{ tv.v|numero }}{% endif %}
+          {% if kanban_valor[etapa.id] > 0 %}R$ {{ kanban_valor[etapa.id]|numero }}{% endif %}
         </div>
       </div>
       <div class="col-body" id="body-{{ etapa.id }}">
@@ -303,6 +308,11 @@
           </select>
         </div>
         {% endfor %}
+        {% if kanban_total[etapa.id] > cards_por_coluna %}
+        <div style="text-align:center; font-size:11px; color:var(--cinza-2); padding:10px 4px;">
+          Mostrando {{ cards_por_coluna }} de {{ kanban_total[etapa.id] }} — use os filtros (busca, consultor, data) pra ver os demais.
+        </div>
+        {% endif %}
       </div>
       <div class="col-add">
         <button onclick="abrirNovoLead('{{ etapa.id }}')">+ Adicionar lead</button>

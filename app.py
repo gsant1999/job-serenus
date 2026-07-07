@@ -7487,15 +7487,24 @@ def crm():
     # Etapas dinâmicas do banco
     etapas = carregar_etapas_crm(conn)
 
-    # Agrupa por etapa
+    # Agrupa por etapa. CARDS_POR_COLUNA limita quantos cards viram DOM de fato —
+    # colunas como "Topo do Funil" acumulam milhares de leads históricos (~4500
+    # numa delas em produção) e renderizar tudo de uma vez travava o CRM inteiro.
+    # Total e valor somado continuam contando TODOS os leads da coluna (não só os
+    # renderizados) — só o card em si é que fica limitado, filtros continuam
+    # funcionando sobre a base inteira.
+    CARDS_POR_COLUNA = 60
     kanban = {e['id']: [] for e in etapas}
+    kanban_total = {e['id']: 0 for e in etapas}
+    kanban_valor = {e['id']: 0 for e in etapas}
     primeira = etapas[0]['id'] if etapas else 'topo'
     for lead in leads:
         etapa = lead['etapa'] or primeira
-        if etapa in kanban:
-            kanban[etapa].append(lead)
-        else:
-            kanban[primeira].append(lead)
+        alvo = etapa if etapa in kanban else primeira
+        kanban_total[alvo] += 1
+        kanban_valor[alvo] += lead['valor_estimado'] or 0
+        if len(kanban[alvo]) < CARDS_POR_COLUNA:
+            kanban[alvo].append(lead)
 
     total = len(leads)
 
@@ -7508,8 +7517,9 @@ def crm():
 
     sub_status_opcoes = _sub_status_opcoes_nomes(conn)
     close_db(conn)
-    return render_template('crm.html', kanban=kanban, etapas=etapas,
-                           total=total, responsaveis=responsaveis, eh_admin=eh_admin,
+    return render_template('crm.html', kanban=kanban, kanban_total=kanban_total,
+                           kanban_valor=kanban_valor, cards_por_coluna=CARDS_POR_COLUNA,
+                           etapas=etapas, total=total, responsaveis=responsaveis, eh_admin=eh_admin,
                            filtros=filtros_ativos, consultores_externos=consultores_externos,
                            sub_status_opcoes=sub_status_opcoes)
 
