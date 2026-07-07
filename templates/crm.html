@@ -29,8 +29,14 @@
   .filtro-chip .x:hover { opacity:1; color:#f87171; }
 
   /* ── Kanban ── */
-  .kanban-wrap { display:flex; gap:14px; overflow-x:auto; padding-bottom:20px; min-height:calc(100vh - 320px); -webkit-overflow-scrolling:touch; scrollbar-width:none; -ms-overflow-style:none; }
-  .kanban-wrap::-webkit-scrollbar { display:none; }
+  /* Barra de rolagem horizontal visível no fim da página (mais fácil de achar
+     com mouse do que depender só do swipe) — só o Kanban rola de lado, o
+     resto da página (topbar/filtros) fica fixo na largura da tela. */
+  .kanban-wrap { display:flex; gap:14px; overflow-x:auto; padding-bottom:20px; min-height:calc(100vh - 320px); -webkit-overflow-scrolling:touch; }
+  .kanban-wrap::-webkit-scrollbar { height:10px; }
+  .kanban-wrap::-webkit-scrollbar-track { background:transparent; }
+  .kanban-wrap::-webkit-scrollbar-thumb { background:var(--borda-2); border-radius:10px; }
+  .kanban-wrap::-webkit-scrollbar-thumb:hover { background:var(--cinza-2); }
   .kanban-col  { min-width:290px; width:290px; flex-shrink:0; display:flex; flex-direction:column; background:var(--panel); border-radius:14px; border:1px solid var(--borda); overflow:hidden; max-height:calc(100vh - 320px); }
   .col-header  { padding:14px 16px 10px; border-bottom:1px solid var(--borda); position:sticky; top:0; background:var(--panel); z-index:2; }
   .col-title   { font-family:'Sora',sans-serif; font-size:13px; font-weight:600; color:var(--texto); display:flex; align-items:center; gap:8px; }
@@ -56,8 +62,9 @@
   .lead-esfriando-tag { font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:8px; white-space:nowrap; }
   .card-esfriando .lead-esfriando-tag { background:rgba(250,204,21,.22); color:#eab308; }
   .card-frio .lead-esfriando-tag { background:rgba(244,63,94,.22); color:#f43f5e; }
-  .lead-sub-status { width:100%; margin-top:8px; background:var(--panel); border:1px solid var(--borda); border-radius:6px; padding:4px 6px; font-size:10.5px; color:var(--cinza); outline:none; cursor:pointer; }
+  .lead-sub-status { flex:1; min-width:0; background:var(--panel); border:1px solid var(--borda); border-radius:6px; padding:4px 6px; font-size:10.5px; color:var(--cinza); outline:none; cursor:pointer; }
   .lead-sub-status:focus { border-color:var(--azul); }
+  .lead-bottom-row { display:flex; align-items:center; gap:6px; margin-top:8px; }
   .lead-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
   .lead-nome   { font-size:13.5px; font-weight:600; color:var(--texto); margin-bottom:2px; line-height:1.3; }
   .lead-cidade { font-size:11px; color:var(--cinza); display:flex; align-items:center; gap:4px; }
@@ -71,7 +78,7 @@
   .lead-resp   { font-size:10px; padding:2px 8px; border-radius:8px; background:rgba(139,92,246,.15); color:#c4b5fd; font-weight:600; }
   .lead-meta-row { display:flex; align-items:center; gap:10px; margin-top:8px; font-size:11px; color:var(--cinza); }
   .lead-meta-row span { display:flex; align-items:center; gap:4px; }
-  .lead-wpp-btn { position:absolute; bottom:11px; right:11px; width:26px; height:26px; border-radius:50%; background:rgba(34,197,94,.15); color:#4ade80; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:13px; transition:.15s; }
+  .lead-wpp-btn { flex-shrink:0; width:26px; height:26px; border-radius:50%; background:rgba(34,197,94,.15); color:#4ade80; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:13px; transition:.15s; }
   .lead-wpp-btn:hover { background:#25d366; color:#fff; }
 
   /* ── Modal Ficha Lead ── */
@@ -298,14 +305,16 @@
           <div class="lead-meta-row" style="color:var(--cinza-2);">
             <span>{{ lead.criado_em|data_br }}</span>
           </div>
-          {% if lead.telefone %}
-          <button class="lead-wpp-btn" onclick="event.stopPropagation(); wppRapido({{ lead.id }}, '{{ lead.telefone }}', '{{ lead.nome|replace("'", "") }}')" title="WhatsApp"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></button>
-          {% endif %}
-          <select class="lead-sub-status" onclick="event.stopPropagation()" onchange="mudarSubStatus({{ lead.id }}, this)">
-            {% for opt in sub_status_opcoes %}
-            <option value="{{ opt }}" {% if (lead.sub_status or '') == opt %}selected{% endif %}>{{ opt or 'Sem status' }}</option>
-            {% endfor %}
-          </select>
+          <div class="lead-bottom-row">
+            <select class="lead-sub-status" onclick="event.stopPropagation()" onchange="mudarSubStatus({{ lead.id }}, this)">
+              {% for opt in sub_status_opcoes %}
+              <option value="{{ opt }}" {% if (lead.sub_status or '') == opt %}selected{% endif %}>{{ opt or 'Sem status' }}</option>
+              {% endfor %}
+            </select>
+            {% if lead.telefone %}
+            <button class="lead-wpp-btn" onclick="event.stopPropagation(); wppRapido('{{ lead.telefone }}')" title="Abrir no BotConversa"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></button>
+            {% endif %}
+          </div>
         </div>
         {% endfor %}
         {% if kanban_total[etapa.id] > cards_por_coluna %}
@@ -540,11 +549,10 @@
             <div class="wpp-templates" id="wpp-templates"></div>
             <textarea id="wpp-msg" class="wpp-msg" placeholder="Digite a mensagem..."></textarea>
             <div class="wpp-actions">
-              <button class="btn-wpp-send" onclick="enviarWppApi()">Enviar pela API (WaSpeed)</button>
-              <button class="btn-wpp-open" onclick="abrirWppWeb()" title="Abrir WhatsApp Web">Web</button>
+              <button class="btn-wpp-send" onclick="abrirWppWeb()">Abrir WhatsApp Web</button>
             </div>
             <div style="font-size:10px;color:var(--cinza-2);margin-top:8px;">
-              A mensagem será enviada pelo seu número configurado no WaSpeed e registrada na timeline.
+              Abre o WhatsApp Web/app com a mensagem pronta, pelo seu próprio número.
             </div>
           </div>
 
@@ -976,21 +984,6 @@ function usarTemplate(i){
   const nome=_leadAtual?.nome||'';
   document.getElementById('wpp-msg').value=WPP_TEMPLATES[i].replace('{nome}',nome);
 }
-async function enviarWppApi(){
-  if(!_leadAtual) return;
-  const msg=document.getElementById('wpp-msg').value.trim();
-  if(!msg){ toast('Digite a mensagem','err'); return; }
-  toast('Enviando...','ok');
-  const r=await fetch('/crm/lead/'+_leadAtual.id+'/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mensagem:msg})});
-  const d=await r.json();
-  if(d.ok){
-    toast('WhatsApp enviado!','ok');
-    document.getElementById('wpp-msg').value='';
-    mudarTab('timeline');
-    const dd=await(await fetch('/crm/lead/'+_leadAtual.id)).json();
-    renderTimeline(dd.atividades||[]);
-  } else toast(d.erro||'Erro ao enviar','err');
-}
 function abrirWppWeb(){
   if(!_leadAtual) return;
   const tel=(_leadAtual.telefone||'').replace(/\D/g,'');
@@ -998,16 +991,19 @@ function abrirWppWeb(){
   const msg=document.getElementById('wpp-msg').value.trim()||('Olá '+(_leadAtual.nome||'')+', tudo bem?');
   window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(msg),'_blank');
 }
-function wppRapido(id, tel, nome){
-  abrirFicha(id).then(()=>{ setTimeout(()=>mudarTab('whatsapp'),200); });
-}
 const BOTCONVERSA_COMPANY_ID='206993';
+function _abrirBotConversaPorTelefone(tel){
+  const digitos=(tel||'').replace(/\D/g,'');
+  if(!digitos){ toast('Lead sem telefone cadastrado','err'); return; }
+  const url='https://app.botconversa.com.br/'+BOTCONVERSA_COMPANY_ID+'/inbox?tab=all&status=all&search='+encodeURIComponent(digitos);
+  window.open(url,'botconversa','width=1100,height=750,noopener');
+}
+function wppRapido(tel){
+  _abrirBotConversaPorTelefone(tel);
+}
 function abrirBotConversa(){
   if(!_leadAtual) return;
-  const tel=(_leadAtual.telefone||'').replace(/\D/g,'');
-  if(!tel){ toast('Lead sem telefone cadastrado','err'); return; }
-  const url='https://app.botconversa.com.br/'+BOTCONVERSA_COMPANY_ID+'/inbox?tab=all&status=all&search='+encodeURIComponent(tel);
-  window.open(url,'botconversa','width=1100,height=750,noopener');
+  _abrirBotConversaPorTelefone(_leadAtual.telefone);
 }
 
 async function uploadAnexo(files){
