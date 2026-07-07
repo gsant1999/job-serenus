@@ -8339,7 +8339,10 @@ def _parse_pdc_pdf(file_obj):
             ordered = [sorted(ws, key=lambda x: x['x0']) for _, ws in sorted(lines.items())]
 
             band_rows = [(ws, [w for w in ws if _price_re.match(w['text'])]) for ws in ordered]
-            band_rows = [(ws, p) for ws, p in band_rows if len(p) >= 2]
+            # >= 1 (não >= 2): uma cotação com um único plano selecionado no Painel do
+            # Corretor só tem 1 preço por linha de faixa etária — exigir 2 fazia o parser
+            # nunca reconhecer nenhuma linha e cair direto no erro "não identifiquei a tabela".
+            band_rows = [(ws, p) for ws, p in band_rows if len(p) >= 1]
             if not band_rows:
                 continue
 
