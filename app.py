@@ -7705,6 +7705,15 @@ def crm_lead_editar(lid):
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                      (lid, session.get('nome'), 'edicao', '; '.join(changes)))
 
+    # Se o responsável mudou pra uma das meninas, reatribui a titularidade no
+    # BotConversa também (best-effort — falha lá não desfaz a edição no JOB).
+    if str(responsavel_id) != str(lead['responsavel_id']):
+        nova = conn.execute("SELECT nome FROM usuarios WHERE id=?", (responsavel_id,)).fetchone() if responsavel_id else None
+        if nova and nova['nome'] in CONSULTORAS_BOOTCONVERSA:
+            ok_bc, msg_bc = _botconversa_transferir_titularidade(telefone, nova['nome'])
+            conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                         (lid, session.get('nome'), 'edicao', f'BotConversa: {msg_bc}'))
+
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
@@ -10404,6 +10413,56 @@ def _waspeed_normaliza_fone(telefone):
 NUMERO_WHATSAPP_SERENUS = '5519936196877'
 CONSULTORAS_BOOTCONVERSA = ('Prisciele Azevedo', 'Juliana Azevedo', 'Jenifer Aparecida Lobregat dos Santos')
 
+# ID de "manager" (atendente) de cada menina dentro do BotConversa — usado pra
+# reatribuir a titularidade da conversa quando o lead é transferido pra elas
+# no JOB. Descoberto via GET /managers/ da API do BotConversa (não muda
+# sozinho, só se a conta de alguma delas for recriada lá).
+BOTCONVERSA_MANAGER_IDS = {
+    'Prisciele Azevedo': 603923,
+    'Juliana Azevedo': 599938,
+    'Jenifer Aparecida Lobregat dos Santos': 603922,
+}
+BOTCONVERSA_API_BASE = 'https://backend.botconversa.com.br/api/v1/webhook'
+
+
+def _botconversa_transferir_titularidade(telefone, menina_nome):
+    """Reatribui a conversa do lead (por telefone) pro atendente certo no
+    BotConversa, quando o responsável no JOB vira uma das 3 meninas — a
+    titularidade muda nos dois sistemas ao mesmo tempo, não só no JOB.
+    Nunca lança exceção (best-effort — se o BotConversa falhar, a transferência
+    no JOB já aconteceu e continua valendo; só não sincroniza lá).
+    Retorna (ok: bool, msg: str)."""
+    api_key = os.environ.get('BOTCONVERSA_API_KEY', '').strip()
+    if not api_key:
+        return False, 'BOTCONVERSA_API_KEY não configurada'
+    manager_id = BOTCONVERSA_MANAGER_IDS.get(menina_nome)
+    if not manager_id:
+        return False, f'"{menina_nome}" não é uma consultora do BotConversa'
+    digitos = re.sub(r'\D', '', telefone or '')
+    if not digitos:
+        return False, 'Lead sem telefone'
+    if len(digitos) <= 11:
+        digitos = '55' + digitos
+    try:
+        import requests as _rq
+        headers = {'API-KEY': api_key}
+        r = _rq.get(f'{BOTCONVERSA_API_BASE}/subscriber/get_by_phone/{digitos}/', headers=headers, timeout=15)
+        if r.status_code == 404:
+            return False, 'Lead não tem conversa no BotConversa (nunca escreveu pelo WhatsApp oficial)'
+        if r.status_code != 200:
+            return False, f'BotConversa: erro {r.status_code} ao buscar assinante'
+        subscriber_id = r.json().get('id')
+        if not subscriber_id:
+            return False, 'BotConversa: assinante sem id na resposta'
+        r2 = _rq.post(f'{BOTCONVERSA_API_BASE}/subscriber/{subscriber_id}/change_conversation_status/',
+                       headers={**headers, 'Content-Type': 'application/json'},
+                       json={'open_conversation': True, 'manager': manager_id}, timeout=15)
+        if r2.status_code not in (200, 201, 204):
+            return False, f'BotConversa: erro {r2.status_code} ao reatribuir'
+        return True, f'Conversa reatribuída a {menina_nome} no BotConversa'
+    except Exception as e:
+        return False, f'Falha ao falar com o BotConversa: {e}'
+
 
 def _whatsapp_do_consultor(conn, responsavel_id):
     """Retorna o número (só dígitos, com 55) que o LEAD deve chamar pra falar com
@@ -11268,19 +11327,34 @@ def crm_transferir_em_massa():
     if not qtd:
         close_db(conn)
         return jsonify({"ok": True, "transferidos": 0, "msg": "Nenhum lead encontrado com esses filtros"})
+    # Se o destino é uma das meninas, cada lead também tem a titularidade
+    # reatribuída no BotConversa (best-effort, não trava a transferência no JOB).
+    destino_eh_menina = npa in CONSULTORAS_BOOTCONVERSA
+    bc_ok, bc_falhou = 0, 0
     # Transfere
     for r in leads_a_transferir:
-        lid = dict(r)['id']
+        rd = dict(r)
+        lid = rd['id']
         conn.execute("UPDATE crm_leads SET responsavel_id=?, consultor_externo=NULL, atualizado_em=? WHERE id=?",
                     (cpa, _agora_sp(), lid))
+        desc = f"Lead transferido de {nde} para {npa}"
+        if destino_eh_menina:
+            telefone_lead = conn.execute("SELECT telefone FROM crm_leads WHERE id=?", (lid,)).fetchone()['telefone']
+            ok_bc, msg_bc = _botconversa_transferir_titularidade(telefone_lead, npa)
+            desc += f" · BotConversa: {msg_bc}"
+            bc_ok += 1 if ok_bc else 0
+            bc_falhou += 0 if ok_bc else 1
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
-                    (lid, 'Sistema', 'transferencia', f"Lead transferido de {nde} para {npa}", _agora_sp()))
+                    (lid, 'Sistema', 'transferencia', desc, _agora_sp()))
     conn.commit()
     close_db(conn)
     # Notifica o novo responsável (resumo)
     _notificar(cpa, 'lead', 'Leads transferidos',
                f"Você recebeu {qtd} lead(s) de {nde}", '/crm')
-    return jsonify({"ok": True, "transferidos": qtd, "de": nde, "para": npa})
+    resp = {"ok": True, "transferidos": qtd, "de": nde, "para": npa}
+    if destino_eh_menina:
+        resp["botconversa"] = {"reatribuidos": bc_ok, "nao_sincronizados": bc_falhou}
+    return jsonify(resp)
 
 
 @app.route('/crm/config')
@@ -12248,7 +12322,7 @@ def crm_importar_meninas_confirmar():
         menina_id = item.get('menina_id')
         if not lid or not menina_id:
             continue
-        lead = conn.execute("SELECT nome, responsavel_id, etapa FROM crm_leads WHERE id=?", (lid,)).fetchone()
+        lead = conn.execute("SELECT nome, telefone, responsavel_id, etapa FROM crm_leads WHERE id=?", (lid,)).fetchone()
         if not lead:
             continue
         menina = conn.execute("SELECT nome FROM usuarios WHERE id=?", (menina_id,)).fetchone()
@@ -12263,6 +12337,8 @@ def crm_importar_meninas_confirmar():
         desc = f'Transferido para {menina["nome"]} via importação de planilha (leads meninas)'
         if etapa_destino and etapa_destino != lead['etapa']:
             desc += f' — movido para "{etapa_destino}"'
+        ok_bc, msg_bc = _botconversa_transferir_titularidade(lead['telefone'], menina['nome'])
+        desc += f' · BotConversa: {msg_bc}'
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                      (lid, session.get('nome'), 'movimentacao', desc, _agora_sp()))
         transferidos += 1
