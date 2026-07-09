@@ -1,0 +1,455 @@
+{% extends "base.html" %}
+{% block title %}Manual do JOB{% endblock %}
+
+{% block head %}
+<style>
+  .man-wrap { display:flex; gap:0; max-width:1200px; margin:0 auto; align-items:flex-start; }
+
+  nav.man-toc {
+    width:230px; flex-shrink:0; position:sticky; top:74px; align-self:flex-start;
+    max-height:calc(100vh - 90px); overflow-y:auto; padding:4px 18px 40px 0; font-size:13px;
+  }
+  nav.man-toc .toc-title { font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--cinza-2); margin:0 0 10px; font-weight:700; }
+  nav.man-toc a { display:block; color:var(--cinza); text-decoration:none; padding:4px 0 4px 10px; border-left:2px solid transparent; }
+  nav.man-toc a:hover, nav.man-toc a:focus-visible { color:var(--teal); border-left-color:var(--teal); }
+  nav.man-toc a.sub { padding-left:22px; font-size:12px; }
+  @media (max-width: 900px) { nav.man-toc { display:none; } }
+
+  main.man-body { flex:1; min-width:0; padding:4px 4px 80px 28px; border-left:1px solid var(--borda); }
+  @media (max-width: 900px) { main.man-body { border-left:none; padding-left:4px; } }
+
+  .man-hero { border-bottom:1px solid var(--borda); padding-bottom:22px; margin-bottom:32px; }
+  .man-eyebrow { font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--teal); font-weight:700; margin:0 0 8px; }
+  .man-h1 { font-size:28px; line-height:1.15; margin:0 0 8px; letter-spacing:-.02em; color:var(--texto); font-family:'Sora',sans-serif; }
+  .man-lede { color:var(--cinza); max-width:64ch; margin:0; font-size:14.5px; }
+
+  .man-body section { margin-bottom:46px; }
+  .man-body h2 {
+    font-size:20px; letter-spacing:-.01em; margin:0 0 14px; padding-top:16px; scroll-margin-top:80px;
+    border-top:2px solid var(--teal); color:var(--texto); font-family:'Sora',sans-serif;
+  }
+  .man-body h2 .mod { display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.12em; color:var(--cinza-2); font-weight:600; margin-bottom:4px; }
+  .man-body h3 { font-size:15px; margin:26px 0 8px; scroll-margin-top:80px; color:var(--texto); font-family:'Sora',sans-serif; }
+  .man-body p, .man-body li { max-width:70ch; color:var(--cinza); font-size:13.5px; line-height:1.65; }
+  .man-body p { margin:9px 0; }
+  .man-body ul, .man-body ol { padding-left:20px; margin:9px 0; }
+  .man-body li { margin:4px 0; }
+  .man-body a { color:var(--azul); }
+  .man-body strong { color:var(--texto); font-weight:650; }
+  .man-body code { font:12px ui-monospace,Menlo,Consolas,monospace; background:var(--panel-2); border-radius:5px; padding:1.5px 6px; color:var(--texto); white-space:nowrap; }
+
+  ol.man-fluxo { list-style:none; counter-reset:passo; padding:0; margin:14px 0; }
+  ol.man-fluxo > li { counter-increment:passo; position:relative; padding:0 0 14px 40px; margin:0; }
+  ol.man-fluxo > li::before {
+    content:counter(passo); position:absolute; left:0; top:0;
+    width:24px; height:24px; border-radius:50%; background:var(--teal); color:#04221a;
+    display:flex; align-items:center; justify-content:center; font-size:11.5px; font-weight:700;
+  }
+  ol.man-fluxo > li:not(:last-child)::after { content:""; position:absolute; left:11.5px; top:28px; bottom:2px; width:1.5px; background:var(--borda); }
+  ol.man-fluxo b.passo-t { display:block; font-weight:650; color:var(--texto); font-size:13.5px; }
+  ol.man-fluxo .passo-d { color:var(--cinza); font-size:13px; }
+
+  .man-box { border-radius:10px; padding:12px 15px; margin:14px 0; font-size:13px; max-width:74ch; border:1px solid transparent; }
+  .man-box b.rotulo { display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.09em; margin-bottom:4px; font-weight:700; }
+  .man-box.regra { background:var(--verde-soft); border-color:rgba(31,216,164,.3); }
+  .man-box.regra b.rotulo { color:var(--teal); }
+  .man-box.dica { background:rgba(59,130,246,.1); border-color:rgba(59,130,246,.25); }
+  .man-box.dica b.rotulo { color:var(--azul); }
+  .man-box.atencao { background:rgba(250,204,21,.08); border-color:rgba(250,204,21,.25); }
+  .man-box.atencao b.rotulo { color:var(--amarelo); }
+
+  .man-tbl-wrap { overflow-x:auto; margin:14px 0; border:1px solid var(--borda); border-radius:10px; }
+  .man-body table { border-collapse:collapse; width:100%; font-size:12.5px; background:var(--panel); }
+  .man-body th { text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--cinza-2); padding:9px 13px; border-bottom:1px solid var(--borda); white-space:nowrap; }
+  .man-body td { padding:8px 13px; border-bottom:1px solid var(--borda); vertical-align:top; color:var(--cinza); }
+  .man-body tr:last-child td { border-bottom:none; }
+  .man-body td:first-child { white-space:nowrap; font-weight:600; color:var(--texto); }
+
+  .man-mapa { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:10px; margin:16px 0 4px; }
+  .man-mapa a { display:block; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px 14px; text-decoration:none; color:var(--texto); transition:border-color .15s; }
+  .man-mapa a:hover, .man-mapa a:focus-visible { border-color:var(--teal); }
+  .man-mapa b { display:block; font-size:13px; margin-bottom:2px; }
+  .man-mapa span { font-size:12px; color:var(--cinza-2); line-height:1.4; display:block; }
+
+  .man-quem { display:inline-block; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; border-radius:20px; padding:2px 8px; vertical-align:2px; margin-left:6px; }
+  .man-quem.admin { background:rgba(244,63,94,.14); color:var(--erro); }
+  .man-quem.todos { background:var(--verde-soft); color:var(--teal); }
+
+  .man-footer { border-top:1px solid var(--borda); padding-top:16px; color:var(--cinza-2); font-size:12px; margin-top:20px; }
+
+  /* ── Impressão / PDF ── */
+  @media print {
+    .sidebar, .hamburger, .sidebar-overlay, .topbar, nav.man-toc, .man-print-btn { display:none !important; }
+    .main { margin-left:0 !important; }
+    body { background:#fff !important; color:#111 !important; }
+    main.man-body { border-left:none; padding:0; }
+    .man-body h2 { break-before:page; border-top-color:#0d9b76; }
+    section:first-of-type h2 { break-before:auto; }
+    .man-body h2, .man-body h3, .man-body p, .man-body li, .man-body td, .man-body th { color:#111 !important; }
+    .man-tbl-wrap, .man-box { border-color:#ccc !important; break-inside:avoid; }
+    .man-box.regra { background:#e8f7f1 !important; }
+    .man-box.dica { background:#eaf1fc !important; }
+    .man-box.atencao { background:#fdf6e3 !important; }
+    ol.man-fluxo > li { break-inside:avoid; }
+    @page { size:A4 portrait; margin:16mm; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Manual do JOB</h1>
+    <div class="sub">Como cada módulo funciona e os fluxos do dia a dia</div>
+  </div>
+  <div><button class="btn-outline btn-sm man-print-btn" onclick="window.print()">Baixar PDF</button></div>
+</div>
+
+<div class="page man-wrap">
+<nav class="man-toc" aria-label="Sumário">
+  <p class="toc-title">Sumário</p>
+  <a href="#comecando">1. Começando</a>
+  <a href="#propostas">2. Propostas</a>
+  <a class="sub" href="#prop-fases">As fases, uma a uma</a>
+  <a class="sub" href="#prop-esteira">Esteira de Implantação</a>
+  <a class="sub" href="#prop-documentos">Documentos e e-mails</a>
+  <a class="sub" href="#prop-antecipacao">Antecipação de comissão</a>
+  <a class="sub" href="#prop-estorno">Estorno e exclusão</a>
+  <a href="#motor">3. Motor de comissão</a>
+  <a class="sub" href="#motor-operadoras">Operadoras (recebimento)</a>
+  <a class="sub" href="#motor-repasses">Repasses ao consultor</a>
+  <a class="sub" href="#motor-niveis">Níveis de produção</a>
+  <a class="sub" href="#motor-ciclo">Ciclo semanal de produção</a>
+  <a class="sub" href="#motor-estorno">Regras de estorno</a>
+  <a href="#fluxo-caixa">4. Fluxo de Caixa</a>
+  <a href="#financeiro">5. Financeiro</a>
+  <a class="sub" href="#fin-custos">Custos e parcelamento</a>
+  <a class="sub" href="#fin-socios">Aportes e reembolsos</a>
+  <a href="#crm">6. CRM</a>
+  <a class="sub" href="#crm-entrada">De onde vêm os leads</a>
+  <a class="sub" href="#crm-kanban">Kanban e cards</a>
+  <a class="sub" href="#crm-ficha">Ficha do lead</a>
+  <a class="sub" href="#crm-whatsapp">WhatsApp, SMS e e-mail</a>
+  <a class="sub" href="#crm-transferencias">Transferências</a>
+  <a href="#cotacao">7. Cotação</a>
+  <a class="sub" href="#cot-tabelas">Tabelas de preço</a>
+  <a class="sub" href="#cot-montar">Montar e enviar</a>
+  <a class="sub" href="#cot-corrigir">Corrigir e nova versão</a>
+  <a href="#material">8. Produtos e Material de Apoio</a>
+  <a href="#usuarios">9. Usuários</a>
+  <a href="#integracoes">10. Integrações</a>
+  <a href="#regras">11. Regras de ouro</a>
+</nav>
+
+<main class="man-body">
+<header class="man-hero">
+  <p class="man-eyebrow">Serenus Corretora de Saúde</p>
+  <h1 class="man-h1">Manual de operação do JOB</h1>
+  <p class="man-lede">Como cada módulo funciona, quem usa o quê, e os fluxos do dia a dia — do lead que chega sozinho no CRM até a comissão paga por PIX. Onde uma ação é restrita, o selo indica: <span class="man-quem admin">Admin</span> <span class="man-quem todos">Todos</span></p>
+  <div class="man-mapa">
+    <a href="#crm"><b>CRM</b><span>Leads, kanban, WhatsApp e transferências</span></a>
+    <a href="#cotacao"><b>Cotação</b><span>Multicálculo e link para o cliente</span></a>
+    <a href="#propostas"><b>Propostas</b><span>Venda fechada, fases, esteira e documentos</span></a>
+    <a href="#motor"><b>Motor de comissão</b><span>Operadoras, repasses, níveis e estornos</span></a>
+    <a href="#fluxo-caixa"><b>Fluxo de Caixa</b><span>Parcelas de comissão e pagamento PIX</span></a>
+    <a href="#financeiro"><b>Financeiro</b><span>Custos, sócios, fixos e DRE</span></a>
+    <a href="#usuarios"><b>Usuários</b><span>Equipe, perfis e regimes</span></a>
+  </div>
+</header>
+
+<!-- ══════════ 1. COMEÇANDO ══════════ -->
+<section id="comecando">
+  <h2><span class="mod">Seção 1</span>Começando</h2>
+
+  <h3>Entrar e recuperar senha</h3>
+  <p>Acesse o JOB pelo navegador e entre com e-mail e senha. Esqueceu a senha? Use <strong>Esqueci minha senha</strong> na tela de login: o sistema envia um código de 6 dígitos por e-mail, válido por 15 minutos. Usuários novos recebem um link de primeira senha por e-mail quando o admin os cadastra.</p>
+
+  <h3>Perfis: o que cada um vê</h3>
+  <div class="man-tbl-wrap"><table>
+    <tr><th>Perfil</th><th>O que pode fazer</th></tr>
+    <tr><td>Consultor</td><td>Vê o próprio dashboard, as próprias propostas e os próprios leads. Solicita edição de proposta (não edita direto). Registra atividades, agenda e conversa com os leads dele.</td></tr>
+    <tr><td>Admin</td><td>Tudo do consultor, mais: edita propostas direto, aprova solicitações, gerencia usuários, tabelas de cotação, financeiro, transferências de leads, etapas do funil e configurações do sistema.</td></tr>
+  </table></div>
+
+  <h3>Notificações e preferências</h3>
+  <p>O sino no topo mostra notificações (cotação aberta pelo cliente, feedback recebido, leads transferidos, solicitações). Atualiza sozinho a cada 30 segundos. Em <strong>Configurações</strong> (menu lateral), cada usuário escolhe o som de notificação. <strong>Modo Claro / Modo Escuro</strong> também fica no menu lateral — a escolha é lembrada no navegador.</p>
+</section>
+
+<!-- ══════════ 2. PROPOSTAS ══════════ -->
+<section id="propostas">
+  <h2><span class="mod">Seção 2</span>Propostas</h2>
+  <p>Proposta é a venda fechada (ou em fechamento). Ao salvar uma proposta, o JOB calcula sozinho a comissão da corretora e do consultor pelo regime dele e pela operadora, e gera as parcelas que depois aparecem no <a href="#fluxo-caixa">Fluxo de Caixa</a>.</p>
+
+  <ol class="man-fluxo">
+    <li><b class="passo-t">Cadastrar em Nova Proposta <span class="man-quem todos">Todos</span></b><span class="passo-d">Cliente, plano, valor da mensalidade, vigência, vidas, dependentes e responsáveis por contrato e negociação. O regime de comissão vem do cadastro do consultor.</span></li>
+    <li><b class="passo-t">Anexar os documentos iniciais</b><span class="passo-d">Contrato social, RG, CNPJ etc. — são eles que vão no e-mail de protocolo para a Affinity.</span></li>
+    <li><b class="passo-t">Enviar o protocolo à Affinity <span class="man-quem admin">Admin</span></b><span class="passo-d">Botão de envio na proposta. Existe o modo teste, que manda o e-mail só para o Guilherme conferir antes do envio real. O envio já muda o status operacional para "Em Análise Operadora".</span></li>
+    <li><b class="passo-t">Acompanhar fase e esteira</b><span class="passo-d">A fase comercial avança conforme a operadora responde (detalhes logo abaixo); a Esteira de Implantação acompanha até a apólice ficar Emitida/Ativa.</span></li>
+    <li><b class="passo-t">Anexar contrato assinado + comprovante do 1º pagamento</b><span class="passo-d">São os dois documentos exigidos para pedir a antecipação de comissão. Comprovante anexado também desbloqueia parcelas que estavam em "Bloqueado - Falta Comprovante".</span></li>
+  </ol>
+
+  <h3 id="prop-fases">As fases da proposta, uma a uma</h3>
+  <p>A fase fica no topo do detalhe da proposta e conta a história comercial da venda. Cada mudança fica gravada na linha do tempo, com quem mudou e quando. A função de cada fase:</p>
+  <div class="man-tbl-wrap"><table>
+    <tr><th>Fase</th><th>O que significa e para que serve</th><th>Próximo passo</th></tr>
+    <tr><td>Proposta cadastrada</td><td>A venda acabou de ser registrada pelo consultor. Serve para o admin saber que há trabalho novo na fila.</td><td>Enviar o protocolo à operadora (via Affinity).</td></tr>
+    <tr><td>Em análise na operadora</td><td>O protocolo foi enviado e a operadora está avaliando. Pode ficar aqui mesmo sem o comprovante anexado — a análise não depende dele.</td><td>Aguardar retorno; anexar o comprovante quando aprovar.</td></tr>
+    <tr><td>Aprovada / aguardando comprovante</td><td>A operadora aprovou o risco. O que segura o processo agora é o pagamento do cliente: falta o comprovante da 1ª mensalidade.</td><td>Consultor cobra o cliente e anexa o comprovante.</td></tr>
+    <tr><td>Comprovante anexado</td><td>O comprovante chegou. Serve como sinal para o gestor conferir se o dinheiro de fato entrou.</td><td>Gestor confirma a entrada.</td></tr>
+    <tr><td>Entrada confirmada</td><td>Pagamento conferido pelo gestor. É este marco que libera a comissão para o fluxo de caixa e conta a venda como aprovada na produção do consultor.</td><td>Acompanhar as parcelas no Fluxo de Caixa.</td></tr>
+    <tr><td>Finalizada</td><td>Processo concluído de ponta a ponta. Registro histórico.</td><td>—</td></tr>
+  </table></div>
+  <div class="man-box dica"><b class="rotulo">Por que existe o aviso de comprovante</b>Ao mover para uma fase que normalmente já teria comprovante, o JOB avisa se ele ainda não foi anexado — deixa prosseguir (a operadora pode aprovar antes do pagamento), mas lembra que a comissão fica travada até o comprovante entrar.</div>
+
+  <h3 id="prop-esteira">Esteira de Implantação <span class="man-quem admin">Admin</span></h3>
+  <p>Menu <strong>Esteira / Auditoria</strong>. Enquanto a fase conta a história comercial, o <strong>status operacional</strong> responde uma pergunta objetiva: <em>a apólice já está valendo?</em> A esteira lista todas as propostas que ainda não chegaram em "Emitida/Ativa" — é a fila de implantação que o admin varre todo dia para nada ficar esquecido.</p>
+  <div class="man-tbl-wrap"><table>
+    <tr><th>Status operacional</th><th>Significado</th></tr>
+    <tr><td>Aguardando Documentos</td><td>Estado inicial: falta documentação para protocolar.</td></tr>
+    <tr><td>Em Análise Operadora</td><td>Protocolo enviado (o envio à Affinity marca isso sozinho); operadora processando.</td></tr>
+    <tr><td>Emitida/Ativa</td><td>Apólice implantada e valendo. <strong>É este status que destrava as parcelas</strong>: tudo que estava "Bloqueado - Falta Comprovante" vira "Pendente de receber", e a proposta sai da esteira. Os números do dashboard de caixa só contam propostas Emitida/Ativa.</td></tr>
+    <tr><td>Suspensa / Cancelada</td><td>Implantação interrompida — a proposta fica marcada e fora do fluxo de comissão.</td></tr>
+  </table></div>
+  <p>Cada item da esteira aceita <strong>pendências</strong> anotadas (o que falta resolver com a operadora), e o dashboard do admin mostra um alerta com o total de propostas paradas na esteira.</p>
+
+  <h3>Editar uma proposta</h3>
+  <p><strong>Admin</strong> edita direto pelo botão de edição no detalhe — toda alteração fica registrada na linha do tempo, e mudar o valor recalcula comissão e regenera as parcelas ainda pendentes (parcelas já recebidas nunca são tocadas). <strong>Consultor</strong> usa o mesmo formulário, mas o que ele envia vira uma <em>solicitação de alteração</em> que o admin aprova ou recusa em <strong>Solicitações de Edição</strong>.</p>
+
+  <h3 id="prop-documentos">Documentos: cada e-mail leva o seu</h3>
+  <div class="man-box regra"><b class="rotulo">Regra</b>O e-mail de <strong>protocolo</strong> leva só os documentos iniciais (contrato social, RG, CNPJ…). O e-mail de <strong>antecipação</strong> leva só o contrato assinado e o comprovante de pagamento. Os dois conjuntos não se misturam.</div>
+
+  <h3 id="prop-antecipacao">Antecipação de comissão <span class="man-quem admin">Admin</span></h3>
+  <p>Pede à Affinity a antecipação da 1ª mensalidade. O JOB só libera o envio se três travas passarem:</p>
+  <ul>
+    <li>A operadora <strong>permite antecipação</strong> naquele tipo de plano (regra da Affinity — ex.: Vera Cruz não permite; Hapvida/Ndi, MedSênior, Porto Seguro e outras permitem conforme PME/PF).</li>
+    <li>Contrato assinado <strong>e</strong> comprovante de pagamento anexados.</li>
+    <li>Número do contrato informado.</li>
+  </ul>
+  <p>Também existem na proposta: <strong>boleto de adesão</strong> (gera boleto real via Asaas, com acompanhamento de pagamento) e <strong>remanejar consultor</strong> (recalcula a comissão pelo regime do novo consultor, preservando parcelas já em fluxo).</p>
+
+  <h3 id="prop-estorno">Estorno e exclusão <span class="man-quem admin">Admin</span></h3>
+  <p>Dois caminhos diferentes para dois problemas diferentes:</p>
+  <ul>
+    <li><strong>Estornar</strong> — o cliente cancelou o plano e a operadora vai cobrar de volta a comissão. O JOB aplica a <a href="#motor-estorno">regra de estorno da operadora</a> (percentual devolvido e até qual mensalidade), cancela as parcelas atingidas e marca a proposta como estornada. A proposta continua visível, com o histórico do estorno.</li>
+    <li><strong>Excluir</strong> — a proposta foi cadastrada errado ou é duplicada. É uma exclusão lógica: exige motivo e detalhe, cancela as parcelas pendentes e some das listas, mas o registro continua no banco para auditoria.</li>
+  </ul>
+</section>
+
+<!-- ══════════ 3. MOTOR DE COMISSÃO ══════════ -->
+<section id="motor">
+  <h2><span class="mod">Seção 3</span>Motor de comissão <span class="man-quem admin">Admin</span></h2>
+  <p>Quando uma proposta é salva, o JOB calcula a comissão sozinho. Este é o painel de controle desse cálculo — quatro cadastros que trabalham juntos. A conta, em uma linha:</p>
+  <div class="man-box regra"><b class="rotulo">A fórmula</b><strong>Operadoras</strong> dizem quantas mensalidades a corretora recebe. <strong>Repasses</strong> dizem quantas dessas vão para o consultor — variando pelo regime dele e, no regime Com Lead, pelo <strong>nível de produção</strong> do mês. A diferença é a margem da corretora. Tudo por operadora e por tipo de plano (PME, PF, Adesão).</div>
+
+  <h3 id="motor-operadoras">Operadoras: o que a corretora recebe</h3>
+  <p>Menu <strong>Operadoras</strong>. Para cada operadora e tipo de plano, cadastra-se o total em <strong>mensalidades</strong> que a operadora paga de comissão à corretora (ex.: Amil PME = 3,0 significa três mensalidades do contrato). O campo <strong>obs</strong> diferencia variações da mesma operadora (praças ou linhas com comissionamento diferente). Sem esse cadastro, a proposta salva com comissão zerada e o JOB avisa que falta o recebimento daquela operadora.</p>
+
+  <h3 id="motor-repasses">Repasses: o que vai para o consultor</h3>
+  <p>Menu <strong>Repasses</strong>. É a matriz operadora × plano × regime do consultor (× nível, quando o regime é Com Lead). Para cada combinação:</p>
+  <ul>
+    <li><strong>Total</strong> — quantas mensalidades o consultor recebe.</li>
+    <li><strong>Régua</strong> — como esse total se distribui no tempo, mensalidade a mensalidade (ex.: <code>1;0,5;0,5</code> = uma mensalidade inteira na 1ª parcela e meia nas duas seguintes). É a régua que define quantas parcelas a proposta gera e o valor de cada uma.</li>
+    <li><strong>Adesão</strong> é um caso à parte: o repasse é um percentual sobre a taxa de adesão (1ª mensalidade), não uma régua.</li>
+    <li><strong>Gestor Vendedor</strong> ignora a matriz: leva 100% do que a corretora recebe.</li>
+  </ul>
+  <div class="man-box atencao"><b class="rotulo">Atenção</b>Proposta salva sem repasse cadastrado para aquela combinação gera aviso e comissão do consultor zerada. Ao criar uma operadora nova em Operadoras, complete também a linha dela em Repasses.</div>
+
+  <h3 id="motor-niveis">Níveis de produção: quem vende mais, ganha mais</h3>
+  <p>Menu <strong>Níveis de Produção</strong>. Para consultores no regime <strong>Com Lead</strong>, o repasse depende do nível do mês, definido pela produção acumulada (soma do valor das vendas no mês da proposta):</p>
+  <div class="man-tbl-wrap"><table>
+    <tr><th>Nível</th><th>Faixa de produção (padrão)</th><th>Efeito</th></tr>
+    <tr><td>N1</td><td>até R$ 3.000</td><td>Usa a coluna N1 da matriz de repasses</td></tr>
+    <tr><td>N2</td><td>R$ 3.000 a R$ 7.000</td><td>Usa a coluna N2 — repasse maior</td></tr>
+    <tr><td>N3</td><td>acima de R$ 7.000</td><td>Usa a coluna N3 — repasse máximo</td></tr>
+  </table></div>
+  <p>As faixas são configuráveis (dá para criar mais níveis ou mudar os cortes). O nível é reavaliado a cada proposta salva, pela produção do mês daquela proposta — vender mais no mês melhora o repasse das próximas vendas do próprio mês.</p>
+
+  <h3 id="motor-ciclo">Ciclo semanal de produção</h3>
+  <p>Menu <strong>Produção</strong>: o painel do ritmo da semana, com a produção de cada consultor no ciclo, vendas aprovadas e comissões por fase. O ciclo é fixo:</p>
+  <div class="man-tbl-wrap"><table>
+    <tr><th>Etapa</th><th>Quando</th><th>O que acontece</th></tr>
+    <tr><td>Coleta</td><td>Quinta a terça</td><td>Consultores registram as propostas da semana.</td></tr>
+    <tr><td>Análise</td><td>Quarta</td><td>Gestor confere as vendas e comissões do ciclo.</td></tr>
+    <tr><td>Liberação</td><td>Quinta seguinte</td><td>Comissões conferidas são liberadas para o corretor.</td></tr>
+    <tr><td>Pagamento</td><td>Sexta seguinte</td><td>Pagamento das comissões liberadas (PIX pelo Fluxo de Caixa).</td></tr>
+  </table></div>
+
+  <h3 id="motor-estorno">Regras de estorno</h3>
+  <p>Menu <strong>Estornos</strong>. Cada operadora tem sua regra de devolução quando o cliente cancela cedo: <strong>percentual estornado</strong> e <strong>até qual mensalidade</strong> a regra vale (ex.: 100% até a 3ª mensalidade). É essa regra que o botão Estornar da proposta aplica. A mesma tela lista as últimas propostas estornadas, para acompanhamento.</p>
+</section>
+
+<!-- ══════════ 4. FLUXO DE CAIXA ══════════ -->
+<section id="fluxo-caixa">
+  <h2><span class="mod">Seção 4</span>Fluxo de Caixa</h2>
+  <p>É onde vivem as parcelas de comissão de todas as propostas. Cada parcela anda por estes status, nesta ordem:</p>
+  <div class="man-tbl-wrap"><table>
+    <tr><th>Status</th><th>Significado</th><th>Quem age</th></tr>
+    <tr><td>Bloqueado - Falta Comprovante</td><td>A proposta ainda não tem o comprovante do 1º pagamento anexado.</td><td>Consultor anexa o comprovante</td></tr>
+    <tr><td>Pendente de receber</td><td>Aguardando a operadora pagar a corretora.</td><td>Admin marca quando recebe</td></tr>
+    <tr><td>Recebido e não repassado</td><td>Dinheiro entrou na corretora, repasse ao consultor ainda não liberado.</td><td>Admin libera</td></tr>
+    <tr><td>Liberado para o corretor</td><td>Pronto para pagar. O consultor dá o aceite; o admin paga.</td><td>Consultor aceita, admin paga</td></tr>
+    <tr><td>Pago ao corretor</td><td>Comissão paga. Fim do ciclo.</td><td>—</td></tr>
+  </table></div>
+
+  <h3>Pagar por PIX <span class="man-quem admin">Admin</span></h3>
+  <p>Nas parcelas liberadas, o botão <strong>Pagar PIX</strong> faz uma transferência real pelo Asaas para a chave PIX cadastrada no usuário do consultor. O status do PIX (processando, enviado, falhou) atualiza sozinho via webhook do Asaas. Sem chave PIX cadastrada, o botão não aparece — cadastre em <a href="#usuarios">Usuários</a>.</p>
+</section>
+
+<!-- ══════════ 5. FINANCEIRO ══════════ -->
+<section id="financeiro">
+  <h2><span class="mod">Seção 5</span>Financeiro <span class="man-quem admin">Admin</span></h2>
+  <p>Visão do mês da corretora: comissões futuras, custos, aportes e reembolsos de sócios, fixos dos consultores e o DRE. Navegue entre meses pelo seletor de competência no topo. Ao lançar algo, a tela permanece na mesma aba — dá para lançar vários itens em sequência.</p>
+
+  <h3 id="fin-custos">Custos: emissão, vencimento e parcelamento</h3>
+  <ol class="man-fluxo">
+    <li><b class="passo-t">Preencha descrição, categoria e valor total</b></li>
+    <li><b class="passo-t">Informe a data de emissão e a de vencimento</b><span class="passo-d">São campos separados. A competência do lançamento vem sempre do mês da <strong>emissão</strong> — nunca do mês que está aberto na tela.</span></li>
+    <li><b class="passo-t">Compra parcelada? Informe o nº de parcelas</b><span class="passo-d">Ex.: R$ 1.200 em 12x vira 12 lançamentos de R$ 100, um por mês a partir da emissão, identificados como 1/12, 2/12…</span></li>
+    <li><b class="passo-t">Diga quem pagou e com qual fonte</b><span class="passo-d">"Caixa da empresa" ou "Recurso de terceiro". Se um sócio pagou do próprio bolso, marque a fonte como Terceiro — isso alimenta o saldo devido a ele.</span></li>
+    <li><b class="passo-t">Anexe o comprovante</b><span class="passo-d">Pelo computador (Anexar) ou pelo celular (botão Celular gera um QR que abre a câmera do telefone).</span></li>
+  </ol>
+  <p>Depois de lançado: <strong>Editar</strong> corrige qualquer campo, e <strong>Marcar pago</strong> faz a conciliação (o lançamento sai de "Previsto" para "Pago" com a data do pagamento registrada).</p>
+
+  <h3 id="fin-socios">Aportes, reembolsos e o saldo entre sócios</h3>
+  <p>Na aba <strong>Aporte / Reembolso de sócios</strong>: aporte é dinheiro do sócio entrando no caixa; reembolso é a empresa devolvendo. O painel <strong>Saldo devido a cada sócio</strong> soma tudo que a empresa deve a cada um — aportes feitos + custos que ele pagou do próprio bolso (fonte Terceiro) − reembolsos já pagos. É o número para saber quanto falta devolver a cada sócio.</p>
+
+  <h3>Fixos e DRE</h3>
+  <p><strong>Gerar fixos deste mês</strong> cria os lançamentos do fixo dos consultores em regime "Com Fixo + Com Leads" (2 parcelas, dia 15 e 30). O <strong>DRE</strong> resume o mês: receita de comissões − repasses − custos − fixos + aportes − reembolsos = resultado.</p>
+</section>
+
+<!-- ══════════ 6. CRM ══════════ -->
+<section id="crm">
+  <h2><span class="mod">Seção 6</span>CRM</h2>
+
+  <h3 id="crm-entrada">De onde vêm os leads</h3>
+  <p>Os leads das campanhas (Meta e Google) entram <strong>sozinhos</strong>: as planilhas são lidas automaticamente a cada 15 minutos. O botão <strong>Buscar leads agora</strong> força uma busca imediata. Leads também podem ser criados à mão (<strong>+ Novo Lead</strong>, em qualquer coluna).</p>
+  <div class="man-box regra"><b class="rotulo">Regra</b>Um telefone = um lead. A importação nunca duplica: se o telefone já existe, o lead existente é atualizado. Se a planilha não diz o consultor, o lead entra <strong>sem responsável</strong> (ninguém é atribuído por padrão) — e um lead que já tem responsável nunca é sobrescrito pela planilha.</div>
+
+  <h3 id="crm-kanban">Kanban e cards</h3>
+  <p>Cada coluna é uma etapa do funil; arraste o card para mudar de etapa. O número no topo da coluna é o total real de leads dela, mas por desempenho cada coluna mostra até <strong>60 cards</strong> — para achar um lead específico em coluna grande, use a busca e os filtros (consultor, etapa, status, origem, período). A barra de rolagem horizontal fica no rodapé do kanban.</p>
+  <p>O card avisa quando o lead está parado: borda <strong>amarela</strong> ("Esfriando") após 2 dias sem nenhuma ação; <strong>vermelha</strong> ("Frio") após 5. Qualquer atividade registrada zera a contagem. Direto no card, sem abrir a ficha: o seletor de <strong>status</strong> (Follow up 1, 2, 3+, Aguardando resposta…) e o botão verde que abre a conversa no <strong>BotConversa</strong>.</p>
+
+  <h3 id="crm-ficha">Ficha do lead</h3>
+  <p>Clique no card para abrir. As abas: <strong>Dados</strong> (contato, responsável, etapa, valor estimado), <strong>Qualificação</strong> (tipo de plano, idade, cidade, CNPJ, plano atual), <strong>WhatsApp</strong> (conversa e recursos de contato), <strong>Anexos</strong>, <strong>Timeline</strong> (histórico completo de tudo que aconteceu) e <strong>Agenda</strong> (lembretes de retorno — os atrasados e os do dia aparecem em <strong>Agenda</strong> no topo do CRM).</p>
+
+  <h3 id="crm-whatsapp">WhatsApp, SMS e e-mail: o canal certo</h3>
+  <div class="man-tbl-wrap"><table>
+    <tr><th>Consultor</th><th>Canal com o lead</th></tr>
+    <tr><td>Prisciele, Juliana, Jenifer</td><td>WhatsApp oficial da Serenus, (19) 93619-6877, operado pelo <strong>BotConversa</strong>. Botão "Abrir conversa no BotConversa" na ficha e no card.</td></tr>
+    <tr><td>Guilherme, Bianca, Gabriel, Danilo</td><td>WhatsApp pessoal de cada um. Botão "Abrir WhatsApp Web" na aba WhatsApp abre a conversa já com a mensagem pronta, pelo número de quem está logado.</td></tr>
+  </table></div>
+  <p>Ainda na aba WhatsApp, para quando <strong>o cliente não atende ao telefone</strong>:</p>
+  <ul>
+    <li><strong>SMS de reforço</strong> — mensagem curta avisando que tentamos contato, com o link do WhatsApp do consultor certo (o do BotConversa para as meninas, o pessoal para os demais). Sempre mostra a prévia antes de enviar, porque SMS custa crédito.</li>
+    <li><strong>Corrigir contato (e-mail)</strong> — quando o telefone da planilha parece errado: manda um e-mail ao lead com um botão que abre o WhatsApp do consultor. O JOB registra quando o cliente clica.</li>
+  </ul>
+
+  <h3 id="crm-transferencias">Transferir leads <span class="man-quem admin">Admin</span></h3>
+  <p>Três formas, da menor para a maior:</p>
+  <ul>
+    <li><strong>Na ficha</strong> — troque o responsável no campo Responsável.</li>
+    <li><strong>Transferência em massa</strong> — move todos os leads de um consultor (ou de um nome legado tipo "Erenir", "Cliciane", "LEAD SISTEMA") para outro, com filtros de etapa, origem e período.</li>
+    <li><strong>Transferir Leads (planilha)</strong> — suba uma planilha (Nome, Telefone, Consultora; modelo disponível para baixar). O JOB casa cada linha pelo telefone, mostra a tela de conferência onde você marca sim/não lead a lead, escolhe a <strong>fase do funil</strong> em que eles entram, e confirma. Linhas não encontradas viram criação opcional, uma a uma, sem nunca duplicar.</li>
+  </ul>
+  <div class="man-box dica"><b class="rotulo">Automático</b>Sempre que o destino da transferência é Prisciele, Juliana ou Jenifer, o JOB também reatribui a conversa no <strong>BotConversa</strong> para ela, pela API oficial — a titularidade muda nos dois sistemas de uma vez. Se o lead nunca falou pelo WhatsApp oficial, o JOB apenas registra isso na timeline e segue.</div>
+
+  <h3>Etapas e status do funil <span class="man-quem admin">Admin</span></h3>
+  <p>Botão <strong>Etapas</strong> no CRM: crie, renomeie, recolora, reordene e exclua tanto as <strong>etapas</strong> (colunas do kanban) quanto os <strong>status</strong> de follow-up dos cards. Ao excluir uma etapa, os leads dela são movidos automaticamente para a etapa seguinte.</p>
+</section>
+
+<!-- ══════════ 7. COTAÇÃO ══════════ -->
+<section id="cotacao">
+  <h2><span class="mod">Seção 7</span>Cotação</h2>
+  <p>Multicálculo próprio da Serenus: compara os planos cadastrados e gera um documento bonito com link para o cliente.</p>
+
+  <h3 id="cot-tabelas">Tabelas de preço <span class="man-quem admin">Admin</span></h3>
+  <p>Em <strong>Gerenciar tabelas</strong>, cada tabela é um plano com preço por faixa etária (00-18 até 59+). Três formas de alimentar:</p>
+  <ul>
+    <li><strong>À mão</strong> — formulário plano a plano.</li>
+    <li><strong>CSV/Excel</strong> — várias tabelas de uma vez; baixe o modelo na própria tela.</li>
+    <li><strong>PDF do Painel do Corretor</strong> — suba o PDF da cotação e o JOB extrai os planos e preços sozinho, com tela de conferência antes de salvar. Dica: gere a cotação no Painel com uma vida em cada faixa (idades 10, 20, 25, 30, 35, 40, 45, 50, 55, 60) para o PDF trazer todas as faixas. Funciona com um ou vários planos no mesmo PDF.</li>
+  </ul>
+
+  <h3 id="cot-montar">Montar a cotação e enviar ao cliente <span class="man-quem todos">Todos</span></h3>
+  <ol class="man-fluxo">
+    <li><b class="passo-t">Quem vai usar o plano</b><span class="passo-d">Digite as idades separadas por vírgula — pode misturar idade (25) com data de nascimento (15/03/1990). Filtros de modalidade, CNPJ, acomodação e coparticipação são opcionais.</span></li>
+    <li><b class="passo-t">Operadoras (opcional)</b><span class="passo-d">Deixe sem marcar para comparar todas.</span></li>
+    <li><b class="passo-t">Cotar</b><span class="passo-d">O resultado ordena por operadora e preço; o menor preço vem marcado. "Tabela incompleta" significa que falta preço em alguma faixa usada.</span></li>
+    <li><b class="passo-t">Marque os planos e as recomendações</b><span class="passo-d">Selecione o que entra no documento e, se quiser, aponte 1ª, 2ª e 3ª opção.</span></li>
+    <li><b class="passo-t">Gerar cotação do cliente</b><span class="passo-d">Escolha formato horizontal (tabela comparativa) ou vertical (um plano embaixo do outro). O documento sai com data e hora, e ganha um link público.</span></li>
+    <li><b class="passo-t">Enviar</b><span class="passo-d">Copie o link, mande por e-mail direto do JOB, ou copie a legenda pronta para WhatsApp (com as cores dos planos). Dá para baixar como imagem ou PDF.</span></li>
+  </ol>
+  <p>O cliente que abre o link vê só a proposta — sem os botões internos — e pode responder com <strong>"Gostei dessa proposta"</strong> ou <strong>"Me explique mais essa opção"</strong>. Esses cliques viram notificação no sino do corretor e entram na timeline do lead. O JOB também registra quantas vezes o link foi aberto.</p>
+  <p>Em <strong>Cotações salvas</strong> fica o histórico completo; na ficha do lead, a linha do tempo de cotações mostra todas as cotações daquele cliente.</p>
+
+  <h3 id="cot-corrigir">Corrigir valor × Nova versão</h3>
+  <div class="man-box regra"><b class="rotulo">Regra</b>O link público de uma cotação é <strong>imutável</strong> — nunca muda nem some. Por isso existem dois caminhos de alteração, e a escolha importa:</div>
+  <ul>
+    <li><strong>Corrigir valor (mesmo link)</strong> — para consertar um preço errado na cotação que o cliente já recebeu. Digite o valor <strong>individual por vida</strong>; o JOB multiplica pela quantidade de vidas da faixa sozinho, igual na cotação original. O cliente vê o valor corrigido no mesmo link.</li>
+    <li><strong>Nova cotação (link novo)</strong> — para renegociação ou cenário diferente: reabre o construtor pré-preenchido e, ao salvar, cria um registro novo com link próprio. A cotação original continua intacta e acessível.</li>
+  </ul>
+</section>
+
+<!-- ══════════ 8. PRODUTOS, PLANOS E MATERIAL DE APOIO ══════════ -->
+<section id="material">
+  <h2><span class="mod">Seção 8</span>Produtos, Planos e Material de Apoio</h2>
+
+  <h3>Produtos / Planos <span class="man-quem admin">Admin</span></h3>
+  <p>Menu <strong>Produtos / Planos</strong>: o catálogo de planos comercializados, por operadora — nome do plano, tipo (PME/PF/Adesão), acomodação e coparticipação. A função dele é padronizar o cadastro de propostas: em vez de digitar o nome do plano à mão (e cada um escrever de um jeito), o consultor escolhe da lista, o que mantém os relatórios por produto consistentes. Não confundir com as <a href="#cot-tabelas">tabelas de preço da Cotação</a> — o catálogo diz <em>quais planos existem</em>; as tabelas dizem <em>quanto custam por faixa etária</em>.</p>
+
+  <h3>Material de Apoio <span class="man-quem todos">Todos</span></h3>
+  <p>Biblioteca de PDFs e materiais organizada em pastas por operadora e tipo (tabelas, redes credenciadas, apresentações…), no mesmo estilo do Painel do Corretor. Todos consultam; o admin adiciona materiais e cria pastas (inclusive vazias, para organizar antes de ter conteúdo).</p>
+</section>
+
+<!-- ══════════ 9. USUÁRIOS ══════════ -->
+<section id="usuarios">
+  <h2><span class="mod">Seção 9</span>Usuários <span class="man-quem admin">Admin</span></h2>
+  <p>Cadastro da equipe. Ao criar um usuário, o JOB envia o link para ele definir a própria senha. Campos que alimentam o resto do sistema:</p>
+  <div class="man-tbl-wrap"><table>
+    <tr><th>Campo</th><th>Usado em</th></tr>
+    <tr><td>Perfil</td><td>Admin ou consultor — define tudo que a pessoa vê e pode fazer.</td></tr>
+    <tr><td>Regime de comissão</td><td>Cálculo automático de comissão e parcelas de cada proposta (Sem Lead/Sem Fixo, Com Lead N1-N3, Com Fixo + Lead, Gestor Vendedor).</td></tr>
+    <tr><td>Chave PIX</td><td>Pagamento de comissão pelo botão Pagar PIX no Fluxo de Caixa.</td></tr>
+    <tr><td>Telefone</td><td>Links de WhatsApp que os leads recebem (para quem usa WhatsApp pessoal).</td></tr>
+    <tr><td>Foto</td><td>Avatar no sistema — cada usuário pode trocar a própria em Minha Foto.</td></tr>
+  </table></div>
+  <p>Desativar um usuário tira o acesso sem apagar o histórico de propostas e leads dele.</p>
+</section>
+
+<!-- ══════════ 10. INTEGRAÇÕES ══════════ -->
+<section id="integracoes">
+  <h2><span class="mod">Seção 10</span>Integrações e automações</h2>
+  <div class="man-tbl-wrap"><table>
+    <tr><th>Integração</th><th>O que faz</th></tr>
+    <tr><td>Planilhas de leads</td><td>Meta e Google alimentam o CRM sozinhas a cada 15 minutos (e pelo botão Buscar leads agora).</td></tr>
+    <tr><td>BotConversa</td><td>WhatsApp oficial das meninas: abrir conversa pelo card/ficha e reatribuição automática de titularidade nas transferências.</td></tr>
+    <tr><td>Asaas</td><td>Boleto de adesão e pagamento de comissão por PIX, com status atualizado por webhook.</td></tr>
+    <tr><td>Brevo</td><td>Envio de todos os e-mails (protocolo, antecipação, cotação, recuperação de senha, contato com lead).</td></tr>
+    <tr><td>GTI SMS</td><td>SMS de reforço do CRM (limite rígido de 160 caracteres por mensagem).</td></tr>
+    <tr><td>Planilha de comissões</td><td>Um script do Google preenche a planilha de comissões da corretora com os dados do JOB (parcelas e regras), sem digitação manual.</td></tr>
+    <tr><td>Power BI</td><td>Endpoints de dados para relatórios externos, protegidos por chave de API.</td></tr>
+    <tr><td>Backups</td><td>Banco com backup automático diário; anexos guardados em disco persistente com cópia em nuvem (Cloudflare R2).</td></tr>
+  </table></div>
+</section>
+
+<!-- ══════════ 11. REGRAS DE OURO ══════════ -->
+<section id="regras">
+  <h2><span class="mod">Seção 11</span>Regras de ouro</h2>
+  <p>O resumo do que nunca pode ser violado — se guardar só uma parte deste manual, guarde esta:</p>
+  <ul>
+    <li><strong>Um telefone = um lead.</strong> Nada no sistema duplica leads; toda importação e criação confere o telefone antes.</li>
+    <li><strong>Link de cotação é imutável.</strong> Renegociou? Nova versão (link novo). Corrigiu preço errado? Corrigir valor (mesmo link) — e o valor digitado é sempre o individual por vida.</li>
+    <li><strong>Cada e-mail leva os documentos certos.</strong> Protocolo = documentos iniciais. Antecipação = contrato assinado + comprovante. Sem mistura.</li>
+    <li><strong>Competência financeira vem da emissão.</strong> Lançar um custo antigo olhando o mês atual não o coloca no mês errado — a data de emissão decide.</li>
+    <li><strong>Transferência manual é sagrada.</strong> A importação automática de planilhas nunca sobrescreve o responsável de um lead que já tem dono.</li>
+    <li><strong>Canal certo por consultor.</strong> Meninas = BotConversa (número oficial da Serenus). Demais = WhatsApp pessoal. O JOB escolhe sozinho nos links e SMS — não force o canal errado à mão.</li>
+    <li><strong>Parcelas recebidas não se mexem.</strong> Recalcular comissão (edição de valor, troca de consultor) só regenera as parcelas ainda pendentes.</li>
+  </ul>
+</section>
+
+<footer class="man-footer">
+  Manual do JOB · Serenus Corretora de Saúde · Atualizado em julho/2026. Dúvidas ou algo desatualizado? Fale com o Guilherme.
+</footer>
+</main>
+</div>
+{% endblock %}

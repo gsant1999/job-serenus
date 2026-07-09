@@ -8581,6 +8581,13 @@ def cotacao_operadoras_logos():
     return render_template('cotacao_logos.html', itens=itens)
 
 
+@app.route('/manual')
+@login_required
+def manual():
+    """Manual de operação do JOB — consulta e impressão/PDF (window.print no template)."""
+    return render_template('manual.html')
+
+
 @app.route('/material-apoio')
 @login_required
 def material_apoio():
