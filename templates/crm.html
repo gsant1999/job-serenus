@@ -1114,7 +1114,7 @@ async function abrirSmsReforco(templateKey){
   const d=await r.json();
   document.getElementById('sr-carregando').style.display='none';
   if(d.ok){
-    _smsTemplateAtual = {template:d.template, token:d.token};
+    _smsTemplateAtual = {template:d.template};
     document.getElementById('sr-texto').textContent=d.mensagem;
     document.getElementById('sr-info').textContent='Vai pro '+d.telefone+' · '+d.caracteres+' caracteres · '+d.segmentos+' crédito'+(d.segmentos>1?'s':'');
     document.getElementById('sr-aviso-duplo').style.display = d.segmentos>1 ? 'block' : 'none';
@@ -1125,7 +1125,7 @@ async function abrirSmsReforco(templateKey){
   }
 }
 async function enviarSmsReforco(){
-  if(!_leadAtual || !_smsTemplateAtual || !_smsTemplateAtual.token) return;
+  if(!_leadAtual || !_smsTemplateAtual || !_smsTemplateAtual.template) return;
   const btn=document.getElementById('sr-btn-enviar');
   btn.disabled=true; btn.textContent='Enviando...';
   const r=await fetch('/crm/lead/'+_leadAtual.id+'/sms-reforco',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_smsTemplateAtual)});
