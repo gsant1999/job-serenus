@@ -3641,6 +3641,26 @@ def _localizar_anexo(nome):
     return None, None
 
 
+@app.route('/avatar/<int:uid>')
+def avatar_usuario(uid):
+    """Foto de perfil do usuário, pública (sem login) — só assim o cliente de e-mail
+    do lead consegue carregar a imagem no corpo do e-mail. Não usar pra nada além de
+    foto de perfil: diferente de /anexos, aqui não tem documento sensível envolvido."""
+    conn = db()
+    u = conn.execute("SELECT foto FROM usuarios WHERE id=?", (uid,)).fetchone()
+    close_db(conn)
+    if not u or not u['foto']:
+        abort(404)
+    conteudo, ctype = _localizar_anexo(u['foto'])
+    if conteudo is None:
+        abort(404)
+    if ctype is None:
+        ctype = mimetypes.guess_type(u['foto'])[0] or 'image/jpeg'
+    resp = Response(conteudo, mimetype=ctype)
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
+
+
 @app.route('/anexos/<path:nome>')
 @login_required
 def servir_anexo(nome):
@@ -9576,10 +9596,24 @@ _EMAIL_CONTATO_TEMPLATES = {
 }
 
 
-def _corpo_email_contato(tpl, nome_lead, corretor_nome, link_click, pixel_url):
-    """HTML bonito no padrão do e-mail de cotação, com pixel + link rastreado."""
+def _corpo_email_contato(tpl, nome_lead, corretor_nome, link_click, pixel_url, foto_url=None):
+    """HTML bonito no padrão do e-mail de cotação, com pixel + link rastreado.
+    foto_url: URL pública da foto do consultor (rota /avatar/<uid>) — se não tiver
+    foto cadastrada, mostra só o nome, sem quebrar o layout."""
     primeiro = (nome_lead or '').strip().split(' ')[0].title() if nome_lead else ''
     saudacao = f"Olá{', ' + primeiro if primeiro else ''}!"
+    cartao_consultor = (
+        f"<div style='display:flex;align-items:center;gap:14px;background:#f8f9fb;border-radius:12px;padding:14px 16px;margin-bottom:26px;'>"
+        + (f"<img src='{foto_url}' width='52' height='52' alt='{corretor_nome}' "
+           "style='width:52px;height:52px;border-radius:50%;object-fit:cover;display:block;flex-shrink:0;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.12);'>"
+           if foto_url else
+           f"<div style='width:52px;height:52px;border-radius:50%;background:#1a1d2e;color:#fff;display:flex;align-items:center;justify-content:center;"
+           f"font-size:19px;font-weight:700;flex-shrink:0;'>{(corretor_nome or '?')[:1].upper()}</div>")
+        + "<div>"
+        f"<div style='font-size:10.5px;color:#8c93a8;text-transform:uppercase;letter-spacing:.6px;font-weight:700;'>Seu consultor</div>"
+        f"<div style='font-size:15px;color:#1a1d2e;font-weight:700;margin-top:2px;'>{corretor_nome}</div>"
+        "</div></div>"
+    )
     return (
         "<div style='background:#f4f6f9;padding:30px 12px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;'>"
         "<div style='max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;"
@@ -9590,8 +9624,7 @@ def _corpo_email_contato(tpl, nome_lead, corretor_nome, link_click, pixel_url):
         "<div style='padding:30px;'>"
         f"<p style='font-size:16px;color:#1a1d2e;margin:0 0 14px;font-weight:600;'>{saudacao}</p>"
         f"<p style='font-size:14px;color:#4a4f63;margin:0 0 22px;line-height:1.7;'>{tpl['texto']}</p>"
-        f"<p style='font-size:14px;color:#4a4f63;margin:0 0 26px;line-height:1.7;'>"
-        f"Para falar direto com o corretor <b>{corretor_nome}</b>, é só clicar no botão abaixo:</p>"
+        f"{cartao_consultor}"
         f"<div style='text-align:center;margin-bottom:26px;'><a href='{link_click}' "
         "style='display:inline-block;background:#25d366;color:#fff;text-decoration:none;font-weight:700;"
         f"font-size:15px;padding:14px 34px;border-radius:10px;'>{tpl['cta']}</a></div>"
@@ -9625,21 +9658,26 @@ def crm_lead_email_contato(lid):
     if not email_lead or '@' not in email_lead:
         close_db(conn); return jsonify({"ok": False, "erro": "Lead sem e-mail válido"}), 400
     # Telefone do corretor: usuário logado → responsável do lead
-    urow = conn.execute("SELECT nome, telefone FROM usuarios WHERE id=?", (session.get('user_id'),)).fetchone()
+    urow = conn.execute("SELECT id, nome, telefone, foto FROM usuarios WHERE id=?", (session.get('user_id'),)).fetchone()
     corretor_nome = (urow['nome'] if urow else None) or session.get('nome') or 'Serenus'
+    corretor_uid = urow['id'] if urow else None
+    corretor_foto = urow['foto'] if urow else None
     corretor_tel = _waspeed_normaliza_fone((urow['telefone'] if urow else '') or '')
     if not corretor_tel and ld.get('responsavel_id'):
-        rrow = conn.execute("SELECT nome, telefone FROM usuarios WHERE id=?", (ld['responsavel_id'],)).fetchone()
+        rrow = conn.execute("SELECT id, nome, telefone, foto FROM usuarios WHERE id=?", (ld['responsavel_id'],)).fetchone()
         if rrow and rrow['telefone']:
             corretor_nome = rrow['nome']
+            corretor_uid = rrow['id']
+            corretor_foto = rrow['foto']
             corretor_tel = _waspeed_normaliza_fone(rrow['telefone'])
     if not corretor_tel:
         close_db(conn)
         return jsonify({"ok": False, "erro": "Cadastre seu telefone em Usuários para gerar o link do WhatsApp"}), 400
     token = secrets.token_urlsafe(12)
     base = request.host_url.rstrip('/')
+    foto_url = f"{base}/avatar/{corretor_uid}" if corretor_uid and corretor_foto else None
     corpo = _corpo_email_contato(tpl, ld.get('nome'), corretor_nome,
-                                 base + '/r/' + token, base + '/t/' + token + '.gif')
+                                 base + '/r/' + token, base + '/t/' + token + '.gif', foto_url=foto_url)
     try:
         _enviar_email.ultimo_erro = None
     except Exception:
