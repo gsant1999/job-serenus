@@ -12949,6 +12949,50 @@ def webhook_botconversa():
     return jsonify({"ok": True, "contato_id": ct['id']})
 
 
+@app.route('/webhook/botconversa/disparo', methods=['POST'])
+def webhook_botconversa_disparo():
+    """Recebe o aviso do Bloco de Integração colocado no INÍCIO do fluxo de
+    disparo (o mesmo fluxo que a Transmissão do BotConversa dispara pra cada
+    contato da lista). Chega um POST por contato, no momento exato em que a
+    mensagem é enviada — assim a lista inteira do disparo cai automaticamente
+    na Base Fria do JOB, sem precisar subir CSV duas vezes.
+    Protegido por token na query string.
+    Payload esperado: {telefone, nome, campanha (opcional, texto livre)}."""
+    token_esperado = os.environ.get('BOTCONVERSA_WEBHOOK_TOKEN', '').strip()
+    if token_esperado and request.args.get('token', '').strip() != token_esperado:
+        return jsonify({"ok": False, "erro": "Token inválido"}), 401
+    d = request.json or {}
+    telefone = (d.get('telefone') or d.get('phone') or '').strip()
+    nome = (d.get('nome') or d.get('name') or '').strip() or 'Sem nome'
+    campanha_nome = (d.get('campanha') or 'Disparos BotConversa').strip()
+    tel_norm = _normalizar_telefone(telefone)
+    if not tel_norm:
+        return jsonify({"ok": False, "erro": "Telefone ausente ou inválido no payload"}), 400
+
+    conn = db()
+    campanha = conn.execute("SELECT id FROM campanhas_frias WHERE nome=?", (campanha_nome,)).fetchone()
+    if campanha:
+        cid = campanha['id']
+    else:
+        conn.execute("INSERT INTO campanhas_frias (nome, descricao, criado_em) VALUES (?,?,?)",
+                     (campanha_nome, 'Criada automaticamente a partir do disparo do BotConversa', _agora_sp()))
+        cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+               else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+
+    ja_existe = conn.execute(
+        "SELECT id FROM contatos_frios WHERE campanha_id=? AND telefone_norm=?", (cid, tel_norm)).fetchone()
+    if ja_existe:
+        close_db(conn)
+        return jsonify({"ok": True, "contato_id": ja_existe['id'], "duplicado": True})
+
+    conn.execute("""INSERT INTO contatos_frios (campanha_id, nome, telefone, telefone_norm, status, criado_em)
+        VALUES (?,?,?,?,'novo',?)""", (cid, nome, telefone, tel_norm, _agora_sp()))
+    contato_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                  else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "contato_id": contato_id, "campanha_id": cid})
+
+
 @app.route('/crm/frios/contato/<int:cid>/promover', methods=['POST'])
 @login_required
 @admin_required
