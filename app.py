@@ -12920,11 +12920,12 @@ def crm_frios_enviar(cid):
 @app.route('/webhook/botconversa', methods=['POST'])
 def webhook_botconversa():
     """Recebe o aviso do Bloco de Integração do BotConversa quando um contato
-    da base fria responde com a mensagem pronta do fluxo — converte em lead
-    de verdade no CRM principal. Protegido por token na query string (não tem
-    sessão de usuário aqui, é uma chamada servidor-a-servidor do BotConversa).
-    Payload esperado: {telefone: '5519...'} (nome/outros campos são opcionais,
-    usa o que já está cadastrado no contato frio)."""
+    da base fria responde no fluxo — NÃO cria o lead direto (pedido explícito:
+    gestão quer revisar antes de promover pro CRM principal). Só marca o
+    contato como 'respondeu', pronto pra promoção manual em /crm/frios.
+    Protegido por token na query string (não tem sessão de usuário aqui, é
+    uma chamada servidor-a-servidor do BotConversa).
+    Payload esperado: {telefone: '5519...'}."""
     token_esperado = os.environ.get('BOTCONVERSA_WEBHOOK_TOKEN', '').strip()
     if token_esperado and request.args.get('token', '').strip() != token_esperado:
         return jsonify({"ok": False, "erro": "Token inválido"}), 401
@@ -12936,14 +12937,34 @@ def webhook_botconversa():
 
     conn = db()
     contato = conn.execute(
-        "SELECT * FROM contatos_frios WHERE telefone_norm=? AND status != 'convertido' ORDER BY id DESC LIMIT 1",
+        "SELECT * FROM contatos_frios WHERE telefone_norm=? AND status NOT IN ('respondeu','convertido') ORDER BY id DESC LIMIT 1",
         (tel_norm,)).fetchone()
     if not contato:
         close_db(conn)
         return jsonify({"ok": False, "erro": "Nenhum contato frio pendente com esse telefone"}), 404
     ct = dict(contato)
 
-    lead_existente = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone()
+    conn.execute("UPDATE contatos_frios SET status='respondeu' WHERE id=?", (ct['id'],))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "contato_id": ct['id']})
+
+
+@app.route('/crm/frios/contato/<int:cid>/promover', methods=['POST'])
+@login_required
+@admin_required
+def crm_frios_contato_promover(cid):
+    """Promoção manual: gestão revisa o contato que respondeu no WhatsApp e
+    decide se ele vira lead de verdade no CRM principal."""
+    conn = db()
+    contato = conn.execute("SELECT * FROM contatos_frios WHERE id=?", (cid,)).fetchone()
+    if not contato:
+        close_db(conn); return jsonify({"ok": False, "erro": "Contato não encontrado"}), 404
+    ct = dict(contato)
+    if ct['status'] == 'convertido':
+        close_db(conn); return jsonify({"ok": False, "erro": "Contato já foi promovido"}), 400
+    tel_norm = ct.get('telefone_norm')
+
+    lead_existente = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone() if tel_norm else None
     if lead_existente:
         lead_id = lead_existente['id']
     else:
@@ -12953,7 +12974,8 @@ def webhook_botconversa():
         lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
                    else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
-                     (lead_id, 'Sistema', 'criacao', f'Lead criado a partir da base fria (respondeu no WhatsApp)', _agora_sp()))
+                     (lead_id, session.get('nome') or 'Sistema', 'criacao',
+                      'Lead promovido manualmente a partir da base fria (respondeu no WhatsApp)', _agora_sp()))
 
     conn.execute("UPDATE contatos_frios SET status='convertido', lead_id=?, convertido_em=? WHERE id=?",
                  (lead_id, _agora_sp(), ct['id']))

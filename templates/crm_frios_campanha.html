@@ -18,6 +18,7 @@
   .status-chip.novo { background:var(--panel-2); color:var(--cinza); }
   .status-chip.contatado { background:rgba(250,204,21,.14); color:var(--amarelo); }
   .status-chip.convertido { background:var(--verde-soft); color:var(--verde); }
+  .status-chip.respondeu { background:rgba(59,130,246,.14); color:var(--azul); }
   .barra-envio { display:flex; align-items:center; gap:10px; padding:14px 16px; background:var(--panel-2); border-bottom:1px solid var(--borda); flex-wrap:wrap; }
   select { background:var(--panel); border:1px solid var(--borda); border-radius:8px; padding:8px 10px; font-size:13px; color:var(--texto); }
 </style>
@@ -56,7 +57,7 @@
     <span id="envio-status" style="font-size:12px; color:var(--cinza);"></span>
   </div>
   <table class="contatos">
-    <thead><tr><th></th><th>Nome</th><th>Telefone</th><th>E-mail</th><th>Status</th></tr></thead>
+    <thead><tr><th></th><th>Nome</th><th>Telefone</th><th>E-mail</th><th>Status</th><th></th></tr></thead>
     <tbody>
       {% for c in contatos %}
       <tr>
@@ -65,9 +66,16 @@
         <td>{{ c.telefone or '-' }}</td>
         <td>{{ c.email or '-' }}</td>
         <td><span class="status-chip {{ c.status }}">{{ c.status }}</span></td>
+        <td>
+          {% if c.status == 'respondeu' %}
+          <button class="btn-acao" style="padding:6px 14px; font-size:12px;" onclick="promoverContato({{ c.id }})">Promover para lead</button>
+          {% elif c.status == 'convertido' %}
+          <span style="font-size:12px; color:var(--verde);">Lead #{{ c.lead_id }}</span>
+          {% endif %}
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="5" style="text-align:center; padding:30px; color:var(--cinza-2);">Nenhum contato importado ainda.</td></tr>
+      <tr><td colspan="6" style="text-align:center; padding:30px; color:var(--cinza-2);">Nenhum contato importado ainda.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -122,6 +130,16 @@ function dispararEnvio(){
     .then(function(d){
       if (d.ok) { document.getElementById('envio-status').textContent = 'Enviados: ' + d.enviados + ' | Falhas: ' + d.falhas; location.reload(); }
       else { document.getElementById('envio-status').textContent = ''; alert(d.erro || 'Erro ao enviar'); }
+    });
+}
+
+function promoverContato(id){
+  if (!confirm('Promover este contato para lead de verdade no CRM principal?')) return;
+  fetch('/crm/frios/contato/' + id + '/promover', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) { alert('Lead criado: #' + d.lead_id); location.reload(); }
+      else { alert(d.erro || 'Erro ao promover'); }
     });
 }
 </script>
