@@ -423,6 +423,10 @@
         <div style="background:var(--panel); border:1px solid var(--borda); border-radius:16px; padding:22px; width:min(420px, 92vw); margin:auto;">
           <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:6px;">E-mail de contato</h3>
           <div style="font-size:12px; color:var(--cinza); margin-bottom:16px;" id="ec-destino"></div>
+          <button class="wpp-template" style="width:100%; margin-bottom:8px;" onclick="enviarEmailContato('boas_vindas')">
+            <strong style="color:var(--texto);">Boas-vindas (recebemos seu pedido)</strong><br>
+            <span style="font-size:11px;">"Recebemos seu pedido de cotação! Um consultor vai entrar em contato em breve."</span>
+          </button>
           <button class="wpp-template" style="width:100%; margin-bottom:8px;" onclick="enviarEmailContato('telefone_errado')">
             <strong style="color:var(--texto);">Telefone incorreto</strong><br>
             <span style="font-size:11px;">"Não conseguimos te ligar — o número parece incorreto. Chame o corretor no WhatsApp."</span>

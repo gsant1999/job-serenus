@@ -9551,6 +9551,14 @@ def crm_agenda_excluir(aid):
 # ── E-MAILS DE CORREÇÃO DE CONTATO (com rastreio de abertura e clique) ──────
 
 _EMAIL_CONTATO_TEMPLATES = {
+    'boas_vindas': {
+        'nome': 'Boas-vindas (recebemos seu pedido)',
+        'assunto': 'Recebemos seu pedido de cotação - Serenus Corretora',
+        'texto': ('Recebemos seu pedido de cotação de plano de saúde! Um dos nossos '
+                  'consultores vai analisar as opções disponíveis para você e entrar em '
+                  'contato em breve.'),
+        'cta': 'Falar agora com o corretor',
+    },
     'telefone_errado': {
         'nome': 'Telefone incorreto',
         'assunto': 'Não conseguimos falar com você - Serenus Corretora',
