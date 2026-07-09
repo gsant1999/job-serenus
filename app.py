@@ -744,6 +744,36 @@ def init_db():
                 atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(usuario_id, dia)
             )""",
+            """CREATE TABLE IF NOT EXISTS campanhas_frias (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL,
+                descricao TEXT,
+                criado_por INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS contatos_frios (
+                id SERIAL PRIMARY KEY,
+                campanha_id INTEGER NOT NULL,
+                nome TEXT NOT NULL,
+                telefone TEXT,
+                telefone_norm TEXT,
+                email TEXT,
+                cnpj TEXT,
+                observacao TEXT,
+                status TEXT DEFAULT 'novo',
+                lead_id INTEGER,
+                convertido_em TIMESTAMP,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS contato_frio_envio (
+                id SERIAL PRIMARY KEY,
+                contato_id INTEGER NOT NULL,
+                campanha_id INTEGER NOT NULL,
+                canal TEXT NOT NULL,
+                template TEXT,
+                enviado_por INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_agenda (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER NOT NULL,
@@ -1069,6 +1099,36 @@ def init_db():
             minutos_ativos INTEGER DEFAULT 0,
             atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(usuario_id, dia)
+        );
+        CREATE TABLE IF NOT EXISTS campanhas_frias (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            descricao TEXT,
+            criado_por INTEGER,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS contatos_frios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campanha_id INTEGER NOT NULL,
+            nome TEXT NOT NULL,
+            telefone TEXT,
+            telefone_norm TEXT,
+            email TEXT,
+            cnpj TEXT,
+            observacao TEXT,
+            status TEXT DEFAULT 'novo',
+            lead_id INTEGER,
+            convertido_em TIMESTAMP,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS contato_frio_envio (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            contato_id INTEGER NOT NULL,
+            campanha_id INTEGER NOT NULL,
+            canal TEXT NOT NULL,
+            template TEXT,
+            enviado_por INTEGER,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS crm_agenda (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -12647,6 +12707,256 @@ def crm_importar_meninas_criar():
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                  (lead_id, session.get('nome'), 'criacao',
                   f'Lead criado via importação de planilha, atribuído a {menina["nome"]}', _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "lead_id": lead_id})
+
+
+# ─── BASE FRIA (contatos que ainda não são leads) ──────────────────────────
+# Fluxo: sobe uma lista (ex: MEIs que completaram 6 meses) numa campanha
+# nomeada, dispara e-mail/SMS em massa reaproveitando os mesmos modelos do
+# CRM principal. Só vira lead de verdade quando o contato responde pelo
+# WhatsApp oficial com a mensagem pronta do fluxo do BotConversa — isso chega
+# aqui via /webhook/botconversa (configurado como Bloco de Integração dentro
+# do fluxo, no painel do BotConversa — não dá pra configurar isso via API).
+# Acesso restrito a admin (pedido explícito: "acesso apenas de gestão").
+
+@app.route('/crm/frios')
+@login_required
+@admin_required
+def crm_frios():
+    """Lista as campanhas da base fria."""
+    conn = db()
+    campanhas = conn.execute("""
+        SELECT c.*, COUNT(ct.id) total_contatos,
+               SUM(CASE WHEN ct.status='convertido' THEN 1 ELSE 0 END) convertidos
+        FROM campanhas_frias c
+        LEFT JOIN contatos_frios ct ON ct.campanha_id = c.id
+        GROUP BY c.id ORDER BY c.id DESC
+    """).fetchall()
+    close_db(conn)
+    return render_template('crm_frios.html', campanhas=campanhas)
+
+
+@app.route('/crm/frios/nova', methods=['POST'])
+@login_required
+@admin_required
+def crm_frios_campanha_nova():
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    if not nome:
+        return jsonify({"ok": False, "erro": "Nome da campanha é obrigatório"}), 400
+    conn = db()
+    conn.execute("INSERT INTO campanhas_frias (nome, descricao, criado_por, criado_em) VALUES (?,?,?,?)",
+                 (nome, (d.get('descricao') or '').strip(), session.get('user_id'), _agora_sp()))
+    cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "id": cid})
+
+
+@app.route('/crm/frios/campanha/<int:cid>')
+@login_required
+@admin_required
+def crm_frios_campanha(cid):
+    conn = db()
+    campanha = conn.execute("SELECT * FROM campanhas_frias WHERE id=?", (cid,)).fetchone()
+    if not campanha:
+        close_db(conn); abort(404)
+    contatos = conn.execute("SELECT * FROM contatos_frios WHERE campanha_id=? ORDER BY id DESC", (cid,)).fetchall()
+    close_db(conn)
+    return render_template('crm_frios_campanha.html', campanha=campanha, contatos=contatos,
+                           sms_templates=SMS_TEMPLATES_LEAD, email_templates=_EMAIL_CONTATO_TEMPLATES)
+
+
+@app.route('/crm/frios/campanha/<int:cid>/importar', methods=['POST'])
+@login_required
+@admin_required
+def crm_frios_importar(cid):
+    """Sobe a lista de contatos (CSV/Excel: nome, telefone, email, cnpj opcional).
+    Dedup por telefone DENTRO da mesma campanha — a mesma pessoa pode aparecer
+    em campanhas diferentes ao longo do tempo, isso é esperado."""
+    conn = db()
+    campanha = conn.execute("SELECT id FROM campanhas_frias WHERE id=?", (cid,)).fetchone()
+    if not campanha:
+        close_db(conn); return jsonify({"ok": False, "erro": "Campanha não encontrada"}), 404
+
+    f = request.files.get('arquivo')
+    if not f or not f.filename:
+        close_db(conn); return jsonify({"ok": False, "erro": "Selecione um arquivo"}), 400
+
+    nome_arq = f.filename.lower()
+    rows = []
+    try:
+        if nome_arq.endswith('.xlsx'):
+            import openpyxl
+            wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
+            ws = wb.active
+            for r in ws.iter_rows(values_only=True):
+                rows.append(['' if c is None else str(c) for c in r])
+        else:
+            import csv, io
+            raw = f.read().decode('utf-8-sig', errors='replace')
+            primeira = raw.split('\n', 1)[0]
+            delim = ';' if primeira.count(';') >= primeira.count(',') else ','
+            rows = [list(r) for r in csv.reader(io.StringIO(raw), delimiter=delim)]
+    except Exception as e:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": f"Erro ao ler o arquivo: {str(e)[:200]}"}), 400
+
+    rows = [r for r in rows if any((str(c) or '').strip() for c in r)]
+    if len(rows) < 2:
+        close_db(conn); return jsonify({"ok": False, "erro": "O arquivo não tem linhas de dados"}), 400
+
+    header = rows[0]
+    idx = {}
+    for i, h in enumerate(header):
+        nh = _norm_txt(h)
+        if nh in ('nome',): idx['nome'] = i
+        elif nh in ('telefone', 'celular', 'whatsapp'): idx['telefone'] = i
+        elif nh in ('email', 'e-mail'): idx['email'] = i
+        elif nh in ('cnpj',): idx['cnpj'] = i
+    if 'nome' not in idx or 'telefone' not in idx:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": 'O arquivo precisa ter ao menos as colunas "Nome" e "Telefone".'}), 400
+
+    existentes = {r['telefone_norm'] for r in conn.execute(
+        "SELECT telefone_norm FROM contatos_frios WHERE campanha_id=? AND telefone_norm IS NOT NULL", (cid,)).fetchall()}
+    importados, duplicados, ignorados = 0, 0, 0
+    for r in rows[1:]:
+        def cell(key):
+            i = idx.get(key)
+            return (str(r[i]).strip() if (i is not None and i < len(r) and r[i] is not None) else '')
+        nome_c, tel_c, email_c, cnpj_c = cell('nome'), cell('telefone'), cell('email'), cell('cnpj')
+        if not nome_c or not tel_c:
+            ignorados += 1; continue
+        tel_norm = _normalizar_telefone(tel_c)
+        if tel_norm and tel_norm in existentes:
+            duplicados += 1; continue
+        conn.execute("""INSERT INTO contatos_frios (campanha_id, nome, telefone, telefone_norm, email, cnpj, status, criado_em)
+            VALUES (?,?,?,?,?,?, 'novo', ?)""",
+            (cid, nome_c, _formatar_telefone(tel_c), tel_norm, email_c, cnpj_c, _agora_sp()))
+        if tel_norm: existentes.add(tel_norm)
+        importados += 1
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "importados": importados, "duplicados": duplicados, "ignorados": ignorados})
+
+
+@app.route('/crm/frios/contato/<int:cid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_frios_contato_excluir(cid):
+    conn = db()
+    conn.execute("DELETE FROM contato_frio_envio WHERE contato_id=?", (cid,))
+    conn.execute("DELETE FROM contatos_frios WHERE id=?", (cid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/frios/campanha/<int:cid>/enviar', methods=['POST'])
+@login_required
+@admin_required
+def crm_frios_enviar(cid):
+    """Disparo em massa (e-mail ou SMS) pros contatos selecionados da campanha.
+    Reaproveita os MESMOS modelos e a MESMA infra de envio do CRM principal —
+    SMS sempre com link wa.me puro (nunca rastreado, ver nota em _texto_sms_lead
+    sobre aprovação da operadora)."""
+    d = request.json or {}
+    canal = (d.get('canal') or '').strip()
+    template_key = (d.get('template') or '').strip()
+    contato_ids = d.get('contato_ids') or []
+    if canal not in ('email', 'sms') or not template_key or not contato_ids:
+        return jsonify({"ok": False, "erro": "Dados incompletos"}), 400
+    conn = db()
+    campanha = conn.execute("SELECT * FROM campanhas_frias WHERE id=?", (cid,)).fetchone()
+    if not campanha:
+        close_db(conn); return jsonify({"ok": False, "erro": "Campanha não encontrada"}), 404
+
+    if canal == 'sms' and template_key not in SMS_TEMPLATES_LEAD:
+        close_db(conn); return jsonify({"ok": False, "erro": "Template de SMS inválido"}), 400
+    if canal == 'email' and template_key not in _EMAIL_CONTATO_TEMPLATES:
+        close_db(conn); return jsonify({"ok": False, "erro": "Template de e-mail inválido"}), 400
+
+    enviados, falhas = 0, 0
+    for cont_id in contato_ids:
+        contato = conn.execute("SELECT * FROM contatos_frios WHERE id=? AND campanha_id=?", (cont_id, cid)).fetchone()
+        if not contato:
+            falhas += 1; continue
+        ct = dict(contato)
+        ok = False
+        if canal == 'sms':
+            if not ct.get('telefone'):
+                falhas += 1; continue
+            consultor_nome = session.get('nome') or 'Serenus'
+            numero_admin = _waspeed_normaliza_fone('') or NUMERO_WHATSAPP_SERENUS
+            link = f"https://wa.me/{numero_admin}"
+            mensagem, _ = _texto_sms_lead(template_key, consultor_nome.split()[0], link, ct['nome'].split()[0] if ct.get('nome') else '')
+            ok, erro = _enviar_sms(ct['telefone'], mensagem)
+        else:
+            if not ct.get('email') or '@' not in ct.get('email', ''):
+                falhas += 1; continue
+            tpl = _EMAIL_CONTATO_TEMPLATES[template_key]
+            # Contato frio ainda não é lead — sem crm_email_log/token, então sem
+            # rastreio de clique/abertura (que depende de lead_id). Link direto pro zap.
+            numero_admin = _waspeed_normaliza_fone('') or NUMERO_WHATSAPP_SERENUS
+            link_zap = f"https://wa.me/{numero_admin}"
+            pixel_1x1 = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7'
+            corpo = _corpo_email_contato(tpl, ct.get('nome'), session.get('nome') or 'Serenus',
+                                         link_zap, pixel_1x1)
+            try:
+                ok = _enviar_email(ct['email'], tpl['assunto'], corpo, remetente_nome='Cotação de Plano de Saúde')
+            except Exception:
+                ok = False
+        if ok:
+            conn.execute("""INSERT INTO contato_frio_envio (contato_id, campanha_id, canal, template, enviado_por, criado_em)
+                VALUES (?,?,?,?,?,?)""", (cont_id, cid, canal, template_key, session.get('user_id'), _agora_sp()))
+            conn.execute("UPDATE contatos_frios SET status='contatado' WHERE id=? AND status='novo'", (cont_id,))
+            enviados += 1
+        else:
+            falhas += 1
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "enviados": enviados, "falhas": falhas})
+
+
+@app.route('/webhook/botconversa', methods=['POST'])
+def webhook_botconversa():
+    """Recebe o aviso do Bloco de Integração do BotConversa quando um contato
+    da base fria responde com a mensagem pronta do fluxo — converte em lead
+    de verdade no CRM principal. Protegido por token na query string (não tem
+    sessão de usuário aqui, é uma chamada servidor-a-servidor do BotConversa).
+    Payload esperado: {telefone: '5519...'} (nome/outros campos são opcionais,
+    usa o que já está cadastrado no contato frio)."""
+    token_esperado = os.environ.get('BOTCONVERSA_WEBHOOK_TOKEN', '').strip()
+    if token_esperado and request.args.get('token', '').strip() != token_esperado:
+        return jsonify({"ok": False, "erro": "Token inválido"}), 401
+    d = request.json or {}
+    telefone = (d.get('telefone') or d.get('phone') or '').strip()
+    tel_norm = _normalizar_telefone(telefone)
+    if not tel_norm:
+        return jsonify({"ok": False, "erro": "Telefone ausente ou inválido no payload"}), 400
+
+    conn = db()
+    contato = conn.execute(
+        "SELECT * FROM contatos_frios WHERE telefone_norm=? AND status != 'convertido' ORDER BY id DESC LIMIT 1",
+        (tel_norm,)).fetchone()
+    if not contato:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Nenhum contato frio pendente com esse telefone"}), 404
+    ct = dict(contato)
+
+    lead_existente = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone()
+    if lead_existente:
+        lead_id = lead_existente['id']
+    else:
+        conn.execute("""INSERT INTO crm_leads (nome, telefone, telefone_norm, email, origem, etapa, criado_em, atualizado_em)
+            VALUES (?,?,?,?,'base_fria','lead_novo',?,?)""",
+            (ct['nome'], ct['telefone'], tel_norm, ct.get('email'), _agora_sp(), _agora_sp()))
+        lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                     (lead_id, 'Sistema', 'criacao', f'Lead criado a partir da base fria (respondeu no WhatsApp)', _agora_sp()))
+
+    conn.execute("UPDATE contatos_frios SET status='convertido', lead_id=?, convertido_em=? WHERE id=?",
+                 (lead_id, _agora_sp(), ct['id']))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "lead_id": lead_id})
 

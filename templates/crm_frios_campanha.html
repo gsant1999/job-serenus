@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}{{ campanha.nome }}{% endblock %}
+
+{% block head %}
+<style>
+  .box { max-width:1000px; background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:22px; margin-bottom:16px; }
+  .box h2 { font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin:0 0 12px; }
+  .box p { font-size:13px; color:var(--cinza); line-height:1.6; }
+  .upload { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  input[type=file] { color:var(--cinza); font-size:13px; }
+  .btn-acao { background:var(--azul); color:#fff; border:none; padding:10px 20px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  .btn-acao:disabled { opacity:.5; cursor:not-allowed; }
+  .tabela-wrap { max-width:1000px; background:var(--panel); border:1px solid var(--borda); border-radius:14px; overflow:hidden; }
+  table.contatos { width:100%; border-collapse:collapse; font-size:13px; }
+  table.contatos th { text-align:left; padding:10px 12px; background:var(--panel-2); color:var(--cinza); font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+  table.contatos td { padding:10px 12px; border-top:1px solid var(--borda); color:var(--texto); }
+  .status-chip { font-size:11px; padding:2px 9px; border-radius:20px; }
+  .status-chip.novo { background:var(--panel-2); color:var(--cinza); }
+  .status-chip.contatado { background:rgba(250,204,21,.14); color:var(--amarelo); }
+  .status-chip.convertido { background:var(--verde-soft); color:var(--verde); }
+  .barra-envio { display:flex; align-items:center; gap:10px; padding:14px 16px; background:var(--panel-2); border-bottom:1px solid var(--borda); flex-wrap:wrap; }
+  select { background:var(--panel); border:1px solid var(--borda); border-radius:8px; padding:8px 10px; font-size:13px; color:var(--texto); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">{{ campanha.nome }}</h1>
+    <div class="sub">{{ campanha.descricao or 'Base fria' }}</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="location.href='/crm/frios'">Voltar</button>
+  </div>
+</div>
+
+<div class="box">
+  <h2>Importar contatos</h2>
+  <p>Planilha (.xlsx ou .csv) com colunas <b>Nome</b> e <b>Telefone</b> (Email e CNPJ opcionais). Contatos com o mesmo telefone já existente nesta campanha são ignorados automaticamente.</p>
+  <div class="upload">
+    <input type="file" id="arq-import" accept=".xlsx,.csv">
+    <button class="btn-acao" onclick="importarContatos()">Importar</button>
+  </div>
+</div>
+
+<div class="tabela-wrap">
+  <div class="barra-envio">
+    <input type="checkbox" id="chk-todos" onchange="marcarTodos(this.checked)">
+    <span style="font-size:12px; color:var(--cinza);">Selecionar todos</span>
+    <select id="sel-canal" onchange="atualizarTemplates()">
+      <option value="sms">SMS</option>
+      <option value="email">E-mail</option>
+    </select>
+    <select id="sel-template"></select>
+    <button class="btn-acao" onclick="dispararEnvio()">Enviar para selecionados</button>
+    <span id="envio-status" style="font-size:12px; color:var(--cinza);"></span>
+  </div>
+  <table class="contatos">
+    <thead><tr><th></th><th>Nome</th><th>Telefone</th><th>E-mail</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for c in contatos %}
+      <tr>
+        <td><input type="checkbox" class="chk-contato" value="{{ c.id }}" {% if c.status == 'convertido' %}disabled{% endif %}></td>
+        <td>{{ c.nome }}</td>
+        <td>{{ c.telefone or '-' }}</td>
+        <td>{{ c.email or '-' }}</td>
+        <td><span class="status-chip {{ c.status }}">{{ c.status }}</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" style="text-align:center; padding:30px; color:var(--cinza-2);">Nenhum contato importado ainda.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+var SMS_TEMPLATES = {{ sms_templates | tojson }};
+var EMAIL_TEMPLATES = {{ email_templates | tojson }};
+var CID = {{ campanha.id }};
+
+function atualizarTemplates(){
+  var canal = document.getElementById('sel-canal').value;
+  var sel = document.getElementById('sel-template');
+  sel.innerHTML = '';
+  var origem = canal === 'sms' ? SMS_TEMPLATES : EMAIL_TEMPLATES;
+  Object.keys(origem).forEach(function(k){
+    var opt = document.createElement('option');
+    opt.value = k;
+    opt.textContent = origem[k].nome;
+    sel.appendChild(opt);
+  });
+}
+atualizarTemplates();
+
+function marcarTodos(v){
+  document.querySelectorAll('.chk-contato:not(:disabled)').forEach(function(el){ el.checked = v; });
+}
+
+function importarContatos(){
+  var f = document.getElementById('arq-import').files[0];
+  if (!f) { alert('Selecione um arquivo'); return; }
+  var fd = new FormData();
+  fd.append('arquivo', f);
+  fetch('/crm/frios/campanha/' + CID + '/importar', {method:'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) { alert('Importados: ' + d.importados + ' | Duplicados: ' + d.duplicados + ' | Ignorados: ' + d.ignorados); location.reload(); }
+      else { alert(d.erro || 'Erro ao importar'); }
+    });
+}
+
+function dispararEnvio(){
+  var ids = Array.from(document.querySelectorAll('.chk-contato:checked')).map(function(el){ return parseInt(el.value); });
+  if (!ids.length) { alert('Selecione ao menos um contato'); return; }
+  var canal = document.getElementById('sel-canal').value;
+  var template = document.getElementById('sel-template').value;
+  if (!confirm('Enviar ' + canal.toUpperCase() + ' para ' + ids.length + ' contato(s)?')) return;
+  document.getElementById('envio-status').textContent = 'Enviando...';
+  fetch('/crm/frios/campanha/' + CID + '/enviar', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({canal: canal, template: template, contato_ids: ids})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) { document.getElementById('envio-status').textContent = 'Enviados: ' + d.enviados + ' | Falhas: ' + d.falhas; location.reload(); }
+      else { document.getElementById('envio-status').textContent = ''; alert(d.erro || 'Erro ao enviar'); }
+    });
+}
+</script>
+{% endblock %}

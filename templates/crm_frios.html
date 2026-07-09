@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Base Fria{% endblock %}
+
+{% block head %}
+<style>
+  .box { max-width:900px; background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:22px; margin-bottom:16px; }
+  .box h2 { font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin:0 0 12px; }
+  .box p { font-size:13px; color:var(--cinza); line-height:1.6; }
+  .camp-lista { max-width:900px; }
+  .camp-row { display:flex; align-items:center; gap:14px; background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:16px 18px; margin-bottom:10px; cursor:pointer; transition:border-color .15s; }
+  .camp-row:hover { border-color:var(--azul); }
+  .camp-nome { font-size:14px; font-weight:600; color:var(--texto); flex:1; }
+  .camp-desc { font-size:12px; color:var(--cinza-2); }
+  .camp-stat { font-size:12px; color:var(--cinza); background:var(--panel-2); border-radius:20px; padding:4px 12px; flex-shrink:0; }
+  .camp-stat.conv { color:var(--verde); }
+  .btn-nova { background:var(--azul); color:#fff; border:none; padding:10px 20px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  .modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; align-items:center; justify-content:center; }
+  .modal-bg.aberto { display:flex; }
+  .modal-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:24px; width:420px; max-width:92vw; }
+  .modal-card h3 { margin:0 0 14px; font-size:15px; color:var(--texto); }
+  .modal-card input, .modal-card textarea { width:100%; box-sizing:border-box; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:10px 12px; font-size:13px; color:var(--texto); margin-bottom:10px; }
+  .modal-acoes { display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Base Fria</h1>
+    <div class="sub">Campanhas de contato frio (MEIs e listas externas) — só vira lead quando responde no WhatsApp oficial</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-nova" onclick="document.getElementById('modal-nova').classList.add('aberto')">Nova campanha</button>
+    <button class="btn-outline btn-sm" onclick="location.href='/crm'">Voltar ao CRM</button>
+  </div>
+</div>
+
+<div class="box">
+  <h2>Como funciona</h2>
+  <p>Cada campanha é uma lista nomeada de contatos (ex: "MEIs 6 meses — Julho/2026"). Você sobe a planilha, dispara e-mail e/ou SMS reaproveitando os mesmos modelos do CRM. O contato só vira lead de verdade no CRM principal quando ele responde pelo WhatsApp oficial com a mensagem pronta do fluxo (configurado no BotConversa).</p>
+</div>
+
+<div class="camp-lista">
+  {% for c in campanhas %}
+  <div class="camp-row" onclick="location.href='/crm/frios/campanha/{{ c.id }}'">
+    <div>
+      <div class="camp-nome">{{ c.nome }}</div>
+      {% if c.descricao %}<div class="camp-desc">{{ c.descricao }}</div>{% endif %}
+    </div>
+    <div class="camp-stat">{{ c.total_contatos or 0 }} contatos</div>
+    <div class="camp-stat conv">{{ c.convertidos or 0 }} convertidos</div>
+  </div>
+  {% else %}
+  <div style="text-align:center; padding:30px; color:var(--cinza-2); font-size:13px;">Nenhuma campanha criada ainda.</div>
+  {% endfor %}
+</div>
+
+<div class="modal-bg" id="modal-nova">
+  <div class="modal-card">
+    <h3>Nova campanha</h3>
+    <input type="text" id="nova-nome" placeholder="Nome da campanha (ex: MEIs 6 meses - Julho/2026)">
+    <textarea id="nova-desc" rows="3" placeholder="Descrição (opcional)"></textarea>
+    <div class="modal-acoes">
+      <button class="btn-outline btn-sm" onclick="document.getElementById('modal-nova').classList.remove('aberto')">Cancelar</button>
+      <button class="btn-nova" onclick="criarCampanha()">Criar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function criarCampanha(){
+  var nome = document.getElementById('nova-nome').value.trim();
+  if (!nome) { alert('Digite o nome da campanha'); return; }
+  fetch('/crm/frios/nova', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({nome: nome, descricao: document.getElementById('nova-desc').value.trim()})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) { location.href = '/crm/frios/campanha/' + d.id; }
+      else { alert(d.erro || 'Erro ao criar campanha'); }
+    });
+}
+</script>
+{% endblock %}
