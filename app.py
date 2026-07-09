@@ -3720,14 +3720,18 @@ def excluir_anexo(pid):
     return jsonify({"ok": True})
 
 # ─── EMAIL UTILITÁRIO ────────────────────────────────────────────────────────
-def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None):
+def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None, remetente_nome=None):
     """Envia email via API do Brevo (HTTPS porta 443 — nunca bloqueada pelo Railway).
     Configure BREVO_API_KEY no Railway. SMTP_USER define o remetente.
     destinatario: string (1 email) ou lista de emails.
     cc: string ou lista de emails para cópia (opcional).
-    anexos: lista de nomes de arquivo (em UPLOAD_FOLDER) a anexar (opcional)."""
+    anexos: lista de nomes de arquivo (em UPLOAD_FOLDER) a anexar (opcional).
+    remetente_nome: nome exibido como remetente (padrão 'JOB Serenus' — e-mails
+    pro lead usam 'Cotação de Plano de Saúde', mais reconhecível pra quem nunca
+    ouviu falar do sistema interno)."""
     api_key = os.environ.get('BREVO_API_KEY','')
     remetente = os.environ.get('SMTP_USER','noreply@serenuscorretora.com.br')
+    remetente_nome = remetente_nome or 'JOB Serenus'
 
     # Normaliza destinatários e cópia para listas
     if isinstance(destinatario, str):
@@ -3788,7 +3792,7 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None):
     def _construir_e_enviar():
         import urllib.request, urllib.error, json as _json
         corpo_payload = {
-            "sender":  {"name": "JOB Serenus", "email": remetente},
+            "sender":  {"name": remetente_nome, "email": remetente},
             "to":      [{"email": e} for e in to_list],
             "subject": assunto,
             "htmlContent": corpo_html
@@ -9149,7 +9153,7 @@ def cotacao_enviar_email(cid):
     except Exception:
         pass
     try:
-        _enviar_email(destino, "Sua cotação - " + (cot.get('titulo') or 'Serenus'), corpo)
+        _enviar_email(destino, "Sua cotação - " + (cot.get('titulo') or 'Serenus'), corpo, remetente_nome='Cotação de Plano de Saúde')
     except Exception as e:
         return jsonify({"ok": False, "erro": str(e)[:200]}), 200
     err = getattr(_enviar_email, 'ultimo_erro', None)
@@ -9683,7 +9687,7 @@ def crm_lead_email_contato(lid):
     except Exception:
         pass
     try:
-        _enviar_email(email_lead, tpl['assunto'], corpo)
+        _enviar_email(email_lead, tpl['assunto'], corpo, remetente_nome='Cotação de Plano de Saúde')
     except Exception as e:
         close_db(conn); return jsonify({"ok": False, "erro": str(e)[:150]}), 200
     err = getattr(_enviar_email, 'ultimo_erro', None)

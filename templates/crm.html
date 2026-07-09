@@ -403,7 +403,7 @@
       <!-- Modal: SMS de reforço (1º contato sem sucesso por telefone) -->
       <div class="modal-overlay" id="modal-sms-reforco" style="z-index:1100;">
         <div style="background:var(--panel); border:1px solid var(--borda); border-radius:16px; padding:22px; width:min(420px, 92vw); margin:auto;">
-          <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:6px;">SMS — Reforço de contato</h3>
+          <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:6px;">Modelos de SMS</h3>
           <div style="font-size:12px; color:var(--cinza); margin-bottom:14px;">Cliente não atendeu a ligação? Este SMS avisa que tentamos contato e que o consultor já chamou no WhatsApp.</div>
           <div id="sr-carregando" style="font-size:12px; color:var(--cinza-2); padding:16px 0; text-align:center;">Montando prévia...</div>
           <div id="sr-conteudo" style="display:none;">
@@ -421,7 +421,7 @@
       <!-- Modal: e-mail de correção de contato -->
       <div class="modal-overlay" id="modal-email-contato" style="z-index:1100;">
         <div style="background:var(--panel); border:1px solid var(--borda); border-radius:16px; padding:22px; width:min(420px, 92vw); margin:auto;">
-          <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:6px;">E-mail de contato</h3>
+          <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:6px;">Modelos de E-mail</h3>
           <div style="font-size:12px; color:var(--cinza); margin-bottom:16px;" id="ec-destino"></div>
           <button class="wpp-template" style="width:100%; margin-bottom:8px;" onclick="enviarEmailContato('boas_vindas')">
             <strong style="color:var(--texto);">Boas-vindas (recebemos seu pedido)</strong><br>
@@ -563,8 +563,8 @@
           <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--borda);">
             <div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:700; margin-bottom:10px;">Cliente não atendeu?</div>
             <div style="display:flex; gap:8px;">
-              <button class="btn-ficha" style="flex:1; background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirEmailContato()" title="Manda um e-mail pro lead pedindo pra chamar o corretor no WhatsApp — pra quando o telefone dele está errado ou não conseguiu falar por telefone">Corrigir contato (e-mail)</button>
-              <button class="btn-ficha" style="flex:1; background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirSmsReforco()" title="Ligou pro cliente e ele não atendeu? Manda um SMS reforçando que tentamos contato">SMS de reforço</button>
+              <button class="btn-ficha" style="flex:1; background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirEmailContato()" title="Manda um e-mail pro lead — boas-vindas, corrigir contato, etc.">Modelos de E-mail</button>
+              <button class="btn-ficha" style="flex:1; background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirSmsReforco()" title="Manda um SMS pro lead com os modelos disponíveis">Modelos de SMS</button>
             </div>
           </div>
         </div>
