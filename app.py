@@ -10795,24 +10795,30 @@ def crm_lead_whatsapp(lid):
 
 SMS_TEMPLATES_LEAD = {
     '1': {'nome': 'Tentei contato e não consegui',
-          'texto': '{nome}, {consultor} aqui, da Serenus. Tentei falar sobre seu plano de saude e nao consegui. Me chama no zap: {link}'},
+          'com_nome': '{nome}, {consultor} aqui, da Serenus. Tentei falar sobre seu plano de saude e nao consegui. Me chama no zap: {link}',
+          'sem_nome': 'Ola! {consultor} aqui, da Serenus. Tentei falar sobre seu plano de saude e nao consegui. Me chama no zap: {link}'},
     '2': {'nome': 'Oportunidade para o seu MEI',
-          'texto': '{nome}, seu MEI da direito a plano de saude com ate 40% off. {consultor} da Serenus. Quer ver os valores? Chama no zap: {link}'},
+          'com_nome': '{nome}, seu MEI da direito a plano com ate 40% off. {consultor}, da Serenus. Chama no zap: {link}',
+          'sem_nome': 'Seu MEI da direito a plano com ate 40% off. {consultor}, da Serenus. Chama no zap: {link}'},
     '3': {'nome': 'Retomando a última conversa',
-          'texto': '{nome}, {consultor} da Serenus. Retomando nossa conversa sobre seu plano de saude. Podemos seguir? Chama no zap: {link}'},
+          'com_nome': '{nome}, {consultor} da Serenus. Retomando nossa conversa sobre seu plano de saude. Podemos seguir? Chama no zap: {link}',
+          'sem_nome': '{consultor} da Serenus, retomando nossa conversa sobre seu plano de saude. Podemos seguir? Chama no zap: {link}'},
     '4': {'nome': 'Seguir com a negociação do plano',
-          'texto': '{nome}, vamos seguir com a negociacao do seu plano? {consultor} da Serenus, ja separei sua proposta. Chama no zap: {link}'},
+          'com_nome': '{nome}, vamos seguir com a negociacao do seu plano? {consultor} da Serenus, ja separei sua proposta. Chama no zap: {link}',
+          'sem_nome': 'Vamos seguir com a negociacao do seu plano? {consultor} da Serenus, ja separei sua proposta. Chama no zap: {link}'},
 }
+SMS_NOME_MINIMO = 3  # abaixo disso o nome fica ilegível (ex: "Gu") — melhor usar a versão sem nome
 
 
 def _montar_sms_lead(conn, lead, template_key, token):
     """Monta o SMS pro lead com link RASTREADO (regista clique, ver /s/<token>).
     Sem acento/emoji de propósito — GSM-7 (fora disso vira UCS-2 e custa mais
     segmentos). O link rastreado (domínio do JOB) é uns 28 caracteres mais longo
-    que o wa.me puro — encurta o nome do lead primeiro pra tentar caber em 160;
-    o template mais longo (nº 2) pode passar de 160 mesmo com nome mínimo, e aí
-    vira SMS duplo (2 créditos) — o preview sempre mostra o tamanho real antes
-    de enviar, pra decisão consciente."""
+    que o wa.me puro. A GTI SMS REJEITA (não só cobra mais) mensagem acima de
+    160 — por isso a estratégia é: tenta com o primeiro nome inteiro, encurta
+    progressivamente até um mínimo ainda legível, e se mesmo assim não couber
+    troca pra uma versão 100% genérica do mesmo template (sem nome nenhum) em
+    vez de mandar um nome cortado sem sentido tipo "Gu,"."""
     tpl = SMS_TEMPLATES_LEAD.get(str(template_key))
     if not tpl:
         return None, None
@@ -10822,15 +10828,33 @@ def _montar_sms_lead(conn, lead, template_key, token):
         if u and u['nome']:
             consultor_primeiro = u['nome'].split()[0]
     link = f"{request.host_url.rstrip('/')}/s/{token}"
-    nome_lead = (lead.get('nome') or '').split()[0] or 'Ola'
+    nome_lead = (lead.get('nome') or '').split()[0] or ''
 
-    def montar(nome):
-        return tpl['texto'].format(nome=nome, consultor=consultor_primeiro, link=link)
+    def montar_com_nome(nome):
+        return tpl['com_nome'].format(nome=nome, consultor=consultor_primeiro, link=link)
 
-    msg = montar(nome_lead)
-    while len(msg) > 160 and len(nome_lead) > 2:
-        nome_lead = nome_lead[:-1]
-        msg = montar(nome_lead)
+    def montar_sem_nome():
+        return tpl['sem_nome'].format(consultor=consultor_primeiro, link=link)
+
+    msg = montar_com_nome(nome_lead) if nome_lead else montar_sem_nome()
+    nome_atual = nome_lead
+    while len(msg) > 160 and len(nome_atual) > SMS_NOME_MINIMO:
+        nome_atual = nome_atual[:-1]
+        msg = montar_com_nome(nome_atual)
+    if len(msg) > 160:
+        msg = montar_sem_nome()
+    # Rede de segurança final: a GTI REJEITA (não só cobra mais) SMS acima de
+    # 160 — se mesmo a versão sem nome passar (consultor com nome muito longo),
+    # encurta só o texto ANTES do link, nunca o link em si (ele tem que
+    # continuar íntegro e clicável).
+    if len(msg) > 160:
+        marcador = f"Chama no zap: {link}"
+        if msg.endswith(marcador):
+            prefixo = msg[:-len(marcador)].rstrip(' ,;:')
+            espaco = max(0, 160 - len(marcador) - 1)
+            msg = (prefixo[:espaco] + ' ' + marcador).strip()
+        else:
+            msg = msg[:160]
     return msg, tpl['nome']
 
 
