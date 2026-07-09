@@ -400,17 +400,35 @@
         <button class="btn-ficha btn-salvar" onclick="salvarFicha()">Salvar</button>
       </div>
 
-      <!-- Modal: SMS de reforço (1º contato sem sucesso por telefone) -->
+      <!-- Modal: Modelos de SMS -->
       <div class="modal-overlay" id="modal-sms-reforco" style="z-index:1100;">
         <div style="background:var(--panel); border:1px solid var(--borda); border-radius:16px; padding:22px; width:min(420px, 92vw); margin:auto;">
           <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:6px;">Modelos de SMS</h3>
-          <div style="font-size:12px; color:var(--cinza); margin-bottom:14px;">Cliente não atendeu a ligação? Este SMS avisa que tentamos contato e que o consultor já chamou no WhatsApp.</div>
-          <div id="sr-carregando" style="font-size:12px; color:var(--cinza-2); padding:16px 0; text-align:center;">Montando prévia...</div>
+
+          <div id="sr-lista-templates">
+            <div style="font-size:12px; color:var(--cinza); margin-bottom:14px;">Escolha o modelo — a próxima tela mostra a prévia antes de enviar de verdade.</div>
+            <button class="wpp-template" style="width:100%; margin-bottom:8px;" onclick="abrirSmsReforco('1')">
+              <strong style="color:var(--texto);">Tentei contato e não consegui</strong>
+            </button>
+            <button class="wpp-template" style="width:100%; margin-bottom:8px;" onclick="abrirSmsReforco('2')">
+              <strong style="color:var(--texto);">Oportunidade para o seu MEI</strong>
+            </button>
+            <button class="wpp-template" style="width:100%; margin-bottom:8px;" onclick="abrirSmsReforco('3')">
+              <strong style="color:var(--texto);">Retomando a última conversa</strong>
+            </button>
+            <button class="wpp-template" style="width:100%; margin-bottom:14px;" onclick="abrirSmsReforco('4')">
+              <strong style="color:var(--texto);">Seguir com a negociação do plano</strong>
+            </button>
+            <button class="btn-outline btn-sm" style="width:100%;" onclick="fechar('modal-sms-reforco')">Cancelar</button>
+          </div>
+
+          <div id="sr-carregando" style="display:none; font-size:12px; color:var(--cinza-2); padding:16px 0; text-align:center;">Montando prévia...</div>
           <div id="sr-conteudo" style="display:none;">
             <div style="background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px 14px; font-size:12.5px; color:var(--texto); line-height:1.5; margin-bottom:8px; white-space:pre-wrap;" id="sr-texto"></div>
-            <div style="font-size:11px; color:var(--cinza-2); margin-bottom:14px;" id="sr-info"></div>
+            <div style="font-size:11px; color:var(--cinza-2); margin-bottom:6px;" id="sr-info"></div>
+            <div style="font-size:11px; color:var(--amarelo); margin-bottom:14px; display:none;" id="sr-aviso-duplo">⚠ Esta mensagem passa de 160 caracteres — vai contar como 2 créditos de SMS.</div>
             <div style="display:flex; gap:8px;">
-              <button class="btn-outline btn-sm" style="flex:1;" onclick="fechar('modal-sms-reforco')">Cancelar</button>
+              <button class="btn-outline btn-sm" style="flex:1;" onclick="voltarTemplatesSms()">Voltar</button>
               <button style="flex:1; background:var(--azul); color:#fff; border:none; padding:9px 14px; border-radius:7px; font-size:12px; font-weight:600; cursor:pointer;" id="sr-btn-enviar" onclick="enviarSmsReforco()">Enviar SMS</button>
             </div>
           </div>
@@ -564,7 +582,7 @@
             <div style="font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); font-weight:700; margin-bottom:10px;">Cliente não atendeu?</div>
             <div style="display:flex; gap:8px;">
               <button class="btn-ficha" style="flex:1; background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirEmailContato()" title="Manda um e-mail pro lead — boas-vindas, corrigir contato, etc.">Modelos de E-mail</button>
-              <button class="btn-ficha" style="flex:1; background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirSmsReforco()" title="Manda um SMS pro lead com os modelos disponíveis">Modelos de SMS</button>
+              <button class="btn-ficha" style="flex:1; background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirModalSms()" title="Manda um SMS pro lead com os modelos disponíveis">Modelos de SMS</button>
             </div>
           </div>
         </div>
@@ -1071,18 +1089,35 @@ async function enviarEmailContato(tpl){
   } else { toast(d.erro||'Erro ao enviar','err'); }
 }
 
-async function abrirSmsReforco(){
+let _smsTemplateAtual = null;
+function abrirModalSms(){
   if(!_leadAtual) return;
   abrir('modal-sms-reforco');
+  document.getElementById('sr-lista-templates').style.display='block';
+  document.getElementById('sr-carregando').style.display='none';
+  document.getElementById('sr-conteudo').style.display='none';
+  document.getElementById('sr-erro').style.display='none';
+}
+function voltarTemplatesSms(){
+  document.getElementById('sr-lista-templates').style.display='block';
+  document.getElementById('sr-conteudo').style.display='none';
+  document.getElementById('sr-erro').style.display='none';
+}
+async function abrirSmsReforco(templateKey){
+  if(!_leadAtual) return;
+  _smsTemplateAtual = templateKey;
+  document.getElementById('sr-lista-templates').style.display='none';
   document.getElementById('sr-carregando').style.display='block';
   document.getElementById('sr-conteudo').style.display='none';
   document.getElementById('sr-erro').style.display='none';
-  const r=await fetch('/crm/lead/'+_leadAtual.id+'/sms-reforco/preview');
+  const r=await fetch('/crm/lead/'+_leadAtual.id+'/sms-reforco/preview?template='+templateKey);
   const d=await r.json();
   document.getElementById('sr-carregando').style.display='none';
   if(d.ok){
+    _smsTemplateAtual = {template:d.template, token:d.token};
     document.getElementById('sr-texto').textContent=d.mensagem;
-    document.getElementById('sr-info').textContent='Vai pro '+d.telefone+' · '+d.caracteres+' caracteres';
+    document.getElementById('sr-info').textContent='Vai pro '+d.telefone+' · '+d.caracteres+' caracteres · '+d.segmentos+' crédito'+(d.segmentos>1?'s':'');
+    document.getElementById('sr-aviso-duplo').style.display = d.segmentos>1 ? 'block' : 'none';
     document.getElementById('sr-conteudo').style.display='block';
   } else {
     document.getElementById('sr-erro').textContent=d.erro||'Erro ao montar prévia';
@@ -1090,10 +1125,10 @@ async function abrirSmsReforco(){
   }
 }
 async function enviarSmsReforco(){
-  if(!_leadAtual) return;
+  if(!_leadAtual || !_smsTemplateAtual || !_smsTemplateAtual.token) return;
   const btn=document.getElementById('sr-btn-enviar');
   btn.disabled=true; btn.textContent='Enviando...';
-  const r=await fetch('/crm/lead/'+_leadAtual.id+'/sms-reforco',{method:'POST'});
+  const r=await fetch('/crm/lead/'+_leadAtual.id+'/sms-reforco',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(_smsTemplateAtual)});
   const d=await r.json();
   btn.disabled=false; btn.textContent='Enviar SMS';
   if(d.ok){

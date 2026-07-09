@@ -721,6 +721,16 @@ def init_db():
                 enviado_por INTEGER,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS crm_sms_log (
+                id SERIAL PRIMARY KEY,
+                lead_id INTEGER NOT NULL,
+                template TEXT,
+                telefone TEXT,
+                token TEXT UNIQUE,
+                clicado INTEGER DEFAULT 0, clicado_em TEXT,
+                enviado_por INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_agenda (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER NOT NULL,
@@ -1020,6 +1030,16 @@ def init_db():
             email TEXT,
             token TEXT UNIQUE,
             aberto INTEGER DEFAULT 0, aberto_em TEXT,
+            clicado INTEGER DEFAULT 0, clicado_em TEXT,
+            enviado_por INTEGER,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS crm_sms_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER NOT NULL,
+            template TEXT,
+            telefone TEXT,
+            token TEXT UNIQUE,
             clicado INTEGER DEFAULT 0, clicado_em TEXT,
             enviado_por INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -10630,23 +10650,56 @@ def crm_lead_whatsapp(lid):
         return jsonify({"ok": False, "erro": f"Falha ao enviar: {e}"}), 500
 
 
-def _montar_sms_reforco(conn, lead):
-    """Monta o texto do SMS de reforço (1o contato sem sucesso por telefone).
-    Sem acento/emoji de propósito — GSM-7 (fora disso vira UCS-2 e custa mais segmentos).
-    Curto de propósito: GTI SMS REJEITA (não só cobra mais) mensagem acima de 160
-    caracteres. Sem menção ao sistema nem ao nome do consultor — o WhatsApp já
-    identifica quem está falando, não precisa gastar caracteres com isso aqui."""
-    primeiro_nome = ((lead.get('nome') or '').split()[0] or 'Ola')[:20]
-    numero_wpp = _whatsapp_do_consultor(conn, lead.get('responsavel_id'))
-    link = f"https://wa.me/{numero_wpp}"
-    return (f"Ola {primeiro_nome}! Recebemos seu pedido de cotacao mas nao conseguimos "
-            f"falar por telefone. Continue por aqui: {link}")
+SMS_TEMPLATES_LEAD = {
+    '1': {'nome': 'Tentei contato e não consegui',
+          'texto': '{nome}, {consultor} aqui, da Serenus. Tentei falar sobre seu plano de saude e nao consegui. Me chama no zap: {link}'},
+    '2': {'nome': 'Oportunidade para o seu MEI',
+          'texto': '{nome}, seu MEI da direito a plano de saude com ate 40% off. {consultor} da Serenus. Quer ver os valores? Chama no zap: {link}'},
+    '3': {'nome': 'Retomando a última conversa',
+          'texto': '{nome}, {consultor} da Serenus. Retomando nossa conversa sobre seu plano de saude. Podemos seguir? Chama no zap: {link}'},
+    '4': {'nome': 'Seguir com a negociação do plano',
+          'texto': '{nome}, vamos seguir com a negociacao do seu plano? {consultor} da Serenus, ja separei sua proposta. Chama no zap: {link}'},
+}
+
+
+def _montar_sms_lead(conn, lead, template_key, token):
+    """Monta o SMS pro lead com link RASTREADO (regista clique, ver /s/<token>).
+    Sem acento/emoji de propósito — GSM-7 (fora disso vira UCS-2 e custa mais
+    segmentos). O link rastreado (domínio do JOB) é uns 28 caracteres mais longo
+    que o wa.me puro — encurta o nome do lead primeiro pra tentar caber em 160;
+    o template mais longo (nº 2) pode passar de 160 mesmo com nome mínimo, e aí
+    vira SMS duplo (2 créditos) — o preview sempre mostra o tamanho real antes
+    de enviar, pra decisão consciente."""
+    tpl = SMS_TEMPLATES_LEAD.get(str(template_key))
+    if not tpl:
+        return None, None
+    consultor_primeiro = 'Serenus'
+    if lead.get('responsavel_id'):
+        u = conn.execute("SELECT nome FROM usuarios WHERE id=?", (lead['responsavel_id'],)).fetchone()
+        if u and u['nome']:
+            consultor_primeiro = u['nome'].split()[0]
+    link = f"{request.host_url.rstrip('/')}/s/{token}"
+    nome_lead = (lead.get('nome') or '').split()[0] or 'Ola'
+
+    def montar(nome):
+        return tpl['texto'].format(nome=nome, consultor=consultor_primeiro, link=link)
+
+    msg = montar(nome_lead)
+    while len(msg) > 160 and len(nome_lead) > 2:
+        nome_lead = nome_lead[:-1]
+        msg = montar(nome_lead)
+    return msg, tpl['nome']
 
 
 @app.route('/crm/lead/<int:lid>/sms-reforco/preview')
 @login_required
 def crm_lead_sms_reforco_preview(lid):
-    """Mostra o texto do SMS de reforço antes de enviar de verdade (SMS custa credito, sem preview seria arriscado)."""
+    """Mostra o texto do SMS antes de enviar de verdade (SMS custa crédito, sem
+    preview seria arriscado). ?template=1..4. O token do link é gerado aqui mas
+    só grava no banco quando o envio for confirmado (ver rota de POST abaixo)."""
+    template_key = (request.args.get('template') or '1').strip()
+    if template_key not in SMS_TEMPLATES_LEAD:
+        return jsonify({"ok": False, "erro": "Template inválido"}), 400
     conn = db()
     lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
     if not lead:
@@ -10656,15 +10709,25 @@ def crm_lead_sms_reforco_preview(lid):
         close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
     if not ld.get('telefone'):
         close_db(conn); return jsonify({"ok": False, "erro": "Lead sem telefone cadastrado"}), 400
-    mensagem = _montar_sms_reforco(conn, ld)
+    token = secrets.token_urlsafe(4)
+    mensagem, nome_tpl = _montar_sms_lead(conn, ld, template_key, token)
     close_db(conn)
-    return jsonify({"ok": True, "mensagem": mensagem, "telefone": ld['telefone'], "caracteres": len(mensagem)})
+    n = len(mensagem)
+    return jsonify({"ok": True, "mensagem": mensagem, "telefone": ld['telefone'], "caracteres": n,
+                    "segmentos": 1 if n <= 160 else 2, "template": template_key, "token": token})
 
 
 @app.route('/crm/lead/<int:lid>/sms-reforco', methods=['POST'])
 @login_required
 def crm_lead_sms_reforco(lid):
-    """Envia o SMS de reforço (1o contato sem sucesso por telefone → reforça que chamamos no WhatsApp)."""
+    """Envia o SMS ao lead. Recebe {template, token} vindos do preview — reconstrói
+    a MESMA mensagem de forma determinística (nunca confia em texto vindo do
+    cliente pra algo que é cobrado) e só agora grava o token no crm_sms_log."""
+    d = request.json or {}
+    template_key = (d.get('template') or '1').strip()
+    token = (d.get('token') or '').strip()
+    if template_key not in SMS_TEMPLATES_LEAD or not token:
+        return jsonify({"ok": False, "erro": "Dados inválidos, refaça a prévia"}), 400
     conn = db()
     lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
     if not lead:
@@ -10674,14 +10737,45 @@ def crm_lead_sms_reforco(lid):
         close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
     if not ld.get('telefone'):
         close_db(conn); return jsonify({"ok": False, "erro": "Lead sem telefone cadastrado"}), 400
-    mensagem = _montar_sms_reforco(conn, ld)
+    mensagem, nome_tpl = _montar_sms_lead(conn, ld, template_key, token)
     ok, erro = _enviar_sms(ld['telefone'], mensagem)
     if ok:
+        conn.execute("INSERT INTO crm_sms_log (lead_id, template, telefone, token, enviado_por, criado_em) VALUES (?,?,?,?,?,?)",
+                     (lid, nome_tpl, ld['telefone'], token, session.get('user_id'), _agora_sp()))
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
-                     (lid, session.get('nome'), 'sms', f'SMS de reforço enviado (1º contato sem resposta): {mensagem}', _agora_sp()))
+                     (lid, session.get('nome'), 'sms', f'SMS "{nome_tpl}" enviado: {mensagem}', _agora_sp()))
         conn.commit()
     close_db(conn)
     return jsonify({"ok": ok, "erro": erro})
+
+
+@app.route('/s/<token>')
+def sms_click(token):
+    """Clique no link do SMS: registra e redireciona pro WhatsApp do consultor
+    responsável (mesma regra de roteamento de sempre — BotConversa pras 3
+    meninas, pessoal pros demais)."""
+    conn = db()
+    r = conn.execute("SELECT * FROM crm_sms_log WHERE token=?", (token,)).fetchone()
+    if not r:
+        close_db(conn); abort(404)
+    rd = dict(r)
+    lead = conn.execute("SELECT nome, responsavel_id FROM crm_leads WHERE id=?", (rd['lead_id'],)).fetchone()
+    ld = dict(lead) if lead else {}
+    if not rd.get('clicado'):
+        conn.execute("UPDATE crm_sms_log SET clicado=1, clicado_em=? WHERE id=?", (_agora_sp(), rd['id']))
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                     (rd['lead_id'], 'Sistema', 'sms', f'Cliente CLICOU no link do SMS "{rd.get("template") or ""}"', _agora_sp()))
+        conn.commit()
+        try:
+            _notificar(ld.get('responsavel_id'), 'lead', 'Cliente clicou no SMS',
+                       f"{ld.get('nome')} clicou no link do SMS", '/crm')
+        except Exception:
+            pass
+    numero_wpp = _whatsapp_do_consultor(conn, ld.get('responsavel_id'))
+    close_db(conn)
+    import urllib.parse as _up
+    msg = f"Olá! Sou {ld.get('nome') or ''}, recebi seu SMS da Serenus sobre meu plano de saúde."
+    return redirect(f"https://wa.me/{numero_wpp}?text={_up.quote(msg)}")
 
 
 # ─── CRM CONFIG ───────────────────────────────────────────────────
