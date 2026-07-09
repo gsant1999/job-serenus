@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Score de Utilização{% endblock %}
+
+{% block head %}
+<style>
+  .score-page { max-width:900px; margin:0 auto; }
+  .score-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:14px; }
+  .score-row { display:flex; align-items:center; gap:16px; padding:14px 0; border-bottom:1px solid var(--borda); }
+  .score-row:last-child { border-bottom:none; }
+  .score-avatar { width:38px; height:38px; border-radius:50%; background:var(--panel-3); color:var(--texto); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; flex-shrink:0; }
+  .score-nome { font-size:14px; font-weight:600; color:var(--texto); flex-shrink:0; width:150px; }
+  .score-barra-wrap { flex:1; background:var(--panel-2); border-radius:20px; height:20px; overflow:hidden; position:relative; }
+  .score-barra { height:100%; border-radius:20px; transition:width .3s; }
+  .score-num { font-size:14px; font-weight:700; color:var(--texto); width:56px; text-align:right; flex-shrink:0; }
+  .score-badge { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; padding:3px 9px; border-radius:20px; flex-shrink:0; width:76px; text-align:center; }
+  .score-badge.ativo { background:var(--verde-soft); color:var(--verde); }
+  .score-badge.pouco { background:rgba(250,204,21,.14); color:var(--amarelo); }
+  .score-badge.inativo { background:rgba(244,63,94,.12); color:var(--erro); }
+  .score-detalhe { display:none; flex-wrap:wrap; gap:6px; margin-top:8px; padding-left:204px; }
+  .score-detalhe.aberto { display:flex; }
+  .score-chip { font-size:11px; background:var(--panel-2); border:1px solid var(--borda); border-radius:20px; padding:3px 10px; color:var(--cinza); }
+  .score-toggle { cursor:pointer; color:var(--azul); font-size:11.5px; flex-shrink:0; }
+  .score-legenda { font-size:11px; color:var(--cinza-2); margin-top:14px; line-height:1.6; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Score de Utilização</h1>
+    <div class="sub">Quem esteve ativo no sistema, dia a dia</div>
+  </div>
+  <div class="mes-nav" style="display:flex;align-items:center;gap:12px;">
+    <label style="font-size:12px; color:var(--cinza);">Dia</label>
+    <input type="date" value="{{ dia }}" onchange="location.href='/score?dia='+this.value">
+  </div>
+</div>
+
+<div class="page score-page">
+  <div class="score-card">
+    {% for r in ranking %}
+    <div class="score-row">
+      <div class="score-avatar">{{ r.nome[0]|upper if r.nome else '?' }}</div>
+      <div class="score-nome">{{ r.nome }}</div>
+      {% if r.score >= 80 %}<span class="score-badge ativo">Ativo</span>
+      {% elif r.score >= 20 %}<span class="score-badge pouco">Pouco ativo</span>
+      {% else %}<span class="score-badge inativo">Inativo</span>{% endif %}
+      <div class="score-barra-wrap">
+        <div class="score-barra" style="width:{{ ((r.score / max_score) * 100)|round(1) }}%; background:{{ '#1fd8a4' if r.score >= 80 else '#facc15' if r.score >= 20 else '#f43f5e' }};"></div>
+      </div>
+      <div class="score-num">{{ r.score }}</div>
+      <span class="score-toggle" onclick="this.closest('.score-row').querySelector('.score-detalhe').classList.toggle('aberto')">detalhe</span>
+    </div>
+    <div class="score-detalhe">
+      {% for chave, rotulo in labels.items() %}
+        {% if r.detalhe.get(chave, 0) > 0 %}
+        <span class="score-chip">{{ rotulo }}: {{ r.detalhe[chave] }}</span>
+        {% endif %}
+      {% endfor %}
+      {% if not r.score %}<span class="score-chip">Nenhuma atividade registrada neste dia</span>{% endif %}
+    </div>
+    {% else %}
+    <div style="text-align:center; padding:30px; color:var(--cinza-2); font-size:13px;">Nenhum usuário ativo cadastrado.</div>
+    {% endfor %}
+  </div>
+
+  <div class="score-legenda">
+    Score = soma ponderada de cada ação do dia (login, tempo ativo real no navegador, ações no CRM, propostas, cotações).
+    Pesos atuais: {% for k, v in pesos.items() %}{{ labels.get(k if k != 'minuto_ativo' else 'minutos_ativos', k) }} = {{ v }}{{ ', ' if not loop.last }}{% endfor %}.
+    Faixas: <strong style="color:var(--verde);">Ativo</strong> ≥ 80 pontos · <strong style="color:var(--amarelo);">Pouco ativo</strong> 20–79 · <strong style="color:var(--erro);">Inativo</strong> abaixo de 20.
+  </div>
+</div>
+{% endblock %}

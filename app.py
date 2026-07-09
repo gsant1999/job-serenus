@@ -731,6 +731,19 @@ def init_db():
                 enviado_por INTEGER,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS login_log (
+                id SERIAL PRIMARY KEY,
+                usuario_id INTEGER NOT NULL,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS score_heartbeat (
+                id SERIAL PRIMARY KEY,
+                usuario_id INTEGER NOT NULL,
+                dia TEXT NOT NULL,
+                minutos_ativos INTEGER DEFAULT 0,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(usuario_id, dia)
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_agenda (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER NOT NULL,
@@ -1043,6 +1056,19 @@ def init_db():
             clicado INTEGER DEFAULT 0, clicado_em TEXT,
             enviado_por INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS login_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS score_heartbeat (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL,
+            dia TEXT NOT NULL,
+            minutos_ativos INTEGER DEFAULT 0,
+            atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(usuario_id, dia)
         );
         CREATE TABLE IF NOT EXISTS crm_agenda (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3996,6 +4022,11 @@ def login():
                         conn.commit()
                     except Exception:
                         pass
+                try:
+                    conn.execute("INSERT INTO login_log (usuario_id, criado_em) VALUES (?,?)", (u['id'], _agora_sp()))
+                    conn.commit()
+                except Exception:
+                    pass
                 close_db(conn)
                 session.update({'user_id':u['id'],'nome':u['nome'],'perfil':u['perfil'],'regime_base':u['regime_base'],'foto':u['foto'] or ''})
                 return redirect(url_for('dashboard'))
@@ -6067,6 +6098,88 @@ def nivel_salvar():
         conn.execute(f"DELETE FROM niveis WHERE codigo NOT IN ({ph})", codigos)
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+# ─── SCORE DE UTILIZAÇÃO ───────────────────────────────────────────────────────
+# Cada tipo de ação tem seu peso — pedido explícito do Guilherme ("cada coisa
+# tem a sua pontuação"). Ações que exigem mais esforço/geram mais resultado
+# (proposta criada, cotação enviada) pesam mais que sinais passivos (minuto
+# ativo no navegador).
+SCORE_PESOS = {
+    'login': 10,
+    'minuto_ativo': 1,       # cada heartbeat = ~2min de uso ativo real (mouse/teclado)
+    'crm_ligacao': 3,
+    'crm_nota': 2,
+    'crm_movimentacao': 3,   # mover etapa, criar lead, qualificar
+    'crm_whatsapp': 4,
+    'crm_sms': 4,
+    'crm_email': 3,
+    'proposta_criada': 15,
+    'proposta_editada': 5,
+    'cotacao_enviada': 8,
+}
+SCORE_LABELS = {
+    'login': 'Logins', 'minutos_ativos': 'Minutos ativos (navegador)',
+    'crm_ligacao': 'Ligações registradas', 'crm_nota': 'Notas no CRM',
+    'crm_movimentacao': 'Movimentações no CRM', 'crm_whatsapp': 'WhatsApp enviados',
+    'crm_sms': 'SMS enviados', 'crm_email': 'E-mails enviados',
+    'proposta_criada': 'Propostas criadas', 'proposta_editada': 'Edições de proposta',
+    'cotacao_enviada': 'Cotações enviadas',
+}
+
+
+def _calcular_score_dia(conn, dia):
+    """dia: 'YYYY-MM-DD'. Retorna a lista de usuários ativos com o score do dia,
+    ordenada do maior pro menor, com o detalhe de cada categoria que compôs o
+    score (pra nunca ser uma caixa-preta)."""
+    usuarios = conn.execute("SELECT id, nome FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()
+    resultado = []
+    for u in usuarios:
+        uid, nome = u['id'], u['nome']
+        d = {}
+        d['login'] = conn.execute(
+            "SELECT COUNT(*) c FROM login_log WHERE usuario_id=? AND DATE(criado_em)=?", (uid, dia)).fetchone()['c']
+        hb = conn.execute(
+            "SELECT minutos_ativos FROM score_heartbeat WHERE usuario_id=? AND dia=?", (uid, dia)).fetchone()
+        d['minutos_ativos'] = (hb['minutos_ativos'] if hb else 0) or 0
+
+        ativ = conn.execute("""SELECT tipo, COUNT(*) c FROM crm_atividades
+            WHERE usuario_nome=? AND DATE(criado_em)=? GROUP BY tipo""", (nome, dia)).fetchall()
+        am = {a['tipo']: a['c'] for a in ativ}
+        d['crm_ligacao'] = am.get('ligacao', 0)
+        d['crm_nota'] = am.get('nota', 0)
+        d['crm_movimentacao'] = am.get('movimentacao', 0) + am.get('criacao', 0) + am.get('atividade', 0)
+        d['crm_whatsapp'] = am.get('whatsapp', 0)
+        d['crm_sms'] = am.get('sms', 0)
+        d['crm_email'] = am.get('email', 0) + am.get('cliente_email', 0)
+
+        d['proposta_criada'] = conn.execute(
+            "SELECT COUNT(*) c FROM propostas WHERE usuario_id=? AND DATE(criado_em)=?", (uid, dia)).fetchone()['c']
+        d['proposta_editada'] = conn.execute(
+            "SELECT COUNT(*) c FROM historico_proposta WHERE usuario_nome=? AND DATE(criado_em)=?", (nome, dia)).fetchone()['c']
+        d['cotacao_enviada'] = conn.execute(
+            "SELECT COUNT(*) c FROM cotacao_salva WHERE corretor_id=? AND DATE(criado_em)=?", (uid, dia)).fetchone()['c']
+
+        score = sum(d[k] * SCORE_PESOS.get(k if k != 'minutos_ativos' else 'minuto_ativo', 0) for k in d)
+        resultado.append({'usuario_id': uid, 'nome': nome, 'score': score, 'detalhe': d})
+    resultado.sort(key=lambda x: -x['score'])
+    return resultado
+
+
+@app.route('/score')
+@login_required
+@admin_required
+def score_utilizacao():
+    """Painel diário de utilização do sistema por consultor — pra saber quem
+    esteve ativo de verdade e quem sumiu, com o detalhe de cada ação que
+    compôs o score (nunca é uma caixa-preta)."""
+    dia = (request.args.get('dia') or datetime.now(TZ_SP).strftime('%Y-%m-%d')).strip()
+    conn = db()
+    ranking = _calcular_score_dia(conn, dia)
+    close_db(conn)
+    max_score = max([r['score'] for r in ranking], default=0) or 1
+    return render_template('score.html', dia=dia, ranking=ranking, max_score=max_score,
+                           labels=SCORE_LABELS, pesos=SCORE_PESOS)
+
 
 # ─── FINANCEIRO: fixo, custos, aporte, comissões futuras, estorno ─────────────────
 def competencia_atual():
@@ -9357,6 +9470,36 @@ def _notificar_whatsapp(usuario_id, titulo, descricao, link=''):
 def _notificar_admins(tipo, titulo, descricao='', link=''):
     """Notifica todos os admins (broadcast: usuario_id NULL)."""
     _notificar(None, tipo, titulo, descricao, link)
+
+
+@app.route('/api/heartbeat', methods=['POST'])
+@login_required
+def api_heartbeat():
+    """Recebe um 'sinal de vida' do navegador — só é chamado pelo JS quando
+    houve mouse/teclado desde o último ping (ver script no base.html), então
+    cada chamada representa ~2min de uso ativo de verdade, não a aba só aberta
+    em segundo plano. Acumula em score_heartbeat, usado pelo score de utilização."""
+    uid = session.get('user_id')
+    if not uid:
+        return jsonify({"ok": False}), 401
+    dia = datetime.now(TZ_SP).strftime('%Y-%m-%d')
+    conn = db()
+    if DB_MODE == 'postgres':
+        conn.execute("""INSERT INTO score_heartbeat (usuario_id, dia, minutos_ativos, atualizado_em)
+            VALUES (?,?,2,?)
+            ON CONFLICT (usuario_id, dia) DO UPDATE SET
+                minutos_ativos = score_heartbeat.minutos_ativos + 2, atualizado_em = excluded.atualizado_em""",
+            (uid, dia, _agora_sp()))
+    else:
+        existe = conn.execute("SELECT id FROM score_heartbeat WHERE usuario_id=? AND dia=?", (uid, dia)).fetchone()
+        if existe:
+            conn.execute("UPDATE score_heartbeat SET minutos_ativos = minutos_ativos + 2, atualizado_em=? WHERE id=?",
+                         (_agora_sp(), existe['id']))
+        else:
+            conn.execute("INSERT INTO score_heartbeat (usuario_id, dia, minutos_ativos, atualizado_em) VALUES (?,?,2,?)",
+                         (uid, dia, _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
 
 
 @app.route('/api/notificacoes')

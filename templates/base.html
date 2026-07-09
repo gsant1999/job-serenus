@@ -495,6 +495,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       Usuários
     </a>
+    <a href="/score" class="nav-link {% if request.path == '/score' %}active{% endif %}" onclick="closeSidebar()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4"/><path d="m6.343 7.757-2.829-2.829"/><path d="M2 13h4"/><path d="M17.657 7.757l2.829-2.829"/><circle cx="12" cy="13" r="8"/><path d="M12 13l3-3"/></svg>
+      Score de Utilização
+    </a>
     <a href="/supervisoras" class="nav-link {% if '/supervisora' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       Supervisoras
@@ -765,6 +769,21 @@ function toggleTema() {
     carregarNotificacoes();
     setInterval(carregarNotificacoes, 30000);
   });
+})();
+
+/* ── Score de utilização: heartbeat de atividade real (mouse/teclado) ──
+   Só manda o ping se houve interação de verdade desde o último envio — aba
+   aberta parada em segundo plano não conta como "uso ativo". */
+(function(){
+  var _houveInteracao = false;
+  ['mousemove','mousedown','keydown','scroll','touchstart'].forEach(function(ev){
+    document.addEventListener(ev, function(){ _houveInteracao = true; }, {passive:true});
+  });
+  setInterval(function(){
+    if (!_houveInteracao) return;
+    _houveInteracao = false;
+    fetch('/api/heartbeat', {method:'POST'}).catch(function(){});
+  }, 120000);
 })();
 </script>
 {% block scripts %}{% endblock %}
