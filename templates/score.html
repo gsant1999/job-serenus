@@ -4,7 +4,8 @@
 {% block head %}
 <style>
   .score-page { max-width:900px; margin:0 auto; }
-  .score-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:14px; }
+  .score-secao-titulo { font-family:'Sora',sans-serif; font-size:13px; font-weight:700; color:var(--texto); margin:0 0 10px; text-transform:uppercase; letter-spacing:.4px; }
+  .score-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:22px; }
   .score-row { display:flex; align-items:center; gap:16px; padding:14px 0; border-bottom:1px solid var(--borda); }
   .score-row:last-child { border-bottom:none; }
   .score-avatar { width:38px; height:38px; border-radius:50%; background:var(--panel-3); color:var(--texto); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; flex-shrink:0; }
@@ -21,6 +22,10 @@
   .score-chip { font-size:11px; background:var(--panel-2); border:1px solid var(--borda); border-radius:20px; padding:3px 10px; color:var(--cinza); }
   .score-toggle { cursor:pointer; color:var(--azul); font-size:11.5px; flex-shrink:0; }
   .score-legenda { font-size:11px; color:var(--cinza-2); margin-top:14px; line-height:1.6; }
+  .periodo-tabs { display:flex; gap:4px; background:var(--panel-2); border-radius:8px; padding:3px; }
+  .periodo-tab { padding:6px 14px; font-size:12px; border-radius:6px; cursor:pointer; color:var(--cinza); text-decoration:none; }
+  .periodo-tab.ativo { background:var(--azul); color:#fff; font-weight:600; }
+  .score-range { font-size:11.5px; color:var(--cinza-2); }
 </style>
 {% endblock %}
 
@@ -28,17 +33,23 @@
 <div class="topbar">
   <div>
     <h1>Score de Utilização</h1>
-    <div class="sub">Quem esteve ativo no sistema, dia a dia</div>
+    <div class="sub">Quem esteve ativo no sistema · <span class="score-range">{{ data_inicio }}{% if data_inicio != data_fim %} a {{ data_fim }}{% endif %}</span></div>
   </div>
   <div class="mes-nav" style="display:flex;align-items:center;gap:12px;">
-    <label style="font-size:12px; color:var(--cinza);">Dia</label>
-    <input type="date" value="{{ dia }}" onchange="location.href='/score?dia='+this.value">
+    <div class="periodo-tabs">
+      <a class="periodo-tab {{ 'ativo' if periodo == 'dia' }}" href="/score?dia={{ dia }}&periodo=dia">Dia</a>
+      <a class="periodo-tab {{ 'ativo' if periodo == 'semana' }}" href="/score?dia={{ dia }}&periodo=semana">Semana</a>
+      <a class="periodo-tab {{ 'ativo' if periodo == 'mes' }}" href="/score?dia={{ dia }}&periodo=mes">Mês</a>
+    </div>
+    <input type="date" value="{{ dia }}" onchange="location.href='/score?dia='+this.value+'&periodo={{ periodo }}'">
   </div>
 </div>
 
 <div class="page score-page">
+  {% for perfil, lista in ranking_por_perfil.items() %}
+  <div class="score-secao-titulo">{{ 'Administração' if perfil == 'admin' else 'Consultores' if perfil == 'consultor' else perfil|title }}</div>
   <div class="score-card">
-    {% for r in ranking %}
+    {% for r in lista %}
     <div class="score-row">
       <div class="score-avatar">{{ r.nome[0]|upper if r.nome else '?' }}</div>
       <div class="score-nome">{{ r.nome }}</div>
@@ -49,7 +60,7 @@
         <div class="score-barra" style="width:{{ ((r.score / max_score) * 100)|round(1) }}%; background:{{ '#1fd8a4' if r.score >= 80 else '#facc15' if r.score >= 20 else '#f43f5e' }};"></div>
       </div>
       <div class="score-num">{{ r.score }}</div>
-      <span class="score-toggle" onclick="this.closest('.score-row').querySelector('.score-detalhe').classList.toggle('aberto')">detalhe</span>
+      <span class="score-toggle" onclick="this.closest('.score-row').nextElementSibling.classList.toggle('aberto')">detalhe</span>
     </div>
     <div class="score-detalhe">
       {% for chave, rotulo in labels.items() %}
@@ -57,15 +68,16 @@
         <span class="score-chip">{{ rotulo }}: {{ r.detalhe[chave] }}</span>
         {% endif %}
       {% endfor %}
-      {% if not r.score %}<span class="score-chip">Nenhuma atividade registrada neste dia</span>{% endif %}
+      {% if not r.score %}<span class="score-chip">Nenhuma atividade registrada no período</span>{% endif %}
     </div>
-    {% else %}
-    <div style="text-align:center; padding:30px; color:var(--cinza-2); font-size:13px;">Nenhum usuário ativo cadastrado.</div>
     {% endfor %}
   </div>
+  {% else %}
+  <div class="score-card" style="text-align:center; padding:30px; color:var(--cinza-2); font-size:13px;">Nenhum usuário ativo cadastrado.</div>
+  {% endfor %}
 
   <div class="score-legenda">
-    Score = soma ponderada de cada ação do dia (login, tempo ativo real no navegador, ações no CRM, propostas, cotações).
+    Score = soma ponderada de cada ação do período (login, tempo ativo real no navegador, ações no CRM, propostas, cotações).
     Pesos atuais: {% for k, v in pesos.items() %}{{ labels.get(k if k != 'minuto_ativo' else 'minutos_ativos', k) }} = {{ v }}{{ ', ' if not loop.last }}{% endfor %}.
     Faixas: <strong style="color:var(--verde);">Ativo</strong> ≥ 80 pontos · <strong style="color:var(--amarelo);">Pouco ativo</strong> 20–79 · <strong style="color:var(--erro);">Inativo</strong> abaixo de 20.
   </div>

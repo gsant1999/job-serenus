@@ -6188,23 +6188,29 @@ SCORE_LABELS = {
 }
 
 
-def _calcular_score_dia(conn, dia):
-    """dia: 'YYYY-MM-DD'. Retorna a lista de usuários ativos com o score do dia,
-    ordenada do maior pro menor, com o detalhe de cada categoria que compôs o
-    score (pra nunca ser uma caixa-preta)."""
-    usuarios = conn.execute("SELECT id, nome FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()
+def _calcular_score_periodo(conn, data_inicio, data_fim):
+    """data_inicio/data_fim: 'YYYY-MM-DD' (inclusive nos dois extremos — pode
+    ser o mesmo dia pra manter o comportamento diário). Retorna a lista de
+    usuários ativos com o score do período, ordenada do maior pro menor, com
+    o detalhe de cada categoria que compôs o score (pra nunca ser uma
+    caixa-preta) e o perfil (tipo) de cada usuário, pra permitir ranking
+    separado por tipo de usuário na tela."""
+    usuarios = conn.execute("SELECT id, nome, perfil FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()
     resultado = []
     for u in usuarios:
-        uid, nome = u['id'], u['nome']
+        uid, nome, perfil = u['id'], u['nome'], u['perfil']
         d = {}
         d['login'] = conn.execute(
-            "SELECT COUNT(*) c FROM login_log WHERE usuario_id=? AND DATE(criado_em)=?", (uid, dia)).fetchone()['c']
+            "SELECT COUNT(*) c FROM login_log WHERE usuario_id=? AND DATE(criado_em) BETWEEN ? AND ?",
+            (uid, data_inicio, data_fim)).fetchone()['c']
         hb = conn.execute(
-            "SELECT minutos_ativos FROM score_heartbeat WHERE usuario_id=? AND dia=?", (uid, dia)).fetchone()
-        d['minutos_ativos'] = (hb['minutos_ativos'] if hb else 0) or 0
+            "SELECT COALESCE(SUM(minutos_ativos),0) c FROM score_heartbeat WHERE usuario_id=? AND dia BETWEEN ? AND ?",
+            (uid, data_inicio, data_fim)).fetchone()
+        d['minutos_ativos'] = (hb['c'] if hb else 0) or 0
 
         ativ = conn.execute("""SELECT tipo, COUNT(*) c FROM crm_atividades
-            WHERE usuario_nome=? AND DATE(criado_em)=? GROUP BY tipo""", (nome, dia)).fetchall()
+            WHERE usuario_nome=? AND DATE(criado_em) BETWEEN ? AND ? GROUP BY tipo""",
+            (nome, data_inicio, data_fim)).fetchall()
         am = {a['tipo']: a['c'] for a in ativ}
         d['crm_ligacao'] = am.get('ligacao', 0)
         d['crm_nota'] = am.get('nota', 0)
@@ -6214,32 +6220,61 @@ def _calcular_score_dia(conn, dia):
         d['crm_email'] = am.get('email', 0) + am.get('cliente_email', 0)
 
         d['proposta_criada'] = conn.execute(
-            "SELECT COUNT(*) c FROM propostas WHERE usuario_id=? AND DATE(criado_em)=?", (uid, dia)).fetchone()['c']
+            "SELECT COUNT(*) c FROM propostas WHERE usuario_id=? AND DATE(criado_em) BETWEEN ? AND ?",
+            (uid, data_inicio, data_fim)).fetchone()['c']
         d['proposta_editada'] = conn.execute(
-            "SELECT COUNT(*) c FROM historico_proposta WHERE usuario_nome=? AND DATE(criado_em)=?", (nome, dia)).fetchone()['c']
+            "SELECT COUNT(*) c FROM historico_proposta WHERE usuario_nome=? AND DATE(criado_em) BETWEEN ? AND ?",
+            (nome, data_inicio, data_fim)).fetchone()['c']
         d['cotacao_enviada'] = conn.execute(
-            "SELECT COUNT(*) c FROM cotacao_salva WHERE corretor_id=? AND DATE(criado_em)=?", (uid, dia)).fetchone()['c']
+            "SELECT COUNT(*) c FROM cotacao_salva WHERE corretor_id=? AND DATE(criado_em) BETWEEN ? AND ?",
+            (uid, data_inicio, data_fim)).fetchone()['c']
 
         score = sum(d[k] * SCORE_PESOS.get(k if k != 'minutos_ativos' else 'minuto_ativo', 0) for k in d)
-        resultado.append({'usuario_id': uid, 'nome': nome, 'score': score, 'detalhe': d})
+        resultado.append({'usuario_id': uid, 'nome': nome, 'perfil': perfil, 'score': score, 'detalhe': d})
     resultado.sort(key=lambda x: -x['score'])
     return resultado
+
+
+def _calcular_score_dia(conn, dia):
+    """Compatibilidade: score de um único dia."""
+    return _calcular_score_periodo(conn, dia, dia)
 
 
 @app.route('/score')
 @login_required
 @admin_required
 def score_utilizacao():
-    """Painel diário de utilização do sistema por consultor — pra saber quem
-    esteve ativo de verdade e quem sumiu, com o detalhe de cada ação que
-    compôs o score (nunca é uma caixa-preta)."""
+    """Painel de utilização do sistema por consultor — pra saber quem esteve
+    ativo de verdade e quem sumiu, com o detalhe de cada ação que compôs o
+    score (nunca é uma caixa-preta). Suporta 3 janelas: dia, semana (segunda
+    a domingo da semana do dia informado) e mês (1º ao último dia do mês)."""
     dia = (request.args.get('dia') or datetime.now(TZ_SP).strftime('%Y-%m-%d')).strip()
+    periodo = (request.args.get('periodo') or 'dia').strip()
+    dia_dt = datetime.strptime(dia, '%Y-%m-%d').date()
+
+    if periodo == 'semana':
+        data_inicio = dia_dt - timedelta(days=dia_dt.weekday())
+        data_fim = data_inicio + timedelta(days=6)
+    elif periodo == 'mes':
+        data_inicio = dia_dt.replace(day=1)
+        prox_mes = (data_inicio.replace(day=28) + timedelta(days=4)).replace(day=1)
+        data_fim = prox_mes - timedelta(days=1)
+    else:
+        data_inicio = data_fim = dia_dt
+
     conn = db()
-    ranking = _calcular_score_dia(conn, dia)
+    ranking = _calcular_score_periodo(conn, data_inicio.isoformat(), data_fim.isoformat())
     close_db(conn)
     max_score = max([r['score'] for r in ranking], default=0) or 1
-    return render_template('score.html', dia=dia, ranking=ranking, max_score=max_score,
-                           labels=SCORE_LABELS, pesos=SCORE_PESOS)
+
+    ranking_por_perfil = {}
+    for r in ranking:
+        ranking_por_perfil.setdefault(r['perfil'] or 'consultor', []).append(r)
+
+    return render_template('score.html', dia=dia, periodo=periodo, ranking=ranking, max_score=max_score,
+                           labels=SCORE_LABELS, pesos=SCORE_PESOS,
+                           ranking_por_perfil=ranking_por_perfil,
+                           data_inicio=data_inicio.strftime('%d/%m'), data_fim=data_fim.strftime('%d/%m'))
 
 
 # ─── FINANCEIRO: fixo, custos, aporte, comissões futuras, estorno ─────────────────
