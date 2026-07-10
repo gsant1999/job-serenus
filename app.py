@@ -802,6 +802,7 @@ def init_db():
                 canal TEXT NOT NULL,
                 template TEXT NOT NULL,
                 delay_dias INTEGER NOT NULL DEFAULT 0,
+                conteudo TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
             """CREATE TABLE IF NOT EXISTS fluxo_inscricoes (
@@ -1196,6 +1197,7 @@ def init_db():
             canal TEXT NOT NULL,
             template TEXT NOT NULL,
             delay_dias INTEGER NOT NULL DEFAULT 0,
+            conteudo TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS fluxo_inscricoes (
@@ -1597,6 +1599,7 @@ def init_db():
         ("lancamentos", "parcela_num", "INTEGER"),
         ("lancamentos", "parcela_total", "INTEGER"),
         ("lancamentos", "forma_pagamento", "TEXT"),
+        ("fluxo_passos", "conteudo", "TEXT"),
         # Telefone do usuário (WhatsApp p/ notificações via WaSpeed e link wa.me nos e-mails)
         ("usuarios", "telefone", "TEXT"),
         # Mensagem pronta pro lead, escrita já no agendamento (fica 1 clique pra enviar quando o lembrete chegar)
@@ -7968,13 +7971,22 @@ def crm_lead_mover(lid):
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                  (lid, session.get('nome'), 'movimentacao',
                   f'Movido de "{etapa_ant}" para "{nova_etapa}"'))
+    # Commit da movimentação ANTES dos hooks de fluxo: se um hook falhar com erro
+    # de SQL, a transação do PG ficaria abortada e o commit final viraria rollback
+    # silencioso — o lead voltaria pra etapa antiga com a rota respondendo ok.
+    conn.commit()
     if etapa_ant != nova_etapa:
         try:
             _fluxo_cancelar_por_etapa(conn, lid, nova_etapa)
             _fluxo_autoiniciar_por_etapa(conn, lid, nova_etapa)
-        except Exception:
-            pass
-    conn.commit(); close_db(conn)
+            conn.commit()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            app.logger.error(f"[FLUXOS] Hook de etapa falhou (lead {lid} -> {nova_etapa}): {e}")
+    close_db(conn)
     return jsonify({"ok": True})
 
 
@@ -12327,26 +12339,70 @@ FLUXO_TEMPLATES = {
     },
 }
 
+# delay_dias de cada passo = dias de espera APÓS o passo anterior (o 1º passo
+# conta a partir da inscrição). Cadências originais dos docs: LP/Renovação
+# D0·D+2·D+4·D+7 e MEI D+1·D+4·D+7·D+10.
 FLUXOS_PADRAO = [
     {
         'nome': 'Lead de Cotação (LP Geral)',
         'descricao': 'Reativa a conversa no WhatsApp com quem pediu cotação numa LP (PF, MEI ou empresa).',
         'passos': [('email', 'lp_cotacao_1', 0), ('email', 'lp_cotacao_2', 2),
-                    ('email', 'lp_cotacao_3', 4), ('email', 'lp_cotacao_4', 7)],
+                    ('email', 'lp_cotacao_3', 2), ('email', 'lp_cotacao_4', 3)],
     },
     {
         'nome': 'Renovação de Plano',
         'descricao': 'Aproveita a janela de reajuste anual pra reativar quem já tem plano e pediu revisão/troca.',
         'passos': [('email', 'renovacao_1', 0), ('email', 'renovacao_2', 2),
-                    ('email', 'renovacao_3', 4), ('email', 'renovacao_4', 7)],
+                    ('email', 'renovacao_3', 2), ('email', 'renovacao_4', 3)],
     },
     {
         'nome': 'Reengajamento MEI 6 Meses',
         'descricao': 'Continuação por e-mail do primeiro contato via WhatsApp com MEI que completou 6+ meses de CNPJ.',
-        'passos': [('email', 'mei6m_1', 1), ('email', 'mei6m_2', 4),
-                    ('email', 'mei6m_3', 7), ('email', 'mei6m_4', 10)],
+        'passos': [('email', 'mei6m_1', 1), ('email', 'mei6m_2', 3),
+                    ('email', 'mei6m_3', 3), ('email', 'mei6m_4', 3)],
     },
 ]
+
+
+def _fluxo_render_texto(s, nome='', consultor='', link=''):
+    """Substitui os placeholders {nome}/{consultor}/{link} SEM usar .format() —
+    texto digitado pelo usuário no editor pode ter chaves soltas que
+    estourariam KeyError e derrubariam o passo inteiro."""
+    return ((s or '').replace('{nome}', nome or '')
+                     .replace('{consultor}', consultor or '')
+                     .replace('{link}', link or ''))
+
+
+def _enviar_botconversa_texto(telefone, texto):
+    """Envia texto pelo WhatsApp oficial (BotConversa / API Meta), via API REST
+    deles — não depende do editor de fluxos do BotConversa (que tem bug de
+    salvamento). Só entrega se o contato tem conversa recente lá (janela de
+    24h da Meta); fora disso retorna erro honesto em vez de sumir calado.
+    Retorna (ok, erro)."""
+    api_key = os.environ.get('BOTCONVERSA_API_KEY', '').strip()
+    if not api_key:
+        return False, 'BOTCONVERSA_API_KEY não configurada'
+    digitos = re.sub(r'\D', '', telefone or '')
+    if not digitos:
+        return False, 'Telefone inválido'
+    if len(digitos) <= 11:
+        digitos = '55' + digitos
+    try:
+        import requests as _rq
+        headers = {'API-KEY': api_key}
+        r = _rq.get(f'{BOTCONVERSA_API_BASE}/subscriber/get_by_phone/{digitos}/', headers=headers, timeout=15)
+        if r.status_code == 404:
+            return False, 'Contato nunca conversou no WhatsApp oficial (BotConversa)'
+        if r.status_code != 200:
+            return False, f'BotConversa: erro {r.status_code} ao buscar contato'
+        sid = r.json().get('id')
+        r2 = _rq.post(f'{BOTCONVERSA_API_BASE}/subscriber/{sid}/send_message/',
+                       headers=headers, json={'type': 'text', 'value': texto}, timeout=15)
+        if r2.status_code in (200, 201):
+            return True, None
+        return False, f'BotConversa: erro {r2.status_code} ao enviar (janela de 24h da Meta pode ter expirado)'
+    except Exception as e:
+        return False, f'Falha no BotConversa: {e}'
 
 
 def _seed_fluxos_padrao(conn):
@@ -12371,11 +12427,18 @@ def _corpo_email_fluxo(tpl, nome_lead, corretor_nome, link_click, foto_url=None)
     """HTML no mesmo padrão visual do e-mail de contato (cartão do consultor em
     tabela, não flexbox — ver histórico do bug de renderização no Gmail/Outlook),
     mas com múltiplos parágrafos (fluxos são narrativos, não uma frase só)."""
+    import html as _html
     primeiro = (nome_lead or '').strip().split(' ')[0].title() if nome_lead else ''
+    # Escape DEPOIS de substituir os placeholders: nome do lead vem de fonte
+    # externa (LP/planilha) e texto de passo personalizado vem do editor —
+    # nenhum dos dois pode injetar HTML no e-mail.
     corpo_paragrafos = ''.join(
-        f"<p style='font-size:14px;color:#4a4f63;margin:0 0 16px;line-height:1.7;'>{p.format(nome=primeiro or 'tudo bem')}</p>"
-        for p in tpl['paragrafos']
+        f"<p style='font-size:14px;color:#4a4f63;margin:0 0 16px;line-height:1.7;'>"
+        f"{_html.escape(_fluxo_render_texto(p, nome=primeiro or 'tudo bem', consultor=corretor_nome, link=link_click))}</p>"
+        for p in tpl['paragrafos'] if (p or '').strip()
     )
+    corretor_nome = _html.escape(corretor_nome or 'Serenus')
+    cta_txt = _html.escape(tpl.get('cta') or 'Falar com o consultor no WhatsApp')
     cartao_consultor = (
         "<table role='presentation' cellpadding='0' cellspacing='0' border='0' "
         "style='background:#f8f9fb;border-radius:12px;margin-bottom:26px;'><tr>"
@@ -12402,7 +12465,7 @@ def _corpo_email_fluxo(tpl, nome_lead, corretor_nome, link_click, foto_url=None)
         f"{cartao_consultor}"
         f"<div style='text-align:center;margin-bottom:26px;'><a href='{link_click}' "
         "style='display:inline-block;background:#25d366;color:#fff;text-decoration:none;font-weight:700;"
-        f"font-size:15px;padding:14px 34px;border-radius:10px;'>{tpl['cta']}</a></div>"
+        f"font-size:15px;padding:14px 34px;border-radius:10px;'>{cta_txt}</a></div>"
         "<p style='font-size:12px;color:#8c93a8;margin:0;line-height:1.6;'>Se o botão não funcionar, "
         f"copie este link no navegador:<br><a href='{link_click}' style='color:#3b82f6;word-break:break-all;'>{link_click}</a></p>"
         "</div>"
@@ -12415,16 +12478,20 @@ def _corpo_email_fluxo(tpl, nome_lead, corretor_nome, link_click, foto_url=None)
 
 def _fluxo_inscrever(conn, fluxo_id, lead_id, etapa_origem=None, iniciado_por=None):
     """Cria uma inscrição ativa (se ainda não houver uma ativa pro mesmo lead+fluxo).
-    Primeiro passo sai na próxima rodada do motor (proximo_envio_em = agora)."""
+    Respeita o delay do 1º passo: delay 0 sai na próxima rodada do motor."""
     ja = conn.execute(
         "SELECT id FROM fluxo_inscricoes WHERE fluxo_id=? AND lead_id=? AND status='ativo'",
         (fluxo_id, lead_id)).fetchone()
     if ja:
         return None
+    p0 = conn.execute(
+        "SELECT delay_dias FROM fluxo_passos WHERE fluxo_id=? ORDER BY ordem LIMIT 1", (fluxo_id,)).fetchone()
+    delay0 = (p0['delay_dias'] if p0 else 0) or 0
+    envio = (datetime.now(TZ_SP) + timedelta(days=delay0)).strftime('%Y-%m-%d %H:%M:%S')
     conn.execute("""INSERT INTO fluxo_inscricoes
         (fluxo_id, lead_id, etapa_origem, status, passo_atual, proximo_envio_em, iniciado_por)
         VALUES (?,?,?,'ativo',0,?,?)""",
-        (fluxo_id, lead_id, etapa_origem, _agora_sp(), iniciado_por))
+        (fluxo_id, lead_id, etapa_origem, envio, iniciado_por))
     return (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
             else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
 
@@ -12450,85 +12517,153 @@ def _fluxo_autoiniciar_por_etapa(conn, lead_id, nova_etapa):
 
 
 _FLUXO_MAX_POR_RODADA = 50
+FLUXO_CANAIS = ('email', 'sms', 'whatsapp', 'botconversa')
+
+
+def _fluxo_executar_passo(conn, passo, lead):
+    """Executa 1 passo do fluxo pra 1 lead. Retorna (ok, erro).
+    Conteúdo do passo: personalizado (JSON gravado pelo editor) ou modelo
+    pronto do catálogo (FLUXO_TEMPLATES pra e-mail, SMS_TEMPLATES_LEAD pra SMS)."""
+    tpl = None
+    if passo.get('conteudo'):
+        try:
+            tpl = json.loads(passo['conteudo']) if isinstance(passo['conteudo'], str) else dict(passo['conteudo'])
+        except Exception:
+            tpl = None
+    if tpl is None:
+        tpl = FLUXO_TEMPLATES.get(passo['template'])
+
+    urow = conn.execute("SELECT id, nome, foto FROM usuarios WHERE id=?",
+                         (lead.get('responsavel_id'),)).fetchone()
+    consultor_nome = (urow['nome'] if urow else None) or 'Serenus'
+    foto_url = f"{_SITE_BASE_URL}/avatar/{urow['id']}" if urow and urow['foto'] else None
+    primeiro = (lead.get('nome') or '').strip().split(' ')[0].title()
+    link_wpp = f"https://wa.me/{_whatsapp_do_consultor(conn, lead.get('responsavel_id'))}"
+    canal = passo['canal']
+
+    if canal == 'email':
+        if not tpl or not tpl.get('paragrafos'):
+            return False, f"Passo de e-mail sem conteúdo (template: {passo['template']})"
+        email_lead = (lead.get('email') or '').strip()
+        if not email_lead or '@' not in email_lead:
+            return False, 'Lead sem e-mail válido'
+        assunto = _fluxo_render_texto(tpl.get('assunto') or 'Serenus Corretora',
+                                       nome=primeiro or 'tudo bem', consultor=consultor_nome)
+        corpo = _corpo_email_fluxo(tpl, lead.get('nome'), consultor_nome, link_wpp, foto_url)
+        ok = _enviar_email(email_lead, assunto, corpo, remetente_nome='Cotação de Plano de Saúde')
+        return ok, None if ok else (getattr(_enviar_email, 'ultimo_erro', None) or 'Falha ao enviar e-mail')
+
+    if not lead.get('telefone'):
+        return False, 'Lead sem telefone'
+
+    if canal == 'sms':
+        if passo['template'] in SMS_TEMPLATES_LEAD:
+            # Modelo aprovado na operadora: monta EXATAMENTE como no envio manual
+            # (link wa.me do consultor, nunca truncar nome) — ver _texto_sms_lead.
+            # split() em nome vazio devolve [] — o "or ['']" evita IndexError.
+            nome_lead = ((lead.get('nome') or '').split() or [''])[0]
+            consultor_primeiro = ((consultor_nome or '').split() or ['Serenus'])[0]
+            mensagem, _n = _texto_sms_lead(passo['template'], consultor_primeiro, link_wpp, nome_lead)
+        else:
+            mensagem = _fluxo_render_texto((tpl or {}).get('texto'),
+                                            nome=primeiro, consultor=consultor_nome, link=link_wpp).strip()
+        if not mensagem:
+            return False, 'Passo de SMS sem texto'
+        return _enviar_sms(lead['telefone'], mensagem)
+
+    texto = _fluxo_render_texto((tpl or {}).get('texto') or '\n\n'.join((tpl or {}).get('paragrafos') or []),
+                                 nome=primeiro, consultor=consultor_nome, link=link_wpp).strip()
+    if not texto:
+        return False, f'Passo de {canal} sem texto'
+    if canal == 'whatsapp':
+        token = _waspeed_token_do_usuario(conn, lead.get('responsavel_id'))
+        return _enviar_whatsapp_waspeed(token, lead.get('telefone'), texto)
+    if canal == 'botconversa':
+        return _enviar_botconversa_texto(lead.get('telefone'), texto)
+    return False, f'Canal desconhecido: {canal}'
+
 
 def _processar_fluxos_pendentes():
     """Motor de disparo: roda 1x/dia (+ fallback por request) e envia o passo
-    pendente de cada inscrição ativa cujo proximo_envio_em já chegou."""
+    pendente de cada inscrição ativa cujo proximo_envio_em já chegou.
+    delay_dias de cada passo = dias de espera após o passo anterior."""
     try:
         conn = db()
         agora = datetime.now(TZ_SP)
+        agora_str = _agora_sp()
         pendentes = conn.execute("""
             SELECT fi.*, f.nome AS fluxo_nome FROM fluxo_inscricoes fi
             JOIN fluxos f ON f.id = fi.fluxo_id
             WHERE fi.status='ativo' AND f.ativo=1 AND fi.proximo_envio_em <= ?
             ORDER BY fi.proximo_envio_em ASC LIMIT ?
-        """, (_agora_sp(), _FLUXO_MAX_POR_RODADA)).fetchall()
+        """, (agora_str, _FLUXO_MAX_POR_RODADA)).fetchall()
         enviados = 0
         for insc in pendentes:
             insc = dict(insc)
-            passos = conn.execute(
-                "SELECT * FROM fluxo_passos WHERE fluxo_id=? ORDER BY ordem", (insc['fluxo_id'],)).fetchall()
-            passo_idx = insc['passo_atual']
-            if passo_idx >= len(passos):
-                conn.execute("UPDATE fluxo_inscricoes SET status='concluido', finalizado_em=? WHERE id=?",
-                             (_agora_sp(), insc['id']))
+            # "Claim" atômico: empurra proximo_envio_em 15 min pra frente ANTES de
+            # enviar e comita na hora. O gunicorn roda 3 workers, cada um com seu
+            # scheduler — sem isso, os 3 leriam as mesmas inscrições às 08:00 e o
+            # lead receberia cada passo em triplicata. Só quem ganha o UPDATE
+            # (rowcount 1) processa; os outros veem 0 e pulam.
+            claim = conn.execute(
+                "UPDATE fluxo_inscricoes SET proximo_envio_em=? WHERE id=? AND status='ativo' AND proximo_envio_em<=?",
+                ((agora + timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S'), insc['id'], agora_str))
+            if getattr(claim, 'rowcount', 1) == 0:
                 continue
-            passo = dict(passos[passo_idx])
-            lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (insc['lead_id'],)).fetchone()
-            ok, erro = False, "Lead não encontrado"
-            if lead:
-                lead = dict(lead)
-                tpl = FLUXO_TEMPLATES.get(passo['template'])
-                if not tpl:
-                    ok, erro = False, f"Template desconhecido: {passo['template']}"
+            conn.commit()
+            try:
+                passos = [dict(p) for p in conn.execute(
+                    "SELECT * FROM fluxo_passos WHERE fluxo_id=? ORDER BY ordem", (insc['fluxo_id'],)).fetchall()]
+                passo_idx = insc['passo_atual']
+                if passo_idx >= len(passos):
+                    conn.execute("UPDATE fluxo_inscricoes SET status='concluido', finalizado_em=? WHERE id=?",
+                                 (_agora_sp(), insc['id']))
+                    conn.commit()
+                    continue
+                passo = passos[passo_idx]
+                lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (insc['lead_id'],)).fetchone()
+                if lead:
+                    ok, erro = _fluxo_executar_passo(conn, passo, dict(lead))
                 else:
-                    urow = conn.execute("SELECT id, nome, foto FROM usuarios WHERE id=?",
-                                         (lead.get('responsavel_id'),)).fetchone()
-                    consultor_nome = (urow['nome'] if urow else None) or 'Serenus'
-                    foto_url = f"{_SITE_BASE_URL}/avatar/{urow['id']}" if urow and urow['foto'] else None
-                    primeiro = (lead.get('nome') or '').strip().split(' ')[0].title()
-                    link_wpp = f"https://wa.me/{_whatsapp_do_consultor(conn, lead.get('responsavel_id'))}"
-                    if passo['canal'] == 'email':
-                        email_lead = (lead.get('email') or '').strip()
-                        if not email_lead or '@' not in email_lead:
-                            ok, erro = False, "Lead sem e-mail válido"
-                        else:
-                            assunto = tpl['assunto'].format(nome=primeiro or 'tudo bem')
-                            corpo = _corpo_email_fluxo(tpl, lead.get('nome'), consultor_nome, link_wpp, foto_url)
-                            ok = _enviar_email(email_lead, assunto, corpo, remetente_nome='Cotação de Plano de Saúde')
-                            erro = None if ok else (getattr(_enviar_email, 'ultimo_erro', None) or 'Falha ao enviar')
-                    elif passo['canal'] == 'sms':
-                        if not lead.get('telefone'):
-                            ok, erro = False, "Lead sem telefone"
-                        else:
-                            mensagem = f"{tpl['paragrafos'][0].format(nome=primeiro or '')} Fale com a Serenus: {link_wpp}"[:300]
-                            ok, erro = _enviar_sms(lead['telefone'], mensagem)
-                    elif passo['canal'] == 'whatsapp':
-                        token = _waspeed_token_do_usuario(conn, lead.get('responsavel_id'))
-                        mensagem = tpl['paragrafos'][0].format(nome=primeiro or '')
-                        ok, erro = _enviar_whatsapp_waspeed(token, lead.get('telefone'), mensagem)
-                    else:
-                        ok, erro = False, f"Canal desconhecido: {passo['canal']}"
-            conn.execute("INSERT INTO fluxo_envio_log (inscricao_id, passo_id, canal, ok, erro) VALUES (?,?,?,?,?)",
-                         (insc['id'], passo['id'], passo['canal'], 1 if ok else 0, erro))
-            proximo_passo_idx = passo_idx + 1
-            if proximo_passo_idx >= len(passos):
-                conn.execute("UPDATE fluxo_inscricoes SET status='concluido', passo_atual=?, finalizado_em=? WHERE id=?",
-                             (proximo_passo_idx, _agora_sp(), insc['id']))
-            else:
-                delay_atual = passo['delay_dias']
-                delay_prox = dict(passos[proximo_passo_idx])['delay_dias']
-                proximo_envio = agora + timedelta(days=max(1, delay_prox - delay_atual))
-                conn.execute("UPDATE fluxo_inscricoes SET passo_atual=?, proximo_envio_em=? WHERE id=?",
-                             (proximo_passo_idx, proximo_envio.strftime('%Y-%m-%d %H:%M:%S'), insc['id']))
-            if ok:
-                enviados += 1
-        conn.commit()
+                    ok, erro = False, 'Lead não encontrado'
+                conn.execute("INSERT INTO fluxo_envio_log (inscricao_id, passo_id, canal, ok, erro) VALUES (?,?,?,?,?)",
+                             (insc['id'], passo['id'], passo['canal'], 1 if ok else 0, erro))
+                proximo_passo_idx = passo_idx + 1
+                if proximo_passo_idx >= len(passos):
+                    conn.execute("UPDATE fluxo_inscricoes SET status='concluido', passo_atual=?, finalizado_em=? WHERE id=?",
+                                 (proximo_passo_idx, _agora_sp(), insc['id']))
+                else:
+                    delay_prox = passos[proximo_passo_idx]['delay_dias'] or 0
+                    proximo_envio = agora + timedelta(days=delay_prox)
+                    conn.execute("UPDATE fluxo_inscricoes SET passo_atual=?, proximo_envio_em=? WHERE id=?",
+                                 (proximo_passo_idx, proximo_envio.strftime('%Y-%m-%d %H:%M:%S'), insc['id']))
+                conn.commit()
+                if ok:
+                    enviados += 1
+            except Exception as e:
+                # Uma inscrição com dado ruim NUNCA pode envenenar a rodada inteira
+                # (travaria todos os fluxos pra sempre, sempre na mesma inscrição).
+                # Rollback + reagenda pra amanhã e segue pras próximas.
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                app.logger.error(f"[FLUXOS] Erro na inscrição {insc['id']} (lead {insc.get('lead_id')}): {e}")
+                try:
+                    conn.execute("UPDATE fluxo_inscricoes SET proximo_envio_em=? WHERE id=?",
+                                 ((agora + timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S'), insc['id']))
+                    conn.commit()
+                except Exception:
+                    pass
         close_db(conn)
         if enviados:
             app.logger.info(f"[FLUXOS] {enviados}/{len(pendentes)} passo(s) enviados")
     except Exception as e:
-        app.logger.error(f"[FLUXOS] ❌ {e}")
+        app.logger.error(f"[FLUXOS] Erro no motor: {e}")
+        try:
+            close_db(conn)
+        except Exception:
+            pass
 
 
 @app.route('/crm/fluxos')
@@ -12575,6 +12710,139 @@ def crm_fluxo_gatilho(fid):
     if not f:
         close_db(conn); return jsonify({"ok": False, "erro": "Fluxo não encontrado"}), 404
     conn.execute("UPDATE fluxos SET gatilho_etapa=? WHERE id=?", (gatilho, fid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/fluxos/novo', methods=['POST'])
+@login_required
+@admin_required
+def crm_fluxo_novo():
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    if not nome:
+        return jsonify({"ok": False, "erro": "Digite o nome do fluxo"}), 400
+    conn = db()
+    # Nasce desativado (igual ao WaSpeed): só liga depois de montar os passos.
+    conn.execute("INSERT INTO fluxos (nome, descricao, gatilho_etapa, ativo) VALUES (?,?,NULL,0)",
+                 (nome, (d.get('descricao') or '').strip()))
+    fid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "id": fid})
+
+
+@app.route('/crm/fluxos/<int:fid>')
+@login_required
+@admin_required
+def crm_fluxo_editor(fid):
+    """Editor visual do fluxo (canvas de blocos, modelado no construtor do WaSpeed)."""
+    conn = db()
+    fluxo = conn.execute("SELECT * FROM fluxos WHERE id=?", (fid,)).fetchone()
+    if not fluxo:
+        close_db(conn); return redirect('/crm/fluxos')
+    fluxo = dict(fluxo)
+    passos = []
+    for p in conn.execute("SELECT * FROM fluxo_passos WHERE fluxo_id=? ORDER BY ordem", (fid,)).fetchall():
+        p = dict(p)
+        try:
+            conteudo = json.loads(p['conteudo']) if p.get('conteudo') else None
+        except Exception:
+            conteudo = None
+        # Só campos escalares pro |tojson (criado_em vem como datetime no Postgres)
+        passos.append({'canal': p['canal'], 'template': p['template'],
+                       'delay_dias': p['delay_dias'], 'conteudo': conteudo})
+    etapas = [dict(e) for e in carregar_etapas_crm(conn)]
+    close_db(conn)
+    return render_template('crm_fluxo_editor.html',
+                           fluxo={'id': fluxo['id'], 'nome': fluxo['nome'],
+                                  'descricao': fluxo.get('descricao') or '',
+                                  'ativo': bool(fluxo.get('ativo')),
+                                  'gatilho_etapa': fluxo.get('gatilho_etapa')},
+                           passos=passos, etapas=etapas,
+                           email_tpls=FLUXO_TEMPLATES,
+                           sms_tpls={k: {'nome': v['nome'], 'exemplo': v['sem_nome']}
+                                     for k, v in SMS_TEMPLATES_LEAD.items()})
+
+
+@app.route('/crm/fluxos/<int:fid>/salvar', methods=['POST'])
+@login_required
+@admin_required
+def crm_fluxo_salvar(fid):
+    """Salva nome, gatilho e a lista completa de passos do editor (substitui tudo).
+    Leads já inscritos continuam de onde estão — alterações valem pros próximos envios."""
+    d = request.json or {}
+    conn = db()
+    f = conn.execute("SELECT id FROM fluxos WHERE id=?", (fid,)).fetchone()
+    if not f:
+        close_db(conn); return jsonify({"ok": False, "erro": "Fluxo não encontrado"}), 404
+    nome = (d.get('nome') or '').strip()
+    if not nome:
+        close_db(conn); return jsonify({"ok": False, "erro": "Nome do fluxo não pode ficar vazio"}), 400
+    gatilho = (d.get('gatilho_etapa') or '').strip() or None
+    if gatilho and gatilho not in [e['id'] for e in carregar_etapas_crm(conn)]:
+        close_db(conn); return jsonify({"ok": False, "erro": "Etapa de gatilho inválida"}), 400
+    passos = d.get('passos')
+    if not isinstance(passos, list) or len(passos) > 30:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lista de passos inválida (máx. 30)"}), 400
+    validados = []
+    for p in passos:
+        canal = (p.get('canal') or '').strip()
+        if canal not in FLUXO_CANAIS:
+            close_db(conn); return jsonify({"ok": False, "erro": f"Canal inválido: {canal}"}), 400
+        try:
+            delay = max(0, min(365, int(p.get('delay_dias') or 0)))
+        except Exception:
+            delay = 0
+        template = (p.get('template') or 'custom').strip()
+        conteudo = p.get('conteudo')
+        if template != 'custom':
+            if canal == 'email' and template not in FLUXO_TEMPLATES:
+                close_db(conn); return jsonify({"ok": False, "erro": f"Modelo de e-mail inválido: {template}"}), 400
+            if canal == 'sms' and template not in SMS_TEMPLATES_LEAD:
+                close_db(conn); return jsonify({"ok": False, "erro": f"Modelo de SMS inválido: {template}"}), 400
+            if canal in ('whatsapp', 'botconversa'):
+                close_db(conn); return jsonify({"ok": False, "erro": "WhatsApp/BotConversa usam texto próprio, não modelo"}), 400
+            conteudo = None
+        else:
+            if not isinstance(conteudo, dict):
+                close_db(conn); return jsonify({"ok": False, "erro": "Passo personalizado sem conteúdo"}), 400
+            if canal == 'email':
+                assunto = (conteudo.get('assunto') or '').strip()
+                parags = [str(x).strip() for x in (conteudo.get('paragrafos') or []) if str(x or '').strip()]
+                if not assunto or not parags:
+                    close_db(conn); return jsonify({"ok": False, "erro": "E-mail personalizado precisa de assunto e corpo"}), 400
+                conteudo = {'assunto': assunto, 'paragrafos': parags,
+                            'cta': (conteudo.get('cta') or '').strip() or 'Falar com o consultor no WhatsApp'}
+            else:
+                texto = (conteudo.get('texto') or '').strip()
+                if not texto:
+                    close_db(conn); return jsonify({"ok": False, "erro": f"Passo de {canal} sem texto"}), 400
+                conteudo = {'texto': texto}
+        validados.append((canal, template, delay,
+                          json.dumps(conteudo, ensure_ascii=False) if conteudo else None))
+    conn.execute("UPDATE fluxos SET nome=?, descricao=?, gatilho_etapa=? WHERE id=?",
+                 (nome, (d.get('descricao') or '').strip(), gatilho, fid))
+    conn.execute("DELETE FROM fluxo_passos WHERE fluxo_id=?", (fid,))
+    for i, (canal, template, delay, conteudo) in enumerate(validados):
+        conn.execute("""INSERT INTO fluxo_passos (fluxo_id, ordem, canal, template, delay_dias, conteudo)
+                        VALUES (?,?,?,?,?,?)""", (fid, i, canal, template, delay, conteudo))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "passos": len(validados)})
+
+
+@app.route('/crm/fluxos/<int:fid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_fluxo_excluir(fid):
+    conn = db()
+    f = conn.execute("SELECT id FROM fluxos WHERE id=?", (fid,)).fetchone()
+    if not f:
+        close_db(conn); return jsonify({"ok": False, "erro": "Fluxo não encontrado"}), 404
+    conn.execute("UPDATE fluxo_inscricoes SET status='cancelado', finalizado_em=? WHERE fluxo_id=? AND status='ativo'",
+                 (_agora_sp(), fid))
+    conn.execute("DELETE FROM fluxo_passos WHERE fluxo_id=?", (fid,))
+    conn.execute("DELETE FROM fluxos WHERE id=?", (fid,))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 

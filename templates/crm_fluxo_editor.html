@@ -1,0 +1,468 @@
+{% extends "base.html" %}
+{% block title %}Editor de Fluxo — {{ fluxo.nome }}{% endblock %}
+
+{% block head %}
+<style>
+  .ed-wrap { display:flex; gap:0; border:1px solid var(--borda); border-radius:14px; overflow:hidden;
+             height:calc(100vh - 170px); min-height:520px; background:var(--panel); }
+  /* ── sidebar esquerda ── */
+  .ed-side { width:250px; flex-shrink:0; border-right:1px solid var(--borda); overflow-y:auto; padding:16px 14px; background:var(--panel); }
+  .ed-side-titulo { display:flex; align-items:center; gap:8px; font-family:'Sora',sans-serif; font-size:12.5px;
+                    font-weight:700; color:var(--texto); margin:0 0 10px; }
+  .ed-side-titulo .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .ed-acion { margin-bottom:22px; }
+  .ed-acion select, .ed-acion label { width:100%; }
+  .ed-acion .opcao { display:flex; align-items:center; gap:8px; background:var(--panel-2); border:1px solid var(--borda);
+                     border-radius:8px; padding:9px 10px; font-size:12px; color:var(--texto); margin-bottom:6px; cursor:pointer; }
+  .ed-acion .opcao input { accent-color:var(--azul); }
+  .ed-acion select { box-sizing:border-box; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px;
+                     padding:8px 10px; font-size:12px; color:var(--texto); margin-top:2px; }
+  .ed-blocos { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .ed-bloco-btn { background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:14px 8px;
+                  display:flex; flex-direction:column; align-items:center; gap:8px; cursor:pointer;
+                  font-size:11.5px; color:var(--texto); text-align:center; transition:border-color .15s; }
+  .ed-bloco-btn:hover { border-color:var(--azul); }
+  .ed-bloco-btn svg { width:20px; height:20px; }
+  /* ── canvas ── */
+  .ed-canvas { flex:1; overflow-y:auto; padding:34px 20px 60px;
+               background-image:radial-gradient(var(--borda) 1px, transparent 1px); background-size:26px 26px; }
+  .ed-chain { max-width:380px; margin:0 auto; display:flex; flex-direction:column; align-items:center; }
+  .ed-inicio { width:100%; background:var(--panel); border:2px solid var(--azul); border-radius:14px;
+               padding:16px 18px; display:flex; align-items:center; gap:12px; }
+  .ed-inicio svg { width:22px; height:22px; color:var(--texto); flex-shrink:0; }
+  .ed-inicio .t1 { font-size:15px; font-weight:800; color:var(--texto); }
+  .ed-inicio .t2 { font-size:11px; color:var(--cinza); margin-top:2px; }
+  .ed-conector { display:flex; flex-direction:column; align-items:center; padding:2px 0; }
+  .ed-conector .linha { width:2px; height:16px; background:var(--borda); }
+  .ed-conector .delay { font-size:10.5px; color:var(--cinza); background:var(--panel); border:1px solid var(--borda);
+                        border-radius:20px; padding:2px 10px; margin:2px 0; }
+  .ed-passo { width:100%; background:var(--panel); border:1px solid var(--borda); border-radius:14px;
+              padding:13px 14px; cursor:pointer; transition:border-color .15s; position:relative; }
+  .ed-passo:hover { border-color:var(--azul); }
+  .ed-passo.sel { border:2px solid var(--azul); padding:12px 13px; }
+  .ed-passo-topo { display:flex; align-items:center; gap:9px; }
+  .ed-passo-icone { width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .ed-passo-icone svg { width:16px; height:16px; color:#fff; }
+  .ed-passo-canal { font-size:13px; font-weight:700; color:var(--texto); }
+  .ed-passo-prev { font-size:11.5px; color:var(--cinza); margin-top:6px; line-height:1.4; overflow:hidden;
+                   display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; word-break:break-word; }
+  .ed-passo-acoes { position:absolute; top:10px; right:10px; display:none; gap:4px; }
+  .ed-passo:hover .ed-passo-acoes, .ed-passo.sel .ed-passo-acoes { display:flex; }
+  .ed-mini-btn { width:24px; height:24px; border-radius:6px; border:1px solid var(--borda); background:var(--panel-2);
+                 color:var(--cinza); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:12px; }
+  .ed-mini-btn:hover { border-color:var(--azul); color:var(--texto); }
+  .ed-mini-btn.rm:hover { border-color:#f43f5e; color:#f43f5e; }
+  .ed-vazio { font-size:12px; color:var(--cinza-2); text-align:center; padding:18px 0; }
+  /* ── painel de config à direita ── */
+  .ed-config { width:330px; flex-shrink:0; border-left:1px solid var(--borda); overflow-y:auto; padding:18px 16px;
+               background:var(--panel); display:none; }
+  .ed-config.aberto { display:block; }
+  .ed-config h3 { font-family:'Sora',sans-serif; font-size:13.5px; color:var(--texto); margin:0 0 14px; }
+  .ed-campo { margin-bottom:12px; }
+  .ed-campo label { display:block; font-size:11px; font-weight:700; color:var(--cinza); text-transform:uppercase;
+                    letter-spacing:.4px; margin-bottom:5px; }
+  .ed-campo input, .ed-campo select, .ed-campo textarea { width:100%; box-sizing:border-box; background:var(--panel-2);
+      border:1px solid var(--borda); border-radius:8px; padding:9px 10px; font-size:12.5px; color:var(--texto); font-family:inherit; }
+  .ed-campo textarea { resize:vertical; line-height:1.55; }
+  .ed-nota { font-size:11px; color:var(--cinza-2); line-height:1.5; margin-bottom:12px; }
+  .ed-nota.alerta { color:var(--amarelo, #facc15); }
+  .ed-preview { background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:10px 12px;
+                font-size:11.5px; color:var(--cinza); line-height:1.55; margin-bottom:12px; max-height:220px; overflow-y:auto; white-space:pre-wrap; }
+  /* ── topo ── */
+  .ed-top { display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+  .ed-top input.nome { background:var(--panel); border:1px solid var(--borda); border-radius:8px; padding:9px 12px;
+                       font-size:14px; font-weight:700; color:var(--texto); min-width:260px; flex:1; max-width:420px; }
+  .btn-azul { background:var(--azul); color:#fff; border:none; padding:10px 22px; border-radius:8px;
+              font-size:13px; font-weight:700; cursor:pointer; }
+  .btn-azul.dirty { box-shadow:0 0 0 2px var(--verde-soft, rgba(31,216,164,.3)); }
+  .fx-switch { position:relative; width:38px; height:20px; flex-shrink:0; }
+  .fx-switch input { opacity:0; width:0; height:0; }
+  .fx-slider { position:absolute; inset:0; background:var(--panel-3, #333a4d); border-radius:20px; transition:.2s; cursor:pointer; }
+  .fx-slider:before { content:""; position:absolute; height:14px; width:14px; left:3px; top:3px; background:#8c93a8; border-radius:50%; transition:.2s; }
+  .fx-switch input:checked + .fx-slider { background:var(--azul); }
+  .fx-switch input:checked + .fx-slider:before { transform:translateX(18px); background:#fff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ed-top">
+  <button class="btn-outline btn-sm" id="btn-voltar" title="Voltar para a lista de fluxos">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="vertical-align:-2px;"><polyline points="15 18 9 12 15 6"/></svg>
+    Fluxos
+  </button>
+  <input type="text" class="nome" id="fluxo-nome" value="{{ fluxo.nome }}" placeholder="Nome do fluxo">
+  <label class="fx-switch" title="Ativar/desativar o fluxo">
+    <input type="checkbox" id="fluxo-ativo" {% if fluxo.ativo %}checked{% endif %}>
+    <span class="fx-slider"></span>
+  </label>
+  <span id="ativo-label" style="font-size:12px; color:var(--cinza);">{{ 'Ativo' if fluxo.ativo else 'Desativado' }}</span>
+  <button class="btn-azul" id="btn-salvar">Salvar fluxo</button>
+</div>
+
+<div class="ed-wrap">
+  <div class="ed-side">
+    <div class="ed-acion">
+      <div class="ed-side-titulo"><span class="dot" style="background:var(--azul);"></span>Acionamento</div>
+      <label class="opcao"><input type="radio" name="acion" value="manual"> Manual (pela ficha do lead)</label>
+      <label class="opcao"><input type="radio" name="acion" value="etapa"> Ao entrar na etapa do funil:</label>
+      <select id="acion-etapa">
+        {% for e in etapas %}
+        <option value="{{ e.id }}">{{ e.nome }}</option>
+        {% endfor %}
+      </select>
+      <div class="ed-nota" style="margin-top:8px;">Com gatilho de etapa, o lead entra sozinho no fluxo ao chegar nela e os envios restantes sao cancelados se ele sair dela.</div>
+    </div>
+
+    <div class="ed-side-titulo"><span class="dot" style="background:var(--amarelo, #facc15);"></span>Blocos de acoes (4)</div>
+    <div class="ed-blocos">
+      <div class="ed-bloco-btn" data-canal="email" style="color:#3b82f6;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>
+        <span style="color:var(--texto);">Enviar E-mail</span>
+      </div>
+      <div class="ed-bloco-btn" data-canal="sms" style="color:#f59e0b;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span style="color:var(--texto);">Enviar SMS</span>
+      </div>
+      <div class="ed-bloco-btn" data-canal="whatsapp" style="color:#25d366;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z"/></svg>
+        <span style="color:var(--texto);">WhatsApp (WaSpeed)</span>
+      </div>
+      <div class="ed-bloco-btn" data-canal="botconversa" style="color:#8b5cf6;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h.01M12 12h.01M16 12h.01"/></svg>
+        <span style="color:var(--texto);">BotConversa</span>
+      </div>
+    </div>
+    <div class="ed-nota" style="margin-top:10px;">Clique num bloco para adicionar ao fim do fluxo. Depois clique no passo no meio da tela para configurar.</div>
+  </div>
+
+  <div class="ed-canvas">
+    <div class="ed-chain" id="chain"></div>
+  </div>
+
+  <div class="ed-config" id="config"></div>
+</div>
+
+<script>
+var FLUXO = {{ fluxo|tojson }};
+var ETAPAS = {{ etapas|tojson }};
+var EMAIL_TPLS = {{ email_tpls|tojson }};
+var SMS_TPLS = {{ sms_tpls|tojson }};
+
+var CANAIS = {
+  email:       {nome:'Enviar E-mail',       cor:'#3b82f6'},
+  sms:         {nome:'Enviar SMS',          cor:'#f59e0b'},
+  whatsapp:    {nome:'WhatsApp (WaSpeed)',  cor:'#25d366'},
+  botconversa: {nome:'BotConversa',         cor:'#8b5cf6'}
+};
+
+// Estado interno: conteudo de e-mail personalizado usa 'corpo' (string) no editor;
+// vira 'paragrafos' (lista, separada por linha em branco) na hora de salvar.
+var passos = ({{ passos|tojson }}).map(function(p){
+  var c = null;
+  if (p.conteudo) {
+    if (p.canal === 'email') c = {assunto:p.conteudo.assunto||'', corpo:(p.conteudo.paragrafos||[]).join('\n\n'), cta:p.conteudo.cta||''};
+    else c = {texto:p.conteudo.texto||''};
+  }
+  return {canal:p.canal, template:p.template, delay_dias:p.delay_dias||0, conteudo:c};
+});
+var sel = -1;
+var dirty = false;
+
+function marcaDirty(){ dirty = true; document.getElementById('btn-salvar').classList.add('dirty'); }
+
+function previewPasso(p){
+  if (p.canal === 'email'){
+    if (p.template !== 'custom' && EMAIL_TPLS[p.template]) return EMAIL_TPLS[p.template].assunto;
+    return (p.conteudo && p.conteudo.assunto) || '(sem assunto — clique para configurar)';
+  }
+  if (p.canal === 'sms' && p.template !== 'custom' && SMS_TPLS[p.template]) return 'Modelo aprovado: ' + SMS_TPLS[p.template].nome;
+  return (p.conteudo && p.conteudo.texto) || '(sem texto — clique para configurar)';
+}
+
+function iconeCanal(canal){
+  var svgs = {
+    email: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
+    sms: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    whatsapp: '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z"/>',
+    botconversa: '<circle cx="12" cy="12" r="10"/><path d="M8 12h.01M12 12h.01M16 12h.01"/>'
+  };
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' + (svgs[canal]||'') + '</svg>';
+}
+
+function textoAcionamento(){
+  var modo = document.querySelector('input[name="acion"]:checked').value;
+  if (modo === 'manual') return 'Manual — iniciado pela ficha do lead no CRM';
+  var slug = document.getElementById('acion-etapa').value;
+  var et = ETAPAS.find(function(e){ return e.id === slug; });
+  return 'Quando o lead entrar na etapa: ' + (et ? et.nome : slug);
+}
+
+function renderChain(){
+  var chain = document.getElementById('chain');
+  chain.innerHTML = '';
+
+  var inicio = document.createElement('div');
+  inicio.className = 'ed-inicio';
+  inicio.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>';
+  var tx = document.createElement('div');
+  var t1 = document.createElement('div'); t1.className='t1'; t1.textContent='Inicio';
+  var t2 = document.createElement('div'); t2.className='t2'; t2.textContent = textoAcionamento();
+  tx.appendChild(t1); tx.appendChild(t2);
+  inicio.appendChild(tx);
+  chain.appendChild(inicio);
+
+  if (!passos.length){
+    var v = document.createElement('div'); v.className='ed-vazio';
+    v.textContent = 'Nenhum passo ainda. Adicione um bloco de acao pela barra da esquerda.';
+    chain.appendChild(v);
+  }
+
+  passos.forEach(function(p, i){
+    var con = document.createElement('div'); con.className = 'ed-conector';
+    var l1 = document.createElement('div'); l1.className='linha';
+    var dl = document.createElement('div'); dl.className='delay';
+    dl.textContent = p.delay_dias > 0
+      ? 'aguarda ' + p.delay_dias + ' dia' + (p.delay_dias > 1 ? 's' : '')
+      : (i === 0 ? 'imediato' : 'mesmo dia');
+    var l2 = document.createElement('div'); l2.className='linha';
+    con.appendChild(l1); con.appendChild(dl); con.appendChild(l2);
+    chain.appendChild(con);
+
+    var bloco = document.createElement('div');
+    bloco.className = 'ed-passo' + (i === sel ? ' sel' : '');
+    var topo = document.createElement('div'); topo.className='ed-passo-topo';
+    var ic = document.createElement('div'); ic.className='ed-passo-icone';
+    ic.style.background = CANAIS[p.canal].cor; ic.innerHTML = iconeCanal(p.canal);
+    var nm = document.createElement('div'); nm.className='ed-passo-canal'; nm.textContent = CANAIS[p.canal].nome;
+    topo.appendChild(ic); topo.appendChild(nm);
+    var pv = document.createElement('div'); pv.className='ed-passo-prev'; pv.textContent = previewPasso(p);
+    bloco.appendChild(topo); bloco.appendChild(pv);
+
+    var acoes = document.createElement('div'); acoes.className='ed-passo-acoes';
+    [['subir','↑'], ['descer','↓'], ['rm','×']].forEach(function(par){
+      var b = document.createElement('button');
+      b.className = 'ed-mini-btn' + (par[0]==='rm' ? ' rm' : '');
+      b.textContent = par[1];
+      b.title = par[0]==='rm' ? 'Remover passo' : (par[0]==='subir' ? 'Mover para cima' : 'Mover para baixo');
+      b.addEventListener('click', function(e){
+        e.stopPropagation();
+        if (par[0]==='rm'){ passos.splice(i,1); if (sel===i) sel=-1; else if (sel>i) sel--; }
+        if (par[0]==='subir' && i>0){ var t=passos[i-1]; passos[i-1]=passos[i]; passos[i]=t; if(sel===i)sel=i-1; else if(sel===i-1)sel=i; }
+        if (par[0]==='descer' && i<passos.length-1){ var t2=passos[i+1]; passos[i+1]=passos[i]; passos[i]=t2; if(sel===i)sel=i+1; else if(sel===i+1)sel=i; }
+        marcaDirty(); renderChain(); renderConfig();
+      });
+      acoes.appendChild(b);
+    });
+    bloco.appendChild(acoes);
+
+    bloco.addEventListener('click', function(){ sel = i; renderChain(); renderConfig(); });
+    chain.appendChild(bloco);
+  });
+}
+
+function campo(labelTxt, el){
+  var w = document.createElement('div'); w.className='ed-campo';
+  var l = document.createElement('label'); l.textContent = labelTxt;
+  w.appendChild(l); w.appendChild(el);
+  return w;
+}
+
+function renderConfig(){
+  var cfg = document.getElementById('config');
+  if (sel < 0 || !passos[sel]){ cfg.classList.remove('aberto'); cfg.innerHTML=''; return; }
+  cfg.classList.add('aberto');
+  cfg.innerHTML = '';
+  var p = passos[sel];
+
+  var h = document.createElement('h3'); h.textContent = 'Passo ' + (sel+1) + ' — ' + CANAIS[p.canal].nome;
+  cfg.appendChild(h);
+
+  var delay = document.createElement('input');
+  delay.type='number'; delay.min='0'; delay.max='365'; delay.value = p.delay_dias;
+  delay.addEventListener('input', function(){ p.delay_dias = Math.max(0, parseInt(delay.value||'0')); marcaDirty(); renderChain(); });
+  cfg.appendChild(campo(sel === 0 ? 'Dias apos a inscricao no fluxo' : 'Dias apos o passo anterior', delay));
+
+  var hint = document.createElement('div'); hint.className='ed-nota';
+  hint.textContent = 'Placeholders disponiveis no texto: {nome} (lead), {consultor}, {link} (WhatsApp do consultor).';
+
+  if (p.canal === 'email'){
+    var modo = document.createElement('select');
+    modo.innerHTML = '<option value="modelo">Modelo pronto (aprovado)</option><option value="custom">Personalizado</option>';
+    modo.value = p.template === 'custom' ? 'custom' : 'modelo';
+    cfg.appendChild(campo('Conteudo', modo));
+
+    var area = document.createElement('div'); cfg.appendChild(area);
+    function renderEmail(){
+      area.innerHTML = '';
+      if (modo.value === 'modelo'){
+        // Passo salvo com chave de modelo que nao existe mais no catalogo:
+        // cai no primeiro modelo em vez de quebrar o painel com TypeError.
+        if (p.template === 'custom' || !EMAIL_TPLS[p.template]) p.template = Object.keys(EMAIL_TPLS)[0];
+        var selT = document.createElement('select');
+        Object.keys(EMAIL_TPLS).forEach(function(k){
+          var o = document.createElement('option'); o.value = k;
+          o.textContent = EMAIL_TPLS[k].assunto.replace('{nome}', 'Fulano');
+          selT.appendChild(o);
+        });
+        selT.value = p.template;
+        var prev = document.createElement('div'); prev.className='ed-preview';
+        function attP(){ prev.textContent = 'Assunto: ' + EMAIL_TPLS[selT.value].assunto + '\n\n' + EMAIL_TPLS[selT.value].paragrafos.join('\n\n') + '\n\nBotao: ' + EMAIL_TPLS[selT.value].cta; }
+        attP();
+        selT.addEventListener('change', function(){ p.template = selT.value; attP(); marcaDirty(); renderChain(); });
+        area.appendChild(campo('Modelo de e-mail', selT));
+        area.appendChild(prev);
+      } else {
+        p.template = 'custom';
+        if (!p.conteudo || p.conteudo.texto !== undefined) p.conteudo = {assunto:'', corpo:'', cta:''};
+        var ass = document.createElement('input'); ass.type='text'; ass.value = p.conteudo.assunto;
+        ass.placeholder = 'Ex: {nome}, sua cotacao esta pronta';
+        ass.addEventListener('input', function(){ p.conteudo.assunto = ass.value; marcaDirty(); renderChain(); });
+        var corpo = document.createElement('textarea'); corpo.rows = 10; corpo.value = p.conteudo.corpo;
+        corpo.placeholder = 'Escreva o e-mail. Separe os paragrafos com uma linha em branco.';
+        corpo.addEventListener('input', function(){ p.conteudo.corpo = corpo.value; marcaDirty(); });
+        var cta = document.createElement('input'); cta.type='text'; cta.value = p.conteudo.cta;
+        cta.placeholder = 'Texto do botao (ex: Quero minha cotacao)';
+        cta.addEventListener('input', function(){ p.conteudo.cta = cta.value; marcaDirty(); });
+        area.appendChild(campo('Assunto', ass));
+        area.appendChild(campo('Corpo do e-mail', corpo));
+        area.appendChild(campo('Botao (leva ao WhatsApp do consultor)', cta));
+        area.appendChild(hint.cloneNode(true));
+      }
+    }
+    modo.addEventListener('change', function(){ marcaDirty(); renderEmail(); renderChain(); });
+    renderEmail();
+
+  } else if (p.canal === 'sms'){
+    var modoS = document.createElement('select');
+    modoS.innerHTML = '<option value="modelo">Modelo aprovado na operadora</option><option value="custom">Texto livre</option>';
+    modoS.value = p.template === 'custom' ? 'custom' : 'modelo';
+    cfg.appendChild(campo('Conteudo', modoS));
+    var areaS = document.createElement('div'); cfg.appendChild(areaS);
+    function renderSms(){
+      areaS.innerHTML = '';
+      if (modoS.value === 'modelo'){
+        if (p.template === 'custom' || !SMS_TPLS[p.template]) p.template = Object.keys(SMS_TPLS)[0];
+        var selS = document.createElement('select');
+        Object.keys(SMS_TPLS).forEach(function(k){
+          var o = document.createElement('option'); o.value = k; o.textContent = SMS_TPLS[k].nome;
+          selS.appendChild(o);
+        });
+        selS.value = p.template;
+        var prevS = document.createElement('div'); prevS.className='ed-preview';
+        function attS(){ prevS.textContent = SMS_TPLS[selS.value].exemplo; }
+        attS();
+        selS.addEventListener('change', function(){ p.template = selS.value; attS(); marcaDirty(); renderChain(); });
+        areaS.appendChild(campo('Modelo de SMS', selS));
+        areaS.appendChild(prevS);
+        var n1 = document.createElement('div'); n1.className='ed-nota';
+        n1.textContent = 'O link do WhatsApp do consultor responsavel pelo lead entra automatico. Modelos ja aprovados na operadora de telefonia — nao sao filtrados como spam.';
+        areaS.appendChild(n1);
+      } else {
+        p.template = 'custom';
+        if (!p.conteudo) p.conteudo = {texto:''};
+        var txt = document.createElement('textarea'); txt.rows = 5; txt.value = p.conteudo.texto || '';
+        txt.placeholder = 'Texto do SMS (max ~160 caracteres)';
+        txt.addEventListener('input', function(){ p.conteudo.texto = txt.value; marcaDirty(); renderChain(); });
+        areaS.appendChild(campo('Texto do SMS', txt));
+        var n2 = document.createElement('div'); n2.className='ed-nota alerta';
+        n2.textContent = 'Atencao: texto fora dos modelos aprovados pode ser filtrado como spam pela operadora e nao chegar, mesmo a API confirmando o envio (ja aconteceu).';
+        areaS.appendChild(n2);
+        areaS.appendChild(hint.cloneNode(true));
+      }
+    }
+    modoS.addEventListener('change', function(){ marcaDirty(); renderSms(); renderChain(); });
+    renderSms();
+
+  } else {
+    p.template = 'custom';
+    if (!p.conteudo) p.conteudo = {texto:''};
+    var txtW = document.createElement('textarea'); txtW.rows = 8; txtW.value = p.conteudo.texto || '';
+    txtW.placeholder = 'Mensagem de WhatsApp. Use {nome}, {consultor} e {link}.';
+    txtW.addEventListener('input', function(){ p.conteudo.texto = txtW.value; marcaDirty(); renderChain(); });
+    cfg.appendChild(campo('Texto da mensagem', txtW));
+    cfg.appendChild(hint.cloneNode(true));
+    var n3 = document.createElement('div'); n3.className='ed-nota' + (p.canal === 'botconversa' ? ' alerta' : '');
+    n3.textContent = p.canal === 'botconversa'
+      ? 'BotConversa (WhatsApp oficial/Meta): so entrega se o contato conversou nas ultimas 24h com o numero oficial. Fora da janela, o envio falha e fica registrado no log.'
+      : 'Enviado pelo WaSpeed com o token do consultor responsavel pelo lead (ou o token global).';
+    cfg.appendChild(n3);
+  }
+}
+
+// ── acionamento ──
+(function(){
+  var manual = document.querySelector('input[name="acion"][value="manual"]');
+  var etapa = document.querySelector('input[name="acion"][value="etapa"]');
+  var selE = document.getElementById('acion-etapa');
+  if (FLUXO.gatilho_etapa){ etapa.checked = true; selE.value = FLUXO.gatilho_etapa; }
+  else { manual.checked = true; }
+  [manual, etapa].forEach(function(r){ r.addEventListener('change', function(){ marcaDirty(); renderChain(); }); });
+  selE.addEventListener('change', function(){ etapa.checked = true; marcaDirty(); renderChain(); });
+})();
+
+// ── paleta de blocos ──
+document.querySelectorAll('.ed-bloco-btn').forEach(function(b){
+  b.addEventListener('click', function(){
+    var canal = b.dataset.canal;
+    var novo = {canal: canal, delay_dias: passos.length ? 2 : 0, template: 'custom', conteudo: {texto:''}};
+    if (canal === 'email'){ novo.template = Object.keys(EMAIL_TPLS)[0]; novo.conteudo = null; }
+    if (canal === 'sms'){ novo.template = Object.keys(SMS_TPLS)[0]; novo.conteudo = null; }
+    passos.push(novo);
+    sel = passos.length - 1;
+    marcaDirty(); renderChain(); renderConfig();
+    var chainEl = document.querySelector('.ed-canvas');
+    chainEl.scrollTop = chainEl.scrollHeight;
+  });
+});
+
+// ── toggle ativo ──
+document.getElementById('fluxo-ativo').addEventListener('change', function(){
+  var el = this;
+  fetch('/crm/fluxos/' + FLUXO.id + '/toggle', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) document.getElementById('ativo-label').textContent = d.ativo ? 'Ativo' : 'Desativado';
+      else { alert(d.erro || 'Erro'); el.checked = !el.checked; }
+    });
+});
+
+// ── salvar ──
+document.getElementById('btn-salvar').addEventListener('click', function(){
+  var payload = {
+    nome: document.getElementById('fluxo-nome').value.trim(),
+    descricao: FLUXO.descricao || '',
+    gatilho_etapa: document.querySelector('input[name="acion"]:checked').value === 'etapa'
+      ? document.getElementById('acion-etapa').value : '',
+    passos: passos.map(function(p){
+      var out = {canal:p.canal, template:p.template, delay_dias:p.delay_dias, conteudo:null};
+      if (p.template === 'custom'){
+        if (p.canal === 'email'){
+          out.conteudo = {assunto:(p.conteudo.assunto||'').trim(), cta:(p.conteudo.cta||'').trim(),
+                          paragrafos:(p.conteudo.corpo||'').split(/\n\s*\n/).map(function(s){return s.trim();}).filter(Boolean)};
+        } else {
+          out.conteudo = {texto:(p.conteudo.texto||'').trim()};
+        }
+      }
+      return out;
+    })
+  };
+  fetch('/crm/fluxos/' + FLUXO.id + '/salvar', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok){ dirty = false; document.getElementById('btn-salvar').classList.remove('dirty');
+                 document.getElementById('btn-salvar').textContent = 'Salvo';
+                 setTimeout(function(){ document.getElementById('btn-salvar').textContent = 'Salvar fluxo'; }, 1600); }
+      else alert(d.erro || 'Erro ao salvar');
+    });
+});
+
+document.getElementById('fluxo-nome').addEventListener('input', marcaDirty);
+document.getElementById('btn-voltar').addEventListener('click', function(){
+  if (dirty && !confirm('Ha alteracoes nao salvas. Sair mesmo assim?')) return;
+  location.href = '/crm/fluxos';
+});
+
+renderChain();
+</script>
+{% endblock %}

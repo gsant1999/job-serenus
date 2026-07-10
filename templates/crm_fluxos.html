@@ -1,85 +1,150 @@
 {% extends "base.html" %}
-{% block title %}Fluxos de Nutrição{% endblock %}
+{% block title %}Fluxos{% endblock %}
 
 {% block head %}
 <style>
-  .box { max-width:900px; background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:22px; margin-bottom:16px; }
-  .box h2 { font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin:0 0 12px; }
-  .box p { font-size:13px; color:var(--cinza); line-height:1.6; }
-  .fluxo-card { max-width:900px; background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:20px 22px; margin-bottom:14px; }
-  .fluxo-topo { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px; }
-  .fluxo-nome { font-size:15px; font-weight:700; color:var(--texto); }
-  .fluxo-desc { font-size:12.5px; color:var(--cinza); margin-bottom:14px; }
-  .fluxo-stats { display:flex; gap:16px; margin-bottom:14px; }
-  .fluxo-stat { font-size:12px; color:var(--cinza); background:var(--panel-2); border-radius:20px; padding:4px 12px; }
-  .fluxo-passos { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
-  .fluxo-passo { font-size:11.5px; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:6px 10px; color:var(--cinza); }
-  .fluxo-passo b { color:var(--texto); }
-  .fluxo-linha { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-  select { background:var(--panel); border:1px solid var(--borda); border-radius:8px; padding:8px 10px; font-size:13px; color:var(--texto); }
-  .toggle-ativo { padding:6px 16px; border-radius:20px; font-size:12px; font-weight:600; border:none; cursor:pointer; }
-  .toggle-ativo.on { background:var(--verde-soft); color:var(--verde); }
-  .toggle-ativo.off { background:rgba(244,63,94,.12); color:var(--erro); }
+  .fx-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:16px; max-width:1100px; }
+  .fx-card { position:relative; background:var(--panel); border:1px solid var(--borda); border-radius:14px;
+             min-height:250px; display:flex; flex-direction:column; cursor:pointer; transition:border-color .15s, transform .1s; }
+  .fx-card:hover { border-color:var(--azul); }
+  .fx-card-nova { background:var(--azul); border-color:var(--azul); align-items:center; justify-content:center; gap:12px; color:#fff; }
+  .fx-card-nova:hover { transform:translateY(-2px); }
+  .fx-card-nova svg { width:38px; height:38px; }
+  .fx-card-nova .fx-nova-label { font-size:14.5px; font-weight:700; }
+  .fx-top { display:flex; justify-content:space-between; align-items:center; padding:12px 12px 0; }
+  .fx-chip { font-size:11px; font-weight:700; padding:4px 12px; border-radius:20px; }
+  .fx-chip.on { background:var(--verde-soft); color:var(--verde); }
+  .fx-chip.off { background:rgba(244,63,94,.15); color:#f43f5e; }
+  .fx-menu-btn { background:transparent; border:1px solid var(--borda); border-radius:8px; width:30px; height:30px;
+                 display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--cinza); }
+  .fx-menu-btn:hover { border-color:#f43f5e; color:#f43f5e; }
+  .fx-meio { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:0 14px; text-align:center; }
+  .fx-meio svg { width:34px; height:34px; color:var(--cinza); }
+  .fx-nome { font-size:14px; font-weight:700; color:var(--texto); word-break:break-word; }
+  .fx-stats { font-size:11px; color:var(--cinza-2); }
+  .fx-bottom { padding:12px 14px; display:flex; align-items:center; justify-content:space-between; }
+  .fx-gatilho { font-size:10.5px; color:var(--cinza-2); }
+  /* toggle switch */
+  .fx-switch { position:relative; width:38px; height:20px; flex-shrink:0; }
+  .fx-switch input { opacity:0; width:0; height:0; }
+  .fx-slider { position:absolute; inset:0; background:var(--panel-3, #333a4d); border-radius:20px; transition:.2s; cursor:pointer; }
+  .fx-slider:before { content:""; position:absolute; height:14px; width:14px; left:3px; top:3px; background:#8c93a8; border-radius:50%; transition:.2s; }
+  .fx-switch input:checked + .fx-slider { background:var(--azul); }
+  .fx-switch input:checked + .fx-slider:before { transform:translateX(18px); background:#fff; }
+  .modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; align-items:center; justify-content:center; }
+  .modal-bg.aberto { display:flex; }
+  .modal-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:24px; width:420px; max-width:92vw; }
+  .modal-card h3 { margin:0 0 14px; font-size:15px; color:var(--texto); }
+  .modal-card input { width:100%; box-sizing:border-box; background:var(--panel-2); border:1px solid var(--borda);
+                      border-radius:8px; padding:10px 12px; font-size:13px; color:var(--texto); margin-bottom:10px; }
+  .modal-acoes { display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
+  .btn-azul { background:var(--azul); color:#fff; border:none; padding:10px 20px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="topbar">
   <div>
-    <h1 style="margin:0;">Fluxos de Nutrição</h1>
-    <div class="sub">Sequências automáticas de e-mail/SMS/WhatsApp disparadas por etapa do CRM ou manualmente pelo atendente</div>
+    <h1 style="margin:0;">Fluxos</h1>
+    <div class="sub">Automações de e-mail, SMS e WhatsApp integradas ao CRM — dispare por etapa do funil ou manualmente</div>
   </div>
   <div style="display:flex; gap:8px;">
     <button class="btn-outline btn-sm" onclick="location.href='/crm'">Voltar ao CRM</button>
   </div>
 </div>
 
-<div class="box">
-  <h2>Como funciona</h2>
-  <p>Cada fluxo tem uma sequência fixa de passos (e-mail/SMS/WhatsApp) com um intervalo de dias entre eles. Você pode amarrar um fluxo a uma etapa do funil — quando um lead entra nela, é inscrito automaticamente; se ele sair dessa etapa antes de terminar, o fluxo é cancelado sozinho. Sem gatilho de etapa, o fluxo só inicia manualmente pela ficha do lead (aba "Fluxos"). O motor roda 1x por dia.</p>
+<div class="fx-grid">
+  <div class="fx-card fx-card-nova" id="card-nova">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    <div class="fx-nova-label">Criar novo fluxo</div>
+  </div>
+
+  {% for f in fluxos %}
+  <div class="fx-card fx-card-item" data-id="{{ f.id }}">
+    <div class="fx-top">
+      <span class="fx-chip {{ 'on' if f.ativo else 'off' }}">{{ 'Ativo' if f.ativo else 'Desativado' }}</span>
+      <button class="fx-menu-btn fx-excluir" data-id="{{ f.id }}" data-nome="{{ f.nome }}" title="Excluir fluxo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      </button>
+    </div>
+    <div class="fx-meio">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      <div class="fx-nome">{{ f.nome }}</div>
+      <div class="fx-stats">{{ f.passos|length }} passo(s) · {{ f.ativos }} em andamento · {{ f.concluidos }} concluído(s)</div>
+    </div>
+    <div class="fx-bottom">
+      <label class="fx-switch" title="Ativar/desativar">
+        <input type="checkbox" class="fx-toggle" data-id="{{ f.id }}" {% if f.ativo %}checked{% endif %}>
+        <span class="fx-slider"></span>
+      </label>
+      <span class="fx-gatilho">
+        {% if f.gatilho_etapa %}Dispara na etapa: {{ f.gatilho_etapa }}{% else %}Início manual{% endif %}
+      </span>
+    </div>
+  </div>
+  {% endfor %}
 </div>
 
-{% for f in fluxos %}
-<div class="fluxo-card">
-  <div class="fluxo-topo">
-    <div class="fluxo-nome">{{ f.nome }}</div>
-    <button class="toggle-ativo {{ 'on' if f.ativo else 'off' }}" onclick="toggleFluxo({{ f.id }})">{{ 'Ativo' if f.ativo else 'Inativo' }}</button>
-  </div>
-  <div class="fluxo-desc">{{ f.descricao }}</div>
-  <div class="fluxo-stats">
-    <span class="fluxo-stat">{{ f.ativos }} lead(s) em andamento</span>
-    <span class="fluxo-stat">{{ f.concluidos }} concluído(s)</span>
-  </div>
-  <div class="fluxo-passos">
-    {% for p in f.passos %}
-    <div class="fluxo-passo"><b>D+{{ p.delay_dias }}</b> · {{ p.canal|upper }} · {{ p.template }}</div>
-    {% endfor %}
-  </div>
-  <div class="fluxo-linha">
-    <span style="font-size:12px; color:var(--cinza);">Gatilho automático (etapa do funil):</span>
-    <select onchange="setGatilho({{ f.id }}, this.value)">
-      <option value="">— Nenhum (só manual) —</option>
-      {% for e in etapas %}
-      <option value="{{ e.id }}" {% if f.gatilho_etapa == e.id %}selected{% endif %}>{{ e.nome }}</option>
-      {% endfor %}
-    </select>
+<div class="modal-bg" id="modal-novo">
+  <div class="modal-card">
+    <h3>Criar novo fluxo</h3>
+    <input type="text" id="novo-nome" placeholder="Nome do fluxo (ex: Follow-up Empresarial)">
+    <div class="modal-acoes">
+      <button class="btn-outline btn-sm" id="novo-cancelar">Cancelar</button>
+      <button class="btn-azul" id="novo-criar">Criar e abrir editor</button>
+    </div>
   </div>
 </div>
-{% else %}
-<div style="text-align:center; padding:30px; color:var(--cinza-2); font-size:13px;">Nenhum fluxo cadastrado ainda.</div>
-{% endfor %}
 
 <script>
-function toggleFluxo(id){
-  fetch('/crm/fluxos/' + id + '/toggle', {method:'POST'})
+document.getElementById('card-nova').addEventListener('click', function(){
+  document.getElementById('modal-novo').classList.add('aberto');
+  document.getElementById('novo-nome').focus();
+});
+document.getElementById('novo-cancelar').addEventListener('click', function(){
+  document.getElementById('modal-novo').classList.remove('aberto');
+});
+document.getElementById('novo-criar').addEventListener('click', function(){
+  var nome = document.getElementById('novo-nome').value.trim();
+  if (!nome) { alert('Digite o nome do fluxo'); return; }
+  fetch('/crm/fluxos/novo', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({nome: nome})})
     .then(function(r){ return r.json(); })
-    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Erro'); });
-}
-function setGatilho(id, etapa){
-  fetch('/crm/fluxos/' + id + '/gatilho', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({gatilho_etapa: etapa})})
-    .then(function(r){ return r.json(); })
-    .then(function(d){ if (!d.ok) alert(d.erro || 'Erro'); });
-}
+    .then(function(d){
+      if (d.ok) location.href = '/crm/fluxos/' + d.id;
+      else alert(d.erro || 'Erro ao criar fluxo');
+    });
+});
+
+document.querySelectorAll('.fx-card-item').forEach(function(card){
+  card.addEventListener('click', function(e){
+    if (e.target.closest('.fx-toggle') || e.target.closest('.fx-switch') || e.target.closest('.fx-excluir')) return;
+    location.href = '/crm/fluxos/' + card.dataset.id;
+  });
+});
+
+document.querySelectorAll('.fx-toggle').forEach(function(t){
+  t.addEventListener('change', function(){
+    fetch('/crm/fluxos/' + t.dataset.id + '/toggle', {method:'POST'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d.ok) location.reload();
+        else { alert(d.erro || 'Erro'); t.checked = !t.checked; }
+      });
+  });
+});
+
+document.querySelectorAll('.fx-excluir').forEach(function(b){
+  b.addEventListener('click', function(e){
+    e.stopPropagation();
+    if (!confirm('Excluir o fluxo "' + b.dataset.nome + '"? Leads em andamento nele terao os envios restantes cancelados.')) return;
+    fetch('/crm/fluxos/' + b.dataset.id + '/excluir', {method:'POST'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d.ok) location.reload();
+        else alert(d.erro || 'Erro ao excluir');
+      });
+  });
+});
 </script>
 {% endblock %}
