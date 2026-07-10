@@ -9833,16 +9833,18 @@ def _corpo_email_contato(tpl, nome_lead, corretor_nome, link_click, pixel_url, f
     primeiro = (nome_lead or '').strip().split(' ')[0].title() if nome_lead else ''
     saudacao = f"Olá{', ' + primeiro if primeiro else ''}!"
     cartao_consultor = (
-        f"<div style='display:flex;align-items:center;gap:14px;background:#f8f9fb;border-radius:12px;padding:14px 16px;margin-bottom:26px;'>"
+        "<table role='presentation' cellpadding='0' cellspacing='0' border='0' "
+        "style='background:#f8f9fb;border-radius:12px;margin-bottom:26px;'><tr>"
+        f"<td style='padding:14px 0 14px 16px;'>"
         + (f"<img src='{foto_url}' width='52' height='52' alt='{corretor_nome}' "
-           "style='width:52px;height:52px;border-radius:50%;object-fit:cover;display:block;flex-shrink:0;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.12);'>"
+           "style='width:52px;height:52px;border-radius:50%;object-fit:cover;display:block;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.12);'>"
            if foto_url else
            f"<div style='width:52px;height:52px;border-radius:50%;background:#1a1d2e;color:#fff;display:flex;align-items:center;justify-content:center;"
-           f"font-size:19px;font-weight:700;flex-shrink:0;'>{(corretor_nome or '?')[:1].upper()}</div>")
-        + "<div>"
+           f"font-size:19px;font-weight:700;'>{(corretor_nome or '?')[:1].upper()}</div>")
+        + f"</td><td style='padding:14px 16px 14px 14px;'>"
         f"<div style='font-size:10.5px;color:#8c93a8;text-transform:uppercase;letter-spacing:.6px;font-weight:700;'>Seu consultor</div>"
         f"<div style='font-size:15px;color:#1a1d2e;font-weight:700;margin-top:2px;'>{corretor_nome}</div>"
-        "</div></div>"
+        "</td></tr></table>"
     )
     return (
         "<div style='background:#f4f6f9;padding:30px 12px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;'>"
@@ -12771,6 +12773,26 @@ def crm_frios_campanha(cid):
                            sms_templates=SMS_TEMPLATES_LEAD, email_templates=_EMAIL_CONTATO_TEMPLATES)
 
 
+@app.route('/crm/frios/campanha/<int:cid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_frios_campanha_excluir(cid):
+    """Exclui a campanha e todos os contatos/envios dela. Não mexe em leads
+    já promovidos (eles ficam no CRM principal, independentes da campanha)."""
+    conn = db()
+    campanha = conn.execute("SELECT id FROM campanhas_frias WHERE id=?", (cid,)).fetchone()
+    if not campanha:
+        close_db(conn); return jsonify({"ok": False, "erro": "Campanha não encontrada"}), 404
+    ids_contatos = [r['id'] for r in conn.execute("SELECT id FROM contatos_frios WHERE campanha_id=?", (cid,)).fetchall()]
+    if ids_contatos:
+        placeholders = ','.join(['?'] * len(ids_contatos))
+        conn.execute(f"DELETE FROM contato_frio_envio WHERE contato_id IN ({placeholders})", ids_contatos)
+    conn.execute("DELETE FROM contatos_frios WHERE campanha_id=?", (cid,))
+    conn.execute("DELETE FROM campanhas_frias WHERE id=?", (cid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
 @app.route('/crm/frios/campanha/<int:cid>/importar', methods=['POST'])
 @login_required
 @admin_required
@@ -12903,8 +12925,10 @@ def crm_frios_enviar(cid):
             numero_admin = _waspeed_normaliza_fone('') or NUMERO_WHATSAPP_SERENUS
             link_zap = f"https://wa.me/{numero_admin}"
             pixel_1x1 = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7'
+            urow = conn.execute("SELECT id, nome, foto FROM usuarios WHERE id=?", (session.get('user_id'),)).fetchone()
+            foto_url = f"{request.host_url.rstrip('/')}/avatar/{urow['id']}" if urow and urow['foto'] else None
             corpo = _corpo_email_contato(tpl, ct.get('nome'), session.get('nome') or 'Serenus',
-                                         link_zap, pixel_1x1)
+                                         link_zap, pixel_1x1, foto_url=foto_url)
             try:
                 ok = _enviar_email(ct['email'], tpl['assunto'], corpo, remetente_nome='Cotação de Plano de Saúde')
             except Exception:

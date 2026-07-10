@@ -49,6 +49,7 @@
     </div>
     <div class="camp-stat">{{ c.total_contatos or 0 }} contatos</div>
     <div class="camp-stat conv">{{ c.convertidos or 0 }} convertidos</div>
+    <button class="btn-ghost" style="color:var(--rosa,#f43f5e);" onclick="event.stopPropagation(); excluirCampanha({{ c.id }}, {{ c.nome|tojson }})">Excluir</button>
   </div>
   {% else %}
   <div style="text-align:center; padding:30px; color:var(--cinza-2); font-size:13px;">Nenhuma campanha criada ainda.</div>
@@ -77,6 +78,16 @@ function criarCampanha(){
     .then(function(d){
       if (d.ok) { location.href = '/crm/frios/campanha/' + d.id; }
       else { alert(d.erro || 'Erro ao criar campanha'); }
+    });
+}
+
+function excluirCampanha(id, nome){
+  if (!confirm('Excluir a campanha "' + nome + '" e todos os contatos dela? Essa ação não pode ser desfeita. Leads já promovidos para o CRM principal não são afetados.')) return;
+  fetch('/crm/frios/campanha/' + id + '/excluir', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) { location.reload(); }
+      else { alert(d.erro || 'Erro ao excluir campanha'); }
     });
 }
 </script>
