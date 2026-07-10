@@ -49,7 +49,7 @@
     </div>
     <div class="camp-stat">{{ c.total_contatos or 0 }} contatos</div>
     <div class="camp-stat conv">{{ c.convertidos or 0 }} convertidos</div>
-    <button class="btn-ghost" style="color:var(--rosa,#f43f5e);" onclick="event.stopPropagation(); excluirCampanha({{ c.id }}, {{ c.nome|tojson }})">Excluir</button>
+    <button class="btn-ghost" style="color:var(--rosa,#f43f5e);" onclick='event.stopPropagation(); excluirCampanha({{ c.id }}, {{ c.nome|tojson }})'>Excluir</button>
   </div>
   {% else %}
   <div style="text-align:center; padding:30px; color:var(--cinza-2); font-size:13px;">Nenhuma campanha criada ainda.</div>
