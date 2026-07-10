@@ -12970,12 +12970,16 @@ def crm_frios_enviar(cid):
             falhas += 1; continue
         ct = dict(contato)
         ok = False
+        # Link do WhatsApp SEMPRE do consultor logado (número aprovado pela
+        # operadora pra ELE especificamente, ver planilha SMS_consultores) —
+        # nunca o WhatsApp genérico da empresa, isso quebra a aprovação do
+        # template na operadora e o SMS some sem erro nenhum (já aconteceu).
+        numero_wpp = _whatsapp_do_consultor(conn, session.get('user_id'))
+        consultor_nome = session.get('nome') or 'Serenus'
         if canal == 'sms':
             if not ct.get('telefone'):
                 falhas += 1; continue
-            consultor_nome = session.get('nome') or 'Serenus'
-            numero_admin = _waspeed_normaliza_fone('') or NUMERO_WHATSAPP_SERENUS
-            link = f"https://wa.me/{numero_admin}"
+            link = f"https://wa.me/{numero_wpp}"
             mensagem, _ = _texto_sms_lead(template_key, consultor_nome.split()[0], link, ct['nome'].split()[0] if ct.get('nome') else '')
             ok, erro = _enviar_sms(ct['telefone'], mensagem)
         else:
@@ -12984,8 +12988,7 @@ def crm_frios_enviar(cid):
             tpl = _EMAIL_CONTATO_TEMPLATES[template_key]
             # Contato frio ainda não é lead — sem crm_email_log/token, então sem
             # rastreio de clique/abertura (que depende de lead_id). Link direto pro zap.
-            numero_admin = _waspeed_normaliza_fone('') or NUMERO_WHATSAPP_SERENUS
-            link_zap = f"https://wa.me/{numero_admin}"
+            link_zap = f"https://wa.me/{numero_wpp}"
             pixel_1x1 = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBTAA7'
             urow = conn.execute("SELECT id, nome, foto FROM usuarios WHERE id=?", (session.get('user_id'),)).fetchone()
             foto_url = f"{request.host_url.rstrip('/')}/avatar/{urow['id']}" if urow and urow['foto'] else None
