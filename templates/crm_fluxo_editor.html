@@ -147,6 +147,8 @@ var FLUXO = {{ fluxo|tojson }};
 var ETAPAS = {{ etapas|tojson }};
 var EMAIL_TPLS = {{ email_tpls|tojson }};
 var SMS_TPLS = {{ sms_tpls|tojson }};
+var MODELOS_EMAIL = {{ modelos_email|tojson }};
+var MODELOS_SMS = {{ modelos_sms|tojson }};
 
 var CANAIS = {
   email:       {nome:'Enviar E-mail',       cor:'#3b82f6'},
@@ -172,10 +174,14 @@ function marcaDirty(){ dirty = true; document.getElementById('btn-salvar').class
 
 function previewPasso(p){
   if (p.canal === 'email'){
+    if (p.template && p.template.indexOf('upload_') === 0 && MODELOS_EMAIL[p.template]) return MODELOS_EMAIL[p.template].nome;
     if (p.template !== 'custom' && EMAIL_TPLS[p.template]) return EMAIL_TPLS[p.template].assunto;
     return (p.conteudo && p.conteudo.assunto) || '(sem assunto — clique para configurar)';
   }
-  if (p.canal === 'sms' && p.template !== 'custom' && SMS_TPLS[p.template]) return 'Modelo aprovado: ' + SMS_TPLS[p.template].nome;
+  if (p.canal === 'sms'){
+    if (p.template && p.template.indexOf('upload_') === 0 && MODELOS_SMS[p.template]) return 'Modelo enviado: ' + MODELOS_SMS[p.template].nome;
+    if (p.template !== 'custom' && SMS_TPLS[p.template]) return 'Modelo aprovado: ' + SMS_TPLS[p.template].nome;
+  }
   return (p.conteudo && p.conteudo.texto) || '(sem texto — clique para configurar)';
 }
 
@@ -287,17 +293,39 @@ function renderConfig(){
 
   if (p.canal === 'email'){
     var modo = document.createElement('select');
-    modo.innerHTML = '<option value="modelo">Modelo pronto (aprovado)</option><option value="custom">Personalizado</option>';
-    modo.value = p.template === 'custom' ? 'custom' : 'modelo';
+    modo.innerHTML = '<option value="upload">Modelo enviado por voce</option><option value="modelo">Modelo pronto (embutido)</option><option value="custom">Personalizado</option>';
+    modo.value = (p.template && p.template.indexOf('upload_') === 0) ? 'upload' : (p.template === 'custom' ? 'custom' : 'modelo');
     cfg.appendChild(campo('Conteudo', modo));
 
     var area = document.createElement('div'); cfg.appendChild(area);
     function renderEmail(){
       area.innerHTML = '';
-      if (modo.value === 'modelo'){
+      if (modo.value === 'upload'){
+        var chaves = Object.keys(MODELOS_EMAIL);
+        if (!chaves.length){
+          var vazio = document.createElement('div'); vazio.className='ed-nota alerta';
+          vazio.textContent = 'Nenhum modelo enviado ainda. Va em "Modelos de E-mail/SMS" (na lista de fluxos) pra subir um.';
+          area.appendChild(vazio);
+          return;
+        }
+        if (p.template.indexOf('upload_') !== 0 || !MODELOS_EMAIL[p.template]) p.template = chaves[0];
+        var selU = document.createElement('select');
+        chaves.forEach(function(k){
+          var o = document.createElement('option'); o.value = k;
+          o.textContent = MODELOS_EMAIL[k].nome + (MODELOS_EMAIL[k].variante ? ' (Variante ' + MODELOS_EMAIL[k].variante + ')' : '');
+          selU.appendChild(o);
+        });
+        selU.value = p.template;
+        var prevU = document.createElement('div'); prevU.className='ed-preview';
+        function attU(){ prevU.textContent = 'Assunto: ' + (MODELOS_EMAIL[selU.value].assunto || '(sem assunto)') + '\n\nHTML customizado — envie um teste antes de disparar em massa.'; }
+        attU();
+        selU.addEventListener('change', function(){ p.template = selU.value; attU(); marcaDirty(); renderChain(); });
+        area.appendChild(campo('Modelo enviado', selU));
+        area.appendChild(prevU);
+      } else if (modo.value === 'modelo'){
         // Passo salvo com chave de modelo que nao existe mais no catalogo:
         // cai no primeiro modelo em vez de quebrar o painel com TypeError.
-        if (p.template === 'custom' || !EMAIL_TPLS[p.template]) p.template = Object.keys(EMAIL_TPLS)[0];
+        if (p.template === 'custom' || p.template.indexOf('upload_') === 0 || !EMAIL_TPLS[p.template]) p.template = Object.keys(EMAIL_TPLS)[0];
         var selT = document.createElement('select');
         Object.keys(EMAIL_TPLS).forEach(function(k){
           var o = document.createElement('option'); o.value = k;
@@ -334,14 +362,39 @@ function renderConfig(){
 
   } else if (p.canal === 'sms'){
     var modoS = document.createElement('select');
-    modoS.innerHTML = '<option value="modelo">Modelo aprovado na operadora</option><option value="custom">Texto livre</option>';
-    modoS.value = p.template === 'custom' ? 'custom' : 'modelo';
+    modoS.innerHTML = '<option value="upload">Modelo enviado por voce</option><option value="modelo">Modelo aprovado na operadora</option><option value="custom">Texto livre</option>';
+    modoS.value = (p.template && p.template.indexOf('upload_') === 0) ? 'upload' : (p.template === 'custom' ? 'custom' : 'modelo');
     cfg.appendChild(campo('Conteudo', modoS));
     var areaS = document.createElement('div'); cfg.appendChild(areaS);
     function renderSms(){
       areaS.innerHTML = '';
-      if (modoS.value === 'modelo'){
-        if (p.template === 'custom' || !SMS_TPLS[p.template]) p.template = Object.keys(SMS_TPLS)[0];
+      if (modoS.value === 'upload'){
+        var chavesS = Object.keys(MODELOS_SMS);
+        if (!chavesS.length){
+          var vazioS = document.createElement('div'); vazioS.className='ed-nota alerta';
+          vazioS.textContent = 'Nenhum modelo enviado ainda. Va em "Modelos de E-mail/SMS" (na lista de fluxos) pra subir um.';
+          areaS.appendChild(vazioS);
+          return;
+        }
+        if (p.template.indexOf('upload_') !== 0 || !MODELOS_SMS[p.template]) p.template = chavesS[0];
+        var selUs = document.createElement('select');
+        chavesS.forEach(function(k){
+          var o = document.createElement('option'); o.value = k;
+          o.textContent = MODELOS_SMS[k].nome + (MODELOS_SMS[k].variante ? ' (Variante ' + MODELOS_SMS[k].variante + ')' : '');
+          selUs.appendChild(o);
+        });
+        selUs.value = p.template;
+        var prevUs = document.createElement('div'); prevUs.className='ed-preview';
+        function attUs(){ prevUs.textContent = MODELOS_SMS[selUs.value].exemplo; }
+        attUs();
+        selUs.addEventListener('change', function(){ p.template = selUs.value; attUs(); marcaDirty(); renderChain(); });
+        areaS.appendChild(campo('Modelo enviado', selUs));
+        areaS.appendChild(prevUs);
+        var nU = document.createElement('div'); nU.className='ed-nota alerta';
+        nU.textContent = 'Modelo enviado por voce mesmo, nao aprovado pela operadora automaticamente — pode ser filtrado como spam.';
+        areaS.appendChild(nU);
+      } else if (modoS.value === 'modelo'){
+        if (p.template === 'custom' || p.template.indexOf('upload_') === 0 || !SMS_TPLS[p.template]) p.template = Object.keys(SMS_TPLS)[0];
         var selS = document.createElement('select');
         Object.keys(SMS_TPLS).forEach(function(k){
           var o = document.createElement('option'); o.value = k; o.textContent = SMS_TPLS[k].nome;

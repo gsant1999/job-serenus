@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Modelos de E-mail/SMS{% endblock %}
+
+{% block head %}
+<style>
+  .mo-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:14px; max-width:1100px; margin-bottom:28px; }
+  .mo-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:16px; }
+  .mo-card-topo { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:8px; }
+  .mo-nome { font-size:14px; font-weight:700; color:var(--texto); }
+  .mo-assunto { font-size:12px; color:var(--cinza); margin-top:2px; }
+  .mo-variante { font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:20px; background:var(--panel-2); color:var(--cinza); flex-shrink:0; }
+  .mo-preview { font-size:11.5px; color:var(--cinza-2); background:var(--panel-2); border-radius:8px; padding:8px 10px; margin:8px 0; max-height:70px; overflow:hidden; white-space:pre-wrap; }
+  .mo-acoes { display:flex; gap:8px; margin-top:8px; }
+  .mo-chip { font-size:11px; font-weight:700; padding:3px 10px; border-radius:20px; }
+  .mo-chip.on { background:var(--verde-soft); color:var(--verde); }
+  .mo-chip.off { background:rgba(244,63,94,.15); color:#f43f5e; }
+  .secao-titulo { font-family:'Sora',sans-serif; font-size:13px; font-weight:700; color:var(--texto); margin:0 0 12px; text-transform:uppercase; letter-spacing:.4px; display:flex; align-items:center; justify-content:space-between; max-width:1100px; }
+  .modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; align-items:center; justify-content:center; overflow-y:auto; padding:30px 0; }
+  .modal-bg.aberto { display:flex; }
+  .modal-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:24px; width:560px; max-width:92vw; margin:auto; }
+  .modal-card h3 { margin:0 0 14px; font-size:15px; color:var(--texto); }
+  .modal-card input, .modal-card textarea, .modal-card select { width:100%; box-sizing:border-box; background:var(--panel-2); border:1px solid var(--borda);
+                      border-radius:8px; padding:10px 12px; font-size:13px; color:var(--texto); margin-bottom:10px; font-family:inherit; }
+  .modal-card label.campo-label { display:block; font-size:11px; font-weight:700; color:var(--cinza); text-transform:uppercase; letter-spacing:.4px; margin:10px 0 5px; }
+  .modal-acoes { display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
+  .btn-azul { background:var(--azul); color:#fff; border:none; padding:10px 20px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  .mo-nota { font-size:11.5px; color:var(--cinza-2); line-height:1.5; margin-bottom:10px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Modelos de E-mail/SMS</h1>
+    <div class="sub">Suba um modelo pronto (HTML de e-mail ou texto de SMS) e ele já aparece na hora de montar um passo de Fluxo — sem precisar mandar o conteúdo pelo chat</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="location.href='/crm/fluxos'">Voltar aos Fluxos</button>
+  </div>
+</div>
+
+<div class="secao-titulo">
+  <span>Modelos de E-mail</span>
+  <button class="btn-azul" style="padding:7px 16px; font-size:12px;" onclick="document.getElementById('modal-email').classList.add('aberto')">+ Subir modelo de e-mail</button>
+</div>
+<div class="mo-grid">
+  {% for m in modelos_email %}
+  <div class="mo-card">
+    <div class="mo-card-topo">
+      <div>
+        <div class="mo-nome">{{ m.nome }}</div>
+        <div class="mo-assunto">{{ m.assunto or '(sem assunto)' }}</div>
+      </div>
+      {% if m.variante %}<span class="mo-variante">Variante {{ m.variante }}</span>{% endif %}
+    </div>
+    <div class="mo-acoes">
+      <span class="mo-chip {{ 'on' if m.ativo else 'off' }}">{{ 'Ativo' if m.ativo else 'Desativado' }}</span>
+      <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
+      <button class="btn-ghost" style="font-size:11.5px; color:var(--rosa,#f43f5e);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
+    </div>
+  </div>
+  {% else %}
+  <div style="grid-column:1/-1; text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo de e-mail cadastrado ainda.</div>
+  {% endfor %}
+</div>
+
+<div class="secao-titulo">
+  <span>Modelos de SMS</span>
+  <button class="btn-azul" style="padding:7px 16px; font-size:12px;" onclick="document.getElementById('modal-sms').classList.add('aberto')">+ Subir modelo de SMS</button>
+</div>
+<div class="mo-grid">
+  {% for m in modelos_sms %}
+  <div class="mo-card">
+    <div class="mo-card-topo">
+      <div class="mo-nome">{{ m.nome }}</div>
+      {% if m.variante %}<span class="mo-variante">Variante {{ m.variante }}</span>{% endif %}
+    </div>
+    <div class="mo-preview">{{ m.corpo_texto }}</div>
+    <div class="mo-acoes">
+      <span class="mo-chip {{ 'on' if m.ativo else 'off' }}">{{ 'Ativo' if m.ativo else 'Desativado' }}</span>
+      <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
+      <button class="btn-ghost" style="font-size:11.5px; color:var(--rosa,#f43f5e);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
+    </div>
+  </div>
+  {% else %}
+  <div style="grid-column:1/-1; text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo de SMS cadastrado ainda.</div>
+  {% endfor %}
+</div>
+
+<!-- Modal: novo modelo de e-mail -->
+<div class="modal-bg" id="modal-email">
+  <div class="modal-card">
+    <h3>Novo modelo de e-mail</h3>
+    <div class="mo-nota">Cole o HTML completo do e-mail (ou envie o arquivo .html). Use <code>{{nome}}</code> no texto — é substituído automaticamente pelo primeiro nome do lead na hora do envio. Se o HTML usa os tokens <code>[URL_LOGO_SERENUS]</code> e/ou <code>[URL_IMAGEM_HERO]</code>, suba as imagens correspondentes abaixo que eles são substituídos sozinhos.</div>
+    <label class="campo-label">Nome do modelo</label>
+    <input type="text" id="em-nome" placeholder="Ex: MEI 6 Meses - E-mail 1 - Variante A">
+    <label class="campo-label">Assunto</label>
+    <input type="text" id="em-assunto" placeholder="Ex: {{nome}}, você chegou a ver minha mensagem?">
+    <label class="campo-label">Variante (opcional — pra teste A/B)</label>
+    <input type="text" id="em-variante" placeholder="Ex: A ou B">
+    <label class="campo-label">HTML (cole aqui, ou envie um arquivo .html abaixo)</label>
+    <textarea id="em-html" rows="8" placeholder="&lt;!DOCTYPE html&gt;..."></textarea>
+    <label class="campo-label">Ou envie o arquivo .html</label>
+    <input type="file" id="em-arquivo" accept=".html,.htm">
+    <label class="campo-label">Logo (opcional — substitui [URL_LOGO_SERENUS])</label>
+    <input type="file" id="em-logo" accept=".png,.jpg,.jpeg,.webp">
+    <label class="campo-label">Imagem de banner/hero (opcional — substitui [URL_IMAGEM_HERO])</label>
+    <input type="file" id="em-hero" accept=".png,.jpg,.jpeg,.webp">
+    <div class="modal-acoes">
+      <button class="btn-outline btn-sm" onclick="document.getElementById('modal-email').classList.remove('aberto')">Cancelar</button>
+      <button class="btn-azul" onclick="salvarModeloEmail()">Salvar modelo</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: novo modelo de SMS -->
+<div class="modal-bg" id="modal-sms">
+  <div class="modal-card">
+    <h3>Novo modelo de SMS</h3>
+    <div class="mo-nota">Texto livre — use <code>{{nome}}</code> para o nome do lead. Atenção: modelos fora dos aprovados pela operadora podem ser filtrados como spam e não chegar, mesmo a API confirmando envio (já aconteceu em produção). Prefira modelos já aprovados quando possível.</div>
+    <label class="campo-label">Nome do modelo</label>
+    <input type="text" id="sm-nome" placeholder="Ex: MEI 6 Meses - SMS reforço">
+    <label class="campo-label">Variante (opcional)</label>
+    <input type="text" id="sm-variante" placeholder="Ex: A ou B">
+    <label class="campo-label">Texto do SMS (máx. ~160 caracteres por segmento)</label>
+    <textarea id="sm-texto" rows="5" placeholder="{{nome}}, tudo bem? ..."></textarea>
+    <div class="modal-acoes">
+      <button class="btn-outline btn-sm" onclick="document.getElementById('modal-sms').classList.remove('aberto')">Cancelar</button>
+      <button class="btn-azul" onclick="salvarModeloSms()">Salvar modelo</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function salvarModeloEmail(){
+  var nome = document.getElementById('em-nome').value.trim();
+  var html = document.getElementById('em-html').value.trim();
+  var arquivo = document.getElementById('em-arquivo').files[0];
+  if (!nome) { alert('Digite o nome do modelo'); return; }
+  if (!html && !arquivo) { alert('Cole o HTML ou envie um arquivo .html'); return; }
+  var fd = new FormData();
+  fd.append('nome', nome);
+  fd.append('assunto', document.getElementById('em-assunto').value.trim());
+  fd.append('variante', document.getElementById('em-variante').value.trim());
+  if (html) fd.append('html', html);
+  if (arquivo) fd.append('arquivo_html', arquivo);
+  var logo = document.getElementById('em-logo').files[0];
+  var hero = document.getElementById('em-hero').files[0];
+  if (logo) fd.append('arquivo_logo', logo);
+  if (hero) fd.append('arquivo_hero', hero);
+  fetch('/crm/modelos/email/novo', {method:'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) {
+        if (d.placeholders_pendentes && d.placeholders_pendentes.length) {
+          alert('Modelo salvo, mas faltou subir: ' + d.placeholders_pendentes.join(', ') + '. O e-mail vai sair com esse token literal até você editar.');
+        }
+        location.reload();
+      } else alert(d.erro || 'Erro ao salvar modelo');
+    });
+}
+
+function salvarModeloSms(){
+  var nome = document.getElementById('sm-nome').value.trim();
+  var texto = document.getElementById('sm-texto').value.trim();
+  if (!nome || !texto) { alert('Preencha nome e texto'); return; }
+  fetch('/crm/modelos/sms/novo', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({nome: nome, texto: texto, variante: document.getElementById('sm-variante').value.trim()})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) location.reload();
+      else alert(d.erro || 'Erro ao salvar modelo');
+    });
+}
+
+function toggleModelo(id){
+  fetch('/crm/modelos/' + id + '/toggle', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Erro'); });
+}
+
+function excluirModelo(id, nome){
+  if (!confirm('Excluir o modelo "' + nome + '"? Passos de fluxo que usam ele vão falhar no próximo envio.')) return;
+  fetch('/crm/modelos/' + id + '/excluir', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Erro'); });
+}
+</script>
+{% endblock %}

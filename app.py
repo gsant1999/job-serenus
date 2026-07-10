@@ -826,6 +826,18 @@ def init_db():
                 erro TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS modelos_conteudo (
+                id SERIAL PRIMARY KEY,
+                tipo TEXT NOT NULL,
+                nome TEXT NOT NULL,
+                assunto TEXT,
+                corpo_html TEXT,
+                corpo_texto TEXT,
+                variante TEXT,
+                ativo INTEGER DEFAULT 1,
+                criado_por INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_agenda (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER NOT NULL,
@@ -1221,6 +1233,18 @@ def init_db():
             erro TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS modelos_conteudo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tipo TEXT NOT NULL,
+            nome TEXT NOT NULL,
+            assunto TEXT,
+            corpo_html TEXT,
+            corpo_texto TEXT,
+            variante TEXT,
+            ativo INTEGER DEFAULT 1,
+            criado_por INTEGER,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE IF NOT EXISTS crm_agenda (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             lead_id INTEGER NOT NULL,
@@ -1600,6 +1624,7 @@ def init_db():
         ("lancamentos", "parcela_total", "INTEGER"),
         ("lancamentos", "forma_pagamento", "TEXT"),
         ("fluxo_passos", "conteudo", "TEXT"),
+        ("fluxo_envio_log", "modelo_id", "INTEGER"),
         # Telefone do usuário (WhatsApp p/ notificações via WaSpeed e link wa.me nos e-mails)
         ("usuarios", "telefone", "TEXT"),
         # Mensagem pronta pro lead, escrita já no agendamento (fica 1 clique pra enviar quando o lembrete chegar)
@@ -12520,18 +12545,46 @@ _FLUXO_MAX_POR_RODADA = 50
 FLUXO_CANAIS = ('email', 'sms', 'whatsapp', 'botconversa')
 
 
+def _renderizar_modelo_html(html, nome_lead):
+    """Substitui os placeholders de nome no HTML enviado pelo admin. Cobre tanto
+    {{nome}} (convenção do JOB) quanto {{ contact.FIRSTNAME }} (tag nativa do
+    Brevo) — como o envio é pela API transacional, não pela automação do Brevo,
+    essa segunda tag nunca seria substituída sozinha; sem isso o e-mail chegaria
+    com "{{ contact.FIRSTNAME }}" literal no texto."""
+    primeiro = (nome_lead or '').strip().split(' ')[0].title() if nome_lead else 'tudo bem'
+    out = html or ''
+    for token in ('{{nome}}', '{{ nome }}', '{{contact.FIRSTNAME}}', '{{ contact.FIRSTNAME }}'):
+        out = out.replace(token, primeiro)
+    return out
+
+
 def _fluxo_executar_passo(conn, passo, lead):
-    """Executa 1 passo do fluxo pra 1 lead. Retorna (ok, erro).
-    Conteúdo do passo: personalizado (JSON gravado pelo editor) ou modelo
-    pronto do catálogo (FLUXO_TEMPLATES pra e-mail, SMS_TEMPLATES_LEAD pra SMS)."""
+    """Executa 1 passo do fluxo pra 1 lead. Retorna (ok, erro, modelo_id).
+    Conteúdo do passo: personalizado (JSON gravado pelo editor), modelo pronto
+    do catálogo embutido (FLUXO_TEMPLATES/SMS_TEMPLATES_LEAD), ou modelo
+    enviado pelo admin (tabela modelos_conteudo, chave 'upload_<id>')."""
+    template_key = passo['template'] or ''
+    modelo_id = None
     tpl = None
-    if passo.get('conteudo'):
+
+    if template_key.startswith('upload_'):
+        try:
+            modelo_id = int(template_key.split('_', 1)[1])
+        except (ValueError, IndexError):
+            modelo_id = None
+        modelo = conn.execute("SELECT * FROM modelos_conteudo WHERE id=? AND ativo=1", (modelo_id,)).fetchone() if modelo_id else None
+        if not modelo:
+            return False, f"Modelo enviado #{modelo_id} não existe mais ou foi desativado", modelo_id
+        modelo = dict(modelo)
+        tpl = {'assunto': modelo.get('assunto') or '', 'corpo_html': modelo.get('corpo_html'),
+               'corpo_texto': modelo.get('corpo_texto')}
+    elif passo.get('conteudo'):
         try:
             tpl = json.loads(passo['conteudo']) if isinstance(passo['conteudo'], str) else dict(passo['conteudo'])
         except Exception:
             tpl = None
-    if tpl is None:
-        tpl = FLUXO_TEMPLATES.get(passo['template'])
+    if tpl is None and not template_key.startswith('upload_'):
+        tpl = FLUXO_TEMPLATES.get(template_key)
 
     urow = conn.execute("SELECT id, nome, foto FROM usuarios WHERE id=?",
                          (lead.get('responsavel_id'),)).fetchone()
@@ -12542,19 +12595,33 @@ def _fluxo_executar_passo(conn, passo, lead):
     canal = passo['canal']
 
     if canal == 'email':
-        if not tpl or not tpl.get('paragrafos'):
-            return False, f"Passo de e-mail sem conteúdo (template: {passo['template']})"
         email_lead = (lead.get('email') or '').strip()
         if not email_lead or '@' not in email_lead:
-            return False, 'Lead sem e-mail válido'
+            return False, 'Lead sem e-mail válido', modelo_id
+        if modelo_id is not None:
+            if not tpl.get('corpo_html'):
+                return False, f"Modelo enviado #{modelo_id} está sem HTML", modelo_id
+            assunto = _renderizar_modelo_html(tpl.get('assunto') or 'Serenus Corretora', lead.get('nome'))
+            corpo = _renderizar_modelo_html(tpl['corpo_html'], lead.get('nome'))
+            ok = _enviar_email(email_lead, assunto, corpo, remetente_nome='Cotação de Plano de Saúde')
+            return ok, (None if ok else (getattr(_enviar_email, 'ultimo_erro', None) or 'Falha ao enviar e-mail')), modelo_id
+        if not tpl or not tpl.get('paragrafos'):
+            return False, f"Passo de e-mail sem conteúdo (template: {template_key})", modelo_id
         assunto = _fluxo_render_texto(tpl.get('assunto') or 'Serenus Corretora',
                                        nome=primeiro or 'tudo bem', consultor=consultor_nome)
         corpo = _corpo_email_fluxo(tpl, lead.get('nome'), consultor_nome, link_wpp, foto_url)
         ok = _enviar_email(email_lead, assunto, corpo, remetente_nome='Cotação de Plano de Saúde')
-        return ok, None if ok else (getattr(_enviar_email, 'ultimo_erro', None) or 'Falha ao enviar e-mail')
+        return ok, (None if ok else (getattr(_enviar_email, 'ultimo_erro', None) or 'Falha ao enviar e-mail')), modelo_id
 
     if not lead.get('telefone'):
-        return False, 'Lead sem telefone'
+        return False, 'Lead sem telefone', modelo_id
+
+    if modelo_id is not None and canal == 'sms':
+        mensagem = _renderizar_modelo_html(tpl.get('corpo_texto') or '', lead.get('nome')).strip()
+        if not mensagem:
+            return False, f"Modelo enviado #{modelo_id} está sem texto", modelo_id
+        ok, erro = _enviar_sms(lead['telefone'], mensagem)
+        return ok, erro, modelo_id
 
     if canal == 'sms':
         if passo['template'] in SMS_TEMPLATES_LEAD:
@@ -12568,19 +12635,22 @@ def _fluxo_executar_passo(conn, passo, lead):
             mensagem = _fluxo_render_texto((tpl or {}).get('texto'),
                                             nome=primeiro, consultor=consultor_nome, link=link_wpp).strip()
         if not mensagem:
-            return False, 'Passo de SMS sem texto'
-        return _enviar_sms(lead['telefone'], mensagem)
+            return False, 'Passo de SMS sem texto', modelo_id
+        ok, erro = _enviar_sms(lead['telefone'], mensagem)
+        return ok, erro, modelo_id
 
     texto = _fluxo_render_texto((tpl or {}).get('texto') or '\n\n'.join((tpl or {}).get('paragrafos') or []),
                                  nome=primeiro, consultor=consultor_nome, link=link_wpp).strip()
     if not texto:
-        return False, f'Passo de {canal} sem texto'
+        return False, f'Passo de {canal} sem texto', modelo_id
     if canal == 'whatsapp':
         token = _waspeed_token_do_usuario(conn, lead.get('responsavel_id'))
-        return _enviar_whatsapp_waspeed(token, lead.get('telefone'), texto)
+        ok, erro = _enviar_whatsapp_waspeed(token, lead.get('telefone'), texto)
+        return ok, erro, modelo_id
     if canal == 'botconversa':
-        return _enviar_botconversa_texto(lead.get('telefone'), texto)
-    return False, f'Canal desconhecido: {canal}'
+        ok, erro = _enviar_botconversa_texto(lead.get('telefone'), texto)
+        return ok, erro, modelo_id
+    return False, f'Canal desconhecido: {canal}', modelo_id
 
 
 def _processar_fluxos_pendentes():
@@ -12623,11 +12693,11 @@ def _processar_fluxos_pendentes():
                 passo = passos[passo_idx]
                 lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (insc['lead_id'],)).fetchone()
                 if lead:
-                    ok, erro = _fluxo_executar_passo(conn, passo, dict(lead))
+                    ok, erro, modelo_id = _fluxo_executar_passo(conn, passo, dict(lead))
                 else:
-                    ok, erro = False, 'Lead não encontrado'
-                conn.execute("INSERT INTO fluxo_envio_log (inscricao_id, passo_id, canal, ok, erro) VALUES (?,?,?,?,?)",
-                             (insc['id'], passo['id'], passo['canal'], 1 if ok else 0, erro))
+                    ok, erro, modelo_id = False, 'Lead não encontrado', None
+                conn.execute("INSERT INTO fluxo_envio_log (inscricao_id, passo_id, canal, ok, erro, modelo_id) VALUES (?,?,?,?,?,?)",
+                             (insc['id'], passo['id'], passo['canal'], 1 if ok else 0, erro, modelo_id))
                 proximo_passo_idx = passo_idx + 1
                 if proximo_passo_idx >= len(passos):
                     conn.execute("UPDATE fluxo_inscricoes SET status='concluido', passo_atual=?, finalizado_em=? WHERE id=?",
@@ -12753,6 +12823,10 @@ def crm_fluxo_editor(fid):
         passos.append({'canal': p['canal'], 'template': p['template'],
                        'delay_dias': p['delay_dias'], 'conteudo': conteudo})
     etapas = [dict(e) for e in carregar_etapas_crm(conn)]
+    modelos_email = {f"upload_{m['id']}": {'nome': m['nome'], 'assunto': m['assunto'] or '', 'variante': m['variante']}
+                      for m in conn.execute("SELECT id, nome, assunto, variante FROM modelos_conteudo WHERE tipo='email' AND ativo=1 ORDER BY nome").fetchall()}
+    modelos_sms = {f"upload_{m['id']}": {'nome': m['nome'], 'exemplo': (m['corpo_texto'] or '')[:200], 'variante': m['variante']}
+                   for m in conn.execute("SELECT id, nome, corpo_texto, variante FROM modelos_conteudo WHERE tipo='sms' AND ativo=1 ORDER BY nome").fetchall()}
     close_db(conn)
     return render_template('crm_fluxo_editor.html',
                            fluxo={'id': fluxo['id'], 'nome': fluxo['nome'],
@@ -12762,7 +12836,8 @@ def crm_fluxo_editor(fid):
                            passos=passos, etapas=etapas,
                            email_tpls=FLUXO_TEMPLATES,
                            sms_tpls={k: {'nome': v['nome'], 'exemplo': v['sem_nome']}
-                                     for k, v in SMS_TEMPLATES_LEAD.items()})
+                                     for k, v in SMS_TEMPLATES_LEAD.items()},
+                           modelos_email=modelos_email, modelos_sms=modelos_sms)
 
 
 @app.route('/crm/fluxos/<int:fid>/salvar', methods=['POST'])
@@ -12796,7 +12871,16 @@ def crm_fluxo_salvar(fid):
             delay = 0
         template = (p.get('template') or 'custom').strip()
         conteudo = p.get('conteudo')
-        if template != 'custom':
+        if template.startswith('upload_'):
+            try:
+                modelo_id_check = int(template.split('_', 1)[1])
+            except (ValueError, IndexError):
+                modelo_id_check = None
+            modelo_row = conn.execute("SELECT tipo FROM modelos_conteudo WHERE id=? AND ativo=1", (modelo_id_check,)).fetchone() if modelo_id_check else None
+            if not modelo_row or modelo_row['tipo'] != canal:
+                close_db(conn); return jsonify({"ok": False, "erro": f"Modelo enviado inválido: {template}"}), 400
+            conteudo = None
+        elif template != 'custom':
             if canal == 'email' and template not in FLUXO_TEMPLATES:
                 close_db(conn); return jsonify({"ok": False, "erro": f"Modelo de e-mail inválido: {template}"}), 400
             if canal == 'sms' and template not in SMS_TEMPLATES_LEAD:
@@ -12843,6 +12927,153 @@ def crm_fluxo_excluir(fid):
                  (_agora_sp(), fid))
     conn.execute("DELETE FROM fluxo_passos WHERE fluxo_id=?", (fid,))
     conn.execute("DELETE FROM fluxos WHERE id=?", (fid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+# ─── BIBLIOTECA DE MODELOS (e-mail/SMS reutilizáveis nos Fluxos) ───────────
+# Antes disso, todo modelo de e-mail/SMS novo precisava ser colado no chat pra
+# eu montar em código. Agora o admin sobe o HTML/texto direto pelo sistema e
+# ele já aparece pronto pra usar no editor de fluxo, sem precisar de mim.
+
+_MODELO_IMG_EXTS = ('.png', '.jpg', '.jpeg', '.webp', '.gif')
+
+
+def _salvar_imagem_modelo(fstorage, prefixo):
+    """Salva uma imagem enviada (logo/banner) em UPLOAD_FOLDER com nome único
+    e devolve o nome do arquivo salvo (ou None se não veio nada válido)."""
+    if not fstorage or not fstorage.filename:
+        return None
+    ext = os.path.splitext(fstorage.filename)[1].lower()
+    if ext not in _MODELO_IMG_EXTS:
+        return None
+    fstorage.seek(0, os.SEEK_END)
+    if fstorage.tell() > 5 * 1024 * 1024:
+        return None
+    fstorage.seek(0)
+    nome = f"modelo_{prefixo}_{int(datetime.now(TZ_SP).timestamp())}{ext}"
+    fstorage.save(os.path.join(UPLOAD_FOLDER, nome))
+    return nome
+
+
+@app.route('/crm/modelos')
+@login_required
+@admin_required
+def crm_modelos():
+    conn = db()
+    modelos = [dict(m) for m in conn.execute(
+        "SELECT * FROM modelos_conteudo ORDER BY tipo, nome").fetchall()]
+    close_db(conn)
+    return render_template('crm_modelos.html',
+                           modelos_email=[m for m in modelos if m['tipo'] == 'email'],
+                           modelos_sms=[m for m in modelos if m['tipo'] == 'sms'])
+
+
+@app.route('/crm/modelos/imagem/<path:nome>')
+def crm_modelo_imagem(nome):
+    """Serve as imagens dos modelos SEM login — o cliente de e-mail do lead
+    precisa carregar a imagem sem sessão nenhuma (mesmo motivo do /avatar/<uid>)."""
+    from urllib.parse import unquote
+    nome = os.path.basename(unquote(nome))
+    conteudo, ctype = _localizar_anexo(nome)
+    if conteudo is None:
+        abort(404)
+    if ctype is None:
+        ctype = mimetypes.guess_type(nome)[0] or 'image/png'
+    resp = Response(conteudo, mimetype=ctype)
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
+
+
+@app.route('/crm/modelos/email/novo', methods=['POST'])
+@login_required
+@admin_required
+def crm_modelo_email_novo():
+    """Recebe um modelo de e-mail em HTML puro (colado ou enviado como arquivo
+    .html), mais logo/banner opcionais que substituem os placeholders
+    [URL_LOGO_SERENUS] e [URL_IMAGEM_HERO] — convenção usada nos designs que
+    o Guilherme manda prontos (ver histórico: e-mails do fluxo MEI/Renovação)."""
+    nome = (request.form.get('nome') or '').strip()
+    assunto = (request.form.get('assunto') or '').strip()
+    variante = (request.form.get('variante') or '').strip() or None
+    html = (request.form.get('html') or '').strip()
+    if not html and 'arquivo_html' in request.files and request.files['arquivo_html'].filename:
+        html = request.files['arquivo_html'].read().decode('utf-8', errors='replace')
+    if not nome or not html:
+        return jsonify({"ok": False, "erro": "Nome e HTML do e-mail são obrigatórios"}), 400
+    if len(html) > 300_000:
+        return jsonify({"ok": False, "erro": "HTML grande demais (máx. ~300KB)"}), 400
+
+    logo_nome = _salvar_imagem_modelo(request.files.get('arquivo_logo'), 'logo')
+    hero_nome = _salvar_imagem_modelo(request.files.get('arquivo_hero'), 'hero')
+    if logo_nome:
+        html = html.replace('[URL_LOGO_SERENUS]', f"{_SITE_BASE_URL}/crm/modelos/imagem/{logo_nome}")
+    if hero_nome:
+        html = html.replace('[URL_IMAGEM_HERO]', f"{_SITE_BASE_URL}/crm/modelos/imagem/{hero_nome}")
+
+    conn = db()
+    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, assunto, corpo_html, variante, ativo, criado_por)
+                    VALUES ('email',?,?,?,?,1,?)""",
+                 (nome, assunto, html, variante, session.get('user_id')))
+    mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    faltando = []
+    if '[URL_LOGO_SERENUS]' in html:
+        faltando.append('logo')
+    if '[URL_IMAGEM_HERO]' in html:
+        faltando.append('banner')
+    return jsonify({"ok": True, "id": mid, "placeholders_pendentes": faltando})
+
+
+@app.route('/crm/modelos/sms/novo', methods=['POST'])
+@login_required
+@admin_required
+def crm_modelo_sms_novo():
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    texto = (d.get('texto') or '').strip()
+    variante = (d.get('variante') or '').strip() or None
+    if not nome or not texto:
+        return jsonify({"ok": False, "erro": "Nome e texto do SMS são obrigatórios"}), 400
+    if len(texto) > 320:
+        return jsonify({"ok": False, "erro": "Texto longo demais pra SMS (máx. 320 caracteres, ~2 segmentos)"}), 400
+    conn = db()
+    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, corpo_texto, variante, ativo, criado_por)
+                    VALUES ('sms',?,?,?,1,?)""",
+                 (nome, texto, variante, session.get('user_id')))
+    mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "id": mid})
+
+
+@app.route('/crm/modelos/<int:mid>/toggle', methods=['POST'])
+@login_required
+@admin_required
+def crm_modelo_toggle(mid):
+    conn = db()
+    m = conn.execute("SELECT ativo FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
+    if not m:
+        close_db(conn); return jsonify({"ok": False, "erro": "Modelo não encontrado"}), 404
+    novo = 0 if m['ativo'] else 1
+    conn.execute("UPDATE modelos_conteudo SET ativo=? WHERE id=?", (novo, mid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "ativo": bool(novo)})
+
+
+@app.route('/crm/modelos/<int:mid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_modelo_excluir(mid):
+    """Exclui o modelo da biblioteca. Passos de fluxo que já referenciam esse
+    modelo passam a falhar no próximo envio com erro claro no log (em vez de
+    apagar o passo do fluxo sozinho, que seria uma mudança silenciosa)."""
+    conn = db()
+    m = conn.execute("SELECT id FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
+    if not m:
+        close_db(conn); return jsonify({"ok": False, "erro": "Modelo não encontrado"}), 404
+    conn.execute("DELETE FROM modelos_conteudo WHERE id=?", (mid,))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
