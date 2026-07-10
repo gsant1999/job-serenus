@@ -466,6 +466,7 @@
         <div class="ficha-tab" onclick="mudarTab('qualificacao')">Qualificação</div>
         <div class="ficha-tab" onclick="mudarTab('atividade')">Atividade</div>
         <div class="ficha-tab" onclick="mudarTab('whatsapp')">WhatsApp</div>
+        <div class="ficha-tab" onclick="mudarTab('fluxos')">Fluxos</div>
         <div class="ficha-tab" onclick="mudarTab('anexos')">Anexos</div>
       </div>
 
@@ -585,6 +586,14 @@
               <button class="btn-ficha" style="flex:1; background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);" onclick="abrirModalSms()" title="Manda um SMS pro lead com os modelos disponíveis">Modelos de SMS</button>
             </div>
           </div>
+        </div>
+
+        <div id="tab-fluxos" class="ficha-tab-pane">
+          <div style="display:flex; gap:8px; margin-bottom:14px;">
+            <select id="fluxo-select" class="campo-input campo-select" style="flex:1;"></select>
+            <button class="btn-ficha btn-salvar" style="flex:0;" onclick="iniciarFluxo()">Iniciar</button>
+          </div>
+          <div id="fluxos-ativos-lista"></div>
         </div>
 
         <div id="tab-anexos" class="ficha-tab-pane">
@@ -791,7 +800,8 @@ async function abrirFicha(id){
   document.getElementById('wpp-msg').value='';
 
   renderTimeline(d.atividades||[]);
-  
+  renderFluxos(d.fluxos_disponiveis||[], d.fluxos_ativos||[]);
+
   // Carregar dados de qualificação
   document.getElementById('qual-tipo-plano').value = d.lead.qual_tipo_plano || '';
   document.getElementById('qual-idade').value       = d.lead.qual_idade || '';
@@ -827,6 +837,52 @@ function renderTimeline(ats){
     return `<div class="tl-item"><div class="tl-icon tl-${tipo}">${icon}</div><div class="tl-body"><div class="tl-desc">${desc}</div><div class="tl-meta">${a.usuario_nome||''} · ${dt}</div></div></div>`;
   }).join('');
 }
+function renderFluxos(disponiveis, ativos){
+  const sel=document.getElementById('fluxo-select');
+  if(sel){
+    sel.innerHTML=disponiveis.length
+      ? disponiveis.map(f=>`<option value="${f.id}">${f.nome}</option>`).join('')
+      : '<option value="">Nenhum fluxo ativo cadastrado</option>';
+  }
+  const el=document.getElementById('fluxos-ativos-lista');
+  if(!el) return;
+  if(!ativos.length){
+    el.innerHTML='<div style="color:var(--cinza);font-size:13px;text-align:center;padding:20px;">Nenhum fluxo em andamento pra este lead.</div>';
+    return;
+  }
+  el.innerHTML=ativos.map(a=>`
+    <div style="background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px 14px; margin-bottom:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <strong style="font-size:13px; color:var(--texto);">${a.fluxo_nome}</strong>
+        <button class="btn-ghost" style="color:var(--rosa,#f43f5e); font-size:12px;" onclick="cancelarFluxo(${a.id})">Cancelar</button>
+      </div>
+      <div style="font-size:12px; color:var(--cinza); margin-top:4px;">Passo ${a.passo_atual} de ${a.total_passos} · próximo envio ${fmtDataHoraBR(a.proximo_envio_em)}</div>
+    </div>
+  `).join('');
+}
+
+function iniciarFluxo(){
+  if(!_leadAtual) return;
+  const fluxoId=document.getElementById('fluxo-select').value;
+  if(!fluxoId){ toast('Nenhum fluxo disponível','err'); return; }
+  fetch('/crm/lead/'+_leadAtual.id+'/fluxo/iniciar', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({fluxo_id: parseInt(fluxoId)})})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok){ toast('Fluxo iniciado'); abrirFicha(_leadAtual.id); }
+      else toast(d.erro||'Erro ao iniciar fluxo', 'err');
+    });
+}
+
+function cancelarFluxo(inscricaoId){
+  if(!_leadAtual) return;
+  if(!confirm('Cancelar este fluxo pra este lead?')) return;
+  fetch('/crm/lead/'+_leadAtual.id+'/fluxo/'+inscricaoId+'/cancelar', {method:'POST'})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok){ toast('Fluxo cancelado'); abrirFicha(_leadAtual.id); }
+      else toast(d.erro||'Erro ao cancelar', 'err');
+    });
+}
+
 function fmtDataHoraBR(s){
   if(!s) return '';
   try{

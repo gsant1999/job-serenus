@@ -82,9 +82,11 @@ def _handler_erro_global(e):
 # quanto em produção (gunicorn) na primeira requisição
 _db_initialized = False
 
+_fluxos_seed_feito = False
+
 @app.before_request
 def _ensure_db_initialized():
-    global _db_initialized
+    global _db_initialized, _fluxos_seed_feito
     if not _db_initialized:
         try:
             init_db()
@@ -98,6 +100,17 @@ def _ensure_db_initialized():
             _db_initialized = True  # Evita loop infinito
         # Inicia o scheduler (backup + import de leads)
         _iniciar_scheduler_backup()
+    # Cadastra os fluxos padrão (separado do _db_initialized acima: aquele já
+    # vem True desde o import do módulo — init_db() roda de novo no boot antes
+    # de _seed_fluxos_padrao existir — então precisa de um guard próprio).
+    if not _fluxos_seed_feito:
+        _fluxos_seed_feito = True
+        try:
+            _conn_seed = db()
+            _seed_fluxos_padrao(_conn_seed)
+            close_db(_conn_seed)
+        except Exception as e:
+            print(f"[FLUXOS] seed pulado: {e}")
 
 
 @app.before_request
@@ -774,6 +787,44 @@ def init_db():
                 enviado_por INTEGER,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS fluxos (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL,
+                descricao TEXT,
+                gatilho_etapa TEXT,
+                ativo INTEGER DEFAULT 1,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS fluxo_passos (
+                id SERIAL PRIMARY KEY,
+                fluxo_id INTEGER NOT NULL,
+                ordem INTEGER NOT NULL,
+                canal TEXT NOT NULL,
+                template TEXT NOT NULL,
+                delay_dias INTEGER NOT NULL DEFAULT 0,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS fluxo_inscricoes (
+                id SERIAL PRIMARY KEY,
+                fluxo_id INTEGER NOT NULL,
+                lead_id INTEGER NOT NULL,
+                etapa_origem TEXT,
+                status TEXT DEFAULT 'ativo',
+                passo_atual INTEGER DEFAULT 0,
+                proximo_envio_em TIMESTAMP,
+                iniciado_por INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                finalizado_em TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS fluxo_envio_log (
+                id SERIAL PRIMARY KEY,
+                inscricao_id INTEGER NOT NULL,
+                passo_id INTEGER,
+                canal TEXT,
+                ok INTEGER DEFAULT 1,
+                erro TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_agenda (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER NOT NULL,
@@ -1128,6 +1179,44 @@ def init_db():
             canal TEXT NOT NULL,
             template TEXT,
             enviado_por INTEGER,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS fluxos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            descricao TEXT,
+            gatilho_etapa TEXT,
+            ativo INTEGER DEFAULT 1,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS fluxo_passos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fluxo_id INTEGER NOT NULL,
+            ordem INTEGER NOT NULL,
+            canal TEXT NOT NULL,
+            template TEXT NOT NULL,
+            delay_dias INTEGER NOT NULL DEFAULT 0,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS fluxo_inscricoes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fluxo_id INTEGER NOT NULL,
+            lead_id INTEGER NOT NULL,
+            etapa_origem TEXT,
+            status TEXT DEFAULT 'ativo',
+            passo_atual INTEGER DEFAULT 0,
+            proximo_envio_em TIMESTAMP,
+            iniciado_por INTEGER,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            finalizado_em TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS fluxo_envio_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            inscricao_id INTEGER NOT NULL,
+            passo_id INTEGER,
+            canal TEXT,
+            ok INTEGER DEFAULT 1,
+            erro TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS crm_agenda (
@@ -7819,12 +7908,22 @@ def crm_lead_detalhe(lid):
         usuarios = [dict(u) for u in conn.execute(
             "SELECT id, nome, perfil FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()]
     etapas = [dict(e) for e in carregar_etapas_crm(conn)]
+    fluxos_disponiveis = [dict(f) for f in conn.execute(
+        "SELECT id, nome FROM fluxos WHERE ativo=1 ORDER BY nome").fetchall()]
+    fluxos_ativos = [dict(i) for i in conn.execute("""
+        SELECT fi.id, fi.passo_atual, fi.proximo_envio_em, f.nome AS fluxo_nome,
+               (SELECT COUNT(*) FROM fluxo_passos WHERE fluxo_id=f.id) AS total_passos
+        FROM fluxo_inscricoes fi JOIN fluxos f ON f.id = fi.fluxo_id
+        WHERE fi.lead_id=? AND fi.status='ativo' ORDER BY fi.id DESC
+    """, (lid,)).fetchall()]
     close_db(conn)
     return jsonify({
         "lead": dict(lead),
         "atividades": [dict(a) for a in atividades],
         "usuarios": usuarios,
-        "etapas": etapas
+        "etapas": etapas,
+        "fluxos_disponiveis": fluxos_disponiveis,
+        "fluxos_ativos": fluxos_ativos
     })
 
 
@@ -7869,6 +7968,12 @@ def crm_lead_mover(lid):
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                  (lid, session.get('nome'), 'movimentacao',
                   f'Movido de "{etapa_ant}" para "{nova_etapa}"'))
+    if etapa_ant != nova_etapa:
+        try:
+            _fluxo_cancelar_por_etapa(conn, lid, nova_etapa)
+            _fluxo_autoiniciar_por_etapa(conn, lid, nova_etapa)
+        except Exception:
+            pass
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
@@ -10737,6 +10842,29 @@ def _waspeed_normaliza_fone(telefone):
     return n
 
 
+def _enviar_whatsapp_waspeed(token, fone, mensagem):
+    """Envia texto via WaSpeed. token: usuarios.waspeed_token ou env WASPEED_TOKEN.
+    Retorna (ok: bool, erro: str|None). Nunca lança exceção."""
+    if not token:
+        return False, "Token WaSpeed não configurado"
+    fone_norm = _waspeed_normaliza_fone(fone)
+    if not fone_norm:
+        return False, "Telefone inválido"
+    try:
+        import requests as _rq
+        r = _rq.post(f"{WASPEED_BASE}/api/enviar-texto/{token}",
+                      json={"phone": fone_norm, "message": mensagem}, timeout=20)
+        try:
+            j = r.json()
+        except Exception:
+            return False, r.text[:200]
+        if j.get('success'):
+            return True, None
+        return False, f"WaSpeed: {j.get('message', 'erro desconhecido')}"
+    except Exception as e:
+        return False, f"Falha ao enviar WhatsApp: {e}"
+
+
 # WhatsApp da corretora (BootConversa + API oficial Meta) — usado pelas 3 consultoras
 # de retrabalho. Os demais consultores usam o próprio WhatsApp pessoal (usuarios.telefone).
 NUMERO_WHATSAPP_SERENUS = '5519936196877'
@@ -12064,6 +12192,435 @@ def _importar_leads_automatico():
     return importados, duplicados
 
 
+# ─── MÓDULO DE FLUXOS DE NUTRIÇÃO (CRM) ─────────────────────────────────────
+# Sequência automática de e-mail/SMS/WhatsApp disparada quando o lead entra
+# numa etapa do funil (ou manualmente pelo atendente). Cada fluxo tem N passos
+# com um delay em dias; o motor roda 1x/dia (+ fallback por request, mesmo
+# padrão do auto-pull de leads) e envia o passo pendente de cada inscrição ativa.
+# Canal WhatsApp usa WaSpeed (BotConversa fica de fora por ora — bug de
+# salvamento confirmado no editor deles no bloco de Integração, ver histórico).
+
+FLUXO_TEMPLATES = {
+    # ── Lead de Cotação (LP Geral) ──
+    'lp_cotacao_1': {
+        'assunto': '{nome}, recebi seu pedido de cotação',
+        'paragrafos': [
+            'Oi {nome}, tudo bem?',
+            'Aqui é o Guilherme, especialista em planos de saúde aqui na Serenus. Recebi agora sua solicitação de cotação.',
+            'Antes de eu te mandar os valores, quero te contar rapidinho como eu trabalho: eu não vendo um plano só. Trabalho com várias operadoras diferentes — Unimed, Amil, Porto Saúde, Bradesco Saúde, SulAmérica, NotreDame Intermédica, Vera Cruz, entre outras — e meu papel é comparar todas elas pra achar a que realmente cabe no seu bolso e na sua necessidade, seja pra você, sua família, ou sua empresa.',
+            'Nos próximos dias vou te mandar algumas informações rápidas que vão te ajudar a entender melhor esse mercado — que, sendo bem sincero, é bem confuso pra quem não é da área — antes de você decidir qualquer coisa.',
+            'Se quiser adiantar, me chama no WhatsApp que eu já começo a montar sua cotação.',
+        ],
+        'cta': 'Quero falar agora com o Guilherme',
+    },
+    'lp_cotacao_2': {
+        'assunto': '{nome}, as operadoras não são todas iguais',
+        'paragrafos': [
+            'Toda vez que alguém me pergunta "qual é o melhor plano de saúde", eu respondo a mesma coisa: depende.',
+            'Depende da rede de hospitais perto de você, de como funciona a coparticipação (se é que o plano tem), e das condições pro seu caso específico. Duas pessoas parecidas podem precisar de operadoras completamente diferentes — e isso ninguém te conta quando você só compara preço no Google.',
+            'Eu trabalho com várias — Unimed, Amil, Porto Saúde, Bradesco, SulAmérica, NotreDame Intermédica, Vera Cruz, entre outras — não porque preciso empurrar alguma, mas porque cada uma resolve um problema diferente. Meu trabalho é achar qual delas resolve o seu.',
+            'Na sua cotação, vou te mostrar não só o preço, mas o porquê de cada opção.',
+        ],
+        'cta': 'Quero entender qual serve pra mim',
+    },
+    'lp_cotacao_3': {
+        'assunto': '{nome}, o plano certo não é o mais barato',
+        'paragrafos': [
+            'Essa semana, atendi um MEI que queria colocar a família toda no plano. No mesmo dia, falei com uma empresa que precisava cobrir 12 funcionários. Duas conversas completamente diferentes — e, no fim, dois planos completamente diferentes também.',
+            'É por isso que eu não gosto de mandar preço de cara. O erro mais caro nesse mercado não é pagar mais — é escolher o plano errado pro momento que você tá vivendo agora.',
+            'Talvez seu caso seja outro: você quer um plano particular, sem CNPJ envolvido. Ou já passou dos 49 e não aguenta mais coparticipação surpresa toda vez que vai ao médico. Ou sua empresa cresceu e o plano que servia ano passado não serve mais.',
+            'Não importa qual desses é o seu — a conversa começa do mesmo jeito: eu entendo onde você está, pra então te mostrar o que realmente cabe aí.',
+        ],
+        'cta': 'Quero contar meu cenário pro Guilherme',
+    },
+    'lp_cotacao_4': {
+        'assunto': 'Preciso te perguntar uma última coisa',
+        'paragrafos': [
+            'Oi {nome}, tudo bem?',
+            'Você pediu uma cotação há alguns dias e não conseguimos continuar a conversa. Sei que a correria não perdoa.',
+            'Só preciso fechar esse assunto por aqui — pra não continuar te escrevendo sobre algo que não faz mais sentido pra você agora.',
+            'Se eu não tiver notícias, entendo que não é agora, e paro por aqui. Sem ressentimento nenhum — só queria ter certeza de que você teve a chance de ver isso.',
+        ],
+        'cta': 'Ainda quero minha cotação',
+    },
+    # ── Renovação de Plano ──
+    'renovacao_1': {
+        'assunto': '{nome}, hora certa de revisar seu plano',
+        'paragrafos': [
+            'Oi {nome}, tudo bem? Aqui é o Guilherme.',
+            'Recebi sua solicitação pra revisar o plano que você já tem. Antes de qualquer coisa, quero te dizer: você escolheu o momento certo.',
+            'É na renovação que o plano de saúde faz o reajuste anual e é aí que muita gente sente o baque na mensalidade sem entender muito bem o porquê. É exatamente nesse momento que vale a pena parar e perguntar: "esse ainda é o melhor plano pra mim, ou existe algo melhor pelo mesmo valor ou até por menos?"',
+            'Vou te ajudar a responder essa pergunta com calma, sem pressa e sem compromisso.',
+        ],
+        'cta': 'Quero revisar meu plano com o Guilherme',
+    },
+    'renovacao_2': {
+        'assunto': '{nome}, você está pagando o reajuste ou revisando de verdade?',
+        'paragrafos': [
+            'Semana passada, um cliente me escreveu bem incomodado: a mensalidade dele subiu quase R$ 200 no reajuste desse ano, do nada. No mesmo dia, outro cliente me contou que só foi descobrir que o hospital que ele confiava tinha saído da rede do plano quando mais precisou.',
+            'Duas dores completamente diferentes, mas nascem do mesmo lugar: ninguém para pra revisar o plano até que algo dói. O reajuste dói no bolso. A rede errada dói bem na hora que você mais precisa que ela funcione.',
+            'Se for uma dessas duas coisas com você, ou as duas, dá pra resolver. Às vezes trocando de operadora. Às vezes só ajustando dentro da que você já tem.',
+        ],
+        'cta': 'Quero saber se vale a pena trocar',
+    },
+    'renovacao_3': {
+        'assunto': '{nome}, veja o que outros clientes descobriram',
+        'paragrafos': [
+            'Talvez a maior dúvida na hora de trocar de plano seja: "e se eu perder tudo que já paguei até aqui?"',
+            'Fica tranquilo: a gente analisa com calma essa questão da carência antes de qualquer decisão, cada caso é um caso, e a troca só faz sentido se realmente compensar pra você. Às vezes nem é sobre trocar de operadora: pode ser só um upgrade dentro do plano que você já tem.',
+        ],
+        'cta': 'Quero entender minhas opções',
+    },
+    'renovacao_4': {
+        'assunto': 'Preciso te perguntar uma última coisa',
+        'paragrafos': [
+            'Oi {nome}, tudo bem?',
+            'Você pediu pra revisar seu plano há alguns dias e não conseguimos continuar a conversa. Sei que revisar contrato não é a coisa mais empolgante da lista de tarefas.',
+            'Só preciso fechar esse assunto por aqui pra não continuar te escrevendo sobre algo que não faz mais sentido pra você agora.',
+            'Se eu não tiver notícias, entendo que não é agora, e paro por aqui. Sem ressentimento nenhum.',
+        ],
+        'cta': 'Ainda quero revisar',
+    },
+    # ── Reengajamento MEI 6 Meses ──
+    'mei6m_1': {
+        'assunto': '{nome}, você chegou a ver minha mensagem?',
+        'paragrafos': [
+            'Oi {nome}, tudo bem?',
+            'Ontem te mandei uma mensagem rápida no WhatsApp. Sei que quando você toca um negócio sozinho, sobra pouco tempo pra ler mensagem de quem quer que seja, então deixo aqui, com calma, pra você ler quando der.',
+            'Uma coisa que eu vejo direto, no dia a dia com MEIs aqui de Campinas e região: a pessoa cuida de tudo, cliente, financeiro, entrega e deixa a própria saúde pra depois. Aí, quando pensa em resolver, acha que vai ser caro ou complicado.',
+            'Não precisa ser nem uma coisa nem outra. Seu CNPJ MEI, depois de 6 meses, já te dá acesso a plano de saúde empresarial pra você, sua família, ou até um funcionário custando de 30% a 40% menos do que o mesmo plano como pessoa física.',
+            'Se fizer sentido, me chama no WhatsApp que eu te explico sem enrolação.',
+        ],
+        'cta': 'Quero entender como funciona',
+    },
+    'mei6m_2': {
+        'assunto': 'A diferença pode passar de 40% no seu plano',
+        'paragrafos': [
+            'Te contei outro dia que seu MEI de 6+ meses libera acesso a plano de saúde empresarial, mais barato que o de pessoa física. Hoje quero te mostrar a conta de verdade.',
+            'A diferença pode passar de 40% ao mês. Todo mês, ano após ano.',
+            'Se você já tem plano ativo, pode ficar tranquilo: a gente analisa com calma essa questão da carência, cada caso é um caso, e a migração só faz sentido se realmente compensar pra você. Às vezes nem é sobre trocar de operadora: pode ser só um upgrade dentro do plano que você já tem.',
+            'Trabalho com Unimed, Amil, Porto Saúde, Vera Cruz, MedSênior, Santa Teresa e mais, sempre buscando o plano certo pro seu perfil, não o mais caro.',
+        ],
+        'cta': 'Quero ver minha cotação',
+    },
+    'mei6m_3': {
+        'assunto': '{nome}, seu CNPJ pode proteger mais que o seu negócio',
+        'paragrafos': [
+            'Oi {nome}, tudo bem?',
+            'Você abriu o MEI pra ter liberdade, faturar, crescer. Mas talvez ainda não tenha pensado nele desse jeito: o mesmo CNPJ que te fez empreendedor também virou uma ferramenta pra proteger quem você ama.',
+            'Com o plano de saúde empresarial que seu MEI libera, dá pra colocar sua família toda, cônjuge, filhos, pais, com cobertura completa, pagando bem menos do que sairia contratar plano individual pra cada um.',
+            'O negócio que você construiu sozinho agora também pode cuidar de quem depende de você.',
+            '(E de quebra: se tiver um funcionário no CNPJ, dá pra incluir ele também nesse mesmo plano.)',
+            'Se quiser entender como incluir sua família nesse plano, me chama no WhatsApp, sem enrolação.',
+        ],
+        'cta': 'Quero proteger minha família também',
+    },
+    'mei6m_4': {
+        'assunto': 'Preciso te perguntar uma última coisa',
+        'paragrafos': [
+            'Oi {nome}, tudo bem?',
+            'Nos últimos dias te mandei algumas mensagens sobre o plano de saúde que seu MEI libera, e não tive retorno, o que é normal, sei como a rotina de quem empreende sozinho é corrida.',
+            'Só preciso fechar esse assunto por aqui, pra não continuar te escrevendo sobre algo que não faz mais sentido pra você agora. Isso não é sobre vender um plano, é sobre você não ficar desprotegido numa hora ruim, se puder evitar.',
+            'Se eu não tiver notícias, entendo que não é agora, e paro por aqui. Sem ressentimento nenhum, só queria ter certeza de que você teve a chance de ver isso.',
+        ],
+        'cta': 'Quero Informações',
+    },
+}
+
+FLUXOS_PADRAO = [
+    {
+        'nome': 'Lead de Cotação (LP Geral)',
+        'descricao': 'Reativa a conversa no WhatsApp com quem pediu cotação numa LP (PF, MEI ou empresa).',
+        'passos': [('email', 'lp_cotacao_1', 0), ('email', 'lp_cotacao_2', 2),
+                    ('email', 'lp_cotacao_3', 4), ('email', 'lp_cotacao_4', 7)],
+    },
+    {
+        'nome': 'Renovação de Plano',
+        'descricao': 'Aproveita a janela de reajuste anual pra reativar quem já tem plano e pediu revisão/troca.',
+        'passos': [('email', 'renovacao_1', 0), ('email', 'renovacao_2', 2),
+                    ('email', 'renovacao_3', 4), ('email', 'renovacao_4', 7)],
+    },
+    {
+        'nome': 'Reengajamento MEI 6 Meses',
+        'descricao': 'Continuação por e-mail do primeiro contato via WhatsApp com MEI que completou 6+ meses de CNPJ.',
+        'passos': [('email', 'mei6m_1', 1), ('email', 'mei6m_2', 4),
+                    ('email', 'mei6m_3', 7), ('email', 'mei6m_4', 10)],
+    },
+]
+
+
+def _seed_fluxos_padrao(conn):
+    """Cadastra os 3 fluxos pré-definidos na primeira vez que a tabela `fluxos`
+    estiver vazia. Não sobrescreve edições feitas depois (gatilho_etapa, ativo)."""
+    ja_tem = conn.execute("SELECT COUNT(*) c FROM fluxos").fetchone()['c']
+    if ja_tem:
+        return
+    for f in FLUXOS_PADRAO:
+        conn.execute("INSERT INTO fluxos (nome, descricao, gatilho_etapa, ativo) VALUES (?,?,?,1)",
+                     (f['nome'], f['descricao'], None))
+        fluxo_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                    else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+        for i, (canal, template, delay) in enumerate(f['passos']):
+            conn.execute("INSERT INTO fluxo_passos (fluxo_id, ordem, canal, template, delay_dias) VALUES (?,?,?,?,?)",
+                         (fluxo_id, i, canal, template, delay))
+    conn.commit()
+    print(f"[FLUXOS] {len(FLUXOS_PADRAO)} fluxo(s) padrão cadastrados")
+
+
+def _corpo_email_fluxo(tpl, nome_lead, corretor_nome, link_click, foto_url=None):
+    """HTML no mesmo padrão visual do e-mail de contato (cartão do consultor em
+    tabela, não flexbox — ver histórico do bug de renderização no Gmail/Outlook),
+    mas com múltiplos parágrafos (fluxos são narrativos, não uma frase só)."""
+    primeiro = (nome_lead or '').strip().split(' ')[0].title() if nome_lead else ''
+    corpo_paragrafos = ''.join(
+        f"<p style='font-size:14px;color:#4a4f63;margin:0 0 16px;line-height:1.7;'>{p.format(nome=primeiro or 'tudo bem')}</p>"
+        for p in tpl['paragrafos']
+    )
+    cartao_consultor = (
+        "<table role='presentation' cellpadding='0' cellspacing='0' border='0' "
+        "style='background:#f8f9fb;border-radius:12px;margin-bottom:26px;'><tr>"
+        f"<td style='padding:14px 0 14px 16px;'>"
+        + (f"<img src='{foto_url}' width='52' height='52' alt='{corretor_nome}' "
+           "style='width:52px;height:52px;border-radius:50%;object-fit:cover;display:block;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.12);'>"
+           if foto_url else
+           f"<div style='width:52px;height:52px;border-radius:50%;background:#1a1d2e;color:#fff;display:flex;align-items:center;justify-content:center;"
+           f"font-size:19px;font-weight:700;'>{(corretor_nome or '?')[:1].upper()}</div>")
+        + f"</td><td style='padding:14px 16px 14px 14px;'>"
+        f"<div style='font-size:10.5px;color:#8c93a8;text-transform:uppercase;letter-spacing:.6px;font-weight:700;'>Seu consultor</div>"
+        f"<div style='font-size:15px;color:#1a1d2e;font-weight:700;margin-top:2px;'>{corretor_nome}</div>"
+        "</td></tr></table>"
+    )
+    return (
+        "<div style='background:#f4f6f9;padding:30px 12px;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;'>"
+        "<div style='max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;"
+        "box-shadow:0 4px 24px rgba(0,0,0,.08);'>"
+        "<div style='background:#1a1d2e;padding:22px 30px;'>"
+        "<span style='color:#fff;font-size:19px;font-weight:800;letter-spacing:2px;'>SERENUS</span>"
+        "<span style='color:#8c93a8;font-size:10px;letter-spacing:2px;display:block;margin-top:2px;'>CORRETORA DE SAÚDE</span></div>"
+        "<div style='padding:30px;'>"
+        f"{corpo_paragrafos}"
+        f"{cartao_consultor}"
+        f"<div style='text-align:center;margin-bottom:26px;'><a href='{link_click}' "
+        "style='display:inline-block;background:#25d366;color:#fff;text-decoration:none;font-weight:700;"
+        f"font-size:15px;padding:14px 34px;border-radius:10px;'>{tpl['cta']}</a></div>"
+        "<p style='font-size:12px;color:#8c93a8;margin:0;line-height:1.6;'>Se o botão não funcionar, "
+        f"copie este link no navegador:<br><a href='{link_click}' style='color:#3b82f6;word-break:break-all;'>{link_click}</a></p>"
+        "</div>"
+        "<div style='padding:16px 30px;background:#fafbfc;border-top:1px solid #eef0f3;font-size:11px;"
+        "color:#9aa0b0;line-height:1.5;'>Serenus Corretora de Saúde. Você recebeu este e-mail porque "
+        "solicitou uma cotação de plano de saúde.</div>"
+        f"</div></div>"
+    )
+
+
+def _fluxo_inscrever(conn, fluxo_id, lead_id, etapa_origem=None, iniciado_por=None):
+    """Cria uma inscrição ativa (se ainda não houver uma ativa pro mesmo lead+fluxo).
+    Primeiro passo sai na próxima rodada do motor (proximo_envio_em = agora)."""
+    ja = conn.execute(
+        "SELECT id FROM fluxo_inscricoes WHERE fluxo_id=? AND lead_id=? AND status='ativo'",
+        (fluxo_id, lead_id)).fetchone()
+    if ja:
+        return None
+    conn.execute("""INSERT INTO fluxo_inscricoes
+        (fluxo_id, lead_id, etapa_origem, status, passo_atual, proximo_envio_em, iniciado_por)
+        VALUES (?,?,?,'ativo',0,?,?)""",
+        (fluxo_id, lead_id, etapa_origem, _agora_sp(), iniciado_por))
+    return (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+
+
+def _fluxo_cancelar_por_etapa(conn, lead_id, nova_etapa):
+    """Cancela inscrições ativas cujo fluxo está preso a uma etapa (gatilho_etapa)
+    diferente da nova etapa do lead. Fluxos iniciados manualmente (sem gatilho_etapa)
+    não são afetados por mudança de etapa — só cancelamento manual os para."""
+    ativas = conn.execute("""
+        SELECT fi.id FROM fluxo_inscricoes fi JOIN fluxos f ON f.id = fi.fluxo_id
+        WHERE fi.lead_id=? AND fi.status='ativo' AND f.gatilho_etapa IS NOT NULL AND f.gatilho_etapa <> ?
+    """, (lead_id, nova_etapa)).fetchall()
+    for row in ativas:
+        conn.execute("UPDATE fluxo_inscricoes SET status='cancelado', finalizado_em=? WHERE id=?",
+                     (_agora_sp(), row['id']))
+
+
+def _fluxo_autoiniciar_por_etapa(conn, lead_id, nova_etapa):
+    """Inscreve o lead em qualquer fluxo ativo cujo gatilho_etapa bate com a etapa nova."""
+    fluxos = conn.execute("SELECT id FROM fluxos WHERE ativo=1 AND gatilho_etapa=?", (nova_etapa,)).fetchall()
+    for f in fluxos:
+        _fluxo_inscrever(conn, f['id'], lead_id, etapa_origem=nova_etapa)
+
+
+_FLUXO_MAX_POR_RODADA = 50
+
+def _processar_fluxos_pendentes():
+    """Motor de disparo: roda 1x/dia (+ fallback por request) e envia o passo
+    pendente de cada inscrição ativa cujo proximo_envio_em já chegou."""
+    try:
+        conn = db()
+        agora = datetime.now(TZ_SP)
+        pendentes = conn.execute("""
+            SELECT fi.*, f.nome AS fluxo_nome FROM fluxo_inscricoes fi
+            JOIN fluxos f ON f.id = fi.fluxo_id
+            WHERE fi.status='ativo' AND f.ativo=1 AND fi.proximo_envio_em <= ?
+            ORDER BY fi.proximo_envio_em ASC LIMIT ?
+        """, (_agora_sp(), _FLUXO_MAX_POR_RODADA)).fetchall()
+        enviados = 0
+        for insc in pendentes:
+            insc = dict(insc)
+            passos = conn.execute(
+                "SELECT * FROM fluxo_passos WHERE fluxo_id=? ORDER BY ordem", (insc['fluxo_id'],)).fetchall()
+            passo_idx = insc['passo_atual']
+            if passo_idx >= len(passos):
+                conn.execute("UPDATE fluxo_inscricoes SET status='concluido', finalizado_em=? WHERE id=?",
+                             (_agora_sp(), insc['id']))
+                continue
+            passo = dict(passos[passo_idx])
+            lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (insc['lead_id'],)).fetchone()
+            ok, erro = False, "Lead não encontrado"
+            if lead:
+                lead = dict(lead)
+                tpl = FLUXO_TEMPLATES.get(passo['template'])
+                if not tpl:
+                    ok, erro = False, f"Template desconhecido: {passo['template']}"
+                else:
+                    urow = conn.execute("SELECT id, nome, foto FROM usuarios WHERE id=?",
+                                         (lead.get('responsavel_id'),)).fetchone()
+                    consultor_nome = (urow['nome'] if urow else None) or 'Serenus'
+                    foto_url = f"{_SITE_BASE_URL}/avatar/{urow['id']}" if urow and urow['foto'] else None
+                    primeiro = (lead.get('nome') or '').strip().split(' ')[0].title()
+                    link_wpp = f"https://wa.me/{_whatsapp_do_consultor(conn, lead.get('responsavel_id'))}"
+                    if passo['canal'] == 'email':
+                        email_lead = (lead.get('email') or '').strip()
+                        if not email_lead or '@' not in email_lead:
+                            ok, erro = False, "Lead sem e-mail válido"
+                        else:
+                            assunto = tpl['assunto'].format(nome=primeiro or 'tudo bem')
+                            corpo = _corpo_email_fluxo(tpl, lead.get('nome'), consultor_nome, link_wpp, foto_url)
+                            ok = _enviar_email(email_lead, assunto, corpo, remetente_nome='Cotação de Plano de Saúde')
+                            erro = None if ok else (getattr(_enviar_email, 'ultimo_erro', None) or 'Falha ao enviar')
+                    elif passo['canal'] == 'sms':
+                        if not lead.get('telefone'):
+                            ok, erro = False, "Lead sem telefone"
+                        else:
+                            mensagem = f"{tpl['paragrafos'][0].format(nome=primeiro or '')} Fale com a Serenus: {link_wpp}"[:300]
+                            ok, erro = _enviar_sms(lead['telefone'], mensagem)
+                    elif passo['canal'] == 'whatsapp':
+                        token = _waspeed_token_do_usuario(conn, lead.get('responsavel_id'))
+                        mensagem = tpl['paragrafos'][0].format(nome=primeiro or '')
+                        ok, erro = _enviar_whatsapp_waspeed(token, lead.get('telefone'), mensagem)
+                    else:
+                        ok, erro = False, f"Canal desconhecido: {passo['canal']}"
+            conn.execute("INSERT INTO fluxo_envio_log (inscricao_id, passo_id, canal, ok, erro) VALUES (?,?,?,?,?)",
+                         (insc['id'], passo['id'], passo['canal'], 1 if ok else 0, erro))
+            proximo_passo_idx = passo_idx + 1
+            if proximo_passo_idx >= len(passos):
+                conn.execute("UPDATE fluxo_inscricoes SET status='concluido', passo_atual=?, finalizado_em=? WHERE id=?",
+                             (proximo_passo_idx, _agora_sp(), insc['id']))
+            else:
+                delay_atual = passo['delay_dias']
+                delay_prox = dict(passos[proximo_passo_idx])['delay_dias']
+                proximo_envio = agora + timedelta(days=max(1, delay_prox - delay_atual))
+                conn.execute("UPDATE fluxo_inscricoes SET passo_atual=?, proximo_envio_em=? WHERE id=?",
+                             (proximo_passo_idx, proximo_envio.strftime('%Y-%m-%d %H:%M:%S'), insc['id']))
+            if ok:
+                enviados += 1
+        conn.commit()
+        close_db(conn)
+        if enviados:
+            app.logger.info(f"[FLUXOS] {enviados}/{len(pendentes)} passo(s) enviados")
+    except Exception as e:
+        app.logger.error(f"[FLUXOS] ❌ {e}")
+
+
+@app.route('/crm/fluxos')
+@login_required
+@admin_required
+def crm_fluxos():
+    conn = db()
+    fluxos = [dict(f) for f in conn.execute("SELECT * FROM fluxos ORDER BY id").fetchall()]
+    for f in fluxos:
+        f['passos'] = [dict(p) for p in conn.execute(
+            "SELECT * FROM fluxo_passos WHERE fluxo_id=? ORDER BY ordem", (f['id'],)).fetchall()]
+        f['ativos'] = conn.execute(
+            "SELECT COUNT(*) c FROM fluxo_inscricoes WHERE fluxo_id=? AND status='ativo'", (f['id'],)).fetchone()['c']
+        f['concluidos'] = conn.execute(
+            "SELECT COUNT(*) c FROM fluxo_inscricoes WHERE fluxo_id=? AND status='concluido'", (f['id'],)).fetchone()['c']
+    etapas = [dict(e) for e in carregar_etapas_crm(conn)]
+    close_db(conn)
+    return render_template('crm_fluxos.html', fluxos=fluxos, etapas=etapas)
+
+
+@app.route('/crm/fluxos/<int:fid>/toggle', methods=['POST'])
+@login_required
+@admin_required
+def crm_fluxo_toggle(fid):
+    conn = db()
+    f = conn.execute("SELECT ativo FROM fluxos WHERE id=?", (fid,)).fetchone()
+    if not f:
+        close_db(conn); return jsonify({"ok": False, "erro": "Fluxo não encontrado"}), 404
+    novo = 0 if f['ativo'] else 1
+    conn.execute("UPDATE fluxos SET ativo=? WHERE id=?", (novo, fid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "ativo": bool(novo)})
+
+
+@app.route('/crm/fluxos/<int:fid>/gatilho', methods=['POST'])
+@login_required
+@admin_required
+def crm_fluxo_gatilho(fid):
+    """Define (ou remove) a etapa do funil que dispara este fluxo automaticamente."""
+    d = request.json or {}
+    gatilho = (d.get('gatilho_etapa') or '').strip() or None
+    conn = db()
+    f = conn.execute("SELECT id FROM fluxos WHERE id=?", (fid,)).fetchone()
+    if not f:
+        close_db(conn); return jsonify({"ok": False, "erro": "Fluxo não encontrado"}), 404
+    conn.execute("UPDATE fluxos SET gatilho_etapa=? WHERE id=?", (gatilho, fid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/lead/<int:lid>/fluxo/iniciar', methods=['POST'])
+@login_required
+def crm_lead_fluxo_iniciar(lid):
+    d = request.json or {}
+    fluxo_id = d.get('fluxo_id')
+    conn = db()
+    lead = conn.execute("SELECT id, responsavel_id, etapa FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and dict(lead)['responsavel_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    fluxo = conn.execute("SELECT id, nome FROM fluxos WHERE id=? AND ativo=1", (fluxo_id,)).fetchone()
+    if not fluxo:
+        close_db(conn); return jsonify({"ok": False, "erro": "Fluxo inválido ou inativo"}), 400
+    insc_id = _fluxo_inscrever(conn, fluxo['id'], lid, etapa_origem=None, iniciado_por=session.get('user_id'))
+    if insc_id is None:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead já está ativo nesse fluxo"}), 400
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                 (lid, session.get('nome'), 'fluxo', f'Fluxo "{fluxo["nome"]}" iniciado manualmente'))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "inscricao_id": insc_id})
+
+
+@app.route('/crm/lead/<int:lid>/fluxo/<int:iid>/cancelar', methods=['POST'])
+@login_required
+def crm_lead_fluxo_cancelar(lid, iid):
+    conn = db()
+    lead = conn.execute("SELECT id, responsavel_id FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and dict(lead)['responsavel_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    insc = conn.execute("SELECT id FROM fluxo_inscricoes WHERE id=? AND lead_id=? AND status='ativo'", (iid, lid)).fetchone()
+    if not insc:
+        close_db(conn); return jsonify({"ok": False, "erro": "Inscrição não encontrada ou já finalizada"}), 404
+    conn.execute("UPDATE fluxo_inscricoes SET status='cancelado', finalizado_em=? WHERE id=?", (_agora_sp(), iid))
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
+                 (lid, session.get('nome'), 'fluxo', 'Fluxo cancelado manualmente'))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
 # ── Auto-pull de leads disparado por requisição (independe do APScheduler) ──
 # Garante que os leads cheguem "a todo momento" mesmo que o agendador em
 # background morra após restart/deploy no Railway. Throttle: no máximo 1x a
@@ -12088,6 +12645,10 @@ def _auto_pull_leads_throttled():
                 pass
             try:
                 _enviar_lembretes_agenda()
+            except Exception:
+                pass
+            try:
+                _processar_fluxos_pendentes()
             except Exception:
                 pass
             finally:
@@ -12154,6 +12715,8 @@ def _iniciar_scheduler_backup():
                       next_run_time=datetime.now(TZ_SP) + timedelta(seconds=40))
         # Leads parados (7+ dias sem atividade): resumo diário às 09:00 SP
         sched.add_job(_notificar_leads_parados, 'cron', hour=9, minute=0, max_instances=1)
+        # Fluxos de nutrição do CRM: dispara os passos pendentes 1x/dia às 08:00 SP
+        sched.add_job(_processar_fluxos_pendentes, 'cron', hour=8, minute=0, max_instances=1)
         sched.start()
         _SCHEDULER_INICIADO = True
         app.logger.info("[SCHEDULER] ✅ Backup (22:00 SP) + Importação de leads (boot + a cada 15 min) agendados")

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Fluxos de Nutrição{% endblock %}
+
+{% block head %}
+<style>
+  .box { max-width:900px; background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:22px; margin-bottom:16px; }
+  .box h2 { font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin:0 0 12px; }
+  .box p { font-size:13px; color:var(--cinza); line-height:1.6; }
+  .fluxo-card { max-width:900px; background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:20px 22px; margin-bottom:14px; }
+  .fluxo-topo { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px; }
+  .fluxo-nome { font-size:15px; font-weight:700; color:var(--texto); }
+  .fluxo-desc { font-size:12.5px; color:var(--cinza); margin-bottom:14px; }
+  .fluxo-stats { display:flex; gap:16px; margin-bottom:14px; }
+  .fluxo-stat { font-size:12px; color:var(--cinza); background:var(--panel-2); border-radius:20px; padding:4px 12px; }
+  .fluxo-passos { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  .fluxo-passo { font-size:11.5px; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:6px 10px; color:var(--cinza); }
+  .fluxo-passo b { color:var(--texto); }
+  .fluxo-linha { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  select { background:var(--panel); border:1px solid var(--borda); border-radius:8px; padding:8px 10px; font-size:13px; color:var(--texto); }
+  .toggle-ativo { padding:6px 16px; border-radius:20px; font-size:12px; font-weight:600; border:none; cursor:pointer; }
+  .toggle-ativo.on { background:var(--verde-soft); color:var(--verde); }
+  .toggle-ativo.off { background:rgba(244,63,94,.12); color:var(--erro); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Fluxos de Nutrição</h1>
+    <div class="sub">Sequências automáticas de e-mail/SMS/WhatsApp disparadas por etapa do CRM ou manualmente pelo atendente</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="location.href='/crm'">Voltar ao CRM</button>
+  </div>
+</div>
+
+<div class="box">
+  <h2>Como funciona</h2>
+  <p>Cada fluxo tem uma sequência fixa de passos (e-mail/SMS/WhatsApp) com um intervalo de dias entre eles. Você pode amarrar um fluxo a uma etapa do funil — quando um lead entra nela, é inscrito automaticamente; se ele sair dessa etapa antes de terminar, o fluxo é cancelado sozinho. Sem gatilho de etapa, o fluxo só inicia manualmente pela ficha do lead (aba "Fluxos"). O motor roda 1x por dia.</p>
+</div>
+
+{% for f in fluxos %}
+<div class="fluxo-card">
+  <div class="fluxo-topo">
+    <div class="fluxo-nome">{{ f.nome }}</div>
+    <button class="toggle-ativo {{ 'on' if f.ativo else 'off' }}" onclick="toggleFluxo({{ f.id }})">{{ 'Ativo' if f.ativo else 'Inativo' }}</button>
+  </div>
+  <div class="fluxo-desc">{{ f.descricao }}</div>
+  <div class="fluxo-stats">
+    <span class="fluxo-stat">{{ f.ativos }} lead(s) em andamento</span>
+    <span class="fluxo-stat">{{ f.concluidos }} concluído(s)</span>
+  </div>
+  <div class="fluxo-passos">
+    {% for p in f.passos %}
+    <div class="fluxo-passo"><b>D+{{ p.delay_dias }}</b> · {{ p.canal|upper }} · {{ p.template }}</div>
+    {% endfor %}
+  </div>
+  <div class="fluxo-linha">
+    <span style="font-size:12px; color:var(--cinza);">Gatilho automático (etapa do funil):</span>
+    <select onchange="setGatilho({{ f.id }}, this.value)">
+      <option value="">— Nenhum (só manual) —</option>
+      {% for e in etapas %}
+      <option value="{{ e.id }}" {% if f.gatilho_etapa == e.id %}selected{% endif %}>{{ e.nome }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</div>
+{% else %}
+<div style="text-align:center; padding:30px; color:var(--cinza-2); font-size:13px;">Nenhum fluxo cadastrado ainda.</div>
+{% endfor %}
+
+<script>
+function toggleFluxo(id){
+  fetch('/crm/fluxos/' + id + '/toggle', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Erro'); });
+}
+function setGatilho(id, etapa){
+  fetch('/crm/fluxos/' + id + '/gatilho', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({gatilho_etapa: etapa})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if (!d.ok) alert(d.erro || 'Erro'); });
+}
+</script>
+{% endblock %}
