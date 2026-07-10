@@ -103,9 +103,15 @@
 
   <!-- CUSTOS -->
   <div class="fin-pane" id="pane-custos">
-    <div class="add-row" style="grid-template-columns:1.6fr 1fr 1fr 1fr .8fr 1fr 1fr 1fr auto;">
+    <div class="add-row" style="grid-template-columns:1.6fr 1fr 1fr 1fr .8fr 1fr 1fr 1fr 1fr auto;">
       <div class="campo"><label>Descrição do custo</label><input type="text" id="c-desc" placeholder="Ex: Aluguel, software, marketing..."></div>
-      <div class="campo"><label>Categoria</label><input type="text" id="c-cat" placeholder="Ex: Fixo"></div>
+      <div class="campo"><label>Categoria</label>
+        <select id="c-cat">
+          <option value="">—</option>
+          <option value="fixo">Fixo</option>
+          <option value="recorrente">Recorrente</option>
+          <option value="parcela_unica">Parcela única</option>
+        </select></div>
       <div class="campo"><label>Data de emissão</label><input type="date" id="c-emissao"></div>
       <div class="campo"><label>Data de vencimento</label><input type="date" id="c-vencimento"></div>
       <div class="campo"><label>Parcelas</label><input type="number" min="1" value="1" id="c-parcelas" title="Compra parcelada (ex: cartão em 10x) — divide o valor automaticamente pelos próximos meses"></div>
@@ -122,22 +128,33 @@
           <option value="Caixa">Caixa da empresa</option>
           <option value="Terceiro">Recurso de terceiro</option>
         </select></div>
+      <div class="campo"><label>Forma de pagamento</label>
+        <select id="c-forma">
+          <option value="">—</option>
+          <option value="pix">Pix</option>
+          <option value="cartao_credito">Cartão de crédito</option>
+          <option value="cartao_debito">Cartão de débito</option>
+          <option value="boleto">Boleto</option>
+          <option value="dinheiro">Dinheiro</option>
+          <option value="transferencia">Transferência</option>
+        </select></div>
       <button class="btn" id="btn-add-custo" onclick="addLanc('custo')">Adicionar</button>
     </div>
     <div style="font-size:11px; color:var(--cinza-2); margin:-6px 0 14px;">A competência do lançamento é sempre a do mês de <b>emissão</b> — não do mês que você está vendo agora. Parcelado em N vezes gera N lançamentos, um por mês a partir da emissão.</div>
     <div class="card">
       <table class="tbl">
-        <thead><tr><th>Descrição</th><th>Categoria</th><th>Emissão</th><th>Vencimento</th><th>Valor</th><th>Pago por</th><th>Fonte</th><th>Status</th><th>Comprovante</th><th></th></tr></thead>
+        <thead><tr><th>Descrição</th><th>Categoria</th><th>Emissão</th><th>Vencimento</th><th>Valor</th><th>Pago por</th><th>Fonte</th><th>Forma</th><th>Status</th><th>Comprovante</th><th></th></tr></thead>
         <tbody id="tbody-custos">
           {% for c in custos %}
           <tr data-id="{{ c.id }}">
             <td class="td-descricao">{{ c.descricao }}</td>
-            <td class="td-categoria">{{ c.categoria }}</td>
+            <td class="td-categoria">{% if c.categoria == 'fixo' %}Fixo{% elif c.categoria == 'recorrente' %}Recorrente{% elif c.categoria == 'parcela_unica' %}Parcela única{% else %}{{ c.categoria or '—' }}{% endif %}</td>
             <td class="td-emissao">{{ (c.data_emissao|data_br) if c.data_emissao else (c.data_lancamento|data_br or '—') }}</td>
             <td class="td-vencimento">{{ (c.data_vencimento|data_br) if c.data_vencimento else '—' }}</td>
             <td class="neg td-valor">{{ c.valor|moeda  }}</td>
             <td class="td-pagou">{{ c.pago_por or '—' }}</td>
             <td class="td-fonte">{% if c.fonte_pagamento == 'Caixa' %}Caixa{% elif c.fonte_pagamento == 'Terceiro' %}Terceiro{% else %}—{% endif %}</td>
+            <td class="td-forma">{% if c.forma_pagamento == 'pix' %}Pix{% elif c.forma_pagamento == 'cartao_credito' %}Cartão crédito{% elif c.forma_pagamento == 'cartao_debito' %}Cartão débito{% elif c.forma_pagamento == 'boleto' %}Boleto{% elif c.forma_pagamento == 'dinheiro' %}Dinheiro{% elif c.forma_pagamento == 'transferencia' %}Transferência{% else %}—{% endif %}</td>
             <td>
               <span class="badge-status {{ 'badge-pago' if c.status in ('Pago','Conciliado') else 'badge-previsto' }}">{{ c.status }}</span>
               {% if c.status == 'Previsto' %}<button class="btn-ghost" style="color:var(--verde);" onclick="conciliar({{ c.id }})">Marcar pago</button>{% endif %}
@@ -150,11 +167,11 @@
               <button class="btn-ghost" style="color:var(--azul);" onclick="abrirQR({{ c.id }}, '{{ c.descricao|replace("'","") }}')">Celular</button>
             </td>
             <td style="white-space:nowrap;">
-              <button class="btn-ghost" onclick='abrirEdicaoCusto({{ c.id }}, {{ c.descricao|tojson }}, {{ (c.categoria or "")|tojson }}, {{ c.valor }}, {{ (c.data_emissao or c.data_lancamento or "")|tojson }}, {{ (c.data_vencimento or "")|tojson }}, {{ (c.pago_por or "")|tojson }}, {{ (c.fonte_pagamento or "")|tojson }})'>Editar</button>
+              <button class="btn-ghost" onclick='abrirEdicaoCusto({{ c.id }}, {{ c.descricao|tojson }}, {{ (c.categoria or "")|tojson }}, {{ c.valor }}, {{ (c.data_emissao or c.data_lancamento or "")|tojson }}, {{ (c.data_vencimento or "")|tojson }}, {{ (c.pago_por or "")|tojson }}, {{ (c.fonte_pagamento or "")|tojson }}, {{ (c.forma_pagamento or "")|tojson }})'>Editar</button>
               <button class="btn-ghost" style="color:var(--rosa);" onclick="excluir({{ c.id }})">×</button>
             </td>
           </tr>
-          {% else %}<tr><td colspan="10" style="color:var(--cinza-2);">Nenhum custo lançado neste mês.</td></tr>{% endfor %}
+          {% else %}<tr><td colspan="11" style="color:var(--cinza-2);">Nenhum custo lançado neste mês.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
@@ -180,7 +197,13 @@
         <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:14px;">Editar custo</h3>
         <input type="hidden" id="ed-id">
         <div class="campo" style="margin-bottom:10px;"><label>Descrição</label><input type="text" id="ed-desc"></div>
-        <div class="campo" style="margin-bottom:10px;"><label>Categoria</label><input type="text" id="ed-cat"></div>
+        <div class="campo" style="margin-bottom:10px;"><label>Categoria</label>
+          <select id="ed-cat">
+            <option value="">—</option>
+            <option value="fixo">Fixo</option>
+            <option value="recorrente">Recorrente</option>
+            <option value="parcela_unica">Parcela única</option>
+          </select></div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
           <div class="campo"><label>Emissão</label><input type="date" id="ed-emissao"></div>
           <div class="campo"><label>Vencimento</label><input type="date" id="ed-vencimento"></div>
@@ -192,6 +215,16 @@
           <div class="campo"><label>Fonte</label>
             <select id="ed-fonte"><option value="">—</option><option value="Caixa">Caixa</option><option value="Terceiro">Terceiro</option></select></div>
         </div>
+        <div class="campo" style="margin-bottom:16px;"><label>Forma de pagamento</label>
+          <select id="ed-forma">
+            <option value="">—</option>
+            <option value="pix">Pix</option>
+            <option value="cartao_credito">Cartão de crédito</option>
+            <option value="cartao_debito">Cartão de débito</option>
+            <option value="boleto">Boleto</option>
+            <option value="dinheiro">Dinheiro</option>
+            <option value="transferencia">Transferência</option>
+          </select></div>
         <div style="display:flex; gap:10px;">
           <button class="btn" style="flex:1;" onclick="salvarEdicaoCusto()">Salvar</button>
           <button class="btn-outline" onclick="fechar('modal-editar-custo')">Cancelar</button>
@@ -290,7 +323,7 @@ async function addLanc(tipo) {
     body.descricao=val('c-desc'); body.categoria=val('c-cat'); body.valor=val('c-val');
     body.data_emissao=val('c-emissao'); body.data_vencimento=val('c-vencimento');
     body.num_parcelas=val('c-parcelas') || 1;
-    body.pago_por=val('c-pagou'); body.fonte_pagamento=val('c-fonte');
+    body.pago_por=val('c-pagou'); body.fonte_pagamento=val('c-fonte'); body.forma_pagamento=val('c-forma');
     if (!body.data_emissao) { toast('Informe a data de emissão', 'err'); return; }
   }
   if (!body.descricao || !body.valor) { toast('Preencha descrição e valor', 'err'); return; }
@@ -317,7 +350,7 @@ async function addLancSocio() {
 }
 
 /* ── Edição de custo ── */
-function abrirEdicaoCusto(id, desc, cat, valor, emissao, vencimento, pagou, fonte) {
+function abrirEdicaoCusto(id, desc, cat, valor, emissao, vencimento, pagou, fonte, forma) {
   document.getElementById('ed-id').value = id;
   document.getElementById('ed-desc').value = desc;
   document.getElementById('ed-cat').value = cat;
@@ -326,6 +359,7 @@ function abrirEdicaoCusto(id, desc, cat, valor, emissao, vencimento, pagou, font
   document.getElementById('ed-vencimento').value = vencimento;
   document.getElementById('ed-pagou').value = pagou;
   document.getElementById('ed-fonte').value = fonte;
+  document.getElementById('ed-forma').value = forma || '';
   document.getElementById('modal-editar-custo').classList.add('open');
 }
 async function salvarEdicaoCusto() {
@@ -333,7 +367,7 @@ async function salvarEdicaoCusto() {
   const body = {
     descricao: val('ed-desc'), categoria: val('ed-cat'), valor: val('ed-val'),
     data_emissao: val('ed-emissao'), data_vencimento: val('ed-vencimento'),
-    pago_por: val('ed-pagou'), fonte_pagamento: val('ed-fonte'),
+    pago_por: val('ed-pagou'), fonte_pagamento: val('ed-fonte'), forma_pagamento: val('ed-forma'),
   };
   const r = await fetch('/lancamento/' + id + '/editar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const d = await r.json();

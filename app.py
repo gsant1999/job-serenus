@@ -1507,6 +1507,7 @@ def init_db():
         ("lancamentos", "grupo_parcela", "TEXT"),
         ("lancamentos", "parcela_num", "INTEGER"),
         ("lancamentos", "parcela_total", "INTEGER"),
+        ("lancamentos", "forma_pagamento", "TEXT"),
         # Telefone do usuário (WhatsApp p/ notificações via WaSpeed e link wa.me nos e-mails)
         ("usuarios", "telefone", "TEXT"),
         # Mensagem pronta pro lead, escrita já no agendamento (fica 1 clique pra enviar quando o lembrete chegar)
@@ -6379,12 +6380,13 @@ def lancamento_salvar():
         desc_i = f"{descricao} ({i+1}/{num_parcelas})" if num_parcelas > 1 else descricao
         conn.execute("""INSERT INTO lancamentos
             (tipo,categoria,descricao,valor,data_competencia,data_lancamento,data_emissao,data_vencimento,
-             socio,recorrente,status,pago_por,fonte_pagamento,grupo_parcela,parcela_num,parcela_total)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             socio,recorrente,status,pago_por,fonte_pagamento,forma_pagamento,grupo_parcela,parcela_num,parcela_total)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (tipo, d.get('categoria', ''), desc_i, valor_i, competencia_i,
              data_emissao or competencia_i, data_emissao or None, data_vencimento or None,
              d.get('socio', ''), 1 if d.get('recorrente') else 0, 'Previsto',
              (d.get('pago_por') or '').strip(), (d.get('fonte_pagamento') or '').strip(),
+             (d.get('forma_pagamento') or '').strip(),
              grupo, i + 1 if num_parcelas > 1 else None, num_parcelas if num_parcelas > 1 else None))
         lid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
@@ -6416,10 +6418,11 @@ def lancamento_editar(lid):
     competencia = data_emissao[:7] if len(data_emissao) >= 7 else (campo('data_competencia') or atual['data_competencia'])
 
     conn.execute("""UPDATE lancamentos SET descricao=?, categoria=?, valor=?, data_emissao=?, data_vencimento=?,
-        data_competencia=?, socio=?, pago_por=?, fonte_pagamento=?
+        data_competencia=?, socio=?, pago_por=?, fonte_pagamento=?, forma_pagamento=?
         WHERE id=?""",
         (campo('descricao'), campo('categoria'), valor, data_emissao or None, (campo('data_vencimento') or '').strip() or None,
-         competencia, campo('socio'), (campo('pago_por') or '').strip(), (campo('fonte_pagamento') or '').strip(), lid))
+         competencia, campo('socio'), (campo('pago_por') or '').strip(), (campo('fonte_pagamento') or '').strip(),
+         (campo('forma_pagamento') or '').strip(), lid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
