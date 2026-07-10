@@ -8475,8 +8475,17 @@ def cotacao_import():
             import openpyxl
             wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
             ws = wb.active
+            def _celula_texto(c):
+                if c is None:
+                    return ''
+                # Excel guarda telefone/CNPJ como número quando a coluna não é
+                # formatada como texto — openpyxl devolve float (19988608662.0).
+                # str() direto grudaria um "0" extra no final ao tirar o ".0".
+                if isinstance(c, float) and c.is_integer():
+                    return str(int(c))
+                return str(c)
             for r in ws.iter_rows(values_only=True):
-                rows.append(['' if c is None else str(c) for c in r])
+                rows.append([_celula_texto(c) for c in r])
         else:
             import csv, io
             raw = f.read().decode('utf-8-sig', errors='replace')
@@ -12548,8 +12557,17 @@ def crm_importar_meninas():
             import openpyxl
             wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
             ws = wb.active
+            def _celula_texto(c):
+                if c is None:
+                    return ''
+                # Excel guarda telefone/CNPJ como número quando a coluna não é
+                # formatada como texto — openpyxl devolve float (19988608662.0).
+                # str() direto grudaria um "0" extra no final ao tirar o ".0".
+                if isinstance(c, float) and c.is_integer():
+                    return str(int(c))
+                return str(c)
             for r in ws.iter_rows(values_only=True):
-                rows.append(['' if c is None else str(c) for c in r])
+                rows.append([_celula_texto(c) for c in r])
         else:
             import csv, io
             raw = f.read().decode('utf-8-sig', errors='replace')
@@ -12816,8 +12834,17 @@ def crm_frios_importar(cid):
             import openpyxl
             wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
             ws = wb.active
+            def _celula_texto(c):
+                if c is None:
+                    return ''
+                # Excel guarda telefone/CNPJ como número quando a coluna não é
+                # formatada como texto — openpyxl devolve float (19988608662.0).
+                # str() direto grudaria um "0" extra no final ao tirar o ".0".
+                if isinstance(c, float) and c.is_integer():
+                    return str(int(c))
+                return str(c)
             for r in ws.iter_rows(values_only=True):
-                rows.append(['' if c is None else str(c) for c in r])
+                rows.append([_celula_texto(c) for c in r])
         else:
             import csv, io
             raw = f.read().decode('utf-8-sig', errors='replace')
