@@ -146,6 +146,63 @@
     return out;
   }
 
+  // ── IMAGENS: raspa as fotos/cotações/documentos da conversa (blob: já
+  //    renderizado), 100% leitura. fetch do blob same-origin funciona no content
+  //    script (validado no DOM real). Redimensiona pra no máx 1600px e comprime
+  //    em JPEG pra caber no payload. Direção pela mesma geometria do texto. ──
+  const _WA_MAX_IMG = 8;
+
+  async function imagemParaBase64(im) {
+    const blob = await (await fetch(im.src)).blob();
+    const bmp = await createImageBitmap(blob);
+    const maxW = 1600;
+    const escala = Math.min(1, maxW / bmp.width);
+    const cw = Math.max(1, Math.round(bmp.width * escala));
+    const ch = Math.max(1, Math.round(bmp.height * escala));
+    const cv = document.createElement('canvas');
+    cv.width = cw; cv.height = ch;
+    cv.getContext('2d').drawImage(bmp, 0, 0, cw, ch);
+    try { bmp.close(); } catch (e) {}
+    const dataUrl = cv.toDataURL('image/jpeg', 0.85);
+    return dataUrl.split(',')[1] || '';
+  }
+
+  function horaProximaDaImagem(im) {
+    let n = im;
+    for (let i = 0; i < 8 && n; i++) {
+      const t = n.querySelector && n.querySelector('[data-pre-plain-text]');
+      if (t) {
+        const m = (t.getAttribute('data-pre-plain-text') || '').match(/\[([^\]]+)\]/);
+        if (m) return m[1];
+      }
+      n = n.parentElement;
+    }
+    return '';
+  }
+
+  async function rasparImagensVisiveis(atualizarStatus) {
+    const centro = centroDoPainel();
+    const cand = Array.from(document.querySelectorAll('#main img')).filter((im) =>
+      (im.src || '').startsWith('blob:') && im.naturalWidth >= 150 && im.naturalHeight >= 150);
+    const vistos = new Set();
+    const out = [];
+    for (const im of cand) {
+      if (out.length >= _WA_MAX_IMG) break;
+      if (vistos.has(im.src)) continue;
+      vistos.add(im.src);
+      try {
+        if (atualizarStatus) atualizarStatus('Lendo imagens… (' + (out.length + 1) + ')');
+        const b64 = await imagemParaBase64(im);
+        if (!b64) continue;
+        const r = im.getBoundingClientRect();
+        const de = (centro != null && r.width > 0)
+          ? ((r.left + r.width / 2) < centro ? 'lead' : 'consultor') : 'lead';
+        out.push({ de, base64: b64, mime: 'image/jpeg', hora: horaProximaDaImagem(im) });
+      } catch (e) { /* imagem que falhar é ignorada, nunca derruba a análise */ }
+    }
+    return out;
+  }
+
   // ═══════════════ UI: botão + painel ═══════════════
 
   function criarBotao() {
@@ -267,9 +324,15 @@
       ? '<div class="job-ia-alertas">' + ia.sinais_atencao.map((a) =>
           '<div class="job-ia-alerta">⚠ ' + esc(a) + '</div>').join('') + '</div>'
       : '';
+    const imgsLidas = (ia.leitura_imagens || []).filter(Boolean);
+    const blocoImgs = imgsLidas.length
+      ? '<div class="job-sec">O que a IA leu nas imagens (' + (ia.imagens_lidas || imgsLidas.length) + ')</div>' +
+        imgsLidas.map((t) => '<div class="job-img-lida">🖼 ' + esc(t) + '</div>').join('')
+      : '';
     return (
       '<div class="job-sec">Leitura da IA <span class="job-ia-badge">Claude</span></div>' +
       '<div class="job-resumo">' + esc(ia.resumo || '') + '</div>' +
+      blocoImgs +
       alertas +
       (acoes ? '<div class="job-sec">Próximas ações (IA)</div>' + acoes : '')
     );
@@ -305,16 +368,20 @@
       const telefone = telefoneDoContato();
       const mensagens = dedup(rasparMensagensVisiveis());
 
-      if (!mensagens.length) {
-        abrirPainel('<div class="job-erro">Não achei mensagens de texto nesta conversa. ' +
-          '(Conversas só de áudio/imagem ainda não são analisadas.)</div>');
+      let imagens = [];
+      try { imagens = await rasparImagensVisiveis(status); } catch (e) { imagens = []; }
+
+      if (!mensagens.length && !imagens.length) {
+        abrirPainel('<div class="job-erro">Não achei mensagens de texto nem imagens nesta conversa. ' +
+          '(Áudio ainda não é lido — em breve.)</div>');
         return;
       }
 
-      status('Calculando o score no JOB…');
+      status(imagens.length ? 'Analisando conversa + ' + imagens.length + ' imagem(ns) no JOB…'
+                            : 'Calculando o score no JOB…');
       const resp = await chrome.runtime.sendMessage({
         type: 'analisar',
-        payload: { telefone, nome, mensagens }
+        payload: { telefone, nome, mensagens, imagens }
       });
 
       if (!resp || !resp.ok) {
