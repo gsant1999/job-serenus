@@ -11,7 +11,16 @@
 const JOB_URL_PADRAO = 'https://job-serenus-production.up.railway.app';
 
 async function config() {
-  const { jobUrl, extKey } = await chrome.storage.sync.get(['jobUrl', 'extKey']);
+  // chrome.storage.local (não sync — o limite de 8KB por item do sync às
+  // vezes disparava "quota exceeded"; local não tem essa restrição).
+  let { jobUrl, extKey } = await chrome.storage.local.get(['jobUrl', 'extKey']);
+  if (jobUrl === undefined && extKey === undefined) {
+    const antigo = await chrome.storage.sync.get(['jobUrl', 'extKey', 'usuarioId']);
+    if (antigo.jobUrl || antigo.extKey) {
+      await chrome.storage.local.set(antigo);
+      jobUrl = antigo.jobUrl; extKey = antigo.extKey;
+    }
+  }
   return {
     jobUrl: (jobUrl || JOB_URL_PADRAO).replace(/\/+$/, ''),
     extKey: extKey || ''
