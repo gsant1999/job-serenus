@@ -8363,6 +8363,10 @@ _CLAUDE_SYSTEM_ANALISE = (
     "comercial). LEIA cada PDF por completo: extraia operadora, planos, valores, condições, "
     "prazos e qualquer dado relevante pra negociação. Registre o que leu de cada um no campo "
     "leitura_documentos.\n\n"
+    "Podem vir LINKS compartilhados na conversa (URL + prévia de título/domínio, quando o "
+    "WhatsApp mostrou). Você NÃO acessa o link — use só o que já vier como texto pra entender o "
+    "contexto (ex: um link de Google Drive com cotação, um vídeo, uma rede social) e considere "
+    "isso no resumo/próximas ações quando fizer diferença.\n\n"
     "IMPORTANTE: o motor de regras só lê o TEXTO da conversa — ele não enxerga imagem nem PDF. "
     "Quando uma cotação/carteirinha/proposta DE PLANO DE SAÚDE anexada mostrar idades, quantidade "
     "de vidas, CNPJ, operadora ou nome do plano, PREENCHA o campo dados_extraidos_anexos com esses "
@@ -8436,8 +8440,8 @@ _CLAUDE_MAX_IMAGENS = 8  # teto por análise (controle de custo/payload)
 _CLAUDE_MAX_DOCUMENTOS = 5  # teto de PDFs por análise (custo/payload maior que imagem)
 
 
-def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, documentos=None):
-    """Chama a Claude para uma leitura qualitativa da conversa (texto + imagens + PDFs).
+def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, documentos=None, links=None):
+    """Chama a Claude para uma leitura qualitativa da conversa (texto + imagens + PDFs + links).
     Retorna dict {resumo, fase_funil, leitura_imagens, leitura_documentos, proximas_acoes,
     sinais_atencao, modelo, imagens_lidas, documentos_lidos} ou None se não há chave ou algo
     falhar (chamador trata None como 'sem camada de IA')."""
@@ -8484,13 +8488,29 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, docume
             blocos_doc.append({"type": "text", "text": f"[{doc.get('hora', '')}] PDF enviado pelo {quem} ({nome_doc}):"})
             blocos_doc.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}})
 
-        if not conversa_txt and not blocos_img and not blocos_doc:
+        # Links compartilhados na conversa — só o texto (URL + prévia que o
+        # WhatsApp já mostra), NUNCA abrimos/buscamos o link no servidor.
+        links_linhas = []
+        for lk in (links or [])[:15]:
+            url = (lk.get('url') or '').strip()
+            if not url:
+                continue
+            quem = 'CLIENTE' if lk.get('de') == 'lead' else 'CONSULTOR'
+            preview = (lk.get('preview') or '').strip()
+            linha = f"[{lk.get('hora', '')}] Link enviado pelo {quem}: {url}"
+            if preview:
+                linha += f" — prévia: {preview[:300]}"
+            links_linhas.append(linha)
+        links_txt = '\n'.join(links_linhas)
+
+        if not conversa_txt and not blocos_img and not blocos_doc and not links_txt:
             return None
 
         conteudo = [{"type": "text", "text":
                      f"Dados já extraídos pelo motor de regras: {json.dumps(extracao, ensure_ascii=False)}\n"
                      f"Score heurístico (referência, não recalcular): {score}/1000 ({faixa}).\n\n"
-                     f"CONVERSA (ordem cronológica):\n{conversa_txt or '(sem texto)'}"}]
+                     f"CONVERSA (ordem cronológica):\n{conversa_txt or '(sem texto)'}"
+                     + (f"\n\nLINKS COMPARTILHADOS NA CONVERSA:\n{links_txt}" if links_txt else "")}]
         conteudo.extend(blocos_img)
         conteudo.extend(blocos_doc)
 
@@ -8590,7 +8610,7 @@ def _transcrever_audio(b64, mime='audio/ogg'):
         return None
 
 
-def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=None):
+def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=None, links=None):
     """Orquestra a análise completa: extração + score oficial + diagnóstico + IA."""
     ex, flags, msgs_lead = _wa_extrair_lead(mensagens, nome_contato)
     sc = _wa_score_lead(ex, flags, mensagens, msgs_lead)
@@ -8602,7 +8622,7 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
                                     'urgencia', 'saude', 'decisor', 'objecoes')}
 
     extracao = _montar_extracao(ex)
-    ia = _analisar_com_claude(mensagens, extracao, sc['score_final'], sc['faixa'], imagens=imagens, documentos=documentos)
+    ia = _analisar_com_claude(mensagens, extracao, sc['score_final'], sc['faixa'], imagens=imagens, documentos=documentos, links=links)
 
     # O motor de regras só lê TEXTO — não enxerga imagem/PDF. Se a IA confirmou
     # dados concretos num anexo (cotação, carteirinha), valem mais que um regex
@@ -8821,6 +8841,19 @@ def api_whatsapp_analisar():
                            'base64': b64, 'nome': str(doc.get('nome') or 'documento.pdf')[:200],
                            'hora': str(doc.get('hora') or '')[:40]})
 
+    # Links (URL + prévia de texto) raspados da conversa — Fase 4. Só texto,
+    # nunca abrimos/buscamos o link no servidor.
+    links = []
+    for lk in (d.get('links') or [])[:15]:
+        if not isinstance(lk, dict):
+            continue
+        url = str(lk.get('url') or '').strip()
+        if not url or len(url) > 2000:
+            continue
+        links.append({'de': 'lead' if lk.get('de') == 'lead' else 'consultor',
+                      'url': url, 'preview': str(lk.get('preview') or '')[:300],
+                      'hora': str(lk.get('hora') or '')[:40]})
+
     # Áudios (base64 OGG) — transcreve cada um e injeta como mensagem na conversa,
     # em ordem cronológica, pra o áudio entrar no Score e na leitura da IA.
     transcricoes = []
@@ -8879,7 +8912,7 @@ def api_whatsapp_analisar():
                 fundido.sort(key=lambda m: _wa_parse_hora(m.get('hora') or '') or datetime.min)
                 limpa = fundido
 
-    an = _wa_analisar_conversa(limpa, nome_contato=nome, imagens=imagens, documentos=documentos)
+    an = _wa_analisar_conversa(limpa, nome_contato=nome, imagens=imagens, documentos=documentos, links=links)
     an['audios_transcritos'] = len(transcricoes)
     an['transcricoes'] = transcricoes
     score, faixa = an['score_final'], an['faixa']

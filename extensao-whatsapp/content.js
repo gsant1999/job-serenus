@@ -109,6 +109,41 @@
     return msgs;
   }
 
+  // ── LINKS: a URL crua já vem junto do texto normal da mensagem (rasparMensagensVisiveis
+  //    já pega isso). O que falta é a PRÉVIA que o WhatsApp desenha (título + domínio) —
+  //    fica num bloco irmão fora do balão de texto. Só leitura do que já está renderizado
+  //    na tela; nunca abre nem busca o link. ──
+  function rasparLinks() {
+    const nodes = document.querySelectorAll('#main .copyable-text[data-pre-plain-text]');
+    const centro = centroDoPainel();
+    const nomeContato = nomeDoContato();
+    const vistos = new Set();
+    const out = [];
+    for (const cp of nodes) {
+      const a = cp.querySelector('a[href^="http"]');
+      if (!a || vistos.has(a.href)) continue;
+      const pre = cp.getAttribute('data-pre-plain-text') || '';
+      const mh = pre.match(/\[([^\]]+)\]/);
+      const hora = mh ? mh[1] : '';
+      // Sobe pelos ancestrais até achar um irmão (fora do balão de texto) com a
+      // prévia (título + domínio) que o WhatsApp gera pra link com preview rica.
+      let preview = '';
+      let no = cp;
+      for (let i = 0; i < 6 && no && no.parentElement; i++) {
+        no = no.parentElement;
+        const candidato = [...no.children]
+          .filter((c) => !c.contains(cp) && !c.querySelector('.copyable-text'))
+          .map((c) => (c.textContent || '').trim())
+          .find((t) => t && t.length > 5 && t.length < 400);
+        if (candidato) { preview = candidato; break; }
+      }
+      vistos.add(a.href);
+      out.push({ de: direcaoDaMensagem(cp, centro, nomeContato), url: a.href, preview: preview.slice(0, 300), hora });
+      if (out.length >= 15) break;
+    }
+    return out;
+  }
+
   // ── Converte a hora tipo "[HH:MM, DD/MM/AAAA]" (DOM) ou "HH:MM, AAAA/M/D"
   //    (áudio) pra timestamp, pra comparar com a marca d'água da última
   //    mensagem já conhecida (modo incremental). Espelha _wa_parse_hora do backend. ──
@@ -523,8 +558,11 @@
       let documentos = [];
       try { documentos = await pedirDocumentos(5); } catch (e) { documentos = []; }
 
-      if (!mensagens.length && !imagens.length && !audios.length && !documentos.length) {
-        abrirPainel('<div class="job-erro">Não achei mensagens, imagens, áudios nem documentos nesta conversa.</div>');
+      let links = [];
+      try { links = rasparLinks(); } catch (e) { links = []; }
+
+      if (!mensagens.length && !imagens.length && !audios.length && !documentos.length && !links.length) {
+        abrirPainel('<div class="job-erro">Não achei mensagens, imagens, áudios, documentos nem links nesta conversa.</div>');
         return;
       }
 
@@ -532,12 +570,13 @@
       if (imagens.length) extras.push(imagens.length + ' imagem(ns)');
       if (audios.length) extras.push(audios.length + ' áudio(s)');
       if (documentos.length) extras.push(documentos.length + ' documento(s)');
+      if (links.length) extras.push(links.length + ' link(s)');
       status(extras.length ? 'Analisando conversa + ' + extras.join(' + ') + ' no JOB…'
                            : 'Calculando o score no JOB…');
       const { usuarioId } = await chrome.storage.sync.get(['usuarioId']);
       const resp = await chrome.runtime.sendMessage({
         type: 'analisar',
-        payload: { telefone, nome, mensagens, imagens, audios, documentos, usuario_id: usuarioId || null }
+        payload: { telefone, nome, mensagens, imagens, audios, documentos, links, usuario_id: usuarioId || null }
       });
 
       if (!resp || !resp.ok) {
