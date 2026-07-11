@@ -7978,9 +7978,11 @@ def _wa_extrair_lead(mensagens, nome_contato=''):
         ex['fase_funil'] = 'QUALIFICANDO'
     else:
         ex['fase_funil'] = 'NOVO_LEAD'
-    # INATIVO: última mensagem há mais de 10 dias (e não fechou)
+    # INATIVO: última mensagem há mais de 10 dias — vale até pra quem disse "vou
+    # fechar" e sumiu (se tivesse fechado de verdade, não estaria sendo analisado
+    # como lead; sumir depois do "vou fechar" é desistência, não fechamento).
     ult_dt = _wa_parse_hora((mensagens[-1].get('hora') or '')) if mensagens else None
-    if ult_dt and ex['fase_funil'] != 'FECHADO':
+    if ult_dt:
         try:
             if (datetime.now(TZ_SP).replace(tzinfo=None) - ult_dt).days > 10:
                 ex['fase_funil'] = 'INATIVO'
@@ -8080,10 +8082,14 @@ def _wa_score_lead(ex, flags, mensagens, msgs_lead):
         cats['upgrade_downgrade'] = 50 if diff >= 1 else 25 if diff == 0 else 10 if diff == -1 else 0
     else:
         cats['upgrade_downgrade'] = None
-    # [8] cobertura desejada vs oferta
-    cats['cobertura_alinhada'] = 10 if flags['mismatch_cobertura'] else 50
-    # [9] rede (sem info de hospital desejado → médio, como no código oficial)
-    cats['rede'] = 35
+    # [8] cobertura desejada vs oferta — SÓ pontua quando o lead expressou a
+    # cobertura que quer. Antes dava 50 de graça pra todo mundo e inflava o score.
+    if ex['cobertura_desejada']:
+        cats['cobertura_alinhada'] = 10 if flags['mismatch_cobertura'] else 50
+    else:
+        cats['cobertura_alinhada'] = None
+    # [9] aderência de rede — só com evidência (hospital/médico desejado citado)
+    cats['rede'] = 35 if re.search(r'\b(hospital|m[ée]dico|laborat[óo]rio|cl[íi]nica)\b[^\n]{0,40}\b(perto|preferido|que eu uso|atende)\b', lead_txt) else None
     # [10] coparticipação
     cp = ex['copart_pref']
     cats['coparticipacao'] = None if not cp else (10 if cp == 'rejeita' else 45 if cp == 'sem' else 35 if cp == 'parcial' else 20)
@@ -8114,13 +8120,13 @@ def _wa_score_lead(ex, flags, mensagens, msgs_lead):
         cats['experiencia_previa'] = None
     # [15] conhecimento das regras
     cats['conhecimento_regras'] = 35 if re.search(r'car[êe]ncia|copart|cpt|reajuste|portabilidade', lead_txt) else None
-    # [16] prontidão documental
+    # [16] prontidão documental — só com evidência (antes dava 30 de graça)
     if re.search(r'segue (o|os|a|as)? ?(documento|rg|cpf|comprovante)|mandei os documentos|enviei os documentos', lead_txt):
         cats['documentacao'] = 45
     elif 'PJ_CNPJ_INCOMPLETO' in ex['tags']:
         cats['documentacao'] = 15
     else:
-        cats['documentacao'] = 30
+        cats['documentacao'] = None
     # [17] engajamento no funil
     if ex['fase_funil'] == 'FECHADO' or len(msgs_lead) >= 8:
         cats['engajamento'] = 45
@@ -8146,21 +8152,26 @@ def _wa_score_lead(ex, flags, mensagens, msgs_lead):
         cats['sinistralidade'] = None
     # [21] pressão concorrencial
     cats['concorrencia'] = 20 if ex['concorrencia'] == 'alta' else None
-    # [22] poder de decisão
-    cats['decisor'] = 45 if ex['decisor'] == 'decisor' else 35
+    # [22] poder de decisão — só com evidência na fala do lead (antes: 45 grátis)
+    if ex['decisor'] == 'influenciador':
+        cats['decisor'] = 35
+    elif re.search(r'\b(eu mesm[oa]|pra mim|para mim|plano individual|vou fechar|quero fechar|eu (que )?decido)\b', lead_txt):
+        cats['decisor'] = 45
+    else:
+        cats['decisor'] = None
     # [23]/[24] facilidade operacional
     cats['reuniao_online'] = 40 if re.search(r'(reuni[ãa]o|call|videochamada)[^\n]{0,20}(online|virtual|meet|zoom)', todo) else None
     cats['assinatura_digital'] = 40 if re.search(r'assinatura digital|assinar online|clicksign|docusign', todo) else None
-    # [25] sentimento da fala
+    # [25] sentimento da fala — só com sinal explícito (antes: 30 grátis)
     if re.search(r'obrigad|perfeito|[óo]timo|excelente|maravilha|adorei|gostei|show|top\b', lead_txt):
         cats['sentimento'] = 40
     elif re.search(r'p[ée]ssimo|horr[íi]vel|decepcion|n[ãa]o gostei|absurdo', lead_txt):
         cats['sentimento'] = 15
     else:
-        cats['sentimento'] = 30
-    # [26] qualidade da interação
+        cats['sentimento'] = None
+    # [26] qualidade da interação — só quando o lead fez perguntas de verdade
     perguntas = sum(1 for m in msgs_lead if '?' in (m.get('texto') or ''))
-    cats['qualidade_interacao'] = 45 if perguntas >= 2 else 30
+    cats['qualidade_interacao'] = 45 if perguntas >= 2 else None
     # [27] tempo de resposta (mediana consultor→lead, pelos timestamps)
     gaps = []
     for i in range(1, len(mensagens)):
@@ -8174,14 +8185,14 @@ def _wa_score_lead(ex, flags, mensagens, msgs_lead):
         mediana = gaps[len(gaps) // 2]
         cats['tempo_resposta'] = 45 if mediana <= 60 else 30 if mediana <= 1440 else 15
     else:
-        cats['tempo_resposta'] = 30
-    # [28] compreensão da proposta
+        cats['tempo_resposta'] = None
+    # [28] compreensão da proposta — só com sinal explícito (antes: 30 grátis)
     if re.search(r'ficou claro|entendi|compreendi|deu (pra|para) entender', lead_txt):
         cats['compreensao'] = 45
     elif re.search(r'n[ãa]o entendi|como assim|confuso|n[ãa]o ficou claro', lead_txt):
         cats['compreensao'] = 15
     else:
-        cats['compreensao'] = 30
+        cats['compreensao'] = None
 
     validas = [p for p in cats.values() if p is not None]
     bruto = (sum(validas) / (50.0 * len(validas))) * 1000 if validas else 0.0
@@ -8197,6 +8208,14 @@ def _wa_score_lead(ex, flags, mensagens, msgs_lead):
         cap, motivo_cap = 600, 'downgrade severo com urgência imediata'
     if flags['mismatch_cobertura'] and cap > 700:
         cap, motivo_cap = 700, 'precisa de cobertura nacional e oferta é regional'
+    # Conversa parada há 10+ dias não pode ser lead "bom" por inércia
+    if ex['fase_funil'] == 'INATIVO' and cap > 550:
+        cap, motivo_cap = 550, 'conversa parada há mais de 10 dias'
+    # Poucos dados objetivos = score não confiável → teto até qualificar melhor.
+    # (Com a normalização dinâmica, 3-4 categorias altas davam 900+ pra qualquer
+    # conversa curta ou aleatória — era isso que fazia todo lead dar ~750.)
+    if len(validas) < 6 and cap > 500:
+        cap, motivo_cap = 500, f'poucos dados objetivos na conversa ({len(validas)} critérios)'
 
     final = _wa_round50(max(0.0, min(float(cap), bruto - total_pen)))
     faixa = ('quente' if final >= 850 else 'bom' if final >= 700 else
@@ -8317,6 +8336,11 @@ _CLAUDE_SYSTEM_ANALISE = (
     "documento). LEIA cada imagem: extraia os dados relevantes (operadora, planos, valores, "
     "nomes, idades, números) e use no diagnóstico. Registre o que leu de cada uma no campo "
     "leitura_imagens.\n\n"
+    "Julgue também a RELEVÂNCIA COMERCIAL da conversa como um todo: 'alta' = negociação real "
+    "de plano de saúde com um cliente em potencial; 'media' = tem interesse mas disperso/incompleto; "
+    "'baixa' = conversa desconexa com só menções soltas ao tema; 'nenhuma' = não é conversa de venda "
+    "(colega de trabalho, assunto pessoal, grupo, teste, suporte interno). Seja rigoroso: mencionar "
+    "operadora ou CNPJ numa conversa interna NÃO faz dela uma venda.\n\n"
     "Regras:\n"
     "- Português do Brasil, tom direto e consultivo, sem enrolação nem elogio vazio.\n"
     "- Baseie-se SÓ no que está na conversa e nas imagens. Não invente dados que não aparecem.\n"
@@ -8347,9 +8371,12 @@ _CLAUDE_SCHEMA_ANALISE = {
             }
         },
         "sinais_atencao": {"type": "array", "items": {"type": "string"},
-                            "description": "Alertas/riscos (ex: cliente sumiu, objeção não resolvida, pediu para parar)."}
+                            "description": "Alertas/riscos (ex: cliente sumiu, objeção não resolvida, pediu para parar)."},
+        "relevancia_comercial": {"type": "string", "enum": ["alta", "media", "baixa", "nenhuma"],
+                                  "description": "A conversa É uma negociação real de plano de saúde com cliente?"}
     },
-    "required": ["resumo", "fase_funil", "leitura_imagens", "proximas_acoes", "sinais_atencao"],
+    "required": ["resumo", "fase_funil", "leitura_imagens", "proximas_acoes", "sinais_atencao",
+                 "relevancia_comercial"],
     "additionalProperties": False
 }
 
@@ -8433,6 +8460,22 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None):
                                     'plano_preferido', 'cobertura_desejada', 'copart_pref',
                                     'urgencia', 'saude', 'decisor', 'objecoes')}
     ia = _analisar_com_claude(mensagens, extracao, sc['score_final'], sc['faixa'], imagens=imagens)
+
+    # A IA lê a conversa COMO UM TODO. Se ela diz que isto não é uma negociação
+    # real (conversa interna/pessoal/desconexa), o score cai — o regex vê
+    # palavras-chave, a IA vê o contexto. Só derruba, nunca sobe (o teto de
+    # confiança é sempre o menor entre motor e IA).
+    if ia:
+        rel = ia.get('relevancia_comercial')
+        teto = {'nenhuma': 250, 'baixa': 550}.get(rel)
+        if teto is not None and sc['score_final'] > teto:
+            sc['cap'] = {'valor': teto, 'motivo': f'IA: relevância comercial {rel} (conversa não é negociação real)'}
+            sc['score_final'] = teto
+            sc['faixa'] = ('quente' if teto >= 850 else 'bom' if teto >= 700 else
+                           'medio' if teto >= 550 else 'baixo' if teto >= 350 else 'improvavel')
+            tags = list(dict.fromkeys([t for t in tags if t not in ('QUENTE', 'BOM', 'MEDIO', 'BAIXO', 'IMPROVAVEL')]
+                                       + [sc['faixa'].upper(), 'RELEVANCIA_' + rel.upper()]))
+
     return {'extracao': extracao, 'fase_funil': ex['fase_funil'], 'tags': tags, **sc,
             'sugestoes': sugestoes, 'followup': followup, 'descricao': descricao, 'ia': ia}
 
