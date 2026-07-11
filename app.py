@@ -8355,6 +8355,12 @@ _CLAUDE_SYSTEM_ANALISE = (
     "comercial). LEIA cada PDF por completo: extraia operadora, planos, valores, condições, "
     "prazos e qualquer dado relevante pra negociação. Registre o que leu de cada um no campo "
     "leitura_documentos.\n\n"
+    "IMPORTANTE: o motor de regras só lê o TEXTO da conversa — ele não enxerga imagem nem PDF. "
+    "Quando uma cotação/documento/carteirinha anexada mostrar idades, quantidade de vidas, CNPJ, "
+    "operadora ou nome do plano, PREENCHA o campo dados_extraidos_anexos com esses valores "
+    "concretos (são eles que vão alimentar o cadastro do lead no CRM). Deixe vazio o que não "
+    "conseguir confirmar num anexo — nunca invente, e nunca repita um dado que só apareceu no "
+    "texto da conversa (esse o motor de regras já cobre sozinho).\n\n"
     "Julgue também a RELEVÂNCIA COMERCIAL da conversa como um todo: 'alta' = negociação real "
     "de plano de saúde com um cliente em potencial; 'media' = tem interesse mas disperso/incompleto; "
     "'baixa' = conversa desconexa com só menções soltas ao tema; 'nenhuma' = não é conversa de venda "
@@ -8394,10 +8400,25 @@ _CLAUDE_SCHEMA_ANALISE = {
         "sinais_atencao": {"type": "array", "items": {"type": "string"},
                             "description": "Alertas/riscos (ex: cliente sumiu, objeção não resolvida, pediu para parar)."},
         "relevancia_comercial": {"type": "string", "enum": ["alta", "media", "baixa", "nenhuma"],
-                                  "description": "A conversa É uma negociação real de plano de saúde com cliente?"}
+                                  "description": "A conversa É uma negociação real de plano de saúde com cliente?"},
+        "dados_extraidos_anexos": {
+            "type": "object",
+            "description": "Dados CONCRETOS confirmados nas IMAGENS ou PDFs anexados (cotação, carteirinha, documento) — não no texto da conversa, que o motor de regras já cobre sozinho. Deixe vazio ('' ou []) o que não conseguir confirmar num anexo.",
+            "properties": {
+                "idades": {"type": "array", "items": {"type": "integer"},
+                           "description": "Idades dos beneficiários vistas num anexo. Vazio se não houver."},
+                "vidas": {"type": "string", "description": "Quantidade de vidas/beneficiários visível num anexo, em texto (ex: '2'). Vazio se não visível."},
+                "cidade": {"type": "string", "description": "Cidade visível num anexo. Vazio se não visível."},
+                "cnpj": {"type": "string", "description": "CNPJ visível num anexo, só dígitos. Vazio se não visível."},
+                "operadora_interesse": {"type": "string", "description": "Operadora da cotação/documento anexado. Vazio se não visível."},
+                "plano_preferido": {"type": "string", "description": "Nome comercial do plano em destaque no anexo. Vazio se não visível."}
+            },
+            "required": ["idades", "vidas", "cidade", "cnpj", "operadora_interesse", "plano_preferido"],
+            "additionalProperties": False
+        }
     },
     "required": ["resumo", "fase_funil", "leitura_imagens", "leitura_documentos", "proximas_acoes",
-                 "sinais_atencao", "relevancia_comercial"],
+                 "sinais_atencao", "relevancia_comercial", "dados_extraidos_anexos"],
     "additionalProperties": False
 }
 
@@ -8563,15 +8584,59 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
     """Orquestra a análise completa: extração + score oficial + diagnóstico + IA."""
     ex, flags, msgs_lead = _wa_extrair_lead(mensagens, nome_contato)
     sc = _wa_score_lead(ex, flags, mensagens, msgs_lead)
+
+    def _montar_extracao(ex):
+        return {k: ex[k] for k in ('nome', 'cidade', 'idades', 'vidas', 'tipo_contratacao',
+                                    'cnpj', 'tem_cnpj', 'plano_ativo', 'operadora_atual', 'operadora_interesse',
+                                    'plano_preferido', 'cobertura_desejada', 'copart_pref',
+                                    'urgencia', 'saude', 'decisor', 'objecoes')}
+
+    extracao = _montar_extracao(ex)
+    ia = _analisar_com_claude(mensagens, extracao, sc['score_final'], sc['faixa'], imagens=imagens, documentos=documentos)
+
+    # O motor de regras só lê TEXTO — não enxerga imagem/PDF. Se a IA confirmou
+    # dados concretos num anexo (cotação, carteirinha), valem mais que um regex
+    # tentando adivinhar por texto solto (ex: "00 a 18" virando idade 18 errada),
+    # então SUBSTITUEM os campos equivalentes — não só preenchem lacuna — antes
+    # de recalcular o score final com o dado correto.
+    dados_anexo = (ia or {}).get('dados_extraidos_anexos') or {}
+    houve_dado_de_anexo = False
+    if dados_anexo.get('idades'):
+        idades_validas = [i for i in dados_anexo['idades'] if isinstance(i, int) and 0 <= i <= 99]
+        if idades_validas:
+            ex['idades'] = idades_validas
+            ex['vidas'] = len(idades_validas)
+            houve_dado_de_anexo = True
+    if dados_anexo.get('vidas'):
+        vidas_num = int(re.sub(r'\D', '', str(dados_anexo['vidas'])) or 0)
+        if vidas_num:
+            ex['vidas'] = vidas_num
+            houve_dado_de_anexo = True
+    if dados_anexo.get('cidade'):
+        ex['cidade'] = dados_anexo['cidade'].strip().title()
+        houve_dado_de_anexo = True
+    if dados_anexo.get('cnpj'):
+        cnpj_digitos = re.sub(r'\D', '', dados_anexo['cnpj'])
+        if len(cnpj_digitos) == 14:
+            ex['cnpj'] = cnpj_digitos
+            ex['tem_cnpj'] = True
+            ex['tipo_contratacao'] = 'PJ'
+            houve_dado_de_anexo = True
+    if dados_anexo.get('operadora_interesse'):
+        ex['operadora_interesse'] = dados_anexo['operadora_interesse'].strip()
+        houve_dado_de_anexo = True
+    if dados_anexo.get('plano_preferido'):
+        ex['plano_preferido'] = dados_anexo['plano_preferido'].strip()
+        houve_dado_de_anexo = True
+
+    if houve_dado_de_anexo:
+        sc = _wa_score_lead(ex, flags, mensagens, msgs_lead)
+        extracao = _montar_extracao(ex)
+
     sugestoes = _wa_proximas_acoes(ex, flags, mensagens)
     followup = _wa_followup(ex, sc['score_final'])
     descricao = _wa_descricao(ex, mensagens, msgs_lead, sc['score_final'], sc['faixa'])
     tags = list(dict.fromkeys(ex['tags'] + [sc['faixa'].upper(), ex['fase_funil']]))
-    extracao = {k: ex[k] for k in ('nome', 'cidade', 'idades', 'vidas', 'tipo_contratacao',
-                                    'cnpj', 'tem_cnpj', 'plano_ativo', 'operadora_atual', 'operadora_interesse',
-                                    'plano_preferido', 'cobertura_desejada', 'copart_pref',
-                                    'urgencia', 'saude', 'decisor', 'objecoes')}
-    ia = _analisar_com_claude(mensagens, extracao, sc['score_final'], sc['faixa'], imagens=imagens, documentos=documentos)
 
     # A IA lê a conversa COMO UM TODO. Se ela diz que isto não é uma negociação
     # real (conversa interna/pessoal/desconexa), o score cai — o regex vê
