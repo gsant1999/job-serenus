@@ -8891,6 +8891,7 @@ def api_whatsapp_analisar():
                             (nome.strip().lower(),)).fetchone()
     lead_id = lead['id'] if lead else None
     lead_criado = False
+    responsavel_lead_criado = None
 
     # ── Não achou lead: cria automaticamente (pedido explícito — a análise não
     # pode ficar só "solta" no painel da extensão, tem que virar lead no CRM) ──
@@ -8916,6 +8917,7 @@ def api_whatsapp_analisar():
                      (lead_id, 'Extensão WhatsApp', 'criacao',
                       'Lead criado automaticamente a partir da análise de uma conversa no WhatsApp.', _agora_sp()))
         lead_criado = True
+        responsavel_lead_criado = responsavel_id
 
     # ── Sobe pro CRM o que deu pra extrair da conversa (qual_*), sem sobrescrever
     # o que o consultor já preencheu manualmente (só entra no que estiver vazio) ──
@@ -8957,6 +8959,17 @@ def api_whatsapp_analisar():
                       f'Score Lead {score}/1000 ({faixa}) · fase {an["fase_funil"]} · {len(limpa)} mensagens analisadas.',
                       _agora_sp()))
     conn.commit(); close_db(conn)
+
+    if lead_criado:
+        # Avisa quem for responsável (ou os admins, se ficou órfão) — a criação
+        # é automática e silenciosa na extensão, então precisa aparecer no sino
+        # do JOB pra não passar batido. Só depois do commit: _notificar abre a
+        # própria conexão, e no SQLite local isso trava se ainda tiver uma
+        # transação aberta na mesma base.
+        _notificar(responsavel_lead_criado, 'lead',
+                   'Lead criado pela extensão de WhatsApp',
+                   f'{nome or telefone} entrou no CRM automaticamente a partir de uma conversa analisada.',
+                   f'/crm?lead={lead_id}')
 
     return _wa_cors(jsonify({
         "ok": True,

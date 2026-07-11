@@ -275,6 +275,30 @@
     });
   }
 
+  // ── TELEFONE via wa-js: pra contato salvo (nome próprio, não número), o DOM
+  //    não expõe o telefone em lugar nenhum — mas o JID interno (chat.id) tem
+  //    o número de verdade quando não é conta @lid (privacidade nova/business).
+  //    Pede pra ponte no main world; devolve string de dígitos ou ''. ──
+  function pedirTelefoneWpp() {
+    return new Promise((resolve) => {
+      const reqId = 't' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true;
+        window.removeEventListener('message', onMsg);
+        resolve(d.telefone || '');
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'obter_telefone', reqId }, '*');
+      setTimeout(() => {
+        if (!pronto) { window.removeEventListener('message', onMsg); resolve(''); }
+      }, 5000);
+    });
+  }
+
   // ═══════════════ UI: botão + painel ═══════════════
 
   function criarBotao() {
@@ -463,7 +487,9 @@
       // importa é lido de novo depois do carregarHistorico, quando o DOM já
       // estabilizou — igual sempre foi antes do modo incremental existir.
       const nomeInicial = nomeDoContato();
-      const telefoneInicial = telefoneDoContato();
+      let telefoneInicial = '';
+      try { telefoneInicial = (await pedirTelefoneWpp()) || telefoneDoContato(); }
+      catch (e) { telefoneInicial = telefoneDoContato(); }
 
       // Modo incremental: pergunta pro JOB se essa conversa já foi analisada
       // antes. Se sim, só precisa rolar até a última mensagem já conhecida —
@@ -481,7 +507,9 @@
       await carregarHistorico(painelRolavel, status, watermark);
       status('Organizando as mensagens…');
       const nome = nomeDoContato() || nomeInicial;
-      const telefone = telefoneDoContato() || telefoneInicial;
+      let telefone = '';
+      try { telefone = (await pedirTelefoneWpp()) || telefoneDoContato() || telefoneInicial; }
+      catch (e) { telefone = telefoneDoContato() || telefoneInicial; }
       const mensagens = dedup(rasparMensagensVisiveis());
 
       let imagens = [];

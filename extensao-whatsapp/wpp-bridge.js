@@ -115,6 +115,24 @@
     return { documentos: out };
   }
 
+  async function obterTelefone() {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getActiveChat) {
+      return { erro: 'wpp_ausente' };
+    }
+    const chat = window.WPP.chat.getActiveChat();
+    if (!chat || !chat.id) return { erro: 'sem_conversa' };
+    // O JID só carrega o número de telefone de verdade pra contato "normal"
+    // (server === 'c.us'). Contas business/privacidade nova usam @lid — um ID
+    // interno que NÃO é o telefone; nesses casos o WhatsApp não expõe o
+    // número real em lugar nenhum do cliente, então respondemos sem_numero e
+    // o content.js cai pro método antigo (nome do cabeçalho/DOM).
+    const server = chat.id.server || '';
+    if (server !== 'c.us') return { erro: 'sem_numero_exposto' };
+    const numero = chat.id.user || (chat.id._serialized || '').split('@')[0];
+    if (!numero) return { erro: 'sem_numero_exposto' };
+    return { telefone: numero };
+  }
+
   window.addEventListener('message', async (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
@@ -123,6 +141,7 @@
     try {
       if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite);
       else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite);
+      else if (d.tipo === 'obter_telefone') resp = await obterTelefone();
       else return;
     } catch (e) { resp = { erro: 'excecao' }; }
     resp.source = 'JOB_EXT_RESP';
