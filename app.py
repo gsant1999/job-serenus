@@ -1663,6 +1663,12 @@ def init_db():
         # Confirmação de leitura do lembrete: link de 1 toque na própria mensagem do WhatsApp
         ("crm_agenda", "confirmar_token", "TEXT"),
         ("crm_agenda", "confirmado_em", "TEXT"),
+        # Custo real da IA por análise de WhatsApp (Claude + transcrição de áudio)
+        ("whatsapp_analises", "custo_claude_usd", "REAL"),
+        ("whatsapp_analises", "custo_transcricao_usd", "REAL"),
+        ("whatsapp_analises", "tokens_entrada", "INTEGER"),
+        ("whatsapp_analises", "tokens_saida", "INTEGER"),
+        ("whatsapp_analises", "audio_segundos", "REAL"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -8325,6 +8331,15 @@ def _wa_descricao(ex, mensagens, msgs_lead, score, faixa):
 
 _CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-haiku-4-5').strip() or 'claude-haiku-4-5'
 
+# Preços em USD/milhão de tokens (Claude Haiku 4.5, jul/2026) e USD/minuto de
+# transcrição — configuráveis por env pra acompanhar reajustes sem precisar
+# mexer no código. Usados só pra ESTIMAR o gasto (painel de custo), não afeta
+# a análise em si.
+_CLAUDE_PRECO_INPUT_USD_MI = float(os.environ.get('CLAUDE_PRECO_INPUT_USD_MILHAO', '1.00'))
+_CLAUDE_PRECO_OUTPUT_USD_MI = float(os.environ.get('CLAUDE_PRECO_OUTPUT_USD_MILHAO', '5.00'))
+_OPENAI_TRANSCRICAO_PRECO_USD_MIN = float(os.environ.get('OPENAI_TRANSCRICAO_PRECO_USD_MIN', '0.006'))
+_GROQ_TRANSCRICAO_PRECO_USD_MIN = float(os.environ.get('GROQ_TRANSCRICAO_PRECO_USD_MIN', '0.000667'))
+
 _CLAUDE_SYSTEM_ANALISE = (
     "Você é um analista de vendas sênior de uma corretora de planos de saúde no Brasil "
     "(Serenus). Recebe a transcrição de uma conversa de WhatsApp entre o CONSULTOR e um "
@@ -8461,6 +8476,12 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, docume
         dados['modelo'] = _CLAUDE_MODEL
         dados['imagens_lidas'] = len(blocos_img) // 2
         dados['documentos_lidos'] = len(blocos_doc) // 2
+        tok_in = getattr(resp.usage, 'input_tokens', 0) or 0
+        tok_out = getattr(resp.usage, 'output_tokens', 0) or 0
+        dados['tokens_entrada'] = tok_in
+        dados['tokens_saida'] = tok_out
+        dados['custo_usd'] = round(tok_in * _CLAUDE_PRECO_INPUT_USD_MI / 1_000_000
+                                    + tok_out * _CLAUDE_PRECO_OUTPUT_USD_MI / 1_000_000, 6)
         return dados
     except Exception as e:
         app.logger.warning(f"[CLAUDE] análise falhou ({_CLAUDE_MODEL}): {e}")
@@ -8480,8 +8501,11 @@ _WA_JARGAO_SMS = ("plano de saúde, cotação, operadora, coparticipação, car�
 
 
 def _transcrever_audio(b64, mime='audio/ogg'):
-    """Transcreve um áudio (base64) em PT-BR. Retorna o texto ou None (sem chave,
-    áudio inválido, ou falha → degrada gracioso)."""
+    """Transcreve um áudio (base64) em PT-BR. Retorna {'texto', 'segundos',
+    'custo_usd', 'provedor'} ou None (sem chave, áudio inválido, ou falha →
+    degrada gracioso). Pede 'verbose_json' pra vir a duração real do áudio
+    (junto com o texto), assim o custo estimado usa segundos de verdade em
+    vez de chutar pelo tamanho do arquivo."""
     import base64 as _b64
     try:
         raw = _b64.b64decode(b64)
@@ -8505,21 +8529,29 @@ def _transcrever_audio(b64, mime='audio/ogg'):
             url = 'https://api.openai.com/v1/audio/transcriptions'
             headers = {'Authorization': f'Bearer {openai_key}'}
             data = {'model': os.environ.get('OPENAI_TRANSCRICAO_MODELO', 'whisper-1'),
-                    'language': 'pt', 'prompt': _WA_JARGAO_SMS}
+                    'language': 'pt', 'prompt': _WA_JARGAO_SMS, 'response_format': 'verbose_json'}
+            provedor, preco_min = 'openai', _OPENAI_TRANSCRICAO_PRECO_USD_MIN
         elif groq_key:
             url = 'https://api.groq.com/openai/v1/audio/transcriptions'
             headers = {'Authorization': f'Bearer {groq_key}'}
             data = {'model': os.environ.get('GROQ_TRANSCRICAO_MODELO', 'whisper-large-v3-turbo'),
-                    'language': 'pt', 'prompt': _WA_JARGAO_SMS}
+                    'language': 'pt', 'prompt': _WA_JARGAO_SMS, 'response_format': 'verbose_json'}
+            provedor, preco_min = 'groq', _GROQ_TRANSCRICAO_PRECO_USD_MIN
         else:
             return None
         files = {'file': (f'audio.{ext}', raw, mime)}
         r = _rq.post(url, headers=headers, files=files, data=data, timeout=90)
         if r.status_code == 200:
             try:
-                return ((r.json().get('text') or '').strip() or None)
+                corpo = r.json()
+                texto = (corpo.get('text') or '').strip()
             except Exception:
-                return (r.text or '').strip() or None
+                texto, corpo = (r.text or '').strip(), {}
+            if not texto:
+                return None
+            segundos = float(corpo.get('duration') or 0) or None
+            custo = round((segundos / 60.0) * preco_min, 6) if segundos else None
+            return {'texto': texto, 'segundos': segundos, 'custo_usd': custo, 'provedor': provedor}
         app.logger.warning(f"[TRANSCRICAO] HTTP {r.status_code}: {r.text[:200]}")
         return None
     except Exception as e:
@@ -8718,15 +8750,20 @@ def api_whatsapp_analisar():
     # em ordem cronológica, pra o áudio entrar no Score e na leitura da IA.
     transcricoes = []
     audio_msgs = []
+    custo_transcricao_usd = 0.0
+    audio_segundos_total = 0.0
     for a in (d.get('audios') or [])[:12]:
         if not isinstance(a, dict):
             continue
         b64 = str(a.get('base64') or '')
         if not b64 or len(b64) > 40_000_000:
             continue
-        texto = _transcrever_audio(b64, str(a.get('mime') or 'audio/ogg'))
-        if not texto:
+        transc = _transcrever_audio(b64, str(a.get('mime') or 'audio/ogg'))
+        if not transc:
             continue
+        texto = transc['texto']
+        custo_transcricao_usd += transc.get('custo_usd') or 0
+        audio_segundos_total += transc.get('segundos') or 0
         de = 'lead' if a.get('de') == 'lead' else 'consultor'
         hora = str(a.get('hora') or '')[:40]
         audio_msgs.append({'de': de, 'texto': '🎤 ' + texto[:4000], 'hora': hora})
@@ -8830,13 +8867,21 @@ def api_whatsapp_analisar():
                                        'score_bruto', 'categorias_consideradas', 'categorias_totais')}
     diagnostico['ia'] = an.get('ia')
     diagnostico['transcricoes'] = an.get('transcricoes')
+
+    ia_info = an.get('ia') or {}
+    custo_claude_usd = ia_info.get('custo_usd') or 0
+    tokens_entrada = ia_info.get('tokens_entrada') or 0
+    tokens_saida = ia_info.get('tokens_saida') or 0
+
     conn.execute("""INSERT INTO whatsapp_analises
         (lead_id, telefone, telefone_norm, nome_contato, total_mensagens, conversa_json,
-         score, score_faixa, sugestoes_json, resumo, criado_por, criado_em)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+         score, score_faixa, sugestoes_json, resumo, criado_por, criado_em,
+         custo_claude_usd, custo_transcricao_usd, tokens_entrada, tokens_saida, audio_segundos)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (lead_id, telefone, tel_norm, nome, len(limpa), json.dumps(limpa, ensure_ascii=False),
          score, faixa, json.dumps(diagnostico, ensure_ascii=False), an['descricao'],
-         d.get('usuario_id'), _agora_sp()))
+         d.get('usuario_id'), _agora_sp(),
+         custo_claude_usd, custo_transcricao_usd, tokens_entrada, tokens_saida, audio_segundos_total))
     analise_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
 
@@ -8872,7 +8917,38 @@ def api_whatsapp_analisar():
                   "url": f"{_SITE_BASE_URL}/crm?lead={lead_id}"} if lead_id else None),
         "lead_encontrado": bool(lead_id) and not lead_criado,
         "lead_criado": lead_criado,
+        "custo_usd": round(custo_claude_usd + custo_transcricao_usd, 6),
     }))
+
+
+def _wa_custo_resumo(conn, uid=None):
+    """Soma o custo estimado da IA (Claude + transcrição) por período — hoje,
+    semana, mês, ano e total — pra dar visibilidade real de gasto. Custo é
+    estimativa (preço USD/token e USD/min configurados via env), não fatura real."""
+    agora = datetime.now(TZ_SP)
+    cortes = {
+        'hoje': agora.strftime('%Y-%m-%d') + ' 00:00:00',
+        'semana': (agora - timedelta(days=agora.weekday())).strftime('%Y-%m-%d') + ' 00:00:00',
+        'mes': agora.strftime('%Y-%m-01') + ' 00:00:00',
+        'ano': agora.strftime('%Y-01-01') + ' 00:00:00',
+    }
+
+    def periodo(desde):
+        q = ("SELECT COALESCE(SUM(COALESCE(custo_claude_usd,0) + COALESCE(custo_transcricao_usd,0)), 0) c, "
+             "COUNT(*) n FROM whatsapp_analises")
+        cond, params = [], []
+        if desde:
+            cond.append("criado_em >= ?"); params.append(desde)
+        if uid:
+            cond.append("criado_por=?"); params.append(uid)
+        if cond:
+            q += " WHERE " + " AND ".join(cond)
+        r = conn.execute(q, params).fetchone()
+        return {'custo_usd': round(r['c'] or 0, 4), 'total_analises': r['n']}
+
+    resumo = {k: periodo(v) for k, v in cortes.items()}
+    resumo['total'] = periodo(None)
+    return resumo
 
 
 def _wa_calibracao(conn, uid=None):
@@ -8920,9 +8996,11 @@ def whatsapp_analises_pagina():
     uid = session['user_id']
     conn = db()
     calibracao = _wa_calibracao(conn, None if eh_admin else uid)
+    custo = _wa_custo_resumo(conn, None if eh_admin else uid)
 
     q = """SELECT wa.id, wa.nome_contato, wa.telefone, wa.score, wa.score_faixa,
                   wa.total_mensagens, wa.criado_em, wa.lead_id,
+                  COALESCE(wa.custo_claude_usd,0) + COALESCE(wa.custo_transcricao_usd,0) AS custo_usd,
                   l.nome AS lead_nome, l.etapa AS lead_etapa, e.nome AS etapa_nome, e.tipo AS etapa_tipo
            FROM whatsapp_analises wa
            LEFT JOIN crm_leads l ON l.id = wa.lead_id
@@ -8934,7 +9012,8 @@ def whatsapp_analises_pagina():
     q += " ORDER BY wa.criado_em DESC LIMIT 200"
     analises = conn.execute(q, params).fetchall()
     close_db(conn)
-    return render_template('whatsapp_analises.html', analises=analises, calibracao=calibracao, eh_admin=eh_admin)
+    return render_template('whatsapp_analises.html', analises=analises, calibracao=calibracao,
+                           custo=custo, eh_admin=eh_admin)
 
 
 # ─── CRM ─────────────────────────────────────────────────────────────────────────

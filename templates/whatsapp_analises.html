@@ -39,6 +39,38 @@
 </div>
 
 <div class="panel-box">
+  <h2>Custo da IA (estimado)</h2>
+  <p class="sub">Claude (leitura da conversa/imagens/PDFs) + transcrição de áudio. Estimativa em USD pelo preço configurado — não é a fatura real do provedor.{{ ' Só as suas análises.' if not eh_admin else ' Todas as consultoras.' }}</p>
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="lbl">Hoje</div>
+      <div class="val">US$ {{ '%.4f'|format(custo.hoje.custo_usd) }}</div>
+      <div class="sub">{{ custo.hoje.total_analises }} análise(s)</div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">Esta semana</div>
+      <div class="val">US$ {{ '%.2f'|format(custo.semana.custo_usd) }}</div>
+      <div class="sub">{{ custo.semana.total_analises }} análise(s)</div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">Este mês</div>
+      <div class="val">US$ {{ '%.2f'|format(custo.mes.custo_usd) }}</div>
+      <div class="sub">{{ custo.mes.total_analises }} análise(s)</div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">Este ano</div>
+      <div class="val">US$ {{ '%.2f'|format(custo.ano.custo_usd) }}</div>
+      <div class="sub">{{ custo.ano.total_analises }} análise(s)</div>
+    </div>
+    <div class="kpi accent-verde">
+      <div class="lbl">Total (desde o início)</div>
+      <div class="val">US$ {{ '%.2f'|format(custo.total.custo_usd) }}</div>
+      <div class="sub">{{ custo.total.total_analises }} análise(s)</div>
+    </div>
+  </div>
+</div>
+
+<div class="panel-box">
   <h2>Calibração: score x desfecho real</h2>
   <p class="sub">Só conta lead que já ganhou ou foi perdido — em aberto ainda pode virar qualquer um dos dois. Poucos dados ainda: isso fica confiável com o tempo, à medida que mais leads da extensão fecham o funil.</p>
   {% set total_decididos = calibracao|sum(attribute='total') %}
@@ -69,7 +101,7 @@
     <div class="vazio">Nenhuma análise ainda. Use o botão da extensão numa conversa do WhatsApp Web.</div>
   {% else %}
   <table class="pnl-tab">
-    <thead><tr><th>Data</th><th>Contato</th><th class="num">Score</th><th>Faixa</th><th>Lead no CRM</th><th>Etapa atual</th></tr></thead>
+    <thead><tr><th>Data</th><th>Contato</th><th class="num">Score</th><th>Faixa</th><th>Lead no CRM</th><th>Etapa atual</th><th class="num">Custo IA</th></tr></thead>
     <tbody>
       {% for a in analises %}
       <tr>
@@ -90,6 +122,7 @@
           {% elif a.etapa_nome %}<span class="pill pill-cinza">{{ a.etapa_nome }}</span>
           {% else %}—{% endif %}
         </td>
+        <td class="num">US$ {{ '%.4f'|format(a.custo_usd or 0) }}</td>
       </tr>
       {% endfor %}
     </tbody>
