@@ -27,11 +27,18 @@ async function config() {
   };
 }
 
-async function chamarJob(caminho, metodo, corpo) {
+async function chamarJob(caminho, metodo, corpo, timeoutMs) {
   const { jobUrl, extKey } = await config();
   if (!extKey) {
     return { ok: false, erro: 'Configure a chave da extensão no popup (clique no ícone do JOB).' };
   }
+  // Sem isso, se o servidor travasse (não desse erro, só não respondesse), o
+  // painel ficava preso em "Calculando o score…" pra sempre, sem forma de
+  // recuperar sem recarregar a aba. AbortController garante que SEMPRE
+  // resolve dentro do prazo, erro claro em vez de promise pendurada.
+  const limite = timeoutMs || 15000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), limite);
   try {
     const resp = await fetch(jobUrl + caminho, {
       method: metodo,
@@ -39,7 +46,8 @@ async function chamarJob(caminho, metodo, corpo) {
         'Content-Type': 'application/json',
         'X-Extension-Key': extKey
       },
-      body: corpo ? JSON.stringify(corpo) : undefined
+      body: corpo ? JSON.stringify(corpo) : undefined,
+      signal: controller.signal
     });
     let dados = null;
     try { dados = await resp.json(); } catch (e) { dados = null; }
@@ -48,25 +56,32 @@ async function chamarJob(caminho, metodo, corpo) {
     }
     return dados || { ok: true };
   } catch (e) {
-    return { ok: false, erro: 'Não consegui falar com o JOB: ' + e.message };
+    const erro = e.name === 'AbortError'
+      ? 'O JOB demorou mais que ' + Math.round(limite / 1000) + 's pra responder — tente de novo.'
+      : 'Não consegui falar com o JOB: ' + e.message;
+    return { ok: false, erro };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'ping') {
-    chamarJob('/api/whatsapp/ping', 'GET', null).then(sendResponse);
+    chamarJob('/api/whatsapp/ping', 'GET', null, 15000).then(sendResponse);
     return true; // resposta assíncrona
   }
   if (msg && msg.type === 'usuarios') {
-    chamarJob('/api/whatsapp/usuarios', 'GET', null).then(sendResponse);
+    chamarJob('/api/whatsapp/usuarios', 'GET', null, 15000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'estado') {
-    chamarJob('/api/whatsapp/estado?telefone=' + encodeURIComponent(msg.telefone || ''), 'GET', null).then(sendResponse);
+    chamarJob('/api/whatsapp/estado?telefone=' + encodeURIComponent(msg.telefone || ''), 'GET', null, 15000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'analisar') {
-    chamarJob('/api/whatsapp/analisar', 'POST', msg.payload).then(sendResponse);
+    // Mais generoso: pode encadear várias transcrições de áudio sequenciais
+    // no servidor (até 90s cada) + leitura pela Claude.
+    chamarJob('/api/whatsapp/analisar', 'POST', msg.payload, 300000).then(sendResponse);
     return true;
   }
   return false;

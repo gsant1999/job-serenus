@@ -59,4 +59,8 @@ async function testar() {
 
 $('salvar').addEventListener('click', salvar);
 $('testar').addEventListener('click', testar);
+// Sem isso, escolher o consultor na lista (já populada por "Testar conexão")
+// só era salvo se o usuário clicasse "Salvar" de novo depois — fácil de
+// esquecer, e aí o lead criado automaticamente ficava sem responsável.
+$('usuarioId').addEventListener('change', salvar);
 carregar();

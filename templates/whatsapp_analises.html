@@ -43,7 +43,7 @@
   <p class="sub">
     Soma dois provedores: <b>Claude</b> (leitura de texto/imagem/PDF) + <b>transcrição de áudio</b> (OpenAI Whisper ou Groq, o que estiver configurado).
     Valor real cobrado é em dólar; aqui convertido pra R$ no câmbio US$ 1 = R$ {{ '%.2f'|format(taxa_usd_brl) }} (fixo, configurável — não é cotação em tempo real).
-    {{ 'Só as suas análises.' if not eh_admin else 'Todas as consultoras.' }}
+    {{ 'Custo das análises que VOCÊ rodou pela extensão (não é por lead — se você analisar a conversa de um lead de outro consultor, o custo aparece aqui mesmo assim).' if not eh_admin else 'Todas as consultoras.' }}
   </p>
   <div class="kpi-grid">
     <div class="kpi">
@@ -91,7 +91,7 @@
 
 <div class="panel-box">
   <h2>Calibração: score x desfecho real</h2>
-  <p class="sub">Só conta lead que já ganhou ou foi perdido — em aberto ainda pode virar qualquer um dos dois. Poucos dados ainda: isso fica confiável com o tempo, à medida que mais leads da extensão fecham o funil.</p>
+  <p class="sub">Só conta lead que já ganhou ou foi perdido — em aberto ainda pode virar qualquer um dos dois. Poucos dados ainda: isso fica confiável com o tempo, à medida que mais leads da extensão fecham o funil.{{ ' Considera os leads sob sua responsabilidade no CRM (não necessariamente quem rodou a análise).' if not eh_admin else '' }}</p>
   {% set total_decididos = calibracao|sum(attribute='total') %}
   {% if total_decididos == 0 %}
     <div class="vazio">Nenhum lead vinculado pela extensão chegou a Ganho/Perdido ainda. Assim que os primeiros fecharem, a taxa de conversão por faixa aparece aqui.</div>
@@ -115,7 +115,7 @@
 
 <div class="panel-box">
   <h2>Últimas análises</h2>
-  <p class="sub">{{ analises|length }} análise(s){{ ' (todas as consultoras)' if eh_admin else ' suas' }}.</p>
+  <p class="sub">{{ analises|length }} análise(s){{ ' (todas as consultoras)' if eh_admin else ' de leads sob sua responsabilidade no CRM — pode incluir análise que outro consultor rodou num lead seu' }}.</p>
   {% if not analises %}
     <div class="vazio">Nenhuma análise ainda. Use o botão da extensão numa conversa do WhatsApp Web.</div>
   {% else %}

@@ -27,6 +27,7 @@
   background: #fff; color: #2563eb; font-weight: 800; font-size: 11px;
   padding: 3px 6px; border-radius: 6px; letter-spacing: .5px;
 }
+#job-btn .job-btn-txt { line-height: 1; }
 
 #job-painel {
   position: fixed;
@@ -68,6 +69,7 @@
 
 .job-score-wrap { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
 .job-score-num { font-size: 44px; font-weight: 800; line-height: 1; }
+.job-score-meta { display: flex; flex-direction: column; gap: 2px; }
 .job-score-faixa { font-size: 13px; font-weight: 800; letter-spacing: .5px; }
 .job-score-sub { font-size: 11px; color: #8c93a8; margin-top: 2px; }
 .job-barra { height: 8px; background: #2c3247; border-radius: 20px; overflow: hidden; margin-bottom: 16px; }
