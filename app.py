@@ -7790,6 +7790,24 @@ _WA_REGIONAIS = ('Vera Cruz', 'Unimed Jundiaí', 'Beneficência', 'Santa Tereza'
 _WA_SO_COPART = ('Vera Cruz', 'Beneficência')
 
 
+def _wa_canonizar_operadora(texto):
+    """Casa um nome de operadora livre (ex: vindo da leitura de um anexo pela
+    Claude, sem grafia garantida) contra a lista canônica _WA_OPERADORAS —
+    o resto do motor de score compara ex['operadora_interesse'] por igualdade
+    EXATA de string com esses literais (fit_geografico, mismatch_cobertura,
+    copart_mismatch), então sem essa canonização uma grafia diferente
+    (ex: 'vera cruz' minúsculo) quebra esses cálculos silenciosamente.
+    Se não achar nenhuma correspondência, devolve o texto original (.title())
+    — melhor manter o dado bruto do que descartar."""
+    t = (texto or '').strip().lower()
+    if not t:
+        return None
+    for nome_op, padroes in _WA_OPERADORAS:
+        if any(p in t for p in padroes):
+            return nome_op
+    return texto.strip().title()
+
+
 def _wa_round50(x):
     return int(round(x / 50.0) * 50)
 
@@ -7887,14 +7905,28 @@ def _wa_extrair_lead(mensagens, nome_contato=''):
         ex['plano_ativo'] = 'ATIVO'
 
     # operadoras: interesse (mais citada) e atual (se plano ativo + citação com "tenho/meu")
-    contagem = []
+    contagem_bruta = {}
     for nome_op, padroes in _WA_OPERADORAS:
         n = sum(todo.count(p) for p in padroes)
         if n:
-            contagem.append((n, nome_op))
+            contagem_bruta[nome_op] = n
+    # Corrige dupla contagem: o padrão de "Unimed" ('unimed') é substring do
+    # padrão de "Unimed Jundiaí" ('unimed jundia'), então toda menção à
+    # Jundiaí também conta pro genérico e pode fazer ele vencer errado —
+    # subtrai a contagem da mais específica da mais genérica antes de decidir.
+    contagem = dict(contagem_bruta)
+    for nome_a, padroes_a in _WA_OPERADORAS:
+        if nome_a not in contagem_bruta:
+            continue
+        for nome_b, padroes_b in _WA_OPERADORAS:
+            if nome_a == nome_b or nome_b not in contagem_bruta:
+                continue
+            if any(pa in pb for pa in padroes_a for pb in padroes_b):
+                contagem[nome_a] = max(0, contagem[nome_a] - contagem_bruta[nome_b])
     if contagem:
-        contagem.sort(reverse=True)
-        ex['operadora_interesse'] = contagem[0][1]
+        melhor = max(contagem.items(), key=lambda x: x[1])
+        if melhor[1] > 0:
+            ex['operadora_interesse'] = melhor[0]
     if ex['plano_ativo'] == 'ATIVO':
         for nome_op, padroes in _WA_OPERADORAS:
             for p in padroes:
@@ -8132,8 +8164,16 @@ def _wa_score_lead(ex, flags, mensagens, msgs_lead):
         cats['forma_pagamento'] = 30
     else:
         cats['forma_pagamento'] = None
-    # [13] risco de inadimplência — sem dado objetivo na conversa → removido
-    cats['inadimplencia'] = None
+    # [13] risco de inadimplência — só com sinal explícito na fala do lead
+    # (categoria ficava sempre None antes, inflando o denominador sem chance
+    # real de pontuar — agora tem sinal de verdade, igual às demais).
+    if re.search(r'nome sujo|negativad[oa]|no spc|no serasa|restri[çc][ãa]o no (cpf|nome)|'
+                 r'n[ãa]o consigo pagar|atrasei (o|a) (boleto|pagamento|mensalidade)|conta atrasada', lead_txt):
+        cats['inadimplencia'] = 10
+    elif re.search(r'sempre pago em dia|nunca atrasei|nome limpo|sem restri[çc][ãa]o (no nome|no cpf)|cr[ée]dito bom', lead_txt):
+        cats['inadimplencia'] = 40
+    else:
+        cats['inadimplencia'] = None
     # [14] experiência prévia com plano/operadora
     if re.search(r'(experi[êe]ncia|atendimento) (p[ée]ssim|ruim|horr[íi]vel)|odiei o plano|tive problema com', lead_txt):
         cats['experiencia_previa'] = 15
@@ -8234,6 +8274,11 @@ def _wa_score_lead(ex, flags, mensagens, msgs_lead):
     # Conversa parada há 10+ dias não pode ser lead "bom" por inércia
     if ex['fase_funil'] == 'INATIVO' and cap > 550:
         cap, motivo_cap = 550, 'conversa parada há mais de 10 dias'
+    # A IA identificou explicitamente que o lead foi perdido (disse não/fechou
+    # com concorrente) — o motor de regras não detecta isso sozinho, mas uma
+    # vez confirmado não pode continuar pontuando como oportunidade viável.
+    if ex['fase_funil'] == 'PERDIDO' and cap > 250:
+        cap, motivo_cap = 250, 'IA identificou que o lead foi perdido'
     # Poucos dados objetivos = score não confiável → teto até qualificar melhor.
     # (Com a normalização dinâmica, 3-4 categorias altas davam 900+ pra qualquer
     # conversa curta ou aleatória — era isso que fazia todo lead dar ~750.)
@@ -8662,14 +8707,14 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
     # então SUBSTITUEM os campos equivalentes — não só preenchem lacuna — antes
     # de recalcular o score final com o dado correto.
     dados_anexo = (ia or {}).get('dados_extraidos_anexos') or {}
-    houve_dado_de_anexo = False
+    houve_enriquecimento_ia = False
     if dados_anexo.get('idades'):
         idades_validas = [i for i in dados_anexo['idades'] if isinstance(i, int) and 0 <= i <= 99]
         if idades_validas:
             ex['idades'] = idades_validas
             ex['faixa_etaria_texto'] = []
             ex['vidas'] = len(idades_validas)
-            houve_dado_de_anexo = True
+            houve_enriquecimento_ia = True
     elif dados_anexo.get('faixas_etarias'):
         # Cotação por faixa etária (sem idade exata de cada um) — guarda a
         # faixa honestamente, nunca inventa um número exato de idade.
@@ -8677,33 +8722,46 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
         if faixas_validas:
             ex['faixa_etaria_texto'] = faixas_validas
             ex['vidas'] = len(faixas_validas)
-            houve_dado_de_anexo = True
+            houve_enriquecimento_ia = True
     if dados_anexo.get('vidas'):
         vidas_num = int(re.sub(r'\D', '', str(dados_anexo['vidas'])) or 0)
         if vidas_num:
-            ex['vidas'] = vidas_num
-            houve_dado_de_anexo = True
+            # Reconcilia em vez de sobrescrever cego: se idades/faixas (acima)
+            # já derivaram um vidas diferente, fica com o maior dos dois — ambos
+            # vêm do mesmo anexo, então divergência é sinal de lista parcial,
+            # não de dado errado; subestimar vidas é pior pro score que superestimar.
+            ex['vidas'] = max(vidas_num, ex['vidas']) if ex['vidas'] else vidas_num
+            houve_enriquecimento_ia = True
     if dados_anexo.get('cidade'):
         ex['cidade'] = dados_anexo['cidade'].strip().title()
-        houve_dado_de_anexo = True
+        houve_enriquecimento_ia = True
     if dados_anexo.get('cnpj'):
         cnpj_digitos = re.sub(r'\D', '', dados_anexo['cnpj'])
         if len(cnpj_digitos) == 14:
             ex['cnpj'] = cnpj_digitos
             ex['tem_cnpj'] = True
             ex['tipo_contratacao'] = 'PJ'
-            houve_dado_de_anexo = True
+            houve_enriquecimento_ia = True
     if dados_anexo.get('tipo_contratacao') in ('PF', 'ADESAO', 'PJ'):
         ex['tipo_contratacao'] = dados_anexo['tipo_contratacao']
-        houve_dado_de_anexo = True
+        houve_enriquecimento_ia = True
     if dados_anexo.get('operadora_interesse'):
-        ex['operadora_interesse'] = dados_anexo['operadora_interesse'].strip()
-        houve_dado_de_anexo = True
+        ex['operadora_interesse'] = _wa_canonizar_operadora(dados_anexo['operadora_interesse'])
+        houve_enriquecimento_ia = True
     if dados_anexo.get('plano_preferido'):
         ex['plano_preferido'] = dados_anexo['plano_preferido'].strip()
-        houve_dado_de_anexo = True
+        houve_enriquecimento_ia = True
 
-    if houve_dado_de_anexo:
+    # A Claude é a ÚNICA camada capaz de reconhecer "lead perdido de verdade"
+    # (disse explicitamente que não quer mais, fechou com concorrente etc.) —
+    # o motor de regras não tem esse estado. Promove pro fase_funil oficial só
+    # nesse caso específico (não sobrescreve os outros estados, que o motor
+    # de regras já cobre melhor que uma leitura narrativa).
+    if ia and ia.get('fase_funil') == 'PERDIDO' and ex['fase_funil'] != 'PERDIDO':
+        ex['fase_funil'] = 'PERDIDO'
+        houve_enriquecimento_ia = True
+
+    if houve_enriquecimento_ia:
         sc = _wa_score_lead(ex, flags, mensagens, msgs_lead)
         extracao = _montar_extracao(ex)
 
@@ -8848,18 +8906,19 @@ def api_whatsapp_analisar():
 
     d = request.json or {}
     mensagens = d.get('mensagens') or []
-    if not isinstance(mensagens, list) or not mensagens:
+    # A conversa pode legitimamente não ter NENHUM texto (ex: lead cujo primeiro
+    # contato foi só um áudio, ou só mandou uma foto de cotação sem escrever
+    # nada) — só rejeita de cara se não veio absolutamente nada em lugar nenhum.
+    if not any([mensagens, d.get('imagens'), d.get('documentos'), d.get('links'), d.get('audios')]):
         return _wa_cors(jsonify({"ok": False, "erro": "Conversa vazia"})), 400
     # Sanidade: normaliza cada mensagem e corta tamanho absurdo (proteção).
     limpa = []
-    for m in mensagens[:2000]:
+    for m in (mensagens if isinstance(mensagens, list) else [])[:2000]:
         if not isinstance(m, dict):
             continue
         de = 'lead' if m.get('de') == 'lead' else 'consultor'
         txt = str(m.get('texto') or '')[:4000]
         limpa.append({'de': de, 'texto': txt, 'hora': str(m.get('hora') or '')[:40]})
-    if not limpa:
-        return _wa_cors(jsonify({"ok": False, "erro": "Nenhuma mensagem válida"})), 400
 
     # Imagens (base64) raspadas da conversa — opcional. Teto de tamanho por imagem
     # (~7MB de base64 ≈ 5MB de arquivo) e de quantidade, pra proteger o payload.
@@ -8927,6 +8986,12 @@ def api_whatsapp_analisar():
         combinado.sort(key=lambda m: _wa_parse_hora(m.get('hora') or '') or datetime.min)
         limpa = combinado
 
+    # Depois de processar tudo (texto + áudio transcrito), se não sobrou nada
+    # utilizável (ex: só vieram áudios e todos falharam na transcrição, sem
+    # imagem/PDF/link), aí sim não tem o que analisar.
+    if not limpa and not imagens and not documentos and not links:
+        return _wa_cors(jsonify({"ok": False, "erro": "Não consegui extrair nada útil desta conversa (sem texto, e áudio/imagem/PDF não deu certo)."})), 400
+
     telefone = str(d.get('telefone') or '').strip()
     nome = str(d.get('nome') or '').strip()[:200]
     tel_norm = _normalizar_telefone(telefone)
@@ -8947,21 +9012,49 @@ def api_whatsapp_analisar():
             except Exception:
                 msgs_antigas = []
             if msgs_antigas:
-                vistos = set()
+                # Ordena ANTES de deduplicar, e compara só com a mensagem
+                # anterior (igual ao dedup do client) — um set() global sobre a
+                # lista inteira derrubava mensagem repetida de verdade (ex: lead
+                # manda "Sim" duas vezes em momentos diferentes da conversa) só
+                # porque data-pre-plain-text do WhatsApp só tem precisão de
+                # minuto. Áudio usa chave própria (ignora o texto transcrito,
+                # que pode sair levemente diferente entre duas chamadas de
+                # Whisper/Groq pro mesmo arquivo — senão o mesmo áudio duplica
+                # na conversa fundida).
+                def _wa_chave_dedup(m):
+                    texto = m.get('texto') or ''
+                    if texto.startswith('🎤'):
+                        return (m.get('de'), 'AUDIO', m.get('hora'))
+                    return (m.get('de'), texto, m.get('hora'))
+                bruto = sorted(msgs_antigas + limpa,
+                                key=lambda m: _wa_parse_hora(m.get('hora') or '') or datetime.min)
                 fundido = []
-                for m in msgs_antigas + limpa:
-                    chave = (m.get('de'), m.get('texto'), m.get('hora'))
-                    if chave in vistos:
-                        continue
-                    vistos.add(chave)
-                    fundido.append(m)
-                fundido.sort(key=lambda m: _wa_parse_hora(m.get('hora') or '') or datetime.min)
+                chave_anterior = None
+                for m in bruto:
+                    chave = _wa_chave_dedup(m)
+                    if chave != chave_anterior:
+                        fundido.append(m)
+                    chave_anterior = chave
                 limpa = fundido
 
     an = _wa_analisar_conversa(limpa, nome_contato=nome, imagens=imagens, documentos=documentos, links=links)
     an['audios_transcritos'] = len(transcricoes)
     an['transcricoes'] = transcricoes
     score, faixa = an['score_final'], an['faixa']
+
+    # Resolve o usuário que está rodando a extensão uma vez só — usado tanto
+    # pra desambiguar homônimo no fallback por nome quanto pra atribuir o
+    # responsável de um lead criado agora.
+    responsavel_extensao = None
+    usuario_id_raw = d.get('usuario_id')
+    if usuario_id_raw:
+        try:
+            uid_candidato = int(usuario_id_raw)
+            u = conn.execute("SELECT id FROM usuarios WHERE id=? AND ativo=1", (uid_candidato,)).fetchone()
+            if u:
+                responsavel_extensao = uid_candidato
+        except (TypeError, ValueError):
+            pass
 
     lead = None
     if tel_norm:
@@ -8974,10 +9067,20 @@ def api_whatsapp_analisar():
                     "SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm LIKE ?",
                     ('%' + suf,)).fetchone()
     # Fallback por NOME: contato salvo no WhatsApp não expõe o telefone no DOM
-    # novo, então a extensão manda só o nome. Casa por nome exato (case-insensitive).
+    # novo, então a extensão manda só o nome. Casa por nome exato (case-insensitive)
+    # — MAS se houver homônimo (nome comum, tipo "Maria Silva"), NÃO adivinha:
+    # dado de saúde é sensível demais pra arriscar grudar na pessoa errada.
+    # Só desambigua se um único candidato bater com o responsável da extensão;
+    # caso contrário segue como "não encontrado" (cria um lead novo).
     if not lead and nome:
-        lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE LOWER(TRIM(nome))=?",
-                            (nome.strip().lower(),)).fetchone()
+        candidatos = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE LOWER(TRIM(nome))=?",
+                                  (nome.strip().lower(),)).fetchall()
+        if len(candidatos) == 1:
+            lead = candidatos[0]
+        elif len(candidatos) > 1 and responsavel_extensao:
+            so_meus = [c for c in candidatos if c['responsavel_id'] == responsavel_extensao]
+            if len(so_meus) == 1:
+                lead = so_meus[0]
     lead_id = lead['id'] if lead else None
     lead_criado = False
     responsavel_lead_criado = None
@@ -8985,28 +9088,18 @@ def api_whatsapp_analisar():
     # ── Não achou lead: cria automaticamente (pedido explícito — a análise não
     # pode ficar só "solta" no painel da extensão, tem que virar lead no CRM) ──
     if not lead_id and (tel_norm or nome):
-        usuario_id_raw = d.get('usuario_id')
-        responsavel_id = None
-        if usuario_id_raw:
-            try:
-                uid_candidato = int(usuario_id_raw)
-                u = conn.execute("SELECT id FROM usuarios WHERE id=? AND ativo=1", (uid_candidato,)).fetchone()
-                if u:
-                    responsavel_id = uid_candidato
-            except (TypeError, ValueError):
-                pass
         conn.execute("""INSERT INTO crm_leads
             (nome, telefone, telefone_norm, origem, etapa, responsavel_id, observacoes, criado_em)
             VALUES (?,?,?,?,?,?,?,?)""",
             (nome or telefone or 'Lead WhatsApp', telefone, tel_norm, 'WhatsApp (extensão)',
-             'lead_novo', responsavel_id, 'Criado automaticamente pela extensão de WhatsApp.', _agora_sp()))
+             'lead_novo', responsavel_extensao, 'Criado automaticamente pela extensão de WhatsApp.', _agora_sp()))
         lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
                    else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                      (lead_id, 'Extensão WhatsApp', 'criacao',
                       'Lead criado automaticamente a partir da análise de uma conversa no WhatsApp.', _agora_sp()))
         lead_criado = True
-        responsavel_lead_criado = responsavel_id
+        responsavel_lead_criado = responsavel_extensao
 
     # ── Sobe pro CRM o que deu pra extrair da conversa (qual_*), sem sobrescrever
     # o que o consultor já preencheu manualmente (só entra no que estiver vazio) ──
