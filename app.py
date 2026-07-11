@@ -8351,16 +8351,26 @@ _CLAUDE_SYSTEM_ANALISE = (
     "documento). LEIA cada imagem: extraia os dados relevantes (operadora, planos, valores, "
     "nomes, idades, números) e use no diagnóstico. Registre o que leu de cada uma no campo "
     "leitura_imagens.\n\n"
+    "CUIDADO: nem toda imagem/PDF anexado é sobre plano de saúde — cliente pode mandar conta de "
+    "água/luz, foto pessoal, print de outro assunto qualquer. IDENTIFIQUE primeiro do que se trata "
+    "a imagem antes de extrair qualquer dado dela. NUNCA projete o nome da operadora ou do plano "
+    "que está sendo discutido NO TEXTO da conversa sobre uma imagem que não é claramente uma "
+    "cotação/carteirinha/proposta daquela operadora — isso já aconteceu (uma conta de água da "
+    "Sanasa foi lida errado como 'carteirinha Vera Cruz' só porque a conversa mencionava Vera "
+    "Cruz). Se a imagem for de outro assunto, diga isso em leitura_imagens e não preencha "
+    "dados_extraidos_anexos com nada dela.\n\n"
     "Podem vir DOCUMENTOS PDF anexados (cotação formal, contrato, tabela de preços, proposta "
     "comercial). LEIA cada PDF por completo: extraia operadora, planos, valores, condições, "
     "prazos e qualquer dado relevante pra negociação. Registre o que leu de cada um no campo "
     "leitura_documentos.\n\n"
     "IMPORTANTE: o motor de regras só lê o TEXTO da conversa — ele não enxerga imagem nem PDF. "
-    "Quando uma cotação/documento/carteirinha anexada mostrar idades, quantidade de vidas, CNPJ, "
-    "operadora ou nome do plano, PREENCHA o campo dados_extraidos_anexos com esses valores "
-    "concretos (são eles que vão alimentar o cadastro do lead no CRM). Deixe vazio o que não "
-    "conseguir confirmar num anexo — nunca invente, e nunca repita um dado que só apareceu no "
-    "texto da conversa (esse o motor de regras já cobre sozinho).\n\n"
+    "Quando uma cotação/carteirinha/proposta DE PLANO DE SAÚDE anexada mostrar idades, quantidade "
+    "de vidas, CNPJ, operadora ou nome do plano, PREENCHA o campo dados_extraidos_anexos com esses "
+    "valores concretos (são eles que vão alimentar o cadastro do lead no CRM — um erro aqui vira "
+    "dado errado no CRM). Só preencha a partir de um anexo que você tem certeza que É sobre plano "
+    "de saúde. Deixe vazio o que não conseguir confirmar num anexo desse tipo — nunca invente, "
+    "nunca projete o assunto da conversa sobre uma imagem não relacionada, e nunca repita um dado "
+    "que só apareceu no texto (esse o motor de regras já cobre sozinho).\n\n"
     "Julgue também a RELEVÂNCIA COMERCIAL da conversa como um todo: 'alta' = negociação real "
     "de plano de saúde com um cliente em potencial; 'media' = tem interesse mas disperso/incompleto; "
     "'baixa' = conversa desconexa com só menções soltas ao tema; 'nenhuma' = não é conversa de venda "
@@ -8644,7 +8654,7 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
     # confiança é sempre o menor entre motor e IA).
     if ia:
         rel = ia.get('relevancia_comercial')
-        teto = {'nenhuma': 250, 'baixa': 550}.get(rel)
+        teto = {'nenhuma': 250, 'baixa': 550, 'media': 700}.get(rel)
         if teto is not None and sc['score_final'] > teto:
             sc['cap'] = {'valor': teto, 'motivo': f'IA: relevância comercial {rel} (conversa não é negociação real)'}
             sc['score_final'] = teto
