@@ -614,12 +614,8 @@
       if (links.length) extras.push(links.length + ' link(s)');
       status(extras.length ? 'Analisando conversa + ' + extras.join(' + ') + ' no JOB…'
                            : 'Calculando o score no JOB…');
-      // chrome.storage.local (não sync — evita o "quota exceeded" do limite por item).
-      let { usuarioId } = await chrome.storage.local.get(['usuarioId']);
-      if (usuarioId === undefined) {
-        const antigo = await chrome.storage.sync.get(['usuarioId']);
-        usuarioId = antigo.usuarioId;
-      }
+      // chrome.storage.local — nunca sync (limite de 8KB por item).
+      const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
       const resp = await chrome.runtime.sendMessage({
         type: 'analisar',
         payload: { telefone, nome, mensagens, imagens, audios, documentos, links, usuario_id: usuarioId || null }
