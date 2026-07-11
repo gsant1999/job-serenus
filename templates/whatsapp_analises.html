@@ -40,34 +40,53 @@
 
 <div class="panel-box">
   <h2>Custo da IA (estimado)</h2>
-  <p class="sub">Claude (leitura da conversa/imagens/PDFs) + transcrição de áudio. Estimativa em USD pelo preço configurado — não é a fatura real do provedor.{{ ' Só as suas análises.' if not eh_admin else ' Todas as consultoras.' }}</p>
+  <p class="sub">
+    Soma dois provedores: <b>Claude</b> (leitura de texto/imagem/PDF) + <b>transcrição de áudio</b> (OpenAI Whisper ou Groq, o que estiver configurado).
+    Valor real cobrado é em dólar; aqui convertido pra R$ no câmbio US$ 1 = R$ {{ '%.2f'|format(taxa_usd_brl) }} (fixo, configurável — não é cotação em tempo real).
+    {{ 'Só as suas análises.' if not eh_admin else 'Todas as consultoras.' }}
+  </p>
   <div class="kpi-grid">
     <div class="kpi">
       <div class="lbl">Hoje</div>
-      <div class="val">US$ {{ '%.4f'|format(custo.hoje.custo_usd) }}</div>
-      <div class="sub">{{ custo.hoje.total_analises }} análise(s)</div>
+      <div class="val">{{ custo.hoje.custo_brl|moeda }}</div>
+      <div class="sub">{{ custo.hoje.total_analises }} análise(s) · US$ {{ '%.4f'|format(custo.hoje.custo_usd) }}</div>
     </div>
     <div class="kpi">
       <div class="lbl">Esta semana</div>
-      <div class="val">US$ {{ '%.2f'|format(custo.semana.custo_usd) }}</div>
-      <div class="sub">{{ custo.semana.total_analises }} análise(s)</div>
+      <div class="val">{{ custo.semana.custo_brl|moeda }}</div>
+      <div class="sub">{{ custo.semana.total_analises }} análise(s) · US$ {{ '%.4f'|format(custo.semana.custo_usd) }}</div>
     </div>
     <div class="kpi">
       <div class="lbl">Este mês</div>
-      <div class="val">US$ {{ '%.2f'|format(custo.mes.custo_usd) }}</div>
-      <div class="sub">{{ custo.mes.total_analises }} análise(s)</div>
+      <div class="val">{{ custo.mes.custo_brl|moeda }}</div>
+      <div class="sub">{{ custo.mes.total_analises }} análise(s) · US$ {{ '%.4f'|format(custo.mes.custo_usd) }}</div>
     </div>
     <div class="kpi">
       <div class="lbl">Este ano</div>
-      <div class="val">US$ {{ '%.2f'|format(custo.ano.custo_usd) }}</div>
-      <div class="sub">{{ custo.ano.total_analises }} análise(s)</div>
+      <div class="val">{{ custo.ano.custo_brl|moeda }}</div>
+      <div class="sub">{{ custo.ano.total_analises }} análise(s) · US$ {{ '%.4f'|format(custo.ano.custo_usd) }}</div>
     </div>
     <div class="kpi accent-verde">
       <div class="lbl">Total (desde o início)</div>
-      <div class="val">US$ {{ '%.2f'|format(custo.total.custo_usd) }}</div>
-      <div class="sub">{{ custo.total.total_analises }} análise(s)</div>
+      <div class="val">{{ custo.total.custo_brl|moeda }}</div>
+      <div class="sub">{{ custo.total.total_analises }} análise(s) · US$ {{ '%.4f'|format(custo.total.custo_usd) }}</div>
     </div>
   </div>
+  <table class="pnl-tab" style="margin-top:16px;">
+    <thead><tr><th>Provedor</th><th class="num">Total (R$)</th><th class="num">Total (US$)</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Claude (análise de texto/imagem/PDF/link)</td>
+        <td class="num">{{ (custo.total.claude_usd * taxa_usd_brl)|moeda }}</td>
+        <td class="num">US$ {{ '%.4f'|format(custo.total.claude_usd) }}</td>
+      </tr>
+      <tr>
+        <td>Transcrição de áudio (OpenAI/Groq)</td>
+        <td class="num">{{ (custo.total.transcricao_usd * taxa_usd_brl)|moeda }}</td>
+        <td class="num">US$ {{ '%.4f'|format(custo.total.transcricao_usd) }}</td>
+      </tr>
+    </tbody>
+  </table>
 </div>
 
 <div class="panel-box">
@@ -122,7 +141,7 @@
           {% elif a.etapa_nome %}<span class="pill pill-cinza">{{ a.etapa_nome }}</span>
           {% else %}—{% endif %}
         </td>
-        <td class="num">US$ {{ '%.4f'|format(a.custo_usd or 0) }}</td>
+        <td class="num">{{ ((a.custo_usd or 0) * taxa_usd_brl)|moeda }}</td>
       </tr>
       {% endfor %}
     </tbody>

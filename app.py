@@ -7831,7 +7831,7 @@ def _wa_extrair_lead(mensagens, nome_contato=''):
     msgs_lead = [m for m in mensagens if m.get('de') == 'lead']
 
     ex = {'nome': (nome_contato or '').strip() or None, 'cidade': None, 'idades': [], 'vidas': None,
-          'tipo_contratacao': None, 'cnpj': None, 'tem_cnpj': None, 'plano_ativo': None,
+          'faixa_etaria_texto': [], 'tipo_contratacao': None, 'cnpj': None, 'tem_cnpj': None, 'plano_ativo': None,
           'operadora_atual': None, 'operadora_interesse': None, 'plano_preferido': None,
           'cobertura_desejada': None, 'copart_pref': None, 'urgencia': None, 'saude': None,
           'concorrencia': None, 'decisor': 'decisor', 'objecoes': [], 'tags': []}
@@ -8037,6 +8037,21 @@ _WA_PENALIDADES = {'gestante_imediato': 180, 'downgrade_severo': 120, 'mismatch_
                    'uso_imediato_sem_port': 120, 'risco_terapias_intensas': 80, 'copart_mismatch': 60}
 
 
+def _wa_faixa_etaria_representativa(faixas):
+    """Idade representativa (só pra classificar em bucket de score — nunca
+    exibida como idade exata) a partir da faixa etária mais alta vista numa
+    cotação, tipo '29-33' -> 33. None se não houver faixa nenhuma."""
+    melhor = None
+    for f in (faixas or []):
+        numeros = re.findall(r'\d+', str(f))
+        if not numeros:
+            continue
+        alto = max(int(n) for n in numeros)
+        if melhor is None or alto > melhor:
+            melhor = alto
+    return melhor
+
+
 def _wa_score_lead(ex, flags, mensagens, msgs_lead):
     """Calcula o Score Lead 0–1000 conforme o modelo oficial. Devolve dict com
     score_final, bruto, breakdown, penalidades e cap."""
@@ -8047,8 +8062,10 @@ def _wa_score_lead(ex, flags, mensagens, msgs_lead):
     # [1] vidas
     v = ex['vidas']
     cats['vidas'] = None if v is None else (10 if v <= 1 else 25 if v == 2 else 35 if v == 3 else 40 if v == 4 else 50)
-    # [2] faixa etária principal (maior idade citada)
-    idade = max(ex['idades']) if ex['idades'] else None
+    # [2] faixa etária principal (maior idade citada). Sem idade exata, usa a
+    # faixa etária da cotação (ex: "29-33") — nunca inventa um número exato,
+    # só usa o teto da faixa mais alta pra cair no mesmo bucket de pontuação.
+    idade = max(ex['idades']) if ex['idades'] else _wa_faixa_etaria_representativa(ex.get('faixa_etaria_texto'))
     cats['faixa_etaria'] = None if idade is None else (
         40 if idade <= 18 else 50 if idade <= 28 else 45 if idade <= 38 else
         40 if idade <= 48 else 35 if idade <= 58 else 30)
@@ -8339,6 +8356,9 @@ _CLAUDE_PRECO_INPUT_USD_MI = float(os.environ.get('CLAUDE_PRECO_INPUT_USD_MILHAO
 _CLAUDE_PRECO_OUTPUT_USD_MI = float(os.environ.get('CLAUDE_PRECO_OUTPUT_USD_MILHAO', '5.00'))
 _OPENAI_TRANSCRICAO_PRECO_USD_MIN = float(os.environ.get('OPENAI_TRANSCRICAO_PRECO_USD_MIN', '0.006'))
 _GROQ_TRANSCRICAO_PRECO_USD_MIN = float(os.environ.get('GROQ_TRANSCRICAO_PRECO_USD_MIN', '0.000667'))
+# Câmbio USD->BRL pro painel de custo mostrar em Real (o valor real cobrado
+# pelos provedores é sempre em dólar — isso é só conversão pra exibição).
+_USD_BRL_TAXA = float(os.environ.get('USD_BRL_TAXA', '5.10'))
 
 _CLAUDE_SYSTEM_ANALISE = (
     "Você é um analista de vendas sênior de uma corretora de planos de saúde no Brasil "
@@ -8368,13 +8388,21 @@ _CLAUDE_SYSTEM_ANALISE = (
     "contexto (ex: um link de Google Drive com cotação, um vídeo, uma rede social) e considere "
     "isso no resumo/próximas ações quando fizer diferença.\n\n"
     "IMPORTANTE: o motor de regras só lê o TEXTO da conversa — ele não enxerga imagem nem PDF. "
-    "Quando uma cotação/carteirinha/proposta DE PLANO DE SAÚDE anexada mostrar idades, quantidade "
-    "de vidas, CNPJ, operadora ou nome do plano, PREENCHA o campo dados_extraidos_anexos com esses "
-    "valores concretos (são eles que vão alimentar o cadastro do lead no CRM — um erro aqui vira "
-    "dado errado no CRM). Só preencha a partir de um anexo que você tem certeza que É sobre plano "
-    "de saúde. Deixe vazio o que não conseguir confirmar num anexo desse tipo — nunca invente, "
-    "nunca projete o assunto da conversa sobre uma imagem não relacionada, e nunca repita um dado "
-    "que só apareceu no texto (esse o motor de regras já cobre sozinho).\n\n"
+    "Quando uma cotação/carteirinha/proposta DE PLANO DE SAÚDE anexada mostrar idades (ou faixas "
+    "etárias, tipo de contratação — PF/ADESÃO/PJ-PME —, quantidade de vidas, CNPJ, operadora ou "
+    "nome do plano, PREENCHA o campo dados_extraidos_anexos com esses valores concretos (são eles "
+    "que vão alimentar o cadastro do lead no CRM — um erro aqui vira dado errado no CRM). Uma "
+    "cotação PME/adesão costuma mostrar uma TABELA por FAIXA ETÁRIA (ex: '00 a 18', '29 a 33') com "
+    "quantidade por faixa em vez da idade exata de cada pessoa — nesse caso preencha "
+    "faixas_etarias (uma entrada por faixa com gente cotada nela) em vez de idades, nunca invente "
+    "uma idade exata que a cotação não informa. Só preencha a partir de um anexo que você tem "
+    "certeza que É sobre plano de saúde. Deixe vazio o que não conseguir confirmar num anexo desse "
+    "tipo — nunca projete o assunto da conversa sobre uma imagem não relacionada, e nunca repita um "
+    "dado que só apareceu no texto (esse o motor de regras já cobre sozinho). Pra plano_preferido: "
+    "é o plano que o CLIENTE demonstrou GOSTAR/PREFERIR de verdade (elogiou, disse que quer esse, "
+    "escolheu) — NÃO é automaticamente o último que o consultor apresentou nem o último anexo "
+    "enviado. Se o cliente não expressou preferência clara, deixe vazio em vez de chutar pelo mais "
+    "recente.\n\n"
     "Julgue também a RELEVÂNCIA COMERCIAL da conversa como um todo: 'alta' = negociação real "
     "de plano de saúde com um cliente em potencial; 'media' = tem interesse mas disperso/incompleto; "
     "'baixa' = conversa desconexa com só menções soltas ao tema; 'nenhuma' = não é conversa de venda "
@@ -8420,14 +8448,18 @@ _CLAUDE_SCHEMA_ANALISE = {
             "description": "Dados CONCRETOS confirmados nas IMAGENS ou PDFs anexados (cotação, carteirinha, documento) — não no texto da conversa, que o motor de regras já cobre sozinho. Deixe vazio ('' ou []) o que não conseguir confirmar num anexo.",
             "properties": {
                 "idades": {"type": "array", "items": {"type": "integer"},
-                           "description": "Idades dos beneficiários vistas num anexo. Vazio se não houver."},
+                           "description": "Idades EXATAS dos beneficiários vistas num anexo. Vazio se o anexo só mostrar faixa etária (use faixas_etarias nesse caso)."},
+                "faixas_etarias": {"type": "array", "items": {"type": "string"},
+                           "description": "Faixas etárias vistas numa tabela/cotação quando NÃO dá pra saber a idade exata (ex: ['00-18','29-33','39-43']) — uma entrada por faixa com pelo menos 1 vida cotada nela. Vazio se as idades exatas já foram preenchidas em 'idades' ou se não houver cotação por faixa."},
                 "vidas": {"type": "string", "description": "Quantidade de vidas/beneficiários visível num anexo, em texto (ex: '2'). Vazio se não visível."},
+                "tipo_contratacao": {"type": "string", "enum": ["", "PF", "ADESAO", "PJ"],
+                           "description": "Tipo de contratação visível na cotação (PF=pessoa física/individual, ADESAO=associação/sindicato, PJ=empresarial/PME/CNPJ). Vazio se não identificável no anexo."},
                 "cidade": {"type": "string", "description": "Cidade visível num anexo. Vazio se não visível."},
                 "cnpj": {"type": "string", "description": "CNPJ visível num anexo, só dígitos. Vazio se não visível."},
                 "operadora_interesse": {"type": "string", "description": "Operadora da cotação/documento anexado. Vazio se não visível."},
-                "plano_preferido": {"type": "string", "description": "Nome comercial do plano em destaque no anexo. Vazio se não visível."}
+                "plano_preferido": {"type": "string", "description": "Nome comercial do plano que o CLIENTE demonstrou preferir de verdade (não o último apresentado/anexado por padrão). Vazio se não houver sinal claro de preferência do cliente."}
             },
-            "required": ["idades", "vidas", "cidade", "cnpj", "operadora_interesse", "plano_preferido"],
+            "required": ["idades", "faixas_etarias", "vidas", "tipo_contratacao", "cidade", "cnpj", "operadora_interesse", "plano_preferido"],
             "additionalProperties": False
         }
     },
@@ -8616,7 +8648,7 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
     sc = _wa_score_lead(ex, flags, mensagens, msgs_lead)
 
     def _montar_extracao(ex):
-        return {k: ex[k] for k in ('nome', 'cidade', 'idades', 'vidas', 'tipo_contratacao',
+        return {k: ex[k] for k in ('nome', 'cidade', 'idades', 'faixa_etaria_texto', 'vidas', 'tipo_contratacao',
                                     'cnpj', 'tem_cnpj', 'plano_ativo', 'operadora_atual', 'operadora_interesse',
                                     'plano_preferido', 'cobertura_desejada', 'copart_pref',
                                     'urgencia', 'saude', 'decisor', 'objecoes')}
@@ -8635,7 +8667,16 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
         idades_validas = [i for i in dados_anexo['idades'] if isinstance(i, int) and 0 <= i <= 99]
         if idades_validas:
             ex['idades'] = idades_validas
+            ex['faixa_etaria_texto'] = []
             ex['vidas'] = len(idades_validas)
+            houve_dado_de_anexo = True
+    elif dados_anexo.get('faixas_etarias'):
+        # Cotação por faixa etária (sem idade exata de cada um) — guarda a
+        # faixa honestamente, nunca inventa um número exato de idade.
+        faixas_validas = [str(f).strip() for f in dados_anexo['faixas_etarias'] if str(f).strip()]
+        if faixas_validas:
+            ex['faixa_etaria_texto'] = faixas_validas
+            ex['vidas'] = len(faixas_validas)
             houve_dado_de_anexo = True
     if dados_anexo.get('vidas'):
         vidas_num = int(re.sub(r'\D', '', str(dados_anexo['vidas'])) or 0)
@@ -8652,6 +8693,9 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
             ex['tem_cnpj'] = True
             ex['tipo_contratacao'] = 'PJ'
             houve_dado_de_anexo = True
+    if dados_anexo.get('tipo_contratacao') in ('PF', 'ADESAO', 'PJ'):
+        ex['tipo_contratacao'] = dados_anexo['tipo_contratacao']
+        houve_dado_de_anexo = True
     if dados_anexo.get('operadora_interesse'):
         ex['operadora_interesse'] = dados_anexo['operadora_interesse'].strip()
         houve_dado_de_anexo = True
@@ -8774,6 +8818,8 @@ def _wa_extracao_para_qualificacao(ex):
     if ex.get('idades'):
         idades_fmt = ', '.join(str(i) for i in sorted(ex['idades']))
         q['qual_idade'] = f"{idades_fmt} anos"
+    elif ex.get('faixa_etaria_texto'):
+        q['qual_idade'] = 'Faixa(s): ' + ', '.join(ex['faixa_etaria_texto'])
     if ex.get('cnpj'):
         c = ex['cnpj']
         q['qual_cnpj'] = f"{c[:2]}.{c[2:5]}.{c[5:8]}/{c[8:12]}-{c[12:14]}" if len(c) == 14 else c
@@ -9043,9 +9089,12 @@ def api_whatsapp_analisar():
 
 
 def _wa_custo_resumo(conn, uid=None):
-    """Soma o custo estimado da IA (Claude + transcrição) por período — hoje,
-    semana, mês, ano e total — pra dar visibilidade real de gasto. Custo é
-    estimativa (preço USD/token e USD/min configurados via env), não fatura real."""
+    """Soma o custo estimado da IA por período — hoje, semana, mês, ano e
+    total — separando Claude (leitura/análise) de transcrição de áudio
+    (OpenAI Whisper ou Groq, dependendo de qual chave está configurada), e
+    convertendo pra R$ (câmbio fixo configurável, não é cotação em tempo
+    real). É estimativa a partir do preço USD/token e USD/min configurados
+    via env — não é a fatura real dos provedores."""
     agora = datetime.now(TZ_SP)
     cortes = {
         'hoje': agora.strftime('%Y-%m-%d') + ' 00:00:00',
@@ -9055,8 +9104,9 @@ def _wa_custo_resumo(conn, uid=None):
     }
 
     def periodo(desde):
-        q = ("SELECT COALESCE(SUM(COALESCE(custo_claude_usd,0) + COALESCE(custo_transcricao_usd,0)), 0) c, "
-             "COUNT(*) n FROM whatsapp_analises")
+        q = ("SELECT COALESCE(SUM(COALESCE(custo_claude_usd,0)),0) c_claude, "
+             "COALESCE(SUM(COALESCE(custo_transcricao_usd,0)),0) c_transc, COUNT(*) n "
+             "FROM whatsapp_analises")
         cond, params = [], []
         if desde:
             cond.append("criado_em >= ?"); params.append(desde)
@@ -9065,10 +9115,15 @@ def _wa_custo_resumo(conn, uid=None):
         if cond:
             q += " WHERE " + " AND ".join(cond)
         r = conn.execute(q, params).fetchone()
-        return {'custo_usd': round(r['c'] or 0, 4), 'total_analises': r['n']}
+        claude = round(r['c_claude'] or 0, 4)
+        transc = round(r['c_transc'] or 0, 4)
+        total_usd = round(claude + transc, 4)
+        return {'claude_usd': claude, 'transcricao_usd': transc, 'custo_usd': total_usd,
+                'custo_brl': round(total_usd * _USD_BRL_TAXA, 2), 'total_analises': r['n']}
 
     resumo = {k: periodo(v) for k, v in cortes.items()}
     resumo['total'] = periodo(None)
+    resumo['taxa_usd_brl'] = _USD_BRL_TAXA
     return resumo
 
 
@@ -9134,7 +9189,7 @@ def whatsapp_analises_pagina():
     analises = conn.execute(q, params).fetchall()
     close_db(conn)
     return render_template('whatsapp_analises.html', analises=analises, calibracao=calibracao,
-                           custo=custo, eh_admin=eh_admin)
+                           custo=custo, taxa_usd_brl=_USD_BRL_TAXA, eh_admin=eh_admin)
 
 
 # ─── CRM ─────────────────────────────────────────────────────────────────────────
