@@ -8447,6 +8447,66 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None):
         return None
 
 
+# ─── TRANSCRIÇÃO DE ÁUDIO (Fase 2) — mensagens de voz do WhatsApp ─────────────
+# A extensão baixa o áudio (OGG/Opus) da conversa via wa-js e manda base64.
+# Aqui transcrevemos pra PT-BR e injetamos como mensagem na conversa, pra o áudio
+# entrar no Score e na leitura da IA como qualquer texto. OpenAI Whisper por
+# padrão (endpoint de transcrição tem retenção-zero — certo pra dado de saúde);
+# Groq como alternativa mais barata via GROQ_API_KEY. Sem chave = não transcreve
+# (degrada gracioso, resto funciona). Jargão do setor melhora a precisão.
+_WA_JARGAO_SMS = ("plano de saúde, cotação, operadora, coparticipação, carência, reajuste, MEI, "
+                  "CNPJ, PME, adesão, enfermaria, apartamento, Vera Cruz, Amil, Unimed, Bradesco, "
+                  "SulAmérica, Porto, Hapvida, NotreDame, Intermédica, MedSênior, Beneficência")
+
+
+def _transcrever_audio(b64, mime='audio/ogg'):
+    """Transcreve um áudio (base64) em PT-BR. Retorna o texto ou None (sem chave,
+    áudio inválido, ou falha → degrada gracioso)."""
+    import base64 as _b64
+    try:
+        raw = _b64.b64decode(b64)
+    except Exception:
+        return None
+    if not raw or len(raw) > 25 * 1024 * 1024:  # limite da API de transcrição
+        return None
+    openai_key = os.environ.get('OPENAI_API_KEY', '').strip()
+    groq_key = os.environ.get('GROQ_API_KEY', '').strip()
+    mime = (mime or 'audio/ogg').split(';')[0].strip()
+    ext = 'ogg'
+    if 'm4a' in mime or 'mp4' in mime or 'aac' in mime:
+        ext = 'm4a'
+    elif 'mpeg' in mime or 'mp3' in mime:
+        ext = 'mp3'
+    elif 'wav' in mime:
+        ext = 'wav'
+    try:
+        import requests as _rq
+        if openai_key:
+            url = 'https://api.openai.com/v1/audio/transcriptions'
+            headers = {'Authorization': f'Bearer {openai_key}'}
+            data = {'model': os.environ.get('OPENAI_TRANSCRICAO_MODELO', 'whisper-1'),
+                    'language': 'pt', 'prompt': _WA_JARGAO_SMS}
+        elif groq_key:
+            url = 'https://api.groq.com/openai/v1/audio/transcriptions'
+            headers = {'Authorization': f'Bearer {groq_key}'}
+            data = {'model': os.environ.get('GROQ_TRANSCRICAO_MODELO', 'whisper-large-v3-turbo'),
+                    'language': 'pt', 'prompt': _WA_JARGAO_SMS}
+        else:
+            return None
+        files = {'file': (f'audio.{ext}', raw, mime)}
+        r = _rq.post(url, headers=headers, files=files, data=data, timeout=90)
+        if r.status_code == 200:
+            try:
+                return ((r.json().get('text') or '').strip() or None)
+            except Exception:
+                return (r.text or '').strip() or None
+        app.logger.warning(f"[TRANSCRICAO] HTTP {r.status_code}: {r.text[:200]}")
+        return None
+    except Exception as e:
+        app.logger.warning(f"[TRANSCRICAO] falhou: {e}")
+        return None
+
+
 def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None):
     """Orquestra a análise completa: extração + score oficial + diagnóstico + IA."""
     ex, flags, msgs_lead = _wa_extrair_lead(mensagens, nome_contato)
@@ -8548,11 +8608,35 @@ def api_whatsapp_analisar():
                         'base64': b64, 'mime': str(img.get('mime') or 'image/jpeg')[:30],
                         'hora': str(img.get('hora') or '')[:40]})
 
+    # Áudios (base64 OGG) — transcreve cada um e injeta como mensagem na conversa,
+    # em ordem cronológica, pra o áudio entrar no Score e na leitura da IA.
+    transcricoes = []
+    audio_msgs = []
+    for a in (d.get('audios') or [])[:12]:
+        if not isinstance(a, dict):
+            continue
+        b64 = str(a.get('base64') or '')
+        if not b64 or len(b64) > 40_000_000:
+            continue
+        texto = _transcrever_audio(b64, str(a.get('mime') or 'audio/ogg'))
+        if not texto:
+            continue
+        de = 'lead' if a.get('de') == 'lead' else 'consultor'
+        hora = str(a.get('hora') or '')[:40]
+        audio_msgs.append({'de': de, 'texto': '🎤 ' + texto[:4000], 'hora': hora})
+        transcricoes.append({'de': de, 'hora': hora, 'texto': texto[:600]})
+    if audio_msgs:
+        combinado = limpa + audio_msgs
+        combinado.sort(key=lambda m: _wa_parse_hora(m.get('hora') or '') or datetime.min)
+        limpa = combinado
+
     telefone = str(d.get('telefone') or '').strip()
     nome = str(d.get('nome') or '').strip()[:200]
     tel_norm = _normalizar_telefone(telefone)
 
     an = _wa_analisar_conversa(limpa, nome_contato=nome, imagens=imagens)
+    an['audios_transcritos'] = len(transcricoes)
+    an['transcricoes'] = transcricoes
     score, faixa = an['score_final'], an['faixa']
 
     conn = db()
@@ -8578,6 +8662,7 @@ def api_whatsapp_analisar():
                                        'penalidades', 'cap', 'followup', 'descricao',
                                        'score_bruto', 'categorias_consideradas', 'categorias_totais')}
     diagnostico['ia'] = an.get('ia')
+    diagnostico['transcricoes'] = an.get('transcricoes')
     conn.execute("""INSERT INTO whatsapp_analises
         (lead_id, telefone, telefone_norm, nome_contato, total_mensagens, conversa_json,
          score, score_faixa, sugestoes_json, resumo, criado_por, criado_em)
@@ -8614,6 +8699,8 @@ def api_whatsapp_analisar():
         "followup": an['followup'],
         "resumo": an['descricao'],
         "ia": an.get('ia'),
+        "audios_transcritos": an.get('audios_transcritos', 0),
+        "transcricoes": an.get('transcricoes', []),
         "lead": ({"id": lead['id'], "nome": lead['nome'],
                   "url": f"{_SITE_BASE_URL}/crm?lead={lead['id']}"} if lead else None),
         "lead_encontrado": bool(lead_id),

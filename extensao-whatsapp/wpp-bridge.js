@@ -1,0 +1,82 @@
+// ─── JOB Serenus · Ponte MAIN world (áudio) ─────────────────────────────────
+//
+//  Roda no CONTEXTO DA PÁGINA (world: MAIN), não no content script isolado —
+//  porque a wa-js (window.WPP) vive no window da página (o WaSpeed já injeta).
+//  O content.js (isolado) pede os áudios via postMessage; esta ponte baixa e
+//  devolve. Só LEITURA: baixa a mídia que o usuário já vê na conversa, sem
+//  apertar play, e NUNCA envia nada. Se o WPP não existir, responde com erro
+//  e a análise segue sem áudio.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+
+(function () {
+  'use strict';
+  if (window.__jobWppBridge) return;
+  window.__jobWppBridge = true;
+
+  async function blobParaBase64(blob) {
+    const buf = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    const CH = 0x8000; // fatia pra não estourar o argumento do fromCharCode
+    for (let i = 0; i < bytes.length; i += CH) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+    }
+    return btoa(bin);
+  }
+
+  function fmtHora(t) {
+    try {
+      const d = new Date((t || 0) * 1000);
+      const p = (n) => String(n).padStart(2, '0');
+      return p(d.getHours()) + ':' + p(d.getMinutes()) + ', ' +
+             d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+    } catch (e) { return ''; }
+  }
+
+  async function baixarAudios(limite) {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.downloadMedia) {
+      return { erro: 'wpp_ausente' };
+    }
+    const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
+    if (!chat || !chat.id) return { erro: 'sem_conversa' };
+    const chatId = chat.id._serialized;
+    let msgs = [];
+    try { msgs = await window.WPP.chat.getMessages(chatId, { count: 200 }); }
+    catch (e) { return { erro: 'falha_mensagens' }; }
+    const audios = msgs.filter((m) => m.type === 'ptt' || m.type === 'audio');
+    const alvos = audios.slice(-Math.max(1, limite || 12)); // os mais recentes
+    const out = [];
+    for (const m of alvos) {
+      try {
+        const media = await window.WPP.chat.downloadMedia(m.id._serialized);
+        let b64 = '', mime = 'audio/ogg';
+        if (media instanceof Blob) {
+          b64 = await blobParaBase64(media);
+          mime = media.type || mime;
+        } else if (media && media.data) {
+          const s = String(media.data);
+          b64 = s.indexOf(',') >= 0 ? s.split(',')[1] : s;
+          mime = media.mimetype || mime;
+        }
+        if (b64) {
+          out.push({ de: (m.id.fromMe ? 'consultor' : 'lead'),
+                     base64: b64, mime: (mime || 'audio/ogg').split(';')[0], hora: fmtHora(m.t) });
+        }
+      } catch (e) { /* áudio que falhar é ignorado, nunca derruba a análise */ }
+    }
+    return { audios: out };
+  }
+
+  window.addEventListener('message', async (ev) => {
+    if (ev.source !== window) return;
+    const d = ev.data;
+    if (!d || d.source !== 'JOB_EXT_REQ' || d.tipo !== 'baixar_audios') return;
+    let resp;
+    try { resp = await baixarAudios(d.limite); }
+    catch (e) { resp = { erro: 'excecao' }; }
+    resp.source = 'JOB_EXT_RESP';
+    resp.reqId = d.reqId;
+    window.postMessage(resp, '*');
+  });
+})();

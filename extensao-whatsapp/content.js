@@ -203,6 +203,28 @@
     return out;
   }
 
+  // ── ÁUDIO: pede os áudios de voz pra ponte no main world (wpp-bridge.js), que
+  //    usa a wa-js pra baixar sem play. Devolve [{de,base64,mime,hora}] ou []. ──
+  function pedirAudios(limite) {
+    return new Promise((resolve) => {
+      const reqId = 'a' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true;
+        window.removeEventListener('message', onMsg);
+        resolve(d.audios || []);
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_audios', reqId, limite }, '*');
+      setTimeout(() => {
+        if (!pronto) { window.removeEventListener('message', onMsg); resolve([]); }
+      }, 60000);
+    });
+  }
+
   // ═══════════════ UI: botão + painel ═══════════════
 
   function criarBotao() {
@@ -303,11 +325,26 @@
       '<div class="job-sec">Follow-up sugerido</div>' +
       '<div class="job-resumo" id="job-followup">' + esc(r.followup || '') + '</div>' +
       '<button class="job-copy" id="job-copy-btn">Copiar follow-up</button>' +
+      seccaoAudios(r.transcricoes, r.audios_transcritos) +
       seccaoIA(r.ia) +
       '<div class="job-sec">Como está a conversa</div>' +
       '<div class="job-resumo">' + esc(r.resumo || '').replace(/\n/g, '<br>') + '</div>' +
       '<div class="job-rodape">' + esc(nome || '') + ' · ' + totalMsgs + ' mensagens lidas · somente leitura</div>'
     );
+  }
+
+  // Bloco das transcrições de áudio — só aparece quando algum áudio foi
+  // transcrito (ou seja, com OPENAI_API_KEY/GROQ_API_KEY ligada no JOB).
+  function seccaoAudios(transcricoes, total) {
+    const t = (transcricoes || []).filter((x) => x && x.texto);
+    if (!t.length) return '';
+    const linhas = t.map((x) => {
+      const quem = x.de === 'lead' ? 'Cliente' : 'Consultor';
+      return '<div class="job-audio-item"><span class="job-audio-quem">🎤 ' + esc(quem) +
+        (x.hora ? ' · ' + esc(String(x.hora).split(',')[0]) : '') + '</span>' +
+        esc(x.texto) + '</div>';
+    }).join('');
+    return '<div class="job-sec">Áudios transcritos (' + (total || t.length) + ')</div>' + linhas;
   }
 
   // Bloco da leitura por IA (Claude) — só aparece quando o backend devolve `ia`
@@ -371,17 +408,23 @@
       let imagens = [];
       try { imagens = await rasparImagensVisiveis(status); } catch (e) { imagens = []; }
 
-      if (!mensagens.length && !imagens.length) {
-        abrirPainel('<div class="job-erro">Não achei mensagens de texto nem imagens nesta conversa. ' +
-          '(Áudio ainda não é lido — em breve.)</div>');
+      status('Baixando e transcrevendo áudios…');
+      let audios = [];
+      try { audios = await pedirAudios(12); } catch (e) { audios = []; }
+
+      if (!mensagens.length && !imagens.length && !audios.length) {
+        abrirPainel('<div class="job-erro">Não achei mensagens, imagens nem áudios nesta conversa.</div>');
         return;
       }
 
-      status(imagens.length ? 'Analisando conversa + ' + imagens.length + ' imagem(ns) no JOB…'
-                            : 'Calculando o score no JOB…');
+      const extras = [];
+      if (imagens.length) extras.push(imagens.length + ' imagem(ns)');
+      if (audios.length) extras.push(audios.length + ' áudio(s)');
+      status(extras.length ? 'Analisando conversa + ' + extras.join(' + ') + ' no JOB…'
+                           : 'Calculando o score no JOB…');
       const resp = await chrome.runtime.sendMessage({
         type: 'analisar',
-        payload: { telefone, nome, mensagens, imagens }
+        payload: { telefone, nome, mensagens, imagens, audios }
       });
 
       if (!resp || !resp.ok) {

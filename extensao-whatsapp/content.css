@@ -114,6 +114,9 @@
   border: 1px solid rgba(250, 204, 21, .2); border-radius: 8px; padding: 6px 10px; margin-bottom: 5px; }
 .job-img-lida { font-size: 11.5px; line-height: 1.55; color: #cdd2df; background: rgba(139, 92, 246, .08);
   border: 1px solid rgba(139, 92, 246, .2); border-radius: 8px; padding: 7px 10px; margin-bottom: 5px; }
+.job-audio-item { font-size: 11.5px; line-height: 1.55; color: #cdd2df; background: rgba(37, 211, 102, .07);
+  border: 1px solid rgba(37, 211, 102, .2); border-radius: 8px; padding: 7px 10px; margin-bottom: 5px; }
+.job-audio-quem { display: block; font-size: 10px; font-weight: 700; color: #25d366; margin-bottom: 2px; }
 .job-resumo { font-size: 12px; line-height: 1.6; color: #b6bccd; white-space: normal;
   background: #12151f; border: 1px solid #2c3247; border-radius: 10px; padding: 10px 12px; }
 .job-rodape { font-size: 10.5px; color: #6b7185; margin-top: 14px; text-align: center; }
