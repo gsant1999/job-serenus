@@ -10,15 +10,27 @@ function status(txt, cls) {
 }
 
 async function carregar() {
-  const { jobUrl, extKey } = await chrome.storage.sync.get(['jobUrl', 'extKey']);
+  const { jobUrl, extKey, usuarioId } = await chrome.storage.sync.get(['jobUrl', 'extKey', 'usuarioId']);
   $('jobUrl').value = jobUrl || JOB_URL_PADRAO;
   $('extKey').value = extKey || '';
+  if (extKey) await carregarUsuarios(usuarioId);
+}
+
+async function carregarUsuarios(selecionadoId) {
+  const resp = await chrome.runtime.sendMessage({ type: 'usuarios' });
+  const sel = $('usuarioId');
+  const atual = selecionadoId != null ? String(selecionadoId) : sel.value;
+  if (!resp || !resp.ok) return;
+  sel.innerHTML = '<option value="">Selecione…</option>' +
+    (resp.usuarios || []).map((u) => '<option value="' + u.id + '">' + u.nome + '</option>').join('');
+  if (atual) sel.value = atual;
 }
 
 async function salvar() {
   const jobUrl = ($('jobUrl').value || JOB_URL_PADRAO).trim().replace(/\/+$/, '');
   const extKey = ($('extKey').value || '').trim();
-  await chrome.storage.sync.set({ jobUrl, extKey });
+  const usuarioId = $('usuarioId').value || '';
+  await chrome.storage.sync.set({ jobUrl, extKey, usuarioId });
   status('Salvo.', 'ok');
 }
 
@@ -28,6 +40,7 @@ async function testar() {
   const resp = await chrome.runtime.sendMessage({ type: 'ping' });
   if (resp && resp.ok) {
     status('Conectado ao JOB ✓', 'ok');
+    await carregarUsuarios();
   } else {
     status((resp && resp.erro) || 'Falha na conexão', 'err');
   }

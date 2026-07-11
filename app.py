@@ -8516,7 +8516,7 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None):
     descricao = _wa_descricao(ex, mensagens, msgs_lead, sc['score_final'], sc['faixa'])
     tags = list(dict.fromkeys(ex['tags'] + [sc['faixa'].upper(), ex['fase_funil']]))
     extracao = {k: ex[k] for k in ('nome', 'cidade', 'idades', 'vidas', 'tipo_contratacao',
-                                    'cnpj', 'plano_ativo', 'operadora_atual', 'operadora_interesse',
+                                    'cnpj', 'tem_cnpj', 'plano_ativo', 'operadora_atual', 'operadora_interesse',
                                     'plano_preferido', 'cobertura_desejada', 'copart_pref',
                                     'urgencia', 'saude', 'decisor', 'objecoes')}
     ia = _analisar_com_claude(mensagens, extracao, sc['score_final'], sc['faixa'], imagens=imagens)
@@ -8567,6 +8567,49 @@ def api_whatsapp_ping():
     if not _wa_auth_ok():
         return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     return _wa_cors(jsonify({"ok": True, "sistema": "JOB Serenus", "versao_api": 1}))
+
+
+@app.route('/api/whatsapp/usuarios', methods=['GET', 'OPTIONS'])
+def api_whatsapp_usuarios():
+    """Lista os usuários ativos (id + nome) pra extensão popular o seletor de
+    'quem está usando a extensão' — usado pra atribuir o responsável do lead
+    quando ele é criado automaticamente."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    conn = db()
+    usuarios = conn.execute(
+        "SELECT id, nome FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "usuarios": [dict(u) for u in usuarios]}))
+
+
+def _wa_extracao_para_qualificacao(ex):
+    """Mapeia o dict de extração da conversa (_wa_extrair_lead) pros campos
+    qual_* do CRM. Só preenche o que dá pra inferir com confiança direto da
+    conversa — nunca inventa (mesma regra da extração em si). qual_tipo_plano
+    (Titular/Familiar/Funcionário) e qual_estagio2 (critérios específicos) não
+    são preenchidos automaticamente por serem ambíguos/curados manualmente."""
+    q = {}
+    if ex.get('cidade'):
+        q['qual_cidade'] = ex['cidade']
+    if ex.get('idades'):
+        idades_fmt = ', '.join(str(i) for i in sorted(ex['idades']))
+        q['qual_idade'] = f"{idades_fmt} anos"
+    if ex.get('cnpj'):
+        c = ex['cnpj']
+        q['qual_cnpj'] = f"{c[:2]}.{c[2:5]}.{c[5:8]}/{c[8:12]}-{c[12:14]}" if len(c) == 14 else c
+    elif ex.get('tem_cnpj') is False:
+        q['qual_cnpj'] = 'Não possui'
+    if ex.get('plano_ativo') == 'ATIVO' and ex.get('operadora_atual'):
+        q['qual_plano_atual'] = ex['operadora_atual'].title()
+    elif ex.get('plano_ativo') == 'SEM_PLANO':
+        q['qual_plano_atual'] = 'Não possui'
+    elif ex.get('plano_ativo') == 'CANCELADO_RECENTE':
+        op = f" ({ex['operadora_atual'].title()})" if ex.get('operadora_atual') else ''
+        q['qual_plano_atual'] = f"Cancelado recentemente{op}"
+    return q
 
 
 @app.route('/api/whatsapp/analisar', methods=['POST', 'OPTIONS'])
@@ -8656,6 +8699,41 @@ def api_whatsapp_analisar():
         lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE LOWER(TRIM(nome))=?",
                             (nome.strip().lower(),)).fetchone()
     lead_id = lead['id'] if lead else None
+    lead_criado = False
+
+    # ── Não achou lead: cria automaticamente (pedido explícito — a análise não
+    # pode ficar só "solta" no painel da extensão, tem que virar lead no CRM) ──
+    if not lead_id and (tel_norm or nome):
+        usuario_id_raw = d.get('usuario_id')
+        responsavel_id = None
+        if usuario_id_raw:
+            try:
+                uid_candidato = int(usuario_id_raw)
+                u = conn.execute("SELECT id FROM usuarios WHERE id=? AND ativo=1", (uid_candidato,)).fetchone()
+                if u:
+                    responsavel_id = uid_candidato
+            except (TypeError, ValueError):
+                pass
+        conn.execute("""INSERT INTO crm_leads
+            (nome, telefone, telefone_norm, origem, etapa, responsavel_id, observacoes, criado_em)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            (nome or telefone or 'Lead WhatsApp', telefone, tel_norm, 'WhatsApp (extensão)',
+             'lead_novo', responsavel_id, 'Criado automaticamente pela extensão de WhatsApp.', _agora_sp()))
+        lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                     (lead_id, 'Extensão WhatsApp', 'criacao',
+                      'Lead criado automaticamente a partir da análise de uma conversa no WhatsApp.', _agora_sp()))
+        lead_criado = True
+
+    # ── Sobe pro CRM o que deu pra extrair da conversa (qual_*), sem sobrescrever
+    # o que o consultor já preencheu manualmente (só entra no que estiver vazio) ──
+    if lead_id:
+        qual = _wa_extracao_para_qualificacao(an['extracao'])
+        if qual:
+            sets = ', '.join(f"{col} = COALESCE(NULLIF({col}, ''), ?)" for col in qual)
+            conn.execute(f"UPDATE crm_leads SET {sets}, atualizado_em=? WHERE id=?",
+                         (*qual.values(), _agora_sp(), lead_id))
 
     # sugestoes_json guarda o diagnóstico completo (dá pra reprocessar/auditar depois)
     diagnostico = {k: an[k] for k in ('sugestoes', 'tags', 'fase_funil', 'extracao', 'breakdown',
@@ -8701,9 +8779,10 @@ def api_whatsapp_analisar():
         "ia": an.get('ia'),
         "audios_transcritos": an.get('audios_transcritos', 0),
         "transcricoes": an.get('transcricoes', []),
-        "lead": ({"id": lead['id'], "nome": lead['nome'],
-                  "url": f"{_SITE_BASE_URL}/crm?lead={lead['id']}"} if lead else None),
-        "lead_encontrado": bool(lead_id),
+        "lead": ({"id": lead_id, "nome": (lead['nome'] if lead else nome),
+                  "url": f"{_SITE_BASE_URL}/crm?lead={lead_id}"} if lead_id else None),
+        "lead_encontrado": bool(lead_id) and not lead_criado,
+        "lead_criado": lead_criado,
     }))
 
 

@@ -48,6 +48,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/ping', 'GET', null).then(sendResponse);
     return true; // resposta assíncrona
   }
+  if (msg && msg.type === 'usuarios') {
+    chamarJob('/api/whatsapp/usuarios', 'GET', null).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'analisar') {
     chamarJob('/api/whatsapp/analisar', 'POST', msg.payload).then(sendResponse);
     return true;

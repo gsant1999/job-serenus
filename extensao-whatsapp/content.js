@@ -285,9 +285,10 @@
         esc(s.detalhe) + '</div></div>';
     }).join('');
     const leadBox = r.lead
-      ? '<a class="job-lead-ok" href="' + esc(r.lead.url) + '" target="_blank">Lead no CRM: <b>' +
+      ? '<a class="job-lead-ok" href="' + esc(r.lead.url) + '" target="_blank">' +
+        (r.lead_criado ? 'Lead criado no CRM: <b>' : 'Lead no CRM: <b>') +
         esc(r.lead.nome) + '</b> — abrir ficha →</a>'
-      : '<div class="job-lead-nao">Nenhum lead com esse telefone/nome no CRM ainda. ' +
+      : '<div class="job-lead-nao">Não consegui criar/achar o lead no CRM. ' +
         '<br><span>Telefone lido: ' + esc(telefone || '—') + '</span></div>';
     const chips = '<span class="job-chip" style="border-color:' + cor + ';color:' + cor + '">' +
         esc(r.fase_funil || '') + '</span>' +
@@ -422,9 +423,10 @@
       if (audios.length) extras.push(audios.length + ' áudio(s)');
       status(extras.length ? 'Analisando conversa + ' + extras.join(' + ') + ' no JOB…'
                            : 'Calculando o score no JOB…');
+      const { usuarioId } = await chrome.storage.sync.get(['usuarioId']);
       const resp = await chrome.runtime.sendMessage({
         type: 'analisar',
-        payload: { telefone, nome, mensagens, imagens, audios }
+        payload: { telefone, nome, mensagens, imagens, audios, usuario_id: usuarioId || null }
       });
 
       if (!resp || !resp.ok) {
