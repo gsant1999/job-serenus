@@ -225,6 +225,26 @@
     });
   }
 
+  function pedirDocumentos(limite) {
+    return new Promise((resolve) => {
+      const reqId = 'd' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true;
+        window.removeEventListener('message', onMsg);
+        resolve(d.documentos || []);
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_documentos', reqId, limite }, '*');
+      setTimeout(() => {
+        if (!pronto) { window.removeEventListener('message', onMsg); resolve([]); }
+      }, 60000);
+    });
+  }
+
   // ═══════════════ UI: botão + painel ═══════════════
 
   function criarBotao() {
@@ -367,10 +387,16 @@
       ? '<div class="job-sec">O que a IA leu nas imagens (' + (ia.imagens_lidas || imgsLidas.length) + ')</div>' +
         imgsLidas.map((t) => '<div class="job-img-lida">🖼 ' + esc(t) + '</div>').join('')
       : '';
+    const docsLidos = (ia.leitura_documentos || []).filter(Boolean);
+    const blocoDocs = docsLidos.length
+      ? '<div class="job-sec">O que a IA leu nos PDFs (' + (ia.documentos_lidos || docsLidos.length) + ')</div>' +
+        docsLidos.map((t) => '<div class="job-img-lida">📄 ' + esc(t) + '</div>').join('')
+      : '';
     return (
       '<div class="job-sec">Leitura da IA <span class="job-ia-badge">Claude</span></div>' +
       '<div class="job-resumo">' + esc(ia.resumo || '') + '</div>' +
       blocoImgs +
+      blocoDocs +
       alertas +
       (acoes ? '<div class="job-sec">Próximas ações (IA)</div>' + acoes : '')
     );
@@ -413,20 +439,25 @@
       let audios = [];
       try { audios = await pedirAudios(12); } catch (e) { audios = []; }
 
-      if (!mensagens.length && !imagens.length && !audios.length) {
-        abrirPainel('<div class="job-erro">Não achei mensagens, imagens nem áudios nesta conversa.</div>');
+      status('Baixando documentos PDF…');
+      let documentos = [];
+      try { documentos = await pedirDocumentos(5); } catch (e) { documentos = []; }
+
+      if (!mensagens.length && !imagens.length && !audios.length && !documentos.length) {
+        abrirPainel('<div class="job-erro">Não achei mensagens, imagens, áudios nem documentos nesta conversa.</div>');
         return;
       }
 
       const extras = [];
       if (imagens.length) extras.push(imagens.length + ' imagem(ns)');
       if (audios.length) extras.push(audios.length + ' áudio(s)');
+      if (documentos.length) extras.push(documentos.length + ' documento(s)');
       status(extras.length ? 'Analisando conversa + ' + extras.join(' + ') + ' no JOB…'
                            : 'Calculando o score no JOB…');
       const { usuarioId } = await chrome.storage.sync.get(['usuarioId']);
       const resp = await chrome.runtime.sendMessage({
         type: 'analisar',
-        payload: { telefone, nome, mensagens, imagens, audios, usuario_id: usuarioId || null }
+        payload: { telefone, nome, mensagens, imagens, audios, documentos, usuario_id: usuarioId || null }
       });
 
       if (!resp || !resp.ok) {

@@ -8336,6 +8336,10 @@ _CLAUDE_SYSTEM_ANALISE = (
     "documento). LEIA cada imagem: extraia os dados relevantes (operadora, planos, valores, "
     "nomes, idades, números) e use no diagnóstico. Registre o que leu de cada uma no campo "
     "leitura_imagens.\n\n"
+    "Podem vir DOCUMENTOS PDF anexados (cotação formal, contrato, tabela de preços, proposta "
+    "comercial). LEIA cada PDF por completo: extraia operadora, planos, valores, condições, "
+    "prazos e qualquer dado relevante pra negociação. Registre o que leu de cada um no campo "
+    "leitura_documentos.\n\n"
     "Julgue também a RELEVÂNCIA COMERCIAL da conversa como um todo: 'alta' = negociação real "
     "de plano de saúde com um cliente em potencial; 'media' = tem interesse mas disperso/incompleto; "
     "'baixa' = conversa desconexa com só menções soltas ao tema; 'nenhuma' = não é conversa de venda "
@@ -8357,6 +8361,8 @@ _CLAUDE_SCHEMA_ANALISE = {
                                                    "NEGOCIANDO", "FECHADO", "INATIVO", "PERDIDO"]},
         "leitura_imagens": {"type": "array", "items": {"type": "string"},
                             "description": "O que você leu em cada imagem anexada (ex: 'Cotação Amil: Bronze DP R$627, Vera Prata R$606...'). Vazio se não houver imagem."},
+        "leitura_documentos": {"type": "array", "items": {"type": "string"},
+                            "description": "O que você leu em cada PDF anexado (ex: 'Proposta Vera Cruz PME: Enfermaria R$489, Apartamento R$612, carência 180 dias...'). Vazio se não houver PDF."},
         "proximas_acoes": {
             "type": "array",
             "items": {
@@ -8375,19 +8381,20 @@ _CLAUDE_SCHEMA_ANALISE = {
         "relevancia_comercial": {"type": "string", "enum": ["alta", "media", "baixa", "nenhuma"],
                                   "description": "A conversa É uma negociação real de plano de saúde com cliente?"}
     },
-    "required": ["resumo", "fase_funil", "leitura_imagens", "proximas_acoes", "sinais_atencao",
-                 "relevancia_comercial"],
+    "required": ["resumo", "fase_funil", "leitura_imagens", "leitura_documentos", "proximas_acoes",
+                 "sinais_atencao", "relevancia_comercial"],
     "additionalProperties": False
 }
 
 _CLAUDE_MAX_IMAGENS = 8  # teto por análise (controle de custo/payload)
+_CLAUDE_MAX_DOCUMENTOS = 5  # teto de PDFs por análise (custo/payload maior que imagem)
 
 
-def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None):
-    """Chama a Claude para uma leitura qualitativa da conversa (texto + imagens).
-    Retorna dict {resumo, fase_funil, leitura_imagens, proximas_acoes, sinais_atencao,
-    modelo, imagens_lidas} ou None se não há chave ou algo falhar (chamador trata
-    None como 'sem camada de IA')."""
+def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, documentos=None):
+    """Chama a Claude para uma leitura qualitativa da conversa (texto + imagens + PDFs).
+    Retorna dict {resumo, fase_funil, leitura_imagens, leitura_documentos, proximas_acoes,
+    sinais_atencao, modelo, imagens_lidas, documentos_lidos} ou None se não há chave ou algo
+    falhar (chamador trata None como 'sem camada de IA')."""
     api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
     if not api_key:
         return None
@@ -8420,7 +8427,18 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None):
             blocos_img.append({"type": "text", "text": f"[{img.get('hora', '')}] Imagem enviada pelo {quem}:"})
             blocos_img.append({"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}})
 
-        if not conversa_txt and not blocos_img:
+        # Blocos de documento PDF (base64) — mesma lógica de rótulo dos blocos de imagem.
+        blocos_doc = []
+        for doc in (documentos or [])[:_CLAUDE_MAX_DOCUMENTOS]:
+            b64 = (doc.get('base64') or '').strip()
+            if not b64:
+                continue
+            quem = 'CLIENTE' if doc.get('de') == 'lead' else 'CONSULTOR'
+            nome_doc = (doc.get('nome') or 'documento.pdf').strip()
+            blocos_doc.append({"type": "text", "text": f"[{doc.get('hora', '')}] PDF enviado pelo {quem} ({nome_doc}):"})
+            blocos_doc.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}})
+
+        if not conversa_txt and not blocos_img and not blocos_doc:
             return None
 
         conteudo = [{"type": "text", "text":
@@ -8428,6 +8446,7 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None):
                      f"Score heurístico (referência, não recalcular): {score}/1000 ({faixa}).\n\n"
                      f"CONVERSA (ordem cronológica):\n{conversa_txt or '(sem texto)'}"}]
         conteudo.extend(blocos_img)
+        conteudo.extend(blocos_doc)
 
         client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
         resp = client.messages.create(
@@ -8441,6 +8460,7 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None):
         dados = json.loads(txt)
         dados['modelo'] = _CLAUDE_MODEL
         dados['imagens_lidas'] = len(blocos_img) // 2
+        dados['documentos_lidos'] = len(blocos_doc) // 2
         return dados
     except Exception as e:
         app.logger.warning(f"[CLAUDE] análise falhou ({_CLAUDE_MODEL}): {e}")
@@ -8507,7 +8527,7 @@ def _transcrever_audio(b64, mime='audio/ogg'):
         return None
 
 
-def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None):
+def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=None):
     """Orquestra a análise completa: extração + score oficial + diagnóstico + IA."""
     ex, flags, msgs_lead = _wa_extrair_lead(mensagens, nome_contato)
     sc = _wa_score_lead(ex, flags, mensagens, msgs_lead)
@@ -8519,7 +8539,7 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None):
                                     'cnpj', 'tem_cnpj', 'plano_ativo', 'operadora_atual', 'operadora_interesse',
                                     'plano_preferido', 'cobertura_desejada', 'copart_pref',
                                     'urgencia', 'saude', 'decisor', 'objecoes')}
-    ia = _analisar_com_claude(mensagens, extracao, sc['score_final'], sc['faixa'], imagens=imagens)
+    ia = _analisar_com_claude(mensagens, extracao, sc['score_final'], sc['faixa'], imagens=imagens, documentos=documentos)
 
     # A IA lê a conversa COMO UM TODO. Se ela diz que isto não é uma negociação
     # real (conversa interna/pessoal/desconexa), o score cai — o regex vê
@@ -8651,6 +8671,19 @@ def api_whatsapp_analisar():
                         'base64': b64, 'mime': str(img.get('mime') or 'image/jpeg')[:30],
                         'hora': str(img.get('hora') or '')[:40]})
 
+    # Documentos PDF (base64) raspados da conversa — opcional (Fase 3). Teto de
+    # tamanho por arquivo (~20MB de base64 ≈ 15MB de arquivo) e de quantidade.
+    documentos = []
+    for doc in (d.get('documentos') or [])[:_CLAUDE_MAX_DOCUMENTOS]:
+        if not isinstance(doc, dict):
+            continue
+        b64 = str(doc.get('base64') or '')
+        if not b64 or len(b64) > 20_000_000:
+            continue
+        documentos.append({'de': 'lead' if doc.get('de') == 'lead' else 'consultor',
+                           'base64': b64, 'nome': str(doc.get('nome') or 'documento.pdf')[:200],
+                           'hora': str(doc.get('hora') or '')[:40]})
+
     # Áudios (base64 OGG) — transcreve cada um e injeta como mensagem na conversa,
     # em ordem cronológica, pra o áudio entrar no Score e na leitura da IA.
     transcricoes = []
@@ -8677,7 +8710,7 @@ def api_whatsapp_analisar():
     nome = str(d.get('nome') or '').strip()[:200]
     tel_norm = _normalizar_telefone(telefone)
 
-    an = _wa_analisar_conversa(limpa, nome_contato=nome, imagens=imagens)
+    an = _wa_analisar_conversa(limpa, nome_contato=nome, imagens=imagens, documentos=documentos)
     an['audios_transcritos'] = len(transcricoes)
     an['transcricoes'] = transcricoes
     score, faixa = an['score_final'], an['faixa']

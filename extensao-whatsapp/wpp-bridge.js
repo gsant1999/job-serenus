@@ -1,11 +1,11 @@
-// ─── JOB Serenus · Ponte MAIN world (áudio) ─────────────────────────────────
+// ─── JOB Serenus · Ponte MAIN world (áudio + documentos) ────────────────────
 //
 //  Roda no CONTEXTO DA PÁGINA (world: MAIN), não no content script isolado —
 //  porque a wa-js (window.WPP) vive no window da página (o WaSpeed já injeta).
-//  O content.js (isolado) pede os áudios via postMessage; esta ponte baixa e
-//  devolve. Só LEITURA: baixa a mídia que o usuário já vê na conversa, sem
-//  apertar play, e NUNCA envia nada. Se o WPP não existir, responde com erro
-//  e a análise segue sem áudio.
+//  O content.js (isolado) pede os áudios/documentos via postMessage; esta
+//  ponte baixa e devolve. Só LEITURA: baixa a mídia que o usuário já vê na
+//  conversa, sem apertar play/abrir nada, e NUNCA envia nada. Se o WPP não
+//  existir, responde com erro e a análise segue sem esse anexo.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -34,13 +34,13 @@
     } catch (e) { return ''; }
   }
 
-  function selecionarAudios(audios, limite) {
-    // Prioriza os áudios do LEAD — é a fala do cliente que importa pra
-    // qualificação e pro score, não pode ficar de fora só porque o consultor
-    // mandou vários áudios recentes por cima. Enche o resto do teto (se
-    // sobrar espaço) com os áudios do consultor, mais recentes primeiro.
-    const doLead = audios.filter((m) => !(m.id && m.id.fromMe));
-    const doConsultor = audios.filter((m) => m.id && m.id.fromMe);
+  function selecionarPorLead(itens, limite) {
+    // Prioriza os itens do LEAD (áudio ou documento) — é o conteúdo do cliente
+    // que importa pra qualificação e pro score, não pode ficar de fora só
+    // porque o consultor mandou vários itens recentes por cima. Enche o resto
+    // do teto (se sobrar espaço) com os itens do consultor, mais recentes primeiro.
+    const doLead = itens.filter((m) => !(m.id && m.id.fromMe));
+    const doConsultor = itens.filter((m) => m.id && m.id.fromMe);
     const leadRecentes = doLead.slice(-limite);
     const espacoConsultor = Math.max(0, limite - leadRecentes.length);
     const consultorRecentes = espacoConsultor ? doConsultor.slice(-espacoConsultor) : [];
@@ -58,7 +58,7 @@
     try { msgs = await window.WPP.chat.getMessages(chatId, { count: 200 }); }
     catch (e) { return { erro: 'falha_mensagens' }; }
     const audios = msgs.filter((m) => m.type === 'ptt' || m.type === 'audio');
-    const alvos = selecionarAudios(audios, Math.max(1, limite || 12));
+    const alvos = selecionarPorLead(audios, Math.max(1, limite || 12));
     const out = [];
     for (const m of alvos) {
       try {
@@ -81,13 +81,50 @@
     return { audios: out };
   }
 
+  async function baixarDocumentos(limite) {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.downloadMedia) {
+      return { erro: 'wpp_ausente' };
+    }
+    const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
+    if (!chat || !chat.id) return { erro: 'sem_conversa' };
+    const chatId = chat.id._serialized;
+    let msgs = [];
+    try { msgs = await window.WPP.chat.getMessages(chatId, { count: 200 }); }
+    catch (e) { return { erro: 'falha_mensagens' }; }
+    // Só PDF — é o único formato de documento que a Claude lê nativamente.
+    const docs = msgs.filter((m) => m.type === 'document' &&
+      (m.mimetype || '').toLowerCase() === 'application/pdf');
+    const alvos = selecionarPorLead(docs, Math.max(1, limite || 5));
+    const out = [];
+    for (const m of alvos) {
+      try {
+        const media = await window.WPP.chat.downloadMedia(m.id._serialized);
+        let b64 = '';
+        if (media instanceof Blob) {
+          b64 = await blobParaBase64(media);
+        } else if (media && media.data) {
+          const s = String(media.data);
+          b64 = s.indexOf(',') >= 0 ? s.split(',')[1] : s;
+        }
+        if (b64) {
+          out.push({ de: (m.id.fromMe ? 'consultor' : 'lead'), base64: b64,
+                     nome: m.filename || 'documento.pdf', hora: fmtHora(m.t) });
+        }
+      } catch (e) { /* documento que falhar é ignorado, nunca derruba a análise */ }
+    }
+    return { documentos: out };
+  }
+
   window.addEventListener('message', async (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
-    if (!d || d.source !== 'JOB_EXT_REQ' || d.tipo !== 'baixar_audios') return;
+    if (!d || d.source !== 'JOB_EXT_REQ') return;
     let resp;
-    try { resp = await baixarAudios(d.limite); }
-    catch (e) { resp = { erro: 'excecao' }; }
+    try {
+      if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite);
+      else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite);
+      else return;
+    } catch (e) { resp = { erro: 'excecao' }; }
     resp.source = 'JOB_EXT_RESP';
     resp.reqId = d.reqId;
     window.postMessage(resp, '*');
