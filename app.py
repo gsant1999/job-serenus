@@ -8786,6 +8786,68 @@ def api_whatsapp_analisar():
     }))
 
 
+def _wa_calibracao(conn, uid=None):
+    """Compara a faixa de score dada pela extensão contra o desfecho REAL do lead
+    no CRM (ganho/perdido). Usa só a análise mais recente de cada lead (evita
+    contar o mesmo lead 2x quando ele foi reanalisado). Só entra na conta quem
+    já chegou numa etapa final — lead ainda em aberto não conta pra nenhum lado,
+    porque ainda pode virar qualquer um dos dois."""
+    q = """SELECT wa.score_faixa, e.tipo AS etapa_tipo
+           FROM whatsapp_analises wa
+           JOIN crm_leads l ON l.id = wa.lead_id
+           JOIN crm_etapas e ON e.slug = l.etapa
+           WHERE wa.lead_id IS NOT NULL AND e.tipo IN ('ganho','perdido')
+             AND wa.id = (SELECT MAX(wa2.id) FROM whatsapp_analises wa2 WHERE wa2.lead_id = wa.lead_id)"""
+    params = []
+    if uid:
+        q += " AND l.responsavel_id=?"
+        params.append(uid)
+    rows = conn.execute(q, params).fetchall()
+    faixas = {'quente': {'ganho': 0, 'perdido': 0}, 'bom': {'ganho': 0, 'perdido': 0},
+              'medio': {'ganho': 0, 'perdido': 0}, 'baixo': {'ganho': 0, 'perdido': 0},
+              'improvavel': {'ganho': 0, 'perdido': 0}}
+    for r in rows:
+        f = r['score_faixa']
+        if f in faixas:
+            faixas[f][r['etapa_tipo']] += 1
+    ordem = ['quente', 'bom', 'medio', 'baixo', 'improvavel']
+    resultado = []
+    for f in ordem:
+        d = faixas[f]
+        total = d['ganho'] + d['perdido']
+        taxa = round(100 * d['ganho'] / total, 1) if total else None
+        resultado.append({'faixa': f, 'ganho': d['ganho'], 'perdido': d['perdido'],
+                           'total': total, 'taxa_conversao': taxa})
+    return resultado
+
+
+@app.route('/whatsapp-analises')
+@login_required
+def whatsapp_analises_pagina():
+    """Lista as análises de conversa feitas pela extensão + o comparativo score
+    x desfecho real dos leads (calibração). Admin vê tudo; consultor só o que é
+    seu (mesma regra de visibilidade do CRM)."""
+    eh_admin = session.get('perfil') == 'admin'
+    uid = session['user_id']
+    conn = db()
+    calibracao = _wa_calibracao(conn, None if eh_admin else uid)
+
+    q = """SELECT wa.id, wa.nome_contato, wa.telefone, wa.score, wa.score_faixa,
+                  wa.total_mensagens, wa.criado_em, wa.lead_id,
+                  l.nome AS lead_nome, l.etapa AS lead_etapa, e.nome AS etapa_nome, e.tipo AS etapa_tipo
+           FROM whatsapp_analises wa
+           LEFT JOIN crm_leads l ON l.id = wa.lead_id
+           LEFT JOIN crm_etapas e ON e.slug = l.etapa"""
+    params = []
+    if not eh_admin:
+        q += " WHERE l.responsavel_id=?"
+        params.append(uid)
+    q += " ORDER BY wa.criado_em DESC LIMIT 200"
+    analises = conn.execute(q, params).fetchall()
+    close_db(conn)
+    return render_template('whatsapp_analises.html', analises=analises, calibracao=calibracao, eh_admin=eh_admin)
+
+
 # ─── CRM ─────────────────────────────────────────────────────────────────────────
 def carregar_etapas_crm(conn=None):
     """Lê as etapas do funil do banco, ordenadas. Cria conexão própria se não receber uma."""

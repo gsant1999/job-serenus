@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Análises WhatsApp{% endblock %}
+
+{% block head %}
+<style>
+  .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:22px; }
+  .kpi { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:16px 18px; }
+  .kpi .lbl { font-size:10px; text-transform:uppercase; letter-spacing:.6px; color:var(--cinza-2); font-weight:600; margin-bottom:8px; }
+  .kpi .val { font-family:'Sora',sans-serif; font-size:26px; font-weight:700; color:var(--texto); line-height:1; }
+  .kpi .sub { font-size:11px; color:var(--cinza); margin-top:6px; }
+  .kpi.accent-verde .val { color:var(--verde); }
+
+  .panel-box { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 20px; margin-bottom:20px; }
+  .panel-box h2 { font-family:'Sora',sans-serif; font-size:14px; font-weight:600; color:var(--texto); margin:0 0 4px; }
+  .panel-box .sub { font-size:11.5px; color:var(--cinza-2); margin:0 0 16px; }
+  .panel-box .vazio { color:var(--cinza-2); font-size:12px; padding:8px 0; }
+
+  table.pnl-tab { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.pnl-tab th { text-align:left; color:var(--cinza-2); font-size:10px; text-transform:uppercase; letter-spacing:.5px; font-weight:600; padding:0 10px 10px; border-bottom:1px solid var(--borda); }
+  table.pnl-tab td { padding:11px 10px; border-bottom:1px solid var(--borda); color:var(--texto); }
+  table.pnl-tab td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  table.pnl-tab tr:last-child td { border-bottom:none; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:20px; font-size:11px; font-weight:600; }
+  .pill-quente { background:rgba(244,63,94,.12); color:#f43f5e; }
+  .pill-bom { background:rgba(34,197,94,.12); color:#22c55e; }
+  .pill-medio { background:rgba(250,204,21,.12); color:#facc15; }
+  .pill-baixo { background:rgba(148,163,184,.15); color:#94a3b8; }
+  .pill-improvavel { background:rgba(148,163,184,.1); color:#6b7185; }
+  .pill-cinza { background:rgba(255,255,255,.06); color:var(--cinza); }
+  .pill-verde { background:rgba(34,197,94,.12); color:#22c55e; }
+  .pill-erro { background:rgba(244,63,94,.12); color:#f43f5e; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:6px;">
+  <h1 style="margin:0;">Análises WhatsApp</h1>
+  <div class="sub">Score Lead calculado pela extensão + comparativo contra o desfecho real no CRM</div>
+</div>
+
+<div class="panel-box">
+  <h2>Calibração: score x desfecho real</h2>
+  <p class="sub">Só conta lead que já ganhou ou foi perdido — em aberto ainda pode virar qualquer um dos dois. Poucos dados ainda: isso fica confiável com o tempo, à medida que mais leads da extensão fecham o funil.</p>
+  {% set total_decididos = calibracao|sum(attribute='total') %}
+  {% if total_decididos == 0 %}
+    <div class="vazio">Nenhum lead vinculado pela extensão chegou a Ganho/Perdido ainda. Assim que os primeiros fecharem, a taxa de conversão por faixa aparece aqui.</div>
+  {% else %}
+  <table class="pnl-tab">
+    <thead><tr><th>Faixa</th><th class="num">Ganhos</th><th class="num">Perdidos</th><th class="num">Total decidido</th><th class="num">Taxa de conversão</th></tr></thead>
+    <tbody>
+      {% for c in calibracao %}
+      <tr>
+        <td><span class="pill pill-{{ c.faixa }}">{{ c.faixa|upper }}</span></td>
+        <td class="num">{{ c.ganho }}</td>
+        <td class="num">{{ c.perdido }}</td>
+        <td class="num">{{ c.total }}</td>
+        <td class="num">{{ c.taxa_conversao ~ '%' if c.taxa_conversao is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="panel-box">
+  <h2>Últimas análises</h2>
+  <p class="sub">{{ analises|length }} análise(s){{ ' (todas as consultoras)' if eh_admin else ' suas' }}.</p>
+  {% if not analises %}
+    <div class="vazio">Nenhuma análise ainda. Use o botão da extensão numa conversa do WhatsApp Web.</div>
+  {% else %}
+  <table class="pnl-tab">
+    <thead><tr><th>Data</th><th>Contato</th><th class="num">Score</th><th>Faixa</th><th>Lead no CRM</th><th>Etapa atual</th></tr></thead>
+    <tbody>
+      {% for a in analises %}
+      <tr>
+        <td>{{ a.criado_em }}</td>
+        <td>{{ a.nome_contato or a.telefone or '—' }}</td>
+        <td class="num">{{ a.score if a.score is not none else '—' }}</td>
+        <td><span class="pill pill-{{ a.score_faixa }}">{{ (a.score_faixa or '—')|upper }}</span></td>
+        <td>
+          {% if a.lead_id %}
+            <a href="/crm?lead={{ a.lead_id }}">{{ a.lead_nome }}</a>
+          {% else %}
+            <span class="pill pill-cinza">sem lead</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if a.etapa_tipo == 'ganho' %}<span class="pill pill-verde">{{ a.etapa_nome }}</span>
+          {% elif a.etapa_tipo == 'perdido' %}<span class="pill pill-erro">{{ a.etapa_nome }}</span>
+          {% elif a.etapa_nome %}<span class="pill pill-cinza">{{ a.etapa_nome }}</span>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endblock %}
