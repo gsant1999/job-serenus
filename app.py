@@ -7746,127 +7746,570 @@ def api_bi_regras():
 # gerar sugestões de próxima ação. O envio é feito pelo service worker da
 # extensão (contorna o CSP do WhatsApp Web), autenticado por WHATSAPP_EXT_KEY.
 
-# Sinais textuais que movem o score. Heurística INICIAL e proposital — o
-# Guilherme vai mandar as regras de "Score Lead" dele depois; quando mandar, é
-# só trocar os pesos/sinais aqui (ou plugar um modelo). O importante já está
-# pronto: a conversa inteira chega aqui estruturada e fica gravada, então dá pra
-# reprocessar o histórico com qualquer régua nova sem raspar o WhatsApp de novo.
-_WA_SINAIS_QUENTES = {
-    'preco':      (r'\b(pre[çc]o|valor|quanto (custa|fica|sai|é)|mensalidade|or[çc]amento|cota[çc][ãa]o)\b', 12),
-    'contratar':  (r'\b(contratar|fechar|quero (o|esse|este) plano|vamos fechar|pode mandar o (boleto|contrato)|assinar)\b', 20),
-    'documento':  (r'\b(cpf|cnpj|rg|documento|carteirinha|comprovante|proposta)\b', 8),
-    'urgencia':   (r'\b(hoje|agora|urgente|com pressa|preciso (j[áa]|logo)|amanh[ãa])\b', 8),
-    'familia':    (r'\b(esposa|marido|filh[oa]s?|fam[íi]lia|depend[eê]nte|c[ôo]njuge|m[ãa]e|pai)\b', 5),
-    'reuniao':    (r'\b(reuni[ãa]o|liga[çc][ãa]o|me liga|pode ligar|hor[áa]rio|agendar|chamada)\b', 7),
-    'mei_cnpj':   (r'\b(mei|meu cnpj|empresarial|pj|pessoa jur[íi]dica)\b', 6),
-}
-_WA_SINAIS_FRIOS = {
-    'recusa':     (r'\b(n[ãa]o tenho interesse|n[ãa]o quero|para de|n[ãa]o me mand[ae]|sair da lista|descadastr)\b', -30),
-    'depois':     (r'\b(depois (eu )?(vejo|falo|te chamo)|mais pra frente|agora n[ãa]o|sem condi[çc][õo]es|t[ôo] sem grana|caro demais)\b', -12),
-    'jatem':      (r'\b(j[áa] tenho plano|j[áa] fechei|j[áa] contratei|j[áa] resolvi)\b', -15),
-}
+# ── MOTOR OFICIAL DO SCORE LEAD (0–1000) ──
+# Implementa o modelo definido pelo Guilherme (doc "SCORE LEADS", fev/2026):
+# 28 categorias de 0–50, normalização dinâmica (dado ausente SAI do denominador —
+# nunca pontua nem penaliza), penalidades por trava de negócio, CAPs (teto) em
+# cenários críticos e arredondamento final pra múltiplo de 50.
+#   score_bruto = (soma_categorias_validas / (50 * qtd_validas)) * 1000
+#   score_final = round_50(min(cap, score_bruto - penalidades))
+# Faixas: 850+ quente · 700+ bom · 550+ medio · 350+ baixo · resto improvavel.
+
+_WA_CIDADES = ('campinas', 'jundiai', 'jundiaí', 'indaiatuba', 'valinhos', 'vinhedo',
+               'hortolandia', 'hortolândia', 'sumare', 'sumaré', 'paulinia', 'paulínia',
+               'americana', 'nova odessa', 'santa barbara', 'santa bárbara', 'cosmopolis',
+               'cosmópolis', 'jaguariuna', 'jaguariúna', 'pedreira', 'amparo', 'itatiba',
+               'louveira', 'varzea paulista', 'várzea paulista', 'campo limpo paulista',
+               'itu', 'salto', 'sorocaba', 'piracicaba', 'limeira', 'mogi guacu', 'mogi guaçu',
+               'mogi mirim', 'monte mor', 'sao paulo', 'são paulo')
+_WA_VERA_FORTE = ('campinas', 'indaiatuba', 'valinhos', 'vinhedo', 'hortolandia', 'hortolândia',
+                  'sumare', 'sumaré', 'paulinia', 'paulínia', 'monte mor')
+_WA_OPERADORAS = [
+    ('Vera Cruz', ('vera cruz', 'vera prata', 'vera confort')),
+    ('Unimed Jundiaí', ('unimed jundia',)),
+    ('Bradesco', ('bradesco',)),
+    ('SulAmérica', ('sulamerica', 'sulamérica', 'sul america', 'sul américa')),
+    ('Amil', ('amil',)),
+    ('Porto', ('porto saude', 'porto saúde', 'porto seguro')),
+    ('Hapvida/NotreDame', ('hapvida', 'notredame', 'notre dame', 'intermedica', 'intermédica')),
+    ('Beneficência', ('beneficencia', 'beneficência')),
+    ('Santa Tereza', ('santa tereza', 'santa teresa')),
+    ('MedSênior', ('medsenior', 'medsênior', 'med senior', 'med sênior')),
+    ('Omint', ('omint',)),
+    ('Unimed', ('unimed',)),
+]
+# Operadoras de rede regional (pro flag de mismatch quando o lead quer NACIONAL)
+_WA_REGIONAIS = ('Vera Cruz', 'Unimed Jundiaí', 'Beneficência', 'Santa Tereza', 'MedSênior')
+# Operadoras que hoje só vendem produto COM coparticipação (pro copart_mismatch)
+_WA_SO_COPART = ('Vera Cruz', 'Beneficência')
 
 
-def _wa_score_conversa(mensagens):
-    """Recebe a lista de mensagens [{de:'lead'|'consultor', texto, hora}] e devolve
-    (score 0-100, faixa, lista de sinais detectados). HEURÍSTICO — ver comentário
-    do módulo. Só olha o que o LEAD escreveu pros sinais de interesse (o que o
-    consultor manda não deve inflar o score do lead)."""
-    import re as _re
-    texto_lead = ' \n '.join((m.get('texto') or '') for m in mensagens if m.get('de') == 'lead').lower()
+def _wa_round50(x):
+    return int(round(x / 50.0) * 50)
+
+
+def _wa_detect_tier(op):
+    """T1 = premium nacional; T1.5 = Vera Cruz (premium regional); T2 = demais."""
+    o = (op or '').lower()
+    if not o:
+        return None
+    if any(k in o for k in ('bradesco', 'sulam', 'sul am', 'porto', 'amil', 'omint', 'unimed nacional')):
+        return 'T1'
+    if 'vera' in o:
+        return 'T1.5'
+    return 'T2'
+
+
+def _wa_parse_hora(h):
+    """Aceita '15:03, 17/06/2025' (D/M/A) e '12:38, 2026/7/4' (A/M/D — formato
+    atual do data-pre-plain-text do WhatsApp Web). Retorna datetime naive ou None."""
+    m = re.match(r'\s*(\d{1,2}):(\d{2}),?\s*(\d{1,4})/(\d{1,2})/(\d{1,4})', h or '')
+    if not m:
+        return None
+    hh, mi = int(m.group(1)), int(m.group(2))
+    a, b, c = m.group(3), m.group(4), m.group(5)
+    try:
+        if len(a) == 4:
+            return datetime(int(a), int(b), int(c), hh, mi)
+        return datetime(int(c), int(b), int(a), hh, mi)
+    except ValueError:
+        return None
+
+
+def _wa_extrair_lead(mensagens, nome_contato=''):
+    """Extrai da conversa os dados estruturados do lead (cidade, idades, PF/CNPJ,
+    plano ativo, operadora/plano de interesse, urgência, saúde, funil, tags...).
+    Regra do modelo: o que não aparece na conversa fica None — NUNCA inventar."""
+    todo = '\n'.join((m.get('texto') or '') for m in mensagens).lower()
+    lead_txt = '\n'.join((m.get('texto') or '') for m in mensagens if m.get('de') == 'lead').lower()
     msgs_lead = [m for m in mensagens if m.get('de') == 'lead']
-    msgs_consultor = [m for m in mensagens if m.get('de') == 'consultor']
 
-    score = 0
-    sinais = []
-    for chave, (padrao, peso) in {**_WA_SINAIS_QUENTES, **_WA_SINAIS_FRIOS}.items():
-        if _re.search(padrao, texto_lead):
-            score += peso
-            sinais.append({'sinal': chave, 'peso': peso, 'tipo': 'quente' if peso > 0 else 'frio'})
+    ex = {'nome': (nome_contato or '').strip() or None, 'cidade': None, 'idades': [], 'vidas': None,
+          'tipo_contratacao': None, 'cnpj': None, 'tem_cnpj': None, 'plano_ativo': None,
+          'operadora_atual': None, 'operadora_interesse': None, 'plano_preferido': None,
+          'cobertura_desejada': None, 'copart_pref': None, 'urgencia': None, 'saude': None,
+          'concorrencia': None, 'decisor': 'decisor', 'objecoes': [], 'tags': []}
+    flags = {'gestante_imediato': False, 'downgrade_severo': False, 'mismatch_cobertura': False,
+             'uso_imediato_sem_port': False, 'risco_terapias_intensas': False,
+             'copart_mismatch': False, 'urgencia_le30': False}
 
-    # Engajamento: lead que responde várias vezes está mais quente que quem mandou 1 linha.
-    n_lead = len(msgs_lead)
-    if n_lead >= 8:
-        score += 15; sinais.append({'sinal': 'muito_engajado', 'peso': 15, 'tipo': 'quente'})
-    elif n_lead >= 4:
-        score += 8; sinais.append({'sinal': 'engajado', 'peso': 8, 'tipo': 'quente'})
-    elif n_lead == 0:
-        score -= 10; sinais.append({'sinal': 'nunca_respondeu', 'peso': -10, 'tipo': 'frio'})
+    # cidade
+    for c in _WA_CIDADES:
+        if re.search(r'\b' + re.escape(c) + r'\b', todo):
+            ex['cidade'] = c.title()
+            break
 
-    # Perguntas do lead = interesse ativo.
+    # idades ("27 anos") e vidas
+    for m in re.finditer(r'\b(\d{1,2})\s*anos\b', todo):
+        v = int(m.group(1))
+        if 0 <= v <= 99 and v not in ex['idades']:
+            ex['idades'].append(v)
+    mv = re.search(r'\b(\d{1,2})\s*vidas?\b', todo)
+    if mv:
+        ex['vidas'] = int(mv.group(1))
+    elif ex['idades']:
+        ex['vidas'] = len(ex['idades'])
+    elif re.search(r'\b(pra|para) mim mesm[oa]\b|\bplano individual\b|\beu mesm[oa]\b', todo):
+        ex['vidas'] = 1
+
+    # CNPJ / MEI
+    mc = re.search(r'\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b', todo)
+    if mc:
+        ex['cnpj'] = re.sub(r'\D', '', mc.group(0))
+        ex['tem_cnpj'] = True
+    elif re.search(r'possui cnpj[^\n]{0,60}?n[ãa]o\b', todo) or re.search(r'n[ãa]o (tenho|possuo|tem) (cnpj|mei)', todo):
+        ex['tem_cnpj'] = False
+    elif re.search(r'\b(tenho|possuo|meu) (cnpj|mei)\b|\bmei ativo\b|\bsou mei\b', todo):
+        ex['tem_cnpj'] = True
+
+    # tipo de contratação (PJ > ADESÃO > PF)
+    if ex['tem_cnpj'] or re.search(r'\b(pme|empresarial|pessoa jur[íi]dica)\b', todo):
+        ex['tipo_contratacao'] = 'PJ'
+    elif re.search(r'ades[ãa]o', todo):
+        ex['tipo_contratacao'] = 'ADESAO'
+    elif re.search(r'pessoa f[íi]sica|\bplano individual\b', todo) or ex['tem_cnpj'] is False:
+        ex['tipo_contratacao'] = 'PF'
+
+    # plano atual (cancelado > sem plano > ativo)
+    if re.search(r'\b(cancelei|cancelamos|foi cancelado|cancelou)\b[^\n]{0,60}\b(plano|conv[êe]nio)\b'
+                 r'|\b(plano|conv[êe]nio)\b[^\n]{0,60}\b(cancelad[oa]|cancelei|encerrou|venceu)\b', todo):
+        ex['plano_ativo'] = 'CANCELADO_RECENTE'
+    elif re.search(r'plano de sa[úu]de atualmente[^\n]{0,80}?n[ãa]o\b', todo) \
+            or re.search(r'\b(n[ãa]o tenho|n[ãa]o possuo|estou sem|t[ôo] sem) plano\b', todo):
+        ex['plano_ativo'] = 'SEM_PLANO'
+    elif re.search(r'\b(tenho|possuo|estou com|j[áa] tenho) [^\n]{0,25}plano\b|\bmeu plano atual\b', todo):
+        ex['plano_ativo'] = 'ATIVO'
+
+    # operadoras: interesse (mais citada) e atual (se plano ativo + citação com "tenho/meu")
+    contagem = []
+    for nome_op, padroes in _WA_OPERADORAS:
+        n = sum(todo.count(p) for p in padroes)
+        if n:
+            contagem.append((n, nome_op))
+    if contagem:
+        contagem.sort(reverse=True)
+        ex['operadora_interesse'] = contagem[0][1]
+    if ex['plano_ativo'] == 'ATIVO':
+        for nome_op, padroes in _WA_OPERADORAS:
+            for p in padroes:
+                if re.search(r'\b(tenho|possuo|meu plano [ée]|sou d[ao]|estou n[ao])\b[^\n]{0,30}' + re.escape(p), todo):
+                    ex['operadora_atual'] = nome_op
+                    break
+            if ex['operadora_atual']:
+                break
+
+    # plano preferido (nome comercial citado)
+    for p in ('confort', 'comfort', 'ouro', 'prata', 'flex', 'classico', 'clássico',
+              'agile', 'selection 300', 'sabe 200', 'premium', 'essencial'):
+        if p in todo:
+            ex['plano_preferido'] = p.title()
+            break
+
+    # cobertura desejada / coparticipação (só quando o LEAD expressa)
+    if re.search(r'\bnacional\b|brasil (todo|inteiro)|outros estados', lead_txt):
+        ex['cobertura_desejada'] = 'NACIONAL'
+    if re.search(r'n[ãa]o (quero|gosto|aceito)[^\n]{0,30}copart|sem copart[^\n]{0,15}(por favor|de prefer[êe]ncia)|odeio copart', lead_txt):
+        ex['copart_pref'] = 'rejeita'
+    elif re.search(r'\bsem coparticipa[çc][ãa]o\b', lead_txt):
+        ex['copart_pref'] = 'sem'
+    elif re.search(r'copart[^\n]{0,25}(tranquilo|tudo bem|ok|sem problema)', lead_txt):
+        ex['copart_pref'] = 'parcial'
+
+    # urgência (declarada pelo lead)
+    if re.search(r'\burgente\b|preciso (j[áa]|agora|pra ontem|o quanto antes)|essa semana|este m[êe]s|imediato', lead_txt):
+        ex['urgencia'] = '<=30'
+    elif re.search(r'm[êe]s que vem|pr[óo]ximo m[êe]s|em uns (30|40|50|60) dias', lead_txt):
+        ex['urgencia'] = '31-60'
+    elif re.search(r'sem pressa|mais pra frente|futuramente|s[óo] pesquisando|planejando ainda', lead_txt):
+        ex['urgencia'] = '>=60'
+
+    # saúde (S0..S4 + gestante) — só com menção explícita
+    gestante = re.search(r'\bgestante\b|\bgr[áa]vida\b', todo)
+    planejando = re.search(r'planejando (engravidar|gesta[çc][ãa]o)|tentando engravidar', todo)
+    if gestante and (re.search(r'\bparto\b', todo) and (ex['urgencia'] == '<=30' or re.search(r'sem (cumprir |a )?car[êe]ncia|antes da car[êe]ncia|j[áa] est(ou|[áa]) gr[áa]vida', todo))):
+        ex['saude'] = 'S4'
+        flags['gestante_imediato'] = True
+    elif gestante and re.search(r'pr[ée][- ]?natal', todo):
+        ex['saude'] = 'S2G'
+    elif planejando:
+        ex['saude'] = 'S1G'
+    elif re.search(r'\b(c[âa]ncer|quimioterapia|hemodi[áa]lise|transplante|cirurgia (marcada|agendada))\b', todo):
+        ex['saude'] = 'S3' if ex['plano_ativo'] == 'ATIVO' else 'S4'
+    elif re.search(r'\b(fonoaudi|psic[óo]log[oa] (semanal|toda semana)|terapias? (semanal|recorrente|intensiva)|\btea\b|autis)', todo):
+        ex['saude'] = 'TERAPIAS'
+        flags['risco_terapias_intensas'] = True
+    elif re.search(r'\b(diabetes|hipertens[ãa]o|press[ãa]o alta|asma|tireoide)\b', todo):
+        ex['saude'] = 'S1' if ex['plano_ativo'] == 'ATIVO' else 'S2'
+    elif re.search(r'n[ãa]o tenho (nenhum |)problema de sa[úu]de|saud[áa]vel|nenhuma doen[çc]a', lead_txt):
+        ex['saude'] = 'S0'
+
+    # concorrência declarada pelo lead
+    if re.search(r'outra cota[çc][ãa]o|outro corretor|or[çc]amento com|estou comparando|cotando (com|em)|pesquisando com', lead_txt):
+        ex['concorrencia'] = 'alta'
+
+    # decisor
+    if re.search(r'vou (falar|ver|conversar) com (meu|minha) (marido|esposa|s[óo]ci[oa]|chefe|m[ãa]e|pai)|preciso consultar|n[ãa]o sou eu quem decide', lead_txt):
+        ex['decisor'] = 'influenciador'
+
+    # objeções levantadas pelo lead (temas de negociação)
+    for chave, rotulo in (('reajuste', 'reajuste'), (r'car[êe]ncia', 'carência'),
+                          (r'copart', 'coparticipação'), (r'rede|hospita', 'rede de atendimento'),
+                          (r'interna[çc]|acomoda[çc]|quarto', 'acomodação/internação'),
+                          (r'pagamento|mensalidade|boleto', 'pagamento'),
+                          (r'maternidade|parto', 'maternidade/parto'),
+                          (r'caro|pre[çc]o alto', 'preço')):
+        if re.search(chave, lead_txt):
+            ex['objecoes'].append(rotulo)
+
+    # fase do funil
+    proposta_enviada = bool(re.search(r'cota[çc][ãa]o|proposta|segue (os|as) valores|o valor [ée] r\$',
+                            '\n'.join((m.get('texto') or '') for m in mensagens if m.get('de') == 'consultor').lower()))
+    qualificado = bool(ex['idades'] or ex['cidade'])
+    fechado = bool(re.search(r'vou fechar|quero fechar|vamos fechar|fechado ent[ãa]o|pode (fazer|gerar|emitir) o contrato'
+                             r'|quais (dados|documentos) (voc[êe] )?precisa|onde (eu )?assino|como assino', lead_txt))
+    negociando = bool(ex['objecoes'] or re.search(r'vou (analisar|avaliar|pensar)', lead_txt))
+    if fechado:
+        ex['fase_funil'] = 'FECHADO'
+    elif negociando and proposta_enviada:
+        ex['fase_funil'] = 'NEGOCIANDO'
+    elif proposta_enviada:
+        ex['fase_funil'] = 'PROPOSTA_ENVIADA'
+    elif qualificado:
+        ex['fase_funil'] = 'QUALIFICANDO'
+    else:
+        ex['fase_funil'] = 'NOVO_LEAD'
+    # INATIVO: última mensagem há mais de 10 dias (e não fechou)
+    ult_dt = _wa_parse_hora((mensagens[-1].get('hora') or '')) if mensagens else None
+    if ult_dt and ex['fase_funil'] != 'FECHADO':
+        try:
+            if (datetime.now(TZ_SP).replace(tzinfo=None) - ult_dt).days > 10:
+                ex['fase_funil'] = 'INATIVO'
+        except Exception:
+            pass
+
+    # elegibilidade PF/adesão (públicos do Vera etc.)
+    adesao_ok = bool(re.search(r'gradua[çc][ãa]o|faculdade|n[íi]vel superior|curso superior|funcion[áa]ri[oa] p[úu]blic[oa]|com[ée]rcio|estudando', lead_txt))
+    if adesao_ok and ex['tipo_contratacao'] in ('PF', 'ADESAO'):
+        ex['tags'].append('PF_ADESAO_OK')
+    if ex['tipo_contratacao'] == 'PJ' and not ex['cnpj']:
+        ex['tags'].append('PJ_CNPJ_INCOMPLETO')
+    if ex['plano_ativo'] == 'SEM_PLANO':
+        ex['tags'].append('SEM_PLANO')
+    if ex['plano_ativo'] == 'CANCELADO_RECENTE':
+        ex['tags'].append('CANCELADO_RECENTE')
+    if ex['cobertura_desejada'] == 'NACIONAL':
+        ex['tags'].append('QUER_NACIONAL')
+    if ex['copart_pref'] == 'rejeita':
+        ex['tags'].append('REJEITA_COPART')
+    if flags['gestante_imediato']:
+        ex['tags'].append('GESTANTE_PARTO_IMEDIATO')
+    if ex['concorrencia'] == 'alta':
+        ex['tags'].append('CONCORRENCIA_ALTA')
+    if fechado:
+        ex['tags'].append('PRONTO_PARA_DOCS')
+
+    # flags dependentes de cruzamentos
+    flags['urgencia_le30'] = ex['urgencia'] == '<=30'
+    flags['mismatch_cobertura'] = (ex['cobertura_desejada'] == 'NACIONAL'
+                                   and ex['operadora_interesse'] in _WA_REGIONAIS)
+    flags['copart_mismatch'] = (ex['copart_pref'] == 'rejeita'
+                                and ex['operadora_interesse'] in _WA_SO_COPART)
+    flags['uso_imediato_sem_port'] = (flags['urgencia_le30'] and ex['plano_ativo'] == 'SEM_PLANO')
+    tiers = (_wa_detect_tier(ex['operadora_atual']), _wa_detect_tier(ex['operadora_interesse']))
+    if tiers[0] and tiers[1]:
+        ordem = {'T1': 0, 'T1.5': 1, 'T2': 2}
+        if ordem[tiers[0]] - ordem[tiers[1]] <= -2:
+            flags['downgrade_severo'] = True
+
+    return ex, flags, msgs_lead
+
+
+_WA_SAUDE_PTS = {'S0': 50, 'S1': 40, 'S2': 25, 'S3': 15, 'S4': 0, 'S1G': 45, 'S2G': 30, 'TERAPIAS': 20}
+_WA_PENALIDADES = {'gestante_imediato': 180, 'downgrade_severo': 120, 'mismatch_cobertura': 100,
+                   'uso_imediato_sem_port': 120, 'risco_terapias_intensas': 80, 'copart_mismatch': 60}
+
+
+def _wa_score_lead(ex, flags, mensagens, msgs_lead):
+    """Calcula o Score Lead 0–1000 conforme o modelo oficial. Devolve dict com
+    score_final, bruto, breakdown, penalidades e cap."""
+    lead_txt = '\n'.join((m.get('texto') or '') for m in msgs_lead).lower()
+    todo = '\n'.join((m.get('texto') or '') for m in mensagens).lower()
+    cats = {}
+
+    # [1] vidas
+    v = ex['vidas']
+    cats['vidas'] = None if v is None else (10 if v <= 1 else 25 if v == 2 else 35 if v == 3 else 40 if v == 4 else 50)
+    # [2] faixa etária principal (maior idade citada)
+    idade = max(ex['idades']) if ex['idades'] else None
+    cats['faixa_etaria'] = None if idade is None else (
+        40 if idade <= 18 else 50 if idade <= 28 else 45 if idade <= 38 else
+        40 if idade <= 48 else 35 if idade <= 58 else 30)
+    # [3] fit geográfico
+    if ex['cidade'] and ex['operadora_interesse']:
+        cid = ex['cidade'].lower()
+        if ex['operadora_interesse'] == 'Vera Cruz':
+            cats['fit_geografico'] = 50 if cid in _WA_VERA_FORTE else 25
+        elif ex['operadora_interesse'] == 'Unimed Jundiaí':
+            cats['fit_geografico'] = 50 if 'jundia' in cid else 25
+        else:
+            cats['fit_geografico'] = 35
+    else:
+        cats['fit_geografico'] = None
+    # [4] tipo de contratação
+    t = ex['tipo_contratacao']
+    cats['tipo_contratacao'] = None if not t else (50 if t == 'PJ' else 40 if t == 'ADESAO' else 30)
+    # [5] elegibilidade técnica
+    if 'PF_ADESAO_OK' in ex['tags'] or (t == 'PJ' and ex['cnpj']):
+        cats['elegibilidade'] = 50
+    elif 'PJ_CNPJ_INCOMPLETO' in ex['tags'] or re.search(r'mei[^\n]{0,30}(rec[ée]m|novo|acabei de abrir|menos de 6)', todo):
+        cats['elegibilidade'] = 25
+    else:
+        cats['elegibilidade'] = None
+    # [6] nível do plano atual
+    if ex['plano_ativo'] == 'SEM_PLANO':
+        cats['nivel_plano_atual'] = 25
+    elif ex['operadora_atual']:
+        cats['nivel_plano_atual'] = 45 if _wa_detect_tier(ex['operadora_atual']) == 'T1' else 30
+    else:
+        cats['nivel_plano_atual'] = None
+    # [7] upgrade/downgrade (código oficial: 50/25/10/0)
+    t_at, t_int = _wa_detect_tier(ex['operadora_atual']), _wa_detect_tier(ex['operadora_interesse'])
+    if t_at and t_int:
+        ordem = {'T1': 0, 'T1.5': 1, 'T2': 2}
+        diff = ordem[t_at] - ordem[t_int]
+        cats['upgrade_downgrade'] = 50 if diff >= 1 else 25 if diff == 0 else 10 if diff == -1 else 0
+    else:
+        cats['upgrade_downgrade'] = None
+    # [8] cobertura desejada vs oferta
+    cats['cobertura_alinhada'] = 10 if flags['mismatch_cobertura'] else 50
+    # [9] rede (sem info de hospital desejado → médio, como no código oficial)
+    cats['rede'] = 35
+    # [10] coparticipação
+    cp = ex['copart_pref']
+    cats['coparticipacao'] = None if not cp else (10 if cp == 'rejeita' else 45 if cp == 'sem' else 35 if cp == 'parcial' else 20)
+    # [11] budget
+    if re.search(r'cabe no (or[çc]amento|bolso)|dentro do or[çc]amento|consigo pagar|fechou no valor|valor (bom|justo|tranquilo)', lead_txt):
+        cats['budget'] = 40
+    elif re.search(r'um pouco caro|apertado|acima do or[çc]amento|t[áa] caro', lead_txt):
+        cats['budget'] = 25
+    elif re.search(r'muito caro|caro demais|absurdo|imposs[íi]vel pagar', lead_txt):
+        cats['budget'] = 15
+    else:
+        cats['budget'] = None
+    # [12] forma de pagamento
+    if 'boleto' in lead_txt:
+        cats['forma_pagamento'] = 40
+    elif re.search(r'd[ée]bito autom[áa]tico', lead_txt):
+        cats['forma_pagamento'] = 30
+    else:
+        cats['forma_pagamento'] = None
+    # [13] risco de inadimplência — sem dado objetivo na conversa → removido
+    cats['inadimplencia'] = None
+    # [14] experiência prévia com plano/operadora
+    if re.search(r'(experi[êe]ncia|atendimento) (p[ée]ssim|ruim|horr[íi]vel)|odiei o plano|tive problema com', lead_txt):
+        cats['experiencia_previa'] = 15
+    elif re.search(r'sempre gostei|era (muito )?bom|experi[êe]ncia (boa|[óo]tima)', lead_txt):
+        cats['experiencia_previa'] = 40
+    else:
+        cats['experiencia_previa'] = None
+    # [15] conhecimento das regras
+    cats['conhecimento_regras'] = 35 if re.search(r'car[êe]ncia|copart|cpt|reajuste|portabilidade', lead_txt) else None
+    # [16] prontidão documental
+    if re.search(r'segue (o|os|a|as)? ?(documento|rg|cpf|comprovante)|mandei os documentos|enviei os documentos', lead_txt):
+        cats['documentacao'] = 45
+    elif 'PJ_CNPJ_INCOMPLETO' in ex['tags']:
+        cats['documentacao'] = 15
+    else:
+        cats['documentacao'] = 30
+    # [17] engajamento no funil
+    if ex['fase_funil'] == 'FECHADO' or len(msgs_lead) >= 8:
+        cats['engajamento'] = 45
+    elif re.search(r'vou (analisar|avaliar|pensar)', lead_txt) or 3 <= len(msgs_lead) < 8:
+        cats['engajamento'] = 35
+    elif len(msgs_lead) <= 2:
+        cats['engajamento'] = 20
+    else:
+        cats['engajamento'] = 30
+    # [18] urgência de uso (imediato = fricção com carência → pontua MENOS)
+    u = ex['urgencia']
+    cats['urgencia'] = None if not u else (10 if u == '<=30' else 30 if u == '31-60' else 45)
+    # [19] saúde
+    cats['saude'] = _WA_SAUDE_PTS.get(ex['saude']) if ex['saude'] else None
+    # [20] sinistralidade estimada (derivada da saúde, quando conhecida)
+    if ex['saude'] in ('S0', 'S1G'):
+        cats['sinistralidade'] = 45
+    elif ex['saude'] in ('S1', 'S2', 'S2G'):
+        cats['sinistralidade'] = 30
+    elif ex['saude'] in ('S3', 'S4', 'TERAPIAS'):
+        cats['sinistralidade'] = 15
+    else:
+        cats['sinistralidade'] = None
+    # [21] pressão concorrencial
+    cats['concorrencia'] = 20 if ex['concorrencia'] == 'alta' else None
+    # [22] poder de decisão
+    cats['decisor'] = 45 if ex['decisor'] == 'decisor' else 35
+    # [23]/[24] facilidade operacional
+    cats['reuniao_online'] = 40 if re.search(r'(reuni[ãa]o|call|videochamada)[^\n]{0,20}(online|virtual|meet|zoom)', todo) else None
+    cats['assinatura_digital'] = 40 if re.search(r'assinatura digital|assinar online|clicksign|docusign', todo) else None
+    # [25] sentimento da fala
+    if re.search(r'obrigad|perfeito|[óo]timo|excelente|maravilha|adorei|gostei|show|top\b', lead_txt):
+        cats['sentimento'] = 40
+    elif re.search(r'p[ée]ssimo|horr[íi]vel|decepcion|n[ãa]o gostei|absurdo', lead_txt):
+        cats['sentimento'] = 15
+    else:
+        cats['sentimento'] = 30
+    # [26] qualidade da interação
     perguntas = sum(1 for m in msgs_lead if '?' in (m.get('texto') or ''))
-    if perguntas >= 2:
-        score += 8; sinais.append({'sinal': 'fez_perguntas', 'peso': 8, 'tipo': 'quente'})
+    cats['qualidade_interacao'] = 45 if perguntas >= 2 else 30
+    # [27] tempo de resposta (mediana consultor→lead, pelos timestamps)
+    gaps = []
+    for i in range(1, len(mensagens)):
+        if mensagens[i].get('de') == 'lead' and mensagens[i - 1].get('de') == 'consultor':
+            d1 = _wa_parse_hora(mensagens[i - 1].get('hora') or '')
+            d2 = _wa_parse_hora(mensagens[i].get('hora') or '')
+            if d1 and d2 and d2 >= d1:
+                gaps.append((d2 - d1).total_seconds() / 60.0)
+    if gaps:
+        gaps.sort()
+        mediana = gaps[len(gaps) // 2]
+        cats['tempo_resposta'] = 45 if mediana <= 60 else 30 if mediana <= 1440 else 15
+    else:
+        cats['tempo_resposta'] = 30
+    # [28] compreensão da proposta
+    if re.search(r'ficou claro|entendi|compreendi|deu (pra|para) entender', lead_txt):
+        cats['compreensao'] = 45
+    elif re.search(r'n[ãa]o entendi|como assim|confuso|n[ãa]o ficou claro', lead_txt):
+        cats['compreensao'] = 15
+    else:
+        cats['compreensao'] = 30
 
-    # Conversa parada esperando o CONSULTOR (última msg é do lead) = precisa retorno.
-    if mensagens and mensagens[-1].get('de') == 'lead':
-        sinais.append({'sinal': 'aguardando_resposta_do_consultor', 'peso': 0, 'tipo': 'atencao'})
+    validas = [p for p in cats.values() if p is not None]
+    bruto = (sum(validas) / (50.0 * len(validas))) * 1000 if validas else 0.0
 
-    score = max(0, min(100, score))
-    faixa = 'quente' if score >= 60 else ('morno' if score >= 25 else 'frio')
-    return score, faixa, sinais
+    penalidades = [{'regra': k, 'pontos': -_WA_PENALIDADES[k]} for k, v in flags.items() if v and k in _WA_PENALIDADES]
+    total_pen = sum(-p['pontos'] for p in penalidades)
+
+    cap = 1000
+    motivo_cap = None
+    if flags['gestante_imediato']:
+        cap, motivo_cap = 500, 'gestante com expectativa de parto sem carência'
+    if flags['downgrade_severo'] and flags['urgencia_le30'] and cap > 600:
+        cap, motivo_cap = 600, 'downgrade severo com urgência imediata'
+    if flags['mismatch_cobertura'] and cap > 700:
+        cap, motivo_cap = 700, 'precisa de cobertura nacional e oferta é regional'
+
+    final = _wa_round50(max(0.0, min(float(cap), bruto - total_pen)))
+    faixa = ('quente' if final >= 850 else 'bom' if final >= 700 else
+             'medio' if final >= 550 else 'baixo' if final >= 350 else 'improvavel')
+    return {'score_final': final, 'score_bruto': round(bruto, 1), 'faixa': faixa,
+            'breakdown': cats, 'categorias_consideradas': len(validas), 'categorias_totais': len(cats),
+            'penalidades': penalidades, 'cap': ({'valor': cap, 'motivo': motivo_cap} if motivo_cap else None)}
 
 
-def _wa_sugestoes(mensagens, score, faixa, sinais):
-    """Gera sugestões de próxima ação a partir dos sinais. Também heurístico e
-    facilmente extensível. Cada sugestão: {prioridade, titulo, detalhe}."""
-    chaves = {s['sinal'] for s in sinais}
+def _wa_proximas_acoes(ex, flags, mensagens):
+    """Próximas ações em tom consultivo, priorizadas pelas travas e pela fase."""
     sug = []
-    ult_lead = mensagens and mensagens[-1].get('de') == 'lead'
-
-    if 'recusa' in chaves:
-        sug.append({'prioridade': 'alta', 'titulo': 'Lead pediu pra parar',
-                    'detalhe': 'Houve sinal de recusa/descadastro. Respeitar e mover para Perdido — não insistir.'})
-    if 'jatem' in chaves:
-        sug.append({'prioridade': 'media', 'titulo': 'Já tem plano — oferecer revisão',
-                    'detalhe': 'Cliente disse que já tem plano. Abordar pela ótica de revisão/reajuste anual (fluxo Renovação), não venda nova.'})
-    if 'contratar' in chaves:
-        sug.append({'prioridade': 'alta', 'titulo': 'Sinal de fechamento — agir agora',
-                    'detalhe': 'O lead falou em fechar/contratar. Mandar proposta/boleto ou marcar a finalização o quanto antes.'})
-    if 'preco' in chaves:
-        sug.append({'prioridade': 'alta', 'titulo': 'Pediu preço/cotação',
-                    'detalhe': 'Enviar a cotação personalizada. Se ainda não qualificou (idade, cidade, CNPJ), fazer isso junto.'})
-    if 'reuniao' in chaves:
-        sug.append({'prioridade': 'media', 'titulo': 'Quer conversar por ligação',
-                    'detalhe': 'Propor 2 horários específicos de ligação em vez de perguntar "quando pode".'})
-    if 'mei_cnpj' in chaves:
-        sug.append({'prioridade': 'media', 'titulo': 'Perfil MEI/PJ',
-                    'detalhe': 'Explorar plano empresarial (até 40% mais barato que PF). Encaixa no fluxo Reengajamento MEI.'})
+    ult_lead = bool(mensagens) and mensagens[-1].get('de') == 'lead'
+    if flags['gestante_imediato']:
+        sug.append({'prioridade': 'alta', 'titulo': 'Alinhar carência de parto com transparência',
+                    'detalhe': 'Gestante esperando parto sem carência: risco alto de frustração. Explicar a regra antes de avançar e avaliar alternativas (pré-natal, portabilidade).'})
+    if flags['mismatch_cobertura']:
+        sug.append({'prioridade': 'alta', 'titulo': 'Trava estrutural: quer nacional, oferta é regional',
+                    'detalhe': f'O lead pediu cobertura nacional e {ex["operadora_interesse"]} é regional. Realinhar expectativa ou trocar a operadora ofertada.'})
+    if 'PRONTO_PARA_DOCS' in ex['tags']:
+        sug.append({'prioridade': 'alta', 'titulo': 'Fechamento sinalizado — enviar checklist de documentos',
+                    'detalhe': 'O lead falou em fechar/pediu os dados. Mandar a lista de documentos hoje e já preparar o contrato.'})
+    if flags['copart_mismatch']:
+        sug.append({'prioridade': 'media', 'titulo': 'Objeção de coparticipação',
+                    'detalhe': f'{ex["operadora_interesse"]} só tem produto coparticipativo e o lead rejeita copart. Explicar o modelo (consultas/exames) ou apresentar operadora sem copart.'})
+    if 'CONCORRENCIA_ALTA' in ex['tags']:
+        sug.append({'prioridade': 'media', 'titulo': 'Comparando com concorrência',
+                    'detalhe': 'Mandar comparativo objetivo em 1 mensagem: rede + coparticipação + reajuste, e propor decisão com prazo.'})
+    if ex['fase_funil'] == 'NEGOCIANDO' and not sug:
+        obj = ', '.join(ex['objecoes'][:3]) or 'as dúvidas abertas'
+        sug.append({'prioridade': 'alta', 'titulo': 'Responder objeções e propor fechamento',
+                    'detalhe': f'Fechar as objeções ({obj}) e propor o próximo passo concreto (docs ou call de 15 min).'})
+    if ex['fase_funil'] == 'PROPOSTA_ENVIADA' and not ult_lead:
+        sug.append({'prioridade': 'media', 'titulo': 'Follow-up da cotação',
+                    'detalhe': 'Cotação enviada sem retorno. Retomar com pergunta específica (qual das opções fez mais sentido?).'})
+    if ex['fase_funil'] == 'QUALIFICANDO':
+        faltando = [c for c, v in (('idade', ex['idades']), ('cidade', ex['cidade']),
+                                    ('CNPJ', ex['tem_cnpj'] is not None), ('plano atual', ex['plano_ativo'])) if not v]
+        if faltando:
+            sug.append({'prioridade': 'media', 'titulo': 'Completar qualificação',
+                        'detalhe': 'Faltam: ' + ', '.join(faltando) + '. Fechar essas lacunas antes de cotar.'})
+    if ex['fase_funil'] == 'INATIVO':
+        sug.append({'prioridade': 'baixa', 'titulo': 'Conversa parada há mais de 10 dias',
+                    'detalhe': 'Reativar com um ângulo novo (fluxo de nutrição/SMS) em vez de repetir a última abordagem.'})
     if ult_lead:
         sug.append({'prioridade': 'alta', 'titulo': 'Conversa parada no lead',
-                    'detalhe': 'A última mensagem é do cliente e ficou sem resposta. Retornar antes de esfriar.'})
-    if 'nunca_respondeu' in chaves:
-        sug.append({'prioridade': 'baixa', 'titulo': 'Lead nunca respondeu',
-                    'detalhe': 'Só houve disparo do consultor. Tentar um ângulo diferente (SMS/e-mail do fluxo) antes de desistir.'})
-
+                    'detalhe': 'A última mensagem é do cliente e está sem resposta. Retornar antes de esfriar.'})
     if not sug:
-        if faixa == 'quente':
-            sug.append({'prioridade': 'alta', 'titulo': 'Lead quente sem próxima ação óbvia',
-                        'detalhe': 'Engajamento alto. Avançar pra qualificação/cotação e marcar próximo passo concreto.'})
-        elif faixa == 'morno':
-            sug.append({'prioridade': 'media', 'titulo': 'Manter aquecido',
-                        'detalhe': 'Interesse existe mas ainda não amadureceu. Nutrir com conteúdo/fluxo e agendar follow-up.'})
-        else:
-            sug.append({'prioridade': 'baixa', 'titulo': 'Lead frio',
-                        'detalhe': 'Pouco sinal de interesse. Colocar num fluxo de nutrição de baixo esforço e priorizar leads mais quentes.'})
-    return sug
+        sug.append({'prioridade': 'media', 'titulo': 'Avançar pro próximo passo concreto',
+                    'detalhe': 'Sem trava detectada. Propor qualificação/cotação e combinar um próximo passo com data.'})
+    return sug[:5]
 
 
-def _wa_resumo(mensagens):
-    """Resumo curto e factual da conversa (sem LLM): contagem e recorte das
-    últimas trocas, pro atendente ter contexto rápido sem reler tudo."""
-    n = len(mensagens)
-    n_lead = sum(1 for m in mensagens if m.get('de') == 'lead')
-    ultimas = mensagens[-4:]
+def _wa_followup(ex, score):
+    """Texto de follow-up sugerido, calibrado pela faixa (modelo do doc oficial)."""
+    primeiro = (ex['nome'] or '').split(' ')[0].title() if ex['nome'] else ''
+    oi = f'Oi {primeiro}! Tudo bem? ' if primeiro else 'Oi! Tudo bem? '
+    op = ex['operadora_interesse'] or 'que conversamos'
+    if score >= 700:
+        return (oi + f'Vi que você está avaliando o plano {op}. Se quiser, te mando um comparativo direto '
+                '(rede + coparticipação + reajuste) em 1 mensagem e já deixo o checklist de documentos pronto pra seguir.')
+    if score >= 550:
+        return (oi + 'Pra eu te orientar melhor, me confirma 2 pontos rapidinho: a cidade onde o plano vai ser mais usado '
+                'e se coparticipação parcial está ok pra você. Com isso já te digo a melhor opção sem dor de cabeça.')
+    return (oi + 'Se fizer sentido, posso te mandar uma opção mais alinhada ao que você busca (cobertura e preço). '
+            'Me diz só a cidade de uso principal e se prefere plano sem coparticipação.')
+
+
+def _wa_descricao(ex, mensagens, msgs_lead, score, faixa):
+    """Descrição de como foi a conversa e como está agora (texto corrido)."""
     linhas = []
-    for m in ultimas:
-        quem = 'Cliente' if m.get('de') == 'lead' else 'Consultor'
-        txt = (m.get('texto') or '').strip().replace('\n', ' ')
-        if len(txt) > 120:
-            txt = txt[:117] + '...'
-        if txt:
-            linhas.append(f'{quem}: {txt}')
-    return f'{n} mensagens ({n_lead} do cliente). Últimas trocas:\n' + '\n'.join(linhas)
+    n, nl = len(mensagens), len(msgs_lead)
+    linhas.append(f'{n} mensagens na conversa, {nl} do cliente.')
+    dados = []
+    if ex['cidade']:
+        dados.append(f'cidade {ex["cidade"]}')
+    if ex['idades']:
+        dados.append('idade(s) ' + ', '.join(str(i) for i in ex['idades']))
+    if ex['vidas']:
+        dados.append(f'{ex["vidas"]} vida(s)')
+    if ex['tipo_contratacao']:
+        rot = {'PJ': 'CNPJ/empresarial', 'ADESAO': 'adesão (PF)', 'PF': 'pessoa física'}[ex['tipo_contratacao']]
+        dados.append(rot + (f' (CNPJ {ex["cnpj"]})' if ex['cnpj'] else ''))
+    if ex['plano_ativo']:
+        rot = {'SEM_PLANO': 'sem plano hoje', 'CANCELADO_RECENTE': 'plano cancelado recentemente',
+               'ATIVO': 'já tem plano' + (f' ({ex["operadora_atual"]})' if ex['operadora_atual'] else '')}[ex['plano_ativo']]
+        dados.append(rot)
+    if dados:
+        linhas.append('Perfil: ' + '; '.join(dados) + '.')
+    if ex['operadora_interesse']:
+        gostou = f'Interesse em {ex["operadora_interesse"]}' + (f', plano {ex["plano_preferido"]}' if ex['plano_preferido'] else '')
+        linhas.append(gostou + '.')
+    if ex['objecoes']:
+        linhas.append('Pontos levantados pelo cliente: ' + ', '.join(ex['objecoes'][:5]) + '.')
+    quem_parou = 'aguardando resposta do CONSULTOR' if (mensagens and mensagens[-1].get('de') == 'lead') else 'aguardando retorno do cliente'
+    linhas.append(f'Fase atual: {ex["fase_funil"]} — {quem_parou}. Score {score}/1000 ({faixa}).')
+    return ' '.join(linhas)
+
+
+def _wa_analisar_conversa(mensagens, nome_contato=''):
+    """Orquestra a análise completa: extração + score oficial + diagnóstico."""
+    ex, flags, msgs_lead = _wa_extrair_lead(mensagens, nome_contato)
+    sc = _wa_score_lead(ex, flags, mensagens, msgs_lead)
+    sugestoes = _wa_proximas_acoes(ex, flags, mensagens)
+    followup = _wa_followup(ex, sc['score_final'])
+    descricao = _wa_descricao(ex, mensagens, msgs_lead, sc['score_final'], sc['faixa'])
+    tags = list(dict.fromkeys(ex['tags'] + [sc['faixa'].upper(), ex['fase_funil']]))
+    return {'extracao': {k: ex[k] for k in ('nome', 'cidade', 'idades', 'vidas', 'tipo_contratacao',
+                                             'cnpj', 'plano_ativo', 'operadora_atual', 'operadora_interesse',
+                                             'plano_preferido', 'cobertura_desejada', 'copart_pref',
+                                             'urgencia', 'saude', 'decisor', 'objecoes')},
+            'fase_funil': ex['fase_funil'], 'tags': tags, **sc,
+            'sugestoes': sugestoes, 'followup': followup, 'descricao': descricao}
 
 
 def _wa_auth_ok():
@@ -7928,9 +8371,8 @@ def api_whatsapp_analisar():
     nome = str(d.get('nome') or '').strip()[:200]
     tel_norm = _normalizar_telefone(telefone)
 
-    score, faixa, sinais = _wa_score_conversa(limpa)
-    sugestoes = _wa_sugestoes(limpa, score, faixa, sinais)
-    resumo = _wa_resumo(limpa)
+    an = _wa_analisar_conversa(limpa, nome_contato=nome)
+    score, faixa = an['score_final'], an['faixa']
 
     conn = db()
     lead = None
@@ -7950,12 +8392,16 @@ def api_whatsapp_analisar():
                             (nome.strip().lower(),)).fetchone()
     lead_id = lead['id'] if lead else None
 
+    # sugestoes_json guarda o diagnóstico completo (dá pra reprocessar/auditar depois)
+    diagnostico = {k: an[k] for k in ('sugestoes', 'tags', 'fase_funil', 'extracao', 'breakdown',
+                                       'penalidades', 'cap', 'followup', 'descricao',
+                                       'score_bruto', 'categorias_consideradas', 'categorias_totais')}
     conn.execute("""INSERT INTO whatsapp_analises
         (lead_id, telefone, telefone_norm, nome_contato, total_mensagens, conversa_json,
          score, score_faixa, sugestoes_json, resumo, criado_por, criado_em)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         (lead_id, telefone, tel_norm, nome, len(limpa), json.dumps(limpa, ensure_ascii=False),
-         score, faixa, json.dumps(sugestoes, ensure_ascii=False), resumo,
+         score, faixa, json.dumps(diagnostico, ensure_ascii=False), an['descricao'],
          d.get('usuario_id'), _agora_sp()))
     analise_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
@@ -7964,7 +8410,7 @@ def api_whatsapp_analisar():
         conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
                         VALUES (?,?,?,?,?)""",
                      (lead_id, 'Extensão WhatsApp', 'analise',
-                      f'Análise da conversa: score {score}/100 ({faixa}). {len(limpa)} mensagens lidas.',
+                      f'Score Lead {score}/1000 ({faixa}) · fase {an["fase_funil"]} · {len(limpa)} mensagens analisadas.',
                       _agora_sp()))
     conn.commit(); close_db(conn)
 
@@ -7972,10 +8418,19 @@ def api_whatsapp_analisar():
         "ok": True,
         "analise_id": analise_id,
         "score": score,
+        "score_bruto": an['score_bruto'],
         "faixa": faixa,
-        "sinais": sinais,
-        "sugestoes": sugestoes,
-        "resumo": resumo,
+        "fase_funil": an['fase_funil'],
+        "tags": an['tags'],
+        "extracao": an['extracao'],
+        "breakdown": an['breakdown'],
+        "categorias_consideradas": an['categorias_consideradas'],
+        "categorias_totais": an['categorias_totais'],
+        "penalidades": an['penalidades'],
+        "cap": an['cap'],
+        "sugestoes": an['sugestoes'],
+        "followup": an['followup'],
+        "resumo": an['descricao'],
         "lead": ({"id": lead['id'], "nome": lead['nome'],
                   "url": f"{_SITE_BASE_URL}/crm?lead={lead['id']}"} if lead else None),
         "lead_encontrado": bool(lead_id),

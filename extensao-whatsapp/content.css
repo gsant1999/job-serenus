@@ -94,6 +94,19 @@
 .job-sug-txt { font-size: 12.5px; line-height: 1.5; color: #cdd2df; }
 .job-sug-txt b { color: #fff; }
 
+.job-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.job-chip { font-size: 10px; font-weight: 700; letter-spacing: .3px; padding: 3px 9px;
+  border-radius: 20px; border: 1px solid #2c3247; color: #b6bccd; background: #12151f; }
+.job-chip-pen { border-color: rgba(244, 63, 94, .4); color: #f43f5e; }
+.job-dados { background: #12151f; border: 1px solid #2c3247; border-radius: 10px; padding: 4px 12px; }
+.job-dado { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0;
+  border-bottom: 1px solid #1e2334; font-size: 12px; }
+.job-dado:last-child { border-bottom: none; }
+.job-dado span { color: #8c93a8; flex-shrink: 0; }
+.job-dado b { color: #e7e9f0; text-align: right; word-break: break-word; }
+.job-copy { width: 100%; margin-top: 8px; background: #2c3247; color: #e7e9f0; border: none;
+  border-radius: 8px; padding: 8px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.job-copy:hover { background: #3a4159; }
 .job-resumo { font-size: 12px; line-height: 1.6; color: #b6bccd; white-space: normal;
   background: #12151f; border: 1px solid #2c3247; border-radius: 10px; padding: 10px 12px; }
 .job-rodape { font-size: 10.5px; color: #6b7185; margin-top: 14px; text-align: center; }

@@ -186,11 +186,19 @@
   }
 
   function corFaixa(faixa) {
-    return faixa === 'quente' ? '#1fd8a4' : (faixa === 'morno' ? '#facc15' : '#f43f5e');
+    return { quente: '#1fd8a4', bom: '#4ade80', medio: '#facc15', baixo: '#fb923c' }[faixa] || '#f43f5e';
+  }
+
+  function linhaDado(rotulo, valor) {
+    if (valor === null || valor === undefined || valor === '' ||
+        (Array.isArray(valor) && !valor.length)) return '';
+    const v = Array.isArray(valor) ? valor.join(', ') : String(valor);
+    return '<div class="job-dado"><span>' + esc(rotulo) + '</span><b>' + esc(v) + '</b></div>';
   }
 
   function renderResultado(r, nome, telefone, totalMsgs) {
     const cor = corFaixa(r.faixa);
+    const ex = r.extracao || {};
     const sugs = (r.sugestoes || []).map((s) => {
       const pc = s.prioridade === 'alta' ? '#f43f5e' : (s.prioridade === 'media' ? '#facc15' : '#8c93a8');
       return '<div class="job-sug"><div class="job-sug-tag" style="background:' + pc + '22;color:' + pc + '">' +
@@ -200,23 +208,60 @@
     const leadBox = r.lead
       ? '<a class="job-lead-ok" href="' + esc(r.lead.url) + '" target="_blank">Lead no CRM: <b>' +
         esc(r.lead.nome) + '</b> — abrir ficha →</a>'
-      : '<div class="job-lead-nao">Nenhum lead com esse telefone no CRM ainda. ' +
+      : '<div class="job-lead-nao">Nenhum lead com esse telefone/nome no CRM ainda. ' +
         '<br><span>Telefone lido: ' + esc(telefone || '—') + '</span></div>';
+    const chips = '<span class="job-chip" style="border-color:' + cor + ';color:' + cor + '">' +
+        esc(r.fase_funil || '') + '</span>' +
+      (r.tags || []).filter((t) => t !== r.fase_funil && t !== (r.faixa || '').toUpperCase())
+        .map((t) => '<span class="job-chip">' + esc(t) + '</span>').join('');
+    const planoAtivo = { SEM_PLANO: 'Sem plano hoje', CANCELADO_RECENTE: 'Cancelado há pouco', ATIVO: 'Tem plano ativo' }[ex.plano_ativo];
+    const tipoRot = { PJ: 'CNPJ / empresarial', ADESAO: 'Adesão (PF)', PF: 'Pessoa física' }[ex.tipo_contratacao];
+    const dados =
+      linhaDado('Cidade', ex.cidade) +
+      linhaDado('Idade(s)', ex.idades) +
+      linhaDado('Vidas', ex.vidas) +
+      linhaDado('Contratação', tipoRot) +
+      linhaDado('CNPJ', ex.cnpj) +
+      linhaDado('Plano atual', planoAtivo && (planoAtivo + (ex.operadora_atual ? ' (' + ex.operadora_atual + ')' : ''))) +
+      linhaDado('Operadora de interesse', ex.operadora_interesse) +
+      linhaDado('Plano que mais gostou', ex.plano_preferido) +
+      linhaDado('Urgência', ex.urgencia) +
+      linhaDado('Objeções', ex.objecoes);
+    const pen = (r.penalidades || []).map((p) => '<span class="job-chip job-chip-pen">' +
+      esc(p.regra) + ' ' + p.pontos + '</span>').join('');
     return (
       '<div class="job-score-wrap">' +
         '<div class="job-score-num" style="color:' + cor + '">' + (r.score != null ? r.score : '—') + '</div>' +
         '<div class="job-score-meta"><div class="job-score-faixa" style="color:' + cor + '">' +
           esc((r.faixa || '').toUpperCase()) + '</div>' +
-          '<div class="job-score-sub">Score do lead · 0–100</div></div>' +
+          '<div class="job-score-sub">Score Lead · 0–1000 · ' + (r.categorias_consideradas || 0) + '/' +
+          (r.categorias_totais || 28) + ' critérios</div></div>' +
       '</div>' +
-      '<div class="job-barra"><div class="job-barra-fill" style="width:' + (r.score || 0) + '%;background:' + cor + '"></div></div>' +
+      '<div class="job-barra"><div class="job-barra-fill" style="width:' + Math.round((r.score || 0) / 10) + '%;background:' + cor + '"></div></div>' +
+      '<div class="job-chips">' + chips + pen + '</div>' +
       leadBox +
-      '<div class="job-sec">Sugestões de próxima ação</div>' +
+      (dados ? '<div class="job-sec">Dados do lead</div><div class="job-dados">' + dados + '</div>' : '') +
+      '<div class="job-sec">Próximas ações</div>' +
       (sugs || '<div class="job-vazio">Sem sugestões.</div>') +
-      '<div class="job-sec">Resumo</div>' +
+      '<div class="job-sec">Follow-up sugerido</div>' +
+      '<div class="job-resumo" id="job-followup">' + esc(r.followup || '') + '</div>' +
+      '<button class="job-copy" id="job-copy-btn">Copiar follow-up</button>' +
+      '<div class="job-sec">Como está a conversa</div>' +
       '<div class="job-resumo">' + esc(r.resumo || '').replace(/\n/g, '<br>') + '</div>' +
       '<div class="job-rodape">' + esc(nome || '') + ' · ' + totalMsgs + ' mensagens lidas · somente leitura</div>'
     );
+  }
+
+  function ligarBotaoCopiar() {
+    const b = document.getElementById('job-copy-btn');
+    if (!b) return;
+    b.addEventListener('click', () => {
+      const t = document.getElementById('job-followup');
+      navigator.clipboard.writeText(t ? t.textContent : '').then(() => {
+        b.textContent = 'Copiado!';
+        setTimeout(() => { b.textContent = 'Copiar follow-up'; }, 1500);
+      });
+    });
   }
 
   async function rodarAnalise() {
@@ -255,6 +300,7 @@
         return;
       }
       setCorpo(renderResultado(resp, nome, telefone, mensagens.length));
+      ligarBotaoCopiar();
     } catch (e) {
       abrirPainel('<div class="job-erro">Erro inesperado: ' + esc(e.message) + '</div>');
     } finally {
