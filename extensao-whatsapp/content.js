@@ -246,9 +246,32 @@
       '<div class="job-sec">Follow-up sugerido</div>' +
       '<div class="job-resumo" id="job-followup">' + esc(r.followup || '') + '</div>' +
       '<button class="job-copy" id="job-copy-btn">Copiar follow-up</button>' +
+      seccaoIA(r.ia) +
       '<div class="job-sec">Como está a conversa</div>' +
       '<div class="job-resumo">' + esc(r.resumo || '').replace(/\n/g, '<br>') + '</div>' +
       '<div class="job-rodape">' + esc(nome || '') + ' · ' + totalMsgs + ' mensagens lidas · somente leitura</div>'
+    );
+  }
+
+  // Bloco da leitura por IA (Claude) — só aparece quando o backend devolve `ia`
+  // (ou seja, quando a ANTHROPIC_API_KEY está ligada no JOB). Sem chave, some.
+  function seccaoIA(ia) {
+    if (!ia) return '';
+    const acoes = (ia.proximas_acoes || []).map((s) => {
+      const pc = s.prioridade === 'alta' ? '#f43f5e' : (s.prioridade === 'media' ? '#facc15' : '#8c93a8');
+      return '<div class="job-sug"><div class="job-sug-tag" style="background:' + pc + '22;color:' + pc + '">' +
+        esc(s.prioridade) + '</div><div class="job-sug-txt"><b>' + esc(s.titulo) + '</b><br>' +
+        esc(s.detalhe) + '</div></div>';
+    }).join('');
+    const alertas = (ia.sinais_atencao || []).length
+      ? '<div class="job-ia-alertas">' + ia.sinais_atencao.map((a) =>
+          '<div class="job-ia-alerta">⚠ ' + esc(a) + '</div>').join('') + '</div>'
+      : '';
+    return (
+      '<div class="job-sec">Leitura da IA <span class="job-ia-badge">Claude</span></div>' +
+      '<div class="job-resumo">' + esc(ia.resumo || '') + '</div>' +
+      alertas +
+      (acoes ? '<div class="job-sec">Próximas ações (IA)</div>' + acoes : '')
     );
   }
 

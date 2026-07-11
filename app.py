@@ -8296,20 +8296,117 @@ def _wa_descricao(ex, mensagens, msgs_lead, score, faixa):
     return ' '.join(linhas)
 
 
+# ─── CAMADA DE IA (Claude) — leitura qualitativa da conversa ─────────────────
+# OPCIONAL e de baixo custo. Só liga se ANTHROPIC_API_KEY estiver setada no
+# Railway. Sem a chave, o sistema segue 100% funcional no motor heurístico
+# (Score 0-1000), sem custo e sem latência extra. A Claude NÃO calcula o score
+# (isso é do motor de regras do Guilherme) — ela adiciona uma leitura narrativa
+# da conversa e próximas ações mais afiadas. Modelo configurável por env
+# CLAUDE_MODEL (padrão Haiku 4.5 — barato e rápido; dá pra subir pra Sonnet/Opus).
+
+_CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-haiku-4-5').strip() or 'claude-haiku-4-5'
+
+_CLAUDE_SYSTEM_ANALISE = (
+    "Você é um analista de vendas sênior de uma corretora de planos de saúde no Brasil "
+    "(Serenus). Recebe a transcrição de uma conversa de WhatsApp entre o CONSULTOR e um "
+    "LEAD (cliente em potencial), mais os dados que um motor de regras já extraiu.\n\n"
+    "Sua tarefa: ler a conversa inteira e devolver uma leitura curta e prática para o "
+    "consultor agir agora. Você NÃO calcula score (outro motor já faz isso) — você entrega "
+    "contexto e próximas ações.\n\n"
+    "Regras:\n"
+    "- Português do Brasil, tom direto e consultivo, sem enrolação nem elogio vazio.\n"
+    "- Baseie-se SÓ no que está na conversa. Não invente dados que não aparecem.\n"
+    "- Priorize as ações pelo que realmente destrava a venda.\n"
+    "- Se o lead pediu para parar/não tem interesse, oriente respeitar e não insistir.\n"
+    "- Cada próxima ação deve ser concreta (o que mandar/fazer), não genérica."
+)
+
+_CLAUDE_SCHEMA_ANALISE = {
+    "type": "object",
+    "properties": {
+        "resumo": {"type": "string", "description": "2-3 frases: como está a conversa e o momento do lead."},
+        "fase_funil": {"type": "string", "enum": ["NOVO_LEAD", "QUALIFICANDO", "PROPOSTA_ENVIADA",
+                                                   "NEGOCIANDO", "FECHADO", "INATIVO", "PERDIDO"]},
+        "proximas_acoes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "prioridade": {"type": "string", "enum": ["alta", "media", "baixa"]},
+                    "titulo": {"type": "string"},
+                    "detalhe": {"type": "string"}
+                },
+                "required": ["prioridade", "titulo", "detalhe"],
+                "additionalProperties": False
+            }
+        },
+        "sinais_atencao": {"type": "array", "items": {"type": "string"},
+                            "description": "Alertas/riscos (ex: cliente sumiu, objeção não resolvida, pediu para parar)."}
+    },
+    "required": ["resumo", "fase_funil", "proximas_acoes", "sinais_atencao"],
+    "additionalProperties": False
+}
+
+
+def _analisar_com_claude(mensagens, extracao, score, faixa):
+    """Chama a Claude para uma leitura qualitativa da conversa. Retorna dict com
+    {resumo, fase_funil, proximas_acoes, sinais_atencao, modelo} ou None se não há
+    chave ou se algo falhar (o chamador trata None como 'sem camada de IA')."""
+    api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    if not api_key:
+        return None
+    try:
+        import anthropic
+    except Exception as e:
+        app.logger.warning(f"[CLAUDE] pacote anthropic ausente: {e}")
+        return None
+    try:
+        linhas = []
+        for m in mensagens:
+            txt = (m.get('texto') or '').strip()
+            if not txt:
+                continue
+            quem = 'CLIENTE' if m.get('de') == 'lead' else 'CONSULTOR'
+            linhas.append(f"[{m.get('hora', '')}] {quem}: {txt}")
+        conversa_txt = '\n'.join(linhas)[:24000]
+        if not conversa_txt:
+            return None
+        contexto = json.dumps(extracao, ensure_ascii=False)
+        client = anthropic.Anthropic(api_key=api_key, timeout=40.0)
+        resp = client.messages.create(
+            model=_CLAUDE_MODEL,
+            max_tokens=1500,
+            system=_CLAUDE_SYSTEM_ANALISE,
+            output_config={"format": {"type": "json_schema", "schema": _CLAUDE_SCHEMA_ANALISE}},
+            messages=[{"role": "user", "content":
+                       f"Dados já extraídos pelo motor de regras: {contexto}\n"
+                       f"Score heurístico (referência, não recalcular): {score}/1000 ({faixa}).\n\n"
+                       f"CONVERSA (ordem cronológica):\n{conversa_txt}"}],
+        )
+        txt = next((b.text for b in resp.content if b.type == 'text'), '')
+        dados = json.loads(txt)
+        dados['modelo'] = _CLAUDE_MODEL
+        return dados
+    except Exception as e:
+        app.logger.warning(f"[CLAUDE] análise falhou ({_CLAUDE_MODEL}): {e}")
+        return None
+
+
 def _wa_analisar_conversa(mensagens, nome_contato=''):
-    """Orquestra a análise completa: extração + score oficial + diagnóstico."""
+    """Orquestra a análise completa: extração + score oficial + diagnóstico + IA."""
     ex, flags, msgs_lead = _wa_extrair_lead(mensagens, nome_contato)
     sc = _wa_score_lead(ex, flags, mensagens, msgs_lead)
     sugestoes = _wa_proximas_acoes(ex, flags, mensagens)
     followup = _wa_followup(ex, sc['score_final'])
     descricao = _wa_descricao(ex, mensagens, msgs_lead, sc['score_final'], sc['faixa'])
     tags = list(dict.fromkeys(ex['tags'] + [sc['faixa'].upper(), ex['fase_funil']]))
-    return {'extracao': {k: ex[k] for k in ('nome', 'cidade', 'idades', 'vidas', 'tipo_contratacao',
-                                             'cnpj', 'plano_ativo', 'operadora_atual', 'operadora_interesse',
-                                             'plano_preferido', 'cobertura_desejada', 'copart_pref',
-                                             'urgencia', 'saude', 'decisor', 'objecoes')},
-            'fase_funil': ex['fase_funil'], 'tags': tags, **sc,
-            'sugestoes': sugestoes, 'followup': followup, 'descricao': descricao}
+    extracao = {k: ex[k] for k in ('nome', 'cidade', 'idades', 'vidas', 'tipo_contratacao',
+                                    'cnpj', 'plano_ativo', 'operadora_atual', 'operadora_interesse',
+                                    'plano_preferido', 'cobertura_desejada', 'copart_pref',
+                                    'urgencia', 'saude', 'decisor', 'objecoes')}
+    ia = _analisar_com_claude(mensagens, extracao, sc['score_final'], sc['faixa'])
+    return {'extracao': extracao, 'fase_funil': ex['fase_funil'], 'tags': tags, **sc,
+            'sugestoes': sugestoes, 'followup': followup, 'descricao': descricao, 'ia': ia}
 
 
 def _wa_auth_ok():
@@ -8396,6 +8493,7 @@ def api_whatsapp_analisar():
     diagnostico = {k: an[k] for k in ('sugestoes', 'tags', 'fase_funil', 'extracao', 'breakdown',
                                        'penalidades', 'cap', 'followup', 'descricao',
                                        'score_bruto', 'categorias_consideradas', 'categorias_totais')}
+    diagnostico['ia'] = an.get('ia')
     conn.execute("""INSERT INTO whatsapp_analises
         (lead_id, telefone, telefone_norm, nome_contato, total_mensagens, conversa_json,
          score, score_faixa, sugestoes_json, resumo, criado_por, criado_em)
@@ -8431,6 +8529,7 @@ def api_whatsapp_analisar():
         "sugestoes": an['sugestoes'],
         "followup": an['followup'],
         "resumo": an['descricao'],
+        "ia": an.get('ia'),
         "lead": ({"id": lead['id'], "nome": lead['nome'],
                   "url": f"{_SITE_BASE_URL}/crm?lead={lead['id']}"} if lead else None),
         "lead_encontrado": bool(lead_id),
