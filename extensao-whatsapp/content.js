@@ -456,23 +456,32 @@
       abrirPainel('<div class="job-carregando"><div class="job-spin"></div><div id="job-status">Lendo a conversa…</div></div>');
       const status = (t) => { const e = document.getElementById('job-status'); if (e) e.textContent = t; };
 
-      const nome = nomeDoContato();
-      const telefone = telefoneDoContato();
+      // Leitura best-effort do nome/telefone só pra consultar o modo incremental
+      // — logo depois de abrir o painel, o cabeçalho às vezes ainda não
+      // renderizou (regressão real: isso já mandou nome vazio pro backend,
+      // derrubando a criação automática do lead). Por isso o valor que REALMENTE
+      // importa é lido de novo depois do carregarHistorico, quando o DOM já
+      // estabilizou — igual sempre foi antes do modo incremental existir.
+      const nomeInicial = nomeDoContato();
+      const telefoneInicial = telefoneDoContato();
 
       // Modo incremental: pergunta pro JOB se essa conversa já foi analisada
       // antes. Se sim, só precisa rolar até a última mensagem já conhecida —
       // não o histórico inteiro de novo. Mais rápido e mais barato. Se der
-      // qualquer erro na consulta, segue sem marca d'água (lê tudo, como hoje).
+      // qualquer erro na consulta (ou não deu pra ler o telefone ainda),
+      // segue sem marca d'água (lê tudo, como sempre foi).
       let watermark = null;
-      if (telefone) {
+      if (telefoneInicial) {
         try {
-          const est = await chrome.runtime.sendMessage({ type: 'estado', telefone });
+          const est = await chrome.runtime.sendMessage({ type: 'estado', telefone: telefoneInicial });
           if (est && est.ok && est.existe) watermark = est.ultima_hora || null;
         } catch (e) { /* segue sem marca d'água */ }
       }
 
       await carregarHistorico(painelRolavel, status, watermark);
       status('Organizando as mensagens…');
+      const nome = nomeDoContato() || nomeInicial;
+      const telefone = telefoneDoContato() || telefoneInicial;
       const mensagens = dedup(rasparMensagensVisiveis());
 
       let imagens = [];
