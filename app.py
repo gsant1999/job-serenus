@@ -8589,6 +8589,36 @@ def api_whatsapp_ping():
     return _wa_cors(jsonify({"ok": True, "sistema": "JOB Serenus", "versao_api": 1}))
 
 
+@app.route('/api/whatsapp/estado', methods=['GET', 'OPTIONS'])
+def api_whatsapp_estado():
+    """A extensão consulta ANTES de raspar a conversa: se já existe uma análise
+    anterior pra esse telefone, devolve a hora da última mensagem conhecida.
+    Assim a extensão só precisa carregar/mandar o histórico até esse ponto —
+    não o passado inteiro de novo — deixando a leitura bem mais rápida em
+    conversas já analisadas antes."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    tel_norm = _normalizar_telefone(str(request.args.get('telefone') or ''))
+    if not tel_norm:
+        return _wa_cors(jsonify({"ok": True, "existe": False}))
+    conn = db()
+    row = conn.execute("""SELECT conversa_json FROM whatsapp_analises
+        WHERE telefone_norm=? ORDER BY id DESC LIMIT 1""", (tel_norm,)).fetchone()
+    close_db(conn)
+    if not row:
+        return _wa_cors(jsonify({"ok": True, "existe": False}))
+    try:
+        msgs = json.loads(row['conversa_json'] or '[]')
+    except Exception:
+        msgs = []
+    if not msgs:
+        return _wa_cors(jsonify({"ok": True, "existe": False}))
+    return _wa_cors(jsonify({"ok": True, "existe": True, "ultima_hora": msgs[-1].get('hora'),
+                              "total_mensagens": len(msgs)}))
+
+
 @app.route('/api/whatsapp/usuarios', methods=['GET', 'OPTIONS'])
 def api_whatsapp_usuarios():
     """Lista os usuários ativos (id + nome) pra extensão popular o seletor de
@@ -8710,12 +8740,38 @@ def api_whatsapp_analisar():
     nome = str(d.get('nome') or '').strip()[:200]
     tel_norm = _normalizar_telefone(telefone)
 
+    conn = db()
+
+    # ── Modo incremental: se já existe uma análise anterior pra esse telefone,
+    # funde a conversa nova (que a extensão pode ter mandado só a partir de
+    # onde parou, pra ser mais rápida) com a conversa já conhecida. O score e a
+    # IA sempre trabalham em cima do histórico COMPLETO fundido, nunca só do
+    # pedaço novo — senão o contexto acumulado se perde a cada rodada.
+    if tel_norm:
+        anterior = conn.execute("""SELECT conversa_json FROM whatsapp_analises
+            WHERE telefone_norm=? ORDER BY id DESC LIMIT 1""", (tel_norm,)).fetchone()
+        if anterior:
+            try:
+                msgs_antigas = json.loads(anterior['conversa_json'] or '[]')
+            except Exception:
+                msgs_antigas = []
+            if msgs_antigas:
+                vistos = set()
+                fundido = []
+                for m in msgs_antigas + limpa:
+                    chave = (m.get('de'), m.get('texto'), m.get('hora'))
+                    if chave in vistos:
+                        continue
+                    vistos.add(chave)
+                    fundido.append(m)
+                fundido.sort(key=lambda m: _wa_parse_hora(m.get('hora') or '') or datetime.min)
+                limpa = fundido
+
     an = _wa_analisar_conversa(limpa, nome_contato=nome, imagens=imagens, documentos=documentos)
     an['audios_transcritos'] = len(transcricoes)
     an['transcricoes'] = transcricoes
     score, faixa = an['score_final'], an['faixa']
 
-    conn = db()
     lead = None
     if tel_norm:
         lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone()

@@ -109,21 +109,51 @@
     return msgs;
   }
 
+  // ── Converte a hora tipo "[HH:MM, DD/MM/AAAA]" (DOM) ou "HH:MM, AAAA/M/D"
+  //    (áudio) pra timestamp, pra comparar com a marca d'água da última
+  //    mensagem já conhecida (modo incremental). Espelha _wa_parse_hora do backend. ──
+  function parseHoraMs(h) {
+    const m = /^\s*(\d{1,2}):(\d{2}),?\s*(\d{1,4})\/(\d{1,2})\/(\d{1,4})/.exec(h || '');
+    if (!m) return null;
+    const hh = +m[1], mi = +m[2];
+    const a = m[3], b = m[4], c = m[5];
+    try {
+      if (a.length === 4) return new Date(+a, +b - 1, +c, hh, mi).getTime();
+      return new Date(+c, +b - 1, +a, hh, mi).getTime();
+    } catch (e) { return null; }
+  }
+
   // ── Rola o histórico pra cima devagar até não carregar mais nada (ou um teto),
   //    pra pegar a conversa inteira e não só o que está na tela. Gentil e humano:
-  //    pausa entre cada rolagem, nunca em loop apertado. ──
-  async function carregarHistorico(painel, atualizarStatus) {
+  //    pausa entre cada rolagem, nunca em loop apertado.
+  //    `watermarkHora`: se o JOB já conhece essa conversa até um certo ponto
+  //    (modo incremental), pára assim que a mensagem mais antiga carregada já
+  //    cobrir esse ponto — não precisa voltar até o início de verdade. ──
+  async function carregarHistorico(painel, atualizarStatus, watermarkHora) {
     if (!painel) return;
+    const watermarkMs = watermarkHora ? parseHoraMs(watermarkHora) : null;
     let anterior = -1, estavel = 0;
-    const MAX_ROLAGENS = 60;
+    const MAX_ROLAGENS = 100;
     for (let i = 0; i < MAX_ROLAGENS; i++) {
+      if (watermarkMs != null) {
+        const msgs = rasparMensagensVisiveis();
+        const primeiraMs = msgs.length ? parseHoraMs(msgs[0].hora) : null;
+        if (primeiraMs != null && primeiraMs <= watermarkMs) break; // já cobriu o conhecido
+      }
+      // Força o scroll a mudar de verdade mesmo se já estiver em 0 — escrever
+      // 0 de novo sem sair de lá não dispara o evento de scroll, e aí o
+      // WhatsApp não percebe que precisa buscar mais histórico. Essa corrida
+      // (rede mais lenta que o intervalo de checagem) fazia a leitura parar
+      // no meio da conversa às vezes, sem pegar as mensagens mais antigas.
+      painel.scrollTop = 40;
+      await sleep(60);
       painel.scrollTop = 0;
       await sleep(650 + Math.floor(Math.random() * 250)); // ritmo humano
       const altura = painel.scrollHeight;
       if (atualizarStatus) atualizarStatus('Lendo histórico… (' + (i + 1) + ')');
       if (altura === anterior) {
         estavel++;
-        if (estavel >= 2) break; // 2 rodadas sem crescer = chegou no começo
+        if (estavel >= 4) break; // margem maior pra rede lenta não cortar cedo demais
       } else {
         estavel = 0;
         anterior = altura;
@@ -426,10 +456,23 @@
       abrirPainel('<div class="job-carregando"><div class="job-spin"></div><div id="job-status">Lendo a conversa…</div></div>');
       const status = (t) => { const e = document.getElementById('job-status'); if (e) e.textContent = t; };
 
-      await carregarHistorico(painelRolavel, status);
-      status('Organizando as mensagens…');
       const nome = nomeDoContato();
       const telefone = telefoneDoContato();
+
+      // Modo incremental: pergunta pro JOB se essa conversa já foi analisada
+      // antes. Se sim, só precisa rolar até a última mensagem já conhecida —
+      // não o histórico inteiro de novo. Mais rápido e mais barato. Se der
+      // qualquer erro na consulta, segue sem marca d'água (lê tudo, como hoje).
+      let watermark = null;
+      if (telefone) {
+        try {
+          const est = await chrome.runtime.sendMessage({ type: 'estado', telefone });
+          if (est && est.ok && est.existe) watermark = est.ultima_hora || null;
+        } catch (e) { /* segue sem marca d'água */ }
+      }
+
+      await carregarHistorico(painelRolavel, status, watermark);
+      status('Organizando as mensagens…');
       const mensagens = dedup(rasparMensagensVisiveis());
 
       let imagens = [];

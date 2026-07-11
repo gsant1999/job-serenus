@@ -52,6 +52,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/usuarios', 'GET', null).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'estado') {
+    chamarJob('/api/whatsapp/estado?telefone=' + encodeURIComponent(msg.telefone || ''), 'GET', null).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'analisar') {
     chamarJob('/api/whatsapp/analisar', 'POST', msg.payload).then(sendResponse);
     return true;
