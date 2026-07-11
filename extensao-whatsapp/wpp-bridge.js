@@ -34,6 +34,19 @@
     } catch (e) { return ''; }
   }
 
+  function selecionarAudios(audios, limite) {
+    // Prioriza os áudios do LEAD — é a fala do cliente que importa pra
+    // qualificação e pro score, não pode ficar de fora só porque o consultor
+    // mandou vários áudios recentes por cima. Enche o resto do teto (se
+    // sobrar espaço) com os áudios do consultor, mais recentes primeiro.
+    const doLead = audios.filter((m) => !(m.id && m.id.fromMe));
+    const doConsultor = audios.filter((m) => m.id && m.id.fromMe);
+    const leadRecentes = doLead.slice(-limite);
+    const espacoConsultor = Math.max(0, limite - leadRecentes.length);
+    const consultorRecentes = espacoConsultor ? doConsultor.slice(-espacoConsultor) : [];
+    return [...leadRecentes, ...consultorRecentes].sort((a, b) => (a.t || 0) - (b.t || 0));
+  }
+
   async function baixarAudios(limite) {
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.downloadMedia) {
       return { erro: 'wpp_ausente' };
@@ -45,7 +58,7 @@
     try { msgs = await window.WPP.chat.getMessages(chatId, { count: 200 }); }
     catch (e) { return { erro: 'falha_mensagens' }; }
     const audios = msgs.filter((m) => m.type === 'ptt' || m.type === 'audio');
-    const alvos = audios.slice(-Math.max(1, limite || 12)); // os mais recentes
+    const alvos = selecionarAudios(audios, Math.max(1, limite || 12));
     const out = [];
     for (const m of alvos) {
       try {
