@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "JOB Serenus — Análise de WhatsApp",
+  "version": "1.0.0",
+  "description": "Lê (somente leitura) a conversa aberta no WhatsApp Web, calcula o Score do lead no JOB e mostra sugestões de próxima ação. NUNCA envia mensagens nem faz disparos.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://web.whatsapp.com/*",
+    "https://job-serenus-production.up.railway.app/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "JOB Serenus — Análise de WhatsApp"
+  },
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -838,6 +838,21 @@ def init_db():
                 criado_por INTEGER,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS whatsapp_analises (
+                id SERIAL PRIMARY KEY,
+                lead_id INTEGER,
+                telefone TEXT,
+                telefone_norm TEXT,
+                nome_contato TEXT,
+                total_mensagens INTEGER DEFAULT 0,
+                conversa_json TEXT,
+                score INTEGER,
+                score_faixa TEXT,
+                sugestoes_json TEXT,
+                resumo TEXT,
+                criado_por INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_agenda (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER NOT NULL,
@@ -1242,6 +1257,21 @@ def init_db():
             corpo_texto TEXT,
             variante TEXT,
             ativo INTEGER DEFAULT 1,
+            criado_por INTEGER,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS whatsapp_analises (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER,
+            telefone TEXT,
+            telefone_norm TEXT,
+            nome_contato TEXT,
+            total_mensagens INTEGER DEFAULT 0,
+            conversa_json TEXT,
+            score INTEGER,
+            score_faixa TEXT,
+            sugestoes_json TEXT,
+            resumo TEXT,
             criado_por INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -7706,6 +7736,250 @@ def api_bi_regras():
         'recebimento': {'colunas': rec_colunas, 'linhas': rec_linhas},
         'repasse': {'colunas': rep_colunas, 'linhas': rep_linhas},
     })
+
+
+# ─── ANÁLISE DE CONVERSA DO WHATSAPP (extensão de navegador) ─────────────────
+# A extensão do JOB (pasta extensao-whatsapp/) roda 100% em modo LEITURA dentro
+# da sessão do WhatsApp Web que o consultor já abriu. Ela raspa a conversa
+# visível (nunca envia mensagem, nunca abre conexão de protocolo — risco de ban
+# praticamente zero) e manda pra cá pra: casar com o lead, aplicar o score e
+# gerar sugestões de próxima ação. O envio é feito pelo service worker da
+# extensão (contorna o CSP do WhatsApp Web), autenticado por WHATSAPP_EXT_KEY.
+
+# Sinais textuais que movem o score. Heurística INICIAL e proposital — o
+# Guilherme vai mandar as regras de "Score Lead" dele depois; quando mandar, é
+# só trocar os pesos/sinais aqui (ou plugar um modelo). O importante já está
+# pronto: a conversa inteira chega aqui estruturada e fica gravada, então dá pra
+# reprocessar o histórico com qualquer régua nova sem raspar o WhatsApp de novo.
+_WA_SINAIS_QUENTES = {
+    'preco':      (r'\b(pre[çc]o|valor|quanto (custa|fica|sai|é)|mensalidade|or[çc]amento|cota[çc][ãa]o)\b', 12),
+    'contratar':  (r'\b(contratar|fechar|quero (o|esse|este) plano|vamos fechar|pode mandar o (boleto|contrato)|assinar)\b', 20),
+    'documento':  (r'\b(cpf|cnpj|rg|documento|carteirinha|comprovante|proposta)\b', 8),
+    'urgencia':   (r'\b(hoje|agora|urgente|com pressa|preciso (j[áa]|logo)|amanh[ãa])\b', 8),
+    'familia':    (r'\b(esposa|marido|filh[oa]s?|fam[íi]lia|depend[eê]nte|c[ôo]njuge|m[ãa]e|pai)\b', 5),
+    'reuniao':    (r'\b(reuni[ãa]o|liga[çc][ãa]o|me liga|pode ligar|hor[áa]rio|agendar|chamada)\b', 7),
+    'mei_cnpj':   (r'\b(mei|meu cnpj|empresarial|pj|pessoa jur[íi]dica)\b', 6),
+}
+_WA_SINAIS_FRIOS = {
+    'recusa':     (r'\b(n[ãa]o tenho interesse|n[ãa]o quero|para de|n[ãa]o me mand[ae]|sair da lista|descadastr)\b', -30),
+    'depois':     (r'\b(depois (eu )?(vejo|falo|te chamo)|mais pra frente|agora n[ãa]o|sem condi[çc][õo]es|t[ôo] sem grana|caro demais)\b', -12),
+    'jatem':      (r'\b(j[áa] tenho plano|j[áa] fechei|j[áa] contratei|j[áa] resolvi)\b', -15),
+}
+
+
+def _wa_score_conversa(mensagens):
+    """Recebe a lista de mensagens [{de:'lead'|'consultor', texto, hora}] e devolve
+    (score 0-100, faixa, lista de sinais detectados). HEURÍSTICO — ver comentário
+    do módulo. Só olha o que o LEAD escreveu pros sinais de interesse (o que o
+    consultor manda não deve inflar o score do lead)."""
+    import re as _re
+    texto_lead = ' \n '.join((m.get('texto') or '') for m in mensagens if m.get('de') == 'lead').lower()
+    msgs_lead = [m for m in mensagens if m.get('de') == 'lead']
+    msgs_consultor = [m for m in mensagens if m.get('de') == 'consultor']
+
+    score = 0
+    sinais = []
+    for chave, (padrao, peso) in {**_WA_SINAIS_QUENTES, **_WA_SINAIS_FRIOS}.items():
+        if _re.search(padrao, texto_lead):
+            score += peso
+            sinais.append({'sinal': chave, 'peso': peso, 'tipo': 'quente' if peso > 0 else 'frio'})
+
+    # Engajamento: lead que responde várias vezes está mais quente que quem mandou 1 linha.
+    n_lead = len(msgs_lead)
+    if n_lead >= 8:
+        score += 15; sinais.append({'sinal': 'muito_engajado', 'peso': 15, 'tipo': 'quente'})
+    elif n_lead >= 4:
+        score += 8; sinais.append({'sinal': 'engajado', 'peso': 8, 'tipo': 'quente'})
+    elif n_lead == 0:
+        score -= 10; sinais.append({'sinal': 'nunca_respondeu', 'peso': -10, 'tipo': 'frio'})
+
+    # Perguntas do lead = interesse ativo.
+    perguntas = sum(1 for m in msgs_lead if '?' in (m.get('texto') or ''))
+    if perguntas >= 2:
+        score += 8; sinais.append({'sinal': 'fez_perguntas', 'peso': 8, 'tipo': 'quente'})
+
+    # Conversa parada esperando o CONSULTOR (última msg é do lead) = precisa retorno.
+    if mensagens and mensagens[-1].get('de') == 'lead':
+        sinais.append({'sinal': 'aguardando_resposta_do_consultor', 'peso': 0, 'tipo': 'atencao'})
+
+    score = max(0, min(100, score))
+    faixa = 'quente' if score >= 60 else ('morno' if score >= 25 else 'frio')
+    return score, faixa, sinais
+
+
+def _wa_sugestoes(mensagens, score, faixa, sinais):
+    """Gera sugestões de próxima ação a partir dos sinais. Também heurístico e
+    facilmente extensível. Cada sugestão: {prioridade, titulo, detalhe}."""
+    chaves = {s['sinal'] for s in sinais}
+    sug = []
+    ult_lead = mensagens and mensagens[-1].get('de') == 'lead'
+
+    if 'recusa' in chaves:
+        sug.append({'prioridade': 'alta', 'titulo': 'Lead pediu pra parar',
+                    'detalhe': 'Houve sinal de recusa/descadastro. Respeitar e mover para Perdido — não insistir.'})
+    if 'jatem' in chaves:
+        sug.append({'prioridade': 'media', 'titulo': 'Já tem plano — oferecer revisão',
+                    'detalhe': 'Cliente disse que já tem plano. Abordar pela ótica de revisão/reajuste anual (fluxo Renovação), não venda nova.'})
+    if 'contratar' in chaves:
+        sug.append({'prioridade': 'alta', 'titulo': 'Sinal de fechamento — agir agora',
+                    'detalhe': 'O lead falou em fechar/contratar. Mandar proposta/boleto ou marcar a finalização o quanto antes.'})
+    if 'preco' in chaves:
+        sug.append({'prioridade': 'alta', 'titulo': 'Pediu preço/cotação',
+                    'detalhe': 'Enviar a cotação personalizada. Se ainda não qualificou (idade, cidade, CNPJ), fazer isso junto.'})
+    if 'reuniao' in chaves:
+        sug.append({'prioridade': 'media', 'titulo': 'Quer conversar por ligação',
+                    'detalhe': 'Propor 2 horários específicos de ligação em vez de perguntar "quando pode".'})
+    if 'mei_cnpj' in chaves:
+        sug.append({'prioridade': 'media', 'titulo': 'Perfil MEI/PJ',
+                    'detalhe': 'Explorar plano empresarial (até 40% mais barato que PF). Encaixa no fluxo Reengajamento MEI.'})
+    if ult_lead:
+        sug.append({'prioridade': 'alta', 'titulo': 'Conversa parada no lead',
+                    'detalhe': 'A última mensagem é do cliente e ficou sem resposta. Retornar antes de esfriar.'})
+    if 'nunca_respondeu' in chaves:
+        sug.append({'prioridade': 'baixa', 'titulo': 'Lead nunca respondeu',
+                    'detalhe': 'Só houve disparo do consultor. Tentar um ângulo diferente (SMS/e-mail do fluxo) antes de desistir.'})
+
+    if not sug:
+        if faixa == 'quente':
+            sug.append({'prioridade': 'alta', 'titulo': 'Lead quente sem próxima ação óbvia',
+                        'detalhe': 'Engajamento alto. Avançar pra qualificação/cotação e marcar próximo passo concreto.'})
+        elif faixa == 'morno':
+            sug.append({'prioridade': 'media', 'titulo': 'Manter aquecido',
+                        'detalhe': 'Interesse existe mas ainda não amadureceu. Nutrir com conteúdo/fluxo e agendar follow-up.'})
+        else:
+            sug.append({'prioridade': 'baixa', 'titulo': 'Lead frio',
+                        'detalhe': 'Pouco sinal de interesse. Colocar num fluxo de nutrição de baixo esforço e priorizar leads mais quentes.'})
+    return sug
+
+
+def _wa_resumo(mensagens):
+    """Resumo curto e factual da conversa (sem LLM): contagem e recorte das
+    últimas trocas, pro atendente ter contexto rápido sem reler tudo."""
+    n = len(mensagens)
+    n_lead = sum(1 for m in mensagens if m.get('de') == 'lead')
+    ultimas = mensagens[-4:]
+    linhas = []
+    for m in ultimas:
+        quem = 'Cliente' if m.get('de') == 'lead' else 'Consultor'
+        txt = (m.get('texto') or '').strip().replace('\n', ' ')
+        if len(txt) > 120:
+            txt = txt[:117] + '...'
+        if txt:
+            linhas.append(f'{quem}: {txt}')
+    return f'{n} mensagens ({n_lead} do cliente). Últimas trocas:\n' + '\n'.join(linhas)
+
+
+def _wa_auth_ok():
+    """Confere a chave da extensão (header X-Extension-Key vs env WHATSAPP_EXT_KEY).
+    Se a env não estiver setada, recusa tudo (fail-closed) — nunca deixa o
+    endpoint aberto sem chave."""
+    esperada = os.environ.get('WHATSAPP_EXT_KEY', '').strip()
+    recebida = request.headers.get('X-Extension-Key', '').strip()
+    return bool(esperada) and recebida == esperada
+
+
+def _wa_cors(resp):
+    """CORS liberado só nesses endpoints — a extensão faz o fetch pelo service
+    worker (host_permissions), mas deixamos CORS pronto caso um dia chame de
+    outro contexto. Sem credenciais, só a chave no header."""
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Extension-Key'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    return resp
+
+
+@app.route('/api/whatsapp/ping', methods=['GET', 'OPTIONS'])
+def api_whatsapp_ping():
+    """A extensão chama isso pra validar URL + chave na tela de configuração."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    return _wa_cors(jsonify({"ok": True, "sistema": "JOB Serenus", "versao_api": 1}))
+
+
+@app.route('/api/whatsapp/analisar', methods=['POST', 'OPTIONS'])
+def api_whatsapp_analisar():
+    """Recebe a conversa raspada pela extensão e devolve score + sugestões.
+    Payload: {telefone, nome, mensagens:[{de:'lead'|'consultor', texto, hora}]}.
+    Casa com o lead por telefone_norm (se existir), grava a análise e, quando
+    achou o lead, registra uma atividade no CRM com o score."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+
+    d = request.json or {}
+    mensagens = d.get('mensagens') or []
+    if not isinstance(mensagens, list) or not mensagens:
+        return _wa_cors(jsonify({"ok": False, "erro": "Conversa vazia"})), 400
+    # Sanidade: normaliza cada mensagem e corta tamanho absurdo (proteção).
+    limpa = []
+    for m in mensagens[:2000]:
+        if not isinstance(m, dict):
+            continue
+        de = 'lead' if m.get('de') == 'lead' else 'consultor'
+        txt = str(m.get('texto') or '')[:4000]
+        limpa.append({'de': de, 'texto': txt, 'hora': str(m.get('hora') or '')[:40]})
+    if not limpa:
+        return _wa_cors(jsonify({"ok": False, "erro": "Nenhuma mensagem válida"})), 400
+
+    telefone = str(d.get('telefone') or '').strip()
+    nome = str(d.get('nome') or '').strip()[:200]
+    tel_norm = _normalizar_telefone(telefone)
+
+    score, faixa, sinais = _wa_score_conversa(limpa)
+    sugestoes = _wa_sugestoes(limpa, score, faixa, sinais)
+    resumo = _wa_resumo(limpa)
+
+    conn = db()
+    lead = None
+    if tel_norm:
+        lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone()
+        if not lead:
+            # tenta pelos últimos 8 dígitos (variação de DDD/9º dígito)
+            suf = tel_norm[-8:]
+            if len(suf) == 8:
+                lead = conn.execute(
+                    "SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm LIKE ?",
+                    ('%' + suf,)).fetchone()
+    # Fallback por NOME: contato salvo no WhatsApp não expõe o telefone no DOM
+    # novo, então a extensão manda só o nome. Casa por nome exato (case-insensitive).
+    if not lead and nome:
+        lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE LOWER(TRIM(nome))=?",
+                            (nome.strip().lower(),)).fetchone()
+    lead_id = lead['id'] if lead else None
+
+    conn.execute("""INSERT INTO whatsapp_analises
+        (lead_id, telefone, telefone_norm, nome_contato, total_mensagens, conversa_json,
+         score, score_faixa, sugestoes_json, resumo, criado_por, criado_em)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (lead_id, telefone, tel_norm, nome, len(limpa), json.dumps(limpa, ensure_ascii=False),
+         score, faixa, json.dumps(sugestoes, ensure_ascii=False), resumo,
+         d.get('usuario_id'), _agora_sp()))
+    analise_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                  else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+
+    if lead_id:
+        conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                        VALUES (?,?,?,?,?)""",
+                     (lead_id, 'Extensão WhatsApp', 'analise',
+                      f'Análise da conversa: score {score}/100 ({faixa}). {len(limpa)} mensagens lidas.',
+                      _agora_sp()))
+    conn.commit(); close_db(conn)
+
+    return _wa_cors(jsonify({
+        "ok": True,
+        "analise_id": analise_id,
+        "score": score,
+        "faixa": faixa,
+        "sinais": sinais,
+        "sugestoes": sugestoes,
+        "resumo": resumo,
+        "lead": ({"id": lead['id'], "nome": lead['nome'],
+                  "url": f"{_SITE_BASE_URL}/crm?lead={lead['id']}"} if lead else None),
+        "lead_encontrado": bool(lead_id),
+    }))
 
 
 # ─── CRM ─────────────────────────────────────────────────────────────────────────

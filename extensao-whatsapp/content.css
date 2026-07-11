@@ -1,0 +1,102 @@
+/* JOB Serenus · estilos do botão e painel injetados no WhatsApp Web.
+   Prefixo job- em tudo e IDs únicos pra não colidir com o WhatsApp. */
+
+#job-btn {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 10px 12px;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(37, 99, 235, .45);
+  transition: transform .12s, box-shadow .12s, opacity .12s;
+}
+#job-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(37, 99, 235, .55); }
+#job-btn:disabled { opacity: .6; cursor: default; transform: none; }
+#job-btn .job-btn-j {
+  background: #fff; color: #2563eb; font-weight: 800; font-size: 11px;
+  padding: 3px 6px; border-radius: 6px; letter-spacing: .5px;
+}
+
+#job-painel {
+  position: fixed;
+  right: 22px;
+  bottom: 78px;
+  z-index: 2147483000;
+  width: 360px;
+  max-width: calc(100vw - 44px);
+  max-height: calc(100vh - 120px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #1a1d2e;
+  color: #e7e9f0;
+  border: 1px solid #2c3247;
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .5);
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+.job-painel-topo {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; background: #12151f; border-bottom: 1px solid #2c3247;
+}
+.job-painel-titulo { font-size: 13px; font-weight: 800; letter-spacing: .3px; }
+.job-painel-x {
+  background: transparent; border: none; color: #8c93a8; font-size: 20px;
+  line-height: 1; cursor: pointer; padding: 0 4px;
+}
+.job-painel-x:hover { color: #fff; }
+.job-painel-corpo { padding: 16px; overflow-y: auto; }
+
+.job-carregando { text-align: center; padding: 26px 10px; color: #b6bccd; font-size: 13px; }
+.job-spin {
+  width: 30px; height: 30px; margin: 0 auto 14px;
+  border: 3px solid #2c3247; border-top-color: #2563eb; border-radius: 50%;
+  animation: jobspin 0.8s linear infinite;
+}
+@keyframes jobspin { to { transform: rotate(360deg); } }
+
+.job-score-wrap { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+.job-score-num { font-size: 44px; font-weight: 800; line-height: 1; }
+.job-score-faixa { font-size: 13px; font-weight: 800; letter-spacing: .5px; }
+.job-score-sub { font-size: 11px; color: #8c93a8; margin-top: 2px; }
+.job-barra { height: 8px; background: #2c3247; border-radius: 20px; overflow: hidden; margin-bottom: 16px; }
+.job-barra-fill { height: 100%; border-radius: 20px; transition: width .4s; }
+
+.job-lead-ok {
+  display: block; background: rgba(31, 216, 164, .12); color: #1fd8a4;
+  border: 1px solid rgba(31, 216, 164, .3); border-radius: 10px;
+  padding: 10px 12px; font-size: 12.5px; text-decoration: none; margin-bottom: 4px;
+}
+.job-lead-ok:hover { background: rgba(31, 216, 164, .2); }
+.job-lead-nao {
+  background: rgba(250, 204, 21, .1); color: #facc15;
+  border: 1px solid rgba(250, 204, 21, .25); border-radius: 10px;
+  padding: 10px 12px; font-size: 12.5px; margin-bottom: 4px;
+}
+.job-lead-nao span { color: #8c93a8; font-size: 11px; }
+
+.job-sec { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+  color: #8c93a8; margin: 16px 0 8px; }
+.job-sug { display: flex; gap: 9px; margin-bottom: 9px; }
+.job-sug-tag { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px;
+  padding: 3px 7px; border-radius: 6px; height: fit-content; flex-shrink: 0; }
+.job-sug-txt { font-size: 12.5px; line-height: 1.5; color: #cdd2df; }
+.job-sug-txt b { color: #fff; }
+
+.job-resumo { font-size: 12px; line-height: 1.6; color: #b6bccd; white-space: normal;
+  background: #12151f; border: 1px solid #2c3247; border-radius: 10px; padding: 10px 12px; }
+.job-rodape { font-size: 10.5px; color: #6b7185; margin-top: 14px; text-align: center; }
+.job-erro { background: rgba(244, 63, 94, .12); color: #f43f5e; border: 1px solid rgba(244, 63, 94, .3);
+  border-radius: 10px; padding: 12px; font-size: 13px; }
+.job-vazio { font-size: 12px; color: #8c93a8; }
