@@ -245,15 +245,17 @@
     return '';
   }
 
-  async function rasparImagensVisiveis(atualizarStatus, desdeMs) {
+  async function rasparImagensVisiveis(atualizarStatus) {
     const centro = centroDoPainel();
     const cand = Array.from(document.querySelectorAll('#main img')).filter((im) =>
       (im.src || '').startsWith('blob:') && im.naturalWidth >= 150 && im.naturalHeight >= 150);
     // Monta metadado (barato) de todo mundo primeiro — antes só pegava as
     // PRIMEIRAS (mais antigas) até o teto, na ordem do DOM; podia deixar de
     // fora justo a cotação mais recente do lead numa conversa longa. Agora
-    // filtra pela marca d'água (modo incremental) e prioriza lead+recente,
-    // igual já faz pra áudio/PDF, ANTES de gastar tempo convertendo pra base64.
+    // prioriza lead+recente (igual áudio/PDF) ANTES de gastar tempo
+    // convertendo pra base64. NÃO filtra por marca d'água — já tentamos e
+    // era arriscado: uma imagem que ficasse de fora do teto numa rodada
+    // anterior ficava escondida pra sempre (ver histórico do fix de áudio).
     const vistos = new Set();
     const candidatos = [];
     for (const im of cand) {
@@ -261,7 +263,6 @@
       vistos.add(im.src);
       const hora = horaProximaDaImagem(im);
       const horaMs = parseHoraMs(hora);
-      if (desdeMs && horaMs != null && horaMs <= desdeMs) continue;
       const r = im.getBoundingClientRect();
       const de = (centro != null && r.width > 0)
         ? ((r.left + r.width / 2) < centro ? 'lead' : 'consultor') : 'lead';
@@ -288,7 +289,7 @@
 
   // ── ÁUDIO: pede os áudios de voz pra ponte no main world (wpp-bridge.js), que
   //    usa a wa-js pra baixar sem play. Devolve [{de,base64,mime,hora}] ou []. ──
-  function pedirAudios(limite, desde) {
+  function pedirAudios(limite) {
     return new Promise((resolve) => {
       const reqId = 'a' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
       let pronto = false;
@@ -301,14 +302,14 @@
         resolve(d.audios || []);
       }
       window.addEventListener('message', onMsg);
-      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_audios', reqId, limite, desde }, '*');
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_audios', reqId, limite }, '*');
       setTimeout(() => {
         if (!pronto) { window.removeEventListener('message', onMsg); resolve([]); }
       }, 60000);
     });
   }
 
-  function pedirDocumentos(limite, desde) {
+  function pedirDocumentos(limite) {
     return new Promise((resolve) => {
       const reqId = 'd' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
       let pronto = false;
@@ -321,7 +322,7 @@
         resolve(d.documentos || []);
       }
       window.addEventListener('message', onMsg);
-      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_documentos', reqId, limite, desde }, '*');
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_documentos', reqId, limite }, '*');
       setTimeout(() => {
         if (!pronto) { window.removeEventListener('message', onMsg); resolve([]); }
       }, 60000);
@@ -581,23 +582,23 @@
       catch (e) { telefone = telefoneDoContato() || telefoneInicial; }
       const mensagens = dedup(rasparMensagensVisiveis());
 
-      // Mesma marca d'água do texto, convertida pros formatos que áudio/PDF
-      // (wa-js, segundos desde epoch) e imagem (DOM, milissegundos) usam — sem
-      // isso o modo incremental só valia pro texto: cada análise re-baixava e
-      // RE-TRANSCREVIA (cobrando de novo) os mesmos áudios/PDFs já vistos antes.
-      const watermarkMs = watermark ? parseHoraMs(watermark) : null;
-      const watermarkSeg = watermarkMs ? Math.floor(watermarkMs / 1000) : null;
-
+      // Áudio/PDF/imagem NÃO usam a marca d'água do modo incremental —
+      // já tentamos (pra economizar retranscrição) e era arriscado demais:
+      // um áudio que ficasse de fora do teto numa rodada anterior (ou que
+      // não tivesse sido transcrito por falta de chave configurada na hora)
+      // ficava escondido PRA SEMPRE. Sempre relê o conjunto atual (com
+      // prioridade lead+recente) — o custo de ocasionalmente re-transcrever
+      // é bem menor que o risco de perder informação real do cliente.
       let imagens = [];
-      try { imagens = await rasparImagensVisiveis(status, watermarkMs); } catch (e) { imagens = []; }
+      try { imagens = await rasparImagensVisiveis(status); } catch (e) { imagens = []; }
 
       status('Baixando e transcrevendo áudios…');
       let audios = [];
-      try { audios = await pedirAudios(12, watermarkSeg); } catch (e) { audios = []; }
+      try { audios = await pedirAudios(12); } catch (e) { audios = []; }
 
       status('Baixando documentos PDF…');
       let documentos = [];
-      try { documentos = await pedirDocumentos(5, watermarkSeg); } catch (e) { documentos = []; }
+      try { documentos = await pedirDocumentos(5); } catch (e) { documentos = []; }
 
       let links = [];
       try { links = rasparLinks(); } catch (e) { links = []; }
