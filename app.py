@@ -8313,9 +8313,13 @@ _CLAUDE_SYSTEM_ANALISE = (
     "Sua tarefa: ler a conversa inteira e devolver uma leitura curta e prática para o "
     "consultor agir agora. Você NÃO calcula score (outro motor já faz isso) — você entrega "
     "contexto e próximas ações.\n\n"
+    "Podem vir IMAGENS anexadas à conversa (print de cotação, foto de carteirinha, foto de "
+    "documento). LEIA cada imagem: extraia os dados relevantes (operadora, planos, valores, "
+    "nomes, idades, números) e use no diagnóstico. Registre o que leu de cada uma no campo "
+    "leitura_imagens.\n\n"
     "Regras:\n"
     "- Português do Brasil, tom direto e consultivo, sem enrolação nem elogio vazio.\n"
-    "- Baseie-se SÓ no que está na conversa. Não invente dados que não aparecem.\n"
+    "- Baseie-se SÓ no que está na conversa e nas imagens. Não invente dados que não aparecem.\n"
     "- Priorize as ações pelo que realmente destrava a venda.\n"
     "- Se o lead pediu para parar/não tem interesse, oriente respeitar e não insistir.\n"
     "- Cada próxima ação deve ser concreta (o que mandar/fazer), não genérica."
@@ -8327,6 +8331,8 @@ _CLAUDE_SCHEMA_ANALISE = {
         "resumo": {"type": "string", "description": "2-3 frases: como está a conversa e o momento do lead."},
         "fase_funil": {"type": "string", "enum": ["NOVO_LEAD", "QUALIFICANDO", "PROPOSTA_ENVIADA",
                                                    "NEGOCIANDO", "FECHADO", "INATIVO", "PERDIDO"]},
+        "leitura_imagens": {"type": "array", "items": {"type": "string"},
+                            "description": "O que você leu em cada imagem anexada (ex: 'Cotação Amil: Bronze DP R$627, Vera Prata R$606...'). Vazio se não houver imagem."},
         "proximas_acoes": {
             "type": "array",
             "items": {
@@ -8343,15 +8349,18 @@ _CLAUDE_SCHEMA_ANALISE = {
         "sinais_atencao": {"type": "array", "items": {"type": "string"},
                             "description": "Alertas/riscos (ex: cliente sumiu, objeção não resolvida, pediu para parar)."}
     },
-    "required": ["resumo", "fase_funil", "proximas_acoes", "sinais_atencao"],
+    "required": ["resumo", "fase_funil", "leitura_imagens", "proximas_acoes", "sinais_atencao"],
     "additionalProperties": False
 }
 
+_CLAUDE_MAX_IMAGENS = 8  # teto por análise (controle de custo/payload)
 
-def _analisar_com_claude(mensagens, extracao, score, faixa):
-    """Chama a Claude para uma leitura qualitativa da conversa. Retorna dict com
-    {resumo, fase_funil, proximas_acoes, sinais_atencao, modelo} ou None se não há
-    chave ou se algo falhar (o chamador trata None como 'sem camada de IA')."""
+
+def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None):
+    """Chama a Claude para uma leitura qualitativa da conversa (texto + imagens).
+    Retorna dict {resumo, fase_funil, leitura_imagens, proximas_acoes, sinais_atencao,
+    modelo, imagens_lidas} ou None se não há chave ou algo falhar (chamador trata
+    None como 'sem camada de IA')."""
     api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
     if not api_key:
         return None
@@ -8369,30 +8378,49 @@ def _analisar_com_claude(mensagens, extracao, score, faixa):
             quem = 'CLIENTE' if m.get('de') == 'lead' else 'CONSULTOR'
             linhas.append(f"[{m.get('hora', '')}] {quem}: {txt}")
         conversa_txt = '\n'.join(linhas)[:24000]
-        if not conversa_txt:
+
+        # Blocos de imagem (base64). Cada uma precedida de um rótulo de texto pra
+        # preservar quem-enviou e quando (a Claude cruza a imagem com a conversa).
+        blocos_img = []
+        for img in (imagens or [])[:_CLAUDE_MAX_IMAGENS]:
+            b64 = (img.get('base64') or '').strip()
+            if not b64:
+                continue
+            mime = (img.get('mime') or 'image/jpeg').strip()
+            if mime not in ('image/jpeg', 'image/png', 'image/webp', 'image/gif'):
+                mime = 'image/jpeg'
+            quem = 'CLIENTE' if img.get('de') == 'lead' else 'CONSULTOR'
+            blocos_img.append({"type": "text", "text": f"[{img.get('hora', '')}] Imagem enviada pelo {quem}:"})
+            blocos_img.append({"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}})
+
+        if not conversa_txt and not blocos_img:
             return None
-        contexto = json.dumps(extracao, ensure_ascii=False)
-        client = anthropic.Anthropic(api_key=api_key, timeout=40.0)
+
+        conteudo = [{"type": "text", "text":
+                     f"Dados já extraídos pelo motor de regras: {json.dumps(extracao, ensure_ascii=False)}\n"
+                     f"Score heurístico (referência, não recalcular): {score}/1000 ({faixa}).\n\n"
+                     f"CONVERSA (ordem cronológica):\n{conversa_txt or '(sem texto)'}"}]
+        conteudo.extend(blocos_img)
+
+        client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
         resp = client.messages.create(
             model=_CLAUDE_MODEL,
             max_tokens=1500,
             system=_CLAUDE_SYSTEM_ANALISE,
             output_config={"format": {"type": "json_schema", "schema": _CLAUDE_SCHEMA_ANALISE}},
-            messages=[{"role": "user", "content":
-                       f"Dados já extraídos pelo motor de regras: {contexto}\n"
-                       f"Score heurístico (referência, não recalcular): {score}/1000 ({faixa}).\n\n"
-                       f"CONVERSA (ordem cronológica):\n{conversa_txt}"}],
+            messages=[{"role": "user", "content": conteudo}],
         )
         txt = next((b.text for b in resp.content if b.type == 'text'), '')
         dados = json.loads(txt)
         dados['modelo'] = _CLAUDE_MODEL
+        dados['imagens_lidas'] = len(blocos_img) // 2
         return dados
     except Exception as e:
         app.logger.warning(f"[CLAUDE] análise falhou ({_CLAUDE_MODEL}): {e}")
         return None
 
 
-def _wa_analisar_conversa(mensagens, nome_contato=''):
+def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None):
     """Orquestra a análise completa: extração + score oficial + diagnóstico + IA."""
     ex, flags, msgs_lead = _wa_extrair_lead(mensagens, nome_contato)
     sc = _wa_score_lead(ex, flags, mensagens, msgs_lead)
@@ -8404,7 +8432,7 @@ def _wa_analisar_conversa(mensagens, nome_contato=''):
                                     'cnpj', 'plano_ativo', 'operadora_atual', 'operadora_interesse',
                                     'plano_preferido', 'cobertura_desejada', 'copart_pref',
                                     'urgencia', 'saude', 'decisor', 'objecoes')}
-    ia = _analisar_com_claude(mensagens, extracao, sc['score_final'], sc['faixa'])
+    ia = _analisar_com_claude(mensagens, extracao, sc['score_final'], sc['faixa'], imagens=imagens)
     return {'extracao': extracao, 'fase_funil': ex['fase_funil'], 'tags': tags, **sc,
             'sugestoes': sugestoes, 'followup': followup, 'descricao': descricao, 'ia': ia}
 
@@ -8464,11 +8492,24 @@ def api_whatsapp_analisar():
     if not limpa:
         return _wa_cors(jsonify({"ok": False, "erro": "Nenhuma mensagem válida"})), 400
 
+    # Imagens (base64) raspadas da conversa — opcional. Teto de tamanho por imagem
+    # (~7MB de base64 ≈ 5MB de arquivo) e de quantidade, pra proteger o payload.
+    imagens = []
+    for img in (d.get('imagens') or [])[:_CLAUDE_MAX_IMAGENS]:
+        if not isinstance(img, dict):
+            continue
+        b64 = str(img.get('base64') or '')
+        if not b64 or len(b64) > 7_500_000:
+            continue
+        imagens.append({'de': 'lead' if img.get('de') == 'lead' else 'consultor',
+                        'base64': b64, 'mime': str(img.get('mime') or 'image/jpeg')[:30],
+                        'hora': str(img.get('hora') or '')[:40]})
+
     telefone = str(d.get('telefone') or '').strip()
     nome = str(d.get('nome') or '').strip()[:200]
     tel_norm = _normalizar_telefone(telefone)
 
-    an = _wa_analisar_conversa(limpa, nome_contato=nome)
+    an = _wa_analisar_conversa(limpa, nome_contato=nome, imagens=imagens)
     score, faixa = an['score_final'], an['faixa']
 
     conn = db()
