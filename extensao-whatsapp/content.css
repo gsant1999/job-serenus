@@ -3,8 +3,8 @@
 
 #job-btn {
   position: fixed;
-  right: 22px;
-  bottom: 22px;
+  right: 24px;
+  bottom: 96px; /* acima do compositor do WhatsApp/WaSpeed pra não cobrir o campo de envio */
   z-index: 2147483000;
   display: flex;
   align-items: center;
@@ -30,8 +30,8 @@
 
 #job-painel {
   position: fixed;
-  right: 22px;
-  bottom: 78px;
+  right: 24px;
+  bottom: 150px;
   z-index: 2147483000;
   width: 360px;
   max-width: calc(100vw - 44px);
