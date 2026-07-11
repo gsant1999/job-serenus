@@ -509,6 +509,14 @@
             <div class="campo-label">Possui plano atualmente? Qual?</div>
             <input type="text" id="qual-plano-atual" class="campo-input" placeholder="Ex: Unimed, Hapvida, Não possui">
           </div>
+          <div class="campo-grupo">
+            <div class="campo-label">Operadora de interesse</div>
+            <input type="text" id="qual-operadora-interesse" class="campo-input" placeholder="Ex: Vera Cruz — Prata">
+          </div>
+          <div class="campo-grupo">
+            <div class="campo-label">Tipo de contratação</div>
+            <input type="text" id="qual-tipo-contratacao" class="campo-input" placeholder="Ex: CNPJ / empresarial, Adesão (PF), Pessoa física">
+          </div>
           <div style="padding:12px 0 8px;font-size:12px;font-weight:600;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;border-top:1px solid var(--borda);margin-top:8px;">
             Estágio 2 — Qualificação específica
           </div>
@@ -808,6 +816,8 @@ async function abrirFicha(id){
   document.getElementById('qual-cidade').value      = d.lead.qual_cidade || '';
   document.getElementById('qual-cnpj').value        = d.lead.qual_cnpj || '';
   document.getElementById('qual-plano-atual').value = d.lead.qual_plano_atual || '';
+  document.getElementById('qual-operadora-interesse').value = d.lead.qual_operadora_interesse || '';
+  document.getElementById('qual-tipo-contratacao').value = d.lead.qual_tipo_contratacao || '';
   document.getElementById('qual-estagio2').value    = d.lead.qual_estagio2 || '';
 
   mudarTab('timeline');
@@ -938,6 +948,8 @@ async function salvarQualificacao(){
     qual_cidade:     document.getElementById('qual-cidade').value.trim(),
     qual_cnpj:       document.getElementById('qual-cnpj').value.trim(),
     qual_plano_atual:document.getElementById('qual-plano-atual').value.trim(),
+    qual_operadora_interesse: document.getElementById('qual-operadora-interesse').value.trim(),
+    qual_tipo_contratacao: document.getElementById('qual-tipo-contratacao').value.trim(),
     qual_estagio2:   document.getElementById('qual-estagio2').value.trim(),
   };
   const r = await fetch('/crm/lead/'+_leadAtual.id+'/qualificacao', {

@@ -47,7 +47,7 @@
     return [...leadRecentes, ...consultorRecentes].sort((a, b) => (a.t || 0) - (b.t || 0));
   }
 
-  async function baixarAudios(limite) {
+  async function baixarAudios(limite, desde) {
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.downloadMedia) {
       return { erro: 'wpp_ausente' };
     }
@@ -57,7 +57,11 @@
     let msgs = [];
     try { msgs = await window.WPP.chat.getMessages(chatId, { count: 200 }); }
     catch (e) { return { erro: 'falha_mensagens' }; }
-    const audios = msgs.filter((m) => m.type === 'ptt' || m.type === 'audio');
+    let audios = msgs.filter((m) => m.type === 'ptt' || m.type === 'audio');
+    // Modo incremental: já transcrevemos tudo até esse ponto numa rodada
+    // anterior — sem isso o mesmo áudio era baixado, transcrito (cobrando de
+    // novo) e podia até duplicar na conversa fundida a cada nova análise.
+    if (desde) audios = audios.filter((m) => (m.t || 0) > desde);
     const alvos = selecionarPorLead(audios, Math.max(1, limite || 12));
     const out = [];
     for (const m of alvos) {
@@ -81,7 +85,7 @@
     return { audios: out };
   }
 
-  async function baixarDocumentos(limite) {
+  async function baixarDocumentos(limite, desde) {
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.downloadMedia) {
       return { erro: 'wpp_ausente' };
     }
@@ -92,8 +96,11 @@
     try { msgs = await window.WPP.chat.getMessages(chatId, { count: 200 }); }
     catch (e) { return { erro: 'falha_mensagens' }; }
     // Só PDF — é o único formato de documento que a Claude lê nativamente.
-    const docs = msgs.filter((m) => m.type === 'document' &&
+    let docs = msgs.filter((m) => m.type === 'document' &&
       (m.mimetype || '').toLowerCase() === 'application/pdf');
+    // Modo incremental: mesmo motivo do áudio — não manda de novo pro JOB (e
+    // pra Claude) um PDF que uma rodada anterior já leu.
+    if (desde) docs = docs.filter((m) => (m.t || 0) > desde);
     const alvos = selecionarPorLead(docs, Math.max(1, limite || 5));
     const out = [];
     for (const m of alvos) {
@@ -139,8 +146,8 @@
     if (!d || d.source !== 'JOB_EXT_REQ') return;
     let resp;
     try {
-      if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite);
-      else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite);
+      if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite, d.desde);
+      else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite, d.desde);
       else if (d.tipo === 'obter_telefone') resp = await obterTelefone();
       else return;
     } catch (e) { resp = { erro: 'excecao' }; }

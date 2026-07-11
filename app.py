@@ -1608,6 +1608,10 @@ def init_db():
         ("crm_leads", "qual_cnpj", "TEXT"),
         ("crm_leads", "qual_plano_atual", "TEXT"),
         ("crm_leads", "qual_estagio2", "TEXT"),
+        # Operadora de interesse e tipo de contratação — extraídos pela análise de
+        # WhatsApp (texto ou anexo) mas não tinham onde chegar na ficha do lead.
+        ("crm_leads", "qual_operadora_interesse", "TEXT"),
+        ("crm_leads", "qual_tipo_contratacao", "TEXT"),
         # Sub-status dentro da etapa (ex: Follow up 1/2/3) — pedido do Gabriel via PDF 04/07
         ("crm_leads", "sub_status", "TEXT"),
         ("crm_leads", "consultor_externo", "TEXT"),  # nome original da planilha
@@ -8679,6 +8683,11 @@ def _transcrever_audio(b64, mime='audio/ogg'):
                 return None
             segundos = float(corpo.get('duration') or 0) or None
             custo = round((segundos / 60.0) * preco_min, 6) if segundos else None
+            if segundos is None:
+                # HTTP 200 mas sem 'duration' no corpo — a transcrição em si
+                # funcionou, mas o custo dessa análise fica subestimado no
+                # painel sem a gente perceber. Não trava a análise, só avisa.
+                app.logger.warning(f"[TRANSCRICAO] {provedor}: resposta 200 sem 'duration' em verbose_json — custo desse áudio não será contabilizado")
             return {'texto': texto, 'segundos': segundos, 'custo_usd': custo, 'provedor': provedor}
         app.logger.warning(f"[TRANSCRICAO] HTTP {r.status_code}: {r.text[:200]}")
         return None
@@ -8699,7 +8708,13 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
                                     'urgencia', 'saude', 'decisor', 'objecoes')}
 
     extracao = _montar_extracao(ex)
+    tinha_chave_claude = bool(os.environ.get('ANTHROPIC_API_KEY', '').strip())
     ia = _analisar_com_claude(mensagens, extracao, sc['score_final'], sc['faixa'], imagens=imagens, documentos=documentos, links=links)
+    # Distingue "IA não configurada" (esperado, silencioso) de "estava
+    # configurada mas essa chamada falhou" (rate limit, timeout, chave
+    # revogada etc.) — sem isso o consultor via a seção de IA sumir sem saber
+    # se era por falta de chave ou por uma falha de verdade naquela análise.
+    ia_falhou = tinha_chave_claude and not ia
 
     # O motor de regras só lê TEXTO — não enxerga imagem/PDF. Se a IA confirmou
     # dados concretos num anexo (cotação, carteirinha), valem mais que um regex
@@ -8786,7 +8801,8 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
                                        + [sc['faixa'].upper(), 'RELEVANCIA_' + rel.upper()]))
 
     return {'extracao': extracao, 'fase_funil': ex['fase_funil'], 'tags': tags, **sc,
-            'sugestoes': sugestoes, 'followup': followup, 'descricao': descricao, 'ia': ia}
+            'sugestoes': sugestoes, 'followup': followup, 'descricao': descricao, 'ia': ia,
+            'ia_falhou': ia_falhou}
 
 
 def _wa_auth_ok():
@@ -8890,6 +8906,13 @@ def _wa_extracao_para_qualificacao(ex):
     elif ex.get('plano_ativo') == 'CANCELADO_RECENTE':
         op = f" ({ex['operadora_atual'].title()})" if ex.get('operadora_atual') else ''
         q['qual_plano_atual'] = f"Cancelado recentemente{op}"
+    if ex.get('operadora_interesse'):
+        q['qual_operadora_interesse'] = ex['operadora_interesse']
+        if ex.get('plano_preferido'):
+            q['qual_operadora_interesse'] += f" — {ex['plano_preferido']}"
+    if ex.get('tipo_contratacao'):
+        q['qual_tipo_contratacao'] = {'PJ': 'CNPJ / empresarial', 'ADESAO': 'Adesão (PF)',
+                                       'PF': 'Pessoa física'}.get(ex['tipo_contratacao'], ex['tipo_contratacao'])
     return q
 
 
@@ -8965,12 +8988,15 @@ def api_whatsapp_analisar():
     audio_msgs = []
     custo_transcricao_usd = 0.0
     audio_segundos_total = 0.0
+    audios_validos = 0
+    tinha_chave_transcricao = bool(os.environ.get('OPENAI_API_KEY', '').strip() or os.environ.get('GROQ_API_KEY', '').strip())
     for a in (d.get('audios') or [])[:12]:
         if not isinstance(a, dict):
             continue
         b64 = str(a.get('base64') or '')
         if not b64 or len(b64) > 40_000_000:
             continue
+        audios_validos += 1
         transc = _transcrever_audio(b64, str(a.get('mime') or 'audio/ogg'))
         if not transc:
             continue
@@ -9040,6 +9066,9 @@ def api_whatsapp_analisar():
     an = _wa_analisar_conversa(limpa, nome_contato=nome, imagens=imagens, documentos=documentos, links=links)
     an['audios_transcritos'] = len(transcricoes)
     an['transcricoes'] = transcricoes
+    # Só é "falha" de verdade se a chave estava configurada e mesmo assim
+    # sobrou áudio sem transcrever — sem chave, o esperado é 0 mesmo (silencioso).
+    an['audios_falha'] = (audios_validos - len(transcricoes)) if tinha_chave_transcricao else 0
     score, faixa = an['score_final'], an['faixa']
 
     # Resolve o usuário que está rodando a extensão uma vez só — usado tanto
@@ -9171,7 +9200,9 @@ def api_whatsapp_analisar():
         "followup": an['followup'],
         "resumo": an['descricao'],
         "ia": an.get('ia'),
+        "ia_falhou": an.get('ia_falhou', False),
         "audios_transcritos": an.get('audios_transcritos', 0),
+        "audios_falha": an.get('audios_falha', 0),
         "transcricoes": an.get('transcricoes', []),
         "lead": ({"id": lead_id, "nome": (lead['nome'] if lead else nome),
                   "url": f"{_SITE_BASE_URL}/crm?lead={lead_id}"} if lead_id else None),
@@ -9545,10 +9576,12 @@ def crm_lead_qualificacao(lid):
     d = request.json or {}
     conn.execute("""UPDATE crm_leads SET
         qual_tipo_plano=?, qual_idade=?, qual_cidade=?, qual_cnpj=?, qual_plano_atual=?, qual_estagio2=?,
+        qual_operadora_interesse=?, qual_tipo_contratacao=?,
         atualizado_em=? WHERE id=?""",
         ((d.get('qual_tipo_plano') or '').strip(), (d.get('qual_idade') or '').strip(),
          (d.get('qual_cidade') or '').strip(), (d.get('qual_cnpj') or '').strip(),
          (d.get('qual_plano_atual') or '').strip(), (d.get('qual_estagio2') or '').strip(),
+         (d.get('qual_operadora_interesse') or '').strip(), (d.get('qual_tipo_contratacao') or '').strip(),
          _agora_sp(), lid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})

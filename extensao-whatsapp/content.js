@@ -245,24 +245,42 @@
     return '';
   }
 
-  async function rasparImagensVisiveis(atualizarStatus) {
+  async function rasparImagensVisiveis(atualizarStatus, desdeMs) {
     const centro = centroDoPainel();
     const cand = Array.from(document.querySelectorAll('#main img')).filter((im) =>
       (im.src || '').startsWith('blob:') && im.naturalWidth >= 150 && im.naturalHeight >= 150);
+    // Monta metadado (barato) de todo mundo primeiro — antes só pegava as
+    // PRIMEIRAS (mais antigas) até o teto, na ordem do DOM; podia deixar de
+    // fora justo a cotação mais recente do lead numa conversa longa. Agora
+    // filtra pela marca d'água (modo incremental) e prioriza lead+recente,
+    // igual já faz pra áudio/PDF, ANTES de gastar tempo convertendo pra base64.
     const vistos = new Set();
-    const out = [];
+    const candidatos = [];
     for (const im of cand) {
-      if (out.length >= _WA_MAX_IMG) break;
       if (vistos.has(im.src)) continue;
       vistos.add(im.src);
+      const hora = horaProximaDaImagem(im);
+      const horaMs = parseHoraMs(hora);
+      if (desdeMs && horaMs != null && horaMs <= desdeMs) continue;
+      const r = im.getBoundingClientRect();
+      const de = (centro != null && r.width > 0)
+        ? ((r.left + r.width / 2) < centro ? 'lead' : 'consultor') : 'lead';
+      candidatos.push({ el: im, de, hora, horaMs: horaMs || 0 });
+    }
+    const doLead = candidatos.filter((c) => c.de === 'lead');
+    const doConsultor = candidatos.filter((c) => c.de !== 'lead');
+    const leadRecentes = doLead.slice(-_WA_MAX_IMG);
+    const espacoConsultor = Math.max(0, _WA_MAX_IMG - leadRecentes.length);
+    const consultorRecentes = espacoConsultor ? doConsultor.slice(-espacoConsultor) : [];
+    const selecionados = [...leadRecentes, ...consultorRecentes].sort((a, b) => a.horaMs - b.horaMs);
+
+    const out = [];
+    for (const c of selecionados) {
       try {
         if (atualizarStatus) atualizarStatus('Lendo imagens… (' + (out.length + 1) + ')');
-        const b64 = await imagemParaBase64(im);
+        const b64 = await imagemParaBase64(c.el);
         if (!b64) continue;
-        const r = im.getBoundingClientRect();
-        const de = (centro != null && r.width > 0)
-          ? ((r.left + r.width / 2) < centro ? 'lead' : 'consultor') : 'lead';
-        out.push({ de, base64: b64, mime: 'image/jpeg', hora: horaProximaDaImagem(im) });
+        out.push({ de: c.de, base64: b64, mime: 'image/jpeg', hora: c.hora });
       } catch (e) { /* imagem que falhar é ignorada, nunca derruba a análise */ }
     }
     return out;
@@ -270,7 +288,7 @@
 
   // ── ÁUDIO: pede os áudios de voz pra ponte no main world (wpp-bridge.js), que
   //    usa a wa-js pra baixar sem play. Devolve [{de,base64,mime,hora}] ou []. ──
-  function pedirAudios(limite) {
+  function pedirAudios(limite, desde) {
     return new Promise((resolve) => {
       const reqId = 'a' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
       let pronto = false;
@@ -283,14 +301,14 @@
         resolve(d.audios || []);
       }
       window.addEventListener('message', onMsg);
-      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_audios', reqId, limite }, '*');
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_audios', reqId, limite, desde }, '*');
       setTimeout(() => {
         if (!pronto) { window.removeEventListener('message', onMsg); resolve([]); }
       }, 60000);
     });
   }
 
-  function pedirDocumentos(limite) {
+  function pedirDocumentos(limite, desde) {
     return new Promise((resolve) => {
       const reqId = 'd' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
       let pronto = false;
@@ -303,7 +321,7 @@
         resolve(d.documentos || []);
       }
       window.addEventListener('message', onMsg);
-      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_documentos', reqId, limite }, '*');
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_documentos', reqId, limite, desde }, '*');
       setTimeout(() => {
         if (!pronto) { window.removeEventListener('message', onMsg); resolve([]); }
       }, 60000);
@@ -418,6 +436,20 @@
       linhaDado('Objeções', ex.objecoes);
     const pen = (r.penalidades || []).map((p) => '<span class="job-chip job-chip-pen">' +
       esc(p.regra) + ' ' + p.pontos + '</span>').join('');
+    // Por que o score parou nesse teto — antes o backend calculava e mandava
+    // o motivo, mas o painel nunca mostrava (consultor via um score baixo sem
+    // saber o porquê, ex: "conversa parada há mais de 10 dias").
+    const capBox = (r.cap && r.cap.motivo)
+      ? '<div class="job-ia-alerta">🔒 Score limitado a ' + r.cap.valor + ': ' + esc(r.cap.motivo) + '</div>'
+      : '';
+    // Falha real de IA/transcrição (chave configurada, mas essa chamada não
+    // deu certo) — diferente de "não configurado", que fica silencioso.
+    const avisos = [];
+    if (r.ia_falhou) avisos.push('A leitura por IA falhou nesta análise — o score seguiu só no motor de regras.');
+    if (r.audios_falha) avisos.push(r.audios_falha + ' áudio(s) não puderam ser transcritos nesta análise.');
+    const avisoFalhas = avisos.length
+      ? avisos.map((a) => '<div class="job-ia-alerta">⚠ ' + esc(a) + '</div>').join('')
+      : '';
     return (
       '<div class="job-score-wrap">' +
         '<div class="job-score-num" style="color:' + cor + '">' + (r.score != null ? r.score : '—') + '</div>' +
@@ -428,6 +460,8 @@
       '</div>' +
       '<div class="job-barra"><div class="job-barra-fill" style="width:' + Math.round((r.score || 0) / 10) + '%;background:' + cor + '"></div></div>' +
       '<div class="job-chips">' + chips + pen + '</div>' +
+      capBox +
+      avisoFalhas +
       leadBox +
       (dados ? '<div class="job-sec">Dados do lead</div><div class="job-dados">' + dados + '</div>' : '') +
       '<div class="job-sec">Próximas ações</div>' +
@@ -547,16 +581,23 @@
       catch (e) { telefone = telefoneDoContato() || telefoneInicial; }
       const mensagens = dedup(rasparMensagensVisiveis());
 
+      // Mesma marca d'água do texto, convertida pros formatos que áudio/PDF
+      // (wa-js, segundos desde epoch) e imagem (DOM, milissegundos) usam — sem
+      // isso o modo incremental só valia pro texto: cada análise re-baixava e
+      // RE-TRANSCREVIA (cobrando de novo) os mesmos áudios/PDFs já vistos antes.
+      const watermarkMs = watermark ? parseHoraMs(watermark) : null;
+      const watermarkSeg = watermarkMs ? Math.floor(watermarkMs / 1000) : null;
+
       let imagens = [];
-      try { imagens = await rasparImagensVisiveis(status); } catch (e) { imagens = []; }
+      try { imagens = await rasparImagensVisiveis(status, watermarkMs); } catch (e) { imagens = []; }
 
       status('Baixando e transcrevendo áudios…');
       let audios = [];
-      try { audios = await pedirAudios(12); } catch (e) { audios = []; }
+      try { audios = await pedirAudios(12, watermarkSeg); } catch (e) { audios = []; }
 
       status('Baixando documentos PDF…');
       let documentos = [];
-      try { documentos = await pedirDocumentos(5); } catch (e) { documentos = []; }
+      try { documentos = await pedirDocumentos(5, watermarkSeg); } catch (e) { documentos = []; }
 
       let links = [];
       try { links = rasparLinks(); } catch (e) { links = []; }
