@@ -788,35 +788,79 @@
     if (_secaoAtiva === 'mensagens') { setCorpoSecaoMensagens(renderModelos(_modelosCache.modelos)); ligarAcoesModelos(); }
   }
 
+  // Ao clicar "Enviar texto" NÃO dispara na hora — abre um preview editável
+  // (padrão do olho 👁 do WaSpeed), pra ter CERTEZA do que vai pro cliente e
+  // poder ajustar antes. Só envia depois de confirmar.
   async function enviarModelo(btn) {
     const modelos = await buscarModelos(false);
     const modelo = modelos.find((m) => String(m.id) === btn.dataset.modeloId);
     if (!modelo) return;
+    abrirPreviewEnvio(modelo.texto);
+  }
+
+  function abrirPreviewEnvio(textoInicial) {
+    const existente = document.getElementById('job-preview');
+    if (existente) existente.remove();
+    const nome = nomeDoContato() || 'este contato';
+    const ov = document.createElement('div');
+    ov.id = 'job-preview';
+    ov.innerHTML =
+      '<div class="job-preview-card">' +
+        '<div class="job-preview-head">Revisar antes de enviar' +
+          '<button class="job-preview-x" id="job-preview-x">×</button></div>' +
+        '<div class="job-preview-para">Para: <b>' + esc(nome) + '</b></div>' +
+        '<textarea class="job-inp job-inp-txt" id="job-preview-texto"></textarea>' +
+        '<div class="job-preview-bolha-label">Vai chegar assim:</div>' +
+        '<div class="job-preview-bolha" id="job-preview-bolha"></div>' +
+        '<div class="job-preview-acoes">' +
+          '<button class="job-mini-btn" id="job-preview-cancelar">Cancelar</button>' +
+          '<button class="job-salvar-modelo" id="job-preview-enviar" style="margin-top:0">Confirmar e enviar</button>' +
+        '</div>' +
+        '<div class="job-grav-status" id="job-preview-status"></div>' +
+      '</div>';
+    document.body.appendChild(ov);
+    const ta = document.getElementById('job-preview-texto');
+    const bolha = document.getElementById('job-preview-bolha');
+    ta.value = textoInicial || '';
+    const atualizarBolha = () => { bolha.textContent = ta.value; };
+    atualizarBolha();
+    ta.addEventListener('input', atualizarBolha);
+    document.getElementById('job-preview-x').addEventListener('click', () => ov.remove());
+    document.getElementById('job-preview-cancelar').addEventListener('click', () => ov.remove());
+    document.getElementById('job-preview-enviar').addEventListener('click', () => confirmarEnvioPreview(ov));
+    ta.focus();
+  }
+
+  async function confirmarEnvioPreview(ov) {
+    const ta = document.getElementById('job-preview-texto');
+    const st = document.getElementById('job-preview-status');
+    const btn = document.getElementById('job-preview-enviar');
+    const texto = (ta.value || '').trim();
+    if (!texto) { if (st) st.textContent = 'A mensagem está vazia.'; return; }
     const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
-    if (!usuarioId) { alert('Selecione seu usuário no popup da extensão primeiro.'); return; }
-    btn.disabled = true;
-    const textoOriginal = btn.textContent;
-    btn.textContent = 'Enviando…';
+    if (!usuarioId) { if (st) st.textContent = 'Selecione seu usuário no popup da extensão primeiro.'; return; }
     const nome = nomeDoContato();
     let telefone = '';
     try { telefone = (await pedirTelefoneWpp()) || telefoneDoContato(); }
     catch (e) { telefone = telefoneDoContato(); }
-    if (!telefone) { btn.textContent = 'Sem telefone nesta conversa'; return; }
+    if (!telefone) { if (st) st.textContent = 'Não achei o telefone desta conversa.'; return; }
+    btn.disabled = true;
+    if (st) st.textContent = 'Enviando…';
     try {
       const resp = await chrome.runtime.sendMessage({
-        type: 'enviar_direto', payload: { telefone, nome, texto: modelo.texto, usuario_id: usuarioId },
+        type: 'enviar_direto', payload: { telefone, nome, texto, usuario_id: usuarioId },
       });
       if (!resp || !resp.ok) {
-        btn.textContent = 'Erro: ' + ((resp && resp.erro) || 'falha ao enfileirar');
-        setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 3000);
+        if (st) st.textContent = 'Erro: ' + ((resp && resp.erro) || 'falha ao enfileirar');
+        btn.disabled = false;
         return;
       }
       await checarFilaDeEnvio();
-      btn.textContent = 'Enviado ✓';
-      setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 3000);
+      if (st) st.textContent = 'Enviado ✓';
+      setTimeout(() => { ov.remove(); }, 900);
     } catch (e) {
-      btn.textContent = 'Erro: ' + e.message;
-      setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 3000);
+      if (st) st.textContent = 'Erro: ' + e.message;
+      btn.disabled = false;
     }
   }
 
