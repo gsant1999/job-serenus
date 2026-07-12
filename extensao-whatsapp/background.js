@@ -92,6 +92,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/analisar', 'POST', msg.payload, 300000, msg.reqId).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'enviar_direto') {
+    // Compor e mandar direto do painel da extensão, sem precisar abrir o
+    // site do JOB — enfileira e casa/cria o lead pelo telefone da conversa.
+    chamarJob('/api/whatsapp/enviar-direto', 'POST', msg.payload, 15000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'cancelar') {
     const registro = _emAndamento.get(msg.reqId);
     if (registro) { registro.cancelado = true; registro.controller.abort(); }

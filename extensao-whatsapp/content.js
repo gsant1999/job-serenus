@@ -387,6 +387,78 @@
     document.body.appendChild(btn);
   }
 
+  // ── Mandar mensagem direto da conversa aberta — pedido explícito de nunca
+  //    precisar sair do WhatsApp Web pra isso (igual WaSpeed/ZapVoice). Reusa
+  //    a mesma fila/limite de ritmo do servidor por baixo, só muda de onde a
+  //    mensagem entra. ──
+  function criarBotaoEnviar() {
+    if (document.getElementById('job-btn-enviar')) return;
+    const btn = document.createElement('button');
+    btn.id = 'job-btn-enviar';
+    btn.title = 'Mandar mensagem nesta conversa pelo JOB';
+    btn.innerHTML = '<span class="job-btn-j">JOB</span><span class="job-btn-txt">Mandar mensagem</span>';
+    btn.addEventListener('click', toggleComposeEnviar);
+    document.body.appendChild(btn);
+  }
+
+  function toggleComposeEnviar() {
+    const existente = document.getElementById('job-compose');
+    if (existente) { existente.remove(); return; }
+    const nome = nomeDoContato();
+    const box = document.createElement('div');
+    box.id = 'job-compose';
+    box.innerHTML =
+      '<div class="job-painel-topo"><span class="job-painel-titulo">JOB · Mandar mensagem</span>' +
+      '<button class="job-painel-x" id="job-compose-x">×</button></div>' +
+      '<div class="job-painel-corpo">' +
+        '<div class="job-compose-para">Para: ' + esc(nome || 'contato atual') + '</div>' +
+        '<textarea id="job-compose-texto" class="job-compose-texto" placeholder="Digite a mensagem…"></textarea>' +
+        '<button class="job-compose-enviar" id="job-compose-enviar-btn">Enviar</button>' +
+        '<div id="job-compose-status" class="job-compose-status"></div>' +
+      '</div>';
+    document.body.appendChild(box);
+    document.getElementById('job-compose-x').addEventListener('click', () => box.remove());
+    document.getElementById('job-compose-enviar-btn').addEventListener('click', enviarMensagemDireta);
+  }
+
+  async function enviarMensagemDireta() {
+    const textarea = document.getElementById('job-compose-texto');
+    const status = document.getElementById('job-compose-status');
+    const btn = document.getElementById('job-compose-enviar-btn');
+    const texto = (textarea.value || '').trim();
+    if (!texto) { status.textContent = 'Escreva a mensagem primeiro.'; return; }
+    const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+    if (!usuarioId) { status.textContent = 'Selecione seu usuário no popup da extensão primeiro.'; return; }
+    btn.disabled = true;
+    status.textContent = 'Enfileirando…';
+    const nome = nomeDoContato();
+    let telefone = '';
+    try { telefone = (await pedirTelefoneWpp()) || telefoneDoContato(); }
+    catch (e) { telefone = telefoneDoContato(); }
+    if (!telefone) { status.textContent = 'Não consegui identificar o telefone desta conversa.'; btn.disabled = false; return; }
+    try {
+      const resp = await chrome.runtime.sendMessage({
+        type: 'enviar_direto', payload: { telefone, nome, texto, usuario_id: usuarioId },
+      });
+      if (!resp || !resp.ok) {
+        status.textContent = 'Erro: ' + ((resp && resp.erro) || 'falha ao enfileirar');
+        btn.disabled = false;
+        return;
+      }
+      status.textContent = 'Na fila — tentando mandar agora…';
+      textarea.value = '';
+      // Já que a conversa certa está aberta agora, tenta despachar na hora em
+      // vez de esperar o próximo ciclo de 20s — mas ainda passa pelo mesmo
+      // limite de ritmo do servidor (/fila/proximo), nunca pula o gate.
+      await checarFilaDeEnvio();
+      status.textContent = 'Mensagem enviada (ou aguardando o limite de ritmo — confira em instantes).';
+      btn.disabled = false;
+    } catch (e) {
+      status.textContent = 'Erro: ' + e.message;
+      btn.disabled = false;
+    }
+  }
+
   function fecharPainel() {
     const p = document.getElementById('job-painel');
     if (p) p.remove();
@@ -811,9 +883,13 @@
     }
   }
 
-  // ── Mantém o botão presente mesmo com o WhatsApp recriando a tela (SPA). ──
+  // ── Mantém os botões presentes mesmo com o WhatsApp recriando a tela (SPA). ──
   criarBotao();
-  const obs = new MutationObserver(() => { if (!document.getElementById('job-btn')) criarBotao(); });
+  criarBotaoEnviar();
+  const obs = new MutationObserver(() => {
+    if (!document.getElementById('job-btn')) criarBotao();
+    if (!document.getElementById('job-btn-enviar')) criarBotaoEnviar();
+  });
   obs.observe(document.body, { childList: true, subtree: false });
 
   // ── Detecta troca de conversa (o WhatsApp Web é uma SPA — não navega, só

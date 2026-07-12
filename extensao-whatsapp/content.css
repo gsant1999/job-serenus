@@ -29,6 +29,62 @@
 }
 #job-btn .job-btn-txt { line-height: 1; }
 
+#job-btn-enviar {
+  position: fixed;
+  right: 24px;
+  bottom: 148px; /* empilhado acima do botão de análise */
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 10px 12px;
+  background: #16a34a;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(22, 163, 74, .45);
+  transition: transform .12s, box-shadow .12s, opacity .12s;
+}
+#job-btn-enviar:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(22, 163, 74, .55); }
+#job-btn-enviar .job-btn-j {
+  background: #fff; color: #16a34a; font-weight: 800; font-size: 11px;
+  padding: 3px 6px; border-radius: 6px; letter-spacing: .5px;
+}
+
+#job-compose {
+  position: fixed;
+  right: 24px;
+  bottom: 204px;
+  z-index: 2147483000;
+  width: 320px;
+  max-width: calc(100vw - 44px);
+  background: #1a1d2e;
+  color: #e7e9f0;
+  border: 1px solid #2c3247;
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .5);
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  overflow: hidden;
+}
+.job-compose-para { font-size: 11px; color: #8c93a8; margin-bottom: 8px; }
+.job-compose-texto {
+  width: 100%; box-sizing: border-box; min-height: 70px; resize: vertical;
+  background: #12151f; border: 1px solid #2c3247; border-radius: 8px;
+  padding: 9px 10px; font-size: 12.5px; color: #e7e9f0; outline: none;
+  font-family: inherit;
+}
+.job-compose-texto:focus { border-color: #16a34a; }
+.job-compose-enviar {
+  width: 100%; margin-top: 10px; background: #16a34a; color: #fff; border: none;
+  border-radius: 8px; padding: 10px; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.job-compose-enviar:disabled { opacity: .6; cursor: default; }
+.job-compose-status { font-size: 11px; color: #8c93a8; margin-top: 8px; min-height: 14px; }
+
 #job-painel {
   position: fixed;
   right: 24px;

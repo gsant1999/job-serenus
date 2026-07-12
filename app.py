@@ -9138,6 +9138,84 @@ def api_whatsapp_fila_confirmar(fid):
     return _wa_cors(jsonify({"ok": True}))
 
 
+@app.route('/api/whatsapp/enviar-direto', methods=['POST', 'OPTIONS'])
+def api_whatsapp_enviar_direto():
+    """Enfileira uma mensagem direto da conversa aberta no WhatsApp Web — pedido
+    explícito do Guilherme pra extensão funcionar inteira ali, sem precisar
+    abrir o site do JOB (igual WaSpeed/ZapVoice). Autenticado por chave de
+    extensão (não sessão de login), casa ou cria o lead pelo telefone (mesma
+    lógica de _wa_auth_ok/casamento usada em /api/whatsapp/analisar).
+    responsavel_id da fila é SEMPRE o usuario_id de quem está usando a
+    extensão agora — é o WhatsApp Web dessa pessoa que vai executar o envio,
+    então tem que bater com o que /fila/proximo vai filtrar depois."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    d = request.json or {}
+    telefone = str(d.get('telefone') or '').strip()
+    nome = str(d.get('nome') or '').strip()[:200]
+    texto = str(d.get('texto') or '').strip()[:4000]
+    if not texto:
+        return _wa_cors(jsonify({"ok": False, "erro": "Mensagem vazia"})), 400
+    chat_id = _wa_chat_id(telefone)
+    if not chat_id:
+        return _wa_cors(jsonify({"ok": False, "erro": "Telefone inválido"})), 400
+    usuario_id = None
+    try:
+        usuario_id = int(d.get('usuario_id'))
+    except (TypeError, ValueError):
+        pass
+    conn = db()
+    if usuario_id:
+        u = conn.execute("SELECT id FROM usuarios WHERE id=? AND ativo=1", (usuario_id,)).fetchone()
+        if not u:
+            usuario_id = None
+    if not usuario_id:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Selecione seu usuário no popup da extensão antes de mandar mensagem"})), 400
+
+    tel_norm = _normalizar_telefone(telefone)
+    lead = None
+    if tel_norm:
+        lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone()
+        if not lead:
+            suf = tel_norm[-8:]
+            if len(suf) == 8:
+                lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm LIKE ?",
+                                     ('%' + suf,)).fetchone()
+    if not lead and nome:
+        candidatos = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE LOWER(TRIM(nome))=?",
+                                  (nome.strip().lower(),)).fetchall()
+        if len(candidatos) == 1:
+            lead = candidatos[0]
+        elif len(candidatos) > 1:
+            so_meus = [c for c in candidatos if c['responsavel_id'] == usuario_id]
+            if len(so_meus) == 1:
+                lead = so_meus[0]
+    lead_id = lead['id'] if lead else None
+    if not lead_id and (tel_norm or nome):
+        conn.execute("""INSERT INTO crm_leads
+            (nome, telefone, telefone_norm, origem, etapa, responsavel_id, observacoes, criado_em)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            (nome or telefone or 'Lead WhatsApp', telefone, tel_norm, 'WhatsApp (extensão)',
+             'lead_novo', usuario_id, 'Criado automaticamente ao mandar mensagem pela extensão.', _agora_sp()))
+        lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                     (lead_id, 'Extensão WhatsApp', 'criacao',
+                      'Lead criado automaticamente ao mandar mensagem pela extensão.', _agora_sp()))
+
+    conn.execute("""INSERT INTO whatsapp_extensao_fila
+        (lead_id, responsavel_id, telefone, chat_id, tipo, texto, origem, criado_por)
+        VALUES (?,?,?,?,'texto',?,'extensao_direto',?)""",
+        (lead_id, usuario_id, telefone, chat_id, texto, usuario_id))
+    fila_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+               else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "id": fila_id, "lead_id": lead_id}))
+
+
 @app.route('/api/whatsapp/usuarios', methods=['GET', 'OPTIONS'])
 def api_whatsapp_usuarios():
     """Lista os usuários ativos (id + nome) pra extensão popular o seletor de
