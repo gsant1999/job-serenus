@@ -1,7 +1,10 @@
 // ─── JOB Serenus · Ponte MAIN world (áudio + documentos) ────────────────────
 //
 //  Roda no CONTEXTO DA PÁGINA (world: MAIN), não no content script isolado —
-//  porque a wa-js (window.WPP) vive no window da página (o WaSpeed já injeta).
+//  porque a wa-js (window.WPP) vive no window da página. A própria extensão
+//  injeta a lib (wa-js.vendor.js, carregado ANTES deste arquivo pelo
+//  manifest.json — @wppconnect/wa-js oficial, vendorizado, sem depender de
+//  extensão de terceiros como o WaSpeed).
 //  O content.js (isolado) pede os áudios/documentos via postMessage; esta
 //  ponte baixa e devolve. Só LEITURA: baixa a mídia que o usuário já vê na
 //  conversa, sem apertar play/abrir nada, e NUNCA envia nada. Se o WPP não
