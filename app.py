@@ -8641,10 +8641,16 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, docume
 # ─── TRANSCRIÇÃO DE ÁUDIO (Fase 2) — mensagens de voz do WhatsApp ─────────────
 # A extensão baixa o áudio (OGG/Opus) da conversa via wa-js e manda base64.
 # Aqui transcrevemos pra PT-BR e injetamos como mensagem na conversa, pra o áudio
-# entrar no Score e na leitura da IA como qualquer texto. OpenAI Whisper por
-# padrão (endpoint de transcrição tem retenção-zero — certo pra dado de saúde);
-# Groq como alternativa mais barata via GROQ_API_KEY. Sem chave = não transcreve
-# (degrada gracioso, resto funciona). Jargão do setor melhora a precisão.
+# entrar no Score e na leitura da IA como qualquer texto.
+# CORREÇÃO 12/07/2026: Groq (whisper-large-v3-turbo) agora é o provedor
+# PRIMÁRIO — ~9x mais barato que a OpenAI (US$0,000667/min vs US$0,006/min),
+# decisão explícita do Guilherme dado o volume (centenas de clientes/mês).
+# OpenAI vira fallback só se GROQ_API_KEY não estiver configurada. Trade-off
+# consciente: a OpenAI tem retenção-zero documentada oficialmente pro endpoint
+# de transcrição (relevante por ser dado de saúde) — a política pública da
+# Groq não confirma a mesma garantia com a mesma clareza. Sem NENHUMA chave =
+# não transcreve (degrada gracioso, resto funciona). Jargão do setor melhora
+# a precisão em ambos os provedores.
 _WA_JARGAO_SMS = ("plano de saúde, cotação, operadora, coparticipação, carência, reajuste, MEI, "
                   "CNPJ, PME, adesão, enfermaria, apartamento, Vera Cruz, Amil, Unimed, Bradesco, "
                   "SulAmérica, Porto, Hapvida, NotreDame, Intermédica, MedSênior, Beneficência")
@@ -8675,18 +8681,18 @@ def _transcrever_audio(b64, mime='audio/ogg'):
         ext = 'wav'
     try:
         import requests as _rq
-        if openai_key:
-            url = 'https://api.openai.com/v1/audio/transcriptions'
-            headers = {'Authorization': f'Bearer {openai_key}'}
-            data = {'model': os.environ.get('OPENAI_TRANSCRICAO_MODELO', 'whisper-1'),
-                    'language': 'pt', 'prompt': _WA_JARGAO_SMS, 'response_format': 'verbose_json'}
-            provedor, preco_min = 'openai', _OPENAI_TRANSCRICAO_PRECO_USD_MIN
-        elif groq_key:
+        if groq_key:
             url = 'https://api.groq.com/openai/v1/audio/transcriptions'
             headers = {'Authorization': f'Bearer {groq_key}'}
             data = {'model': os.environ.get('GROQ_TRANSCRICAO_MODELO', 'whisper-large-v3-turbo'),
                     'language': 'pt', 'prompt': _WA_JARGAO_SMS, 'response_format': 'verbose_json'}
             provedor, preco_min = 'groq', _GROQ_TRANSCRICAO_PRECO_USD_MIN
+        elif openai_key:
+            url = 'https://api.openai.com/v1/audio/transcriptions'
+            headers = {'Authorization': f'Bearer {openai_key}'}
+            data = {'model': os.environ.get('OPENAI_TRANSCRICAO_MODELO', 'whisper-1'),
+                    'language': 'pt', 'prompt': _WA_JARGAO_SMS, 'response_format': 'verbose_json'}
+            provedor, preco_min = 'openai', _OPENAI_TRANSCRICAO_PRECO_USD_MIN
         else:
             return None
         files = {'file': (f'audio.{ext}', raw, mime)}
