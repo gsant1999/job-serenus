@@ -860,6 +860,24 @@ def init_db():
                 custo_usd REAL,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS whatsapp_extensao_fila (
+                id SERIAL PRIMARY KEY,
+                lead_id INTEGER,
+                responsavel_id INTEGER NOT NULL,
+                telefone TEXT NOT NULL,
+                chat_id TEXT NOT NULL,
+                tipo TEXT NOT NULL DEFAULT 'texto',
+                texto TEXT NOT NULL,
+                origem TEXT NOT NULL DEFAULT 'crm_lead',
+                status TEXT NOT NULL DEFAULT 'pendente',
+                tentativas INTEGER NOT NULL DEFAULT 0,
+                erro TEXT,
+                claim_em TIMESTAMP,
+                wpp_msg_id TEXT,
+                criado_por INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                enviado_em TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_agenda (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER NOT NULL,
@@ -1288,6 +1306,24 @@ def init_db():
             segundos REAL,
             custo_usd REAL,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS whatsapp_extensao_fila (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER,
+            responsavel_id INTEGER NOT NULL,
+            telefone TEXT NOT NULL,
+            chat_id TEXT NOT NULL,
+            tipo TEXT NOT NULL DEFAULT 'texto',
+            texto TEXT NOT NULL,
+            origem TEXT NOT NULL DEFAULT 'crm_lead',
+            status TEXT NOT NULL DEFAULT 'pendente',
+            tentativas INTEGER NOT NULL DEFAULT 0,
+            erro TEXT,
+            claim_em TIMESTAMP,
+            wpp_msg_id TEXT,
+            criado_por INTEGER,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            enviado_em TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS crm_agenda (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1721,6 +1757,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_repasse_op ON repasse_corretor(operadora, plano, modelo, nivel)",
         "CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email)",
         "CREATE INDEX IF NOT EXISTS idx_parcelas_competencia ON parcelas(competencia)",
+        "CREATE INDEX IF NOT EXISTS idx_wpp_fila_pendente ON whatsapp_extensao_fila(responsavel_id, status)",
     ]
     for idx in indices:
         try:
@@ -8937,6 +8974,168 @@ def api_whatsapp_estado():
         return _wa_cors(jsonify({"ok": True, "existe": False}))
     return _wa_cors(jsonify({"ok": True, "existe": True, "ultima_hora": msgs[-1].get('hora'),
                               "total_mensagens": len(msgs)}))
+
+
+# ─── FILA DE ENVIO DA EXTENSÃO (Fase 1 — envio avulso de texto) ──────────────
+# A extensão só consegue mandar mensagem de verdade enquanto o Chrome do
+# consultor estiver aberto com o WhatsApp Web carregado (não é um gateway
+# sempre ligado como o WaSpeed) — por isso o envio é assíncrono: o CRM
+# enfileira, a extensão consulta periodicamente ("puxa" o trabalho, mesmo
+# padrão do _importar_leads_automatico) e confirma depois de mandar.
+_WA_FILA_GATE_SEGUNDOS = int(os.environ.get('WA_FILA_GATE_SEGUNDOS', '12'))
+_WA_FILA_RECLAIM_MINUTOS = 3
+_WA_FILA_MAX_TENTATIVAS = 3
+
+
+def _wa_chat_id(telefone):
+    """'55DDDNUMERO@c.us' — formato que a wa-js espera pra endereçar o chat.
+    Reaproveita a mesma normalização já usada pro WaSpeed (garante '55')."""
+    fone = _waspeed_normaliza_fone(telefone)
+    return f"{fone}@c.us" if fone else ''
+
+
+def _wa_segundos_desde(valor):
+    """Segundos desde um timestamp do banco (PG datetime ou string SQLite),
+    lidando com naive/aware igual _data_expirada. None se valor vazio/inválido."""
+    dt = _parse_dt_seguro(valor)
+    if not dt:
+        return None
+    agora = datetime.now(TZ_SP)
+    if dt.tzinfo is None:
+        agora = agora.replace(tzinfo=None)
+    return (agora - dt).total_seconds()
+
+
+@app.route('/crm/lead/<int:lid>/whatsapp-extensao/enfileirar', methods=['POST'])
+@login_required
+def crm_lead_whatsapp_extensao_enfileirar(lid):
+    """Coloca uma mensagem de texto na fila pra extensão mandar assim que o
+    WhatsApp Web daquele consultor estiver aberto. Nunca envia na hora."""
+    conn = db()
+    lead = conn.execute("SELECT id, telefone, responsavel_id FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    ld = dict(lead)
+    if session.get('perfil') != 'admin' and ld['responsavel_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    if not ld['responsavel_id']:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead sem responsável definido — defina antes de mandar mensagem"}), 400
+    texto = (request.json or {}).get('texto', '').strip()[:4000]
+    if not texto:
+        close_db(conn); return jsonify({"ok": False, "erro": "Mensagem vazia"}), 400
+    chat_id = _wa_chat_id(ld.get('telefone'))
+    if not chat_id:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead sem telefone válido"}), 400
+    conn.execute("""INSERT INTO whatsapp_extensao_fila
+        (lead_id, responsavel_id, telefone, chat_id, tipo, texto, origem, criado_por)
+        VALUES (?,?,?,?,'texto',?,'crm_lead',?)""",
+        (lid, ld['responsavel_id'], ld['telefone'], chat_id, texto, session.get('user_id')))
+    fila_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+               else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "id": fila_id, "status": "pendente"})
+
+
+@app.route('/crm/lead/<int:lid>/whatsapp-extensao/status', methods=['GET'])
+@login_required
+def crm_lead_whatsapp_extensao_status(lid):
+    """Polling leve pro front saber se um item da fila já foi enviado."""
+    fila_id = request.args.get('fila_id', type=int)
+    if not fila_id:
+        return jsonify({"ok": False, "erro": "fila_id obrigatório"}), 400
+    conn = db()
+    item = conn.execute("SELECT id, lead_id, status, erro FROM whatsapp_extensao_fila WHERE id=?", (fila_id,)).fetchone()
+    close_db(conn)
+    if not item or item['lead_id'] != lid:
+        return jsonify({"ok": False, "erro": "Não encontrado"}), 404
+    return jsonify({"ok": True, "status": item['status'], "erro": item['erro']})
+
+
+@app.route('/api/whatsapp/fila/proximo', methods=['GET', 'OPTIONS'])
+def api_whatsapp_fila_proximo():
+    """A extensão consulta isso periodicamente perguntando se tem algo pra
+    mandar. Claim atômico (mesmo padrão de _processar_fluxos_pendentes) pra
+    nunca deixar duas abas do mesmo consultor pegarem o mesmo item. O limite
+    de ritmo mora AQUI (servidor), não no client — nunca libera item novo
+    pro mesmo responsavel_id antes de _WA_FILA_GATE_SEGUNDOS do último envio."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    usuario_id = request.args.get('usuario_id', type=int)
+    if not usuario_id:
+        return _wa_cors(jsonify({"ok": True, "item": None}))
+    conn = db()
+    ultimo = conn.execute("""SELECT MAX(enviado_em) m FROM whatsapp_extensao_fila
+        WHERE responsavel_id=? AND status='enviado'""", (usuario_id,)).fetchone()
+    if ultimo and ultimo['m']:
+        decorrido = _wa_segundos_desde(ultimo['m'])
+        if decorrido is not None and decorrido < _WA_FILA_GATE_SEGUNDOS:
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": True, "item": None}))
+    agora = datetime.now(TZ_SP)
+    cutoff_reclaim = (agora - timedelta(minutes=_WA_FILA_RECLAIM_MINUTOS)).strftime('%Y-%m-%d %H:%M:%S')
+    candidato = conn.execute("""
+        SELECT id FROM whatsapp_extensao_fila
+        WHERE responsavel_id=? AND (
+            status='pendente' OR (status='enviando' AND claim_em < ?)
+        )
+        ORDER BY criado_em ASC LIMIT 1
+    """, (usuario_id, cutoff_reclaim)).fetchone()
+    if not candidato:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": True, "item": None}))
+    claim = conn.execute("""UPDATE whatsapp_extensao_fila SET status='enviando', claim_em=?
+        WHERE id=? AND status IN ('pendente','enviando')""",
+        (agora.strftime('%Y-%m-%d %H:%M:%S'), candidato['id']))
+    if getattr(claim, 'rowcount', 1) == 0:
+        conn.rollback(); close_db(conn)
+        return _wa_cors(jsonify({"ok": True, "item": None}))
+    conn.commit()
+    item = conn.execute("SELECT * FROM whatsapp_extensao_fila WHERE id=?", (candidato['id'],)).fetchone()
+    close_db(conn)
+    if not item:
+        return _wa_cors(jsonify({"ok": True, "item": None}))
+    it = dict(item)
+    return _wa_cors(jsonify({"ok": True, "item": {
+        "id": it['id'], "chat_id": it['chat_id'], "tipo": it['tipo'], "texto": it['texto'],
+    }}))
+
+
+@app.route('/api/whatsapp/fila/<int:fid>/confirmar', methods=['POST', 'OPTIONS'])
+def api_whatsapp_fila_confirmar(fid):
+    """A extensão chama depois de tentar mandar (sucesso ou falha). Sucesso
+    grava em crm_atividades igual o botão de 1 clique já faz. Falha reenfileira
+    até 3 tentativas, depois marca 'falhou' de vez (não fica tentando pra sempre)."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    d = request.json or {}
+    conn = db()
+    item = conn.execute("SELECT * FROM whatsapp_extensao_fila WHERE id=?", (fid,)).fetchone()
+    if not item:
+        close_db(conn); return _wa_cors(jsonify({"ok": False, "erro": "Não encontrado"})), 404
+    it = dict(item)
+    if bool(d.get('ok')):
+        conn.execute("""UPDATE whatsapp_extensao_fila SET status='enviado', enviado_em=?, wpp_msg_id=? WHERE id=?""",
+                     (_agora_sp(), str(d.get('wpp_msg_id') or '')[:100], fid))
+        if it['lead_id']:
+            conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                            VALUES (?,?,?,?,?)""",
+                         (it['lead_id'], 'Extensão WhatsApp', 'whatsapp',
+                          f"WhatsApp enviado via extensão: {it['texto'][:200]}", _agora_sp()))
+    else:
+        tentativas = it['tentativas'] + 1
+        erro = str(d.get('erro') or 'Falha ao enviar')[:300]
+        if tentativas >= _WA_FILA_MAX_TENTATIVAS:
+            conn.execute("UPDATE whatsapp_extensao_fila SET status='falhou', tentativas=?, erro=? WHERE id=?",
+                         (tentativas, erro, fid))
+        else:
+            conn.execute("UPDATE whatsapp_extensao_fila SET status='pendente', tentativas=?, erro=? WHERE id=?",
+                         (tentativas, erro, fid))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
 
 
 @app.route('/api/whatsapp/usuarios', methods=['GET', 'OPTIONS'])
