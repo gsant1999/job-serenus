@@ -46,6 +46,10 @@ html.job-push-esquerda .job-trilho-item-ativo { border-left: none; border-right:
   min-width: 15px; height: 15px; border-radius: 999px;
   display: flex; align-items: center; justify-content: center; padding: 0 3px;
 }
+/* display:flex acima ganha do [hidden] do navegador (mesma especificidade,
+   e regra de autor sempre vence a folha padrão) — sem isso o badge "0"
+   aparecia mesmo com nenhuma análise rodando. */
+.job-trilho-item-badge[hidden] { display: none; }
 
 #job-painel-doc {
   position: fixed; top: 0; right: 72px; bottom: 0; width: 400px;
