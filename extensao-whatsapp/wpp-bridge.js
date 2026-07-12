@@ -1,14 +1,16 @@
-// ─── JOB Serenus · Ponte MAIN world (áudio + documentos) ────────────────────
+// ─── JOB Serenus · Ponte MAIN world (áudio + documentos + envio) ────────────
 //
 //  Roda no CONTEXTO DA PÁGINA (world: MAIN), não no content script isolado —
 //  porque a wa-js (window.WPP) vive no window da página. A própria extensão
 //  injeta a lib (wa-js.vendor.js, carregado ANTES deste arquivo pelo
 //  manifest.json — @wppconnect/wa-js oficial, vendorizado, sem depender de
 //  extensão de terceiros como o WaSpeed).
-//  O content.js (isolado) pede os áudios/documentos via postMessage; esta
-//  ponte baixa e devolve. Só LEITURA: baixa a mídia que o usuário já vê na
-//  conversa, sem apertar play/abrir nada, e NUNCA envia nada. Se o WPP não
-//  existir, responde com erro e a análise segue sem esse anexo.
+//  O content.js (isolado) pede via postMessage: baixar áudio/documento (só
+//  leitura, sem apertar play/abrir nada) e, a partir da Fase 1, mandar uma
+//  mensagem de texto específica — SEMPRE originada de uma ação explícita do
+//  consultor na fila do CRM, nunca em massa/automático por conta própria
+//  desta ponte. Se o WPP não existir, responde com erro e a análise/envio
+//  segue sem essa parte.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -145,6 +147,25 @@
     return { telefone: numero };
   }
 
+  // ── ENVIO (Fase 1) — a ÚNICA função desta ponte que manda alguma coisa pro
+  //    WhatsApp. Cada chamada é uma mensagem específica que o consultor pediu
+  //    explicitamente pra mandar (via fila do CRM) — nunca em massa, nunca
+  //    automático sem origem rastreável. wa-js manda direto pelo chatId, sem
+  //    precisar abrir/navegar até a conversa na tela primeiro. ──
+  async function enviarTexto(chatId, texto) {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.sendTextMessage) {
+      return { erro: 'wpp_ausente' };
+    }
+    if (!chatId || !texto) return { erro: 'parametros_invalidos' };
+    try {
+      const res = await window.WPP.chat.sendTextMessage(chatId, texto);
+      const msgId = (res && res.id && res.id._serialized) || (res && res._serialized) || null;
+      return { ok: true, wpp_msg_id: msgId };
+    } catch (e) {
+      return { ok: false, erro: String((e && e.message) || e).slice(0, 200) };
+    }
+  }
+
   window.addEventListener('message', async (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
@@ -154,6 +175,7 @@
       if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite);
       else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite);
       else if (d.tipo === 'obter_telefone') resp = await obterTelefone();
+      else if (d.tipo === 'enviar_texto') resp = await enviarTexto(d.chatId, d.texto);
       else return;
     } catch (e) { resp = { erro: 'excecao' }; }
     resp.source = 'JOB_EXT_RESP';

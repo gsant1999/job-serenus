@@ -22,7 +22,7 @@
 </head>
 <body>
   <h1>JOB Serenus</h1>
-  <p class="sub">Análise de conversa do WhatsApp · somente leitura</p>
+  <p class="sub">Análise de conversa do WhatsApp + envio pela fila do CRM</p>
 
   <label for="jobUrl">URL do JOB</label>
   <input id="jobUrl" type="text" placeholder="https://job-serenus-production.up.railway.app">
@@ -41,8 +41,10 @@
 
   <div class="nota">
     A chave é a mesma configurada no Railway (variável <b>WHATSAPP_EXT_KEY</b>).
-    O consultor selecionado vira o responsável dos leads criados automaticamente.
-    Esta extensão só lê a conversa aberta e nunca envia mensagens.
+    O consultor selecionado vira o responsável dos leads criados automaticamente
+    e é quem a extensão consulta pra saber se tem mensagem pendente pra mandar.
+    O envio só acontece pra mensagens que o próprio consultor colocou na fila
+    pelo CRM — a extensão nunca decide sozinha o que ou quando mandar.
   </div>
 
   <script src="popup.js"></script>

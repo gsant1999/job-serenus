@@ -1,16 +1,15 @@
 // ─── JOB Serenus · Content Script (WhatsApp Web) ────────────────────────────
 //
 //  ⚠️  GARANTIA DE SEGURANÇA — LEIA ANTES DE MEXER:
-//  Este script é 100% LEITURA. Ele:
-//    • lê a conversa que JÁ ESTÁ na tela (a sessão que VOCÊ abriu);
-//    • rola o histórico pra cima devagar, como um humano, pra carregar mais;
-//    • injeta um botão e um painel próprios na página.
-//  Ele NUNCA:
-//    • digita no campo de mensagem, clica em "enviar", nem manda nada;
-//    • abre conexão de protocolo / API do WhatsApp;
-//    • faz qualquer ação em massa ou automática de envio.
-//  Ler o DOM da sua própria sessão é o mesmo que você lendo com os olhos —
-//  é o caminho de MENOR risco possível de banir o número. Não adicione envio aqui.
+//  A leitura (análise de lead) continua 100% leitura: lê a conversa que JÁ
+//  ESTÁ na tela, rola o histórico devagar como um humano, nunca digita no
+//  campo de mensagem nem clica em "enviar" por conta própria.
+//  A partir da Fase 1, existe TAMBÉM um envio — mas só de mensagens que o
+//  consultor colocou explicitamente na fila pelo CRM (nunca decidido aqui, e
+//  esse arquivo não tem NENHUMA lógica de "quando"/"o quê" mandar, só busca o
+//  que já foi aprovado). Ritmo limitado no servidor (não aqui), nunca envia
+//  em massa. Ao adicionar qualquer coisa nova de envio, sempre com origem
+//  rastreável — nunca automático "por conta própria" da extensão.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -350,6 +349,29 @@
       setTimeout(() => {
         if (!pronto) { window.removeEventListener('message', onMsg); resolve(''); }
       }, 5000);
+    });
+  }
+
+  // ── ENVIO (Fase 1): pede pra ponte no main world mandar um texto
+  //    específico. Só chamada pelo loop da fila (mais abaixo), nunca direto
+  //    de uma ação de leitura. ──
+  function pedirEnviarTexto(chatId, texto) {
+    return new Promise((resolve) => {
+      const reqId = 'e' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true;
+        window.removeEventListener('message', onMsg);
+        resolve(d);
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'enviar_texto', reqId, chatId, texto }, '*');
+      setTimeout(() => {
+        if (!pronto) { window.removeEventListener('message', onMsg); resolve({ erro: 'timeout_envio' }); }
+      }, 30000);
     });
   }
 
@@ -805,4 +827,31 @@
     _ultimaChaveVista = chaveAgora;
     sincronizarPainelComConversa();
   }, 1500);
+
+  // ═══════════════ Fila de envio (Fase 1) ═══════════════
+  // A cada ~20s pergunta ao JOB se tem alguma mensagem pra mandar (só se a
+  // extensão estiver configurada). O QUE mandar e QUANDO foi decidido pelo
+  // consultor lá no CRM — este loop só busca e executa, não decide nada.
+  // O limite de ritmo de verdade mora no servidor (/api/whatsapp/fila/proximo);
+  // o mutex aqui só evita duas consultas se sobrepondo na MESMA aba.
+  let _filaOcupada = false;
+  async function checarFilaDeEnvio() {
+    if (_filaOcupada) return;
+    const { extKey, usuarioId } = await chrome.storage.local.get(['extKey', 'usuarioId']);
+    if (!extKey || !usuarioId) return;
+    _filaOcupada = true;
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: 'fila_proximo', usuario_id: usuarioId });
+      const item = resp && resp.ok && resp.item;
+      if (!item) return;
+      const envio = await pedirEnviarTexto(item.chat_id, item.texto);
+      await chrome.runtime.sendMessage({
+        type: 'fila_confirmar', fila_id: item.id,
+        ok: !!(envio && envio.ok), erro: (envio && envio.erro) || null,
+        wpp_msg_id: (envio && envio.wpp_msg_id) || null,
+      });
+    } catch (e) { /* próxima rodada tenta de novo */ }
+    finally { _filaOcupada = false; }
+  }
+  setInterval(checarFilaDeEnvio, 20000);
 })();

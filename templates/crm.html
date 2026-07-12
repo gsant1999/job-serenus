@@ -581,10 +581,12 @@
             <textarea id="wpp-msg" class="wpp-msg" placeholder="Digite a mensagem..."></textarea>
             <div class="wpp-actions">
               <button class="btn-wpp-send" onclick="abrirWppWeb()">Abrir WhatsApp Web</button>
+              <button class="btn-wpp-send" id="wpp-fila-btn" style="background:#2563eb;margin-top:6px;" onclick="enviarViaExtensao()">Mandar via extensão (automático)</button>
             </div>
             <div style="font-size:10px;color:var(--cinza-2);margin-top:8px;">
               Abre o WhatsApp Web/app com a mensagem pronta, pelo seu próprio número.
             </div>
+            <div id="wpp-fila-status" style="font-size:10px;color:var(--cinza-2);margin-top:4px;"></div>
           </div>
 
           <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--borda);">
@@ -1080,6 +1082,42 @@ function abrirWppWeb(){
   if(!tel){ toast('Sem telefone','err'); return; }
   const msg=document.getElementById('wpp-msg').value.trim()||('Olá '+(_leadAtual.nome||'')+', tudo bem?');
   window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(msg),'_blank');
+}
+// ── Envio pela fila da extensão: não é síncrono — só funciona quando o
+//    WhatsApp Web de algum computador do responsável estiver aberto com a
+//    extensão configurada. "Pendente" por um tempo é normal, não é erro. ──
+async function enviarViaExtensao(){
+  if(!_leadAtual) return;
+  const texto=document.getElementById('wpp-msg').value.trim();
+  if(!texto){ toast('Escreva a mensagem primeiro','err'); return; }
+  const btn=document.getElementById('wpp-fila-btn');
+  const status=document.getElementById('wpp-fila-status');
+  btn.disabled=true;
+  status.textContent='Na fila…';
+  try{
+    const r=await fetch('/crm/lead/'+_leadAtual.id+'/whatsapp-extensao/enfileirar',{
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({texto})
+    });
+    const d=await r.json();
+    if(!d.ok){ status.textContent='Erro: '+(d.erro||'falha ao enfileirar'); btn.disabled=false; return; }
+    _acompanharFilaWpp(d.id, btn, status, 0);
+  }catch(e){ status.textContent='Erro: '+e.message; btn.disabled=false; }
+}
+function _acompanharFilaWpp(filaId, btn, status, tentativa){
+  const MAX_TENTATIVAS=6, INTERVALO_MS=5000;
+  fetch('/crm/lead/'+_leadAtual.id+'/whatsapp-extensao/status?fila_id='+filaId)
+    .then(r=>r.json()).then(d=>{
+      if(!d.ok){ status.textContent='Erro ao checar status'; btn.disabled=false; return; }
+      if(d.status==='enviado'){ status.textContent='Enviado ✓'; btn.disabled=false; toast('Mensagem enviada!','ok'); return; }
+      if(d.status==='falhou'){ status.textContent='Falhou — '+(d.erro||'erro desconhecido'); btn.disabled=false; return; }
+      if(d.status==='cancelado'){ status.textContent='Cancelado'; btn.disabled=false; return; }
+      if(tentativa>=MAX_TENTATIVAS){
+        status.textContent='Pendente — aguardando o WhatsApp Web abrir em algum computador do responsável.';
+        btn.disabled=false; return;
+      }
+      status.textContent='Na fila… aguardando o WhatsApp Web do responsável ('+(tentativa+1)+')';
+      setTimeout(()=>_acompanharFilaWpp(filaId, btn, status, tentativa+1), INTERVALO_MS);
+    }).catch(()=>{ status.textContent='Pendente — não deu pra confirmar agora.'; btn.disabled=false; });
 }
 const BOTCONVERSA_COMPANY_ID='206993';
 function _abrirBotConversaPorTelefone(tel){

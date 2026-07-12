@@ -4,9 +4,11 @@
 // manda os dados pra cá (service worker), que não sofre o CSP da página e tem
 // host_permissions, e ESTE arquivo faz a chamada HTTP pro JOB.
 //
-// Este worker SÓ FALA COM O JOB. Ele nunca toca no WhatsApp — não tem como
-// enviar mensagem daqui. Toda a superfície de risco de "banir o número" mora
-// no WhatsApp Web, e o content script é 100% leitura.
+// Este worker SÓ FALA COM O JOB (nunca toca no WhatsApp diretamente — quem
+// manda mensagem de verdade é a ponte MAIN world, wpp-bridge.js). A partir
+// da Fase 1, esse HTTP inclui perguntar ao JOB "tem algo pra mandar?" e
+// confirmar depois de mandar — mas a decisão de QUE mensagem e QUANDO é
+// sempre do consultor lá no CRM, nunca decidida aqui.
 
 const JOB_URL_PADRAO = 'https://job-serenus-production.up.railway.app';
 
@@ -95,6 +97,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (registro) { registro.cancelado = true; registro.controller.abort(); }
     sendResponse({ ok: true });
     return false;
+  }
+  if (msg && msg.type === 'fila_proximo') {
+    chamarJob('/api/whatsapp/fila/proximo?usuario_id=' + encodeURIComponent(msg.usuario_id || ''), 'GET', null, 15000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'fila_confirmar') {
+    chamarJob('/api/whatsapp/fila/' + encodeURIComponent(msg.fila_id) + '/confirmar', 'POST',
+      { ok: msg.ok, erro: msg.erro, wpp_msg_id: msg.wpp_msg_id }, 15000).then(sendResponse);
+    return true;
   }
   if (msg && msg.type === 'notificar') {
     // Aviso local do sistema operacional — só isso, nada é enviado pra fora.

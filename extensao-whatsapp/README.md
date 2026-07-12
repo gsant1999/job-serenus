@@ -3,26 +3,31 @@
 Extensão de navegador (Chrome/Edge) que lê a conversa aberta no **WhatsApp Web**,
 casa com o lead no **JOB** (ou cria automaticamente), calcula o **Score Lead**
 oficial (0–1000) e mostra **sugestões de próxima ação** — direto ao lado da
-conversa. Versão atual: `1.8.1`.
+conversa. A partir da versão `2.0.0` também manda mensagem de texto, mas só
+quando o consultor coloca explicitamente na fila pelo CRM (nunca em massa,
+nunca por conta própria da extensão).
 
-## Segurança: por que isso NÃO bane o número
+## Segurança: leitura sempre foi, envio é sob demanda e com limite
 
-A extensão é **100% leitura**. Ela:
+A **análise de lead continua 100% leitura**: lê a conversa que você já abriu,
+rola o histórico devagar (ritmo humano), baixa mídia que já está na tela sem
+apertar play, nunca digita ou clica em "enviar" por conta própria.
 
-- lê a conversa que **você já abriu** na sua sessão do WhatsApp Web;
-- rola o histórico pra cima devagar (ritmo humano) pra carregar mais mensagens;
-- baixa mídia (áudio/documento) que já está na tela, sem apertar play nem abrir nada;
-- injeta um botão e um painel próprios na página.
+A partir da Fase 1, existe **também** um envio — com um desenho pensado pra
+minimizar risco:
 
-Ela **nunca**:
+- só manda mensagem que o consultor colocou explicitamente na fila do CRM
+  (`/crm/lead/<id>/whatsapp-extensao/enfileirar`) — a extensão nunca decide
+  sozinha o quê ou quando mandar;
+- o limite de ritmo entre envios mora no **servidor** (não dá pra burlar
+  mudando o client), configurável via `WA_FILA_GATE_SEGUNDOS`;
+- sem disparo em massa nesta fase — isso é uma fase futura própria, com
+  aquecimento de número e teto diário, só depois de validar em volume baixo.
 
-- digita no campo de mensagem, clica em "enviar" nem manda nada;
-- abre conexão de protocolo/API do WhatsApp;
-- faz qualquer ação em massa ou envio automático.
-
-Ler o DOM da sua própria sessão é o mesmo que você lendo com os olhos — é o
-caminho de **menor risco possível** de banir o número. Diferente de disparo em
-massa (que é o que realmente derruba número), aqui não há envio nenhum.
+Ler o DOM da sua própria sessão continua sendo o caminho de menor risco pra
+leitura. Pro envio, o risco real é inerente a automatizar WhatsApp Web não
+oficial — o desenho aqui existe pra reduzir esse risco, não pra fingir que
+ele não existe.
 
 ## Instalação (uma vez)
 
