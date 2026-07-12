@@ -9228,9 +9228,8 @@ def api_whatsapp_enviar_direto():
 @app.route('/api/whatsapp/extensao/modelos', methods=['GET', 'OPTIONS'])
 def api_whatsapp_extensao_modelos():
     """Lista os modelos de mensagem de WhatsApp ativos pra extensão mostrar na
-    seção Mensagens do painel — só LEITURA (criar/editar modelo é só no site,
-    admin). Monta a URL de mídia pronta pra extensão não precisar saber o
-    padrão de rota."""
+    seção Mensagens do painel. Monta a URL de mídia pronta pra extensão não
+    precisar saber o padrão de rota."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
@@ -9248,6 +9247,77 @@ def api_whatsapp_extensao_modelos():
             "midia_url": (f"{_SITE_BASE_URL}/crm/modelos/midia/{md['midia_arquivo']}" if md['midia_arquivo'] else None),
         })
     return _wa_cors(jsonify({"ok": True, "modelos": modelos}))
+
+
+@app.route('/api/whatsapp/extensao/modelos/novo', methods=['POST', 'OPTIONS'])
+def api_whatsapp_extensao_modelo_novo():
+    """Cria um modelo de mensagem de WhatsApp DIRETO da extensão (texto sempre;
+    mídia opcional — áudio gravado na hora, áudio pronto ou imagem). Autenticado
+    por chave de extensão (não sessão) — decisão explícita do Guilherme de poder
+    montar a biblioteca inteira sem sair do WhatsApp, igual WaSpeed/ZapVoice.
+    criado_por = usuario_id escolhido no popup (pra saber quem cadastrou)."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    nome = (request.form.get('nome') or '').strip()
+    texto = (request.form.get('texto') or '').strip()
+    if not nome or not texto:
+        return _wa_cors(jsonify({"ok": False, "erro": "Nome e texto são obrigatórios"})), 400
+    if len(texto) > 4000:
+        return _wa_cors(jsonify({"ok": False, "erro": "Texto longo demais (máx. 4000 caracteres)"})), 400
+    criado_por = None
+    try:
+        criado_por = int(request.form.get('usuario_id'))
+    except (TypeError, ValueError):
+        pass
+
+    midia_arquivo, midia_tipo = None, None
+    f = request.files.get('arquivo_midia')
+    if f and f.filename:
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext in _MODELO_WPP_EXTS_IMG:
+            midia_tipo = 'imagem'
+        elif ext in _MODELO_WPP_EXTS_AUDIO or ext in ('.webm',):
+            midia_tipo = 'audio'
+        else:
+            return _wa_cors(jsonify({"ok": False, "erro": f"Formato não aceito: {ext}"})), 400
+        f.stream.seek(0, os.SEEK_END)
+        tamanho = f.stream.tell()
+        f.stream.seek(0)
+        if tamanho > 16_000_000:
+            return _wa_cors(jsonify({"ok": False, "erro": "Arquivo grande demais (máx. 16MB)"})), 400
+        nome_arquivo = f"MODELO_WPP_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{_sanitizar_filename(f.filename)}"
+        resultado = upload_arquivo_r2(f.stream, f"modelos/{nome_arquivo}")
+        if not resultado.get('ok'):
+            return _wa_cors(jsonify({"ok": False, "erro": "Erro ao salvar mídia"})), 500
+        midia_arquivo = nome_arquivo
+
+    conn = db()
+    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, corpo_texto, ativo, criado_por, midia_arquivo, midia_tipo)
+                    VALUES ('whatsapp',?,?,1,?,?,?)""",
+                 (nome, texto, criado_por, midia_arquivo, midia_tipo))
+    mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "id": mid}))
+
+
+@app.route('/api/whatsapp/extensao/modelos/<int:mid>/excluir', methods=['POST', 'OPTIONS'])
+def api_whatsapp_extensao_modelo_excluir(mid):
+    """Exclui um modelo de WhatsApp pela extensão. Só mexe em tipo='whatsapp'
+    (não deixa a extensão apagar modelo de email/sms por engano/abuso)."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    conn = db()
+    m = conn.execute("SELECT id FROM modelos_conteudo WHERE id=? AND tipo='whatsapp'", (mid,)).fetchone()
+    if not m:
+        close_db(conn); return _wa_cors(jsonify({"ok": False, "erro": "Modelo não encontrado"})), 404
+    conn.execute("DELETE FROM modelos_conteudo WHERE id=? AND tipo='whatsapp'", (mid,))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
 
 
 @app.route('/api/whatsapp/usuarios', methods=['GET', 'OPTIONS'])

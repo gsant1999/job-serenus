@@ -73,6 +73,37 @@ async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId) {
   }
 }
 
+// Cria um modelo com upload de mídia (multipart) — não passa por chamarJob
+// (que é JSON). O content script manda o arquivo como base64 (Blob não
+// atravessa chrome.runtime.sendMessage); aqui remonta num Blob e posta como
+// FormData. O envio precisa acontecer AQUI (o content script não consegue
+// fetch pro JOB por causa do CSP do WhatsApp Web).
+async function criarModelo(dados) {
+  const { jobUrl, extKey } = await config();
+  if (!extKey) return { ok: false, erro: 'Configure a chave da extensão no popup.' };
+  try {
+    const fd = new FormData();
+    fd.append('nome', dados.nome || '');
+    fd.append('texto', dados.texto || '');
+    if (dados.usuario_id) fd.append('usuario_id', dados.usuario_id);
+    if (dados.midia_base64 && dados.midia_nome) {
+      const bin = atob(dados.midia_base64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: dados.midia_mime || 'application/octet-stream' });
+      fd.append('arquivo_midia', blob, dados.midia_nome);
+    }
+    const resp = await fetch(jobUrl + '/api/whatsapp/extensao/modelos/novo', {
+      method: 'POST', headers: { 'X-Extension-Key': extKey }, body: fd,
+    });
+    const d = await resp.json().catch(() => null);
+    if (!resp.ok) return { ok: false, erro: (d && d.erro) || ('HTTP ' + resp.status) };
+    return d || { ok: true };
+  } catch (e) {
+    return { ok: false, erro: 'Falha ao salvar modelo: ' + e.message };
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'ping') {
     chamarJob('/api/whatsapp/ping', 'GET', null, 15000).then(sendResponse);
@@ -99,9 +130,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === 'listar_modelos') {
-    // Biblioteca de modelos de mensagem — só leitura (criar/editar é só no
-    // site, admin). Usado pela seção "Mensagens" do painel.
     chamarJob('/api/whatsapp/extensao/modelos', 'GET', null, 15000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'criar_modelo') {
+    criarModelo(msg.dados).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'excluir_modelo') {
+    chamarJob('/api/whatsapp/extensao/modelos/' + encodeURIComponent(msg.id) + '/excluir', 'POST', {}, 15000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'cancelar') {

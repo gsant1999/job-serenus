@@ -575,14 +575,17 @@
   }
 
   // ═══════════════ Seção Mensagens: biblioteca de modelos ═══════════════
-  // Sem caixa de compor livre (não tem valor sobre o campo nativo do
-  // WhatsApp — já testamos e o próprio Guilherme apontou isso certo). O que
-  // tem valor é mandar algo PROGRAMADO: escolher um modelo já pronto (criado
-  // no site, admin) e mandar pela mesma fila que já existe. Envio de mídia
-  // ainda não está disponível (fase própria futura) — modelo com áudio/
-  // imagem fica listado, mas o botão de enviar vem desabilitado.
+  // Biblioteca de modelos de mensagem, gerenciável AQUI dentro da extensão
+  // (pedido direto do Guilherme, igual WaSpeed/ZapVoice): salvar texto pronto,
+  // subir áudio/imagem, e GRAVAR áudio na hora — sem sair do WhatsApp. Mandar
+  // um modelo continua passando pela mesma fila com limite de ritmo do
+  // servidor. Envio de mídia em si (mandar o áudio pro lead) ainda é fase
+  // futura — por ora a mídia fica salva no modelo, o botão Enviar manda o
+  // texto.
   const MODELOS_CACHE_MS = 5 * 60 * 1000;
   let _modelosCache = null; // {ts, modelos}
+  let _gravador = null, _gravChunks = [], _gravTimer = null, _gravInicio = 0;
+  let _midiaAnexada = null; // {blob, nome, mime, tipo, dur}
 
   async function buscarModelos(forcar) {
     if (!forcar && _modelosCache && (Date.now() - _modelosCache.ts) < MODELOS_CACHE_MS) {
@@ -598,31 +601,70 @@
     return '<div class="job-carregando"><div class="job-spin"></div><div>Carregando modelos…</div></div>';
   }
 
-  function renderModelos(modelos) {
-    if (!modelos.length) {
-      return '<div class="job-vazio">Nenhum modelo de WhatsApp cadastrado ainda. ' +
-        'Gerencie em <b>/crm/modelos</b> no site do JOB.</div>';
+  function renderFormularioNovo() {
+    let midiaChip = '';
+    if (_midiaAnexada) {
+      const rot = _midiaAnexada.tipo === 'audio'
+        ? '🎤 Áudio pronto' + (_midiaAnexada.dur ? ' (' + fmtDuracao(_midiaAnexada.dur) + ')' : '')
+        : '🖼 Imagem pronta';
+      midiaChip = '<div class="job-midia-chip">' + rot +
+        '<button class="job-midia-x" id="job-midia-descartar" title="Remover">×</button></div>';
     }
-    return modelos.map((m) => {
-      const badge = m.midia_tipo
-        ? '<span class="job-chip">' + (m.midia_tipo === 'audio' ? '🎤 Áudio' : '🖼 Imagem') + '</span>'
-        : '';
-      const btnEnviar = m.midia_tipo
-        ? '<button class="job-modelo-enviar" disabled title="Envio de mídia — em breve">Envio de mídia — em breve</button>'
-        : '<button class="job-modelo-enviar" data-modelo-id="' + m.id + '">Enviar</button>';
-      return '<div class="job-modelo-card">' +
-        '<div class="job-modelo-nome">' + esc(m.nome) + '</div>' +
-        (badge ? '<div>' + badge + '</div>' : '') +
-        '<div class="job-modelo-preview">' + esc(m.texto) + '</div>' +
-        '<div class="job-modelo-acoes">' +
-          btnEnviar +
-          '<button class="job-modelo-copiar" data-texto="' + esc(m.texto) + '">Copiar texto</button>' +
-        '</div>' +
+    return '<div class="job-novo-modelo">' +
+      '<div class="job-sec" style="margin-top:0">Novo modelo</div>' +
+      '<input class="job-inp" id="job-novo-nome" placeholder="Nome (ex: Boas-vindas)">' +
+      '<textarea class="job-inp job-inp-txt" id="job-novo-texto" placeholder="Texto da mensagem…"></textarea>' +
+      '<div class="job-novo-acoes">' +
+        '<button class="job-mini-btn" id="job-gravar-btn">🎤 Gravar áudio</button>' +
+        '<button class="job-mini-btn" id="job-anexar-btn">📎 Anexar arquivo</button>' +
+        '<input type="file" id="job-arquivo-input" accept="audio/*,image/*" style="display:none">' +
+      '</div>' +
+      '<div id="job-grav-status" class="job-grav-status"></div>' +
+      midiaChip +
+      '<button class="job-salvar-modelo" id="job-salvar-modelo-btn">Salvar modelo</button>' +
+      '<div id="job-salvar-status" class="job-grav-status"></div>' +
       '</div>';
-    }).join('');
+  }
+
+  function renderModelos(modelos) {
+    const lista = !modelos.length
+      ? '<div class="job-vazio">Nenhum modelo salvo ainda. Crie o primeiro acima.</div>'
+      : modelos.map((m) => {
+        const badge = m.midia_tipo
+          ? '<span class="job-chip">' + (m.midia_tipo === 'audio' ? '🎤 Áudio' : '🖼 Imagem') + '</span>'
+          : '';
+        return '<div class="job-modelo-card">' +
+          '<div class="job-modelo-nome">' + esc(m.nome) + '</div>' +
+          (badge ? '<div>' + badge + '</div>' : '') +
+          '<div class="job-modelo-preview">' + esc(m.texto) + '</div>' +
+          '<div class="job-modelo-acoes">' +
+            '<button class="job-modelo-enviar" data-modelo-id="' + m.id + '">Enviar texto</button>' +
+            '<button class="job-modelo-copiar" data-texto="' + esc(m.texto) + '">Copiar</button>' +
+            '<button class="job-modelo-excluir" data-modelo-id="' + m.id + '" title="Excluir">×</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    return renderFormularioNovo() +
+      '<div class="job-sec">Modelos salvos (' + modelos.length + ')</div>' + lista;
   }
 
   function ligarAcoesModelos() {
+    const g = document.getElementById('job-gravar-btn');
+    if (g) g.addEventListener('click', toggleGravacao);
+    const a = document.getElementById('job-anexar-btn');
+    const inp = document.getElementById('job-arquivo-input');
+    if (a && inp) {
+      a.addEventListener('click', () => inp.click());
+      inp.addEventListener('change', () => {
+        const f = inp.files[0];
+        if (f) anexarArquivo(f);
+      });
+    }
+    const desc = document.getElementById('job-midia-descartar');
+    if (desc) desc.addEventListener('click', descartarMidia);
+    const sv = document.getElementById('job-salvar-modelo-btn');
+    if (sv) sv.addEventListener('click', salvarModeloNovo);
+
     document.querySelectorAll('.job-modelo-enviar[data-modelo-id]').forEach((btn) => {
       btn.addEventListener('click', () => enviarModelo(btn));
     });
@@ -635,6 +677,115 @@
         });
       });
     });
+    document.querySelectorAll('.job-modelo-excluir').forEach((btn) => {
+      btn.addEventListener('click', () => excluirModelo(btn.dataset.modeloId));
+    });
+  }
+
+  // ── Gravação de áudio ao vivo (MediaRecorder). O WhatsApp Web já tem
+  //    permissão de microfone (usa pra nota de voz), então getUserMedia
+  //    normalmente passa direto. Se negar, mostra erro claro. ──
+  async function toggleGravacao() {
+    const btn = document.getElementById('job-gravar-btn');
+    const st = document.getElementById('job-grav-status');
+    if (_gravador && _gravador.state === 'recording') {
+      _gravador.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      _gravChunks = [];
+      _gravador = new MediaRecorder(stream);
+      _gravador.ondataavailable = (e) => { if (e.data.size) _gravChunks.push(e.data); };
+      _gravador.onstop = () => {
+        clearInterval(_gravTimer);
+        stream.getTracks().forEach((t) => t.stop());
+        const dur = Math.round((Date.now() - _gravInicio) / 1000);
+        const blob = new Blob(_gravChunks, { type: _gravChunks[0] ? _gravChunks[0].type : 'audio/webm' });
+        _midiaAnexada = { blob, nome: 'gravacao.webm', mime: blob.type || 'audio/webm', tipo: 'audio', dur };
+        redesenharMensagens();
+      };
+      _gravInicio = Date.now();
+      _gravador.start();
+      if (btn) btn.textContent = '■ Parar';
+      _gravTimer = setInterval(() => {
+        if (st) st.textContent = 'Gravando… ' + fmtDuracao(Math.round((Date.now() - _gravInicio) / 1000));
+      }, 500);
+    } catch (e) {
+      if (st) st.textContent = 'Não consegui acessar o microfone: ' + e.message;
+    }
+  }
+
+  function anexarArquivo(f) {
+    const tipo = f.type.startsWith('image/') ? 'imagem' : 'audio';
+    _midiaAnexada = { blob: f, nome: f.name, mime: f.type || 'application/octet-stream', tipo, dur: null };
+    redesenharMensagens();
+  }
+
+  function descartarMidia() {
+    _midiaAnexada = null;
+    redesenharMensagens();
+  }
+
+  // Redesenha preservando o que já foi digitado no formulário (nome/texto).
+  function redesenharMensagens() {
+    const nomeAtual = (document.getElementById('job-novo-nome') || {}).value || '';
+    const textoAtual = (document.getElementById('job-novo-texto') || {}).value || '';
+    setCorpoSecaoMensagens(renderModelos(_modelosCache ? _modelosCache.modelos : []));
+    ligarAcoesModelos();
+    const n = document.getElementById('job-novo-nome');
+    const t = document.getElementById('job-novo-texto');
+    if (n) n.value = nomeAtual;
+    if (t) t.value = textoAtual;
+  }
+
+  function blobParaBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onloadend = () => resolve(String(r.result).split(',')[1] || '');
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+  }
+
+  async function salvarModeloNovo() {
+    const nome = (document.getElementById('job-novo-nome') || {}).value || '';
+    const texto = (document.getElementById('job-novo-texto') || {}).value || '';
+    const st = document.getElementById('job-salvar-status');
+    const btn = document.getElementById('job-salvar-modelo-btn');
+    if (!nome.trim() || !texto.trim()) { if (st) st.textContent = 'Preencha nome e texto.'; return; }
+    const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+    btn.disabled = true;
+    if (st) st.textContent = 'Salvando…';
+    const dados = { nome: nome.trim(), texto: texto.trim(), usuario_id: usuarioId || '' };
+    if (_midiaAnexada) {
+      try { dados.midia_base64 = await blobParaBase64(_midiaAnexada.blob); }
+      catch (e) { if (st) st.textContent = 'Erro ao ler a mídia.'; btn.disabled = false; return; }
+      dados.midia_nome = _midiaAnexada.nome;
+      dados.midia_mime = _midiaAnexada.mime;
+    }
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: 'criar_modelo', dados });
+      if (!resp || !resp.ok) {
+        if (st) st.textContent = 'Erro: ' + ((resp && resp.erro) || 'falha ao salvar');
+        btn.disabled = false;
+        return;
+      }
+      _midiaAnexada = null;
+      await buscarModelos(true); // recarrega a lista com o novo
+      if (_secaoAtiva === 'mensagens') { setCorpoSecaoMensagens(renderModelos(_modelosCache.modelos)); ligarAcoesModelos(); }
+    } catch (e) {
+      if (st) st.textContent = 'Erro: ' + e.message;
+      btn.disabled = false;
+    }
+  }
+
+  async function excluirModelo(id) {
+    if (!confirm('Excluir este modelo?')) return;
+    const resp = await chrome.runtime.sendMessage({ type: 'excluir_modelo', id });
+    if (!resp || !resp.ok) { alert((resp && resp.erro) || 'Erro ao excluir'); return; }
+    await buscarModelos(true);
+    if (_secaoAtiva === 'mensagens') { setCorpoSecaoMensagens(renderModelos(_modelosCache.modelos)); ligarAcoesModelos(); }
   }
 
   async function enviarModelo(btn) {
@@ -660,11 +811,8 @@
         setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 3000);
         return;
       }
-      // Mesma lógica da fila normal: tenta despachar na hora (ainda passando
-      // pelo limite de ritmo do servidor), já que a conversa certa está
-      // aberta agora.
       await checarFilaDeEnvio();
-      btn.textContent = 'Enviado (ou na fila) ✓';
+      btn.textContent = 'Enviado ✓';
       setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 3000);
     } catch (e) {
       btn.textContent = 'Erro: ' + e.message;
