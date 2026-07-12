@@ -42,6 +42,5 @@ ERP em **Flask + PostgreSQL (Railway)** da Serenus Corretora de Saúde. Um arqui
 
 ## Pendências urgentes conhecidas
 
-- Asaas API retornando 401 (boleto/NF parados) — investigar credencial.
 - MedSênior PF sem registro de `recebimento`.
 - Chaves de produção já expostas em chat — rotacionar quando possível (Postgres, ASAAS_API_KEY, BREVO_API_KEY).
