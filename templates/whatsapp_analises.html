@@ -120,7 +120,7 @@
     <div class="vazio">Nenhuma análise ainda. Use o botão da extensão numa conversa do WhatsApp Web.</div>
   {% else %}
   <table class="pnl-tab">
-    <thead><tr><th>Data</th><th>Contato</th><th class="num">Score</th><th>Faixa</th><th>Lead no CRM</th><th>Etapa atual</th><th class="num">Custo IA</th></tr></thead>
+    <thead><tr><th>Data</th><th>Contato</th><th class="num">Score</th><th>Faixa</th><th>Lead no CRM</th><th>Etapa atual</th><th class="num">Duração</th><th class="num">Custo IA</th></tr></thead>
     <tbody>
       {% for a in analises %}
       <tr>
@@ -139,6 +139,13 @@
           {% if a.etapa_tipo == 'ganho' %}<span class="pill pill-verde">{{ a.etapa_nome }}</span>
           {% elif a.etapa_tipo == 'perdido' %}<span class="pill pill-erro">{{ a.etapa_nome }}</span>
           {% elif a.etapa_nome %}<span class="pill pill-cinza">{{ a.etapa_nome }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td class="num">
+          {% if a.duracao_segundos is not none %}
+            {% if a.duracao_segundos < 60 %}{{ a.duracao_segundos|round|int }}s
+            {% else %}{{ (a.duracao_segundos // 60)|int }}min {{ (a.duracao_segundos % 60)|round|int }}s
+            {% endif %}
           {% else %}—{% endif %}
         </td>
         <td class="num">{{ ((a.custo_usd or 0) * taxa_usd_brl)|moeda }}</td>

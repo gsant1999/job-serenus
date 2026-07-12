@@ -63,8 +63,11 @@
     // NÃO filtra por marca d'água (já tentamos — bug real: um áudio que ficou
     // de fora do teto numa rodada anterior, ou que não foi transcrito porque a
     // chave não estava configurada na hora, ficava escondido PRA SEMPRE, sem
-    // aviso nenhum. Prioridade é nunca perder áudio de verdade — o custo de
-    // ocasionalmente re-transcrever é bem menor que esse risco.
+    // aviso nenhum. Prioridade é nunca perder áudio de verdade — sempre manda
+    // todos; manda também o id da mensagem (msg_id) pra o servidor poder
+    // reaproveitar uma transcrição já feita antes pro MESMO áudio em vez de
+    // pagar de novo — isso é diferente da marca d'água (nunca deixa de mandar
+    // um áudio, só evita re-transcrever um que já foi transcrito com sucesso).
     const audios = msgs.filter((m) => m.type === 'ptt' || m.type === 'audio');
     const alvos = selecionarPorLead(audios, Math.max(1, limite || 12));
     const out = [];
@@ -81,7 +84,7 @@
           mime = media.mimetype || mime;
         }
         if (b64) {
-          out.push({ de: (m.id.fromMe ? 'consultor' : 'lead'),
+          out.push({ de: (m.id.fromMe ? 'consultor' : 'lead'), msg_id: m.id._serialized,
                      base64: b64, mime: (mime || 'audio/ogg').split(';')[0], hora: fmtHora(m.t) });
         }
       } catch (e) { /* áudio que falhar é ignorado, nunca derruba a análise */ }

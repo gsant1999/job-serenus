@@ -451,6 +451,10 @@
     const avisoFalhas = avisos.length
       ? avisos.map((a) => '<div class="job-ia-alerta">⚠ ' + esc(a) + '</div>').join('')
       : '';
+    const partesRodape = [esc(nome || ''), totalMsgs + ' mensagens lidas'];
+    if (r.duracao_segundos != null) partesRodape.push('levou ' + fmtDuracao(r.duracao_segundos));
+    if (r.audios_do_cache) partesRodape.push(r.audios_do_cache + ' áudio(s) reaproveitados do cache');
+    partesRodape.push('somente leitura');
     return (
       '<div class="job-score-wrap">' +
         '<div class="job-score-num" style="color:' + cor + '">' + (r.score != null ? r.score : '—') + '</div>' +
@@ -474,8 +478,14 @@
       seccaoIA(r.ia) +
       '<div class="job-sec">Como está a conversa</div>' +
       '<div class="job-resumo">' + esc(r.resumo || '').replace(/\n/g, '<br>') + '</div>' +
-      '<div class="job-rodape">' + esc(nome || '') + ' · ' + totalMsgs + ' mensagens lidas · somente leitura</div>'
+      '<div class="job-rodape">' + partesRodape.join(' · ') + '</div>'
     );
+  }
+
+  function fmtDuracao(seg) {
+    const s = Math.round(seg || 0);
+    if (s < 60) return s + 's';
+    return Math.floor(s / 60) + 'min ' + (s % 60) + 's';
   }
 
   // Bloco das transcrições de áudio — só aparece quando algum áudio foi

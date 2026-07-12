@@ -853,6 +853,13 @@ def init_db():
                 criado_por INTEGER,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS whatsapp_transcricoes_cache (
+                msg_id TEXT PRIMARY KEY,
+                texto TEXT NOT NULL,
+                segundos REAL,
+                custo_usd REAL,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_agenda (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER NOT NULL,
@@ -1275,6 +1282,13 @@ def init_db():
             criado_por INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS whatsapp_transcricoes_cache (
+            msg_id TEXT PRIMARY KEY,
+            texto TEXT NOT NULL,
+            segundos REAL,
+            custo_usd REAL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE IF NOT EXISTS crm_agenda (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             lead_id INTEGER NOT NULL,
@@ -1673,6 +1687,10 @@ def init_db():
         ("whatsapp_analises", "tokens_entrada", "INTEGER"),
         ("whatsapp_analises", "tokens_saida", "INTEGER"),
         ("whatsapp_analises", "audio_segundos", "REAL"),
+        # Quanto tempo a análise levou (raspagem já excluída — só o tempo de
+        # servidor: transcrição + Claude). Consultor pediu pra enxergar isso,
+        # oscilava muito e sem visibilidade não dava pra saber se era normal.
+        ("whatsapp_analises", "duracao_segundos", "REAL"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -8696,6 +8714,33 @@ def _transcrever_audio(b64, mime='audio/ogg'):
         return None
 
 
+def _wa_transcricao_cache_buscar(conn, msg_id):
+    """Devolve {'texto','segundos'} se esse áudio (pela wpp_msg_id, estável
+    entre releituras da mesma conversa) já foi transcrito antes, ou None.
+    NUNCA usado pra decidir se um áudio entra ou não na análise — só evita
+    pagar de novo por uma transcrição que já temos. Ver _wa_chave_dedup: o
+    conjunto de áudios considerados continua sendo sempre todos os que a
+    extensão manda; isso só troca a CHAMADA cara por uma leitura de cache."""
+    if not msg_id:
+        return None
+    row = conn.execute("SELECT texto, segundos FROM whatsapp_transcricoes_cache WHERE msg_id=?",
+                        (msg_id,)).fetchone()
+    if not row:
+        return None
+    return {'texto': row['texto'], 'segundos': row['segundos']}
+
+
+def _wa_transcricao_cache_salvar(conn, msg_id, texto, segundos, custo_usd):
+    if not msg_id or not texto:
+        return
+    try:
+        conn.execute("""INSERT OR IGNORE INTO whatsapp_transcricoes_cache
+                        (msg_id, texto, segundos, custo_usd) VALUES (?,?,?,?)""",
+                     (msg_id, texto, segundos, custo_usd))
+    except Exception as e:
+        app.logger.warning(f"[TRANSCRICAO_CACHE] falhou ao salvar {msg_id}: {e}")
+
+
 def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=None, links=None):
     """Orquestra a análise completa: extração + score oficial + diagnóstico + IA."""
     ex, flags, msgs_lead = _wa_extrair_lead(mensagens, nome_contato)
@@ -8927,6 +8972,7 @@ def api_whatsapp_analisar():
     if not _wa_auth_ok():
         return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
 
+    t_inicio = time.monotonic()
     d = request.json or {}
     mensagens = d.get('mensagens') or []
     # A conversa pode legitimamente não ter NENHUM texto (ex: lead cujo primeiro
@@ -8982,13 +9028,22 @@ def api_whatsapp_analisar():
                       'url': url, 'preview': str(lk.get('preview') or '')[:300],
                       'hora': str(lk.get('hora') or '')[:40]})
 
+    conn = db()
+
     # Áudios (base64 OGG) — transcreve cada um e injeta como mensagem na conversa,
     # em ordem cronológica, pra o áudio entrar no Score e na leitura da IA.
+    # Cache por msg_id (id estável da wa-js, ver _wa_transcricao_cache_buscar):
+    # todo áudio que a extensão manda SEMPRE entra na conversa — o cache só
+    # evita pagar de novo pela transcrição de um áudio que a gente já tem,
+    # nunca decide deixar um áudio de fora. Isso é diferente (e seguro) da
+    # marca d'água que foi revertida antes: aqui nunca se pula considerar um
+    # áudio, só se evita RETRABALHO numa chamada cara já feita com sucesso.
     transcricoes = []
     audio_msgs = []
     custo_transcricao_usd = 0.0
     audio_segundos_total = 0.0
     audios_validos = 0
+    audios_do_cache = 0
     tinha_chave_transcricao = bool(os.environ.get('OPENAI_API_KEY', '').strip() or os.environ.get('GROQ_API_KEY', '').strip())
     for a in (d.get('audios') or [])[:12]:
         if not isinstance(a, dict):
@@ -8997,12 +9052,20 @@ def api_whatsapp_analisar():
         if not b64 or len(b64) > 40_000_000:
             continue
         audios_validos += 1
-        transc = _transcrever_audio(b64, str(a.get('mime') or 'audio/ogg'))
-        if not transc:
-            continue
-        texto = transc['texto']
-        custo_transcricao_usd += transc.get('custo_usd') or 0
-        audio_segundos_total += transc.get('segundos') or 0
+        msg_id = str(a.get('msg_id') or '').strip()[:100] or None
+        cache = _wa_transcricao_cache_buscar(conn, msg_id)
+        if cache:
+            texto = cache['texto']
+            audio_segundos_total += cache.get('segundos') or 0
+            audios_do_cache += 1
+        else:
+            transc = _transcrever_audio(b64, str(a.get('mime') or 'audio/ogg'))
+            if not transc:
+                continue
+            texto = transc['texto']
+            custo_transcricao_usd += transc.get('custo_usd') or 0
+            audio_segundos_total += transc.get('segundos') or 0
+            _wa_transcricao_cache_salvar(conn, msg_id, texto, transc.get('segundos'), transc.get('custo_usd'))
         de = 'lead' if a.get('de') == 'lead' else 'consultor'
         hora = str(a.get('hora') or '')[:40]
         audio_msgs.append({'de': de, 'texto': '🎤 ' + texto[:4000], 'hora': hora})
@@ -9016,13 +9079,12 @@ def api_whatsapp_analisar():
     # utilizável (ex: só vieram áudios e todos falharam na transcrição, sem
     # imagem/PDF/link), aí sim não tem o que analisar.
     if not limpa and not imagens and not documentos and not links:
+        close_db(conn)
         return _wa_cors(jsonify({"ok": False, "erro": "Não consegui extrair nada útil desta conversa (sem texto, e áudio/imagem/PDF não deu certo)."})), 400
 
     telefone = str(d.get('telefone') or '').strip()
     nome = str(d.get('nome') or '').strip()[:200]
     tel_norm = _normalizar_telefone(telefone)
-
-    conn = db()
 
     # ── Modo incremental: se já existe uma análise anterior pra esse telefone,
     # funde a conversa nova (que a extensão pode ter mandado só a partir de
@@ -9065,6 +9127,7 @@ def api_whatsapp_analisar():
 
     an = _wa_analisar_conversa(limpa, nome_contato=nome, imagens=imagens, documentos=documentos, links=links)
     an['audios_transcritos'] = len(transcricoes)
+    an['audios_do_cache'] = audios_do_cache
     an['transcricoes'] = transcricoes
     # Só é "falha" de verdade se a chave estava configurada e mesmo assim
     # sobrou áudio sem transcrever — sem chave, o esperado é 0 mesmo (silencioso).
@@ -9150,16 +9213,19 @@ def api_whatsapp_analisar():
     custo_claude_usd = ia_info.get('custo_usd') or 0
     tokens_entrada = ia_info.get('tokens_entrada') or 0
     tokens_saida = ia_info.get('tokens_saida') or 0
+    duracao_segundos = round(time.monotonic() - t_inicio, 2)
 
     conn.execute("""INSERT INTO whatsapp_analises
         (lead_id, telefone, telefone_norm, nome_contato, total_mensagens, conversa_json,
          score, score_faixa, sugestoes_json, resumo, criado_por, criado_em,
-         custo_claude_usd, custo_transcricao_usd, tokens_entrada, tokens_saida, audio_segundos)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         custo_claude_usd, custo_transcricao_usd, tokens_entrada, tokens_saida, audio_segundos,
+         duracao_segundos)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (lead_id, telefone, tel_norm, nome, len(limpa), json.dumps(limpa, ensure_ascii=False),
          score, faixa, json.dumps(diagnostico, ensure_ascii=False), an['descricao'],
          d.get('usuario_id'), _agora_sp(),
-         custo_claude_usd, custo_transcricao_usd, tokens_entrada, tokens_saida, audio_segundos_total))
+         custo_claude_usd, custo_transcricao_usd, tokens_entrada, tokens_saida, audio_segundos_total,
+         duracao_segundos))
     analise_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
 
@@ -9202,6 +9268,7 @@ def api_whatsapp_analisar():
         "ia": an.get('ia'),
         "ia_falhou": an.get('ia_falhou', False),
         "audios_transcritos": an.get('audios_transcritos', 0),
+        "audios_do_cache": an.get('audios_do_cache', 0),
         "audios_falha": an.get('audios_falha', 0),
         "transcricoes": an.get('transcricoes', []),
         "lead": ({"id": lead_id, "nome": (lead['nome'] if lead else nome),
@@ -9209,6 +9276,7 @@ def api_whatsapp_analisar():
         "lead_encontrado": bool(lead_id) and not lead_criado,
         "lead_criado": lead_criado,
         "custo_usd": round(custo_claude_usd + custo_transcricao_usd, 6),
+        "duracao_segundos": duracao_segundos,
     }))
 
 
@@ -9299,7 +9367,7 @@ def whatsapp_analises_pagina():
     custo = _wa_custo_resumo(conn, None if eh_admin else uid)
 
     q = """SELECT wa.id, wa.nome_contato, wa.telefone, wa.score, wa.score_faixa,
-                  wa.total_mensagens, wa.criado_em, wa.lead_id,
+                  wa.total_mensagens, wa.criado_em, wa.lead_id, wa.duracao_segundos,
                   COALESCE(wa.custo_claude_usd,0) + COALESCE(wa.custo_transcricao_usd,0) AS custo_usd,
                   l.nome AS lead_nome, l.etapa AS lead_etapa, e.nome AS etapa_nome, e.tipo AS etapa_tipo
            FROM whatsapp_analises wa
