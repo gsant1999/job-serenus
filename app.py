@@ -8656,12 +8656,43 @@ _WA_JARGAO_SMS = ("plano de saúde, cotação, operadora, coparticipação, car�
                   "SulAmérica, Porto, Hapvida, NotreDame, Intermédica, MedSênior, Beneficência")
 
 
+def _transcrever_chamar(url, headers, data, raw, ext, mime, provedor, preco_min):
+    """Uma tentativa de transcrição contra um provedor específico. Retorna
+    {'texto','segundos','custo_usd','provedor'}, None (áudio sem fala/vazio,
+    não adianta tentar outro provedor) ou lança exceção (erro de
+    rede/HTTP/rate-limit — quem chama decide se tenta o próximo provedor)."""
+    import requests as _rq
+    files = {'file': (f'audio.{ext}', raw, mime)}
+    r = _rq.post(url, headers=headers, files=files, data=data, timeout=90)
+    if r.status_code != 200:
+        raise RuntimeError(f'HTTP {r.status_code}: {r.text[:200]}')
+    try:
+        corpo = r.json()
+        texto = (corpo.get('text') or '').strip()
+    except Exception:
+        texto, corpo = (r.text or '').strip(), {}
+    if not texto:
+        return None
+    segundos = float(corpo.get('duration') or 0) or None
+    custo = round((segundos / 60.0) * preco_min, 6) if segundos else None
+    if segundos is None:
+        # HTTP 200 mas sem 'duration' no corpo — a transcrição em si
+        # funcionou, mas o custo dessa análise fica subestimado no
+        # painel sem a gente perceber. Não trava a análise, só avisa.
+        app.logger.warning(f"[TRANSCRICAO] {provedor}: resposta 200 sem 'duration' em verbose_json — custo desse áudio não será contabilizado")
+    return {'texto': texto, 'segundos': segundos, 'custo_usd': custo, 'provedor': provedor}
+
+
 def _transcrever_audio(b64, mime='audio/ogg'):
     """Transcreve um áudio (base64) em PT-BR. Retorna {'texto', 'segundos',
-    'custo_usd', 'provedor'} ou None (sem chave, áudio inválido, ou falha →
-    degrada gracioso). Pede 'verbose_json' pra vir a duração real do áudio
-    (junto com o texto), assim o custo estimado usa segundos de verdade em
-    vez de chutar pelo tamanho do arquivo."""
+    'custo_usd', 'provedor'} ou None (sem chave, áudio inválido, ou falha nos
+    provedores configurados → degrada gracioso). Pede 'verbose_json' pra vir
+    a duração real do áudio (junto com o texto), assim o custo estimado usa
+    segundos de verdade em vez de chutar pelo tamanho do arquivo.
+    Tenta Groq primeiro (mais barato); se a CHAMADA falhar de verdade (rate
+    limit do plano grátis, erro de rede, 5xx — não só "não configurada"),
+    tenta a OpenAI em seguida em vez de simplesmente perder o áudio. Nunca
+    fica só na mão do provedor mais barato estar de pé no momento."""
     import base64 as _b64
     try:
         raw = _b64.b64decode(b64)
@@ -8679,45 +8710,38 @@ def _transcrever_audio(b64, mime='audio/ogg'):
         ext = 'mp3'
     elif 'wav' in mime:
         ext = 'wav'
-    try:
-        import requests as _rq
-        if groq_key:
-            url = 'https://api.groq.com/openai/v1/audio/transcriptions'
-            headers = {'Authorization': f'Bearer {groq_key}'}
-            data = {'model': os.environ.get('GROQ_TRANSCRICAO_MODELO', 'whisper-large-v3-turbo'),
-                    'language': 'pt', 'prompt': _WA_JARGAO_SMS, 'response_format': 'verbose_json'}
-            provedor, preco_min = 'groq', _GROQ_TRANSCRICAO_PRECO_USD_MIN
-        elif openai_key:
-            url = 'https://api.openai.com/v1/audio/transcriptions'
-            headers = {'Authorization': f'Bearer {openai_key}'}
-            data = {'model': os.environ.get('OPENAI_TRANSCRICAO_MODELO', 'whisper-1'),
-                    'language': 'pt', 'prompt': _WA_JARGAO_SMS, 'response_format': 'verbose_json'}
-            provedor, preco_min = 'openai', _OPENAI_TRANSCRICAO_PRECO_USD_MIN
-        else:
-            return None
-        files = {'file': (f'audio.{ext}', raw, mime)}
-        r = _rq.post(url, headers=headers, files=files, data=data, timeout=90)
-        if r.status_code == 200:
-            try:
-                corpo = r.json()
-                texto = (corpo.get('text') or '').strip()
-            except Exception:
-                texto, corpo = (r.text or '').strip(), {}
-            if not texto:
+
+    tentativas = []
+    if groq_key:
+        tentativas.append((
+            'https://api.groq.com/openai/v1/audio/transcriptions',
+            {'Authorization': f'Bearer {groq_key}'},
+            {'model': os.environ.get('GROQ_TRANSCRICAO_MODELO', 'whisper-large-v3-turbo'),
+             'language': 'pt', 'prompt': _WA_JARGAO_SMS, 'response_format': 'verbose_json'},
+            'groq', _GROQ_TRANSCRICAO_PRECO_USD_MIN,
+        ))
+    if openai_key:
+        tentativas.append((
+            'https://api.openai.com/v1/audio/transcriptions',
+            {'Authorization': f'Bearer {openai_key}'},
+            {'model': os.environ.get('OPENAI_TRANSCRICAO_MODELO', 'whisper-1'),
+             'language': 'pt', 'prompt': _WA_JARGAO_SMS, 'response_format': 'verbose_json'},
+            'openai', _OPENAI_TRANSCRICAO_PRECO_USD_MIN,
+        ))
+    if not tentativas:
+        return None
+
+    for i, (url, headers, data, provedor, preco_min) in enumerate(tentativas):
+        try:
+            return _transcrever_chamar(url, headers, data, raw, ext, mime, provedor, preco_min)
+        except Exception as e:
+            ultimo = (i == len(tentativas) - 1)
+            nivel = app.logger.warning if ultimo else app.logger.info
+            nivel(f"[TRANSCRICAO] {provedor} falhou ({e})" +
+                  ('' if ultimo else ' — tentando próximo provedor'))
+            if ultimo:
                 return None
-            segundos = float(corpo.get('duration') or 0) or None
-            custo = round((segundos / 60.0) * preco_min, 6) if segundos else None
-            if segundos is None:
-                # HTTP 200 mas sem 'duration' no corpo — a transcrição em si
-                # funcionou, mas o custo dessa análise fica subestimado no
-                # painel sem a gente perceber. Não trava a análise, só avisa.
-                app.logger.warning(f"[TRANSCRICAO] {provedor}: resposta 200 sem 'duration' em verbose_json — custo desse áudio não será contabilizado")
-            return {'texto': texto, 'segundos': segundos, 'custo_usd': custo, 'provedor': provedor}
-        app.logger.warning(f"[TRANSCRICAO] HTTP {r.status_code}: {r.text[:200]}")
-        return None
-    except Exception as e:
-        app.logger.warning(f"[TRANSCRICAO] falhou: {e}")
-        return None
+    return None
 
 
 def _wa_transcricao_cache_buscar(conn, msg_id):
