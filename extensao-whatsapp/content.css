@@ -52,12 +52,31 @@
   padding: 14px 16px; background: #12151f; border-bottom: 1px solid #2c3247;
 }
 .job-painel-titulo { font-size: 13px; font-weight: 800; letter-spacing: .3px; }
-.job-painel-x {
+.job-painel-x, .job-painel-min {
   background: transparent; border: none; color: #8c93a8; font-size: 20px;
   line-height: 1; cursor: pointer; padding: 0 4px;
 }
-.job-painel-x:hover { color: #fff; }
+.job-painel-x:hover, .job-painel-min:hover { color: #fff; }
+.job-painel-min { font-size: 22px; font-weight: 800; }
 .job-painel-corpo { padding: 16px; overflow-y: auto; }
+.job-painel-min-ativo .job-painel-corpo { display: none; }
+.job-painel-min-ativo { cursor: pointer; }
+
+.job-cancelar {
+  display: block; margin: 14px auto 0; padding: 8px 18px;
+  background: transparent; color: #fb7185; border: 1px solid rgba(251, 113, 133, .4);
+  border-radius: 999px; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.job-cancelar:hover { background: rgba(251, 113, 133, .1); }
+
+#job-pilula {
+  position: fixed; right: 24px; bottom: 56px; z-index: 2147483000;
+  background: #12151f; color: #b6bccd; border: 1px solid #2c3247;
+  border-radius: 999px; padding: 7px 14px; font-size: 12px; font-weight: 700;
+  cursor: pointer; box-shadow: 0 8px 20px rgba(0, 0, 0, .4);
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+#job-pilula:hover { color: #fff; }
 
 .job-carregando { text-align: center; padding: 26px 10px; color: #b6bccd; font-size: 13px; }
 .job-spin {

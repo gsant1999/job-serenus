@@ -20,7 +20,12 @@ async function config() {
   };
 }
 
-async function chamarJob(caminho, metodo, corpo, timeoutMs) {
+// reqId -> {controller, cancelado}. Só existe enquanto a chamada está em voo —
+// permite que o content script cancele uma análise específica (pode ter mais
+// de uma rodando pra conversas diferentes ao mesmo tempo) sem afetar as outras.
+const _emAndamento = new Map();
+
+async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId) {
   const { jobUrl, extKey } = await config();
   if (!extKey) {
     return { ok: false, erro: 'Configure a chave da extensão no popup (clique no ícone do JOB).' };
@@ -32,6 +37,8 @@ async function chamarJob(caminho, metodo, corpo, timeoutMs) {
   const limite = timeoutMs || 15000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), limite);
+  const registro = reqId ? { controller, cancelado: false } : null;
+  if (reqId) _emAndamento.set(reqId, registro);
   try {
     const resp = await fetch(jobUrl + caminho, {
       method: metodo,
@@ -49,12 +56,18 @@ async function chamarJob(caminho, metodo, corpo, timeoutMs) {
     }
     return dados || { ok: true };
   } catch (e) {
-    const erro = e.name === 'AbortError'
-      ? 'O JOB demorou mais que ' + Math.round(limite / 1000) + 's pra responder — tente de novo.'
-      : 'Não consegui falar com o JOB: ' + e.message;
+    let erro;
+    if (e.name === 'AbortError') {
+      erro = (registro && registro.cancelado)
+        ? 'Análise cancelada.'
+        : 'O JOB demorou mais que ' + Math.round(limite / 1000) + 's pra responder — tente de novo.';
+    } else {
+      erro = 'Não consegui falar com o JOB: ' + e.message;
+    }
     return { ok: false, erro };
   } finally {
     clearTimeout(timer);
+    if (reqId) _emAndamento.delete(reqId);
   }
 }
 
@@ -74,8 +87,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'analisar') {
     // Mais generoso: pode encadear várias transcrições de áudio sequenciais
     // no servidor (até 90s cada) + leitura pela Claude.
-    chamarJob('/api/whatsapp/analisar', 'POST', msg.payload, 300000).then(sendResponse);
+    chamarJob('/api/whatsapp/analisar', 'POST', msg.payload, 300000, msg.reqId).then(sendResponse);
     return true;
+  }
+  if (msg && msg.type === 'cancelar') {
+    const registro = _emAndamento.get(msg.reqId);
+    if (registro) { registro.cancelado = true; registro.controller.abort(); }
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (msg && msg.type === 'notificar') {
+    // Aviso local do sistema operacional — só isso, nada é enviado pra fora.
+    // Sem isso, minimizar o painel ou trocar de conversa fazia o consultor
+    // perder o momento em que a análise terminava (tinha que ficar olhando).
+    try {
+      chrome.notifications.create('', {
+        type: 'basic',
+        iconUrl: 'icon128.png',
+        title: msg.titulo || 'JOB Serenus',
+        message: msg.mensagem || '',
+      });
+    } catch (e) { /* notificação é best-effort, nunca derruba a análise */ }
+    sendResponse({ ok: true });
+    return false;
   }
   return false;
 });

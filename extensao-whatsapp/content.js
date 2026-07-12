@@ -370,16 +370,119 @@
     if (p) p.remove();
   }
 
+  function minimizarPainel(ev) {
+    if (ev) ev.stopPropagation();
+    const p = document.getElementById('job-painel');
+    if (p) p.classList.add('job-painel-min-ativo');
+  }
+
+  function restaurarPainel() {
+    const p = document.getElementById('job-painel');
+    if (p && p.classList.contains('job-painel-min-ativo')) p.classList.remove('job-painel-min-ativo');
+  }
+
   function abrirPainel(conteudoHTML) {
     fecharPainel();
     const p = document.createElement('div');
     p.id = 'job-painel';
     p.innerHTML =
       '<div class="job-painel-topo"><span class="job-painel-titulo">JOB · Análise do lead</span>' +
+      '<button class="job-painel-min" id="job-painel-min" title="Minimizar (continua rodando)">–</button>' +
       '<button class="job-painel-x" id="job-painel-x">×</button></div>' +
       '<div class="job-painel-corpo" id="job-painel-corpo">' + conteudoHTML + '</div>';
     document.body.appendChild(p);
-    document.getElementById('job-painel-x').addEventListener('click', fecharPainel);
+    document.getElementById('job-painel-x').addEventListener('click', (ev) => { ev.stopPropagation(); fecharPainel(); });
+    document.getElementById('job-painel-min').addEventListener('click', minimizarPainel);
+    p.querySelector('.job-painel-topo').addEventListener('click', restaurarPainel);
+    const cancelBtn = document.getElementById('job-cancelar-btn');
+    if (cancelBtn) cancelBtn.addEventListener('click', () => cancelarAnalise(cancelBtn.dataset.reqid));
+  }
+
+  // ═══════════════ Múltiplas análises em paralelo (estado + pílula) ═══════════════
+  // A RASPAGEM (ler mensagens/áudio/imagem da tela) só funciona na conversa que
+  // está aberta agora — não dá pra ler duas conversas ao mesmo tempo, é uma
+  // limitação real do WhatsApp Web (só uma conversa fica no DOM por vez). Mas
+  // depois que os dados já foram lidos, a ESPERA pela resposta do JOB (transcrição
+  // + IA) não depende mais da tela — por isso dá pra trocar de conversa e deixar
+  // rodando em segundo plano. Este bloco rastreia cada análise em andamento numa
+  // Map (não um estado global único) e mostra uma pílula fixa com o total, pra
+  // nunca "perder" uma análise que ficou rodando numa conversa que você já fechou,
+  // nem confundir o painel com o resultado da conversa errada.
+  const _analises = new Map(); // reqId -> {reqId, chave, telefone, nome, totalMsgs, status, resultado, erro, iniciadoEm, statusTexto}
+  const _cancelados = new Set();
+
+  function novoReqId() {
+    return 'an_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function chaveConversa(telefone, nome) {
+    return (telefone || '').trim() || ('nome:' + (nome || '').trim().toLowerCase());
+  }
+
+  function atualizarPilula() {
+    const rodando = [..._analises.values()].filter((a) => a.status === 'rodando');
+    let pill = document.getElementById('job-pilula');
+    if (!rodando.length) { if (pill) pill.remove(); return; }
+    if (!pill) {
+      pill = document.createElement('div');
+      pill.id = 'job-pilula';
+      pill.addEventListener('click', () => {
+        const lista = [..._analises.values()].filter((a) => a.status === 'rodando')
+          .map((a) => (a.nome || a.telefone || 'Lead') + ' — ' + fmtDuracao((Date.now() - a.iniciadoEm) / 1000))
+          .join('\n');
+        alert('Analisando agora:\n\n' + lista);
+      });
+      document.body.appendChild(pill);
+    }
+    pill.textContent = '🔄 ' + rodando.length + (rodando.length === 1 ? ' análise em andamento' : ' análises em andamento');
+  }
+
+  function telaCarregando(reqId, texto) {
+    return '<div class="job-carregando"><div class="job-spin"></div><div id="job-status">' + esc(texto) + '</div></div>' +
+      '<button class="job-cancelar" id="job-cancelar-btn" data-reqid="' + esc(reqId) + '">Cancelar análise</button>';
+  }
+
+  // Chama de novo o painel certo quando o consultor troca de conversa — nunca
+  // deixa a análise do cliente anterior "grudada" na tela do cliente novo. Se
+  // não tiver análise pra conversa atual, fecha o painel (fica só o botão).
+  function sincronizarPainelComConversa() {
+    const chaveAtual = chaveConversa(telefoneDoContato(), nomeDoContato());
+    const doConversaAtual = [..._analises.values()]
+      .filter((a) => a.chave === chaveAtual)
+      .sort((a, b) => b.iniciadoEm - a.iniciadoEm)[0];
+    if (!doConversaAtual) { fecharPainel(); return; }
+    if (doConversaAtual.status === 'rodando') {
+      abrirPainel(telaCarregando(doConversaAtual.reqId, doConversaAtual.statusTexto || 'Analisando…'));
+    } else if (doConversaAtual.status === 'ok') {
+      abrirPainel('');
+      setCorpo(renderResultado(doConversaAtual.resultado, doConversaAtual.nome, doConversaAtual.telefone, doConversaAtual.totalMsgs));
+      ligarBotaoCopiar();
+    } else if (doConversaAtual.status === 'erro') {
+      abrirPainel('<div class="job-erro">' + esc(doConversaAtual.erro || 'Falha ao analisar') + '</div>');
+    } else if (doConversaAtual.status === 'cancelado') {
+      abrirPainel('<div class="job-erro">Análise cancelada.</div>');
+    }
+  }
+
+  function cancelarAnalise(reqId) {
+    if (!reqId) return;
+    _cancelados.add(reqId);
+    const a = _analises.get(reqId);
+    if (a) a.status = 'cancelado';
+    try { chrome.runtime.sendMessage({ type: 'cancelar', reqId }); } catch (e) { /* ignore */ }
+    atualizarPilula();
+    sincronizarPainelComConversa();
+  }
+
+  function notificarConclusao(a) {
+    if (!a) return;
+    const titulo = a.status === 'ok'
+      ? 'Análise concluída — ' + (a.nome || a.telefone || 'lead')
+      : 'Análise falhou — ' + (a.nome || a.telefone || 'lead');
+    const msg = a.status === 'ok'
+      ? 'Score ' + (a.resultado && a.resultado.score != null ? a.resultado.score : '—') + '/1000'
+      : (a.erro || 'Erro desconhecido');
+    try { chrome.runtime.sendMessage({ type: 'notificar', titulo, mensagem: msg }); } catch (e) { /* ignore */ }
   }
 
   function setCorpo(html) {
@@ -550,15 +653,31 @@
 
   async function rodarAnalise() {
     const btn = document.getElementById('job-btn');
-    if (btn) btn.disabled = true;
+    const reqId = novoReqId();
+    // Chave provisória (nome/telefone ainda não confirmados) — atualizada assim
+    // que der pra ler direito, mais abaixo. Registra já pra pílula/cancelar
+    // funcionarem desde a primeira tela de carregamento.
+    const entrada = {
+      reqId, chave: chaveConversa('', nomeDoContato()), telefone: '', nome: nomeDoContato(),
+      totalMsgs: 0, status: 'rodando', resultado: null, erro: null,
+      iniciadoEm: Date.now(), statusTexto: 'Lendo a conversa…',
+    };
+    _analises.set(reqId, entrada);
+    atualizarPilula();
     try {
       const painelRolavel = acharPainelRolavel();
       if (!painelRolavel) {
+        _analises.delete(reqId);
+        atualizarPilula();
         abrirPainel('<div class="job-erro">Abra uma conversa primeiro.</div>');
         return;
       }
-      abrirPainel('<div class="job-carregando"><div class="job-spin"></div><div id="job-status">Lendo a conversa…</div></div>');
-      const status = (t) => { const e = document.getElementById('job-status'); if (e) e.textContent = t; };
+      abrirPainel(telaCarregando(reqId, entrada.statusTexto));
+      const status = (t) => {
+        entrada.statusTexto = t;
+        const e = document.getElementById('job-status');
+        if (e) e.textContent = t;
+      };
 
       // Leitura best-effort do nome/telefone só pra consultar o modo incremental
       // — logo depois de abrir o painel, o cabeçalho às vezes ainda não
@@ -585,11 +704,15 @@
       }
 
       await carregarHistorico(painelRolavel, status, watermark);
+      if (_cancelados.has(reqId)) return;
       status('Organizando as mensagens…');
       const nome = nomeDoContato() || nomeInicial;
       let telefone = '';
       try { telefone = (await pedirTelefoneWpp()) || telefoneDoContato() || telefoneInicial; }
       catch (e) { telefone = telefoneDoContato() || telefoneInicial; }
+      entrada.nome = nome;
+      entrada.telefone = telefone;
+      entrada.chave = chaveConversa(telefone, nome);
       const mensagens = dedup(rasparMensagensVisiveis());
 
       // Áudio/PDF/imagem NÃO usam a marca d'água do modo incremental —
@@ -613,7 +736,12 @@
       let links = [];
       try { links = rasparLinks(); } catch (e) { links = []; }
 
+      if (_cancelados.has(reqId)) return;
+      entrada.totalMsgs = mensagens.length;
+
       if (!mensagens.length && !imagens.length && !audios.length && !documentos.length && !links.length) {
+        _analises.delete(reqId);
+        atualizarPilula();
         abrirPainel('<div class="job-erro">Não achei mensagens, imagens, áudios, documentos nem links nesta conversa.</div>');
         return;
       }
@@ -625,22 +753,37 @@
       if (links.length) extras.push(links.length + ' link(s)');
       status(extras.length ? 'Analisando conversa + ' + extras.join(' + ') + ' no JOB…'
                            : 'Calculando o score no JOB…');
+      // A PARTIR DAQUI a raspagem já terminou — dá pra trocar de conversa
+      // sem prejuízo, o resto é só esperar a resposta de rede do JOB.
       // chrome.storage.local — nunca sync (limite de 8KB por item).
       const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
       const resp = await chrome.runtime.sendMessage({
-        type: 'analisar',
+        type: 'analisar', reqId,
         payload: { telefone, nome, mensagens, imagens, audios, documentos, links, usuario_id: usuarioId || null }
       });
 
+      // Se o usuário cancelou enquanto a resposta ainda estava a caminho, não
+      // sobrescreve o status 'cancelado' já aplicado por cancelarAnalise().
+      if (entrada.status !== 'rodando') return;
+
       if (!resp || !resp.ok) {
-        abrirPainel('<div class="job-erro">' + esc((resp && resp.erro) || 'Falha ao analisar') +
-          '</div><div class="job-rodape">Verifique a chave/URL no popup do JOB.</div>');
-        return;
+        entrada.status = 'erro';
+        entrada.erro = (resp && resp.erro) || 'Falha ao analisar';
+      } else {
+        entrada.status = 'ok';
+        entrada.resultado = resp;
       }
-      setCorpo(renderResultado(resp, nome, telefone, mensagens.length));
-      ligarBotaoCopiar();
+      atualizarPilula();
+      notificarConclusao(entrada);
+      sincronizarPainelComConversa();
     } catch (e) {
-      abrirPainel('<div class="job-erro">Erro inesperado: ' + esc(e.message) + '</div>');
+      if (entrada.status === 'rodando') {
+        entrada.status = 'erro';
+        entrada.erro = 'Erro inesperado: ' + e.message;
+        atualizarPilula();
+        notificarConclusao(entrada);
+        sincronizarPainelComConversa();
+      }
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -650,4 +793,16 @@
   criarBotao();
   const obs = new MutationObserver(() => { if (!document.getElementById('job-btn')) criarBotao(); });
   obs.observe(document.body, { childList: true, subtree: false });
+
+  // ── Detecta troca de conversa (o WhatsApp Web é uma SPA — não navega, só
+  //    troca o conteúdo — não existe evento nativo confiável pra "conversa
+  //    trocou", então compara periodicamente). Só re-renderiza o painel quando
+  //    a chave realmente muda, pra não piscar a cada tick. ──
+  let _ultimaChaveVista = null;
+  setInterval(() => {
+    const chaveAgora = chaveConversa(telefoneDoContato(), nomeDoContato());
+    if (chaveAgora === _ultimaChaveVista) return;
+    _ultimaChaveVista = chaveAgora;
+    sincronizarPainelComConversa();
+  }, 1500);
 })();
