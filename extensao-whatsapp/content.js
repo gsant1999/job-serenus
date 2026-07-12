@@ -375,121 +375,115 @@
     });
   }
 
-  // ═══════════════ UI: botão + painel ═══════════════
 
-  function criarBotao() {
-    if (document.getElementById('job-btn')) return;
-    const btn = document.createElement('button');
-    btn.id = 'job-btn';
-    btn.title = 'Analisar esta conversa no JOB (somente leitura)';
-    btn.innerHTML = '<span class="job-btn-j">JOB</span><span class="job-btn-txt">Analisar lead</span>';
-    btn.addEventListener('click', rodarAnalise);
-    document.body.appendChild(btn);
+  // ═══════════════ UI: trilho fixo + painel docado ═══════════════
+  // Pedido explícito: nada de elemento solto/flutuante — o padrão é um trilho
+  // fino sempre visível na lateral (direita por padrão, esquerda por opção no
+  // popup) e um painel que se DOCA ao lado dele, empurrando o WhatsApp de
+  // verdade, igual WaSpeed/ZapVoice. Duas seções por enquanto: "analise" e
+  // "mensagens" — dá pra crescer sem criar elemento novo, só adicionar item
+  // no trilho.
+  let _secaoAtiva = null; // 'analise' | 'mensagens' | null
+  let _railSide = 'direita';
+
+  async function carregarPreferenciaLado() {
+    const { railSide } = await chrome.storage.local.get(['railSide']);
+    _railSide = railSide === 'esquerda' ? 'esquerda' : 'direita';
+    aplicarClassesHtml();
   }
-
-  // ── Mandar mensagem direto da conversa aberta — pedido explícito de nunca
-  //    precisar sair do WhatsApp Web pra isso (igual WaSpeed/ZapVoice). Reusa
-  //    a mesma fila/limite de ritmo do servidor por baixo, só muda de onde a
-  //    mensagem entra. ──
-  function criarBotaoEnviar() {
-    if (document.getElementById('job-btn-enviar')) return;
-    const btn = document.createElement('button');
-    btn.id = 'job-btn-enviar';
-    btn.title = 'Mandar mensagem nesta conversa pelo JOB';
-    btn.innerHTML = '<span class="job-btn-j">JOB</span><span class="job-btn-txt">Mandar mensagem</span>';
-    btn.addEventListener('click', toggleComposeEnviar);
-    document.body.appendChild(btn);
-  }
-
-  function toggleComposeEnviar() {
-    const existente = document.getElementById('job-compose');
-    if (existente) { existente.remove(); return; }
-    const nome = nomeDoContato();
-    const box = document.createElement('div');
-    box.id = 'job-compose';
-    box.innerHTML =
-      '<div class="job-painel-topo"><span class="job-painel-titulo">JOB · Mandar mensagem</span>' +
-      '<button class="job-painel-x" id="job-compose-x">×</button></div>' +
-      '<div class="job-painel-corpo">' +
-        '<div class="job-compose-para">Para: ' + esc(nome || 'contato atual') + '</div>' +
-        '<textarea id="job-compose-texto" class="job-compose-texto" placeholder="Digite a mensagem…"></textarea>' +
-        '<button class="job-compose-enviar" id="job-compose-enviar-btn">Enviar</button>' +
-        '<div id="job-compose-status" class="job-compose-status"></div>' +
-      '</div>';
-    document.body.appendChild(box);
-    document.getElementById('job-compose-x').addEventListener('click', () => box.remove());
-    document.getElementById('job-compose-enviar-btn').addEventListener('click', enviarMensagemDireta);
-  }
-
-  async function enviarMensagemDireta() {
-    const textarea = document.getElementById('job-compose-texto');
-    const status = document.getElementById('job-compose-status');
-    const btn = document.getElementById('job-compose-enviar-btn');
-    const texto = (textarea.value || '').trim();
-    if (!texto) { status.textContent = 'Escreva a mensagem primeiro.'; return; }
-    const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
-    if (!usuarioId) { status.textContent = 'Selecione seu usuário no popup da extensão primeiro.'; return; }
-    btn.disabled = true;
-    status.textContent = 'Enfileirando…';
-    const nome = nomeDoContato();
-    let telefone = '';
-    try { telefone = (await pedirTelefoneWpp()) || telefoneDoContato(); }
-    catch (e) { telefone = telefoneDoContato(); }
-    if (!telefone) { status.textContent = 'Não consegui identificar o telefone desta conversa.'; btn.disabled = false; return; }
-    try {
-      const resp = await chrome.runtime.sendMessage({
-        type: 'enviar_direto', payload: { telefone, nome, texto, usuario_id: usuarioId },
-      });
-      if (!resp || !resp.ok) {
-        status.textContent = 'Erro: ' + ((resp && resp.erro) || 'falha ao enfileirar');
-        btn.disabled = false;
-        return;
+  if (chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && changes.railSide) {
+        _railSide = changes.railSide.newValue === 'esquerda' ? 'esquerda' : 'direita';
+        aplicarClassesHtml();
       }
-      status.textContent = 'Na fila — tentando mandar agora…';
-      textarea.value = '';
-      // Já que a conversa certa está aberta agora, tenta despachar na hora em
-      // vez de esperar o próximo ciclo de 20s — mas ainda passa pelo mesmo
-      // limite de ritmo do servidor (/fila/proximo), nunca pula o gate.
-      await checarFilaDeEnvio();
-      status.textContent = 'Mensagem enviada (ou aguardando o limite de ritmo — confira em instantes).';
-      btn.disabled = false;
-    } catch (e) {
-      status.textContent = 'Erro: ' + e.message;
-      btn.disabled = false;
+    });
+  }
+
+  const JOB_PUSH_MIN_WIDTH = 1360; // trilho+painel+folga mínima pro WhatsApp não espremer
+  function aplicarClassesHtml() {
+    const html = document.documentElement;
+    html.classList.toggle('job-push-esquerda', _railSide === 'esquerda');
+    html.classList.add('job-push-trilho');
+    if (_secaoAtiva) {
+      const cabe = window.innerWidth >= JOB_PUSH_MIN_WIDTH;
+      html.classList.toggle('job-push-painel', cabe);
+      html.classList.toggle('job-overlay-painel', !cabe);
+    } else {
+      html.classList.remove('job-push-painel');
+      html.classList.remove('job-overlay-painel');
     }
   }
+  let _resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(aplicarClassesHtml, 150);
+  });
 
-  function fecharPainel() {
-    const p = document.getElementById('job-painel');
+  function criarTrilho() {
+    if (document.getElementById('job-trilho')) return;
+    const trilho = document.createElement('div');
+    trilho.id = 'job-trilho';
+    trilho.innerHTML =
+      '<div class="job-trilho-logo">JOB</div>' +
+      '<button class="job-trilho-item" data-secao="analise" title="Análise de lead">' +
+        '<span class="job-trilho-item-icone">◎</span>' +
+        '<span class="job-trilho-item-label">Análise</span>' +
+        '<span class="job-trilho-item-badge" id="job-trilho-badge" hidden>0</span>' +
+      '</button>' +
+      '<button class="job-trilho-item" data-secao="mensagens" title="Mensagens">' +
+        '<span class="job-trilho-item-icone">✉</span>' +
+        '<span class="job-trilho-item-label">Mensagens</span>' +
+      '</button>';
+    trilho.querySelectorAll('.job-trilho-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        const secao = item.dataset.secao;
+        if (_secaoAtiva === secao) fecharSecao();
+        else abrirSecao(secao);
+      });
+    });
+    document.body.appendChild(trilho);
+    aplicarClassesHtml();
+  }
+
+  function fecharSecao() {
+    _secaoAtiva = null;
+    const p = document.getElementById('job-painel-doc');
     if (p) p.remove();
+    document.querySelectorAll('.job-trilho-item').forEach((i) => i.classList.remove('job-trilho-item-ativo'));
+    aplicarClassesHtml();
   }
 
-  function minimizarPainel(ev) {
-    if (ev) ev.stopPropagation();
-    const p = document.getElementById('job-painel');
-    if (p) p.classList.add('job-painel-min-ativo');
+  function abrirSecao(secao) {
+    _secaoAtiva = secao;
+    document.querySelectorAll('.job-trilho-item').forEach((i) =>
+      i.classList.toggle('job-trilho-item-ativo', i.dataset.secao === secao));
+    let p = document.getElementById('job-painel-doc');
+    if (!p) {
+      p = document.createElement('div');
+      p.id = 'job-painel-doc';
+      p.innerHTML =
+        '<div class="job-painel-doc-header">' +
+          '<span class="job-painel-doc-logo">JOB Serenus</span>' +
+          '<button class="job-painel-doc-fechar" id="job-painel-doc-x">×</button>' +
+        '</div>' +
+        '<div class="job-painel-doc-corpo" id="job-painel-doc-corpo"></div>';
+      document.body.appendChild(p);
+      document.getElementById('job-painel-doc-x').addEventListener('click', fecharSecao);
+    }
+    p.classList.toggle('job-painel-doc-esquerda', _railSide === 'esquerda');
+    aplicarClassesHtml();
+    if (secao === 'analise') sincronizarPainelComConversa();
+    else if (secao === 'mensagens') abrirSecaoMensagens();
   }
 
-  function restaurarPainel() {
-    const p = document.getElementById('job-painel');
-    if (p && p.classList.contains('job-painel-min-ativo')) p.classList.remove('job-painel-min-ativo');
-  }
-
-  function abrirPainel(conteudoHTML) {
-    fecharPainel();
-    const p = document.createElement('div');
-    p.id = 'job-painel';
-    p.innerHTML =
-      '<div class="job-painel-topo"><span class="job-painel-titulo">JOB · Análise do lead</span>' +
-      '<button class="job-painel-min" id="job-painel-min" title="Minimizar (continua rodando)">–</button>' +
-      '<button class="job-painel-x" id="job-painel-x">×</button></div>' +
-      '<div class="job-painel-corpo" id="job-painel-corpo">' + conteudoHTML + '</div>';
-    document.body.appendChild(p);
-    document.getElementById('job-painel-x').addEventListener('click', (ev) => { ev.stopPropagation(); fecharPainel(); });
-    document.getElementById('job-painel-min').addEventListener('click', minimizarPainel);
-    p.querySelector('.job-painel-topo').addEventListener('click', restaurarPainel);
+  function setCorpoSecao(html) {
+    const c = document.getElementById('job-painel-doc-corpo');
+    if (c) c.innerHTML = html;
     const cancelBtn = document.getElementById('job-cancelar-btn');
     if (cancelBtn) cancelBtn.addEventListener('click', () => cancelarAnalise(cancelBtn.dataset.reqid));
+    const analisarBtn = document.getElementById('job-analisar-btn');
+    if (analisarBtn) analisarBtn.addEventListener('click', rodarAnalise);
   }
 
   // ═══════════════ Múltiplas análises em paralelo (estado + pílula) ═══════════════
@@ -515,20 +509,14 @@
 
   function atualizarPilula() {
     const rodando = [..._analises.values()].filter((a) => a.status === 'rodando');
-    let pill = document.getElementById('job-pilula');
-    if (!rodando.length) { if (pill) pill.remove(); return; }
-    if (!pill) {
-      pill = document.createElement('div');
-      pill.id = 'job-pilula';
-      pill.addEventListener('click', () => {
-        const lista = [..._analises.values()].filter((a) => a.status === 'rodando')
-          .map((a) => (a.nome || a.telefone || 'Lead') + ' — ' + fmtDuracao((Date.now() - a.iniciadoEm) / 1000))
-          .join('\n');
-        alert('Analisando agora:\n\n' + lista);
-      });
-      document.body.appendChild(pill);
-    }
-    pill.textContent = '🔄 ' + rodando.length + (rodando.length === 1 ? ' análise em andamento' : ' análises em andamento');
+    const badge = document.getElementById('job-trilho-badge');
+    if (!badge) return;
+    if (!rodando.length) { badge.hidden = true; return; }
+    badge.hidden = false;
+    badge.textContent = String(rodando.length);
+    badge.title = [..._analises.values()].filter((a) => a.status === 'rodando')
+      .map((a) => (a.nome || a.telefone || 'Lead') + ' — ' + fmtDuracao((Date.now() - a.iniciadoEm) / 1000))
+      .join('\n');
   }
 
   function telaCarregando(reqId, texto) {
@@ -536,25 +524,32 @@
       '<button class="job-cancelar" id="job-cancelar-btn" data-reqid="' + esc(reqId) + '">Cancelar análise</button>';
   }
 
-  // Chama de novo o painel certo quando o consultor troca de conversa — nunca
-  // deixa a análise do cliente anterior "grudada" na tela do cliente novo. Se
-  // não tiver análise pra conversa atual, fecha o painel (fica só o botão).
+  function telaSemAnalise() {
+    return '<div class="job-sem-analise">' +
+      '<div class="job-sem-analise-txt">Nenhuma análise ainda pra esta conversa.</div>' +
+      '<button class="job-analisar-btn" id="job-analisar-btn">Analisar este lead</button>' +
+      '</div>';
+  }
+
+  // Chama de novo o conteúdo certo da seção "Análise" quando o consultor troca
+  // de conversa — nunca deixa a análise do cliente anterior "grudada" na tela
+  // do cliente novo. Só mexe se a seção estiver de fato aberta agora.
   function sincronizarPainelComConversa() {
+    if (_secaoAtiva !== 'analise') return;
     const chaveAtual = chaveConversa(telefoneDoContato(), nomeDoContato());
     const doConversaAtual = [..._analises.values()]
       .filter((a) => a.chave === chaveAtual)
       .sort((a, b) => b.iniciadoEm - a.iniciadoEm)[0];
-    if (!doConversaAtual) { fecharPainel(); return; }
+    if (!doConversaAtual) { setCorpoSecao(telaSemAnalise()); return; }
     if (doConversaAtual.status === 'rodando') {
-      abrirPainel(telaCarregando(doConversaAtual.reqId, doConversaAtual.statusTexto || 'Analisando…'));
+      setCorpoSecao(telaCarregando(doConversaAtual.reqId, doConversaAtual.statusTexto || 'Analisando…'));
     } else if (doConversaAtual.status === 'ok') {
-      abrirPainel('');
-      setCorpo(renderResultado(doConversaAtual.resultado, doConversaAtual.nome, doConversaAtual.telefone, doConversaAtual.totalMsgs));
+      setCorpoSecao(renderResultado(doConversaAtual.resultado, doConversaAtual.nome, doConversaAtual.telefone, doConversaAtual.totalMsgs));
       ligarBotaoCopiar();
     } else if (doConversaAtual.status === 'erro') {
-      abrirPainel('<div class="job-erro">' + esc(doConversaAtual.erro || 'Falha ao analisar') + '</div>');
+      setCorpoSecao('<div class="job-erro">' + esc(doConversaAtual.erro || 'Falha ao analisar') + '</div>' + telaSemAnalise());
     } else if (doConversaAtual.status === 'cancelado') {
-      abrirPainel('<div class="job-erro">Análise cancelada.</div>');
+      setCorpoSecao('<div class="job-erro">Análise cancelada.</div>' + telaSemAnalise());
     }
   }
 
@@ -579,8 +574,114 @@
     try { chrome.runtime.sendMessage({ type: 'notificar', titulo, mensagem: msg }); } catch (e) { /* ignore */ }
   }
 
-  function setCorpo(html) {
-    const c = document.getElementById('job-painel-corpo');
+  // ═══════════════ Seção Mensagens: biblioteca de modelos ═══════════════
+  // Sem caixa de compor livre (não tem valor sobre o campo nativo do
+  // WhatsApp — já testamos e o próprio Guilherme apontou isso certo). O que
+  // tem valor é mandar algo PROGRAMADO: escolher um modelo já pronto (criado
+  // no site, admin) e mandar pela mesma fila que já existe. Envio de mídia
+  // ainda não está disponível (fase própria futura) — modelo com áudio/
+  // imagem fica listado, mas o botão de enviar vem desabilitado.
+  const MODELOS_CACHE_MS = 5 * 60 * 1000;
+  let _modelosCache = null; // {ts, modelos}
+
+  async function buscarModelos(forcar) {
+    if (!forcar && _modelosCache && (Date.now() - _modelosCache.ts) < MODELOS_CACHE_MS) {
+      return _modelosCache.modelos;
+    }
+    const resp = await chrome.runtime.sendMessage({ type: 'listar_modelos' });
+    const modelos = (resp && resp.ok && resp.modelos) || [];
+    _modelosCache = { ts: Date.now(), modelos };
+    return modelos;
+  }
+
+  function telaMensagensCarregando() {
+    return '<div class="job-carregando"><div class="job-spin"></div><div>Carregando modelos…</div></div>';
+  }
+
+  function renderModelos(modelos) {
+    if (!modelos.length) {
+      return '<div class="job-vazio">Nenhum modelo de WhatsApp cadastrado ainda. ' +
+        'Gerencie em <b>/crm/modelos</b> no site do JOB.</div>';
+    }
+    return modelos.map((m) => {
+      const badge = m.midia_tipo
+        ? '<span class="job-chip">' + (m.midia_tipo === 'audio' ? '🎤 Áudio' : '🖼 Imagem') + '</span>'
+        : '';
+      const btnEnviar = m.midia_tipo
+        ? '<button class="job-modelo-enviar" disabled title="Envio de mídia — em breve">Envio de mídia — em breve</button>'
+        : '<button class="job-modelo-enviar" data-modelo-id="' + m.id + '">Enviar</button>';
+      return '<div class="job-modelo-card">' +
+        '<div class="job-modelo-nome">' + esc(m.nome) + '</div>' +
+        (badge ? '<div>' + badge + '</div>' : '') +
+        '<div class="job-modelo-preview">' + esc(m.texto) + '</div>' +
+        '<div class="job-modelo-acoes">' +
+          btnEnviar +
+          '<button class="job-modelo-copiar" data-texto="' + esc(m.texto) + '">Copiar texto</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function ligarAcoesModelos() {
+    document.querySelectorAll('.job-modelo-enviar[data-modelo-id]').forEach((btn) => {
+      btn.addEventListener('click', () => enviarModelo(btn));
+    });
+    document.querySelectorAll('.job-modelo-copiar').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.texto || '').then(() => {
+          const original = btn.textContent;
+          btn.textContent = 'Copiado!';
+          setTimeout(() => { btn.textContent = original; }, 1500);
+        });
+      });
+    });
+  }
+
+  async function enviarModelo(btn) {
+    const modelos = await buscarModelos(false);
+    const modelo = modelos.find((m) => String(m.id) === btn.dataset.modeloId);
+    if (!modelo) return;
+    const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+    if (!usuarioId) { alert('Selecione seu usuário no popup da extensão primeiro.'); return; }
+    btn.disabled = true;
+    const textoOriginal = btn.textContent;
+    btn.textContent = 'Enviando…';
+    const nome = nomeDoContato();
+    let telefone = '';
+    try { telefone = (await pedirTelefoneWpp()) || telefoneDoContato(); }
+    catch (e) { telefone = telefoneDoContato(); }
+    if (!telefone) { btn.textContent = 'Sem telefone nesta conversa'; return; }
+    try {
+      const resp = await chrome.runtime.sendMessage({
+        type: 'enviar_direto', payload: { telefone, nome, texto: modelo.texto, usuario_id: usuarioId },
+      });
+      if (!resp || !resp.ok) {
+        btn.textContent = 'Erro: ' + ((resp && resp.erro) || 'falha ao enfileirar');
+        setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 3000);
+        return;
+      }
+      // Mesma lógica da fila normal: tenta despachar na hora (ainda passando
+      // pelo limite de ritmo do servidor), já que a conversa certa está
+      // aberta agora.
+      await checarFilaDeEnvio();
+      btn.textContent = 'Enviado (ou na fila) ✓';
+      setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 3000);
+    } catch (e) {
+      btn.textContent = 'Erro: ' + e.message;
+      setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 3000);
+    }
+  }
+
+  async function abrirSecaoMensagens() {
+    setCorpoSecaoMensagens(telaMensagensCarregando());
+    const modelos = await buscarModelos(false);
+    if (_secaoAtiva !== 'mensagens') return; // fechou/trocou de seção enquanto buscava
+    setCorpoSecaoMensagens(renderModelos(modelos));
+    ligarAcoesModelos();
+  }
+
+  function setCorpoSecaoMensagens(html) {
+    const c = document.getElementById('job-painel-doc-corpo');
     if (c) c.innerHTML = html;
   }
 
@@ -746,13 +847,15 @@
   }
 
   async function rodarAnalise() {
-    const btn = document.getElementById('job-btn');
     const reqId = novoReqId();
-    // Chave provisória (nome/telefone ainda não confirmados) — atualizada assim
-    // que der pra ler direito, mais abaixo. Registra já pra pílula/cancelar
-    // funcionarem desde a primeira tela de carregamento.
+    // Chave provisória com o telefone SÍNCRONO do DOM (telefoneDoContato) —
+    // tem que bater com o que sincronizarPainelComConversa calcula na mesma
+    // hora (abrirSecao('analise') já dispara a sincronização), senão a
+    // primeira tela de carregamento não encontra esta entrada. O telefone de
+    // verdade (via wa-js, assíncrono) só é confirmado mais abaixo, e a chave
+    // é recalculada nesse ponto.
     const entrada = {
-      reqId, chave: chaveConversa('', nomeDoContato()), telefone: '', nome: nomeDoContato(),
+      reqId, chave: chaveConversa(telefoneDoContato(), nomeDoContato()), telefone: '', nome: nomeDoContato(),
       totalMsgs: 0, status: 'rodando', resultado: null, erro: null,
       iniciadoEm: Date.now(), statusTexto: 'Lendo a conversa…',
     };
@@ -763,10 +866,11 @@
       if (!painelRolavel) {
         _analises.delete(reqId);
         atualizarPilula();
-        abrirPainel('<div class="job-erro">Abra uma conversa primeiro.</div>');
+        abrirSecao('analise');
+        setCorpoSecao('<div class="job-erro">Abra uma conversa primeiro.</div>');
         return;
       }
-      abrirPainel(telaCarregando(reqId, entrada.statusTexto));
+      abrirSecao('analise');
       const status = (t) => {
         entrada.statusTexto = t;
         const e = document.getElementById('job-status');
@@ -836,7 +940,7 @@
       if (!mensagens.length && !imagens.length && !audios.length && !documentos.length && !links.length) {
         _analises.delete(reqId);
         atualizarPilula();
-        abrirPainel('<div class="job-erro">Não achei mensagens, imagens, áudios, documentos nem links nesta conversa.</div>');
+        setCorpoSecao('<div class="job-erro">Não achei mensagens, imagens, áudios, documentos nem links nesta conversa.</div>');
         return;
       }
 
@@ -878,17 +982,14 @@
         notificarConclusao(entrada);
         sincronizarPainelComConversa();
       }
-    } finally {
-      if (btn) btn.disabled = false;
     }
   }
 
-  // ── Mantém os botões presentes mesmo com o WhatsApp recriando a tela (SPA). ──
-  criarBotao();
-  criarBotaoEnviar();
+  // ── Mantém o trilho presente mesmo com o WhatsApp recriando a tela (SPA). ──
+  carregarPreferenciaLado();
+  criarTrilho();
   const obs = new MutationObserver(() => {
-    if (!document.getElementById('job-btn')) criarBotao();
-    if (!document.getElementById('job-btn-enviar')) criarBotaoEnviar();
+    if (!document.getElementById('job-trilho')) criarTrilho();
   });
   obs.observe(document.body, { childList: true, subtree: false });
 

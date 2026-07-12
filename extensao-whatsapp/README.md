@@ -54,8 +54,8 @@ tem valor padrão e degrada gracioso se faltar):
 WHATSAPP_EXT_KEY = <sua-chave-secreta>        # obrigatória — sem ela o endpoint recusa tudo (fail-closed)
 ANTHROPIC_API_KEY = sk-ant-...                # leitura de imagem/PDF/link e resumo pela IA (Claude)
 CLAUDE_MODEL = claude-haiku-4-5               # opcional, padrão já é o mais barato
-OPENAI_API_KEY = sk-...                       # transcrição de áudio (Whisper) — retenção zero, prioridade
-GROQ_API_KEY = gsk_...                        # alternativa mais barata de transcrição (usada só se não tiver OPENAI_API_KEY)
+GROQ_API_KEY = gsk_...                        # transcrição de áudio — ~9x mais barata, prioridade (com fallback pra OpenAI se a chamada falhar de verdade)
+OPENAI_API_KEY = sk-...                       # fallback de transcrição — retenção zero documentada (relevante por ser dado de saúde)
 USD_BRL_TAXA = 5.10                           # câmbio fixo pro painel de custo mostrar em R$ (ajustar de vez em quando)
 ```
 
@@ -63,11 +63,17 @@ A **mesma** `WHATSAPP_EXT_KEY` vai no popup da extensão.
 
 ## Uso no dia a dia
 
-1. Abra o WhatsApp Web e clique numa conversa de lead.
-2. Clique no botão **"JOB · Analisar lead"** (canto inferior direito).
-3. A extensão lê o histórico da conversa inteiro (ou só o que for novo, se já
-   tiver analisado essa conversa antes — modo incremental), baixa imagens,
-   áudio, PDF e links, manda tudo pro JOB e mostra:
+A extensão vive num **trilho fino fixo na lateral do WhatsApp Web** (direita
+por padrão, dá pra trocar pra esquerda no popup) — sem botão solto, sem
+janela flutuando por cima da conversa. Clicar num ícone do trilho **doca**
+um painel ao lado, empurrando o WhatsApp (ou sobrepondo, em tela estreita).
+
+**Análise de lead** (ícone "Análise"):
+1. Abra uma conversa de lead e clique no ícone.
+2. Se ainda não tem análise pra essa conversa, aparece o botão **"Analisar
+   este lead"**. A extensão lê o histórico inteiro (ou só o que for novo, se
+   já tiver analisado antes — modo incremental), baixa imagens, áudio, PDF e
+   links, manda tudo pro JOB e mostra:
    - **Score Lead 0–1000** e a faixa (quente / bom / médio / baixo / improvável),
      com quantos dos 28 critérios oficiais entraram na conta;
    - se o lead **já existe no CRM** (com link pra ficha) ou **foi criado agora**;
@@ -77,10 +83,23 @@ A **mesma** `WHATSAPP_EXT_KEY` vai no popup da extensão.
      sinais de atenção, próximas ações concretas;
    - **áudios transcritos**, com quem falou cada um;
    - **follow-up pronto** pra copiar e colar.
+3. Dá pra trocar de conversa com a análise ainda rodando — ela continua em
+   segundo plano (um badge no ícone mostra quantas estão em andamento) e o
+   painel mostra sempre a análise certa pra conversa que estiver aberta.
+   Notificação do sistema avisa quando termina.
 
 A análise fica registrada na timeline do lead no CRM, sobe os dados de
 qualificação pra ficha (sem apagar o que já tiver sido preenchido à mão), e
 dispara uma notificação no sino do JOB quando cria um lead novo.
+
+**Mensagens** (ícone "Mensagens"):
+Lista os modelos de mensagem de WhatsApp cadastrados no site (`/crm/modelos`,
+admin) — nome, prévia do texto, se tem mídia anexada. Botão **Enviar** manda
+o texto pra conversa aberta agora (pela mesma fila com limite de ritmo do
+servidor); **Copiar texto** pra quem preferir colar manualmente. Criar/editar
+modelo é só no site — a extensão nunca decide sozinha o que existe na
+biblioteca. Modelo com áudio/imagem anexado fica listado mas ainda não pode
+ser enviado (fase própria futura).
 
 ## Custo
 

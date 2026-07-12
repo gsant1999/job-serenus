@@ -13,9 +13,10 @@ function status(txt, cls) {
 }
 
 async function carregar() {
-  const { jobUrl, extKey, usuarioId } = await chrome.storage.local.get(['jobUrl', 'extKey', 'usuarioId']);
+  const { jobUrl, extKey, usuarioId, railSide } = await chrome.storage.local.get(['jobUrl', 'extKey', 'usuarioId', 'railSide']);
   $('jobUrl').value = jobUrl || JOB_URL_PADRAO;
   $('extKey').value = extKey || '';
+  $('railSide').value = railSide === 'esquerda' ? 'esquerda' : 'direita';
   if (extKey) await carregarUsuarios(usuarioId);
 }
 
@@ -33,7 +34,8 @@ async function salvar() {
   const jobUrl = ($('jobUrl').value || JOB_URL_PADRAO).trim().replace(/\/+$/, '');
   const extKey = ($('extKey').value || '').trim();
   const usuarioId = $('usuarioId').value || '';
-  await chrome.storage.local.set({ jobUrl, extKey, usuarioId });
+  const railSide = $('railSide').value === 'esquerda' ? 'esquerda' : 'direita';
+  await chrome.storage.local.set({ jobUrl, extKey, usuarioId, railSide });
   status('Salvo.', 'ok');
 }
 
@@ -55,4 +57,5 @@ $('testar').addEventListener('click', testar);
 // só era salvo se o usuário clicasse "Salvar" de novo depois — fácil de
 // esquecer, e aí o lead criado automaticamente ficava sem responsável.
 $('usuarioId').addEventListener('change', salvar);
+$('railSide').addEventListener('change', salvar);
 carregar();

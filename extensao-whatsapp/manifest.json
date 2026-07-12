@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "JOB Serenus — Análise de WhatsApp",
-  "version": "2.1.0",
-  "description": "Lê a conversa aberta no WhatsApp Web, calcula o Score do lead no JOB e mostra sugestões de próxima ação. Envio de mensagem é sempre uma ação explícita do consultor, nunca automático em massa.",
+  "version": "2.2.0",
+  "description": "Painel docado no WhatsApp Web: analisa o lead e calcula o Score no JOB, e manda mensagens da biblioteca de modelos. Envio é sempre uma ação explícita do consultor, nunca automático em massa.",
   "permissions": ["storage", "notifications"],
   "host_permissions": [
     "https://web.whatsapp.com/*",

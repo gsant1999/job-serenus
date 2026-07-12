@@ -98,6 +98,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/enviar-direto', 'POST', msg.payload, 15000).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'listar_modelos') {
+    // Biblioteca de modelos de mensagem — só leitura (criar/editar é só no
+    // site, admin). Usado pela seção "Mensagens" do painel.
+    chamarJob('/api/whatsapp/extensao/modelos', 'GET', null, 15000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'cancelar') {
     const registro = _emAndamento.get(msg.reqId);
     if (registro) { registro.cancelado = true; registro.controller.abort(); }

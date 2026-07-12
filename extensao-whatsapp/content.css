@@ -1,122 +1,75 @@
-/* JOB Serenus · estilos do botão e painel injetados no WhatsApp Web.
-   Prefixo job- em tudo e IDs únicos pra não colidir com o WhatsApp. */
+/* JOB Serenus · estilos do trilho + painel docado injetados no WhatsApp Web.
+   Prefixo job- em tudo e IDs únicos pra não colidir com o WhatsApp.
+   Padrão trilho fino + painel docado (não flutuante), igual WaSpeed/ZapVoice. */
 
-#job-btn {
-  position: fixed;
-  right: 24px;
-  bottom: 96px; /* acima do compositor do WhatsApp/WaSpeed pra não cobrir o campo de envio */
-  z-index: 2147483000;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px 10px 12px;
-  background: #2563eb;
-  color: #fff;
-  border: none;
-  border-radius: 999px;
-  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 6px 20px rgba(37, 99, 235, .45);
-  transition: transform .12s, box-shadow .12s, opacity .12s;
-}
-#job-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(37, 99, 235, .55); }
-#job-btn:disabled { opacity: .6; cursor: default; transform: none; }
-#job-btn .job-btn-j {
-  background: #fff; color: #2563eb; font-weight: 800; font-size: 11px;
-  padding: 3px 6px; border-radius: 6px; letter-spacing: .5px;
-}
-#job-btn .job-btn-txt { line-height: 1; }
+/* ── Empurra o <html> pra abrir espaço, igual o padrão observado no WaSpeed —
+      nunca mexe em elemento interno do React do WhatsApp, só no <html> de
+      fora, que reflow sozinho por ser layout flexível. !important porque o
+      próprio WhatsApp mexe em <html> (dark mode) e pode pisar na margem. ── */
+html.job-push-trilho { margin-right: 72px !important; transition: margin .18s ease; }
+html.job-push-painel { margin-right: 472px !important; }
+html.job-push-esquerda.job-push-trilho { margin-right: 0 !important; margin-left: 72px !important; }
+html.job-push-esquerda.job-push-painel { margin-left: 472px !important; margin-right: 0 !important; }
+/* Overlay (tela estreita): só o trilho empurra, o painel flutua por cima. */
+html.job-overlay-painel { margin-right: 72px !important; }
+html.job-push-esquerda.job-overlay-painel { margin-left: 72px !important; margin-right: 0 !important; }
 
-#job-btn-enviar {
-  position: fixed;
-  right: 24px;
-  bottom: 148px; /* empilhado acima do botão de análise */
+#job-trilho {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 72px;
   z-index: 2147483000;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px 10px 12px;
-  background: #16a34a;
-  color: #fff;
-  border: none;
-  border-radius: 999px;
-  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 6px 20px rgba(22, 163, 74, .45);
-  transition: transform .12s, box-shadow .12s, opacity .12s;
-}
-#job-btn-enviar:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(22, 163, 74, .55); }
-#job-btn-enviar .job-btn-j {
-  background: #fff; color: #16a34a; font-weight: 800; font-size: 11px;
-  padding: 3px 6px; border-radius: 6px; letter-spacing: .5px;
-}
-
-#job-compose {
-  position: fixed;
-  right: 24px;
-  bottom: 204px;
-  z-index: 2147483000;
-  width: 320px;
-  max-width: calc(100vw - 44px);
-  background: #1a1d2e;
-  color: #e7e9f0;
-  border: 1px solid #2c3247;
-  border-radius: 16px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, .5);
-  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  overflow: hidden;
-}
-.job-compose-para { font-size: 11px; color: #8c93a8; margin-bottom: 8px; }
-.job-compose-texto {
-  width: 100%; box-sizing: border-box; min-height: 70px; resize: vertical;
-  background: #12151f; border: 1px solid #2c3247; border-radius: 8px;
-  padding: 9px 10px; font-size: 12.5px; color: #e7e9f0; outline: none;
-  font-family: inherit;
-}
-.job-compose-texto:focus { border-color: #16a34a; }
-.job-compose-enviar {
-  width: 100%; margin-top: 10px; background: #16a34a; color: #fff; border: none;
-  border-radius: 8px; padding: 10px; font-size: 13px; font-weight: 700; cursor: pointer;
-}
-.job-compose-enviar:disabled { opacity: .6; cursor: default; }
-.job-compose-status { font-size: 11px; color: #8c93a8; margin-top: 8px; min-height: 14px; }
-
-#job-painel {
-  position: fixed;
-  right: 24px;
-  bottom: 150px;
-  z-index: 2147483000;
-  width: 360px;
-  max-width: calc(100vw - 44px);
-  max-height: calc(100vh - 120px);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  background: #1a1d2e;
-  color: #e7e9f0;
-  border: 1px solid #2c3247;
-  border-radius: 16px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, .5);
+  display: flex; flex-direction: column; align-items: center;
+  background: #12151f; border-left: 1px solid #2c3247;
+  padding-top: 14px;
   font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
-.job-painel-topo {
+html.job-push-esquerda #job-trilho { right: auto; left: 0; border-left: none; border-right: 1px solid #2c3247; }
+
+.job-trilho-logo {
+  background: #2563eb; color: #fff; font-weight: 800; font-size: 11px;
+  padding: 4px 8px; border-radius: 6px; letter-spacing: .5px; margin-bottom: 18px;
+}
+
+.job-trilho-item {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  width: 100%; padding: 10px 4px; background: transparent; border: none;
+  color: #8c93a8; cursor: pointer; font-family: inherit;
+}
+.job-trilho-item:hover { color: #e7e9f0; background: rgba(255,255,255,.03); }
+.job-trilho-item-ativo { color: #fff; background: rgba(37, 99, 235, .18); border-left: 2px solid #2563eb; }
+html.job-push-esquerda .job-trilho-item-ativo { border-left: none; border-right: 2px solid #2563eb; }
+.job-trilho-item-icone { font-size: 18px; line-height: 1; }
+.job-trilho-item-label { font-size: 9.5px; font-weight: 700; text-align: center; line-height: 1.15; }
+.job-trilho-item-badge {
+  position: absolute; top: 4px; right: 10px;
+  background: #f43f5e; color: #fff; font-size: 9px; font-weight: 800;
+  min-width: 15px; height: 15px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center; padding: 0 3px;
+}
+
+#job-painel-doc {
+  position: fixed; top: 0; right: 72px; bottom: 0; width: 400px;
+  max-width: calc(100vw - 72px);
+  z-index: 2147483000;
+  display: flex; flex-direction: column;
+  background: #1a1d2e; color: #e7e9f0;
+  border-left: 1px solid #2c3247;
+  box-shadow: -18px 0 40px rgba(0,0,0,.35);
+  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+#job-painel-doc.job-painel-doc-esquerda { right: auto; left: 72px; border-left: none; border-right: 1px solid #2c3247; box-shadow: 18px 0 40px rgba(0,0,0,.35); }
+
+.job-painel-doc-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 16px; background: #12151f; border-bottom: 1px solid #2c3247;
+  padding: 14px 16px; background: #12151f; border-bottom: 1px solid #2c3247; flex-shrink: 0;
 }
-.job-painel-titulo { font-size: 13px; font-weight: 800; letter-spacing: .3px; }
-.job-painel-x, .job-painel-min {
+.job-painel-doc-logo { font-size: 13px; font-weight: 800; letter-spacing: .3px; }
+.job-painel-doc-fechar {
   background: transparent; border: none; color: #8c93a8; font-size: 20px;
   line-height: 1; cursor: pointer; padding: 0 4px;
 }
-.job-painel-x:hover, .job-painel-min:hover { color: #fff; }
-.job-painel-min { font-size: 22px; font-weight: 800; }
-.job-painel-corpo { padding: 16px; overflow-y: auto; }
-.job-painel-min-ativo .job-painel-corpo { display: none; }
-.job-painel-min-ativo { cursor: pointer; }
+.job-painel-doc-fechar:hover { color: #fff; }
+.job-painel-doc-corpo { padding: 16px; overflow-y: auto; flex: 1; }
 
 .job-cancelar {
   display: block; margin: 14px auto 0; padding: 8px 18px;
@@ -125,14 +78,34 @@
 }
 .job-cancelar:hover { background: rgba(251, 113, 133, .1); }
 
-#job-pilula {
-  position: fixed; right: 24px; bottom: 56px; z-index: 2147483000;
-  background: #12151f; color: #b6bccd; border: 1px solid #2c3247;
-  border-radius: 999px; padding: 7px 14px; font-size: 12px; font-weight: 700;
-  cursor: pointer; box-shadow: 0 8px 20px rgba(0, 0, 0, .4);
-  font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+.job-sem-analise { text-align: center; padding: 30px 10px; }
+.job-sem-analise-txt { font-size: 12.5px; color: #8c93a8; margin-bottom: 14px; }
+.job-analisar-btn {
+  background: #2563eb; color: #fff; border: none; border-radius: 999px;
+  padding: 10px 22px; font-size: 13px; font-weight: 700; cursor: pointer;
 }
-#job-pilula:hover { color: #fff; }
+.job-analisar-btn:hover { background: #3b74f0; }
+
+/* ── Seção Mensagens: cartões de modelo ── */
+.job-modelo-card {
+  background: #12151f; border: 1px solid #2c3247; border-radius: 10px;
+  padding: 12px; margin-bottom: 10px;
+}
+.job-modelo-nome { font-size: 13px; font-weight: 700; color: #e7e9f0; margin-bottom: 4px; }
+.job-modelo-preview {
+  font-size: 12px; color: #b6bccd; line-height: 1.5; margin: 6px 0;
+  max-height: 60px; overflow: hidden; white-space: pre-wrap;
+}
+.job-modelo-acoes { display: flex; gap: 8px; margin-top: 8px; }
+.job-modelo-enviar, .job-modelo-copiar {
+  flex: 1; padding: 7px 10px; border-radius: 8px; font-size: 11.5px; font-weight: 700;
+  cursor: pointer; border: none;
+}
+.job-modelo-enviar { background: #16a34a; color: #fff; }
+.job-modelo-enviar:hover:not(:disabled) { background: #1a9c4a; }
+.job-modelo-enviar:disabled { background: #2c3247; color: #6b7185; cursor: default; font-size: 10.5px; }
+.job-modelo-copiar { background: #2c3247; color: #e7e9f0; }
+.job-modelo-copiar:hover { background: #3a4159; }
 
 .job-carregando { text-align: center; padding: 26px 10px; color: #b6bccd; font-size: 13px; }
 .job-spin {

@@ -22,7 +22,7 @@
 </head>
 <body>
   <h1>JOB Serenus</h1>
-  <p class="sub">Análise de conversa do WhatsApp + envio pela fila do CRM</p>
+  <p class="sub">Análise de conversa do WhatsApp + mensagens da biblioteca de modelos</p>
 
   <label for="jobUrl">URL do JOB</label>
   <input id="jobUrl" type="text" placeholder="https://job-serenus-production.up.railway.app">
@@ -33,6 +33,12 @@
   <label for="usuarioId">Quem está usando (consultor)</label>
   <select id="usuarioId">
     <option value="">Selecione…</option>
+  </select>
+
+  <label for="railSide">Lado do painel no WhatsApp Web</label>
+  <select id="railSide">
+    <option value="direita">Direita</option>
+    <option value="esquerda">Esquerda</option>
   </select>
 
   <button id="salvar">Salvar</button>
