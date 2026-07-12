@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Modelos de E-mail/SMS{% endblock %}
+{% block title %}Modelos de E-mail/SMS/WhatsApp{% endblock %}
 
 {% block head %}
 <style>
@@ -31,8 +31,8 @@
 {% block content %}
 <div class="topbar">
   <div>
-    <h1 style="margin:0;">Modelos de E-mail/SMS</h1>
-    <div class="sub">Suba um modelo pronto (HTML de e-mail ou texto de SMS) e ele já aparece na hora de montar um passo de Fluxo — sem precisar mandar o conteúdo pelo chat</div>
+    <h1 style="margin:0;">Modelos de E-mail/SMS/WhatsApp</h1>
+    <div class="sub">Suba um modelo pronto (HTML de e-mail, texto de SMS ou mensagem de WhatsApp) e ele já aparece na hora de montar um passo de Fluxo — sem precisar mandar o conteúdo pelo chat</div>
   </div>
   <div style="display:flex; gap:8px;">
     <button class="btn-outline btn-sm" onclick="location.href='/crm/fluxos'">Voltar aos Fluxos</button>
@@ -87,6 +87,30 @@
   {% endfor %}
 </div>
 
+<div class="secao-titulo">
+  <span>Modelos de WhatsApp</span>
+  <button class="btn-azul" style="padding:7px 16px; font-size:12px;" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">+ Novo modelo de WhatsApp</button>
+</div>
+<div class="mo-grid">
+  {% for m in modelos_whatsapp %}
+  <div class="mo-card">
+    <div class="mo-card-topo">
+      <div class="mo-nome">{{ m.nome }}</div>
+      {% if m.variante %}<span class="mo-variante">Variante {{ m.variante }}</span>{% endif %}
+    </div>
+    <div class="mo-preview">{{ m.corpo_texto }}</div>
+    {% if m.midia_tipo %}<span class="mo-variante">{{ '🎤 Áudio' if m.midia_tipo == 'audio' else '🖼 Imagem' }} anexado</span>{% endif %}
+    <div class="mo-acoes">
+      <span class="mo-chip {{ 'on' if m.ativo else 'off' }}">{{ 'Ativo' if m.ativo else 'Desativado' }}</span>
+      <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
+      <button class="btn-ghost" style="font-size:11.5px; color:var(--rosa,#f43f5e);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
+    </div>
+  </div>
+  {% else %}
+  <div style="grid-column:1/-1; text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo de WhatsApp cadastrado ainda.</div>
+  {% endfor %}
+</div>
+
 <!-- Modal: novo modelo de e-mail -->
 <div class="modal-bg" id="modal-email">
   <div class="modal-card">
@@ -131,6 +155,26 @@
   </div>
 </div>
 
+<!-- Modal: novo modelo de WhatsApp -->
+<div class="modal-bg" id="modal-whatsapp">
+  <div class="modal-card">
+    <h3>Novo modelo de WhatsApp</h3>
+    <div class="mo-nota">Base pra futuramente virar funil automático. Texto sempre obrigatório. Mídia é opcional — só áudio OU imagem, nunca as duas (envio de mídia pela extensão ainda não está disponível; por enquanto o modelo com mídia fica só salvo).</div>
+    <label class="campo-label">Nome do modelo</label>
+    <input type="text" id="wa-nome" placeholder="Ex: Boas-vindas - primeiro contato">
+    <label class="campo-label">Variante (opcional)</label>
+    <input type="text" id="wa-variante" placeholder="Ex: A ou B">
+    <label class="campo-label">Texto da mensagem</label>
+    <textarea id="wa-texto" rows="5" placeholder="Oi {{nome}}, tudo bem?"></textarea>
+    <label class="campo-label">Mídia (opcional — imagem: jpg/png/webp, áudio: mp3/ogg/m4a/opus/wav, máx. 8MB)</label>
+    <input type="file" id="wa-midia" accept=".jpg,.jpeg,.png,.webp,.mp3,.ogg,.oga,.m4a,.opus,.wav">
+    <div class="modal-acoes">
+      <button class="btn-outline btn-sm" onclick="document.getElementById('modal-whatsapp').classList.remove('aberto')">Cancelar</button>
+      <button class="btn-azul" onclick="salvarModeloWhatsapp()">Salvar modelo</button>
+    </div>
+  </div>
+</div>
+
 <script>
 function salvarModeloEmail(){
   var nome = document.getElementById('em-nome').value.trim();
@@ -166,6 +210,24 @@ function salvarModeloSms(){
   if (!nome || !texto) { alert('Preencha nome e texto'); return; }
   fetch('/crm/modelos/sms/novo', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({nome: nome, texto: texto, variante: document.getElementById('sm-variante').value.trim()})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) location.reload();
+      else alert(d.erro || 'Erro ao salvar modelo');
+    });
+}
+
+function salvarModeloWhatsapp(){
+  var nome = document.getElementById('wa-nome').value.trim();
+  var texto = document.getElementById('wa-texto').value.trim();
+  if (!nome || !texto) { alert('Preencha nome e texto'); return; }
+  var fd = new FormData();
+  fd.append('nome', nome);
+  fd.append('texto', texto);
+  fd.append('variante', document.getElementById('wa-variante').value.trim());
+  var midia = document.getElementById('wa-midia').files[0];
+  if (midia) fd.append('arquivo_midia', midia);
+  fetch('/crm/modelos/whatsapp/novo', {method:'POST', body: fd})
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (d.ok) location.reload();

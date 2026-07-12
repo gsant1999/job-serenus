@@ -836,7 +836,9 @@ def init_db():
                 variante TEXT,
                 ativo INTEGER DEFAULT 1,
                 criado_por INTEGER,
-                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                midia_arquivo TEXT,
+                midia_tipo TEXT
             )""",
             """CREATE TABLE IF NOT EXISTS whatsapp_analises (
                 id SERIAL PRIMARY KEY,
@@ -1283,7 +1285,9 @@ def init_db():
             variante TEXT,
             ativo INTEGER DEFAULT 1,
             criado_por INTEGER,
-            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            midia_arquivo TEXT,
+            midia_tipo TEXT
         );
         CREATE TABLE IF NOT EXISTS whatsapp_analises (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1727,6 +1731,11 @@ def init_db():
         # servidor: transcrição + Claude). Consultor pediu pra enxergar isso,
         # oscilava muito e sem visibilidade não dava pra saber se era normal.
         ("whatsapp_analises", "duracao_segundos", "REAL"),
+        # Biblioteca de modelos de mensagem de WhatsApp (base pra funil, fase
+        # futura) — texto sempre; mídia é opcional e mutuamente exclusiva
+        # (áudio OU imagem, nunca as duas), validado na rota, não no schema.
+        ("modelos_conteudo", "midia_arquivo", "TEXT"),
+        ("modelos_conteudo", "midia_tipo", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -9216,6 +9225,31 @@ def api_whatsapp_enviar_direto():
     return _wa_cors(jsonify({"ok": True, "id": fila_id, "lead_id": lead_id}))
 
 
+@app.route('/api/whatsapp/extensao/modelos', methods=['GET', 'OPTIONS'])
+def api_whatsapp_extensao_modelos():
+    """Lista os modelos de mensagem de WhatsApp ativos pra extensão mostrar na
+    seção Mensagens do painel — só LEITURA (criar/editar modelo é só no site,
+    admin). Monta a URL de mídia pronta pra extensão não precisar saber o
+    padrão de rota."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    conn = db()
+    rows = conn.execute("""SELECT id, nome, corpo_texto, variante, midia_arquivo, midia_tipo
+        FROM modelos_conteudo WHERE tipo='whatsapp' AND ativo=1 ORDER BY nome""").fetchall()
+    close_db(conn)
+    modelos = []
+    for m in rows:
+        md = dict(m)
+        modelos.append({
+            "id": md['id'], "nome": md['nome'], "texto": md['corpo_texto'] or '',
+            "variante": md['variante'], "midia_tipo": md['midia_tipo'],
+            "midia_url": (f"{_SITE_BASE_URL}/crm/modelos/midia/{md['midia_arquivo']}" if md['midia_arquivo'] else None),
+        })
+    return _wa_cors(jsonify({"ok": True, "modelos": modelos}))
+
+
 @app.route('/api/whatsapp/usuarios', methods=['GET', 'OPTIONS'])
 def api_whatsapp_usuarios():
     """Lista os usuários ativos (id + nome) pra extensão popular o seletor de
@@ -14951,7 +14985,8 @@ def crm_modelos():
     close_db(conn)
     return render_template('crm_modelos.html',
                            modelos_email=[m for m in modelos if m['tipo'] == 'email'],
-                           modelos_sms=[m for m in modelos if m['tipo'] == 'sms'])
+                           modelos_sms=[m for m in modelos if m['tipo'] == 'sms'],
+                           modelos_whatsapp=[m for m in modelos if m['tipo'] == 'whatsapp'])
 
 
 @app.route('/crm/modelos/imagem/<path:nome>')
@@ -15031,6 +15066,78 @@ def crm_modelo_sms_novo():
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "id": mid})
+
+
+_MODELO_WPP_EXTS_IMG = ('.jpg', '.jpeg', '.png', '.webp')
+_MODELO_WPP_EXTS_AUDIO = ('.mp3', '.ogg', '.oga', '.m4a', '.opus', '.wav')
+
+
+@app.route('/crm/modelos/whatsapp/novo', methods=['POST'])
+@login_required
+@admin_required
+def crm_modelo_whatsapp_novo():
+    """Modelo de mensagem de WhatsApp — base da biblioteca reutilizável (pedido
+    explícito do Guilherme, pra depois virar funil). Texto sempre obrigatório;
+    mídia é opcional e SÓ áudio OU imagem, nunca as duas (mantém simples e
+    compatível com como wa-js manda cada tipo — decisão registrada no plano).
+    Autoria fica só aqui (site, admin) — a extensão só lê e manda o texto pela
+    fila que já existe; ela nunca cria/edita modelo (chave de extensão é
+    única e compartilhada entre consultores, não é identidade individual)."""
+    nome = (request.form.get('nome') or '').strip()
+    texto = (request.form.get('texto') or '').strip()
+    variante = (request.form.get('variante') or '').strip() or None
+    if not nome or not texto:
+        return jsonify({"ok": False, "erro": "Nome e texto da mensagem são obrigatórios"}), 400
+    if len(texto) > 4000:
+        return jsonify({"ok": False, "erro": "Texto longo demais (máx. 4000 caracteres)"}), 400
+
+    midia_arquivo, midia_tipo = None, None
+    f = request.files.get('arquivo_midia')
+    if f and f.filename:
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext in _MODELO_WPP_EXTS_IMG:
+            midia_tipo = 'imagem'
+        elif ext in _MODELO_WPP_EXTS_AUDIO:
+            midia_tipo = 'audio'
+        else:
+            return jsonify({"ok": False, "erro": f"Formato não aceito: {ext} (imagem: jpg/png/webp, áudio: mp3/ogg/m4a/opus/wav)"}), 400
+        f.stream.seek(0, os.SEEK_END)
+        tamanho = f.stream.tell()
+        f.stream.seek(0)
+        if tamanho > 8_000_000:
+            return jsonify({"ok": False, "erro": "Arquivo grande demais (máx. 8MB)"}), 400
+        nome_arquivo = f"MODELO_WPP_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{_sanitizar_filename(f.filename)}"
+        resultado = upload_arquivo_r2(f.stream, f"modelos/{nome_arquivo}")
+        if not resultado.get('ok'):
+            return jsonify({"ok": False, "erro": f"Erro ao salvar mídia: {resultado.get('erro', 'desconhecido')}"}), 500
+        midia_arquivo = nome_arquivo
+
+    conn = db()
+    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, corpo_texto, variante, ativo, criado_por, midia_arquivo, midia_tipo)
+                    VALUES ('whatsapp',?,?,?,1,?,?,?)""",
+                 (nome, texto, variante, session.get('user_id'), midia_arquivo, midia_tipo))
+    mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "id": mid})
+
+
+@app.route('/crm/modelos/midia/<path:nome>')
+def crm_modelo_midia(nome):
+    """Serve a mídia (áudio/imagem) de um modelo de WhatsApp SEM login — mesmo
+    motivo de /crm/modelos/imagem/<nome>: a tag <img>/<audio> injetada no
+    painel da extensão (dentro do WhatsApp Web) não manda cookie de sessão
+    nem a chave da extensão."""
+    from urllib.parse import unquote
+    nome = os.path.basename(unquote(nome))
+    conteudo, ctype = _localizar_anexo(nome)
+    if conteudo is None:
+        abort(404)
+    if ctype is None:
+        ctype = mimetypes.guess_type(nome)[0] or 'application/octet-stream'
+    resp = Response(conteudo, mimetype=ctype)
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
 
 
 @app.route('/crm/modelos/<int:mid>/toggle', methods=['POST'])
