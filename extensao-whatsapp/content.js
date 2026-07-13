@@ -1100,10 +1100,18 @@
 
   async function buscarFunis(forcar) {
     if (!forcar && _funisCache && (Date.now() - _funisCache.ts) < FUNIS_CACHE_MS) return _funisCache.funis;
-    const resp = await chrome.runtime.sendMessage({ type: 'listar_funis' });
-    const funis = (resp && resp.ok && resp.funis) || [];
+    // Devolve a resposta CRUA (não só o array) pra abrirSecaoFunis distinguir
+    // "deu erro" de "não tem funil" — e nunca ficar preso no spinner.
+    let resp;
+    try {
+      resp = await chrome.runtime.sendMessage({ type: 'listar_funis' });
+    } catch (e) {
+      return { ok: false, erro: 'Recarregue a aba do WhatsApp Web (a extensão foi atualizada): ' + (e && e.message || e) };
+    }
+    if (!resp || !resp.ok) return { ok: false, erro: (resp && resp.erro) || 'Não consegui falar com o JOB.' };
+    const funis = resp.funis || [];
     _funisCache = { ts: Date.now(), funis };
-    return funis;
+    return { ok: true, funis };
   }
 
   function funilTipoIcone(tipo) {
@@ -1121,10 +1129,23 @@
 
   async function abrirSecaoFunis() {
     setCorpoSecaoMensagens('<div class="job-carregando"><div class="job-spin"></div><div>Carregando funis…</div></div>');
-    const funis = await buscarFunis(false);
+    let res;
+    try {
+      res = await buscarFunis(false);
+    } catch (e) {
+      res = { ok: false, erro: String(e && e.message || e) };
+    }
     if (_secaoAtiva !== 'funis') return;
-    setCorpoSecaoMensagens(renderFunis(funis));
-    ligarAcoesFunis();
+    if (!res || !res.ok) {
+      setCorpoSecaoMensagens('<div class="job-erro">Não consegui carregar os funis.<br><span style="font-size:11px;opacity:.8">' + esc((res && res.erro) || '') + '</span></div>');
+      return;
+    }
+    try {
+      setCorpoSecaoMensagens(renderFunis(res.funis));
+      ligarAcoesFunis();
+    } catch (e) {
+      setCorpoSecaoMensagens('<div class="job-erro">Erro ao montar a lista de funis:<br><span style="font-size:11px;opacity:.8">' + esc(String(e && e.message || e)) + '</span></div>');
+    }
   }
 
   function renderFunis(funis) {
@@ -1188,7 +1209,8 @@
   //    progresso passo-a-passo e deixa cancelar no meio. ──
   async function dispararFunil(funilId) {
     if (_funilRodando) { alert('Já tem um funil rodando — espere terminar ou cancele.'); return; }
-    const funis = await buscarFunis(false);
+    const res = await buscarFunis(false);
+    const funis = (res && res.ok && res.funis) || [];
     const funil = funis.find((f) => String(f.id) === String(funilId));
     if (!funil || !(funil.passos || []).length) { alert('Esse funil não tem passos.'); return; }
     const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
