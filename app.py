@@ -9448,14 +9448,7 @@ def api_whatsapp_enviar_direto():
         return _wa_cors(jsonify({"ok": False, "erro": "Selecione seu usuário no popup da extensão antes de mandar mensagem"})), 400
 
     tel_norm = _normalizar_telefone(telefone)
-    lead = None
-    if tel_norm:
-        lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone()
-        if not lead:
-            suf = tel_norm[-8:]
-            if len(suf) == 8:
-                lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm LIKE ?",
-                                     ('%' + suf,)).fetchone()
+    lead = _buscar_lead_por_telefone(conn, tel_norm)
     if not lead and nome:
         candidatos = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE LOWER(TRIM(nome))=?",
                                   (nome.strip().lower(),)).fetchall()
@@ -9971,16 +9964,7 @@ def api_whatsapp_analisar():
         except (TypeError, ValueError):
             pass
 
-    lead = None
-    if tel_norm:
-        lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone()
-        if not lead:
-            # tenta pelos últimos 8 dígitos (variação de DDD/9º dígito)
-            suf = tel_norm[-8:]
-            if len(suf) == 8:
-                lead = conn.execute(
-                    "SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm LIKE ?",
-                    ('%' + suf,)).fetchone()
+    lead = _buscar_lead_por_telefone(conn, tel_norm)
     # Fallback por NOME: contato salvo no WhatsApp não expõe o telefone no DOM
     # novo, então a extensão manda só o nome. Casa por nome exato (case-insensitive)
     # — MAS se houver homônimo (nome comum, tipo "Maria Silva"), NÃO adivinha:
@@ -14713,12 +14697,9 @@ def _importar_leads_automatico():
                     if (datetime.now(TZ_SP) - dt_lead).days > 30:
                         ignorados += 1
                         continue
-                # Dedup por telefone_norm (alinhado ao webhook) + email
-                existe = None
-                if telefone_norm:
-                    existe = conn.execute(
-                        "SELECT id FROM crm_leads WHERE telefone_norm = ?", (telefone_norm,)
-                    ).fetchone()
+                # Dedup por telefone_norm (com tolerância de 9º dígito — mesmo
+                # critério usado em toda criação automática de lead) + email
+                existe = _buscar_lead_por_telefone(conn, telefone_norm)
                 if not existe and email:
                     existe = conn.execute(
                         "SELECT id FROM crm_leads WHERE LOWER(email) = LOWER(?)", (email,)
@@ -16196,6 +16177,28 @@ def _normalizar_telefone(tel_raw):
         dig = dig[2:]
     return dig
 
+
+def _buscar_lead_por_telefone(conn, telefone_norm):
+    """Busca de lead por telefone: SEMPRE a base de verdade pro dedup (nunca
+    nome — nome tem falso-negativo fácil, ex: contato salvo como 'Karine' no
+    CRM vs 'Karine - Lead' no WhatsApp, que nunca bateria numa comparação
+    exata e geraria duplicata). Exata primeiro; se não achar, tenta pelos
+    últimos 8 dígitos (mesmo número, só variando presença do 9º dígito —
+    '19991046030' vs '1991046030' têm o mesmo sufixo de 8). Usado em todo
+    lugar que cria lead a partir de telefone: import de planilha (manual e
+    automático) e análise de WhatsApp — critério único, sem duplicar lógica."""
+    if not telefone_norm:
+        return None
+    lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm=?",
+                        (telefone_norm,)).fetchone()
+    if lead:
+        return lead
+    suf = telefone_norm[-8:]
+    if len(suf) == 8:
+        lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm LIKE ?",
+                            ('%' + suf,)).fetchone()
+    return lead
+
 def _formatar_telefone(tel_raw):
     """
     Formata telefone para exibição bonita: (19) 99104-6030 ou (19) 3104-6030.
@@ -16503,15 +16506,20 @@ def _processar_lead(row, conn):
     # Data do lead
     data_lead = _parse_data_lead(data_hora_raw)
     
-    # Filtro 2: Duplicado (telefone ou email)
-    if telefone:
-        dup = conn.execute(
-            "SELECT id FROM crm_leads WHERE telefone = ?",
-            (telefone,)
-        ).fetchone()
+    # Filtro 2: Duplicado — SEMPRE por telefone normalizado (nunca nome, nunca
+    # telefone cru). Bug real que gerava duplicata em massa: essa checagem
+    # comparava o telefone CRU da planilha (ex: "19991046030") contra a coluna
+    # `telefone` do banco, que guarda o valor JÁ FORMATADO pra exibição
+    # (ex: "(19) 99104-6030") — as duas strings quase nunca batiam, então
+    # praticamente todo lead "duplicado" passava como novo. Corrigido pra
+    # comparar normalizado-com-normalizado, com tolerância de 9º dígito
+    # (mesmo critério usado na análise de WhatsApp — _buscar_lead_por_telefone).
+    telefone_norm = _normalizar_telefone(telefone)
+    if telefone_norm:
+        dup = _buscar_lead_por_telefone(conn, telefone_norm)
         if dup:
             return (False, f'Duplicado (tel {telefone})', None)
-    
+
     if email:
         dup = conn.execute(
             "SELECT id FROM crm_leads WHERE email = ?",
@@ -16519,14 +16527,15 @@ def _processar_lead(row, conn):
         ).fetchone()
         if dup:
             return (False, f'Duplicado (email {email})', None)
-    
+
     # Validação mínima
     if not nome:
         return (False, 'Nome vazio', None)
-    
+
     return (True, 'OK', {
         'nome': nome,
         'telefone': telefone,
+        'telefone_norm': telefone_norm,
         'email': email,
         'empresa': cidade,
         'origem': origem,
@@ -17219,13 +17228,18 @@ def crm_importar():
         
         if sucesso:
             try:
+                # BUG CORRIGIDO: esse INSERT nunca gravava telefone_norm — o
+                # lead criado aqui ficava PRA SEMPRE invisível pra qualquer
+                # busca por telefone no resto do sistema (análise de WhatsApp,
+                # próxima importação...), garantindo duplicata toda vez que
+                # esse mesmo contato aparecesse de novo em qualquer outro lugar.
                 conn.execute(
-                    """INSERT INTO crm_leads 
-                       (nome, telefone, email, empresa, origem, etapa, responsavel_id, valor_estimado, observacoes)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (dados['nome'], dados['telefone'], dados['email'], dados['empresa'],
-                     dados['origem'], dados['etapa'], dados['responsavel_id'],
-                     dados['valor_estimado'], dados['observacoes'])
+                    """INSERT INTO crm_leads
+                       (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id, valor_estimado, observacoes, criado_em)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (dados['nome'], _formatar_telefone(dados['telefone']) or dados['telefone'], dados['telefone_norm'],
+                     dados['email'], dados['empresa'], dados['origem'], dados['etapa'], dados['responsavel_id'],
+                     dados['valor_estimado'], dados['observacoes'], dados.get('data_lead') or _agora_sp())
                 )
                 importados += 1
             except Exception as e:
