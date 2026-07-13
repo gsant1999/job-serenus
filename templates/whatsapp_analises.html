@@ -116,16 +116,25 @@
 <div class="panel-box">
   <h2>Últimas análises</h2>
   <p class="sub">{{ analises|length }} análise(s){{ ' (todas as consultoras)' if eh_admin else ' de leads sob sua responsabilidade no CRM — pode incluir análise que outro consultor rodou num lead seu' }}.</p>
+  {% if eh_admin and consultores %}
+  <div style="display:flex; gap:6px; flex-wrap:wrap; margin:0 0 16px;">
+    <a href="/whatsapp-analises" class="pill {{ 'pill-verde' if not f_consultor else 'pill-cinza' }}" style="text-decoration:none; cursor:pointer;">Todos</a>
+    {% for cst in consultores %}
+    <a href="/whatsapp-analises?consultor={{ cst.id }}" class="pill {{ 'pill-verde' if f_consultor == cst.id|string else 'pill-cinza' }}" style="text-decoration:none; cursor:pointer;">{{ cst.nome }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% if not analises %}
     <div class="vazio">Nenhuma análise ainda. Use o botão da extensão numa conversa do WhatsApp Web.</div>
   {% else %}
   <table class="pnl-tab">
-    <thead><tr><th>Data</th><th>Contato</th><th class="num">Score</th><th>Faixa</th><th>Lead no CRM</th><th>Etapa atual</th><th class="num">Duração</th><th class="num">Custo IA</th><th>Conversa</th></tr></thead>
+    <thead><tr><th>Data</th><th>Contato</th>{% if eh_admin %}<th>Consultor</th>{% endif %}<th class="num">Score</th><th>Faixa</th><th>Lead no CRM</th><th>Etapa atual</th><th class="num">Duração</th><th class="num">Custo IA</th><th>Conversa</th></tr></thead>
     <tbody>
       {% for a in analises %}
       <tr>
         <td>{{ a.criado_em }}</td>
         <td>{{ a.nome_contato or a.telefone or '—' }}</td>
+        {% if eh_admin %}<td>{{ a.consultor_nome or '—' }}</td>{% endif %}
         <td class="num">{{ a.score if a.score is not none else '—' }}</td>
         <td><span class="pill pill-{{ a.score_faixa }}">{{ (a.score_faixa or '—')|upper }}</span></td>
         <td>

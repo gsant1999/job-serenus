@@ -10172,26 +10172,45 @@ def whatsapp_analises_pagina():
     seu (mesma regra de visibilidade do CRM)."""
     eh_admin = session.get('perfil') == 'admin'
     uid = session['user_id']
+    # Filtro por consultor: só faz sentido pro admin (consultor não-admin já só
+    # vê as próprias, filtrar de novo por si mesmo não muda nada) — quem rodou
+    # a análise (criado_por = usuário escolhido no popup da extensão na hora),
+    # não o responsável do lead — é "análise de quem", não "lead de quem".
+    f_consultor = request.args.get('consultor', '').strip() if eh_admin else ''
     conn = db()
     calibracao = _wa_calibracao(conn, None if eh_admin else uid)
     custo = _wa_custo_resumo(conn, None if eh_admin else uid)
 
     q = """SELECT wa.id, wa.nome_contato, wa.telefone, wa.score, wa.score_faixa,
-                  wa.total_mensagens, wa.criado_em, wa.lead_id, wa.duracao_segundos,
+                  wa.total_mensagens, wa.criado_em, wa.lead_id, wa.duracao_segundos, wa.criado_por,
                   COALESCE(wa.custo_claude_usd,0) + COALESCE(wa.custo_transcricao_usd,0) AS custo_usd,
-                  l.nome AS lead_nome, l.etapa AS lead_etapa, e.nome AS etapa_nome, e.tipo AS etapa_tipo
+                  l.nome AS lead_nome, l.etapa AS lead_etapa, e.nome AS etapa_nome, e.tipo AS etapa_tipo,
+                  u.nome AS consultor_nome
            FROM whatsapp_analises wa
            LEFT JOIN crm_leads l ON l.id = wa.lead_id
-           LEFT JOIN crm_etapas e ON e.slug = l.etapa"""
-    params = []
+           LEFT JOIN crm_etapas e ON e.slug = l.etapa
+           LEFT JOIN usuarios u ON u.id = wa.criado_por"""
+    condicoes, params = [], []
     if not eh_admin:
-        q += " WHERE l.responsavel_id=?"
+        condicoes.append("l.responsavel_id=?")
         params.append(uid)
+    if f_consultor:
+        condicoes.append("wa.criado_por=?")
+        params.append(f_consultor)
+    if condicoes:
+        q += " WHERE " + " AND ".join(condicoes)
     q += " ORDER BY wa.criado_em DESC LIMIT 200"
     analises = conn.execute(q, params).fetchall()
+    # Lista de consultores pra montar o filtro — só quem já tem alguma análise
+    # (não adianta mostrar opção vazia), só visível pro admin.
+    consultores = []
+    if eh_admin:
+        consultores = conn.execute("""SELECT DISTINCT u.id, u.nome FROM whatsapp_analises wa
+            JOIN usuarios u ON u.id = wa.criado_por ORDER BY u.nome""").fetchall()
     close_db(conn)
     return render_template('whatsapp_analises.html', analises=analises, calibracao=calibracao,
-                           custo=custo, taxa_usd_brl=_USD_BRL_TAXA, eh_admin=eh_admin)
+                           custo=custo, taxa_usd_brl=_USD_BRL_TAXA, eh_admin=eh_admin,
+                           consultores=consultores, f_consultor=f_consultor)
 
 
 @app.route('/whatsapp-analises/<int:aid>/conversa')
