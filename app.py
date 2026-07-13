@@ -8810,9 +8810,10 @@ _CLAUDE_SCHEMA_ANALISE = {
                 "cidade": {"type": "string", "description": "Cidade visível num anexo. Vazio se não visível."},
                 "cnpj": {"type": "string", "description": "CNPJ visível num anexo, só dígitos. Vazio se não visível."},
                 "operadora_interesse": {"type": "string", "description": "Operadora da cotação/documento anexado. Vazio se não visível."},
-                "plano_preferido": {"type": "string", "description": "Nome comercial do plano que o CLIENTE demonstrou preferir de verdade (não o último apresentado/anexado por padrão). Vazio se não houver sinal claro de preferência do cliente."}
+                "plano_preferido": {"type": "string", "description": "Nome comercial do plano que o CLIENTE demonstrou preferir de verdade (não o último apresentado/anexado por padrão). Vazio se não houver sinal claro de preferência do cliente."},
+                "valor_cotacao": {"type": "string", "description": "Valor em R$ da cotação/proposta — visto numa imagem/PDF de cotação OU dito claramente pelo consultor no texto como o valor de uma proposta pro cliente. Só o número (ex: '627,00' ou '627.00'), sem 'R$'. Se houver mais de um plano/valor no anexo, use o do plano_preferido do cliente; sem preferência clara, use o mais barato. Vazio se não houver valor claro."}
             },
-            "required": ["idades", "faixas_etarias", "vidas", "tipo_contratacao", "cidade", "cnpj", "operadora_interesse", "plano_preferido"],
+            "required": ["idades", "faixas_etarias", "vidas", "tipo_contratacao", "cidade", "cnpj", "operadora_interesse", "plano_preferido", "valor_cotacao"],
             "additionalProperties": False
         }
     },
@@ -9127,6 +9128,23 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
     if dados_anexo.get('plano_preferido'):
         ex['plano_preferido'] = dados_anexo['plano_preferido'].strip()
         houve_enriquecimento_ia = True
+    # Valor da cotação: não é campo de score, só passa direto pra quem chamou
+    # preencher valor_estimado/observações do lead — não mexe em ex/score.
+    valor_cotacao = None
+    bruto_valor = str(dados_anexo.get('valor_cotacao') or '').strip()
+    if bruto_valor:
+        limpo = re.sub(r'[^\d,.]', '', bruto_valor)
+        # Normaliza separador: "1.234,56" (BR) e "627.00" (US) os dois viram ponto decimal.
+        if ',' in limpo and '.' in limpo:
+            limpo = limpo.replace('.', '').replace(',', '.')
+        elif ',' in limpo:
+            limpo = limpo.replace(',', '.')
+        try:
+            v = float(limpo)
+            if 0 < v < 1_000_000:
+                valor_cotacao = round(v, 2)
+        except ValueError:
+            pass
 
     # A Claude é a ÚNICA camada capaz de reconhecer "lead perdido de verdade"
     # (disse explicitamente que não quer mais, fechou com concorrente etc.) —
@@ -9163,7 +9181,7 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
 
     return {'extracao': extracao, 'fase_funil': ex['fase_funil'], 'tags': tags, **sc,
             'sugestoes': sugestoes, 'followup': followup, 'descricao': descricao, 'ia': ia,
-            'ia_falhou': ia_falhou}
+            'ia_falhou': ia_falhou, 'valor_cotacao': valor_cotacao}
 
 
 def _wa_auth_ok():
@@ -10080,6 +10098,27 @@ def api_whatsapp_analisar():
             sets = ', '.join(f"{col} = COALESCE(NULLIF({col}, ''), ?)" for col in qual)
             conn.execute(f"UPDATE crm_leads SET {sets}, atualizado_em=? WHERE id=?",
                          (*qual.values(), _agora_sp(), lead_id))
+
+    # ── Valor da cotação (pedido explícito do Guilherme): quando a IA acha um
+    # valor claro num anexo/texto, preenche o campo estruturado valor_estimado
+    # (só se ainda estiver vazio — nunca pisa em cima do que o consultor já
+    # colocou) E deixa um registro em observações, com a operadora se souber.
+    # Dedup por conteúdo: reanálise da mesma conversa com o MESMO valor não
+    # empilha a nota de novo (a extensão manda tudo de novo a cada rodada). ──
+    if lead_id and an.get('valor_cotacao'):
+        vc = an['valor_cotacao']
+        operadora = (an.get('extracao') or {}).get('operadora_interesse') or ''
+        nota = f"Cotação identificada pela IA: R$ {vc:.2f}".replace('.', ',')
+        if operadora:
+            nota += f" ({operadora})"
+        atual = conn.execute("SELECT valor_estimado, observacoes FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+        atual = dict(atual) if atual else {}
+        if nota not in (atual.get('observacoes') or ''):
+            obs_nova = ((atual.get('observacoes') or '').rstrip() + f"\n{nota}").strip()
+            conn.execute("""UPDATE crm_leads SET
+                valor_estimado = COALESCE(valor_estimado, ?),
+                observacoes = ?, atualizado_em = ? WHERE id=?""",
+                (vc, obs_nova, _agora_sp(), lead_id))
 
     # ── Score Lead move o lead pra Topo do Funil na primeira triagem real —
     # regra combinada com o Guilherme: score>=550 (medio/bom/quente) tira da
