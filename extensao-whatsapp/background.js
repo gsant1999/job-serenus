@@ -150,11 +150,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === 'listar_modelos') {
-    chamarJob('/api/whatsapp/extensao/modelos', 'GET', null, 15000).then(sendResponse);
+    // Manda o consultor escolhido no popup: o JOB devolve só a biblioteca DELE
+    // (+ itens sem dono, material da corretora) — cada um vê a própria voz.
+    chrome.storage.local.get(['usuarioId']).then(({ usuarioId }) =>
+      chamarJob('/api/whatsapp/extensao/modelos' +
+        (usuarioId ? '?usuario_id=' + encodeURIComponent(usuarioId) : ''), 'GET', null, 15000)
+    ).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'listar_funis') {
-    chamarJob('/api/whatsapp/extensao/funis', 'GET', null, 15000).then(sendResponse);
+    chrome.storage.local.get(['usuarioId']).then(({ usuarioId }) =>
+      chamarJob('/api/whatsapp/extensao/funis' +
+        (usuarioId ? '?usuario_id=' + encodeURIComponent(usuarioId) : ''), 'GET', null, 15000)
+    ).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'funil_disparado') {

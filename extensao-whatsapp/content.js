@@ -1770,4 +1770,18 @@
     finally { _filaOcupada = false; }
   }
   setInterval(checarFilaDeEnvio, 20000);
+
+  // Trocou o consultor (ou chave/URL) no popup → joga fora o cache das listas,
+  // senão a biblioteca/funis do consultor anterior ficam na tela por até 5 min.
+  try {
+    chrome.storage.onChanged.addListener((mud, area) => {
+      if (area !== 'local') return;
+      if (mud.usuarioId || mud.extKey || mud.jobUrl) {
+        _modelosCache = null;
+        _funisCache = null;
+        if (_secaoAtiva === 'mensagens') abrirSecaoMensagens();
+        else if (_secaoAtiva === 'funis') abrirSecaoFunis();
+      }
+    });
+  } catch (e) { /* sem storage, sem cache pra limpar */ }
 })();

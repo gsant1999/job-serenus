@@ -9313,16 +9313,32 @@ def api_whatsapp_enviar_direto():
 def api_whatsapp_extensao_modelos():
     """Lista os modelos de mensagem de WhatsApp ativos pra extensão mostrar na
     seção Mensagens do painel. Monta a URL de mídia pronta pra extensão não
-    precisar saber o padrão de rota."""
+    precisar saber o padrão de rota.
+
+    Com ?usuario_id=N, devolve só a biblioteca DAQUELE consultor (criado_por=N)
+    + itens sem dono (criado_por NULL = material da corretora, visível a todos).
+    Pedido do Guilherme: cada consultor vê os áudios da própria voz, não os 432
+    do acervo dele. ATENÇÃO: isso é organização, NÃO segurança — a chave da
+    extensão é única/compartilhada, então qualquer portador dela pode pedir o
+    usuario_id que quiser. Segurança real = chave por usuário (item futuro)."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
         return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    try:
+        uid = int(request.args.get('usuario_id') or 0)
+    except (TypeError, ValueError):
+        uid = 0
+    where = "tipo='whatsapp' AND ativo=1"
+    params = []
+    if uid:
+        where += " AND (criado_por = ? OR criado_por IS NULL)"
+        params.append(uid)
     conn = db()
-    rows = conn.execute("""SELECT id, nome, corpo_texto, variante, midia_arquivo, midia_tipo,
+    rows = conn.execute(f"""SELECT id, nome, corpo_texto, variante, midia_arquivo, midia_tipo,
         categoria, favorito, vezes_usado
-        FROM modelos_conteudo WHERE tipo='whatsapp' AND ativo=1
-        ORDER BY favorito DESC, (categoria IS NULL), categoria, nome""").fetchall()
+        FROM modelos_conteudo WHERE {where}
+        ORDER BY favorito DESC, (categoria IS NULL), categoria, nome""", params).fetchall()
     close_db(conn)
     modelos = []
     for m in rows:
@@ -9437,10 +9453,22 @@ def api_whatsapp_extensao_funis():
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
         return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    # Mesmo filtro por consultor dos modelos: ?usuario_id=N → funis DELE
+    # (criado_por=N) + funis sem dono (NULL = da corretora). Organização, não
+    # segurança — ver comentário em api_whatsapp_extensao_modelos.
+    try:
+        uid = int(request.args.get('usuario_id') or 0)
+    except (TypeError, ValueError):
+        uid = 0
+    where_f = "ativo=1"
+    params_f = []
+    if uid:
+        where_f += " AND (criado_por = ? OR criado_por IS NULL)"
+        params_f.append(uid)
     conn = db()
-    funis = conn.execute("""SELECT id, nome, categoria, favorito, vezes_disparado
-        FROM whatsapp_funis WHERE ativo=1
-        ORDER BY favorito DESC, (categoria IS NULL), categoria, nome""").fetchall()
+    funis = conn.execute(f"""SELECT id, nome, categoria, favorito, vezes_disparado
+        FROM whatsapp_funis WHERE {where_f}
+        ORDER BY favorito DESC, (categoria IS NULL), categoria, nome""", params_f).fetchall()
     # Puxa TODOS os passos de uma vez (join com o modelo) e agrupa por funil —
     # evita N+1 e mantém a ordem definida no builder.
     passos = conn.execute("""SELECT p.id AS passo_id, p.funil_id, p.ordem, p.delay_segundos,
