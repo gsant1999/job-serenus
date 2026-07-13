@@ -25,6 +25,23 @@
   .modal-acoes { display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
   .btn-azul { background:var(--azul); color:#fff; border:none; padding:10px 20px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
   .mo-nota { font-size:11.5px; color:var(--cinza-2); line-height:1.5; margin-bottom:10px; }
+
+  .wa-stats { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; max-width:1100px; }
+  .wa-stat { background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:8px 16px; text-align:center; }
+  .wa-stat b { display:block; font-size:20px; font-weight:800; color:var(--texto); font-variant-numeric:tabular-nums; }
+  .wa-stat span { font-size:11px; color:var(--cinza-2); }
+  .wa-controls { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px; max-width:1100px; }
+  .wa-busca { flex:1; min-width:220px; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; font-size:13px; color:var(--texto); }
+  .wa-busca:focus { outline:none; border-color:var(--azul); }
+  .wa-filtros { display:flex; gap:6px; flex-wrap:wrap; }
+  .wa-fchip { background:var(--panel-2); color:var(--cinza); border:1px solid var(--borda); border-radius:20px; padding:6px 13px; font-size:12px; font-weight:600; cursor:pointer; }
+  .wa-fchip.on { background:var(--azul); color:#fff; border-color:var(--azul); }
+  #wa-lista { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:14px; max-width:1100px; margin-bottom:28px; }
+  .wa-card { display:flex; flex-direction:column; }
+  .wa-tipo-ico { margin-right:5px; }
+  .wa-fav { background:none; border:none; color:var(--cinza-2); font-size:18px; cursor:pointer; line-height:1; padding:0 2px; }
+  .wa-fav.ativo { color:#f5c518; }
+  .wa-cat-chip { display:inline-block; align-self:flex-start; font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:20px; background:rgba(37,99,235,.12); color:var(--azul); margin-bottom:6px; }
 </style>
 {% endblock %}
 
@@ -91,24 +108,61 @@
   <span>Modelos de WhatsApp</span>
   <button class="btn-azul" style="padding:7px 16px; font-size:12px;" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">+ Novo modelo de WhatsApp</button>
 </div>
-<div class="mo-grid">
+
+{% if stats_wpp and stats_wpp.total %}
+<div class="wa-stats">
+  <div class="wa-stat"><b>{{ stats_wpp.total }}</b><span>no total</span></div>
+  <div class="wa-stat"><b>{{ stats_wpp.texto }}</b><span>texto</span></div>
+  <div class="wa-stat"><b>{{ stats_wpp.audio }}</b><span>áudio</span></div>
+  <div class="wa-stat"><b>{{ stats_wpp.imagem }}</b><span>imagem</span></div>
+  <div class="wa-stat"><b>{{ stats_wpp.categorias|length }}</b><span>categorias</span></div>
+</div>
+
+<div class="wa-controls">
+  <input type="text" id="wa-busca" class="wa-busca" placeholder="Buscar por nome, texto ou categoria…" oninput="filtrarWpp()">
+  <div class="wa-filtros">
+    <button class="wa-fchip on" data-f="todos" onclick="setFiltroWpp(this)">Todos</button>
+    <button class="wa-fchip" data-f="favoritos" onclick="setFiltroWpp(this)">★ Favoritos</button>
+    <button class="wa-fchip" data-f="texto" onclick="setFiltroWpp(this)">Texto</button>
+    <button class="wa-fchip" data-f="audio" onclick="setFiltroWpp(this)">Áudio</button>
+    <button class="wa-fchip" data-f="imagem" onclick="setFiltroWpp(this)">Imagem</button>
+  </div>
+</div>
+{% endif %}
+
+<div id="wa-lista">
   {% for m in modelos_whatsapp %}
-  <div class="mo-card">
+  <div class="mo-card wa-card"
+       data-nome="{{ (m.nome or '')|lower }}"
+       data-texto="{{ (m.corpo_texto or '')|lower }}"
+       data-categoria="{{ (m.categoria or '')|lower }}"
+       data-tipo="{{ m.midia_tipo or 'texto' }}"
+       data-fav="{{ 1 if m.favorito else 0 }}">
     <div class="mo-card-topo">
-      <div class="mo-nome">{{ m.nome }}</div>
-      {% if m.variante %}<span class="mo-variante">Variante {{ m.variante }}</span>{% endif %}
+      <div class="mo-nome">
+        <span class="wa-tipo-ico">{{ '🎤' if m.midia_tipo == 'audio' else ('🖼' if m.midia_tipo == 'imagem' else '💬') }}</span>
+        {{ m.nome }}
+      </div>
+      <button class="wa-fav {{ 'ativo' if m.favorito else '' }}" onclick="toggleFavorito({{ m.id }}, this)" title="Favoritar">★</button>
     </div>
+    {% if m.categoria %}<span class="wa-cat-chip">{{ m.categoria }}</span>{% endif %}
     <div class="mo-preview">{{ m.corpo_texto }}</div>
-    {% if m.midia_tipo %}<span class="mo-variante">{{ '🎤 Áudio' if m.midia_tipo == 'audio' else '🖼 Imagem' }} anexado</span>{% endif %}
+    {% if m.midia_tipo == 'audio' and m.midia_arquivo %}
+    <audio controls preload="none" src="/crm/modelos/midia/{{ m.midia_arquivo }}" style="width:100%; margin:6px 0; height:34px;"></audio>
+    {% elif m.midia_tipo == 'imagem' and m.midia_arquivo %}
+    <img src="/crm/modelos/midia/{{ m.midia_arquivo }}" alt="" style="max-width:100%; max-height:130px; border-radius:8px; margin:6px 0;">
+    {% endif %}
     <div class="mo-acoes">
       <span class="mo-chip {{ 'on' if m.ativo else 'off' }}">{{ 'Ativo' if m.ativo else 'Desativado' }}</span>
+      {% if m.vezes_usado %}<span class="mo-chip" style="background:var(--panel-2);color:var(--cinza);">usado {{ m.vezes_usado }}×</span>{% endif %}
       <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
       <button class="btn-ghost" style="font-size:11.5px; color:var(--rosa,#f43f5e);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
     </div>
   </div>
   {% else %}
-  <div style="grid-column:1/-1; text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo de WhatsApp cadastrado ainda.</div>
+  <div style="text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo de WhatsApp cadastrado ainda.</div>
   {% endfor %}
+  <div id="wa-vazio-filtro" style="display:none; text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo bate com esse filtro.</div>
 </div>
 
 <!-- Modal: novo modelo de e-mail -->
@@ -162,6 +216,11 @@
     <div class="mo-nota">Base pra futuramente virar funil automático. Texto sempre obrigatório. Mídia é opcional — só áudio OU imagem, nunca as duas (envio de mídia pela extensão ainda não está disponível; por enquanto o modelo com mídia fica só salvo).</div>
     <label class="campo-label">Nome do modelo</label>
     <input type="text" id="wa-nome" placeholder="Ex: Boas-vindas - primeiro contato">
+    <label class="campo-label">Categoria (opcional — agrupa na biblioteca, ex: Notredame, Beneficência)</label>
+    <input type="text" id="wa-categoria" list="wa-cats" placeholder="Ex: Notredame">
+    <datalist id="wa-cats">
+      {% for c in stats_wpp.categorias if stats_wpp %}<option value="{{ c }}">{% endfor %}
+    </datalist>
     <label class="campo-label">Variante (opcional)</label>
     <input type="text" id="wa-variante" placeholder="Ex: A ou B">
     <label class="campo-label">Texto da mensagem</label>
@@ -224,6 +283,7 @@ function salvarModeloWhatsapp(){
   var fd = new FormData();
   fd.append('nome', nome);
   fd.append('texto', texto);
+  fd.append('categoria', document.getElementById('wa-categoria').value.trim());
   fd.append('variante', document.getElementById('wa-variante').value.trim());
   var midia = document.getElementById('wa-midia').files[0];
   if (midia) fd.append('arquivo_midia', midia);
@@ -232,6 +292,40 @@ function salvarModeloWhatsapp(){
     .then(function(d){
       if (d.ok) location.reload();
       else alert(d.erro || 'Erro ao salvar modelo');
+    });
+}
+
+var _waFiltro = 'todos';
+function setFiltroWpp(btn){
+  document.querySelectorAll('.wa-fchip').forEach(function(b){ b.classList.remove('on'); });
+  btn.classList.add('on');
+  _waFiltro = btn.dataset.f;
+  filtrarWpp();
+}
+function filtrarWpp(){
+  var q = (document.getElementById('wa-busca').value || '').trim().toLowerCase();
+  var visiveis = 0;
+  document.querySelectorAll('#wa-lista .wa-card').forEach(function(card){
+    var bateBusca = !q || card.dataset.nome.indexOf(q) >= 0 || card.dataset.texto.indexOf(q) >= 0 || card.dataset.categoria.indexOf(q) >= 0;
+    var bateFiltro = _waFiltro === 'todos'
+      || (_waFiltro === 'favoritos' && card.dataset.fav === '1')
+      || (card.dataset.tipo === _waFiltro);
+    var mostra = bateBusca && bateFiltro;
+    card.style.display = mostra ? '' : 'none';
+    if (mostra) visiveis++;
+  });
+  var vazio = document.getElementById('wa-vazio-filtro');
+  if (vazio) vazio.style.display = visiveis ? 'none' : '';
+}
+function toggleFavorito(id, btn){
+  fetch('/crm/modelos/' + id + '/favorito', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { alert(d.erro || 'Erro'); return; }
+      var card = btn.closest('.wa-card');
+      btn.classList.toggle('ativo', d.favorito);
+      card.dataset.fav = d.favorito ? '1' : '0';
+      filtrarWpp();
     });
 }
 
