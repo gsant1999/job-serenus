@@ -838,7 +838,10 @@ def init_db():
                 criado_por INTEGER,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 midia_arquivo TEXT,
-                midia_tipo TEXT
+                midia_tipo TEXT,
+                categoria TEXT,
+                favorito INTEGER DEFAULT 0,
+                vezes_usado INTEGER DEFAULT 0
             )""",
             """CREATE TABLE IF NOT EXISTS whatsapp_analises (
                 id SERIAL PRIMARY KEY,
@@ -1287,7 +1290,10 @@ def init_db():
             criado_por INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             midia_arquivo TEXT,
-            midia_tipo TEXT
+            midia_tipo TEXT,
+            categoria TEXT,
+            favorito INTEGER DEFAULT 0,
+            vezes_usado INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS whatsapp_analises (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1736,6 +1742,11 @@ def init_db():
         # (áudio OU imagem, nunca as duas), validado na rota, não no schema.
         ("modelos_conteudo", "midia_arquivo", "TEXT"),
         ("modelos_conteudo", "midia_tipo", "TEXT"),
+        # Organização da biblioteca (padrão ZapVoice/WaSpeed): categoria pra
+        # agrupar, favorito pra fixar no topo, vezes_usado pra "mais usadas".
+        ("modelos_conteudo", "categoria", "TEXT"),
+        ("modelos_conteudo", "favorito", "INTEGER DEFAULT 0"),
+        ("modelos_conteudo", "vezes_usado", "INTEGER DEFAULT 0"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -9221,6 +9232,13 @@ def api_whatsapp_enviar_direto():
         (lead_id, usuario_id, telefone, chat_id, texto, usuario_id))
     fila_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
                else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    # Contabiliza uso do modelo (pra "mais usadas" na biblioteca) quando o
+    # envio veio de um modelo salvo.
+    try:
+        modelo_id = int(d.get('modelo_id'))
+        conn.execute("UPDATE modelos_conteudo SET vezes_usado = COALESCE(vezes_usado,0) + 1 WHERE id=? AND tipo='whatsapp'", (modelo_id,))
+    except (TypeError, ValueError):
+        pass
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True, "id": fila_id, "lead_id": lead_id}))
 
@@ -9235,8 +9253,10 @@ def api_whatsapp_extensao_modelos():
     if not _wa_auth_ok():
         return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     conn = db()
-    rows = conn.execute("""SELECT id, nome, corpo_texto, variante, midia_arquivo, midia_tipo
-        FROM modelos_conteudo WHERE tipo='whatsapp' AND ativo=1 ORDER BY nome""").fetchall()
+    rows = conn.execute("""SELECT id, nome, corpo_texto, variante, midia_arquivo, midia_tipo,
+        categoria, favorito, vezes_usado
+        FROM modelos_conteudo WHERE tipo='whatsapp' AND ativo=1
+        ORDER BY favorito DESC, (categoria IS NULL), categoria, nome""").fetchall()
     close_db(conn)
     modelos = []
     for m in rows:
@@ -9244,6 +9264,8 @@ def api_whatsapp_extensao_modelos():
         modelos.append({
             "id": md['id'], "nome": md['nome'], "texto": md['corpo_texto'] or '',
             "variante": md['variante'], "midia_tipo": md['midia_tipo'],
+            "categoria": md.get('categoria') or '', "favorito": bool(md.get('favorito')),
+            "vezes_usado": md.get('vezes_usado') or 0,
             "midia_url": (f"{_SITE_BASE_URL}/crm/modelos/midia/{md['midia_arquivo']}" if md['midia_arquivo'] else None),
         })
     return _wa_cors(jsonify({"ok": True, "modelos": modelos}))
@@ -9293,14 +9315,32 @@ def api_whatsapp_extensao_modelo_novo():
             return _wa_cors(jsonify({"ok": False, "erro": "Erro ao salvar mídia"})), 500
         midia_arquivo = nome_arquivo
 
+    categoria = (request.form.get('categoria') or '').strip()[:80] or None
     conn = db()
-    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, corpo_texto, ativo, criado_por, midia_arquivo, midia_tipo)
-                    VALUES ('whatsapp',?,?,1,?,?,?)""",
-                 (nome, texto, criado_por, midia_arquivo, midia_tipo))
+    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, corpo_texto, ativo, criado_por, midia_arquivo, midia_tipo, categoria)
+                    VALUES ('whatsapp',?,?,1,?,?,?,?)""",
+                 (nome, texto, criado_por, midia_arquivo, midia_tipo, categoria))
     mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True, "id": mid}))
+
+
+@app.route('/api/whatsapp/extensao/modelos/<int:mid>/favorito', methods=['POST', 'OPTIONS'])
+def api_whatsapp_extensao_modelo_favorito(mid):
+    """Marca/desmarca favorito (fixa no topo da biblioteca). Só tipo='whatsapp'."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    conn = db()
+    m = conn.execute("SELECT favorito FROM modelos_conteudo WHERE id=? AND tipo='whatsapp'", (mid,)).fetchone()
+    if not m:
+        close_db(conn); return _wa_cors(jsonify({"ok": False, "erro": "Modelo não encontrado"})), 404
+    novo = 0 if m['favorito'] else 1
+    conn.execute("UPDATE modelos_conteudo SET favorito=? WHERE id=?", (novo, mid))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "favorito": bool(novo)}))
 
 
 @app.route('/api/whatsapp/extensao/modelos/<int:mid>/excluir', methods=['POST', 'OPTIONS'])
@@ -15053,10 +15093,22 @@ def crm_modelos():
     modelos = [dict(m) for m in conn.execute(
         "SELECT * FROM modelos_conteudo ORDER BY tipo, nome").fetchall()]
     close_db(conn)
+    wpp = [m for m in modelos if m['tipo'] == 'whatsapp']
+    # Favoritos primeiro, depois por categoria (sem categoria por último), depois nome.
+    wpp.sort(key=lambda m: (0 if m.get('favorito') else 1,
+                            (m.get('categoria') or '￿').lower(),
+                            (m.get('nome') or '').lower()))
+    stats_wpp = {
+        'total': len(wpp),
+        'texto': sum(1 for m in wpp if not m.get('midia_tipo')),
+        'audio': sum(1 for m in wpp if m.get('midia_tipo') == 'audio'),
+        'imagem': sum(1 for m in wpp if m.get('midia_tipo') == 'imagem'),
+        'categorias': sorted({(m.get('categoria') or '').strip() for m in wpp if (m.get('categoria') or '').strip()}),
+    }
     return render_template('crm_modelos.html',
                            modelos_email=[m for m in modelos if m['tipo'] == 'email'],
                            modelos_sms=[m for m in modelos if m['tipo'] == 'sms'],
-                           modelos_whatsapp=[m for m in modelos if m['tipo'] == 'whatsapp'])
+                           modelos_whatsapp=wpp, stats_wpp=stats_wpp)
 
 
 @app.route('/crm/modelos/imagem/<path:nome>')
@@ -15182,14 +15234,30 @@ def crm_modelo_whatsapp_novo():
             return jsonify({"ok": False, "erro": f"Erro ao salvar mídia: {resultado.get('erro', 'desconhecido')}"}), 500
         midia_arquivo = nome_arquivo
 
+    categoria = (request.form.get('categoria') or '').strip()[:80] or None
     conn = db()
-    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, corpo_texto, variante, ativo, criado_por, midia_arquivo, midia_tipo)
-                    VALUES ('whatsapp',?,?,?,1,?,?,?)""",
-                 (nome, texto, variante, session.get('user_id'), midia_arquivo, midia_tipo))
+    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, corpo_texto, variante, ativo, criado_por, midia_arquivo, midia_tipo, categoria)
+                    VALUES ('whatsapp',?,?,?,1,?,?,?,?)""",
+                 (nome, texto, variante, session.get('user_id'), midia_arquivo, midia_tipo, categoria))
     mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "id": mid})
+
+
+@app.route('/crm/modelos/<int:mid>/favorito', methods=['POST'])
+@login_required
+@admin_required
+def crm_modelo_favorito(mid):
+    """Marca/desmarca favorito de um modelo (qualquer tipo)."""
+    conn = db()
+    m = conn.execute("SELECT favorito FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
+    if not m:
+        close_db(conn); return jsonify({"ok": False, "erro": "Modelo não encontrado"}), 404
+    novo = 0 if m['favorito'] else 1
+    conn.execute("UPDATE modelos_conteudo SET favorito=? WHERE id=?", (novo, mid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "favorito": bool(novo)})
 
 
 @app.route('/crm/modelos/midia/<path:nome>')
