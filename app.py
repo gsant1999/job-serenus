@@ -15931,7 +15931,11 @@ def crm_importar_botconversa():
     (funil), não só a biblioteca solta de mensagens.
     Formato esperado: .zip com manifest.json (lista de fluxos, cada um com
     nome/categoria/passos) + pasta media/ com os arquivos binários referenciados.
-    Dedup por nome de funil — re-subir o mesmo zip não duplica."""
+    Dedup por nome de funil — re-subir o mesmo zip não duplica. Dedup também
+    por arquivo_local dentro da mesma importação — o mesmo binário (ex.: PDF
+    de rede de atendimento reaproveitado em vários fluxos parecidos) é
+    enviado pro storage uma única vez e os modelos seguintes só reaproveitam
+    o nome já subido, em vez de duplicar o upload a cada fluxo que o usa."""
     import zipfile as _zip, io as _io, tempfile as _tmp
     f = request.files.get('arquivo')
     if not f or not f.filename:
@@ -15949,6 +15953,7 @@ def crm_importar_botconversa():
             existentes = {r['nome'] for r in conn.execute("SELECT nome FROM whatsapp_funis").fetchall()}
             criado_por = session.get('user_id')
             contagem = {'funis': 0, 'modelos': 0, 'pulados': 0, 'erros': 0}
+            cache_midia = {}  # arquivo_local (mesmo binário reaproveitado entre fluxos) -> nome_arq já subido
             for fluxo in manifesto:
                 nome_funil = (fluxo.get('nome') or '').strip()[:200]
                 if not nome_funil or nome_funil in existentes:
@@ -15975,15 +15980,25 @@ def crm_importar_botconversa():
                             arq_local = passo.get('arquivo_local')
                             if not arq_local:
                                 continue
-                            try:
-                                dados_bin = zf.read(f'media/{arq_local}')
-                            except KeyError:
-                                contagem['erros'] += 1
-                                continue
                             ordem += 1
-                            ext = os.path.splitext(arq_local)[1] or '.bin'
-                            nome_arq = f"MODELO_WPP_BC_{secrets.token_hex(6)}{ext}"
-                            upload_arquivo_r2(_io.BytesIO(dados_bin), f"modelos/{nome_arq}")
+                            nome_arq = cache_midia.get(arq_local)
+                            if not nome_arq:
+                                # nome determinístico (o script de extração já nomeia o
+                                # arquivo pelo hash do conteúdo) — mesmo binário reaproveitado
+                                # em fluxos diferentes sobe uma vez só, mesmo em importações
+                                # separadas (zip grande dividido em lotes pra não estourar
+                                # timeout), porque o nome final é sempre o mesmo.
+                                ext = os.path.splitext(arq_local)[1] or '.bin'
+                                base = os.path.splitext(os.path.basename(arq_local))[0]
+                                nome_arq = f"MODELO_WPP_BC_{base}{ext}"[:120]
+                                if not os.path.exists(os.path.join(UPLOAD_FOLDER, nome_arq)):
+                                    try:
+                                        dados_bin = zf.read(f'media/{arq_local}')
+                                    except KeyError:
+                                        contagem['erros'] += 1
+                                        continue
+                                    upload_arquivo_r2(_io.BytesIO(dados_bin), f"modelos/{nome_arq}")
+                                cache_midia[arq_local] = nome_arq
                             conn.execute("""INSERT INTO modelos_conteudo
                                 (tipo, nome, ativo, criado_por, midia_arquivo, midia_tipo, categoria) VALUES ('whatsapp',?,1,?,?,?,?)""",
                                 (f"{nome_funil} #{ordem}"[:200], criado_por, nome_arq, tipo, categoria))
