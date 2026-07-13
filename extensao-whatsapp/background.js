@@ -141,6 +141,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/extensao/modelos/' + encodeURIComponent(msg.id) + '/excluir', 'POST', {}, 15000).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'favorito_modelo') {
+    chamarJob('/api/whatsapp/extensao/modelos/' + encodeURIComponent(msg.id) + '/favorito', 'POST', {}, 15000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'cancelar') {
     const registro = _emAndamento.get(msg.reqId);
     if (registro) { registro.cancelado = true; registro.controller.abort(); }

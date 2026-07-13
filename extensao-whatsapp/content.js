@@ -613,6 +613,8 @@
     return '<div class="job-novo-modelo">' +
       '<div class="job-sec" style="margin-top:0">Novo modelo</div>' +
       '<input class="job-inp" id="job-novo-nome" placeholder="Nome (ex: Boas-vindas)">' +
+      '<input class="job-inp" id="job-novo-categoria" list="job-cats" placeholder="Categoria (opcional — ex: Notredame)">' +
+      '<datalist id="job-cats">' + categoriasExistentes().map((c) => '<option value="' + esc(c) + '">').join('') + '</datalist>' +
       '<textarea class="job-inp job-inp-txt" id="job-novo-texto" placeholder="Texto da mensagem…"></textarea>' +
       '<div class="job-novo-acoes">' +
         '<button class="job-mini-btn" id="job-gravar-btn">🎤 Gravar áudio</button>' +
@@ -626,26 +628,123 @@
       '</div>';
   }
 
+  let _waFiltro = 'todos'; // todos | favoritos | texto | audio | imagem
+  let _waBusca = '';
+
+  function categoriasExistentes() {
+    const cats = (_modelosCache ? _modelosCache.modelos : [])
+      .map((m) => (m.categoria || '').trim()).filter(Boolean);
+    return [...new Set(cats)].sort();
+  }
+
+  function tipoIcone(m) {
+    return m.midia_tipo === 'audio' ? '🎤' : (m.midia_tipo === 'imagem' ? '🖼' : '💬');
+  }
+
+  function modeloPassaFiltro(m) {
+    const tipo = m.midia_tipo || 'texto';
+    const okFiltro = _waFiltro === 'todos'
+      || (_waFiltro === 'favoritos' && m.favorito)
+      || tipo === _waFiltro;
+    if (!okFiltro) return false;
+    if (!_waBusca) return true;
+    const q = _waBusca;
+    return (m.nome || '').toLowerCase().indexOf(q) >= 0
+      || (m.texto || '').toLowerCase().indexOf(q) >= 0
+      || (m.categoria || '').toLowerCase().indexOf(q) >= 0;
+  }
+
+  function cardModelo(m) {
+    let midia = '';
+    if (m.midia_tipo === 'audio' && m.midia_url) {
+      // Ouvir antes de enviar — o player do WhatsApp Web já mostra o áudio;
+      // aqui é pra CONFERIR o modelo salvo antes de mandar (padrão ZapVoice).
+      midia = '<audio class="job-modelo-audio" controls preload="none" src="' + esc(m.midia_url) + '"></audio>';
+    } else if (m.midia_tipo === 'imagem' && m.midia_url) {
+      midia = '<img class="job-modelo-img" src="' + esc(m.midia_url) + '" alt="">';
+    }
+    const estrela = '<button class="job-modelo-fav ' + (m.favorito ? 'ativo' : '') +
+      '" data-modelo-id="' + m.id + '" title="Favoritar">★</button>';
+    return '<div class="job-modelo-card">' +
+      '<div class="job-modelo-topo">' +
+        '<div class="job-modelo-nome"><span class="job-tipo-ico">' + tipoIcone(m) + '</span> ' + esc(m.nome) + '</div>' +
+        estrela +
+      '</div>' +
+      '<div class="job-modelo-preview">' + esc(m.texto) + '</div>' +
+      midia +
+      '<div class="job-modelo-acoes">' +
+        '<button class="job-modelo-enviar" data-modelo-id="' + m.id + '">Enviar texto</button>' +
+        '<button class="job-modelo-copiar" data-texto="' + esc(m.texto) + '">Copiar</button>' +
+        '<button class="job-modelo-excluir" data-modelo-id="' + m.id + '" title="Excluir">×</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderListaModelos(modelos) {
+    const filtrados = modelos.filter(modeloPassaFiltro);
+    if (!filtrados.length) {
+      return _waBusca || _waFiltro !== 'todos'
+        ? '<div class="job-vazio">Nenhum modelo bate com esse filtro.</div>'
+        : '<div class="job-vazio">Nenhum modelo salvo ainda. Crie o primeiro acima.</div>';
+    }
+    // Favoritos já vêm primeiro do servidor; agrupa por categoria (sem
+    // categoria vira "Sem categoria"), mantendo a ordem recebida.
+    const grupos = new Map();
+    filtrados.forEach((m) => {
+      const cat = (m.categoria || '').trim() || 'Sem categoria';
+      if (!grupos.has(cat)) grupos.set(cat, []);
+      grupos.get(cat).push(m);
+    });
+    let out = '';
+    grupos.forEach((itens, cat) => {
+      out += '<div class="job-modelo-grupo">' + esc(cat) + ' <span>(' + itens.length + ')</span></div>' +
+        itens.map(cardModelo).join('');
+    });
+    return out;
+  }
+
   function renderModelos(modelos) {
-    const lista = !modelos.length
-      ? '<div class="job-vazio">Nenhum modelo salvo ainda. Crie o primeiro acima.</div>'
-      : modelos.map((m) => {
-        const badge = m.midia_tipo
-          ? '<span class="job-chip">' + (m.midia_tipo === 'audio' ? '🎤 Áudio' : '🖼 Imagem') + '</span>'
-          : '';
-        return '<div class="job-modelo-card">' +
-          '<div class="job-modelo-nome">' + esc(m.nome) + '</div>' +
-          (badge ? '<div>' + badge + '</div>' : '') +
-          '<div class="job-modelo-preview">' + esc(m.texto) + '</div>' +
-          '<div class="job-modelo-acoes">' +
-            '<button class="job-modelo-enviar" data-modelo-id="' + m.id + '">Enviar texto</button>' +
-            '<button class="job-modelo-copiar" data-texto="' + esc(m.texto) + '">Copiar</button>' +
-            '<button class="job-modelo-excluir" data-modelo-id="' + m.id + '" title="Excluir">×</button>' +
-          '</div>' +
-        '</div>';
-      }).join('');
+    const chips = ['todos', 'favoritos', 'texto', 'audio', 'imagem'].map((f) => {
+      const rot = { todos: 'Todos', favoritos: '★', texto: '💬', audio: '🎤', imagem: '🖼' }[f];
+      return '<button class="job-fchip ' + (_waFiltro === f ? 'on' : '') + '" data-f="' + f + '">' + rot + '</button>';
+    }).join('');
     return renderFormularioNovo() +
-      '<div class="job-sec">Modelos salvos (' + modelos.length + ')</div>' + lista;
+      '<div class="job-biblioteca-controles">' +
+        '<input class="job-inp" id="job-busca-modelo" placeholder="Buscar modelo…" value="' + esc(_waBusca) + '">' +
+        '<div class="job-fchips">' + chips + '</div>' +
+      '</div>' +
+      '<div class="job-sec">Modelos salvos</div>' +
+      '<div id="job-modelos-lista">' + renderListaModelos(modelos) + '</div>';
+  }
+
+  function rerenderListaModelos() {
+    const c = document.getElementById('job-modelos-lista');
+    if (!c) return;
+    c.innerHTML = renderListaModelos(_modelosCache ? _modelosCache.modelos : []);
+    ligarAcoesItens();
+  }
+
+  // Ações dos itens da lista (separadas do formulário, pra re-render de
+  // busca/filtro não precisar rebindar o formulário e perder o que foi digitado).
+  function ligarAcoesItens() {
+    document.querySelectorAll('.job-modelo-enviar[data-modelo-id]').forEach((btn) => {
+      btn.addEventListener('click', () => enviarModelo(btn));
+    });
+    document.querySelectorAll('.job-modelo-copiar').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.texto || '').then(() => {
+          const original = btn.textContent;
+          btn.textContent = 'Copiado!';
+          setTimeout(() => { btn.textContent = original; }, 1500);
+        });
+      });
+    });
+    document.querySelectorAll('.job-modelo-excluir').forEach((btn) => {
+      btn.addEventListener('click', () => excluirModelo(btn.dataset.modeloId));
+    });
+    document.querySelectorAll('.job-modelo-fav').forEach((btn) => {
+      btn.addEventListener('click', () => toggleFavoritoModelo(btn.dataset.modeloId, btn));
+    });
   }
 
   function ligarAcoesModelos() {
@@ -665,21 +764,28 @@
     const sv = document.getElementById('job-salvar-modelo-btn');
     if (sv) sv.addEventListener('click', salvarModeloNovo);
 
-    document.querySelectorAll('.job-modelo-enviar[data-modelo-id]').forEach((btn) => {
-      btn.addEventListener('click', () => enviarModelo(btn));
-    });
-    document.querySelectorAll('.job-modelo-copiar').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        navigator.clipboard.writeText(btn.dataset.texto || '').then(() => {
-          const original = btn.textContent;
-          btn.textContent = 'Copiado!';
-          setTimeout(() => { btn.textContent = original; }, 1500);
-        });
+    const busca = document.getElementById('job-busca-modelo');
+    if (busca) busca.addEventListener('input', () => { _waBusca = (busca.value || '').trim().toLowerCase(); rerenderListaModelos(); });
+    document.querySelectorAll('.job-fchip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        _waFiltro = chip.dataset.f;
+        document.querySelectorAll('.job-fchip').forEach((c) => c.classList.toggle('on', c === chip));
+        rerenderListaModelos();
       });
     });
-    document.querySelectorAll('.job-modelo-excluir').forEach((btn) => {
-      btn.addEventListener('click', () => excluirModelo(btn.dataset.modeloId));
-    });
+
+    ligarAcoesItens();
+  }
+
+  async function toggleFavoritoModelo(id, btn) {
+    const resp = await chrome.runtime.sendMessage({ type: 'favorito_modelo', id });
+    if (!resp || !resp.ok) return;
+    btn.classList.toggle('ativo', resp.favorito);
+    // atualiza o cache pra o filtro "favoritos" e a ordenação refletirem
+    if (_modelosCache) {
+      const m = _modelosCache.modelos.find((x) => String(x.id) === String(id));
+      if (m) m.favorito = resp.favorito;
+    }
   }
 
   // ── Gravação de áudio ao vivo (MediaRecorder). O WhatsApp Web já tem
@@ -757,7 +863,8 @@
     const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
     btn.disabled = true;
     if (st) st.textContent = 'Salvando…';
-    const dados = { nome: nome.trim(), texto: texto.trim(), usuario_id: usuarioId || '' };
+    const categoria = ((document.getElementById('job-novo-categoria') || {}).value || '').trim();
+    const dados = { nome: nome.trim(), texto: texto.trim(), categoria, usuario_id: usuarioId || '' };
     if (_midiaAnexada) {
       try { dados.midia_base64 = await blobParaBase64(_midiaAnexada.blob); }
       catch (e) { if (st) st.textContent = 'Erro ao ler a mídia.'; btn.disabled = false; return; }
@@ -795,10 +902,10 @@
     const modelos = await buscarModelos(false);
     const modelo = modelos.find((m) => String(m.id) === btn.dataset.modeloId);
     if (!modelo) return;
-    abrirPreviewEnvio(modelo.texto);
+    abrirPreviewEnvio(modelo.texto, modelo.id);
   }
 
-  function abrirPreviewEnvio(textoInicial) {
+  function abrirPreviewEnvio(textoInicial, modeloId) {
     const existente = document.getElementById('job-preview');
     if (existente) existente.remove();
     const nome = nomeDoContato() || 'este contato';
@@ -827,11 +934,11 @@
     ta.addEventListener('input', atualizarBolha);
     document.getElementById('job-preview-x').addEventListener('click', () => ov.remove());
     document.getElementById('job-preview-cancelar').addEventListener('click', () => ov.remove());
-    document.getElementById('job-preview-enviar').addEventListener('click', () => confirmarEnvioPreview(ov));
+    document.getElementById('job-preview-enviar').addEventListener('click', () => confirmarEnvioPreview(ov, modeloId));
     ta.focus();
   }
 
-  async function confirmarEnvioPreview(ov) {
+  async function confirmarEnvioPreview(ov, modeloId) {
     const ta = document.getElementById('job-preview-texto');
     const st = document.getElementById('job-preview-status');
     const btn = document.getElementById('job-preview-enviar');
@@ -847,9 +954,9 @@
     btn.disabled = true;
     if (st) st.textContent = 'Enviando…';
     try {
-      const resp = await chrome.runtime.sendMessage({
-        type: 'enviar_direto', payload: { telefone, nome, texto, usuario_id: usuarioId },
-      });
+      const payload = { telefone, nome, texto, usuario_id: usuarioId };
+      if (modeloId) payload.modelo_id = modeloId;
+      const resp = await chrome.runtime.sendMessage({ type: 'enviar_direto', payload });
       if (!resp || !resp.ok) {
         if (st) st.textContent = 'Erro: ' + ((resp && resp.erro) || 'falha ao enfileirar');
         btn.disabled = false;

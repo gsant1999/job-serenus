@@ -156,6 +156,27 @@ html.job-push-esquerda .job-trilho-item-ativo { border-left: none; border-right:
 .job-preview-acoes .job-mini-btn { flex: 0 0 auto; padding: 10px 16px; }
 .job-preview-acoes .job-salvar-modelo { flex: 1; }
 
+/* ── Biblioteca: busca + filtros por tipo + grupos ── */
+.job-biblioteca-controles { margin: 4px 0 6px; }
+#job-busca-modelo { margin-bottom: 8px; }
+.job-fchips { display: flex; gap: 6px; flex-wrap: wrap; }
+.job-fchip {
+  background: #12151f; color: #8c93a8; border: 1px solid #2c3247; border-radius: 999px;
+  padding: 5px 12px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+}
+.job-fchip.on { background: #2563eb; color: #fff; border-color: #2563eb; }
+.job-modelo-grupo {
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px;
+  color: #8c93a8; margin: 14px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #2c3247;
+}
+.job-modelo-grupo span { color: #6b7185; font-weight: 700; }
+.job-modelo-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.job-tipo-ico { margin-right: 2px; }
+.job-modelo-fav { background: none; border: none; color: #4a4f5c; font-size: 16px; cursor: pointer; line-height: 1; padding: 0 2px; flex: 0 0 auto; }
+.job-modelo-fav.ativo { color: #f5c518; }
+.job-modelo-audio { width: 100%; height: 34px; margin: 8px 0 2px; }
+.job-modelo-img { max-width: 100%; max-height: 130px; border-radius: 8px; margin: 8px 0 2px; }
+
 /* ── Seção Mensagens: cartões de modelo ── */
 .job-modelo-card {
   background: #12151f; border: 1px solid #2c3247; border-radius: 10px;
