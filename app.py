@@ -15919,6 +15919,96 @@ def crm_importar_zapvoice():
             pass
 
 
+@app.route('/crm/modelos/importar-botconversa', methods=['POST'])
+@login_required
+@admin_required
+def crm_importar_botconversa():
+    """Importa fluxos extraídos do BotConversa (scripts/botconversa_extract.py)
+    pra biblioteca de WhatsApp do JOB. Cada fluxo do BotConversa vira um
+    whatsapp_funis; cada passo (texto ou mídia) do fluxo vira um
+    modelos_conteudo, ligado em ordem via whatsapp_funil_passos — mesmo
+    padrão da importação do ZapVoice, mas reconstruindo também a sequência
+    (funil), não só a biblioteca solta de mensagens.
+    Formato esperado: .zip com manifest.json (lista de fluxos, cada um com
+    nome/categoria/passos) + pasta media/ com os arquivos binários referenciados.
+    Dedup por nome de funil — re-subir o mesmo zip não duplica."""
+    import zipfile as _zip, io as _io, tempfile as _tmp
+    f = request.files.get('arquivo')
+    if not f or not f.filename:
+        return jsonify({"ok": False, "erro": "Envie o arquivo .zip exportado pelo script"}), 400
+    tmp = _tmp.NamedTemporaryFile(delete=False, suffix='.zip')
+    try:
+        f.save(tmp.name)
+        tmp.close()
+        with _zip.ZipFile(tmp.name) as zf:
+            try:
+                manifesto = json.loads(zf.read('manifest.json'))
+            except KeyError:
+                return jsonify({"ok": False, "erro": "Zip inválido: falta manifest.json"}), 400
+            conn = db()
+            existentes = {r['nome'] for r in conn.execute("SELECT nome FROM whatsapp_funis").fetchall()}
+            criado_por = session.get('user_id')
+            contagem = {'funis': 0, 'modelos': 0, 'pulados': 0, 'erros': 0}
+            for fluxo in manifesto:
+                nome_funil = (fluxo.get('nome') or '').strip()[:200]
+                if not nome_funil or nome_funil in existentes:
+                    contagem['pulados'] += 1
+                    continue
+                try:
+                    categoria = (fluxo.get('categoria') or '').strip()[:120] or None
+                    conn.execute("INSERT INTO whatsapp_funis (nome, categoria, ativo, criado_por) VALUES (?,?,1,?)",
+                                 (nome_funil, categoria, criado_por))
+                    fid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+                    ordem = 0
+                    for passo in (fluxo.get('passos') or []):
+                        tipo = passo.get('tipo')
+                        if tipo == 'texto':
+                            texto = (passo.get('texto') or '').strip()
+                            if not texto:
+                                continue
+                            ordem += 1
+                            conn.execute("""INSERT INTO modelos_conteudo
+                                (tipo, nome, corpo_texto, ativo, criado_por, categoria) VALUES ('whatsapp',?,?,1,?,?)""",
+                                (f"{nome_funil} #{ordem}"[:200], texto[:4000], criado_por, categoria))
+                        elif tipo in ('imagem', 'video', 'audio', 'documento'):
+                            arq_local = passo.get('arquivo_local')
+                            if not arq_local:
+                                continue
+                            try:
+                                dados_bin = zf.read(f'media/{arq_local}')
+                            except KeyError:
+                                contagem['erros'] += 1
+                                continue
+                            ordem += 1
+                            ext = os.path.splitext(arq_local)[1] or '.bin'
+                            nome_arq = f"MODELO_WPP_BC_{secrets.token_hex(6)}{ext}"
+                            upload_arquivo_r2(_io.BytesIO(dados_bin), f"modelos/{nome_arq}")
+                            conn.execute("""INSERT INTO modelos_conteudo
+                                (tipo, nome, ativo, criado_por, midia_arquivo, midia_tipo, categoria) VALUES ('whatsapp',?,1,?,?,?,?)""",
+                                (f"{nome_funil} #{ordem}"[:200], criado_por, nome_arq, tipo, categoria))
+                        else:
+                            continue
+                        mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                               else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+                        conn.execute("INSERT INTO whatsapp_funil_passos (funil_id, ordem, modelo_id, delay_segundos) VALUES (?,?,?,?)",
+                                     (fid, ordem, mid, 5))
+                        contagem['modelos'] += 1
+                    existentes.add(nome_funil)
+                    contagem['funis'] += 1
+                    conn.commit()
+                except Exception as e:
+                    contagem['erros'] += 1
+                    app.logger.warning(f"[IMPORT-BC] falhou fluxo \"{fluxo.get('nome')}\": {e}")
+            close_db(conn)
+        return jsonify({"ok": True, "contagem": contagem})
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+
+
 @app.route('/crm/modelos/<int:mid>/favorito', methods=['POST'])
 @login_required
 @admin_required
