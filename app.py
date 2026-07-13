@@ -9832,7 +9832,8 @@ def api_whatsapp_analisar():
             continue
         documentos.append({'de': 'lead' if doc.get('de') == 'lead' else 'consultor',
                            'base64': b64, 'nome': str(doc.get('nome') or 'documento.pdf')[:200],
-                           'hora': str(doc.get('hora') or '')[:40]})
+                           'hora': str(doc.get('hora') or '')[:40],
+                           'msg_id': str(doc.get('msg_id') or '').strip()[:100] or None})
 
     # Links (URL + prévia de texto) raspados da conversa — Fase 4. Só texto,
     # nunca abrimos/buscamos o link no servidor.
@@ -9905,11 +9906,12 @@ def api_whatsapp_analisar():
     nome = str(d.get('nome') or '').strip()[:200]
     tel_norm = _normalizar_telefone(telefone)
 
-    # ── Modo incremental: se já existe uma análise anterior pra esse telefone,
-    # funde a conversa nova (que a extensão pode ter mandado só a partir de
-    # onde parou, pra ser mais rápida) com a conversa já conhecida. O score e a
-    # IA sempre trabalham em cima do histórico COMPLETO fundido, nunca só do
-    # pedaço novo — senão o contexto acumulado se perde a cada rodada.
+    # Busca a conversa salva anterior UMA VEZ — usada tanto pro merge
+    # incremental de texto/áudio (abaixo) quanto pro dedup de mídia (a seguir):
+    # sem isso, cada reanálise re-subiria a MESMA imagem/PDF que já está salva
+    # (a extensão manda de novo tudo que ainda está visível na tela, não só o
+    # que é novo), duplicando arquivo em storage a cada rodada.
+    msgs_antigas = []
     if tel_norm:
         anterior = conn.execute("""SELECT conversa_json FROM whatsapp_analises
             WHERE telefone_norm=? ORDER BY id DESC LIMIT 1""", (tel_norm,)).fetchone()
@@ -9918,31 +9920,98 @@ def api_whatsapp_analisar():
                 msgs_antigas = json.loads(anterior['conversa_json'] or '[]')
             except Exception:
                 msgs_antigas = []
-            if msgs_antigas:
-                # Ordena ANTES de deduplicar, e compara só com a mensagem
-                # anterior (igual ao dedup do client) — um set() global sobre a
-                # lista inteira derrubava mensagem repetida de verdade (ex: lead
-                # manda "Sim" duas vezes em momentos diferentes da conversa) só
-                # porque data-pre-plain-text do WhatsApp só tem precisão de
-                # minuto. Áudio usa chave própria (ignora o texto transcrito,
-                # que pode sair levemente diferente entre duas chamadas de
-                # Whisper/Groq pro mesmo arquivo — senão o mesmo áudio duplica
-                # na conversa fundida).
-                def _wa_chave_dedup(m):
-                    texto = m.get('texto') or ''
-                    if texto.startswith('🎤'):
-                        return (m.get('de'), 'AUDIO', m.get('hora'))
-                    return (m.get('de'), texto, m.get('hora'))
-                bruto = sorted(msgs_antigas + limpa,
-                                key=lambda m: _wa_parse_hora(m.get('hora') or '') or datetime.min)
-                fundido = []
-                chave_anterior = None
-                for m in bruto:
-                    chave = _wa_chave_dedup(m)
-                    if chave != chave_anterior:
-                        fundido.append(m)
-                    chave_anterior = chave
-                limpa = fundido
+
+    # ── Mídia: imagem/PDF/link viviam só na memória da requisição (a IA lia e
+    # esquecia) — por isso nunca apareciam de novo na conversa salva. Agora
+    # persistem via a mesma infra de anexo já usada pros comprovantes (local +
+    # R2 best-effort), como mensagens no histórico. Identidade estável (msg_id
+    # do PDF, hash do conteúdo pra imagem, a própria URL pro link) evita
+    # duplicar o mesmo arquivo a cada reanálise. ──
+    ja_salvo = set()
+    for m in msgs_antigas:
+        if m.get('tipo') == 'imagem':
+            ja_salvo.add(('imagem', m.get('hash')))
+        elif m.get('tipo') == 'documento':
+            ja_salvo.add(('documento', m.get('msg_id') or m.get('hash')))
+        elif m.get('tipo') == 'link':
+            ja_salvo.add(('link', m.get('url')))
+
+    midia_msgs = []
+    if imagens or documentos or links:
+        import base64 as _b64_mod, io as _io_mod
+        for img in imagens:
+            h = hashlib.sha1(img['base64'][:20000].encode('ascii', 'ignore')).hexdigest()[:24]
+            if ('imagem', h) in ja_salvo:
+                continue
+            try:
+                ext = '.png' if 'png' in (img.get('mime') or '') else '.jpg'
+                nome_arq = f"WA_ANALISE_{secrets.token_hex(8)}{ext}"
+                upload_arquivo_r2(_io_mod.BytesIO(_b64_mod.b64decode(img['base64'])), f"whatsapp-analises/{nome_arq}")
+                midia_msgs.append({'de': img['de'], 'tipo': 'imagem', 'arquivo': nome_arq, 'hash': h, 'hora': img['hora']})
+                ja_salvo.add(('imagem', h))
+            except Exception as e:
+                app.logger.warning(f"[WA-ANALISE] falha ao salvar imagem: {e}")
+        for doc in documentos:
+            msg_id = str(doc.get('msg_id') or '').strip()[:100] or None
+            ident = msg_id or hashlib.sha1(doc['base64'][:20000].encode('ascii', 'ignore')).hexdigest()[:24]
+            if ('documento', ident) in ja_salvo:
+                continue
+            try:
+                nome_arq = f"WA_ANALISE_{secrets.token_hex(8)}.pdf"
+                upload_arquivo_r2(_io_mod.BytesIO(_b64_mod.b64decode(doc['base64'])), f"whatsapp-analises/{nome_arq}")
+                midia_msgs.append({'de': doc['de'], 'tipo': 'documento', 'arquivo': nome_arq,
+                                   'msg_id': msg_id, 'hash': (None if msg_id else ident),
+                                   'nome_original': doc.get('nome'), 'hora': doc['hora']})
+                ja_salvo.add(('documento', ident))
+            except Exception as e:
+                app.logger.warning(f"[WA-ANALISE] falha ao salvar documento: {e}")
+        for lk in links:
+            if ('link', lk['url']) in ja_salvo:
+                continue
+            midia_msgs.append({'de': lk['de'], 'tipo': 'link', 'url': lk['url'],
+                               'preview': lk['preview'], 'hora': lk['hora']})
+            ja_salvo.add(('link', lk['url']))
+    if midia_msgs:
+        combinado = limpa + midia_msgs
+        combinado.sort(key=lambda m: _wa_parse_hora(m.get('hora') or '') or datetime.min)
+        limpa = combinado
+
+    # ── Modo incremental: funde a conversa nova (que a extensão pode ter
+    # mandado só a partir de onde parou, pra ser mais rápida) com a conversa já
+    # conhecida (msgs_antigas, buscada acima). O score e a IA sempre trabalham
+    # em cima do histórico COMPLETO fundido, nunca só do pedaço novo — senão o
+    # contexto acumulado se perde a cada rodada.
+    if msgs_antigas:
+        # Ordena ANTES de deduplicar, e compara só com a mensagem anterior
+        # (igual ao dedup do client) — um set() global sobre a lista inteira
+        # derrubava mensagem repetida de verdade (ex: lead manda "Sim" duas
+        # vezes em momentos diferentes) só porque data-pre-plain-text do
+        # WhatsApp só tem precisão de minuto. Áudio/mídia usam chave própria
+        # (identidade estável, não o hora/texto) — senão o mesmo áudio/imagem
+        # duplicava na conversa fundida, ou pior, uma imagem diferente enviada
+        # no mesmo minuto era descartada por engano.
+        def _wa_chave_dedup(m):
+            tipo = m.get('tipo')
+            if tipo == 'imagem':
+                return ('MIDIA', 'imagem', m.get('hash'))
+            if tipo == 'documento':
+                return ('MIDIA', 'documento', m.get('msg_id') or m.get('hash'))
+            if tipo == 'link':
+                return ('MIDIA', 'link', m.get('url'))
+            texto = m.get('texto') or ''
+            if texto.startswith('🎤'):
+                return (m.get('de'), 'AUDIO', m.get('hora'))
+            return (m.get('de'), texto, m.get('hora'))
+        bruto = sorted(msgs_antigas + limpa,
+                        key=lambda m: _wa_parse_hora(m.get('hora') or '') or datetime.min)
+        fundido = []
+        chave_anterior = None
+        for m in bruto:
+            chave = _wa_chave_dedup(m)
+            if chave != chave_anterior:
+                fundido.append(m)
+            chave_anterior = chave
+        limpa = fundido
 
     an = _wa_analisar_conversa(limpa, nome_contato=nome, imagens=imagens, documentos=documentos, links=links)
     an['audios_transcritos'] = len(transcricoes)

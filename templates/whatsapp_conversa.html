@@ -13,6 +13,12 @@
   .cv-lead { align-self:flex-start; background:var(--panel-2); border:1px solid var(--borda); color:var(--texto); border-bottom-left-radius:4px; }
   .cv-consultor { align-self:flex-end; background:rgba(31,216,164,.1); border:1px solid rgba(31,216,164,.22); color:var(--texto); border-bottom-right-radius:4px; }
   .cv-vazio { text-align:center; color:var(--cinza-2); font-size:13px; padding:40px 20px; }
+  .cv-msg img.cv-img { display:block; max-width:100%; max-height:320px; border-radius:8px; margin-bottom:4px; cursor:pointer; }
+  .cv-doc { display:flex; align-items:center; gap:8px; padding:2px 0; }
+  .cv-doc svg { width:18px; height:18px; flex-shrink:0; }
+  .cv-doc a { color:inherit; text-decoration:underline; }
+  .cv-link { display:block; word-break:break-all; }
+  .cv-link-preview { font-size:11.5px; color:var(--cinza); margin-top:3px; }
 </style>
 {% endblock %}
 
@@ -39,7 +45,22 @@
 
     <div class="cv-chat">
       {% for m in mensagens %}
-      <div class="cv-msg {{ 'cv-consultor' if m.de == 'consultor' else 'cv-lead' }}">{{ m.texto }}<span class="cv-hora">{{ m.hora or '' }}</span></div>
+      <div class="cv-msg {{ 'cv-consultor' if m.de == 'consultor' else 'cv-lead' }}">
+        {%- if m.tipo == 'imagem' -%}
+          <img class="cv-img" src="/crm/modelos/midia/{{ m.arquivo }}" alt="" loading="lazy" onclick="window.open(this.src, '_blank')">
+        {%- elif m.tipo == 'documento' -%}
+          <div class="cv-doc">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <a href="/crm/modelos/midia/{{ m.arquivo }}" target="_blank" rel="noopener">{{ m.nome_original or 'documento.pdf' }}</a>
+          </div>
+        {%- elif m.tipo == 'link' -%}
+          <a class="cv-link" href="{{ m.url }}" target="_blank" rel="noopener">{{ m.url }}</a>
+          {%- if m.preview %}<div class="cv-link-preview">{{ m.preview }}</div>{% endif -%}
+        {%- else -%}
+          {{ m.texto }}
+        {%- endif -%}
+        <span class="cv-hora">{{ m.hora or '' }}</span>
+      </div>
       {% else %}
       <div class="cv-vazio">Nenhuma mensagem salva nesta análise.</div>
       {% endfor %}

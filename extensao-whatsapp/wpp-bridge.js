@@ -121,8 +121,11 @@
           b64 = s.indexOf(',') >= 0 ? s.split(',')[1] : s;
         }
         if (b64) {
+          // msg_id (igual áudio) — deixa o servidor reconhecer "esse PDF já foi
+          // salvo antes" numa reanálise, em vez de gravar o mesmo arquivo de novo
+          // a cada rodada (a extensão manda de novo tudo que ainda está na tela).
           out.push({ de: (m.id.fromMe ? 'consultor' : 'lead'), base64: b64,
-                     nome: m.filename || 'documento.pdf', hora: fmtHora(m.t) });
+                     nome: m.filename || 'documento.pdf', hora: fmtHora(m.t), msg_id: m.id._serialized });
         }
       } catch (e) { /* documento que falhar é ignorado, nunca derruba a análise */ }
     }
