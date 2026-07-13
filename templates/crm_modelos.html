@@ -3,18 +3,64 @@
 
 {% block head %}
 <style>
-  .mo-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:14px; max-width:1100px; margin-bottom:28px; }
-  .mo-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:16px; }
-  .mo-card-topo { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:8px; }
-  .mo-nome { font-size:14px; font-weight:700; color:var(--texto); }
-  .mo-assunto { font-size:12px; color:var(--cinza); margin-top:2px; }
+  /* Abas por canal — E-mail/SMS vazios não viram mais seção rolável, só existem ao clicar. */
+  .mo-tabs { display:flex; gap:22px; border-bottom:1px solid var(--borda); max-width:1100px; margin-bottom:22px; }
+  .mo-tab { background:none; border:none; padding:10px 2px; font-family:'Sora',sans-serif; font-size:13px; font-weight:600;
+            color:var(--cinza); cursor:pointer; position:relative; display:flex; align-items:center; gap:7px; }
+  .mo-tab-n { font-size:11px; font-weight:600; color:var(--cinza-2); font-variant-numeric:tabular-nums; }
+  .mo-tab.on { color:var(--texto); }
+  .mo-tab:hover:not(.on) { color:var(--texto); }
+  .mo-tab.on::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; border-radius:2px; background:var(--grad-frio); }
+
+  /* Toolbar do canal: busca + filtros com contagem embutida (substitui a barra de 6 estatísticas). */
+  .mo-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:20px; max-width:1100px; }
+  .wa-busca { flex:0 0 260px; min-width:200px; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; font-size:13px; color:var(--texto); }
+  .wa-busca:focus { outline:none; border-color:var(--azul); }
+  .wa-filtros { display:flex; gap:6px; flex-wrap:wrap; flex:1; }
+  .wa-fchip { background:var(--panel); color:var(--cinza); border:1px solid var(--borda); border-radius:20px; padding:6px 12px;
+              font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px; }
+  .wa-fchip span { font-size:10.5px; color:var(--cinza-2); font-variant-numeric:tabular-nums; }
+  .wa-fchip.on { background:var(--azul); color:#fff; border-color:var(--azul); }
+  .wa-fchip.on span { color:rgba(255,255,255,.75); }
+  .mo-toolbar-acoes { display:flex; gap:8px; margin-left:auto; }
+
+  /* Lista de linhas com detalhe sob demanda — escanear 432 itens é leitura
+     vertical (ícone + nome + meta), não parsear 6 elementos por card. */
+  .mo-lista { display:flex; flex-direction:column; max-width:1100px; margin-bottom:28px; border:1px solid var(--borda); border-radius:14px; overflow:hidden; }
+  .wa-item { border-bottom:1px solid var(--borda); background:var(--panel); }
+  .wa-item:last-child { border-bottom:none; }
+  .wa-row { display:flex; align-items:center; gap:12px; padding:13px 16px; cursor:pointer; }
+  .wa-row:hover { background:var(--panel-2); }
+  .wa-tico { width:26px; height:26px; border-radius:7px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .wa-tico svg { width:14px; height:14px; }
+  .wa-tico.t-texto { background:rgba(59,130,246,.14); color:var(--azul); }
+  .wa-tico.t-audio { background:rgba(139,92,246,.16); color:var(--roxo); }
+  .wa-tico.t-imagem { background:var(--verde-soft); color:var(--verde); }
+  .wa-tico.t-video { background:rgba(245,158,11,.14); color:#f59e0b; }
+  .wa-tico.t-documento { background:rgba(250,204,21,.16); color:var(--amarelo); }
+  .wa-row-corpo { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .wa-row-nome { font-size:13.5px; font-weight:700; color:var(--texto); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .wa-row-meta { font-size:11.5px; color:var(--cinza-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mo-chip.off { font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:20px; background:rgba(244,63,94,.15); color:var(--erro); flex-shrink:0; }
   .mo-variante { font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:20px; background:var(--panel-2); color:var(--cinza); flex-shrink:0; }
-  .mo-preview { font-size:11.5px; color:var(--cinza-2); background:var(--panel-2); border-radius:8px; padding:8px 10px; margin:8px 0; max-height:70px; overflow:hidden; white-space:pre-wrap; }
-  .mo-acoes { display:flex; gap:8px; margin-top:8px; }
-  .mo-chip { font-size:11px; font-weight:700; padding:3px 10px; border-radius:20px; }
-  .mo-chip.on { background:var(--verde-soft); color:var(--verde); }
-  .mo-chip.off { background:rgba(244,63,94,.15); color:#f43f5e; }
-  .secao-titulo { font-family:'Sora',sans-serif; font-size:13px; font-weight:700; color:var(--texto); margin:0 0 12px; text-transform:uppercase; letter-spacing:.4px; display:flex; align-items:center; justify-content:space-between; max-width:1100px; }
+  .wa-fav { background:none; border:none; color:var(--cinza-2); font-size:16px; cursor:pointer; line-height:1; padding:2px; flex-shrink:0; opacity:0; transition:opacity .12s; }
+  .wa-row:hover .wa-fav, .wa-fav.ativo { opacity:1; }
+  .wa-fav.ativo { color:#f5c518; }
+  .wa-row-seta { color:var(--cinza-2); font-size:14px; flex-shrink:0; transition:transform .15s; }
+  .wa-item.aberto .wa-row-seta { transform:rotate(90deg); }
+  .wa-row-detalhe { padding:0 16px 16px 54px; }
+  .mo-preview { font-size:12px; color:var(--cinza-2); background:var(--panel-2); border-radius:8px; padding:10px 12px; white-space:pre-wrap; }
+  .mo-acoes { display:flex; gap:8px; margin-top:10px; align-items:center; }
+
+  /* Estado vazio de canal: card de ação (padrão já aprovado nos Fluxos), não texto cinza solto. */
+  .mo-empty-card { max-width:1100px; background:var(--azul); border:1px solid var(--azul); border-radius:14px; padding:36px 24px;
+                   display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:#fff;
+                   cursor:pointer; transition:transform .1s; }
+  .mo-empty-card:hover { transform:translateY(-2px); }
+  .mo-empty-card svg { width:32px; height:32px; }
+  .mo-empty-label { font-size:14.5px; font-weight:700; }
+  .mo-empty-sub { font-size:12px; opacity:.85; }
+
   .modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; align-items:center; justify-content:center; overflow-y:auto; padding:30px 0; }
   .modal-bg.aberto { display:flex; }
   .modal-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:24px; width:560px; max-width:92vw; margin:auto; }
@@ -25,30 +71,6 @@
   .modal-acoes { display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
   .btn-azul { background:var(--azul); color:#fff; border:none; padding:10px 20px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
   .mo-nota { font-size:11.5px; color:var(--cinza-2); line-height:1.5; margin-bottom:10px; }
-
-  .wa-stats { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; max-width:1100px; }
-  .wa-stat { background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:8px 16px; text-align:center; }
-  .wa-stat b { display:block; font-size:20px; font-weight:800; color:var(--texto); font-variant-numeric:tabular-nums; }
-  .wa-stat span { font-size:11px; color:var(--cinza-2); }
-  .wa-controls { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px; max-width:1100px; }
-  .wa-busca { flex:1; min-width:220px; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; font-size:13px; color:var(--texto); }
-  .wa-busca:focus { outline:none; border-color:var(--azul); }
-  .wa-filtros { display:flex; gap:6px; flex-wrap:wrap; }
-  .wa-fchip { background:var(--panel-2); color:var(--cinza); border:1px solid var(--borda); border-radius:20px; padding:6px 13px; font-size:12px; font-weight:600; cursor:pointer; }
-  .wa-fchip.on { background:var(--azul); color:#fff; border-color:var(--azul); }
-  #wa-lista { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:12px; max-width:1100px; margin-bottom:28px; }
-  .wa-card { display:flex; flex-direction:column; padding:13px 14px; }
-  .wa-card .mo-nome { display:flex; align-items:flex-start; gap:8px; font-size:13px; line-height:1.35; }
-  .wa-tico { width:26px; height:26px; border-radius:7px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
-  .wa-tico svg { width:14px; height:14px; }
-  .wa-tico.t-texto { background:rgba(59,130,246,.14); color:var(--azul); }
-  .wa-tico.t-audio { background:rgba(139,92,246,.16); color:var(--roxo); }
-  .wa-tico.t-imagem { background:var(--verde-soft); color:var(--verde); }
-  .wa-tico.t-video { background:rgba(245,158,11,.14); color:#f59e0b; }
-  .wa-tico.t-documento { background:rgba(244,63,94,.14); color:#f43f5e; }
-  .wa-fav { background:none; border:none; color:var(--cinza-2); font-size:18px; cursor:pointer; line-height:1; padding:0 2px; }
-  .wa-fav.ativo { color:#f5c518; }
-  .wa-cat-chip { display:inline-block; align-self:flex-start; font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:20px; background:rgba(37,99,235,.12); color:var(--azul); margin-bottom:6px; }
 </style>
 {% endblock %}
 
@@ -63,98 +85,45 @@
   </div>
 </div>
 
-<div class="secao-titulo">
-  <span>Modelos de E-mail</span>
-  <button class="btn-azul" style="padding:7px 16px; font-size:12px;" onclick="document.getElementById('modal-email').classList.add('aberto')">+ Subir modelo de e-mail</button>
-</div>
-<div class="mo-grid">
-  {% for m in modelos_email %}
-  <div class="mo-card">
-    <div class="mo-card-topo">
-      <div>
-        <div class="mo-nome">{{ m.nome }}</div>
-        <div class="mo-assunto">{{ m.assunto or '(sem assunto)' }}</div>
-      </div>
-      {% if m.variante %}<span class="mo-variante">Variante {{ m.variante }}</span>{% endif %}
-    </div>
-    <div class="mo-acoes">
-      <span class="mo-chip {{ 'on' if m.ativo else 'off' }}">{{ 'Ativo' if m.ativo else 'Desativado' }}</span>
-      <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
-      <button class="btn-ghost" style="font-size:11.5px; color:var(--rosa,#f43f5e);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
-    </div>
-  </div>
-  {% else %}
-  <div style="grid-column:1/-1; text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo de e-mail cadastrado ainda.</div>
-  {% endfor %}
+<div class="mo-tabs">
+  <button class="mo-tab on" data-canal="whatsapp" onclick="mudarAba(this)">WhatsApp <span class="mo-tab-n">{{ modelos_whatsapp|length }}</span></button>
+  <button class="mo-tab" data-canal="email" onclick="mudarAba(this)">E-mail <span class="mo-tab-n">{{ modelos_email|length }}</span></button>
+  <button class="mo-tab" data-canal="sms" onclick="mudarAba(this)">SMS <span class="mo-tab-n">{{ modelos_sms|length }}</span></button>
 </div>
 
-<div class="secao-titulo">
-  <span>Modelos de SMS</span>
-  <button class="btn-azul" style="padding:7px 16px; font-size:12px;" onclick="document.getElementById('modal-sms').classList.add('aberto')">+ Subir modelo de SMS</button>
-</div>
-<div class="mo-grid">
-  {% for m in modelos_sms %}
-  <div class="mo-card">
-    <div class="mo-card-topo">
-      <div class="mo-nome">{{ m.nome }}</div>
-      {% if m.variante %}<span class="mo-variante">Variante {{ m.variante }}</span>{% endif %}
+<!-- ═══ Canal WhatsApp (aba padrão — é 99% do uso) ═══ -->
+<div class="canal-painel" data-canal="whatsapp">
+  {% if modelos_whatsapp %}
+  <div class="mo-toolbar">
+    <input type="text" id="wa-busca" class="wa-busca" placeholder="Buscar por nome, texto ou categoria…" oninput="filtrarWpp()">
+    <div class="wa-filtros">
+      <button class="wa-fchip on" data-f="todos" onclick="setFiltroWpp(this)">Todos <span>{{ modelos_whatsapp|length }}</span></button>
+      <button class="wa-fchip" data-f="favoritos" onclick="setFiltroWpp(this)">Favoritos <span>{{ modelos_whatsapp|selectattr('favorito')|list|length }}</span></button>
+      <button class="wa-fchip" data-f="texto" onclick="setFiltroWpp(this)">Texto <span>{{ stats_wpp.texto }}</span></button>
+      <button class="wa-fchip" data-f="audio" onclick="setFiltroWpp(this)">Áudio <span>{{ stats_wpp.audio }}</span></button>
+      <button class="wa-fchip" data-f="imagem" onclick="setFiltroWpp(this)">Imagem <span>{{ stats_wpp.imagem }}</span></button>
+      <button class="wa-fchip" data-f="documento" onclick="setFiltroWpp(this)">PDF <span>{{ stats_wpp.documento or 0 }}</span></button>
     </div>
-    <div class="mo-preview">{{ m.corpo_texto }}</div>
-    <div class="mo-acoes">
-      <span class="mo-chip {{ 'on' if m.ativo else 'off' }}">{{ 'Ativo' if m.ativo else 'Desativado' }}</span>
-      <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
-      <button class="btn-ghost" style="font-size:11.5px; color:var(--rosa,#f43f5e);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
+    <div class="mo-toolbar-acoes">
+      <button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup</button>
+      <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">+ Novo modelo</button>
     </div>
   </div>
-  {% else %}
-  <div style="grid-column:1/-1; text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo de SMS cadastrado ainda.</div>
-  {% endfor %}
-</div>
+  {% endif %}
+  <input type="file" id="zv-arquivo" accept=".json" style="display:none" onchange="importarZapVoice(this)">
+  <div id="zv-status" style="display:none; max-width:1100px; margin:0 0 14px; font-size:13px; color:var(--cinza); background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;"></div>
 
-<div class="secao-titulo">
-  <span>Modelos de WhatsApp</span>
-  <div style="display:flex; gap:8px;">
-    <button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup do ZapVoice</button>
-    <input type="file" id="zv-arquivo" accept=".json" style="display:none" onchange="importarZapVoice(this)">
-    <button class="btn-azul" style="padding:7px 16px; font-size:12px;" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">+ Novo modelo de WhatsApp</button>
-  </div>
-</div>
-<div id="zv-status" style="display:none; max-width:1100px; margin:0 0 14px; font-size:13px; color:var(--cinza); background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;"></div>
-
-{% if stats_wpp and stats_wpp.total %}
-<div class="wa-stats">
-  <div class="wa-stat"><b>{{ stats_wpp.total }}</b><span>no total</span></div>
-  <div class="wa-stat"><b>{{ stats_wpp.texto }}</b><span>texto</span></div>
-  <div class="wa-stat"><b>{{ stats_wpp.audio }}</b><span>áudio</span></div>
-  <div class="wa-stat"><b>{{ stats_wpp.imagem }}</b><span>imagem</span></div>
-  <div class="wa-stat"><b>{{ stats_wpp.documento or 0 }}</b><span>PDF</span></div>
-  <div class="wa-stat"><b>{{ stats_wpp.categorias|length }}</b><span>categorias</span></div>
-</div>
-
-<div class="wa-controls">
-  <input type="text" id="wa-busca" class="wa-busca" placeholder="Buscar por nome, texto ou categoria…" oninput="filtrarWpp()">
-  <div class="wa-filtros">
-    <button class="wa-fchip on" data-f="todos" onclick="setFiltroWpp(this)">Todos</button>
-    <button class="wa-fchip" data-f="favoritos" onclick="setFiltroWpp(this)">★ Favoritos</button>
-    <button class="wa-fchip" data-f="texto" onclick="setFiltroWpp(this)">Texto</button>
-    <button class="wa-fchip" data-f="audio" onclick="setFiltroWpp(this)">Áudio</button>
-    <button class="wa-fchip" data-f="imagem" onclick="setFiltroWpp(this)">Imagem</button>
-    <button class="wa-fchip" data-f="documento" onclick="setFiltroWpp(this)">PDF</button>
-  </div>
-</div>
-{% endif %}
-
-<div id="wa-lista">
-  {% for m in modelos_whatsapp %}
-  <div class="mo-card wa-card"
-       data-nome="{{ (m.nome or '')|lower }}"
-       data-texto="{{ (m.corpo_texto or '')|lower }}"
-       data-categoria="{{ (m.categoria or '')|lower }}"
-       data-tipo="{{ m.midia_tipo or 'texto' }}"
-       data-fav="{{ 1 if m.favorito else 0 }}">
+  {% if modelos_whatsapp %}
+  <div id="wa-lista" class="mo-lista">
+    {% for m in modelos_whatsapp %}
     {% set t = m.midia_tipo if m.midia_tipo in ('audio','imagem','video','documento') else 'texto' %}
-    <div class="mo-card-topo">
-      <div class="mo-nome">
+    <div class="wa-item"
+         data-nome="{{ (m.nome or '')|lower }}"
+         data-texto="{{ (m.corpo_texto or '')|lower }}"
+         data-categoria="{{ (m.categoria or '')|lower }}"
+         data-tipo="{{ m.midia_tipo or 'texto' }}"
+         data-fav="{{ 1 if m.favorito else 0 }}">
+      <div class="wa-row" onclick="toggleLinha(this)">
         <span class="wa-tico t-{{ t }}">
           {%- if t == 'audio' -%}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
@@ -168,30 +137,125 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           {%- endif -%}
         </span>
-        {{ m.nome }}
+        <div class="wa-row-corpo">
+          <span class="wa-row-nome">{{ m.nome }}</span>
+          <span class="wa-row-meta">{{ m.categoria or '' }}{{ ' · usado ' ~ m.vezes_usado ~ '×' if m.vezes_usado else '' }}</span>
+        </div>
+        {% if not m.ativo %}<span class="mo-chip off">Desativado</span>{% endif %}
+        <button class="wa-fav {{ 'ativo' if m.favorito else '' }}" onclick="event.stopPropagation(); toggleFavorito({{ m.id }}, this)" title="Favoritar">★</button>
+        <span class="wa-row-seta">›</span>
       </div>
-      <button class="wa-fav {{ 'ativo' if m.favorito else '' }}" onclick="toggleFavorito({{ m.id }}, this)" title="Favoritar">★</button>
+      <div class="wa-row-detalhe" hidden>
+        {% if m.corpo_texto %}<div class="mo-preview">{{ m.corpo_texto }}</div>{% endif %}
+        {% if m.midia_tipo == 'audio' and m.midia_arquivo %}
+        <audio controls preload="none" src="/crm/modelos/midia/{{ m.midia_arquivo }}" style="width:100%; margin:8px 0 0; height:34px;"></audio>
+        {% elif m.midia_tipo == 'imagem' and m.midia_arquivo %}
+        <img src="/crm/modelos/midia/{{ m.midia_arquivo }}" alt="" loading="lazy" style="max-width:100%; max-height:160px; border-radius:8px; margin:8px 0 0;">
+        {% elif m.midia_tipo in ('documento','video') and m.midia_arquivo %}
+        <a href="/crm/modelos/midia/{{ m.midia_arquivo }}" target="_blank" rel="noopener" class="btn-ghost" style="font-size:11.5px; display:inline-block; margin-top:8px;">Abrir {{ 'PDF' if m.midia_tipo == 'documento' else 'vídeo' }}</a>
+        {% endif %}
+        <div class="mo-acoes">
+          <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
+        </div>
+      </div>
     </div>
-    {% if m.categoria %}<span class="wa-cat-chip">{{ m.categoria }}</span>{% endif %}
-    <div class="mo-preview">{{ m.corpo_texto }}</div>
-    {% if m.midia_tipo == 'audio' and m.midia_arquivo %}
-    <audio controls preload="none" src="/crm/modelos/midia/{{ m.midia_arquivo }}" style="width:100%; margin:6px 0; height:34px;"></audio>
-    {% elif m.midia_tipo == 'imagem' and m.midia_arquivo %}
-    <img src="/crm/modelos/midia/{{ m.midia_arquivo }}" alt="" style="max-width:100%; max-height:130px; border-radius:8px; margin:6px 0;">
-    {% elif m.midia_tipo in ('documento','video') and m.midia_arquivo %}
-    <a href="/crm/modelos/midia/{{ m.midia_arquivo }}" target="_blank" rel="noopener" class="btn-ghost" style="font-size:11.5px; align-self:flex-start; margin:4px 0;">Abrir {{ 'PDF' if m.midia_tipo == 'documento' else 'vídeo' }}</a>
-    {% endif %}
-    <div class="mo-acoes">
-      <span class="mo-chip {{ 'on' if m.ativo else 'off' }}">{{ 'Ativo' if m.ativo else 'Desativado' }}</span>
-      {% if m.vezes_usado %}<span class="mo-chip" style="background:var(--panel-2);color:var(--cinza);">usado {{ m.vezes_usado }}×</span>{% endif %}
-      <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
-      <button class="btn-ghost" style="font-size:11.5px; color:var(--rosa,#f43f5e);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
-    </div>
+    {% endfor %}
+    <div id="wa-vazio-filtro" style="display:none; text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo bate com esse filtro.</div>
   </div>
   {% else %}
-  <div style="text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo de WhatsApp cadastrado ainda.</div>
-  {% endfor %}
-  <div id="wa-vazio-filtro" style="display:none; text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo bate com esse filtro.</div>
+  <div class="mo-empty-card" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    <div class="mo-empty-label">Nenhum modelo de WhatsApp ainda</div>
+    <div class="mo-empty-sub">Crie o primeiro, ou importe o backup do ZapVoice pelo botão abaixo</div>
+  </div>
+  <div style="max-width:1100px; text-align:center; margin-top:12px;">
+    <button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup do ZapVoice</button>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ═══ Canal E-mail ═══ -->
+<div class="canal-painel" data-canal="email" style="display:none;">
+  {% if modelos_email %}
+  <div class="mo-toolbar">
+    <div class="mo-toolbar-acoes">
+      <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-email').classList.add('aberto')">+ Subir modelo de e-mail</button>
+    </div>
+  </div>
+  <div class="mo-lista">
+    {% for m in modelos_email %}
+    <div class="wa-item">
+      <div class="wa-row" onclick="toggleLinha(this)">
+        <span class="wa-tico t-texto">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        </span>
+        <div class="wa-row-corpo">
+          <span class="wa-row-nome">{{ m.nome }}</span>
+          <span class="wa-row-meta">{{ m.assunto or '(sem assunto)' }}</span>
+        </div>
+        {% if m.variante %}<span class="mo-variante">Variante {{ m.variante }}</span>{% endif %}
+        {% if not m.ativo %}<span class="mo-chip off">Desativado</span>{% endif %}
+        <span class="wa-row-seta">›</span>
+      </div>
+      <div class="wa-row-detalhe" hidden>
+        <div class="mo-acoes" style="margin-top:0;">
+          <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="mo-empty-card" onclick="document.getElementById('modal-email').classList.add('aberto')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    <div class="mo-empty-label">Nenhum modelo de e-mail ainda</div>
+    <div class="mo-empty-sub">Suba um HTML pronto pra usar em Fluxos</div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ═══ Canal SMS ═══ -->
+<div class="canal-painel" data-canal="sms" style="display:none;">
+  {% if modelos_sms %}
+  <div class="mo-toolbar">
+    <div class="mo-toolbar-acoes">
+      <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-sms').classList.add('aberto')">+ Subir modelo de SMS</button>
+    </div>
+  </div>
+  <div class="mo-lista">
+    {% for m in modelos_sms %}
+    <div class="wa-item">
+      <div class="wa-row" onclick="toggleLinha(this)">
+        <span class="wa-tico t-texto">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </span>
+        <div class="wa-row-corpo">
+          <span class="wa-row-nome">{{ m.nome }}</span>
+          <span class="wa-row-meta">{{ (m.corpo_texto or '')|truncate(70) }}</span>
+        </div>
+        {% if m.variante %}<span class="mo-variante">Variante {{ m.variante }}</span>{% endif %}
+        {% if not m.ativo %}<span class="mo-chip off">Desativado</span>{% endif %}
+        <span class="wa-row-seta">›</span>
+      </div>
+      <div class="wa-row-detalhe" hidden>
+        {% if m.corpo_texto %}<div class="mo-preview">{{ m.corpo_texto }}</div>{% endif %}
+        <div class="mo-acoes">
+          <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="mo-empty-card" onclick="document.getElementById('modal-sms').classList.add('aberto')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    <div class="mo-empty-label">Nenhum modelo de SMS ainda</div>
+    <div class="mo-empty-sub">Texto curto pra usar em Fluxos</div>
+  </div>
+  {% endif %}
 </div>
 
 <!-- Modal: novo modelo de e-mail -->
@@ -264,6 +328,28 @@
 </div>
 
 <script>
+function mudarAba(btn){
+  document.querySelectorAll('.mo-tab').forEach(function(b){ b.classList.remove('on'); });
+  btn.classList.add('on');
+  document.querySelectorAll('.canal-painel').forEach(function(p){
+    p.style.display = (p.dataset.canal === btn.dataset.canal) ? '' : 'none';
+  });
+}
+
+// Um item expandido por vez — abre o clicado, fecha qualquer outro.
+function toggleLinha(row){
+  var item = row.closest('.wa-item');
+  var det = item.querySelector('.wa-row-detalhe');
+  if (!det) return;
+  var vaiAbrir = det.hasAttribute('hidden');
+  document.querySelectorAll('.wa-item.aberto').forEach(function(o){
+    o.classList.remove('aberto');
+    var d = o.querySelector('.wa-row-detalhe');
+    if (d) d.setAttribute('hidden','');
+  });
+  if (vaiAbrir) { item.classList.add('aberto'); det.removeAttribute('hidden'); }
+}
+
 function salvarModeloEmail(){
   var nome = document.getElementById('em-nome').value.trim();
   var html = document.getElementById('em-html').value.trim();
@@ -358,7 +444,7 @@ function setFiltroWpp(btn){
 function filtrarWpp(){
   var q = (document.getElementById('wa-busca').value || '').trim().toLowerCase();
   var visiveis = 0;
-  document.querySelectorAll('#wa-lista .wa-card').forEach(function(card){
+  document.querySelectorAll('#wa-lista .wa-item').forEach(function(card){
     var bateBusca = !q || card.dataset.nome.indexOf(q) >= 0 || card.dataset.texto.indexOf(q) >= 0 || card.dataset.categoria.indexOf(q) >= 0;
     var bateFiltro = _waFiltro === 'todos'
       || (_waFiltro === 'favoritos' && card.dataset.fav === '1')
@@ -375,7 +461,7 @@ function toggleFavorito(id, btn){
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (!d.ok) { alert(d.erro || 'Erro'); return; }
-      var card = btn.closest('.wa-card');
+      var card = btn.closest('.wa-item');
       btn.classList.toggle('ativo', d.favorito);
       card.dataset.fav = d.favorito ? '1' : '0';
       filtrarWpp();

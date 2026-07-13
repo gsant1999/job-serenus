@@ -3,16 +3,16 @@
 
 {% block head %}
 <style>
-  .fn-wrap { display:grid; grid-template-columns:340px 1fr; gap:18px; align-items:start; max-width:1180px; }
+  .fn-wrap { display:grid; grid-template-columns:340px 1fr; gap:22px; align-items:start; max-width:1180px; }
   @media (max-width:900px){ .fn-wrap { grid-template-columns:1fr; } }
 
   /* Coluna esquerda: lista de funis */
-  .fn-col { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:14px; }
+  .fn-col { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:16px; }
   .fn-col-topo { display:flex; gap:8px; margin-bottom:12px; }
   .fn-busca { flex:1; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:8px 11px; font-size:12.5px; color:var(--texto); }
   .fn-busca:focus { outline:none; border-color:var(--azul); }
-  .fn-lista { display:flex; flex-direction:column; gap:8px; max-height:70vh; overflow-y:auto; }
-  .fn-item { text-align:left; width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:10px 12px; cursor:pointer; transition:.12s; position:relative; display:flex; align-items:center; gap:10px; }
+  .fn-lista { display:flex; flex-direction:column; gap:10px; max-height:70vh; overflow-y:auto; }
+  .fn-item { text-align:left; width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:13px 14px; cursor:pointer; transition:.12s; position:relative; display:flex; align-items:center; gap:10px; }
   .fn-item:hover { border-color:var(--borda-2); }
   .fn-item.sel { border-color:transparent; }
   .fn-item.sel::before { content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:0 3px 3px 0; background:var(--grad-frio); }
@@ -36,13 +36,14 @@
   .fn-b-acao.perigo:hover { color:#f43f5e; border-color:rgba(244,63,94,.4); }
   .fn-b-acao.star.on { color:#f5c518; }
 
-  .fn-passos { padding:14px 18px; display:flex; flex-direction:column; gap:8px; }
-  .fn-passo { display:flex; align-items:center; gap:11px; background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:10px 12px; }
-  .fn-passo.t-texto { border-color:rgba(59,130,246,.32); background:rgba(59,130,246,.05); }
-  .fn-passo.t-audio { border-color:rgba(139,92,246,.35); background:rgba(139,92,246,.06); }
-  .fn-passo.t-imagem { border-color:rgba(31,216,164,.32); background:rgba(31,216,164,.05); }
-  .fn-passo.t-video { border-color:rgba(245,158,11,.32); background:rgba(245,158,11,.05); }
-  .fn-passo.t-documento { border-color:rgba(244,63,94,.3); background:rgba(244,63,94,.04); }
+  .fn-passos { padding:14px 18px; display:flex; flex-direction:column; gap:10px; }
+  .fn-passo { display:flex; align-items:center; gap:12px; background:var(--panel-2); border:1px solid var(--borda);
+              border-left:3px solid transparent; border-radius:11px; padding:13px 14px; }
+  .fn-passo.t-texto { border-left-color:var(--azul); }
+  .fn-passo.t-audio { border-left-color:var(--roxo); }
+  .fn-passo.t-imagem { border-left-color:var(--verde); }
+  .fn-passo.t-video { border-left-color:#f59e0b; }
+  .fn-passo.t-documento { border-left-color:var(--amarelo); }
   .fn-passo-ord { width:20px; height:20px; flex-shrink:0; border-radius:50%; background:var(--panel-3); color:var(--cinza); font-size:10.5px; font-weight:800; display:flex; align-items:center; justify-content:center; font-variant-numeric:tabular-nums; }
   .fn-passo-ico { width:32px; height:32px; flex-shrink:0; border-radius:9px; display:flex; align-items:center; justify-content:center; }
   .fn-passo-ico svg { width:16px; height:16px; }
@@ -50,19 +51,9 @@
   .fn-passo-ico.t-audio { background:rgba(139,92,246,.16); color:var(--roxo); }
   .fn-passo-ico.t-imagem { background:var(--verde-soft); color:var(--verde); }
   .fn-passo-ico.t-video { background:rgba(245,158,11,.14); color:#f59e0b; }
-  .fn-passo-ico.t-documento { background:rgba(244,63,94,.14); color:#f43f5e; }
+  .fn-passo-ico.t-documento { background:rgba(250,204,21,.16); color:var(--amarelo); }
   .fn-passo-corpo { flex:1; min-width:0; }
   .fn-passo-nome { font-size:12.5px; font-weight:700; color:var(--texto); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .fn-passo.t-texto .fn-passo-nome { color:#7eb1ff; }
-  .fn-passo.t-audio .fn-passo-nome { color:#b3a0f8; }
-  .fn-passo.t-imagem .fn-passo-nome { color:#3fe0b6; }
-  .fn-passo.t-video .fn-passo-nome { color:#fbbf24; }
-  .fn-passo.t-documento .fn-passo-nome { color:#fb7185; }
-  [data-theme="light"] .fn-passo.t-texto .fn-passo-nome { color:#2563eb; }
-  [data-theme="light"] .fn-passo.t-audio .fn-passo-nome { color:#7c3aed; }
-  [data-theme="light"] .fn-passo.t-imagem .fn-passo-nome { color:#0d9268; }
-  [data-theme="light"] .fn-passo.t-video .fn-passo-nome { color:#b45309; }
-  [data-theme="light"] .fn-passo.t-documento .fn-passo-nome { color:#e11d48; }
   .fn-passo-quando { font-size:11px; color:var(--cinza); margin-top:3px; display:flex; align-items:center; gap:5px; }
   .fn-passo-quando svg { width:12px; height:12px; opacity:.7; flex-shrink:0; }
   /* input.fn-delay-inp com seletor composto: o base.html tem input[type=number]
