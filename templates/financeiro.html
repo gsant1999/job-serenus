@@ -577,10 +577,13 @@ function atualizarCamposMeio(prefixo) {
   const final = document.getElementById(prefixo + '-campo-final');
   const fechamento = document.getElementById(prefixo + '-campo-fechamento');
   const vencimento = document.getElementById(prefixo + '-campo-vencimento');
-  if (titular) titular.style.display = ehCartao ? '' : 'none';
-  if (final) final.style.display = ehCartao ? '' : 'none';
-  if (fechamento) fechamento.style.display = ehCredito ? '' : 'none';
-  if (vencimento) vencimento.style.display = ehCredito ? '' : 'none';
+  // 'block', não '' — limpar o inline style deixaria a regra de CSS
+  // .mp-campo-cartao{display:none} valendo de novo (inline vazio não vence
+  // uma classe do stylesheet; só um valor explícito no inline vence).
+  if (titular) titular.style.display = ehCartao ? 'block' : 'none';
+  if (final) final.style.display = ehCartao ? 'block' : 'none';
+  if (fechamento) fechamento.style.display = ehCredito ? 'block' : 'none';
+  if (vencimento) vencimento.style.display = ehCredito ? 'block' : 'none';
 }
 document.addEventListener('DOMContentLoaded', () => atualizarCamposMeio('mp'));
 
