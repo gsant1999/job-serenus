@@ -120,7 +120,7 @@
     <div class="vazio">Nenhuma análise ainda. Use o botão da extensão numa conversa do WhatsApp Web.</div>
   {% else %}
   <table class="pnl-tab">
-    <thead><tr><th>Data</th><th>Contato</th><th class="num">Score</th><th>Faixa</th><th>Lead no CRM</th><th>Etapa atual</th><th class="num">Duração</th><th class="num">Custo IA</th></tr></thead>
+    <thead><tr><th>Data</th><th>Contato</th><th class="num">Score</th><th>Faixa</th><th>Lead no CRM</th><th>Etapa atual</th><th class="num">Duração</th><th class="num">Custo IA</th><th>Conversa</th></tr></thead>
     <tbody>
       {% for a in analises %}
       <tr>
@@ -149,6 +149,7 @@
           {% else %}—{% endif %}
         </td>
         <td class="num">{{ ((a.custo_usd or 0) * taxa_usd_brl)|moeda }}</td>
+        <td>{% if a.total_mensagens %}<a href="/whatsapp-analises/{{ a.id }}/conversa">Ver conversa ({{ a.total_mensagens }})</a>{% else %}—{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

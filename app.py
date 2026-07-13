@@ -10009,6 +10009,31 @@ def whatsapp_analises_pagina():
                            custo=custo, taxa_usd_brl=_USD_BRL_TAXA, eh_admin=eh_admin)
 
 
+@app.route('/whatsapp-analises/<int:aid>/conversa')
+@login_required
+def whatsapp_analise_conversa(aid):
+    """Mostra a conversa salva de uma análise (conversa_json) em formato de
+    chat. É o registro da ÚLTIMA conversa conhecida do lead — cada análise
+    guarda o histórico completo fundido até aquele momento, então a mais
+    recente é sempre a foto mais atual. Consultor só vê conversa de lead dele
+    (mesma regra do CRM); admin vê tudo."""
+    conn = db()
+    a = conn.execute("""SELECT wa.*, l.nome AS lead_nome, l.responsavel_id
+        FROM whatsapp_analises wa LEFT JOIN crm_leads l ON l.id = wa.lead_id
+        WHERE wa.id=?""", (aid,)).fetchone()
+    close_db(conn)
+    if not a:
+        abort(404)
+    a = dict(a)
+    if session.get('perfil') != 'admin' and a.get('responsavel_id') not in (None, session.get('user_id')):
+        abort(403)
+    try:
+        mensagens = json.loads(a.get('conversa_json') or '[]')
+    except Exception:
+        mensagens = []
+    return render_template('whatsapp_conversa.html', a=a, mensagens=mensagens)
+
+
 # ─── CRM ─────────────────────────────────────────────────────────────────────────
 def carregar_etapas_crm(conn=None):
     """Lê as etapas do funil do banco, ordenadas. Cria conexão própria se não receber uma."""

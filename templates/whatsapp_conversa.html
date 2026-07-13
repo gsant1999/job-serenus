@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Conversa · {{ a.nome_contato or a.telefone }}{% endblock %}
+
+{% block head %}
+<style>
+  .cv-wrap { max-width:760px; }
+  .cv-meta { display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-bottom:18px; font-size:12px; color:var(--cinza); }
+  .cv-meta b { color:var(--texto); }
+  .cv-score { font-size:11px; font-weight:800; padding:3px 11px; border-radius:20px; background:var(--verde-soft); color:var(--verde); }
+  .cv-chat { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 16px; display:flex; flex-direction:column; gap:8px; }
+  .cv-msg { max-width:78%; padding:9px 12px; border-radius:12px; font-size:13px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+  .cv-msg .cv-hora { display:block; font-size:10px; color:var(--cinza-2); margin-top:4px; }
+  .cv-lead { align-self:flex-start; background:var(--panel-2); border:1px solid var(--borda); color:var(--texto); border-bottom-left-radius:4px; }
+  .cv-consultor { align-self:flex-end; background:rgba(31,216,164,.1); border:1px solid rgba(31,216,164,.22); color:var(--texto); border-bottom-right-radius:4px; }
+  .cv-vazio { text-align:center; color:var(--cinza-2); font-size:13px; padding:40px 20px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Conversa salva — {{ a.nome_contato or a.telefone or 'contato' }}</h1>
+    <div class="sub">Registro da conversa no momento da análise ({{ a.criado_em }}) — a análise mais recente do lead sempre guarda o histórico completo até ali</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    {% if a.lead_id %}<button class="btn-outline btn-sm" onclick="location.href='/crm?lead={{ a.lead_id }}'">Abrir lead no CRM</button>{% endif %}
+    <button class="btn-outline btn-sm" onclick="location.href='/whatsapp-analises'">Voltar às análises</button>
+  </div>
+</div>
+
+<div class="page">
+  <div class="cv-wrap">
+    <div class="cv-meta">
+      {% if a.score is not none %}<span class="cv-score">Score {{ a.score }}/1000{% if a.score_faixa %} · {{ a.score_faixa }}{% endif %}</span>{% endif %}
+      <span><b>{{ mensagens|length }}</b> mensagens</span>
+      {% if a.lead_nome %}<span>Lead: <b>{{ a.lead_nome }}</b></span>{% endif %}
+      {% if a.telefone %}<span>{{ a.telefone }}</span>{% endif %}
+    </div>
+
+    <div class="cv-chat">
+      {% for m in mensagens %}
+      <div class="cv-msg {{ 'cv-consultor' if m.de == 'consultor' else 'cv-lead' }}">{{ m.texto }}<span class="cv-hora">{{ m.hora or '' }}</span></div>
+      {% else %}
+      <div class="cv-vazio">Nenhuma mensagem salva nesta análise.</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
