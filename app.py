@@ -15249,6 +15249,7 @@ def crm_modelos():
         'texto': sum(1 for m in wpp if not m.get('midia_tipo')),
         'audio': sum(1 for m in wpp if m.get('midia_tipo') == 'audio'),
         'imagem': sum(1 for m in wpp if m.get('midia_tipo') == 'imagem'),
+        'documento': sum(1 for m in wpp if m.get('midia_tipo') == 'documento'),
         'categorias': sorted({(m.get('categoria') or '').strip() for m in wpp if (m.get('categoria') or '').strip()}),
     }
     return render_template('crm_modelos.html',

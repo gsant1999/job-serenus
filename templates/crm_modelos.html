@@ -36,9 +36,16 @@
   .wa-filtros { display:flex; gap:6px; flex-wrap:wrap; }
   .wa-fchip { background:var(--panel-2); color:var(--cinza); border:1px solid var(--borda); border-radius:20px; padding:6px 13px; font-size:12px; font-weight:600; cursor:pointer; }
   .wa-fchip.on { background:var(--azul); color:#fff; border-color:var(--azul); }
-  #wa-lista { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:14px; max-width:1100px; margin-bottom:28px; }
-  .wa-card { display:flex; flex-direction:column; }
-  .wa-tipo-ico { margin-right:5px; }
+  #wa-lista { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:12px; max-width:1100px; margin-bottom:28px; }
+  .wa-card { display:flex; flex-direction:column; padding:13px 14px; }
+  .wa-card .mo-nome { display:flex; align-items:flex-start; gap:8px; font-size:13px; line-height:1.35; }
+  .wa-tico { width:26px; height:26px; border-radius:7px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .wa-tico svg { width:14px; height:14px; }
+  .wa-tico.t-texto { background:rgba(59,130,246,.14); color:var(--azul); }
+  .wa-tico.t-audio { background:rgba(139,92,246,.16); color:var(--roxo); }
+  .wa-tico.t-imagem { background:var(--verde-soft); color:var(--verde); }
+  .wa-tico.t-video { background:rgba(245,158,11,.14); color:#f59e0b; }
+  .wa-tico.t-documento { background:rgba(244,63,94,.14); color:#f43f5e; }
   .wa-fav { background:none; border:none; color:var(--cinza-2); font-size:18px; cursor:pointer; line-height:1; padding:0 2px; }
   .wa-fav.ativo { color:#f5c518; }
   .wa-cat-chip { display:inline-block; align-self:flex-start; font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:20px; background:rgba(37,99,235,.12); color:var(--azul); margin-bottom:6px; }
@@ -120,6 +127,7 @@
   <div class="wa-stat"><b>{{ stats_wpp.texto }}</b><span>texto</span></div>
   <div class="wa-stat"><b>{{ stats_wpp.audio }}</b><span>áudio</span></div>
   <div class="wa-stat"><b>{{ stats_wpp.imagem }}</b><span>imagem</span></div>
+  <div class="wa-stat"><b>{{ stats_wpp.documento or 0 }}</b><span>PDF</span></div>
   <div class="wa-stat"><b>{{ stats_wpp.categorias|length }}</b><span>categorias</span></div>
 </div>
 
@@ -131,6 +139,7 @@
     <button class="wa-fchip" data-f="texto" onclick="setFiltroWpp(this)">Texto</button>
     <button class="wa-fchip" data-f="audio" onclick="setFiltroWpp(this)">Áudio</button>
     <button class="wa-fchip" data-f="imagem" onclick="setFiltroWpp(this)">Imagem</button>
+    <button class="wa-fchip" data-f="documento" onclick="setFiltroWpp(this)">PDF</button>
   </div>
 </div>
 {% endif %}
@@ -143,9 +152,22 @@
        data-categoria="{{ (m.categoria or '')|lower }}"
        data-tipo="{{ m.midia_tipo or 'texto' }}"
        data-fav="{{ 1 if m.favorito else 0 }}">
+    {% set t = m.midia_tipo if m.midia_tipo in ('audio','imagem','video','documento') else 'texto' %}
     <div class="mo-card-topo">
       <div class="mo-nome">
-        <span class="wa-tipo-ico">{{ '🎤' if m.midia_tipo == 'audio' else ('🖼' if m.midia_tipo == 'imagem' else '💬') }}</span>
+        <span class="wa-tico t-{{ t }}">
+          {%- if t == 'audio' -%}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+          {%- elif t == 'imagem' -%}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          {%- elif t == 'video' -%}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          {%- elif t == 'documento' -%}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          {%- else -%}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          {%- endif -%}
+        </span>
         {{ m.nome }}
       </div>
       <button class="wa-fav {{ 'ativo' if m.favorito else '' }}" onclick="toggleFavorito({{ m.id }}, this)" title="Favoritar">★</button>
@@ -156,6 +178,8 @@
     <audio controls preload="none" src="/crm/modelos/midia/{{ m.midia_arquivo }}" style="width:100%; margin:6px 0; height:34px;"></audio>
     {% elif m.midia_tipo == 'imagem' and m.midia_arquivo %}
     <img src="/crm/modelos/midia/{{ m.midia_arquivo }}" alt="" style="max-width:100%; max-height:130px; border-radius:8px; margin:6px 0;">
+    {% elif m.midia_tipo in ('documento','video') and m.midia_arquivo %}
+    <a href="/crm/modelos/midia/{{ m.midia_arquivo }}" target="_blank" rel="noopener" class="btn-ghost" style="font-size:11.5px; align-self:flex-start; margin:4px 0;">Abrir {{ 'PDF' if m.midia_tipo == 'documento' else 'vídeo' }}</a>
     {% endif %}
     <div class="mo-acoes">
       <span class="mo-chip {{ 'on' if m.ativo else 'off' }}">{{ 'Ativo' if m.ativo else 'Desativado' }}</span>
@@ -218,7 +242,7 @@
 <div class="modal-bg" id="modal-whatsapp">
   <div class="modal-card">
     <h3>Novo modelo de WhatsApp</h3>
-    <div class="mo-nota">Base pra futuramente virar funil automático. Texto sempre obrigatório. Mídia é opcional — só áudio OU imagem, nunca as duas (envio de mídia pela extensão ainda não está disponível; por enquanto o modelo com mídia fica só salvo).</div>
+    <div class="mo-nota">Vira item da biblioteca da extensão e passo de funil. Mídia é opcional — só áudio OU imagem, nunca as duas. Áudio é enviado como nota de voz; imagem vai com o texto como legenda.</div>
     <label class="campo-label">Nome do modelo</label>
     <input type="text" id="wa-nome" placeholder="Ex: Boas-vindas - primeiro contato">
     <label class="campo-label">Categoria (opcional — agrupa na biblioteca, ex: Notredame, Beneficência)</label>

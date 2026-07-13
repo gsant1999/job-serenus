@@ -468,7 +468,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
       {% if session.perfil == 'admin' %}Fluxo de Caixa{% else %}Meu Financeiro{% endif %}
     </a>
-    <a href="/crm" class="nav-link {% if '/crm' in request.path and '/crm/frios' not in request.path and '/crm/fluxos' not in request.path %}active{% endif %}" onclick="closeSidebar()">
+    <a href="/crm" class="nav-link {% if '/crm' in request.path and '/crm/frios' not in request.path and '/crm/fluxos' not in request.path and '/crm/funis' not in request.path and '/crm/modelos' not in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="23" y1="21" x2="23" y2="19"/><line x1="20" y1="16" x2="20" y2="21"/><line x1="17" y1="18" x2="17" y2="21"/></svg>
       CRM
     </a>
@@ -484,6 +484,10 @@
     <a href="/crm/funis" class="nav-link {% if '/crm/funis' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
       Funis WhatsApp
+    </a>
+    <a href="/crm/modelos" class="nav-link {% if '/crm/modelos' in request.path %}active{% endif %}" onclick="closeSidebar()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/></svg>
+      Modelos
     </a>
     {% endif %}
     <a href="/cotacao" class="nav-link {% if '/cotacao' in request.path %}active{% endif %}" onclick="closeSidebar()">
