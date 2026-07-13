@@ -13,9 +13,17 @@
 .kpi .lbl { font-size:10.5px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
 .kpi .val { font-family:'Sora',sans-serif; font-size:20px; font-weight:700; }
 .tbl { width:100%; border-collapse:collapse; }
-.tbl th { text-align:left; font-size:10.5px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.4px; padding:10px 12px; border-bottom:1px solid var(--borda-2); }
+.tbl th { text-align:left; font-size:10.5px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.4px; padding:10px 12px; border-bottom:1px solid var(--borda-2); white-space:nowrap; }
 .tbl td { padding:11px 12px; border-bottom:1px solid var(--borda); font-size:13px; }
 .tbl tr:last-child td { border-bottom:none; }
+/* A tabela de custos tem muitas colunas (com botões que não podem quebrar
+   linha) — sem isso ela empurrava a PÁGINA INTEIRA pro lado (sidebar junto),
+   em vez de só ela mesma rolar. .card tem overflow:hidden (só corta, não
+   rola), então o scroll precisa acontecer neste wrapper aqui dentro. */
+.tbl-wrap { overflow-x:auto; }
+.meio-detalhe { font-size:11.5px; color:var(--cinza-2); }
+.meio-tipo-chip { display:inline-block; padding:2px 9px; border-radius:20px; font-size:10.5px; font-weight:600; background:var(--panel-3); color:var(--cinza); }
+.mp-campo-cartao, .mp-campo-credito { display:none; }
 .mes-nav { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
 .mes-nav input { padding:9px 12px; }
 .add-row { display:grid; gap:10px; align-items:end; margin-bottom:14px; padding:16px; background:var(--panel-2); border:1px solid var(--borda); border-radius:12px; }
@@ -29,6 +37,28 @@
 {% endblock %}
 
 {% block content %}
+{% macro select_forma_pagamento(id) %}
+<select id="{{ id }}" onchange="atualizarPreviewMeio('{{ id }}')">
+  <option value="">—</option>
+  <optgroup label="Simples">
+    <option value="pix">Pix</option>
+    <option value="boleto">Boleto</option>
+    <option value="dinheiro">Dinheiro</option>
+    <option value="transferencia">Transferência</option>
+    <option value="cartao_credito">Cartão de crédito (não cadastrado)</option>
+    <option value="cartao_debito">Cartão de débito (não cadastrado)</option>
+  </optgroup>
+  {% set cartoes = meios_pagamento|selectattr('ativo')|list %}
+  {% if cartoes %}
+  <optgroup label="Meios cadastrados">
+    {% for m in cartoes %}
+    <option value="meio:{{ m.id }}">{{ m.nome }}{% if m.final_cartao %} •••• {{ m.final_cartao }}{% endif %}</option>
+    {% endfor %}
+  </optgroup>
+  {% endif %}
+</select>
+<div class="meio-detalhe" id="{{ id }}-preview"></div>
+{% endmacro %}
 <div class="topbar">
   <div>
     <h1>Financeiro</h1>
@@ -56,6 +86,7 @@
     <div class="fin-tab" data-pane="custos" onclick="aba('custos')">Custos</div>
     <div class="fin-tab" data-pane="aporte" onclick="aba('aporte')">Aporte / Reembolso de sócios</div>
     <div class="fin-tab" data-pane="fixo" onclick="aba('fixo')">Fixo dos consultores</div>
+    <div class="fin-tab" data-pane="meios" onclick="aba('meios')">Meios de pagamento</div>
     <div class="fin-tab" data-pane="dre" onclick="aba('dre')">DRE</div>
   </div>
 
@@ -82,6 +113,7 @@
   <div class="fin-pane active" id="pane-futuras">
     <div class="card">
       <div class="card-header"><h3>Comissões a receber por mês</h3></div>
+      <div class="tbl-wrap">
       <table class="tbl">
         <thead><tr><th>Competência</th><th>Parcelas</th><th>A receber (operadora)</th><th>A repassar (consultor)</th><th>Margem</th></tr></thead>
         <tbody>
@@ -98,6 +130,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     </div>
   </div>
 
@@ -128,20 +161,12 @@
           <option value="Caixa">Caixa da empresa</option>
           <option value="Terceiro">Recurso de terceiro</option>
         </select></div>
-      <div class="campo"><label>Forma de pagamento</label>
-        <select id="c-forma">
-          <option value="">—</option>
-          <option value="pix">Pix</option>
-          <option value="cartao_credito">Cartão de crédito</option>
-          <option value="cartao_debito">Cartão de débito</option>
-          <option value="boleto">Boleto</option>
-          <option value="dinheiro">Dinheiro</option>
-          <option value="transferencia">Transferência</option>
-        </select></div>
+      <div class="campo"><label>Forma de pagamento</label>{{ select_forma_pagamento('c-forma') }}</div>
       <button class="btn" id="btn-add-custo" onclick="addLanc('custo')">Adicionar</button>
     </div>
     <div style="font-size:11px; color:var(--cinza-2); margin:-6px 0 14px;">A competência do lançamento é sempre a do mês de <b>emissão</b> — não do mês que você está vendo agora. Parcelado em N vezes gera N lançamentos, um por mês a partir da emissão.</div>
     <div class="card">
+      <div class="tbl-wrap">
       <table class="tbl">
         <thead><tr><th>Descrição</th><th>Categoria</th><th>Emissão</th><th>Vencimento</th><th>Valor</th><th>Pago por</th><th>Fonte</th><th>Forma</th><th>Status</th><th>Comprovante</th><th></th></tr></thead>
         <tbody id="tbody-custos">
@@ -154,7 +179,11 @@
             <td class="neg td-valor">{{ c.valor|moeda  }}</td>
             <td class="td-pagou">{{ c.pago_por or '—' }}</td>
             <td class="td-fonte">{% if c.fonte_pagamento == 'Caixa' %}Caixa{% elif c.fonte_pagamento == 'Terceiro' %}Terceiro{% else %}—{% endif %}</td>
-            <td class="td-forma">{% if c.forma_pagamento == 'pix' %}Pix{% elif c.forma_pagamento == 'cartao_credito' %}Cartão crédito{% elif c.forma_pagamento == 'cartao_debito' %}Cartão débito{% elif c.forma_pagamento == 'boleto' %}Boleto{% elif c.forma_pagamento == 'dinheiro' %}Dinheiro{% elif c.forma_pagamento == 'transferencia' %}Transferência{% else %}—{% endif %}</td>
+            <td class="td-forma">
+              {% if c.meio_nome %}
+                {{ c.meio_nome }}{% if c.meio_final_cartao %} •••• {{ c.meio_final_cartao }}{% endif %}
+              {% elif c.forma_pagamento == 'pix' %}Pix{% elif c.forma_pagamento == 'cartao_credito' %}Cartão crédito{% elif c.forma_pagamento == 'cartao_debito' %}Cartão débito{% elif c.forma_pagamento == 'boleto' %}Boleto{% elif c.forma_pagamento == 'dinheiro' %}Dinheiro{% elif c.forma_pagamento == 'transferencia' %}Transferência{% else %}—{% endif %}
+            </td>
             <td>
               <span class="badge-status {{ 'badge-pago' if c.status in ('Pago','Conciliado') else 'badge-previsto' }}">{{ c.status }}</span>
               {% if c.status == 'Previsto' %}<button class="btn-ghost" style="color:var(--verde);" onclick="conciliar({{ c.id }})">Marcar pago</button>{% endif %}
@@ -167,13 +196,14 @@
               <button class="btn-ghost" style="color:var(--azul);" onclick="abrirQR({{ c.id }}, '{{ c.descricao|replace("'","") }}')">Celular</button>
             </td>
             <td style="white-space:nowrap;">
-              <button class="btn-ghost" onclick='abrirEdicaoCusto({{ c.id }}, {{ c.descricao|tojson }}, {{ (c.categoria or "")|tojson }}, {{ c.valor }}, {{ (c.data_emissao or c.data_lancamento or "")|tojson }}, {{ (c.data_vencimento or "")|tojson }}, {{ (c.pago_por or "")|tojson }}, {{ (c.fonte_pagamento or "")|tojson }}, {{ (c.forma_pagamento or "")|tojson }})'>Editar</button>
+              <button class="btn-ghost" onclick='abrirEdicaoCusto({{ c.id }}, {{ c.descricao|tojson }}, {{ (c.categoria or "")|tojson }}, {{ c.valor }}, {{ (c.data_emissao or c.data_lancamento or "")|tojson }}, {{ (c.data_vencimento or "")|tojson }}, {{ (c.pago_por or "")|tojson }}, {{ (c.fonte_pagamento or "")|tojson }}, {{ (c.forma_pagamento or "")|tojson }}, {{ (c.meio_pagamento_id or "")|tojson }})'>Editar</button>
               <button class="btn-ghost" style="color:var(--rosa);" onclick="excluir({{ c.id }})">×</button>
             </td>
           </tr>
           {% else %}<tr><td colspan="11" style="color:var(--cinza-2);">Nenhum custo lançado neste mês.</td></tr>{% endfor %}
         </tbody>
       </table>
+      </div>
     </div>
     <input type="file" id="file-comprovante" accept="image/*,.pdf" style="display:none;" onchange="enviarComprovante()">
     <!-- Modal QR: subir comprovante pelo celular -->
@@ -215,16 +245,7 @@
           <div class="campo"><label>Fonte</label>
             <select id="ed-fonte"><option value="">—</option><option value="Caixa">Caixa</option><option value="Terceiro">Terceiro</option></select></div>
         </div>
-        <div class="campo" style="margin-bottom:16px;"><label>Forma de pagamento</label>
-          <select id="ed-forma">
-            <option value="">—</option>
-            <option value="pix">Pix</option>
-            <option value="cartao_credito">Cartão de crédito</option>
-            <option value="cartao_debito">Cartão de débito</option>
-            <option value="boleto">Boleto</option>
-            <option value="dinheiro">Dinheiro</option>
-            <option value="transferencia">Transferência</option>
-          </select></div>
+        <div class="campo" style="margin-bottom:16px;"><label>Forma de pagamento</label>{{ select_forma_pagamento('ed-forma') }}</div>
         <div style="display:flex; gap:10px;">
           <button class="btn" style="flex:1;" onclick="salvarEdicaoCusto()">Salvar</button>
           <button class="btn-outline" onclick="fechar('modal-editar-custo')">Cancelar</button>
@@ -258,6 +279,7 @@
       <button class="btn" onclick="addLancSocio()">Adicionar</button>
     </div>
     <div class="card">
+      <div class="tbl-wrap">
       <table class="tbl">
         <thead><tr><th>Tipo</th><th>Sócio</th><th>Descrição</th><th>Valor</th><th></th></tr></thead>
         <tbody>
@@ -272,6 +294,7 @@
           {% if not aportes and not reembolsos %}<tr><td colspan="5" style="color:var(--cinza-2);">Nenhum aporte ou reembolso neste mês.</td></tr>{% endif %}
         </tbody>
       </table>
+      </div>
     </div>
   </div>
 
@@ -284,6 +307,7 @@
     </div>
     <button class="btn" style="margin-bottom:14px;" onclick="gerarFixo()">Gerar fixos deste mês</button>
     <div class="card">
+      <div class="tbl-wrap">
       <table class="tbl">
         <thead><tr><th>Consultor</th><th>Parcela</th><th>Data</th><th>Valor</th><th>Status</th></tr></thead>
         <tbody>
@@ -296,6 +320,93 @@
           {% else %}<tr><td colspan="5" style="color:var(--cinza-2);">Nenhum fixo gerado. Clique em "Gerar fixos deste mês".</td></tr>{% endfor %}
         </tbody>
       </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- MEIOS DE PAGAMENTO -->
+  <div class="fin-pane" id="pane-meios">
+    <div class="card" style="background:rgba(139,92,246,.05); border-color:rgba(139,92,246,.2); margin-bottom:14px;">
+      <div style="padding:14px 20px; font-size:13px; color:var(--cinza); line-height:1.6;">
+        Cadastre um cartão ou conta específica pra escolher na hora de lançar um custo — os campos de titular, final do cartão e fatura só aparecem pra cartão de crédito/débito, o que não se aplica fica escondido. Pix, boleto, dinheiro e transferência continuam disponíveis direto no lançamento, sem precisar cadastrar nada.
+      </div>
+    </div>
+    <div class="add-row" style="grid-template-columns:1.3fr 1.1fr 1fr 1fr .9fr .9fr .9fr auto;">
+      <div class="campo"><label>Nome do meio</label><input type="text" id="mp-nome" placeholder="Ex: Nubank Guilherme"></div>
+      <div class="campo"><label>Tipo</label>
+        <select id="mp-tipo" onchange="atualizarCamposMeio('mp')">
+          <option value="">—</option>
+          <option value="cartao_credito">Cartão de crédito</option>
+          <option value="cartao_debito">Cartão de débito</option>
+          <option value="pix">Pix</option>
+          <option value="boleto">Boleto</option>
+          <option value="dinheiro">Dinheiro</option>
+          <option value="transferencia">Transferência</option>
+        </select></div>
+      <div class="campo"><label>Banco</label><input type="text" id="mp-banco" placeholder="Ex: Nubank"></div>
+      <div class="campo mp-campo-cartao" id="mp-campo-titular"><label>Titular</label><input type="text" id="mp-titular" placeholder="Nome impresso"></div>
+      <div class="campo mp-campo-cartao" id="mp-campo-final"><label>Final do cartão</label><input type="text" id="mp-final" maxlength="4" placeholder="0000"></div>
+      <div class="campo mp-campo-credito" id="mp-campo-fechamento"><label>Dia fechamento</label><input type="number" id="mp-fechamento" min="1" max="31"></div>
+      <div class="campo mp-campo-credito" id="mp-campo-vencimento"><label>Venc. da fatura</label><input type="number" id="mp-vencimento" min="1" max="31"></div>
+      <button class="btn" onclick="addMeioPagamento()">Adicionar</button>
+    </div>
+    <div class="card">
+      <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr><th>Nome</th><th>Tipo</th><th>Detalhes</th><th>Status</th><th></th></tr></thead>
+        <tbody id="tbody-meios">
+          {% for m in meios_pagamento %}
+          <tr data-id="{{ m.id }}" {% if not m.ativo %}style="opacity:.55;"{% endif %}>
+            <td><strong>{{ m.nome }}</strong></td>
+            <td><span class="meio-tipo-chip">{% if m.tipo == 'cartao_credito' %}Cartão crédito{% elif m.tipo == 'cartao_debito' %}Cartão débito{% elif m.tipo == 'pix' %}Pix{% elif m.tipo == 'boleto' %}Boleto{% elif m.tipo == 'dinheiro' %}Dinheiro{% elif m.tipo == 'transferencia' %}Transferência{% else %}{{ m.tipo }}{% endif %}</span></td>
+            <td class="meio-detalhe">
+              {%- set partes = [] -%}
+              {%- if m.banco %}{{ partes.append(m.banco) or '' }}{% endif -%}
+              {%- if m.titular %}{{ partes.append('titular ' + m.titular) or '' }}{% endif -%}
+              {%- if m.final_cartao %}{{ partes.append('final ' + m.final_cartao) or '' }}{% endif -%}
+              {%- if m.dia_fechamento %}{{ partes.append('fecha dia ' + m.dia_fechamento|string) or '' }}{% endif -%}
+              {%- if m.dia_vencimento_fatura %}{{ partes.append('vence dia ' + m.dia_vencimento_fatura|string) or '' }}{% endif -%}
+              {{ partes|join(' · ') or '—' }}
+            </td>
+            <td><span class="badge-status {{ 'badge-pago' if m.ativo else 'badge-previsto' }}">{{ 'Ativo' if m.ativo else 'Inativo' }}</span></td>
+            <td style="white-space:nowrap;">
+              <button class="btn-ghost" onclick='abrirEdicaoMeio({{ m.id }}, {{ m.nome|tojson }}, {{ m.tipo|tojson }}, {{ (m.banco or "")|tojson }}, {{ (m.titular or "")|tojson }}, {{ (m.final_cartao or "")|tojson }}, {{ m.dia_fechamento or "null" }}, {{ m.dia_vencimento_fatura or "null" }})'>Editar</button>
+              <button class="btn-ghost" onclick="toggleMeio({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
+              <button class="btn-ghost" style="color:var(--rosa);" onclick="excluirMeio({{ m.id }})">×</button>
+            </td>
+          </tr>
+          {% else %}<tr><td colspan="5" style="color:var(--cinza-2);">Nenhum meio de pagamento cadastrado ainda.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+    <!-- Modal edição de meio de pagamento -->
+    <div class="modal-overlay" id="modal-editar-meio">
+      <div style="background:var(--panel); border:1px solid var(--borda); border-radius:16px; padding:24px; width:min(420px, 92vw); margin:auto;">
+        <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:14px;">Editar meio de pagamento</h3>
+        <input type="hidden" id="edm-id">
+        <div class="campo" style="margin-bottom:10px;"><label>Nome</label><input type="text" id="edm-nome"></div>
+        <div class="campo" style="margin-bottom:10px;"><label>Tipo</label>
+          <select id="edm-tipo" onchange="atualizarCamposMeio('edm')">
+            <option value="cartao_credito">Cartão de crédito</option>
+            <option value="cartao_debito">Cartão de débito</option>
+            <option value="pix">Pix</option>
+            <option value="boleto">Boleto</option>
+            <option value="dinheiro">Dinheiro</option>
+            <option value="transferencia">Transferência</option>
+          </select></div>
+        <div class="campo" style="margin-bottom:10px;"><label>Banco</label><input type="text" id="edm-banco"></div>
+        <div class="campo mp-campo-cartao" id="edm-campo-titular" style="margin-bottom:10px;"><label>Titular</label><input type="text" id="edm-titular"></div>
+        <div class="campo mp-campo-cartao" id="edm-campo-final" style="margin-bottom:10px;"><label>Final do cartão</label><input type="text" id="edm-final" maxlength="4"></div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px;">
+          <div class="campo mp-campo-credito" id="edm-campo-fechamento"><label>Dia fechamento</label><input type="number" id="edm-fechamento" min="1" max="31"></div>
+          <div class="campo mp-campo-credito" id="edm-campo-vencimento"><label>Venc. da fatura</label><input type="number" id="edm-vencimento" min="1" max="31"></div>
+        </div>
+        <div style="display:flex; gap:10px;">
+          <button class="btn" style="flex:1;" onclick="salvarEdicaoMeio()">Salvar</button>
+          <button class="btn-outline" onclick="fechar('modal-editar-meio')">Cancelar</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -305,6 +416,7 @@
 {% block scripts %}
 <script>
 const MES = "{{ mes }}";
+const MEIOS_PAGAMENTO = {{ meios_pagamento|tojson }};
 
 function aba(p) {
   document.querySelectorAll('.fin-tab').forEach(t=>t.classList.toggle('active', t.dataset.pane===p));
@@ -317,13 +429,39 @@ document.addEventListener('DOMContentLoaded', () => {
   if (salva && document.getElementById('pane-'+salva)) aba(salva);
 });
 
+/* ── Forma de pagamento: o <select> unificado usa valor "meio:<id>" quando é
+   um cartão/meio cadastrado, ou o valor simples (pix/boleto/...) quando não
+   é. Isso separa os dois campos que o backend espera (forma_pagamento vs
+   meio_pagamento_id) a partir de uma única escolha na tela. ── */
+function lerFormaPagamento(selectId) {
+  const v = val(selectId);
+  if (v && v.indexOf('meio:') === 0) return { forma_pagamento: '', meio_pagamento_id: v.slice(5) };
+  return { forma_pagamento: v, meio_pagamento_id: '' };
+}
+function atualizarPreviewMeio(selectId) {
+  const prev = document.getElementById(selectId + '-preview');
+  if (!prev) return;
+  const v = val(selectId);
+  if (!v || v.indexOf('meio:') !== 0) { prev.textContent = ''; return; }
+  const id = parseInt(v.slice(5), 10);
+  const m = MEIOS_PAGAMENTO.find(x => x.id === id);
+  if (!m) { prev.textContent = ''; return; }
+  const partes = [];
+  if (m.banco) partes.push(m.banco);
+  if (m.titular) partes.push('titular ' + m.titular);
+  if (m.dia_fechamento) partes.push('fecha dia ' + m.dia_fechamento);
+  if (m.dia_vencimento_fatura) partes.push('vence dia ' + m.dia_vencimento_fatura);
+  prev.textContent = partes.join(' · ');
+}
+
 async function addLanc(tipo) {
   let body = {tipo};
   if (tipo==='custo') {
     body.descricao=val('c-desc'); body.categoria=val('c-cat'); body.valor=val('c-val');
     body.data_emissao=val('c-emissao'); body.data_vencimento=val('c-vencimento');
     body.num_parcelas=val('c-parcelas') || 1;
-    body.pago_por=val('c-pagou'); body.fonte_pagamento=val('c-fonte'); body.forma_pagamento=val('c-forma');
+    body.pago_por=val('c-pagou'); body.fonte_pagamento=val('c-fonte');
+    Object.assign(body, lerFormaPagamento('c-forma'));
     if (!body.data_emissao) { toast('Informe a data de emissão', 'err'); return; }
   }
   if (!body.descricao || !body.valor) { toast('Preencha descrição e valor', 'err'); return; }
@@ -350,7 +488,7 @@ async function addLancSocio() {
 }
 
 /* ── Edição de custo ── */
-function abrirEdicaoCusto(id, desc, cat, valor, emissao, vencimento, pagou, fonte, forma) {
+function abrirEdicaoCusto(id, desc, cat, valor, emissao, vencimento, pagou, fonte, forma, meioId) {
   document.getElementById('ed-id').value = id;
   document.getElementById('ed-desc').value = desc;
   document.getElementById('ed-cat').value = cat;
@@ -359,7 +497,8 @@ function abrirEdicaoCusto(id, desc, cat, valor, emissao, vencimento, pagou, font
   document.getElementById('ed-vencimento').value = vencimento;
   document.getElementById('ed-pagou').value = pagou;
   document.getElementById('ed-fonte').value = fonte;
-  document.getElementById('ed-forma').value = forma || '';
+  document.getElementById('ed-forma').value = meioId ? ('meio:' + meioId) : (forma || '');
+  atualizarPreviewMeio('ed-forma');
   document.getElementById('modal-editar-custo').classList.add('open');
 }
 async function salvarEdicaoCusto() {
@@ -367,8 +506,9 @@ async function salvarEdicaoCusto() {
   const body = {
     descricao: val('ed-desc'), categoria: val('ed-cat'), valor: val('ed-val'),
     data_emissao: val('ed-emissao'), data_vencimento: val('ed-vencimento'),
-    pago_por: val('ed-pagou'), fonte_pagamento: val('ed-fonte'), forma_pagamento: val('ed-forma'),
+    pago_por: val('ed-pagou'), fonte_pagamento: val('ed-fonte'),
   };
+  Object.assign(body, lerFormaPagamento('ed-forma'));
   const r = await fetch('/lancamento/' + id + '/editar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const d = await r.json();
   if (d.ok) { toast('Atualizado', 'ok'); localStorage.setItem('fin_tab_ativa', 'custos'); setTimeout(()=>location.reload(), 400); }
@@ -423,6 +563,76 @@ async function gerarFixo() {
   const r = await fetch('/fixo/gerar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mes:MES})});
   const d = await r.json();
   if (d.ok) { toast(`${d.criados} lançamentos de fixo gerados`, 'ok'); localStorage.setItem('fin_tab_ativa', 'fixo'); setTimeout(()=>location.reload(), 700); }
+}
+
+/* ── Meios de pagamento: mostra/esconde titular/final/fatura conforme o tipo
+   — só cartão de crédito/débito tem titular e final; só crédito tem fatura
+   (débito não tem "fechamento"/"vencimento" no Brasil). prefixo é 'mp' no
+   formulário de novo, 'edm' no modal de edição — mesmos IDs de campo. ── */
+function atualizarCamposMeio(prefixo) {
+  const tipo = val(prefixo + '-tipo');
+  const ehCartao = tipo === 'cartao_credito' || tipo === 'cartao_debito';
+  const ehCredito = tipo === 'cartao_credito';
+  const titular = document.getElementById(prefixo + '-campo-titular');
+  const final = document.getElementById(prefixo + '-campo-final');
+  const fechamento = document.getElementById(prefixo + '-campo-fechamento');
+  const vencimento = document.getElementById(prefixo + '-campo-vencimento');
+  if (titular) titular.style.display = ehCartao ? '' : 'none';
+  if (final) final.style.display = ehCartao ? '' : 'none';
+  if (fechamento) fechamento.style.display = ehCredito ? '' : 'none';
+  if (vencimento) vencimento.style.display = ehCredito ? '' : 'none';
+}
+document.addEventListener('DOMContentLoaded', () => atualizarCamposMeio('mp'));
+
+async function addMeioPagamento() {
+  const body = {
+    nome: val('mp-nome'), tipo: val('mp-tipo'), banco: val('mp-banco'),
+    titular: val('mp-titular'), final_cartao: val('mp-final'),
+    dia_fechamento: val('mp-fechamento'), dia_vencimento_fatura: val('mp-vencimento'),
+  };
+  if (!body.nome || !body.tipo) { toast('Preencha nome e tipo', 'err'); return; }
+  const r = await fetch('/meio-pagamento/salvar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const d = await r.json();
+  if (d.ok) { toast('Meio de pagamento cadastrado', 'ok'); localStorage.setItem('fin_tab_ativa', 'meios'); setTimeout(()=>location.reload(), 500); }
+  else toast(d.msg || 'Erro ao cadastrar', 'err');
+}
+
+function abrirEdicaoMeio(id, nome, tipo, banco, titular, final_cartao, fechamento, vencimento) {
+  document.getElementById('edm-id').value = id;
+  document.getElementById('edm-nome').value = nome;
+  document.getElementById('edm-tipo').value = tipo;
+  document.getElementById('edm-banco').value = banco || '';
+  document.getElementById('edm-titular').value = titular || '';
+  document.getElementById('edm-final').value = final_cartao || '';
+  document.getElementById('edm-fechamento').value = fechamento || '';
+  document.getElementById('edm-vencimento').value = vencimento || '';
+  atualizarCamposMeio('edm');
+  document.getElementById('modal-editar-meio').classList.add('open');
+}
+async function salvarEdicaoMeio() {
+  const id = val('edm-id');
+  const body = {
+    nome: val('edm-nome'), tipo: val('edm-tipo'), banco: val('edm-banco'),
+    titular: val('edm-titular'), final_cartao: val('edm-final'),
+    dia_fechamento: val('edm-fechamento'), dia_vencimento_fatura: val('edm-vencimento'),
+  };
+  const r = await fetch('/meio-pagamento/' + id + '/editar', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const d = await r.json();
+  if (d.ok) { toast('Atualizado', 'ok'); localStorage.setItem('fin_tab_ativa', 'meios'); setTimeout(()=>location.reload(), 400); }
+  else toast(d.msg || 'Erro ao salvar', 'err');
+}
+async function toggleMeio(id) {
+  const r = await fetch('/meio-pagamento/' + id + '/toggle', {method:'POST'});
+  const d = await r.json();
+  if (d.ok) { toast(d.ativo ? 'Ativado' : 'Desativado', 'ok'); localStorage.setItem('fin_tab_ativa', 'meios'); setTimeout(()=>location.reload(), 400); }
+  else toast(d.msg || 'Erro', 'err');
+}
+async function excluirMeio(id) {
+  if (!confirm('Excluir este meio de pagamento?')) return;
+  const r = await fetch('/meio-pagamento/' + id + '/excluir', {method:'POST'});
+  const d = await r.json();
+  if (d.ok) { toast('Excluído', 'ok'); localStorage.setItem('fin_tab_ativa', 'meios'); setTimeout(()=>location.reload(), 400); }
+  else toast(d.msg || 'Não foi possível excluir', 'err');
 }
 </script>
 {% endblock %}

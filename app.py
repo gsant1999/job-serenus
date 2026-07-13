@@ -626,6 +626,18 @@ def init_db():
                 status TEXT DEFAULT 'Previsto',
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS meios_pagamento (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL,
+                tipo TEXT NOT NULL,
+                banco TEXT,
+                titular TEXT,
+                final_cartao TEXT,
+                dia_fechamento INTEGER,
+                dia_vencimento_fatura INTEGER,
+                ativo INTEGER DEFAULT 1,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS regras_estorno (
                 id SERIAL PRIMARY KEY,
                 operadora TEXT UNIQUE NOT NULL,
@@ -1113,6 +1125,18 @@ def init_db():
             socio TEXT,
             usuario_id INTEGER,
             status TEXT DEFAULT 'Previsto',
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS meios_pagamento (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            tipo TEXT NOT NULL,
+            banco TEXT,
+            titular TEXT,
+            final_cartao TEXT,
+            dia_fechamento INTEGER,
+            dia_vencimento_fatura INTEGER,
+            ativo INTEGER DEFAULT 1,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS regras_estorno (
@@ -1753,6 +1777,11 @@ def init_db():
         ("lancamentos", "parcela_num", "INTEGER"),
         ("lancamentos", "parcela_total", "INTEGER"),
         ("lancamentos", "forma_pagamento", "TEXT"),
+        # Vínculo opcional com um meio de pagamento cadastrado (cartão específico
+        # com titular/final/fatura etc.) — forma_pagamento continua preenchido
+        # sempre (derivado do tipo do meio quando há vínculo), pra não quebrar
+        # nenhum código que já lê forma_pagamento direto.
+        ("lancamentos", "meio_pagamento_id", "INTEGER"),
         ("fluxo_passos", "conteudo", "TEXT"),
         ("fluxo_envio_log", "modelo_id", "INTEGER"),
         # Telefone do usuário (WhatsApp p/ notificações via WaSpeed e link wa.me nos e-mails)
@@ -6572,6 +6601,113 @@ def gerar_fixo_mes(ano_mes):
     conn.commit(); close_db(conn)
     return criados
 
+
+# ─── Meios de pagamento (cadastro) ──────────────────────────────────────────
+# Registro de cartões/contas específicos usados nos custos da empresa — além
+# do tipo genérico (Pix, Cartão de crédito...), guarda titular/final do
+# cartão/dia de fechamento e vencimento da fatura "quando cabe" (só cartão
+# tem esses campos; Pix/boleto/dinheiro/transferência não precisam).
+_MEIO_TIPOS_CARTAO = ('cartao_credito', 'cartao_debito')
+
+
+@app.route('/meio-pagamento/salvar', methods=['POST'])
+@login_required
+@admin_required
+def meio_pagamento_salvar():
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    tipo = (d.get('tipo') or '').strip()
+    if not nome or not tipo:
+        return jsonify({"ok": False, "msg": "Nome e tipo são obrigatórios"}), 400
+
+    def num_ou_none(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    eh_cartao = tipo in _MEIO_TIPOS_CARTAO
+    conn = db()
+    conn.execute("""INSERT INTO meios_pagamento
+        (nome, tipo, banco, titular, final_cartao, dia_fechamento, dia_vencimento_fatura, ativo)
+        VALUES (?,?,?,?,?,?,?,1)""",
+        (nome, tipo, (d.get('banco') or '').strip() or None,
+         (d.get('titular') or '').strip() or None if eh_cartao else None,
+         (d.get('final_cartao') or '').strip()[:4] or None if eh_cartao else None,
+         num_ou_none(d.get('dia_fechamento')) if tipo == 'cartao_credito' else None,
+         num_ou_none(d.get('dia_vencimento_fatura')) if tipo == 'cartao_credito' else None))
+    mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "id": mid})
+
+
+@app.route('/meio-pagamento/<int:mid>/editar', methods=['POST'])
+@login_required
+@admin_required
+def meio_pagamento_editar(mid):
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    tipo = (d.get('tipo') or '').strip()
+    if not nome or not tipo:
+        return jsonify({"ok": False, "msg": "Nome e tipo são obrigatórios"}), 400
+
+    def num_ou_none(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    eh_cartao = tipo in _MEIO_TIPOS_CARTAO
+    conn = db()
+    if not conn.execute("SELECT id FROM meios_pagamento WHERE id=?", (mid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "msg": "Meio de pagamento não encontrado"}), 404
+    conn.execute("""UPDATE meios_pagamento SET nome=?, tipo=?, banco=?, titular=?, final_cartao=?,
+        dia_fechamento=?, dia_vencimento_fatura=? WHERE id=?""",
+        (nome, tipo, (d.get('banco') or '').strip() or None,
+         (d.get('titular') or '').strip() or None if eh_cartao else None,
+         (d.get('final_cartao') or '').strip()[:4] or None if eh_cartao else None,
+         num_ou_none(d.get('dia_fechamento')) if tipo == 'cartao_credito' else None,
+         num_ou_none(d.get('dia_vencimento_fatura')) if tipo == 'cartao_credito' else None,
+         mid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/meio-pagamento/<int:mid>/toggle', methods=['POST'])
+@login_required
+@admin_required
+def meio_pagamento_toggle(mid):
+    conn = db()
+    m = conn.execute("SELECT ativo FROM meios_pagamento WHERE id=?", (mid,)).fetchone()
+    if not m:
+        close_db(conn); return jsonify({"ok": False, "msg": "Meio de pagamento não encontrado"}), 404
+    novo = 0 if m['ativo'] else 1
+    conn.execute("UPDATE meios_pagamento SET ativo=? WHERE id=?", (novo, mid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "ativo": bool(novo)})
+
+
+@app.route('/meio-pagamento/<int:mid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def meio_pagamento_excluir(mid):
+    """Só exclui se não tiver nenhum lançamento vinculado — meio de pagamento
+    é registro financeiro (quem pagou o quê, com qual cartão), apagar um que
+    já foi usado deixaria lançamentos antigos órfãos e sem explicação. Se já
+    foi usado, o caminho é desativar (toggle), não excluir."""
+    conn = db()
+    if not conn.execute("SELECT id FROM meios_pagamento WHERE id=?", (mid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "msg": "Meio de pagamento não encontrado"}), 404
+    em_uso = conn.execute("SELECT COUNT(*) c FROM lancamentos WHERE meio_pagamento_id=?", (mid,)).fetchone()['c']
+    if em_uso:
+        close_db(conn)
+        return jsonify({"ok": False, "msg": f"Esse meio já foi usado em {em_uso} lançamento(s) — desative em vez de excluir, pra não perder o histórico."}), 400
+    conn.execute("DELETE FROM meios_pagamento WHERE id=?", (mid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
 @app.route('/financeiro')
 @login_required
 @admin_required
@@ -6583,12 +6719,21 @@ def financeiro():
             COALESCE(SUM(valor),0) consultor, COALESCE(SUM(valor_corretora),0) corretora, COUNT(*) qtd
         FROM parcelas WHERE status NOT IN ('Pago ao corretor') AND competencia IS NOT NULL
         GROUP BY competencia ORDER BY competencia""").fetchall()
-    # Lançamentos do mês
-    custos = conn.execute("SELECT * FROM lancamentos WHERE tipo='custo' AND data_competencia=? ORDER BY id DESC", (mes,)).fetchall()
+    # Lançamentos do mês (custos vêm com o meio de pagamento vinculado, se
+    # houver, pra mostrar "Nubank •••• 4521" em vez de só "Cartão crédito").
+    custos = conn.execute("""SELECT l.*, mp.nome AS meio_nome, mp.tipo AS meio_tipo, mp.banco AS meio_banco,
+            mp.titular AS meio_titular, mp.final_cartao AS meio_final_cartao,
+            mp.dia_vencimento_fatura AS meio_dia_vencimento
+        FROM lancamentos l LEFT JOIN meios_pagamento mp ON mp.id = l.meio_pagamento_id
+        WHERE l.tipo='custo' AND l.data_competencia=? ORDER BY l.id DESC""", (mes,)).fetchall()
     aportes = conn.execute("SELECT * FROM lancamentos WHERE tipo='aporte' AND data_competencia=? ORDER BY id DESC", (mes,)).fetchall()
     reembolsos = conn.execute("SELECT * FROM lancamentos WHERE tipo='reembolso' AND data_competencia=? ORDER BY id DESC", (mes,)).fetchall()
     fixos = conn.execute("""SELECT l.*, u.nome consultor_nome FROM lancamentos l
         LEFT JOIN usuarios u ON u.id=l.usuario_id WHERE l.tipo='fixo' AND l.data_competencia=? ORDER BY l.data_lancamento""", (mes,)).fetchall()
+    # dict (não Row) — precisa ir serializado como JSON pro JS do template
+    # montar o preview do meio selecionado sem chamada extra ao servidor.
+    meios_pagamento = [dict(m) for m in conn.execute(
+        "SELECT * FROM meios_pagamento ORDER BY ativo DESC, tipo, nome").fetchall()]
     # Totais do mês
     receber_mes = conn.execute("""SELECT COALESCE(SUM(valor_corretora),0) v FROM parcelas
         WHERE competencia=? AND status NOT IN ('Pago ao corretor')""", (mes,)).fetchone()['v']
@@ -6640,6 +6785,7 @@ def financeiro():
     close_db(conn)
     return render_template('financeiro.html', mes=mes, futuras=futuras,
         custos=custos, aportes=aportes, fixos=fixos, reembolsos=reembolsos,
+        meios_pagamento=meios_pagamento,
         receber_mes=receber_mes, pagar_consultor=pagar_consultor,
         total_custos=total_custos, total_custos_puro=total_custos_puro, total_fixos=total_fixos,
         total_aportes=total_aportes, total_reembolsos=total_reembolsos,
@@ -6675,6 +6821,22 @@ def lancamento_salvar():
     competencia_base = data_emissao[:7] if len(data_emissao) >= 7 else (d.get('data_competencia') or competencia_atual())
 
     conn = db()
+    # Se veio um meio de pagamento cadastrado, a forma de pagamento é sempre
+    # derivada do TIPO dele (não confia no que veio solto do front) — garante
+    # que "Nubank final 4521" sempre aparece corretamente como cartão de
+    # crédito, mesmo que o forma_pagamento enviado esteja desatualizado.
+    forma_pagamento = (d.get('forma_pagamento') or '').strip()
+    try:
+        meio_pagamento_id = int(d.get('meio_pagamento_id')) if d.get('meio_pagamento_id') else None
+    except (TypeError, ValueError):
+        meio_pagamento_id = None
+    if meio_pagamento_id:
+        meio = conn.execute("SELECT tipo FROM meios_pagamento WHERE id=?", (meio_pagamento_id,)).fetchone()
+        if meio:
+            forma_pagamento = meio['tipo']
+        else:
+            meio_pagamento_id = None
+
     grupo = secrets.token_hex(6) if num_parcelas > 1 else None
     valor_parcela = round(valor_total / num_parcelas, 2)
     ids = []
@@ -6685,13 +6847,13 @@ def lancamento_salvar():
         desc_i = f"{descricao} ({i+1}/{num_parcelas})" if num_parcelas > 1 else descricao
         conn.execute("""INSERT INTO lancamentos
             (tipo,categoria,descricao,valor,data_competencia,data_lancamento,data_emissao,data_vencimento,
-             socio,recorrente,status,pago_por,fonte_pagamento,forma_pagamento,grupo_parcela,parcela_num,parcela_total)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             socio,recorrente,status,pago_por,fonte_pagamento,forma_pagamento,meio_pagamento_id,grupo_parcela,parcela_num,parcela_total)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (tipo, d.get('categoria', ''), desc_i, valor_i, competencia_i,
              data_emissao or competencia_i, data_emissao or None, data_vencimento or None,
              d.get('socio', ''), 1 if d.get('recorrente') else 0, 'Previsto',
              (d.get('pago_por') or '').strip(), (d.get('fonte_pagamento') or '').strip(),
-             (d.get('forma_pagamento') or '').strip(),
+             forma_pagamento, meio_pagamento_id,
              grupo, i + 1 if num_parcelas > 1 else None, num_parcelas if num_parcelas > 1 else None))
         lid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
@@ -6722,12 +6884,25 @@ def lancamento_editar(lid):
     data_emissao = (campo('data_emissao') or '').strip()
     competencia = data_emissao[:7] if len(data_emissao) >= 7 else (campo('data_competencia') or atual['data_competencia'])
 
+    meio_raw = campo('meio_pagamento_id', atual['meio_pagamento_id'])
+    try:
+        meio_pagamento_id = int(meio_raw) if meio_raw else None
+    except (TypeError, ValueError):
+        meio_pagamento_id = None
+    forma_pagamento = (campo('forma_pagamento') or '').strip()
+    if meio_pagamento_id:
+        meio = conn.execute("SELECT tipo FROM meios_pagamento WHERE id=?", (meio_pagamento_id,)).fetchone()
+        if meio:
+            forma_pagamento = meio['tipo']
+        else:
+            meio_pagamento_id = None
+
     conn.execute("""UPDATE lancamentos SET descricao=?, categoria=?, valor=?, data_emissao=?, data_vencimento=?,
-        data_competencia=?, socio=?, pago_por=?, fonte_pagamento=?, forma_pagamento=?
+        data_competencia=?, socio=?, pago_por=?, fonte_pagamento=?, forma_pagamento=?, meio_pagamento_id=?
         WHERE id=?""",
         (campo('descricao'), campo('categoria'), valor, data_emissao or None, (campo('data_vencimento') or '').strip() or None,
          competencia, campo('socio'), (campo('pago_por') or '').strip(), (campo('fonte_pagamento') or '').strip(),
-         (campo('forma_pagamento') or '').strip(), lid))
+         forma_pagamento, meio_pagamento_id, lid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
