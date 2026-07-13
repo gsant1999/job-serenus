@@ -524,7 +524,7 @@ async function enviar() {
   try {
     const res = await fetch('/salvar-proposta', {method:'POST', body:new FormData(form)});
     const data = await res.json();
-    if (data.ok) { toast('Proposta salva','ok'); setTimeout(()=>location.href='/propostas',900); }
+    if (data.ok) { toast('Proposta salva','ok'); setTimeout(()=>location.href = data.id ? ('/proposta/'+data.id) : '/propostas', 900); }
     else { toast('Erro: '+data.msg,'err'); btn.textContent='Salvar proposta'; btn.disabled=false; }
   } catch(e) { toast('Erro de conexão','err'); btn.textContent='Salvar proposta'; btn.disabled=false; }
 }

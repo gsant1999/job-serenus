@@ -1371,5 +1371,12 @@ async function executarTransferencia(){
 }
 
 renderFiltrosSalvos();
+
+// Deep-link: sino/WhatsApp/agenda montam /crm?lead=<id> pra abrir a ficha
+// direto — abrirFicha já busca via fetch (funciona mesmo se o card não
+// estiver na coluna/página renderizada agora) e abre o modal sozinha.
+{% if lead_focus %}
+abrirFicha({{ lead_focus }});
+{% endif %}
 </script>
 {% endblock %}

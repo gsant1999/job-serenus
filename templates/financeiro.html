@@ -425,6 +425,20 @@ function aba(p) {
 }
 // Restaura a aba em que o usuário estava antes de lançar (senão sempre volta pra "Comissões futuras")
 document.addEventListener('DOMContentLoaded', () => {
+  const LANCAMENTO_FOCUS = {{ (lancamento_focus or '')|tojson }};
+  if (LANCAMENTO_FOCUS) {
+    // Deep-link da notificação "comprovante recebido" — sempre vai pra Custos
+    // (é a única aba que guarda comprovante), ignora a aba salva no localStorage.
+    aba('custos');
+    const linha = document.querySelector('#tbody-custos tr[data-id="' + LANCAMENTO_FOCUS + '"]');
+    if (linha) {
+      linha.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      linha.style.outline = '2px solid var(--azul)';
+      linha.style.outlineOffset = '-2px';
+      setTimeout(() => { linha.style.outline = ''; }, 3000);
+    }
+    return;
+  }
   const salva = localStorage.getItem('fin_tab_ativa');
   if (salva && document.getElementById('pane-'+salva)) aba(salva);
 });

@@ -4648,7 +4648,9 @@ def salvar_proposta():
                               '/proposta/' + str(proposta_id))
         except Exception:
             pass
-        return jsonify({"ok": True})
+        # id vai na resposta pra o front abrir a proposta recém-criada em vez
+        # de cair na listagem genérica (o id existia no backend, só não saía daqui).
+        return jsonify({"ok": True, "id": proposta_id})
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
@@ -6713,6 +6715,12 @@ def meio_pagamento_excluir(mid):
 @admin_required
 def financeiro():
     mes = request.args.get('mes', competencia_atual())
+    # Deep-link: notificação de "comprovante recebido" aponta pra cá com o
+    # lançamento específico — antes caía sempre na aba/mês genérico.
+    try:
+        lancamento_focus = int(request.args.get('lancamento', '') or 0) or None
+    except (TypeError, ValueError):
+        lancamento_focus = None
     conn = db()
     # Comissões a receber (futuras) agrupadas por competência
     futuras = conn.execute("""SELECT competencia,
@@ -6789,7 +6797,7 @@ def financeiro():
         receber_mes=receber_mes, pagar_consultor=pagar_consultor,
         total_custos=total_custos, total_custos_puro=total_custos_puro, total_fixos=total_fixos,
         total_aportes=total_aportes, total_reembolsos=total_reembolsos,
-        saldo=saldo, dre=dre, saldo_socios=saldo_socios_lista)
+        saldo=saldo, dre=dre, saldo_socios=saldo_socios_lista, lancamento_focus=lancamento_focus)
 
 def _proximo_mes(competencia, n):
     """Soma n meses a uma competência 'YYYY-MM'. Retorna 'YYYY-MM'."""
@@ -6996,8 +7004,13 @@ def upload_comprovante_publico(token):
         if ok:
             enviado = True
             try:
+                # Com mes+lancamento: cai direto na competência certa (senão o
+                # filtro default é o mês corrente, e o lançamento podia nem
+                # aparecer) e a linha já vem destacada — não só "/financeiro" cru.
+                comp = ld.get('data_competencia') or ''
+                link_fin = f"/financeiro?lancamento={ld['id']}" + (f"&mes={comp}" if comp else '')
                 _notificar_admins('sistema', 'Comprovante recebido',
-                                  f"Custo \"{ld.get('descricao') or ''}\" ({_moeda(ld.get('valor'))})", '/financeiro')
+                                  f"Custo \"{ld.get('descricao') or ''}\" ({_moeda(ld.get('valor'))})", link_fin)
             except Exception:
                 pass
         else:
@@ -10289,6 +10302,16 @@ def crm():
     f_busca     = request.args.get('q', '').strip()
     f_externo   = request.args.get('externo', '').strip()  # consultor externo (não cadastrado)
     f_sub_status = request.args.get('sub_status', '').strip()
+    # Deep-link pra abrir uma ficha específica ao carregar a página (notificação
+    # do sino, WhatsApp, agenda, etc. montam /crm?lead=<id> — antes esse parâmetro
+    # era lido em vários lugares mas NUNCA consumido aqui nem no JS, então todo
+    # link "específico" caía no quadro geral). Só o id (int), nunca entra no
+    # WHERE do kanban — o JS busca a ficha via fetch('/crm/lead/<id>') direto,
+    # funciona mesmo se o card não estiver renderizado na coluna/página atual.
+    try:
+        f_lead = int(request.args.get('lead', '') or 0) or None
+    except (TypeError, ValueError):
+        f_lead = None
 
     # Lista de consultores para o filtro (admin vê todos os usuários ativos)
     responsaveis = []
@@ -10404,7 +10427,7 @@ def crm():
                            kanban_valor=kanban_valor, cards_por_coluna=CARDS_POR_COLUNA,
                            etapas=etapas, total=total, responsaveis=responsaveis, eh_admin=eh_admin,
                            filtros=filtros_ativos, consultores_externos=consultores_externos,
-                           sub_status_opcoes=sub_status_opcoes)
+                           sub_status_opcoes=sub_status_opcoes, lead_focus=f_lead)
 
 
 @app.route('/crm/lead/novo', methods=['POST'])
@@ -12650,7 +12673,7 @@ def email_pixel(token):
             close_db(conn)
             if lead:
                 _notificar(dict(lead).get('responsavel_id'), 'lead', 'E-mail aberto',
-                           f"{dict(lead).get('nome')} abriu o e-mail de contato", '/crm')
+                           f"{dict(lead).get('nome')} abriu o e-mail de contato", f"/crm?lead={rd['lead_id']}")
         else:
             close_db(conn)
     except Exception:
@@ -12689,7 +12712,7 @@ def email_click(token):
     if lead and not rd.get('clicado'):
         try:
             _notificar(dict(lead).get('responsavel_id'), 'lead', 'Cliente clicou no e-mail',
-                       f"{dict(lead).get('nome')} clicou para chamar no WhatsApp", '/crm')
+                       f"{dict(lead).get('nome')} clicou para chamar no WhatsApp", f"/crm?lead={rd['lead_id']}")
         except Exception:
             pass
     nome_lead = (dict(lead).get('nome') if lead else '') or ''
@@ -12768,7 +12791,7 @@ def _enviar_lembretes_agenda():
                     partes.append(f"Detalhes: {d.get('descricao')}")
                 partes.append(f"\nJá vi e vou executar: {_SITE_BASE_URL}/a/{token}")
                 _notificar(d.get('usuario_id'), 'lead', f"Lembrete: {d.get('assunto')}",
-                           '\n'.join(partes), '/crm/agenda')
+                           '\n'.join(partes), f"/crm?lead={d['lead_id']}")
             except Exception as e:
                 app.logger.warning(f"[AGENDA] falha ao notificar lembrete id={d['id']}: {e}")
         close_db(conn)
