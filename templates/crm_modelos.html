@@ -106,8 +106,13 @@
 
 <div class="secao-titulo">
   <span>Modelos de WhatsApp</span>
-  <button class="btn-azul" style="padding:7px 16px; font-size:12px;" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">+ Novo modelo de WhatsApp</button>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup do ZapVoice</button>
+    <input type="file" id="zv-arquivo" accept=".json" style="display:none" onchange="importarZapVoice(this)">
+    <button class="btn-azul" style="padding:7px 16px; font-size:12px;" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">+ Novo modelo de WhatsApp</button>
+  </div>
 </div>
+<div id="zv-status" style="display:none; max-width:1100px; margin:0 0 14px; font-size:13px; color:var(--cinza); background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;"></div>
 
 {% if stats_wpp and stats_wpp.total %}
 <div class="wa-stats">
@@ -274,6 +279,30 @@ function salvarModeloSms(){
       if (d.ok) location.reload();
       else alert(d.erro || 'Erro ao salvar modelo');
     });
+}
+
+function importarZapVoice(inp){
+  var f = inp.files[0];
+  if (!f) return;
+  var st = document.getElementById('zv-status');
+  st.style.display = 'block';
+  var mb = (f.size/1024/1024).toFixed(0);
+  st.innerHTML = 'Importando <b>' + f.name + '</b> (' + mb + ' MB)… arquivos grandes podem levar alguns minutos. Não feche a página.';
+  var fd = new FormData();
+  fd.append('arquivo', f);
+  fetch('/crm/modelos/importar-zapvoice', {method:'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { st.innerHTML = 'Erro: ' + (d.erro || 'falha na importação'); return; }
+      var c = d.contagem;
+      st.innerHTML = 'Importado: <b>' + c.texto + '</b> textos, <b>' + c.audio + '</b> áudios, <b>' +
+        c.imagem + '</b> imagens, <b>' + c.documento + '</b> documentos' +
+        (c.pulados ? ' · ' + c.pulados + ' já existiam' : '') +
+        (c.erros ? ' · ' + c.erros + ' com erro' : '') + '. Recarregando…';
+      setTimeout(function(){ location.reload(); }, 1500);
+    })
+    .catch(function(e){ st.innerHTML = 'Erro: ' + e.message + ' (se o arquivo for muito grande, pode ter estourado o limite de upload).'; });
+  inp.value = '';
 }
 
 function salvarModeloWhatsapp(){

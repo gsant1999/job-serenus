@@ -15254,6 +15254,107 @@ def crm_modelo_whatsapp_novo():
     return jsonify({"ok": True, "id": mid})
 
 
+def _zv_categoria_do_nome(nome):
+    """Deriva categoria do nome no padrão ZapVoice ("... - GNDI" -> "GNDI")."""
+    if nome and ' - ' in nome:
+        cand = nome.rsplit(' - ', 1)[-1].strip()
+        if 1 <= len(cand) <= 40:
+            return cand
+    return None
+
+
+@app.route('/crm/modelos/importar-zapvoice', methods=['POST'])
+@login_required
+@admin_required
+def crm_importar_zapvoice():
+    """Importa um backup do ZapVoice (JSON) pra biblioteca de WhatsApp do JOB.
+    Formato: arrays de metadados (audios/messages/medias/docs, cada item com
+    id/name/isFavorite) + objectsList (id -> data: texto puro ou data:URI
+    base64). Streaming com ijson pra aguentar backups grandes sem estourar a
+    memória. Dedup por nome (re-subir não duplica). Mídia é salva via
+    upload_arquivo_r2 e importada como modelo com midia_arquivo/midia_tipo —
+    o envio de mídia em si é fase à parte, mas o item já fica na biblioteca."""
+    import ijson, io as _io, base64 as _b64, tempfile as _tmp
+    f = request.files.get('arquivo')
+    if not f or not f.filename:
+        return jsonify({"ok": False, "erro": "Envie o arquivo .json do backup"}), 400
+    tmp = _tmp.NamedTemporaryFile(delete=False, suffix='.json')
+    try:
+        f.save(tmp.name)
+        tmp.close()
+        # Passo 1: metadados (id -> nome, favorito). Pequeno, cabe na memória.
+        meta = {}
+        for kind in ('audios', 'messages', 'medias', 'docs'):
+            with open(tmp.name, 'rb') as fh:
+                for it in ijson.items(fh, f'{kind}.item'):
+                    if it.get('id'):
+                        meta[it['id']] = {'nome': (it.get('name') or 'Sem nome').strip()[:200],
+                                          'fav': 1 if it.get('isFavorite') else 0}
+        conn = db()
+        existentes = {r['nome'] for r in conn.execute(
+            "SELECT nome FROM modelos_conteudo WHERE tipo='whatsapp'").fetchall()}
+        criado_por = session.get('user_id')
+        contagem = {'texto': 0, 'audio': 0, 'imagem': 0, 'documento': 0, 'video': 0, 'pulados': 0, 'erros': 0}
+        # Passo 2: objectsList, um item por vez (blob grande decodificado e
+        # descartado na hora — memória fica limitada).
+        with open(tmp.name, 'rb') as fh:
+            for obj in ijson.items(fh, 'objectsList.item'):
+                oid = obj.get('id')
+                m = meta.get(oid)
+                if not m:
+                    continue
+                nome = m['nome']
+                if nome in existentes:
+                    contagem['pulados'] += 1
+                    continue
+                cat = _zv_categoria_do_nome(nome)
+                data = obj.get('data')
+                try:
+                    if isinstance(data, str) and data.startswith('data:'):
+                        header, b64data = data.split(',', 1)
+                        mime = header[5:header.find(';')] if ';' in header else 'application/octet-stream'
+                        if mime.startswith('audio'):
+                            midia_tipo, ext = 'audio', ('.ogg' if 'ogg' in mime else ('.mp3' if 'mpeg' in mime else '.m4a'))
+                        elif mime.startswith('image'):
+                            midia_tipo, ext = 'imagem', ('.png' if 'png' in mime else '.jpg')
+                        elif 'pdf' in mime:
+                            midia_tipo, ext = 'documento', '.pdf'
+                        elif mime.startswith('video'):
+                            midia_tipo, ext = 'video', '.mp4'
+                        else:
+                            midia_tipo, ext = 'documento', '.bin'
+                        raw = _b64.b64decode(b64data)
+                        nome_arq = f"MODELO_WPP_ZV_{_sanitizar_filename(oid)}{ext}"
+                        upload_arquivo_r2(_io.BytesIO(raw), f"modelos/{nome_arq}")
+                        conn.execute("""INSERT INTO modelos_conteudo
+                            (tipo, nome, corpo_texto, ativo, criado_por, midia_arquivo, midia_tipo, categoria, favorito)
+                            VALUES ('whatsapp',?,?,1,?,?,?,?,?)""",
+                            (nome, nome, criado_por, nome_arq, midia_tipo, cat, m['fav']))
+                        contagem[midia_tipo] += 1
+                    else:
+                        texto = (data or '').strip()[:4000]
+                        if not texto:
+                            contagem['pulados'] += 1
+                            continue
+                        conn.execute("""INSERT INTO modelos_conteudo
+                            (tipo, nome, corpo_texto, ativo, criado_por, categoria, favorito)
+                            VALUES ('whatsapp',?,?,1,?,?,?)""",
+                            (nome, texto, criado_por, cat, m['fav']))
+                        contagem['texto'] += 1
+                    existentes.add(nome)
+                    conn.commit()
+                except Exception as e:
+                    contagem['erros'] += 1
+                    app.logger.warning(f"[IMPORT-ZV] falhou item {oid}: {e}")
+        close_db(conn)
+        return jsonify({"ok": True, "contagem": contagem})
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+
+
 @app.route('/crm/modelos/<int:mid>/favorito', methods=['POST'])
 @login_required
 @admin_required
