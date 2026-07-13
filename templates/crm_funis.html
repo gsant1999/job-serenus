@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+{% block title %}Funis de WhatsApp{% endblock %}
+
+{% block head %}
+<style>
+  .fn-wrap { display:grid; grid-template-columns:340px 1fr; gap:18px; align-items:start; max-width:1180px; }
+  @media (max-width:900px){ .fn-wrap { grid-template-columns:1fr; } }
+
+  /* Coluna esquerda: lista de funis */
+  .fn-col { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:14px; }
+  .fn-col-topo { display:flex; gap:8px; margin-bottom:12px; }
+  .fn-busca { flex:1; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:8px 11px; font-size:12.5px; color:var(--texto); }
+  .fn-busca:focus { outline:none; border-color:var(--azul); }
+  .fn-lista { display:flex; flex-direction:column; gap:8px; max-height:70vh; overflow-y:auto; }
+  .fn-item { text-align:left; width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:11px 12px; cursor:pointer; transition:.12s; position:relative; }
+  .fn-item:hover { border-color:var(--borda-2); }
+  .fn-item.sel { border-color:transparent; }
+  .fn-item.sel::before { content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:0 3px 3px 0; background:var(--grad-frio); }
+  .fn-item-nome { font-size:13px; font-weight:700; color:var(--texto); padding-left:6px; display:flex; align-items:center; gap:6px; }
+  .fn-item-cat { font-size:10.5px; color:var(--cinza-2); padding-left:6px; margin-top:2px; }
+  .fn-item-meta { display:flex; gap:10px; padding-left:6px; margin-top:7px; font-size:10.5px; color:var(--cinza); font-variant-numeric:tabular-nums; }
+  .fn-item-meta span { display:inline-flex; align-items:center; gap:3px; }
+  .fn-item-meta svg { width:12px; height:12px; opacity:.75; }
+  .fn-star { position:absolute; top:9px; right:10px; font-size:14px; color:var(--cinza-2); }
+  .fn-star.on { color:#f5c518; }
+  .fn-vazio { text-align:center; color:var(--cinza-2); font-size:12px; padding:24px 8px; }
+
+  /* Coluna direita: builder */
+  .fn-builder { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:0; overflow:hidden; }
+  .fn-b-head { display:flex; align-items:center; gap:10px; padding:16px 18px; border-bottom:1px solid var(--borda); }
+  .fn-b-nome { font-family:'Sora',sans-serif; font-size:16px; font-weight:700; color:var(--texto); flex:1; }
+  .fn-b-cat { font-size:11px; color:var(--cinza); font-weight:600; }
+  .fn-b-acao { background:var(--panel-2); border:1px solid var(--borda); color:var(--cinza); border-radius:8px; width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
+  .fn-b-acao:hover { color:var(--texto); border-color:var(--borda-2); }
+  .fn-b-acao svg { width:16px; height:16px; }
+  .fn-b-acao.perigo:hover { color:#f43f5e; border-color:rgba(244,63,94,.4); }
+  .fn-b-acao.star.on { color:#f5c518; }
+
+  .fn-passos { padding:14px 18px; display:flex; flex-direction:column; gap:10px; }
+  .fn-passo { display:flex; align-items:center; gap:12px; background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:11px 13px; }
+  .fn-passo-ord { width:22px; height:22px; flex-shrink:0; border-radius:50%; background:var(--panel-3); color:var(--cinza); font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; font-variant-numeric:tabular-nums; }
+  .fn-passo-ico { width:34px; height:34px; flex-shrink:0; border-radius:9px; display:flex; align-items:center; justify-content:center; }
+  .fn-passo-ico svg { width:17px; height:17px; }
+  .fn-passo-ico.t-texto { background:rgba(59,130,246,.14); color:var(--azul); }
+  .fn-passo-ico.t-audio { background:rgba(139,92,246,.16); color:var(--roxo); }
+  .fn-passo-ico.t-imagem { background:var(--verde-soft); color:var(--verde); }
+  .fn-passo-ico.t-documento { background:rgba(244,63,94,.14); color:#f43f5e; }
+  .fn-passo-corpo { flex:1; min-width:0; }
+  .fn-passo-nome { font-size:13px; font-weight:700; color:var(--texto); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fn-passo-quando { font-size:11px; color:var(--cinza); margin-top:2px; display:flex; align-items:center; gap:5px; }
+  .fn-passo-quando svg { width:12px; height:12px; opacity:.7; }
+  .fn-delay-inp { width:60px; background:var(--panel-3); border:1px solid var(--borda); border-radius:6px; padding:3px 6px; font-size:11px; color:var(--texto); text-align:center; font-variant-numeric:tabular-nums; }
+  .fn-passo-acoes { display:flex; gap:4px; flex-shrink:0; }
+  .fn-mini { background:none; border:none; color:var(--cinza-2); cursor:pointer; width:26px; height:26px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; }
+  .fn-mini:hover { color:var(--texto); background:var(--panel-3); }
+  .fn-mini:disabled { opacity:.3; cursor:default; }
+  .fn-mini.perigo:hover { color:#f43f5e; }
+  .fn-mini svg { width:15px; height:15px; }
+
+  .fn-add { margin:2px 18px 18px; }
+  .fn-add-btn { width:100%; background:var(--panel-2); border:1px dashed var(--borda-2); color:var(--cinza); border-radius:11px; padding:12px; font-size:13px; font-weight:600; cursor:pointer; }
+  .fn-add-btn:hover { color:var(--texto); border-color:var(--azul); }
+  .fn-picker { background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:14px; margin:2px 18px 18px; }
+  .fn-picker label { display:block; font-size:10.5px; font-weight:700; color:var(--cinza); text-transform:uppercase; letter-spacing:.4px; margin:0 0 5px; }
+  .fn-picker select, .fn-picker input { width:100%; box-sizing:border-box; background:var(--panel-3); border:1px solid var(--borda); border-radius:8px; padding:9px 11px; font-size:12.5px; color:var(--texto); margin-bottom:11px; font-family:inherit; }
+  .fn-picker-linha { display:flex; gap:10px; }
+  .fn-picker-linha > div { flex:1; }
+  .fn-picker-acoes { display:flex; justify-content:flex-end; gap:8px; }
+
+  .fn-empty { text-align:center; color:var(--cinza-2); padding:60px 20px; }
+  .fn-empty svg { width:44px; height:44px; opacity:.35; margin-bottom:12px; }
+  .fn-empty p { font-size:13px; margin:0; }
+  .fn-total { font-size:11px; color:var(--cinza-2); padding:0 18px 14px; }
+
+  .btn-azul { background:var(--azul); color:#fff; border:none; padding:9px 18px; border-radius:8px; font-size:12.5px; font-weight:600; cursor:pointer; }
+  .btn-cinza { background:var(--panel-3); color:var(--cinza); border:1px solid var(--borda); padding:9px 16px; border-radius:8px; font-size:12.5px; font-weight:600; cursor:pointer; }
+
+  .modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; align-items:center; justify-content:center; }
+  .modal-bg.aberto { display:flex; }
+  .modal-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:22px; width:440px; max-width:92vw; }
+  .modal-card h3 { margin:0 0 14px; font-size:15px; color:var(--texto); }
+  .modal-card input { width:100%; box-sizing:border-box; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:10px 12px; font-size:13px; color:var(--texto); margin-bottom:10px; font-family:inherit; }
+  .modal-acoes { display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Funis de WhatsApp</h1>
+    <div class="sub">Monte uma sequência de mensagens, áudios, imagens e PDFs — cada passo com um intervalo. Na extensão, o consultor dispara o funil inteiro na conversa aberta, um passo após o outro</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="location.href='/crm/modelos'">Biblioteca de modelos</button>
+    <button class="btn-azul" onclick="abrirNovoFunil()">+ Novo funil</button>
+  </div>
+</div>
+
+<div class="fn-wrap">
+  <!-- Lista de funis -->
+  <div class="fn-col">
+    <div class="fn-col-topo">
+      <input class="fn-busca" id="fn-busca" placeholder="Buscar funil..." oninput="filtrarFunis()">
+    </div>
+    <div class="fn-lista" id="fn-lista"></div>
+  </div>
+
+  <!-- Builder -->
+  <div class="fn-builder" id="fn-builder"></div>
+</div>
+
+<!-- Modal novo funil -->
+<div class="modal-bg" id="modal-novo">
+  <div class="modal-card">
+    <h3 id="modal-novo-titulo">Novo funil</h3>
+    <input id="nf-nome" placeholder="Nome do funil (ex: Abertura PME - Campinas)">
+    <input id="nf-cat" placeholder="Categoria (opcional — ex: PME, GNDI, Renovação)">
+    <div class="modal-acoes">
+      <button class="btn-cinza" onclick="document.getElementById('modal-novo').classList.remove('aberto')">Cancelar</button>
+      <button class="btn-azul" id="nf-salvar" onclick="salvarNovoFunil()">Criar funil</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const FUNIS = {{ funis|tojson }};
+const MODELOS = {{ modelos|tojson }};
+
+const ICO = {
+  texto: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  audio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>',
+  imagem: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
+  video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>',
+  documento: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+  relogio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>',
+  lixo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+  lapis: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>',
+  cima: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>',
+  baixo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
+  funil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>',
+};
+
+let selecionado = null;
+
+function tipoDePasso(p){ return (p.tipo && ICO[p.tipo]) ? p.tipo : 'texto'; }
+function fmtDelay(s){ s = s||0; if(s<=0) return 'imediatamente'; const m=Math.floor(s/60), r=s%60; if(m&&r) return `após ${m}min ${r}s`; if(m) return `após ${m}min`; return `após ${r}s`; }
+function escapar(t){ const d=document.createElement('div'); d.textContent=t==null?'':String(t); return d.innerHTML; }
+
+function contaTipos(f){
+  const c={audio:0,imagem:0,texto:0,documento:0,video:0};
+  (f.passos||[]).forEach(p=>{ c[tipoDePasso(p)]=(c[tipoDePasso(p)]||0)+1; });
+  return c;
+}
+
+function renderLista(){
+  const busca=(document.getElementById('fn-busca').value||'').toLowerCase();
+  const lista=document.getElementById('fn-lista');
+  const vis=FUNIS.filter(f=> !busca || (f.nome||'').toLowerCase().includes(busca) || (f.categoria||'').toLowerCase().includes(busca));
+  if(!vis.length){ lista.innerHTML='<div class="fn-vazio">'+(FUNIS.length?'Nenhum funil bate com a busca.':'Nenhum funil ainda. Crie o primeiro.')+'</div>'; return; }
+  lista.innerHTML = vis.map(f=>{
+    const c=contaTipos(f);
+    const metas=[];
+    if(c.audio) metas.push(`<span>${ICO.audio}${c.audio}</span>`);
+    if(c.imagem) metas.push(`<span>${ICO.imagem}${c.imagem}</span>`);
+    if(c.texto) metas.push(`<span>${ICO.texto}${c.texto}</span>`);
+    if(c.documento) metas.push(`<span>${ICO.documento}${c.documento}</span>`);
+    return `<button class="fn-item ${selecionado===f.id?'sel':''}" onclick="selecionar(${f.id})">
+      <span class="fn-star ${f.favorito?'on':''}">${f.favorito?'★':'☆'}</span>
+      <div class="fn-item-nome">${ICO.funil}${escapar(f.nome)}</div>
+      ${f.categoria?`<div class="fn-item-cat">${escapar(f.categoria)}</div>`:''}
+      <div class="fn-item-meta">${metas.join('')||'<span style="opacity:.6">sem passos</span>'}</div>
+    </button>`;
+  }).join('');
+}
+
+function renderBuilder(){
+  const b=document.getElementById('fn-builder');
+  const f=FUNIS.find(x=>x.id===selecionado);
+  if(!f){
+    b.innerHTML=`<div class="fn-empty">${ICO.funil}<p>Selecione um funil à esquerda<br>ou crie um novo para começar.</p></div>`;
+    return;
+  }
+  const passos=(f.passos||[]).slice().sort((a,b)=>(a.ordem-b.ordem)||(a.id-b.id));
+  const total=passos.reduce((s,p)=>s+(p.delay_segundos||0),0);
+  const linhas = passos.map((p,i)=>{
+    const t=tipoDePasso(p);
+    return `<div class="fn-passo" data-passo="${p.id}">
+      <div class="fn-passo-ord">${i+1}</div>
+      <div class="fn-passo-ico t-${t}">${ICO[t]}</div>
+      <div class="fn-passo-corpo">
+        <div class="fn-passo-nome">${escapar(p.modelo_nome)}</div>
+        <div class="fn-passo-quando">${ICO.relogio} Enviando
+          <input type="number" class="fn-delay-inp" min="0" max="3600" value="${p.delay_segundos||0}"
+                 onchange="mudarDelay(${p.id}, this.value)" title="Segundos de espera antes deste passo"> s depois</div>
+      </div>
+      <div class="fn-passo-acoes">
+        <button class="fn-mini" onclick="mover(${p.id},'cima')" ${i===0?'disabled':''} title="Subir">${ICO.cima}</button>
+        <button class="fn-mini" onclick="mover(${p.id},'baixo')" ${i===passos.length-1?'disabled':''} title="Descer">${ICO.baixo}</button>
+        <button class="fn-mini perigo" onclick="excluirPasso(${p.id})" title="Remover passo">${ICO.lixo}</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const opcoes = MODELOS.map(m=>{
+    const t=(m.midia_tipo && ICO[m.midia_tipo])? m.midia_tipo : 'texto';
+    const tag = t==='texto'?'[texto]':(t==='audio'?'[áudio]':(t==='imagem'?'[imagem]':(t==='documento'?'[PDF]':'[mídia]')));
+    return `<option value="${m.id}">${tag} ${escapar(m.nome)}</option>`;
+  }).join('');
+
+  b.innerHTML = `
+    <div class="fn-b-head">
+      <div style="flex:1; min-width:0;">
+        <div class="fn-b-nome">${escapar(f.nome)}</div>
+        ${f.categoria?`<div class="fn-b-cat">${escapar(f.categoria)}</div>`:''}
+      </div>
+      <button class="fn-b-acao star ${f.favorito?'on':''}" onclick="favoritar(${f.id})" title="Favoritar">${f.favorito?'★':'☆'}</button>
+      <button class="fn-b-acao" onclick="renomear(${f.id})" title="Renomear">${ICO.lapis}</button>
+      <button class="fn-b-acao perigo" onclick="excluirFunil(${f.id})" title="Excluir funil">${ICO.lixo}</button>
+    </div>
+    <div class="fn-passos">${linhas || '<div class="fn-vazio" style="padding:20px 0">Nenhum passo ainda. Adicione o primeiro abaixo.</div>'}</div>
+    ${passos.length?`<div class="fn-total">Tempo total da sequência: ~${fmtDelay(total).replace('após ','')}</div>`:''}
+    <div class="fn-picker">
+      <label>Adicionar passo</label>
+      <div class="fn-picker-linha">
+        <div style="flex:2"><select id="pk-modelo">${opcoes||'<option value="">Nenhum modelo na biblioteca</option>'}</select></div>
+        <div style="flex:1"><input type="number" id="pk-delay" min="0" max="3600" value="5" title="Segundos de espera antes de mandar"></div>
+      </div>
+      <div class="fn-picker-acoes">
+        <button class="btn-azul" onclick="adicionarPasso(${f.id})">Adicionar à sequência</button>
+      </div>
+    </div>`;
+}
+
+function selecionar(id){ selecionado=id; location.hash='funil-'+id; renderLista(); renderBuilder(); }
+function filtrarFunis(){ renderLista(); }
+
+async function api(url, corpo){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(corpo||{})});
+  const d=await r.json().catch(()=>({ok:false,erro:'resposta inválida'}));
+  if(!d.ok) alert(d.erro||'Falhou.');
+  return d;
+}
+function recarregar(id){ if(id!=null) location.hash='funil-'+id; location.reload(); }
+
+function abrirNovoFunil(){ document.getElementById('nf-nome').value=''; document.getElementById('nf-cat').value=''; document.getElementById('modal-novo').classList.add('aberto'); document.getElementById('nf-nome').focus(); }
+async function salvarNovoFunil(){
+  const nome=document.getElementById('nf-nome').value.trim();
+  const categoria=document.getElementById('nf-cat').value.trim();
+  if(!nome){ alert('Dê um nome ao funil.'); return; }
+  const d=await api('/crm/funis/novo',{nome,categoria});
+  if(d.ok) recarregar(d.id);
+}
+async function renomear(id){
+  const f=FUNIS.find(x=>x.id===id); if(!f) return;
+  const nome=prompt('Novo nome do funil:', f.nome); if(nome===null) return;
+  const categoria=prompt('Categoria (deixe vazio para nenhuma):', f.categoria||''); if(categoria===null) return;
+  const d=await api('/crm/funis/'+id+'/renomear',{nome:nome.trim(),categoria:categoria.trim()});
+  if(d.ok) recarregar(id);
+}
+async function favoritar(id){ const d=await api('/crm/funis/'+id+'/favorito',{}); if(d.ok) recarregar(id); }
+async function excluirFunil(id){
+  const f=FUNIS.find(x=>x.id===id);
+  if(!confirm('Excluir o funil "'+(f?f.nome:'')+'" e todos os seus passos?')) return;
+  const d=await api('/crm/funis/'+id+'/excluir',{}); if(d.ok){ selecionado=null; location.hash=''; location.reload(); }
+}
+async function adicionarPasso(fid){
+  const modelo_id=document.getElementById('pk-modelo').value;
+  const delay_segundos=document.getElementById('pk-delay').value;
+  if(!modelo_id){ alert('Escolha um modelo.'); return; }
+  const d=await api('/crm/funis/'+fid+'/passo/novo',{modelo_id,delay_segundos});
+  if(d.ok) recarregar(fid);
+}
+async function mudarDelay(pid, val){ const d=await api('/crm/funis/passo/'+pid+'/delay',{delay_segundos:val}); if(d.ok) recarregar(selecionado); }
+async function mover(pid, direcao){ const d=await api('/crm/funis/passo/'+pid+'/mover',{direcao}); if(d.ok) recarregar(selecionado); }
+async function excluirPasso(pid){ if(!confirm('Remover este passo da sequência?')) return; const d=await api('/crm/funis/passo/'+pid+'/excluir',{}); if(d.ok) recarregar(selecionado); }
+
+// Restaura a seleção pelo hash (sobrevive ao reload após cada mudança).
+(function init(){
+  const m=(location.hash||'').match(/funil-(\d+)/);
+  if(m){ const id=parseInt(m[1],10); if(FUNIS.some(f=>f.id===id)) selecionado=id; }
+  if(selecionado===null && FUNIS.length) selecionado=FUNIS[0].id;
+  renderLista(); renderBuilder();
+})();
+</script>
+{% endblock %}

@@ -20,6 +20,15 @@
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  // Base do site do JOB — pro link "Gerenciar funis no site". Padrão é produção;
+  // se o popup configurou outra URL (jobUrl), hidrata daqui pra respeitar.
+  let _SITE_BASE_URL_EXT = 'https://job-serenus-production.up.railway.app';
+  try {
+    chrome.storage.local.get(['jobUrl']).then((c) => {
+      if (c && c.jobUrl) _SITE_BASE_URL_EXT = String(c.jobUrl).replace(/\/+$/, '');
+    });
+  } catch (e) { /* mantém o padrão de produção */ }
+
   // ── Descobre o container rolável das mensagens (o WhatsApp muda as classes,
   //    então detectamos pelo comportamento: dentro do #main, o elemento que
   //    realmente rola verticalmente). ──
@@ -495,6 +504,10 @@
       '<button class="job-trilho-item" data-secao="mensagens" title="Mensagens">' +
         '<span class="job-trilho-item-icone">' + _ICO_MENSAGENS + '</span>' +
         '<span class="job-trilho-item-label">Mensagens</span>' +
+      '</button>' +
+      '<button class="job-trilho-item" data-secao="funis" title="Funis">' +
+        '<span class="job-trilho-item-icone">' + _ICO_FUNIS + '</span>' +
+        '<span class="job-trilho-item-label">Funis</span>' +
       '</button>';
     trilho.querySelectorAll('.job-trilho-item').forEach((item) => {
       item.addEventListener('click', () => {
@@ -537,6 +550,7 @@
     aplicarClassesHtml();
     if (secao === 'analise') sincronizarPainelComConversa();
     else if (secao === 'mensagens') abrirSecaoMensagens();
+    else if (secao === 'funis') abrirSecaoFunis();
   }
 
   function setCorpoSecao(html) {
@@ -1071,6 +1085,227 @@
   function setCorpoSecaoMensagens(html) {
     const c = document.getElementById('job-painel-doc-corpo');
     if (c) c.innerHTML = html;
+  }
+
+  // ═══════════════ Funis (sequência de disparo, estilo ZapVoice) ═══════════════
+  // Um funil é uma sequência de passos (texto/áudio/imagem/PDF), cada um com um
+  // intervalo. Aqui na extensão o consultor DISPARA o funil inteiro na conversa
+  // aberta: manda o passo, espera o intervalo, manda o próximo — sempre uma
+  // ação explícita dele numa conversa que está na tela, nunca em massa. Montar/
+  // editar funis é no site (/crm/funis); aqui é só disparar. Envio de cada passo
+  // reusa a MESMA ponte wa-js do envio avulso (texto e mídia do item A).
+  const FUNIS_CACHE_MS = 5 * 60 * 1000;
+  let _funisCache = null; // {ts, funis}
+  let _funilRodando = false, _funilCancelar = false;
+
+  async function buscarFunis(forcar) {
+    if (!forcar && _funisCache && (Date.now() - _funisCache.ts) < FUNIS_CACHE_MS) return _funisCache.funis;
+    const resp = await chrome.runtime.sendMessage({ type: 'listar_funis' });
+    const funis = (resp && resp.ok && resp.funis) || [];
+    _funisCache = { ts: Date.now(), funis };
+    return funis;
+  }
+
+  function funilTipoIcone(tipo) {
+    return tipo === 'audio' ? '🎤' : (tipo === 'imagem' ? '🖼' : (tipo === 'documento' ? '📄' : (tipo === 'video' ? '🎬' : '💬')));
+  }
+
+  function fmtQuando(s) {
+    s = s || 0;
+    if (s <= 0) return 'imediatamente';
+    const m = Math.floor(s / 60), r = s % 60;
+    if (m && r) return 'após ' + m + 'min ' + r + 's';
+    if (m) return 'após ' + m + 'min';
+    return 'após ' + r + 's';
+  }
+
+  async function abrirSecaoFunis() {
+    setCorpoSecaoMensagens('<div class="job-carregando"><div class="job-spin"></div><div>Carregando funis…</div></div>');
+    const funis = await buscarFunis(false);
+    if (_secaoAtiva !== 'funis') return;
+    setCorpoSecaoMensagens(renderFunis(funis));
+    ligarAcoesFunis();
+  }
+
+  function renderFunis(funis) {
+    let lista;
+    if (!funis.length) {
+      lista = '<div class="job-vazio">Nenhum funil ainda.<br>Monte o primeiro em <b>Funis WhatsApp</b> no site do JOB.</div>';
+    } else {
+      lista = funis.map(cardFunil).join('');
+    }
+    return '<div class="job-funis-intro">Dispare uma sequência pronta na conversa aberta — um passo após o outro, com os intervalos definidos.</div>' +
+      '<div id="job-funis-lista">' + lista + '</div>' +
+      '<a class="job-funis-gerenciar" href="' + esc(_SITE_BASE_URL_EXT) + '/crm/funis" target="_blank" rel="noopener">Gerenciar funis no site →</a>';
+  }
+
+  function cardFunil(f) {
+    const passos = f.passos || [];
+    const tipos = {};
+    passos.forEach((p) => { tipos[p.tipo] = (tipos[p.tipo] || 0) + 1; });
+    const meta = Object.keys(tipos).map((t) => funilTipoIcone(t) + ' ' + tipos[t]).join('  ') || 'sem passos';
+    const listaPassos = passos.map((p, i) =>
+      '<div class="job-funil-passo">' +
+        '<span class="job-funil-passo-num">' + (i + 1) + '</span>' +
+        '<span class="job-funil-passo-ico">' + funilTipoIcone(p.tipo) + '</span>' +
+        '<span class="job-funil-passo-nome">' + esc(p.nome) + '</span>' +
+        '<span class="job-funil-passo-quando">' + esc(fmtQuando(p.delay_segundos)) + '</span>' +
+      '</div>').join('');
+    return '<div class="job-funil-card" data-funil-id="' + f.id + '">' +
+      '<div class="job-funil-topo">' +
+        '<div class="job-funil-titulo">' +
+          '<div class="job-funil-nome">' + (f.favorito ? '<span class="job-funil-star">★</span> ' : '') + esc(f.nome) + '</div>' +
+          (f.categoria ? '<div class="job-funil-cat">' + esc(f.categoria) + '</div>' : '') +
+          '<div class="job-funil-meta">' + meta + '</div>' +
+        '</div>' +
+        '<button class="job-funil-expandir" data-funil-id="' + f.id + '" title="Ver passos">▾</button>' +
+      '</div>' +
+      '<div class="job-funil-passos" hidden>' + (listaPassos || '<div class="job-vazio" style="padding:10px">Funil sem passos.</div>') + '</div>' +
+      '<button class="job-funil-disparar" data-funil-id="' + f.id + '"' + (passos.length ? '' : ' disabled') + '>' +
+        _ICO_ENVIAR + ' Disparar na conversa</button>' +
+    '</div>';
+  }
+
+  const _ICO_ENVIAR = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+
+  function ligarAcoesFunis() {
+    document.querySelectorAll('.job-funil-expandir').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const card = btn.closest('.job-funil-card');
+        const passos = card && card.querySelector('.job-funil-passos');
+        if (!passos) return;
+        const aberto = !passos.hasAttribute('hidden');
+        if (aberto) { passos.setAttribute('hidden', ''); btn.textContent = '▾'; }
+        else { passos.removeAttribute('hidden'); btn.textContent = '▴'; }
+      });
+    });
+    document.querySelectorAll('.job-funil-disparar[data-funil-id]').forEach((btn) => {
+      btn.addEventListener('click', () => dispararFunil(btn.dataset.funilId));
+    });
+  }
+
+  // ── Toca a sequência: espera o intervalo do passo, manda, próximo. Mostra
+  //    progresso passo-a-passo e deixa cancelar no meio. ──
+  async function dispararFunil(funilId) {
+    if (_funilRodando) { alert('Já tem um funil rodando — espere terminar ou cancele.'); return; }
+    const funis = await buscarFunis(false);
+    const funil = funis.find((f) => String(f.id) === String(funilId));
+    if (!funil || !(funil.passos || []).length) { alert('Esse funil não tem passos.'); return; }
+    const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+    if (!usuarioId) { alert('Selecione seu usuário no popup da extensão primeiro.'); return; }
+    let chatId = '';
+    try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
+    if (!chatId) { alert('Abra a conversa do cliente antes de disparar o funil.'); return; }
+    const nome = nomeDoContato() || 'este contato';
+    if (!confirm('Disparar o funil "' + funil.nome + '" (' + funil.passos.length + ' passo(s)) para ' + nome + '?')) return;
+    let telefone = '';
+    try { telefone = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { telefone = telefoneDoContato(); }
+
+    _funilRodando = true; _funilCancelar = false;
+    const prog = abrirProgressoFunil(funil, nome);
+    let enviados = 0;
+    for (let i = 0; i < funil.passos.length; i++) {
+      if (_funilCancelar) break;
+      const passo = funil.passos[i];
+      await esperarComContagem(prog, i, Math.max(0, passo.delay_segundos || 0));
+      if (_funilCancelar) break;
+      marcarPasso(prog, i, 'enviando');
+      let envio;
+      try {
+        if (passo.tipo && passo.tipo !== 'texto' && passo.midia_url) {
+          const dl = await chrome.runtime.sendMessage({ type: 'baixar_midia', url: passo.midia_url });
+          if (dl && dl.ok) envio = await pedirEnviarMidia(chatId, passo.tipo, dl.dataUrl, passo.texto);
+          else envio = { ok: false, erro: (dl && dl.erro) || 'falha ao baixar a mídia' };
+        } else {
+          envio = await pedirEnviarTexto(chatId, passo.texto);
+        }
+      } catch (e) { envio = { ok: false, erro: String(e && e.message || e) }; }
+      if (envio && envio.ok) { enviados++; marcarPasso(prog, i, 'ok'); }
+      else { marcarPasso(prog, i, 'erro', (envio && envio.erro) || ''); }
+    }
+    _funilRodando = false;
+    finalizarProgresso(prog, enviados, funil.passos.length, _funilCancelar);
+    try { await chrome.runtime.sendMessage({ type: 'funil_disparado', funil_id: funil.id, telefone, enviados }); } catch (e) { /* registro é best-effort */ }
+  }
+
+  function abrirProgressoFunil(funil, nomeContato) {
+    const existente = document.getElementById('job-funil-prog');
+    if (existente) existente.remove();
+    const linhas = funil.passos.map((p, i) =>
+      '<div class="job-fp-linha" data-i="' + i + '">' +
+        '<span class="job-fp-dot"></span>' +
+        '<span class="job-fp-ico">' + funilTipoIcone(p.tipo) + '</span>' +
+        '<span class="job-fp-nome">' + esc(p.nome) + '</span>' +
+        '<span class="job-fp-estado"></span>' +
+      '</div>').join('');
+    const ov = document.createElement('div');
+    ov.id = 'job-funil-prog';
+    ov.innerHTML =
+      '<div class="job-fp-card">' +
+        '<div class="job-fp-head"><b>' + esc(funil.nome) + '</b><span>para ' + esc(nomeContato) + '</span></div>' +
+        '<div class="job-fp-linhas">' + linhas + '</div>' +
+        '<div class="job-fp-rodape">' +
+          '<span class="job-fp-status" id="job-fp-status">Iniciando…</span>' +
+          '<button class="job-fp-cancelar" id="job-fp-cancelar">Cancelar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(ov);
+    document.getElementById('job-fp-cancelar').addEventListener('click', () => {
+      _funilCancelar = true;
+      const s = document.getElementById('job-fp-status');
+      if (s) s.textContent = 'Cancelando…';
+    });
+    return ov;
+  }
+
+  async function esperarComContagem(prog, i, segundos) {
+    const linha = prog && prog.querySelector('.job-fp-linha[data-i="' + i + '"]');
+    const estado = linha && linha.querySelector('.job-fp-estado');
+    const status = document.getElementById('job-fp-status');
+    if (linha) linha.classList.add('atual');
+    let resta = segundos;
+    while (resta > 0) {
+      if (_funilCancelar) return;
+      if (estado) estado.textContent = 'em ' + resta + 's';
+      if (status) status.textContent = 'Passo ' + (i + 1) + ': aguardando ' + resta + 's';
+      await new Promise((r) => setTimeout(r, 1000));
+      resta--;
+    }
+    if (estado) estado.textContent = '';
+  }
+
+  function marcarPasso(prog, i, estado, erro) {
+    const linha = prog && prog.querySelector('.job-fp-linha[data-i="' + i + '"]');
+    const status = document.getElementById('job-fp-status');
+    if (!linha) return;
+    linha.classList.remove('atual');
+    const est = linha.querySelector('.job-fp-estado');
+    if (estado === 'enviando') {
+      linha.classList.add('atual');
+      if (est) est.textContent = 'enviando…';
+      if (status) status.textContent = 'Passo ' + (i + 1) + ': enviando…';
+    } else if (estado === 'ok') {
+      linha.classList.add('ok');
+      if (est) est.textContent = '✓';
+    } else if (estado === 'erro') {
+      linha.classList.add('erro');
+      if (est) est.textContent = 'falhou';
+      if (erro) linha.title = erro;
+    }
+  }
+
+  function finalizarProgresso(prog, enviados, total, cancelado) {
+    const status = document.getElementById('job-fp-status');
+    const btn = document.getElementById('job-fp-cancelar');
+    if (status) {
+      status.textContent = cancelado
+        ? ('Cancelado — ' + enviados + ' de ' + total + ' enviados.')
+        : ('Concluído — ' + enviados + ' de ' + total + ' enviados.');
+    }
+    if (btn) { btn.textContent = 'Fechar'; btn.classList.add('job-fp-fechar');
+      const novo = btn.cloneNode(true); btn.parentNode.replaceChild(novo, btn);
+      novo.addEventListener('click', () => { const p = document.getElementById('job-funil-prog'); if (p) p.remove(); });
+    }
   }
 
   function esc(s) {

@@ -884,6 +884,23 @@ def init_db():
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 enviado_em TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS whatsapp_funis (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL,
+                categoria TEXT,
+                favorito INTEGER DEFAULT 0,
+                ativo INTEGER DEFAULT 1,
+                vezes_disparado INTEGER DEFAULT 0,
+                criado_por INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS whatsapp_funil_passos (
+                id SERIAL PRIMARY KEY,
+                funil_id INTEGER NOT NULL,
+                ordem INTEGER NOT NULL DEFAULT 0,
+                modelo_id INTEGER NOT NULL,
+                delay_segundos INTEGER NOT NULL DEFAULT 5
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_agenda (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER NOT NULL,
@@ -1336,6 +1353,23 @@ def init_db():
             criado_por INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             enviado_em TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS whatsapp_funis (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            categoria TEXT,
+            favorito INTEGER DEFAULT 0,
+            ativo INTEGER DEFAULT 1,
+            vezes_disparado INTEGER DEFAULT 0,
+            criado_por INTEGER,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS whatsapp_funil_passos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            funil_id INTEGER NOT NULL,
+            ordem INTEGER NOT NULL DEFAULT 0,
+            modelo_id INTEGER NOT NULL,
+            delay_segundos INTEGER NOT NULL DEFAULT 5
         );
         CREATE TABLE IF NOT EXISTS crm_agenda (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -9384,6 +9418,86 @@ def api_whatsapp_extensao_modelo_excluir(mid):
     return _wa_cors(jsonify({"ok": True}))
 
 
+@app.route('/api/whatsapp/extensao/funis', methods=['GET', 'OPTIONS'])
+def api_whatsapp_extensao_funis():
+    """Lista os funis (sequências de disparo) ativos, cada um com seus passos já
+    resolvidos (texto/mídia + delay) — a extensão precisa de tudo pronto pra
+    TOCAR a sequência na conversa aberta (envia passo, espera o delay, próximo),
+    sem ida-e-volta por passo. O disparo é sempre uma ação explícita do consultor
+    na conversa que está na tela — nunca em massa/automático."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    conn = db()
+    funis = conn.execute("""SELECT id, nome, categoria, favorito, vezes_disparado
+        FROM whatsapp_funis WHERE ativo=1
+        ORDER BY favorito DESC, (categoria IS NULL), categoria, nome""").fetchall()
+    # Puxa TODOS os passos de uma vez (join com o modelo) e agrupa por funil —
+    # evita N+1 e mantém a ordem definida no builder.
+    passos = conn.execute("""SELECT p.id AS passo_id, p.funil_id, p.ordem, p.delay_segundos,
+            m.id AS modelo_id, m.nome, m.corpo_texto, m.midia_arquivo, m.midia_tipo
+        FROM whatsapp_funil_passos p
+        JOIN modelos_conteudo m ON m.id = p.modelo_id AND m.tipo='whatsapp' AND m.ativo=1
+        ORDER BY p.funil_id, p.ordem, p.id""").fetchall()
+    close_db(conn)
+    por_funil = {}
+    for p in passos:
+        pd = dict(p)
+        por_funil.setdefault(pd['funil_id'], []).append({
+            "passo_id": pd['passo_id'],
+            "modelo_id": pd['modelo_id'],
+            "nome": pd['nome'],
+            "texto": pd['corpo_texto'] or '',
+            "delay_segundos": pd['delay_segundos'] or 0,
+            "tipo": (pd['midia_tipo'] if pd['midia_tipo'] in ('audio', 'imagem', 'video', 'documento') else 'texto'),
+            "midia_url": (f"{_SITE_BASE_URL}/crm/modelos/midia/{pd['midia_arquivo']}" if pd['midia_arquivo'] else None),
+        })
+    out = []
+    for f in funis:
+        fd = dict(f)
+        out.append({
+            "id": fd['id'], "nome": fd['nome'],
+            "categoria": fd.get('categoria') or '', "favorito": bool(fd.get('favorito')),
+            "vezes_disparado": fd.get('vezes_disparado') or 0,
+            "passos": por_funil.get(fd['id'], []),
+        })
+    return _wa_cors(jsonify({"ok": True, "funis": out}))
+
+
+@app.route('/api/whatsapp/extensao/funis/<int:fid>/disparado', methods=['POST', 'OPTIONS'])
+def api_whatsapp_extensao_funil_disparado(fid):
+    """A extensão avisa que terminou de tocar um funil numa conversa — só pra
+    contabilizar (vezes_disparado) e registrar no lead, se casou pelo telefone.
+    O envio em si aconteceu client-side pela wa-js; aqui é só o registro."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    d = request.get_json(silent=True) or {}
+    conn = db()
+    f = conn.execute("SELECT nome FROM whatsapp_funis WHERE id=?", (fid,)).fetchone()
+    if not f:
+        close_db(conn); return _wa_cors(jsonify({"ok": False, "erro": "Funil não encontrado"})), 404
+    conn.execute("UPDATE whatsapp_funis SET vezes_disparado = COALESCE(vezes_disparado,0) + 1 WHERE id=?", (fid,))
+    # Casa com o lead pelo telefone (best-effort) só pra deixar rastro na timeline.
+    tel = re.sub(r'\D', '', str(d.get('telefone') or ''))
+    enviados = 0
+    try:
+        enviados = int(d.get('enviados') or 0)
+    except (TypeError, ValueError):
+        enviados = 0
+    if tel:
+        tel_norm = _normalizar_telefone(tel)
+        lead = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=? ORDER BY id DESC LIMIT 1", (tel_norm,)).fetchone()
+        if lead:
+            conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                         (lead['id'], 'Extensão WhatsApp', 'mensagem',
+                          f"Funil \"{f['nome']}\" disparado ({enviados} passo(s)).", _agora_sp()))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
+
+
 @app.route('/api/whatsapp/usuarios', methods=['GET', 'OPTIONS'])
 def api_whatsapp_usuarios():
     """Lista os usuários ativos (id + nome) pra extensão popular o seletor de
@@ -15429,6 +15543,187 @@ def crm_modelo_excluir(mid):
     if not m:
         close_db(conn); return jsonify({"ok": False, "erro": "Modelo não encontrado"}), 404
     conn.execute("DELETE FROM modelos_conteudo WHERE id=?", (mid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+# ─── Funis de WhatsApp (sequências de disparo) ──────────────────────────────
+# Um funil é uma sequência ordenada de passos; cada passo aponta pra um modelo
+# da biblioteca (texto/áudio/imagem/PDF) + um delay antes de mandar. A extensão
+# TOCA a sequência na conversa aberta. Isto é SEPARADO dos "fluxos" do CRM
+# (tabela fluxos) — por decisão do Guilherme; casar os dois é passo futuro.
+
+def _funil_num(v, padrao, minimo, maximo):
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return padrao
+    return max(minimo, min(maximo, n))
+
+
+@app.route('/crm/funis')
+@login_required
+@admin_required
+def crm_funis():
+    conn = db()
+    funis = [dict(f) for f in conn.execute(
+        "SELECT * FROM whatsapp_funis WHERE ativo=1 ORDER BY favorito DESC, (categoria IS NULL), categoria, nome").fetchall()]
+    passos = [dict(p) for p in conn.execute("""
+        SELECT p.id, p.funil_id, p.ordem, p.delay_segundos,
+               m.id AS modelo_id, m.nome AS modelo_nome, m.midia_tipo, m.corpo_texto
+        FROM whatsapp_funil_passos p
+        JOIN modelos_conteudo m ON m.id = p.modelo_id
+        ORDER BY p.funil_id, p.ordem, p.id""").fetchall()]
+    # Biblioteca de modelos pra montar os passos (só WhatsApp ativos).
+    modelos = [dict(m) for m in conn.execute("""
+        SELECT id, nome, midia_tipo, categoria, corpo_texto FROM modelos_conteudo
+        WHERE tipo='whatsapp' AND ativo=1
+        ORDER BY (categoria IS NULL), categoria, nome""").fetchall()]
+    close_db(conn)
+    por_funil = {}
+    for p in passos:
+        p['tipo'] = p['midia_tipo'] if p['midia_tipo'] in ('audio', 'imagem', 'video', 'documento') else 'texto'
+        por_funil.setdefault(p['funil_id'], []).append(p)
+    for f in funis:
+        f['passos'] = por_funil.get(f['id'], [])
+        f['total_delay'] = sum((p['delay_segundos'] or 0) for p in f['passos'])
+    return render_template('crm_funis.html', funis=funis, modelos=modelos)
+
+
+@app.route('/crm/funis/novo', methods=['POST'])
+@login_required
+@admin_required
+def crm_funil_novo():
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()[:200]
+    categoria = (d.get('categoria') or '').strip()[:120] or None
+    if not nome:
+        return jsonify({"ok": False, "erro": "Dê um nome ao funil"}), 400
+    conn = db()
+    conn.execute("INSERT INTO whatsapp_funis (nome, categoria, ativo, criado_por) VALUES (?,?,1,?)",
+                 (nome, categoria, session.get('user_id')))
+    fid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "id": fid})
+
+
+@app.route('/crm/funis/<int:fid>/renomear', methods=['POST'])
+@login_required
+@admin_required
+def crm_funil_renomear(fid):
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()[:200]
+    categoria = (d.get('categoria') or '').strip()[:120] or None
+    if not nome:
+        return jsonify({"ok": False, "erro": "Nome não pode ficar vazio"}), 400
+    conn = db()
+    if not conn.execute("SELECT id FROM whatsapp_funis WHERE id=?", (fid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Funil não encontrado"}), 404
+    conn.execute("UPDATE whatsapp_funis SET nome=?, categoria=? WHERE id=?", (nome, categoria, fid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/funis/<int:fid>/favorito', methods=['POST'])
+@login_required
+@admin_required
+def crm_funil_favorito(fid):
+    conn = db()
+    f = conn.execute("SELECT favorito FROM whatsapp_funis WHERE id=?", (fid,)).fetchone()
+    if not f:
+        close_db(conn); return jsonify({"ok": False, "erro": "Funil não encontrado"}), 404
+    novo = 0 if f['favorito'] else 1
+    conn.execute("UPDATE whatsapp_funis SET favorito=? WHERE id=?", (novo, fid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "favorito": bool(novo)})
+
+
+@app.route('/crm/funis/<int:fid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_funil_excluir(fid):
+    conn = db()
+    if not conn.execute("SELECT id FROM whatsapp_funis WHERE id=?", (fid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Funil não encontrado"}), 404
+    conn.execute("DELETE FROM whatsapp_funil_passos WHERE funil_id=?", (fid,))
+    conn.execute("DELETE FROM whatsapp_funis WHERE id=?", (fid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/funis/<int:fid>/passo/novo', methods=['POST'])
+@login_required
+@admin_required
+def crm_funil_passo_novo(fid):
+    d = request.json or {}
+    modelo_id = _funil_num(d.get('modelo_id'), 0, 0, 2_000_000_000)
+    delay = _funil_num(d.get('delay_segundos'), 5, 0, 3600)
+    if not modelo_id:
+        return jsonify({"ok": False, "erro": "Escolha um modelo"}), 400
+    conn = db()
+    if not conn.execute("SELECT id FROM whatsapp_funis WHERE id=?", (fid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Funil não encontrado"}), 404
+    if not conn.execute("SELECT id FROM modelos_conteudo WHERE id=? AND tipo='whatsapp'", (modelo_id,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Modelo inválido"}), 400
+    prox = conn.execute("SELECT COALESCE(MAX(ordem),0)+1 AS o FROM whatsapp_funil_passos WHERE funil_id=?", (fid,)).fetchone()['o']
+    conn.execute("INSERT INTO whatsapp_funil_passos (funil_id, ordem, modelo_id, delay_segundos) VALUES (?,?,?,?)",
+                 (fid, prox, modelo_id, delay))
+    pid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "id": pid})
+
+
+@app.route('/crm/funis/passo/<int:pid>/delay', methods=['POST'])
+@login_required
+@admin_required
+def crm_funil_passo_delay(pid):
+    d = request.json or {}
+    delay = _funil_num(d.get('delay_segundos'), 5, 0, 3600)
+    conn = db()
+    if not conn.execute("SELECT id FROM whatsapp_funil_passos WHERE id=?", (pid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Passo não encontrado"}), 404
+    conn.execute("UPDATE whatsapp_funil_passos SET delay_segundos=? WHERE id=?", (delay, pid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "delay_segundos": delay})
+
+
+@app.route('/crm/funis/passo/<int:pid>/mover', methods=['POST'])
+@login_required
+@admin_required
+def crm_funil_passo_mover(pid):
+    """Troca a ordem com o passo vizinho (cima/baixo) — reordenar sem drag."""
+    d = request.json or {}
+    direcao = (d.get('direcao') or '').strip()
+    conn = db()
+    p = conn.execute("SELECT id, funil_id, ordem FROM whatsapp_funil_passos WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn); return jsonify({"ok": False, "erro": "Passo não encontrado"}), 404
+    p = dict(p)
+    if direcao == 'cima':
+        viz = conn.execute("""SELECT id, ordem FROM whatsapp_funil_passos
+            WHERE funil_id=? AND ordem < ? ORDER BY ordem DESC LIMIT 1""", (p['funil_id'], p['ordem'])).fetchone()
+    else:
+        viz = conn.execute("""SELECT id, ordem FROM whatsapp_funil_passos
+            WHERE funil_id=? AND ordem > ? ORDER BY ordem ASC LIMIT 1""", (p['funil_id'], p['ordem'])).fetchone()
+    if not viz:
+        close_db(conn); return jsonify({"ok": True, "moveu": False})
+    viz = dict(viz)
+    conn.execute("UPDATE whatsapp_funil_passos SET ordem=? WHERE id=?", (viz['ordem'], p['id']))
+    conn.execute("UPDATE whatsapp_funil_passos SET ordem=? WHERE id=?", (p['ordem'], viz['id']))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "moveu": True})
+
+
+@app.route('/crm/funis/passo/<int:pid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_funil_passo_excluir(pid):
+    conn = db()
+    if not conn.execute("SELECT id FROM whatsapp_funil_passos WHERE id=?", (pid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Passo não encontrado"}), 404
+    conn.execute("DELETE FROM whatsapp_funil_passos WHERE id=?", (pid,))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 

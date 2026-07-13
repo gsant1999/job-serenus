@@ -292,3 +292,60 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
 .job-erro { background: rgba(244, 63, 94, .12); color: #f43f5e; border: 1px solid rgba(244, 63, 94, .3);
   border-radius: 10px; padding: 12px; font-size: 13px; }
 .job-vazio { font-size: 12px; color: #9aa1b5; }
+
+/* ── Seção Funis: sequências de disparo ── */
+.job-funis-intro { font-size: 11.5px; line-height: 1.5; color: #9aa1b5; margin: 2px 0 12px; }
+.job-funis-gerenciar { display: block; text-align: center; margin: 14px 0 4px; font-size: 11.5px;
+  color: #3b82f6; text-decoration: none; }
+.job-funis-gerenciar:hover { color: #60a5fa; text-decoration: underline; }
+.job-funil-card { background: #1b1b27; border: 1px solid #26262f; border-radius: 11px;
+  padding: 11px 12px; margin-bottom: 9px; }
+.job-funil-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.job-funil-titulo { min-width: 0; flex: 1; }
+.job-funil-nome { font-size: 13px; font-weight: 700; color: #eef0f6; }
+.job-funil-star { color: #f5c518; }
+.job-funil-cat { font-size: 10.5px; color: #646b80; margin-top: 1px; }
+.job-funil-meta { font-size: 11px; color: #9aa1b5; margin-top: 5px; font-variant-numeric: tabular-nums; letter-spacing: .3px; }
+.job-funil-expandir { background: #26262f; border: none; color: #9aa1b5; border-radius: 7px;
+  width: 26px; height: 26px; cursor: pointer; font-size: 12px; flex-shrink: 0; }
+.job-funil-expandir:hover { background: #2a2a38; color: #eef0f6; }
+.job-funil-passos { margin: 9px 0 4px; border-top: 1px solid #22222f; padding-top: 8px; }
+.job-funil-passo { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: #c3c8d4; padding: 4px 0; }
+.job-funil-passo-num { width: 17px; height: 17px; flex-shrink: 0; border-radius: 50%; background: #22222f;
+  color: #9aa1b5; font-size: 9.5px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.job-funil-passo-ico { flex-shrink: 0; }
+.job-funil-passo-nome { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-funil-passo-quando { flex-shrink: 0; font-size: 10px; color: #646b80; }
+.job-funil-disparar { width: 100%; margin-top: 8px; background: linear-gradient(135deg,#1fd8a4 0%,#3b82f6 60%,#8b5cf6 100%);
+  color: #fff; border: none; border-radius: 8px; padding: 9px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.job-funil-disparar:hover:not(:disabled) { filter: brightness(1.08); }
+.job-funil-disparar:disabled { background: #26262f; color: #646b80; cursor: default; }
+
+/* ── Overlay de progresso do disparo ── */
+#job-funil-prog { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 2147483000;
+  display: flex; align-items: center; justify-content: center; }
+.job-fp-card { background: #15151e; border: 1px solid #26262f; border-radius: 14px; width: 340px;
+  max-width: 92vw; max-height: 80vh; overflow-y: auto; padding: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.job-fp-head { margin-bottom: 12px; }
+.job-fp-head b { display: block; font-size: 14px; color: #eef0f6; }
+.job-fp-head span { font-size: 11px; color: #9aa1b5; }
+.job-fp-linhas { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; }
+.job-fp-linha { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; font-size: 12px; color: #c3c8d4; }
+.job-fp-linha.atual { background: rgba(59,130,246,.12); }
+.job-fp-linha.ok { color: #9aa1b5; }
+.job-fp-linha.erro { background: rgba(244,63,94,.1); color: #f43f5e; }
+.job-fp-dot { width: 8px; height: 8px; border-radius: 50%; background: #3a3a48; flex-shrink: 0; }
+.job-fp-linha.atual .job-fp-dot { background: #3b82f6; animation: jobPulse 1s ease-in-out infinite; }
+.job-fp-linha.ok .job-fp-dot { background: #1fd8a4; }
+.job-fp-linha.erro .job-fp-dot { background: #f43f5e; }
+@keyframes jobPulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+.job-fp-ico { flex-shrink: 0; }
+.job-fp-nome { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-fp-estado { flex-shrink: 0; font-size: 10.5px; color: #646b80; font-variant-numeric: tabular-nums; }
+.job-fp-linha.ok .job-fp-estado { color: #1fd8a4; }
+.job-fp-rodape { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.job-fp-status { font-size: 11.5px; color: #9aa1b5; }
+.job-fp-cancelar { background: #26262f; color: #eef0f6; border: none; border-radius: 8px;
+  padding: 7px 14px; font-size: 12px; font-weight: 700; cursor: pointer; flex-shrink: 0; }
+.job-fp-cancelar:hover { background: #2a2a38; }
+.job-fp-cancelar.job-fp-fechar { background: #1fd8a4; color: #0a0a10; }

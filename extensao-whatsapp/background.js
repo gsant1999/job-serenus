@@ -153,6 +153,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/extensao/modelos', 'GET', null, 15000).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'listar_funis') {
+    chamarJob('/api/whatsapp/extensao/funis', 'GET', null, 15000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'funil_disparado') {
+    // Só registra que o funil foi tocado (contador + timeline do lead) — o
+    // envio de cada passo já aconteceu client-side pela ponte wa-js.
+    chamarJob('/api/whatsapp/extensao/funis/' + encodeURIComponent(msg.funil_id) + '/disparado', 'POST',
+      { telefone: msg.telefone || '', enviados: msg.enviados || 0 }, 15000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'criar_modelo') {
     criarModelo(msg.dados).then(sendResponse);
     return true;
