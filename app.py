@@ -15923,105 +15923,153 @@ def crm_importar_zapvoice():
 @login_required
 @admin_required
 def crm_importar_botconversa():
-    """Importa fluxos extraídos do BotConversa (scripts/botconversa_extract.py)
-    pra biblioteca de WhatsApp do JOB. Cada fluxo do BotConversa vira um
-    whatsapp_funis; cada passo (texto ou mídia) do fluxo vira um
-    modelos_conteudo, ligado em ordem via whatsapp_funil_passos — mesmo
-    padrão da importação do ZapVoice, mas reconstruindo também a sequência
-    (funil), não só a biblioteca solta de mensagens.
-    Formato esperado: .zip com manifest.json (lista de fluxos, cada um com
-    nome/categoria/passos) + pasta media/ com os arquivos binários referenciados.
-    Dedup por nome de funil — re-subir o mesmo zip não duplica. Dedup também
-    por arquivo_local dentro da mesma importação — o mesmo binário (ex.: PDF
-    de rede de atendimento reaproveitado em vários fluxos parecidos) é
-    enviado pro storage uma única vez e os modelos seguintes só reaproveitam
-    o nome já subido, em vez de duplicar o upload a cada fluxo que o usa."""
-    import zipfile as _zip, io as _io, tempfile as _tmp
-    f = request.files.get('arquivo')
-    if not f or not f.filename:
-        return jsonify({"ok": False, "erro": "Envie o arquivo .zip exportado pelo script"}), 400
-    tmp = _tmp.NamedTemporaryFile(delete=False, suffix='.zip')
-    try:
+    """Importa fluxos extraídos do BotConversa pra biblioteca de WhatsApp do
+    JOB. Cada fluxo do BotConversa vira um whatsapp_funis; cada passo (texto
+    ou mídia) do fluxo vira um modelos_conteudo, ligado em ordem via
+    whatsapp_funil_passos — mesmo padrão da importação do ZapVoice, mas
+    reconstruindo também a sequência (funil), não só a biblioteca solta de
+    mensagens.
+    Aceita dois formatos de entrada:
+    1) multipart/form-data com campo 'arquivo' = .zip (manifest.json + pasta
+       media/ com os binários já baixados) — feito por
+       scripts/botconversa_extract.py, que roda na máquina de quem tem
+       acesso ao BotConversa.
+    2) JSON puro (Content-Type: application/json) com a lista de fluxos
+       direto — cada passo de mídia leva uma 'url' pública (o BotConversa
+       guarda mídia em S3 sem exigir login pra baixar) em vez de
+       'arquivo_local'; o próprio servidor busca o binário. Evita ter que
+       fazer upload de um zip grande pelo navegador — só texto (o manifest é
+       leve), o download pesado roda direto no servidor pra R2.
+    Dedup por nome de funil — re-subir o mesmo zip/manifest não duplica.
+    Dedup também de mídia dentro da mesma importação (por hash do
+    arquivo_local OU pela própria url) — o mesmo binário (ex.: PDF de rede
+    de atendimento reaproveitado em vários fluxos parecidos) é enviado pro
+    storage uma única vez, mesmo se vier em lotes/requisições separadas,
+    porque o nome final no storage é sempre determinístico."""
+    import io as _io
+    import hashlib as _hashlib
+    from urllib.parse import urlparse
+
+    zf = None
+    tmp_path = None
+    if request.files.get('arquivo'):
+        import zipfile as _zip, tempfile as _tmp
+        f = request.files['arquivo']
+        tmp = _tmp.NamedTemporaryFile(delete=False, suffix='.zip')
         f.save(tmp.name)
         tmp.close()
-        with _zip.ZipFile(tmp.name) as zf:
+        tmp_path = tmp.name
+        try:
+            zf = _zip.ZipFile(tmp_path)
+            manifesto = json.loads(zf.read('manifest.json'))
+        except KeyError:
+            zf.close(); os.unlink(tmp_path)
+            return jsonify({"ok": False, "erro": "Zip inválido: falta manifest.json"}), 400
+        except Exception as e:
+            if zf: zf.close()
+            os.unlink(tmp_path)
+            return jsonify({"ok": False, "erro": f"Zip inválido: {e}"}), 400
+    else:
+        manifesto = request.get_json(silent=True)
+        if manifesto is None:
+            return jsonify({"ok": False, "erro": "Envie o .zip exportado ou um JSON com a lista de fluxos"}), 400
+        if isinstance(manifesto, dict):
+            manifesto = manifesto.get('fluxos') or []
+
+    def _obter_bytes(passo):
+        arq_local = passo.get('arquivo_local')
+        if arq_local and zf:
             try:
-                manifesto = json.loads(zf.read('manifest.json'))
+                return zf.read(f'media/{arq_local}')
             except KeyError:
-                return jsonify({"ok": False, "erro": "Zip inválido: falta manifest.json"}), 400
-            conn = db()
-            existentes = {r['nome'] for r in conn.execute("SELECT nome FROM whatsapp_funis").fetchall()}
-            criado_por = session.get('user_id')
-            contagem = {'funis': 0, 'modelos': 0, 'pulados': 0, 'erros': 0}
-            cache_midia = {}  # arquivo_local (mesmo binário reaproveitado entre fluxos) -> nome_arq já subido
-            for fluxo in manifesto:
-                nome_funil = (fluxo.get('nome') or '').strip()[:200]
-                if not nome_funil or nome_funil in existentes:
-                    contagem['pulados'] += 1
-                    continue
-                try:
-                    categoria = (fluxo.get('categoria') or '').strip()[:120] or None
-                    conn.execute("INSERT INTO whatsapp_funis (nome, categoria, ativo, criado_por) VALUES (?,?,1,?)",
-                                 (nome_funil, categoria, criado_por))
-                    fid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
-                           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
-                    ordem = 0
-                    for passo in (fluxo.get('passos') or []):
-                        tipo = passo.get('tipo')
-                        if tipo == 'texto':
-                            texto = (passo.get('texto') or '').strip()
-                            if not texto:
-                                continue
-                            ordem += 1
-                            conn.execute("""INSERT INTO modelos_conteudo
-                                (tipo, nome, corpo_texto, ativo, criado_por, categoria) VALUES ('whatsapp',?,?,1,?,?)""",
-                                (f"{nome_funil} #{ordem}"[:200], texto[:4000], criado_por, categoria))
-                        elif tipo in ('imagem', 'video', 'audio', 'documento'):
-                            arq_local = passo.get('arquivo_local')
-                            if not arq_local:
-                                continue
-                            ordem += 1
-                            nome_arq = cache_midia.get(arq_local)
-                            if not nome_arq:
-                                # nome determinístico (o script de extração já nomeia o
-                                # arquivo pelo hash do conteúdo) — mesmo binário reaproveitado
-                                # em fluxos diferentes sobe uma vez só, mesmo em importações
-                                # separadas (zip grande dividido em lotes pra não estourar
-                                # timeout), porque o nome final é sempre o mesmo.
-                                ext = os.path.splitext(arq_local)[1] or '.bin'
-                                base = os.path.splitext(os.path.basename(arq_local))[0]
-                                nome_arq = f"MODELO_WPP_BC_{base}{ext}"[:120]
-                                if not os.path.exists(os.path.join(UPLOAD_FOLDER, nome_arq)):
-                                    try:
-                                        dados_bin = zf.read(f'media/{arq_local}')
-                                    except KeyError:
-                                        contagem['erros'] += 1
-                                        continue
-                                    upload_arquivo_r2(_io.BytesIO(dados_bin), f"modelos/{nome_arq}")
-                                cache_midia[arq_local] = nome_arq
-                            conn.execute("""INSERT INTO modelos_conteudo
-                                (tipo, nome, ativo, criado_por, midia_arquivo, midia_tipo, categoria) VALUES ('whatsapp',?,1,?,?,?,?)""",
-                                (f"{nome_funil} #{ordem}"[:200], criado_por, nome_arq, tipo, categoria))
-                        else:
+                return None
+        url = passo.get('url')
+        if url:
+            try:
+                r = _requests.get(url, timeout=30)
+                r.raise_for_status()
+                return r.content
+            except Exception as e:
+                app.logger.warning(f"[IMPORT-BC] falhou baixar mídia {url}: {e}")
+                return None
+        return None
+
+    try:
+        conn = db()
+        existentes = {r['nome'] for r in conn.execute("SELECT nome FROM whatsapp_funis").fetchall()}
+        criado_por = session.get('user_id')
+        contagem = {'funis': 0, 'modelos': 0, 'pulados': 0, 'erros': 0}
+        cache_midia = {}  # identidade da mídia (arquivo_local ou url) -> nome_arq já subido
+        for fluxo in manifesto:
+            nome_funil = (fluxo.get('nome') or '').strip()[:200]
+            if not nome_funil or nome_funil in existentes:
+                contagem['pulados'] += 1
+                continue
+            try:
+                categoria = (fluxo.get('categoria') or '').strip()[:120] or None
+                conn.execute("INSERT INTO whatsapp_funis (nome, categoria, ativo, criado_por) VALUES (?,?,1,?)",
+                             (nome_funil, categoria, criado_por))
+                fid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                       else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+                ordem = 0
+                for passo in (fluxo.get('passos') or []):
+                    tipo = passo.get('tipo')
+                    if tipo == 'texto':
+                        texto = (passo.get('texto') or '').strip()
+                        if not texto:
                             continue
-                        mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
-                               else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
-                        conn.execute("INSERT INTO whatsapp_funil_passos (funil_id, ordem, modelo_id, delay_segundos) VALUES (?,?,?,?)",
-                                     (fid, ordem, mid, 5))
-                        contagem['modelos'] += 1
-                    existentes.add(nome_funil)
-                    contagem['funis'] += 1
-                    conn.commit()
-                except Exception as e:
-                    contagem['erros'] += 1
-                    app.logger.warning(f"[IMPORT-BC] falhou fluxo \"{fluxo.get('nome')}\": {e}")
-            close_db(conn)
+                        ordem += 1
+                        conn.execute("""INSERT INTO modelos_conteudo
+                            (tipo, nome, corpo_texto, ativo, criado_por, categoria) VALUES ('whatsapp',?,?,1,?,?)""",
+                            (f"{nome_funil} #{ordem}"[:200], texto[:4000], criado_por, categoria))
+                    elif tipo in ('imagem', 'video', 'audio', 'documento'):
+                        identidade = passo.get('arquivo_local') or passo.get('url')
+                        if not identidade:
+                            continue
+                        ordem += 1
+                        nome_arq = cache_midia.get(identidade)
+                        if not nome_arq:
+                            # nome determinístico (hash da identidade — arquivo_local do
+                            # script já é nomeado pelo hash do conteúdo; url vira hash
+                            # aqui) — mesmo binário reaproveitado em fluxos diferentes
+                            # sobe uma vez só, mesmo em importações/lotes separados,
+                            # porque o nome final é sempre o mesmo.
+                            ext = os.path.splitext(urlparse(identidade).path if identidade.startswith('http') else identidade)[1] or '.bin'
+                            h = _hashlib.sha1(identidade.encode('utf-8')).hexdigest()[:20]
+                            nome_arq = f"MODELO_WPP_BC_{h}{ext}"[:120]
+                            if not os.path.exists(os.path.join(UPLOAD_FOLDER, nome_arq)):
+                                dados_bin = _obter_bytes(passo)
+                                if not dados_bin:
+                                    contagem['erros'] += 1
+                                    continue
+                                upload_arquivo_r2(_io.BytesIO(dados_bin), f"modelos/{nome_arq}")
+                            cache_midia[identidade] = nome_arq
+                        conn.execute("""INSERT INTO modelos_conteudo
+                            (tipo, nome, ativo, criado_por, midia_arquivo, midia_tipo, categoria) VALUES ('whatsapp',?,1,?,?,?,?)""",
+                            (f"{nome_funil} #{ordem}"[:200], criado_por, nome_arq, tipo, categoria))
+                    else:
+                        continue
+                    mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+                    conn.execute("INSERT INTO whatsapp_funil_passos (funil_id, ordem, modelo_id, delay_segundos) VALUES (?,?,?,?)",
+                                 (fid, ordem, mid, 5))
+                    contagem['modelos'] += 1
+                existentes.add(nome_funil)
+                contagem['funis'] += 1
+                conn.commit()
+            except Exception as e:
+                contagem['erros'] += 1
+                app.logger.warning(f"[IMPORT-BC] falhou fluxo \"{fluxo.get('nome')}\": {e}")
+        close_db(conn)
         return jsonify({"ok": True, "contagem": contagem})
     finally:
-        try:
-            os.unlink(tmp.name)
-        except Exception:
-            pass
+        if zf:
+            zf.close()
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
 
 @app.route('/crm/modelos/<int:mid>/favorito', methods=['POST'])
