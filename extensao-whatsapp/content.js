@@ -465,14 +465,21 @@
     _resizeTimer = setTimeout(aplicarClassesHtml, 150);
   });
 
-  // Logo do JOB: anel de arcos (teal→azul→roxo) girando devagar, "JOB" parado
-  // no centro — mesma identidade da sidebar do sistema (grad-frio).
+  // Logo do JOB: o MESMO arquivo dos arcos do sistema (logo_arcos.png) girando
+  // devagar, "JOB" parado no centro — idêntico à sidebar do site (spinSlow 20s).
+  // Nada de anel genérico: é o logo real, liberado via web_accessible_resources.
+  const _LOGO_ARCOS_URL = (function () {
+    try { return chrome.runtime.getURL('logo_arcos.png'); } catch (e) { return ''; }
+  })();
   function logoJobHTML() {
-    return '<div class="job-logo"><div class="job-logo-ring"></div><span class="job-logo-txt">JOB</span></div>';
+    return '<div class="job-logo">' +
+      (_LOGO_ARCOS_URL ? '<img class="job-logo-arcos" src="' + _LOGO_ARCOS_URL + '" alt="">' : '') +
+      '<span class="job-logo-txt">JOB</span></div>';
   }
 
   const _ICO_ANALISE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>';
   const _ICO_MENSAGENS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
+  const _ICO_FUNIS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
 
   function criarTrilho() {
     if (document.getElementById('job-trilho')) return;

@@ -24,20 +24,19 @@ html.job-push-esquerda.job-overlay-painel { margin-left: 72px !important; margin
 }
 html.job-push-esquerda #job-trilho { right: auto; left: 0; border-left: none; border-right: 1px solid rgba(255,255,255,.06); }
 
-/* Logo JOB: anel de arcos girando (grad-frio do sistema), JOB parado no meio. */
+/* Logo JOB: o arquivo REAL dos arcos do sistema (logo_arcos.png) girando,
+   "JOB" parado no meio — idêntico à sidebar do site (spinSlow). */
 .job-logo { position: relative; width: 36px; height: 36px; margin-bottom: 16px; flex-shrink: 0; }
-.job-logo-ring {
-  position: absolute; inset: 0; border-radius: 50%;
-  background: conic-gradient(from 0deg, #1fd8a4, #3b82f6, #8b5cf6, #1fd8a4);
-  animation: jobLogoSpin 8s linear infinite;
+.job-logo-arcos {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+  animation: jobLogoSpin 20s linear infinite;
 }
-.job-logo-ring::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: #0a0a10; }
 .job-logo-txt {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  font-family: -apple-system, "Segoe UI", sans-serif; font-size: 9.5px; font-weight: 800; color: #fff; letter-spacing: .3px; z-index: 1;
+  font-family: -apple-system, "Segoe UI", sans-serif; font-size: 9px; font-weight: 800; color: #fff; letter-spacing: .3px; z-index: 1;
 }
 @keyframes jobLogoSpin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .job-logo-ring { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .job-logo-arcos { animation: none; } }
 
 .job-trilho-item {
   position: relative;
