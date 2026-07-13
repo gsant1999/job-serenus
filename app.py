@@ -9217,7 +9217,11 @@ def api_whatsapp_enviar_direto():
     telefone = str(d.get('telefone') or '').strip()
     nome = str(d.get('nome') or '').strip()[:200]
     texto = str(d.get('texto') or '').strip()[:4000]
-    if not texto:
+    # Texto pode ser vazio SE for um modelo de mídia (áudio/imagem sem legenda) —
+    # a validação de "mensagem vazia" pra texto puro acontece depois de resolver
+    # o modelo (senão áudio/nota de voz sem legenda era barrado como vazio).
+    tem_modelo = bool(str(d.get('modelo_id') or '').strip())
+    if not texto and not tem_modelo:
         return _wa_cors(jsonify({"ok": False, "erro": "Mensagem vazia"})), 400
     # chat_id explícito (id serializado da conversa aberta, via wa-js) é o
     # caminho à prova de falha — funciona pra contato salvo e @lid, onde o
@@ -9288,6 +9292,10 @@ def api_whatsapp_enviar_direto():
         mod = conn.execute("SELECT midia_arquivo, midia_tipo FROM modelos_conteudo WHERE id=? AND tipo='whatsapp'", (modelo_id,)).fetchone()
         if mod and mod['midia_arquivo'] and mod['midia_tipo'] in ('audio', 'imagem', 'video', 'documento'):
             tipo, midia_arquivo = mod['midia_tipo'], mod['midia_arquivo']
+    # Agora sim: se acabou sendo texto puro (sem mídia) e o texto está vazio, barra.
+    if tipo == 'texto' and not texto:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Mensagem vazia"})), 400
     conn.execute("""INSERT INTO whatsapp_extensao_fila
         (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo, origem, criado_por)
         VALUES (?,?,?,?,?,?,?,'extensao_direto',?)""",
