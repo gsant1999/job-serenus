@@ -293,33 +293,65 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
   border-radius: 10px; padding: 12px; font-size: 13px; }
 .job-vazio { font-size: 12px; color: #9aa1b5; }
 
-/* ── Seção Funis: sequências de disparo ── */
-.job-funis-intro { font-size: 11.5px; line-height: 1.5; color: #9aa1b5; margin: 2px 0 12px; }
+/* ── Seção Funis: sequências de disparo (padrão ZapVoice, cores do JOB) ── */
 .job-funis-gerenciar { display: block; text-align: center; margin: 14px 0 4px; font-size: 11.5px;
   color: #3b82f6; text-decoration: none; }
 .job-funis-gerenciar:hover { color: #60a5fa; text-decoration: underline; }
-.job-funil-card { background: #1b1b27; border: 1px solid #26262f; border-radius: 11px;
-  padding: 11px 12px; margin-bottom: 9px; }
-.job-funil-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.job-funil-card { background: #1b1b27; border: 1px solid #26262f; border-radius: 12px;
+  padding: 12px; margin-bottom: 10px; }
+.job-funil-topo { display: flex; align-items: center; gap: 9px; }
+.job-funil-ico { width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px;
+  background: rgba(31, 216, 164, .12); color: #1fd8a4;
+  display: flex; align-items: center; justify-content: center; }
 .job-funil-titulo { min-width: 0; flex: 1; }
-.job-funil-nome { font-size: 13px; font-weight: 700; color: #eef0f6; }
-.job-funil-star { color: #f5c518; }
-.job-funil-cat { font-size: 10.5px; color: #646b80; margin-top: 1px; }
-.job-funil-meta { font-size: 11px; color: #9aa1b5; margin-top: 5px; font-variant-numeric: tabular-nums; letter-spacing: .3px; }
-.job-funil-expandir { background: #26262f; border: none; color: #9aa1b5; border-radius: 7px;
-  width: 26px; height: 26px; cursor: pointer; font-size: 12px; flex-shrink: 0; }
-.job-funil-expandir:hover { background: #2a2a38; color: #eef0f6; }
-.job-funil-passos { margin: 9px 0 4px; border-top: 1px solid #22222f; padding-top: 8px; }
-.job-funil-passo { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: #c3c8d4; padding: 4px 0; }
-.job-funil-passo-num { width: 17px; height: 17px; flex-shrink: 0; border-radius: 50%; background: #22222f;
-  color: #9aa1b5; font-size: 9.5px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
-.job-funil-passo-ico { flex-shrink: 0; }
-.job-funil-passo-nome { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.job-funil-passo-quando { flex-shrink: 0; font-size: 10px; color: #646b80; }
-.job-funil-disparar { width: 100%; margin-top: 8px; background: linear-gradient(135deg,#1fd8a4 0%,#3b82f6 60%,#8b5cf6 100%);
+.job-funil-nome { font-size: 12.5px; font-weight: 700; color: #eef0f6; line-height: 1.3; }
+.job-funil-star { color: #f5c518; display: inline-flex; vertical-align: -1px; }
+.job-funil-star svg { fill: currentColor; }
+.job-funil-meta { font-size: 10.5px; color: #9aa1b5; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.job-funil-expandir { background: none; border: none; color: #646b80; border-radius: 7px;
+  width: 26px; height: 26px; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; }
+.job-funil-expandir:hover { background: #26262f; color: #eef0f6; }
+.job-funil-expandir svg { transition: transform .15s; }
+.job-funil-expandir.fechado svg { transform: rotate(-90deg); }
+.job-funil-passos { margin-top: 4px; }
+.job-funil-passos.fechado { display: none; }
+
+/* Caixinha de passo colorida pelo tipo — bate o olho e sabe o que vai sair. */
+.job-fpasso { display: flex; align-items: center; gap: 9px; border: 1px solid #26262f;
+  border-radius: 10px; padding: 8px 10px; margin-top: 7px; background: #15151e; }
+.job-fpasso-ico { flex-shrink: 0; display: flex; }
+.job-fpasso-info { flex: 1; min-width: 0; }
+.job-fpasso-nome { font-size: 11.5px; font-weight: 700; line-height: 1.35;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.job-fpasso-quando { font-size: 10px; color: #9aa1b5; margin-top: 2px;
+  display: flex; align-items: center; gap: 4px; }
+.job-fpasso-num { width: 18px; height: 18px; flex-shrink: 0; border-radius: 50%; background: #22222f;
+  color: #9aa1b5; font-size: 9.5px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums; }
+.job-fpasso.t-texto     { border-color: rgba(59, 130, 246, .35);  background: rgba(59, 130, 246, .06); }
+.job-fpasso.t-texto     .job-fpasso-ico, .job-fpasso.t-texto     .job-fpasso-nome { color: #7eb1ff; }
+.job-fpasso.t-audio     { border-color: rgba(139, 92, 246, .38);  background: rgba(139, 92, 246, .07); }
+.job-fpasso.t-audio     .job-fpasso-ico, .job-fpasso.t-audio     .job-fpasso-nome { color: #b3a0f8; }
+.job-fpasso.t-imagem    { border-color: rgba(31, 216, 164, .35);  background: rgba(31, 216, 164, .06); }
+.job-fpasso.t-imagem    .job-fpasso-ico, .job-fpasso.t-imagem    .job-fpasso-nome { color: #3fe0b6; }
+.job-fpasso.t-video     { border-color: rgba(245, 158, 11, .35);  background: rgba(245, 158, 11, .06); }
+.job-fpasso.t-video     .job-fpasso-ico, .job-fpasso.t-video     .job-fpasso-nome { color: #fbbf24; }
+.job-fpasso.t-documento { border-color: rgba(244, 63, 94, .32);   background: rgba(244, 63, 94, .05); }
+.job-fpasso.t-documento .job-fpasso-ico, .job-fpasso.t-documento .job-fpasso-nome { color: #fb7185; }
+
+.job-funil-disparar { width: 100%; margin-top: 10px; background: linear-gradient(135deg,#1fd8a4 0%,#3b82f6 60%,#8b5cf6 100%);
   color: #fff; border: none; border-radius: 8px; padding: 9px; font-size: 12px; font-weight: 700; cursor: pointer; }
 .job-funil-disparar:hover:not(:disabled) { filter: brightness(1.08); }
 .job-funil-disparar:disabled { background: #26262f; color: #646b80; cursor: default; }
+
+/* Ícones SVG inline (kit _svgIco) — alinhamento com o texto ao lado. */
+.job-tico { display: inline-flex; vertical-align: -2px; margin-right: 2px; }
+.job-tico.tico-texto { color: #7eb1ff; }
+.job-tico.tico-audio { color: #b3a0f8; }
+.job-tico.tico-imagem { color: #3fe0b6; }
+.job-fchip svg, .job-mini-btn svg, .job-midia-chip svg, .job-preview-midia-rot svg,
+.job-audio-quem svg, .job-img-lida svg { vertical-align: -2px; }
 
 /* ── Overlay de progresso do disparo ── */
 #job-funil-prog { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 2147483000;

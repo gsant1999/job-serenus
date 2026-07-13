@@ -490,6 +490,25 @@
   const _ICO_MENSAGENS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
   const _ICO_FUNIS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
 
+  // Kit de ícones SVG (traço, herda a cor via currentColor) — o Guilherme NÃO
+  // quer emoji em interface nenhuma do JOB; qualquer ícone novo sai daqui.
+  function _svgIco(nome, px) {
+    const p = {
+      texto: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+      audio: '<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>',
+      imagem: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
+      documento: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
+      video: '<polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>',
+      clipe: '<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+      relogio: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
+      chevron: '<polyline points="6 9 12 15 18 9"/>',
+      funil: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+      estrela: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+    }[nome] || '';
+    const s = px || 14;
+    return '<svg viewBox="0 0 24 24" width="' + s + '" height="' + s + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>';
+  }
+
   function criarTrilho() {
     if (document.getElementById('job-trilho')) return;
     const trilho = document.createElement('div');
@@ -681,8 +700,8 @@
     let midiaChip = '';
     if (_midiaAnexada) {
       const rot = _midiaAnexada.tipo === 'audio'
-        ? '🎤 Áudio pronto' + (_midiaAnexada.dur ? ' (' + fmtDuracao(_midiaAnexada.dur) + ')' : '')
-        : '🖼 Imagem pronta';
+        ? _svgIco('audio', 12) + ' Áudio pronto' + (_midiaAnexada.dur ? ' (' + fmtDuracao(_midiaAnexada.dur) + ')' : '')
+        : _svgIco('imagem', 12) + ' Imagem pronta';
       midiaChip = '<div class="job-midia-chip">' + rot +
         '<button class="job-midia-x" id="job-midia-descartar" title="Remover">×</button></div>';
     }
@@ -693,8 +712,8 @@
       '<datalist id="job-cats">' + categoriasExistentes().map((c) => '<option value="' + esc(c) + '">').join('') + '</datalist>' +
       '<textarea class="job-inp job-inp-txt" id="job-novo-texto" placeholder="Texto da mensagem…"></textarea>' +
       '<div class="job-novo-acoes">' +
-        '<button class="job-mini-btn" id="job-gravar-btn">🎤 Gravar áudio</button>' +
-        '<button class="job-mini-btn" id="job-anexar-btn">📎 Anexar arquivo</button>' +
+        '<button class="job-mini-btn" id="job-gravar-btn">' + _svgIco('audio', 12) + ' Gravar áudio</button>' +
+        '<button class="job-mini-btn" id="job-anexar-btn">' + _svgIco('clipe', 12) + ' Anexar arquivo</button>' +
         '<input type="file" id="job-arquivo-input" accept="audio/*,image/*" style="display:none">' +
       '</div>' +
       '<div id="job-grav-status" class="job-grav-status"></div>' +
@@ -714,7 +733,8 @@
   }
 
   function tipoIcone(m) {
-    return m.midia_tipo === 'audio' ? '🎤' : (m.midia_tipo === 'imagem' ? '🖼' : '💬');
+    const t = m.midia_tipo === 'audio' ? 'audio' : (m.midia_tipo === 'imagem' ? 'imagem' : 'texto');
+    return '<span class="job-tico tico-' + t + '">' + _svgIco(t, 13) + '</span>';
   }
 
   function modeloPassaFiltro(m) {
@@ -787,7 +807,13 @@
 
   function renderModelos(modelos) {
     const chips = ['todos', 'favoritos', 'texto', 'audio', 'imagem'].map((f) => {
-      const rot = { todos: 'Todos', favoritos: '★', texto: '💬', audio: '🎤', imagem: '🖼' }[f];
+      const rot = {
+        todos: 'Todos',
+        favoritos: _svgIco('estrela', 11),
+        texto: _svgIco('texto', 12),
+        audio: _svgIco('audio', 12),
+        imagem: _svgIco('imagem', 12),
+      }[f];
       return '<button class="job-fchip ' + (_waFiltro === f ? 'on' : '') + '" data-f="' + f + '">' + rot + '</button>';
     }).join('');
     return renderFormularioNovo() +
@@ -999,7 +1025,7 @@
     const nome = nomeDoContato() || 'este contato';
     let previaMidia = '';
     if (midiaTipo === 'audio' && modelo.midia_url) {
-      previaMidia = '<div class="job-preview-midia"><span class="job-preview-midia-rot">🎤 Nota de voz — ouça antes de enviar</span>' +
+      previaMidia = '<div class="job-preview-midia"><span class="job-preview-midia-rot">' + _svgIco('audio', 12) + ' Nota de voz — ouça antes de enviar</span>' +
         '<audio controls preload="none" src="' + esc(modelo.midia_url) + '" style="width:100%"></audio></div>';
     } else if (midiaTipo === 'imagem' && modelo.midia_url) {
       previaMidia = '<div class="job-preview-midia"><img src="' + esc(modelo.midia_url) + '" alt="" style="max-width:100%;max-height:180px;border-radius:8px"></div>';
@@ -1099,7 +1125,12 @@
   let _funilRodando = false, _funilCancelar = false;
 
   async function buscarFunis(forcar) {
-    if (!forcar && _funisCache && (Date.now() - _funisCache.ts) < FUNIS_CACHE_MS) return _funisCache.funis;
+    // ATENÇÃO: o cache tem que devolver o MESMO formato {ok, funis} do caminho
+    // fresco — já quebrou uma vez (cache devolvia o array cru, dispararFunil lia
+    // res.ok, dava undefined e alertava "não tem passos" com os passos na tela).
+    if (!forcar && _funisCache && (Date.now() - _funisCache.ts) < FUNIS_CACHE_MS) {
+      return { ok: true, funis: _funisCache.funis };
+    }
     // Devolve a resposta CRUA (não só o array) pra abrirSecaoFunis distinguir
     // "deu erro" de "não tem funil" — e nunca ficar preso no spinner.
     let resp;
@@ -1114,8 +1145,9 @@
     return { ok: true, funis };
   }
 
-  function funilTipoIcone(tipo) {
-    return tipo === 'audio' ? '🎤' : (tipo === 'imagem' ? '🖼' : (tipo === 'documento' ? '📄' : (tipo === 'video' ? '🎬' : '💬')));
+  function funilTipoIcone(tipo, px) {
+    const t = ['audio', 'imagem', 'documento', 'video'].indexOf(tipo) >= 0 ? tipo : 'texto';
+    return _svgIco(t, px || 13);
   }
 
   function fmtQuando(s) {
@@ -1148,56 +1180,88 @@
     }
   }
 
+  // Busca + "só favoritos" (padrão ZapVoice: Buscar… / Apenas favoritos).
+  let _fnBusca = '', _fnSoFav = false;
+
+  function funilPassaFiltro(f) {
+    if (_fnSoFav && !f.favorito) return false;
+    if (!_fnBusca) return true;
+    return (f.nome || '').toLowerCase().indexOf(_fnBusca) >= 0
+      || (f.categoria || '').toLowerCase().indexOf(_fnBusca) >= 0;
+  }
+
   function renderFunis(funis) {
-    let lista;
-    if (!funis.length) {
-      lista = '<div class="job-vazio">Nenhum funil ainda.<br>Monte o primeiro em <b>Funis WhatsApp</b> no site do JOB.</div>';
-    } else {
-      lista = funis.map(cardFunil).join('');
-    }
-    return '<div class="job-funis-intro">Dispare uma sequência pronta na conversa aberta — um passo após o outro, com os intervalos definidos.</div>' +
-      '<div id="job-funis-lista">' + lista + '</div>' +
+    return '<div class="job-biblioteca-controles">' +
+        '<input class="job-inp" id="job-busca-funil" placeholder="Buscar funil…" value="' + esc(_fnBusca) + '">' +
+        '<div class="job-fchips">' +
+          '<button class="job-fchip ' + (_fnSoFav ? '' : 'on') + '" data-fn-fav="0">Todos</button>' +
+          '<button class="job-fchip ' + (_fnSoFav ? 'on' : '') + '" data-fn-fav="1">' + _svgIco('estrela', 11) + ' Favoritos</button>' +
+        '</div>' +
+      '</div>' +
+      '<div id="job-funis-lista">' + listaFunisHTML(funis) + '</div>' +
       '<a class="job-funis-gerenciar" href="' + esc(_SITE_BASE_URL_EXT) + '/crm/funis" target="_blank" rel="noopener">Gerenciar funis no site →</a>';
+  }
+
+  function listaFunisHTML(funis) {
+    if (!funis.length) {
+      return '<div class="job-vazio">Nenhum funil ainda.<br>Monte o primeiro em <b>Funis WhatsApp</b> no site do JOB.</div>';
+    }
+    const vis = funis.filter(funilPassaFiltro);
+    if (!vis.length) return '<div class="job-vazio">Nenhum funil bate com esse filtro.</div>';
+    return vis.map(cardFunil).join('');
   }
 
   function cardFunil(f) {
     const passos = f.passos || [];
-    const tipos = {};
-    passos.forEach((p) => { tipos[p.tipo] = (tipos[p.tipo] || 0) + 1; });
-    const meta = Object.keys(tipos).map((t) => funilTipoIcone(t) + ' ' + tipos[t]).join('  ') || 'sem passos';
+    const totalS = passos.reduce((s, p) => s + (p.delay_segundos || 0), 0);
+    const meta = passos.length
+      ? passos.length + ' passo' + (passos.length > 1 ? 's' : '') + (totalS ? ' · ~' + fmtQuando(totalS).replace('após ', '') : '')
+      : 'sem passos';
+    // Cada passo é uma caixinha colorida pelo tipo (padrão ZapVoice): o
+    // consultor bate o olho e sabe o que vai sair — áudio, imagem, texto, PDF.
     const listaPassos = passos.map((p, i) =>
-      '<div class="job-funil-passo">' +
-        '<span class="job-funil-passo-num">' + (i + 1) + '</span>' +
-        '<span class="job-funil-passo-ico">' + funilTipoIcone(p.tipo) + '</span>' +
-        '<span class="job-funil-passo-nome">' + esc(p.nome) + '</span>' +
-        '<span class="job-funil-passo-quando">' + esc(fmtQuando(p.delay_segundos)) + '</span>' +
+      '<div class="job-fpasso t-' + esc(p.tipo || 'texto') + '">' +
+        '<span class="job-fpasso-ico">' + funilTipoIcone(p.tipo, 14) + '</span>' +
+        '<div class="job-fpasso-info">' +
+          '<div class="job-fpasso-nome">' + esc(p.nome) + '</div>' +
+          '<div class="job-fpasso-quando">' + _svgIco('relogio', 10) + ' Enviando ' + esc(fmtQuando(p.delay_segundos)) + '</div>' +
+        '</div>' +
+        '<span class="job-fpasso-num">' + (i + 1) + '</span>' +
       '</div>').join('');
     return '<div class="job-funil-card" data-funil-id="' + f.id + '">' +
       '<div class="job-funil-topo">' +
+        '<span class="job-funil-ico">' + _svgIco('funil', 15) + '</span>' +
         '<div class="job-funil-titulo">' +
-          '<div class="job-funil-nome">' + (f.favorito ? '<span class="job-funil-star">★</span> ' : '') + esc(f.nome) + '</div>' +
-          (f.categoria ? '<div class="job-funil-cat">' + esc(f.categoria) + '</div>' : '') +
-          '<div class="job-funil-meta">' + meta + '</div>' +
+          '<div class="job-funil-nome">' + esc(f.nome) + (f.favorito ? ' <span class="job-funil-star">' + _svgIco('estrela', 11) + '</span>' : '') + '</div>' +
+          '<div class="job-funil-meta">' + (f.categoria ? esc(f.categoria) + ' · ' : '') + esc(meta) + '</div>' +
         '</div>' +
-        '<button class="job-funil-expandir" data-funil-id="' + f.id + '" title="Ver passos">▾</button>' +
+        '<button class="job-funil-expandir" title="Mostrar/ocultar passos">' + _svgIco('chevron', 14) + '</button>' +
       '</div>' +
-      '<div class="job-funil-passos" hidden>' + (listaPassos || '<div class="job-vazio" style="padding:10px">Funil sem passos.</div>') + '</div>' +
+      '<div class="job-funil-passos">' + (listaPassos || '<div class="job-vazio" style="padding:8px 0 2px">Funil sem passos.</div>') + '</div>' +
       '<button class="job-funil-disparar" data-funil-id="' + f.id + '"' + (passos.length ? '' : ' disabled') + '>' +
-        _ICO_ENVIAR + ' Disparar na conversa</button>' +
+        _ICO_ENVIAR + ' Disparar funil</button>' +
     '</div>';
   }
 
   const _ICO_ENVIAR = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
 
-  function ligarAcoesFunis() {
+  function rerenderFunisLista() {
+    const c = document.getElementById('job-funis-lista');
+    if (!c) return;
+    c.innerHTML = listaFunisHTML(_funisCache ? _funisCache.funis : []);
+    ligarAcoesListaFunis();
+  }
+
+  // Ações da LISTA (rebindadas a cada filtro/busca) separadas dos controles
+  // (bindados uma vez — senão a busca perdia o foco a cada tecla).
+  function ligarAcoesListaFunis() {
     document.querySelectorAll('.job-funil-expandir').forEach((btn) => {
       btn.addEventListener('click', () => {
         const card = btn.closest('.job-funil-card');
         const passos = card && card.querySelector('.job-funil-passos');
         if (!passos) return;
-        const aberto = !passos.hasAttribute('hidden');
-        if (aberto) { passos.setAttribute('hidden', ''); btn.textContent = '▾'; }
-        else { passos.removeAttribute('hidden'); btn.textContent = '▴'; }
+        passos.classList.toggle('fechado');
+        btn.classList.toggle('fechado');
       });
     });
     document.querySelectorAll('.job-funil-disparar[data-funil-id]').forEach((btn) => {
@@ -1205,14 +1269,33 @@
     });
   }
 
+  function ligarAcoesFunis() {
+    const busca = document.getElementById('job-busca-funil');
+    if (busca) busca.addEventListener('input', () => {
+      _fnBusca = (busca.value || '').trim().toLowerCase();
+      rerenderFunisLista();
+    });
+    document.querySelectorAll('.job-fchip[data-fn-fav]').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        _fnSoFav = chip.dataset.fnFav === '1';
+        document.querySelectorAll('.job-fchip[data-fn-fav]').forEach((c) => c.classList.toggle('on', c === chip));
+        rerenderFunisLista();
+      });
+    });
+    ligarAcoesListaFunis();
+  }
+
   // ── Toca a sequência: espera o intervalo do passo, manda, próximo. Mostra
   //    progresso passo-a-passo e deixa cancelar no meio. ──
   async function dispararFunil(funilId) {
     if (_funilRodando) { alert('Já tem um funil rodando — espere terminar ou cancele.'); return; }
     const res = await buscarFunis(false);
-    const funis = (res && res.ok && res.funis) || [];
-    const funil = funis.find((f) => String(f.id) === String(funilId));
-    if (!funil || !(funil.passos || []).length) { alert('Esse funil não tem passos.'); return; }
+    // Três casos DIFERENTES, três mensagens — misturar tudo em "não tem passos"
+    // já mascarou um bug real de cache.
+    if (!res || !res.ok) { alert('Não consegui carregar o funil: ' + ((res && res.erro) || 'tente de novo.')); return; }
+    const funil = (res.funis || []).find((f) => String(f.id) === String(funilId));
+    if (!funil) { alert('Funil não encontrado — feche e abra a aba Funis pra recarregar.'); return; }
+    if (!(funil.passos || []).length) { alert('Esse funil não tem passos. Adicione passos no site (Funis WhatsApp).'); return; }
     const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
     if (!usuarioId) { alert('Selecione seu usuário no popup da extensão primeiro.'); return; }
     let chatId = '';
@@ -1438,7 +1521,7 @@
     if (!t.length) return '';
     const linhas = t.map((x) => {
       const quem = x.de === 'lead' ? 'Cliente' : 'Consultor';
-      return '<div class="job-audio-item"><span class="job-audio-quem">🎤 ' + esc(quem) +
+      return '<div class="job-audio-item"><span class="job-audio-quem">' + _svgIco('audio', 10) + ' ' + esc(quem) +
         (x.hora ? ' · ' + esc(String(x.hora).split(',')[0]) : '') + '</span>' +
         esc(x.texto) + '</div>';
     }).join('');
@@ -1462,12 +1545,12 @@
     const imgsLidas = (ia.leitura_imagens || []).filter(Boolean);
     const blocoImgs = imgsLidas.length
       ? '<div class="job-sec">O que a IA leu nas imagens (' + (ia.imagens_lidas || imgsLidas.length) + ')</div>' +
-        imgsLidas.map((t) => '<div class="job-img-lida">🖼 ' + esc(t) + '</div>').join('')
+        imgsLidas.map((t) => '<div class="job-img-lida">' + _svgIco('imagem', 11) + ' ' + esc(t) + '</div>').join('')
       : '';
     const docsLidos = (ia.leitura_documentos || []).filter(Boolean);
     const blocoDocs = docsLidos.length
       ? '<div class="job-sec">O que a IA leu nos PDFs (' + (ia.documentos_lidos || docsLidos.length) + ')</div>' +
-        docsLidos.map((t) => '<div class="job-img-lida">📄 ' + esc(t) + '</div>').join('')
+        docsLidos.map((t) => '<div class="job-img-lida">' + _svgIco('documento', 11) + ' ' + esc(t) + '</div>').join('')
       : '';
     return (
       '<div class="job-sec">Leitura da IA <span class="job-ia-badge">Claude</span></div>' +
