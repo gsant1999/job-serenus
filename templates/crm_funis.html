@@ -84,6 +84,14 @@
   .fn-picker-linha { display:flex; gap:10px; }
   .fn-picker-linha > div { flex:1; }
   .fn-picker-acoes { display:flex; justify-content:flex-end; gap:8px; }
+  .fn-pk-combo { position:relative; }
+  .fn-pk-lista { position:absolute; top:calc(100% - 8px); left:0; right:0; z-index:60; background:var(--panel); border:1px solid var(--borda-2); border-radius:10px; max-height:280px; overflow-y:auto; box-shadow:0 14px 40px rgba(0,0,0,.45); }
+  .fn-pk-item { display:flex; align-items:center; gap:9px; width:100%; text-align:left; background:none; border:none; border-bottom:1px solid var(--borda); padding:8px 11px; cursor:pointer; }
+  .fn-pk-item:hover { background:var(--panel-2); }
+  .fn-pk-item:last-child { border-bottom:none; }
+  .fn-pk-nome { flex:1; min-width:0; font-size:12.5px; font-weight:600; color:var(--texto); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fn-pk-cat { flex-shrink:0; font-size:10px; font-weight:700; color:var(--cinza-2); }
+  .fn-pk-vazio { padding:14px; font-size:12px; color:var(--cinza-2); text-align:center; }
 
   .fn-empty { text-align:center; color:var(--cinza-2); padding:60px 20px; }
   .fn-empty svg { width:44px; height:44px; opacity:.35; margin-bottom:12px; }
@@ -212,12 +220,6 @@ function renderBuilder(){
     </div>`;
   }).join('');
 
-  const opcoes = MODELOS.map(m=>{
-    const t=(m.midia_tipo && ICO[m.midia_tipo])? m.midia_tipo : 'texto';
-    const tag = t==='texto'?'[texto]':(t==='audio'?'[áudio]':(t==='imagem'?'[imagem]':(t==='documento'?'[PDF]':'[mídia]')));
-    return `<option value="${m.id}">${tag} ${escapar(m.nome)}</option>`;
-  }).join('');
-
   b.innerHTML = `
     <div class="fn-b-head">
       <div style="flex:1; min-width:0;">
@@ -233,8 +235,12 @@ function renderBuilder(){
     <div class="fn-picker">
       <label>Adicionar passo</label>
       <div class="fn-picker-linha">
-        <div style="flex:2"><select id="pk-modelo">${opcoes||'<option value="">Nenhum modelo na biblioteca</option>'}</select></div>
-        <div style="flex:1"><input type="number" id="pk-delay" min="0" max="3600" value="5" title="Segundos de espera antes de mandar"></div>
+        <div class="fn-pk-combo" style="flex:2">
+          <input type="text" id="pk-busca" placeholder="Buscar modelo por nome, categoria ou tipo…" autocomplete="off"
+                 oninput="filtrarPicker()" onfocus="filtrarPicker()">
+          <div class="fn-pk-lista" id="pk-lista" hidden></div>
+        </div>
+        <div style="flex:1"><input type="number" id="pk-delay" min="0" max="3600" value="5" title="Segundos de espera antes de mandar este passo"></div>
       </div>
       <div class="fn-picker-acoes">
         <button class="btn-azul" onclick="adicionarPasso(${f.id})">Adicionar à sequência</button>
@@ -274,11 +280,51 @@ async function excluirFunil(id){
   if(!confirm('Excluir o funil "'+(f?f.nome:'')+'" e todos os seus passos?')) return;
   const d=await api('/crm/funis/'+id+'/excluir',{}); if(d.ok){ selecionado=null; location.hash=''; location.reload(); }
 }
+// ── Combo com busca do "Adicionar passo" — um select nativo com 400+ modelos
+//    era inutilizável. Digita → filtra na hora → clica pra escolher. ──
+let _pkSel = null;
+
+function tipoDoModelo(m){ return (m.midia_tipo && ICO[m.midia_tipo]) ? m.midia_tipo : 'texto'; }
+function rotuloTipo(t){ return t==='audio'?'áudio':(t==='imagem'?'imagem':(t==='documento'?'pdf':(t==='video'?'vídeo':'texto'))); }
+
+function filtrarPicker(){
+  const inp=document.getElementById('pk-busca'), lista=document.getElementById('pk-lista');
+  if(!inp||!lista) return;
+  if(_pkSel && inp.value!==_pkSel.nome) _pkSel=null; // editou depois de escolher
+  const q=(inp.value||'').toLowerCase().trim();
+  const res=MODELOS.filter(m=>{
+    if(!q) return true;
+    return (m.nome||'').toLowerCase().includes(q)
+      || (m.categoria||'').toLowerCase().includes(q)
+      || rotuloTipo(tipoDoModelo(m)).includes(q);
+  }).slice(0,60);
+  lista.innerHTML = res.length ? res.map(m=>{
+    const t=tipoDoModelo(m);
+    return `<button type="button" class="fn-pk-item" onclick="escolherModelo(${m.id})">
+      <span class="fn-passo-ico t-${t}" style="width:26px;height:26px;border-radius:7px;">${ICO[t]}</span>
+      <span class="fn-pk-nome">${escapar(m.nome)}</span>
+      ${m.categoria?`<span class="fn-pk-cat">${escapar(m.categoria)}</span>`:''}
+    </button>`;
+  }).join('') : '<div class="fn-pk-vazio">Nenhum modelo bate com essa busca.</div>';
+  lista.hidden=false;
+}
+
+function escolherModelo(id){
+  const m=MODELOS.find(x=>x.id===id); if(!m) return;
+  _pkSel=m;
+  const inp=document.getElementById('pk-busca'); if(inp) inp.value=m.nome;
+  const lista=document.getElementById('pk-lista'); if(lista) lista.hidden=true;
+}
+
+document.addEventListener('click',(e)=>{
+  const lista=document.getElementById('pk-lista');
+  if(lista && !e.target.closest('.fn-pk-combo')) lista.hidden=true;
+});
+
 async function adicionarPasso(fid){
-  const modelo_id=document.getElementById('pk-modelo').value;
+  if(!_pkSel){ alert('Busque e escolha um modelo da biblioteca.'); document.getElementById('pk-busca') && document.getElementById('pk-busca').focus(); return; }
   const delay_segundos=document.getElementById('pk-delay').value;
-  if(!modelo_id){ alert('Escolha um modelo.'); return; }
-  const d=await api('/crm/funis/'+fid+'/passo/novo',{modelo_id,delay_segundos});
+  const d=await api('/crm/funis/'+fid+'/passo/novo',{modelo_id:_pkSel.id,delay_segundos});
   if(d.ok) recarregar(fid);
 }
 async function mudarDelay(pid, val){ const d=await api('/crm/funis/passo/'+pid+'/delay',{delay_segundos:val}); if(d.ok) recarregar(selecionado); }
