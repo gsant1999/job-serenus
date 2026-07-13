@@ -12,16 +12,16 @@
   .fn-busca { flex:1; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:8px 11px; font-size:12.5px; color:var(--texto); }
   .fn-busca:focus { outline:none; border-color:var(--azul); }
   .fn-lista { display:flex; flex-direction:column; gap:8px; max-height:70vh; overflow-y:auto; }
-  .fn-item { text-align:left; width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:11px 12px; cursor:pointer; transition:.12s; position:relative; }
+  .fn-item { text-align:left; width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:10px 12px; cursor:pointer; transition:.12s; position:relative; display:flex; align-items:center; gap:10px; }
   .fn-item:hover { border-color:var(--borda-2); }
   .fn-item.sel { border-color:transparent; }
   .fn-item.sel::before { content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px; border-radius:0 3px 3px 0; background:var(--grad-frio); }
-  .fn-item-nome { font-size:13px; font-weight:700; color:var(--texto); padding-left:6px; display:flex; align-items:center; gap:6px; }
-  .fn-item-cat { font-size:10.5px; color:var(--cinza-2); padding-left:6px; margin-top:2px; }
-  .fn-item-meta { display:flex; gap:10px; padding-left:6px; margin-top:7px; font-size:10.5px; color:var(--cinza); font-variant-numeric:tabular-nums; }
-  .fn-item-meta span { display:inline-flex; align-items:center; gap:3px; }
-  .fn-item-meta svg { width:12px; height:12px; opacity:.75; }
-  .fn-star { position:absolute; top:9px; right:10px; font-size:14px; color:var(--cinza-2); }
+  .fn-item-ico { width:30px; height:30px; flex-shrink:0; border-radius:8px; background:var(--verde-soft); color:var(--verde); display:flex; align-items:center; justify-content:center; }
+  .fn-item-ico svg { width:15px; height:15px; }
+  .fn-item-info { flex:1; min-width:0; }
+  .fn-item-nome { font-size:12.5px; font-weight:700; color:var(--texto); line-height:1.3; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  .fn-item-sub { font-size:10.5px; color:var(--cinza); margin-top:2px; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fn-star { flex-shrink:0; font-size:14px; color:var(--cinza-2); align-self:flex-start; }
   .fn-star.on { color:#f5c518; }
   .fn-vazio { text-align:center; color:var(--cinza-2); font-size:12px; padding:24px 8px; }
 
@@ -36,20 +36,38 @@
   .fn-b-acao.perigo:hover { color:#f43f5e; border-color:rgba(244,63,94,.4); }
   .fn-b-acao.star.on { color:#f5c518; }
 
-  .fn-passos { padding:14px 18px; display:flex; flex-direction:column; gap:10px; }
-  .fn-passo { display:flex; align-items:center; gap:12px; background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:11px 13px; }
-  .fn-passo-ord { width:22px; height:22px; flex-shrink:0; border-radius:50%; background:var(--panel-3); color:var(--cinza); font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; font-variant-numeric:tabular-nums; }
-  .fn-passo-ico { width:34px; height:34px; flex-shrink:0; border-radius:9px; display:flex; align-items:center; justify-content:center; }
-  .fn-passo-ico svg { width:17px; height:17px; }
+  .fn-passos { padding:14px 18px; display:flex; flex-direction:column; gap:8px; }
+  .fn-passo { display:flex; align-items:center; gap:11px; background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:10px 12px; }
+  .fn-passo.t-texto { border-color:rgba(59,130,246,.32); background:rgba(59,130,246,.05); }
+  .fn-passo.t-audio { border-color:rgba(139,92,246,.35); background:rgba(139,92,246,.06); }
+  .fn-passo.t-imagem { border-color:rgba(31,216,164,.32); background:rgba(31,216,164,.05); }
+  .fn-passo.t-video { border-color:rgba(245,158,11,.32); background:rgba(245,158,11,.05); }
+  .fn-passo.t-documento { border-color:rgba(244,63,94,.3); background:rgba(244,63,94,.04); }
+  .fn-passo-ord { width:20px; height:20px; flex-shrink:0; border-radius:50%; background:var(--panel-3); color:var(--cinza); font-size:10.5px; font-weight:800; display:flex; align-items:center; justify-content:center; font-variant-numeric:tabular-nums; }
+  .fn-passo-ico { width:32px; height:32px; flex-shrink:0; border-radius:9px; display:flex; align-items:center; justify-content:center; }
+  .fn-passo-ico svg { width:16px; height:16px; }
   .fn-passo-ico.t-texto { background:rgba(59,130,246,.14); color:var(--azul); }
   .fn-passo-ico.t-audio { background:rgba(139,92,246,.16); color:var(--roxo); }
   .fn-passo-ico.t-imagem { background:var(--verde-soft); color:var(--verde); }
+  .fn-passo-ico.t-video { background:rgba(245,158,11,.14); color:#f59e0b; }
   .fn-passo-ico.t-documento { background:rgba(244,63,94,.14); color:#f43f5e; }
   .fn-passo-corpo { flex:1; min-width:0; }
-  .fn-passo-nome { font-size:13px; font-weight:700; color:var(--texto); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .fn-passo-quando { font-size:11px; color:var(--cinza); margin-top:2px; display:flex; align-items:center; gap:5px; }
-  .fn-passo-quando svg { width:12px; height:12px; opacity:.7; }
-  .fn-delay-inp { width:60px; background:var(--panel-3); border:1px solid var(--borda); border-radius:6px; padding:3px 6px; font-size:11px; color:var(--texto); text-align:center; font-variant-numeric:tabular-nums; }
+  .fn-passo-nome { font-size:12.5px; font-weight:700; color:var(--texto); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fn-passo.t-texto .fn-passo-nome { color:#7eb1ff; }
+  .fn-passo.t-audio .fn-passo-nome { color:#b3a0f8; }
+  .fn-passo.t-imagem .fn-passo-nome { color:#3fe0b6; }
+  .fn-passo.t-video .fn-passo-nome { color:#fbbf24; }
+  .fn-passo.t-documento .fn-passo-nome { color:#fb7185; }
+  [data-theme="light"] .fn-passo.t-texto .fn-passo-nome { color:#2563eb; }
+  [data-theme="light"] .fn-passo.t-audio .fn-passo-nome { color:#7c3aed; }
+  [data-theme="light"] .fn-passo.t-imagem .fn-passo-nome { color:#0d9268; }
+  [data-theme="light"] .fn-passo.t-video .fn-passo-nome { color:#b45309; }
+  [data-theme="light"] .fn-passo.t-documento .fn-passo-nome { color:#e11d48; }
+  .fn-passo-quando { font-size:11px; color:var(--cinza); margin-top:3px; display:flex; align-items:center; gap:5px; }
+  .fn-passo-quando svg { width:12px; height:12px; opacity:.7; flex-shrink:0; }
+  /* input.fn-delay-inp com seletor composto: o base.html tem input[type=number]
+     global com width:100% que ganharia da classe sozinha (já estourou o layout). */
+  .fn-passo-quando input.fn-delay-inp { width:58px; background:var(--panel-3); border:1px solid var(--borda); border-radius:6px; padding:3px 6px; font-size:11px; color:var(--texto); text-align:center; font-variant-numeric:tabular-nums; box-shadow:none; }
   .fn-passo-acoes { display:flex; gap:4px; flex-shrink:0; }
   .fn-mini { background:none; border:none; color:var(--cinza-2); cursor:pointer; width:26px; height:26px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; }
   .fn-mini:hover { color:var(--texto); background:var(--panel-3); }
@@ -146,29 +164,22 @@ function tipoDePasso(p){ return (p.tipo && ICO[p.tipo]) ? p.tipo : 'texto'; }
 function fmtDelay(s){ s = s||0; if(s<=0) return 'imediatamente'; const m=Math.floor(s/60), r=s%60; if(m&&r) return `após ${m}min ${r}s`; if(m) return `após ${m}min`; return `após ${r}s`; }
 function escapar(t){ const d=document.createElement('div'); d.textContent=t==null?'':String(t); return d.innerHTML; }
 
-function contaTipos(f){
-  const c={audio:0,imagem:0,texto:0,documento:0,video:0};
-  (f.passos||[]).forEach(p=>{ c[tipoDePasso(p)]=(c[tipoDePasso(p)]||0)+1; });
-  return c;
-}
-
 function renderLista(){
   const busca=(document.getElementById('fn-busca').value||'').toLowerCase();
   const lista=document.getElementById('fn-lista');
   const vis=FUNIS.filter(f=> !busca || (f.nome||'').toLowerCase().includes(busca) || (f.categoria||'').toLowerCase().includes(busca));
   if(!vis.length){ lista.innerHTML='<div class="fn-vazio">'+(FUNIS.length?'Nenhum funil bate com a busca.':'Nenhum funil ainda. Crie o primeiro.')+'</div>'; return; }
   lista.innerHTML = vis.map(f=>{
-    const c=contaTipos(f);
-    const metas=[];
-    if(c.audio) metas.push(`<span>${ICO.audio}${c.audio}</span>`);
-    if(c.imagem) metas.push(`<span>${ICO.imagem}${c.imagem}</span>`);
-    if(c.texto) metas.push(`<span>${ICO.texto}${c.texto}</span>`);
-    if(c.documento) metas.push(`<span>${ICO.documento}${c.documento}</span>`);
+    const n=(f.passos||[]).length;
+    const sub=[f.categoria, n?`${n} passo${n>1?'s':''}`:'sem passos', (f.total_delay?`~${fmtDelay(f.total_delay).replace('após ','')}`:'')]
+      .filter(Boolean).join(' · ');
     return `<button class="fn-item ${selecionado===f.id?'sel':''}" onclick="selecionar(${f.id})">
+      <span class="fn-item-ico">${ICO.funil}</span>
+      <div class="fn-item-info">
+        <div class="fn-item-nome">${escapar(f.nome)}</div>
+        <div class="fn-item-sub">${escapar(sub)}</div>
+      </div>
       <span class="fn-star ${f.favorito?'on':''}">${f.favorito?'★':'☆'}</span>
-      <div class="fn-item-nome">${ICO.funil}${escapar(f.nome)}</div>
-      ${f.categoria?`<div class="fn-item-cat">${escapar(f.categoria)}</div>`:''}
-      <div class="fn-item-meta">${metas.join('')||'<span style="opacity:.6">sem passos</span>'}</div>
     </button>`;
   }).join('');
 }
@@ -184,14 +195,14 @@ function renderBuilder(){
   const total=passos.reduce((s,p)=>s+(p.delay_segundos||0),0);
   const linhas = passos.map((p,i)=>{
     const t=tipoDePasso(p);
-    return `<div class="fn-passo" data-passo="${p.id}">
+    return `<div class="fn-passo t-${t}" data-passo="${p.id}">
       <div class="fn-passo-ord">${i+1}</div>
       <div class="fn-passo-ico t-${t}">${ICO[t]}</div>
       <div class="fn-passo-corpo">
         <div class="fn-passo-nome">${escapar(p.modelo_nome)}</div>
-        <div class="fn-passo-quando">${ICO.relogio} Enviando
+        <div class="fn-passo-quando">${ICO.relogio} Enviando após
           <input type="number" class="fn-delay-inp" min="0" max="3600" value="${p.delay_segundos||0}"
-                 onchange="mudarDelay(${p.id}, this.value)" title="Segundos de espera antes deste passo"> s depois</div>
+                 onchange="mudarDelay(${p.id}, this.value)" title="Segundos de espera antes deste passo"> s</div>
       </div>
       <div class="fn-passo-acoes">
         <button class="fn-mini" onclick="mover(${p.id},'cima')" ${i===0?'disabled':''} title="Subir">${ICO.cima}</button>
