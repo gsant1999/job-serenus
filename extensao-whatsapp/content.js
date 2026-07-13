@@ -626,26 +626,79 @@
       '</div>';
   }
 
+  function telaBuscandoUltima() {
+    return '<div class="job-carregando"><div class="job-spin"></div><div>Verificando análise salva…</div></div>';
+  }
+
+  function fmtDataHora(s) {
+    if (!s) return '';
+    try {
+      const d = new Date(String(s).replace(' ', 'T'));
+      if (isNaN(d.getTime())) return String(s);
+      const p = (n) => String(n).padStart(2, '0');
+      return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear() + ' às ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    } catch (e) { return String(s); }
+  }
+
+  // Retrato da ÚLTIMA análise salva no JOB (pode ter rodado em outro
+  // computador, ou nesta mesma antes de fechar o Chrome) — a extensão só
+  // guarda o resultado completo em memória (Map _analises), que se perde ao
+  // recarregar; sem isso o consultor via "nenhuma análise" à toa toda vez que
+  // reabria a conversa, mesmo já tendo analisado antes.
+  function telaUltimaAnaliseSalva(ua, totalMsgs) {
+    const cor = corFaixa(ua.faixa);
+    return '<div class="job-ultima-analise">' +
+      '<div class="job-ultima-analise-tag">Última análise salva</div>' +
+      '<div class="job-score-wrap">' +
+        '<div class="job-score-num" style="color:' + cor + '">' + (ua.score ?? '—') + '</div>' +
+        '<div class="job-score-meta">' +
+          '<div class="job-score-faixa" style="color:' + cor + '">' + esc((ua.faixa || '').toUpperCase()) + '</div>' +
+          '<div class="job-score-sub">' + esc(fmtDataHora(ua.criado_em)) + (totalMsgs ? ' · ' + totalMsgs + ' mensagens' : '') + '</div>' +
+        '</div>' +
+      '</div>' +
+      (ua.resumo ? '<div class="job-resumo">' + esc(ua.resumo) + '</div>' : '') +
+      (ua.lead_id ? '<a class="job-lead-ok" href="' + esc(_SITE_BASE_URL_EXT) + '/crm?lead=' + ua.lead_id + '" target="_blank" rel="noopener">Abrir lead no CRM</a>' : '') +
+      '<a class="job-lead-ok" href="' + esc(ua.conversa_url) + '" target="_blank" rel="noopener">Ver conversa completa</a>' +
+      '<button class="job-analisar-btn" id="job-analisar-btn" style="margin-top:10px;">Analisar de novo</button>' +
+      '</div>';
+  }
+
   // Chama de novo o conteúdo certo da seção "Análise" quando o consultor troca
   // de conversa — nunca deixa a análise do cliente anterior "grudada" na tela
   // do cliente novo. Só mexe se a seção estiver de fato aberta agora.
-  function sincronizarPainelComConversa() {
+  async function sincronizarPainelComConversa() {
     if (_secaoAtiva !== 'analise') return;
     const chaveAtual = chaveConversa(telefoneDoContato(), nomeDoContato());
     const doConversaAtual = [..._analises.values()]
       .filter((a) => a.chave === chaveAtual)
       .sort((a, b) => b.iniciadoEm - a.iniciadoEm)[0];
-    if (!doConversaAtual) { setCorpoSecao(telaSemAnalise()); return; }
-    if (doConversaAtual.status === 'rodando') {
-      setCorpoSecao(telaCarregando(doConversaAtual.reqId, doConversaAtual.statusTexto || 'Analisando…'));
-    } else if (doConversaAtual.status === 'ok') {
-      setCorpoSecao(renderResultado(doConversaAtual.resultado, doConversaAtual.nome, doConversaAtual.telefone, doConversaAtual.totalMsgs));
-      ligarBotaoCopiar();
-    } else if (doConversaAtual.status === 'erro') {
-      setCorpoSecao('<div class="job-erro">' + esc(doConversaAtual.erro || 'Falha ao analisar') + '</div>' + telaSemAnalise());
-    } else if (doConversaAtual.status === 'cancelado') {
-      setCorpoSecao('<div class="job-erro">Análise cancelada.</div>' + telaSemAnalise());
+    if (doConversaAtual) {
+      if (doConversaAtual.status === 'rodando') {
+        setCorpoSecao(telaCarregando(doConversaAtual.reqId, doConversaAtual.statusTexto || 'Analisando…'));
+      } else if (doConversaAtual.status === 'ok') {
+        setCorpoSecao(renderResultado(doConversaAtual.resultado, doConversaAtual.nome, doConversaAtual.telefone, doConversaAtual.totalMsgs));
+        ligarBotaoCopiar();
+      } else if (doConversaAtual.status === 'erro') {
+        setCorpoSecao('<div class="job-erro">' + esc(doConversaAtual.erro || 'Falha ao analisar') + '</div>' + telaSemAnalise());
+      } else if (doConversaAtual.status === 'cancelado') {
+        setCorpoSecao('<div class="job-erro">Análise cancelada.</div>' + telaSemAnalise());
+      }
+      return;
     }
+    // Nada rodado NESTA sessão — pergunta ao JOB se existe uma análise salva
+    // de antes (outra sessão/computador). chaveAtual é comparada de novo
+    // depois do fetch pra não pintar a tela errada se o consultor já trocou
+    // de conversa enquanto a busca estava em voo.
+    setCorpoSecao(telaBuscandoUltima());
+    let telefone = '';
+    try { telefone = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { telefone = telefoneDoContato(); }
+    if (_secaoAtiva !== 'analise' || chaveConversa(telefoneDoContato(), nomeDoContato()) !== chaveAtual) return;
+    if (!telefone) { setCorpoSecao(telaSemAnalise()); return; }
+    let resp = null;
+    try { resp = await chrome.runtime.sendMessage({ type: 'estado', telefone }); } catch (e) { /* segue sem retrato */ }
+    if (_secaoAtiva !== 'analise' || chaveConversa(telefoneDoContato(), nomeDoContato()) !== chaveAtual) return;
+    const ultima = resp && resp.ok && resp.existe && resp.ultima_analise;
+    setCorpoSecao(ultima ? telaUltimaAnaliseSalva(ultima, resp.total_mensagens) : telaSemAnalise());
   }
 
   function cancelarAnalise(reqId) {

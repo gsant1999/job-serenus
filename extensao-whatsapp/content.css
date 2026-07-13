@@ -107,6 +107,17 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
 }
 .job-analisar-btn:hover { background: #5a97f8; }
 
+/* ── Última análise salva (retrato vindo do JOB — a extensão não guarda
+   resultado entre sessões, só na memória da aba) ── */
+.job-ultima-analise { padding: 2px 0 6px; }
+.job-ultima-analise-tag {
+  display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .4px;
+  text-transform: uppercase; color: #9aa1b5; background: #1b1b27;
+  border: 1px solid #26262f; border-radius: 20px; padding: 3px 10px; margin-bottom: 12px;
+}
+.job-ultima-analise .job-lead-ok { display: block; text-align: center; margin-bottom: 6px; }
+.job-ultima-analise .job-analisar-btn { display: block; width: 100%; }
+
 /* ── Seção Mensagens: formulário de novo modelo ── */
 .job-novo-modelo { margin-top: 2px;
   background: #1b1b27; border: 1px solid #26262f; border-radius: 12px;

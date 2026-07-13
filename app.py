@@ -9007,10 +9007,11 @@ def api_whatsapp_ping():
 @app.route('/api/whatsapp/estado', methods=['GET', 'OPTIONS'])
 def api_whatsapp_estado():
     """A extensão consulta ANTES de raspar a conversa: se já existe uma análise
-    anterior pra esse telefone, devolve a hora da última mensagem conhecida.
-    Assim a extensão só precisa carregar/mandar o histórico até esse ponto —
-    não o passado inteiro de novo — deixando a leitura bem mais rápida em
-    conversas já analisadas antes."""
+    anterior pra esse telefone, devolve a hora da última mensagem conhecida
+    (pra ler só o histórico novo, não o passado inteiro de novo) E um retrato
+    da última análise (score/faixa/resumo/data) — pra o painel mostrar "última
+    análise salva" mesmo depois de fechar e reabrir o Chrome, já que a extensão
+    só guarda análises rodadas na sessão atual em memória (Map, não storage)."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
@@ -9019,19 +9020,28 @@ def api_whatsapp_estado():
     if not tel_norm:
         return _wa_cors(jsonify({"ok": True, "existe": False}))
     conn = db()
-    row = conn.execute("""SELECT conversa_json FROM whatsapp_analises
-        WHERE telefone_norm=? ORDER BY id DESC LIMIT 1""", (tel_norm,)).fetchone()
+    row = conn.execute("""SELECT id, conversa_json, score, score_faixa, resumo, criado_em, lead_id
+        FROM whatsapp_analises WHERE telefone_norm=? ORDER BY id DESC LIMIT 1""", (tel_norm,)).fetchone()
     close_db(conn)
     if not row:
         return _wa_cors(jsonify({"ok": True, "existe": False}))
+    row = dict(row)
     try:
         msgs = json.loads(row['conversa_json'] or '[]')
     except Exception:
         msgs = []
     if not msgs:
         return _wa_cors(jsonify({"ok": True, "existe": False}))
-    return _wa_cors(jsonify({"ok": True, "existe": True, "ultima_hora": msgs[-1].get('hora'),
-                              "total_mensagens": len(msgs)}))
+    return _wa_cors(jsonify({
+        "ok": True, "existe": True, "ultima_hora": msgs[-1].get('hora'),
+        "total_mensagens": len(msgs),
+        "ultima_analise": {
+            "id": row['id'], "score": row['score'], "faixa": row['score_faixa'],
+            "resumo": row['resumo'], "criado_em": row['criado_em'],
+            "lead_id": row['lead_id'],
+            "conversa_url": f"{_SITE_BASE_URL}/whatsapp-analises/{row['id']}/conversa",
+        },
+    }))
 
 
 # ─── FILA DE ENVIO DA EXTENSÃO (Fase 1 — envio avulso de texto) ──────────────
