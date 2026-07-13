@@ -1786,6 +1786,9 @@ def init_db():
         ("fluxo_envio_log", "modelo_id", "INTEGER"),
         # Telefone do usuário (WhatsApp p/ notificações via WaSpeed e link wa.me nos e-mails)
         ("usuarios", "telefone", "TEXT"),
+        # Opt-out pessoal do aviso de LEAD NOVO no WhatsApp (sino interno
+        # continua sempre ligado, não tem como desligar — só o WhatsApp).
+        ("usuarios", "notificar_wpp_leads", "INTEGER DEFAULT 1"),
         # Mensagem pronta pro lead, escrita já no agendamento (fica 1 clique pra enviar quando o lembrete chegar)
         ("crm_agenda", "mensagem_lead", "TEXT"),
         ("crm_agenda", "mensagem_lead_enviada", "INTEGER DEFAULT 0"),
@@ -12176,7 +12179,7 @@ def _notificar(usuario_id, tipo, titulo, descricao='', link=''):
         except Exception: pass
     # WhatsApp em thread separada: nunca atrasa nem derruba a requisição
     try:
-        threading.Thread(target=_notificar_whatsapp, args=(usuario_id, titulo, descricao, link), daemon=True).start()
+        threading.Thread(target=_notificar_whatsapp, args=(usuario_id, tipo, titulo, descricao, link), daemon=True).start()
     except Exception:
         pass
 
@@ -12184,10 +12187,15 @@ def _notificar(usuario_id, tipo, titulo, descricao='', link=''):
 _SITE_BASE_URL = "https://job-serenus-production.up.railway.app"
 
 
-def _notificar_whatsapp(usuario_id, titulo, descricao, link=''):
+def _notificar_whatsapp(usuario_id, tipo, titulo, descricao, link=''):
     """Envia a notificação para o WhatsApp do(s) destinatário(s) via WaSpeed.
     Usa o token global (WASPEED_TOKEN — número do Guilherme). Loga sucesso/falha
-    de cada envio — antes falhava 100% em silêncio e não dava pra saber por quê."""
+    de cada envio — antes falhava 100% em silêncio e não dava pra saber por quê.
+    O sino interno (tabela notificacoes) NUNCA é afetado por isso — é sempre
+    criado antes desta função rodar; aqui só decide se manda por WhatsApp
+    também. Opt-out é só pra tipo='lead' (aviso de lead novo) — uma coluna
+    única silenciando TUDO desligaria também aviso de proposta/comprovante/
+    comissão, que não foi pedido."""
     token = os.environ.get('WASPEED_TOKEN', '').strip()
     if not token:
         app.logger.warning(f"[NOTIF-WPP] WASPEED_TOKEN não configurada — lembrete '{titulo}' NÃO enviado")
@@ -12195,10 +12203,11 @@ def _notificar_whatsapp(usuario_id, titulo, descricao, link=''):
     try:
         import requests as _rq
         conn = db()
+        filtro_opt_out = " AND COALESCE(notificar_wpp_leads,1)=1" if tipo == 'lead' else ""
         if usuario_id:
-            rows = conn.execute("SELECT telefone FROM usuarios WHERE id=? AND ativo=1", (usuario_id,)).fetchall()
-        else:  # broadcast → todos os admins com telefone
-            rows = conn.execute("SELECT telefone FROM usuarios WHERE perfil='admin' AND ativo=1").fetchall()
+            rows = conn.execute(f"SELECT telefone FROM usuarios WHERE id=? AND ativo=1{filtro_opt_out}", (usuario_id,)).fetchall()
+        else:  # broadcast → todos os admins com telefone (que não desligaram esse tipo)
+            rows = conn.execute(f"SELECT telefone FROM usuarios WHERE perfil='admin' AND ativo=1{filtro_opt_out}").fetchall()
         close_db(conn)
         fones = set()
         for r in rows:
@@ -12207,15 +12216,17 @@ def _notificar_whatsapp(usuario_id, titulo, descricao, link=''):
             if f:
                 fones.add(f)
         if not fones:
-            app.logger.warning(f"[NOTIF-WPP] usuario_id={usuario_id} sem telefone válido cadastrado — lembrete '{titulo}' NÃO enviado")
+            app.logger.info(f"[NOTIF-WPP] usuario_id={usuario_id} sem telefone válido ou optou por não receber — lembrete '{titulo}' NÃO enviado")
             return
-        msg = f"*JOB Serenus*\n{titulo}"
-        if descricao:
+        # Mensagem compacta: nome do app + título já diz o essencial, descrição
+        # só entra se acrescentar algo que o título não disse.
+        msg = f"*JOB* — {titulo}"
+        if descricao and descricao.strip() != titulo.strip():
             msg += f"\n{descricao}"
         # Se a descrição já traz um link (ex: confirmação de atividade), não duplica com o link genérico
         if link and 'http' not in (descricao or ''):
             url = link if link.startswith('http') else _SITE_BASE_URL + link
-            msg += f"\n\n{url}"
+            msg += f"\n{url}"
         for f in fones:
             fone_mascarado = f[:4] + '****' + f[-2:]
             try:
@@ -14499,10 +14510,16 @@ SONS_NOTIFICACAO = {
 def configuracoes():
     """Configurações pessoais do usuário logado (som de notificação, etc)."""
     conn = db()
-    row = conn.execute("SELECT som_notificacao FROM usuarios WHERE id=?", (session['user_id'],)).fetchone()
+    row = conn.execute("SELECT som_notificacao, notificar_wpp_leads FROM usuarios WHERE id=?", (session['user_id'],)).fetchone()
     close_db(conn)
-    som_atual = (dict(row).get('som_notificacao') if row else None) or 'thriller'
-    return render_template('configuracoes.html', som_atual=som_atual, sons=SONS_NOTIFICACAO)
+    rd = dict(row) if row else {}
+    som_atual = rd.get('som_notificacao') or 'thriller'
+    # Coluna nova default NULL em linha antiga → trata como "1" (ligado), é o
+    # comportamento de sempre; só desliga quando o usuário explicitamente pede.
+    notificar_wpp_leads = rd.get('notificar_wpp_leads')
+    notificar_wpp_leads = True if notificar_wpp_leads is None else bool(notificar_wpp_leads)
+    return render_template('configuracoes.html', som_atual=som_atual, sons=SONS_NOTIFICACAO,
+                           notificar_wpp_leads=notificar_wpp_leads)
 
 
 @app.route('/configuracoes/som', methods=['POST'])
@@ -14517,6 +14534,20 @@ def configuracoes_som():
     conn.execute("UPDATE usuarios SET som_notificacao=? WHERE id=?", (som, session['user_id']))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+
+@app.route('/configuracoes/notificacao-wpp', methods=['POST'])
+@login_required
+def configuracoes_notificacao_wpp():
+    """Liga/desliga o aviso de LEAD NOVO no WhatsApp pessoal do usuário logado
+    — opcional por pessoa, como pedido. O sino interno (aba de notificações do
+    JOB) nunca é afetado por essa opção, continua sempre ligado."""
+    d = request.json or {}
+    ligado = 1 if d.get('ligado') else 0
+    conn = db()
+    conn.execute("UPDATE usuarios SET notificar_wpp_leads=? WHERE id=?", (ligado, session['user_id']))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "ligado": bool(ligado)})
 
 
 
@@ -14666,6 +14697,7 @@ def _importar_leads_automatico():
     importados = 0
     duplicados = 0
     ignorados = 0
+    ultimo_lead_id = None
     MAX_POR_RODADA = 50  # teto por execução: se houver backlog, drena aos poucos
     try:
         conn = db()
@@ -14729,16 +14761,24 @@ def _importar_leads_automatico():
                 """, (lead_id, consultor or 'Sistema', f"Lead importado automaticamente via {dados.get('origem') or 'planilha'}"))
                 conn.commit()
                 importados += 1
+                ultimo_lead_id = lead_id
             except Exception:
                 try: conn.rollback()
                 except Exception: pass
         close_db(conn)
         if importados:
             app.logger.info(f"[LEAD_AUTO] ✅ {importados} leads novos importados (dup={duplicados}, ign={ignorados})")
-            # Uma única notificação-resumo (nunca uma por lead, p/ não floodar o sino)
+            # Uma única notificação-resumo (nunca uma por lead, p/ não floodar o sino).
+            # Link específico quando dá pra apontar pra algo de verdade: 1 lead
+            # só → a ficha dele; vários → filtrado na etapa de entrada (bem
+            # melhor que o quadro geral, mesmo sem focar um card só).
             try:
+                if importados == 1:
+                    link_import = f"/crm?lead={ultimo_lead_id}"
+                else:
+                    link_import = "/crm?etapa=lead_novo"
                 _notificar_admins('lead', f'{importados} novo(s) lead(s)',
-                                  'Importados das planilhas automaticamente', '/crm')
+                                  'Importados das planilhas automaticamente', link_import)
             except Exception:
                 pass
     except Exception as e:

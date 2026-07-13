@@ -30,6 +30,20 @@
     </div>
   </div>
 
+  <div class="card" style="max-width:640px; margin-top:16px;">
+    <div style="padding:22px 26px;">
+      <h3 style="font-family:'Sora',sans-serif; font-size:15px; margin-bottom:4px;">Aviso de lead novo no WhatsApp</h3>
+      <div style="font-size:12.5px; color:var(--cinza); margin-bottom:18px; line-height:1.5;">Manda uma mensagem pro seu WhatsApp sempre que um lead novo entra no sistema. Desligar aqui só tira o WhatsApp — a notificação continua aparecendo no sino do JOB normalmente.</div>
+
+      <div style="display:flex; align-items:center; gap:10px; padding:12px 14px; border:1px solid var(--borda); border-radius:10px; background:var(--panel-2);">
+        <input type="checkbox" id="chk-wpp-leads" {% if notificar_wpp_leads %}checked{% endif %} onchange="salvarNotificacaoWpp(this.checked)" style="width:16px; height:16px; accent-color:var(--azul); cursor:pointer;">
+        <label for="chk-wpp-leads" style="flex:1; font-size:13.5px; color:var(--texto); cursor:pointer;">Receber aviso de lead novo no meu WhatsApp</label>
+      </div>
+
+      <div id="wpp-status" style="font-size:12px; color:var(--verde); margin-top:12px; display:none;">Preferência salva.</div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -53,6 +67,19 @@ async function salvarSom(chave){
     status.style.display = 'block';
     setTimeout(function(){ status.style.display = 'none'; }, 2500);
   } else {
+    toast(d.erro || 'Erro ao salvar', 'err');
+  }
+}
+
+async function salvarNotificacaoWpp(ligado){
+  const r = await fetch('/configuracoes/notificacao-wpp', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ligado: ligado})});
+  const d = await r.json();
+  const status = document.getElementById('wpp-status');
+  if (d.ok) {
+    status.style.display = 'block';
+    setTimeout(function(){ status.style.display = 'none'; }, 2500);
+  } else {
+    document.getElementById('chk-wpp-leads').checked = !ligado;
     toast(d.erro || 'Erro ao salvar', 'err');
   }
 }
