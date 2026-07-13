@@ -443,19 +443,28 @@
     _resizeTimer = setTimeout(aplicarClassesHtml, 150);
   });
 
+  // Logo do JOB: anel de arcos (teal→azul→roxo) girando devagar, "JOB" parado
+  // no centro — mesma identidade da sidebar do sistema (grad-frio).
+  function logoJobHTML() {
+    return '<div class="job-logo"><div class="job-logo-ring"></div><span class="job-logo-txt">JOB</span></div>';
+  }
+
+  const _ICO_ANALISE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>';
+  const _ICO_MENSAGENS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
+
   function criarTrilho() {
     if (document.getElementById('job-trilho')) return;
     const trilho = document.createElement('div');
     trilho.id = 'job-trilho';
     trilho.innerHTML =
-      '<div class="job-trilho-logo">JOB</div>' +
+      logoJobHTML() +
       '<button class="job-trilho-item" data-secao="analise" title="Análise de lead">' +
-        '<span class="job-trilho-item-icone">◎</span>' +
+        '<span class="job-trilho-item-icone">' + _ICO_ANALISE + '</span>' +
         '<span class="job-trilho-item-label">Análise</span>' +
         '<span class="job-trilho-item-badge" id="job-trilho-badge" hidden>0</span>' +
       '</button>' +
       '<button class="job-trilho-item" data-secao="mensagens" title="Mensagens">' +
-        '<span class="job-trilho-item-icone">✉</span>' +
+        '<span class="job-trilho-item-icone">' + _ICO_MENSAGENS + '</span>' +
         '<span class="job-trilho-item-label">Mensagens</span>' +
       '</button>';
     trilho.querySelectorAll('.job-trilho-item').forEach((item) => {
@@ -487,7 +496,8 @@
       p.id = 'job-painel-doc';
       p.innerHTML =
         '<div class="job-painel-doc-header">' +
-          '<span class="job-painel-doc-logo">JOB Serenus</span>' +
+          '<span class="job-painel-doc-logo">' + logoJobHTML() +
+            '<span class="job-painel-doc-titulo">JOB <b>Serenus</b></span></span>' +
           '<button class="job-painel-doc-fechar" id="job-painel-doc-x">×</button>' +
         '</div>' +
         '<div class="job-painel-doc-corpo" id="job-painel-doc-corpo"></div>';

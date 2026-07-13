@@ -18,28 +18,43 @@ html.job-push-esquerda.job-overlay-painel { margin-left: 72px !important; margin
   position: fixed; top: 0; right: 0; bottom: 0; width: 72px;
   z-index: 2147483000;
   display: flex; flex-direction: column; align-items: center;
-  background: #1b1b27; border-left: 1px solid #26262f;
-  padding-top: 14px;
+  background: #0a0a10; border-left: 1px solid rgba(255,255,255,.06);
+  padding-top: 16px; gap: 4px;
   font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
-html.job-push-esquerda #job-trilho { right: auto; left: 0; border-left: none; border-right: 1px solid #26262f; }
+html.job-push-esquerda #job-trilho { right: auto; left: 0; border-left: none; border-right: 1px solid rgba(255,255,255,.06); }
 
-.job-trilho-logo {
-  background: #3b82f6; color: #fff; font-weight: 800; font-size: 11px;
-  padding: 4px 8px; border-radius: 6px; letter-spacing: .5px; margin-bottom: 18px;
+/* Logo JOB: anel de arcos girando (grad-frio do sistema), JOB parado no meio. */
+.job-logo { position: relative; width: 36px; height: 36px; margin-bottom: 16px; flex-shrink: 0; }
+.job-logo-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(from 0deg, #1fd8a4, #3b82f6, #8b5cf6, #1fd8a4);
+  animation: jobLogoSpin 8s linear infinite;
 }
+.job-logo-ring::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: #0a0a10; }
+.job-logo-txt {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-family: -apple-system, "Segoe UI", sans-serif; font-size: 9.5px; font-weight: 800; color: #fff; letter-spacing: .3px; z-index: 1;
+}
+@keyframes jobLogoSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .job-logo-ring { animation: none; } }
 
 .job-trilho-item {
   position: relative;
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  width: 100%; padding: 10px 4px; background: transparent; border: none;
-  color: #9aa1b5; cursor: pointer; font-family: inherit;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  width: 100%; padding: 11px 4px; background: transparent; border: none;
+  color: #9aa1b5; cursor: pointer; font-family: inherit; transition: color .12s, background .12s;
 }
-.job-trilho-item:hover { color: #eef0f6; background: rgba(255,255,255,.03); }
-.job-trilho-item-ativo { color: #fff; background: rgba(59, 130, 246, .16); border-left: 2px solid #3b82f6; }
-html.job-push-esquerda .job-trilho-item-ativo { border-left: none; border-right: 2px solid #3b82f6; }
-.job-trilho-item-icone { font-size: 18px; line-height: 1; }
-.job-trilho-item-label { font-size: 9.5px; font-weight: 700; text-align: center; line-height: 1.15; }
+.job-trilho-item:hover { color: #eef0f6; background: rgba(255,255,255,.04); }
+.job-trilho-item-ativo { color: #fff; background: rgba(255,255,255,.05); }
+.job-trilho-item-ativo::before {
+  content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0;
+  background: linear-gradient(135deg,#1fd8a4 0%,#3b82f6 50%,#8b5cf6 100%);
+}
+html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; border-radius: 3px 0 0 3px; }
+.job-trilho-item-icone { line-height: 0; }
+.job-trilho-item-icone svg { width: 20px; height: 20px; }
+.job-trilho-item-label { font-size: 9.5px; font-weight: 700; text-align: center; line-height: 1.15; letter-spacing: .2px; }
 .job-trilho-item-badge {
   position: absolute; top: 4px; right: 10px;
   background: #f43f5e; color: #fff; font-size: 9px; font-weight: 800;
@@ -67,7 +82,10 @@ html.job-push-esquerda .job-trilho-item-ativo { border-left: none; border-right:
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 16px; background: #1b1b27; border-bottom: 1px solid #26262f; flex-shrink: 0;
 }
-.job-painel-doc-logo { font-size: 13px; font-weight: 800; letter-spacing: .3px; }
+.job-painel-doc-logo { display: flex; align-items: center; gap: 9px; }
+.job-painel-doc-logo .job-logo { width: 28px; height: 28px; margin-bottom: 0; }
+.job-painel-doc-titulo { font-size: 14px; font-weight: 800; letter-spacing: .3px; color: #9aa1b5; }
+.job-painel-doc-titulo b { color: #fff; font-weight: 800; }
 .job-painel-doc-fechar {
   background: transparent; border: none; color: #9aa1b5; font-size: 20px;
   line-height: 1; cursor: pointer; padding: 0 4px;
