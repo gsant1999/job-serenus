@@ -180,6 +180,29 @@
     }
   }
 
+  // ── ENVIO DE MÍDIA (item A): recebe a mídia já em dataURL (o background
+  //    baixou do JOB — a página não pode por causa do CSP do WhatsApp) e manda
+  //    pela wa-js. Áudio vai como NOTA DE VOZ (isPtt) — igual "gravado na hora"
+  //    do ZapVoice, não como arquivo. ──
+  async function enviarMidia(chatId, tipo, dataUrl, legenda) {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.sendFileMessage) {
+      return { erro: 'wpp_ausente' };
+    }
+    if (!chatId || !dataUrl) return { erro: 'parametros_invalidos' };
+    try {
+      const opts = {};
+      if (tipo === 'audio') { opts.type = 'audio'; opts.isPtt = true; }
+      else if (tipo === 'imagem') { opts.type = 'image'; if (legenda) opts.caption = legenda; }
+      else if (tipo === 'video') { opts.type = 'video'; if (legenda) opts.caption = legenda; }
+      else { opts.type = 'document'; opts.filename = 'documento'; }
+      const res = await window.WPP.chat.sendFileMessage(chatId, dataUrl, opts);
+      const msgId = (res && res.id && res.id._serialized) || (res && res._serialized) || null;
+      return { ok: true, wpp_msg_id: msgId };
+    } catch (e) {
+      return { ok: false, erro: String((e && e.message) || e).slice(0, 200) };
+    }
+  }
+
   window.addEventListener('message', async (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
@@ -191,6 +214,7 @@
       else if (d.tipo === 'obter_telefone') resp = await obterTelefone();
       else if (d.tipo === 'obter_chat_id') resp = await obterChatIdAtivo();
       else if (d.tipo === 'enviar_texto') resp = await enviarTexto(d.chatId, d.texto);
+      else if (d.tipo === 'enviar_midia') resp = await enviarMidia(d.chatId, d.midiaTipo, d.dataUrl, d.legenda);
       else return;
     } catch (e) { resp = { erro: 'excecao' }; }
     resp.source = 'JOB_EXT_RESP';

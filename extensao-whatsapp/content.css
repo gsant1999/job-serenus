@@ -163,6 +163,8 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
 .job-preview-head b { color: #fff; font-weight: 700; }
 .job-preview-x { background: transparent; border: none; color: #9aa1b5; font-size: 22px; cursor: pointer; line-height: 1; padding: 0 2px; }
 .job-preview-x:hover { color: #fff; }
+.job-preview-midia { margin-bottom: 12px; }
+.job-preview-midia-rot { display: block; font-size: 11px; color: #9aa1b5; margin-bottom: 6px; }
 .job-preview-txt {
   width: 100%; box-sizing: border-box; min-height: 96px; max-height: 260px; resize: vertical;
   background: #1b1b27; color: #eef0f6; border: 1px solid #26262f; border-radius: 12px;

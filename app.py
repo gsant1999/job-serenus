@@ -873,6 +873,7 @@ def init_db():
                 chat_id TEXT NOT NULL,
                 tipo TEXT NOT NULL DEFAULT 'texto',
                 texto TEXT NOT NULL,
+                midia_arquivo TEXT,
                 origem TEXT NOT NULL DEFAULT 'crm_lead',
                 status TEXT NOT NULL DEFAULT 'pendente',
                 tentativas INTEGER NOT NULL DEFAULT 0,
@@ -1325,6 +1326,7 @@ def init_db():
             chat_id TEXT NOT NULL,
             tipo TEXT NOT NULL DEFAULT 'texto',
             texto TEXT NOT NULL,
+            midia_arquivo TEXT,
             origem TEXT NOT NULL DEFAULT 'crm_lead',
             status TEXT NOT NULL DEFAULT 'pendente',
             tentativas INTEGER NOT NULL DEFAULT 0,
@@ -1747,6 +1749,8 @@ def init_db():
         ("modelos_conteudo", "categoria", "TEXT"),
         ("modelos_conteudo", "favorito", "INTEGER DEFAULT 0"),
         ("modelos_conteudo", "vezes_usado", "INTEGER DEFAULT 0"),
+        # Envio de mídia (item A): a fila carrega o arquivo da mídia a mandar.
+        ("whatsapp_extensao_fila", "midia_arquivo", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -9117,8 +9121,11 @@ def api_whatsapp_fila_proximo():
     if not item:
         return _wa_cors(jsonify({"ok": True, "item": None}))
     it = dict(item)
+    midia_url = (f"{_SITE_BASE_URL}/crm/modelos/midia/{it['midia_arquivo']}"
+                 if it.get('midia_arquivo') else None)
     return _wa_cors(jsonify({"ok": True, "item": {
         "id": it['id'], "chat_id": it['chat_id'], "tipo": it['tipo'], "texto": it['texto'],
+        "midia_url": midia_url,
     }}))
 
 
@@ -9235,19 +9242,27 @@ def api_whatsapp_enviar_direto():
                      (lead_id, 'Extensão WhatsApp', 'criacao',
                       'Lead criado automaticamente ao mandar mensagem pela extensão.', _agora_sp()))
 
-    conn.execute("""INSERT INTO whatsapp_extensao_fila
-        (lead_id, responsavel_id, telefone, chat_id, tipo, texto, origem, criado_por)
-        VALUES (?,?,?,?,'texto',?,'extensao_direto',?)""",
-        (lead_id, usuario_id, telefone, chat_id, texto, usuario_id))
-    fila_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
-               else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
-    # Contabiliza uso do modelo (pra "mais usadas" na biblioteca) quando o
-    # envio veio de um modelo salvo.
+    # Se veio de um modelo salvo com MÍDIA (áudio/imagem), a fila manda a mídia
+    # (item A) — texto vira legenda. Sem mídia, é texto puro como antes.
+    tipo, midia_arquivo = 'texto', None
+    modelo_id = None
     try:
         modelo_id = int(d.get('modelo_id'))
-        conn.execute("UPDATE modelos_conteudo SET vezes_usado = COALESCE(vezes_usado,0) + 1 WHERE id=? AND tipo='whatsapp'", (modelo_id,))
     except (TypeError, ValueError):
-        pass
+        modelo_id = None
+    if modelo_id:
+        mod = conn.execute("SELECT midia_arquivo, midia_tipo FROM modelos_conteudo WHERE id=? AND tipo='whatsapp'", (modelo_id,)).fetchone()
+        if mod and mod['midia_arquivo'] and mod['midia_tipo'] in ('audio', 'imagem', 'video', 'documento'):
+            tipo, midia_arquivo = mod['midia_tipo'], mod['midia_arquivo']
+    conn.execute("""INSERT INTO whatsapp_extensao_fila
+        (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo, origem, criado_por)
+        VALUES (?,?,?,?,?,?,?,'extensao_direto',?)""",
+        (lead_id, usuario_id, telefone, chat_id, tipo, texto, midia_arquivo, usuario_id))
+    fila_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+               else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    # Contabiliza uso do modelo (pra "mais usadas" na biblioteca).
+    if modelo_id:
+        conn.execute("UPDATE modelos_conteudo SET vezes_usado = COALESCE(vezes_usado,0) + 1 WHERE id=? AND tipo='whatsapp'", (modelo_id,))
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True, "id": fila_id, "lead_id": lead_id}))
 

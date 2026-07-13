@@ -104,6 +104,26 @@ async function criarModelo(dados) {
   }
 }
 
+// Baixa a mídia de um modelo (URL do JOB) e devolve dataURL base64. O content
+// script/página não consegue por causa do CSP do WhatsApp Web; o background
+// tem host_permissions pro domínio do JOB.
+async function baixarMidiaDataUrl(url) {
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return { ok: false, erro: 'HTTP ' + resp.status };
+    const blob = await resp.blob();
+    const dataUrl = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onloadend = () => res(String(r.result));
+      r.onerror = rej;
+      r.readAsDataURL(blob);
+    });
+    return { ok: true, dataUrl };
+  } catch (e) {
+    return { ok: false, erro: 'Falha ao baixar mídia: ' + e.message };
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'ping') {
     chamarJob('/api/whatsapp/ping', 'GET', null, 15000).then(sendResponse);
@@ -143,6 +163,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'favorito_modelo') {
     chamarJob('/api/whatsapp/extensao/modelos/' + encodeURIComponent(msg.id) + '/favorito', 'POST', {}, 15000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'baixar_midia') {
+    // Baixa a mídia do JOB e devolve como dataURL — só o background pode
+    // (host_permissions); a página do WhatsApp bloqueia fetch externo (CSP).
+    baixarMidiaDataUrl(msg.url).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'cancelar') {

@@ -398,6 +398,28 @@
     });
   }
 
+  // ── ENVIO DE MÍDIA (item A): manda a mídia (dataURL, já baixada pelo
+  //    background) pela ponte. Áudio vira nota de voz. ──
+  function pedirEnviarMidia(chatId, midiaTipo, dataUrl, legenda) {
+    return new Promise((resolve) => {
+      const reqId = 'm' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true;
+        window.removeEventListener('message', onMsg);
+        resolve(d);
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'enviar_midia', reqId, chatId, midiaTipo, dataUrl, legenda }, '*');
+      setTimeout(() => {
+        if (!pronto) { window.removeEventListener('message', onMsg); resolve({ erro: 'timeout_envio' }); }
+      }, 45000);
+    });
+  }
+
 
   // ═══════════════ UI: trilho fixo + painel docado ═══════════════
   // Pedido explícito: nada de elemento solto/flutuante — o padrão é um trilho
@@ -706,11 +728,17 @@
       '<div class="job-modelo-preview">' + esc(m.texto) + '</div>' +
       midia +
       '<div class="job-modelo-acoes">' +
-        '<button class="job-modelo-enviar" data-modelo-id="' + m.id + '">Enviar texto</button>' +
+        '<button class="job-modelo-enviar" data-modelo-id="' + m.id + '">' + rotuloEnviar(m) + '</button>' +
         '<button class="job-modelo-copiar" data-texto="' + esc(m.texto) + '">Copiar</button>' +
         '<button class="job-modelo-excluir" data-modelo-id="' + m.id + '" title="Excluir">×</button>' +
       '</div>' +
     '</div>';
+  }
+
+  function rotuloEnviar(m) {
+    if (m.midia_tipo === 'audio') return 'Enviar áudio';
+    if (m.midia_tipo === 'imagem') return 'Enviar imagem';
+    return 'Enviar texto';
   }
 
   function renderListaModelos(modelos) {
@@ -935,20 +963,36 @@
     const modelos = await buscarModelos(false);
     const modelo = modelos.find((m) => String(m.id) === btn.dataset.modeloId);
     if (!modelo) return;
-    abrirPreviewEnvio(modelo.texto, modelo.id);
+    abrirPreviewEnvio(modelo);
   }
 
-  function abrirPreviewEnvio(textoInicial, modeloId) {
+  // Aceita um modelo {texto, id, midia_tipo, midia_url} OU só um texto (composição
+  // avulsa). Mídia mostra o áudio/imagem no preview; áudio não tem legenda (nota
+  // de voz), imagem tem legenda opcional; texto puro exige mensagem.
+  function abrirPreviewEnvio(modeloOuTexto) {
+    const modelo = (typeof modeloOuTexto === 'object' && modeloOuTexto) ? modeloOuTexto : { texto: modeloOuTexto || '' };
+    const modeloId = modelo.id || null;
+    const midiaTipo = modelo.midia_tipo || null;
     const existente = document.getElementById('job-preview');
     if (existente) existente.remove();
     const nome = nomeDoContato() || 'este contato';
+    let previaMidia = '';
+    if (midiaTipo === 'audio' && modelo.midia_url) {
+      previaMidia = '<div class="job-preview-midia"><span class="job-preview-midia-rot">🎤 Nota de voz — ouça antes de enviar</span>' +
+        '<audio controls preload="none" src="' + esc(modelo.midia_url) + '" style="width:100%"></audio></div>';
+    } else if (midiaTipo === 'imagem' && modelo.midia_url) {
+      previaMidia = '<div class="job-preview-midia"><img src="' + esc(modelo.midia_url) + '" alt="" style="max-width:100%;max-height:180px;border-radius:8px"></div>';
+    }
+    const ehAudio = midiaTipo === 'audio';
+    const placeholder = midiaTipo === 'imagem' ? 'Legenda (opcional)…' : 'Escreva a mensagem…';
     const ov = document.createElement('div');
     ov.id = 'job-preview';
     ov.innerHTML =
       '<div class="job-preview-card">' +
         '<div class="job-preview-head"><span>Enviar para <b>' + esc(nome) + '</b></span>' +
           '<button class="job-preview-x" id="job-preview-x">×</button></div>' +
-        '<textarea class="job-preview-txt" id="job-preview-texto" placeholder="Escreva a mensagem…"></textarea>' +
+        previaMidia +
+        (ehAudio ? '' : '<textarea class="job-preview-txt" id="job-preview-texto" placeholder="' + placeholder + '"></textarea>') +
         '<div class="job-preview-acoes">' +
           '<button class="job-preview-cancelar" id="job-preview-cancelar">Cancelar</button>' +
           '<button class="job-preview-enviar" id="job-preview-enviar">Enviar</button>' +
@@ -957,22 +1001,22 @@
       '</div>';
     document.body.appendChild(ov);
     const ta = document.getElementById('job-preview-texto');
-    ta.value = textoInicial || '';
+    if (ta) { ta.value = modelo.texto || ''; }
     const fechar = () => ov.remove();
     ov.addEventListener('click', (e) => { if (e.target === ov) fechar(); });
     document.getElementById('job-preview-x').addEventListener('click', fechar);
     document.getElementById('job-preview-cancelar').addEventListener('click', fechar);
-    document.getElementById('job-preview-enviar').addEventListener('click', () => confirmarEnvioPreview(ov, modeloId));
-    ta.focus();
-    ta.setSelectionRange(ta.value.length, ta.value.length);
+    document.getElementById('job-preview-enviar').addEventListener('click', () => confirmarEnvioPreview(ov, modeloId, midiaTipo));
+    if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
   }
 
-  async function confirmarEnvioPreview(ov, modeloId) {
+  async function confirmarEnvioPreview(ov, modeloId, midiaTipo) {
     const ta = document.getElementById('job-preview-texto');
     const st = document.getElementById('job-preview-status');
     const btn = document.getElementById('job-preview-enviar');
-    const texto = (ta.value || '').trim();
-    if (!texto) { if (st) st.textContent = 'A mensagem está vazia.'; return; }
+    const texto = ((ta && ta.value) || '').trim();
+    // Texto puro exige mensagem; mídia pode ir sem legenda.
+    if (!texto && !midiaTipo) { if (st) st.textContent = 'A mensagem está vazia.'; return; }
     const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
     if (!usuarioId) { if (st) st.textContent = 'Selecione seu usuário no popup da extensão primeiro.'; return; }
     btn.disabled = true;
@@ -1358,7 +1402,18 @@
       const resp = await chrome.runtime.sendMessage({ type: 'fila_proximo', usuario_id: usuarioId });
       const item = resp && resp.ok && resp.item;
       if (!item) return;
-      const envio = await pedirEnviarTexto(item.chat_id, item.texto);
+      let envio;
+      if (item.tipo && item.tipo !== 'texto' && item.midia_url) {
+        // Mídia: o background baixa (CSP), a ponte manda pela wa-js.
+        const dl = await chrome.runtime.sendMessage({ type: 'baixar_midia', url: item.midia_url });
+        if (dl && dl.ok) {
+          envio = await pedirEnviarMidia(item.chat_id, item.tipo, dl.dataUrl, item.texto);
+        } else {
+          envio = { ok: false, erro: (dl && dl.erro) || 'falha ao baixar a mídia' };
+        }
+      } else {
+        envio = await pedirEnviarTexto(item.chat_id, item.texto);
+      }
       await chrome.runtime.sendMessage({
         type: 'fila_confirmar', fila_id: item.id,
         ok: !!(envio && envio.ok), erro: (envio && envio.erro) || null,
