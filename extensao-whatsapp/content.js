@@ -352,6 +352,29 @@
     });
   }
 
+  // ── ID da conversa aberta agora (via wa-js). É o jeito à prova de falha de
+  //    mandar pra conversa na tela mesmo quando o telefone não é lido (contato
+  //    salvo, @lid business). Devolve '' se não der. ──
+  function pedirChatId() {
+    return new Promise((resolve) => {
+      const reqId = 'c' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true;
+        window.removeEventListener('message', onMsg);
+        resolve(d.chat_id || '');
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'obter_chat_id', reqId }, '*');
+      setTimeout(() => {
+        if (!pronto) { window.removeEventListener('message', onMsg); resolve(''); }
+      }, 5000);
+    });
+  }
+
   // ── ENVIO (Fase 1): pede pra ponte no main world mandar um texto
   //    específico. Só chamada pelo loop da fila (mais abaixo), nunca direto
   //    de uma ação de leitura. ──
@@ -913,29 +936,25 @@
     ov.id = 'job-preview';
     ov.innerHTML =
       '<div class="job-preview-card">' +
-        '<div class="job-preview-head">Revisar antes de enviar' +
+        '<div class="job-preview-head"><span>Enviar para <b>' + esc(nome) + '</b></span>' +
           '<button class="job-preview-x" id="job-preview-x">×</button></div>' +
-        '<div class="job-preview-para">Para: <b>' + esc(nome) + '</b></div>' +
-        '<textarea class="job-inp job-inp-txt" id="job-preview-texto"></textarea>' +
-        '<div class="job-preview-bolha-label">Vai chegar assim:</div>' +
-        '<div class="job-preview-bolha" id="job-preview-bolha"></div>' +
+        '<textarea class="job-preview-txt" id="job-preview-texto" placeholder="Escreva a mensagem…"></textarea>' +
         '<div class="job-preview-acoes">' +
-          '<button class="job-mini-btn" id="job-preview-cancelar">Cancelar</button>' +
-          '<button class="job-salvar-modelo" id="job-preview-enviar" style="margin-top:0">Confirmar e enviar</button>' +
+          '<button class="job-preview-cancelar" id="job-preview-cancelar">Cancelar</button>' +
+          '<button class="job-preview-enviar" id="job-preview-enviar">Enviar</button>' +
         '</div>' +
-        '<div class="job-grav-status" id="job-preview-status"></div>' +
+        '<div class="job-preview-status" id="job-preview-status"></div>' +
       '</div>';
     document.body.appendChild(ov);
     const ta = document.getElementById('job-preview-texto');
-    const bolha = document.getElementById('job-preview-bolha');
     ta.value = textoInicial || '';
-    const atualizarBolha = () => { bolha.textContent = ta.value; };
-    atualizarBolha();
-    ta.addEventListener('input', atualizarBolha);
-    document.getElementById('job-preview-x').addEventListener('click', () => ov.remove());
-    document.getElementById('job-preview-cancelar').addEventListener('click', () => ov.remove());
+    const fechar = () => ov.remove();
+    ov.addEventListener('click', (e) => { if (e.target === ov) fechar(); });
+    document.getElementById('job-preview-x').addEventListener('click', fechar);
+    document.getElementById('job-preview-cancelar').addEventListener('click', fechar);
     document.getElementById('job-preview-enviar').addEventListener('click', () => confirmarEnvioPreview(ov, modeloId));
     ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
   }
 
   async function confirmarEnvioPreview(ov, modeloId) {
@@ -946,25 +965,34 @@
     if (!texto) { if (st) st.textContent = 'A mensagem está vazia.'; return; }
     const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
     if (!usuarioId) { if (st) st.textContent = 'Selecione seu usuário no popup da extensão primeiro.'; return; }
+    btn.disabled = true;
+    if (st) st.textContent = 'Enviando…';
     const nome = nomeDoContato();
+    // chat_id da conversa aberta é o caminho à prova de falha (funciona pra
+    // contato salvo e @lid). Telefone é só best-effort, pra casar o lead no CRM.
+    let chatId = '';
+    try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
     let telefone = '';
     try { telefone = (await pedirTelefoneWpp()) || telefoneDoContato(); }
     catch (e) { telefone = telefoneDoContato(); }
-    if (!telefone) { if (st) st.textContent = 'Não achei o telefone desta conversa.'; return; }
-    btn.disabled = true;
-    if (st) st.textContent = 'Enviando…';
+    if (!chatId && !telefone) {
+      if (st) st.textContent = 'Não consegui identificar a conversa. Abra a conversa e tente de novo.';
+      btn.disabled = false;
+      return;
+    }
     try {
       const payload = { telefone, nome, texto, usuario_id: usuarioId };
+      if (chatId) payload.chat_id = chatId;
       if (modeloId) payload.modelo_id = modeloId;
       const resp = await chrome.runtime.sendMessage({ type: 'enviar_direto', payload });
       if (!resp || !resp.ok) {
-        if (st) st.textContent = 'Erro: ' + ((resp && resp.erro) || 'falha ao enfileirar');
+        if (st) st.textContent = 'Erro: ' + ((resp && resp.erro) || 'falha ao enviar');
         btn.disabled = false;
         return;
       }
       await checarFilaDeEnvio();
       if (st) st.textContent = 'Enviado ✓';
-      setTimeout(() => { ov.remove(); }, 900);
+      setTimeout(() => { ov.remove(); }, 800);
     } catch (e) {
       if (st) st.textContent = 'Erro: ' + e.message;
       btn.disabled = false;

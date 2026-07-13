@@ -9178,9 +9178,18 @@ def api_whatsapp_enviar_direto():
     texto = str(d.get('texto') or '').strip()[:4000]
     if not texto:
         return _wa_cors(jsonify({"ok": False, "erro": "Mensagem vazia"})), 400
-    chat_id = _wa_chat_id(telefone)
+    # chat_id explícito (id serializado da conversa aberta, via wa-js) é o
+    # caminho à prova de falha — funciona pra contato salvo e @lid, onde o
+    # telefone não é lido. Se não veio, cai pro cálculo pelo telefone.
+    chat_id = str(d.get('chat_id') or '').strip()[:100]
     if not chat_id:
-        return _wa_cors(jsonify({"ok": False, "erro": "Telefone inválido"})), 400
+        chat_id = _wa_chat_id(telefone)
+    if not chat_id:
+        return _wa_cors(jsonify({"ok": False, "erro": "Não consegui identificar a conversa (abra a conversa e tente de novo)"})), 400
+    # Se o telefone não veio mas o chat_id é de contato normal (55...@c.us),
+    # extrai os dígitos pra ainda tentar casar o lead.
+    if not telefone and chat_id.endswith('@c.us'):
+        telefone = chat_id.split('@')[0]
     usuario_id = None
     try:
         usuario_id = int(d.get('usuario_id'))

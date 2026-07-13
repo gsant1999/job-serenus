@@ -147,6 +147,20 @@
     return { telefone: numero };
   }
 
+  // ── ID da conversa aberta AGORA (serializado). Funciona pra contato normal
+  //    (c.us) E pra @lid (business/privacidade nova) — é o id interno que a
+  //    wa-js aceita pra mandar, mesmo quando o telefone real não é exposto.
+  //    É o jeito à prova de falha de mandar pra conversa que está na tela,
+  //    sem depender de descobrir o número. ──
+  async function obterChatIdAtivo() {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getActiveChat) {
+      return { erro: 'wpp_ausente' };
+    }
+    const chat = window.WPP.chat.getActiveChat();
+    if (!chat || !chat.id) return { erro: 'sem_conversa' };
+    return { chat_id: chat.id._serialized || '' };
+  }
+
   // ── ENVIO (Fase 1) — a ÚNICA função desta ponte que manda alguma coisa pro
   //    WhatsApp. Cada chamada é uma mensagem específica que o consultor pediu
   //    explicitamente pra mandar (via fila do CRM) — nunca em massa, nunca
@@ -175,6 +189,7 @@
       if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite);
       else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite);
       else if (d.tipo === 'obter_telefone') resp = await obterTelefone();
+      else if (d.tipo === 'obter_chat_id') resp = await obterChatIdAtivo();
       else if (d.tipo === 'enviar_texto') resp = await enviarTexto(d.chatId, d.texto);
       else return;
     } catch (e) { resp = { erro: 'excecao' }; }

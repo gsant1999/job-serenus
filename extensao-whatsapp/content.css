@@ -127,34 +127,43 @@ html.job-push-esquerda .job-trilho-item-ativo { border-left: none; border-right:
 }
 .job-modelo-excluir:hover { background: rgba(251, 113, 133, .12); }
 
-/* ── Preview antes de enviar (padrão do olho do WaSpeed) ── */
+/* ── Preview antes de enviar — enxuto, uma caixa só, cara de WhatsApp ── */
 #job-preview {
   position: fixed; inset: 0; z-index: 2147483100;
-  background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center;
   font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
 .job-preview-card {
-  width: 420px; max-width: calc(100vw - 40px); max-height: calc(100vh - 60px); overflow-y: auto;
-  background: #1a1d2e; color: #e7e9f0; border: 1px solid #2c3247; border-radius: 14px; padding: 18px;
-  box-shadow: 0 20px 60px rgba(0,0,0,.55);
+  width: 400px; max-width: calc(100vw - 40px);
+  background: #1a1d2e; color: #e7e9f0; border: 1px solid #2c3247; border-radius: 14px;
+  padding: 16px; box-shadow: 0 24px 60px rgba(0,0,0,.55);
 }
 .job-preview-head {
-  display: flex; align-items: center; justify-content: space-between;
-  font-size: 14px; font-weight: 800; margin-bottom: 12px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #b6bccd;
 }
-.job-preview-x { background: transparent; border: none; color: #8c93a8; font-size: 20px; cursor: pointer; line-height: 1; }
+.job-preview-head b { color: #fff; font-weight: 700; }
+.job-preview-x { background: transparent; border: none; color: #8c93a8; font-size: 22px; cursor: pointer; line-height: 1; padding: 0 2px; }
 .job-preview-x:hover { color: #fff; }
-.job-preview-para { font-size: 12px; color: #8c93a8; margin-bottom: 8px; }
-.job-preview-para b { color: #e7e9f0; }
-.job-preview-bolha-label { font-size: 10.5px; color: #8c93a8; text-transform: uppercase; letter-spacing: .4px; margin: 10px 0 5px; }
-.job-preview-bolha {
-  background: #056162; color: #e7f5f3; border-radius: 10px 10px 10px 2px;
-  padding: 9px 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
-  max-height: 220px; overflow-y: auto;
+.job-preview-txt {
+  width: 100%; box-sizing: border-box; min-height: 96px; max-height: 260px; resize: vertical;
+  background: #202c33; color: #e9edef; border: 1px solid #2c3247; border-radius: 12px;
+  padding: 12px 14px; font-size: 14px; line-height: 1.5; font-family: inherit; outline: none;
 }
-.job-preview-acoes { display: flex; gap: 8px; margin-top: 14px; }
-.job-preview-acoes .job-mini-btn { flex: 0 0 auto; padding: 10px 16px; }
-.job-preview-acoes .job-salvar-modelo { flex: 1; }
+.job-preview-txt:focus { border-color: #00a884; }
+.job-preview-acoes { display: flex; gap: 8px; margin-top: 12px; }
+.job-preview-cancelar {
+  flex: 0 0 auto; padding: 11px 18px; background: transparent; color: #b6bccd;
+  border: 1px solid #2c3247; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.job-preview-cancelar:hover { background: rgba(255,255,255,.04); }
+.job-preview-enviar {
+  flex: 1; padding: 11px; background: #00a884; color: #fff; border: none;
+  border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+.job-preview-enviar:hover:not(:disabled) { background: #06b894; }
+.job-preview-enviar:disabled { opacity: .6; cursor: default; }
+.job-preview-status { font-size: 12px; color: #8c93a8; min-height: 15px; margin-top: 8px; text-align: center; }
 
 /* ── Biblioteca: busca + filtros por tipo + grupos ── */
 .job-biblioteca-controles { margin: 4px 0 6px; }
