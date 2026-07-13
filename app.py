@@ -10081,6 +10081,23 @@ def api_whatsapp_analisar():
             conn.execute(f"UPDATE crm_leads SET {sets}, atualizado_em=? WHERE id=?",
                          (*qual.values(), _agora_sp(), lead_id))
 
+    # ── Score Lead move o lead pra Topo do Funil na primeira triagem real —
+    # regra combinada com o Guilherme: score>=550 (medio/bom/quente) tira da
+    # pilha de Lead Novo pra Topo; abaixo disso fica parado (humano decide se
+    # continua nutrindo ou descarta). SÓ mexe se o lead AINDA estiver em
+    # 'lead_novo' — o WHERE na etapa é o que impede sobrescrever qualquer
+    # movimentação manual já feita (Transferência, Meio, Fundo...). Nunca
+    # progride Topo→Meio→Fundo sozinho (depende de coisa que o score não vê —
+    # documentação, negociação) e nunca toca Ganho/Perdido — decisão humana.
+    if lead_id and score is not None and score >= 550:
+        moveu = conn.execute("""UPDATE crm_leads SET etapa='topo', atualizado_em=?
+            WHERE id=? AND etapa='lead_novo'""", (_agora_sp(), lead_id)).rowcount
+        if moveu:
+            conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                VALUES (?,?,?,?,?)""",
+                (lead_id, 'Score Lead', 'etapa',
+                 f'Movido automaticamente de Lead Novo pra Topo do Funil (score {score}/1000, {faixa}).', _agora_sp()))
+
     # sugestoes_json guarda o diagnóstico completo (dá pra reprocessar/auditar depois)
     diagnostico = {k: an[k] for k in ('sugestoes', 'tags', 'fase_funil', 'extracao', 'breakdown',
                                        'penalidades', 'cap', 'followup', 'descricao',
