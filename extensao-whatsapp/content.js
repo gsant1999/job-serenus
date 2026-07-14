@@ -756,7 +756,16 @@
     if (!forcar && _modelosCache && (Date.now() - _modelosCache.ts) < MODELOS_CACHE_MS) {
       return _modelosCache.modelos;
     }
-    const resp = await chrome.runtime.sendMessage({ type: 'listar_modelos' });
+    let resp;
+    try {
+      resp = await chrome.runtime.sendMessage({ type: 'listar_modelos' });
+    } catch (e) {
+      // "Extension context invalidated": a extensão foi atualizada/recarregada
+      // mas ESTA aba do WhatsApp não — o content script ficou órfão do
+      // background. Sinaliza pro chamador mostrar "recarregue a aba" em vez de
+      // travar no spinner pra sempre (era esse o bug do "Carregando modelos…").
+      throw new Error('CONTEXTO_INVALIDO');
+    }
     const modelos = (resp && resp.ok && resp.modelos) || [];
     _gestorModo = !!(resp && resp.gestor);
     _modelosCache = { ts: Date.now(), modelos };
@@ -1176,10 +1185,26 @@
 
   async function abrirSecaoMensagens() {
     setCorpoSecaoMensagens(telaMensagensCarregando());
-    const modelos = await buscarModelos(false);
+    let modelos;
+    try {
+      modelos = await buscarModelos(false);
+    } catch (e) {
+      if (_secaoAtiva !== 'mensagens') return;
+      setCorpoSecaoMensagens(_avisoRecarregarAba());
+      return;
+    }
     if (_secaoAtiva !== 'mensagens') return; // fechou/trocou de seção enquanto buscava
     setCorpoSecaoMensagens(renderModelos(modelos));
     ligarAcoesModelos();
+  }
+
+  // Aviso amigável quando o content script perdeu o vínculo com o background
+  // (extensão atualizada e a aba não recarregada). Um botão que dá o reload.
+  function _avisoRecarregarAba() {
+    return '<div class="job-erro" style="text-align:center">' +
+      'A extensão foi atualizada.<br><b>Recarregue esta aba do WhatsApp Web</b> pra voltar a funcionar.' +
+      '<br><button class="job-analisar-btn" style="margin-top:12px" onclick="location.reload()">Recarregar agora</button>' +
+      '</div>';
   }
 
   function setCorpoSecaoMensagens(html) {
