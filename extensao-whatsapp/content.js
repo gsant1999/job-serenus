@@ -1767,12 +1767,18 @@
   }
 
   // ── Mantém o trilho presente mesmo com o WhatsApp recriando a tela (SPA). ──
-  carregarPreferenciaLado();
-  criarTrilho();
-  const obs = new MutationObserver(() => {
-    if (!document.getElementById('job-trilho')) criarTrilho();
+  // carregarPreferenciaLado() é assíncrona (lê chrome.storage) — espera ela
+  // resolver ANTES de criar o trilho (e antes de ligar o observer, que
+  // recria o trilho se ele sumir), senão o trilho nasce no lado padrão
+  // ('direita') e pula pro lado configurado um instante depois, toda vez que
+  // o Chrome descarta a aba em segundo plano e recarrega o content script.
+  carregarPreferenciaLado().then(() => {
+    criarTrilho();
+    const obs = new MutationObserver(() => {
+      if (!document.getElementById('job-trilho')) criarTrilho();
+    });
+    obs.observe(document.body, { childList: true, subtree: false });
   });
-  obs.observe(document.body, { childList: true, subtree: false });
 
   // ── Detecta troca de conversa (o WhatsApp Web é uma SPA — não navega, só
   //    troca o conteúdo — não existe evento nativo confiável pra "conversa
