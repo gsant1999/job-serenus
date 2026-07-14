@@ -25,11 +25,14 @@
   <div style="display:flex; gap:8px;">
     <button class="btn-outline btn-sm" onclick="location.href='/cotacao'">Voltar à cotação</button>
     <button class="btn-outline btn-sm" onclick="location.href='/cotacao/operadoras-logos'">Logos das operadoras</button>
-    <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas/importar-pdf'">Importar PDF (Painel do Corretor)</button>
+    <button class="btn-outline btn-sm" onclick="document.getElementById('pdc-json').click()">Importar do Painel do Corretor (JSON)</button>
+    <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas/importar-pdf'">Importar PDF</button>
     <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas/importar'">Importar CSV/Excel</button>
     <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas/nova'">+ Nova tabela</button>
   </div>
 </div>
+<input type="file" id="pdc-json" accept=".json,application/json" style="display:none" onchange="importarPdcJson(this)">
+<div id="pdc-status" style="display:none; max-width:1100px; margin:0 0 14px; font-size:13px; color:var(--cinza); background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;"></div>
 
 {% if tabelas %}
 <table class="cot">
@@ -69,6 +72,35 @@ function excluirTabela(id, nome) {
     .then(r => r.json())
     .then(d => { if (d.ok) location.reload(); else alert('Erro ao excluir.'); })
     .catch(() => alert('Erro de conexão.'));
+}
+
+function importarPdcJson(inp) {
+  var f = inp.files[0];
+  if (!f) return;
+  var st = document.getElementById('pdc-status');
+  st.style.display = 'block';
+  st.innerHTML = 'Importando <b>' + f.name + '</b>…';
+  var reader = new FileReader();
+  reader.onload = function () {
+    var dados;
+    try { dados = JSON.parse(reader.result); }
+    catch (e) { st.innerHTML = 'Erro: o arquivo não é um JSON válido.'; return; }
+    fetch('/cotacao/tabelas/importar-pdc', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dados)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) { st.innerHTML = 'Erro: ' + (d.erro || 'falha na importação'); return; }
+        var c = d.contagem;
+        st.innerHTML = 'Importado: <b>' + c.planos_novos + '</b> planos novos, <b>' + c.planos_atualizados +
+          '</b> atualizados, <b>' + c.precos + '</b> preços, <b>' + c.rede + '</b> credenciados na rede' +
+          (c.ignorados ? ' · ' + c.ignorados + ' ignorados' : '') + '. Recarregando…';
+        setTimeout(function () { location.reload(); }, 1800);
+      })
+      .catch(function (e) { st.innerHTML = 'Erro: ' + e.message; });
+  };
+  reader.readAsText(f);
+  inp.value = '';
 }
 </script>
 {% endblock %}
