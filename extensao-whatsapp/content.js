@@ -331,12 +331,15 @@
         if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
         pronto = true;
         window.removeEventListener('message', onMsg);
-        resolve(d.documentos || []);
+        // encontrados = quantos PDFs existiam pra baixar; se baixou menos, o
+        // servidor devolve documentos_falha e o painel avisa (nada de sumir PDF
+        // em silêncio — conversa com 2 PDFs chegava com 1 e ninguém sabia).
+        resolve({ documentos: d.documentos || [], encontrados: d.encontrados || (d.documentos || []).length });
       }
       window.addEventListener('message', onMsg);
       window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_documentos', reqId, limite }, '*');
       setTimeout(() => {
-        if (!pronto) { window.removeEventListener('message', onMsg); resolve([]); }
+        if (!pronto) { window.removeEventListener('message', onMsg); resolve({ documentos: [], encontrados: 0 }); }
       }, 60000);
     });
   }
@@ -1692,6 +1695,7 @@
     const avisos = [];
     if (r.ia_falhou) avisos.push('A leitura por IA falhou nesta análise — o score seguiu só no motor de regras.');
     if (r.audios_falha) avisos.push(r.audios_falha + ' áudio(s) não puderam ser transcritos nesta análise.');
+    if (r.documentos_falha) avisos.push(r.documentos_falha + ' PDF(s) da conversa não puderam ser baixados — clique em Analisar de novo pra tentar incluir.');
     const avisoFalhas = avisos.length
       ? avisos.map((a) => '<div class="job-ia-alerta">⚠ ' + esc(a) + '</div>').join('')
       : '';
@@ -1949,7 +1953,12 @@
 
       status('Baixando documentos PDF…');
       let documentos = [];
-      try { documentos = await pedirDocumentos(5); } catch (e) { documentos = []; }
+      let documentosEncontrados = 0;
+      try {
+        const rd = await pedirDocumentos(5);
+        documentos = rd.documentos || [];
+        documentosEncontrados = rd.encontrados || documentos.length;
+      } catch (e) { documentos = []; }
 
       let links = [];
       try { links = rasparLinks(); } catch (e) { links = []; }
@@ -1982,7 +1991,8 @@
       const resp = await chrome.runtime.sendMessage({
         type: 'analisar', reqId,
         payload: { telefone, nome, mensagens, imagens, audios, documentos, links,
-                   usuario_id: usuarioId || null, whatsapp_consultor: meuNumero || null }
+                   usuario_id: usuarioId || null, whatsapp_consultor: meuNumero || null,
+                   documentos_encontrados: documentosEncontrados }
       });
 
       // Se o usuário cancelou enquanto a resposta ainda estava a caminho, não

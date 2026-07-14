@@ -8876,9 +8876,12 @@ _CLAUDE_SYSTEM_ANALISE = (
     "enviado. Se o cliente não expressou preferência clara, deixe vazio em vez de chutar pelo mais "
     "recente.\n\n"
     "DOCUMENTOS PESSOAIS (fechamento): quando a conversa tiver fotos/PDFs de RG, CNH, comprovante "
-    "de residência ou cartão do SUS (CNS) — comum na hora de fechar a proposta —, extraia os dados "
-    "de CADA pessoa no campo documentos_pessoas (um item por pessoa): nome, cpf, rg, nascimento "
-    "(DD/MM/AAAA), emissao, natural (CIDADE - UF), pai, mae, cns, e o endereço do comprovante. "
+    "de residência, cartão do SUS (CNS) ou CERTIDÃO de casamento/nascimento — comum na hora de "
+    "fechar a proposta —, extraia os dados de CADA pessoa no campo documentos_pessoas (um item por "
+    "pessoa): nome, cpf, rg, nascimento (DD/MM/AAAA), emissao, natural (CIDADE - UF), pai, mae, cns, "
+    "e o endereço do comprovante. Um scan/foto de documento dentro de um PDF vale igual a uma foto "
+    "solta. Na certidão de casamento, extraia OS DOIS cônjuges (um item cada, com o que a certidão "
+    "mostrar: nome, nascimento, filiação) e a data do casamento em dados_empresa.casamento_vigencia. "
     "REGRA FORTE: se você CONSEGUE LER um documento pessoal numa imagem/PDF (ou seja, descreveu ele "
     "em leitura_imagens/leitura_documentos), você DEVE preencher documentos_pessoas com o que "
     "conseguir ler — NÃO deixe [] com o documento legível na tela. Preencha campo a campo o que está "
@@ -8993,7 +8996,7 @@ _CLAUDE_SCHEMA_ANALISE = {
                 "cnpj": {"type": "string", "description": "CNPJ da empresa."},
                 "plano_atual": {"type": "string", "description": "Plano/produto atual do cliente, se mencionado."},
                 "operadora_atual": {"type": "string", "description": "Operadora atual, se mencionada."},
-                "casamento_vigencia": {"type": "string", "description": "Data de aniversário/vigência do plano atual usada pro casamento de vigência (DD/MM/AAAA), se dita."}
+                "casamento_vigencia": {"type": "string", "description": "Data de casamento vista numa certidão de casamento anexada, OU a data de aniversário/vigência do plano atual usada pro casamento de vigência (DD/MM/AAAA)."}
             },
             "required": ["razao_social", "cnpj", "plano_atual", "operadora_atual", "casamento_vigencia"],
             "additionalProperties": False
@@ -9085,6 +9088,46 @@ def _formatar_docs_extraidos(pessoas, empresa):
     return '\n\n'.join(blocos)
 
 
+def _pdf_extrair_conteudo(b64, max_paginas=4):
+    """Prepara um PDF pro Claude ler MELHOR. Retorna (texto, paginas_jpeg_b64):
+    - PDF digital (tem camada de texto, ex: CNH-e, declaração de operadora):
+      devolve o texto completo — leitura perfeita, sem depender de visão.
+    - PDF escaneado ("Whatsapp Scan": foto de RG/CNH/certidão dentro de um PDF,
+      SEM camada de texto): renderiza as páginas em alta resolução (~200 DPI,
+      via pdfplumber/pypdfium2 que já são dependência do projeto) e devolve como
+      JPEG base64 — a visão da Claude lê texto miúdo de scan muito melhor assim
+      do que pelo pipeline nativo de PDF em resolução padrão.
+    Qualquer erro degrada gracioso pra ('', []) — o chamador manda o PDF nativo."""
+    import io
+    import base64 as _b64
+    try:
+        raw = _b64.b64decode(b64)
+        import pdfplumber
+        paginas = []
+        with pdfplumber.open(io.BytesIO(raw)) as pdf:
+            pgs = pdf.pages[:max_paginas]
+            partes = [(pg.extract_text() or '').strip() for pg in pgs]
+            texto = '\n\n'.join(p for p in partes if p).strip()
+            # >=120 chars = camada de texto de verdade (menos que isso costuma ser
+            # só número de página/rodapé de scanner — trata como escaneado).
+            if len(texto) >= 120:
+                return texto, []
+            for pg in pgs:
+                try:
+                    img = pg.to_image(resolution=200).original.convert('RGB')
+                    if max(img.size) > 2000:  # teto de payload/custo por página
+                        img.thumbnail((2000, 2000))
+                    buf = io.BytesIO()
+                    img.save(buf, format='JPEG', quality=88)
+                    paginas.append(_b64.b64encode(buf.getvalue()).decode())
+                except Exception:
+                    continue
+        return '', paginas
+    except Exception as e:
+        app.logger.warning(f"[PDF] extração de conteúdo falhou: {e}")
+        return '', []
+
+
 def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, documentos=None, links=None):
     """Chama a Claude para uma leitura qualitativa da conversa (texto + imagens + PDFs + links).
     Retorna dict {resumo, fase_funil, leitura_imagens, leitura_documentos, proximas_acoes,
@@ -9122,16 +9165,32 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, docume
             blocos_img.append({"type": "text", "text": f"[{img.get('hora', '')}] Imagem enviada pelo {quem}:"})
             blocos_img.append({"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}})
 
-        # Blocos de documento PDF (base64) — mesma lógica de rótulo dos blocos de imagem.
+        # Blocos de documento PDF (base64) — mesma lógica de rótulo dos blocos de
+        # imagem. Cada PDF passa por _pdf_extrair_conteudo: digital vira TEXTO
+        # extraído (leitura perfeita, ex: CNH-e); escaneado vira PÁGINAS em alta
+        # resolução (a Claude lia mal o scan pelo PDF nativo — "Whatsapp Scan"
+        # de RG/CNH/certidão voltava sem extração, caso do Aluizio 14/07).
         blocos_doc = []
+        docs_processados = 0
         for doc in (documentos or [])[:_CLAUDE_MAX_DOCUMENTOS]:
             b64 = (doc.get('base64') or '').strip()
             if not b64:
                 continue
             quem = 'CLIENTE' if doc.get('de') == 'lead' else 'CONSULTOR'
             nome_doc = (doc.get('nome') or 'documento.pdf').strip()
-            blocos_doc.append({"type": "text", "text": f"[{doc.get('hora', '')}] PDF enviado pelo {quem} ({nome_doc}):"})
-            blocos_doc.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}})
+            rotulo = f"[{doc.get('hora', '')}] PDF enviado pelo {quem} ({nome_doc})"
+            texto_pdf, paginas_img = _pdf_extrair_conteudo(b64)
+            if texto_pdf:
+                blocos_doc.append({"type": "text", "text": rotulo + " — texto extraído do PDF:\n" + texto_pdf[:8000]})
+                blocos_doc.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}})
+            elif paginas_img:
+                blocos_doc.append({"type": "text", "text": rotulo + f" — scan renderizado em alta resolução ({len(paginas_img)} página(s)):"})
+                for pb64 in paginas_img:
+                    blocos_doc.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": pb64}})
+            else:
+                blocos_doc.append({"type": "text", "text": rotulo + ":"})
+                blocos_doc.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}})
+            docs_processados += 1
 
         # Links compartilhados na conversa — só o texto (URL + prévia que o
         # WhatsApp já mostra), NUNCA abrimos/buscamos o link no servidor.
@@ -9199,7 +9258,7 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, docume
             return None
         dados['modelo'] = modelo
         dados['imagens_lidas'] = len(blocos_img) // 2
-        dados['documentos_lidos'] = len(blocos_doc) // 2
+        dados['documentos_lidos'] = docs_processados
         tok_in = getattr(resp.usage, 'input_tokens', 0) or 0
         tok_out = getattr(resp.usage, 'output_tokens', 0) or 0
         dados['tokens_entrada'] = tok_in
@@ -10373,6 +10432,14 @@ def api_whatsapp_analisar():
                            'base64': b64, 'nome': str(doc.get('nome') or 'documento.pdf')[:200],
                            'hora': str(doc.get('hora') or '')[:40],
                            'msg_id': str(doc.get('msg_id') or '').strip()[:100] or None})
+    # A extensão manda quantos PDFs EXISTIAM na conversa; se baixou menos (mídia
+    # não sincronizada, download falhou), o painel avisa em vez de fingir que
+    # leu tudo — antes um PDF sumia em silêncio e a extração vinha capenga.
+    try:
+        docs_encontrados = int(d.get('documentos_encontrados') or 0)
+    except (TypeError, ValueError):
+        docs_encontrados = 0
+    documentos_falha = max(0, docs_encontrados - len(documentos))
 
     # Links (URL + prévia de texto) raspados da conversa — Fase 4. Só texto,
     # nunca abrimos/buscamos o link no servidor.
@@ -10767,6 +10834,7 @@ def api_whatsapp_analisar():
         "audios_transcritos": an.get('audios_transcritos', 0),
         "audios_do_cache": an.get('audios_do_cache', 0),
         "audios_falha": an.get('audios_falha', 0),
+        "documentos_falha": documentos_falha,
         "transcricoes": an.get('transcricoes', []),
         "lead": ({"id": lead_id, "nome": (lead['nome'] if lead else nome),
                   "url": f"{_SITE_BASE_URL}/crm?lead={lead_id}"} if lead_id else None),

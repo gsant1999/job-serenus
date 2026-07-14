@@ -119,7 +119,14 @@
     const out = [];
     for (const m of alvos) {
       try {
-        const media = await window.WPP.chat.downloadMedia(m.id._serialized);
+        // Retry 1x: o download da mídia falha esporadicamente (mídia ainda não
+        // sincronizada) e antes o PDF sumia da análise em silêncio — conversa
+        // com 2 PDFs chegava com 1 no Claude sem ninguém saber (caso 14/07).
+        let media = null;
+        for (let t = 0; t < 2 && !media; t++) {
+          try { media = await window.WPP.chat.downloadMedia(m.id._serialized); }
+          catch (e) { media = null; }
+        }
         let b64 = '';
         if (media instanceof Blob) {
           b64 = await blobParaBase64(media);
@@ -136,7 +143,9 @@
         }
       } catch (e) { /* documento que falhar é ignorado, nunca derruba a análise */ }
     }
-    return { documentos: out };
+    // encontrados = PDFs selecionados pra baixar; se baixados < encontrados, o
+    // painel avisa em vez de fingir que leu tudo.
+    return { documentos: out, encontrados: alvos.length };
   }
 
   async function obterTelefone() {
