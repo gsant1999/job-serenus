@@ -535,5 +535,34 @@ fetch('/api/campos-ativos').then(r=>r.json()).then(campos=>{
     document.getElementById('secao-custom').style.display = 'block';
   }
 });
+
+// ─── Pré-preenchimento a partir da análise do lead (extensão) ───
+const PREFILL = {{ prefill|tojson }};
+(function aplicarPrefill(){
+  if (!PREFILL || !Object.keys(PREFILL).length) return;
+  const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+  const setName = (n, v) => { const el = document.querySelector('[name="'+n+'"]'); if (el && v) el.value = v; };
+  // tipo_pessoa primeiro (mostra o bloco de CNPJ/CPF via toggleDocs)
+  if (PREFILL.tipo_pessoa) { const tp = document.getElementById('tipo_pessoa'); if (tp) { tp.value = PREFILL.tipo_pessoa; try { toggleDocs(); } catch(e){} } }
+  set('cnpj', PREFILL.cnpj);
+  set('cpf_titular', PREFILL.cpf_titular);
+  set('nome_titular', PREFILL.nome_titular);
+  set('data_nasc_titular', PREFILL.data_nasc_titular);
+  set('valor', PREFILL.valor);
+  setName('razao_social', PREFILL.razao_social);
+  setName('total_vidas', PREFILL.total_vidas);
+  if (PREFILL.dependentes && PREFILL.dependentes.length) {
+    DEPS = PREFILL.dependentes.map(d => ({nome:d.nome||'', nasc:d.nasc||'', parentesco:d.parentesco||''}));
+    renderDeps();
+  }
+  const obs = document.querySelector('[name="observacoes"]');
+  if (obs && PREFILL.docs_texto) obs.value = (obs.value ? obs.value + '\n\n' : '') + PREFILL.docs_texto;
+  try { syncDeps(); } catch(e){}
+  // aviso visual no topo
+  const banner = document.createElement('div');
+  banner.style.cssText = 'max-width:100%;margin:0 0 16px;padding:12px 14px;background:rgba(59,130,246,.12);border:1px solid var(--azul);border-radius:10px;color:var(--texto);font-size:13px;';
+  banner.innerHTML = 'Pré-preenchido com os dados extraídos da análise do lead. <b>Confira tudo</b> (principalmente CPF/RG e valores) e complete o financeiro antes de salvar.';
+  const form = document.querySelector('form'); if (form) form.insertBefore(banner, form.firstChild);
+})();
 </script>
 {% endblock %}

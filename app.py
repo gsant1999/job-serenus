@@ -4564,8 +4564,49 @@ def nova_proposta():
     conn = db()
     sups = conn.execute("SELECT * FROM supervisoras WHERE ativo=1 ORDER BY nome").fetchall()
     ops = conn.execute("SELECT DISTINCT operadora FROM recebimento ORDER BY operadora").fetchall()
+    # Pré-preenchimento a partir da última análise de WhatsApp do lead (botão
+    # "Fechei essa proposta — criar no JOB" na extensão manda ?lead=N). Enche só
+    # o que a IA extraiu com segurança dos documentos; o financeiro fica pro
+    # consultor. Se não houver análise/lead, vem vazio (formulário normal).
+    prefill = {}
+    lead_id = (request.args.get('lead') or '').strip()
+    if lead_id.isdigit():
+        row = conn.execute("SELECT sugestoes_json FROM whatsapp_analises WHERE lead_id=? ORDER BY id DESC LIMIT 1",
+                           (lead_id,)).fetchone()
+        lead = conn.execute("SELECT nome, valor_estimado FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+        diag = {}
+        if row:
+            try:
+                diag = json.loads(row['sugestoes_json'] or '{}')
+            except Exception:
+                diag = {}
+        ia = diag.get('ia') or {}
+        pessoas = ia.get('documentos_pessoas') or []
+        empresa = ia.get('dados_empresa') or {}
+        extr = diag.get('extracao') or {}
+
+        def _iso(dt):  # DD/MM/AAAA -> YYYY-MM-DD (pro input type=date)
+            m = re.match(r'(\d{1,2})/(\d{1,2})/(\d{4})', str(dt or ''))
+            return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}" if m else ''
+
+        if pessoas:
+            tit = pessoas[0]
+            prefill['nome_titular'] = tit.get('nome') or ''
+            prefill['cpf_titular'] = tit.get('cpf') or ''
+            prefill['data_nasc_titular'] = _iso(tit.get('nascimento'))
+            prefill['dependentes'] = [{'nome': p.get('nome') or '', 'nasc': _iso(p.get('nascimento')), 'parentesco': ''}
+                                      for p in pessoas[1:] if p.get('nome')]
+            prefill['total_vidas'] = len(pessoas)
+        cnpj = (empresa.get('cnpj') or extr.get('cnpj') or '').strip()
+        prefill['cnpj'] = cnpj
+        prefill['tipo_pessoa'] = 'PME' if cnpj else 'PF'
+        prefill['razao_social'] = (empresa.get('razao_social') or (pessoas[0].get('nome') if pessoas else '')
+                                   or (lead['nome'] if lead else '') or '')
+        if lead and lead['valor_estimado']:
+            prefill['valor'] = f"{float(lead['valor_estimado']):.2f}".replace('.', ',')
+        prefill['docs_texto'] = diag.get('docs_extraidos') or ''
     close_db(conn)
-    return render_template('form.html', supervisoras=sups, operadoras=[o['operadora'] for o in ops])
+    return render_template('form.html', supervisoras=sups, operadoras=[o['operadora'] for o in ops], prefill=prefill)
 
 @app.route('/salvar-proposta', methods=['POST'])
 @login_required
