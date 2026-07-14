@@ -3842,13 +3842,17 @@ def webhook_asaas():
                             (parc['proposta_id'], 'Asaas (webhook)', 'Status do pagamento', 'Pendente', 'Pago ao corretor (PIX confirmado)')
                         )
                         app.logger.info(f"[WEBHOOK] 💰 Transferência concluída: parcela {parc['id']} marcada como 'Pago ao corretor'")
-                    
+
                     elif evento in ('TRANSFER_FAILED', 'TRANSFER_CANCELLED'):
                         motivo = transfer.get('failReason') or 'Transferência falhou ou foi cancelada'
                         conn.execute("UPDATE parcelas SET asaas_erro=? WHERE id=?", (str(motivo)[:300], parc['id']))
                         app.logger.warning(f"[WEBHOOK] ❌ Transferência falhou: parcela {parc['id']}, motivo={motivo[:50]}")
-                    
+
                     conn.commit()
+                    # Consultor só era avisado no caminho manual — pagamento via
+                    # PIX/Asaas confirmava em silêncio (sino mudo).
+                    if evento == 'TRANSFER_DONE':
+                        _notificar_parcela_consultor(conn, parc['id'], 'paga', origem='PIX via Asaas')
                 else:
                     app.logger.warning(f"[WEBHOOK] ⚠️  Transferência não encontrada: asaas_transfer_id={transfer_id}")
             else:
@@ -5820,6 +5824,25 @@ def proposta_fase(pid):
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "aviso": aviso})
 
+def _notificar_parcela_consultor(conn, pid, verbo, origem=''):
+    """Avisa o consultor dono da proposta que a parcela foi liberada/paga.
+    Chamar DEPOIS do commit (o _notificar abre conexão própria — no SQLite
+    local trava se ainda houver transação aberta na mesma base). Mostra
+    pa.valor, que é a PARTE DO CONSULTOR (valor_corretora é a da corretora)."""
+    try:
+        row = conn.execute("""SELECT pr.usuario_id, pr.razao_social, pa.numero, pa.valor
+                              FROM parcelas pa JOIN propostas pr ON pr.id = pa.proposta_id
+                              WHERE pa.id=?""", (pid,)).fetchone()
+        if row and row['usuario_id']:
+            rd = dict(row)
+            _notificar(rd['usuario_id'], 'comissao', f'Comissão {verbo}',
+                       f"Parcela {rd.get('numero')} de {rd.get('razao_social') or 'proposta'} "
+                       f"({_moeda(rd.get('valor'))})" + (f' — {origem}' if origem else ''),
+                       '/fluxo-caixa')
+    except Exception:
+        pass
+
+
 # ─── ROTAS DE PARCELAS (FLUXO DE CAIXA) ─────────────────────────────────────────
 @app.route('/parcela/<int:pid>/status', methods=['POST'])
 @login_required
@@ -5837,7 +5860,14 @@ def parcela_status(pid):
                      (novo, datetime.now(TZ_SP).isoformat(), pid))
     else:
         conn.execute("UPDATE parcelas SET status=? WHERE id=?", (novo, pid))
-    conn.commit(); close_db(conn)
+    conn.commit()
+    # Antes só o botão de ação notificava — a troca manual pelo select deixava
+    # o consultor sem aviso de comissão liberada/paga.
+    if novo == 'Liberado para o corretor':
+        _notificar_parcela_consultor(conn, pid, 'liberada')
+    elif novo == 'Pago ao corretor':
+        _notificar_parcela_consultor(conn, pid, 'paga')
+    close_db(conn)
     return jsonify({"ok": True})
 
 @app.route('/parcela/<int:pid>/acao', methods=['POST'])
@@ -5860,22 +5890,11 @@ def parcela_acao(pid):
     else:
         close_db(conn); return jsonify({"ok": False, "msg": "Ação inválida"}), 400
     conn.commit()
-    # Notifica o consultor quando a comissão é liberada ou paga
-    try:
-        if acao in ('liberar', 'pagar'):
-            row = conn.execute("""SELECT pr.usuario_id, pr.razao_social, pa.numero, pa.valor_corretora
-                                  FROM parcelas pa JOIN propostas pr ON pr.id = pa.proposta_id
-                                  WHERE pa.id=?""", (pid,)).fetchone()
-            if row:
-                rd = dict(row)
-                if rd.get('usuario_id'):
-                    verbo = 'liberada' if acao == 'liberar' else 'paga'
-                    _notificar(rd['usuario_id'], 'comissao', f'Comissão {verbo}',
-                               f"Parcela {rd.get('numero')} de {rd.get('razao_social') or 'proposta'} "
-                               f"({_moeda(rd.get('valor_corretora'))})",
-                               '/fluxo-caixa')
-    except Exception:
-        pass
+    # Notifica o consultor quando a comissão é liberada ou paga (helper único
+    # dos 3 caminhos; antes este inline mostrava valor_corretora — a parte da
+    # CORRETORA — pro consultor, valor errado no aviso).
+    if acao in ('liberar', 'pagar'):
+        _notificar_parcela_consultor(conn, pid, 'liberada' if acao == 'liberar' else 'paga')
     close_db(conn)
     return jsonify({"ok": True})
 
