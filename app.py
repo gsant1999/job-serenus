@@ -8779,12 +8779,15 @@ def _wa_descricao(ex, mensagens, msgs_lead, score, faixa):
 
 _CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-haiku-4-5').strip() or 'claude-haiku-4-5'
 
-# Modelo mais forte SÓ pra conversas com documento/anexo (leitura de RG/CNH/
-# carteirinha fotografada em ângulo é marginal no Haiku). Opt-in por env: se
-# CLAUDE_MODEL_DOCS estiver setada (ex: 'claude-sonnet-5'), ela é usada quando a
-# conversa tem imagem ou PDF; sem a env, mantém o modelo padrão (sem 3x de custo
-# nas análises comuns). Ver _analisar_com_claude.
-_CLAUDE_MODEL_DOCS = os.environ.get('CLAUDE_MODEL_DOCS', '').strip()
+# Modelo mais forte SÓ pra conversas com documento/anexo (imagem ou PDF). A visão
+# do Haiku é fraca pra RG/CNH/carteirinha fotografada em ângulo — lê o documento
+# limpo bem, mas erra/pula campos nos difíceis (caso da Cintia, jul/2026). O
+# Sonnet lê muito melhor esses documentos. Só entra quando há anexo (não encarece
+# as análises de conversa só-texto). Custo: ~US$0,10 por análise-com-documento vs
+# ~US$0,035 no Haiku — centavos, e só nos fechamentos, contra o valor de uma
+# proposta. Pra voltar ao Haiku, setar CLAUDE_MODEL_DOCS='' no Railway; pra
+# máxima precisão, 'claude-opus-4-8'. Ver _analisar_com_claude.
+_CLAUDE_MODEL_DOCS = os.environ.get('CLAUDE_MODEL_DOCS', 'claude-sonnet-5').strip()
 
 # Teto de tokens de SAÍDA da análise. Era 1500 fixo — e numa conversa de
 # fechamento cheia de documento (RG+CNH+carteirinha) o JSON estruturado
@@ -8799,6 +8802,20 @@ _CLAUDE_MAX_TOKENS_ANALISE = int(os.environ.get('CLAUDE_MAX_TOKENS_ANALISE', '60
 # a análise em si.
 _CLAUDE_PRECO_INPUT_USD_MI = float(os.environ.get('CLAUDE_PRECO_INPUT_USD_MILHAO', '1.00'))
 _CLAUDE_PRECO_OUTPUT_USD_MI = float(os.environ.get('CLAUDE_PRECO_OUTPUT_USD_MILHAO', '5.00'))
+
+
+def _precos_modelo(modelo):
+    """Preço (input, output) em USD/milhão pro modelo usado. Haiku vem das envs
+    acima; Sonnet/Opus são aproximados (só pra estimar o painel de custo, já que
+    documento agora roda no Sonnet — cobrar preço de Haiku subestimaria ~3x)."""
+    m = (modelo or '').lower()
+    if 'opus' in m:
+        return 15.0, 75.0
+    if 'sonnet' in m:
+        return 3.0, 15.0
+    return _CLAUDE_PRECO_INPUT_USD_MI, _CLAUDE_PRECO_OUTPUT_USD_MI
+
+
 _OPENAI_TRANSCRICAO_PRECO_USD_MIN = float(os.environ.get('OPENAI_TRANSCRICAO_PRECO_USD_MIN', '0.006'))
 _GROQ_TRANSCRICAO_PRECO_USD_MIN = float(os.environ.get('GROQ_TRANSCRICAO_PRECO_USD_MIN', '0.000667'))
 # Câmbio USD->BRL pro painel de custo mostrar em Real (o valor real cobrado
@@ -8861,6 +8878,15 @@ _CLAUDE_SYSTEM_ANALISE = (
     "documento; NUNCA invente número de documento. Se aparecerem dados da EMPRESA/plano atual/data de "
     "casamento de vigência (texto ou anexo, típico de PME), preencha dados_empresa. Só deixe "
     "documentos_pessoas como [] quando NÃO houver nenhum documento pessoal legível na conversa.\n\n"
+    "PRECISÃO NA LEITURA (o dado mais valioso são os NÚMEROS): leia CPF, RG e CNS dígito a dígito, "
+    "com atenção — um número errado inutiliza o cadastro. Onde cada dado costuma estar: a CNH traz "
+    "nome, CPF, doc de identidade/RG, data de nascimento, filiação (pai e mãe) e naturalidade; o RG "
+    "traz nome, RG, data de nascimento, emissão, filiação e naturalidade; a CARTEIRINHA de plano de "
+    "saúde traz o nome do titular e a data de nascimento (extraia os dois — não deixe a data em "
+    "branco se ela aparece no cartão); o comprovante de residência traz o endereço completo (rua, "
+    "número, bairro, cidade, CEP). Olhe o documento com atenção antes de dar um campo como ausente: "
+    "só marque vazio depois de confirmar que o campo realmente não está no documento — não desista "
+    "de um número só porque a foto está um pouco torta ou escura.\n\n"
     "Julgue também a RELEVÂNCIA COMERCIAL da conversa como um todo: 'alta' = negociação real "
     "de plano de saúde com um cliente em potencial; 'media' = tem interesse mas disperso/incompleto; "
     "'baixa' = conversa desconexa com só menções soltas ao tema; 'nenhuma' = não é conversa de venda "
@@ -9156,8 +9182,9 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, docume
         tok_out = getattr(resp.usage, 'output_tokens', 0) or 0
         dados['tokens_entrada'] = tok_in
         dados['tokens_saida'] = tok_out
-        dados['custo_usd'] = round(tok_in * _CLAUDE_PRECO_INPUT_USD_MI / 1_000_000
-                                    + tok_out * _CLAUDE_PRECO_OUTPUT_USD_MI / 1_000_000, 6)
+        preco_in, preco_out = _precos_modelo(modelo)
+        dados['custo_usd'] = round(tok_in * preco_in / 1_000_000
+                                    + tok_out * preco_out / 1_000_000, 6)
         return dados
     except Exception as e:
         app.logger.warning(f"[CLAUDE] análise falhou ({_CLAUDE_MODEL}): {e}")
