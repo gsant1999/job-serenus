@@ -16180,6 +16180,291 @@ def crm_modelo_excluir(mid):
     return jsonify({"ok": True})
 
 
+# ─── Pastas (Modelos + Funis organizados por consultor → operadora → subpasta) ──
+# Hierarquia de profundidade livre. Só existem 5 pastas RAIZ (parent_id NULL),
+# fixas/protegidas contra exclusão: "Compartilhado", "A organizar" e uma por
+# consultor (consultor_id = usuarios.id, criadas pelo backfill automático a
+# partir de quem tem perfil='consultor'). Sob qualquer raiz, subpastas
+# arbitrárias via parent_id — essas NUNCA guardam consultor_id direto, o dono
+# de uma subpasta é sempre calculado subindo até a raiz (_pasta_dono). Modelos
+# e funis apontam pra uma pasta folha (pasta_id) e carregam dono_consultor_id
+# denormalizado a partir da raiz, pra a extensão da consultora filtrar com um
+# WHERE direto (roda a cada troca de conversa, não pode subir árvore toda vez).
+
+def _pasta_dono(conn, pasta_id):
+    """Sobe a árvore a partir de qualquer pasta até achar a raiz e devolve o
+    consultor_id dela (None = Compartilhado/A organizar, ou pasta órfã)."""
+    visitados = set()
+    atual = pasta_id
+    ultimo = None
+    while atual and atual not in visitados:
+        visitados.add(atual)
+        p = conn.execute("SELECT parent_id, consultor_id FROM pastas WHERE id=?", (atual,)).fetchone()
+        if not p:
+            return None
+        ultimo = p
+        if not p['parent_id']:
+            return p['consultor_id']
+        atual = p['parent_id']
+    return ultimo['consultor_id'] if ultimo else None
+
+
+def _pasta_recalcular_cascata(conn, pasta_id):
+    """Depois de mover uma pasta pra debaixo de outra raiz, recalcula
+    dono_consultor_id de todo modelo/funil na subárvore inteira a partir dela
+    (não só os diretamente dentro) — mover uma pasta de Compartilhado pra
+    dentro de um consultor é uma reatribuição de dono de tudo que tem nela."""
+    dono = _pasta_dono(conn, pasta_id)
+    fila = [pasta_id]
+    todas = []
+    while fila:
+        atual = fila.pop()
+        todas.append(atual)
+        fila.extend(f['id'] for f in conn.execute("SELECT id FROM pastas WHERE parent_id=?", (atual,)).fetchall())
+    marcadores = ','.join(['?'] * len(todas))
+    conn.execute(f"UPDATE modelos_conteudo SET dono_consultor_id=? WHERE pasta_id IN ({marcadores})", (dono, *todas))
+    conn.execute(f"UPDATE whatsapp_funis SET dono_consultor_id=? WHERE pasta_id IN ({marcadores})", (dono, *todas))
+
+
+def _construir_arvore_pastas(conn):
+    """Monta a árvore inteira (pastas + contagem de modelos/funis ativos
+    dentro de cada uma) num JSON só, pra navegação client-side sem round-trip
+    — mesmo espírito do navegador do Material de Apoio, mas recursivo de
+    verdade (aquele é hardcoded em 2 níveis, não dava pra reaproveitar)."""
+    pastas = [dict(p) for p in conn.execute("SELECT * FROM pastas ORDER BY nome").fetchall()]
+    cont_modelos, cont_funis = {}, {}
+    for r in conn.execute("SELECT pasta_id, COUNT(*) n FROM modelos_conteudo WHERE pasta_id IS NOT NULL AND ativo=1 GROUP BY pasta_id").fetchall():
+        cont_modelos[r['pasta_id']] = r['n']
+    for r in conn.execute("SELECT pasta_id, COUNT(*) n FROM whatsapp_funis WHERE pasta_id IS NOT NULL AND ativo=1 GROUP BY pasta_id").fetchall():
+        cont_funis[r['pasta_id']] = r['n']
+    by_id = {p['id']: {**p, 'filhas': [], 'modelos': cont_modelos.get(p['id'], 0), 'funis': cont_funis.get(p['id'], 0)}
+             for p in pastas}
+    raizes = []
+    for p in by_id.values():
+        if p['parent_id'] and p['parent_id'] in by_id:
+            by_id[p['parent_id']]['filhas'].append(p)
+        else:
+            raizes.append(p)
+    return raizes
+
+
+@app.route('/crm/pastas/nova', methods=['POST'])
+@login_required
+@admin_required
+def crm_pasta_nova():
+    """Só cria SUBpasta — as 5 raízes (Compartilhado, A organizar, uma por
+    consultor) são geridas pelo backfill automático, não por aqui."""
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()[:120]
+    parent_id = d.get('parent_id')
+    if not nome:
+        return jsonify({"ok": False, "erro": "Dê um nome à pasta"}), 400
+    if not parent_id:
+        return jsonify({"ok": False, "erro": "Escolha em qual pasta ela vai ficar dentro"}), 400
+    conn = db()
+    if not conn.execute("SELECT id FROM pastas WHERE id=?", (parent_id,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Pasta pai não encontrada"}), 400
+    conn.execute("INSERT INTO pastas (nome, parent_id, consultor_id) VALUES (?,?,NULL)", (nome, parent_id))
+    pid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "id": pid})
+
+
+@app.route('/crm/pastas/<int:pid>/renomear', methods=['POST'])
+@login_required
+@admin_required
+def crm_pasta_renomear(pid):
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()[:120]
+    if not nome:
+        return jsonify({"ok": False, "erro": "Nome não pode ficar vazio"}), 400
+    conn = db()
+    if not conn.execute("SELECT id FROM pastas WHERE id=?", (pid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Pasta não encontrada"}), 404
+    conn.execute("UPDATE pastas SET nome=? WHERE id=?", (nome, pid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/pastas/<int:pid>/mover', methods=['POST'])
+@login_required
+@admin_required
+def crm_pasta_mover(pid):
+    """Muda uma SUBpasta de lugar (as 5 raízes não se movem — ficam fixas).
+    Recalcula dono_consultor_id em cascata pra ela e tudo dentro, já que
+    mover entre Compartilhado/A organizar/pasta de um consultor troca o
+    dono de tudo que tem lá dentro."""
+    d = request.json or {}
+    novo_parent = d.get('parent_id')
+    if not novo_parent:
+        return jsonify({"ok": False, "erro": "Escolha a pasta destino"}), 400
+    conn = db()
+    pasta = conn.execute("SELECT id, parent_id FROM pastas WHERE id=?", (pid,)).fetchone()
+    if not pasta:
+        close_db(conn); return jsonify({"ok": False, "erro": "Pasta não encontrada"}), 404
+    if not pasta['parent_id']:
+        close_db(conn); return jsonify({"ok": False, "erro": "Essa é uma pasta raiz — não pode ser movida"}), 400
+    novo_parent = int(novo_parent)
+    if novo_parent == pid:
+        close_db(conn); return jsonify({"ok": False, "erro": "Uma pasta não pode ser pai dela mesma"}), 400
+    if not conn.execute("SELECT id FROM pastas WHERE id=?", (novo_parent,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Pasta destino não encontrada"}), 400
+    atual, visitados = novo_parent, set()
+    while atual and atual not in visitados:
+        if atual == pid:
+            close_db(conn); return jsonify({"ok": False, "erro": "Não dá pra mover uma pasta pra dentro dela mesma"}), 400
+        visitados.add(atual)
+        p = conn.execute("SELECT parent_id FROM pastas WHERE id=?", (atual,)).fetchone()
+        atual = p['parent_id'] if p else None
+    conn.execute("UPDATE pastas SET parent_id=? WHERE id=?", (novo_parent, pid))
+    _pasta_recalcular_cascata(conn, pid)
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/pastas/<int:pid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_pasta_excluir(pid):
+    conn = db()
+    pasta = conn.execute("SELECT id, parent_id FROM pastas WHERE id=?", (pid,)).fetchone()
+    if not pasta:
+        close_db(conn); return jsonify({"ok": False, "erro": "Pasta não encontrada"}), 404
+    if not pasta['parent_id']:
+        close_db(conn); return jsonify({"ok": False, "erro": "Essa é uma pasta raiz — não pode ser excluída"}), 400
+    if conn.execute("SELECT id FROM pastas WHERE parent_id=?", (pid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Essa pasta tem subpastas — mova ou exclua elas primeiro"}), 400
+    if conn.execute("SELECT id FROM modelos_conteudo WHERE pasta_id=?", (pid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Essa pasta tem modelos dentro — mova eles primeiro"}), 400
+    if conn.execute("SELECT id FROM whatsapp_funis WHERE pasta_id=?", (pid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Essa pasta tem funis dentro — mova eles primeiro"}), 400
+    conn.execute("DELETE FROM pastas WHERE id=?", (pid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/modelos/<int:mid>/mover-pasta', methods=['POST'])
+@login_required
+@admin_required
+def crm_modelo_mover_pasta(mid):
+    d = request.json or {}
+    pasta_id = d.get('pasta_id')
+    conn = db()
+    if not conn.execute("SELECT id FROM modelos_conteudo WHERE id=?", (mid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Modelo não encontrado"}), 404
+    dono = None
+    if pasta_id:
+        if not conn.execute("SELECT id FROM pastas WHERE id=?", (pasta_id,)).fetchone():
+            close_db(conn); return jsonify({"ok": False, "erro": "Pasta não encontrada"}), 400
+        dono = _pasta_dono(conn, pasta_id)
+    conn.execute("UPDATE modelos_conteudo SET pasta_id=?, dono_consultor_id=? WHERE id=?", (pasta_id or None, dono, mid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/funis/<int:fid>/mover-pasta', methods=['POST'])
+@login_required
+@admin_required
+def crm_funil_mover_pasta(fid):
+    d = request.json or {}
+    pasta_id = d.get('pasta_id')
+    conn = db()
+    if not conn.execute("SELECT id FROM whatsapp_funis WHERE id=?", (fid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Funil não encontrado"}), 404
+    dono = None
+    if pasta_id:
+        if not conn.execute("SELECT id FROM pastas WHERE id=?", (pasta_id,)).fetchone():
+            close_db(conn); return jsonify({"ok": False, "erro": "Pasta não encontrada"}), 400
+        dono = _pasta_dono(conn, pasta_id)
+    conn.execute("UPDATE whatsapp_funis SET pasta_id=?, dono_consultor_id=? WHERE id=?", (pasta_id or None, dono, fid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/pastas/backfill-automatico', methods=['POST'])
+@login_required
+@admin_required
+def crm_pastas_backfill_automatico():
+    """Roda uma vez (idempotente): cria as 5 pastas raiz (Compartilhado, A
+    organizar, uma por consultor real — perfil='consultor') e reclassifica
+    todo modelo/funil que AINDA NÃO tem pasta_id a partir da categoria solta
+    que já existe. Regra combinada com o Guilherme: categoria "FLUXOS <nome>"
+    que bate com um consultor de verdade vira subpasta pessoal; categoria
+    vazia cai direto em "A organizar"; qualquer outra categoria com valor
+    vira subpasta (com o nome exato da categoria, sem tentar unificar
+    variações tipo "VERA CRUZ"/"Vera cruz") dentro de "Compartilhado". Só
+    mexe em item sem pasta_id — rodar de novo não reclassifica nada que já
+    foi organizado manualmente."""
+    conn = db()
+
+    def _achar_ou_criar_raiz(nome, consultor_id):
+        r = conn.execute(
+            "SELECT id FROM pastas WHERE parent_id IS NULL AND nome=? AND COALESCE(consultor_id,0)=COALESCE(?,0)",
+            (nome, consultor_id)).fetchone()
+        if r:
+            return r['id']
+        conn.execute("INSERT INTO pastas (nome, parent_id, consultor_id) VALUES (?,NULL,?)", (nome, consultor_id))
+        return (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+
+    def _achar_ou_criar_sub(nome, parent_id):
+        r = conn.execute("SELECT id FROM pastas WHERE parent_id=? AND nome=?", (parent_id, nome)).fetchone()
+        if r:
+            return r['id']
+        conn.execute("INSERT INTO pastas (nome, parent_id, consultor_id) VALUES (?,?,NULL)", (nome, parent_id))
+        return (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+
+    raiz_compartilhado = _achar_ou_criar_raiz('Compartilhado', None)
+    raiz_organizar = _achar_ou_criar_raiz('A organizar', None)
+
+    consultores = {r['nome']: r['id'] for r in conn.execute(
+        "SELECT id, nome FROM usuarios WHERE perfil='consultor' AND ativo=1").fetchall()}
+    # Mapeamento explícito (não fuzzy) do apelido usado nas categorias antigas
+    # pro nome completo cadastrado em usuarios — só essas 3 existem hoje.
+    APELIDO_CONSULTOR = {'JENI': 'Jenifer Aparecida Lobregat dos Santos',
+                          'JULIANA': 'Juliana Azevedo', 'PRI': 'Prisciele Azevedo'}
+    raiz_consultor = {}
+    for apelido, nome_completo in APELIDO_CONSULTOR.items():
+        uid = consultores.get(nome_completo)
+        if uid:
+            raiz_consultor[apelido] = _achar_ou_criar_raiz(nome_completo, uid)
+
+    cache = {}
+
+    def _resolver_pasta(categoria):
+        chave = (categoria or '').strip()
+        if chave in cache:
+            return cache[chave]
+        if not chave:
+            resultado = (raiz_organizar, None)
+        else:
+            m = re.match(r'^FLUXOS\s+(\w+)', chave, re.IGNORECASE)
+            apelido = m.group(1).upper() if m else None
+            if apelido and apelido in raiz_consultor:
+                uid = consultores[APELIDO_CONSULTOR[apelido]]
+                resultado = (_achar_ou_criar_sub(chave, raiz_consultor[apelido]), uid)
+            else:
+                resultado = (_achar_ou_criar_sub(chave, raiz_compartilhado), None)
+        cache[chave] = resultado
+        return resultado
+
+    contagem = {'modelos_classificados': 0, 'funis_classificados': 0}
+    for row in conn.execute("SELECT id, categoria FROM modelos_conteudo WHERE pasta_id IS NULL").fetchall():
+        pasta_id, dono = _resolver_pasta(row['categoria'])
+        conn.execute("UPDATE modelos_conteudo SET pasta_id=?, dono_consultor_id=? WHERE id=?", (pasta_id, dono, row['id']))
+        contagem['modelos_classificados'] += 1
+    for row in conn.execute("SELECT id, categoria FROM whatsapp_funis WHERE pasta_id IS NULL").fetchall():
+        pasta_id, dono = _resolver_pasta(row['categoria'])
+        conn.execute("UPDATE whatsapp_funis SET pasta_id=?, dono_consultor_id=? WHERE id=?", (pasta_id, dono, row['id']))
+        contagem['funis_classificados'] += 1
+    contagem['subpastas_criadas'] = len(cache)
+    contagem['pastas_raiz'] = 2 + len(raiz_consultor)
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "contagem": contagem})
+
+
 # ─── Funis de WhatsApp (sequências de disparo) ──────────────────────────────
 # Um funil é uma sequência ordenada de passos; cada passo aponta pra um modelo
 # da biblioteca (texto/áudio/imagem/PDF) + um delay antes de mandar. A extensão
