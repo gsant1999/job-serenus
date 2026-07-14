@@ -4536,15 +4536,31 @@ def dashboard():
             GROUP BY p.id ORDER BY p.id DESC""",(uid,)).fetchall()
         rb = session.get('regime_base')
         if rb == 'com_lead':
-            if m['mes_producao'] <= 3000: m['regime_label'] = 'Com Lead — N1 (até R$ 3.000)'
-            elif m['mes_producao'] <= 7000: m['regime_label'] = 'Com Lead — N2 (até R$ 7.000)'
-            else: m['regime_label'] = 'Com Lead — N3 (acima de R$ 7.000)'
+            # Nível pela MESMA fonte do cálculo real (tabela niveis via
+            # _nivel_por_producao) — era hardcoded N1<=3000/N2<=7000 aqui, então
+            # mudar as faixas em /niveis mudava o pagamento mas o consultor via
+            # o rótulo antigo (duas verdades na tela).
+            nivel_cod = _nivel_por_producao(m['mes_producao'] or 0, conn)
+            try:
+                nv = conn.execute("SELECT label, faixa_min, faixa_max FROM niveis WHERE codigo=?",
+                                  (nivel_cod,)).fetchone()
+            except Exception:
+                nv = None
+            if nv:
+                fx = (f"até R$ {float(nv['faixa_max']):,.0f}".replace(',', '.') if nv['faixa_max'] is not None
+                      else f"acima de R$ {float(nv['faixa_min'] or 0):,.0f}".replace(',', '.'))
+                m['regime_label'] = f"Com Lead — {nv['label'] or nivel_cod.upper()} ({fx})"
+            else:
+                m['regime_label'] = f"Com Lead — {nivel_cod.upper()}"
         elif rb == 'com_fixo_lead': m['regime_label'] = 'Com Fixo + Com Lead'
         else: m['regime_label'] = 'Sem Lead e Sem Fixo'
+        # Fixo da MESMA fonte que o pagamento usa (usuarios.valor_fixo, via
+        # gerar_fixo_mes) — antes lia da tabela legado 'regimes' e o consultor
+        # podia ver um valor diferente do que recebia.
         m['valor_fixo'] = 0
         if rb == 'com_fixo_lead':
-            r = conn.execute("SELECT valor_fixo FROM regimes WHERE codigo='com_fixo_lead'").fetchone()
-            m['valor_fixo'] = r['valor_fixo'] if r else 0
+            r = conn.execute("SELECT valor_fixo FROM usuarios WHERE id=?", (uid,)).fetchone()
+            m['valor_fixo'] = (r['valor_fixo'] or 0) if r else 0
         pendentes_aceite = conn.execute("""SELECT pa.*, p.razao_social, p.adm_operadora FROM parcelas pa
             JOIN propostas p ON p.id=pa.proposta_id
             WHERE p.usuario_id=? AND pa.status='Liberado para o corretor' AND pa.aceite_corretor=0
