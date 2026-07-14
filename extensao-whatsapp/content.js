@@ -1626,7 +1626,7 @@
       '<div class="job-resumo" id="job-followup">' + esc(r.followup || '') + '</div>' +
       '<button class="job-copy" id="job-copy-btn">Copiar follow-up</button>' +
       seccaoAudios(r.transcricoes, r.audios_transcritos) +
-      seccaoDocs(r.docs_extraidos) +
+      seccaoDocs(r.docs_extraidos, r.ia) +
       seccaoIA(r.ia) +
       '<div class="job-sec">Como está a conversa</div>' +
       '<div class="job-resumo">' + esc(r.resumo || '').replace(/\n/g, '<br>') + '</div>' +
@@ -1657,12 +1657,27 @@
   // Bloco dos dados extraídos dos documentos (RG/CNH/comprovante) — no formato
   // padrão da corretora, copiável pra colar na proposta/onde precisar. Só
   // aparece quando o backend achou documento pessoal na conversa.
-  function seccaoDocs(txt) {
-    if (!txt || !String(txt).trim()) return '';
+  function seccaoDocs(txt, ia) {
+    if (txt && String(txt).trim()) {
+      return '<div class="job-sec">Dados dos documentos</div>' +
+        '<div class="job-resumo" id="job-docs-txt" style="white-space:pre-wrap;font-variant-numeric:tabular-nums;">' + esc(txt) + '</div>' +
+        '<button class="job-copy" id="job-docs-copy" data-texto="' + esc(txt) + '">Copiar dados dos documentos</button>' +
+        '<button class="job-analisar-btn" id="job-criar-proposta" style="margin-top:8px;">Fechei essa proposta — criar no JOB</button>';
+    }
+    // Sem dados extraídos: se a IA LEU imagens/PDFs mas não achou documento
+    // pessoal, diz isso em vez de sumir (senão o consultor acha que "não
+    // apareceu / é burro" sem saber o porquê). Só some de vez se não houve
+    // nenhum anexo pra ler.
+    const nImg = (ia && (ia.imagens_lidas || (ia.leitura_imagens || []).length)) || 0;
+    const nDoc = (ia && (ia.documentos_lidos || (ia.leitura_documentos || []).length)) || 0;
+    if (!nImg && !nDoc) return '';
+    const partes = [];
+    if (nImg) partes.push(nImg + ' imagem(ns)');
+    if (nDoc) partes.push(nDoc + ' PDF(s)');
     return '<div class="job-sec">Dados dos documentos</div>' +
-      '<div class="job-resumo" id="job-docs-txt" style="white-space:pre-wrap;font-variant-numeric:tabular-nums;">' + esc(txt) + '</div>' +
-      '<button class="job-copy" id="job-docs-copy" data-texto="' + esc(txt) + '">Copiar dados dos documentos</button>' +
-      '<button class="job-analisar-btn" id="job-criar-proposta" style="margin-top:8px;">Fechei essa proposta — criar no JOB</button>';
+      '<div class="job-ia-alerta" style="color:var(--cinza);background:rgba(255,255,255,.04);border-color:var(--borda);">' +
+      'A IA leu ' + partes.join(' e ') + ', mas não identificou RG/CNH/comprovante pra extrair dados de proposta. ' +
+      'Se tiver documento na conversa, confira se está legível e clique em Analisar de novo.</div>';
   }
 
   // Bloco da leitura por IA (Claude) — só aparece quando o backend devolve `ia`
