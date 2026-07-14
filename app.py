@@ -15709,6 +15709,7 @@ def crm_modelos():
     conn = db()
     modelos = [dict(m) for m in conn.execute(
         "SELECT * FROM modelos_conteudo ORDER BY tipo, nome").fetchall()]
+    arvore_pastas = _construir_arvore_pastas(conn)
     close_db(conn)
     wpp = [m for m in modelos if m['tipo'] == 'whatsapp']
     # Favoritos primeiro, depois por categoria (sem categoria por último), depois nome.
@@ -15726,7 +15727,7 @@ def crm_modelos():
     return render_template('crm_modelos.html',
                            modelos_email=[m for m in modelos if m['tipo'] == 'email'],
                            modelos_sms=[m for m in modelos if m['tipo'] == 'sms'],
-                           modelos_whatsapp=wpp, stats_wpp=stats_wpp)
+                           modelos_whatsapp=wpp, stats_wpp=stats_wpp, arvore_pastas=arvore_pastas)
 
 
 @app.route('/crm/modelos/imagem/<path:nome>')
@@ -16497,6 +16498,7 @@ def crm_funis():
         SELECT id, nome, midia_tipo, categoria, corpo_texto FROM modelos_conteudo
         WHERE tipo='whatsapp' AND ativo=1
         ORDER BY (categoria IS NULL), categoria, nome""").fetchall()]
+    arvore_pastas = _construir_arvore_pastas(conn)
     close_db(conn)
     por_funil = {}
     for p in passos:
@@ -16505,7 +16507,7 @@ def crm_funis():
     for f in funis:
         f['passos'] = por_funil.get(f['id'], [])
         f['total_delay'] = sum((p['delay_segundos'] or 0) for p in f['passos'])
-    return render_template('crm_funis.html', funis=funis, modelos=modelos)
+    return render_template('crm_funis.html', funis=funis, modelos=modelos, arvore_pastas=arvore_pastas)
 
 
 @app.route('/crm/funis/novo', methods=['POST'])

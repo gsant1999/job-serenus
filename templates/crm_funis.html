@@ -8,9 +8,16 @@
 
   /* Coluna esquerda: lista de funis */
   .fn-col { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:16px; }
-  .fn-col-topo { display:flex; gap:8px; margin-bottom:12px; }
+  .fn-col-topo { display:flex; gap:8px; margin-bottom:12px; flex-direction:column; }
   .fn-busca { flex:1; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:8px 11px; font-size:12.5px; color:var(--texto); }
   .fn-busca:focus { outline:none; border-color:var(--azul); }
+  .fn-pasta-sel { width:100%; box-sizing:border-box; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px;
+                  padding:8px 11px; font-size:12.5px; color:var(--texto); font-family:inherit; }
+  .fn-pasta-sel:focus { outline:none; border-color:var(--azul); }
+  .fn-pasta-nova { background:none; border:none; color:var(--azul); font-size:11.5px; font-weight:600; cursor:pointer; padding:2px 0; text-align:left; }
+  .fn-pasta-nova:hover { text-decoration:underline; }
+  .fn-b-pasta { display:flex; align-items:center; gap:8px; padding:0 18px 14px; }
+  .fn-b-pasta select { flex:1; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:7px 10px; font-size:11.5px; color:var(--texto); font-family:inherit; }
   .fn-lista { display:flex; flex-direction:column; gap:10px; max-height:70vh; overflow-y:auto; }
   .fn-item { text-align:left; width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:11px; padding:13px 14px; cursor:pointer; transition:.12s; position:relative; display:flex; align-items:center; gap:10px; }
   .fn-item:hover { border-color:var(--borda-2); }
@@ -118,6 +125,7 @@
   <!-- Lista de funis -->
   <div class="fn-col">
     <div class="fn-col-topo">
+      <select class="fn-pasta-sel" id="fn-pasta-filtro" onchange="mudarPastaFiltro()"></select>
       <input class="fn-busca" id="fn-busca" placeholder="Buscar funil..." oninput="filtrarFunis()">
     </div>
     <div class="fn-lista" id="fn-lista"></div>
@@ -144,6 +152,7 @@
 <script>
 const FUNIS = {{ funis|tojson }};
 const MODELOS = {{ modelos|tojson }};
+const PASTAS = {{ arvore_pastas|tojson }};
 
 const ICO = {
   texto: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
@@ -165,10 +174,63 @@ function tipoDePasso(p){ return (p.tipo && ICO[p.tipo]) ? p.tipo : 'texto'; }
 function fmtDelay(s){ s = s||0; if(s<=0) return 'imediatamente'; const m=Math.floor(s/60), r=s%60; if(m&&r) return `após ${m}min ${r}s`; if(m) return `após ${m}min`; return `após ${r}s`; }
 function escapar(t){ const d=document.createElement('div'); d.textContent=t==null?'':String(t); return d.innerHTML; }
 
+// ── Pastas (consultor → operadora → subpasta) — filtro de navegação na lista
+//    de funis + "mover pra pasta" no funil selecionado. V1 é um select simples
+//    com indentação por profundidade, não um navegador em grade com drag. ──
+function _pastasFlatten(nos, prefixo){
+  prefixo = prefixo || '';
+  let out = [];
+  (nos || PASTAS).forEach(function(p){
+    out.push({id:p.id, label:prefixo + p.nome});
+    out = out.concat(_pastasFlatten(p.filhas, prefixo + '— '));
+  });
+  return out;
+}
+function _pastaPorId(id, nos){
+  nos = nos || PASTAS;
+  for (const p of nos){
+    if (p.id === id) return p;
+    const achou = _pastaPorId(id, p.filhas);
+    if (achou) return achou;
+  }
+  return null;
+}
+function _popularSelectPastas(sel, valorAtual, comOpcaoTodas){
+  const flat = _pastasFlatten(PASTAS);
+  let html = comOpcaoTodas ? '<option value="">Todas as pastas</option>' : '<option value="">Sem pasta</option>';
+  html += flat.map(function(p){
+    return '<option value="'+p.id+'"'+(String(valorAtual)===String(p.id)?' selected':'')+'>'+escapar(p.label)+'</option>';
+  }).join('');
+  sel.innerHTML = html;
+}
+
+let _pastaFiltro = '';
+function mudarPastaFiltro(){
+  _pastaFiltro = document.getElementById('fn-pasta-filtro').value;
+  renderLista();
+}
+async function criarSubpasta(parentIdPadrao){
+  const flat = _pastasFlatten(PASTAS);
+  const opcoes = flat.map(function(p){ return p.id+' = '+p.label; }).join('\n');
+  const parentStr = prompt('Vai criar dentro de qual pasta? Digite o número:\n'+opcoes, parentIdPadrao||'');
+  if (parentStr===null) return;
+  const nome = prompt('Nome da nova subpasta:');
+  if (!nome || !nome.trim()) return;
+  const d = await api('/crm/pastas/nova', {nome:nome.trim(), parent_id:parseInt(parentStr,10)});
+  if (d.ok) location.reload();
+}
+async function moverFunilPasta(fid, pastaId){
+  const d = await api('/crm/funis/'+fid+'/mover-pasta', {pasta_id: pastaId?parseInt(pastaId,10):null});
+  if (d.ok) recarregar(fid);
+}
+
 function renderLista(){
   const busca=(document.getElementById('fn-busca').value||'').toLowerCase();
   const lista=document.getElementById('fn-lista');
-  const vis=FUNIS.filter(f=> !busca || (f.nome||'').toLowerCase().includes(busca) || (f.categoria||'').toLowerCase().includes(busca));
+  const vis=FUNIS.filter(f=> {
+    if (_pastaFiltro && String(f.pasta_id||'')!==String(_pastaFiltro)) return false;
+    return !busca || (f.nome||'').toLowerCase().includes(busca) || (f.categoria||'').toLowerCase().includes(busca);
+  });
   if(!vis.length){ lista.innerHTML='<div class="fn-vazio">'+(FUNIS.length?'Nenhum funil bate com a busca.':'Nenhum funil ainda. Crie o primeiro.')+'</div>'; return; }
   lista.innerHTML = vis.map(f=>{
     const n=(f.passos||[]).length;
@@ -223,6 +285,10 @@ function renderBuilder(){
       <button class="fn-b-acao" onclick="renomear(${f.id})" title="Renomear">${ICO.lapis}</button>
       <button class="fn-b-acao perigo" onclick="excluirFunil(${f.id})" title="Excluir funil">${ICO.lixo}</button>
     </div>
+    <div class="fn-b-pasta">
+      <select id="fn-b-pasta-sel" onchange="moverFunilPasta(${f.id}, this.value)"></select>
+      <button class="fn-pasta-nova" onclick="criarSubpasta(document.getElementById('fn-b-pasta-sel').value)" title="Criar subpasta">+ subpasta</button>
+    </div>
     <div class="fn-passos">${linhas || '<div class="fn-vazio" style="padding:20px 0">Nenhum passo ainda. Adicione o primeiro abaixo.</div>'}</div>
     ${passos.length?`<div class="fn-total">Tempo total da sequência: ~${fmtDelay(total).replace('após ','')}</div>`:''}
     <div class="fn-picker">
@@ -239,6 +305,7 @@ function renderBuilder(){
         <button class="btn-azul" onclick="adicionarPasso(${f.id})">Adicionar à sequência</button>
       </div>
     </div>`;
+  _popularSelectPastas(document.getElementById('fn-b-pasta-sel'), f.pasta_id, false);
 }
 
 function selecionar(id){ selecionado=id; location.hash='funil-'+id; renderLista(); renderBuilder(); }
@@ -326,6 +393,7 @@ async function excluirPasso(pid){ if(!confirm('Remover este passo da sequência?
 
 // Restaura a seleção pelo hash (sobrevive ao reload após cada mudança).
 (function init(){
+  _popularSelectPastas(document.getElementById('fn-pasta-filtro'), '', true);
   const m=(location.hash||'').match(/funil-(\d+)/);
   if(m){ const id=parseInt(m[1],10); if(FUNIS.some(f=>f.id===id)) selecionado=id; }
   if(selecionado===null && FUNIS.length) selecionado=FUNIS[0].id;
