@@ -9480,6 +9480,78 @@ Serenus pelo contato abaixo.</p>
     return Response(html, mimetype='text/html')
 
 
+_EXTENSAO_ARQUIVOS = ['manifest.json', 'background.js', 'content.js', 'content.css', 'wpp-bridge.js',
+                      'wa-js.vendor.js', 'popup.html', 'popup.js', 'icon16.png', 'icon48.png',
+                      'icon128.png', 'logo_arcos.png']
+
+
+def _extensao_versao():
+    try:
+        base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extensao-whatsapp')
+        return json.load(open(os.path.join(base, 'manifest.json'))).get('version', '')
+    except Exception:
+        return ''
+
+
+@app.route('/extensao/download')
+@login_required
+def extensao_download():
+    """Paliativo enquanto a Chrome Web Store não aprova: baixa a extensão
+    (sempre a versão mais nova do deploy) pra instalar 'sem compactação'. Zipa
+    a pasta na hora — nunca fica um zip velho pra trás."""
+    import zipfile as _zip, io as _io
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extensao-whatsapp')
+    buf = _io.BytesIO()
+    with _zip.ZipFile(buf, 'w', _zip.ZIP_DEFLATED) as zf:
+        for nome in _EXTENSAO_ARQUIVOS:
+            caminho = os.path.join(base, nome)
+            if os.path.exists(caminho):
+                zf.write(caminho, nome)
+    buf.seek(0)
+    ver = _extensao_versao()
+    return Response(buf.getvalue(), mimetype='application/zip',
+                    headers={'Content-Disposition': f'attachment; filename=job-serenus-extensao-{ver}.zip'})
+
+
+@app.route('/extensao/instalar')
+@login_required
+def extensao_instalar():
+    """Página com o passo a passo pra equipe instalar a extensão sem esperar a
+    loja (carregar sem compactação). Link estável pra mandar pras consultoras."""
+    ver = _extensao_versao()
+    html = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instalar a extensão JOB</title>
+<style>
+  body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:720px;margin:0 auto;
+    padding:36px 22px 80px;color:#1a1d24;line-height:1.6;background:#fff;}
+  h1{font-size:24px;margin:0 0 4px} .sub{color:#6b7280;font-size:14px;margin-bottom:24px}
+  ol{padding-left:22px} li{margin:10px 0}
+  code{background:#f3f4f6;padding:2px 6px;border-radius:5px;font-size:13px}
+  .btn{display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:13px 22px;border-radius:10px;
+    font-weight:600;font-size:15px;margin:8px 0 20px}
+  .aviso{background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:12px 14px;font-size:13.5px;margin-top:24px}
+</style></head><body>
+<h1>Instalar a extensão do JOB no seu Chrome</h1>
+<div class="sub">Versão __VER__ · enquanto a Chrome Web Store não libera, instale assim (leva 1 minuto).</div>
+
+<a class="btn" href="/extensao/download">Baixar a extensão (.zip)</a>
+
+<ol>
+  <li><b>Baixe</b> o arquivo no botão acima e <b>descompacte</b> (clique com o botão direito &rarr; "Abrir"/"Extrair"). Vai virar uma pasta chamada <code>job-serenus-extensao-__VER__</code>.</li>
+  <li>Deixe essa pasta num lugar que você não vá apagar (ex.: Documentos).</li>
+  <li>No Chrome, abra <code>chrome://extensions</code>.</li>
+  <li>Ligue o <b>"Modo do desenvolvedor"</b> (canto superior direito).</li>
+  <li>Clique em <b>"Carregar sem compactação"</b> e escolha a <b>pasta</b> que você descompactou.</li>
+  <li>Pronto: abra o <b>WhatsApp Web</b> e dê <b>F5</b>. O painel do JOB aparece na lateral.</li>
+</ol>
+
+<div class="aviso"><b>Quando sair uma atualização:</b> você vai baixar de novo por este link, descompactar por cima, e em <code>chrome://extensions</code> clicar no <b>&#8635; (recarregar)</b> da extensão + <b>F5</b> no WhatsApp. (Quando a Chrome Web Store aprovar, isso passa a ser automático e este passo some.)</div>
+</body></html>"""
+    html = html.replace('__VER__', ver or '')
+    return Response(html, mimetype='text/html')
+
+
 @app.route('/api/whatsapp/estado', methods=['GET', 'OPTIONS'])
 def api_whatsapp_estado():
     """A extensão consulta ANTES de raspar a conversa: se já existe uma análise
