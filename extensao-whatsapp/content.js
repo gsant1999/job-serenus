@@ -547,6 +547,18 @@
     aplicarClassesHtml();
   }
 
+  // ESC fecha o painel da extensão (igual os modais do site do JOB). Só age
+  // quando o painel está aberto — e aí segura o ESC pra ele não vazar pro
+  // WhatsApp Web (que fecharia a conversa). Painel fechado: ESC segue normal.
+  // Capture (true) pra pegar antes do handler do WhatsApp.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && _secaoAtiva) {
+      fecharSecao();
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
+
   function abrirSecao(secao) {
     _secaoAtiva = secao;
     document.querySelectorAll('.job-trilho-item').forEach((i) =>
