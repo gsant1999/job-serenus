@@ -365,6 +365,43 @@
     });
   }
 
+  // ── Número do PRÓPRIO WhatsApp logado (o do consultor), via wa-js. Vai junto
+  //    da análise pro JOB atribuir o lead a quem está de fato conversando.
+  //    Cacheado: não muda durante a sessão. ──
+  let _meuNumeroCache = null;
+  function pedirMeuNumero() {
+    if (_meuNumeroCache) return Promise.resolve(_meuNumeroCache);
+    return new Promise((resolve) => {
+      const reqId = 'n' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true;
+        window.removeEventListener('message', onMsg);
+        if (d.numero) _meuNumeroCache = d.numero;
+        resolve(d.numero || '');
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'obter_meu_numero', reqId }, '*');
+      setTimeout(() => {
+        if (!pronto) { window.removeEventListener('message', onMsg); resolve(''); }
+      }, 5000);
+    });
+  }
+
+  // Consultor escolhido no popup — cacheado pra comparações síncronas no render
+  // (ex: "este lead é meu?" ao reabrir uma análise salva). Atualiza sozinho se
+  // o popup mudar (storage.onChanged).
+  let _usuarioIdPopup = null;
+  try {
+    chrome.storage.local.get(['usuarioId']).then(({ usuarioId }) => { _usuarioIdPopup = usuarioId || null; });
+    chrome.storage.onChanged.addListener((mud, area) => {
+      if (area === 'local' && mud.usuarioId) _usuarioIdPopup = mud.usuarioId.newValue || null;
+    });
+  } catch (e) { /* contexto invalidado — segue sem cache */ }
+
   // ── ID da conversa aberta agora (via wa-js). É o jeito à prova de falha de
   //    mandar pra conversa na tela mesmo quando o telefone não é lido (contato
   //    salvo, @lid business). Devolve '' se não der. ──
@@ -1571,12 +1608,39 @@
         esc(s.prioridade) + '</div><div class="job-sug-txt"><b>' + esc(s.titulo) + '</b><br>' +
         esc(s.detalhe) + '</div></div>';
     }).join('');
-    const leadBox = r.lead
+    // Dono do lead: avisa se já é do consultor, se está com OUTRO consultor no
+    // JOB, ou pra quem o lead recém-criado foi (pedido do Guilherme, 14/07).
+    // Na análise fresca o servidor manda lead_e_do_consultor resolvido pelo
+    // NÚMERO do WhatsApp; ao reabrir (estado) compara com o consultor do popup.
+    let ehMeu = r.lead_e_do_consultor;
+    const respId = (r.lead_responsavel_id != null) ? Number(r.lead_responsavel_id) : null;
+    if (ehMeu === undefined && respId != null && _usuarioIdPopup) ehMeu = (Number(_usuarioIdPopup) === respId);
+    let donoLinha = '';
+    if (r.lead) {
+      if (r.lead_criado) {
+        donoLinha = r.consultor_nome
+          ? '<div class="job-lead-dono" style="font-size:11.5px;color:#1fd8a4;margin:4px 0 2px;">Atribuído a <b>' + esc(r.consultor_nome) + '</b>.</div>'
+          : '<div class="job-ia-alerta">⚠ Lead criado SEM responsável — selecione seu usuário no popup da extensão (e cadastre seu telefone em Usuários no JOB).</div>';
+      } else if (ehMeu === true) {
+        donoLinha = '<div class="job-lead-dono" style="font-size:11.5px;color:#1fd8a4;margin:4px 0 2px;">Este lead já está no seu cadastro.</div>';
+      } else if (r.lead_responsavel_nome && ehMeu === false) {
+        donoLinha = '<div class="job-ia-alerta">⚠ Este lead está com OUTRO consultor no JOB: <b>' + esc(r.lead_responsavel_nome) + '</b>.</div>';
+      } else if (r.lead_responsavel_nome) {
+        donoLinha = '<div class="job-lead-dono" style="font-size:11.5px;color:#8c93a8;margin:4px 0 2px;">Responsável no JOB: <b>' + esc(r.lead_responsavel_nome) + '</b>.</div>';
+      } else {
+        donoLinha = '<div class="job-lead-dono" style="font-size:11.5px;color:#facc15;margin:4px 0 2px;">Este lead está sem responsável no JOB.</div>';
+      }
+    }
+    const avisoConsultor = r.aviso_consultor
+      ? '<div class="job-ia-alerta">⚠ ' + esc(r.aviso_consultor) + '</div>'
+      : '';
+    const leadBox = (r.lead
       ? '<a class="job-lead-ok" href="' + esc(r.lead.url) + '" target="_blank">' +
         (r.lead_criado ? 'Lead criado no CRM: <b>' : 'Lead no CRM: <b>') +
-        esc(r.lead.nome) + '</b> — abrir ficha →</a>'
+        esc(r.lead.nome) + '</b> — abrir ficha →</a>' + donoLinha
       : '<div class="job-lead-nao">Não consegui criar/achar o lead no CRM. ' +
-        '<br><span>Telefone lido: ' + esc(telefone || '—') + '</span></div>';
+        '<br><span>Telefone lido: ' + esc(telefone || '—') + '</span></div>') +
+      avisoConsultor;
     const chips = '<span class="job-chip" style="border-color:' + cor + ';color:' + cor + '">' +
         esc(r.fase_funil || '') + '</span>' +
       (r.tags || []).filter((t) => t !== r.fase_funil && t !== (r.faixa || '').toUpperCase())
@@ -1911,9 +1975,14 @@
       // sem prejuízo, o resto é só esperar a resposta de rede do JOB.
       // chrome.storage.local — nunca sync (limite de 8KB por item).
       const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+      // Número do WhatsApp logado — o JOB atribui o lead pelo NÚMERO (quem está
+      // de fato na conversa); o consultor do popup vira fallback.
+      let meuNumero = '';
+      try { meuNumero = await pedirMeuNumero(); } catch (e) { /* segue sem */ }
       const resp = await chrome.runtime.sendMessage({
         type: 'analisar', reqId,
-        payload: { telefone, nome, mensagens, imagens, audios, documentos, links, usuario_id: usuarioId || null }
+        payload: { telefone, nome, mensagens, imagens, audios, documentos, links,
+                   usuario_id: usuarioId || null, whatsapp_consultor: meuNumero || null }
       });
 
       // Se o usuário cancelou enquanto a resposta ainda estava a caminho, não

@@ -157,6 +157,23 @@
     return { telefone: numero };
   }
 
+  // Número do PRÓPRIO WhatsApp logado nesta aba (o do consultor). Usado pelo
+  // JOB pra atribuir o lead a quem está de fato conversando — o consultor do
+  // popup é só fallback (é manual e vive esquecido/errado).
+  async function obterMeuNumero() {
+    if (!window.WPP || !window.WPP.conn || !window.WPP.conn.getMyUserId) {
+      return { erro: 'wpp_ausente' };
+    }
+    try {
+      const wid = window.WPP.conn.getMyUserId();
+      const numero = wid && (wid.user || (wid._serialized || '').split('@')[0]);
+      if (!numero) return { erro: 'sem_numero' };
+      return { numero: String(numero) };
+    } catch (e) {
+      return { erro: 'falha' };
+    }
+  }
+
   // ── ID da conversa aberta AGORA (serializado). Funciona pra contato normal
   //    (c.us) E pra @lid (business/privacidade nova) — é o id interno que a
   //    wa-js aceita pra mandar, mesmo quando o telefone real não é exposto.
@@ -222,6 +239,7 @@
       if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite);
       else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite);
       else if (d.tipo === 'obter_telefone') resp = await obterTelefone();
+      else if (d.tipo === 'obter_meu_numero') resp = await obterMeuNumero();
       else if (d.tipo === 'obter_chat_id') resp = await obterChatIdAtivo();
       else if (d.tipo === 'enviar_texto') resp = await enviarTexto(d.chatId, d.texto);
       else if (d.tipo === 'enviar_midia') resp = await enviarMidia(d.chatId, d.midiaTipo, d.dataUrl, d.legenda);

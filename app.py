@@ -9696,8 +9696,10 @@ def api_whatsapp_estado():
         return _wa_cors(jsonify({"ok": True, "existe": False}))
     conn = db()
     row = conn.execute("""SELECT wa.id, wa.conversa_json, wa.score, wa.score_faixa, wa.resumo, wa.criado_em,
-        wa.lead_id, wa.sugestoes_json, wa.duracao_segundos, l.nome AS lead_nome
+        wa.lead_id, wa.sugestoes_json, wa.duracao_segundos, l.nome AS lead_nome,
+        l.responsavel_id AS lead_responsavel_id, ur.nome AS lead_responsavel_nome
         FROM whatsapp_analises wa LEFT JOIN crm_leads l ON l.id = wa.lead_id
+        LEFT JOIN usuarios ur ON ur.id = l.responsavel_id
         WHERE wa.telefone_norm=? ORDER BY wa.id DESC LIMIT 1""", (tel_norm,)).fetchone()
     close_db(conn)
     if not row:
@@ -9732,6 +9734,8 @@ def api_whatsapp_estado():
             "criado_em": row['criado_em'], "lead_id": row['lead_id'],
             "lead": ({"id": row['lead_id'], "nome": row['lead_nome'],
                       "url": f"{_SITE_BASE_URL}/crm?lead={row['lead_id']}"} if row['lead_id'] else None),
+            "lead_responsavel_id": row['lead_responsavel_id'],
+            "lead_responsavel_nome": row['lead_responsavel_nome'],
             "lead_criado": False,
             "conversa_url": f"{_SITE_BASE_URL}/whatsapp-analises/{row['id']}/conversa",
         },
@@ -10560,16 +10564,47 @@ def api_whatsapp_analisar():
     # Resolve o usuário que está rodando a extensão uma vez só — usado tanto
     # pra desambiguar homônimo no fallback por nome quanto pra atribuir o
     # responsável de um lead criado agora.
+    # PRIORIDADE: o NÚMERO do WhatsApp logado na aba (detectado via wa-js e
+    # casado com o telefone cadastrado em /usuarios) manda; o consultor escolhido
+    # no popup é só fallback. O popup é manual e vive esquecido — análise saía no
+    # nome de outro consultor (pedido do Guilherme, 14/07). Casamento pelos
+    # últimos 8 dígitos, mesmo critério do _buscar_lead_por_telefone (9º dígito).
     responsavel_extensao = None
+    consultor_nome = None
+    aviso_consultor = None
+    usuario_zap = None
+    zap_consultor = _normalizar_telefone(str(d.get('whatsapp_consultor') or ''))
+    if zap_consultor and len(zap_consultor) >= 8:
+        suf_zap = zap_consultor[-8:]
+        for u in conn.execute("SELECT id, nome, telefone FROM usuarios WHERE ativo=1").fetchall():
+            tel_u = _normalizar_telefone(str(u['telefone'] or ''))
+            if tel_u and len(tel_u) >= 8 and tel_u[-8:] == suf_zap:
+                usuario_zap = u
+                break
+    usuario_popup = None
     usuario_id_raw = d.get('usuario_id')
     if usuario_id_raw:
         try:
-            uid_candidato = int(usuario_id_raw)
-            u = conn.execute("SELECT id FROM usuarios WHERE id=? AND ativo=1", (uid_candidato,)).fetchone()
+            u = conn.execute("SELECT id, nome FROM usuarios WHERE id=? AND ativo=1",
+                             (int(usuario_id_raw),)).fetchone()
             if u:
-                responsavel_extensao = uid_candidato
+                usuario_popup = u
         except (TypeError, ValueError):
             pass
+    if usuario_zap:
+        responsavel_extensao = usuario_zap['id']
+        consultor_nome = usuario_zap['nome']
+        if usuario_popup and usuario_popup['id'] != usuario_zap['id']:
+            aviso_consultor = (f"Este WhatsApp é de {usuario_zap['nome']}, mas a extensão está configurada "
+                               f"como {usuario_popup['nome']} — o lead fica com {usuario_zap['nome']}. "
+                               "Ajuste o consultor no popup da extensão.")
+    elif usuario_popup:
+        responsavel_extensao = usuario_popup['id']
+        consultor_nome = usuario_popup['nome']
+        if zap_consultor:
+            aviso_consultor = (f"O número deste WhatsApp não está cadastrado em nenhum consultor — usando "
+                               f"{usuario_popup['nome']} (escolhido no popup). Cadastre o telefone do consultor "
+                               "em Usuários no JOB pra atribuição automática.")
 
     lead = _buscar_lead_por_telefone(conn, tel_norm)
     # Fallback por NOME: contato salvo no WhatsApp não expõe o telefone no DOM
@@ -10606,6 +10641,14 @@ def api_whatsapp_analisar():
                       'Lead criado automaticamente a partir da análise de uma conversa no WhatsApp.', _agora_sp()))
         lead_criado = True
         responsavel_lead_criado = responsavel_extensao
+
+    # Dono do lead — o painel avisa o consultor: "já está no seu cadastro",
+    # "está com OUTRO consultor (Fulano)" ou pra quem o lead novo foi atribuído.
+    lead_resp_id = responsavel_lead_criado if lead_criado else (lead['responsavel_id'] if lead else None)
+    lead_resp_nome = None
+    if lead_id and lead_resp_id:
+        _rn = conn.execute("SELECT nome FROM usuarios WHERE id=?", (lead_resp_id,)).fetchone()
+        lead_resp_nome = _rn['nome'] if _rn else None
 
     # ── Sobe pro CRM o que deu pra extrair da conversa (qual_*), sem sobrescrever
     # o que o consultor já preencheu manualmente (só entra no que estiver vazio) ──
@@ -10729,6 +10772,11 @@ def api_whatsapp_analisar():
                   "url": f"{_SITE_BASE_URL}/crm?lead={lead_id}"} if lead_id else None),
         "lead_encontrado": bool(lead_id) and not lead_criado,
         "lead_criado": lead_criado,
+        "consultor_nome": consultor_nome,
+        "aviso_consultor": aviso_consultor,
+        "lead_responsavel_id": lead_resp_id,
+        "lead_responsavel_nome": lead_resp_nome,
+        "lead_e_do_consultor": bool(lead_id and responsavel_extensao and lead_resp_id == responsavel_extensao),
         "custo_usd": round(custo_claude_usd + custo_transcricao_usd, 6),
         "duracao_segundos": duracao_segundos,
     }))
