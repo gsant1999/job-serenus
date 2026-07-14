@@ -236,7 +236,11 @@
     cv.width = cw; cv.height = ch;
     cv.getContext('2d').drawImage(bmp, 0, 0, cw, ch);
     try { bmp.close(); } catch (e) {}
-    const dataUrl = cv.toDataURL('image/jpeg', 0.85);
+    // 0.92 (não 0.85): documento fotografado (RG/CNH/carteirinha) já vem
+    // comprimido pelo WhatsApp; re-encodar em JPEG baixo por cima destruía o
+    // texto fino e a IA não conseguia ler. 0.92 preserva legibilidade e continua
+    // bem abaixo do teto de 7,5MB do servidor (foto a 1600px ~ 1MB base64).
+    const dataUrl = cv.toDataURL('image/jpeg', 0.92);
     return dataUrl.split(',')[1] || '';
   }
 

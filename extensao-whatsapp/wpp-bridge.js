@@ -106,8 +106,15 @@
     catch (e) { return { erro: 'falha_mensagens' }; }
     // Só PDF — é o único formato de documento que a Claude lê nativamente.
     // Sem filtro por marca d'água — mesmo motivo do áudio (ver baixarAudios).
-    const docs = msgs.filter((m) => m.type === 'document' &&
-      (m.mimetype || '').toLowerCase() === 'application/pdf');
+    // O mime confiável mora em m.mediaData.mimetype (a wa-js nem sempre espelha
+    // pro topo do modelo); confiar só em m.mimetype descartava o PDF em silêncio
+    // (bug: CNH-e.pdf da Cintia nunca chegava ao Claude). Fallback pela extensão
+    // do nome também, caso nenhum mime venha.
+    const docs = msgs.filter((m) => {
+      if (m.type !== 'document') return false;
+      const mt = (m.mimetype || (m.mediaData && m.mediaData.mimetype) || '').toLowerCase();
+      return mt === 'application/pdf' || /\.pdf$/i.test(m.filename || '');
+    });
     const alvos = selecionarPorLead(docs, Math.max(1, limite || 5));
     const out = [];
     for (const m of alvos) {
