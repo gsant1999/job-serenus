@@ -8793,6 +8793,14 @@ _CLAUDE_SYSTEM_ANALISE = (
     "escolheu) — NÃO é automaticamente o último que o consultor apresentou nem o último anexo "
     "enviado. Se o cliente não expressou preferência clara, deixe vazio em vez de chutar pelo mais "
     "recente.\n\n"
+    "DOCUMENTOS PESSOAIS (fechamento): quando a conversa tiver fotos/PDFs de RG, CNH, comprovante "
+    "de residência ou cartão do SUS (CNS) — comum na hora de fechar a proposta —, extraia os dados "
+    "de CADA pessoa no campo documentos_pessoas (um item por pessoa): nome, cpf, rg, nascimento "
+    "(DD/MM/AAAA), emissao, natural (CIDADE - UF), pai, mae, cns, e o endereço do comprovante. "
+    "Extraia SÓ o que está escrito no documento; deixe '' o que não estiver — NUNCA invente número "
+    "de documento. Se aparecerem dados da EMPRESA/plano atual/data de casamento de vigência (texto "
+    "ou anexo, típico de PME), preencha dados_empresa. Se não houver documento pessoal, deixe "
+    "documentos_pessoas como [] e os campos de dados_empresa vazios.\n\n"
     "Julgue também a RELEVÂNCIA COMERCIAL da conversa como um todo: 'alta' = negociação real "
     "de plano de saúde com um cliente em potencial; 'media' = tem interesse mas disperso/incompleto; "
     "'baixa' = conversa desconexa com só menções soltas ao tema; 'nenhuma' = não é conversa de venda "
@@ -8852,15 +8860,119 @@ _CLAUDE_SCHEMA_ANALISE = {
             },
             "required": ["idades", "faixas_etarias", "vidas", "tipo_contratacao", "cidade", "cnpj", "operadora_interesse", "plano_preferido", "valor_cotacao"],
             "additionalProperties": False
+        },
+        "documentos_pessoas": {
+            "type": "array",
+            "description": "Uma entrada por PESSOA cujos documentos (RG, CNH, comprovante de residência, CNS) aparecem nos anexos da conversa. Vazio [] se não houver documento pessoal. Extraia SÓ o que está escrito no documento; use '' pro que não estiver. Não invente.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "nome": {"type": "string", "description": "Nome completo."},
+                    "cpf": {"type": "string", "description": "CPF (com pontuação como no documento)."},
+                    "rg": {"type": "string", "description": "RG."},
+                    "nascimento": {"type": "string", "description": "Data de nascimento no formato DD/MM/AAAA."},
+                    "emissao": {"type": "string", "description": "Data de emissão do RG (DD/MM/AAAA)."},
+                    "natural": {"type": "string", "description": "Naturalidade no formato CIDADE - UF."},
+                    "pai": {"type": "string", "description": "Nome do pai."},
+                    "mae": {"type": "string", "description": "Nome da mãe."},
+                    "cns": {"type": "string", "description": "Número do CNES/CNS (cartão do SUS), se houver."},
+                    "email": {"type": "string", "description": "E-mail, se aparecer."},
+                    "telefone": {"type": "string", "description": "Telefone, se aparecer."},
+                    "endereco_rua": {"type": "string", "description": "Nome da rua/logradouro."},
+                    "endereco_numero": {"type": "string", "description": "Número e complemento."},
+                    "endereco_bairro": {"type": "string", "description": "Bairro."},
+                    "endereco_cidade": {"type": "string", "description": "Cidade do endereço."},
+                    "endereco_cep": {"type": "string", "description": "CEP no formato 00000-000."}
+                },
+                "required": ["nome", "cpf", "rg", "nascimento", "emissao", "natural", "pai", "mae", "cns",
+                             "email", "telefone", "endereco_rua", "endereco_numero", "endereco_bairro",
+                             "endereco_cidade", "endereco_cep"],
+                "additionalProperties": False
+            }
+        },
+        "dados_empresa": {
+            "type": "object",
+            "description": "Dados da empresa / plano atual / casamento de vigência, quando aparecem nos anexos ou são ditos claramente no texto (comum no fechamento de PME). Deixe '' o que não houver.",
+            "properties": {
+                "razao_social": {"type": "string", "description": "Razão social da empresa."},
+                "cnpj": {"type": "string", "description": "CNPJ da empresa."},
+                "plano_atual": {"type": "string", "description": "Plano/produto atual do cliente, se mencionado."},
+                "operadora_atual": {"type": "string", "description": "Operadora atual, se mencionada."},
+                "casamento_vigencia": {"type": "string", "description": "Data de aniversário/vigência do plano atual usada pro casamento de vigência (DD/MM/AAAA), se dita."}
+            },
+            "required": ["razao_social", "cnpj", "plano_atual", "operadora_atual", "casamento_vigencia"],
+            "additionalProperties": False
         }
     },
     "required": ["resumo", "fase_funil", "leitura_imagens", "leitura_documentos", "proximas_acoes",
-                 "sinais_atencao", "relevancia_comercial", "dados_extraidos_anexos"],
+                 "sinais_atencao", "relevancia_comercial", "dados_extraidos_anexos",
+                 "documentos_pessoas", "dados_empresa"],
     "additionalProperties": False
 }
 
 _CLAUDE_MAX_IMAGENS = 8  # teto por análise (controle de custo/payload)
 _CLAUDE_MAX_DOCUMENTOS = 5  # teto de PDFs por análise (custo/payload maior que imagem)
+
+
+def _calcular_idade(nascimento_str):
+    """Idade a partir de DD/MM/AAAA. None se não der pra ler."""
+    m = re.match(r'\s*(\d{1,2})/(\d{1,2})/(\d{4})', str(nascimento_str or ''))
+    if not m:
+        return None
+    try:
+        d, mes, ano = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        hoje = datetime.now(TZ_SP).date()
+        idade = hoje.year - ano - ((hoje.month, hoje.day) < (mes, d))
+        return idade if 0 <= idade <= 120 else None
+    except Exception:
+        return None
+
+
+def _formatar_docs_extraidos(pessoas, empresa):
+    """Formata os dados extraídos dos documentos no padrão EXATO pedido pelo
+    Guilherme: CAIXA ALTA, bullets, sem nome de campo (só EMISSÃO:/NATURAL:/CEP:),
+    'NÃO LOCALIZADO' pro que faltar, idade calculada. Um bloco por pessoa +
+    bloco de empresa/plano no fim. Devolve '' se não houver nada."""
+    NL = 'NÃO LOCALIZADO'
+    def U(v):
+        v = str(v or '').strip()
+        return v.upper() if v else NL
+    blocos = []
+    for p in (pessoas or []):
+        nasc = str(p.get('nascimento') or '').strip()
+        idade = _calcular_idade(nasc)
+        linha_nasc = (nasc.upper() + (f" — {idade} ANOS" if idade is not None else '')) if nasc else NL
+        b = [
+            '• ' + U(p.get('nome')),
+            '• ' + U(p.get('cpf')),
+            '• ' + U(p.get('rg')),
+            '• ' + linha_nasc,
+            '• EMISSÃO: ' + U(p.get('emissao')),
+            '• NATURAL: ' + U(p.get('natural')),
+            '• ' + U(p.get('pai')),
+            '• ' + U(p.get('mae')),
+            '• ' + U(p.get('cns')),
+            '',
+            '• ' + U(p.get('email')),
+            '• ' + U(p.get('telefone')),
+            '',
+            '• ' + U(p.get('endereco_rua')),
+            '• ' + U(p.get('endereco_numero')),
+            '• ' + U(p.get('endereco_bairro')),
+            '• ' + U(p.get('endereco_cidade')),
+            '• CEP: ' + U(p.get('endereco_cep')),
+        ]
+        blocos.append('\n'.join(b))
+    emp = empresa or {}
+    if any((emp.get(k) or '').strip() for k in ('razao_social', 'cnpj', 'plano_atual', 'operadora_atual', 'casamento_vigencia')):
+        eb = ['EMPRESA / PLANO ATUAL',
+              '• ' + U(emp.get('razao_social')),
+              '• CNPJ: ' + U(emp.get('cnpj')),
+              '• PLANO ATUAL: ' + U(emp.get('plano_atual')),
+              '• OPERADORA ATUAL: ' + U(emp.get('operadora_atual')),
+              '• CASAMENTO DE VIGÊNCIA: ' + U(emp.get('casamento_vigencia'))]
+        blocos.append('\n'.join(eb))
+    return '\n\n'.join(blocos)
 
 
 def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, documentos=None, links=None):
@@ -9216,9 +9328,12 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
             tags = list(dict.fromkeys([t for t in tags if t not in ('QUENTE', 'BOM', 'MEDIO', 'BAIXO', 'IMPROVAVEL')]
                                        + [sc['faixa'].upper(), 'RELEVANCIA_' + rel.upper()]))
 
+    docs_extraidos = _formatar_docs_extraidos((ia or {}).get('documentos_pessoas'),
+                                              (ia or {}).get('dados_empresa'))
     return {'extracao': extracao, 'fase_funil': ex['fase_funil'], 'tags': tags, **sc,
             'sugestoes': sugestoes, 'followup': followup, 'descricao': descricao, 'ia': ia,
-            'ia_falhou': ia_falhou, 'valor_cotacao': valor_cotacao}
+            'ia_falhou': ia_falhou, 'valor_cotacao': valor_cotacao,
+            'docs_extraidos': docs_extraidos}
 
 
 def _wa_auth_ok():
@@ -9374,6 +9489,7 @@ def api_whatsapp_estado():
             "penalidades": diagnostico.get('penalidades'), "cap": diagnostico.get('cap'),
             "sugestoes": diagnostico.get('sugestoes'), "followup": diagnostico.get('followup'),
             "resumo": row['resumo'], "ia": diagnostico.get('ia'),
+            "docs_extraidos": diagnostico.get('docs_extraidos') or '',
             "transcricoes": diagnostico.get('transcricoes'),
             "duracao_segundos": row['duracao_segundos'],
             "criado_em": row['criado_em'], "lead_id": row['lead_id'],
@@ -10307,6 +10423,7 @@ def api_whatsapp_analisar():
                                        'score_bruto', 'categorias_consideradas', 'categorias_totais')}
     diagnostico['ia'] = an.get('ia')
     diagnostico['transcricoes'] = an.get('transcricoes')
+    diagnostico['docs_extraidos'] = an.get('docs_extraidos') or ''
 
     ia_info = an.get('ia') or {}
     custo_claude_usd = ia_info.get('custo_usd') or 0
@@ -10365,6 +10482,7 @@ def api_whatsapp_analisar():
         "followup": an['followup'],
         "resumo": an['descricao'],
         "ia": an.get('ia'),
+        "docs_extraidos": an.get('docs_extraidos') or '',
         "ia_falhou": an.get('ia_falhou', False),
         "audios_transcritos": an.get('audios_transcritos', 0),
         "audios_do_cache": an.get('audios_do_cache', 0),

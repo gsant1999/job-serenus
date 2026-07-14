@@ -1614,6 +1614,7 @@
       '<div class="job-resumo" id="job-followup">' + esc(r.followup || '') + '</div>' +
       '<button class="job-copy" id="job-copy-btn">Copiar follow-up</button>' +
       seccaoAudios(r.transcricoes, r.audios_transcritos) +
+      seccaoDocs(r.docs_extraidos) +
       seccaoIA(r.ia) +
       '<div class="job-sec">Como está a conversa</div>' +
       '<div class="job-resumo">' + esc(r.resumo || '').replace(/\n/g, '<br>') + '</div>' +
@@ -1639,6 +1640,17 @@
         esc(x.texto) + '</div>';
     }).join('');
     return '<div class="job-sec">Áudios transcritos (' + (total || t.length) + ')</div>' + linhas;
+  }
+
+  // Bloco dos dados extraídos dos documentos (RG/CNH/comprovante) — no formato
+  // padrão da corretora, copiável pra colar na proposta/onde precisar. Só
+  // aparece quando o backend achou documento pessoal na conversa.
+  function seccaoDocs(txt) {
+    if (!txt || !String(txt).trim()) return '';
+    return '<div class="job-sec">Dados dos documentos</div>' +
+      '<div class="job-resumo" id="job-docs-txt" style="white-space:pre-wrap;font-variant-numeric:tabular-nums;">' + esc(txt) + '</div>' +
+      '<button class="job-copy" id="job-docs-copy" data-texto="' + esc(txt) + '">Copiar dados dos documentos</button>' +
+      '<button class="job-analisar-btn" id="job-criar-proposta" style="margin-top:8px;">Fechei essa proposta — criar no JOB</button>';
   }
 
   // Bloco da leitura por IA (Claude) — só aparece quando o backend devolve `ia`
@@ -1677,14 +1689,39 @@
 
   function ligarBotaoCopiar() {
     const b = document.getElementById('job-copy-btn');
-    if (!b) return;
-    b.addEventListener('click', () => {
-      const t = document.getElementById('job-followup');
-      navigator.clipboard.writeText(t ? t.textContent : '').then(() => {
-        b.textContent = 'Copiado!';
-        setTimeout(() => { b.textContent = 'Copiar follow-up'; }, 1500);
+    if (b) {
+      b.addEventListener('click', () => {
+        const t = document.getElementById('job-followup');
+        navigator.clipboard.writeText(t ? t.textContent : '').then(() => {
+          b.textContent = 'Copiado!';
+          setTimeout(() => { b.textContent = 'Copiar follow-up'; }, 1500);
+        });
       });
-    });
+    }
+    // Copiar os dados dos documentos (formato padrão da corretora).
+    const bd = document.getElementById('job-docs-copy');
+    if (bd) {
+      bd.addEventListener('click', () => {
+        navigator.clipboard.writeText(bd.dataset.texto || '').then(() => {
+          bd.textContent = 'Copiado!';
+          setTimeout(() => { bd.textContent = 'Copiar dados dos documentos'; }, 1500);
+        });
+      });
+    }
+    // "Fechei essa proposta — criar no JOB": abre o formulário de nova proposta
+    // no site, já com o lead vinculado. (O pré-preenchimento dos dados extraídos
+    // no formulário é a próxima fase.)
+    const bp = document.getElementById('job-criar-proposta');
+    if (bp) {
+      bp.addEventListener('click', () => {
+        // pega o lead_id do link "Lead no CRM" que já está na tela, se houver
+        let leadId = '';
+        const link = document.querySelector('.job-lead-ok[href*="crm?lead="]');
+        if (link) { const m = (link.getAttribute('href') || '').match(/lead=(\d+)/); if (m) leadId = m[1]; }
+        const url = _SITE_BASE_URL_EXT + '/nova-proposta' + (leadId ? ('?lead=' + leadId) : '');
+        window.open(url, '_blank', 'noopener');
+      });
+    }
   }
 
   async function rodarAnalise() {
