@@ -16419,17 +16419,69 @@ def crm_funil_mover_pasta(fid):
 @login_required
 @admin_required
 def crm_pastas_backfill_automatico():
-    """Roda uma vez (idempotente): cria as 5 pastas raiz (Compartilhado, A
-    organizar, uma por consultor real — perfil='consultor') e reclassifica
-    todo modelo/funil que AINDA NÃO tem pasta_id a partir da categoria solta
-    que já existe. Regra combinada com o Guilherme: categoria "FLUXOS <nome>"
-    que bate com um consultor de verdade vira subpasta pessoal; categoria
-    vazia cai direto em "A organizar"; qualquer outra categoria com valor
-    vira subpasta (com o nome exato da categoria, sem tentar unificar
-    variações tipo "VERA CRUZ"/"Vera cruz") dentro de "Compartilhado". Só
-    mexe em item sem pasta_id — rodar de novo não reclassifica nada que já
-    foi organizado manualmente."""
+    """Cria as 5 pastas raiz (Compartilhado, A organizar, uma por consultor
+    real) e classifica os modelos/funis a partir da categoria solta.
+
+    Classificação ESPERTA (a 1a versão era ingênua — virava 109 pastas de
+    lixo porque tratava cada string de categoria como pasta):
+    - "FLUXOS <consultor>" → pasta pessoal do consultor.
+    - Categoria que casa com uma OPERADORA conhecida (por palavra-chave —
+      "amil", "amil (1)", "amil (2)" → AMIL; "vera cruz"/"VERA CRUZ" → VERA
+      CRUZ) → uma única subpasta da operadora dentro de Compartilhado. Isso
+      consolida as 192 categorias de Vera Cruz numa pasta só, etc.
+    - Qualquer outra coisa (categoria vazia, data, nome de arquivo, nota
+      solta) → "A organizar", SEM criar subpasta. O gestor arruma depois.
+
+    ?reset=1 (ou {"reset": true}): apaga TODAS as pastas e zera pasta_id de
+    tudo antes de reclassificar do zero — pra corrigir uma classificação
+    ruim anterior. Sem reset, só mexe em item ainda sem pasta_id (não
+    atropela organização manual). Idempotente nos dois modos."""
+    reset = bool((request.json or {}).get('reset')) or request.args.get('reset') == '1'
     conn = db()
+    if reset:
+        conn.execute("UPDATE modelos_conteudo SET pasta_id=NULL, dono_consultor_id=NULL")
+        conn.execute("UPDATE whatsapp_funis SET pasta_id=NULL, dono_consultor_id=NULL")
+        conn.execute("DELETE FROM pastas")
+
+    # Operadoras canônicas por palavra-chave (ordem importa: mais específico
+    # primeiro — "beneficência" antes de "bene"; nome normalizado sem acento).
+    _OPERADORAS_KW = [
+        ('VERA CRUZ', ['vera cruz', 'vera prata', 'vera ouro', 'vera adesao', 'vera empresarial',
+                       'vera confort', 'coparticipacao vera', 'portal vera', 'vera (', 'vera adesão']),
+        ('MEDSENIOR', ['medsenior', 'med senior']),
+        ('SAUDE BENEFICENCIA', ['beneficencia']),
+        ('SULAMERICA', ['sulamerica', 'sul america']),
+        ('BRADESCO', ['bradesco']),
+        ('AMIL', ['amil']),
+        ('PORTO SAUDE', ['porto']),
+        ('UNIMED', ['unimed']),
+        ('NOTREDAME / GNDI / HAPVIDA', ['gndi', 'notredame', 'notre dame', 'notrelife',
+                                        'intermedica', 'hapvida']),
+        ('SAO BERNARDO / SAMP', ['sao bernardo', 'bernardo samp', ' samp']),
+        ('SANTA TEREZA', ['santa tereza']),
+        ('UNICA SAUDE', ['unica saude', 'unica ']),
+        ('EVA SAUDE', ['eva saude']),
+        ('ABRAMGE', ['abramge']),
+        ('AMHE', ['amhe']),
+        ('BENE', ['bene']),
+        ('OMINT', ['omint']),
+        ('CARE PLUS', ['care plus']),
+        ('GOCARE', ['gocare', 'go care']),
+        ('PROASA', ['proasa']),
+        ('SALUSMED', ['salusmed', 'salus med']),
+        ('LEADER', ['leader']),
+        ('DONA SAUDE', ['dona saude']),
+    ]
+
+    def _operadora_de(categoria):
+        k = _norm_txt(categoria or '')  # minúsculo, sem acento
+        if not k.strip():
+            return None
+        for nome, kws in _OPERADORAS_KW:
+            for kw in kws:
+                if _norm_txt(kw) in k:
+                    return nome
+        return None
 
     def _achar_ou_criar_raiz(nome, consultor_id):
         r = conn.execute(
@@ -16470,30 +16522,35 @@ def crm_pastas_backfill_automatico():
         chave = (categoria or '').strip()
         if chave in cache:
             return cache[chave]
-        if not chave:
-            resultado = (raiz_organizar, None)
+        m = re.match(r'^FLUXOS\s+(\w+)', chave, re.IGNORECASE)
+        apelido = m.group(1).upper() if m else None
+        if apelido and apelido in raiz_consultor:
+            uid = consultores[APELIDO_CONSULTOR[apelido]]
+            resultado = (_achar_ou_criar_sub(chave, raiz_consultor[apelido]), uid)
         else:
-            m = re.match(r'^FLUXOS\s+(\w+)', chave, re.IGNORECASE)
-            apelido = m.group(1).upper() if m else None
-            if apelido and apelido in raiz_consultor:
-                uid = consultores[APELIDO_CONSULTOR[apelido]]
-                resultado = (_achar_ou_criar_sub(chave, raiz_consultor[apelido]), uid)
+            op = _operadora_de(chave)
+            if op:
+                resultado = (_achar_ou_criar_sub(op, raiz_compartilhado), None)
             else:
-                resultado = (_achar_ou_criar_sub(chave, raiz_compartilhado), None)
+                # categoria vazia, data, nome de arquivo, nota solta → "A
+                # organizar" sem virar pasta (o gestor arruma depois).
+                resultado = (raiz_organizar, None)
         cache[chave] = resultado
         return resultado
 
     contagem = {'modelos_classificados': 0, 'funis_classificados': 0}
+    pastas_usadas = set()
     for row in conn.execute("SELECT id, categoria FROM modelos_conteudo WHERE pasta_id IS NULL").fetchall():
         pasta_id, dono = _resolver_pasta(row['categoria'])
         conn.execute("UPDATE modelos_conteudo SET pasta_id=?, dono_consultor_id=? WHERE id=?", (pasta_id, dono, row['id']))
+        pastas_usadas.add(pasta_id)
         contagem['modelos_classificados'] += 1
     for row in conn.execute("SELECT id, categoria FROM whatsapp_funis WHERE pasta_id IS NULL").fetchall():
         pasta_id, dono = _resolver_pasta(row['categoria'])
         conn.execute("UPDATE whatsapp_funis SET pasta_id=?, dono_consultor_id=? WHERE id=?", (pasta_id, dono, row['id']))
+        pastas_usadas.add(pasta_id)
         contagem['funis_classificados'] += 1
-    contagem['subpastas_criadas'] = len(cache)
-    contagem['pastas_raiz'] = 2 + len(raiz_consultor)
+    contagem['total_pastas'] = conn.execute("SELECT COUNT(*) n FROM pastas").fetchone()['n']
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "contagem": contagem})
 
