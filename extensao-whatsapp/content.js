@@ -663,6 +663,21 @@
       '</div>';
   }
 
+  // Mesma tela de resultado de uma análise recém-rodada (renderResultado),
+  // mas hidratada com o que já estava salvo no JOB — inclusive leitura da IA,
+  // dados extraídos e sugestões. Antes disso existir, reabrir uma conversa já
+  // analisada só mostrava um resumo raso (score + texto curto): o resto
+  // (sugestoes_json) sempre esteve salvo no banco, só não voltava pra cá.
+  // Se o registro for antigo (sem sugestoes_json) ou vier vazio, cai de volta
+  // na tela rasa (telaUltimaAnaliseSalva) em vez de mostrar um painel rico
+  // cheio de seções vazias.
+  function telaUltimaAnaliseSalvaRica(ua, totalMsgs, telefone) {
+    if (!ua.extracao && !ua.ia && !(ua.sugestoes || []).length) return telaUltimaAnaliseSalva(ua, totalMsgs);
+    return '<div class="job-ultima-analise-tag">Última análise salva · ' + esc(fmtDataHora(ua.criado_em)) + '</div>' +
+      renderResultado(ua, ua.lead ? ua.lead.nome : '', telefone, totalMsgs) +
+      '<button class="job-analisar-btn" id="job-analisar-btn" style="margin-top:10px;">Analisar de novo</button>';
+  }
+
   // Chama de novo o conteúdo certo da seção "Análise" quando o consultor troca
   // de conversa — nunca deixa a análise do cliente anterior "grudada" na tela
   // do cliente novo. Só mexe se a seção estiver de fato aberta agora.
@@ -698,7 +713,8 @@
     try { resp = await chrome.runtime.sendMessage({ type: 'estado', telefone }); } catch (e) { /* segue sem retrato */ }
     if (_secaoAtiva !== 'analise' || chaveConversa(telefoneDoContato(), nomeDoContato()) !== chaveAtual) return;
     const ultima = resp && resp.ok && resp.existe && resp.ultima_analise;
-    setCorpoSecao(ultima ? telaUltimaAnaliseSalva(ultima, resp.total_mensagens) : telaSemAnalise());
+    setCorpoSecao(ultima ? telaUltimaAnaliseSalvaRica(ultima, resp.total_mensagens, telefone) : telaSemAnalise());
+    if (ultima) ligarBotaoCopiar();
   }
 
   function cancelarAnalise(reqId) {

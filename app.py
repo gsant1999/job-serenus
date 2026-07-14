@@ -9218,9 +9218,12 @@ def api_whatsapp_estado():
     """A extensão consulta ANTES de raspar a conversa: se já existe uma análise
     anterior pra esse telefone, devolve a hora da última mensagem conhecida
     (pra ler só o histórico novo, não o passado inteiro de novo) E um retrato
-    da última análise (score/faixa/resumo/data) — pra o painel mostrar "última
-    análise salva" mesmo depois de fechar e reabrir o Chrome, já que a extensão
-    só guarda análises rodadas na sessão atual em memória (Map, não storage)."""
+    COMPLETO da última análise — score, dados extraídos, leitura da IA em
+    imagens/PDFs, sinais de atenção, próximas ações — pra o painel reabrir
+    exatamente como ficou, mesmo depois de fechar e reabrir o Chrome, já que
+    a extensão só guarda análises rodadas na sessão atual em memória (Map, não
+    storage). Antes essa rota só devolvia score/faixa/resumo curto — o resto
+    (sugestoes_json) já estava salvo no banco desde sempre, só não voltava."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
@@ -9229,8 +9232,10 @@ def api_whatsapp_estado():
     if not tel_norm:
         return _wa_cors(jsonify({"ok": True, "existe": False}))
     conn = db()
-    row = conn.execute("""SELECT id, conversa_json, score, score_faixa, resumo, criado_em, lead_id
-        FROM whatsapp_analises WHERE telefone_norm=? ORDER BY id DESC LIMIT 1""", (tel_norm,)).fetchone()
+    row = conn.execute("""SELECT wa.id, wa.conversa_json, wa.score, wa.score_faixa, wa.resumo, wa.criado_em,
+        wa.lead_id, wa.sugestoes_json, wa.duracao_segundos, l.nome AS lead_nome
+        FROM whatsapp_analises wa LEFT JOIN crm_leads l ON l.id = wa.lead_id
+        WHERE wa.telefone_norm=? ORDER BY wa.id DESC LIMIT 1""", (tel_norm,)).fetchone()
     close_db(conn)
     if not row:
         return _wa_cors(jsonify({"ok": True, "existe": False}))
@@ -9241,13 +9246,29 @@ def api_whatsapp_estado():
         msgs = []
     if not msgs:
         return _wa_cors(jsonify({"ok": True, "existe": False}))
+    try:
+        diagnostico = json.loads(row['sugestoes_json'] or '{}')
+    except Exception:
+        diagnostico = {}
     return _wa_cors(jsonify({
         "ok": True, "existe": True, "ultima_hora": msgs[-1].get('hora'),
         "total_mensagens": len(msgs),
         "ultima_analise": {
-            "id": row['id'], "score": row['score'], "faixa": row['score_faixa'],
-            "resumo": row['resumo'], "criado_em": row['criado_em'],
-            "lead_id": row['lead_id'],
+            "id": row['id'], "score": row['score'], "score_bruto": diagnostico.get('score_bruto'),
+            "faixa": row['score_faixa'], "fase_funil": diagnostico.get('fase_funil'),
+            "tags": diagnostico.get('tags'), "extracao": diagnostico.get('extracao'),
+            "breakdown": diagnostico.get('breakdown'),
+            "categorias_consideradas": diagnostico.get('categorias_consideradas'),
+            "categorias_totais": diagnostico.get('categorias_totais'),
+            "penalidades": diagnostico.get('penalidades'), "cap": diagnostico.get('cap'),
+            "sugestoes": diagnostico.get('sugestoes'), "followup": diagnostico.get('followup'),
+            "resumo": row['resumo'], "ia": diagnostico.get('ia'),
+            "transcricoes": diagnostico.get('transcricoes'),
+            "duracao_segundos": row['duracao_segundos'],
+            "criado_em": row['criado_em'], "lead_id": row['lead_id'],
+            "lead": ({"id": row['lead_id'], "nome": row['lead_nome'],
+                      "url": f"{_SITE_BASE_URL}/crm?lead={row['lead_id']}"} if row['lead_id'] else None),
+            "lead_criado": False,
             "conversa_url": f"{_SITE_BASE_URL}/whatsapp-analises/{row['id']}/conversa",
         },
     }))
