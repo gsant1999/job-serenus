@@ -1969,7 +1969,20 @@ FLUXO_SEMANAL = {
 def detectar_fase_atual():
     """Detecta automaticamente qual fase estamos: coleta, analise ou pagamento.
     Thu→Tue = Coleta | Quarta = Análise | Sexta = Pagamento
-    """
+    O admin pode FORÇAR a fase pelo botão em /producao — o override vale só pro
+    dia em que foi feito (guardado em config 'fase_forcada' como 'fase|data');
+    no dia seguinte volta ao automático. Antes o botão só gravava um log que
+    nada lia — fase exibida nunca mudava (botão decorativo)."""
+    try:
+        conn = db()
+        row = conn.execute("SELECT valor FROM config WHERE chave='fase_forcada'").fetchone()
+        close_db(conn)
+        if row and row['valor']:
+            fase, _, data_f = str(row['valor']).partition('|')
+            if data_f == date.today().isoformat() and fase in ('coleta', 'analise', 'pagamento'):
+                return fase
+    except Exception:
+        pass
     dia = date.today().weekday()  # 0=seg,1=ter,2=qua,3=qui,4=sex,5=sab,6=dom
     if dia == 2: return 'analise'    # Quarta
     if dia == 4: return 'pagamento'  # Sexta
@@ -6475,8 +6488,15 @@ def producao():
     """Dashboard de Nível de Produção com fluxo temporal, timeline e configuração de níveis."""
     conn = db()
     ciclo = ciclo_atual()
-    
-    # Consultores com produção do ciclo atual
+    # A tela diz "ciclo atual" — então as contas FILTRAM pelo ciclo (antes
+    # somavam o histórico inteiro do sistema com o rótulo de ciclo, número
+    # mentiroso). Range: quinta de início até o fim da terça (fim_iso + 1 dia,
+    # exclusivo), comparação por string funciona igual em PG e SQLite.
+    ciclo_ini = ciclo['inicio_iso']
+    ciclo_fim_excl = (date.fromisoformat(ciclo['fim_iso']) + timedelta(days=1)).isoformat()
+
+    # Consultores com produção do ciclo atual (propostas criadas no ciclo;
+    # comissões das parcelas dessas propostas)
     consultores = conn.execute("""
         SELECT u.id, u.nome, u.valor_fixo, u.regime_base,
                COUNT(DISTINCT p.id) qtd_propostas,
@@ -6485,22 +6505,26 @@ def producao():
                COALESCE(SUM(CASE WHEN par.status!='Pago ao corretor' THEN par.valor ELSE 0 END), 0) comissao_pendente
         FROM usuarios u
         LEFT JOIN propostas p ON p.usuario_id=u.id
+            AND p.criado_em >= ? AND p.criado_em < ?
+            AND p.status <> 'Excluída' AND COALESCE(p.estornada,0)=0
         LEFT JOIN parcelas par ON par.proposta_id=p.id
         WHERE u.ativo=1 AND u.perfil='consultor'
         GROUP BY u.id, u.nome, u.valor_fixo, u.regime_base
         ORDER BY qtd_propostas DESC
-    """).fetchall()
-    
-    # Estatísticas gerais do ciclo
+    """, (ciclo_ini, ciclo_fim_excl)).fetchall()
+
+    # Estatísticas do ciclo (mesmo filtro)
     stats = conn.execute("""
-        SELECT 
+        SELECT
             COUNT(DISTINCT id) qtd_propostas,
             COUNT(DISTINCT CASE WHEN venda_status IN ('Entrada confirmada','Proposta aprovada') THEN id END) qtd_aprovadas,
             COUNT(DISTINCT CASE WHEN venda_status IN ('Entrada confirmada','Proposta aprovada') THEN id END) entrada_confirmada,
             COUNT(DISTINCT CASE WHEN venda_status='Em análise na operadora' THEN id END) em_analise,
             COUNT(DISTINCT CASE WHEN venda_status='Proposta cadastrada' THEN id END) cadastradas
         FROM propostas
-    """).fetchone()
+        WHERE criado_em >= ? AND criado_em < ?
+          AND status <> 'Excluída' AND COALESCE(estornada,0)=0
+    """, (ciclo_ini, ciclo_fim_excl)).fetchone()
     
     # Comissões por fase
     comissoes_fase = conn.execute("""
@@ -6541,11 +6565,18 @@ def producao_mudar_fase():
         return jsonify({"ok": False, "erro": "Fase inválida"}), 400
     
     conn = db()
-    conn.execute("""INSERT INTO historico_proposta (proposta_id, usuario_nome, campo, valor_antes, valor_depois)
-        VALUES (NULL, ?, 'Fluxo Semanal', ?, ?)""", 
-        (session.get('nome','admin'), detectar_fase_atual(), nova_fase))
+    # Grava o override do dia (antes o botão só tentava inserir um log com
+    # proposta_id NULL — quebrava com NOT NULL e nada lia o log de toda forma;
+    # botão decorativo). detectar_fase_atual honra 'fase|data' só no dia de hoje.
+    app.logger.info(f"[PRODUCAO] fase forçada pra '{nova_fase}' por {session.get('nome', 'admin')}")
+    valor = f"{nova_fase}|{date.today().isoformat()}"
+    if DB_MODE == 'postgres':
+        conn.execute("""INSERT INTO config (chave,valor) VALUES ('fase_forcada',?)
+            ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor""", (valor,))
+    else:
+        conn.execute("INSERT OR REPLACE INTO config (chave,valor) VALUES ('fase_forcada',?)", (valor,))
     conn.commit(); close_db(conn)
-    
+
     return jsonify({"ok": True, "nova_fase": nova_fase})
 
 @app.route('/niveis')
