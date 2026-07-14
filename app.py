@@ -17511,6 +17511,30 @@ _ULTIMO_AUTO_PULL = 0.0
 _AUTO_PULL_LOCK = threading.Lock()
 _AUTO_PULL_INTERVALO = 600  # segundos
 
+_ULTIMO_FIXO_AUTO = 0.0
+
+
+def _gerar_fixo_automatico():
+    """Fixo mensal SEM depender de clique: garante os lançamentos do mês
+    corrente pra todo consultor com fixo (antes, se ninguém clicasse o botão
+    em /financeiro, o fixo simplesmente não existia — nem na DRE nem pro
+    consultor). gerar_fixo_mes é idempotente por consultor+dia, então rodar de
+    novo só cria o que falta — consultor novo no meio do mês entra na próxima
+    passada. Tenta no máximo 1x a cada 6h (pega o mutirão do throttle de 10min
+    do auto-pull, mas não martela o banco)."""
+    global _ULTIMO_FIXO_AUTO
+    agora = time.time()
+    if agora - _ULTIMO_FIXO_AUTO < 6 * 3600:
+        return
+    _ULTIMO_FIXO_AUTO = agora
+    try:
+        ano_mes = datetime.now(TZ_SP).strftime('%Y-%m')
+        criados = gerar_fixo_mes(ano_mes)
+        if criados:
+            app.logger.info(f"[FIXO] {criados} lançamento(s) de fixo gerados automaticamente pra {ano_mes}")
+    except Exception as e:
+        app.logger.warning(f"[FIXO] geração automática falhou: {e}")
+
 def _auto_pull_leads_throttled():
     global _ULTIMO_AUTO_PULL
     try:
@@ -17531,6 +17555,10 @@ def _auto_pull_leads_throttled():
                 pass
             try:
                 _processar_fluxos_pendentes()
+            except Exception:
+                pass
+            try:
+                _gerar_fixo_automatico()
             except Exception:
                 pass
             finally:
