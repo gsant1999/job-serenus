@@ -19,6 +19,27 @@
   .cv-doc a { color:inherit; text-decoration:underline; }
   .cv-link { display:block; word-break:break-all; }
   .cv-link-preview { font-size:11.5px; color:var(--cinza); margin-top:3px; }
+
+  /* Painel da análise da IA — mesmo conteúdo/ordem que a extensão mostra */
+  .an-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:18px 18px 20px; margin-bottom:18px; }
+  .an-sec { font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; font-weight:700; color:var(--cinza-2); margin:18px 0 8px; }
+  .an-sec:first-child { margin-top:0; }
+  .an-badge { display:inline-block; font-size:9.5px; font-weight:700; letter-spacing:.3px; padding:1px 7px; border-radius:10px; background:rgba(139,120,255,.16); color:#a99bff; margin-left:6px; vertical-align:middle; }
+  .an-resumo { font-size:13px; line-height:1.6; color:var(--texto); }
+  .an-lida { font-size:12.5px; line-height:1.55; color:var(--texto); background:var(--panel-2); border:1px solid var(--borda); border-radius:9px; padding:8px 11px; margin-bottom:6px; }
+  .an-alerta { font-size:12.5px; line-height:1.5; color:var(--amarelo); background:rgba(250,204,21,.1); border:1px solid rgba(250,204,21,.22); border-radius:9px; padding:8px 11px; margin-bottom:6px; }
+  .an-sug { display:flex; gap:9px; align-items:flex-start; margin-bottom:8px; }
+  .an-sug-tag { font-size:9.5px; font-weight:700; text-transform:uppercase; padding:2px 8px; border-radius:20px; flex-shrink:0; margin-top:2px; }
+  .an-sug-txt { font-size:12.5px; line-height:1.5; color:var(--texto); }
+  .an-sug-txt b { color:var(--texto); }
+  .an-dados { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; font-size:12.5px; }
+  .an-dados dt { color:var(--cinza-2); }
+  .an-dados dd { color:var(--texto); margin:0; }
+  .an-docs { font-size:12.5px; line-height:1.6; color:var(--texto); white-space:pre-wrap; font-variant-numeric:tabular-nums; background:var(--panel-2); border:1px solid var(--borda); border-radius:9px; padding:11px 13px; }
+  .an-copy { margin-top:9px; background:transparent; border:1px solid var(--borda); color:var(--texto); border-radius:8px; padding:7px 13px; font-size:12px; cursor:pointer; }
+  .an-copy:hover { border-color:var(--azul); color:var(--azul); }
+  .an-audio { font-size:12.5px; line-height:1.55; color:var(--texto); background:var(--panel-2); border:1px solid var(--borda); border-radius:9px; padding:8px 11px; margin-bottom:6px; }
+  .an-audio-quem { display:block; font-size:10.5px; font-weight:600; color:var(--cinza); margin-bottom:3px; }
 </style>
 {% endblock %}
 
@@ -42,6 +63,90 @@
       {% if a.lead_nome %}<span>Lead: <b>{{ a.lead_nome }}</b></span>{% endif %}
       {% if a.telefone %}<span>{{ a.telefone }}</span>{% endif %}
     </div>
+
+    {# ---- Análise da IA (o que estava salvo mas não aparecia) ---- #}
+    {% set tem_analise = ia or diag.docs_extraidos or diag.followup or diag.sugestoes or a.resumo %}
+    {% if tem_analise %}
+    <div class="an-card">
+      {% if ia.resumo %}
+        <div class="an-sec">Leitura da IA <span class="an-badge">Claude</span></div>
+        <div class="an-resumo">{{ ia.resumo }}</div>
+      {% endif %}
+
+      {% if ia.leitura_imagens %}
+        <div class="an-sec">O que a IA leu nas imagens ({{ ia.imagens_lidas or ia.leitura_imagens|length }})</div>
+        {% for t in ia.leitura_imagens %}{% if t %}<div class="an-lida">{{ t }}</div>{% endif %}{% endfor %}
+      {% endif %}
+
+      {% if ia.leitura_documentos %}
+        <div class="an-sec">O que a IA leu nos PDFs ({{ ia.documentos_lidos or ia.leitura_documentos|length }})</div>
+        {% for t in ia.leitura_documentos %}{% if t %}<div class="an-lida">{{ t }}</div>{% endif %}{% endfor %}
+      {% endif %}
+
+      {% if diag.docs_extraidos and diag.docs_extraidos.strip() %}
+        <div class="an-sec">Dados dos documentos</div>
+        <div class="an-docs" id="an-docs-txt">{{ diag.docs_extraidos }}</div>
+        <button class="an-copy" id="an-docs-copy">Copiar dados dos documentos</button>
+      {% endif %}
+
+      {% if ia.sinais_atencao %}
+        <div class="an-sec">Sinais de atenção</div>
+        {% for s in ia.sinais_atencao %}{% if s %}<div class="an-alerta">{{ s }}</div>{% endif %}{% endfor %}
+      {% endif %}
+
+      {% set acoes = ia.proximas_acoes or diag.sugestoes %}
+      {% if acoes %}
+        <div class="an-sec">Próximas ações</div>
+        {% for s in acoes %}
+          {% set pc = '#f43f5e' if s.prioridade == 'alta' else ('#facc15' if s.prioridade == 'media' else '#8c93a8') %}
+          <div class="an-sug">
+            <span class="an-sug-tag" style="background:{{ pc }}22;color:{{ pc }}">{{ s.prioridade }}</span>
+            <div class="an-sug-txt"><b>{{ s.titulo }}</b><br>{{ s.detalhe }}</div>
+          </div>
+        {% endfor %}
+      {% endif %}
+
+      {% if extracao %}
+        {% set dados = [] %}
+        {% if extracao.cidade %}{% set _ = dados.append(('Cidade', extracao.cidade)) %}{% endif %}
+        {% if extracao.idades %}{% set _ = dados.append(('Idade(s)', extracao.idades)) %}{% endif %}
+        {% if extracao.vidas %}{% set _ = dados.append(('Vidas', extracao.vidas)) %}{% endif %}
+        {% if extracao.cnpj %}{% set _ = dados.append(('CNPJ', extracao.cnpj)) %}{% endif %}
+        {% if extracao.operadora_interesse %}{% set _ = dados.append(('Operadora de interesse', extracao.operadora_interesse)) %}{% endif %}
+        {% if extracao.operadora_atual %}{% set _ = dados.append(('Operadora atual', extracao.operadora_atual)) %}{% endif %}
+        {% if extracao.plano_preferido %}{% set _ = dados.append(('Plano preferido', extracao.plano_preferido)) %}{% endif %}
+        {% if extracao.urgencia %}{% set _ = dados.append(('Urgência', extracao.urgencia)) %}{% endif %}
+        {% if extracao.objecoes %}{% set _ = dados.append(('Objeções', extracao.objecoes)) %}{% endif %}
+        {% if dados %}
+          <div class="an-sec">Dados do lead</div>
+          <dl class="an-dados">
+            {% for rot, val in dados %}<dt>{{ rot }}</dt><dd>{{ val }}</dd>{% endfor %}
+          </dl>
+        {% endif %}
+      {% endif %}
+
+      {% if diag.followup %}
+        <div class="an-sec">Follow-up sugerido</div>
+        <div class="an-resumo" id="an-followup">{{ diag.followup }}</div>
+        <button class="an-copy" id="an-fup-copy">Copiar follow-up</button>
+      {% endif %}
+
+      {% if diag.transcricoes %}
+        {% set trans = diag.transcricoes | selectattr('texto') | list %}
+        {% if trans %}
+          <div class="an-sec">Áudios transcritos ({{ trans|length }})</div>
+          {% for x in trans %}
+            <div class="an-audio"><span class="an-audio-quem">{{ 'Cliente' if x.de == 'lead' else 'Consultor' }}{% if x.hora %} · {{ x.hora.split(',')[0] }}{% endif %}</span>{{ x.texto }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endif %}
+
+      {% if a.resumo %}
+        <div class="an-sec">Como está a conversa</div>
+        <div class="an-resumo">{{ a.resumo | replace('\n', '<br>') | safe }}</div>
+      {% endif %}
+    </div>
+    {% endif %}
 
     <div class="cv-chat">
       {% for m in mensagens %}
@@ -67,4 +172,19 @@
     </div>
   </div>
 </div>
+
+<script>
+  function _anCopiar(btnId, srcId, rotulo) {
+    var b = document.getElementById(btnId), s = document.getElementById(srcId);
+    if (!b || !s) return;
+    b.addEventListener('click', function () {
+      navigator.clipboard.writeText(s.innerText || s.textContent || '').then(function () {
+        b.textContent = 'Copiado!';
+        setTimeout(function () { b.textContent = rotulo; }, 1500);
+      });
+    });
+  }
+  _anCopiar('an-docs-copy', 'an-docs-txt', 'Copiar dados dos documentos');
+  _anCopiar('an-fup-copy', 'an-followup', 'Copiar follow-up');
+</script>
 {% endblock %}

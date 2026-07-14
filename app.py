@@ -10755,7 +10755,20 @@ def whatsapp_analise_conversa(aid):
         mensagens = json.loads(a.get('conversa_json') or '[]')
     except Exception:
         mensagens = []
-    return render_template('whatsapp_conversa.html', a=a, mensagens=mensagens)
+    # sugestoes_json guarda o diagnóstico completo da IA (leitura de imagens/PDF,
+    # dados extraídos dos documentos, próximas ações, follow-up, transcrições).
+    # A página só mostrava a transcrição da conversa e o score — a leitura da IA
+    # ficava salva mas invisível. Aqui ela volta pra tela, no mesmo formato da
+    # extensão, pra o registro no JOB bater com o que a IA analisou.
+    try:
+        diag = json.loads(a.get('sugestoes_json') or '{}')
+    except Exception:
+        diag = {}
+    if not isinstance(diag, dict):
+        diag = {}
+    return render_template('whatsapp_conversa.html', a=a, mensagens=mensagens,
+                           diag=diag, ia=(diag.get('ia') or {}),
+                           extracao=(diag.get('extracao') or {}))
 
 
 # ─── CRM ─────────────────────────────────────────────────────────────────────────
