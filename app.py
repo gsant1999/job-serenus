@@ -913,6 +913,13 @@ def init_db():
                 modelo_id INTEGER NOT NULL,
                 delay_segundos INTEGER NOT NULL DEFAULT 5
             )""",
+            """CREATE TABLE IF NOT EXISTS pastas (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL,
+                parent_id INTEGER,
+                consultor_id INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_agenda (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER NOT NULL,
@@ -1395,6 +1402,13 @@ def init_db():
             modelo_id INTEGER NOT NULL,
             delay_segundos INTEGER NOT NULL DEFAULT 5
         );
+        CREATE TABLE IF NOT EXISTS pastas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            parent_id INTEGER,
+            consultor_id INTEGER,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE IF NOT EXISTS crm_agenda (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             lead_id INTEGER NOT NULL,
@@ -1817,6 +1831,16 @@ def init_db():
         ("modelos_conteudo", "vezes_usado", "INTEGER DEFAULT 0"),
         # Envio de mídia (item A): a fila carrega o arquivo da mídia a mandar.
         ("whatsapp_extensao_fila", "midia_arquivo", "TEXT"),
+        # Pastas por consultor→operadora→subpasta (profundidade livre, tabela
+        # `pastas`). pasta_id é a pasta exata (folha) pra navegação/breadcrumb;
+        # dono_consultor_id é denormalizado a partir da raiz da árvore (NULL =
+        # Compartilhado/A organizar, preenchido = só daquele consultor) — existe
+        # pra a extensão filtrar com um WHERE direto, sem subir a árvore toda
+        # vez que lista modelos/funis (roda a cada troca de conversa).
+        ("modelos_conteudo", "pasta_id", "INTEGER"),
+        ("modelos_conteudo", "dono_consultor_id", "INTEGER"),
+        ("whatsapp_funis", "pasta_id", "INTEGER"),
+        ("whatsapp_funis", "dono_consultor_id", "INTEGER"),
     ]
 
     for tabela, coluna, tipo in migracoes:
