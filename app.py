@@ -9591,16 +9591,26 @@ def api_whatsapp_extensao_modelos():
         uid = int(request.args.get('usuario_id') or 0)
     except (TypeError, ValueError):
         uid = 0
-    where = "tipo='whatsapp' AND ativo=1"
-    params = []
-    if uid:
-        where += " AND (dono_consultor_id = ? OR dono_consultor_id IS NULL)"
-        params.append(uid)
     conn = db()
-    rows = conn.execute(f"""SELECT id, nome, corpo_texto, variante, midia_arquivo, midia_tipo,
-        categoria, favorito, vezes_usado
-        FROM modelos_conteudo WHERE {where}
-        ORDER BY favorito DESC, (categoria IS NULL), categoria, nome""", params).fetchall()
+    # Gestor (admin/supervisor/gestor_vendedor) enxerga a biblioteca de TODO
+    # mundo, organizada por dono — pra supervisionar. Consultor continua vendo
+    # só a pasta dele + o compartilhado. Pedido do Guilherme: "eu como gestor
+    # quero ter acesso às mensagens e funis de todos, em pasta, organizado".
+    perfil = None
+    if uid:
+        prow = conn.execute("SELECT perfil FROM usuarios WHERE id=?", (uid,)).fetchone()
+        perfil = prow['perfil'] if prow else None
+    eh_gestor = perfil in ('admin', 'supervisor', 'gestor_vendedor')
+    where = "m.tipo='whatsapp' AND m.ativo=1"
+    params = []
+    if uid and not eh_gestor:
+        where += " AND (m.dono_consultor_id = ? OR m.dono_consultor_id IS NULL)"
+        params.append(uid)
+    rows = conn.execute(f"""SELECT m.id, m.nome, m.corpo_texto, m.variante, m.midia_arquivo, m.midia_tipo,
+        m.categoria, m.favorito, m.vezes_usado, m.dono_consultor_id, u.nome AS dono_nome
+        FROM modelos_conteudo m LEFT JOIN usuarios u ON u.id = m.dono_consultor_id
+        WHERE {where}
+        ORDER BY favorito DESC, (u.nome IS NULL), u.nome, (m.categoria IS NULL), m.categoria, m.nome""", params).fetchall()
     close_db(conn)
     modelos = []
     for m in rows:
@@ -9610,9 +9620,10 @@ def api_whatsapp_extensao_modelos():
             "variante": md['variante'], "midia_tipo": md['midia_tipo'],
             "categoria": md.get('categoria') or '', "favorito": bool(md.get('favorito')),
             "vezes_usado": md.get('vezes_usado') or 0,
+            "dono_nome": md.get('dono_nome') or 'Compartilhado',
             "midia_url": (f"{_SITE_BASE_URL}/crm/modelos/midia/{md['midia_arquivo']}" if md['midia_arquivo'] else None),
         })
-    return _wa_cors(jsonify({"ok": True, "modelos": modelos}))
+    return _wa_cors(jsonify({"ok": True, "gestor": eh_gestor, "modelos": modelos}))
 
 
 @app.route('/api/whatsapp/extensao/modelos/novo', methods=['POST', 'OPTIONS'])
@@ -9728,15 +9739,24 @@ def api_whatsapp_extensao_funis():
         uid = int(request.args.get('usuario_id') or 0)
     except (TypeError, ValueError):
         uid = 0
-    where_f = "ativo=1"
-    params_f = []
-    if uid:
-        where_f += " AND (dono_consultor_id = ? OR dono_consultor_id IS NULL)"
-        params_f.append(uid)
     conn = db()
-    funis = conn.execute(f"""SELECT id, nome, categoria, favorito, vezes_disparado
-        FROM whatsapp_funis WHERE {where_f}
-        ORDER BY favorito DESC, (categoria IS NULL), categoria, nome""", params_f).fetchall()
+    # Gestor vê os funis de todo mundo (organizado por dono); consultor vê só o
+    # dele + compartilhado — mesma regra dos modelos.
+    perfil = None
+    if uid:
+        prow = conn.execute("SELECT perfil FROM usuarios WHERE id=?", (uid,)).fetchone()
+        perfil = prow['perfil'] if prow else None
+    eh_gestor = perfil in ('admin', 'supervisor', 'gestor_vendedor')
+    where_f = "f.ativo=1"
+    params_f = []
+    if uid and not eh_gestor:
+        where_f += " AND (f.dono_consultor_id = ? OR f.dono_consultor_id IS NULL)"
+        params_f.append(uid)
+    funis = conn.execute(f"""SELECT f.id, f.nome, f.categoria, f.favorito, f.vezes_disparado,
+            f.dono_consultor_id, u.nome AS dono_nome
+        FROM whatsapp_funis f LEFT JOIN usuarios u ON u.id = f.dono_consultor_id
+        WHERE {where_f}
+        ORDER BY favorito DESC, (u.nome IS NULL), u.nome, (f.categoria IS NULL), f.categoria, f.nome""", params_f).fetchall()
     # Puxa TODOS os passos de uma vez (join com o modelo) e agrupa por funil —
     # evita N+1 e mantém a ordem definida no builder.
     passos = conn.execute("""SELECT p.id AS passo_id, p.funil_id, p.ordem, p.delay_segundos,
@@ -9764,9 +9784,10 @@ def api_whatsapp_extensao_funis():
             "id": fd['id'], "nome": fd['nome'],
             "categoria": fd.get('categoria') or '', "favorito": bool(fd.get('favorito')),
             "vezes_disparado": fd.get('vezes_disparado') or 0,
+            "dono_nome": fd.get('dono_nome') or 'Compartilhado',
             "passos": por_funil.get(fd['id'], []),
         })
-    return _wa_cors(jsonify({"ok": True, "funis": out}))
+    return _wa_cors(jsonify({"ok": True, "gestor": eh_gestor, "funis": out}))
 
 
 @app.route('/api/whatsapp/extensao/funis/<int:fid>/disparado', methods=['POST', 'OPTIONS'])

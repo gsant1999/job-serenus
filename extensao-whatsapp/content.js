@@ -748,6 +748,7 @@
   // texto.
   const MODELOS_CACHE_MS = 5 * 60 * 1000;
   let _modelosCache = null; // {ts, modelos}
+  let _gestorModo = false; // gestor/admin: vê a biblioteca de todos, agrupada por consultor
   let _gravador = null, _gravChunks = [], _gravTimer = null, _gravInicio = 0;
   let _midiaAnexada = null; // {blob, nome, mime, tipo, dur}
 
@@ -757,6 +758,7 @@
     }
     const resp = await chrome.runtime.sendMessage({ type: 'listar_modelos' });
     const modelos = (resp && resp.ok && resp.modelos) || [];
+    _gestorModo = !!(resp && resp.gestor);
     _modelosCache = { ts: Date.now(), modelos };
     return modelos;
   }
@@ -858,13 +860,16 @@
         ? '<div class="job-vazio">Nenhum modelo bate com esse filtro.</div>'
         : '<div class="job-vazio">Nenhum modelo salvo ainda. Crie o primeiro acima.</div>';
     }
-    // Favoritos já vêm primeiro do servidor; agrupa por categoria (sem
-    // categoria vira "Sem categoria"), mantendo a ordem recebida.
+    // Favoritos já vêm primeiro do servidor; agrupa mantendo a ordem recebida.
+    // Gestor (admin/supervisor): agrupa por CONSULTOR (pasta) — "ver de todos,
+    // organizado". Consultor comum: agrupa por categoria, como sempre.
     const grupos = new Map();
     filtrados.forEach((m) => {
-      const cat = (m.categoria || '').trim() || 'Sem categoria';
-      if (!grupos.has(cat)) grupos.set(cat, []);
-      grupos.get(cat).push(m);
+      const chave = _gestorModo
+        ? (m.dono_nome || 'Compartilhado')
+        : ((m.categoria || '').trim() || 'Sem categoria');
+      if (!grupos.has(chave)) grupos.set(chave, []);
+      grupos.get(chave).push(m);
     });
     let out = '';
     grupos.forEach((itens, cat) => {
@@ -1210,6 +1215,7 @@
     }
     if (!resp || !resp.ok) return { ok: false, erro: (resp && resp.erro) || 'Não consegui falar com o JOB.' };
     const funis = resp.funis || [];
+    _gestorModo = !!resp.gestor;
     _funisCache = { ts: Date.now(), funis };
     return { ok: true, funis };
   }
@@ -1277,7 +1283,20 @@
     }
     const vis = funis.filter(funilPassaFiltro);
     if (!vis.length) return '<div class="job-vazio">Nenhum funil bate com esse filtro.</div>';
-    return vis.map(cardFunil).join('');
+    // Gestor: agrupa os funis por consultor (pasta) — "ver de todos, organizado".
+    if (!_gestorModo) return vis.map(cardFunil).join('');
+    const grupos = new Map();
+    vis.forEach((f) => {
+      const chave = f.dono_nome || 'Compartilhado';
+      if (!grupos.has(chave)) grupos.set(chave, []);
+      grupos.get(chave).push(f);
+    });
+    let out = '';
+    grupos.forEach((itens, dono) => {
+      out += '<div class="job-modelo-grupo">' + esc(dono) + ' <span>(' + itens.length + ')</span></div>' +
+        itens.map(cardFunil).join('');
+    });
+    return out;
   }
 
   function cardFunil(f) {
