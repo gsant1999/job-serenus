@@ -2062,14 +2062,17 @@ def _producao_mes(conn, usuario_id, criado_em, excluir_pid=None):
         ini = ma + '-01'
         ano, mes = int(ma[:4]), int(ma[5:7])
         fim = f"{ano+1}-01-01" if mes == 12 else f"{ano}-{mes+1:02d}-01"
+        # Proposta excluída ou estornada NÃO conta produção — essa soma define o
+        # nível N1/N2/N3 (percentual de comissão); contar venda que caiu deixava
+        # o consultor subir de nível com base em nada.
+        base_sql = """SELECT COALESCE(SUM(valor),0) v FROM propostas
+            WHERE usuario_id=? AND criado_em>=? AND criado_em<?
+              AND status <> 'Excluída' AND COALESCE(estornada,0)=0"""
         if excluir_pid is not None:
-            r = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM propostas
-                WHERE usuario_id=? AND criado_em>=? AND criado_em<? AND id<>?""",
+            r = conn.execute(base_sql + " AND id<>?",
                 (usuario_id, ini, fim, excluir_pid)).fetchone()
         else:
-            r = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM propostas
-                WHERE usuario_id=? AND criado_em>=? AND criado_em<?""",
-                (usuario_id, ini, fim)).fetchone()
+            r = conn.execute(base_sql, (usuario_id, ini, fim)).fetchone()
         return r['v'] if r else 0
     except Exception:
         if DB_MODE == 'postgres':
