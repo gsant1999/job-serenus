@@ -18,6 +18,7 @@ async function carregar() {
   $('extKey').value = extKey || '';
   $('railSide').value = railSide === 'esquerda' ? 'esquerda' : 'direita';
   if (extKey) await carregarUsuarios(usuarioId);
+  else atualizarAvisoUsuario();
 }
 
 async function carregarUsuarios(selecionadoId) {
@@ -28,6 +29,12 @@ async function carregarUsuarios(selecionadoId) {
   sel.innerHTML = '<option value="">Selecione…</option>' +
     (resp.usuarios || []).map((u) => '<option value="' + u.id + '">' + u.nome + '</option>').join('');
   if (atual) sel.value = atual;
+  atualizarAvisoUsuario();
+}
+
+function atualizarAvisoUsuario() {
+  const aviso = $('usuarioIdAviso');
+  if (aviso) aviso.style.display = $('usuarioId').value ? 'none' : '';
 }
 
 async function salvar() {
@@ -36,6 +43,7 @@ async function salvar() {
   const usuarioId = $('usuarioId').value || '';
   const railSide = $('railSide').value === 'esquerda' ? 'esquerda' : 'direita';
   await chrome.storage.local.set({ jobUrl, extKey, usuarioId, railSide });
+  atualizarAvisoUsuario();
   status('Salvo.', 'ok');
 }
 

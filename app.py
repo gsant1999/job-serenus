@@ -9572,12 +9572,17 @@ def api_whatsapp_extensao_modelos():
     seção Mensagens do painel. Monta a URL de mídia pronta pra extensão não
     precisar saber o padrão de rota.
 
-    Com ?usuario_id=N, devolve só a biblioteca DAQUELE consultor (criado_por=N)
-    + itens sem dono (criado_por NULL = material da corretora, visível a todos).
-    Pedido do Guilherme: cada consultor vê os áudios da própria voz, não os 432
-    do acervo dele. ATENÇÃO: isso é organização, NÃO segurança — a chave da
-    extensão é única/compartilhada, então qualquer portador dela pode pedir o
-    usuario_id que quiser. Segurança real = chave por usuário (item futuro)."""
+    Com ?usuario_id=N, devolve só a pasta DAQUELE consultor (dono_consultor_id=N)
+    + itens de pasta compartilhada/sem pasta (dono_consultor_id NULL = material
+    da corretora, visível a todos). Pedido do Guilherme: cada consultora vê os
+    áudios da própria voz + o material compartilhado, não a biblioteca de todo
+    mundo — filtra por dono_consultor_id (organização por pasta), não mais por
+    criado_por (que só registrava quem CADASTROU, sem relação com de quem é o
+    conteúdo — os 641 modelos importados em massa tinham todos criado_por do
+    admin que rodou a importação). ATENÇÃO: isso é organização, NÃO segurança —
+    a chave da extensão é única/compartilhada, então qualquer portador dela
+    pode pedir o usuario_id que quiser. Segurança real = chave por usuário
+    (item futuro)."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
@@ -9589,7 +9594,7 @@ def api_whatsapp_extensao_modelos():
     where = "tipo='whatsapp' AND ativo=1"
     params = []
     if uid:
-        where += " AND (criado_por = ? OR criado_por IS NULL)"
+        where += " AND (dono_consultor_id = ? OR dono_consultor_id IS NULL)"
         params.append(uid)
     conn = db()
     rows = conn.execute(f"""SELECT id, nome, corpo_texto, variante, midia_arquivo, midia_tipo,
@@ -9632,6 +9637,10 @@ def api_whatsapp_extensao_modelo_novo():
         criado_por = int(request.form.get('usuario_id'))
     except (TypeError, ValueError):
         pass
+    # dono_consultor_id = quem gravou (mesmo usuario_id) — sem isso, o próprio
+    # áudio que a consultora acabou de gravar sumiria da lista dela assim que
+    # a extensão passasse a filtrar por dono_consultor_id em vez de criado_por.
+    dono_consultor_id = criado_por
 
     midia_arquivo, midia_tipo = None, None
     f = request.files.get('arquivo_midia')
@@ -9656,9 +9665,10 @@ def api_whatsapp_extensao_modelo_novo():
 
     categoria = (request.form.get('categoria') or '').strip()[:80] or None
     conn = db()
-    conn.execute("""INSERT INTO modelos_conteudo (tipo, nome, corpo_texto, ativo, criado_por, midia_arquivo, midia_tipo, categoria)
-                    VALUES ('whatsapp',?,?,1,?,?,?,?)""",
-                 (nome, texto, criado_por, midia_arquivo, midia_tipo, categoria))
+    conn.execute("""INSERT INTO modelos_conteudo
+                    (tipo, nome, corpo_texto, ativo, criado_por, midia_arquivo, midia_tipo, categoria, dono_consultor_id)
+                    VALUES ('whatsapp',?,?,1,?,?,?,?,?)""",
+                 (nome, texto, criado_por, midia_arquivo, midia_tipo, categoria, dono_consultor_id))
     mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     conn.commit(); close_db(conn)
@@ -9710,9 +9720,10 @@ def api_whatsapp_extensao_funis():
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
         return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
-    # Mesmo filtro por consultor dos modelos: ?usuario_id=N → funis DELE
-    # (criado_por=N) + funis sem dono (NULL = da corretora). Organização, não
-    # segurança — ver comentário em api_whatsapp_extensao_modelos.
+    # Mesmo filtro por consultor dos modelos: ?usuario_id=N → funis da pasta
+    # DELA (dono_consultor_id=N) + funis de pasta compartilhada/sem pasta
+    # (NULL = da corretora). Organização, não segurança — ver comentário em
+    # api_whatsapp_extensao_modelos.
     try:
         uid = int(request.args.get('usuario_id') or 0)
     except (TypeError, ValueError):
@@ -9720,7 +9731,7 @@ def api_whatsapp_extensao_funis():
     where_f = "ativo=1"
     params_f = []
     if uid:
-        where_f += " AND (criado_por = ? OR criado_por IS NULL)"
+        where_f += " AND (dono_consultor_id = ? OR dono_consultor_id IS NULL)"
         params_f.append(uid)
     conn = db()
     funis = conn.execute(f"""SELECT id, nome, categoria, favorito, vezes_disparado
