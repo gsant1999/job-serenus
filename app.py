@@ -6872,12 +6872,24 @@ def financeiro():
     total_aportes = sum(a['valor'] for a in aportes)
     total_reembolsos = sum(r['valor'] for r in reembolsos)
     saldo = receber_mes - pagar_consultor - total_custos_puro - total_fixos + total_aportes - total_reembolsos
-    # ─── DRE do mês ───
-    comissao_recebida = conn.execute("""SELECT COALESCE(SUM(valor_corretora),0) v FROM parcelas
+    # ─── DRE do mês (regime de COMPETÊNCIA: tudo do mês, pago ou não) ───
+    # Antes a DRE somava só parcelas NÃO pagas: pagar um consultor fazia a
+    # receita e o repasse daquele valor SUMIREM do relatório, distorcendo o
+    # resultado do mês conforme os pagamentos aconteciam. E a receita bruta só
+    # contava a parte da corretora (valor_corretora), mas o repasse era
+    # descontado por cima — dupla subtração da parte do consultor. Agora:
+    # receita = comissão TOTAL da operadora (consultor + corretora), repasse =
+    # parte do consultor (pago + a pagar), margem = parte líquida da corretora.
+    tot_mes = conn.execute("""SELECT COALESCE(SUM(valor),0) consultor,
+            COALESCE(SUM(valor_corretora),0) corretora FROM parcelas
+        WHERE competencia=?""", (mes,)).fetchone()
+    repasse_pago = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM parcelas
         WHERE competencia=? AND status='Pago ao corretor'""", (mes,)).fetchone()['v']
     dre = {
-        'receita_bruta': receber_mes,                          # comissões a receber das operadoras
-        'repasse_consultores': pagar_consultor,                # (-) repasses
+        'receita_bruta': (tot_mes['consultor'] or 0) + (tot_mes['corretora'] or 0),
+        'repasse_consultores': tot_mes['consultor'] or 0,      # (-) repasses (pago + a pagar)
+        'repasse_pago': repasse_pago,                          # quanto do repasse já foi pago
+        'repasse_a_pagar': (tot_mes['consultor'] or 0) - repasse_pago,
         'custos_operacionais': total_custos_puro,              # (-) custos lançados
         'fixos': total_fixos,                                  # (-) fixos
         'aportes': total_aportes,                              # (+) aportes

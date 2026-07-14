@@ -96,8 +96,8 @@
       <div class="card-header"><h3>DRE — {{ mes }}</h3></div>
       <table class="tbl">
         <tbody>
-          <tr><td>Receita bruta (comissões a receber)</td><td class="pos" style="text-align:right;">{{ dre.receita_bruta|moeda  }}</td></tr>
-          <tr><td>(−) Repasse aos consultores</td><td class="neg" style="text-align:right;">− {{ dre.repasse_consultores|moeda  }}</td></tr>
+          <tr><td>Receita bruta (comissão total do mês)</td><td class="pos" style="text-align:right;">{{ dre.receita_bruta|moeda  }}</td></tr>
+          <tr><td>(−) Repasse aos consultores <span style="color:var(--cinza-2); font-size:11px;">({{ dre.repasse_pago|moeda }} pago · {{ dre.repasse_a_pagar|moeda }} a pagar)</span></td><td class="neg" style="text-align:right;">− {{ dre.repasse_consultores|moeda  }}</td></tr>
           <tr style="border-top:2px solid var(--borda-2);"><td><strong>Margem bruta</strong></td><td style="text-align:right;"><strong>{{ dre.margem_bruta|moeda  }}</strong></td></tr>
           <tr><td>(−) Custos operacionais</td><td class="neg" style="text-align:right;">− {{ dre.custos_operacionais|moeda  }}</td></tr>
           <tr><td>(−) Fixos dos consultores</td><td class="neg" style="text-align:right;">− {{ dre.fixos|moeda  }}</td></tr>
