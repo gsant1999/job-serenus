@@ -8800,9 +8800,11 @@ _CLAUDE_MODEL_DOCS = os.environ.get('CLAUDE_MODEL_DOCS', 'claude-sonnet-5').stri
 # Teto de tokens de SAÍDA da análise. Era 1500 fixo — e numa conversa de
 # fechamento cheia de documento (RG+CNH+carteirinha) o JSON estruturado
 # estourava, o json.loads quebrava e a IA inteira virava None em SILÊNCIO
-# (bug da Cintia, jul/2026). 6000 dá folga de sobra; custo de output é marginal
-# e só se paga o que o modelo de fato gera. Configurável por env.
-_CLAUDE_MAX_TOKENS_ANALISE = int(os.environ.get('CLAUDE_MAX_TOKENS_ANALISE', '6000') or 6000)
+# (bug da Cintia, jul/2026). Com o schema reordenado (dado crítico primeiro),
+# 4000 já dá folga de sobra — o JSON típico é ~2000 — e gera menos tokens que
+# 6000, então a resposta do Sonnet volta mais rápido (era parte da lentidão).
+# Configurável por env.
+_CLAUDE_MAX_TOKENS_ANALISE = int(os.environ.get('CLAUDE_MAX_TOKENS_ANALISE', '4000') or 4000)
 
 # Preços em USD/milhão de tokens (Claude Haiku 4.5, jul/2026) e USD/minuto de
 # transcrição — configuráveis por env pra acompanhar reajustes sem precisar
@@ -8901,8 +8903,12 @@ _CLAUDE_SYSTEM_ANALISE = (
     "Julgue também a RELEVÂNCIA COMERCIAL da conversa como um todo: 'alta' = negociação real "
     "de plano de saúde com um cliente em potencial; 'media' = tem interesse mas disperso/incompleto; "
     "'baixa' = conversa desconexa com só menções soltas ao tema; 'nenhuma' = não é conversa de venda "
-    "(colega de trabalho, assunto pessoal, grupo, teste, suporte interno). Seja rigoroso: mencionar "
-    "operadora ou CNPJ numa conversa interna NÃO faz dela uma venda.\n\n"
+    "(colega de trabalho, assunto pessoal, grupo, teste, suporte interno). Seja rigoroso nos dois "
+    "sentidos: mencionar operadora ou CNPJ numa conversa interna NÃO faz dela uma venda; MAS se o "
+    "cliente mandou DOCUMENTO pessoal (RG/CNH/comprovante/carteirinha), pediu ou discutiu COTAÇÃO, "
+    "falou em FECHAR/contratar, ou combinou valor/vigência, isso é 'alta' — não rebaixe pra "
+    "'baixa'/'media' um fechamento real só porque a conversa tem áudios longos ou está desorganizada. "
+    "'baixa'/'nenhuma' são pra conversa que claramente NÃO é uma venda, não pra lead difícil de ler.\n\n"
     "Regras:\n"
     "- Português do Brasil, tom direto e consultivo, sem enrolação nem elogio vazio.\n"
     "- Baseie-se SÓ no que está na conversa e nas imagens. Não invente dados que não aparecem.\n"
@@ -9153,7 +9159,12 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, docume
         conteudo.extend(blocos_img)
         conteudo.extend(blocos_doc)
 
-        client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
+        # timeout 150s (era 60): o Sonnet lendo documento é mais lento e passava
+        # de 60s, aí a chamada estourava e o SDK re-tentava sozinho (2x60s ~ 2min),
+        # terminando em falha -> análise sem IA, custo R$ 0,00 e score sem o cap
+        # (parte do "score oscila" e "não calcula custo"). max_retries=1 evita o
+        # empilhamento de tentativas lentas.
+        client = anthropic.Anthropic(api_key=api_key, timeout=150.0, max_retries=1)
         # Modelo mais forte quando a conversa tem documento/imagem, se configurado.
         modelo = _CLAUDE_MODEL_DOCS if (_CLAUDE_MODEL_DOCS and (blocos_img or blocos_doc)) else _CLAUDE_MODEL
         # Chama com folga de tokens; se AINDA truncar (documento muito pesado),
@@ -9463,7 +9474,17 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
     # confiança é sempre o menor entre motor e IA).
     if ia:
         rel = ia.get('relevancia_comercial')
-        teto = {'nenhuma': 250, 'baixa': 550, 'media': 700}.get(rel)
+        # Tetos suavizados (antes 250/550/700): um julgamento 'baixa' equivocado da
+        # IA derrubava um lead real pela METADE (850 -> 550), gerando score que
+        # oscilava toda hora pra mesma conversa. Agora derruba menos.
+        teto = {'nenhuma': 300, 'baixa': 650, 'media': 800}.get(rel)
+        # DOCUMENTO pessoal enviado (RG/CNH/comprovante) = fechamento REAL, sem
+        # discussão: a IA às vezes lê a conversa como 'baixa' por engano e o cap
+        # matava o score de quem já está fechando. Se há documento extraído, o cap
+        # não desce abaixo de 700 (é 'bom' no mínimo).
+        tem_documento = bool((ia.get('documentos_pessoas') or []))
+        if tem_documento and teto is not None and teto < 700:
+            teto = None
         if teto is not None and sc['score_final'] > teto:
             sc['cap'] = {'valor': teto, 'motivo': f'IA: relevância comercial {rel} (conversa não é negociação real)'}
             sc['score_final'] = teto
