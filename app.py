@@ -3733,28 +3733,25 @@ def emergency_exportar():
     return resp
 
 
-@app.route('/parcela/<int:pid>/pagar-asaas', methods=['POST'])
-@login_required
-@admin_required
-def parcela_pagar_asaas(pid):
-    """Cria uma transferência PIX real via Asaas para pagar a comissão do consultor."""
-    if not asaas_configurado():
-        return jsonify({"ok": False, "erro": "Asaas não configurado. Adicione ASAAS_API_KEY no Railway."}), 400
-
-    conn = db()
+def _pagar_parcela_asaas_core(conn, pid, operador_nome):
+    """Núcleo do pagamento PIX de UMA parcela via Asaas — usado pela rota
+    individual e pelo pagamento em lote do /fechamento. Faz as validações
+    (liberada, sem transfer iniciado, chave PIX), cria a transferência e grava
+    o transfer_id. Retorna (ok, info) — info é transfer_id ou mensagem de erro.
+    Commita a cada parcela (quem chama não precisa)."""
     parc = conn.execute("""SELECT pa.*, p.consultor, p.usuario_id, p.razao_social
         FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id WHERE pa.id=?""", (pid,)).fetchone()
     if not parc:
-        close_db(conn); return jsonify({"ok": False, "erro": "Parcela não encontrada"}), 404
+        return False, "Parcela não encontrada"
     if parc['status'] != 'Liberado para o corretor':
-        close_db(conn); return jsonify({"ok": False, "erro": "Só é possível pagar parcelas liberadas para o corretor"}), 400
+        return False, "Só é possível pagar parcelas liberadas para o corretor"
     if parc['asaas_transfer_id']:
-        close_db(conn); return jsonify({"ok": False, "erro": "Esta parcela já tem um pagamento Asaas iniciado"}), 400
+        return False, "Esta parcela já tem um pagamento Asaas iniciado"
 
     consultor = conn.execute("SELECT chave_pix, nome FROM usuarios WHERE id=?", (parc['usuario_id'],)).fetchone()
     chave_pix = (consultor['chave_pix'] if consultor else '') or ''
     if not chave_pix.strip():
-        close_db(conn); return jsonify({"ok": False, "erro": f"{parc['consultor']} não tem chave PIX cadastrada. Cadastre em Usuários."}), 400
+        return False, f"{parc['consultor']} não tem chave PIX cadastrada. Cadastre em Usuários."
 
     tipo_chave = asaas_detectar_tipo_chave(chave_pix)
     valor = round(float(parc['valor']), 2)
@@ -3773,17 +3770,31 @@ def parcela_pagar_asaas(pid):
                      (data['id'], data.get('status', 'PENDING'), pid))
         conn.execute("""INSERT INTO historico_proposta (proposta_id, usuario_nome, campo, valor_antes, valor_depois)
                         VALUES (?,?,?,?,?)""",
-                     (parc['proposta_id'] if 'proposta_id' in parc.keys() else None, session.get('nome'),
+                     (parc['proposta_id'] if 'proposta_id' in parc.keys() else None, operador_nome,
                       'Pagamento PIX (Asaas)', '', f"R$ {valor:.2f} para {parc['consultor']} — transfer {data['id']}"))
-        conn.commit(); close_db(conn)
-        return jsonify({"ok": True, "transfer_id": data['id'], "status": data.get('status')})
-    else:
-        erro_msg = data.get('_erro')
-        if not erro_msg and data.get('errors'):
-            erro_msg = '; '.join([e.get('description', str(e)) for e in data['errors']])
-        conn.execute("UPDATE parcelas SET asaas_erro=? WHERE id=?", (str(erro_msg)[:300], pid))
-        conn.commit(); close_db(conn)
-        return jsonify({"ok": False, "erro": erro_msg or "Erro desconhecido do Asaas", "status": status}), 400
+        conn.commit()
+        return True, data['id']
+    erro_msg = data.get('_erro')
+    if not erro_msg and data.get('errors'):
+        erro_msg = '; '.join([e.get('description', str(e)) for e in data['errors']])
+    conn.execute("UPDATE parcelas SET asaas_erro=? WHERE id=?", (str(erro_msg)[:300], pid))
+    conn.commit()
+    return False, erro_msg or "Erro desconhecido do Asaas"
+
+
+@app.route('/parcela/<int:pid>/pagar-asaas', methods=['POST'])
+@login_required
+@admin_required
+def parcela_pagar_asaas(pid):
+    """Cria uma transferência PIX real via Asaas para pagar a comissão do consultor."""
+    if not asaas_configurado():
+        return jsonify({"ok": False, "erro": "Asaas não configurado. Adicione ASAAS_API_KEY no Railway."}), 400
+    conn = db()
+    ok, info = _pagar_parcela_asaas_core(conn, pid, session.get('nome'))
+    close_db(conn)
+    if ok:
+        return jsonify({"ok": True, "transfer_id": info})
+    return jsonify({"ok": False, "erro": info}), 400
 
 
 @app.route('/webhook/asaas', methods=['POST'])
@@ -6966,6 +6977,122 @@ def _proximo_mes(competencia, n):
     ano, mes = int(competencia[:4]), int(competencia[5:7])
     total = (ano * 12 + (mes - 1)) + n
     return f"{total // 12}-{(total % 12) + 1:02d}"
+
+
+# ─── FECHAMENTO MENSAL POR CONSULTOR ─────────────────────────────────────────
+@app.route('/fechamento')
+@login_required
+@admin_required
+def fechamento():
+    """Fechamento do mês por consultor: "quanto devo ao Fulano em {mes}?" —
+    fixo (lancamentos tipo fixo) + comissões (parcelas da competência) num
+    lugar só, com pagamento em lote. Antes o fixo vivia no /financeiro e a
+    comissão no /fluxo-caixa, e fechar o mês era caçar parcela por parcela
+    (auditoria 14/07)."""
+    mes = request.args.get('mes', competencia_atual())
+    if len(mes) != 7:
+        mes = competencia_atual()
+    conn = db()
+    consultores = conn.execute("""SELECT id, nome, chave_pix FROM usuarios
+        WHERE ativo=1 AND perfil='consultor' ORDER BY nome""").fetchall()
+    linhas = []
+    tot = {'fixo_a_pagar': 0.0, 'liberado': 0.0, 'em_fluxo': 0.0, 'pago': 0.0, 'total_a_pagar': 0.0}
+    for u in consultores:
+        fixo = conn.execute("""SELECT COALESCE(SUM(valor),0) total,
+                COALESCE(SUM(CASE WHEN status IN ('Pago','Conciliado') THEN valor ELSE 0 END),0) pago
+            FROM lancamentos WHERE tipo='fixo' AND usuario_id=? AND data_competencia=?""",
+            (u['id'], mes)).fetchone()
+        com = conn.execute("""SELECT
+                COALESCE(SUM(CASE WHEN pa.status='Liberado para o corretor' THEN pa.valor ELSE 0 END),0) liberado,
+                COUNT(CASE WHEN pa.status='Liberado para o corretor' THEN 1 END) qtd_liberadas,
+                COALESCE(SUM(CASE WHEN pa.status='Pago ao corretor' THEN pa.valor ELSE 0 END),0) pago,
+                COALESCE(SUM(CASE WHEN pa.status NOT IN ('Liberado para o corretor','Pago ao corretor') THEN pa.valor ELSE 0 END),0) em_fluxo
+            FROM parcelas pa JOIN propostas p ON p.id=pa.proposta_id
+            WHERE p.usuario_id=? AND pa.competencia=?""", (u['id'], mes)).fetchone()
+        fixo_a_pagar = round((fixo['total'] or 0) - (fixo['pago'] or 0), 2)
+        linha = {
+            'id': u['id'], 'nome': u['nome'], 'chave_pix': (u['chave_pix'] or '').strip(),
+            'fixo_total': fixo['total'] or 0, 'fixo_pago': fixo['pago'] or 0, 'fixo_a_pagar': fixo_a_pagar,
+            'liberado': com['liberado'] or 0, 'qtd_liberadas': com['qtd_liberadas'] or 0,
+            'pago': com['pago'] or 0, 'em_fluxo': com['em_fluxo'] or 0,
+        }
+        linha['total_a_pagar'] = round(fixo_a_pagar + linha['liberado'], 2)
+        # consultor sem nenhum movimento no mês não polui a tela
+        if not any([linha['fixo_total'], linha['liberado'], linha['pago'], linha['em_fluxo']]):
+            continue
+        tot['fixo_a_pagar'] += fixo_a_pagar
+        tot['liberado'] += linha['liberado']
+        tot['em_fluxo'] += linha['em_fluxo']
+        tot['pago'] += linha['pago'] + linha['fixo_pago']
+        tot['total_a_pagar'] += linha['total_a_pagar']
+        linhas.append(linha)
+    close_db(conn)
+    return render_template('fechamento.html', mes=mes, linhas=linhas, tot=tot,
+                           mes_ant=_proximo_mes(mes, -1), mes_prox=_proximo_mes(mes, 1),
+                           asaas_ok=asaas_configurado())
+
+
+@app.route('/fechamento/pagar', methods=['POST'])
+@login_required
+@admin_required
+def fechamento_pagar():
+    """Paga o mês de UM consultor em lote.
+    metodo='manual': marca as parcelas liberadas como pagas + fixo como pago
+      (registro, não transfere dinheiro) e avisa o consultor com UM resumo.
+    metodo='asaas': dispara PIX real parcela por parcela via Asaas — cada uma
+      vira 'Pago ao corretor' quando o webhook confirmar (que também notifica).
+      O fixo NÃO vai pelo Asaas (não é parcela) — marcar manual depois."""
+    d = request.json or {}
+    try:
+        uid = int(d.get('usuario_id') or 0)
+    except (TypeError, ValueError):
+        uid = 0
+    mes = str(d.get('mes') or '').strip()
+    metodo = d.get('metodo')
+    if not uid or len(mes) != 7 or metodo not in ('manual', 'asaas'):
+        return jsonify({"ok": False, "erro": "Parâmetros inválidos"}), 400
+    conn = db()
+    parcelas = conn.execute("""SELECT pa.id, pa.valor FROM parcelas pa
+        JOIN propostas p ON p.id=pa.proposta_id
+        WHERE p.usuario_id=? AND pa.competencia=? AND pa.status='Liberado para o corretor'
+        ORDER BY pa.id""", (uid, mes)).fetchall()
+    resultado = {"parcelas_ok": 0, "parcelas_erro": [], "fixo_pago": 0.0, "total": 0.0}
+    if metodo == 'asaas':
+        if not asaas_configurado():
+            close_db(conn)
+            return jsonify({"ok": False, "erro": "Asaas não configurado. Adicione ASAAS_API_KEY no Railway."}), 400
+        for pa in parcelas:
+            ok, info = _pagar_parcela_asaas_core(conn, pa['id'], session.get('nome'))
+            if ok:
+                resultado['parcelas_ok'] += 1
+                resultado['total'] += pa['valor'] or 0
+            else:
+                resultado['parcelas_erro'].append(f"parcela {pa['id']}: {info}")
+    else:
+        agora = datetime.now(TZ_SP).isoformat()
+        for pa in parcelas:
+            conn.execute("UPDATE parcelas SET status='Pago ao corretor', data_pagamento=? WHERE id=?",
+                         (agora, pa['id']))
+            resultado['parcelas_ok'] += 1
+            resultado['total'] += pa['valor'] or 0
+        fx = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM lancamentos
+            WHERE tipo='fixo' AND usuario_id=? AND data_competencia=?
+              AND COALESCE(status,'') NOT IN ('Pago','Conciliado')""", (uid, mes)).fetchone()
+        if fx and fx['v']:
+            conn.execute("""UPDATE lancamentos SET status='Pago', data_pagamento=?
+                WHERE tipo='fixo' AND usuario_id=? AND data_competencia=?
+                  AND COALESCE(status,'') NOT IN ('Pago','Conciliado')""",
+                (_fmt_data_br(datetime.now(TZ_SP)), uid, mes))
+            resultado['fixo_pago'] = fx['v']
+            resultado['total'] += fx['v']
+        conn.commit()
+        if resultado['total'] > 0:
+            _notificar(uid, 'comissao', f'Fechamento de {mes} pago',
+                       f"{resultado['parcelas_ok']} parcela(s)" +
+                       (f" + fixo de {_moeda(resultado['fixo_pago'])}" if resultado['fixo_pago'] else '') +
+                       f" — total {_moeda(resultado['total'])}", '/fluxo-caixa')
+    close_db(conn)
+    return jsonify({"ok": True, **resultado})
 
 
 @app.route('/lancamento/salvar', methods=['POST'])

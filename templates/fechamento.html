@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Fechamento mensal{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Fechamento mensal</h1>
+    <div class="sub">Quanto pagar a cada consultor em {{ mes }} — fixo + comissões liberadas num lugar só</div>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <button class="btn-outline btn-sm" onclick="location.href='/fechamento?mes={{ mes_ant }}'">&larr; {{ mes_ant }}</button>
+    <strong style="font-size:15px;">{{ mes }}</strong>
+    <button class="btn-outline btn-sm" onclick="location.href='/fechamento?mes={{ mes_prox }}'">{{ mes_prox }} &rarr;</button>
+  </div>
+</div>
+
+<div class="page">
+  {% if not asaas_ok %}
+  <div class="sub" style="margin-bottom:12px;">Asaas não configurado — pagamento em lote disponível só pela marcação manual.</div>
+  {% endif %}
+
+  <div class="card">
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Consultor</th>
+          <th style="text-align:right;">Fixo a pagar</th>
+          <th style="text-align:right;">Comissões liberadas</th>
+          <th style="text-align:right;">Em fluxo</th>
+          <th style="text-align:right;">Já pago no mês</th>
+          <th style="text-align:right;">Total a pagar agora</th>
+          <th>Chave PIX</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in linhas %}
+        <tr>
+          <td>{{ l.nome }}</td>
+          <td style="text-align:right;">{{ l.fixo_a_pagar|moeda }}</td>
+          <td style="text-align:right;">{{ l.liberado|moeda }}{% if l.qtd_liberadas %} <span style="color:var(--cinza-2); font-size:11px;">({{ l.qtd_liberadas }})</span>{% endif %}</td>
+          <td style="text-align:right; color:var(--cinza);">{{ l.em_fluxo|moeda }}</td>
+          <td style="text-align:right; color:var(--verde);">{{ (l.pago + l.fixo_pago)|moeda }}</td>
+          <td style="text-align:right;"><strong>{{ l.total_a_pagar|moeda }}</strong></td>
+          <td style="font-size:11.5px; color:var(--cinza);">{{ l.chave_pix or '—' }}</td>
+          <td style="white-space:nowrap;">
+            {% if l.total_a_pagar > 0 %}
+              {% if asaas_ok and l.liberado > 0 and l.chave_pix %}
+              <button class="btn-outline btn-sm" onclick="pagarMes({{ l.id }}, 'asaas', '{{ l.nome }}', {{ l.liberado }})">PIX (comissões)</button>
+              {% endif %}
+              <button class="btn-outline btn-sm" onclick="pagarMes({{ l.id }}, 'manual', '{{ l.nome }}', {{ l.total_a_pagar }})">Marcar mês pago</button>
+            {% else %}
+              <span style="color:var(--cinza-2); font-size:11.5px;">Nada a pagar</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" style="text-align:center; color:var(--cinza-2); padding:28px;">Nenhum movimento em {{ mes }}.</td></tr>
+        {% endfor %}
+      </tbody>
+      {% if linhas %}
+      <tfoot>
+        <tr style="border-top:2px solid var(--borda-2);">
+          <td><strong>Total</strong></td>
+          <td style="text-align:right;"><strong>{{ tot.fixo_a_pagar|moeda }}</strong></td>
+          <td style="text-align:right;"><strong>{{ tot.liberado|moeda }}</strong></td>
+          <td style="text-align:right;">{{ tot.em_fluxo|moeda }}</td>
+          <td style="text-align:right;">{{ tot.pago|moeda }}</td>
+          <td style="text-align:right;"><strong>{{ tot.total_a_pagar|moeda }}</strong></td>
+          <td></td><td></td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+
+  <div class="sub" style="margin-top:12px; max-width:900px; line-height:1.6;">
+    <b>PIX (comissões)</b> dispara a transferência real via Asaas de cada parcela liberada — o status vira pago quando o Asaas confirmar (o fixo não vai pelo Asaas; transfira por fora e use "Marcar mês pago").
+    <b>Marcar mês pago</b> registra as parcelas liberadas + o fixo como pagos, sem transferir dinheiro. "Em fluxo" são comissões da competência ainda não liberadas pelo gestor — não entram no total a pagar.
+  </div>
+</div>
+
+<script>
+async function pagarMes(uid, metodo, nome, valor) {
+  const fmt = valor.toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
+  const msg = metodo === 'asaas'
+    ? 'Transferir AGORA ' + fmt + ' em PIX para ' + nome + ' (parcela a parcela via Asaas)?'
+    : 'Marcar o mês como pago para ' + nome + ' (' + fmt + ')? Isso NAO transfere dinheiro, só registra.';
+  if (!confirm(msg)) return;
+  if (metodo === 'asaas' && !confirm('Tem certeza? Dinheiro real será transferido para ' + nome + '.')) return;
+  try {
+    const r = await fetch('/fechamento/pagar', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({usuario_id: uid, mes: '{{ mes }}', metodo: metodo})
+    });
+    const d = await r.json();
+    if (!d.ok) { alert('Erro: ' + (d.erro || 'falha desconhecida')); return; }
+    let m = d.parcelas_ok + ' parcela(s) processada(s)';
+    if (d.fixo_pago) m += ', fixo marcado como pago';
+    if (d.parcelas_erro && d.parcelas_erro.length) m += '\n\nerros:\n' + d.parcelas_erro.join('\n');
+    alert(m);
+    location.reload();
+  } catch (e) { alert('Erro de conexão: ' + e.message); }
+}
+</script>
+{% endblock %}
