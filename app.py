@@ -8249,8 +8249,16 @@ def _wa_extrair_lead(mensagens, nome_contato=''):
             ex['cidade'] = c.title()
             break
 
-    # idades ("27 anos") e vidas
+    # idades ("27 anos") e vidas — ignora expressão de TEMPO ("há 5 anos", "faz
+    # 18 anos", "5 anos atrás", "5 anos de mercado/casa"), que o regex antigo
+    # confundia com idade de gente (o "18, 5" errado da conversa da Cintia).
     for m in re.finditer(r'\b(\d{1,2})\s*anos\b', todo):
+        pre = todo[max(0, m.start() - 7):m.start()]
+        pos = todo[m.end():m.end() + 12]
+        if re.search(r'\b(h[áa]|faz|desde)\s*$', pre):
+            continue
+        if re.search(r'^\s*(atr[áa]s|de\s+(?!idade)(?:mercado|casa|empresa|experi|trabalho|serviç|mercad))', pos):
+            continue
         v = int(m.group(1))
         if 0 <= v <= 99 and v not in ex['idades']:
             ex['idades'].append(v)
@@ -8886,7 +8894,10 @@ _CLAUDE_SYSTEM_ANALISE = (
     "branco se ela aparece no cartão); o comprovante de residência traz o endereço completo (rua, "
     "número, bairro, cidade, CEP). Olhe o documento com atenção antes de dar um campo como ausente: "
     "só marque vazio depois de confirmar que o campo realmente não está no documento — não desista "
-    "de um número só porque a foto está um pouco torta ou escura.\n\n"
+    "de um número só porque a foto está um pouco torta ou escura. Se o documento está legível o "
+    "suficiente pra você descrever o que ele é, está legível pra extrair os campos dele: campo em "
+    "branco num documento legível é FALHA DE LEITURA sua, não ausência do dado — releia com calma e "
+    "preencha tudo o que estiver escrito.\n\n"
     "Julgue também a RELEVÂNCIA COMERCIAL da conversa como um todo: 'alta' = negociação real "
     "de plano de saúde com um cliente em potencial; 'media' = tem interesse mas disperso/incompleto; "
     "'baixa' = conversa desconexa com só menções soltas ao tema; 'nenhuma' = não é conversa de venda "
@@ -9393,6 +9404,22 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
         houve_enriquecimento_ia = True
     if dados_anexo.get('plano_preferido'):
         ex['plano_preferido'] = dados_anexo['plano_preferido'].strip()
+        houve_enriquecimento_ia = True
+    # DATA DE NASCIMENTO dos DOCUMENTOS (RG/CNH) = idade EXATA de cada
+    # beneficiário. É a fonte mais confiável que existe — vence o regex de texto
+    # (que confundia "5 anos de plano" com uma vida de 5 anos) e a cotação por
+    # faixa. Quando há documento pessoal com nascimento legível, as idades vêm
+    # daí; vidas fica no maior entre o que já tínhamos e o nº de documentos (não
+    # encolhe se só chegou parte dos documentos).
+    idades_docs = []
+    for p in ((ia or {}).get('documentos_pessoas') or []):
+        idade_doc = _calcular_idade((p or {}).get('nascimento') or '')
+        if idade_doc is not None and 0 <= idade_doc <= 120 and idade_doc not in idades_docs:
+            idades_docs.append(idade_doc)
+    if idades_docs:
+        ex['idades'] = idades_docs
+        ex['faixa_etaria_texto'] = []
+        ex['vidas'] = max(ex.get('vidas') or 0, len(idades_docs))
         houve_enriquecimento_ia = True
     # Valor da cotação: não é campo de score, só passa direto pra quem chamou
     # preencher valor_estimado/observações do lead — não mexe em ex/score.
