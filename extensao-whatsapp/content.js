@@ -707,7 +707,11 @@
       if (doConversaAtual.status === 'rodando') {
         setCorpoSecao(telaCarregando(doConversaAtual.reqId, doConversaAtual.statusTexto || 'Analisando…'));
       } else if (doConversaAtual.status === 'ok') {
-        setCorpoSecao(renderResultado(doConversaAtual.resultado, doConversaAtual.nome, doConversaAtual.telefone, doConversaAtual.totalMsgs));
+        // O botão "Analisar de novo" tem que aparecer TAMBÉM aqui (resultado da
+        // sessão atual, em memória) — antes só vinha na análise buscada do
+        // servidor, então quem acabou de analisar ficava sem como reanalisar.
+        setCorpoSecao(renderResultado(doConversaAtual.resultado, doConversaAtual.nome, doConversaAtual.telefone, doConversaAtual.totalMsgs) +
+          '<button class="job-analisar-btn" id="job-analisar-btn" style="margin-top:10px;">Analisar de novo</button>');
         ligarBotaoCopiar();
       } else if (doConversaAtual.status === 'erro') {
         setCorpoSecao('<div class="job-erro">' + esc(doConversaAtual.erro || 'Falha ao analisar') + '</div>' + telaSemAnalise());
@@ -1597,6 +1601,20 @@
     const dados = camposLead.map((c) => linhaDado(c[0], c[1])).join('');
     const dadosTexto = camposLead.filter((c) => temValor(c[1]))
       .map((c) => c[0] + ': ' + (Array.isArray(c[1]) ? c[1].join(', ') : c[1])).join('\n');
+    // Texto da ANÁLISE COMPLETA (um botão só copia tudo) — o Guilherme não quer
+    // copiar seção por seção. Monta em texto limpo, na mesma ordem da tela.
+    const acoesTxt = (r.sugestoes || [])
+      .map((s) => '- [' + (s.prioridade || '') + '] ' + (s.titulo || '') + (s.detalhe ? ': ' + s.detalhe : '')).join('\n');
+    const blocosCompleta = [
+      'ANALISE DO LEAD — ' + (nome || telefone || ''),
+      'Score: ' + (r.score != null ? r.score : '—') + '/1000' + (r.faixa ? ' (' + String(r.faixa).toUpperCase() + ')' : ''),
+    ];
+    if (dadosTexto) blocosCompleta.push('', 'DADOS DO LEAD', dadosTexto);
+    if (r.docs_extraidos && String(r.docs_extraidos).trim()) blocosCompleta.push('', 'DADOS DOS DOCUMENTOS', String(r.docs_extraidos).trim());
+    if (acoesTxt) blocosCompleta.push('', 'PROXIMAS ACOES', acoesTxt);
+    if (r.followup) blocosCompleta.push('', 'FOLLOW-UP SUGERIDO', String(r.followup).trim());
+    if (r.ia && r.ia.resumo) blocosCompleta.push('', 'LEITURA DA IA', String(r.ia.resumo).trim());
+    const analiseCompletaTexto = blocosCompleta.join('\n');
     const pen = (r.penalidades || []).map((p) => '<span class="job-chip job-chip-pen">' +
       esc(p.regra) + ' ' + p.pontos + '</span>').join('');
     // Por que o score parou nesse teto — antes o backend calculava e mandava
@@ -1630,6 +1648,7 @@
       capBox +
       avisoFalhas +
       leadBox +
+      '<button class="job-copy job-copy-full" id="job-analise-copy" data-texto="' + esc(analiseCompletaTexto) + '" style="width:100%;margin:4px 0 8px;">Copiar análise completa</button>' +
       (dados ? '<div class="job-sec">Dados do lead</div><div class="job-dados">' + dados + '</div>' +
         '<button class="job-copy" id="job-dados-copy" data-texto="' + esc(dadosTexto) + '">Copiar dados do lead</button>' : '') +
       '<div class="job-sec">Próximas ações</div>' +
@@ -1734,6 +1753,16 @@
         navigator.clipboard.writeText(t ? t.textContent : '').then(() => {
           b.textContent = 'Copiado!';
           setTimeout(() => { b.textContent = 'Copiar follow-up'; }, 1500);
+        });
+      });
+    }
+    // Copiar a ANÁLISE COMPLETA (tudo de uma vez).
+    const ba = document.getElementById('job-analise-copy');
+    if (ba) {
+      ba.addEventListener('click', () => {
+        navigator.clipboard.writeText(ba.dataset.texto || '').then(() => {
+          ba.textContent = 'Copiado!';
+          setTimeout(() => { ba.textContent = 'Copiar análise completa'; }, 1500);
         });
       });
     }
