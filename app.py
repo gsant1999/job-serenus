@@ -9237,6 +9237,80 @@ def api_whatsapp_ping():
     return _wa_cors(jsonify({"ok": True, "sistema": "JOB Serenus", "versao_api": 1}))
 
 
+@app.route('/extensao/privacidade')
+def extensao_privacidade():
+    """Política de privacidade da extensão (página pública, sem login) — exigida
+    pela Chrome Web Store porque a extensão lê conteúdo do WhatsApp Web. Link
+    estável pra colar no cadastro da loja. Autocontida (não usa base.html)."""
+    html = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Política de Privacidade — Extensão JOB Serenus</title>
+<style>
+  body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:760px;margin:0 auto;
+    padding:40px 22px 80px;color:#1a1d24;line-height:1.6;background:#fff;}
+  h1{font-size:26px;margin:0 0 4px} h2{font-size:18px;margin:32px 0 8px}
+  .sub{color:#6b7280;font-size:14px;margin-bottom:8px}
+  ul{padding-left:20px} li{margin:4px 0} a{color:#2563eb}
+  code{background:#f3f4f6;padding:1px 5px;border-radius:4px;font-size:13px}
+</style></head><body>
+<h1>Política de Privacidade</h1>
+<div class="sub">Extensão de navegador &ldquo;JOB Serenus — Análise de WhatsApp&rdquo; · Serenus Corretora de Saúde</div>
+<div class="sub">Última atualização: julho de 2026</div>
+
+<h2>O que a extensão faz</h2>
+<p>A extensão adiciona um painel dentro do WhatsApp Web para uso dos consultores
+da Serenus Corretora. Ela lê a conversa que o consultor tem aberta na tela para
+(a) calcular um &ldquo;Score&rdquo; do lead e gerar uma análise no sistema
+interno JOB da Serenus, e (b) permitir enviar mensagens da biblioteca de modelos
+da corretora. Toda ação é sempre iniciada explicitamente pelo consultor — a
+extensão não age sozinha nem em massa.</p>
+
+<h2>Que dados são acessados</h2>
+<ul>
+  <li><b>Conteúdo da conversa aberta</b> (mensagens de texto e, quando o consultor
+      pede uma análise, imagens/áudios/PDFs daquela conversa) e o número de
+      telefone do contato — usados para a análise do lead.</li>
+  <li><b>Configurações locais</b> guardadas no seu navegador: qual consultor está
+      usando, o lado do painel, o endereço do sistema JOB e a chave de acesso.</li>
+</ul>
+
+<h2>Para onde os dados vão</h2>
+<p>Os dados da conversa analisada são enviados <b>somente</b> para o sistema
+próprio da Serenus (JOB, hospedado em <code>job-serenus-production.up.railway.app</code>),
+onde ficam registrados no histórico do lead da corretora. <b>Não vendemos, não
+compartilhamos e não enviamos esses dados para terceiros</b> para publicidade ou
+qualquer finalidade fora do atendimento ao próprio cliente da Serenus.</p>
+
+<h2>Onde os dados ficam</h2>
+<ul>
+  <li>As configurações ficam apenas no seu navegador (armazenamento local da
+      extensão).</li>
+  <li>A análise e o histórico ficam no banco de dados do sistema JOB da Serenus,
+      com acesso restrito à equipe da corretora.</li>
+</ul>
+
+<h2>Permissões do navegador e por quê</h2>
+<ul>
+  <li><code>storage</code>: guardar suas configurações no navegador.</li>
+  <li><code>notifications</code>: avisar quando uma análise termina.</li>
+  <li>acesso a <code>web.whatsapp.com</code>: é onde o painel é exibido e a
+      conversa é lida.</li>
+  <li>acesso ao sistema JOB da Serenus: para enviar a análise e buscar os modelos
+      de mensagem.</li>
+</ul>
+
+<h2>Retenção e exclusão</h2>
+<p>Você pode limpar as configurações locais desinstalando a extensão. Para
+solicitar exclusão de dados de análise guardados no sistema JOB, fale com a
+Serenus pelo contato abaixo.</p>
+
+<h2>Contato</h2>
+<p>Serenus Corretora de Saúde — dúvidas sobre privacidade:
+<a href="mailto:contato@serenuscorretora.com.br">contato@serenuscorretora.com.br</a>.</p>
+</body></html>"""
+    return Response(html, mimetype='text/html')
+
+
 @app.route('/api/whatsapp/estado', methods=['GET', 'OPTIONS'])
 def api_whatsapp_estado():
     """A extensão consulta ANTES de raspar a conversa: se já existe uma análise
