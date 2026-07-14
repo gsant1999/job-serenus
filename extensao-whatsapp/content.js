@@ -1579,17 +1579,24 @@
         .map((t) => '<span class="job-chip">' + esc(t) + '</span>').join('');
     const planoAtivo = { SEM_PLANO: 'Sem plano hoje', CANCELADO_RECENTE: 'Cancelado há pouco', ATIVO: 'Tem plano ativo' }[ex.plano_ativo];
     const tipoRot = { PJ: 'CNPJ / empresarial', ADESAO: 'Adesão (PF)', PF: 'Pessoa física' }[ex.tipo_contratacao];
-    const dados =
-      linhaDado('Cidade', ex.cidade) +
-      linhaDado('Idade(s)', ex.idades) +
-      linhaDado('Vidas', ex.vidas) +
-      linhaDado('Contratação', tipoRot) +
-      linhaDado('CNPJ', ex.cnpj) +
-      linhaDado('Plano atual', planoAtivo && (planoAtivo + (ex.operadora_atual ? ' (' + ex.operadora_atual + ')' : ''))) +
-      linhaDado('Operadora de interesse', ex.operadora_interesse) +
-      linhaDado('Plano que mais gostou', ex.plano_preferido) +
-      linhaDado('Urgência', ex.urgencia) +
-      linhaDado('Objeções', ex.objecoes);
+    // Uma lista só de campos → gera o HTML E o texto copiável (sem drift entre
+    // os dois): o Guilherme pediu pra poder copiar os dados do lead direto.
+    const camposLead = [
+      ['Cidade', ex.cidade],
+      ['Idade(s)', ex.idades],
+      ['Vidas', ex.vidas],
+      ['Contratação', tipoRot],
+      ['CNPJ', ex.cnpj],
+      ['Plano atual', planoAtivo && (planoAtivo + (ex.operadora_atual ? ' (' + ex.operadora_atual + ')' : ''))],
+      ['Operadora de interesse', ex.operadora_interesse],
+      ['Plano que mais gostou', ex.plano_preferido],
+      ['Urgência', ex.urgencia],
+      ['Objeções', ex.objecoes],
+    ];
+    const temValor = (v) => !(v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length));
+    const dados = camposLead.map((c) => linhaDado(c[0], c[1])).join('');
+    const dadosTexto = camposLead.filter((c) => temValor(c[1]))
+      .map((c) => c[0] + ': ' + (Array.isArray(c[1]) ? c[1].join(', ') : c[1])).join('\n');
     const pen = (r.penalidades || []).map((p) => '<span class="job-chip job-chip-pen">' +
       esc(p.regra) + ' ' + p.pontos + '</span>').join('');
     // Por que o score parou nesse teto — antes o backend calculava e mandava
@@ -1623,7 +1630,8 @@
       capBox +
       avisoFalhas +
       leadBox +
-      (dados ? '<div class="job-sec">Dados do lead</div><div class="job-dados">' + dados + '</div>' : '') +
+      (dados ? '<div class="job-sec">Dados do lead</div><div class="job-dados">' + dados + '</div>' +
+        '<button class="job-copy" id="job-dados-copy" data-texto="' + esc(dadosTexto) + '">Copiar dados do lead</button>' : '') +
       '<div class="job-sec">Próximas ações</div>' +
       (sugs || '<div class="job-vazio">Sem sugestões.</div>') +
       '<div class="job-sec">Follow-up sugerido</div>' +
@@ -1726,6 +1734,16 @@
         navigator.clipboard.writeText(t ? t.textContent : '').then(() => {
           b.textContent = 'Copiado!';
           setTimeout(() => { b.textContent = 'Copiar follow-up'; }, 1500);
+        });
+      });
+    }
+    // Copiar os dados do lead (cidade, idades, vidas, CNPJ, operadora...).
+    const bl = document.getElementById('job-dados-copy');
+    if (bl) {
+      bl.addEventListener('click', () => {
+        navigator.clipboard.writeText(bl.dataset.texto || '').then(() => {
+          bl.textContent = 'Copiado!';
+          setTimeout(() => { bl.textContent = 'Copiar dados do lead'; }, 1500);
         });
       });
     }
