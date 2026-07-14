@@ -8779,6 +8779,20 @@ def _wa_descricao(ex, mensagens, msgs_lead, score, faixa):
 
 _CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-haiku-4-5').strip() or 'claude-haiku-4-5'
 
+# Modelo mais forte SÓ pra conversas com documento/anexo (leitura de RG/CNH/
+# carteirinha fotografada em ângulo é marginal no Haiku). Opt-in por env: se
+# CLAUDE_MODEL_DOCS estiver setada (ex: 'claude-sonnet-5'), ela é usada quando a
+# conversa tem imagem ou PDF; sem a env, mantém o modelo padrão (sem 3x de custo
+# nas análises comuns). Ver _analisar_com_claude.
+_CLAUDE_MODEL_DOCS = os.environ.get('CLAUDE_MODEL_DOCS', '').strip()
+
+# Teto de tokens de SAÍDA da análise. Era 1500 fixo — e numa conversa de
+# fechamento cheia de documento (RG+CNH+carteirinha) o JSON estruturado
+# estourava, o json.loads quebrava e a IA inteira virava None em SILÊNCIO
+# (bug da Cintia, jul/2026). 6000 dá folga de sobra; custo de output é marginal
+# e só se paga o que o modelo de fato gera. Configurável por env.
+_CLAUDE_MAX_TOKENS_ANALISE = int(os.environ.get('CLAUDE_MAX_TOKENS_ANALISE', '6000') or 6000)
+
 # Preços em USD/milhão de tokens (Claude Haiku 4.5, jul/2026) e USD/minuto de
 # transcrição — configuráveis por env pra acompanhar reajustes sem precisar
 # mexer no código. Usados só pra ESTIMAR o gasto (painel de custo), não afeta
@@ -8862,31 +8876,23 @@ _CLAUDE_SYSTEM_ANALISE = (
 
 _CLAUDE_SCHEMA_ANALISE = {
     "type": "object",
+    # ORDEM IMPORTA: em saída estruturada (json_schema strict) o modelo emite as
+    # chaves na ordem do schema. Por isso os campos CRÍTICOS de pré-preenchimento
+    # (dados_extraidos_anexos, documentos_pessoas, dados_empresa) vêm ANTES dos
+    # verbosos e opcionais (proximas_acoes, sinais_atencao) — se algo truncar, o
+    # que se perde é o texto narrativo, nunca os dados do documento. leitura_*
+    # fica logo antes da extração de propósito: a IA "lê em voz alta" a imagem/PDF
+    # e só então extrai (isso melhora a precisão da leitura de documento difícil).
     "properties": {
         "resumo": {"type": "string", "description": "2-3 frases: como está a conversa e o momento do lead."},
         "fase_funil": {"type": "string", "enum": ["NOVO_LEAD", "QUALIFICANDO", "PROPOSTA_ENVIADA",
                                                    "NEGOCIANDO", "FECHADO", "INATIVO", "PERDIDO"]},
+        "relevancia_comercial": {"type": "string", "enum": ["alta", "media", "baixa", "nenhuma"],
+                                  "description": "A conversa É uma negociação real de plano de saúde com cliente?"},
         "leitura_imagens": {"type": "array", "items": {"type": "string"},
                             "description": "O que você leu em cada imagem anexada (ex: 'Cotação Amil: Bronze DP R$627, Vera Prata R$606...'). Vazio se não houver imagem."},
         "leitura_documentos": {"type": "array", "items": {"type": "string"},
                             "description": "O que você leu em cada PDF anexado (ex: 'Proposta Vera Cruz PME: Enfermaria R$489, Apartamento R$612, carência 180 dias...'). Vazio se não houver PDF."},
-        "proximas_acoes": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "prioridade": {"type": "string", "enum": ["alta", "media", "baixa"]},
-                    "titulo": {"type": "string"},
-                    "detalhe": {"type": "string"}
-                },
-                "required": ["prioridade", "titulo", "detalhe"],
-                "additionalProperties": False
-            }
-        },
-        "sinais_atencao": {"type": "array", "items": {"type": "string"},
-                            "description": "Alertas/riscos (ex: cliente sumiu, objeção não resolvida, pediu para parar)."},
-        "relevancia_comercial": {"type": "string", "enum": ["alta", "media", "baixa", "nenhuma"],
-                                  "description": "A conversa É uma negociação real de plano de saúde com cliente?"},
         "dados_extraidos_anexos": {
             "type": "object",
             "description": "Dados CONCRETOS confirmados nas IMAGENS ou PDFs anexados (cotação, carteirinha, documento) — não no texto da conversa, que o motor de regras já cobre sozinho. Deixe vazio ('' ou []) o que não conseguir confirmar num anexo.",
@@ -8948,11 +8954,26 @@ _CLAUDE_SCHEMA_ANALISE = {
             },
             "required": ["razao_social", "cnpj", "plano_atual", "operadora_atual", "casamento_vigencia"],
             "additionalProperties": False
-        }
+        },
+        "proximas_acoes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "prioridade": {"type": "string", "enum": ["alta", "media", "baixa"]},
+                    "titulo": {"type": "string"},
+                    "detalhe": {"type": "string"}
+                },
+                "required": ["prioridade", "titulo", "detalhe"],
+                "additionalProperties": False
+            }
+        },
+        "sinais_atencao": {"type": "array", "items": {"type": "string"},
+                            "description": "Alertas/riscos (ex: cliente sumiu, objeção não resolvida, pediu para parar)."}
     },
-    "required": ["resumo", "fase_funil", "leitura_imagens", "leitura_documentos", "proximas_acoes",
-                 "sinais_atencao", "relevancia_comercial", "dados_extraidos_anexos",
-                 "documentos_pessoas", "dados_empresa"],
+    "required": ["resumo", "fase_funil", "relevancia_comercial", "leitura_imagens", "leitura_documentos",
+                 "dados_extraidos_anexos", "documentos_pessoas", "dados_empresa",
+                 "proximas_acoes", "sinais_atencao"],
     "additionalProperties": False
 }
 
@@ -9096,16 +9117,39 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, docume
         conteudo.extend(blocos_doc)
 
         client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
-        resp = client.messages.create(
-            model=_CLAUDE_MODEL,
-            max_tokens=1500,
-            system=_CLAUDE_SYSTEM_ANALISE,
-            output_config={"format": {"type": "json_schema", "schema": _CLAUDE_SCHEMA_ANALISE}},
-            messages=[{"role": "user", "content": conteudo}],
-        )
-        txt = next((b.text for b in resp.content if b.type == 'text'), '')
-        dados = json.loads(txt)
-        dados['modelo'] = _CLAUDE_MODEL
+        # Modelo mais forte quando a conversa tem documento/imagem, se configurado.
+        modelo = _CLAUDE_MODEL_DOCS if (_CLAUDE_MODEL_DOCS and (blocos_img or blocos_doc)) else _CLAUDE_MODEL
+        # Chama com folga de tokens; se AINDA truncar (documento muito pesado),
+        # refaz 1x com o dobro do teto em vez de deixar o json.loads quebrar e a
+        # análise inteira virar None. Antes era max_tokens=1500 fixo -> a conversa
+        # de fechamento da Cintia estourava e sumia com tudo (sem pista no log).
+        max_tokens = _CLAUDE_MAX_TOKENS_ANALISE
+        resp = None
+        txt = ''
+        for tentativa in range(2):
+            resp = client.messages.create(
+                model=modelo,
+                max_tokens=max_tokens,
+                system=_CLAUDE_SYSTEM_ANALISE,
+                output_config={"format": {"type": "json_schema", "schema": _CLAUDE_SCHEMA_ANALISE}},
+                messages=[{"role": "user", "content": conteudo}],
+            )
+            txt = next((b.text for b in resp.content if b.type == 'text'), '')
+            if getattr(resp, 'stop_reason', None) != 'max_tokens':
+                break
+            app.logger.warning(f"[CLAUDE] resposta truncada em {max_tokens} tokens (stop_reason=max_tokens)"
+                               + (" — refazendo com o dobro do teto" if tentativa == 0
+                                  else " — teto dobrado ainda não bastou, desisto"))
+            max_tokens = min(max_tokens * 2, 16000)
+        try:
+            dados = json.loads(txt)
+        except Exception as e:
+            # NÃO engole mais o erro em silêncio — era isso que deixava o bug
+            # invisível ("motor burro" sem nada no log). Loga a causa e o pedaço.
+            app.logger.warning(f"[CLAUDE] parse do JSON falhou: {repr(e)} | stop_reason="
+                               f"{getattr(resp, 'stop_reason', None)} | inicio={txt[:200]!r} | fim={txt[-200:]!r}")
+            return None
+        dados['modelo'] = modelo
         dados['imagens_lidas'] = len(blocos_img) // 2
         dados['documentos_lidos'] = len(blocos_doc) // 2
         tok_in = getattr(resp.usage, 'input_tokens', 0) or 0
