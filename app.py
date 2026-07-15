@@ -17060,26 +17060,39 @@ def _salvar_imagem_modelo(fstorage, prefixo):
 def crm_modelos():
     conn = db()
     modelos = [dict(m) for m in conn.execute(
-        "SELECT * FROM modelos_conteudo ORDER BY tipo, nome").fetchall()]
-    arvore_pastas = _construir_arvore_pastas(conn)
+        """SELECT m.*, u.nome AS dono_nome FROM modelos_conteudo m
+           LEFT JOIN usuarios u ON u.id = m.dono_consultor_id
+           ORDER BY m.tipo, m.nome""").fetchall()]
     close_db(conn)
     wpp = [m for m in modelos if m['tipo'] == 'whatsapp']
-    # Favoritos primeiro, depois por categoria (sem categoria por último), depois nome.
-    wpp.sort(key=lambda m: (0 if m.get('favorito') else 1,
-                            (m.get('categoria') or '￿').lower(),
-                            (m.get('nome') or '').lower()))
+    # Favorito primeiro, depois nome — dentro de cada tipo.
+    wpp.sort(key=lambda m: (0 if m.get('favorito') else 1, (m.get('nome') or '').lower()))
     stats_wpp = {
         'total': len(wpp),
         'texto': sum(1 for m in wpp if not m.get('midia_tipo')),
         'audio': sum(1 for m in wpp if m.get('midia_tipo') == 'audio'),
         'imagem': sum(1 for m in wpp if m.get('midia_tipo') == 'imagem'),
         'documento': sum(1 for m in wpp if m.get('midia_tipo') == 'documento'),
-        'categorias': sorted({(m.get('categoria') or '').strip() for m in wpp if (m.get('categoria') or '').strip()}),
     }
+    # PASTA = consultor, DENTRO por TIPO (Áudio/Texto/PDF/Imagem) — modelo do
+    # desenho do Guilherme. Automático (dono_consultor_id + midia_tipo), sem
+    # árvore/pasta manual/cascata.
+    _ORDEM_TIPO = ['Texto', 'Áudio', 'Imagem', 'PDF', 'Vídeo']
+    def _tipo_lbl(m):
+        return {'audio': 'Áudio', 'imagem': 'Imagem', 'video': 'Vídeo',
+                'documento': 'PDF'}.get(m.get('midia_tipo'), 'Texto')
+    donos = {}
+    for m in wpp:
+        d = (m.get('dono_nome') or 'Compartilhado')
+        donos.setdefault(d, {}).setdefault(_tipo_lbl(m), []).append(m)
+    wpp_grupos = []
+    for dono in sorted(donos, key=lambda x: x.lower()):
+        tipos = [{'tipo': t, 'itens': donos[dono][t]} for t in _ORDEM_TIPO if t in donos[dono]]
+        wpp_grupos.append({'dono': dono, 'total': sum(len(x['itens']) for x in tipos), 'tipos': tipos})
     return render_template('crm_modelos.html',
                            modelos_email=[m for m in modelos if m['tipo'] == 'email'],
                            modelos_sms=[m for m in modelos if m['tipo'] == 'sms'],
-                           modelos_whatsapp=wpp, stats_wpp=stats_wpp, arvore_pastas=arvore_pastas)
+                           modelos_whatsapp=wpp, wpp_grupos=wpp_grupos, stats_wpp=stats_wpp)
 
 
 @app.route('/crm/modelos/imagem/<path:nome>')

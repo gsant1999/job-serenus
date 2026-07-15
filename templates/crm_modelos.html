@@ -26,7 +26,17 @@
 
   /* Lista de linhas com detalhe sob demanda — escanear 432 itens é leitura
      vertical (ícone + nome + meta), não parsear 6 elementos por card. */
-  .mo-lista { display:flex; flex-direction:column; max-width:1100px; margin-bottom:28px; border:1px solid var(--borda); border-radius:14px; overflow:hidden; }
+  .mo-lista { display:flex; flex-direction:column; max-width:1100px; margin-bottom:28px; }
+  /* Pasta = consultor (recolhível) */
+  .pasta-wa { border:1px solid var(--borda); border-radius:12px; overflow:hidden; margin-bottom:12px; background:var(--panel); }
+  .pasta-wa-nome { cursor:pointer; list-style:none; user-select:none; font-size:13.5px; font-weight:700; color:var(--texto); padding:12px 16px; background:var(--panel-2); display:flex; align-items:center; gap:8px; }
+  .pasta-wa-nome::-webkit-details-marker { display:none; }
+  .pasta-wa-nome::before { content:'▸'; color:var(--cinza-2); font-size:11px; transition:transform .15s; }
+  .pasta-wa[open] > .pasta-wa-nome::before { transform:rotate(90deg); }
+  .pasta-wa-nome span { color:var(--cinza-2); font-weight:600; font-size:12px; margin-left:auto; }
+  /* Tipo = áudio/texto/PDF/imagem (dentro da pasta) */
+  .wa-tipo-header { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza); padding:12px 16px 6px; }
+  .wa-tipo-header span { color:var(--cinza-2); }
   .wa-item { border-bottom:1px solid var(--borda); background:var(--panel); }
   .wa-item:last-child { border-bottom:none; }
   .wa-row { display:flex; align-items:center; gap:12px; padding:13px 16px; cursor:pointer; }
@@ -96,8 +106,7 @@
 <div class="canal-painel" data-canal="whatsapp">
   {% if modelos_whatsapp %}
   <div class="mo-toolbar">
-    <select class="wa-busca" id="wa-pasta-filtro" style="flex:0 0 220px;" onchange="mudarPastaFiltroWpp()"></select>
-    <input type="text" id="wa-busca" class="wa-busca" placeholder="Buscar por nome, texto ou categoria…" oninput="filtrarWpp()">
+    <input type="text" id="wa-busca" class="wa-busca" placeholder="Buscar por nome ou texto…" oninput="filtrarWpp()">
     <div class="wa-filtros">
       <button class="wa-fchip on" data-f="todos" onclick="setFiltroWpp(this)">Todos <span>{{ modelos_whatsapp|length }}</span></button>
       <button class="wa-fchip" data-f="favoritos" onclick="setFiltroWpp(this)">Favoritos <span>{{ modelos_whatsapp|selectattr('favorito')|list|length }}</span></button>
@@ -109,7 +118,6 @@
     <div class="mo-toolbar-acoes">
       <button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup</button>
       <button class="btn-outline btn-sm" onclick="document.getElementById('bc-arquivo').click()">Importar fluxos do BotConversa</button>
-      <button class="btn-outline btn-sm" onclick="criarSubpastaWpp()">+ Nova subpasta</button>
       <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">+ Novo modelo</button>
     </div>
   </div>
@@ -121,15 +129,18 @@
 
   {% if modelos_whatsapp %}
   <div id="wa-lista" class="mo-lista">
-    {% for m in modelos_whatsapp %}
+    {% for g in wpp_grupos %}
+    <details class="pasta-wa" open>
+      <summary class="pasta-wa-nome">{{ g.dono }} <span>({{ g.total }})</span></summary>
+      {% for ts in g.tipos %}
+      <div class="wa-tipo-header">{{ ts.tipo }} <span>({{ ts.itens|length }})</span></div>
+      {% for m in ts.itens %}
     {% set t = m.midia_tipo if m.midia_tipo in ('audio','imagem','video','documento') else 'texto' %}
     <div class="wa-item"
          data-nome="{{ (m.nome or '')|lower }}"
          data-texto="{{ (m.corpo_texto or '')|lower }}"
-         data-categoria="{{ (m.categoria or '')|lower }}"
          data-tipo="{{ m.midia_tipo or 'texto' }}"
-         data-fav="{{ 1 if m.favorito else 0 }}"
-         data-pasta-id="{{ m.pasta_id or '' }}">
+         data-fav="{{ 1 if m.favorito else 0 }}">
       <div class="wa-row" onclick="toggleLinha(this)">
         <span class="wa-tico t-{{ t }}">
           {%- if t == 'audio' -%}
@@ -164,10 +175,12 @@
         <div class="mo-acoes">
           <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
           <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
-          <select class="mo-pasta-sel" style="margin-left:auto; max-width:220px;" onchange="moverModeloPasta({{ m.id }}, this.value)" data-pasta-atual="{{ m.pasta_id or '' }}"></select>
         </div>
       </div>
     </div>
+      {% endfor %}
+      {% endfor %}
+    </details>
     {% endfor %}
     <div id="wa-vazio-filtro" style="display:none; text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo bate com esse filtro.</div>
   </div>
@@ -338,55 +351,9 @@
 </div>
 
 <script>
-const PASTAS = {{ arvore_pastas|tojson }};
 function escapar(t){ const d=document.createElement('div'); d.textContent=t==null?'':String(t); return d.innerHTML; }
-
-// ── Pastas (consultor → operadora → subpasta) — mesmo padrão da tela de
-//    Funis: select simples com indentação por profundidade (V1, sem
-//    navegador em grade nem drag-and-drop). ──
-function _pastasFlatten(nos, prefixo){
-  prefixo = prefixo || '';
-  let out = [];
-  (nos || PASTAS).forEach(function(p){
-    out.push({id:p.id, label:prefixo + p.nome});
-    out = out.concat(_pastasFlatten(p.filhas, prefixo + '— '));
-  });
-  return out;
-}
-function _popularSelectPastas(sel, valorAtual, comOpcaoTodas){
-  if (!sel) return;
-  const flat = _pastasFlatten(PASTAS);
-  let html = comOpcaoTodas ? '<option value="">Todas as pastas</option>' : '<option value="">Sem pasta</option>';
-  html += flat.map(function(p){
-    return '<option value="'+p.id+'"'+(String(valorAtual)===String(p.id)?' selected':'')+'>'+escapar(p.label)+'</option>';
-  }).join('');
-  sel.innerHTML = html;
-}
-async function _pastaApi(url, corpo){
-  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(corpo||{})});
-  const d = await r.json().catch(function(){ return {ok:false, erro:'resposta inválida'}; });
-  if (!d.ok) alert(d.erro || 'Falhou.');
-  return d;
-}
-async function moverModeloPasta(mid, pastaId){
-  const d = await _pastaApi('/crm/modelos/'+mid+'/mover-pasta', {pasta_id: pastaId?parseInt(pastaId,10):null});
-  if (d.ok) location.reload();
-}
-async function criarSubpastaWpp(){
-  const flat = _pastasFlatten(PASTAS);
-  const opcoes = flat.map(function(p){ return p.id+' = '+p.label; }).join('\n');
-  const parentStr = prompt('Vai criar dentro de qual pasta? Digite o número:\n'+opcoes);
-  if (parentStr===null) return;
-  const nome = prompt('Nome da nova subpasta:');
-  if (!nome || !nome.trim()) return;
-  const d = await _pastaApi('/crm/pastas/nova', {nome:nome.trim(), parent_id:parseInt(parentStr,10)});
-  if (d.ok) location.reload();
-}
-let _pastaFiltroWpp = '';
-function mudarPastaFiltroWpp(){
-  _pastaFiltroWpp = document.getElementById('wa-pasta-filtro').value;
-  filtrarWpp();
-}
+// Pastas agora são automáticas (consultor → tipo, agrupado no servidor) — a
+// árvore manual, o filtro por pasta e o mover-pasta foram aposentados.
 
 function mudarAba(btn){
   document.querySelectorAll('.mo-tab').forEach(function(b){ b.classList.remove('on'); });
@@ -409,8 +376,6 @@ function toggleLinha(row){
   });
   if (vaiAbrir) {
     item.classList.add('aberto'); det.removeAttribute('hidden');
-    var sel = det.querySelector('.mo-pasta-sel');
-    if (sel && !sel.dataset.populado) { _popularSelectPastas(sel, sel.dataset.pastaAtual, false); sel.dataset.populado = '1'; }
   }
 }
 
@@ -532,14 +497,24 @@ function filtrarWpp(){
   var q = (document.getElementById('wa-busca').value || '').trim().toLowerCase();
   var visiveis = 0;
   document.querySelectorAll('#wa-lista .wa-item').forEach(function(card){
-    var bateBusca = !q || card.dataset.nome.indexOf(q) >= 0 || card.dataset.texto.indexOf(q) >= 0 || card.dataset.categoria.indexOf(q) >= 0;
+    var bateBusca = !q || card.dataset.nome.indexOf(q) >= 0 || card.dataset.texto.indexOf(q) >= 0;
     var bateFiltro = _waFiltro === 'todos'
       || (_waFiltro === 'favoritos' && card.dataset.fav === '1')
       || (card.dataset.tipo === _waFiltro);
-    var batePasta = !_pastaFiltroWpp || card.dataset.pastaId === _pastaFiltroWpp;
-    var mostra = bateBusca && bateFiltro && batePasta;
+    var mostra = bateBusca && bateFiltro;
     card.style.display = mostra ? '' : 'none';
     if (mostra) visiveis++;
+  });
+  // Esconde cabeçalho de TIPO sem card visível e pasta de consultor vazia.
+  document.querySelectorAll('#wa-lista .wa-tipo-header').forEach(function(h){
+    var vis = false, n = h.nextElementSibling;
+    while (n && n.classList && n.classList.contains('wa-item')) { if (n.style.display !== 'none') vis = true; n = n.nextElementSibling; }
+    h.style.display = vis ? '' : 'none';
+  });
+  document.querySelectorAll('#wa-lista .pasta-wa').forEach(function(p){
+    var algum = false;
+    p.querySelectorAll('.wa-item').forEach(function(c){ if (c.style.display !== 'none') algum = true; });
+    p.style.display = algum ? '' : 'none';
   });
   var vazio = document.getElementById('wa-vazio-filtro');
   if (vazio) vazio.style.display = visiveis ? 'none' : '';
@@ -569,8 +544,5 @@ function excluirModelo(id, nome){
     .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Erro'); });
 }
 
-(function initPastasWpp(){
-  _popularSelectPastas(document.getElementById('wa-pasta-filtro'), '', true);
-})();
 </script>
 {% endblock %}
