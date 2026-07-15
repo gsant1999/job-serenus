@@ -163,16 +163,24 @@ function renomear(nome, obs) {
   document.getElementById('modal-ren').classList.add('open');
 }
 function fecharRen() { document.getElementById('modal-ren').classList.remove('open'); }
-async function salvarRenomear() {
+async function salvarRenomear(fundir) {
   const nome = document.getElementById('ren-nome').value.trim();
   if (!nome) { toast('Informe o novo nome', 'err'); return; }
   const body = {operadora:_renOrig.operadora, obs:_renOrig.obs,
                 operadora_novo:nome, obs_novo:document.getElementById('ren-obs').value.trim()};
+  if (fundir) body.fundir = true;
   try {
     const r = await fetch('/operadora/renomear', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const d = await r.json();
-    if (d.ok) { toast('Renomeado' + (d.propostas ? ' (' + d.propostas + ' proposta(s) atualizadas)' : ''), 'ok'); setTimeout(()=>location.reload(), 700); }
-    else toast(d.msg || 'Erro ao renomear', 'err');
+    if (d.ok) {
+      toast((d.fundido ? 'Fundido' : 'Renomeado') + (d.propostas ? ' (' + d.propostas + ' proposta(s) atualizadas)' : ''), 'ok');
+      setTimeout(()=>location.reload(), 700);
+    } else if (d.existe) {
+      // destino já existe: oferecer a fusão (mantém as comissões salvas)
+      if (confirm('Já existe uma operadora "' + nome + '".\n\nJuntar as duas num nome só? As propostas passam a usar "' + nome + '" e as comissões já salvas são mantidas (nada é recalculado).')) {
+        salvarRenomear(true);
+      }
+    } else toast(d.msg || 'Erro ao renomear', 'err');
   } catch(e) { toast('Erro de conexão', 'err'); }
 }
 

@@ -6829,11 +6829,51 @@ def operadora_renomear():
     existe = (conn.execute("SELECT 1 FROM recebimento WHERE operadora=? AND obs=? LIMIT 1", (op_new, obs_new)).fetchone()
               or conn.execute("SELECT 1 FROM repasse_corretor WHERE operadora=? AND obs=? LIMIT 1", (op_new, obs_new)).fetchone()
               or conn.execute("SELECT 1 FROM operadoras WHERE operadora=? LIMIT 1", (disp_new,)).fetchone())
-    if existe:
+    if existe and not d.get('fundir'):
         close_db(conn)
         return jsonify({"ok": False, "existe": True,
-                        "msg": f"Já existe uma operadora \"{disp_new}\". Escolha outro nome ou ajuste os preços "
-                               "dela manualmente (não faço fusão automática pra não misturar valores)."}), 409
+                        "msg": f"Já existe uma operadora \"{disp_new}\". Confirme a fusão para juntar as duas "
+                               "num nome só (as comissões já salvas nas propostas são mantidas)."}), 409
+    if existe and d.get('fundir'):
+        # FUSÃO: junta a origem no destino que já existe. Move preços que NÃO colidem
+        # (colisão: o destino já tem aquele plano/modelo/nível -> mantém o do destino),
+        # reatribui as propostas pro nome do destino SEM recalcular comissão (mantém o
+        # que está salvo, como o admin pediu) e remove a origem. Tudo numa transação.
+        try:
+            for tab, keys in (('recebimento', ['plano']),
+                              ('repasse_corretor', ['plano', 'modelo', 'nivel'])):
+                origem = conn.execute(f"SELECT * FROM {tab} WHERE operadora=? AND obs=?",
+                                      (op_old, obs_old)).fetchall()
+                for r in origem:
+                    cond = " AND ".join(f"COALESCE({k},'')=?" for k in keys)
+                    vals = [r[k] if r[k] is not None else '' for k in keys]
+                    colide = conn.execute(
+                        f"SELECT 1 FROM {tab} WHERE operadora=? AND obs=? AND {cond} LIMIT 1",
+                        (op_new, obs_new, *vals)).fetchone()
+                    if colide:
+                        conn.execute(f"DELETE FROM {tab} WHERE operadora=? AND obs=? AND {cond}",
+                                     (op_old, obs_old, *vals))       # destino ganha
+                    else:
+                        conn.execute(f"UPDATE {tab} SET operadora=?, obs=? WHERE operadora=? AND obs=? AND {cond}",
+                                     (op_new, obs_new, op_old, obs_old, *vals))
+            cur = conn.execute("UPDATE propostas SET adm_operadora=? WHERE adm_operadora=?",
+                               (disp_new, disp_old))
+            n_props = cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else \
+                conn.execute("SELECT COUNT(*) c FROM propostas WHERE adm_operadora=?", (disp_new,)).fetchone()['c']
+            conn.execute("DELETE FROM operadoras WHERE operadora=?", (disp_old,))
+            if DB_MODE == 'postgres':
+                conn.execute("INSERT INTO operadoras (operadora) VALUES (%s) ON CONFLICT (operadora) DO NOTHING", (disp_new,))
+            else:
+                conn.execute("INSERT OR IGNORE INTO operadoras (operadora) VALUES (?)", (disp_new,))
+            conn.commit()
+        except Exception as e:
+            try: conn.rollback()
+            except Exception: pass
+            close_db(conn)
+            app.logger.warning(f"[OPERADORA] fusão falhou: {e}")
+            return jsonify({"ok": False, "msg": "Falha ao fundir — nada foi alterado."}), 500
+        close_db(conn)
+        return jsonify({"ok": True, "fundido": True, "propostas": n_props})
     try:
         conn.execute("UPDATE recebimento SET operadora=?, obs=? WHERE operadora=? AND obs=?",
                      (op_new, obs_new, op_old, obs_old))
