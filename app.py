@@ -4892,7 +4892,20 @@ def ver_proposta(pid):
     if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']: return "Acesso negado", 403
     parcelas = conn.execute("SELECT * FROM parcelas WHERE proposta_id=? ORDER BY numero ASC",(pid,)).fetchall()
     campos_def = conn.execute("SELECT * FROM campos_custom ORDER BY ordem,id").fetchall()
+    # Operadora no editar = SELECT da lista única (não texto livre). Antes era
+    # input de texto: dava pra digitar um nome que não existe na tabela de preço
+    # e a comissão zerava. O valor atual entra na lista mesmo se for histórico,
+    # pra a edição nunca apagar a operadora que já estava na proposta.
+    op_lista = [o['display'] for o in _operadoras_lista(conn)]
+    atual_op = ((p['adm_operadora'] if 'adm_operadora' in p.keys() else '') or '').strip()
+    if atual_op and atual_op not in op_lista:
+        op_lista = [atual_op] + op_lista
     close_db(conn)
+    campos_secoes = []
+    for s in CAMPOS_EDIT_SECOES:
+        campos = [({**c, 'tipo': 'select', 'opcoes': op_lista} if c['k'] == 'adm_operadora' else c)
+                  for c in s['campos']]
+        campos_secoes.append({**s, 'campos': campos})
     # Nome legível do modelo/regime aplicado
     cod = p['regime_aplicado'] or ''
     nome_regime = MODELO_NOME.get(cod, cod or '—')
@@ -4922,7 +4935,7 @@ def ver_proposta(pid):
             except Exception: solic_pendente['alteracoes_parsed'] = {}
 
     return render_template('detalhe.html', p=p, parcelas=parcelas, regime=regime, extras=extras_view,
-                           campos_secoes=CAMPOS_EDIT_SECOES, valores_edit=valores_edit,
+                           campos_secoes=campos_secoes, valores_edit=valores_edit,
                            solic_pendente=solic_pendente)
 
 @app.route('/proposta/<int:pid>/consultor', methods=['POST'])
