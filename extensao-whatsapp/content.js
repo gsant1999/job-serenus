@@ -1716,6 +1716,12 @@
       capBox +
       avisoFalhas +
       leadBox +
+      '<button class="job-analisar-btn" id="job-cotar"' +
+        ' data-lead="' + esc(String(r.lead ? r.lead.id : '')) + '"' +
+        ' data-nome="' + esc((r.lead && r.lead.nome) || nome || '') + '"' +
+        ' data-telefone="' + esc(telefone || '') + '"' +
+        ' data-idades="' + esc(Array.isArray(ex.idades) ? ex.idades.join(',') : (ex.idades || '')) + '"' +
+        ' style="width:100%;margin:6px 0 4px;background:#8b5cf6;">Cotar no JOB para este lead</button>' +
       '<button class="job-copy job-copy-full" id="job-analise-copy" data-texto="' + esc(analiseCompletaTexto) + '" style="width:100%;margin:4px 0 8px;">Copiar análise completa</button>' +
       (dados ? '<div class="job-sec">Dados do lead</div><div class="job-dados">' + dados + '</div>' +
         '<button class="job-copy" id="job-dados-copy" data-texto="' + esc(dadosTexto) + '">Copiar dados do lead</button>' : '') +
@@ -1822,6 +1828,20 @@
           b.textContent = 'Copiado!';
           setTimeout(() => { b.textContent = 'Copiar follow-up'; }, 1500);
         });
+      });
+    }
+    // "Cotar no JOB para este lead": abre o multicálculo do JOB já vinculado ao
+    // lead (lead_id -> a cotação salva aparece na aba Cotações da ficha do CRM)
+    // e com as idades já extraídas preenchidas, pra cotar rápido da conversa.
+    const bc = document.getElementById('job-cotar');
+    if (bc) {
+      bc.addEventListener('click', () => {
+        const q = [];
+        if (bc.dataset.lead) q.push('lead_id=' + encodeURIComponent(bc.dataset.lead));
+        if (bc.dataset.nome) q.push('cliente_nome=' + encodeURIComponent(bc.dataset.nome));
+        if (bc.dataset.telefone) q.push('cliente_telefone=' + encodeURIComponent(bc.dataset.telefone));
+        if (bc.dataset.idades) q.push('idades=' + encodeURIComponent(bc.dataset.idades));
+        window.open(_SITE_BASE_URL_EXT + '/cotacao' + (q.length ? '?' + q.join('&') : ''), '_blank');
       });
     }
     // Copiar a ANÁLISE COMPLETA (tudo de uma vez).
