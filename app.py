@@ -2103,6 +2103,56 @@ def _split_operadora(operadora):
     return op, ''
 
 
+def _op_compact(s):
+    """Nome de operadora reduzido a só letras/números, sem acento e minúsculo:
+    'Med Senior SP/RJ' -> 'medseniorsprj', 'MedSênior' -> 'medsenior'. Serve pra
+    casar a MESMA operadora escrita de formas diferentes (acento, espaço, praça)."""
+    return ''.join(ch for ch in _normaliza_op(s or '') if ch.isalnum())
+
+
+def _op_casa(a, b):
+    """True se dois nomes são a MESMA operadora tolerando acento, espaço e sufixo
+    de praça ('MedSênior' == 'Medsenior' == 'Med Senior SP/RJ'). Exige que o menor
+    tenha >=4 chars e seja prefixo do maior — não casa nomes só parecidos."""
+    ca, cb = _op_compact(a), _op_compact(b)
+    if not ca or not cb:
+        return False
+    if ca == cb:
+        return True
+    menor, maior = (ca, cb) if len(ca) <= len(cb) else (cb, ca)
+    return len(menor) >= 4 and maior.startswith(menor)
+
+
+def _resolver_nome_operadora(conn, op_nome, plano):
+    """Devolve o nome de operadora REALMENTE cadastrado nas tabelas de preço PARA
+    ESTE PLANO. Se o nome exato não tem preço nesse plano mas há UMA operadora
+    equivalente com grafia diferente, devolve a canônica — assim uma proposta
+    gravada como 'MedSênior' PF acha os preços cadastrados como 'Med Senior SP/RJ'
+    PF e a comissão não zera. Checagem POR PLANO de propósito: existe 'MedSênior'
+    cadastrado em outro plano, e um check global achava que estava tudo certo.
+    Ambiguidade (>1 candidata) mantém o original (zero + aviso) — melhor não pagar
+    do que pagar errado."""
+    try:
+        existe = conn.execute(
+            "SELECT 1 FROM recebimento WHERE operadora=? AND plano=? "
+            "UNION SELECT 1 FROM repasse_corretor WHERE operadora=? AND plano=? LIMIT 1",
+            (op_nome, plano, op_nome, plano)).fetchone()
+        if existe:
+            return op_nome
+        nomes = set()
+        for tab in ('recebimento', 'repasse_corretor'):
+            for r in conn.execute(f"SELECT DISTINCT operadora FROM {tab} WHERE plano=?", (plano,)).fetchall():
+                if _op_casa(r['operadora'], op_nome):
+                    nomes.add(r['operadora'])
+        if len(nomes) == 1:
+            return nomes.pop()
+    except Exception:
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+    return op_nome
+
+
 def _op_display(operadora, obs):
     """(operadora, obs) -> nome de exibição único ('Operadora · obs' ou só o nome).
     É a forma canônica gravada em propostas.adm_operadora e no registro de nomes."""
@@ -2195,6 +2245,10 @@ def calc_comissao(operadora, regime_base, prod_acumulada, valor_venda, modalidad
     valor = float(valor_venda or 0)
     op_nome, op_obs = _split_operadora(operadora)
     plano = _plano_from_modalidade(modalidade, tipo_pessoa)
+    # Casa grafias diferentes da mesma operadora NESTE plano ('MedSênior' PF ->
+    # 'Med Senior SP/RJ' PF) ANTES de buscar preço, senão o nome do seletor não
+    # bate com a tabela e a comissão zera.
+    op_nome = _resolver_nome_operadora(conn, op_nome, plano)
 
     # 1) Recebimento da corretora (mensalidades / resíduo)
     receb = conn.execute(
