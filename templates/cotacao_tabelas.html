@@ -34,6 +34,30 @@
 <input type="file" id="pdc-json" accept=".json,application/json" style="display:none" onchange="importarPdcJson(this)">
 <div id="pdc-status" style="display:none; max-width:1100px; margin:0 0 14px; font-size:13px; color:var(--cinza); background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;"></div>
 
+<div class="card" style="max-width:1100px; margin:0 0 16px; padding:16px 18px;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:12px; flex-wrap:wrap;">
+    <div>
+      <strong style="font-size:14px;">Watchlist — o que manter atualizado</strong>
+      <div class="sub" style="margin-top:2px;">Cidade + modalidade que a Serenus vende. O extrator varre só isto no Painel (mantém leve e certeiro).</div>
+    </div>
+    <div style="display:flex; gap:6px; align-items:center;">
+      <input type="text" id="wl-cidade" placeholder="Cidade - UF (ex: Campinas - SP)" style="padding:8px 11px; font-size:13px; min-width:200px;">
+      <select id="wl-mod" style="padding:8px 11px; font-size:13px;"><option>PME</option><option>PF</option><option>Adesão</option></select>
+      <button class="btn-outline btn-sm" onclick="wlAdd()">Adicionar</button>
+    </div>
+  </div>
+  <div style="display:flex; flex-wrap:wrap; gap:7px;">
+    {% for w in watchlist %}
+    <span style="display:inline-flex; align-items:center; gap:7px; background:var(--panel-2); border:1px solid var(--borda); border-radius:20px; padding:5px 12px; font-size:12.5px;">
+      {{ w.cidade }} · <b>{{ w.modalidade }}</b>
+      <button onclick="wlDel({{ w.id }})" style="background:none; border:none; color:var(--erro); cursor:pointer; font-size:14px; line-height:1; padding:0;" title="Remover">&times;</button>
+    </span>
+    {% else %}
+    <span class="sub">Nenhuma cidade na watchlist ainda. Adicione as que você vende.</span>
+    {% endfor %}
+  </div>
+</div>
+
 {% if n_velhas %}
 <div style="max-width:1100px; margin:0 0 14px; font-size:13px; background:rgba(250,204,21,.1); border:1px solid rgba(250,204,21,.3); border-radius:10px; padding:12px 14px; color:var(--amarelo);">
   <b>{{ n_velhas }} tabela(s) com preço velho</b> (mais de 21 dias sem atualizar do Painel). Rode a atualização antes de cotar com elas.
@@ -76,6 +100,23 @@
 {% endif %}
 
 <script>
+async function wlAdd() {
+  var cidade = document.getElementById('wl-cidade').value.trim();
+  var modalidade = document.getElementById('wl-mod').value;
+  if (!cidade) { alert('Informe a cidade (ex: Campinas - SP)'); return; }
+  try {
+    var r = await fetch('/cotacao/watchlist/add', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({cidade:cidade, modalidade:modalidade})});
+    var d = await r.json();
+    if (d.ok) location.reload(); else alert(d.msg || 'Erro ao adicionar');
+  } catch(e) { alert('Erro de conexão'); }
+}
+async function wlDel(id) {
+  if (!confirm('Remover da watchlist?')) return;
+  try {
+    var r = await fetch('/cotacao/watchlist/' + id + '/excluir', {method:'POST'});
+    if ((await r.json()).ok) location.reload();
+  } catch(e) { alert('Erro de conexão'); }
+}
 function excluirTabela(id, nome) {
   if (!confirm('Excluir a tabela "' + nome + '"? Esta ação não pode ser desfeita.')) return;
   fetch('/cotacao/tabelas/' + id + '/excluir', { method: 'POST' })

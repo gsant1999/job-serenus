@@ -1900,6 +1900,27 @@ def init_db():
     if not is_pg:
         conn.commit()
 
+    # ─── WATCHLIST DA COTAÇÃO (opção C): pares (cidade, modalidade) que o extrator
+    # mantém fresco no PDC. Criada aqui (idempotente) pra não mexer nos 2 blocos
+    # de schema. Só config, sem preço — não há risco pra dado existente. ───
+    try:
+        if is_pg:
+            conn.execute("""CREATE TABLE IF NOT EXISTS cotacao_watchlist (
+                id SERIAL PRIMARY KEY, cidade TEXT NOT NULL, modalidade TEXT NOT NULL DEFAULT 'PME',
+                ativo INTEGER DEFAULT 1, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(cidade, modalidade))""")
+        else:
+            conn.execute("""CREATE TABLE IF NOT EXISTS cotacao_watchlist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, cidade TEXT NOT NULL, modalidade TEXT NOT NULL DEFAULT 'PME',
+                ativo INTEGER DEFAULT 1, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(cidade, modalidade))""")
+        conn.commit()
+    except Exception as e:
+        if is_pg:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[WATCHLIST] criação pulada: {e}")
+
     # ─── REGISTRO DE NOMES DE OPERADORA: preenche a tabela 'operadoras' com o
     # display único de TODA operadora que já existe em recebimento, repasse_corretor
     # ou nas propostas — assim o registro de nomes fica completo e nenhum nome
@@ -12198,7 +12219,14 @@ def cotacao_tabelas():
         if t['frescor'] in ('velha', 'sem_data'):
             n_velhas += 1
         tabelas.append(t)
-    return render_template('cotacao_tabelas.html', tabelas=tabelas, n_velhas=n_velhas)
+    conn = db()
+    try:
+        watchlist = [dict(w) for w in conn.execute(
+            "SELECT id,cidade,modalidade FROM cotacao_watchlist ORDER BY cidade,modalidade").fetchall()]
+    except Exception:
+        watchlist = []
+    close_db(conn)
+    return render_template('cotacao_tabelas.html', tabelas=tabelas, n_velhas=n_velhas, watchlist=watchlist)
 
 
 @app.route('/cotacao/tabelas/nova', methods=['GET', 'POST'])
@@ -12762,6 +12790,49 @@ def cotacao_importar_pdc():
         conn.commit()
     close_db(conn)
     return jsonify({"ok": True, "contagem": cont, "rejeitos": rejeitos[:20]})
+
+
+# ── Watchlist da cotação (opção C): o que o extrator mantém fresco ──
+@app.route('/cotacao/watchlist/add', methods=['POST'])
+@login_required
+@admin_required
+def cotacao_watchlist_add():
+    d = request.json or {}
+    cidade = (d.get('cidade') or '').strip()
+    modalidade = _norm_modalidade_pdc(d.get('modalidade') or 'PME')
+    if not cidade:
+        return jsonify({"ok": False, "msg": "Informe a cidade (ex: Campinas - SP)"}), 400
+    conn = db()
+    if DB_MODE == 'postgres':
+        conn.execute("INSERT INTO cotacao_watchlist (cidade,modalidade) VALUES (%s,%s) ON CONFLICT (cidade,modalidade) DO NOTHING", (cidade, modalidade))
+    else:
+        conn.execute("INSERT OR IGNORE INTO cotacao_watchlist (cidade,modalidade) VALUES (?,?)", (cidade, modalidade))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/cotacao/watchlist/<int:wid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def cotacao_watchlist_excluir(wid):
+    conn = db()
+    conn.execute("DELETE FROM cotacao_watchlist WHERE id=?", (wid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/cotacao/watchlist.json')
+@login_required
+def cotacao_watchlist_json():
+    """Lista que o extrator (extensão) consome pra saber o que varrer no PDC:
+    pares (cidade, modalidade) ativos. Login exigido (usa a sessão do corretor)."""
+    conn = db()
+    try:
+        rows = conn.execute("SELECT id,cidade,modalidade FROM cotacao_watchlist WHERE ativo=1 ORDER BY cidade,modalidade").fetchall()
+    except Exception:
+        rows = []
+    close_db(conn)
+    return jsonify({"ok": True, "watchlist": [dict(r) for r in rows]})
 
 
 # ── Logos das operadoras ──
