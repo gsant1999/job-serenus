@@ -1897,6 +1897,34 @@ def init_db():
     if not is_pg:
         conn.commit()
 
+    # ─── REGISTRO DE NOMES DE OPERADORA: preenche a tabela 'operadoras' com o
+    # display único de TODA operadora que já existe em recebimento, repasse_corretor
+    # ou nas propostas — assim o registro de nomes fica completo e nenhum nome
+    # some das listas. 100% aditivo (INSERT ... DO NOTHING): nunca apaga nem
+    # renomeia nada. Roda toda subida, é idempotente. ───
+    try:
+        nomes = set()
+        for r in conn.execute("SELECT DISTINCT operadora, obs FROM recebimento").fetchall():
+            d = _op_display(r['operadora'], r['obs'])
+            if d: nomes.add(d)
+        for r in conn.execute("SELECT DISTINCT operadora, obs FROM repasse_corretor").fetchall():
+            d = _op_display(r['operadora'], r['obs'])
+            if d: nomes.add(d)
+        for r in conn.execute("SELECT DISTINCT adm_operadora FROM propostas WHERE adm_operadora IS NOT NULL AND adm_operadora<>''").fetchall():
+            d = (r['adm_operadora'] or '').strip()
+            if d: nomes.add(d)
+        for nome in nomes:
+            if is_pg:
+                conn.execute("INSERT INTO operadoras (operadora) VALUES (%s) ON CONFLICT (operadora) DO NOTHING", (nome,))
+            else:
+                conn.execute("INSERT OR IGNORE INTO operadoras (operadora) VALUES (?)", (nome,))
+        conn.commit()
+    except Exception as e:
+        if is_pg:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[OPERADORAS] backfill de nomes pulado: {e}")
+
     # ─── FUSO HORÁRIO: defaults em hora de São Paulo (o CURRENT_TIMESTAMP do
     # Postgres grava UTC — timeline aparecia 3h no futuro). Idempotente. ───
     if is_pg:
@@ -2046,6 +2074,46 @@ def _split_operadora(operadora):
             a, b = op.split(sep, 1)
             return a.strip(), b.strip()
     return op, ''
+
+
+def _op_display(operadora, obs):
+    """(operadora, obs) -> nome de exibição único ('Operadora · obs' ou só o nome).
+    É a forma canônica gravada em propostas.adm_operadora e no registro de nomes."""
+    op = (operadora or '').strip()
+    ob = (obs or '').strip()
+    return f"{op} · {ob}" if ob else op
+
+
+def _operadoras_lista(conn):
+    """FONTE ÚNICA da lista de operadoras (por identidade operadora+obs).
+    Une o registro de nomes (tabela operadoras, que guarda o display completo)
+    com o que existe em recebimento e repasse_corretor — assim um nome cadastrado
+    sem preço aparece, um preço sem passar pelo cadastro aparece, e as telas
+    (form da proposta, /repasses, /operadoras, produtos) enxergam a MESMA lista.
+    Retorna [{operadora, obs, display}] ordenado por display."""
+    pares = {}
+    def _add(op, ob):
+        op = (op or '').strip(); ob = (ob or '').strip()
+        if op:
+            pares.setdefault((op, ob), _op_display(op, ob))
+    try:
+        for r in conn.execute("SELECT DISTINCT operadora, obs FROM recebimento").fetchall():
+            _add(r['operadora'], r['obs'])
+    except Exception:
+        pass
+    try:
+        for r in conn.execute("SELECT DISTINCT operadora, obs FROM repasse_corretor").fetchall():
+            _add(r['operadora'], r['obs'])
+    except Exception:
+        pass
+    try:
+        for r in conn.execute("SELECT operadora FROM operadoras").fetchall():
+            _add(*_split_operadora(r['operadora']))
+    except Exception:
+        pass
+    return sorted(({'operadora': op, 'obs': ob, 'display': disp}
+                   for (op, ob), disp in pares.items()),
+                  key=lambda x: x['display'].lower())
 
 def _nivel_por_producao(prod, conn):
     """Determina o nível (n1/n2/n3) pela produção acumulada, respeitando a tabela niveis."""
@@ -4610,7 +4678,7 @@ def dashboard():
 def nova_proposta():
     conn = db()
     sups = conn.execute("SELECT * FROM supervisoras WHERE ativo=1 ORDER BY nome").fetchall()
-    ops = conn.execute("SELECT DISTINCT operadora FROM recebimento ORDER BY operadora").fetchall()
+    ops = [o['display'] for o in _operadoras_lista(conn)]
     # Pré-preenchimento a partir da última análise de WhatsApp do lead (botão
     # "Fechei essa proposta — criar no JOB" na extensão manda ?lead=N). Enche só
     # o que a IA extraiu com segurança dos documentos; o financeiro fica pro
@@ -4653,7 +4721,7 @@ def nova_proposta():
             prefill['valor'] = f"{float(lead['valor_estimado']):.2f}".replace('.', ',')
         prefill['docs_texto'] = diag.get('docs_extraidos') or ''
     close_db(conn)
-    return render_template('form.html', supervisoras=sups, operadoras=[o['operadora'] for o in ops], prefill=prefill)
+    return render_template('form.html', supervisoras=sups, operadoras=ops, prefill=prefill)
 
 @app.route('/salvar-proposta', methods=['POST'])
 @login_required
@@ -5500,9 +5568,9 @@ def proposta_etiquetas(pid):
 def produtos():
     conn = db()
     rows = conn.execute("SELECT * FROM produtos WHERE ativo=1 ORDER BY operadora, nome").fetchall()
-    ops = conn.execute("SELECT DISTINCT operadora FROM recebimento ORDER BY operadora").fetchall()
+    ops = [o['display'] for o in _operadoras_lista(conn)]
     close_db(conn)
-    return render_template('produtos.html', produtos=rows, operadoras=[o['operadora'] for o in ops])
+    return render_template('produtos.html', produtos=rows, operadoras=ops)
 
 @app.route('/produto/salvar', methods=['POST'])
 @login_required
@@ -6411,15 +6479,22 @@ def api_campos_ativos():
 def operadoras():
     conn = db()
     rows = conn.execute("SELECT * FROM recebimento ORDER BY operadora,plano").fetchall()
+    # Toda operadora cadastrada aparece — inclusive as SEM preço ainda (vindas do
+    # registro de nomes / repasse / propostas). Sem isso, um nome recém-cadastrado
+    # ou usado só em proposta ficava invisível aqui.
+    lista = _operadoras_lista(conn)
     close_db(conn)
-    # agrupa por operadora+obs, com colunas por plano
     grupos = {}
+    for x in lista:
+        key = (x['operadora'], x['obs'])
+        grupos[key] = {'operadora': x['operadora'], 'obs': x['obs'], 'PME': None, 'PF': None, 'ADESAO': None, 'ids': {}}
     for r in rows:
         key = (r['operadora'], r['obs'] or '')
         grupos.setdefault(key, {'operadora': r['operadora'], 'obs': r['obs'] or '', 'PME': None, 'PF': None, 'ADESAO': None, 'ids': {}})
         grupos[key][r['plano']] = r['total']
         grupos[key]['ids'][r['plano']] = r['id']
-    return render_template('operadoras.html', grupos=list(grupos.values()))
+    ordenado = sorted(grupos.values(), key=lambda g: (g['operadora'].lower(), g['obs'].lower()))
+    return render_template('operadoras.html', grupos=ordenado)
 
 @app.route('/operadora/salvar', methods=['POST'])
 @login_required
@@ -6460,13 +6535,13 @@ def operadora_excluir():
 @admin_required
 def repasses():
     conn = db()
-    ops = conn.execute("SELECT DISTINCT operadora,obs FROM recebimento ORDER BY operadora").fetchall()
+    ops = _operadoras_lista(conn)   # fonte única (mesma lista do /operadoras e do form)
     reps = conn.execute("SELECT * FROM repasse_corretor").fetchall()
     niveis = conn.execute("SELECT * FROM niveis ORDER BY ordem").fetchall()
     close_db(conn)
     rep_map = {f"{r['operadora']}|{r['obs'] or ''}|{r['plano']}|{r['modelo']}|{r['nivel']}": dict(r) for r in reps}
     return render_template('repasses.html',
-                           operadoras=[{'operadora': o['operadora'], 'obs': o['obs'] or ''} for o in ops],
+                           operadoras=[{'operadora': o['operadora'], 'obs': o['obs']} for o in ops],
                            rep_map=rep_map, niveis=[dict(n) for n in niveis],
                            modelo_nome=MODELO_NOME, modelo_tem_meta=MODELO_TEM_META)
 
@@ -7331,11 +7406,11 @@ def estornos():
     conn = db()
     regras = conn.execute("""SELECT r.*, COALESCE((SELECT 1 FROM recebimento WHERE operadora=r.operadora LIMIT 1),0) tem_op
         FROM regras_estorno r ORDER BY operadora""").fetchall()
-    ops = conn.execute("SELECT DISTINCT operadora FROM recebimento ORDER BY operadora").fetchall()
+    ops = [o['display'] for o in _operadoras_lista(conn)]
     estornadas = conn.execute("SELECT * FROM propostas WHERE estornada=1 ORDER BY id DESC LIMIT 30").fetchall()
     close_db(conn)
     return render_template('estornos.html', regras=regras,
-        operadoras=[o['operadora'] for o in ops], estornadas=estornadas)
+        operadoras=ops, estornadas=estornadas)
 
 @app.route('/regra-estorno/salvar', methods=['POST'])
 @login_required
