@@ -209,6 +209,24 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
   color: #9aa1b5; margin: 14px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #26262f;
 }
 .job-modelo-grupo span { color: #646b80; font-weight: 700; }
+/* Pasta = consultor (gestor). Recolhível via <details>. */
+.job-pasta { margin: 10px 0; border: 1px solid #26262f; border-radius: 10px; overflow: hidden; background: #17171d; }
+.job-pasta-nome {
+  cursor: pointer; list-style: none; user-select: none;
+  font-size: 12px; font-weight: 800; color: #e6e8f0; padding: 10px 12px;
+  display: flex; align-items: center; gap: 6px; background: #1d1d25;
+}
+.job-pasta-nome::-webkit-details-marker { display: none; }
+.job-pasta-nome::before { content: '▸'; color: #646b80; font-size: 10px; transition: transform .15s; }
+.job-pasta[open] > .job-pasta-nome::before { transform: rotate(90deg); }
+.job-pasta-nome span { color: #646b80; font-weight: 700; margin-left: auto; }
+.job-pasta-conteudo { padding: 4px 10px 10px; }
+/* Tipo = áudio/texto/PDF/imagem (dentro da pasta) */
+.job-modelo-tipo {
+  font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px;
+  color: #7c8398; margin: 10px 0 6px; padding-left: 2px;
+}
+.job-modelo-tipo span { color: #545b6e; font-weight: 700; }
 .job-modelo-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .job-tipo-ico { margin-right: 2px; }
 .job-modelo-fav { background: none; border: none; color: #646b80; font-size: 16px; cursor: pointer; line-height: 1; padding: 0 2px; flex: 0 0 auto; }

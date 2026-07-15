@@ -922,6 +922,32 @@
     return 'Enviar texto';
   }
 
+  // Tipo do modelo pro agrupamento (Áudio/Imagem/PDF/Vídeo/Texto) — nível de
+  // dentro da pasta, tudo automático do midia_tipo. Sem pasta manual.
+  const _ORDEM_TIPO = ['Texto', 'Áudio', 'Imagem', 'PDF', 'Vídeo'];
+  function _tipoModelo(m) {
+    if (m.midia_tipo === 'audio') return 'Áudio';
+    if (m.midia_tipo === 'imagem') return 'Imagem';
+    if (m.midia_tipo === 'video') return 'Vídeo';
+    if (m.midia_tipo === 'documento') return 'PDF';
+    return 'Texto';
+  }
+  function _blocoPorTipo(itens) {
+    const porTipo = new Map();
+    itens.forEach((m) => {
+      const t = _tipoModelo(m);
+      if (!porTipo.has(t)) porTipo.set(t, []);
+      porTipo.get(t).push(m);
+    });
+    let html = '';
+    _ORDEM_TIPO.forEach((t) => {
+      if (porTipo.has(t)) {
+        html += '<div class="job-modelo-tipo">' + t + ' <span>(' + porTipo.get(t).length + ')</span></div>' +
+          porTipo.get(t).map(cardModelo).join('');
+      }
+    });
+    return html;
+  }
   function renderListaModelos(modelos) {
     const filtrados = modelos.filter(modeloPassaFiltro);
     if (!filtrados.length) {
@@ -929,23 +955,25 @@
         ? '<div class="job-vazio">Nenhum modelo bate com esse filtro.</div>'
         : '<div class="job-vazio">Nenhum modelo salvo ainda. Crie o primeiro acima.</div>';
     }
-    // Favoritos já vêm primeiro do servidor; agrupa mantendo a ordem recebida.
-    // Gestor (admin/supervisor): agrupa por CONSULTOR (pasta) — "ver de todos,
-    // organizado". Consultor comum: agrupa por categoria, como sempre.
-    const grupos = new Map();
-    filtrados.forEach((m) => {
-      const chave = _gestorModo
-        ? (m.dono_nome || 'Compartilhado')
-        : ((m.categoria || '').trim() || 'Sem categoria');
-      if (!grupos.has(chave)) grupos.set(chave, []);
-      grupos.get(chave).push(m);
-    });
-    let out = '';
-    grupos.forEach((itens, cat) => {
-      out += '<div class="job-modelo-grupo">' + esc(cat) + ' <span>(' + itens.length + ')</span></div>' +
-        itens.map(cardModelo).join('');
-    });
-    return out;
+    // Modelo do desenho do Guilherme: PASTA = consultor, DENTRO agrupado por TIPO
+    // (áudio/texto/PDF/imagem). Gestor vê a pasta de cada consultor (recolhível);
+    // consultor comum vê direto os tipos (é tudo dele). Nada de árvore/categoria.
+    if (_gestorModo) {
+      const porDono = new Map();
+      filtrados.forEach((m) => {
+        const d = (m.dono_nome || 'Compartilhado');
+        if (!porDono.has(d)) porDono.set(d, []);
+        porDono.get(d).push(m);
+      });
+      let out = '';
+      porDono.forEach((itens, dono) => {
+        out += '<details class="job-pasta" open><summary class="job-pasta-nome">' +
+          esc(dono) + ' <span>(' + itens.length + ')</span></summary>' +
+          '<div class="job-pasta-conteudo">' + _blocoPorTipo(itens) + '</div></details>';
+      });
+      return out;
+    }
+    return _blocoPorTipo(filtrados);
   }
 
   function renderModelos(modelos) {
@@ -1368,7 +1396,8 @@
     }
     const vis = funis.filter(funilPassaFiltro);
     if (!vis.length) return '<div class="job-vazio">Nenhum funil bate com esse filtro.</div>';
-    // Gestor: agrupa os funis por consultor (pasta) — "ver de todos, organizado".
+    // Gestor: pasta por consultor (recolhível), igual aos modelos. Funil é uma
+    // sequência multi-tipo, então não tem sub-nível de tipo — só a pasta.
     if (!_gestorModo) return vis.map(cardFunil).join('');
     const grupos = new Map();
     vis.forEach((f) => {
@@ -1378,8 +1407,9 @@
     });
     let out = '';
     grupos.forEach((itens, dono) => {
-      out += '<div class="job-modelo-grupo">' + esc(dono) + ' <span>(' + itens.length + ')</span></div>' +
-        itens.map(cardFunil).join('');
+      out += '<details class="job-pasta" open><summary class="job-pasta-nome">' +
+        esc(dono) + ' <span>(' + itens.length + ')</span></summary>' +
+        '<div class="job-pasta-conteudo">' + itens.map(cardFunil).join('') + '</div></details>';
     });
     return out;
   }
