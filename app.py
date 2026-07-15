@@ -2453,36 +2453,72 @@ def login_required(f):
 def admin_required(f):
     @wraps(f)
     def w(*a, **kw):
-        if session.get('perfil') != 'admin': return redirect(url_for('dashboard'))
-        return f(*a, **kw)
+        if session.get('perfil') == 'admin':
+            return f(*a, **kw)
+        # Consultor: só passa se a rota for de um MÓDULO concedido a ele (deixa
+        # liberar Modelos/Funis/Operadoras etc. por consultor). Rota admin que
+        # não é módulo (config, edição de usuário...) segue exclusiva do admin.
+        permitidos = _modulos_permitidos_atual()
+        mod = _modulo_do_path(request.path)
+        if mod and permitidos is not None and mod in permitidos:
+            return f(*a, **kw)
+        return redirect(url_for('dashboard'))
     return w
 
 
-# ─── MÓDULOS POR CONSULTOR (acesso configurável) ─────────────────────────────
-# O admin escolhe, em Usuários, quais módulos cada consultor acessa. Sem config
-# (modulos NULL) = TODOS liberados (comportamento atual, não quebra nada). Admin
-# vê tudo sempre. Só valem os módulos consultor-facing; a área de Administração
-# continua exclusiva do admin (via @admin_required).
+# ─── MÓDULOS POR CONSULTOR (acesso configurável em Usuários) ─────────────────
+# O admin escolhe, por consultor, quais módulos ele acessa. Cada módulo tem
+# admin=True/False: os de consultor (False) entram no acesso PADRÃO (o que todo
+# consultor sem config já vê hoje — não muda nada); os gerenciais (True) só ficam
+# visíveis se o admin conceder explicitamente. Admin vê tudo sempre.
 MODULOS = [
-    {'key': 'nova_proposta', 'label': 'Nova Proposta',        'prefixos': ['/nova-proposta', '/salvar-proposta']},
-    {'key': 'propostas',     'label': 'Propostas',            'prefixos': ['/propostas', '/proposta/']},
-    {'key': 'fluxo',         'label': 'Fluxo de Caixa',       'prefixos': ['/fluxo-caixa']},
-    {'key': 'crm',           'label': 'CRM',                  'prefixos': ['/crm']},
-    {'key': 'cotacao',       'label': 'Cotação',              'prefixos': ['/cotacao']},
-    {'key': 'material',      'label': 'Material de Apoio',    'prefixos': ['/material-apoio']},
-    {'key': 'manual',        'label': 'Manual',               'prefixos': ['/manual']},
-    {'key': 'bi',            'label': 'Análises (BI)',        'prefixos': ['/bi']},
-    {'key': 'whatsapp',      'label': 'Score Lead WhatsApp',  'prefixos': ['/whatsapp-analises']},
+    # Consultor (acesso padrão)
+    {'key': 'nova_proposta', 'label': 'Nova Proposta',        'prefixos': ['/nova-proposta', '/salvar-proposta'], 'admin': False},
+    {'key': 'propostas',     'label': 'Propostas',            'prefixos': ['/propostas', '/proposta/'],           'admin': False},
+    {'key': 'fluxo',         'label': 'Fluxo de Caixa',       'prefixos': ['/fluxo-caixa'],                       'admin': False},
+    {'key': 'crm',           'label': 'CRM',                  'prefixos': ['/crm'],                               'admin': False},
+    {'key': 'cotacao',       'label': 'Cotação',              'prefixos': ['/cotacao'],                           'admin': False},
+    {'key': 'material',      'label': 'Material de Apoio',    'prefixos': ['/material-apoio'],                    'admin': False},
+    {'key': 'manual',        'label': 'Manual',               'prefixos': ['/manual'],                            'admin': False},
+    {'key': 'bi',            'label': 'Análises (BI)',        'prefixos': ['/bi'],                                'admin': False},
+    {'key': 'whatsapp',      'label': 'Score Lead WhatsApp',  'prefixos': ['/whatsapp-analises'],                 'admin': False},
+    # CRM (gerenciais)
+    {'key': 'crm_frios',     'label': 'CRM · Base Fria',      'prefixos': ['/crm/frios'],                         'admin': True},
+    {'key': 'crm_fluxos',    'label': 'CRM · Fluxos',         'prefixos': ['/crm/fluxos'],                        'admin': True},
+    {'key': 'crm_funis',     'label': 'CRM · Funis WhatsApp', 'prefixos': ['/crm/funis'],                         'admin': True},
+    {'key': 'crm_modelos',   'label': 'CRM · Modelos',        'prefixos': ['/crm/modelos'],                       'admin': True},
+    # Administração (gerenciais)
+    {'key': 'usuarios',      'label': 'Usuários',             'prefixos': ['/usuarios', '/usuario/'],             'admin': True},
+    {'key': 'score',         'label': 'Score de Utilização',  'prefixos': ['/score'],                             'admin': True},
+    {'key': 'supervisoras',  'label': 'Supervisoras',         'prefixos': ['/supervisoras', '/supervisora/'],     'admin': True},
+    {'key': 'operadoras',    'label': 'Operadoras',           'prefixos': ['/operadoras', '/operadora/'],         'admin': True},
+    {'key': 'repasses',      'label': 'Repasses',             'prefixos': ['/repasses', '/repasse/'],             'admin': True},
+    {'key': 'producao',      'label': 'Níveis de Produção',   'prefixos': ['/producao', '/niveis', '/nivel/'],    'admin': True},
+    {'key': 'financeiro',    'label': 'Financeiro',           'prefixos': ['/financeiro'],                        'admin': True},
+    {'key': 'fechamento',    'label': 'Fechamento',           'prefixos': ['/fechamento'],                        'admin': True},
+    {'key': 'estornos',      'label': 'Estornos',             'prefixos': ['/estornos', '/estorno/'],             'admin': True},
+    {'key': 'produtos',      'label': 'Produtos / Planos',    'prefixos': ['/produtos', '/produto/'],             'admin': True},
+    {'key': 'campos',        'label': 'Campos Personalizados','prefixos': ['/campos', '/campo/'],                 'admin': True},
+    {'key': 'auditoria',     'label': 'Esteira / Auditoria',  'prefixos': ['/admin/auditoria'],                   'admin': True},
+    {'key': 'excluidas',     'label': 'Propostas Excluídas',  'prefixos': ['/admin/propostas-excluidas'],         'admin': True},
 ]
 _MODULOS_KEYS = [m['key'] for m in MODULOS]
+_MODULOS_CONSULTOR = [m['key'] for m in MODULOS if not m.get('admin')]   # acesso padrão
+_MODULOS_ADMIN = [m['key'] for m in MODULOS if m.get('admin')]
+
+
+def _match_prefixo(path, pre):
+    """Casa o path com o prefixo do módulo sem 'vazar' (ex: /bi não pega /bimestre)."""
+    if pre.endswith('/'):
+        return path.startswith(pre)
+    return path == pre or path.startswith(pre + '/')
 
 
 def _modulos_permitidos_atual():
-    """Set de módulos que o usuário logado pode acessar, ou None = sem restrição
-    (admin, ou consultor sem config = tudo). Cacheado no g por request."""
-    if 'user_id' not in session:
-        return None
-    if session.get('perfil') == 'admin':
+    """Set de módulos do usuário logado. Admin/não-logado -> None (sem restrição).
+    Consultor: a lista salva; sem config -> o acesso PADRÃO de consultor. Nunca
+    inclui módulo gerencial a menos que concedido. Cacheado no g por request."""
+    if 'user_id' not in session or session.get('perfil') == 'admin':
         return None
     if 'modulos_cache' in g.__dict__:
         return g.modulos_cache
@@ -2498,28 +2534,33 @@ def _modulos_permitidos_atual():
                 permitidos = set(str(x) for x in lista)
     except Exception:
         permitidos = None
+    if permitidos is None:
+        permitidos = set(_MODULOS_CONSULTOR)   # sem config = acesso padrão de consultor
     g.modulos_cache = permitidos
     return permitidos
 
 
 def _modulo_do_path(path):
+    """Módulo dono do path pelo prefixo MAIS ESPECÍFICO (ex: /crm/modelos -> crm_modelos, não crm)."""
+    melhor, mlen = None, -1
     for m in MODULOS:
         for pre in m['prefixos']:
-            if path == pre or path == pre.rstrip('/') or path.startswith(pre):
-                return m['key']
-    return None
+            if _match_prefixo(path, pre) and len(pre) > mlen:
+                mlen, melhor = len(pre), m['key']
+    return melhor
 
 
 @app.before_request
 def _guard_modulos():
     """Bloqueia consultor de acessar por URL um módulo que ele não tem — enforcement
-    de verdade, não só esconder no menu. Admin e quem não tem restrição passam.
-    Nunca toca em rota que não seja de um módulo (login, /api, /webhook, config...)."""
+    de verdade, não só esconder no menu. Admin passa. API/webhook/rota-sem-módulo passam."""
     if 'user_id' not in session or session.get('perfil') == 'admin':
         return
-    permitidos = _modulos_permitidos_atual()
-    if permitidos is None:
+    # Assets (mídia de modelo, anexos) nunca são bloqueados — senão imagem de
+    # modelo quebra pra quem não tem o módulo de gestão de modelos.
+    if '/midia/' in request.path or '/anexos/' in request.path:
         return
+    permitidos = _modulos_permitidos_atual()
     mod = _modulo_do_path(request.path)
     if mod is not None and mod not in permitidos:
         if request.path.startswith('/api/') or request.accept_mimetypes.best == 'application/json':
@@ -2530,12 +2571,12 @@ def _guard_modulos():
 
 @app.context_processor
 def _inject_pode_modulo():
-    """Deixa pode_modulo('cotacao') disponível em todo template (pra esconder os
-    itens do menu que o consultor não acessa)."""
+    """pode_modulo('cotacao') e tem_modulo_admin nos templates (esconder itens do menu)."""
     permitidos = _modulos_permitidos_atual()
     def pode_modulo(chave):
         return permitidos is None or chave in permitidos
-    return {'pode_modulo': pode_modulo}
+    tem_modulo_admin = permitidos is None or any(k in permitidos for k in _MODULOS_ADMIN)
+    return {'pode_modulo': pode_modulo, 'tem_modulo_admin': tem_modulo_admin}
 
 # ─── INTEGRAÇÃO ASAAS (pagamentos PIX para consultores) ──────────────────────────
 import requests as _requests

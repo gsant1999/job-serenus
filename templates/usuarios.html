@@ -218,17 +218,17 @@
         <label style="display:block; margin-bottom:8px;">Módulos que este consultor acessa</label>
         <label class="radio" style="display:inline-flex; margin-bottom:8px;">
           <input type="checkbox" name="modulos_todos" id="e-mod-todos" value="1" onchange="toggleModulos()">
-          <span>Liberar TODOS os módulos (padrão)</span>
+          <span>Acesso padrão de consultor (os módulos comuns)</span>
         </label>
         <div id="e-mod-lista" style="display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; padding:8px 0 0;">
           {% for m in modulos %}
           <label class="radio" style="display:inline-flex; font-size:13px;">
-            <input type="checkbox" name="mod_{{ m.key }}" class="e-mod-check" value="1">
-            <span>{{ m.label }}</span>
+            <input type="checkbox" name="mod_{{ m.key }}" class="e-mod-check" value="1" data-admin="{{ 1 if m.admin else 0 }}">
+            <span>{{ m.label }}{% if m.admin %} <span style="font-size:9.5px; color:var(--amarelo); border:1px solid rgba(250,204,21,.4); border-radius:4px; padding:0 4px;">gerencial</span>{% endif %}</span>
           </label>
           {% endfor %}
         </div>
-        <div class="sub" style="font-size:11px; margin-top:4px;">Desmarque "Liberar todos" pra escolher módulo a módulo. A área de Administração continua exclusiva do admin.</div>
+        <div class="sub" style="font-size:11px; margin-top:4px;">"Acesso padrão" = os módulos comuns de consultor. Desmarque pra escolher item a item — inclusive liberar um módulo <b>gerencial</b> (Modelos, Funis, Operadoras...) pra este consultor.</div>
       </div>
 
       <div style="display:flex; gap:10px;">
@@ -344,7 +344,8 @@ function editar(u) {
   document.getElementById('e-mod-todos').checked = todos;
   document.querySelectorAll('.e-mod-check').forEach(function(ch){
     var key = ch.name.replace('mod_','');
-    ch.checked = todos ? true : (perms.indexOf(key) >= 0);
+    // "padrão" (todos) = só os módulos de consultor marcados; gerenciais off.
+    ch.checked = todos ? (ch.dataset.admin !== '1') : (perms.indexOf(key) >= 0);
   });
   toggleModulos();
   document.getElementById('modal-editar').classList.add('open');
@@ -353,11 +354,13 @@ function editar(u) {
 function toggleModulos() {
   // Admin não tem restrição de módulo; consultor sim.
   var ehAdmin = document.getElementById('e-perfil').value === 'admin';
-  var wrap = document.getElementById('e-modulos-wrap');
-  wrap.style.display = ehAdmin ? 'none' : '';
+  document.getElementById('e-modulos-wrap').style.display = ehAdmin ? 'none' : '';
   var todos = document.getElementById('e-mod-todos').checked;
-  document.querySelectorAll('.e-mod-check').forEach(function(ch){ ch.disabled = todos; });
-  document.getElementById('e-mod-lista').style.opacity = todos ? '.45' : '1';
+  document.querySelectorAll('.e-mod-check').forEach(function(ch){
+    if (todos) ch.checked = (ch.dataset.admin !== '1');  // padrão = só consultor
+    ch.disabled = todos;
+  });
+  document.getElementById('e-mod-lista').style.opacity = todos ? '.55' : '1';
 }
 
 function confirmarReset() {

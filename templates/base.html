@@ -480,19 +480,25 @@
       CRM
     </a>
     {% endif %}
-    {% if session.perfil == 'admin' %}
+    {% if pode_modulo('crm_frios') %}
     <a href="/crm/frios" class="nav-link {% if '/crm/frios' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       Base Fria
     </a>
+    {% endif %}
+    {% if pode_modulo('crm_fluxos') %}
     <a href="/crm/fluxos" class="nav-link {% if '/crm/fluxos' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
       Fluxos
     </a>
+    {% endif %}
+    {% if pode_modulo('crm_funis') %}
     <a href="/crm/funis" class="nav-link {% if '/crm/funis' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
       Funis WhatsApp
     </a>
+    {% endif %}
+    {% if pode_modulo('crm_modelos') %}
     <a href="/crm/modelos" class="nav-link {% if '/crm/modelos' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/></svg>
       Modelos
@@ -529,60 +535,86 @@
     </a>
     {% endif %}
 
-    {% if session.perfil == 'admin' %}
+    {% if tem_modulo_admin %}
     <div class="nav-section">Administração</div>
+    {% if pode_modulo('usuarios') %}
     <a href="/usuarios" class="nav-link {% if '/usuario' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       Usuários
     </a>
+    {% endif %}
+    {% if pode_modulo('score') %}
     <a href="/score" class="nav-link {% if request.path == '/score' %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4"/><path d="m6.343 7.757-2.829-2.829"/><path d="M2 13h4"/><path d="M17.657 7.757l2.829-2.829"/><circle cx="12" cy="13" r="8"/><path d="M12 13l3-3"/></svg>
       Score de Utilização
     </a>
+    {% endif %}
+    {% if pode_modulo('supervisoras') %}
     <a href="/supervisoras" class="nav-link {% if '/supervisora' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       Supervisoras
     </a>
+    {% endif %}
+    {% if pode_modulo('operadoras') %}
     <a href="/operadoras" class="nav-link {% if '/operadora' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/></svg>
       Operadoras
     </a>
+    {% endif %}
+    {% if pode_modulo('repasses') %}
     <a href="/repasses" class="nav-link {% if '/repasse' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
       Repasses
     </a>
+    {% endif %}
+    {% if pode_modulo('producao') %}
     <a href="/producao" class="nav-link {% if '/producao' in request.path or '/niveis' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
       Níveis de Produção
     </a>
+    {% endif %}
+    {% if pode_modulo('financeiro') %}
     <a href="/financeiro" class="nav-link {% if '/financeiro' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
       Financeiro
     </a>
+    {% endif %}
+    {% if pode_modulo('fechamento') %}
     <a href="/fechamento" class="nav-link {% if '/fechamento' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="m9 16 2 2 4-4"/></svg>
       Fechamento
     </a>
+    {% endif %}
+    {% if pode_modulo('estornos') %}
     <a href="/estornos" class="nav-link {% if '/estorno' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
       Estornos
     </a>
+    {% endif %}
+    {% if pode_modulo('produtos') %}
     <a href="/produtos" class="nav-link {% if '/produto' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
       Produtos / Planos
     </a>
+    {% endif %}
+    {% if pode_modulo('campos') %}
     <a href="/campos" class="nav-link {% if '/campo' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="14" y2="15"/><circle cx="18" cy="15" r="2"/></svg>
       Campos Personalizados
     </a>
+    {% endif %}
+    {% if pode_modulo('auditoria') %}
     <a href="/admin/auditoria" class="nav-link {% if '/auditoria' in request.path %}active{% endif %}" onclick="closeSidebar()" style="color:#f59e0b;">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
       Esteira / Auditoria
     </a>
+    {% endif %}
+    {% if pode_modulo('excluidas') %}
     <a href="/admin/propostas-excluidas" class="nav-link {% if '/propostas-excluidas' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
       Propostas Excluídas
     </a>
+    {% endif %}
     {% endif %}
   </div>
 
