@@ -6500,13 +6500,23 @@ def operadoras():
 @login_required
 @admin_required
 def operadora_salvar():
-    """Salva o recebimento (mensalidades) de uma operadora por plano."""
+    """Cadastra/atualiza uma operadora: registra o NOME (aparece em todas as
+    telas mesmo sem preço) e grava o recebimento (mensalidades) por plano que
+    vier preenchido. Cadastrar só o nome (sem preço) é válido — pra depois
+    configurar preço/repasse."""
     d = request.json or {}
     nome = (d.get('operadora') or '').strip()
     obs = (d.get('obs') or '').strip()
     if not nome:
         return jsonify({"ok": False, "msg": "Informe o nome"}), 400
+    display = _op_display(nome, obs)
     conn = db()
+    # Registra o nome (fonte única) — é o que faz um nome novo aparecer em
+    # /repasses, no form da proposta, etc., independente de ter preço.
+    if DB_MODE == 'postgres':
+        conn.execute("INSERT INTO operadoras (operadora) VALUES (%s) ON CONFLICT (operadora) DO NOTHING", (display,))
+    else:
+        conn.execute("INSERT OR IGNORE INTO operadoras (operadora) VALUES (?)", (display,))
     for plano in ['PME', 'PF', 'ADESAO']:
         val = d.get(plano)
         if val in (None, ''): continue

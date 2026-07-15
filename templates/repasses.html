@@ -30,7 +30,10 @@
     <h1>Repasses ao Corretor</h1>
     <div class="sub">Quanto o corretor recebe, em nº de mensalidades, por operadora × modelo × nível</div>
   </div>
-  <div><button class="btn" onclick="salvarTudo()">Salvar alterações</button></div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline" onclick="novaOperadora()">+ Nova operadora</button>
+    <button class="btn" onclick="salvarTudo()">Salvar alterações</button>
+  </div>
 </div>
 
 <div class="page" style="max-width:880px;">
@@ -42,12 +45,16 @@
     </div>
   </div>
 
-  <select class="sel-op" id="sel-op" onchange="carregar()">
-    <option value="">— Selecione a operadora —</option>
-    {% for o in operadoras %}
-    <option value="{{ o.operadora }}|{{ o.obs }}">{{ o.operadora }}{% if o.obs %} · {{ o.obs }}{% endif %}</option>
-    {% endfor %}
-  </select>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <select class="sel-op" id="sel-op" onchange="carregar()" style="flex:1;">
+      <option value="">— Selecione a operadora —</option>
+      {% for o in operadoras %}
+      <option value="{{ o.operadora }}|{{ o.obs }}">{{ o.operadora }}{% if o.obs %} · {{ o.obs }}{% endif %}</option>
+      {% endfor %}
+    </select>
+    <button class="btn-outline btn-sm" id="btn-ren" onclick="renomearSel()" style="display:none;">Renomear</button>
+    <button class="btn-outline btn-sm del" id="btn-del" onclick="excluirSel()" style="display:none;">Excluir</button>
+  </div>
 
   <div class="plano-tabs" id="plano-tabs" style="display:none;">
     <div class="plano-tab active" data-plano="PME" onclick="trocarPlano('PME')">PME</div>
@@ -74,8 +81,49 @@ let planoAtual = 'PME';
 function carregar() {
   const v = document.getElementById('sel-op').value;
   document.getElementById('plano-tabs').style.display = v ? 'flex' : 'none';
+  document.getElementById('btn-ren').style.display = v ? '' : 'none';
+  document.getElementById('btn-del').style.display = v ? '' : 'none';
   if (!v) { document.getElementById('conteudo').innerHTML = ''; return; }
   render();
+}
+async function novaOperadora() {
+  const nome = (prompt('Nome da nova operadora:') || '').trim();
+  if (!nome) return;
+  const obs = (prompt('Observação / variação (opcional — ex: Com Copay):') || '').trim();
+  try {
+    const r = await fetch('/operadora/salvar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({operadora:nome, obs:obs})});
+    if ((await r.json()).ok) { toast('Operadora cadastrada', 'ok'); setTimeout(()=>location.reload(), 600); }
+    else toast('Erro ao cadastrar', 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+async function renomearSel() {
+  const sel = document.getElementById('sel-op').value;
+  if (!sel) return;
+  const [op, obs] = sel.split('|');
+  const disp = op + (obs ? ' · ' + obs : '');
+  const novo = (prompt('Renomear "' + disp + '" para (nome):', op) || '').trim();
+  if (!novo) return;
+  const novoObs = (prompt('Observação / variação:', obs || '') || '').trim();
+  try {
+    const r = await fetch('/operadora/renomear', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({operadora:op, obs:obs, operadora_novo:novo, obs_novo:novoObs})});
+    const d = await r.json();
+    if (d.ok) { toast('Renomeado' + (d.propostas ? ' (' + d.propostas + ' proposta(s))' : ''), 'ok'); setTimeout(()=>location.reload(), 700); }
+    else toast(d.msg || 'Erro ao renomear', 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+async function excluirSel() {
+  const sel = document.getElementById('sel-op').value;
+  if (!sel) return;
+  const [op, obs] = sel.split('|');
+  const disp = op + (obs ? ' · ' + obs : '');
+  if (!confirm('Excluir a operadora "' + disp + '"? Remove preços e repasses dela.')) return;
+  try {
+    const r = await fetch('/operadora/excluir', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({operadora:op, obs:obs})});
+    const d = await r.json();
+    if (d.ok) { toast('Excluída', 'ok'); setTimeout(()=>location.reload(), 500); }
+    else toast(d.msg || 'Não foi possível excluir', 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
 }
 function trocarPlano(p) {
   planoAtual = p;

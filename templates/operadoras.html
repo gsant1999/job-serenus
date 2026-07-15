@@ -3,7 +3,7 @@
 
 {% block head %}
 <style>
-.op-row { display:grid; grid-template-columns:1.6fr .8fr .8fr .8fr auto; gap:12px; align-items:center; padding:13px 20px; border-bottom:1px solid var(--borda); }
+.op-row { display:grid; grid-template-columns:1.6fr .7fr .7fr .7fr auto; gap:12px; align-items:center; padding:13px 20px; border-bottom:1px solid var(--borda); }
 .op-row:last-child { border-bottom:none; }
 .op-head { font-size:10.5px; color:var(--cinza-2); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
 .op-nome { font-size:13.5px; color:#fff; font-weight:500; }
@@ -12,6 +12,9 @@
 .mens small { color:var(--cinza-2); font-weight:400; font-size:10px; }
 .mens.vazio { color:var(--cinza-2); font-weight:400; }
 .busca { width:100%; padding:11px 14px; margin-bottom:14px; }
+.op-acoes { display:flex; gap:4px; justify-content:flex-end; }
+.op-acoes .btn-ghost { padding:5px 9px; font-size:11.5px; }
+.op-acoes .del:hover { color:var(--erro); }
 </style>
 {% endblock %}
 
@@ -24,11 +27,11 @@
   <div><button class="btn" onclick="abrirNovo()">+ Nova operadora</button></div>
 </div>
 
-<div class="page" style="max-width:900px;">
+<div class="page" style="max-width:960px;">
 
   <div class="card" style="background:linear-gradient(135deg,rgba(31,216,164,.08),rgba(59,130,246,.06)); border-color:var(--borda-2); margin-bottom:18px;">
     <div style="padding:16px 22px; font-size:13px; color:var(--cinza); line-height:1.7;">
-      Quanto a corretora <strong style="color:#fff;">recebe da operadora</strong>, em número de mensalidades. Ex: <code style="color:var(--teal);">2.8</code> = 2,8 mensalidades (280%). Valores vindos da sua planilha (aba Affinity). Edite o que precisar.
+      Quanto a corretora <strong style="color:#fff;">recebe da operadora</strong>, em número de mensalidades. Ex: <code style="color:var(--teal);">2.8</code> = 2,8 mensalidades (280%). <strong style="color:#fff;">Renomear</strong> troca o nome aqui, no Repasse e em todas as propostas de uma vez.
     </div>
   </div>
 
@@ -49,7 +52,11 @@
         <div class="mens {{ 'vazio' if g.PME is none }}">{% if g.PME is not none %}{{ g.PME }}<small> mens</small>{% else %}—{% endif %}</div>
         <div class="mens {{ 'vazio' if g.PF is none }}">{% if g.PF is not none %}{{ g.PF }}<small> mens</small>{% else %}—{% endif %}</div>
         <div class="mens {{ 'vazio' if g.ADESAO is none }}">{% if g.ADESAO is not none %}{{ g.ADESAO }}<small> mens</small>{% else %}—{% endif %}</div>
-        <button class="btn-ghost" onclick='editar({{ g.operadora|tojson }}, {{ g.obs|tojson }}, {{ g.PME|tojson }}, {{ g.PF|tojson }}, {{ g.ADESAO|tojson }})'>Editar</button>
+        <div class="op-acoes">
+          <button class="btn-ghost" onclick='editar({{ g.operadora|tojson }}, {{ g.obs|tojson }}, {{ g.PME|tojson }}, {{ g.PF|tojson }}, {{ g.ADESAO|tojson }})'>Editar</button>
+          <button class="btn-ghost" onclick='renomear({{ g.operadora|tojson }}, {{ g.obs|tojson }})'>Renomear</button>
+          <button class="btn-ghost del" onclick='excluir({{ g.operadora|tojson }}, {{ g.obs|tojson }})'>Excluir</button>
+        </div>
       </div>
       {% endfor %}
     </div>
@@ -63,10 +70,11 @@
     <div class="campo" style="margin-bottom:12px;">
       <label>Operadora *</label>
       <input type="text" id="m-nome" placeholder="Ex: SulAmérica">
+      <div class="hint" id="m-nome-hint" style="display:none; color:var(--cinza-2); font-size:11px; margin-top:4px;">Pra trocar o nome, use o botão Renomear (mantém tudo sincronizado).</div>
     </div>
     <div class="campo" style="margin-bottom:12px;">
       <label>Observação / variação (opcional)</label>
-      <input type="text" id="m-obs" placeholder="Ex: Hapvida, Premium...">
+      <input type="text" id="m-obs" placeholder="Ex: Com Copay, Premium...">
     </div>
     <div class="form-row form-row-3" style="margin-bottom:18px;">
       <div class="campo"><label>PME (mens)</label><input type="number" step="0.1" id="m-pme" placeholder="—"></div>
@@ -79,28 +87,55 @@
     </div>
   </div>
 </div>
+
+<div class="modal-overlay" id="modal-ren">
+  <div class="modal" style="max-width:520px;">
+    <h3>Renomear operadora</h3>
+    <div class="sub" id="ren-atual" style="margin-bottom:14px;"></div>
+    <div class="campo" style="margin-bottom:12px;">
+      <label>Novo nome *</label>
+      <input type="text" id="ren-nome">
+    </div>
+    <div class="campo" style="margin-bottom:18px;">
+      <label>Observação / variação</label>
+      <input type="text" id="ren-obs" placeholder="(opcional)">
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn" style="flex:1;" onclick="salvarRenomear()">Renomear em tudo</button>
+      <button class="btn-outline" onclick="fecharRen()">Cancelar</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+let _editando = false;
 function filtrar() {
   const q = document.getElementById('busca').value.toLowerCase();
-  document.querySelectorAll('.item').forEach(el => {
-    el.style.display = el.dataset.nome.includes(q) ? '' : 'none';
-  });
+  document.querySelectorAll('.item').forEach(el => { el.style.display = el.dataset.nome.includes(q) ? '' : 'none'; });
 }
 function abrirNovo() {
+  _editando = false;
   document.getElementById('m-titulo').textContent = 'Nova operadora';
   ['m-nome','m-obs','m-pme','m-pf','m-ades'].forEach(i=>document.getElementById(i).value='');
+  document.getElementById('m-nome').readOnly = false;
+  document.getElementById('m-obs').readOnly = false;
+  document.getElementById('m-nome-hint').style.display = 'none';
   document.getElementById('modal').classList.add('open');
 }
 function editar(nome, obs, pme, pf, ades) {
-  document.getElementById('m-titulo').textContent = 'Editar ' + nome;
+  _editando = true;
+  document.getElementById('m-titulo').textContent = 'Editar preços — ' + nome + (obs ? ' · ' + obs : '');
   document.getElementById('m-nome').value = nome;
   document.getElementById('m-obs').value = obs || '';
   document.getElementById('m-pme').value = pme ?? '';
   document.getElementById('m-pf').value = pf ?? '';
   document.getElementById('m-ades').value = ades ?? '';
+  // Nome travado no editar: mudar nome aqui duplicaria. Use Renomear.
+  document.getElementById('m-nome').readOnly = true;
+  document.getElementById('m-obs').readOnly = true;
+  document.getElementById('m-nome-hint').style.display = 'block';
   document.getElementById('modal').classList.add('open');
 }
 function fechar() { document.getElementById('modal').classList.remove('open'); }
@@ -114,8 +149,41 @@ async function salvar() {
   };
   try {
     const r = await fetch('/operadora/salvar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    if ((await r.json()).ok) { toast('Salvo', 'ok'); setTimeout(()=>location.reload(), 600); }
+    if ((await r.json()).ok) { toast('Salvo', 'ok'); setTimeout(()=>location.reload(), 500); }
     else toast('Erro', 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+
+let _renOrig = {operadora:'', obs:''};
+function renomear(nome, obs) {
+  _renOrig = {operadora: nome, obs: obs || ''};
+  document.getElementById('ren-atual').textContent = 'Atual: ' + nome + (obs ? ' · ' + obs : '');
+  document.getElementById('ren-nome').value = nome;
+  document.getElementById('ren-obs').value = obs || '';
+  document.getElementById('modal-ren').classList.add('open');
+}
+function fecharRen() { document.getElementById('modal-ren').classList.remove('open'); }
+async function salvarRenomear() {
+  const nome = document.getElementById('ren-nome').value.trim();
+  if (!nome) { toast('Informe o novo nome', 'err'); return; }
+  const body = {operadora:_renOrig.operadora, obs:_renOrig.obs,
+                operadora_novo:nome, obs_novo:document.getElementById('ren-obs').value.trim()};
+  try {
+    const r = await fetch('/operadora/renomear', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if (d.ok) { toast('Renomeado' + (d.propostas ? ' (' + d.propostas + ' proposta(s) atualizadas)' : ''), 'ok'); setTimeout(()=>location.reload(), 700); }
+    else toast(d.msg || 'Erro ao renomear', 'err');
+  } catch(e) { toast('Erro de conexão', 'err'); }
+}
+
+async function excluir(nome, obs) {
+  const disp = nome + (obs ? ' · ' + obs : '');
+  if (!confirm('Excluir a operadora "' + disp + '"? Remove preços e repasses dela.')) return;
+  try {
+    const r = await fetch('/operadora/excluir', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({operadora:nome, obs:obs||''})});
+    const d = await r.json();
+    if (d.ok) { toast('Excluída', 'ok'); setTimeout(()=>location.reload(), 500); }
+    else toast(d.msg || 'Não foi possível excluir', 'err');
   } catch(e) { toast('Erro de conexão', 'err'); }
 }
 </script>
