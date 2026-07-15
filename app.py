@@ -12173,12 +12173,32 @@ def cotacao():
 def cotacao_tabelas():
     """Lista as tabelas de preço cadastradas (admin)."""
     conn = db()
-    tabelas = conn.execute("""
+    rows = conn.execute("""
         SELECT t.*, (SELECT COUNT(*) FROM cotacao_preco p WHERE p.tabela_id=t.id AND p.preco>0) AS precos_ok
         FROM cotacao_tabela t ORDER BY t.operadora, t.plano
     """).fetchall()
     close_db(conn)
-    return render_template('cotacao_tabelas.html', tabelas=tabelas)
+    # Selo de frescor: há quantos dias o preço foi atualizado do PDC. verde <=7,
+    # amarelo 8-21, vermelho >21 ou sem data. Cotar com preço velho é o risco da
+    # opção C — a tela avisa antes.
+    hoje = datetime.now(TZ_SP).date()
+    tabelas, n_velhas = [], 0
+    for r in rows:
+        t = dict(r)
+        dt = _parse_dt_seguro(t.get('atualizado_em'))
+        if dt is not None:
+            # Diferença por DATA (não datetime) — evita off-by-one por segundos e
+            # o "-1 dia" que dava por fuso ao comparar timestamp recém-gravado.
+            dias = max(0, (hoje - dt.date()).days)
+            t['dias_atualizado'] = dias
+            t['frescor'] = 'fresca' if dias <= 7 else ('ok' if dias <= 21 else 'velha')
+        else:
+            t['dias_atualizado'] = None
+            t['frescor'] = 'sem_data'
+        if t['frescor'] in ('velha', 'sem_data'):
+            n_velhas += 1
+        tabelas.append(t)
+    return render_template('cotacao_tabelas.html', tabelas=tabelas, n_velhas=n_velhas)
 
 
 @app.route('/cotacao/tabelas/nova', methods=['GET', 'POST'])

@@ -34,10 +34,15 @@
 <input type="file" id="pdc-json" accept=".json,application/json" style="display:none" onchange="importarPdcJson(this)">
 <div id="pdc-status" style="display:none; max-width:1100px; margin:0 0 14px; font-size:13px; color:var(--cinza); background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;"></div>
 
+{% if n_velhas %}
+<div style="max-width:1100px; margin:0 0 14px; font-size:13px; background:rgba(250,204,21,.1); border:1px solid rgba(250,204,21,.3); border-radius:10px; padding:12px 14px; color:var(--amarelo);">
+  <b>{{ n_velhas }} tabela(s) com preço velho</b> (mais de 21 dias sem atualizar do Painel). Rode a atualização antes de cotar com elas.
+</div>
+{% endif %}
 {% if tabelas %}
 <table class="cot">
   <thead>
-    <tr><th>Operadora</th><th>Plano</th><th>Modalidade</th><th>Acomodação</th><th>Copart.</th><th>Abrangência</th><th>Vigência</th><th>Faixas</th><th></th></tr>
+    <tr><th>Operadora</th><th>Plano</th><th>Modalidade</th><th>Acomodação</th><th>Copart.</th><th>Cidade</th><th>Atualizado</th><th>Faixas</th><th></th></tr>
   </thead>
   <tbody>
     {% for t in tabelas %}
@@ -47,8 +52,13 @@
       <td><span class="tag">{{ t.modalidade }}</span></td>
       <td>{{ t.acomodacao }}</td>
       <td>{{ t.coparticipacao }}</td>
-      <td>{{ t.abrangencia }}</td>
-      <td>{{ t.vigencia }}</td>
+      <td>{{ t.cidade or t.abrangencia or '—' }}</td>
+      <td>
+        {% if t.frescor == 'fresca' %}<span class="tag tag-ok">há {{ t.dias_atualizado }}d</span>
+        {% elif t.frescor == 'ok' %}<span class="tag" style="background:rgba(250,204,21,.14); color:var(--amarelo);">há {{ t.dias_atualizado }}d</span>
+        {% elif t.frescor == 'velha' %}<span class="tag" style="background:rgba(244,63,94,.14); color:var(--erro);">há {{ t.dias_atualizado }}d</span>
+        {% else %}<span class="tag tag-inc">sem data</span>{% endif %}
+      </td>
       <td>
         {% if t.precos_ok >= 10 %}<span class="tag tag-ok">{{ t.precos_ok }}/10</span>
         {% else %}<span class="tag tag-inc">{{ t.precos_ok }}/10</span>{% endif %}
