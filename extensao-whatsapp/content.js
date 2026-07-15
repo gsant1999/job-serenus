@@ -2117,7 +2117,65 @@
       if (!document.getElementById('job-trilho')) criarTrilho();
     });
     obs.observe(document.body, { childList: true, subtree: false });
+    verificarVersaoExtensao();
   });
+
+  // ── Aviso de versão nova ──────────────────────────────────────────────────
+  // Pergunta ao JOB qual é a versão mais nova da extensão. Se a que está rodando
+  // aqui estiver atrás, mostra um balão fixo com o passo a passo pra atualizar.
+  // Quem instalou pela Chrome Web Store atualiza sozinho (o Chrome faz em algumas
+  // horas) — o balão só ajuda a apressar (fechar/reabrir o WhatsApp). Fica pendurado
+  // até a versão bater; some sozinho quando o consultor já atualizou.
+  function _cmpVersao(a, b) {
+    const pa = String(a || '').split('.').map((n) => parseInt(n, 10) || 0);
+    const pb = String(b || '').split('.').map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const d = (pa[i] || 0) - (pb[i] || 0);
+      if (d !== 0) return d < 0 ? -1 : 1;
+    }
+    return 0;
+  }
+
+  async function verificarVersaoExtensao() {
+    let minha = '';
+    try { minha = chrome.runtime.getManifest().version; } catch (e) { return; }
+    let nova = '';
+    try {
+      const r = await fetch(_SITE_BASE_URL_EXT + '/api/whatsapp/versao', { cache: 'no-store' });
+      const j = await r.json();
+      nova = (j && j.versao) || '';
+    } catch (e) { return; } // sem internet/JOB fora do ar: não incomoda
+    if (!nova || _cmpVersao(minha, nova) >= 0) {
+      const b = document.getElementById('job-aviso-versao');
+      if (b) b.remove();
+      return; // já está na mais nova (ou mais nova ainda, em dev)
+    }
+    mostrarAvisoVersao(minha, nova);
+  }
+
+  function mostrarAvisoVersao(minha, nova) {
+    if (document.getElementById('job-aviso-versao')) return;
+    const box = document.createElement('div');
+    box.id = 'job-aviso-versao';
+    box.innerHTML =
+      '<div class="job-aviso-versao-topo">' +
+        '<b>Atualização da extensão JOB</b>' +
+        '<button class="job-aviso-versao-x" title="Depois">×</button>' +
+      '</div>' +
+      '<div class="job-aviso-versao-corpo">' +
+        'Saiu a versão <b>' + nova + '</b> (você está na ' + minha + '). Para atualizar agora:' +
+        '<ol>' +
+          '<li>Feche <b>todas</b> as abas do WhatsApp Web.</li>' +
+          '<li>Abra o WhatsApp Web de novo.</li>' +
+        '</ol>' +
+        '<div class="job-aviso-versao-nota">O Chrome atualiza sozinho em algumas horas — esses passos só apressam.</div>' +
+      '</div>';
+    document.body.appendChild(box);
+    box.querySelector('.job-aviso-versao-x').addEventListener('click', () => box.remove());
+    // Se a aba ficar aberta muito tempo, re-checa de hora em hora (o Chrome pode
+    // ter atualizado em segundo plano — aí o balão some no próximo criarTrilho).
+    setTimeout(verificarVersaoExtensao, 60 * 60 * 1000);
+  }
 
   // ── Detecta troca de conversa (o WhatsApp Web é uma SPA — não navega, só
   //    troca o conteúdo — não existe evento nativo confiável pra "conversa

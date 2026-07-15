@@ -422,3 +422,20 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
   padding: 7px 14px; font-size: 12px; font-weight: 700; cursor: pointer; flex-shrink: 0; }
 .job-fp-cancelar:hover { background: #2a2a38; }
 .job-fp-cancelar.job-fp-fechar { background: #1fd8a4; color: #0a0a10; }
+
+/* Aviso de versão nova da extensão (balão fixo no canto) */
+#job-aviso-versao { position: fixed; bottom: 18px; right: 18px; width: 300px; z-index: 2147483200;
+  background: #14141c; color: #eef0f6; border: 1px solid #2a2a38; border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.45); font-family: -apple-system, "Segoe UI", sans-serif;
+  overflow: hidden; }
+#job-aviso-versao.job-painel-doc-esquerda, .job-esquerda #job-aviso-versao { right: auto; left: 18px; }
+.job-aviso-versao-topo { display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 14px; background: #1c2c22; border-bottom: 1px solid #234; }
+.job-aviso-versao-topo b { font-size: 13px; color: #1fd8a4; }
+.job-aviso-versao-x { background: none; border: none; color: #9aa1b5; font-size: 20px; line-height: 1;
+  cursor: pointer; padding: 0 2px; }
+.job-aviso-versao-x:hover { color: #eef0f6; }
+.job-aviso-versao-corpo { padding: 12px 14px 14px; font-size: 12.5px; line-height: 1.5; }
+.job-aviso-versao-corpo ol { margin: 8px 0 0; padding-left: 18px; }
+.job-aviso-versao-corpo li { margin: 4px 0; }
+.job-aviso-versao-nota { margin-top: 10px; font-size: 11px; color: #9aa1b5; }

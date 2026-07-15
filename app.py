@@ -10124,6 +10124,17 @@ def api_whatsapp_ping():
     return _wa_cors(jsonify({"ok": True, "sistema": "JOB Serenus", "versao_api": 1}))
 
 
+@app.route('/api/whatsapp/versao', methods=['GET', 'OPTIONS'])
+def api_whatsapp_versao():
+    """Diz qual é a versão mais nova da extensão (a que está no deploy). A própria
+    extensão compara com a sua (chrome.runtime.getManifest().version) e, se estiver
+    atrasada, mostra o aviso de atualizar. Público (sem chave) de propósito: é só um
+    número de versão e o aviso precisa aparecer mesmo antes de configurar a chave."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    return _wa_cors(jsonify({"ok": True, "versao": _extensao_versao()}))
+
+
 @app.route('/extensao/privacidade')
 def extensao_privacidade():
     """Política de privacidade da extensão (página pública, sem login) — exigida
