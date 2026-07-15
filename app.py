@@ -2103,6 +2103,25 @@ def _split_operadora(operadora):
     return op, ''
 
 
+def _num_brl(v):
+    """Valor monetário digitado -> float, aceitando BR ('1.194,63') E ponto decimal
+    ('1194.63'). Regra: SE tem vírgula, o ponto é milhar e a vírgula é o decimal;
+    SEM vírgula, o ponto (se houver) é o decimal — NÃO apagar, senão '1194.63' vira
+    119463 (bug do milhar no editar/criar proposta). Já vem número? passa direto."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v if v is not None else '').strip()
+    if not s:
+        return 0.0
+    s = s.replace('R$', '').replace(' ', '').replace(' ', '')
+    if ',' in s:
+        s = s.replace('.', '').replace(',', '.')
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def _op_compact(s):
     """Nome de operadora reduzido a só letras/números, sem acento e minúsculo:
     'Med Senior SP/RJ' -> 'medseniorsprj', 'MedSênior' -> 'medsenior'. Serve pra
@@ -4966,7 +4985,7 @@ def salvar_proposta():
             if chave in d:
                 extras[c['nome_tecnico']] = d.get(chave)
 
-        valor = float((d.get('valor','0') or '0').replace('.','').replace(',','.'))
+        valor = _num_brl(d.get('valor','0'))
         operadora = d.get('adm_operadora','')
         modalidade = d.get('modalidade','')
         regime_base = session.get('regime_base','sem_lead_sem_fixo')
@@ -5882,10 +5901,12 @@ def proposta_editar(pid):
     # Campos numéricos para conversão
     NUMERICOS = {'valor','total_vidas','dia_vencimento','num_parcelas','comissao_total_corretora','comissao_consultor','comissao_corretora_liquida'}
     
+    MONETARIOS = ('valor','comissao_total_corretora','comissao_consultor','comissao_corretora_liquida')
     def conv(campo, v):
         if campo in NUMERICOS:
-            s = str(v or '').replace('.','').replace(',','.') if campo in ('valor','comissao_total_corretora','comissao_consultor','comissao_corretora_liquida') else str(v or '')
-            try: return float(s) if campo in ('valor','comissao_total_corretora','comissao_consultor','comissao_corretora_liquida') else int(s or 0)
+            if campo in MONETARIOS:
+                return _num_brl(v)  # aceita '1.194,63' e '1194.63' sem virar 119463
+            try: return int(str(v or '').strip() or 0)
             except: return 0
         return v
     
@@ -5932,7 +5953,7 @@ def proposta_editar(pid):
     # Se valor foi alterado, recalcular e regenerar parcelas se necessário
     if 'valor' in d:
         valor_antes = float(p['valor'] or 0)
-        novo_valor = float(str(d['valor'] or 0).replace('.','').replace(',','.'))
+        novo_valor = _num_brl(d['valor'])
         # Só recalcula se o valor MUDOU de fato — 'valor' vem sempre no payload
         # (o modal envia todos os campos), então checar só a presença disparava
         # o recálculo em toda edição, mesmo de campos sem relação com valor.
@@ -6069,9 +6090,11 @@ def resolver_solicitacao(sid):
                 continue
             novo = info.get('valor') if isinstance(info, dict) else info
             if campo in NUMERICOS:
-                s_val = str(novo or '').replace('.','').replace(',','.') if campo == 'valor' else str(novo or '')
-                try: novo = float(s_val) if campo == 'valor' else int(s_val or 0)
-                except: novo = 0
+                if campo == 'valor':
+                    novo = _num_brl(novo)  # '1.194,63' e '1194.63' sem virar 119463
+                else:
+                    try: novo = int(str(novo or '').strip() or 0)
+                    except: novo = 0
             antes = p[campo] if campo in p.keys() else ''
             conn.execute(f"UPDATE propostas SET {campo}=? WHERE id=?", (novo, pid))
             conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,campo,valor_antes,valor_depois,criado_em)
