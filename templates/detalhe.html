@@ -189,6 +189,11 @@
             <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--verde);margin-top:5px;">{{ (p.comissao_corretora_liquida or 0)|moeda  }}</div>
           </div>
         </div>
+        {% if (p.comissao_consultor or 0) > 0 and (p.comissao_total_corretora or 0) == 0 %}
+        <div style="margin-top:12px;background:rgba(244,63,94,.1);border:1px solid rgba(244,63,124,.35);border-radius:8px;padding:10px 14px;font-size:12.5px;color:var(--rosa);line-height:1.5;">
+          <b>Recebimento não cadastrado.</b> A operadora <b>{{ p.adm_operadora }}</b> ({{ p.tipo_pessoa or p.modalidade }}) não tem o valor de <b>recebimento</b> (quanto a operadora paga a corretora) cadastrado — por isso o bruto ficou zero e o líquido negativo. Cadastre em <a href="/operadoras" style="color:var(--rosa);text-decoration:underline;">Operadoras</a> e clique em <b>Recalcular comissões</b> na tela de Propostas.
+        </div>
+        {% endif %}
       </div>
       {% else %}
       <div class="card" style="margin-bottom:16px;">
