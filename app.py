@@ -6522,12 +6522,85 @@ def operadora_salvar():
 @login_required
 @admin_required
 def operadora_excluir():
+    """Exclui uma operadora (identidade operadora+obs) do registro e das tabelas
+    de preço. BLOQUEIA se houver proposta usando esse nome — senão a proposta
+    ficaria órfã (comissão zerada ao recalcular). O admin renomeia/reatribui
+    antes. Nunca apaga proposta."""
     d = request.json or {}
+    op = (d.get('operadora') or '').strip()
+    obs = (d.get('obs') or '').strip()
+    if not op:
+        return jsonify({"ok": False, "msg": "Operadora não informada"}), 400
+    display = _op_display(op, obs)
     conn = db()
-    conn.execute("DELETE FROM recebimento WHERE operadora=? AND obs=?", (d.get('operadora'), d.get('obs','')))
-    conn.execute("DELETE FROM repasse_corretor WHERE operadora=? AND obs=?", (d.get('operadora'), d.get('obs','')))
+    n_props = conn.execute("SELECT COUNT(*) c FROM propostas WHERE adm_operadora=? AND status<>'Excluída'",
+                           (display,)).fetchone()['c']
+    if n_props > 0:
+        close_db(conn)
+        return jsonify({"ok": False, "bloqueado": True, "propostas": n_props,
+                        "msg": f"{n_props} proposta(s) usam \"{display}\". Renomeie a operadora "
+                               "(o nome troca em todas de uma vez) ou reatribua essas propostas antes de excluir."}), 409
+    conn.execute("DELETE FROM recebimento WHERE operadora=? AND obs=?", (op, obs))
+    conn.execute("DELETE FROM repasse_corretor WHERE operadora=? AND obs=?", (op, obs))
+    conn.execute("DELETE FROM operadoras WHERE operadora=?", (display,))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+
+@app.route('/operadora/renomear', methods=['POST'])
+@login_required
+@admin_required
+def operadora_renomear():
+    """Renomeia uma operadora e PROPAGA em cascata pra recebimento,
+    repasse_corretor, o registro de nomes E propostas.adm_operadora — tudo numa
+    transação. É o que garante o sincronismo perfeito: trocar o nome num lugar
+    troca em todos, e a comissão continua batendo. NÃO permite renomear pra um
+    nome que já existe (evita fusão ambígua de preços / perda de dado); nesse
+    caso o admin ajusta manual. Nunca apaga proposta — só reescreve o nome."""
+    d = request.json or {}
+    op_old = (d.get('operadora') or '').strip()
+    obs_old = (d.get('obs') or '').strip()
+    op_new = (d.get('operadora_novo') or '').strip()
+    obs_new = (d.get('obs_novo') or '').strip()
+    if not op_old or not op_new:
+        return jsonify({"ok": False, "msg": "Informe o nome atual e o novo"}), 400
+    disp_old = _op_display(op_old, obs_old)
+    disp_new = _op_display(op_new, obs_new)
+    if disp_old == disp_new:
+        return jsonify({"ok": True, "propostas": 0})
+    conn = db()
+    # alvo já existe? (em qualquer uma das fontes) -> bloqueia a fusão
+    existe = (conn.execute("SELECT 1 FROM recebimento WHERE operadora=? AND obs=? LIMIT 1", (op_new, obs_new)).fetchone()
+              or conn.execute("SELECT 1 FROM repasse_corretor WHERE operadora=? AND obs=? LIMIT 1", (op_new, obs_new)).fetchone()
+              or conn.execute("SELECT 1 FROM operadoras WHERE operadora=? LIMIT 1", (disp_new,)).fetchone())
+    if existe:
+        close_db(conn)
+        return jsonify({"ok": False, "existe": True,
+                        "msg": f"Já existe uma operadora \"{disp_new}\". Escolha outro nome ou ajuste os preços "
+                               "dela manualmente (não faço fusão automática pra não misturar valores)."}), 409
+    try:
+        conn.execute("UPDATE recebimento SET operadora=?, obs=? WHERE operadora=? AND obs=?",
+                     (op_new, obs_new, op_old, obs_old))
+        conn.execute("UPDATE repasse_corretor SET operadora=?, obs=? WHERE operadora=? AND obs=?",
+                     (op_new, obs_new, op_old, obs_old))
+        conn.execute("UPDATE operadoras SET operadora=? WHERE operadora=?", (disp_new, disp_old))
+        # registro pode não existir ainda pro nome antigo — garante o novo
+        if DB_MODE == 'postgres':
+            conn.execute("INSERT INTO operadoras (operadora) VALUES (%s) ON CONFLICT (operadora) DO NOTHING", (disp_new,))
+        else:
+            conn.execute("INSERT OR IGNORE INTO operadoras (operadora) VALUES (?)", (disp_new,))
+        cur = conn.execute("UPDATE propostas SET adm_operadora=? WHERE adm_operadora=?", (disp_new, disp_old))
+        n_props = cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else \
+            conn.execute("SELECT COUNT(*) c FROM propostas WHERE adm_operadora=?", (disp_new,)).fetchone()['c']
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        close_db(conn)
+        app.logger.warning(f"[OPERADORA] renomear falhou: {e}")
+        return jsonify({"ok": False, "msg": "Falha ao renomear — nada foi alterado."}), 500
+    close_db(conn)
+    return jsonify({"ok": True, "propostas": n_props})
 
 # ─── REPASSES AO CORRETOR (mensalidades por operadora × plano × modelo × nível) ────
 @app.route('/repasses')
