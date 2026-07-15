@@ -1,6 +1,6 @@
 # HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
 import os, sqlite3, json, hashlib, secrets, re, threading, time, mimetypes
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response, g
 from datetime import datetime, timedelta, date
 from functools import wraps
 from dateutil.relativedelta import relativedelta
@@ -1857,6 +1857,9 @@ def init_db():
         # Frescor: quando o preço foi extraído/atualizado do PDC pela última vez
         # (selo de frescor da opção C — a tela avisa o que está velho).
         ("cotacao_tabela", "atualizado_em", "TIMESTAMP"),
+        # Módulos liberados por consultor (JSON de chaves). NULL = todos (default,
+        # não muda nada). Admin ignora — vê tudo sempre.
+        ("usuarios", "modulos", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -2453,6 +2456,86 @@ def admin_required(f):
         if session.get('perfil') != 'admin': return redirect(url_for('dashboard'))
         return f(*a, **kw)
     return w
+
+
+# ─── MÓDULOS POR CONSULTOR (acesso configurável) ─────────────────────────────
+# O admin escolhe, em Usuários, quais módulos cada consultor acessa. Sem config
+# (modulos NULL) = TODOS liberados (comportamento atual, não quebra nada). Admin
+# vê tudo sempre. Só valem os módulos consultor-facing; a área de Administração
+# continua exclusiva do admin (via @admin_required).
+MODULOS = [
+    {'key': 'nova_proposta', 'label': 'Nova Proposta',        'prefixos': ['/nova-proposta', '/salvar-proposta']},
+    {'key': 'propostas',     'label': 'Propostas',            'prefixos': ['/propostas', '/proposta/']},
+    {'key': 'fluxo',         'label': 'Fluxo de Caixa',       'prefixos': ['/fluxo-caixa']},
+    {'key': 'crm',           'label': 'CRM',                  'prefixos': ['/crm']},
+    {'key': 'cotacao',       'label': 'Cotação',              'prefixos': ['/cotacao']},
+    {'key': 'material',      'label': 'Material de Apoio',    'prefixos': ['/material-apoio']},
+    {'key': 'manual',        'label': 'Manual',               'prefixos': ['/manual']},
+    {'key': 'bi',            'label': 'Análises (BI)',        'prefixos': ['/bi']},
+    {'key': 'whatsapp',      'label': 'Score Lead WhatsApp',  'prefixos': ['/whatsapp-analises']},
+]
+_MODULOS_KEYS = [m['key'] for m in MODULOS]
+
+
+def _modulos_permitidos_atual():
+    """Set de módulos que o usuário logado pode acessar, ou None = sem restrição
+    (admin, ou consultor sem config = tudo). Cacheado no g por request."""
+    if 'user_id' not in session:
+        return None
+    if session.get('perfil') == 'admin':
+        return None
+    if 'modulos_cache' in g.__dict__:
+        return g.modulos_cache
+    permitidos = None
+    try:
+        conn = db()
+        row = conn.execute("SELECT modulos FROM usuarios WHERE id=?", (session['user_id'],)).fetchone()
+        close_db(conn)
+        raw = (row['modulos'] if row and 'modulos' in row.keys() else None)
+        if raw:
+            lista = json.loads(raw)
+            if isinstance(lista, list):
+                permitidos = set(str(x) for x in lista)
+    except Exception:
+        permitidos = None
+    g.modulos_cache = permitidos
+    return permitidos
+
+
+def _modulo_do_path(path):
+    for m in MODULOS:
+        for pre in m['prefixos']:
+            if path == pre or path == pre.rstrip('/') or path.startswith(pre):
+                return m['key']
+    return None
+
+
+@app.before_request
+def _guard_modulos():
+    """Bloqueia consultor de acessar por URL um módulo que ele não tem — enforcement
+    de verdade, não só esconder no menu. Admin e quem não tem restrição passam.
+    Nunca toca em rota que não seja de um módulo (login, /api, /webhook, config...)."""
+    if 'user_id' not in session or session.get('perfil') == 'admin':
+        return
+    permitidos = _modulos_permitidos_atual()
+    if permitidos is None:
+        return
+    mod = _modulo_do_path(request.path)
+    if mod is not None and mod not in permitidos:
+        if request.path.startswith('/api/') or request.accept_mimetypes.best == 'application/json':
+            return jsonify({"ok": False, "erro": "Sem acesso a este módulo"}), 403
+        flash('Você não tem acesso a este módulo. Fale com o administrador.')
+        return redirect(url_for('dashboard'))
+
+
+@app.context_processor
+def _inject_pode_modulo():
+    """Deixa pode_modulo('cotacao') disponível em todo template (pra esconder os
+    itens do menu que o consultor não acessa)."""
+    permitidos = _modulos_permitidos_atual()
+    def pode_modulo(chave):
+        return permitidos is None or chave in permitidos
+    return {'pode_modulo': pode_modulo}
 
 # ─── INTEGRAÇÃO ASAAS (pagamentos PIX para consultores) ──────────────────────────
 import requests as _requests
@@ -6210,7 +6293,8 @@ def usuarios():
         d['senha_hash'] = bool(d.get('senha_hash'))
         d.pop('reset_token', None)
         usuarios_l.append(d)
-    return render_template('usuarios.html', usuarios=usuarios_l, host=request.host_url.rstrip('/'))
+    return render_template('usuarios.html', usuarios=usuarios_l, host=request.host_url.rstrip('/'),
+                           modulos=MODULOS)
 
 @app.route('/usuario/novo', methods=['POST'])
 @login_required
@@ -6298,10 +6382,17 @@ def usuario_editar(uid):
         if ext in ('.png','.jpg','.jpeg','.webp'):
             foto_nome = f"perfil_{uid}_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}{ext}"
             fimg.save(os.path.join(UPLOAD_FOLDER, foto_nome))
-    conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=?,telefone=?,waspeed_token=? WHERE id=?""",
+    # Módulos liberados (checkboxes). "modulos_todos" marcado = sem restrição
+    # (grava NULL = tudo). Senão grava só os marcados. Só vale pra não-admin.
+    if d.get('modulos_todos') or d.get('perfil') == 'admin':
+        modulos_val = None
+    else:
+        marcados = [k for k in _MODULOS_KEYS if d.get('mod_' + k)]
+        modulos_val = json.dumps(marcados)
+    conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=?,telefone=?,waspeed_token=?,modulos=? WHERE id=?""",
         (d['nome'],d['email'].lower(),d['perfil'],
          (d['regime_base'] if d['perfil']=='consultor' else ''),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,
-         d.get('telefone','').strip(),d.get('waspeed_token','').strip() or None,uid))
+         d.get('telefone','').strip(),d.get('waspeed_token','').strip() or None,modulos_val,uid))
     conn.commit(); close_db(conn)
     return redirect(url_for('usuarios'))
 
