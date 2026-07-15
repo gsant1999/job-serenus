@@ -1854,6 +1854,9 @@ def init_db():
         # Cidade/região da tabela de preço (o PDC calcula por cidade — preço e
         # rede valem por cidade, não dá pra assumir "vale em qualquer lugar").
         ("cotacao_tabela", "cidade", "TEXT DEFAULT ''"),
+        # Frescor: quando o preço foi extraído/atualizado do PDC pela última vez
+        # (selo de frescor da opção C — a tela avisa o que está velho).
+        ("cotacao_tabela", "atualizado_em", "TIMESTAMP"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -12634,6 +12637,23 @@ def _norm_copart_pdc(txt):
     return 'Sem'
 
 
+def _validar_precos_faixa(precos_job):
+    """Trava de qualidade da opção C: só deixa gravar uma tabela CERTEIRA. Recebe
+    {faixa_job: preco} e devolve (ok, motivo). Rejeita extração incompleta/torta
+    pra não sobrescrever preço bom com lixo:
+    - todas as 10 faixas ANS presentes e com preço > 0;
+    - preço não-decrescente com a idade (faixa mais velha nunca custa menos que a
+      mais nova) — pega leitura embaralhada/coluna trocada."""
+    faltando = [fx for fx in FAIXAS_ETARIAS if not (precos_job.get(fx) or 0) > 0]
+    if faltando:
+        return False, f"faltam faixas com preço: {', '.join(faltando)}"
+    seq = [precos_job[fx] for fx in FAIXAS_ETARIAS]
+    for i in range(1, len(seq)):
+        if seq[i] < seq[i - 1] - 0.005:
+            return False, f"preço cai com a idade ({FAIXAS_ETARIAS[i-1]}={seq[i-1]:.2f} > {FAIXAS_ETARIAS[i]}={seq[i]:.2f})"
+    return True, ''
+
+
 @app.route('/cotacao/tabelas/importar-pdc', methods=['POST'])
 @login_required
 @admin_required
@@ -12658,7 +12678,9 @@ def cotacao_importar_pdc():
         tipo_cnpj_g = (dados.get('tipo_cnpj') or '').strip()
 
     conn = db()
-    cont = {'planos_novos': 0, 'planos_atualizados': 0, 'precos': 0, 'rede': 0, 'ignorados': 0}
+    agora = _agora_sp()
+    cont = {'planos_novos': 0, 'planos_atualizados': 0, 'precos': 0, 'rede': 0, 'ignorados': 0, 'rejeitados': 0}
+    rejeitos = []
     for p in planos:
         operadora = (p.get('operadora') or '').strip()
         plano = (p.get('plano') or '').strip()
@@ -12666,6 +12688,20 @@ def cotacao_importar_pdc():
         if not operadora or not plano or not precos:
             cont['ignorados'] += 1
             continue
+        # Monta o mapa de preços por faixa ANS e VALIDA antes de tocar no banco —
+        # extração torta/incompleta é rejeitada e NÃO sobrescreve o preço bom que
+        # já estava lá (trava de "certeiro").
+        precos_job = {}
+        for faixa_txt, valor in precos.items():
+            fx = _faixa_pdc_para_job(faixa_txt)
+            if fx:
+                precos_job[fx] = _parse_preco_br(str(valor))
+        ok_val, motivo = _validar_precos_faixa(precos_job)
+        if not ok_val:
+            cont['rejeitados'] += 1
+            rejeitos.append(f"{operadora} · {plano}: {motivo}")
+            continue
+
         cidade = (p.get('cidade') or cidade_g or '').strip()
         modalidade = _norm_modalidade_pdc(p.get('modalidade') or modalidade_g)
         acomodacao = _norm_acomodacao_pdc(p.get('acomodacao'))
@@ -12680,24 +12716,20 @@ def cotacao_importar_pdc():
             tid = existente['id']
             conn.execute("DELETE FROM cotacao_preco WHERE tabela_id=?", (tid,))
             conn.execute("DELETE FROM cotacao_rede WHERE tabela_id=?", (tid,))
-            conn.execute("UPDATE cotacao_tabela SET ativo=1, abrangencia=? WHERE id=?",
-                         (cidade, tid))
+            conn.execute("UPDATE cotacao_tabela SET ativo=1, abrangencia=?, atualizado_em=? WHERE id=?",
+                         (cidade, agora, tid))
             cont['planos_atualizados'] += 1
         else:
             conn.execute("""INSERT INTO cotacao_tabela
-                (operadora, plano, modalidade, acomodacao, coparticipacao, tipo_cnpj, cidade, abrangencia, ativo)
-                VALUES (?,?,?,?,?,?,?,?,1)""",
-                (operadora, plano, modalidade, acomodacao, copart, tipo_cnpj, cidade, cidade))
+                (operadora, plano, modalidade, acomodacao, coparticipacao, tipo_cnpj, cidade, abrangencia, ativo, atualizado_em)
+                VALUES (?,?,?,?,?,?,?,?,1,?)""",
+                (operadora, plano, modalidade, acomodacao, copart, tipo_cnpj, cidade, cidade, agora))
             tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                    else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             cont['planos_novos'] += 1
 
-        for faixa_txt, valor in precos.items():
-            fx = _faixa_pdc_para_job(faixa_txt)
-            if not fx:
-                continue
-            conn.execute("INSERT INTO cotacao_preco (tabela_id, faixa, preco) VALUES (?,?,?)",
-                         (tid, fx, _parse_preco_br(str(valor))))
+        for fx, preco in precos_job.items():
+            conn.execute("INSERT INTO cotacao_preco (tabela_id, faixa, preco) VALUES (?,?,?)", (tid, fx, preco))
             cont['precos'] += 1
 
         for cred in (p.get('rede') or []):
@@ -12709,7 +12741,7 @@ def cotacao_importar_pdc():
             cont['rede'] += 1
         conn.commit()
     close_db(conn)
-    return jsonify({"ok": True, "contagem": cont})
+    return jsonify({"ok": True, "contagem": cont, "rejeitos": rejeitos[:20]})
 
 
 # ── Logos das operadoras ──
