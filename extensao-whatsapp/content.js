@@ -839,22 +839,24 @@
   function renderFormularioNovo() {
     let midiaChip = '';
     if (_midiaAnexada) {
-      const rot = _midiaAnexada.tipo === 'audio'
-        ? _svgIco('audio', 12) + ' Áudio pronto' + (_midiaAnexada.dur ? ' (' + fmtDuracao(_midiaAnexada.dur) + ')' : '')
-        : _svgIco('imagem', 12) + ' Imagem pronta';
+      const rotTipo = { audio: 'Áudio pronto', imagem: 'Imagem pronta', video: 'Vídeo pronto', documento: 'PDF pronto' };
+      const icoTipo = { audio: 'audio', imagem: 'imagem', video: 'imagem', documento: 'documento' };
+      const rot = _svgIco(icoTipo[_midiaAnexada.tipo] || 'clipe', 12) + ' ' +
+        (rotTipo[_midiaAnexada.tipo] || 'Arquivo pronto') +
+        (_midiaAnexada.tipo === 'audio' && _midiaAnexada.dur ? ' (' + fmtDuracao(_midiaAnexada.dur) + ')' : '');
       midiaChip = '<div class="job-midia-chip">' + rot +
         '<button class="job-midia-x" id="job-midia-descartar" title="Remover">×</button></div>';
     }
     return '<div class="job-novo-modelo">' +
       '<div class="job-sec" style="margin-top:0">Novo modelo</div>' +
       '<input class="job-inp" id="job-novo-nome" placeholder="Nome (ex: Boas-vindas)">' +
-      '<input class="job-inp" id="job-novo-categoria" list="job-cats" placeholder="Categoria (opcional — ex: Notredame)">' +
+      '<input class="job-inp" id="job-novo-categoria" list="job-cats" placeholder="Pasta (opcional — ex: Amil, Carência, Rede)">' +
       '<datalist id="job-cats">' + categoriasExistentes().map((c) => '<option value="' + esc(c) + '">').join('') + '</datalist>' +
       '<textarea class="job-inp job-inp-txt" id="job-novo-texto" placeholder="Texto da mensagem…"></textarea>' +
       '<div class="job-novo-acoes">' +
         '<button class="job-mini-btn" id="job-gravar-btn">' + _svgIco('audio', 12) + ' Gravar áudio</button>' +
         '<button class="job-mini-btn" id="job-anexar-btn">' + _svgIco('clipe', 12) + ' Anexar arquivo</button>' +
-        '<input type="file" id="job-arquivo-input" accept="audio/*,image/*" style="display:none">' +
+        '<input type="file" id="job-arquivo-input" accept="audio/*,image/*,video/*,application/pdf" style="display:none">' +
       '</div>' +
       '<div id="job-grav-status" class="job-grav-status"></div>' +
       midiaChip +
@@ -873,8 +875,8 @@
   }
 
   function tipoIcone(m) {
-    const t = m.midia_tipo === 'audio' ? 'audio' : (m.midia_tipo === 'imagem' ? 'imagem' : 'texto');
-    return '<span class="job-tico tico-' + t + '">' + _svgIco(t, 13) + '</span>';
+    const ico = { audio: 'audio', imagem: 'imagem', video: 'imagem', documento: 'documento' }[m.midia_tipo] || 'texto';
+    return '<span class="job-tico tico-' + ico + '">' + _svgIco(ico, 13) + '</span>';
   }
 
   function modeloPassaFiltro(m) {
@@ -898,6 +900,10 @@
       midia = '<audio class="job-modelo-audio" controls preload="none" src="' + esc(m.midia_url) + '"></audio>';
     } else if (m.midia_tipo === 'imagem' && m.midia_url) {
       midia = '<img class="job-modelo-img" src="' + esc(m.midia_url) + '" alt="">';
+    } else if (m.midia_tipo === 'video' && m.midia_url) {
+      midia = '<video class="job-modelo-img" controls preload="none" src="' + esc(m.midia_url) + '"></video>';
+    } else if (m.midia_tipo === 'documento' && m.midia_url) {
+      midia = '<a class="job-modelo-doc" href="' + esc(m.midia_url) + '" target="_blank" rel="noopener">' + _svgIco('documento', 12) + ' Abrir PDF</a>';
     }
     const estrela = '<button class="job-modelo-fav ' + (m.favorito ? 'ativo' : '') +
       '" data-modelo-id="' + m.id + '" title="Favoritar">★</button>';
@@ -919,6 +925,8 @@
   function rotuloEnviar(m) {
     if (m.midia_tipo === 'audio') return 'Enviar áudio';
     if (m.midia_tipo === 'imagem') return 'Enviar imagem';
+    if (m.midia_tipo === 'video') return 'Enviar vídeo';
+    if (m.midia_tipo === 'documento') return 'Enviar PDF';
     return 'Enviar texto';
   }
 
@@ -948,6 +956,27 @@
     });
     return html;
   }
+  // Sub-pastas manuais dentro do consultor (categoria — ex: Amil, Carência, Rede).
+  // "Geral" pros sem sub-pasta. Dentro de cada uma, agrupa por tipo.
+  function _blocoPorCategoria(itens) {
+    const porCat = new Map();
+    itens.forEach((m) => {
+      const cat = ((m.categoria || '').trim()) || 'Geral';
+      if (!porCat.has(cat)) porCat.set(cat, []);
+      porCat.get(cat).push(m);
+    });
+    const cats = [...porCat.keys()].sort((a, b) =>
+      a === 'Geral' ? 1 : (b === 'Geral' ? -1 : a.localeCompare(b)));
+    // Uma sub-pasta só (Geral) = não precisa da caixa, mostra direto por tipo.
+    if (cats.length === 1) return _blocoPorTipo(porCat.get(cats[0]));
+    let html = '';
+    cats.forEach((cat) => {
+      html += '<details class="job-subpasta" open><summary class="job-subpasta-nome">' +
+        esc(cat) + ' <span>(' + porCat.get(cat).length + ')</span></summary>' +
+        '<div class="job-subpasta-conteudo">' + _blocoPorTipo(porCat.get(cat)) + '</div></details>';
+    });
+    return html;
+  }
   function renderListaModelos(modelos) {
     const filtrados = modelos.filter(modeloPassaFiltro);
     if (!filtrados.length) {
@@ -969,11 +998,11 @@
       porDono.forEach((itens, dono) => {
         out += '<details class="job-pasta" open><summary class="job-pasta-nome">' +
           esc(dono) + ' <span>(' + itens.length + ')</span></summary>' +
-          '<div class="job-pasta-conteudo">' + _blocoPorTipo(itens) + '</div></details>';
+          '<div class="job-pasta-conteudo">' + _blocoPorCategoria(itens) + '</div></details>';
       });
       return out;
     }
-    return _blocoPorTipo(filtrados);
+    return _blocoPorCategoria(filtrados);
   }
 
   function renderModelos(modelos) {
@@ -1102,8 +1131,14 @@
   }
 
   function anexarArquivo(f) {
-    const tipo = f.type.startsWith('image/') ? 'imagem' : 'audio';
-    _midiaAnexada = { blob: f, nome: f.name, mime: f.type || 'application/octet-stream', tipo, dur: null };
+    const mime = f.type || '';
+    const nome = (f.name || '').toLowerCase();
+    let tipo = 'audio';
+    if (mime.startsWith('image/')) tipo = 'imagem';
+    else if (mime.startsWith('video/') || /\.(mp4|mov|m4v|3gp)$/.test(nome)) tipo = 'video';
+    else if (mime === 'application/pdf' || nome.endsWith('.pdf')) tipo = 'documento';
+    else if (mime.startsWith('audio/')) tipo = 'audio';
+    _midiaAnexada = { blob: f, nome: f.name, mime: mime || 'application/octet-stream', tipo, dur: null };
     redesenharMensagens();
   }
 

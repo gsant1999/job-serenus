@@ -10695,11 +10695,8 @@ def api_whatsapp_extensao_modelo_novo():
     f = request.files.get('arquivo_midia')
     if f and f.filename:
         ext = os.path.splitext(f.filename)[1].lower()
-        if ext in _MODELO_WPP_EXTS_IMG:
-            midia_tipo = 'imagem'
-        elif ext in _MODELO_WPP_EXTS_AUDIO or ext in ('.webm',):
-            midia_tipo = 'audio'
-        else:
+        midia_tipo = _midia_tipo_por_ext(ext)
+        if not midia_tipo:
             return _wa_cors(jsonify({"ok": False, "erro": f"Formato não aceito: {ext}"})), 400
         f.stream.seek(0, os.SEEK_END)
         tamanho = f.stream.tell()
@@ -17073,10 +17070,13 @@ def crm_modelos():
         'audio': sum(1 for m in wpp if m.get('midia_tipo') == 'audio'),
         'imagem': sum(1 for m in wpp if m.get('midia_tipo') == 'imagem'),
         'documento': sum(1 for m in wpp if m.get('midia_tipo') == 'documento'),
+        'video': sum(1 for m in wpp if m.get('midia_tipo') == 'video'),
+        # nomes de sub-pasta (categoria) já usados — sugestão no datalist
+        'categorias': sorted({(m.get('categoria') or '').strip() for m in wpp if (m.get('categoria') or '').strip()}),
     }
-    # PASTA = consultor, DENTRO por TIPO (Áudio/Texto/PDF/Imagem) — modelo do
-    # desenho do Guilherme. Automático (dono_consultor_id + midia_tipo), sem
-    # árvore/pasta manual/cascata.
+    # PASTA = consultor -> SUB-PASTA manual (categoria: operadora/material) -> TIPO
+    # (Áudio/Texto/PDF/Imagem/Vídeo). Consultor e tipo são automáticos; a
+    # sub-pasta é o rótulo que o consultor cria. Sem árvore/cascata.
     _ORDEM_TIPO = ['Texto', 'Áudio', 'Imagem', 'PDF', 'Vídeo']
     def _tipo_lbl(m):
         return {'audio': 'Áudio', 'imagem': 'Imagem', 'video': 'Vídeo',
@@ -17084,11 +17084,20 @@ def crm_modelos():
     donos = {}
     for m in wpp:
         d = (m.get('dono_nome') or 'Compartilhado')
-        donos.setdefault(d, {}).setdefault(_tipo_lbl(m), []).append(m)
+        cat = (m.get('categoria') or '').strip() or 'Geral'
+        donos.setdefault(d, {}).setdefault(cat, {}).setdefault(_tipo_lbl(m), []).append(m)
+    def _ordena_cats(cats):
+        return sorted(cats, key=lambda c: (1, '') if c == 'Geral' else (0, c.lower()))
     wpp_grupos = []
     for dono in sorted(donos, key=lambda x: x.lower()):
-        tipos = [{'tipo': t, 'itens': donos[dono][t]} for t in _ORDEM_TIPO if t in donos[dono]]
-        wpp_grupos.append({'dono': dono, 'total': sum(len(x['itens']) for x in tipos), 'tipos': tipos})
+        subpastas = []
+        total_dono = 0
+        for cat in _ordena_cats(donos[dono].keys()):
+            tipos = [{'tipo': t, 'itens': donos[dono][cat][t]} for t in _ORDEM_TIPO if t in donos[dono][cat]]
+            n = sum(len(x['itens']) for x in tipos)
+            total_dono += n
+            subpastas.append({'nome': cat, 'total': n, 'tipos': tipos})
+        wpp_grupos.append({'dono': dono, 'total': total_dono, 'subpastas': subpastas})
     return render_template('crm_modelos.html',
                            modelos_email=[m for m in modelos if m['tipo'] == 'email'],
                            modelos_sms=[m for m in modelos if m['tipo'] == 'sms'],
@@ -17174,8 +17183,24 @@ def crm_modelo_sms_novo():
     return jsonify({"ok": True, "id": mid})
 
 
-_MODELO_WPP_EXTS_IMG = ('.jpg', '.jpeg', '.png', '.webp')
+_MODELO_WPP_EXTS_IMG = ('.jpg', '.jpeg', '.png', '.webp', '.gif')
 _MODELO_WPP_EXTS_AUDIO = ('.mp3', '.ogg', '.oga', '.m4a', '.opus', '.wav')
+_MODELO_WPP_EXTS_VIDEO = ('.mp4', '.mov', '.m4v', '.3gp')
+_MODELO_WPP_EXTS_DOC = ('.pdf',)
+
+
+def _midia_tipo_por_ext(ext):
+    """Extensão -> tipo de mídia do modelo (imagem/audio/video/documento) ou None."""
+    ext = (ext or '').lower()
+    if ext in _MODELO_WPP_EXTS_IMG: return 'imagem'
+    if ext in _MODELO_WPP_EXTS_AUDIO or ext == '.webm': return 'audio'
+    if ext in _MODELO_WPP_EXTS_VIDEO: return 'video'
+    if ext in _MODELO_WPP_EXTS_DOC: return 'documento'
+    return None
+
+
+# Teto por tipo (vídeo/PDF são maiores; WhatsApp aguenta ~16MB de vídeo).
+_MODELO_WPP_LIMITE = {'imagem': 8_000_000, 'audio': 16_000_000, 'video': 16_000_000, 'documento': 16_000_000}
 
 
 @app.route('/crm/modelos/whatsapp/novo', methods=['POST'])
@@ -17201,17 +17226,15 @@ def crm_modelo_whatsapp_novo():
     f = request.files.get('arquivo_midia')
     if f and f.filename:
         ext = os.path.splitext(f.filename)[1].lower()
-        if ext in _MODELO_WPP_EXTS_IMG:
-            midia_tipo = 'imagem'
-        elif ext in _MODELO_WPP_EXTS_AUDIO:
-            midia_tipo = 'audio'
-        else:
-            return jsonify({"ok": False, "erro": f"Formato não aceito: {ext} (imagem: jpg/png/webp, áudio: mp3/ogg/m4a/opus/wav)"}), 400
+        midia_tipo = _midia_tipo_por_ext(ext)
+        if not midia_tipo:
+            return jsonify({"ok": False, "erro": f"Formato não aceito: {ext} (imagem, áudio, vídeo mp4/mov, ou PDF)"}), 400
         f.stream.seek(0, os.SEEK_END)
         tamanho = f.stream.tell()
         f.stream.seek(0)
-        if tamanho > 8_000_000:
-            return jsonify({"ok": False, "erro": "Arquivo grande demais (máx. 8MB)"}), 400
+        limite = _MODELO_WPP_LIMITE.get(midia_tipo, 8_000_000)
+        if tamanho > limite:
+            return jsonify({"ok": False, "erro": f"Arquivo grande demais (máx. {limite // 1_000_000}MB)"}), 400
         nome_arquivo = f"MODELO_WPP_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{_sanitizar_filename(f.filename)}"
         resultado = upload_arquivo_r2(f.stream, f"modelos/{nome_arquivo}")
         if not resultado.get('ok'):

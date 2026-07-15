@@ -221,6 +221,18 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
 .job-pasta[open] > .job-pasta-nome::before { transform: rotate(90deg); }
 .job-pasta-nome span { color: #646b80; font-weight: 700; margin-left: auto; }
 .job-pasta-conteudo { padding: 4px 10px 10px; }
+/* Sub-pasta = categoria manual (operadora/material) dentro do consultor */
+.job-subpasta { margin: 6px 0; border: 1px solid #23232b; border-radius: 8px; overflow: hidden; }
+.job-subpasta-nome {
+  cursor: pointer; list-style: none; user-select: none;
+  font-size: 11px; font-weight: 700; color: #c7cbd8; padding: 7px 10px;
+  display: flex; align-items: center; gap: 6px; background: #191920;
+}
+.job-subpasta-nome::-webkit-details-marker { display: none; }
+.job-subpasta-nome::before { content: '▸'; color: #545b6e; font-size: 9px; transition: transform .15s; }
+.job-subpasta[open] > .job-subpasta-nome::before { transform: rotate(90deg); }
+.job-subpasta-nome span { color: #545b6e; font-weight: 700; margin-left: auto; }
+.job-subpasta-conteudo { padding: 2px 8px 6px; }
 /* Tipo = áudio/texto/PDF/imagem (dentro da pasta) */
 .job-modelo-tipo {
   font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px;

@@ -34,7 +34,14 @@
   .pasta-wa-nome::before { content:'▸'; color:var(--cinza-2); font-size:11px; transition:transform .15s; }
   .pasta-wa[open] > .pasta-wa-nome::before { transform:rotate(90deg); }
   .pasta-wa-nome span { color:var(--cinza-2); font-weight:600; font-size:12px; margin-left:auto; }
-  /* Tipo = áudio/texto/PDF/imagem (dentro da pasta) */
+  /* Sub-pasta = categoria manual (operadora/material) dentro do consultor */
+  .subpasta-wa { border:1px solid var(--borda); border-radius:9px; overflow:hidden; margin:8px 12px; background:var(--panel-2); }
+  .subpasta-wa-nome { cursor:pointer; list-style:none; user-select:none; font-size:12px; font-weight:700; color:var(--texto); padding:9px 13px; display:flex; align-items:center; gap:7px; }
+  .subpasta-wa-nome::-webkit-details-marker { display:none; }
+  .subpasta-wa-nome::before { content:'▸'; color:var(--cinza-2); font-size:10px; transition:transform .15s; }
+  .subpasta-wa[open] > .subpasta-wa-nome::before { transform:rotate(90deg); }
+  .subpasta-wa-nome span { color:var(--cinza-2); font-weight:600; font-size:11px; margin-left:auto; }
+  /* Tipo = áudio/texto/PDF/imagem/vídeo (dentro da sub-pasta) */
   .wa-tipo-header { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza); padding:12px 16px 6px; }
   .wa-tipo-header span { color:var(--cinza-2); }
   .wa-item { border-bottom:1px solid var(--borda); background:var(--panel); }
@@ -132,7 +139,10 @@
     {% for g in wpp_grupos %}
     <details class="pasta-wa" open>
       <summary class="pasta-wa-nome">{{ g.dono }} <span>({{ g.total }})</span></summary>
-      {% for ts in g.tipos %}
+      {% for sp in g.subpastas %}
+      {% set mostra_sub = g.subpastas|length > 1 or sp.nome != 'Geral' %}
+      {% if mostra_sub %}<details class="subpasta-wa" open><summary class="subpasta-wa-nome">{{ sp.nome }} <span>({{ sp.total }})</span></summary>{% endif %}
+      {% for ts in sp.tipos %}
       <div class="wa-tipo-header">{{ ts.tipo }} <span>({{ ts.itens|length }})</span></div>
       {% for m in ts.itens %}
     {% set t = m.midia_tipo if m.midia_tipo in ('audio','imagem','video','documento') else 'texto' %}
@@ -179,6 +189,8 @@
       </div>
     </div>
       {% endfor %}
+      {% endfor %}
+      {% if mostra_sub %}</details>{% endif %}
       {% endfor %}
     </details>
     {% endfor %}
@@ -332,8 +344,8 @@
     <div class="mo-nota">Vira item da biblioteca da extensão e passo de funil. Mídia é opcional — só áudio OU imagem, nunca as duas. Áudio é enviado como nota de voz; imagem vai com o texto como legenda.</div>
     <label class="campo-label">Nome do modelo</label>
     <input type="text" id="wa-nome" placeholder="Ex: Boas-vindas - primeiro contato">
-    <label class="campo-label">Categoria (opcional — agrupa na biblioteca, ex: Notredame, Beneficência)</label>
-    <input type="text" id="wa-categoria" list="wa-cats" placeholder="Ex: Notredame">
+    <label class="campo-label">Pasta (opcional — organiza dentro do consultor, ex: Amil, Carência, Rede de Atendimento)</label>
+    <input type="text" id="wa-categoria" list="wa-cats" placeholder="Ex: Amil, Coparticipação, Rede…">
     <datalist id="wa-cats">
       {% for c in stats_wpp.categorias if stats_wpp %}<option value="{{ c }}">{% endfor %}
     </datalist>
@@ -342,7 +354,7 @@
     <label class="campo-label">Texto da mensagem</label>
     <textarea id="wa-texto" rows="5" placeholder="Oi {{nome}}, tudo bem?"></textarea>
     <label class="campo-label">Mídia (opcional — imagem: jpg/png/webp, áudio: mp3/ogg/m4a/opus/wav, máx. 8MB)</label>
-    <input type="file" id="wa-midia" accept=".jpg,.jpeg,.png,.webp,.mp3,.ogg,.oga,.m4a,.opus,.wav">
+    <input type="file" id="wa-midia" accept=".jpg,.jpeg,.png,.webp,.gif,.mp3,.ogg,.oga,.m4a,.opus,.wav,.mp4,.mov,.m4v,.3gp,.pdf">
     <div class="modal-acoes">
       <button class="btn-outline btn-sm" onclick="document.getElementById('modal-whatsapp').classList.remove('aberto')">Cancelar</button>
       <button class="btn-azul" onclick="salvarModeloWhatsapp()">Salvar modelo</button>
@@ -511,7 +523,7 @@ function filtrarWpp(){
     while (n && n.classList && n.classList.contains('wa-item')) { if (n.style.display !== 'none') vis = true; n = n.nextElementSibling; }
     h.style.display = vis ? '' : 'none';
   });
-  document.querySelectorAll('#wa-lista .pasta-wa').forEach(function(p){
+  document.querySelectorAll('#wa-lista .subpasta-wa, #wa-lista .pasta-wa').forEach(function(p){
     var algum = false;
     p.querySelectorAll('.wa-item').forEach(function(c){ if (c.style.display !== 'none') algum = true; });
     p.style.display = algum ? '' : 'none';
