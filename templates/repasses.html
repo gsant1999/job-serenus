@@ -104,12 +104,22 @@ async function renomearSel() {
   const novo = (prompt('Renomear "' + disp + '" para (nome):', op) || '').trim();
   if (!novo) return;
   const novoObs = (prompt('Observação / variação:', obs || '') || '').trim();
+  await enviarRenomear(op, obs, novo, novoObs, false);
+}
+async function enviarRenomear(op, obs, novo, novoObs, fundir) {
+  const body = {operadora:op, obs:obs, operadora_novo:novo, obs_novo:novoObs};
+  if (fundir) body.fundir = true;
   try {
-    const r = await fetch('/operadora/renomear', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({operadora:op, obs:obs, operadora_novo:novo, obs_novo:novoObs})});
+    const r = await fetch('/operadora/renomear', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const d = await r.json();
-    if (d.ok) { toast('Renomeado' + (d.propostas ? ' (' + d.propostas + ' proposta(s))' : ''), 'ok'); setTimeout(()=>location.reload(), 700); }
-    else toast(d.msg || 'Erro ao renomear', 'err');
+    if (d.ok) {
+      toast((d.fundido ? 'Fundido' : 'Renomeado') + (d.propostas ? ' (' + d.propostas + ' proposta(s))' : ''), 'ok');
+      setTimeout(()=>location.reload(), 700);
+    } else if (d.existe) {
+      if (confirm('Já existe uma operadora "' + novo + '".\n\nJuntar as duas num nome só? As propostas passam a usar "' + novo + '" e as comissões já salvas são mantidas (nada é recalculado).')) {
+        enviarRenomear(op, obs, novo, novoObs, true);
+      }
+    } else toast(d.msg || 'Erro ao renomear', 'err');
   } catch(e) { toast('Erro de conexão', 'err'); }
 }
 async function excluirSel() {
