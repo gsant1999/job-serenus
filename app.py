@@ -5250,6 +5250,94 @@ def recalcular_todas():
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "recalculadas": recalc, "avisos": avisos})
 
+
+@app.route('/admin/comissoes-problemas')
+@login_required
+@admin_required
+def comissoes_problemas():
+    """Painel: lista as propostas ativas com comissão quebrada (bruto zero, líquido
+    negativo ou falta de cadastro) dizendo EXATAMENTE o que falta em cada operadora,
+    e um resumo dos cadastros faltantes agrupados. Read-only — não altera nada."""
+    conn = db()
+    props = conn.execute("""SELECT p.*, u.regime_base FROM propostas p
+        LEFT JOIN usuarios u ON u.id=p.usuario_id
+        WHERE COALESCE(p.estornada,0)=0 AND p.status<>'Excluída' ORDER BY p.id DESC""").fetchall()
+    quebradas = []
+    falta_receb, falta_rep = set(), set()
+    for p in props:
+        valor = p['valor'] or 0
+        if valor <= 0:
+            continue
+        tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
+        prod = _producao_mes(conn, p['usuario_id'], p['criado_em'], excluir_pid=p['id']) + valor
+        cc = calc_comissao(p['adm_operadora'], (p['regime_base'] or 'sem_lead_sem_fixo'),
+                           prod, valor, p['modalidade'], tp)
+        aviso = cc.get('aviso') or ''
+        if not aviso and (cc.get('liquido') or 0) >= 0:
+            continue
+        quebradas.append({'id': p['id'], 'cliente': p['razao_social'] or '—',
+                          'operadora': p['adm_operadora'] or '—', 'plano': cc.get('plano', ''),
+                          'valor': valor, 'aviso': aviso,
+                          'liquido': cc.get('liquido') or 0})
+        op = (p['adm_operadora'] or '').strip()
+        if 'Falta RECEBIMENTO' in aviso:
+            falta_receb.add(f"{op} · {cc.get('plano','')}")
+        if 'Falta REPASSE' in aviso:
+            falta_rep.add(f"{op} · {cc.get('plano','')}")
+    close_db(conn)
+
+    def _linhas():
+        if not quebradas:
+            return '<tr><td colspan="5" style="padding:24px;text-align:center;color:#16a34a;">Nenhuma proposta com comissão quebrada. Tudo certo.</td></tr>'
+        out = []
+        for q in quebradas:
+            liq = f"R$ {q['liquido']:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+            out.append(
+                f'<tr><td style="padding:10px 12px;"><a href="/proposta/{q["id"]}" style="color:#2563eb;">#{q["id"]}</a></td>'
+                f'<td style="padding:10px 12px;">{q["cliente"]}</td>'
+                f'<td style="padding:10px 12px;">{q["operadora"]} · {q["plano"]}</td>'
+                f'<td style="padding:10px 12px;color:{"#dc2626" if q["liquido"]<0 else "#6b7280"};">{liq}</td>'
+                f'<td style="padding:10px 12px;color:#b91c1c;font-size:12.5px;">{q["aviso"] or "líquido negativo"}</td></tr>')
+        return ''.join(out)
+
+    def _chips(s, label):
+        if not s:
+            return ''
+        itens = ''.join(f'<li>{x}</li>' for x in sorted(s))
+        return f'<div style="margin:10px 0;"><b>{label}:</b><ul style="margin:6px 0 0;padding-left:20px;">{itens}</ul></div>'
+
+    html = f"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comissões com problema — JOB</title>
+<style>
+  body{{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:1000px;margin:0 auto;
+    padding:32px 22px 80px;color:#1a1d24;line-height:1.5;background:#fff;}}
+  h1{{font-size:24px;margin:0 0 4px}} .sub{{color:#6b7280;font-size:14px;margin-bottom:20px}}
+  table{{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}}
+  th{{text-align:left;padding:10px 12px;background:#f3f4f6;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;}}
+  tr{{border-bottom:1px solid #eee;}}
+  .box{{background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:14px 16px;margin:18px 0;font-size:13.5px;}}
+  a.voltar{{display:inline-block;margin-bottom:16px;color:#2563eb;text-decoration:none;font-size:14px;}}
+  .btn{{display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;font-size:14px;margin:6px 8px 6px 0;}}
+</style></head><body>
+<a class="voltar" href="/propostas">← Voltar para Propostas</a>
+<h1>Comissões com problema</h1>
+<div class="sub">{len(quebradas)} proposta(s) ativa(s) com comissão quebrada. A causa é sempre um <b>cadastro de preço faltando</b> na operadora.</div>
+<div class="box">
+  <b>O que fazer:</b> cadastre os itens faltantes abaixo em <a href="/operadoras">Operadoras</a> (recebimento) e <a href="/repasses">Repasses</a>. Depois volte em Propostas e clique em <b>Recalcular comissões</b>.
+  {_chips(falta_receb, 'Falta RECEBIMENTO (quanto a operadora paga a corretora)')}
+  {_chips(falta_rep, 'Falta REPASSE (quanto o consultor recebe)')}
+</div>
+<a class="btn" href="/operadoras">Cadastrar recebimento</a>
+<a class="btn" href="/repasses">Cadastrar repasse</a>
+<table>
+  <thead><tr><th>Proposta</th><th>Cliente</th><th>Operadora · Plano</th><th>Líquido atual</th><th>O que falta</th></tr></thead>
+  <tbody>{_linhas()}</tbody>
+</table>
+</body></html>"""
+    return html
+
+
 @app.route('/api/consultores')
 @login_required
 @admin_required

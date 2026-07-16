@@ -16,7 +16,8 @@
       </span>
       <span style="color:{% if session.modo_teste %}#f59e0b{% else %}var(--cinza){% endif %};font-weight:{% if session.modo_teste %}600{% else %}400{% endif %};">Modo Teste</span>
     </label>
-    <button class="btn-outline" onclick="recalcularTodas(this)">Recalcular comissões</button>{% endif %}
+    <button class="btn-outline" onclick="recalcularTodas(this)">Recalcular comissões</button>
+    <a href="/admin/comissoes-problemas" class="btn-outline" style="text-decoration:none;">Comissões com problema</a>{% endif %}
     <button class="btn-outline" onclick="exportar()">Exportar CSV</button>
     <a href="/nova-proposta" class="btn">Nova proposta</a>
   </div>
