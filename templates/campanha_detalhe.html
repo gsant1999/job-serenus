@@ -36,15 +36,24 @@
   </div>
 </div>
 
+<div class="card" style="margin-bottom:16px;padding:16px 20px;">
+  <div style="display:flex;gap:26px;flex-wrap:wrap;">
+    <div><div style="font-size:11px;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;">Aguardando</div><div style="font-family:'Sora',sans-serif;font-size:22px;color:var(--info);">{{ resumo.aguardando or 0 }}</div></div>
+    <div><div style="font-size:11px;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;">Responderam</div><div style="font-family:'Sora',sans-serif;font-size:22px;color:var(--teal);">{{ resumo.respondeu or 0 }}</div></div>
+    <div><div style="font-size:11px;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;">Sem resposta</div><div style="font-family:'Sora',sans-serif;font-size:22px;color:var(--rosa);">{{ resumo.sem_resposta or 0 }}</div></div>
+    <div><div style="font-size:11px;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;">Conversas apagadas</div><div style="font-family:'Sora',sans-serif;font-size:22px;color:var(--cinza);">{{ resumo.excluido or 0 }}</div></div>
+  </div>
+</div>
+
 <div class="card" style="margin-bottom:16px;">
   <div class="card-header"><h3>Por consultor</h3></div>
-  <div class="cons-row cons-head"><div>Consultor</div><div>Contatos</div><div>Enviados</div><div>Responderam</div><div>Agenda (VCF)</div></div>
+  <div class="cons-row cons-head"><div>Consultor</div><div>Contatos</div><div>Aguardando</div><div>Responderam</div><div>Agenda (VCF)</div></div>
   {% for pc in porcons %}
   <div class="cons-row">
     <div>{{ pc.nome }}</div>
     <div>{{ pc.total }}</div>
-    <div style="color:var(--info);">{{ pc.enviados or 0 }}</div>
-    <div style="color:var(--teal);">{{ pc.respondeu or 0 }}</div>
+    <div style="color:var(--info);">{{ pc.aguardando or 0 }}</div>
+    <div style="color:var(--teal);">{{ pc.respondeu or 0 }}{% if pc.sem_resposta %} <span style="color:var(--rosa);font-size:11px;">· {{ pc.sem_resposta }} s/ resp.</span>{% endif %}</div>
     <div><a class="btn-outline" style="text-decoration:none;padding:5px 12px;font-size:12px;" href="/campanha/{{ camp.id }}/vcf?consultor={{ pc.id }}">Baixar VCF</a></div>
   </div>
   {% else %}

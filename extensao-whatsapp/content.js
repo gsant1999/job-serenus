@@ -2227,6 +2227,96 @@
   }
   setInterval(checarFilaDeEnvio, 20000);
 
+  // ═══════════════ Campanha (Fase 2): vigília de resposta + limpeza ═══════════════
+  // Vigia os números que ESTE consultor disparou numa campanha: quando um deles
+  // responde, avisa o JOB (o lead fica quente). Os que não respondem no prazo o
+  // JOB marca como 'sem_resposta' e a extensão oferece apagar a conversa — sempre
+  // com o consultor clicando, nunca automático (é irreversível no WhatsApp).
+  const _campWatch = new Map();  // chatId -> { telefone, contato_id }
+  let _campExcluir = [];         // [{ chat_id, telefone, contato_id }]
+
+  function pedirApagarConversa(chatId) {
+    return new Promise((resolve) => {
+      const reqId = 'x' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true; window.removeEventListener('message', onMsg); resolve(d);
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'apagar_conversa', reqId, chatId }, '*');
+      setTimeout(() => { if (!pronto) { window.removeEventListener('message', onMsg); resolve({ erro: 'timeout' }); } }, 15000);
+    });
+  }
+
+  // A ponte avisa quando ENTRA uma mensagem (só o chatId). Se for de um número em
+  // vigília, reporta a resposta ao JOB e tira da vigília.
+  window.addEventListener('message', async (ev) => {
+    if (ev.source !== window) return;
+    const d = ev.data;
+    if (!d || d.source !== 'JOB_EXT_EVT' || d.tipo !== 'inbound' || !d.chatId) return;
+    const alvo = _campWatch.get(d.chatId);
+    if (!alvo) return;
+    _campWatch.delete(d.chatId);
+    try {
+      const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+      await chrome.runtime.sendMessage({ type: 'campanha_resposta', telefone: alvo.telefone, usuario_id: usuarioId });
+    } catch (e) { /* próxima varredura reconcilia */ }
+  });
+
+  async function checarCampanhaAguardando() {
+    const { extKey, usuarioId } = await chrome.storage.local.get(['extKey', 'usuarioId']);
+    if (!extKey || !usuarioId) return;
+    let resp;
+    try {
+      resp = await chrome.runtime.sendMessage({ type: 'campanha_aguardando', usuario_id: usuarioId });
+    } catch (e) { return; }
+    if (!resp || !resp.ok) return;
+    _campWatch.clear();
+    (resp.aguardando || []).forEach((a) => {
+      if (a.chat_id) _campWatch.set(a.chat_id, { telefone: a.telefone, contato_id: a.contato_id });
+    });
+    _campExcluir = (resp.excluir || []).filter((e) => e.chat_id);
+    if (_campExcluir.length) mostrarAvisoLimpeza(_campExcluir.length);
+    else { const b = document.getElementById('job-aviso-limpeza'); if (b) b.remove(); }
+  }
+  setTimeout(checarCampanhaAguardando, 8000);
+  setInterval(checarCampanhaAguardando, 90000);
+
+  function mostrarAvisoLimpeza(qtd) {
+    let box = document.getElementById('job-aviso-limpeza');
+    if (box) { const q = box.querySelector('.job-limpeza-qtd'); if (q) q.textContent = qtd; return; }
+    box = document.createElement('div');
+    box.id = 'job-aviso-limpeza';
+    box.innerHTML =
+      '<div class="job-aviso-versao-topo"><b>Campanha — sem resposta</b>' +
+        '<button class="job-aviso-versao-x" title="Depois">×</button></div>' +
+      '<div class="job-aviso-versao-corpo"><span class="job-limpeza-qtd">' + qtd + '</span> conversa(s) sem resposta no prazo. Apagar essas conversas do seu WhatsApp?' +
+        '<div style="margin-top:10px;"><button class="job-analisar-btn" id="job-limpar-btn">Apagar conversas</button></div>' +
+        '<div class="job-aviso-versao-nota">Só apaga quem não respondeu. Ação irreversível.</div></div>';
+    document.body.appendChild(box);
+    box.querySelector('.job-aviso-versao-x').addEventListener('click', () => box.remove());
+    box.querySelector('#job-limpar-btn').addEventListener('click', limparSemResposta);
+  }
+
+  async function limparSemResposta() {
+    if (!_campExcluir.length) return;
+    if (!confirm('Apagar ' + _campExcluir.length + ' conversa(s) sem resposta do seu WhatsApp? Isso não tem desfazer.')) return;
+    const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+    const btn = document.getElementById('job-limpar-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Apagando...'; }
+    for (const e of _campExcluir.slice()) {
+      const r = await pedirApagarConversa(e.chat_id);
+      if (r && r.ok) {
+        try { await chrome.runtime.sendMessage({ type: 'campanha_excluir', contato_id: e.contato_id, telefone: e.telefone, usuario_id: usuarioId }); } catch (x) { /* reconcilia depois */ }
+      }
+    }
+    _campExcluir = [];
+    const box = document.getElementById('job-aviso-limpeza'); if (box) box.remove();
+  }
+
   // Trocou o consultor (ou chave/URL) no popup → joga fora o cache das listas,
   // senão a biblioteca/funis do consultor anterior ficam na tela por até 5 min.
   try {

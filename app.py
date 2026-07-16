@@ -1908,6 +1908,11 @@ def init_db():
         # Módulos liberados por consultor (JSON de chaves). NULL = todos (default,
         # não muda nada). Admin ignora — vê tudo sempre.
         ("usuarios", "modulos", "TEXT"),
+        # Disparo em roleta (Fase 2): rastreio de resposta/exclusão por contato.
+        ("campanha_contato", "sem_resposta_em", "TIMESTAMP"),
+        ("campanha_contato", "excluido_em", "TIMESTAMP"),
+        # Janela (dias) sem resposta até o contato virar 'sem_resposta' (varredura).
+        ("campanha", "dias_sem_resposta", "INTEGER DEFAULT 2"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -5473,6 +5478,35 @@ def _campanha_enfileirar(conn, campanha_id, texto_fallback=''):
     return n
 
 
+def _campanha_marcar_sem_resposta(conn):
+    """Promove contatos 'enviado' há mais de N dias (por campanha, dias_sem_resposta,
+    default 2) sem resposta para 'sem_resposta' — base pra oferecer apagar a conversa.
+    Comparação por texto do timestamp (compatível PG+SQLite). Idempotente."""
+    from datetime import timedelta as _td
+    try:
+        camps = conn.execute("SELECT id, COALESCE(dias_sem_resposta,2) dias FROM campanha WHERE status<>'concluida'").fetchall()
+    except Exception:
+        return 0
+    agora = datetime.now(TZ_SP)
+    n = 0
+    for c in camps:
+        dias = int(c['dias'] or 2)
+        cutoff = (agora - _td(days=dias)).strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            cur = conn.execute("""UPDATE campanha_contato SET status='sem_resposta', sem_resposta_em=?
+                WHERE campanha_id=? AND status='enviado' AND respondeu_em IS NULL
+                  AND enviado_em IS NOT NULL AND CAST(enviado_em AS TEXT) < ?""",
+                (_agora_sp(), c['id'], cutoff))
+            n += getattr(cur, 'rowcount', 0) or 0
+        except Exception:
+            if DB_MODE == 'postgres':
+                try: conn.rollback()
+                except Exception: pass
+    try: conn.commit()
+    except Exception: pass
+    return n
+
+
 def _campanha_parse_lista(texto):
     """Lê a lista colada (uma pessoa por linha, colunas separadas por TAB/;/vírgula).
     Robusto à ordem: acha o telefone pela quantidade de dígitos, o e-mail pelo @,
@@ -5560,21 +5594,29 @@ def campanha_detalhe(cid):
     camp = conn.execute("SELECT * FROM campanha WHERE id=?", (cid,)).fetchone()
     if not camp:
         close_db(conn); return "Campanha não encontrada", 404
+    _campanha_marcar_sem_resposta(conn)  # atualiza os vencidos antes de mostrar
     contatos = conn.execute("""SELECT cc.*, u.nome consultor_nome FROM campanha_contato cc
         LEFT JOIN usuarios u ON u.id=cc.consultor_id WHERE cc.campanha_id=? ORDER BY cc.id""", (cid,)).fetchall()
     porcons = conn.execute("""SELECT u.id, u.nome,
         COUNT(*) total,
-        SUM(CASE WHEN cc.enviado_em IS NOT NULL THEN 1 ELSE 0 END) enviados,
-        SUM(CASE WHEN cc.status='respondeu' THEN 1 ELSE 0 END) respondeu
+        SUM(CASE WHEN cc.status='enviado' AND cc.respondeu_em IS NULL THEN 1 ELSE 0 END) aguardando,
+        SUM(CASE WHEN cc.status='respondeu' THEN 1 ELSE 0 END) respondeu,
+        SUM(CASE WHEN cc.status='sem_resposta' THEN 1 ELSE 0 END) sem_resposta
         FROM campanha_contato cc JOIN usuarios u ON u.id=cc.consultor_id
         WHERE cc.campanha_id=? GROUP BY u.id, u.nome ORDER BY u.nome""", (cid,)).fetchall()
+    resumo = conn.execute("""SELECT
+        SUM(CASE WHEN status='respondeu' THEN 1 ELSE 0 END) respondeu,
+        SUM(CASE WHEN status='enviado' AND respondeu_em IS NULL THEN 1 ELSE 0 END) aguardando,
+        SUM(CASE WHEN status='sem_resposta' THEN 1 ELSE 0 END) sem_resposta,
+        SUM(CASE WHEN status='excluido' THEN 1 ELSE 0 END) excluido
+        FROM campanha_contato WHERE campanha_id=?""", (cid,)).fetchone()
     close_db(conn)
     import json as _json
     try: msgs = _json.loads(camp['mensagens'] or '[]')
     except Exception: msgs = []
     return render_template('campanha_detalhe.html', camp=dict(camp), msgs=msgs,
                            contatos=[dict(r) for r in contatos],
-                           porcons=[dict(r) for r in porcons])
+                           porcons=[dict(r) for r in porcons], resumo=dict(resumo) if resumo else {})
 
 
 @app.route('/campanha/<int:cid>/vcf')
@@ -5633,17 +5675,84 @@ def campanha_status(cid):
 @app.route('/api/whatsapp/campanha/resposta', methods=['POST', 'OPTIONS'])
 def api_whatsapp_campanha_resposta():
     """A extensão avisa quando um número de campanha RESPONDEU. Marca o contato
-    como 'respondeu' (fica quente, libera o disparo do contexto). Chave da extensão."""
+    como 'respondeu' (fica quente, libera o disparo do contexto). Chave da extensão.
+    usuario_id (opcional) escopa pro consultor dono — evita marcar a resposta em
+    campanha de outro consultor que por acaso tenha o mesmo número."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
         return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
-    tel = _normalizar_telefone(str((request.json or {}).get('telefone') or ''))
+    d = request.json or {}
+    tel = _normalizar_telefone(str(d.get('telefone') or ''))
     if not tel:
         return _wa_cors(jsonify({"ok": False, "erro": "telefone"})), 400
+    uid = d.get('usuario_id')
     conn = db()
-    conn.execute("""UPDATE campanha_contato SET status='respondeu', respondeu_em=?
-        WHERE telefone_norm=? AND status IN ('enfileirado','enviado')""", (_agora_sp(), tel))
+    if uid:
+        conn.execute("""UPDATE campanha_contato SET status='respondeu', respondeu_em=?
+            WHERE telefone_norm=? AND consultor_id=? AND status IN ('enfileirado','enviado')""",
+            (_agora_sp(), tel, uid))
+    else:
+        conn.execute("""UPDATE campanha_contato SET status='respondeu', respondeu_em=?
+            WHERE telefone_norm=? AND status IN ('enfileirado','enviado')""", (_agora_sp(), tel))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
+
+
+@app.route('/api/whatsapp/campanha/aguardando', methods=['GET', 'OPTIONS'])
+def api_whatsapp_campanha_aguardando():
+    """A extensão pergunta, pro consultor, quais números de campanha estão
+    AGUARDANDO resposta (pra vigiar a chegada) e quais já viraram SEM RESPOSTA
+    (pra oferecer apagar a conversa). Só leitura, escopado por consultor."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
+    uid = request.args.get('usuario_id', type=int)
+    if not uid:
+        return _wa_cors(jsonify({"ok": True, "aguardando": [], "excluir": []}))
+    conn = db()
+    _campanha_marcar_sem_resposta(conn)  # promove os vencidos antes de listar
+    def _linha(r):
+        return {"contato_id": r['id'], "telefone": r['telefone_norm'],
+                "chat_id": _wa_chat_id(r['telefone_norm'] or r['telefone'] or '')}
+    aguard = conn.execute("""SELECT id, telefone, telefone_norm FROM campanha_contato
+        WHERE consultor_id=? AND status='enviado' AND respondeu_em IS NULL AND excluido_em IS NULL
+          AND telefone_norm IS NOT NULL AND telefone_norm<>''""", (uid,)).fetchall()
+    excluir = conn.execute("""SELECT id, telefone, telefone_norm FROM campanha_contato
+        WHERE consultor_id=? AND status='sem_resposta' AND excluido_em IS NULL
+          AND telefone_norm IS NOT NULL AND telefone_norm<>''""", (uid,)).fetchall()
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True,
+        "aguardando": [_linha(r) for r in aguard],
+        "excluir": [_linha(r) for r in excluir]}))
+
+
+@app.route('/api/whatsapp/campanha/excluir-conversa', methods=['POST', 'OPTIONS'])
+def api_whatsapp_campanha_excluir():
+    """A extensão avisa que o consultor apagou a conversa de um não-respondente.
+    Registra excluido_em (auditoria) e tira da lista de vigília. Ação irreversível
+    no WhatsApp — quem apaga é o consultor no aparelho dele; aqui só registramos."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
+    d = request.json or {}
+    uid = d.get('usuario_id')
+    cid = d.get('contato_id')
+    tel = _normalizar_telefone(str(d.get('telefone') or ''))
+    if not uid or not (cid or tel):
+        return _wa_cors(jsonify({"ok": False, "erro": "faltam dados"})), 400
+    conn = db()
+    if not conn.execute("SELECT 1 FROM usuarios WHERE id=? AND ativo=1", (uid,)).fetchone():
+        close_db(conn); return _wa_cors(jsonify({"ok": False, "erro": "consultor inválido"})), 403
+    if cid:
+        conn.execute("UPDATE campanha_contato SET status='excluido', excluido_em=? WHERE id=? AND consultor_id=?",
+                     (_agora_sp(), cid, uid))
+    else:
+        conn.execute("""UPDATE campanha_contato SET status='excluido', excluido_em=?
+            WHERE telefone_norm=? AND consultor_id=? AND status IN ('sem_resposta','enviado')""",
+            (_agora_sp(), tel, uid))
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
 
@@ -11010,7 +11119,7 @@ def api_whatsapp_fila_proximo():
                  if it.get('midia_arquivo') else None)
     return _wa_cors(jsonify({"ok": True, "item": {
         "id": it['id'], "chat_id": it['chat_id'], "tipo": it['tipo'], "texto": it['texto'],
-        "midia_url": midia_url,
+        "midia_url": midia_url, "origem": it.get('origem') or '',
     }}))
 
 

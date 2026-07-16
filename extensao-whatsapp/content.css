@@ -424,10 +424,15 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
 .job-fp-cancelar.job-fp-fechar { background: #1fd8a4; color: #0a0a10; }
 
 /* Aviso de versão nova da extensão (balão fixo no canto) */
-#job-aviso-versao { position: fixed; bottom: 18px; right: 18px; width: 300px; z-index: 2147483200;
+#job-aviso-versao, #job-aviso-limpeza { position: fixed; right: 18px; width: 300px; z-index: 2147483200;
   background: #14141c; color: #eef0f6; border: 1px solid #2a2a38; border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0,0,0,.45); font-family: -apple-system, "Segoe UI", sans-serif;
   overflow: hidden; }
+#job-aviso-versao { bottom: 18px; }
+#job-aviso-limpeza { bottom: 18px; }
+/* se os dois aparecerem juntos, empilha a limpeza acima da versão */
+#job-aviso-versao ~ #job-aviso-limpeza { bottom: 190px; }
+.job-aviso-limpeza-topo { background: rgba(244,63,94,.14) !important; }
 #job-aviso-versao.job-painel-doc-esquerda, .job-esquerda #job-aviso-versao { right: auto; left: 18px; }
 .job-aviso-versao-topo { display: flex; align-items: center; justify-content: space-between;
   padding: 11px 14px; background: #1c2c22; border-bottom: 1px solid #234; }

@@ -239,6 +239,45 @@
     }
   }
 
+  // ── APAGAR CONVERSA (Fase 2): quando o consultor decide limpar um contato que
+  //    não respondeu à campanha. Irreversível no WhatsApp — só é chamado por ação
+  //    explícita do consultor (botão), nunca automático. ──
+  async function apagarConversa(chatId) {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.delete) return { erro: 'wpp_ausente' };
+    if (!chatId) return { erro: 'parametros_invalidos' };
+    try {
+      const r = await window.WPP.chat.delete(chatId);
+      return { ok: true, status: (r && r.status) || 200 };
+    } catch (e) {
+      return { ok: false, erro: String((e && e.message) || e).slice(0, 200) };
+    }
+  }
+
+  // ── INBOUND (Fase 2): escuta mensagens RECEBIDAS e avisa o content script.
+  //    Repassa SÓ o chatId (nunca o conteúdo) — o content script decide se é um
+  //    número de campanha em vigília antes de reportar ao JOB. Registra UMA vez,
+  //    quando a wa-js fica pronta (pode não estar no load). ──
+  let _jobInboundLigado = false;
+  function ligarInbound() {
+    if (_jobInboundLigado || !window.WPP || !window.WPP.on) return;
+    try {
+      window.WPP.on('chat.new_message', (msg) => {
+        try {
+          if (!msg || !msg.id || msg.id.fromMe) return;   // só o que ENTROU (do contato)
+          const chatId = (msg.id.remote && msg.id.remote._serialized)
+            || (msg.from && msg.from._serialized) || '';
+          if (chatId) window.postMessage({ source: 'JOB_EXT_EVT', tipo: 'inbound', chatId }, '*');
+        } catch (e) { /* nunca derruba a wa-js */ }
+      });
+      _jobInboundLigado = true;
+    } catch (e) { /* tenta de novo no timer */ }
+  }
+  ligarInbound();
+  const _jobInboundTimer = setInterval(() => {
+    ligarInbound();
+    if (_jobInboundLigado) clearInterval(_jobInboundTimer);
+  }, 3000);
+
   window.addEventListener('message', async (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
@@ -252,6 +291,7 @@
       else if (d.tipo === 'obter_chat_id') resp = await obterChatIdAtivo();
       else if (d.tipo === 'enviar_texto') resp = await enviarTexto(d.chatId, d.texto);
       else if (d.tipo === 'enviar_midia') resp = await enviarMidia(d.chatId, d.midiaTipo, d.dataUrl, d.legenda);
+      else if (d.tipo === 'apagar_conversa') resp = await apagarConversa(d.chatId);
       else return;
     } catch (e) { resp = { erro: 'excecao' }; }
     resp.source = 'JOB_EXT_RESP';
