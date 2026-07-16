@@ -5914,6 +5914,77 @@ def api_whatsapp_campanha_excluir():
     return _wa_cors(jsonify({"ok": True}))
 
 
+def _crm_grupos_duplicados(conn):
+    """Grupos de leads SEM número duplicados por nome+consultor (o lixo gerado pelo
+    bug do @lid). Só mescla os sem número — lead com número é confiável, não toca."""
+    return conn.execute("""SELECT LOWER(TRIM(nome)) chave, COALESCE(responsavel_id,-1) resp, COUNT(*) n
+        FROM crm_leads WHERE COALESCE(TRIM(telefone_norm),'')='' AND COALESCE(TRIM(nome),'')<>''
+        GROUP BY LOWER(TRIM(nome)), COALESCE(responsavel_id,-1)
+        HAVING COUNT(*) > 1 ORDER BY n DESC""").fetchall()
+
+
+@app.route('/crm/leads-duplicados')
+@login_required
+@admin_required
+def crm_leads_duplicados():
+    conn = db()
+    grupos = _crm_grupos_duplicados(conn)
+    close_db(conn)
+    extra = sum(g['n'] - 1 for g in grupos)
+    linhas = ''.join(
+        f'<tr><td style="padding:8px 12px;">{g["chave"]}</td><td style="padding:8px 12px;text-align:center;">{g["n"]}</td>'
+        f'<td style="padding:8px 12px;text-align:center;color:#dc2626;">{g["n"]-1}</td></tr>' for g in grupos)
+    corpo = (f'<p>{len(grupos)} nome(s) com duplicados sem número — <b>{extra} lead(s) a mesclar</b>. '
+             'A mesclagem mantém o mais antigo de cada nome, move o histórico pra ele e apaga os demais. '
+             'Leads COM número não são tocados.</p>'
+             '<button class="btn" onclick="mesclar(this)">Mesclar duplicados</button>'
+             '<table style="width:100%;border-collapse:collapse;margin-top:16px;font-size:13.5px;">'
+             '<thead><tr><th style="text-align:left;padding:8px 12px;background:#f3f4f6;">Nome</th>'
+             '<th style="padding:8px 12px;background:#f3f4f6;">Leads</th><th style="padding:8px 12px;background:#f3f4f6;">A apagar</th></tr></thead>'
+             f'<tbody>{linhas or "<tr><td colspan=3 style=padding:20px;text-align:center;color:#16a34a;>Nenhum duplicado sem número.</td></tr>"}</tbody></table>'
+             if grupos or True else '')
+    html = f"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Leads duplicados</title>
+<style>body{{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:760px;margin:0 auto;padding:32px 22px 80px;color:#1a1d24;line-height:1.5;}}
+h1{{font-size:23px;margin:0 0 12px}} a.voltar{{color:#2563eb;text-decoration:none;font-size:14px;}} tr{{border-bottom:1px solid #eee}}
+.btn{{display:inline-block;background:#2563eb;color:#fff;border:none;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;}}</style>
+</head><body><a class="voltar" href="/crm">← Voltar ao CRM</a><h1>Leads duplicados sem número</h1>{corpo}
+<script>async function mesclar(b){{b.disabled=true;b.textContent='Mesclando...';
+const r=await fetch('/crm/leads-duplicados/aplicar',{{method:'POST'}});const d=await r.json();
+alert(d.ok?('Mesclados '+d.mesclados+' lead(s) duplicado(s).'):'Erro');location.reload();}}</script>
+</body></html>"""
+    return html
+
+
+@app.route('/crm/leads-duplicados/aplicar', methods=['POST'])
+@login_required
+@admin_required
+def crm_leads_duplicados_aplicar():
+    conn = db()
+    grupos = _crm_grupos_duplicados(conn)
+    mesclados = 0
+    for g in grupos:
+        rows = conn.execute("""SELECT id FROM crm_leads
+            WHERE LOWER(TRIM(nome))=? AND COALESCE(responsavel_id,-1)=?
+              AND COALESCE(TRIM(telefone_norm),'')='' ORDER BY id""", (g['chave'], g['resp'])).fetchall()
+        if len(rows) < 2:
+            continue
+        keep = rows[0]['id']
+        for r in rows[1:]:
+            # move o histórico pro lead que fica e apaga o duplicado
+            for tab in ('crm_atividades', 'whatsapp_extensao_fila'):
+                try:
+                    conn.execute(f"UPDATE {tab} SET lead_id=? WHERE lead_id=?", (keep, r['id']))
+                except Exception:
+                    if DB_MODE == 'postgres':
+                        try: conn.rollback()
+                        except Exception: pass
+            conn.execute("DELETE FROM crm_leads WHERE id=?", (r['id'],))
+            mesclados += 1
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "mesclados": mesclados})
+
+
 @app.route('/api/consultores')
 @login_required
 @admin_required
@@ -11376,23 +11447,26 @@ def api_whatsapp_enviar_direto():
     tel_norm = _normalizar_telefone(telefone)
     lead = _buscar_lead_por_telefone(conn, tel_norm)
     if not lead and nome:
-        candidatos = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE LOWER(TRIM(nome))=?",
-                                  (nome.strip().lower(),)).fetchall()
-        if len(candidatos) == 1:
-            lead = candidatos[0]
-        elif len(candidatos) > 1:
-            so_meus = [c for c in candidatos if c['responsavel_id'] == usuario_id]
-            if len(so_meus) == 1:
-                lead = so_meus[0]
+        # Casa por NOME (contatos @lid, sem número exposto). REAPROVEITA um lead que
+        # já existe em vez de criar outro a cada envio — pega o melhor: do consultor
+        # atual, de preferência já COM número, senão o mais antigo. Antes só casava
+        # se houvesse exatamente um -> com duplicados ele desistia e criava mais um.
+        cands = conn.execute(
+            "SELECT id, nome, responsavel_id, telefone_norm FROM crm_leads WHERE LOWER(TRIM(nome))=?",
+            (nome.strip().lower(),)).fetchall()
+        if cands:
+            meus = [c for c in cands if c['responsavel_id'] == usuario_id] or list(cands)
+            meus.sort(key=lambda c: (0 if (c['telefone_norm'] or '').strip() else 1, c['id']))
+            lead = meus[0]
     lead_id = lead['id'] if lead else None
-    # Se casou um lead que estava sem número e AGORA temos, completa (deixa de ser órfão).
+    # Casou um lead sem número e AGORA temos: completa (deixa de ser órfão).
     if lead_id and tel_norm:
         conn.execute("""UPDATE crm_leads SET telefone=COALESCE(NULLIF(telefone,''),?),
             telefone_norm=COALESCE(NULLIF(telefone_norm,''),?) WHERE id=?""",
             (telefone, tel_norm, lead_id))
-    if not lead_id and tel_norm:
-        # Só cria lead quando TEM número — sem número não dá pra deduplicar e virava
-        # um lead novo a cada envio (bug do 'Andrea' repetido, contato business/@lid).
+    if not lead_id and (tel_norm or nome):
+        # Cria UMA vez. A partir daqui os próximos envios casam por número (se houver)
+        # ou por nome (reaproveita) — não duplica mais. Sem número, avisa os admins.
         conn.execute("""INSERT INTO crm_leads
             (nome, telefone, telefone_norm, origem, etapa, responsavel_id, observacoes, criado_em)
             VALUES (?,?,?,?,?,?,?,?)""",
@@ -11403,10 +11477,8 @@ def api_whatsapp_enviar_direto():
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                      (lead_id, 'Extensão WhatsApp', 'criacao',
                       'Lead criado automaticamente ao mandar mensagem pela extensão.', _agora_sp()))
-    elif not lead_id and not tel_norm:
-        # Contato sem número (business/privacidade @lid) e sem lead casado: NÃO cria
-        # lead-lixo. O envio segue pelo chat_id; reporta pros admins pegarem o número.
-        _sem_numero_reportar = True
+        if not tel_norm:
+            _sem_numero_reportar = True  # nasceu sem número — pedir pra alguém completar
 
     # Se veio de um modelo salvo com MÍDIA (áudio/imagem), a fila manda a mídia
     # (item A) — texto vira legenda. Sem mídia, é texto puro como antes.
