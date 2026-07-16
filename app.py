@@ -1931,6 +1931,9 @@ def init_db():
         # e Funil de conteúdo disparado quando o lead responde (fica quente).
         ("campanha", "saudacao_categoria", "TEXT"),
         ("campanha", "funil_id", "INTEGER"),
+        # Quem participa da roleta de disparo (qualquer perfil — admin tb pode).
+        # Escolhido a dedo pelo admin, não amarrado a perfil='consultor'.
+        ("usuarios", "disparo_participa", "INTEGER DEFAULT 0"),
         # Auto-disparo do funil quando o lead responde: liberar_em segura o item na
         # fila até a hora (delay proposital/aleatório); funil_em guarda quando o
         # funil da campanha já foi disparado pro contato (não dispara duas vezes).
@@ -5421,6 +5424,14 @@ def comissoes_problemas():
 # diário por consultor (aquecimento). Envio de verdade = extensão de cada um.
 
 def _campanha_consultores_ativos(conn):
+    """Participantes da roleta: usuários MARCADOS (disparo_participa=1), de qualquer
+    perfil (admin também pode entrar — Guilherme, etc.). Se ninguém foi marcado
+    ainda, cai no padrão antigo (consultores ativos) pra não quebrar nada."""
+    rows = conn.execute(
+        "SELECT id,nome FROM usuarios WHERE ativo=1 AND COALESCE(disparo_participa,0)=1 ORDER BY nome"
+    ).fetchall()
+    if rows:
+        return rows
     return conn.execute(
         "SELECT id,nome FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome"
     ).fetchall()
@@ -5693,10 +5704,31 @@ def campanhas():
     funis = [dict(r) for r in conn.execute(
         "SELECT id, nome, categoria FROM whatsapp_funis WHERE COALESCE(ativo,1)=1 ORDER BY nome").fetchall()]
     presenca = _consultores_presenca(conn)
+    todos_usuarios = [dict(r) for r in conn.execute(
+        "SELECT id, nome, perfil, COALESCE(disparo_participa,0) participa FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()]
     close_db(conn)
     return render_template('campanhas.html', campanhas=[dict(r) for r in rows],
                            pastas_saudacao=pastas, funis=funis, presenca=presenca,
+                           todos_usuarios=todos_usuarios,
                            versao_min=_EXT_VERSAO_MIN_DISPARO, versao_atual=_extensao_versao())
+
+
+@app.route('/campanhas/participantes', methods=['POST'])
+@login_required
+@admin_required
+def campanhas_participantes():
+    """Define QUEM participa da roleta de disparo — qualquer usuário ativo (admin
+    incluso), escolhido a dedo. Recebe a lista de ids marcados; zera o resto."""
+    ids = (request.json or {}).get('ids') or []
+    conn = db()
+    conn.execute("UPDATE usuarios SET disparo_participa=0 WHERE ativo=1")
+    for uid in ids:
+        try:
+            conn.execute("UPDATE usuarios SET disparo_participa=1 WHERE id=?", (int(uid),))
+        except (TypeError, ValueError):
+            pass
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "participantes": len(ids)})
 
 
 @app.route('/campanhas/acompanhamento')
@@ -11112,7 +11144,7 @@ def _consultores_presenca(conn):
            conn.execute("SELECT usuario_id, versao, numero, wpp_ok, visto_em FROM consultor_wpp_status").fetchall()}
     ver_atual = _extensao_versao()
     out = []
-    for u in conn.execute("SELECT id, nome FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome").fetchall():
+    for u in _campanha_consultores_ativos(conn):
         s = stt.get(u['id'])
         online = False
         if s and s.get('visto_em'):
