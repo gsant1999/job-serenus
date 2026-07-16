@@ -5679,6 +5679,42 @@ def campanhas():
                            pastas_saudacao=pastas, funis=funis)
 
 
+@app.route('/campanhas/acompanhamento')
+@login_required
+@admin_required
+def campanhas_acompanhamento():
+    """Sub-módulo de acompanhamento: painel ao vivo de como o disparo está rodando
+    — KPIs globais, fila agora por consultor, últimos envios e últimas respostas."""
+    conn = db()
+    _campanha_marcar_sem_resposta(conn)
+    hoje = _agora_sp()[:10]
+    g = conn.execute("""SELECT
+        (SELECT COUNT(*) FROM campanha WHERE status='ativa') ativas,
+        (SELECT COUNT(*) FROM campanha_contato) contatos,
+        (SELECT COUNT(*) FROM campanha_contato WHERE status='respondeu') respondeu,
+        (SELECT COUNT(*) FROM campanha_contato WHERE status='enviado' AND respondeu_em IS NULL) aguardando,
+        (SELECT COUNT(*) FROM campanha_contato WHERE status='sem_resposta') sem_resposta,
+        (SELECT COUNT(*) FROM campanha_contato WHERE enviado_em IS NOT NULL AND substr(CAST(enviado_em AS TEXT),1,10)=?) enviados_hoje,
+        (SELECT COUNT(*) FROM whatsapp_extensao_fila WHERE origem IN ('campanha','campanha_funil') AND status IN ('pendente','enviando')) na_fila
+        """, (hoje,)).fetchone()
+    porcons = conn.execute("""SELECT u.nome,
+        (SELECT COUNT(*) FROM whatsapp_extensao_fila f WHERE f.responsavel_id=u.id AND f.origem IN ('campanha','campanha_funil') AND f.status IN ('pendente','enviando')) na_fila,
+        (SELECT COUNT(*) FROM campanha_contato cc WHERE cc.consultor_id=u.id AND cc.enviado_em IS NOT NULL AND substr(CAST(cc.enviado_em AS TEXT),1,10)=?) enviados_hoje,
+        (SELECT COUNT(*) FROM campanha_contato cc WHERE cc.consultor_id=u.id AND cc.status='respondeu') respondeu
+        FROM usuarios u WHERE u.ativo=1 AND u.perfil='consultor' ORDER BY u.nome""", (hoje,)).fetchall()
+    ult_resp = conn.execute("""SELECT cc.nome, cc.telefone_norm, cc.respondeu_em, u.nome consultor, c.nome campanha, c.id cid
+        FROM campanha_contato cc JOIN campanha c ON c.id=cc.campanha_id LEFT JOIN usuarios u ON u.id=cc.consultor_id
+        WHERE cc.status='respondeu' AND cc.respondeu_em IS NOT NULL
+        ORDER BY cc.respondeu_em DESC LIMIT 12""").fetchall()
+    ult_env = conn.execute("""SELECT cc.nome, cc.enviado_em, u.nome consultor, c.nome campanha, c.id cid
+        FROM campanha_contato cc JOIN campanha c ON c.id=cc.campanha_id LEFT JOIN usuarios u ON u.id=cc.consultor_id
+        WHERE cc.enviado_em IS NOT NULL ORDER BY cc.enviado_em DESC LIMIT 12""").fetchall()
+    close_db(conn)
+    return render_template('campanha_acompanhamento.html', g=dict(g),
+                           porcons=[dict(r) for r in porcons],
+                           ult_resp=[dict(r) for r in ult_resp], ult_env=[dict(r) for r in ult_env])
+
+
 @app.route('/campanha/criar', methods=['POST'])
 @login_required
 @admin_required
