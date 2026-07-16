@@ -368,6 +368,41 @@
     });
   }
 
+  // ── Popup pra pedir o número quando o WhatsApp não expõe (conta business/@lid).
+  //    Sem isso, o CRM criava um lead novo SEM número a cada envio (duplicado).
+  //    Devolve os dígitos digitados (ou '' se o consultor pular). ──
+  function pedirNumeroManual(nome) {
+    return new Promise((resolve) => {
+      const wrap = document.createElement('div');
+      wrap.id = 'job-num-modal';
+      wrap.innerHTML =
+        '<div class="job-num-box">' +
+          '<div class="job-num-tit">Número não identificado</div>' +
+          '<div class="job-num-txt">O WhatsApp não mostrou o número de <b>' + ((nome || 'este contato').replace(/</g, '')) + '</b> (conta business ou de privacidade). Informe o WhatsApp dele pra salvar no CRM:</div>' +
+          '<input class="job-num-inp" type="tel" inputmode="numeric" placeholder="Ex: 19 99999-8888" />' +
+          '<div class="job-num-acoes">' +
+            '<button class="job-num-pular" type="button">Pular</button>' +
+            '<button class="job-num-ok" type="button">Salvar e enviar</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(wrap);
+      const inp = wrap.querySelector('.job-num-inp');
+      setTimeout(() => inp.focus(), 50);
+      function fim(v) { wrap.remove(); resolve((v || '').trim()); }
+      wrap.querySelector('.job-num-pular').addEventListener('click', () => fim(''));
+      wrap.querySelector('.job-num-ok').addEventListener('click', () => fim(inp.value));
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') fim(inp.value); if (e.key === 'Escape') fim(''); });
+    });
+  }
+
+  // Garante um número pro lead: tenta pela wa-js; se não der, pergunta ao consultor.
+  async function garantirTelefone(nome) {
+    let tel = '';
+    try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+    if (tel) return tel;
+    return await pedirNumeroManual(nome);
+  }
+
   // ── Número do PRÓPRIO WhatsApp logado (o do consultor), via wa-js. Vai junto
   //    da análise pro JOB atribuir o lead a quem está de fato conversando.
   //    Cacheado: não muda durante a sessão. ──
@@ -1279,9 +1314,7 @@
     // contato salvo e @lid). Telefone é só best-effort, pra casar o lead no CRM.
     let chatId = '';
     try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
-    let telefone = '';
-    try { telefone = (await pedirTelefoneWpp()) || telefoneDoContato(); }
-    catch (e) { telefone = telefoneDoContato(); }
+    let telefone = await garantirTelefone(nome);
     if (!chatId && !telefone) {
       if (st) st.textContent = 'Não consegui identificar a conversa. Abra a conversa e tente de novo.';
       btn.disabled = false;
@@ -1541,8 +1574,7 @@
     if (!chatId) { alert('Abra a conversa do cliente antes de disparar o funil.'); return; }
     const nome = nomeDoContato() || 'este contato';
     if (!confirm('Disparar o funil "' + funil.nome + '" (' + funil.passos.length + ' passo(s)) para ' + nome + '?')) return;
-    let telefone = '';
-    try { telefone = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { telefone = telefoneDoContato(); }
+    let telefone = await garantirTelefone(nome);
 
     _funilRodando = true; _funilCancelar = false;
     const prog = abrirProgressoFunil(funil, nome);

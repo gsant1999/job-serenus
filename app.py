@@ -11372,6 +11372,7 @@ def api_whatsapp_enviar_direto():
         close_db(conn)
         return _wa_cors(jsonify({"ok": False, "erro": "Selecione seu usuário no popup da extensão antes de mandar mensagem"})), 400
 
+    _sem_numero_reportar = False
     tel_norm = _normalizar_telefone(telefone)
     lead = _buscar_lead_por_telefone(conn, tel_norm)
     if not lead and nome:
@@ -11384,7 +11385,14 @@ def api_whatsapp_enviar_direto():
             if len(so_meus) == 1:
                 lead = so_meus[0]
     lead_id = lead['id'] if lead else None
-    if not lead_id and (tel_norm or nome):
+    # Se casou um lead que estava sem número e AGORA temos, completa (deixa de ser órfão).
+    if lead_id and tel_norm:
+        conn.execute("""UPDATE crm_leads SET telefone=COALESCE(NULLIF(telefone,''),?),
+            telefone_norm=COALESCE(NULLIF(telefone_norm,''),?) WHERE id=?""",
+            (telefone, tel_norm, lead_id))
+    if not lead_id and tel_norm:
+        # Só cria lead quando TEM número — sem número não dá pra deduplicar e virava
+        # um lead novo a cada envio (bug do 'Andrea' repetido, contato business/@lid).
         conn.execute("""INSERT INTO crm_leads
             (nome, telefone, telefone_norm, origem, etapa, responsavel_id, observacoes, criado_em)
             VALUES (?,?,?,?,?,?,?,?)""",
@@ -11395,6 +11403,10 @@ def api_whatsapp_enviar_direto():
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                      (lead_id, 'Extensão WhatsApp', 'criacao',
                       'Lead criado automaticamente ao mandar mensagem pela extensão.', _agora_sp()))
+    elif not lead_id and not tel_norm:
+        # Contato sem número (business/privacidade @lid) e sem lead casado: NÃO cria
+        # lead-lixo. O envio segue pelo chat_id; reporta pros admins pegarem o número.
+        _sem_numero_reportar = True
 
     # Se veio de um modelo salvo com MÍDIA (áudio/imagem), a fila manda a mídia
     # (item A) — texto vira legenda. Sem mídia, é texto puro como antes.
@@ -11422,7 +11434,16 @@ def api_whatsapp_enviar_direto():
     if modelo_id:
         conn.execute("UPDATE modelos_conteudo SET vezes_usado = COALESCE(vezes_usado,0) + 1 WHERE id=? AND tipo='whatsapp'", (modelo_id,))
     conn.commit(); close_db(conn)
-    return _wa_cors(jsonify({"ok": True, "id": fila_id, "lead_id": lead_id}))
+    if _sem_numero_reportar:
+        # Reporta 1x pros admins: contato sem número exposto, ninguém foi cadastrado.
+        try:
+            _notificar_admins('lead_sem_numero', 'Contato de WhatsApp sem número',
+                f'{nome or "Contato"} recebeu mensagem pela extensão, mas o WhatsApp não expôs o número '
+                '(conta business/privacidade). O lead NÃO foi cadastrado — peça o número ao cliente.', '/crm')
+        except Exception:
+            pass
+    return _wa_cors(jsonify({"ok": True, "id": fila_id, "lead_id": lead_id,
+                             "precisa_numero": _sem_numero_reportar}))
 
 
 @app.route('/api/whatsapp/extensao/modelos', methods=['GET', 'OPTIONS'])
