@@ -5749,11 +5749,14 @@ def campanhas_acompanhamento():
         (SELECT COUNT(*) FROM campanha_contato WHERE enviado_em IS NOT NULL AND substr(CAST(enviado_em AS TEXT),1,10)=?) enviados_hoje,
         (SELECT COUNT(*) FROM whatsapp_extensao_fila WHERE origem IN ('campanha','campanha_funil') AND status IN ('pendente','enviando')) na_fila
         """, (hoje,)).fetchone()
-    porcons = conn.execute("""SELECT u.nome,
+    # MESMA lista de participantes da página de Disparos (não mais perfil='consultor').
+    ids_part = [u['id'] for u in _campanha_consultores_ativos(conn)]
+    ph = ','.join(['?'] * len(ids_part)) or 'NULL'
+    porcons = conn.execute(f"""SELECT u.nome,
         (SELECT COUNT(*) FROM whatsapp_extensao_fila f WHERE f.responsavel_id=u.id AND f.origem IN ('campanha','campanha_funil') AND f.status IN ('pendente','enviando')) na_fila,
         (SELECT COUNT(*) FROM campanha_contato cc WHERE cc.consultor_id=u.id AND cc.enviado_em IS NOT NULL AND substr(CAST(cc.enviado_em AS TEXT),1,10)=?) enviados_hoje,
         (SELECT COUNT(*) FROM campanha_contato cc WHERE cc.consultor_id=u.id AND cc.status='respondeu') respondeu
-        FROM usuarios u WHERE u.ativo=1 AND u.perfil='consultor' ORDER BY u.nome""", (hoje,)).fetchall()
+        FROM usuarios u WHERE u.id IN ({ph}) ORDER BY u.nome""", (hoje, *ids_part)).fetchall() if ids_part else []
     ult_resp = conn.execute("""SELECT cc.nome, cc.telefone_norm, cc.respondeu_em, u.nome consultor, c.nome campanha, c.id cid
         FROM campanha_contato cc JOIN campanha c ON c.id=cc.campanha_id LEFT JOIN usuarios u ON u.id=cc.consultor_id
         WHERE cc.status='respondeu' AND cc.respondeu_em IS NOT NULL
