@@ -896,6 +896,30 @@ def init_db():
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 enviado_em TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS campanha (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL,
+                mensagens TEXT NOT NULL DEFAULT '[]',
+                teto_dia INTEGER NOT NULL DEFAULT 20,
+                status TEXT NOT NULL DEFAULT 'ativa',
+                criado_por INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS campanha_contato (
+                id SERIAL PRIMARY KEY,
+                campanha_id INTEGER NOT NULL,
+                nome TEXT,
+                razao_social TEXT,
+                telefone TEXT,
+                telefone_norm TEXT,
+                email TEXT,
+                consultor_id INTEGER,
+                status TEXT NOT NULL DEFAULT 'pendente',
+                fila_id INTEGER,
+                enviado_em TIMESTAMP,
+                respondeu_em TIMESTAMP,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS whatsapp_funis (
                 id SERIAL PRIMARY KEY,
                 nome TEXT NOT NULL,
@@ -1389,6 +1413,30 @@ def init_db():
             criado_por INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             enviado_em TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS campanha (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            mensagens TEXT NOT NULL DEFAULT '[]',
+            teto_dia INTEGER NOT NULL DEFAULT 20,
+            status TEXT NOT NULL DEFAULT 'ativa',
+            criado_por INTEGER,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS campanha_contato (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campanha_id INTEGER NOT NULL,
+            nome TEXT,
+            razao_social TEXT,
+            telefone TEXT,
+            telefone_norm TEXT,
+            email TEXT,
+            consultor_id INTEGER,
+            status TEXT NOT NULL DEFAULT 'pendente',
+            fila_id INTEGER,
+            enviado_em TIMESTAMP,
+            respondeu_em TIMESTAMP,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS whatsapp_funis (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -5336,6 +5384,268 @@ def comissoes_problemas():
 </table>
 </body></html>"""
     return html
+
+
+# ═══════════════ DISPARO EM ROLETA (campanhas do mês) ═══════════════
+# Sobe uma lista, distribui em rodízio entre os consultores e alimenta a fila
+# de envio que a extensão JÁ consome (ritmo por consultor mora na fila). Aqui é
+# só o cérebro: importar, atribuir na roleta, gerar VCF e pingar a fila com teto
+# diário por consultor (aquecimento). Envio de verdade = extensão de cada um.
+
+def _campanha_consultores_ativos(conn):
+    return conn.execute(
+        "SELECT id,nome FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome"
+    ).fetchall()
+
+
+def _campanha_roleta(conn, campanha_id):
+    """Distribui em rodízio os contatos ainda sem dono entre os consultores ativos.
+    Roda equilibrando: continua a partir de quem já tem menos contatos na campanha."""
+    cons = _campanha_consultores_ativos(conn)
+    if not cons:
+        return 0
+    ids = [c['id'] for c in cons]
+    # quantos cada consultor já tem nesta campanha (pra continuar equilibrado)
+    carga = {i: 0 for i in ids}
+    for r in conn.execute("SELECT consultor_id, COUNT(*) c FROM campanha_contato WHERE campanha_id=? AND consultor_id IS NOT NULL GROUP BY consultor_id", (campanha_id,)).fetchall():
+        if r['consultor_id'] in carga:
+            carga[r['consultor_id']] = r['c']
+    pend = conn.execute("SELECT id FROM campanha_contato WHERE campanha_id=? AND consultor_id IS NULL ORDER BY id", (campanha_id,)).fetchall()
+    n = 0
+    for row in pend:
+        alvo = min(ids, key=lambda i: carga[i])  # sempre pro que tem menos
+        conn.execute("UPDATE campanha_contato SET consultor_id=? WHERE id=?", (alvo, row['id']))
+        carga[alvo] += 1
+        n += 1
+    return n
+
+
+def _campanha_enfileirar(conn, campanha_id, texto_fallback=''):
+    """Empurra pra fila da extensão até o teto diário de cada consultor (o que já
+    entrou na fila hoje conta). A fila espaça os envios por consultor (gate). Cada
+    contato leva uma variação sorteada da mensagem. Idempotente por dia."""
+    import random as _rnd, json as _json
+    camp = conn.execute("SELECT * FROM campanha WHERE id=?", (campanha_id,)).fetchone()
+    if not camp or camp['status'] != 'ativa':
+        return 0
+    try:
+        msgs = _json.loads(camp['mensagens'] or '[]')
+    except Exception:
+        msgs = []
+    msgs = [m for m in msgs if (m or '').strip()] or [texto_fallback or 'Bom dia, tudo bem?']
+    teto = int(camp['teto_dia'] or 20)
+    hoje = _agora_sp()[:10]
+    n = 0
+    for c in _campanha_consultores_ativos(conn):
+        cid = c['id']
+        ja_hoje = conn.execute("""SELECT COUNT(*) q FROM campanha_contato cc
+            WHERE cc.campanha_id=? AND cc.consultor_id=? AND cc.enviado_em IS NOT NULL
+              AND substr(CAST(cc.enviado_em AS TEXT),1,10)=?""", (campanha_id, cid, hoje)).fetchone()['q']
+        # já enfileirados hoje mas ainda não enviados também contam pro teto
+        na_fila = conn.execute("""SELECT COUNT(*) q FROM campanha_contato cc
+            JOIN whatsapp_extensao_fila f ON f.id=cc.fila_id
+            WHERE cc.campanha_id=? AND cc.consultor_id=? AND cc.status='enfileirado'
+              AND f.status IN ('pendente','enviando')""", (campanha_id, cid)).fetchone()['q']
+        resta = teto - ja_hoje - na_fila
+        if resta <= 0:
+            continue
+        alvos = conn.execute("""SELECT * FROM campanha_contato
+            WHERE campanha_id=? AND consultor_id=? AND status='pendente'
+              AND telefone_norm IS NOT NULL AND telefone_norm<>'' ORDER BY id LIMIT ?""",
+            (campanha_id, cid, resta)).fetchall()
+        for ct in alvos:
+            chat_id = _wa_chat_id(ct['telefone_norm'] or ct['telefone'] or '')
+            if not chat_id:
+                conn.execute("UPDATE campanha_contato SET status='invalido' WHERE id=?", (ct['id'],))
+                continue
+            texto = _rnd.choice(msgs)
+            if '{nome}' in texto:
+                texto = texto.replace('{nome}', (ct['nome'] or '').split(' ')[0] or 'tudo bem')
+            conn.execute("""INSERT INTO whatsapp_extensao_fila
+                (lead_id, responsavel_id, telefone, chat_id, tipo, texto, origem, criado_por)
+                VALUES (?,?,?,?,?,?,'campanha',?)""",
+                (None, cid, ct['telefone'] or ct['telefone_norm'], chat_id, 'texto', texto, cid))
+            fila_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+                       else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+            conn.execute("UPDATE campanha_contato SET status='enfileirado', fila_id=? WHERE id=?", (fila_id, ct['id']))
+            n += 1
+    conn.commit()
+    return n
+
+
+def _campanha_parse_lista(texto):
+    """Lê a lista colada (uma pessoa por linha, colunas separadas por TAB/;/vírgula).
+    Robusto à ordem: acha o telefone pela quantidade de dígitos, o e-mail pelo @,
+    o resto vira nome/razão. Devolve [{nome, razao_social, telefone, telefone_norm, email}]."""
+    import re as _re
+    out = []
+    for linha in (texto or '').splitlines():
+        linha = linha.strip()
+        if not linha:
+            continue
+        partes = [p.strip() for p in _re.split(r'\t|;|,', linha) if p.strip()]
+        if not partes:
+            continue
+        email = next((p for p in partes if '@' in p), '')
+        tel = ''
+        for p in partes:
+            dig = _re.sub(r'\D', '', p)
+            if len(dig) >= 10:  # telefone BR com DDD
+                tel = p; break
+        textos = [p for p in partes if p not in (email, tel)]
+        nome = textos[0] if textos else ''
+        razao = textos[1] if len(textos) > 1 else ''
+        norm = _normalizar_telefone(tel) if tel else ''
+        if not (nome or tel):
+            continue
+        out.append({'nome': nome, 'razao_social': razao, 'telefone': tel,
+                    'telefone_norm': norm, 'email': email})
+    return out
+
+
+@app.route('/campanhas')
+@login_required
+@admin_required
+def campanhas():
+    conn = db()
+    rows = conn.execute("""SELECT c.*,
+        (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id) total,
+        (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.enviado_em IS NOT NULL) enviados,
+        (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.status='respondeu') respondeu
+        FROM campanha c ORDER BY c.id DESC""").fetchall()
+    close_db(conn)
+    return render_template('campanhas.html', campanhas=[dict(r) for r in rows])
+
+
+@app.route('/campanha/criar', methods=['POST'])
+@login_required
+@admin_required
+def campanha_criar():
+    import json as _json
+    d = request.form
+    nome = (d.get('nome') or '').strip() or f"Campanha {_agora_sp()[:10]}"
+    try: teto = max(1, int(d.get('teto_dia') or 20))
+    except Exception: teto = 20
+    msgs = [m.strip() for m in (d.get('mensagens') or '').split('\n---\n') if m.strip()]
+    if not msgs:
+        msgs = [(d.get('mensagens') or 'Bom dia, tudo bem?').strip()]
+    contatos = _campanha_parse_lista(d.get('lista') or '')
+    if not contatos:
+        return redirect(url_for('campanhas'))
+    conn = db()
+    conn.execute("INSERT INTO campanha (nome, mensagens, teto_dia, status, criado_por) VALUES (?,?,?,'ativa',?)",
+                 (nome, _json.dumps(msgs, ensure_ascii=False), teto, session.get('user_id')))
+    cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    vistos = set()
+    for c in contatos:
+        chave = c['telefone_norm'] or c['telefone']
+        if chave and chave in vistos:
+            continue  # dedup por telefone dentro da mesma campanha
+        vistos.add(chave)
+        conn.execute("""INSERT INTO campanha_contato
+            (campanha_id, nome, razao_social, telefone, telefone_norm, email, status)
+            VALUES (?,?,?,?,?,?,'pendente')""",
+            (cid, c['nome'], c['razao_social'], c['telefone'], c['telefone_norm'], c['email']))
+    _campanha_roleta(conn, cid)
+    conn.commit(); close_db(conn)
+    return redirect(url_for('campanha_detalhe', cid=cid))
+
+
+@app.route('/campanha/<int:cid>')
+@login_required
+@admin_required
+def campanha_detalhe(cid):
+    conn = db()
+    camp = conn.execute("SELECT * FROM campanha WHERE id=?", (cid,)).fetchone()
+    if not camp:
+        close_db(conn); return "Campanha não encontrada", 404
+    contatos = conn.execute("""SELECT cc.*, u.nome consultor_nome FROM campanha_contato cc
+        LEFT JOIN usuarios u ON u.id=cc.consultor_id WHERE cc.campanha_id=? ORDER BY cc.id""", (cid,)).fetchall()
+    porcons = conn.execute("""SELECT u.id, u.nome,
+        COUNT(*) total,
+        SUM(CASE WHEN cc.enviado_em IS NOT NULL THEN 1 ELSE 0 END) enviados,
+        SUM(CASE WHEN cc.status='respondeu' THEN 1 ELSE 0 END) respondeu
+        FROM campanha_contato cc JOIN usuarios u ON u.id=cc.consultor_id
+        WHERE cc.campanha_id=? GROUP BY u.id, u.nome ORDER BY u.nome""", (cid,)).fetchall()
+    close_db(conn)
+    import json as _json
+    try: msgs = _json.loads(camp['mensagens'] or '[]')
+    except Exception: msgs = []
+    return render_template('campanha_detalhe.html', camp=dict(camp), msgs=msgs,
+                           contatos=[dict(r) for r in contatos],
+                           porcons=[dict(r) for r in porcons])
+
+
+@app.route('/campanha/<int:cid>/vcf')
+@login_required
+@admin_required
+def campanha_vcf(cid):
+    """Baixa um .vcf (agenda) com os contatos de um consultor — ele importa no
+    celular (Android ou iPhone abrem nativo) e os contatos ficam salvos antes do
+    disparo. Cross-platform, sem integração."""
+    consultor_id = request.args.get('consultor', type=int)
+    conn = db()
+    if consultor_id:
+        rows = conn.execute("SELECT nome, telefone_norm, telefone, email FROM campanha_contato WHERE campanha_id=? AND consultor_id=? ORDER BY nome", (cid, consultor_id)).fetchall()
+        u = conn.execute("SELECT nome FROM usuarios WHERE id=?", (consultor_id,)).fetchone()
+        etiqueta = (u['nome'] if u else 'consultor').split(' ')[0]
+    else:
+        rows = conn.execute("SELECT nome, telefone_norm, telefone, email FROM campanha_contato WHERE campanha_id=? ORDER BY nome", (cid,)).fetchall()
+        etiqueta = 'todos'
+    close_db(conn)
+    linhas = []
+    for r in rows:
+        tel = r['telefone_norm'] or r['telefone'] or ''
+        if not tel:
+            continue
+        nome = (r['nome'] or tel).replace('\n', ' ').strip()
+        linhas.append("BEGIN:VCARD\nVERSION:3.0\nN:;{n};;;\nFN:{n}\nTEL;TYPE=CELL:+{t}\n{e}END:VCARD".format(
+            n=nome, t=tel, e=(f"EMAIL:{r['email']}\n" if r['email'] else '')))
+    vcf = "\n".join(linhas) + "\n"
+    return Response(vcf, mimetype='text/vcard',
+                    headers={'Content-Disposition': f'attachment; filename=campanha{cid}-{etiqueta}.vcf'})
+
+
+@app.route('/campanha/<int:cid>/enfileirar', methods=['POST'])
+@login_required
+@admin_required
+def campanha_enfileirar_rota(cid):
+    conn = db()
+    n = _campanha_enfileirar(conn, cid)
+    close_db(conn)
+    return jsonify({"ok": True, "enfileirados": n})
+
+
+@app.route('/campanha/<int:cid>/status', methods=['POST'])
+@login_required
+@admin_required
+def campanha_status(cid):
+    novo = (request.json or {}).get('status', 'ativa')
+    if novo not in ('ativa', 'pausada', 'concluida'):
+        return jsonify({"ok": False}), 400
+    conn = db()
+    conn.execute("UPDATE campanha SET status=? WHERE id=?", (novo, cid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "status": novo})
+
+
+@app.route('/api/whatsapp/campanha/resposta', methods=['POST', 'OPTIONS'])
+def api_whatsapp_campanha_resposta():
+    """A extensão avisa quando um número de campanha RESPONDEU. Marca o contato
+    como 'respondeu' (fica quente, libera o disparo do contexto). Chave da extensão."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
+    tel = _normalizar_telefone(str((request.json or {}).get('telefone') or ''))
+    if not tel:
+        return _wa_cors(jsonify({"ok": False, "erro": "telefone"})), 400
+    conn = db()
+    conn.execute("""UPDATE campanha_contato SET status='respondeu', respondeu_em=?
+        WHERE telefone_norm=? AND status IN ('enfileirado','enviado')""", (_agora_sp(), tel))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
 
 
 @app.route('/api/consultores')
@@ -10572,8 +10882,18 @@ def api_whatsapp_estado():
 # enfileira, a extensão consulta periodicamente ("puxa" o trabalho, mesmo
 # padrão do _importar_leads_automatico) e confirma depois de mandar.
 _WA_FILA_GATE_SEGUNDOS = int(os.environ.get('WA_FILA_GATE_SEGUNDOS', '12'))
+_WA_FILA_GATE_MAX = int(os.environ.get('WA_FILA_GATE_MAX', '45'))
 _WA_FILA_RECLAIM_MINUTOS = 3
 _WA_FILA_MAX_TENTATIVAS = 3
+
+
+def _wa_gate_atual():
+    """Intervalo mínimo ATÉ o próximo envio do mesmo consultor — sorteado a cada
+    consulta entre GATE e GATE_MAX. Aleatório de propósito: envio de X em X segundos
+    cravado é padrão de robô e queima número; intervalo quebrado parece humano."""
+    import random as _rnd
+    lo, hi = _WA_FILA_GATE_SEGUNDOS, max(_WA_FILA_GATE_SEGUNDOS, _WA_FILA_GATE_MAX)
+    return _rnd.uniform(lo, hi)
 
 
 def _wa_chat_id(telefone):
@@ -10659,7 +10979,7 @@ def api_whatsapp_fila_proximo():
         WHERE responsavel_id=? AND status='enviado'""", (usuario_id,)).fetchone()
     if ultimo and ultimo['m']:
         decorrido = _wa_segundos_desde(ultimo['m'])
-        if decorrido is not None and decorrido < _WA_FILA_GATE_SEGUNDOS:
+        if decorrido is not None and decorrido < _wa_gate_atual():
             close_db(conn)
             return _wa_cors(jsonify({"ok": True, "item": None}))
     agora = datetime.now(TZ_SP)
@@ -10712,6 +11032,9 @@ def api_whatsapp_fila_confirmar(fid):
     if bool(d.get('ok')):
         conn.execute("""UPDATE whatsapp_extensao_fila SET status='enviado', enviado_em=?, wpp_msg_id=? WHERE id=?""",
                      (_agora_sp(), str(d.get('wpp_msg_id') or '')[:100], fid))
+        if it.get('origem') == 'campanha':
+            conn.execute("UPDATE campanha_contato SET status='enviado', enviado_em=? WHERE fila_id=?",
+                         (_agora_sp(), fid))
         if it['lead_id']:
             conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
                             VALUES (?,?,?,?,?)""",

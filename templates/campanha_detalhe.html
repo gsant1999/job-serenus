@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+{% block title %}{{ camp.nome }}{% endblock %}
+
+{% block head %}
+<style>
+.cons-row { display:grid; grid-template-columns:1.4fr .7fr .7fr .7fr auto; gap:12px; align-items:center; padding:12px 18px; border-bottom:1px solid var(--borda); font-size:13.5px; }
+.cons-row:last-child { border-bottom:none; }
+.cons-head { font-size:10.5px; color:var(--cinza-2); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+.st { font-size:11px; padding:2px 9px; border-radius:12px; font-weight:600; }
+.st.pendente { background:rgba(148,163,184,.15); color:var(--cinza); }
+.st.enfileirado { background:rgba(59,130,246,.14); color:var(--info); }
+.st.enviado { background:rgba(31,216,164,.12); color:var(--teal); }
+.st.respondeu { background:rgba(31,216,164,.2); color:var(--teal); font-weight:700; }
+.st.invalido, .st.sem_resposta { background:rgba(244,63,94,.12); color:var(--rosa); }
+.ct-row { display:grid; grid-template-columns:1.4fr 1fr .8fr auto; gap:10px; padding:9px 18px; border-bottom:1px solid var(--borda); font-size:12.5px; align-items:center; }
+.msgvar { background:var(--fundo-2,#14141c); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; font-size:13px; margin:6px 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head" style="display:flex;align-items:center;justify-content:space-between;">
+  <div>
+    <h1>{{ camp.nome }}</h1>
+    <div class="sub">Campanha #{{ camp.id }} · {{ contatos|length }} contatos · teto {{ camp.teto_dia }}/dia por consultor · <span id="st-label">{{ camp.status }}</span></div>
+  </div>
+  <div style="display:flex;gap:8px;">
+    <a href="/campanhas" class="btn-outline" style="text-decoration:none;">Voltar</a>
+    <button class="btn-outline" onclick="mudarStatus(camp_status=='ativa'?'pausada':'ativa')" id="btn-pausar">{{ 'Pausar' if camp.status=='ativa' else 'Retomar' }}</button>
+    <button class="btn" onclick="enfileirar(this)">Enviar lote de hoje</button>
+  </div>
+</div>
+
+<div class="card" style="padding:16px 20px;margin-bottom:16px;">
+  <div style="font-size:12.5px;color:var(--cinza);line-height:1.6;">
+    <b style="color:var(--texto);">Como rodar:</b> 1) cada consultor baixa o <b>VCF dele</b> abaixo e importa no celular (salva os contatos). 2) Clique em <b>Enviar lote de hoje</b> — o sistema coloca até {{ camp.teto_dia }} por consultor na fila; a extensão de cada um dispara com intervalo aleatório. 3) Quem responder vira <b>quente</b>; quem não responder, o consultor apaga a conversa.
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-header"><h3>Por consultor</h3></div>
+  <div class="cons-row cons-head"><div>Consultor</div><div>Contatos</div><div>Enviados</div><div>Responderam</div><div>Agenda (VCF)</div></div>
+  {% for pc in porcons %}
+  <div class="cons-row">
+    <div>{{ pc.nome }}</div>
+    <div>{{ pc.total }}</div>
+    <div style="color:var(--info);">{{ pc.enviados or 0 }}</div>
+    <div style="color:var(--teal);">{{ pc.respondeu or 0 }}</div>
+    <div><a class="btn-outline" style="text-decoration:none;padding:5px 12px;font-size:12px;" href="/campanha/{{ camp.id }}/vcf?consultor={{ pc.id }}">Baixar VCF</a></div>
+  </div>
+  {% else %}
+  <div style="padding:18px;color:var(--cinza);">Nenhum consultor ativo pra distribuir. Cadastre consultores.</div>
+  {% endfor %}
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-header"><h3>Mensagens ({{ msgs|length }} variação{{ 'ões' if msgs|length != 1 else '' }})</h3></div>
+  <div style="padding:14px 18px;">
+    {% for m in msgs %}<div class="msgvar">{{ m }}</div>{% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+    <h3>Contatos</h3>
+    <a class="btn-outline" style="text-decoration:none;padding:5px 12px;font-size:12px;" href="/campanha/{{ camp.id }}/vcf">Baixar VCF (todos)</a>
+  </div>
+  <div class="ct-row cons-head"><div>Nome</div><div>Telefone</div><div>Consultor</div><div>Status</div></div>
+  {% for ct in contatos %}
+  <div class="ct-row">
+    <div>{{ ct.nome or '—' }}{% if ct.razao_social %}<div style="color:var(--cinza);font-size:11px;">{{ ct.razao_social }}</div>{% endif %}</div>
+    <div>{{ ct.telefone or ct.telefone_norm or '—' }}</div>
+    <div>{{ ct.consultor_nome or '—' }}</div>
+    <div><span class="st {{ ct.status }}">{{ ct.status }}</span></div>
+  </div>
+  {% endfor %}
+</div>
+
+<script>
+const camp_status = "{{ camp.status }}";
+async function enfileirar(btn){
+  btn.disabled=true; const t=btn.textContent; btn.textContent='Enviando...';
+  try{
+    const r=await fetch('/campanha/{{ camp.id }}/enfileirar',{method:'POST'});
+    const d=await r.json();
+    toast(d.ok ? (d.enfileirados+' contato(s) na fila. A extensão vai disparando.') : 'Erro', d.ok?'ok':'err');
+    setTimeout(()=>location.reload(), 1200);
+  }catch(e){ toast('Erro de conexão','err'); btn.disabled=false; btn.textContent=t; }
+}
+async function mudarStatus(novo){
+  try{
+    const r=await fetch('/campanha/{{ camp.id }}/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:novo})});
+    const d=await r.json();
+    if(d.ok){ toast('Campanha '+novo,'ok'); setTimeout(()=>location.reload(),700); }
+  }catch(e){ toast('Erro','err'); }
+}
+</script>
+{% endblock %}

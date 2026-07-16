@@ -1,0 +1,69 @@
+{% extends 'base.html' %}
+{% block title %}Disparos{% endblock %}
+
+{% block head %}
+<style>
+.camp-grid { display:grid; grid-template-columns:1fr; gap:12px; }
+.camp-card { padding:16px 20px; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.camp-card a.nome { font-size:16px; font-weight:700; color:var(--texto); text-decoration:none; }
+.camp-metrics { display:flex; gap:22px; font-size:13px; }
+.camp-metrics b { font-family:'Sora',sans-serif; font-size:18px; display:block; }
+.camp-badge { font-size:11px; padding:3px 10px; border-radius:20px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; }
+.camp-badge.ativa { background:rgba(31,216,164,.12); color:var(--teal); }
+.camp-badge.pausada { background:rgba(245,158,11,.14); color:#f59e0b; }
+.camp-badge.concluida { background:rgba(148,163,184,.15); color:var(--cinza); }
+.ajuda { font-size:12.5px; color:var(--cinza); line-height:1.6; }
+label.campo { display:block; font-size:12px; color:var(--cinza-2); font-weight:600; margin:14px 0 5px; }
+textarea.campo, input.campo { width:100%; background:var(--fundo-2,#14141c); border:1px solid var(--borda); border-radius:8px; color:var(--texto); padding:10px 12px; font-size:13px; font-family:inherit; }
+textarea.campo { min-height:90px; resize:vertical; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-head" style="display:flex;align-items:center;justify-content:space-between;">
+  <div>
+    <h1>Disparos</h1>
+    <div class="sub">Campanhas do mês em rodízio pelos WhatsApps dos consultores</div>
+  </div>
+  <button class="btn" onclick="document.getElementById('nova').scrollIntoView({behavior:'smooth'})">Nova campanha</button>
+</div>
+
+<div class="camp-grid" style="margin-bottom:26px;">
+  {% for c in campanhas %}
+  <div class="card camp-card">
+    <div>
+      <a class="nome" href="/campanha/{{ c.id }}">{{ c.nome }}</a>
+      <div style="font-size:11.5px;color:var(--cinza);margin-top:2px;">#{{ c.id }} · teto {{ c.teto_dia }}/dia por consultor</div>
+    </div>
+    <div class="camp-metrics">
+      <div style="text-align:center;"><b>{{ c.total }}</b><span style="color:var(--cinza);">contatos</span></div>
+      <div style="text-align:center;"><b style="color:var(--info);">{{ c.enviados }}</b><span style="color:var(--cinza);">enviados</span></div>
+      <div style="text-align:center;"><b style="color:var(--teal);">{{ c.respondeu }}</b><span style="color:var(--cinza);">responderam</span></div>
+    </div>
+    <span class="camp-badge {{ c.status }}">{{ c.status }}</span>
+  </div>
+  {% else %}
+  <div class="card" style="padding:26px;text-align:center;color:var(--cinza);">Nenhuma campanha ainda. Crie a primeira abaixo.</div>
+  {% endfor %}
+</div>
+
+<div class="card" id="nova" style="padding:22px;">
+  <h3 style="margin:0 0 4px;">Nova campanha</h3>
+  <div class="ajuda">Cole a lista, defina o teto diário e as variações do "bom dia". O sistema distribui em rodízio entre os consultores e gera o VCF de cada um pra salvar os contatos.</div>
+  <form method="POST" action="/campanha/criar">
+    <label class="campo">Nome da campanha</label>
+    <input class="campo" name="nome" placeholder="Ex: Aniversário 6 meses — Julho">
+
+    <label class="campo">Teto por consultor por dia (aquecimento — comece baixo)</label>
+    <input class="campo" name="teto_dia" type="number" min="1" value="20" style="max-width:140px;">
+
+    <label class="campo">Mensagens do "bom dia" (separe variações com uma linha <code>---</code>). Use <code>{nome}</code> pro primeiro nome.</label>
+    <textarea class="campo" name="mensagens" placeholder="Bom dia, {nome}! Tudo bem?&#10;---&#10;Oi {nome}, bom dia! Como vai?&#10;---&#10;Olá {nome}, tudo certo por aí?"></textarea>
+
+    <label class="campo">Lista de contatos (uma pessoa por linha — nome, telefone, e-mail, razão social; ordem livre, separado por vírgula/TAB)</label>
+    <textarea class="campo" name="lista" style="min-height:140px;" placeholder="Maria Silva, 19 99999-8888, maria@email.com, Padaria Silva ME&#10;João Souza, 11988887777, joao@email.com"></textarea>
+
+    <div style="margin-top:16px;"><button class="btn" type="submit">Criar campanha e distribuir</button></div>
+  </form>
+</div>
+{% endblock %}
