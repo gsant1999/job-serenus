@@ -186,6 +186,7 @@
     <button class="btn-outline btn-sm" onclick="location.href='/crm/etapas/gerenciar'">Etapas</button>
     <button class="btn-outline btn-sm" onclick="abrirModalTransferencia()">Transferência em massa</button>
     <button class="btn-outline btn-sm" onclick="location.href='/crm/importar-meninas'">Transferir Leads</button>
+    <button class="btn-outline btn-sm" onclick="mesclarDuplicados(this)">Mesclar duplicados</button>
     {% endif %}
   </div>
 </div>
@@ -720,6 +721,22 @@ let _tipoAtiv  = 'nota';
 let _usuarios  = [];
 let _etapas    = {{ etapas|tojson }};
 const IS_ADMIN = {{ 'true' if eh_admin else 'false' }};
+
+function mesclarDuplicados(btn){
+  if (!confirm('Mesclar leads duplicados SEM número (mesmo nome + consultor)?\n\nMantém o mais antigo, move o histórico pra ele e apaga os demais. Leads com número não são tocados.')) return;
+  const txt = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Mesclando...';
+  fetch('/crm/leads-duplicados/aplicar', {method:'POST'})
+    .then(r => r.json())
+    .then(d => {
+      btn.disabled = false; btn.textContent = txt;
+      if (d.ok) {
+        if (d.mesclados > 0) { toast(d.mesclados + ' lead(s) duplicado(s) mesclado(s)!', 'ok'); setTimeout(()=>location.reload(), 900); }
+        else { toast('Nenhum duplicado sem número encontrado.', 'ok'); }
+      } else { toast('Erro ao mesclar.', 'err'); }
+    })
+    .catch(() => { btn.disabled = false; btn.textContent = txt; toast('Erro de conexão.', 'err'); });
+}
 
 function buscarLeadsAgora(btn){
   const txt = btn.textContent;
