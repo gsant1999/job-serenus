@@ -5146,9 +5146,22 @@ def ver_proposta(pid):
 
     # Solicitação de edição pendente (para o admin ver e aprovar/recusar)
     solic_pendente = None
+    comissao_aviso = ''
     if session.get('perfil') == 'admin':
         sp = conn2 = db()
         row = conn2.execute("SELECT * FROM solicitacoes_edicao WHERE proposta_id=? AND status='Pendente' ORDER BY criado_em DESC LIMIT 1", (pid,)).fetchone()
+        # Diagnóstico AO VIVO da comissão: o motor sabe exatamente o que falta
+        # (recebimento e/ou repasse da operadora nesse plano). A tela mostrava só
+        # os zeros gravados sem explicar; agora surfaceia o aviso do próprio motor.
+        try:
+            u = conn2.execute("SELECT regime_base FROM usuarios WHERE id=?", (p['usuario_id'],)).fetchone()
+            prod = _producao_mes(conn2, p['usuario_id'], p['criado_em'], excluir_pid=pid) + (p['valor'] or 0)
+            cc = calc_comissao(p['adm_operadora'], (u['regime_base'] if u else '') or 'sem_lead_sem_fixo',
+                               prod, p['valor'] or 0, p['modalidade'],
+                               p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
+            comissao_aviso = cc.get('aviso') or ''
+        except Exception:
+            comissao_aviso = ''
         close_db(conn2)
         if row:
             solic_pendente = dict(row)
@@ -5157,7 +5170,7 @@ def ver_proposta(pid):
 
     return render_template('detalhe.html', p=p, parcelas=parcelas, regime=regime, extras=extras_view,
                            campos_secoes=campos_secoes, valores_edit=valores_edit,
-                           solic_pendente=solic_pendente)
+                           solic_pendente=solic_pendente, comissao_aviso=comissao_aviso)
 
 @app.route('/proposta/<int:pid>/consultor', methods=['POST'])
 @login_required
