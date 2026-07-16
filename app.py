@@ -1917,6 +1917,11 @@ def init_db():
         # e Funil de conteúdo disparado quando o lead responde (fica quente).
         ("campanha", "saudacao_categoria", "TEXT"),
         ("campanha", "funil_id", "INTEGER"),
+        # Auto-disparo do funil quando o lead responde: liberar_em segura o item na
+        # fila até a hora (delay proposital/aleatório); funil_em guarda quando o
+        # funil da campanha já foi disparado pro contato (não dispara duas vezes).
+        ("whatsapp_extensao_fila", "liberar_em", "TIMESTAMP"),
+        ("campanha_contato", "funil_em", "TIMESTAMP"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -5526,6 +5531,53 @@ def _campanha_marcar_sem_resposta(conn):
     return n
 
 
+_CAMP_FUNIL_ESPERA_MIN = int(os.environ.get('CAMP_FUNIL_ESPERA_MIN', '45'))   # espera antes de responder
+_CAMP_FUNIL_ESPERA_MAX = int(os.environ.get('CAMP_FUNIL_ESPERA_MAX', '180'))  # (segundos, aleatório)
+
+
+def _campanha_disparar_funil(conn, contato):
+    """Auto-dispara o funil da campanha pro contato que respondeu — enfileira cada
+    passo (Modelo) com DELAY PROPOSITAL E ALEATÓRIO: espera aleatória antes de
+    responder (parece humano) + o delay de cada passo + jitter, preso por
+    liberar_em na fila. Guarda funil_em pra não disparar duas vezes. A fila ainda
+    espaça tudo pelo gate por consultor — proteção dupla contra queda de número."""
+    import random as _rnd
+    from datetime import timedelta as _td
+    if not contato:
+        return 0
+    if ('funil_em' in contato.keys() and contato['funil_em']):
+        return 0  # já disparado pra esse contato
+    camp = conn.execute("SELECT funil_id FROM campanha WHERE id=?", (contato['campanha_id'],)).fetchone()
+    if not camp or not camp['funil_id']:
+        return 0
+    passos = conn.execute("""SELECT p.ordem, p.delay_segundos, m.corpo_texto, m.midia_arquivo, m.midia_tipo
+        FROM whatsapp_funil_passos p JOIN modelos_conteudo m ON m.id=p.modelo_id
+        WHERE p.funil_id=? ORDER BY p.ordem""", (camp['funil_id'],)).fetchall()
+    if not passos:
+        return 0
+    chat_id = _wa_chat_id(contato['telefone_norm'] or contato['telefone'] or '')
+    if not chat_id:
+        return 0
+    agora = datetime.now(TZ_SP)
+    acc = _rnd.uniform(_CAMP_FUNIL_ESPERA_MIN, _CAMP_FUNIL_ESPERA_MAX)  # espera inicial
+    n = 0
+    for p in passos:
+        tipo = p['midia_tipo'] if p['midia_tipo'] in ('audio', 'imagem', 'video', 'documento') else 'texto'
+        texto = p['corpo_texto'] or ''
+        if '{nome}' in texto:
+            texto = texto.replace('{nome}', (contato['nome'] or '').split(' ')[0] or 'tudo bem')
+        liberar = (agora + _td(seconds=acc)).strftime('%Y-%m-%d %H:%M:%S')
+        conn.execute("""INSERT INTO whatsapp_extensao_fila
+            (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo, origem, criado_por, liberar_em)
+            VALUES (?,?,?,?,?,?,?,'campanha_funil',?,?)""",
+            (None, contato['consultor_id'], contato['telefone'] or contato['telefone_norm'], chat_id,
+             tipo, texto, (p['midia_arquivo'] if tipo != 'texto' else None), contato['consultor_id'], liberar))
+        n += 1
+        acc += max(3, int(p['delay_segundos'] or 5)) + _rnd.uniform(2, 10)  # próximo passo
+    conn.execute("UPDATE campanha_contato SET funil_em=? WHERE id=?", (_agora_sp(), contato['id']))
+    return n
+
+
 def _campanha_parse_lista(texto):
     """Lê a lista colada (uma pessoa por linha, colunas separadas por TAB/;/vírgula).
     Robusto à ordem: acha o telefone pela quantidade de dígitos, o e-mail pelo @,
@@ -5789,8 +5841,19 @@ def api_whatsapp_campanha_resposta():
     else:
         conn.execute("""UPDATE campanha_contato SET status='respondeu', respondeu_em=?
             WHERE telefone_norm=? AND status IN ('enfileirado','enviado')""", (_agora_sp(), tel))
+    # Auto-dispara o funil da campanha (com delay aleatório) pros que responderam
+    # agora e ainda não receberam — só das campanhas ATIVAS que têm funil ligado.
+    disparados = 0
+    q = "SELECT cc.* FROM campanha_contato cc JOIN campanha c ON c.id=cc.campanha_id " \
+        "WHERE cc.telefone_norm=? AND cc.status='respondeu' AND cc.funil_em IS NULL " \
+        "AND c.status='ativa' AND c.funil_id IS NOT NULL"
+    args = [tel]
+    if uid:
+        q += " AND cc.consultor_id=?"; args.append(uid)
+    for ct in conn.execute(q, tuple(args)).fetchall():
+        disparados += _campanha_disparar_funil(conn, ct)
     conn.commit(); close_db(conn)
-    return _wa_cors(jsonify({"ok": True}))
+    return _wa_cors(jsonify({"ok": True, "funil_passos": disparados}))
 
 
 @app.route('/api/whatsapp/campanha/aguardando', methods=['GET', 'OPTIONS'])
@@ -11186,14 +11249,17 @@ def api_whatsapp_fila_proximo():
             close_db(conn)
             return _wa_cors(jsonify({"ok": True, "item": None}))
     agora = datetime.now(TZ_SP)
+    agora_txt = agora.strftime('%Y-%m-%d %H:%M:%S')
     cutoff_reclaim = (agora - timedelta(minutes=_WA_FILA_RECLAIM_MINUTOS)).strftime('%Y-%m-%d %H:%M:%S')
+    # liberar_em segura o item até a hora (delay proposital do auto-funil). Item
+    # sem liberar_em (envio normal/opener) sai na hora.
     candidato = conn.execute("""
         SELECT id FROM whatsapp_extensao_fila
         WHERE responsavel_id=? AND (
             status='pendente' OR (status='enviando' AND claim_em < ?)
-        )
+        ) AND (liberar_em IS NULL OR CAST(liberar_em AS TEXT) <= ?)
         ORDER BY criado_em ASC LIMIT 1
-    """, (usuario_id, cutoff_reclaim)).fetchone()
+    """, (usuario_id, cutoff_reclaim, agora_txt)).fetchone()
     if not candidato:
         close_db(conn)
         return _wa_cors(jsonify({"ok": True, "item": None}))
