@@ -1913,6 +1913,10 @@ def init_db():
         ("campanha_contato", "excluido_em", "TIMESTAMP"),
         # Janela (dias) sem resposta até o contato virar 'sem_resposta' (varredura).
         ("campanha", "dias_sem_resposta", "INTEGER DEFAULT 2"),
+        # Saudação vinda dos Modelos (pasta/categoria de textos, rodízio aleatório)
+        # e Funil de conteúdo disparado quando o lead responde (fica quente).
+        ("campanha", "saudacao_categoria", "TEXT"),
+        ("campanha", "funil_id", "INTEGER"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -5433,10 +5437,25 @@ def _campanha_enfileirar(conn, campanha_id, texto_fallback=''):
     camp = conn.execute("SELECT * FROM campanha WHERE id=?", (campanha_id,)).fetchone()
     if not camp or camp['status'] != 'ativa':
         return 0
-    try:
-        msgs = _json.loads(camp['mensagens'] or '[]')
-    except Exception:
-        msgs = []
+    # Saudação: se a campanha aponta uma PASTA dos Modelos, o pool de "bom dia" são
+    # os textos daquela pasta (rodízio aleatório) — o Guilherme cria/edita lá. Sem
+    # pasta, usa as variações digitadas inline na campanha.
+    msgs = []
+    cat = (camp['saudacao_categoria'] if 'saudacao_categoria' in camp.keys() else '') or ''
+    if cat:
+        try:
+            msgs = [r['corpo_texto'].strip() for r in conn.execute(
+                """SELECT corpo_texto FROM modelos_conteudo
+                   WHERE tipo='whatsapp' AND categoria=? AND COALESCE(midia_tipo,'') IN ('','texto')
+                     AND COALESCE(corpo_texto,'')<>'' AND COALESCE(ativo,1)=1""", (cat,)).fetchall()
+                if (r['corpo_texto'] or '').strip()]
+        except Exception:
+            msgs = []
+    if not msgs:
+        try:
+            msgs = _json.loads(camp['mensagens'] or '[]')
+        except Exception:
+            msgs = []
     msgs = [m for m in msgs if (m or '').strip()] or [texto_fallback or 'Bom dia, tudo bem?']
     teto = int(camp['teto_dia'] or 20)
     hoje = _agora_sp()[:10]
@@ -5596,8 +5615,16 @@ def campanhas():
         (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.enviado_em IS NOT NULL) enviados,
         (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.status='respondeu') respondeu
         FROM campanha c ORDER BY c.id DESC""").fetchall()
+    pastas = [r['categoria'] for r in conn.execute(
+        """SELECT DISTINCT categoria FROM modelos_conteudo
+           WHERE tipo='whatsapp' AND COALESCE(categoria,'')<>''
+             AND COALESCE(midia_tipo,'') IN ('','texto') AND COALESCE(corpo_texto,'')<>''
+           ORDER BY categoria""").fetchall()]
+    funis = [dict(r) for r in conn.execute(
+        "SELECT id, nome, categoria FROM whatsapp_funis WHERE COALESCE(ativo,1)=1 ORDER BY nome").fetchall()]
     close_db(conn)
-    return render_template('campanhas.html', campanhas=[dict(r) for r in rows])
+    return render_template('campanhas.html', campanhas=[dict(r) for r in rows],
+                           pastas_saudacao=pastas, funis=funis)
 
 
 @app.route('/campanha/criar', methods=['POST'])
@@ -5616,9 +5643,13 @@ def campanha_criar():
     contatos += _campanha_parse_planilha(request.files.get('planilha'))
     if not contatos:
         return redirect(url_for('campanhas'))
+    saud = (d.get('saudacao_categoria') or '').strip() or None
+    try: funil_id = int(d.get('funil_id')) or None
+    except (TypeError, ValueError): funil_id = None
     conn = db()
-    conn.execute("INSERT INTO campanha (nome, mensagens, teto_dia, status, criado_por) VALUES (?,?,?,'ativa',?)",
-                 (nome, _json.dumps(msgs, ensure_ascii=False), teto, session.get('user_id')))
+    conn.execute("""INSERT INTO campanha (nome, mensagens, teto_dia, status, criado_por, saudacao_categoria, funil_id)
+        VALUES (?,?,?,'ativa',?,?,?)""",
+        (nome, _json.dumps(msgs, ensure_ascii=False), teto, session.get('user_id'), saud, funil_id))
     cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     vistos = set()
@@ -5660,12 +5691,25 @@ def campanha_detalhe(cid):
         SUM(CASE WHEN status='sem_resposta' THEN 1 ELSE 0 END) sem_resposta,
         SUM(CASE WHEN status='excluido' THEN 1 ELSE 0 END) excluido
         FROM campanha_contato WHERE campanha_id=?""", (cid,)).fetchone()
-    close_db(conn)
+    # Saudação vinda de pasta dos Modelos? mostra os textos de lá. Funil ligado?
+    saud_cat = (camp['saudacao_categoria'] if 'saudacao_categoria' in camp.keys() else '') or ''
+    funil = None
+    fid = camp['funil_id'] if 'funil_id' in camp.keys() else None
+    if fid:
+        fr = conn.execute("SELECT id, nome FROM whatsapp_funis WHERE id=?", (fid,)).fetchone()
+        funil = dict(fr) if fr else None
     import json as _json
-    try: msgs = _json.loads(camp['mensagens'] or '[]')
-    except Exception: msgs = []
+    if saud_cat:
+        msgs = [r['corpo_texto'] for r in conn.execute(
+            """SELECT corpo_texto FROM modelos_conteudo WHERE tipo='whatsapp' AND categoria=?
+               AND COALESCE(midia_tipo,'') IN ('','texto') AND COALESCE(corpo_texto,'')<>''
+               AND COALESCE(ativo,1)=1""", (saud_cat,)).fetchall()]
+    else:
+        try: msgs = _json.loads(camp['mensagens'] or '[]')
+        except Exception: msgs = []
+    close_db(conn)
     return render_template('campanha_detalhe.html', camp=dict(camp), msgs=msgs,
-                           contatos=[dict(r) for r in contatos],
+                           contatos=[dict(r) for r in contatos], saud_cat=saud_cat, funil=funil,
                            porcons=[dict(r) for r in porcons], resumo=dict(resumo) if resumo else {})
 
 

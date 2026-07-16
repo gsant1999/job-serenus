@@ -106,11 +106,25 @@
   </div>
 
   <div class="card" style="margin-bottom:16px;">
-    <div class="card-header"><h3>Saudações ({{ msgs|length }} variação{{ 'ões' if msgs|length != 1 else '' }})</h3></div>
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+      <h3>Saudações ({{ msgs|length }} variação{{ 'ões' if msgs|length != 1 else '' }})</h3>
+      {% if saud_cat %}<a href="/crm/modelos" style="font-size:12px;color:var(--teal);text-decoration:none;">Pasta dos Modelos: {{ saud_cat }} — editar</a>{% endif %}
+    </div>
     <div style="padding:14px 18px;">
-      {% for m in msgs %}<div class="msgvar">{{ m }}</div>{% endfor %}
+      {% for m in msgs %}<div class="msgvar">{{ m }}</div>{% else %}<div style="color:var(--cinza);font-size:12.5px;">Sem saudações — {% if saud_cat %}a pasta "{{ saud_cat }}" está vazia.{% else %}nenhuma variação definida.{% endif %}</div>{% endfor %}
     </div>
   </div>
+
+  {% if funil %}
+  <div class="card" style="margin-bottom:16px;padding:15px 20px;display:flex;justify-content:space-between;align-items:center;gap:14px;">
+    <div>
+      <div style="font-size:11px;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;">Conteúdo quando responder</div>
+      <div style="font-size:15px;font-weight:700;margin-top:2px;">Funil: {{ funil.nome }}</div>
+      <div style="font-size:12px;color:var(--cinza);margin-top:2px;">Quando o lead vira quente, o consultor dispara este funil na conversa (áudio/imagem/PDF dos Modelos).</div>
+    </div>
+    <a href="/crm/funis" class="btn-outline" style="text-decoration:none;white-space:nowrap;">Ver funil</a>
+  </div>
+  {% endif %}
 
   <div class="card">
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">

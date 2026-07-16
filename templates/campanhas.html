@@ -100,14 +100,33 @@ input.campo:focus, textarea.campo:focus { outline:none; border-color:var(--teal)
 
       <div class="form-sec">
         <h4><span class="num">2</span> Saudação (o "bom dia")</h4>
-        <div class="hint">Escreva 2-3 variações — o sistema alterna entre elas (mensagem clonada queima número). Use <code>{nome}</code> pro primeiro nome. Separe cada variação com uma linha <code>---</code>.</div>
+        <div class="hint">Use uma <b>pasta dos Modelos</b> (recomendado) — o sistema roda aleatório os textos de lá. Ou escreva variações inline (separadas por <code>---</code>). Use <code>{nome}</code> pro primeiro nome.</div>
         <div class="form-body">
-          <textarea class="campo" name="mensagens" style="min-height:120px;" placeholder="Bom dia, {nome}! Tudo bem?&#10;---&#10;Oi {nome}, bom dia! Como vai?&#10;---&#10;Olá {nome}, tudo certo por aí?"></textarea>
+          <label class="lbl">Pasta de saudação (Modelos)</label>
+          <select class="campo" name="saudacao_categoria" style="max-width:360px;">
+            <option value="">— usar as variações digitadas abaixo —</option>
+            {% for p in pastas_saudacao %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+          </select>
+          {% if not pastas_saudacao %}<div style="font-size:11.5px;color:var(--cinza);margin-top:5px;">Nenhuma pasta de texto nos Modelos ainda. Crie saudações em <a href="/crm/modelos" style="color:var(--teal);">Modelos</a> e elas aparecem aqui.</div>{% endif %}
+          <label class="lbl">Ou variações inline</label>
+          <textarea class="campo" name="mensagens" style="min-height:100px;" placeholder="Bom dia, {nome}! Tudo bem?&#10;---&#10;Oi {nome}, bom dia! Como vai?"></textarea>
         </div>
       </div>
 
       <div class="form-sec">
-        <h4><span class="num">3</span> Ritmo (aquecimento)</h4>
+        <h4><span class="num">3</span> Conteúdo quando responder (funil)</h4>
+        <div class="hint">Quando o lead responde e vira quente, o consultor dispara este <b>funil</b> (a sequência de áudio/imagem/PDF que puxa dos Modelos). Opcional.</div>
+        <div class="form-body">
+          <select class="campo" name="funil_id" style="max-width:360px;">
+            <option value="">— nenhum por enquanto —</option>
+            {% for f in funis %}<option value="{{ f.id }}">{{ f.nome }}{% if f.categoria %} · {{ f.categoria }}{% endif %}</option>{% endfor %}
+          </select>
+          {% if not funis %}<div style="font-size:11.5px;color:var(--cinza);margin-top:5px;">Nenhum funil ainda. Monte em <a href="/crm/funis" style="color:var(--teal);">Funis WhatsApp</a>.</div>{% endif %}
+        </div>
+      </div>
+
+      <div class="form-sec">
+        <h4><span class="num">4</span> Ritmo (aquecimento)</h4>
         <div class="hint">Quantos cada consultor manda por dia. Comece baixo (15-20) e aumente com o tempo — número novo aguenta menos.</div>
         <div class="form-body" style="display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap;">
           <div>
