@@ -5448,10 +5448,12 @@ def _campanha_roleta(conn, campanha_id):
     return n
 
 
-def _campanha_enfileirar(conn, campanha_id, texto_fallback=''):
+def _campanha_enfileirar(conn, campanha_id, texto_fallback='', apto_ids=None):
     """Empurra pra fila da extensão até o teto diário de cada consultor (o que já
     entrou na fila hoje conta). A fila espaça os envios por consultor (gate). Cada
-    contato leva uma variação sorteada da mensagem. Idempotente por dia."""
+    contato leva uma variação sorteada da mensagem. Idempotente por dia.
+    apto_ids (set): se passado, SÓ enfileira pros consultores aptos — os contatos
+    dos inaptos ficam 'pendente' e saem quando o WhatsApp deles voltar a ficar apto."""
     import random as _rnd, json as _json
     camp = conn.execute("SELECT * FROM campanha WHERE id=?", (campanha_id,)).fetchone()
     if not camp or camp['status'] != 'ativa':
@@ -5481,6 +5483,8 @@ def _campanha_enfileirar(conn, campanha_id, texto_fallback=''):
     n = 0
     for c in _campanha_consultores_ativos(conn):
         cid = c['id']
+        if apto_ids is not None and cid not in apto_ids:
+            continue  # consultor inapto: contatos dele esperam (não some, só adia)
         ja_hoje = conn.execute("""SELECT COUNT(*) q FROM campanha_contato cc
             WHERE cc.campanha_id=? AND cc.consultor_id=? AND cc.enviado_em IS NOT NULL
               AND substr(CAST(cc.enviado_em AS TEXT),1,10)=?""", (campanha_id, cid, hoje)).fetchone()['q']
@@ -5852,9 +5856,12 @@ def campanha_vcf(cid):
 @admin_required
 def campanha_enfileirar_rota(cid):
     conn = db()
-    n = _campanha_enfileirar(conn, cid)
+    presenca = _consultores_presenca(conn)
+    aptos = {p['id'] for p in presenca if p['apto']}
+    n = _campanha_enfileirar(conn, cid, apto_ids=aptos)
+    inaptos = [p['nome'] for p in presenca if not p['apto']]
     close_db(conn)
-    return jsonify({"ok": True, "enfileirados": n})
+    return jsonify({"ok": True, "enfileirados": n, "aptos": len(aptos), "inaptos": inaptos})
 
 
 @app.route('/campanha/<int:cid>/status', methods=['POST'])

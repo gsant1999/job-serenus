@@ -149,8 +149,15 @@ async function enfileirar(btn){
   try{
     const r=await fetch('/campanha/{{ camp.id }}/enfileirar',{method:'POST'});
     const d=await r.json();
-    toast(d.ok ? (d.enfileirados+' contato(s) na fila. A extensão vai disparando.') : 'Erro', d.ok?'ok':'err');
-    setTimeout(()=>location.reload(), 1200);
+    if(!d.ok){ toast('Erro','err'); btn.disabled=false; btn.textContent=t; return; }
+    if(d.aptos===0){
+      toast('Ninguém apto agora — peça pros consultores abrir o WhatsApp Web e atualizar a extensão.','err');
+      btn.disabled=false; btn.textContent=t; return;
+    }
+    let msg = d.enfileirados+' contato(s) na fila ('+d.aptos+' consultor(es) apto(s)).';
+    if(d.inaptos && d.inaptos.length) msg += ' Fora (inaptos): '+d.inaptos.join(', ')+'.';
+    toast(msg, 'ok');
+    setTimeout(()=>location.reload(), 1600);
   }catch(e){ toast('Erro de conexão','err'); btn.disabled=false; btn.textContent=t; }
 }
 async function mudarStatus(novo){
