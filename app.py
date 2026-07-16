@@ -920,6 +920,13 @@ def init_db():
                 respondeu_em TIMESTAMP,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS consultor_wpp_status (
+                usuario_id INTEGER PRIMARY KEY,
+                versao TEXT,
+                numero TEXT,
+                wpp_ok INTEGER DEFAULT 0,
+                visto_em TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS whatsapp_funis (
                 id SERIAL PRIMARY KEY,
                 nome TEXT NOT NULL,
@@ -1437,6 +1444,13 @@ def init_db():
             enviado_em TIMESTAMP,
             respondeu_em TIMESTAMP,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS consultor_wpp_status (
+            usuario_id INTEGER PRIMARY KEY,
+            versao TEXT,
+            numero TEXT,
+            wpp_ok INTEGER DEFAULT 0,
+            visto_em TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS whatsapp_funis (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -5674,9 +5688,11 @@ def campanhas():
            ORDER BY categoria""").fetchall()]
     funis = [dict(r) for r in conn.execute(
         "SELECT id, nome, categoria FROM whatsapp_funis WHERE COALESCE(ativo,1)=1 ORDER BY nome").fetchall()]
+    presenca = _consultores_presenca(conn)
     close_db(conn)
     return render_template('campanhas.html', campanhas=[dict(r) for r in rows],
-                           pastas_saudacao=pastas, funis=funis)
+                           pastas_saudacao=pastas, funis=funis, presenca=presenca,
+                           versao_min=_EXT_VERSAO_MIN_DISPARO, versao_atual=_extensao_versao())
 
 
 @app.route('/campanhas/acompanhamento')
@@ -11034,6 +11050,78 @@ def api_whatsapp_versao():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     return _wa_cors(jsonify({"ok": True, "versao": _extensao_versao()}))
+
+
+# Versão mínima da extensão pra PARTICIPAR do disparo com tudo (detectar resposta,
+# auto-funil, popup de número). Abaixo disso ela até manda o "bom dia" (a fila é
+# antiga), mas NÃO detecta resposta — quebra o "só continua com quem responde".
+_EXT_VERSAO_MIN_DISPARO = '2.21.0'
+
+
+def _cmp_versao(a, b):
+    pa = [int(x) if x.isdigit() else 0 for x in str(a or '0').split('.')]
+    pb = [int(x) if x.isdigit() else 0 for x in str(b or '0').split('.')]
+    for i in range(max(len(pa), len(pb))):
+        d = (pa[i] if i < len(pa) else 0) - (pb[i] if i < len(pb) else 0)
+        if d:
+            return -1 if d < 0 else 1
+    return 0
+
+
+@app.route('/api/whatsapp/presenca', methods=['POST', 'OPTIONS'])
+def api_whatsapp_presenca():
+    """A extensão bate ponto (a cada ~1min): informa versão, número do WhatsApp
+    logado e se a wa-js está pronta. Alimenta o painel de aptidão do disparo."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False}))
+    d = request.json or {}
+    try:
+        uid = int(d.get('usuario_id'))
+    except (TypeError, ValueError):
+        return _wa_cors(jsonify({"ok": False}))
+    versao = str(d.get('versao') or '')[:20]
+    numero = str(d.get('numero') or '')[:30]
+    wpp_ok = 1 if d.get('wpp_ok') else 0
+    agora = _agora_sp()
+    conn = db()
+    if DB_MODE == 'postgres':
+        conn.execute("""INSERT INTO consultor_wpp_status (usuario_id, versao, numero, wpp_ok, visto_em)
+            VALUES (%s,%s,%s,%s,%s) ON CONFLICT (usuario_id) DO UPDATE SET
+            versao=excluded.versao, numero=excluded.numero, wpp_ok=excluded.wpp_ok, visto_em=excluded.visto_em""",
+            (uid, versao, numero, wpp_ok, agora))
+    else:
+        conn.execute("""INSERT OR REPLACE INTO consultor_wpp_status (usuario_id, versao, numero, wpp_ok, visto_em)
+            VALUES (?,?,?,?,?)""", (uid, versao, numero, wpp_ok, agora))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
+
+
+def _consultores_presenca(conn):
+    """Aptidão de cada consultor ativo pro disparo: online (bateu ponto < 3min),
+    versão OK (>= mínima), WhatsApp conectado. 'apto' = os três verdes."""
+    stt = {r['usuario_id']: dict(r) for r in
+           conn.execute("SELECT usuario_id, versao, numero, wpp_ok, visto_em FROM consultor_wpp_status").fetchall()}
+    ver_atual = _extensao_versao()
+    out = []
+    for u in conn.execute("SELECT id, nome FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome").fetchall():
+        s = stt.get(u['id'])
+        online = False
+        if s and s.get('visto_em'):
+            seg = _wa_segundos_desde(s['visto_em'])
+            online = (seg is not None and seg < 180)
+        versao = (s or {}).get('versao') or ''
+        versao_ok = bool(versao) and _cmp_versao(versao, _EXT_VERSAO_MIN_DISPARO) >= 0
+        atualizada = bool(versao) and _cmp_versao(versao, ver_atual) >= 0
+        wpp_ok = bool((s or {}).get('wpp_ok'))
+        out.append({
+            'id': u['id'], 'nome': u['nome'],
+            'online': online, 'versao': versao, 'versao_ok': versao_ok, 'atualizada': atualizada,
+            'numero': (s or {}).get('numero') or '', 'wpp_ok': wpp_ok,
+            'apto': bool(online and versao_ok and wpp_ok),
+        })
+    return out
 
 
 @app.route('/extensao/privacidade')

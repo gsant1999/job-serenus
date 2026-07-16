@@ -2317,6 +2317,20 @@
   setTimeout(checarCampanhaAguardando, 8000);
   setInterval(checarCampanhaAguardando, 90000);
 
+  // ── Bate ponto pro painel de aptidão do disparo: versão, número do WhatsApp
+  //    logado e se a wa-js está de pé. O admin vê na aba Disparos quem está apto. ──
+  async function baterPontoDisparo() {
+    const { extKey, usuarioId } = await chrome.storage.local.get(['extKey', 'usuarioId']);
+    if (!extKey || !usuarioId) return;
+    let versao = ''; try { versao = chrome.runtime.getManifest().version; } catch (e) {}
+    let numero = ''; try { numero = await pedirMeuNumero(); } catch (e) {}
+    try {
+      await chrome.runtime.sendMessage({ type: 'presenca', usuario_id: usuarioId, versao, numero, wpp_ok: !!numero });
+    } catch (e) { /* próxima batida tenta de novo */ }
+  }
+  setTimeout(baterPontoDisparo, 6000);
+  setInterval(baterPontoDisparo, 60000);
+
   function mostrarAvisoLimpeza(qtd) {
     let box = document.getElementById('job-aviso-limpeza');
     if (box) { const q = box.querySelector('.job-limpeza-qtd'); if (q) q.textContent = qtd; return; }

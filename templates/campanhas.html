@@ -23,6 +23,19 @@
 .camp-badge.pausada { background:rgba(245,158,11,.14); color:#f59e0b; }
 .camp-badge.concluida { background:rgba(148,163,184,.15); color:var(--cinza); }
 
+.apt-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; padding:16px 18px; }
+.apt-card { border:1px solid var(--borda); border-radius:10px; padding:12px 14px; background:var(--fundo-2,#12121a); }
+.apt-card.apto { border-color:rgba(31,216,164,.4); }
+.apt-top { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.apt-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.apt-top b { font-size:13.5px; }
+.apt-sel { margin-left:auto; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--cinza); }
+.apt-card.apto .apt-sel { color:var(--teal); }
+.apt-linhas { display:flex; flex-direction:column; gap:3px; font-size:11.5px; }
+.apt-linhas .ok { color:var(--teal); }
+.apt-linhas .ok::before { content:'✓ '; }
+.apt-linhas .no { color:var(--rosa); }
+.apt-linhas .no::before { content:'× '; }
 .form-sec { border-top:1px solid var(--borda); padding:20px 22px; }
 .form-sec:first-of-type { border-top:none; }
 .form-sec h4 { font-size:13px; font-weight:700; margin:0 0 3px; display:flex; align-items:center; gap:8px; }
@@ -53,6 +66,35 @@ input.campo:focus, textarea.campo:focus { outline:none; border-color:var(--teal)
       <div class="disp-sub">Campanhas do mês em rodízio pelos WhatsApps dos consultores — envio humano, ritmo aleatório, só continua com quem responde.</div>
     </div>
     <a href="/campanhas/acompanhamento" class="btn-outline" style="text-decoration:none;white-space:nowrap;">Acompanhamento</a>
+  </div>
+
+  {# ── Painel de aptidão: os WhatsApps que vão participar da roleta ── #}
+  <div class="card" style="margin-bottom:22px;padding:0;">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+      <h3>WhatsApps na roleta</h3>
+      <span style="font-size:11.5px;color:var(--cinza);">Versão atual {{ versao_atual }} · mínima {{ versao_min }} · atualiza a cada 1 min</span>
+    </div>
+    <div class="apt-grid">
+      {% for p in presenca %}
+      <div class="apt-card {{ 'apto' if p.apto else 'nao' }}">
+        <div class="apt-top">
+          <span class="apt-dot" style="background:{{ 'var(--teal)' if p.apto else ('#f59e0b' if p.online else 'var(--cinza-2,#6b7280)') }};"></span>
+          <b>{{ p.nome }}</b>
+          <span class="apt-sel">{{ 'Apto' if p.apto else ('Ver pendência' if p.online else 'Offline') }}</span>
+        </div>
+        <div class="apt-linhas">
+          <span class="{{ 'ok' if p.online else 'no' }}">{{ 'Online' if p.online else 'Fora do ar' }}</span>
+          <span class="{{ 'ok' if p.wpp_ok else 'no' }}">{{ 'WhatsApp conectado' if p.wpp_ok else 'WhatsApp não conectado' }}</span>
+          <span class="{{ 'ok' if p.versao_ok else 'no' }}">{% if p.versao %}Versão {{ p.versao }}{% if not p.atualizada %} (desatualizada){% endif %}{% else %}Versão desconhecida{% endif %}</span>
+        </div>
+      </div>
+      {% else %}
+      <div style="padding:18px;color:var(--cinza);">Nenhum consultor ativo cadastrado.</div>
+      {% endfor %}
+    </div>
+    <div style="padding:10px 18px;border-top:1px solid var(--borda);font-size:11.5px;color:var(--cinza);">
+      Só os <b style="color:var(--teal);">Aptos</b> disparam de verdade: online, WhatsApp Web aberto com a extensão e versão ≥ {{ versao_min }}. Quem está fora manda o "bom dia" mas pode não detectar resposta — peça pra abrir o WhatsApp Web e atualizar a extensão.
+    </div>
   </div>
 
   <div class="camp-list">

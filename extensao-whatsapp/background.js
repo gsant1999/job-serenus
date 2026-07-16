@@ -219,6 +219,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       { contato_id: msg.contato_id, telefone: msg.telefone, usuario_id: msg.usuario_id }, 15000).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'presenca') {
+    chamarJob('/api/whatsapp/presenca', 'POST',
+      { usuario_id: msg.usuario_id, versao: msg.versao, numero: msg.numero, wpp_ok: msg.wpp_ok }, 10000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'notificar') {
     // Aviso local do sistema operacional — só isso, nada é enviado pra fora.
     // Sem isso, minimizar o painel ou trocar de conversa fazia o consultor
