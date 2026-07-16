@@ -5537,6 +5537,55 @@ def _campanha_parse_lista(texto):
     return out
 
 
+def _campanha_parse_planilha(fs):
+    """Lê um arquivo enviado (CSV ou XLSX) e devolve a mesma lista de contatos,
+    reaproveitando a heurística por linha do _campanha_parse_lista (junta as
+    colunas com ';'). Descarta linhas sem telefone válido (cabeçalho inclusive)."""
+    if not fs or not getattr(fs, 'filename', ''):
+        return []
+    nome = fs.filename.lower()
+    linhas = []
+    try:
+        if nome.endswith('.xlsx') or nome.endswith('.xlsm'):
+            import openpyxl, io as _io
+            wb = openpyxl.load_workbook(_io.BytesIO(fs.read()), read_only=True, data_only=True)
+            for row in wb.active.iter_rows(values_only=True):
+                cels = [str(c).strip() for c in row if c is not None and str(c).strip()]
+                if cels:
+                    linhas.append(';'.join(cels))
+        else:
+            import csv as _csv, io as _io
+            data = fs.read().decode('utf-8', errors='ignore')
+            for row in _csv.reader(_io.StringIO(data)):
+                cels = [c.strip() for c in row if c and c.strip()]
+                if cels:
+                    linhas.append(';'.join(cels))
+    except Exception:
+        return []
+    # só contatos com telefone de fato (tira cabeçalho e linhas incompletas)
+    return [c for c in _campanha_parse_lista('\n'.join(linhas)) if c['telefone_norm']]
+
+
+@app.route('/campanha/modelo-planilha')
+@login_required
+@admin_required
+def campanha_modelo_planilha():
+    """Baixa um XLSX modelo pra preencher a lista do disparo — sempre à disposição."""
+    import openpyxl, io as _io
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Contatos'
+    ws.append(['Nome', 'Telefone', 'Email', 'Razão Social'])
+    ws.append(['Maria Silva', '19 99999-8888', 'maria@email.com', 'Padaria Silva ME'])
+    ws.append(['João Souza', '11 98888-7777', 'joao@email.com', ''])
+    for col, larg in zip('ABCD', (26, 20, 26, 26)):
+        ws.column_dimensions[col].width = larg
+    buf = _io.BytesIO(); wb.save(buf); buf.seek(0)
+    return Response(buf.getvalue(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': 'attachment; filename=modelo-lista-disparo.xlsx'})
+
+
 @app.route('/campanhas')
 @login_required
 @admin_required
@@ -5564,6 +5613,7 @@ def campanha_criar():
     if not msgs:
         msgs = [(d.get('mensagens') or 'Bom dia, tudo bem?').strip()]
     contatos = _campanha_parse_lista(d.get('lista') or '')
+    contatos += _campanha_parse_planilha(request.files.get('planilha'))
     if not contatos:
         return redirect(url_for('campanhas'))
     conn = db()

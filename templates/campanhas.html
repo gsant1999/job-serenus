@@ -3,67 +3,137 @@
 
 {% block head %}
 <style>
-.camp-grid { display:grid; grid-template-columns:1fr; gap:12px; }
-.camp-card { padding:16px 20px; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.disp-wrap { max-width: 1040px; }
+.disp-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; margin-bottom:6px; }
+.disp-hero h1 { font-size:26px; }
+.disp-sub { color:var(--cinza); font-size:13.5px; margin-bottom:22px; }
+
+.camp-list { display:grid; grid-template-columns:1fr; gap:12px; margin-bottom:30px; }
+.camp-card { padding:0; overflow:hidden; }
+.camp-card-top { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:15px 20px; }
 .camp-card a.nome { font-size:16px; font-weight:700; color:var(--texto); text-decoration:none; }
-.camp-metrics { display:flex; gap:22px; font-size:13px; }
-.camp-metrics b { font-family:'Sora',sans-serif; font-size:18px; display:block; }
-.camp-badge { font-size:11px; padding:3px 10px; border-radius:20px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; }
+.camp-card a.nome:hover { color:var(--teal); }
+.camp-sub { font-size:11.5px; color:var(--cinza); margin-top:2px; }
+.camp-metrics { display:flex; gap:20px; font-size:12px; color:var(--cinza); text-align:center; }
+.camp-metrics b { font-family:'Sora',sans-serif; font-size:17px; display:block; color:var(--texto); }
+.camp-bar { height:5px; background:var(--borda); display:flex; }
+.camp-bar > i { display:block; height:100%; }
+.camp-badge { font-size:10.5px; padding:3px 10px; border-radius:20px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; }
 .camp-badge.ativa { background:rgba(31,216,164,.12); color:var(--teal); }
 .camp-badge.pausada { background:rgba(245,158,11,.14); color:#f59e0b; }
 .camp-badge.concluida { background:rgba(148,163,184,.15); color:var(--cinza); }
-.ajuda { font-size:12.5px; color:var(--cinza); line-height:1.6; }
-label.campo { display:block; font-size:12px; color:var(--cinza-2); font-weight:600; margin:14px 0 5px; }
-textarea.campo, input.campo { width:100%; background:var(--fundo-2,#14141c); border:1px solid var(--borda); border-radius:8px; color:var(--texto); padding:10px 12px; font-size:13px; font-family:inherit; }
-textarea.campo { min-height:90px; resize:vertical; }
+
+.form-sec { border-top:1px solid var(--borda); padding:20px 22px; }
+.form-sec:first-of-type { border-top:none; }
+.form-sec h4 { font-size:13px; font-weight:700; margin:0 0 3px; display:flex; align-items:center; gap:8px; }
+.form-sec .num { width:22px; height:22px; border-radius:50%; background:var(--grad-frio); color:#fff; font-size:12px; display:inline-flex; align-items:center; justify-content:center; font-weight:700; }
+.form-sec .hint { font-size:12px; color:var(--cinza); line-height:1.55; margin:0 0 12px 30px; }
+.form-body { margin-left:30px; }
+label.lbl { display:block; font-size:11.5px; color:var(--cinza-2); font-weight:600; margin:12px 0 5px; }
+textarea.campo, input.campo { width:100%; background:var(--fundo-2,#12121a); border:1px solid var(--borda); border-radius:9px; color:var(--texto); padding:10px 12px; font-size:13px; font-family:inherit; }
+textarea.campo { min-height:96px; resize:vertical; line-height:1.5; }
+input.campo:focus, textarea.campo:focus { outline:none; border-color:var(--teal); }
+.drop { border:1.5px dashed var(--borda); border-radius:11px; padding:20px; text-align:center; cursor:pointer; transition:.15s; background:var(--fundo-2,#12121a); }
+.drop:hover { border-color:var(--teal); background:rgba(31,216,164,.04); }
+.drop .ic { font-size:26px; }
+.drop .t { font-weight:600; font-size:13.5px; margin-top:4px; }
+.drop .s { font-size:11.5px; color:var(--cinza); margin-top:2px; }
+.drop.tem { border-color:var(--teal); border-style:solid; }
+.linkmodelo { font-size:12px; color:var(--teal); text-decoration:none; }
+.ou { text-align:center; font-size:11px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:1px; margin:14px 0 4px; }
+.foot { padding:18px 22px; border-top:1px solid var(--borda); display:flex; justify-content:flex-end; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="page-head" style="display:flex;align-items:center;justify-content:space-between;">
-  <div>
-    <h1>Disparos</h1>
-    <div class="sub">Campanhas do mês em rodízio pelos WhatsApps dos consultores</div>
-  </div>
-  <button class="btn" onclick="document.getElementById('nova').scrollIntoView({behavior:'smooth'})">Nova campanha</button>
-</div>
-
-<div class="camp-grid" style="margin-bottom:26px;">
-  {% for c in campanhas %}
-  <div class="card camp-card">
+<div class="page disp-wrap">
+  <div class="disp-hero">
     <div>
-      <a class="nome" href="/campanha/{{ c.id }}">{{ c.nome }}</a>
-      <div style="font-size:11.5px;color:var(--cinza);margin-top:2px;">#{{ c.id }} · teto {{ c.teto_dia }}/dia por consultor</div>
+      <h1>Disparos</h1>
+      <div class="disp-sub">Campanhas do mês em rodízio pelos WhatsApps dos consultores — envio humano, ritmo aleatório, só continua com quem responde.</div>
     </div>
-    <div class="camp-metrics">
-      <div style="text-align:center;"><b>{{ c.total }}</b><span style="color:var(--cinza);">contatos</span></div>
-      <div style="text-align:center;"><b style="color:var(--info);">{{ c.enviados }}</b><span style="color:var(--cinza);">enviados</span></div>
-      <div style="text-align:center;"><b style="color:var(--teal);">{{ c.respondeu }}</b><span style="color:var(--cinza);">responderam</span></div>
-    </div>
-    <span class="camp-badge {{ c.status }}">{{ c.status }}</span>
   </div>
-  {% else %}
-  <div class="card" style="padding:26px;text-align:center;color:var(--cinza);">Nenhuma campanha ainda. Crie a primeira abaixo.</div>
-  {% endfor %}
+
+  <div class="camp-list">
+    {% for c in campanhas %}
+    {% set enviados = c.enviados or 0 %}{% set resp = c.respondeu or 0 %}{% set tot = c.total or 0 %}
+    <div class="card camp-card">
+      <div class="camp-card-top">
+        <div>
+          <a class="nome" href="/campanha/{{ c.id }}">{{ c.nome }}</a>
+          <div class="camp-sub">#{{ c.id }} · teto {{ c.teto_dia }}/dia por consultor</div>
+        </div>
+        <div class="camp-metrics">
+          <div><b>{{ tot }}</b>contatos</div>
+          <div><b style="color:var(--info);">{{ enviados }}</b>enviados</div>
+          <div><b style="color:var(--teal);">{{ resp }}</b>responderam</div>
+          <span class="camp-badge {{ c.status }}">{{ c.status }}</span>
+        </div>
+      </div>
+      <div class="camp-bar">
+        <i style="width:{{ (resp / tot * 100) if tot else 0 }}%;background:var(--teal);"></i>
+        <i style="width:{{ ((enviados - resp) / tot * 100) if tot else 0 }}%;background:var(--info);"></i>
+      </div>
+    </div>
+    {% else %}
+    <div class="card" style="padding:30px;text-align:center;color:var(--cinza);">Nenhuma campanha ainda. Crie a primeira abaixo.</div>
+    {% endfor %}
+  </div>
+
+  <div class="card" id="nova" style="padding:0;">
+    <div style="padding:18px 22px 0;"><h3 style="margin:0;">Nova campanha</h3></div>
+    <form method="POST" action="/campanha/criar" enctype="multipart/form-data">
+      <div class="form-sec">
+        <h4><span class="num">1</span> Lista de contatos</h4>
+        <div class="hint">Suba a planilha do mês (Excel ou CSV). O sistema acha nome, telefone e e-mail em qualquer ordem, remove repetidos e distribui em rodízio.</div>
+        <div class="form-body">
+          <label class="drop" id="drop" for="planilha">
+            <div class="ic"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="color:var(--teal);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg></div>
+            <div class="t" id="drop-t">Clique para escolher a planilha</div>
+            <div class="s">.xlsx ou .csv — <a href="/campanha/modelo-planilha" class="linkmodelo" onclick="event.stopPropagation()">baixar modelo</a></div>
+          </label>
+          <input type="file" id="planilha" name="planilha" accept=".xlsx,.xlsm,.csv" style="display:none;">
+          <div class="ou">ou cole os contatos</div>
+          <textarea class="campo" name="lista" placeholder="Maria Silva, 19 99999-8888, maria@email.com&#10;João Souza, 11988887777"></textarea>
+        </div>
+      </div>
+
+      <div class="form-sec">
+        <h4><span class="num">2</span> Saudação (o "bom dia")</h4>
+        <div class="hint">Escreva 2-3 variações — o sistema alterna entre elas (mensagem clonada queima número). Use <code>{nome}</code> pro primeiro nome. Separe cada variação com uma linha <code>---</code>.</div>
+        <div class="form-body">
+          <textarea class="campo" name="mensagens" style="min-height:120px;" placeholder="Bom dia, {nome}! Tudo bem?&#10;---&#10;Oi {nome}, bom dia! Como vai?&#10;---&#10;Olá {nome}, tudo certo por aí?"></textarea>
+        </div>
+      </div>
+
+      <div class="form-sec">
+        <h4><span class="num">3</span> Ritmo (aquecimento)</h4>
+        <div class="hint">Quantos cada consultor manda por dia. Comece baixo (15-20) e aumente com o tempo — número novo aguenta menos.</div>
+        <div class="form-body" style="display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap;">
+          <div>
+            <label class="lbl">Teto por consultor / dia</label>
+            <input class="campo" name="teto_dia" type="number" min="1" value="20" style="width:130px;">
+          </div>
+          <div>
+            <label class="lbl">Nome da campanha</label>
+            <input class="campo" name="nome" placeholder="Ex: Aniversário 6 meses — Julho" style="width:320px;max-width:60vw;">
+          </div>
+        </div>
+      </div>
+
+      <div class="foot"><button class="btn" type="submit">Criar campanha e distribuir</button></div>
+    </form>
+  </div>
 </div>
 
-<div class="card" id="nova" style="padding:22px;">
-  <h3 style="margin:0 0 4px;">Nova campanha</h3>
-  <div class="ajuda">Cole a lista, defina o teto diário e as variações do "bom dia". O sistema distribui em rodízio entre os consultores e gera o VCF de cada um pra salvar os contatos.</div>
-  <form method="POST" action="/campanha/criar">
-    <label class="campo">Nome da campanha</label>
-    <input class="campo" name="nome" placeholder="Ex: Aniversário 6 meses — Julho">
-
-    <label class="campo">Teto por consultor por dia (aquecimento — comece baixo)</label>
-    <input class="campo" name="teto_dia" type="number" min="1" value="20" style="max-width:140px;">
-
-    <label class="campo">Mensagens do "bom dia" (separe variações com uma linha <code>---</code>). Use <code>{nome}</code> pro primeiro nome.</label>
-    <textarea class="campo" name="mensagens" placeholder="Bom dia, {nome}! Tudo bem?&#10;---&#10;Oi {nome}, bom dia! Como vai?&#10;---&#10;Olá {nome}, tudo certo por aí?"></textarea>
-
-    <label class="campo">Lista de contatos (uma pessoa por linha — nome, telefone, e-mail, razão social; ordem livre, separado por vírgula/TAB)</label>
-    <textarea class="campo" name="lista" style="min-height:140px;" placeholder="Maria Silva, 19 99999-8888, maria@email.com, Padaria Silva ME&#10;João Souza, 11988887777, joao@email.com"></textarea>
-
-    <div style="margin-top:16px;"><button class="btn" type="submit">Criar campanha e distribuir</button></div>
-  </form>
-</div>
+<script>
+  const inp = document.getElementById('planilha');
+  const drop = document.getElementById('drop');
+  inp.addEventListener('change', () => {
+    if (inp.files && inp.files[0]) {
+      drop.classList.add('tem');
+      document.getElementById('drop-t').textContent = inp.files[0].name;
+    }
+  });
+</script>
 {% endblock %}

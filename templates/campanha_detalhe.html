@@ -3,89 +3,133 @@
 
 {% block head %}
 <style>
-.cons-row { display:grid; grid-template-columns:1.4fr .7fr .7fr .7fr auto; gap:12px; align-items:center; padding:12px 18px; border-bottom:1px solid var(--borda); font-size:13.5px; }
+.disp-wrap { max-width: 1080px; }
+.cd-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; flex-wrap:wrap; margin-bottom:18px; }
+.cd-hero h1 { font-size:24px; }
+.cd-sub { color:var(--cinza); font-size:12.5px; margin-top:3px; }
+.cd-badge { font-size:10.5px; padding:3px 10px; border-radius:20px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; vertical-align:middle; margin-left:8px; }
+.cd-badge.ativa { background:rgba(31,216,164,.12); color:var(--teal); }
+.cd-badge.pausada { background:rgba(245,158,11,.14); color:#f59e0b; }
+.cd-badge.concluida { background:rgba(148,163,184,.15); color:var(--cinza); }
+.cd-controls { display:flex; gap:8px; flex-wrap:wrap; }
+
+.kpi-row { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:14px; }
+.kpi { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:15px 16px; }
+.kpi .n { font-family:'Sora',sans-serif; font-size:26px; font-weight:700; line-height:1; }
+.kpi .l { font-size:11px; color:var(--cinza); text-transform:uppercase; letter-spacing:.5px; margin-top:6px; }
+.funnel { height:12px; border-radius:7px; overflow:hidden; display:flex; background:var(--borda); margin-bottom:6px; }
+.funnel > i { height:100%; display:block; }
+.funnel-leg { display:flex; gap:16px; font-size:11.5px; color:var(--cinza); flex-wrap:wrap; }
+.funnel-leg span::before { content:''; display:inline-block; width:9px; height:9px; border-radius:3px; margin-right:5px; vertical-align:middle; }
+
+.cons-row { display:grid; grid-template-columns:1.5fr .7fr .7fr .8fr auto; gap:12px; align-items:center; padding:12px 18px; border-bottom:1px solid var(--borda); font-size:13.5px; }
 .cons-row:last-child { border-bottom:none; }
 .cons-head { font-size:10.5px; color:var(--cinza-2); font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+.msgvar { background:var(--fundo-2,#12121a); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; font-size:13px; margin:6px 0; }
+.ct-row { display:grid; grid-template-columns:1.4fr 1fr .8fr auto; gap:10px; padding:9px 18px; border-bottom:1px solid var(--borda); font-size:12.5px; align-items:center; }
 .st { font-size:11px; padding:2px 9px; border-radius:12px; font-weight:600; }
 .st.pendente { background:rgba(148,163,184,.15); color:var(--cinza); }
 .st.enfileirado { background:rgba(59,130,246,.14); color:var(--info); }
-.st.enviado { background:rgba(31,216,164,.12); color:var(--teal); }
+.st.enviado { background:rgba(59,130,246,.14); color:var(--info); }
 .st.respondeu { background:rgba(31,216,164,.2); color:var(--teal); font-weight:700; }
-.st.invalido, .st.sem_resposta { background:rgba(244,63,94,.12); color:var(--rosa); }
-.ct-row { display:grid; grid-template-columns:1.4fr 1fr .8fr auto; gap:10px; padding:9px 18px; border-bottom:1px solid var(--borda); font-size:12.5px; align-items:center; }
-.msgvar { background:var(--fundo-2,#14141c); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; font-size:13px; margin:6px 0; }
+.st.sem_resposta, .st.invalido { background:rgba(244,63,94,.12); color:var(--rosa); }
+.st.excluido { background:rgba(148,163,184,.12); color:var(--cinza); }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="page-head" style="display:flex;align-items:center;justify-content:space-between;">
-  <div>
-    <h1>{{ camp.nome }}</h1>
-    <div class="sub">Campanha #{{ camp.id }} · {{ contatos|length }} contatos · teto {{ camp.teto_dia }}/dia por consultor · <span id="st-label">{{ camp.status }}</span></div>
+{% set ag = resumo.aguardando or 0 %}{% set rp = resumo.respondeu or 0 %}{% set sr = resumo.sem_resposta or 0 %}{% set ex = resumo.excluido or 0 %}
+{% set tot = contatos|length %}
+{% set base = rp + ag + sr %}
+{% set taxa = (rp / base * 100) if base else 0 %}
+<div class="page disp-wrap">
+  <div class="cd-hero">
+    <div>
+      <h1>{{ camp.nome }}<span class="cd-badge {{ camp.status }}" id="badge">{{ camp.status }}</span></h1>
+      <div class="cd-sub">Campanha #{{ camp.id }} · {{ tot }} contatos · teto {{ camp.teto_dia }}/dia por consultor · vira "sem resposta" após {{ camp.dias_sem_resposta or 2 }} dias</div>
+    </div>
+    <div class="cd-controls">
+      <a href="/campanhas" class="btn-outline" style="text-decoration:none;">Voltar</a>
+      {% if camp.status == 'ativa' %}
+      <button class="btn-outline" onclick="mudarStatus('pausada')">Suspender</button>
+      <button class="btn-outline" onclick="mudarStatus('concluida')">Encerrar</button>
+      <button class="btn" onclick="enfileirar(this)">Enviar lote de hoje</button>
+      {% elif camp.status == 'pausada' %}
+      <button class="btn-outline" onclick="mudarStatus('concluida')">Encerrar</button>
+      <button class="btn" onclick="mudarStatus('ativa')">Retomar</button>
+      {% else %}
+      <button class="btn-outline" onclick="mudarStatus('ativa')">Reabrir</button>
+      {% endif %}
+    </div>
   </div>
-  <div style="display:flex;gap:8px;">
-    <a href="/campanhas" class="btn-outline" style="text-decoration:none;">Voltar</a>
-    <button class="btn-outline" onclick="mudarStatus(camp_status=='ativa'?'pausada':'ativa')" id="btn-pausar">{{ 'Pausar' if camp.status=='ativa' else 'Retomar' }}</button>
-    <button class="btn" onclick="enfileirar(this)">Enviar lote de hoje</button>
-  </div>
-</div>
 
-<div class="card" style="padding:16px 20px;margin-bottom:16px;">
-  <div style="font-size:12.5px;color:var(--cinza);line-height:1.6;">
-    <b style="color:var(--texto);">Como rodar:</b> 1) cada consultor baixa o <b>VCF dele</b> abaixo e importa no celular (salva os contatos). 2) Clique em <b>Enviar lote de hoje</b> — o sistema coloca até {{ camp.teto_dia }} por consultor na fila; a extensão de cada um dispara com intervalo aleatório. 3) Quem responder vira <b>quente</b>; quem não responder, o consultor apaga a conversa.
+  <div class="kpi-row">
+    <div class="kpi"><div class="n">{{ tot }}</div><div class="l">Contatos</div></div>
+    <div class="kpi"><div class="n" style="color:var(--info);">{{ ag }}</div><div class="l">Aguardando</div></div>
+    <div class="kpi"><div class="n" style="color:var(--teal);">{{ rp }}</div><div class="l">Responderam</div></div>
+    <div class="kpi"><div class="n" style="color:var(--rosa);">{{ sr }}</div><div class="l">Sem resposta</div></div>
+    <div class="kpi"><div class="n" style="color:var(--teal);">{{ '%.0f'|format(taxa) }}%</div><div class="l">Taxa de resposta</div></div>
   </div>
-</div>
 
-<div class="card" style="margin-bottom:16px;padding:16px 20px;">
-  <div style="display:flex;gap:26px;flex-wrap:wrap;">
-    <div><div style="font-size:11px;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;">Aguardando</div><div style="font-family:'Sora',sans-serif;font-size:22px;color:var(--info);">{{ resumo.aguardando or 0 }}</div></div>
-    <div><div style="font-size:11px;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;">Responderam</div><div style="font-family:'Sora',sans-serif;font-size:22px;color:var(--teal);">{{ resumo.respondeu or 0 }}</div></div>
-    <div><div style="font-size:11px;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;">Sem resposta</div><div style="font-family:'Sora',sans-serif;font-size:22px;color:var(--rosa);">{{ resumo.sem_resposta or 0 }}</div></div>
-    <div><div style="font-size:11px;color:var(--cinza);text-transform:uppercase;letter-spacing:.5px;">Conversas apagadas</div><div style="font-family:'Sora',sans-serif;font-size:22px;color:var(--cinza);">{{ resumo.excluido or 0 }}</div></div>
+  <div class="card" style="padding:16px 20px;margin-bottom:16px;">
+    <div class="funnel">
+      <i style="width:{{ (rp/tot*100) if tot else 0 }}%;background:var(--teal);"></i>
+      <i style="width:{{ (ag/tot*100) if tot else 0 }}%;background:var(--info);"></i>
+      <i style="width:{{ (sr/tot*100) if tot else 0 }}%;background:var(--rosa);"></i>
+      <i style="width:{{ (ex/tot*100) if tot else 0 }}%;background:var(--cinza-2,#6b7280);"></i>
+    </div>
+    <div class="funnel-leg">
+      <span style="--c:var(--teal);"><i style="background:var(--teal);"></i>Responderam {{ rp }}</span>
+      <span><i style="background:var(--info);"></i>Aguardando {{ ag }}</span>
+      <span><i style="background:var(--rosa);"></i>Sem resposta {{ sr }}</span>
+      <span><i style="background:var(--cinza-2,#6b7280);"></i>Conversas apagadas {{ ex }}</span>
+    </div>
+    <div style="font-size:12.5px;color:var(--cinza);line-height:1.6;margin-top:12px;border-top:1px solid var(--borda);padding-top:12px;">
+      <b style="color:var(--texto);">Como rodar:</b> cada consultor baixa o <b>VCF dele</b> (abaixo) e importa no celular; clique em <b>Enviar lote de hoje</b> — a extensão dispara com intervalo aleatório; quem responde vira <b>quente</b>, e a extensão oferece apagar as conversas sem resposta.
+    </div>
   </div>
-</div>
 
-<div class="card" style="margin-bottom:16px;">
-  <div class="card-header"><h3>Por consultor</h3></div>
-  <div class="cons-row cons-head"><div>Consultor</div><div>Contatos</div><div>Aguardando</div><div>Responderam</div><div>Agenda (VCF)</div></div>
-  {% for pc in porcons %}
-  <div class="cons-row">
-    <div>{{ pc.nome }}</div>
-    <div>{{ pc.total }}</div>
-    <div style="color:var(--info);">{{ pc.aguardando or 0 }}</div>
-    <div style="color:var(--teal);">{{ pc.respondeu or 0 }}{% if pc.sem_resposta %} <span style="color:var(--rosa);font-size:11px;">· {{ pc.sem_resposta }} s/ resp.</span>{% endif %}</div>
-    <div><a class="btn-outline" style="text-decoration:none;padding:5px 12px;font-size:12px;" href="/campanha/{{ camp.id }}/vcf?consultor={{ pc.id }}">Baixar VCF</a></div>
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header"><h3>Por consultor</h3></div>
+    <div class="cons-row cons-head"><div>Consultor</div><div>Contatos</div><div>Aguardando</div><div>Responderam</div><div>Agenda (VCF)</div></div>
+    {% for pc in porcons %}
+    <div class="cons-row">
+      <div>{{ pc.nome }}</div>
+      <div>{{ pc.total }}</div>
+      <div style="color:var(--info);">{{ pc.aguardando or 0 }}</div>
+      <div style="color:var(--teal);">{{ pc.respondeu or 0 }}{% if pc.sem_resposta %} <span style="color:var(--rosa);font-size:11px;">· {{ pc.sem_resposta }} s/resp</span>{% endif %}</div>
+      <div><a class="btn-outline" style="text-decoration:none;padding:5px 12px;font-size:12px;" href="/campanha/{{ camp.id }}/vcf?consultor={{ pc.id }}">Baixar VCF</a></div>
+    </div>
+    {% else %}
+    <div style="padding:18px;color:var(--cinza);">Nenhum consultor ativo pra distribuir. Cadastre consultores.</div>
+    {% endfor %}
   </div>
-  {% else %}
-  <div style="padding:18px;color:var(--cinza);">Nenhum consultor ativo pra distribuir. Cadastre consultores.</div>
-  {% endfor %}
-</div>
 
-<div class="card" style="margin-bottom:16px;">
-  <div class="card-header"><h3>Mensagens ({{ msgs|length }} variação{{ 'ões' if msgs|length != 1 else '' }})</h3></div>
-  <div style="padding:14px 18px;">
-    {% for m in msgs %}<div class="msgvar">{{ m }}</div>{% endfor %}
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header"><h3>Saudações ({{ msgs|length }} variação{{ 'ões' if msgs|length != 1 else '' }})</h3></div>
+    <div style="padding:14px 18px;">
+      {% for m in msgs %}<div class="msgvar">{{ m }}</div>{% endfor %}
+    </div>
   </div>
-</div>
 
-<div class="card">
-  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-    <h3>Contatos</h3>
-    <a class="btn-outline" style="text-decoration:none;padding:5px 12px;font-size:12px;" href="/campanha/{{ camp.id }}/vcf">Baixar VCF (todos)</a>
+  <div class="card">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+      <h3>Contatos</h3>
+      <a class="btn-outline" style="text-decoration:none;padding:5px 12px;font-size:12px;" href="/campanha/{{ camp.id }}/vcf">Baixar VCF (todos)</a>
+    </div>
+    <div class="ct-row cons-head"><div>Nome</div><div>Telefone</div><div>Consultor</div><div>Status</div></div>
+    {% for ct in contatos %}
+    <div class="ct-row">
+      <div>{{ ct.nome or '—' }}{% if ct.razao_social %}<div style="color:var(--cinza);font-size:11px;">{{ ct.razao_social }}</div>{% endif %}</div>
+      <div>{{ ct.telefone or ct.telefone_norm or '—' }}</div>
+      <div>{{ ct.consultor_nome or '—' }}</div>
+      <div><span class="st {{ ct.status }}">{{ ct.status }}</span></div>
+    </div>
+    {% endfor %}
   </div>
-  <div class="ct-row cons-head"><div>Nome</div><div>Telefone</div><div>Consultor</div><div>Status</div></div>
-  {% for ct in contatos %}
-  <div class="ct-row">
-    <div>{{ ct.nome or '—' }}{% if ct.razao_social %}<div style="color:var(--cinza);font-size:11px;">{{ ct.razao_social }}</div>{% endif %}</div>
-    <div>{{ ct.telefone or ct.telefone_norm or '—' }}</div>
-    <div>{{ ct.consultor_nome or '—' }}</div>
-    <div><span class="st {{ ct.status }}">{{ ct.status }}</span></div>
-  </div>
-  {% endfor %}
 </div>
 
 <script>
-const camp_status = "{{ camp.status }}";
 async function enfileirar(btn){
   btn.disabled=true; const t=btn.textContent; btn.textContent='Enviando...';
   try{
@@ -96,10 +140,12 @@ async function enfileirar(btn){
   }catch(e){ toast('Erro de conexão','err'); btn.disabled=false; btn.textContent=t; }
 }
 async function mudarStatus(novo){
+  const nomes={ativa:'retomar',pausada:'suspender',concluida:'encerrar'};
+  if(novo=='concluida' && !confirm('Encerrar a campanha? Para de enviar novos lotes.')) return;
   try{
     const r=await fetch('/campanha/{{ camp.id }}/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:novo})});
     const d=await r.json();
-    if(d.ok){ toast('Campanha '+novo,'ok'); setTimeout(()=>location.reload(),700); }
+    if(d.ok){ toast('Campanha: '+novo,'ok'); setTimeout(()=>location.reload(),700); }
   }catch(e){ toast('Erro','err'); }
 }
 </script>
