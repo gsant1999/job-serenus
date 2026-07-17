@@ -5643,6 +5643,82 @@ def _campanha_disparar_funil(conn, contato):
     return n
 
 
+# ═══════════════ ATENDIMENTO IMEDIATO DO LEAD PAGO ═══════════════
+def _horario_comercial(agora=None):
+    """True se é dia útil (seg-sex) das 08:00 às 18:00 (America/Sao_Paulo). O
+    atendimento automático do lead pago SÓ dispara nessa janela — pedido do Guilherme."""
+    a = agora or datetime.now(TZ_SP)
+    return a.weekday() < 5 and 8 <= a.hour < 18
+
+
+def _lead_pago_opener(conn, consultor_id, nome):
+    """Mensagem de abertura do lead pago, POR CONSULTOR: sorteia um modelo de texto
+    DO consultor na pasta de abertura (config 'atendimento_categoria', default
+    'Abertura'); senão qualquer modelo dessa pasta; senão o texto padrão (config
+    'atendimento_msg_padrao'). Troca {nome} pelo 1º nome."""
+    import random as _rnd
+    try:
+        r = conn.execute("SELECT valor FROM config WHERE chave='atendimento_categoria'").fetchone()
+        cat = (r['valor'] if r else '') or 'Abertura'
+    except Exception:
+        cat = 'Abertura'
+    textos = []
+    try:
+        rows = conn.execute("""SELECT corpo_texto, dono_consultor_id FROM modelos_conteudo
+            WHERE tipo='whatsapp' AND COALESCE(midia_tipo,'') IN ('','texto')
+              AND COALESCE(corpo_texto,'')<>'' AND COALESCE(ativo,1)=1 AND categoria=?""", (cat,)).fetchall()
+        meus = [r['corpo_texto'] for r in rows if r['dono_consultor_id'] == consultor_id and (r['corpo_texto'] or '').strip()]
+        todos = [r['corpo_texto'] for r in rows if (r['corpo_texto'] or '').strip()]
+        textos = meus or todos
+    except Exception:
+        textos = []
+    if not textos:
+        try:
+            r = conn.execute("SELECT valor FROM config WHERE chave='atendimento_msg_padrao'").fetchone()
+            padrao = (r['valor'] if r else '') or ''
+        except Exception:
+            padrao = ''
+        textos = [padrao or 'Oi {nome}, tudo bem? Vi que você pediu uma cotação de plano de saúde. Posso te ajudar agora mesmo?']
+    txt = _rnd.choice(textos)
+    if '{nome}' in txt:
+        txt = txt.replace('{nome}', (nome or '').split(' ')[0] or 'tudo bem')
+    return txt
+
+
+def _atender_lead_pago_auto(conn, lead_id):
+    """Lead PAGO + horário comercial + consultor atribuído -> dispara na hora a
+    abertura pelo WhatsApp DELE (fila) + avisa (sino). Marca atendido_em (sai do
+    inbox e não reenvia). Idempotente. Fora do horário/orgânico: não faz nada
+    (o lead fica no inbox pra chamada manual). Retorna True se disparou."""
+    if not _horario_comercial():
+        return False
+    lead = conn.execute("""SELECT id, nome, telefone, telefone_norm, responsavel_id, trafego, atendido_em
+        FROM crm_leads WHERE id=?""", (lead_id,)).fetchone()
+    if not lead or lead['trafego'] != 'Pago' or lead['atendido_em']:
+        return False
+    uid = lead['responsavel_id']
+    if not uid:
+        return False  # sem consultor atribuído na planilha, não tem por quem disparar
+    chat_id = _wa_chat_id(lead['telefone_norm'] or lead['telefone'] or '')
+    if not chat_id:
+        return False
+    texto = _lead_pago_opener(conn, uid, lead['nome'])
+    conn.execute("""INSERT INTO whatsapp_extensao_fila
+        (lead_id, responsavel_id, telefone, chat_id, tipo, texto, origem, criado_por)
+        VALUES (?,?,?,?,?,?,'lead_pago',?)""",
+        (lead_id, uid, lead['telefone'] or lead['telefone_norm'], chat_id, 'texto', texto, uid))
+    conn.execute("UPDATE crm_leads SET atendido_em=? WHERE id=?", (_agora_sp(), lead_id))
+    conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+        VALUES (?,?,?,?,?)""",
+        (lead_id, 'Atendimento imediato', 'whatsapp', f'Lead PAGO — abertura automática enviada: {texto[:150]}', _agora_sp()))
+    try:
+        _notificar(uid, 'lead_pago', 'Lead PAGO — atendimento imediato',
+                   f'{lead["nome"] or "Lead"} veio de anúncio pago. A abertura automática já saiu pelo seu WhatsApp — acompanhe a conversa.', '/crm')
+    except Exception:
+        pass
+    return True
+
+
 def _campanha_parse_lista(texto):
     """Lê a lista colada (uma pessoa por linha, colunas separadas por TAB/;/vírgula).
     Robusto à ordem: acha o telefone pela quantidade de dígitos, o e-mail pelo @,
@@ -17520,6 +17596,12 @@ def _importar_leads_automatico():
                     INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
                     VALUES (?, ?, 'criacao', ?)
                 """, (lead_id, consultor or 'Sistema', f"Lead importado automaticamente via {dados.get('origem') or 'planilha'}"))
+                # Lead PAGO em horário comercial: dispara a abertura na hora pelo
+                # WhatsApp do consultor atribuído + avisa (atendimento imediato).
+                try:
+                    _atender_lead_pago_auto(conn, lead_id)
+                except Exception:
+                    pass
                 conn.commit()
                 importados += 1
                 ultimo_lead_id = lead_id
