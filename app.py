@@ -18664,11 +18664,11 @@ def crm_modelo_excluir(mid):
 @login_required
 @admin_required
 def crm_modelo_editar(mid):
-    """Edita nome e/ou texto de um modelo. Só mexe no que veio no payload —
-    mídia (áudio/imagem/PDF) e o resto ficam intactos ('não perde nada')."""
-    d = request.json or {}
-    nome = (d.get('nome') or '').strip()
-    texto = d.get('corpo_texto')
+    """Edita nome, texto e/ou o ARQUIVO de mídia de um modelo. Só mexe no que veio
+    (multipart) — se não subir arquivo novo, a mídia atual fica intacta ('não perde
+    nada'). Subiu arquivo: substitui a mídia (imagem/áudio/vídeo/PDF)."""
+    nome = (request.form.get('nome') or '').strip()
+    texto = request.form.get('corpo_texto')
     conn = db()
     m = conn.execute("SELECT id FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
     if not m:
@@ -18678,6 +18678,23 @@ def crm_modelo_editar(mid):
         sets.append("nome=?"); args.append(nome[:200])
     if texto is not None:
         sets.append("corpo_texto=?"); args.append(str(texto)[:4000])
+    # Troca de arquivo (opcional)
+    f = request.files.get('arquivo_midia')
+    if f and f.filename:
+        ext = os.path.splitext(f.filename)[1].lower()
+        midia_tipo = _midia_tipo_por_ext(ext)
+        if not midia_tipo:
+            close_db(conn); return jsonify({"ok": False, "erro": f"Formato não aceito: {ext} (imagem, áudio, vídeo mp4/mov, ou PDF)"})
+        f.stream.seek(0, os.SEEK_END); tamanho = f.stream.tell(); f.stream.seek(0)
+        limite = _MODELO_WPP_LIMITE.get(midia_tipo, 8_000_000)
+        if tamanho > limite:
+            close_db(conn); return jsonify({"ok": False, "erro": f"Arquivo grande demais (máx. {limite // 1_000_000}MB)"})
+        nome_arquivo = f"MODELO_WPP_{datetime.now(TZ_SP).strftime('%Y%m%d%H%M%S')}_{_sanitizar_filename(f.filename)}"
+        resultado = upload_arquivo_r2(f.stream, f"modelos/{nome_arquivo}")
+        if not resultado.get('ok'):
+            close_db(conn); return jsonify({"ok": False, "erro": f"Erro ao salvar mídia: {resultado.get('erro', 'desconhecido')}"})
+        sets.append("midia_arquivo=?"); args.append(nome_arquivo)
+        sets.append("midia_tipo=?"); args.append(midia_tipo)
     if sets:
         args.append(mid)
         conn.execute(f"UPDATE modelos_conteudo SET {', '.join(sets)} WHERE id=?", tuple(args))
