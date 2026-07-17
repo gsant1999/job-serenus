@@ -75,6 +75,9 @@
   .origem-badge-google { background:rgba(234,67,53,.2); color:#fb9187; }
   .origem-badge-manual { background:rgba(139,92,246,.18); color:#c4b5fd; }
   .origem-badge-medsenior { background:rgba(31,216,164,.18); color:#5eecc4; }
+  .lead-trafego { font-size:10px; font-weight:800; padding:2px 8px; border-radius:11px; letter-spacing:.4px; }
+  .lead-trafego.pago { background:linear-gradient(135deg,#f59e0b,#ef4444); color:#fff; }
+  .lead-trafego.org  { background:rgba(148,163,184,.18); color:#cbd5e1; }
   .lead-resp   { font-size:10px; padding:2px 8px; border-radius:8px; background:rgba(139,92,246,.15); color:#c4b5fd; font-weight:600; }
   .lead-meta-row { display:flex; align-items:center; gap:10px; margin-top:8px; font-size:11px; color:var(--cinza); }
   .lead-meta-row span { display:flex; align-items:center; gap:4px; }
@@ -296,6 +299,8 @@
             <span class="lead-origem {{ obadge }}">
               {{ 'Meta' if 'Facebook' in orig else 'MedSênior' if 'MEDSENIOR' in orig else 'Google' if 'Google' in orig else 'Manual' }}
             </span>
+            {% if lead.trafego == 'Pago' %}<span class="lead-trafego pago" title="Veio de anúncio pago (Google Ads)">PAGO</span>
+            {% elif lead.trafego == 'Orgânico' %}<span class="lead-trafego org" title="Veio de tráfego orgânico (não pago)">Orgânico</span>{% endif %}
             {% if lead.responsavel_nome %}<span class="lead-resp">{{ lead.responsavel_nome.split()[0] }}</span>
             {% elif lead.consultor_externo %}<span class="lead-resp" style="background:rgba(244,63,94,.12); color:var(--erro);" title="Sem consultor cadastrado no JOB — valor original da planilha">{{ lead.consultor_externo }}</span>{% endif %}
             {% if esf.texto %}<span class="lead-esfriando-tag" title="Sem nenhuma ação registrada há um tempo">{{ esf.texto }}</span>{% endif %}

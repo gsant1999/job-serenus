@@ -1940,6 +1940,9 @@ def init_db():
         # Origem de tráfego do lead: 'Pago' (utm_medium=cpc) vs 'Orgânico'. A UTM
         # completa vai em dados_extras (JSON) pra depois cruzar características.
         ("crm_leads", "trafego", "TEXT"),
+        # gclid (Google Click ID) do clique do anúncio — chave pra devolver a VENDA
+        # pro Google (conversão offline). Guardado tb em dados_extras com o resto.
+        ("crm_leads", "gclid", "TEXT"),
         # Auto-disparo do funil quando o lead responde: liberar_em segura o item na
         # fila até a hora (delay proposital/aleatório); funil_em guarda quando o
         # funil da campanha já foi disparado pro contato (não dispara duas vezes).
@@ -17456,11 +17459,11 @@ def _importar_leads_automatico():
                 conn.execute("""
                     INSERT INTO crm_leads
                         (nome, telefone, telefone_norm, email, empresa, origem, etapa,
-                         responsavel_id, observacoes, criado_em, consultor_externo, trafego, dados_extras)
-                    VALUES (?, ?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?, ?, ?, ?)
+                         responsavel_id, observacoes, criado_em, consultor_externo, trafego, gclid, dados_extras)
+                    VALUES (?, ?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?, ?, ?, ?, ?)
                 """, (dados['nome'], telefone, telefone_norm, email, dados.get('empresa') or '',
                       dados.get('origem') or 'Planilha', resp_id, dados.get('observacoes') or '',
-                      criado_em, consultor_externo, dados.get('trafego') or None, dados.get('dados_extras')))
+                      criado_em, consultor_externo, dados.get('trafego') or None, dados.get('gclid'), dados.get('dados_extras')))
                 lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
                            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
                 conn.execute("""
@@ -19862,6 +19865,14 @@ def _processar_lead(row, conn):
         trafego = ''
     utm = {k: v for k, v in {'source': utm_source, 'medium': utm_medium, 'campaign': utm_campaign,
                              'term': utm_term, 'content': utm_content}.items() if v}
+    # Ids de clique (conversão offline): gclid (Google), gbraid/wbraid (iOS/app),
+    # fbclid (Meta) + landing page. Vêm do snippet colado na landing (campo oculto).
+    gclid = _col(row, 'gclid', 'GCLID', 'GClid')
+    click = {k: v for k, v in {
+        'gclid': gclid, 'gbraid': _col(row, 'gbraid', 'GBRAID'),
+        'wbraid': _col(row, 'wbraid', 'WBRAID'), 'fbclid': _col(row, 'fbclid', 'FBCLID'),
+        'landing': _col(row, 'landing_url', 'landing', 'Landing', 'page', 'url'),
+        'device': _col(row, 'device', 'Device', 'aparelho')}.items() if v}
     # Planilha META/Facebook: SEMPRE só a coluna "Consultor" (nunca "Consultor 2" —
     # pedido explícito do Guilherme, não é confiável pra atribuição). Outras planilhas
     # mantêm o mapeamento flexível (nomeiam colunas de forma diferente).
@@ -19936,7 +19947,8 @@ def _processar_lead(row, conn):
         'data_lead': data_lead.strftime('%Y-%m-%d 12:00:00') if data_lead else None,
         'observacoes': obs,
         'trafego': trafego,
-        'dados_extras': json.dumps({'utm': utm}, ensure_ascii=False) if utm else None,
+        'gclid': gclid or None,
+        'dados_extras': json.dumps({'utm': utm, 'click': click}, ensure_ascii=False) if (utm or click) else None,
     })
 
 
@@ -20627,12 +20639,12 @@ def crm_importar():
                 # esse mesmo contato aparecesse de novo em qualquer outro lugar.
                 conn.execute(
                     """INSERT INTO crm_leads
-                       (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id, valor_estimado, observacoes, criado_em, trafego, dados_extras)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id, valor_estimado, observacoes, criado_em, trafego, gclid, dados_extras)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (dados['nome'], _formatar_telefone(dados['telefone']) or dados['telefone'], dados['telefone_norm'],
                      dados['email'], dados['empresa'], dados['origem'], dados['etapa'], dados['responsavel_id'],
                      dados['valor_estimado'], dados['observacoes'], dados.get('data_lead') or _agora_sp(),
-                     dados.get('trafego') or None, dados.get('dados_extras'))
+                     dados.get('trafego') or None, dados.get('gclid'), dados.get('dados_extras'))
                 )
                 importados += 1
             except Exception as e:
