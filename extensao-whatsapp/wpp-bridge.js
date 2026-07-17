@@ -149,21 +149,61 @@
   }
 
   async function obterTelefone() {
-    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getActiveChat) {
-      return { erro: 'wpp_ausente' };
-    }
-    const chat = window.WPP.chat.getActiveChat();
+    const WA = window.WPP;
+    if (!WA || !WA.chat || !WA.chat.getActiveChat) return { erro: 'wpp_ausente' };
+    const chat = WA.chat.getActiveChat();
     if (!chat || !chat.id) return { erro: 'sem_conversa' };
-    // O JID só carrega o número de telefone de verdade pra contato "normal"
-    // (server === 'c.us'). Contas business/privacidade nova usam @lid — um ID
-    // interno que NÃO é o telefone; nesses casos o WhatsApp não expõe o
-    // número real em lugar nenhum do cliente, então respondemos sem_numero e
-    // o content.js cai pro método antigo (nome do cabeçalho/DOM).
-    const server = chat.id.server || '';
-    if (server !== 'c.us') return { erro: 'sem_numero_exposto' };
-    const numero = chat.id.user || (chat.id._serialized || '').split('@')[0];
-    if (!numero) return { erro: 'sem_numero_exposto' };
-    return { telefone: numero };
+    const digits = (v) => (v ? String(v).replace(/\D/g, '') : '');
+    const fromWid = (w) => w && (w.user || (w._serialized || '').split('@')[0]);
+    const wid = chat.id;
+    // Contato normal (c.us): o número está no próprio JID.
+    if (wid.server === 'c.us') {
+      const n = digits(fromWid(wid));
+      if (n) return { telefone: n };
+    }
+    // @lid (business/privacidade): o número real NÃO está no cabeçalho/JID, mas a
+    // wa-js tem o mapa interno lid->pn. Escada de resolução (achado do workflow).
+    const cid = wid._serialized || (fromWid(wid) + '@' + wid.server);
+    // 1) alto nível: cache + fallback no servidor (queryExists)
+    try {
+      if (WA.contact && WA.contact.getPnLidEntry) {
+        const e = await WA.contact.getPnLidEntry(cid);
+        const n = digits(fromWid(e && e.phoneNumber));
+        if (n) return { telefone: n };
+      }
+    } catch (e) { /* tenta a próxima */ }
+    // 2) cache síncrono lid->pn
+    try {
+      if (WA.whatsapp && WA.whatsapp.lidPnCache && WA.whatsapp.lidPnCache.getPhoneNumber) {
+        const n = digits(fromWid(WA.whatsapp.lidPnCache.getPhoneNumber(wid)));
+        if (n) return { telefone: n };
+      }
+    } catch (e) {}
+    // 3) ContactModel (getPnForLid recebe o modelo, não o wid) + campo phoneNumber
+    try {
+      const cm = WA.whatsapp && WA.whatsapp.ContactStore && WA.whatsapp.ContactStore.get(wid);
+      if (cm) {
+        try { const n = digits(fromWid(WA.whatsapp.functions.getPnForLid(cm))); if (n) return { telefone: n }; } catch (e) {}
+        const n2 = digits(fromWid(cm.phoneNumber)); if (n2) return { telefone: n2 };
+      }
+    } catch (e) {}
+    // 4) função baixo nível (aceita lid wid)
+    try {
+      if (WA.whatsapp && WA.whatsapp.functions && WA.whatsapp.functions.getPhoneNumber) {
+        const n = digits(fromWid(WA.whatsapp.functions.getPhoneNumber(wid)));
+        if (n) return { telefone: n };
+      }
+    } catch (e) {}
+    // 5) força o servidor a revelar e tenta de novo o passo 1
+    try {
+      if (WA.chat.requestPhoneNumber) {
+        await WA.chat.requestPhoneNumber(cid);
+        const e = await WA.contact.getPnLidEntry(cid);
+        const n = digits(fromWid(e && e.phoneNumber));
+        if (n) return { telefone: n };
+      }
+    } catch (e) {}
+    return { erro: 'sem_numero_exposto' };
   }
 
   // Número do PRÓPRIO WhatsApp logado nesta aba (o do consultor). Usado pelo

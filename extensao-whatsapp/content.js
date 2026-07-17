@@ -364,7 +364,7 @@
       window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'obter_telefone', reqId }, '*');
       setTimeout(() => {
         if (!pronto) { window.removeEventListener('message', onMsg); resolve(''); }
-      }, 5000);
+      }, 9000);
     });
   }
 
@@ -395,12 +395,34 @@
     });
   }
 
-  // Garante um número pro lead: tenta pela wa-js; se não der, pergunta ao consultor.
-  async function garantirTelefone(nome) {
+  // Cache chat_id -> número, pra NUNCA perguntar duas vezes o mesmo contato.
+  async function _cacheNumeroSalvar(chatId, tel) {
+    if (!chatId || !tel) return;
+    try {
+      const { jobNumCache = {} } = await chrome.storage.local.get(['jobNumCache']);
+      jobNumCache[chatId] = tel; await chrome.storage.local.set({ jobNumCache });
+    } catch (e) {}
+  }
+  async function _cacheNumeroLer(chatId) {
+    if (!chatId) return '';
+    try {
+      const { jobNumCache = {} } = await chrome.storage.local.get(['jobNumCache']);
+      return jobNumCache[chatId] || '';
+    } catch (e) { return ''; }
+  }
+
+  // Garante um número pro lead, na ordem: (1) wa-js (resolve @lid pelo mapa interno),
+  // (2) cache local por chat_id (já resolvido/digitado antes), (3) popup pro corretor.
+  // O que for resolvido/digitado é guardado no cache — não pergunta de novo.
+  async function garantirTelefone(nome, chatId) {
     let tel = '';
     try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
-    if (tel) return tel;
-    return await pedirNumeroManual(nome);
+    if (tel) { await _cacheNumeroSalvar(chatId, tel); return tel; }
+    const cached = await _cacheNumeroLer(chatId);
+    if (cached) return cached;
+    const manual = await pedirNumeroManual(nome);
+    if (manual) await _cacheNumeroSalvar(chatId, manual);
+    return manual;
   }
 
   // ── Número do PRÓPRIO WhatsApp logado (o do consultor), via wa-js. Vai junto
@@ -1314,7 +1336,7 @@
     // contato salvo e @lid). Telefone é só best-effort, pra casar o lead no CRM.
     let chatId = '';
     try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
-    let telefone = await garantirTelefone(nome);
+    let telefone = await garantirTelefone(nome, chatId);
     if (!chatId && !telefone) {
       if (st) st.textContent = 'Não consegui identificar a conversa. Abra a conversa e tente de novo.';
       btn.disabled = false;
@@ -1574,7 +1596,7 @@
     if (!chatId) { alert('Abra a conversa do cliente antes de disparar o funil.'); return; }
     const nome = nomeDoContato() || 'este contato';
     if (!confirm('Disparar o funil "' + funil.nome + '" (' + funil.passos.length + ' passo(s)) para ' + nome + '?')) return;
-    let telefone = await garantirTelefone(nome);
+    let telefone = await garantirTelefone(nome, chatId);
 
     _funilRodando = true; _funilCancelar = false;
     const prog = abrirProgressoFunil(funil, nome);
