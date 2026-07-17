@@ -148,16 +148,28 @@ input.campo:focus, textarea.campo:focus { outline:none; border-color:var(--teal)
 
       <div class="form-sec">
         <h4><span class="num">2</span> Saudação (o "bom dia")</h4>
-        <div class="hint">Use uma <b>pasta dos Modelos</b> (recomendado) — o sistema roda aleatório os textos de lá. Ou escreva variações inline (separadas por <code>---</code>). Use <code>{nome}</code> pro primeiro nome.</div>
+        <div class="hint"><b>Marque os modelos</b> dos seus Modelos que quer usar (o sistema roda aleatório entre eles). Ou, se não marcar nenhum, use as variações inline. Use <code>{nome}</code> pro primeiro nome.</div>
         <div class="form-body">
-          <label class="lbl">Pasta de saudação (Modelos)</label>
-          <select class="campo" name="saudacao_categoria" style="max-width:360px;">
-            <option value="">— usar as variações digitadas abaixo —</option>
-            {% for p in pastas_saudacao %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
-          </select>
-          {% if not pastas_saudacao %}<div style="font-size:11.5px;color:var(--cinza);margin-top:5px;">Nenhuma pasta de texto nos Modelos ainda. Crie saudações em <a href="/crm/modelos" style="color:var(--teal);">Modelos</a> e elas aparecem aqui.</div>{% endif %}
-          <label class="lbl">Ou variações inline</label>
-          <textarea class="campo" name="mensagens" style="min-height:100px;" placeholder="Bom dia, {nome}! Tudo bem?&#10;---&#10;Oi {nome}, bom dia! Como vai?"></textarea>
+          <label class="lbl">Modelos de saudação — marque os que quer usar</label>
+          {% if modelos_saudacao %}
+          <div style="max-height:230px;overflow:auto;border:1px solid var(--borda);border-radius:9px;padding:6px;background:var(--fundo-2,#12121a);">
+            {% set ns = namespace(cat='__none__') %}
+            {% for m in modelos_saudacao %}
+              {% if m.categoria != ns.cat %}{% set ns.cat = m.categoria %}
+              <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);padding:8px 6px 3px;">{{ m.categoria or 'Sem pasta' }}</div>
+              {% endif %}
+              <label style="display:flex;gap:9px;align-items:flex-start;padding:6px 8px;border-radius:7px;cursor:pointer;" onmouseover="this.style.background='rgba(255,255,255,.03)'" onmouseout="this.style.background=''">
+                <input type="checkbox" name="saudacao_modelos" value="{{ m.id }}" style="width:15px;height:15px;margin-top:2px;flex-shrink:0;">
+                <span style="font-size:12.5px;"><b>{{ m.nome }}</b><span style="display:block;color:var(--cinza);font-size:11.5px;">{{ (m.corpo_texto or '')[:90] }}{{ '…' if (m.corpo_texto or '')|length > 90 else '' }}</span></span>
+              </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div style="font-size:11.5px;color:var(--cinza);">Nenhum modelo de texto nos Modelos ainda. Crie saudações em <a href="/crm/modelos" style="color:var(--teal);">Modelos</a> e elas aparecem aqui pra marcar.</div>
+          {% endif %}
+          <label class="lbl" style="margin-top:14px;">Ou variações inline (se não marcar modelos acima)</label>
+          <textarea class="campo" name="mensagens" style="min-height:90px;" placeholder="Bom dia, {nome}! Tudo bem?&#10;---&#10;Oi {nome}, bom dia! Como vai?"></textarea>
+          <div style="font-size:11px;color:var(--cinza-2);margin-top:4px;">Uma variação por bloco, separadas por uma linha com <code>---</code>.</div>
         </div>
       </div>
 

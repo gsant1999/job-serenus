@@ -1930,6 +1930,9 @@ def init_db():
         # Saudação vinda dos Modelos (pasta/categoria de textos, rodízio aleatório)
         # e Funil de conteúdo disparado quando o lead responde (fica quente).
         ("campanha", "saudacao_categoria", "TEXT"),
+        # Modelos de saudação escolhidos a dedo (JSON de ids de modelos_conteudo).
+        # Tem prioridade sobre saudacao_categoria e sobre as variações inline.
+        ("campanha", "saudacao_modelos", "TEXT"),
         ("campanha", "funil_id", "INTEGER"),
         # Quem participa da roleta de disparo (qualquer perfil — admin tb pode).
         # Escolhido a dedo pelo admin, não amarrado a perfil='consultor'.
@@ -5462,6 +5465,46 @@ def _campanha_roleta(conn, campanha_id):
     return n
 
 
+def _campanha_saudacoes(conn, camp):
+    """Pool de saudações da campanha, por prioridade: (1) modelos escolhidos a dedo
+    (saudacao_modelos, JSON de ids), (2) pasta dos Modelos (saudacao_categoria),
+    (3) variações inline (mensagens JSON). Só textos não-vazios."""
+    import json as _json
+    def _txts_por_ids(ids):
+        if not ids:
+            return []
+        ph = ','.join(['?'] * len(ids))
+        rows = conn.execute(
+            f"SELECT id, corpo_texto FROM modelos_conteudo WHERE id IN ({ph}) AND tipo='whatsapp'",
+            tuple(ids)).fetchall()
+        mp = {r['id']: (r['corpo_texto'] or '').strip() for r in rows}
+        return [mp[i] for i in ids if mp.get(i)]  # mantém a ordem escolhida
+    # (1) modelos escolhidos
+    try:
+        ids = _json.loads(camp['saudacao_modelos']) if ('saudacao_modelos' in camp.keys() and camp['saudacao_modelos']) else []
+    except Exception:
+        ids = []
+    msgs = _txts_por_ids([int(i) for i in ids if str(i).isdigit()]) if ids else []
+    # (2) pasta
+    if not msgs:
+        cat = (camp['saudacao_categoria'] if 'saudacao_categoria' in camp.keys() else '') or ''
+        if cat:
+            try:
+                msgs = [(r['corpo_texto'] or '').strip() for r in conn.execute(
+                    """SELECT corpo_texto FROM modelos_conteudo WHERE tipo='whatsapp' AND categoria=?
+                       AND COALESCE(midia_tipo,'') IN ('','texto') AND COALESCE(corpo_texto,'')<>''
+                       AND COALESCE(ativo,1)=1""", (cat,)).fetchall() if (r['corpo_texto'] or '').strip()]
+            except Exception:
+                msgs = []
+    # (3) inline
+    if not msgs:
+        try:
+            msgs = _json.loads(camp['mensagens'] or '[]')
+        except Exception:
+            msgs = []
+    return [m for m in msgs if (m or '').strip()]
+
+
 def _campanha_enfileirar(conn, campanha_id, texto_fallback='', apto_ids=None):
     """Empurra pra fila da extensão até o teto diário de cada consultor (o que já
     entrou na fila hoje conta). A fila espaça os envios por consultor (gate). Cada
@@ -5475,23 +5518,7 @@ def _campanha_enfileirar(conn, campanha_id, texto_fallback='', apto_ids=None):
     # Saudação: se a campanha aponta uma PASTA dos Modelos, o pool de "bom dia" são
     # os textos daquela pasta (rodízio aleatório) — o Guilherme cria/edita lá. Sem
     # pasta, usa as variações digitadas inline na campanha.
-    msgs = []
-    cat = (camp['saudacao_categoria'] if 'saudacao_categoria' in camp.keys() else '') or ''
-    if cat:
-        try:
-            msgs = [r['corpo_texto'].strip() for r in conn.execute(
-                """SELECT corpo_texto FROM modelos_conteudo
-                   WHERE tipo='whatsapp' AND categoria=? AND COALESCE(midia_tipo,'') IN ('','texto')
-                     AND COALESCE(corpo_texto,'')<>'' AND COALESCE(ativo,1)=1""", (cat,)).fetchall()
-                if (r['corpo_texto'] or '').strip()]
-        except Exception:
-            msgs = []
-    if not msgs:
-        try:
-            msgs = _json.loads(camp['mensagens'] or '[]')
-        except Exception:
-            msgs = []
-    msgs = [m for m in msgs if (m or '').strip()] or [texto_fallback or 'Bom dia, tudo bem?']
+    msgs = _campanha_saudacoes(conn, camp) or [texto_fallback or 'Bom dia, tudo bem?']
     teto = int(camp['teto_dia'] or 20)
     hoje = _agora_sp()[:10]
     n = 0
@@ -5707,12 +5734,19 @@ def campanhas():
            ORDER BY categoria""").fetchall()]
     funis = [dict(r) for r in conn.execute(
         "SELECT id, nome, categoria FROM whatsapp_funis WHERE COALESCE(ativo,1)=1 ORDER BY nome").fetchall()]
+    # Modelos de TEXTO (WhatsApp) pra escolher a dedo como saudação — agrupa por pasta.
+    modelos_saud = [dict(r) for r in conn.execute(
+        """SELECT id, nome, COALESCE(categoria,'') categoria, corpo_texto FROM modelos_conteudo
+           WHERE tipo='whatsapp' AND COALESCE(midia_tipo,'') IN ('','texto')
+             AND COALESCE(corpo_texto,'')<>'' AND COALESCE(ativo,1)=1
+           ORDER BY COALESCE(categoria,''), nome""").fetchall()]
     presenca = _consultores_presenca(conn)
     todos_usuarios = [dict(r) for r in conn.execute(
         "SELECT id, nome, perfil, COALESCE(disparo_participa,0) participa FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()]
     close_db(conn)
     return render_template('campanhas.html', campanhas=[dict(r) for r in rows],
                            pastas_saudacao=pastas, funis=funis, presenca=presenca,
+                           modelos_saudacao=modelos_saud,
                            todos_usuarios=todos_usuarios,
                            versao_min=_EXT_VERSAO_MIN_DISPARO, versao_atual=_extensao_versao())
 
@@ -5821,20 +5855,28 @@ def campanha_criar():
     nome = (d.get('nome') or '').strip() or f"Campanha {_agora_sp()[:10]}"
     try: teto = max(1, int(d.get('teto_dia') or 20))
     except Exception: teto = 20
-    msgs = [m.strip() for m in (d.get('mensagens') or '').split('\n---\n') if m.strip()]
+    # Separador de variações inline robusto: normaliza \r\n e aceita uma linha só
+    # de traços (2+), com espaços — antes exigia '\n---\n' exato e o navegador manda
+    # '\r\n', então nunca quebrava (virava uma mensagem só com '---' no meio).
+    import re as _re
+    raw = (d.get('mensagens') or '').replace('\r\n', '\n').replace('\r', '\n')
+    msgs = [m.strip() for m in _re.split(r'\n\s*-{2,}\s*\n', raw) if m.strip()]
     if not msgs:
-        msgs = [(d.get('mensagens') or 'Bom dia, tudo bem?').strip()]
+        msgs = [raw.strip()] if raw.strip() else ['Bom dia, tudo bem?']
     contatos = _campanha_parse_lista(d.get('lista') or '')
     contatos += _campanha_parse_planilha(request.files.get('planilha'))
     if not contatos:
         return redirect(url_for('campanhas'))
     saud = (d.get('saudacao_categoria') or '').strip() or None
+    # Modelos escolhidos a dedo (checkboxes) — prioridade sobre pasta/inline.
+    ids_mod = [i for i in (d.getlist('saudacao_modelos') if hasattr(d, 'getlist') else []) if i]
+    saud_modelos = _json.dumps([int(i) for i in ids_mod if str(i).isdigit()]) if ids_mod else None
     try: funil_id = int(d.get('funil_id')) or None
     except (TypeError, ValueError): funil_id = None
     conn = db()
-    conn.execute("""INSERT INTO campanha (nome, mensagens, teto_dia, status, criado_por, saudacao_categoria, funil_id)
-        VALUES (?,?,?,'ativa',?,?,?)""",
-        (nome, _json.dumps(msgs, ensure_ascii=False), teto, session.get('user_id'), saud, funil_id))
+    conn.execute("""INSERT INTO campanha (nome, mensagens, teto_dia, status, criado_por, saudacao_categoria, saudacao_modelos, funil_id)
+        VALUES (?,?,?,'ativa',?,?,?,?)""",
+        (nome, _json.dumps(msgs, ensure_ascii=False), teto, session.get('user_id'), saud, saud_modelos, funil_id))
     cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     vistos = set()
@@ -5896,15 +5938,7 @@ def campanha_detalhe(cid):
     if fid:
         fr = conn.execute("SELECT id, nome FROM whatsapp_funis WHERE id=?", (fid,)).fetchone()
         funil = dict(fr) if fr else None
-    import json as _json
-    if saud_cat:
-        msgs = [r['corpo_texto'] for r in conn.execute(
-            """SELECT corpo_texto FROM modelos_conteudo WHERE tipo='whatsapp' AND categoria=?
-               AND COALESCE(midia_tipo,'') IN ('','texto') AND COALESCE(corpo_texto,'')<>''
-               AND COALESCE(ativo,1)=1""", (saud_cat,)).fetchall()]
-    else:
-        try: msgs = _json.loads(camp['mensagens'] or '[]')
-        except Exception: msgs = []
+    msgs = _campanha_saudacoes(conn, camp)
     close_db(conn)
     return render_template('campanha_detalhe.html', camp=dict(camp), msgs=msgs,
                            contatos=[dict(r) for r in contatos], saud_cat=saud_cat, funil=funil,
