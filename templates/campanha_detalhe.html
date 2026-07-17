@@ -58,7 +58,7 @@
       <button class="btn-outline" onclick="mudarStatus('concluida')">Encerrar</button>
       <button class="btn" onclick="mudarStatus('ativa')">Retomar</button>
       {% else %}
-      <button class="btn-outline" onclick="mudarStatus('ativa')">Reabrir</button>
+      <button class="btn-outline" onclick="mudarStatus('ativa')" title="Continua de onde parou: o que já foi enviado fica enviado, só os pendentes voltam a sair no próximo lote.">Reabrir (continua de onde parou)</button>
       {% endif %}
     </div>
   </div>
@@ -84,8 +84,14 @@
       <span><i style="background:var(--rosa);"></i>Sem resposta {{ sr }}</span>
       <span><i style="background:var(--cinza-2,#6b7280);"></i>Conversas apagadas {{ ex }}</span>
     </div>
+    {% if eta and (eta.lote_seg > 0 or eta.falta_total > 0) %}
+    <div style="font-size:12.5px;margin-top:12px;border-top:1px solid var(--borda);padding-top:12px;display:flex;gap:22px;flex-wrap:wrap;">
+      {% if eta.lote_seg > 0 %}<div><span style="color:var(--cinza);">Lote na fila agora:</span> <b style="color:var(--info);">~{{ eta.lote_min }} min</b> pra terminar de enviar</div>{% endif %}
+      {% if eta.falta_total > 0 %}<div><span style="color:var(--cinza);">Faltam enviar:</span> <b>{{ eta.falta_total }}</b> contato(s){% if eta.dias_total and eta.dias_total > 1 %} · ~{{ eta.dias_total }} dias no teto de {{ camp.teto_dia }}/dia{% endif %}</div>{% endif %}
+    </div>
+    {% endif %}
     <div style="font-size:12.5px;color:var(--cinza);line-height:1.6;margin-top:12px;border-top:1px solid var(--borda);padding-top:12px;">
-      <b style="color:var(--texto);">Como rodar:</b> cada consultor baixa o <b>VCF dele</b> (abaixo) e importa no celular; clique em <b>Enviar lote de hoje</b> — a extensão dispara com intervalo aleatório; quem responde vira <b>quente</b>, e a extensão oferece apagar as conversas sem resposta.
+      <b style="color:var(--texto);">Como rodar:</b> cada consultor baixa o <b>VCF dele</b> (abaixo) e importa no celular; clique em <b>Enviar lote de hoje</b> — a extensão dispara com intervalo aleatório; quem responde vira <b>quente</b>, e a extensão oferece apagar as conversas sem resposta. O intervalo é sorteado entre {{ (12) }}–45s por consultor, e todos enviam em paralelo.
     </div>
   </div>
 

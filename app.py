@@ -5828,9 +5828,22 @@ def campanha_detalhe(cid):
         COUNT(*) total,
         SUM(CASE WHEN cc.status='enviado' AND cc.respondeu_em IS NULL THEN 1 ELSE 0 END) aguardando,
         SUM(CASE WHEN cc.status='respondeu' THEN 1 ELSE 0 END) respondeu,
-        SUM(CASE WHEN cc.status='sem_resposta' THEN 1 ELSE 0 END) sem_resposta
+        SUM(CASE WHEN cc.status='sem_resposta' THEN 1 ELSE 0 END) sem_resposta,
+        SUM(CASE WHEN cc.status='enfileirado' THEN 1 ELSE 0 END) enfileirado,
+        SUM(CASE WHEN cc.status='pendente' THEN 1 ELSE 0 END) pendente
         FROM campanha_contato cc JOIN usuarios u ON u.id=cc.consultor_id
         WHERE cc.campanha_id=? GROUP BY u.id, u.nome ORDER BY u.nome""", (cid,)).fetchall()
+    porcons = [dict(r) for r in porcons]
+    # Tempo estimado: a fila espaça cada envio por um intervalo aleatório (gate) por
+    # consultor, e eles enviam EM PARALELO — então o gargalo é quem tem mais na fila.
+    _gate = (_WA_FILA_GATE_SEGUNDOS + _WA_FILA_GATE_MAX) / 2.0  # média do intervalo
+    eta_lote_seg = max([(p['enfileirado'] or 0) for p in porcons] or [0]) * _gate
+    teto = int(camp['teto_dia'] or 20)
+    falta_max = max([((p['enfileirado'] or 0) + (p['pendente'] or 0)) for p in porcons] or [0])
+    dias_total = -(-falta_max // teto) if teto else 0  # ceil
+    falta_total = sum(((p['enfileirado'] or 0) + (p['pendente'] or 0)) for p in porcons)
+    eta = {'lote_seg': int(eta_lote_seg), 'lote_min': -(-int(eta_lote_seg) // 60),
+           'falta_total': falta_total, 'dias_total': dias_total}
     resumo = conn.execute("""SELECT
         SUM(CASE WHEN status='respondeu' THEN 1 ELSE 0 END) respondeu,
         SUM(CASE WHEN status='enviado' AND respondeu_em IS NULL THEN 1 ELSE 0 END) aguardando,
@@ -5856,7 +5869,7 @@ def campanha_detalhe(cid):
     close_db(conn)
     return render_template('campanha_detalhe.html', camp=dict(camp), msgs=msgs,
                            contatos=[dict(r) for r in contatos], saud_cat=saud_cat, funil=funil,
-                           porcons=[dict(r) for r in porcons], resumo=dict(resumo) if resumo else {})
+                           porcons=porcons, resumo=dict(resumo) if resumo else {}, eta=eta)
 
 
 @app.route('/campanha/<int:cid>/vcf')
@@ -5939,11 +5952,12 @@ def api_whatsapp_campanha_resposta():
         conn.execute("""UPDATE campanha_contato SET status='respondeu', respondeu_em=?
             WHERE telefone_norm=? AND status IN ('enfileirado','enviado')""", (_agora_sp(), tel))
     # Auto-dispara o funil da campanha (com delay aleatório) pros que responderam
-    # agora e ainda não receberam — só das campanhas ATIVAS que têm funil ligado.
+    # agora e ainda não receberam. NÃO exige campanha 'ativa': o lead pode responder
+    # dias depois, com a campanha já concluída — o conteúdo tem que sair mesmo assim.
     disparados = 0
     q = "SELECT cc.* FROM campanha_contato cc JOIN campanha c ON c.id=cc.campanha_id " \
         "WHERE cc.telefone_norm=? AND cc.status='respondeu' AND cc.funil_em IS NULL " \
-        "AND c.status='ativa' AND c.funil_id IS NOT NULL"
+        "AND c.status<>'pausada' AND c.funil_id IS NOT NULL"
     args = [tel]
     if uid:
         q += " AND cc.consultor_id=?"; args.append(uid)
