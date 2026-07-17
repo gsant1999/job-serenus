@@ -18647,8 +18647,42 @@ def crm_modelo_excluir(mid):
     m = conn.execute("SELECT id FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
     if not m:
         close_db(conn); return jsonify({"ok": False, "erro": "Modelo não encontrado"}), 404
-    conn.execute("DELETE FROM modelos_conteudo WHERE id=?", (mid,))
-    conn.commit(); close_db(conn)
+    try:
+        conn.execute("DELETE FROM modelos_conteudo WHERE id=?", (mid,))
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        close_db(conn)
+        app.logger.warning(f"[MODELO] excluir {mid} falhou: {e}")
+        return jsonify({"ok": False, "erro": "Não foi possível excluir (modelo em uso?)."})
+    close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/modelos/<int:mid>/editar', methods=['POST'])
+@login_required
+@admin_required
+def crm_modelo_editar(mid):
+    """Edita nome e/ou texto de um modelo. Só mexe no que veio no payload —
+    mídia (áudio/imagem/PDF) e o resto ficam intactos ('não perde nada')."""
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    texto = d.get('corpo_texto')
+    conn = db()
+    m = conn.execute("SELECT id FROM modelos_conteudo WHERE id=?", (mid,)).fetchone()
+    if not m:
+        close_db(conn); return jsonify({"ok": False, "erro": "Modelo não encontrado"}), 404
+    sets, args = [], []
+    if nome:
+        sets.append("nome=?"); args.append(nome[:200])
+    if texto is not None:
+        sets.append("corpo_texto=?"); args.append(str(texto)[:4000])
+    if sets:
+        args.append(mid)
+        conn.execute(f"UPDATE modelos_conteudo SET {', '.join(sets)} WHERE id=?", tuple(args))
+        conn.commit()
+    close_db(conn)
     return jsonify({"ok": True})
 
 

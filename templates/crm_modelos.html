@@ -183,8 +183,17 @@
         <a href="/crm/modelos/midia/{{ m.midia_arquivo }}" target="_blank" rel="noopener" class="btn-ghost" style="font-size:11.5px; display:inline-block; margin-top:8px;">Abrir {{ 'PDF' if m.midia_tipo == 'documento' else 'vídeo' }}</a>
         {% endif %}
         <div class="mo-acoes">
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="editarModelo({{ m.id }})">Editar</button>
           <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
           <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
+        </div>
+        <div class="mo-editar" id="ed-{{ m.id }}" hidden style="margin-top:8px;">
+          <input id="edn-{{ m.id }}" class="job-inp" value="{{ m.nome|e }}" placeholder="Nome do modelo" style="width:100%; box-sizing:border-box; margin-bottom:6px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto);">
+          <textarea id="edt-{{ m.id }}" placeholder="Texto da mensagem" style="width:100%; box-sizing:border-box; min-height:72px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto); resize:vertical;">{{ m.corpo_texto or '' }}</textarea>
+          <div style="display:flex; gap:8px; margin-top:6px;">
+            <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="salvarEdicaoModelo({{ m.id }})">Salvar</button>
+            <button class="btn-ghost" style="font-size:11.5px;" onclick="editarModelo({{ m.id }})">Cancelar</button>
+          </div>
         </div>
       </div>
     </div>
@@ -276,8 +285,17 @@
       <div class="wa-row-detalhe" hidden>
         {% if m.corpo_texto %}<div class="mo-preview">{{ m.corpo_texto }}</div>{% endif %}
         <div class="mo-acoes">
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="editarModelo({{ m.id }})">Editar</button>
           <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
           <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
+        </div>
+        <div class="mo-editar" id="ed-{{ m.id }}" hidden style="margin-top:8px;">
+          <input id="edn-{{ m.id }}" class="job-inp" value="{{ m.nome|e }}" placeholder="Nome do modelo" style="width:100%; box-sizing:border-box; margin-bottom:6px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto);">
+          <textarea id="edt-{{ m.id }}" placeholder="Texto da mensagem" style="width:100%; box-sizing:border-box; min-height:72px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto); resize:vertical;">{{ m.corpo_texto or '' }}</textarea>
+          <div style="display:flex; gap:8px; margin-top:6px;">
+            <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="salvarEdicaoModelo({{ m.id }})">Salvar</button>
+            <button class="btn-ghost" style="font-size:11.5px;" onclick="editarModelo({{ m.id }})">Cancelar</button>
+          </div>
         </div>
       </div>
     </div>
@@ -546,14 +564,32 @@ function toggleFavorito(id, btn){
 function toggleModelo(id){
   fetch('/crm/modelos/' + id + '/toggle', {method:'POST'})
     .then(function(r){ return r.json(); })
-    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Erro'); });
+    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Erro'); })
+    .catch(function(){ alert('Erro de conexão ao alterar o modelo.'); });
 }
 
 function excluirModelo(id, nome){
   if (!confirm('Excluir o modelo "' + nome + '"? Passos de fluxo que usam ele vão falhar no próximo envio.')) return;
   fetch('/crm/modelos/' + id + '/excluir', {method:'POST'})
     .then(function(r){ return r.json(); })
-    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Erro'); });
+    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Não foi possível excluir.'); })
+    .catch(function(){ alert('Erro ao excluir (conexão ou servidor).'); });
+}
+
+function editarModelo(id){
+  var el = document.getElementById('ed-' + id);
+  if (el) el.hidden = !el.hidden;
+}
+
+function salvarEdicaoModelo(id){
+  var nome = (document.getElementById('edn-' + id).value || '').trim();
+  var texto = document.getElementById('edt-' + id).value;
+  if (!nome) { alert('Dê um nome ao modelo.'); return; }
+  fetch('/crm/modelos/' + id + '/editar', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({nome: nome, corpo_texto: texto})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Erro ao salvar'); })
+    .catch(function(){ alert('Erro de conexão ao salvar.'); });
 }
 
 </script>
