@@ -185,7 +185,7 @@
         <div class="mo-acoes">
           <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="editarModelo({{ m.id }})">Editar</button>
           <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
-          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" data-nome="{{ m.nome|e }}" onclick="excluirModelo({{ m.id }}, this)">Excluir</button>
         </div>
         <div class="mo-editar" id="ed-{{ m.id }}" hidden style="margin-top:8px;">
           <input id="edn-{{ m.id }}" class="job-inp" value="{{ m.nome|e }}" placeholder="Nome do modelo" style="width:100%; box-sizing:border-box; margin-bottom:6px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto);">
@@ -246,7 +246,7 @@
       <div class="wa-row-detalhe" hidden>
         <div class="mo-acoes" style="margin-top:0;">
           <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
-          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" data-nome="{{ m.nome|e }}" onclick="excluirModelo({{ m.id }}, this)">Excluir</button>
         </div>
       </div>
     </div>
@@ -289,7 +289,7 @@
         <div class="mo-acoes">
           <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="editarModelo({{ m.id }})">Editar</button>
           <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
-          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" onclick="excluirModelo({{ m.id }}, {{ m.nome|tojson }})">Excluir</button>
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" data-nome="{{ m.nome|e }}" onclick="excluirModelo({{ m.id }}, this)">Excluir</button>
         </div>
         <div class="mo-editar" id="ed-{{ m.id }}" hidden style="margin-top:8px;">
           <input id="edn-{{ m.id }}" class="job-inp" value="{{ m.nome|e }}" placeholder="Nome do modelo" style="width:100%; box-sizing:border-box; margin-bottom:6px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto);">
@@ -572,7 +572,8 @@ function toggleModelo(id){
     .catch(function(){ alert('Erro de conexão ao alterar o modelo.'); });
 }
 
-function excluirModelo(id, nome){
+function excluirModelo(id, el){
+  var nome = (el && el.getAttribute && el.getAttribute('data-nome')) || 'este modelo';
   if (!confirm('Excluir o modelo "' + nome + '"? Passos de fluxo que usam ele vão falhar no próximo envio.')) return;
   fetch('/crm/modelos/' + id + '/excluir', {method:'POST'})
     .then(function(r){ return r.json(); })
