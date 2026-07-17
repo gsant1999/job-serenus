@@ -590,6 +590,7 @@
   const _ICO_ANALISE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>';
   const _ICO_MENSAGENS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
   const _ICO_FUNIS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
+  const _ICO_INBOX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>';
 
   // Kit de ícones SVG (traço, herda a cor via currentColor) — o Guilherme NÃO
   // quer emoji em interface nenhuma do JOB; qualquer ícone novo sai daqui.
@@ -628,6 +629,11 @@
       '<button class="job-trilho-item" data-secao="funis" title="Funis">' +
         '<span class="job-trilho-item-icone">' + _ICO_FUNIS + '</span>' +
         '<span class="job-trilho-item-label">Funis</span>' +
+      '</button>' +
+      '<button class="job-trilho-item" data-secao="inbox" title="Leads novos">' +
+        '<span class="job-trilho-item-icone">' + _ICO_INBOX + '</span>' +
+        '<span class="job-trilho-item-label">Leads</span>' +
+        '<span class="job-trilho-item-badge" id="job-inbox-badge" hidden>0</span>' +
       '</button>';
     trilho.querySelectorAll('.job-trilho-item').forEach((item) => {
       item.addEventListener('click', () => {
@@ -683,6 +689,123 @@
     if (secao === 'analise') sincronizarPainelComConversa();
     else if (secao === 'mensagens') abrirSecaoMensagens();
     else if (secao === 'funis') abrirSecaoFunis();
+    else if (secao === 'inbox') abrirSecaoInbox();
+  }
+
+  // ═══════════════ Inbox de leads novos (atendimento imediato) ═══════════════
+  // Os últimos leads que caíram pra ESTE consultor e ainda não foram chamados,
+  // com o tempo correndo e cor conforme a espera (verde < 5min, amarelo < 15,
+  // vermelho depois). Botão "Atender" abre a conversa e tira o lead da lista.
+  // O mais parado fica no topo. Pedido do Guilherme: de cara na extensão.
+  let _inboxCache = [];
+  let _inboxTimer = null;
+
+  function _inboxCor(seg) {
+    if (seg < 300) return '#1fd8a4';      // < 5 min
+    if (seg < 900) return '#f59e0b';       // < 15 min
+    return '#f43f5e';                       // parado demais
+  }
+  function _inboxTempo(seg) {
+    if (seg < 60) return 'agora';
+    var m = Math.floor(seg / 60);
+    if (m < 60) return m + ' min';
+    var h = Math.floor(m / 60);
+    return h + 'h' + (m % 60 ? ' ' + (m % 60) + 'min' : '');
+  }
+  function _segDesde(iso) {
+    var t = Date.parse((iso || '').replace(' ', 'T'));
+    if (isNaN(t)) return 0;
+    return Math.max(0, Math.floor((Date.now() - t) / 1000));
+  }
+
+  function renderInbox() {
+    if (!_inboxCache.length) {
+      return '<div class="job-sem-analise"><div class="job-sem-analise-txt">Nenhum lead novo esperando. Quando cair um lead pra você, ele aparece aqui na hora.</div></div>';
+    }
+    var html = '<div class="job-inbox-lista">';
+    _inboxCache.forEach(function (l) {
+      var seg = _segDesde(l.criado_em);
+      var cor = _inboxCor(seg);
+      html += '<div class="job-inbox-card" data-id="' + l.id + '" data-chat="' + (l.chat_id || '') + '" data-tel="' + (l.telefone || '') + '" style="border-left:3px solid ' + cor + ';">' +
+        '<div class="job-inbox-top">' +
+          '<span class="job-inbox-nome">' + (l.nome || 'Lead').replace(/</g, '') + '</span>' +
+          (l.pago ? '<span class="job-inbox-pago">PAGO</span>' : '') +
+          '<span class="job-inbox-tempo" data-iso="' + (l.criado_em || '') + '" style="color:' + cor + ';">' + _inboxTempo(seg) + '</span>' +
+        '</div>' +
+        '<div class="job-inbox-tel">' + (l.telefone || '') + '</div>' +
+        '<button class="job-inbox-atender">Atender agora</button>' +
+      '</div>';
+    });
+    return html + '</div>';
+  }
+
+  function ligarAcoesInbox() {
+    document.querySelectorAll('.job-inbox-atender').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var card = btn.closest('.job-inbox-card');
+        atenderLead(card.dataset.id, card.dataset.chat, card.dataset.tel);
+      });
+    });
+  }
+
+  async function atenderLead(leadId, chatId, telefone) {
+    try {
+      const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+      await chrome.runtime.sendMessage({ type: 'inbox_atender', lead_id: parseInt(leadId, 10), usuario_id: usuarioId });
+    } catch (e) { /* segue mesmo se falhar o report */ }
+    _inboxCache = _inboxCache.filter(function (l) { return String(l.id) !== String(leadId); });
+    atualizarBadgeInbox();
+    if (_secaoAtiva === 'inbox') { setCorpoSecaoInbox(renderInbox()); ligarAcoesInbox(); }
+    // abre a conversa do lead pra o consultor falar agora
+    var num = (telefone || '').replace(/\D/g, '');
+    if (num) window.location.href = 'https://web.whatsapp.com/send?phone=' + num;
+  }
+
+  function setCorpoSecaoInbox(html) {
+    const c = document.getElementById('job-painel-doc-corpo');
+    if (c) c.innerHTML = html;
+  }
+
+  async function abrirSecaoInbox() {
+    setCorpoSecaoInbox('<div class="job-sem-analise"><div class="job-sem-analise-txt">Carregando leads…</div></div>');
+    await buscarInbox();
+    if (_secaoAtiva !== 'inbox') return;
+    setCorpoSecaoInbox(renderInbox());
+    ligarAcoesInbox();
+  }
+
+  async function buscarInbox() {
+    const { extKey, usuarioId } = await chrome.storage.local.get(['extKey', 'usuarioId']);
+    if (!extKey || !usuarioId) return;
+    try {
+      const r = await chrome.runtime.sendMessage({ type: 'inbox', usuario_id: usuarioId });
+      if (r && r.ok) { _inboxCache = r.leads || []; atualizarBadgeInbox(); }
+    } catch (e) { /* próxima rodada tenta de novo */ }
+  }
+
+  function atualizarBadgeInbox() {
+    var b = document.getElementById('job-inbox-badge');
+    if (!b) return;
+    var n = _inboxCache.length;
+    // destaca vermelho se algum lead está esperando há muito
+    if (n) { b.hidden = false; b.textContent = n; } else { b.hidden = true; }
+  }
+
+  // Atualiza o tempo/cor a cada 20s (client-side) e re-busca a lista a cada 45s.
+  function ligarLoopInbox() {
+    if (_inboxTimer) return;
+    _inboxTimer = setInterval(function () {
+      // tick visual do tempo, se a seção estiver aberta
+      if (_secaoAtiva === 'inbox') {
+        document.querySelectorAll('.job-inbox-tempo').forEach(function (el) {
+          var seg = _segDesde(el.dataset.iso);
+          el.textContent = _inboxTempo(seg);
+          el.style.color = _inboxCor(seg);
+          var card = el.closest('.job-inbox-card');
+          if (card) card.style.borderLeftColor = _inboxCor(seg);
+        });
+      }
+    }, 20000);
   }
 
   function setCorpoSecao(html) {
@@ -2389,6 +2512,12 @@
   }
   setTimeout(baterPontoDisparo, 6000);
   setInterval(baterPontoDisparo, 60000);
+
+  // Inbox de leads novos: busca a cada 45s (mesmo com a seção fechada, pra o
+  // badge do trilho avisar) + tick visual do tempo.
+  setTimeout(buscarInbox, 9000);
+  setInterval(buscarInbox, 45000);
+  ligarLoopInbox();
 
   function mostrarAvisoLimpeza(qtd) {
     let box = document.getElementById('job-aviso-limpeza');

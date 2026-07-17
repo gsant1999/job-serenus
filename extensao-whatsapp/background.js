@@ -224,6 +224,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       { usuario_id: msg.usuario_id, versao: msg.versao, numero: msg.numero, wpp_ok: msg.wpp_ok }, 10000).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'inbox') {
+    chamarJob('/api/whatsapp/inbox?usuario_id=' + encodeURIComponent(msg.usuario_id || ''), 'GET', null, 12000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'inbox_atender') {
+    chamarJob('/api/whatsapp/inbox/atender', 'POST', { lead_id: msg.lead_id, usuario_id: msg.usuario_id }, 12000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'notificar') {
     // Aviso local do sistema operacional — só isso, nada é enviado pra fora.
     // Sem isso, minimizar o painel ou trocar de conversa fazia o consultor

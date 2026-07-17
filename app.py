@@ -1943,6 +1943,9 @@ def init_db():
         # gclid (Google Click ID) do clique do anúncio — chave pra devolver a VENDA
         # pro Google (conversão offline). Guardado tb em dados_extras com o resto.
         ("crm_leads", "gclid", "TEXT"),
+        # Quando o consultor ATENDEU o lead (chamou/mandou msg) — tira do inbox da
+        # extensão. NULL = ainda esperando ser chamado.
+        ("crm_leads", "atendido_em", "TIMESTAMP"),
         # Auto-disparo do funil quando o lead responde: liberar_em segura o item na
         # fila até a hora (delay proposital/aleatório); funil_em guarda quando o
         # funil da campanha já foi disparado pro contato (não dispara duas vezes).
@@ -11229,6 +11232,53 @@ def api_whatsapp_presenca():
     else:
         conn.execute("""INSERT OR REPLACE INTO consultor_wpp_status (usuario_id, versao, numero, wpp_ok, visto_em)
             VALUES (?,?,?,?,?)""", (uid, versao, numero, wpp_ok, agora))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
+
+
+@app.route('/api/whatsapp/inbox', methods=['GET', 'OPTIONS'])
+def api_whatsapp_inbox():
+    """Leads NOVOS ainda não atendidos deste consultor — pra caixa de entrada na
+    barra da extensão (os últimos que chegaram, com o tempo correndo). O mais
+    parado no topo (espera maior). Só leitura, chave da extensão."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
+    uid = request.args.get('usuario_id', type=int)
+    if not uid:
+        return _wa_cors(jsonify({"ok": True, "leads": []}))
+    conn = db()
+    rows = conn.execute("""SELECT id, nome, telefone, telefone_norm, criado_em, trafego
+        FROM crm_leads
+        WHERE responsavel_id=? AND atendido_em IS NULL
+          AND COALESCE(etapa,'') IN ('lead_novo','topo','')
+          AND COALESCE(telefone_norm,'')<>''
+        ORDER BY criado_em ASC LIMIT 8""", (uid,)).fetchall()
+    leads = [{"id": r['id'], "nome": r['nome'] or 'Lead', "telefone": r['telefone'] or r['telefone_norm'],
+              "chat_id": _wa_chat_id(r['telefone_norm'] or r['telefone'] or ''),
+              "criado_em": str(r['criado_em'] or ''), "pago": (r['trafego'] == 'Pago')}
+             for r in rows]
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "leads": leads}))
+
+
+@app.route('/api/whatsapp/inbox/atender', methods=['POST', 'OPTIONS'])
+def api_whatsapp_inbox_atender():
+    """A extensão marca que o consultor atendeu (chamou) o lead — sai do inbox.
+    Registra atividade e a hora do atendimento."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
+    d = request.json or {}
+    lead_id = d.get('lead_id')
+    if not lead_id:
+        return _wa_cors(jsonify({"ok": False, "erro": "lead_id"})), 400
+    conn = db()
+    conn.execute("UPDATE crm_leads SET atendido_em=? WHERE id=? AND atendido_em IS NULL", (_agora_sp(), lead_id))
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                 (lead_id, 'Extensão WhatsApp', 'atendimento', 'Lead atendido pelo inbox da extensão.', _agora_sp()))
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
 
