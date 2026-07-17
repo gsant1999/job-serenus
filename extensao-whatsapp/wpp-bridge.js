@@ -278,6 +278,24 @@
     if (_jobInboundLigado) clearInterval(_jobInboundTimer);
   }, 3000);
 
+  // ── Checa por LEITURA se um chat já teve resposta do contato (fallback do evento
+  //    chat.new_message, que nem sempre dispara). Lê as últimas msgs e vê se a mais
+  //    recente NÃO é nossa (fromMe===false) = o contato respondeu. Mais confiável. ──
+  async function checarInbound(chatId) {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getMessages) return { inbound: false };
+    try {
+      const msgs = await window.WPP.chat.getMessages(chatId, { count: 6 });
+      if (!msgs || !msgs.length) return { inbound: false };
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        const fromMe = m && m.id && m.id.fromMe;
+        if (fromMe === false) return { inbound: true };   // última mensagem é do contato
+        if (fromMe === true) return { inbound: false };   // última é nossa -> ainda não respondeu
+      }
+      return { inbound: false };
+    } catch (e) { return { inbound: false }; }
+  }
+
   window.addEventListener('message', async (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
@@ -292,6 +310,7 @@
       else if (d.tipo === 'enviar_texto') resp = await enviarTexto(d.chatId, d.texto);
       else if (d.tipo === 'enviar_midia') resp = await enviarMidia(d.chatId, d.midiaTipo, d.dataUrl, d.legenda);
       else if (d.tipo === 'apagar_conversa') resp = await apagarConversa(d.chatId);
+      else if (d.tipo === 'checar_inbound') resp = await checarInbound(d.chatId);
       else return;
     } catch (e) { resp = { erro: 'excecao' }; }
     resp.source = 'JOB_EXT_RESP';

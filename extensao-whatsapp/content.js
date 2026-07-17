@@ -2298,6 +2298,22 @@
     } catch (e) { /* próxima varredura reconcilia */ }
   });
 
+  function pedirChecarInbound(chatId) {
+    return new Promise((resolve) => {
+      const reqId = 'ci' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true; window.removeEventListener('message', onMsg); resolve(!!(d && d.inbound));
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'checar_inbound', reqId, chatId }, '*');
+      setTimeout(() => { if (!pronto) { window.removeEventListener('message', onMsg); resolve(false); } }, 8000);
+    });
+  }
+
   async function checarCampanhaAguardando() {
     const { extKey, usuarioId } = await chrome.storage.local.get(['extKey', 'usuarioId']);
     if (!extKey || !usuarioId) return;
@@ -2313,9 +2329,24 @@
     _campExcluir = (resp.excluir || []).filter((e) => e.chat_id);
     if (_campExcluir.length) mostrarAvisoLimpeza(_campExcluir.length);
     else { const b = document.getElementById('job-aviso-limpeza'); if (b) b.remove(); }
+    // POLLING de resposta (fallback do evento): lê cada chat vigiado e, se o contato
+    // já respondeu, reporta ao JOB. Cap por rodada pra não pesar. Confiável mesmo
+    // quando o evento chat.new_message não dispara.
+    let checados = 0;
+    for (const [chatId, alvo] of _campWatch) {
+      if (checados >= 15) break;
+      checados++;
+      try {
+        const respondeu = await pedirChecarInbound(chatId);
+        if (respondeu) {
+          _campWatch.delete(chatId);
+          await chrome.runtime.sendMessage({ type: 'campanha_resposta', telefone: alvo.telefone, usuario_id: usuarioId });
+        }
+      } catch (e) { /* próxima rodada tenta de novo */ }
+    }
   }
   setTimeout(checarCampanhaAguardando, 8000);
-  setInterval(checarCampanhaAguardando, 90000);
+  setInterval(checarCampanhaAguardando, 60000);
 
   // ── Bate ponto pro painel de aptidão do disparo: versão, número do WhatsApp
   //    logado e se a wa-js está de pé. O admin vê na aba Disparos quem está apto. ──
