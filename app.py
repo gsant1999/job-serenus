@@ -19718,7 +19718,7 @@ def _processar_lead(row, conn):
     _med = (utm_medium or '').strip().lower()
     if _med in ('cpc', 'ppc', 'paid', 'paidsearch', 'paid_search', 'paid-search', 'display', 'cpm'):
         trafego = 'Pago'
-    elif utm_source or utm_medium or utm_campaign:
+    elif utm_source or utm_medium or utm_campaign or utm_content:
         trafego = 'Orgânico'
     else:
         trafego = ''
@@ -19782,6 +19782,8 @@ def _processar_lead(row, conn):
         obs = (obs + ' · ' if obs else '') + f"Tráfego: {trafego}"
         if utm.get('campaign'):
             obs += f" ({utm['campaign']})"
+    if utm.get('content'):
+        obs = (obs + ' · ' if obs else '') + f"Página: {utm['content']}"
     return (True, 'OK', {
         'nome': nome,
         'telefone': telefone,
