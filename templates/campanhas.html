@@ -74,6 +74,7 @@ input.campo:focus, textarea.campo:focus { outline:none; border-color:var(--teal)
       <h3>WhatsApps na roleta</h3>
       <div style="display:flex;align-items:center;gap:12px;">
         <span style="font-size:11.5px;color:var(--cinza);">Versão {{ versao_atual }} · mín {{ versao_min }} · atualiza 1 min</span>
+        <button class="btn-outline btn-sm" type="button" onclick="testarEntreConsultores(this)" title="Cada consultor manda a saudação pro número de outro (rodízio) — dá pra ver o disparo e a resposta funcionando sem incomodar cliente.">Testar entre consultores</button>
         <button class="btn-outline btn-sm" type="button" onclick="document.getElementById('modal-part').style.display='flex'">Escolher participantes</button>
       </div>
     </div>
@@ -111,6 +112,7 @@ input.campo:focus, textarea.campo:focus { outline:none; border-color:var(--teal)
         </div>
         <div class="camp-metrics">
           <div><b>{{ tot }}</b>contatos</div>
+          <div><b style="color:var(--roxo,#8b5cf6);">{{ c.na_fila or 0 }}</b>na fila</div>
           <div><b style="color:var(--info);">{{ enviados }}</b>enviados</div>
           <div><b style="color:var(--teal);">{{ resp }}</b>responderam</div>
           <span class="camp-badge {{ c.status }}">{{ c.status }}</span>
@@ -212,6 +214,17 @@ input.campo:focus, textarea.campo:focus { outline:none; border-color:var(--teal)
 </div>
 
 <script>
+  async function testarEntreConsultores(btn){
+    if(!confirm('Criar um teste? Cada consultor conectado manda a saudação pro número de outro (rodízio). Serve pra validar o disparo sem incomodar cliente.')) return;
+    btn.disabled=true; var t=btn.textContent; btn.textContent='Testando...';
+    try{
+      var r=await fetch('/campanhas/testar',{method:'POST'});
+      var d=await r.json();
+      if(d.ok){ location.href='/campanha/'+d.campanha_id; }
+      else { alert(d.erro||'Erro'); btn.disabled=false; btn.textContent=t; }
+    }catch(e){ alert('Erro de conexão'); btn.disabled=false; btn.textContent=t; }
+  }
+
   async function salvarParticipantes(btn){
     const ids = Array.from(document.querySelectorAll('.part-chk:checked')).map(c=>c.value);
     btn.disabled=true; btn.textContent='Salvando...';

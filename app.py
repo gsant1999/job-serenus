@@ -5697,7 +5697,8 @@ def campanhas():
     rows = conn.execute("""SELECT c.*,
         (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id) total,
         (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.enviado_em IS NOT NULL) enviados,
-        (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.status='respondeu') respondeu
+        (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.status='respondeu') respondeu,
+        (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.status IN ('pendente','enfileirado')) na_fila
         FROM campanha c ORDER BY c.id DESC""").fetchall()
     pastas = [r['categoria'] for r in conn.execute(
         """SELECT DISTINCT categoria FROM modelos_conteudo
@@ -5732,6 +5733,44 @@ def campanhas_participantes():
             pass
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "participantes": len(ids)})
+
+
+@app.route('/campanhas/testar', methods=['POST'])
+@login_required
+@admin_required
+def campanhas_testar():
+    """Cria uma campanha de TESTE entre os próprios consultores: cada participante
+    (com WhatsApp conectado) manda a saudação pro número de OUTRO participante em
+    rodízio — nunca pra si mesmo. Serve pra ver o disparo, o rodízio e a detecção
+    de resposta funcionando de verdade, sem incomodar cliente."""
+    import json as _json
+    conn = db()
+    parts = []
+    for u in _campanha_consultores_ativos(conn):
+        s = conn.execute("SELECT numero FROM consultor_wpp_status WHERE usuario_id=?", (u['id'],)).fetchone()
+        num = _normalizar_telefone(s['numero']) if s and s['numero'] else ''
+        if num:
+            parts.append({'id': u['id'], 'nome': u['nome'], 'num': num})
+    if len(parts) < 2:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Precisa de pelo menos 2 participantes com WhatsApp conectado (peça pra abrirem o WhatsApp Web com a extensão)."})
+    msg = ('Teste de disparo do JOB. Se você recebeu isso, o disparo está funcionando. '
+           'Pode responder aqui pra testar a detecção de resposta e o funil.')
+    conn.execute("INSERT INTO campanha (nome, mensagens, teto_dia, status, criado_por) VALUES (?,?,?, 'ativa', ?)",
+                 (f"TESTE {_agora_sp()[:16]}", _json.dumps([msg], ensure_ascii=False), 50, session.get('user_id')))
+    cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    n = len(parts)
+    for i, p in enumerate(parts):
+        remetente = parts[(i + 1) % n]  # o número de p é enviado por OUTRO (rodízio)
+        conn.execute("""INSERT INTO campanha_contato (campanha_id, nome, telefone, telefone_norm, consultor_id, status)
+            VALUES (?,?,?,?,?, 'pendente')""",
+            (cid, 'Teste ' + p['nome'], p['num'], p['num'], remetente['id']))
+    conn.commit()
+    aptos = {x['id'] for x in _consultores_presenca(conn) if x['apto']}
+    enf = _campanha_enfileirar(conn, cid, apto_ids=aptos)
+    close_db(conn)
+    return jsonify({"ok": True, "campanha_id": cid, "contatos": n, "enfileirados": enf})
 
 
 @app.route('/campanhas/acompanhamento')
