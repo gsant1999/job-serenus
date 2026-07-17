@@ -2313,6 +2313,12 @@
     if (!d || d.source !== 'JOB_EXT_EVT' || d.tipo !== 'inbound' || !d.chatId) return;
     const alvo = _campWatch.get(d.chatId);
     if (!alvo) return;
+    // Confirma pela leitura antes de reportar: só se a última é do contato E a gente
+    // só mandou a saudação (não respondeu manual). Evita disparar funil quando um
+    // humano já assumiu (mesmo pelo celular).
+    let ok = false;
+    try { ok = await pedirChecarInbound(d.chatId); } catch (e) { ok = false; }
+    if (!ok) return;
     _campWatch.delete(d.chatId);
     try {
       const { usuarioId } = await chrome.storage.local.get(['usuarioId']);

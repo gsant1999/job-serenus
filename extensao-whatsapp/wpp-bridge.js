@@ -324,15 +324,16 @@
   async function checarInbound(chatId) {
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getMessages) return { inbound: false };
     try {
-      const msgs = await window.WPP.chat.getMessages(chatId, { count: 6 });
+      const msgs = await window.WPP.chat.getMessages(chatId, { count: 12 });
       if (!msgs || !msgs.length) return { inbound: false };
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        const m = msgs[i];
-        const fromMe = m && m.id && m.id.fromMe;
-        if (fromMe === false) return { inbound: true };   // última mensagem é do contato
-        if (fromMe === true) return { inbound: false };   // última é nossa -> ainda não respondeu
-      }
-      return { inbound: false };
+      let nossas = 0;
+      for (const m of msgs) { if (m && m.id && m.id.fromMe) nossas++; }
+      const ult = msgs[msgs.length - 1];
+      const ultimaDoContato = !!(ult && ult.id && ult.id.fromMe === false);
+      // Só conta como "respondeu p/ disparar o funil" se: a última mensagem é do
+      // CONTATO **e** a gente só mandou UMA vez (a saudação). Se houver 2+ nossas,
+      // um humano já respondeu (mesmo pelo celular) — NÃO dispara o funil.
+      return { inbound: !!(ultimaDoContato && nossas <= 1) };
     } catch (e) { return { inbound: false }; }
   }
 
