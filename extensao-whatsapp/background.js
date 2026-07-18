@@ -245,6 +245,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/inbox/atender', 'POST', { lead_id: msg.lead_id, usuario_id: msg.usuario_id }, 12000).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'forcar_update') {
+    // Só funciona de verdade em extensão instalada pela Chrome Web Store
+    // (tem update_url apontando pra Google). Em cópia "Carregar sem
+    // compactação" (modo desenvolvedor) o Chrome NUNCA autoatualiza sozinho —
+    // não existe alternativa segura a isso; qualquer "baixa e substitui
+    // sozinho" seria a extensão reescrevendo a si mesma, e o Chrome bloqueia
+    // isso de propósito (segurança, evita extensão virar malware depois de
+    // instalada). O botão força o Chrome a CONSULTAR a Store agora em vez de
+    // esperar o timer periódico dele — é o máximo que dá pra apressar.
+    try {
+      chrome.runtime.requestUpdateCheck((status, details) => {
+        sendResponse({ ok: true, status, versaoNova: details && details.version });
+      });
+    } catch (e) { sendResponse({ ok: false, erro: String(e && e.message || e) }); }
+    return true;
+  }
   if (msg && msg.type === 'notificar') {
     // Aviso local do sistema operacional — só isso, nada é enviado pra fora.
     // Sem isso, minimizar o painel ou trocar de conversa fazia o consultor

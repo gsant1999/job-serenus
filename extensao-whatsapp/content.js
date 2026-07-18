@@ -751,6 +751,8 @@
           '<button data-tema="claro" class="' + (temaAtual === 'claro' ? 'ativo' : '') + '">Claro</button>' +
         '</div>' +
       '</div>' +
+      '<button class="job-trilho-config-atualizar" id="job-trilho-atualizar-btn">Forçar verificação de atualização</button>' +
+      '<div class="job-trilho-config-nota" id="job-trilho-atualizar-status"></div>' +
       '<button class="job-trilho-config-desligar" id="job-trilho-desligar-btn">Desligar extensão nesta aba</button>';
     document.body.appendChild(pop);
     const btn = document.getElementById('job-trilho-config-btn');
@@ -765,6 +767,28 @@
         document.body.setAttribute('data-job-tema', novoTema);
         pop.querySelectorAll('.job-trilho-tema-btns button').forEach((x) => x.classList.toggle('ativo', x === b));
       });
+    });
+    // "Forçar atualização": só funciona de verdade em cópia instalada pela
+    // Chrome Web Store (é ela que tem update_url). Em cópia "Carregar sem
+    // compactação" o Chrome NUNCA autoatualiza — avisamos isso claramente em
+    // vez de fingir que funcionou (pedido honesto, não gambiarra).
+    document.getElementById('job-trilho-atualizar-btn').addEventListener('click', async () => {
+      const st = document.getElementById('job-trilho-atualizar-status');
+      if (st) st.textContent = 'Verificando…';
+      let resp;
+      try { resp = await chrome.runtime.sendMessage({ type: 'forcar_update' }); } catch (e) { resp = null; }
+      if (!st) return;
+      if (!resp || !resp.ok) {
+        st.textContent = 'Não consegui verificar. Se essa cópia foi carregada manualmente (modo desenvolvedor), ela nunca atualiza sozinha — precisa recarregar o arquivo na mão.';
+      } else if (resp.status === 'update_available') {
+        st.textContent = 'Atualização encontrada (v' + (resp.versaoNova || '?') + ') — baixando e aplicando sozinho, a aba vai recarregar em instantes.';
+      } else if (resp.status === 'no_update') {
+        st.textContent = 'Já está na versão mais recente disponível na Chrome Web Store.';
+      } else if (resp.status === 'throttled') {
+        st.textContent = 'Você checou recente demais — o Chrome limita a frequência dessa verificação. Tente de novo em alguns minutos.';
+      } else {
+        st.textContent = String(resp.status || 'Sem resposta.');
+      }
     });
     document.getElementById('job-trilho-desligar-btn').addEventListener('click', async () => {
       if (!confirm('Desligar a extensão JOB nesta aba do WhatsApp? Pra ligar de novo, use o popup da extensão (ícone JOB na barra do Chrome) e dê F5.')) return;

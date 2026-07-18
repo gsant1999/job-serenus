@@ -146,7 +146,12 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 .job-trilho-tema-btns button { border: none; background: transparent; color: var(--job-txt-fraco);
   font-size: 11px; font-weight: 500; padding: 5px 10px; border-radius: 6px; cursor: pointer; }
 .job-trilho-tema-btns button.ativo { background: var(--job-acento); color: var(--job-acento-txt); }
-.job-trilho-config-desligar { width: 100%; margin-top: 6px; background: rgba(244,63,94,.1);
+.job-trilho-config-atualizar { width: 100%; margin-top: 10px; background: var(--job-bg3);
+  color: var(--job-txt); border: none; border-radius: 8px; padding: 8px;
+  font-size: 11.5px; font-weight: 500; cursor: pointer; }
+.job-trilho-config-atualizar:hover { background: var(--job-bg3-hover); }
+.job-trilho-config-nota { font-size: 10px; color: var(--job-txt-fraco); line-height: 1.4; margin-top: 5px; min-height: 0; }
+.job-trilho-config-desligar { width: 100%; margin-top: 10px; background: rgba(244,63,94,.1);
   color: #fb7185; border: 1px solid rgba(244,63,94,.3); border-radius: 8px; padding: 8px;
   font-size: 11.5px; font-weight: 500; cursor: pointer; }
 .job-trilho-config-desligar:hover { background: rgba(244,63,94,.18); }
