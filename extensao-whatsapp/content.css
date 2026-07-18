@@ -18,6 +18,14 @@
   --job-acento: #1fd8a4;
   --job-acento-txt: #0a0a10;
   --job-borda: #26262f;
+  /* ── Cores SEMÂNTICAS (estado), separadas do acento de marca. No tema
+     escuro são claras/dessaturadas (legíveis sobre fundo escuro). Cada uma
+     tem texto + fundo (tint) + borda. ── */
+  --job-warn: #fbbf24;      --job-warn-bg: rgba(250,204,21,.10);  --job-warn-bd: rgba(250,204,21,.24);
+  --job-info: #7eb1ff;      --job-info-bg: rgba(59,130,246,.10);  --job-info-bd: rgba(59,130,246,.28);
+  --job-danger: #fb7185;    --job-danger-bg: rgba(244,63,94,.10); --job-danger-bd: rgba(244,63,94,.30);
+  --job-roxo: #a78bfa;      --job-roxo-bg: rgba(139,92,246,.14);  --job-roxo-bd: rgba(139,92,246,.28);
+  --job-sucesso: #3fe0b6;   --job-sucesso-bg: rgba(31,216,164,.12); --job-sucesso-bd: rgba(31,216,164,.30);
 }
 /* Tema claro (opcional, escolhido no popup da extensão) — mesma estrutura,
    superfícies claras, mesmo verde de destaque. Some, se o consultor preferir
@@ -35,6 +43,14 @@ body[data-job-tema="claro"] {
   --job-acento: #0f9d76;
   --job-acento-txt: #ffffff;
   --job-borda: #e2ded1;
+  /* Semânticas no tema CLARO: versões ESCURAS e saturadas (o amarelo/roxo
+     claros do tema escuro somem sobre o off-white). Contraste AA garantido. */
+  --job-warn: #8a5a00;      --job-warn-bg: rgba(202,138,4,.16);   --job-warn-bd: rgba(160,110,0,.34);
+  --job-info: #1d4ed8;      --job-info-bg: rgba(37,99,235,.10);   --job-info-bd: rgba(37,99,235,.30);
+  --job-danger: #be123c;    --job-danger-bg: rgba(225,29,72,.10); --job-danger-bd: rgba(225,29,72,.30);
+  --job-roxo: #6d28d9;      --job-roxo-bg: rgba(124,58,237,.10);  --job-roxo-bd: rgba(124,58,237,.28);
+  /* sucesso como TEXTO precisa ser mais escuro que o acento (que é fundo de botão) */
+  --job-sucesso: #0a6f54;   --job-sucesso-bg: rgba(15,157,118,.12); --job-sucesso-bd: rgba(15,157,118,.32);
 }
 
 /* JOB Serenus · estilos do trilho + painel docado injetados no WhatsApp Web.
@@ -112,9 +128,9 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
   cursor: default;
 }
 .job-trilho-versao-num {
-  display: inline-block; background: var(--job-bg3); color: var(--job-txt);
-  font-size: 9.5px; font-weight: 700; font-variant-numeric: tabular-nums;
-  padding: 3px 9px; border-radius: 999px; letter-spacing: .2px;
+  display: inline-block; background: var(--job-bg2); color: var(--job-txt-fraco);
+  font-size: 9.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+  padding: 3px 9px; border-radius: 999px; letter-spacing: .2px; border: 1px solid var(--job-bg3);
 }
 .job-trilho-versao.tem-nova .job-trilho-versao-num { background: var(--job-acento); color: var(--job-acento-txt); }
 .job-trilho-versao-nova {
@@ -381,22 +397,28 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 @keyframes jobspin { to { transform: rotate(360deg); } }
 
 .job-score-wrap { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
-.job-score-num { font-size: 44px; font-weight: 500; line-height: 1; }
+.job-score-num { font-size: 44px; font-weight: 500; line-height: 1; color: var(--fx, var(--job-txt)); }
 .job-score-meta { display: flex; flex-direction: column; gap: 2px; }
-.job-score-faixa { font-size: 13px; font-weight: 500; letter-spacing: .5px; }
+.job-score-faixa { font-size: 13px; font-weight: 500; letter-spacing: .5px; color: var(--fx, var(--job-txt)); }
 .job-score-sub { font-size: 11px; color: var(--job-txt-fraco); margin-top: 2px; }
 .job-barra { height: 8px; background: var(--job-bg3); border-radius: 20px; overflow: hidden; margin-bottom: 16px; }
-.job-barra-fill { height: 100%; border-radius: 20px; transition: width .4s; }
+.job-barra-fill { height: 100%; border-radius: 20px; transition: width .4s; background: var(--fx, var(--job-acento)); }
+/* Faixa do score: cada classe só define --fx; texto e barra consomem. Tema-safe. */
+.faixa-quente { --fx: var(--job-sucesso); }
+.faixa-bom    { --fx: var(--job-sucesso); }
+.faixa-medio  { --fx: var(--job-warn); }
+.faixa-baixo  { --fx: var(--job-warn); }
+.faixa-ruim   { --fx: var(--job-danger); }
 
 .job-lead-ok {
-  display: block; background: rgba(31, 216, 164, .12); color: var(--job-acento);
-  border: 1px solid rgba(31, 216, 164, .3); border-radius: 10px;
+  display: block; background: var(--job-sucesso-bg); color: var(--job-sucesso);
+  border: 1px solid var(--job-sucesso-bd); border-radius: 10px;
   padding: 10px 12px; font-size: 12.5px; text-decoration: none; margin-bottom: 4px;
 }
-.job-lead-ok:hover { background: rgba(31, 216, 164, .2); }
+.job-lead-ok:hover { filter: brightness(1.08); }
 .job-lead-nao {
-  background: rgba(250, 204, 21, .1); color: #facc15;
-  border: 1px solid rgba(250, 204, 21, .25); border-radius: 10px;
+  background: var(--job-warn-bg); color: var(--job-warn);
+  border: 1px solid var(--job-warn-bd); border-radius: 10px;
   padding: 10px 12px; font-size: 12.5px; margin-bottom: 4px;
 }
 .job-lead-nao span { color: var(--job-txt-fraco); font-size: 11px; }
@@ -405,14 +427,23 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
   color: var(--job-txt-fraco); margin: 16px 0 8px; }
 .job-sug { display: flex; gap: 9px; margin-bottom: 9px; }
 .job-sug-tag { font-size: 9.5px; font-weight: 500; text-transform: uppercase; letter-spacing: .4px;
-  padding: 3px 7px; border-radius: 6px; height: fit-content; flex-shrink: 0; }
+  padding: 3px 7px; border-radius: 6px; height: fit-content; flex-shrink: 0;
+  color: var(--job-txt-fraco); background: var(--job-bg3); }
+.job-sug-tag.p-alta  { color: var(--job-danger); background: var(--job-danger-bg); }
+.job-sug-tag.p-media { color: var(--job-warn);   background: var(--job-warn-bg); }
+.job-sug-tag.p-baixa { color: var(--job-txt-fraco); background: var(--job-bg3); }
 .job-sug-txt { font-size: 12.5px; line-height: 1.5; color: var(--job-txt-fraco); }
 .job-sug-txt b { color: var(--job-txt); }
+/* Linha "dono do lead" — cor por estado, tema-safe (era hex inline) */
+.job-lead-dono { font-size: 11.5px; margin: 4px 0 2px; }
+.job-lead-dono.ok { color: var(--job-sucesso); }
+.job-lead-dono.warn { color: var(--job-warn); }
+.job-lead-dono.neutro { color: var(--job-txt-fraco); }
 
 .job-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
 .job-chip { font-size: 10px; font-weight: 500; letter-spacing: .3px; padding: 3px 9px;
   border-radius: 20px; border: 1px solid var(--job-bg3); color: var(--job-txt-fraco); background: var(--job-bg2); }
-.job-chip-pen { border-color: rgba(244, 63, 94, .4); color: #f43f5e; }
+.job-chip-pen { border-color: var(--job-danger-bd); color: var(--job-danger); background: var(--job-danger-bg); }
 .job-dados { background: var(--job-bg2); border: 1px solid var(--job-bg3); border-radius: 10px; padding: 4px 12px; }
 .job-dado { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0;
   border-bottom: 1px solid var(--job-bg3); font-size: 12px; }
@@ -423,13 +454,13 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
   border-radius: 8px; padding: 8px; font-size: 12px; font-weight: 500; cursor: pointer; }
 .job-copy:hover { background: var(--job-bg3-hover); }
 .job-ia-badge { font-size: 9px; font-weight: 500; letter-spacing: .4px; padding: 2px 7px;
-  border-radius: 20px; background: rgba(139, 92, 246, .18); color: #a78bfa; margin-left: 6px; vertical-align: middle; }
+  border-radius: 20px; background: var(--job-roxo-bg); color: var(--job-roxo); margin-left: 6px; vertical-align: middle; }
 .job-ia-alertas { margin: 8px 0 4px; }
-.job-ia-alerta { font-size: 11.5px; line-height: 1.5; color: #fbbf24; background: rgba(250, 204, 21, .08);
-  border: 1px solid rgba(250, 204, 21, .2); border-radius: 8px; padding: 6px 10px; margin-bottom: 5px; }
-.job-img-lida { font-size: 11.5px; line-height: 1.55; color: #c3c8d4; background: rgba(139, 92, 246, .08);
-  border: 1px solid rgba(139, 92, 246, .2); border-radius: 8px; padding: 7px 10px; margin-bottom: 5px; }
-.job-audio-item { font-size: 11.5px; line-height: 1.55; color: #c3c8d4; background: rgba(37, 211, 102, .07);
+.job-ia-alerta { font-size: 11.5px; line-height: 1.5; color: var(--job-warn); background: var(--job-warn-bg);
+  border: 1px solid var(--job-warn-bd); border-radius: 8px; padding: 6px 10px; margin-bottom: 5px; }
+.job-img-lida { font-size: 11.5px; line-height: 1.55; color: var(--job-txt-fraco); background: var(--job-roxo-bg);
+  border: 1px solid var(--job-roxo-bd); border-radius: 8px; padding: 7px 10px; margin-bottom: 5px; }
+.job-audio-item { font-size: 11.5px; line-height: 1.55; color: var(--job-txt-fraco); background: rgba(37, 211, 102, .07);
   border: 1px solid rgba(37, 211, 102, .2); border-radius: 8px; padding: 7px 10px; margin-bottom: 5px; }
 .job-audio-quem { display: block; font-size: 10px; font-weight: 500; color: var(--job-acento); margin-bottom: 2px; }
 .job-resumo { font-size: 12px; line-height: 1.6; color: var(--job-txt-fraco); white-space: normal;

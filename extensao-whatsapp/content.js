@@ -976,9 +976,11 @@
   let _inboxTimer = null;
 
   function _inboxCor(seg) {
-    if (seg < 300) return '#1fd8a4';      // < 5 min
-    if (seg < 900) return '#f59e0b';       // < 15 min
-    return '#f43f5e';                       // parado demais
+    // Devolve variável CSS (resolve por tema) em vez de hex fixo — o âmbar/verde
+    // fixos sumiam no tema claro.
+    if (seg < 300) return 'var(--job-sucesso)';   // < 5 min
+    if (seg < 900) return 'var(--job-warn)';        // < 15 min
+    return 'var(--job-danger)';                     // parado demais
   }
   function _inboxTempo(seg) {
     if (seg < 60) return 'agora';
@@ -1191,13 +1193,13 @@
   // recarregar; sem isso o consultor via "nenhuma análise" à toa toda vez que
   // reabria a conversa, mesmo já tendo analisado antes.
   function telaUltimaAnaliseSalva(ua, totalMsgs) {
-    const cor = corFaixa(ua.faixa);
+    const fx = classeFaixa(ua.faixa);
     return '<div class="job-ultima-analise">' +
       '<div class="job-ultima-analise-tag">Última análise salva</div>' +
       '<div class="job-score-wrap">' +
-        '<div class="job-score-num" style="color:' + cor + '">' + (ua.score ?? '—') + '</div>' +
+        '<div class="job-score-num ' + fx + '">' + (ua.score ?? '—') + '</div>' +
         '<div class="job-score-meta">' +
-          '<div class="job-score-faixa" style="color:' + cor + '">' + esc((ua.faixa || '').toUpperCase()) + '</div>' +
+          '<div class="job-score-faixa ' + fx + '">' + esc((ua.faixa || '').toUpperCase()) + '</div>' +
           '<div class="job-score-sub">' + esc(fmtDataHora(ua.criado_em)) + (totalMsgs ? ' · ' + totalMsgs + ' mensagens' : '') + '</div>' +
         '</div>' +
       '</div>' +
@@ -2303,8 +2305,9 @@
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   }
 
-  function corFaixa(faixa) {
-    return { quente: '#1fd8a4', bom: '#4ade80', medio: '#facc15', baixo: '#fb923c' }[faixa] || '#f43f5e';
+  // Classe da faixa (não mais cor fixa): o CSS resolve a cor por tema via --fx.
+  function classeFaixa(faixa) {
+    return { quente: 'faixa-quente', bom: 'faixa-bom', medio: 'faixa-medio', baixo: 'faixa-baixo' }[faixa] || 'faixa-ruim';
   }
 
   function linhaDado(rotulo, valor) {
@@ -2315,11 +2318,11 @@
   }
 
   function renderResultado(r, nome, telefone, totalMsgs) {
-    const cor = corFaixa(r.faixa);
+    const fx = classeFaixa(r.faixa);
     const ex = r.extracao || {};
     const sugs = (r.sugestoes || []).map((s) => {
-      const pc = s.prioridade === 'alta' ? '#f43f5e' : (s.prioridade === 'media' ? '#facc15' : '#8c93a8');
-      return '<div class="job-sug"><div class="job-sug-tag" style="background:' + pc + '22;color:' + pc + '">' +
+      const pcl = s.prioridade === 'alta' ? 'p-alta' : (s.prioridade === 'media' ? 'p-media' : 'p-baixa');
+      return '<div class="job-sug"><div class="job-sug-tag ' + pcl + '">' +
         esc(s.prioridade) + '</div><div class="job-sug-txt"><b>' + esc(s.titulo) + '</b><br>' +
         esc(s.detalhe) + '</div></div>';
     }).join('');
@@ -2334,16 +2337,16 @@
     if (r.lead) {
       if (r.lead_criado) {
         donoLinha = r.consultor_nome
-          ? '<div class="job-lead-dono" style="font-size:11.5px;color:#1fd8a4;margin:4px 0 2px;">Atribuído a <b>' + esc(r.consultor_nome) + '</b>.</div>'
+          ? '<div class="job-lead-dono ok">Atribuído a <b>' + esc(r.consultor_nome) + '</b>.</div>'
           : '<div class="job-ia-alerta">⚠ Lead criado SEM responsável — selecione seu usuário no popup da extensão (e cadastre seu telefone em Usuários no JOB).</div>';
       } else if (ehMeu === true) {
-        donoLinha = '<div class="job-lead-dono" style="font-size:11.5px;color:#1fd8a4;margin:4px 0 2px;">Este lead já está no seu cadastro.</div>';
+        donoLinha = '<div class="job-lead-dono ok">Este lead já está no seu cadastro.</div>';
       } else if (r.lead_responsavel_nome && ehMeu === false) {
         donoLinha = '<div class="job-ia-alerta">⚠ Este lead está com OUTRO consultor no JOB: <b>' + esc(r.lead_responsavel_nome) + '</b>.</div>';
       } else if (r.lead_responsavel_nome) {
-        donoLinha = '<div class="job-lead-dono" style="font-size:11.5px;color:#8c93a8;margin:4px 0 2px;">Responsável no JOB: <b>' + esc(r.lead_responsavel_nome) + '</b>.</div>';
+        donoLinha = '<div class="job-lead-dono neutro">Responsável no JOB: <b>' + esc(r.lead_responsavel_nome) + '</b>.</div>';
       } else {
-        donoLinha = '<div class="job-lead-dono" style="font-size:11.5px;color:#facc15;margin:4px 0 2px;">Este lead está sem responsável no JOB.</div>';
+        donoLinha = '<div class="job-lead-dono warn">Este lead está sem responsável no JOB.</div>';
       }
     }
     const avisoConsultor = r.aviso_consultor
@@ -2417,13 +2420,13 @@
     partesRodape.push('somente leitura');
     return (
       '<div class="job-score-wrap">' +
-        '<div class="job-score-num" style="color:' + cor + '">' + (r.score != null ? r.score : '—') + '</div>' +
-        '<div class="job-score-meta"><div class="job-score-faixa" style="color:' + cor + '">' +
+        '<div class="job-score-num ' + fx + '">' + (r.score != null ? r.score : '—') + '</div>' +
+        '<div class="job-score-meta"><div class="job-score-faixa ' + fx + '">' +
           esc((r.faixa || '').toUpperCase()) + '</div>' +
           '<div class="job-score-sub">Score Lead · 0–1000 · ' + (r.categorias_consideradas || 0) + '/' +
           (r.categorias_totais || 28) + ' critérios</div></div>' +
       '</div>' +
-      '<div class="job-barra"><div class="job-barra-fill" style="width:' + Math.round((r.score || 0) / 10) + '%;background:' + cor + '"></div></div>' +
+      '<div class="job-barra"><div class="job-barra-fill ' + fx + '" style="width:' + Math.round((r.score || 0) / 10) + '%;"></div></div>' +
       '<div class="job-chips">' + chips + pen + '</div>' +
       capBox +
       avisoFalhas +
