@@ -219,6 +219,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       { contato_id: msg.contato_id, telefone: msg.telefone, usuario_id: msg.usuario_id }, 15000).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'chat_lead') {
+    chamarJob('/api/whatsapp/chat-lead?chat_id=' + encodeURIComponent(msg.chat_id || ''), 'GET', null, 10000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'presenca') {
     chamarJob('/api/whatsapp/presenca', 'POST',
       { usuario_id: msg.usuario_id, versao: msg.versao, numero: msg.numero, wpp_ok: msg.wpp_ok }, 10000).then(sendResponse);

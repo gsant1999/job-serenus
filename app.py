@@ -927,6 +927,14 @@ def init_db():
                 wpp_ok INTEGER DEFAULT 0,
                 visto_em TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS wa_chat_lead (
+                chat_id TEXT PRIMARY KEY,
+                lead_id INTEGER,
+                telefone TEXT,
+                telefone_norm TEXT,
+                nome TEXT,
+                atualizado_em TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS whatsapp_funis (
                 id SERIAL PRIMARY KEY,
                 nome TEXT NOT NULL,
@@ -1458,6 +1466,14 @@ def init_db():
             numero TEXT,
             wpp_ok INTEGER DEFAULT 0,
             visto_em TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS wa_chat_lead (
+            chat_id TEXT PRIMARY KEY,
+            lead_id INTEGER,
+            telefone TEXT,
+            telefone_norm TEXT,
+            nome TEXT,
+            atualizado_em TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS whatsapp_funis (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -11868,6 +11884,28 @@ def api_whatsapp_fila_confirmar(fid):
     return _wa_cors(jsonify({"ok": True}))
 
 
+@app.route('/api/whatsapp/chat-lead', methods=['GET', 'OPTIONS'])
+def api_whatsapp_chat_lead():
+    """A extensão pergunta ANTES de mostrar o popup manual: 'esse chat_id já tem
+    telefone/nome conhecido?'. Memória fica NO SERVIDOR (não no navegador de um
+    consultor só) — uma vez que QUALQUER consultor informou o número dessa
+    conversa, ninguém mais precisa digitar de novo, mesmo trocando de PC."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
+    chat_id = (request.args.get('chat_id') or '').strip()[:100]
+    if not chat_id:
+        return _wa_cors(jsonify({"ok": True, "achou": False}))
+    conn = db()
+    r = conn.execute("SELECT lead_id, telefone, telefone_norm, nome FROM wa_chat_lead WHERE chat_id=?", (chat_id,)).fetchone()
+    close_db(conn)
+    if not r or not (r['telefone'] or r['telefone_norm']):
+        return _wa_cors(jsonify({"ok": True, "achou": False}))
+    return _wa_cors(jsonify({"ok": True, "achou": True, "telefone": r['telefone'] or r['telefone_norm'],
+                             "nome": r['nome'] or '', "lead_id": r['lead_id']}))
+
+
 @app.route('/api/whatsapp/enviar-direto', methods=['POST', 'OPTIONS'])
 def api_whatsapp_enviar_direto():
     """Enfileira uma mensagem direto da conversa aberta no WhatsApp Web — pedido
@@ -11934,6 +11972,11 @@ def api_whatsapp_enviar_direto():
             meus.sort(key=lambda c: (0 if (c['telefone_norm'] or '').strip() else 1, c['id']))
             lead = meus[0]
     lead_id = lead['id'] if lead else None
+    # Lead já existe e é de OUTRO consultor: não trava nada — a mensagem sai igual
+    # e a atividade é registrada do mesmo jeito — só avisa os dois (quem está
+    # conversando agora e o dono do lead no JOB), pra não passar batido.
+    dono_diferente_id = lead['responsavel_id'] if (lead and lead['responsavel_id'] and lead['responsavel_id'] != usuario_id) else None
+    nome_lead_atual = (lead['nome'] if lead else '') or nome or 'Lead'
     # Casou um lead sem número e AGORA temos: completa (deixa de ser órfão).
     if lead_id and tel_norm:
         conn.execute("""UPDATE crm_leads SET telefone=COALESCE(NULLIF(telefone,''),?),
@@ -11980,6 +12023,19 @@ def api_whatsapp_enviar_direto():
     # Contabiliza uso do modelo (pra "mais usadas" na biblioteca).
     if modelo_id:
         conn.execute("UPDATE modelos_conteudo SET vezes_usado = COALESCE(vezes_usado,0) + 1 WHERE id=? AND tipo='whatsapp'", (modelo_id,))
+    # Guarda chat_id -> lead/telefone/nome NO SERVIDOR (não só no navegador do
+    # consultor) — assim, na próxima vez que QUALQUER extensão perguntar por essa
+    # conversa, o JOB já responde sem precisar abrir o popup de novo.
+    if chat_id and (lead_id or telefone or nome):
+        if DB_MODE == 'postgres':
+            conn.execute("""INSERT INTO wa_chat_lead (chat_id, lead_id, telefone, telefone_norm, nome, atualizado_em)
+                VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (chat_id) DO UPDATE SET
+                lead_id=excluded.lead_id, telefone=excluded.telefone, telefone_norm=excluded.telefone_norm,
+                nome=excluded.nome, atualizado_em=excluded.atualizado_em""",
+                (chat_id, lead_id, telefone, tel_norm, nome, _agora_sp()))
+        else:
+            conn.execute("""INSERT OR REPLACE INTO wa_chat_lead (chat_id, lead_id, telefone, telefone_norm, nome, atualizado_em)
+                VALUES (?,?,?,?,?,?)""", (chat_id, lead_id, telefone, tel_norm, nome, _agora_sp()))
     conn.commit(); close_db(conn)
     if _sem_numero_reportar:
         # Reporta 1x pros admins: contato sem número exposto, ninguém foi cadastrado.
@@ -11989,8 +12045,31 @@ def api_whatsapp_enviar_direto():
                 '(conta business/privacidade). O lead NÃO foi cadastrado — peça o número ao cliente.', '/crm')
         except Exception:
             pass
+    if dono_diferente_id and lead_id:
+        # Throttle: não avisa de novo se já avisou nos últimos 30min pra esse
+        # par lead+consultor (conversa ativa não pode virar spam de notificação).
+        try:
+            conn2 = db()
+            cutoff = (datetime.now(TZ_SP) - timedelta(minutes=30)).strftime('%Y-%m-%d %H:%M:%S')
+            ja_avisou = conn2.execute("""SELECT 1 FROM notificacoes WHERE tipo='lead_outro_consultor'
+                AND link=? AND criado_em>? LIMIT 1""", (f'/crm/lead/{lead_id}', cutoff)).fetchone()
+            if not ja_avisou:
+                quem_conversa = conn2.execute("SELECT nome FROM usuarios WHERE id=?", (usuario_id,)).fetchone()
+                quem_conversa_nome = quem_conversa['nome'] if quem_conversa else 'Um consultor'
+                dono_nome_row = conn2.execute("SELECT nome FROM usuarios WHERE id=?", (dono_diferente_id,)).fetchone()
+                dono_nome = dono_nome_row['nome'] if dono_nome_row else 'outro consultor'
+                _notificar(dono_diferente_id, 'lead_outro_consultor', 'Seu lead está sendo atendido por outro consultor',
+                           f'{quem_conversa_nome} está conversando com {nome_lead_atual} no WhatsApp — esse lead é seu no JOB.',
+                           f'/crm/lead/{lead_id}')
+                _notificar(usuario_id, 'lead_outro_consultor', 'Esse lead já é de outro consultor',
+                           f'{nome_lead_atual} já é atendido por {dono_nome} no JOB. Sua mensagem foi enviada normalmente — '
+                           'combine com ele antes de seguir a conversa.', f'/crm/lead/{lead_id}')
+            close_db(conn2)
+        except Exception:
+            pass
     return _wa_cors(jsonify({"ok": True, "id": fila_id, "lead_id": lead_id,
-                             "precisa_numero": _sem_numero_reportar}))
+                             "precisa_numero": _sem_numero_reportar,
+                             "dono_diferente": bool(dono_diferente_id)}))
 
 
 @app.route('/api/whatsapp/extensao/modelos', methods=['GET', 'OPTIONS'])

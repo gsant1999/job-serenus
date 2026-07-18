@@ -377,18 +377,25 @@
     });
   }
 
-  // ── Popup pra pedir o número quando o WhatsApp não expõe (conta business/@lid).
-  //    Sem isso, o CRM criava um lead novo SEM número a cada envio (duplicado).
-  //    Devolve os dígitos digitados (ou '' se o consultor pular). ──
+  // ── Card (NÃO modal) pra pedir o número quando o WhatsApp não expõe (conta
+  //    business/@lid). Fica num canto, sem travar a tela — o consultor pode
+  //    clicar no nome do contato e abrir "Dados do contato" no próprio WhatsApp
+  //    pra conferir o número lá, e depois digitar aqui (ou clicar Tentar de novo,
+  //    que às vezes já resolve sozinho depois de abrir esses dados — o WhatsApp
+  //    preenche o cache interno quando você olha o perfil). Devolve os dígitos
+  //    digitados (ou '' se o consultor pular). ──
   function pedirNumeroManual(nome) {
     return new Promise((resolve) => {
+      const existente = document.getElementById('job-num-modal');
+      if (existente) existente.remove();
       const wrap = document.createElement('div');
       wrap.id = 'job-num-modal';
       wrap.innerHTML =
         '<div class="job-num-box">' +
-          '<div class="job-num-tit">Número não identificado</div>' +
-          '<div class="job-num-txt">O WhatsApp não mostrou o número de <b>' + ((nome || 'este contato').replace(/</g, '')) + '</b> (conta business ou de privacidade). Informe o WhatsApp dele pra salvar no CRM:</div>' +
+          '<div class="job-num-tit"><span>Número não identificado</span><button class="job-num-fechar" type="button" title="Fechar">×</button></div>' +
+          '<div class="job-num-txt">O WhatsApp não mostrou o número de <b>' + ((nome || 'este contato').replace(/</g, '')) + '</b> (conta business ou de privacidade). Você pode clicar no nome dele lá em cima pra abrir "Dados do contato" e conferir — ou digitar aqui:</div>' +
           '<input class="job-num-inp" type="tel" inputmode="numeric" placeholder="Ex: 19 99999-8888" />' +
+          '<button class="job-num-retry" type="button">↻ Tentar de novo (depois de abrir os dados do contato)</button>' +
           '<div class="job-num-acoes">' +
             '<button class="job-num-pular" type="button">Pular</button>' +
             '<button class="job-num-ok" type="button">Salvar e enviar</button>' +
@@ -396,11 +403,20 @@
         '</div>';
       document.body.appendChild(wrap);
       const inp = wrap.querySelector('.job-num-inp');
-      setTimeout(() => inp.focus(), 50);
       function fim(v) { wrap.remove(); resolve((v || '').trim()); }
+      wrap.querySelector('.job-num-fechar').addEventListener('click', () => fim(''));
       wrap.querySelector('.job-num-pular').addEventListener('click', () => fim(''));
       wrap.querySelector('.job-num-ok').addEventListener('click', () => fim(inp.value));
       inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') fim(inp.value); if (e.key === 'Escape') fim(''); });
+      wrap.querySelector('.job-num-retry').addEventListener('click', async () => {
+        const btn = wrap.querySelector('.job-num-retry');
+        btn.textContent = 'Tentando de novo…'; btn.disabled = true;
+        let tel = '';
+        try { tel = await pedirTelefoneWpp(); } catch (e) {}
+        if (tel) { fim(tel); return; }
+        btn.textContent = '↻ Ainda não achou — tente abrir os Dados do contato e clicar de novo';
+        btn.disabled = false;
+      });
     });
   }
 
@@ -429,6 +445,17 @@
     if (tel) { await _cacheNumeroSalvar(chatId, tel); return tel; }
     const cached = await _cacheNumeroLer(chatId);
     if (cached) return cached;
+    // Memória NO SERVIDOR (não só neste navegador): se QUALQUER consultor já
+    // informou o número dessa conversa antes, o JOB já sabe — nunca pergunta de
+    // novo, mesmo em outro PC/perfil de Chrome.
+    try {
+      const r = await chrome.runtime.sendMessage({ type: 'chat_lead', chat_id: chatId });
+      if (r && r.ok && r.achou && r.telefone) {
+        await _cacheNumeroSalvar(chatId, r.telefone);
+        if (r.nome) _ultimoNomeWpp = _ultimoNomeWpp || r.nome;
+        return r.telefone;
+      }
+    } catch (e) { /* segue pro popup se o servidor não responder */ }
     // Mesmo sem número, a wa-js costuma achar o NOME salvo (contato business/@lid)
     // — usa esse em vez do nome raspado do DOM (nomeDoContato), que quebra quando
     // o WhatsApp muda a tela. Melhora a mensagem do popup e o casamento no CRM.

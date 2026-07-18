@@ -445,21 +445,26 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
 .job-aviso-versao-corpo li { margin: 4px 0; }
 .job-aviso-versao-nota { margin-top: 10px; font-size: 11px; color: #9aa1b5; }
 
-/* Popup pra pedir o número quando o WhatsApp não expõe (business/@lid) */
-#job-num-modal { position: fixed; inset: 0; z-index: 2147483300; background: rgba(0,0,0,.55);
-  display: flex; align-items: center; justify-content: center; font-family: -apple-system, "Segoe UI", sans-serif; }
-#job-num-modal .job-num-box { width: 340px; max-width: 90vw; background: #14141c; color: #eef0f6;
-  border: 1px solid #2a2a38; border-radius: 14px; padding: 20px; box-shadow: 0 16px 44px rgba(0,0,0,.5); }
-#job-num-modal .job-num-tit { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
-#job-num-modal .job-num-txt { font-size: 12.5px; color: #b7bccb; line-height: 1.5; margin-bottom: 12px; }
+/* Card flutuante pra pedir o número quando o WhatsApp não expõe (business/@lid).
+   NÃO é modal — sem fundo escuro cobrindo a tela, o consultor continua livre pra
+   clicar no nome do contato e abrir os Dados do Contato do próprio WhatsApp
+   (às vezes o número aparece lá, mesmo quando a wa-js não consegue ler). */
+#job-num-modal { position: fixed; right: 18px; bottom: 18px; z-index: 2147483300;
+  font-family: -apple-system, "Segoe UI", sans-serif; }
+#job-num-modal .job-num-box { width: 320px; max-width: 90vw; background: #14141c; color: #eef0f6;
+  border: 1px solid #2a2a38; border-radius: 14px; padding: 18px; box-shadow: 0 16px 44px rgba(0,0,0,.5); }
+#job-num-modal .job-num-tit { font-size: 14px; font-weight: 700; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#job-num-modal .job-num-fechar { background: none; border: none; color: #6b7280; font-size: 18px; line-height: 1; cursor: pointer; padding: 0; }
+#job-num-modal .job-num-txt { font-size: 12px; color: #b7bccb; line-height: 1.5; margin-bottom: 10px; }
 #job-num-modal .job-num-inp { width: 100%; background: #0f0f16; border: 1px solid #2a2a38; border-radius: 9px;
-  color: #eef0f6; padding: 11px 12px; font-size: 14px; box-sizing: border-box; }
+  color: #eef0f6; padding: 10px 12px; font-size: 13.5px; box-sizing: border-box; }
 #job-num-modal .job-num-inp:focus { outline: none; border-color: #1fd8a4; }
-#job-num-modal .job-num-acoes { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+#job-num-modal .job-num-retry { background: none; border: none; color: #7aa2ff; font-size: 11.5px; cursor: pointer; padding: 6px 0 0; text-align: left; }
+#job-num-modal .job-num-acoes { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 #job-num-modal .job-num-pular { background: #26262f; color: #cfd3df; border: none; border-radius: 8px;
-  padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  padding: 8px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
 #job-num-modal .job-num-ok { background: #1fd8a4; color: #0a0a10; border: none; border-radius: 8px;
-  padding: 9px 16px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  padding: 8px 14px; font-size: 12.5px; font-weight: 700; cursor: pointer; }
 
 /* Inbox de leads novos (atendimento imediato) */
 .job-inbox-lista { display: flex; flex-direction: column; gap: 9px; }
