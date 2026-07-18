@@ -48,11 +48,11 @@ html.job-push-esquerda.job-overlay-painel { margin-left: 72px !important; margin
   position: fixed; top: 0; right: 0; bottom: 0; width: 72px;
   z-index: 2147483000;
   display: flex; flex-direction: column; align-items: center;
-  background: var(--job-acento-txt); border-left: 1px solid rgba(255,255,255,.06);
+  background: var(--job-bg1); border-left: 1px solid var(--job-bg3);
   padding-top: 16px; gap: 4px;
   font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
-html.job-push-esquerda #job-trilho { right: auto; left: 0; border-left: none; border-right: 1px solid rgba(255,255,255,.06); }
+html.job-push-esquerda #job-trilho { right: auto; left: 0; border-left: none; border-right: 1px solid var(--job-bg3); }
 
 /* Logo JOB: o arquivo REAL dos arcos do sistema (logo_arcos.png) girando,
    "JOB" parado no meio — idêntico à sidebar do site (spinSlow). */
@@ -75,7 +75,7 @@ html.job-push-esquerda #job-trilho { right: auto; left: 0; border-left: none; bo
   color: var(--job-txt-fraco); cursor: pointer; font-family: inherit; transition: color .12s, background .12s;
 }
 .job-trilho-item:hover { color: var(--job-txt); background: rgba(255,255,255,.04); }
-.job-trilho-item-ativo { color: #fff; background: rgba(255,255,255,.05); }
+.job-trilho-item-ativo { color: var(--job-txt); background: rgba(120,120,140,.1); }
 .job-trilho-item-ativo::before {
   content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0;
   background: linear-gradient(135deg,var(--job-acento) 0%,#3b82f6 50%,#8b5cf6 100%);
@@ -162,12 +162,12 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 .job-painel-doc-logo { display: flex; align-items: center; gap: 9px; }
 .job-painel-doc-logo .job-logo { width: 28px; height: 28px; margin-bottom: 0; }
 .job-painel-doc-titulo { font-size: 14px; font-weight: 600; letter-spacing: .3px; color: var(--job-txt-fraco); }
-.job-painel-doc-titulo b { color: #fff; font-weight: 600; }
+.job-painel-doc-titulo b { color: var(--job-txt); font-weight: 600; }
 .job-painel-doc-fechar {
   background: transparent; border: none; color: var(--job-txt-fraco); font-size: 20px;
   line-height: 1; cursor: pointer; padding: 0 4px;
 }
-.job-painel-doc-fechar:hover { color: #fff; }
+.job-painel-doc-fechar:hover { color: var(--job-txt); }
 .job-painel-doc-corpo { padding: 12px; overflow-y: auto; flex: 1; }
 
 .job-cancelar {
@@ -251,9 +251,9 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--job-txt-fraco);
 }
-.job-preview-head b { color: #fff; font-weight: 600; }
+.job-preview-head b { color: var(--job-txt); font-weight: 600; }
 .job-preview-x { background: transparent; border: none; color: var(--job-txt-fraco); font-size: 22px; cursor: pointer; line-height: 1; padding: 0 2px; }
-.job-preview-x:hover { color: #fff; }
+.job-preview-x:hover { color: var(--job-txt); }
 .job-preview-midia { margin-bottom: 12px; }
 .job-preview-midia-rot { display: block; font-size: 11px; color: var(--job-txt-fraco); margin-bottom: 6px; }
 .job-preview-txt {
@@ -291,29 +291,29 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 }
 .job-modelo-grupo span { color: #646b80; font-weight: 600; }
 /* Pasta = consultor (gestor). Recolhível via <details>. */
-.job-pasta { margin: 10px 0; border: 1px solid var(--job-bg3); border-radius: 10px; overflow: hidden; background: #17171d; }
+.job-pasta { margin: 10px 0; border: 1px solid var(--job-bg3); border-radius: 10px; overflow: hidden; background: var(--job-bg1); }
 .job-pasta-nome {
   cursor: pointer; list-style: none; user-select: none;
-  font-size: 12px; font-weight: 600; color: #e6e8f0; padding: 10px 12px;
-  display: flex; align-items: center; gap: 6px; background: #1d1d25;
+  font-size: 12px; font-weight: 600; color: var(--job-txt); padding: 10px 12px;
+  display: flex; align-items: center; gap: 6px; background: var(--job-bg2);
 }
 .job-pasta-nome::-webkit-details-marker { display: none; }
-.job-pasta-nome::before { content: '▸'; color: #646b80; font-size: 10px; transition: transform .15s; }
+.job-pasta-nome::before { content: '▸'; color: var(--job-txt-fraco); font-size: 10px; transition: transform .15s; }
 .job-pasta[open] > .job-pasta-nome::before { transform: rotate(90deg); }
-.job-pasta-nome span { color: #646b80; font-weight: 600; margin-left: auto; }
-.job-pasta-conteudo { padding: 4px 10px 10px; }
+.job-pasta-nome span { color: var(--job-txt-fraco); font-weight: 600; margin-left: auto; }
+.job-pasta-conteudo { padding: 4px 10px 10px; background: var(--job-bg1); }
 /* Sub-pasta = categoria manual (operadora/material) dentro do consultor */
-.job-subpasta { margin: 6px 0; border: 1px solid #23232b; border-radius: 8px; overflow: hidden; }
+.job-subpasta { margin: 6px 0; border: 1px solid var(--job-bg3); border-radius: 8px; overflow: hidden; }
 .job-subpasta-nome {
   cursor: pointer; list-style: none; user-select: none;
-  font-size: 11px; font-weight: 600; color: #c7cbd8; padding: 7px 10px;
-  display: flex; align-items: center; gap: 6px; background: #191920;
+  font-size: 11px; font-weight: 600; color: var(--job-txt); padding: 7px 10px;
+  display: flex; align-items: center; gap: 6px; background: var(--job-bg2);
 }
 .job-subpasta-nome::-webkit-details-marker { display: none; }
-.job-subpasta-nome::before { content: '▸'; color: #545b6e; font-size: 9px; transition: transform .15s; }
+.job-subpasta-nome::before { content: '▸'; color: var(--job-txt-fraco); font-size: 9px; transition: transform .15s; }
 .job-subpasta[open] > .job-subpasta-nome::before { transform: rotate(90deg); }
-.job-subpasta-nome span { color: #545b6e; font-weight: 600; margin-left: auto; }
-.job-subpasta-conteudo { padding: 2px 8px 6px; }
+.job-subpasta-nome span { color: var(--job-txt-fraco); font-weight: 600; margin-left: auto; }
+.job-subpasta-conteudo { padding: 2px 8px 6px; background: var(--job-bg1); }
 /* Tipo = áudio/texto/PDF/imagem (dentro da pasta) */
 .job-modelo-tipo {
   font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px;
@@ -382,8 +382,8 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 .job-sug { display: flex; gap: 9px; margin-bottom: 9px; }
 .job-sug-tag { font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px;
   padding: 3px 7px; border-radius: 6px; height: fit-content; flex-shrink: 0; }
-.job-sug-txt { font-size: 12.5px; line-height: 1.5; color: #c3c8d4; }
-.job-sug-txt b { color: #fff; }
+.job-sug-txt { font-size: 12.5px; line-height: 1.5; color: var(--job-txt-fraco); }
+.job-sug-txt b { color: var(--job-txt); }
 
 .job-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
 .job-chip { font-size: 10px; font-weight: 600; letter-spacing: .3px; padding: 3px 9px;
@@ -391,7 +391,7 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 .job-chip-pen { border-color: rgba(244, 63, 94, .4); color: #f43f5e; }
 .job-dados { background: var(--job-bg2); border: 1px solid var(--job-bg3); border-radius: 10px; padding: 4px 12px; }
 .job-dado { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0;
-  border-bottom: 1px solid #22222f; font-size: 12px; }
+  border-bottom: 1px solid var(--job-bg3); font-size: 12px; }
 .job-dado:last-child { border-bottom: none; }
 .job-dado span { color: var(--job-txt-fraco); flex-shrink: 0; }
 .job-dado b { color: var(--job-txt); text-align: right; word-break: break-word; }
@@ -511,7 +511,7 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 .job-aviso-limpeza-topo { background: rgba(244,63,94,.14) !important; }
 #job-aviso-versao.job-painel-doc-esquerda, .job-esquerda #job-aviso-versao { right: auto; left: 18px; }
 .job-aviso-versao-topo { display: flex; align-items: center; justify-content: space-between;
-  padding: 11px 14px; background: #1c2c22; border-bottom: 1px solid #234; }
+  padding: 11px 14px; background: rgba(31,216,164,.1); border-bottom: 1px solid var(--job-bg3); }
 .job-aviso-versao-topo b { font-size: 13px; color: var(--job-acento); }
 .job-aviso-versao-x { background: none; border: none; color: var(--job-txt-fraco); font-size: 20px; line-height: 1;
   cursor: pointer; padding: 0 2px; }
