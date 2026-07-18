@@ -113,6 +113,18 @@
   <button class="btn-img" style="background:#9aa0b0;color:#1c1c24" onclick="baixarImagem()">Baixar</button>
   <button class="btn-pdf" onclick="window.print()">PDF</button>
 </div>
+{% if engajamento %}
+<div style="max-width:1180px;margin:0 auto 14px;background:#2a2a34;border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:13px 18px;color:#e6e6ec;font-size:12.5px;display:flex;gap:26px;flex-wrap:wrap;align-items:center;">
+  <b style="color:#fff;">Comportamento do cliente:</b>
+  {% if engajamento.consentiu %}
+    <span>Tempo na página: <b>{{ engajamento.tempo_min }} min</b></span>
+    <span>Rolou até: <b>{{ engajamento.scroll_max }}%</b></span>
+    {% if engajamento.planos_clicados %}<span>Mais clicado: <b>{{ engajamento.planos_clicados[0][0] }}</b> ({{ engajamento.planos_clicados[0][1] }}x)</span>{% endif %}
+  {% else %}
+    <span style="color:#9a9aa6;">Cliente não aceitou o acompanhamento — sem dados de comportamento.</span>
+  {% endif %}
+</div>
+{% endif %}
 {% endif %}
 <textarea id="legenda-txt" style="position:absolute;left:-9999px;top:0;">{{ cot.legenda }}</textarea>
 
@@ -198,6 +210,19 @@
   </div>
   <div style="font-size:11.5px;color:#8a8a96;margin-top:10px;">Isso não é a contratação do plano — é só pra avisar seu corretor sobre o que você achou.</div>
   <div id="fb-cotacao-ok" style="display:none;font-size:13px;color:#22c55e;font-weight:600;margin-top:12px;">Obrigado! Seu corretor já foi avisado.</div>
+</div>
+
+{# Consentimento suave (não bloqueia a leitura): some sozinho ao aceitar/recusar. #}
+<div id="cons-cotacao" style="position:fixed;left:0;right:0;bottom:0;z-index:999;background:#1c1c24;color:#e6e6ec;padding:14px 18px;box-shadow:0 -6px 24px rgba(0,0,0,.35);display:none;">
+  <div style="max-width:900px;margin:0 auto;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+    <div style="flex:1;min-width:220px;font-size:12.5px;line-height:1.5;">
+      Pra te atender melhor, seu corretor pode ver o quanto tempo você ficou aqui e o que mais chamou sua atenção. Nada disso é usado pra selecionar risco — só pra saber como te ajudar. <a href="/extensao/privacidade" target="_blank" style="color:#93c5fd;">Saiba mais</a>.
+    </div>
+    <div style="display:flex;gap:8px;flex-shrink:0;">
+      <button onclick="consCotacaoResponder(false)" style="background:transparent;color:#9a9aa6;border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:8px 14px;font-size:12.5px;cursor:pointer;">Prefiro não</button>
+      <button onclick="consCotacaoResponder(true)" style="background:#1fd8a4;color:#0a0a10;border:none;border-radius:8px;padding:8px 16px;font-size:12.5px;font-weight:700;cursor:pointer;">Tudo bem</button>
+    </div>
+  </div>
 </div>
 {% endif %}
 </div>
@@ -364,6 +389,72 @@ function baixarImagem() {
     link.click();
   }).catch(function(e) { alert('Não foi possível gerar a imagem: ' + e); });
 }
+
+{% if publico %}
+// ── Comportamento na cotação: SÓ com consentimento explícito do cliente (banner
+//    "Tudo bem" / "Prefiro não"). Cookie de 1ª parte (localStorage), sem terceiros.
+//    Manda tempo na página, até onde rolou e em qual plano clicou — o corretor vê
+//    isso na tela interna. Nunca usa esse dado pra selecionar risco. ──
+(function () {
+  var CHAVE = 'job_cons_' + '{{ cot.token }}';
+  var consentiu = localStorage.getItem(CHAVE) === '1';
+  var jaRespondeu = localStorage.getItem(CHAVE) !== null;
+  var t0 = Date.now();
+  var scrollMax = 0;
+  var enviouAlgumaVez = false;
+
+  function mandar(evento, dados) {
+    try {
+      var payload = JSON.stringify({ evento: evento, dados: dados || {} });
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(window.location.pathname + '/evento', new Blob([payload], { type: 'application/json' }));
+      } else {
+        fetch(window.location.pathname + '/evento', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true });
+      }
+      enviouAlgumaVez = true;
+    } catch (e) {}
+  }
+
+  window.consCotacaoResponder = function (aceitou) {
+    localStorage.setItem(CHAVE, aceitou ? '1' : '0');
+    document.getElementById('cons-cotacao').style.display = 'none';
+    if (aceitou) { mandar('consentimento', {}); ligarCaptura(); }
+  };
+
+  function ligarCaptura() {
+    document.addEventListener('scroll', function () {
+      var doc = document.documentElement;
+      var pct = Math.min(100, Math.round(100 * (window.scrollY + window.innerHeight) / doc.scrollHeight));
+      if (pct > scrollMax) scrollMax = pct;
+    }, { passive: true });
+    document.querySelectorAll('.op-name, .vpn').forEach(function (el) {
+      el.style.cursor = 'pointer';
+      el.addEventListener('click', function () {
+        var nome = el.textContent.trim().slice(0, 60);
+        mandar('clique_plano', { plano: nome });
+      });
+    });
+    function reportarTempo() {
+      var seg = Math.round((Date.now() - t0) / 1000);
+      if (seg > 2) mandar('tempo_pagina', { segundos: seg });
+      if (scrollMax > 0) mandar('scroll', { pct: scrollMax });
+      t0 = Date.now();
+    }
+    setInterval(reportarTempo, 20000);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') reportarTempo(); });
+    window.addEventListener('pagehide', reportarTempo);
+  }
+
+  if (jaRespondeu) {
+    if (consentiu) ligarCaptura();
+  } else {
+    setTimeout(function () {
+      var b = document.getElementById('cons-cotacao');
+      if (b) b.style.display = 'block';
+    }, 2500); // deixa a pessoa ver a cotação antes de perguntar — nada bloqueado
+  }
+})();
+{% endif %}
 </script>
 </body>
 </html>

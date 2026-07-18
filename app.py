@@ -1009,6 +1009,13 @@ def init_db():
                 operadora TEXT NOT NULL, arquivo TEXT NOT NULL,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS cotacao_engajamento (
+                id SERIAL PRIMARY KEY,
+                cotacao_id INTEGER NOT NULL,
+                evento TEXT NOT NULL,
+                dados TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS material_apoio (
                 id SERIAL PRIMARY KEY,
                 operadora TEXT, tipo TEXT, titulo TEXT NOT NULL, descricao TEXT, conteudo TEXT, arquivo TEXT,
@@ -1539,6 +1546,13 @@ def init_db():
             corretor_id INTEGER, corretor_nome TEXT, corretor_email TEXT, corretor_telefone TEXT,
             cliente_nome TEXT, cliente_email TEXT, cliente_telefone TEXT,
             titulo TEXT, vidas_json TEXT, planos_json TEXT, total REAL DEFAULT 0,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS cotacao_engajamento (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cotacao_id INTEGER NOT NULL,
+            evento TEXT NOT NULL,
+            dados TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS operadora_logo (
@@ -14683,8 +14697,36 @@ def cotacao_documento(cid):
             cot['token'] = novo
         except Exception:
             pass
+    # Resumo do que o cliente fez na cotação (só se aceitou ser observado).
+    engajamento = None
+    try:
+        rows = conn.execute("SELECT evento, dados, criado_em FROM cotacao_engajamento WHERE cotacao_id=? ORDER BY criado_em", (cid,)).fetchall()
+        if rows:
+            consentiu = any(r['evento'] == 'consentimento' for r in rows)
+            tempo_seg = 0
+            scroll_max = 0
+            cliques = {}
+            for r in rows:
+                try:
+                    dd = json.loads(r['dados'] or '{}')
+                except Exception:
+                    dd = {}
+                if r['evento'] == 'tempo_pagina':
+                    tempo_seg += int(dd.get('segundos') or 0)
+                elif r['evento'] == 'scroll':
+                    scroll_max = max(scroll_max, int(dd.get('pct') or 0))
+                elif r['evento'] == 'clique_plano':
+                    nome = dd.get('plano') or dd.get('operadora') or '—'
+                    cliques[nome] = cliques.get(nome, 0) + 1
+            engajamento = {
+                'consentiu': consentiu, 'tempo_min': round(tempo_seg / 60, 1), 'scroll_max': scroll_max,
+                'planos_clicados': sorted(cliques.items(), key=lambda x: -x[1]),
+                'ultima_atividade': str(rows[-1]['criado_em']),
+            }
+    except Exception:
+        engajamento = None
     close_db(conn)
-    return render_template('cotacao_documento.html', cot=cot)
+    return render_template('cotacao_documento.html', cot=cot, engajamento=engajamento)
 
 
 @app.route('/cotacao/<int:cid>/reabrir')
@@ -14915,6 +14957,40 @@ def cotacao_publica_feedback(token):
         _notificar(cd.get('corretor_id'), 'cotacao', titulo_notif, desc, '/cotacao/documento/' + str(cd['id']))
     except Exception:
         pass
+    return jsonify({"ok": True})
+
+
+_COT_EVENTOS_VALIDOS = ('consentimento', 'tempo_pagina', 'scroll', 'clique_plano')
+
+
+@app.route('/c/<token>/evento', methods=['POST'])
+def cotacao_publica_evento(token):
+    """Captura de comportamento na cotação pública — SÓ depois do cliente aceitar
+    (evento 'consentimento' precisa ser o primeiro; os demais são recusados sem
+    ele). Cookie de 1ª parte, sem rastreio de terceiros: tempo na página, até onde
+    rolou, em qual plano clicou. Serve pro corretor entender o que o cliente olhou
+    antes de ligar — não vira seleção de risco nem decisão de saúde."""
+    d = request.json or {}
+    evento = (d.get('evento') or '').strip()
+    if evento not in _COT_EVENTOS_VALIDOS:
+        return jsonify({"ok": False}), 400
+    conn = db()
+    c = conn.execute("SELECT id FROM cotacao_salva WHERE token=?", (token,)).fetchone()
+    if not c:
+        close_db(conn); return jsonify({"ok": False}), 404
+    cot_id = c['id']
+    if evento != 'consentimento':
+        # só grava comportamento se já existe consentimento pra essa cotação
+        consentiu = conn.execute(
+            "SELECT 1 FROM cotacao_engajamento WHERE cotacao_id=? AND evento='consentimento' LIMIT 1",
+            (cot_id,)).fetchone()
+        if not consentiu:
+            close_db(conn); return jsonify({"ok": False, "erro": "sem_consentimento"}), 403
+    dados = d.get('dados') if isinstance(d.get('dados'), dict) else {}
+    dados_str = json.dumps(dados, ensure_ascii=False)[:800]
+    conn.execute("INSERT INTO cotacao_engajamento (cotacao_id, evento, dados, criado_em) VALUES (?,?,?,?)",
+                 (cot_id, evento, dados_str, _agora_sp()))
+    conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
 
