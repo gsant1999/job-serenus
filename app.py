@@ -16084,6 +16084,22 @@ def webhook_sheets():
             if num_pess:
                 obs += f" | Pessoas: {num_pess}"
 
+            # UTM/click (mesma lógica de _processar_lead) — o Apps Script pode mandar
+            # esses campos junto do lead; se não mandar, fica vazio (sem quebrar nada).
+            utm_medium = (lead.get('utm_medium') or '').strip()
+            gclid = (lead.get('gclid') or '').strip()
+            _med = utm_medium.lower()
+            if _med in ('cpc', 'ppc', 'paid', 'paidsearch', 'paid_search', 'paid-search', 'display', 'cpm'):
+                trafego = 'Pago'
+            elif utm_medium or (lead.get('utm_source') or '').strip() or (lead.get('utm_campaign') or '').strip():
+                trafego = 'Orgânico'
+            else:
+                trafego = None
+            click = {k: (lead.get(k) or '').strip() for k in
+                     ('utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'landing_url')}
+            click = {k: v for k, v in click.items() if v}
+            dados_extras_wh = json.dumps({'click': click}, ensure_ascii=False) if click else None
+
             # ── Verificar se lead já existe (por telefone OU email) ──
             # Usa telefone_norm (só dígitos) comparado contra telefone_norm do banco
             lead_existente = None
@@ -16178,16 +16194,22 @@ def webhook_sheets():
 
             conn.execute("""
                 INSERT INTO crm_leads
-                    (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id, observacoes, criado_em, consultor_externo)
-                    VALUES (?, ?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?, ?)
+                    (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id, observacoes, criado_em, consultor_externo, trafego, gclid, dados_extras)
+                    VALUES (?, ?, ?, ?, ?, ?, 'lead_novo', ?, ?, ?, ?, ?, ?, ?)
             """, (nome, telefone, telefone_norm, email, cidade, origem, responsavel_id, obs,
-                  data_criacao, consultor_externo))
+                  data_criacao, consultor_externo, trafego, gclid or None, dados_extras_wh))
 
             lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             conn.execute("""
                 INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
                 VALUES (?, ?, 'criacao', ?)
             """, (lead_id, consultor or 'Sistema', f'Lead importado via {origem} em {data_str}'))
+            # Webhook = tempo real (o Apps Script empurra na hora, sem esperar o pull de
+            # 15min). É aqui que o atendimento imediato do lead PAGO fica de fato instantâneo.
+            try:
+                _atender_lead_pago_auto(conn, lead_id)
+            except Exception:
+                pass
 
             importados += 1
 
