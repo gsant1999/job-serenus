@@ -348,6 +348,14 @@
   //    não expõe o telefone em lugar nenhum — mas o JID interno (chat.id) tem
   //    o número de verdade quando não é conta @lid (privacidade nova/business).
   //    Pede pra ponte no main world; devolve string de dígitos ou ''. ──
+  // Nome vindo da wa-js na última chamada de obter_telefone — lido direto do Store
+  // do WhatsApp (chat.name/contact.pushname), não do DOM. Mais confiável que
+  // nomeDoContato() porque não depende de seletor CSS, que quebra toda vez que o
+  // WhatsApp muda a tela. Mesmo quando o número não é resolvível (@lid sem
+  // permissão), esse nome costuma vir — é o "nome salvo no cabeçalho".
+  let _ultimoNomeWpp = '';
+  function nomeMaisConfiavel(nomeDom) { return _ultimoNomeWpp || nomeDom || ''; }
+
   function pedirTelefoneWpp() {
     return new Promise((resolve) => {
       const reqId = 't' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
@@ -358,6 +366,7 @@
         if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
         pronto = true;
         window.removeEventListener('message', onMsg);
+        if (d.nome) _ultimoNomeWpp = d.nome;
         resolve(d.telefone || '');
       }
       window.addEventListener('message', onMsg);
@@ -420,7 +429,10 @@
     if (tel) { await _cacheNumeroSalvar(chatId, tel); return tel; }
     const cached = await _cacheNumeroLer(chatId);
     if (cached) return cached;
-    const manual = await pedirNumeroManual(nome);
+    // Mesmo sem número, a wa-js costuma achar o NOME salvo (contato business/@lid)
+    // — usa esse em vez do nome raspado do DOM (nomeDoContato), que quebra quando
+    // o WhatsApp muda a tela. Melhora a mensagem do popup e o casamento no CRM.
+    const manual = await pedirNumeroManual(nomeMaisConfiavel(nome));
     if (manual) await _cacheNumeroSalvar(chatId, manual);
     return manual;
   }
@@ -1454,12 +1466,13 @@
     if (!usuarioId) { if (st) st.textContent = 'Selecione seu usuário no popup da extensão primeiro.'; return; }
     btn.disabled = true;
     if (st) st.textContent = 'Enviando…';
-    const nome = nomeDoContato();
+    let nome = nomeDoContato();
     // chat_id da conversa aberta é o caminho à prova de falha (funciona pra
     // contato salvo e @lid). Telefone é só best-effort, pra casar o lead no CRM.
     let chatId = '';
     try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
     let telefone = await garantirTelefone(nome, chatId);
+    nome = nomeMaisConfiavel(nome); // depois de garantirTelefone, a wa-js já tentou achar o nome de verdade
     if (!chatId && !telefone) {
       if (st) st.textContent = 'Não consegui identificar a conversa. Abra a conversa e tente de novo.';
       btn.disabled = false;

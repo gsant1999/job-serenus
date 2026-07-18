@@ -156,54 +156,72 @@
     const digits = (v) => (v ? String(v).replace(/\D/g, '') : '');
     const fromWid = (w) => w && (w.user || (w._serialized || '').split('@')[0]);
     const wid = chat.id;
+    // Nome salvo, direto da wa-js (Store), NÃO do DOM — o WhatsApp muda a tela sem
+    // avisar e quebra qualquer seletor CSS; isso aqui é o mesmo dado que alimenta a
+    // tela, só que lido da fonte. Serve mesmo quando o número não é resolvível
+    // (conta @lid) — o consultor ainda vê quem é e o CRM casa por nome.
+    function nomeDoChat() {
+      try {
+        const c = chat.contact || (WA.whatsapp && WA.whatsapp.ContactStore && WA.whatsapp.ContactStore.get(wid));
+        return (chat.name || chat.formattedTitle || (c && (c.name || c.pushname || c.shortName)) || '') + '';
+      } catch (e) { return ''; }
+    }
     // Contato normal (c.us): o número está no próprio JID.
     if (wid.server === 'c.us') {
       const n = digits(fromWid(wid));
-      if (n) return { telefone: n };
+      if (n) return { telefone: n, nome: nomeDoChat() };
     }
     // @lid (business/privacidade): o número real NÃO está no cabeçalho/JID, mas a
     // wa-js tem o mapa interno lid->pn. Escada de resolução (achado do workflow).
     const cid = wid._serialized || (fromWid(wid) + '@' + wid.server);
+    let nomeAchado = nomeDoChat();
     // 1) alto nível: cache + fallback no servidor (queryExists)
     try {
       if (WA.contact && WA.contact.getPnLidEntry) {
         const e = await WA.contact.getPnLidEntry(cid);
+        if (e && e.contact) nomeAchado = nomeAchado || e.contact.pushname || e.contact.name || e.contact.shortName || '';
         const n = digits(fromWid(e && e.phoneNumber));
-        if (n) return { telefone: n };
+        if (n) return { telefone: n, nome: nomeAchado };
       }
     } catch (e) { /* tenta a próxima */ }
     // 2) cache síncrono lid->pn
     try {
       if (WA.whatsapp && WA.whatsapp.lidPnCache && WA.whatsapp.lidPnCache.getPhoneNumber) {
         const n = digits(fromWid(WA.whatsapp.lidPnCache.getPhoneNumber(wid)));
-        if (n) return { telefone: n };
+        if (n) return { telefone: n, nome: nomeAchado };
       }
     } catch (e) {}
     // 3) ContactModel (getPnForLid recebe o modelo, não o wid) + campo phoneNumber
     try {
       const cm = WA.whatsapp && WA.whatsapp.ContactStore && WA.whatsapp.ContactStore.get(wid);
       if (cm) {
-        try { const n = digits(fromWid(WA.whatsapp.functions.getPnForLid(cm))); if (n) return { telefone: n }; } catch (e) {}
-        const n2 = digits(fromWid(cm.phoneNumber)); if (n2) return { telefone: n2 };
+        nomeAchado = nomeAchado || cm.pushname || cm.name || cm.shortName || '';
+        try { const n = digits(fromWid(WA.whatsapp.functions.getPnForLid(cm))); if (n) return { telefone: n, nome: nomeAchado }; } catch (e) {}
+        const n2 = digits(fromWid(cm.phoneNumber)); if (n2) return { telefone: n2, nome: nomeAchado };
       }
     } catch (e) {}
     // 4) função baixo nível (aceita lid wid)
     try {
       if (WA.whatsapp && WA.whatsapp.functions && WA.whatsapp.functions.getPhoneNumber) {
         const n = digits(fromWid(WA.whatsapp.functions.getPhoneNumber(wid)));
-        if (n) return { telefone: n };
+        if (n) return { telefone: n, nome: nomeAchado };
       }
     } catch (e) {}
-    // 5) força o servidor a revelar e tenta de novo o passo 1
+    // 5) força o servidor a revelar e tenta de novo o passo 1 (pode falhar — o
+    //    WhatsApp nem sempre libera; ainda assim tenta, é o caso legítimo de negócio
+    //    respondendo quem te procurou)
     try {
       if (WA.chat.requestPhoneNumber) {
         await WA.chat.requestPhoneNumber(cid);
         const e = await WA.contact.getPnLidEntry(cid);
+        if (e && e.contact) nomeAchado = nomeAchado || e.contact.pushname || e.contact.name || e.contact.shortName || '';
         const n = digits(fromWid(e && e.phoneNumber));
-        if (n) return { telefone: n };
+        if (n) return { telefone: n, nome: nomeAchado };
       }
     } catch (e) {}
-    return { erro: 'sem_numero_exposto' };
+    // Não achou o número de jeito nenhum — devolve pelo menos o nome (nunca deixa
+    // o consultor/CRM completamente às cegas).
+    return { erro: 'sem_numero_exposto', nome: nomeAchado };
   }
 
   // Número do PRÓPRIO WhatsApp logado nesta aba (o do consultor). Usado pelo
