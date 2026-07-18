@@ -348,6 +348,8 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 .job-modelo-fav.ativo { color: #f5c518; }
 .job-modelo-audio { width: 100%; height: 34px; margin: 8px 0 2px; }
 .job-modelo-img { max-width: 100%; max-height: 130px; border-radius: 8px; margin: 8px 0 2px; }
+.job-midia-lazy { margin: 8px 0 2px; padding: 12px; border-radius: 8px; background: var(--job-bg2);
+  border: 1px dashed var(--job-bg3); font-size: 11px; color: var(--job-txt-fraco); text-align: center; }
 
 /* ── Seção Mensagens: cartões de modelo ── */
 .job-modelo-card {

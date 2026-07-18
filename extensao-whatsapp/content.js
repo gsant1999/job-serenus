@@ -1381,19 +1381,69 @@
       || (m.categoria || '').toLowerCase().indexOf(q) >= 0;
   }
 
-  function cardModelo(m) {
-    let midia = '';
-    if (m.midia_tipo === 'audio' && m.midia_url) {
-      // Ouvir antes de enviar — o player do WhatsApp Web já mostra o áudio;
-      // aqui é pra CONFERIR o modelo salvo antes de mandar (padrão ZapVoice).
-      midia = '<audio class="job-modelo-audio" controls preload="none" src="' + esc(m.midia_url) + '"></audio>';
-    } else if (m.midia_tipo === 'imagem' && m.midia_url) {
-      midia = '<img class="job-modelo-img" src="' + esc(m.midia_url) + '" alt="">';
-    } else if (m.midia_tipo === 'video' && m.midia_url) {
-      midia = '<video class="job-modelo-img" controls preload="none" src="' + esc(m.midia_url) + '"></video>';
-    } else if (m.midia_tipo === 'documento' && m.midia_url) {
-      midia = '<a class="job-modelo-doc" href="' + esc(m.midia_url) + '" target="_blank" rel="noopener">' + _svgIco('documento', 12) + ' Abrir PDF</a>';
+  // ── Prévia de mídia dentro do painel: NÃO dá pra usar <img src="url do JOB">
+  //    direto — o WhatsApp Web tem um CSP estrito que bloqueia carregar imagem/
+  //    áudio de fora do domínio dele (por isso o player aparecia "0:00/0:00" e a
+  //    imagem nem carregava). Solução: o background (que tem host_permissions e
+  //    não sofre o CSP da página) baixa a mídia, devolve base64, e aqui a gente
+  //    vira um blob: URL (mesma-origem, o CSP libera) e injeta no <img>/<audio>.
+  //    Carrega SÓ quando o elemento fica visível (abrir o olho / a pasta) via
+  //    IntersectionObserver — não baixa tudo de uma vez. ──
+  function _dataUrlParaBlobUrl(dataUrl) {
+    const virg = dataUrl.indexOf(',');
+    const meta = dataUrl.slice(0, virg);
+    const b64 = dataUrl.slice(virg + 1);
+    const mime = (meta.match(/data:([^;]+)/) || [])[1] || 'application/octet-stream';
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return URL.createObjectURL(new Blob([bytes], { type: mime }));
+  }
+  const _midiaObserver = ('IntersectionObserver' in window)
+    ? new IntersectionObserver((entradas) => {
+        for (const en of entradas) {
+          if (en.isIntersecting) { _midiaObserver.unobserve(en.target); _carregarUmaMidia(en.target); }
+        }
+      }, { root: null, rootMargin: '150px' })
+    : null;
+  async function _carregarUmaMidia(ph) {
+    if (!ph || ph.getAttribute('data-midia-carregada')) return;
+    ph.setAttribute('data-midia-carregada', '1');
+    const url = ph.getAttribute('data-midia-url');
+    const tipo = ph.getAttribute('data-midia-tipo');
+    try {
+      const dl = await chrome.runtime.sendMessage({ type: 'baixar_midia', url });
+      if (!dl || !dl.ok) { ph.textContent = 'não consegui carregar a prévia'; return; }
+      const blobUrl = _dataUrlParaBlobUrl(dl.dataUrl);
+      let el;
+      if (tipo === 'imagem') { el = document.createElement('img'); el.className = 'job-modelo-img'; el.src = blobUrl; }
+      else if (tipo === 'video') { el = document.createElement('video'); el.className = 'job-modelo-img'; el.controls = true; el.src = blobUrl; }
+      else if (tipo === 'audio') { el = document.createElement('audio'); el.className = 'job-modelo-audio'; el.controls = true; el.src = blobUrl; }
+      if (el) ph.replaceWith(el); else ph.remove();
+    } catch (e) { ph.textContent = 'erro ao carregar prévia'; }
+  }
+  function _observarMidias(container) {
+    if (!container) return;
+    const pend = container.querySelectorAll('[data-midia-url]:not([data-midia-carregada])');
+    pend.forEach((ph) => { if (_midiaObserver) _midiaObserver.observe(ph); else _carregarUmaMidia(ph); });
+  }
+  // Placeholder HTML pra mídia (imagem/áudio/vídeo). PDF continua sendo um link
+  // (abre em aba nova — navegação, não sofre o CSP de embed).
+  function midiaLazyHtml(tipo, url) {
+    if (!url) return '';
+    if (tipo === 'documento') {
+      return '<a class="job-modelo-doc" href="' + esc(url) + '" target="_blank" rel="noopener">' + _svgIco('documento', 12) + ' Abrir PDF</a>';
     }
+    if (tipo === 'imagem' || tipo === 'audio' || tipo === 'video') {
+      return '<div class="job-midia-lazy" data-midia-url="' + esc(url) + '" data-midia-tipo="' + esc(tipo) + '">carregando prévia…</div>';
+    }
+    return '';
+  }
+
+  function cardModelo(m) {
+    // Ouvir/ver antes de enviar — carrega via background (CSP do WhatsApp bloqueia
+    // src externo direto), só quando fica visível.
+    const midia = m.midia_url ? midiaLazyHtml(m.midia_tipo, m.midia_url) : '';
     const estrela = '<button class="job-modelo-fav ' + (m.favorito ? 'ativo' : '') +
       '" data-modelo-id="' + m.id + '" title="Favoritar">★</button>';
     return '<div class="job-modelo-card">' +
@@ -1521,6 +1571,7 @@
     if (!c) return;
     c.innerHTML = renderListaModelos(_modelosCache ? _modelosCache.modelos : []);
     ligarAcoesItens();
+    _observarMidias(c);
   }
 
   // Ações dos itens da lista (separadas do formulário, pra re-render de
@@ -1822,7 +1873,7 @@
 
   function setCorpoSecaoMensagens(html) {
     const c = document.getElementById('job-painel-doc-corpo');
-    if (c) c.innerHTML = html;
+    if (c) { c.innerHTML = html; _observarMidias(c); }
   }
 
   // ═══════════════ Funis (sequência de disparo, estilo ZapVoice) ═══════════════
@@ -1951,16 +2002,7 @@
   // visível) — os dados já vêm prontos com buscarFunis (texto e midia_url),
   // não precisa baixar nada só pra mostrar aqui.
   function previewConteudoPasso(p) {
-    let midia = '';
-    if (p.tipo === 'audio' && p.midia_url) {
-      midia = '<audio class="job-modelo-audio" controls preload="none" src="' + esc(p.midia_url) + '"></audio>';
-    } else if (p.tipo === 'imagem' && p.midia_url) {
-      midia = '<img class="job-modelo-img" src="' + esc(p.midia_url) + '" alt="">';
-    } else if (p.tipo === 'video' && p.midia_url) {
-      midia = '<video class="job-modelo-img" controls preload="none" src="' + esc(p.midia_url) + '"></video>';
-    } else if (p.tipo === 'documento' && p.midia_url) {
-      midia = '<a class="job-modelo-doc" href="' + esc(p.midia_url) + '" target="_blank" rel="noopener">' + _svgIco('documento', 12) + ' Abrir PDF</a>';
-    }
+    const midia = p.midia_url ? midiaLazyHtml(p.tipo, p.midia_url) : '';
     const texto = (p.texto || '').trim();
     return (texto ? '<div class="job-modelo-preview">' + esc(texto) + '</div>' : '') + midia;
   }
@@ -2012,6 +2054,7 @@
     if (!c) return;
     c.innerHTML = listaFunisHTML(_funisCache ? _funisCache.funis : []);
     ligarAcoesListaFunis();
+    _observarMidias(c);
   }
 
   // Ações da LISTA (rebindadas a cada filtro/busca) separadas dos controles
@@ -2035,7 +2078,10 @@
         const preview = passo && passo.querySelector('.job-fpasso-preview');
         if (!preview) return;
         preview.classList.toggle('fechado');
-        btn.classList.toggle('ativo', !preview.classList.contains('fechado'));
+        const aberto = !preview.classList.contains('fechado');
+        btn.classList.toggle('ativo', aberto);
+        // Ao abrir, carrega a mídia na hora (não espera o IntersectionObserver).
+        if (aberto) preview.querySelectorAll('[data-midia-url]:not([data-midia-carregada])').forEach(_carregarUmaMidia);
       });
     });
   }
