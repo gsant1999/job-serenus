@@ -12893,6 +12893,9 @@ def api_whatsapp_analisar():
     audios_validos = 0
     audios_do_cache = 0
     tinha_chave_transcricao = bool(os.environ.get('OPENAI_API_KEY', '').strip() or os.environ.get('GROQ_API_KEY', '').strip())
+    # 1) Coleta os áudios válidos e resolve o cache (rápido, DB local) — separa
+    #    os que já temos dos que precisam ir pro provedor de transcrição.
+    audio_itens = []
     for a in (d.get('audios') or [])[:12]:
         if not isinstance(a, dict):
             continue
@@ -12900,24 +12903,51 @@ def api_whatsapp_analisar():
         if not b64 or len(b64) > 40_000_000:
             continue
         audios_validos += 1
-        msg_id = str(a.get('msg_id') or '').strip()[:100] or None
-        cache = _wa_transcricao_cache_buscar(conn, msg_id)
+        it = {'b64': b64, 'mime': str(a.get('mime') or 'audio/ogg'),
+              'de': 'lead' if a.get('de') == 'lead' else 'consultor',
+              'hora': str(a.get('hora') or '')[:40],
+              'msg_id': str(a.get('msg_id') or '').strip()[:100] or None}
+        cache = _wa_transcricao_cache_buscar(conn, it['msg_id'])
         if cache:
-            texto = cache['texto']
-            audio_segundos_total += cache.get('segundos') or 0
+            it['texto'] = cache['texto']
+            it['segundos'] = cache.get('segundos') or 0
+            audio_segundos_total += it['segundos']
             audios_do_cache += 1
-        else:
-            transc = _transcrever_audio(b64, str(a.get('mime') or 'audio/ogg'))
-            if not transc:
-                continue
-            texto = transc['texto']
-            custo_transcricao_usd += transc.get('custo_usd') or 0
-            audio_segundos_total += transc.get('segundos') or 0
-            _wa_transcricao_cache_salvar(conn, msg_id, texto, transc.get('segundos'), transc.get('custo_usd'))
-        de = 'lead' if a.get('de') == 'lead' else 'consultor'
-        hora = str(a.get('hora') or '')[:40]
-        audio_msgs.append({'de': de, 'texto': '🎤 ' + texto[:4000], 'hora': hora})
-        transcricoes.append({'de': de, 'hora': hora, 'texto': texto[:600]})
+        audio_itens.append(it)
+    # 2) Transcreve os SEM cache EM PARALELO. Antes era serial (um áudio de cada
+    #    vez): 12 áudios × ~6s = ~1min só de transcrição — a maior espera do
+    #    consultor. Como é I/O (HTTP pro provedor), threads liberam o GIL e
+    #    rodam de fato ao mesmo tempo → cai pro tempo do MAIS LENTO, não a soma.
+    #    _transcrever_audio é puro (não toca no banco), seguro em thread.
+    pendentes = [it for it in audio_itens if 'texto' not in it]
+    if pendentes:
+        import concurrent.futures as _cf
+        with _cf.ThreadPoolExecutor(max_workers=min(6, len(pendentes))) as _ex:
+            _futs = {_ex.submit(_transcrever_audio, it['b64'], it['mime']): it for it in pendentes}
+            for _fut in _cf.as_completed(_futs):
+                it = _futs[_fut]
+                try:
+                    transc = _fut.result()
+                except Exception:
+                    transc = None
+                if transc:
+                    it['texto'] = transc['texto']
+                    it['segundos'] = transc.get('segundos') or 0
+                    it['custo'] = transc.get('custo_usd') or 0
+        # 3) Salva no cache + soma custo/segundos SERIALMENTE (fora das threads,
+        #    o conn do SQLite não é thread-safe).
+        for it in pendentes:
+            if 'texto' in it:
+                custo_transcricao_usd += it.get('custo') or 0
+                audio_segundos_total += it.get('segundos') or 0
+                _wa_transcricao_cache_salvar(conn, it['msg_id'], it['texto'], it.get('segundos'), it.get('custo') or 0)
+    # 4) Monta as mensagens de áudio (na ordem em que vieram; depois tudo é
+    #    reordenado por hora junto com o texto).
+    for it in audio_itens:
+        if 'texto' not in it:
+            continue
+        audio_msgs.append({'de': it['de'], 'texto': '🎤 ' + it['texto'][:4000], 'hora': it['hora']})
+        transcricoes.append({'de': it['de'], 'hora': it['hora'], 'texto': it['texto'][:600]})
     if audio_msgs:
         combinado = limpa + audio_msgs
         combinado.sort(key=lambda m: _wa_parse_hora(m.get('hora') or '') or datetime.min)
