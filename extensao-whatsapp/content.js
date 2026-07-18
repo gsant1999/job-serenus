@@ -797,13 +797,28 @@
     });
   }
 
-  function _avisoInbox(msg, cor) {
+  // NUNCA navega/recarrega a página do WhatsApp Web (web.whatsapp.com/send?phone=
+  // trocava a tela inteira e às vezes dava erro de "número inválido" do próprio
+  // WhatsApp — pedido explícito do Guilherme, 18/07: "não quero que fique
+  // atualizando a página do whatsapp"). O disparo do funil é 100% server-side
+  // (fila), não precisa de nenhuma conversa aberta na tela pra funcionar.
+  function _avisoInbox(msg, cor, linkNum) {
     var el = document.createElement('div');
-    el.textContent = msg;
     el.style.cssText = 'position:fixed;right:18px;bottom:90px;z-index:999999;background:' + (cor || '#1f2937') +
       ';color:#fff;padding:10px 14px;border-radius:8px;font-size:13px;max-width:280px;box-shadow:0 4px 14px rgba(0,0,0,.3);';
+    var texto = document.createElement('div');
+    texto.textContent = msg;
+    el.appendChild(texto);
+    if (linkNum) {
+      var a = document.createElement('a');
+      a.href = 'https://web.whatsapp.com/send?phone=' + linkNum;
+      a.target = '_blank'; // abre em aba nova — NUNCA na aba atual (não recarrega o que já está aberto)
+      a.textContent = 'Abrir conversa em nova aba →';
+      a.style.cssText = 'display:block;margin-top:6px;color:#fff;text-decoration:underline;font-size:12px;';
+      el.appendChild(a);
+    }
     document.body.appendChild(el);
-    setTimeout(function () { el.remove(); }, 5000);
+    setTimeout(function () { el.remove(); }, 8000);
   }
 
   var _ERROS_ATENDER = {
@@ -821,14 +836,12 @@
     _inboxCache = _inboxCache.filter(function (l) { return String(l.id) !== String(leadId); });
     atualizarBadgeInbox();
     if (_secaoAtiva === 'inbox') { setCorpoSecaoInbox(renderInbox()); ligarAcoesInbox(); }
-    if (resp && resp.ok) {
-      _avisoInbox('Funil disparado: ' + (resp.passos_enfileirados || 0) + ' mensagem(ns) na fila.', '#0f766e');
-    } else if (resp && resp.erro) {
-      _avisoInbox(_ERROS_ATENDER[resp.erro] || (resp.msg || 'Não foi possível disparar o funil de atendimento.'), '#b91c1c');
-    }
-    // abre a conversa do lead pra o consultor acompanhar
     var num = (telefone || '').replace(/\D/g, '');
-    if (num) window.location.href = 'https://web.whatsapp.com/send?phone=' + num;
+    if (resp && resp.ok) {
+      _avisoInbox('Funil disparado: ' + (resp.passos_enfileirados || 0) + ' mensagem(ns) na fila.', '#0f766e', num);
+    } else if (resp && resp.erro) {
+      _avisoInbox(_ERROS_ATENDER[resp.erro] || (resp.msg || 'Não foi possível disparar o funil de atendimento.'), '#b91c1c', num);
+    }
   }
 
   function setCorpoSecaoInbox(html) {
