@@ -709,6 +709,9 @@
         '<span class="job-trilho-item-label">Leads</span>' +
         '<span class="job-trilho-item-badge" id="job-inbox-badge" hidden>0</span>' +
       '</button>' +
+      '<div class="job-trilho-rodape">' +
+        '<button class="job-trilho-mini" id="job-trilho-config-btn" title="Configurações (tema, desligar)">' + _ICO_CONFIG + '</button>' +
+      '</div>' +
       '<div class="job-trilho-versao" id="job-trilho-versao" title="Versão instalada"></div>';
     trilho.querySelectorAll('.job-trilho-item').forEach((item) => {
       item.addEventListener('click', () => {
@@ -718,8 +721,67 @@
       });
     });
     document.body.appendChild(trilho);
+    document.getElementById('job-trilho-config-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleConfigPopover();
+    });
     aplicarClassesHtml();
     atualizarSeloVersao();
+  }
+
+  const _ICO_CONFIG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+
+  // ── Popover de config no trilho: tema (claro/escuro) + desligar a extensão
+  //    nesta aba — pedido explícito do Guilherme, 18/07 ("cadê o botão de
+  //    desligar/configurar NO TRILHO?", não só no popup do Chrome). ──
+  async function toggleConfigPopover() {
+    const existente = document.getElementById('job-trilho-config');
+    if (existente) { existente.remove(); return; }
+    const { tema } = await chrome.storage.local.get(['tema']);
+    const temaAtual = tema === 'claro' ? 'claro' : 'escuro';
+    const pop = document.createElement('div');
+    pop.id = 'job-trilho-config';
+    pop.className = 'job-trilho-config';
+    pop.innerHTML =
+      '<div class="job-trilho-config-tit">Aparência</div>' +
+      '<div class="job-trilho-config-linha">' +
+        '<span>Tema do painel</span>' +
+        '<div class="job-trilho-tema-btns">' +
+          '<button data-tema="escuro" class="' + (temaAtual === 'escuro' ? 'ativo' : '') + '">Escuro</button>' +
+          '<button data-tema="claro" class="' + (temaAtual === 'claro' ? 'ativo' : '') + '">Claro</button>' +
+        '</div>' +
+      '</div>' +
+      '<button class="job-trilho-config-desligar" id="job-trilho-desligar-btn">Desligar extensão nesta aba</button>';
+    document.body.appendChild(pop);
+    const btn = document.getElementById('job-trilho-config-btn');
+    if (btn) {
+      const r = btn.getBoundingClientRect();
+      pop.style.bottom = (window.innerHeight - r.bottom + r.height + 8) + 'px';
+    }
+    pop.querySelectorAll('.job-trilho-tema-btns button').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const novoTema = b.dataset.tema;
+        await chrome.storage.local.set({ tema: novoTema });
+        document.body.setAttribute('data-job-tema', novoTema);
+        pop.querySelectorAll('.job-trilho-tema-btns button').forEach((x) => x.classList.toggle('ativo', x === b));
+      });
+    });
+    document.getElementById('job-trilho-desligar-btn').addEventListener('click', async () => {
+      if (!confirm('Desligar a extensão JOB nesta aba do WhatsApp? Pra ligar de novo, use o popup da extensão (ícone JOB na barra do Chrome) e dê F5.')) return;
+      await chrome.storage.local.set({ extensaoAtiva: false });
+      const t = document.getElementById('job-trilho'); if (t) t.remove();
+      const p = document.getElementById('job-painel-doc'); if (p) p.remove();
+      pop.remove();
+      document.documentElement.classList.remove('job-push-trilho', 'job-push-painel', 'job-overlay-painel', 'job-push-esquerda');
+    });
+    // Fecha ao clicar fora — sem isso ficava aberto até apertar de novo no ícone.
+    setTimeout(() => {
+      document.addEventListener('click', function fechar(ev) {
+        if (pop.contains(ev.target)) return;
+        pop.remove();
+        document.removeEventListener('click', fechar);
+      });
+    }, 0);
   }
 
   // ── Selo discreto de versão no rodapé do trilho: mostra a instalada e, se
@@ -734,9 +796,11 @@
     if (nova && _cmpVersao(minha, nova) < 0) {
       el.innerHTML = 'v' + esc(minha) + '<span class="job-trilho-versao-nova">nova: ' + esc(nova) + '</span>';
       el.title = 'Instalada: ' + minha + ' — disponível: ' + nova + ' (feche e reabra o WhatsApp Web pra atualizar)';
+      el.classList.add('tem-nova');
     } else {
       el.textContent = 'v' + minha;
       el.title = 'Versão instalada — está na mais recente';
+      el.classList.remove('tem-nova');
     }
   }
 
