@@ -102,7 +102,7 @@
   //    então detectamos pelo comportamento: dentro do #main, o elemento que
   //    realmente rola verticalmente). ──
   function acharPainelRolavel() {
-    const main = document.querySelector('#main') || document.body;
+    const main = _qsRemoto('mainContainer', ['#main']) || document.body;
     const candidatos = main.querySelectorAll('div');
     let melhor = null, melhorAltura = 0;
     for (const el of candidatos) {
@@ -121,6 +121,9 @@
   //    ideia vista no WaSpeed (eles têm um config.json próprio pra isso).
   //    Sempre com fallback pro valor fixo se o remoto falhar/não tiver a chave. ──
   let _seletoresRemotos = null;
+  let _flagsRemotas = null;
+  // querySelector com fallback: usa a lista remota da chave se existir, senão o
+  // padrão fixo. Devolve o primeiro elemento que casar.
   function _qsRemoto(chave, padrao, escopo) {
     const lista = (_seletoresRemotos && _seletoresRemotos[chave]) || padrao;
     const base = escopo || document;
@@ -129,12 +132,34 @@
     }
     return null;
   }
+  // querySelectorAll com fallback: junta os resultados de TODOS os seletores da
+  // lista (dedup por identidade), pra caso o WhatsApp use classes diferentes em
+  // versões diferentes ao mesmo tempo.
+  function _qsAllRemoto(chave, padrao, escopo) {
+    const lista = (_seletoresRemotos && _seletoresRemotos[chave]) || padrao;
+    const base = escopo || document;
+    const vistos = new Set();
+    for (const sel of lista) {
+      try {
+        base.querySelectorAll(sel).forEach((el) => vistos.add(el));
+      } catch (e) { /* seletor inválido, tenta o próximo */ }
+    }
+    return [...vistos];
+  }
+  // Flag de comportamento remota (default true se o servidor não respondeu).
+  function _flag(nome, padrao) {
+    if (_flagsRemotas && Object.prototype.hasOwnProperty.call(_flagsRemotas, nome)) return !!_flagsRemotas[nome];
+    return padrao !== undefined ? padrao : true;
+  }
   async function carregarSeletoresRemotos() {
     try {
       const r = await fetch(_SITE_BASE_URL_EXT + '/api/whatsapp/config-remota', { cache: 'no-store' });
       const j = await r.json();
-      if (j && j.ok && j.seletores) _seletoresRemotos = j.seletores;
-    } catch (e) { /* sem internet: segue com os seletores fixos do código */ }
+      if (j && j.ok) {
+        if (j.seletores) _seletoresRemotos = j.seletores;
+        if (j.flags) _flagsRemotas = j.flags;
+      }
+    } catch (e) { /* sem internet: segue com os seletores/flags fixos do código */ }
   }
 
   // ── Nome do contato/conversa aberta (do cabeçalho). ──
@@ -158,7 +183,7 @@
       const dig = (nome || '').replace(/\D/g, '');
       if (dig.length >= 10 && dig.length <= 15) return dig;
     }
-    for (const el of document.querySelectorAll('#main [data-id]')) {
+    for (const el of _qsAllRemoto('mensagensComDataId', ['#main [data-id]'])) {
       const id = el.getAttribute('data-id') || '';
       const m = id.match(/(\d{10,15})@[cs]/);
       if (m) return m[1];
@@ -192,7 +217,7 @@
   // ── Raspa todas as mensagens de texto atualmente no DOM, em ordem. ──
   //    Âncora estável: .copyable-text com data-pre-plain-text="[HH:MM, DD/MM/AAAA] Nome: ".
   function rasparMensagensVisiveis() {
-    const nodes = document.querySelectorAll('#main .copyable-text[data-pre-plain-text]');
+    const nodes = _qsAllRemoto('mensagemComData', ['#main .copyable-text[data-pre-plain-text]']);
     const centro = centroDoPainel();
     const nomeContato = nomeDoContato();
     const msgs = [];
@@ -200,7 +225,7 @@
       const pre = cp.getAttribute('data-pre-plain-text') || '';
       const mh = pre.match(/\[([^\]]+)\]/);
       const hora = mh ? mh[1] : '';
-      const alvo = cp.querySelector('span.selectable-text') || cp.querySelector('.selectable-text') || cp;
+      const alvo = _qsRemoto('textoSelecionavel', ['span.selectable-text', '.selectable-text'], cp) || cp;
       let texto = (alvo.innerText || alvo.textContent || '').trim();
       if (!texto) continue;
       msgs.push({ de: direcaoDaMensagem(cp, centro, nomeContato), texto, hora });
@@ -213,13 +238,13 @@
   //    fica num bloco irmão fora do balão de texto. Só leitura do que já está renderizado
   //    na tela; nunca abre nem busca o link. ──
   function rasparLinks() {
-    const nodes = document.querySelectorAll('#main .copyable-text[data-pre-plain-text]');
+    const nodes = _qsAllRemoto('mensagemComData', ['#main .copyable-text[data-pre-plain-text]']);
     const centro = centroDoPainel();
     const nomeContato = nomeDoContato();
     const vistos = new Set();
     const out = [];
     for (const cp of nodes) {
-      const a = cp.querySelector('a[href^="http"]');
+      const a = _qsRemoto('linkNaMensagem', ['a[href^="http"]'], cp);
       if (!a || vistos.has(a.href)) continue;
       const pre = cp.getAttribute('data-pre-plain-text') || '';
       const mh = pre.match(/\[([^\]]+)\]/);
@@ -350,7 +375,7 @@
 
   async function rasparImagensVisiveis(atualizarStatus) {
     const centro = centroDoPainel();
-    const cand = Array.from(document.querySelectorAll('#main img')).filter((im) =>
+    const cand = _qsAllRemoto('imagensDaConversa', ['#main img']).filter((im) =>
       (im.src || '').startsWith('blob:') && im.naturalWidth >= 150 && im.naturalHeight >= 150);
     // Monta metadado (barato) de todo mundo primeiro — antes só pegava as
     // PRIMEIRAS (mais antigas) até o teto, na ordem do DOM; podia deixar de
@@ -461,7 +486,7 @@
         resolve(d.telefone || '');
       }
       window.addEventListener('message', onMsg);
-      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'obter_telefone', reqId }, '*');
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'obter_telefone', reqId, resolverLid: _flag('resolver_lid') }, '*');
       setTimeout(() => {
         if (!pronto) { window.removeEventListener('message', onMsg); resolve(''); }
       }, 9000);

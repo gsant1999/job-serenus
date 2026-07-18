@@ -17,10 +17,12 @@
   <div class="ec-hero">
     <h1>Seletores DOM da Extensão</h1>
     <div class="ec-sub">
-      Quando o WhatsApp muda o HTML da tela dele, a extensão pode parar de achar o nome do contato aberto (ou outro
-      elemento que ainda vier a usar essa lista). Em vez de esperar um deploy novo, edita o seletor certo aqui — a
-      extensão relê isso sozinha a cada ~15 minutos.<br>
-      Cada chave é uma lista de seletores CSS candidatos (tenta o primeiro, se não achar tenta o próximo).
+      Quando o WhatsApp muda o HTML da tela dele, a extensão pode parar de achar o nome do contato, os balões de
+      mensagem, as imagens etc. Em vez de esperar um deploy novo, edita o seletor certo aqui — a extensão relê isso
+      sozinha a cada ~15 minutos.<br>
+      Em <b>seletores</b>, cada chave é uma lista de seletores CSS candidatos (tenta o primeiro, se não achar tenta o
+      próximo). Em <b>flags</b>, liga/desliga comportamentos — ex.: <code>resolver_lid</code> (tentar descobrir o
+      número real por trás de um contato @lid); desligue se um dia isso passar a atrapalhar.
     </div>
   </div>
   {% if atualizado_em %}<div class="ec-meta">Última edição: {{ atualizado_em }}</div>{% endif %}

@@ -148,7 +148,12 @@
     return { documentos: out, encontrados: alvos.length };
   }
 
-  async function obterTelefone() {
+  async function obterTelefone(resolverLid) {
+    // resolverLid (flag remota do JOB, default true): quando false, NÃO tenta a
+    // escada de resolução @lid (chega a chamar requestPhoneNumber, que às vezes
+    // mexe na UI do WhatsApp). Serve de "freio de emergência" se um dia o
+    // WhatsApp mudar e essa resolução passar a atrapalhar — desliga sem deploy.
+    if (resolverLid === undefined) resolverLid = true;
     const WA = window.WPP;
     if (!WA || !WA.chat || !WA.chat.getActiveChat) return { erro: 'wpp_ausente' };
     const chat = WA.chat.getActiveChat();
@@ -171,6 +176,9 @@
       const n = digits(fromWid(wid));
       if (n) return { telefone: n, nome: nomeDoChat() };
     }
+    // Freio de emergência remoto: se a resolução @lid estiver desligada, para
+    // aqui e devolve só o nome (o CRM ainda casa por nome).
+    if (!resolverLid) return { erro: 'lid_desligado', nome: nomeDoChat() };
     // @lid (business/privacidade): o número real NÃO está no cabeçalho/JID, mas a
     // wa-js tem o mapa interno lid->pn. Escada de resolução (achado do workflow).
     const cid = wid._serialized || (fromWid(wid) + '@' + wid.server);
@@ -363,7 +371,7 @@
     try {
       if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite);
       else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite);
-      else if (d.tipo === 'obter_telefone') resp = await obterTelefone();
+      else if (d.tipo === 'obter_telefone') resp = await obterTelefone(d.resolverLid);
       else if (d.tipo === 'obter_meu_numero') resp = await obterMeuNumero();
       else if (d.tipo === 'obter_chat_id') resp = await obterChatIdAtivo();
       else if (d.tipo === 'enviar_texto') resp = await enviarTexto(d.chatId, d.texto);

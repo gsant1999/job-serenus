@@ -11594,58 +11594,91 @@ def extensao_erros():
 # editando aqui, na hora, sem esperar deploy nem aprovação de loja nenhuma.
 # Ideia vista investigando como o WaSpeed resolve o mesmo problema (config.json
 # remoto deles) — mesmo princípio, hospedado no nosso próprio servidor.
+# Cada chave é uma lista de seletores CSS candidatos (a extensão tenta o
+# primeiro, cai pro próximo se não achar). Cobrem TODA a leitura de tela:
+# cabeçalho da conversa, balões de mensagem, imagens, container rolável.
 _SELETORES_DOM_PADRAO = {
     "headerContato": ["#main header"],
     "nomeContatoComTitulo": ["span[dir=\"auto\"][title]"],
     "nomeContatoSpan": ["span[dir=\"auto\"]"],
+    "mainContainer": ["#main"],
+    "mensagemComData": ["#main .copyable-text[data-pre-plain-text]"],
+    "textoSelecionavel": ["span.selectable-text", ".selectable-text"],
+    "linkNaMensagem": ["a[href^=\"http\"]"],
+    "mensagensComDataId": ["#main [data-id]"],
+    "imagensDaConversa": ["#main img"],
 }
+# Flags de comportamento ligáveis/desligáveis sem deploy — mesma ideia das
+# feature flags que a ZapVoice usa (ex.: tratamento @lid). resolver_lid liga
+# a tentativa de resolver o número real por trás de um @lid (privacy do
+# WhatsApp 2025); se um dia isso passar a dar problema, desliga aqui na hora.
+_FLAGS_PADRAO = {
+    "resolver_lid": True,
+}
+
+
+def _config_remota_atual(conn):
+    """Lê a config remota do banco (seletores + flags), caindo pros padrões
+    quando não há linha ou o JSON está inválido. Sempre mescla com o padrão
+    pra nunca faltar uma chave que o código espera."""
+    row = conn.execute("SELECT valor FROM extensao_config WHERE chave='config_remota'").fetchone()
+    seletores, flags = dict(_SELETORES_DOM_PADRAO), dict(_FLAGS_PADRAO)
+    if row and row['valor']:
+        try:
+            d = json.loads(row['valor'])
+            seletores.update(d.get('seletores') or {})
+            flags.update(d.get('flags') or {})
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return seletores, flags
 
 
 @app.route('/api/whatsapp/config-remota', methods=['GET', 'OPTIONS'])
 def api_whatsapp_config_remota():
-    """Seletores DOM atuais + versão — a extensão consulta a cada ~15min e usa
-    esses valores em vez dos fixos no código, quando existirem. Público (sem
+    """Seletores DOM + flags de comportamento atuais — a extensão consulta a
+    cada ~15min e usa esses valores em vez dos fixos no código. Público (sem
     chave) de propósito, igual /api/whatsapp/versao."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     conn = db()
-    row = conn.execute("SELECT valor FROM extensao_config WHERE chave='seletores_dom'").fetchone()
+    seletores, flags = _config_remota_atual(conn)
     close_db(conn)
-    try:
-        seletores = json.loads(row['valor']) if row and row['valor'] else _SELETORES_DOM_PADRAO
-    except (TypeError, ValueError, json.JSONDecodeError):
-        seletores = _SELETORES_DOM_PADRAO
-    return _wa_cors(jsonify({"ok": True, "seletores": seletores}))
+    return _wa_cors(jsonify({"ok": True, "seletores": seletores, "flags": flags}))
 
 
 @app.route('/extensao/config-remota', methods=['GET', 'POST'])
 @login_required
 @admin_required
 def extensao_config_remota():
-    """Edição direta dos seletores DOM remotos — pra corrigir na hora quando o
-    WhatsApp muda o HTML e algo da extensão para de achar o elemento certo."""
+    """Edição direta da config remota (seletores DOM + flags) — pra corrigir na
+    hora quando o WhatsApp muda o HTML e algo da extensão para de achar o
+    elemento certo, ou pra ligar/desligar um comportamento (ex.: resolver @lid)."""
     conn = db()
     if request.method == 'POST':
         bruto = request.form.get('json', '').strip()
         try:
-            json.loads(bruto)  # só valida — guarda o texto como veio
+            parsed = json.loads(bruto)
+            if not isinstance(parsed, dict) or 'seletores' not in parsed:
+                raise ValueError("O JSON precisa ter a chave 'seletores' (e opcionalmente 'flags').")
         except (TypeError, ValueError, json.JSONDecodeError) as e:
             flash(f'JSON inválido: {e}')
             close_db(conn)
             return redirect(url_for('extensao_config_remota'))
         if DB_MODE == 'postgres':
-            conn.execute("""INSERT INTO extensao_config (chave, valor, atualizado_em) VALUES ('seletores_dom', %s, %s)
+            conn.execute("""INSERT INTO extensao_config (chave, valor, atualizado_em) VALUES ('config_remota', %s, %s)
                 ON CONFLICT (chave) DO UPDATE SET valor=excluded.valor, atualizado_em=excluded.atualizado_em""",
                 (bruto, _agora_sp()))
         else:
-            conn.execute("INSERT OR REPLACE INTO extensao_config (chave, valor, atualizado_em) VALUES ('seletores_dom', ?, ?)",
+            conn.execute("INSERT OR REPLACE INTO extensao_config (chave, valor, atualizado_em) VALUES ('config_remota', ?, ?)",
                 (bruto, _agora_sp()))
         conn.commit(); close_db(conn)
-        flash('Seletores salvos.')
+        flash('Config salva.')
         return redirect(url_for('extensao_config_remota'))
-    row = conn.execute("SELECT valor, atualizado_em FROM extensao_config WHERE chave='seletores_dom'").fetchone()
+    row = conn.execute("SELECT valor, atualizado_em FROM extensao_config WHERE chave='config_remota'").fetchone()
+    seletores, flags = _config_remota_atual(conn)
     close_db(conn)
-    valor = row['valor'] if row and row['valor'] else json.dumps(_SELETORES_DOM_PADRAO, indent=2, ensure_ascii=False)
+    valor = row['valor'] if row and row['valor'] else json.dumps(
+        {"seletores": seletores, "flags": flags}, indent=2, ensure_ascii=False)
     return render_template('extensao_config_remota.html', valor=valor,
                             atualizado_em=row['atualizado_em'] if row else None)
 
