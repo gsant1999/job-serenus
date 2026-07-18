@@ -11314,9 +11314,10 @@ def api_whatsapp_presenca():
 
 @app.route('/api/whatsapp/inbox', methods=['GET', 'OPTIONS'])
 def api_whatsapp_inbox():
-    """Leads NOVOS ainda não atendidos deste consultor — pra caixa de entrada na
-    barra da extensão (os últimos que chegaram, com o tempo correndo). O mais
-    parado no topo (espera maior). Só leitura, chave da extensão."""
+    """Últimos 5 leads que CHEGARAM na coluna 'Lead Novo' (Kanban) deste consultor
+    e ainda não foram atendidos — pra caixa de entrada na barra da extensão. É uma
+    JANELA das 5 chegadas mais recentes (não os mais antigos da história); dentro
+    dela, o mais parado esperando fica no topo. Só leitura, chave da extensão."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
@@ -11325,12 +11326,14 @@ def api_whatsapp_inbox():
     if not uid:
         return _wa_cors(jsonify({"ok": True, "leads": []}))
     conn = db()
-    rows = conn.execute("""SELECT id, nome, telefone, telefone_norm, criado_em, trafego
+    rows = conn.execute("""SELECT * FROM (
+        SELECT id, nome, telefone, telefone_norm, criado_em, trafego
         FROM crm_leads
         WHERE responsavel_id=? AND atendido_em IS NULL
-          AND COALESCE(etapa,'') IN ('lead_novo','topo','')
+          AND etapa='lead_novo'
           AND COALESCE(telefone_norm,'')<>''
-        ORDER BY criado_em ASC LIMIT 8""", (uid,)).fetchall()
+        ORDER BY criado_em DESC LIMIT 5
+    ) x ORDER BY criado_em ASC""", (uid,)).fetchall()
     leads = [{"id": r['id'], "nome": r['nome'] or 'Lead', "telefone": r['telefone'] or r['telefone_norm'],
               "chat_id": _wa_chat_id(r['telefone_norm'] or r['telefone'] or ''),
               "criado_em": str(r['criado_em'] or ''), "pago": (r['trafego'] == 'Pago')}
