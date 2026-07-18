@@ -23,17 +23,18 @@
    superfícies claras, mesmo verde de destaque. Some, se o consultor preferir
    o padrão escuro (pedido do Guilherme, 18/07). */
 body[data-job-tema="claro"] {
-  --job-bg0: #f3f4f7;
-  --job-bg1: #ffffff;
-  --job-bg1b: #ffffff;
-  --job-bg2: #f7f8fa;
-  --job-bg3: #e7e9ee;
-  --job-bg3-hover: #dde0e8;
-  --job-txt: #1a1d2b;
-  --job-txt-fraco: #6b7185;
+  /* Off-white morno, não branco-papel estéril — pedido do Guilherme, 18/07. */
+  --job-bg0: #efece4;
+  --job-bg1: #f7f5ef;
+  --job-bg1b: #f2efe7;
+  --job-bg2: #efece2;
+  --job-bg3: #e2ded1;
+  --job-bg3-hover: #d5d0c0;
+  --job-txt: #262319;
+  --job-txt-fraco: #756f5e;
   --job-acento: #0f9d76;
   --job-acento-txt: #ffffff;
-  --job-borda: #e2e4ea;
+  --job-borda: #e2ded1;
 }
 
 /* JOB Serenus · estilos do trilho + painel docado injetados no WhatsApp Web.
@@ -71,7 +72,7 @@ html.job-push-esquerda #job-trilho { right: auto; left: 0; border-left: none; bo
 }
 .job-logo-txt {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  font-family: 'NunitoJOB', -apple-system, "Segoe UI", sans-serif; font-size: 9px; font-weight: 500; color: #fff; letter-spacing: .3px; z-index: 1;
+  font-family: 'NunitoJOB', -apple-system, "Segoe UI", sans-serif; font-size: 9px; font-weight: 700; color: var(--job-txt); letter-spacing: .3px; z-index: 1;
 }
 @keyframes jobLogoSpin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .job-logo-arcos { animation: none; } }
@@ -107,18 +108,22 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
    mais nova disponível) — mesma ideia do número de build que o próprio
    WhatsApp mostra no canto da barra dele. */
 .job-trilho-versao {
-  position: relative; margin-top: 4px; margin-bottom: 6px; padding: 4px 2px; text-align: center;
-  font-size: 8.5px; color: var(--job-txt-fraco); font-variant-numeric: tabular-nums;
-  line-height: 1.4; cursor: default; opacity: .7;
+  position: relative; margin-top: 4px; margin-bottom: 8px; text-align: center;
+  cursor: default;
 }
+.job-trilho-versao-num {
+  display: inline-block; background: var(--job-bg3); color: var(--job-txt);
+  font-size: 9.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+  padding: 3px 9px; border-radius: 999px; letter-spacing: .2px;
+}
+.job-trilho-versao.tem-nova .job-trilho-versao-num { background: var(--job-acento); color: var(--job-acento-txt); }
 .job-trilho-versao-nova {
-  display: block; color: var(--job-acento); font-weight: 500; font-size: 8px;
+  display: block; margin-top: 3px; color: var(--job-acento); font-weight: 600; font-size: 8.5px;
 }
-/* Bolinha vermelha de "tem atualização" — mais discreta que texto piscando,
-   igual badge de notificação de app. */
+/* Bolinha vermelha de "tem atualização" — some quando já tá na mais nova. */
 .job-trilho-versao.tem-nova::before {
-  content: ""; position: absolute; top: -1px; right: 22px; width: 7px; height: 7px;
-  border-radius: 50%; background: #f43f5e; box-shadow: 0 0 0 2px var(--job-acento-txt);
+  content: ""; position: absolute; top: -2px; right: 16px; width: 7px; height: 7px;
+  border-radius: 50%; background: #f43f5e; box-shadow: 0 0 0 2px var(--job-bg1);
 }
 
 /* ── Botões de rodapé do trilho: config (tema) e desligar — ficam ACIMA do

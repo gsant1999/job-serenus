@@ -818,11 +818,12 @@
     let minha = '';
     try { minha = chrome.runtime.getManifest().version; } catch (e) { return; }
     if (nova && _cmpVersao(minha, nova) < 0) {
-      el.innerHTML = 'v' + esc(minha) + '<span class="job-trilho-versao-nova">nova: ' + esc(nova) + '</span>';
+      el.innerHTML = '<span class="job-trilho-versao-num">v' + esc(minha) + '</span>' +
+        '<span class="job-trilho-versao-nova">nova: ' + esc(nova) + '</span>';
       el.title = 'Instalada: ' + minha + ' — disponível: ' + nova + ' (feche e reabra o WhatsApp Web pra atualizar)';
       el.classList.add('tem-nova');
     } else {
-      el.textContent = 'v' + minha;
+      el.innerHTML = '<span class="job-trilho-versao-num">v' + esc(minha) + '</span>';
       el.title = 'Versão instalada — está na mais recente';
       el.classList.remove('tem-nova');
     }
@@ -2601,6 +2602,11 @@
     });
     obs.observe(document.body, { childList: true, subtree: false });
     verificarVersaoExtensao();
+    // Reverifica sozinho a cada 20min, SEMPRE — antes só reagendava quando
+    // achava atualização, então uma aba aberta por horas sem update na hora
+    // do primeiro check nunca mais avisava depois (hora que "demora" pra
+    // avisar era essa: aba antiga, sem re-checagem nenhuma agendada).
+    setInterval(verificarVersaoExtensao, 20 * 60 * 1000);
   });
 
   // ── Aviso de versão nova ──────────────────────────────────────────────────
@@ -2656,9 +2662,6 @@
       '</div>';
     document.body.appendChild(box);
     box.querySelector('.job-aviso-versao-x').addEventListener('click', () => box.remove());
-    // Se a aba ficar aberta muito tempo, re-checa de hora em hora (o Chrome pode
-    // ter atualizado em segundo plano — aí o balão some no próximo criarTrilho).
-    setTimeout(verificarVersaoExtensao, 60 * 60 * 1000);
   }
 
   // ── Detecta troca de conversa (o WhatsApp Web é uma SPA — não navega, só
