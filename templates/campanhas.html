@@ -36,12 +36,31 @@
 .apt-linhas .ok::before { content:'✓ '; }
 .apt-linhas .no { color:var(--rosa); }
 .apt-linhas .no::before { content:'× '; }
-.form-sec { border-top:1px solid var(--borda); padding:20px 22px; }
-.form-sec:first-of-type { border-top:none; }
-.form-sec h4 { font-size:13px; font-weight:700; margin:0 0 3px; display:flex; align-items:center; gap:8px; }
+.form-sec { padding:22px; }
+.form-sec h4 { font-size:14px; font-weight:700; margin:0 0 3px; display:flex; align-items:center; gap:8px; }
 .form-sec .num { width:22px; height:22px; border-radius:50%; background:var(--grad-frio); color:#fff; font-size:12px; display:inline-flex; align-items:center; justify-content:center; font-weight:700; }
 .form-sec .hint { font-size:12px; color:var(--cinza); line-height:1.55; margin:0 0 12px 30px; }
 .form-body { margin-left:30px; }
+
+/* ── Wizard ── */
+.wiz-stepper { display:flex; align-items:center; padding:18px 22px 0; gap:0; }
+.wiz-dot-wrap { display:flex; flex-direction:column; align-items:center; gap:6px; flex-shrink:0; cursor:default; }
+.wiz-dot-wrap.pode-clicar { cursor:pointer; }
+.wiz-dot { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12.5px; font-weight:700;
+  background:var(--fundo-2,#12121a); border:1.5px solid var(--borda); color:var(--cinza); transition:.15s; }
+.wiz-dot-wrap.ativo .wiz-dot { background:var(--grad-frio); border-color:transparent; color:#fff; }
+.wiz-dot-wrap.feito .wiz-dot { background:rgba(31,216,164,.15); border-color:var(--teal); color:var(--teal); }
+.wiz-label { font-size:10.5px; color:var(--cinza); text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; }
+.wiz-dot-wrap.ativo .wiz-label { color:var(--texto); font-weight:700; }
+.wiz-linha { flex:1; height:1.5px; background:var(--borda); margin:0 6px 20px; min-width:16px; }
+.wiz-linha.feita { background:var(--teal); }
+.wiz-panel { display:none; }
+.wiz-panel.ativo { display:block; }
+.wiz-nav { display:flex; justify-content:space-between; padding:18px 22px; border-top:1px solid var(--borda); }
+.wiz-resumo { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-left:30px; }
+.wiz-resumo-card { background:var(--fundo-2,#12121a); border:1px solid var(--borda); border-radius:10px; padding:13px 15px; }
+.wiz-resumo-card .l { font-size:10.5px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.4px; }
+.wiz-resumo-card .v { font-size:15px; font-weight:700; margin-top:3px; }
 label.lbl { display:block; font-size:11.5px; color:var(--cinza-2); font-weight:600; margin:12px 0 5px; }
 textarea.campo, input.campo { width:100%; background:var(--fundo-2,#12121a); border:1px solid var(--borda); border-radius:9px; color:var(--texto); padding:10px 12px; font-size:13px; font-family:inherit; }
 textarea.campo { min-height:96px; resize:vertical; line-height:1.5; }
@@ -130,77 +149,121 @@ input.campo:focus, textarea.campo:focus { outline:none; border-color:var(--teal)
 
   <div class="card" id="nova" style="padding:0;">
     <div style="padding:18px 22px 0;"><h3 style="margin:0;">Nova campanha</h3></div>
-    <form method="POST" action="/campanha/criar" enctype="multipart/form-data">
-      <div class="form-sec">
-        <h4><span class="num">1</span> Lista de contatos</h4>
-        <div class="hint">Suba a planilha do mês (Excel ou CSV). O sistema acha nome, telefone e e-mail em qualquer ordem, remove repetidos e distribui em rodízio.</div>
-        <div class="form-body">
-          <label class="drop" id="drop" for="planilha">
-            <div class="ic"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="color:var(--teal);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg></div>
-            <div class="t" id="drop-t">Clique para escolher a planilha</div>
-            <div class="s">.xlsx ou .csv — <a href="/campanha/modelo-planilha" class="linkmodelo" onclick="event.stopPropagation()">baixar modelo</a></div>
-          </label>
-          <input type="file" id="planilha" name="planilha" accept=".xlsx,.xlsm,.csv" style="display:none;">
-          <div class="ou">ou cole os contatos</div>
-          <textarea class="campo" name="lista" placeholder="Maria Silva, 19 99999-8888, maria@email.com&#10;João Souza, 11988887777"></textarea>
-        </div>
-      </div>
 
-      <div class="form-sec">
-        <h4><span class="num">2</span> Saudação (o "bom dia")</h4>
-        <div class="hint"><b>Marque os modelos</b> dos seus Modelos que quer usar (o sistema roda aleatório entre eles). Ou, se não marcar nenhum, use as variações inline. Use <code>{nome}</code> pro primeiro nome.</div>
-        <div class="form-body">
-          <label class="lbl">Modelos de saudação — marque os que quer usar</label>
-          {% if modelos_saudacao %}
-          <div style="max-height:230px;overflow:auto;border:1px solid var(--borda);border-radius:9px;padding:6px;background:var(--fundo-2,#12121a);">
-            {% set ns = namespace(cat='__none__') %}
-            {% for m in modelos_saudacao %}
-              {% if m.categoria != ns.cat %}{% set ns.cat = m.categoria %}
-              <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);padding:8px 6px 3px;">{{ m.categoria or 'Sem pasta' }}</div>
-              {% endif %}
-              <label style="display:flex;gap:9px;align-items:flex-start;padding:6px 8px;border-radius:7px;cursor:pointer;" onmouseover="this.style.background='rgba(255,255,255,.03)'" onmouseout="this.style.background=''">
-                <input type="checkbox" name="saudacao_modelos" value="{{ m.id }}" style="width:15px;height:15px;margin-top:2px;flex-shrink:0;">
-                <span style="font-size:12.5px;"><b>{{ m.nome }}</b><span style="display:block;color:var(--cinza);font-size:11.5px;">{{ (m.corpo_texto or '')[:90] }}{{ '…' if (m.corpo_texto or '')|length > 90 else '' }}</span></span>
-              </label>
-            {% endfor %}
-          </div>
-          {% else %}
-          <div style="font-size:11.5px;color:var(--cinza);">Nenhum modelo de texto nos Modelos ainda. Crie saudações em <a href="/crm/modelos" style="color:var(--teal);">Modelos</a> e elas aparecem aqui pra marcar.</div>
-          {% endif %}
-          <label class="lbl" style="margin-top:14px;">Ou variações inline (se não marcar modelos acima)</label>
-          <textarea class="campo" name="mensagens" style="min-height:90px;" placeholder="Bom dia, {nome}! Tudo bem?&#10;---&#10;Oi {nome}, bom dia! Como vai?"></textarea>
-          <div style="font-size:11px;color:var(--cinza-2);margin-top:4px;">Uma variação por bloco, separadas por uma linha com <code>---</code>.</div>
-        </div>
+    {# ── Stepper visual (estilo ZapVoice): Contatos → Ações → Revisão → Envio ── #}
+    <div class="wiz-stepper" id="wiz-stepper">
+      {% for s in [(1,'Contatos'),(2,'Ações'),(3,'Revisão'),(4,'Envio')] %}
+      <div class="wiz-dot-wrap {{ 'ativo' if s[0]==1 else '' }} {{ 'pode-clicar' if s[0]==1 else '' }}" data-step="{{ s[0] }}" onclick="wizIr({{ s[0] }})">
+        <div class="wiz-dot">{{ s[0] }}</div>
+        <div class="wiz-label">{{ s[1] }}</div>
       </div>
+      {% if not loop.last %}<div class="wiz-linha" data-linha="{{ s[0] }}"></div>{% endif %}
+      {% endfor %}
+    </div>
 
-      <div class="form-sec">
-        <h4><span class="num">3</span> Conteúdo quando responder (funil)</h4>
-        <div class="hint">Quando o lead responde e vira quente, o consultor dispara este <b>funil</b> (a sequência de áudio/imagem/PDF que puxa dos Modelos). Opcional.</div>
-        <div class="form-body">
-          <select class="campo" name="funil_id" style="max-width:360px;">
-            <option value="">— nenhum por enquanto —</option>
-            {% for f in funis %}<option value="{{ f.id }}">{{ f.nome }}{% if f.categoria %} · {{ f.categoria }}{% endif %}</option>{% endfor %}
-          </select>
-          {% if not funis %}<div style="font-size:11.5px;color:var(--cinza);margin-top:5px;">Nenhum funil ainda. Monte em <a href="/crm/funis" style="color:var(--teal);">Funis WhatsApp</a>.</div>{% endif %}
-        </div>
-      </div>
+    <form method="POST" action="/campanha/criar" enctype="multipart/form-data" id="form-campanha">
 
-      <div class="form-sec">
-        <h4><span class="num">4</span> Ritmo (aquecimento)</h4>
-        <div class="hint">Quantos cada consultor manda por dia. Comece baixo (15-20) e aumente com o tempo — número novo aguenta menos.</div>
-        <div class="form-body" style="display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap;">
-          <div>
-            <label class="lbl">Teto por consultor / dia</label>
-            <input class="campo" name="teto_dia" type="number" min="1" value="20" style="width:130px;">
-          </div>
-          <div>
-            <label class="lbl">Nome da campanha</label>
-            <input class="campo" name="nome" placeholder="Ex: Aniversário 6 meses — Julho" style="width:320px;max-width:60vw;">
+      {# ── Passo 1: Contatos ── #}
+      <div class="wiz-panel ativo" data-panel="1">
+        <div class="form-sec">
+          <h4><span class="num">1</span> Lista de contatos</h4>
+          <div class="hint">Suba a planilha do mês (Excel ou CSV). O sistema acha nome, telefone e e-mail em qualquer ordem, remove repetidos e distribui em rodízio.</div>
+          <div class="form-body">
+            <label class="drop" id="drop" for="planilha">
+              <div class="ic"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="color:var(--teal);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg></div>
+              <div class="t" id="drop-t">Clique para escolher a planilha</div>
+              <div class="s">.xlsx ou .csv — <a href="/campanha/modelo-planilha" class="linkmodelo" onclick="event.stopPropagation()">baixar modelo</a></div>
+            </label>
+            <input type="file" id="planilha" name="planilha" accept=".xlsx,.xlsm,.csv" style="display:none;">
+            <div class="ou">ou cole os contatos</div>
+            <textarea class="campo" name="lista" id="wiz-lista" placeholder="Maria Silva, 19 99999-8888, maria@email.com&#10;João Souza, 11988887777"></textarea>
           </div>
         </div>
       </div>
 
-      <div class="foot"><button class="btn" type="submit">Criar campanha e distribuir</button></div>
+      {# ── Passo 2: Ações (saudação + funil) ── #}
+      <div class="wiz-panel" data-panel="2">
+        <div class="form-sec">
+          <h4><span class="num">1</span> Saudação (o "bom dia")</h4>
+          <div class="hint"><b>Marque os modelos</b> dos seus Modelos que quer usar (o sistema roda aleatório entre eles). Ou, se não marcar nenhum, use as variações inline. Use <code>{nome}</code> pro primeiro nome.</div>
+          <div class="form-body">
+            <label class="lbl">Modelos de saudação — marque os que quer usar</label>
+            {% if modelos_saudacao %}
+            <div style="max-height:230px;overflow:auto;border:1px solid var(--borda);border-radius:9px;padding:6px;background:var(--fundo-2,#12121a);">
+              {% set ns = namespace(cat='__none__') %}
+              {% for m in modelos_saudacao %}
+                {% if m.categoria != ns.cat %}{% set ns.cat = m.categoria %}
+                <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);padding:8px 6px 3px;">{{ m.categoria or 'Sem pasta' }}</div>
+                {% endif %}
+                <label style="display:flex;gap:9px;align-items:flex-start;padding:6px 8px;border-radius:7px;cursor:pointer;" onmouseover="this.style.background='rgba(255,255,255,.03)'" onmouseout="this.style.background=''">
+                  <input type="checkbox" name="saudacao_modelos" class="wiz-saud-chk" value="{{ m.id }}" style="width:15px;height:15px;margin-top:2px;flex-shrink:0;">
+                  <span style="font-size:12.5px;"><b>{{ m.nome }}</b><span style="display:block;color:var(--cinza);font-size:11.5px;">{{ (m.corpo_texto or '')[:90] }}{{ '…' if (m.corpo_texto or '')|length > 90 else '' }}</span></span>
+                </label>
+              {% endfor %}
+            </div>
+            {% else %}
+            <div style="font-size:11.5px;color:var(--cinza);">Nenhum modelo de texto nos Modelos ainda. Crie saudações em <a href="/crm/modelos" style="color:var(--teal);">Modelos</a> e elas aparecem aqui pra marcar.</div>
+            {% endif %}
+            <label class="lbl" style="margin-top:14px;">Ou variações inline (se não marcar modelos acima)</label>
+            <textarea class="campo" name="mensagens" id="wiz-mensagens" style="min-height:90px;" placeholder="Bom dia, {nome}! Tudo bem?&#10;---&#10;Oi {nome}, bom dia! Como vai?"></textarea>
+            <div style="font-size:11px;color:var(--cinza-2);margin-top:4px;">Uma variação por bloco, separadas por uma linha com <code>---</code>.</div>
+          </div>
+        </div>
+        <div class="form-sec" style="border-top:1px solid var(--borda);">
+          <h4><span class="num">2</span> Conteúdo quando responder (funil)</h4>
+          <div class="hint">Quando o lead responde e vira quente, o consultor dispara este <b>funil</b> (a sequência de áudio/imagem/PDF que puxa dos Modelos). Opcional.</div>
+          <div class="form-body">
+            <select class="campo" name="funil_id" id="wiz-funil" style="max-width:360px;">
+              <option value="">— nenhum por enquanto —</option>
+              {% for f in funis %}<option value="{{ f.id }}">{{ f.nome }}{% if f.categoria %} · {{ f.categoria }}{% endif %}</option>{% endfor %}
+            </select>
+            {% if not funis %}<div style="font-size:11.5px;color:var(--cinza);margin-top:5px;">Nenhum funil ainda. Monte em <a href="/crm/funis" style="color:var(--teal);">Funis WhatsApp</a>.</div>{% endif %}
+          </div>
+        </div>
+      </div>
+
+      {# ── Passo 3: Revisão (ritmo + nome + resumo) ── #}
+      <div class="wiz-panel" data-panel="3">
+        <div class="form-sec">
+          <h4><span class="num">1</span> Ritmo (aquecimento)</h4>
+          <div class="hint">Quantos cada consultor manda por dia. Comece baixo (15-20) e aumente com o tempo — número novo aguenta menos.</div>
+          <div class="form-body" style="display:flex;gap:24px;align-items:flex-end;flex-wrap:wrap;">
+            <div>
+              <label class="lbl">Teto por consultor / dia</label>
+              <input class="campo" name="teto_dia" id="wiz-teto" type="number" min="1" value="20" style="width:130px;">
+            </div>
+            <div>
+              <label class="lbl">Nome da campanha</label>
+              <input class="campo" name="nome" id="wiz-nome" placeholder="Ex: Aniversário 6 meses — Julho" style="width:320px;max-width:60vw;">
+            </div>
+          </div>
+        </div>
+        <div class="form-sec" style="border-top:1px solid var(--borda);">
+          <h4><span class="num">2</span> Revise antes de enviar</h4>
+          <div class="wiz-resumo">
+            <div class="wiz-resumo-card"><div class="l">Contatos colados</div><div class="v" id="rv-contatos">0 linha(s)</div></div>
+            <div class="wiz-resumo-card"><div class="l">Planilha</div><div class="v" id="rv-planilha">Nenhuma escolhida</div></div>
+            <div class="wiz-resumo-card"><div class="l">Saudações marcadas</div><div class="v" id="rv-saud">0 modelo(s)</div></div>
+            <div class="wiz-resumo-card"><div class="l">Funil de resposta</div><div class="v" id="rv-funil">Nenhum</div></div>
+            <div class="wiz-resumo-card"><div class="l">Teto por consultor</div><div class="v" id="rv-teto">20 / dia</div></div>
+            <div class="wiz-resumo-card"><div class="l">Nome da campanha</div><div class="v" id="rv-nome">Sem nome (auto)</div></div>
+          </div>
+        </div>
+      </div>
+
+      {# ── Passo 4: Envio ── #}
+      <div class="wiz-panel" data-panel="4">
+        <div class="form-sec" style="text-align:center;padding:40px 22px;">
+          <div style="font-size:15px;font-weight:700;margin-bottom:6px;">Tudo pronto pra distribuir</div>
+          <div style="font-size:12.5px;color:var(--cinza);max-width:420px;margin:0 auto 22px;">Ao criar, o sistema distribui os contatos em rodízio entre os participantes e a campanha fica <b>ativa</b>. Você ainda vai poder baixar os VCFs e clicar em "Enviar lote" na tela seguinte.</div>
+          <button class="btn" type="submit" id="wiz-btn-criar" style="padding:13px 28px;font-size:14.5px;">Criar campanha e distribuir</button>
+        </div>
+      </div>
+
+      <div class="wiz-nav">
+        <button class="btn-outline" type="button" id="wiz-voltar" onclick="wizVoltar()" style="visibility:hidden;">Voltar</button>
+        <button class="btn" type="button" id="wiz-avancar" onclick="wizAvancar()">Avançar</button>
+      </div>
     </form>
   </div>
 </div>
@@ -253,6 +316,74 @@ input.campo:focus, textarea.campo:focus { outline:none; border-color:var(--teal)
       drop.classList.add('tem');
       document.getElementById('drop-t').textContent = inp.files[0].name;
     }
+    atualizarResumo();
   });
+
+  // ── Wizard (Contatos → Ações → Revisão → Envio) ──
+  var wizPasso = 1;
+  var wizMaxVisitado = 1;
+  function wizIr(n){
+    if (n > wizMaxVisitado) return; // só pula pra passo já visitado (ou o próximo pelo botão Avançar)
+    if (n === 1 && !validarPasso1(false)) { /* deixa voltar mesmo sem validar */ }
+    wizPasso = n;
+    wizRender();
+  }
+  function validarPasso1(mostrarErro){
+    var temLista = (document.getElementById('wiz-lista').value || '').trim().length > 0;
+    var temArquivo = inp.files && inp.files[0];
+    if (!temLista && !temArquivo) {
+      if (mostrarErro) toast('Cole a lista ou escolha uma planilha antes de avançar.', 'err');
+      return false;
+    }
+    return true;
+  }
+  function wizAvancar(){
+    if (wizPasso === 1 && !validarPasso1(true)) return;
+    if (wizPasso < 4) {
+      wizPasso += 1;
+      if (wizPasso > wizMaxVisitado) wizMaxVisitado = wizPasso;
+      if (wizPasso === 3) atualizarResumo();
+      wizRender();
+    }
+  }
+  function wizVoltar(){
+    if (wizPasso > 1) { wizPasso -= 1; wizRender(); }
+  }
+  function wizRender(){
+    document.querySelectorAll('.wiz-panel').forEach(function(p){
+      p.classList.toggle('ativo', Number(p.dataset.panel) === wizPasso);
+    });
+    document.querySelectorAll('.wiz-dot-wrap').forEach(function(d){
+      var n = Number(d.dataset.step);
+      d.classList.toggle('ativo', n === wizPasso);
+      d.classList.toggle('feito', n < wizPasso);
+      d.classList.toggle('pode-clicar', n <= wizMaxVisitado);
+    });
+    document.querySelectorAll('.wiz-linha').forEach(function(l){
+      l.classList.toggle('feita', Number(l.dataset.linha) < wizPasso);
+    });
+    document.getElementById('wiz-voltar').style.visibility = wizPasso > 1 ? 'visible' : 'hidden';
+    document.getElementById('wiz-avancar').style.display = wizPasso < 4 ? 'inline-block' : 'none';
+  }
+  function atualizarResumo(){
+    var linhas = (document.getElementById('wiz-lista').value || '').split('\n').map(function(l){return l.trim();}).filter(Boolean);
+    document.getElementById('rv-contatos').textContent = linhas.length + ' linha(s) coladas';
+    document.getElementById('rv-planilha').textContent = (inp.files && inp.files[0]) ? inp.files[0].name : 'Nenhuma escolhida';
+    var nSaud = document.querySelectorAll('.wiz-saud-chk:checked').length;
+    var msgsInline = (document.getElementById('wiz-mensagens').value || '').split(/\n\s*-{2,}\s*\n/).map(function(s){return s.trim();}).filter(Boolean);
+    document.getElementById('rv-saud').textContent = nSaud ? (nSaud + ' modelo(s) marcado(s)') : (msgsInline.length ? (msgsInline.length + ' variação(ões) inline') : 'Nenhuma (usa texto padrão)');
+    var fSel = document.getElementById('wiz-funil');
+    document.getElementById('rv-funil').textContent = fSel.value ? fSel.options[fSel.selectedIndex].textContent : 'Nenhum';
+    document.getElementById('rv-teto').textContent = (document.getElementById('wiz-teto').value || '20') + ' / dia';
+    document.getElementById('rv-nome').textContent = (document.getElementById('wiz-nome').value || '').trim() || 'Sem nome (gera automático)';
+  }
+  document.getElementById('wiz-lista').addEventListener('input', atualizarResumo);
+  document.getElementById('wiz-mensagens').addEventListener('input', atualizarResumo);
+  document.querySelectorAll('.wiz-saud-chk').forEach(function(c){ c.addEventListener('change', atualizarResumo); });
+  document.getElementById('wiz-funil').addEventListener('change', atualizarResumo);
+  document.getElementById('wiz-teto').addEventListener('input', atualizarResumo);
+  document.getElementById('wiz-nome').addEventListener('input', atualizarResumo);
+  var _btCriar = document.getElementById('wiz-btn-criar');
+  if (_btCriar) _btCriar.addEventListener('click', function(){ _btCriar.disabled = true; _btCriar.textContent = 'Criando...'; });
 </script>
 {% endblock %}

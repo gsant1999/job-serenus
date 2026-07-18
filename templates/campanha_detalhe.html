@@ -50,6 +50,8 @@
     </div>
     <div class="cd-controls">
       <a href="/campanhas" class="btn-outline" style="text-decoration:none;">Voltar</a>
+      <button class="btn-outline" onclick="document.getElementById('modal-editar-conteudo').style.display='flex'" title="Trocar a saudação e o funil daqui pra frente — quem já recebeu não muda.">Editar saudação/funil</button>
+      <button class="btn-outline" onclick="reequilibrar(this)" title="Redistribui os contatos AINDA NÃO enviados pra bater com os participantes marcados agora. Use depois de habilitar ou desabilitar alguém em 'Escolher participantes'.">Reequilibrar participantes</button>
       {% if camp.status == 'ativa' %}
       <button class="btn-outline" onclick="mudarStatus('pausada')">Suspender</button>
       <button class="btn-outline" onclick="mudarStatus('concluida')">Encerrar</button>
@@ -149,7 +151,70 @@
   </div>
 </div>
 
+<div id="modal-editar-conteudo" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.55);align-items:center;justify-content:center;">
+  <div style="width:480px;max-width:92vw;max-height:86vh;overflow:auto;background:var(--panel);border:1px solid var(--borda);border-radius:14px;padding:20px;">
+    <h3 style="margin:0 0 4px;">Trocar saudação / funil</h3>
+    <div style="font-size:12px;color:var(--cinza);margin-bottom:14px;">Vale a partir de agora — quem já recebeu a saudação não muda, só os próximos lotes.</div>
+
+    <label style="font-size:11.5px;color:var(--cinza-2);font-weight:600;display:block;margin:10px 0 5px;">Modelos de saudação — marque os que quer usar</label>
+    {% if modelos_saudacao %}
+    <div style="max-height:200px;overflow:auto;border:1px solid var(--borda);border-radius:9px;padding:6px;background:var(--fundo-2,#12121a);">
+      {% set ns = namespace(cat='__none__') %}
+      {% for m in modelos_saudacao %}
+        {% if m.categoria != ns.cat %}{% set ns.cat = m.categoria %}
+        <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);padding:8px 6px 3px;">{{ m.categoria or 'Sem pasta' }}</div>
+        {% endif %}
+        <label style="display:flex;gap:9px;align-items:flex-start;padding:6px 8px;border-radius:7px;cursor:pointer;">
+          <input type="checkbox" class="ec-saud-chk" value="{{ m.id }}" {% if m.id in saud_marcados %}checked{% endif %} style="width:15px;height:15px;margin-top:2px;flex-shrink:0;">
+          <span style="font-size:12.5px;"><b>{{ m.nome }}</b><span style="display:block;color:var(--cinza);font-size:11.5px;">{{ (m.corpo_texto or '')[:80] }}{{ '…' if (m.corpo_texto or '')|length > 80 else '' }}</span></span>
+        </label>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div style="font-size:11.5px;color:var(--cinza);">Nenhum modelo de texto nos Modelos ainda.</div>
+    {% endif %}
+
+    <label style="font-size:11.5px;color:var(--cinza-2);font-weight:600;display:block;margin:12px 0 5px;">Ou variações inline (se não marcar modelos acima)</label>
+    <textarea id="ec-mensagens" style="width:100%;box-sizing:border-box;min-height:80px;padding:9px 11px;font-size:12.5px;background:var(--fundo-2,#12121a);border:1px solid var(--borda);border-radius:8px;color:var(--texto);resize:vertical;" placeholder="Bom dia, {nome}! Tudo bem?&#10;---&#10;Oi {nome}, bom dia!">{% for m in mensagens_atuais %}{{ m }}{% if not loop.last %}
+---
+{% endif %}{% endfor %}</textarea>
+
+    <label style="font-size:11.5px;color:var(--cinza-2);font-weight:600;display:block;margin:12px 0 5px;">Funil de resposta</label>
+    <select id="ec-funil" style="width:100%;box-sizing:border-box;padding:9px 11px;font-size:12.5px;background:var(--fundo-2,#12121a);border:1px solid var(--borda);border-radius:8px;color:var(--texto);">
+      <option value="">— nenhum —</option>
+      {% for f in funis %}<option value="{{ f.id }}" {% if funil and funil.id==f.id %}selected{% endif %}>{{ f.nome }}{% if f.categoria %} · {{ f.categoria }}{% endif %}</option>{% endfor %}
+    </select>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+      <button class="btn-outline" type="button" onclick="document.getElementById('modal-editar-conteudo').style.display='none'">Cancelar</button>
+      <button class="btn" type="button" onclick="salvarEdicaoConteudo(this)">Salvar</button>
+    </div>
+  </div>
+</div>
+
 <script>
+async function reequilibrar(btn){
+  btn.disabled=true; const t=btn.textContent; btn.textContent='Reequilibrando...';
+  try{
+    const r=await fetch('/campanha/{{ camp.id }}/reequilibrar',{method:'POST'});
+    const d=await r.json();
+    if(d.ok){ toast(d.redistribuidos+' contato(s) redistribuído(s) entre os participantes atuais.', 'ok'); setTimeout(()=>location.reload(),1200); }
+    else { toast('Erro','err'); btn.disabled=false; btn.textContent=t; }
+  }catch(e){ toast('Erro de conexão','err'); btn.disabled=false; btn.textContent=t; }
+}
+async function salvarEdicaoConteudo(btn){
+  const fd = new FormData();
+  document.querySelectorAll('.ec-saud-chk:checked').forEach(function(c){ fd.append('saudacao_modelos', c.value); });
+  fd.append('mensagens', document.getElementById('ec-mensagens').value);
+  fd.append('funil_id', document.getElementById('ec-funil').value);
+  btn.disabled=true; const t=btn.textContent; btn.textContent='Salvando...';
+  try{
+    const r=await fetch('/campanha/{{ camp.id }}/editar-conteudo',{method:'POST',body:fd});
+    const d=await r.json();
+    if(d.ok){ toast('Saudação/funil atualizados.','ok'); setTimeout(()=>location.reload(),900); }
+    else { toast(d.erro||'Erro','err'); btn.disabled=false; btn.textContent=t; }
+  }catch(e){ toast('Erro de conexão','err'); btn.disabled=false; btn.textContent=t; }
+}
 async function enfileirar(btn){
   btn.disabled=true; const t=btn.textContent; btn.textContent='Enviando...';
   try{

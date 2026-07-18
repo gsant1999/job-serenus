@@ -5449,6 +5449,26 @@ def _campanha_consultores_ativos(conn):
     ).fetchall()
 
 
+def _campanha_reequilibrar(conn, campanha_id):
+    """Redistribui os contatos AINDA NÃO enviados (status='pendente') entre os
+    participantes ATIVOS agora — permite habilitar/desabilitar gente com o disparo
+    já rodando. Quem foi desabilitado perde os pendentes dele (voltam pro rodízio);
+    quem foi habilitado passa a receber. Contato já enfileirado/enviado não se mexe
+    (mensagem não se desmanda)."""
+    ativos = {c['id'] for c in _campanha_consultores_ativos(conn)}
+    if not ativos:
+        return 0
+    orfaos = conn.execute("""SELECT id, consultor_id FROM campanha_contato
+        WHERE campanha_id=? AND status='pendente'""", (campanha_id,)).fetchall()
+    n = 0
+    for r in orfaos:
+        if r['consultor_id'] not in ativos:
+            conn.execute("UPDATE campanha_contato SET consultor_id=NULL WHERE id=?", (r['id'],))
+            n += 1
+    _campanha_roleta(conn, campanha_id)
+    return n
+
+
 def _campanha_roleta(conn, campanha_id):
     """Distribui em rodízio os contatos ainda sem dono entre os consultores ativos.
     Roda equilibrando: continua a partir de quem já tem menos contatos na campanha."""
@@ -5980,6 +6000,7 @@ def campanha_criar():
 @login_required
 @admin_required
 def campanha_detalhe(cid):
+    import json as _json
     conn = db()
     camp = conn.execute("SELECT * FROM campanha WHERE id=?", (cid,)).fetchone()
     if not camp:
@@ -6021,10 +6042,24 @@ def campanha_detalhe(cid):
         fr = conn.execute("SELECT id, nome FROM whatsapp_funis WHERE id=?", (fid,)).fetchone()
         funil = dict(fr) if fr else None
     msgs = _campanha_saudacoes(conn, camp)
+    # Pra edição pós-criação: lista de modelos de saudação + funis + o que já está marcado.
+    modelos_saud = [dict(r) for r in conn.execute(
+        """SELECT id, nome, COALESCE(categoria,'') categoria, corpo_texto FROM modelos_conteudo
+           WHERE tipo='whatsapp' AND COALESCE(midia_tipo,'') IN ('','texto')
+             AND COALESCE(corpo_texto,'')<>'' AND COALESCE(ativo,1)=1
+           ORDER BY COALESCE(categoria,''), nome""").fetchall()]
+    funis_todos = [dict(r) for r in conn.execute(
+        "SELECT id, nome, categoria FROM whatsapp_funis WHERE COALESCE(ativo,1)=1 ORDER BY nome").fetchall()]
+    try:
+        saud_marcados = set(_json.loads(camp['saudacao_modelos']) if ('saudacao_modelos' in camp.keys() and camp['saudacao_modelos']) else [])
+    except Exception:
+        saud_marcados = set()
     close_db(conn)
     return render_template('campanha_detalhe.html', camp=dict(camp), msgs=msgs,
                            contatos=[dict(r) for r in contatos], saud_cat=saud_cat, funil=funil,
-                           porcons=porcons, resumo=dict(resumo) if resumo else {}, eta=eta)
+                           porcons=porcons, resumo=dict(resumo) if resumo else {}, eta=eta,
+                           modelos_saudacao=modelos_saud, funis=funis_todos, saud_marcados=saud_marcados,
+                           mensagens_atuais=(_json.loads(camp['mensagens'] or '[]') if not (camp['saudacao_categoria'] or saud_marcados) else []))
 
 
 @app.route('/campanha/<int:cid>/vcf')
@@ -6081,6 +6116,44 @@ def campanha_status(cid):
     conn.execute("UPDATE campanha SET status=? WHERE id=?", (novo, cid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "status": novo})
+
+
+@app.route('/campanha/<int:cid>/reequilibrar', methods=['POST'])
+@login_required
+@admin_required
+def campanha_reequilibrar_rota(cid):
+    """Habilitar/desabilitar gente com o disparo já rodando: redistribui os
+    contatos ainda não enviados pra bater com quem está marcado como participante
+    AGORA (tela 'Escolher participantes')."""
+    conn = db()
+    n = _campanha_reequilibrar(conn, cid)
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "redistribuidos": n})
+
+
+@app.route('/campanha/<int:cid>/editar-conteudo', methods=['POST'])
+@login_required
+@admin_required
+def campanha_editar_conteudo(cid):
+    """Troca a saudação e/ou o funil DEPOIS da campanha já criada — vale a partir
+    daqui pra frente (quem já recebeu não muda, os próximos lotes usam o novo)."""
+    import json as _json
+    conn = db()
+    camp = conn.execute("SELECT id FROM campanha WHERE id=?", (cid,)).fetchone()
+    if not camp:
+        close_db(conn); return jsonify({"ok": False, "erro": "Campanha não encontrada"}), 404
+    d = request.form
+    import re as _re
+    raw = (d.get('mensagens') or '').replace('\r\n', '\n').replace('\r', '\n')
+    msgs = [m.strip() for m in _re.split(r'\n\s*-{2,}\s*\n', raw) if m.strip()]
+    ids_mod = [i for i in (d.getlist('saudacao_modelos') if hasattr(d, 'getlist') else []) if i]
+    saud_modelos = _json.dumps([int(i) for i in ids_mod if str(i).isdigit()]) if ids_mod else None
+    try: funil_id = int(d.get('funil_id')) or None
+    except (TypeError, ValueError): funil_id = None
+    conn.execute("""UPDATE campanha SET mensagens=?, saudacao_modelos=?, saudacao_categoria=NULL, funil_id=?
+        WHERE id=?""", (_json.dumps(msgs, ensure_ascii=False), saud_modelos, funil_id, cid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
 
 
 @app.route('/api/whatsapp/campanha/resposta', methods=['POST', 'OPTIONS'])
