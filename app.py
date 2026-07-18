@@ -2002,6 +2002,9 @@ def init_db():
         # Quando o consultor ATENDEU o lead (chamou/mandou msg) — tira do inbox da
         # extensão. NULL = ainda esperando ser chamado.
         ("crm_leads", "atendido_em", "TIMESTAMP"),
+        # Funil que "Atender agora" (inbox da extensão) dispara pra esse consultor
+        # — cada um pode ter o seu (abertura personalizada).
+        ("usuarios", "funil_atendimento_id", "INTEGER"),
         # Auto-disparo do funil quando o lead responde: liberar_em segura o item na
         # fila até a hora (delay proposital/aleatório); funil_em guarda quando o
         # funil da campanha já foi disparado pro contato (não dispara duas vezes).
@@ -5628,9 +5631,7 @@ def _campanha_enfileirar(conn, campanha_id, texto_fallback='', apto_ids=None):
             if not chat_id:
                 conn.execute("UPDATE campanha_contato SET status='invalido' WHERE id=?", (ct['id'],))
                 continue
-            texto = _rnd.choice(msgs)
-            if '{nome}' in texto:
-                texto = texto.replace('{nome}', (ct['nome'] or '').split(' ')[0] or 'tudo bem')
+            texto = _preencher_texto(_rnd.choice(msgs), ct['nome'])
             conn.execute("""INSERT INTO whatsapp_extensao_fila
                 (lead_id, responsavel_id, telefone, chat_id, tipo, texto, origem, criado_por)
                 VALUES (?,?,?,?,?,?,'campanha',?)""",
@@ -5704,9 +5705,7 @@ def _campanha_disparar_funil(conn, contato):
     n = 0
     for p in passos:
         tipo = p['midia_tipo'] if p['midia_tipo'] in ('audio', 'imagem', 'video', 'documento') else 'texto'
-        texto = p['corpo_texto'] or ''
-        if '{nome}' in texto:
-            texto = texto.replace('{nome}', (contato['nome'] or '').split(' ')[0] or 'tudo bem')
+        texto = _preencher_texto(p['corpo_texto'] or '', contato['nome'])
         liberar = (agora + _td(seconds=acc)).strftime('%Y-%m-%d %H:%M:%S')
         conn.execute("""INSERT INTO whatsapp_extensao_fila
             (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo, origem, criado_por, liberar_em)
@@ -5725,6 +5724,29 @@ def _horario_comercial(agora=None):
     atendimento automático do lead pago SÓ dispara nessa janela — pedido do Guilherme."""
     a = agora or datetime.now(TZ_SP)
     return a.weekday() < 5 and 8 <= a.hour < 18
+
+
+def _saudacao_hora(agora=None):
+    """'Bom dia' / 'Boa tarde' / 'Boa noite' de acordo com a hora REAL
+    (America/Sao_Paulo) — nunca um texto fixo. 5h-11h59 dia, 12h-17h59 tarde,
+    resto noite. Usado no placeholder {saudacao} das mensagens de abertura."""
+    h = (agora or datetime.now(TZ_SP)).hour
+    if 5 <= h < 12:
+        return 'Bom dia'
+    if 12 <= h < 18:
+        return 'Boa tarde'
+    return 'Boa noite'
+
+
+def _preencher_texto(texto, nome, agora=None):
+    """Substitui {nome} (1º nome, do CRM) e {saudacao} (Bom dia/Boa tarde/Boa
+    noite pela hora real) — usado em toda mensagem de abertura automática."""
+    txt = texto or ''
+    if '{nome}' in txt:
+        txt = txt.replace('{nome}', (nome or '').strip().split(' ')[0] or 'tudo bem')
+    if '{saudacao}' in txt:
+        txt = txt.replace('{saudacao}', _saudacao_hora(agora))
+    return txt
 
 
 def _lead_pago_opener(conn, consultor_id, nome):
@@ -5755,10 +5777,51 @@ def _lead_pago_opener(conn, consultor_id, nome):
         except Exception:
             padrao = ''
         textos = [padrao or 'Oi {nome}, tudo bem? Vi que você pediu uma cotação de plano de saúde. Posso te ajudar agora mesmo?']
-    txt = _rnd.choice(textos)
-    if '{nome}' in txt:
-        txt = txt.replace('{nome}', (nome or '').split(' ')[0] or 'tudo bem')
-    return txt
+    return _preencher_texto(_rnd.choice(textos), nome)
+
+
+def _lead_atender_com_funil(conn, lead_id, usuario_id):
+    """'Atender agora' de verdade: dispara o FUNIL DE ATENDIMENTO configurado
+    para ESTE consultor (usuarios.funil_atendimento_id) pro lead clicado — não só
+    abre a conversa vazia. Cada passo já sai com {nome} (1º nome, do CRM, não
+    chute) e {saudacao} (Bom dia/Boa tarde/Boa noite pela hora real) preenchidos.
+    Sem funil configurado pro consultor: não inventa nada, avisa pra configurar."""
+    lead = conn.execute("SELECT id, nome, telefone, telefone_norm FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+    if not lead:
+        return {"ok": False, "erro": "lead_nao_encontrado"}
+    u = conn.execute("SELECT funil_atendimento_id FROM usuarios WHERE id=?", (usuario_id,)).fetchone()
+    funil_id = u['funil_atendimento_id'] if u else None
+    if not funil_id:
+        return {"ok": False, "erro": "sem_funil_configurado",
+                "msg": "Nenhum funil de atendimento configurado pra você. Peça pro admin definir em Usuários."}
+    passos = conn.execute("""SELECT p.ordem, p.delay_segundos, m.corpo_texto, m.midia_arquivo, m.midia_tipo
+        FROM whatsapp_funil_passos p JOIN modelos_conteudo m ON m.id=p.modelo_id
+        WHERE p.funil_id=? ORDER BY p.ordem""", (funil_id,)).fetchall()
+    if not passos:
+        return {"ok": False, "erro": "funil_sem_passos", "msg": "O funil de atendimento configurado não tem passos."}
+    chat_id = _wa_chat_id(lead['telefone_norm'] or lead['telefone'] or '')
+    if not chat_id:
+        return {"ok": False, "erro": "sem_telefone", "msg": "Esse lead não tem telefone válido."}
+    from datetime import timedelta as _td
+    agora = datetime.now(TZ_SP)
+    acc = 0
+    n = 0
+    for p in passos:
+        tipo = p['midia_tipo'] if p['midia_tipo'] in ('audio', 'imagem', 'video', 'documento') else 'texto'
+        texto = _preencher_texto(p['corpo_texto'] or '', lead['nome'], agora)
+        liberar = (agora + _td(seconds=acc)).strftime('%Y-%m-%d %H:%M:%S')
+        conn.execute("""INSERT INTO whatsapp_extensao_fila
+            (lead_id, responsavel_id, telefone, chat_id, tipo, texto, midia_arquivo, origem, criado_por, liberar_em)
+            VALUES (?,?,?,?,?,?,?,'atendimento_manual',?,?)""",
+            (lead_id, usuario_id, lead['telefone'] or lead['telefone_norm'], chat_id,
+             tipo, texto, (p['midia_arquivo'] if tipo != 'texto' else None), usuario_id, liberar))
+        n += 1
+        acc += max(2, int(p['delay_segundos'] or 3))  # espaça os passos (sem delay artificial no 1º)
+    conn.execute("UPDATE crm_leads SET atendido_em=? WHERE id=? AND atendido_em IS NULL", (_agora_sp(), lead_id))
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                 (lead_id, 'Atendimento imediato', 'whatsapp',
+                  f'"Atender agora" disparou o funil de atendimento ({n} passo(s)).', _agora_sp()))
+    return {"ok": True, "passos_enfileirados": n}
 
 
 def _atender_lead_pago_auto(conn, lead_id):
@@ -7545,6 +7608,8 @@ def bi():
 def usuarios():
     conn = db()
     rows = conn.execute("SELECT * FROM usuarios ORDER BY id").fetchall()
+    funis_l = [dict(r) for r in conn.execute(
+        "SELECT id, nome, categoria FROM whatsapp_funis WHERE COALESCE(ativo,1)=1 ORDER BY nome").fetchall()]
     close_db(conn)
     # dict simples: Row do SQLite não é serializável pelo |tojson do template,
     # e o hash de senha não deve ir para o HTML
@@ -7555,7 +7620,7 @@ def usuarios():
         d.pop('reset_token', None)
         usuarios_l.append(d)
     return render_template('usuarios.html', usuarios=usuarios_l, host=request.host_url.rstrip('/'),
-                           modulos=MODULOS)
+                           modulos=MODULOS, funis=funis_l)
 
 @app.route('/usuario/novo', methods=['POST'])
 @login_required
@@ -7650,10 +7715,12 @@ def usuario_editar(uid):
     else:
         marcados = [k for k in _MODULOS_KEYS if d.get('mod_' + k)]
         modulos_val = json.dumps(marcados)
-    conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=?,telefone=?,waspeed_token=?,modulos=? WHERE id=?""",
+    funil_atendimento_id = (d.get('funil_atendimento_id', '') or '').strip()
+    funil_atendimento_id = int(funil_atendimento_id) if funil_atendimento_id.isdigit() else None
+    conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=?,telefone=?,waspeed_token=?,modulos=?,funil_atendimento_id=? WHERE id=?""",
         (d['nome'],d['email'].lower(),d['perfil'],
          (d['regime_base'] if d['perfil']=='consultor' else ''),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,
-         d.get('telefone','').strip(),d.get('waspeed_token','').strip() or None,modulos_val,uid))
+         d.get('telefone','').strip(),d.get('waspeed_token','').strip() or None,modulos_val,funil_atendimento_id,uid))
     conn.commit(); close_db(conn)
     return redirect(url_for('usuarios'))
 
@@ -11473,17 +11540,35 @@ def api_whatsapp_inbox():
 
 @app.route('/api/whatsapp/inbox/atender', methods=['POST', 'OPTIONS'])
 def api_whatsapp_inbox_atender():
-    """A extensão marca que o consultor atendeu (chamou) o lead — sai do inbox.
-    Registra atividade e a hora do atendimento."""
+    """'Atender agora' de verdade: dispara o funil de atendimento do consultor
+    pro lead (com {nome} do CRM e {saudacao} pela hora certa) — não só marca
+    como atendido. Sem funil configurado, ainda marca atendido (não trava o
+    consultor) mas avisa que precisa configurar."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
         return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
     d = request.json or {}
     lead_id = d.get('lead_id')
+    try:
+        usuario_id = int(d.get('usuario_id'))
+    except (TypeError, ValueError):
+        usuario_id = None
     if not lead_id:
         return _wa_cors(jsonify({"ok": False, "erro": "lead_id"})), 400
     conn = db()
+    if usuario_id:
+        resultado = _lead_atender_com_funil(conn, lead_id, usuario_id)
+        if not resultado.get('ok'):
+            # Sem funil/passos/telefone: ainda marca atendido (o consultor já
+            # decidiu abrir a conversa) mas não inventa mensagem nenhuma.
+            conn.execute("UPDATE crm_leads SET atendido_em=? WHERE id=? AND atendido_em IS NULL", (_agora_sp(), lead_id))
+            conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                         (lead_id, 'Extensão WhatsApp', 'atendimento', 'Lead atendido pelo inbox da extensão (sem funil disparado: ' + str(resultado.get('erro')) + ').', _agora_sp()))
+            conn.commit(); close_db(conn)
+            return _wa_cors(jsonify(resultado))
+        conn.commit(); close_db(conn)
+        return _wa_cors(jsonify(resultado))
     conn.execute("UPDATE crm_leads SET atendido_em=? WHERE id=? AND atendido_em IS NULL", (_agora_sp(), lead_id))
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                  (lead_id, 'Extensão WhatsApp', 'atendimento', 'Lead atendido pelo inbox da extensão.', _agora_sp()))

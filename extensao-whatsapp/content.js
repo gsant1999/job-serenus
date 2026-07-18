@@ -797,15 +797,36 @@
     });
   }
 
+  function _avisoInbox(msg, cor) {
+    var el = document.createElement('div');
+    el.textContent = msg;
+    el.style.cssText = 'position:fixed;right:18px;bottom:90px;z-index:999999;background:' + (cor || '#1f2937') +
+      ';color:#fff;padding:10px 14px;border-radius:8px;font-size:13px;max-width:280px;box-shadow:0 4px 14px rgba(0,0,0,.3);';
+    document.body.appendChild(el);
+    setTimeout(function () { el.remove(); }, 5000);
+  }
+
+  var _ERROS_ATENDER = {
+    sem_funil_configurado: 'Esse consultor não tem funil de atendimento configurado (Usuários → editar → Funil de atendimento).',
+    funil_sem_passos: 'O funil de atendimento configurado não tem passos.',
+    sem_telefone: 'Não foi possível localizar o telefone deste lead.',
+  };
+
   async function atenderLead(leadId, chatId, telefone) {
+    var resp = null;
     try {
       const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
-      await chrome.runtime.sendMessage({ type: 'inbox_atender', lead_id: parseInt(leadId, 10), usuario_id: usuarioId });
+      resp = await chrome.runtime.sendMessage({ type: 'inbox_atender', lead_id: parseInt(leadId, 10), usuario_id: usuarioId });
     } catch (e) { /* segue mesmo se falhar o report */ }
     _inboxCache = _inboxCache.filter(function (l) { return String(l.id) !== String(leadId); });
     atualizarBadgeInbox();
     if (_secaoAtiva === 'inbox') { setCorpoSecaoInbox(renderInbox()); ligarAcoesInbox(); }
-    // abre a conversa do lead pra o consultor falar agora
+    if (resp && resp.ok) {
+      _avisoInbox('Funil disparado: ' + (resp.passos_enfileirados || 0) + ' mensagem(ns) na fila.', '#0f766e');
+    } else if (resp && resp.erro) {
+      _avisoInbox(_ERROS_ATENDER[resp.erro] || (resp.msg || 'Não foi possível disparar o funil de atendimento.'), '#b91c1c');
+    }
+    // abre a conversa do lead pra o consultor acompanhar
     var num = (telefone || '').replace(/\D/g, '');
     if (num) window.location.href = 'https://web.whatsapp.com/send?phone=' + num;
   }
