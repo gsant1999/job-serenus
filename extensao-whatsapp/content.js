@@ -115,13 +115,35 @@
     return melhor;
   }
 
+  // ── Seletores DOM remotos: quando o WhatsApp muda o HTML dele e um seletor
+  //    fixo no código para de achar o elemento, dá pra corrigir direto no
+  //    site (/extensao/config-remota) sem esperar deploy nem loja — mesma
+  //    ideia vista no WaSpeed (eles têm um config.json próprio pra isso).
+  //    Sempre com fallback pro valor fixo se o remoto falhar/não tiver a chave. ──
+  let _seletoresRemotos = null;
+  function _qsRemoto(chave, padrao, escopo) {
+    const lista = (_seletoresRemotos && _seletoresRemotos[chave]) || padrao;
+    const base = escopo || document;
+    for (const sel of lista) {
+      try { const el = base.querySelector(sel); if (el) return el; } catch (e) { /* seletor inválido, tenta o próximo */ }
+    }
+    return null;
+  }
+  async function carregarSeletoresRemotos() {
+    try {
+      const r = await fetch(_SITE_BASE_URL_EXT + '/api/whatsapp/config-remota', { cache: 'no-store' });
+      const j = await r.json();
+      if (j && j.ok && j.seletores) _seletoresRemotos = j.seletores;
+    } catch (e) { /* sem internet: segue com os seletores fixos do código */ }
+  }
+
   // ── Nome do contato/conversa aberta (do cabeçalho). ──
   function nomeDoContato() {
-    const header = document.querySelector('#main header');
+    const header = _qsRemoto('headerContato', ['#main header']);
     if (!header) return '';
-    const comTitle = header.querySelector('span[dir="auto"][title]');
+    const comTitle = _qsRemoto('nomeContatoComTitulo', ['span[dir="auto"][title]'], header);
     if (comTitle && comTitle.getAttribute('title')) return comTitle.getAttribute('title').trim();
-    const span = header.querySelector('span[dir="auto"]');
+    const span = _qsRemoto('nomeContatoSpan', ['span[dir="auto"]'], header);
     return span ? (span.textContent || '').trim() : '';
   }
 
@@ -2677,6 +2699,8 @@
     // do primeiro check nunca mais avisava depois (hora que "demora" pra
     // avisar era essa: aba antiga, sem re-checagem nenhuma agendada).
     setInterval(verificarVersaoExtensao, 20 * 60 * 1000);
+    carregarSeletoresRemotos();
+    setInterval(carregarSeletoresRemotos, 15 * 60 * 1000);
   });
 
   // ── Aviso de versão nova ──────────────────────────────────────────────────

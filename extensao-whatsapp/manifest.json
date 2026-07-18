@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JOB Serenus — Análise de WhatsApp",
-  "version": "2.35.0",
+  "version": "2.36.0",
   "description": "Painel dentro do WhatsApp Web para consultores da Serenus: analisa o lead, calcula o Score e envia mensagens da biblioteca.",
   "permissions": ["storage", "notifications"],
   "host_permissions": [

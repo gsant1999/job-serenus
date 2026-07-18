@@ -959,6 +959,11 @@ def init_db():
                 url TEXT,
                 criado_em TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS extensao_config (
+                chave TEXT PRIMARY KEY,
+                valor TEXT,
+                atualizado_em TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS whatsapp_funis (
                 id SERIAL PRIMARY KEY,
                 nome TEXT NOT NULL,
@@ -1522,6 +1527,11 @@ def init_db():
             stack TEXT,
             url TEXT,
             criado_em TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS extensao_config (
+            chave TEXT PRIMARY KEY,
+            valor TEXT,
+            atualizado_em TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS whatsapp_funis (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -11576,6 +11586,68 @@ def extensao_erros():
         LEFT JOIN usuarios u ON u.id=e.usuario_id ORDER BY e.criado_em DESC LIMIT 200""").fetchall()
     close_db(conn)
     return render_template('extensao_erros.html', erros=[dict(r) for r in rows])
+
+
+# Seletores DOM do WhatsApp Web usados pela extensão pra ler a tela (nome do
+# contato aberto etc). Ficam em BANCO, não hardcoded — quando o WhatsApp muda
+# o HTML dele (acontece direto) e algo para de funcionar, dá pra corrigir
+# editando aqui, na hora, sem esperar deploy nem aprovação de loja nenhuma.
+# Ideia vista investigando como o WaSpeed resolve o mesmo problema (config.json
+# remoto deles) — mesmo princípio, hospedado no nosso próprio servidor.
+_SELETORES_DOM_PADRAO = {
+    "headerContato": ["#main header"],
+    "nomeContatoComTitulo": ["span[dir=\"auto\"][title]"],
+    "nomeContatoSpan": ["span[dir=\"auto\"]"],
+}
+
+
+@app.route('/api/whatsapp/config-remota', methods=['GET', 'OPTIONS'])
+def api_whatsapp_config_remota():
+    """Seletores DOM atuais + versão — a extensão consulta a cada ~15min e usa
+    esses valores em vez dos fixos no código, quando existirem. Público (sem
+    chave) de propósito, igual /api/whatsapp/versao."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    conn = db()
+    row = conn.execute("SELECT valor FROM extensao_config WHERE chave='seletores_dom'").fetchone()
+    close_db(conn)
+    try:
+        seletores = json.loads(row['valor']) if row and row['valor'] else _SELETORES_DOM_PADRAO
+    except (TypeError, ValueError, json.JSONDecodeError):
+        seletores = _SELETORES_DOM_PADRAO
+    return _wa_cors(jsonify({"ok": True, "seletores": seletores}))
+
+
+@app.route('/extensao/config-remota', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def extensao_config_remota():
+    """Edição direta dos seletores DOM remotos — pra corrigir na hora quando o
+    WhatsApp muda o HTML e algo da extensão para de achar o elemento certo."""
+    conn = db()
+    if request.method == 'POST':
+        bruto = request.form.get('json', '').strip()
+        try:
+            json.loads(bruto)  # só valida — guarda o texto como veio
+        except (TypeError, ValueError, json.JSONDecodeError) as e:
+            flash(f'JSON inválido: {e}')
+            close_db(conn)
+            return redirect(url_for('extensao_config_remota'))
+        if DB_MODE == 'postgres':
+            conn.execute("""INSERT INTO extensao_config (chave, valor, atualizado_em) VALUES ('seletores_dom', %s, %s)
+                ON CONFLICT (chave) DO UPDATE SET valor=excluded.valor, atualizado_em=excluded.atualizado_em""",
+                (bruto, _agora_sp()))
+        else:
+            conn.execute("INSERT OR REPLACE INTO extensao_config (chave, valor, atualizado_em) VALUES ('seletores_dom', ?, ?)",
+                (bruto, _agora_sp()))
+        conn.commit(); close_db(conn)
+        flash('Seletores salvos.')
+        return redirect(url_for('extensao_config_remota'))
+    row = conn.execute("SELECT valor, atualizado_em FROM extensao_config WHERE chave='seletores_dom'").fetchone()
+    close_db(conn)
+    valor = row['valor'] if row and row['valor'] else json.dumps(_SELETORES_DOM_PADRAO, indent=2, ensure_ascii=False)
+    return render_template('extensao_config_remota.html', valor=valor,
+                            atualizado_em=row['atualizado_em'] if row else None)
 
 
 # Versão mínima da extensão pra PARTICIPAR do disparo com tudo (detectar resposta,
