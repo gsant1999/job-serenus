@@ -18,6 +18,21 @@
   if (window.__jobSerenusCarregado) return;
   window.__jobSerenusCarregado = true;
 
+  // ── Botão "Desligar extensão" no popup: liga extensaoAtiva=false e a
+  //    extensão simplesmente não injeta nada nessa aba (nenhum painel, ícone,
+  //    polling) — pedido do Guilherme, 18/07. Precisa de F5 pra reativar (ou
+  //    já nasce desligada se você abrir o WhatsApp com o toggle apagado). ──
+  chrome.storage.local.get(['extensaoAtiva']).then((c) => {
+    if (c && c.extensaoAtiva === false) {
+      window.__jobSerenusCarregado = false;
+      console.log('[JOB Serenus] extensão desligada nas configurações do popup — nada foi injetado nesta aba.');
+      return;
+    }
+    _bootJobSerenus();
+  }).catch(() => _bootJobSerenus()); // sem storage acessível: não trava o consultor, liga normal
+
+  function _bootJobSerenus() {
+
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // Base do site do JOB — pro link "Gerenciar funis no site". Padrão é produção;
@@ -28,6 +43,26 @@
       if (c && c.jobUrl) _SITE_BASE_URL_EXT = String(c.jobUrl).replace(/\/+$/, '');
     });
   } catch (e) { /* mantém o padrão de produção */ }
+
+  // ── Pastas (Funis/Mensagens) começam FECHADAS por padrão — só abrem se o
+  //    próprio consultor abrir, e aí lembra (mesmo depois de F5) — pedido do
+  //    Guilherme, 18/07: "mantenha as pastas sempre fechadas a não ser que o
+  //    usuário abra a dele". ──
+  let _pastasAbertas = new Set();
+  try {
+    chrome.storage.local.get(['pastasAbertas']).then((c) => {
+      _pastasAbertas = new Set(c && c.pastasAbertas || []);
+    });
+  } catch (e) { /* começa fechado se falhar */ }
+  function _pastaAberta(key) { return _pastasAbertas.has(key); }
+  document.addEventListener('toggle', (e) => {
+    const el = e.target;
+    if (!el || !el.classList || !(el.classList.contains('job-pasta') || el.classList.contains('job-subpasta'))) return;
+    const key = el.dataset.pastaKey;
+    if (!key) return;
+    if (el.open) _pastasAbertas.add(key); else _pastasAbertas.delete(key);
+    try { chrome.storage.local.set({ pastasAbertas: [..._pastasAbertas] }); } catch (e2) { /* best-effort */ }
+  }, true); // toggle não borbulha — precisa capture
 
   // ── Descobre o container rolável das mensagens (o WhatsApp muda as classes,
   //    então detectamos pelo comportamento: dentro do #main, o elemento que
@@ -1234,7 +1269,8 @@
     if (cats.length === 1) return _blocoPorTipo(porCat.get(cats[0]));
     let html = '';
     cats.forEach((cat) => {
-      html += '<details class="job-subpasta" open><summary class="job-subpasta-nome">' +
+      const key = 'modelos:sub:' + cat;
+      html += '<details class="job-subpasta" data-pasta-key="' + esc(key) + '"' + (_pastaAberta(key) ? ' open' : '') + '><summary class="job-subpasta-nome">' +
         esc(cat) + ' <span>(' + porCat.get(cat).length + ')</span></summary>' +
         '<div class="job-subpasta-conteudo">' + _blocoPorTipo(porCat.get(cat)) + '</div></details>';
     });
@@ -1259,7 +1295,8 @@
       });
       let out = '';
       porDono.forEach((itens, dono) => {
-        out += '<details class="job-pasta" open><summary class="job-pasta-nome">' +
+        const key = 'modelos:dono:' + dono;
+        out += '<details class="job-pasta" data-pasta-key="' + esc(key) + '"' + (_pastaAberta(key) ? ' open' : '') + '><summary class="job-pasta-nome">' +
           esc(dono) + ' <span>(' + itens.length + ')</span></summary>' +
           '<div class="job-pasta-conteudo">' + _blocoPorCategoria(itens) + '</div></details>';
       });
@@ -1711,7 +1748,8 @@
     });
     let out = '';
     grupos.forEach((itens, dono) => {
-      out += '<details class="job-pasta" open><summary class="job-pasta-nome">' +
+      const key = 'funis:dono:' + dono;
+      out += '<details class="job-pasta" data-pasta-key="' + esc(key) + '"' + (_pastaAberta(key) ? ' open' : '') + '><summary class="job-pasta-nome">' +
         esc(dono) + ' <span>(' + itens.length + ')</span></summary>' +
         '<div class="job-pasta-conteudo">' + itens.map(cardFunil).join('') + '</div></details>';
     });
@@ -2722,6 +2760,16 @@
         if (_secaoAtiva === 'mensagens') abrirSecaoMensagens();
         else if (_secaoAtiva === 'funis') abrirSecaoFunis();
       }
+      if (mud.tema) aplicarTema(mud.tema.newValue);
     });
   } catch (e) { /* sem storage, sem cache pra limpar */ }
+
+  // ── Tema claro/escuro (escolhido no popup) — aplica no load e ao vivo se
+  //    trocar sem precisar de F5. ──
+  function aplicarTema(tema) {
+    document.body.setAttribute('data-job-tema', tema === 'claro' ? 'claro' : 'escuro');
+  }
+  chrome.storage.local.get(['tema']).then((c) => aplicarTema(c && c.tema)).catch(() => {});
+
+  } // fim de _bootJobSerenus
 })();

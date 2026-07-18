@@ -13,10 +13,13 @@ function status(txt, cls) {
 }
 
 async function carregar() {
-  const { jobUrl, extKey, usuarioId, railSide } = await chrome.storage.local.get(['jobUrl', 'extKey', 'usuarioId', 'railSide']);
+  const { jobUrl, extKey, usuarioId, railSide, tema, extensaoAtiva } =
+    await chrome.storage.local.get(['jobUrl', 'extKey', 'usuarioId', 'railSide', 'tema', 'extensaoAtiva']);
   $('jobUrl').value = jobUrl || JOB_URL_PADRAO;
   $('extKey').value = extKey || '';
   $('railSide').value = railSide === 'esquerda' ? 'esquerda' : 'direita';
+  $('tema').value = tema === 'claro' ? 'claro' : 'escuro';
+  $('extensaoAtiva').checked = extensaoAtiva !== false; // default ligada
   if (extKey) await carregarUsuarios(usuarioId);
   else atualizarAvisoUsuario();
 }
@@ -42,7 +45,9 @@ async function salvar() {
   const extKey = ($('extKey').value || '').trim();
   const usuarioId = $('usuarioId').value || '';
   const railSide = $('railSide').value === 'esquerda' ? 'esquerda' : 'direita';
-  await chrome.storage.local.set({ jobUrl, extKey, usuarioId, railSide });
+  const tema = $('tema').value === 'claro' ? 'claro' : 'escuro';
+  const extensaoAtiva = $('extensaoAtiva').checked;
+  await chrome.storage.local.set({ jobUrl, extKey, usuarioId, railSide, tema, extensaoAtiva });
   atualizarAvisoUsuario();
   status('Salvo.', 'ok');
 }
@@ -66,4 +71,6 @@ $('testar').addEventListener('click', testar);
 // esquecer, e aí o lead criado automaticamente ficava sem responsável.
 $('usuarioId').addEventListener('change', salvar);
 $('railSide').addEventListener('change', salvar);
+$('tema').addEventListener('change', salvar);
+$('extensaoAtiva').addEventListener('change', salvar);
 carregar();

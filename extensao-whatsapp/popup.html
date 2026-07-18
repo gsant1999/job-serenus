@@ -44,6 +44,18 @@
     <option value="esquerda">Esquerda</option>
   </select>
 
+  <label for="tema">Aparência do painel</label>
+  <select id="tema">
+    <option value="escuro">Escuro (padrão)</option>
+    <option value="claro">Claro</option>
+  </select>
+
+  <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-weight:600; color:#e7e9f0; cursor:pointer;">
+    <input type="checkbox" id="extensaoAtiva" checked style="width:auto;">
+    Extensão ligada neste computador
+  </label>
+  <div class="nota" style="margin-top:6px; border-top:none; padding-top:0;">Desmarque pra desligar tudo (painel, ícone, análise) no WhatsApp Web — precisa recarregar a aba do WhatsApp depois de mudar.</div>
+
   <button id="salvar">Salvar</button>
   <button id="testar" class="sec">Testar conexão</button>
   <div id="status" class="info"></div>
