@@ -935,6 +935,19 @@ def init_db():
                 nome TEXT,
                 atualizado_em TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS funil_execucao (
+                usuario_id INTEGER PRIMARY KEY,
+                funil_id INTEGER,
+                funil_nome TEXT,
+                contato_nome TEXT,
+                telefone TEXT,
+                passo_atual INTEGER DEFAULT 0,
+                total_passos INTEGER DEFAULT 0,
+                segundos_restantes INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'rodando',
+                iniciado_em TIMESTAMP,
+                atualizado_em TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS whatsapp_funis (
                 id SERIAL PRIMARY KEY,
                 nome TEXT NOT NULL,
@@ -1473,6 +1486,19 @@ def init_db():
             telefone TEXT,
             telefone_norm TEXT,
             nome TEXT,
+            atualizado_em TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS funil_execucao (
+            usuario_id INTEGER PRIMARY KEY,
+            funil_id INTEGER,
+            funil_nome TEXT,
+            contato_nome TEXT,
+            telefone TEXT,
+            passo_atual INTEGER DEFAULT 0,
+            total_passos INTEGER DEFAULT 0,
+            segundos_restantes INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'rodando',
+            iniciado_em TIMESTAMP,
             atualizado_em TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS whatsapp_funis (
@@ -12322,8 +12348,89 @@ def api_whatsapp_extensao_funil_disparado(fid):
             conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                          (lead['id'], 'Extensão WhatsApp', 'mensagem',
                           f"Funil \"{f['nome']}\" disparado ({enviados} passo(s)).", _agora_sp()))
+    # Fecha a execução ao vivo (se existir) — some do painel de acompanhamento.
+    usuario_id = d.get('usuario_id')
+    if usuario_id:
+        try:
+            conn.execute("DELETE FROM funil_execucao WHERE usuario_id=?", (int(usuario_id),))
+        except (TypeError, ValueError):
+            pass
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
+
+
+@app.route('/api/whatsapp/funil/progresso', methods=['POST', 'OPTIONS'])
+def api_whatsapp_funil_progresso():
+    """A extensão reporta CADA passo do funil manual (disparado direto de uma
+    conversa) enquanto roda — alimenta o painel 'Acompanhamento de funis' no
+    site: quem está disparando, pra quem, em qual passo, quanto falta. Upsert por
+    usuario_id (um funil manual por vez por consultor — é uma aba do WhatsApp)."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False}))
+    d = request.json or {}
+    try:
+        uid = int(d.get('usuario_id'))
+    except (TypeError, ValueError):
+        return _wa_cors(jsonify({"ok": False}))
+    status = (d.get('status') or 'rodando').strip()
+    agora = _agora_sp()
+    conn = db()
+    if status in ('concluido', 'cancelado', 'erro'):
+        conn.execute("DELETE FROM funil_execucao WHERE usuario_id=?", (uid,))
+        conn.commit(); close_db(conn)
+        return _wa_cors(jsonify({"ok": True}))
+    try:
+        passo_atual = int(d.get('passo_atual') or 0)
+    except (TypeError, ValueError):
+        passo_atual = 0
+    try:
+        total_passos = int(d.get('total_passos') or 0)
+    except (TypeError, ValueError):
+        total_passos = 0
+    try:
+        seg = int(d.get('segundos_restantes') or 0)
+    except (TypeError, ValueError):
+        seg = 0
+    ja_existe = conn.execute("SELECT usuario_id FROM funil_execucao WHERE usuario_id=?", (uid,)).fetchone()
+    if DB_MODE == 'postgres':
+        conn.execute("""INSERT INTO funil_execucao
+            (usuario_id, funil_id, funil_nome, contato_nome, telefone, passo_atual, total_passos, segundos_restantes, status, iniciado_em, atualizado_em)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'rodando',%s,%s)
+            ON CONFLICT (usuario_id) DO UPDATE SET
+            funil_id=excluded.funil_id, funil_nome=excluded.funil_nome, contato_nome=excluded.contato_nome,
+            telefone=excluded.telefone, passo_atual=excluded.passo_atual, total_passos=excluded.total_passos,
+            segundos_restantes=excluded.segundos_restantes, status='rodando', atualizado_em=excluded.atualizado_em""",
+            (uid, d.get('funil_id'), d.get('funil_nome') or '', d.get('nome') or '', d.get('telefone') or '',
+             passo_atual, total_passos, seg, agora if not ja_existe else agora, agora))
+    else:
+        iniciado = agora if not ja_existe else conn.execute(
+            "SELECT iniciado_em FROM funil_execucao WHERE usuario_id=?", (uid,)).fetchone()['iniciado_em']
+        conn.execute("""INSERT OR REPLACE INTO funil_execucao
+            (usuario_id, funil_id, funil_nome, contato_nome, telefone, passo_atual, total_passos, segundos_restantes, status, iniciado_em, atualizado_em)
+            VALUES (?,?,?,?,?,?,?,?,'rodando',?,?)""",
+            (uid, d.get('funil_id'), d.get('funil_nome') or '', d.get('nome') or '', d.get('telefone') or '',
+             passo_atual, total_passos, seg, iniciado, agora))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
+
+
+@app.route('/funis/acompanhamento')
+@login_required
+@admin_required
+def funis_acompanhamento():
+    """Painel: quais disparos de funil manual estão rodando agora — quem, pra
+    quem, em qual passo, quanto falta. Some sozinho quando o consultor termina/
+    fecha (a extensão limpa a linha) ou depois de 15min sem report (travado)."""
+    conn = db()
+    cutoff = (datetime.now(TZ_SP) - timedelta(minutes=15)).strftime('%Y-%m-%d %H:%M:%S')
+    conn.execute("DELETE FROM funil_execucao WHERE atualizado_em < ?", (cutoff,))
+    conn.commit()
+    rows = conn.execute("""SELECT fe.*, u.nome usuario_nome FROM funil_execucao fe
+        LEFT JOIN usuarios u ON u.id=fe.usuario_id ORDER BY fe.atualizado_em DESC""").fetchall()
+    close_db(conn)
+    return render_template('funis_acompanhamento.html', execucoes=[dict(r) for r in rows])
 
 
 @app.route('/api/whatsapp/usuarios', methods=['GET', 'OPTIONS'])

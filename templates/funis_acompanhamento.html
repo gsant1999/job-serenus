@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block title %}Acompanhamento de Funis{% endblock %}
+
+{% block head %}
+<meta http-equiv="refresh" content="10">
+<style>
+.fa-wrap { max-width:980px; }
+.fa-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; flex-wrap:wrap; }
+.fa-hero h1 { font-size:24px; }
+.fa-sub { color:var(--cinza); font-size:12.5px; margin-top:3px; }
+.fa-card { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:16px 18px; margin-bottom:12px; }
+.fa-top { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.fa-quem { font-size:14px; font-weight:700; }
+.fa-quem .pra { color:var(--cinza); font-weight:400; }
+.fa-tempo { font-family:'Sora',sans-serif; font-size:20px; font-weight:700; color:var(--info); }
+.fa-tempo .l { font-size:9.5px; color:var(--cinza); text-transform:uppercase; letter-spacing:.4px; display:block; font-weight:600; font-family:inherit; }
+.fa-bar { height:8px; border-radius:5px; background:var(--borda); overflow:hidden; margin-top:12px; }
+.fa-bar > i { display:block; height:100%; background:var(--teal); }
+.fa-meta { display:flex; gap:16px; font-size:11.5px; color:var(--cinza); margin-top:8px; flex-wrap:wrap; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page fa-wrap">
+  <div class="fa-hero">
+    <div>
+      <h1>Acompanhamento de Funis</h1>
+      <div class="fa-sub">Disparos manuais de funil (direto de uma conversa) rodando agora · atualiza sozinho a cada 10s</div>
+    </div>
+    <a href="/crm/funis" class="btn-outline" style="text-decoration:none;">Voltar aos Funis</a>
+  </div>
+
+  {% if execucoes %}
+    {% for e in execucoes %}
+    {% set pct = ((e.passo_atual / e.total_passos * 100) if e.total_passos else 0) %}
+    <div class="fa-card">
+      <div class="fa-top">
+        <div class="fa-quem">{{ e.usuario_nome or 'Consultor' }} <span class="pra">→ {{ e.contato_nome or e.telefone or 'contato' }}</span></div>
+        <div class="fa-tempo"><span class="l">Tempo restante</span>{{ e.segundos_restantes or 0 }}s</div>
+      </div>
+      <div class="fa-bar"><i style="width:{{ pct }}%;"></i></div>
+      <div class="fa-meta">
+        <span>Funil: <b style="color:var(--texto);">{{ e.funil_nome or '—' }}</b></span>
+        <span>Passo <b style="color:var(--texto);">{{ e.passo_atual }}</b> de <b style="color:var(--texto);">{{ e.total_passos }}</b></span>
+        <span>{{ e.telefone or '' }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="card" style="padding:30px;text-align:center;color:var(--cinza);">Nenhum funil manual rodando agora.</div>
+  {% endif %}
+</div>
+{% endblock %}

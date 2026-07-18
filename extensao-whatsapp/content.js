@@ -698,7 +698,17 @@
   // WhatsApp Web (que fecharia a conversa). Painel fechado: ESC segue normal.
   // Capture (true) pra pegar antes do handler do WhatsApp.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && _secaoAtiva) {
+    if (e.key !== 'Escape') return;
+    // Prioridade: primeiro fecha o card de progresso do funil (se tiver um na
+    // tela) — não cancela o envio, só some da vista pra liberar outro lead.
+    const fp = document.getElementById('job-funil-prog');
+    if (fp) {
+      fp.remove();
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
+    if (_secaoAtiva) {
       fecharSecao();
       e.stopPropagation();
       e.preventDefault();
@@ -1764,12 +1774,26 @@
     _funilRodando = true; _funilCancelar = false;
     const prog = abrirProgressoFunil(funil, nome);
     let enviados = 0;
+    // Reporta o progresso pro painel 'Acompanhamento de funis' no site — pra
+    // que o Guilherme veja quem está disparando, pra quem, em qual passo e
+    // quanto falta, mesmo com o card fechado (ESC) neste navegador.
+    function reportarProgresso(passoIdx, segundosRestantes) {
+      try {
+        chrome.runtime.sendMessage({
+          type: 'funil_progresso', usuario_id: usuarioId, funil_id: funil.id, funil_nome: funil.nome,
+          nome, telefone, passo_atual: passoIdx + 1, total_passos: funil.passos.length,
+          segundos_restantes: segundosRestantes || 0, status: 'rodando',
+        });
+      } catch (e) { /* best-effort, nunca trava o disparo */ }
+    }
+    reportarProgresso(0, 0);
     for (let i = 0; i < funil.passos.length; i++) {
       if (_funilCancelar) break;
       const passo = funil.passos[i];
-      await esperarComContagem(prog, i, Math.max(0, passo.delay_segundos || 0));
+      await esperarComContagem(prog, i, Math.max(0, passo.delay_segundos || 0), (resta) => reportarProgresso(i, resta));
       if (_funilCancelar) break;
       marcarPasso(prog, i, 'enviando');
+      reportarProgresso(i, 0);
       let envio;
       try {
         if (passo.tipo && passo.tipo !== 'texto' && passo.midia_url) {
@@ -1785,7 +1809,9 @@
     }
     _funilRodando = false;
     finalizarProgresso(prog, enviados, funil.passos.length, _funilCancelar);
-    try { await chrome.runtime.sendMessage({ type: 'funil_disparado', funil_id: funil.id, telefone, enviados }); } catch (e) { /* registro é best-effort */ }
+    // Fecha a execução ao vivo no servidor (some do painel de acompanhamento) —
+    // manda usuario_id sempre, mesmo se cancelado no meio.
+    try { await chrome.runtime.sendMessage({ type: 'funil_disparado', funil_id: funil.id, telefone, enviados, usuario_id: usuarioId }); } catch (e) { /* registro é best-effort */ }
   }
 
   function abrirProgressoFunil(funil, nomeContato) {
@@ -1802,7 +1828,10 @@
     ov.id = 'job-funil-prog';
     ov.innerHTML =
       '<div class="job-fp-card">' +
-        '<div class="job-fp-head"><b>' + esc(funil.nome) + '</b><span>para ' + esc(nomeContato) + '</span></div>' +
+        '<div class="job-fp-head" style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">' +
+          '<div><b>' + esc(funil.nome) + '</b><span>para ' + esc(nomeContato) + '</span></div>' +
+          '<button id="job-fp-x" title="Fechar (ESC) — o funil continua enviando" style="background:none;border:none;color:#6b7280;font-size:18px;line-height:1;cursor:pointer;padding:0;flex-shrink:0;">×</button>' +
+        '</div>' +
         '<div class="job-fp-linhas">' + linhas + '</div>' +
         '<div class="job-fp-rodape">' +
           '<span class="job-fp-status" id="job-fp-status">Iniciando…</span>' +
@@ -1815,21 +1844,28 @@
       const s = document.getElementById('job-fp-status');
       if (s) s.textContent = 'Cancelando…';
     });
+    // Fechar só esconde o card — o funil SEGUE enviando em segundo plano (os
+    // updates de UI já checam se os elementos existem antes de mexer, então
+    // remover o card não quebra o loop). É pra liberar o consultor pra atender
+    // outro lead sem cancelar o que já estava rodando.
+    document.getElementById('job-fp-x').addEventListener('click', () => { ov.remove(); });
     return ov;
   }
 
-  async function esperarComContagem(prog, i, segundos) {
+  async function esperarComContagem(prog, i, segundos, onTick) {
     const linha = prog && prog.querySelector('.job-fp-linha[data-i="' + i + '"]');
     const estado = linha && linha.querySelector('.job-fp-estado');
     const status = document.getElementById('job-fp-status');
     if (linha) linha.classList.add('atual');
     let resta = segundos;
+    if (onTick) onTick(resta); // primeiro report imediato (não espera 3s)
     while (resta > 0) {
       if (_funilCancelar) return;
       if (estado) estado.textContent = 'em ' + resta + 's';
       if (status) status.textContent = 'Passo ' + (i + 1) + ': aguardando ' + resta + 's';
       await new Promise((r) => setTimeout(r, 1000));
       resta--;
+      if (onTick && resta % 3 === 0) onTick(resta); // throttla o report pro servidor
     }
     if (estado) estado.textContent = '';
   }

@@ -394,11 +394,13 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
 .job-fchip svg, .job-mini-btn svg, .job-midia-chip svg, .job-preview-midia-rot svg,
 .job-audio-quem svg, .job-img-lida svg { vertical-align: -2px; }
 
-/* ── Overlay de progresso do disparo ── */
-#job-funil-prog { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 2147483000;
-  display: flex; align-items: center; justify-content: center; }
-.job-fp-card { background: #15151e; border: 1px solid #26262f; border-radius: 14px; width: 340px;
-  max-width: 92vw; max-height: 80vh; overflow-y: auto; padding: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+/* ── Card de progresso do disparo (NÃO bloqueia mais a tela): fica num canto,
+   sem fundo escuro por cima — dá pra clicar em outro lead/conversa enquanto o
+   funil roda. ESC ou o × fecham só o CARD; o funil continua enviando em segundo
+   plano (fechar não cancela — só some da vista). ── */
+#job-funil-prog { position: fixed; right: 18px; bottom: 18px; z-index: 2147483000; }
+.job-fp-card { background: #15151e; border: 1px solid #26262f; border-radius: 14px; width: 320px;
+  max-width: 92vw; max-height: 70vh; overflow-y: auto; padding: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
 .job-fp-head { margin-bottom: 12px; }
 .job-fp-head b { display: block; font-size: 14px; color: #eef0f6; }
 .job-fp-head span { font-size: 11px; color: #9aa1b5; }
