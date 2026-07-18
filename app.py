@@ -936,7 +936,9 @@ def init_db():
                 atualizado_em TIMESTAMP
             )""",
             """CREATE TABLE IF NOT EXISTS funil_execucao (
-                usuario_id INTEGER PRIMARY KEY,
+                id SERIAL PRIMARY KEY,
+                job_uid TEXT,
+                usuario_id INTEGER,
                 funil_id INTEGER,
                 funil_nome TEXT,
                 contato_nome TEXT,
@@ -1489,7 +1491,9 @@ def init_db():
             atualizado_em TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS funil_execucao (
-            usuario_id INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_uid TEXT,
+            usuario_id INTEGER,
             funil_id INTEGER,
             funil_nome TEXT,
             contato_nome TEXT,
@@ -2135,6 +2139,58 @@ def init_db():
             try: conn.rollback()
             except Exception: pass
             print(f"[TZFIX] pulado: {e}")
+
+    # ─── funil_execucao: era PK só em usuario_id (1 execução por consultor).
+    # Passa a permitir VÁRIAS execuções simultâneas por consultor (funil pra
+    # leads diferentes ao mesmo tempo) — troca a PK pra id autoincremento e
+    # cada execução ganha um job_uid próprio (gerado na extensão). ───
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        conn.commit()
+        ja_fe = conn.execute("SELECT 1 FROM meta_flags WHERE k='funilexec_pk_20260718'").fetchone()
+        if not ja_fe:
+            if is_pg:
+                conn.execute("""CREATE TABLE funil_execucao_new (
+                    id SERIAL PRIMARY KEY, job_uid TEXT, usuario_id INTEGER,
+                    funil_id INTEGER, funil_nome TEXT, contato_nome TEXT, telefone TEXT,
+                    passo_atual INTEGER DEFAULT 0, total_passos INTEGER DEFAULT 0,
+                    segundos_restantes INTEGER DEFAULT 0, status TEXT DEFAULT 'rodando',
+                    iniciado_em TIMESTAMP, atualizado_em TIMESTAMP)""")
+                conn.execute("""INSERT INTO funil_execucao_new
+                    (job_uid, usuario_id, funil_id, funil_nome, contato_nome, telefone,
+                     passo_atual, total_passos, segundos_restantes, status, iniciado_em, atualizado_em)
+                    SELECT usuario_id::text, usuario_id, funil_id, funil_nome, contato_nome, telefone,
+                     passo_atual, total_passos, segundos_restantes, status, iniciado_em, atualizado_em
+                    FROM funil_execucao""")
+                conn.execute("DROP TABLE funil_execucao")
+                conn.execute("ALTER TABLE funil_execucao_new RENAME TO funil_execucao")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_funil_execucao_usuario ON funil_execucao(usuario_id)")
+                conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_funil_execucao_jobuid ON funil_execucao(job_uid)")
+            else:
+                conn.execute("""CREATE TABLE funil_execucao_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, job_uid TEXT, usuario_id INTEGER,
+                    funil_id INTEGER, funil_nome TEXT, contato_nome TEXT, telefone TEXT,
+                    passo_atual INTEGER DEFAULT 0, total_passos INTEGER DEFAULT 0,
+                    segundos_restantes INTEGER DEFAULT 0, status TEXT DEFAULT 'rodando',
+                    iniciado_em TIMESTAMP, atualizado_em TIMESTAMP)""")
+                conn.execute("""INSERT INTO funil_execucao_new
+                    (job_uid, usuario_id, funil_id, funil_nome, contato_nome, telefone,
+                     passo_atual, total_passos, segundos_restantes, status, iniciado_em, atualizado_em)
+                    SELECT CAST(usuario_id AS TEXT), usuario_id, funil_id, funil_nome, contato_nome, telefone,
+                     passo_atual, total_passos, segundos_restantes, status, iniciado_em, atualizado_em
+                    FROM funil_execucao""")
+                conn.execute("DROP TABLE funil_execucao")
+                conn.execute("ALTER TABLE funil_execucao_new RENAME TO funil_execucao")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_funil_execucao_usuario ON funil_execucao(usuario_id)")
+                conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_funil_execucao_jobuid ON funil_execucao(job_uid)")
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('funilexec_pk_20260718')")
+            conn.commit()
+            print("[FUNILEXEC] Migrado pra suportar várias execuções por consultor")
+    except Exception as e:
+        if is_pg:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[FUNILEXEC] migração pulada: {e}")
 
     close_db(conn)
 
@@ -12434,22 +12490,22 @@ def api_whatsapp_extensao_funil_disparado(fid):
                          (lead['id'], 'Extensão WhatsApp', 'mensagem',
                           f"Funil \"{f['nome']}\" disparado ({enviados} passo(s)).", _agora_sp()))
     # Fecha a execução ao vivo (se existir) — some do painel de acompanhamento.
-    usuario_id = d.get('usuario_id')
-    if usuario_id:
-        try:
-            conn.execute("DELETE FROM funil_execucao WHERE usuario_id=?", (int(usuario_id),))
-        except (TypeError, ValueError):
-            pass
+    # job_uid identifica ESSA execução específica (um consultor pode ter várias
+    # rodando ao mesmo tempo, pra leads diferentes).
+    job_uid = d.get('job_uid')
+    if job_uid:
+        conn.execute("DELETE FROM funil_execucao WHERE job_uid=?", (str(job_uid),))
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
 
 
 @app.route('/api/whatsapp/funil/progresso', methods=['POST', 'OPTIONS'])
 def api_whatsapp_funil_progresso():
-    """A extensão reporta CADA passo do funil manual (disparado direto de uma
-    conversa) enquanto roda — alimenta o painel 'Acompanhamento de funis' no
-    site: quem está disparando, pra quem, em qual passo, quanto falta. Upsert por
-    usuario_id (um funil manual por vez por consultor — é uma aba do WhatsApp)."""
+    """A extensão reporta CADA passo de cada funil manual rodando (disparado
+    direto de uma conversa) — alimenta o painel 'Acompanhamento de funis' no
+    site: quem está disparando, pra quem, em qual passo, quanto falta. Upsert
+    por job_uid (um consultor pode ter VÁRIAS execuções simultâneas, uma por
+    lead/conversa — cada disparo na extensão gera seu próprio job_uid)."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
@@ -12459,11 +12515,12 @@ def api_whatsapp_funil_progresso():
         uid = int(d.get('usuario_id'))
     except (TypeError, ValueError):
         return _wa_cors(jsonify({"ok": False}))
+    job_uid = str(d.get('job_uid') or uid)  # fallback pra extensões antigas sem job_uid
     status = (d.get('status') or 'rodando').strip()
     agora = _agora_sp()
     conn = db()
     if status in ('concluido', 'cancelado', 'erro'):
-        conn.execute("DELETE FROM funil_execucao WHERE usuario_id=?", (uid,))
+        conn.execute("DELETE FROM funil_execucao WHERE job_uid=?", (job_uid,))
         conn.commit(); close_db(conn)
         return _wa_cors(jsonify({"ok": True}))
     try:
@@ -12478,25 +12535,33 @@ def api_whatsapp_funil_progresso():
         seg = int(d.get('segundos_restantes') or 0)
     except (TypeError, ValueError):
         seg = 0
-    ja_existe = conn.execute("SELECT usuario_id FROM funil_execucao WHERE usuario_id=?", (uid,)).fetchone()
+    ja_existe = conn.execute("SELECT job_uid FROM funil_execucao WHERE job_uid=?", (job_uid,)).fetchone()
     if DB_MODE == 'postgres':
         conn.execute("""INSERT INTO funil_execucao
-            (usuario_id, funil_id, funil_nome, contato_nome, telefone, passo_atual, total_passos, segundos_restantes, status, iniciado_em, atualizado_em)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'rodando',%s,%s)
-            ON CONFLICT (usuario_id) DO UPDATE SET
+            (job_uid, usuario_id, funil_id, funil_nome, contato_nome, telefone, passo_atual, total_passos, segundos_restantes, status, iniciado_em, atualizado_em)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'rodando',%s,%s)
+            ON CONFLICT (job_uid) DO UPDATE SET
             funil_id=excluded.funil_id, funil_nome=excluded.funil_nome, contato_nome=excluded.contato_nome,
             telefone=excluded.telefone, passo_atual=excluded.passo_atual, total_passos=excluded.total_passos,
             segundos_restantes=excluded.segundos_restantes, status='rodando', atualizado_em=excluded.atualizado_em""",
-            (uid, d.get('funil_id'), d.get('funil_nome') or '', d.get('nome') or '', d.get('telefone') or '',
-             passo_atual, total_passos, seg, agora if not ja_existe else agora, agora))
+            (job_uid, uid, d.get('funil_id'), d.get('funil_nome') or '', d.get('nome') or '', d.get('telefone') or '',
+             passo_atual, total_passos, seg, agora, agora))
     else:
         iniciado = agora if not ja_existe else conn.execute(
-            "SELECT iniciado_em FROM funil_execucao WHERE usuario_id=?", (uid,)).fetchone()['iniciado_em']
-        conn.execute("""INSERT OR REPLACE INTO funil_execucao
-            (usuario_id, funil_id, funil_nome, contato_nome, telefone, passo_atual, total_passos, segundos_restantes, status, iniciado_em, atualizado_em)
-            VALUES (?,?,?,?,?,?,?,?,'rodando',?,?)""",
-            (uid, d.get('funil_id'), d.get('funil_nome') or '', d.get('nome') or '', d.get('telefone') or '',
-             passo_atual, total_passos, seg, iniciado, agora))
+            "SELECT iniciado_em FROM funil_execucao WHERE job_uid=?", (job_uid,)).fetchone()['iniciado_em']
+        if ja_existe:
+            conn.execute("""UPDATE funil_execucao SET
+                usuario_id=?, funil_id=?, funil_nome=?, contato_nome=?, telefone=?,
+                passo_atual=?, total_passos=?, segundos_restantes=?, status='rodando', atualizado_em=?
+                WHERE job_uid=?""",
+                (uid, d.get('funil_id'), d.get('funil_nome') or '', d.get('nome') or '', d.get('telefone') or '',
+                 passo_atual, total_passos, seg, agora, job_uid))
+        else:
+            conn.execute("""INSERT INTO funil_execucao
+                (job_uid, usuario_id, funil_id, funil_nome, contato_nome, telefone, passo_atual, total_passos, segundos_restantes, status, iniciado_em, atualizado_em)
+                VALUES (?,?,?,?,?,?,?,?,?,'rodando',?,?)""",
+                (job_uid, uid, d.get('funil_id'), d.get('funil_nome') or '', d.get('nome') or '', d.get('telefone') or '',
+                 passo_atual, total_passos, seg, iniciado, agora))
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
 

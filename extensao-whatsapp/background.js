@@ -170,12 +170,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // envio de cada passo já aconteceu client-side pela ponte wa-js. Manda
     // usuario_id pra o servidor fechar a execução ao vivo do painel.
     chamarJob('/api/whatsapp/extensao/funis/' + encodeURIComponent(msg.funil_id) + '/disparado', 'POST',
-      { telefone: msg.telefone || '', enviados: msg.enviados || 0, usuario_id: msg.usuario_id }, 15000).then(sendResponse);
+      { telefone: msg.telefone || '', enviados: msg.enviados || 0, usuario_id: msg.usuario_id, job_uid: msg.job_uid }, 15000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'funil_progresso') {
     chamarJob('/api/whatsapp/funil/progresso', 'POST', {
-      usuario_id: msg.usuario_id, funil_id: msg.funil_id, funil_nome: msg.funil_nome,
+      usuario_id: msg.usuario_id, job_uid: msg.job_uid, funil_id: msg.funil_id, funil_nome: msg.funil_nome,
       nome: msg.nome, telefone: msg.telefone, passo_atual: msg.passo_atual,
       total_passos: msg.total_passos, segundos_restantes: msg.segundos_restantes, status: msg.status,
     }, 10000).then(sendResponse).catch(() => sendResponse({ ok: false }));

@@ -699,11 +699,11 @@
   // Capture (true) pra pegar antes do handler do WhatsApp.
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    // Prioridade: primeiro fecha o card de progresso do funil (se tiver um na
-    // tela) — não cancela o envio, só some da vista pra liberar outro lead.
-    const fp = document.getElementById('job-funil-prog');
-    if (fp) {
-      fp.remove();
+    // Prioridade: primeiro fecha o painel da bolha de funis (se estiver
+    // aberto) — não cancela nenhum envio, só recolhe a bolha pro pontinho.
+    if (_bubbleAberta) {
+      _bubbleAberta = false;
+      renderBubble();
       e.stopPropagation();
       e.preventDefault();
       return;
@@ -1593,7 +1593,14 @@
   // reusa a MESMA ponte wa-js do envio avulso (texto e mídia do item A).
   const FUNIS_CACHE_MS = 5 * 60 * 1000;
   let _funisCache = null; // {ts, funis}
-  let _funilRodando = false, _funilCancelar = false;
+  // Fila de execuções: cada disparo vira um "job" independente. Jobs em
+  // conversas DIFERENTES rodam em paralelo (não se atrapalham). Dois jobs pro
+  // MESMO contato (chatId) enfileiram — o segundo só começa quando o primeiro
+  // terminar, pra nunca intercalar mensagem de um funil com a de outro na
+  // mesma conversa. Acompanhados numa bolha discreta e arrastável (não trava
+  // mais a tela — pedido do Guilherme, 18/07).
+  let _filaFunis = []; // [{id, funil, nomeContato, chatId, telefone, usuarioId, status, passoAtual, segundosRestantes, enviados, cancelar}]
+  const _chatsOcupados = new Set();
 
   async function buscarFunis(forcar) {
     // ATENÇÃO: o cache tem que devolver o MESMO formato {ok, funis} do caminho
@@ -1772,10 +1779,15 @@
     ligarAcoesListaFunis();
   }
 
-  // ── Toca a sequência: espera o intervalo do passo, manda, próximo. Mostra
-  //    progresso passo-a-passo e deixa cancelar no meio. ──
+  function _uid() {
+    return 'j' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  // ── Dispara um funil: cria um "job" e entra na fila. Jobs em conversas
+  //    DIFERENTES rodam em paralelo (não se atrapalham). Dois jobs pro MESMO
+  //    contato enfileiram — o segundo só começa quando o primeiro terminar,
+  //    pra nunca intercalar mensagens de dois funis na mesma conversa. ──
   async function dispararFunil(funilId) {
-    if (_funilRodando) { alert('Já tem um funil rodando — espere terminar ou cancele.'); return; }
     const res = await buscarFunis(false);
     // Três casos DIFERENTES, três mensagens — misturar tudo em "não tem passos"
     // já mascarou um bug real de cache.
@@ -1792,137 +1804,175 @@
     if (!confirm('Disparar o funil "' + funil.nome + '" (' + funil.passos.length + ' passo(s)) para ' + nome + '?')) return;
     let telefone = await garantirTelefone(nome, chatId);
 
-    _funilRodando = true; _funilCancelar = false;
-    const prog = abrirProgressoFunil(funil, nome);
-    let enviados = 0;
-    // Reporta o progresso pro painel 'Acompanhamento de funis' no site — pra
-    // que o Guilherme veja quem está disparando, pra quem, em qual passo e
-    // quanto falta, mesmo com o card fechado (ESC) neste navegador.
+    const job = {
+      id: _uid(), funil, chatId, nomeContato: nome, telefone, usuarioId,
+      status: 'aguardando', passoAtual: 0, segundosRestantes: 0, enviados: 0, cancelar: false,
+    };
+    _filaFunis.push(job);
+    const podeComecar = !_chatsOcupados.has(chatId);
+    if (podeComecar) { _chatsOcupados.add(chatId); job.status = 'rodando'; }
+    renderBubble();
+    if (podeComecar) executarJob(job);
+  }
+
+  async function executarJob(job) {
+    const { funil } = job;
     function reportarProgresso(passoIdx, segundosRestantes) {
+      job.passoAtual = passoIdx; job.segundosRestantes = segundosRestantes || 0;
+      renderBubble();
       try {
         chrome.runtime.sendMessage({
-          type: 'funil_progresso', usuario_id: usuarioId, funil_id: funil.id, funil_nome: funil.nome,
-          nome, telefone, passo_atual: passoIdx + 1, total_passos: funil.passos.length,
+          type: 'funil_progresso', usuario_id: job.usuarioId, job_uid: job.id,
+          funil_id: funil.id, funil_nome: funil.nome, nome: job.nomeContato, telefone: job.telefone,
+          passo_atual: passoIdx + 1, total_passos: funil.passos.length,
           segundos_restantes: segundosRestantes || 0, status: 'rodando',
         });
       } catch (e) { /* best-effort, nunca trava o disparo */ }
     }
     reportarProgresso(0, 0);
     for (let i = 0; i < funil.passos.length; i++) {
-      if (_funilCancelar) break;
+      if (job.cancelar) break;
       const passo = funil.passos[i];
-      await esperarComContagem(prog, i, Math.max(0, passo.delay_segundos || 0), (resta) => reportarProgresso(i, resta));
-      if (_funilCancelar) break;
-      marcarPasso(prog, i, 'enviando');
-      reportarProgresso(i, 0);
+      const segundos = Math.max(0, passo.delay_segundos || 0);
+      let resta = segundos;
+      reportarProgresso(i, resta);
+      while (resta > 0) {
+        if (job.cancelar) break;
+        await new Promise((r) => setTimeout(r, 1000));
+        resta--;
+        if (resta % 3 === 0) reportarProgresso(i, resta);
+        else { job.segundosRestantes = resta; renderBubble(); }
+      }
+      if (job.cancelar) break;
+      job.enviando = i; renderBubble();
       let envio;
       try {
         if (passo.tipo && passo.tipo !== 'texto' && passo.midia_url) {
           const dl = await chrome.runtime.sendMessage({ type: 'baixar_midia', url: passo.midia_url });
-          if (dl && dl.ok) envio = await pedirEnviarMidia(chatId, passo.tipo, dl.dataUrl, passo.texto);
+          if (dl && dl.ok) envio = await pedirEnviarMidia(job.chatId, passo.tipo, dl.dataUrl, passo.texto);
           else envio = { ok: false, erro: (dl && dl.erro) || 'falha ao baixar a mídia' };
         } else {
-          envio = await pedirEnviarTexto(chatId, passo.texto);
+          envio = await pedirEnviarTexto(job.chatId, passo.texto);
         }
       } catch (e) { envio = { ok: false, erro: String(e && e.message || e) }; }
-      if (envio && envio.ok) { enviados++; marcarPasso(prog, i, 'ok'); }
-      else { marcarPasso(prog, i, 'erro', (envio && envio.erro) || ''); }
+      job.enviando = -1;
+      if (envio && envio.ok) { job.enviados++; job.passoAtual = i + 1; }
+      renderBubble();
     }
-    _funilRodando = false;
-    finalizarProgresso(prog, enviados, funil.passos.length, _funilCancelar);
-    // Fecha a execução ao vivo no servidor (some do painel de acompanhamento) —
-    // manda usuario_id sempre, mesmo se cancelado no meio.
-    try { await chrome.runtime.sendMessage({ type: 'funil_disparado', funil_id: funil.id, telefone, enviados, usuario_id: usuarioId }); } catch (e) { /* registro é best-effort */ }
+    job.status = job.cancelar ? 'cancelado' : 'concluido';
+    renderBubble();
+    try { await chrome.runtime.sendMessage({ type: 'funil_disparado', funil_id: funil.id, telefone: job.telefone, enviados: job.enviados, usuario_id: job.usuarioId, job_uid: job.id }); } catch (e) { /* registro é best-effort */ }
+    // Libera o chat pro próximo job enfileirado pra ele (se tiver).
+    _chatsOcupados.delete(job.chatId);
+    const proximo = _filaFunis.find((j) => j.status === 'aguardando' && j.chatId === job.chatId);
+    if (proximo) { _chatsOcupados.add(job.chatId); proximo.status = 'rodando'; executarJob(proximo); }
+    // Some da bolha sozinho depois de um tempo — mas fica visível o bastante
+    // pra dar tempo do consultor ver que terminou (ou que deu erro).
+    setTimeout(() => {
+      _filaFunis = _filaFunis.filter((j) => j.id !== job.id);
+      renderBubble();
+    }, 8000);
+    renderBubble();
   }
 
-  function abrirProgressoFunil(funil, nomeContato) {
-    const existente = document.getElementById('job-funil-prog');
-    if (existente) existente.remove();
-    const linhas = funil.passos.map((p, i) =>
-      '<div class="job-fp-linha" data-i="' + i + '">' +
-        '<span class="job-fp-dot"></span>' +
-        '<span class="job-fp-ico">' + funilTipoIcone(p.tipo) + '</span>' +
-        '<span class="job-fp-nome">' + esc(p.nome) + '</span>' +
-        '<span class="job-fp-estado"></span>' +
-      '</div>').join('');
-    const ov = document.createElement('div');
-    ov.id = 'job-funil-prog';
-    ov.innerHTML =
-      '<div class="job-fp-card">' +
-        '<div class="job-fp-head" style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">' +
-          '<div><b>' + esc(funil.nome) + '</b><span>para ' + esc(nomeContato) + '</span></div>' +
-          '<button id="job-fp-x" title="Fechar (ESC) — o funil continua enviando" style="background:none;border:none;color:#6b7280;font-size:18px;line-height:1;cursor:pointer;padding:0;flex-shrink:0;">×</button>' +
-        '</div>' +
-        '<div class="job-fp-linhas">' + linhas + '</div>' +
-        '<div class="job-fp-rodape">' +
-          '<span class="job-fp-status" id="job-fp-status">Iniciando…</span>' +
-          '<button class="job-fp-cancelar" id="job-fp-cancelar">Cancelar</button>' +
-        '</div>' +
+  function cancelarJob(jobId) {
+    const job = _filaFunis.find((j) => j.id === jobId);
+    if (!job) return;
+    if (job.status === 'aguardando') {
+      _filaFunis = _filaFunis.filter((j) => j.id !== jobId);
+    } else {
+      job.cancelar = true;
+    }
+    renderBubble();
+  }
+
+  function fecharJobDaLista(jobId) {
+    _filaFunis = _filaFunis.filter((j) => j.id !== jobId);
+    renderBubble();
+  }
+
+  // ── Bolha discreta e arrastável: fica um pontinho pequeno no canto (não
+  //    trava mais a tela — pedido do Guilherme, 18/07). Clique expande a
+  //    lista de execuções (paralelas e enfileiradas); arrastar move o
+  //    conjunto pra qualquer canto da tela. ──
+  let _bubblePos = null; // {left, top} em px — null = ainda não foi movida (posição padrão)
+  let _bubbleAberta = false;
+
+  function _bubbleEl() { return document.getElementById('job-funil-bubble'); }
+
+  function renderBubble() {
+    if (!_filaFunis.length) {
+      const el = _bubbleEl();
+      if (el) el.remove();
+      return;
+    }
+    let el = _bubbleEl();
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'job-funil-bubble';
+      document.body.appendChild(el);
+      ligarDragBubble(el);
+    }
+    if (_bubblePos) { el.style.left = _bubblePos.left + 'px'; el.style.top = _bubblePos.top + 'px'; }
+
+    const rodando = _filaFunis.filter((j) => j.status === 'rodando').length;
+    const aguardando = _filaFunis.filter((j) => j.status === 'aguardando').length;
+
+    const linhas = _filaFunis.map((j) => {
+      let sub;
+      if (j.status === 'aguardando') sub = 'na fila — espera a conversa liberar';
+      else if (j.status === 'concluido') sub = 'concluído — ' + j.enviados + '/' + j.funil.passos.length + ' enviados';
+      else if (j.status === 'cancelado') sub = 'cancelado — ' + j.enviados + '/' + j.funil.passos.length + ' enviados';
+      else if (typeof j.enviando === 'number' && j.enviando >= 0) sub = 'passo ' + (j.enviando + 1) + '/' + j.funil.passos.length + ': enviando…';
+      else sub = 'passo ' + (j.passoAtual + 1) + '/' + j.funil.passos.length + (j.segundosRestantes ? (' — em ' + j.segundosRestantes + 's') : '');
+      const acaoBtn = (j.status === 'rodando' || j.status === 'aguardando')
+        ? '<button class="job-fb-cancelar" data-jid="' + j.id + '">' + (j.status === 'aguardando' ? 'tirar da fila' : 'cancelar') + '</button>'
+        : '<button class="job-fb-fechar" data-jid="' + j.id + '">fechar</button>';
+      return '<div class="job-fb-linha job-fb-' + j.status + '">' +
+        '<div class="job-fb-linha-top"><b>' + esc(j.funil.nome) + '</b><span>' + esc(j.nomeContato) + '</span></div>' +
+        '<div class="job-fb-linha-sub">' + esc(sub) + '</div>' +
+        acaoBtn +
       '</div>';
-    document.body.appendChild(ov);
-    document.getElementById('job-fp-cancelar').addEventListener('click', () => {
-      _funilCancelar = true;
-      const s = document.getElementById('job-fp-status');
-      if (s) s.textContent = 'Cancelando…';
+    }).join('');
+
+    el.innerHTML =
+      '<div class="job-fb-dot" id="job-fb-dot" title="Funis rodando — arraste pra mover">' +
+        (rodando || aguardando) +
+      '</div>' +
+      '<div class="job-fb-painel" id="job-fb-painel" style="display:' + (_bubbleAberta ? 'block' : 'none') + '">' +
+        '<div class="job-fb-cab">Funis em andamento</div>' +
+        linhas +
+      '</div>';
+
+    document.getElementById('job-fb-dot').addEventListener('click', (e) => {
+      if (el.dataset.arrastou === '1') { el.dataset.arrastou = ''; return; } // não abre se acabou de arrastar
+      _bubbleAberta = !_bubbleAberta;
+      renderBubble();
     });
-    // Fechar só esconde o card — o funil SEGUE enviando em segundo plano (os
-    // updates de UI já checam se os elementos existem antes de mexer, então
-    // remover o card não quebra o loop). É pra liberar o consultor pra atender
-    // outro lead sem cancelar o que já estava rodando.
-    document.getElementById('job-fp-x').addEventListener('click', () => { ov.remove(); });
-    return ov;
+    el.querySelectorAll('.job-fb-cancelar').forEach((b) => b.addEventListener('click', () => cancelarJob(b.dataset.jid)));
+    el.querySelectorAll('.job-fb-fechar').forEach((b) => b.addEventListener('click', () => fecharJobDaLista(b.dataset.jid)));
   }
 
-  async function esperarComContagem(prog, i, segundos, onTick) {
-    const linha = prog && prog.querySelector('.job-fp-linha[data-i="' + i + '"]');
-    const estado = linha && linha.querySelector('.job-fp-estado');
-    const status = document.getElementById('job-fp-status');
-    if (linha) linha.classList.add('atual');
-    let resta = segundos;
-    if (onTick) onTick(resta); // primeiro report imediato (não espera 3s)
-    while (resta > 0) {
-      if (_funilCancelar) return;
-      if (estado) estado.textContent = 'em ' + resta + 's';
-      if (status) status.textContent = 'Passo ' + (i + 1) + ': aguardando ' + resta + 's';
-      await new Promise((r) => setTimeout(r, 1000));
-      resta--;
-      if (onTick && resta % 3 === 0) onTick(resta); // throttla o report pro servidor
-    }
-    if (estado) estado.textContent = '';
-  }
-
-  function marcarPasso(prog, i, estado, erro) {
-    const linha = prog && prog.querySelector('.job-fp-linha[data-i="' + i + '"]');
-    const status = document.getElementById('job-fp-status');
-    if (!linha) return;
-    linha.classList.remove('atual');
-    const est = linha.querySelector('.job-fp-estado');
-    if (estado === 'enviando') {
-      linha.classList.add('atual');
-      if (est) est.textContent = 'enviando…';
-      if (status) status.textContent = 'Passo ' + (i + 1) + ': enviando…';
-    } else if (estado === 'ok') {
-      linha.classList.add('ok');
-      if (est) est.textContent = '✓';
-    } else if (estado === 'erro') {
-      linha.classList.add('erro');
-      if (est) est.textContent = 'falhou';
-      if (erro) linha.title = erro;
-    }
-  }
-
-  function finalizarProgresso(prog, enviados, total, cancelado) {
-    const status = document.getElementById('job-fp-status');
-    const btn = document.getElementById('job-fp-cancelar');
-    if (status) {
-      status.textContent = cancelado
-        ? ('Cancelado — ' + enviados + ' de ' + total + ' enviados.')
-        : ('Concluído — ' + enviados + ' de ' + total + ' enviados.');
-    }
-    if (btn) { btn.textContent = 'Fechar'; btn.classList.add('job-fp-fechar');
-      const novo = btn.cloneNode(true); btn.parentNode.replaceChild(novo, btn);
-      novo.addEventListener('click', () => { const p = document.getElementById('job-funil-prog'); if (p) p.remove(); });
-    }
+  function ligarDragBubble(el) {
+    const dot = () => el.querySelector('#job-fb-dot');
+    let arrastando = false, offX = 0, offY = 0;
+    el.addEventListener('mousedown', (e) => {
+      if (!e.target.closest('#job-fb-dot')) return; // só arrasta pelo pontinho, não pelo painel aberto
+      arrastando = true;
+      const r = el.getBoundingClientRect();
+      offX = e.clientX - r.left; offY = e.clientY - r.top;
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!arrastando) return;
+      el.dataset.arrastou = '1';
+      const left = Math.min(Math.max(4, e.clientX - offX), window.innerWidth - 60);
+      const top = Math.min(Math.max(4, e.clientY - offY), window.innerHeight - 60);
+      _bubblePos = { left, top };
+      el.style.left = left + 'px'; el.style.top = top + 'px';
+      el.style.right = 'auto'; el.style.bottom = 'auto';
+    });
+    document.addEventListener('mouseup', () => { arrastando = false; });
   }
 
   function esc(s) {
