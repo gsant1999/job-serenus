@@ -261,6 +261,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     } catch (e) { sendResponse({ ok: false, erro: String(e && e.message || e) }); }
     return true;
   }
+  if (msg && msg.type === 'erro_log') {
+    // Best-effort — nunca deve travar nada nem virar loop de erro.
+    chamarJob('/api/whatsapp/erro', 'POST', {
+      usuario_id: msg.usuario_id, versao: msg.versao, mensagem: msg.mensagem,
+      stack: msg.stack, url: msg.url,
+    }, 8000).then(sendResponse).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
   if (msg && msg.type === 'notificar') {
     // Aviso local do sistema operacional — só isso, nada é enviado pra fora.
     // Sem isso, minimizar o painel ou trocar de conversa fazia o consultor
@@ -277,4 +285,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
   return false;
+});
+
+// Erros dentro do próprio service worker (não passam por chrome.runtime.sendMessage
+// porque ele não manda mensagem pra si mesmo) — reporta direto.
+self.addEventListener('error', (e) => {
+  chamarJob('/api/whatsapp/erro', 'POST', {
+    mensagem: 'background.js: ' + String(e.message || e), stack: String(e.error && e.error.stack || ''),
+    url: 'background.js', versao: chrome.runtime.getManifest().version,
+  }, 8000).catch(() => {});
+});
+self.addEventListener('unhandledrejection', (e) => {
+  chamarJob('/api/whatsapp/erro', 'POST', {
+    mensagem: 'background.js (promise): ' + String(e.reason && e.reason.message || e.reason),
+    stack: String(e.reason && e.reason.stack || ''), url: 'background.js',
+    versao: chrome.runtime.getManifest().version,
+  }, 8000).catch(() => {});
 });

@@ -950,6 +950,15 @@ def init_db():
                 iniciado_em TIMESTAMP,
                 atualizado_em TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS extensao_erros (
+                id SERIAL PRIMARY KEY,
+                usuario_id INTEGER,
+                versao TEXT,
+                mensagem TEXT,
+                stack TEXT,
+                url TEXT,
+                criado_em TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS whatsapp_funis (
                 id SERIAL PRIMARY KEY,
                 nome TEXT NOT NULL,
@@ -1504,6 +1513,15 @@ def init_db():
             status TEXT DEFAULT 'rodando',
             iniciado_em TIMESTAMP,
             atualizado_em TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS extensao_erros (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER,
+            versao TEXT,
+            mensagem TEXT,
+            stack TEXT,
+            url TEXT,
+            criado_em TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS whatsapp_funis (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -11516,6 +11534,48 @@ def api_whatsapp_versao():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     return _wa_cors(jsonify({"ok": True, "versao": _extensao_versao()}))
+
+
+@app.route('/api/whatsapp/erro', methods=['POST', 'OPTIONS'])
+def api_whatsapp_erro():
+    """A extensão reporta um erro JS (window.onerror/unhandledrejection) que
+    aconteceu no navegador do consultor — sem isso, um bug só chegava até nós
+    se o consultor reclamasse. Best-effort: nunca deve travar a extensão."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False})), 401
+    d = request.get_json(silent=True) or {}
+    mensagem = (d.get('mensagem') or '')[:2000]
+    if not mensagem:
+        return _wa_cors(jsonify({"ok": False}))
+    conn = db()
+    try:
+        uid = int(d.get('usuario_id')) if d.get('usuario_id') else None
+    except (TypeError, ValueError):
+        uid = None
+    conn.execute("""INSERT INTO extensao_erros (usuario_id, versao, mensagem, stack, url, criado_em)
+        VALUES (?,?,?,?,?,?)""",
+        (uid, (d.get('versao') or '')[:20], mensagem, (d.get('stack') or '')[:4000],
+         (d.get('url') or '')[:300], _agora_sp()))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
+
+
+@app.route('/extensao/erros')
+@login_required
+@admin_required
+def extensao_erros():
+    """Painel: erros JS reportados pela extensão nos navegadores dos
+    consultores — visibilidade que antes só existia se alguém reclamasse."""
+    conn = db()
+    cutoff = (datetime.now(TZ_SP) - timedelta(days=14)).strftime('%Y-%m-%d %H:%M:%S')
+    conn.execute("DELETE FROM extensao_erros WHERE criado_em < ?", (cutoff,))
+    conn.commit()
+    rows = conn.execute("""SELECT e.*, u.nome usuario_nome FROM extensao_erros e
+        LEFT JOIN usuarios u ON u.id=e.usuario_id ORDER BY e.criado_em DESC LIMIT 200""").fetchall()
+    close_db(conn)
+    return render_template('extensao_erros.html', erros=[dict(r) for r in rows])
 
 
 # Versão mínima da extensão pra PARTICIPAR do disparo com tudo (detectar resposta,

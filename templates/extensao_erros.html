@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Erros da Extensão{% endblock %}
+
+{% block head %}
+<style>
+.ee-wrap { max-width:980px; }
+.ee-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; flex-wrap:wrap; }
+.ee-hero h1 { font-size:24px; }
+.ee-sub { color:var(--cinza); font-size:12.5px; margin-top:3px; }
+.ee-card { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:14px 16px; margin-bottom:10px; }
+.ee-top { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.ee-quem { font-size:12.5px; color:var(--cinza); }
+.ee-quem b { color:var(--texto); }
+.ee-quando { font-size:11px; color:var(--cinza); font-variant-numeric:tabular-nums; }
+.ee-msg { font-size:13px; color:var(--texto); margin-top:8px; font-weight:600; }
+.ee-stack { margin-top:8px; font-size:11px; color:var(--cinza); font-family:monospace; white-space:pre-wrap;
+  max-height:160px; overflow-y:auto; background:var(--fundo); border-radius:8px; padding:8px 10px; }
+.ee-url { font-size:10.5px; color:var(--cinza); margin-top:6px; word-break:break-all; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page ee-wrap">
+  <div class="ee-hero">
+    <div>
+      <h1>Erros da Extensão</h1>
+      <div class="ee-sub">Erros JS reportados pela extensão nos navegadores dos consultores · últimos 14 dias</div>
+    </div>
+  </div>
+
+  {% if erros %}
+    {% for e in erros %}
+    <div class="ee-card">
+      <div class="ee-top">
+        <div class="ee-quem"><b>{{ e.usuario_nome or 'Não identificado' }}</b> · v{{ e.versao or '?' }}</div>
+        <div class="ee-quando">{{ e.criado_em }}</div>
+      </div>
+      <div class="ee-msg">{{ e.mensagem }}</div>
+      {% if e.url %}<div class="ee-url">{{ e.url }}</div>{% endif %}
+      {% if e.stack %}<div class="ee-stack">{{ e.stack }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="card" style="padding:30px;text-align:center;color:var(--cinza);">Nenhum erro reportado — bom sinal.</div>
+  {% endif %}
+</div>
+{% endblock %}

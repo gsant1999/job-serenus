@@ -64,6 +64,40 @@
     try { chrome.storage.local.set({ pastasAbertas: [..._pastasAbertas] }); } catch (e2) { /* best-effort */ }
   }, true); // toggle não borbulha — precisa capture
 
+  // ── Reporta erros JS pro JOB (visibilidade de bug em produção — antes só
+  //    ficávamos sabendo se o consultor reclamasse). Deduplica por mensagem
+  //    (não manda a mesma falha 50x) e limita a 15 reports por sessão da aba
+  //    (nunca vira flood se algo entrar em loop de erro). ──
+  const _errosReportados = new Set();
+  let _errosContagem = 0;
+  function _reportarErro(mensagem, stack) {
+    if (!mensagem || _errosContagem >= 15) return;
+    const chave = String(mensagem).slice(0, 200);
+    if (_errosReportados.has(chave)) return;
+    _errosReportados.add(chave); _errosContagem++;
+    chrome.storage.local.get(['usuarioId']).then(({ usuarioId }) => {
+      try {
+        chrome.runtime.sendMessage({
+          type: 'erro_log', usuario_id: usuarioId, mensagem: String(mensagem).slice(0, 2000),
+          stack: String(stack || '').slice(0, 4000), url: location.href,
+          versao: (chrome.runtime.getManifest() || {}).version || '',
+        });
+      } catch (e) { /* best-effort, nunca deixa um erro virar outro erro */ }
+    }).catch(() => {});
+  }
+  window.addEventListener('error', (e) => {
+    if (e && e.filename && /content\.js|wpp-bridge\.js/.test(e.filename)) {
+      _reportarErro(e.message, e.error && e.error.stack);
+    }
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    const msg = e && e.reason && (e.reason.message || String(e.reason));
+    // Sem filtro de origem aqui (rejection não expõe filename) — só reporta
+    // se parecer coisa nossa (menciona job/wpp) pra não poluir com erro do
+    // próprio WhatsApp Web.
+    if (msg && /job|wpp|__jobwppbridge/i.test(msg)) _reportarErro(msg, e.reason && e.reason.stack);
+  });
+
   // ── Descobre o container rolável das mensagens (o WhatsApp muda as classes,
   //    então detectamos pelo comportamento: dentro do #main, o elemento que
   //    realmente rola verticalmente). ──
@@ -680,6 +714,7 @@
       chevron: '<polyline points="6 9 12 15 18 9"/>',
       funil: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
       estrela: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+      olho: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
     }[nome] || '';
     const s = px || 14;
     return '<svg viewBox="0 0 24 24" width="' + s + '" height="' + s + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>';
@@ -1865,6 +1900,24 @@
     return out;
   }
 
+  // Conteúdo de verdade de um passo do funil (texto inteiro + mídia tocável/
+  // visível) — os dados já vêm prontos com buscarFunis (texto e midia_url),
+  // não precisa baixar nada só pra mostrar aqui.
+  function previewConteudoPasso(p) {
+    let midia = '';
+    if (p.tipo === 'audio' && p.midia_url) {
+      midia = '<audio class="job-modelo-audio" controls preload="none" src="' + esc(p.midia_url) + '"></audio>';
+    } else if (p.tipo === 'imagem' && p.midia_url) {
+      midia = '<img class="job-modelo-img" src="' + esc(p.midia_url) + '" alt="">';
+    } else if (p.tipo === 'video' && p.midia_url) {
+      midia = '<video class="job-modelo-img" controls preload="none" src="' + esc(p.midia_url) + '"></video>';
+    } else if (p.tipo === 'documento' && p.midia_url) {
+      midia = '<a class="job-modelo-doc" href="' + esc(p.midia_url) + '" target="_blank" rel="noopener">' + _svgIco('documento', 12) + ' Abrir PDF</a>';
+    }
+    const texto = (p.texto || '').trim();
+    return (texto ? '<div class="job-modelo-preview">' + esc(texto) + '</div>' : '') + midia;
+  }
+
   function cardFunil(f) {
     const passos = f.passos || [];
     const totalS = passos.reduce((s, p) => s + (p.delay_segundos || 0), 0);
@@ -1873,14 +1926,22 @@
       : 'sem passos';
     // Cada passo é uma caixinha colorida pelo tipo (padrão ZapVoice): o
     // consultor bate o olho e sabe o que vai sair — áudio, imagem, texto, PDF.
+    // Clicar no "olho" mostra o conteúdo de verdade antes de disparar (o texto
+    // inteiro, toca o áudio, vê a imagem) — antes só mostrava o NOME do
+    // modelo, sem dar pra conferir o que ia sair de fato. Pedido do
+    // Guilherme, 18/07.
     const listaPassos = passos.map((p, i) =>
       '<div class="job-fpasso t-' + esc(p.tipo || 'texto') + '">' +
-        '<span class="job-fpasso-ico">' + funilTipoIcone(p.tipo, 14) + '</span>' +
-        '<div class="job-fpasso-info">' +
-          '<div class="job-fpasso-nome">' + esc(p.nome) + '</div>' +
-          '<div class="job-fpasso-quando">' + _svgIco('relogio', 10) + ' Enviando ' + esc(fmtQuando(p.delay_segundos)) + '</div>' +
+        '<div class="job-fpasso-linha">' +
+          '<span class="job-fpasso-ico">' + funilTipoIcone(p.tipo, 14) + '</span>' +
+          '<div class="job-fpasso-info">' +
+            '<div class="job-fpasso-nome">' + esc(p.nome) + '</div>' +
+            '<div class="job-fpasso-quando">' + _svgIco('relogio', 10) + ' Enviando ' + esc(fmtQuando(p.delay_segundos)) + '</div>' +
+          '</div>' +
+          '<button class="job-fpasso-olho" title="Ver conteúdo">' + _svgIco('olho', 14) + '</button>' +
+          '<span class="job-fpasso-num">' + (i + 1) + '</span>' +
         '</div>' +
-        '<span class="job-fpasso-num">' + (i + 1) + '</span>' +
+        '<div class="job-fpasso-preview fechado">' + previewConteudoPasso(p) + '</div>' +
       '</div>').join('');
     return '<div class="job-funil-card" data-funil-id="' + f.id + '">' +
       '<div class="job-funil-topo">' +
@@ -1920,6 +1981,15 @@
     });
     document.querySelectorAll('.job-funil-disparar[data-funil-id]').forEach((btn) => {
       btn.addEventListener('click', () => dispararFunil(btn.dataset.funilId));
+    });
+    document.querySelectorAll('.job-fpasso-olho').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const passo = btn.closest('.job-fpasso');
+        const preview = passo && passo.querySelector('.job-fpasso-preview');
+        if (!preview) return;
+        preview.classList.toggle('fechado');
+        btn.classList.toggle('ativo', !preview.classList.contains('fechado'));
+      });
     });
   }
 
