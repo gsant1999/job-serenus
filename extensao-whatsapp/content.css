@@ -95,6 +95,18 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
    aparecia mesmo com nenhuma análise rodando. */
 .job-trilho-item-badge[hidden] { display: none; }
 
+/* Selo discreto de versão no rodapé do trilho (instalada +, se houver, a
+   mais nova disponível) — mesma ideia do número de build que o próprio
+   WhatsApp mostra no canto da barra dele. */
+.job-trilho-versao {
+  margin-top: auto; margin-bottom: 10px; padding: 4px 2px; text-align: center;
+  font-size: 8.5px; color: var(--job-txt-fraco); font-variant-numeric: tabular-nums;
+  line-height: 1.5; cursor: default; opacity: .65;
+}
+.job-trilho-versao-nova {
+  display: block; color: var(--job-acento); font-weight: 700; font-size: 8px;
+}
+
 #job-painel-doc {
   position: fixed; top: 0; right: 72px; bottom: 0; width: 400px;
   max-width: calc(100vw - 72px);

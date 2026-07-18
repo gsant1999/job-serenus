@@ -708,7 +708,8 @@
         '<span class="job-trilho-item-icone">' + _ICO_INBOX + '</span>' +
         '<span class="job-trilho-item-label">Leads</span>' +
         '<span class="job-trilho-item-badge" id="job-inbox-badge" hidden>0</span>' +
-      '</button>';
+      '</button>' +
+      '<div class="job-trilho-versao" id="job-trilho-versao" title="Versão instalada"></div>';
     trilho.querySelectorAll('.job-trilho-item').forEach((item) => {
       item.addEventListener('click', () => {
         const secao = item.dataset.secao;
@@ -718,6 +719,25 @@
     });
     document.body.appendChild(trilho);
     aplicarClassesHtml();
+    atualizarSeloVersao();
+  }
+
+  // ── Selo discreto de versão no rodapé do trilho: mostra a instalada e, se
+  //    tiver uma mais nova disponível, mostra ela também em destaque — pedido
+  //    do Guilherme, 18/07 (mesma ideia do "7.4.3.67" que o próprio WhatsApp
+  //    mostra no canto da barra dele). ──
+  function atualizarSeloVersao(nova) {
+    const el = document.getElementById('job-trilho-versao');
+    if (!el) return;
+    let minha = '';
+    try { minha = chrome.runtime.getManifest().version; } catch (e) { return; }
+    if (nova && _cmpVersao(minha, nova) < 0) {
+      el.innerHTML = 'v' + esc(minha) + '<span class="job-trilho-versao-nova">nova: ' + esc(nova) + '</span>';
+      el.title = 'Instalada: ' + minha + ' — disponível: ' + nova + ' (feche e reabra o WhatsApp Web pra atualizar)';
+    } else {
+      el.textContent = 'v' + minha;
+      el.title = 'Versão instalada — está na mais recente';
+    }
   }
 
   function fecharSecao() {
@@ -2520,6 +2540,7 @@
       const j = await r.json();
       nova = (j && j.versao) || '';
     } catch (e) { return; } // sem internet/JOB fora do ar: não incomoda
+    atualizarSeloVersao(nova);
     if (!nova || _cmpVersao(minha, nova) >= 0) {
       const b = document.getElementById('job-aviso-versao');
       if (b) b.remove();
