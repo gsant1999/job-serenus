@@ -72,8 +72,10 @@
     // um áudio, só evita re-transcrever um que já foi transcrito com sucesso).
     const audios = msgs.filter((m) => m.type === 'ptt' || m.type === 'audio');
     const alvos = selecionarPorLead(audios, Math.max(1, limite || 12));
-    const out = [];
-    for (const m of alvos) {
+    // Baixa em PARALELO (lotes de 5): o teto de áudios subiu bastante (conversas
+    // de venda têm dezenas) e baixar um a um chegava perto do timeout. Cada
+    // download é decrypt de rede — 5 de cada vez é rápido sem sobrecarregar.
+    async function baixarUm(m) {
       try {
         const media = await window.WPP.chat.downloadMedia(m.id._serialized);
         let b64 = '', mime = 'audio/ogg';
@@ -86,10 +88,16 @@
           mime = media.mimetype || mime;
         }
         if (b64) {
-          out.push({ de: (m.id.fromMe ? 'consultor' : 'lead'), msg_id: m.id._serialized,
-                     base64: b64, mime: (mime || 'audio/ogg').split(';')[0], hora: fmtHora(m.t) });
+          return { de: (m.id.fromMe ? 'consultor' : 'lead'), msg_id: m.id._serialized,
+                   base64: b64, mime: (mime || 'audio/ogg').split(';')[0], hora: fmtHora(m.t) };
         }
       } catch (e) { /* áudio que falhar é ignorado, nunca derruba a análise */ }
+      return null;
+    }
+    const out = [];
+    for (let i = 0; i < alvos.length; i += 5) {
+      const lote = await Promise.all(alvos.slice(i, i + 5).map(baixarUm));
+      for (const r of lote) if (r) out.push(r);
     }
     return { audios: out };
   }

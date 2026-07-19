@@ -339,7 +339,7 @@
   //    renderizado), 100% leitura. fetch do blob same-origin funciona no content
   //    script (validado no DOM real). Redimensiona pra no máx 1600px e comprime
   //    em JPEG pra caber no payload. Direção pela mesma geometria do texto. ──
-  const _WA_MAX_IMG = 8;
+  const _WA_MAX_IMG = 20;
 
   async function imagemParaBase64(im) {
     const blob = await (await fetch(im.src)).blob();
@@ -433,7 +433,7 @@
       window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_audios', reqId, limite }, '*');
       setTimeout(() => {
         if (!pronto) { window.removeEventListener('message', onMsg); resolve([]); }
-      }, 60000);
+      }, 120000);
     });
   }
 
@@ -2696,13 +2696,18 @@
 
       status('Baixando e transcrevendo áudios…');
       let audios = [];
-      try { audios = await pedirAudios(12); } catch (e) { audios = []; }
+      // Teto alto de propósito: conversas de venda têm MUITO áudio (a Hellen
+      // tinha 34) e a análise precisa deles TODOS — a parte do cliente é o que
+      // mais importa. Antes o teto era 12 e cortava 22 em silêncio. Agora a
+      // transcrição roda em paralelo e é cacheada por msg_id no servidor, e o
+      // Groq é baratíssimo, então subir o teto não pesa em custo nem em tempo.
+      try { audios = await pedirAudios(60); } catch (e) { audios = []; }
 
       status('Baixando documentos PDF…');
       let documentos = [];
       let documentosEncontrados = 0;
       try {
-        const rd = await pedirDocumentos(5);
+        const rd = await pedirDocumentos(15);
         documentos = rd.documentos || [];
         documentosEncontrados = rd.encontrados || documentos.length;
       } catch (e) { documentos = []; }

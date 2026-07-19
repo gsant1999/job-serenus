@@ -13097,7 +13097,11 @@ def api_whatsapp_analisar():
     # 1) Coleta os áudios válidos e resolve o cache (rápido, DB local) — separa
     #    os que já temos dos que precisam ir pro provedor de transcrição.
     audio_itens = []
-    for a in (d.get('audios') or [])[:12]:
+    # Teto alto (60): conversa de venda tem MUITO áudio (a Hellen tinha 34) e a
+    # análise precisa de TODOS — antes o teto era 12 aqui E no cliente, cortando
+    # a maior parte em silêncio. Transcrição é paralela + cacheada por msg_id +
+    # Groq barato, então subir não pesa (primeira rodada custa; reanálise é grátis).
+    for a in (d.get('audios') or [])[:60]:
         if not isinstance(a, dict):
             continue
         b64 = str(a.get('base64') or '')
@@ -13123,7 +13127,7 @@ def api_whatsapp_analisar():
     pendentes = [it for it in audio_itens if 'texto' not in it]
     if pendentes:
         import concurrent.futures as _cf
-        with _cf.ThreadPoolExecutor(max_workers=min(6, len(pendentes))) as _ex:
+        with _cf.ThreadPoolExecutor(max_workers=min(8, len(pendentes))) as _ex:
             _futs = {_ex.submit(_transcrever_audio, it['b64'], it['mime']): it for it in pendentes}
             for _fut in _cf.as_completed(_futs):
                 it = _futs[_fut]
