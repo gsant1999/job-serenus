@@ -1865,17 +1865,29 @@
   }
 
   // Aviso amigável quando o content script perdeu o vínculo com o background
-  // (extensão atualizada e a aba não recarregada). Um botão que dá o reload.
+  // (a extensão se atualizou e ESTA aba não foi recarregada — o código rodando
+  // aqui virou uma cópia velha, órfã do background novo). Não é "você está
+  // desatualizado": a extensão já está na última versão, é só esta aba que
+  // precisa de um F5. Um botão dá o reload.
   function _avisoRecarregarAba() {
     return '<div class="job-erro" style="text-align:center">' +
-      'A extensão foi atualizada.<br><b>Recarregue esta aba do WhatsApp Web</b> pra voltar a funcionar.' +
-      '<br><button class="job-analisar-btn" style="margin-top:12px" onclick="location.reload()">Recarregar agora</button>' +
+      'A extensão foi atualizada num segundo plano.<br><b>Esta aba do WhatsApp Web precisa recarregar</b> ' +
+      'pra pegar a versão nova (a extensão em si já está atualizada).' +
+      '<br><button class="job-analisar-btn" id="job-recarregar-aba" style="margin-top:12px">Recarregar agora</button>' +
       '</div>';
   }
 
   function setCorpoSecaoMensagens(html) {
     const c = document.getElementById('job-painel-doc-corpo');
-    if (c) { c.innerHTML = html; _observarMidias(c); }
+    if (c) {
+      c.innerHTML = html;
+      _observarMidias(c);
+      // O CSP do WhatsApp Web bloqueia onclick inline — o botão de recarregar
+      // só funciona com listener de verdade. location.reload() é API de window
+      // (não chrome.*), então roda mesmo com o contexto da extensão invalidado.
+      const btnReload = c.querySelector('#job-recarregar-aba');
+      if (btnReload) btnReload.addEventListener('click', function () { location.reload(); });
+    }
   }
 
   // ═══════════════ Funis (sequência de disparo, estilo ZapVoice) ═══════════════
