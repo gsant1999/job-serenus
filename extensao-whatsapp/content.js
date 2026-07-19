@@ -1231,6 +1231,19 @@
   async function sincronizarPainelComConversa() {
     if (_secaoAtiva !== 'analise') return;
     const chaveAtual = chaveConversa(telefoneDoContato(), nomeDoContato());
+    // Identidade ESTÁVEL da conversa aberta pro guard "trocou de conversa?".
+    // NÃO usar telefoneDoContato() aqui: o número raspado do DOM flipa (aparece
+    // só depois que o WhatsApp termina de renderizar os data-id) — durante a
+    // busca do telefone a chave mudava de 'nome:x' pra o número, o guard achava
+    // que trocou de conversa, saía com return e DEIXAVA O SPINNER GIRANDO PRA
+    // SEMPRE (bug do "Verificando análise salva…" que nunca saía). O nome do
+    // cabeçalho é estável; leitura vazia (re-render) não conta como troca.
+    const nomeAtual = nomeDoContato();
+    const trocouDeConversa = () => {
+      if (_secaoAtiva !== 'analise') return true;
+      const n = nomeDoContato();
+      return !!(n && n !== nomeAtual);
+    };
     const doConversaAtual = [..._analises.values()]
       .filter((a) => a.chave === chaveAtual)
       .sort((a, b) => b.iniciadoEm - a.iniciadoEm)[0];
@@ -1258,11 +1271,11 @@
     setCorpoSecao(telaBuscandoUltima());
     let telefone = '';
     try { telefone = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { telefone = telefoneDoContato(); }
-    if (_secaoAtiva !== 'analise' || chaveConversa(telefoneDoContato(), nomeDoContato()) !== chaveAtual) return;
+    if (trocouDeConversa()) return;
     if (!telefone) { setCorpoSecao(telaSemAnalise()); return; }
     let resp = null;
     try { resp = await chrome.runtime.sendMessage({ type: 'estado', telefone }); } catch (e) { /* segue sem retrato */ }
-    if (_secaoAtiva !== 'analise' || chaveConversa(telefoneDoContato(), nomeDoContato()) !== chaveAtual) return;
+    if (trocouDeConversa()) return;
     const ultima = resp && resp.ok && resp.existe && resp.ultima_analise;
     setCorpoSecao(ultima ? telaUltimaAnaliseSalvaRica(ultima, resp.total_mensagens, telefone) : telaSemAnalise());
     if (ultima) ligarBotaoCopiar();
