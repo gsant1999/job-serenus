@@ -148,7 +148,44 @@
     return { documentos: out, encontrados: alvos.length };
   }
 
+  // Cache de resolução telefone por conversa. A escada @lid abaixo faz chamadas
+  // de REDE (getPnLidEntry com fallback no servidor, requestPhoneNumber) e era
+  // refeita do zero TODA vez que o consultor trocava de conversa — por isso o
+  // "Verificando análise salva…" demorava. Aqui guarda o resultado por chatId:
+  // número resolvido não muda (cache longo); negativa retenta rápido (o servidor
+  // pode liberar o número depois). Guilherme, 19/07: "muito lento pra verificar".
+  const _telCache = new Map(); // chave -> {res, ts}
+  const _TEL_CACHE_POS_MS = 30 * 60 * 1000; // achou número: não muda
+  const _TEL_CACHE_NEG_MS = 45 * 1000;      // não achou: retenta logo
+
   async function obterTelefone(resolverLid) {
+    let chave = '';
+    try {
+      const WA = window.WPP;
+      const chat = WA && WA.chat && WA.chat.getActiveChat && WA.chat.getActiveChat();
+      if (chat && chat.id) {
+        const id = chat.id._serialized || (chat.id.user + '@' + chat.id.server);
+        chave = id + '|' + (resolverLid === false ? '0' : '1');
+      }
+    } catch (e) {}
+    if (chave) {
+      const c = _telCache.get(chave);
+      if (c) {
+        const ttl = (c.res && c.res.telefone) ? _TEL_CACHE_POS_MS : _TEL_CACHE_NEG_MS;
+        if (Date.now() - c.ts < ttl) return c.res;
+      }
+    }
+    const res = await _obterTelefoneResolver(resolverLid);
+    // Não cacheia falha transitória de ambiente (wpp ainda carregando): retentar
+    // logo pode dar certo. Número resolvido e "sem número exposto" (negativa
+    // legítima) são cacheáveis.
+    if (chave && res && res.erro !== 'wpp_ausente' && res.erro !== 'sem_conversa') {
+      _telCache.set(chave, { res, ts: Date.now() });
+    }
+    return res;
+  }
+
+  async function _obterTelefoneResolver(resolverLid) {
     // resolverLid (flag remota do JOB, default true): quando false, NÃO tenta a
     // escada de resolução @lid (chega a chamar requestPhoneNumber, que às vezes
     // mexe na UI do WhatsApp). Serve de "freio de emergência" se um dia o
