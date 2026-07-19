@@ -99,7 +99,9 @@
       const lote = await Promise.all(alvos.slice(i, i + 5).map(baixarUm));
       for (const r of lote) if (r) out.push(r);
     }
-    return { audios: out };
+    // encontrados = TOTAL de áudios na conversa (antes do teto), pra o painel
+    // avisar "X de Y ficaram de fora" — nada de cortar em silêncio.
+    return { audios: out, encontrados: audios.length };
   }
 
   async function baixarDocumentos(limite) {
@@ -151,9 +153,10 @@
         }
       } catch (e) { /* documento que falhar é ignorado, nunca derruba a análise */ }
     }
-    // encontrados = PDFs selecionados pra baixar; se baixados < encontrados, o
-    // painel avisa em vez de fingir que leu tudo.
-    return { documentos: out, encontrados: alvos.length };
+    // encontrados = TOTAL de PDFs na conversa (antes do teto). Se entraram
+    // menos (teto OU falha de download), o painel avisa "X de Y" em vez de
+    // fingir que leu tudo.
+    return { documentos: out, encontrados: docs.length };
   }
 
   // Cache de resolução telefone por conversa. A escada @lid abaixo faz chamadas

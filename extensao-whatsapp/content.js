@@ -412,7 +412,9 @@
         out.push({ de: c.de, base64: b64, mime: 'image/jpeg', hora: c.hora });
       } catch (e) { /* imagem que falhar é ignorada, nunca derruba a análise */ }
     }
-    return out;
+    // encontrados = TOTAL de imagens únicas visíveis na conversa (antes do teto),
+    // pra o painel avisar "X de Y ficaram de fora".
+    return { imagens: out, encontrados: candidatos.length };
   }
 
   // ── ÁUDIO: pede os áudios de voz pra ponte no main world (wpp-bridge.js), que
@@ -427,12 +429,12 @@
         if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
         pronto = true;
         window.removeEventListener('message', onMsg);
-        resolve(d.audios || []);
+        resolve({ audios: d.audios || [], encontrados: d.encontrados || (d.audios || []).length });
       }
       window.addEventListener('message', onMsg);
       window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_audios', reqId, limite }, '*');
       setTimeout(() => {
-        if (!pronto) { window.removeEventListener('message', onMsg); resolve([]); }
+        if (!pronto) { window.removeEventListener('message', onMsg); resolve({ audios: [], encontrados: 0 }); }
       }, 120000);
     });
   }
@@ -2435,7 +2437,10 @@
     const avisos = [];
     if (r.ia_falhou) avisos.push('A leitura por IA falhou nesta análise — o score seguiu só no motor de regras.');
     if (r.audios_falha) avisos.push(r.audios_falha + ' áudio(s) não puderam ser transcritos nesta análise.');
-    if (r.documentos_falha) avisos.push(r.documentos_falha + ' PDF(s) da conversa não puderam ser baixados — clique em Analisar de novo pra tentar incluir.');
+    // Transparência do teto: nunca cortar mídia em silêncio. Diz "X de Y".
+    if (r.audios_cortados) avisos.push(r.audios_cortados + ' de ' + (r.audios_encontrados || '?') + ' áudios ficaram de fora (limite de 60 por análise) — os mais recentes entraram.');
+    if (r.imagens_cortadas) avisos.push(r.imagens_cortadas + ' de ' + (r.imagens_encontrados || '?') + ' imagens ficaram de fora (limite de 20 por análise).');
+    if (r.documentos_falha) avisos.push(r.documentos_falha + ' de ' + (r.documentos_encontrados || '?') + ' PDF(s) não entraram (limite ou falha de download) — Analisar de novo pra tentar incluir.');
     const avisoFalhas = avisos.length
       ? avisos.map((a) => '<div class="job-ia-alerta">⚠ ' + esc(a) + '</div>').join('')
       : '';
@@ -2705,16 +2710,26 @@
       // prioridade lead+recente) — o custo de ocasionalmente re-transcrever
       // é bem menor que o risco de perder informação real do cliente.
       let imagens = [];
-      try { imagens = await rasparImagensVisiveis(status); } catch (e) { imagens = []; }
+      let imagensEncontradas = 0;
+      try {
+        const ri = await rasparImagensVisiveis(status);
+        imagens = ri.imagens || [];
+        imagensEncontradas = ri.encontrados || imagens.length;
+      } catch (e) { imagens = []; }
 
       status('Baixando e transcrevendo áudios…');
       let audios = [];
+      let audiosEncontrados = 0;
       // Teto alto de propósito: conversas de venda têm MUITO áudio (a Hellen
       // tinha 34) e a análise precisa deles TODOS — a parte do cliente é o que
       // mais importa. Antes o teto era 12 e cortava 22 em silêncio. Agora a
       // transcrição roda em paralelo e é cacheada por msg_id no servidor, e o
       // Groq é baratíssimo, então subir o teto não pesa em custo nem em tempo.
-      try { audios = await pedirAudios(60); } catch (e) { audios = []; }
+      try {
+        const ra = await pedirAudios(60);
+        audios = ra.audios || [];
+        audiosEncontrados = ra.encontrados || audios.length;
+      } catch (e) { audios = []; }
 
       status('Baixando documentos PDF…');
       let documentos = [];
@@ -2757,7 +2772,8 @@
         type: 'analisar', reqId,
         payload: { telefone, nome, mensagens, imagens, audios, documentos, links,
                    usuario_id: usuarioId || null, whatsapp_consultor: meuNumero || null,
-                   documentos_encontrados: documentosEncontrados }
+                   documentos_encontrados: documentosEncontrados,
+                   audios_encontrados: audiosEncontrados, imagens_encontrados: imagensEncontradas }
       });
 
       // Se o usuário cancelou enquanto a resposta ainda estava a caminho, não

@@ -10990,8 +10990,8 @@ _CLAUDE_SCHEMA_ANALISE = {
     "additionalProperties": False
 }
 
-_CLAUDE_MAX_IMAGENS = 8  # teto por análise (controle de custo/payload)
-_CLAUDE_MAX_DOCUMENTOS = 5  # teto de PDFs por análise (custo/payload maior que imagem)
+_CLAUDE_MAX_IMAGENS = 20  # teto por análise (o custo real é freado pelo teto de R$1 em _wa_mapear_midias; aqui é só limite de payload)
+_CLAUDE_MAX_DOCUMENTOS = 15  # teto de PDFs por análise (idem — cada mídia é descrita 1x e cacheada)
 
 
 def _calcular_idade(nascimento_str):
@@ -13063,6 +13063,21 @@ def api_whatsapp_analisar():
     except (TypeError, ValueError):
         docs_encontrados = 0
     documentos_falha = max(0, docs_encontrados - len(documentos))
+    # Transparência do teto (pedido do Guilherme, 19/07 — "nada de cortar em
+    # silêncio"): a extensão manda quantos áudios/imagens/PDFs EXISTIAM na
+    # conversa; se entraram menos por causa do teto, o painel avisa "X de Y".
+    try:
+        imagens_encontrados = int(d.get('imagens_encontrados') or 0)
+    except (TypeError, ValueError):
+        imagens_encontrados = 0
+    imagens_cortadas = max(0, imagens_encontrados - len(imagens))
+    try:
+        audios_encontrados = int(d.get('audios_encontrados') or 0)
+    except (TypeError, ValueError):
+        audios_encontrados = 0
+    # audios_cortados é calculado adiante (precisa de audios_validos, contado ao
+    # processar os áudios); inicia em 0 aqui.
+    audios_cortados = 0
 
     # Links (URL + prévia de texto) raspados da conversa — Fase 4. Só texto,
     # nunca abrimos/buscamos o link no servidor.
@@ -13119,6 +13134,9 @@ def api_whatsapp_analisar():
             audio_segundos_total += it['segundos']
             audios_do_cache += 1
         audio_itens.append(it)
+    # Quantos áudios ficaram de fora pelo teto (encontrados na conversa menos os
+    # que de fato vieram/valeram) — pro painel avisar "X de Y".
+    audios_cortados = max(0, audios_encontrados - audios_validos)
     # 2) Transcreve os SEM cache EM PARALELO. Antes era serial (um áudio de cada
     #    vez): 12 áudios × ~6s = ~1min só de transcrição — a maior espera do
     #    consultor. Como é I/O (HTTP pro provedor), threads liberam o GIL e
@@ -13512,6 +13530,11 @@ def api_whatsapp_analisar():
         "audios_do_cache": an.get('audios_do_cache', 0),
         "audios_falha": an.get('audios_falha', 0),
         "documentos_falha": documentos_falha,
+        "documentos_encontrados": docs_encontrados,
+        "audios_cortados": audios_cortados,
+        "audios_encontrados": audios_encontrados,
+        "imagens_cortadas": imagens_cortadas,
+        "imagens_encontrados": imagens_encontrados,
         "transcricoes": an.get('transcricoes', []),
         "lead": ({"id": lead_id, "nome": (lead['nome'] if lead else nome),
                   "url": f"{_SITE_BASE_URL}/crm?lead={lead_id}"} if lead_id else None),
