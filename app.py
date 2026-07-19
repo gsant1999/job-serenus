@@ -11416,9 +11416,22 @@ _DESCREVER_SYSTEM = (
 )
 
 
+# Modelo pra DESCREVER a mídia. Cotação é tabela densa (faixas × valores) e o
+# código já sabia que o Sonnet lê MUITO melhor que o Haiku esses documentos —
+# então descrever no modelo forte (Guilherme, 19/07: "a cotação muda sempre,
+# não dá pra reaproveitar, e o número é o que importa"). Continua sendo UMA
+# descrição por conteúdo (cacheada): re-análise do mesmo lead é de graça, e a
+# análise principal segue só-texto no barato. Muito mais barato que o antigo
+# (Sonnet relia TODAS as mídias em toda análise), e sem perder precisão no
+# número. Configurável; cai pro Haiku se o modelo de docs estiver vazio.
+_CLAUDE_MODEL_DESCREVER = (os.environ.get('CLAUDE_MODEL_DESCREVER', '').strip()
+                           or _CLAUDE_MODEL_DOCS or _CLAUDE_MODEL)
+
+
 def _descrever_uma_midia(tipo, b64, mime_ou_nome):
-    """Uma chamada de visão BARATA (Haiku) que devolve a descrição textual de UMA
-    mídia. Digital PDF já vem como texto extraído (custo ~zero); imagem e PDF
+    """Uma chamada de visão que devolve a descrição textual FIEL de UMA mídia
+    (no modelo forte — cotação precisa de precisão nos valores). Digital PDF já
+    vem como texto extraído (custo ~zero, leitura perfeita); imagem e PDF
     escaneado vão pra visão. Retorna {'descricao','custo_usd'} ou None."""
     api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
     if not api_key:
@@ -11442,9 +11455,11 @@ def _descrever_uma_midia(tipo, b64, mime_ou_nome):
         conteudo.append({"type": "text", "text": "Descreva esta imagem:"})
         conteudo.append({"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}})
     try:
-        client = anthropic.Anthropic(api_key=api_key, timeout=90.0, max_retries=1)
+        client = anthropic.Anthropic(api_key=api_key, timeout=120.0, max_retries=1)
         resp = client.messages.create(
-            model=_CLAUDE_MODEL, max_tokens=700, system=_DESCREVER_SYSTEM,
+            # max_tokens folgado: cotação densa (várias faixas × colunas) precisa
+            # de espaço pra listar TODOS os valores sem truncar.
+            model=_CLAUDE_MODEL_DESCREVER, max_tokens=1400, system=_DESCREVER_SYSTEM,
             messages=[{"role": "user", "content": conteudo}],
         )
         desc = next((b.text for b in resp.content if b.type == 'text'), '').strip()
@@ -11452,7 +11467,7 @@ def _descrever_uma_midia(tipo, b64, mime_ou_nome):
             return None
         ti = getattr(resp.usage, 'input_tokens', 0) or 0
         to = getattr(resp.usage, 'output_tokens', 0) or 0
-        pi, po = _precos_modelo(_CLAUDE_MODEL)
+        pi, po = _precos_modelo(_CLAUDE_MODEL_DESCREVER)
         return {'descricao': desc[:6000], 'custo_usd': round(ti * pi / 1e6 + to * po / 1e6, 6)}
     except Exception as e:
         app.logger.warning(f"[DESCREVER_MIDIA] falhou: {e}")
