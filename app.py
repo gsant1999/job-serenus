@@ -877,6 +877,13 @@ def init_db():
                 custo_usd REAL,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS whatsapp_midia_cache (
+                conteudo_hash TEXT PRIMARY KEY,
+                tipo TEXT,
+                descricao TEXT NOT NULL,
+                custo_usd REAL,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS whatsapp_extensao_fila (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER,
@@ -1443,6 +1450,13 @@ def init_db():
             msg_id TEXT PRIMARY KEY,
             texto TEXT NOT NULL,
             segundos REAL,
+            custo_usd REAL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS whatsapp_midia_cache (
+            conteudo_hash TEXT PRIMARY KEY,
+            tipo TEXT,
+            descricao TEXT NOT NULL,
             custo_usd REAL,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -10759,6 +10773,13 @@ _CLAUDE_MAX_TOKENS_ANALISE = int(os.environ.get('CLAUDE_MAX_TOKENS_ANALISE', '40
 _CLAUDE_PRECO_INPUT_USD_MI = float(os.environ.get('CLAUDE_PRECO_INPUT_USD_MILHAO', '1.00'))
 _CLAUDE_PRECO_OUTPUT_USD_MI = float(os.environ.get('CLAUDE_PRECO_OUTPUT_USD_MILHAO', '5.00'))
 
+# TETO DURO de custo por análise (em USD). "O custo da IA nunca pode passar de
+# R$1" (Guilherme). Convertido pela taxa; se durante a análise o gasto
+# acumulado (transcrição + descrição de mídia + IA) encostar nesse teto, a
+# gente PARA de mandar mídia nova pra IA descrever e segue com o que já tem —
+# nunca deixa uma análise explodir de custo. Configurável por env.
+_CUSTO_MAX_ANALISE_BRL = float(os.environ.get('CUSTO_MAX_ANALISE_BRL', '1.00'))
+
 
 def _precos_modelo(modelo):
     """Preço (input, output) em USD/milhão pro modelo usado. Haiku vem das envs
@@ -11349,6 +11370,171 @@ def _wa_transcricao_cache_salvar(conn, msg_id, texto, segundos, custo_usd):
                      (msg_id, texto, segundos, custo_usd))
     except Exception as e:
         app.logger.warning(f"[TRANSCRICAO_CACHE] falhou ao salvar {msg_id}: {e}")
+
+
+# ─── CACHE DE MÍDIA POR CONTEÚDO (Fase: enxugar custo, jul/2026) ──────────────
+# Pedido do Guilherme: "integrar o que já foi mapeado antes". Toda imagem/PDF
+# tem um HASH do conteúdo (sha256 dos bytes). A PRIMEIRA vez que aparece, a IA
+# lê e a gente guarda uma DESCRIÇÃO factual (o que é a cotação, valores, etc).
+# Da 2ª vez em diante — na MESMA conversa OU em QUALQUER outro lead (o mesmo
+# print de cotação da biblioteca mandado pra 20 clientes) — a gente NÃO paga
+# leitura de novo: injeta a descrição já salva no lugar certo da conversa (em
+# ordem cronológica), e a análise principal roda só-texto (Haiku, barato).
+def _wa_midia_hash(b64):
+    try:
+        return hashlib.sha256((b64 or '').encode('utf-8')).hexdigest()
+    except Exception:
+        return None
+
+
+def _wa_midia_cache_buscar(conn, h):
+    if not h:
+        return None
+    row = conn.execute("SELECT descricao FROM whatsapp_midia_cache WHERE conteudo_hash=?", (h,)).fetchone()
+    return row['descricao'] if row else None
+
+
+def _wa_midia_cache_salvar(conn, h, tipo, descricao, custo_usd):
+    if not h or not descricao:
+        return
+    try:
+        conn.execute("""INSERT OR IGNORE INTO whatsapp_midia_cache
+                        (conteudo_hash, tipo, descricao, custo_usd) VALUES (?,?,?,?)""",
+                     (h, tipo, descricao, custo_usd))
+    except Exception as e:
+        app.logger.warning(f"[MIDIA_CACHE] falhou ao salvar {h[:12]}: {e}")
+
+
+_DESCREVER_SYSTEM = (
+    "Você descreve UMA mídia (imagem ou documento) de uma conversa de corretor de plano de saúde, "
+    "de forma FACTUAL e OBJETIVA, pra outra IA usar depois sem ver a mídia. Não opine, não sugira ação. "
+    "Se for uma COTAÇÃO/tabela de plano: liste operadora, nome do plano, tipo (PF/PME/adesão), acomodação "
+    "(enfermaria/apartamento), coparticipação (sim/não), abrangência, e TODOS os valores por faixa etária que "
+    "aparecerem. Se for DOCUMENTO (RG/CNH/CPF/CNPJ/comprovante/carteirinha): diga o tipo e os dados legíveis "
+    "(nome, número, datas). Se for outra coisa (foto pessoal, meme, print de conversa): descreva em 1 frase. "
+    "Responda só com a descrição, sem preâmbulo."
+)
+
+
+def _descrever_uma_midia(tipo, b64, mime_ou_nome):
+    """Uma chamada de visão BARATA (Haiku) que devolve a descrição textual de UMA
+    mídia. Digital PDF já vem como texto extraído (custo ~zero); imagem e PDF
+    escaneado vão pra visão. Retorna {'descricao','custo_usd'} ou None."""
+    api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    if not api_key:
+        return None
+    conteudo = []
+    if tipo == 'documento':
+        texto_pdf, paginas_img = _pdf_extrair_conteudo(b64)
+        if texto_pdf:
+            # PDF digital: o texto extraído JÁ é a descrição perfeita — sem custo de IA.
+            return {'descricao': ('[PDF ' + str(mime_ou_nome or '') + ']\n' + texto_pdf)[:6000], 'custo_usd': 0.0}
+        if paginas_img:
+            conteudo.append({"type": "text", "text": "Descreva este documento (PDF escaneado, páginas abaixo):"})
+            for pb64 in paginas_img:
+                conteudo.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": pb64}})
+        else:
+            conteudo.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}})
+    else:
+        mime = (mime_ou_nome or 'image/jpeg')
+        if mime not in ('image/jpeg', 'image/png', 'image/webp', 'image/gif'):
+            mime = 'image/jpeg'
+        conteudo.append({"type": "text", "text": "Descreva esta imagem:"})
+        conteudo.append({"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}})
+    try:
+        client = anthropic.Anthropic(api_key=api_key, timeout=90.0, max_retries=1)
+        resp = client.messages.create(
+            model=_CLAUDE_MODEL, max_tokens=700, system=_DESCREVER_SYSTEM,
+            messages=[{"role": "user", "content": conteudo}],
+        )
+        desc = next((b.text for b in resp.content if b.type == 'text'), '').strip()
+        if not desc:
+            return None
+        ti = getattr(resp.usage, 'input_tokens', 0) or 0
+        to = getattr(resp.usage, 'output_tokens', 0) or 0
+        pi, po = _precos_modelo(_CLAUDE_MODEL)
+        return {'descricao': desc[:6000], 'custo_usd': round(ti * pi / 1e6 + to * po / 1e6, 6)}
+    except Exception as e:
+        app.logger.warning(f"[DESCREVER_MIDIA] falhou: {e}")
+        return None
+
+
+def _wa_mapear_midias(conn, imagens, documentos, custo_ja_gasto_usd=0.0):
+    """Transforma imagens+PDFs em LINHAS de texto pra entrar na conversa em ordem
+    cronológica — usando o cache por conteúdo quando já vimos aquela mídia antes,
+    e descrevendo (barato, em paralelo) só as novas. Respeita o teto de custo:
+    se encostar no limite, para de descrever mídia nova e marca as que ficaram.
+    Retorna (linhas[], custo_usd, n_imagens_lidas, n_docs_lidos, n_puladas_por_custo)."""
+    teto_usd = _CUSTO_MAX_ANALISE_BRL / (_USD_BRL_TAXA or 5.1)
+    itens = []
+    for img in (imagens or [])[:_CLAUDE_MAX_IMAGENS]:
+        b64 = (img.get('base64') or '').strip()
+        if b64:
+            itens.append({'tipo': 'imagem', 'b64': b64, 'mime': (img.get('mime') or 'image/jpeg').strip(),
+                          'de': 'CLIENTE' if img.get('de') == 'lead' else 'CONSULTOR', 'hora': str(img.get('hora') or '')})
+    for doc in (documentos or [])[:_CLAUDE_MAX_DOCUMENTOS]:
+        b64 = (doc.get('base64') or '').strip()
+        if b64:
+            itens.append({'tipo': 'documento', 'b64': b64, 'mime': (doc.get('nome') or 'documento.pdf').strip(),
+                          'de': 'CLIENTE' if doc.get('de') == 'lead' else 'CONSULTOR', 'hora': str(doc.get('hora') or '')})
+    # 1) resolve o cache (rápido). Mídias IGUAIS (mesmo hash) na mesma análise
+    #    compartilham a descrição — nunca descreve o mesmo conteúdo 2x, nem
+    #    dentro da mesma chamada (o print de cotação repetido no mesmo lead).
+    for it in itens:
+        it['hash'] = _wa_midia_hash(it['b64'])
+        it['descricao'] = _wa_midia_cache_buscar(conn, it['hash'])
+    # hashes únicos que ainda precisam de descrição (um representante por hash)
+    por_hash = {}
+    for it in itens:
+        if it['descricao'] is None and it['hash'] and it['hash'] not in por_hash:
+            por_hash[it['hash']] = it
+    # 2) descreve os hashes novos EM PARALELO, respeitando o teto de custo
+    custo = 0.0
+    puladas = 0
+    if por_hash:
+        import concurrent.futures as _cf
+        # Só descreve enquanto couber no orçamento (US$0,02/mídia como margem).
+        cabe = []
+        gasto_previsto = custo_ja_gasto_usd
+        for h, it in por_hash.items():
+            if gasto_previsto + 0.02 > teto_usd:
+                puladas += 1
+                continue
+            cabe.append(it)
+            gasto_previsto += 0.02
+        descricoes = {}  # hash -> {descricao, custo}
+        with _cf.ThreadPoolExecutor(max_workers=min(5, len(cabe) or 1)) as _ex:
+            _futs = {_ex.submit(_descrever_uma_midia, it['tipo'], it['b64'], it['mime']): it for it in cabe}
+            for _fut in _cf.as_completed(_futs):
+                it = _futs[_fut]
+                try:
+                    r = _fut.result()
+                except Exception:
+                    r = None
+                if r:
+                    descricoes[it['hash']] = r
+                    custo += r.get('custo_usd') or 0
+                    _wa_midia_cache_salvar(conn, it['hash'], it['tipo'], r['descricao'], r.get('custo_usd') or 0)
+        # aplica a descrição achada a TODOS os itens com aquele hash
+        for it in itens:
+            if it['descricao'] is None and it['hash'] in descricoes:
+                it['descricao'] = descricoes[it['hash']]['descricao']
+    # 3) monta as linhas cronológicas
+    linhas = []
+    n_img = n_doc = 0
+    for it in itens:
+        rot = 'Imagem' if it['tipo'] == 'imagem' else 'Documento/PDF'
+        if it.get('descricao'):
+            linhas.append({'de': 'lead' if it['de'] == 'CLIENTE' else 'consultor', 'hora': it['hora'],
+                           'texto': f"[{rot} enviado pelo {it['de']}] {it['descricao']}"})
+            if it['tipo'] == 'imagem':
+                n_img += 1
+            else:
+                n_doc += 1
+        else:
+            linhas.append({'de': 'lead' if it['de'] == 'CLIENTE' else 'consultor', 'hora': it['hora'],
+                           'texto': f"[{rot} enviado pelo {it['de']} — não foi possível ler o conteúdo]"})
+    return linhas, round(custo, 6), n_img, n_doc, puladas
 
 
 def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=None, links=None):
@@ -13071,7 +13257,25 @@ def api_whatsapp_analisar():
             chave_anterior = chave
         limpa = fundido
 
-    an = _wa_analisar_conversa(limpa, nome_contato=nome, imagens=imagens, documentos=documentos, links=links)
+    # ── Mídia (imagem/PDF) → DESCRIÇÃO cacheada por conteúdo, injetada na
+    # conversa em ordem cronológica. Antes cada análise mandava as imagens/PDFs
+    # CRUS pra IA ler do zero (e subia pro modelo caro), toda vez, inclusive o
+    # MESMO print de cotação repetido em 20 leads — foi o que fez uma análise
+    # custar R$8,96. Agora descreve UMA vez (Haiku, barato, em paralelo), guarda
+    # por hash e reusa; a análise principal roda SÓ-TEXTO. Respeita o teto de
+    # R$1: se encostar, para de descrever mídia nova. Pedido do Guilherme. ──
+    midia_linhas, custo_midia_usd, imgs_lidas, docs_lidos, midias_puladas = _wa_mapear_midias(
+        conn, imagens, documentos, custo_ja_gasto_usd=custo_transcricao_usd)
+    limpa_ia = limpa
+    if midia_linhas:
+        limpa_ia = sorted(limpa + midia_linhas,
+                          key=lambda m: _wa_parse_hora(m.get('hora') or '') or datetime.min)
+    an = _wa_analisar_conversa(limpa_ia, nome_contato=nome, imagens=None, documentos=None, links=links)
+    # A IA não vê mais a mídia crua — as contagens vêm do mapeamento (cache+descrição).
+    if isinstance(an.get('ia'), dict):
+        an['ia']['imagens_lidas'] = imgs_lidas
+        an['ia']['documentos_lidos'] = docs_lidos
+        an['ia']['midias_puladas_custo'] = midias_puladas
     an['audios_transcritos'] = len(transcricoes)
     an['audios_do_cache'] = audios_do_cache
     an['transcricoes'] = transcricoes
@@ -13225,7 +13429,9 @@ def api_whatsapp_analisar():
     diagnostico['docs_extraidos'] = an.get('docs_extraidos') or ''
 
     ia_info = an.get('ia') or {}
-    custo_claude_usd = ia_info.get('custo_usd') or 0
+    # Custo da IA = análise principal (só-texto agora) + descrição das mídias
+    # novas (as reusadas do cache custam ZERO). Tudo é Claude → soma no mesmo campo.
+    custo_claude_usd = (ia_info.get('custo_usd') or 0) + (custo_midia_usd or 0)
     tokens_entrada = ia_info.get('tokens_entrada') or 0
     tokens_saida = ia_info.get('tokens_saida') or 0
     duracao_segundos = round(time.monotonic() - t_inicio, 2)
