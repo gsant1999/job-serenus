@@ -5111,6 +5111,30 @@ def dashboard():
             JOIN propostas p ON p.id=pa.proposta_id
             WHERE pa.status='Pago ao corretor' AND p.status_operacional='Emitida/Ativa'""").fetchone()['v']
         m['fc_antecip'] = conn.execute("SELECT COUNT(*) c FROM parcelas WHERE status='Antecipação - Aguardando ADM'").fetchone()['c']
+        # Vendas do dia e da semana (Guilherme, 20/07: "gostaria de saber as
+        # vendas do dia, da semana e do mês"). "Hoje" e "semana" olham pra
+        # criado_em (quando a proposta foi de fato lançada no sistema) — datas
+        # de calendário reais, diferente do "mês" acima (que usa mes_meta, o
+        # ciclo comercial/fechamento). "Semana" usa o MESMO ciclo quinta-a-
+        # terça que o resto do sistema já usa em Fluxo de Caixa, pra não criar
+        # um terceiro conceito de semana.
+        hoje_ini = date.today().isoformat()
+        hoje_fim = (date.today() + timedelta(days=1)).isoformat()
+        m['hoje_qtd'] = conn.execute(
+            "SELECT COUNT(*) c FROM propostas WHERE status != 'Excluída' AND criado_em>=? AND criado_em<?",
+            (hoje_ini, hoje_fim)).fetchone()['c']
+        m['hoje_valor'] = conn.execute(
+            "SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE status != 'Excluída' AND criado_em>=? AND criado_em<?",
+            (hoje_ini, hoje_fim)).fetchone()['v']
+        _ciclo_sem = ciclo_atual()
+        sem_ini = _ciclo_sem['inicio_iso']
+        sem_fim = (date.fromisoformat(_ciclo_sem['fim_iso']) + timedelta(days=1)).isoformat()
+        m['semana_qtd'] = conn.execute(
+            "SELECT COUNT(*) c FROM propostas WHERE status != 'Excluída' AND criado_em>=? AND criado_em<?",
+            (sem_ini, sem_fim)).fetchone()['c']
+        m['semana_valor'] = conn.execute(
+            "SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE status != 'Excluída' AND criado_em>=? AND criado_em<?",
+            (sem_ini, sem_fim)).fetchone()['v']
         # Alerta auditoria: propostas que precisam evoluir o status operacional
         m['auditoria_pendente'] = conn.execute("""SELECT COUNT(*) c FROM propostas
             WHERE status != 'Excluída' AND status_operacional NOT IN ('Emitida/Ativa')

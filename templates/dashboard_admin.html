@@ -35,6 +35,26 @@
 </a>
 {% endif %}
 
+  <!-- Vendas do dia / semana / mês (Guilherme, 20/07) -->
+  <div style="font-size:12px; font-weight:600; color:var(--cinza); text-transform:uppercase; letter-spacing:.6px; margin-bottom:12px;">Vendas</div>
+  <div class="metricas m-3" style="margin-bottom:20px;">
+    <div class="metrica">
+      <div class="lbl">Hoje</div>
+      <div class="val">{{ m.hoje_qtd }}</div>
+      <div class="sub">R$ {{ m.hoje_valor|numero }}</div>
+    </div>
+    <div class="metrica">
+      <div class="lbl">Semana</div>
+      <div class="val">{{ m.semana_qtd }}</div>
+      <div class="sub">R$ {{ m.semana_valor|numero }} · ciclo {{ ciclo.inicio }}–{{ ciclo.fim }}</div>
+    </div>
+    <div class="metrica">
+      <div class="lbl">Mês</div>
+      <div class="val">{{ m.propostas }}</div>
+      <div class="sub">R$ {{ m.producao|numero }}</div>
+    </div>
+  </div>
+
   <div class="metricas m-4">
     <div class="metrica">
       <div class="lbl">Propostas</div>
