@@ -45,6 +45,7 @@
       <thead>
         <tr>
           <th>ID</th>
+          <th>Data</th>
           <th>Cliente</th>
           {% if session.perfil == 'admin' %}<th>Consultor</th>{% endif %}
           <th>Operadora</th>
@@ -68,6 +69,7 @@
         <tr data-m="{{ p.modalidade }}" data-t="{{ p.tipo_contrato }}"
             data-s="{{ p.razao_social|lower }} {{ p.consultor|lower }} {{ p.adm_operadora|lower }}">
           <td><a href="/proposta/{{ p.id }}" style="color:var(--verde); font-weight:500;">#{{ p.id }}</a></td>
+          <td class="td-mono" style="font-size:12px;color:var(--cinza);white-space:nowrap;" title="Dia que o protocolo da venda subiu no sistema">{{ p.criado_em|data_br }}</td>
           <td><strong>{{ p.razao_social }}</strong></td>
           {% if session.perfil == 'admin' %}<td>{{ p.consultor }}</td>{% endif %}
           <td>{{ p.adm_operadora or '—' }}</td>
