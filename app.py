@@ -2259,6 +2259,35 @@ def init_db():
             except Exception: pass
         print(f"[GESTOR_REGIME] migração pulada: {e}")
 
+    # ─── Backfill de mes_meta em propostas antigas (cadastradas antes dessa
+    # coluna existir). A produção que define o nível N1/N2/N3 passou a somar
+    # por mes_meta (o ciclo de vendas oficial), não mais pelo calendário de
+    # criado_em — sem isso, proposta antiga sem mes_meta preenchido ficaria de
+    # fora da soma de produção do mês dela pra sempre. Aqui só assume
+    # mes_meta = mês de criado_em (a melhor aproximação disponível pra dado
+    # histórico que nunca teve fechamento registrado à parte). ───
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        conn.commit()
+        ja_mm = conn.execute("SELECT 1 FROM meta_flags WHERE k='mesmeta_backfill_20260720'").fetchone()
+        if not ja_mm:
+            faltantes = conn.execute(
+                "SELECT id, criado_em FROM propostas WHERE mes_meta IS NULL OR mes_meta=''").fetchall()
+            n = 0
+            for r in faltantes:
+                ma = str(r['criado_em'] or '')[:7]
+                if len(ma) == 7:
+                    conn.execute("UPDATE propostas SET mes_meta=? WHERE id=?", (ma, r['id']))
+                    n += 1
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('mesmeta_backfill_20260720')")
+            conn.commit()
+            print(f"[MESMETA_BACKFILL] mes_meta preenchido em {n} proposta(s) antiga(s)")
+    except Exception as e:
+        if is_pg:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[MESMETA_BACKFILL] migração pulada: {e}")
+
     close_db(conn)
 
 
@@ -2500,28 +2529,29 @@ def _nivel_por_producao(prod, conn):
     return 'n3'
 
 
-def _producao_mes(conn, usuario_id, criado_em, excluir_pid=None):
-    """Soma a produção (valor) do consultor no mês de criado_em, exceto a própria proposta.
-    Usa range de datas — compatível com PostgreSQL (timestamp) e SQLite (texto).
-    Evita substr()/to_char() que diferem entre os bancos."""
-    ma = str(criado_em or '')[:7]  # 'YYYY-MM'
+def _producao_mes(conn, usuario_id, mes_meta, excluir_pid=None):
+    """Soma a produção (valor) do consultor no CICLO DE VENDAS (mes_meta) —
+    o mesmo mês que o resto do sistema usa (dashboard, filtro de mês,
+    fechamento). Guilherme, 20/07: "não respeita o calendário de vendas do
+    mês, precisa funcionar por ciclo/mês" — antes filtrava pelo calendário
+    de criado_em (data em que a proposta foi lançada no sistema), que diverge
+    do ciclo comercial real quando o fechamento cai num mês diferente do
+    lançamento; o nível N1/N2/N3 saía calculado no mês errado nesses casos."""
+    ma = str(mes_meta or '')[:7]  # 'YYYY-MM'
     if len(ma) != 7:
         return 0
     try:
-        ini = ma + '-01'
-        ano, mes = int(ma[:4]), int(ma[5:7])
-        fim = f"{ano+1}-01-01" if mes == 12 else f"{ano}-{mes+1:02d}-01"
         # Proposta excluída ou estornada NÃO conta produção — essa soma define o
         # nível N1/N2/N3 (percentual de comissão); contar venda que caiu deixava
         # o consultor subir de nível com base em nada.
         base_sql = """SELECT COALESCE(SUM(valor),0) v FROM propostas
-            WHERE usuario_id=? AND criado_em>=? AND criado_em<?
+            WHERE usuario_id=? AND mes_meta=?
               AND status <> 'Excluída' AND COALESCE(estornada,0)=0"""
         if excluir_pid is not None:
             r = conn.execute(base_sql + " AND id<>?",
-                (usuario_id, ini, fim, excluir_pid)).fetchone()
+                (usuario_id, ma, excluir_pid)).fetchone()
         else:
-            r = conn.execute(base_sql, (usuario_id, ini, fim)).fetchone()
+            r = conn.execute(base_sql, (usuario_id, ma)).fetchone()
         return r['v'] if r else 0
     except Exception:
         if DB_MODE == 'postgres':
@@ -3160,8 +3190,8 @@ def corrigir_operadoras():
                 u = conn.execute("SELECT regime_base FROM usuarios WHERE id=?", (p['usuario_id'],)).fetchone()
                 regime = (u['regime_base'] if u else None) or 'sem_lead_sem_fixo'
                 tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
-                # Produção acumulada do mês (igual ao recálculo oficial) para nível correto
-                prod_antes = _producao_mes(conn, p['usuario_id'], p['criado_em'], excluir_pid=pid)
+                # Produção acumulada do CICLO (mes_meta, igual ao recálculo oficial) para nível correto
+                prod_antes = _producao_mes(conn, p['usuario_id'], p['mes_meta'], excluir_pid=pid)
                 prod_acum = prod_antes + (p['valor'] or 0)
                 c = calc_comissao(nova_op, regime, prod_acum, p['valor'] or 0, p['modalidade'], tp)
                 conn.execute("""UPDATE propostas SET comissao_total_corretora=?, comissao_consultor=?,
@@ -5265,15 +5295,18 @@ def salvar_proposta():
         # `or` garante o fallback de verdade.
         regime_base = session.get('regime_base') or 'sem_lead_sem_fixo'
         conn = db(); cur = conn.cursor()
-        ma = datetime.now(TZ_SP).strftime('%Y-%m')
-        # Produção do mês ANTES desta venda + esta venda = produção que define o nível.
-        # (Regra: o nível é o da produção do dia em que a venda subiu, incluindo ela.)
-        prod_antes = cur.execute("SELECT COALESCE(SUM(valor),0) v FROM propostas WHERE usuario_id=? AND strftime('%Y-%m',criado_em)=?",(session['user_id'],ma)).fetchone()['v']
-        prod_acumulada = prod_antes + valor
-        c = calc_comissao(operadora, regime_base, prod_acumulada, valor, modalidade, d.get('tipo_pessoa',''))
-        # mes_meta = mês do fechamento (data_fechamento do form, ou mês atual)
+        # mes_meta = mês do fechamento (data_fechamento do form, ou mês atual) —
+        # é o CICLO DE VENDAS oficial do sistema (mesma base do dashboard, do
+        # filtro de mês e do fechamento). Calculado ANTES da produção porque a
+        # produção que define o nível também tem que ser desse mesmo ciclo, não
+        # do calendário de quando a proposta foi lançada no sistema (Guilherme,
+        # 20/07: "não respeita o calendário de vendas do mês").
         data_fechamento = d.get('data_fechamento','').strip()
         mes_meta = data_fechamento[:7] if (data_fechamento and len(data_fechamento) >= 7) else datetime.now(TZ_SP).strftime('%Y-%m')
+        # Produção do CICLO ANTES desta venda + esta venda = produção que define o nível.
+        prod_antes = _producao_mes(conn, session['user_id'], mes_meta)
+        prod_acumulada = prod_antes + valor
+        c = calc_comissao(operadora, regime_base, prod_acumulada, valor, modalidade, d.get('tipo_pessoa',''))
 
         # status parcelas: bloqueado se sem comprovante
         status_parcela_inicial = 'Bloqueado - Falta Comprovante' if not comprovante_arq else 'Pendente de receber'
@@ -5430,7 +5463,7 @@ def ver_proposta(pid):
         # os zeros gravados sem explicar; agora surfaceia o aviso do próprio motor.
         try:
             u = conn2.execute("SELECT regime_base FROM usuarios WHERE id=?", (p['usuario_id'],)).fetchone()
-            prod = _producao_mes(conn2, p['usuario_id'], p['criado_em'], excluir_pid=pid) + (p['valor'] or 0)
+            prod = _producao_mes(conn2, p['usuario_id'], p['mes_meta'], excluir_pid=pid) + (p['valor'] or 0)
             cc = calc_comissao(p['adm_operadora'], (u['regime_base'] if u else '') or 'sem_lead_sem_fixo',
                                prod, p['valor'] or 0, p['modalidade'],
                                p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
@@ -5460,8 +5493,8 @@ def editar_consultor(pid):
     if not u or not p:
         close_db(conn); return jsonify({"ok": False, "msg": "Consultor ou proposta inválidos"}), 400
 
-    # Produção do mês do NOVO consultor (exceto esta proposta) + esta venda
-    prod_antes = _producao_mes(conn, novo_uid, p['criado_em'], excluir_pid=pid)
+    # Produção do CICLO (mes_meta) do NOVO consultor (exceto esta proposta) + esta venda
+    prod_antes = _producao_mes(conn, novo_uid, p['mes_meta'], excluir_pid=pid)
     prod_acumulada = prod_antes + (p['valor'] or 0)
     c = calc_comissao(p['adm_operadora'], u['regime_base'], prod_acumulada, p['valor'] or 0, p['modalidade'], p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
 
@@ -5498,7 +5531,7 @@ def recalcular_todas():
     recalc, avisos = 0, []
     for p in props:
         regime = p['regime_base'] or 'sem_lead_sem_fixo'
-        prod_antes = _producao_mes(conn, p['usuario_id'], p['criado_em'], excluir_pid=p['id'])
+        prod_antes = _producao_mes(conn, p['usuario_id'], p['mes_meta'], excluir_pid=p['id'])
         prod_acum = prod_antes + (p['valor'] or 0)
         tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
         c = calc_comissao(p['adm_operadora'], regime, prod_acum, p['valor'] or 0, p['modalidade'], tp)
@@ -5544,7 +5577,7 @@ def comissoes_problemas():
         if valor <= 0:
             continue
         tp = p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else ''
-        prod = _producao_mes(conn, p['usuario_id'], p['criado_em'], excluir_pid=p['id']) + valor
+        prod = _producao_mes(conn, p['usuario_id'], p['mes_meta'], excluir_pid=p['id']) + valor
         cc = calc_comissao(p['adm_operadora'], (p['regime_base'] or 'sem_lead_sem_fixo'),
                            prod, valor, p['modalidade'], tp)
         aviso = cc.get('aviso') or ''
@@ -6610,8 +6643,12 @@ def crm_leads_duplicados_aplicar():
 @login_required
 @admin_required
 def api_consultores():
+    # Antes só listava perfil='consultor' — gestores (admin) que também vendem
+    # não apareciam pra receber o remanejo de uma proposta ("nós vendemos
+    # também", Guilherme 20/07). Regime já é explícito pra todo mundo agora
+    # (ver commit db5089b), então qualquer usuário ativo pode entrar aqui.
     conn = db()
-    rows = conn.execute("SELECT id,nome,regime_base FROM usuarios WHERE ativo=1 AND perfil='consultor' ORDER BY nome").fetchall()
+    rows = conn.execute("SELECT id,nome,regime_base FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()
     close_db(conn)
     return jsonify([{'id': r['id'], 'nome': r['nome'],
                      'regime': MODELO_NOME.get(r['regime_base'], r['regime_base'] or '—')} for r in rows])
