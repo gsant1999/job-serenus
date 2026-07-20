@@ -6443,9 +6443,24 @@ def api_whatsapp_campanha_aguardando():
         WHERE consultor_id=? AND status='sem_resposta' AND excluido_em IS NULL
           AND telefone_norm IS NOT NULL AND telefone_norm<>''""", (uid,)).fetchall()
     close_db(conn)
+    # DEDUP por telefone: o mesmo número pode estar em MAIS de uma campanha
+    # (várias linhas em campanha_contato) — o aviso mostrava "Gábriel" duas
+    # vezes e o apagar tentaria excluir o mesmo chat duas vezes. Uma conversa
+    # no WhatsApp = uma entrada aqui, sempre.
+    def _dedup(rows):
+        # Chave = chat_id (não a string do telefone): '5519...' e '19...' são o
+        # MESMO chat no WhatsApp e apareciam como duas entradas no aviso.
+        por_chat = {}
+        for r in rows:
+            li = _linha(r)
+            ja = por_chat.get(li['chat_id'])
+            # fica a entrada COM nome (a linha sem 55 pode não casar o lead)
+            if ja is None or (not ja['nome'] and li['nome']):
+                por_chat[li['chat_id']] = li
+        return list(por_chat.values())
     return _wa_cors(jsonify({"ok": True,
-        "aguardando": [_linha(r) for r in aguard],
-        "excluir": [_linha(r) for r in excluir]}))
+        "aguardando": _dedup(aguard),
+        "excluir": _dedup(excluir)}))
 
 
 @app.route('/api/whatsapp/campanha/excluir-conversa', methods=['POST', 'OPTIONS'])
@@ -6466,13 +6481,29 @@ def api_whatsapp_campanha_excluir():
     conn = db()
     if not conn.execute("SELECT 1 FROM usuarios WHERE id=? AND ativo=1", (uid,)).fetchone():
         close_db(conn); return _wa_cors(jsonify({"ok": False, "erro": "consultor inválido"})), 403
-    if cid:
+    # Marca por TELEFONE sempre que houver: o mesmo número pode estar em várias
+    # campanhas (várias linhas) e a conversa apagada é UMA — marcar só pelo id
+    # deixava a linha da outra campanha viva e o aviso de limpeza ressuscitava.
+    # Casa TODAS as variantes do número (com/sem 55): campanha_contato guarda o
+    # formato de quem importou, e _normalizar_telefone tira o 55 — sem isso o
+    # UPDATE não achava a linha e o aviso voltava mesmo depois de apagar.
+    import re as _re
+    bruto = _re.sub(r'\D', '', str(d.get('telefone') or ''))
+    variantes = {v for v in (
+        tel, bruto,
+        ('55' + tel) if tel and not tel.startswith('55') else '',
+        tel[2:] if tel.startswith('55') else '',
+        ('55' + bruto) if bruto and not bruto.startswith('55') else '',
+        bruto[2:] if bruto.startswith('55') else '',
+    ) if v}
+    if variantes:
+        marcadores = ','.join(['?'] * len(variantes))
+        conn.execute(f"""UPDATE campanha_contato SET status='excluido', excluido_em=?
+            WHERE telefone_norm IN ({marcadores}) AND consultor_id=? AND status IN ('sem_resposta','enviado')""",
+            (_agora_sp(), *variantes, uid))
+    elif cid:
         conn.execute("UPDATE campanha_contato SET status='excluido', excluido_em=? WHERE id=? AND consultor_id=?",
                      (_agora_sp(), cid, uid))
-    else:
-        conn.execute("""UPDATE campanha_contato SET status='excluido', excluido_em=?
-            WHERE telefone_norm=? AND consultor_id=? AND status IN ('sem_resposta','enviado')""",
-            (_agora_sp(), tel, uid))
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
 

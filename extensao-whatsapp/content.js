@@ -3064,7 +3064,24 @@
       if (a.chat_id) _campWatch.set(a.chat_id, { telefone: a.telefone, contato_id: a.contato_id });
     });
     _campExcluir = (resp.excluir || []).filter((e) => e.chat_id);
-    mostrarAvisoLimpeza(_campExcluir);
+    // Dedup por chat_id também aqui (defesa em profundidade — o servidor já
+    // deduplica, mas um backend velho não pode duplicar o aviso; chat_id
+    // normaliza '5519...' e '19...' pro mesmo chat).
+    const _chatsVistos = new Set();
+    _campExcluir = _campExcluir.filter((e) => {
+      if (_chatsVistos.has(e.chat_id)) return false;
+      _chatsVistos.add(e.chat_id); return true;
+    });
+    // O "×" vale de verdade: quem dispensou o aviso não o vê de novo a cada
+    // varredura de 60s (era a "insistência" que o Guilherme reclamou). Guarda a
+    // assinatura da lista dispensada; só reaparece se surgir contato NOVO.
+    const _assin = _campExcluir.map((e) => e.telefone).sort().join(',');
+    const { limpezaDispensada } = await chrome.storage.local.get(['limpezaDispensada']);
+    if (_campExcluir.length && _assin === limpezaDispensada) {
+      const bx = document.getElementById('job-aviso-limpeza'); if (bx) bx.remove();
+    } else {
+      mostrarAvisoLimpeza(_campExcluir, _assin);
+    }
     // POLLING de resposta (fallback do evento): lê cada chat vigiado e, se o contato
     // já respondeu, reporta ao JOB. Cap por rodada pra não pesar. Confiável mesmo
     // quando o evento chat.new_message não dispara.
@@ -3117,7 +3134,7 @@
   // Aviso de LIMPEZA pós-campanha. Antes só dizia "2 conversa(s)" — perigoso pra
   // uma ação IRREVERSÍVEL. Agora lista QUEM (nome + telefone) e explica o motivo
   // (contatos que você disparou e não responderam no prazo).
-  function mostrarAvisoLimpeza(lista) {
+  function mostrarAvisoLimpeza(lista, assinatura) {
     const itens = Array.isArray(lista) ? lista : [];
     const qtd = itens.length;
     if (!qtd) { const b0 = document.getElementById('job-aviso-limpeza'); if (b0) b0.remove(); return; }
@@ -3141,7 +3158,12 @@
     let box = document.getElementById('job-aviso-limpeza');
     if (!box) { box = document.createElement('div'); box.id = 'job-aviso-limpeza'; document.body.appendChild(box); }
     box.innerHTML = corpo;
-    box.querySelector('.job-aviso-versao-x').addEventListener('click', () => box.remove());
+    box.querySelector('.job-aviso-versao-x').addEventListener('click', () => {
+      box.remove();
+      // Dispensa PERSISTENTE (vale entre F5s): esta lista não volta a incomodar;
+      // só reaparece se um contato NOVO entrar na limpeza (assinatura muda).
+      if (assinatura) { try { chrome.storage.local.set({ limpezaDispensada: assinatura }); } catch (e) { /* sem storage */ } }
+    });
     box.querySelector('#job-limpar-btn').addEventListener('click', limparSemResposta);
   }
 
