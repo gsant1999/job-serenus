@@ -2743,6 +2743,30 @@
       let links = [];
       try { links = rasparLinks(); } catch (e) { links = []; }
 
+      // TRAVA DE TAMANHO DO PAYLOAD. Mandar tudo numa mensagem só pro service
+      // worker (44 áudios + imagens + PDFs = dezenas de MB) estoura a memória
+      // do SW: ele MORRE e a análise falha ANTES de chegar no servidor (foi o
+      // que quebrou na Hellen e no Fernando — o POST /analisar nem aparecia no
+      // log). Mantém os ÁUDIOS (prioridade do Guilherme, e são pequenos) e
+      // encaixa o máximo de imagens/PDF num teto seguro; o que não couber é
+      // cortado e vira "X de Y" no painel (os *_encontrados seguem sendo o
+      // total real). Prioriza os menores pra caber o máximo de itens.
+      const _PAYLOAD_MAX_B64 = 8 * 1024 * 1024; // ~8MB de base64 (o que já rodava antes)
+      const _tamB64 = (m) => (m && m.base64 ? m.base64.length : 0);
+      let _orcamento = _PAYLOAD_MAX_B64;
+      const _audiosOk = [];
+      for (const a of audios) { const t = _tamB64(a); if (t <= _orcamento) { _audiosOk.push(a); _orcamento -= t; } }
+      const _pesadas = [
+        ...imagens.map((x) => ({ tipo: 'img', item: x })),
+        ...documentos.map((x) => ({ tipo: 'doc', item: x })),
+      ].sort((p, q) => _tamB64(p.item) - _tamB64(q.item));
+      const _imagensOk = [], _documentosOk = [];
+      for (const p of _pesadas) {
+        const t = _tamB64(p.item);
+        if (t <= _orcamento) { (p.tipo === 'img' ? _imagensOk : _documentosOk).push(p.item); _orcamento -= t; }
+      }
+      audios = _audiosOk; imagens = _imagensOk; documentos = _documentosOk;
+
       if (_cancelados.has(reqId)) return;
       entrada.totalMsgs = mensagens.length;
 
