@@ -2234,8 +2234,32 @@ def init_db():
             except Exception: pass
         print(f"[FUNILEXEC] migração pulada: {e}")
 
-    close_db(conn)
+    # ─── Regime de comissão explícito p/ gestores (admin/supervisor/gestor_vendedor)
+    # que vendem. Guilherme, 20/07: "os gestores que vendem recebem no nível de
+    # sem fixo e sem lead, mas quero as funções ADM preservadas (o perfil
+    # 'gestor vendedor' dá muito erro de acesso)". A conta já caía nesse regime
+    # por coincidência (vários pontos do código tratam regime_base='' como esse
+    # fallback), mas ficava em branco no cadastro ("—" na tela de Usuários) e
+    # frágil pra manter. Aqui só preenche o que estava em branco — não mexe em
+    # perfil de ninguém. ───
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        conn.commit()
+        ja_gr = conn.execute("SELECT 1 FROM meta_flags WHERE k='gestor_regime_20260720'").fetchone()
+        if not ja_gr:
+            conn.execute("""UPDATE usuarios SET regime_base='sem_lead_sem_fixo'
+                WHERE perfil IN ('admin','supervisor','gestor_vendedor')
+                  AND (regime_base IS NULL OR regime_base='')""")
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('gestor_regime_20260720')")
+            conn.commit()
+            print("[GESTOR_REGIME] regime_base preenchido p/ admin/supervisor/gestor_vendedor sem regime")
+    except Exception as e:
+        if is_pg:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[GESTOR_REGIME] migração pulada: {e}")
 
+    close_db(conn)
 
 
 # ─── ESTRUTURA DO FLUXO SEMANAL AUTOMÁTICO ──────────────────────────────────
@@ -5236,7 +5260,10 @@ def salvar_proposta():
         valor = _num_brl(d.get('valor','0'))
         operadora = d.get('adm_operadora','')
         modalidade = d.get('modalidade','')
-        regime_base = session.get('regime_base','sem_lead_sem_fixo')
+        # `or` (não .get com default): se o valor salvo for '' (string vazia,
+        # não ausente), .get(chave, default) devolve '' mesmo assim — só o
+        # `or` garante o fallback de verdade.
+        regime_base = session.get('regime_base') or 'sem_lead_sem_fixo'
         conn = db(); cur = conn.cursor()
         ma = datetime.now(TZ_SP).strftime('%Y-%m')
         # Produção do mês ANTES desta venda + esta venda = produção que define o nível.
@@ -7770,9 +7797,15 @@ def usuario_novo():
     cpf = d.get('cpf','').strip()
     conn = db()
     try:
+        # Regime de comissão: consultor usa o que foi escolhido no form; qualquer
+        # outro perfil (admin/supervisor/gestor_vendedor) grava explicitamente
+        # 'sem_lead_sem_fixo' — não deixa em branco. Em branco funcionava por
+        # coincidência (vários pontos do código tratam '' como esse fallback),
+        # mas é frágil e a tela de Usuários mostrava "—" em vez do regime real
+        # que estava sendo aplicado nas vendas desse gestor.
         conn.execute("""INSERT INTO usuarios (nome,email,perfil,regime_base,token_setup,token_expira,cpf)
             VALUES (?,?,?,?,?,?,?)""",(nome,email,d.get('perfil','consultor'),
-            (d.get('regime_base','sem_lead_sem_fixo') if d.get('perfil','consultor')=='consultor' else ''),token,expira,cpf or None))
+            (d.get('regime_base','sem_lead_sem_fixo') if d.get('perfil','consultor')=='consultor' else 'sem_lead_sem_fixo'),token,expira,cpf or None))
         conn.commit()
     except sqlite3.IntegrityError:
         flash('E-mail já cadastrado.'); close_db(conn); return redirect(url_for('usuarios'))
@@ -7853,9 +7886,12 @@ def usuario_editar(uid):
         modulos_val = json.dumps(marcados)
     funil_atendimento_id = (d.get('funil_atendimento_id', '') or '').strip()
     funil_atendimento_id = int(funil_atendimento_id) if funil_atendimento_id.isdigit() else None
+    # Regime de comissão: consultor usa o que veio do form; qualquer outro
+    # perfil (admin/supervisor/gestor_vendedor) grava explicitamente
+    # 'sem_lead_sem_fixo' — mesmo motivo do usuario_novo acima (ver comentário lá).
     conn.execute("""UPDATE usuarios SET nome=?,email=?,perfil=?,regime_base=?,ativo=?,valor_fixo=?,chave_pix=?,foto=?,cpf=?,telefone=?,waspeed_token=?,modulos=?,funil_atendimento_id=? WHERE id=?""",
         (d['nome'],d['email'].lower(),d['perfil'],
-         (d['regime_base'] if d['perfil']=='consultor' else ''),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,
+         (d['regime_base'] if d['perfil']=='consultor' else 'sem_lead_sem_fixo'),ativo,fnum('valor_fixo'),d.get('chave_pix',''),foto_nome,d.get('cpf','') or None,
          d.get('telefone','').strip(),d.get('waspeed_token','').strip() or None,modulos_val,funil_atendimento_id,uid))
     conn.commit(); close_db(conn)
     return redirect(url_for('usuarios'))
