@@ -27,6 +27,19 @@ async function config() {
 // de uma rodando pra conversas diferentes ao mesmo tempo) sem afetar as outras.
 const _emAndamento = new Map();
 
+// reqId -> payload sendo montado em lotes (analisar_iniciar/_parte/_executar).
+// O content script manda a base + as mídias em pedaços pequenos pra NUNCA
+// trafegar um bloco gigante (que matava o service worker); aqui a gente acumula
+// e só dispara o fetch no _executar. Some ao executar/cancelar; TTL de faxina
+// pra não vazar se a aba morrer no meio.
+const _partesAnalise = new Map();
+function _faxinaPartes() {
+  const agora = Date.now();
+  for (const [k, v] of _partesAnalise) {
+    if (agora - (v._ts || 0) > 10 * 60 * 1000) _partesAnalise.delete(k);
+  }
+}
+
 async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId) {
   const { jobUrl, extKey } = await config();
   if (!extKey) {
@@ -143,6 +156,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/analisar', 'POST', msg.payload, 300000, msg.reqId).then(sendResponse);
     return true;
   }
+  // ── Análise em LOTES (não estoura o service worker em conversa pesada) ──
+  if (msg && msg.type === 'analisar_iniciar') {
+    _faxinaPartes();
+    const base = msg.base || {};
+    _partesAnalise.set(msg.reqId, {
+      _ts: Date.now(),
+      telefone: base.telefone, nome: base.nome,
+      mensagens: base.mensagens || [], links: base.links || [],
+      usuario_id: base.usuario_id || null, whatsapp_consultor: base.whatsapp_consultor || null,
+      documentos_encontrados: base.documentos_encontrados || 0,
+      audios_encontrados: base.audios_encontrados || 0,
+      imagens_encontrados: base.imagens_encontrados || 0,
+      audios: [], imagens: [], documentos: [],
+    });
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (msg && msg.type === 'analisar_parte') {
+    const acc = _partesAnalise.get(msg.reqId);
+    if (!acc) { sendResponse({ ok: false, erro: 'Sessão de análise expirou — tente de novo.' }); return true; }
+    const alvo = acc[msg.tipo];
+    if (Array.isArray(alvo) && Array.isArray(msg.itens)) { for (const it of msg.itens) alvo.push(it); acc._ts = Date.now(); }
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (msg && msg.type === 'analisar_executar') {
+    const acc = _partesAnalise.get(msg.reqId);
+    if (!acc) { sendResponse({ ok: false, erro: 'Sessão de análise expirou — tente de novo.' }); return true; }
+    _partesAnalise.delete(msg.reqId); // libera a memória do SW antes do fetch
+    const { _ts, ...payload } = acc;
+    chamarJob('/api/whatsapp/analisar', 'POST', payload, 300000, msg.reqId).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'enviar_direto') {
     // Compor e mandar direto do painel da extensão, sem precisar abrir o
     // site do JOB — enfileira e casa/cria o lead pelo telefone da conversa.
@@ -202,6 +248,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'cancelar') {
     const registro = _emAndamento.get(msg.reqId);
     if (registro) { registro.cancelado = true; registro.controller.abort(); }
+    _partesAnalise.delete(msg.reqId); // descarta lotes acumulados que não viraram fetch
     sendResponse({ ok: true });
     return false;
   }

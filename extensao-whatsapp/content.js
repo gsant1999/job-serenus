@@ -608,6 +608,26 @@
     });
   }
 
+  // Envia a análise em LOTES pro background (nunca numa mensagem gigante — isso
+  // matava o service worker). O background acumula tudo por reqId e, no
+  // 'analisar_executar', dispara UM fetch com o payload montado. Devolve a mesma
+  // resposta que o /api/whatsapp/analisar sempre devolveu.
+  async function enviarAnaliseEmLotes(reqId, base, audios, imagens, documentos) {
+    const ini = await chrome.runtime.sendMessage({ type: 'analisar_iniciar', reqId, base });
+    if (!ini || !ini.ok) return ini || { ok: false, erro: 'Falha ao iniciar a análise.' };
+    const LOTE = 4; // poucos itens por mensagem = o SW nunca segura um bloco grande
+    async function enviarTipo(tipo, arr) {
+      for (let i = 0; i < (arr || []).length; i += LOTE) {
+        const r = await chrome.runtime.sendMessage({ type: 'analisar_parte', reqId, tipo, itens: arr.slice(i, i + LOTE) });
+        if (!r || !r.ok) throw new Error((r && r.erro) || 'Falha ao enviar mídia.');
+      }
+    }
+    await enviarTipo('audios', audios);
+    await enviarTipo('imagens', imagens);
+    await enviarTipo('documentos', documentos);
+    return await chrome.runtime.sendMessage({ type: 'analisar_executar', reqId });
+  }
+
   // Consultor escolhido no popup — cacheado pra comparações síncronas no render
   // (ex: "este lead é meu?" ao reabrir uma análise salva). Atualiza sozinho se
   // o popup mudar (storage.onChanged).
@@ -1230,6 +1250,7 @@
   // Chama de novo o conteúdo certo da seção "Análise" quando o consultor troca
   // de conversa — nunca deixa a análise do cliente anterior "grudada" na tela
   // do cliente novo. Só mexe se a seção estiver de fato aberta agora.
+  let _syncToken = 0; // marca a sincronização atual (pro watchdog do spinner)
   async function sincronizarPainelComConversa() {
     if (_secaoAtiva !== 'analise') return;
     const chaveAtual = chaveConversa(telefoneDoContato(), nomeDoContato());
@@ -1271,6 +1292,17 @@
     // depois do fetch pra não pintar a tela errada se o consultor já trocou
     // de conversa enquanto a busca estava em voo.
     setCorpoSecao(telaBuscandoUltima());
+    // Watchdog: o spinner "Verificando análise salva…" NUNCA pode ficar preso.
+    // Se em 12s a resolução do telefone / o estado não voltarem (rede lenta,
+    // conta @lid difícil, aba estrangulada em 2o plano), cai pro botão de
+    // analisar em vez de girar pra sempre. O token evita que um watchdog velho
+    // pise numa sincronização mais nova.
+    const _tk = ++_syncToken;
+    setTimeout(() => {
+      if (_tk !== _syncToken || _secaoAtiva !== 'analise') return;
+      const c = document.getElementById('job-painel-doc-corpo');
+      if (c && c.querySelector('.job-carregando')) setCorpoSecao(telaSemAnalise());
+    }, 12000);
     let telefone = '';
     try { telefone = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { telefone = telefoneDoContato(); }
     if (trocouDeConversa()) return;
@@ -2751,7 +2783,7 @@
       // encaixa o máximo de imagens/PDF num teto seguro; o que não couber é
       // cortado e vira "X de Y" no painel (os *_encontrados seguem sendo o
       // total real). Prioriza os menores pra caber o máximo de itens.
-      const _PAYLOAD_MAX_B64 = 8 * 1024 * 1024; // ~8MB de base64 (o que já rodava antes)
+      const _PAYLOAD_MAX_B64 = 22 * 1024 * 1024; // freio de segurança (o envio em lotes já evita o estouro; isto é só p/ conversa monstruosa)
       const _tamB64 = (m) => (m && m.base64 ? m.base64.length : 0);
       let _orcamento = _PAYLOAD_MAX_B64;
       const _audiosOk = [];
@@ -2792,13 +2824,19 @@
       // de fato na conversa); o consultor do popup vira fallback.
       let meuNumero = '';
       try { meuNumero = await pedirMeuNumero(); } catch (e) { /* segue sem */ }
-      const resp = await chrome.runtime.sendMessage({
-        type: 'analisar', reqId,
-        payload: { telefone, nome, mensagens, imagens, audios, documentos, links,
-                   usuario_id: usuarioId || null, whatsapp_consultor: meuNumero || null,
-                   documentos_encontrados: documentosEncontrados,
-                   audios_encontrados: audiosEncontrados, imagens_encontrados: imagensEncontradas }
-      });
+      // ENVIO EM LOTES: mandar tudo numa mensagem só pro service worker estoura
+      // a memória dele (ele morre e a análise falha ANTES de chegar no servidor
+      // — foi o que quebrou com 44 áudios). Aqui manda a BASE (texto/meta, leve),
+      // depois as mídias em lotes pequenos que o background vai acumulando, e só
+      // então dispara UM fetch com tudo montado. Sem pacote gigante, sem perder
+      // mídia. O reqId amarra os lotes e permite cancelar.
+      const _baseAnalise = {
+        telefone, nome, mensagens, links,
+        usuario_id: usuarioId || null, whatsapp_consultor: meuNumero || null,
+        documentos_encontrados: documentosEncontrados,
+        audios_encontrados: audiosEncontrados, imagens_encontrados: imagensEncontradas,
+      };
+      const resp = await enviarAnaliseEmLotes(reqId, _baseAnalise, audios, imagens, documentos);
 
       // Se o usuário cancelou enquanto a resposta ainda estava a caminho, não
       // sobrescreve o status 'cancelado' já aplicado por cancelarAnalise().
