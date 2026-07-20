@@ -6428,11 +6428,18 @@ def api_whatsapp_campanha_aguardando():
     _campanha_marcar_sem_resposta(conn)  # promove os vencidos antes de listar
     def _linha(r):
         return {"contato_id": r['id'], "telefone": r['telefone_norm'],
+                "nome": (r['lead_nome'] or ''),
                 "chat_id": _wa_chat_id(r['telefone_norm'] or r['telefone'] or '')}
-    aguard = conn.execute("""SELECT id, telefone, telefone_norm FROM campanha_contato
+    # Nome do lead por subquery (não multiplica linha se houver lead duplicado)
+    # — pra o aviso de limpeza dizer QUEM vai ser apagado, não só "2 conversas".
+    aguard = conn.execute("""SELECT id, telefone, telefone_norm,
+        (SELECT nome FROM crm_leads l WHERE l.telefone_norm = campanha_contato.telefone_norm ORDER BY l.id LIMIT 1) AS lead_nome
+        FROM campanha_contato
         WHERE consultor_id=? AND status='enviado' AND respondeu_em IS NULL AND excluido_em IS NULL
           AND telefone_norm IS NOT NULL AND telefone_norm<>''""", (uid,)).fetchall()
-    excluir = conn.execute("""SELECT id, telefone, telefone_norm FROM campanha_contato
+    excluir = conn.execute("""SELECT id, telefone, telefone_norm,
+        (SELECT nome FROM crm_leads l WHERE l.telefone_norm = campanha_contato.telefone_norm ORDER BY l.id LIMIT 1) AS lead_nome
+        FROM campanha_contato
         WHERE consultor_id=? AND status='sem_resposta' AND excluido_em IS NULL
           AND telefone_norm IS NOT NULL AND telefone_norm<>''""", (uid,)).fetchall()
     close_db(conn)

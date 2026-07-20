@@ -3064,8 +3064,7 @@
       if (a.chat_id) _campWatch.set(a.chat_id, { telefone: a.telefone, contato_id: a.contato_id });
     });
     _campExcluir = (resp.excluir || []).filter((e) => e.chat_id);
-    if (_campExcluir.length) mostrarAvisoLimpeza(_campExcluir.length);
-    else { const b = document.getElementById('job-aviso-limpeza'); if (b) b.remove(); }
+    mostrarAvisoLimpeza(_campExcluir);
     // POLLING de resposta (fallback do evento): lê cada chat vigiado e, se o contato
     // já respondeu, reporta ao JOB. Cap por rodada pra não pesar. Confiável mesmo
     // quando o evento chat.new_message não dispara.
@@ -3105,18 +3104,43 @@
   setInterval(buscarInbox, 45000);
   ligarLoopInbox();
 
-  function mostrarAvisoLimpeza(qtd) {
-    let box = document.getElementById('job-aviso-limpeza');
-    if (box) { const q = box.querySelector('.job-limpeza-qtd'); if (q) q.textContent = qtd; return; }
-    box = document.createElement('div');
-    box.id = 'job-aviso-limpeza';
-    box.innerHTML =
-      '<div class="job-aviso-versao-topo"><b>Campanha — sem resposta</b>' +
+  // Formata o telefone (dígitos) num rótulo BR legível pro aviso de limpeza.
+  function fmtTelLimpezaBr(t) {
+    const d = String(t || '').replace(/\D/g, '');
+    if (d.length === 13 && d.startsWith('55')) return '+55 (' + d.slice(2, 4) + ') ' + d.slice(4, 9) + '-' + d.slice(9);
+    if (d.length === 12 && d.startsWith('55')) return '+55 (' + d.slice(2, 4) + ') ' + d.slice(4, 8) + '-' + d.slice(8);
+    if (d.length === 11) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7);
+    if (d.length === 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6);
+    return t || '';
+  }
+
+  // Aviso de LIMPEZA pós-campanha. Antes só dizia "2 conversa(s)" — perigoso pra
+  // uma ação IRREVERSÍVEL. Agora lista QUEM (nome + telefone) e explica o motivo
+  // (contatos que você disparou e não responderam no prazo).
+  function mostrarAvisoLimpeza(lista) {
+    const itens = Array.isArray(lista) ? lista : [];
+    const qtd = itens.length;
+    if (!qtd) { const b0 = document.getElementById('job-aviso-limpeza'); if (b0) b0.remove(); return; }
+    const linhas = itens.slice(0, 6).map((e) => {
+      const nome = (e.nome || '').trim();
+      const tel = fmtTelLimpezaBr(e.telefone || '');
+      return '<div style="font-size:12px;opacity:.92;padding:2px 0;">' +
+        (nome ? '<b>' + esc(nome) + '</b> · ' : '') + esc(tel) + '</div>';
+    }).join('');
+    const mais = qtd > 6 ? '<div style="font-size:11.5px;opacity:.7;padding-top:2px;">+ ' + (qtd - 6) + ' outro(s)</div>' : '';
+    const corpo =
+      '<div class="job-aviso-versao-topo"><b>Limpeza pós-campanha</b>' +
         '<button class="job-aviso-versao-x" title="Depois">×</button></div>' +
-      '<div class="job-aviso-versao-corpo"><span class="job-limpeza-qtd">' + qtd + '</span> conversa(s) sem resposta no prazo. Apagar essas conversas do seu WhatsApp?' +
-        '<div style="margin-top:10px;"><button class="job-analisar-btn" id="job-limpar-btn">Apagar conversas</button></div>' +
-        '<div class="job-aviso-versao-nota">Só apaga quem não respondeu. Ação irreversível.</div></div>';
-    document.body.appendChild(box);
+      '<div class="job-aviso-versao-corpo">' +
+        'Estes <b>' + qtd + '</b> contato(s) que você disparou na campanha <b>não responderam</b> no prazo. ' +
+        'Quer apagar essas conversas do seu WhatsApp pra limpar a lista?' +
+        '<div style="margin:8px 0;max-height:150px;overflow-y:auto;">' + linhas + mais + '</div>' +
+        '<div style="margin-top:6px;"><button class="job-analisar-btn" id="job-limpar-btn">Apagar conversas</button></div>' +
+        '<div class="job-aviso-versao-nota">Só apaga quem não respondeu. Ação irreversível no WhatsApp.</div>' +
+      '</div>';
+    let box = document.getElementById('job-aviso-limpeza');
+    if (!box) { box = document.createElement('div'); box.id = 'job-aviso-limpeza'; document.body.appendChild(box); }
+    box.innerHTML = corpo;
     box.querySelector('.job-aviso-versao-x').addEventListener('click', () => box.remove());
     box.querySelector('#job-limpar-btn').addEventListener('click', limparSemResposta);
   }
