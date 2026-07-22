@@ -2892,6 +2892,12 @@ _ROTAS_SERENUS = (
     '/crm/importar-meninas', '/crm/modelos/importar-botconversa',
     '/crm/modelos/importar-zapvoice', '/manual',
 )
+# Sufixos em /proposta/<id>/... do fluxo Affinity (parceiro do Serenus): envio
+# de protocolo/antecipação e o e-mail-modelo. Também só no Serenus.
+_SUFIXOS_AFFINITY = (
+    '/email-affinity', '/enviar-plataforma', '/enviar-teste',
+    '/antecipacao/enviar', '/antecipacao/preview',
+)
 
 
 @app.before_request
@@ -2902,7 +2908,8 @@ def _gate_operador_serenus():
     p = request.path
     if not MODO_OPERADOR and p.startswith(_ROTAS_OPERADOR):
         abort(404)
-    if not _eh_serenus() and p.startswith(_ROTAS_SERENUS):
+    if not _eh_serenus() and (p.startswith(_ROTAS_SERENUS)
+                              or (p.startswith('/proposta/') and p.endswith(_SUFIXOS_AFFINITY))):
         abort(404)
 
 
@@ -17470,6 +17477,11 @@ def _botconversa_transferir_titularidade(telefone, menina_nome):
     Nunca lança exceção (best-effort — se o BotConversa falhar, a transferência
     no JOB já aconteceu e continua valendo; só não sincroniza lá).
     Retorna (ok: bool, msg: str)."""
+    # BotConversa é integração específica do Serenus (managers/meninas fixos).
+    # Já seria inerte sem a API key numa instância de cliente, mas gateamos
+    # explícito pra deixar claro que não roda fora do Serenus.
+    if not _eh_serenus():
+        return False, 'integração indisponível'
     api_key = os.environ.get('BOTCONVERSA_API_KEY', '').strip()
     if not api_key:
         return False, 'BOTCONVERSA_API_KEY não configurada'
@@ -21106,8 +21118,14 @@ def _ler_google_sheets_por_gid(sheet_id, gid):
 
 def _listar_leads_do_sheets():
     """Lê ambas as planilhas (Facebook e Google) e retorna lista de leads brutos."""
+    # ISOLAMENTO: as planilhas abaixo são as do SERENUS (IDs chumbados). Numa
+    # instância de cliente (outra marca) isso puxaria os leads do Serenus pro CRM
+    # dele — vazamento. Então só roda na marca Serenus. Um cliente configura a
+    # fonte de leads dele depois (integração própria); por ora, não importa nada.
+    if not _eh_serenus():
+        return []
     leads = []
-    
+
     # Facebook: "LEADS GERAIS" (gid=0) — por gid, não por nome: /gviz cacheava
     # a coluna Consultor desatualizada (confirmado 04/07/2026)
     facebook_id = '1VOChFfTkuVO4eO0FCAkBjrP9qDFnvWZnk5rLdUrNm64'

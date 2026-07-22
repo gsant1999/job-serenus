@@ -131,6 +131,7 @@
         Editar proposta
       </button>
 
+      {% if eh_serenus %}
       <button onclick="abrirEmailAffinity()" style="padding:9px 18px;border-radius:8px;background:rgba(59,130,246,.12);color:var(--info);border:1px solid rgba(59,130,246,.3);cursor:pointer;font-size:13px;font-weight:600;">
         Enviar para Affinity
       </button>
@@ -138,6 +139,7 @@
       <button onclick="abrirAntecipacao()" style="padding:9px 18px;border-radius:8px;background:rgba(31,216,164,.1);color:var(--teal);border:1px solid rgba(31,216,164,.3);cursor:pointer;font-size:13px;font-weight:600;">
         Solicitar antecipacao
       </button>
+      {% endif %}
 
       <button onclick="abrirConsultor()" style="padding:9px 18px;border-radius:8px;background:var(--panel-2);color:var(--texto);border:1px solid var(--borda);cursor:pointer;font-size:13px;font-weight:600;">
         Trocar consultor
