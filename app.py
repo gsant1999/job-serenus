@@ -3028,6 +3028,9 @@ BRAND = {
     'corretora':     os.environ.get('BRAND_CORRETORA') or 'Corretora Serenus',
     'ano':           os.environ.get('BRAND_ANO') or '2026',
     'suporte_email': os.environ.get('BRAND_SUPORTE_EMAIL') or 'guilherme@serenuscorretora.com.br',
+    # Logo (imagem dos arcos girando no menu/login). Cliente aponta a dele por
+    # env; default = o do Serenus.
+    'logo':          os.environ.get('BRAND_LOGO_URL') or '/static/logo_arcos.png',
 }
 
 
