@@ -2863,6 +2863,49 @@ def admin_required(f):
     return w
 
 
+# ─── OPERADOR (nós, o fornecedor) vs admin do cliente ────────────────────────
+# Ferramentas de infra/diagnóstico/suporte (emergency, backup, testar-*,
+# observabilidade, seletores da extensão) NÃO são pro admin do cliente — só pra
+# quem opera o produto. `MODO_OPERADOR` liga isso. DEFAULT = ligado, pra a
+# instância do Serenus (que não seta env) continuar idêntica; a instância de
+# cliente seta MODO_OPERADOR=0 e essas telas somem (do menu e das rotas). Nós,
+# pra dar suporte à instância de um cliente, ligamos MODO_OPERADOR=1 nela.
+MODO_OPERADOR = (os.environ.get('MODO_OPERADOR', '1').strip().lower() not in ('0', 'false', 'nao', 'não', ''))
+
+# Marca é do Serenus? Usado pra esconder recursos específicos do Serenus
+# (importar-meninas, BotConversa/ZapVoice, Affinity, manual) nas outras marcas.
+def _eh_serenus():
+    return BRAND.get('nome_curto', '').strip().lower() == 'serenus'
+
+# Prefixos de rota que só o OPERADOR vê (infra/diagnóstico/suporte). Numa
+# instância de cliente (MODO_OPERADOR=0) somem do menu E das rotas (404).
+_ROTAS_OPERADOR = (
+    '/admin/emergency', '/admin/db/', '/admin/backup', '/admin/asaas',
+    '/admin/testar-', '/admin/observabilidade', '/admin/ultimo-erro',
+    '/admin/webhook-diagnostico', '/admin/recovery-anexos',
+    '/admin/anexos/reconciliar-r2', '/admin/modo-teste', '/admin/testar-r2',
+    '/extensao/erros', '/extensao/config-remota',
+)
+# Prefixos específicos do Serenus (integração/parceiro/conteúdo). Somem nas
+# outras marcas.
+_ROTAS_SERENUS = (
+    '/crm/importar-meninas', '/crm/modelos/importar-botconversa',
+    '/crm/modelos/importar-zapvoice', '/manual',
+)
+
+
+@app.before_request
+def _gate_operador_serenus():
+    """Esconde (404) as rotas de operador quando MODO_OPERADOR=0, e as rotas
+    específicas do Serenus quando a marca não é Serenus. Centraliza a política
+    num lugar só (em vez de trocar o decorator em ~30 rotas)."""
+    p = request.path
+    if not MODO_OPERADOR and p.startswith(_ROTAS_OPERADOR):
+        abort(404)
+    if not _eh_serenus() and p.startswith(_ROTAS_SERENUS):
+        abort(404)
+
+
 # ─── MÓDULOS POR CONSULTOR (acesso configurável em Usuários) ─────────────────
 # O admin escolhe, por consultor, quais módulos ele acessa. Cada módulo tem
 # admin=True/False: os de consultor (False) entram no acesso PADRÃO (o que todo
@@ -2983,9 +3026,10 @@ BRAND = {
 
 @app.context_processor
 def _inject_brand():
-    """`brand.nome`, `brand.nome_curto` etc. em qualquer template — a marca é
-    configurável por instância (white-label)."""
-    return {'brand': BRAND}
+    """`brand.*`, `eh_serenus` e `modo_operador` em qualquer template — a marca
+    é configurável por instância (white-label), e esses flags escondem do menu
+    o que é do Serenus / de operador."""
+    return {'brand': BRAND, 'eh_serenus': _eh_serenus(), 'modo_operador': MODO_OPERADOR}
 
 
 @app.context_processor

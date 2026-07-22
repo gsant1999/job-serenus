@@ -123,8 +123,8 @@
       <button class="wa-fchip" data-f="documento" onclick="setFiltroWpp(this)">PDF <span>{{ stats_wpp.documento or 0 }}</span></button>
     </div>
     <div class="mo-toolbar-acoes">
-      <button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup</button>
-      <button class="btn-outline btn-sm" onclick="document.getElementById('bc-arquivo').click()">Importar fluxos do BotConversa</button>
+      {% if eh_serenus %}<button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup</button>
+      <button class="btn-outline btn-sm" onclick="document.getElementById('bc-arquivo').click()">Importar fluxos do BotConversa</button>{% endif %}
       <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">+ Novo modelo</button>
     </div>
   </div>
@@ -211,12 +211,12 @@
   <div class="mo-empty-card" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     <div class="mo-empty-label">Nenhum modelo de WhatsApp ainda</div>
-    <div class="mo-empty-sub">Crie o primeiro, ou importe o backup do ZapVoice pelo botão abaixo</div>
+    <div class="mo-empty-sub">Crie o primeiro modelo de WhatsApp.</div>
   </div>
-  <div style="max-width:1100px; text-align:center; margin-top:12px;">
+  {% if eh_serenus %}<div style="max-width:1100px; text-align:center; margin-top:12px;">
     <button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup do ZapVoice</button>
     <button class="btn-outline btn-sm" onclick="document.getElementById('bc-arquivo').click()">Importar fluxos do BotConversa</button>
-  </div>
+  </div>{% endif %}
   {% endif %}
 </div>
 
