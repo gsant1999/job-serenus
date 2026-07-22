@@ -474,6 +474,29 @@
     });
   }
 
+  // ── MENSAGENS via wa-js (Store), não do DOM. Devolve [{de,texto,hora}] ou [].
+  //    Mais confiável e completo que raspar o HTML; cai vazio se a wa-js falhar,
+  //    e aí o chamador usa a raspagem do DOM como reserva. ──
+  function pedirMensagensWpp(limite) {
+    return new Promise((resolve) => {
+      const reqId = 'lm' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true;
+        window.removeEventListener('message', onMsg);
+        resolve(Array.isArray(d.mensagens) ? d.mensagens : []);
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'ler_mensagens', reqId, limite }, '*');
+      setTimeout(() => {
+        if (!pronto) { window.removeEventListener('message', onMsg); resolve([]); }
+      }, 15000);
+    });
+  }
+
   // ── TELEFONE via wa-js: pra contato salvo (nome próprio, não número), o DOM
   //    não expõe o telefone em lugar nenhum — mas o JID interno (chat.id) tem
   //    o número de verdade quando não é conta @lid (privacidade nova/business).
@@ -2753,7 +2776,15 @@
       entrada.nome = nome;
       entrada.telefone = telefone;
       entrada.chave = chaveConversa(telefone, nome);
-      const mensagens = dedup(rasparMensagensVisiveis());
+      // Mensagens de texto DA WA-JS (fonte confiável, histórico completo, não
+      // quebra com mudança de layout) — igual ZapVoice/WaSpeed. Se a wa-js
+      // falhar/vier vazia, cai na raspagem do DOM (reserva) pra nunca deixar o
+      // consultor sem análise. O carregarHistorico acima segue valendo pras
+      // IMAGENS (essas ainda vêm do DOM).
+      let msgsBrutas = [];
+      try { msgsBrutas = await pedirMensagensWpp(500); } catch (e) { msgsBrutas = []; }
+      if (!msgsBrutas.length) msgsBrutas = rasparMensagensVisiveis();
+      const mensagens = dedup(msgsBrutas);
 
       // Áudio/PDF/imagem NÃO usam a marca d'água do modo incremental —
       // já tentamos (pra economizar retranscrição) e era arriscado demais:

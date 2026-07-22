@@ -159,6 +159,32 @@
     return { documentos: out, encontrados: docs.length };
   }
 
+  // Lê as MENSAGENS DE TEXTO direto da wa-js (Store), não do DOM. Antes o
+  // content.js raspava o HTML da tela (frágil: quebra quando o WhatsApp muda o
+  // layout, e só pegava o que tinha rolado). Aqui vem tudo da fonte — a mesma
+  // que já usamos pra áudio/PDF (getMessages) — com texto, remetente e hora
+  // confiáveis, sem rolar a tela. Inclui a legenda de mídia (caption), que é
+  // texto que o cliente/corretor escreveu.
+  async function lerMensagens(limite) {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getMessages) return { erro: 'wpp_ausente' };
+    const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
+    if (!chat || !chat.id) return { erro: 'sem_conversa' };
+    const chatId = chat.id._serialized;
+    let msgs = [];
+    try { msgs = await window.WPP.chat.getMessages(chatId, { count: Math.max(50, limite || 500) }); }
+    catch (e) { return { erro: 'falha_mensagens' }; }
+    const out = [];
+    for (const m of msgs) {
+      let texto = '';
+      if (m.type === 'chat') texto = m.body || '';        // mensagem de texto
+      else if (m.caption) texto = m.caption;              // legenda de imagem/vídeo/PDF
+      texto = (texto || '').trim();
+      if (!texto) continue;                                // pula mídia sem legenda, sistema, etc.
+      out.push({ de: (m.id && m.id.fromMe ? 'consultor' : 'lead'), texto: texto.slice(0, 4000), hora: fmtHora(m.t) });
+    }
+    return { mensagens: out };
+  }
+
   // Cache de resolução telefone por conversa. A escada @lid abaixo faz chamadas
   // de REDE (getPnLidEntry com fallback no servidor, requestPhoneNumber) e era
   // refeita do zero TODA vez que o consultor trocava de conversa — por isso o
@@ -419,6 +445,7 @@
     try {
       if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite);
       else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite);
+      else if (d.tipo === 'ler_mensagens') resp = await lerMensagens(d.limite);
       else if (d.tipo === 'obter_telefone') resp = await obterTelefone(d.resolverLid);
       else if (d.tipo === 'obter_meu_numero') resp = await obterMeuNumero();
       else if (d.tipo === 'obter_chat_id') resp = await obterChatIdAtivo();
