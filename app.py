@@ -495,6 +495,21 @@ def _last_insert_id(cur):
             return None
     return cur.lastrowid
 
+# ─── SEED por instância (white-label) ───────────────────────────────────────
+# Numa instância NOVA (banco vazio) o init_db semeia um admin e alguns dados.
+# Pra vender pra outra corretora, o admin semeado NÃO pode ser o do Serenus, e
+# os números financeiros negociados do Serenus (seed_comissoes.json, tabela de
+# comissões, remetente Affinity) NÃO podem ir junto. Tudo vem de env com DEFAULT
+# = Serenus: a instância do Serenus (que não seta nada) continua idêntica; a do
+# cliente seta o admin dela e SEED_DADOS_SERENUS=0 pra nascer com o financeiro
+# em branco. Só afeta banco NOVO — o Serenus em produção já tem os dados, o seed
+# nem roda de novo (checa existência antes).
+SEED_ADMIN_NOME = os.environ.get('SEED_ADMIN_NOME') or 'Guilherme Santos'
+SEED_ADMIN_EMAIL = (os.environ.get('SEED_ADMIN_EMAIL') or 'guilherme@serenuscorretora.com.br').strip().lower()
+SEED_ADMIN_SENHA = os.environ.get('SEED_ADMIN_SENHA') or 'serenus2025'
+SEED_DADOS_SERENUS = (os.environ.get('SEED_DADOS_SERENUS', '1').strip().lower() not in ('0', 'false', 'nao', 'não', ''))
+
+
 def init_db():
     conn = db()
     is_pg = DB_MODE == 'postgres'
@@ -1703,24 +1718,26 @@ def init_db():
     # Colunas que ja estao nas tabelas acima, então não precisa add_col
     # (tudo já tá no CREATE TABLE IF NOT EXISTS)
     
-    # Insert config — compatível com SQLite e Postgres
-    if is_pg:
-        cur = conn.cursor()
-        cur.execute("INSERT INTO config (chave,valor) VALUES (%s,%s) ON CONFLICT (chave) DO NOTHING", 
-            ('affinity_destinatarios', 'pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br'))
-        cur.execute("INSERT INTO config (chave,valor) VALUES (%s,%s) ON CONFLICT (chave) DO NOTHING",
-            ('affinity_contato', 'Pamela'))
-        cur.execute("INSERT INTO config (chave,valor) VALUES (%s,%s) ON CONFLICT (chave) DO NOTHING",
-            ('affinity_remetente', 'guilherme@serenuscorretora.com.br'))
-        conn.commit()
-    else:
-        conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)", 
-            ('affinity_destinatarios', 'pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br'))
-        conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)",
-            ('affinity_contato', 'Pamela'))
-        conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)",
-            ('affinity_remetente', 'guilherme@serenuscorretora.com.br'))
-    
+    # Config do parceiro Affinity — específico do Serenus (e-mails/contato deles).
+    # Não vai pra instância de cliente (SEED_DADOS_SERENUS=0).
+    if SEED_DADOS_SERENUS:
+        if is_pg:
+            cur = conn.cursor()
+            cur.execute("INSERT INTO config (chave,valor) VALUES (%s,%s) ON CONFLICT (chave) DO NOTHING",
+                ('affinity_destinatarios', 'pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br'))
+            cur.execute("INSERT INTO config (chave,valor) VALUES (%s,%s) ON CONFLICT (chave) DO NOTHING",
+                ('affinity_contato', 'Pamela'))
+            cur.execute("INSERT INTO config (chave,valor) VALUES (%s,%s) ON CONFLICT (chave) DO NOTHING",
+                ('affinity_remetente', 'guilherme@serenuscorretora.com.br'))
+            conn.commit()
+        else:
+            conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)",
+                ('affinity_destinatarios', 'pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br'))
+            conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)",
+                ('affinity_contato', 'Pamela'))
+            conn.execute("INSERT OR IGNORE INTO config (chave,valor) VALUES (?,?)",
+                ('affinity_remetente', 'guilherme@serenuscorretora.com.br'))
+
     # Etiquetas padrão
     etq_default = [('Renovação','#3b82f6'),('Reajuste','#fb923c'),('Pós-venda','#1fd8a4'),
                    ('Campanha','#8b5cf6'),('Atenção estorno','#f43f7c'),('Indicação','#facc15')]
@@ -1805,32 +1822,36 @@ def init_db():
             (codigo,nome,descricao,valor_fixo,num_parcelas,distribuicao_parcelas,faixa_min,faixa_max,coluna_comissao,ordem)
             VALUES (?,?,?,?,?,?,?,?,?,?)""", r)
     
-    # Admin padrão
-    admin = conn.execute("SELECT id FROM usuarios WHERE email='guilherme@serenuscorretora.com.br'").fetchone()
+    # Admin padrão (o PRIMEIRO acesso da instância). Configurável por env —
+    # numa instância de cliente, é o admin DELE, nunca o do Serenus.
+    admin = conn.execute("SELECT id FROM usuarios WHERE email=?", (SEED_ADMIN_EMAIL,)).fetchone()
     if not admin:
         from werkzeug.security import generate_password_hash as _gph
         conn.execute("""INSERT INTO usuarios (nome,email,senha_hash,perfil,regime_base)
             VALUES (?,?,?,?,?)""",
-            ('Guilherme Santos','guilherme@serenuscorretora.com.br',_gph("serenus2025", method='pbkdf2:sha256', salt_length=16),'admin','com_fixo_lead'))
-    
-    # Comissões padrão
-    com_default = [
-        ("SulAmérica",2.8,0.7,1.2,1.5,1.8,1.8,"100;100;80"),("Porto Seguro",2.8,0.7,1.2,1.5,1.8,1.8,"100;100;80"),
-        ("Porto",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),("Amil",2.8,0.7,1.2,1.5,1.8,1.8,"100;100;80"),
-        ("Bradesco",3.3,0.8,1.5,1.8,2.1,2.1,"100;100;80;50"),("MedSênior",1.7,0.45,0.8,1.0,1.1,1.1,"100;50;20"),
-        ("Vera Cruz",1.6,0.4,0.7,0.9,1.0,1.0,"100;60"),("Hapvida",2.3,0.575,1.035,1.265,1.495,1.495,"100;80;50"),
-        ("Unimed Jundiaí",3.0,0.75,1.35,1.65,1.95,1.95,"100;100;100"),("Unimed Sorocaba",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),
-        ("Santa Helena",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),("Santa Tereza",1.5,0.375,0.675,0.825,0.975,0.975,"100;50"),
-        ("Sobam",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),("Beneficência",1.0,0.25,0.45,0.55,0.65,0.65,"100"),
-        ("Affix",1.5,0.375,0.675,0.825,0.975,0.975,"100;50"),("Qualicorp",3.0,0.75,1.35,1.65,1.95,1.95,"100;100;100"),
-        ("Allcare",1.6,0.4,0.72,0.88,1.04,1.04,"100;60"),("Amhemed",2.0,0.5,0.9,1.1,1.3,1.3,"100;100"),
-        ("Ana Costa",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),("Supermed",2.8,0.7,1.2,1.5,1.8,1.8,"100;100;80"),
-        ("EVA",1.6,0.4,0.7,0.9,1.0,1.0,"100;60"),("Lancers",1.6,0.4,0.7,0.9,1.0,1.0,"100;60"),
-    ]
-    for c in com_default:
-        conn.execute("""INSERT OR IGNORE INTO comissoes
-            (operadora,perc_total,perc_sem_leads,perc_n1,perc_n2,perc_n3,perc_com_fixo,dist_corretora) VALUES (?,?,?,?,?,?,?,?)""", c)
-    
+            (SEED_ADMIN_NOME, SEED_ADMIN_EMAIL, _gph(SEED_ADMIN_SENHA, method='pbkdf2:sha256', salt_length=16), 'admin', 'com_fixo_lead'))
+
+    # Comissões padrão — números NEGOCIADOS do Serenus. NÃO vão pra instância de
+    # cliente (SEED_DADOS_SERENUS=0): a corretora cliente cadastra as operadoras
+    # e comissões dela. Os níveis (abaixo) são scaffold genérico e ficam sempre.
+    if SEED_DADOS_SERENUS:
+        com_default = [
+            ("SulAmérica",2.8,0.7,1.2,1.5,1.8,1.8,"100;100;80"),("Porto Seguro",2.8,0.7,1.2,1.5,1.8,1.8,"100;100;80"),
+            ("Porto",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),("Amil",2.8,0.7,1.2,1.5,1.8,1.8,"100;100;80"),
+            ("Bradesco",3.3,0.8,1.5,1.8,2.1,2.1,"100;100;80;50"),("MedSênior",1.7,0.45,0.8,1.0,1.1,1.1,"100;50;20"),
+            ("Vera Cruz",1.6,0.4,0.7,0.9,1.0,1.0,"100;60"),("Hapvida",2.3,0.575,1.035,1.265,1.495,1.495,"100;80;50"),
+            ("Unimed Jundiaí",3.0,0.75,1.35,1.65,1.95,1.95,"100;100;100"),("Unimed Sorocaba",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),
+            ("Santa Helena",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),("Santa Tereza",1.5,0.375,0.675,0.825,0.975,0.975,"100;50"),
+            ("Sobam",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),("Beneficência",1.0,0.25,0.45,0.55,0.65,0.65,"100"),
+            ("Affix",1.5,0.375,0.675,0.825,0.975,0.975,"100;50"),("Qualicorp",3.0,0.75,1.35,1.65,1.95,1.95,"100;100;100"),
+            ("Allcare",1.6,0.4,0.72,0.88,1.04,1.04,"100;60"),("Amhemed",2.0,0.5,0.9,1.1,1.3,1.3,"100;100"),
+            ("Ana Costa",2.4,0.6,1.08,1.32,1.56,1.56,"100;100;40"),("Supermed",2.8,0.7,1.2,1.5,1.8,1.8,"100;100;80"),
+            ("EVA",1.6,0.4,0.7,0.9,1.0,1.0,"100;60"),("Lancers",1.6,0.4,0.7,0.9,1.0,1.0,"100;60"),
+        ]
+        for c in com_default:
+            conn.execute("""INSERT OR IGNORE INTO comissoes
+                (operadora,perc_total,perc_sem_leads,perc_n1,perc_n2,perc_n3,perc_com_fixo,dist_corretora) VALUES (?,?,?,?,?,?,?,?)""", c)
+
     # Níveis padrão
     niveis_default = [
         ('n1','N1', 0.0, 3000.0, 1),
@@ -1840,9 +1861,10 @@ def init_db():
     for n in niveis_default:
         conn.execute("INSERT OR IGNORE INTO niveis (codigo,label,faixa_min,faixa_max,ordem) VALUES (?,?,?,?,?)", n)
     
-    # Seed de comissões (se arquivo existe)
+    # Seed de recebimento/repasse do Serenus (arquivo com números reais) — idem:
+    # não vai pra instância de cliente.
     ja_tem = conn.execute("SELECT COUNT(*) as c FROM recebimento").fetchone()
-    if ja_tem and ja_tem[0] == 0 if isinstance(ja_tem, tuple) else ja_tem['c'] == 0:
+    if SEED_DADOS_SERENUS and (ja_tem and ja_tem[0] == 0 if isinstance(ja_tem, tuple) else ja_tem['c'] == 0):
         seed_path = os.path.join(BASE_DIR, "seed_comissoes.json")
         if os.path.exists(seed_path):
             seed = json.load(open(seed_path, encoding='utf-8'))
@@ -21944,11 +21966,13 @@ if __name__ == '__main__':
     import os
     # init_db() já roda no import acima
     print("\n" + "="*52)
-    print("  JOB · Serenus Corretora · v14")
+    print(f"  JOB · {BRAND['nome']}")
     print("="*52)
     port = int(os.environ.get('PORT', 8080))
     print(f"  Rodando na porta {port}")
-    print("  Admin:  guilherme@serenuscorretora.com.br / serenus2025")
+    # Mostra o admin SEMEADO (env), não um fixo do Serenus — e só a senha se for
+    # o default de dev (numa instância real a senha vem de env e não se imprime).
+    print(f"  Admin:  {SEED_ADMIN_EMAIL}" + ("  / (senha do SEED_ADMIN_SENHA)" if os.environ.get('SEED_ADMIN_SENHA') else " / serenus2025"))
     print("="*52 + "\n")
     app.run(debug=False, host='0.0.0.0', port=port)
 
