@@ -324,7 +324,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       chrome.notifications.create('', {
         type: 'basic',
         iconUrl: 'icon128.png',
-        title: msg.titulo || 'JOB Serenus',
+        title: msg.titulo || 'JOB',
         message: msg.mensagem || '',
       });
     } catch (e) { /* notificação é best-effort, nunca derruba a análise */ }

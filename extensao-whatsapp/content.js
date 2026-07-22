@@ -158,8 +158,20 @@
       if (j && j.ok) {
         if (j.seletores) _seletoresRemotos = j.seletores;
         if (j.flags) _flagsRemotas = j.flags;
+        // Marca da instância conectada — a extensão é um artefato único, então
+        // mostra a marca de QUEM ela conecta (cada cliente vê a dele).
+        if (j.marca) { _marcaInstancia = String(j.marca); _aplicarMarca(); }
       }
     } catch (e) { /* sem internet: segue com os seletores/flags fixos do código */ }
+  }
+
+  let _marcaInstancia = '';
+  // Atualiza o título do painel com a marca da instância (se já renderizado).
+  function _aplicarMarca() {
+    try {
+      const el = document.querySelector('.job-painel-doc-titulo');
+      if (el && _marcaInstancia) el.innerHTML = 'JOB <b>' + _marcaInstancia.replace(/[<>&]/g, '') + '</b>';
+    } catch (e) { /* painel ainda não montado — pega no próximo render */ }
   }
 
   // ── Nome do contato/conversa aberta (do cabeçalho). ──
@@ -974,7 +986,7 @@
       p.innerHTML =
         '<div class="job-painel-doc-header">' +
           '<span class="job-painel-doc-logo">' + logoJobHTML() +
-            '<span class="job-painel-doc-titulo">JOB <b>Serenus</b></span></span>' +
+            '<span class="job-painel-doc-titulo">JOB' + (_marcaInstancia ? ' <b>' + _marcaInstancia.replace(/[<>&]/g, '') + '</b>' : '') + '</span></span>' +
           '<button class="job-painel-doc-fechar" id="job-painel-doc-x">×</button>' +
         '</div>' +
         '<div class="job-painel-doc-corpo" id="job-painel-doc-corpo"></div>';

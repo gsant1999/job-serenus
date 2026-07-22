@@ -12074,7 +12074,11 @@ def api_whatsapp_config_remota():
     conn = db()
     seletores, flags = _config_remota_atual(conn)
     close_db(conn)
-    return _wa_cors(jsonify({"ok": True, "seletores": seletores, "flags": flags}))
+    # marca: a extensão é um artefato único (Chrome Web Store), então ela puxa a
+    # marca da INSTÂNCIA que está conectada e mostra no painel — cada cliente vê
+    # a marca dele, não "Serenus" fixo.
+    return _wa_cors(jsonify({"ok": True, "seletores": seletores, "flags": flags,
+                             "marca": BRAND['nome_curto'], "marca_nome": BRAND['nome']}))
 
 
 @app.route('/extensao/config-remota', methods=['GET', 'POST'])

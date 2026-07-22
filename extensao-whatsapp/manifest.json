@@ -1,17 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "JOB Serenus — Análise de WhatsApp",
-  "version": "2.39.10",
-  "description": "Painel dentro do WhatsApp Web para consultores da Serenus: analisa o lead, calcula o Score e envia mensagens da biblioteca.",
+  "name": "JOB — Análise de WhatsApp",
+  "version": "2.39.11",
+  "description": "Painel dentro do WhatsApp Web: analisa o lead, calcula o Score e envia mensagens da biblioteca de modelos.",
   "permissions": ["storage", "notifications"],
   "host_permissions": [
     "https://web.whatsapp.com/*",
-    "https://job-serenus-production.up.railway.app/*"
+    "https://*.up.railway.app/*"
   ],
   "background": { "service_worker": "background.js" },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "JOB Serenus — Análise de WhatsApp"
+    "default_title": "JOB — Análise de WhatsApp"
   },
   "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
   "web_accessible_resources": [
