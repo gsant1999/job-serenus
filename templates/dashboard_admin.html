@@ -74,7 +74,7 @@
     <div class="metrica verde">
       <div class="lbl">Margem Líquida</div>
       <div class="val">R$ {{ m.com_liquido|numero }}</div>
-      <div class="sub">Serenus, após repasses</div>
+      <div class="sub">{{ brand.nome_curto }}, após repasses</div>
     </div>
   </div>
 
@@ -127,7 +127,7 @@
       <div class="sub">a pagar para a equipe</div>
     </div>
     <div class="metrica verde">
-      <div class="lbl">Líquido Serenus</div>
+      <div class="lbl">Líquido {{ brand.nome_curto }}</div>
       <div class="val" style="font-size:20px;">{{ m.com_liquido|moeda  }}</div>
       <div class="sub">margem após repasses</div>
     </div>

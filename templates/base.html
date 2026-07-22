@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0c0c12">
 <link rel="icon" type="image/png" href="/static/favicon.png">
-<title>{% block title %}JOB{% endblock %} · Serenus</title>
+<title>{% block title %}JOB{% endblock %} · {{ brand.nome_curto }}</title>
 <script>
   // Aplica o tema salvo ANTES da página pintar (evita o flash escuro→claro em toda
   // navegação — antes isso só rodava no DOMContentLoaded, ou seja, depois que o
@@ -413,7 +413,7 @@
       </div>
       <div class="logo-text">
         <h2>JOB</h2>
-        <span>by Corretora Serenus</span>
+        <span>by {{ brand.corretora }}</span>
       </div>
     </div>
     <button class="sidebar-close" onclick="closeSidebar()" aria-label="Fechar menu">✕</button>

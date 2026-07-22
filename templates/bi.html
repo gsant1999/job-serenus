@@ -96,7 +96,7 @@ new Chart(document.getElementById('chartMes'),{
     {label:'Produção (R$)', data:mesValor, borderColor:'#1d4ed8', backgroundColor:'rgba(29,78,216,.08)', tension:.35, fill:true},
     {% if session.perfil == 'admin' %}
     {label:'Comissão bruta', data:mesComTot, borderColor:'#1fd8a4', tension:.35},
-    {label:'Líquido Serenus', data:mesLiq, borderColor:'#facc15', borderDash:[5,5], tension:.35}
+    {label:'Líquido {{ brand.nome_curto }}', data:mesLiq, borderColor:'#facc15', borderDash:[5,5], tension:.35}
     {% else %}
     {label:'Minha comissão', data:mesCom, borderColor:'#1fd8a4', backgroundColor:'rgba(31,216,164,.12)', tension:.35, fill:true}
     {% endif %}

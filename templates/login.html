@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" type="image/png" href="/static/favicon.png">
-  <title>JOB · Serenus</title>
+  <title>JOB · {{ brand.nome_curto }}</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -101,7 +101,7 @@
         <img class="arcs-img" src="/static/logo_arcos.png" alt="">
         <div class="job-text">JOB</div>
       </div>
-      <div class="byline">by Corretora Serenus</div>
+      <div class="byline">by {{ brand.corretora }}</div>
     </div>
     <div class="branding-bottom">Sistema de Gestão · Acesso Restrito</div>
   </div>
@@ -139,7 +139,7 @@
       <a href="/esqueci-senha" style="font-size:12.5px; color:#9aa1b5; text-decoration:none;">Esqueci minha senha</a>
     </div>
 
-    <div class="rodape">JOB · Corretora Serenus © 2026</div>
+    <div class="rodape">JOB · {{ brand.corretora }} © {{ brand.ano }}</div>
   </div>
 </div>
 <script>

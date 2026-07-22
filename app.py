@@ -2944,6 +2944,28 @@ def _guard_modulos():
         return redirect(url_for('dashboard'))
 
 
+# ─── MARCA (white-label) ─────────────────────────────────────────────────────
+# O JOB é vendido pra outras corretoras como INSTÂNCIA SEPARADA (deploy próprio +
+# banco vazio próprio — isolamento total). O mesmo código serve a todas: a marca
+# vem de env vars, e o DEFAULT é Serenus, então a instância do Serenus (que não
+# seta nada) continua idêntica. Cada cliente seta as suas no Railway dele.
+# Usar `or DEFAULT` (não o 2º arg de getenv): env var setada vazia vira ''.
+BRAND = {
+    'nome':          os.environ.get('BRAND_NOME') or 'Serenus Corretora de Saúde',
+    'nome_curto':    os.environ.get('BRAND_NOME_CURTO') or 'Serenus',
+    'corretora':     os.environ.get('BRAND_CORRETORA') or 'Corretora Serenus',
+    'ano':           os.environ.get('BRAND_ANO') or '2026',
+    'suporte_email': os.environ.get('BRAND_SUPORTE_EMAIL') or 'guilherme@serenuscorretora.com.br',
+}
+
+
+@app.context_processor
+def _inject_brand():
+    """`brand.nome`, `brand.nome_curto` etc. em qualquer template — a marca é
+    configurável por instância (white-label)."""
+    return {'brand': BRAND}
+
+
 @app.context_processor
 def _inject_pode_modulo():
     """pode_modulo('cotacao') e tem_modulo_admin nos templates (esconder itens do menu)."""

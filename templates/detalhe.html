@@ -185,7 +185,7 @@
             <div style="font-size:10px;color:var(--cinza);margin-top:3px;">{{ regime.nome if regime else (p.regime_aplicado or '—') }}</div>
           </div>
           <div style="background:var(--verde-soft);padding:14px;border-radius:8px;text-align:center;">
-            <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Líquido Serenus</div>
+            <div style="font-size:10px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Líquido {{ brand.nome_curto }}</div>
             <div style="font-family:'Sora',sans-serif;font-size:20px;color:var(--verde);margin-top:5px;">{{ (p.comissao_corretora_liquida or 0)|moeda  }}</div>
           </div>
         </div>

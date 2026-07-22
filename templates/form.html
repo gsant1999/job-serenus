@@ -223,7 +223,7 @@
       {% if session.perfil == 'admin' %}
       <div class="row"><span>Comissão total (corretora)</span><span id="p-total">—</span></div>
       <div class="row"><span>Repasse total ao consultor</span><span id="p-consul">—</span></div>
-      <div class="row total"><span>Líquido Serenus</span><span id="p-liq">—</span></div>
+      <div class="row total"><span>Líquido {{ brand.nome_curto }}</span><span id="p-liq">—</span></div>
       {% else %}
       <div class="row total"><span>Total a receber</span><span id="p-consul">—</span></div>
       {% endif %}
