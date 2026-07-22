@@ -1267,8 +1267,17 @@
       const n = nomeDoContato();
       return !!(n && n !== nomeAtual);
     };
+    // Casa por CHAVE (telefone confirmado via wa-js quando a análise começou)
+    // OU por NOME (estável) — nunca só pela chave calculada AGORA com
+    // telefoneDoContato(): durante o carregarHistorico (rodarAnalise fica
+    // rolando a tela pra carregar histórico antigo), a leitura de telefone via
+    // DOM (data-id) fica instável a cada re-render da virtualização — a chave
+    // calculada aqui não batia mais com a da análise 'rodando', o painel
+    // "perdia" a análise em andamento e mostrava "Analisar este lead" de novo
+    // (bug real: parecia travado, mas a análise seguia rodando por trás —
+    // Guilherme, 21/07: "trava depois de clicar Analisar, em qualquer lead").
     const doConversaAtual = [..._analises.values()]
-      .filter((a) => a.chave === chaveAtual)
+      .filter((a) => a.chave === chaveAtual || (nomeAtual && a.nome === nomeAtual))
       .sort((a, b) => b.iniciadoEm - a.iniciadoEm)[0];
     if (doConversaAtual) {
       if (doConversaAtual.status === 'rodando') {
@@ -2943,10 +2952,17 @@
   // ── Detecta troca de conversa (o WhatsApp Web é uma SPA — não navega, só
   //    troca o conteúdo — não existe evento nativo confiável pra "conversa
   //    trocou", então compara periodicamente). Só re-renderiza o painel quando
-  //    a chave realmente muda, pra não piscar a cada tick. ──
+  //    a chave realmente muda, pra não piscar a cada tick.
+  //    NOME apenas (não telefone): telefoneDoContato() lê o DOM (data-id das
+  //    mensagens) e fica instável durante o scroll do carregarHistorico (a
+  //    virtualização re-renderiza a lista) — comparar com telefone incluído
+  //    disparava "trocou de conversa" à toa a cada 1.5s enquanto uma análise
+  //    rodava, resincronizando o painel e derrubando o spinner de "Analisando…"
+  //    de volta pra "Analisar este lead", mesmo com a análise seguindo rodando
+  //    por trás (bug real: parecia travado — Guilherme, 21/07). ──
   let _ultimaChaveVista = null;
   setInterval(() => {
-    const chaveAgora = chaveConversa(telefoneDoContato(), nomeDoContato());
+    const chaveAgora = nomeDoContato() || chaveConversa(telefoneDoContato(), nomeDoContato());
     if (chaveAgora === _ultimaChaveVista) return;
     _ultimaChaveVista = chaveAgora;
     sincronizarPainelComConversa();
