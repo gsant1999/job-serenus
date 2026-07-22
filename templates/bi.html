@@ -79,6 +79,10 @@
 
 {% block scripts %}
 <script>
+// Chart.js é `defer` (base.html) — só inicializa os gráficos depois que ele
+// carregou (DOMContentLoaded dispara após os scripts deferidos).
+document.addEventListener('DOMContentLoaded', function () {
+if (typeof Chart === 'undefined') return;
 const CORES = ['#1fd8a4','#3b82f6','#8b5cf6','#f43f7c','#fb923c','#facc15','#22d3ee','#a3e635','#fb7185','#c084fc'];
 
 const mesLabels=[{% for m in por_mes %}'{{ m.mes }}',{% endfor %}];
@@ -126,5 +130,6 @@ new Chart(document.getElementById('chartCon'),{
   options:{ responsive:true, indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{ ticks:{ callback:v=>'R$'+v.toLocaleString('pt-BR') }, grid:{color:'rgba(255,255,255,.06)'} }, y:{ grid:{display:false} } } }
 });
 {% endif %}
+});
 </script>
 {% endblock %}

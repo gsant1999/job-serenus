@@ -194,6 +194,12 @@
 
 {% block scripts %}
 <script>
+// Chart.js é carregado com `defer` (base.html) — executa DEPOIS do parsing.
+// Este script inline rodaria ANTES dele (Chart indefinido -> gráfico vazio).
+// DOMContentLoaded dispara depois dos scripts deferidos, então aqui o Chart
+// já existe. Guard extra caso o CDN falhe.
+document.addEventListener('DOMContentLoaded', function () {
+if (typeof Chart === 'undefined') return;
 const CORES = ['#1fd8a4','#3b82f6','#8b5cf6','#f43f7c','#fb923c','#facc15','#22d3ee','#a3e635'];
 new Chart(document.getElementById('chartOp'),{
   type:'bar',
@@ -206,6 +212,7 @@ new Chart(document.getElementById('chartCon'),{
   data:{ labels:[{% for c in por_consultor %}'{{ c.consultor }}',{% endfor %}],
     datasets:[{ data:[{% for c in por_consultor %}{{ c.valor }},{% endfor %}], backgroundColor:CORES, borderWidth:3, borderColor:'#15151e' }]},
   options:{ responsive:true, plugins:{ legend:{ position:'right', labels:{ padding:14, font:{size:12} } } } }
+});
 });
 </script>
 {% endblock %}

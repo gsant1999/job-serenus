@@ -130,11 +130,14 @@
 
 {% block scripts %}
 <script>
-new Chart(document.getElementById('chartOp'),{
+// Chart.js é `defer` (base.html) — inicializa depois que ele carregou.
+document.addEventListener('DOMContentLoaded', function () {
+if (typeof Chart !== 'undefined') new Chart(document.getElementById('chartOp'),{
   type:'bar',
   data:{ labels:[{% for o in por_operadora %}'{{ o.adm_operadora or "—" }}',{% endfor %}],
     datasets:[{ data:[{% for o in por_operadora %}{{ o.valor }},{% endfor %}], backgroundColor:'#1fd8a4', borderRadius:5, barThickness:28 }]},
   options:{ responsive:true, plugins:{legend:{display:false}}, scales:{ y:{ ticks:{ callback:v=>'R$'+v.toLocaleString('pt-BR') }, grid:{color:'rgba(255,255,255,.06)'} }, x:{ grid:{display:false} } } }
+});
 });
 
 async function uploadComprovante(pid, input) {
