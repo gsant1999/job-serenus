@@ -871,6 +871,7 @@
   const _ICO_MENSAGENS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
   const _ICO_FUNIS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
   const _ICO_INBOX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>';
+  const _ICO_CNPJ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-3"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/></svg>';
 
   // Kit de ícones SVG (traço, herda a cor via currentColor) — o Guilherme NÃO
   // quer emoji em interface nenhuma do JOB; qualquer ícone novo sai daqui.
@@ -915,6 +916,10 @@
         '<span class="job-trilho-item-icone">' + _ICO_INBOX + '</span>' +
         '<span class="job-trilho-item-label">Leads</span>' +
         '<span class="job-trilho-item-badge" id="job-inbox-badge" hidden>0</span>' +
+      '</button>' +
+      '<button class="job-trilho-item" data-secao="cnpj" title="Consultar CNPJ">' +
+        '<span class="job-trilho-item-icone">' + _ICO_CNPJ + '</span>' +
+        '<span class="job-trilho-item-label">CNPJ</span>' +
       '</button>' +
       '<div class="job-trilho-rodape">' +
         '<button class="job-trilho-mini" id="job-trilho-config-btn" title="Configurações (tema, desligar)">' + _ICO_CONFIG + '</button>' +
@@ -1090,6 +1095,115 @@
     else if (secao === 'mensagens') abrirSecaoMensagens();
     else if (secao === 'funis') abrirSecaoFunis();
     else if (secao === 'inbox') abrirSecaoInbox();
+    else if (secao === 'cnpj') abrirSecaoCnpj();
+  }
+
+  // ═══════════════ Consulta de CNPJ (Receita via BrasilAPI) ═══════════════
+  // Em vez de raspar o cnpjreva (CAPTCHA) e o CCMEI (gov.br), o backend usa a
+  // BrasilAPI e devolve os dados da Receita + se é MEI. O certificado CCMEI o
+  // consultor abre manualmente (botão) e loga na hora.
+  function _fmtCnpj(dig) {
+    dig = String(dig || '').replace(/\D/g, '').slice(0, 14);
+    if (dig.length !== 14) return dig;
+    return dig.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  }
+  function _cnpjNaConversa() {
+    try {
+      const main = document.querySelector('#main');
+      const txt = main ? (main.innerText || '') : '';
+      const m = txt.match(/\d{2}[.\s]?\d{3}[.\s]?\d{3}[/\s]?\d{4}[-\s]?\d{2}/);
+      if (m) { const d = m[0].replace(/\D/g, ''); if (d.length === 14) return d; }
+    } catch (e) { /* sem conversa aberta, tudo bem */ }
+    return '';
+  }
+  function abrirSecaoCnpj() {
+    const pre = _cnpjNaConversa();
+    setCorpoSecao(
+      '<div class="job-cnpj-wrap" style="padding:4px 2px;">' +
+        '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">Consultar CNPJ</div>' +
+        '<div style="font-size:12px;color:var(--job-cinza,#8a90a2);line-height:1.5;margin-bottom:12px;">Dados da Receita (razão social, abertura, situação, sócios, natureza jurídica) e se é MEI — sem CAPTCHA, sem gov.br.</div>' +
+        '<div style="display:flex;gap:6px;margin-bottom:12px;">' +
+          '<input id="job-cnpj-input" inputmode="numeric" placeholder="00.000.000/0000-00" value="' + esc(_fmtCnpj(pre)) + '" ' +
+            'style="flex:1;min-width:0;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04);color:inherit;font-size:14px;" />' +
+          '<button class="job-copy" id="job-cnpj-btn" style="white-space:nowrap;">Consultar</button>' +
+        '</div>' +
+        '<div id="job-cnpj-resultado"></div>' +
+      '</div>');
+    const input = document.getElementById('job-cnpj-input');
+    const btn = document.getElementById('job-cnpj-btn');
+    const disparar = () => _consultarCnpjUI((input.value || '').replace(/\D/g, ''));
+    if (btn) btn.addEventListener('click', disparar);
+    if (input) {
+      input.addEventListener('input', () => { input.value = _fmtCnpj(input.value); });
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') disparar(); });
+      input.focus();
+    }
+    if (pre) disparar();
+  }
+  async function _consultarCnpjUI(dig) {
+    const box = document.getElementById('job-cnpj-resultado');
+    if (!box) return;
+    if (String(dig || '').length !== 14) {
+      box.innerHTML = '<div class="job-ia-alerta">⚠ Digite os 14 números do CNPJ.</div>';
+      return;
+    }
+    box.innerHTML = '<div class="job-sem-analise"><div class="job-carregando"></div><div class="job-sem-analise-txt">Consultando na Receita…</div></div>';
+    let resp;
+    try { resp = await _safeSendMessage({ type: 'consultar_cnpj', cnpj: dig }); }
+    catch (e) { resp = null; }
+    if (!resp || !resp.ok || !resp.cnpj) {
+      box.innerHTML = '<div class="job-ia-alerta">⚠ ' + esc((resp && resp.erro) || 'Não consegui consultar esse CNPJ agora.') + '</div>';
+      return;
+    }
+    box.innerHTML = _renderCnpjCard(resp.cnpj);
+    const bc = document.getElementById('job-cnpj-copy');
+    if (bc) bc.addEventListener('click', () => {
+      navigator.clipboard.writeText(bc.dataset.texto || '').then(() => {
+        bc.textContent = 'Copiado!';
+        setTimeout(() => { bc.textContent = 'Copiar dados'; }, 1500);
+      });
+    });
+  }
+  function _renderCnpjCard(c) {
+    const selo = (txt, ok) => '<span class="job-chip" style="background:' +
+      (ok ? 'rgba(31,216,164,.15);color:#1fd8a4' : 'rgba(244,63,124,.15);color:#fb8497') + ';">' + esc(txt) + '</span>';
+    const linha = (rot, val) => val ? '<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:13px;">' +
+      '<span style="color:var(--job-cinza,#8a90a2);min-width:118px;">' + esc(rot) + '</span>' +
+      '<span style="flex:1;">' + esc(val) + '</span></div>' : '';
+    const socios = (c.socios || []).map((s) => s.nome + (s.qualificacao ? ' (' + s.qualificacao + ')' : '')).join('; ');
+    const natureza = [c.natureza_codigo, c.natureza_descricao].filter(Boolean).join(' - ');
+    const txtCopia = [
+      'CNPJ: ' + _fmtCnpj(c.cnpj),
+      'Razão social: ' + (c.nome || ''),
+      c.fantasia ? 'Nome fantasia: ' + c.fantasia : '',
+      'Abertura: ' + (c.data_abertura || ''),
+      'Situação: ' + (c.situacao || ''),
+      'Município: ' + (c.municipio || ''),
+      'Natureza jurídica: ' + natureza,
+      c.cnae ? 'Atividade: ' + c.cnae : '',
+      'MEI: ' + (c.eh_mei ? 'Sim' : 'Não') + (c.eh_simples ? ' | Simples: Sim' : ''),
+      socios ? 'Quadro societário: ' + socios : '',
+    ].filter(Boolean).join('\n');
+    return '<div style="border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:14px;">' +
+      '<div style="font-size:15px;font-weight:700;line-height:1.3;">' + esc(c.nome || '—') + '</div>' +
+      (c.fantasia ? '<div style="font-size:12.5px;color:var(--job-cinza,#8a90a2);margin-top:2px;">' + esc(c.fantasia) + '</div>' : '') +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:9px 0 11px;">' +
+        selo(c.ativa ? 'Ativa' : (c.situacao || 'Situação?'), !!c.ativa) +
+        selo(c.eh_mei ? 'É MEI' : 'Não é MEI', !!c.eh_mei) +
+        (c.eh_simples ? selo('Simples Nacional', true) : '') +
+      '</div>' +
+      linha('CNPJ', _fmtCnpj(c.cnpj)) +
+      linha('Data de abertura', c.data_abertura) +
+      linha('Município', c.municipio) +
+      linha('Natureza jurídica', natureza) +
+      linha('Atividade (CNAE)', c.cnae) +
+      linha('Quadro societário', socios) +
+      '<div style="display:flex;gap:6px;margin-top:12px;">' +
+        '<button class="job-copy" id="job-cnpj-copy" data-texto="' + esc(txtCopia) + '">Copiar dados</button>' +
+        '<a class="job-copy" href="https://mei.receita.economia.gov.br/certificado/visualizacao" target="_blank" rel="noopener" style="text-decoration:none;">Abrir CCMEI (login gov.br)</a>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--job-cinza,#8a90a2);margin-top:8px;line-height:1.4;">Fonte: ' + esc(c.fonte || 'Receita') + '. Para o certificado CCMEI em PDF, abra o site e faça login com seu gov.br.</div>' +
+    '</div>';
   }
 
   // ═══════════════ Inbox de leads novos (atendimento imediato) ═══════════════
@@ -2594,7 +2708,7 @@
     const avisoPulados = (Array.isArray(r._pulados) && r._pulados.length)
       ? '<div class="job-ia-alerta">⚠ ' + esc(r._pulados.length + ' PDF(s) que o consultor enviou não foram lidos por terem mais de 5 páginas (material de apoio costuma não mudar a análise): ' +
           r._pulados.map((p) => p.nome + ' (' + p.paginas + ' pág)').join(', ')) +
-          '<div style="margin-top:7px;"><button class="job-btn" id="job-avaliar-pdfs" style="font-size:12px;padding:4px 10px;">Avaliar esses PDFs mesmo assim</button></div></div>'
+          '<div style="margin-top:7px;"><button class="job-copy" id="job-avaliar-pdfs" style="font-size:12px;padding:4px 10px;">Avaliar esses PDFs mesmo assim</button></div></div>'
       : '';
     const partesRodape = [esc(nome || ''), totalMsgs + ' mensagens lidas'];
     if (r.duracao_segundos != null) partesRodape.push('levou ' + fmtDuracao(r.duracao_segundos));
