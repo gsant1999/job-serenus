@@ -39,6 +39,20 @@
     } catch (e) { return ''; }
   }
 
+  // Remove mensagens repetidas pelo id (_serialized) — o getMessages devolve
+  // itens duplicados quando o count pedido é maior que o total (busca no
+  // servidor + cache). Vale pra texto, áudio e PDF.
+  function _dedupPorId(itens) {
+    const vistos = new Set();
+    const out = [];
+    for (const m of (itens || [])) {
+      const mid = m && m.id && m.id._serialized;
+      if (mid) { if (vistos.has(mid)) continue; vistos.add(mid); }
+      out.push(m);
+    }
+    return out;
+  }
+
   function selecionarPorLead(itens, limite) {
     // Prioriza os itens do LEAD (áudio ou documento) — é o conteúdo do cliente
     // que importa pra qualificação e pro score, não pode ficar de fora só
@@ -70,7 +84,7 @@
     // reaproveitar uma transcrição já feita antes pro MESMO áudio em vez de
     // pagar de novo — isso é diferente da marca d'água (nunca deixa de mandar
     // um áudio, só evita re-transcrever um que já foi transcrito com sucesso).
-    const audios = msgs.filter((m) => m.type === 'ptt' || m.type === 'audio');
+    const audios = _dedupPorId(msgs.filter((m) => m.type === 'ptt' || m.type === 'audio'));
     const alvos = selecionarPorLead(audios, Math.max(1, limite || 12));
     // Baixa em PARALELO (lotes de 5): o teto de áudios subiu bastante (conversas
     // de venda têm dezenas) e baixar um a um chegava perto do timeout. Cada
@@ -120,11 +134,11 @@
     // pro topo do modelo); confiar só em m.mimetype descartava o PDF em silêncio
     // (bug: CNH-e.pdf da Cintia nunca chegava ao Claude). Fallback pela extensão
     // do nome também, caso nenhum mime venha.
-    const docs = msgs.filter((m) => {
+    const docs = _dedupPorId(msgs.filter((m) => {
       if (m.type !== 'document') return false;
       const mt = (m.mimetype || (m.mediaData && m.mediaData.mimetype) || '').toLowerCase();
       return mt === 'application/pdf' || /\.pdf$/i.test(m.filename || '');
-    });
+    }));
     const alvos = selecionarPorLead(docs, Math.max(1, limite || 5));
     const out = [];
     for (const m of alvos) {
@@ -173,15 +187,11 @@
     let msgs = [];
     try { msgs = await window.WPP.chat.getMessages(chatId, { count: Math.max(50, limite || 500) }); }
     catch (e) { return { erro: 'falha_mensagens' }; }
-    // DEDUP por id da mensagem: pedir 'count' maior que o total faz o getMessages
-    // buscar no servidor e devolver de novo mensagens que já estavam no cache —
-    // vinham DUPLICADAS ("Perfeito, sem pressa." 2x). O id (_serialized) é único
-    // por mensagem, então dedup por ele elimina qualquer repetição da wa-js.
+    // DEDUP por id (_dedupPorId): pedir 'count' maior que o total faz o
+    // getMessages buscar no servidor e devolver de novo mensagens que já
+    // estavam no cache — vinham DUPLICADAS ("Perfeito, sem pressa." 2x).
     const out = [];
-    const vistos = new Set();
-    for (const m of msgs) {
-      const mid = m.id && m.id._serialized;
-      if (mid) { if (vistos.has(mid)) continue; vistos.add(mid); }
+    for (const m of _dedupPorId(msgs)) {
       let texto = '';
       if (m.type === 'chat') texto = m.body || '';        // mensagem de texto
       else if (m.caption) texto = m.caption;              // legenda de imagem/vídeo/PDF
