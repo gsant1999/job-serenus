@@ -72,6 +72,7 @@
   let _errosContagem = 0;
   function _reportarErro(mensagem, stack) {
     if (!mensagem || _errosContagem >= 15) return;
+    if (_ehContextoInvalidado(mensagem)) { _marcarContextoMorto(); return; } // benigno: F5 resolve, não é bug
     const chave = String(mensagem).slice(0, 200);
     if (_errosReportados.has(chave)) return;
     _errosReportados.add(chave); _errosContagem++;
@@ -92,11 +93,63 @@
   });
   window.addEventListener('unhandledrejection', (e) => {
     const msg = e && e.reason && (e.reason.message || String(e.reason));
+    if (_ehContextoInvalidado(msg)) { _marcarContextoMorto(); return; }
     // Sem filtro de origem aqui (rejection não expõe filename) — só reporta
     // se parecer coisa nossa (menciona job/wpp) pra não poluir com erro do
     // próprio WhatsApp Web.
     if (msg && /job|wpp|__jobwppbridge/i.test(msg)) _reportarErro(msg, e.reason && e.reason.stack);
   });
+
+  // ═══════════════ CONTEXTO INVALIDADO (extensão atualizada c/ a aba aberta) ═══
+  // Quando a extensão é recarregada/atualizada e ESTA aba não deu F5, o script
+  // fica órfão: chrome.runtime.id vira undefined e qualquer chrome.* lança
+  // "Extension context invalidated". Isso é BENIGNO (só precisa de F5), mas os
+  // ~7 loops de polling relançavam o erro a cada tick (banner reaparecendo sem
+  // parar). Aqui: detecta uma vez, PARA todos os loops e mostra UM aviso
+  // amigável — sem banner vermelho de "erro", sem reportar ao servidor.
+  let _contextoMorto = false;
+  const _idsLoops = [];
+  function _registrarLoop(id) { _idsLoops.push(id); return id; }
+  function _contextoValido() {
+    try { return !!(chrome.runtime && chrome.runtime.id); } catch (e) { return false; }
+  }
+  function _ehContextoInvalidado(e) {
+    const m = String((e && e.message) || e || '');
+    return /Extension context invalidated|context invalidated|CONTEXTO_INVALIDO/i.test(m);
+  }
+  function _pararLoops() {
+    _idsLoops.forEach((id) => { try { clearInterval(id); } catch (e) {} });
+    _idsLoops.length = 0;
+  }
+  let _avisoContextoMostrado = false;
+  function _mostrarAvisoRecarregarGlobal() {
+    if (_avisoContextoMostrado) return; _avisoContextoMostrado = true;
+    try {
+      if (document.getElementById('job-aviso-contexto')) return;
+      const d = document.createElement('div');
+      d.id = 'job-aviso-contexto';
+      d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#f43f5e;color:#fff;padding:9px 14px;font:13px -apple-system,sans-serif;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.35)';
+      d.innerHTML = 'A extensão JOB foi atualizada. <b>Recarregue esta aba (F5)</b> para voltar a funcionar.' +
+        ' <button id="job-aviso-reload" style="margin-left:12px;background:#fff;color:#b91c40;border:none;border-radius:6px;padding:5px 12px;font-weight:700;cursor:pointer">Recarregar agora</button>';
+      document.body.appendChild(d);
+      const b = d.querySelector('#job-aviso-reload');
+      if (b) b.addEventListener('click', () => location.reload()); // location.reload é API de window: roda mesmo com o contexto órfão
+    } catch (e) { /* nunca deixa o aviso virar outro erro */ }
+  }
+  function _marcarContextoMorto() {
+    if (_contextoMorto) return;
+    _contextoMorto = true;
+    _pararLoops();
+    _mostrarAvisoRecarregarGlobal();
+  }
+  // Leitura de storage que NUNCA lança/rejeita — se o contexto morreu, marca e
+  // devolve {} (o chamador segue sem travar). Substitui os chrome.storage.get
+  // que ficavam fora do try/catch nos loops.
+  async function _safeStorageGet(chaves) {
+    if (!_contextoValido()) { _marcarContextoMorto(); return {}; }
+    try { return await chrome.storage.local.get(chaves); }
+    catch (e) { if (_ehContextoInvalidado(e)) _marcarContextoMorto(); return {}; }
+  }
 
   // ── Descobre o container rolável das mensagens (o WhatsApp muda as classes,
   //    então detectamos pelo comportamento: dentro do #main, o elemento que
@@ -1143,7 +1196,8 @@
   }
 
   async function buscarInbox() {
-    const { extKey, usuarioId } = await chrome.storage.local.get(['extKey', 'usuarioId']);
+    if (_contextoMorto) return;
+    const { extKey, usuarioId } = await _safeStorageGet(['extKey', 'usuarioId']);
     if (!extKey || !usuarioId) return;
     try {
       const r = await chrome.runtime.sendMessage({ type: 'inbox', usuario_id: usuarioId });
@@ -2905,6 +2959,9 @@
       notificarConclusao(entrada);
       sincronizarPainelComConversa();
     } catch (e) {
+      // Contexto invalidado (extensão atualizada, aba órfã) é benigno — mostra o
+      // aviso de F5, não um "Erro inesperado" vermelho preso no painel.
+      if (_ehContextoInvalidado(e)) { _analises.delete(reqId); atualizarPilula(); _marcarContextoMorto(); return; }
       if (entrada.status === 'rodando') {
         entrada.status = 'erro';
         entrada.erro = 'Erro inesperado: ' + e.message;
@@ -2932,9 +2989,9 @@
     // achava atualização, então uma aba aberta por horas sem update na hora
     // do primeiro check nunca mais avisava depois (hora que "demora" pra
     // avisar era essa: aba antiga, sem re-checagem nenhuma agendada).
-    setInterval(verificarVersaoExtensao, 20 * 60 * 1000);
+    _registrarLoop(setInterval(verificarVersaoExtensao, 20 * 60 * 1000));
     carregarSeletoresRemotos();
-    setInterval(carregarSeletoresRemotos, 15 * 60 * 1000);
+    _registrarLoop(setInterval(carregarSeletoresRemotos, 15 * 60 * 1000));
   });
 
   // ── Aviso de versão nova ──────────────────────────────────────────────────
@@ -3004,12 +3061,13 @@
   //    de volta pra "Analisar este lead", mesmo com a análise seguindo rodando
   //    por trás (bug real: parecia travado — Guilherme, 21/07). ──
   let _ultimaChaveVista = null;
-  setInterval(() => {
+  _registrarLoop(setInterval(() => {
+    if (!_contextoValido()) { _marcarContextoMorto(); return; }
     const chaveAgora = nomeDoContato() || chaveConversa(telefoneDoContato(), nomeDoContato());
     if (chaveAgora === _ultimaChaveVista) return;
     _ultimaChaveVista = chaveAgora;
     sincronizarPainelComConversa();
-  }, 1500);
+  }, 1500));
 
   // ═══════════════ Fila de envio (Fase 1) ═══════════════
   // A cada ~20s pergunta ao JOB se tem alguma mensagem pra mandar (só se a
@@ -3019,8 +3077,9 @@
   // o mutex aqui só evita duas consultas se sobrepondo na MESMA aba.
   let _filaOcupada = false;
   async function checarFilaDeEnvio() {
+    if (_contextoMorto) return;
     if (_filaOcupada) return;
-    const { extKey, usuarioId } = await chrome.storage.local.get(['extKey', 'usuarioId']);
+    const { extKey, usuarioId } = await _safeStorageGet(['extKey', 'usuarioId']);
     if (!extKey || !usuarioId) return;
     _filaOcupada = true;
     try {
@@ -3047,7 +3106,7 @@
     } catch (e) { /* próxima rodada tenta de novo */ }
     finally { _filaOcupada = false; }
   }
-  setInterval(checarFilaDeEnvio, 20000);
+  _registrarLoop(setInterval(checarFilaDeEnvio, 20000));
 
   // ═══════════════ Campanha (Fase 2): vigília de resposta + limpeza ═══════════════
   // Vigia os números que ESTE consultor disparou numa campanha: quando um deles
@@ -3111,7 +3170,8 @@
   }
 
   async function checarCampanhaAguardando() {
-    const { extKey, usuarioId } = await chrome.storage.local.get(['extKey', 'usuarioId']);
+    if (_contextoMorto) return;
+    const { extKey, usuarioId } = await _safeStorageGet(['extKey', 'usuarioId']);
     if (!extKey || !usuarioId) return;
     let resp;
     try {
@@ -3135,7 +3195,7 @@
     // varredura de 60s (era a "insistência" que o Guilherme reclamou). Guarda a
     // assinatura da lista dispensada; só reaparece se surgir contato NOVO.
     const _assin = _campExcluir.map((e) => e.telefone).sort().join(',');
-    const { limpezaDispensada } = await chrome.storage.local.get(['limpezaDispensada']);
+    const { limpezaDispensada } = await _safeStorageGet(['limpezaDispensada']);
     if (_campExcluir.length && _assin === limpezaDispensada) {
       const bx = document.getElementById('job-aviso-limpeza'); if (bx) bx.remove();
     } else {
@@ -3158,12 +3218,13 @@
     }
   }
   setTimeout(checarCampanhaAguardando, 8000);
-  setInterval(checarCampanhaAguardando, 60000);
+  _registrarLoop(setInterval(checarCampanhaAguardando, 60000));
 
   // ── Bate ponto pro painel de aptidão do disparo: versão, número do WhatsApp
   //    logado e se a wa-js está de pé. O admin vê na aba Disparos quem está apto. ──
   async function baterPontoDisparo() {
-    const { extKey, usuarioId } = await chrome.storage.local.get(['extKey', 'usuarioId']);
+    if (_contextoMorto) return;
+    const { extKey, usuarioId } = await _safeStorageGet(['extKey', 'usuarioId']);
     if (!extKey || !usuarioId) return;
     let versao = ''; try { versao = chrome.runtime.getManifest().version; } catch (e) {}
     let numero = ''; try { numero = await pedirMeuNumero(); } catch (e) {}
@@ -3172,12 +3233,12 @@
     } catch (e) { /* próxima batida tenta de novo */ }
   }
   setTimeout(baterPontoDisparo, 6000);
-  setInterval(baterPontoDisparo, 60000);
+  _registrarLoop(setInterval(baterPontoDisparo, 60000));
 
   // Inbox de leads novos: busca a cada 45s (mesmo com a seção fechada, pra o
   // badge do trilho avisar) + tick visual do tempo.
   setTimeout(buscarInbox, 9000);
-  setInterval(buscarInbox, 45000);
+  _registrarLoop(setInterval(buscarInbox, 45000));
   ligarLoopInbox();
 
   // Formata o telefone (dígitos) num rótulo BR legível pro aviso de limpeza.
