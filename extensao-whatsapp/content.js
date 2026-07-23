@@ -1107,6 +1107,10 @@
     if (dig.length !== 14) return dig;
     return dig.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
   }
+  function _dataBr(iso) {
+    const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? m[3] + '/' + m[2] + '/' + m[1] : (iso || '');
+  }
   function _cnpjNaConversa() {
     try {
       const main = document.querySelector('#main');
@@ -1172,7 +1176,7 @@
       'CNPJ: ' + _fmtCnpj(c.cnpj),
       'Razão social: ' + (c.nome || ''),
       c.fantasia ? 'Nome fantasia: ' + c.fantasia : '',
-      'Abertura: ' + (c.data_abertura || ''),
+      'Abertura: ' + _dataBr(c.data_abertura),
       'Situação: ' + (c.situacao || ''),
       'Município: ' + (c.municipio || ''),
       'Natureza jurídica: ' + natureza,
@@ -1189,7 +1193,7 @@
         (c.eh_simples ? selo('Simples Nacional', 'info') : '') +
       '</div>' +
       linha('CNPJ', _fmtCnpj(c.cnpj)) +
-      linha('Data de abertura', c.data_abertura) +
+      linha('Data de abertura', _dataBr(c.data_abertura)) +
       linha('Município', c.municipio) +
       linha('Natureza jurídica', natureza) +
       linha('Atividade (CNAE)', c.cnae) +

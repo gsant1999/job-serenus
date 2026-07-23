@@ -12180,6 +12180,14 @@ def _consultar_cnpj(dig):
                     }
         except Exception:
             dados = None
+    # MEI não tem quadro societário na Receita (qsa vem vazio) — o titular é o
+    # próprio nome, embutido na razão social (ex.: "52.788.240 MILENA SANTOS
+    # BECKER"). Extrai o nome limpo (tira o prefixo numérico) e usa como sócio.
+    if dados and dados.get('eh_mei') and not dados.get('socios'):
+        titular = re.sub(r'^\d{2}\.\d{3}\.\d{3}\s+', '', dados.get('nome') or '').strip()
+        if titular:
+            dados['socios'] = [{"nome": titular, "qualificacao": "Titular MEI"}]
+            dados['titular_mei'] = titular
     if dados:
         _CNPJ_CACHE[dig] = (time.time(), dados)
     return dados
