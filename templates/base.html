@@ -539,6 +539,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 6v6l4 2"/><path d="M16 2l4 4-4 4"/></svg>
       Inteligência de Vendas
     </a>
+    <a href="/playbook" class="nav-link {% if request.path == '/playbook' %}active{% endif %}" onclick="closeSidebar()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+      Playbook
+    </a>
     {% endif %}
     {% if pode_modulo('whatsapp') %}
     <a href="/whatsapp-analises" class="nav-link {% if '/whatsapp-analises' in request.path %}active{% endif %}" onclick="closeSidebar()">

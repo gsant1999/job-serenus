@@ -7892,18 +7892,12 @@ def fluxo_caixa():
                                total_pago=total_pago, fixo_mes=fixo_mes, fixo_parcelas=fixo_parcelas)
 
 # ─── BI ──────────────────────────────────────────────────────────────────────────
-@app.route('/inteligencia-vendas')
-@login_required
-@admin_required
-def inteligencia_vendas():
-    """Cataloga os clientes FECHADOS (proposta emitida/ativa) e cruza com a
-    análise de conversa de cada um — inteligência de vendas: o que fecha
-    (objeções que aparecem em quem fechou, operadoras/planos, perfil, tempo
-    médio até fechar, por consultor). Base pra decisão e pra follow-up."""
-    conn = db()
-    # A tabela propostas NÃO tem lead_id — a ligação com a análise de conversa é
-    # pelo TELEFONE (a análise é indexada por telefone_norm). Casamos o telefone
-    # do responsável da proposta com a última análise daquele número.
+def _fechados_com_analise(conn):
+    """Clientes FECHADOS (proposta emitida/ativa) cruzados com a última análise
+    de conversa deles. propostas NÃO tem lead_id — casa por TELEFONE
+    (tel_resp_contrato/negociacao vs whatsapp_analises.telefone_norm). Retorna
+    a lista de clientes (com objeções, followup, score) — usado pela
+    Inteligência de Vendas e pelo Playbook."""
     fechados = conn.execute("""
         SELECT p.id, p.razao_social, p.consultor, p.adm_operadora, p.modalidade,
                p.valor, p.total_vidas, p.criado_em,
@@ -7913,7 +7907,6 @@ def inteligencia_vendas():
           AND COALESCE(p.estornada,0)=0
         ORDER BY p.criado_em DESC
     """).fetchall()
-    # Última análise por telefone_norm -> dict pra casar em memória.
     analises = {}
     for a in conn.execute("""
         SELECT wa.telefone_norm, wa.sugestoes_json, wa.score, wa.score_faixa, wa.id, wa.criado_em
@@ -7922,44 +7915,24 @@ def inteligencia_vendas():
           AND wa.id = (SELECT MAX(wa2.id) FROM whatsapp_analises wa2 WHERE wa2.telefone_norm = wa.telefone_norm)
     """).fetchall():
         analises[a['telefone_norm']] = a
-    close_db(conn)
-
-    from collections import Counter
-    total = len(fechados)
-    soma_valor = sum(float(r['valor'] or 0) for r in fechados)
-    por_operadora, val_operadora = Counter(), {}
-    por_consultor, val_consultor = Counter(), {}
-    objecoes, cidades = Counter(), Counter()
-    scores, dias_ate_fechar, com_analise = [], [], 0
     clientes = []
     for r in fechados:
-        # casa a análise pelo telefone do responsável (contato ou negociação)
         wa = None
         for tel in (r['tel_resp_contrato'], r['tel_resp_negociacao']):
             tn = _normalizar_telefone(str(tel or ''))
             if tn and tn in analises:
                 wa = analises[tn]; break
-        op = r['adm_operadora'] or '—'
-        por_operadora[op] += 1; val_operadora[op] = val_operadora.get(op, 0) + float(r['valor'] or 0)
-        cons = r['consultor'] or '—'
-        por_consultor[cons] += 1; val_consultor[cons] = val_consultor.get(cons, 0) + float(r['valor'] or 0)
-        extr = {}
+        extr, diag = {}, {}
+        dias = None
         if wa is not None:
-            com_analise += 1
             try:
-                extr = (json.loads(wa['sugestoes_json'] or '{}') or {}).get('extracao') or {}
+                diag = json.loads(wa['sugestoes_json'] or '{}') or {}
+                extr = diag.get('extracao') or {}
             except Exception:
-                extr = {}
-            if wa['score'] is not None:
-                scores.append(wa['score'])
-            # tempo da 1ª análise até o fechamento (proxy do ciclo de venda)
+                extr, diag = {}, {}
             d1, d2 = _parse_dt_seguro(wa['criado_em']), _parse_dt_seguro(r['criado_em'])
             if d1 and d2 and d2 >= d1:
-                dias_ate_fechar.append((d2 - d1).days)
-        for o in (extr.get('objecoes') or []):
-            objecoes[str(o).strip().lower()] += 1
-        if extr.get('cidade'):
-            cidades[str(extr['cidade']).strip().title()] += 1
+                dias = (d2 - d1).days
         clientes.append({
             'id': r['id'], 'nome': r['razao_social'], 'consultor': r['consultor'],
             'operadora': r['adm_operadora'], 'modalidade': r['modalidade'],
@@ -7969,7 +7942,43 @@ def inteligencia_vendas():
             'score': (wa['score'] if wa is not None else None),
             'faixa': (wa['score_faixa'] if wa is not None else None),
             'objecoes': extr.get('objecoes') or [], 'cidade': extr.get('cidade'),
+            'followup': (diag.get('followup') or '').strip(),
+            'dias_para_fechar': dias,
         })
+    return clientes
+
+
+@app.route('/inteligencia-vendas')
+@login_required
+@admin_required
+def inteligencia_vendas():
+    """Cataloga os clientes FECHADOS e cruza com a análise de conversa — o que
+    fecha (objeções, operadoras/cidades/consultores, perfil, tempo até fechar)."""
+    conn = db()
+    clientes = _fechados_com_analise(conn)
+    close_db(conn)
+    from collections import Counter
+    total = len(clientes)
+    soma_valor = sum(c['valor'] for c in clientes)
+    por_operadora, val_operadora = Counter(), {}
+    por_consultor, val_consultor = Counter(), {}
+    objecoes, cidades = Counter(), Counter()
+    scores, dias_ate_fechar, com_analise = [], [], 0
+    for c in clientes:
+        op = c['operadora'] or '—'
+        por_operadora[op] += 1; val_operadora[op] = val_operadora.get(op, 0) + c['valor']
+        cons = c['consultor'] or '—'
+        por_consultor[cons] += 1; val_consultor[cons] = val_consultor.get(cons, 0) + c['valor']
+        if c['analise_id']:
+            com_analise += 1
+        if c['score'] is not None:
+            scores.append(c['score'])
+        if c['dias_para_fechar'] is not None:
+            dias_ate_fechar.append(c['dias_para_fechar'])
+        for o in (c['objecoes'] or []):
+            objecoes[str(o).strip().lower()] += 1
+        if c['cidade']:
+            cidades[str(c['cidade']).strip().title()] += 1
     m = {
         'total': total, 'soma_valor': soma_valor,
         'ticket': round(soma_valor / total, 2) if total else 0,
@@ -7984,6 +7993,37 @@ def inteligencia_vendas():
     return render_template('inteligencia_vendas.html', m=m, clientes=clientes,
                            top_operadoras=top_operadoras, top_consultores=top_consultores,
                            top_objecoes=top_objecoes, top_cidades=top_cidades)
+
+
+@app.route('/playbook')
+@login_required
+@admin_required
+def playbook():
+    """Playbook de vendas aprendido com quem FECHOU: por objeção, os casos reais
+    de fechamento onde ela apareceu (o consultor novo lê como foi contornada) +
+    o follow-up sugerido. É o material de treino e a base de conhecimento pro
+    copiloto de IA."""
+    conn = db()
+    clientes = _fechados_com_analise(conn)
+    close_db(conn)
+    # Agrupa por objeção: cada objeção -> casos de fechamento onde apareceu.
+    por_objecao = {}
+    for c in clientes:
+        if not c['analise_id']:
+            continue
+        for o in (c['objecoes'] or []):
+            chave = str(o).strip().lower()
+            if not chave:
+                continue
+            por_objecao.setdefault(chave, []).append(c)
+    objecoes = sorted(
+        ({'nome': k, 'qtd': len(v), 'casos': v} for k, v in por_objecao.items()),
+        key=lambda x: -x['qtd'])
+    # Follow-ups reais de quem fechou (exemplos de mensagem que converteu).
+    followups = [c for c in clientes if c['analise_id'] and c['followup']][:20]
+    total_com_analise = sum(1 for c in clientes if c['analise_id'])
+    return render_template('playbook.html', objecoes=objecoes, followups=followups,
+                           total_fechados=len(clientes), total_com_analise=total_com_analise)
 
 
 @app.route('/bi')
