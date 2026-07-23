@@ -1119,14 +1119,11 @@
   function abrirSecaoCnpj() {
     const pre = _cnpjNaConversa();
     setCorpoSecao(
-      '<div class="job-cnpj-wrap" style="padding:4px 2px;">' +
-        '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">Consultar CNPJ</div>' +
-        '<div style="font-size:12px;color:var(--job-cinza,#8a90a2);line-height:1.5;margin-bottom:12px;">Dados da Receita (razão social, abertura, situação, sócios, natureza jurídica) e se é MEI — sem CAPTCHA, sem gov.br.</div>' +
-        '<div style="display:flex;gap:6px;margin-bottom:12px;">' +
-          '<input id="job-cnpj-input" inputmode="numeric" placeholder="00.000.000/0000-00" value="' + esc(_fmtCnpj(pre)) + '" ' +
-            'style="flex:1;min-width:0;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04);color:inherit;font-size:14px;" />' +
-          '<button class="job-copy" id="job-cnpj-btn" style="white-space:nowrap;">Consultar</button>' +
-        '</div>' +
+      '<div class="job-cnpj-wrap">' +
+        '<div class="job-cnpj-titulo">Consultar CNPJ</div>' +
+        '<div class="job-cnpj-sub">Dados da Receita (razão social, abertura, situação, sócios, natureza jurídica) e se é MEI — sem CAPTCHA, sem gov.br.</div>' +
+        '<input id="job-cnpj-input" class="job-cnpj-input" inputmode="numeric" placeholder="00.000.000/0000-00" value="' + esc(_fmtCnpj(pre)) + '" />' +
+        '<button class="job-cnpj-btn" id="job-cnpj-btn">Consultar</button>' +
         '<div id="job-cnpj-resultado"></div>' +
       '</div>');
     const input = document.getElementById('job-cnpj-input');
@@ -1165,11 +1162,10 @@
     });
   }
   function _renderCnpjCard(c) {
-    const selo = (txt, ok) => '<span class="job-chip" style="background:' +
-      (ok ? 'rgba(31,216,164,.15);color:#1fd8a4' : 'rgba(244,63,124,.15);color:#fb8497') + ';">' + esc(txt) + '</span>';
-    const linha = (rot, val) => val ? '<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:13px;">' +
-      '<span style="color:var(--job-cinza,#8a90a2);min-width:118px;">' + esc(rot) + '</span>' +
-      '<span style="flex:1;">' + esc(val) + '</span></div>' : '';
+    const selo = (txt, cls) => '<span class="job-cnpj-selo ' + cls + '">' + esc(txt) + '</span>';
+    const linha = (rot, val) => val ? '<div class="job-cnpj-linha">' +
+      '<span class="job-cnpj-rot">' + esc(rot) + '</span>' +
+      '<span class="job-cnpj-val">' + esc(val) + '</span></div>' : '';
     const socios = (c.socios || []).map((s) => s.nome + (s.qualificacao ? ' (' + s.qualificacao + ')' : '')).join('; ');
     const natureza = [c.natureza_codigo, c.natureza_descricao].filter(Boolean).join(' - ');
     const txtCopia = [
@@ -1184,13 +1180,13 @@
       'MEI: ' + (c.eh_mei ? 'Sim' : 'Não') + (c.eh_simples ? ' | Simples: Sim' : ''),
       socios ? 'Quadro societário: ' + socios : '',
     ].filter(Boolean).join('\n');
-    return '<div style="border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:14px;">' +
-      '<div style="font-size:15px;font-weight:700;line-height:1.3;">' + esc(c.nome || '—') + '</div>' +
-      (c.fantasia ? '<div style="font-size:12.5px;color:var(--job-cinza,#8a90a2);margin-top:2px;">' + esc(c.fantasia) + '</div>' : '') +
-      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:9px 0 11px;">' +
-        selo(c.ativa ? 'Ativa' : (c.situacao || 'Situação?'), !!c.ativa) +
-        selo(c.eh_mei ? 'É MEI' : 'Não é MEI', !!c.eh_mei) +
-        (c.eh_simples ? selo('Simples Nacional', true) : '') +
+    return '<div class="job-cnpj-card">' +
+      '<div class="job-cnpj-nome">' + esc(c.nome || '—') + '</div>' +
+      (c.fantasia ? '<div class="job-cnpj-fant">' + esc(c.fantasia) + '</div>' : '') +
+      '<div class="job-cnpj-selos">' +
+        selo(c.ativa ? 'Ativa' : (c.situacao || 'Situação?'), c.ativa ? 'ok' : 'no') +
+        selo(c.eh_mei ? 'É MEI' : 'Não é MEI', c.eh_mei ? 'ok' : 'no') +
+        (c.eh_simples ? selo('Simples Nacional', 'info') : '') +
       '</div>' +
       linha('CNPJ', _fmtCnpj(c.cnpj)) +
       linha('Data de abertura', c.data_abertura) +
@@ -1198,11 +1194,11 @@
       linha('Natureza jurídica', natureza) +
       linha('Atividade (CNAE)', c.cnae) +
       linha('Quadro societário', socios) +
-      '<div style="display:flex;gap:6px;margin-top:12px;">' +
+      '<div class="job-cnpj-acoes">' +
         '<button class="job-copy" id="job-cnpj-copy" data-texto="' + esc(txtCopia) + '">Copiar dados</button>' +
-        '<a class="job-copy" href="https://mei.receita.economia.gov.br/certificado/visualizacao" target="_blank" rel="noopener" style="text-decoration:none;">Abrir CCMEI (login gov.br)</a>' +
+        '<a class="job-cnpj-link" href="https://mei.receita.economia.gov.br/certificado/visualizacao" target="_blank" rel="noopener">Abrir CCMEI</a>' +
       '</div>' +
-      '<div style="font-size:11px;color:var(--job-cinza,#8a90a2);margin-top:8px;line-height:1.4;">Fonte: ' + esc(c.fonte || 'Receita') + '. Para o certificado CCMEI em PDF, abra o site e faça login com seu gov.br.</div>' +
+      '<div class="job-cnpj-fonte">Fonte: ' + esc(c.fonte || 'Receita') + '. Para o certificado CCMEI em PDF, abra o site e faça login com seu gov.br.</div>' +
     '</div>';
   }
 

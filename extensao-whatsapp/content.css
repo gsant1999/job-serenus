@@ -453,6 +453,40 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 .job-copy { width: 100%; margin-top: 8px; background: var(--job-bg3); color: var(--job-txt); border: none;
   border-radius: 8px; padding: 8px; font-size: 12px; font-weight: 500; cursor: pointer; }
 .job-copy:hover { background: var(--job-bg3-hover); }
+
+/* ── Consulta de CNPJ ─────────────────────────────────────────────── */
+.job-cnpj-titulo { font-size: 16px; font-weight: 600; color: var(--job-txt); }
+.job-cnpj-sub { font-size: 12px; color: var(--job-txt-fraco); line-height: 1.5; margin: 4px 0 16px; }
+.job-cnpj-input { width: 100%; box-sizing: border-box; padding: 11px 13px; border-radius: 10px;
+  border: 1px solid var(--job-borda); background: var(--job-bg2); color: var(--job-txt);
+  font-size: 15px; font-family: inherit; letter-spacing: .3px; outline: none; transition: border-color .12s; }
+.job-cnpj-input:focus { border-color: var(--job-acento); }
+.job-cnpj-input::placeholder { color: var(--job-txt-fraco); }
+.job-cnpj-btn { width: 100%; margin-top: 9px; padding: 11px; border: none; border-radius: 10px;
+  background: var(--job-acento); color: var(--job-acento-txt); font-size: 14px; font-weight: 600;
+  font-family: inherit; cursor: pointer; transition: filter .12s; }
+.job-cnpj-btn:hover { filter: brightness(1.06); }
+.job-cnpj-btn:disabled { opacity: .55; cursor: default; }
+.job-cnpj-card { margin-top: 16px; border: 1px solid var(--job-borda); border-radius: 14px;
+  padding: 16px; background: var(--job-bg2); }
+.job-cnpj-nome { font-size: 15.5px; font-weight: 600; color: var(--job-txt); line-height: 1.3; }
+.job-cnpj-fant { font-size: 12.5px; color: var(--job-txt-fraco); margin-top: 3px; }
+.job-cnpj-selos { display: flex; gap: 6px; flex-wrap: wrap; margin: 11px 0 13px; }
+.job-cnpj-selo { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid transparent; letter-spacing: .2px; }
+.job-cnpj-selo.ok { color: var(--job-sucesso); background: var(--job-sucesso-bg); border-color: var(--job-sucesso-bd); }
+.job-cnpj-selo.no { color: var(--job-danger); background: var(--job-danger-bg); border-color: var(--job-danger-bd); }
+.job-cnpj-selo.info { color: var(--job-info); background: var(--job-info-bg); border-color: var(--job-info-bd); }
+.job-cnpj-linha { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--job-borda); font-size: 13px; }
+.job-cnpj-linha:last-of-type { border-bottom: none; }
+.job-cnpj-rot { color: var(--job-txt-fraco); min-width: 116px; flex-shrink: 0; }
+.job-cnpj-val { color: var(--job-txt); flex: 1; word-break: break-word; }
+.job-cnpj-acoes { display: flex; gap: 8px; margin-top: 14px; }
+.job-cnpj-acoes .job-copy, .job-cnpj-acoes .job-cnpj-link { margin-top: 0; flex: 1; text-align: center; }
+.job-cnpj-link { background: var(--job-bg3); color: var(--job-txt); border-radius: 8px; padding: 8px;
+  font-size: 12px; font-weight: 500; text-decoration: none; display: flex; align-items: center; justify-content: center; }
+.job-cnpj-link:hover { background: var(--job-bg3-hover); }
+.job-cnpj-fonte { font-size: 11px; color: var(--job-txt-fraco); margin-top: 10px; line-height: 1.45; }
 .job-ia-badge { font-size: 9px; font-weight: 500; letter-spacing: .4px; padding: 2px 7px;
   border-radius: 20px; background: var(--job-roxo-bg); color: var(--job-roxo); margin-left: 6px; vertical-align: middle; }
 .job-ia-alertas { margin: 8px 0 4px; }
