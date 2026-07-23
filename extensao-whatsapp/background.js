@@ -284,6 +284,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/cnpj/' + encodeURIComponent(dig), 'GET', null, 20000).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'notas_listar') {
+    chamarJob('/api/whatsapp/notas?telefone=' + encodeURIComponent(msg.telefone || ''), 'GET', null, 10000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'notas_criar') {
+    chamarJob('/api/whatsapp/notas', 'POST',
+      { telefone: msg.telefone, texto: msg.texto, usuario_id: msg.usuario_id }, 10000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'notas_excluir') {
+    chamarJob('/api/whatsapp/notas/excluir', 'POST', { id: msg.id }, 10000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'presenca') {
     chamarJob('/api/whatsapp/presenca', 'POST',
       { usuario_id: msg.usuario_id, versao: msg.versao, numero: msg.numero, wpp_ok: msg.wpp_ok }, 10000).then(sendResponse);

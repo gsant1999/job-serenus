@@ -487,6 +487,44 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
   font-size: 12px; font-weight: 500; text-decoration: none; display: flex; align-items: center; justify-content: center; }
 .job-cnpj-link:hover { background: var(--job-bg3-hover); }
 .job-cnpj-fonte { font-size: 11px; color: var(--job-txt-fraco); margin-top: 10px; line-height: 1.45; }
+.job-cnpj-acoes-2 { display: flex; gap: 8px; margin-top: 8px; }
+.job-cnpj-salvar-lead { flex: 1; margin-top: 0; background: var(--job-acento); color: var(--job-acento-txt);
+  border: none; border-radius: 8px; padding: 8px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.job-cnpj-salvar-lead:hover { filter: brightness(1.06); }
+.job-cnpj-salvar-lead:disabled { opacity: .6; cursor: default; }
+
+/* ── Barra de notas do lead (topo da conversa) ───────────────────────── */
+#job-notas-bar { position: relative; z-index: 20; font-family: 'NunitoJOB', -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+.job-notas-head { display: flex; align-items: center; gap: 8px; padding: 9px 16px; background: var(--job-bg2);
+  border-bottom: 1px solid var(--job-borda); cursor: pointer; font-size: 12.5px; color: var(--job-txt); user-select: none; }
+.job-notas-head:hover { background: var(--job-bg3); }
+.job-notas-ico { display: flex; width: 15px; height: 15px; color: var(--job-acento); flex-shrink: 0; }
+.job-notas-ico svg { width: 100%; height: 100%; }
+.job-notas-count { font-weight: 700; color: var(--job-acento); flex-shrink: 0; }
+.job-notas-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--job-txt-fraco); }
+.job-notas-vazio { flex: 1; color: var(--job-txt-fraco); }
+.job-notas-abrir { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--job-acento); }
+.job-notas-painel { background: var(--job-bg2); border-bottom: 1px solid var(--job-borda); padding: 12px 16px 14px; }
+.job-notas-topo { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
+.job-notas-titulo { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--job-txt); }
+.job-notas-titulo svg { width: 14px; height: 14px; color: var(--job-acento); }
+.job-notas-fechar { background: none; border: none; color: var(--job-txt-fraco); font-size: 12px; cursor: pointer; font-family: inherit; }
+.job-notas-fechar:hover { color: var(--job-txt); }
+.job-notas-lista { display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; margin-bottom: 10px; }
+.job-nota-item { background: var(--job-bg3); border-radius: 8px; padding: 8px 10px; }
+.job-nota-txt { font-size: 13px; color: var(--job-txt); line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.job-nota-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 10.5px; color: var(--job-txt-fraco); }
+.job-nota-del { margin-left: auto; background: none; border: none; color: var(--job-txt-fraco); font-size: 14px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.job-nota-del:hover { color: var(--job-danger); }
+.job-notas-nova { display: flex; flex-direction: column; gap: 7px; }
+.job-nota-input { width: 100%; box-sizing: border-box; resize: vertical; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--job-borda); background: var(--job-bg1); color: var(--job-txt); font-size: 13px;
+  font-family: inherit; outline: none; }
+.job-nota-input:focus { border-color: var(--job-acento); }
+.job-nota-salvar { align-self: flex-end; background: var(--job-acento); color: var(--job-acento-txt); border: none;
+  border-radius: 8px; padding: 7px 14px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.job-nota-salvar:hover { filter: brightness(1.06); }
+.job-nota-salvar:disabled { opacity: .6; cursor: default; }
 .job-ia-badge { font-size: 9px; font-weight: 500; letter-spacing: .4px; padding: 2px 7px;
   border-radius: 20px; background: var(--job-roxo-bg); color: var(--job-roxo); margin-left: 6px; vertical-align: middle; }
 .job-ia-alertas { margin: 8px 0 4px; }
