@@ -12103,6 +12103,106 @@ def api_whatsapp_ping():
     return _wa_cors(jsonify({"ok": True, "sistema": "JOB Serenus", "versao_api": 1}))
 
 
+# Consulta de CNPJ na extensão — em vez de raspar o cnpjreva da Receita (tem
+# CAPTCHA, robô não passa) e o CCMEI (exige gov.br), usamos a BrasilAPI, que
+# devolve os MESMOS dados da Receita, aberta e de graça: razão social, data de
+# abertura, situação, quadro societário, município, natureza jurídica E o flag
+# opcao_pelo_mei — ou seja, dá pra confirmar se é MEI sem ninguém logar no
+# gov.br. O certificado CCMEI (PDF) fica manual, no navegador do consultor.
+_CNPJ_CACHE = {}          # cache em memória (processo único): {dig: (ts, dados)}
+_CNPJ_CACHE_TTL = 30 * 24 * 3600   # 30 dias — cadastro de CNPJ muda pouco
+
+
+def _consultar_cnpj(dig):
+    """Consulta um CNPJ (14 dígitos) na BrasilAPI e normaliza pros campos que a
+    extensão mostra. Cai pra ReceitaWS se a BrasilAPI falhar. Retorna dict ou
+    None. Best-effort: qualquer erro de rede vira None (a rota trata)."""
+    cache = _CNPJ_CACHE.get(dig)
+    if cache and (time.time() - cache[0]) < _CNPJ_CACHE_TTL:
+        return cache[1]
+    dados = None
+    # 1) BrasilAPI (preferida — traz opcao_pelo_mei e QSA completo)
+    try:
+        r = _requests.get('https://brasilapi.com.br/api/cnpj/v1/' + dig, timeout=15)
+        if r.status_code == 200:
+            d = r.json()
+            socios = []
+            for s in (d.get('qsa') or []):
+                nome = (s.get('nome_socio') or '').strip()
+                if nome:
+                    socios.append({"nome": nome, "qualificacao": (s.get('qualificacao_socio') or '').strip()})
+            sit = (d.get('descricao_situacao_cadastral') or '').strip()
+            mun = (d.get('municipio') or '').strip()
+            uf = (d.get('uf') or '').strip()
+            dados = {
+                "cnpj": dig,
+                "nome": (d.get('razao_social') or '').strip(),
+                "fantasia": (d.get('nome_fantasia') or '').strip(),
+                "data_abertura": (d.get('data_inicio_atividade') or '').strip(),
+                "situacao": sit,
+                "ativa": sit.upper() == 'ATIVA',
+                "municipio": (mun + (' - ' + uf if uf else '')).strip(' -'),
+                "natureza_codigo": str(d.get('codigo_natureza_juridica') or '').strip(),
+                "natureza_descricao": (d.get('natureza_juridica') or '').strip(),
+                "cnae": (d.get('cnae_fiscal_descricao') or '').strip(),
+                "eh_mei": bool(d.get('opcao_pelo_mei')),
+                "eh_simples": bool(d.get('opcao_pelo_simples')),
+                "socios": socios,
+                "fonte": "BrasilAPI",
+            }
+    except Exception:
+        dados = None
+    # 2) Fallback ReceitaWS (sem flag MEI confiável, mas cobre os campos básicos)
+    if not dados:
+        try:
+            r = _requests.get('https://receitaws.com.br/v1/cnpj/' + dig, timeout=15)
+            if r.status_code == 200:
+                d = r.json()
+                if (d.get('status') or '').upper() != 'ERROR':
+                    socios = [{"nome": (s.get('nome') or '').strip(), "qualificacao": (s.get('qual') or '').strip()}
+                              for s in (d.get('qsa') or []) if (s.get('nome') or '').strip()]
+                    sit = (d.get('situacao') or '').strip()
+                    dados = {
+                        "cnpj": dig,
+                        "nome": (d.get('nome') or '').strip(),
+                        "fantasia": (d.get('fantasia') or '').strip(),
+                        "data_abertura": (d.get('abertura') or '').strip(),
+                        "situacao": sit,
+                        "ativa": sit.upper() == 'ATIVA',
+                        "municipio": ((d.get('municipio') or '').strip() + (' - ' + (d.get('uf') or '').strip() if d.get('uf') else '')).strip(' -'),
+                        "natureza_codigo": (str(d.get('natureza_juridica') or '').split(' - ')[0]).strip(),
+                        "natureza_descricao": (d.get('natureza_juridica') or '').strip(),
+                        "cnae": ((d.get('atividade_principal') or [{}])[0].get('text') or '').strip(),
+                        "eh_mei": bool(d.get('simei', {}).get('optante')) if isinstance(d.get('simei'), dict) else False,
+                        "eh_simples": bool(d.get('simples', {}).get('optante')) if isinstance(d.get('simples'), dict) else False,
+                        "socios": socios,
+                        "fonte": "ReceitaWS",
+                    }
+        except Exception:
+            dados = None
+    if dados:
+        _CNPJ_CACHE[dig] = (time.time(), dados)
+    return dados
+
+
+@app.route('/api/whatsapp/cnpj/<cnpj>', methods=['GET', 'OPTIONS'])
+def api_whatsapp_cnpj(cnpj):
+    """Consulta de CNPJ pra extensão: devolve os dados cadastrais da Receita
+    (via BrasilAPI) já normalizados, incluindo se a empresa é MEI. Sem CAPTCHA,
+    sem gov.br — o certificado CCMEI em si o consultor abre manualmente."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    dig = re.sub(r'\D', '', cnpj or '')
+    if len(dig) != 14:
+        return _wa_cors(jsonify({"ok": False, "erro": "CNPJ precisa ter 14 dígitos"})), 400
+    dados = _consultar_cnpj(dig)
+    if not dados:
+        return _wa_cors(jsonify({"ok": False, "erro": "Não consegui consultar esse CNPJ agora. Tente de novo em instantes."})), 502
+    return _wa_cors(jsonify({"ok": True, "cnpj": dados}))
+
+
 @app.route('/api/whatsapp/versao', methods=['GET', 'OPTIONS'])
 def api_whatsapp_versao():
     """Diz qual é a versão mais nova da extensão (a que está no deploy). A própria
