@@ -986,6 +986,14 @@ def init_db():
                 valor TEXT,
                 atualizado_em TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS lead_notas (
+                id SERIAL PRIMARY KEY,
+                telefone_norm TEXT NOT NULL,
+                usuario_id INTEGER,
+                autor_nome TEXT,
+                texto TEXT NOT NULL,
+                criado_em TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS whatsapp_funis (
                 id SERIAL PRIMARY KEY,
                 nome TEXT NOT NULL,
@@ -1561,6 +1569,14 @@ def init_db():
             chave TEXT PRIMARY KEY,
             valor TEXT,
             atualizado_em TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS lead_notas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telefone_norm TEXT NOT NULL,
+            usuario_id INTEGER,
+            autor_nome TEXT,
+            texto TEXT NOT NULL,
+            criado_em TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS whatsapp_funis (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -12209,6 +12225,67 @@ def api_whatsapp_cnpj(cnpj):
     if not dados:
         return _wa_cors(jsonify({"ok": False, "erro": "Não consegui consultar esse CNPJ agora. Tente de novo em instantes."})), 502
     return _wa_cors(jsonify({"ok": True, "cnpj": dados}))
+
+
+# Notas do lead — anotações que ficam presas ao telefone e aparecem numa barra
+# em cima da conversa no WhatsApp (a extensão desenha). Ideia vista no ZapVoice
+# (aba "Anotações"), mas aqui a nota mora no NOSSO banco, atrelada ao número,
+# então segue o lead independente de quem abre a conversa.
+@app.route('/api/whatsapp/notas', methods=['GET', 'POST', 'OPTIONS'])
+def api_whatsapp_notas():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    conn = db()
+    if request.method == 'GET':
+        tel = _normalizar_telefone(request.args.get('telefone', ''))
+        if not tel:
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": False, "erro": "telefone ausente"})), 400
+        rows = conn.execute("""SELECT id, texto, autor_nome, criado_em FROM lead_notas
+            WHERE telefone_norm=? ORDER BY id DESC LIMIT 100""", (tel,)).fetchall()
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": True, "notas": [dict(r) for r in rows]}))
+    # POST — cria nota
+    d = request.get_json(silent=True) or {}
+    tel = _normalizar_telefone(d.get('telefone', ''))
+    texto = (d.get('texto') or '').strip()[:4000]
+    if not tel or not texto:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "telefone e texto são obrigatórios"})), 400
+    try:
+        uid = int(d.get('usuario_id')) if d.get('usuario_id') else None
+    except (TypeError, ValueError):
+        uid = None
+    autor = ''
+    if uid:
+        u = conn.execute("SELECT nome FROM usuarios WHERE id=?", (uid,)).fetchone()
+        autor = (u['nome'] if u else '') or ''
+    cur = conn.execute("""INSERT INTO lead_notas (telefone_norm, usuario_id, autor_nome, texto, criado_em)
+        VALUES (?,?,?,?,?)""", (tel, uid, autor, texto, _agora_sp()))
+    nid = _last_insert_id(cur)
+    conn.commit()
+    row = conn.execute("SELECT id, texto, autor_nome, criado_em FROM lead_notas WHERE id=?", (nid,)).fetchone()
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "nota": dict(row) if row else None}))
+
+
+@app.route('/api/whatsapp/notas/excluir', methods=['POST', 'OPTIONS'])
+def api_whatsapp_notas_excluir():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False})), 401
+    d = request.get_json(silent=True) or {}
+    try:
+        nid = int(d.get('id'))
+    except (TypeError, ValueError):
+        return _wa_cors(jsonify({"ok": False, "erro": "id inválido"})), 400
+    conn = db()
+    conn.execute("DELETE FROM lead_notas WHERE id=?", (nid,))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
 
 
 @app.route('/api/whatsapp/versao', methods=['GET', 'OPTIONS'])
