@@ -87,6 +87,7 @@
     }).catch(() => {});
   }
   window.addEventListener('error', (e) => {
+    if (e && _ehContextoInvalidado(e.message || (e.error && e.error.message))) { _marcarContextoMorto(); return; }
     if (e && e.filename && /content\.js|wpp-bridge\.js/.test(e.filename)) {
       _reportarErro(e.message, e.error && e.error.stack);
     }
@@ -149,6 +150,18 @@
     if (!_contextoValido()) { _marcarContextoMorto(); return {}; }
     try { return await chrome.storage.local.get(chaves); }
     catch (e) { if (_ehContextoInvalidado(e)) _marcarContextoMorto(); return {}; }
+  }
+  function _safeStorageSet(obj) {  // fire-and-forget, nunca lança
+    if (!_contextoValido()) { _marcarContextoMorto(); return; }
+    try { chrome.storage.local.set(obj).catch(() => {}); }
+    catch (e) { if (_ehContextoInvalidado(e)) _marcarContextoMorto(); }
+  }
+  // Mensagem pro background que nunca lança nem rejeita "context invalidated":
+  // devolve null nesse caso (e marca o contexto morto) — o chamador trata null.
+  async function _safeSendMessage(msg) {
+    if (!_contextoValido()) { _marcarContextoMorto(); return null; }
+    try { return await chrome.runtime.sendMessage(msg); }
+    catch (e) { if (_ehContextoInvalidado(e)) { _marcarContextoMorto(); return null; } throw e; }
   }
 
   // ── Descobre o container rolável das mensagens (o WhatsApp muda as classes,
@@ -630,14 +643,14 @@
   async function _cacheNumeroSalvar(chatId, tel) {
     if (!chatId || !tel) return;
     try {
-      const { jobNumCache = {} } = await chrome.storage.local.get(['jobNumCache']);
-      jobNumCache[chatId] = tel; await chrome.storage.local.set({ jobNumCache });
+      const { jobNumCache = {} } = await _safeStorageGet(['jobNumCache']);
+      jobNumCache[chatId] = tel; _safeStorageSet({ jobNumCache });
     } catch (e) {}
   }
   async function _cacheNumeroLer(chatId) {
     if (!chatId) return '';
     try {
-      const { jobNumCache = {} } = await chrome.storage.local.get(['jobNumCache']);
+      const { jobNumCache = {} } = await _safeStorageGet(['jobNumCache']);
       return jobNumCache[chatId] || '';
     } catch (e) { return ''; }
   }
@@ -807,7 +820,7 @@
   let _railSide = 'direita';
 
   async function carregarPreferenciaLado() {
-    const { railSide } = await chrome.storage.local.get(['railSide']);
+    const { railSide } = await _safeStorageGet(['railSide']);
     _railSide = railSide === 'esquerda' ? 'esquerda' : 'direita';
     aplicarClassesHtml();
   }
@@ -929,7 +942,7 @@
   async function toggleConfigPopover() {
     const existente = document.getElementById('job-trilho-config');
     if (existente) { existente.remove(); return; }
-    const { tema } = await chrome.storage.local.get(['tema']);
+    const { tema } = await _safeStorageGet(['tema']);
     const temaAtual = tema === 'claro' ? 'claro' : 'escuro';
     const pop = document.createElement('div');
     pop.id = 'job-trilho-config';
@@ -955,7 +968,7 @@
     pop.querySelectorAll('.job-trilho-tema-btns button').forEach((b) => {
       b.addEventListener('click', async () => {
         const novoTema = b.dataset.tema;
-        await chrome.storage.local.set({ tema: novoTema });
+        _safeStorageSet({ tema: novoTema });
         document.body.setAttribute('data-job-tema', novoTema);
         pop.querySelectorAll('.job-trilho-tema-btns button').forEach((x) => x.classList.toggle('ativo', x === b));
       });
@@ -984,7 +997,7 @@
     });
     document.getElementById('job-trilho-desligar-btn').addEventListener('click', async () => {
       if (!confirm('Desligar a extensão JOB nesta aba do WhatsApp? Pra ligar de novo, use o popup da extensão (ícone JOB na barra do Chrome) e dê F5.')) return;
-      await chrome.storage.local.set({ extensaoAtiva: false });
+      _safeStorageSet({ extensaoAtiva: false });
       const t = document.getElementById('job-trilho'); if (t) t.remove();
       const p = document.getElementById('job-painel-doc'); if (p) p.remove();
       pop.remove();
@@ -1168,7 +1181,7 @@
   async function atenderLead(leadId, chatId, telefone) {
     var resp = null;
     try {
-      const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+      const { usuarioId } = await _safeStorageGet(['usuarioId']);
       resp = await chrome.runtime.sendMessage({ type: 'inbox_atender', lead_id: parseInt(leadId, 10), usuario_id: usuarioId });
     } catch (e) { /* segue mesmo se falhar o report */ }
     _inboxCache = _inboxCache.filter(function (l) { return String(l.id) !== String(leadId); });
@@ -1863,7 +1876,7 @@
     const st = document.getElementById('job-salvar-status');
     const btn = document.getElementById('job-salvar-modelo-btn');
     if (!nome.trim() || !texto.trim()) { if (st) st.textContent = 'Preencha nome e texto.'; return; }
-    const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+    const { usuarioId } = await _safeStorageGet(['usuarioId']);
     btn.disabled = true;
     if (st) st.textContent = 'Salvando…';
     const categoria = ((document.getElementById('job-novo-categoria') || {}).value || '').trim();
@@ -1959,7 +1972,7 @@
     const texto = ((ta && ta.value) || '').trim();
     // Texto puro exige mensagem; mídia pode ir sem legenda.
     if (!texto && !midiaTipo) { if (st) st.textContent = 'A mensagem está vazia.'; return; }
-    const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+    const { usuarioId } = await _safeStorageGet(['usuarioId']);
     if (!usuarioId) { if (st) st.textContent = 'Selecione seu usuário no popup da extensão primeiro.'; return; }
     btn.disabled = true;
     if (st) st.textContent = 'Enviando…';
@@ -2277,7 +2290,7 @@
     const funil = (res.funis || []).find((f) => String(f.id) === String(funilId));
     if (!funil) { alert('Funil não encontrado — feche e abra a aba Funis pra recarregar.'); return; }
     if (!(funil.passos || []).length) { alert('Esse funil não tem passos. Adicione passos no site (Funis WhatsApp).'); return; }
-    const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+    const { usuarioId } = await _safeStorageGet(['usuarioId']);
     if (!usuarioId) { alert('Selecione seu usuário no popup da extensão primeiro.'); return; }
     let chatId = '';
     try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
@@ -2925,7 +2938,7 @@
       // A PARTIR DAQUI a raspagem já terminou — dá pra trocar de conversa
       // sem prejuízo, o resto é só esperar a resposta de rede do JOB.
       // chrome.storage.local — nunca sync (limite de 8KB por item).
-      const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+      const { usuarioId } = await _safeStorageGet(['usuarioId']);
       // Número do WhatsApp logado — o JOB atribui o lead pelo NÚMERO (quem está
       // de fato na conversa); o consultor do popup vira fallback.
       let meuNumero = '';
@@ -3148,7 +3161,7 @@
     if (!ok) return;
     _campWatch.delete(d.chatId);
     try {
-      const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+      const { usuarioId } = await _safeStorageGet(['usuarioId']);
       await chrome.runtime.sendMessage({ type: 'campanha_resposta', telefone: alvo.telefone, usuario_id: usuarioId });
     } catch (e) { /* próxima varredura reconcilia */ }
   });
@@ -3290,7 +3303,7 @@
   async function limparSemResposta() {
     if (!_campExcluir.length) return;
     if (!confirm('Apagar ' + _campExcluir.length + ' conversa(s) sem resposta do seu WhatsApp? Isso não tem desfazer.')) return;
-    const { usuarioId } = await chrome.storage.local.get(['usuarioId']);
+    const { usuarioId } = await _safeStorageGet(['usuarioId']);
     const btn = document.getElementById('job-limpar-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Apagando...'; }
     for (const e of _campExcluir.slice()) {
