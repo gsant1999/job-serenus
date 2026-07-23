@@ -1,0 +1,166 @@
+{% extends 'base.html' %}
+{% block title %}Inteligência de Vendas{% endblock %}
+
+{% block head %}
+<style>
+  .iv-bar-wrap { display:flex; flex-direction:column; gap:9px; }
+  .iv-bar-row { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; }
+  .iv-bar-lbl { font-size:13px; color:var(--texto); }
+  .iv-bar-track { position:relative; height:22px; background:var(--panel-2); border-radius:6px; overflow:hidden; }
+  .iv-bar-fill { position:absolute; inset:0 auto 0 0; border-radius:6px; }
+  .iv-bar-txt { position:absolute; right:8px; top:50%; transform:translateY(-50%); font-size:11.5px; color:var(--texto); font-weight:600; }
+  .iv-grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media (max-width:900px){ .iv-grid2 { grid-template-columns:1fr; } }
+  .iv-sec-title { font-size:12px; font-weight:600; color:var(--cinza); text-transform:uppercase; letter-spacing:.6px; margin-bottom:12px; }
+  .iv-obj-help { font-size:12px; color:var(--cinza); margin:-6px 0 14px; line-height:1.5; }
+  table.iv-tab { width:100%; border-collapse:collapse; }
+  table.iv-tab th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza); padding:9px 10px; border-bottom:1px solid var(--borda); white-space:nowrap; }
+  table.iv-tab td { padding:10px; font-size:13px; border-bottom:1px solid var(--borda-2,rgba(255,255,255,.05)); }
+  .iv-obj-tag { display:inline-block; font-size:10.5px; background:rgba(244,63,124,.12); color:#fb8497; border:1px solid rgba(244,63,124,.25); border-radius:20px; padding:1px 8px; margin:1px 2px; white-space:nowrap; }
+  .iv-score { font-variant-numeric:tabular-nums; font-weight:700; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Inteligência de Vendas</h1>
+    <div class="sub">O que fecha, aprendido com quem já fechou</div>
+  </div>
+</div>
+
+<div class="page">
+
+  <div class="metricas m-4" style="margin-bottom:8px;">
+    <div class="metrica verde">
+      <div class="lbl">Clientes fechados</div>
+      <div class="val">{{ m.total }}</div>
+      <div class="sub">propostas emitidas/ativas</div>
+    </div>
+    <div class="metrica">
+      <div class="lbl">Ticket médio</div>
+      <div class="val">R$ {{ m.ticket|numero }}</div>
+      <div class="sub">R$ {{ m.soma_valor|numero }} no total</div>
+    </div>
+    <div class="metrica">
+      <div class="lbl">Score médio</div>
+      <div class="val">{{ m.score_medio if m.score_medio is not none else '—' }}</div>
+      <div class="sub">{{ m.com_analise }} com análise de conversa</div>
+    </div>
+    <div class="metrica">
+      <div class="lbl">Tempo até fechar</div>
+      <div class="val">{{ m.tempo_medio if m.tempo_medio is not none else '—' }}{% if m.tempo_medio is not none %} <span style="font-size:14px;color:var(--cinza);">dias</span>{% endif %}</div>
+      <div class="sub">do lead entrar ao fechamento</div>
+    </div>
+  </div>
+
+  <!-- Objeções em quem FECHOU: o insight central -->
+  <div class="card" style="margin-bottom:18px;">
+    <div class="iv-sec-title">Objeções que apareceram em quem FECHOU</div>
+    <div class="iv-obj-help">São as objeções que a conversa registrou nos clientes que mesmo assim fecharam — ou seja, dá pra contornar. Use como argumento pronto no follow-up.</div>
+    {% if top_objecoes %}
+    <div class="iv-bar-wrap">
+      {% set maxobj = top_objecoes[0].qtd %}
+      {% for o in top_objecoes %}
+      <div class="iv-bar-row">
+        <div class="iv-bar-track">
+          <div class="iv-bar-fill" style="width:{{ (o.qtd / maxobj * 100)|round(0,'floor') }}%; background:linear-gradient(90deg,#f43f7c,#fb923c);"></div>
+          <span class="iv-bar-txt" style="left:8px;right:auto;">{{ o.nome }}</span>
+        </div>
+        <div style="font-size:12.5px;color:var(--cinza);min-width:52px;text-align:right;">{{ o.qtd }}x</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div style="font-size:13px;color:var(--cinza);">Ainda sem objeções mapeadas nos fechados (as vendas fechadas precisam ter uma análise de conversa vinculada).</div>
+    {% endif %}
+  </div>
+
+  <div class="iv-grid2" style="margin-bottom:18px;">
+    <div class="card">
+      <div class="iv-sec-title">Operadoras que mais fecham</div>
+      <div class="iv-bar-wrap">
+        {% set maxop = (top_operadoras[0].qtd if top_operadoras else 1) %}
+        {% for o in top_operadoras %}
+        <div class="iv-bar-row">
+          <div class="iv-bar-track">
+            <div class="iv-bar-fill" style="width:{{ (o.qtd / maxop * 100)|round(0,'floor') }}%; background:linear-gradient(90deg,#1fd8a4,#3b82f6);"></div>
+            <span class="iv-bar-txt" style="left:8px;right:auto;">{{ o.nome }}</span>
+          </div>
+          <div style="font-size:12.5px;color:var(--cinza);min-width:120px;text-align:right;">{{ o.qtd }} · R$ {{ o.valor|numero }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="card">
+      <div class="iv-sec-title">Cidades que mais fecham</div>
+      {% if top_cidades %}
+      <div class="iv-bar-wrap">
+        {% set maxc = top_cidades[0].qtd %}
+        {% for c in top_cidades %}
+        <div class="iv-bar-row">
+          <div class="iv-bar-track">
+            <div class="iv-bar-fill" style="width:{{ (c.qtd / maxc * 100)|round(0,'floor') }}%; background:linear-gradient(90deg,#8b5cf6,#3b82f6);"></div>
+            <span class="iv-bar-txt" style="left:8px;right:auto;">{{ c.nome }}</span>
+          </div>
+          <div style="font-size:12.5px;color:var(--cinza);min-width:52px;text-align:right;">{{ c.qtd }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div style="font-size:13px;color:var(--cinza);">Sem cidade mapeada nos fechados ainda.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px;">
+    <div class="iv-sec-title">Fechamentos por consultor</div>
+    <div class="iv-bar-wrap">
+      {% set maxcon = (top_consultores[0].qtd if top_consultores else 1) %}
+      {% for c in top_consultores %}
+      <div class="iv-bar-row">
+        <div class="iv-bar-track">
+          <div class="iv-bar-fill" style="width:{{ (c.qtd / maxcon * 100)|round(0,'floor') }}%; background:linear-gradient(90deg,#facc15,#fb923c);"></div>
+          <span class="iv-bar-txt" style="left:8px;right:auto;color:#1c1c24;">{{ c.nome }}</span>
+        </div>
+        <div style="font-size:12.5px;color:var(--cinza);min-width:120px;text-align:right;">{{ c.qtd }} · R$ {{ c.valor|numero }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="iv-sec-title">Clientes fechados ({{ clientes|length }})</div>
+    <div style="overflow-x:auto;">
+      <table class="iv-tab">
+        <thead>
+          <tr>
+            <th>Cliente</th><th>Consultor</th><th>Operadora</th><th>Modalidade</th>
+            <th>Vidas</th><th>Valor</th><th>Score</th><th>Objeções</th><th>Data</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in clientes %}
+          <tr>
+            <td><strong>{{ c.nome }}</strong>{% if c.cidade %}<div style="font-size:11px;color:var(--cinza);">{{ c.cidade }}</div>{% endif %}</td>
+            <td>{{ c.consultor or '—' }}</td>
+            <td>{{ c.operadora or '—' }}</td>
+            <td><span class="tag tag-verde">{{ c.modalidade }}</span></td>
+            <td class="td-mono">{{ c.vidas }}</td>
+            <td class="td-mono">{{ c.valor|moeda }}</td>
+            <td>{% if c.score is not none %}<span class="iv-score">{{ c.score }}</span>{% else %}<span style="color:var(--cinza-2);">—</span>{% endif %}</td>
+            <td style="max-width:240px;">{% for o in c.objecoes[:4] %}<span class="iv-obj-tag">{{ o }}</span>{% endfor %}{% if c.objecoes|length > 4 %}<span style="font-size:11px;color:var(--cinza);"> +{{ c.objecoes|length - 4 }}</span>{% endif %}</td>
+            <td style="font-size:12px;color:var(--cinza);white-space:nowrap;">{{ c.criado_em|data_br }}</td>
+            <td style="white-space:nowrap;">
+              <a href="/proposta/{{ c.id }}" class="btn-ghost" style="font-size:12px;">Proposta</a>
+              {% if c.analise_id %}<a href="/whatsapp-analises/{{ c.analise_id }}/conversa" class="btn-ghost" style="font-size:12px;color:var(--info);">Análise</a>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

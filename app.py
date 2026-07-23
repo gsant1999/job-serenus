@@ -7892,6 +7892,100 @@ def fluxo_caixa():
                                total_pago=total_pago, fixo_mes=fixo_mes, fixo_parcelas=fixo_parcelas)
 
 # ─── BI ──────────────────────────────────────────────────────────────────────────
+@app.route('/inteligencia-vendas')
+@login_required
+@admin_required
+def inteligencia_vendas():
+    """Cataloga os clientes FECHADOS (proposta emitida/ativa) e cruza com a
+    análise de conversa de cada um — inteligência de vendas: o que fecha
+    (objeções que aparecem em quem fechou, operadoras/planos, perfil, tempo
+    médio até fechar, por consultor). Base pra decisão e pra follow-up."""
+    conn = db()
+    # A tabela propostas NÃO tem lead_id — a ligação com a análise de conversa é
+    # pelo TELEFONE (a análise é indexada por telefone_norm). Casamos o telefone
+    # do responsável da proposta com a última análise daquele número.
+    fechados = conn.execute("""
+        SELECT p.id, p.razao_social, p.consultor, p.adm_operadora, p.modalidade,
+               p.valor, p.total_vidas, p.criado_em,
+               p.tel_resp_contrato, p.tel_resp_negociacao
+        FROM propostas p
+        WHERE p.status_operacional='Emitida/Ativa' AND p.status <> 'Excluída'
+          AND COALESCE(p.estornada,0)=0
+        ORDER BY p.criado_em DESC
+    """).fetchall()
+    # Última análise por telefone_norm -> dict pra casar em memória.
+    analises = {}
+    for a in conn.execute("""
+        SELECT wa.telefone_norm, wa.sugestoes_json, wa.score, wa.score_faixa, wa.id, wa.criado_em
+        FROM whatsapp_analises wa
+        WHERE wa.telefone_norm IS NOT NULL AND wa.telefone_norm <> ''
+          AND wa.id = (SELECT MAX(wa2.id) FROM whatsapp_analises wa2 WHERE wa2.telefone_norm = wa.telefone_norm)
+    """).fetchall():
+        analises[a['telefone_norm']] = a
+    close_db(conn)
+
+    from collections import Counter
+    total = len(fechados)
+    soma_valor = sum(float(r['valor'] or 0) for r in fechados)
+    por_operadora, val_operadora = Counter(), {}
+    por_consultor, val_consultor = Counter(), {}
+    objecoes, cidades = Counter(), Counter()
+    scores, dias_ate_fechar, com_analise = [], [], 0
+    clientes = []
+    for r in fechados:
+        # casa a análise pelo telefone do responsável (contato ou negociação)
+        wa = None
+        for tel in (r['tel_resp_contrato'], r['tel_resp_negociacao']):
+            tn = _normalizar_telefone(str(tel or ''))
+            if tn and tn in analises:
+                wa = analises[tn]; break
+        op = r['adm_operadora'] or '—'
+        por_operadora[op] += 1; val_operadora[op] = val_operadora.get(op, 0) + float(r['valor'] or 0)
+        cons = r['consultor'] or '—'
+        por_consultor[cons] += 1; val_consultor[cons] = val_consultor.get(cons, 0) + float(r['valor'] or 0)
+        extr = {}
+        if wa is not None:
+            com_analise += 1
+            try:
+                extr = (json.loads(wa['sugestoes_json'] or '{}') or {}).get('extracao') or {}
+            except Exception:
+                extr = {}
+            if wa['score'] is not None:
+                scores.append(wa['score'])
+            # tempo da 1ª análise até o fechamento (proxy do ciclo de venda)
+            d1, d2 = _parse_dt_seguro(wa['criado_em']), _parse_dt_seguro(r['criado_em'])
+            if d1 and d2 and d2 >= d1:
+                dias_ate_fechar.append((d2 - d1).days)
+        for o in (extr.get('objecoes') or []):
+            objecoes[str(o).strip().lower()] += 1
+        if extr.get('cidade'):
+            cidades[str(extr['cidade']).strip().title()] += 1
+        clientes.append({
+            'id': r['id'], 'nome': r['razao_social'], 'consultor': r['consultor'],
+            'operadora': r['adm_operadora'], 'modalidade': r['modalidade'],
+            'valor': float(r['valor'] or 0), 'vidas': r['total_vidas'],
+            'criado_em': r['criado_em'],
+            'analise_id': (wa['id'] if wa is not None else None),
+            'score': (wa['score'] if wa is not None else None),
+            'faixa': (wa['score_faixa'] if wa is not None else None),
+            'objecoes': extr.get('objecoes') or [], 'cidade': extr.get('cidade'),
+        })
+    m = {
+        'total': total, 'soma_valor': soma_valor,
+        'ticket': round(soma_valor / total, 2) if total else 0,
+        'com_analise': com_analise,
+        'score_medio': round(sum(scores) / len(scores)) if scores else None,
+        'tempo_medio': round(sum(dias_ate_fechar) / len(dias_ate_fechar), 1) if dias_ate_fechar else None,
+    }
+    top_operadoras = [{'nome': k, 'qtd': v, 'valor': val_operadora[k]} for k, v in por_operadora.most_common(10)]
+    top_consultores = [{'nome': k, 'qtd': v, 'valor': val_consultor[k]} for k, v in por_consultor.most_common(15)]
+    top_objecoes = [{'nome': k, 'qtd': v} for k, v in objecoes.most_common(12)]
+    top_cidades = [{'nome': k, 'qtd': v} for k, v in cidades.most_common(10)]
+    return render_template('inteligencia_vendas.html', m=m, clientes=clientes,
+                           top_operadoras=top_operadoras, top_consultores=top_consultores,
+                           top_objecoes=top_objecoes, top_cidades=top_cidades)
+
+
 @app.route('/bi')
 @login_required
 def bi():
