@@ -173,8 +173,15 @@
     let msgs = [];
     try { msgs = await window.WPP.chat.getMessages(chatId, { count: Math.max(50, limite || 500) }); }
     catch (e) { return { erro: 'falha_mensagens' }; }
+    // DEDUP por id da mensagem: pedir 'count' maior que o total faz o getMessages
+    // buscar no servidor e devolver de novo mensagens que já estavam no cache —
+    // vinham DUPLICADAS ("Perfeito, sem pressa." 2x). O id (_serialized) é único
+    // por mensagem, então dedup por ele elimina qualquer repetição da wa-js.
     const out = [];
+    const vistos = new Set();
     for (const m of msgs) {
+      const mid = m.id && m.id._serialized;
+      if (mid) { if (vistos.has(mid)) continue; vistos.add(mid); }
       let texto = '';
       if (m.type === 'chat') texto = m.body || '';        // mensagem de texto
       else if (m.caption) texto = m.caption;              // legenda de imagem/vídeo/PDF
