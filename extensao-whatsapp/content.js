@@ -517,7 +517,7 @@
     });
   }
 
-  function pedirDocumentos(limite) {
+  function pedirDocumentos(limite, forcarGrandes) {
     return new Promise((resolve) => {
       const reqId = 'd' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
       let pronto = false;
@@ -530,12 +530,14 @@
         // encontrados = quantos PDFs existiam pra baixar; se baixou menos, o
         // servidor devolve documentos_falha e o painel avisa (nada de sumir PDF
         // em silêncio — conversa com 2 PDFs chegava com 1 e ninguém sabia).
-        resolve({ documentos: d.documentos || [], encontrados: d.encontrados || (d.documentos || []).length });
+        // pulados = PDFs do consultor com +5 páginas que nem baixamos (otimização).
+        resolve({ documentos: d.documentos || [], encontrados: d.encontrados || (d.documentos || []).length,
+                  pulados: Array.isArray(d.pulados) ? d.pulados : [] });
       }
       window.addEventListener('message', onMsg);
-      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_documentos', reqId, limite }, '*');
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'baixar_documentos', reqId, limite, forcarGrandes: !!forcarGrandes }, '*');
       setTimeout(() => {
-        if (!pronto) { window.removeEventListener('message', onMsg); resolve({ documentos: [], encontrados: 0 }); }
+        if (!pronto) { window.removeEventListener('message', onMsg); resolve({ documentos: [], encontrados: 0, pulados: [] }); }
       }, 60000);
     });
   }
@@ -2587,6 +2589,13 @@
     const avisoFalhas = avisos.length
       ? avisos.map((a) => '<div class="job-ia-alerta">⚠ ' + esc(a) + '</div>').join('')
       : '';
+    // PDFs do consultor com +5 páginas que nem baixamos (otimização) — aviso
+    // próprio, com botão pra ler mesmo assim se o Guilherme quiser.
+    const avisoPulados = (Array.isArray(r._pulados) && r._pulados.length)
+      ? '<div class="job-ia-alerta">⚠ ' + esc(r._pulados.length + ' PDF(s) que o consultor enviou não foram lidos por terem mais de 5 páginas (material de apoio costuma não mudar a análise): ' +
+          r._pulados.map((p) => p.nome + ' (' + p.paginas + ' pág)').join(', ')) +
+          '<div style="margin-top:7px;"><button class="job-btn" id="job-avaliar-pdfs" style="font-size:12px;padding:4px 10px;">Avaliar esses PDFs mesmo assim</button></div></div>'
+      : '';
     const partesRodape = [esc(nome || ''), totalMsgs + ' mensagens lidas'];
     if (r.duracao_segundos != null) partesRodape.push('levou ' + fmtDuracao(r.duracao_segundos));
     if (r.audios_do_cache) partesRodape.push(r.audios_do_cache + ' áudio(s) reaproveitados do cache');
@@ -2603,6 +2612,7 @@
       '<div class="job-chips">' + chips + pen + '</div>' +
       capBox +
       avisoFalhas +
+      avisoPulados +
       leadBox +
       '<button class="job-analisar-btn" id="job-cotar"' +
         ' data-lead="' + esc(String(r.lead ? r.lead.id : '')) + '"' +
@@ -2776,9 +2786,19 @@
         window.open(url, '_blank', 'noopener');
       });
     }
+    // "Avaliar esses PDFs mesmo assim" — reanalisa forçando a leitura dos PDFs
+    // grandes do consultor que foram pulados pela otimização.
+    const bpdf = document.getElementById('job-avaliar-pdfs');
+    if (bpdf) {
+      bpdf.addEventListener('click', () => {
+        bpdf.disabled = true;
+        bpdf.textContent = 'Reanalisando com os PDFs…';
+        rodarAnalise(true);
+      });
+    }
   }
 
-  async function rodarAnalise() {
+  async function rodarAnalise(forcarPdfGrandes) {
     const reqId = novoReqId();
     // Chave provisória com o telefone SÍNCRONO do DOM (telefoneDoContato) —
     // tem que bater com o que sincronizarPainelComConversa calcula na mesma
@@ -2885,10 +2905,12 @@
       status('Baixando documentos PDF…');
       let documentos = [];
       let documentosEncontrados = 0;
+      let pdfsPulados = [];
       try {
-        const rd = await pedirDocumentos(15);
+        const rd = await pedirDocumentos(15, forcarPdfGrandes);
         documentos = rd.documentos || [];
         documentosEncontrados = rd.encontrados || documentos.length;
+        pdfsPulados = rd.pulados || [];
       } catch (e) { documentos = []; }
 
       let links = [];
@@ -2966,6 +2988,9 @@
         entrada.erro = (resp && resp.erro) || 'Falha ao analisar';
       } else {
         entrada.status = 'ok';
+        // Anexa os PDFs pulados pela otimização (só quando NÃO foi forçado) —
+        // o painel usa pra mostrar o aviso + botão "avaliar mesmo assim".
+        if (!forcarPdfGrandes && pdfsPulados.length) resp._pulados = pdfsPulados;
         entrada.resultado = resp;
       }
       atualizarPilula();

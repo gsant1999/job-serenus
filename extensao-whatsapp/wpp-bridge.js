@@ -118,7 +118,7 @@
     return { audios: out, encontrados: audios.length };
   }
 
-  async function baixarDocumentos(limite) {
+  async function baixarDocumentos(limite, forcarGrandes) {
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.downloadMedia) {
       return { erro: 'wpp_ausente' };
     }
@@ -139,7 +139,24 @@
       const mt = (m.mimetype || (m.mediaData && m.mediaData.mimetype) || '').toLowerCase();
       return mt === 'application/pdf' || /\.pdf$/i.test(m.filename || '');
     }));
-    const alvos = selecionarPorLead(docs, Math.max(1, limite || 5));
+    // Otimização: PDF que o CONSULTOR enviou (fromMe) com mais de 5 páginas é
+    // quase sempre material de apoio (fotos de hospital, catálogo) — ler não
+    // muda a análise do cliente e custa muito (44MB/19pág travava tudo). Então
+    // pulamos e avisamos, oferecendo "avaliar mesmo assim". PDF do CLIENTE
+    // (RG, comprovante, carteirinha) é sempre lido por inteiro, sem teto.
+    const LIMITE_PAG_CONSULTOR = 5;
+    const pulados = [];
+    const _paginas = (m) => Number(m.pageCount || (m.mediaData && m.mediaData.pageCount) || 0) || 0;
+    const docsFiltrados = forcarGrandes ? docs : docs.filter((m) => {
+      const daConsultor = !!(m.id && m.id.fromMe);
+      const pg = _paginas(m);
+      if (daConsultor && pg > LIMITE_PAG_CONSULTOR) {
+        pulados.push({ nome: m.filename || 'documento.pdf', paginas: pg });
+        return false;
+      }
+      return true;
+    });
+    const alvos = selecionarPorLead(docsFiltrados, Math.max(1, limite || 5));
     const out = [];
     for (const m of alvos) {
       try {
@@ -167,10 +184,10 @@
         }
       } catch (e) { /* documento que falhar é ignorado, nunca derruba a análise */ }
     }
-    // encontrados = TOTAL de PDFs na conversa (antes do teto). Se entraram
-    // menos (teto OU falha de download), o painel avisa "X de Y" em vez de
-    // fingir que leu tudo.
-    return { documentos: out, encontrados: docs.length };
+    // encontrados = PDFs elegíveis (já sem os pulados por página). Se entraram
+    // menos que isso (teto de contagem OU falha de download), o painel avisa
+    // "X de Y". Os pulados por página têm aviso próprio (pulados_paginas).
+    return { documentos: out, encontrados: docsFiltrados.length, pulados: pulados };
   }
 
   // Lê as MENSAGENS DE TEXTO direto da wa-js (Store), não do DOM. Antes o
@@ -461,7 +478,7 @@
     let resp;
     try {
       if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite);
-      else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite);
+      else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite, d.forcarGrandes);
       else if (d.tipo === 'ler_mensagens') resp = await lerMensagens(d.limite);
       else if (d.tipo === 'obter_telefone') resp = await obterTelefone(d.resolverLid);
       else if (d.tipo === 'obter_meu_numero') resp = await obterMeuNumero();
