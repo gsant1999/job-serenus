@@ -15041,6 +15041,13 @@ def cotacao():
                                     'coparticipacao': f_copart, 'ops': f_ops, 'mei': f_mei})
 
 
+@app.route('/cotacao/vera-cruz')
+@login_required
+def cotacao_vera_cruz():
+    """Montador de cotação avulso para Vera Cruz (2Care/Allcare) — tabela fixa, sem multicálculo."""
+    return render_template('cotacao_vera_cruz.html')
+
+
 @app.route('/cotacao/tabelas')
 @login_required
 @admin_required

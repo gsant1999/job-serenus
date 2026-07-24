@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<title>Cotação Vera Cruz · 2Care/Allcare</title>
+<style>
+  :root {
+    --accent: #14b8a6;
+    --accent-ink: #0f766e;
+    --accent-soft: #f0fdfa;
+    --ink: #1a1d1c;
+    --muted: #6b7280;
+    --paper: #ffffff;
+    --bg: #ffffff;
+    --border: #e6e8e7;
+    --border-strong: #d4d8d6;
+    --radius: 14px;
+    --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--font-ui);
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  .app {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 28px 20px 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* ---------- toolbar ---------- */
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: var(--paper);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+  }
+  .toolbar-group { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    appearance: none;
+    border: 1px solid var(--border-strong);
+    background: var(--paper);
+    color: var(--ink);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 9px 14px;
+    border-radius: 9px;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+    white-space: nowrap;
+  }
+  .btn:hover { background: #f5f6f5; }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.active { background: var(--ink); border-color: var(--ink); color: #ffffff; }
+
+  /* ---------- controls panel ---------- */
+  .panel {
+    background: var(--paper);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr;
+    gap: 22px;
+    align-items: start;
+  }
+  .panel-block { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .panel-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+
+  .faixa-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 16px;
+  }
+  .faixa-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 13px;
+    padding: 3px 0;
+  }
+  .faixa-row.has-qty .faixa-label { color: var(--accent-ink); font-weight: 700; }
+  .faixa-label { color: var(--ink); }
+  .faixa-row input {
+    width: 52px;
+    font-family: inherit;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    padding: 5px 4px;
+    border-radius: 7px;
+    border: 1px solid var(--border-strong);
+    background: var(--paper);
+    color: var(--ink);
+  }
+  .faixa-row input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  select {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--border-strong);
+    background: var(--paper);
+    color: var(--ink);
+    max-width: 100%;
+  }
+
+  .plan-checks { display: flex; flex-direction: column; gap: 7px; }
+  .plan-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .plan-check input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+  /* ---------- the quote sheet ---------- */
+  .sheet {
+    background: var(--paper);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px 34px 26px;
+  }
+  .sheet-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 22px;
+  }
+  .sheet-head h1 {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .brand-logo { flex-shrink: 0; }
+
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 32px;
+    margin-bottom: 26px;
+    max-width: 620px;
+  }
+  .meta-grid > div { display: flex; gap: 8px; align-items: baseline; font-size: 13.5px; }
+  .meta-label { font-weight: 700; color: var(--ink); min-width: 78px; flex-shrink: 0; }
+  #metaData { color: var(--muted); }
+  .meta-input {
+    font-family: inherit;
+    font-size: 13.5px;
+    color: var(--ink);
+    border: none;
+    border-bottom: 1px solid transparent;
+    background: transparent;
+    padding: 0 0 1px;
+    flex: 1;
+    min-width: 0;
+  }
+  .meta-input::placeholder { color: var(--muted); opacity: 0.7; }
+  .meta-input:hover { border-bottom-color: var(--border-strong); }
+  .meta-input:focus-visible { outline: none; border-bottom-color: var(--accent); }
+
+  .table-wrap { overflow-x: auto; }
+  table.quote {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  table.quote th, table.quote td {
+    padding: 10px 14px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  table.quote thead .row-label-col,
+  table.quote tbody .row-label-col {
+    text-align: left;
+    white-space: normal;
+  }
+  .plan-col {
+    border-bottom: 2px solid var(--ink);
+    min-width: 148px;
+  }
+  .plan-col.destacado {
+    background: var(--accent-soft);
+    border-bottom-color: var(--accent);
+    border-radius: 8px 8px 0 0;
+  }
+  .plan-name { font-size: 13.5px; font-weight: 800; color: var(--ink); }
+  .plan-sub { font-size: 10.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .plan-toggle-hint { cursor: default; }
+  .highlight-mode .plan-toggle-hint { cursor: pointer; }
+  .highlight-mode .plan-toggle-hint:hover { background: var(--accent-soft); border-radius: 8px 8px 0 0; }
+
+  .section-label td {
+    text-align: left;
+    font-weight: 700;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    padding-top: 16px;
+    padding-bottom: 4px;
+    border: none;
+  }
+  tr.data-row td { border-bottom: 1px solid var(--border); }
+  tr.data-row td.plan-col.destacado { background: var(--accent-soft); }
+  .row-label-col { font-weight: 600; color: var(--ink); }
+  .row-count { color: var(--accent-ink); font-weight: 700; font-size: 12px; margin-left: 4px; }
+  .price-cell { font-variant-numeric: tabular-nums; }
+
+  tr.total-row td {
+    border-top: 2px solid var(--ink);
+    border-bottom: none;
+    padding-top: 12px;
+    font-weight: 800;
+    font-size: 15px;
+  }
+  tr.total-row td.plan-col.destacado { background: var(--accent-soft); border-radius: 0 0 8px 8px; }
+  tr.total-row .row-label-col { font-size: 13.5px; }
+
+  .empty-table {
+    padding: 40px 10px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .disclaimer {
+    margin-top: 22px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+  .disclaimer strong { color: var(--ink); }
+
+  .toast {
+    position: fixed;
+    bottom: 22px;
+    left: 50%;
+    transform: translateX(-50%) translateY(8px);
+    background: var(--ink);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 18px;
+    border-radius: 999px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.16s ease, transform 0.16s ease;
+    z-index: 20;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 780px) {
+    .panel { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    .sheet { padding: 22px 16px 18px; }
+    .meta-grid { grid-template-columns: 1fr; max-width: none; }
+    .sheet-head { flex-direction: column; }
+  }
+
+  @media print {
+    body { background: #fff; }
+    .no-print { display: none !important; }
+    .app { padding: 0; max-width: none; }
+    .sheet { border: none; border-radius: 0; padding: 6px; }
+    .meta-input { border-bottom: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="toolbar no-print">
+    <div class="toolbar-group">
+      <button class="btn" id="btnReset">Nova cotação</button>
+      <button class="btn" id="btnHighlight">Destacar planos</button>
+    </div>
+    <div class="toolbar-group">
+      <button class="btn" id="btnLink">Copiar link</button>
+      <button class="btn" id="btnCopyText">Copiar cotação</button>
+      <button class="btn primary" id="btnPrint">Baixar / PDF</button>
+    </div>
+  </div>
+
+  <div class="panel no-print">
+    <div class="panel-block">
+      <span class="panel-label">Faixas etárias — quantidade de vidas</span>
+      <div class="faixa-grid" id="faixaGrid"></div>
+    </div>
+    <div class="panel-block">
+      <span class="panel-label">Entidade de classe</span>
+      <select id="entidadeSelect"></select>
+    </div>
+    <div class="panel-block">
+      <span class="panel-label">Planos exibidos</span>
+      <div class="plan-checks" id="planChecks"></div>
+    </div>
+  </div>
+
+  <div class="sheet" id="sheet">
+    <div class="sheet-head">
+      <h1>Cotação Empresarial</h1>
+      <svg class="brand-logo" width="168" height="50" viewBox="0 0 168 50" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vera Cruz Plano de Saúde">
+        <path d="M4 6 C20 1 34 9 31 20 C28 31 15 36 6 42 C16 37 22 28 17 19 C13 12 6 9 4 6 Z" fill="#20c4e8"/>
+        <path d="M12 2 C28 -3 41 6 38 16 C35 27 21 30 13 27 C22 24 28 17 25 10 C22 5 14 4 12 2 Z" fill="#1ec48f"/>
+        <text x="48" y="21" font-family="-apple-system,Segoe UI,Arial,sans-serif" font-size="18" font-weight="700" letter-spacing="1.5" fill="#7c8a86">VERA CRUZ</text>
+        <text x="48" y="38" font-family="-apple-system,Segoe UI,Arial,sans-serif" font-size="11.5" font-weight="700" letter-spacing="0.5" fill="#14b8a6">PLANO DE SAÚDE</text>
+      </svg>
+    </div>
+
+    <div class="meta-grid">
+      <div><span class="meta-label">Cotação</span><span id="metaData"></span></div>
+      <div><span class="meta-label">Cliente</span><input class="meta-input" id="metaCliente" placeholder="Nome do cliente" /></div>
+      <div><span class="meta-label">Corretor</span><input class="meta-input" id="metaCorretor" placeholder="Nome do corretor" /></div>
+      <div><span class="meta-label">Telefone</span><input class="meta-input" id="metaTelefone" placeholder="(00) 00000-0000" /></div>
+      <div id="metaEntidadeRow"><span class="meta-label">Entidade</span><span id="metaEntidade">—</span></div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="quote" id="quoteTable"></table>
+    </div>
+
+    <p class="disclaimer">
+      <strong>Informativo referencial:</strong> Ambulatorial + Hospitalar com Obstetrícia, com coparticipação total, grupo de municípios (região de Campinas/SP). Valores sujeitos a alteração pela operadora sem aviso prévio. Reajuste em junho. Vínculo associativo obrigatório para o titular junto à entidade de classe selecionada. Este material não substitui as condições contratuais.
+    </p>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+(function () {
+  var FAIXAS = [
+    { min: 0, max: 18, label: "0 a 18 anos" },
+    { min: 19, max: 23, label: "19 a 23 anos" },
+    { min: 24, max: 28, label: "24 a 28 anos" },
+    { min: 29, max: 33, label: "29 a 33 anos" },
+    { min: 34, max: 38, label: "34 a 38 anos" },
+    { min: 39, max: 43, label: "39 a 43 anos" },
+    { min: 44, max: 48, label: "44 a 48 anos" },
+    { min: 49, max: 53, label: "49 a 53 anos" },
+    { min: 54, max: 58, label: "54 a 58 anos" },
+    { min: 59, max: 200, label: "59 anos +" }
+  ];
+
+  var PLANOS = [
+    {
+      id: "prata", nome: "VERA PRATA", acomodacao: "Enfermaria", registro: "498.081/24-6",
+      precos: [227.61, 268.58, 300.81, 324.88, 350.86, 403.50, 544.73, 702.70, 913.50, 1297.18]
+    },
+    {
+      id: "prata_mais", nome: "VERA PRATA MAIS", acomodacao: "Apartamento", registro: "498.080/24-8",
+      precos: [300.51, 354.61, 397.15, 428.93, 463.24, 532.73, 719.18, 927.74, 1206.06, 1712.60]
+    },
+    {
+      id: "ouro", nome: "VERA OURO", acomodacao: "Enfermaria", registro: "504.911/25-3",
+      precos: [329.74, 389.06, 447.41, 483.21, 512.20, 589.03, 806.98, 1089.43, 1514.30, 1968.60]
+    },
+    {
+      id: "ouro_mais", nome: "VERA OURO MAIS", acomodacao: "Apartamento", registro: "504.912/25-1",
+      precos: [371.74, 438.60, 504.40, 544.75, 577.43, 664.05, 909.75, 1228.16, 1707.15, 2219.30]
+    }
+  ];
+
+  var ENTIDADES = [
+    { id: "", nome: "— Não informar —" },
+    { id: "aeb", nome: "AEB — Associação dos Estudantes do Brasil" },
+    { id: "afecom", nome: "AFECOM — Associação dos Funcionários das Empresas do Comércio de Bens e Serviços do Brasil" },
+    { id: "ancepla", nome: "AncePla — Associação Nacional dos Consultores Empresariais, Profissionais Liberais e Autônomos" },
+    { id: "unasfem", nome: "UNASFEM — União Nacional de Assistência aos Servidores Federais, Estaduais e Municipais" }
+  ];
+
+  var state = {
+    cliente: "", corretor: "", telefone: "",
+    faixaQtds: new Array(FAIXAS.length).fill(0),
+    entidade: "",
+    planos: PLANOS.map(function (p) { return p.id; }),
+    destacados: [],
+    highlightMode: false
+  };
+
+  var fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+  var fmtData = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  function el(tag, cls, html) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (html !== undefined) e.innerHTML = html;
+    return e;
+  }
+
+  function faixasUsadasList() {
+    return FAIXAS.map(function (f, i) { return i; }).filter(function (i) { return state.faixaQtds[i] > 0; });
+  }
+
+  function planosAtivosList() {
+    return PLANOS.filter(function (p) { return state.planos.indexOf(p.id) !== -1; });
+  }
+
+  // ---------- render faixa quantity grid ----------
+  function renderFaixaGrid() {
+    var wrap = document.getElementById("faixaGrid");
+    wrap.innerHTML = "";
+    FAIXAS.forEach(function (f, i) {
+      var row = el("div", "faixa-row" + (state.faixaQtds[i] > 0 ? " has-qty" : ""));
+      row.appendChild(el("span", "faixa-label", f.label));
+      var input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.max = "99";
+      input.value = state.faixaQtds[i] || "";
+      input.placeholder = "0";
+      input.setAttribute("aria-label", "Quantidade de vidas " + f.label);
+      input.addEventListener("input", function () {
+        var v = parseInt(input.value, 10);
+        state.faixaQtds[i] = isNaN(v) || v < 0 ? 0 : v;
+        row.classList.toggle("has-qty", state.faixaQtds[i] > 0);
+        persist();
+        renderTable();
+      });
+      row.appendChild(input);
+      wrap.appendChild(row);
+    });
+  }
+
+  // ---------- render entidade select ----------
+  function renderEntidadeSelect() {
+    var sel = document.getElementById("entidadeSelect");
+    sel.innerHTML = "";
+    ENTIDADES.forEach(function (e) {
+      var opt = document.createElement("option");
+      opt.value = e.id;
+      opt.textContent = e.nome;
+      sel.appendChild(opt);
+    });
+    sel.value = state.entidade;
+    sel.onchange = function () {
+      state.entidade = sel.value;
+      persist();
+      renderMetaEntidade();
+      renderTable();
+    };
+  }
+
+  function renderMetaEntidade() {
+    var entidadeObj = ENTIDADES.filter(function (e) { return e.id === state.entidade; })[0];
+    var metaRow = document.getElementById("metaEntidadeRow");
+    if (entidadeObj && entidadeObj.id) {
+      document.getElementById("metaEntidade").textContent = entidadeObj.nome;
+      metaRow.style.display = "flex";
+    } else {
+      metaRow.style.display = "none";
+    }
+  }
+
+  // ---------- render plan checkboxes ----------
+  function renderPlanChecks() {
+    var wrap = document.getElementById("planChecks");
+    wrap.innerHTML = "";
+    PLANOS.forEach(function (p) {
+      var label = el("label", "plan-check");
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = state.planos.indexOf(p.id) !== -1;
+      cb.onchange = function () {
+        if (cb.checked) {
+          if (state.planos.indexOf(p.id) === -1) state.planos.push(p.id);
+        } else {
+          state.planos = state.planos.filter(function (id) { return id !== p.id; });
+        }
+        persist();
+        renderTable();
+      };
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(p.nome));
+      wrap.appendChild(label);
+    });
+  }
+
+  // ---------- render meta ----------
+  function renderMeta() {
+    document.getElementById("metaData").textContent = fmtData.format(new Date());
+    document.getElementById("metaCliente").value = state.cliente;
+    document.getElementById("metaCorretor").value = state.corretor;
+    document.getElementById("metaTelefone").value = state.telefone;
+    renderMetaEntidade();
+  }
+
+  // ---------- render quote table ----------
+  function renderTable() {
+    var table = document.getElementById("quoteTable");
+    table.innerHTML = "";
+    var planosAtivos = planosAtivosList();
+
+    if (!planosAtivos.length) {
+      table.appendChild(el("tr", null, '<td class="empty-table">Selecione ao menos um plano.</td>'));
+      return;
+    }
+
+    var faixasUsadas = faixasUsadasList();
+
+    var sheet = document.getElementById("sheet");
+    sheet.classList.toggle("highlight-mode", state.highlightMode);
+
+    var thead = el("thead");
+    var trHead = el("tr");
+    trHead.appendChild(el("th", "row-label-col"));
+    planosAtivos.forEach(function (p) {
+      var th = el("th", "plan-col" + (state.destacados.indexOf(p.id) !== -1 ? " destacado" : "") + " plan-toggle-hint");
+      th.innerHTML = '<div class="plan-name">' + p.nome + '</div><div class="plan-sub">Vera Cruz &middot; ' + p.acomodacao + '</div>';
+      th.title = state.highlightMode ? "Clique para destacar/remover destaque" : p.nome;
+      th.onclick = function () {
+        if (!state.highlightMode) return;
+        var idx = state.destacados.indexOf(p.id);
+        if (idx === -1) state.destacados.push(p.id); else state.destacados.splice(idx, 1);
+        persist();
+        renderTable();
+      };
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+
+    var tbody = el("tbody");
+
+    tbody.appendChild(el("tr", "section-label", '<td colspan="' + (planosAtivos.length + 1) + '">Geral</td>'));
+
+    function dataRow(label, valueFn) {
+      var tr = el("tr", "data-row");
+      tr.appendChild(el("td", "row-label-col", label));
+      planosAtivos.forEach(function (p) {
+        var td = el("td", "plan-col" + (state.destacados.indexOf(p.id) !== -1 ? " destacado" : ""));
+        td.innerHTML = valueFn(p);
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    }
+
+    dataRow("Modalidade", function () { return "Coletivo por adesão"; });
+    dataRow("Acomodação", function (p) { return p.acomodacao; });
+    dataRow("Coparticipação", function () { return "Total"; });
+
+    if (!faixasUsadas.length) {
+      var trEmpty = el("tr");
+      var tdEmpty = el("td", "empty-table");
+      tdEmpty.colSpan = planosAtivos.length + 1;
+      tdEmpty.textContent = "Informe a quantidade de vidas por faixa etária ao lado.";
+      trEmpty.appendChild(tdEmpty);
+      tbody.appendChild(trEmpty);
+    } else {
+      faixasUsadas.forEach(function (i) {
+        var f = FAIXAS[i];
+        var qtd = state.faixaQtds[i];
+        dataRow(f.label + '<span class="row-count">' + qtd + 'x</span>', function (p) {
+          return '<span class="price-cell">' + fmtBRL.format(p.precos[i] * qtd) + "</span>";
+        });
+      });
+
+      var trTotal = el("tr", "total-row");
+      trTotal.appendChild(el("td", "row-label-col", "Total"));
+      planosAtivos.forEach(function (p) {
+        var total = faixasUsadas.reduce(function (sum, i) { return sum + p.precos[i] * state.faixaQtds[i]; }, 0);
+        var td = el("td", "plan-col" + (state.destacados.indexOf(p.id) !== -1 ? " destacado" : ""));
+        td.textContent = fmtBRL.format(total);
+        trTotal.appendChild(td);
+      });
+      tbody.appendChild(trTotal);
+    }
+
+    table.appendChild(tbody);
+  }
+
+  function render() {
+    renderFaixaGrid();
+    renderEntidadeSelect();
+    renderPlanChecks();
+    renderMeta();
+    renderTable();
+    document.getElementById("btnHighlight").classList.toggle("active", state.highlightMode);
+  }
+
+  // ---------- persistence via URL hash ----------
+  function persist() {
+    try {
+      var payload = JSON.stringify(state);
+      var encoded = btoa(unescape(encodeURIComponent(payload)));
+      history.replaceState(null, "", "#s=" + encoded);
+    } catch (e) { /* ignore */ }
+  }
+
+  function loadFromHash() {
+    var hash = location.hash;
+    var match = hash.match(/s=([^&]+)/);
+    if (!match) return;
+    try {
+      var decoded = decodeURIComponent(escape(atob(match[1])));
+      var saved = JSON.parse(decoded);
+      state = Object.assign(state, saved);
+      if (!Array.isArray(state.faixaQtds) || state.faixaQtds.length !== FAIXAS.length) {
+        state.faixaQtds = new Array(FAIXAS.length).fill(0);
+      }
+    } catch (e) { /* ignore malformed */ }
+  }
+
+  function showToast(msg) {
+    var t = document.getElementById("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(showToast._tm);
+    showToast._tm = setTimeout(function () { t.classList.remove("show"); }, 1800);
+  }
+
+  function buildQuoteText() {
+    var planosAtivos = planosAtivosList();
+    var faixasUsadas = faixasUsadasList();
+    var lines = ["COTAÇÃO EMPRESARIAL — VERA CRUZ"];
+    if (state.cliente) lines.push("Cliente: " + state.cliente);
+    if (state.corretor) lines.push("Corretor: " + state.corretor);
+    if (state.telefone) lines.push("Telefone: " + state.telefone);
+    var entidadeObj = ENTIDADES.filter(function (e) { return e.id === state.entidade; })[0];
+    if (entidadeObj && entidadeObj.id) lines.push("Entidade: " + entidadeObj.nome);
+    lines.push("Data: " + fmtData.format(new Date()));
+    lines.push("");
+    if (!faixasUsadas.length || !planosAtivos.length) {
+      lines.push("(Informe as vidas e os planos para gerar os valores.)");
+      return lines.join("\n");
+    }
+    planosAtivos.forEach(function (p) {
+      lines.push(p.nome + " — " + p.acomodacao + " — coparticipação total");
+      faixasUsadas.forEach(function (i) {
+        var qtd = state.faixaQtds[i];
+        lines.push("  " + FAIXAS[i].label + " (" + qtd + "x): " + fmtBRL.format(p.precos[i] * qtd));
+      });
+      var total = faixasUsadas.reduce(function (sum, i) { return sum + p.precos[i] * state.faixaQtds[i]; }, 0);
+      lines.push("  TOTAL: " + fmtBRL.format(total));
+      lines.push("");
+    });
+    return lines.join("\n").trim();
+  }
+
+  // ---------- wire up controls ----------
+  document.getElementById("metaCliente").addEventListener("input", function (e) { state.cliente = e.target.value; persist(); });
+  document.getElementById("metaCorretor").addEventListener("input", function (e) { state.corretor = e.target.value; persist(); });
+  document.getElementById("metaTelefone").addEventListener("input", function (e) { state.telefone = e.target.value; persist(); });
+
+  document.getElementById("btnReset").addEventListener("click", function () {
+    state = {
+      cliente: "", corretor: "", telefone: "",
+      faixaQtds: new Array(FAIXAS.length).fill(0),
+      entidade: "",
+      planos: PLANOS.map(function (p) { return p.id; }),
+      destacados: [], highlightMode: false
+    };
+    persist();
+    render();
+    showToast("Nova cotação iniciada");
+  });
+
+  document.getElementById("btnHighlight").addEventListener("click", function () {
+    state.highlightMode = !state.highlightMode;
+    persist();
+    renderTable();
+    document.getElementById("btnHighlight").classList.toggle("active", state.highlightMode);
+    showToast(state.highlightMode ? "Clique em um plano para destacar" : "Modo de destaque desativado");
+  });
+
+  document.getElementById("btnLink").addEventListener("click", function () {
+    persist();
+    var url = location.href;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function () { showToast("Link copiado"); }, function () { showToast(url); });
+    } else {
+      showToast(url);
+    }
+  });
+
+  document.getElementById("btnCopyText").addEventListener("click", function () {
+    var text = buildQuoteText();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { showToast("Cotação copiada"); }, function () { showToast("Não foi possível copiar"); });
+    } else {
+      showToast("Não foi possível copiar");
+    }
+  });
+
+  document.getElementById("btnPrint").addEventListener("click", function () { window.print(); });
+
+  loadFromHash();
+  render();
+})();
+</script>
+</body>
+</html>
