@@ -220,17 +220,6 @@
   .highlight-mode .plan-toggle-hint { cursor: pointer; }
   .highlight-mode .plan-toggle-hint:hover { background: var(--accent-soft); border-radius: 8px 8px 0 0; }
 
-  .section-label td {
-    text-align: left;
-    font-weight: 700;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--muted);
-    padding-top: 16px;
-    padding-bottom: 4px;
-    border: none;
-  }
   tr.data-row td { border-bottom: 1px solid var(--border); }
   tr.data-row td.plan-col.destacado { background: var(--accent-soft); }
   .row-label-col { font-weight: 600; color: var(--ink); }
@@ -299,6 +288,7 @@
     .meta-input { border-bottom: none; }
   }
 </style>
+<script src="/static/vendor/html2canvas.min.js"></script>
 </head>
 <body>
 
@@ -311,6 +301,7 @@
     <div class="toolbar-group">
       <button class="btn" id="btnLink">Copiar link</button>
       <button class="btn" id="btnCopyText">Copiar cotação</button>
+      <button class="btn" id="btnCopyImage">Copiar imagem</button>
       <button class="btn primary" id="btnPrint">Baixar / PDF</button>
     </div>
   </div>
@@ -552,8 +543,6 @@
 
     var tbody = el("tbody");
 
-    tbody.appendChild(el("tr", "section-label", '<td colspan="' + (planosAtivos.length + 1) + '">Geral</td>'));
-
     function dataRow(label, valueFn) {
       var tr = el("tr", "data-row");
       tr.appendChild(el("td", "row-label-col", label));
@@ -581,12 +570,13 @@
         var f = FAIXAS[i];
         var qtd = state.faixaQtds[i];
         dataRow(f.label + '<span class="row-count">' + qtd + 'x</span>', function (p) {
-          return '<span class="price-cell">' + fmtBRL.format(p.precos[i] * qtd) + "</span>";
+          return '<span class="price-cell">' + fmtBRL.format(p.precos[i]) + "</span>";
         });
       });
 
+      var totalVidas = faixasUsadas.reduce(function (sum, i) { return sum + state.faixaQtds[i]; }, 0);
       var trTotal = el("tr", "total-row");
-      trTotal.appendChild(el("td", "row-label-col", "Total"));
+      trTotal.appendChild(el("td", "row-label-col", "Total" + '<span class="row-count">' + totalVidas + (totalVidas === 1 ? " vida" : " vidas") + "</span>"));
       planosAtivos.forEach(function (p) {
         var total = faixasUsadas.reduce(function (sum, i) { return sum + p.precos[i] * state.faixaQtds[i]; }, 0);
         var td = el("td", "plan-col" + (state.destacados.indexOf(p.id) !== -1 ? " destacado" : ""));
@@ -654,14 +644,15 @@
       lines.push("(Informe as vidas e os planos para gerar os valores.)");
       return lines.join("\n");
     }
+    var totalVidas = faixasUsadas.reduce(function (sum, i) { return sum + state.faixaQtds[i]; }, 0);
     planosAtivos.forEach(function (p) {
       lines.push(p.nome + " — " + p.acomodacao + " — coparticipação total");
       faixasUsadas.forEach(function (i) {
         var qtd = state.faixaQtds[i];
-        lines.push("  " + FAIXAS[i].label + " (" + qtd + "x): " + fmtBRL.format(p.precos[i] * qtd));
+        lines.push("  " + FAIXAS[i].label + " (" + qtd + "x): " + fmtBRL.format(p.precos[i]));
       });
       var total = faixasUsadas.reduce(function (sum, i) { return sum + p.precos[i] * state.faixaQtds[i]; }, 0);
-      lines.push("  TOTAL: " + fmtBRL.format(total));
+      lines.push("  TOTAL (" + totalVidas + (totalVidas === 1 ? " vida" : " vidas") + "): " + fmtBRL.format(total));
       lines.push("");
     });
     return lines.join("\n").trim();
@@ -711,6 +702,40 @@
       showToast("Não foi possível copiar");
     }
   });
+
+  document.getElementById("btnCopyImage").addEventListener("click", function () {
+    if (typeof html2canvas === "undefined") { showToast("Biblioteca de imagem não carregou"); return; }
+    var btn = document.getElementById("btnCopyImage");
+    var original = btn.textContent;
+    btn.textContent = "Gerando...";
+    html2canvas(document.getElementById("sheet"), { backgroundColor: "#ffffff", scale: 2 }).then(function (canvas) {
+      btn.textContent = original;
+      canvas.toBlob(function (blob) {
+        if (!blob) { showToast("Não foi possível gerar a imagem"); return; }
+        if (navigator.clipboard && window.ClipboardItem) {
+          navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]).then(
+            function () { showToast("Imagem copiada"); },
+            function () { downloadBlob(blob); }
+          );
+        } else {
+          downloadBlob(blob);
+        }
+      });
+    }).catch(function () {
+      btn.textContent = original;
+      showToast("Não foi possível gerar a imagem");
+    });
+  });
+
+  function downloadBlob(blob) {
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "cotacao-vera-cruz.png";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast("Imagem baixada");
+  }
 
   document.getElementById("btnPrint").addEventListener("click", function () { window.print(); });
 
