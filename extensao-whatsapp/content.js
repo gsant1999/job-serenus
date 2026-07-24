@@ -2941,10 +2941,35 @@
     return m ? (m[3] + '/' + m[2] + ' ' + m[4] + ':' + m[5]) : '';
   }
 
+  // ATENÇÃO — NUNCA inserir a barra dentro de #main (nem com insertBefore,
+  // nem appendChild). #main é a árvore React do WhatsApp Web: um nó estranho
+  // ali dentro corrompe a reconciliação do React e QUEBRA O ENVIO DE
+  // MENSAGEM (bug real, confirmado em produção 23/07/2026 — mensagem parava
+  // com ícone de falha). A barra fica em document.body, position:fixed, e
+  // _posicionarBarraNotas() a ancora visualmente no rodapé do cabeçalho da
+  // conversa a cada tick — mesmo lugar na tela, fora da árvore do WhatsApp.
+  function _posicionarBarraNotas(main) {
+    const bar = document.getElementById('job-notas-bar');
+    if (!bar || !main) return;
+    const header = _qsRemoto('headerContato', ['#main header']);
+    const r = main.getBoundingClientRect();
+    const topRef = header ? header.getBoundingClientRect().bottom : r.top;
+    bar.style.left = Math.round(r.left) + 'px';
+    bar.style.width = Math.round(r.width) + 'px';
+    bar.style.top = Math.round(topRef) + 'px';
+  }
+
   async function _atualizarBarraNotas(forcar) {
     if (_contextoMorto) return;
     const main = document.querySelector('#main');
     if (!main) { const b = document.getElementById('job-notas-bar'); if (b) b.remove(); _notasChave = ''; return; }
+    let bar = document.getElementById('job-notas-bar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'job-notas-bar';
+      document.body.appendChild(bar);
+    }
+    _posicionarBarraNotas(main);
     const chave = nomeDoContato() + '|' + telefoneDoContato();
     if (!forcar && chave === _notasChave) return;
     _notasChave = chave;
@@ -2952,12 +2977,6 @@
     let tel = '';
     try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
     _notasTel = tel;
-    let bar = document.getElementById('job-notas-bar');
-    if (!bar) {
-      bar = document.createElement('div');
-      bar.id = 'job-notas-bar';
-      main.insertBefore(bar, main.firstChild);
-    }
     if (!tel) { bar.innerHTML = ''; return; }
     let resp;
     try { resp = await _safeSendMessage({ type: 'notas_listar', telefone: tel }); } catch (e) { resp = null; }
@@ -3526,6 +3545,10 @@
   // conversa, então checa por polling leve (nome+telefone do cabeçalho) —
   // _atualizarBarraNotas só refaz o fetch quando a chave muda de fato.
   _registrarLoop(setInterval(() => { _atualizarBarraNotas(false); }, 1500));
+  window.addEventListener('resize', () => {
+    const m = document.querySelector('#main');
+    if (m) _posicionarBarraNotas(m);
+  });
 
   // Formata o telefone (dígitos) num rótulo BR legível pro aviso de limpeza.
   function fmtTelLimpezaBr(t) {

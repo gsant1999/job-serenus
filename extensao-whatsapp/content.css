@@ -493,10 +493,16 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 .job-cnpj-salvar-lead:hover { filter: brightness(1.06); }
 .job-cnpj-salvar-lead:disabled { opacity: .6; cursor: default; }
 
-/* ── Barra de notas do lead (topo da conversa) ───────────────────────── */
-#job-notas-bar { position: relative; z-index: 20; font-family: 'NunitoJOB', -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+/* ── Barra de notas do lead (topo da conversa) ─────────────────────────
+   FIXED, anexada no document.body — NUNCA inserir dentro de #main (é a
+   árvore React do próprio WhatsApp Web; um nó nosso ali dentro corrompe a
+   reconciliação e quebra o ENVIO de mensagem — bug real, confirmado em
+   produção 23/07/2026). A posição é recalculada por JS a cada tick,
+   ancorada no rodapé do cabeçalho da conversa (_posicionarBarraNotas). ── */
+#job-notas-bar { position: fixed; z-index: 40; font-family: 'NunitoJOB', -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
 .job-notas-head { display: flex; align-items: center; gap: 8px; padding: 9px 16px; background: var(--job-bg2);
-  border-bottom: 1px solid var(--job-borda); cursor: pointer; font-size: 12.5px; color: var(--job-txt); user-select: none; }
+  border-bottom: 1px solid var(--job-borda); cursor: pointer; font-size: 12.5px; color: var(--job-txt); user-select: none;
+  box-shadow: 0 2px 10px rgba(0,0,0,.18); }
 .job-notas-head:hover { background: var(--job-bg3); }
 .job-notas-ico { display: flex; width: 15px; height: 15px; color: var(--job-acento); flex-shrink: 0; }
 .job-notas-ico svg { width: 100%; height: 100%; }
@@ -504,7 +510,8 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 .job-notas-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--job-txt-fraco); }
 .job-notas-vazio { flex: 1; color: var(--job-txt-fraco); }
 .job-notas-abrir { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--job-acento); }
-.job-notas-painel { background: var(--job-bg2); border-bottom: 1px solid var(--job-borda); padding: 12px 16px 14px; }
+.job-notas-painel { background: var(--job-bg2); border-bottom: 1px solid var(--job-borda); padding: 12px 16px 14px;
+  box-shadow: 0 10px 28px rgba(0,0,0,.32); max-height: 70vh; overflow-y: auto; }
 .job-notas-topo { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
 .job-notas-titulo { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--job-txt); }
 .job-notas-titulo svg { width: 14px; height: 14px; color: var(--job-acento); }
