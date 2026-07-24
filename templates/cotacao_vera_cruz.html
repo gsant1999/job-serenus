@@ -299,6 +299,7 @@
       <button class="btn" id="btnHighlight">Destacar planos</button>
     </div>
     <div class="toolbar-group">
+      <button class="btn" id="btnSave">Salvar cotação</button>
       <button class="btn" id="btnLink">Copiar link</button>
       <button class="btn" id="btnCopyText">Copiar cotação</button>
       <button class="btn" id="btnCopyImage">Copiar imagem</button>
@@ -348,6 +349,8 @@
 
 <script>
 (function () {
+  var INITIAL_STATE = {{ initial_state_js|safe }};
+
   var FAIXAS = [
     { min: 0, max: 18, label: "0 a 18 anos" },
     { min: 19, max: 23, label: "19 a 23 anos" },
@@ -694,6 +697,27 @@
     }
   });
 
+  document.getElementById("btnSave").addEventListener("click", function () {
+    var btn = document.getElementById("btnSave");
+    var original = btn.textContent;
+    btn.textContent = "Salvando...";
+    fetch("/cotacao/vera-cruz/salvar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state)
+    }).then(function (r) {
+      if (!r.ok) throw new Error("falha ao salvar");
+      return r.json();
+    }).then(function (data) {
+      btn.textContent = original;
+      showToast("Cotação salva — abrindo em nova aba");
+      window.open(data.url, "_blank");
+    }).catch(function () {
+      btn.textContent = original;
+      showToast("Não foi possível salvar a cotação");
+    });
+  });
+
   document.getElementById("btnCopyText").addEventListener("click", function () {
     var text = buildQuoteText();
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -739,6 +763,12 @@
 
   document.getElementById("btnPrint").addEventListener("click", function () { window.print(); });
 
+  if (INITIAL_STATE) {
+    state = Object.assign(state, INITIAL_STATE);
+    if (!Array.isArray(state.faixaQtds) || state.faixaQtds.length !== FAIXAS.length) {
+      state.faixaQtds = new Array(FAIXAS.length).fill(0);
+    }
+  }
   loadFromHash();
   render();
 })();

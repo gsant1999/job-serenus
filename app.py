@@ -1110,6 +1110,12 @@ def init_db():
                 lida INTEGER DEFAULT 0,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS cotacao_vera_cruz_salva (
+                id SERIAL PRIMARY KEY,
+                corretor_id INTEGER, corretor_nome TEXT, cliente_nome TEXT,
+                dados_json TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
         ]
         for sql in tables_sql:
             try:
@@ -1665,6 +1671,12 @@ def init_db():
             corretor_id INTEGER, corretor_nome TEXT, corretor_email TEXT, corretor_telefone TEXT,
             cliente_nome TEXT, cliente_email TEXT, cliente_telefone TEXT,
             titulo TEXT, vidas_json TEXT, planos_json TEXT, total REAL DEFAULT 0,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS cotacao_vera_cruz_salva (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            corretor_id INTEGER, corretor_nome TEXT, cliente_nome TEXT,
+            dados_json TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS cotacao_engajamento (
@@ -15045,7 +15057,41 @@ def cotacao():
 @login_required
 def cotacao_vera_cruz():
     """Montador de cotação avulso para Vera Cruz (2Care/Allcare) — tabela fixa, sem multicálculo."""
-    return render_template('cotacao_vera_cruz.html')
+    return render_template('cotacao_vera_cruz.html', initial_state_js='null')
+
+
+@app.route('/cotacao/vera-cruz/salvar', methods=['POST'])
+@login_required
+def cotacao_vera_cruz_salvar():
+    """Salva o estado atual da cotação avulsa Vera Cruz e retorna o link para abrir em outra aba."""
+    payload = request.get_json(silent=True) or {}
+    conn = db()
+    urow = conn.execute("SELECT nome FROM usuarios WHERE id=?", (session.get('user_id'),)).fetchone()
+    corretor_nome = (urow['nome'] if urow else None) or session.get('nome') or ''
+    cliente_nome = (payload.get('cliente') or '').strip()
+    conn.execute(
+        "INSERT INTO cotacao_vera_cruz_salva (corretor_id, corretor_nome, cliente_nome, dados_json) VALUES (?, ?, ?, ?)",
+        (session.get('user_id'), corretor_nome, cliente_nome, json.dumps(payload)))
+    cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    conn.commit(); close_db(conn)
+    return jsonify({'id': cid, 'url': '/cotacao/vera-cruz/' + str(cid)})
+
+
+@app.route('/cotacao/vera-cruz/<int:cid>')
+@login_required
+def cotacao_vera_cruz_ver(cid):
+    """Abre uma cotação Vera Cruz salva anteriormente (link estável para o corretor acessar depois)."""
+    conn = db()
+    row = conn.execute("SELECT * FROM cotacao_vera_cruz_salva WHERE id=?", (cid,)).fetchone()
+    close_db(conn)
+    if not row:
+        abort(404)
+    if session.get('perfil') != 'admin' and row['corretor_id'] != session.get('user_id'):
+        abort(403)
+    dados_json = row['dados_json'] or 'null'
+    initial_state_js = dados_json.replace('</', '<\\/')
+    return render_template('cotacao_vera_cruz.html', initial_state_js=initial_state_js)
 
 
 @app.route('/cotacao/tabelas')
