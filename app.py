@@ -13007,6 +13007,27 @@ def api_whatsapp_chat_lead():
                              "nome": r['nome'] or '', "lead_id": r['lead_id']}))
 
 
+@app.route('/api/whatsapp/lead-por-telefone', methods=['GET', 'OPTIONS'])
+def api_whatsapp_lead_por_telefone():
+    """Acha o lead do CRM pelo telefone da conversa aberta — pro botão 'Abrir
+    lead no CRM' do trilho da extensão (achar automático, sem precisar rodar
+    análise antes). Usa o mesmo casamento por telefone_norm/sufixo de
+    _buscar_lead_por_telefone (fonte única de verdade pro dedup)."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
+    tel = _normalizar_telefone(request.args.get('telefone', ''))
+    if not tel:
+        return _wa_cors(jsonify({"ok": True, "achou": False}))
+    conn = db()
+    lead = _buscar_lead_por_telefone(conn, tel)
+    close_db(conn)
+    if not lead:
+        return _wa_cors(jsonify({"ok": True, "achou": False}))
+    return _wa_cors(jsonify({"ok": True, "achou": True, "lead_id": lead['id'], "nome": lead['nome']}))
+
+
 @app.route('/api/whatsapp/enviar-direto', methods=['POST', 'OPTIONS'])
 def api_whatsapp_enviar_direto():
     """Enfileira uma mensagem direto da conversa aberta no WhatsApp Web — pedido
