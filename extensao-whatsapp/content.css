@@ -477,10 +477,15 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 .job-cnpj-selo.ok { color: var(--job-sucesso); background: var(--job-sucesso-bg); border-color: var(--job-sucesso-bd); }
 .job-cnpj-selo.no { color: var(--job-danger); background: var(--job-danger-bg); border-color: var(--job-danger-bd); }
 .job-cnpj-selo.info { color: var(--job-info); background: var(--job-info-bg); border-color: var(--job-info-bd); }
-.job-cnpj-linha { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--job-borda); font-size: 13px; }
+.job-cnpj-linha { display: flex; align-items: flex-start; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--job-borda); font-size: 13px; }
 .job-cnpj-linha:last-of-type { border-bottom: none; }
 .job-cnpj-rot { color: var(--job-txt-fraco); min-width: 116px; flex-shrink: 0; }
-.job-cnpj-val { color: var(--job-txt); flex: 1; word-break: break-word; }
+.job-cnpj-val { color: var(--job-txt); flex: 1; word-break: break-word; user-select: text; }
+.job-cnpj-copy-item { flex-shrink: 0; width: 22px; height: 22px; padding: 0; display: flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: 6px; color: var(--job-txt-fraco); cursor: pointer; }
+.job-cnpj-copy-item svg { width: 14px; height: 14px; }
+.job-cnpj-copy-item:hover { background: var(--job-bg3); color: var(--job-txt); }
+.job-cnpj-copy-item.copiado { color: var(--job-acento); }
 .job-cnpj-acoes { display: flex; gap: 8px; margin-top: 14px; }
 .job-cnpj-acoes .job-copy, .job-cnpj-acoes .job-cnpj-link { margin-top: 0; flex: 1; text-align: center; }
 .job-cnpj-link { background: var(--job-bg3); color: var(--job-txt); border-radius: 8px; padding: 8px;
@@ -501,7 +506,7 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 .job-notas-lista { display: flex; flex-direction: column; gap: 6px; margin: 14px 0; }
 .job-notas-vazio { color: var(--job-txt-fraco); }
 .job-nota-item { background: var(--job-bg3); border-radius: 8px; padding: 9px 11px; }
-.job-nota-txt { font-size: 13px; color: var(--job-txt); line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.job-nota-txt { font-size: 13px; color: var(--job-txt); line-height: 1.45; white-space: pre-wrap; word-break: break-word; user-select: text; cursor: text; }
 .job-nota-meta { display: flex; align-items: center; gap: 8px; margin-top: 5px; font-size: 10.5px; color: var(--job-txt-fraco); }
 .job-nota-del { margin-left: auto; background: none; border: none; color: var(--job-txt-fraco); font-size: 15px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .job-nota-del:hover { color: var(--job-danger); }

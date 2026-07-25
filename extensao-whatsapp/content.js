@@ -874,6 +874,7 @@
   const _ICO_CNPJ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-3"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/></svg>';
   const _ICO_NOTA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>';
   const _ICO_CRM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/><path d="M21 8v6M18 11h6"/></svg>';
+  const _ICO_COPIAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 
   // Kit de ícones SVG (traço, herda a cor via currentColor) — o Guilherme NÃO
   // quer emoji em interface nenhuma do JOB; qualquer ícone novo sai daqui.
@@ -1176,6 +1177,16 @@
         setTimeout(() => { bc.textContent = 'Copiar dados'; }, 1500);
       });
     });
+    // Copiar item a item (CNPJ, data, município, natureza jurídica, CNAE,
+    // quadro societário isoladamente) — cada linha tem seu próprio botão.
+    box.querySelectorAll('.job-cnpj-copy-item').forEach((b) => {
+      b.addEventListener('click', () => {
+        navigator.clipboard.writeText(b.dataset.valor || '').then(() => {
+          b.classList.add('copiado');
+          setTimeout(() => b.classList.remove('copiado'), 1200);
+        });
+      });
+    });
     // "Salvar no lead" grava os dados do CNPJ como nota presa ao telefone da
     // CONVERSA ABERTA (não do CNPJ pesquisado — podem ser números diferentes,
     // ex: consultor confere o CNPJ de terceiro antes de perguntar ao lead).
@@ -1190,13 +1201,24 @@
       else bs.disabled = false;
     });
   }
+  // Só a Receita federal via URL pré-preenche o campo (?cnpj=, confirmado
+  // manualmente — o CAPTCHA continua manual, óbvio). O CCMEI e a JUCESP não
+  // aceitam parâmetro público conhecido: abrem a página normal, busca manual.
+  function _linkCnpjReva(dig) {
+    return 'https://solucoes.receita.fazenda.gov.br/Servicos/cnpjreva/Cnpjreva_Solicitacao.asp?cnpj=' + dig;
+  }
   function _renderCnpjCard(c) {
     const selo = (txt, cls) => '<span class="job-cnpj-selo ' + cls + '">' + esc(txt) + '</span>';
+    // Cada linha ganha um botão de copiar só daquele valor — o Guilherme
+    // pediu pra poder copiar item a item, não só o bloco inteiro.
     const linha = (rot, val) => val ? '<div class="job-cnpj-linha">' +
       '<span class="job-cnpj-rot">' + esc(rot) + '</span>' +
-      '<span class="job-cnpj-val">' + esc(val) + '</span></div>' : '';
+      '<span class="job-cnpj-val">' + esc(val) + '</span>' +
+      '<button class="job-cnpj-copy-item" data-valor="' + esc(val) + '" title="Copiar ' + esc(rot) + '">' + _ICO_COPIAR + '</button>' +
+      '</div>' : '';
     const socios = (c.socios || []).map((s) => s.nome + (s.qualificacao ? ' (' + s.qualificacao + ')' : '')).join('; ');
     const natureza = [c.natureza_codigo, c.natureza_descricao].filter(Boolean).join(' - ');
+    const ehSP = /(-|\s)SP$/i.test((c.municipio || '').trim());
     const txtCopia = [
       'CNPJ: ' + _fmtCnpj(c.cnpj),
       'Razão social: ' + (c.nome || ''),
@@ -1225,12 +1247,16 @@
       linha('Quadro societário', socios) +
       '<div class="job-cnpj-acoes">' +
         '<button class="job-copy" id="job-cnpj-copy" data-texto="' + esc(txtCopia) + '">Copiar dados</button>' +
+        '<a class="job-cnpj-link" href="' + esc(_linkCnpjReva(c.cnpj)) + '" target="_blank" rel="noopener" title="Abre com o CNPJ já preenchido, só falta o CAPTCHA">Cartão CNPJ (Receita)</a>' +
+      '</div>' +
+      '<div class="job-cnpj-acoes">' +
         '<a class="job-cnpj-link" href="https://mei.receita.economia.gov.br/certificado/visualizacao" target="_blank" rel="noopener">Abrir CCMEI</a>' +
+        (ehSP ? '<a class="job-cnpj-link" href="https://www.jucesponline.sp.gov.br/Default.aspx" target="_blank" rel="noopener" title="Empresa é de SP — busca manual pelo CNPJ ou nome">Pesquisar na JUCESP</a>' : '') +
       '</div>' +
       '<div class="job-cnpj-acoes-2">' +
         '<button class="job-cnpj-salvar-lead" id="job-cnpj-salvar-lead" data-texto="' + esc('Consulta CNPJ:\n' + txtCopia) + '">Salvar no lead (nota)</button>' +
       '</div>' +
-      '<div class="job-cnpj-fonte">Fonte: ' + esc(c.fonte || 'Receita') + '. Para o certificado CCMEI em PDF, abra o site e faça login com seu gov.br.</div>' +
+      '<div class="job-cnpj-fonte">Fonte: ' + esc(c.fonte || 'Receita') + '. Cartão CNPJ e CCMEI abrem com CAPTCHA/login manual do consultor' + (ehSP ? '; JUCESP também (busca manual)' : '') + '.</div>' +
     '</div>';
   }
 
