@@ -873,6 +873,7 @@
   const _ICO_INBOX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>';
   const _ICO_CNPJ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-3"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/></svg>';
   const _ICO_NOTA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>';
+  const _ICO_CRM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/><path d="M21 8v6M18 11h6"/></svg>';
 
   // Kit de ícones SVG (traço, herda a cor via currentColor) — o Guilherme NÃO
   // quer emoji em interface nenhuma do JOB; qualquer ícone novo sai daqui.
@@ -922,12 +923,21 @@
         '<span class="job-trilho-item-icone">' + _ICO_CNPJ + '</span>' +
         '<span class="job-trilho-item-label">CNPJ</span>' +
       '</button>' +
+      '<button class="job-trilho-item" data-secao="notas" title="Notas do lead">' +
+        '<span class="job-trilho-item-icone">' + _ICO_NOTA + '</span>' +
+        '<span class="job-trilho-item-label">Notas</span>' +
+      '</button>' +
+      '<button class="job-trilho-item" data-acao="crm" title="Abrir lead no CRM do JOB">' +
+        '<span class="job-trilho-item-icone">' + _ICO_CRM + '</span>' +
+        '<span class="job-trilho-item-label">CRM</span>' +
+      '</button>' +
       '<div class="job-trilho-rodape">' +
         '<button class="job-trilho-mini" id="job-trilho-config-btn" title="Configurações (tema, desligar)">' + _ICO_CONFIG + '</button>' +
       '</div>' +
       '<div class="job-trilho-versao" id="job-trilho-versao" title="Versão instalada"></div>';
     trilho.querySelectorAll('.job-trilho-item').forEach((item) => {
       item.addEventListener('click', () => {
+        if (item.dataset.acao === 'crm') { _abrirLeadNoCrm(item); return; }
         const secao = item.dataset.secao;
         if (_secaoAtiva === secao) fecharSecao();
         else abrirSecao(secao);
@@ -1097,6 +1107,7 @@
     else if (secao === 'funis') abrirSecaoFunis();
     else if (secao === 'inbox') abrirSecaoInbox();
     else if (secao === 'cnpj') abrirSecaoCnpj();
+    else if (secao === 'notas') abrirSecaoNotas();
   }
 
   // ═══════════════ Consulta de CNPJ (Receita via BrasilAPI) ═══════════════
@@ -1171,7 +1182,9 @@
     const bs = document.getElementById('job-cnpj-salvar-lead');
     if (bs) bs.addEventListener('click', async () => {
       bs.disabled = true; bs.textContent = 'Salvando…';
-      const ok = await _salvarNotaLead(bs.dataset.texto || '');
+      let tel = '';
+      try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+      const ok = await _salvarNotaLead(tel, bs.dataset.texto || '');
       bs.textContent = ok ? 'Salvo no lead!' : 'Falha — tentar de novo';
       if (ok) { setTimeout(() => { bs.disabled = false; bs.textContent = 'Salvar no lead (nota)'; }, 2000); }
       else bs.disabled = false;
@@ -2927,104 +2940,61 @@
     }
   }
 
-  // ═══════════════ Notas do lead — barra em cima da conversa ═══════════════
-  // Anotações presas ao telefone (mora no nosso banco), mostradas numa faixa no
-  // topo da conversa. Ideia da aba "Anotações" do ZapVoice, mas atrelada ao
-  // lead. Vigia a troca de conversa por polling leve (o WhatsApp não avisa).
-  let _notasChave = '';
-  let _notasTel = '';
-  let _notasCache = [];
-  let _notasAberto = false;
-
+  // ═══════════════ Notas do lead — aba do trilho ═══════════════
+  // Anotações presas ao telefone (mora no nosso banco). ATENÇÃO — a primeira
+  // versão disso era uma barra flutuante em cima da conversa; deu problema
+  // (não salvava de forma confiável) e a barra ORIGINAL antes dela inseria
+  // direto em #main, o que QUEBROU O ENVIO de mensagem (bug real, confirmado
+  // em produção 23/07/2026). Por isso agora é uma aba normal do trilho —
+  // mesmo padrão já comprovado da aba CNPJ: document.body via setCorpoSecao,
+  // nunca toca no DOM do WhatsApp, resolve o telefone NA HORA (sem estado
+  // global que pode ficar desatualizado entre trocas de conversa).
   function _tempoBrCurto(iso) {
     const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
     return m ? (m[3] + '/' + m[2] + ' ' + m[4] + ':' + m[5]) : '';
   }
 
-  // ATENÇÃO — NUNCA inserir a barra dentro de #main (nem com insertBefore,
-  // nem appendChild). #main é a árvore React do WhatsApp Web: um nó estranho
-  // ali dentro corrompe a reconciliação do React e QUEBRA O ENVIO DE
-  // MENSAGEM (bug real, confirmado em produção 23/07/2026 — mensagem parava
-  // com ícone de falha). A barra fica em document.body, position:fixed, e
-  // _posicionarBarraNotas() a ancora visualmente no rodapé do cabeçalho da
-  // conversa a cada tick — mesmo lugar na tela, fora da árvore do WhatsApp.
-  function _posicionarBarraNotas(main) {
-    const bar = document.getElementById('job-notas-bar');
-    if (!bar || !main) return;
-    const header = _qsRemoto('headerContato', ['#main header']);
-    const r = main.getBoundingClientRect();
-    const topRef = header ? header.getBoundingClientRect().bottom : r.top;
-    bar.style.left = Math.round(r.left) + 'px';
-    bar.style.width = Math.round(r.width) + 'px';
-    bar.style.top = Math.round(topRef) + 'px';
-  }
-
-  async function _atualizarBarraNotas(forcar) {
-    if (_contextoMorto) return;
-    const main = document.querySelector('#main');
-    if (!main) { const b = document.getElementById('job-notas-bar'); if (b) b.remove(); _notasChave = ''; return; }
-    let bar = document.getElementById('job-notas-bar');
-    if (!bar) {
-      bar = document.createElement('div');
-      bar.id = 'job-notas-bar';
-      document.body.appendChild(bar);
-    }
-    _posicionarBarraNotas(main);
-    const chave = nomeDoContato() + '|' + telefoneDoContato();
-    if (!forcar && chave === _notasChave) return;
-    _notasChave = chave;
-    _notasAberto = false;
+  async function abrirSecaoNotas() {
+    setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div><div class="job-sem-analise-txt">Abrindo notas…</div></div>');
     let tel = '';
     try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
-    _notasTel = tel;
-    if (!tel) { bar.innerHTML = ''; return; }
-    let resp;
-    try { resp = await _safeSendMessage({ type: 'notas_listar', telefone: tel }); } catch (e) { resp = null; }
-    if (_notasTel !== tel) return;  // trocou de conversa enquanto carregava
-    _notasCache = (resp && resp.ok && resp.notas) ? resp.notas : [];
-    _renderBarraNotas();
-  }
-
-  function _renderBarraNotas() {
-    const bar = document.getElementById('job-notas-bar');
-    if (!bar) return;
-    const n = _notasCache.length;
-    if (!_notasAberto) {
-      const ultima = n ? _notasCache[0].texto : '';
-      bar.innerHTML =
-        '<div class="job-notas-head" id="job-notas-toggle">' +
-          '<span class="job-notas-ico">' + _ICO_NOTA + '</span>' +
-          (n
-            ? '<span class="job-notas-count">' + n + '</span><span class="job-notas-preview">' + esc(ultima) + '</span>'
-            : '<span class="job-notas-vazio">Nenhuma nota deste lead — clique para adicionar</span>') +
-          '<span class="job-notas-abrir">' + (n ? 'Ver notas' : 'Adicionar') + '</span>' +
-        '</div>';
-      const t = document.getElementById('job-notas-toggle');
-      if (t) t.addEventListener('click', () => { _notasAberto = true; _renderBarraNotas(); });
+    const nome = nomeDoContato();
+    if (!tel) {
+      setCorpoSecao('<div class="job-erro">Abra uma conversa primeiro pra ver as notas do lead.</div>');
       return;
     }
-    const lista = n
-      ? _notasCache.map((no) =>
+    await _carregarNotasSecao(tel, nome);
+  }
+
+  async function _carregarNotasSecao(tel, nome) {
+    let resp;
+    try { resp = await _safeSendMessage({ type: 'notas_listar', telefone: tel }); } catch (e) { resp = null; }
+    if (!resp || !resp.ok) {
+      setCorpoSecao('<div class="job-erro">Não consegui carregar as notas agora. <button class="job-copy" id="job-notas-retry" style="width:auto;display:inline;padding:4px 10px;margin-left:6px;">Tentar de novo</button></div>');
+      const rt = document.getElementById('job-notas-retry');
+      if (rt) rt.addEventListener('click', () => _carregarNotasSecao(tel, nome));
+      return;
+    }
+    _renderSecaoNotas(tel, nome, resp.notas || []);
+  }
+
+  function _renderSecaoNotas(tel, nome, notas) {
+    const lista = notas.length
+      ? notas.map((no) =>
           '<div class="job-nota-item">' +
             '<div class="job-nota-txt">' + esc(no.texto) + '</div>' +
             '<div class="job-nota-meta">' + esc([no.autor_nome, _tempoBrCurto(no.criado_em)].filter(Boolean).join(' · ')) +
               '<button class="job-nota-del" data-id="' + no.id + '" title="Excluir">×</button></div>' +
           '</div>').join('')
-      : '<div class="job-notas-vazio" style="padding:8px 2px;">Ainda sem notas. Escreva a primeira abaixo.</div>';
-    bar.innerHTML =
-      '<div class="job-notas-painel">' +
-        '<div class="job-notas-topo">' +
-          '<span class="job-notas-titulo">' + _ICO_NOTA + ' Notas do lead</span>' +
-          '<button class="job-notas-fechar" id="job-notas-x">Fechar</button>' +
-        '</div>' +
+      : '<div class="job-notas-vazio" style="padding:6px 2px;">Ainda sem notas deste lead. Escreva a primeira abaixo.</div>';
+    setCorpoSecao(
+      '<div class="job-notas-secao">' +
+        '<div class="job-cnpj-titulo">Notas do lead</div>' +
+        '<div class="job-cnpj-sub">' + esc(nome || tel) + ' — fica salvo no JOB, qualquer consultor que abrir essa conversa vê.</div>' +
         '<div class="job-notas-lista">' + lista + '</div>' +
-        '<div class="job-notas-nova">' +
-          '<textarea id="job-nota-input" class="job-nota-input" rows="2" placeholder="Escrever uma nota deste lead…"></textarea>' +
-          '<button class="job-nota-salvar" id="job-nota-salvar">Salvar nota</button>' +
-        '</div>' +
-      '</div>';
-    const x = document.getElementById('job-notas-x');
-    if (x) x.addEventListener('click', () => { _notasAberto = false; _renderBarraNotas(); });
+        '<textarea id="job-nota-input" class="job-nota-input" rows="3" placeholder="Escrever uma nota deste lead…"></textarea>' +
+        '<button class="job-cnpj-btn" id="job-nota-salvar">Salvar nota</button>' +
+      '</div>');
     const salvar = document.getElementById('job-nota-salvar');
     const input = document.getElementById('job-nota-input');
     if (salvar && input) {
@@ -3032,25 +3002,23 @@
         const txt = (input.value || '').trim();
         if (!txt) { input.focus(); return; }
         salvar.disabled = true; salvar.textContent = 'Salvando…';
-        const ok = await _salvarNotaLead(txt);
-        if (ok) { input.value = ''; await _atualizarBarraNotas(true); _notasAberto = true; _renderBarraNotas(); }
-        else { salvar.disabled = false; salvar.textContent = 'Falha — tentar de novo'; }
+        const ok = await _salvarNotaLead(tel, txt);
+        if (ok) { await _carregarNotasSecao(tel, nome); }
+        else { salvar.disabled = false; salvar.textContent = 'Falha ao salvar — tentar de novo'; }
       });
-      input.focus();
     }
-    bar.querySelectorAll('.job-nota-del').forEach((b) => {
+    document.querySelectorAll('.job-nota-del').forEach((b) => {
       b.addEventListener('click', async () => {
         const id = parseInt(b.dataset.id, 10);
+        b.disabled = true;
         try { await _safeSendMessage({ type: 'notas_excluir', id }); } catch (e) { /* ignora */ }
-        _notasCache = _notasCache.filter((no) => no.id !== id);
-        _renderBarraNotas();
+        await _carregarNotasSecao(tel, nome);
       });
     });
   }
 
-  // Cria uma nota no lead da conversa aberta. texto obrigatório. Retorna bool.
-  async function _salvarNotaLead(texto) {
-    let tel = _notasTel;
+  // Cria uma nota no telefone informado. texto obrigatório. Retorna bool.
+  async function _salvarNotaLead(tel, texto) {
     if (!tel) { try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); } }
     if (!tel) return false;
     const { usuarioId } = await _safeStorageGet(['usuarioId']);
@@ -3058,6 +3026,27 @@
     try { resp = await _safeSendMessage({ type: 'notas_criar', telefone: tel, texto, usuario_id: usuarioId }); }
     catch (e) { resp = null; }
     return !!(resp && resp.ok);
+  }
+
+  // Acha o lead no CRM do JOB pelo telefone da conversa aberta e abre em nova
+  // aba. Ação direta do trilho (não abre seção) — pedido do Guilherme pra
+  // pular a busca manual no CRM.
+  async function _abrirLeadNoCrm(btn) {
+    const rotuloOriginal = btn.querySelector('.job-trilho-item-label');
+    const setLabel = (t) => { if (rotuloOriginal) rotuloOriginal.textContent = t; };
+    let tel = '';
+    try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+    if (!tel) { setLabel('Sem conversa'); setTimeout(() => setLabel('CRM'), 2200); return; }
+    setLabel('Buscando…');
+    let resp;
+    try { resp = await _safeSendMessage({ type: 'lead_por_telefone', telefone: tel }); } catch (e) { resp = null; }
+    if (resp && resp.ok && resp.achou && resp.lead_id) {
+      window.open(_SITE_BASE_URL_EXT + '/crm?lead=' + resp.lead_id, '_blank', 'noopener');
+      setLabel('CRM');
+    } else {
+      setLabel('Sem lead ainda');
+      setTimeout(() => setLabel('CRM'), 2200);
+    }
   }
 
   async function rodarAnalise(forcarPdfGrandes) {
@@ -3540,15 +3529,6 @@
   setTimeout(buscarInbox, 9000);
   _registrarLoop(setInterval(buscarInbox, 45000));
   ligarLoopInbox();
-
-  // Barra de notas do lead: o WhatsApp não avisa quando o consultor troca de
-  // conversa, então checa por polling leve (nome+telefone do cabeçalho) —
-  // _atualizarBarraNotas só refaz o fetch quando a chave muda de fato.
-  _registrarLoop(setInterval(() => { _atualizarBarraNotas(false); }, 1500));
-  window.addEventListener('resize', () => {
-    const m = document.querySelector('#main');
-    if (m) _posicionarBarraNotas(m);
-  });
 
   // Formata o telefone (dígitos) num rótulo BR legível pro aviso de limpeza.
   function fmtTelLimpezaBr(t) {
