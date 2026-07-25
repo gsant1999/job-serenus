@@ -42,6 +42,16 @@
 <div class="page" style="max-width:860px;">
 <form id="form">
 
+  <div class="form-secao" style="border:1px dashed var(--borda-2); background:var(--panel-2);">
+    <h3>Colar dados extraídos</h3>
+    <div class="aviso" style="display:block; margin-bottom:10px;">Cole aqui o bloco de dados dos documentos (nome, CPF, nascimento, CNPJ etc.) — o formulário abaixo é preenchido automaticamente. Nenhum dado é enviado a serviços externos.</div>
+    <div class="campo">
+      <textarea id="dados-colados" rows="6" placeholder="Cole o bloco de dados aqui..."></textarea>
+    </div>
+    <button type="button" class="btn-outline" onclick="preencherDeTexto()">Preencher automaticamente</button>
+    <div class="hint" id="colar-status"></div>
+  </div>
+
   <div class="form-secao">
     <h3>Informações internas</h3>
     <div class="form-row form-row-2">
@@ -112,6 +122,7 @@
       <div class="campo" id="campo-cnpj" style="display:none;">
         <label>CNPJ da empresa</label>
         <input type="text" name="cnpj" id="cnpj" placeholder="00.000.000/0000-00" oninput="mascaraCNPJ(this)">
+        <div class="hint" id="cnpj-status"></div>
       </div>
       <div class="campo">
         <label>CPF do titular</label>
@@ -536,33 +547,177 @@ fetch('/api/campos-ativos').then(r=>r.json()).then(campos=>{
   }
 });
 
-// ─── Pré-preenchimento a partir da análise do lead (extensão) ───
-const PREFILL = {{ prefill|tojson }};
-(function aplicarPrefill(){
-  if (!PREFILL || !Object.keys(PREFILL).length) return;
+// ─── Preenchimento automático (usado tanto pelo pré-fill do lead quanto pelo "Colar dados") ───
+function preencherFormulario(dados, bannerMsg) {
+  if (!dados || !Object.keys(dados).length) return;
   const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
   const setName = (n, v) => { const el = document.querySelector('[name="'+n+'"]'); if (el && v) el.value = v; };
   // tipo_pessoa primeiro (mostra o bloco de CNPJ/CPF via toggleDocs)
-  if (PREFILL.tipo_pessoa) { const tp = document.getElementById('tipo_pessoa'); if (tp) { tp.value = PREFILL.tipo_pessoa; try { toggleDocs(); } catch(e){} } }
-  set('cnpj', PREFILL.cnpj);
-  set('cpf_titular', PREFILL.cpf_titular);
-  set('nome_titular', PREFILL.nome_titular);
-  set('data_nasc_titular', PREFILL.data_nasc_titular);
-  set('valor', PREFILL.valor);
-  setName('razao_social', PREFILL.razao_social);
-  setName('total_vidas', PREFILL.total_vidas);
-  if (PREFILL.dependentes && PREFILL.dependentes.length) {
-    DEPS = PREFILL.dependentes.map(d => ({nome:d.nome||'', nasc:d.nasc||'', parentesco:d.parentesco||''}));
+  if (dados.tipo_pessoa) { const tp = document.getElementById('tipo_pessoa'); if (tp) { tp.value = dados.tipo_pessoa; try { toggleDocs(); } catch(e){} } }
+  set('cnpj', dados.cnpj);
+  set('cpf_titular', dados.cpf_titular);
+  set('nome_titular', dados.nome_titular);
+  set('data_nasc_titular', dados.data_nasc_titular);
+  set('valor', dados.valor);
+  setName('razao_social', dados.razao_social);
+  setName('total_vidas', dados.total_vidas);
+  if (dados.dependentes && dados.dependentes.length) {
+    DEPS = dados.dependentes.map(d => ({nome:d.nome||'', nasc:d.nasc||'', parentesco:d.parentesco||''}));
     renderDeps();
   }
   const obs = document.querySelector('[name="observacoes"]');
-  if (obs && PREFILL.docs_texto) obs.value = (obs.value ? obs.value + '\n\n' : '') + PREFILL.docs_texto;
+  if (obs && dados.docs_texto) obs.value = (obs.value ? obs.value + '\n\n' : '') + dados.docs_texto;
   try { syncDeps(); } catch(e){}
-  // aviso visual no topo
-  const banner = document.createElement('div');
-  banner.style.cssText = 'max-width:100%;margin:0 0 16px;padding:12px 14px;background:rgba(59,130,246,.12);border:1px solid var(--azul);border-radius:10px;color:var(--texto);font-size:13px;';
-  banner.innerHTML = 'Pré-preenchido com os dados extraídos da análise do lead. <b>Confira tudo</b> (principalmente CPF/RG e valores) e complete o financeiro antes de salvar.';
-  const form = document.querySelector('form'); if (form) form.insertBefore(banner, form.firstChild);
+  if (dados.cnpj) { try { buscarDadosCNPJ(dados.cnpj.replace(/\D/g,'')); } catch(e){} }
+  if (bannerMsg) {
+    const banner = document.createElement('div');
+    banner.style.cssText = 'max-width:100%;margin:0 0 16px;padding:12px 14px;background:rgba(59,130,246,.12);border:1px solid var(--azul);border-radius:10px;color:var(--texto);font-size:13px;';
+    banner.innerHTML = bannerMsg;
+    const form = document.querySelector('form'); if (form) form.insertBefore(banner, form.firstChild);
+  }
+}
+
+// ─── Pré-preenchimento a partir da análise do lead (extensão) ───
+const PREFILL = {{ prefill|tojson }};
+if (PREFILL && Object.keys(PREFILL).length) {
+  preencherFormulario(PREFILL, 'Pré-preenchido com os dados extraídos da análise do lead. <b>Confira tudo</b> (principalmente CPF/RG e valores) e complete o financeiro antes de salvar.');
+}
+
+// ─── Buscar CNPJ na Receita (BrasilAPI) e preencher razão social + titular ───
+let _cnpjBuscaTimer = null;
+function buscarDadosCNPJ(dig) {
+  const status = document.getElementById('cnpj-status');
+  if (!dig || dig.length !== 14) return;
+  if (status) status.textContent = 'Consultando CNPJ...';
+  fetch('/api/cnpj/' + dig).then(r => r.json()).then(data => {
+    if (!data.ok) { if (status) status.textContent = data.erro || 'CNPJ não encontrado.'; return; }
+    const c = data.cnpj;
+    const setName = (n, v) => { const el = document.querySelector('[name="'+n+'"]'); if (el && v) el.value = v; };
+    if (c.nome) setName('razao_social', c.nome);
+    const titular = c.titular_mei || (c.socios && c.socios.length ? c.socios[0].nome : '');
+    if (titular) { const el = document.getElementById('nome_titular'); if (el && !el.value) el.value = titular; }
+    if (status) status.textContent = '✓ ' + (c.nome || 'Dados encontrados') + (c.eh_mei ? ' · MEI' : '') + (c.situacao ? ' · ' + c.situacao : '');
+    try { syncDeps(); } catch(e){}
+  }).catch(() => { if (status) status.textContent = 'Não foi possível consultar agora.'; });
+}
+(function () {
+  const cnpjEl = document.getElementById('cnpj');
+  if (!cnpjEl) return;
+  cnpjEl.addEventListener('input', function () {
+    clearTimeout(_cnpjBuscaTimer);
+    const dig = this.value.replace(/\D/g, '');
+    if (dig.length === 14) _cnpjBuscaTimer = setTimeout(() => buscarDadosCNPJ(dig), 400);
+  });
 })();
+
+// ─── Colar dados extraídos (RG/CNH/comprovantes) — parser local, sem IA/internet ───
+function _parseDataBR(txt) {
+  const m = (txt || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  return m ? (m[3] + '-' + m[2] + '-' + m[1]) : '';
+}
+function parseDadosColados(texto) {
+  const blocos = (texto || '').split(/\n\s*\n/).map(b => b.split('\n').map(l => l.trim()).filter(Boolean)).filter(b => b.length);
+  const reCPF = /\d{3}\.\d{3}\.\d{3}-\d{2}/;
+  const reData = /^\d{2}\/\d{2}\/\d{4}$/;
+  const reCEP = /^CEP:/i;
+  const reCNPJLinha = /^CNPJ:\s*(.+)/i;
+  const reFone = /\(\d{2}\)\s?\d{4,5}-?\d{4}/;
+  const reEmail = /[\w.+-]+@[\w-]+\.[\w.-]+/;
+
+  const pessoas = [];
+  let cnpj = '', razaoSocial = '', endereco = null, foneEmail = [];
+  const extras = [];
+
+  blocos.forEach(linhas => {
+    const texto1 = linhas.join(' ');
+    if (/C[ÁA]LCULO DAS IDADES/i.test(texto1)) return; // calculado por nós, ignora
+
+    const linhaCPF = linhas.findIndex(l => reCPF.test(l));
+    if (linhaCPF !== -1) {
+      // bloco de pessoa
+      const p = { nome: '', cpf: '', rg: '', nasc: '', emissao: '', natural: '', pai: '', mae: '', cnes: '' };
+      p.nome = linhas.slice(0, linhaCPF).join(' ');
+      p.cpf = linhas[linhaCPF].match(reCPF)[0];
+      const resto = linhas.slice(linhaCPF + 1);
+      const filiacao = [];
+      resto.forEach(l => {
+        if (reData.test(l)) p.nasc = l;
+        else if (/^EMISS[ÃA]O:/i.test(l)) p.emissao = l.replace(/^EMISS[ÃA]O:\s*/i, '');
+        else if (/^NATURAL:/i.test(l)) p.natural = l.replace(/^NATURAL:\s*/i, '');
+        else if (/^CNES/i.test(l)) p.cnes = l.replace(/^CNES\S*:\s*/i, '');
+        else if (!p.rg && !reData.test(l)) p.rg = l; // primeira linha "solta" após o CPF = RG
+        else filiacao.push(l);
+      });
+      // a 1ª linha "solta" vira RG (acima); as seguintes que sobraram = pai/mãe, na ordem
+      if (filiacao.length) { p.pai = filiacao[0] || ''; p.mae = filiacao[1] || ''; }
+      pessoas.push(p);
+      return;
+    }
+
+    if (linhas.some(l => reCEP.test(l))) {
+      const cepLinha = linhas.find(l => reCEP.test(l));
+      const outras = linhas.filter(l => l !== cepLinha);
+      endereco = { rua: outras[0] || '', numero: outras[1] || '', bairro: outras[2] || '', cidade: outras[3] || '', cep: cepLinha.replace(/^CEP:\s*/i, '') };
+      return;
+    }
+
+    const linhaCnpj = linhas.find(l => reCNPJLinha.test(l));
+    if (linhaCnpj) {
+      cnpj = linhaCnpj.match(reCNPJLinha)[1].trim();
+      razaoSocial = linhas.filter(l => l !== linhaCnpj).join(' ');
+      return;
+    }
+
+    if (linhas.some(l => reFone.test(l) || reEmail.test(l))) {
+      foneEmail = linhas;
+      return;
+    }
+
+    extras.push(linhas.join('\n'));
+  });
+
+  const dados = { dependentes: [] };
+  if (cnpj) { dados.cnpj = cnpj; dados.tipo_pessoa = 'PME'; }
+  if (razaoSocial) dados.razao_social = razaoSocial;
+  if (pessoas.length) {
+    dados.total_vidas = pessoas.length;
+    dados.nome_titular = pessoas[0].nome;
+    dados.cpf_titular = pessoas[0].cpf;
+    dados.data_nasc_titular = _parseDataBR(pessoas[0].nasc);
+    dados.dependentes = pessoas.slice(1).map(p => ({ nome: p.nome, nasc: _parseDataBR(p.nasc), parentesco: '' }));
+  }
+
+  // tudo que não tem campo próprio no formulário (RG, filiação, naturalidade,
+  // CNES, endereço, telefone, e-mail) vai pras observações — nada se perde.
+  const docsLinhas = [];
+  pessoas.forEach(p => {
+    docsLinhas.push(p.nome + ':' +
+      (p.rg ? ' RG ' + p.rg + '.' : '') +
+      (p.emissao ? ' Emissão ' + p.emissao + '.' : '') +
+      (p.natural ? ' Natural de ' + p.natural + '.' : '') +
+      (p.pai ? ' Pai: ' + p.pai + '.' : '') +
+      (p.mae ? ' Mãe: ' + p.mae + '.' : '') +
+      (p.cnes ? ' CNES: ' + p.cnes + '.' : ''));
+  });
+  if (endereco) docsLinhas.push('Endereço: ' + [endereco.rua, endereco.numero, endereco.bairro, endereco.cidade].filter(Boolean).join(', ') + (endereco.cep ? ' - CEP ' + endereco.cep : ''));
+  if (foneEmail.length) docsLinhas.push('Contato: ' + foneEmail.join(' / '));
+  extras.forEach(e => docsLinhas.push(e));
+  if (docsLinhas.length) dados.docs_texto = 'Dados colados:\n' + docsLinhas.join('\n');
+
+  return dados;
+}
+function preencherDeTexto() {
+  const texto = document.getElementById('dados-colados').value;
+  const status = document.getElementById('colar-status');
+  if (!texto.trim()) { if (status) status.textContent = 'Cole o texto extraído antes de preencher.'; return; }
+  const dados = parseDadosColados(texto);
+  const achou = [];
+  if (dados.nome_titular) achou.push('titular');
+  if (dados.dependentes && dados.dependentes.length) achou.push(dados.dependentes.length + ' dependente(s)');
+  if (dados.cnpj) achou.push('CNPJ');
+  if (!achou.length) { if (status) status.textContent = 'Não consegui reconhecer nenhum dado nesse texto — confira o formato.'; return; }
+  preencherFormulario(dados, null);
+  if (status) status.textContent = '✓ Preenchido: ' + achou.join(', ') + '. Confira os campos antes de salvar.';
+}
 </script>
 {% endblock %}

@@ -12239,6 +12239,20 @@ def api_whatsapp_cnpj(cnpj):
     return _wa_cors(jsonify({"ok": True, "cnpj": dados}))
 
 
+@app.route('/api/cnpj/<cnpj>')
+@login_required
+def api_cnpj(cnpj):
+    """Consulta de CNPJ pro formulário de proposta: preenche razão social e
+    titular automaticamente a partir da BrasilAPI (mesma lógica da extensão)."""
+    dig = re.sub(r'\D', '', cnpj or '')
+    if len(dig) != 14:
+        return jsonify({"ok": False, "erro": "CNPJ precisa ter 14 dígitos"}), 400
+    dados = _consultar_cnpj(dig)
+    if not dados:
+        return jsonify({"ok": False, "erro": "Não consegui consultar esse CNPJ agora. Tente de novo em instantes."}), 502
+    return jsonify({"ok": True, "cnpj": dados})
+
+
 # Notas do lead — anotações que ficam presas ao telefone e aparecem numa barra
 # em cima da conversa no WhatsApp (a extensão desenha). Ideia vista no ZapVoice
 # (aba "Anotações"), mas aqui a nota mora no NOSSO banco, atrelada ao número,
