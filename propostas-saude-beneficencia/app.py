@@ -178,4 +178,9 @@ def _sem_cache(resp):
 
 
 if __name__ == '__main__':
-    app.run(port=5057, debug=True)
+    # Em producao quem sobe o app e o gunicorn (ver Procfile). Este bloco e para rodar
+    # na maquina do corretor - mas respeita PORT e escuta em 0.0.0.0 caso algum PaaS
+    # execute o arquivo direto: senao o processo sobe em 127.0.0.1 e nada de fora chega.
+    porta = int(os.environ.get('PORT', 5057))
+    hospedado = bool(os.environ.get('PORT'))
+    app.run(host='0.0.0.0' if hospedado else '127.0.0.1', port=porta, debug=not hospedado)
