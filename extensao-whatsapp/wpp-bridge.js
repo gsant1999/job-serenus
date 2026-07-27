@@ -376,6 +376,32 @@
   //    explicitamente pra mandar (via fila do CRM) — nunca em massa, nunca
   //    automático sem origem rastreável. wa-js manda direto pelo chatId, sem
   //    precisar abrir/navegar até a conversa na tela primeiro. ──
+  // ── CONFIRMAÇÃO REAL DE ENVIO ──────────────────────────────────────────
+  // sendTextMessage/sendFileMessage resolvem assim que a mensagem entra na
+  // fila LOCAL (aparece na tela com relojinho) — NÃO quando o servidor do
+  // WhatsApp aceita. Reportar "enviado" aí era mentira: o consultor via
+  // "enviado" e a mensagem só saía segundos depois (ou falhava em silêncio).
+  // O retorno traz `sendMsgResult`, uma promise que resolve com o resultado
+  // de verdade ('OK' | 'ERROR_NETWORK' | ...). Esperamos ela, com teto de
+  // tempo pra nunca pendurar o envio se a confirmação não vier.
+  const _CONFIRMA_MS = 12000;        // texto
+  const _CONFIRMA_MS_MIDIA = 25000;  // mídia: tem upload antes (cabe no teto de 45s do chamador)
+  async function _confirmarEnvio(res, tetoMs) {
+    if (!res || !res.sendMsgResult) return { confirmado: false };
+    try {
+      const r = await Promise.race([
+        Promise.resolve(res.sendMsgResult),
+        new Promise((ok) => setTimeout(() => ok('__timeout__'), tetoMs || _CONFIRMA_MS)),
+      ]);
+      if (r === '__timeout__') return { confirmado: false };
+      const st = String((r && r.messageSendResult) || r || '');
+      if (st && st !== 'OK') return { confirmado: true, falhou: true, motivo: st };
+      return { confirmado: true };
+    } catch (e) {
+      return { confirmado: false };
+    }
+  }
+
   async function enviarTexto(chatId, texto) {
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.sendTextMessage) {
       return { erro: 'wpp_ausente' };
@@ -384,7 +410,9 @@
     try {
       const res = await window.WPP.chat.sendTextMessage(chatId, texto);
       const msgId = (res && res.id && res.id._serialized) || (res && res._serialized) || null;
-      return { ok: true, wpp_msg_id: msgId };
+      const c = await _confirmarEnvio(res);
+      if (c.falhou) return { ok: false, erro: 'WhatsApp não aceitou o envio (' + c.motivo + ')' };
+      return { ok: true, wpp_msg_id: msgId, confirmado: c.confirmado };
     } catch (e) {
       return { ok: false, erro: String((e && e.message) || e).slice(0, 200) };
     }
@@ -414,7 +442,11 @@
       }
       const res = await window.WPP.chat.sendFileMessage(chatId, dataUrl, opts);
       const msgId = (res && res.id && res.id._serialized) || (res && res._serialized) || null;
-      return { ok: true, wpp_msg_id: msgId };
+      // Mesma confirmação real do texto — mídia é ainda mais sujeita a demora
+      // (upload do arquivo antes do envio), então "enviado" otimista enganava mais.
+      const c = await _confirmarEnvio(res, _CONFIRMA_MS_MIDIA);
+      if (c.falhou) return { ok: false, erro: 'WhatsApp não aceitou o envio (' + c.motivo + ')' };
+      return { ok: true, wpp_msg_id: msgId, confirmado: c.confirmado };
     } catch (e) {
       return { ok: false, erro: String((e && e.message) || e).slice(0, 200) };
     }
