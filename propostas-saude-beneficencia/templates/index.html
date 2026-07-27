@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Proposta e Ficha de Inclusão — Saúde Beneficência</title>
+<style>
+  :root{
+    --bg:#f6f5f1; --surface:#fff; --surface-2:#efeee8; --ink:#1e2422; --ink-soft:#5b625d;
+    --line:#dcdad2; --accent:#0d6b58; --accent-ink:#fff; --accent-soft:#e3efe9; --danger:#a3372a;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.4;}
+  .shell{max-width:920px;margin:0 auto;padding:32px 20px 100px;}
+  h1{font-size:22px;margin:0 0 4px;}
+  .sub{color:var(--ink-soft);font-size:13.5px;margin:0 0 26px;}
+  section{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px 22px;margin-bottom:18px;}
+  section h2{font-size:15px;margin:0 0 4px;}
+  section .hint{font-size:12.5px;color:var(--ink-soft);margin:0 0 14px;}
+  label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-bottom:4px;}
+  input[type=text],input[type=number],select,textarea{
+    font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;
+    background:var(--surface-2);color:var(--ink);width:100%;
+  }
+  textarea{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;min-height:160px;}
+  .row{display:flex;gap:10px;align-items:flex-end;}
+  .row > *{flex:1;}
+  .grid{display:grid;gap:10px;}
+  .g2{grid-template-columns:1fr 1fr;} .g3{grid-template-columns:1fr 1fr 1fr;} .g4{grid-template-columns:1fr 1fr 1fr 1fr;}
+  @media (max-width:640px){.g2,.g3,.g4{grid-template-columns:1fr;}}
+  .btn{font:inherit;font-size:13.5px;font-weight:700;padding:9px 16px;border-radius:8px;cursor:pointer;border:1px solid transparent;background:var(--accent);color:var(--accent-ink);white-space:nowrap;}
+  .btn-sec{background:transparent;border-color:var(--line);color:var(--ink);}
+  .btn-sec:hover{background:var(--surface-2);border-color:var(--accent);color:var(--accent);}
+  .btn:hover{filter:brightness(1.08);}
+  .btn.secondary{background:transparent;border-color:var(--line);color:var(--ink);}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;}
+  .chip{padding:8px 14px;border-radius:20px;border:1px solid var(--line);background:var(--surface-2);cursor:pointer;font-size:13px;font-weight:600;user-select:none;}
+  .chip.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+  .plano-card{padding:12px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface-2);cursor:pointer;}
+  .plano-card b{font-size:13.5px;display:block;}
+  .plano-card small{color:var(--ink-soft);font-size:11.5px;}
+  .plano-card.on{background:var(--accent-soft);border-color:var(--accent);}
+  .plano-card.on b{color:var(--accent);}
+  .pessoa-card{border:1px solid var(--line);border-radius:9px;padding:14px;background:var(--surface-2);margin-top:12px;}
+  .pessoa-card h3{margin:0 0 10px;font-size:14px;}
+  .status{font-size:12.5px;margin-top:8px;}
+  .status.err{color:var(--danger);}
+  .status.ok{color:var(--accent);}
+  .empresa-box{margin-top:14px;}
+  .socios{margin-top:8px;}
+  footer.actions{position:sticky;bottom:16px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
+  .out-links a{display:inline-block;margin:4px 8px 0 0;padding:6px 12px;background:var(--accent-soft);color:var(--accent);border-radius:7px;text-decoration:none;font-size:13px;font-weight:700;}
+  .small{font-size:11.5px;color:var(--ink-soft);}
+  .req::after{content:" *";color:var(--danger);font-weight:800;}
+  .fixo{background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;padding:12px 14px;color:var(--accent);}
+  .fixo .small{color:var(--accent);opacity:.85;}
+  .saude-box{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);}
+  hr.sep{border:none;border-top:1px dashed var(--line);margin:14px 0;}
+</style>
+</head>
+<body>
+<div class="shell">
+  <h1>Proposta de Adesão + Ficha de Inclusão</h1>
+  <p class="sub">Saúde Beneficência · preenche os PDFs originais sem mudar a estrutura deles. Cole o CNPJ e o bloco de notas — o resto é só clicar.</p>
+
+  <section id="sec-empresa">
+    <h2>1 · Empresa (via CNPJ)</h2>
+    <p class="hint">Cola só o número — o resto vem da Receita automaticamente.</p>
+    <div class="row">
+      <div><label>CNPJ</label><input type="text" id="cnpjInput" placeholder="00.000.000/0000-00"></div>
+      <button class="btn" onclick="buscarCnpj()">Buscar CNPJ</button>
+    </div>
+    <div id="cnpjStatus" class="status"></div>
+    <div class="empresa-box grid g2" id="empresaBox" style="display:none;">
+      <div><label>Razão social</label><input type="text" id="e_razao"></div>
+      <div><label>Nome fantasia</label><input type="text" id="e_fantasia"></div>
+      <div><label>Endereço</label><input type="text" id="e_endereco"></div>
+      <div class="grid g2"><div><label>Nº</label><input type="text" id="e_numero"></div><div><label>Compl.</label><input type="text" id="e_complemento"></div></div>
+      <div><label>Bairro</label><input type="text" id="e_bairro"></div>
+      <div><label>Cidade / UF</label><div class="row"><input type="text" id="e_cidade"><input type="text" id="e_uf" style="max-width:60px;"></div></div>
+      <div><label>CEP</label><input type="text" id="e_cep"></div>
+      <div><label class="req">Telefone (obrigatório)</label><input type="text" id="e_telefone" placeholder="obrigatório"></div>
+      <div><label class="req">E-mail (obrigatório)</label><input type="text" id="e_email" placeholder="obrigatório"></div>
+      <div><label>Contato (nome)</label><input type="text" id="e_contato"></div>
+      <div class="socios" style="grid-column:1/-1;">
+        <label>Sócio/responsável legal (clique para usar)</label>
+        <div class="chips" id="sociosChips"></div>
+        <div class="grid g3" style="margin-top:8px;">
+          <div><label>Nome do representante legal</label><input type="text" id="rep_nome"></div>
+          <div><label>Identidade nº</label><input type="text" id="rep_identidade"></div>
+          <div><label>CPF</label><input type="text" id="rep_cpf"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="sec-notas">
+    <h2>2 · Bloco de notas (titular / dependentes)</h2>
+    <p class="hint">Cola o texto que você já mantém (nome, CPF, RG, nascimento, mãe, SUS, endereço, telefone, e-mail).</p>
+    <p class="hint">Não tem o bloco pronto? Clique em <b>Copiar prompt</b>, cole no ChatGPT junto com as fotos dos documentos e traga a resposta de volta para cá.</p>
+    <textarea id="notasInput" placeholder="Cole aqui o bloco de notas..."></textarea>
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn" onclick="interpretarNotas()">Interpretar notas</button>
+      <button class="btn btn-sec" onclick="copiarPrompt()">Copiar prompt para o ChatGPT</button>
+    </div>
+    <div id="notasStatus" class="status"></div>
+    <div id="pessoasBox"></div>
+  </section>
+
+  <section>
+    <h2>3 · Plano</h2>
+    <div class="grid g3" id="planoGrid"></div>
+    <div class="row" style="margin-top:14px;">
+      <div><label>Acomodação</label>
+        <div class="chips" id="acomodacaoChips">
+          <div class="chip on" data-v="coletiva" onclick="escolherUnico('acomodacaoChips',this)">Coletiva</div>
+          <div class="chip" data-v="privativa" onclick="escolherUnico('acomodacaoChips',this)">Privativa</div>
+        </div>
+      </div>
+      <div style="max-width:140px;"><label>Nº de vidas</label><input type="number" id="vidas" min="1" value="1" readonly></div>
+    </div>
+    <p class="small">Nº de vidas é calculado automaticamente (titulares + dependentes marcados na seção 2).</p>
+    <p class="small" id="mensalidadeCalc" style="color:var(--accent);font-weight:700;"></p>
+  </section>
+
+  <section>
+    <h2>4 · Vigência</h2>
+    <label>Dia de vencimento</label>
+    <div class="chips" id="vencimentoChips">
+      <div class="chip" data-v="05" onclick="escolherUnico('vencimentoChips',this)">05</div>
+      <div class="chip" data-v="10" onclick="escolherUnico('vencimentoChips',this)">10</div>
+      <div class="chip on" data-v="15" onclick="escolherUnico('vencimentoChips',this)">15</div>
+      <div class="chip" data-v="20" onclick="escolherUnico('vencimentoChips',this)">20</div>
+    </div>
+    <div class="row" style="margin-top:12px;">
+      <div><label>Mês de início</label><select id="vigMes"></select></div>
+      <div><label>Ano</label><input type="number" id="vigAno"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>5 · Condições especiais</h2>
+    <label>Agente já recebeu a 1ª mensalidade?</label>
+    <div class="chips" id="recebeuChips">
+      <div class="chip on" data-v="nao" onclick="escolherUnico('recebeuChips',this);toggleRecebeu()">Não</div>
+      <div class="chip" data-v="sim" onclick="escolherUnico('recebeuChips',this);toggleRecebeu()">Sim</div>
+    </div>
+    <div id="recebeuBox" style="display:none;margin-top:10px;" class="grid g2">
+      <div><label>Valor (R$) — sugerido pela faixa etária</label><input type="text" id="valorRecebido"></div>
+      <div><label>Forma de pagamento</label>
+        <div class="chips">
+          <div class="chip on" data-v="dinheiro" onclick="escolherUnico(this.parentNode,this)">Dinheiro</div>
+          <div class="chip" data-v="cheque" onclick="escolherUnico(this.parentNode,this)">Cheque</div>
+        </div>
+      </div>
+    </div>
+    <hr class="sep">
+    <label>Há aproveitamento de carência de outra operadora?</label>
+    <div class="chips" id="carenciaChips">
+      <div class="chip on" data-v="nao" onclick="escolherUnico('carenciaChips',this)">Não</div>
+      <div class="chip" data-v="sim" onclick="escolherUnico('carenciaChips',this)">Sim</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>6 · Agente de vendas</h2>
+    <p class="hint">Fixo — vai sempre assim em todas as propostas.</p>
+    <div class="fixo">
+      <div><b>{{ agente.nome }}</b></div>
+      <div class="small">CPF {{ agente.cpf }} · {{ agente.telefone }}</div>
+    </div>
+  </section>
+
+  <footer class="actions">
+    <div style="flex:1;font-size:12.5px;color:var(--ink-soft);" id="statusFinal">Preencha as seções acima.</div>
+    <button class="btn" onclick="gerar()">Gerar documentos</button>
+  </footer>
+  <div class="out-links" id="outLinks"></div>
+</div>
+
+<script>
+const PLANOS = {{ planos|tojson }};
+let PESSOAS = [];
+let CNPJ_INFO = null;
+let ENDERECO_NOTAS = null;   // endereço do bloco de notas → vai em "Endereço de correspondência"
+
+// Estado civil concorda com o sexo da pessoa (o contrato real da Sandra traz "SOLTEIRA").
+const ESTADOS_CIVIS = [
+  {key:'solteiro',   rotulo:'Solteiro(a)',   m:'SOLTEIRO',    f:'SOLTEIRA'},
+  {key:'casado',     rotulo:'Casado(a)',     m:'CASADO',      f:'CASADA'},
+  {key:'divorciado', rotulo:'Divorciado(a)', m:'DIVORCIADO',  f:'DIVORCIADA'},
+  {key:'viuvo',      rotulo:'Viúvo(a)',      m:'VIÚVO',       f:'VIÚVA'},
+  {key:'uniao',      rotulo:'União estável', m:'UNIÃO ESTÁVEL', f:'UNIÃO ESTÁVEL'},
+];
+function textoEstadoCivil(pessoa){
+  const e = ESTADOS_CIVIS.find(x => x.key === pessoa.estado_civil_key);
+  if (!e) return '';
+  return pessoa.sexo === 'F' ? e.f : e.m;
+}
+
+function up(s){ return (s||'').toString().toUpperCase().trim(); }
+function dig(s){ return (s||'').toString().replace(/\D/g,''); }
+function fmtTel(v){
+  var d = dig(v);
+  if (d.length === 11) return '(' + d.slice(0,2) + ') ' + d.slice(2,7) + '-' + d.slice(7);
+  if (d.length === 10) return '(' + d.slice(0,2) + ') ' + d.slice(2,6) + '-' + d.slice(6);
+  return (v||'').trim();
+}
+function fmtCep(v){
+  var d = dig(v);
+  return d.length === 8 ? d.slice(0,5) + '-' + d.slice(5) : (v||'').trim();
+}
+
+// ---- plano cards ----
+const planoGrid = document.getElementById('planoGrid');
+Object.keys(PLANOS).forEach((key, i) => {
+  const p = PLANOS[key];
+  const div = document.createElement('div');
+  div.className = 'plano-card' + (i === 0 ? ' on' : '');
+  div.dataset.v = key;
+  div.innerHTML = `<b>${p.nome_folha}</b><small>Preço varia por faixa etária</small>`;
+  div.onclick = () => escolherUnico(planoGrid, div);
+  planoGrid.appendChild(div);
+});
+
+function escolherUnico(containerOrId, el){
+  const container = typeof containerOrId === 'string' ? document.getElementById(containerOrId) : containerOrId;
+  Array.from(container.children).forEach(c => c.classList.remove('on'));
+  el.classList.add('on');
+}
+
+// ---- meses / ano padrao (proximo mes) ----
+const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const vigMesSel = document.getElementById('vigMes');
+MESES.forEach((m,i)=>{ const o=document.createElement('option'); o.value=i+1; o.textContent=m; vigMesSel.appendChild(o); });
+(function(){
+  const hoje = new Date();
+  let mes = hoje.getMonth() + 2; // proximo mes (1-indexed +1)
+  let ano = hoje.getFullYear();
+  if (mes > 12){ mes -= 12; ano += 1; }
+  vigMesSel.value = mes;
+  document.getElementById('vigAno').value = ano;
+})();
+
+// ---- CNPJ ----
+async function buscarCnpj(){
+  const cnpj = document.getElementById('cnpjInput').value.replace(/\D/g,'');
+  const statusEl = document.getElementById('cnpjStatus');
+  if (cnpj.length !== 14){ statusEl.textContent = 'CNPJ precisa ter 14 dígitos.'; statusEl.className='status err'; return; }
+  statusEl.textContent = 'Buscando...'; statusEl.className='status';
+  try{
+    const r = await fetch('/api/cnpj/' + cnpj);
+    const d = await r.json();
+    if (!r.ok){ statusEl.textContent = d.erro || 'Erro ao buscar CNPJ.'; statusEl.className='status err'; return; }
+    CNPJ_INFO = d;
+    document.getElementById('empresaBox').style.display = 'grid';
+    document.getElementById('e_razao').value = up(d.razao_social);
+    document.getElementById('e_fantasia').value = up(d.nome_fantasia);
+    document.getElementById('e_endereco').value = up(d.endereco);
+    document.getElementById('e_numero').value = d.numero || '';
+    document.getElementById('e_complemento').value = up(d.complemento);
+    document.getElementById('e_bairro').value = up(d.bairro);
+    document.getElementById('e_cidade').value = up(d.cidade);
+    document.getElementById('e_uf').value = up(d.uf);
+    document.getElementById('e_cep').value = fmtCep(d.cep);
+    document.getElementById('e_telefone').value = fmtTel(d.telefone);
+    document.getElementById('e_email').value = (d.email || '').toLowerCase();
+    const chipsBox = document.getElementById('sociosChips');
+    chipsBox.innerHTML = '';
+    (d.socios || []).forEach(s => {
+      const chip = document.createElement('div');
+      chip.className = 'chip';
+      chip.textContent = s.nome + (s.qualificacao ? ' · ' + s.qualificacao : '');
+      chip.onclick = () => {
+        Array.from(chipsBox.children).forEach(c=>c.classList.remove('on'));
+        chip.classList.add('on');
+        document.getElementById('rep_nome').value = up(s.nome);
+        autoPreencherRepCpf(s.nome);
+      };
+      chipsBox.appendChild(chip);
+    });
+    if (d.responsavel_sugerido){
+      const alvo = Array.from(chipsBox.children).find(c => c.textContent.startsWith(d.responsavel_sugerido));
+      if (alvo) alvo.click();
+    }
+    statusEl.textContent = 'Empresa encontrada.'; statusEl.className = 'status ok';
+    document.getElementById('e_contato').value = document.getElementById('e_contato').value || '';
+  }catch(e){
+    statusEl.textContent = 'Falha de conexão: ' + e; statusEl.className='status err';
+  }
+}
+
+function autoPreencherRepCpf(nomeSocio){
+  if (!nomeSocio) return;
+  const p = PESSOAS.find(x => up(x.nome) === up(nomeSocio));
+  if (p){
+    // Identidade nº: só o número (sem órgão emissor/UF).
+    document.getElementById('rep_identidade').value = dig(p.rg);
+    document.getElementById('rep_cpf').value = p.cpf || '';
+  }
+}
+
+// ---- bloco de notas ----
+async function interpretarNotas(){
+  const texto = document.getElementById('notasInput').value;
+  const statusEl = document.getElementById('notasStatus');
+  statusEl.textContent = 'Interpretando...'; statusEl.className = 'status';
+  const r = await fetch('/api/parse-notas', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({texto})});
+  const d = await r.json();
+  PESSOAS = (d.pessoas || []).map(p => ({...p, papel:'titular', parentesco:'', estado_civil:'', portabilidade:false, data_entrevista:''}));
+
+  if (!document.getElementById('e_razao').value && d.empresa && d.empresa.razao_social){
+    document.getElementById('empresaBox').style.display = 'grid';
+    document.getElementById('e_razao').value = up(d.empresa.razao_social);
+  }
+  if (d.endereco){
+    ENDERECO_NOTAS = {
+      endereco: up(d.endereco.rua), numero: d.endereco.numero || '', complemento: '',
+      bairro: up(d.endereco.bairro), cidade: up(d.endereco.cidade), cep: d.endereco.cep || '',
+      uf: up(document.getElementById('e_uf').value),
+    };
+    PESSOAS.forEach(p => {
+      p.endereco = ENDERECO_NOTAS.endereco; p.numero = ENDERECO_NOTAS.numero;
+      p.bairro = ENDERECO_NOTAS.bairro; p.cidade = ENDERECO_NOTAS.cidade;
+      p.cep = ENDERECO_NOTAS.cep; p.uf = ENDERECO_NOTAS.uf;
+    });
+  }
+  if (d.contato){
+    PESSOAS.forEach(p => { p.telefone1 = fmtTel(d.contato.telefone); p.email = (d.contato.email || '').toLowerCase(); });
+    // O e-mail/telefone do bloco de notas SEMPRE tem prioridade sobre o da Receita.
+    if (d.contato.email) document.getElementById('e_email').value = d.contato.email.toLowerCase();
+    if (d.contato.telefone) document.getElementById('e_telefone').value = fmtTel(d.contato.telefone);
+  }
+  // Contato: primeiro titular identificado
+  var elContato = document.getElementById('e_contato');
+  if (!elContato.value.trim() && PESSOAS.length) elContato.value = up(PESSOAS[0].nome.split(' ')[0]);
+  // Liga o sócio vindo do CNPJ com a pessoa do bloco de notas (RG/CPF do representante)
+  autoPreencherRepCpf(document.getElementById('rep_nome').value);
+  statusEl.textContent = `${PESSOAS.length} pessoa(s) identificada(s).`; statusEl.className = 'status ok';
+  renderPessoas();
+  recalcularVidas();
+}
+
+function renderPessoas(){
+  const box = document.getElementById('pessoasBox');
+  box.innerHTML = '';
+  const titulares = PESSOAS.filter(p => p.papel === 'titular');
+  PESSOAS.forEach((p, idx) => {
+    const card = document.createElement('div');
+    card.className = 'pessoa-card';
+    let vinculoHtml = '';
+    if (p.papel === 'dependente' && titulares.length > 1){
+      vinculoHtml = `<div style="margin-top:8px;"><label>Dependente de</label><select onchange="PESSOAS[${idx}].titular_de=this.value">
+        ${titulares.map(t => `<option value="${t.nome}">${t.nome}</option>`).join('')}
+      </select></div>`;
+    }
+    card.innerHTML = `
+      <h3>${p.nome || '(sem nome)'}</h3>
+      <div class="grid g4">
+        <div><label>CPF</label><input type="text" value="${p.cpf||''}" oninput="PESSOAS[${idx}].cpf=up(this.value)"></div>
+        <div><label>RG</label><input type="text" value="${p.rg||''}" oninput="PESSOAS[${idx}].rg=up(this.value)"></div>
+        <div><label>Nascimento</label><input type="text" value="${p.nascimento||''}" oninput="PESSOAS[${idx}].nascimento=this.value"></div>
+        <div><label>Sexo</label>
+          <div class="chips">
+            <div class="chip ${p.sexo==='M'?'on':''}" onclick="PESSOAS[${idx}].sexo='M';escolherUnico(this.parentNode,this)">M</div>
+            <div class="chip ${p.sexo==='F'?'on':''}" onclick="PESSOAS[${idx}].sexo='F';escolherUnico(this.parentNode,this)">F</div>
+          </div>
+        </div>
+      </div>
+      <div class="grid g2" style="margin-top:10px;">
+        <div><label>Nome da mãe</label><input type="text" value="${p.mae||''}" oninput="PESSOAS[${idx}].mae=up(this.value)"></div>
+        <div><label>Cartão do SUS</label><input type="text" value="${p.sus||''}" oninput="PESSOAS[${idx}].sus=this.value"></div>
+      </div>
+      <div style="margin-top:10px;"><label>Papel nesta venda</label>
+        <div class="chips">
+          <div class="chip ${p.papel==='titular'?'on':''}" onclick="definirPapel(${idx},'titular')">Titular</div>
+          <div class="chip ${p.papel==='dependente'?'on':''}" onclick="definirPapel(${idx},'dependente')">Dependente</div>
+        </div>
+      </div>
+      <div style="margin-top:8px;">
+        <label>Estado civil</label>
+        <div class="chips">
+          ${ESTADOS_CIVIS.map(e => `<div class="chip ${p.estado_civil_key===e.key?'on':''}" onclick="definirEstadoCivil(${idx},'${e.key}')">${e.rotulo}</div>`).join('')}
+        </div>
+      </div>
+      <div id="parentescoBox${idx}" style="margin-top:8px;display:${p.papel==='dependente'?'block':'none'};">
+        <label>Parentesco com o titular</label>
+        <div class="chips">
+          ${['CÔNJUGE','FILHO(A)','ENTEADO(A)','OUTRO'].map(v => `<div class="chip ${p.parentesco===v?'on':''}" onclick="PESSOAS[${idx}].parentesco='${v}';escolherUnico(this.parentNode,this)">${v}</div>`).join('')}
+        </div>
+      </div>
+      ${vinculoHtml}
+      <div class="saude-box">
+        <label>Declaração de saúde (página 2 da ficha)</label>
+        <div class="chips">
+          <div class="chip ${!p.portabilidade?'on':''}" onclick="definirSaude(${idx},false)">Entrevista médica</div>
+          <div class="chip ${p.portabilidade?'on':''}" onclick="definirSaude(${idx},true)">Portabilidade</div>
+        </div>
+        <div id="dataEntrevistaBox${idx}" style="margin-top:8px;display:${p.portabilidade?'none':'block'};max-width:220px;">
+          <label>Data da entrevista</label>
+          <input type="text" value="${p.data_entrevista||''}" placeholder="DD/MM/AAAA" oninput="PESSOAS[${idx}].data_entrevista=this.value">
+        </div>
+      </div>
+    `;
+    box.appendChild(card);
+  });
+}
+
+function definirPapel(idx, papel){
+  PESSOAS[idx].papel = papel;
+  renderPessoas();
+  recalcularVidas();
+}
+
+// Prompt pronto para o consultor colar no ChatGPT dele junto com as fotos.
+// O formato de saída tem que bater EXATAMENTE com o que o parser.py espera:
+// bloco por pessoa (nome / CPF na 2ª linha / RG / nascimento / pai / mãe / SUS),
+// depois endereço (com linha CEP), depois CNPJ + razão social, depois contato.
+const PROMPT_DOCS = `Você vai ler documentos (RG, CNH, cartão CNPJ, comprovante de endereço) que eu vou anexar e devolver os dados em TEXTO PURO, exatamente no formato abaixo.
+
+REGRAS OBRIGATÓRIAS:
+- Responda SOMENTE o texto no formato. Sem explicação, sem markdown, sem asteriscos, sem títulos.
+- Tudo em MAIÚSCULAS, exceto o e-mail.
+- Separe cada bloco por UMA linha em branco.
+- Se um dado não estiver no documento, OMITA a linha inteira. Nunca escreva "não informado".
+- A ordem das linhas importa. Não troque a ordem.
+- O nome do PAI vem antes do nome da MÃE. Se só houver um, escreva o da mãe.
+
+FORMATO (repita o bloco de pessoa para cada titular e cada dependente):
+
+NOME COMPLETO DA PESSOA
+000.000.000-00
+000000000 SSP SP
+DD/MM/AAAA
+NOME COMPLETO DO PAI
+NOME COMPLETO DA MÃE
+CNES: 000000000000000
+
+(linha em branco entre pessoas)
+
+RUA OU AVENIDA
+NUMERO
+BAIRRO
+CIDADE
+CEP: 00000-000
+
+CNPJ: 00.000.000/0000-00
+RAZÃO SOCIAL DA EMPRESA
+
+(11) 90000-0000
+email@dominio.com
+
+OBSERVAÇÕES:
+- A 2ª linha de cada pessoa é sempre o CPF. Se não achar o CPF, ainda assim mantenha a linha com o que houver.
+- A 4ª linha é a data de NASCIMENTO (não a data de emissão do documento).
+- CNES é o número do Cartão SUS, quando aparecer.
+- O número da casa fica sozinho numa linha, logo depois da rua.
+
+Agora leia os documentos anexados e devolva só o texto.`;
+
+function copiarPrompt(){
+  const st = document.getElementById('notasStatus');
+  navigator.clipboard.writeText(PROMPT_DOCS).then(function(){
+    st.textContent = 'Prompt copiado. Cole no ChatGPT junto com as fotos dos documentos e traga a resposta para o campo acima.';
+  }, function(){
+    // fallback quando o navegador bloqueia a área de transferência
+    const t = document.createElement('textarea');
+    t.value = PROMPT_DOCS; document.body.appendChild(t); t.select();
+    document.execCommand('copy'); document.body.removeChild(t);
+    st.textContent = 'Prompt copiado.';
+  });
+}
+
+function definirEstadoCivil(idx, key){
+  PESSOAS[idx].estado_civil_key = key;
+  PESSOAS[idx].estado_civil = textoEstadoCivil(PESSOAS[idx]);
+  renderPessoas();
+}
+
+function definirSaude(idx, portabilidade){
+  PESSOAS[idx].portabilidade = portabilidade;
+  if (portabilidade) PESSOAS[idx].data_entrevista = '';
+  renderPessoas();
+  // se alguém é portabilidade, a folha marca "aproveitamento de carências: SIM"
+  var temPort = PESSOAS.some(function(p){ return p.portabilidade; });
+  var chips = document.getElementById('carenciaChips');
+  var alvo = Array.from(chips.children).find(function(c){ return c.dataset.v === (temPort ? 'sim' : 'nao'); });
+  if (alvo) escolherUnico(chips, alvo);
+}
+
+function recalcularVidas(){
+  document.getElementById('vidas').value = PESSOAS.length || 1;
+  sugerirValorRecebido();
+}
+
+// ---- recebeu 1a mensalidade ----
+function toggleRecebeu(){
+  const on = document.querySelector('#recebeuChips .chip.on').dataset.v === 'sim';
+  document.getElementById('recebeuBox').style.display = on ? 'grid' : 'none';
+  if (on) sugerirValorRecebido();
+}
+
+function idadeEm(nascimento, ref){
+  const [d,m,y] = nascimento.split('/').map(Number);
+  let idade = ref.getFullYear() - y;
+  if ((ref.getMonth()+1, ref.getDate()) < (m, d)) {}
+  const antesAniversario = (ref.getMonth()+1 < m) || (ref.getMonth()+1 === m && ref.getDate() < d);
+  if (antesAniversario) idade -= 1;
+  return idade;
+}
+function faixaIdx(idade){
+  const minimos = [0,19,24,29,34,39,44,49,54,59];
+  let idx = 0;
+  minimos.forEach((mn,i) => { if (idade >= mn) idx = i; });
+  return idx;
+}
+function sugerirValorRecebido(){
+  const card = document.querySelector('#planoGrid .plano-card.on');
+  if (!card) return;
+  const precos = PLANOS[card.dataset.v].precos;
+  const ref = new Date(parseInt(document.getElementById('vigAno').value), parseInt(vigMesSel.value)-1, 1);
+  let total = 0;
+  PESSOAS.forEach(p => { if (p.nascimento){ total += precos[faixaIdx(idadeEm(p.nascimento, ref))]; } });
+  const txt = total.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  document.getElementById('valorRecebido').value = txt;
+  document.getElementById('mensalidadeCalc').textContent = total > 0 ? ('Mensalidade calculada: R$ ' + txt) : '';
+}
+// recalcula sempre que muda plano, vigência ou pessoas
+document.getElementById('planoGrid').addEventListener('click', () => setTimeout(sugerirValorRecebido, 0));
+vigMesSel.addEventListener('change', sugerirValorRecebido);
+document.getElementById('vigAno').addEventListener('input', sugerirValorRecebido);
+
+// ---- gerar ----
+async function gerar(){
+  const statusEl = document.getElementById('statusFinal');
+  const titulares = PESSOAS.filter(p => p.papel === 'titular');
+  if (!titulares.length){ statusEl.textContent = 'Marque pelo menos 1 titular na seção 2.'; return; }
+  if (!document.getElementById('e_razao').value){ statusEl.textContent = 'Preencha/busque os dados da empresa.'; return; }
+  const emailEmp = document.getElementById('e_email').value.trim();
+  const telEmp = document.getElementById('e_telefone').value.trim();
+  if (!telEmp){ statusEl.textContent = 'Telefone da empresa é obrigatório.'; document.getElementById('e_telefone').focus(); return; }
+  if (!emailEmp){ statusEl.textContent = 'E-mail da empresa é obrigatório.'; document.getElementById('e_email').focus(); return; }
+
+  const planoKey = document.querySelector('#planoGrid .plano-card.on').dataset.v;
+  const acomodacao = document.querySelector('#acomodacaoChips .chip.on').dataset.v;
+  const vencimento = document.querySelector('#vencimentoChips .chip.on').dataset.v;
+  const recebeu = document.querySelector('#recebeuChips .chip.on').dataset.v === 'sim';
+  const carencia = document.querySelector('#carenciaChips .chip.on').dataset.v === 'sim';
+
+  const gruposTitulares = titulares.map(t => ({
+    titular: t,
+    dependentes: PESSOAS.filter(p => p.papel === 'dependente' && (titulares.length === 1 || p.titular_de === t.nome)),
+  }));
+
+  const dados = {
+    empresa: {
+      razao_social: document.getElementById('e_razao').value,
+      nome_fantasia: document.getElementById('e_fantasia').value,
+      cnpj: document.getElementById('cnpjInput').value,
+      endereco: document.getElementById('e_endereco').value,
+      numero: document.getElementById('e_numero').value,
+      complemento: document.getElementById('e_complemento').value,
+      bairro: document.getElementById('e_bairro').value,
+      cidade: document.getElementById('e_cidade').value,
+      uf: document.getElementById('e_uf').value,
+      cep: document.getElementById('e_cep').value,
+      telefone: document.getElementById('e_telefone').value,
+      email: document.getElementById('e_email').value,
+      contato: document.getElementById('e_contato').value,
+    },
+    representante: {
+      nome: document.getElementById('rep_nome').value,
+      identidade: document.getElementById('rep_identidade').value,
+      cpf: document.getElementById('rep_cpf').value,
+    },
+    endereco_correspondencia: ENDERECO_NOTAS,
+    plano: { produto: planoKey, acomodacao: acomodacao, vidas: PESSOAS.length },
+    vigencia: { vencimento: vencimento, mes: vigMesSel.value, ano: document.getElementById('vigAno').value },
+    pagamento: {
+      recebeu: recebeu,
+      // valor da mensalidade vai sempre, marcando SIM ou NÃO
+      valor: parseFloat((document.getElementById('valorRecebido').value||'0').replace(/\./g,'').replace(',', '.')) || 0,
+    },
+    carencia_outra_operadora: carencia,
+    migracoes: [],
+    titulares: gruposTitulares,
+  };
+
+  statusEl.textContent = 'Gerando...';
+  statusEl.textContent = 'Gerando documentos...';
+  const r = await fetch('/api/gerar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(dados)});
+
+  if (!r.ok){
+    // erro vem como JSON; sucesso vem como ZIP
+    let msg = 'falha desconhecida';
+    try { msg = (await r.json()).erro || msg; } catch(e){}
+    statusEl.textContent = 'Erro: ' + msg;
+    return;
+  }
+
+  // Sucesso: o servidor devolve um ZIP com a Proposta e todas as Fichas.
+  // Nada fica gravado no servidor - o arquivo existe só aqui no navegador.
+  const blob = await r.blob();
+  const nomeZip = (r.headers.get('Content-Disposition')||'').match(/filename="?([^"]+)"?/)?.[1] || 'proposta.zip';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nomeZip; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+  statusEl.textContent = 'Documentos gerados. O download começou automaticamente.';
+  const links = document.getElementById('outLinks');
+  links.innerHTML = `<b style="display:block;margin:10px 0 4px;">Baixado:</b><a href="${url}" download="${nomeZip}">${nomeZip}</a>`;
+}
+</script>
+</body>
+</html>

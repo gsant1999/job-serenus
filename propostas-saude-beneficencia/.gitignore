@@ -1,0 +1,5 @@
+# PDFs preenchidos com dado de cliente (CPF/RG) - nunca versionar
+saida/
+__pycache__/
+*.pyc
+.DS_Store

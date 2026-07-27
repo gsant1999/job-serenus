@@ -1,0 +1,8 @@
+Flask==3.0.0
+Werkzeug==3.0.1
+gunicorn==21.2.0
+requests==2.31.0
+# Versao EXATA de proposito: o preenchimento dos PDFs depende do formato do fluxo de
+# aparencia do pypdf e de PdfWriter._add_apstream_object (API interna da biblioteca).
+# Subir de versao sem testar quebra o layout do documento que vai para a operadora.
+pypdf==6.11.0
