@@ -30,10 +30,24 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 
 SENHA_ACESSO = os.environ.get('SENHA_ACESSO', '')
-# Sem senha configurada so e aceitavel rodando na maquina do corretor.
 EXIGE_SENHA = bool(SENHA_ACESSO)
 
+# Railway (e qualquer PaaS) injeta PORT. Se estamos hospedados e ninguem definiu a senha,
+# o app NAO pode simplesmente abrir: ele gera documento com CPF, RG e dado de saude.
+# Falha fechado - responde 503 em tudo ate a variavel existir.
+HOSPEDADO = bool(os.environ.get('PORT'))
+SEM_SENHA_EM_PRODUCAO = HOSPEDADO and not SENHA_ACESSO
+
 SOMENTE_DIGITOS = re.compile(r'\D')
+
+
+@app.before_request
+def _bloqueia_sem_senha():
+    """Trava tudo se o app foi hospedado sem SENHA_ACESSO configurada."""
+    if SEM_SENHA_EM_PRODUCAO:
+        return ('Configuracao incompleta: defina a variavel de ambiente SENHA_ACESSO '
+                'antes de usar esta ferramenta. Ela gera documentos com dados pessoais '
+                'e nao funciona sem controle de acesso.'), 503
 
 
 def login_obrigatorio(f):
