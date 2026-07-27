@@ -790,7 +790,18 @@
 
   // ── ENVIO DE MÍDIA (item A): manda a mídia (dataURL, já baixada pelo
   //    background) pela ponte. Áudio vira nota de voz. ──
-  function pedirEnviarMidia(chatId, midiaTipo, dataUrl, legenda) {
+  // Nome do arquivo pro documento: a wa-js mostra isso no balão do PDF. Vem da
+  // última parte da midia_url (/crm/modelos/midia/<arquivo>); sem isso o PDF
+  // chegava sempre como "documento" no WhatsApp do cliente.
+  function _nomeArquivoDaUrl(url) {
+    try {
+      const limpa = String(url || '').split('?')[0].split('#')[0];
+      const base = decodeURIComponent(limpa.substring(limpa.lastIndexOf('/') + 1)).trim();
+      return base || '';
+    } catch (e) { return ''; }
+  }
+
+  function pedirEnviarMidia(chatId, midiaTipo, dataUrl, legenda, nomeArquivo) {
     return new Promise((resolve) => {
       const reqId = 'm' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
       let pronto = false;
@@ -803,7 +814,7 @@
         resolve(d);
       }
       window.addEventListener('message', onMsg);
-      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'enviar_midia', reqId, chatId, midiaTipo, dataUrl, legenda }, '*');
+      window.postMessage({ source: 'JOB_EXT_REQ', tipo: 'enviar_midia', reqId, chatId, midiaTipo, dataUrl, legenda, nomeArquivo }, '*');
       setTimeout(() => {
         if (!pronto) { window.removeEventListener('message', onMsg); resolve({ erro: 'timeout_envio' }); }
       }, 45000);
@@ -1232,8 +1243,13 @@
       socios ? 'Quadro societário: ' + socios : '',
     ].filter(Boolean).join('\n');
     return '<div class="job-cnpj-card">' +
-      '<div class="job-cnpj-nome">' + esc(c.nome || '—') + '</div>' +
-      (c.fantasia ? '<div class="job-cnpj-fant">' + esc(c.fantasia) + '</div>' : '') +
+      '<div class="job-cnpj-titulo-row">' +
+        '<div class="job-cnpj-titulo-txt">' +
+          '<div class="job-cnpj-nome">' + esc(c.nome || '—') + '</div>' +
+          (c.fantasia ? '<div class="job-cnpj-fant">' + esc(c.fantasia) + '</div>' : '') +
+        '</div>' +
+        (c.nome ? '<button class="job-cnpj-copy-item" data-valor="' + esc(c.nome) + '" title="Copiar razão social">' + _ICO_COPIAR + '</button>' : '') +
+      '</div>' +
       '<div class="job-cnpj-selos">' +
         selo(c.ativa ? 'Ativa' : (c.situacao || 'Situação?'), c.ativa ? 'ok' : 'no') +
         selo(c.eh_mei ? 'É MEI' : 'Não é MEI', c.eh_mei ? 'ok' : 'no') +
@@ -2514,7 +2530,7 @@
       try {
         if (passo.tipo && passo.tipo !== 'texto' && passo.midia_url) {
           const dl = await chrome.runtime.sendMessage({ type: 'baixar_midia', url: passo.midia_url });
-          if (dl && dl.ok) envio = await pedirEnviarMidia(job.chatId, passo.tipo, dl.dataUrl, passo.texto);
+          if (dl && dl.ok) envio = await pedirEnviarMidia(job.chatId, passo.tipo, dl.dataUrl, passo.texto, _nomeArquivoDaUrl(passo.midia_url));
           else envio = { ok: false, erro: (dl && dl.erro) || 'falha ao baixar a mídia' };
         } else {
           envio = await pedirEnviarTexto(job.chatId, passo.texto);
@@ -3406,7 +3422,7 @@
         // Mídia: o background baixa (CSP), a ponte manda pela wa-js.
         const dl = await chrome.runtime.sendMessage({ type: 'baixar_midia', url: item.midia_url });
         if (dl && dl.ok) {
-          envio = await pedirEnviarMidia(item.chat_id, item.tipo, dl.dataUrl, item.texto);
+          envio = await pedirEnviarMidia(item.chat_id, item.tipo, dl.dataUrl, item.texto, _nomeArquivoDaUrl(item.midia_url));
         } else {
           envio = { ok: false, erro: (dl && dl.erro) || 'falha ao baixar a mídia' };
         }

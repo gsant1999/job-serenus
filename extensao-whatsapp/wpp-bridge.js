@@ -394,7 +394,7 @@
   //    baixou do JOB — a página não pode por causa do CSP do WhatsApp) e manda
   //    pela wa-js. Áudio vai como NOTA DE VOZ (isPtt) — igual "gravado na hora"
   //    do ZapVoice, não como arquivo. ──
-  async function enviarMidia(chatId, tipo, dataUrl, legenda) {
+  async function enviarMidia(chatId, tipo, dataUrl, legenda, nomeArquivo) {
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.sendFileMessage) {
       return { erro: 'wpp_ausente' };
     }
@@ -404,7 +404,14 @@
       if (tipo === 'audio') { opts.type = 'audio'; opts.isPtt = true; }
       else if (tipo === 'imagem') { opts.type = 'image'; if (legenda) opts.caption = legenda; }
       else if (tipo === 'video') { opts.type = 'video'; if (legenda) opts.caption = legenda; }
-      else { opts.type = 'document'; opts.filename = 'documento'; }
+      else {
+        // Documento TAMBÉM aceita caption (DocumentMessageOptions estende
+        // FileMessageOptions) — antes a legenda do PDF era descartada em
+        // silêncio (reclamação do Danilo) e o nome ia fixo como 'documento'.
+        opts.type = 'document';
+        opts.filename = nomeArquivo || 'documento.pdf';
+        if (legenda) opts.caption = legenda;
+      }
       const res = await window.WPP.chat.sendFileMessage(chatId, dataUrl, opts);
       const msgId = (res && res.id && res.id._serialized) || (res && res._serialized) || null;
       return { ok: true, wpp_msg_id: msgId };
@@ -484,7 +491,7 @@
       else if (d.tipo === 'obter_meu_numero') resp = await obterMeuNumero();
       else if (d.tipo === 'obter_chat_id') resp = await obterChatIdAtivo();
       else if (d.tipo === 'enviar_texto') resp = await enviarTexto(d.chatId, d.texto);
-      else if (d.tipo === 'enviar_midia') resp = await enviarMidia(d.chatId, d.midiaTipo, d.dataUrl, d.legenda);
+      else if (d.tipo === 'enviar_midia') resp = await enviarMidia(d.chatId, d.midiaTipo, d.dataUrl, d.legenda, d.nomeArquivo);
       else if (d.tipo === 'apagar_conversa') resp = await apagarConversa(d.chatId);
       else if (d.tipo === 'checar_inbound') resp = await checarInbound(d.chatId);
       else return;
