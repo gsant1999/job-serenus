@@ -6,3 +6,11 @@ requests==2.31.0
 # aparencia do pypdf e de PdfWriter._add_apstream_object (API interna da biblioteca).
 # Subir de versao sem testar quebra o layout do documento que vai para a operadora.
 pypdf==6.11.0
+# Foto de documento -> pagina A4 no contrato (montagem.py) e reducao antes de mandar
+# para a IA (leitor.py).
+Pillow==11.3.0
+# Renderiza pagina de PDF como imagem, para a IA conseguir ler documento em PDF.
+pypdfium2==5.10.1
+# Leitura automatica dos documentos. So e usada quando ANTHROPIC_API_KEY existe -
+# sem a chave o app sobe igual e cai no caminho manual (prompt para o ChatGPT).
+anthropic==0.116.0

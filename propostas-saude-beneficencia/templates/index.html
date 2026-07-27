@@ -74,6 +74,15 @@
   .roteiro b{font-size:12.5px;display:block;margin-bottom:6px;}
   .roteiro div{font-size:12.5px;padding:2px 0;}
   .r-ok{color:var(--ink);} .r-falta{color:var(--danger);font-weight:700;}
+  .ia-box{margin-top:14px;border:1px solid var(--accent);border-radius:9px;
+    padding:13px 15px;background:var(--accent-soft);}
+  .ia-box b{font-size:13px;color:var(--accent);}
+  .ia-box p{margin:6px 0 10px;}
+  .ia-box .small{color:var(--accent);opacity:.9;}
+  .ia-box code{background:var(--surface);padding:1px 5px;border-radius:4px;font-size:11px;}
+  .ia-box .status{display:block;margin-top:9px;}
+  .ia-avisos{margin-top:10px;font-size:12.5px;color:var(--danger);}
+  .ia-avisos div{padding:2px 0;}
 </style>
 </head>
 <body>
@@ -213,6 +222,25 @@
 
     <div id="checklistBox" style="margin-top:14px;"></div>
     <div id="obsBox"></div>
+
+    <div class="ia-box">
+      {% if ia_disponivel %}
+      <b>Ler os documentos e preencher sozinho</b>
+      <p class="small">A IA lê as fotos que você subiu acima e preenche o bloco de notas
+        da seção 2. Você confere e corrige antes de gerar — nada vai para o PDF sem passar
+        pelos seus olhos.</p>
+      <button class="btn" onclick="lerDocumentos(this)">Ler documentos e preencher</button>
+      <span id="iaStatus" class="status"></span>
+      <div id="iaObs"></div>
+      {% else %}
+      <b>Leitura automática desligada</b>
+      <p class="small">Para a IA ler os documentos e preencher sozinha, defina a variável
+        <code>ANTHROPIC_API_KEY</code> no Railway. Custa cerca de US$ 0,015 por proposta.
+        Enquanto isso, use o botão <b>Copiar prompt para o ChatGPT</b> na seção 2 — mesmo
+        resultado, sem custo, só com um copia-e-cola a mais.</p>
+      {% endif %}
+    </div>
+
     <div style="margin-top:12px;">
       <button class="btn" onclick="gerarContrato()">Gerar contrato completo</button>
       <span id="contratoStatus" class="status"></span>
@@ -641,6 +669,76 @@ function anexar(chave, files){
   ARQUIVOS[chave] = Array.from(files);
   const st = document.getElementById('st-' + chave);
   if (st){ st.textContent = files.length + ' arquivo(s)'; st.classList.add('ok'); }
+}
+
+// Manda para a IA os MESMOS arquivos já anexados na seção 7 e traz o bloco de notas
+// preenchido para a seção 2, onde o corretor confere e corrige.
+async function lerDocumentos(botao){
+  const st = document.getElementById('iaStatus');
+  const obs = document.getElementById('iaObs');
+  obs.innerHTML = '';
+  st.className = 'status';
+
+  const fd = new FormData();
+  let n = 0;
+  for (const chave in ARQUIVOS){
+    if (!(chave.startsWith('doc_') || chave === 'comprovante_endereco' || chave.startsWith('certidao_'))) continue;
+    (ARQUIVOS[chave]||[]).forEach(f => { fd.append(chave, f); n++; });
+  }
+  if (!n){
+    st.textContent = 'Anexe ao menos um documento de identidade acima.';
+    st.className = 'status err';
+    return;
+  }
+
+  // Cada leitura é uma chamada paga. Trava o botão para dois cliques não virarem
+  // duas cobranças.
+  botao.disabled = true;
+  const rotulo = botao.textContent;
+  botao.textContent = 'Lendo...';
+  st.textContent = `Lendo ${n} documento(s)...`;
+  let r, d;
+  try {
+    r = await fetch('/api/ler-documentos', {method:'POST', body: fd});
+    d = await r.json().catch(() => ({}));
+  } catch (e) {
+    st.textContent = 'Erro de conexão: ' + e;
+    st.className = 'status err';
+    return;
+  } finally {
+    botao.disabled = false;
+    botao.textContent = rotulo;
+  }
+  if (!r.ok){
+    st.textContent = 'Erro: ' + (d.erro || 'falha ao ler');
+    st.className = 'status err';
+    return;
+  }
+
+  // Joga no campo de notas e interpreta com o mesmo parser do caminho manual —
+  // um caminho só, testado, para os dois modos.
+  document.getElementById('notasInput').value = d.bloco_notas || '';
+  await interpretarNotas();
+
+  if (d.endereco && d.endereco.rua){
+    ENDERECO_NOTAS = {
+      endereco: up(d.endereco.rua), numero: d.endereco.numero || '',
+      complemento: d.endereco.complemento || '', bairro: up(d.endereco.bairro),
+      cidade: up(d.endereco.cidade), cep: d.endereco.cep || '', uf: up(d.endereco.uf),
+    };
+  }
+
+  const u = d._uso || {};
+  st.textContent = `${(d.pessoas||[]).length} pessoa(s) lida(s). Confira na seção 2 antes de gerar.`;
+  st.className = 'status ok';
+
+  const avisos = (d.observacoes || []);
+  obs.innerHTML =
+    (avisos.length ? `<div class="ia-avisos"><b>A IA não conseguiu ler tudo — confira:</b>` +
+      avisos.map(o => `<div>• ${o}</div>`).join('') + `</div>` : '') +
+    (u.tokens_entrada ? `<p class="small" style="margin-top:6px;">${u.imagens} imagem(ns) ·
+      ${u.tokens_entrada.toLocaleString('pt-BR')} tokens de entrada · modelo ${u.modelo}</p>` : '');
+  document.getElementById('sec-notas').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 async function gerarContrato(){

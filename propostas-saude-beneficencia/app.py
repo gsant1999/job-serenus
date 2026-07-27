@@ -23,6 +23,7 @@ from functools import wraps
 from flask import (Flask, jsonify, redirect, render_template, request, send_file,
                    session, url_for)
 
+import leitor
 import montagem
 import motor
 import regras
@@ -90,7 +91,7 @@ def sair():
 @login_obrigatorio
 def index():
     return render_template('index.html', agente=motor.AGENTE, planos=motor.PLANOS,
-                           exige_senha=EXIGE_SENHA)
+                           exige_senha=EXIGE_SENHA, ia_disponivel=leitor.disponivel())
 
 
 @app.route('/api/cnpj/<cnpj>')
@@ -186,6 +187,52 @@ def api_checklist():
         ))
     except ValueError as e:
         return jsonify({'erro': str(e)}), 400
+
+
+@app.route('/api/ler-documentos', methods=['POST'])
+@login_obrigatorio
+def api_ler_documentos():
+    """Le os documentos enviados e devolve o bloco de notas ja preenchido.
+
+    Sao os MESMOS arquivos que vao montar o contrato - o corretor sobe uma vez so.
+    Sem ANTHROPIC_API_KEY configurada, responde 503 e a tela cai no caminho manual
+    (o botao que copia o prompt para o ChatGPT do proprio consultor)."""
+    if not leitor.disponivel():
+        return jsonify({'erro': 'Leitura automática indisponível: falta a variável '
+                                'ANTHROPIC_API_KEY. Use o botão "Copiar prompt para o '
+                                'ChatGPT" na seção 2.', 'sem_chave': True}), 503
+
+    arquivos = []
+    for chave in request.files:
+        # So os documentos que carregam dado de pessoa. Cartao CNPJ ja vem da
+        # BrasilAPI e contrato social e longo demais para o pouco que acrescenta.
+        if chave.startswith(('doc_', 'comprovante_endereco', 'certidao_')):
+            arquivos += [(f.filename, f.read()) for f in request.files.getlist(chave)
+                         if f and f.filename]
+    if not arquivos:
+        return jsonify({'erro': 'Envie ao menos um documento de identidade.'}), 400
+
+    try:
+        dados = leitor.ler(arquivos)
+    except leitor.SemChave as e:
+        return jsonify({'erro': str(e), 'sem_chave': True}), 503
+    except Exception as e:
+        app.logger.exception('falha ao ler documentos')
+        # A mensagem crua da API nao ajuda o corretor. Traduz os dois casos que ele
+        # consegue resolver sozinho e guarda o resto no log.
+        texto = str(e)
+        if 'authentication' in texto or 'x-api-key' in texto:
+            amigavel = ('A chave ANTHROPIC_API_KEY do Railway está inválida ou expirada. '
+                        'Use o botão "Copiar prompt para o ChatGPT" na seção 2 enquanto isso.')
+        elif 'credit' in texto or 'quota' in texto or 'billing' in texto:
+            amigavel = ('A conta da API está sem crédito. Use o botão "Copiar prompt para o '
+                        'ChatGPT" na seção 2 enquanto isso.')
+        else:
+            amigavel = f'Não foi possível ler os documentos: {texto}'
+        return jsonify({'erro': amigavel}), 502
+
+    dados['bloco_notas'] = leitor.para_bloco_notas(dados)
+    return jsonify(dados)
 
 
 @app.route('/api/contrato', methods=['POST'])
