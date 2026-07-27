@@ -1120,6 +1120,7 @@
     else if (secao === 'inbox') abrirSecaoInbox();
     else if (secao === 'cnpj') abrirSecaoCnpj();
     else if (secao === 'notas') abrirSecaoNotas();
+    else if (secao === 'crm') abrirSecaoNovoLead();
   }
 
   // ═══════════════ Consulta de CNPJ (Receita via BrasilAPI) ═══════════════
@@ -3086,9 +3087,95 @@
       window.open(_SITE_BASE_URL_EXT + '/crm?lead=' + resp.lead_id, '_blank', 'noopener');
       setLabel('CRM');
     } else {
-      setLabel('Sem lead ainda');
-      setTimeout(() => setLabel('CRM'), 2200);
+      // Não achou lead pelo telefone: em vez de só avisar "sem lead", oferece
+      // cadastrar na hora (opcional — o consultor decide). Pedido do Guilherme:
+      // com dados completos, pra não entrar lead capenga no funil.
+      setLabel('CRM');
+      abrirSecao('crm');
     }
+  }
+
+  // ═══════════ Cadastrar lead no CRM direto da conversa ═══════════
+  // Só aparece quando o botão CRM não achou ninguém por telefone. Nome e
+  // telefone vêm pré-preenchidos da conversa aberta (o telefone é validado
+  // contra o número real, não digitado à mão), e a origem é obrigatória —
+  // lead sem origem não deixa medir canal depois.
+  const _ORIGENS_LEAD = ['Indicação', 'Google', 'Facebook', 'Instagram', 'MEDSENIOR', 'Site', 'manual'];
+  const _ORIGEM_ROTULO = { 'MEDSENIOR': 'MedSênior', 'manual': 'Manual / prospecção' };
+
+  async function abrirSecaoNovoLead() {
+    setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div><div class="job-sem-analise-txt">Lendo a conversa…</div></div>');
+    let tel = '';
+    try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+    if (!tel) {
+      setCorpoSecao('<div class="job-erro">Abra uma conversa primeiro pra cadastrar o lead.</div>');
+      return;
+    }
+    // Nome do cabeçalho só serve se NÃO for o próprio número (contato não salvo).
+    const nomeBruto = (nomeDoContato() || '').trim();
+    const nomeSugerido = /^[+\d\s()\-]+$/.test(nomeBruto) ? '' : nomeBruto;
+    setCorpoSecao(
+      '<div class="job-novolead">' +
+        '<div class="job-cnpj-titulo">Cadastrar lead no CRM</div>' +
+        '<div class="job-cnpj-sub">Este número ainda não está no JOB. Cadastre com os dados completos pra ele entrar no funil e ser medido por canal.</div>' +
+        '<label class="job-nl-lbl">Nome <span class="job-nl-req">obrigatório</span></label>' +
+        '<input id="job-nl-nome" class="job-cnpj-input" placeholder="Nome do lead" value="' + esc(nomeSugerido) + '" />' +
+        '<label class="job-nl-lbl">Telefone <span class="job-nl-ok">da conversa</span></label>' +
+        '<input id="job-nl-tel" class="job-cnpj-input" value="' + esc(_fmtTelBr(tel)) + '" readonly />' +
+        '<label class="job-nl-lbl">Como chegou <span class="job-nl-req">obrigatório</span></label>' +
+        '<select id="job-nl-origem" class="job-cnpj-input">' +
+          '<option value="">Selecione…</option>' +
+          _ORIGENS_LEAD.map((o) => '<option value="' + esc(o) + '">' + esc(_ORIGEM_ROTULO[o] || o) + '</option>').join('') +
+        '</select>' +
+        '<label class="job-nl-lbl">Observação <span class="job-nl-opt">opcional</span></label>' +
+        '<textarea id="job-nl-obs" class="job-nota-input" rows="2" placeholder="Ex: indicado pela Ana, quer plano pra 3 vidas"></textarea>' +
+        '<button class="job-cnpj-btn" id="job-nl-salvar">Cadastrar no CRM</button>' +
+        '<div id="job-nl-msg"></div>' +
+      '</div>');
+    const bt = document.getElementById('job-nl-salvar');
+    if (bt) bt.addEventListener('click', () => _salvarNovoLead(tel));
+    const inNome = document.getElementById('job-nl-nome');
+    if (inNome) inNome.focus();
+  }
+
+  function _fmtTelBr(t) {
+    const d = String(t || '').replace(/\D/g, '').replace(/^55/, '');
+    if (d.length === 11) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7);
+    if (d.length === 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6);
+    return String(t || '');
+  }
+
+  async function _salvarNovoLead(telefone) {
+    const msg = document.getElementById('job-nl-msg');
+    const bt = document.getElementById('job-nl-salvar');
+    const nome = (document.getElementById('job-nl-nome') || {}).value || '';
+    const origem = (document.getElementById('job-nl-origem') || {}).value || '';
+    const obs = (document.getElementById('job-nl-obs') || {}).value || '';
+    const aviso = (txt) => { if (msg) msg.innerHTML = '<div class="job-ia-alerta">⚠ ' + esc(txt) + '</div>'; };
+    if (!nome.trim()) { aviso('Informe o nome do lead.'); return; }
+    if (!origem) { aviso('Selecione como o lead chegou.'); return; }
+    if (msg) msg.innerHTML = '';
+    if (bt) { bt.disabled = true; bt.textContent = 'Cadastrando…'; }
+    const { usuarioId } = await _safeStorageGet(['usuarioId']);
+    let resp;
+    try {
+      resp = await _safeSendMessage({ type: 'lead_criar', nome: nome.trim(), telefone,
+        origem, observacoes: obs.trim(), usuario_id: usuarioId });
+    } catch (e) { resp = null; }
+    if (!resp || !resp.ok) {
+      aviso((resp && resp.erro) || 'Não consegui cadastrar agora. Tente de novo.');
+      if (bt) { bt.disabled = false; bt.textContent = 'Cadastrar no CRM'; }
+      return;
+    }
+    const url = _SITE_BASE_URL_EXT + '/crm?lead=' + resp.lead_id;
+    setCorpoSecao(
+      '<div class="job-novolead">' +
+        '<div class="job-cnpj-titulo">' + (resp.ja_existia ? 'Esse lead já existia' : 'Lead cadastrado') + '</div>' +
+        '<div class="job-cnpj-sub">' + (resp.ja_existia
+          ? 'Já havia um lead com esse telefone no JOB — abrimos o existente em vez de duplicar.'
+          : 'Entrou no funil em "Lead Novo", atribuído a você.') + '</div>' +
+        '<a class="job-cnpj-link" href="' + esc(url) + '" target="_blank" rel="noopener" style="display:flex;margin-top:12px;">Abrir no CRM</a>' +
+      '</div>');
   }
 
   async function rodarAnalise(forcarPdfGrandes) {

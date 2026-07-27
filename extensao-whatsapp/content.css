@@ -469,6 +469,16 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 .job-cnpj-btn:disabled { opacity: .55; cursor: default; }
 .job-cnpj-card { margin-top: 16px; border: 1px solid var(--job-borda); border-radius: 14px;
   padding: 16px; background: var(--job-bg2); }
+/* ── Cadastro de lead novo pela conversa ─────────────────────────────── */
+.job-nl-lbl { display: block; font-size: 11.5px; font-weight: 600; color: var(--job-txt-fraco);
+  margin: 14px 0 5px; text-transform: uppercase; letter-spacing: .4px; }
+.job-nl-req { color: var(--job-danger); font-weight: 500; text-transform: none; letter-spacing: 0; margin-left: 4px; }
+.job-nl-opt { color: var(--job-txt-fraco); font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 4px; opacity: .8; }
+.job-nl-ok { color: var(--job-acento); font-weight: 500; text-transform: none; letter-spacing: 0; margin-left: 4px; }
+.job-novolead .job-cnpj-input[readonly] { opacity: .75; cursor: default; }
+.job-novolead select.job-cnpj-input { cursor: pointer; }
+.job-novolead .job-cnpj-btn { margin-top: 16px; }
+
 .job-cnpj-titulo-row { display: flex; align-items: flex-start; gap: 8px; }
 .job-cnpj-titulo-txt { flex: 1; min-width: 0; }
 .job-cnpj-nome { font-size: 15.5px; font-weight: 600; color: var(--job-txt); line-height: 1.3; user-select: text; }

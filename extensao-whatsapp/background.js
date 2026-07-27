@@ -301,6 +301,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/lead-por-telefone?telefone=' + encodeURIComponent(msg.telefone || ''), 'GET', null, 10000).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'lead_criar') {
+    chamarJob('/api/whatsapp/lead/criar', 'POST', {
+      nome: msg.nome, telefone: msg.telefone, origem: msg.origem,
+      email: msg.email, empresa: msg.empresa, observacoes: msg.observacoes,
+      usuario_id: msg.usuario_id,
+    }, 15000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'presenca') {
     chamarJob('/api/whatsapp/presenca', 'POST',
       { usuario_id: msg.usuario_id, versao: msg.versao, numero: msg.numero, wpp_ok: msg.wpp_ok }, 10000).then(sendResponse);

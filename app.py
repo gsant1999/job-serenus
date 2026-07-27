@@ -13076,6 +13076,71 @@ def api_whatsapp_lead_por_telefone():
     return _wa_cors(jsonify({"ok": True, "achou": True, "lead_id": lead['id'], "nome": lead['nome']}))
 
 
+# Origens aceitas ao cadastrar lead pela extensão. Lista fechada de propósito:
+# origem digitada à mão vira sujeira no funil (mesma origem escrita de 5 jeitos
+# não agrupa em relatório nenhum). 'Facebook'/'Google'/'manual'/'MEDSENIOR'
+# mantêm exatamente a grafia que o CRM já filtra (templates/crm.html).
+_WA_ORIGENS_LEAD = ['Indicação', 'Google', 'Facebook', 'Instagram', 'MEDSENIOR', 'Site', 'manual']
+
+
+@app.route('/api/whatsapp/lead/criar', methods=['POST', 'OPTIONS'])
+def api_whatsapp_lead_criar():
+    """Cadastra no CRM o lead da conversa aberta, quando o botão CRM da extensão
+    não achou ninguém pelo telefone. Opcional (o consultor decide), mas com
+    dados completos obrigatórios: nome, telefone e origem — lead sem origem não
+    dá pra medir canal depois. Grava telefone_norm (senão o lead ficaria
+    invisível pro casamento por telefone do resto do sistema) e deduplica pelo
+    mesmo critério de _buscar_lead_por_telefone: se já existir, devolve o
+    existente em vez de criar duplicata."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
+    d = request.get_json(silent=True) or {}
+    nome = (d.get('nome') or '').strip()[:200]
+    origem = (d.get('origem') or '').strip()
+    tel_norm = _normalizar_telefone(d.get('telefone', ''))
+    if not nome:
+        return _wa_cors(jsonify({"ok": False, "erro": "Informe o nome do lead."})), 400
+    # Telefone: 10 (fixo+DDD) ou 11 (celular+DDD) dígitos depois de normalizado.
+    if len(tel_norm) not in (10, 11):
+        return _wa_cors(jsonify({"ok": False, "erro": "Telefone inválido — confira o número da conversa."})), 400
+    if origem not in _WA_ORIGENS_LEAD:
+        return _wa_cors(jsonify({"ok": False, "erro": "Selecione como o lead chegou."})), 400
+    try:
+        uid = int(d.get('usuario_id')) if d.get('usuario_id') else None
+    except (TypeError, ValueError):
+        uid = None
+    conn = db()
+    ja = _buscar_lead_por_telefone(conn, tel_norm)
+    if ja:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": True, "ja_existia": True, "lead_id": ja['id'], "nome": ja['nome']}))
+    agora = _agora_sp()
+    cur = conn.execute("""INSERT INTO crm_leads
+        (nome, telefone, telefone_norm, email, empresa, origem, etapa, responsavel_id, observacoes, criado_em, atualizado_em)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (nome, _formatar_telefone(tel_norm), tel_norm,
+         (d.get('email') or '').strip()[:200] or None,
+         (d.get('empresa') or '').strip()[:200] or None,
+         origem, 'lead_novo', uid,
+         (d.get('observacoes') or '').strip()[:2000] or None, agora, agora))
+    lead_id = _last_insert_id(cur)
+    if lead_id is None:
+        r = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=? ORDER BY id DESC LIMIT 1",
+                         (tel_norm,)).fetchone()
+        lead_id = r['id'] if r else None
+    autor = ''
+    if uid:
+        u = conn.execute("SELECT nome FROM usuarios WHERE id=?", (uid,)).fetchone()
+        autor = (u['nome'] if u else '') or ''
+    conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+        VALUES (?,?,?,?,?)""",
+        (lead_id, autor, 'criacao', f'Lead cadastrado pela extensão (origem: {origem})', agora))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "ja_existia": False, "lead_id": lead_id}))
+
+
 @app.route('/api/whatsapp/enviar-direto', methods=['POST', 'OPTIONS'])
 def api_whatsapp_enviar_direto():
     """Enfileira uma mensagem direto da conversa aberta no WhatsApp Web — pedido
