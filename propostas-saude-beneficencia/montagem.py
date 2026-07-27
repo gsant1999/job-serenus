@@ -147,6 +147,15 @@ def montar(gerados, anexos, titular_e_dono):
                                 'detalhe': 'faltando'})
             _juntar(f'{rotulo}{sufixo}', itens)
 
+            # Logo depois dos documentos dos dependentes entram os papeis que provam o
+            # parentesco (certidao de casamento, uniao estavel, certidao de nascimento).
+            # Ficam colados no bloco do dependente para o analista da operadora ler o
+            # vinculo sem folhear o contrato inteiro atras da certidao.
+            if chave == 'doc_dependentes':
+                for k in sorted(anexos):
+                    if k.startswith('parentesco_') or k == 'certidao_crianca':
+                        _juntar(f'Comprovação de parentesco{sufixo}', anexos[k])
+
     # 9. Vinculo - sempre por ultimo, e so quando o titular nao e o dono do CNPJ
     chave, rotulo, _ = ETAPA_VINCULO
     if not titular_e_dono:

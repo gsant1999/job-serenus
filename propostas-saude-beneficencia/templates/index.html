@@ -64,6 +64,16 @@
   .fixo .small{color:var(--accent);opacity:.85;}
   .saude-box{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);}
   hr.sep{border:none;border-top:1px dashed var(--line);margin:14px 0;}
+  .doc-item{border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin-bottom:8px;background:var(--surface-2);}
+  .doc-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;}
+  .doc-head b{font-size:13px;}
+  .doc-status{font-size:11.5px;font-weight:700;color:var(--danger);white-space:nowrap;}
+  .doc-status.ok{color:var(--accent);}
+  .doc-item input[type=file]{margin-top:7px;font-size:12px;width:100%;}
+  .roteiro{margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:var(--surface-2);}
+  .roteiro b{font-size:12.5px;display:block;margin-bottom:6px;}
+  .roteiro div{font-size:12.5px;padding:2px 0;}
+  .r-ok{color:var(--ink);} .r-falta{color:var(--danger);font-weight:700;}
 </style>
 </head>
 <body>
@@ -187,6 +197,27 @@
       <div id="agenteErro" class="status"></div>
     </div>
     <button class="btn btn-sec" id="btnNovoAgente" style="margin-top:10px;" onclick="abrirNovoAgente()">+ Cadastrar outro agente</button>
+  </section>
+
+  <section id="sec-docs">
+    <h2>7 · Documentos do cliente</h2>
+    <p class="hint">O sistema monta o contrato final na ordem da operadora. Aceita PDF e foto.</p>
+
+    <label>O titular é</label>
+    <div class="chips" id="tipoTitularChips">
+      <div class="chip on" data-v="socio" onclick="definirTipoTitular('socio',this)">Sócio da empresa</div>
+      <div class="chip" data-v="funcionario" onclick="definirTipoTitular('funcionario',this)">Funcionário (FGTS)</div>
+      <div class="chip" data-v="estagiario" onclick="definirTipoTitular('estagiario',this)">Estagiário</div>
+    </div>
+    <p class="small" id="avisoVinculo" style="margin-top:6px;"></p>
+
+    <div id="checklistBox" style="margin-top:14px;"></div>
+    <div id="obsBox"></div>
+    <div style="margin-top:12px;">
+      <button class="btn" onclick="gerarContrato()">Gerar contrato completo</button>
+      <span id="contratoStatus" class="status"></span>
+    </div>
+    <div id="roteiroBox"></div>
   </section>
 
   <footer class="actions">
@@ -404,7 +435,7 @@ function renderPessoas(){
       <div id="parentescoBox${idx}" style="margin-top:8px;display:${p.papel==='dependente'?'block':'none'};">
         <label>Parentesco com o titular</label>
         <div class="chips">
-          ${['CÔNJUGE','FILHO(A)','ENTEADO(A)','OUTRO'].map(v => `<div class="chip ${p.parentesco===v?'on':''}" onclick="PESSOAS[${idx}].parentesco='${v}';escolherUnico(this.parentNode,this)">${v}</div>`).join('')}
+          ${PARENTESCOS.map(o => `<div class="chip ${p.parentesco_key===o.k?'on':''}" onclick="definirParentesco(${idx},'${o.k}','${o.r}');escolherUnico(this.parentNode,this)">${o.r}</div>`).join('')}
         </div>
       </div>
       ${vinculoHtml}
@@ -541,6 +572,118 @@ function fmtCpf(v){
   return d.length === 11 ? `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}` : v.trim();
 }
 carregarAgentes();
+atualizarChecklist();
+
+// ── Parentescos aceitos pela Saúde Beneficência ─────────────────────────────
+// Diretos e indiretos, na ordem em que a operadora lista. A chave (k) é a mesma
+// de regras.py — é ela que decide qual papel comprova o vínculo.
+const PARENTESCOS = [
+  {k:'conjuge',     r:'CÔNJUGE'},        {k:'companheiro', r:'COMPANHEIRO(A)'},
+  {k:'filho',       r:'FILHO(A)'},       {k:'pai_mae',     r:'PAI OU MÃE'},
+  {k:'sogro_sogra', r:'SOGRO(A)'},       {k:'irmao',       r:'IRMÃO(Ã)'},
+  {k:'neto',        r:'NETO(A)'},        {k:'avo',         r:'AVÔ/AVÓ'},
+  {k:'bisneto',     r:'BISNETO(A)'},     {k:'bisavo',      r:'BISAVÔ/BISAVÓ'},
+  {k:'sobrinho',    r:'SOBRINHO(A)'},    {k:'tio',         r:'TIO(A)'},
+  {k:'cunhado',     r:'CUNHADO(A)'},     {k:'nora_genro',  r:'NORA/GENRO'},
+];
+function definirParentesco(idx, chave, rotulo){
+  PESSOAS[idx].parentesco_key = chave;
+  PESSOAS[idx].parentesco = rotulo;   // é o texto que vai impresso na Ficha
+  atualizarChecklist();
+}
+
+// ── Documentos do contrato ──────────────────────────────────────────────────
+let TIPO_TITULAR = 'socio';
+let CHECKLIST = [];
+const ARQUIVOS = {};   // chave -> [File]
+
+function definirTipoTitular(v, el){
+  TIPO_TITULAR = v;
+  escolherUnico(document.getElementById('tipoTitularChips'), el);
+  atualizarChecklist();
+}
+
+async function atualizarChecklist(){
+  const deps = PESSOAS.filter(p => p.papel === 'dependente' && p.parentesco_key)
+                      .map(p => p.parentesco_key);
+  // Criança sem nenhum documento: o corretor marca no próprio item da lista.
+  const r = await fetch('/api/checklist', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({tipo_titular: TIPO_TITULAR, parentescos: deps,
+                          crianca_sem_documento: !!document.getElementById('criancaSemDoc')?.checked})});
+  if (!r.ok) return;
+  const d = await r.json();
+  CHECKLIST = d.itens;
+
+  document.getElementById('avisoVinculo').textContent = TIPO_TITULAR === 'socio'
+    ? 'Como é sócio, o contrato social já comprova o vínculo — não pede documento extra.'
+    : 'Não sendo sócio, o vínculo com a empresa precisa ser comprovado (último documento do contrato).';
+
+  document.getElementById('checklistBox').innerHTML = CHECKLIST.map(it => `
+    <div class="doc-item" id="doc-${it.chave}">
+      <div class="doc-head">
+        <b>${it.rotulo}</b>
+        <span class="doc-status" id="st-${it.chave}">${(ARQUIVOS[it.chave]||[]).length ? (ARQUIVOS[it.chave].length + ' arquivo(s)') : 'faltando'}</span>
+      </div>
+      <div class="small">${it.motivo}</div>
+      <input type="file" multiple accept="application/pdf,image/*"
+             onchange="anexar('${it.chave}', this.files)">
+    </div>`).join('') + `
+    <label class="chip" style="margin-top:6px;display:inline-flex;">
+      <input type="checkbox" id="criancaSemDoc" onchange="atualizarChecklist()" style="margin-right:6px;">
+      Tem criança sem RG, CPF nem CNH
+    </label>`;
+
+  document.getElementById('obsBox').innerHTML = (d.observacoes||[]).map(o =>
+    `<p class="small" style="color:var(--accent);margin-top:6px;">${o}</p>`).join('');
+}
+
+function anexar(chave, files){
+  ARQUIVOS[chave] = Array.from(files);
+  const st = document.getElementById('st-' + chave);
+  if (st){ st.textContent = files.length + ' arquivo(s)'; st.classList.add('ok'); }
+}
+
+async function gerarContrato(){
+  const st = document.getElementById('contratoStatus');
+  const faltando = CHECKLIST.filter(it => it.obrigatorio && !(ARQUIVOS[it.chave]||[]).length);
+  if (faltando.length && !confirm(
+      `Faltam ${faltando.length} documento(s):\n\n` + faltando.map(f => '• ' + f.rotulo).join('\n') +
+      '\n\nGerar assim mesmo? O contrato sai incompleto.')) return;
+
+  const dados = montarPayload();
+  if (!dados) return;
+  dados.tipo_titular = TIPO_TITULAR;
+
+  const fd = new FormData();
+  fd.append('dados', JSON.stringify(dados));
+  for (const chave in ARQUIVOS) (ARQUIVOS[chave]||[]).forEach(f => fd.append(chave, f));
+
+  st.textContent = 'Montando o contrato...';
+  const r = await fetch('/api/contrato', {method:'POST', body: fd});
+  if (!r.ok){
+    let msg = 'falha desconhecida';
+    try { msg = (await r.json()).erro || msg; } catch(e){}
+    st.textContent = 'Erro: ' + msg; return;
+  }
+
+  const blob = await r.blob();
+  const nome = (r.headers.get('Content-Disposition')||'').match(/filename="?([^"]+)"?/)?.[1] || 'contrato.pdf';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = nome; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  st.textContent = 'Contrato gerado. O download começou.';
+
+  // Mostra a ordem montada e o que faltou, para conferir antes de enviar
+  let roteiro = [];
+  try { roteiro = JSON.parse(r.headers.get('X-Roteiro') || '[]'); } catch(e){}
+  document.getElementById('roteiroBox').innerHTML = roteiro.length ? `
+    <div class="roteiro">
+      <b>Ordem do contrato gerado</b>
+      ${roteiro.map(x => `<div class="${x.ok?'r-ok':'r-falta'}">
+         ${x.ok ? '' : 'FALTOU — '}${x.etapa}${x.paginas ? ' ('+x.paginas+' pág.)' : ''}
+      </div>`).join('')}
+    </div>` : '';
+}
 
 function copiarPrompt(){
   const st = document.getElementById('notasStatus');
@@ -615,15 +758,17 @@ vigMesSel.addEventListener('change', sugerirValorRecebido);
 document.getElementById('vigAno').addEventListener('input', sugerirValorRecebido);
 
 // ---- gerar ----
-async function gerar(){
+// Monta o JSON da proposta. Extraído para o botão de gerar os PDFs e o de montar
+// o contrato completo usarem exatamente os mesmos dados.
+function montarPayload(){
   const statusEl = document.getElementById('statusFinal');
   const titulares = PESSOAS.filter(p => p.papel === 'titular');
-  if (!titulares.length){ statusEl.textContent = 'Marque pelo menos 1 titular na seção 2.'; return; }
-  if (!document.getElementById('e_razao').value){ statusEl.textContent = 'Preencha/busque os dados da empresa.'; return; }
+  if (!titulares.length){ statusEl.textContent = 'Marque pelo menos 1 titular na seção 2.'; return null; }
+  if (!document.getElementById('e_razao').value){ statusEl.textContent = 'Preencha/busque os dados da empresa.'; return null; }
   const emailEmp = document.getElementById('e_email').value.trim();
   const telEmp = document.getElementById('e_telefone').value.trim();
-  if (!telEmp){ statusEl.textContent = 'Telefone da empresa é obrigatório.'; document.getElementById('e_telefone').focus(); return; }
-  if (!emailEmp){ statusEl.textContent = 'E-mail da empresa é obrigatório.'; document.getElementById('e_email').focus(); return; }
+  if (!telEmp){ statusEl.textContent = 'Telefone da empresa é obrigatório.'; document.getElementById('e_telefone').focus(); return null; }
+  if (!emailEmp){ statusEl.textContent = 'E-mail da empresa é obrigatório.'; document.getElementById('e_email').focus(); return null; }
 
   const planoKey = document.querySelector('#planoGrid .plano-card.on').dataset.v;
   const acomodacao = document.querySelector('#acomodacaoChips .chip.on').dataset.v;
@@ -670,8 +815,14 @@ async function gerar(){
     migracoes: [],
     titulares: gruposTitulares,
   };
+  return dados;
+}
 
-  statusEl.textContent = 'Gerando...';
+async function gerar(){
+  const statusEl = document.getElementById('statusFinal');
+  const dados = montarPayload();
+  if (!dados) return;
+
   statusEl.textContent = 'Gerando documentos...';
   const r = await fetch('/api/gerar', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(dados)});
 

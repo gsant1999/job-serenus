@@ -107,29 +107,35 @@ def checklist(tipo_titular, parentescos_dependentes, tem_criancas_sem_documento=
     """Monta a lista de documentos que ESTE caso exige, para o corretor conferir
     antes de mandar para a operadora.
 
-    Devolve {'itens': [(rotulo, obrigatorio, motivo)], 'observacoes': [str]}.
+    Devolve {'itens': [{chave, rotulo, obrigatorio, motivo}], 'observacoes': [str]}.
+
+    'chave' e a mesma que montagem.py usa para posicionar o documento no contrato -
+    e o que permite a tela montar os campos de upload sozinha, sem lista duplicada
+    em dois lugares que sai de sincronia na primeira mudanca de regra.
     """
     observacoes = []
     itens = [
-        ('Cartão CNPJ', True, 'Identifica a empresa contratante'),
-        ('Contrato social ou CCMEI', True, 'CCMEI quando a empresa é MEI'),
-        ('Documento do dono da empresa', True, 'Sempre, mesmo que ele não entre no plano'),
-        ('Documento do titular (RG, CPF ou CNH)', True, 'Identificação do titular'),
-        ('Comprovante de endereço', True, 'Obrigatório em toda proposta'),
+        ('cartao_cnpj', 'Cartão CNPJ', True, 'Identifica a empresa contratante'),
+        ('contrato_social', 'Contrato social ou CCMEI', True, 'CCMEI quando a empresa é MEI'),
+        ('doc_dono', 'Documento do dono da empresa', True, 'Sempre, mesmo que ele não entre no plano'),
+        ('doc_titular', 'Documento do titular (RG, CPF ou CNH)', True, 'Identificação do titular'),
+        ('comprovante_endereco', 'Comprovante de endereço', True, 'Obrigatório em toda proposta'),
     ]
 
     vinculo = documento_de_vinculo_do_titular(tipo_titular)
     if vinculo:
-        itens.append((vinculo, True,
+        itens.append(('vinculo', vinculo, True,
                       'O titular não é sócio — precisa comprovar o vínculo com a empresa'))
 
-    for p in parentescos_dependentes or []:
+    parentescos = parentescos_dependentes or []
+    if parentescos:
+        itens.append(('doc_dependentes', 'Documento dos dependentes (RG, CPF ou CNH)', True,
+                      'Identificação de cada dependente'))
+    for p in parentescos:
         rotulo = DEPENDENTES.get(p, (p, '?', None))[0]
-        itens.append((f'Documento do dependente: {rotulo}', True,
-                      'Identificação do dependente'))
         prova = documento_de_parentesco(p)
         if prova:
-            itens.append((prova, True,
+            itens.append((f'parentesco_{p}', prova, True,
                           f'Comprova o parentesco de {rotulo} com o titular'))
         else:
             observacoes.append(
@@ -137,14 +143,15 @@ def checklist(tipo_titular, parentescos_dependentes, tem_criancas_sem_documento=
                 f'parentesco — não precisa de papel adicional.')
 
     if tem_criancas_sem_documento:
-        itens.append(('Certidão de nascimento da criança', True,
+        itens.append(('certidao_crianca', 'Certidão de nascimento da criança', True,
                       'Criança sem RG, CPF ou CNH entra pela certidão'))
 
     # tira duplicata mantendo a ordem (ex.: dois filhos pedem a mesma certidao)
     vistos, unicos = set(), []
-    for rotulo, obrig, motivo in itens:
-        if rotulo in vistos:
+    for chave, rotulo, obrig, motivo in itens:
+        if chave in vistos:
             continue
-        vistos.add(rotulo)
-        unicos.append((rotulo, obrig, motivo))
+        vistos.add(chave)
+        unicos.append({'chave': chave, 'rotulo': rotulo,
+                       'obrigatorio': obrig, 'motivo': motivo})
     return {'itens': unicos, 'observacoes': list(dict.fromkeys(observacoes))}

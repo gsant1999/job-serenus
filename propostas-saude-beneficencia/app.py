@@ -23,7 +23,9 @@ from functools import wraps
 from flask import (Flask, jsonify, redirect, render_template, request, send_file,
                    session, url_for)
 
+import montagem
 import motor
+import regras
 from parser import parse_bloco_notas
 
 app = Flask(__name__)
@@ -168,6 +170,69 @@ def api_gerar():
     prefixo = pdfs[0][0].rsplit('_Proposta.pdf', 1)[0] if pdfs else 'proposta'
     return send_file(buf, mimetype='application/zip', as_attachment=True,
                      download_name=f'{prefixo}_Adesao.zip')
+
+
+@app.route('/api/checklist', methods=['POST'])
+@login_obrigatorio
+def api_checklist():
+    """Diz quais documentos ESTE caso exige. A tela usa para montar os campos de
+    upload - assim a lista vive so em regras.py e nunca sai de sincronia."""
+    d = request.get_json(force=True) or {}
+    try:
+        return jsonify(regras.checklist(
+            d.get('tipo_titular') or 'socio',
+            d.get('parentescos') or [],
+            bool(d.get('crianca_sem_documento')),
+        ))
+    except ValueError as e:
+        return jsonify({'erro': str(e)}), 400
+
+
+@app.route('/api/contrato', methods=['POST'])
+@login_obrigatorio
+def api_contrato():
+    """Gera a Proposta e as Fichas e junta com os documentos enviados, na ordem da
+    operadora. Recebe multipart: campo 'dados' com o JSON e um campo por documento."""
+    try:
+        dados = json.loads(request.form.get('dados') or '{}')
+    except json.JSONDecodeError:
+        return jsonify({'erro': 'Dados da proposta inválidos.'}), 400
+
+    try:
+        pdfs = motor.gerar_tudo_memoria(dados)
+    except ValueError as e:
+        return jsonify({'erro': str(e)}), 400
+    except Exception:
+        app.logger.exception('falha ao gerar os PDFs da proposta')
+        return jsonify({'erro': 'Não foi possível gerar a proposta. Confira os dados.'}), 500
+
+    anexos = {}
+    for chave in request.files:
+        arquivos = [(f.filename, f.read()) for f in request.files.getlist(chave) if f and f.filename]
+        if arquivos:
+            anexos[chave] = arquivos
+
+    try:
+        final, roteiro = montagem.montar(
+            {'proposta': pdfs[0][1], 'fichas': [b for _, b in pdfs[1:]]},
+            anexos,
+            titular_e_dono=(dados.get('tipo_titular') or 'socio') == 'socio',
+        )
+    except Exception:
+        app.logger.exception('falha ao montar o contrato')
+        return jsonify({'erro': 'Não foi possível montar o contrato.'}), 500
+
+    prefixo = pdfs[0][0].rsplit('_Proposta.pdf', 1)[0]
+    resp = send_file(io.BytesIO(final), mimetype='application/pdf', as_attachment=True,
+                     download_name=f'CONTRATO_{prefixo}.pdf')
+    # O roteiro vai no cabecalho: o navegador baixa o PDF e ainda consegue mostrar o
+    # que entrou e o que faltou, sem precisar de uma segunda requisicao.
+    # ensure_ascii=True de proposito: cabecalho HTTP e latin-1, e acento em UTF-8
+    # chega corrompido do outro lado ("Adesao" virava "Ades?o"). Escapado como
+    # \uXXXX o cabecalho fica ASCII puro e o JSON.parse do navegador desfaz.
+    resp.headers['X-Roteiro'] = json.dumps(roteiro, ensure_ascii=True)
+    resp.headers['Access-Control-Expose-Headers'] = 'X-Roteiro, Content-Disposition'
+    return resp
 
 
 @app.after_request
