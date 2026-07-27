@@ -27,12 +27,23 @@ if not hasattr(PdfWriter, '_add_apstream_object'):
         'O achatamento do PDF depende dela. Fixe pypdf==6.11.0 ou adapte motor._achatar().'
     )
 
-# Agente de vendas: SEMPRE estes dados.
+# Agente de vendas padrao. A tela permite cadastrar outros e escolher qual assina a
+# proposta; este aqui e so o que ja vem pronto para nao comecar vazio.
 AGENTE = {
     'nome': 'GUILHERME AUGUSTO SANTOS',
     'cpf': '475.547.078-17',
     'telefone': '(19) 99875-2758',
 }
+
+
+def _agente(dados):
+    """Agente que assina ESTA proposta. Cai no padrao se a tela nao mandar."""
+    a = (dados or {}).get('agente') or {}
+    return {
+        'nome': (a.get('nome') or AGENTE['nome']).strip(),
+        'cpf': (a.get('cpf') or AGENTE['cpf']).strip(),
+        'telefone': (a.get('telefone') or AGENTE['telefone']).strip(),
+    }
 
 MESES = ['JANEIRO', 'FEVEREIRO', 'MARÇO', 'ABRIL', 'MAIO', 'JUNHO', 'JULHO',
          'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO']
@@ -510,6 +521,7 @@ def preencher_folha(dados, caminho_saida):
     pag = dados.get('pagamento', {})
     carencia = bool(dados.get('carencia_outra_operadora'))
     corr = dados.get('endereco_correspondencia') or {}
+    agente = _agente(dados)
 
     mes = int(vig['mes'])
     ano = str(vig['ano'])
@@ -527,9 +539,9 @@ def preencher_folha(dados, caminho_saida):
         'CEP': fmt_cep(empresa.get('cep')),
         'CIDADE': empresa['cidade'],
         'CONTATO': empresa.get('contato', ''),
-        'CORRETORA PJ': AGENTE['nome'],
-        'TELEFONES': AGENTE['cpf'],
-        'CORRETORA PF': AGENTE['telefone'],
+        'CORRETORA PJ': agente['nome'],
+        'TELEFONES': agente['cpf'],
+        'CORRETORA PF': agente['telefone'],
         'Produto': plano['nome_folha'],
         'Número de vidas': str(dados['plano']['vidas']),
         '01 de': MESES[mes - 1],
@@ -555,7 +567,7 @@ def preencher_folha(dados, caminho_saida):
         p0['R'] = fmt_moeda(pag['valor_migracoes'])
 
     # Pagina 2: migracoes (so preenche se houver).
-    p1 = {'CORRETOR  RESPONSÁVEL': AGENTE['nome']}
+    p1 = {'CORRETOR  RESPONSÁVEL': agente['nome']}
     campos_mig = [f'Folha2Text{i}' for i in range(2, 32)]
     for i, m in enumerate((dados.get('migracoes') or [])[:10]):
         base = i * 3
@@ -590,8 +602,8 @@ def preencher_folha(dados, caminho_saida):
     p4 = {
         plano['p4']: '/Yes',
         'Text32': f'{mes:02d}/{ano}',
-        'Text33': AGENTE['nome'],
-        'Text34': AGENTE['cpf'],
+        'Text33': agente['nome'],
+        'Text34': agente['cpf'],
     }
 
     # Pagina 6 (RECIBO) fica SEMPRE em branco - por decisao do corretor.

@@ -52,6 +52,15 @@
   .small{font-size:11.5px;color:var(--ink-soft);}
   .req::after{content:" *";color:var(--danger);font-weight:800;}
   .fixo{background:var(--accent-soft);border:1px solid var(--accent);border-radius:8px;padding:12px 14px;color:var(--accent);}
+  .agente-item{display:flex;align-items:center;gap:10px;padding:11px 13px;border:1px solid var(--line);
+    border-radius:8px;background:var(--surface-2);cursor:pointer;margin-bottom:7px;}
+  .agente-item.on{border-color:var(--accent);background:var(--accent-soft);}
+  .agente-item.on b{color:var(--accent);}
+  .agente-item span{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;}
+  .agente-item b{font-size:13.5px;}
+  .btn-remove{background:none;border:none;color:var(--danger);font-size:12px;font-weight:700;
+    cursor:pointer;padding:4px 7px;border-radius:6px;flex-shrink:0;}
+  .btn-remove:hover{background:var(--danger-soft);}
   .fixo .small{color:var(--accent);opacity:.85;}
   .saude-box{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);}
   hr.sep{border:none;border-top:1px dashed var(--line);margin:14px 0;}
@@ -163,11 +172,21 @@
 
   <section>
     <h2>6 · Agente de vendas</h2>
-    <p class="hint">Fixo — vai sempre assim em todas as propostas.</p>
-    <div class="fixo">
-      <div><b>{{ agente.nome }}</b></div>
-      <div class="small">CPF {{ agente.cpf }} · {{ agente.telefone }}</div>
+    <p class="hint">Quem assina esta proposta. A lista fica salva neste navegador.</p>
+    <div id="agentesBox"></div>
+    <div id="agenteNovoBox" style="display:none;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);">
+      <div class="grid g3">
+        <div><label>Nome completo</label><input type="text" id="ag_novo_nome"></div>
+        <div><label>CPF</label><input type="text" id="ag_novo_cpf" placeholder="000.000.000-00" maxlength="14"></div>
+        <div><label>Telefone</label><input type="text" id="ag_novo_tel" placeholder="(00) 00000-0000"></div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;">
+        <button class="btn" onclick="salvarAgente()">Salvar agente</button>
+        <button class="btn btn-sec" onclick="cancelarAgente()">Cancelar</button>
+      </div>
+      <div id="agenteErro" class="status"></div>
     </div>
+    <button class="btn btn-sec" id="btnNovoAgente" style="margin-top:10px;" onclick="abrirNovoAgente()">+ Cadastrar outro agente</button>
   </section>
 
   <footer class="actions">
@@ -457,6 +476,72 @@ OBSERVAÇÕES:
 
 Agora leia os documentos anexados e devolva só o texto.`;
 
+// ── Agentes de vendas ────────────────────────────────────────────────────────
+// Ficam no navegador: cada consultor tem a própria lista, sem precisar de banco.
+// O agente de origem vem pré-cadastrado e não pode ser removido, para a lista
+// nunca ficar vazia e a proposta nunca sair sem quem assina.
+const AGENTE_PADRAO = {{ agente|tojson }};
+const CHAVE_AGENTES = 'psb_agentes_v1';
+let AGENTES = [];
+let AGENTE_SEL = 0;
+
+function carregarAgentes(){
+  try { AGENTES = JSON.parse(localStorage.getItem(CHAVE_AGENTES) || '[]'); } catch(e){ AGENTES = []; }
+  if (!Array.isArray(AGENTES) || !AGENTES.length) AGENTES = [{...AGENTE_PADRAO, fixo:true}];
+  if (!AGENTES.some(a => a.fixo)) AGENTES.unshift({...AGENTE_PADRAO, fixo:true});
+  if (AGENTE_SEL >= AGENTES.length) AGENTE_SEL = 0;
+  renderAgentes();
+}
+function gravarAgentes(){
+  localStorage.setItem(CHAVE_AGENTES, JSON.stringify(AGENTES));
+}
+function renderAgentes(){
+  document.getElementById('agentesBox').innerHTML = AGENTES.map((a, i) => `
+    <label class="agente-item ${i===AGENTE_SEL?'on':''}">
+      <input type="radio" name="agente_sel" ${i===AGENTE_SEL?'checked':''} onchange="AGENTE_SEL=${i};renderAgentes()">
+      <span>
+        <b>${a.nome}</b>
+        <span class="small">CPF ${a.cpf} · ${a.telefone}</span>
+      </span>
+      ${a.fixo ? '' : `<button type="button" class="btn-remove" title="Remover" onclick="event.preventDefault();removerAgente(${i})">Remover</button>`}
+    </label>`).join('');
+}
+function abrirNovoAgente(){
+  document.getElementById('agenteNovoBox').style.display = 'block';
+  document.getElementById('btnNovoAgente').style.display = 'none';
+  document.getElementById('ag_novo_nome').focus();
+}
+function cancelarAgente(){
+  document.getElementById('agenteNovoBox').style.display = 'none';
+  document.getElementById('btnNovoAgente').style.display = 'inline-block';
+  ['ag_novo_nome','ag_novo_cpf','ag_novo_tel'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('agenteErro').textContent = '';
+}
+function salvarAgente(){
+  const nome = up(document.getElementById('ag_novo_nome').value);
+  const cpf  = document.getElementById('ag_novo_cpf').value.trim();
+  const tel  = document.getElementById('ag_novo_tel').value.trim();
+  const err  = document.getElementById('agenteErro');
+  if (!nome){ err.textContent = 'Informe o nome do agente.'; return; }
+  if (dig(cpf).length !== 11){ err.textContent = 'CPF precisa ter 11 dígitos.'; return; }
+  if (dig(tel).length < 10){ err.textContent = 'Telefone incompleto.'; return; }
+  AGENTES.push({nome: nome, cpf: fmtCpf(cpf), telefone: fmtTel(tel)});
+  AGENTE_SEL = AGENTES.length - 1;   // já seleciona quem acabou de ser cadastrado
+  gravarAgentes(); renderAgentes(); cancelarAgente();
+}
+function removerAgente(i){
+  if (AGENTES[i] && AGENTES[i].fixo) return;
+  if (!confirm(`Remover ${AGENTES[i].nome} da lista?`)) return;
+  AGENTES.splice(i, 1);
+  if (AGENTE_SEL >= AGENTES.length) AGENTE_SEL = AGENTES.length - 1;
+  gravarAgentes(); renderAgentes();
+}
+function fmtCpf(v){
+  const d = dig(v);
+  return d.length === 11 ? `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}` : v.trim();
+}
+carregarAgentes();
+
 function copiarPrompt(){
   const st = document.getElementById('notasStatus');
   navigator.clipboard.writeText(PROMPT_DOCS).then(function(){
@@ -573,6 +658,7 @@ async function gerar(){
       cpf: document.getElementById('rep_cpf').value,
     },
     endereco_correspondencia: ENDERECO_NOTAS,
+    agente: AGENTES[AGENTE_SEL] || AGENTE_PADRAO,
     plano: { produto: planoKey, acomodacao: acomodacao, vidas: PESSOAS.length },
     vigencia: { vencimento: vencimento, mes: vigMesSel.value, ano: document.getElementById('vigAno').value },
     pagamento: {
