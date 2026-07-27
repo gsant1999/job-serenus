@@ -87,6 +87,7 @@
     <div class="sub">{{ p.criado_em|data_br }} · {{ p.razao_social }}</div>
   </div>
   <div style="display:flex;gap:8px;">
+    {% if lead_crm %}<a href="/crm/lead/{{ lead_crm.id }}" class="btn-outline" title="Lead correspondente no CRM (casado por telefone)">Ver lead no CRM</a>{% endif %}
     <a href="/propostas" class="btn-outline">Voltar</a>
   </div>
 </div>

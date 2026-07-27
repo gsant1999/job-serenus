@@ -5570,6 +5570,16 @@ def ver_proposta(pid):
     if not p: return "Não encontrada", 404
     if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']: return "Acesso negado", 403
     parcelas = conn.execute("SELECT * FROM parcelas WHERE proposta_id=? ORDER BY numero ASC",(pid,)).fetchall()
+    # Lead correspondente no CRM — propostas não tem lead_id, casa por telefone
+    # (mesmo critério de _buscar_lead_por_telefone/_fechados_com_analise).
+    lead_crm = None
+    for tel in (p['tel_resp_contrato'] if 'tel_resp_contrato' in p.keys() else None,
+                p['tel_resp_negociacao'] if 'tel_resp_negociacao' in p.keys() else None):
+        tn = _normalizar_telefone(str(tel or ''))
+        if tn:
+            lead_crm = _buscar_lead_por_telefone(conn, tn)
+            if lead_crm:
+                break
     campos_def = conn.execute("SELECT * FROM campos_custom ORDER BY ordem,id").fetchall()
     # Operadora no editar = SELECT da lista única (não texto livre). Antes era
     # input de texto: dava pra digitar um nome que não existe na tabela de preço
@@ -5628,7 +5638,7 @@ def ver_proposta(pid):
 
     return render_template('detalhe.html', p=p, parcelas=parcelas, regime=regime, extras=extras_view,
                            campos_secoes=campos_secoes, valores_edit=valores_edit,
-                           solic_pendente=solic_pendente, comissao_aviso=comissao_aviso)
+                           solic_pendente=solic_pendente, comissao_aviso=comissao_aviso, lead_crm=lead_crm)
 
 @app.route('/proposta/<int:pid>/consultor', methods=['POST'])
 @login_required
@@ -7922,10 +7932,12 @@ def fluxo_caixa():
 # ─── BI ──────────────────────────────────────────────────────────────────────────
 def _fechados_com_analise(conn):
     """Clientes FECHADOS (proposta emitida/ativa) cruzados com a última análise
-    de conversa deles. propostas NÃO tem lead_id — casa por TELEFONE
-    (tel_resp_contrato/negociacao vs whatsapp_analises.telefone_norm). Retorna
-    a lista de clientes (com objeções, followup, score) — usado pela
-    Inteligência de Vendas e pelo Playbook."""
+    de conversa deles E com o lead correspondente no CRM. propostas NÃO tem
+    lead_id — tudo casa por TELEFONE (tel_resp_contrato/negociacao vs
+    whatsapp_analises.telefone_norm / crm_leads.telefone_norm, mesmo critério
+    de _buscar_lead_por_telefone). Retorna a lista de clientes (objeções,
+    followup, score, lead do CRM, dias desde o lead entrar até fechar) —
+    usado pela Inteligência de Vendas e pelo Playbook."""
     fechados = conn.execute("""
         SELECT p.id, p.razao_social, p.consultor, p.adm_operadora, p.modalidade,
                p.valor, p.total_vidas, p.criado_em,
@@ -7945,11 +7957,17 @@ def _fechados_com_analise(conn):
         analises[a['telefone_norm']] = a
     clientes = []
     for r in fechados:
-        wa = None
+        wa, lead = None, None
         for tel in (r['tel_resp_contrato'], r['tel_resp_negociacao']):
             tn = _normalizar_telefone(str(tel or ''))
-            if tn and tn in analises:
-                wa = analises[tn]; break
+            if not tn:
+                continue
+            if wa is None and tn in analises:
+                wa = analises[tn]
+            if lead is None:
+                lead = _buscar_lead_por_telefone(conn, tn)
+            if wa is not None and lead is not None:
+                break
         extr, diag = {}, {}
         dias = None
         if wa is not None:
@@ -7961,6 +7979,14 @@ def _fechados_com_analise(conn):
             d1, d2 = _parse_dt_seguro(wa['criado_em']), _parse_dt_seguro(r['criado_em'])
             if d1 and d2 and d2 >= d1:
                 dias = (d2 - d1).days
+        # KPI mais completo: do LEAD entrar no CRM até a proposta fechar (o
+        # 'dias_para_fechar' acima só cobre da análise em diante — nem todo
+        # fechado teve conversa analisada, mas quase todo teve lead no CRM).
+        dias_lead = None
+        if lead is not None:
+            d1, d2 = _parse_dt_seguro(lead['criado_em']), _parse_dt_seguro(r['criado_em'])
+            if d1 and d2 and d2 >= d1:
+                dias_lead = (d2 - d1).days
         clientes.append({
             'id': r['id'], 'nome': r['razao_social'], 'consultor': r['consultor'],
             'operadora': r['adm_operadora'], 'modalidade': r['modalidade'],
@@ -7972,6 +7998,9 @@ def _fechados_com_analise(conn):
             'objecoes': extr.get('objecoes') or [], 'cidade': extr.get('cidade'),
             'followup': (diag.get('followup') or '').strip(),
             'dias_para_fechar': dias,
+            'lead_id': (lead['id'] if lead is not None else None),
+            'lead_etapa': (lead['etapa'] if lead is not None else None),
+            'dias_desde_lead': dias_lead,
         })
     return clientes
 
@@ -7991,7 +8020,7 @@ def inteligencia_vendas():
     por_operadora, val_operadora = Counter(), {}
     por_consultor, val_consultor = Counter(), {}
     objecoes, cidades = Counter(), Counter()
-    scores, dias_ate_fechar, com_analise = [], [], 0
+    scores, dias_ate_fechar, com_analise, com_lead = [], [], 0, 0
     for c in clientes:
         op = c['operadora'] or '—'
         por_operadora[op] += 1; val_operadora[op] = val_operadora.get(op, 0) + c['valor']
@@ -7999,10 +8028,15 @@ def inteligencia_vendas():
         por_consultor[cons] += 1; val_consultor[cons] = val_consultor.get(cons, 0) + c['valor']
         if c['analise_id']:
             com_analise += 1
+        if c['lead_id']:
+            com_lead += 1
         if c['score'] is not None:
             scores.append(c['score'])
-        if c['dias_para_fechar'] is not None:
-            dias_ate_fechar.append(c['dias_para_fechar'])
+        # Prefere o tempo desde o LEAD entrar no CRM (funil completo); só cai
+        # pro tempo desde a análise quando não achou lead casado por telefone.
+        dias_c = c['dias_desde_lead'] if c['dias_desde_lead'] is not None else c['dias_para_fechar']
+        if dias_c is not None:
+            dias_ate_fechar.append(dias_c)
         for o in (c['objecoes'] or []):
             objecoes[str(o).strip().lower()] += 1
         if c['cidade']:
@@ -8010,7 +8044,7 @@ def inteligencia_vendas():
     m = {
         'total': total, 'soma_valor': soma_valor,
         'ticket': round(soma_valor / total, 2) if total else 0,
-        'com_analise': com_analise,
+        'com_analise': com_analise, 'com_lead': com_lead,
         'score_medio': round(sum(scores) / len(scores)) if scores else None,
         'tempo_medio': round(sum(dias_ate_fechar) / len(dias_ate_fechar), 1) if dias_ate_fechar else None,
     }
@@ -21289,13 +21323,13 @@ def _buscar_lead_por_telefone(conn, telefone_norm):
     automático) e análise de WhatsApp — critério único, sem duplicar lógica."""
     if not telefone_norm:
         return None
-    lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm=?",
+    lead = conn.execute("SELECT id, nome, responsavel_id, etapa, criado_em FROM crm_leads WHERE telefone_norm=?",
                         (telefone_norm,)).fetchone()
     if lead:
         return lead
     suf = telefone_norm[-8:]
     if len(suf) == 8:
-        lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE telefone_norm LIKE ?",
+        lead = conn.execute("SELECT id, nome, responsavel_id, etapa, criado_em FROM crm_leads WHERE telefone_norm LIKE ?",
                             ('%' + suf,)).fetchone()
     return lead
 

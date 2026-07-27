@@ -50,7 +50,7 @@
     <div class="metrica">
       <div class="lbl">Tempo até fechar</div>
       <div class="val">{{ m.tempo_medio if m.tempo_medio is not none else '—' }}{% if m.tempo_medio is not none %} <span style="font-size:14px;color:var(--cinza);">dias</span>{% endif %}</div>
-      <div class="sub">do lead entrar ao fechamento</div>
+      <div class="sub">do lead entrar ao fechamento · {{ m.com_lead }} com lead no CRM</div>
     </div>
   </div>
 
@@ -153,6 +153,7 @@
             <td style="font-size:12px;color:var(--cinza);white-space:nowrap;">{{ c.criado_em|data_br }}</td>
             <td style="white-space:nowrap;">
               <a href="/proposta/{{ c.id }}" class="btn-ghost" style="font-size:12px;">Proposta</a>
+              {% if c.lead_id %}<a href="/crm/lead/{{ c.lead_id }}" class="btn-ghost" style="font-size:12px;color:var(--sucesso,#1fd8a4);">Lead CRM</a>{% endif %}
               {% if c.analise_id %}<a href="/whatsapp-analises/{{ c.analise_id }}/conversa" class="btn-ghost" style="font-size:12px;color:var(--info);">Análise</a>{% endif %}
             </td>
           </tr>
