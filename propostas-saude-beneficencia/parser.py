@@ -42,6 +42,8 @@ def _parse_pessoa(linhas):
     rg = linhas[2].strip() if len(linhas) > 2 else ''
     nascimento = ''
     sus = ''
+    telefone = ''
+    email = ''
     nomes_extra = []
     for ln in linhas[3:]:
         ln_up = ln.upper()
@@ -56,11 +58,19 @@ def _parse_pessoa(linhas):
             m = re.search(r'(\d{5,})', ln)
             if m:
                 sus = m.group(1)
+        elif '@' in ln:
+            # E-mail escrito junto dos dados da pessoa. Precisa sair daqui: a mae e o
+            # ULTIMO nome extra do bloco, entao um e-mail no fim da lista virava o
+            # nome da mae na ficha que vai para a operadora.
+            email = ln.strip().lower()
+        elif TEL_RE.search(ln) and not DATA_RE.match(ln.strip()):
+            telefone = ln.strip()
         else:
             nomes_extra.append(ln.strip())
     mae = nomes_extra[-1] if nomes_extra else ''
     return {'nome': nome, 'cpf': cpf, 'rg': rg, 'nascimento': nascimento, 'mae': mae,
-            'sus': sus, 'sexo': deduzir_sexo(nome)}
+            'sus': sus, 'sexo': deduzir_sexo(nome),
+            'telefone1': telefone, 'email': email}
 
 
 def _parse_empresa(linhas):
@@ -133,4 +143,12 @@ def parse_bloco_notas(texto):
         elif CPF_RE.search(segunda):
             pessoas.append(_parse_pessoa(linhas))
         # bloco nao reconhecido: ignorado (mostrado como "nao interpretado" na UI se precisar)
+    # Telefone e e-mail escritos dentro do bloco da pessoa valem como contato: o
+    # corretor ja forneceu o dado, nao faz sentido a tela pedir de novo.
+    if not contato.get('telefone') or not contato.get('email'):
+        for p in pessoas:
+            if not contato.get('telefone') and p.get('telefone1'):
+                contato['telefone'] = p['telefone1']
+            if not contato.get('email') and p.get('email'):
+                contato['email'] = p['email']
     return {'pessoas': pessoas, 'empresa': empresa, 'endereco': endereco, 'contato': contato}

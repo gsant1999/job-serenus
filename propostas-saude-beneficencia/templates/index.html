@@ -10,7 +10,36 @@
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.4;}
-  .shell{max-width:920px;margin:0 auto;padding:32px 20px 100px;}
+  .shell{max-width:920px;margin:0 0 0 var(--trilho);padding:32px 26px 100px;}
+  @media (max-width:820px){ .shell{margin-left:0;padding:20px 16px 90px;} }
+  /* ── menu lateral (mesmo do resto do sistema) ─────────────────────────── */
+  :root{ --trilho:236px; }
+  .trilho{position:fixed;top:0;left:0;bottom:0;width:var(--trilho);background:var(--surface);
+    border-right:1px solid var(--line);padding:20px 14px;display:flex;flex-direction:column;
+    gap:3px;overflow-y:auto;z-index:30;}
+  .marca{font-size:13.5px;font-weight:800;letter-spacing:-.01em;line-height:1.25;padding:0 10px 4px;}
+  .marca span{display:block;font-size:11px;font-weight:600;color:var(--ink-soft);margin-top:2px;}
+  .grupo{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--ink-soft);padding:16px 10px 5px;}
+  .trilho a{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:8px;
+    color:var(--ink);text-decoration:none;font-size:13.5px;font-weight:600;}
+  .trilho a:hover{background:var(--surface-2);}
+  .trilho a.on{background:var(--accent-soft);color:var(--accent);font-weight:800;}
+  .trilho a svg{width:17px;height:17px;flex-shrink:0;stroke:currentColor;fill:none;
+    stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;opacity:.8;}
+  .conta{margin-top:auto;padding-top:16px;border-top:1px solid var(--line);}
+  .conta b{display:block;font-size:12.5px;}
+  .conta .papel{font-size:10.5px;font-weight:800;text-transform:uppercase;color:var(--accent);}
+  .conta a{font-size:12px;color:var(--ink-soft);padding:7px 11px;margin-top:4px;}
+  @media (max-width:820px){
+    .trilho{position:static;width:auto;flex-direction:row;flex-wrap:wrap;align-items:center;
+      border-right:none;border-bottom:1px solid var(--line);padding:12px;gap:5px;}
+    .marca{width:100%;padding-bottom:8px;} .marca span,.grupo{display:none;}
+    .trilho a{padding:7px 11px;font-size:12.5px;}
+    .conta{margin-top:0;padding-top:0;border-top:none;display:flex;align-items:center;
+      gap:10px;margin-left:auto;}
+  }
+
   h1{font-size:22px;margin:0 0 4px;}
   .sub{color:var(--ink-soft);font-size:13.5px;margin:0 0 26px;}
   section{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px 22px;margin-bottom:18px;}
@@ -83,13 +112,10 @@
   .auto-box .status{display:block;margin-top:9px;}
   .auto-avisos{margin-top:10px;font-size:12.5px;color:var(--danger);}
   .auto-avisos div{padding:2px 0;}
-  .manuais{border:1px solid var(--accent);border-radius:9px;padding:13px 15px;
-    background:var(--accent-soft);margin-top:4px;}
-  .manuais > b{font-size:12.5px;color:var(--accent);}
-  .manuais > p{margin:5px 0 10px;}
-  .manuais .small{color:var(--accent);opacity:.9;}
-  .manuais > div{margin-bottom:8px;}
-  .manuais > div:last-child{margin-bottom:0;}
+  .origem{font-size:10px;font-weight:700;text-transform:none;letter-spacing:0;
+    color:var(--accent);background:var(--accent-soft);padding:1px 6px;border-radius:20px;
+    margin-left:5px;}
+  .origem:empty{display:none;}
   .dropzone{border:2px dashed var(--accent);border-radius:9px;padding:22px 16px;text-align:center;
     cursor:pointer;background:var(--surface);display:flex;flex-direction:column;gap:4px;}
   .dropzone.sobre{background:var(--accent-soft);border-style:solid;}
@@ -108,16 +134,14 @@
 </style>
 </head>
 <body>
+{% include "_trilho.html" %}
 <div class="shell">
-  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:14px;flex-wrap:wrap;">
-    <h1>Proposta de Adesão + Ficha de Inclusão</h1>
-    <a href="/gestao" style="color:var(--accent);text-decoration:none;font-weight:700;font-size:13.5px;">Gestão →</a>
-  </div>
+  <h1>Proposta de Adesão + Ficha de Inclusão</h1>
   <p class="sub">Saúde Beneficência · preenche os PDFs originais sem mudar a estrutura deles. Solte os documentos na seção 7 — o resto o sistema faz.</p>
 
   <section id="sec-empresa">
     <h2>1 · Empresa (via CNPJ)</h2>
-    <p class="hint">Preenchido sozinho quando você solta o cartão CNPJ na seção 7. Se preferir, cole o número aqui — o resto vem da Receita.</p>
+    <p class="hint">Preenchido sozinho quando você solta o cartão CNPJ na seção 7. Se preferir, cole o número aqui.<br><b>Contato, telefone e e-mail</b> não vêm da Receita — saem do bloco de notas ou você digita.</p>
     <div class="row">
       <div><label>CNPJ</label><input type="text" id="cnpjInput" placeholder="00.000.000/0000-00"></div>
       <button class="btn" onclick="buscarCnpj()">Buscar CNPJ</button>
@@ -131,16 +155,21 @@
       <div><label>Bairro</label><input type="text" id="e_bairro"></div>
       <div><label>Cidade / UF</label><div class="row"><input type="text" id="e_cidade"><input type="text" id="e_uf" style="max-width:60px;"></div></div>
       <div><label>CEP</label><input type="text" id="e_cep"></div>
-      <div class="manuais">
-        <b>Só estes três você digita</b>
-        <p class="small">O resto vem do cartão CNPJ. Estes a Receita não traz atualizados —
-          e é por eles que a operadora fala com o cliente.</p>
-        <div><label class="req">Nome completo do contato</label>
-          <input type="text" id="e_contato" placeholder="quem responde pela empresa"></div>
-        <div><label class="req">Telefone</label>
-          <input type="text" id="e_telefone" placeholder="(00) 00000-0000"></div>
-        <div><label class="req">E-mail</label>
-          <input type="email" id="e_email" placeholder="nome@empresa.com.br"></div>
+      <!-- Contato, telefone e e-mail ficam na mesma grade dos outros campos: sao
+           campos iguais aos demais e destacar em caixa propria so quebrava o
+           alinhamento. O que muda e a origem, e isso a etiqueta ao lado do rotulo
+           diz - inclusive quando ja vieram prontos do bloco de notas. -->
+      <div>
+        <label class="req">Nome do contato <span class="origem" id="org_contato"></span></label>
+        <input type="text" id="e_contato" placeholder="quem responde pela empresa">
+      </div>
+      <div>
+        <label class="req">Telefone <span class="origem" id="org_telefone"></span></label>
+        <input type="text" id="e_telefone" placeholder="(00) 00000-0000">
+      </div>
+      <div>
+        <label class="req">E-mail <span class="origem" id="org_email"></span></label>
+        <input type="email" id="e_email" placeholder="nome@empresa.com.br">
       </div>
       <div class="socios" style="grid-column:1/-1;">
         <label>Sócio/responsável legal (clique para usar)</label>
@@ -321,6 +350,19 @@ function textoEstadoCivil(pessoa){
 }
 
 function up(s){ return (s||'').toString().toUpperCase().trim(); }
+
+// Diz de onde veio o valor que já está no campo. Some quando você digita por cima:
+// a etiqueta não pode continuar dizendo "do bloco de notas" depois que você mudou.
+function marcarOrigem(campo, texto){
+  const et = document.getElementById('org_' + campo);
+  if (!et) return;
+  et.textContent = texto || '';
+  const entrada = document.getElementById('e_' + campo);
+  if (entrada && !entrada.dataset.limpa){
+    entrada.dataset.limpa = '1';
+    entrada.addEventListener('input', () => { et.textContent = ''; });
+  }
+}
 // O motor grava DD/MM/AAAA no PDF, mas <input type="date"> só fala ISO. As duas
 // funções ficam nas pontas: o dado guardado continua no formato do documento.
 function paraIso(br){
@@ -460,12 +502,22 @@ async function interpretarNotas(){
   if (d.contato){
     PESSOAS.forEach(p => { p.telefone1 = fmtTel(d.contato.telefone); p.email = (d.contato.email || '').toLowerCase(); });
     // O e-mail/telefone do bloco de notas SEMPRE tem prioridade sobre o da Receita.
-    if (d.contato.email) document.getElementById('e_email').value = d.contato.email.toLowerCase();
-    if (d.contato.telefone) document.getElementById('e_telefone').value = fmtTel(d.contato.telefone);
+    if (d.contato.email){
+      document.getElementById('e_email').value = d.contato.email.toLowerCase();
+      marcarOrigem('email', 'do bloco de notas');
+    }
+    if (d.contato.telefone){
+      document.getElementById('e_telefone').value = fmtTel(d.contato.telefone);
+      marcarOrigem('telefone', 'do bloco de notas');
+    }
   }
-  // Contato: primeiro titular identificado
+  // Contato: nome completo do primeiro titular, nao so o primeiro nome - e o nome
+  // que a operadora usa para falar com a empresa.
   var elContato = document.getElementById('e_contato');
-  if (!elContato.value.trim() && PESSOAS.length) elContato.value = up(PESSOAS[0].nome.split(' ')[0]);
+  if (!elContato.value.trim() && PESSOAS.length){
+    elContato.value = up(PESSOAS[0].nome);
+    marcarOrigem('contato', 'do bloco de notas');
+  }
   // Liga o sócio vindo do CNPJ com a pessoa do bloco de notas (RG/CPF do representante)
   autoPreencherRepCpf(document.getElementById('rep_nome').value);
   statusEl.textContent = `${PESSOAS.length} pessoa(s) identificada(s).`; statusEl.className = 'status ok';
