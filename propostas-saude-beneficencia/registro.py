@@ -9,6 +9,7 @@ ATENCAO ao caminho: DADOS_DIR precisa apontar para o volume montado. Se apontar 
 o disco do container, o historico some no proximo deploy - o container e efemero.
 """
 import datetime
+import json
 import os
 import sqlite3
 import uuid
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS contrato (
     bytes        INTEGER,
     paginas      INTEGER,
     faltando     INTEGER,        -- quantos itens do contrato ficaram sem documento
+    pendencias   TEXT,           -- JSON com QUAIS itens faltaram
     usuario      TEXT
 );
 CREATE TABLE IF NOT EXISTS leitura (
@@ -63,6 +65,11 @@ def iniciar():
     try:
         with _conectar() as con:
             con.executescript(ESQUEMA)
+            # Bancos criados antes desta coluna existir continuam validos: a coluna
+            # entra vazia e os contratos antigos so nao sabem dizer o que faltou.
+            colunas = {l['name'] for l in con.execute('PRAGMA table_info(contrato)')}
+            if 'pendencias' not in colunas:
+                con.execute('ALTER TABLE contrato ADD COLUMN pendencias TEXT')
         return True
     except Exception:
         return False
@@ -113,15 +120,19 @@ def gravar_contrato(pdf, dados, roteiro, usuario=''):
         if acomod:
             plano = f'{plano} · {acomod}'
 
+        # Guarda QUAIS itens faltaram, nao so quantos: "2 pendencias" sem dizer quais
+        # obriga o corretor a abrir o PDF e conferir pagina por pagina.
+        faltantes = [r.get('etapa', '?') for r in roteiro if not r.get('ok')]
+
         with _conectar() as con:
             con.execute(
                 'INSERT INTO contrato (id, criado_em, empresa, cnpj, titular, plano, '
-                'vidas, agente, arquivo, bytes, paginas, faltando, usuario) '
-                'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                'vidas, agente, arquivo, bytes, paginas, faltando, pendencias, usuario) '
+                'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 (ident, _agora(), empresa.get('razao_social', ''), empresa.get('cnpj', ''),
                  titular, plano, vidas, (dados.get('agente') or {}).get('nome', ''),
                  nome, len(pdf), sum(r.get('paginas', 0) for r in roteiro if r.get('ok')),
-                 sum(1 for r in roteiro if not r.get('ok')), usuario))
+                 len(faltantes), json.dumps(faltantes, ensure_ascii=False), usuario))
         return ident
     except Exception:
         return None
@@ -186,6 +197,14 @@ def listar(limite=200):
             linhas = con.execute(
                 'SELECT * FROM contrato ORDER BY criado_em DESC LIMIT ?',
                 (limite,)).fetchall()
-        return [dict(l) for l in linhas]
+        saida = []
+        for l in linhas:
+            d = dict(l)
+            try:
+                d['pendencias'] = json.loads(d.get('pendencias') or '[]')
+            except Exception:
+                d['pendencias'] = []
+            saida.append(d)
+        return saida
     except Exception:
         return []

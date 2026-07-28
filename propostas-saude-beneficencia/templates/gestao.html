@@ -43,6 +43,8 @@
   .rolagem{overflow-x:auto;}
   a.baixar{color:var(--accent);text-decoration:none;font-weight:700;white-space:nowrap;}
   .pend{color:var(--danger);font-weight:700;}
+  .lista-pend{margin-top:4px;font-size:11.5px;color:var(--ink-soft);line-height:1.45;}
+  .lista-pend i{opacity:.75;}
   .vazio{background:var(--surface);border:1px solid var(--line);border-radius:11px;
     padding:26px;text-align:center;color:var(--ink-soft);font-size:13.5px;}
   .alerta{background:var(--danger-soft);border:1px solid var(--danger);color:var(--danger);
@@ -126,7 +128,18 @@
           <td class="num">{{ c.vidas }}</td>
           <td class="num">{{ c.paginas }}</td>
           <td class="num">{{ (c.bytes / 1048576)|round(2) }} MB</td>
-          <td>{% if c.faltando %}<span class="pend">{{ c.faltando }} pendência(s)</span>{% else %}completo{% endif %}</td>
+          <td>
+            {% if c.faltando %}
+              <span class="pend">{{ c.faltando }} pendência(s)</span>
+              {% if c.pendencias %}
+                <div class="lista-pend">
+                  {% for p in c.pendencias %}<div>· {{ p }}</div>{% endfor %}
+                </div>
+              {% else %}
+                <div class="lista-pend"><i>gerado antes do sistema anotar quais</i></div>
+              {% endif %}
+            {% else %}completo{% endif %}
+          </td>
           <td><a class="baixar" href="/gestao/contrato/{{ c.id }}">baixar</a></td>
         </tr>
       {% endfor %}
