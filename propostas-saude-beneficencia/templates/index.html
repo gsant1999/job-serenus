@@ -99,6 +99,9 @@
   .doc-status{font-size:11.5px;font-weight:700;color:var(--danger);white-space:nowrap;}
   .doc-status.ok{color:var(--accent);}
   .doc-item input[type=file]{margin-top:7px;font-size:12px;width:100%;}
+  .guardado{display:flex;align-items:center;gap:8px;margin-top:7px;padding:6px 10px;
+    background:var(--accent-soft);border-radius:7px;font-size:12.5px;color:var(--accent);}
+  .guardado span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .roteiro{margin-top:12px;border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:var(--surface-2);}
   .roteiro b{font-size:12.5px;display:block;margin-bottom:6px;}
   .roteiro div{font-size:12.5px;padding:2px 0;}
@@ -715,6 +718,11 @@ atualizarChecklist();
 // sobrescreve nada: vira mais uma versão da mesma proposta.
 const PROPOSTA = {{ (proposta.dados if proposta else None)|tojson }};
 const PROPOSTA_ID = {{ (proposta.id if proposta else None)|tojson }};
+// {chave: [nomes]} do que ja esta no servidor. Não são File no navegador: ficam
+// guardados lá e entram no contrato sozinhos, por isso a tela precisa mostrá-los
+// como presentes em vez de "faltando".
+const GUARDADOS = {{ (proposta.anexos if proposta else [])|map(attribute='chave')|list|tojson }};
+const GUARDADOS_NOME = {{ ((proposta.anexos if proposta else [])|list)|tojson }};
 
 function porId(id, valor){
   const el = document.getElementById(id);
@@ -775,7 +783,6 @@ function carregarProposta(d){
   atualizarChecklist();
 }
 
-if (PROPOSTA) carregarProposta(PROPOSTA);
 
 // ── Parentescos aceitos pela Saúde Beneficência ─────────────────────────────
 // Diretos e indiretos, na ordem em que a operadora lista. A chave (k) é a mesma
@@ -821,16 +828,28 @@ async function atualizarChecklist(){
     ? 'Como é sócio, o contrato social já comprova o vínculo — não pede documento extra.'
     : 'Não sendo sócio, o vínculo com a empresa precisa ser comprovado (último documento do contrato).';
 
-  document.getElementById('checklistBox').innerHTML = CHECKLIST.map(it => `
+  document.getElementById('checklistBox').innerHTML = CHECKLIST.map(it => {
+    const novos = (ARQUIVOS[it.chave]||[]).length;
+    const guardado = GUARDADOS_NOME.filter(a => a.chave === it.chave);
+    const situacao = novos ? novos + ' arquivo(s)'
+                   : (guardado.length ? 'já anexado' : 'faltando');
+    return `
     <div class="doc-item" id="doc-${it.chave}">
       <div class="doc-head">
         <b>${it.rotulo}</b>
-        <span class="doc-status" id="st-${it.chave}">${(ARQUIVOS[it.chave]||[]).length ? (ARQUIVOS[it.chave].length + ' arquivo(s)') : 'faltando'}</span>
+        <span class="doc-status ${novos || guardado.length ? 'ok' : ''}" id="st-${it.chave}">${situacao}</span>
       </div>
       <div class="small">${it.motivo}</div>
+      ${guardado.length && !novos ? guardado.map(a => `
+        <div class="guardado">
+          <span>${a.nome}</span>
+          <button class="btn-remove" onclick="removerGuardado('${it.chave}')">remover</button>
+        </div>`).join('') : ''}
+      ${guardado.length && !novos
+        ? '<div class="small" style="margin-top:5px;">Escolha um arquivo abaixo para substituir.</div>' : ''}
       <input type="file" multiple accept="application/pdf,image/*"
              onchange="anexar('${it.chave}', this.files)">
-    </div>`).join('') + `
+    </div>`; }).join('') + `
     <label class="chip" style="margin-top:6px;display:inline-flex;">
       <input type="checkbox" id="criancaSemDoc" onchange="atualizarChecklist()" style="margin-right:6px;">
       Tem criança sem RG, CPF nem CNH
@@ -842,6 +861,18 @@ async function atualizarChecklist(){
   // Mudou quem é titular, ou o parentesco de alguém? Os documentos vão para os
   // campos novos sozinhos, sem você reanexar nada.
   distribuir();
+}
+
+async function removerGuardado(chave){
+  if (!PROPOSTA_ID) return;
+  if (!confirm('Tirar este documento da proposta?')) return;
+  const r = await fetch(`/api/proposta/${PROPOSTA_ID}/anexo/${chave}`, {method:'DELETE'});
+  if (!r.ok){ alert('Não foi possível remover.'); return; }
+  // Some da lista local também, senão a tela continua dizendo que está anexado.
+  for (let i = GUARDADOS_NOME.length - 1; i >= 0; i--){
+    if (GUARDADOS_NOME[i].chave === chave) GUARDADOS_NOME.splice(i, 1);
+  }
+  atualizarChecklist();
 }
 
 function anexar(chave, files){
@@ -1073,6 +1104,12 @@ async function lerDocumentos(botao){
     (u.custo_brl != null ? `<p class="small" style="margin-top:6px;">${u.imagens} página(ns)
       processada(s) · custo desta leitura: R$ ${u.custo_brl.toFixed(3).replace('.', ',')}</p>` : '');
 }
+
+// Carregar a proposta fica por ULTIMO de propósito: carregarProposta() chama
+// renderPessoas(), que usa PARENTESCOS. Chamando antes da declaração, o const cai na
+// zona morta temporal, estoura ReferenceError e derruba o script inteiro — a tela de
+// edição não montava nem o checklist.
+if (PROPOSTA) carregarProposta(PROPOSTA);
 
 // Arrastar direto para a área, sem passar pelo seletor de arquivos.
 (function(){

@@ -335,11 +335,20 @@ def api_contrato():
         app.logger.exception('falha ao gerar os PDFs da proposta')
         return jsonify({'erro': 'Não foi possível gerar a proposta. Confira os dados.'}), 500
 
-    anexos = {}
+    # Documentos que vieram AGORA do navegador.
+    enviados = {}
     for chave in request.files:
         arquivos = [(f.filename, f.read()) for f in request.files.getlist(chave) if f and f.filename]
         if arquivos:
-            anexos[chave] = arquivos
+            enviados[chave] = arquivos
+
+    # Corrigindo uma proposta que ja existe: parte do que esta guardado e deixa o que
+    # veio agora substituir so a sua propria chave. Sem isso, regerar sem reanexar tudo
+    # produzia um contrato SEM nenhum documento - a v2 saia com 1,9 MB no lugar de 7,1.
+    u = usuario_atual()
+    pid = (request.form.get('proposta_id') or '').strip() or None
+    anexos = dict(propostas.anexos_para_montagem(pid)) if pid else {}
+    anexos.update(enviados)
 
     # A mesma lista que a tela usa para montar os campos de upload decide o que o
     # contrato vai cobrar. Uma fonte so - antes o checklist exigia certidao de
@@ -369,11 +378,10 @@ def api_contrato():
 
     # A proposta passa a existir como registro editavel: dados + cada anexo separado.
     # E o que permite voltar depois e trocar so a declaracao de uniao estavel.
-    u = usuario_atual()
-    pid = (request.form.get('proposta_id') or '').strip() or None
     try:
         pid = propostas.salvar(dados, u, pid)
-        for chave, itens in anexos.items():
+        # So o que veio agora: regravar os guardados seria reescrever arquivo igual.
+        for chave, itens in enviados.items():
             for nome, conteudo in itens:
                 propostas.guardar_anexo(pid, chave, nome, conteudo, u)
         propostas.guardar_versao(pid, final, roteiro, u)
@@ -422,6 +430,22 @@ def ver_proposta(pid):
         return 'Esta proposta é de outro consultor.', 403
     return render_template('proposta.html', p=p, situacoes=propostas.SITUACOES,
                            pagina='acompanhamento')
+
+
+@app.route('/api/proposta/<pid>/anexo/<chave>', methods=['DELETE'])
+@login_obrigatorio
+def api_remover_anexo(pid, chave):
+    """Tira um documento da proposta. Usado quando o corretor vai trocar um anexo
+    errado - sem isso o antigo continuaria entrando no contrato para sempre."""
+    u = usuario_atual()
+    p = propostas.obter(pid)
+    if not p:
+        return jsonify({'erro': 'Proposta não encontrada.'}), 404
+    if u['papel'] != 'gestor' and p['consultor_id'] != u['id']:
+        return jsonify({'erro': 'Esta proposta é de outro consultor.'}), 403
+    propostas.remover_anexo(pid, chave)
+    propostas.registrar_evento(pid, u, 'anexo', f'removeu {chave}')
+    return jsonify({'ok': True})
 
 
 @app.route('/proposta/<pid>/situacao', methods=['POST'])
