@@ -40,7 +40,13 @@ EXIGE_SENHA = bool(SENHA_ACESSO)
 # Railway (e qualquer PaaS) injeta PORT. Se estamos hospedados e ninguem definiu a senha,
 # o app NAO pode simplesmente abrir: ele gera documento com CPF, RG e dado de saude.
 # Falha fechado - responde 503 em tudo ate a variavel existir.
-HOSPEDADO = bool(os.environ.get('PORT'))
+#
+# DEV_LOCAL desliga essa trava. Existe porque PORT sozinho e um sinal ruim de "estou
+# em producao": ferramenta de preview local tambem injeta PORT, e a maquina do
+# desenvolvedor caia em 503 sem motivo. Quem define DEV_LOCAL no PaaS e o dono do
+# projeto, entao a trava continua servindo para o que foi feita: impedir que um
+# deploy esquecido suba aberto na internet.
+HOSPEDADO = bool(os.environ.get('PORT')) and not os.environ.get('DEV_LOCAL')
 SEM_SENHA_EM_PRODUCAO = HOSPEDADO and not SENHA_ACESSO
 
 SOMENTE_DIGITOS = re.compile(r'\D')
@@ -323,5 +329,4 @@ if __name__ == '__main__':
     # na maquina do corretor - mas respeita PORT e escuta em 0.0.0.0 caso algum PaaS
     # execute o arquivo direto: senao o processo sobe em 127.0.0.1 e nada de fora chega.
     porta = int(os.environ.get('PORT', 5057))
-    hospedado = bool(os.environ.get('PORT'))
-    app.run(host='0.0.0.0' if hospedado else '127.0.0.1', port=porta, debug=not hospedado)
+    app.run(host='0.0.0.0' if HOSPEDADO else '127.0.0.1', port=porta, debug=not HOSPEDADO)
