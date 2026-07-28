@@ -74,15 +74,15 @@
   .roteiro b{font-size:12.5px;display:block;margin-bottom:6px;}
   .roteiro div{font-size:12.5px;padding:2px 0;}
   .r-ok{color:var(--ink);} .r-falta{color:var(--danger);font-weight:700;}
-  .ia-box{margin-top:14px;border:1px solid var(--accent);border-radius:9px;
+  .auto-box{margin-top:14px;border:1px solid var(--accent);border-radius:9px;
     padding:13px 15px;background:var(--accent-soft);}
-  .ia-box b{font-size:13px;color:var(--accent);}
-  .ia-box p{margin:6px 0 10px;}
-  .ia-box .small{color:var(--accent);opacity:.9;}
-  .ia-box code{background:var(--surface);padding:1px 5px;border-radius:4px;font-size:11px;}
-  .ia-box .status{display:block;margin-top:9px;}
-  .ia-avisos{margin-top:10px;font-size:12.5px;color:var(--danger);}
-  .ia-avisos div{padding:2px 0;}
+  .auto-box b{font-size:13px;color:var(--accent);}
+  .auto-box p{margin:6px 0 10px;}
+  .auto-box .small{color:var(--accent);opacity:.9;}
+  .auto-box code{background:var(--surface);padding:1px 5px;border-radius:4px;font-size:11px;}
+  .auto-box .status{display:block;margin-top:9px;}
+  .auto-avisos{margin-top:10px;font-size:12.5px;color:var(--danger);}
+  .auto-avisos div{padding:2px 0;}
   .dropzone{border:2px dashed var(--accent);border-radius:9px;padding:22px 16px;text-align:center;
     cursor:pointer;background:var(--surface);display:flex;flex-direction:column;gap:4px;}
   .dropzone.sobre{background:var(--accent-soft);border-style:solid;}
@@ -142,11 +142,11 @@
   <section id="sec-notas">
     <h2>2 · Bloco de notas (titular / dependentes)</h2>
     <p class="hint">Cola o texto que você já mantém (nome, CPF, RG, nascimento, mãe, SUS, endereço, telefone, e-mail).</p>
-    <p class="hint">Não tem o bloco pronto? Clique em <b>Copiar prompt</b>, cole no ChatGPT junto com as fotos dos documentos e traga a resposta de volta para cá.</p>
+    <p class="hint">Não tem o bloco pronto? Clique em <b>Copiar instruções</b> e siga o passo a passo.</p>
     <textarea id="notasInput" placeholder="Cole aqui o bloco de notas..."></textarea>
     <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn" onclick="interpretarNotas()">Interpretar notas</button>
-      <button class="btn btn-sec" onclick="copiarPrompt()">Copiar prompt para o ChatGPT</button>
+      <button class="btn btn-sec" onclick="copiarPrompt()">Copiar instruções de leitura</button>
     </div>
     <div id="notasStatus" class="status"></div>
     <div id="pessoasBox"></div>
@@ -239,10 +239,10 @@
     <p class="small" id="avisoVinculo" style="margin-top:6px;"></p>
 
     {% if ia_disponivel %}
-    <div class="ia-box">
+    <div class="auto-box">
       <b>Solte tudo de uma vez</b>
       <p class="small">Arraste a pasta inteira aqui — RG, CNH, cartão CNPJ, contrato social,
-        comprovante, certidões. A IA lê, identifica o que é cada arquivo e distribui nos
+        comprovante, certidões. O sistema lê, identifica o que é cada arquivo e distribui nos
         campos certos abaixo. Você confere e corrige o que estiver errado.</p>
 
       <div id="dropzone" class="dropzone" onclick="document.getElementById('arqInput').click()">
@@ -255,17 +255,16 @@
       <div id="filaBox"></div>
       <div style="margin-top:10px;">
         <button class="btn" id="btnLer" onclick="lerDocumentos(this)">Ler e organizar</button>
-        <span id="iaStatus" class="status"></span>
+        <span id="autoStatus" class="status"></span>
       </div>
-      <div id="iaObs"></div>
+      <div id="autoObs"></div>
     </div>
     {% else %}
-    <div class="ia-box">
-      <b>Leitura automática desligada</b>
-      <p class="small">Para a IA ler os documentos e distribuir sozinha, defina a variável
-        <code>ANTHROPIC_API_KEY</code> no Railway. Enquanto isso, use o botão
-        <b>Copiar prompt para o ChatGPT</b> na seção 2 e anexe os documentos campo a
-        campo abaixo.</p>
+    <div class="auto-box">
+      <b>Leitura automática indisponível</b>
+      <p class="small">Anexe os documentos campo a campo abaixo. Se preferir, use o
+        botão <b>Copiar instruções de leitura</b> na seção 2 para montar o bloco de
+        notas mais rápido.</p>
     </div>
     {% endif %}
 
@@ -520,7 +519,7 @@ function definirPapel(idx, papel){
   recalcularVidas();
 }
 
-// Prompt pronto para o consultor colar no ChatGPT dele junto com as fotos.
+// Passo a passo de leitura manual, para quando a automática não estiver ligada.
 // O formato de saída tem que bater EXATAMENTE com o que o parser.py espera:
 // bloco por pessoa (nome / CPF na 2ª linha / RG / nascimento / pai / mãe / SUS),
 // depois endereço (com linha CEP), depois CNPJ + razão social, depois contato.
@@ -706,13 +705,13 @@ function anexar(chave, files){
   if (st){ st.textContent = files.length + ' arquivo(s)'; st.classList.add('ok'); }
 }
 
-// ── Solta tudo de uma vez, a IA separa ──────────────────────────────────────
+// ── Solta tudo de uma vez e o sistema separa ────────────────────────────────
 // FILA guarda os arquivos crus na ordem em que o corretor soltou; o índice dessa
-// ordem é o que amarra a resposta da IA de volta ao arquivo certo.
+// ordem é o que amarra a resposta da leitura de volta ao arquivo certo.
 let FILA = [];        // [File]
 let CLASSE = [];      // [{indice, arquivo, tipo, pessoa, certeza, chave, manual}]
 
-// Tipo de papel (o que a IA enxerga) -> campo do contrato. 'identidade' fica de
+// Tipo de papel (o que a leitura devolve) -> campo do contrato. 'identidade' fica de
 // fora: quem é dono, titular ou dependente depende de quem você marcou na seção 2,
 // não do que está impresso no RG.
 const MAPA_TIPOS = {
@@ -803,7 +802,7 @@ function corrigirDestino(i, chave){
   distribuir();
 }
 
-// Decide o campo de cada arquivo cruzando o que a IA leu com quem você marcou como
+// Decide o campo de cada arquivo cruzando o que foi lido com quem você marcou como
 // titular/dependente. Roda de novo toda vez que o checklist muda — é isso que faz
 // os documentos se reorganizarem sozinhos quando você corrige um papel na seção 2.
 function distribuir(){
@@ -835,7 +834,7 @@ function distribuir(){
     c.chave = c.chaves[0] || '';
   }
 
-  // Reconstrói só os campos que a IA controla; o que você anexou na mão continua.
+  // Reconstrói só os campos preenchidos automaticamente; o que você anexou continua.
   for (const c of CLASSE) for (const k of (c.chaves||[])) ARQUIVOS[k] = [];
   for (const c of CLASSE) for (const k of (c.chaves||[])) ARQUIVOS[k].push(FILA[c.indice - 1]);
 
@@ -849,11 +848,11 @@ function distribuir(){
   desenharFila();
 }
 
-// Manda a fila inteira para a IA: ela devolve os dados das pessoas E o que é cada
+// Manda a fila inteira para leitura: volta com os dados das pessoas E o que é cada
 // arquivo. O bloco de notas vai para a seção 2 e os documentos se distribuem sozinhos.
 async function lerDocumentos(botao){
-  const st = document.getElementById('iaStatus');
-  const obs = document.getElementById('iaObs');
+  const st = document.getElementById('autoStatus');
+  const obs = document.getElementById('autoObs');
   obs.innerHTML = '';
   st.className = 'status';
 
@@ -914,11 +913,10 @@ async function lerDocumentos(botao){
 
   const avisos = (d.observacoes || []);
   obs.innerHTML =
-    (avisos.length ? `<div class="ia-avisos"><b>A IA não conseguiu ler tudo — confira:</b>` +
+    (avisos.length ? `<div class="auto-avisos"><b>Não foi possível ler tudo — confira:</b>` +
       avisos.map(o => `<div>• ${o}</div>`).join('') + `</div>` : '') +
-    (u.custo_brl != null ? `<p class="small" style="margin-top:6px;">${u.imagens} imagem(ns) ·
-      ${(u.tokens_entrada||0).toLocaleString('pt-BR')} tokens · custo desta leitura:
-      R$ ${u.custo_brl.toFixed(3).replace('.', ',')}</p>` : '');
+    (u.custo_brl != null ? `<p class="small" style="margin-top:6px;">${u.imagens} página(ns)
+      processada(s) · custo desta leitura: R$ ${u.custo_brl.toFixed(3).replace('.', ',')}</p>` : '');
 }
 
 // Arrastar direto para a área, sem passar pelo seletor de arquivos.
@@ -981,13 +979,13 @@ async function gerarContrato(){
 function copiarPrompt(){
   const st = document.getElementById('notasStatus');
   navigator.clipboard.writeText(PROMPT_DOCS).then(function(){
-    st.textContent = 'Prompt copiado. Cole no ChatGPT junto com as fotos dos documentos e traga a resposta para o campo acima.';
+    st.textContent = 'Instruções copiadas. Siga o passo a passo e traga o resultado para o campo acima.';
   }, function(){
     // fallback quando o navegador bloqueia a área de transferência
     const t = document.createElement('textarea');
     t.value = PROMPT_DOCS; document.body.appendChild(t); t.select();
     document.execCommand('copy'); document.body.removeChild(t);
-    st.textContent = 'Prompt copiado.';
+    st.textContent = 'Instruções copiadas.';
   });
 }
 

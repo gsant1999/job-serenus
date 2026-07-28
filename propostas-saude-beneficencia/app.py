@@ -203,12 +203,15 @@ def api_ler_documentos():
     """Le os documentos enviados e devolve o bloco de notas ja preenchido.
 
     Sao os MESMOS arquivos que vao montar o contrato - o corretor sobe uma vez so.
-    Sem ANTHROPIC_API_KEY configurada, responde 503 e a tela cai no caminho manual
-    (o botao que copia o prompt para o ChatGPT do proprio consultor)."""
+
+    As mensagens devolvidas ao navegador sao deliberadamente genericas: nao citam
+    fornecedor, nome de variavel nem provedor de hospedagem. Quem opera o sistema nao
+    precisa saber como ele foi montado, e quem nao opera nao deve descobrir pela tela.
+    O detalhe real do erro vai para o log do servidor."""
     if not leitor.disponivel():
-        return jsonify({'erro': 'Leitura automática indisponível: falta a variável '
-                                'ANTHROPIC_API_KEY. Use o botão "Copiar prompt para o '
-                                'ChatGPT" na seção 2.', 'sem_chave': True}), 503
+        return jsonify({'erro': 'Leitura automática indisponível neste ambiente. '
+                                'Anexe os documentos campo a campo.',
+                        'sem_chave': True}), 503
 
     # 'arquivo' e a area onde o corretor solta a pasta inteira de uma vez. A ordem
     # do getlist e a mesma da tela, e e ela que amarra a classificacao de volta ao
@@ -226,25 +229,36 @@ def api_ler_documentos():
 
     try:
         dados = leitor.ler(arquivos)
-    except leitor.SemChave as e:
-        return jsonify({'erro': str(e), 'sem_chave': True}), 503
+    except leitor.SemChave:
+        return jsonify({'erro': 'Leitura automática indisponível neste ambiente. '
+                                'Anexe os documentos campo a campo.',
+                        'sem_chave': True}), 503
     except Exception as e:
+        # O texto cru identifica o provedor e nao ajuda quem esta na tela. Vai inteiro
+        # para o log do servidor; o navegador recebe so a acao possivel. 'codigo' e uma
+        # etiqueta interna para o suporte cruzar com o log sem expor nada.
         app.logger.exception('falha ao ler documentos')
-        # A mensagem crua da API nao ajuda o corretor. Traduz os dois casos que ele
-        # consegue resolver sozinho e guarda o resto no log.
-        texto = str(e)
-        if 'authentication' in texto or 'x-api-key' in texto:
-            amigavel = ('A chave ANTHROPIC_API_KEY do Railway está inválida ou expirada. '
-                        'Use o botão "Copiar prompt para o ChatGPT" na seção 2 enquanto isso.')
+        texto = str(e).lower()
+        if 'authentication' in texto or 'api-key' in texto or 'unauthorized' in texto:
+            amigavel, codigo = ('Leitura automática temporariamente indisponível. '
+                                'Anexe os documentos campo a campo.', 'L-01')
         elif 'credit' in texto or 'quota' in texto or 'billing' in texto:
-            amigavel = ('A conta da API está sem crédito. Use o botão "Copiar prompt para o '
-                        'ChatGPT" na seção 2 enquanto isso.')
+            amigavel, codigo = ('Limite de processamento atingido. Anexe os documentos '
+                                'campo a campo.', 'L-02')
+        elif 'rate' in texto or 'overloaded' in texto or 'timeout' in texto:
+            amigavel, codigo = ('Serviço ocupado. Tente de novo em alguns segundos.', 'L-03')
         else:
-            amigavel = f'Não foi possível ler os documentos: {texto}'
-        return jsonify({'erro': amigavel}), 502
+            amigavel, codigo = ('Não foi possível ler os documentos. Confira se as fotos '
+                                'estão legíveis e tente de novo.', 'L-09')
+        return jsonify({'erro': amigavel, 'codigo': codigo}), 502
 
     registro.gravar_leitura(dados.get('_uso') or {})
     dados['bloco_notas'] = leitor.para_bloco_notas(dados)
+    # O navegador nao precisa saber qual motor leu os documentos, nem em que unidade
+    # ele cobra. Fica so o que serve para quem usa: quantas paginas e quanto custou.
+    u = dados.get('_uso') or {}
+    dados['_uso'] = {'imagens': u.get('imagens', 0), 'arquivos': u.get('arquivos', 0),
+                     'custo_brl': u.get('custo_brl', 0.0)}
     return jsonify(dados)
 
 
@@ -318,9 +332,16 @@ def baixar_contrato(ident):
 
 
 @app.after_request
-def _sem_cache(resp):
-    """A tela carrega dado pessoal; nao deixar cache no navegador nem em proxy."""
+def _cabecalhos(resp):
+    """A tela carrega dado pessoal; nao deixar cache no navegador nem em proxy.
+
+    Tambem apaga a assinatura do servidor: por padrao o cabecalho Server anuncia
+    'Werkzeug/3.1.8 Python/3.9.6', o que entrega a stack inteira de graca a quem so
+    abriu o site. Nada aqui substitui autenticacao - so evita facilitar."""
     resp.headers['Cache-Control'] = 'no-store'
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Referrer-Policy'] = 'same-origin'
+    resp.headers['X-Frame-Options'] = 'SAMEORIGIN'
     return resp
 
 
