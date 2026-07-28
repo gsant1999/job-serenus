@@ -33,8 +33,10 @@
   <form class="cartao" method="post" autocomplete="off">
     <h1>Proposta Saúde Beneficência</h1>
     <p class="sub">Acesso restrito à equipe Serenus.</p>
-    <label for="senha">Senha</label>
-    <input type="password" id="senha" name="senha" autofocus required>
+    <label for="login">Usuário</label>
+    <input type="text" id="login" name="login" autofocus required autocapitalize="none" spellcheck="false">
+    <label for="senha" style="margin-top:12px;">Senha</label>
+    <input type="password" id="senha" name="senha" required>
     <button type="submit">Entrar</button>
     {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   </form>

@@ -658,6 +658,73 @@ function fmtCpf(v){
 carregarAgentes();
 atualizarChecklist();
 
+// ── Corrigir uma proposta que já existe ─────────────────────────────────────
+// Vem preenchida do servidor quando a URL traz ?id=. Gerar de novo aqui não
+// sobrescreve nada: vira mais uma versão da mesma proposta.
+const PROPOSTA = {{ (proposta.dados if proposta else None)|tojson }};
+const PROPOSTA_ID = {{ (proposta.id if proposta else None)|tojson }};
+
+function porId(id, valor){
+  const el = document.getElementById(id);
+  if (el && valor != null) el.value = valor;
+}
+
+function carregarProposta(d){
+  const e = d.empresa || {};
+  porId('cnpjInput', e.cnpj); porId('e_razao', e.razao_social);
+  porId('e_fantasia', e.nome_fantasia); porId('e_endereco', e.endereco);
+  porId('e_numero', e.numero); porId('e_complemento', e.complemento);
+  porId('e_bairro', e.bairro); porId('e_cidade', e.cidade); porId('e_uf', e.uf);
+  porId('e_cep', e.cep); porId('e_telefone', e.telefone); porId('e_email', e.email);
+  porId('e_contato', e.contato);
+  document.getElementById('empresaBox').style.display = 'grid';
+
+  const r = d.representante || {};
+  porId('rep_nome', r.nome); porId('rep_identidade', r.identidade); porId('rep_cpf', r.cpf);
+
+  // Volta as pessoas com o papel e o parentesco que já tinham.
+  PESSOAS = [];
+  (d.titulares || []).forEach(g => {
+    if (g.titular) PESSOAS.push({...g.titular, papel:'titular'});
+    (g.dependentes || []).forEach(dep => PESSOAS.push({...dep, papel:'dependente'}));
+  });
+  PESSOAS.forEach(p => {
+    p.data_entrevista = p.entrevista || p.data_entrevista || '';
+    p.portabilidade = !!p.portabilidade;
+  });
+  renderPessoas();
+
+  ENDERECO_NOTAS = d.endereco_correspondencia || null;
+
+  const plano = d.plano || {};
+  const cartao = document.querySelector(`#planoGrid .plano-card[data-v="${plano.produto}"]`);
+  if (cartao) escolherUnico(document.getElementById('planoGrid'), cartao);
+  const acom = document.querySelector(`#acomodacaoChips .chip[data-v="${plano.acomodacao}"]`);
+  if (acom) escolherUnico(document.getElementById('acomodacaoChips'), acom);
+
+  const vig = d.vigencia || {};
+  const venc = document.querySelector(`#vencimentoChips .chip[data-v="${vig.vencimento}"]`);
+  if (venc) escolherUnico(document.getElementById('vencimentoChips'), venc);
+  if (vig.mes) porId('vigMes', vig.mes);
+  porId('vigAno', vig.ano);
+
+  const pag = d.pagamento || {};
+  const rec = document.querySelector(`#recebeuChips .chip[data-v="${pag.recebeu ? 'sim' : 'nao'}"]`);
+  if (rec) escolherUnico(document.getElementById('recebeuChips'), rec);
+  if (pag.valor) porId('valorRecebido', String(pag.valor).replace('.', ','));
+
+  const car = document.querySelector(`#carenciaChips .chip[data-v="${d.carencia_outra_operadora ? 'sim' : 'nao'}"]`);
+  if (car) escolherUnico(document.getElementById('carenciaChips'), car);
+
+  if (d.tipo_titular){
+    const chip = document.querySelector(`#tipoTitularChips .chip[data-v="${d.tipo_titular}"]`);
+    if (chip) definirTipoTitular(d.tipo_titular, chip);
+  }
+  atualizarChecklist();
+}
+
+if (PROPOSTA) carregarProposta(PROPOSTA);
+
 // ── Parentescos aceitos pela Saúde Beneficência ─────────────────────────────
 // Diretos e indiretos, na ordem em que a operadora lista. A chave (k) é a mesma
 // de regras.py — é ela que decide qual papel comprova o vínculo.
@@ -982,6 +1049,7 @@ async function gerarContrato(){
 
   const fd = new FormData();
   fd.append('dados', JSON.stringify(dados));
+  if (PROPOSTA_ID) fd.append('proposta_id', PROPOSTA_ID);
   for (const chave in ARQUIVOS) (ARQUIVOS[chave]||[]).forEach(f => fd.append(chave, f));
 
   st.textContent = 'Montando o contrato...';

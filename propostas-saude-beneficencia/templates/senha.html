@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block titulo %}Trocar senha{% endblock %}
+{% block cabecalho %}Trocar senha{% endblock %}
+{% block conteudo %}
+  {% if obrigatorio %}
+    <div class="erro">Escolha uma senha só sua antes de continuar.</div>
+  {% endif %}
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+  {% if feito %}<div class="ok">{{ feito }} <a class="link" href="/">Ir para a proposta</a></div>{% endif %}
+  <div class="cartao" style="max-width:420px;">
+    <form method="post">
+      <div class="campo"><label>Nova senha</label><input type="password" name="nova" required></div>
+      <div class="campo"><label>Repita a nova senha</label><input type="password" name="confirma" required></div>
+      <button class="btn" type="submit">Trocar</button>
+      <p class="small">Mínimo de 6 caracteres.</p>
+    </form>
+  </div>
+{% endblock %}

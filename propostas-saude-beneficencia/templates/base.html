@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block titulo %}Proposta Saúde Beneficência{% endblock %}</title>
+<style>
+  :root{
+    --bg:#f4f4f2; --surface:#fff; --surface-2:#fafaf8; --line:#e2e2dd;
+    --ink:#1c1c1a; --ink-soft:#6b6b64; --accent:#20573f; --accent-soft:#e7f0ea;
+    --danger:#a4342a; --danger-soft:#fbeceb; --aviso:#8a6316; --aviso-soft:#fdf3e0;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#16161a; --surface:#1e1e23; --surface-2:#25252b; --line:#33333a;
+      --ink:#ececea; --ink-soft:#9a9a95; --accent:#7fc4a0; --accent-soft:#1e3830;
+      --danger:#e08b81; --danger-soft:#3a2320; --aviso:#e0bd7f; --aviso-soft:#332a18;
+    }
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;}
+  .wrap{max-width:1040px;margin:0 auto;padding:22px 18px 60px;}
+  .topo{display:flex;justify-content:space-between;align-items:center;gap:14px;
+    flex-wrap:wrap;margin-bottom:20px;}
+  h1{font-size:21px;margin:0;}
+  h2{font-size:15px;margin:26px 0 10px;}
+  nav a{color:var(--ink-soft);text-decoration:none;font-size:13px;font-weight:700;
+    margin-left:14px;}
+  nav a:hover, nav a.on{color:var(--accent);}
+  nav .quem{color:var(--ink-soft);font-size:12px;font-weight:400;margin-left:14px;}
+  .cartao{background:var(--surface);border:1px solid var(--line);border-radius:11px;
+    padding:16px 18px;margin-bottom:14px;}
+  table{width:100%;border-collapse:collapse;background:var(--surface);
+    border:1px solid var(--line);border-radius:11px;overflow:hidden;font-size:13px;}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;
+    color:var(--ink-soft);padding:10px 12px;background:var(--surface-2);
+    border-bottom:1px solid var(--line);white-space:nowrap;}
+  td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top;}
+  tr:last-child td{border-bottom:none;}
+  .rolagem{overflow-x:auto;}
+  a.link{color:var(--accent);text-decoration:none;font-weight:700;}
+  .selo{display:inline-block;font-size:10.5px;font-weight:800;text-transform:uppercase;
+    letter-spacing:.03em;padding:3px 8px;border-radius:20px;white-space:nowrap;}
+  .s-rascunho{background:var(--surface-2);color:var(--ink-soft);border:1px solid var(--line);}
+  .s-em_analise{background:var(--aviso-soft);color:var(--aviso);}
+  .s-correcao{background:var(--danger-soft);color:var(--danger);}
+  .s-aprovado{background:var(--accent-soft);color:var(--accent);}
+  .s-enviado{background:var(--accent);color:#fff;}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:8px;
+    padding:9px 15px;font-size:13.5px;font-weight:700;cursor:pointer;
+    text-decoration:none;display:inline-block;}
+  .btn.sec{background:var(--surface);color:var(--ink);border:1px solid var(--line);}
+  .btn.perigo{background:var(--danger);}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  label{display:block;font-size:12px;font-weight:700;color:var(--ink-soft);
+    margin-bottom:4px;}
+  input[type=text],input[type=password],select,textarea{
+    width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;
+    background:var(--surface-2);color:var(--ink);font-size:14px;font-family:inherit;}
+  textarea{min-height:80px;resize:vertical;}
+  .campo{margin-bottom:11px;}
+  .linha{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  .linha > div{flex:1;min-width:150px;}
+  .erro{background:var(--danger-soft);border:1px solid var(--danger);color:var(--danger);
+    border-radius:9px;padding:11px 14px;font-size:13px;margin-bottom:14px;}
+  .ok{background:var(--accent-soft);border:1px solid var(--accent);color:var(--accent);
+    border-radius:9px;padding:11px 14px;font-size:13px;margin-bottom:14px;}
+  .small{font-size:11.5px;color:var(--ink-soft);}
+  .vazio{background:var(--surface);border:1px solid var(--line);border-radius:11px;
+    padding:26px;text-align:center;color:var(--ink-soft);font-size:13.5px;}
+  .abas{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px;}
+  .abas a{padding:7px 13px;border-radius:20px;border:1px solid var(--line);
+    background:var(--surface);color:var(--ink-soft);text-decoration:none;
+    font-size:12.5px;font-weight:700;}
+  .abas a.on{background:var(--accent);color:#fff;border-color:var(--accent);}
+  {% block estilo %}{% endblock %}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topo">
+    <h1>{% block cabecalho %}Proposta Saúde Beneficência{% endblock %}</h1>
+    <nav>
+      <a href="/">Nova proposta</a>
+      <a href="/acompanhamento">Acompanhamento</a>
+      <a href="/gestao">Custos</a>
+      {% if usuario and usuario.papel == 'gestor' %}<a href="/usuarios">Usuários</a>{% endif %}
+      {% if usuario %}<span class="quem">{{ usuario.nome }}</span>
+      <a href="/sair">Sair</a>{% endif %}
+    </nav>
+  </div>
+  {% block conteudo %}{% endblock %}
+</div>
+</body>
+</html>

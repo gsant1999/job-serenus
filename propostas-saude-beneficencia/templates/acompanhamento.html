@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block titulo %}Acompanhamento — Proposta Saúde Beneficência{% endblock %}
+{% block cabecalho %}Acompanhamento{% endblock %}
+
+{% block conteudo %}
+  <div class="abas">
+    <a href="/acompanhamento" class="{{ 'on' if not filtro }}">Todas</a>
+    {% for chave, rotulo in situacoes.items() %}
+      <a href="/acompanhamento?situacao={{ chave }}" class="{{ 'on' if filtro == chave }}">
+        {{ rotulo }}{% if contagem.get(chave) %} · {{ contagem[chave] }}{% endif %}
+      </a>
+    {% endfor %}
+  </div>
+
+  {% if usuario.papel != 'gestor' %}
+    <p class="small" style="margin:-6px 0 14px;">Aparecem aqui as propostas que você montou.</p>
+  {% endif %}
+
+  {% if lista %}
+  <div class="rolagem">
+    <table>
+      <thead>
+        <tr>
+          <th>Situação</th><th>Empresa</th><th>Titular</th>
+          <th>Vidas</th><th>Versões</th><th>Atualizada</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for p in lista %}
+        <tr>
+          <td><span class="selo s-{{ p.situacao }}">{{ situacoes.get(p.situacao, p.situacao) }}</span></td>
+          <td>{{ p.empresa or '—' }}<br><span class="small">{{ p.cnpj }}</span></td>
+          <td>{{ p.titular or '—' }}</td>
+          <td>{{ p.vidas }}</td>
+          <td>{{ p.versoes }}</td>
+          <td>{{ p.atualizado_em[8:10] }}/{{ p.atualizado_em[5:7] }} {{ p.atualizado_em[11:16] }}</td>
+          <td><a class="link" href="/proposta/{{ p.id }}">abrir</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="vazio">
+    {% if filtro %}Nenhuma proposta nesta situação.
+    {% else %}Nenhuma proposta ainda. Gere um contrato e ela aparece aqui.{% endif %}
+  </div>
+  {% endif %}
+{% endblock %}

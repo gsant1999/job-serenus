@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block titulo %}{{ p.empresa or 'Proposta' }} — Saúde Beneficência{% endblock %}
+{% block cabecalho %}{{ p.empresa or 'Proposta' }}{% endblock %}
+
+{% block estilo %}
+  .duas{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start;}
+  @media (max-width:760px){ .duas{grid-template-columns:1fr;} }
+  .hist{list-style:none;margin:0;padding:0;}
+  .hist li{padding:9px 0;border-bottom:1px dashed var(--line);font-size:13px;}
+  .hist li:last-child{border-bottom:none;}
+  .hist .quando{font-size:11px;color:var(--ink-soft);}
+  .hist .texto{margin-top:2px;}
+  .pendaviso{background:var(--danger-soft);border:1px solid var(--danger);
+    border-radius:9px;padding:13px 15px;margin-bottom:14px;}
+  .pendaviso b{color:var(--danger);font-size:13px;display:block;margin-bottom:4px;}
+  .anexo-lista{font-size:12.5px;}
+  .anexo-lista div{padding:3px 0;border-bottom:1px dashed var(--line);}
+  .anexo-lista div:last-child{border-bottom:none;}
+{% endblock %}
+
+{% block conteudo %}
+  <div class="cartao" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+    <div>
+      <span class="selo s-{{ p.situacao }}">{{ situacoes.get(p.situacao, p.situacao) }}</span>
+      <span class="small" style="margin-left:10px;">
+        {{ p.cnpj }} · titular {{ p.titular or '—' }} · {{ p.vidas }} vida(s)
+      </span>
+    </div>
+    <div>
+      {% if p.versoes %}
+        <a class="btn sec" href="/proposta/{{ p.id }}/versao/{{ p.versoes[0].numero }}">Baixar contrato</a>
+      {% endif %}
+      <a class="btn" href="/?id={{ p.id }}">Abrir para corrigir</a>
+    </div>
+  </div>
+
+  {% if p.situacao == 'correcao' and p.pendencia %}
+  <div class="pendaviso">
+    <b>O que precisa ser corrigido</b>
+    {{ p.pendencia }}
+  </div>
+  {% endif %}
+
+  <div class="duas">
+    <div>
+      <h2>Versões do contrato</h2>
+      {% if p.versoes %}
+      <div class="rolagem">
+        <table>
+          <thead><tr><th>Versão</th><th>Quando</th><th>Quem</th><th>Págs</th><th>Situação</th><th></th></tr></thead>
+          <tbody>
+          {% for v in p.versoes %}
+            <tr>
+              <td>v{{ v.numero }}</td>
+              <td>{{ v.criado_em[8:10] }}/{{ v.criado_em[5:7] }} {{ v.criado_em[11:16] }}</td>
+              <td>{{ v.usuario_nome or '—' }}</td>
+              <td>{{ v.paginas }}</td>
+              <td>
+                {% if v.pendencias %}
+                  <span style="color:var(--danger);font-weight:700;">{{ v.pendencias|length }} pendência(s)</span>
+                  <div class="small">{% for x in v.pendencias %}· {{ x }}<br>{% endfor %}</div>
+                {% else %}completo{% endif %}
+              </td>
+              <td><a class="link" href="/proposta/{{ p.id }}/versao/{{ v.numero }}">baixar</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <div class="vazio">Nenhuma versão gerada ainda.</div>
+      {% endif %}
+
+      <h2>Documentos guardados</h2>
+      <div class="cartao anexo-lista">
+        {% if p.anexos %}
+          {% for a in p.anexos %}
+            <div><b>{{ a.chave }}</b> — {{ a.nome }}
+              <span class="small">({{ (a.bytes / 1024)|round|int }} KB)</span></div>
+          {% endfor %}
+        {% else %}
+          <span class="small">Nenhum documento guardado.</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div>
+      <h2>Mover a proposta</h2>
+      <div class="cartao">
+        {% if usuario.papel == 'gestor' %}
+          <form method="post" action="/proposta/{{ p.id }}/situacao">
+            <div class="campo">
+              <label>Devolver para correção</label>
+              <textarea name="texto" placeholder="Escreva o que falta — é isso que o consultor vai ler. Ex.: falta a data da entrevista médica da titular; trocar o contrato social e a declaração de união estável."></textarea>
+            </div>
+            <input type="hidden" name="situacao" value="correcao">
+            <button class="btn perigo" type="submit">Devolver para correção</button>
+          </form>
+          <hr style="border:none;border-top:1px dashed var(--line);margin:14px 0;">
+          <form method="post" action="/proposta/{{ p.id }}/situacao" style="display:inline;">
+            <input type="hidden" name="situacao" value="aprovado">
+            <button class="btn" type="submit">Aprovar</button>
+          </form>
+          <form method="post" action="/proposta/{{ p.id }}/situacao" style="display:inline;">
+            <input type="hidden" name="situacao" value="enviado">
+            <input type="hidden" name="texto" value="enviado à operadora">
+            <button class="btn sec" type="submit">Marcar como enviado</button>
+          </form>
+        {% else %}
+          <p class="small" style="margin-top:0;">Quando terminar de corrigir, mande para conferência.</p>
+          <form method="post" action="/proposta/{{ p.id }}/situacao">
+            <input type="hidden" name="situacao" value="em_analise">
+            <input type="hidden" name="texto" value="enviado para conferência">
+            <button class="btn" type="submit">Mandar para conferência</button>
+          </form>
+          <p class="small" style="margin-bottom:0;">Aprovar e marcar como enviado é do gestor.</p>
+        {% endif %}
+      </div>
+
+      <h2>Histórico</h2>
+      <div class="cartao">
+        <ul class="hist">
+          {% for e in p.eventos %}
+          <li>
+            <div class="quando">{{ e.quando[8:10] }}/{{ e.quando[5:7] }} {{ e.quando[11:16] }} · {{ e.usuario_nome or 'sistema' }}</div>
+            <div class="texto"><b>{{ situacoes.get(e.tipo, e.tipo) }}</b>{% if e.texto %} — {{ e.texto }}{% endif %}</div>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+{% endblock %}

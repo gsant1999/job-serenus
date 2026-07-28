@@ -27,11 +27,15 @@ import leitor
 import montagem
 import motor
 import regras
+import contas
+import propostas
 import registro
 from parser import parse_bloco_notas
 
 app = Flask(__name__)
 registro.iniciar()
+contas.iniciar()
+propostas.iniciar()
 app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 
 SENHA_ACESSO = os.environ.get('SENHA_ACESSO', '')
@@ -61,32 +65,79 @@ def _bloqueia_sem_senha():
                 'e nao funciona sem controle de acesso.'), 503
 
 
+def usuario_atual():
+    """Quem esta logado, ou None. Le do banco a cada requisicao de proposito: assim
+    desativar alguem ou mudar o papel vale na hora, sem esperar a sessao expirar."""
+    uid = session.get('usuario_id')
+    return contas.por_id(uid) if uid else None
+
+
 def login_obrigatorio(f):
     """Os documentos gerados tem CPF, RG e dado de saude. Na internet aberta, nenhuma
     rota pode responder sem sessao."""
     @wraps(f)
     def wrapper(*a, **kw):
-        if EXIGE_SENHA and not session.get('autenticado'):
+        if not usuario_atual():
             if request.path.startswith('/api/'):
-                return jsonify({'erro': 'Sessao expirada. Recarregue a pagina e entre de novo.'}), 401
+                return jsonify({'erro': 'Sessão expirada. Entre de novo.'}), 401
             return redirect(url_for('login'))
         return f(*a, **kw)
     return wrapper
 
 
+def gestor_obrigatorio(f):
+    """Aprovar, devolver para correcao e mexer em usuario e so do gestor. A checagem
+    fica no servidor: esconder o botao na tela nao impede ninguem de chamar a rota."""
+    @wraps(f)
+    def wrapper(*a, **kw):
+        u = usuario_atual()
+        if not u:
+            return redirect(url_for('login'))
+        if u.get('papel') != 'gestor':
+            if request.path.startswith('/api/'):
+                return jsonify({'erro': 'Só um gestor pode fazer isso.'}), 403
+            return 'Só um gestor pode abrir esta página.', 403
+        return f(*a, **kw)
+    return wrapper
+
+
+@app.context_processor
+def _injeta_usuario():
+    return {'usuario': usuario_atual()}
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    if not EXIGE_SENHA:
-        session['autenticado'] = True
-        return redirect(url_for('index'))
     erro = ''
     if request.method == 'POST':
-        # compare_digest evita vazar o tamanho da senha pelo tempo de resposta
-        if secrets.compare_digest(request.form.get('senha', ''), SENHA_ACESSO):
-            session['autenticado'] = True
+        u = contas.autenticar(request.form.get('login', ''), request.form.get('senha', ''))
+        if u:
+            session.clear()
+            session['usuario_id'] = u['id']
+            if u.get('trocar_senha'):
+                return redirect(url_for('minha_senha'))
             return redirect(url_for('index'))
-        erro = 'Senha incorreta.'
+        # Mensagem unica de proposito: dizer "usuario nao existe" entrega quais logins
+        # sao validos para quem esta tentando adivinhar.
+        erro = 'Login ou senha incorretos.'
     return render_template('login.html', erro=erro)
+
+
+@app.route('/minha-senha', methods=['GET', 'POST'])
+@login_obrigatorio
+def minha_senha():
+    u = usuario_atual()
+    erro = feito = ''
+    if request.method == 'POST':
+        nova = request.form.get('nova', '')
+        if nova != request.form.get('confirma', ''):
+            erro = 'As duas senhas não são iguais.'
+        else:
+            erro = contas.trocar_senha(u['id'], nova) or ''
+            if not erro:
+                feito = 'Senha trocada.'
+    return render_template('senha.html', erro=erro, feito=feito,
+                           obrigatorio=bool(u.get('trocar_senha')))
 
 
 @app.route('/sair')
@@ -98,8 +149,12 @@ def sair():
 @app.route('/')
 @login_obrigatorio
 def index():
+    """Com ?id= abre uma proposta existente para corrigir, em vez de comecar do zero."""
+    pid = (request.args.get('id') or '').strip()
+    proposta = propostas.obter(pid) if pid else None
     return render_template('index.html', agente=motor.AGENTE, planos=motor.PLANOS,
-                           exige_senha=EXIGE_SENHA, ia_disponivel=leitor.disponivel())
+                           exige_senha=EXIGE_SENHA, ia_disponivel=leitor.disponivel(),
+                           proposta=proposta)
 
 
 @app.route('/api/cnpj/<cnpj>')
@@ -312,6 +367,20 @@ def api_contrato():
 
     registro.gravar_contrato(final, dados, roteiro)
 
+    # A proposta passa a existir como registro editavel: dados + cada anexo separado.
+    # E o que permite voltar depois e trocar so a declaracao de uniao estavel.
+    u = usuario_atual()
+    pid = (request.form.get('proposta_id') or '').strip() or None
+    try:
+        pid = propostas.salvar(dados, u, pid)
+        for chave, itens in anexos.items():
+            for nome, conteudo in itens:
+                propostas.guardar_anexo(pid, chave, nome, conteudo, u)
+        propostas.guardar_versao(pid, final, roteiro, u)
+    except Exception:
+        app.logger.exception('falha ao guardar a proposta')
+        pid = None
+
     prefixo = pdfs[0][0].rsplit('_Proposta.pdf', 1)[0]
     resp = send_file(io.BytesIO(final), mimetype='application/pdf', as_attachment=True,
                      download_name=f'CONTRATO_{prefixo}.pdf')
@@ -321,8 +390,85 @@ def api_contrato():
     # chega corrompido do outro lado ("Adesao" virava "Ades?o"). Escapado como
     # \uXXXX o cabecalho fica ASCII puro e o JSON.parse do navegador desfaz.
     resp.headers['X-Roteiro'] = json.dumps(roteiro, ensure_ascii=True)
-    resp.headers['Access-Control-Expose-Headers'] = 'X-Roteiro, Content-Disposition'
+    if pid:
+        resp.headers['X-Proposta'] = pid
+    resp.headers['Access-Control-Expose-Headers'] = 'X-Roteiro, X-Proposta, Content-Disposition'
     return resp
+
+
+@app.route('/acompanhamento')
+@login_obrigatorio
+def acompanhamento():
+    """Fila de propostas. O gestor ve todas; o consultor, so as dele."""
+    u = usuario_atual()
+    situacao = (request.args.get('situacao') or '').strip() or None
+    apenas_minhas = u['papel'] != 'gestor'
+    return render_template(
+        'acompanhamento.html',
+        lista=propostas.listar(situacao, u['id'] if apenas_minhas else None),
+        contagem=propostas.contar_por_situacao(),
+        situacoes=propostas.SITUACOES, filtro=situacao)
+
+
+@app.route('/proposta/<pid>')
+@login_obrigatorio
+def ver_proposta(pid):
+    p = propostas.obter(pid)
+    if not p:
+        return 'Proposta não encontrada.', 404
+    u = usuario_atual()
+    if u['papel'] != 'gestor' and p['consultor_id'] != u['id']:
+        return 'Esta proposta é de outro consultor.', 403
+    return render_template('proposta.html', p=p, situacoes=propostas.SITUACOES)
+
+
+@app.route('/proposta/<pid>/situacao', methods=['POST'])
+@login_obrigatorio
+def mudar_situacao(pid):
+    u = usuario_atual()
+    erro = propostas.mudar_situacao(pid, request.form.get('situacao', ''), u,
+                                    request.form.get('texto', ''))
+    if erro:
+        return render_template('recado.html', erro=erro, voltar=url_for('ver_proposta', pid=pid)), 400
+    return redirect(url_for('ver_proposta', pid=pid))
+
+
+@app.route('/proposta/<pid>/versao/<int:numero>')
+@login_obrigatorio
+def baixar_versao(pid, numero):
+    u = usuario_atual()
+    p = propostas.obter(pid)
+    if not p:
+        return 'Proposta não encontrada.', 404
+    if u['papel'] != 'gestor' and p['consultor_id'] != u['id']:
+        return 'Esta proposta é de outro consultor.', 403
+    caminho = propostas.caminho_versao(pid, numero)
+    if not caminho:
+        return 'Versão não encontrada.', 404
+    return send_file(caminho, mimetype='application/pdf', as_attachment=True,
+                     download_name=f'CONTRATO_{p["empresa"] or pid}_v{numero}.pdf')
+
+
+@app.route('/usuarios', methods=['GET', 'POST'])
+@gestor_obrigatorio
+def usuarios():
+    erro = feito = ''
+    if request.method == 'POST':
+        acao = request.form.get('acao')
+        if acao == 'criar':
+            _, erro = contas.criar(
+                request.form.get('login', ''), request.form.get('nome', ''),
+                request.form.get('senha', ''), request.form.get('papel', 'consultor'),
+                request.form.get('cpf', ''), request.form.get('telefone', ''))
+            erro = erro or ''
+            feito = '' if erro else 'Usuário criado. Ele troca a senha no primeiro acesso.'
+        elif acao == 'ativo':
+            erro = contas.definir_ativo(request.form.get('id'),
+                                        request.form.get('valor') == '1') or ''
+        elif acao == 'papel':
+            erro = contas.definir_papel(request.form.get('id'),
+                                        request.form.get('valor', '')) or ''
+    return render_template('usuarios.html', lista=contas.listar(), erro=erro, feito=feito)
 
 
 @app.route('/gestao')
