@@ -154,7 +154,7 @@ def index():
     proposta = propostas.obter(pid) if pid else None
     return render_template('index.html', agente=motor.AGENTE, planos=motor.PLANOS,
                            exige_senha=EXIGE_SENHA, ia_disponivel=leitor.disponivel(),
-                           proposta=proposta)
+                           proposta=proposta, pagina='proposta')
 
 
 @app.route('/api/cnpj/<cnpj>')
@@ -407,7 +407,8 @@ def acompanhamento():
         'acompanhamento.html',
         lista=propostas.listar(situacao, u['id'] if apenas_minhas else None),
         contagem=propostas.contar_por_situacao(),
-        situacoes=propostas.SITUACOES, filtro=situacao)
+        situacoes=propostas.SITUACOES, filtro=situacao,
+        pagina='acompanhamento')
 
 
 @app.route('/proposta/<pid>')
@@ -419,7 +420,8 @@ def ver_proposta(pid):
     u = usuario_atual()
     if u['papel'] != 'gestor' and p['consultor_id'] != u['id']:
         return 'Esta proposta é de outro consultor.', 403
-    return render_template('proposta.html', p=p, situacoes=propostas.SITUACOES)
+    return render_template('proposta.html', p=p, situacoes=propostas.SITUACOES,
+                           pagina='acompanhamento')
 
 
 @app.route('/proposta/<pid>/situacao', methods=['POST'])
@@ -468,17 +470,18 @@ def usuarios():
         elif acao == 'papel':
             erro = contas.definir_papel(request.form.get('id'),
                                         request.form.get('valor', '')) or ''
-    return render_template('usuarios.html', lista=contas.listar(), erro=erro, feito=feito)
+    return render_template('usuarios.html', lista=contas.listar(), erro=erro, feito=feito,
+                           pagina='usuarios')
 
 
 @app.route('/gestao')
-@login_obrigatorio
+@gestor_obrigatorio
 def gestao():
     """Quanto a ferramenta custou e o que ela ja gerou."""
     return render_template('gestao.html', resumo=registro.resumo(),
                            contratos=registro.listar(),
                            persistente=registro.disponivel(),
-                           pasta=registro.DADOS_DIR)
+                           pasta=registro.DADOS_DIR, pagina='custos')
 
 
 @app.route('/gestao/contrato/<ident>')
