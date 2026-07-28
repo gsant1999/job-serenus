@@ -90,6 +90,17 @@ ESQUEMA = {
                 'additionalProperties': False,
             },
         },
+        'empresa': {
+            'type': 'object',
+            'description': 'Sai do cartao CNPJ. So o numero ja basta: o resto a tela '
+                           'busca na Receita sozinha.',
+            'properties': {
+                'cnpj': {'type': 'string', 'description': '00.000.000/0000-00'},
+                'razao_social': {'type': 'string'},
+            },
+            'required': ['cnpj', 'razao_social'],
+            'additionalProperties': False,
+        },
         'endereco': {
             'type': 'object',
             'properties': {
@@ -106,7 +117,7 @@ ESQUEMA = {
             'description': 'Campos ilegiveis ou duvidosos, para o corretor conferir',
         },
     },
-    'required': ['arquivos', 'pessoas', 'endereco', 'observacoes'],
+    'required': ['arquivos', 'pessoas', 'empresa', 'endereco', 'observacoes'],
     'additionalProperties': False,
 }
 
@@ -146,6 +157,9 @@ Prefira "baixa" a chutar — o corretor revisa o que vier marcado assim.
 - Sexo "M" ou "F" conforme o documento; se não estiver escrito, deduza pelo nome; se
   ainda assim não der, deixe vazio.
 - O endereço vem do comprovante de endereço, se houver.
+- Em "empresa", copie o CNPJ do cartão CNPJ exatamente como impresso, com pontuação.
+  Se não houver cartão CNPJ entre os arquivos, deixe vazio — não invente e não tire o
+  número do contrato social se estiver ilegível.
 
 Campo que você não conseguir ler: deixe vazio e escreva em "observacoes" qual foi e de
 quem. NUNCA invente e NUNCA chute dígito de CPF ou RG — um dígito errado faz a operadora
@@ -245,7 +259,7 @@ def ler(arquivos):
 
     imagens = _imagens_por_arquivo(arquivos)
     if not imagens:
-        return {'arquivos': [], 'pessoas': [], 'endereco': {},
+        return {'arquivos': [], 'pessoas': [], 'empresa': {}, 'endereco': {},
                 'observacoes': ['Nenhuma imagem legível foi enviada.']}
 
     conteudo = []

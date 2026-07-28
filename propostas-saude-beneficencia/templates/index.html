@@ -83,6 +83,13 @@
   .auto-box .status{display:block;margin-top:9px;}
   .auto-avisos{margin-top:10px;font-size:12.5px;color:var(--danger);}
   .auto-avisos div{padding:2px 0;}
+  .manuais{border:1px solid var(--accent);border-radius:9px;padding:13px 15px;
+    background:var(--accent-soft);margin-top:4px;}
+  .manuais > b{font-size:12.5px;color:var(--accent);}
+  .manuais > p{margin:5px 0 10px;}
+  .manuais .small{color:var(--accent);opacity:.9;}
+  .manuais > div{margin-bottom:8px;}
+  .manuais > div:last-child{margin-bottom:0;}
   .dropzone{border:2px dashed var(--accent);border-radius:9px;padding:22px 16px;text-align:center;
     cursor:pointer;background:var(--surface);display:flex;flex-direction:column;gap:4px;}
   .dropzone.sobre{background:var(--accent-soft);border-style:solid;}
@@ -106,11 +113,11 @@
     <h1>Proposta de Adesão + Ficha de Inclusão</h1>
     <a href="/gestao" style="color:var(--accent);text-decoration:none;font-weight:700;font-size:13.5px;">Gestão →</a>
   </div>
-  <p class="sub">Saúde Beneficência · preenche os PDFs originais sem mudar a estrutura deles. Cole o CNPJ e o bloco de notas — o resto é só clicar.</p>
+  <p class="sub">Saúde Beneficência · preenche os PDFs originais sem mudar a estrutura deles. Solte os documentos na seção 7 — o resto o sistema faz.</p>
 
   <section id="sec-empresa">
     <h2>1 · Empresa (via CNPJ)</h2>
-    <p class="hint">Cola só o número — o resto vem da Receita automaticamente.</p>
+    <p class="hint">Preenchido sozinho quando você solta o cartão CNPJ na seção 7. Se preferir, cole o número aqui — o resto vem da Receita.</p>
     <div class="row">
       <div><label>CNPJ</label><input type="text" id="cnpjInput" placeholder="00.000.000/0000-00"></div>
       <button class="btn" onclick="buscarCnpj()">Buscar CNPJ</button>
@@ -124,9 +131,17 @@
       <div><label>Bairro</label><input type="text" id="e_bairro"></div>
       <div><label>Cidade / UF</label><div class="row"><input type="text" id="e_cidade"><input type="text" id="e_uf" style="max-width:60px;"></div></div>
       <div><label>CEP</label><input type="text" id="e_cep"></div>
-      <div><label class="req">Telefone (obrigatório)</label><input type="text" id="e_telefone" placeholder="obrigatório"></div>
-      <div><label class="req">E-mail (obrigatório)</label><input type="text" id="e_email" placeholder="obrigatório"></div>
-      <div><label>Contato (nome)</label><input type="text" id="e_contato"></div>
+      <div class="manuais">
+        <b>Só estes três você digita</b>
+        <p class="small">O resto vem do cartão CNPJ. Estes a Receita não traz atualizados —
+          e é por eles que a operadora fala com o cliente.</p>
+        <div><label class="req">Nome completo do contato</label>
+          <input type="text" id="e_contato" placeholder="quem responde pela empresa"></div>
+        <div><label class="req">Telefone</label>
+          <input type="text" id="e_telefone" placeholder="(00) 00000-0000"></div>
+        <div><label class="req">E-mail</label>
+          <input type="email" id="e_email" placeholder="nome@empresa.com.br"></div>
+      </div>
       <div class="socios" style="grid-column:1/-1;">
         <label>Sócio/responsável legal (clique para usar)</label>
         <div class="chips" id="sociosChips"></div>
@@ -306,6 +321,16 @@ function textoEstadoCivil(pessoa){
 }
 
 function up(s){ return (s||'').toString().toUpperCase().trim(); }
+// O motor grava DD/MM/AAAA no PDF, mas <input type="date"> só fala ISO. As duas
+// funções ficam nas pontas: o dado guardado continua no formato do documento.
+function paraIso(br){
+  const m = (br||'').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : '';
+}
+function paraBr(iso){
+  const m = (iso||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+}
 function dig(s){ return (s||'').toString().replace(/\D/g,''); }
 function fmtTel(v){
   var d = dig(v);
@@ -505,7 +530,8 @@ function renderPessoas(){
         </div>
         <div id="dataEntrevistaBox${idx}" style="margin-top:8px;display:${p.portabilidade?'none':'block'};max-width:220px;">
           <label>Data da entrevista</label>
-          <input type="text" value="${p.data_entrevista||''}" placeholder="DD/MM/AAAA" oninput="PESSOAS[${idx}].data_entrevista=this.value">
+          <input type="date" value="${paraIso(p.data_entrevista)}"
+                 onchange="PESSOAS[${idx}].data_entrevista=paraBr(this.value)">
         </div>
       </div>
     `;
@@ -887,6 +913,16 @@ async function lerDocumentos(botao){
     st.textContent = 'Erro: ' + (d.erro || 'falha ao ler');
     st.className = 'status err';
     return;
+  }
+
+  // O cartão CNPJ resolve a seção 1 inteira: pega o número lido, e a Receita devolve
+  // razão social, endereço e sócios. Vem ANTES de tudo porque é ela que preenche o
+  // representante legal — sem ele, a distribuição não sabe qual documento é do dono.
+  const cnpjLido = ((d.empresa || {}).cnpj || '').replace(/\D/g, '');
+  if (cnpjLido.length === 14){
+    document.getElementById('cnpjInput').value = (d.empresa.cnpj || '').trim();
+    st.textContent = 'Cartão CNPJ lido, buscando na Receita...';
+    try { await buscarCnpj(); } catch (e) { /* a tela já mostra o erro da busca */ }
   }
 
   // Joga no campo de notas e interpreta com o mesmo parser do caminho manual —
