@@ -31,7 +31,14 @@ A4_LARGURA, A4_ALTURA = 595.28, 841.89
 # Densidade da folha gerada a partir de foto. A folha e montada em pixels nessa
 # densidade e salva declarando o mesmo DPI - e o que faz o PDF sair no tamanho A4
 # de verdade. Montar em pixels de 72 dpi e salvar a 150 encolhe a pagina para 1/2.
-DPI_FOLHA = 150
+#
+# 130 e o ponto de equilibrio medido: derruba a pagina de foto de 269 KB para 179 KB
+# (-33%) e um RG fotografado ainda chega ao analista com ~190 DPI no documento -
+# acima dos 150 DPI que OCR e leitura humana pedem. Descer mais economiza centavos
+# de armazenamento e arrisca o que custa caro: proposta recusada por ilegibilidade.
+DPI_FOLHA = int(os.environ.get('COMPRESSAO_DPI', '130'))
+# Qualidade do JPEG dentro do PDF. 80 nao deixa artefato visivel em texto impresso.
+QUALIDADE_JPEG = int(os.environ.get('COMPRESSAO_JPEG', '80'))
 A4_PX = (int(A4_LARGURA / 72 * DPI_FOLHA), int(A4_ALTURA / 72 * DPI_FOLHA))
 
 EXT_IMAGEM = {'.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp', '.bmp', '.tif', '.tiff'}
@@ -76,7 +83,8 @@ def _imagem_para_pdf(dados):
     folha.paste(im, ((alvo[0] - largura) // 2, (alvo[1] - altura) // 2))
 
     buf = io.BytesIO()
-    folha.save(buf, format='PDF', resolution=float(DPI_FOLHA))
+    folha.save(buf, format='PDF', resolution=float(DPI_FOLHA),
+               quality=QUALIDADE_JPEG, optimize=True)
     buf.seek(0)
     return buf.getvalue()
 
@@ -164,6 +172,16 @@ def montar(gerados, anexos, titular_e_dono):
             roteiro.append({'etapa': rotulo, 'arquivo': None, 'ok': False,
                             'detalhe': 'faltando - obrigatorio porque o titular nao e o dono do CNPJ'})
         _juntar(rotulo, itens)
+
+    # Compressao SEM PERDA dos fluxos de conteudo. Nao toca nas imagens do formulario
+    # oficial da operadora de proposito: recomprimi-las mudaria o visual do documento,
+    # e o documento tem que chegar na operadora igual ao original. O que da para
+    # encolher sem risco, encolhe; o resto e o preco de manter a folha intacta.
+    for pagina in escritor.pages:
+        try:
+            pagina.compress_content_streams(level=9)
+        except Exception:
+            pass
 
     buf = io.BytesIO()
     escritor.write(buf)

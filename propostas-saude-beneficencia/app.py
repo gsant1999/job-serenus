@@ -27,9 +27,11 @@ import leitor
 import montagem
 import motor
 import regras
+import registro
 from parser import parse_bloco_notas
 
 app = Flask(__name__)
+registro.iniciar()
 app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 
 SENHA_ACESSO = os.environ.get('SENHA_ACESSO', '')
@@ -235,6 +237,7 @@ def api_ler_documentos():
             amigavel = f'Não foi possível ler os documentos: {texto}'
         return jsonify({'erro': amigavel}), 502
 
+    registro.gravar_leitura(dados.get('_uso') or {})
     dados['bloco_notas'] = leitor.para_bloco_notas(dados)
     return jsonify(dados)
 
@@ -273,6 +276,8 @@ def api_contrato():
         app.logger.exception('falha ao montar o contrato')
         return jsonify({'erro': 'Não foi possível montar o contrato.'}), 500
 
+    registro.gravar_contrato(final, dados, roteiro)
+
     prefixo = pdfs[0][0].rsplit('_Proposta.pdf', 1)[0]
     resp = send_file(io.BytesIO(final), mimetype='application/pdf', as_attachment=True,
                      download_name=f'CONTRATO_{prefixo}.pdf')
@@ -284,6 +289,26 @@ def api_contrato():
     resp.headers['X-Roteiro'] = json.dumps(roteiro, ensure_ascii=True)
     resp.headers['Access-Control-Expose-Headers'] = 'X-Roteiro, Content-Disposition'
     return resp
+
+
+@app.route('/gestao')
+@login_obrigatorio
+def gestao():
+    """Quanto a ferramenta custou e o que ela ja gerou."""
+    return render_template('gestao.html', resumo=registro.resumo(),
+                           contratos=registro.listar(),
+                           persistente=registro.disponivel(),
+                           pasta=registro.DADOS_DIR)
+
+
+@app.route('/gestao/contrato/<ident>')
+@login_obrigatorio
+def baixar_contrato(ident):
+    caminho = registro.caminho_pdf(ident)
+    if not caminho:
+        return 'Contrato nao encontrado.', 404
+    return send_file(caminho, mimetype='application/pdf', as_attachment=True,
+                     download_name=f'CONTRATO_{ident}.pdf')
 
 
 @app.after_request
