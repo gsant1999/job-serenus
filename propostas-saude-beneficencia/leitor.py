@@ -1,8 +1,14 @@
-"""Le os documentos enviados (RG, CNH, comprovante de endereco) e devolve os dados
-ja estruturados, para o corretor nao redigitar nada.
+"""Le os documentos enviados e devolve (a) os dados das pessoas e (b) o que e cada
+arquivo, para o sistema distribuir tudo sozinho nos campos do contrato.
 
-Os MESMOS arquivos que montam o contrato alimentam o preenchimento: sobe uma vez,
-serve para as duas coisas.
+O corretor joga a pasta inteira de uma vez numa area so. A IA nao decide regra de
+negocio - ela responde duas perguntas que exigem OLHAR o papel:
+
+    "que documento e este?"  e  "de quem e?"
+
+Quem e titular, quem e dependente e quem e o dono do CNPJ o sistema ja sabe (o
+corretor marcou na secao 2), entao a distribuicao final e feita em codigo, casando
+o nome lido com as pessoas cadastradas. Modelo nao adivinha regra de operadora.
 
 Precisa de ANTHROPIC_API_KEY. Sem a chave, a ferramenta continua funcionando pelo
 caminho manual (o botao que copia o prompt para o ChatGPT do proprio consultor).
@@ -20,13 +26,53 @@ MODELO = os.environ.get('MODELO_LEITURA', 'claude-haiku-4-5')
 # Reduz a foto antes de enviar. O custo e proporcional a area da imagem, e acima
 # de ~1568px no lado maior o modelo nao ganha nada - so encarece.
 LADO_MAXIMO = 1568
-# Teto de imagens por leitura: evita que alguem suba 40 fotos e gere uma conta
-# inesperada num clique so.
-MAX_IMAGENS = 12
+# Teto de imagens por leitura: evita que alguem suba a pasta errada e gere uma conta
+# inesperada num clique so. Um contrato completo com dependente da ~10 imagens.
+MAX_IMAGENS = 24
+# Paginas por PDF. Duas bastam: a primeira diz o que o documento e, e documento de
+# identidade em PDF costuma ter frente e verso. Contrato social tem 10 paginas e
+# mandar todas so encarece sem mudar a classificacao.
+PAGINAS_POR_PDF = 2
+
+# Tipos que a IA pode atribuir. Sao tipos de PAPEL, nao posicoes no contrato - quem
+# converte tipo em campo do contrato e o front, que sabe quem e titular e quem e
+# dependente. Manter em sincronia com MAPA_TIPOS no index.html.
+TIPOS = [
+    'identidade',            # RG, CNH, CPF, carteira funcional
+    'cartao_cnpj',
+    'contrato_social',       # contrato social, CCMEI, requerimento de empresario
+    'comprovante_endereco',  # conta de luz, agua, telefone, internet, boleto
+    'certidao_casamento',
+    'uniao_estavel',         # declaracao de uniao estavel (gov.br ou cartorio)
+    'certidao_nascimento',
+    'holerite',              # holerite verde padrao (vinculo de funcionario)
+    'contrato_estagio',
+    'carteira_trabalho',
+    'outro',
+]
 
 ESQUEMA = {
     'type': 'object',
     'properties': {
+        'arquivos': {
+            'type': 'array',
+            'description': 'Um item por ARQUIVO recebido, na mesma numeracao',
+            'items': {
+                'type': 'object',
+                'properties': {
+                    'indice': {'type': 'integer', 'description': 'O numero do ARQUIVO'},
+                    'tipo': {'type': 'string', 'enum': TIPOS},
+                    'pessoa': {
+                        'type': 'string',
+                        'description': 'Nome completo do titular do documento; vazio '
+                                       'quando o documento nao e de uma pessoa',
+                    },
+                    'certeza': {'type': 'string', 'enum': ['alta', 'media', 'baixa']},
+                },
+                'required': ['indice', 'tipo', 'pessoa', 'certeza'],
+                'additionalProperties': False,
+            },
+        },
         'pessoas': {
             'type': 'array',
             'items': {
@@ -60,29 +106,50 @@ ESQUEMA = {
             'description': 'Campos ilegiveis ou duvidosos, para o corretor conferir',
         },
     },
-    'required': ['pessoas', 'endereco', 'observacoes'],
+    'required': ['arquivos', 'pessoas', 'endereco', 'observacoes'],
     'additionalProperties': False,
 }
 
-INSTRUCAO = """Você recebeu fotos/digitalizações de documentos brasileiros (RG, CNH,
-comprovante de endereço) de uma proposta de plano de saúde.
+INSTRUCAO = """Você recebeu os documentos de uma proposta de plano de saúde empresarial
+brasileira. Cada imagem vem precedida de uma linha "ARQUIVO n" que diz a qual arquivo
+ela pertence — um mesmo arquivo pode ter mais de uma imagem (frente e verso, ou páginas
+de um PDF).
 
-Extraia os dados EXATAMENTE como aparecem. Regras:
+Faça duas coisas.
 
-- Um mesmo documento pode aparecer em duas imagens (frente e verso): junte numa
-  pessoa só, não invente duas.
-- Datas sempre em DD/MM/AAAA. A data de NASCIMENTO, nunca a de emissão ou validade.
-- CPF com pontuação: 000.000.000-00. RG como está impresso.
-- "mae" e "pai" vêm da filiação. Se só houver um, preencha o que existir e deixe o
-  outro vazio.
-- Sexo: "M" ou "F" conforme o documento. Se não estiver escrito, deduza pelo nome;
-  se ainda assim não der, deixe vazio.
-- Campo que você não conseguir ler: deixe vazio e escreva em "observacoes" qual foi
-  e de quem. NUNCA invente e NUNCA chute dígito de CPF ou RG.
-- O endereço vem do comprovante de endereço, se houver algum.
+**1) Classifique cada ARQUIVO** (um item em "arquivos" por número de ARQUIVO, nunca dois
+para o mesmo número):
 
-Se a imagem estiver ilegível, diga isso em "observacoes" em vez de adivinhar. Um
-dígito errado de CPF faz a proposta ser recusada pela operadora."""
+- "identidade": RG, CNH, CPF, carteira funcional ou de conselho de classe. Em "pessoa",
+  o nome completo do dono do documento.
+- "cartao_cnpj": cartão CNPJ / comprovante de inscrição da Receita Federal.
+- "contrato_social": contrato social, CCMEI, requerimento de empresário, alteração
+  contratual.
+- "comprovante_endereco": conta de luz, água, gás, telefone, internet ou boleto no
+  endereço. Em "pessoa", o nome que está na conta.
+- "certidao_casamento", "uniao_estavel", "certidao_nascimento": as certidões. Em
+  "pessoa", de quem é a certidão (na de nascimento, o nome de quem nasceu).
+- "holerite", "contrato_estagio", "carteira_trabalho": papéis de vínculo de trabalho.
+- "outro": qualquer coisa que não se encaixe.
+
+Em "certeza", diga o quanto você confia na classificação: "alta", "media" ou "baixa".
+Prefira "baixa" a chutar — o corretor revisa o que vier marcado assim.
+
+**2) Extraia os dados das pessoas** dos documentos de identidade e certidões:
+
+- Um mesmo documento em duas imagens (frente e verso) é UMA pessoa, não duas.
+- A mesma pessoa aparecendo em documentos diferentes (RG e CNH) também é uma só:
+  junte os dados.
+- Datas em DD/MM/AAAA. A de NASCIMENTO, nunca a de emissão ou validade.
+- CPF pontuado: 000.000.000-00. RG como está impresso.
+- "mae" e "pai" vêm da filiação. Se só houver um, preencha o que existir.
+- Sexo "M" ou "F" conforme o documento; se não estiver escrito, deduza pelo nome; se
+  ainda assim não der, deixe vazio.
+- O endereço vem do comprovante de endereço, se houver.
+
+Campo que você não conseguir ler: deixe vazio e escreva em "observacoes" qual foi e de
+quem. NUNCA invente e NUNCA chute dígito de CPF ou RG — um dígito errado faz a operadora
+recusar a proposta inteira."""
 
 
 class SemChave(RuntimeError):
@@ -93,7 +160,7 @@ def disponivel():
     return bool(os.environ.get('ANTHROPIC_API_KEY'))
 
 
-def _preparar(dados, nome):
+def _preparar(dados):
     """Reduz e converte para JPEG. Devolve (media_type, base64) ou None se nao for
     imagem legivel."""
     from PIL import Image, ImageOps
@@ -115,9 +182,8 @@ def _preparar(dados, nome):
     return 'image/jpeg', base64.standard_b64encode(buf.getvalue()).decode()
 
 
-def _paginas_do_pdf(dados, limite=4):
-    """PDF tambem e documento: converte as primeiras paginas em imagem.
-    Precisa do pypdfium2, que ja vem junto do pdfplumber."""
+def _paginas_do_pdf(dados, limite=PAGINAS_POR_PDF):
+    """PDF tambem e documento: converte as primeiras paginas em imagem."""
     try:
         import pypdfium2 as pdfium
     except ImportError:
@@ -129,7 +195,7 @@ def _paginas_do_pdf(dados, limite=4):
             pil = doc[i].render(scale=200 / 72).to_pil()
             buf = io.BytesIO()
             pil.convert('RGB').save(buf, format='JPEG', quality=85, optimize=True)
-            preparado = _preparar(buf.getvalue(), f'pag{i}')
+            preparado = _preparar(buf.getvalue())
             if preparado:
                 saida.append(preparado)
     except Exception:
@@ -137,31 +203,56 @@ def _paginas_do_pdf(dados, limite=4):
     return saida
 
 
+def _imagens_por_arquivo(arquivos):
+    """arquivos: [(nome, bytes)] -> [(indice, nome, media_type, b64)] respeitando o teto.
+
+    Percorre em rodadas (primeira imagem de cada arquivo, depois a segunda...) para
+    que um PDF gordo no comeco da fila nao consuma o teto e deixe os documentos do
+    fim sem nenhuma imagem - o que faria a IA nem enxergar que eles existem."""
+    por_arquivo = []
+    for nome, dados in arquivos:
+        if dados[:5] == b'%PDF-':
+            por_arquivo.append(_paginas_do_pdf(dados))
+        else:
+            p = _preparar(dados)
+            por_arquivo.append([p] if p else [])
+
+    saida, rodada = [], 0
+    while len(saida) < MAX_IMAGENS:
+        avancou = False
+        for i, imagens in enumerate(por_arquivo):
+            if rodada < len(imagens):
+                avancou = True
+                saida.append((i + 1, arquivos[i][0]) + imagens[rodada])
+                if len(saida) >= MAX_IMAGENS:
+                    break
+        if not avancou:
+            break
+        rodada += 1
+    # Volta a ordem natural (arquivo 1 antes do 2) para a IA nao ver as paginas
+    # embaralhadas.
+    saida.sort(key=lambda x: x[0])
+    return saida
+
+
 def ler(arquivos):
-    """arquivos: [(nome, bytes)]. Devolve o dicionario do ESQUEMA."""
+    """arquivos: [(nome, bytes)] na ordem em que o corretor soltou.
+    Devolve o dicionario do ESQUEMA; 'arquivos[].indice' e 1-based nessa mesma ordem."""
     if not disponivel():
         raise SemChave('ANTHROPIC_API_KEY não configurada.')
 
     import anthropic
 
-    imagens = []
-    for nome, dados in arquivos:
-        if dados[:5] == b'%PDF-':
-            imagens.extend(_paginas_do_pdf(dados))
-        else:
-            p = _preparar(dados, nome)
-            if p:
-                imagens.append(p)
-        if len(imagens) >= MAX_IMAGENS:
-            break
-    imagens = imagens[:MAX_IMAGENS]
-
+    imagens = _imagens_por_arquivo(arquivos)
     if not imagens:
-        return {'pessoas': [], 'endereco': {}, 'observacoes': [
-            'Nenhuma imagem legível foi enviada.']}
+        return {'arquivos': [], 'pessoas': [], 'endereco': {},
+                'observacoes': ['Nenhuma imagem legível foi enviada.']}
 
-    conteudo = [{'type': 'image', 'source': {'type': 'base64', 'media_type': mt, 'data': b64}}
-                for mt, b64 in imagens]
+    conteudo = []
+    for indice, nome, media_type, b64 in imagens:
+        conteudo.append({'type': 'text', 'text': f'ARQUIVO {indice}: {nome}'})
+        conteudo.append({'type': 'image', 'source': {
+            'type': 'base64', 'media_type': media_type, 'data': b64}})
     conteudo.append({'type': 'text', 'text': INSTRUCAO})
 
     cliente = anthropic.Anthropic()
@@ -174,13 +265,59 @@ def ler(arquivos):
 
     texto = next((b.text for b in resposta.content if b.type == 'text'), '{}')
     dados = json.loads(texto)
-    dados['_uso'] = {
-        'imagens': len(imagens),
-        'tokens_entrada': resposta.usage.input_tokens,
-        'tokens_saida': resposta.usage.output_tokens,
-        'modelo': MODELO,
-    }
+
+    # Devolve o nome do arquivo junto da classificacao: a tela mostra "rg.jpg ->
+    # documento de identidade", e o corretor confere sem abrir nada.
+    nomes = {i + 1: nome for i, (nome, _) in enumerate(arquivos)}
+    vistos = set()
+    limpos = []
+    for a in dados.get('arquivos', []):
+        i = a.get('indice')
+        if i not in nomes or i in vistos:
+            continue          # indice inventado ou repetido: descarta
+        vistos.add(i)
+        a['arquivo'] = nomes[i]
+        limpos.append(a)
+    # Arquivo que a IA nao classificou (ou que nem coube no teto de imagens) nao pode
+    # sumir da tela - entra como desconhecido para o corretor resolver na mao.
+    for i, nome in sorted(nomes.items()):
+        if i not in vistos:
+            limpos.append({'indice': i, 'arquivo': nome, 'tipo': 'outro',
+                           'pessoa': '', 'certeza': 'baixa'})
+    dados['arquivos'] = sorted(limpos, key=lambda a: a['indice'])
+
+    enviadas = len({i for i, _, _, _ in imagens})
+    if enviadas < len(arquivos):
+        dados.setdefault('observacoes', []).append(
+            f'Só couberam {enviadas} dos {len(arquivos)} arquivos nesta leitura '
+            f'(teto de {MAX_IMAGENS} imagens). Os demais ficaram sem classificação.')
+
+    dados['_uso'] = uso(resposta.usage.input_tokens, resposta.usage.output_tokens,
+                        len(arquivos), len(imagens))
     return dados
+
+
+# Preco do Haiku 4.5 (USD por milhao de tokens). Se MODELO mudar, mude aqui tambem -
+# o numero que aparece na tela de gestao sai daqui.
+PRECO_ENTRADA_USD = 1.00
+PRECO_SAIDA_USD = 5.00
+# Cambio usado para mostrar o custo em real. E uma referencia fixa de propria vontade:
+# buscar cotacao em tempo real numa tela de custo interno nao paga o que custa manter.
+CAMBIO_BRL = float(os.environ.get('CAMBIO_BRL', '5.40'))
+
+
+def uso(tokens_entrada, tokens_saida, n_arquivos=0, n_imagens=0):
+    """Traduz tokens em dinheiro. Usado na tela e no registro de custo."""
+    usd = (tokens_entrada / 1e6) * PRECO_ENTRADA_USD + (tokens_saida / 1e6) * PRECO_SAIDA_USD
+    return {
+        'arquivos': n_arquivos,
+        'imagens': n_imagens,
+        'tokens_entrada': tokens_entrada,
+        'tokens_saida': tokens_saida,
+        'modelo': MODELO,
+        'custo_usd': round(usd, 6),
+        'custo_brl': round(usd * CAMBIO_BRL, 4),
+    }
 
 
 def para_bloco_notas(dados):

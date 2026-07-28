@@ -202,15 +202,19 @@ def api_ler_documentos():
                                 'ANTHROPIC_API_KEY. Use o botão "Copiar prompt para o '
                                 'ChatGPT" na seção 2.', 'sem_chave': True}), 503
 
-    arquivos = []
-    for chave in request.files:
-        # So os documentos que carregam dado de pessoa. Cartao CNPJ ja vem da
-        # BrasilAPI e contrato social e longo demais para o pouco que acrescenta.
-        if chave.startswith(('doc_', 'comprovante_endereco', 'certidao_')):
-            arquivos += [(f.filename, f.read()) for f in request.files.getlist(chave)
-                         if f and f.filename]
+    # 'arquivo' e a area onde o corretor solta a pasta inteira de uma vez. A ordem
+    # do getlist e a mesma da tela, e e ela que amarra a classificacao de volta ao
+    # arquivo certo (leitor.ler devolve indice 1-based nessa ordem).
+    arquivos = [(f.filename, f.read()) for f in request.files.getlist('arquivo')
+                if f and f.filename]
     if not arquivos:
-        return jsonify({'erro': 'Envie ao menos um documento de identidade.'}), 400
+        # Compatibilidade com o fluxo antigo, campo por campo.
+        for chave in request.files:
+            if chave.startswith(('doc_', 'comprovante_endereco', 'certidao_')):
+                arquivos += [(f.filename, f.read()) for f in request.files.getlist(chave)
+                             if f and f.filename]
+    if not arquivos:
+        return jsonify({'erro': 'Envie ao menos um documento.'}), 400
 
     try:
         dados = leitor.ler(arquivos)

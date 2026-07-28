@@ -83,6 +83,21 @@
   .ia-box .status{display:block;margin-top:9px;}
   .ia-avisos{margin-top:10px;font-size:12.5px;color:var(--danger);}
   .ia-avisos div{padding:2px 0;}
+  .dropzone{border:2px dashed var(--accent);border-radius:9px;padding:22px 16px;text-align:center;
+    cursor:pointer;background:var(--surface);display:flex;flex-direction:column;gap:4px;}
+  .dropzone.sobre{background:var(--accent-soft);border-style:solid;}
+  .dropzone b{font-size:13.5px;}
+  .fila{margin-top:10px;display:flex;flex-direction:column;gap:5px;}
+  .fila-item{display:flex;align-items:center;gap:9px;background:var(--surface);
+    border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:12.5px;}
+  .fila-item .nome{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .fila-item select{font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid var(--line);
+    background:var(--surface-2);color:var(--ink);max-width:44%;}
+  .fila-item.duvida{border-color:var(--danger);}
+  .fila-item.duvida select{border-color:var(--danger);}
+  .marca{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;
+    padding:2px 6px;border-radius:5px;background:var(--accent-soft);color:var(--accent);flex-shrink:0;}
+  .marca.baixa{background:var(--danger-soft);color:var(--danger);}
 </style>
 </head>
 <body>
@@ -220,26 +235,39 @@
     </div>
     <p class="small" id="avisoVinculo" style="margin-top:6px;"></p>
 
+    {% if ia_disponivel %}
+    <div class="ia-box">
+      <b>Solte tudo de uma vez</b>
+      <p class="small">Arraste a pasta inteira aqui — RG, CNH, cartão CNPJ, contrato social,
+        comprovante, certidões. A IA lê, identifica o que é cada arquivo e distribui nos
+        campos certos abaixo. Você confere e corrige o que estiver errado.</p>
+
+      <div id="dropzone" class="dropzone" onclick="document.getElementById('arqInput').click()">
+        <b>Arraste os documentos aqui</b>
+        <span class="small">ou clique para escolher — PDF e foto</span>
+      </div>
+      <input type="file" id="arqInput" multiple accept="application/pdf,image/*"
+             style="display:none;" onchange="receberArquivos(this.files)">
+
+      <div id="filaBox"></div>
+      <div style="margin-top:10px;">
+        <button class="btn" id="btnLer" onclick="lerDocumentos(this)">Ler e organizar</button>
+        <span id="iaStatus" class="status"></span>
+      </div>
+      <div id="iaObs"></div>
+    </div>
+    {% else %}
+    <div class="ia-box">
+      <b>Leitura automática desligada</b>
+      <p class="small">Para a IA ler os documentos e distribuir sozinha, defina a variável
+        <code>ANTHROPIC_API_KEY</code> no Railway. Enquanto isso, use o botão
+        <b>Copiar prompt para o ChatGPT</b> na seção 2 e anexe os documentos campo a
+        campo abaixo.</p>
+    </div>
+    {% endif %}
+
     <div id="checklistBox" style="margin-top:14px;"></div>
     <div id="obsBox"></div>
-
-    <div class="ia-box">
-      {% if ia_disponivel %}
-      <b>Ler os documentos e preencher sozinho</b>
-      <p class="small">A IA lê as fotos que você subiu acima e preenche o bloco de notas
-        da seção 2. Você confere e corrige antes de gerar — nada vai para o PDF sem passar
-        pelos seus olhos.</p>
-      <button class="btn" onclick="lerDocumentos(this)">Ler documentos e preencher</button>
-      <span id="iaStatus" class="status"></span>
-      <div id="iaObs"></div>
-      {% else %}
-      <b>Leitura automática desligada</b>
-      <p class="small">Para a IA ler os documentos e preencher sozinha, defina a variável
-        <code>ANTHROPIC_API_KEY</code> no Railway. Custa cerca de US$ 0,015 por proposta.
-        Enquanto isso, use o botão <b>Copiar prompt para o ChatGPT</b> na seção 2 — mesmo
-        resultado, sem custo, só com um copia-e-cola a mais.</p>
-      {% endif %}
-    </div>
 
     <div style="margin-top:12px;">
       <button class="btn" onclick="gerarContrato()">Gerar contrato completo</button>
@@ -663,6 +691,10 @@ async function atualizarChecklist(){
 
   document.getElementById('obsBox').innerHTML = (d.observacoes||[]).map(o =>
     `<p class="small" style="color:var(--accent);margin-top:6px;">${o}</p>`).join('');
+
+  // Mudou quem é titular, ou o parentesco de alguém? Os documentos vão para os
+  // campos novos sozinhos, sem você reanexar nada.
+  distribuir();
 }
 
 function anexar(chave, files){
@@ -671,32 +703,172 @@ function anexar(chave, files){
   if (st){ st.textContent = files.length + ' arquivo(s)'; st.classList.add('ok'); }
 }
 
-// Manda para a IA os MESMOS arquivos já anexados na seção 7 e traz o bloco de notas
-// preenchido para a seção 2, onde o corretor confere e corrige.
+// ── Solta tudo de uma vez, a IA separa ──────────────────────────────────────
+// FILA guarda os arquivos crus na ordem em que o corretor soltou; o índice dessa
+// ordem é o que amarra a resposta da IA de volta ao arquivo certo.
+let FILA = [];        // [File]
+let CLASSE = [];      // [{indice, arquivo, tipo, pessoa, certeza, chave, manual}]
+
+// Tipo de papel (o que a IA enxerga) -> campo do contrato. 'identidade' fica de
+// fora: quem é dono, titular ou dependente depende de quem você marcou na seção 2,
+// não do que está impresso no RG.
+const MAPA_TIPOS = {
+  cartao_cnpj: 'cartao_cnpj',
+  contrato_social: 'contrato_social',
+  comprovante_endereco: 'comprovante_endereco',
+  holerite: 'vinculo',
+  contrato_estagio: 'vinculo',
+  carteira_trabalho: 'vinculo',
+  certidao_casamento: 'parentesco_conjuge',
+  uniao_estavel: 'parentesco_companheiro',
+  certidao_nascimento: 'parentesco_filho',
+};
+const ROTULO_TIPO = {
+  identidade:'Documento de identidade', cartao_cnpj:'Cartão CNPJ',
+  contrato_social:'Contrato social / CCMEI', comprovante_endereco:'Comprovante de endereço',
+  certidao_casamento:'Certidão de casamento', uniao_estavel:'União estável',
+  certidao_nascimento:'Certidão de nascimento', holerite:'Holerite',
+  contrato_estagio:'Contrato de estágio', carteira_trabalho:'Carteira de trabalho',
+  outro:'Não identificado',
+};
+
+function normNome(s){
+  return (s||'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toUpperCase().replace(/[^A-Z ]/g,' ').replace(/\s+/g,' ').trim();
+}
+// Nome de documento raramente bate caractere a caractere com o que foi digitado
+// (abreviação, nome do meio faltando). Primeiro e último sobrenome iguais já é
+// a mesma pessoa para efeito de separar os documentos.
+function mesmaPessoa(a, b){
+  const x = normNome(a).split(' '), y = normNome(b).split(' ');
+  if (x.length < 2 || y.length < 2) return false;
+  if (x.join(' ') === y.join(' ')) return true;
+  return x[0] === y[0] && x[x.length-1] === y[y.length-1];
+}
+
+function receberArquivos(files){
+  FILA = FILA.concat(Array.from(files));
+  CLASSE = [];
+  desenharFila();
+}
+function tirarDaFila(i){
+  FILA.splice(i, 1);
+  CLASSE = [];
+  desenharFila();
+}
+
+function desenharFila(){
+  const box = document.getElementById('filaBox');
+  if (!FILA.length){ box.innerHTML = ''; return; }
+
+  // Antes de ler, é só a lista do que vai subir.
+  if (!CLASSE.length){
+    box.innerHTML = '<div class="fila">' + FILA.map((f, i) => `
+      <div class="fila-item">
+        <span class="nome">${f.name}</span>
+        <button class="btn-remove" onclick="tirarDaFila(${i})">remover</button>
+      </div>`).join('') + '</div>';
+    return;
+  }
+
+  // Depois de ler, cada arquivo mostra onde foi parar e um seletor para corrigir.
+  const destinos = [{k:'', r:'— não usar —'}].concat(CHECKLIST.map(it => ({k:it.chave, r:it.rotulo})));
+  box.innerHTML = '<div class="fila">' + CLASSE.map((c, i) => {
+    const duvida = c.certeza === 'baixa' || !c.chave;
+    const opcoes = destinos.map(d =>
+      `<option value="${d.k}" ${d.k === c.chave ? 'selected' : ''}>${d.r}</option>`).join('');
+    // Um documento pode entrar em dois pontos do contrato (o RG do sócio titular vale
+    // como documento do dono E do titular). O segundo destino fica visível para você
+    // não achar que faltou.
+    const extra = (c.chaves || []).slice(1)
+      .map(k => (CHECKLIST.find(it => it.chave === k) || {}).rotulo).filter(Boolean);
+    return `
+      <div class="fila-item ${duvida ? 'duvida' : ''}">
+        <span class="marca ${duvida ? 'baixa' : ''}">${ROTULO_TIPO[c.tipo] || c.tipo}</span>
+        <span class="nome" title="${c.arquivo}${c.pessoa ? ' — ' + c.pessoa : ''}">${c.arquivo}${
+          c.pessoa ? ' · ' + c.pessoa : ''}${
+          extra.length ? ` <span style="color:var(--accent);">+ ${extra.join(' + ')}</span>` : ''}</span>
+        <select onchange="corrigirDestino(${i}, this.value)">${opcoes}</select>
+      </div>`;
+  }).join('') + '</div>';
+}
+
+function corrigirDestino(i, chave){
+  CLASSE[i].chave = chave;
+  CLASSE[i].chaves = chave ? [chave] : [];
+  CLASSE[i].manual = true;   // sua escolha não é sobrescrita na próxima redistribuição
+  distribuir();
+}
+
+// Decide o campo de cada arquivo cruzando o que a IA leu com quem você marcou como
+// titular/dependente. Roda de novo toda vez que o checklist muda — é isso que faz
+// os documentos se reorganizarem sozinhos quando você corrige um papel na seção 2.
+function distribuir(){
+  if (!CLASSE.length) return;
+  const titulares = PESSOAS.filter(p => p.papel === 'titular');
+  const dependentes = PESSOAS.filter(p => p.papel === 'dependente');
+  const dono = document.getElementById('rep_nome')?.value || '';
+  const chavesValidas = new Set(CHECKLIST.map(it => it.chave));
+
+  for (const c of CLASSE){
+    if (c.manual){ c.chaves = c.chave ? [c.chave] : []; continue; }  // você mandou, fica
+    let chaves = MAPA_TIPOS[c.tipo] ? [MAPA_TIPOS[c.tipo]] : [];
+
+    if (c.tipo === 'identidade'){
+      chaves = [];
+      // O documento do dono do CNPJ é item obrigatório do contrato mesmo quando ele
+      // é o próprio titular — nesse caso o mesmo papel entra duas vezes, em posições
+      // diferentes. Por isso os destinos se somam em vez de disputar.
+      if (dono && mesmaPessoa(dono, c.pessoa))                       chaves.push('doc_dono');
+      if (titulares.some(t => mesmaPessoa(t.nome, c.pessoa)))        chaves.push('doc_titular');
+      else if (dependentes.some(d => mesmaPessoa(d.nome, c.pessoa))) chaves.push('doc_dependentes');
+    }
+    // Certidão de nascimento de criança sem documento tem campo próprio.
+    if (c.tipo === 'certidao_nascimento' && chavesValidas.has('certidao_crianca')
+        && !chavesValidas.has('parentesco_filho')) chaves = ['certidao_crianca'];
+    // Campo que este caso não pede (ex.: vínculo quando o titular é sócio) não existe
+    // no checklist — não adianta jogar o arquivo lá.
+    c.chaves = chaves.filter(k => chavesValidas.has(k));
+    c.chave = c.chaves[0] || '';
+  }
+
+  // Reconstrói só os campos que a IA controla; o que você anexou na mão continua.
+  for (const c of CLASSE) for (const k of (c.chaves||[])) ARQUIVOS[k] = [];
+  for (const c of CLASSE) for (const k of (c.chaves||[])) ARQUIVOS[k].push(FILA[c.indice - 1]);
+
+  for (const it of CHECKLIST){
+    const st = document.getElementById('st-' + it.chave);
+    if (!st) continue;
+    const n = (ARQUIVOS[it.chave] || []).length;
+    st.textContent = n ? n + ' arquivo(s)' : 'faltando';
+    st.classList.toggle('ok', n > 0);
+  }
+  desenharFila();
+}
+
+// Manda a fila inteira para a IA: ela devolve os dados das pessoas E o que é cada
+// arquivo. O bloco de notas vai para a seção 2 e os documentos se distribuem sozinhos.
 async function lerDocumentos(botao){
   const st = document.getElementById('iaStatus');
   const obs = document.getElementById('iaObs');
   obs.innerHTML = '';
   st.className = 'status';
 
-  const fd = new FormData();
-  let n = 0;
-  for (const chave in ARQUIVOS){
-    if (!(chave.startsWith('doc_') || chave === 'comprovante_endereco' || chave.startsWith('certidao_'))) continue;
-    (ARQUIVOS[chave]||[]).forEach(f => { fd.append(chave, f); n++; });
-  }
-  if (!n){
-    st.textContent = 'Anexe ao menos um documento de identidade acima.';
+  if (!FILA.length){
+    st.textContent = 'Solte os documentos na área acima primeiro.';
     st.className = 'status err';
     return;
   }
+
+  const fd = new FormData();
+  FILA.forEach(f => fd.append('arquivo', f));
 
   // Cada leitura é uma chamada paga. Trava o botão para dois cliques não virarem
   // duas cobranças.
   botao.disabled = true;
   const rotulo = botao.textContent;
   botao.textContent = 'Lendo...';
-  st.textContent = `Lendo ${n} documento(s)...`;
+  st.textContent = `Lendo ${FILA.length} documento(s)...`;
   let r, d;
   try {
     r = await fetch('/api/ler-documentos', {method:'POST', body: fd});
@@ -718,7 +890,7 @@ async function lerDocumentos(botao){
   // Joga no campo de notas e interpreta com o mesmo parser do caminho manual —
   // um caminho só, testado, para os dois modos.
   document.getElementById('notasInput').value = d.bloco_notas || '';
-  await interpretarNotas();
+  await interpretarNotas();          // isso já dispara atualizarChecklist -> distribuir
 
   if (d.endereco && d.endereco.rua){
     ENDERECO_NOTAS = {
@@ -728,18 +900,38 @@ async function lerDocumentos(botao){
     };
   }
 
+  CLASSE = (d.arquivos || []).map(a => ({...a, chave: '', manual: false}));
+  await atualizarChecklist();        // redesenha os campos e chama distribuir()
+
   const u = d._uso || {};
-  st.textContent = `${(d.pessoas||[]).length} pessoa(s) lida(s). Confira na seção 2 antes de gerar.`;
-  st.className = 'status ok';
+  const semDestino = CLASSE.filter(c => !c.chave).length;
+  st.textContent = `${(d.pessoas||[]).length} pessoa(s) e ${CLASSE.length} documento(s) lidos.`
+    + (semDestino ? ` ${semDestino} sem destino — escolha abaixo.` : ' Confira antes de gerar.');
+  st.className = semDestino ? 'status err' : 'status ok';
 
   const avisos = (d.observacoes || []);
   obs.innerHTML =
     (avisos.length ? `<div class="ia-avisos"><b>A IA não conseguiu ler tudo — confira:</b>` +
       avisos.map(o => `<div>• ${o}</div>`).join('') + `</div>` : '') +
-    (u.tokens_entrada ? `<p class="small" style="margin-top:6px;">${u.imagens} imagem(ns) ·
-      ${u.tokens_entrada.toLocaleString('pt-BR')} tokens de entrada · modelo ${u.modelo}</p>` : '');
-  document.getElementById('sec-notas').scrollIntoView({behavior:'smooth', block:'start'});
+    (u.custo_brl != null ? `<p class="small" style="margin-top:6px;">${u.imagens} imagem(ns) ·
+      ${(u.tokens_entrada||0).toLocaleString('pt-BR')} tokens · custo desta leitura:
+      R$ ${u.custo_brl.toFixed(3).replace('.', ',')}</p>` : '');
 }
+
+// Arrastar direto para a área, sem passar pelo seletor de arquivos.
+(function(){
+  const dz = document.getElementById('dropzone');
+  if (!dz) return;
+  ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); dz.classList.add('sobre');
+  }));
+  ['dragleave','drop'].forEach(ev => dz.addEventListener(ev, e => {
+    e.preventDefault(); dz.classList.remove('sobre');
+  }));
+  dz.addEventListener('drop', e => {
+    if (e.dataTransfer && e.dataTransfer.files.length) receberArquivos(e.dataTransfer.files);
+  });
+})();
 
 async function gerarContrato(){
   const st = document.getElementById('contratoStatus');
