@@ -979,7 +979,6 @@ async function gerarContrato(){
 
   const dados = montarPayload();
   if (!dados) return;
-  dados.tipo_titular = TIPO_TITULAR;
 
   const fd = new FormData();
   fd.append('dados', JSON.stringify(dados));
@@ -1141,6 +1140,10 @@ function montarPayload(){
     carencia_outra_operadora: carencia,
     migracoes: [],
     titulares: gruposTitulares,
+    // o servidor remonta o checklist para saber o que cobrar do contrato; sem estes
+    // dois ele não teria como saber que o caso pede certidão de nascimento
+    tipo_titular: TIPO_TITULAR,
+    crianca_sem_documento: !!document.getElementById('criancaSemDoc')?.checked,
   };
   return dados;
 }

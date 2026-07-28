@@ -100,12 +100,18 @@ def _para_paginas(nome_arquivo, dados):
     return PdfReader(io.BytesIO(dados))
 
 
-def montar(gerados, anexos, titular_e_dono):
+def montar(gerados, anexos, titular_e_dono, exigidos=None):
     """Monta o contrato final.
 
-    gerados: {'proposta': bytes, 'fichas': [bytes, ...]}  - saida do motor
-    anexos:  {chave: [(nome_arquivo, bytes), ...]}        - o que o corretor subiu
+    gerados:  {'proposta': bytes, 'fichas': [bytes, ...]}  - saida do motor
+    anexos:   {chave: [(nome_arquivo, bytes), ...]}        - o que o corretor subiu
     titular_e_dono: bool - se True, a comprovacao de vinculo nao entra
+    exigidos: [{'chave','rotulo'}] obrigatorios DESTE caso, vindo de regras.checklist()
+
+    'exigidos' existe porque a lista de comprovacoes de parentesco depende de quem sao
+    os dependentes - isso e regra de negocio e mora em regras.py. Sem receber a lista,
+    esta funcao so sabia cobrar o que esta fixo aqui em cima, e um conjuge sem certidao
+    de casamento passava batido: o checklist da tela cobrava e o contrato nao reclamava.
 
     Devolve (bytes_do_pdf, roteiro) onde roteiro descreve o que entrou e o que faltou,
     para a interface mostrar ao corretor antes de ele mandar para a operadora.
@@ -160,9 +166,22 @@ def montar(gerados, anexos, titular_e_dono):
             # Ficam colados no bloco do dependente para o analista da operadora ler o
             # vinculo sem folhear o contrato inteiro atras da certidao.
             if chave == 'doc_dependentes':
-                for k in sorted(anexos):
-                    if k.startswith('parentesco_') or k == 'certidao_crianca':
-                        _juntar(f'Comprovação de parentesco{sufixo}', anexos[k])
+                enviados = [k for k in sorted(anexos)
+                            if k.startswith('parentesco_') or k == 'certidao_crianca']
+                for k in enviados:
+                    _juntar(f'Comprovação de parentesco{sufixo}', anexos[k])
+
+                # E cobra as que este caso exige e nao vieram. Só no bloco do primeiro
+                # titular: a lista de exigidos é da proposta inteira, não por titular,
+                # e repetir a cobrança em cada bloco contaria a mesma falta várias vezes.
+                if i == 0:
+                    for item in (exigidos or []):
+                        k = item.get('chave', '')
+                        if not (k.startswith('parentesco_') or k == 'certidao_crianca'):
+                            continue
+                        if not anexos.get(k):
+                            roteiro.append({'etapa': item.get('rotulo', k), 'arquivo': None,
+                                            'ok': False, 'detalhe': 'faltando'})
 
     # 9. Vinculo - sempre por ultimo, e so quando o titular nao e o dono do CNPJ
     chave, rotulo, _ = ETAPA_VINCULO

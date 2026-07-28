@@ -286,11 +286,25 @@ def api_contrato():
         if arquivos:
             anexos[chave] = arquivos
 
+    # A mesma lista que a tela usa para montar os campos de upload decide o que o
+    # contrato vai cobrar. Uma fonte so - antes o checklist exigia certidao de
+    # casamento e o contrato saia sem reclamar da falta dela.
+    tipo_titular = dados.get('tipo_titular') or 'socio'
+    parentescos = [d.get('parentesco_key') for g in (dados.get('titulares') or [])
+                   for d in (g.get('dependentes') or []) if d.get('parentesco_key')]
+    try:
+        exigidos = [i for i in regras.checklist(
+            tipo_titular, parentescos,
+            bool(dados.get('crianca_sem_documento')))['itens'] if i['obrigatorio']]
+    except ValueError:
+        exigidos = []          # tipo de titular recusado ja teria barrado antes
+
     try:
         final, roteiro = montagem.montar(
             {'proposta': pdfs[0][1], 'fichas': [b for _, b in pdfs[1:]]},
             anexos,
-            titular_e_dono=(dados.get('tipo_titular') or 'socio') == 'socio',
+            titular_e_dono=tipo_titular == 'socio',
+            exigidos=exigidos,
         )
     except Exception:
         app.logger.exception('falha ao montar o contrato')
