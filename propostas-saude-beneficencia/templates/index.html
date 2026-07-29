@@ -779,7 +779,10 @@ atualizarChecklist();
 // Vem preenchida do servidor quando a URL traz ?id=. Gerar de novo aqui não
 // sobrescreve nada: vira mais uma versão da mesma proposta.
 const PROPOSTA = {{ (proposta.dados if proposta else None)|tojson }};
-const PROPOSTA_ID = {{ (proposta.id if proposta else None)|tojson }};
+// let, não const: a primeira geração devolve o id da proposta criada e a tela passa
+// a usá-lo. Sem isso, cada clique em "Gerar contrato" criava uma proposta NOVA e o
+// acompanhamento enchia de rascunhos duplicados da mesma empresa.
+let PROPOSTA_ID = {{ (proposta.id if proposta else None)|tojson }};
 // {chave: [nomes]} do que ja esta no servidor. Não são File no navegador: ficam
 // guardados lá e entram no contrato sozinhos, por isso a tela precisa mostrá-los
 // como presentes em vez de "faltando".
@@ -1294,7 +1297,13 @@ async function gerarContrato(){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = nome; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
-  st.textContent = 'Contrato gerado. O download começou.';
+  // Vincula a tela à proposta: da próxima vez vira versão, não proposta nova.
+  const idNovo = r.headers.get('X-Proposta');
+  const primeira = !PROPOSTA_ID;
+  if (idNovo) PROPOSTA_ID = idNovo;
+  st.innerHTML = 'Contrato gerado. O download começou.'
+    + (PROPOSTA_ID ? ` <a class="link" href="/proposta/${PROPOSTA_ID}" target="_blank">ver no acompanhamento</a>` : '')
+    + (primeira ? '' : ' <span class="small">(nova versão da mesma proposta)</span>');
 
   // Mostra a ordem montada e o que faltou, para conferir antes de enviar
   let roteiro = [];

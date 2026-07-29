@@ -34,6 +34,12 @@
         <a class="btn sec" href="/proposta/{{ p.id }}/carta">Carta para assinar</a>
       {% endif %}
       <a class="btn" href="/?id={{ p.id }}">Abrir para corrigir</a>
+      {% if p.situacao == 'rascunho' %}
+        <form method="post" action="/proposta/{{ p.id }}/excluir" style="display:inline;"
+              onsubmit="return confirm('Excluir esta proposta e tudo dela — documentos, versões e histórico?');">
+          <button class="btn perigo" type="submit">Excluir</button>
+        </form>
+      {% endif %}
     </div>
   </div>
 

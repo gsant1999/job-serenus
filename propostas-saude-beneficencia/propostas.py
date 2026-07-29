@@ -323,6 +323,36 @@ def guardar_versao(pid, pdf, roteiro, usuario=None):
         return None
 
 
+def excluir(pid):
+    """Apaga a proposta, os anexos, as versoes e o historico dela.
+
+    Existe para limpar duplicata - nao para desfazer trabalho. Por isso a tela so
+    oferece em rascunho: proposta que ja foi para analise ou para a operadora tem
+    historico que alguem pode precisar."""
+    try:
+        with _conectar() as con:
+            arquivos = [a['arquivo'] for a in con.execute(
+                'SELECT arquivo FROM anexo WHERE proposta_id=?', (pid,))]
+            versoes = [v['arquivo'] for v in con.execute(
+                'SELECT arquivo FROM versao WHERE proposta_id=?', (pid,))]
+            for nome in arquivos:
+                try:
+                    os.remove(os.path.join(ANEXOS, nome))
+                except OSError:
+                    pass
+            for nome in versoes:
+                try:
+                    os.remove(os.path.join(VERSOES, nome))
+                except OSError:
+                    pass
+            for tabela in ('anexo', 'evento', 'versao'):
+                con.execute(f'DELETE FROM {tabela} WHERE proposta_id=?', (pid,))
+            con.execute('DELETE FROM proposta WHERE id=?', (pid,))
+        return True
+    except Exception:
+        return False
+
+
 def caminho_versao(pid, numero=None):
     """Caminho do PDF de uma versao (a ultima, se numero for None)."""
     try:

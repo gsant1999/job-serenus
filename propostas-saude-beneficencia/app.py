@@ -550,6 +550,25 @@ def baixar_carta(pid):
                      download_name=f'CARTA_CANCELAMENTO_{p["empresa"] or pid}.pdf')
 
 
+@app.route('/proposta/<pid>/excluir', methods=['POST'])
+@login_obrigatorio
+def excluir_proposta(pid):
+    """So rascunho e so o dono (ou um gestor). Proposta que ja andou no fluxo tem
+    historico que alguem pode precisar - essa some de vez."""
+    u = usuario_atual()
+    p = propostas.obter(pid)
+    if not p:
+        return 'Proposta não encontrada.', 404
+    if u['papel'] != 'gestor' and p['consultor_id'] != u['id']:
+        return 'Esta proposta é de outro consultor.', 403
+    if p['situacao'] != 'rascunho':
+        return render_template('recado.html', voltar=url_for('ver_proposta', pid=pid),
+                               erro='Só dá para excluir proposta em rascunho. Esta já '
+                                    'andou no fluxo e tem histórico.'), 400
+    propostas.excluir(pid)
+    return redirect(url_for('acompanhamento'))
+
+
 @app.route('/proposta/<pid>/versao/<int:numero>')
 @login_obrigatorio
 def baixar_versao(pid, numero):

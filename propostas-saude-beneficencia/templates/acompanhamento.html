@@ -34,7 +34,16 @@
           <td>{{ p.vidas }}</td>
           <td>{{ p.versoes }}</td>
           <td>{{ p.atualizado_em[8:10] }}/{{ p.atualizado_em[5:7] }} {{ p.atualizado_em[11:16] }}</td>
-          <td><a class="link" href="/proposta/{{ p.id }}">abrir</a></td>
+          <td>
+            <a class="link" href="/proposta/{{ p.id }}">abrir</a>
+            {% if p.situacao == 'rascunho' %}
+              <form method="post" action="/proposta/{{ p.id }}/excluir" style="display:inline;margin-left:8px;"
+                    onsubmit="return confirm('Excluir esta proposta e tudo dela?');">
+                <button type="submit" style="background:none;border:none;padding:0;cursor:pointer;
+                        color:var(--danger);font-size:12.5px;font-weight:700;">excluir</button>
+              </form>
+            {% endif %}
+          </td>
         </tr>
       {% endfor %}
       </tbody>
