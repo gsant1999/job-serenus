@@ -56,6 +56,40 @@
   </div>
   {% endif %}
 
+  {% if media_comissao %}
+  <div class="card">
+    <div class="card-header"><h3>Média de comissão por mês{% if session.perfil == 'admin' %}, por consultor{% endif %}</h3></div>
+    <div style="padding:2px 16px 10px; font-size:12.5px; color:var(--cinza); line-height:1.55;">
+      Média por <b>mês ativo</b> — mês em que a pessoa produziu. Contado pelo <b>ciclo de vendas</b> (mês-meta),
+      não pelo calendário. Proposta excluída ou estornada não entra, igual ao cálculo de produção.
+    </div>
+    <table>
+      <thead><tr>
+        <th>Consultor</th><th>Meses ativos</th><th>Propostas</th>
+        {% if session.perfil == 'admin' %}<th>Bruto / mês</th>{% endif %}
+        <th>Do consultor / mês</th>
+        {% if session.perfil == 'admin' %}<th>Líquido {{ brand.nome_curto }} / mês</th><th>Margem</th>{% endif %}
+      </tr></thead>
+      <tbody>
+        {% for c in media_comissao %}
+        <tr>
+          <td><strong>{{ c.consultor }}</strong></td>
+          <td class="td-mono">{{ c.meses }}</td>
+          <td class="td-mono">{{ c.qtd }}</td>
+          {% if session.perfil == 'admin' %}<td class="td-mono" style="color:var(--info);">{{ c.bruto_mes|moeda }}</td>{% endif %}
+          <td class="td-mono" style="color:var(--erro);">{{ c.consultor_mes|moeda }}</td>
+          {% if session.perfil == 'admin' %}
+          {% set mg = (c.liquido_total / c.bruto_total * 100) if c.bruto_total else 0 %}
+          <td class="td-mono" style="color:var(--verde); font-weight:600;">{{ c.liquido_mes|moeda }}</td>
+          <td><span class="tag {{ 'tag-verde' if mg > 50 else 'tag-am' }}">{{ "%.1f"|format(mg) }}%</span></td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   <div class="card">
     <div class="card-header"><h3>Detalhamento por operadora</h3></div>
     <table>

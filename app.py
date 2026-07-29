@@ -8105,6 +8105,38 @@ def bi():
         por_consultor = conn.execute("""SELECT consultor,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,
             COALESCE(SUM(comissao_consultor),0) com,COALESCE(SUM(total_vidas),0) vidas
             FROM propostas GROUP BY consultor ORDER BY valor DESC""").fetchall()
+        # KPI: média de comissão POR MÊS por consultor, nos 3 níveis (bruto que
+        # entra na corretora, parte do consultor, líquido que sobra). Agrupado
+        # por mes_meta (CICLO de vendas, não mês do calendário) e com o mesmo
+        # filtro que _producao_mes usa pra definir comissão: proposta excluída
+        # ou estornada não conta. A média é por MÊS ATIVO (mês em que a pessoa
+        # produziu) — dividir por todos os meses do histórico puniria quem
+        # entrou depois e faria o número dizer outra coisa.
+        # CAST em criado_em: substr() direto em timestamp quebra no Postgres.
+        com_media = conn.execute("""SELECT consultor,
+                COUNT(DISTINCT COALESCE(NULLIF(mes_meta,''), substr(CAST(criado_em AS TEXT),1,7))) meses,
+                COUNT(*) qtd,
+                COALESCE(SUM(comissao_total_corretora),0) bruto,
+                COALESCE(SUM(comissao_consultor),0) do_consultor,
+                COALESCE(SUM(comissao_corretora_liquida),0) liquido
+            FROM propostas
+            WHERE status <> 'Excluída' AND COALESCE(estornada,0)=0
+            GROUP BY consultor""").fetchall()
+        media_comissao = []
+        for r in com_media:
+            m = r['meses'] or 0
+            if not m:
+                continue
+            media_comissao.append({
+                'consultor': r['consultor'] or '—', 'meses': m, 'qtd': r['qtd'],
+                'bruto_mes': (r['bruto'] or 0) / m,
+                'consultor_mes': (r['do_consultor'] or 0) / m,
+                'liquido_mes': (r['liquido'] or 0) / m,
+                'bruto_total': r['bruto'] or 0,
+                'consultor_total': r['do_consultor'] or 0,
+                'liquido_total': r['liquido'] or 0,
+            })
+        media_comissao.sort(key=lambda x: x['bruto_mes'], reverse=True)
     else:
         por_mes = conn.execute("""SELECT strftime('%Y-%m',criado_em) mes,COUNT(*) qtd,
             COALESCE(SUM(valor),0) valor,COALESCE(SUM(comissao_consultor),0) com_consultor
@@ -8115,9 +8147,25 @@ def bi():
         por_modalidade = conn.execute("""SELECT modalidade,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
             FROM propostas WHERE usuario_id=? GROUP BY modalidade ORDER BY valor DESC""",(uid,)).fetchall()
         por_consultor = []
+        # Consultor vê só a média DELE, e só a própria comissão — bruto da
+        # corretora e líquido da Serenus são margem da empresa, não vão pra cá.
+        r = conn.execute("""SELECT
+                COUNT(DISTINCT COALESCE(NULLIF(mes_meta,''), substr(CAST(criado_em AS TEXT),1,7))) meses,
+                COUNT(*) qtd,
+                COALESCE(SUM(comissao_consultor),0) do_consultor
+            FROM propostas
+            WHERE usuario_id=? AND status <> 'Excluída' AND COALESCE(estornada,0)=0""",(uid,)).fetchone()
+        media_comissao = []
+        if r and (r['meses'] or 0):
+            media_comissao.append({
+                'consultor': session.get('nome') or 'Você', 'meses': r['meses'], 'qtd': r['qtd'],
+                'consultor_mes': (r['do_consultor'] or 0) / r['meses'],
+                'consultor_total': r['do_consultor'] or 0,
+            })
     close_db(conn)
     return render_template('bi.html', por_mes=por_mes, por_operadora=por_operadora,
-                           por_modalidade=por_modalidade, por_consultor=por_consultor)
+                           por_modalidade=por_modalidade, por_consultor=por_consultor,
+                           media_comissao=media_comissao)
 
 # ─── USUÁRIOS ────────────────────────────────────────────────────────────────────
 @app.route('/usuarios')
