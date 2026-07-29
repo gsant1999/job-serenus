@@ -103,7 +103,16 @@ def documento_de_parentesco(parentesco):
     return DEPENDENTES[parentesco][2]
 
 
-def checklist(tipo_titular, parentescos_dependentes, tem_criancas_sem_documento=False):
+# Filho em comum entre o titular e o conjuge/companheiro comprova o vinculo do casal:
+# a certidao de nascimento da crianca traz os dois nomes na filiacao, e isso basta para
+# a Bene. Vale SO se a crianca entrar no contrato - se ela ficar de fora, o pacote nao
+# tem o papel que liga um conjuge ao outro, e volta a exigir certidao de casamento ou
+# declaracao de uniao estavel.
+PROVAS_DE_CASAL = ('parentesco_conjuge', 'parentesco_companheiro')
+
+
+def checklist(tipo_titular, parentescos_dependentes, tem_criancas_sem_documento=False,
+              filho_em_comum=False):
     """Monta a lista de documentos que ESTE caso exige, para o corretor conferir
     antes de mandar para a operadora.
 
@@ -145,6 +154,23 @@ def checklist(tipo_titular, parentescos_dependentes, tem_criancas_sem_documento=
     if tem_criancas_sem_documento:
         itens.append(('certidao_crianca', 'Certidão de nascimento da criança', True,
                       'Criança sem RG, CPF ou CNH entra pela certidão'))
+
+    # Filho em comum no contrato dispensa a prova de casal - mas so quando ha filho E
+    # conjuge/companheiro na MESMA proposta. Marcar a caixa sem o filho entrar nao tira
+    # a exigencia: o que comprova e a certidao dele dentro do pacote.
+    tem_filho = 'filho' in parentescos
+    tem_casal = any(p in ('conjuge', 'companheiro') for p in parentescos)
+    if filho_em_comum and tem_filho and tem_casal:
+        itens = [i for i in itens if i[0] not in PROVAS_DE_CASAL]
+        observacoes.append(
+            'Filho(a) em comum entrando no contrato: a certidão de nascimento dele(a) '
+            'traz os dois nomes na filiação e já comprova o vínculo do casal — não '
+            'precisa de certidão de casamento nem de declaração de união estável.')
+    elif filho_em_comum and tem_casal and not tem_filho:
+        observacoes.append(
+            'Filho(a) em comum só dispensa a certidão de casamento se a criança '
+            'TAMBÉM entrar no contrato. Como ela ficou de fora, o vínculo do casal '
+            'continua precisando do papel próprio.')
 
     # tira duplicata mantendo a ordem (ex.: dois filhos pedem a mesma certidao)
     vistos, unicos = set(), []

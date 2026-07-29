@@ -575,15 +575,36 @@ function renderPessoas(){
         <div class="chips">
           ${PARENTESCOS.map(o => `<div class="chip ${p.parentesco_key===o.k?'on':''}" onclick="definirParentesco(${idx},'${o.k}','${o.r}');escolherUnico(this.parentNode,this)">${o.r}</div>`).join('')}
         </div>
+        ${p.parentesco_key === 'filho' ? `
+        <label class="chip" style="margin-top:8px;display:inline-flex;align-items:center;">
+          <input type="checkbox" ${p.filho_em_comum ? 'checked' : ''} style="margin-right:6px;"
+                 onchange="definirFilhoEmComum(${idx}, this.checked)">
+          Filho(a) em comum com o cônjuge/companheiro(a) do titular
+        </label>
+        <div class="small" style="margin-top:4px;">
+          Marque se a criança é do casal e está entrando no contrato: a certidão dela
+          comprova o vínculo dos dois, dispensando certidão de casamento ou união estável.
+        </div>` : ''}
       </div>
       ${vinculoHtml}
       <div class="saude-box">
         <label>Declaração de saúde (página 2 da ficha)</label>
         <div class="chips">
-          <div class="chip ${!p.portabilidade?'on':''}" onclick="definirSaude(${idx},false)">Entrevista médica</div>
-          <div class="chip ${p.portabilidade?'on':''}" onclick="definirSaude(${idx},true)">Portabilidade</div>
+          <div class="chip ${!p.portabilidade && !p.migracao?'on':''}" onclick="definirSaude(${idx},'entrevista')">Entrevista médica</div>
+          <div class="chip ${p.portabilidade?'on':''}" onclick="definirSaude(${idx},'portabilidade')">Portabilidade</div>
+          <div class="chip ${p.migracao?'on':''}" onclick="definirSaude(${idx},'migracao')">Migração administrativa</div>
         </div>
-        <div id="dataEntrevistaBox${idx}" style="margin-top:8px;display:${p.portabilidade?'none':'block'};max-width:220px;">
+        <div id="migracaoBox${idx}" style="margin-top:8px;display:${p.migracao?'block':'none'};max-width:320px;">
+          <label>Valor que esta vida paga hoje na Beneficência</label>
+          <div class="row">
+            <input type="text" value="${p.valor_migracao||''}" placeholder="0,00"
+                   oninput="PESSOAS[${idx}].valor_migracao=this.value">
+            <input type="text" value="${p.obs_migracao||''}" placeholder="observação (opcional)"
+                   oninput="PESSOAS[${idx}].obs_migracao=this.value">
+          </div>
+          <div class="small" style="margin-top:4px;">Vai para a tabela de migrações da folha 2.</div>
+        </div>
+        <div id="dataEntrevistaBox${idx}" style="margin-top:8px;display:${p.portabilidade||p.migracao?'none':'block'};max-width:220px;">
           <label>Data da entrevista</label>
           <input type="date" value="${paraIso(p.data_entrevista)}"
                  onchange="PESSOAS[${idx}].data_entrevista=paraBr(this.value)">
@@ -799,6 +820,13 @@ const PARENTESCOS = [
 function definirParentesco(idx, chave, rotulo){
   PESSOAS[idx].parentesco_key = chave;
   PESSOAS[idx].parentesco = rotulo;   // é o texto que vai impresso na Ficha
+  if (chave !== 'filho') PESSOAS[idx].filho_em_comum = false;
+  renderPessoas();                    // faz aparecer/sumir a pergunta do filho em comum
+  atualizarChecklist();
+}
+
+function definirFilhoEmComum(idx, valor){
+  PESSOAS[idx].filho_em_comum = valor;
   atualizarChecklist();
 }
 
@@ -819,7 +847,10 @@ async function atualizarChecklist(){
   // Criança sem nenhum documento: o corretor marca no próprio item da lista.
   const r = await fetch('/api/checklist', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({tipo_titular: TIPO_TITULAR, parentescos: deps,
-                          crianca_sem_documento: !!document.getElementById('criancaSemDoc')?.checked})});
+                          crianca_sem_documento: !!document.getElementById('criancaSemDoc')?.checked,
+                          // só conta se o filho em comum estiver de fato no contrato
+                          filho_em_comum: PESSOAS.some(p => p.papel === 'dependente'
+                                          && p.parentesco_key === 'filho' && p.filho_em_comum)})});
   if (!r.ok) return;
   const d = await r.json();
   CHECKLIST = d.itens;
@@ -1187,9 +1218,14 @@ function definirEstadoCivil(idx, key){
   renderPessoas();
 }
 
-function definirSaude(idx, portabilidade){
-  PESSOAS[idx].portabilidade = portabilidade;
-  if (portabilidade) PESSOAS[idx].data_entrevista = '';
+function definirSaude(idx, modo){
+  const p = PESSOAS[idx];
+  p.portabilidade = modo === 'portabilidade';
+  p.migracao      = modo === 'migracao';
+  // Portabilidade e migração não têm entrevista: a data sai para não ir data velha
+  // impressa junto da palavra na ficha.
+  if (modo !== 'entrevista') p.data_entrevista = '';
+  if (modo !== 'migracao'){ p.valor_migracao = ''; p.obs_migracao = ''; }
   renderPessoas();
   // se alguém é portabilidade, a folha marca "aproveitamento de carências: SIM"
   var temPort = PESSOAS.some(function(p){ return p.portabilidade; });
@@ -1293,9 +1329,19 @@ function montarPayload(){
       recebeu: recebeu,
       // valor da mensalidade vai sempre, marcando SIM ou NÃO
       valor: parseFloat((document.getElementById('valorRecebido').value||'0').replace(/\./g,'').replace(',', '.')) || 0,
+      // Soma do que as vidas migradas já pagam: é o total repassado à operadora,
+      // impresso no campo próprio da folha 1.
+      valor_migracoes: PESSOAS.filter(p => p.migracao).reduce((t, p) =>
+        t + (parseFloat((p.valor_migracao||'0').toString().replace(/\./g,'').replace(',', '.')) || 0), 0),
     },
     carencia_outra_operadora: carencia,
-    migracoes: [],
+    // Quem já está na Beneficência por outro contrato entra na tabela da folha 2:
+    // é assim que a operadora liga a vida nova à apólice que ela já tem.
+    migracoes: PESSOAS.filter(p => p.migracao).map(p => ({
+      nome: up(p.nome),
+      valor: parseFloat((p.valor_migracao||'0').toString().replace(/\./g,'').replace(',', '.')) || 0,
+      observacao: up(p.obs_migracao || ''),
+    })),
     titulares: gruposTitulares,
     // o servidor remonta o checklist para saber o que cobrar do contrato; sem estes
     // dois ele não teria como saber que o caso pede certidão de nascimento

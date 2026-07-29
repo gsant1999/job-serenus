@@ -247,6 +247,7 @@ def api_checklist():
             d.get('tipo_titular') or 'socio',
             d.get('parentescos') or [],
             bool(d.get('crianca_sem_documento')),
+            bool(d.get('filho_em_comum')),
         ))
     except ValueError as e:
         return jsonify({'erro': str(e)}), 400
@@ -357,9 +358,12 @@ def api_contrato():
     parentescos = [d.get('parentesco_key') for g in (dados.get('titulares') or [])
                    for d in (g.get('dependentes') or []) if d.get('parentesco_key')]
     try:
+        filho_comum = any(d.get('filho_em_comum') for g in (dados.get('titulares') or [])
+                          for d in (g.get('dependentes') or []))
         exigidos = [i for i in regras.checklist(
             tipo_titular, parentescos,
-            bool(dados.get('crianca_sem_documento')))['itens'] if i['obrigatorio']]
+            bool(dados.get('crianca_sem_documento')),
+            filho_comum)['itens'] if i['obrigatorio']]
     except ValueError:
         exigidos = []          # tipo de titular recusado ja teria barrado antes
 

@@ -623,7 +623,17 @@ DEP_CAMPOS = [
 
 
 def _saude_texto(pessoa):
-    """Pagina 2 da Ficha: data da entrevista medica OU a palavra PORTABILIDADE."""
+    """Pagina 2 da Ficha: como esta vida entra no plano.
+
+    Tres caminhos, e o campo e o mesmo para os tres:
+      - entrevista medica: vai a data
+      - portabilidade de carencias: a palavra PORTABILIDADE
+      - migracao administrativa: a palavra MIGRACAO ADMINISTRATIVA. E quando a pessoa
+        JA esta na Beneficencia por outro contrato; nao ha entrevista a marcar, e a
+        operadora precisa ler isso aqui para ligar as duas apolices.
+    """
+    if pessoa.get('migracao'):
+        return 'MIGRAÇÃO ADMINISTRATIVA'
     if pessoa.get('portabilidade'):
         return 'PORTABILIDADE'
     return (pessoa.get('data_entrevista') or '').strip()
