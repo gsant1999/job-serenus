@@ -8174,6 +8174,7 @@ def bi():
         com_media = conn.execute(f"""SELECT consultor,
                 COUNT(DISTINCT COALESCE(NULLIF(mes_meta,''), substr(CAST(criado_em AS TEXT),1,7))) meses,
                 COUNT(*) qtd,
+                COALESCE(SUM(valor),0) producao,
                 COALESCE(SUM(comissao_total_corretora),0) bruto,
                 COALESCE(SUM(comissao_consultor),0) do_consultor,
                 COALESCE(SUM(comissao_corretora_liquida),0) liquido
@@ -8185,6 +8186,7 @@ def bi():
             m = r['meses'] or 0
             if not m:
                 continue
+            prod_c = r['producao'] or 0
             media_comissao.append({
                 'consultor': r['consultor'] or '—', 'meses': m, 'qtd': r['qtd'],
                 'bruto_mes': (r['bruto'] or 0) / m,
@@ -8193,8 +8195,53 @@ def bi():
                 'bruto_total': r['bruto'] or 0,
                 'consultor_total': r['do_consultor'] or 0,
                 'liquido_total': r['liquido'] or 0,
+                # % sobre a PRODUÇÃO do consultor (mesma lógica do card geral) —
+                # normal passar de 100%: comissão é em Nº DE MENSALIDADES
+                # acumuladas (ex: 2,8 mensalidades = 280%), não uma fração de
+                # uma mensalidade só (ver /operadoras, onde isso é configurado).
+                'bruto_pct': (r['bruto'] or 0) / prod_c * 100 if prod_c else 0,
+                'consultor_pct': (r['do_consultor'] or 0) / prod_c * 100 if prod_c else 0,
+                'liquido_pct': (r['liquido'] or 0) / prod_c * 100 if prod_c else 0,
             })
         media_comissao.sort(key=lambda x: x['bruto_mes'], reverse=True)
+        # DIAGNÓSTICO: propostas do período com comissão bruta zerada — sinal
+        # de que falta cadastrar o RECEBIMENTO ou o REPASSE daquela operadora/
+        # plano em /operadoras ou /repasses. Esse check já existia (motor
+        # calc_comissao já gera o aviso 'Falta RECEBIMENTO'/'Falta REPASSE',
+        # e /admin/db/detalhes já contava quantas tinham comissão zerada) mas
+        # ficava só num endpoint JSON interno que ninguém via na prática
+        # (Guilherme, 29/07: "tem como eu saber se tem algo de errado"). Reusa
+        # o MESMO calc_comissao da tela de detalhe da proposta, só que
+        # aplicado a todas as zeradas do período, agrupado por aviso pra não
+        # virar uma lista repetida de 40 linhas iguais.
+        zeradas = conn.execute(f"""SELECT id, razao_social, adm_operadora, modalidade,
+                tipo_pessoa, valor, usuario_id
+            FROM propostas WHERE {base_sql}
+              AND COALESCE(valor,0) > 0
+              AND (comissao_total_corretora IS NULL OR comissao_total_corretora = 0)
+            ORDER BY id""", filtro_mes_params).fetchall()
+        avisos_comissao = []
+        if zeradas:
+            regimes = {}
+            for r in conn.execute("SELECT id, regime_base FROM usuarios").fetchall():
+                regimes[r['id']] = r['regime_base'] or 'sem_lead_sem_fixo'
+            por_aviso = {}
+            for p in zeradas:
+                try:
+                    cc = calc_comissao(p['adm_operadora'], regimes.get(p['usuario_id'], 'sem_lead_sem_fixo'),
+                                       0, p['valor'] or 0, p['modalidade'],
+                                       p['tipo_pessoa'] if 'tipo_pessoa' in p.keys() else '')
+                    aviso = (cc.get('aviso') or '').strip()
+                except Exception:
+                    aviso = ''
+                chave = aviso or f"Comissão zerada: {p['adm_operadora'] or '—'} / {p['modalidade'] or '—'} (verificar cadastro)"
+                if chave not in por_aviso:
+                    por_aviso[chave] = {'aviso': chave, 'qtd': 0, 'valor': 0, 'exemplos': []}
+                por_aviso[chave]['qtd'] += 1
+                por_aviso[chave]['valor'] += p['valor'] or 0
+                if len(por_aviso[chave]['exemplos']) < 4:
+                    por_aviso[chave]['exemplos'].append({'id': p['id'], 'nome': p['razao_social']})
+            avisos_comissao = sorted(por_aviso.values(), key=lambda x: x['qtd'], reverse=True)
     else:
         por_mes = conn.execute("""SELECT strftime('%Y-%m',criado_em) mes,COUNT(*) qtd,
             COALESCE(SUM(valor),0) valor,COALESCE(SUM(comissao_consultor),0) com_consultor
@@ -8228,11 +8275,16 @@ def bi():
                 'consultor': session.get('nome') or 'Você', 'meses': r2['meses'], 'qtd': r2['qtd'],
                 'consultor_mes': (r2['do_consultor'] or 0) / r2['meses'],
                 'consultor_total': r2['do_consultor'] or 0,
+                'consultor_pct': pct_geral['consultor_pct'],
             })
+        # Diagnóstico de cadastro é operação da corretora (config de operadora/
+        # repasse) — só admin vê, mesma régua do bruto/líquido nesta página.
+        avisos_comissao = []
     close_db(conn)
     return render_template('bi.html', por_mes=por_mes, por_operadora=por_operadora,
                            por_modalidade=por_modalidade, por_consultor=por_consultor,
                            media_comissao=media_comissao, pct_geral=pct_geral,
+                           avisos_comissao=avisos_comissao,
                            f_mes=f_mes, meses_disponiveis=meses_disponiveis)
 
 # ─── USUÁRIOS ────────────────────────────────────────────────────────────────────

@@ -20,6 +20,31 @@
 
 <div class="page">
 
+  {% if avisos_comissao %}
+  <div class="card" style="border-color:rgba(250,204,21,.35);">
+    <div class="card-header"><h3>Diagnóstico de comissão — {{ avisos_comissao|sum(attribute='qtd') }} proposta(s) com comissão zerada</h3></div>
+    <div style="padding:0 16px 6px; font-size:12.5px; color:var(--cinza); line-height:1.55;">
+      Comissão bruta zerada quase sempre é <b style="color:var(--texto);">falta de cadastro</b> — recebimento da
+      operadora não configurado em <a href="/operadoras" style="color:var(--info);">Operadoras</a>, ou repasse não
+      configurado em <a href="/repasses" style="color:var(--info);">Repasses</a>. Só do período filtrado.
+    </div>
+    <div style="padding:6px 16px 16px; display:flex; flex-direction:column; gap:8px;">
+      {% for a in avisos_comissao %}
+      <div style="background:var(--panel-2); border-radius:10px; padding:10px 14px;">
+        <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline;">
+          <strong style="font-size:13px;">{{ a.aviso }}</strong>
+          <span class="tag tag-am">{{ a.qtd }} proposta{{ 's' if a.qtd != 1 else '' }} · {{ a.valor|moeda }}</span>
+        </div>
+        <div style="font-size:11.5px; color:var(--cinza); margin-top:4px;">
+          {% for ex in a.exemplos %}<a href="/proposta/{{ ex.id }}" style="color:var(--info); margin-right:10px;">#{{ ex.id }} {{ ex.nome }}</a>{% endfor %}
+          {% if a.qtd > a.exemplos|length %}<span>+ {{ a.qtd - a.exemplos|length }} outra(s)</span>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   {% if pct_geral %}
   <div class="card">
     <div class="card-header"><h3>% de comissão sobre a produção {% if f_mes != 'todos' %}({{ {'01':'Janeiro','02':'Fevereiro','03':'Março','04':'Abril','05':'Maio','06':'Junho','07':'Julho','08':'Agosto','09':'Setembro','10':'Outubro','11':'Novembro','12':'Dezembro'}[f_mes[5:7]] }}/{{ f_mes[:4] }}){% else %}(todo o período){% endif %}</h3></div>
@@ -44,7 +69,11 @@
       </div>
       {% endif %}
     </div>
-    <div style="padding:0 16px 14px; font-size:12px; color:var(--cinza);">Produção do período: {{ pct_geral.producao|moeda }}. % sobre o valor total das propostas (exclui excluídas e estornadas).</div>
+    <div style="padding:0 16px 14px; font-size:12px; color:var(--cinza); line-height:1.55;">
+      Produção do período: {{ pct_geral.producao|moeda }}. % sobre o valor total das propostas (exclui excluídas e estornadas).
+      <b style="color:var(--texto);">Normal passar de 100%</b> — a comissão da operadora é em <b>número de mensalidades acumuladas</b>
+      (ex: 2,8 mensalidades = 280%, configurado em <a href="/operadoras" style="color:var(--info);">Operadoras</a>), não uma fração de uma mensalidade só.
+    </div>
   </div>
   {% endif %}
 
@@ -98,6 +127,7 @@
     <div style="padding:2px 16px 10px; font-size:12.5px; color:var(--cinza); line-height:1.55;">
       Média por <b>mês ativo</b> — mês em que a pessoa produziu. Contado pelo <b>ciclo de vendas</b> (mês-meta),
       não pelo calendário. Proposta excluída ou estornada não entra, igual ao cálculo de produção.
+      O <b>%</b> abaixo de cada valor é sobre a produção do próprio consultor no período (pode passar de 100% — ver explicação acima).
     </div>
     <table>
       <thead><tr>
@@ -112,11 +142,13 @@
           <td><strong>{{ c.consultor }}</strong></td>
           <td class="td-mono">{{ c.meses }}</td>
           <td class="td-mono">{{ c.qtd }}</td>
-          {% if session.perfil == 'admin' %}<td class="td-mono" style="color:var(--info);">{{ c.bruto_mes|moeda }}</td>{% endif %}
-          <td class="td-mono" style="color:var(--erro);">{{ c.consultor_mes|moeda }}</td>
+          {% if session.perfil == 'admin' %}
+          <td class="td-mono" style="color:var(--info);">{{ c.bruto_mes|moeda }}<div style="font-size:10.5px;color:var(--cinza);">{{ "%.1f"|format(c.bruto_pct) }}%</div></td>
+          {% endif %}
+          <td class="td-mono" style="color:var(--erro);">{{ c.consultor_mes|moeda }}<div style="font-size:10.5px;color:var(--cinza);">{{ "%.1f"|format(c.consultor_pct) }}%</div></td>
           {% if session.perfil == 'admin' %}
           {% set mg = (c.liquido_total / c.bruto_total * 100) if c.bruto_total else 0 %}
-          <td class="td-mono" style="color:var(--verde); font-weight:600;">{{ c.liquido_mes|moeda }}</td>
+          <td class="td-mono" style="color:var(--verde); font-weight:600;">{{ c.liquido_mes|moeda }}<div style="font-size:10.5px;color:var(--cinza); font-weight:400;">{{ "%.1f"|format(c.liquido_pct) }}%</div></td>
           <td><span class="tag {{ 'tag-verde' if mg > 50 else 'tag-am' }}">{{ "%.1f"|format(mg) }}%</span></td>
           {% endif %}
         </tr>
