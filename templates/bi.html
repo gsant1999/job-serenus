@@ -7,10 +7,46 @@
     <h1>Análises</h1>
     <div class="sub">{% if session.perfil == 'admin' %}Visão completa da corretora{% else %}Sua produção pessoal{% endif %}</div>
   </div>
-  {% if session.perfil == 'admin' %}<div><a href="/api/propostas" target="_blank" class="btn-outline">API Power BI</a></div>{% endif %}
+  <div style="display:flex; gap:10px; align-items:center;">
+    <select id="sel-mes-bi" onchange="location.href='/bi?mes='+this.value" style="background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; color:var(--texto); font-size:13px; outline:none;">
+      {% for mm in meses_disponiveis %}
+      <option value="{{ mm }}" {% if mm == f_mes %}selected{% endif %}>{{ {'01':'Janeiro','02':'Fevereiro','03':'Março','04':'Abril','05':'Maio','06':'Junho','07':'Julho','08':'Agosto','09':'Setembro','10':'Outubro','11':'Novembro','12':'Dezembro'}[mm[5:7]] }}/{{ mm[:4] }}</option>
+      {% endfor %}
+      <option value="todos" {% if f_mes == 'todos' %}selected{% endif %}>Todos os períodos</option>
+    </select>
+    {% if session.perfil == 'admin' %}<a href="/api/propostas" target="_blank" class="btn-outline">API Power BI</a>{% endif %}
+  </div>
 </div>
 
 <div class="page">
+
+  {% if pct_geral %}
+  <div class="card">
+    <div class="card-header"><h3>% de comissão sobre a produção {% if f_mes != 'todos' %}({{ {'01':'Janeiro','02':'Fevereiro','03':'Março','04':'Abril','05':'Maio','06':'Junho','07':'Julho','08':'Agosto','09':'Setembro','10':'Outubro','11':'Novembro','12':'Dezembro'}[f_mes[5:7]] }}/{{ f_mes[:4] }}){% else %}(todo o período){% endif %}</h3></div>
+    <div class="metricas{{ ' m-3' if session.perfil == 'admin' else '' }}" style="padding:0 16px 16px;">
+      {% if session.perfil == 'admin' %}
+      <div class="metrica">
+        <div class="lbl">Bruta (corretora)</div>
+        <div class="val">{{ "%.1f"|format(pct_geral.bruto_pct) }}%</div>
+        <div class="sub">{{ pct_geral.bruto|moeda }}</div>
+      </div>
+      {% endif %}
+      <div class="metrica">
+        <div class="lbl">Do consultor</div>
+        <div class="val">{{ "%.1f"|format(pct_geral.consultor_pct) }}%</div>
+        <div class="sub">{{ pct_geral.consultor|moeda }}</div>
+      </div>
+      {% if session.perfil == 'admin' %}
+      <div class="metrica">
+        <div class="lbl">Líquido {{ brand.nome_curto }}</div>
+        <div class="val">{{ "%.1f"|format(pct_geral.liquido_pct) }}%</div>
+        <div class="sub">{{ pct_geral.liquido|moeda }}</div>
+      </div>
+      {% endif %}
+    </div>
+    <div style="padding:0 16px 14px; font-size:12px; color:var(--cinza);">Produção do período: {{ pct_geral.producao|moeda }}. % sobre o valor total das propostas (exclui excluídas e estornadas).</div>
+  </div>
+  {% endif %}
 
   <div class="card">
     <div class="card-header"><h3>Evolução mensal</h3></div>

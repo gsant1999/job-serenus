@@ -8112,36 +8112,74 @@ def playbook():
 @login_required
 def bi():
     conn = db(); uid = session['user_id']; ea = session['perfil'] == 'admin'
+    # Filtro por COMPETÊNCIA (mes_meta = ciclo de vendas), igual ao dashboard
+    # de propostas ('/', filtro 'mes') — mesmo parâmetro, mesmo default (mês
+    # atual) e mesma opção 'todos'. Pedido explícito do Guilherme pra esta
+    # aba funcionar do mesmo jeito.
+    f_mes = (request.args.get('mes') or '').strip() or datetime.now(TZ_SP).strftime('%Y-%m')
+    if f_mes == 'todos':
+        filtro_mes_sql, filtro_mes_params = "", []
+    else:
+        filtro_mes_sql, filtro_mes_params = " AND mes_meta=?", [f_mes]
+    # Base comum: mesmo filtro de validade que _producao_mes usa pra definir
+    # comissão (excluída/estornada não conta) + a competência selecionada.
+    base_sql = "status <> 'Excluída' AND COALESCE(estornada,0)=0" + filtro_mes_sql
+    meses_disponiveis = [r['mes_meta'] if hasattr(r, 'keys') else r[0] for r in conn.execute(
+        "SELECT DISTINCT mes_meta FROM propostas WHERE mes_meta IS NOT NULL AND mes_meta != '' ORDER BY mes_meta DESC").fetchall()]
+    mes_atual_sp = datetime.now(TZ_SP).strftime('%Y-%m')
+    if mes_atual_sp not in meses_disponiveis:
+        meses_disponiveis.insert(0, mes_atual_sp)
     if ea:
+        # Tendência histórica por mês — visão de série temporal, propositalmente
+        # NÃO filtrada pela competência selecionada (é o gráfico que já mostra
+        # todos os meses lado a lado; filtrar reduziria a 1 barra só).
         por_mes = conn.execute("""SELECT strftime('%Y-%m',criado_em) mes,COUNT(*) qtd,
             COALESCE(SUM(valor),0) valor,COALESCE(SUM(comissao_total_corretora),0) com_total,
             COALESCE(SUM(comissao_consultor),0) com_consultor,COALESCE(SUM(comissao_corretora_liquida),0) com_liquido
             FROM propostas GROUP BY mes ORDER BY mes""").fetchall()
-        por_operadora = conn.execute("""SELECT adm_operadora op,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,
+        # WHERE 1=1 (não status<>'Excluída' — preserva o comportamento que já
+        # existia aqui antes desta mudança; só a competência é nova) porque
+        # filtro_mes_sql começa com "AND" e antes essas 3 consultas não tinham
+        # WHERE nenhum.
+        por_operadora = conn.execute(f"""SELECT adm_operadora op,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,
             COALESCE(SUM(comissao_total_corretora),0) com,COALESCE(SUM(total_vidas),0) vidas
-            FROM propostas GROUP BY adm_operadora ORDER BY valor DESC""").fetchall()
-        por_modalidade = conn.execute("""SELECT modalidade,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
-            FROM propostas GROUP BY modalidade ORDER BY valor DESC""").fetchall()
-        por_consultor = conn.execute("""SELECT consultor,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,
+            FROM propostas WHERE 1=1{filtro_mes_sql} GROUP BY adm_operadora ORDER BY valor DESC""", filtro_mes_params).fetchall()
+        por_modalidade = conn.execute(f"""SELECT modalidade,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
+            FROM propostas WHERE 1=1{filtro_mes_sql} GROUP BY modalidade ORDER BY valor DESC""", filtro_mes_params).fetchall()
+        por_consultor = conn.execute(f"""SELECT consultor,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,
             COALESCE(SUM(comissao_consultor),0) com,COALESCE(SUM(total_vidas),0) vidas
-            FROM propostas GROUP BY consultor ORDER BY valor DESC""").fetchall()
+            FROM propostas WHERE 1=1{filtro_mes_sql} GROUP BY consultor ORDER BY valor DESC""", filtro_mes_params).fetchall()
+        # % GERAL sobre a produção do período filtrado: quanto da produção virou
+        # comissão bruta, quanto foi repassado ao consultor e quanto ficou de
+        # líquido — visão agregada de "tudo", não por consultor.
+        geral = conn.execute(f"""SELECT COALESCE(SUM(valor),0) producao,
+                COALESCE(SUM(comissao_total_corretora),0) bruto,
+                COALESCE(SUM(comissao_consultor),0) do_consultor,
+                COALESCE(SUM(comissao_corretora_liquida),0) liquido
+            FROM propostas WHERE {base_sql}""", filtro_mes_params).fetchone()
+        prod = geral['producao'] or 0
+        pct_geral = {
+            'producao': prod,
+            'bruto': geral['bruto'] or 0, 'bruto_pct': (geral['bruto'] or 0) / prod * 100 if prod else 0,
+            'consultor': geral['do_consultor'] or 0, 'consultor_pct': (geral['do_consultor'] or 0) / prod * 100 if prod else 0,
+            'liquido': geral['liquido'] or 0, 'liquido_pct': (geral['liquido'] or 0) / prod * 100 if prod else 0,
+        }
         # KPI: média de comissão POR MÊS por consultor, nos 3 níveis (bruto que
         # entra na corretora, parte do consultor, líquido que sobra). Agrupado
-        # por mes_meta (CICLO de vendas, não mês do calendário) e com o mesmo
-        # filtro que _producao_mes usa pra definir comissão: proposta excluída
-        # ou estornada não conta. A média é por MÊS ATIVO (mês em que a pessoa
-        # produziu) — dividir por todos os meses do histórico puniria quem
-        # entrou depois e faria o número dizer outra coisa.
+        # por mes_meta (CICLO de vendas, não mês do calendário). A média é por
+        # MÊS ATIVO (mês em que a pessoa produziu) — dividir por todos os
+        # meses do histórico puniria quem entrou depois. Respeita a mesma
+        # competência selecionada acima (com 'todos' vira a média histórica).
         # CAST em criado_em: substr() direto em timestamp quebra no Postgres.
-        com_media = conn.execute("""SELECT consultor,
+        com_media = conn.execute(f"""SELECT consultor,
                 COUNT(DISTINCT COALESCE(NULLIF(mes_meta,''), substr(CAST(criado_em AS TEXT),1,7))) meses,
                 COUNT(*) qtd,
                 COALESCE(SUM(comissao_total_corretora),0) bruto,
                 COALESCE(SUM(comissao_consultor),0) do_consultor,
                 COALESCE(SUM(comissao_corretora_liquida),0) liquido
             FROM propostas
-            WHERE status <> 'Excluída' AND COALESCE(estornada,0)=0
-            GROUP BY consultor""").fetchall()
+            WHERE {base_sql}
+            GROUP BY consultor""", filtro_mes_params).fetchall()
         media_comissao = []
         for r in com_media:
             m = r['meses'] or 0
@@ -8161,31 +8199,41 @@ def bi():
         por_mes = conn.execute("""SELECT strftime('%Y-%m',criado_em) mes,COUNT(*) qtd,
             COALESCE(SUM(valor),0) valor,COALESCE(SUM(comissao_consultor),0) com_consultor
             FROM propostas WHERE usuario_id=? GROUP BY mes ORDER BY mes""",(uid,)).fetchall()
-        por_operadora = conn.execute("""SELECT adm_operadora op,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,
+        por_operadora = conn.execute(f"""SELECT adm_operadora op,COUNT(*) qtd,COALESCE(SUM(valor),0) valor,
             COALESCE(SUM(comissao_consultor),0) com,COALESCE(SUM(total_vidas),0) vidas
-            FROM propostas WHERE usuario_id=? GROUP BY adm_operadora ORDER BY valor DESC""",(uid,)).fetchall()
-        por_modalidade = conn.execute("""SELECT modalidade,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
-            FROM propostas WHERE usuario_id=? GROUP BY modalidade ORDER BY valor DESC""",(uid,)).fetchall()
+            FROM propostas WHERE usuario_id=?{filtro_mes_sql}
+            GROUP BY adm_operadora ORDER BY valor DESC""", [uid] + filtro_mes_params).fetchall()
+        por_modalidade = conn.execute(f"""SELECT modalidade,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
+            FROM propostas WHERE usuario_id=?{filtro_mes_sql}
+            GROUP BY modalidade ORDER BY valor DESC""", [uid] + filtro_mes_params).fetchall()
         por_consultor = []
-        # Consultor vê só a média DELE, e só a própria comissão — bruto da
-        # corretora e líquido da Serenus são margem da empresa, não vão pra cá.
-        r = conn.execute("""SELECT
+        # Consultor vê só a própria % e a própria média — bruto da corretora e
+        # líquido da Serenus são margem da empresa, não vão pra cá.
+        r = conn.execute(f"""SELECT COALESCE(SUM(valor),0) producao,
+                COALESCE(SUM(comissao_consultor),0) do_consultor
+            FROM propostas WHERE usuario_id=? AND {base_sql}""", [uid] + filtro_mes_params).fetchone()
+        prod = r['producao'] or 0
+        pct_geral = {
+            'producao': prod, 'consultor': r['do_consultor'] or 0,
+            'consultor_pct': (r['do_consultor'] or 0) / prod * 100 if prod else 0,
+        }
+        r2 = conn.execute(f"""SELECT
                 COUNT(DISTINCT COALESCE(NULLIF(mes_meta,''), substr(CAST(criado_em AS TEXT),1,7))) meses,
                 COUNT(*) qtd,
                 COALESCE(SUM(comissao_consultor),0) do_consultor
-            FROM propostas
-            WHERE usuario_id=? AND status <> 'Excluída' AND COALESCE(estornada,0)=0""",(uid,)).fetchone()
+            FROM propostas WHERE usuario_id=? AND {base_sql}""", [uid] + filtro_mes_params).fetchone()
         media_comissao = []
-        if r and (r['meses'] or 0):
+        if r2 and (r2['meses'] or 0):
             media_comissao.append({
-                'consultor': session.get('nome') or 'Você', 'meses': r['meses'], 'qtd': r['qtd'],
-                'consultor_mes': (r['do_consultor'] or 0) / r['meses'],
-                'consultor_total': r['do_consultor'] or 0,
+                'consultor': session.get('nome') or 'Você', 'meses': r2['meses'], 'qtd': r2['qtd'],
+                'consultor_mes': (r2['do_consultor'] or 0) / r2['meses'],
+                'consultor_total': r2['do_consultor'] or 0,
             })
     close_db(conn)
     return render_template('bi.html', por_mes=por_mes, por_operadora=por_operadora,
                            por_modalidade=por_modalidade, por_consultor=por_consultor,
-                           media_comissao=media_comissao)
+                           media_comissao=media_comissao, pct_geral=pct_geral,
+                           f_mes=f_mes, meses_disponiveis=meses_disponiveis)
 
 # ─── USUÁRIOS ────────────────────────────────────────────────────────────────────
 @app.route('/usuarios')
