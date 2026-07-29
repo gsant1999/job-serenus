@@ -4,11 +4,19 @@ Quando a vida ja esta na Beneficencia e vai para um contrato novo, a operadora p
 de um pedido escrito para encerrar o contrato antigo - senao a pessoa fica com duas
 apolices e a migracao trava. A carta vai na CAPA do contrato, antes da proposta.
 
-Quem assina e o titular do CONTRATO ANTERIOR, que nem sempre e o titular do novo: no
-caso comum a esposa era titular do plano da familia e passa a dependente do marido.
+O TEXTO E O QUE A OPERADORA PASSOU. Nao inventar redacao aqui: carta fora do modelo
+volta da analise. Dois pontos do modelo que parecem detalhe e nao sao:
 
-Documento nosso, nao formulario da operadora - por isso e gerado do zero, e nao
-preenchendo PDF pronto como o resto do sistema.
+  - "sem a imposicao de eventuais multas contratuais ou permanencia minima" - e o que
+    evita cobranca de multa por sair antes do prazo;
+  - "estou migrando parte das vidas para um novo CNPJ" - e a justificativa que
+    enquadra o pedido como venda administrativa em vez de cancelamento comum.
+
+Quem assina e o REPRESENTANTE LEGAL DA EMPRESA do contrato anterior - nao o titular
+pessoa fisica. Quando o contrato antigo e individual/familiar nao ha empresa, e o
+texto muda para a pessoa falando por si.
+
+Documento nosso, nao formulario da operadora - por isso e gerado do zero.
 """
 import io
 import datetime
@@ -23,21 +31,13 @@ LARGURA, ALTURA = A4
 MESES = ('janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho',
          'agosto', 'setembro', 'outubro', 'novembro', 'dezembro')
 
-# Como o contrato antigo e descrito na carta. A operadora trata os dois casos do mesmo
-# jeito, mas o texto precisa bater com o que a pessoa tem em maos.
-ORIGENS = {
-    'pf': 'plano individual/familiar',
-    'empresarial': 'plano coletivo empresarial',
-}
 
-
-def _data_extenso(hoje=None):
-    d = hoje or datetime.date.today()
+def _data_extenso(d):
     return f'{d.day} de {MESES[d.month - 1]} de {d.year}'
 
 
 def _quebrar(texto, fonte, tamanho, largura, c):
-    """Quebra o paragrafo na largura util. O reportlab nao quebra linha sozinho."""
+    """Quebra o paragrafo na largura util - o reportlab nao quebra linha sozinho."""
     palavras, linhas, atual = texto.split(), [], ''
     for p in palavras:
         teste = (atual + ' ' + p).strip()
@@ -56,24 +56,25 @@ def gerar(dados, hoje=None):
     """Devolve os bytes do PDF, ou None se este caso nao pede carta.
 
     Espera em dados['contrato_anterior']:
-        {titular: {nome, cpf}, origem: 'pf'|'empresarial', numero: str, operadora: str}
-    e usa dados['migracoes'] para listar quem sai junto.
+        {titular: {nome, cpf}, empresa: {razao_social, cnpj}, origem: 'pf'|'empresarial'}
     """
-    ant = (dados.get('contrato_anterior') or {})
-    titular_ant = (ant.get('titular') or {})
-    if not (titular_ant.get('nome') or '').strip():
+    ant = dados.get('contrato_anterior') or {}
+    quem = ant.get('titular') or {}
+    if not (quem.get('nome') or '').strip():
         return None            # sem quem assine, nao ha carta
 
-    empresa = dados.get('empresa') or {}
+    empresa_ant = ant.get('empresa') or {}
+    empresarial = (ant.get('origem') or 'empresarial') == 'empresarial'
+    empresa_nova = dados.get('empresa') or {}
     vig = dados.get('vigencia') or {}
     largura_util = LARGURA - 2 * MARGEM
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     c.setTitle('Solicitação de cancelamento de contrato')
-    y = ALTURA - MARGEM
+    y = ALTURA - MARGEM - 20 * mm
 
-    def escrever(texto, fonte='Helvetica', tamanho=11, espaco=15, recuo=0):
+    def escrever(texto, fonte='Helvetica', tamanho=12, espaco=18, recuo=0):
         nonlocal y
         for linha in _quebrar(texto, fonte, tamanho, largura_util - recuo, c):
             c.setFont(fonte, tamanho)
@@ -82,73 +83,66 @@ def gerar(dados, hoje=None):
 
     def pular(n=1):
         nonlocal y
-        y -= 15 * n
+        y -= 18 * n
 
-    cidade = empresa.get('cidade') or 'Campinas'
-    escrever(f'{cidade.title()}, {_data_extenso(hoje)}', tamanho=11)
-    pular(2)
+    # A data do cancelamento e o inicio de vigencia do contrato novo: um encerra no
+    # dia em que o outro comeca, para nao haver dia sem cobertura.
+    mes, ano = vig.get('mes') or '', vig.get('ano') or ''
+    data_cancelamento = f'01/{mes}/{ano}' if mes and ano else ''
 
-    escrever('À', fonte='Helvetica-Bold')
-    escrever(ant.get('operadora') or 'ASSOCIAÇÃO DE SAÚDE PORTUGUESA DE BENEFICÊNCIA',
-             fonte='Helvetica-Bold')
-    pular()
-    escrever('Ref.: Solicitação de cancelamento de contrato', fonte='Helvetica-Bold')
-    pular(2)
+    # --- corpo, no texto da operadora -------------------------------------------
+    if empresarial:
+        corpo = (f"Eu, {quem.get('nome', '').upper()} portador do CPF Nº "
+                 f"{quem.get('cpf', '')}, representante legal da empresa "
+                 f"{(empresa_ant.get('razao_social') or '').upper()}, CNPJ "
+                 f"{empresa_ant.get('cnpj', '')}, solicito o cancelamento do meu "
+                 f"contrato para {data_cancelamento} sem a imposição de eventuais "
+                 f"multas contratuais ou permanência mínima, pois, estou migrando "
+                 f"parte das vidas para um novo CNPJ e incluindo novas vidas.")
+    else:
+        # Individual/familiar: nao ha empresa nem representante legal, mas o pedido e
+        # o mesmo - inclusive a dispensa de multa e de permanencia minima.
+        corpo = (f"Eu, {quem.get('nome', '').upper()} portador do CPF Nº "
+                 f"{quem.get('cpf', '')}, titular do plano individual/familiar mantido "
+                 f"junto a essa operadora, solicito o cancelamento do meu contrato para "
+                 f"{data_cancelamento} sem a imposição de eventuais multas contratuais "
+                 f"ou permanência mínima, pois, estou migrando para o plano coletivo "
+                 f"empresarial da empresa {(empresa_nova.get('razao_social') or '').upper()}, "
+                 f"CNPJ {empresa_nova.get('cnpj', '')}.")
 
-    numero = (ant.get('numero') or '').strip()
-    origem = ORIGENS.get(ant.get('origem'), ORIGENS['empresarial'])
-    ident = f', de nº {numero},' if numero else ''
-
-    escrever(
-        f"Eu, {titular_ant.get('nome', '').upper()}, inscrito(a) no CPF sob o nº "
-        f"{titular_ant.get('cpf', '')}, na qualidade de titular do {origem}{ident} "
-        f"mantido junto a essa operadora, venho por meio desta solicitar o CANCELAMENTO "
-        f"do referido contrato.")
-    pular()
-
-    escrever(
-        f"O pedido decorre da minha migração para o plano coletivo empresarial "
-        f"contratado pela empresa {empresa.get('razao_social', '').upper()}, inscrita no "
-        f"CNPJ sob o nº {empresa.get('cnpj', '')}, com início de vigência previsto para "
-        f"{vig.get('mes', '')}/{vig.get('ano', '')}.")
-    pular()
-
-    escrever(
-        'Solicito que o encerramento seja processado de forma a não haver interrupção '
-        'de cobertura entre um contrato e outro.')
+    escrever(corpo)
     pular()
 
-    # Dependentes que saem junto. Sem isso a operadora cancela so o titular e os
-    # demais ficam pendurados no contrato antigo.
+    # Quem sai junto. Nao esta no modelo da operadora, mas sem isso ela cancela so
+    # quem assinou e os demais ficam pendurados no contrato antigo.
     migrantes = [m for m in (dados.get('migracoes') or []) if m.get('nome')]
-    outros = [m for m in migrantes
-              if m.get('nome', '').strip().upper() != titular_ant.get('nome', '').strip().upper()]
-    if outros:
-        escrever('O cancelamento abrange também os seguintes beneficiários vinculados '
-                 'ao contrato:')
-        pular(0.4)
-        for m in outros:
+    if migrantes:
+        escrever('Seguem as vidas que migram:', tamanho=11.5)
+        pular(0.3)
+        for m in migrantes:
             partes = [m.get('nome', '').upper()]
             if m.get('cpf'):
                 partes.append(f"CPF {m['cpf']}")
             if m.get('nascimento'):
                 partes.append(f"nascido(a) em {m['nascimento']}")
-            if m.get('parentesco'):
-                partes.append(str(m['parentesco']).lower())
-            escrever('•  ' + ' — '.join(partes), tamanho=10.5, espaco=14, recuo=8)
+            escrever('•  ' + ' — '.join(partes), tamanho=11, espaco=16, recuo=10)
         pular()
 
-    escrever('Sem mais para o momento, coloco-me à disposição para os esclarecimentos '
-             'que se fizerem necessários.')
+    cidade = (empresa_nova.get('cidade') or 'Campinas').title()
+    escrever(f'{cidade}, {_data_extenso(hoje or datetime.date.today())}.')
     pular(3)
 
-    c.line(MARGEM, y, MARGEM + 75 * mm, y)
-    y -= 14
+    # Linha de assinatura no formato do modelo
+    c.setFont('Helvetica', 12)
+    rodape = ('__________(assinatura do representante da empresa)_______________'
+              if empresarial else '__________(assinatura do titular)_______________')
+    c.drawString(MARGEM, y, rodape)
+    y -= 18
     c.setFont('Helvetica-Bold', 11)
-    c.drawString(MARGEM, y, titular_ant.get('nome', '').upper())
+    c.drawString(MARGEM, y, quem.get('nome', '').upper())
     y -= 14
     c.setFont('Helvetica', 10)
-    c.drawString(MARGEM, y, f"CPF {titular_ant.get('cpf', '')}")
+    c.drawString(MARGEM, y, f"CPF {quem.get('cpf', '')}")
 
     c.showPage()
     c.save()

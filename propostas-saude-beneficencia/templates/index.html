@@ -320,22 +320,27 @@
       <p class="small">Alguém está migrando de outro contrato. A operadora precisa do
         pedido por escrito para encerrar a apólice antiga — senão a pessoa fica com dois
         planos e a migração trava. O sistema monta a carta e coloca na capa do contrato.</p>
-      <div class="grid g2">
-        <div><label class="req">Titular do contrato anterior</label>
-          <input type="text" id="ant_nome" placeholder="quem assina a carta"></div>
-        <div><label>CPF</label><input type="text" id="ant_cpf"></div>
-      </div>
-      <label style="margin-top:9px;">O contrato anterior é</label>
+      <label>O contrato anterior é</label>
       <div class="chips" id="origemChips">
-        <div class="chip on" data-v="empresarial" onclick="escolherUnico(this.parentNode,this)">Coletivo empresarial</div>
-        <div class="chip" data-v="pf" onclick="escolherUnico(this.parentNode,this)">Individual / familiar</div>
+        <div class="chip on" data-v="empresarial" onclick="escolherUnico(this.parentNode,this);trocarOrigem()">Coletivo empresarial</div>
+        <div class="chip" data-v="pf" onclick="escolherUnico(this.parentNode,this);trocarOrigem()">Individual / familiar</div>
       </div>
-      <div style="margin-top:9px;max-width:280px;">
-        <label>Número do contrato ou carteirinha (opcional)</label>
-        <input type="text" id="ant_numero">
+
+      <div id="antEmpresaBox" class="grid g2" style="margin-top:10px;">
+        <div><label class="req">Empresa do contrato anterior</label>
+          <input type="text" id="ant_empresa" placeholder="razão social"></div>
+        <div><label class="req">CNPJ dela</label>
+          <input type="text" id="ant_cnpj" placeholder="00.000.000/0000-00"></div>
       </div>
-      <p class="small" style="margin-top:8px;">Quem assina é o titular do contrato
-        <b>anterior</b> — costuma ser outra pessoa do casal, não o titular do novo.</p>
+
+      <div class="grid g2" style="margin-top:10px;">
+        <div><label class="req" id="ant_nome_rotulo">Representante legal que assina</label>
+          <input type="text" id="ant_nome"></div>
+        <div><label class="req">CPF</label><input type="text" id="ant_cpf"></div>
+      </div>
+      <p class="small" style="margin-top:8px;" id="ant_dica">Quem assina é o
+        representante legal da empresa do contrato <b>anterior</b> — pode não ser o
+        titular do plano novo.</p>
       <div style="margin-top:10px;">
         <button class="btn" onclick="baixarCarta(this)">Baixar carta para assinar</button>
         <span id="cartaStatus" class="status"></span>
@@ -864,6 +869,20 @@ function definirParentesco(idx, chave, rotulo){
 function definirFilhoEmComum(idx, valor){
   PESSOAS[idx].filho_em_comum = valor;
   atualizarChecklist();
+}
+
+// Contrato anterior individual não tem empresa nem representante legal: o texto da
+// carta muda e os campos da empresa saem de cena.
+function trocarOrigem(){
+  const empresarial = document.querySelector('#origemChips .chip.on')?.dataset.v === 'empresarial';
+  const box = document.getElementById('antEmpresaBox');
+  if (box) box.style.display = empresarial ? 'grid' : 'none';
+  const rot = document.getElementById('ant_nome_rotulo');
+  if (rot) rot.textContent = empresarial ? 'Representante legal que assina' : 'Titular que assina';
+  const dica = document.getElementById('ant_dica');
+  if (dica) dica.innerHTML = empresarial
+    ? 'Quem assina é o representante legal da empresa do contrato <b>anterior</b> — pode não ser o titular do plano novo.'
+    : 'Quem assina é o titular do plano individual/familiar que está sendo cancelado.';
 }
 
 // Baixa só a carta, antes do contrato: o cliente precisa assinar no meio do caminho.
@@ -1429,8 +1448,11 @@ function montarPayload(){
         nome: up(document.getElementById('ant_nome')?.value || ''),
         cpf: document.getElementById('ant_cpf')?.value || '',
       },
+      empresa: {
+        razao_social: up(document.getElementById('ant_empresa')?.value || ''),
+        cnpj: document.getElementById('ant_cnpj')?.value || '',
+      },
       origem: document.querySelector('#origemChips .chip.on')?.dataset.v || 'empresarial',
-      numero: document.getElementById('ant_numero')?.value || '',
     },
     titulares: gruposTitulares,
     // o servidor remonta o checklist para saber o que cobrar do contrato; sem estes
