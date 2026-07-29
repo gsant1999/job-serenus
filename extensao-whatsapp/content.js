@@ -851,6 +851,12 @@
     const html = document.documentElement;
     html.classList.toggle('job-push-esquerda', _railSide === 'esquerda');
     html.classList.add('job-push-trilho');
+    // O painel também precisa trocar de lado. Antes isso só era aplicado
+    // dentro de abrirSecao(), então trocar o lado com o painel JÁ ABERTO movia
+    // só o trilho — o painel ficava do lado errado, parecendo que a
+    // preferência "não funciona".
+    const painel = document.getElementById('job-painel-doc');
+    if (painel) painel.classList.toggle('job-painel-doc-esquerda', _railSide === 'esquerda');
     if (_secaoAtiva) {
       const cabe = window.innerWidth >= JOB_PUSH_MIN_WIDTH;
       html.classList.toggle('job-push-painel', cabe);
