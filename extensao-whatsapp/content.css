@@ -61,13 +61,19 @@ body[data-job-tema="claro"] {
       nunca mexe em elemento interno do React do WhatsApp, só no <html> de
       fora, que reflow sozinho por ser layout flexível. !important porque o
       próprio WhatsApp mexe em <html> (dark mode) e pode pisar na margem. ── */
-html.job-push-trilho { margin-right: 72px !important; transition: margin .18s ease; }
-html.job-push-painel { margin-right: 472px !important; }
-html.job-push-esquerda.job-push-trilho { margin-right: 0 !important; margin-left: 72px !important; }
-html.job-push-esquerda.job-push-painel { margin-left: 472px !important; margin-right: 0 !important; }
+/* IMPORTANTE: cada lado mexe SÓ na sua margem. Antes, o modo esquerda ainda
+   zerava margin-right com !important — e isso APAGAVA o empurrão de outras
+   extensões (o WaSpeed empurra margin-right pro trilho dele), jogando o
+   trilho delas por cima das mensagens. Usando :not(.job-push-esquerda), no
+   modo esquerda nunca encostamos em margin-right: os dois convivem. */
+html.job-push-trilho { transition: margin .18s ease; }
+html.job-push-trilho:not(.job-push-esquerda) { margin-right: 72px !important; }
+html.job-push-painel:not(.job-push-esquerda) { margin-right: 472px !important; }
+html.job-push-esquerda.job-push-trilho { margin-left: 72px !important; }
+html.job-push-esquerda.job-push-painel { margin-left: 472px !important; }
 /* Overlay (tela estreita): só o trilho empurra, o painel flutua por cima. */
-html.job-overlay-painel { margin-right: 72px !important; }
-html.job-push-esquerda.job-overlay-painel { margin-left: 72px !important; margin-right: 0 !important; }
+html.job-overlay-painel:not(.job-push-esquerda) { margin-right: 72px !important; }
+html.job-push-esquerda.job-overlay-painel { margin-left: 72px !important; }
 
 #job-trilho {
   position: fixed; top: 0; right: 0; bottom: 0; width: 72px;

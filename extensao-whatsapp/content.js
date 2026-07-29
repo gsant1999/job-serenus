@@ -830,17 +830,26 @@
   // "mensagens" — dá pra crescer sem criar elemento novo, só adicionar item
   // no trilho.
   let _secaoAtiva = null; // 'analise' | 'mensagens' | null
-  let _railSide = 'direita';
+  // ESQUERDA por padrão: o WaSpeed (e outras extensões de WhatsApp) fixam o
+  // trilho deles à DIREITA e empurram a página com margin-right !important —
+  // o mesmo que fazíamos. Duas extensões disputando a MESMA margem se
+  // sobrescrevem: a página oscila e os trilhos ficam um por cima do outro
+  // (relato do Guilherme, 27/07). Cada um de um lado, cada um na sua margem,
+  // sem disputa. Quem preferir a direita ainda escolhe no popup.
+  let _railSide = 'esquerda';
 
   async function carregarPreferenciaLado() {
     const { railSide } = await _safeStorageGet(['railSide']);
-    _railSide = railSide === 'esquerda' ? 'esquerda' : 'direita';
+    // Só a escolha EXPLÍCITA por 'direita' tira do padrão. Storage vazio (ou
+    // falha de leitura, que devolve {}) mantém a esquerda — antes caía na
+    // direita e o trilho "pulava" pro lado errado sozinho.
+    _railSide = railSide === 'direita' ? 'direita' : 'esquerda';
     aplicarClassesHtml();
   }
   if (chrome.storage.onChanged) {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'local' && changes.railSide) {
-        _railSide = changes.railSide.newValue === 'esquerda' ? 'esquerda' : 'direita';
+        _railSide = changes.railSide.newValue === 'direita' ? 'direita' : 'esquerda';
         aplicarClassesHtml();
       }
     });
