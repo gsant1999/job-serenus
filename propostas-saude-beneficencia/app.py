@@ -533,7 +533,13 @@ def _cabecalhos(resp):
 
 
 if __name__ == '__main__':
-    # Em producao quem sobe o app e o gunicorn (ver Procfile). Este bloco e para rodar
+    # Em producao quem sobe o app e o gunicorn (ver Procfile e railway.json). O
+    # railway.json existe porque o Railway ignora o Procfile e, achando um app.py,
+    # executava ESTE bloco em producao - subindo o servidor de desenvolvimento do
+    # Flask, que atende uma requisicao por vez. Gerar um contrato de 7 MB travava o
+    # site para todo mundo ate terminar.
+    #
+    # Este bloco e para rodar
     # na maquina do corretor - mas respeita PORT e escuta em 0.0.0.0 caso algum PaaS
     # execute o arquivo direto: senao o processo sobe em 127.0.0.1 e nada de fora chega.
     porta = int(os.environ.get('PORT', 5057))
