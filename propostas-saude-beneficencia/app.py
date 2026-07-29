@@ -230,6 +230,28 @@ def api_parse_notas():
     return jsonify(parse_bloco_notas(texto))
 
 
+@app.route('/api/carta', methods=['POST'])
+@login_obrigatorio
+def api_carta():
+    """Devolve so a carta de cancelamento, para o cliente assinar.
+
+    Sai antes do contrato de proposito: o que vale na capa e o papel assinado, e a
+    assinatura tem que acontecer entre gerar o modelo e montar o pacote."""
+    dados = request.get_json(force=True) or {}
+    try:
+        pdf = carta.gerar(dados)
+    except Exception:
+        app.logger.exception('falha ao gerar a carta')
+        return jsonify({'erro': 'Não foi possível gerar a carta.'}), 500
+    if not pdf:
+        return jsonify({'erro': 'Informe o titular do contrato anterior — é quem assina.'}), 400
+
+    nome = (dados.get('contrato_anterior') or {}).get('titular', {}).get('nome', 'carta')
+    limpo = re.sub(r'[^A-Za-z0-9]+', '_', nome).strip('_').upper() or 'CARTA'
+    return send_file(io.BytesIO(pdf), mimetype='application/pdf', as_attachment=True,
+                     download_name=f'CARTA_CANCELAMENTO_{limpo}.pdf')
+
+
 @app.route('/api/gerar', methods=['POST'])
 @login_obrigatorio
 def api_gerar():
@@ -269,6 +291,8 @@ def api_checklist():
             d.get('parentescos') or [],
             bool(d.get('crianca_sem_documento')),
             bool(d.get('filho_em_comum')),
+            bool(d.get('tem_portabilidade')),
+            bool(d.get('tem_migracao')),
         ))
     except ValueError as e:
         return jsonify({'erro': str(e)}), 400
@@ -381,19 +405,26 @@ def api_contrato():
     try:
         filho_comum = any(d.get('filho_em_comum') for g in (dados.get('titulares') or [])
                           for d in (g.get('dependentes') or []))
+        pessoas = [p for g in (dados.get('titulares') or [])
+                   for p in ([g.get('titular') or {}] + (g.get('dependentes') or []))]
         exigidos = [i for i in regras.checklist(
             tipo_titular, parentescos,
             bool(dados.get('crianca_sem_documento')),
-            filho_comum)['itens'] if i['obrigatorio']]
+            filho_comum,
+            any(p.get('portabilidade') for p in pessoas),
+            any(p.get('migracao') for p in pessoas))['itens'] if i['obrigatorio']]
     except ValueError:
         exigidos = []          # tipo de titular recusado ja teria barrado antes
 
-    # Carta de cancelamento: so sai quando ha migracao e alguem para assinar.
-    try:
-        folha_carta = carta.gerar(dados)
-    except Exception:
-        app.logger.exception('falha ao gerar a carta de cancelamento')
-        folha_carta = None
+    # A capa e a carta ASSINADA, quando ela ja foi anexada. O modelo gerado so entra
+    # como reserva, para o pacote nao sair sem nada no lugar - e o checklist cobra a
+    # assinada de qualquer forma.
+    folha_carta = None
+    if not anexos.get('carta_cancelamento'):
+        try:
+            folha_carta = carta.gerar(dados)
+        except Exception:
+            app.logger.exception('falha ao gerar a carta de cancelamento')
 
     try:
         final, roteiro = montagem.montar(

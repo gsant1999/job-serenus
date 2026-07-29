@@ -336,6 +336,13 @@
       </div>
       <p class="small" style="margin-top:8px;">Quem assina é o titular do contrato
         <b>anterior</b> — costuma ser outra pessoa do casal, não o titular do novo.</p>
+      <div style="margin-top:10px;">
+        <button class="btn" onclick="baixarCarta(this)">Baixar carta para assinar</button>
+        <span id="cartaStatus" class="status"></span>
+      </div>
+      <p class="small" style="margin-top:6px;">Colha a assinatura e anexe a carta
+        assinada em <b>Documentos do cliente</b>, abaixo. É a assinada que vai na capa
+        do contrato.</p>
     </div>
 
     <div id="checklistBox" style="margin-top:14px;"></div>
@@ -859,6 +866,32 @@ function definirFilhoEmComum(idx, valor){
   atualizarChecklist();
 }
 
+// Baixa só a carta, antes do contrato: o cliente precisa assinar no meio do caminho.
+async function baixarCarta(botao){
+  const st = document.getElementById('cartaStatus');
+  const dados = montarPayload();
+  if (!dados){ st.textContent = 'Complete a proposta primeiro.'; st.className='status err'; return; }
+  botao.disabled = true;
+  st.textContent = 'Gerando...'; st.className = 'status';
+  try {
+    const r = await fetch('/api/carta', {method:'POST', headers:{'Content-Type':'application/json'},
+                                         body: JSON.stringify(dados)});
+    if (!r.ok){
+      const e = await r.json().catch(() => ({}));
+      st.textContent = e.erro || 'Não foi possível gerar.'; st.className = 'status err';
+      return;
+    }
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (r.headers.get('Content-Disposition')||'').split('filename=')[1] || 'carta.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    st.textContent = 'Baixada. Depois de assinada, anexe abaixo.'; st.className = 'status ok';
+  } catch(e){
+    st.textContent = 'Erro: ' + e; st.className = 'status err';
+  } finally { botao.disabled = false; }
+}
+
 // A carta só existe quando alguém migra. Sugere como signatário a primeira pessoa
 // que está migrando - no caso comum é ela mesma quem era titular do plano antigo.
 function atualizarCarta(){
@@ -894,7 +927,9 @@ async function atualizarChecklist(){
                           crianca_sem_documento: !!document.getElementById('criancaSemDoc')?.checked,
                           // só conta se o filho em comum estiver de fato no contrato
                           filho_em_comum: PESSOAS.some(p => p.papel === 'dependente'
-                                          && p.parentesco_key === 'filho' && p.filho_em_comum)})});
+                                          && p.parentesco_key === 'filho' && p.filho_em_comum),
+                          tem_portabilidade: PESSOAS.some(p => p.portabilidade),
+                          tem_migracao: PESSOAS.some(p => p.migracao)})});
   if (!r.ok) return;
   const d = await r.json();
   CHECKLIST = d.itens;

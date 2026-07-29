@@ -112,7 +112,7 @@ PROVAS_DE_CASAL = ('parentesco_conjuge', 'parentesco_companheiro')
 
 
 def checklist(tipo_titular, parentescos_dependentes, tem_criancas_sem_documento=False,
-              filho_em_comum=False):
+              filho_em_comum=False, tem_portabilidade=False, tem_migracao=False):
     """Monta a lista de documentos que ESTE caso exige, para o corretor conferir
     antes de mandar para a operadora.
 
@@ -154,6 +154,23 @@ def checklist(tipo_titular, parentescos_dependentes, tem_criancas_sem_documento=
     if tem_criancas_sem_documento:
         itens.append(('certidao_crianca', 'Certidão de nascimento da criança', True,
                       'Criança sem RG, CPF ou CNH entra pela certidão'))
+
+    # Portabilidade de carencias so e aceita com os dois papeis da operadora de origem:
+    # a permanencia prova o tempo de plano e a de portabilidade autoriza o
+    # aproveitamento. Faltando um, a Bene analisa como adesao nova e a carencia volta.
+    if tem_portabilidade:
+        itens.append(('carta_permanencia', 'Carta de permanência', True,
+                      'Comprova o tempo de plano na operadora de origem'))
+        itens.append(('carta_portabilidade', 'Carta de portabilidade', True,
+                      'Autoriza o aproveitamento das carências já cumpridas'))
+
+    # Venda administrativa: a carta que pede o cancelamento do contrato antigo entra
+    # ASSINADA pelo titular anterior. O sistema gera o modelo; o que vai no contrato
+    # e o papel assinado.
+    if tem_migracao:
+        itens.append(('carta_cancelamento', 'Carta de cancelamento assinada', True,
+                      'Baixe o modelo, colha a assinatura do titular do contrato anterior '
+                      'e anexe aqui'))
 
     # Filho em comum no contrato dispensa a prova de casal - mas so quando ha filho E
     # conjuge/companheiro na MESMA proposta. Marcar a caixa sem o filho entrar nao tira

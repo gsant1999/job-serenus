@@ -140,8 +140,11 @@ def montar(gerados, anexos, titular_e_dono, exigidos=None):
     # 0. Carta de cancelamento do contrato anterior (so nas vendas administrativas).
     # Vai na CAPA porque e o pedido que autoriza a operadora a encerrar a apolice
     # antiga - o analista precisa ver antes de abrir a proposta.
-    if gerados.get('carta'):
-        _juntar('Carta de cancelamento do contrato anterior',
+    assinada = anexos.get('carta_cancelamento')
+    if assinada:
+        _juntar('Carta de cancelamento (assinada)', assinada)
+    elif gerados.get('carta'):
+        _juntar('Carta de cancelamento do contrato anterior — SEM ASSINATURA',
                 [('Carta.pdf', gerados['carta'])])
 
     # 1. Proposta de Adesao
@@ -172,23 +175,22 @@ def montar(gerados, anexos, titular_e_dono, exigidos=None):
             # parentesco (certidao de casamento, uniao estavel, certidao de nascimento).
             # Ficam colados no bloco do dependente para o analista da operadora ler o
             # vinculo sem folhear o contrato inteiro atras da certidao.
+            # Cartas da portabilidade entram logo depois do comprovante, ainda no
+            # bloco do titular: e o conjunto que o analista le junto para decidir se
+            # aproveita a carencia.
+            if chave == 'comprovante_endereco' and i == 0:
+                for k, rot in (('carta_permanencia', 'Carta de permanência'),
+                               ('carta_portabilidade', 'Carta de portabilidade')):
+                    if anexos.get(k):
+                        _juntar(rot, anexos[k])
+
             if chave == 'doc_dependentes':
                 enviados = [k for k in sorted(anexos)
                             if k.startswith('parentesco_') or k == 'certidao_crianca']
                 for k in enviados:
                     _juntar(f'Comprovação de parentesco{sufixo}', anexos[k])
 
-                # E cobra as que este caso exige e nao vieram. Só no bloco do primeiro
-                # titular: a lista de exigidos é da proposta inteira, não por titular,
-                # e repetir a cobrança em cada bloco contaria a mesma falta várias vezes.
-                if i == 0:
-                    for item in (exigidos or []):
-                        k = item.get('chave', '')
-                        if not (k.startswith('parentesco_') or k == 'certidao_crianca'):
-                            continue
-                        if not anexos.get(k):
-                            roteiro.append({'etapa': item.get('rotulo', k), 'arquivo': None,
-                                            'ok': False, 'detalhe': 'faltando'})
+
 
     # 9. Vinculo - sempre por ultimo, e so quando o titular nao e o dono do CNPJ
     chave, rotulo, _ = ETAPA_VINCULO
@@ -198,6 +200,24 @@ def montar(gerados, anexos, titular_e_dono, exigidos=None):
             roteiro.append({'etapa': rotulo, 'arquivo': None, 'ok': False,
                             'detalhe': 'faltando - obrigatorio porque o titular nao e o dono do CNPJ'})
         _juntar(rotulo, itens)
+
+    # Cobra TUDO que este caso exige e nao veio - qualquer chave, nao so as fixas
+    # daqui de cima. Antes a checagem listava prefixos ('parentesco_', 'certidao_'),
+    # e regra nova nascia sem cobranca: as cartas de portabilidade e a de cancelamento
+    # eram exigidas na tela e o contrato saia dizendo "completo".
+    ja_cobrado = {r['etapa'] for r in roteiro if not r.get('ok')}
+    entregues = {r['etapa'] for r in roteiro if r.get('ok')}
+    for item in (exigidos or []):
+        chave, rotulo = item.get('chave', ''), item.get('rotulo', '')
+        if anexos.get(chave):
+            continue
+        if rotulo in ja_cobrado or rotulo in entregues:
+            continue
+        # o que ja tem etapa fixa aqui em cima foi tratado no lugar dele
+        if chave in {c for c, _, _ in ETAPAS_EMPRESA + ETAPAS_TITULAR} or chave == 'vinculo':
+            continue
+        roteiro.append({'etapa': rotulo or chave, 'arquivo': None, 'ok': False,
+                        'detalhe': 'faltando'})
 
     # Compressao SEM PERDA dos fluxos de conteudo. Nao toca nas imagens do formulario
     # oficial da operadora de proposito: recomprimi-las mudaria o visual do documento,
