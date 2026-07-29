@@ -66,24 +66,28 @@ body[data-job-tema="claro"] {
    extensões (o WaSpeed empurra margin-right pro trilho dele), jogando o
    trilho delas por cima das mensagens. Usando :not(.job-push-esquerda), no
    modo esquerda nunca encostamos em margin-right: os dois convivem. */
+/* --job-viz = quantos px o trilho de OUTRA extensão (WaSpeed, ZapVoice...) já
+   ocupa no NOSSO lado. Medido em JS (_medirVizinhos) e escrito aqui. Assim o
+   JOB se encaixa DEPOIS do vizinho em vez de sentar em cima dele, e a margem
+   da página soma os dois. Sem vizinho, vale 0 e nada muda. */
 html.job-push-trilho { transition: margin .18s ease; }
-html.job-push-trilho:not(.job-push-esquerda) { margin-right: 72px !important; }
-html.job-push-painel:not(.job-push-esquerda) { margin-right: 472px !important; }
-html.job-push-esquerda.job-push-trilho { margin-left: 72px !important; }
-html.job-push-esquerda.job-push-painel { margin-left: 472px !important; }
+html.job-push-trilho:not(.job-push-esquerda) { margin-right: calc(var(--job-viz, 0px) + 72px) !important; }
+html.job-push-painel:not(.job-push-esquerda) { margin-right: calc(var(--job-viz, 0px) + 472px) !important; }
+html.job-push-esquerda.job-push-trilho { margin-left: calc(var(--job-viz, 0px) + 72px) !important; }
+html.job-push-esquerda.job-push-painel { margin-left: calc(var(--job-viz, 0px) + 472px) !important; }
 /* Overlay (tela estreita): só o trilho empurra, o painel flutua por cima. */
-html.job-overlay-painel:not(.job-push-esquerda) { margin-right: 72px !important; }
-html.job-push-esquerda.job-overlay-painel { margin-left: 72px !important; }
+html.job-overlay-painel:not(.job-push-esquerda) { margin-right: calc(var(--job-viz, 0px) + 72px) !important; }
+html.job-push-esquerda.job-overlay-painel { margin-left: calc(var(--job-viz, 0px) + 72px) !important; }
 
 #job-trilho {
-  position: fixed; top: 0; right: 0; bottom: 0; width: 72px;
+  position: fixed; top: 0; right: var(--job-viz, 0px); bottom: 0; width: 72px;
   z-index: 2147483000;
   display: flex; flex-direction: column; align-items: center;
   background: var(--job-bg1); border-left: 1px solid var(--job-bg3);
   padding-top: 16px; gap: 4px;
   font-family: 'NunitoJOB', -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
-html.job-push-esquerda #job-trilho { right: auto; left: 0; border-left: none; border-right: 1px solid var(--job-bg3); }
+html.job-push-esquerda #job-trilho { right: auto; left: var(--job-viz, 0px); border-left: none; border-right: 1px solid var(--job-bg3); }
 
 /* Logo JOB: o arquivo REAL dos arcos do sistema (logo_arcos.png) girando,
    "JOB" parado no meio — idêntico à sidebar do site (spinSlow). */
@@ -163,8 +167,8 @@ html.job-push-esquerda .job-trilho-item-ativo::before { left: auto; right: 0; bo
 .job-trilho-config { position: fixed; bottom: 72px; width: 210px; background: var(--job-bg2);
   border: 1px solid var(--job-bg3); border-radius: 12px; padding: 10px; box-shadow: 0 16px 44px rgba(0,0,0,.45);
   z-index: 2147483100; font-family: 'NunitoJOB', -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
-html:not(.job-push-esquerda) .job-trilho-config { right: 80px; }
-html.job-push-esquerda .job-trilho-config { left: 80px; }
+html:not(.job-push-esquerda) .job-trilho-config { right: calc(var(--job-viz, 0px) + 80px); }
+html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80px); }
 .job-trilho-config-tit { font-size: 10.5px; font-weight: 500; color: var(--job-txt-fraco);
   text-transform: uppercase; letter-spacing: .3px; margin-bottom: 8px; }
 .job-trilho-config-linha { display: flex; align-items: center; justify-content: space-between;
@@ -184,8 +188,8 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
 .job-trilho-config-desligar:hover { background: rgba(244,63,94,.18); }
 
 #job-painel-doc {
-  position: fixed; top: 0; right: 72px; bottom: 0; width: 400px;
-  max-width: calc(100vw - 72px);
+  position: fixed; top: 0; right: calc(var(--job-viz, 0px) + 72px); bottom: 0; width: 400px;
+  max-width: calc(100vw - var(--job-viz, 0px) - 72px);
   z-index: 2147483000;
   display: flex; flex-direction: column;
   background: var(--job-bg1); color: var(--job-txt);
@@ -193,7 +197,7 @@ html.job-push-esquerda .job-trilho-config { left: 80px; }
   box-shadow: -18px 0 40px rgba(0,0,0,.35);
   font-family: 'NunitoJOB', -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
-#job-painel-doc.job-painel-doc-esquerda { right: auto; left: 72px; border-left: none; border-right: 1px solid var(--job-bg3); box-shadow: 18px 0 40px rgba(0,0,0,.35); }
+#job-painel-doc.job-painel-doc-esquerda { right: auto; left: calc(var(--job-viz, 0px) + 72px); border-left: none; border-right: 1px solid var(--job-bg3); box-shadow: 18px 0 40px rgba(0,0,0,.35); }
 
 .job-painel-doc-header {
   display: flex; align-items: center; justify-content: space-between;

@@ -853,11 +853,54 @@
     });
   }
 
+  // ── CONVIVÊNCIA COM OUTRAS EXTENSÕES (WaSpeed, ZapVoice...) ─────────────
+  // Todas fixam um trilho estreito e alto na borda da tela e empurram a
+  // página. Escolher "esquerda ou direita" na mão não resolve quando há DUAS
+  // além da nossa: um lado sempre fica dobrado e um trilho senta em cima do
+  // outro (relato do Guilherme, 29/07). Então medimos quanto já está ocupado
+  // no NOSSO lado e nos encaixamos DEPOIS do vizinho, somando a margem.
+  // Escreve em --job-viz, que o CSS usa pra posicionar trilho, painel e
+  // popover e pra calcular o empurrão da página.
+  let _vizOcupado = -1;   // -1 = ainda não medido
+
+  function _medirVizinhos() {
+    const larg = window.innerWidth, alt = window.innerHeight;
+    let esq = 0, dir = 0;
+    if (!larg || !alt) return { esquerda: 0, direita: 0 };
+    for (const el of Array.from(document.body.children)) {
+      // Nunca medir a gente mesmo (viraria laço: empurra, mede, empurra...).
+      if (el.id === 'job-trilho' || el.id === 'job-painel-doc') continue;
+      if (el.id === 'app' || el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
+      let cs;
+      try { cs = getComputedStyle(el); } catch (e) { continue; }
+      if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden') continue;
+      const r = el.getBoundingClientRect();
+      // Assinatura de trilho: estreito, alto e encostado numa borda.
+      if (r.width <= 0 || r.width > 220) continue;
+      if (r.height < alt * 0.5) continue;
+      if (r.left <= 2) esq = Math.max(esq, r.right);
+      else if (r.right >= larg - 2) dir = Math.max(dir, larg - r.left);
+    }
+    return { esquerda: Math.round(esq), direita: Math.round(dir) };
+  }
+
+  function aplicarOffsetVizinhos() {
+    if (_contextoMorto) return;
+    const v = _medirVizinhos();
+    const px = _railSide === 'esquerda' ? v.esquerda : v.direita;
+    if (px === _vizOcupado) return;   // só escreve quando muda (evita thrash)
+    _vizOcupado = px;
+    document.documentElement.style.setProperty('--job-viz', px + 'px');
+  }
+
   const JOB_PUSH_MIN_WIDTH = 1360; // trilho+painel+folga mínima pro WhatsApp não espremer
   function aplicarClassesHtml() {
     const html = document.documentElement;
     html.classList.toggle('job-push-esquerda', _railSide === 'esquerda');
     html.classList.add('job-push-trilho');
+    // Trocar de lado muda qual vizinho importa — remede antes de posicionar.
+    _vizOcupado = -1;
+    aplicarOffsetVizinhos();
     // O painel também precisa trocar de lado. Antes isso só era aplicado
     // dentro de abrirSecao(), então trocar o lado com o painel JÁ ABERTO movia
     // só o trilho — o painel ficava do lado errado, parecendo que a
@@ -3494,6 +3537,10 @@
   let _ultimaChaveVista = null;
   _registrarLoop(setInterval(() => {
     if (!_contextoValido()) { _marcarContextoMorto(); return; }
+    // Outras extensões carregam em tempos diferentes da nossa (e o usuário pode
+    // ligar/desligar as delas em pleno uso) — remedir sempre. É barato: só
+    // escreve no DOM quando o valor muda de fato.
+    aplicarOffsetVizinhos();
     const chaveAgora = nomeDoContato() || chaveConversa(telefoneDoContato(), nomeDoContato());
     if (chaveAgora === _ultimaChaveVista) return;
     _ultimaChaveVista = chaveAgora;
