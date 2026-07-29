@@ -228,7 +228,39 @@ Estrutura final: `{ sp: {label, records[]}, camp: {...}, rio: {...} }`, embutida
 
 ---
 
-## 8. Hospedagem — DECIDIDO, ainda não implementado
+## 8. Hospedagem — IMPLEMENTADO no ERP JOB
+
+- **`/rede-referenciada`** (`@login_required`) — a página, com botão "Gerar link para cliente"
+  (24h / 7 dias / 30 dias).
+- **`/rede-referenciada/gerar-link`** (POST, autenticado) — cria token (`secrets.token_urlsafe(24)`),
+  grava em `rede_link` (token, quem gerou, filtros, `expira_em`), devolve `{url, expiraTexto}`.
+- **`/rede/<token>`** (pública) — valida `expira_em`/`revogado`; se ok, serve a mesma página em
+  modo `public` (mostra banner "válido até..."); se vencido, `410` com
+  `templates/rede_referenciada_expirado.html`; se token não existe, `404`.
+- Tabela `rede_link` criada em `init_db()` (blocos PG e SQLite).
+- Item de menu na sidebar (`templates/base.html`), gated por `eh_serenus` — mesmo padrão do
+  "Manual", não some no menu de instância de cliente.
+- Testado localmente (SQLite) com `test_client`: rota autenticada, geração de link, token válido,
+  token inválido (404), token expirado (410), e anti-regressão em `/login`, `/` e `/propostas`.
+
+O `template.html` ganhou um bloco de contexto (`CTX`, injetado via `<!--REDE_CTX-->` →
+`{{ rede_ctx | tojson }}` no Jinja) que muda o comportamento:
+- `modo: 'app'` → mostra o botão de gerar link.
+- `modo: 'public'` → mostra o banner de validade e carimba a data de expiração no rodapé do PDF.
+- ausente (artifact/standalone) → nada muda, comportamento antigo.
+
+`EMBUTIDO` (`window.self !== window.top`) decide como o PDF é entregue: fora de iframe (ERP) baixa
+direto com `<a download>`; dentro de um iframe com sandbox (artifact) cai no fallback de aba nova /
+visualizador embutido — **que na prática também falhou** dentro do artifact (ver nota abaixo). Por
+isso a hospedagem no ERP deixou de ser só "melhor" e passou a ser necessária.
+
+> **Nota sobre o artifact:** depois de implementado o fallback (aba nova → visualizador embutido em
+> `<iframe src="blob:...">`), o usuário reportou que nem o visualizador embutido carregava dentro
+> do artifact (ícone de arquivo quebrado). Ou seja, dentro de um iframe com sandbox não existe
+> caminho confiável para entregar um Blob gerado em JS — nem download, nem popup, nem iframe
+> aninhado. Fora do sandbox (app normal, como o ERP), os três caminhos funcionam sem problema.
+
+## 8.1 Pendência antiga (mantida como referência histórica)
 
 O artifact fica em `claude.ai/code/artifact/...` e qualquer pessoa com o link acessa. Guilherme
 recusou isso (não quer o domínio da Claude nem acesso aberto) e **decidiu em 29/07/2026**:

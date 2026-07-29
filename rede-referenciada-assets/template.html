@@ -283,6 +283,23 @@
   }
   #pdfviewer .pv-frame{flex:1;width:100%;border:0;background:#fff;}
 
+  .linkbanner{
+    display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    padding:9px 12px;margin-bottom:10px;border-radius:10px;
+    background:var(--accent-soft);color:var(--accent-ink);font-size:12px;font-weight:600;
+  }
+  .linkbanner-app{align-items:flex-start;}
+  .linkbtn{
+    padding:7px 12px;border-radius:8px;border:1px solid var(--line-strong);
+    background:var(--surface);color:var(--ink);font-size:12px;font-weight:700;cursor:pointer;
+  }
+  .linkbtn-primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .linkbox{display:flex;gap:6px;align-items:center;width:100%;}
+  .linkbox select{padding:7px 9px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font-size:12px;flex:1;}
+  .linkresult{display:flex;gap:6px;align-items:center;flex-wrap:wrap;width:100%;}
+  .linkresult input{flex:1;min-width:160px;padding:7px 9px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font-size:11.5px;}
+  .linkresult .linkexp{font-size:11px;color:var(--ink-faint);font-weight:600;}
+
   .watermark{
     position:fixed;inset:-60% -60%;
     display:flex;align-items:center;justify-content:center;
@@ -315,6 +332,9 @@
 </style>
 
 <div class="watermark" aria-hidden="true"><div class="wm-inner" id="wmtext"></div></div>
+
+<!--REDE_CTX-->
+<div id="redeTopoSlot"></div>
 
 <div class="shell">
   <header class="top">
@@ -373,6 +393,17 @@
 (function(){
   "use strict";
   var DB = JSON.parse(document.getElementById("rede-data").textContent);
+
+  // Contexto injetado pelo servidor (ERP). Ausente = pagina standalone/artifact.
+  var CTX = (function(){
+    var el = document.getElementById("rede-ctx");
+    if(!el) return {modo:"standalone"};
+    try { return JSON.parse(el.textContent) || {modo:"standalone"}; }
+    catch(e){ return {modo:"standalone"}; }
+  })();
+  // Dentro de um iframe com sandbox (artifact) o navegador bloqueia download,
+  // popup e blob: em iframe. Fora dele (ERP) tudo funciona normal.
+  var EMBUTIDO = (function(){ try { return window.self !== window.top; } catch(e){ return true; } })();
   var CITY_ORDER = ["sp","camp","rio"];
   var TIPO_LABEL = {ps:"Pronto Socorro", hm:"Hospital / Maternidade", hd:"Hospital Dia", mc:"Médico / Clínica"};
   var TIPO_LABEL_SHORT = {ps:"PS", hm:"Hospital", hd:"Hosp. Dia", mc:"Médico/Clínica"};
@@ -780,6 +811,9 @@
     cs += "q 0.78 0.82 0.79 RG 0.8 w " + PDF_M + " " + (y+4).toFixed(2) + " m " + (PDF_W-PDF_M).toFixed(2) + " " + (y+4).toFixed(2) + " l S Q\n";
     y -= 6;
     line("Material exclusivo Serenus Corretora de Saude - uso interno, nao redistribuir.", {size:7.4, bold:true, color:C_INK, gap:2.5});
+    if(meta.expiraTexto){
+      line("Documento gerado a partir de um link temporario, valido ate " + meta.expiraTexto + (meta.geradoPor ? (" - gerado por " + meta.geradoPor) : "") + ".", {size:7, bold:true, color:C_ACC, gap:2.5});
+    }
     line("Fonte: busca publica de rede referenciada SulAmerica (portal.sulamericaseguros.com.br). Plano Direto Nacional 557 / 87507. Gerado em " + meta.dateStr + ".", {size:7, color:C_FAINT, gap:2.5});
     line("Cada consulta ao site da operadora retorna no maximo 50 prestadores por ponto; a coleta varreu multiplos pontos e todas as especialidades, mas em especialidades de altissimo volume a lista pode nao ser exaustiva. Confirme cobertura com o prestador.", {size:7, color:C_FAINT, gap:2.5});
     endPage();
@@ -842,9 +876,21 @@
   // o PDF num visualizador dentro da propria pagina.
   function deliverPdf(blob, filename, count){
     var url = URL.createObjectURL(blob);
+
+    if(!EMBUTIDO){
+      // Fora de iframe (ERP): download direto funciona normal.
+      var a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+      showToast("PDF de " + count + " locais baixado.");
+      return;
+    }
+
+    // Dentro de um iframe com sandbox (artifact): download e blob: em iframe
+    // aninhado sao bloqueados sem erro. Melhor esforco: aba nova.
     var win = null;
     try { win = window.open(url, "_blank"); } catch(e){ win = null; }
-
     if(win){
       showToast("PDF de " + count + " locais aberto em nova aba — use Salvar/Compartilhar por lá.");
       setTimeout(function(){ URL.revokeObjectURL(url); }, 120000);
@@ -899,7 +945,9 @@
           filterLabel: filterLabel(),
           count: recs.length,
           tipoAll: state.tipo === "all",
-          dateStr: dateStr
+          dateStr: dateStr,
+          expiraTexto: CTX.expiraTexto || null,
+          geradoPor: CTX.geradoPor || null
         };
         var blob = buildPdfBlob(recs, meta);
         var name = "rede-sulamerica-" + slugify(DB[state.city].label) +
@@ -933,9 +981,87 @@
   try{ savedTheme = localStorage.getItem("rede-theme") || "auto"; }catch(e){}
   applyTheme(savedTheme);
 
+  // ---------- Banner de topo: gerar/mostrar link temporario (so dentro do ERP) ----------
+  function renderTopoBanner(){
+    var slot = document.getElementById("redeTopoSlot");
+    if(!slot) return;
+
+    if(CTX.modo === "public"){
+      slot.innerHTML =
+        '<div class="linkbanner">' +
+          '<span>Link temporario' + (CTX.expiraTexto ? ' - valido ate <b>' + escapeHtml(CTX.expiraTexto) + '</b>' : '') +
+          (CTX.geradoPor ? ' - gerado por ' + escapeHtml(CTX.geradoPor) : '') + '.</span>' +
+        '</div>';
+      return;
+    }
+
+    if(CTX.modo === "app" && CTX.gerarLinkUrl){
+      slot.innerHTML =
+        '<div class="linkbanner linkbanner-app">' +
+          '<button class="linkbtn" id="gerarLinkBtn" type="button">Gerar link para cliente</button>' +
+          '<div class="linkbox" id="linkBox" style="display:none;">' +
+            '<select id="linkPrazo">' +
+              '<option value="24h">Expira em 24 horas</option>' +
+              '<option value="7d" selected>Expira em 7 dias</option>' +
+              '<option value="30d">Expira em 30 dias</option>' +
+            '</select>' +
+            '<button class="linkbtn linkbtn-primary" id="linkGerarConfirm" type="button">Gerar</button>' +
+          '</div>' +
+          '<div class="linkresult" id="linkResult" style="display:none;"></div>' +
+        '</div>';
+
+      document.getElementById("gerarLinkBtn").addEventListener("click", function(){
+        var box = document.getElementById("linkBox");
+        box.style.display = box.style.display === "none" ? "flex" : "none";
+      });
+      document.getElementById("linkGerarConfirm").addEventListener("click", function(){
+        var btn = document.getElementById("linkGerarConfirm");
+        btn.disabled = true;
+        btn.textContent = "Gerando…";
+        var body = {
+          prazo: document.getElementById("linkPrazo").value,
+          cidade: state.city, tipo: state.tipo, esp: state.esp, q: state.q
+        };
+        fetch(CTX.gerarLinkUrl, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(body)
+        }).then(function(r){ return r.json(); }).then(function(data){
+          btn.disabled = false;
+          btn.textContent = "Gerar";
+          if(!data || !data.url){
+            showToast("Nao foi possivel gerar o link.");
+            return;
+          }
+          var res = document.getElementById("linkResult");
+          res.style.display = "block";
+          res.innerHTML =
+            '<input readonly id="linkUrlInput" value="' + escapeHtml(data.url) + '" />' +
+            '<button class="linkbtn" id="linkCopyBtn" type="button">Copiar</button>' +
+            '<span class="linkexp">Expira em ' + escapeHtml(data.expiraTexto || "") + '</span>';
+          document.getElementById("linkCopyBtn").addEventListener("click", function(){
+            var inp = document.getElementById("linkUrlInput");
+            inp.select();
+            try{
+              navigator.clipboard.writeText(inp.value).then(function(){ showToast("Link copiado."); });
+            }catch(e){
+              document.execCommand("copy");
+              showToast("Link copiado.");
+            }
+          });
+        }).catch(function(){
+          btn.disabled = false;
+          btn.textContent = "Gerar";
+          showToast("Falha ao gerar o link.");
+        });
+      });
+    }
+  }
+
   buildCityTabs();
   buildTipoChips();
   buildEspSelect();
+  renderTopoBanner();
   render();
 })();
 </script>

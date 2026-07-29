@@ -1094,6 +1094,16 @@ def init_db():
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(operadora, nome)
             )""",
+            """CREATE TABLE IF NOT EXISTS rede_link (
+                id SERIAL PRIMARY KEY,
+                token TEXT UNIQUE NOT NULL,
+                criado_por_id INTEGER, criado_por_nome TEXT,
+                cidade TEXT, tipo TEXT, esp TEXT, q TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expira_em TIMESTAMP NOT NULL,
+                revogado INTEGER DEFAULT 0,
+                aberturas INTEGER DEFAULT 0
+            )""",
             """CREATE TABLE IF NOT EXISTS cotacao_legenda_modelo (
                 id SERIAL PRIMARY KEY,
                 nome TEXT NOT NULL,
@@ -1701,6 +1711,16 @@ def init_db():
             operadora TEXT NOT NULL, nome TEXT NOT NULL,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(operadora, nome)
+        );
+        CREATE TABLE IF NOT EXISTS rede_link (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token TEXT UNIQUE NOT NULL,
+            criado_por_id INTEGER, criado_por_nome TEXT,
+            cidade TEXT, tipo TEXT, esp TEXT, q TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expira_em TIMESTAMP NOT NULL,
+            revogado INTEGER DEFAULT 0,
+            aberturas INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS cotacao_legenda_modelo (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -15957,6 +15977,83 @@ def cotacao_operadoras_logos():
     itens = [{'operadora': op, 'logo': _logo_operadora_url(conn, op)} for op in operadoras]
     close_db(conn)
     return render_template('cotacao_logos.html', itens=itens)
+
+
+RE_LINK_PRAZOS = {'24h': timedelta(hours=24), '7d': timedelta(days=7), '30d': timedelta(days=30)}
+
+
+def _rede_link_fmt(dt):
+    """dd/mm/aaaa às HH:MM, em horário de SP."""
+    if dt.tzinfo is None:
+        dt = TZ_SP.localize(dt)
+    return dt.strftime('%d/%m/%Y às %H:%M')
+
+
+@app.route('/rede-referenciada')
+@login_required
+def rede_referenciada():
+    """Consulta da rede referenciada SulAmérica (São Paulo, Campinas, Rio) —
+    material exclusivo Serenus. Ver rede-referenciada-assets/ na raiz do repo
+    para como os dados foram coletados e como regerar este template."""
+    ctx = {'modo': 'app', 'gerarLinkUrl': url_for('rede_gerar_link')}
+    return render_template('rede_referenciada.html', rede_ctx=ctx)
+
+
+@app.route('/rede-referenciada/gerar-link', methods=['POST'])
+@login_required
+def rede_gerar_link():
+    """Gera um link temporário (com prazo de expiração) para mandar ao cliente."""
+    body = request.get_json(silent=True) or {}
+    prazo = body.get('prazo') or '7d'
+    delta = RE_LINK_PRAZOS.get(prazo, RE_LINK_PRAZOS['7d'])
+    expira_em = datetime.now(TZ_SP) + delta
+    token = secrets.token_urlsafe(24)
+
+    conn = db()
+    conn.execute(
+        """INSERT INTO rede_link (token, criado_por_id, criado_por_nome, cidade, tipo, esp, q, expira_em)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (token, session.get('user_id'), session.get('nome', ''),
+         (body.get('cidade') or '')[:20], (body.get('tipo') or '')[:20],
+         (body.get('esp') or '')[:200], (body.get('q') or '')[:200],
+         expira_em.strftime('%Y-%m-%d %H:%M:%S'))
+    )
+    conn.commit()
+    close_db(conn)
+
+    return jsonify({
+        'url': url_for('rede_referenciada_publica', token=token, _external=True),
+        'expiraTexto': _rede_link_fmt(expira_em)
+    })
+
+
+@app.route('/rede/<token>')
+def rede_referenciada_publica(token):
+    """Link temporário enviado ao cliente. Some sozinho depois do prazo —
+    a marca d'água e o carimbo no rodapé do PDF continuam sendo só dissuasão;
+    quem já baixou o PDF antes de expirar fica com a cópia."""
+    conn = db()
+    row = conn.execute("SELECT * FROM rede_link WHERE token=?", (token,)).fetchone()
+    if not row:
+        close_db(conn)
+        abort(404)
+    r = dict(row)
+    expira_em = _parse_dt_seguro(r.get('expira_em'))
+    expirado = bool(r.get('revogado')) or (expira_em and expira_em.replace(tzinfo=None) < datetime.now(TZ_SP).replace(tzinfo=None))
+    if expirado:
+        close_db(conn)
+        return render_template('rede_referenciada_expirado.html'), 410
+
+    conn.execute("UPDATE rede_link SET aberturas=COALESCE(aberturas,0)+1 WHERE id=?", (r['id'],))
+    conn.commit()
+    close_db(conn)
+
+    ctx = {
+        'modo': 'public',
+        'expiraTexto': _rede_link_fmt(expira_em) if expira_em else None,
+        'geradoPor': r.get('criado_por_nome') or None,
+    }
+    return render_template('rede_referenciada.html', rede_ctx=ctx)
 
 
 @app.route('/manual')
