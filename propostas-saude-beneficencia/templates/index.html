@@ -842,6 +842,17 @@ function carregarProposta(d){
     const chip = document.querySelector(`#tipoTitularChips .chip[data-v="${d.tipo_titular}"]`);
     if (chip) definirTipoTitular(d.tipo_titular, chip);
   }
+
+  // Contrato anterior: sem isso, ao reabrir uma proposta com migração a caixa da
+  // carta nem aparecia — não havia onde preencher e a carta não saía.
+  const ant = d.contrato_anterior || {};
+  porId('ant_nome', (ant.titular||{}).nome); porId('ant_cpf', (ant.titular||{}).cpf);
+  porId('ant_empresa', (ant.empresa||{}).razao_social); porId('ant_cnpj', (ant.empresa||{}).cnpj);
+  const chipOrigem = document.querySelector(`#origemChips .chip[data-v="${ant.origem||'empresarial'}"]`);
+  if (chipOrigem) escolherUnico(document.getElementById('origemChips'), chipOrigem);
+  trocarOrigem();
+  atualizarCarta();
+
   atualizarChecklist();
 }
 

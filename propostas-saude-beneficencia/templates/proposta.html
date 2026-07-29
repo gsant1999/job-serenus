@@ -30,6 +30,9 @@
       {% if p.versoes %}
         <a class="btn sec" href="/proposta/{{ p.id }}/versao/{{ p.versoes[0].numero }}">Baixar contrato</a>
       {% endif %}
+      {% if p.dados.get('migracoes') %}
+        <a class="btn sec" href="/proposta/{{ p.id }}/carta">Carta para assinar</a>
+      {% endif %}
       <a class="btn" href="/?id={{ p.id }}">Abrir para corrigir</a>
     </div>
   </div>

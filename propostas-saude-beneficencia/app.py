@@ -523,6 +523,33 @@ def mudar_situacao(pid):
     return redirect(url_for('ver_proposta', pid=pid))
 
 
+@app.route('/proposta/<pid>/carta')
+@login_obrigatorio
+def baixar_carta(pid):
+    """Carta de cancelamento a partir da proposta ja guardada.
+
+    Existe para quem so quer o papel para assinar, sem reabrir a proposta inteira -
+    e o caso de quem gerou o contrato ontem e hoje precisa da assinatura."""
+    u = usuario_atual()
+    p = propostas.obter(pid)
+    if not p:
+        return 'Proposta não encontrada.', 404
+    if u['papel'] != 'gestor' and p['consultor_id'] != u['id']:
+        return 'Esta proposta é de outro consultor.', 403
+    try:
+        pdf = carta.gerar(p.get('dados') or {})
+    except Exception:
+        app.logger.exception('falha ao gerar a carta')
+        pdf = None
+    if not pdf:
+        return render_template('recado.html', voltar=url_for('ver_proposta', pid=pid),
+                               erro='Esta proposta não tem os dados do contrato anterior. '
+                                    'Abra para corrigir, marque quem está migrando e '
+                                    'preencha quem assina a carta.'), 400
+    return send_file(io.BytesIO(pdf), mimetype='application/pdf', as_attachment=True,
+                     download_name=f'CARTA_CANCELAMENTO_{p["empresa"] or pid}.pdf')
+
+
 @app.route('/proposta/<pid>/versao/<int:numero>')
 @login_obrigatorio
 def baixar_versao(pid, numero):
