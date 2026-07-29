@@ -137,6 +137,13 @@ def montar(gerados, anexos, titular_e_dono, exigidos=None):
                             'paginas': len(leitor.pages)})
         return total
 
+    # 0. Carta de cancelamento do contrato anterior (so nas vendas administrativas).
+    # Vai na CAPA porque e o pedido que autoriza a operadora a encerrar a apolice
+    # antiga - o analista precisa ver antes de abrir a proposta.
+    if gerados.get('carta'):
+        _juntar('Carta de cancelamento do contrato anterior',
+                [('Carta.pdf', gerados['carta'])])
+
     # 1. Proposta de Adesao
     _juntar('Proposta de Adesão', [('Proposta.pdf', gerados['proposta'])])
 

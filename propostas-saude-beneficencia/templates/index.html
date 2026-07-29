@@ -315,6 +315,29 @@
     </div>
     {% endif %}
 
+    <div id="cartaBox" class="auto-box" style="display:none;">
+      <b>Carta de cancelamento do contrato anterior</b>
+      <p class="small">Alguém está migrando de outro contrato. A operadora precisa do
+        pedido por escrito para encerrar a apólice antiga — senão a pessoa fica com dois
+        planos e a migração trava. O sistema monta a carta e coloca na capa do contrato.</p>
+      <div class="grid g2">
+        <div><label class="req">Titular do contrato anterior</label>
+          <input type="text" id="ant_nome" placeholder="quem assina a carta"></div>
+        <div><label>CPF</label><input type="text" id="ant_cpf"></div>
+      </div>
+      <label style="margin-top:9px;">O contrato anterior é</label>
+      <div class="chips" id="origemChips">
+        <div class="chip on" data-v="empresarial" onclick="escolherUnico(this.parentNode,this)">Coletivo empresarial</div>
+        <div class="chip" data-v="pf" onclick="escolherUnico(this.parentNode,this)">Individual / familiar</div>
+      </div>
+      <div style="margin-top:9px;max-width:280px;">
+        <label>Número do contrato ou carteirinha (opcional)</label>
+        <input type="text" id="ant_numero">
+      </div>
+      <p class="small" style="margin-top:8px;">Quem assina é o titular do contrato
+        <b>anterior</b> — costuma ser outra pessoa do casal, não o titular do novo.</p>
+    </div>
+
     <div id="checklistBox" style="margin-top:14px;"></div>
     <div id="obsBox"></div>
 
@@ -460,7 +483,13 @@ async function buscarCnpj(){
       const alvo = Array.from(chipsBox.children).find(c => c.textContent.startsWith(d.responsavel_sugerido));
       if (alvo) alvo.click();
     }
-    statusEl.textContent = 'Empresa encontrada.'; statusEl.className = 'status ok';
+    if (d.aviso){
+      statusEl.textContent = 'Empresa encontrada. ' + d.aviso;
+      statusEl.className = 'status err';
+      document.getElementById('e_endereco').focus();
+    } else {
+      statusEl.textContent = 'Empresa encontrada.'; statusEl.className = 'status ok';
+    }
     document.getElementById('e_contato').value = document.getElementById('e_contato').value || '';
   }catch(e){
     statusEl.textContent = 'Falha de conexão: ' + e; statusEl.className='status err';
@@ -828,6 +857,21 @@ function definirParentesco(idx, chave, rotulo){
 function definirFilhoEmComum(idx, valor){
   PESSOAS[idx].filho_em_comum = valor;
   atualizarChecklist();
+}
+
+// A carta só existe quando alguém migra. Sugere como signatário a primeira pessoa
+// que está migrando - no caso comum é ela mesma quem era titular do plano antigo.
+function atualizarCarta(){
+  const caixa = document.getElementById('cartaBox');
+  if (!caixa) return;
+  const migrando = PESSOAS.filter(p => p.migracao);
+  caixa.style.display = migrando.length ? 'block' : 'none';
+  const campo = document.getElementById('ant_nome');
+  if (migrando.length && campo && !campo.value.trim()){
+    campo.value = up(migrando[0].nome || '');
+    const cpf = document.getElementById('ant_cpf');
+    if (cpf && !cpf.value.trim()) cpf.value = migrando[0].cpf || '';
+  }
 }
 
 // ── Documentos do contrato ──────────────────────────────────────────────────
@@ -1227,6 +1271,7 @@ function definirSaude(idx, modo){
   if (modo !== 'entrevista') p.data_entrevista = '';
   if (modo !== 'migracao'){ p.valor_migracao = ''; p.obs_migracao = ''; }
   renderPessoas();
+  atualizarCarta();
   // se alguém é portabilidade, a folha marca "aproveitamento de carências: SIM"
   var temPort = PESSOAS.some(function(p){ return p.portabilidade; });
   var chips = document.getElementById('carenciaChips');
@@ -1341,7 +1386,17 @@ function montarPayload(){
       nome: up(p.nome),
       valor: parseFloat((p.valor_migracao||'0').toString().replace(/\./g,'').replace(',', '.')) || 0,
       observacao: up(p.obs_migracao || ''),
+      // vão só para a carta de cancelamento, que precisa identificar cada beneficiário
+      cpf: p.cpf || '', nascimento: p.nascimento || '', parentesco: p.parentesco || '',
     })),
+    contrato_anterior: {
+      titular: {
+        nome: up(document.getElementById('ant_nome')?.value || ''),
+        cpf: document.getElementById('ant_cpf')?.value || '',
+      },
+      origem: document.querySelector('#origemChips .chip.on')?.dataset.v || 'empresarial',
+      numero: document.getElementById('ant_numero')?.value || '',
+    },
     titulares: gruposTitulares,
     // o servidor remonta o checklist para saber o que cobrar do contrato; sem estes
     // dois ele não teria como saber que o caso pede certidão de nascimento

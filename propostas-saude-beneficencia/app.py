@@ -24,6 +24,7 @@ from flask import (Flask, jsonify, redirect, render_template, request, send_file
                    session, url_for)
 
 import leitor
+import carta
 import montagem
 import motor
 import regras
@@ -184,6 +185,24 @@ def api_cnpj(cnpj):
     if not responsavel and socios:
         responsavel = socios[0]
 
+    # Empresario individual e MEI nao tem quadro societario: a Receita devolve qsa
+    # vazio e poe o nome da pessoa DENTRO da razao social, no formato
+    # "52.725.505 LEANDRO GAMA PIMENTEL". Sem tratar isso, a tela ficava sem nenhum
+    # representante legal para clicar - e boa parte da carteira e MEI.
+    razao = dados.get('razao_social', '') or ''
+    if not socios:
+        nome_titular = re.sub(r'^[\d./\-\s]+', '', razao).strip()
+        if nome_titular and nome_titular != razao.strip():
+            socios = [{'nome_socio': nome_titular,
+                       'qualificacao_socio': 'Empresário individual'}]
+            responsavel = socios[0]
+
+    # A Receita as vezes devolve o registro sem logradouro/numero. Nao e falha da
+    # consulta - o dado nao esta la. Avisar e melhor do que deixar o campo vazio e o
+    # corretor descobrir na hora que a operadora recusar por endereco incompleto.
+    faltando = [r for r, v in (('endereço', dados.get('logradouro')),
+                               ('número', dados.get('numero'))) if not (v or '').strip()]
+
     return jsonify({
         'razao_social': dados.get('razao_social', ''),
         'nome_fantasia': dados.get('nome_fantasia', ''),
@@ -199,6 +218,8 @@ def api_cnpj(cnpj):
         'cnpj': dados.get('cnpj', digitos),
         'socios': [{'nome': s.get('nome_socio', ''), 'qualificacao': s.get('qualificacao_socio', '')} for s in socios],
         'responsavel_sugerido': responsavel.get('nome_socio') if responsavel else '',
+        'aviso': ('A Receita não tem ' + ' nem '.join(faltando) + ' neste CNPJ — '
+                  'preencha à mão.') if faltando else '',
     })
 
 
@@ -367,9 +388,17 @@ def api_contrato():
     except ValueError:
         exigidos = []          # tipo de titular recusado ja teria barrado antes
 
+    # Carta de cancelamento: so sai quando ha migracao e alguem para assinar.
+    try:
+        folha_carta = carta.gerar(dados)
+    except Exception:
+        app.logger.exception('falha ao gerar a carta de cancelamento')
+        folha_carta = None
+
     try:
         final, roteiro = montagem.montar(
-            {'proposta': pdfs[0][1], 'fichas': [b for _, b in pdfs[1:]]},
+            {'proposta': pdfs[0][1], 'fichas': [b for _, b in pdfs[1:]],
+             'carta': folha_carta},
             anexos,
             titular_e_dono=tipo_titular == 'socio',
             exigidos=exigidos,

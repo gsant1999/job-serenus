@@ -14,3 +14,6 @@ pypdfium2==5.10.1
 # Leitura automatica dos documentos. So e usada quando ANTHROPIC_API_KEY existe -
 # sem a chave o app sobe igual e cai no caminho manual (prompt para o ChatGPT).
 anthropic==0.116.0
+# Carta de cancelamento do contrato anterior (venda administrativa). E o unico
+# documento que o sistema cria do zero, em vez de preencher formulario da operadora.
+reportlab==5.0.0
