@@ -16070,7 +16070,7 @@ def rede_gerar_link():
     close_db(conn)
 
     return jsonify({
-        'url': url_for('rede_referenciada_publica', token=token, _external=True),
+        'url': _SITE_BASE_URL + url_for('rede_referenciada_publica', token=token),
         'expiraTexto': _rede_link_fmt(expira_em)
     })
 
