@@ -244,7 +244,9 @@ def api_carta():
         app.logger.exception('falha ao gerar a carta')
         return jsonify({'erro': 'Não foi possível gerar a carta.'}), 500
     if not pdf:
-        return jsonify({'erro': 'Informe o titular do contrato anterior — é quem assina.'}), 400
+        return jsonify({'erro': 'Faltam dados do contrato anterior: quem assina e, no '
+                                'caso de contrato empresarial, a razão social e o CNPJ '
+                                'da empresa que está sendo cancelada.'}), 400
 
     nome = (dados.get('contrato_anterior') or {}).get('titular', {}).get('nome', 'carta')
     limpo = re.sub(r'[^A-Za-z0-9]+', '_', nome).strip('_').upper() or 'CARTA'
@@ -544,8 +546,9 @@ def baixar_carta(pid):
     if not pdf:
         return render_template('recado.html', voltar=url_for('ver_proposta', pid=pid),
                                erro='Esta proposta não tem os dados do contrato anterior. '
-                                    'Abra para corrigir, marque quem está migrando e '
-                                    'preencha quem assina a carta.'), 400
+                                    'Abra para corrigir, marque quem está migrando e preencha '
+                                    'quem assina — e, se o contrato antigo for empresarial, '
+                                    'a razão social e o CNPJ daquela empresa.'), 400
     return send_file(io.BytesIO(pdf), mimetype='application/pdf', as_attachment=True,
                      download_name=f'CARTA_CANCELAMENTO_{p["empresa"] or pid}.pdf')
 

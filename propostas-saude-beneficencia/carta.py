@@ -65,6 +65,13 @@ def gerar(dados, hoje=None):
 
     empresa_ant = ant.get('empresa') or {}
     empresarial = (ant.get('origem') or 'empresarial') == 'empresarial'
+    # Sem a empresa anterior o texto sai "representante legal da empresa , CNPJ ," -
+    # com virgula solta e sem dizer de que contrato se trata. Carta assim volta da
+    # analise; melhor nao gerar e dizer o que falta.
+    if empresarial and not ((empresa_ant.get('razao_social') or '').strip()
+                            and (empresa_ant.get('cnpj') or '').strip()):
+        return None
+
     empresa_nova = dados.get('empresa') or {}
     vig = dados.get('vigencia') or {}
     largura_util = LARGURA - 2 * MARGEM
@@ -72,7 +79,12 @@ def gerar(dados, hoje=None):
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     c.setTitle('Solicitação de cancelamento de contrato')
-    y = ALTURA - MARGEM - 20 * mm
+    y = ALTURA - MARGEM
+
+    c.setFont('Helvetica-Bold', 14)
+    titulo = 'CARTA DE CANCELAMENTO'
+    c.drawString((LARGURA - c.stringWidth(titulo, 'Helvetica-Bold', 14)) / 2, y, titulo)
+    y -= 34
 
     def escrever(texto, fonte='Helvetica', tamanho=12, espaco=18, recuo=0):
         nonlocal y
@@ -128,21 +140,25 @@ def gerar(dados, hoje=None):
             escrever('•  ' + ' — '.join(partes), tamanho=11, espaco=16, recuo=10)
         pular()
 
+    # A data vai SEMPRE, mesmo sem cidade cadastrada: documento sem data nao serve
+    # para marcar quando o cancelamento foi pedido.
     cidade = (empresa_nova.get('cidade') or 'Campinas').title()
     escrever(f'{cidade}, {_data_extenso(hoje or datetime.date.today())}.')
-    pular(3)
 
-    # Linha de assinatura no formato do modelo
-    c.setFont('Helvetica', 12)
-    rodape = ('__________(assinatura do representante da empresa)_______________'
-              if empresarial else '__________(assinatura do titular)_______________')
-    c.drawString(MARGEM, y, rodape)
-    y -= 18
+    # Assinatura: espaco em branco suficiente para assinar A MAO acima da linha, e a
+    # identificacao embaixo. O modelo da operadora trazia a instrucao no meio dos
+    # underscores, o que virava parte do documento assinado.
+    pular(4)
+    c.line(MARGEM, y, MARGEM + 95 * mm, y)
+    y -= 15
     c.setFont('Helvetica-Bold', 11)
     c.drawString(MARGEM, y, quem.get('nome', '').upper())
     y -= 14
     c.setFont('Helvetica', 10)
     c.drawString(MARGEM, y, f"CPF {quem.get('cpf', '')}")
+    y -= 14
+    c.drawString(MARGEM, y, 'Representante legal da empresa' if empresarial
+                 else 'Titular do contrato')
 
     c.showPage()
     c.save()
