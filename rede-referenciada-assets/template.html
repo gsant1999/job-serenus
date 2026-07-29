@@ -1,0 +1,941 @@
+<title>Rede Referenciada — SulAmérica</title>
+<style>
+  :root{
+    --accent:#0F6B5C;
+    --accent-ink:#0A4F44;
+    --accent-soft:#E4EFEC;
+    --bg:#F3F6F4;
+    --surface:#FFFFFF;
+    --surface-2:#EEF2EF;
+    --ink:#16211D;
+    --ink-soft:#5B6B64;
+    --ink-faint:#8A968F;
+    --line:#DDE4DF;
+    --line-strong:#C7D0CA;
+    --ps:#B4432E;
+    --hm:#0E7490;
+    --hd:#6D5A8C;
+    --mc:#5B6472;
+    --radius:14px;
+    --shadow:0 1px 2px rgba(22,33,29,.06), 0 6px 20px -8px rgba(22,33,29,.12);
+    color-scheme: light;
+  }
+  :root[data-theme="dark"]{
+    --bg:#121613;
+    --surface:#1A211D;
+    --surface-2:#212925;
+    --ink:#EAF0EC;
+    --ink-soft:#A9B6AF;
+    --ink-faint:#78877F;
+    --line:#2B342F;
+    --line-strong:#3A4640;
+    --accent:#3FBFA3;
+    --accent-ink:#8FE3CE;
+    --accent-soft:#1C332D;
+    --ps:#E07A5F;
+    --hm:#4FB3C9;
+    --hd:#B7A3D6;
+    --mc:#9AA3AF;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px -10px rgba(0,0,0,.5);
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#121613;
+      --surface:#1A211D;
+      --surface-2:#212925;
+      --ink:#EAF0EC;
+      --ink-soft:#A9B6AF;
+      --ink-faint:#78877F;
+      --line:#2B342F;
+      --line-strong:#3A4640;
+      --accent:#3FBFA3;
+      --accent-ink:#8FE3CE;
+      --accent-soft:#1C332D;
+      --ps:#E07A5F;
+      --hm:#4FB3C9;
+      --hd:#B7A3D6;
+      --mc:#9AA3AF;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px -10px rgba(0,0,0,.5);
+      color-scheme: dark;
+    }
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  .display{
+    font-family:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif;
+    text-wrap:balance;
+  }
+  .mono{
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    font-variant-numeric:tabular-nums;
+  }
+
+  .shell{max-width:640px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;position:relative;z-index:2;}
+
+  header.top{
+    position:sticky;top:0;z-index:30;
+    background:var(--bg);
+    padding:14px 16px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .titlebar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;}
+  .titlebar h1{
+    font-size:19px;margin:0;font-weight:600;letter-spacing:-.01em;
+  }
+  .titlebar .tag{
+    font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.08em;
+    white-space:nowrap;
+  }
+  .pdfbtn{
+    flex:0 0 auto;
+    display:inline-flex;align-items:center;gap:5px;
+    padding:7px 11px;border-radius:9px;border:1px solid var(--line-strong);
+    background:var(--surface);color:var(--ink-soft);
+    font-size:12px;font-weight:600;cursor:pointer;
+  }
+  .pdfbtn:active{background:var(--surface-2);}
+  .pdfbtn svg{color:var(--accent-ink);}
+
+  .citytabs{display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;scrollbar-width:none;}
+  .citytabs::-webkit-scrollbar{display:none;}
+  .citytab{
+    flex:1 1 auto;
+    text-align:center;
+    padding:9px 10px;
+    border-radius:10px;
+    border:1px solid var(--line);
+    background:var(--surface);
+    color:var(--ink-soft);
+    font-size:13.5px;
+    font-weight:600;
+    cursor:pointer;
+    white-space:nowrap;
+    transition:background .15s,color .15s,border-color .15s;
+  }
+  .citytab .n{display:block;font-weight:400;font-size:10.5px;color:var(--ink-faint);margin-top:1px;}
+  .citytab.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .citytab.active .n{color:rgba(255,255,255,.8);}
+
+  .filters{padding:0 0 12px;}
+  .searchrow{position:relative;margin-bottom:8px;}
+  .searchrow input{
+    width:100%;
+    padding:11px 14px 11px 38px;
+    border-radius:10px;
+    border:1px solid var(--line-strong);
+    background:var(--surface);
+    color:var(--ink);
+    font-size:15px;
+  }
+  .searchrow input:focus{outline:2px solid var(--accent);outline-offset:1px;}
+  .searchrow svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--ink-faint);}
+  .searchrow input::placeholder{color:var(--ink-faint);}
+
+  .chiprow{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px;margin-bottom:8px;}
+  .chiprow::-webkit-scrollbar{display:none;}
+  .chip{
+    flex:0 0 auto;
+    padding:6px 12px;
+    border-radius:999px;
+    border:1px solid var(--line-strong);
+    background:var(--surface);
+    color:var(--ink-soft);
+    font-size:12.5px;
+    font-weight:600;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .chip.active{background:var(--ink);border-color:var(--ink);color:var(--bg);}
+  .chip .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;position:relative;top:-1px;}
+
+  .esprow select{
+    width:100%;
+    padding:9px 12px;
+    border-radius:10px;
+    border:1px solid var(--line-strong);
+    background:var(--surface);
+    color:var(--ink);
+    font-size:13.5px;
+  }
+
+  main{flex:1;padding:4px 16px 40px;}
+
+  .resultbar{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:12px 2px 8px;
+    color:var(--ink-soft);font-size:12.5px;
+  }
+  .resultbar b{color:var(--ink);font-weight:600;}
+
+  .idle{padding:18px 2px 8px;}
+  .idle .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0 18px;}
+  .statcard{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 8px;text-align:center;}
+  .statcard .v{font-size:19px;font-weight:700;font-family:ui-serif,Georgia,serif;}
+  .statcard .l{font-size:10px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.04em;margin-top:2px;}
+  .idle p{color:var(--ink-soft);font-size:13.5px;line-height:1.55;margin:0 0 12px;}
+  .idle h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);font-weight:600;margin:20px 0 10px;}
+  .topesp{display:flex;flex-wrap:wrap;gap:6px;}
+
+  .card{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-left:3px solid var(--line);
+    border-radius:12px;
+    padding:12px 13px;
+    margin-bottom:9px;
+    box-shadow:var(--shadow);
+  }
+  .card.t-ps{border-left-color:var(--ps);}
+  .card.t-hm{border-left-color:var(--hm);}
+  .card.t-hd{border-left-color:var(--hd);}
+  .card .head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:5px;}
+  .card .name{font-size:15px;font-weight:600;line-height:1.3;}
+  .card .badge{
+    flex:0 0 auto;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+    padding:3px 7px;border-radius:6px;white-space:nowrap;margin-top:1px;
+  }
+  .badge.t-ps{background:color-mix(in srgb, var(--ps) 16%, transparent);color:var(--ps);}
+  .badge.t-hm{background:color-mix(in srgb, var(--hm) 16%, transparent);color:var(--hm);}
+  .badge.t-hd{background:color-mix(in srgb, var(--hd) 16%, transparent);color:var(--hd);}
+  .badge.t-mc{background:var(--surface-2);color:var(--ink-soft);}
+
+  .card .addr{font-size:13px;color:var(--ink-soft);line-height:1.4;margin-bottom:6px;}
+  .card .addr a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--line-strong);}
+  .card .esps{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;}
+  .esptag{
+    font-size:11px;padding:2px 7px;border-radius:6px;background:var(--accent-soft);color:var(--accent-ink);font-weight:600;
+  }
+  .esptag.more{background:var(--surface-2);color:var(--ink-faint);}
+  .card .row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+  .telrow{display:flex;gap:6px;flex-wrap:wrap;}
+  .tel{
+    display:inline-flex;align-items:center;gap:5px;
+    font-size:12.5px;font-weight:600;color:var(--accent-ink);
+    text-decoration:none;background:var(--accent-soft);padding:5px 9px;border-radius:8px;
+  }
+  .flags{display:flex;gap:5px;}
+  .flag{font-size:10px;color:var(--ink-faint);border:1px solid var(--line);border-radius:6px;padding:3px 6px;}
+
+  .empty{padding:40px 10px;text-align:center;color:var(--ink-faint);}
+  .empty .big{font-size:34px;margin-bottom:8px;}
+
+  .loadmore{
+    display:block;width:100%;margin-top:6px;padding:12px;border-radius:10px;
+    border:1px dashed var(--line-strong);background:transparent;color:var(--ink-soft);
+    font-size:13px;font-weight:600;cursor:pointer;
+  }
+  .loadmore:active{background:var(--surface-2);}
+
+  footer{padding:22px 16px 34px;border-top:1px solid var(--line);margin-top:10px;}
+  footer .note{font-size:11.5px;line-height:1.6;color:var(--ink-faint);}
+  footer .note strong{color:var(--ink-soft);}
+  footer .themetoggle{display:flex;gap:6px;margin-top:14px;}
+  footer .themebtn{
+    font-size:11px;padding:6px 10px;border-radius:8px;border:1px solid var(--line-strong);
+    background:var(--surface);color:var(--ink-soft);cursor:pointer;
+  }
+  footer .themebtn.active{background:var(--ink);color:var(--bg);border-color:var(--ink);}
+
+  a{color:var(--accent-ink);}
+  ::selection{background:var(--accent-soft);}
+
+  #toast{
+    position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(12px);
+    background:var(--ink);color:var(--bg);
+    padding:10px 16px;border-radius:10px;
+    font-size:13px;font-weight:600;text-align:center;
+    max-width:86%;box-shadow:var(--shadow);
+    z-index:999;opacity:0;pointer-events:none;
+    transition:opacity .18s ease, transform .18s ease;
+  }
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  @media print{ #toast{display:none !important;} }
+
+  #pdfviewer{
+    position:fixed;inset:0;z-index:2000;background:var(--bg);
+    display:flex;flex-direction:column;
+  }
+  #pdfviewer .pv-bar{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:10px 14px;border-bottom:1px solid var(--line);background:var(--surface);
+  }
+  #pdfviewer .pv-title{font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #pdfviewer .pv-title span{display:block;font-size:10px;font-weight:600;color:var(--ink-faint);}
+  #pdfviewer .pv-acts{display:flex;gap:6px;flex:0 0 auto;}
+  #pdfviewer .pv-btn{
+    padding:8px 13px;border-radius:9px;border:1px solid var(--line-strong);
+    background:var(--surface);color:var(--ink);font-size:12.5px;font-weight:700;
+    cursor:pointer;text-decoration:none;
+  }
+  #pdfviewer .pv-primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  #pdfviewer .pv-hint{
+    padding:8px 14px;font-size:11px;line-height:1.45;color:var(--ink-faint);
+    background:var(--surface-2);border-bottom:1px solid var(--line);
+  }
+  #pdfviewer .pv-frame{flex:1;width:100%;border:0;background:#fff;}
+
+  .watermark{
+    position:fixed;inset:-60% -60%;
+    display:flex;align-items:center;justify-content:center;
+    transform:rotate(-28deg);
+    pointer-events:none;user-select:none;
+    z-index:1;overflow:hidden;
+  }
+  .wm-inner{
+    width:240vw;text-align:center;
+    color:var(--ink);opacity:.045;
+    font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
+    line-height:2.8em;white-space:pre-wrap;
+  }
+
+  .brandrow{display:flex;align-items:center;gap:14px;margin-bottom:12px;}
+  .brand-serenus{display:flex;align-items:center;}
+  .brand-serenus img{height:27px;width:auto;display:block;}
+  .brand-serenus img.dark-only{display:none;}
+  :root[data-theme="dark"] .brand-serenus img.light-only{display:none;}
+  :root[data-theme="dark"] .brand-serenus img.dark-only{display:block;}
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]) .brand-serenus img.light-only{display:none;}
+    :root:not([data-theme="light"]) .brand-serenus img.dark-only{display:block;}
+  }
+  .branddivider{width:1px;height:26px;background:var(--line-strong);flex:0 0 auto;}
+  .brand-sula{display:flex;align-items:center;}
+  .brand-sula img{height:32px;width:auto;display:block;}
+
+  @media print{ .watermark{display:none;} }
+</style>
+
+<div class="watermark" aria-hidden="true"><div class="wm-inner" id="wmtext"></div></div>
+
+<div class="shell">
+  <header class="top">
+    <div class="brandrow">
+      <div class="brand-serenus">
+        <img class="light-only" src="data:image/png;base64,__SERENUS_LOGO_BLACK_B64__" alt="Serenus Corretora" />
+        <img class="dark-only" src="data:image/png;base64,__SERENUS_LOGO_LIGHT_B64__" alt="Serenus Corretora" />
+      </div>
+      <div class="branddivider"></div>
+      <div class="brand-sula">
+        <img src="data:image/png;base64,__LOGO_B64__" alt="SulAmérica" />
+      </div>
+    </div>
+    <div class="titlebar">
+      <h1 class="display">Rede Referenciada</h1>
+      <button class="pdfbtn" id="pdfbtn" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h8l4 4v3"></path><path d="M6 18H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"></path><path d="M6 14h12v8H6z"></path></svg>
+        PDF
+      </button>
+    </div>
+    <div class="citytabs" id="citytabs"></div>
+    <div class="filters">
+      <div class="searchrow">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input id="search" type="text" placeholder="Nome, bairro ou especialidade…" autocomplete="off" />
+      </div>
+      <div class="chiprow" id="tipochips"></div>
+      <div class="esprow"><select id="espselect"></select></div>
+    </div>
+  </header>
+
+  <main id="main"></main>
+
+  <footer>
+    <div class="themetoggle">
+      <button class="themebtn" data-t="auto">Automático</button>
+      <button class="themebtn" data-t="light">Claro</button>
+      <button class="themebtn" data-t="dark">Escuro</button>
+    </div>
+    <p class="note" style="margin-top:14px;">
+      <strong>Material exclusivo Serenus Corretora de Saúde</strong> — uso interno, não redistribuir nem repassar acesso a outras corretoras.<br /><br />
+      <strong>Fonte:</strong> busca pública de rede referenciada da SulAmérica — plano PME AMB HOSP c/ Obst. Adaptado, Direto Nacional (produto 557 / plano 87507). Extraído em 29/07/2026.<br /><br />
+      <strong>Metodologia:</strong> cada consulta ao site retorna no máximo 50 prestadores mais próximos do ponto pesquisado. Para superar esse limite, a coleta varreu cada cidade por múltiplos pontos geográficos e, para Médico/Clínica/Diagnóstico, repetiu a busca separadamente para cada uma das 106 especialidades cadastradas — o que praticamente elimina o limite, exceto em pouquíssimas especialidades de altíssimo volume (ex.: Clínica Médica, Cardiologia, Ginecologia) em cidades muito grandes, onde a lista mostra os 50 prestadores mais próximos do centro e pode não esgotar 100% da rede.<br /><br />
+      Sempre confirme cobertura e disponibilidade com o prestador antes de direcionar o cliente.
+    </p>
+  </footer>
+</div>
+
+<script id="rede-data" type="application/json">__DATA__</script>
+<script id="rede-logo" type="text/plain">__LOGO_B64__</script>
+<script id="rede-logo-serenus-black" type="text/plain">__SERENUS_LOGO_BLACK_B64__</script>
+<script id="rede-logo-serenus-light" type="text/plain">__SERENUS_LOGO_LIGHT_B64__</script>
+<script id="pdf-logo-serenus" type="text/plain">__SERENUS_JPG_B64__</script>
+<script id="pdf-logo-sula" type="text/plain">__SULA_JPG_B64__</script>
+<script>
+(function(){
+  "use strict";
+  var DB = JSON.parse(document.getElementById("rede-data").textContent);
+  var CITY_ORDER = ["sp","camp","rio"];
+  var TIPO_LABEL = {ps:"Pronto Socorro", hm:"Hospital / Maternidade", hd:"Hospital Dia", mc:"Médico / Clínica"};
+  var TIPO_LABEL_SHORT = {ps:"PS", hm:"Hospital", hd:"Hosp. Dia", mc:"Médico/Clínica"};
+
+  var state = {city:"sp", tipo:"all", esp:"all", q:"", limit:40};
+
+  var els = {
+    citytabs: document.getElementById("citytabs"),
+    tipochips: document.getElementById("tipochips"),
+    espselect: document.getElementById("espselect"),
+    search: document.getElementById("search"),
+    main: document.getElementById("main")
+  };
+
+  function escapeHtml(s){
+    return (s||"").replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+
+  function fmtPhone(digits){
+    if(digits.length===11) return "(" + digits.slice(0,2) + ") " + digits.slice(2,7) + "-" + digits.slice(7);
+    if(digits.length===10) return "(" + digits.slice(0,2) + ") " + digits.slice(2,6) + "-" + digits.slice(6);
+    return digits;
+  }
+
+  function buildCityTabs(){
+    els.citytabs.innerHTML = CITY_ORDER.map(function(c){
+      var d = DB[c];
+      return '<div class="citytab' + (c===state.city?' active':'') + '" data-city="' + c + '">' +
+        d.label + '<span class="n">' + d.records.length + ' locais</span></div>';
+    }).join("");
+    Array.prototype.forEach.call(els.citytabs.children, function(el){
+      el.addEventListener("click", function(){
+        state.city = el.getAttribute("data-city");
+        state.tipo = "all"; state.esp = "all"; state.limit = 40;
+        els.search.value = "";
+        state.q = "";
+        buildCityTabs(); buildTipoChips(); buildEspSelect(); render();
+        window.scrollTo({top:0, behavior:"smooth"});
+      });
+    });
+  }
+
+  function countBy(records, keyFn){
+    var m = {};
+    records.forEach(function(r){
+      var k = keyFn(r);
+      if(Array.isArray(k)) k.forEach(function(kk){ m[kk]=(m[kk]||0)+1; });
+      else m[k] = (m[k]||0)+1;
+    });
+    return m;
+  }
+
+  function currentRecords(){
+    return DB[state.city].records;
+  }
+
+  function buildTipoChips(){
+    var recs = currentRecords();
+    var counts = countBy(recs, function(r){return r.t;});
+    var order = ["ps","hm","hd","mc"];
+    var chips = ['<div class="chip' + (state.tipo==="all"?" active":"") + '" data-tipo="all">Todos<span></span></div>'];
+    order.forEach(function(t){
+      if(!counts[t]) return;
+      chips.push('<div class="chip' + (state.tipo===t?" active":"") + '" data-tipo="' + t + '">' +
+        '<span class="dot" style="background:var(--' + t + ')"></span>' + TIPO_LABEL_SHORT[t] + ' · ' + counts[t] + '</div>');
+    });
+    els.tipochips.innerHTML = chips.join("");
+    Array.prototype.forEach.call(els.tipochips.children, function(el){
+      el.addEventListener("click", function(){
+        state.tipo = el.getAttribute("data-tipo");
+        state.esp = "all"; state.limit = 40;
+        buildTipoChips(); buildEspSelect(); render();
+      });
+    });
+  }
+
+  function buildEspSelect(){
+    var recs = currentRecords().filter(function(r){ return state.tipo==="all" || r.t===state.tipo; });
+    var counts = countBy(recs, function(r){return r.s;});
+    var keys = Object.keys(counts).sort(function(a,b){ return counts[b]-counts[a] || a.localeCompare(b); });
+    var opts = ['<option value="all">Todas as especialidades (' + recs.length + ' locais)</option>'];
+    keys.forEach(function(k){
+      opts.push('<option value="' + escapeHtml(k) + '"' + (state.esp===k?" selected":"") + '>' + escapeHtml(k) + ' — ' + counts[k] + '</option>');
+    });
+    els.espselect.innerHTML = opts.join("");
+    if(state.esp!=="all" && counts[state.esp]===undefined){ state.esp="all"; els.espselect.value="all"; }
+  }
+
+  function matches(r){
+    if(state.tipo!=="all" && r.t!==state.tipo) return false;
+    if(state.esp!=="all" && r.s.indexOf(state.esp)===-1) return false;
+    if(state.q){
+      var hay = (r.n + " " + r.b + " " + r.s.join(" ")).toLowerCase();
+      if(hay.indexOf(state.q) === -1) return false;
+    }
+    return true;
+  }
+
+  function mapsUrl(r){
+    var q = r.e + ", " + r.b + ", " + DB[state.city].label;
+    return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
+  }
+
+  function cardHtml(r){
+    var espTags = r.s.slice(0,3).map(function(e){ return '<span class="esptag">' + escapeHtml(e) + '</span>'; }).join("");
+    if(r.s.length>3) espTags += '<span class="esptag more">+' + (r.s.length-3) + '</span>';
+    var tels = (r.f||[]).map(function(d){
+      return '<a class="tel" href="tel:+55' + d + '"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>' + fmtPhone(d) + '</a>';
+    }).join("");
+    var flags = "";
+    if(r.o) flags += '<span class="flag">Agend. online</span>';
+    if(r.v) flags += '<span class="flag">Teleconsulta</span>';
+    return (
+      '<div class="card t-' + r.t + '">' +
+        '<div class="head"><div class="name">' + escapeHtml(r.n) + '</div>' +
+          '<div class="badge t-' + r.t + '">' + TIPO_LABEL_SHORT[r.t] + '</div></div>' +
+        '<div class="addr"><a href="' + mapsUrl(r) + '" target="_blank" rel="noopener">' + escapeHtml(r.e) + '</a> — ' + escapeHtml(r.b) + ' · <span class="mono">' + escapeHtml(r.c) + '</span></div>' +
+        (espTags ? '<div class="esps">' + espTags + '</div>' : '') +
+        '<div class="row">' +
+          '<div class="telrow">' + (tels || '<span class="flag">Sem telefone informado</span>') + '</div>' +
+          (flags ? '<div class="flags">' + flags + '</div>' : '') +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function idleHtml(){
+    var recs = currentRecords();
+    var counts = countBy(recs, function(r){return r.t;});
+    var espCounts = countBy(recs, function(r){return r.s;});
+    var topEsp = Object.keys(espCounts).sort(function(a,b){return espCounts[b]-espCounts[a];}).slice(0,10);
+    return (
+      '<div class="idle">' +
+        '<div class="stats">' +
+          '<div class="statcard"><div class="v">' + (counts.ps||0) + '</div><div class="l">Pronto<br/>Socorro</div></div>' +
+          '<div class="statcard"><div class="v">' + (counts.hm||0) + '</div><div class="l">Hospital /<br/>Maternidade</div></div>' +
+          '<div class="statcard"><div class="v">' + (counts.hd||0) + '</div><div class="l">Hospital<br/>Dia</div></div>' +
+          '<div class="statcard"><div class="v">' + (counts.mc||0) + '</div><div class="l">Médicos /<br/>Clínicas</div></div>' +
+        '</div>' +
+        '<p>Busque por nome, bairro ou especialidade acima, ou toque em uma especialidade frequente para começar.</p>' +
+        '<h2>Especialidades mais frequentes em ' + DB[state.city].label + '</h2>' +
+        '<div class="topesp">' + topEsp.map(function(e){
+          return '<span class="esptag" style="cursor:pointer" data-esp="' + escapeHtml(e) + '">' + escapeHtml(e) + ' · ' + espCounts[e] + '</span>';
+        }).join("") + '</div>' +
+      '</div>'
+    );
+  }
+
+  function render(){
+    var recs = currentRecords().filter(matches);
+    if(!state.q && state.tipo==="all" && state.esp==="all"){
+      els.main.innerHTML = idleHtml();
+      Array.prototype.forEach.call(els.main.querySelectorAll("[data-esp]"), function(el){
+        el.addEventListener("click", function(){
+          state.esp = el.getAttribute("data-esp");
+          buildEspSelect();
+          render();
+          window.scrollTo({top:0, behavior:"smooth"});
+        });
+      });
+      return;
+    }
+    var shown = recs.slice(0, state.limit);
+    var html = '<div class="resultbar"><span><b>' + recs.length + '</b> resultado' + (recs.length===1?"":"s") + ' em ' + DB[state.city].label + '</span></div>';
+    if(shown.length===0){
+      html += '<div class="empty"><div class="big">🔎</div>Nada encontrado. Tente outro termo ou limpe os filtros.</div>';
+    } else {
+      html += shown.map(cardHtml).join("");
+      if(recs.length > shown.length){
+        html += '<button class="loadmore" id="loadmore">Carregar mais (' + (recs.length-shown.length) + ' restantes)</button>';
+      }
+    }
+    els.main.innerHTML = html;
+    var lm = document.getElementById("loadmore");
+    if(lm) lm.addEventListener("click", function(){ state.limit += 60; render(); });
+  }
+
+  var debTimer;
+  els.search.addEventListener("input", function(){
+    clearTimeout(debTimer);
+    debTimer = setTimeout(function(){
+      state.q = els.search.value.trim().toLowerCase();
+      state.limit = 40;
+      render();
+    }, 120);
+  });
+
+  els.espselect.addEventListener("change", function(){
+    state.esp = els.espselect.value;
+    state.limit = 40;
+    render();
+  });
+
+  // ---------- Watermark ----------
+  (function(){
+    var phrase = "SERENUS CORRETORA · MATERIAL EXCLUSIVO — USO INTERNO";
+    var line = new Array(4).fill(phrase).join("      ");
+    var lines = new Array(16).fill(line);
+    document.getElementById("wmtext").textContent = lines.join("\n");
+  })();
+
+  // ---------- Assets do PDF ----------
+  var PDF_SERENUS_JPG = document.getElementById("pdf-logo-serenus").textContent.trim();
+  var PDF_SULA_JPG = document.getElementById("pdf-logo-sula").textContent.trim();
+  var PDF_SERENUS_W = __SER_JPG_W__, PDF_SERENUS_H = __SER_JPG_H__;
+  var PDF_SULA_W = __SUL_JPG_W__, PDF_SULA_H = __SUL_JPG_H__;
+
+  function filterLabel(){
+    var parts = [];
+    parts.push(TIPO_LABEL[state.tipo] || "Todos os tipos de atendimento");
+    if(state.esp !== "all") parts.push(state.esp);
+    if(state.q) parts.push('busca "' + els.search.value.trim() + '"');
+    return parts.join(" - ");
+  }
+
+  function showToast(msg){
+    var t = document.getElementById("toast");
+    if(!t){
+      t = document.createElement("div");
+      t.id = "toast";
+      document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(showToast._h);
+    showToast._h = setTimeout(function(){ t.classList.remove("show"); }, 3600);
+  }
+
+  // ---------- Gerador de PDF nativo (sem dependencias, sem window.print) ----------
+  var PDF_W = 595.28, PDF_H = 841.89, PDF_M = 42;
+  var PDF_TIPO_LABEL = {ps:"Pronto Socorro", hm:"Hospital / Maternidade", hd:"Hospital Dia", mc:"Medico / Clinica"};
+
+  // Helvetica (WinAnsi) nao tem os mesmos glifos que a tela; normaliza acentos
+  // para o subconjunto seguro e escapa os caracteres especiais do PDF.
+  function pdfStr(s){
+    s = (s == null ? "" : String(s));
+    var out = "";
+    for(var i=0;i<s.length;i++){
+      var code = s.charCodeAt(i);
+      var ch = s[i];
+      if(code > 255){ ch = "?"; }
+      if(ch === "(" || ch === ")" || ch === "\\") out += "\\" + ch;
+      else out += ch;
+    }
+    return out;
+  }
+
+  // Larguras reais do Helvetica (unidades/1000) para as faixas ASCII + Latin-1 usadas.
+  var HELV_W = {' ':278,'!':278,'"':355,'#':556,'$':556,'%':889,'&':667,"'":191,'(':333,')':333,'*':389,'+':584,',':278,'-':333,'.':278,'/':278,'0':556,'1':556,'2':556,'3':556,'4':556,'5':556,'6':556,'7':556,'8':556,'9':556,':':278,';':278,'<':584,'=':584,'>':584,'?':556,'@':1015,'A':667,'B':667,'C':722,'D':722,'E':667,'F':611,'G':778,'H':722,'I':278,'J':500,'K':667,'L':556,'M':833,'N':722,'O':778,'P':667,'Q':778,'R':722,'S':667,'T':611,'U':722,'V':667,'W':944,'X':667,'Y':667,'Z':611,'[':278,'\\':278,']':278,'^':469,'_':556,'`':333,'a':556,'b':556,'c':500,'d':556,'e':556,'f':278,'g':556,'h':556,'i':222,'j':222,'k':500,'l':222,'m':833,'n':556,'o':556,'p':556,'q':556,'r':333,'s':500,'t':278,'u':556,'v':500,'w':722,'x':500,'y':500,'z':500,'{':334,'|':260,'}':334,'~':584};
+  var HELVB_W = {' ':278,'!':333,'"':474,'#':556,'$':556,'%':889,'&':722,"'":238,'(':333,')':333,'*':389,'+':584,',':278,'-':333,'.':278,'/':278,'0':556,'1':556,'2':556,'3':556,'4':556,'5':556,'6':556,'7':556,'8':556,'9':556,':':333,';':333,'<':584,'=':584,'>':584,'?':611,'@':975,'A':722,'B':722,'C':722,'D':722,'E':667,'F':611,'G':778,'H':722,'I':278,'J':556,'K':722,'L':611,'M':833,'N':722,'O':778,'P':667,'Q':778,'R':722,'S':667,'T':611,'U':722,'V':667,'W':944,'X':667,'Y':667,'Z':611,'[':333,'\\':278,']':333,'^':584,'_':556,'`':333,'a':556,'b':611,'c':556,'d':611,'e':556,'f':333,'g':611,'h':611,'i':278,'j':278,'k':556,'l':278,'m':889,'n':611,'o':611,'p':611,'q':611,'r':389,'s':556,'t':333,'u':611,'v':556,'w':778,'x':556,'y':556,'z':500,'{':389,'|':280,'}':389,'~':584};
+
+  function pdfTextWidth(s, size, bold){
+    var tbl = bold ? HELVB_W : HELV_W;
+    var total = 0;
+    s = (s == null ? "" : String(s));
+    for(var i=0;i<s.length;i++){
+      var w = tbl[s[i]];
+      total += (w == null ? 556 : w);
+    }
+    return total * size / 1000;
+  }
+
+  function pdfWrap(s, maxW, size, bold){
+    var words = String(s == null ? "" : s).split(" ");
+    var lines = [], cur = "";
+    for(var i=0;i<words.length;i++){
+      var test = cur ? cur + " " + words[i] : words[i];
+      if(pdfTextWidth(test, size, bold) > maxW && cur){
+        lines.push(cur);
+        cur = words[i];
+      } else {
+        cur = test;
+      }
+    }
+    if(cur) lines.push(cur);
+    return lines.length ? lines : [""];
+  }
+
+  function b64ToBinary(b64){
+    return atob(b64);
+  }
+
+  function buildPdfBlob(records, meta){
+    var objects = [];
+    function newObj(dict, data){
+      objects.push({dict: dict, data: data});
+      return objects.length;
+    }
+
+    var fReg = newObj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+    var fBold = newObj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+
+    var serBin = b64ToBinary(PDF_SERENUS_JPG);
+    var sulBin = b64ToBinary(PDF_SULA_JPG);
+    var imSer = newObj("<< /Type /XObject /Subtype /Image /Width " + PDF_SERENUS_W + " /Height " + PDF_SERENUS_H +
+      " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + serBin.length + " >>", serBin);
+    var imSul = newObj("<< /Type /XObject /Subtype /Image /Width " + PDF_SULA_W + " /Height " + PDF_SULA_H +
+      " /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " + sulBin.length + " >>", sulBin);
+    var gsWm = newObj("<< /Type /ExtGState /ca 0.07 >>");
+
+    var C_INK = "0.086 0.129 0.114";
+    var C_SOFT = "0.357 0.408 0.376";
+    var C_ACC = "0.039 0.310 0.267";
+    var C_FAINT = "0.541 0.588 0.561";
+
+    var pages = [];
+    var cs = "", y = 0;
+
+    function drawWatermark(){
+      var phrase = "SERENUS CORRETORA - MATERIAL EXCLUSIVO";
+      var row3 = phrase + "    " + phrase + "    " + phrase;
+      var ang = 28 * Math.PI / 180;
+      var ca = Math.cos(ang).toFixed(4), sa = Math.sin(ang).toFixed(4), nsa = (-Math.sin(ang)).toFixed(4);
+      cs += "q /GS1 gs 0.42 0.45 0.43 rg BT /F2 9 Tf\n";
+      for(var row=-3; row<15; row++){
+        cs += ca + " " + sa + " " + nsa + " " + ca + " -150 " + (row*58) + " Tm (" + pdfStr(row3) + ") Tj\n";
+      }
+      cs += "ET Q\n";
+    }
+
+    function startPage(isFirst){
+      cs = "";
+      drawWatermark();
+      cs += "q " + C_INK + " rg 0 " + (PDF_H - 5).toFixed(2) + " " + PDF_W.toFixed(2) + " 5 re f Q\n";
+      if(isFirst){
+        var sw = 96, sh = sw * PDF_SERENUS_H / PDF_SERENUS_W;
+        var logoY = PDF_H - 30 - sh;
+        cs += "q " + sw.toFixed(2) + " 0 0 " + sh.toFixed(2) + " " + PDF_M + " " + logoY.toFixed(2) + " cm /Im1 Do Q\n";
+        var uw = 84, uh = uw * PDF_SULA_H / PDF_SULA_W;
+        cs += "q " + uw.toFixed(2) + " 0 0 " + uh.toFixed(2) + " " + (PDF_M + sw + 18).toFixed(2) + " " + (logoY + (sh-uh)/2).toFixed(2) + " cm /Im2 Do Q\n";
+        y = logoY - 26;
+        cs += "BT /F2 16 Tf " + C_INK + " rg " + PDF_M + " " + y.toFixed(2) + " Td (" + pdfStr(meta.cityLabel) + ") Tj ET\n";
+        y -= 15;
+        cs += "BT /F1 9 Tf " + C_SOFT + " rg " + PDF_M + " " + y.toFixed(2) + " Td (" + pdfStr(meta.count + " resultados - " + meta.filterLabel) + ") Tj ET\n";
+        y -= 22;
+      } else {
+        cs += "BT /F2 8.5 Tf " + C_SOFT + " rg " + PDF_M + " " + (PDF_H - 24).toFixed(2) + " Td (" + pdfStr("Rede Referenciada - " + meta.cityLabel + " - Serenus Corretora") + ") Tj ET\n";
+        y = PDF_H - 46;
+      }
+      pages.push(null); // placeholder, replaced on endPage
+    }
+
+    function endPage(){
+      pages[pages.length-1] = cs;
+    }
+
+    function ensure(h){
+      if(y - h < PDF_M + 8){
+        endPage();
+        startPage(false);
+      }
+    }
+
+    function line(text, opt){
+      opt = opt || {};
+      var size = opt.size || 9, bold = !!opt.bold;
+      var color = opt.color || C_INK;
+      var gap = opt.gap != null ? opt.gap : 2;
+      var maxW = PDF_W - PDF_M*2;
+      var lns = pdfWrap(text, maxW, size, bold);
+      for(var i=0;i<lns.length;i++){
+        ensure(size + gap);
+        cs += "BT /" + (bold?"F2":"F1") + " " + size + " Tf " + color + " rg " + PDF_M + " " + y.toFixed(2) + " Td (" + pdfStr(lns[i]) + ") Tj ET\n";
+        y -= size + gap;
+      }
+    }
+
+    function groupTitle(text){
+      ensure(30);
+      y -= 8;
+      cs += "q 0.78 0.82 0.79 RG 0.8 w " + PDF_M + " " + (y+3).toFixed(2) + " m " + (PDF_W-PDF_M).toFixed(2) + " " + (y+3).toFixed(2) + " l S Q\n";
+      y -= 5;
+      line(text, {size:10, bold:true, color:C_INK, gap:7});
+    }
+
+    function record(r){
+      ensure(32);
+      var fl = [];
+      if(r.o) fl.push("Agend. online");
+      if(r.v) fl.push("Teleconsulta");
+      line(r.n + (fl.length ? "   (" + fl.join(", ") + ")" : ""), {size:9.5, bold:true, gap:1.5});
+      var tels = (r.f||[]).map(fmtPhone).join("   ");
+      line(r.e + " - " + r.b + " | CEP " + r.c + (tels ? " | " + tels : " | sem telefone informado"), {size:8.2, color:C_SOFT, gap:1.5});
+      if(r.s && r.s.length) line(r.s.join(", "), {size:7.9, color:C_ACC, gap:6});
+      else y -= 6;
+    }
+
+    startPage(true);
+
+    if(meta.tipoAll){
+      ["ps","hm","hd","mc"].forEach(function(t){
+        var grp = records.filter(function(r){ return r.t === t; });
+        if(!grp.length) return;
+        groupTitle(PDF_TIPO_LABEL[t] + " (" + grp.length + ")");
+        grp.forEach(record);
+      });
+    } else {
+      records.forEach(record);
+    }
+
+    ensure(58);
+    y -= 10;
+    cs += "q 0.78 0.82 0.79 RG 0.8 w " + PDF_M + " " + (y+4).toFixed(2) + " m " + (PDF_W-PDF_M).toFixed(2) + " " + (y+4).toFixed(2) + " l S Q\n";
+    y -= 6;
+    line("Material exclusivo Serenus Corretora de Saude - uso interno, nao redistribuir.", {size:7.4, bold:true, color:C_INK, gap:2.5});
+    line("Fonte: busca publica de rede referenciada SulAmerica (portal.sulamericaseguros.com.br). Plano Direto Nacional 557 / 87507. Gerado em " + meta.dateStr + ".", {size:7, color:C_FAINT, gap:2.5});
+    line("Cada consulta ao site da operadora retorna no maximo 50 prestadores por ponto; a coleta varreu multiplos pontos e todas as especialidades, mas em especialidades de altissimo volume a lista pode nao ser exaustiva. Confirme cobertura com o prestador.", {size:7, color:C_FAINT, gap:2.5});
+    endPage();
+
+    // objetos de pagina
+    var contentNums = pages.map(function(c){ return newObj("<< /Length " + c.length + " >>", c); });
+    var pageNums = [];
+    contentNums.forEach(function(cn){
+      var res = "<< /Font << /F1 " + fReg + " 0 R /F2 " + fBold + " 0 R >> " +
+        "/XObject << /Im1 " + imSer + " 0 R /Im2 " + imSul + " 0 R >> " +
+        "/ExtGState << /GS1 " + gsWm + " 0 R >> >>";
+      pageNums.push(newObj("<< /Type /Page /Parent __PAGES__ /MediaBox [0 0 " + PDF_W + " " + PDF_H + "] /Resources " + res + " /Contents " + cn + " 0 R >>"));
+    });
+    var pagesNum = newObj("<< /Type /Pages /Kids [" + pageNums.map(function(n){return n + " 0 R";}).join(" ") + "] /Count " + pageNums.length + " >>");
+    objects.forEach(function(o, i){
+      if(o.dict && o.dict.indexOf("__PAGES__") !== -1){
+        objects[i].dict = o.dict.replace("__PAGES__", pagesNum + " 0 R");
+      }
+    });
+    var catNum = newObj("<< /Type /Catalog /Pages " + pagesNum + " 0 R >>");
+    var infoNum = newObj("<< /Title (" + pdfStr("Rede Referenciada - " + meta.cityLabel + " - Serenus Corretora") + ") /Author (" + pdfStr("Serenus Corretora de Saude") + ") /Creator (" + pdfStr("Serenus - Rede Referenciada") + ") >>");
+
+    var head = "%PDF-1.4\n%âãÏÓ\n";
+    var chunks = [head];
+    var offsets = [0];
+    var pos = head.length;
+    for(var i=0;i<objects.length;i++){
+      var num = i+1, o = objects[i], body;
+      if(o.data != null) body = num + " 0 obj\n" + o.dict + "\nstream\n" + o.data + "\nendstream\nendobj\n";
+      else body = num + " 0 obj\n" + o.dict + "\nendobj\n";
+      offsets[num] = pos;
+      chunks.push(body);
+      pos += body.length;
+    }
+    var xrefStart = pos;
+    var xref = "xref\n0 " + (objects.length+1) + "\n0000000000 65535 f \n";
+    for(var j=1;j<=objects.length;j++){
+      var s = String(offsets[j]);
+      while(s.length < 10) s = "0" + s;
+      xref += s + " 00000 n \n";
+    }
+    var trailer = "trailer\n<< /Size " + (objects.length+1) + " /Root " + catNum + " 0 R /Info " + infoNum + " 0 R >>\nstartxref\n" + xrefStart + "\n%%EOF";
+
+    var full = chunks.join("") + xref + trailer;
+    var bytes = new Uint8Array(full.length);
+    for(var k=0;k<full.length;k++){ bytes[k] = full.charCodeAt(k) & 0xFF; }
+    return new Blob([bytes], {type:"application/pdf"});
+  }
+
+  function slugify(s){
+    return String(s).toLowerCase()
+      .replace(/[àáâãä]/g,"a").replace(/[èéêë]/g,"e").replace(/[ìíîï]/g,"i")
+      .replace(/[òóôõö]/g,"o").replace(/[ùúûü]/g,"u").replace(/ç/g,"c")
+      .replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+  }
+
+  // Entrega o PDF. Dentro de um iframe com sandbox (caso do artifact) o navegador
+  // BLOQUEIA <a download>, sem lancar erro. Por isso a ordem: abrir numa aba real
+  // (sem sandbox, onde salvar funciona normal) e, se o popup for barrado, mostrar
+  // o PDF num visualizador dentro da propria pagina.
+  function deliverPdf(blob, filename, count){
+    var url = URL.createObjectURL(blob);
+    var win = null;
+    try { win = window.open(url, "_blank"); } catch(e){ win = null; }
+
+    if(win){
+      showToast("PDF de " + count + " locais aberto em nova aba — use Salvar/Compartilhar por lá.");
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 120000);
+      return;
+    }
+    showPdfViewer(url, filename, count);
+  }
+
+  function showPdfViewer(url, filename, count){
+    var old = document.getElementById("pdfviewer");
+    if(old) old.parentNode.removeChild(old);
+
+    var ov = document.createElement("div");
+    ov.id = "pdfviewer";
+    ov.innerHTML =
+      '<div class="pv-bar">' +
+        '<div class="pv-title">' + escapeHtml(filename) + ' <span>' + count + ' locais</span></div>' +
+        '<div class="pv-acts">' +
+          '<a class="pv-btn pv-primary" id="pvSave" href="' + url + '" download="' + escapeHtml(filename) + '">Salvar</a>' +
+          '<button class="pv-btn" id="pvClose" type="button">Fechar</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="pv-hint">Se o botao Salvar nao funcionar, use o botao de download/compartilhar do visualizador de PDF abaixo.</div>' +
+      '<iframe class="pv-frame" src="' + url + '" title="PDF"></iframe>';
+    document.body.appendChild(ov);
+
+    document.getElementById("pvClose").addEventListener("click", function(){
+      ov.parentNode.removeChild(ov);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    });
+    showToast("PDF de " + count + " locais pronto.");
+  }
+
+  function exportPdf(){
+    var recs = currentRecords().filter(matches);
+    if(recs.length === 0){
+      showToast("Nenhum resultado para gerar PDF. Ajuste a busca ou os filtros.");
+      return;
+    }
+    var btn = document.getElementById("pdfbtn");
+    btn.disabled = true;
+    var prevLabel = btn.innerHTML;
+    btn.innerHTML = "Gerando…";
+    showToast("Gerando PDF com " + recs.length + " locais…");
+
+    setTimeout(function(){
+      try{
+        var now = new Date();
+        var dateStr = now.toLocaleDateString("pt-BR") + " as " + now.toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"});
+        var meta = {
+          cityLabel: DB[state.city].label,
+          filterLabel: filterLabel(),
+          count: recs.length,
+          tipoAll: state.tipo === "all",
+          dateStr: dateStr
+        };
+        var blob = buildPdfBlob(recs, meta);
+        var name = "rede-sulamerica-" + slugify(DB[state.city].label) +
+          (state.esp !== "all" ? "-" + slugify(state.esp) : "") +
+          (state.tipo !== "all" ? "-" + state.tipo : "") + ".pdf";
+        deliverPdf(blob, name, recs.length);
+      } catch(e){
+        showToast("Falha ao gerar o PDF: " + (e && e.message ? e.message : e));
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = prevLabel;
+      }
+    }, 30);
+  }
+
+  document.getElementById("pdfbtn").addEventListener("click", exportPdf);
+
+  // theme
+  function applyTheme(t){
+    if(t==="auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", t);
+    Array.prototype.forEach.call(document.querySelectorAll(".themebtn"), function(b){
+      b.classList.toggle("active", b.getAttribute("data-t")===t);
+    });
+    try{ localStorage.setItem("rede-theme", t); }catch(e){}
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".themebtn"), function(b){
+    b.addEventListener("click", function(){ applyTheme(b.getAttribute("data-t")); });
+  });
+  var savedTheme = "auto";
+  try{ savedTheme = localStorage.getItem("rede-theme") || "auto"; }catch(e){}
+  applyTheme(savedTheme);
+
+  buildCityTabs();
+  buildTipoChips();
+  buildEspSelect();
+  render();
+})();
+</script>
