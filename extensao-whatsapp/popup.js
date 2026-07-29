@@ -17,9 +17,10 @@ async function carregar() {
     await chrome.storage.local.get(['jobUrl', 'extKey', 'usuarioId', 'railSide', 'tema', 'extensaoAtiva']);
   $('jobUrl').value = jobUrl || JOB_URL_PADRAO;
   $('extKey').value = extKey || '';
-  // Esquerda é o padrão (mesma regra do content.js): a direita colide com o
-  // trilho de outras extensões de WhatsApp, que também empurram margin-right.
-  $('railSide').value = railSide === 'direita' ? 'direita' : 'esquerda';
+  // Direita é o padrão (mesma regra do content.js). O que importa é o JOB
+  // ficar no lado OPOSTO ao trilho de outra extensão — duas no mesmo lado
+  // disputam a margem do <html> e se sobrepõem.
+  $('railSide').value = railSide === 'esquerda' ? 'esquerda' : 'direita';
   $('tema').value = tema === 'claro' ? 'claro' : 'escuro';
   $('extensaoAtiva').checked = extensaoAtiva !== false; // default ligada
   if (extKey) await carregarUsuarios(usuarioId);
@@ -46,7 +47,7 @@ async function salvar() {
   const jobUrl = ($('jobUrl').value || JOB_URL_PADRAO).trim().replace(/\/+$/, '');
   const extKey = ($('extKey').value || '').trim();
   const usuarioId = $('usuarioId').value || '';
-  const railSide = $('railSide').value === 'direita' ? 'direita' : 'esquerda';
+  const railSide = $('railSide').value === 'esquerda' ? 'esquerda' : 'direita';
   const tema = $('tema').value === 'claro' ? 'claro' : 'escuro';
   const extensaoAtiva = $('extensaoAtiva').checked;
   await chrome.storage.local.set({ jobUrl, extKey, usuarioId, railSide, tema, extensaoAtiva });
