@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rede Vera Cruz — Serenus Corretora</title>
+<title>Rede de Atendimento — Vera Cruz — Serenus Corretora</title>
 <style>
   :root{
     --vc-blue:#00AEEF; --vc-blue-dk:#0087BD; --vc-navy:#0B2942; --vc-ink:#16211D;
@@ -138,8 +138,9 @@
     <div class="brand">
       <div class="brand-mark">VC</div>
       <div class="brand-txt">
-        <b>Rede Vera Cruz</b>
-        <span id="planoSub">Consulte médicos e unidades</span>
+        <b>Rede de Atendimento</b>
+        <span id="planoSub">Vera Cruz — consulte médicos e unidades</span>
+        <span id="atualizadoTag" style="display:block;opacity:.8;"></span>
       </div>
       <button class="theme-btn" id="themeBtn" type="button" title="Alternar tema">&#9788;</button>
     </div>
@@ -236,6 +237,7 @@
   themeBtn.addEventListener("click", function(){
     applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
   });
+  document.getElementById("atualizadoTag").textContent = "Atualizado em " + DB.versao + " (válido até " + DB.validade + ")";
 
   // ---------- Intro publica ----------
   if(CTX.modo === "public"){
@@ -257,7 +259,7 @@
     document.getElementById("tabPrata").classList.toggle("active", p === "prata");
     document.getElementById("tabOuro").classList.toggle("active", p === "ouro");
     document.getElementById("ouroSubtabs").style.display = p === "ouro" ? "flex" : "none";
-    document.getElementById("planoSub").textContent = DB[p].descricao;
+    document.getElementById("planoSub").textContent = "Vera Cruz — " + DB[p].descricao;
     if(p === "prata") state.sub = "propria";
     render();
   }
@@ -465,12 +467,12 @@
       cs += "q " + C_INK + " rg 0 " + (PDF_H - 6).toFixed(2) + " " + PDF_W.toFixed(2) + " 6 re f Q\n";
       if(isFirst){
         y = PDF_H - 48;
-        cs += "BT /F2 17 Tf " + C_INK + " rg " + PDF_M + " " + y.toFixed(2) + " Td (Rede Vera Cruz - " + pdfStr(meta.title) + ") Tj ET\n";
+        cs += "BT /F2 17 Tf " + C_INK + " rg " + PDF_M + " " + y.toFixed(2) + " Td (Rede de Atendimento - Vera Cruz - " + pdfStr(meta.title) + ") Tj ET\n";
         y -= 16;
         cs += "BT /F1 9 Tf " + C_SOFT + " rg " + PDF_M + " " + y.toFixed(2) + " Td (" + pdfStr(meta.subtitle) + ") Tj ET\n";
         y -= 24;
       } else {
-        cs += "BT /F2 8.5 Tf " + C_SOFT + " rg " + PDF_M + " " + (PDF_H - 26).toFixed(2) + " Td (Rede Vera Cruz - " + pdfStr(meta.title) + " - Serenus Corretora) Tj ET\n";
+        cs += "BT /F2 8.5 Tf " + C_SOFT + " rg " + PDF_M + " " + (PDF_H - 26).toFixed(2) + " Td (Rede de Atendimento - Vera Cruz - " + pdfStr(meta.title) + " - Serenus Corretora) Tj ET\n";
         y = PDF_H - 48;
       }
       pages.push(null);
@@ -525,7 +527,7 @@
       if(o.dict && o.dict.indexOf("__PAGES__") !== -1) objects[i].dict = o.dict.replace("__PAGES__", pagesNum + " 0 R");
     });
     var catNum = newObj("<< /Type /Catalog /Pages " + pagesNum + " 0 R >>");
-    var infoNum = newObj("<< /Title (Rede Vera Cruz - " + pdfStr(meta.title) + ") /Author (Serenus Corretora de Saude) /Creator (Serenus - Rede Vera Cruz) >>");
+    var infoNum = newObj("<< /Title (Rede de Atendimento - Vera Cruz - " + pdfStr(meta.title) + ") /Author (Serenus Corretora de Saude) /Creator (Serenus - Rede de Atendimento) >>");
 
     var head = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
     var chunks = [head], offsets = [0], pos = head.length;
@@ -595,7 +597,7 @@
         var subLabel = (state.plano === "ouro" && state.sub !== "propria") ? " - Credenciada " + state.sub : "";
         var meta = {
           title: plano.nome + subLabel,
-          subtitle: totalItems + " itens" + (state.q ? " - busca: " + state.q : ""),
+          subtitle: totalItems + " itens" + (state.q ? " - busca: " + state.q : "") + " - Atualizado em " + DB.versao,
           dateStr: dateStr
         };
         var blob = buildPdfBlob(sections, meta);

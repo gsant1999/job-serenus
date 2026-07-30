@@ -16012,6 +16012,15 @@ def _rede_link_fmt(dt):
     return dt.strftime('%d/%m/%Y às %H:%M')
 
 
+@app.route('/rede-atendimento')
+@login_required
+def rede_atendimento_hub():
+    """Ponto único de entrada — escolha da operadora (SulAmérica, Vera Cruz, ...).
+    Cada operadora mantém sua própria rota/dados/template, isolados; este hub
+    só concentra a navegação e padroniza o nome exibido no menu."""
+    return render_template('rede_atendimento_hub.html')
+
+
 @app.route('/rede-referenciada')
 @login_required
 def rede_referenciada():
