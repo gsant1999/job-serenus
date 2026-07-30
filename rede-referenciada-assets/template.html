@@ -180,14 +180,41 @@
   }
   .resultbar b{color:var(--ink);font-weight:600;}
 
-  .idle{padding:18px 2px 8px;}
-  .idle .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0 18px;}
-  .statcard{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 8px;text-align:center;}
-  .statcard .v{font-size:19px;font-weight:700;font-family:ui-serif,Georgia,serif;}
-  .statcard .l{font-size:10px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.04em;margin-top:2px;}
-  .idle p{color:var(--ink-soft);font-size:13.5px;line-height:1.55;margin:0 0 12px;}
-  .idle h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);font-weight:600;margin:20px 0 10px;}
+  .idle{padding:16px 2px 8px;}
+  .idle .intro{color:var(--ink-soft);font-size:14px;line-height:1.6;margin:0 0 18px;}
+  .idle .intro strong{color:var(--ink);}
+  .idle h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);font-weight:600;margin:22px 0 10px;}
   .topesp{display:flex;flex-wrap:wrap;gap:6px;}
+
+  .catgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .catcard{
+    background:var(--surface);border:1px solid var(--line);border-radius:14px;
+    padding:15px 13px;text-align:left;cursor:pointer;
+    display:flex;flex-direction:column;gap:9px;
+    box-shadow:var(--shadow);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .catcard:active{border-color:var(--accent);}
+  .catcard .icn{
+    width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+    background:var(--surface-2);color:var(--ink-soft);flex:0 0 auto;
+  }
+  .catcard .icn svg{width:18px;height:18px;}
+  .catcard.t-ps .icn{background:color-mix(in srgb, var(--ps) 18%, transparent);color:var(--ps);}
+  .catcard.t-hm .icn{background:color-mix(in srgb, var(--hm) 18%, transparent);color:var(--hm);}
+  .catcard.t-hd .icn{background:color-mix(in srgb, var(--hd) 18%, transparent);color:var(--hd);}
+  .catcard.t-mc .icn{background:var(--accent-soft);color:var(--accent-ink);}
+  .catcard .nm{font-size:14.5px;font-weight:700;color:var(--ink);line-height:1.25;}
+  .catcard .ds{font-size:11.5px;color:var(--ink-faint);line-height:1.35;}
+  .catcard .ct{font-size:11px;color:var(--ink-soft);font-weight:700;margin-top:auto;}
+
+  .backbar{
+    display:flex;align-items:center;gap:6px;margin:2px 0 14px;
+    font-size:13px;font-weight:600;color:var(--accent-ink);cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .backbar svg{width:15px;height:15px;flex:0 0 auto;}
+  .breadtrail{color:var(--ink-faint);font-weight:500;}
 
   .card{
     background:var(--surface);
@@ -368,10 +395,8 @@
     <div class="filters">
       <div class="searchrow">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        <input id="search" type="text" placeholder="Nome, bairro ou especialidade…" autocomplete="off" />
+        <input id="search" type="text" placeholder="Buscar nome, bairro ou especialidade…" autocomplete="off" />
       </div>
-      <div class="chiprow" id="tipochips"></div>
-      <div class="esprow"><select id="espselect"></select></div>
     </div>
   </header>
 
@@ -414,15 +439,25 @@
   // popup e blob: em iframe. Fora dele (ERP) tudo funciona normal.
   var EMBUTIDO = (function(){ try { return window.self !== window.top; } catch(e){ return true; } })();
   var CITY_ORDER = ["sp","camp","rio"];
-  var TIPO_LABEL = {ps:"Pronto Socorro", hm:"Hospital / Maternidade", hd:"Hospital Dia", mc:"Médico / Clínica"};
-  var TIPO_LABEL_SHORT = {ps:"PS", hm:"Hospital", hd:"Hosp. Dia", mc:"Médico/Clínica"};
+  var TIPO_LABEL = {ps:"Pronto Socorro", hm:"Hospital e Maternidade", hd:"Hospital Dia", mc:"Médicos e Clínicas"};
+  var TIPO_LABEL_SHORT = {ps:"Emergência", hm:"Hospital", hd:"Hospital Dia", mc:"Médico/Clínica"};
+  var TIPO_DESC = {
+    ps: "Urgência e emergência",
+    hm: "Internação e parto",
+    hd: "Procedimentos sem internação",
+    mc: "Consultas, exames e especialistas"
+  };
+  var TIPO_ICON = {
+    ps: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>',
+    hm: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="1.5"></rect><path d="M9 21v-4h6v4"></path><path d="M9 8h1M9 12h1M14 8h1M14 12h1"></path></svg>',
+    hd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 3"></path></svg>',
+    mc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"></path></svg>'
+  };
 
   var state = {city:"sp", tipo:"all", esp:"all", q:"", limit:40};
 
   var els = {
     citytabs: document.getElementById("citytabs"),
-    tipochips: document.getElementById("tipochips"),
-    espselect: document.getElementById("espselect"),
     search: document.getElementById("search"),
     main: document.getElementById("main")
   };
@@ -451,7 +486,7 @@
         state.tipo = "all"; state.esp = "all"; state.limit = 40;
         els.search.value = "";
         state.q = "";
-        buildCityTabs(); buildTipoChips(); buildEspSelect(); render();
+        buildCityTabs(); render();
         window.scrollTo({top:0, behavior:"smooth"});
       });
     });
@@ -469,38 +504,6 @@
 
   function currentRecords(){
     return DB[state.city].records;
-  }
-
-  function buildTipoChips(){
-    var recs = currentRecords();
-    var counts = countBy(recs, function(r){return r.t;});
-    var order = ["ps","hm","hd","mc"];
-    var chips = ['<div class="chip' + (state.tipo==="all"?" active":"") + '" data-tipo="all">Todos<span></span></div>'];
-    order.forEach(function(t){
-      if(!counts[t]) return;
-      chips.push('<div class="chip' + (state.tipo===t?" active":"") + '" data-tipo="' + t + '">' +
-        '<span class="dot" style="background:var(--' + t + ')"></span>' + TIPO_LABEL_SHORT[t] + ' · ' + counts[t] + '</div>');
-    });
-    els.tipochips.innerHTML = chips.join("");
-    Array.prototype.forEach.call(els.tipochips.children, function(el){
-      el.addEventListener("click", function(){
-        state.tipo = el.getAttribute("data-tipo");
-        state.esp = "all"; state.limit = 40;
-        buildTipoChips(); buildEspSelect(); render();
-      });
-    });
-  }
-
-  function buildEspSelect(){
-    var recs = currentRecords().filter(function(r){ return state.tipo==="all" || r.t===state.tipo; });
-    var counts = countBy(recs, function(r){return r.s;});
-    var keys = Object.keys(counts).sort(function(a,b){ return counts[b]-counts[a] || a.localeCompare(b); });
-    var opts = ['<option value="all">Todas as especialidades (' + recs.length + ' locais)</option>'];
-    keys.forEach(function(k){
-      opts.push('<option value="' + escapeHtml(k) + '"' + (state.esp===k?" selected":"") + '>' + escapeHtml(k) + ' — ' + counts[k] + '</option>');
-    });
-    els.espselect.innerHTML = opts.join("");
-    if(state.esp!=="all" && counts[state.esp]===undefined){ state.esp="all"; els.espselect.value="all"; }
   }
 
   function matches(r){
@@ -541,46 +544,125 @@
     );
   }
 
-  function idleHtml(){
+  // ---------- Navegacao em 3 passos: categoria -> especialidade (so p/ Medicos/Clinicas,
+  // categoria grande demais pra listar direto) -> resultados. Buscar a qualquer momento
+  // pula direto pros resultados. Sem select nativo de 100+ itens (ruim no celular) e sem
+  // mostrar tudo de uma vez na tela inicial (carga cognitiva alta pra quem abre o link
+  // sem contexto nenhum, como um cliente).
+  function introText(){
+    if(CTX.modo === "public"){
+      var quem = CTX.geradoPor ? ("sua corretora " + CTX.geradoPor) : "a Serenus Corretora";
+      return "Esta e a rede credenciada do seu plano <strong>SulAmerica</strong>, preparada por " + escapeHtml(quem) + ". Toque numa opcao abaixo ou use a busca no topo.";
+    }
+    return "Toque numa categoria para explorar, ou busque direto por nome, bairro ou especialidade.";
+  }
+
+  function categoryHomeHtml(){
     var recs = currentRecords();
     var counts = countBy(recs, function(r){return r.t;});
     var espCounts = countBy(recs, function(r){return r.s;});
-    var topEsp = Object.keys(espCounts).sort(function(a,b){return espCounts[b]-espCounts[a];}).slice(0,10);
+    var topEsp = Object.keys(espCounts).sort(function(a,b){return espCounts[b]-espCounts[a];}).slice(0,8);
+    var order = ["ps","hm","hd","mc"];
+    var cards = order.filter(function(t){ return counts[t]; }).map(function(t){
+      return '<div class="catcard t-' + t + '" data-tipo="' + t + '">' +
+        '<div class="icn">' + TIPO_ICON[t] + '</div>' +
+        '<div class="nm">' + TIPO_LABEL_SHORT[t] + '</div>' +
+        '<div class="ds">' + TIPO_DESC[t] + '</div>' +
+        '<div class="ct">' + counts[t] + ' locais</div>' +
+      '</div>';
+    }).join("");
+    var espChips = topEsp.length ? (
+      '<h2>Especialidades mais buscadas em ' + escapeHtml(DB[state.city].label) + '</h2>' +
+      '<div class="topesp">' + topEsp.map(function(e){
+        return '<span class="esptag" style="cursor:pointer" data-esp="' + escapeHtml(e) + '">' + escapeHtml(e) + ' · ' + espCounts[e] + '</span>';
+      }).join("") + '</div>'
+    ) : "";
+    return '<div class="idle"><p class="intro">' + introText() + '</p><div class="catgrid">' + cards + '</div>' + espChips + '</div>';
+  }
+
+  function specialtyPickerHtml(){
+    var recs = currentRecords().filter(function(r){ return r.t === state.tipo; });
+    var espCounts = countBy(recs, function(r){return r.s;});
+    var keys = Object.keys(espCounts).sort(function(a,b){ return espCounts[b]-espCounts[a] || a.localeCompare(b); });
     return (
       '<div class="idle">' +
-        '<div class="stats">' +
-          '<div class="statcard"><div class="v">' + (counts.ps||0) + '</div><div class="l">Pronto<br/>Socorro</div></div>' +
-          '<div class="statcard"><div class="v">' + (counts.hm||0) + '</div><div class="l">Hospital /<br/>Maternidade</div></div>' +
-          '<div class="statcard"><div class="v">' + (counts.hd||0) + '</div><div class="l">Hospital<br/>Dia</div></div>' +
-          '<div class="statcard"><div class="v">' + (counts.mc||0) + '</div><div class="l">Médicos /<br/>Clínicas</div></div>' +
+        backbarHtml("Categorias") +
+        '<p class="intro"><strong>' + TIPO_LABEL_SHORT[state.tipo] + '</strong> — ' + recs.length + ' locais em ' + escapeHtml(DB[state.city].label) + '. Escolha uma especialidade ou toque em "ver todos".</p>' +
+        '<div class="topesp">' +
+          '<span class="esptag" style="cursor:pointer;font-weight:700;" data-esp="all">Ver todos · ' + recs.length + '</span>' +
+          keys.map(function(k){
+            return '<span class="esptag" style="cursor:pointer" data-esp="' + escapeHtml(k) + '">' + escapeHtml(k) + ' · ' + espCounts[k] + '</span>';
+          }).join("") +
         '</div>' +
-        '<p>Busque por nome, bairro ou especialidade acima, ou toque em uma especialidade frequente para começar.</p>' +
-        '<h2>Especialidades mais frequentes em ' + DB[state.city].label + '</h2>' +
-        '<div class="topesp">' + topEsp.map(function(e){
-          return '<span class="esptag" style="cursor:pointer" data-esp="' + escapeHtml(e) + '">' + escapeHtml(e) + ' · ' + espCounts[e] + '</span>';
-        }).join("") + '</div>' +
       '</div>'
     );
   }
 
+  function backbarHtml(label){
+    return '<div class="backbar" id="backbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>Voltar<span class="breadtrail">&nbsp;· ' + escapeHtml(label) + '</span></div>';
+  }
+
+  function goBack(){
+    if(state.q){ state.q = ""; els.search.value = ""; }
+    else if(state.esp !== "all"){ state.esp = "all"; }
+    else if(state.tipo !== "all"){ state.tipo = "all"; }
+    state.limit = 40;
+    render();
+    window.scrollTo({top:0, behavior:"smooth"});
+  }
+
+  function wireBackBtn(){
+    var b = document.getElementById("backbtn");
+    if(b) b.addEventListener("click", goBack);
+  }
+
+  function wireEspChips(){
+    Array.prototype.forEach.call(els.main.querySelectorAll("[data-esp]"), function(el){
+      el.addEventListener("click", function(){
+        state.esp = el.getAttribute("data-esp");
+        state.limit = 40;
+        render();
+        window.scrollTo({top:0, behavior:"smooth"});
+      });
+    });
+  }
+
   function render(){
     var recs = currentRecords().filter(matches);
+
+    // Passo 1: tela inicial por categoria
     if(!state.q && state.tipo==="all" && state.esp==="all"){
-      els.main.innerHTML = idleHtml();
-      Array.prototype.forEach.call(els.main.querySelectorAll("[data-esp]"), function(el){
+      els.main.innerHTML = categoryHomeHtml();
+      Array.prototype.forEach.call(els.main.querySelectorAll("[data-tipo]"), function(el){
         el.addEventListener("click", function(){
-          state.esp = el.getAttribute("data-esp");
-          buildEspSelect();
+          state.tipo = el.getAttribute("data-tipo");
+          state.limit = 40;
           render();
           window.scrollTo({top:0, behavior:"smooth"});
         });
       });
+      wireEspChips();
       return;
     }
+
+    // Passo 2: categoria grande (Medicos/Clinicas) sem especialidade nem busca -> escolher especialidade
+    if(!state.q && state.tipo==="mc" && state.esp==="all"){
+      els.main.innerHTML = specialtyPickerHtml();
+      wireBackBtn();
+      wireEspChips();
+      return;
+    }
+
+    // Passo 3: resultados
     var shown = recs.slice(0, state.limit);
-    var html = '<div class="resultbar"><span><b>' + recs.length + '</b> resultado' + (recs.length===1?"":"s") + ' em ' + DB[state.city].label + '</span></div>';
+    var breadParts = [];
+    if(state.tipo !== "all") breadParts.push(TIPO_LABEL_SHORT[state.tipo]);
+    if(state.esp !== "all") breadParts.push(state.esp);
+    if(state.q) breadParts.push('"' + els.search.value.trim() + '"');
+    var html = backbarHtml(breadParts.join(" · ") || "Categorias");
+    html += '<div class="resultbar"><span><b>' + recs.length + '</b> resultado' + (recs.length===1?"":"s") + ' em ' + escapeHtml(DB[state.city].label) + '</span></div>';
     if(shown.length===0){
-      html += '<div class="empty"><div class="big">🔎</div>Nada encontrado. Tente outro termo ou limpe os filtros.</div>';
+      html += '<div class="empty">Nada encontrado. Tente outro termo ou toque em Voltar.</div>';
     } else {
       html += shown.map(cardHtml).join("");
       if(recs.length > shown.length){
@@ -588,6 +670,7 @@
       }
     }
     els.main.innerHTML = html;
+    wireBackBtn();
     var lm = document.getElementById("loadmore");
     if(lm) lm.addEventListener("click", function(){ state.limit += 60; render(); });
   }
@@ -600,12 +683,6 @@
       state.limit = 40;
       render();
     }, 120);
-  });
-
-  els.espselect.addEventListener("change", function(){
-    state.esp = els.espselect.value;
-    state.limit = 40;
-    render();
   });
 
   // ---------- Watermark ----------
@@ -1111,8 +1188,6 @@
   }
 
   buildCityTabs();
-  buildTipoChips();
-  buildEspSelect();
   renderTopoBanner();
   render();
 })();
