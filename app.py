@@ -2126,6 +2126,9 @@ def init_db():
         # funil da campanha já foi disparado pro contato (não dispara duas vezes).
         ("whatsapp_extensao_fila", "liberar_em", "TIMESTAMP"),
         ("campanha_contato", "funil_em", "TIMESTAMP"),
+        # Nome do cliente pra quem o link foi gerado — carimbado no PDF/marca d'água
+        # (rastreabilidade: se o material circular, dá pra saber pra quem foi mandado).
+        ("rede_link", "cliente", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -16009,11 +16012,13 @@ def rede_gerar_link():
     expira_em = datetime.now(TZ_SP) + delta
     token = secrets.token_urlsafe(24)
 
+    cliente = (body.get('cliente') or '').strip()[:120] or None
+
     conn = db()
     conn.execute(
-        """INSERT INTO rede_link (token, criado_por_id, criado_por_nome, cidade, tipo, esp, q, expira_em)
-           VALUES (?,?,?,?,?,?,?,?)""",
-        (token, session.get('user_id'), session.get('nome', ''),
+        """INSERT INTO rede_link (token, criado_por_id, criado_por_nome, cliente, cidade, tipo, esp, q, expira_em)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (token, session.get('user_id'), session.get('nome', ''), cliente,
          (body.get('cidade') or '')[:20], (body.get('tipo') or '')[:20],
          (body.get('esp') or '')[:200], (body.get('q') or '')[:200],
          expira_em.strftime('%Y-%m-%d %H:%M:%S'))
@@ -16023,7 +16028,8 @@ def rede_gerar_link():
 
     return jsonify({
         'url': _SITE_BASE_URL + url_for('rede_referenciada_publica', token=token),
-        'expiraTexto': _rede_link_fmt(expira_em)
+        'expiraTexto': _rede_link_fmt(expira_em),
+        'geradoPara': cliente
     })
 
 
@@ -16052,6 +16058,7 @@ def rede_referenciada_publica(token):
         'modo': 'public',
         'expiraTexto': _rede_link_fmt(expira_em) if expira_em else None,
         'geradoPor': r.get('criado_por_nome') or None,
+        'geradoPara': r.get('cliente') or None,
     }
     return render_template('rede_referenciada.html', rede_ctx=ctx)
 

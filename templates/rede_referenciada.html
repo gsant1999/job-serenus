@@ -95,6 +95,10 @@
     font-size:11px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.08em;
     white-space:nowrap;
   }
+  .plano-tag{
+    font-size:11px;color:var(--ink-soft);font-weight:600;margin-top:2px;
+  }
+  .plano-tag span{color:var(--ink-faint);font-weight:500;}
   .pdfbtn{
     flex:0 0 auto;
     display:inline-flex;align-items:center;gap:5px;
@@ -294,8 +298,10 @@
     background:var(--surface);color:var(--ink);font-size:12px;font-weight:700;cursor:pointer;
   }
   .linkbtn-primary{background:var(--accent);border-color:var(--accent);color:#fff;}
-  .linkbox{display:flex;gap:6px;align-items:center;width:100%;}
-  .linkbox select{padding:7px 9px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font-size:12px;flex:1;}
+  .linkbox{display:flex;gap:6px;align-items:center;width:100%;flex-wrap:wrap;}
+  .linkbox select, .linkbox input{padding:7px 9px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font-size:12px;}
+  .linkbox select{flex:1 1 130px;}
+  .linkbox input{flex:2 1 160px;}
   .linkresult{display:flex;gap:6px;align-items:center;flex-wrap:wrap;width:100%;}
   .linkresult input{flex:1;min-width:160px;padding:7px 9px;border-radius:8px;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);font-size:11.5px;}
   .linkresult .linkexp{font-size:11px;color:var(--ink-faint);font-weight:600;}
@@ -334,7 +340,6 @@
 <div class="watermark" aria-hidden="true"><div class="wm-inner" id="wmtext"></div></div>
 
 <script id="rede-ctx" type="application/json">{{ rede_ctx | tojson }}</script>
-<div id="redeTopoSlot"></div>
 
 <div class="shell">
   <header class="top">
@@ -349,12 +354,16 @@
       </div>
     </div>
     <div class="titlebar">
-      <h1 class="display">Rede Referenciada</h1>
+      <div>
+        <h1 class="display">Rede Referenciada</h1>
+        <div class="plano-tag">SulAmérica · Direto Nacional <span>produto 557 / plano 87507</span></div>
+      </div>
       <button class="pdfbtn" id="pdfbtn" type="button">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h8l4 4v3"></path><path d="M6 18H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"></path><path d="M6 14h12v8H6z"></path></svg>
         PDF
       </button>
     </div>
+    <div id="redeTopoSlot"></div>
     <div class="citytabs" id="citytabs"></div>
     <div class="filters">
       <div class="searchrow">
@@ -715,13 +724,23 @@
     var cs = "", y = 0;
 
     function drawWatermark(){
-      var phrase = "SERENUS CORRETORA - MATERIAL EXCLUSIVO";
-      var row3 = phrase + "    " + phrase + "    " + phrase;
-      var ang = 28 * Math.PI / 180;
+      // Com nome do cliente, o carimbo vira pessoal (rastreia quem vazou);
+      // sem nome, fica o aviso generico de material interno.
+      //
+      // Cor solida bem clara em vez de transparencia (/ca do ExtGState): muitos
+      // visualizadores de PDF moveis IGNORAM alpha e desenham a cor cheia, o que
+      // deixava a marca d'agua escura e ilegivel por cima do conteudo. Cinza claro
+      // fixo funciona igual em qualquer app, e o espacamento maior evita que a
+      // marca caia em cima das linhas de texto na maioria dos casos.
+      var phrase = meta.geradoPara
+        ? ("SERENUS · USO EXCLUSIVO DE " + meta.geradoPara.toUpperCase())
+        : "SERENUS CORRETORA · MATERIAL EXCLUSIVO";
+      var row2 = phrase + "          " + phrase;
+      var ang = 32 * Math.PI / 180;
       var ca = Math.cos(ang).toFixed(4), sa = Math.sin(ang).toFixed(4), nsa = (-Math.sin(ang)).toFixed(4);
-      cs += "q /GS1 gs 0.42 0.45 0.43 rg BT /F2 9 Tf\n";
-      for(var row=-3; row<15; row++){
-        cs += ca + " " + sa + " " + nsa + " " + ca + " -150 " + (row*58) + " Tm (" + pdfStr(row3) + ") Tj\n";
+      cs += "q 0.85 0.86 0.855 rg BT /F1 8 Tf\n";
+      for(var row=-2; row<16; row++){
+        cs += ca + " " + sa + " " + nsa + " " + ca + " -160 " + (row*100) + " Tm (" + pdfStr(row2) + ") Tj\n";
       }
       cs += "ET Q\n";
     }
@@ -742,8 +761,17 @@
         cs += "BT /F1 9 Tf " + C_SOFT + " rg " + PDF_M + " " + y.toFixed(2) + " Td (" + pdfStr(meta.count + " resultados - " + meta.filterLabel) + ") Tj ET\n";
         y -= 22;
       } else {
-        cs += "BT /F2 8.5 Tf " + C_SOFT + " rg " + PDF_M + " " + (PDF_H - 24).toFixed(2) + " Td (" + pdfStr("Rede Referenciada - " + meta.cityLabel + " - Serenus Corretora") + ") Tj ET\n";
-        y = PDF_H - 46;
+        // Logos menores em toda pagina (nao so na primeira) — pedido explicito:
+        // material precisa se identificar mesmo se alguem so imprimir/repassar uma folha avulsa.
+        var sw2 = 46, sh2 = sw2 * PDF_SERENUS_H / PDF_SERENUS_W;
+        var logoY2 = PDF_H - 16 - sh2;
+        cs += "q " + sw2.toFixed(2) + " 0 0 " + sh2.toFixed(2) + " " + PDF_M + " " + logoY2.toFixed(2) + " cm /Im1 Do Q\n";
+        var uw2 = 40, uh2 = uw2 * PDF_SULA_H / PDF_SULA_W;
+        cs += "q " + uw2.toFixed(2) + " 0 0 " + uh2.toFixed(2) + " " + (PDF_M + sw2 + 10).toFixed(2) + " " + (logoY2 + (sh2-uh2)/2).toFixed(2) + " cm /Im2 Do Q\n";
+        var txtX = PDF_M + sw2 + 10 + uw2 + 14;
+        cs += "BT /F2 9 Tf " + C_INK + " rg " + txtX + " " + (logoY2 + sh2 - 11).toFixed(2) + " Td (" + pdfStr(meta.cityLabel + " - Serenus Corretora") + ") Tj ET\n";
+        cs += "BT /F1 7.5 Tf " + C_FAINT + " rg " + txtX + " " + (logoY2 + sh2 - 22).toFixed(2) + " Td (" + pdfStr("SulAmerica Direto Nacional (557 / 87507)") + ") Tj ET\n";
+        y = logoY2 - 18;
       }
       pages.push(null); // placeholder, replaced on endPage
     }
@@ -774,23 +802,29 @@
     }
 
     function groupTitle(text){
-      ensure(30);
-      y -= 8;
+      ensure(34);
+      y -= 10;
       cs += "q 0.78 0.82 0.79 RG 0.8 w " + PDF_M + " " + (y+3).toFixed(2) + " m " + (PDF_W-PDF_M).toFixed(2) + " " + (y+3).toFixed(2) + " l S Q\n";
-      y -= 5;
-      line(text, {size:10, bold:true, color:C_INK, gap:7});
+      y -= 6;
+      line(text, {size:10.5, bold:true, color:C_INK, gap:10});
     }
 
     function record(r){
-      ensure(32);
+      // Registros bem espacados, com divisoria sutil entre um e outro — prioriza
+      // legibilidade sobre densidade, mesmo que o PDF fique com mais paginas.
+      ensure(48);
       var fl = [];
       if(r.o) fl.push("Agend. online");
       if(r.v) fl.push("Teleconsulta");
-      line(r.n + (fl.length ? "   (" + fl.join(", ") + ")" : ""), {size:9.5, bold:true, gap:1.5});
+      line(r.n + (fl.length ? "   (" + fl.join(", ") + ")" : ""), {size:10, bold:true, gap:3.5});
       var tels = (r.f||[]).map(fmtPhone).join("   ");
-      line(r.e + " - " + r.b + " | CEP " + r.c + (tels ? " | " + tels : " | sem telefone informado"), {size:8.2, color:C_SOFT, gap:1.5});
-      if(r.s && r.s.length) line(r.s.join(", "), {size:7.9, color:C_ACC, gap:6});
-      else y -= 6;
+      line(r.e + " - " + r.b, {size:8.4, color:C_SOFT, gap:2.5});
+      line("CEP " + r.c + (tels ? "   " + tels : "   sem telefone informado"), {size:8.4, color:C_SOFT, gap:3.5});
+      if(r.s && r.s.length) line(r.s.join(", "), {size:8, color:C_ACC, gap:4});
+      ensure(12);
+      y -= 6;
+      cs += "q 0.88 0.90 0.885 RG 0.6 w " + PDF_M + " " + y.toFixed(2) + " m " + (PDF_W-PDF_M).toFixed(2) + " " + y.toFixed(2) + " l S Q\n";
+      y -= 9;
     }
 
     startPage(true);
@@ -810,7 +844,12 @@
     y -= 10;
     cs += "q 0.78 0.82 0.79 RG 0.8 w " + PDF_M + " " + (y+4).toFixed(2) + " m " + (PDF_W-PDF_M).toFixed(2) + " " + (y+4).toFixed(2) + " l S Q\n";
     y -= 6;
-    line("Material exclusivo Serenus Corretora de Saude - uso interno, nao redistribuir.", {size:7.4, bold:true, color:C_INK, gap:2.5});
+    line(
+      meta.geradoPara
+        ? ("Documento de uso exclusivo de " + meta.geradoPara + " - Serenus Corretora de Saude - nao redistribuir.")
+        : "Material exclusivo Serenus Corretora de Saude - uso interno, nao redistribuir.",
+      {size:7.4, bold:true, color:C_INK, gap:2.5}
+    );
     if(meta.expiraTexto){
       line("Documento gerado a partir de um link temporario, valido ate " + meta.expiraTexto + (meta.geradoPor ? (" - gerado por " + meta.geradoPor) : "") + ".", {size:7, bold:true, color:C_ACC, gap:2.5});
     }
@@ -947,7 +986,8 @@
           tipoAll: state.tipo === "all",
           dateStr: dateStr,
           expiraTexto: CTX.expiraTexto || null,
-          geradoPor: CTX.geradoPor || null
+          geradoPor: CTX.geradoPor || null,
+          geradoPara: CTX.geradoPara || null
         };
         var blob = buildPdfBlob(recs, meta);
         var name = "rede-sulamerica-" + slugify(DB[state.city].label) +
@@ -977,8 +1017,9 @@
   Array.prototype.forEach.call(document.querySelectorAll(".themebtn"), function(b){
     b.addEventListener("click", function(){ applyTheme(b.getAttribute("data-t")); });
   });
-  var savedTheme = "auto";
-  try{ savedTheme = localStorage.getItem("rede-theme") || "auto"; }catch(e){}
+  // Preferencia padrao e sempre claro (nao segue o sistema) ate o usuario escolher.
+  var savedTheme = "light";
+  try{ savedTheme = localStorage.getItem("rede-theme") || "light"; }catch(e){}
   applyTheme(savedTheme);
 
   // ---------- Banner de topo: gerar/mostrar link temporario (so dentro do ERP) ----------
@@ -990,7 +1031,8 @@
       slot.innerHTML =
         '<div class="linkbanner">' +
           '<span>Link temporario' + (CTX.expiraTexto ? ' - valido ate <b>' + escapeHtml(CTX.expiraTexto) + '</b>' : '') +
-          (CTX.geradoPor ? ' - gerado por ' + escapeHtml(CTX.geradoPor) : '') + '.</span>' +
+          (CTX.geradoPor ? ' - gerado por ' + escapeHtml(CTX.geradoPor) : '') +
+          (CTX.geradoPara ? ' - uso exclusivo de ' + escapeHtml(CTX.geradoPara) : '') + '.</span>' +
         '</div>';
       return;
     }
@@ -1000,6 +1042,7 @@
         '<div class="linkbanner linkbanner-app">' +
           '<button class="linkbtn" id="gerarLinkBtn" type="button">Gerar link para cliente</button>' +
           '<div class="linkbox" id="linkBox" style="display:none;">' +
+            '<input id="linkCliente" type="text" placeholder="Nome do cliente (aparece no PDF)" />' +
             '<select id="linkPrazo">' +
               '<option value="24h">Expira em 24 horas</option>' +
               '<option value="7d" selected>Expira em 7 dias</option>' +
@@ -1020,6 +1063,7 @@
         btn.textContent = "Gerando…";
         var body = {
           prazo: document.getElementById("linkPrazo").value,
+          cliente: document.getElementById("linkCliente").value.trim(),
           cidade: state.city, tipo: state.tipo, esp: state.esp, q: state.q
         };
         fetch(CTX.gerarLinkUrl, {
@@ -1038,7 +1082,8 @@
           res.innerHTML =
             '<input readonly id="linkUrlInput" value="' + escapeHtml(data.url) + '" />' +
             '<button class="linkbtn" id="linkCopyBtn" type="button">Copiar</button>' +
-            '<span class="linkexp">Expira em ' + escapeHtml(data.expiraTexto || "") + '</span>';
+            '<span class="linkexp">Expira em ' + escapeHtml(data.expiraTexto || "") +
+              (data.geradoPara ? " - uso exclusivo de " + escapeHtml(data.geradoPara) : " - sem nome de cliente vinculado") + '</span>';
           document.getElementById("linkCopyBtn").addEventListener("click", function(){
             var inp = document.getElementById("linkUrlInput");
             inp.select();
