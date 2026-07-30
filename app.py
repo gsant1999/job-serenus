@@ -8568,7 +8568,8 @@ def _fechados_com_analise(conn):
     fechados = conn.execute("""
         SELECT p.id, p.razao_social, p.consultor, p.adm_operadora, p.modalidade,
                p.valor, p.total_vidas, p.criado_em,
-               p.tel_resp_contrato, p.tel_resp_negociacao
+               p.tel_resp_contrato, p.tel_resp_negociacao,
+               p.lead_id, p.lead_vinculo
         FROM propostas p
         WHERE p.status_operacional='Emitida/Ativa' AND p.status <> 'Excluída'
           AND COALESCE(p.estornada,0)=0
@@ -8585,6 +8586,12 @@ def _fechados_com_analise(conn):
     clientes = []
     for r in fechados:
         wa, lead = None, None
+        # Vínculo gravado tem prioridade: é a chave, não uma adivinhação refeita a
+        # cada consulta. O casamento por telefone continua como retaguarda pros
+        # registros que o backfill não conseguiu ligar (ambíguos, sem lead).
+        if 'lead_id' in r.keys() and r['lead_id']:
+            lead = conn.execute("""SELECT id, nome, responsavel_id, etapa, criado_em
+                                   FROM crm_leads WHERE id=?""", (r['lead_id'],)).fetchone()
         for tel in (r['tel_resp_contrato'], r['tel_resp_negociacao']):
             tn = _normalizar_telefone(str(tel or ''))
             if not tn:
@@ -23013,20 +23020,65 @@ CONSULTOR_ALIASES = {
     'jack2': 'Jack',
 }
 
+# Prefixos de celular no Brasil (o 1o dígito do número, depois do DDD). Fixo
+# começa em 2-5, celular em 6-9 — é o que permite decidir se falta o 9º dígito.
+_PREFIXO_CELULAR = '6789'
+
+
 def _normalizar_telefone(tel_raw):
-    """
-    Extrai só os dígitos do telefone e normaliza para o padrão brasileiro.
-    Retorna apenas dígitos: '5519991046030' ou '19991046030'.
-    Usado para comparação/dedup.
+    """Reduz qualquer escrita de telefone a UMA forma canônica: DDD + número, com
+    o 9º dígito presente quando é celular. Só dígitos.
+
+    O telefone é o balizador de tudo (dedup de lead, casamento venda↔lead, análise
+    de WhatsApp), então ele precisa dar o mesmo resultado para todas as formas em
+    que a mesma pessoa é escrita. Casos reais que estavam furando:
+
+      '(19) 9681-0150'   -> 19996810150   (celular sem o 9º dígito)
+      '190997265776'     -> 19997265776   (zero de operadora entre DDD e número)
+      '+55 19 99104-6030'-> 19991046030   (DDI)
+      '019 99104-6030'   -> 19991046030   (zero de operadora antes do DDD)
+
+    Antes, o de 10 dígitos só era achado pelo sufixo de 8 — que IGNORA O DDD, e
+    fazia (19) 9681-0150 colidir com (11) 9681-0150. Canonizando, a comparação
+    volta a ser exata e o DDD passa a contar.
     """
     if not tel_raw:
         return ''
-    import re
     dig = re.sub(r'\D', '', str(tel_raw))
-    # Remove código do país 55 se tiver 12-13 dígitos (55 + DDD + número)
-    if len(dig) >= 12 and dig.startswith('55'):
+    if not dig:
+        return ''
+    # DDI: só remove quando o que sobra ainda é um telefone com DDD (>=10), senão
+    # um fixo de São Paulo começando com 55 ('5512-3456') perderia os 2 primeiros.
+    if dig.startswith('55') and len(dig) - 2 >= 10:
         dig = dig[2:]
+    # Zero de operadora antes do DDD ('019...')
+    while dig.startswith('0') and len(dig) > 10:
+        dig = dig[1:]
+    # Zero de operadora entre DDD e número ('19 0 99726-5776')
+    if len(dig) == 12 and dig[2] == '0':
+        dig = dig[:2] + dig[3:]
+    # Celular que perdeu o 9º dígito: DDD + 8 dígitos começando em 6-9
+    if len(dig) == 10 and dig[2] in _PREFIXO_CELULAR:
+        dig = dig[:2] + '9' + dig[2:]
     return dig
+
+
+def _telefone_variantes(tel_raw):
+    """Formas em que o MESMO número pode estar gravado no banco. Existe porque
+    telefone_norm de linhas antigas foi calculado com a normalização velha: sem
+    isso, um lead gravado como '1996810150' nunca seria achado pela busca do
+    canônico '19996810150'. O backfill corrige o histórico, isto cobre o que
+    escapar (import antigo, integração de fora)."""
+    can = _normalizar_telefone(tel_raw)
+    if not can:
+        return []
+    fora = [can]
+    # sem o 9º dígito
+    if len(can) == 11 and can[2] == '9':
+        fora.append(can[:2] + can[3:])
+    # com DDI
+    fora.append('55' + can)
+    return list(dict.fromkeys(fora))
 
 
 def _buscar_lead_por_telefone(conn, telefone_norm):
@@ -23040,15 +23092,23 @@ def _buscar_lead_por_telefone(conn, telefone_norm):
     automático) e análise de WhatsApp — critério único, sem duplicar lógica."""
     if not telefone_norm:
         return None
-    lead = conn.execute("SELECT id, nome, responsavel_id, etapa, criado_em FROM crm_leads WHERE telefone_norm=?",
-                        (telefone_norm,)).fetchone()
-    if lead:
-        return lead
-    suf = telefone_norm[-8:]
-    if len(suf) == 8:
-        lead = conn.execute("SELECT id, nome, responsavel_id, etapa, criado_em FROM crm_leads WHERE telefone_norm LIKE ?",
-                            ('%' + suf,)).fetchone()
-    return lead
+    COLS = "SELECT id, nome, responsavel_id, etapa, criado_em FROM crm_leads WHERE "
+    variantes = _telefone_variantes(telefone_norm)
+    if variantes:
+        marc = ','.join(['?'] * len(variantes))
+        lead = conn.execute(COLS + f"telefone_norm IN ({marc})", variantes).fetchone()
+        if lead:
+            return lead
+    # Último recurso: sufixo de 8 dígitos — mas AMARRADO AO MESMO DDD. Sem essa
+    # amarra, (19) 9681-0150 e (11) 9681-0150 eram tratados como a mesma pessoa.
+    can = _normalizar_telefone(telefone_norm)
+    suf, ddd = can[-8:], can[:2]
+    if len(suf) == 8 and len(ddd) == 2:
+        lead = conn.execute(COLS + "telefone_norm LIKE ? AND telefone_norm LIKE ?",
+                            ('%' + suf, ddd + '%')).fetchone()
+        if lead:
+            return lead
+    return None
 
 def _formatar_telefone(tel_raw):
     """
@@ -24202,6 +24262,71 @@ if __name__ == '__main__':
     print(f"  Admin:  {SEED_ADMIN_EMAIL}" + ("  / (senha do SEED_ADMIN_SENHA)" if os.environ.get('SEED_ADMIN_SENHA') else " / serenus2025"))
     print("="*52 + "\n")
     app.run(debug=False, host='0.0.0.0', port=port)
+
+# ─── BACKFILL do telefone canônico (29/07/2026) ───────────────────────────────
+# Precisa rodar ANTES do vínculo proposta↔lead: o casamento compara telefone_norm,
+# então canonizar depois deixaria o vínculo baseado nos valores velhos.
+# Recalcula a partir do próprio telefone_norm (que já é só dígitos) porque a
+# normalização é idempotente — aplicar no que já está canônico devolve igual. Isso
+# evita ter que saber o nome da coluna crua de cada uma das seis tabelas.
+_TABELAS_TELEFONE_NORM = ['crm_leads', 'contatos_frios', 'whatsapp_analises',
+                          'campanha_contato', 'wa_chat_lead', 'lead_notas']
+
+
+def _backfill_telefone_canonico():
+    conn = None
+    try:
+        conn = db()
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        if conn.execute("SELECT 1 FROM meta_flags WHERE k='telefone_canonico_20260729'").fetchone():
+            return
+        total = 0
+        por_tabela = {}
+        for tab in _TABELAS_TELEFONE_NORM:
+            try:
+                rows = conn.execute(
+                    f"SELECT DISTINCT telefone_norm t FROM {tab} WHERE telefone_norm IS NOT NULL AND telefone_norm <> ''"
+                ).fetchall()
+            except Exception:
+                continue
+            n = 0
+            for r in rows:
+                velho = r['t']
+                novo = _normalizar_telefone(velho)
+                if novo and novo != velho:
+                    n += conn.execute(f"UPDATE {tab} SET telefone_norm=? WHERE telefone_norm=?",
+                                      (novo, velho)).rowcount or 0
+            if n:
+                por_tabela[tab] = n
+            total += n
+        # Canonizar pode revelar que dois leads eram a mesma pessoa escrita
+        # diferente. NÃO mescla nada — só avisa, porque mesclar lead é destrutivo e
+        # já existe a tela /crm/leads-duplicados pra isso, com revisão humana.
+        dups = 0
+        try:
+            dups = conn.execute("""SELECT COUNT(*) c FROM (
+                SELECT telefone_norm FROM crm_leads
+                WHERE telefone_norm IS NOT NULL AND telefone_norm <> ''
+                GROUP BY telefone_norm HAVING COUNT(*) > 1)""").fetchone()['c']
+        except Exception:
+            pass
+        conn.execute("INSERT INTO meta_flags (k) VALUES ('telefone_canonico_20260729')")
+        conn.commit()
+        print(f"[TELEFONE_CANONICO] {total} registro(s) corrigido(s) {por_tabela or ''}"
+              + (f" | {dups} telefone(s) com mais de um lead — revise em /crm/leads-duplicados" if dups else ""))
+    except Exception as e:
+        if conn is not None:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[TELEFONE_CANONICO] migração pulada: {e}")
+    finally:
+        if conn is not None:
+            try: close_db(conn)
+            except Exception: pass
+
+
+_backfill_telefone_canonico()
+
 
 # ─── BACKFILL do vínculo proposta ↔ lead (29/07/2026) ────────────────────────
 # Roda AQUI e não dentro de init_db(): o casamento usa _normalizar_telefone, que só
