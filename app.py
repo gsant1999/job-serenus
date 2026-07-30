@@ -14424,6 +14424,105 @@ def api_whatsapp_lead_criar():
     return _wa_cors(jsonify({"ok": True, "ja_existia": False, "lead_id": lead_id}))
 
 
+# ─── TRANSCRIÇÃO INLINE DOS ÁUDIOS ────────────────────────────────────────────
+# A extensão mostra a transcrição colada embaixo de cada áudio, na própria
+# conversa. Dois endpoints em vez de um: primeiro ela pergunta o que JÁ está em
+# cache (barato, sem subir áudio nenhum) e pinta na hora; só depois sobe os que
+# faltam. Sem essa separação, abrir uma conversa antiga significaria subir dezenas
+# de megabytes de áudio que já foram transcritos e pagos.
+_TETO_TRANSCRICAO_MES_USD = float(os.environ.get('TRANSCRICAO_TETO_MES_USD', '15'))
+
+
+def _gasto_transcricao_mes(conn):
+    """Quanto já foi gasto em transcrição no mês corrente (pelo cache, que é onde
+    o custo real de cada áudio fica registrado)."""
+    ini = datetime.now(TZ_SP).strftime('%Y-%m') + '-01'
+    try:
+        r = conn.execute("""SELECT COALESCE(SUM(custo_usd),0) v FROM whatsapp_transcricoes_cache
+                            WHERE CAST(criado_em AS TEXT) >= ?""", (ini,)).fetchone()
+        return float(r['v'] or 0)
+    except Exception:
+        return 0.0
+
+
+@app.route('/api/whatsapp/transcricoes', methods=['POST', 'OPTIONS'])
+def api_whatsapp_transcricoes():
+    """O que já está transcrito, pelos ids das mensagens. Resposta imediata."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    ids = (request.get_json(silent=True) or {}).get('ids') or []
+    ids = [str(i) for i in ids if i][:400]
+    if not ids:
+        return _wa_cors(jsonify({"ok": True, "transcricoes": {}}))
+    conn = db()
+    out = {}
+    try:
+        marc = ','.join(['?'] * len(ids))
+        for r in conn.execute(f"""SELECT msg_id, texto FROM whatsapp_transcricoes_cache
+                                  WHERE msg_id IN ({marc})""", ids).fetchall():
+            out[r['msg_id']] = r['texto']
+        gasto = _gasto_transcricao_mes(conn)
+    except Exception as e:
+        app.logger.warning(f"[TRANSCRICAO] consulta de cache falhou: {e}")
+        gasto = 0.0
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "transcricoes": out,
+                             "gasto_mes_usd": round(gasto, 4),
+                             "teto_mes_usd": _TETO_TRANSCRICAO_MES_USD}))
+
+
+@app.route('/api/whatsapp/transcrever', methods=['POST', 'OPTIONS'])
+def api_whatsapp_transcrever():
+    """Transcreve os áudios que ainda não têm cache. A extensão manda em lotes
+    pequenos, do mais recente pro mais antigo — o que interessa aparece primeiro."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    audios = (request.get_json(silent=True) or {}).get('audios') or []
+    if not isinstance(audios, list) or not audios:
+        return _wa_cors(jsonify({"ok": False, "erro": "Nenhum áudio recebido"})), 400
+    audios = audios[:10]
+    conn = db()
+    gasto = _gasto_transcricao_mes(conn)
+    # Teto mensal: mesmo princípio do CUSTO_MAX_ANALISE_BRL que já existe. Nunca
+    # deixa a transcrição automática virar uma conta surpresa no fim do mês.
+    if gasto >= _TETO_TRANSCRICAO_MES_USD:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "teto_mensal",
+                                 "detalhe": f"Teto de US${_TETO_TRANSCRICAO_MES_USD} atingido neste mês",
+                                 "gasto_mes_usd": round(gasto, 4)})), 200
+    out, custo_rodada = {}, 0.0
+    for a in audios:
+        mid = str((a or {}).get('msg_id') or '')
+        if not mid:
+            continue
+        ja = _wa_transcricao_cache_buscar(conn, mid)
+        if ja:
+            out[mid] = ja['texto']
+            continue
+        b64 = (a or {}).get('base64') or ''
+        if not b64:
+            continue
+        r = _transcrever_audio(b64, (a or {}).get('mime') or 'audio/ogg')
+        if r and (r.get('texto') or '').strip():
+            _wa_transcricao_cache_salvar(conn, mid, r['texto'], r.get('segundos'), r.get('custo_usd'))
+            out[mid] = r['texto']
+            custo_rodada += float(r.get('custo_usd') or 0)
+        else:
+            # Falha vira string vazia em vez de sumir: a extensão marca o áudio
+            # como "não deu pra transcrever" e não fica tentando pra sempre.
+            out[mid] = ''
+        if gasto + custo_rodada >= _TETO_TRANSCRICAO_MES_USD:
+            break
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "transcricoes": out,
+                             "custo_rodada_usd": round(custo_rodada, 5),
+                             "gasto_mes_usd": round(gasto + custo_rodada, 4)}))
+
+
 # ─── FICHA COMPLETA DO LEAD PRA EXTENSÃO ──────────────────────────────────────
 # UMA chamada devolve tudo que o popup dentro do WhatsApp precisa. É de propósito:
 # o consultor abre a conversa e o painel tem que estar pronto — seis requisições em

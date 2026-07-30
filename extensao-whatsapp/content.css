@@ -786,3 +786,31 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-ficha-aviso.erro { color:#f43f5e; }
 .job-ficha-link { font-size:11px; color:var(--job-txt-fraco); text-decoration:none; text-align:center; }
 .job-ficha-link:hover { color:var(--job-acento); text-decoration:underline; }
+
+/* ═══════════════ Transcrição colada no áudio ═══════════════
+   Vive no document.body, posicionada por coordenada sobre a bolha. NUNCA dentro
+   do #main: além do risco de quebrar o envio (árvore React), a lista é
+   virtualizada e um nó pendurado na linha acabaria sob o áudio de outra pessoa. */
+.job-tr-chip {
+  position: fixed; z-index: 8000; box-sizing: border-box;
+  display: flex; align-items: flex-start; gap: 6px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  border-radius: 0 0 9px 9px; border-top: none;
+  padding: 4px 9px 5px; cursor: pointer;
+  font-size: 11.5px; line-height: 1.45; color: var(--job-txt-fraco);
+  box-shadow: 0 4px 12px rgba(0,0,0,.18);
+  max-height: 26px; overflow: hidden; transition: max-height .12s ease;
+}
+.job-tr-chip:hover { border-color: var(--job-acento); color: var(--job-txt); }
+.job-tr-chip.aberta {
+  max-height: 320px; overflow-y: auto; z-index: 8001;
+  color: var(--job-txt); cursor: default; user-select: text;
+  border-radius: 0 0 9px 9px;
+}
+.job-tr-chip.carregando .job-tr-txt::after { content: 'transcrevendo…'; font-style: italic; }
+.job-tr-chip.vazia { opacity: .55; font-style: italic; }
+.job-tr-seta { flex-shrink: 0; font-size: 9px; line-height: 1.7; opacity: .7; }
+.job-tr-txt { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+.job-tr-chip:not(.aberta) .job-tr-txt {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}

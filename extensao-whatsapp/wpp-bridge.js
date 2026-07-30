@@ -118,6 +118,57 @@
     return { audios: out, encontrados: audios.length };
   }
 
+  // Lista os áudios da conversa SEM baixar nada. É o que permite consultar o
+  // cache antes: abrir uma conversa antiga não pode significar subir dezenas de
+  // megabytes de áudio que já foram transcritos e pagos.
+  async function listarAudios() {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getMessages) {
+      return { erro: 'wpp_ausente' };
+    }
+    const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
+    if (!chat || !chat.id) return { erro: 'sem_conversa' };
+    const chatId = chat.id._serialized;
+    let msgs = [];
+    try { msgs = await window.WPP.chat.getMessages(chatId, { count: 400 }); }
+    catch (e) { return { erro: 'falha_mensagens' }; }
+    const audios = _dedupPorId(msgs.filter((m) => m.type === 'ptt' || m.type === 'audio'));
+    return {
+      chat_id: chatId,
+      // Mais recente primeiro: é a ordem em que a transcrição interessa.
+      audios: audios.map((m) => ({
+        msg_id: m.id._serialized,
+        de: (m.id.fromMe ? 'consultor' : 'lead'),
+        t: m.t || 0,
+        hora: fmtHora(m.t),
+      })).sort((a, b) => (b.t || 0) - (a.t || 0)),
+    };
+  }
+
+  // Baixa SÓ os áudios pedidos (os que não têm cache).
+  async function baixarAudiosPorId(ids) {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.downloadMedia) {
+      return { erro: 'wpp_ausente' };
+    }
+    const alvos = (ids || []).slice(0, 10);
+    const out = [];
+    for (const id of alvos) {
+      try {
+        const media = await window.WPP.chat.downloadMedia(id);
+        let b64 = '', mime = 'audio/ogg';
+        if (media instanceof Blob) {
+          b64 = await blobParaBase64(media);
+          mime = media.type || mime;
+        } else if (media && media.data) {
+          const str = String(media.data);
+          b64 = str.indexOf(',') >= 0 ? str.split(',')[1] : str;
+          mime = media.mimetype || mime;
+        }
+        if (b64) out.push({ msg_id: id, base64: b64, mime: (mime || 'audio/ogg').split(';')[0] });
+      } catch (e) { /* um áudio que falhe não pode derrubar o lote */ }
+    }
+    return { audios: out };
+  }
+
   async function baixarDocumentos(limite, forcarGrandes) {
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.downloadMedia) {
       return { erro: 'wpp_ausente' };
@@ -517,6 +568,8 @@
     let resp;
     try {
       if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite);
+      else if (d.tipo === 'listar_audios') resp = await listarAudios();
+      else if (d.tipo === 'baixar_audios_ids') resp = await baixarAudiosPorId(d.ids);
       else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite, d.forcarGrandes);
       else if (d.tipo === 'ler_mensagens') resp = await lerMensagens(d.limite);
       else if (d.tipo === 'obter_telefone') resp = await obterTelefone(d.resolverLid);

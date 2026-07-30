@@ -1180,6 +1180,199 @@
     else if (secao === 'ficha') abrirSecaoFicha();
   }
 
+  // ═══════════════ Transcrição colada no áudio ═══════════════
+  // As etiquetas vivem no document.body e são POSICIONADAS por coordenada sobre a
+  // bolha do áudio. Não entram na lista de mensagens de propósito:
+  //   1) inserir nó no #main é a árvore React do WhatsApp — foi o que quebrou o
+  //      envio de mensagem quando a barra de notas morava lá;
+  //   2) a lista é VIRTUALIZADA: o WhatsApp recicla as linhas conforme você rola,
+  //      então um nó pendurado na linha acabaria embaixo do áudio de OUTRA pessoa.
+  // Aqui o vínculo id-da-mensagem → posição é refeito a cada quadro, então
+  // reciclagem não consegue trocar o texto de lugar.
+  const TR = {
+    cache: new Map(),        // msg_id -> texto ('' = tentou e não deu)
+    abertas: new Set(),      // msg_id das etiquetas expandidas
+    chips: new Map(),        // msg_id -> elemento
+    chatId: null,
+    fila: [],
+    rodando: false,
+    ligado: true,
+    aviso: '',
+  };
+
+  function _trPodeRodar() {
+    return TR.ligado && !!document.querySelector('#main');
+  }
+
+  async function trSincronizar() {
+    if (!_trPodeRodar()) return;
+    const lista = await _pedirPonte('listar_audios', {}, 20000);
+    if (!lista || lista.erro || !Array.isArray(lista.audios)) return;
+    // Trocou de conversa: limpa tudo, senão a etiqueta do chat anterior fica
+    // flutuando sobre a conversa nova.
+    if (TR.chatId !== lista.chat_id) {
+      TR.chatId = lista.chat_id;
+      TR.fila = [];
+      trLimparChips();
+    }
+    const ids = lista.audios.map((a) => a.msg_id);
+    if (!ids.length) return;
+    const faltaCache = ids.filter((id) => !TR.cache.has(id));
+    if (faltaCache.length) {
+      const r = await _safeSendMessage({ type: 'transcricoes_cache', ids: faltaCache }).catch(() => null);
+      if (r && r.ok) {
+        Object.keys(r.transcricoes || {}).forEach((k) => TR.cache.set(k, r.transcricoes[k]));
+        if (typeof r.gasto_mes_usd === 'number' && typeof r.teto_mes_usd === 'number'
+            && r.gasto_mes_usd >= r.teto_mes_usd) {
+          TR.aviso = 'teto de custo do mês atingido';
+        }
+      }
+    }
+    trPintar();
+    // O que ainda não tem texto entra na fila, do mais recente pro mais antigo
+    // (lista já vem ordenada assim) — o que interessa aparece primeiro.
+    const pendentes = ids.filter((id) => !TR.cache.has(id));
+    TR.fila = pendentes;
+    trProcessarFila();
+  }
+
+  async function trProcessarFila() {
+    if (TR.rodando || !TR.fila.length || TR.aviso) return;
+    TR.rodando = true;
+    try {
+      while (TR.fila.length && !TR.aviso) {
+        const lote = TR.fila.splice(0, 3);
+        lote.forEach((id) => trMarcarCarregando(id));
+        const baixados = await _pedirPonte('baixar_audios_ids', { ids: lote }, 90000);
+        const audios = (baixados && baixados.audios) || [];
+        if (!audios.length) { lote.forEach((id) => TR.cache.set(id, '')); trPintar(); continue; }
+        const r = await _safeSendMessage({ type: 'transcrever_audios', audios }).catch(() => null);
+        if (!r || !r.ok) {
+          if (r && r.erro === 'teto_mensal') { TR.aviso = 'teto de custo do mês atingido'; }
+          // Falhou a rodada: devolve pra fila só uma vez, marcando como tentado,
+          // pra não ficar em laço infinito consumindo download de áudio.
+          lote.forEach((id) => { if (!TR.cache.has(id)) TR.cache.set(id, ''); });
+        } else {
+          Object.keys(r.transcricoes || {}).forEach((k) => TR.cache.set(k, r.transcricoes[k]));
+          lote.forEach((id) => { if (!TR.cache.has(id)) TR.cache.set(id, ''); });
+        }
+        trPintar();
+      }
+    } finally {
+      TR.rodando = false;
+    }
+  }
+
+  function trMarcarCarregando(id) {
+    const chip = TR.chips.get(id);
+    if (chip) chip.classList.add('carregando');
+  }
+
+  function trLimparChips() {
+    TR.chips.forEach((el) => el.remove());
+    TR.chips.clear();
+    TR.abertas.clear();
+  }
+
+  // Cria/atualiza as etiquetas SÓ dos áudios visíveis: numa conversa longa há
+  // centenas, e manter todas posicionadas a cada quadro travaria a rolagem.
+  function trPintar() {
+    if (!_trPodeRodar()) { trLimparChips(); return; }
+    const main = document.querySelector('#main');
+    if (!main) return;
+    const area = main.getBoundingClientRect();
+    const vistos = new Set();
+    TR.cache.forEach((texto, id) => {
+      // O data-id do WhatsApp tem @ e . ('false_5519...@c.us_ABC') — sem escapar,
+      // o seletor quebra. Guarda e chamada pelo MESMO caminho (window.CSS), senão
+      // o guard passa e a chamada estoura onde CSS não é global.
+      const idSeguro = (window.CSS && window.CSS.escape) ? window.CSS.escape(id) : id;
+      const linha = main.querySelector('[data-id="' + idSeguro + '"]');
+      if (!linha) return;
+      const r = linha.getBoundingClientRect();
+      // Fora da área visível da conversa: não desenha (e remove se existia).
+      if (r.bottom < area.top - 40 || r.top > area.bottom + 40) return;
+      vistos.add(id);
+      let chip = TR.chips.get(id);
+      if (!chip) {
+        chip = document.createElement('div');
+        chip.className = 'job-tr-chip';
+        chip.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          if (TR.abertas.has(id)) TR.abertas.delete(id); else TR.abertas.add(id);
+          trPintar();
+        });
+        document.body.appendChild(chip);
+        TR.chips.set(id, chip);
+      }
+      const aberta = TR.abertas.has(id);
+      const carregando = !TR.cache.has(id) || texto === undefined;
+      chip.classList.toggle('aberta', aberta);
+      chip.classList.toggle('carregando', carregando);
+      chip.classList.toggle('vazia', texto === '');
+      const rotulo = texto === '' ? 'Não deu pra transcrever este áudio'
+                   : (aberta ? texto : (texto || '').slice(0, 46) + ((texto || '').length > 46 ? '…' : ''));
+      chip.innerHTML = '<span class="job-tr-seta">' + (aberta ? '▾' : '▸') + '</span>' +
+                       '<span class="job-tr-txt">' + esc(rotulo) + '</span>';
+      // Ancorada na base da bolha, alinhada com ela. Largura limitada à da bolha
+      // pra não invadir o outro lado da conversa.
+      const larg = Math.max(150, Math.min(r.width, 420));
+      chip.style.width = larg + 'px';
+      chip.style.left = Math.round(r.left) + 'px';
+      chip.style.top = Math.round(r.bottom - 4) + 'px';
+      chip.style.display = '';
+    });
+    // Some com as etiquetas de áudios que saíram da tela
+    TR.chips.forEach((el, id) => {
+      if (!vistos.has(id)) { el.remove(); TR.chips.delete(id); }
+    });
+  }
+
+  // Reposiciona junto com a rolagem. rAF pra não pendurar trabalho em cada evento
+  // de scroll — a lista do WhatsApp dispara muitos por segundo.
+  let _trRaf = null;
+  function trAgendarPintura() {
+    if (_trRaf) return;
+    _trRaf = requestAnimationFrame(() => { _trRaf = null; trPintar(); });
+  }
+
+  function trIniciar() {
+    document.addEventListener('scroll', trAgendarPintura, true);
+    window.addEventListener('resize', trAgendarPintura);
+    // Troca de conversa e mensagens novas: re-sincroniza com folga, sem ficar
+    // consultando o servidor a cada mutação do DOM.
+    let ultimo = 0;
+    const obs = new MutationObserver(() => {
+      trAgendarPintura();
+      const agora = Date.now();
+      if (agora - ultimo > 4000) { ultimo = agora; trSincronizar(); }
+    });
+    const alvo = document.querySelector('#app') || document.body;
+    obs.observe(alvo, { childList: true, subtree: true });
+    setTimeout(trSincronizar, 2500);
+  }
+
+  // Helper genérico pra falar com a ponte (mesmo padrão de pedirAudios).
+  function _pedirPonte(tipo, extra, tetoMs) {
+    return new Promise((resolve) => {
+      const reqId = 'p' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true;
+        window.removeEventListener('message', onMsg);
+        resolve(d);
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage(Object.assign({ source: 'JOB_EXT_REQ', tipo, reqId }, extra || {}), '*');
+      setTimeout(() => {
+        if (!pronto) { window.removeEventListener('message', onMsg); resolve(null); }
+      }, tetoMs || 30000);
+    });
+  }
+
   // ═══════════════ Ficha do lead (CRM dentro do WhatsApp) ═══════════════
   // O painel inteiro do CRM na mesma aba: etapa, sub-status, etiquetas, campos
   // personalizados, qualificação e atividade. Mora no #job-painel-doc, que é
@@ -3811,6 +4004,9 @@
       if (!document.getElementById('job-trilho')) criarTrilho();
     });
     obs.observe(document.body, { childList: true, subtree: false });
+    // Transcrição colada no áudio. Best-effort: se qualquer coisa aqui falhar, o
+    // resto da extensão continua funcionando — transcrição é ganho, não requisito.
+    try { trIniciar(); } catch (e) { console.warn('[JOB] transcrição não iniciou:', e); }
     verificarVersaoExtensao();
     // Reverifica sozinho a cada 20min, SEMPRE — antes só reagendava quando
     // achava atualização, então uma aba aberta por horas sem update na hora
