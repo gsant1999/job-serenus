@@ -1061,6 +1061,34 @@ def init_db():
                 criado_em TEXT,
                 PRIMARY KEY (lead_id, etiqueta_id)
             )""",
+            # CAMPOS PERSONALIZADOS: a definição é dado, não código — o admin cria
+            # e edita em /crm/campos sem deploy. Chave-valor em vez de uma coluna
+            # por campo porque cada campo novo viraria um ALTER TABLE em produção.
+            """CREATE TABLE IF NOT EXISTS crm_campos (
+                id SERIAL PRIMARY KEY,
+                chave TEXT UNIQUE NOT NULL,
+                nome TEXT NOT NULL,
+                tipo TEXT DEFAULT 'texto',
+                momento TEXT DEFAULT 'conversa',
+                fonte TEXT DEFAULT 'consultor',
+                opcoes_json TEXT,
+                mapa_extras TEXT,
+                obriga_saida_de TEXT,
+                dica TEXT,
+                ordem INTEGER DEFAULT 0,
+                ativo INTEGER DEFAULT 1
+            )""",
+            # fonte no VALOR (não só na definição): saber que a data de abertura
+            # veio da API e não do consultor é o que permite reconsultar sem
+            # sobrescrever o que uma pessoa corrigiu na mão.
+            """CREATE TABLE IF NOT EXISTS crm_lead_campos (
+                lead_id INTEGER NOT NULL,
+                campo_id INTEGER NOT NULL,
+                valor TEXT,
+                fonte TEXT,
+                atualizado_em TEXT,
+                PRIMARY KEY (lead_id, campo_id)
+            )""",
             """CREATE TABLE IF NOT EXISTS cotacao_tabela (
                 id SERIAL PRIMARY KEY,
                 operadora TEXT NOT NULL, plano TEXT NOT NULL,
@@ -1673,6 +1701,28 @@ def init_db():
             etiqueta_id INTEGER NOT NULL,
             criado_em TEXT,
             PRIMARY KEY (lead_id, etiqueta_id)
+        );
+        CREATE TABLE IF NOT EXISTS crm_campos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chave TEXT UNIQUE NOT NULL,
+            nome TEXT NOT NULL,
+            tipo TEXT DEFAULT 'texto',
+            momento TEXT DEFAULT 'conversa',
+            fonte TEXT DEFAULT 'consultor',
+            opcoes_json TEXT,
+            mapa_extras TEXT,
+            obriga_saida_de TEXT,
+            dica TEXT,
+            ordem INTEGER DEFAULT 0,
+            ativo INTEGER DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS crm_lead_campos (
+            lead_id INTEGER NOT NULL,
+            campo_id INTEGER NOT NULL,
+            valor TEXT,
+            fonte TEXT,
+            atualizado_em TEXT,
+            PRIMARY KEY (lead_id, campo_id)
         );
         CREATE TABLE IF NOT EXISTS operadoras (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2414,6 +2464,120 @@ def init_db():
                 except Exception: pass
             print(f"[ETIQ_SPLIT] migração pulada: {e}")
 
+    # ─── CAMPOS PERSONALIZADOS: catálogo inicial (29/07/2026) ─────────────────
+    # `momento` diz QUANDO o campo é preenchido, e é o que organiza a ficha:
+    #   automatico = já chega preenchido (mídia paga / formulário), ninguém digita
+    #   conversa   = o consultor descobre ao longo do atendimento, não na 1a msg
+    #   proposta   = só existe na hora de preencher a proposta
+    # `fonte` diz DE ONDE vem o valor — 'utm' e 'api_cnpj' são preenchidos por
+    # código, não por pessoa, e por isso não podem ser sobrescritos às cegas.
+    # `mapa_extras` é o caminho dentro de crm_leads.dados_extras: a ingestão de
+    # leads JÁ grava utm_source/campaign/content e gclid lá desde sempre, então
+    # "converteu em qual criativo" não precisa de coleta nova — precisa ser lido.
+    # `opcoes_json` aceita o marcador '@operadoras': a lista sai do cadastro de
+    # operadoras em tempo de tela, então cadastrar uma operadora nova já a faz
+    # aparecer aqui, sem ninguém manter duas listas.
+    CIDADES_RMC = ['Campinas', 'Hortolândia', 'Sumaré', 'Americana', 'Indaiatuba',
+                   'Valinhos', 'Vinhedo', 'Paulínia', 'Santa Bárbara d\'Oeste',
+                   'Nova Odessa', 'Monte Mor', 'Itatiba', 'Jaguariúna',
+                   'Artur Nogueira', 'Cosmópolis', 'Engenheiro Coelho',
+                   'Holambra', 'Pedreira', 'Santo Antônio de Posse', 'Morungaba']
+    CAMPOS_PADRAO = [
+        # chave, nome, tipo, momento, fonte, opcoes, mapa_extras, dica
+        ('origem_midia', 'Origem', 'texto', 'automatico', 'utm', None, 'utm.source',
+         'De onde o lead veio (Google, Instagram, Facebook, indicação, disparo)'),
+        ('campanha', 'Campanha', 'texto', 'automatico', 'utm', None, 'utm.campaign',
+         'Nome da campanha que trouxe o lead'),
+        ('criativo', 'Converteu em qual criativo', 'texto', 'automatico', 'utm', None, 'utm.content',
+         'Anúncio/criativo que gerou o clique — é o utm_content'),
+        ('tipo_plano', 'Tipo de plano', 'select', 'automatico', 'formulario',
+         '["Individual","Familiar","Empresarial","Adesão"]', None, None),
+        ('tipo_contratacao', 'Tipo de contratação', 'select', 'automatico', 'formulario',
+         '["CNPJ","MEI","PF","Adesão"]', None, None),
+        ('cnpj', 'CNPJ', 'texto', 'conversa', 'consultor', None, None,
+         'Preenchendo aqui, a data de abertura vem sozinha pela API'),
+        ('cnpj_data_abertura', 'Data de abertura do CNPJ', 'data', 'conversa', 'api_cnpj', None, None,
+         'Puxado por API na consulta de CNPJ — dispara o gatilho dos 6 meses'),
+        ('tem_plano_hoje', 'Tem plano hoje', 'booleano', 'conversa', 'consultor', None, None, None),
+        ('plano_atual', 'Plano atual', 'select', 'conversa', 'consultor', '@operadoras', None, None),
+        ('valor_pago_hoje', 'Valor pago hoje', 'moeda', 'conversa', 'consultor', None, None,
+         'Mensalidade que ele paga hoje — é o número que escreve a campanha de economia'),
+        ('mes_reajuste', 'Mês de reajuste do plano atual', 'mes', 'conversa', 'consultor', None, None,
+         'Está no boleto ou na carteirinha. Melhor gatilho de nutrição que existe'),
+        ('composicao_familiar', 'Composição familiar', 'multiselect', 'conversa', 'consultor',
+         '["Cônjuge","Filhos","Pais","Sócio"]', None, None),
+        ('numero_vidas', 'Número de vidas', 'numero', 'conversa', 'consultor', None, None, None),
+        ('hospital_preferencia', 'Hospital de preferência', 'texto', 'conversa', 'consultor', None, None,
+         'A pergunta que fecha venda — hoje ela morre no histórico do WhatsApp'),
+        ('operadora_cotada', 'Operadora cotada', 'select', 'conversa', 'consultor', '@operadoras', None, None),
+        ('cidade_rmc', 'Cidade RMC', 'select', 'conversa', 'consultor', json.dumps(CIDADES_RMC), None, None),
+        ('qualificacao_notas', 'Notas da qualificação', 'texto_longo', 'conversa', 'consultor', None, None, None),
+        ('data_nascimento_titular', 'Data de nascimento do titular', 'data', 'proposta', 'proposta', None, None,
+         'Guarde a DATA, não a idade: assim a faixa etária se recalcula sozinha'),
+        # Legado: os leads antigos têm idade digitada. Fica visível pra não perder
+        # o dado, mas a dica manda usar a data de nascimento daqui pra frente.
+        ('idade_informada', 'Idade informada (legado)', 'texto', 'conversa', 'consultor', None, None,
+         'Campo antigo. Preencha a Data de nascimento do titular, que não envelhece errado'),
+    ]
+    # De onde cada campo novo herda o dado já digitado nos leads. Sem isso os 600+
+    # leads existentes ficariam com a ficha nova em branco e o consultor teria dois
+    # lugares pra mesma informação — que é como um CRM começa a mentir.
+    HERANCA_QUAL = [
+        ('qual_tipo_plano', 'tipo_plano'),
+        ('qual_tipo_contratacao', 'tipo_contratacao'),
+        ('qual_cidade', 'cidade_rmc'),
+        ('qual_cnpj', 'cnpj'),
+        ('qual_plano_atual', 'plano_atual'),
+        ('qual_operadora_interesse', 'operadora_cotada'),
+        ('qual_estagio2', 'qualificacao_notas'),
+        ('qual_idade', 'idade_informada'),
+    ]
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        ja_campos = conn.execute("SELECT 1 FROM meta_flags WHERE k='campos_personalizados_20260729'").fetchone()
+    except Exception:
+        ja_campos = True
+    if not ja_campos:
+        try:
+            for i, (chave, nome, tipo, momento, fonte, opcoes, mapa, dica) in enumerate(CAMPOS_PADRAO, start=1):
+                ja = conn.execute("SELECT id FROM crm_campos WHERE chave=?", (chave,)).fetchone()
+                if ja:
+                    continue
+                conn.execute("""INSERT INTO crm_campos
+                    (chave,nome,tipo,momento,fonte,opcoes_json,mapa_extras,dica,ordem)
+                    VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (chave, nome, tipo, momento, fonte, opcoes, mapa, dica, i))
+            # Herda o que já estava nas colunas qual_*
+            herdados = 0
+            for coluna, chave in HERANCA_QUAL:
+                cid = conn.execute("SELECT id FROM crm_campos WHERE chave=?", (chave,)).fetchone()
+                if not cid:
+                    continue
+                try:
+                    rows = conn.execute(
+                        f"SELECT id, {coluna} v FROM crm_leads WHERE {coluna} IS NOT NULL AND {coluna} <> ''"
+                    ).fetchall()
+                except Exception:
+                    continue
+                for r in rows:
+                    if is_pg:
+                        conn.execute("""INSERT INTO crm_lead_campos (lead_id,campo_id,valor,fonte,atualizado_em)
+                            VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+                            (r['id'], cid['id'], str(r['v']).strip(), 'migracao', _agora_sp()))
+                    else:
+                        conn.execute("""INSERT OR IGNORE INTO crm_lead_campos (lead_id,campo_id,valor,fonte,atualizado_em)
+                            VALUES (?,?,?,?,?)""",
+                            (r['id'], cid['id'], str(r['v']).strip(), 'migracao', _agora_sp()))
+                    herdados += 1
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('campos_personalizados_20260729')")
+            conn.commit()
+            print(f"[CAMPOS] catálogo criado; {herdados} valor(es) herdado(s) das colunas qual_*")
+        except Exception as e:
+            if is_pg:
+                try: conn.rollback()
+                except Exception: pass
+            print(f"[CAMPOS] migração pulada: {e}")
+
     if not is_pg:
         conn.commit()
 
@@ -2421,6 +2585,8 @@ def init_db():
     indices = [
         "CREATE INDEX IF NOT EXISTS idx_propostas_usuario ON propostas(usuario_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_etq_lead ON crm_lead_etiquetas(lead_id)",
+        "CREATE INDEX IF NOT EXISTS idx_lead_campo_lead ON crm_lead_campos(lead_id)",
+        "CREATE INDEX IF NOT EXISTS idx_lead_campo_campo ON crm_lead_campos(campo_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_etq_etq ON crm_lead_etiquetas(etiqueta_id)",
         "CREATE INDEX IF NOT EXISTS idx_propostas_status ON propostas(status)",
         "CREATE INDEX IF NOT EXISTS idx_propostas_criado ON propostas(criado_em)",
@@ -15298,6 +15464,8 @@ def crm_lead_detalhe(lid):
         FROM fluxo_inscricoes fi JOIN fluxos f ON f.id = fi.fluxo_id
         WHERE fi.lead_id=? AND fi.status='ativo' ORDER BY fi.id DESC
     """, (lid,)).fetchall()]
+    campos_def = carregar_campos_crm(conn)
+    campos_val = valores_campos_lead(conn, lead, campos_def)
     etiquetas_todas = carregar_etiquetas_crm(conn)
     _do_lead = _etiquetas_dos_leads(conn, [lid]).get(lid, [])
     etiquetas_marcadas = [e['id'] for e in _do_lead]
@@ -15312,6 +15480,8 @@ def crm_lead_detalhe(lid):
         "fluxos_disponiveis": fluxos_disponiveis,
         "fluxos_ativos": fluxos_ativos,
         "playbook": _playbook_do_lead(lead, nomes_marcados),
+        "campos_def": campos_def,
+        "campos_val": campos_val,
         "etiquetas_todas": etiquetas_todas,
         "etiquetas_marcadas": etiquetas_marcadas,
         "sub_status_etapa": sub_status_desta_etapa
@@ -15405,6 +15575,139 @@ def _sub_status_por_etapa(conn=None):
         por_etapa.setdefault(e['id'], [])
         por_etapa[e['id']] = por_etapa[e['id']] + [g for g in globais if g not in por_etapa[e['id']]]
     return por_etapa
+
+
+# Tipos de campo que a ficha sabe renderizar, e os momentos que organizam a tela.
+# 'automatico' não é opção pro admin criar à mão: campo automático precisa de um
+# mapa_extras ou de código que o preencha, então nasce só pelo catálogo padrão.
+_CAMPO_TIPOS = ['texto', 'texto_longo', 'numero', 'moeda', 'data', 'mes',
+                'select', 'multiselect', 'booleano']
+_CAMPO_MOMENTOS = ['automatico', 'conversa', 'proposta']
+_CAMPO_MOMENTO_ROTULO = {
+    'automatico': 'Chega preenchido',
+    'conversa': 'Ao longo da conversa',
+    'proposta': 'No preenchimento da proposta',
+}
+
+
+def carregar_campos_crm(conn=None, momento=None):
+    """Definição dos campos personalizados. `opcoes` já vem resolvido: o marcador
+    '@operadoras' é trocado pelo cadastro real de operadoras, então ninguém
+    mantém duas listas — cadastrar operadora nova já a oferece no CRM."""
+    fechar = False
+    if conn is None:
+        conn = db(); fechar = True
+    try:
+        q = "SELECT * FROM crm_campos WHERE ativo=1"
+        p = []
+        if momento:
+            q += " AND momento=?"
+            p.append(momento)
+        rows = conn.execute(q + " ORDER BY ordem, id", p).fetchall()
+        operadoras = None
+        out = []
+        for r in rows:
+            bruto = r['opcoes_json'] or ''
+            if bruto.strip() == '@operadoras':
+                if operadoras is None:
+                    try:
+                        operadoras = [x['operadora'] for x in conn.execute(
+                            "SELECT DISTINCT operadora FROM operadoras WHERE operadora IS NOT NULL AND operadora <> '' ORDER BY operadora").fetchall()]
+                    except Exception:
+                        operadoras = []
+                opcoes = operadoras
+            elif bruto:
+                try:
+                    opcoes = json.loads(bruto)
+                except Exception:
+                    opcoes = []
+            else:
+                opcoes = []
+            out.append({'id': r['id'], 'chave': r['chave'], 'nome': r['nome'],
+                        'tipo': r['tipo'] or 'texto', 'momento': r['momento'] or 'conversa',
+                        'fonte': r['fonte'] or 'consultor', 'opcoes': opcoes,
+                        'mapa_extras': r['mapa_extras'] or '',
+                        'obriga_saida_de': r['obriga_saida_de'] or '',
+                        'dica': r['dica'] or '', 'ordem': r['ordem']})
+    except Exception:
+        out = []
+    finally:
+        if fechar:
+            close_db(conn)
+    return out
+
+
+def _ler_do_extras(extras, caminho):
+    """Lê 'utm.content' dentro do JSON de dados_extras. A ingestão de leads grava
+    utm_source/medium/campaign/term/content e os ids de clique lá desde sempre —
+    é dado que já existe e nunca foi mostrado pra ninguém."""
+    if not extras or not caminho:
+        return ''
+    try:
+        d = json.loads(extras) if isinstance(extras, str) else extras
+    except Exception:
+        return ''
+    for parte in caminho.split('.'):
+        if not isinstance(d, dict):
+            return ''
+        d = d.get(parte)
+        if d is None:
+            return ''
+    return str(d).strip() if not isinstance(d, (dict, list)) else ''
+
+
+def valores_campos_lead(conn, lead, campos=None):
+    """{chave: {'valor':..., 'fonte':...}} pro lead, já com os automáticos
+    resolvidos. Campo de fonte 'utm' NÃO é gravado no banco: ele é derivado do
+    dados_extras na hora de mostrar, senão o mesmo dado passaria a existir em dois
+    lugares e um deles ficaria velho."""
+    if campos is None:
+        campos = carregar_campos_crm(conn)
+    lid = lead['id'] if hasattr(lead, 'keys') else lead
+    salvos = {}
+    try:
+        for r in conn.execute("""SELECT c.chave, lc.valor, lc.fonte FROM crm_lead_campos lc
+                                 JOIN crm_campos c ON c.id = lc.campo_id
+                                 WHERE lc.lead_id=?""", (lid,)).fetchall():
+            salvos[r['chave']] = {'valor': r['valor'] or '', 'fonte': r['fonte'] or ''}
+    except Exception:
+        pass
+    extras = None
+    if hasattr(lead, 'keys') and 'dados_extras' in lead.keys():
+        extras = lead['dados_extras']
+    out = {}
+    for c in campos:
+        if c['mapa_extras'] and not (salvos.get(c['chave'], {}).get('valor')):
+            v = _ler_do_extras(extras, c['mapa_extras'])
+            # Fallback do campo Origem: nem todo lead vem com utm_source (indicação,
+            # entrada manual), mas todos têm crm_leads.origem preenchido.
+            if not v and c['chave'] == 'origem_midia' and hasattr(lead, 'keys'):
+                v = (lead['origem'] or '') if 'origem' in lead.keys() else ''
+            out[c['chave']] = {'valor': v, 'fonte': 'automatico' if v else ''}
+        else:
+            out[c['chave']] = salvos.get(c['chave'], {'valor': '', 'fonte': ''})
+    return out
+
+
+def gravar_campo_lead(conn, lid, chave, valor, fonte='consultor', so_se_vazio=False):
+    """Grava um campo pelo nome da chave. `so_se_vazio` é o que deixa a API
+    reconsultar sem atropelar correção feita à mão: a API só preenche o que está
+    em branco. Retorna True se gravou."""
+    c = conn.execute("SELECT id FROM crm_campos WHERE chave=? AND ativo=1", (chave,)).fetchone()
+    if not c:
+        return False
+    atual = conn.execute("SELECT valor FROM crm_lead_campos WHERE lead_id=? AND campo_id=?",
+                         (lid, c['id'])).fetchone()
+    if so_se_vazio and atual and (atual['valor'] or '').strip():
+        return False
+    valor = ('' if valor is None else str(valor)).strip()
+    if atual:
+        conn.execute("""UPDATE crm_lead_campos SET valor=?, fonte=?, atualizado_em=?
+                        WHERE lead_id=? AND campo_id=?""", (valor, fonte, _agora_sp(), lid, c['id']))
+    else:
+        conn.execute("""INSERT INTO crm_lead_campos (lead_id,campo_id,valor,fonte,atualizado_em)
+                        VALUES (?,?,?,?,?)""", (lid, c['id'], valor, fonte, _agora_sp()))
+    return True
 
 
 def carregar_etiquetas_crm(conn=None):
@@ -18356,9 +18659,12 @@ def crm_etapas_gerenciar():
     etapas = carregar_etapas_crm(conn)
     status_opcoes = carregar_status_crm(conn)
     etiquetas = carregar_etiquetas_crm(conn)
+    campos = carregar_campos_crm(conn)
     close_db(conn)
     return render_template('crm_etapas.html', etapas=etapas, status_opcoes=status_opcoes,
-                           etiquetas=etiquetas, sla_padrao=_SLA_PADRAO_DIAS)
+                           etiquetas=etiquetas, sla_padrao=_SLA_PADRAO_DIAS,
+                           campos=campos, campo_tipos=_CAMPO_TIPOS,
+                           campo_momentos=_CAMPO_MOMENTOS, momento_rotulo=_CAMPO_MOMENTO_ROTULO)
 
 
 @app.route('/crm/status/nova', methods=['POST'])
@@ -18415,6 +18721,164 @@ def crm_status_excluir(sid):
         close_db(conn); return jsonify({"ok": False, "erro": "Status não encontrado"}), 404
     conn.execute("UPDATE crm_leads SET sub_status=NULL WHERE sub_status=?", (st['nome'],))
     conn.execute("DELETE FROM crm_status_opcoes WHERE id=?", (sid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+# ─── CAMPOS PERSONALIZADOS ────────────────────────────────────────────────────
+@app.route('/crm/lead/<int:lid>/campos', methods=['POST'])
+@login_required
+def crm_lead_campos_salvar(lid):
+    """Salva os campos personalizados do lead. Campo de fonte 'utm' é ignorado:
+    ele é derivado do dados_extras e gravar por cima criaria uma segunda versão
+    do mesmo dado, que envelhece diferente da primeira."""
+    d = (request.json or {}).get('campos') or {}
+    if not isinstance(d, dict):
+        return jsonify({"ok": False, "erro": "Formato inválido"}), 400
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    campos = {c['chave']: c for c in carregar_campos_crm(conn)}
+    antes = valores_campos_lead(conn, lead)
+    mudou = []
+    for chave, valor in d.items():
+        c = campos.get(chave)
+        if not c or c['fonte'] == 'utm':
+            continue
+        if isinstance(valor, list):
+            valor = ', '.join([str(v) for v in valor if str(v).strip()])
+        novo = ('' if valor is None else str(valor)).strip()
+        if novo == (antes.get(chave, {}).get('valor') or ''):
+            continue
+        gravar_campo_lead(conn, lid, chave, novo, fonte=f"consultor:{session.get('user_id')}")
+        mudou.append(c['nome'])
+    if mudou:
+        conn.execute("UPDATE crm_leads SET atualizado_em=? WHERE id=?", (_agora_sp(), lid))
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                     (lid, session.get('nome'), 'edicao', 'Qualificação: ' + ', '.join(mudou), _agora_sp()))
+    # A data de abertura do CNPJ é gatilho de campanha (6 meses de empresa), então
+    # vale tentar puxar na hora em que o CNPJ é informado, sem pedir de novo.
+    puxou_cnpj = None
+    if 'cnpj' in d and (d.get('cnpj') or '').strip():
+        puxou_cnpj = _preencher_campos_por_cnpj(conn, lid, d.get('cnpj'))
+    conn.commit()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    vals = valores_campos_lead(conn, lead)
+    close_db(conn)
+    return jsonify({"ok": True, "campos_val": vals, "cnpj": puxou_cnpj, "mudou": mudou})
+
+
+def _preencher_campos_por_cnpj(conn, lid, cnpj):
+    """Ponte com a consulta de CNPJ que já existe (BrasilAPI, com cache de 30 dias):
+    o consultor digita o CNPJ e a data de abertura + razão social chegam sozinhas.
+    Só preenche o que está VAZIO — se alguém corrigiu na mão, a API não atropela."""
+    try:
+        dados = _consultar_cnpj(cnpj)
+    except Exception as e:
+        app.logger.warning(f"[CAMPOS/CNPJ] consulta falhou (lead {lid}): {e}")
+        return None
+    if not dados:
+        return None
+    # A chave é data_abertura e já vem em dd/mm/aaaa — _consultar_cnpj normaliza
+    # as duas APIs (BrasilAPI e ReceitaWS) pro mesmo formato.
+    abertura = (dados.get('data_abertura') or '').strip()
+    if abertura:
+        gravar_campo_lead(conn, lid, 'cnpj_data_abertura', abertura, fonte='api_cnpj', so_se_vazio=True)
+    return {'nome': dados.get('nome') or '', 'abertura': abertura,
+            'eh_mei': bool(dados.get('eh_mei'))}
+
+
+@app.route('/crm/campos/novo', methods=['POST'])
+@login_required
+@admin_required
+def crm_campo_novo():
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    tipo = (d.get('tipo') or 'texto').strip()
+    momento = (d.get('momento') or 'conversa').strip()
+    if not nome:
+        return jsonify({"ok": False, "erro": "Nome obrigatório"}), 400
+    if tipo not in _CAMPO_TIPOS:
+        return jsonify({"ok": False, "erro": "Tipo inválido"}), 400
+    if momento not in _CAMPO_MOMENTOS:
+        return jsonify({"ok": False, "erro": "Momento inválido"}), 400
+    # A chave é gerada do nome e nunca muda depois: é ela que os disparos e os
+    # filtros usam, então renomear o campo não pode quebrar quem já aponta pra ele.
+    base = re.sub(r'[^a-z0-9]+', '_', _slugify(nome)).strip('_') or 'campo'
+    conn = db()
+    chave, n = base, 1
+    while conn.execute("SELECT 1 FROM crm_campos WHERE chave=?", (chave,)).fetchone():
+        n += 1; chave = f"{base}_{n}"
+    opcoes = d.get('opcoes')
+    opcoes_json = None
+    if tipo in ('select', 'multiselect'):
+        lista = [str(o).strip() for o in (opcoes or []) if str(o).strip()] if isinstance(opcoes, list) \
+                else [x.strip() for x in str(opcoes or '').split(',') if x.strip()]
+        if not lista:
+            close_db(conn); return jsonify({"ok": False, "erro": "Campo de lista precisa de opções"}), 400
+        opcoes_json = json.dumps(lista, ensure_ascii=False)
+    maxord = conn.execute("SELECT COALESCE(MAX(ordem),0) m FROM crm_campos").fetchone()['m']
+    conn.execute("""INSERT INTO crm_campos (chave,nome,tipo,momento,fonte,opcoes_json,dica,ordem)
+                    VALUES (?,?,?,?,?,?,?,?)""",
+                 (chave, nome, tipo, momento, 'consultor', opcoes_json,
+                  (d.get('dica') or '').strip() or None, maxord + 1))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "chave": chave})
+
+
+@app.route('/crm/campos/<int:cid>/editar', methods=['POST'])
+@login_required
+@admin_required
+def crm_campo_editar(cid):
+    d = request.json or {}
+    conn = db()
+    c = conn.execute("SELECT * FROM crm_campos WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn); return jsonify({"ok": False, "erro": "Campo não encontrado"}), 404
+    nome = (d.get('nome') or '').strip() or c['nome']
+    momento = (d.get('momento') or '').strip() or c['momento']
+    if momento not in _CAMPO_MOMENTOS:
+        close_db(conn); return jsonify({"ok": False, "erro": "Momento inválido"}), 400
+    dica = d.get('dica', c['dica'])
+    conn.execute("UPDATE crm_campos SET nome=?, momento=?, dica=? WHERE id=?",
+                 (nome, momento, (dica or '').strip() or None, cid))
+    if 'opcoes' in d and (c['tipo'] in ('select', 'multiselect')) and (c['opcoes_json'] or '').strip() != '@operadoras':
+        lista = [str(o).strip() for o in d['opcoes'] if str(o).strip()] if isinstance(d['opcoes'], list) \
+                else [x.strip() for x in str(d['opcoes'] or '').split(',') if x.strip()]
+        if lista:
+            conn.execute("UPDATE crm_campos SET opcoes_json=? WHERE id=?",
+                         (json.dumps(lista, ensure_ascii=False), cid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/campos/<int:cid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_campo_excluir(cid):
+    """Desativa, não deleta: os valores já preenchidos nos leads continuam no
+    banco, então reativar o campo devolve o histórico inteiro."""
+    conn = db()
+    if not conn.execute("SELECT 1 FROM crm_campos WHERE id=?", (cid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Campo não encontrado"}), 404
+    conn.execute("UPDATE crm_campos SET ativo=0 WHERE id=?", (cid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/campos/reordenar', methods=['POST'])
+@login_required
+@admin_required
+def crm_campos_reordenar():
+    ordem = (request.json or {}).get('ordem', [])
+    if not isinstance(ordem, list) or not ordem:
+        return jsonify({"ok": False, "erro": "Ordem inválida"}), 400
+    conn = db()
+    for i, cid in enumerate(ordem, start=1):
+        conn.execute("UPDATE crm_campos SET ordem=? WHERE id=?", (i, cid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 

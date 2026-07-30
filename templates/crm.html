@@ -62,6 +62,34 @@
   .lead-esfriando-tag { font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:8px; white-space:nowrap; }
   .card-esfriando .lead-esfriando-tag { background:rgba(250,204,21,.22); color:#eab308; }
   .card-frio .lead-esfriando-tag { background:rgba(244,63,94,.22); color:#f43f5e; }
+  .cp-bloco { margin:16px 0 4px; }
+  .cp-bloco-tit { display:flex; align-items:center; gap:7px; font-size:10px; font-weight:700;
+                  text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2);
+                  padding-bottom:7px; border-bottom:1px solid var(--borda); margin-bottom:11px; }
+  .cp-bloco-tit .pino { font-size:9px; font-weight:700; padding:2px 7px; border-radius:8px; letter-spacing:.3px; }
+  .cp-auto .pino { background:rgba(34,211,238,.15); color:#67e8f9; }
+  .cp-conversa .pino { background:rgba(168,85,247,.15); color:#d8b4fe; }
+  .cp-proposta .pino { background:rgba(250,204,21,.13); color:#facc15; }
+  .cp-campo { margin-bottom:11px; }
+  .cp-label { font-size:10px; font-weight:600; color:var(--cinza); text-transform:uppercase;
+              letter-spacing:.5px; margin-bottom:3px; }
+  .cp-dica { font-size:10.5px; color:var(--cinza-2); margin-bottom:4px; line-height:1.4; }
+  /* Campo automático é leitura: mostrar como input editável convidaria a digitar
+     por cima de um dado que o sistema regrava no próximo import. */
+  .cp-lido { font-size:12.5px; color:var(--texto); background:var(--panel-3); border:1px solid var(--borda);
+             border-radius:8px; padding:8px 10px; user-select:text; word-break:break-word; }
+  .cp-lido.vazio { color:var(--cinza-2); font-style:italic; }
+  .cp-fonte { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.3px;
+              color:var(--cinza-2); margin-left:6px; }
+  .cp-multi { display:flex; flex-wrap:wrap; gap:6px; }
+  .cp-multi label { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; color:var(--texto);
+                    background:var(--panel-2); border:1px solid var(--borda); border-radius:11px;
+                    padding:4px 10px; cursor:pointer; }
+  .cp-salvar { display:flex; align-items:center; gap:9px; margin:6px 0 2px; }
+  .cp-salvar button { background:var(--azul); color:#fff; border:none; border-radius:8px; padding:8px 16px;
+                      font-size:12px; font-weight:600; cursor:pointer; }
+  .cp-salvar button:disabled { opacity:.6; cursor:default; }
+  .cp-salvar .aviso { font-size:11px; color:var(--cinza-2); }
   .ficha-etqs { display:flex; flex-wrap:wrap; gap:6px; }
   .ficha-etq { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:12px; cursor:pointer;
                font-size:11px; font-weight:600; border:1px solid var(--borda); background:var(--panel-2);
@@ -488,6 +516,7 @@
           <div class="campo-dica">Por que o lead está parado</div>
           <div id="ficha-etiquetas" class="ficha-etqs"></div>
         </div>
+        <div id="ficha-campos"></div>
         <div class="campo-grupo" id="campo-playbook" style="display:none">
           <div class="campo-label">Sugestão de mensagem <span id="playbook-origem" class="pb-origem"></span></div>
           <div id="ficha-playbook"></div>
@@ -930,6 +959,7 @@ async function abrirFicha(id){
   badge.style.color=eo?eo.cor:'#aaa';
 
   montarSubStatusFicha(d.sub_status_etapa||[], d.lead.sub_status||'');
+  montarCampos(d.campos_def||[], d.campos_val||{});
   montarEtiquetasFicha(d.etiquetas_todas||[], d.etiquetas_marcadas||[]);
   montarPlaybook(d.playbook);
 
@@ -1215,6 +1245,104 @@ async function mudarSubStatus(id, sel){
     if(tag) tag.remove();
   }
   toast(valor?('Sub-status: '+valor):'Sub-status limpo','ok');
+}
+
+// ─── FICHA: campos personalizados ─────────────────────────────────────────────
+const CP_ROTULO = {automatico:'Chega preenchido', conversa:'Ao longo da conversa',
+                   proposta:'No preenchimento da proposta'};
+let _cpDef = [], _cpVal = {};
+
+function _esc(v){
+  return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function montarCampos(def, val){
+  _cpDef = def||[]; _cpVal = val||{};
+  const box=document.getElementById('ficha-campos');
+  if(!box) return;
+  if(!_cpDef.length){ box.innerHTML=''; return; }
+  let html='';
+  ['automatico','conversa','proposta'].forEach(m=>{
+    const doGrupo=_cpDef.filter(c=>c.momento===m);
+    if(!doGrupo.length) return;
+    const cls = m==='automatico'?'cp-auto':(m==='proposta'?'cp-proposta':'cp-conversa');
+    html+='<div class="cp-bloco '+cls+'">'
+      +'<div class="cp-bloco-tit"><span class="pino">'+CP_ROTULO[m]+'</span></div>'
+      +doGrupo.map(c=>_cpCampoHtml(c)).join('')
+      +'</div>';
+  });
+  html+='<div class="cp-salvar"><button id="cp-btn" onclick="salvarCampos()">Salvar qualificação</button>'
+    +'<span class="aviso" id="cp-aviso"></span></div>';
+  box.innerHTML=html;
+}
+
+function _cpCampoHtml(c){
+  const v=(_cpVal[c.chave]||{}).valor||'', fonte=(_cpVal[c.chave]||{}).fonte||'';
+  let corpo;
+  // Automático e vindo de API são leitura: quem escreve é o import / a consulta.
+  if(c.momento==='automatico' || c.fonte==='utm'){
+    corpo='<div class="cp-lido'+(v?'':' vazio')+'">'+(v?_esc(v):'— ainda não chegou')+'</div>';
+  }else if(c.tipo==='select'){
+    corpo='<select class="campo-input campo-select" data-chave="'+c.chave+'">'
+      +'<option value="">—</option>'
+      +(c.opcoes||[]).map(o=>'<option value="'+_esc(o)+'"'+(o===v?' selected':'')+'>'+_esc(o)+'</option>').join('')
+      // Valor gravado que saiu da lista (operadora desativada, cidade digitada
+      // antes): mantém visível, senão salvar de novo apagaria silenciosamente.
+      +((v && (c.opcoes||[]).indexOf(v)===-1)?'<option value="'+_esc(v)+'" selected>'+_esc(v)+' (fora da lista)</option>':'')
+      +'</select>';
+  }else if(c.tipo==='multiselect'){
+    const marc=v.split(',').map(x=>x.trim()).filter(Boolean);
+    corpo='<div class="cp-multi" data-chave="'+c.chave+'" data-multi="1">'
+      +(c.opcoes||[]).map(o=>'<label><input type="checkbox" value="'+_esc(o)+'"'
+        +(marc.indexOf(o)>-1?' checked':'')+'>'+_esc(o)+'</label>').join('')+'</div>';
+  }else if(c.tipo==='booleano'){
+    corpo='<select class="campo-input campo-select" data-chave="'+c.chave+'">'
+      +'<option value="">—</option>'
+      +'<option value="Sim"'+(v==='Sim'?' selected':'')+'>Sim</option>'
+      +'<option value="Não"'+(v==='Não'?' selected':'')+'>Não</option></select>';
+  }else if(c.tipo==='texto_longo'){
+    corpo='<textarea class="campo-input" rows="3" data-chave="'+c.chave+'">'+_esc(v)+'</textarea>';
+  }else{
+    const t = c.tipo==='data'?'date' : (c.tipo==='mes'?'month' : (c.tipo==='numero'?'number':'text'));
+    const ph = c.tipo==='moeda'?' placeholder="0,00" inputmode="decimal"' : '';
+    corpo='<input type="'+t+'" class="campo-input" data-chave="'+c.chave+'" value="'+_esc(v)+'"'+ph+'>';
+  }
+  return '<div class="cp-campo"><div class="cp-label">'+_esc(c.nome)
+    +(fonte==='api_cnpj'?'<span class="cp-fonte">via API</span>':'')
+    +(fonte==='migracao'?'<span class="cp-fonte">importado</span>':'')
+    +'</div>'
+    +(c.dica?'<div class="cp-dica">'+_esc(c.dica)+'</div>':'')
+    +corpo+'</div>';
+}
+
+async function salvarCampos(){
+  if(!_leadAtual) return;
+  const btn=document.getElementById('cp-btn'), aviso=document.getElementById('cp-aviso');
+  const box=document.getElementById('ficha-campos');
+  const payload={};
+  box.querySelectorAll('[data-chave]').forEach(el=>{
+    if(el.dataset.multi){
+      payload[el.dataset.chave]=Array.from(el.querySelectorAll('input:checked')).map(i=>i.value);
+    }else{
+      payload[el.dataset.chave]=el.value;
+    }
+  });
+  btn.disabled=true; aviso.textContent='Salvando...';
+  try{
+    const r=await fetch('/crm/lead/'+_leadAtual.id+'/campos',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({campos:payload})});
+    const d=await r.json();
+    if(!d.ok){ aviso.textContent=''; toast(d.erro||'Erro ao salvar','err'); return; }
+    montarCampos(_cpDef, d.campos_val||{});
+    aviso.textContent='';
+    if(d.cnpj && d.cnpj.abertura) toast('CNPJ consultado: abertura em '+d.cnpj.abertura,'ok');
+    else toast(d.mudou&&d.mudou.length?('Salvo: '+d.mudou.join(', ')):'Nada mudou','ok');
+  }catch(e){
+    aviso.textContent=''; toast('Falha de conexão ao salvar','err');
+  }finally{
+    btn.disabled=false;
+  }
 }
 
 // ─── FICHA: sub-status, etiquetas e sugestão de mensagem ──────────────────────

@@ -160,6 +160,52 @@
     </div>
     <div class="ge-nota">Arquivar não apaga o histórico: quem já foi classificado continua vinculado, e reativando a etiqueta os leads voltam marcados.</div>
   </div>
+
+  <div class="ge-sec">
+    <div class="ge-sec-tit">Campos personalizados</div>
+    <div class="ge-sec-sub">O que o CRM sabe sobre o lead além de nome e telefone. O <strong>momento</strong> organiza a ficha: <em>chega preenchido</em> vem da mídia paga e do formulário (ninguém digita), <em>ao longo da conversa</em> é o que o consultor descobre atendendo, e <em>no preenchimento da proposta</em> só existe na hora de emitir.</div>
+    {% for m in campo_momentos %}
+    {% set doGrupo = campos|selectattr('momento','equalto',m)|list %}
+    {% if doGrupo %}
+    <div class="ge-grupo">
+      <div class="ge-grupo-tit">{{ momento_rotulo[m] }}</div>
+      {% for c in doGrupo %}
+      <div class="ge-item" data-id="{{ c.id }}">
+        <div class="nome"><input type="text" value="{{ c.nome }}" onblur="if(this.value.trim() && this.value!==this.defaultValue) editarCampo({{ c.id }}, {nome:this.value.trim()})"></div>
+        <span class="tipo-tag">{{ c.tipo }}</span>
+        <select onchange="editarCampo({{ c.id }}, {momento:this.value})" title="Quando este campo é preenchido">
+          {% for m2 in campo_momentos %}<option value="{{ m2 }}" {% if m2 == m %}selected{% endif %}>{{ momento_rotulo[m2] }}</option>{% endfor %}
+        </select>
+        {% if c.fonte in ['utm','api_cnpj','proposta'] %}
+        <span class="tipo-tag" title="Preenchido por código, não por pessoa">{{ 'mídia paga' if c.fonte == 'utm' else ('API CNPJ' if c.fonte == 'api_cnpj' else 'proposta') }}</span>
+        {% endif %}
+        <div class="ge-btns">
+          <button class="ge-btn-mini" title="Mover para cima" onclick="moverCampo({{ c.id }}, -1)">▲</button>
+          <button class="ge-btn-mini" title="Mover para baixo" onclick="moverCampo({{ c.id }}, 1)">▼</button>
+          <button class="ge-btn-mini excluir" title="Arquivar campo" onclick="excluirCampo({{ c.id }}, '{{ c.nome }}')">✕</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endfor %}
+    {% if not campos %}<div class="ge-vazio">Nenhum campo cadastrado.</div>{% endif %}
+    <div class="ge-add">
+      <input type="text" id="novo-campo-nome" placeholder="Nome do campo (ex: Tem sócio no CNPJ?)">
+      <select id="novo-campo-tipo" onchange="document.getElementById('novo-campo-opcoes').style.display=(this.value=='select'||this.value=='multiselect')?'':'none'">
+        {% for t in campo_tipos %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+      </select>
+      <select id="novo-campo-momento">
+        <option value="conversa">Ao longo da conversa</option>
+        <option value="proposta">No preenchimento da proposta</option>
+      </select>
+      <button onclick="criarCampo()">+ Adicionar</button>
+    </div>
+    <div class="ge-add" id="novo-campo-opcoes" style="display:none">
+      <input type="text" id="novo-campo-lista" placeholder="Opções separadas por vírgula (ex: Sim, Não, Não sei)">
+    </div>
+    <div class="ge-nota">Campo novo nasce como preenchido pelo consultor. Os automáticos (mídia paga, API de CNPJ, proposta) precisam de código que os alimente, então só existem no catálogo padrão — mas o nome, o momento e a ordem deles você muda aqui.</div>
+  </div>
 </div>
 
 <script>
@@ -255,6 +301,35 @@ async function moverStatus(id, direcao) {
   if (novoIdx < 0 || novoIdx >= ids.length) return;
   [ids[idx], ids[novoIdx]] = [ids[novoIdx], ids[idx]];
   const d = await _post('/crm/status/reordenar', {ordem: ids});
+  if (d.ok) location.reload();
+}
+// ── Campos personalizados ──
+async function criarCampo() {
+  const nome = document.getElementById('novo-campo-nome').value.trim();
+  const tipo = document.getElementById('novo-campo-tipo').value;
+  const momento = document.getElementById('novo-campo-momento').value;
+  const opcoes = document.getElementById('novo-campo-lista').value;
+  if (!nome) return;
+  const d = await _post('/crm/campos/novo', {nome, tipo, momento, opcoes});
+  if (d.ok) location.reload();
+}
+async function editarCampo(id, campos) {
+  const d = await _post('/crm/campos/' + id + '/editar', campos);
+  if (campos.momento) location.reload();
+}
+async function excluirCampo(id, nome) {
+  if (!confirm('Arquivar o campo "' + nome + '"? Ele sai da ficha, mas o que já foi preenchido nos leads continua guardado.')) return;
+  const d = await _post('/crm/campos/' + id + '/excluir', {});
+  if (d.ok) location.reload();
+}
+async function moverCampo(id, direcao) {
+  const itens = Array.from(document.querySelectorAll('.ge-item[data-id]'));
+  const ids = itens.map(i => parseInt(i.dataset.id));
+  const idx = ids.indexOf(id);
+  const novoIdx = idx + direcao;
+  if (novoIdx < 0 || novoIdx >= ids.length) return;
+  [ids[idx], ids[novoIdx]] = [ids[novoIdx], ids[idx]];
+  const d = await _post('/crm/campos/reordenar', {ordem: ids});
   if (d.ok) location.reload();
 }
 </script>
