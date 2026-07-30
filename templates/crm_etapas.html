@@ -66,7 +66,7 @@
         <div class="ge-btns">
           <button class="ge-btn-mini" title="Mover para cima" onclick="moverQuadro('{{ q.slug }}', -1)">▲</button>
           <button class="ge-btn-mini" title="Mover para baixo" onclick="moverQuadro('{{ q.slug }}', 1)">▼</button>
-          <button class="ge-btn-mini excluir" title="Arquivar quadro" onclick="excluirQuadro('{{ q.slug }}', '{{ q.nome }}')">✕</button>
+          <button class="ge-btn-mini excluir" title="Arquivar quadro" onclick="excluirQuadro('{{ q.slug }}', this)">✕</button>
         </div>
       </div>
       {% endfor %}
@@ -99,7 +99,7 @@
         <div class="ge-btns">
           <button class="ge-btn-mini" title="Mover para cima" onclick="moverEtapa('{{ e.slug }}', -1)">▲</button>
           <button class="ge-btn-mini" title="Mover para baixo" onclick="moverEtapa('{{ e.slug }}', 1)">▼</button>
-          <button class="ge-btn-mini excluir" title="Excluir etapa" onclick="excluirEtapa('{{ e.slug }}', '{{ e.nome }}')">✕</button>
+          <button class="ge-btn-mini excluir" title="Excluir etapa" onclick="excluirEtapa('{{ e.slug }}', this)">✕</button>
         </div>
       </div>
       {% endfor %}
@@ -130,7 +130,7 @@
             {% for e2 in etapas %}<option value="{{ e2.slug }}" {% if e2.slug == etapa.slug %}selected{% endif %}>{{ e2.nome }}</option>{% endfor %}
           </select>
           <div class="ge-btns">
-            <button class="ge-btn-mini excluir" title="Excluir sub-status" onclick="excluirStatus({{ s.id }}, '{{ s.nome }}')">✕</button>
+            <button class="ge-btn-mini excluir" title="Excluir sub-status" onclick="excluirStatus({{ s.id }}, this)">✕</button>
           </div>
         </div>
         {% endfor %}
@@ -149,7 +149,7 @@
             {% for e2 in etapas %}<option value="{{ e2.slug }}">{{ e2.nome }}</option>{% endfor %}
           </select>
           <div class="ge-btns">
-            <button class="ge-btn-mini excluir" title="Excluir sub-status" onclick="excluirStatus({{ s.id }}, '{{ s.nome }}')">✕</button>
+            <button class="ge-btn-mini excluir" title="Excluir sub-status" onclick="excluirStatus({{ s.id }}, this)">✕</button>
           </div>
         </div>
         {% endfor %}
@@ -178,7 +178,7 @@
         <div class="ge-btns">
           <button class="ge-btn-mini" title="Mover para cima" onclick="moverEtiqueta({{ e.id }}, -1)">▲</button>
           <button class="ge-btn-mini" title="Mover para baixo" onclick="moverEtiqueta({{ e.id }}, 1)">▼</button>
-          <button class="ge-btn-mini excluir" title="Arquivar etiqueta" onclick="excluirEtiqueta({{ e.id }}, '{{ e.nome }}')">✕</button>
+          <button class="ge-btn-mini excluir" title="Arquivar etiqueta" onclick="excluirEtiqueta({{ e.id }}, this)">✕</button>
         </div>
       </div>
       {% endfor %}
@@ -213,7 +213,7 @@
         <div class="ge-btns">
           <button class="ge-btn-mini" title="Mover para cima" onclick="moverCampo({{ c.id }}, -1)">▲</button>
           <button class="ge-btn-mini" title="Mover para baixo" onclick="moverCampo({{ c.id }}, 1)">▼</button>
-          <button class="ge-btn-mini excluir" title="Arquivar campo" onclick="excluirCampo({{ c.id }}, '{{ c.nome }}')">✕</button>
+          <button class="ge-btn-mini excluir" title="Arquivar campo" onclick="excluirCampo({{ c.id }}, this)">✕</button>
         </div>
       </div>
       {% endfor %}
@@ -260,7 +260,12 @@ async function editarEtapa(slug, campos) {
   const d = await _post('/crm/etapas/' + slug + '/editar', campos);
   if (!d.ok) location.reload();
 }
-async function excluirEtapa(slug, nome) {
+async function excluirEtapa(slug, btn) {
+  // O nome vem do DOM, nao interpolado no onclick: aspa no nome do campo
+  // fechava a string JS e virava XSS armazenado (o autoescape do Jinja nao
+  // protege dentro de atributo de evento).
+  const item = btn && btn.closest ? btn.closest('.ge-item') : null;
+  const nome = item ? (item.querySelector('.nome input') || {}).value || '' : '';
   if (!confirm('Excluir a etapa "' + nome + '"? Os leads dela serão movidos para a etapa seguinte.')) return;
   const d = await _post('/crm/etapas/' + slug + '/excluir', {});
   if (d.ok) location.reload();
@@ -301,7 +306,12 @@ async function editarEtiqueta(id, campos) {
   const d = await _post('/crm/etiquetas/' + id + '/editar', campos);
   location.reload();
 }
-async function excluirEtiqueta(id, nome) {
+async function excluirEtiqueta(id, btn) {
+  // O nome vem do DOM, nao interpolado no onclick: aspa no nome do campo
+  // fechava a string JS e virava XSS armazenado (o autoescape do Jinja nao
+  // protege dentro de atributo de evento).
+  const item = btn && btn.closest ? btn.closest('.ge-item') : null;
+  const nome = item ? (item.querySelector('.nome input') || {}).value || '' : '';
   if (!confirm('Arquivar a etiqueta "' + nome + '"? Ela sai dos cards, mas o histórico de quem foi classificado com ela é mantido.')) return;
   const d = await _post('/crm/etiquetas/' + id + '/excluir', {});
   if (d.ok) location.reload();
@@ -320,7 +330,12 @@ async function editarStatus(id, nome) {
   const d = await _post('/crm/status/' + id + '/editar', {nome});
   if (!d.ok) location.reload();
 }
-async function excluirStatus(id, nome) {
+async function excluirStatus(id, btn) {
+  // O nome vem do DOM, nao interpolado no onclick: aspa no nome do campo
+  // fechava a string JS e virava XSS armazenado (o autoescape do Jinja nao
+  // protege dentro de atributo de evento).
+  const item = btn && btn.closest ? btn.closest('.ge-item') : null;
+  const nome = item ? (item.querySelector('.nome input') || {}).value || '' : '';
   if (!confirm('Excluir o status "' + nome + '"? Leads com esse status ficarão sem status.')) return;
   const d = await _post('/crm/status/' + id + '/excluir', {});
   if (d.ok) location.reload();
@@ -347,7 +362,12 @@ async function editarQuadro(slug, campos) {
   const d = await _post('/crm/quadros/' + slug + '/editar', campos);
   if (!d.ok) location.reload();
 }
-async function excluirQuadro(slug, nome) {
+async function excluirQuadro(slug, btn) {
+  // O nome vem do DOM, nao interpolado no onclick: aspa no nome do campo
+  // fechava a string JS e virava XSS armazenado (o autoescape do Jinja nao
+  // protege dentro de atributo de evento).
+  const item = btn && btn.closest ? btn.closest('.ge-item') : null;
+  const nome = item ? (item.querySelector('.nome input') || {}).value || '' : '';
   if (!confirm('Arquivar o quadro "' + nome + '"? Só funciona se ele estiver sem etapas.')) return;
   const d = await _post('/crm/quadros/' + slug + '/excluir', {});
   if (d.ok) location.reload();
@@ -377,7 +397,12 @@ async function editarCampo(id, campos) {
   const d = await _post('/crm/campos/' + id + '/editar', campos);
   if (campos.momento) location.reload();
 }
-async function excluirCampo(id, nome) {
+async function excluirCampo(id, btn) {
+  // O nome vem do DOM, nao interpolado no onclick: aspa no nome do campo
+  // fechava a string JS e virava XSS armazenado (o autoescape do Jinja nao
+  // protege dentro de atributo de evento).
+  const item = btn && btn.closest ? btn.closest('.ge-item') : null;
+  const nome = item ? (item.querySelector('.nome input') || {}).value || '' : '';
   if (!confirm('Arquivar o campo "' + nome + '"? Ele sai da ficha, mas o que já foi preenchido nos leads continua guardado.')) return;
   const d = await _post('/crm/campos/' + id + '/excluir', {});
   if (d.ok) location.reload();

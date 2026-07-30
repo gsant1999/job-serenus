@@ -7435,10 +7435,15 @@ def crm_leads_duplicados():
              if grupos or True else '')
 
     def _lin_tel(d):
+        # ESCAPAR: nome do lead é dado externo (formulário público via /webhook/sheets
+        # e endpoint da extensão). Esta página tem o botão de mesclagem destrutiva,
+        # então script injetado aqui roda com a sessão admin e pode dispará-la.
+        import html as _html
+        _e = lambda v: _html.escape(str(v or ''), quote=True)
         itens = ''.join(
-            f'<li><a href="/crm?lead={x["id"]}" target="_blank">{(x["nome"] or "(sem nome)")}</a>'
-            f' <span class="cinza">· {x["etapa"] or "—"} · {x["resp"] or "sem consultor"}'
-            f' · entrou em {_fmt_data_br(x["criado_em"])}</span></li>' for x in d['leads'])
+            f'<li><a href="/crm?lead={int(x["id"])}" target="_blank">{_e(x["nome"]) or "(sem nome)"}</a>'
+            f' <span class="cinza">· {_e(x["etapa"]) or "—"} · {_e(x["resp"]) or "sem consultor"}'
+            f' · entrou em {_e(_fmt_data_br(x["criado_em"]))}</span></li>' for x in d['leads'])
         return (f'<div class="grupo"><div class="tel">{_formatar_telefone(d["tel"])}'
                 f' <span class="cinza">— {len(d["leads"])} leads</span></div><ul>{itens}</ul></div>')
     bloco_tel = (
@@ -8820,6 +8825,10 @@ def _ads_enfileirar(conn, proposta_id, motivo='venda confirmada'):
     prop = conn.execute("SELECT * FROM propostas WHERE id=?", (proposta_id,)).fetchone()
     if not prop:
         return None, 'proposta inexistente'
+    # 'sem_clique' NÃO é definitivo: é o estado normal de toda venda antiga no
+    # momento do backfill, e vira 'pendente' assim que o vínculo lead↔proposta ou
+    # o gclid aparecerem. Tratar como final fazia a tela dizer "0 fora da fila"
+    # enquanto essas vendas nunca seriam enviadas.
     ja = conn.execute("SELECT * FROM google_ads_conversoes WHERE proposta_id=?", (proposta_id,)).fetchone()
     if ja and ja['status'] in ('enviada', 'pendente'):
         return dict(ja), 'já registrada'
@@ -8840,15 +8849,20 @@ def _ads_enfileirar(conn, proposta_id, motivo='venda confirmada'):
     # pra aparecer no diagnóstico em vez de sumir.
     status = 'pendente' if click_id else 'sem_clique'
     quando = _agora_sp()
+    # A conversão aconteceu quando a VENDA aconteceu, não quando alguém apertou o
+    # botão. No backfill da base histórica isso era a diferença entre reportar a
+    # data certa e mandar tudo com a data de hoje — o que distorce a atribuição e
+    # ainda faz o Google recusar em massa, porque o clique fica fora da janela.
+    quando_venda = (prop['criado_em'] if 'criado_em' in prop.keys() else None) or quando
     if ja:
         conn.execute("""UPDATE google_ads_conversoes SET lead_id=?, click_id=?, click_tipo=?,
-                        valor=?, status=?, detalhe=? WHERE proposta_id=?""",
-                     (lead_id, click_id, tipo, valor, status, motivo, proposta_id))
+                        valor=?, status=?, detalhe=?, conversao_em=? WHERE proposta_id=?""",
+                     (lead_id, click_id, tipo, valor, status, motivo, quando_venda, proposta_id))
     else:
         conn.execute("""INSERT INTO google_ads_conversoes
             (proposta_id, lead_id, click_id, click_tipo, valor, conversao_em, status, detalhe, criado_em)
             VALUES (?,?,?,?,?,?,?,?,?)""",
-            (proposta_id, lead_id, click_id, tipo, valor, quando, status, motivo, quando))
+            (proposta_id, lead_id, click_id, tipo, valor, quando_venda, status, motivo, quando))
     return dict(conn.execute("SELECT * FROM google_ads_conversoes WHERE proposta_id=?",
                              (proposta_id,)).fetchone()), status
 
@@ -19939,7 +19953,8 @@ def google_ads_painel():
         fora = conn.execute("""SELECT COUNT(*) c FROM propostas p
             WHERE p.status_operacional='Emitida/Ativa' AND p.status <> 'Excluída'
               AND COALESCE(p.estornada,0)=0
-              AND NOT EXISTS (SELECT 1 FROM google_ads_conversoes g WHERE g.proposta_id=p.id)""").fetchone()['c']
+              AND NOT EXISTS (SELECT 1 FROM google_ads_conversoes g
+                              WHERE g.proposta_id=p.id AND g.status <> 'sem_clique')""").fetchone()['c']
     except Exception:
         fora = 0
     close_db(conn)
@@ -19959,7 +19974,8 @@ def google_ads_enfileirar():
     props = conn.execute("""SELECT id FROM propostas
         WHERE status_operacional='Emitida/Ativa' AND status <> 'Excluída'
           AND COALESCE(estornada,0)=0
-          AND NOT EXISTS (SELECT 1 FROM google_ads_conversoes g WHERE g.proposta_id=propostas.id)
+          AND NOT EXISTS (SELECT 1 FROM google_ads_conversoes g
+                          WHERE g.proposta_id=propostas.id AND g.status <> 'sem_clique')
         ORDER BY id""").fetchall()
     placar = {}
     for p in props:
