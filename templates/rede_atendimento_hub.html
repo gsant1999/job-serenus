@@ -1,25 +1,24 @@
 {% extends "base.html" %}
-{% block title %}Rede de Atendimento — Serenus{% endblock %}
+{% block title %}Rede de Atendimento{% endblock %}
 {% block content %}
 <style>
-  .ra-wrap{max-width:560px;margin:0 auto;padding:28px 16px 60px;}
-  .ra-head{margin-bottom:22px;}
-  .ra-head h1{font-family:ui-serif,Georgia,serif;font-size:24px;margin:0 0 6px;}
-  .ra-head p{margin:0;font-size:13.5px;color:var(--text-soft,#6b7a74);}
+  .ra-wrap{max-width:600px;margin:0 auto;padding:8px 4px 40px;}
+  .ra-head{margin-bottom:24px;}
+  .ra-head h1{font-family:'Sora',sans-serif;font-size:22px;font-weight:800;margin:0 0 6px;color:var(--texto);}
+  .ra-head p{margin:0;font-size:13.5px;color:var(--cinza);}
   .ra-list{display:flex;flex-direction:column;gap:12px;}
-  .ra-card{display:flex;align-items:center;gap:14px;text-decoration:none;color:inherit;
-    background:var(--card-bg,#fff);border:1px solid var(--border,#DDE4DF);border-radius:14px;
-    padding:16px;transition:border-color .15s;}
-  .ra-card:hover{border-color:var(--accent,#16211D);}
-  .ra-mark{flex:none;width:42px;height:42px;border-radius:11px;display:flex;align-items:center;
-    justify-content:center;font-weight:800;font-size:14px;color:#fff;}
-  .ra-mark.sula{background:#FF7A1A;}
-  .ra-mark.vc{background:#00AEEF;}
+  .ra-card{display:flex;align-items:center;gap:16px;text-decoration:none;color:inherit;
+    background:var(--card-bg);border:1px solid var(--borda);border-radius:14px;
+    padding:18px;transition:border-color .15s,transform .15s;}
+  .ra-card:hover{border-color:var(--borda-2);transform:translateY(-1px);}
+  .ra-mark{flex:none;width:56px;height:56px;border-radius:12px;display:flex;align-items:center;
+    justify-content:center;background:#fff;border:1px solid var(--borda);overflow:hidden;}
+  .ra-mark img{max-width:78%;max-height:78%;object-fit:contain;display:block;}
   .ra-body{flex:1;min-width:0;}
-  .ra-body b{display:block;font-size:15px;}
-  .ra-body span{display:block;font-size:12.5px;color:var(--text-soft,#6b7a74);margin-top:2px;}
-  .ra-arrow{flex:none;color:var(--text-soft,#6b7a74);}
-  .ra-note{margin-top:24px;font-size:12px;color:var(--text-soft,#6b7a74);}
+  .ra-body b{display:block;font-size:15.5px;color:var(--texto);}
+  .ra-body span{display:block;font-size:12.5px;color:var(--cinza);margin-top:3px;line-height:1.4;}
+  .ra-arrow{flex:none;color:var(--cinza-2);}
+  .ra-note{margin-top:26px;font-size:11.5px;color:var(--cinza-2);}
 </style>
 <div class="ra-wrap">
   <div class="ra-head">
@@ -28,7 +27,7 @@
   </div>
   <div class="ra-list">
     <a class="ra-card" href="/rede-referenciada">
-      <div class="ra-mark sula">SA</div>
+      <div class="ra-mark"><img src="{{ url_for('static', filename='operadoras/sulamerica-saude.svg') }}" alt="SulAmérica"></div>
       <div class="ra-body">
         <b>SulAmérica</b>
         <span>Direto Nacional (557 / 87507) — São Paulo, Campinas e Rio de Janeiro</span>
@@ -36,7 +35,7 @@
       <svg class="ra-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>
     </a>
     <a class="ra-card" href="/rede-vera-cruz">
-      <div class="ra-mark vc">VC</div>
+      <div class="ra-mark"><img src="{{ url_for('static', filename='operadoras/vera-cruz.png') }}" alt="Vera Cruz"></div>
       <div class="ra-body">
         <b>Vera Cruz</b>
         <span>Vera Prata e Vera Ouro — Campinas e Indaiatuba</span>
