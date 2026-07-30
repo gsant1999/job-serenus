@@ -2532,6 +2532,71 @@ def init_db():
         ('qual_estagio2', 'qualificacao_notas'),
         ('qual_idade', 'idade_informada'),
     ]
+    # ── Campos que TRAVAM a saída da etapa ──────────────────────────────────────
+    # Flag própria: o catálogo acima já rodou no deploy anterior, então sem uma
+    # segunda migração esses quatro nunca nasceriam em produção.
+    CAMPOS_SAIDA = [
+        ('status_proposta_lead', 'Status da proposta', 'emissao_proposta',
+         ['Pendente', 'Protocolada', 'Em análise', 'Aprovada', 'Recusada'],
+         'Sem isso ninguém sabe em que pé está a proposta na operadora'),
+        ('motivo_perda', 'Motivo da perda', 'negociacao_perdida',
+         ['Preço', 'Fechou com outro', 'Rede insuficiente', 'Carência', 'Não é o decisor',
+          'Recusado pela operadora', 'Sumiu', 'Fora de área', 'Lead inválido'],
+         'É o que faz existir relatório de perda — sem motivo, a perda não ensina nada'),
+        ('gatilho_retorno', 'Gatilho de retorno', 'nutricao',
+         ['Reajuste', 'Fim de carência', '12 meses portabilidade', '6 meses de CNPJ',
+          'Muda de faixa etária', 'Virada de ano', 'Aguardando decisor', 'Sem gatilho'],
+         'O motivo concreto pra voltar a falar com esse lead'),
+        ('data_retorno', 'Data de retorno', 'nutricao', None,
+         'Entra no calendário — é o que tira o lead do esquecimento'),
+    ]
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        ja_saida = conn.execute("SELECT 1 FROM meta_flags WHERE k='campos_saida_20260729'").fetchone()
+    except Exception:
+        ja_saida = True
+    if not ja_saida:
+        try:
+            # ordem alta e fixa: este bloco roda ANTES do catálogo geral, então usar
+            # MAX(ordem) daria 1..4 e colidiria com os campos de qualificação.
+            # Campo de saída é sempre o último grupo da ficha.
+            for i, (chave, nome, etapa, opcoes, dica) in enumerate(CAMPOS_SAIDA, start=1):
+                if conn.execute("SELECT 1 FROM crm_campos WHERE chave=?", (chave,)).fetchone():
+                    continue
+                conn.execute("""INSERT INTO crm_campos
+                    (chave,nome,tipo,momento,fonte,opcoes_json,obriga_saida_de,dica,ordem)
+                    VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (chave, nome, 'select' if opcoes else 'data', 'saida', 'consultor',
+                     json.dumps(opcoes, ensure_ascii=False) if opcoes else None,
+                     etapa, dica, 900 + i))
+            # perdido_motivo já existe como coluna e tem histórico: herda, senão o
+            # relatório de perda nasceria zerado nos leads já perdidos.
+            cid = conn.execute("SELECT id FROM crm_campos WHERE chave='motivo_perda'").fetchone()
+            herdados = 0
+            if cid:
+                try:
+                    rows = conn.execute("""SELECT id, perdido_motivo v FROM crm_leads
+                                           WHERE perdido_motivo IS NOT NULL AND perdido_motivo <> ''""").fetchall()
+                except Exception:
+                    rows = []
+                for r in rows:
+                    if is_pg:
+                        conn.execute("""INSERT INTO crm_lead_campos (lead_id,campo_id,valor,fonte,atualizado_em)
+                            VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+                            (r['id'], cid['id'], str(r['v']).strip(), 'migracao', _agora_sp()))
+                    else:
+                        conn.execute("""INSERT OR IGNORE INTO crm_lead_campos (lead_id,campo_id,valor,fonte,atualizado_em)
+                            VALUES (?,?,?,?,?)""", (r['id'], cid['id'], str(r['v']).strip(), 'migracao', _agora_sp()))
+                    herdados += 1
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('campos_saida_20260729')")
+            conn.commit()
+            print(f"[CAMPOS_SAIDA] 4 campos de trava criados; {herdados} motivo(s) de perda herdado(s)")
+        except Exception as e:
+            if is_pg:
+                try: conn.rollback()
+                except Exception: pass
+            print(f"[CAMPOS_SAIDA] migração pulada: {e}")
+
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
         ja_campos = conn.execute("SELECT 1 FROM meta_flags WHERE k='campos_personalizados_20260729'").fetchone()
@@ -15228,6 +15293,25 @@ def crm():
 
     etiquetas_lead = _etiquetas_dos_leads(conn, [l['id'] for l in leads])
 
+    # Campos que travam a saída, por etapa — vão no card porque é lá que o
+    # consultor arrasta, e travar sem mostrar o que falta é só frustração.
+    campos_def = carregar_campos_crm(conn)
+    campos_saida_etapa = {}
+    for c in campos_def:
+        if c['obriga_saida_de']:
+            campos_saida_etapa.setdefault(c['obriga_saida_de'], []).append(c)
+    valores_saida = {}
+    trava_falta = {}
+    if campos_saida_etapa:
+        for lead in leads:
+            exig = campos_saida_etapa.get(lead['etapa'] or '')
+            if not exig:
+                continue
+            v = valores_campos_lead(conn, lead, campos_def)
+            valores_saida[lead['id']] = {c['chave']: (v.get(c['chave'], {}).get('valor') or '') for c in exig}
+            trava_falta[lead['id']] = [c['nome'] for c in exig
+                                       if not (v.get(c['chave'], {}).get('valor') or '').strip()]
+
     # Agrupa por etapa. CARDS_POR_COLUNA limita quantos cards viram DOM de fato —
     # colunas do meio do funil acumulam milhares de leads históricos (~4500
     # numa delas em produção) e renderizar tudo de uma vez travava o CRM inteiro.
@@ -15267,7 +15351,9 @@ def crm():
                            filtros=filtros_ativos, consultores_externos=consultores_externos,
                            sub_status_opcoes=sub_status_opcoes, lead_focus=f_lead,
                            sub_status_etapa=sub_status_etapa, etiquetas_todas=etiquetas_todas,
-                           etiquetas_lead=etiquetas_lead, saude=saude)
+                           etiquetas_lead=etiquetas_lead, saude=saude,
+                           campos_saida_etapa=campos_saida_etapa, valores_saida=valores_saida,
+                           trava_falta=trava_falta)
 
 
 @app.route('/crm/lead/novo', methods=['POST'])
@@ -15466,6 +15552,8 @@ def crm_lead_detalhe(lid):
     """, (lid,)).fetchall()]
     campos_def = carregar_campos_crm(conn)
     campos_val = valores_campos_lead(conn, lead, campos_def)
+    # Calculado ANTES do close_db — a conexão já está fechada quando o jsonify roda.
+    campos_faltando = campos_faltando_pra_sair(conn, lead, campos_def)
     etiquetas_todas = carregar_etiquetas_crm(conn)
     _do_lead = _etiquetas_dos_leads(conn, [lid]).get(lid, [])
     etiquetas_marcadas = [e['id'] for e in _do_lead]
@@ -15482,6 +15570,7 @@ def crm_lead_detalhe(lid):
         "playbook": _playbook_do_lead(lead, nomes_marcados),
         "campos_def": campos_def,
         "campos_val": campos_val,
+        "campos_faltando": campos_faltando,
         "etiquetas_todas": etiquetas_todas,
         "etiquetas_marcadas": etiquetas_marcadas,
         "sub_status_etapa": sub_status_desta_etapa
@@ -15526,6 +15615,13 @@ def crm_lead_mover(lid):
     if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
         close_db(conn); return jsonify({"ok": False}), 403
     etapa_ant = lead['etapa']
+    if nova_etapa != etapa_ant:
+        faltando = campos_faltando_pra_sair(conn, lead)
+        if faltando:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": "Preencha antes de mover: " +
+                            ', '.join([f['nome'] for f in faltando]),
+                            "faltando": faltando, "etapa_atual": etapa_ant}), 400
     # avancou_em só é carimbado quando a etapa REALMENTE mudou: arrastar o card
     # de volta pra mesma coluna não é avanço e não deve zerar o cronômetro.
     if etapa_ant != nova_etapa:
@@ -15582,11 +15678,12 @@ def _sub_status_por_etapa(conn=None):
 # mapa_extras ou de código que o preencha, então nasce só pelo catálogo padrão.
 _CAMPO_TIPOS = ['texto', 'texto_longo', 'numero', 'moeda', 'data', 'mes',
                 'select', 'multiselect', 'booleano']
-_CAMPO_MOMENTOS = ['automatico', 'conversa', 'proposta']
+_CAMPO_MOMENTOS = ['automatico', 'conversa', 'proposta', 'saida']
 _CAMPO_MOMENTO_ROTULO = {
     'automatico': 'Chega preenchido',
     'conversa': 'Ao longo da conversa',
     'proposta': 'No preenchimento da proposta',
+    'saida': 'Obrigatório para sair da etapa',
 }
 
 
@@ -15687,6 +15784,25 @@ def valores_campos_lead(conn, lead, campos=None):
         else:
             out[c['chave']] = salvos.get(c['chave'], {'valor': '', 'fonte': ''})
     return out
+
+
+def campos_faltando_pra_sair(conn, lead, campos=None):
+    """Campos obrigatórios da etapa ATUAL que estão em branco. Enquanto tiver algum,
+    o card não sai da coluna — é isso que transforma perda e nutrição em fila de
+    reabordagem em vez de cemitério: sem motivo registrado não existe relatório de
+    perda, e sem gatilho + data de retorno ninguém sabe quando voltar a falar.
+    Devolve lista de dicts {nome, chave, opcoes}."""
+    etapa = (lead['etapa'] if hasattr(lead, 'keys') else '') or ''
+    if not etapa:
+        return []
+    if campos is None:
+        campos = carregar_campos_crm(conn)
+    exigidos = [c for c in campos if (c['obriga_saida_de'] or '') == etapa]
+    if not exigidos:
+        return []
+    vals = valores_campos_lead(conn, lead, campos)
+    return [{'nome': c['nome'], 'chave': c['chave'], 'opcoes': c['opcoes']}
+            for c in exigidos if not (vals.get(c['chave'], {}).get('valor') or '').strip()]
 
 
 def gravar_campo_lead(conn, lid, chave, valor, fonte='consultor', so_se_vazio=False):
@@ -15847,6 +15963,16 @@ def crm_lead_editar(lid):
     if etapa != lead['etapa']: changes.append(f'Etapa: "{lead["etapa"]}" → "{etapa}"')
     if str(responsavel_id) != str(lead['responsavel_id']): changes.append(f'Responsável alterado')
     if sub_status != lead['sub_status']: changes.append(f'Status: "{lead["sub_status"] or "—"}" → "{sub_status or "—"}"')
+
+    # A trava vale aqui também: sem isso bastava trocar a etapa pelo seletor da
+    # ficha pra escapar da obrigatoriedade que o arrastar do Kanban impõe.
+    if etapa != lead['etapa']:
+        faltando = campos_faltando_pra_sair(conn, lead)
+        if faltando:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": "Preencha antes de mudar de etapa: " +
+                            ', '.join([f['nome'] for f in faltando]),
+                            "faltando": faltando}), 400
 
     # Trocar de etapa por aqui zera o sub-status: ele é o andamento DENTRO da
     # etapa, então "Dados completos" num lead que foi pra Cotação Enviada não

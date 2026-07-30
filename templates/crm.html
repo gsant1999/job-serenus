@@ -70,6 +70,11 @@
   .cp-auto .pino { background:rgba(34,211,238,.15); color:#67e8f9; }
   .cp-conversa .pino { background:rgba(168,85,247,.15); color:#d8b4fe; }
   .cp-proposta .pino { background:rgba(250,204,21,.13); color:#facc15; }
+  .cp-saida .pino { background:rgba(244,63,94,.15); color:#fb7185; }
+  .cp-saida { border:1px solid rgba(244,63,94,.25); border-radius:10px; padding:11px 12px 4px;
+              background:rgba(244,63,94,.05); }
+  .cp-pendente .campo-input, .cp-pendente .campo-select { border-color:rgba(244,63,94,.45); }
+  .cp-saida .cp-bloco-tit { border-bottom-color:rgba(244,63,94,.2); }
   .cp-campo { margin-bottom:11px; }
   .cp-label { font-size:10px; font-weight:600; color:var(--cinza); text-transform:uppercase;
               letter-spacing:.5px; margin-bottom:3px; }
@@ -114,6 +119,21 @@
   .pb-acoes button { background:var(--panel-3); border:1px solid var(--borda); color:var(--cinza); border-radius:7px;
                      padding:5px 10px; font-size:11px; cursor:pointer; }
   .pb-acoes button:hover { border-color:var(--azul); color:var(--texto); }
+  /* Bloco de trava no card: o consultor arrasta daqui, então é aqui que ele
+     precisa ver o que falta — travar sem dizer o quê é só frustração. */
+  .lead-trava { margin-top:8px; padding:8px 9px; border-radius:8px;
+                background:rgba(244,63,94,.07); border:1px solid rgba(244,63,94,.25); }
+  .lead-trava-tit { font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.4px;
+                    color:#fb7185; margin-bottom:6px; }
+  .lead-trava-campo { display:flex; flex-direction:column; gap:3px; margin-bottom:6px; }
+  .lead-trava-campo:last-child { margin-bottom:0; }
+  .lead-trava-lbl { font-size:9.5px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.3px; }
+  .lead-trava-sel { width:100%; background:var(--panel); border:1px solid var(--borda); border-radius:6px;
+                    padding:5px 7px; font-size:11px; color:var(--texto); outline:none; cursor:pointer; }
+  .lead-trava.ok { background:rgba(34,197,94,.07); border-color:rgba(34,197,94,.3); }
+  .lead-trava.ok .lead-trava-tit { color:#4ade80; }
+  .lead-trava-sel.vazio { border-color:rgba(244,63,94,.45); color:var(--cinza-2); }
+  .lead-trava-sel:focus { border-color:var(--azul); }
   .lead-etqs { display:flex; gap:4px; flex-wrap:wrap; margin-top:7px; }
   .lead-etq { font-size:9.5px; font-weight:700; padding:2px 8px; border-radius:9px; color:#0b1220;
               text-transform:uppercase; letter-spacing:.3px; max-width:100%; overflow:hidden;
@@ -217,6 +237,10 @@
   .nova-ativ { background:var(--panel-2); border-radius:10px; padding:14px; border:1px solid var(--borda); }
   .nova-ativ textarea { width:100%; background:transparent; border:none; color:var(--texto); font-size:13px; resize:none; outline:none; min-height:70px; }
   .nova-ativ-footer { display:flex; justify-content:space-between; align-items:center; margin-top:8px; }
+  .btn-config-funil { display:inline-flex; align-items:center; gap:6px; background:rgba(99,102,241,.14);
+                      border:1px solid rgba(99,102,241,.45); color:#a5b4fc; border-radius:8px;
+                      padding:6px 13px; font-size:12px; font-weight:600; cursor:pointer; transition:.15s; }
+  .btn-config-funil:hover { background:#6366f1; border-color:#6366f1; color:#fff; }
   .tipo-btns { display:flex; gap:6px; flex-wrap:wrap; }
   .tipo-btn  { padding:5px 10px; border-radius:6px; border:1px solid var(--borda); background:transparent; color:var(--cinza); font-size:11px; cursor:pointer; transition:.15s; }
   .tipo-btn:hover, .tipo-btn.sel { background:var(--azul); color:#fff; border-color:var(--azul); }
@@ -261,12 +285,21 @@
   </div>
   <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
     <button class="btn-outline btn-sm" onclick="abrirNovoLead()">+ Novo Lead</button>
+    {% if eh_admin %}
+    {# Destacado e no começo: era o 6o de 9 botoes identicos e ficava invisivel,
+       sendo que e a porta de TODA a configuracao do funil. #}
+    <button class="btn-config-funil" onclick="location.href='/crm/etapas/gerenciar'"
+            title="Etapas do funil, prazo de cor do card, sub-status por etapa, etiquetas e campos personalizados">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+      Configurar funil
+    </button>
+    {% endif %}
     <button class="btn-outline btn-sm" onclick="location.href='/crm/agenda'">Agenda</button>
     {% if eh_admin %}
     <button class="btn-outline btn-sm" id="btn-buscar-leads" onclick="buscarLeadsAgora(this)">Buscar leads agora</button>
     <button class="btn-outline btn-sm" onclick="location.href='/crm/painel'">Painel</button>
     <button class="btn-outline btn-sm" onclick="location.href='/crm/importar'">Importar</button>
-    <button class="btn-outline btn-sm" onclick="location.href='/crm/etapas/gerenciar'" title="Etapas do funil, prazo de cor, sub-status e etiquetas">Configurar funil</button>
     <button class="btn-outline btn-sm" onclick="abrirModalTransferencia()">Transferência em massa</button>
     {% if eh_serenus %}<button class="btn-outline btn-sm" onclick="location.href='/crm/importar-meninas'">Transferir Leads</button>{% endif %}
     <button class="btn-outline btn-sm" onclick="mesclarDuplicados(this)">Mesclar duplicados</button>
@@ -441,6 +474,31 @@
               {% endif %}
             </select>
           </div>
+          {% set exig = campos_saida_etapa.get(etapa.id, []) %}
+          {% if exig %}
+          {% set vals = valores_saida.get(lead.id, {}) %}
+          {% set faltam = trava_falta.get(lead.id, []) %}
+          <div class="lead-trava{{ '' if faltam else ' ok' }}">
+            <div class="lead-trava-tit">{{ 'Preencha pra mover o card' if faltam else 'Liberado pra mover' }}</div>
+            {% for c in exig %}
+            <div class="lead-trava-campo">
+              <span class="lead-trava-lbl">{{ c.nome }}</span>
+              {% if c.tipo == 'select' %}
+              <select class="lead-trava-sel{{ '' if vals.get(c.chave) else ' vazio' }}"
+                      onclick="event.stopPropagation()"
+                      onchange="salvarCampoCard({{ lead.id }}, '{{ c.chave }}', this)">
+                <option value="">— escolha —</option>
+                {% for o in c.opcoes %}<option value="{{ o }}" {% if vals.get(c.chave) == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
+              </select>
+              {% else %}
+              <input type="date" class="lead-trava-sel{{ '' if vals.get(c.chave) else ' vazio' }}"
+                     value="{{ vals.get(c.chave, '') }}" onclick="event.stopPropagation()"
+                     onchange="salvarCampoCard({{ lead.id }}, '{{ c.chave }}', this)">
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
           <div class="lead-acoes-row">
             <button class="lead-etq-btn" onclick="event.stopPropagation(); abrirEtiquetas({{ lead.id }}, this)" title="Marcar etiquetas">Etiquetas</button>
             {% if lead.telefone %}
@@ -920,9 +978,23 @@ function drop(e, etapa){
   const card=document.getElementById('card-'+_dragging);
   const col=document.getElementById('body-'+etapa);
   if(!card||!col) return;
+  // Guarda de onde o card veio: se o servidor recusar a mudança (campo obrigatório
+  // em branco), ele volta pra coluna original — deixar o card na coluna nova com
+  // o banco dizendo outra coisa é pior que não mover.
+  const origem=card.parentElement, vizinho=card.nextElementSibling, id=_dragging;
   col.prepend(card); atualizarContadores();
-  fetch('/crm/lead/'+_dragging+'/mover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({etapa})})
-    .then(r=>r.json()).then(d=>{ if(!d.ok) toast('Erro ao mover','err'); });
+  fetch('/crm/lead/'+id+'/mover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({etapa})})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok) return;
+      if(origem){ origem.insertBefore(card, vizinho); atualizarContadores(); }
+      toast(d.erro||'Erro ao mover','err');
+      // Abre a ficha já no que falta: o consultor resolve e arrasta de novo.
+      if(d.faltando && d.faltando.length) abrirFicha(id);
+    })
+    .catch(()=>{
+      if(origem){ origem.insertBefore(card, vizinho); atualizarContadores(); }
+      toast('Falha de conexão — o card voltou pro lugar','err');
+    });
   _dragging=null;
 }
 function atualizarContadores(){
@@ -1249,7 +1321,8 @@ async function mudarSubStatus(id, sel){
 
 // ─── FICHA: campos personalizados ─────────────────────────────────────────────
 const CP_ROTULO = {automatico:'Chega preenchido', conversa:'Ao longo da conversa',
-                   proposta:'No preenchimento da proposta'};
+                   proposta:'No preenchimento da proposta',
+                   saida:'Obrigatório pra sair desta etapa'};
 let _cpDef = [], _cpVal = {};
 
 function _esc(v){
@@ -1263,10 +1336,12 @@ function montarCampos(def, val){
   if(!box) return;
   if(!_cpDef.length){ box.innerHTML=''; return; }
   let html='';
-  ['automatico','conversa','proposta'].forEach(m=>{
+  ['saida','automatico','conversa','proposta'].forEach(m=>{
     const doGrupo=_cpDef.filter(c=>c.momento===m);
     if(!doGrupo.length) return;
-    const cls = m==='automatico'?'cp-auto':(m==='proposta'?'cp-proposta':'cp-conversa');
+    // Saída vem primeiro na ficha: é o que impede o card de andar, então é a
+    // primeira coisa que interessa a quem abriu o lead pra fazê-lo andar.
+    const cls = m==='saida'?'cp-saida':(m==='automatico'?'cp-auto':(m==='proposta'?'cp-proposta':'cp-conversa'));
     html+='<div class="cp-bloco '+cls+'">'
       +'<div class="cp-bloco-tit"><span class="pino">'+CP_ROTULO[m]+'</span></div>'
       +doGrupo.map(c=>_cpCampoHtml(c)).join('')
@@ -1308,12 +1383,36 @@ function _cpCampoHtml(c){
     const ph = c.tipo==='moeda'?' placeholder="0,00" inputmode="decimal"' : '';
     corpo='<input type="'+t+'" class="campo-input" data-chave="'+c.chave+'" value="'+_esc(v)+'"'+ph+'>';
   }
-  return '<div class="cp-campo"><div class="cp-label">'+_esc(c.nome)
+  const pendente = c.momento==='saida' && !v;
+  return '<div class="cp-campo'+(pendente?' cp-pendente':'')+'"><div class="cp-label">'+_esc(c.nome)
     +(fonte==='api_cnpj'?'<span class="cp-fonte">via API</span>':'')
     +(fonte==='migracao'?'<span class="cp-fonte">importado</span>':'')
     +'</div>'
     +(c.dica?'<div class="cp-dica">'+_esc(c.dica)+'</div>':'')
     +corpo+'</div>';
+}
+
+// Salva UM campo direto do card, sem abrir a ficha — é o caminho de quem só
+// precisa registrar o motivo da perda e seguir.
+async function salvarCampoCard(lid, chave, el){
+  const payload={}; payload[chave]=el.value;
+  el.classList.toggle('vazio', !el.value);
+  try{
+    const r=await fetch('/crm/lead/'+lid+'/campos',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({campos:payload})});
+    const d=await r.json();
+    if(!d.ok){ toast(d.erro||'Erro ao salvar','err'); return; }
+    const bloco=el.closest('.lead-trava');
+    if(bloco){
+      const faltam=Array.from(bloco.querySelectorAll('.lead-trava-sel')).some(x=>!x.value);
+      const tit=bloco.querySelector('.lead-trava-tit');
+      if(tit) tit.textContent = faltam ? 'Preencha pra mover o card' : 'Liberado pra mover';
+      bloco.style.background = faltam ? '' : 'rgba(34,197,94,.07)';
+      bloco.style.borderColor = faltam ? '' : 'rgba(34,197,94,.3)';
+      if(tit) tit.style.color = faltam ? '' : '#4ade80';
+    }
+    toast('Registrado','ok');
+  }catch(e){ toast('Falha de conexão','err'); }
 }
 
 async function salvarCampos(){
