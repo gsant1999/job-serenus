@@ -727,28 +727,34 @@
       // Com nome do cliente, o carimbo vira pessoal (rastreia quem vazou);
       // sem nome, fica o aviso generico de material interno.
       //
-      // Cor solida bem clara em vez de transparencia (/ca do ExtGState): muitos
-      // visualizadores de PDF moveis IGNORAM alpha e desenham a cor cheia, o que
-      // deixava a marca d'agua escura e ilegivel por cima do conteudo. Cinza claro
-      // fixo funciona igual em qualquer app, e o espacamento maior evita que a
-      // marca caia em cima das linhas de texto na maioria dos casos.
+      // Marca unica e centralizada na pagina (padrao de documento confidencial
+      // de verdade), nao uma grade repetida — grade repetida cobrindo a pagina
+      // inteira lembra "vazamento", nao material profissional. Cor solida bem
+      // clara (nao usa transparencia /ca: muitos visualizadores de PDF moveis
+      // ignoram alpha e desenham a cor cheia, o que deixava tudo escuro).
       var phrase = meta.geradoPara
-        ? ("SERENUS · USO EXCLUSIVO DE " + meta.geradoPara.toUpperCase())
-        : "SERENUS CORRETORA · MATERIAL EXCLUSIVO";
-      var row2 = phrase + "          " + phrase;
-      var ang = 32 * Math.PI / 180;
-      var ca = Math.cos(ang).toFixed(4), sa = Math.sin(ang).toFixed(4), nsa = (-Math.sin(ang)).toFixed(4);
-      cs += "q 0.85 0.86 0.855 rg BT /F1 8 Tf\n";
-      for(var row=-2; row<16; row++){
-        cs += ca + " " + sa + " " + nsa + " " + ca + " -160 " + (row*100) + " Tm (" + pdfStr(row2) + ") Tj\n";
-      }
+        ? ("USO EXCLUSIVO DE " + meta.geradoPara.toUpperCase())
+        : "SERENUS · MATERIAL EXCLUSIVO";
+      var size = 27;
+      var w = pdfTextWidth(phrase, size, false);
+      var maxSpan = 430;
+      if(w > maxSpan){ size = size * maxSpan / w; w = maxSpan; }
+      var ang = 40 * Math.PI / 180;
+      var ca = Math.cos(ang), sa = Math.sin(ang);
+      var cx = PDF_W/2, cy = PDF_H/2;
+      var startX = cx - (w/2)*ca;
+      var startY = cy - (w/2)*sa;
+      cs += "q 0.88 0.885 0.878 rg BT /F1 " + size.toFixed(2) + " Tf\n";
+      cs += ca.toFixed(4) + " " + sa.toFixed(4) + " " + (-sa).toFixed(4) + " " + ca.toFixed(4) + " " + startX.toFixed(2) + " " + startY.toFixed(2) + " Tm (" + pdfStr(phrase) + ") Tj\n";
       cs += "ET Q\n";
     }
 
     function startPage(isFirst){
       cs = "";
       drawWatermark();
-      cs += "q " + C_INK + " rg 0 " + (PDF_H - 5).toFixed(2) + " " + PDF_W.toFixed(2) + " 5 re f Q\n";
+      // Faixa fina na cor da marca (teal), nao preto solido — preto pesado no
+      // topo de toda pagina lembra formulario burocratico, nao material de marca.
+      cs += "q " + C_ACC + " rg 0 " + (PDF_H - 4).toFixed(2) + " " + PDF_W.toFixed(2) + " 4 re f Q\n";
       if(isFirst){
         var sw = 96, sh = sw * PDF_SERENUS_H / PDF_SERENUS_W;
         var logoY = PDF_H - 30 - sh;
@@ -763,15 +769,16 @@
       } else {
         // Logos menores em toda pagina (nao so na primeira) — pedido explicito:
         // material precisa se identificar mesmo se alguem so imprimir/repassar uma folha avulsa.
-        var sw2 = 46, sh2 = sw2 * PDF_SERENUS_H / PDF_SERENUS_W;
-        var logoY2 = PDF_H - 16 - sh2;
+        var sw2 = 78, sh2 = sw2 * PDF_SERENUS_H / PDF_SERENUS_W;
+        var logoY2 = PDF_H - 20 - sh2;
         cs += "q " + sw2.toFixed(2) + " 0 0 " + sh2.toFixed(2) + " " + PDF_M + " " + logoY2.toFixed(2) + " cm /Im1 Do Q\n";
-        var uw2 = 40, uh2 = uw2 * PDF_SULA_H / PDF_SULA_W;
-        cs += "q " + uw2.toFixed(2) + " 0 0 " + uh2.toFixed(2) + " " + (PDF_M + sw2 + 10).toFixed(2) + " " + (logoY2 + (sh2-uh2)/2).toFixed(2) + " cm /Im2 Do Q\n";
-        var txtX = PDF_M + sw2 + 10 + uw2 + 14;
-        cs += "BT /F2 9 Tf " + C_INK + " rg " + txtX + " " + (logoY2 + sh2 - 11).toFixed(2) + " Td (" + pdfStr(meta.cityLabel + " - Serenus Corretora") + ") Tj ET\n";
-        cs += "BT /F1 7.5 Tf " + C_FAINT + " rg " + txtX + " " + (logoY2 + sh2 - 22).toFixed(2) + " Td (" + pdfStr("SulAmerica Direto Nacional (557 / 87507)") + ") Tj ET\n";
-        y = logoY2 - 18;
+        var uw2 = 66, uh2 = uw2 * PDF_SULA_H / PDF_SULA_W;
+        cs += "q " + uw2.toFixed(2) + " 0 0 " + uh2.toFixed(2) + " " + (PDF_M + sw2 + 14).toFixed(2) + " " + (logoY2 + (sh2-uh2)/2).toFixed(2) + " cm /Im2 Do Q\n";
+        var txtX = PDF_M + sw2 + 14 + uw2 + 16;
+        var txtMidY = logoY2 + sh2/2;
+        cs += "BT /F2 10.5 Tf " + C_INK + " rg " + txtX + " " + (txtMidY + 5).toFixed(2) + " Td (" + pdfStr(meta.cityLabel + " - Serenus Corretora") + ") Tj ET\n";
+        cs += "BT /F1 8.5 Tf " + C_FAINT + " rg " + txtX + " " + (txtMidY - 9).toFixed(2) + " Td (" + pdfStr("SulAmerica Direto Nacional (557 / 87507)") + ") Tj ET\n";
+        y = logoY2 - 20;
       }
       pages.push(null); // placeholder, replaced on endPage
     }
