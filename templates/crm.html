@@ -237,6 +237,20 @@
   .nova-ativ { background:var(--panel-2); border-radius:10px; padding:14px; border:1px solid var(--borda); }
   .nova-ativ textarea { width:100%; background:transparent; border:none; color:var(--texto); font-size:13px; resize:none; outline:none; min-height:70px; }
   .nova-ativ-footer { display:flex; justify-content:space-between; align-items:center; margin-top:8px; }
+  .quadro-vazio { text-align:center; padding:46px 22px; border:1px dashed var(--borda);
+                  border-radius:14px; margin-bottom:16px; }
+  .quadro-vazio-tit { font-size:15px; font-weight:700; color:var(--texto); margin-bottom:6px; }
+  .quadro-vazio-txt { font-size:13px; color:var(--cinza-2); margin-bottom:16px; line-height:1.5; }
+  .quadro-abas { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 14px; padding-bottom:2px; }
+  .quadro-aba { display:inline-flex; align-items:center; gap:7px; text-decoration:none;
+                background:var(--panel); border:1px solid var(--borda); border-radius:9px;
+                padding:7px 14px; font-size:12.5px; font-weight:600; color:var(--cinza); transition:.15s; }
+  .quadro-aba:hover { color:var(--texto); border-color:var(--cinza-2); }
+  .quadro-aba.on { color:var(--texto); border-color:var(--qc, var(--azul)); background:var(--panel-2); }
+  .quadro-ponto { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+  .quadro-qtd { font-size:11px; font-weight:700; background:var(--panel-3); color:var(--cinza-2);
+                padding:1px 7px; border-radius:9px; }
+  .quadro-aba.on .quadro-qtd { background:var(--qc, var(--azul)); color:#0b1220; }
   .btn-config-funil { display:inline-flex; align-items:center; gap:6px; background:rgba(99,102,241,.14);
                       border:1px solid rgba(99,102,241,.45); color:#a5b4fc; border-radius:8px;
                       padding:6px 13px; font-size:12px; font-weight:600; cursor:pointer; transition:.15s; }
@@ -306,6 +320,21 @@
     {% endif %}
   </div>
 </div>
+
+{# Abas de quadro: só aparecem se houver mais de um. Com um quadro só, uma aba
+   solitária seria ruído puro. #}
+{% if quadros|length > 1 %}
+<div class="quadro-abas">
+  {% for q in quadros %}
+  <a class="quadro-aba {{ 'on' if q.slug == quadro_atual else '' }}"
+     href="?quadro={{ q.slug }}{{ ('&' ~ qs_filtros) if qs_filtros else '' }}"
+     style="{{ '--qc:' ~ q.cor }}">
+    <span class="quadro-ponto" style="background:{{ q.cor }}"></span>{{ q.nome }}
+    <span class="quadro-qtd">{{ quadro_total.get(q.slug, 0) }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
 
 <div class="page" style="padding-right:0;">
 
@@ -404,6 +433,15 @@
   <div class="filtros-salvos" id="filtros-salvos"></div>
 
   <!-- ── KANBAN ── -->
+  {% if not etapas %}
+  {# Quadro sem etapa nenhuma: sem isto o admin cria um quadro e ve tela branca,
+     sem pista do que fazer em seguida. #}
+  <div class="quadro-vazio">
+    <div class="quadro-vazio-tit">Este quadro ainda não tem etapas</div>
+    <div class="quadro-vazio-txt">Crie as etapas dele, ou mova uma etapa existente pra cá, em Configurar funil.</div>
+    <button class="btn-config-funil" onclick="location.href='/crm/etapas/gerenciar'">Configurar funil</button>
+  </div>
+  {% endif %}
   <div class="kanban-wrap" id="kanban">
     {% for etapa in etapas %}
     <div class="kanban-col" id="col-{{ etapa.id }}" data-etapa="{{ etapa.id }}"

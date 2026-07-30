@@ -1029,6 +1029,18 @@ def init_db():
                 lembrete_enviado INTEGER DEFAULT 0,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            # QUADROS: cada kanban é um quadro com suas próprias etapas. O quadro do
+            # LEAD é derivado da etapa dele, nunca gravado — coluna separada
+            # dessincroniza (mover de etapa e esquecer de mover de quadro), e um lead
+            # em dois lugares ao mesmo tempo é impossível de depurar.
+            """CREATE TABLE IF NOT EXISTS crm_quadros (
+                id SERIAL PRIMARY KEY,
+                slug TEXT UNIQUE NOT NULL,
+                nome TEXT NOT NULL,
+                cor TEXT DEFAULT '#6366f1',
+                ordem INTEGER DEFAULT 0,
+                ativo INTEGER DEFAULT 1
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_etapas (
                 id SERIAL PRIMARY KEY,
                 slug TEXT UNIQUE NOT NULL,
@@ -1684,6 +1696,14 @@ def init_db():
             lembrete_enviado INTEGER DEFAULT 0,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS crm_quadros (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT UNIQUE NOT NULL,
+            nome TEXT NOT NULL,
+            cor TEXT DEFAULT '#6366f1',
+            ordem INTEGER DEFAULT 0,
+            ativo INTEGER DEFAULT 1
+        );
         CREATE TABLE IF NOT EXISTS crm_etapas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             slug TEXT UNIQUE NOT NULL,
@@ -2202,6 +2222,8 @@ def init_db():
         ("crm_status_opcoes", "etapa_slug", "TEXT"),
         # prazo em dias até o card virar de cor nesta etapa (NULL = padrão global)
         ("crm_etapas", "sla_dias", "INTEGER"),
+        # A que quadro esta etapa pertence (vazio = quadro padrão)
+        ("crm_etapas", "quadro_slug", "TEXT"),
         ("crm_leads", "consultor_externo", "TEXT"),  # nome original da planilha
         # ─── Boleto de Adesão via Asaas ───
         ("propostas", "adesao_asaas_customer_id", "TEXT"),
@@ -2394,6 +2416,37 @@ def init_db():
                 try: conn.rollback()
                 except Exception: pass
             print(f"[ETQ_RENAME] migração pulada: {e}")
+
+    # ─── QUADROS DO KANBAN (30/07/2026) ───────────────────────────────────────
+    # Um quadro por funil. As etapas que já existem vão todas pro quadro comercial
+    # — nenhum card muda de lugar nesta migração, que é o requisito pra ela ser
+    # segura numa base viva. O funil de nutrição ganha um quadro próprio VAZIO:
+    # mover a etapa Nutrição pra ele agora tiraria os leads que já estão lá da
+    # vista de quem trabalha o comercial, sem ninguém ter pedido.
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        ja_quadros = conn.execute("SELECT 1 FROM meta_flags WHERE k='quadros_kanban_20260730'").fetchone()
+    except Exception:
+        ja_quadros = True
+    if not ja_quadros:
+        try:
+            for i, (slug, nome, cor) in enumerate([
+                ('comercial', 'Funil Comercial', '#6366f1'),
+                ('nutricao', 'Nutrição', '#a855f7'),
+            ], start=1):
+                if not conn.execute("SELECT 1 FROM crm_quadros WHERE slug=?", (slug,)).fetchone():
+                    conn.execute("INSERT INTO crm_quadros (slug,nome,cor,ordem) VALUES (?,?,?,?)",
+                                 (slug, nome, cor, i))
+            n = conn.execute("""UPDATE crm_etapas SET quadro_slug='comercial'
+                                WHERE quadro_slug IS NULL OR quadro_slug=''""").rowcount or 0
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('quadros_kanban_20260730')")
+            conn.commit()
+            print(f"[QUADROS] 2 quadro(s) criado(s); {n} etapa(s) no Funil Comercial")
+        except Exception as e:
+            if is_pg:
+                try: conn.rollback()
+                except Exception: pass
+            print(f"[QUADROS] migração pulada: {e}")
 
     # ─── SEPARAÇÃO ETIQUETA × SUB-STATUS (29/07/2026) ─────────────────────────
     # Estavam na mesma lista, e são coisas diferentes:
@@ -15557,18 +15610,49 @@ def whatsapp_analise_conversa(aid):
 
 
 # ─── CRM ─────────────────────────────────────────────────────────────────────────
-def carregar_etapas_crm(conn=None):
+def carregar_quadros_crm(conn=None):
+    """Quadros do kanban, ordenados. Sempre devolve ao menos um: sem quadro o /crm
+    não teria o que renderizar, e uma tela vazia por causa de config faltando é
+    pior que um padrão razoável."""
+    fechar = False
+    if conn is None:
+        conn = db(); fechar = True
+    try:
+        rows = conn.execute(
+            "SELECT slug, nome, cor, ordem FROM crm_quadros WHERE ativo=1 ORDER BY ordem, id"
+        ).fetchall()
+        out = [{'id': r['slug'], 'slug': r['slug'], 'nome': r['nome'],
+                'cor': r['cor'] or '#6366f1', 'ordem': r['ordem']} for r in rows]
+    except Exception:
+        out = []
+    finally:
+        if fechar:
+            close_db(conn)
+    if not out:
+        out = [{'id': 'comercial', 'slug': 'comercial', 'nome': 'Funil Comercial',
+                'cor': '#6366f1', 'ordem': 1}]
+    return out
+
+
+# quadro=None devolve TODAS as etapas de propósito: as 16 chamadas espalhadas pelo
+# app (validação de etapa em /mover, gatilhos de fluxo, importação, API) precisam
+# enxergar o funil inteiro. Só a tela do kanban filtra por quadro.
+def carregar_etapas_crm(conn=None, quadro=None):
     """Lê as etapas do funil do banco, ordenadas. Cria conexão própria se não receber uma."""
     fechar = False
     if conn is None:
         conn = db(); fechar = True
     try:
         rows = conn.execute(
-            "SELECT slug, nome, cor, ordem, tipo, sla_dias FROM crm_etapas WHERE ativo=1 ORDER BY ordem, id"
+            "SELECT slug, nome, cor, ordem, tipo, sla_dias, quadro_slug FROM crm_etapas WHERE ativo=1 ORDER BY ordem, id"
         ).fetchall()
         etapas = [{'id': r['slug'], 'slug': r['slug'], 'nome': r['nome'],
                    'cor': r['cor'], 'ordem': r['ordem'], 'tipo': r['tipo'],
-                   'sla_dias': (r['sla_dias'] if 'sla_dias' in r.keys() else None)} for r in rows]
+                   'sla_dias': (r['sla_dias'] if 'sla_dias' in r.keys() else None),
+                   'quadro': ((r['quadro_slug'] if 'quadro_slug' in r.keys() else '') or 'comercial')}
+                  for r in rows]
+        if quadro:
+            etapas = [e for e in etapas if e['quadro'] == quadro]
     except Exception:
         etapas = []
     finally:
@@ -15576,6 +15660,7 @@ def carregar_etapas_crm(conn=None):
             close_db(conn)
     # Fallback: se a tabela ainda não existir/estiver vazia, usa as etapas padrão
     if not etapas:
+        # fallback: tudo no quadro comercial
         etapas = [
             {'id': 'lead_novo', 'slug': 'lead_novo', 'nome': 'Novo Lead', 'cor': '#6366f1', 'ordem': 0, 'tipo': 'normal'},
             {'id': 'primeiro_contato', 'slug': 'primeiro_contato', 'nome': 'Primeiro Contato', 'cor': '#3b82f6', 'ordem': 1, 'tipo': 'normal'},
@@ -15587,6 +15672,11 @@ def carregar_etapas_crm(conn=None):
             {'id': 'negociacao_perdida', 'slug': 'negociacao_perdida', 'nome': 'Negociação Perdida', 'cor': '#ef4444', 'ordem': 7, 'tipo': 'perdido'},
             {'id': 'nutricao', 'slug': 'nutricao', 'nome': 'Nutrição', 'cor': '#a3a3a3', 'ordem': 8, 'tipo': 'normal'},
         ]
+        for e in etapas:
+            e.setdefault('sla_dias', None)
+            e['quadro'] = 'comercial'
+        if quadro and quadro != 'comercial':
+            etapas = []
     return etapas
 
 
@@ -15734,8 +15824,13 @@ def crm():
     q += " ORDER BY l.atualizado_em DESC"
     leads = conn.execute(q, params).fetchall()
 
-    # Etapas dinâmicas do banco
-    etapas = carregar_etapas_crm(conn)
+    # Etapas do QUADRO selecionado. Quadro inválido cai no primeiro em vez de
+    # mostrar um kanban vazio — link velho no favorito não pode virar tela em branco.
+    quadros = carregar_quadros_crm(conn)
+    f_quadro = (request.args.get('quadro') or '').strip()
+    if f_quadro not in [q['slug'] for q in quadros]:
+        f_quadro = quadros[0]['slug']
+    etapas = carregar_etapas_crm(conn, quadro=f_quadro)
 
     # ── Saúde (cor) de cada card: tempo sem AVANÇAR contra o prazo da etapa ──
     # Calculado em Python e não em SQL porque o prazo é por etapa e a comparação
@@ -15752,6 +15847,7 @@ def crm():
         av = lead['avancou_em'] if 'avancou_em' in lead.keys() else None
         saude[lead['id']] = _saude_card(av, sla_por_etapa.get(lead['etapa'] or ''), lead['atualizado_em'])
 
+    leads_todos = list(leads)
     if f_cor:
         if f_cor == 'fora_do_prazo':
             leads = [l for l in leads if saude[l['id']]['nivel'] in ('atencao', 'atrasado')]
@@ -15789,24 +15885,53 @@ def crm():
     kanban = {e['id']: [] for e in etapas}
     kanban_total = {e['id']: 0 for e in etapas}
     kanban_valor = {e['id']: 0 for e in etapas}
-    primeira = etapas[0]['id'] if etapas else 'lead_novo'
+    # Com mais de um quadro, o lead SÓ entra no kanban se a etapa dele pertence ao
+    # quadro aberto. Antes, qualquer etapa desconhecida caía na primeira coluna —
+    # o que com quadros fazia todo lead do comercial aparecer também no funil de
+    # nutrição (visto em teste: 3 cards do comercial na coluna de nutrição).
+    # Órfão de verdade (etapa que não existe em quadro nenhum) fica no PRIMEIRO
+    # quadro, pra não sumir do sistema — mas só lá.
+    etapas_conhecidas = {e['id'] for e in carregar_etapas_crm(conn)}
+    primeira = etapas[0]['id'] if etapas else None
+    eh_quadro_padrao = bool(quadros) and f_quadro == quadros[0]['slug']
     for lead in leads:
-        etapa = lead['etapa'] or primeira
-        alvo = etapa if etapa in kanban else primeira
+        etapa = lead['etapa'] or ''
+        if etapa in kanban:
+            alvo = etapa
+        elif etapa not in etapas_conhecidas and eh_quadro_padrao and primeira:
+            alvo = primeira          # órfão: aparece no quadro padrão
+        else:
+            continue                 # lead de outro quadro: não é desta tela
         kanban_total[alvo] += 1
         kanban_valor[alvo] += lead['valor_estimado'] or 0
         if len(kanban[alvo]) < CARDS_POR_COLUNA:
             kanban[alvo].append(lead)
 
-    total = len(leads)
+    total = sum(kanban_total.values())
+
+    # Quantos leads em cada quadro — a aba precisa dizer se vale a pena clicar.
+    # Conta sobre a MESMA base filtrada (consultor, busca, data), senão a aba
+    # prometeria leads que o filtro atual esconderia.
+    quadro_de = {e['id']: e.get('quadro') or 'comercial' for e in carregar_etapas_crm(conn)}
+    quadro_total = {q['slug']: 0 for q in quadros}
+    for lead in leads_todos:
+        # Mesma regra do kanban: órfão conta no quadro padrão, não em qualquer um.
+        qd = quadro_de.get(lead['etapa'] or '', quadros[0]['slug'])
+        if qd in quadro_total:
+            quadro_total[qd] += 1
 
     # Filtros ativos para repassar ao template
     filtros_ativos = {
         'etapa': f_etapa, 'consultor': f_consultor, 'origem': f_origem,
         'data_de': f_data_de, 'data_ate': f_data_ate, 'q': f_busca,
         'externo': f_externo, 'sub_status': f_sub_status,
-        'etiqueta': f_etiqueta, 'cor': f_cor
+        'etiqueta': f_etiqueta, 'cor': f_cor, 'quadro': f_quadro
     }
+    # Query string dos filtros ativos SEM o quadro — as abas concatenam o seu
+    # próprio. Montada aqui e não no Jinja porque valor de filtro pode ter espaço,
+    # acento ou & (busca por nome), e no template isso viraria link quebrado.
+    from urllib.parse import urlencode
+    qs_filtros = urlencode({k: v for k, v in filtros_ativos.items() if v and k != 'quadro'})
 
     sub_status_opcoes = _sub_status_opcoes_nomes(conn)
     sub_status_etapa = _sub_status_por_etapa(conn)
@@ -15820,7 +15945,9 @@ def crm():
                            sub_status_etapa=sub_status_etapa, etiquetas_todas=etiquetas_todas,
                            etiquetas_lead=etiquetas_lead, saude=saude,
                            campos_saida_etapa=campos_saida_etapa, valores_saida=valores_saida,
-                           trava_falta=trava_falta)
+                           trava_falta=trava_falta,
+                           quadros=quadros, quadro_atual=f_quadro, quadro_total=quadro_total,
+                           qs_filtros=qs_filtros)
 
 
 @app.route('/crm/lead/novo', methods=['POST'])
@@ -19250,8 +19377,11 @@ def crm_etapa_nova():
         slug = f"{base}_{tent}"
     # ordem: vai pro fim (antes de ganho/perdido se existirem)
     maxord = conn.execute("SELECT COALESCE(MAX(ordem),0) m FROM crm_etapas").fetchone()['m']
-    conn.execute("INSERT INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES (?,?,?,?,?)",
-                 (slug, nome, cor, maxord + 1, 'normal'))
+    quadro = (d.get('quadro') or 'comercial').strip()
+    if not conn.execute("SELECT 1 FROM crm_quadros WHERE slug=? AND ativo=1", (quadro,)).fetchone():
+        quadro = 'comercial'
+    conn.execute("INSERT INTO crm_etapas (slug,nome,cor,ordem,tipo,quadro_slug) VALUES (?,?,?,?,?,?)",
+                 (slug, nome, cor, maxord + 1, 'normal', quadro))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "slug": slug})
 
@@ -19271,6 +19401,13 @@ def crm_etapa_editar(slug):
     nova_cor = cor or et['cor']
     # sla_dias = prazo até o card desta etapa virar de cor. '' apaga (volta ao
     # padrão global); ausente mantém o que está gravado.
+    # Trocar a etapa de quadro leva os leads dela junto — o quadro do lead é
+    # derivado da etapa, então não há nada pra sincronizar (é o ponto do desenho).
+    if 'quadro' in d:
+        novo_q = (d.get('quadro') or '').strip()
+        if novo_q and not conn.execute("SELECT 1 FROM crm_quadros WHERE slug=? AND ativo=1", (novo_q,)).fetchone():
+            close_db(conn); return jsonify({"ok": False, "erro": "Quadro não encontrado"}), 400
+        conn.execute("UPDATE crm_etapas SET quadro_slug=? WHERE slug=?", (novo_q or 'comercial', slug))
     if 'sla_dias' in d:
         bruto = str(d.get('sla_dias') or '').strip()
         try:
@@ -19331,8 +19468,9 @@ def crm_etapas_gerenciar():
     status_opcoes = carregar_status_crm(conn)
     etiquetas = carregar_etiquetas_crm(conn)
     campos = carregar_campos_crm(conn)
+    quadros = carregar_quadros_crm(conn)
     close_db(conn)
-    return render_template('crm_etapas.html', etapas=etapas, status_opcoes=status_opcoes,
+    return render_template('crm_etapas.html', etapas=etapas, status_opcoes=status_opcoes, quadros=quadros,
                            etiquetas=etiquetas, sla_padrao=_SLA_PADRAO_DIAS,
                            campos=campos, campo_tipos=_CAMPO_TIPOS,
                            campo_momentos=_CAMPO_MOMENTOS, momento_rotulo=_CAMPO_MOMENTO_ROTULO)
@@ -19392,6 +19530,78 @@ def crm_status_excluir(sid):
         close_db(conn); return jsonify({"ok": False, "erro": "Status não encontrado"}), 404
     conn.execute("UPDATE crm_leads SET sub_status=NULL WHERE sub_status=?", (st['nome'],))
     conn.execute("DELETE FROM crm_status_opcoes WHERE id=?", (sid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+# ─── QUADROS DO KANBAN ────────────────────────────────────────────────────────
+@app.route('/crm/quadros/novo', methods=['POST'])
+@login_required
+@admin_required
+def crm_quadro_novo():
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    if not nome:
+        return jsonify({"ok": False, "erro": "Nome obrigatório"}), 400
+    conn = db()
+    base = _slugify(nome) or 'quadro'
+    slug, n = base, 1
+    while conn.execute("SELECT 1 FROM crm_quadros WHERE slug=?", (slug,)).fetchone():
+        n += 1; slug = f"{base}_{n}"
+    maxord = conn.execute("SELECT COALESCE(MAX(ordem),0) m FROM crm_quadros").fetchone()['m']
+    conn.execute("INSERT INTO crm_quadros (slug,nome,cor,ordem) VALUES (?,?,?,?)",
+                 (slug, nome, (d.get('cor') or '#6366f1').strip(), maxord + 1))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "slug": slug})
+
+
+@app.route('/crm/quadros/<slug>/editar', methods=['POST'])
+@login_required
+@admin_required
+def crm_quadro_editar(slug):
+    d = request.json or {}
+    conn = db()
+    q = conn.execute("SELECT * FROM crm_quadros WHERE slug=?", (slug,)).fetchone()
+    if not q:
+        close_db(conn); return jsonify({"ok": False, "erro": "Quadro não encontrado"}), 404
+    conn.execute("UPDATE crm_quadros SET nome=?, cor=? WHERE slug=?",
+                 ((d.get('nome') or '').strip() or q['nome'],
+                  (d.get('cor') or '').strip() or q['cor'], slug))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/quadros/<slug>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_quadro_excluir(slug):
+    """Só arquiva quadro VAZIO. Arquivar um quadro com etapas sumiria com os leads
+    dessas etapas da tela — eles continuariam no banco, mas ninguém os veria, que
+    é a pior forma de perder dado: a que não parece perda."""
+    conn = db()
+    if not conn.execute("SELECT 1 FROM crm_quadros WHERE slug=?", (slug,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Quadro não encontrado"}), 404
+    n = conn.execute("SELECT COUNT(*) c FROM crm_etapas WHERE quadro_slug=? AND ativo=1", (slug,)).fetchone()['c']
+    if n:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": f"Este quadro tem {n} etapa(s). Mova-as pra outro quadro antes."}), 400
+    if conn.execute("SELECT COUNT(*) c FROM crm_quadros WHERE ativo=1").fetchone()['c'] <= 1:
+        close_db(conn); return jsonify({"ok": False, "erro": "Não dá pra arquivar o único quadro"}), 400
+    conn.execute("UPDATE crm_quadros SET ativo=0 WHERE slug=?", (slug,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/quadros/reordenar', methods=['POST'])
+@login_required
+@admin_required
+def crm_quadros_reordenar():
+    ordem = (request.json or {}).get('ordem', [])
+    if not isinstance(ordem, list) or not ordem:
+        return jsonify({"ok": False, "erro": "Ordem inválida"}), 400
+    conn = db()
+    for i, slug in enumerate(ordem, start=1):
+        conn.execute("UPDATE crm_quadros SET ordem=? WHERE slug=?", (i, slug))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 

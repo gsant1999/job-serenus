@@ -55,6 +55,31 @@
   </div>
 
   <div class="ge-sec">
+    <div class="ge-sec-tit">Quadros</div>
+    <div class="ge-sec-sub">Cada quadro é um kanban com suas próprias etapas — o funil comercial e o de nutrição, por exemplo. O lead pertence ao quadro da etapa onde ele está, então mover uma etapa de quadro leva os leads dela junto.</div>
+    <div id="lista-quadros">
+      {% for q in quadros %}
+      <div class="ge-item" data-slug="{{ q.slug }}">
+        <input type="color" value="{{ q.cor }}" onchange="editarQuadro('{{ q.slug }}', {cor:this.value})">
+        <div class="nome"><input type="text" value="{{ q.nome }}" onblur="if(this.value.trim() && this.value!==this.defaultValue) editarQuadro('{{ q.slug }}', {nome:this.value.trim()})"></div>
+        <span class="tipo-tag">{{ etapas|selectattr('quadro','equalto',q.slug)|list|length }} etapa(s)</span>
+        <div class="ge-btns">
+          <button class="ge-btn-mini" title="Mover para cima" onclick="moverQuadro('{{ q.slug }}', -1)">▲</button>
+          <button class="ge-btn-mini" title="Mover para baixo" onclick="moverQuadro('{{ q.slug }}', 1)">▼</button>
+          <button class="ge-btn-mini excluir" title="Arquivar quadro" onclick="excluirQuadro('{{ q.slug }}', '{{ q.nome }}')">✕</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="ge-add">
+      <input type="color" id="novo-quadro-cor" value="#6366f1">
+      <input type="text" id="novo-quadro-nome" placeholder="Nome do novo quadro (ex: Pós-venda)">
+      <button onclick="criarQuadro()">+ Adicionar quadro</button>
+    </div>
+    <div class="ge-nota">Só dá pra arquivar quadro vazio. Arquivar um quadro com etapas sumiria com os leads dessas etapas da tela — eles continuariam no banco, mas ninguém os veria.</div>
+  </div>
+
+  <div class="ge-sec">
     <div class="ge-sec-tit">Etapas do Funil</div>
     <div class="ge-sec-sub">São as colunas do Kanban. Use as setas para reordenar. Ao excluir uma etapa, os leads dela são movidos automaticamente para a etapa seguinte. O campo <strong>dias</strong> é o prazo desta etapa: passando dele o card fica amarelo, no dobro fica vermelho.</div>
     <div id="lista-etapas">
@@ -62,6 +87,9 @@
       <div class="ge-item" data-slug="{{ e.slug }}">
         <input type="color" value="{{ e.cor }}" onchange="editarEtapa('{{ e.slug }}', {cor:this.value})">
         <div class="nome"><input type="text" value="{{ e.nome }}" onblur="if(this.value.trim() && this.value!==this.defaultValue) editarEtapa('{{ e.slug }}', {nome:this.value.trim()})"></div>
+        <select onchange="editarEtapa('{{ e.slug }}', {quadro:this.value}); location.reload();" title="Em que quadro esta etapa aparece">
+          {% for q in quadros %}<option value="{{ q.slug }}" {% if q.slug == e.quadro %}selected{% endif %}>{{ q.nome }}</option>{% endfor %}
+        </select>
         {% if e.tipo != 'normal' %}<span class="tipo-tag">{{ e.tipo }}</span>{% endif %}
         <div class="prazo" title="Dias sem avançar até o card mudar de cor nesta etapa. Vazio usa o padrão ({{ sla_padrao }} dias).">
           <input type="number" min="1" value="{{ e.sla_dias or '' }}" placeholder="{{ sla_padrao }}"
@@ -79,6 +107,9 @@
     <div class="ge-add">
       <input type="color" id="nova-etapa-cor" value="#3b82f6">
       <input type="text" id="nova-etapa-nome" placeholder="Nome da nova etapa (ex: Aguardando documentos)">
+      <select id="nova-etapa-quadro">
+        {% for q in quadros %}<option value="{{ q.slug }}">{{ q.nome }}</option>{% endfor %}
+      </select>
       <button onclick="criarEtapa()">+ Adicionar etapa</button>
     </div>
   </div>
@@ -221,7 +252,8 @@ async function criarEtapa() {
   const nome = document.getElementById('nova-etapa-nome').value.trim();
   const cor = document.getElementById('nova-etapa-cor').value;
   if (!nome) return;
-  const d = await _post('/crm/etapas/nova', {nome, cor});
+  const quadro = (document.getElementById('nova-etapa-quadro')||{}).value || 'comercial';
+  const d = await _post('/crm/etapas/nova', {nome, cor, quadro});
   if (d.ok) location.reload();
 }
 async function editarEtapa(slug, campos) {
@@ -303,6 +335,34 @@ async function moverStatus(id, direcao) {
   const d = await _post('/crm/status/reordenar', {ordem: ids});
   if (d.ok) location.reload();
 }
+// ── Quadros ──
+async function criarQuadro() {
+  const nome = document.getElementById('novo-quadro-nome').value.trim();
+  const cor = document.getElementById('novo-quadro-cor').value;
+  if (!nome) return;
+  const d = await _post('/crm/quadros/novo', {nome, cor});
+  if (d.ok) location.reload();
+}
+async function editarQuadro(slug, campos) {
+  const d = await _post('/crm/quadros/' + slug + '/editar', campos);
+  if (!d.ok) location.reload();
+}
+async function excluirQuadro(slug, nome) {
+  if (!confirm('Arquivar o quadro "' + nome + '"? Só funciona se ele estiver sem etapas.')) return;
+  const d = await _post('/crm/quadros/' + slug + '/excluir', {});
+  if (d.ok) location.reload();
+}
+async function moverQuadro(slug, direcao) {
+  const itens = Array.from(document.querySelectorAll('#lista-quadros .ge-item'));
+  const slugs = itens.map(i => i.dataset.slug);
+  const idx = slugs.indexOf(slug);
+  const novoIdx = idx + direcao;
+  if (novoIdx < 0 || novoIdx >= slugs.length) return;
+  [slugs[idx], slugs[novoIdx]] = [slugs[novoIdx], slugs[idx]];
+  const d = await _post('/crm/quadros/reordenar', {ordem: slugs});
+  if (d.ok) location.reload();
+}
+
 // ── Campos personalizados ──
 async function criarCampo() {
   const nome = document.getElementById('novo-campo-nome').value.trim();
