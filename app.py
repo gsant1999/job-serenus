@@ -1880,7 +1880,10 @@ def init_db():
     # principalmente na etapa Cotação Enviada. Trocadas em 29/07/2026: "Follow up
     # 1/2/3" dizia quantas vezes o consultor tentou, não POR QUE o lead parou —
     # e é o motivo que define qual conversa ter. Agora cada etiqueta é um motivo.
-    status_default = ['Preço Caro', 'Silêncio', 'Momento', 'Aguardando resposta']
+    # Nome da etiqueta = a frase que o consultor ouviu do lead, não a categoria
+    # abstrata ("Preço", "Momento"). "Achou Caro" e "Não é o Momento" são o que
+    # ele lê no card e reconhece na hora, sem traduzir nada.
+    status_default = ['Achou Caro', 'Silêncio', 'Não é o Momento', 'Aguardando resposta']
     try:
         ja_tem_status = conn.execute("SELECT COUNT(*) c FROM crm_status_opcoes").fetchone()['c']
     except Exception:
@@ -1928,6 +1931,45 @@ def init_db():
                     try: conn.rollback()
                     except Exception: pass
                 print(f"[FOLLOWUP_ETIQUETAS] migração pulada: {e}")
+
+    # ─── RENAME das etiquetas de follow-up (29/07/2026, mesmo dia) ────────────
+    # Precisa de flag PRÓPRIA: a flag followup_etiquetas_20260729 já rodou no
+    # deploy anterior, então o bloco acima nunca mais executa — sem esta segunda
+    # migração os nomes antigos ficariam pra sempre no banco de produção.
+    # RENOMEIA no lugar (não apaga e recria) pra não perder a etiqueta dos cards
+    # que já foram classificados: apagar a opção deixaria o card com sub_status
+    # apontando pra um nome que não existe mais na lista.
+    rename_etq = [('Preço Caro', 'Achou Caro'), ('Momento', 'Não é o Momento')]
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        ja_ren = conn.execute("SELECT 1 FROM meta_flags WHERE k='etq_rename_20260729b'").fetchone()
+    except Exception:
+        ja_ren = True
+    if not ja_ren:
+        try:
+            renomeados = 0
+            for antigo, novo in rename_etq:
+                existe_novo = conn.execute("SELECT 1 FROM crm_status_opcoes WHERE nome=?", (novo,)).fetchone()
+                if existe_novo:
+                    # Nome novo já existe (ex.: instalação limpa): só migra os
+                    # cards que ainda apontam pro antigo e remove a duplicata.
+                    conn.execute("UPDATE crm_leads SET sub_status=? WHERE sub_status=?", (novo, antigo))
+                    conn.execute("DELETE FROM crm_status_opcoes WHERE nome=?", (antigo,))
+                else:
+                    conn.execute("UPDATE crm_status_opcoes SET nome=? WHERE nome=?", (novo, antigo))
+                    conn.execute("UPDATE crm_leads SET sub_status=? WHERE sub_status=?", (novo, antigo))
+                renomeados += 1
+            # Reordena pela lista oficial (Achou Caro, Silêncio, Não é o Momento...)
+            for i, nome in enumerate(status_default, start=1):
+                conn.execute("UPDATE crm_status_opcoes SET ordem=? WHERE nome=?", (i, nome))
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('etq_rename_20260729b')")
+            conn.commit()
+            print(f"[ETQ_RENAME] {renomeados} etiqueta(s) renomeada(s): Achou Caro / Não é o Momento")
+        except Exception as e:
+            if is_pg:
+                try: conn.rollback()
+                except Exception: pass
+            print(f"[ETQ_RENAME] migração pulada: {e}")
 
 
     # Regimes padrão
