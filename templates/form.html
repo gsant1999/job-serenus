@@ -41,6 +41,9 @@
 
 <div class="page" style="max-width:860px;">
 <form id="form">
+  {# Lead de origem, quando a proposta nasceu da ficha do CRM/extensao. Campo
+     oculto porque e chave, nao dado que alguem digita. #}
+  <input type="hidden" name="lead_id_origem" value="{{ lead_id_origem or '' }}">
 
   <div class="form-secao" style="border:1px dashed var(--borda-2); background:var(--panel-2);">
     <h3>Colar dados extraídos</h3>

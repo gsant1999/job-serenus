@@ -109,6 +109,16 @@
   {% if cot.token %}<button class="btn-voltar" style="border-color:rgba(255,255,255,.5)" onclick="copiarLink()">Copiar link</button>{% endif %}
   <button class="btn-voltar" id="btn-editar" style="border-color:rgba(251,146,60,.7);color:#fb923c" onclick="toggleEditar()" title="Corrige um valor SÓ nesta cotação, sem trocar o link. Se o cliente já tem este link, ele verá o valor corrigido.">Corrigir valor (mesmo link)</button>
   <button class="btn-img" id="btn-salvar-aj" style="display:none;background:#fb923c;color:#1c1c24" onclick="salvarAjustes({{ cot.id }})">Salvar correção</button>
+  {% if cot.planos and cot.planos|length > 1 %}
+  <div style="position:relative;display:inline-block;">
+    <button class="btn-img" onclick="togglePlanoUnico()">Copiar plano</button>
+    <div id="painel-plano-unico" style="display:none;position:absolute;top:calc(100% + 8px);right:0;background:#2a2a34;border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:8px;z-index:999;box-shadow:0 8px 32px rgba(0,0,0,.5);min-width:200px;">
+      {% for p in cot.planos %}
+      <button onclick="copiarImagemPlano({{ loop.index0 }})" style="display:block;width:100%;text-align:left;background:transparent;border:none;color:#f0f0f4;padding:9px 10px;font-size:13px;cursor:pointer;border-radius:7px;">{{ p.plano }} <span style="color:#9a9aa6;">({{ p.operadora }})</span></button>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
   <button class="btn-img" onclick="copiarImagem()">Copiar imagem</button>
   <button class="btn-img" style="background:#9aa0b0;color:#1c1c24" onclick="baixarImagem()">Baixar</button>
   <button class="btn-pdf" onclick="window.print()">PDF</button>
@@ -151,7 +161,7 @@
   <div class="vert">
     {% for p in cot.planos %}
     {% set pidx = loop.index0 %}
-    <div class="vcard" style="--c:{{ p.cor }}">
+    <div class="vcard" data-p="{{ pidx }}" style="--c:{{ p.cor }}">
       <div class="vhead">
         {% if p.logo %}<img src="{{ p.logo }}" alt="{{ p.operadora }}" class="vlogo">{% else %}<span class="vop">{{ p.operadora }}</span>{% endif %}
         <div class="vtit">
@@ -163,7 +173,7 @@
       </div>
       <table class="vtab">
         {% for f in cot.faixas_usadas %}
-        <tr><td>{{ f.label }}<span class="q">{{ f.qtd }}x</span></td><td class="vv preco-cell" data-p="{{ pidx }}" data-f="{{ f.faixa }}" data-qtd="{{ f.qtd }}" data-preco-unit="{{ p.precos_unit[f.faixa] }}">{{ p.precos[f.faixa]|moeda_doc }}</td></tr>
+        <tr><td>{{ f.label }}<span class="q">{{ f.qtd }}x</span></td><td class="vv preco-cell" data-p="{{ pidx }}" data-f="{{ f.faixa }}" data-qtd="{{ f.qtd }}" data-preco-unit="{{ p.precos_unit[f.faixa] }}">{{ p.precos_unit[f.faixa]|moeda_doc }}</td></tr>
         {% endfor %}
       </table>
     </div>
@@ -175,19 +185,19 @@
   <table class="doc">
     <tr class="op">
       <td class="lbl"></td>
-      {% for p in cot.planos %}<td class="op-name" style="--c:{{ p.cor }}">{% if p.logo %}<img src="{{ p.logo }}" alt="{{ p.operadora }}" style="max-height:36px; max-width:130px; object-fit:contain;">{% else %}{{ p.operadora }}{% endif %}</td>{% endfor %}
+      {% for p in cot.planos %}<td class="op-name" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{% if p.logo %}<img src="{{ p.logo }}" alt="{{ p.operadora }}" style="max-height:36px; max-width:130px; object-fit:contain;">{% else %}{{ p.operadora }}{% endif %}</td>{% endfor %}
     </tr>
     <tr class="head">
-      <td class="lbl">Geral</td>
-      {% for p in cot.planos %}<td class="val" style="--c:{{ p.cor }}">{% if p.recomendacao %}<div style="font-size:9px;font-weight:700;letter-spacing:.3px;padding:2px 7px;border-radius:20px;display:inline-block;margin-bottom:3px;background:{% if p.recomendacao=='1ª opção' %}#1fb88a{% elif p.recomendacao=='2ª opção' %}#3b82f6{% else %}#8b5cf6{% endif %};color:#fff;">{{ p.recomendacao }}</div>{% endif %}<div class="pn">{{ p.plano }}</div><div class="po">{{ p.operadora }}</div></td>{% endfor %}
+      <td class="lbl"></td>
+      {% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}" style="--c:{{ p.cor }}">{% if p.recomendacao %}<div style="font-size:9px;font-weight:700;letter-spacing:.3px;padding:2px 7px;border-radius:20px;display:inline-block;margin-bottom:3px;background:{% if p.recomendacao=='1ª opção' %}#1fb88a{% elif p.recomendacao=='2ª opção' %}#3b82f6{% else %}#8b5cf6{% endif %};color:#fff;">{{ p.recomendacao }}</div>{% endif %}<div class="pn">{{ p.plano }}</div><div class="po">{{ p.operadora }}</div></td>{% endfor %}
     </tr>
-    <tr><td class="lbl">Modalidade</td>{% for p in cot.planos %}<td class="val">{{ p.modalidade }}</td>{% endfor %}</tr>
-    <tr><td class="lbl">Acomodação</td>{% for p in cot.planos %}<td class="val">{{ p.acomodacao }}</td>{% endfor %}</tr>
-    <tr><td class="lbl">Coparticipação</td>{% for p in cot.planos %}<td class="val">{{ p.coparticipacao }}</td>{% endfor %}</tr>
+    <tr><td class="lbl">Modalidade</td>{% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}">{{ p.modalidade }}</td>{% endfor %}</tr>
+    <tr><td class="lbl">Acomodação</td>{% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}">{{ p.acomodacao }}</td>{% endfor %}</tr>
+    <tr><td class="lbl">Coparticipação</td>{% for p in cot.planos %}<td class="val" data-p="{{ loop.index0 }}">{{ p.coparticipacao }}</td>{% endfor %}</tr>
     {% for f in cot.faixas_usadas %}
     <tr class="faixa">
       <td class="lbl">{{ f.label }}<span class="q">{{ f.qtd }}x</span></td>
-      {% for p in cot.planos %}<td class="val preco-cell" data-p="{{ loop.index0 }}" data-f="{{ f.faixa }}" data-qtd="{{ f.qtd }}" data-preco-unit="{{ p.precos_unit[f.faixa] }}">{{ p.precos[f.faixa]|moeda_doc }}</td>{% endfor %}
+      {% for p in cot.planos %}<td class="val preco-cell" data-p="{{ loop.index0 }}" data-f="{{ f.faixa }}" data-qtd="{{ f.qtd }}" data-preco-unit="{{ p.precos_unit[f.faixa] }}">{{ p.precos_unit[f.faixa]|moeda_doc }}</td>{% endfor %}
     </tr>
     {% endfor %}
     <tr class="total">
@@ -253,16 +263,7 @@ function toggleEditar() {
   var on = doc.classList.toggle('editando');
   document.querySelectorAll('.preco-cell').forEach(function(c){
     c.setAttribute('contenteditable', on ? 'true' : 'false');
-    if (on) {
-      // Edição é sempre pelo valor INDIVIDUAL (por vida) — o subtotal exibido
-      // normalmente já vem multiplicado pela quantidade daquela faixa, então
-      // editar o subtotal direto faz o total sair errado em faixas com 2+ vidas.
-      c.dataset.subtotalTexto = c.textContent;
-      var precoUnit = parseFloat(c.getAttribute('data-preco-unit') || '0');
-      c.textContent = _fmtBR(precoUnit);
-    } else if (c.dataset.subtotalTexto !== undefined) {
-      c.textContent = c.dataset.subtotalTexto;
-    }
+    // A célula já exibe o valor INDIVIDUAL (por vida) — não precisa converter.
   });
   document.getElementById('btn-editar').textContent = on ? 'Cancelar' : 'Corrigir valor (mesmo link)';
   document.getElementById('btn-salvar-aj').style.display = on ? 'inline-block' : 'none';
@@ -379,6 +380,36 @@ async function copiarImagem() {
       }
     });
   } catch (e) { alert('Não foi possível gerar a imagem: ' + e); }
+}
+function togglePlanoUnico() {
+  var p = document.getElementById('painel-plano-unico');
+  p.style.display = (p.style.display === 'block') ? 'none' : 'block';
+}
+document.addEventListener('click', function(e) {
+  var p = document.getElementById('painel-plano-unico');
+  if (!p || p.style.display !== 'block') return;
+  if (!p.contains(e.target) && !e.target.closest('[onclick="togglePlanoUnico()"]')) p.style.display = 'none';
+});
+async function copiarImagemPlano(idx) {
+  document.getElementById('painel-plano-unico').style.display = 'none';
+  var alvo = document.getElementById('documento');
+  var escondidos = [];
+  alvo.querySelectorAll('[data-p]').forEach(function(el){
+    if (el.getAttribute('data-p') !== String(idx)) { escondidos.push([el, el.style.display]); el.style.display = 'none'; }
+  });
+  try {
+    var canvas = await html2canvas(alvo, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+    canvas.toBlob(async function(blob) {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        alert('Imagem do plano copiada! Agora é só colar (Ctrl/Cmd+V) no WhatsApp.');
+      } catch (e) {
+        var a = document.createElement('a'); a.download = 'cotacao-plano.png'; a.href = canvas.toDataURL('image/png'); a.click();
+        alert('Seu navegador não permite copiar imagem direto; baixei o arquivo.');
+      }
+    });
+  } catch (e) { alert('Não foi possível gerar a imagem: ' + e); }
+  finally { escondidos.forEach(function(par){ par[0].style.display = par[1]; }); }
 }
 function baixarImagem() {
   var alvo = document.getElementById('documento');

@@ -598,8 +598,19 @@
         </div>
         <div class="campo-grupo">
           <div class="campo-label">Etapa</div>
+          {# TODAS as etapas, agrupadas por quadro. Se listasse so as do quadro
+             aberto, um lead de outro quadro (aberto por /crm?lead=N vindo de uma
+             notificacao) nao acharia a propria etapa no select — ele caía na
+             primeira opcao e Salvar MOVIA o lead sem ninguem pedir. #}
           <select id="ficha-etapa" class="campo-input campo-select">
-            {% for e in etapas %}<option value="{{ e.id }}">{{ e.nome }}</option>{% endfor %}
+            {% for q in quadros %}
+            {% set doQuadro = etapas_todas|selectattr('quadro','equalto',q.slug)|list %}
+            {% if doQuadro %}
+            <optgroup label="{{ q.nome }}">
+              {% for e in doQuadro %}<option value="{{ e.id }}">{{ e.nome }}</option>{% endfor %}
+            </optgroup>
+            {% endif %}
+            {% endfor %}
           </select>
         </div>
         <div class="campo-grupo">

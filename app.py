@@ -6039,7 +6039,11 @@ def nova_proposta():
             prefill['valor'] = f"{float(lead['valor_estimado']):.2f}".replace('.', ',')
         prefill['docs_texto'] = diag.get('docs_extraidos') or ''
     close_db(conn)
-    return render_template('form.html', supervisoras=sups, operadoras=ops, prefill=prefill)
+    # Propaga o id do lead pro formulário: e a chave que liga a venda a origem de
+    # midia. Sem ela, salvar_proposta re-adivinha por telefone/CNPJ justamente no
+    # caso em que a resposta certa ja estava na mao.
+    return render_template('form.html', supervisoras=sups, operadoras=ops, prefill=prefill,
+                           lead_id_origem=(lead_id if lead_id.isdigit() else ''))
 
 @app.route('/salvar-proposta', methods=['POST'])
 @login_required
@@ -6141,7 +6145,8 @@ def salvar_proposta():
         # Amarra ao lead na hora: é aqui que o telefone/CNPJ estão frescos e certos.
         # Best-effort — falhar no vínculo não pode impedir o cadastro da venda.
         try:
-            _lid, _crit = vincular_proposta_lead(conn, proposta_id)
+            _lid, _crit = vincular_proposta_lead(conn, proposta_id,
+                                                 lead_id_certo=(request.form.get('lead_id_origem') or None))
             if _lid:
                 app.logger.info(f"[VINCULO] proposta {proposta_id} -> lead {_lid} ({_crit})")
         except Exception as _e:
@@ -8687,7 +8692,7 @@ def achar_lead_da_proposta(conn, prop):
     return None, 'sem_lead'
 
 
-def vincular_proposta_lead(conn, proposta_id, prop=None):
+def vincular_proposta_lead(conn, proposta_id, prop=None, lead_id_certo=None):
     """Amarra a proposta ao lead e fecha o elo dos dois lados. Nunca sobrescreve um
     vínculo existente: se alguém corrigiu à mão, a heurística não desfaz."""
     if prop is None:
@@ -8696,6 +8701,21 @@ def vincular_proposta_lead(conn, proposta_id, prop=None):
         return None, 'proposta_inexistente'
     if 'lead_id' in prop.keys() and prop['lead_id']:
         return prop['lead_id'], 'ja_vinculado'
+    # Quando o id do lead é CONHECIDO (proposta aberta a partir da ficha, via
+    # /nova-proposta?lead=N), usa ele. Adivinhar por telefone/CNPJ justamente no
+    # caso em que a resposta certa estava na mão é como se perde o gclid: basta o
+    # responsável do contrato ter telefone diferente do lead pra dar 'sem_lead'.
+    if lead_id_certo:
+        try:
+            lid_certo = int(lead_id_certo)
+        except (TypeError, ValueError):
+            lid_certo = 0
+        if lid_certo and conn.execute("SELECT 1 FROM crm_leads WHERE id=?", (lid_certo,)).fetchone():
+            conn.execute("UPDATE propostas SET lead_id=?, lead_vinculo=? WHERE id=?",
+                         (lid_certo, 'informado', proposta_id))
+            conn.execute("UPDATE crm_leads SET proposta_id=? WHERE id=? AND (proposta_id IS NULL OR proposta_id=0)",
+                         (proposta_id, lid_certo))
+            return lid_certo, 'informado'
     lid, criterio = achar_lead_da_proposta(conn, prop)
     if not lid:
         return None, criterio
@@ -14492,6 +14512,18 @@ def api_whatsapp_lead_salvar():
     if not lead:
         close_db(conn)
         return _wa_cors(jsonify({"ok": False, "erro": "Lead não encontrado"})), 404
+    # Mesma checagem de dono das rotas equivalentes do CRM (crm_lead_editar,
+    # crm_lead_campos_salvar, crm_lead_etiqueta): sem ela, pela extensão qualquer
+    # consultor editava lead de colega — e a atividade saía assinada com o nome
+    # que ele mesmo mandou. A chave da extensão diz que a chamada vem do JOB, não
+    # QUEM está chamando.
+    if uid:
+        u = conn.execute("SELECT perfil FROM usuarios WHERE id=? AND ativo=1", (uid,)).fetchone()
+        eh_admin_wa = bool(u) and (u['perfil'] or '') == 'admin'
+        if not eh_admin_wa and lead['responsavel_id'] and lead['responsavel_id'] != uid:
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": False,
+                "erro": "Este lead é de outro consultor. Peça a transferência no CRM."})), 403
     mudancas, avisos = [], []
     try:
         # 1) Dados básicos
@@ -15940,8 +15972,10 @@ def carregar_etapas_crm(conn=None, quadro=None):
                    'sla_dias': (r['sla_dias'] if 'sla_dias' in r.keys() else None),
                    'quadro': ((r['quadro_slug'] if 'quadro_slug' in r.keys() else '') or 'comercial')}
                   for r in rows]
-        if quadro:
-            etapas = [e for e in etapas if e['quadro'] == quadro]
+        # NAO filtra aqui: o filtro por quadro tem que vir DEPOIS do fallback,
+        # senão "este quadro está vazio" vira "a tabela está vazia" e as 9 etapas
+        # padrão hardcoded aparecem como colunas fantasma — com os leads reais
+        # dentro, e o mesmo lead renderizado em dois quadros ao mesmo tempo.
     except Exception:
         etapas = []
     finally:
@@ -15964,8 +15998,11 @@ def carregar_etapas_crm(conn=None, quadro=None):
         for e in etapas:
             e.setdefault('sla_dias', None)
             e['quadro'] = 'comercial'
-        if quadro and quadro != 'comercial':
-            etapas = []
+    # Filtro por quadro SÓ AGORA, depois do fallback: quadro vazio devolve lista
+    # vazia (a tela mostra "este quadro ainda não tem etapas"), e o fallback só
+    # entra quando a tabela inteira está vazia ou quebrou.
+    if quadro:
+        etapas = [e for e in etapas if (e.get('quadro') or 'comercial') == quadro]
     return etapas
 
 
@@ -16256,7 +16293,7 @@ def crm():
                            campos_saida_etapa=campos_saida_etapa, valores_saida=valores_saida,
                            trava_falta=trava_falta,
                            quadros=quadros, quadro_atual=f_quadro, quadro_total=quadro_total,
-                           qs_filtros=qs_filtros)
+                           qs_filtros=qs_filtros, etapas_todas=carregar_etapas_crm())
 
 
 @app.route('/crm/lead/novo', methods=['POST'])
@@ -16889,7 +16926,12 @@ def crm_lead_editar(lid):
 
     # Campos que só admin pode alterar
     responsavel_id = int(d['responsavel_id']) if eh_admin and d.get('responsavel_id') else lead['responsavel_id']
-    etapa          = d.get('etapa', lead['etapa']) if eh_admin else lead['etapa']
+    # A etapa segue a MESMA regra do arrastar no Kanban (/crm/lead/<id>/mover):
+    # admin, ou o dono do lead. Descartar em silêncio e responder 200 fazia o card
+    # pular de coluna na tela enquanto o banco não mudava — e, pior, a trava de
+    # campo obrigatório nem chegava a rodar, então o consultor também não via o
+    # aviso do que faltava preencher.
+    etapa = d.get('etapa', lead['etapa'])
 
     # Detectar mudanças para timeline
     changes = []
