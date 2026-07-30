@@ -315,14 +315,27 @@
 
   function unidadeAcc(u, idx){
     var title = u.n + (u.sub ? " — " + u.sub : "");
-    if(!matchesQuery(title + " " + (u.esp||[]).join(" "))) return "";
+    var medicos = u.medicos || [];
+    var searchText = title + " " + (u.esp||[]).join(" ") + " " + medicos.map(function(m){ return m.n + " " + m.e.join(" "); }).join(" ");
+    if(!matchesQuery(searchText)) return "";
+    var medicosHtml = "";
+    if(medicos.length){
+      var filtered = state.q ? medicos.filter(function(m){ return matchesQuery(m.n + " " + m.e.join(" ")); }) : medicos;
+      if(state.q && !filtered.length) return "";
+      medicosHtml = '<div class="esplist" style="border-top:none;padding-top:0;">Corpo clínico (agenda online):</div>' +
+        (state.q ? filtered : medicos).map(function(m){
+          return '<div class="row"><span class="pn">' + escapeHtml(m.n) + '</span>' +
+            '<div class="pe" style="color:var(--vc-blue-dk);font-weight:600;">' + m.e.map(escapeHtml).join(", ") + '</div></div>';
+        }).join("");
+    }
     var body = '<div class="addr-line">' + escapeHtml(u.e) + '</div>' +
       '<div class="phone-line">' + u.f.map(escapeHtml).join(" · ") + '</div>' +
       (u.extra ? '<div class="extra">' + escapeHtml(u.extra) + '</div>' : '') +
-      (u.esp && u.esp.length ? '<div class="esplist">' + u.esp.map(escapeHtml).join(" · ") + (u.entre_outras ? " (entre outras)" : "") + '</div>' : '');
+      (!medicos.length && u.esp && u.esp.length ? '<div class="esplist">' + u.esp.map(escapeHtml).join(" · ") + (u.entre_outras ? " (entre outras)" : "") + '</div>' : '') +
+      medicosHtml;
     return '<div class="acc" data-idx="u' + idx + '"><div class="acc-head"><div><div class="t">' + escapeHtml(u.n) +
       '</div>' + (u.sub ? '<div class="sub">' + escapeHtml(u.sub) + '</div>' : '') + '</div>' +
-      '<div class="cnt">' + (u.esp ? u.esp.length + ' esp.' : '') + '</div></div>' +
+      '<div class="cnt">' + (medicos.length ? medicos.length + ' médicos' : (u.esp ? u.esp.length + ' esp.' : '')) + '</div></div>' +
       '<div class="acc-body">' + body + '</div></div>';
   }
 
@@ -574,12 +587,21 @@
           return {n: h.n, e: h.t + " - " + h.e, f: h.f};
         })});
       }
-      var unids = plano.unidades.filter(function(u){ return matchesQuery((u.n + " " + (u.sub||"") + " " + (u.esp||[]).join(" "))); });
-      if(unids.length){
-        sections.push({title: "Unidades e especialidades próprias", items: unids.map(function(u){
+      var semMedicos = plano.unidades.filter(function(u){
+        return !(u.medicos && u.medicos.length) && matchesQuery((u.n + " " + (u.sub||"") + " " + (u.esp||[]).join(" ")));
+      });
+      if(semMedicos.length){
+        sections.push({title: "Unidades e especialidades próprias", items: semMedicos.map(function(u){
           return {n: u.n + (u.sub ? " - " + u.sub : ""), e: u.e, f: u.f, esp: u.esp};
         })});
       }
+      plano.unidades.filter(function(u){ return u.medicos && u.medicos.length; }).forEach(function(u){
+        var lista = (u.medicos||[]).filter(function(m){ return matchesQuery(u.n + " " + (u.sub||"") + " " + m.n + " " + m.e.join(" ")); });
+        if(!lista.length) return;
+        sections.push({title: u.n + (u.sub ? " - " + u.sub : "") + " (corpo clínico)", items: lista.map(function(m){
+          return {n: m.n, esp: m.e};
+        })});
+      });
     } else {
       var cred = plano.credenciada[state.sub] || {};
       Object.keys(cred).forEach(function(nome){
