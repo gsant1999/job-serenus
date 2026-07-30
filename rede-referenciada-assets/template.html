@@ -372,12 +372,12 @@
   <header class="top">
     <div class="brandrow">
       <div class="brand-serenus">
-        <img class="light-only" src="data:image/png;base64,__SERENUS_LOGO_BLACK_B64__" alt="Serenus Corretora" />
-        <img class="dark-only" src="data:image/png;base64,__SERENUS_LOGO_LIGHT_B64__" alt="Serenus Corretora" />
+        <img class="light-only" src="{{ url_for('static', filename='brand/serenus-logo-black.png') }}" alt="Serenus Corretora" />
+        <img class="dark-only" src="{{ url_for('static', filename='brand/serenus-logo-light.png') }}" alt="Serenus Corretora" />
       </div>
       <div class="branddivider"></div>
       <div class="brand-sula">
-        <img src="data:image/png;base64,__LOGO_B64__" alt="SulAmérica" />
+        <img src="{{ url_for('static', filename='operadoras/sulamerica-saude.svg') }}" alt="SulAmérica" />
       </div>
     </div>
     <div class="titlebar">
