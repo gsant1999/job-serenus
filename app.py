@@ -2170,6 +2170,14 @@ def init_db():
         # card ficava verde só porque alguém mexeu num campo. A cor tem que
         # responder a avanço real no funil.
         ("crm_leads", "avancou_em", "TEXT"),
+        # A COSTURA: propostas nunca teve lead_id, então venda↔lead era casada por
+        # telefone em tempo de consulta. Isso funciona até alguém digitar o número
+        # diferente na proposta — e aí a venda simplesmente não tem origem. Com a
+        # chave gravada, lead → cotação → proposta → parcela → comissão fecha.
+        ("propostas", "lead_id", "INTEGER"),
+        # De onde saiu o vínculo (cnpj / telefone / telefone_sufixo / manual):
+        # sem isso não há como auditar um vínculo errado depois.
+        ("propostas", "lead_vinculo", "TEXT"),
         # sub-status agora pertence a UMA etapa (NULL = vale em todas)
         ("crm_status_opcoes", "etapa_slug", "TEXT"),
         # prazo em dias até o card virar de cor nesta etapa (NULL = padrão global)
@@ -2650,6 +2658,7 @@ def init_db():
     indices = [
         "CREATE INDEX IF NOT EXISTS idx_propostas_usuario ON propostas(usuario_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_etq_lead ON crm_lead_etiquetas(lead_id)",
+        "CREATE INDEX IF NOT EXISTS idx_propostas_lead ON propostas(lead_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_lead ON crm_lead_campos(lead_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_campo ON crm_lead_campos(campo_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_etq_etq ON crm_lead_etiquetas(etiqueta_id)",
@@ -6021,6 +6030,14 @@ def salvar_proposta():
             mes_meta,'Aguardando Documentos'
         ))
         proposta_id = _last_insert_id(cur)
+        # Amarra ao lead na hora: é aqui que o telefone/CNPJ estão frescos e certos.
+        # Best-effort — falhar no vínculo não pode impedir o cadastro da venda.
+        try:
+            _lid, _crit = vincular_proposta_lead(conn, proposta_id)
+            if _lid:
+                app.logger.info(f"[VINCULO] proposta {proposta_id} -> lead {_lid} ({_crit})")
+        except Exception as _e:
+            app.logger.warning(f"[VINCULO] proposta {proposta_id} sem vínculo: {_e}")
         dia_venc = d.get('dia_vencimento') or None
         if dia_venc:
             try: cur.execute("UPDATE propostas SET dia_vencimento=? WHERE id=?", (int(dia_venc), proposta_id))
@@ -8458,6 +8475,88 @@ def fluxo_caixa():
                                total_pago=total_pago, fixo_mes=fixo_mes, fixo_parcelas=fixo_parcelas)
 
 # ─── BI ──────────────────────────────────────────────────────────────────────────
+def _so_digitos(v):
+    return re.sub(r'\D', '', str(v or ''))
+
+
+def achar_lead_da_proposta(conn, prop):
+    """Descobre a qual lead do CRM uma proposta pertence. Devolve (lead_id, criterio)
+    ou (None, motivo). Ordem dos critérios é do mais forte pro mais fraco, e
+    AMBIGUIDADE NUNCA VIRA VÍNCULO: se dois leads batem, prefere não ligar a ligar
+    errado — vínculo errado contamina comissão, origem de mídia e relatório de
+    perda de uma vez, e ninguém percebe.
+
+    1) CNPJ: identificador único de verdade, o mais seguro pra PME
+    2) telefone exato (tel_resp_contrato / tel_resp_negociacao vs telefone_norm)
+    3) telefone pelos últimos 8 dígitos — cobre a variação do 9º dígito, que é a
+       diferença mais comum entre o número salvo no CRM e o digitado na proposta
+    """
+    def _unico(sql, params):
+        rows = conn.execute(sql, params).fetchall()
+        ids = {r['id'] for r in rows}
+        if len(ids) == 1:
+            return ids.pop()
+        return None if not ids else 'AMBIGUO'
+
+    cnpj = _so_digitos(prop['cnpj'] if 'cnpj' in prop.keys() else '')
+    if len(cnpj) == 14:
+        # Procura nas duas casas: a coluna legada e o campo personalizado novo.
+        r = _unico("""SELECT DISTINCT l.id FROM crm_leads l
+                      LEFT JOIN crm_lead_campos lc ON lc.lead_id = l.id
+                      LEFT JOIN crm_campos c ON c.id = lc.campo_id AND c.chave='cnpj'
+                      WHERE REPLACE(REPLACE(REPLACE(COALESCE(l.qual_cnpj,''),'.',''),'/',''),'-','')=?
+                         OR REPLACE(REPLACE(REPLACE(COALESCE(lc.valor,''),'.',''),'/',''),'-','')=?""",
+                  (cnpj, cnpj))
+        if r == 'AMBIGUO':
+            return None, 'ambiguo_cnpj'
+        if r:
+            return r, 'cnpj'
+
+    tels = []
+    for campo in ('tel_resp_contrato', 'tel_resp_negociacao'):
+        if campo in prop.keys():
+            tn = _normalizar_telefone(str(prop[campo] or ''))
+            if tn and tn not in tels:
+                tels.append(tn)
+    for tn in tels:
+        r = _unico("SELECT id FROM crm_leads WHERE telefone_norm=?", (tn,))
+        if r == 'AMBIGUO':
+            return None, 'ambiguo_telefone'
+        if r:
+            return r, 'telefone'
+    for tn in tels:
+        suf = tn[-8:]
+        if len(suf) != 8:
+            continue
+        r = _unico("SELECT id FROM crm_leads WHERE telefone_norm LIKE ?", ('%' + suf,))
+        if r == 'AMBIGUO':
+            return None, 'ambiguo_telefone_sufixo'
+        if r:
+            return r, 'telefone_sufixo'
+    return None, 'sem_lead'
+
+
+def vincular_proposta_lead(conn, proposta_id, prop=None):
+    """Amarra a proposta ao lead e fecha o elo dos dois lados. Nunca sobrescreve um
+    vínculo existente: se alguém corrigiu à mão, a heurística não desfaz."""
+    if prop is None:
+        prop = conn.execute("SELECT * FROM propostas WHERE id=?", (proposta_id,)).fetchone()
+    if not prop:
+        return None, 'proposta_inexistente'
+    if 'lead_id' in prop.keys() and prop['lead_id']:
+        return prop['lead_id'], 'ja_vinculado'
+    lid, criterio = achar_lead_da_proposta(conn, prop)
+    if not lid:
+        return None, criterio
+    conn.execute("UPDATE propostas SET lead_id=?, lead_vinculo=? WHERE id=?", (lid, criterio, proposta_id))
+    # Elo recíproco: crm_leads.proposta_id existe desde sempre e vive vazio.
+    # Só preenche se estiver em branco — o lead pode ter mais de uma proposta e o
+    # primeiro fechamento é o que interessa como "virou venda".
+    conn.execute("UPDATE crm_leads SET proposta_id=? WHERE id=? AND (proposta_id IS NULL OR proposta_id=0)",
+                 (proposta_id, lid))
+    return lid, criterio
+
+
 def _fechados_com_analise(conn):
     """Clientes FECHADOS (proposta emitida/ativa) cruzados com a última análise
     de conversa deles E com o lead correspondente no CRM. propostas NÃO tem
@@ -24103,6 +24202,46 @@ if __name__ == '__main__':
     print(f"  Admin:  {SEED_ADMIN_EMAIL}" + ("  / (senha do SEED_ADMIN_SENHA)" if os.environ.get('SEED_ADMIN_SENHA') else " / serenus2025"))
     print("="*52 + "\n")
     app.run(debug=False, host='0.0.0.0', port=port)
+
+# ─── BACKFILL do vínculo proposta ↔ lead (29/07/2026) ────────────────────────
+# Roda AQUI e não dentro de init_db(): o casamento usa _normalizar_telefone, que só
+# é definido bem depois no arquivo — dentro do init o nome ainda não existe e a
+# migração morria com NameError, silenciosamente pulada.
+# Imprime o placar por critério: sem esse número não há como saber se a costura
+# pegou ou se metade da base ficou órfã. O que não casou fica NULL de propósito —
+# chutar um lead contaminaria comissão, origem de mídia e relatório de perda de uma
+# vez, e ninguém perceberia.
+def _backfill_vinculo_proposta_lead():
+    conn = None
+    try:
+        conn = db()
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        if conn.execute("SELECT 1 FROM meta_flags WHERE k='proposta_lead_id_20260729'").fetchone():
+            return
+        props = conn.execute("""SELECT * FROM propostas
+                                WHERE (lead_id IS NULL OR lead_id=0)
+                                  AND COALESCE(status,'') <> 'Excluída'""").fetchall()
+        placar = {}
+        for p in props:
+            _lid, criterio = vincular_proposta_lead(conn, p['id'], p)
+            placar[criterio] = placar.get(criterio, 0) + 1
+        conn.execute("INSERT INTO meta_flags (k) VALUES ('proposta_lead_id_20260729')")
+        conn.commit()
+        ligadas = sum(v for k, v in placar.items() if k in ('cnpj', 'telefone', 'telefone_sufixo'))
+        print(f"[VINCULO_BACKFILL] {ligadas}/{len(props)} proposta(s) ligada(s) ao lead — {placar}")
+    except Exception as e:
+        if conn is not None:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[VINCULO_BACKFILL] migração pulada: {e}")
+    finally:
+        if conn is not None:
+            try: close_db(conn)
+            except Exception: pass
+
+
+_backfill_vinculo_proposta_lead()
+
 
 # ─── DEBUG INFO PARA PRODUÇÃO ────────────────────────────────────────────
 print(f"\n[STARTUP] DATABASE_URL: {os.environ.get('DATABASE_URL', 'NÃO ENCONTRADA')[:80]}")
