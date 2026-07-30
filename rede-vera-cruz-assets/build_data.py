@@ -5,8 +5,18 @@ Gera rede_vera_cruz_data.json a partir dos PDFs oficiais:
   - "Vera Ouro - Material de Apoio - 10.25" (rede própria + credenciada)
 Fonte: transcrição manual dos PDFs enviados pelo usuário (versão 10/2025).
 Dados válidos até 31/10/2025 conforme os próprios documentos.
+
+Nomes de médicos da rede própria (mesma em Prata e Ouro) vêm do sistema de
+agendamento TuoTempo do próprio grupo Vera Cruz (ver scrape_tuotempo.py /
+tuotempo_propria.json) — os PDFs oficiais só listam especialidades por unidade
+própria, sem nome de médico.
 """
 import json
+import os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(HERE, "tuotempo_propria.json"), "r", encoding="utf-8") as _f:
+    TUOTEMPO_PROPRIA = json.load(_f)
 
 # ---------- HOSPITAIS (comuns aos dois planos) ----------
 HOSPITAIS = [
@@ -43,10 +53,12 @@ HOSPITAIS = [
 ]
 
 # ---------- ESPECIALIDADES DISPONÍVEIS POR ESPAÇO/AMBULATÓRIO PRÓPRIO ----------
-def unidade(nome, sub, esp, endereco, fones, extra=None, entre_outras=False):
+def unidade(nome, sub, esp, endereco, fones, extra=None, entre_outras=False, tt=None):
     d = {"n": nome, "sub": sub, "esp": esp, "e": endereco, "f": fones, "entre_outras": entre_outras}
     if extra:
         d["extra"] = extra
+    if tt:
+        d["medicos"] = TUOTEMPO_PROPRIA.get(tt, [])
     return d
 
 UNIDADES_PRATA = [
@@ -56,11 +68,12 @@ UNIDADES_PRATA = [
         "Cirurgia Torácica", "Cirurgia Vascular", "Coloproctologia", "Dermatologia", "Gastroenterologia",
         "Ginecologia", "Infectologia", "Neurologia", "Cirúrgica/Coluna", "Neurologia Clinica",
         "Nutricionista", "Ortopedia", "Otorrinolaringologia", "Urologia",
-    ], "Praça Doutor Toffoli, nº 28. Centro - Campinas/SP", ["(19) 3751-3770", "(19) 97162-7147"]),
+    ], "Praça Doutor Toffoli, nº 28. Centro - Campinas/SP", ["(19) 3751-3770", "(19) 97162-7147"],
+        tt="Ambulatorio Casa de Saude"),
     unidade("Vera Cruz Centro Clínico", "Unidade Nova Campinas", [
         "Cardiologia", "Cirurgia Mão", "Nefrologia", "Ortopedia",
     ], "Av Doutor Jesuíno Marcondes Machado, nº 394. Nova Campinas - Campinas/SP",
-        ["(19) 3751-3770"], entre_outras=True),
+        ["(19) 3751-3770"], entre_outras=True, tt="Centro Clinico Nova Campinas"),
     unidade("Vera Cruz Cuidado Integrado", None, [
         "Geriatria", "Médica de família e comunidade", "Nutricionista", "Pediatria", "Psicologia", "Psiquiatria",
     ], "Rua Luzitana, nº 681. Centro - Campinas/SP", ["0800 000 0023", "(19) 98396-0705"]),
@@ -72,11 +85,13 @@ UNIDADES_PRATA = [
         "Ginecologia e Obstetrícia", "Histeroscopia", "Mastologia", "Medicina Fetal", "Nutrição Clínica",
         "Patologia do Trato Genital Inferior Feminino", "Pediatria", "Pneumologia", "Psicologia", "Psiquiatria",
         "Reumatologia Pediátrica", "Uroginecologia",
-    ], "Rua Gonçalves César, nº 158. Jardim Guanabara - Campinas/SP", ["(19) 3751-3770"]),
+    ], "Rua Gonçalves César, nº 158. Jardim Guanabara - Campinas/SP", ["(19) 3751-3770"],
+        tt="Centro Clinico Guanabara"),
     unidade("Espaço Vera Cruz", None, [
         "Pediatria geral", "Neuropediatria", "Cardiopediatria", "Nefropediatria", "Imunopediatria",
         "Pneumopediatria", "Gastropediatria",
-    ], "Av. Iguatemi, nº 777.– 2º Piso. Vila Brandina - Campinas - SP", ["(19) 3751-3770"]),
+    ], "Av. Iguatemi, nº 777.– 2º Piso. Vila Brandina - Campinas - SP", ["(19) 3751-3770"],
+        tt="Espaco Vera Cruz"),
     unidade("Vera Cruz Oftalmologia", None, [
         "Cirurgia refrativa", "Oftalmopediatria", "Oncologia ocular", "Catarata", "Lente de contato",
         "Visão subnormal", "Córnea", "Estrabismo", "Plástica ocular", "Glaucoma", "Retina",
@@ -97,7 +112,8 @@ UNIDADES_PRATA = [
         "Ortopedia e Traumatologia Ombro e Cotovelo", "Ortopedia e Traumatologia Pé e Tornozelo",
         "Ortopedia Geral", "Otorrinolaringologista", "Pediatria", "Pneumologista", "Psiquiatra",
         "Reumatologista", "Uroginecologista", "Urologista",
-    ], "Av. Eng. Fábio Roberto Barnabé, nº 1870. Vila Sfeir- Indaiatuba/SP", ["(19) 3834-4877", "(19) 3751-3770"]),
+    ], "Av. Eng. Fábio Roberto Barnabé, nº 1870. Vila Sfeir- Indaiatuba/SP", ["(19) 3834-4877", "(19) 3751-3770"],
+        tt="Centro Medico Vera Cruz Indaiatuba"),
     unidade("Centro Médico São Camilo", "Especialidades Eletivas", [
         "Cardiologia", "Cirurgia Bariátrica", "Cirurgia Geral", "Cirurgia Pediátrica",
         "Cirurgia Plástica Reparadora", "Cirurgia Robótica", "Clínico Geral", "Dermatologia", "Gastrocirurgia",
@@ -105,7 +121,20 @@ UNIDADES_PRATA = [
         "Neuro Cirurgia Coluna", "Oncologista", "Ortopedia do Esporte", "Ortopedia e Traumatologia",
         "Otorrinolaringologia", "Pediatria", "Psiquiatria", "Reumatologia", "Urologia", "Vascular",
     ], "Rua Miguel Fernandes Garcia Filho, nº 540. Chácara Areal - Indaiatuba/SP",
-        ["(19) 3834-4877", "(19) 3751-3770"]),
+        ["(19) 3834-4877", "(19) 3751-3770"], tt="Centro Medico Sao Camilo Indaiatuba"),
+    unidade("Vera Cruz Neurologia e Coluna", None, [
+        "Alergia e Imunologia Pediátrica", "Cirurgia Bariátrica", "Cirurgia de Cabeça e Pescoço",
+        "Cirurgia do Aparelho Digestivo", "Cirurgia Geral", "Cirurgia Plástica", "Clínica Médica",
+        "Coloproctologia", "Dermatologia", "Gastroenterologia", "Gastroenterologia Pediátrica",
+        "Hematologia", "Nefrologia", "Neurocirurgia", "Neurocirurgia Coluna", "Neuro Vascular",
+        "Neurologia Clínica", "Ortopedia Coluna", "Pediatria", "Pneumologia", "Reumatologia",
+        "Reumatologia Pediátrica",
+    ], "Av. Andrade Neves, nº 402. Centro - Campinas/SP", ["(19) 3751-3770"],
+        tt="Vera Cruz Neurologia e Coluna"),
+    unidade("Ambulatório Hospital Vera Cruz", None, [
+        "Anestesiologia", "Otorrinolaringologia", "Urologia",
+    ], "Rua Barreto Leme, 245. Centro - Campinas/SP", ["(19) 3751-3770"],
+        tt="Ambulatorio Hospital Vera Cruz"),
     unidade("Vera Cruz Medicina Diagnóstica", "Unidade Hospital Vera Cruz", [], "Av Doutor Jesuíno Marcondes Machado, nº 394. Nova Campinas - Campinas/SP", ["(19) 3739-3700"]),
     unidade("Vera Cruz Medicina Diagnóstica", "Unidade Casarão do Café", [], "Av. Andrade Neves, nº 402. Centro - Campinas/SP", ["(19) 3739-3700"]),
     unidade("Vera Cruz Medicina Diagnóstica", "Unidade Castelo", ["Imagem / Radiologia"],
