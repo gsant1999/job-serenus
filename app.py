@@ -732,7 +732,7 @@ def init_db():
                 email TEXT,
                 empresa TEXT,
                 origem TEXT DEFAULT 'manual',
-                etapa TEXT DEFAULT 'topo',
+                etapa TEXT DEFAULT 'lead_novo',
                 responsavel_id INTEGER,
                 proposta_id INTEGER,
                 valor_estimado REAL,
@@ -1332,7 +1332,7 @@ def init_db():
             email TEXT,
             empresa TEXT,
             origem TEXT DEFAULT 'manual',
-            etapa TEXT DEFAULT 'topo',
+            etapa TEXT DEFAULT 'lead_novo',
             responsavel_id INTEGER,
             proposta_id INTEGER,
             valor_estimado REAL,
@@ -1798,14 +1798,23 @@ def init_db():
         for nome, cor in etq_default:
             conn.execute("INSERT OR IGNORE INTO etiquetas (nome,cor) VALUES (?,?)", (nome, cor))
 
-    # Etapas do funil CRM padrão (só insere se a tabela estiver vazia — preserva customizações)
+    # Etapas do funil CRM padrão (só insere se a tabela estiver vazia — preserva customizações).
+    # Funil redesenhado com o Guilherme em 29/07/2026: cada etapa é um MOMENTO
+    # REAL do processo comercial ("primeiro contato", "cotação enviada"), não um
+    # rótulo genérico de profundidade (topo/meio/fundo) que não dizia o que o
+    # consultor tinha feito. A migração dos leads antigos está mais abaixo.
+    # tipo: 'ganho'/'perdido' saem do pipeline aberto e não entram no alerta de
+    # inatividade; 'normal' é lead em andamento.
     etapas_default = [
-        ('lead_novo', 'Lead Novo',      '#6366f1', 0, 'normal'),
-        ('topo',    'Topo do Funil',  '#3b82f6', 1, 'normal'),
-        ('meio',    'Meio do Funil',  '#f59e0b', 2, 'normal'),
-        ('fim',     'Fundo do Funil', '#10b981', 3, 'normal'),
-        ('ganho',   'Ganho',          '#1fd8a4', 4, 'ganho'),
-        ('perdido', 'Perdido',        '#ef4444', 5, 'perdido'),
+        ('lead_novo',          'Novo Lead',            '#6366f1', 0, 'normal'),
+        ('primeiro_contato',   'Primeiro Contato',     '#3b82f6', 1, 'normal'),
+        ('qualificacao',       'Qualificação',         '#8b5cf6', 2, 'normal'),
+        ('cotacao_enviada',    'Cotação Enviada',      '#f59e0b', 3, 'normal'),
+        ('venda_fechada',      'Venda Fechada',        '#1fd8a4', 4, 'ganho'),
+        ('emissao_proposta',   'Emissão de Proposta',  '#22d3ee', 5, 'ganho'),
+        ('status_proposta',    'Status da Proposta',   '#0ea5e9', 6, 'ganho'),
+        ('negociacao_perdida', 'Negociação Perdida',   '#ef4444', 7, 'perdido'),
+        ('nutricao',           'Nutrição',             '#a3a3a3', 8, 'normal'),
     ]
     try:
         ja_tem = conn.execute("SELECT COUNT(*) c FROM crm_etapas").fetchone()['c']
@@ -1824,18 +1833,54 @@ def init_db():
                              (slug, nome, cor, ordem, tipo))
             conn.commit()
     else:
-        # Garante que lead_novo existe mesmo em bancos já populados
+        # ─── MIGRAÇÃO DO FUNIL (29/07/2026) ───────────────────────────────────
+        # Banco já populado: cria as etapas novas, move os leads das antigas pras
+        # equivalentes e só então apaga as antigas. A ORDEM importa — apagar a
+        # etapa antes de mover os leads deixaria card órfão apontando pra slug
+        # inexistente (o card sumiria do board). Idempotente por meta_flags.
         try:
-            if is_pg:
-                conn.execute("INSERT INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES ('lead_novo','Lead Novo','#6366f1',0,'normal') ON CONFLICT (slug) DO NOTHING")
-            else:
-                conn.execute("INSERT OR IGNORE INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES ('lead_novo','Lead Novo','#6366f1',0,'normal')")
-            conn.commit()
+            conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+            ja_funil = conn.execute("SELECT 1 FROM meta_flags WHERE k='funil_novo_20260729'").fetchone()
         except Exception:
-            pass
+            ja_funil = True   # sem meta_flags não arrisca migrar
+        if not ja_funil:
+            try:
+                for slug, nome, cor, ordem, tipo in etapas_default:
+                    if is_pg:
+                        conn.execute("""INSERT INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES (%s,%s,%s,%s,%s)
+                            ON CONFLICT (slug) DO UPDATE SET nome=EXCLUDED.nome, cor=EXCLUDED.cor,
+                            ordem=EXCLUDED.ordem, tipo=EXCLUDED.tipo""", (slug, nome, cor, ordem, tipo))
+                    else:
+                        conn.execute("INSERT OR IGNORE INTO crm_etapas (slug,nome,cor,ordem,tipo) VALUES (?,?,?,?,?)",
+                                     (slug, nome, cor, ordem, tipo))
+                        conn.execute("UPDATE crm_etapas SET nome=?, cor=?, ordem=?, tipo=? WHERE slug=?",
+                                     (nome, cor, ordem, tipo, slug))
+                # De→Para dos leads. 'lead_novo' fica (só troca o nome exibido).
+                de_para = [('topo', 'primeiro_contato'), ('meio', 'qualificacao'),
+                           ('fim', 'cotacao_enviada'), ('ganho', 'venda_fechada'),
+                           ('perdido', 'negociacao_perdida')]
+                movidos = 0
+                for antiga, nova in de_para:
+                    movidos += conn.execute("UPDATE crm_leads SET etapa=? WHERE etapa=?", (nova, antiga)).rowcount or 0
+                # Só agora remove as antigas — e apenas se não sobrou lead nelas.
+                for antiga, _ in de_para:
+                    resto = conn.execute("SELECT COUNT(*) c FROM crm_leads WHERE etapa=?", (antiga,)).fetchone()['c']
+                    if not resto:
+                        conn.execute("DELETE FROM crm_etapas WHERE slug=?", (antiga,))
+                conn.execute("INSERT INTO meta_flags (k) VALUES ('funil_novo_20260729')")
+                conn.commit()
+                print(f"[FUNIL_NOVO] etapas atualizadas; {movidos} lead(s) migrado(s) pro funil novo")
+            except Exception as e:
+                if is_pg:
+                    try: conn.rollback()
+                    except Exception: pass
+                print(f"[FUNIL_NOVO] migração pulada: {e}")
 
-    # Opções de status (sub-status) padrão — só insere se a tabela estiver vazia
-    status_default = ['Follow up 1', 'Follow up 2', 'Follow up 3+', 'Aguardando resposta', 'Sem interesse no momento']
+    # Opções de status (sub-status do card) — as ETIQUETAS DE FOLLOW-UP, usadas
+    # principalmente na etapa Cotação Enviada. Trocadas em 29/07/2026: "Follow up
+    # 1/2/3" dizia quantas vezes o consultor tentou, não POR QUE o lead parou —
+    # e é o motivo que define qual conversa ter. Agora cada etiqueta é um motivo.
+    status_default = ['Preço Caro', 'Silêncio', 'Momento', 'Aguardando resposta']
     try:
         ja_tem_status = conn.execute("SELECT COUNT(*) c FROM crm_status_opcoes").fetchone()['c']
     except Exception:
@@ -1850,6 +1895,39 @@ def init_db():
             for i, nome in enumerate(status_default, start=1):
                 conn.execute("INSERT OR IGNORE INTO crm_status_opcoes (nome,ordem) VALUES (?,?)", (nome, i))
             conn.commit()
+    else:
+        # Banco já populado: adiciona as etiquetas novas e limpa as de "Follow up
+        # N". Card que estava com uma delas é ZERADO (sub_status NULL) em vez de
+        # ser adivinhado — "Follow up 2" não diz se o lead achou caro ou sumiu,
+        # então chutar um motivo criaria dado falso no relatório. O consultor
+        # reclassifica na próxima interação.
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+            ja_etq = conn.execute("SELECT 1 FROM meta_flags WHERE k='followup_etiquetas_20260729'").fetchone()
+        except Exception:
+            ja_etq = True
+        if not ja_etq:
+            try:
+                for i, nome in enumerate(status_default, start=1):
+                    if is_pg:
+                        conn.execute("""INSERT INTO crm_status_opcoes (nome,ordem) VALUES (%s,%s)
+                            ON CONFLICT (nome) DO UPDATE SET ordem=EXCLUDED.ordem""", (nome, i))
+                    else:
+                        conn.execute("INSERT OR IGNORE INTO crm_status_opcoes (nome,ordem) VALUES (?,?)", (nome, i))
+                        conn.execute("UPDATE crm_status_opcoes SET ordem=? WHERE nome=?", (i, nome))
+                antigas = ['Follow up 1', 'Follow up 2', 'Follow up 3+', 'Sem interesse no momento']
+                zerados = 0
+                for nome in antigas:
+                    zerados += conn.execute("UPDATE crm_leads SET sub_status=NULL WHERE sub_status=?", (nome,)).rowcount or 0
+                    conn.execute("DELETE FROM crm_status_opcoes WHERE nome=?", (nome,))
+                conn.execute("INSERT INTO meta_flags (k) VALUES ('followup_etiquetas_20260729')")
+                conn.commit()
+                print(f"[FOLLOWUP_ETIQUETAS] etiquetas de follow-up trocadas; {zerados} card(s) sem etiqueta pra reclassificar")
+            except Exception as e:
+                if is_pg:
+                    try: conn.rollback()
+                    except Exception: pass
+                print(f"[FOLLOWUP_ETIQUETAS] migração pulada: {e}")
 
 
     # Regimes padrão
@@ -14313,22 +14391,22 @@ def api_whatsapp_analisar():
                 observacoes = ?, atualizado_em = ? WHERE id=?""",
                 (vc, obs_nova, _agora_sp(), lead_id))
 
-    # ── Score Lead move o lead pra Topo do Funil na primeira triagem real —
+    # ── Score Lead move o lead pra Primeiro Contato na primeira triagem real —
     # regra combinada com o Guilherme: score>=550 (medio/bom/quente) tira da
-    # pilha de Lead Novo pra Topo; abaixo disso fica parado (humano decide se
-    # continua nutrindo ou descarta). SÓ mexe se o lead AINDA estiver em
-    # 'lead_novo' — o WHERE na etapa é o que impede sobrescrever qualquer
-    # movimentação manual já feita (Transferência, Meio, Fundo...). Nunca
-    # progride Topo→Meio→Fundo sozinho (depende de coisa que o score não vê —
-    # documentação, negociação) e nunca toca Ganho/Perdido — decisão humana.
+    # pilha de Novo Lead; abaixo disso fica parado (humano decide se continua
+    # nutrindo ou descarta). SÓ mexe se o lead AINDA estiver em 'lead_novo' — o
+    # WHERE na etapa é o que impede sobrescrever qualquer movimentação manual já
+    # feita. Nunca progride sozinho pra Qualificação/Cotação (depende de coisa
+    # que o score não vê — dados pedidos, cotação montada) e nunca toca
+    # Venda Fechada / Negociação Perdida — decisão humana.
     if lead_id and score is not None and score >= 550:
-        moveu = conn.execute("""UPDATE crm_leads SET etapa='topo', atualizado_em=?
+        moveu = conn.execute("""UPDATE crm_leads SET etapa='primeiro_contato', atualizado_em=?
             WHERE id=? AND etapa='lead_novo'""", (_agora_sp(), lead_id)).rowcount
         if moveu:
             conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
                 VALUES (?,?,?,?,?)""",
                 (lead_id, 'Score Lead', 'etapa',
-                 f'Movido automaticamente de Lead Novo pra Topo do Funil (score {score}/1000, {faixa}).', _agora_sp()))
+                 f'Movido automaticamente de Novo Lead pra Primeiro Contato (score {score}/1000, {faixa}).', _agora_sp()))
 
     # sugestoes_json guarda o diagnóstico completo (dá pra reprocessar/auditar depois)
     diagnostico = {k: an[k] for k in ('sugestoes', 'tags', 'fase_funil', 'extracao', 'breakdown',
@@ -14604,11 +14682,15 @@ def carregar_etapas_crm(conn=None):
     # Fallback: se a tabela ainda não existir/estiver vazia, usa as etapas padrão
     if not etapas:
         etapas = [
-            {'id': 'topo', 'slug': 'topo', 'nome': 'Topo do Funil', 'cor': '#3b82f6', 'ordem': 1, 'tipo': 'normal'},
-            {'id': 'meio', 'slug': 'meio', 'nome': 'Meio do Funil', 'cor': '#f59e0b', 'ordem': 2, 'tipo': 'normal'},
-            {'id': 'fim', 'slug': 'fim', 'nome': 'Fundo do Funil', 'cor': '#10b981', 'ordem': 3, 'tipo': 'normal'},
-            {'id': 'ganho', 'slug': 'ganho', 'nome': 'Ganho', 'cor': '#1fd8a4', 'ordem': 4, 'tipo': 'ganho'},
-            {'id': 'perdido', 'slug': 'perdido', 'nome': 'Perdido', 'cor': '#ef4444', 'ordem': 5, 'tipo': 'perdido'},
+            {'id': 'lead_novo', 'slug': 'lead_novo', 'nome': 'Novo Lead', 'cor': '#6366f1', 'ordem': 0, 'tipo': 'normal'},
+            {'id': 'primeiro_contato', 'slug': 'primeiro_contato', 'nome': 'Primeiro Contato', 'cor': '#3b82f6', 'ordem': 1, 'tipo': 'normal'},
+            {'id': 'qualificacao', 'slug': 'qualificacao', 'nome': 'Qualificação', 'cor': '#8b5cf6', 'ordem': 2, 'tipo': 'normal'},
+            {'id': 'cotacao_enviada', 'slug': 'cotacao_enviada', 'nome': 'Cotação Enviada', 'cor': '#f59e0b', 'ordem': 3, 'tipo': 'normal'},
+            {'id': 'venda_fechada', 'slug': 'venda_fechada', 'nome': 'Venda Fechada', 'cor': '#1fd8a4', 'ordem': 4, 'tipo': 'ganho'},
+            {'id': 'emissao_proposta', 'slug': 'emissao_proposta', 'nome': 'Emissão de Proposta', 'cor': '#22d3ee', 'ordem': 5, 'tipo': 'ganho'},
+            {'id': 'status_proposta', 'slug': 'status_proposta', 'nome': 'Status da Proposta', 'cor': '#0ea5e9', 'ordem': 6, 'tipo': 'ganho'},
+            {'id': 'negociacao_perdida', 'slug': 'negociacao_perdida', 'nome': 'Negociação Perdida', 'cor': '#ef4444', 'ordem': 7, 'tipo': 'perdido'},
+            {'id': 'nutricao', 'slug': 'nutricao', 'nome': 'Nutrição', 'cor': '#a3a3a3', 'ordem': 8, 'tipo': 'normal'},
         ]
     return etapas
 
@@ -14746,7 +14828,7 @@ def crm():
     etapas = carregar_etapas_crm(conn)
 
     # Agrupa por etapa. CARDS_POR_COLUNA limita quantos cards viram DOM de fato —
-    # colunas como "Topo do Funil" acumulam milhares de leads históricos (~4500
+    # colunas do meio do funil acumulam milhares de leads históricos (~4500
     # numa delas em produção) e renderizar tudo de uma vez travava o CRM inteiro.
     # Total e valor somado continuam contando TODOS os leads da coluna (não só os
     # renderizados) — só o card em si é que fica limitado, filtros continuam
@@ -14755,7 +14837,7 @@ def crm():
     kanban = {e['id']: [] for e in etapas}
     kanban_total = {e['id']: 0 for e in etapas}
     kanban_valor = {e['id']: 0 for e in etapas}
-    primeira = etapas[0]['id'] if etapas else 'topo'
+    primeira = etapas[0]['id'] if etapas else 'lead_novo'
     for lead in leads:
         etapa = lead['etapa'] or primeira
         alvo = etapa if etapa in kanban else primeira
@@ -14794,7 +14876,7 @@ def crm_lead_novo():
                     etapa, responsavel_id, valor_estimado, observacoes)
                     VALUES (?,?,?,?,?,?,?,?,?)""",
         (d.get('nome'), d.get('telefone'), d.get('email'), d.get('empresa'),
-         d.get('origem', 'manual'), d.get('etapa', 'topo'), resp_id,
+         d.get('origem', 'manual'), d.get('etapa', 'lead_novo'), resp_id,
          float(d.get('valor_estimado') or 0) or None, d.get('observacoes')))
     lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
@@ -17735,7 +17817,7 @@ def crm_etapa_excluir(slug):
     restante = conn.execute(
         "SELECT slug FROM crm_etapas WHERE ativo=1 AND slug<>? ORDER BY ordem, id LIMIT 1", (slug,)
     ).fetchone()
-    destino = restante['slug'] if restante else 'topo'
+    destino = restante['slug'] if restante else 'lead_novo'
     conn.execute("UPDATE crm_leads SET etapa=? WHERE etapa=?", (destino, slug))
     conn.execute("DELETE FROM crm_etapas WHERE slug=?", (slug,))
     conn.commit(); close_db(conn)
@@ -18669,7 +18751,8 @@ def admin_crm_restaurar_etapas():
         # Os movidos por engano têm criado_em antigo OU foram criados em massa.
         #
         # Identifica leads em 'lead_novo' que têm atividade de 'criacao' (import)
-        # e os move para 'topo' (onde leads importados devem ficar).
+        # e os move para 'primeiro_contato' (onde leads importados devem ficar —
+        # eram 'topo' antes do funil novo de 29/07/2026).
         # Leads genuinamente novos (criados manualmente hoje) permanecem.
 
         # Busca todos os leads em lead_novo que vieram de importação
@@ -18688,10 +18771,10 @@ def admin_crm_restaurar_etapas():
 
         restaurados = 0
         if ids:
-            # Move em lote para 'topo' usando IN com placeholders
+            # Move em lote para 'primeiro_contato' usando IN com placeholders
             placeholders = ','.join(['?'] * len(ids))
             conn.execute(
-                f"UPDATE crm_leads SET etapa='topo' WHERE id IN ({placeholders}) AND etapa='lead_novo'",
+                f"UPDATE crm_leads SET etapa='primeiro_contato' WHERE id IN ({placeholders}) AND etapa='lead_novo'",
                 ids
             )
             restaurados = len(ids)
@@ -18708,7 +18791,7 @@ def admin_crm_restaurar_etapas():
         return jsonify({
             'ok': True,
             'restaurados': restaurados,
-            'msg': f'{restaurados} leads movidos de Lead Novo para Topo do Funil'
+            'msg': f'{restaurados} leads movidos de Novo Lead para Primeiro Contato'
         })
     except Exception as e:
         close_db(conn)
@@ -22031,7 +22114,7 @@ def _processar_lead(row, conn):
         'email': email,
         'empresa': cidade,
         'origem': origem,
-        'etapa': 'topo',
+        'etapa': 'lead_novo',
         'responsavel_id': responsavel_id,
         'valor_estimado': None,
         'consultor_nome': consultor,
