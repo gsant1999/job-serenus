@@ -62,6 +62,22 @@
   .lead-esfriando-tag { font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:8px; white-space:nowrap; }
   .card-esfriando .lead-esfriando-tag { background:rgba(250,204,21,.22); color:#eab308; }
   .card-frio .lead-esfriando-tag { background:rgba(244,63,94,.22); color:#f43f5e; }
+  .lead-etqs { display:flex; gap:4px; flex-wrap:wrap; margin-top:7px; }
+  .lead-etq { font-size:9.5px; font-weight:700; padding:2px 8px; border-radius:9px; color:#0b1220;
+              text-transform:uppercase; letter-spacing:.3px; max-width:100%; overflow:hidden;
+              text-overflow:ellipsis; white-space:nowrap; }
+  .lead-etq-btn { background:var(--panel); border:1px solid var(--borda); border-radius:6px;
+                  padding:4px 8px; font-size:10px; color:var(--cinza); cursor:pointer; white-space:nowrap; }
+  .lead-etq-btn:hover { border-color:var(--azul); color:var(--texto); }
+  /* Popover de etiquetas: fica no body pra não ser cortado pelo overflow da coluna */
+  .etq-pop { position:fixed; z-index:9000; background:var(--panel); border:1px solid var(--borda);
+             border-radius:10px; padding:8px; min-width:220px; box-shadow:0 12px 34px rgba(0,0,0,.45); }
+  .etq-pop-tit { font-size:11px; font-weight:700; color:var(--cinza); text-transform:uppercase;
+                 letter-spacing:.5px; padding:2px 4px 8px; }
+  .etq-pop label { display:flex; align-items:center; gap:8px; padding:5px 4px; cursor:pointer; font-size:12px; color:var(--texto); }
+  .etq-pop label:hover { background:rgba(148,163,184,.1); border-radius:6px; }
+  .etq-pop .bolinha { width:11px; height:11px; border-radius:50%; flex-shrink:0; }
+  .etq-pop-vazio { font-size:11.5px; color:var(--cinza-2); padding:4px; }
   .lead-sub-status { flex:1; min-width:0; background:var(--panel); border:1px solid var(--borda); border-radius:6px; padding:4px 6px; font-size:10.5px; color:var(--cinza); outline:none; cursor:pointer; }
   .lead-sub-status:focus { border-color:var(--azul); }
   .lead-bottom-row { display:flex; align-items:center; gap:6px; margin-top:8px; }
@@ -230,13 +246,41 @@
     </div>
     {% endif %}
     <div class="filtro-grupo">
-      <label>Status</label>
+      <label>Sub-status</label>
       <select name="sub_status">
         <option value="">Todos</option>
-        <option value="sem" {% if filtros.sub_status == 'sem' %}selected{% endif %}>Sem status</option>
-        {% for opt in sub_status_opcoes %}
-        {% if opt %}<option value="{{ opt }}" {% if filtros.sub_status == opt %}selected{% endif %}>{{ opt }}</option>{% endif %}
+        <option value="sem" {% if filtros.sub_status == 'sem' %}selected{% endif %}>Sem sub-status</option>
+        {# Agrupado por etapa: a mesma lista corrida não deixava claro que
+           "Implantada" só existe em Status da Proposta. #}
+        {% for etapa in etapas %}
+        {% if sub_status_etapa.get(etapa.id) %}
+        <optgroup label="{{ etapa.nome }}">
+          {% for opt in sub_status_etapa[etapa.id] %}
+          <option value="{{ opt }}" {% if filtros.sub_status == opt %}selected{% endif %}>{{ opt }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endif %}
         {% endfor %}
+      </select>
+    </div>
+    <div class="filtro-grupo">
+      <label>Etiqueta</label>
+      <select name="etiqueta">
+        <option value="">Todas</option>
+        <option value="sem" {% if filtros.etiqueta == 'sem' %}selected{% endif %}>Sem etiqueta</option>
+        {% for e in etiquetas_todas %}
+        <option value="{{ e.id }}" {% if filtros.etiqueta == e.id|string %}selected{% endif %}>{{ e.nome }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filtro-grupo">
+      <label>Situação</label>
+      <select name="cor">
+        <option value="">Todas</option>
+        <option value="fora_do_prazo" {% if filtros.cor == 'fora_do_prazo' %}selected{% endif %}>Fora do prazo (amarelo + vermelho)</option>
+        <option value="atrasado" {% if filtros.cor == 'atrasado' %}selected{% endif %}>Atrasado (vermelho)</option>
+        <option value="atencao" {% if filtros.cor == 'atencao' %}selected{% endif %}>Atenção (amarelo)</option>
+        <option value="no_prazo" {% if filtros.cor == 'no_prazo' %}selected{% endif %}>No prazo</option>
       </select>
     </div>
     <div class="filtro-grupo">
@@ -284,7 +328,8 @@
         {% for lead in kanban[etapa.id] %}
         {% set orig = lead.origem or 'manual' %}
         {% set ocls = 'origem-fb' if 'Facebook' in orig else 'origem-medsenior' if 'MEDSENIOR' in orig else 'origem-google' if 'Google' in orig else 'origem-manual' %}
-        {% set esf = lead.atualizado_em|status_esfriando %}
+        {% set esf = saude.get(lead.id, {'classe':'', 'texto':''}) %}
+        {% set etqs = etiquetas_lead.get(lead.id, []) %}
         <div class="lead-card {{ ocls }} {{ esf.classe }}" id="card-{{ lead.id }}"
              draggable="true"
              ondragstart="dragStart(event, {{ lead.id }})"
@@ -306,8 +351,15 @@
             {% elif lead.trafego == 'Orgânico' %}<span class="lead-trafego org" title="Veio de tráfego orgânico (não pago)">Orgânico</span>{% endif %}
             {% if lead.responsavel_nome %}<span class="lead-resp">{{ lead.responsavel_nome.split()[0] }}</span>
             {% elif lead.consultor_externo %}<span class="lead-resp" style="background:rgba(244,63,94,.12); color:var(--erro);" title="Sem consultor cadastrado no JOB — valor original da planilha">{{ lead.consultor_externo }}</span>{% endif %}
-            {% if esf.texto %}<span class="lead-esfriando-tag" title="Sem nenhuma ação registrada há um tempo">{{ esf.texto }}</span>{% endif %}
+            {% if esf.texto %}<span class="lead-esfriando-tag" title="Tempo sem avançar de etapa ou de sub-status — prazo definido na etapa">{{ esf.texto }}</span>{% endif %}
           </div>
+          {% if etqs %}
+          <div class="lead-etqs">
+            {% for e in etqs %}
+            <span class="lead-etq" style="background:{{ e.cor }};" title="Etiqueta: {{ e.nome }}">{{ e.nome }}</span>
+            {% endfor %}
+          </div>
+          {% endif %}
           <div class="lead-meta-row">
             {% if lead.telefone %}<span>{{ lead.telefone }}</span>{% endif %}
           </div>
@@ -315,11 +367,19 @@
             <span>{{ lead.criado_em|data_br }}</span>
           </div>
           <div class="lead-bottom-row">
-            <select class="lead-sub-status" onclick="event.stopPropagation()" onchange="mudarSubStatus({{ lead.id }}, this)">
-              {% for opt in sub_status_opcoes %}
-              <option value="{{ opt }}" {% if (lead.sub_status or '') == opt %}selected{% endif %}>{{ opt or 'Sem status' }}</option>
+            {# Só os sub-status DESTA etapa: é o que falta pro lead avançar daqui. #}
+            <select class="lead-sub-status" data-anterior="{{ lead.sub_status or '' }}" onclick="event.stopPropagation()" onchange="mudarSubStatus({{ lead.id }}, this)">
+              <option value="" {% if not lead.sub_status %}selected{% endif %}>Sem sub-status</option>
+              {% for opt in sub_status_etapa.get(etapa.id, []) %}
+              <option value="{{ opt }}" {% if (lead.sub_status or '') == opt %}selected{% endif %}>{{ opt }}</option>
               {% endfor %}
+              {% if lead.sub_status and lead.sub_status not in sub_status_etapa.get(etapa.id, []) %}
+              {# Sub-status de outra etapa (lead foi movido depois de classificado):
+                 mantém visível em vez de mostrar o card como "sem sub-status". #}
+              <option value="{{ lead.sub_status }}" selected>{{ lead.sub_status }} (de outra etapa)</option>
+              {% endif %}
             </select>
+            <button class="lead-etq-btn" onclick="event.stopPropagation(); abrirEtiquetas({{ lead.id }}, this)" title="Etiquetas">Etiquetas</button>
             {% if lead.telefone %}
             <button class="lead-wpp-btn" onclick="event.stopPropagation(); wppRapido('{{ lead.telefone }}')" title="Abrir no BotConversa"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></button>
             {% endif %}
@@ -1086,11 +1146,94 @@ async function concluirAgLead(id){
   if((await r.json()).ok){ toast('Concluída','ok'); carregarAgendaLead(); }
 }
 async function mudarSubStatus(id, sel){
-  const valor=sel.value;
+  const valor=sel.value, anterior=sel.dataset.anterior||'';
   const r=await fetch('/crm/lead/'+id+'/sub-status',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({sub_status:valor})});
   const d=await r.json();
-  if(!d.ok){ toast(d.erro||'Erro ao mudar status','err'); }
+  if(!d.ok){ sel.value=anterior; toast(d.erro||'Erro ao mudar sub-status','err'); return; }
+  sel.dataset.anterior=valor;
+  // Avançar o sub-status zera o cronômetro, então a cor do card tem que sair na
+  // hora — deixar o amarelo/vermelho na tela depois da ação faz o consultor
+  // achar que não registrou e mexer de novo.
+  const card=document.getElementById('card-'+id);
+  if(card){
+    card.classList.remove('card-esfriando','card-frio');
+    const tag=card.querySelector('.lead-esfriando-tag');
+    if(tag) tag.remove();
+  }
+  toast(valor?('Sub-status: '+valor):'Sub-status limpo','ok');
+}
+
+// ─── ETIQUETAS ────────────────────────────────────────────────────────────────
+const ETQS_DISPONIVEIS = {{ etiquetas_todas|tojson }};
+let etqPopAberto = null;
+
+function fecharEtqPop(){
+  if(etqPopAberto){ etqPopAberto.remove(); etqPopAberto=null; }
+}
+document.addEventListener('click', (ev)=>{
+  if(etqPopAberto && !etqPopAberto.contains(ev.target)) fecharEtqPop();
+});
+document.addEventListener('keydown', (ev)=>{ if(ev.key==='Escape') fecharEtqPop(); });
+
+function abrirEtiquetas(id, btn){
+  fecharEtqPop();
+  const card=document.getElementById('card-'+id);
+  const marcadas=new Set(Array.from(card ? card.querySelectorAll('.lead-etq') : [])
+    .map(e=>e.textContent.trim()));
+  const pop=document.createElement('div');
+  pop.className='etq-pop';
+  pop.onclick=(e)=>e.stopPropagation();
+  if(!ETQS_DISPONIVEIS.length){
+    pop.innerHTML='<div class="etq-pop-tit">Etiquetas</div>'
+      +'<div class="etq-pop-vazio">Nenhuma etiqueta cadastrada. O admin cria em Configurar funil.</div>';
+  }else{
+    pop.innerHTML='<div class="etq-pop-tit">Etiquetas</div>'+ETQS_DISPONIVEIS.map(e=>
+      '<label><input type="checkbox" '+(marcadas.has(e.nome)?'checked':'')
+      +' onchange="marcarEtiqueta('+id+','+e.id+',this)">'
+      +'<span class="bolinha" style="background:'+e.cor+'"></span>'
+      +'<span>'+e.nome+'</span></label>').join('');
+  }
+  document.body.appendChild(pop);
+  // Posiciona no body (não dentro da coluna): o .col-body tem overflow, então um
+  // popover filho do card seria cortado nas duas últimas linhas da coluna.
+  const r=btn.getBoundingClientRect();
+  const alt=pop.offsetHeight, larg=pop.offsetWidth;
+  pop.style.top=Math.max(8, Math.min(window.innerHeight-alt-8, r.bottom+6))+'px';
+  pop.style.left=Math.max(8, Math.min(window.innerWidth-larg-8, r.left))+'px';
+  etqPopAberto=pop;
+}
+
+async function marcarEtiqueta(lid, eid, chk){
+  const marcar=chk.checked;
+  chk.disabled=true;
+  try{
+    const r=await fetch('/crm/lead/'+lid+'/etiqueta',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({etiqueta_id:eid, marcar:marcar})});
+    const d=await r.json();
+    if(!d.ok){ chk.checked=!marcar; toast(d.erro||'Erro ao salvar etiqueta','err'); return; }
+    pintarEtiquetas(lid, d.etiquetas||[]);
+  }catch(e){
+    chk.checked=!marcar; toast('Falha de conexão ao salvar etiqueta','err');
+  }finally{
+    chk.disabled=false;
+  }
+}
+
+function pintarEtiquetas(lid, etqs){
+  const card=document.getElementById('card-'+lid);
+  if(!card) return;
+  let box=card.querySelector('.lead-etqs');
+  if(!etqs.length){ if(box) box.remove(); return; }
+  if(!box){
+    box=document.createElement('div');
+    box.className='lead-etqs';
+    const tags=card.querySelector('.lead-tags');
+    if(tags) tags.insertAdjacentElement('afterend', box); else card.appendChild(box);
+  }
+  box.innerHTML=etqs.map(e=>'<span class="lead-etq" style="background:'+e.cor
+    +'" title="Etiqueta: '+e.nome+'">'+e.nome+'</span>').join('');
 }
 // "Já atendi manualmente" — tira o card de Novo Lead e joga em Primeiro Contato
 // (era 'topo' antes do funil novo de 29/07/2026; a etapa não existe mais, então

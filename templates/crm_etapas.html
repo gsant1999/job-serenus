@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Gerenciar Etapas e Status{% endblock %}
+{% block title %}Etapas, sub-status e etiquetas{% endblock %}
 
 {% block head %}
 <style>
@@ -26,6 +26,20 @@
   .ge-add input[type="color"] { width:40px; height:38px; border:1px solid var(--borda); border-radius:8px; background:none; padding:2px; cursor:pointer; }
   .ge-add button { background:var(--azul); color:#fff; border:none; padding:9px 18px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; }
 
+  .ge-item .prazo { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--cinza-2); flex-shrink:0; }
+  .ge-item .prazo input { width:46px; background:var(--panel-3); border:1px solid var(--borda); border-radius:6px;
+                          padding:4px 6px; color:var(--texto); font-size:12px; text-align:center; outline:none; }
+  .ge-item .prazo input:focus { border-color:var(--azul); }
+  .ge-grupo { margin-bottom:14px; }
+  .ge-grupo-tit { display:flex; align-items:center; gap:7px; font-size:11px; font-weight:700; text-transform:uppercase;
+                  letter-spacing:.5px; color:var(--cinza-2); margin:0 0 7px 2px; }
+  .ge-grupo-tit .dot { width:9px; height:9px; border-radius:50%; }
+  .ge-pill { padding:3px 10px; border-radius:11px; font-size:10.5px; font-weight:700; color:#0b1220;
+             text-transform:uppercase; letter-spacing:.3px; }
+  .ge-add select { background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 10px;
+                   color:var(--texto); font-size:13px; outline:none; }
+  .ge-nota { font-size:11.5px; color:var(--cinza-2); background:var(--panel-3); border-radius:8px;
+             padding:9px 11px; margin-top:12px; line-height:1.5; }
   .ge-vazio { text-align:center; padding:20px; color:var(--cinza-2); font-size:12.5px; }
 </style>
 {% endblock %}
@@ -34,21 +48,26 @@
 <div class="ge-page">
   <div class="topbar" style="margin-bottom:20px;">
     <div>
-      <h1 style="margin:0;">Etapas e Status</h1>
-      <div class="sub">Gerencie as colunas do Kanban e as opções de status dos leads</div>
+      <h1 style="margin:0;">Etapas, sub-status e etiquetas</h1>
+      <div class="sub">Colunas do Kanban, o andamento dentro de cada uma e as etiquetas de motivo</div>
     </div>
     <div><button class="btn-outline btn-sm" onclick="location.href='/crm'">Voltar ao CRM</button></div>
   </div>
 
   <div class="ge-sec">
     <div class="ge-sec-tit">Etapas do Funil</div>
-    <div class="ge-sec-sub">São as colunas do Kanban. Use as setas para reordenar. Ao excluir uma etapa, os leads dela são movidos automaticamente para a etapa seguinte.</div>
+    <div class="ge-sec-sub">São as colunas do Kanban. Use as setas para reordenar. Ao excluir uma etapa, os leads dela são movidos automaticamente para a etapa seguinte. O campo <strong>dias</strong> é o prazo desta etapa: passando dele o card fica amarelo, no dobro fica vermelho.</div>
     <div id="lista-etapas">
       {% for e in etapas %}
       <div class="ge-item" data-slug="{{ e.slug }}">
         <input type="color" value="{{ e.cor }}" onchange="editarEtapa('{{ e.slug }}', {cor:this.value})">
         <div class="nome"><input type="text" value="{{ e.nome }}" onblur="if(this.value.trim() && this.value!==this.defaultValue) editarEtapa('{{ e.slug }}', {nome:this.value.trim()})"></div>
         {% if e.tipo != 'normal' %}<span class="tipo-tag">{{ e.tipo }}</span>{% endif %}
+        <div class="prazo" title="Dias sem avançar até o card mudar de cor nesta etapa. Vazio usa o padrão ({{ sla_padrao }} dias).">
+          <input type="number" min="1" value="{{ e.sla_dias or '' }}" placeholder="{{ sla_padrao }}"
+                 onchange="editarEtapa('{{ e.slug }}', {sla_dias:this.value})">
+          <span>dias</span>
+        </div>
         <div class="ge-btns">
           <button class="ge-btn-mini" title="Mover para cima" onclick="moverEtapa('{{ e.slug }}', -1)">▲</button>
           <button class="ge-btn-mini" title="Mover para baixo" onclick="moverEtapa('{{ e.slug }}', 1)">▼</button>
@@ -65,25 +84,81 @@
   </div>
 
   <div class="ge-sec">
-    <div class="ge-sec-tit">Status (follow-up)</div>
-    <div class="ge-sec-sub">Aparece no card do Kanban para marcar em que ponto do follow-up o lead está, sem precisar trocar de etapa.</div>
+    <div class="ge-sec-tit">Sub-status por etapa</div>
+    <div class="ge-sec-sub">É o andamento do lead <strong>dentro</strong> da etapa — o que falta pra ele avançar pra próxima coluna. Cada etapa tem a sua lista, então o card só oferece o que faz sentido onde ele está. Mudar o sub-status zera o cronômetro da cor.</div>
     <div id="lista-status">
-      {% for s in status_opcoes %}
-      <div class="ge-item" data-id="{{ s.id }}">
-        <div class="nome"><input type="text" value="{{ s.nome }}" onblur="if(this.value.trim() && this.value!==this.defaultValue) editarStatus({{ s.id }}, this.value.trim())"></div>
+      {% for etapa in etapas %}
+      {% set desta = status_opcoes|selectattr('etapa_slug', 'equalto', etapa.slug)|list %}
+      {% if desta %}
+      <div class="ge-grupo">
+        <div class="ge-grupo-tit"><span class="dot" style="background:{{ etapa.cor }}"></span>{{ etapa.nome }}</div>
+        {% for s in desta %}
+        <div class="ge-item" data-id="{{ s.id }}">
+          <div class="nome"><input type="text" value="{{ s.nome }}" onblur="if(this.value.trim() && this.value!==this.defaultValue) editarStatus({{ s.id }}, this.value.trim())"></div>
+          <select onchange="moverStatusEtapa({{ s.id }}, this.value)" title="Etapa dona deste sub-status">
+            {% for e2 in etapas %}<option value="{{ e2.slug }}" {% if e2.slug == etapa.slug %}selected{% endif %}>{{ e2.nome }}</option>{% endfor %}
+          </select>
+          <div class="ge-btns">
+            <button class="ge-btn-mini excluir" title="Excluir sub-status" onclick="excluirStatus({{ s.id }}, '{{ s.nome }}')">✕</button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% endfor %}
+      {% set soltos = status_opcoes|rejectattr('etapa_slug')|list %}
+      {% if soltos %}
+      <div class="ge-grupo">
+        <div class="ge-grupo-tit" style="color:var(--erro);">Sem etapa — aparece em todas as colunas</div>
+        {% for s in soltos %}
+        <div class="ge-item" data-id="{{ s.id }}">
+          <div class="nome"><input type="text" value="{{ s.nome }}" onblur="if(this.value.trim() && this.value!==this.defaultValue) editarStatus({{ s.id }}, this.value.trim())"></div>
+          <select onchange="moverStatusEtapa({{ s.id }}, this.value)">
+            <option value="">Sem etapa</option>
+            {% for e2 in etapas %}<option value="{{ e2.slug }}">{{ e2.nome }}</option>{% endfor %}
+          </select>
+          <div class="ge-btns">
+            <button class="ge-btn-mini excluir" title="Excluir sub-status" onclick="excluirStatus({{ s.id }}, '{{ s.nome }}')">✕</button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% if not status_opcoes %}<div class="ge-vazio">Nenhum sub-status cadastrado.</div>{% endif %}
+    <div class="ge-add">
+      <input type="text" id="novo-status-nome" placeholder="Nome do sub-status (ex: Reunião marcada)">
+      <select id="novo-status-etapa">
+        {% for e in etapas %}<option value="{{ e.slug }}">{{ e.nome }}</option>{% endfor %}
+      </select>
+      <button onclick="criarStatus()">+ Adicionar</button>
+    </div>
+  </div>
+
+  <div class="ge-sec">
+    <div class="ge-sec-tit">Etiquetas</div>
+    <div class="ge-sec-sub">Dizem <strong>por que</strong> o lead está parado (achou caro, sumiu, não é o momento). Valem em qualquer etapa e o lead pode ter várias. O consultor só marca e desmarca no card — criar, renomear e apagar é só aqui, pra etiqueta significar a mesma coisa pra todo o time.</div>
+    <div id="lista-etiquetas">
+      {% for e in etiquetas %}
+      <div class="ge-item" data-id="{{ e.id }}">
+        <input type="color" value="{{ e.cor }}" onchange="editarEtiqueta({{ e.id }}, {cor:this.value})">
+        <span class="ge-pill" style="background:{{ e.cor }}">{{ e.nome }}</span>
+        <div class="nome"><input type="text" value="{{ e.nome }}" onblur="if(this.value.trim() && this.value!==this.defaultValue) editarEtiqueta({{ e.id }}, {nome:this.value.trim()})"></div>
         <div class="ge-btns">
-          <button class="ge-btn-mini" title="Mover para cima" onclick="moverStatus({{ s.id }}, -1)">▲</button>
-          <button class="ge-btn-mini" title="Mover para baixo" onclick="moverStatus({{ s.id }}, 1)">▼</button>
-          <button class="ge-btn-mini excluir" title="Excluir status" onclick="excluirStatus({{ s.id }}, '{{ s.nome }}')">✕</button>
+          <button class="ge-btn-mini" title="Mover para cima" onclick="moverEtiqueta({{ e.id }}, -1)">▲</button>
+          <button class="ge-btn-mini" title="Mover para baixo" onclick="moverEtiqueta({{ e.id }}, 1)">▼</button>
+          <button class="ge-btn-mini excluir" title="Arquivar etiqueta" onclick="excluirEtiqueta({{ e.id }}, '{{ e.nome }}')">✕</button>
         </div>
       </div>
       {% endfor %}
     </div>
-    {% if not status_opcoes %}<div class="ge-vazio">Nenhum status cadastrado.</div>{% endif %}
+    {% if not etiquetas %}<div class="ge-vazio">Nenhuma etiqueta cadastrada.</div>{% endif %}
     <div class="ge-add">
-      <input type="text" id="novo-status-nome" placeholder="Nome do novo status (ex: Follow up 4)">
-      <button onclick="criarStatus()">+ Adicionar status</button>
+      <input type="color" id="nova-etq-cor" value="#f43f5e">
+      <input type="text" id="nova-etq-nome" placeholder="Nome da etiqueta (ex: Quer PF, Sem CNPJ)">
+      <button onclick="criarEtiqueta()">+ Adicionar etiqueta</button>
     </div>
+    <div class="ge-nota">Arquivar não apaga o histórico: quem já foi classificado continua vinculado, e reativando a etiqueta os leads voltam marcados.</div>
   </div>
 </div>
 
@@ -126,8 +201,41 @@ async function moverEtapa(slug, direcao) {
 // ── Status ──
 async function criarStatus() {
   const nome = document.getElementById('novo-status-nome').value.trim();
+  const etapa_slug = document.getElementById('novo-status-etapa').value;
   if (!nome) return;
-  const d = await _post('/crm/status/nova', {nome});
+  const d = await _post('/crm/status/nova', {nome, etapa_slug});
+  if (d.ok) location.reload();
+}
+async function moverStatusEtapa(id, etapa_slug) {
+  const d = await _post('/crm/status/' + id + '/editar', {etapa_slug});
+  if (d.ok) location.reload();
+}
+
+// ── Etiquetas ──
+async function criarEtiqueta() {
+  const nome = document.getElementById('nova-etq-nome').value.trim();
+  const cor = document.getElementById('nova-etq-cor').value;
+  if (!nome) return;
+  const d = await _post('/crm/etiquetas/nova', {nome, cor});
+  if (d.ok) location.reload();
+}
+async function editarEtiqueta(id, campos) {
+  const d = await _post('/crm/etiquetas/' + id + '/editar', campos);
+  location.reload();
+}
+async function excluirEtiqueta(id, nome) {
+  if (!confirm('Arquivar a etiqueta "' + nome + '"? Ela sai dos cards, mas o histórico de quem foi classificado com ela é mantido.')) return;
+  const d = await _post('/crm/etiquetas/' + id + '/excluir', {});
+  if (d.ok) location.reload();
+}
+async function moverEtiqueta(id, direcao) {
+  const itens = Array.from(document.querySelectorAll('#lista-etiquetas .ge-item'));
+  const ids = itens.map(i => parseInt(i.dataset.id));
+  const idx = ids.indexOf(id);
+  const novoIdx = idx + direcao;
+  if (novoIdx < 0 || novoIdx >= ids.length) return;
+  [ids[idx], ids[novoIdx]] = [ids[novoIdx], ids[idx]];
+  const d = await _post('/crm/etiquetas/reordenar', {ordem: ids});
   if (d.ok) location.reload();
 }
 async function editarStatus(id, nome) {

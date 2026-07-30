@@ -1044,6 +1044,23 @@ def init_db():
                 ordem INTEGER DEFAULT 0,
                 ativo INTEGER DEFAULT 1
             )""",
+            # ETIQUETAS: campo próprio do lead, independente da etapa e do
+            # sub-status. Múltiplas por lead (é um "por que", não um "onde") e o
+            # nome/cor só muda em /crm/etapas/gerenciar — o consultor marca e
+            # desmarca, nunca renomeia.
+            """CREATE TABLE IF NOT EXISTS crm_etiquetas (
+                id SERIAL PRIMARY KEY,
+                nome TEXT UNIQUE NOT NULL,
+                cor TEXT DEFAULT '#64748b',
+                ordem INTEGER DEFAULT 0,
+                ativo INTEGER DEFAULT 1
+            )""",
+            """CREATE TABLE IF NOT EXISTS crm_lead_etiquetas (
+                lead_id INTEGER NOT NULL,
+                etiqueta_id INTEGER NOT NULL,
+                criado_em TEXT,
+                PRIMARY KEY (lead_id, etiqueta_id)
+            )""",
             """CREATE TABLE IF NOT EXISTS cotacao_tabela (
                 id SERIAL PRIMARY KEY,
                 operadora TEXT NOT NULL, plano TEXT NOT NULL,
@@ -1644,6 +1661,19 @@ def init_db():
             ordem INTEGER DEFAULT 0,
             ativo INTEGER DEFAULT 1
         );
+        CREATE TABLE IF NOT EXISTS crm_etiquetas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT UNIQUE NOT NULL,
+            cor TEXT DEFAULT '#64748b',
+            ordem INTEGER DEFAULT 0,
+            ativo INTEGER DEFAULT 1
+        );
+        CREATE TABLE IF NOT EXISTS crm_lead_etiquetas (
+            lead_id INTEGER NOT NULL,
+            etiqueta_id INTEGER NOT NULL,
+            criado_em TEXT,
+            PRIMARY KEY (lead_id, etiqueta_id)
+        );
         CREATE TABLE IF NOT EXISTS operadoras (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             operadora TEXT UNIQUE NOT NULL,
@@ -1899,6 +1929,15 @@ def init_db():
                 conn.execute("INSERT OR IGNORE INTO crm_status_opcoes (nome,ordem) VALUES (?,?)", (nome, i))
             conn.commit()
     else:
+        # Se a separação etiqueta × sub-status já rodou, esses quatro nomes viraram
+        # ETIQUETA e não podem voltar pra lista de sub-status. Sem esta guarda o
+        # bloco abaixo os reinseria como sub-status global no boot seguinte, e eles
+        # reapareciam em TODAS as etapas — exatamente o problema que a separação
+        # resolveu. (Visto em teste: ids 28-31 recriados no segundo startup.)
+        try:
+            ja_separou = conn.execute("SELECT 1 FROM meta_flags WHERE k='etiq_substatus_split_20260729'").fetchone()
+        except Exception:
+            ja_separou = None
         # Banco já populado: adiciona as etiquetas novas e limpa as de "Follow up
         # N". Card que estava com uma delas é ZERADO (sub_status NULL) em vez de
         # ser adivinhado — "Follow up 2" não diz se o lead achou caro ou sumiu,
@@ -1909,7 +1948,7 @@ def init_db():
             ja_etq = conn.execute("SELECT 1 FROM meta_flags WHERE k='followup_etiquetas_20260729'").fetchone()
         except Exception:
             ja_etq = True
-        if not ja_etq:
+        if not ja_etq and not ja_separou:
             try:
                 for i, nome in enumerate(status_default, start=1):
                     if is_pg:
@@ -1932,44 +1971,7 @@ def init_db():
                     except Exception: pass
                 print(f"[FOLLOWUP_ETIQUETAS] migração pulada: {e}")
 
-    # ─── RENAME das etiquetas de follow-up (29/07/2026, mesmo dia) ────────────
-    # Precisa de flag PRÓPRIA: a flag followup_etiquetas_20260729 já rodou no
-    # deploy anterior, então o bloco acima nunca mais executa — sem esta segunda
-    # migração os nomes antigos ficariam pra sempre no banco de produção.
-    # RENOMEIA no lugar (não apaga e recria) pra não perder a etiqueta dos cards
-    # que já foram classificados: apagar a opção deixaria o card com sub_status
-    # apontando pra um nome que não existe mais na lista.
-    rename_etq = [('Preço Caro', 'Achou Caro'), ('Momento', 'Não é o Momento')]
-    try:
-        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
-        ja_ren = conn.execute("SELECT 1 FROM meta_flags WHERE k='etq_rename_20260729b'").fetchone()
-    except Exception:
-        ja_ren = True
-    if not ja_ren:
-        try:
-            renomeados = 0
-            for antigo, novo in rename_etq:
-                existe_novo = conn.execute("SELECT 1 FROM crm_status_opcoes WHERE nome=?", (novo,)).fetchone()
-                if existe_novo:
-                    # Nome novo já existe (ex.: instalação limpa): só migra os
-                    # cards que ainda apontam pro antigo e remove a duplicata.
-                    conn.execute("UPDATE crm_leads SET sub_status=? WHERE sub_status=?", (novo, antigo))
-                    conn.execute("DELETE FROM crm_status_opcoes WHERE nome=?", (antigo,))
-                else:
-                    conn.execute("UPDATE crm_status_opcoes SET nome=? WHERE nome=?", (novo, antigo))
-                    conn.execute("UPDATE crm_leads SET sub_status=? WHERE sub_status=?", (novo, antigo))
-                renomeados += 1
-            # Reordena pela lista oficial (Achou Caro, Silêncio, Não é o Momento...)
-            for i, nome in enumerate(status_default, start=1):
-                conn.execute("UPDATE crm_status_opcoes SET ordem=? WHERE nome=?", (i, nome))
-            conn.execute("INSERT INTO meta_flags (k) VALUES ('etq_rename_20260729b')")
-            conn.commit()
-            print(f"[ETQ_RENAME] {renomeados} etiqueta(s) renomeada(s): Achou Caro / Não é o Momento")
-        except Exception as e:
-            if is_pg:
-                try: conn.rollback()
-                except Exception: pass
-            print(f"[ETQ_RENAME] migração pulada: {e}")
+
 
 
     # Regimes padrão
@@ -2112,6 +2114,16 @@ def init_db():
         ("crm_leads", "qual_tipo_contratacao", "TEXT"),
         # Sub-status dentro da etapa (ex: Follow up 1/2/3) — pedido do Gabriel via PDF 04/07
         ("crm_leads", "sub_status", "TEXT"),
+        # avancou_em = última vez que o lead ANDOU (mudou de etapa ou de
+        # sub-status). Separado de atualizado_em de propósito: atualizado_em
+        # muda em qualquer edição (corrigir telefone, anexar arquivo), então o
+        # card ficava verde só porque alguém mexeu num campo. A cor tem que
+        # responder a avanço real no funil.
+        ("crm_leads", "avancou_em", "TEXT"),
+        # sub-status agora pertence a UMA etapa (NULL = vale em todas)
+        ("crm_status_opcoes", "etapa_slug", "TEXT"),
+        # prazo em dias até o card virar de cor nesta etapa (NULL = padrão global)
+        ("crm_etapas", "sla_dias", "INTEGER"),
         ("crm_leads", "consultor_externo", "TEXT"),  # nome original da planilha
         # ─── Boleto de Adesão via Asaas ───
         ("propostas", "adesao_asaas_customer_id", "TEXT"),
@@ -2262,12 +2274,154 @@ def init_db():
                 try: conn.rollback()
                 except Exception: pass
             # SQLite: coluna já existe → ignora
+    # ─── RENAME das etiquetas de follow-up (29/07/2026, mesmo dia) ────────────
+    # RODA AQUI, e não junto do seed das etiquetas: a coluna crm_leads.sub_status só
+    # é criada no loop de colunas acima, então lá em cima o UPDATE falhava com
+    # 'no such column: sub_status' e o rename nunca completava.
+    # Precisa de flag PRÓPRIA: a flag followup_etiquetas_20260729 já rodou no
+    # deploy anterior, então o bloco acima nunca mais executa — sem esta segunda
+    # migração os nomes antigos ficariam pra sempre no banco de produção.
+    # RENOMEIA no lugar (não apaga e recria) pra não perder a etiqueta dos cards
+    # que já foram classificados: apagar a opção deixaria o card com sub_status
+    # apontando pra um nome que não existe mais na lista.
+    rename_etq = [('Preço Caro', 'Achou Caro'), ('Momento', 'Não é o Momento')]
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        ja_ren = conn.execute("SELECT 1 FROM meta_flags WHERE k='etq_rename_20260729b'").fetchone()
+    except Exception:
+        ja_ren = True
+    if not ja_ren:
+        try:
+            renomeados = 0
+            for antigo, novo in rename_etq:
+                existe_novo = conn.execute("SELECT 1 FROM crm_status_opcoes WHERE nome=?", (novo,)).fetchone()
+                if existe_novo:
+                    # Nome novo já existe (ex.: instalação limpa): só migra os
+                    # cards que ainda apontam pro antigo e remove a duplicata.
+                    conn.execute("UPDATE crm_leads SET sub_status=? WHERE sub_status=?", (novo, antigo))
+                    conn.execute("DELETE FROM crm_status_opcoes WHERE nome=?", (antigo,))
+                else:
+                    conn.execute("UPDATE crm_status_opcoes SET nome=? WHERE nome=?", (novo, antigo))
+                    conn.execute("UPDATE crm_leads SET sub_status=? WHERE sub_status=?", (novo, antigo))
+                renomeados += 1
+            # Reordena pela lista oficial (Achou Caro, Silêncio, Não é o Momento...)
+            oficial = ['Achou Caro', 'Silêncio', 'Não é o Momento', 'Aguardando resposta']
+            for i, nome in enumerate(oficial, start=1):
+                conn.execute("UPDATE crm_status_opcoes SET ordem=? WHERE nome=?", (i, nome))
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('etq_rename_20260729b')")
+            conn.commit()
+            print(f"[ETQ_RENAME] {renomeados} etiqueta(s) renomeada(s): Achou Caro / Não é o Momento")
+        except Exception as e:
+            if is_pg:
+                try: conn.rollback()
+                except Exception: pass
+            print(f"[ETQ_RENAME] migração pulada: {e}")
+
+    # ─── SEPARAÇÃO ETIQUETA × SUB-STATUS (29/07/2026) ─────────────────────────
+    # Estavam na mesma lista, e são coisas diferentes:
+    #   ETIQUETA  = POR QUE o lead parou (Achou Caro, Silêncio, Não é o Momento).
+    #               Vale em qualquer etapa, é múltipla, cor fixa, e o consultor só
+    #               marca/desmarca — quem cria e renomeia é o admin.
+    #   SUB-STATUS = ONDE o lead está DENTRO da etapa atual, ou seja o que falta
+    #               pra ele avançar pra próxima coluna. É um só por lead e a lista
+    #               muda conforme a etapa (não faz sentido oferecer "3 cotações"
+    #               num lead que ainda está em Primeiro Contato).
+    # Antes as três razões apareciam como sub-status em TODAS as etapas, o que
+    # ocupava o único campo de andamento do card com uma informação que não é
+    # andamento. Aqui elas mudam de casa: viram etiqueta de verdade, e cada
+    # etapa recebe os sub-status de avanço que competem a ela.
+    ETIQUETAS_PADRAO = [
+        ('Achou Caro',       '#f43f5e'),
+        ('Silêncio',         '#94a3b8'),
+        ('Não é o Momento',  '#f59e0b'),
+        ('Aguardando resposta', '#3b82f6'),
+    ]
+    SUB_STATUS_POR_ETAPA = {
+        'lead_novo':          ['Aguardando distribuição', 'Distribuído'],
+        'primeiro_contato':   ['Tentativa 1', 'Tentativa 2', 'Tentativa 3', 'Respondeu'],
+        'qualificacao':       ['Dados solicitados', 'Dados parciais', 'Dados completos'],
+        'cotacao_enviada':    ['1 cotação enviada', '2 cotações enviadas', '3 cotações enviadas', 'Em negociação'],
+        'venda_fechada':      ['Aguardando documentos', 'Documentos completos'],
+        'emissao_proposta':   ['Em digitação', 'Enviada à operadora'],
+        'status_proposta':    ['Em análise', 'Pendência da operadora', 'Implantada'],
+        'negociacao_perdida': ['Perda registrada'],
+        'nutricao':           ['Em nutrição', 'Reaquecido'],
+    }
+    # Prazo até o card mudar de cor, por etapa. Etapa de topo é curta (lead novo
+    # esfria em horas, não em dias); etapa de acompanhamento operacional é longa
+    # porque quem manda no ritmo é a operadora, não o consultor.
+    SLA_POR_ETAPA = {
+        'lead_novo': 1, 'primeiro_contato': 2, 'qualificacao': 3,
+        'cotacao_enviada': 4, 'venda_fechada': 3, 'emissao_proposta': 3,
+        'status_proposta': 7, 'negociacao_perdida': 30, 'nutricao': 30,
+    }
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        ja_sep = conn.execute("SELECT 1 FROM meta_flags WHERE k='etiq_substatus_split_20260729'").fetchone()
+    except Exception:
+        ja_sep = True
+    if not ja_sep:
+        try:
+            # 1) Cria as etiquetas de verdade
+            for i, (nome, cor) in enumerate(ETIQUETAS_PADRAO, start=1):
+                if is_pg:
+                    conn.execute("""INSERT INTO crm_etiquetas (nome,cor,ordem) VALUES (%s,%s,%s)
+                        ON CONFLICT (nome) DO UPDATE SET cor=EXCLUDED.cor, ordem=EXCLUDED.ordem""", (nome, cor, i))
+                else:
+                    conn.execute("INSERT OR IGNORE INTO crm_etiquetas (nome,cor,ordem) VALUES (?,?,?)", (nome, cor, i))
+                    conn.execute("UPDATE crm_etiquetas SET cor=?, ordem=? WHERE nome=?", (cor, i, nome))
+            # 2) Todo lead que tinha uma dessas como sub_status GANHA a etiqueta
+            #    equivalente e tem o sub_status limpo. Não é perda de dado: a
+            #    classificação continua existindo, só passa pro campo certo.
+            movidos = 0
+            for nome, _cor in ETIQUETAS_PADRAO:
+                et = conn.execute("SELECT id FROM crm_etiquetas WHERE nome=?", (nome,)).fetchone()
+                if not et:
+                    continue
+                alvos = conn.execute("SELECT id FROM crm_leads WHERE sub_status=?", (nome,)).fetchall()
+                for a in alvos:
+                    if is_pg:
+                        conn.execute("""INSERT INTO crm_lead_etiquetas (lead_id,etiqueta_id,criado_em)
+                            VALUES (%s,%s,%s) ON CONFLICT DO NOTHING""", (a['id'], et['id'], _agora_sp()))
+                    else:
+                        conn.execute("""INSERT OR IGNORE INTO crm_lead_etiquetas (lead_id,etiqueta_id,criado_em)
+                            VALUES (?,?,?)""", (a['id'], et['id'], _agora_sp()))
+                    movidos += 1
+                conn.execute("UPDATE crm_leads SET sub_status=NULL WHERE sub_status=?", (nome,))
+                conn.execute("DELETE FROM crm_status_opcoes WHERE nome=?", (nome,))
+            # 3) Sub-status de avanço, agora amarrados à etapa
+            ordem = 0
+            for slug, nomes in SUB_STATUS_POR_ETAPA.items():
+                for nome in nomes:
+                    ordem += 1
+                    ja = conn.execute("SELECT id FROM crm_status_opcoes WHERE nome=?", (nome,)).fetchone()
+                    if ja:
+                        conn.execute("UPDATE crm_status_opcoes SET etapa_slug=?, ordem=? WHERE id=?", (slug, ordem, ja['id']))
+                    else:
+                        conn.execute("INSERT INTO crm_status_opcoes (nome,ordem,etapa_slug) VALUES (?,?,?)", (nome, ordem, slug))
+            # 4) Prazo de cor por etapa
+            for slug, dias in SLA_POR_ETAPA.items():
+                conn.execute("UPDATE crm_etapas SET sla_dias=? WHERE slug=? AND sla_dias IS NULL", (dias, slug))
+            # 5) Backfill do avancou_em: sem isso TODO card nasceria vermelho no
+            #    primeiro deploy (avancou_em NULL = nunca andou).
+            conn.execute("UPDATE crm_leads SET avancou_em=COALESCE(atualizado_em, criado_em) WHERE avancou_em IS NULL")
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('etiq_substatus_split_20260729')")
+            conn.commit()
+            print(f"[ETIQ_SPLIT] etiquetas separadas do sub-status; {movidos} classificação(ões) preservada(s) como etiqueta")
+        except Exception as e:
+            if is_pg:
+                try: conn.rollback()
+                except Exception: pass
+            print(f"[ETIQ_SPLIT] migração pulada: {e}")
+
     if not is_pg:
         conn.commit()
 
     # ─── ÍNDICES: aceleram as queries mais frequentes (seguro, não altera dados) ───
     indices = [
         "CREATE INDEX IF NOT EXISTS idx_propostas_usuario ON propostas(usuario_id)",
+        "CREATE INDEX IF NOT EXISTS idx_lead_etq_lead ON crm_lead_etiquetas(lead_id)",
+        "CREATE INDEX IF NOT EXISTS idx_lead_etq_etq ON crm_lead_etiquetas(etiqueta_id)",
         "CREATE INDEX IF NOT EXISTS idx_propostas_status ON propostas(status)",
         "CREATE INDEX IF NOT EXISTS idx_propostas_criado ON propostas(criado_em)",
         "CREATE INDEX IF NOT EXISTS idx_parcelas_proposta ON parcelas(proposta_id)",
@@ -14712,10 +14866,11 @@ def carregar_etapas_crm(conn=None):
         conn = db(); fechar = True
     try:
         rows = conn.execute(
-            "SELECT slug, nome, cor, ordem, tipo FROM crm_etapas WHERE ativo=1 ORDER BY ordem, id"
+            "SELECT slug, nome, cor, ordem, tipo, sla_dias FROM crm_etapas WHERE ativo=1 ORDER BY ordem, id"
         ).fetchall()
         etapas = [{'id': r['slug'], 'slug': r['slug'], 'nome': r['nome'],
-                   'cor': r['cor'], 'ordem': r['ordem'], 'tipo': r['tipo']} for r in rows]
+                   'cor': r['cor'], 'ordem': r['ordem'], 'tipo': r['tipo'],
+                   'sla_dias': (r['sla_dias'] if 'sla_dias' in r.keys() else None)} for r in rows]
     except Exception:
         etapas = []
     finally:
@@ -14744,9 +14899,10 @@ def carregar_status_crm(conn=None):
         conn = db(); fechar = True
     try:
         rows = conn.execute(
-            "SELECT id, nome, ordem FROM crm_status_opcoes WHERE ativo=1 ORDER BY ordem, id"
+            "SELECT id, nome, ordem, etapa_slug FROM crm_status_opcoes WHERE ativo=1 ORDER BY ordem, id"
         ).fetchall()
-        status = [{'id': r['id'], 'nome': r['nome'], 'ordem': r['ordem']} for r in rows]
+        status = [{'id': r['id'], 'nome': r['nome'], 'ordem': r['ordem'],
+                   'etapa_slug': (r['etapa_slug'] if 'etapa_slug' in r.keys() else None) or ''} for r in rows]
     except Exception:
         status = []
     finally:
@@ -14778,6 +14934,8 @@ def crm():
     f_busca     = request.args.get('q', '').strip()
     f_externo   = request.args.get('externo', '').strip()  # consultor externo (não cadastrado)
     f_sub_status = request.args.get('sub_status', '').strip()
+    f_etiqueta  = request.args.get('etiqueta', '').strip()   # id da etiqueta, ou 'sem'
+    f_cor       = request.args.get('cor', '').strip()        # atrasado | atencao | no_prazo | fora_do_prazo
     # Deep-link pra abrir uma ficha específica ao carregar a página (notificação
     # do sino, WhatsApp, agenda, etc. montam /crm?lead=<id> — antes esse parâmetro
     # era lido em vários lugares mas NUNCA consumido aqui nem no JS, então todo
@@ -14846,6 +15004,18 @@ def crm():
             q += " AND l.sub_status=?"
             params.append(f_sub_status)
 
+    # Etiqueta: EXISTS em vez de JOIN porque o lead pode ter várias — com JOIN o
+    # mesmo card apareceria duplicado na coluna e o total da etapa contaria a mais.
+    if f_etiqueta:
+        if f_etiqueta == 'sem':
+            q += " AND NOT EXISTS (SELECT 1 FROM crm_lead_etiquetas le JOIN crm_etiquetas e ON e.id=le.etiqueta_id WHERE le.lead_id=l.id AND e.ativo=1)"
+        else:
+            try:
+                q += " AND EXISTS (SELECT 1 FROM crm_lead_etiquetas le WHERE le.lead_id=l.id AND le.etiqueta_id=?)"
+                params.append(int(f_etiqueta))
+            except ValueError:
+                pass
+
     if f_origem:
         q += " AND l.origem LIKE ?"
         params.append(f'%{f_origem}%')
@@ -14868,6 +15038,29 @@ def crm():
 
     # Etapas dinâmicas do banco
     etapas = carregar_etapas_crm(conn)
+
+    # ── Saúde (cor) de cada card: tempo sem AVANÇAR contra o prazo da etapa ──
+    # Calculado em Python e não em SQL porque o prazo é por etapa e a comparação
+    # é com "agora" no fuso de SP — em SQL isso viraria um CASE por etapa que
+    # some com o índice e ainda erra o fuso no Postgres.
+    sla_por_etapa = {}
+    try:
+        for r in conn.execute("SELECT slug, sla_dias FROM crm_etapas").fetchall():
+            sla_por_etapa[r['slug']] = r['sla_dias']
+    except Exception:
+        pass
+    saude = {}
+    for lead in leads:
+        av = lead['avancou_em'] if 'avancou_em' in lead.keys() else None
+        saude[lead['id']] = _saude_card(av, sla_por_etapa.get(lead['etapa'] or ''), lead['atualizado_em'])
+
+    if f_cor:
+        if f_cor == 'fora_do_prazo':
+            leads = [l for l in leads if saude[l['id']]['nivel'] in ('atencao', 'atrasado')]
+        else:
+            leads = [l for l in leads if saude[l['id']]['nivel'] == f_cor]
+
+    etiquetas_lead = _etiquetas_dos_leads(conn, [l['id'] for l in leads])
 
     # Agrupa por etapa. CARDS_POR_COLUNA limita quantos cards viram DOM de fato —
     # colunas do meio do funil acumulam milhares de leads históricos (~4500
@@ -14894,16 +15087,21 @@ def crm():
     filtros_ativos = {
         'etapa': f_etapa, 'consultor': f_consultor, 'origem': f_origem,
         'data_de': f_data_de, 'data_ate': f_data_ate, 'q': f_busca,
-        'externo': f_externo, 'sub_status': f_sub_status
+        'externo': f_externo, 'sub_status': f_sub_status,
+        'etiqueta': f_etiqueta, 'cor': f_cor
     }
 
     sub_status_opcoes = _sub_status_opcoes_nomes(conn)
+    sub_status_etapa = _sub_status_por_etapa(conn)
+    etiquetas_todas = carregar_etiquetas_crm(conn)
     close_db(conn)
     return render_template('crm.html', kanban=kanban, kanban_total=kanban_total,
                            kanban_valor=kanban_valor, cards_por_coluna=CARDS_POR_COLUNA,
                            etapas=etapas, total=total, responsaveis=responsaveis, eh_admin=eh_admin,
                            filtros=filtros_ativos, consultores_externos=consultores_externos,
-                           sub_status_opcoes=sub_status_opcoes, lead_focus=f_lead)
+                           sub_status_opcoes=sub_status_opcoes, lead_focus=f_lead,
+                           sub_status_etapa=sub_status_etapa, etiquetas_todas=etiquetas_todas,
+                           etiquetas_lead=etiquetas_lead, saude=saude)
 
 
 @app.route('/crm/lead/novo', methods=['POST'])
@@ -14925,6 +15123,144 @@ def crm_lead_novo():
                  (lead_id, session.get('nome'), 'criacao', 'Lead criado'))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "id": lead_id})
+
+
+# ─── PLAYBOOK DE FOLLOW-UP ────────────────────────────────────────────────────
+# Mensagens prontas por ETIQUETA (o motivo pelo qual o lead parou). Vêm do
+# Playbook Comercial do Guilherme (Axioma) — a ideia é que o consultor abra o
+# card, leia POR QUE o lead parou e já tenha a mensagem daquele passo pra copiar,
+# em vez de improvisar ou mandar a mesma coisa pros três casos (o que é
+# exatamente o que produz o gargalo).
+#
+# 'quando' é a distância desde a última interação, não uma data fixa: quem
+# reclamou de preço se mede em dias, quem travou nos dados se mede em horas.
+_PLAYBOOK_FOLLOWUP = {
+    'Achou Caro': {
+        'resumo': 'O melhor dos três, e o mais maltratado. Ele leu, respondeu e disse a verdade — '
+                  'isso é briefing, não recusa. "Caro" quase nunca é sobre o valor absoluto: é '
+                  'comparação com a coisa errada.',
+        'passos': [
+            {'quando': '24–48h', 'titulo': 'Descobrir o número dele', 'formato': 'Texto',
+             'porque': 'Não defenda o preço e não dê desconto. Pergunte contra o que ele está comparando '
+                       'e quanto caberia. A resposta reabre a conversa e vira briefing pra próxima cotação.',
+             'msg': '{NOME}, entendi. Só pra eu te ajudar direito: você comparou com algum plano que já viu, '
+                    'ou com o que paga hoje? E qual valor caberia no seu orçamento por mês? Com esse número '
+                    'eu consigo remontar a cotação.'},
+            {'quando': '4–5 dias', 'titulo': 'Mudar a oferta, não o preço', 'formato': 'Texto + PDF',
+             'porque': 'Volte com três configurações lado a lado — coparticipação, enfermaria no lugar de '
+                       'apartamento, rede reduzida, tirar agregados. Três opções ancoram e devolvem o controle a ele.',
+             'msg': '{NOME}, remontei de três jeitos diferentes pra você comparar. A opção 2 é a que a maioria '
+                    'das famílias no seu perfil escolhe — mantém o hospital e cabe melhor no mês. Dá uma olhada '
+                    'e me diz qual faz mais sentido.'},
+            {'quando': '10–12 dias', 'titulo': 'O custo de não ter', 'formato': 'Áudio, até 45s',
+             'porque': 'Sem terrorismo. Comparativo simples entre a mensalidade e o que custa um procedimento '
+                       'no particular. Depois disso, nutrição com gatilho de reajuste.',
+             'msg': '{NOME}, uma última coisa e eu te deixo em paz. Fiz a conta do que sai uma internação de '
+                    'três dias no particular aqui na região e comparei com um ano da mensalidade. Te mando? '
+                    'É rápido, e você decide com o número na mão.'},
+        ],
+    },
+    'Silêncio': {
+        'resumo': 'Silêncio raramente é não. Costuma ser: não entendeu o que leu, não decide sozinho, ou '
+                  'ficou sem graça de negociar. Mandar "conseguiu ver a cotação?" três vezes pede trabalho '
+                  'e não entrega nada.',
+        'passos': [
+            {'quando': '24h', 'titulo': 'Entregar, não cobrar', 'formato': 'Áudio, até 40s',
+             'porque': 'O medo real dele é não entender o que está lendo. Explique em português claro e feche '
+                       'com pergunta fechada, que é fácil de responder.',
+             'msg': '{NOME}, gravei rapidinho explicando a cotação em miúdos, sem economês. Ouve com calma. '
+                    'E me responde só uma coisa: você prefere a opção com apartamento ou a com enfermaria? '
+                    'Só A ou B que eu sigo daqui.'},
+            {'quando': '3–4 dias', 'titulo': 'Falar dele, não da venda', 'formato': 'Texto',
+             'porque': 'Troque o ângulo pra algo que ele tem vontade de responder. E descubra se existe um '
+                       'segundo decisor — boa parte dos fantasmas está esperando falar com o cônjuge.',
+             'msg': '{NOME}, uma dúvida que ajuda muito: qual hospital vocês costumam usar? Eu confiro se está '
+                    'na rede antes de você decidir qualquer coisa. E me diz — essa decisão você costuma tomar '
+                    'junto com alguém?'},
+            {'quando': '7–10 dias', 'titulo': 'Encerrar de verdade', 'formato': 'Texto',
+             'porque': 'A mensagem de maior taxa de resposta do funil. Tira a pressão. Uma parte responde na '
+                       'hora; o resto sai limpo, sem denunciar seu número.',
+             'msg': '{NOME}, vou encerrar seu atendimento por aqui e liberar a cotação. Se um dia quiser '
+                    'retomar, é só me chamar que eu refaço com os valores atualizados. Sucesso aí!'},
+        ],
+    },
+    # ATENÇÃO: o Playbook não tem trilha escrita pra esta etiqueta — ele só diz
+    # "quer, mas não agora, vai pra nutrição com data marcada". Os passos abaixo
+    # são RASCUNHO seguindo essa lógica (fixar a data e o gatilho, não insistir),
+    # pro consultor não ficar sem nada no card. Revisar com o Guilherme.
+    'Não é o Momento': {
+        'resumo': 'RASCUNHO (não está no Playbook). Ele quer, mas não agora. O erro aqui é insistir — o '
+                  'certo é sair com DATA e GATILHO marcados, pra voltar no momento em que a conversa faz '
+                  'sentido pra ele.',
+        'rascunho': True,
+        'passos': [
+            {'quando': 'na hora', 'titulo': 'Marcar a data, não insistir', 'formato': 'Texto',
+             'porque': 'Aceitar o "não agora" na hora gera confiança e é o que te dá permissão pra voltar. '
+                       'Sem data marcada, o lead vira cemitério.',
+             'msg': '{NOME}, tranquilo, entendo perfeitamente. Só me ajuda numa coisa: quando faria mais '
+                    'sentido a gente retomar? Eu anoto aqui e te chamo na época, com os valores já '
+                    'atualizados — assim você não precisa lembrar de nada.'},
+            {'quando': 'no gatilho', 'titulo': 'Voltar com o motivo dele', 'formato': 'Texto',
+             'porque': 'Volte pelo gatilho que você anotou (reajuste, fim de carência, 6 meses de CNPJ), '
+                       'não por "estou passando pra saber". O gatilho é o que torna a mensagem relevante.',
+             'msg': '{NOME}, tudo bem? Você me pediu pra retomar nessa época, então estou aqui. '
+                    'Refiz a cotação com os valores de agora — quer que eu te mande pra comparar?'},
+            {'quando': 'sem resposta no gatilho', 'titulo': 'Deixar a porta aberta', 'formato': 'Texto',
+             'porque': 'Se não respondeu nem no gatilho, encerre sem queimar. Ele volta quando precisar — '
+                       'e volta pra quem não encheu.',
+             'msg': '{NOME}, imagino que ainda não seja o momento e está tudo certo. Vou parar de te chamar '
+                    'pra não incomodar. Quando quiser retomar, me manda um oi que eu resolvo rapidinho.'},
+        ],
+    },
+}
+# Mensagens por ETAPA — a trilha "travou antes da cotação" do Playbook. Não é
+# objeção, é atrito: ele demonstrou intenção e parou na hora de mandar os dados.
+_PLAYBOOK_ETAPA = {
+    'qualificacao': {
+        'resumo': 'Não é objeção, é atrito. Ele demonstrou intenção e parou antes de mandar os dados. '
+                  'Quase sempre por uma de duas razões: o consultor demorou a responder, ou pediu dado '
+                  'demais de uma vez.',
+        'passos': [
+            {'quando': '1–2h, mesmo dia', 'titulo': 'Pedir uma coisa só', 'formato': 'Texto',
+             'porque': 'Uma prévia antes dos dados completos gera reciprocidade — ele responde pra receber. '
+                       'Peça o mínimo que já permite devolver alguma coisa.',
+             'msg': '{NOME}, pra já te adiantar uma prévia: me manda só as idades de quem vai entrar no plano. '
+                    'Com isso eu já te mando hoje uma faixa de valor, e a gente completa o resto depois.'},
+            {'quando': 'dia seguinte', 'titulo': 'Oferecer o caminho mais fácil', 'formato': 'Texto',
+             'porque': 'Digitar dado de documento no WhatsApp é chato. Tire o trabalho dele.',
+             'msg': '{NOME}, se for mais prático você me manda por áudio, ou eu te ligo três minutinhos e já '
+                    'preencho tudo por aqui. O que fica melhor?'},
+            {'quando': 'dia 4', 'titulo': 'Prazo — só se for real', 'formato': 'Texto',
+             'porque': 'Fim de tabela, prazo de vigência, mudança de valor na virada do mês. Se não existir, '
+                       'NÃO invente: promessa falsa custa o lead e a reputação.',
+             'msg': '{NOME}, a tabela que usei na sua simulação vale até {DATA}. Depois disso preciso refazer '
+                    'com os valores novos. Se ainda fizer sentido, me manda os dados hoje que eu garanto '
+                    'essa condição.'},
+        ],
+    },
+}
+
+
+def _playbook_do_lead(lead):
+    """Escolhe a trilha do Playbook pro lead e devolve as mensagens com {NOME} já
+    trocado pelo primeiro nome. A ETIQUETA (por que parou) tem prioridade sobre a
+    etapa: saber que o lead achou caro é mais específico do que saber que ele está
+    em Cotação Enviada. Sem etiqueta, cai na trilha da etapa (se houver)."""
+    etq = (lead['sub_status'] if 'sub_status' in lead.keys() else '') or ''
+    etapa = (lead['etapa'] if 'etapa' in lead.keys() else '') or ''
+    trilha, origem = None, ''
+    if etq.strip() in _PLAYBOOK_FOLLOWUP:
+        trilha, origem = _PLAYBOOK_FOLLOWUP[etq.strip()], etq.strip()
+    elif etapa in _PLAYBOOK_ETAPA:
+        trilha, origem = _PLAYBOOK_ETAPA[etapa], 'Travou antes da cotação'
+    if not trilha:
+        return None
+    primeiro = ((lead['nome'] if 'nome' in lead.keys() else '') or '').strip().split(' ')[0]
+    passos = []
+    for p in trilha['passos']:
+        passos.append({**p, 'msg': p['msg'].replace('{NOME}', primeiro or 'você')})
+    return {'titulo': origem, 'resumo': trilha['resumo'],
+            'rascunho': bool(trilha.get('rascunho')), 'passos': passos}
 
 
 @app.route('/crm/lead/<int:lid>')
@@ -14954,6 +15290,9 @@ def crm_lead_detalhe(lid):
         FROM fluxo_inscricoes fi JOIN fluxos f ON f.id = fi.fluxo_id
         WHERE fi.lead_id=? AND fi.status='ativo' ORDER BY fi.id DESC
     """, (lid,)).fetchall()]
+    etiquetas_todas = carregar_etiquetas_crm(conn)
+    etiquetas_marcadas = [e['id'] for e in _etiquetas_dos_leads(conn, [lid]).get(lid, [])]
+    sub_status_desta_etapa = _sub_status_por_etapa(conn).get(lead['etapa'] or '', [])
     close_db(conn)
     return jsonify({
         "lead": dict(lead),
@@ -14961,7 +15300,11 @@ def crm_lead_detalhe(lid):
         "usuarios": usuarios,
         "etapas": etapas,
         "fluxos_disponiveis": fluxos_disponiveis,
-        "fluxos_ativos": fluxos_ativos
+        "fluxos_ativos": fluxos_ativos,
+        "playbook": _playbook_do_lead(lead),
+        "etiquetas_todas": etiquetas_todas,
+        "etiquetas_marcadas": etiquetas_marcadas,
+        "sub_status_etapa": sub_status_desta_etapa
     })
 
 
@@ -15003,8 +15346,14 @@ def crm_lead_mover(lid):
     if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
         close_db(conn); return jsonify({"ok": False}), 403
     etapa_ant = lead['etapa']
-    conn.execute("UPDATE crm_leads SET etapa=?, atualizado_em=? WHERE id=?",
-                 (nova_etapa, _agora_sp(), lid))
+    # avancou_em só é carimbado quando a etapa REALMENTE mudou: arrastar o card
+    # de volta pra mesma coluna não é avanço e não deve zerar o cronômetro.
+    if etapa_ant != nova_etapa:
+        conn.execute("UPDATE crm_leads SET etapa=?, atualizado_em=?, avancou_em=? WHERE id=?",
+                     (nova_etapa, _agora_sp(), _agora_sp(), lid))
+    else:
+        conn.execute("UPDATE crm_leads SET etapa=?, atualizado_em=? WHERE id=?",
+                     (nova_etapa, _agora_sp(), lid))
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                  (lid, session.get('nome'), 'movimentacao',
                   f'Movido de "{etapa_ant}" para "{nova_etapa}"'))
@@ -15032,6 +15381,83 @@ def _sub_status_opcoes_nomes(conn=None):
     return [''] + [s['nome'] for s in carregar_status_crm(conn)]
 
 
+def _sub_status_por_etapa(conn=None):
+    """{slug_da_etapa: [nomes]} — o card só oferece o que faz sentido na coluna
+    onde ele está. Sub-status sem etapa_slug (legado ou criado sem etapa) entra
+    em TODAS as listas, pra nunca sumir da tela sem aviso."""
+    todos = carregar_status_crm(conn)
+    globais = [s['nome'] for s in todos if not s['etapa_slug']]
+    por_etapa = {}
+    for s_ in todos:
+        if s_['etapa_slug']:
+            por_etapa.setdefault(s_['etapa_slug'], []).append(s_['nome'])
+    for e in carregar_etapas_crm(conn):
+        por_etapa.setdefault(e['id'], [])
+        por_etapa[e['id']] = por_etapa[e['id']] + [g for g in globais if g not in por_etapa[e['id']]]
+    return por_etapa
+
+
+def carregar_etiquetas_crm(conn=None):
+    """Etiquetas disponíveis (nome + cor). Lista fixa pro consultor: ele marca e
+    desmarca, quem cria/renomeia/apaga é o admin em /crm/etapas/gerenciar."""
+    fechar = False
+    if conn is None:
+        conn = db(); fechar = True
+    try:
+        rows = conn.execute(
+            "SELECT id, nome, cor, ordem FROM crm_etiquetas WHERE ativo=1 ORDER BY ordem, id"
+        ).fetchall()
+        out = [{'id': r['id'], 'nome': r['nome'], 'cor': r['cor'] or '#64748b', 'ordem': r['ordem']} for r in rows]
+    except Exception:
+        out = []
+    finally:
+        if fechar:
+            close_db(conn)
+    return out
+
+
+def _etiquetas_dos_leads(conn, lead_ids):
+    """{lead_id: [{nome,cor,id}]} numa query só — o Kanban renderiza até 60 cards
+    por coluna × 9 colunas, então uma query por card derrubaria a página."""
+    if not lead_ids:
+        return {}
+    marc = ','.join(['?'] * len(lead_ids))
+    try:
+        rows = conn.execute(f"""SELECT le.lead_id, e.id, e.nome, e.cor, e.ordem
+                                FROM crm_lead_etiquetas le
+                                JOIN crm_etiquetas e ON e.id = le.etiqueta_id
+                                WHERE le.lead_id IN ({marc}) AND e.ativo=1
+                                ORDER BY e.ordem, e.id""", list(lead_ids)).fetchall()
+    except Exception:
+        return {}
+    out = {}
+    for r in rows:
+        out.setdefault(r['lead_id'], []).append({'id': r['id'], 'nome': r['nome'], 'cor': r['cor'] or '#64748b'})
+    return out
+
+
+# Níveis de saúde do card. 'no_prazo' não recebe cor: se tudo pintasse, nada
+# chamaria atenção — só o que passou do prazo é que precisa gritar.
+_SLA_PADRAO_DIAS = 3
+
+def _saude_card(avancou_em, sla_dias=None, fallback=None):
+    """Cor do card pelo tempo SEM AVANÇAR (mudar de etapa ou de sub-status).
+    Passou do prazo da etapa = atenção; dobro do prazo = atrasado."""
+    ref = avancou_em or fallback
+    dt = _parse_dt_seguro(ref) if ref else None
+    if not dt:
+        return {'nivel': 'no_prazo', 'classe': '', 'texto': '', 'dias': 0}
+    if dt.tzinfo is None:
+        dt = TZ_SP.localize(dt)
+    dias = int((datetime.now(TZ_SP) - dt).total_seconds() / 86400)
+    limite = int(sla_dias) if sla_dias else _SLA_PADRAO_DIAS
+    if dias >= limite * 2:
+        return {'nivel': 'atrasado', 'classe': 'card-frio', 'texto': f'Parado há {dias}d', 'dias': dias}
+    if dias >= limite:
+        return {'nivel': 'atencao', 'classe': 'card-esfriando', 'texto': f'Parado há {dias}d', 'dias': dias}
+    return {'nivel': 'no_prazo', 'classe': '', 'texto': '', 'dias': dias}
+
+
 @app.route('/crm/lead/<int:lid>/sub-status', methods=['POST'])
 @login_required
 def crm_lead_sub_status(lid):
@@ -15039,16 +15465,22 @@ def crm_lead_sub_status(lid):
     ficha inteira — pedido do Gabriel (PDF 04/07): saber de manhã quantos follow
     ups já foram feitos com cada lead, sem trocar de coluna no funil."""
     novo = (request.json or {}).get('sub_status', '')
-    if novo not in _sub_status_opcoes_nomes():
-        return jsonify({"ok": False, "erro": "Sub-status inválido"}), 400
     conn = db()
     lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
     if not lead:
         close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
     if session.get('perfil') != 'admin' and lead['responsavel_id'] != session.get('user_id'):
         close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    # Valida contra a lista DA ETAPA do lead, não contra a lista geral: sub-status
+    # agora é o andamento dentro da coluna, então aceitar "Implantada" num lead
+    # que está em Primeiro Contato criaria um card impossível de interpretar.
+    permitidos = [''] + _sub_status_por_etapa(conn).get(lead['etapa'] or '', [])
+    if novo not in permitidos:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Sub-status não existe nesta etapa"}), 400
     anterior = lead['sub_status'] or '—'
-    conn.execute("UPDATE crm_leads SET sub_status=?, atualizado_em=? WHERE id=?", (novo or None, _agora_sp(), lid))
+    conn.execute("UPDATE crm_leads SET sub_status=?, atualizado_em=?, avancou_em=? WHERE id=?",
+                 (novo or None, _agora_sp(), _agora_sp(), lid))
     conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                  (lid, session.get('nome'), 'edicao', f'Status: "{anterior}" → "{novo or "—"}"', _agora_sp()))
     conn.commit(); close_db(conn)
@@ -17838,6 +18270,15 @@ def crm_etapa_editar(slug):
         close_db(conn); return jsonify({"ok": False, "erro": "Etapa não encontrada"}), 404
     novo_nome = nome or et['nome']
     nova_cor = cor or et['cor']
+    # sla_dias = prazo até o card desta etapa virar de cor. '' apaga (volta ao
+    # padrão global); ausente mantém o que está gravado.
+    if 'sla_dias' in d:
+        bruto = str(d.get('sla_dias') or '').strip()
+        try:
+            sla = max(1, int(bruto)) if bruto else None
+        except ValueError:
+            close_db(conn); return jsonify({"ok": False, "erro": "Prazo inválido"}), 400
+        conn.execute("UPDATE crm_etapas SET sla_dias=? WHERE slug=?", (sla, slug))
     conn.execute("UPDATE crm_etapas SET nome=?, cor=? WHERE slug=?", (novo_nome, nova_cor, slug))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
@@ -17889,8 +18330,10 @@ def crm_etapas_gerenciar():
     conn = db()
     etapas = carregar_etapas_crm(conn)
     status_opcoes = carregar_status_crm(conn)
+    etiquetas = carregar_etiquetas_crm(conn)
     close_db(conn)
-    return render_template('crm_etapas.html', etapas=etapas, status_opcoes=status_opcoes)
+    return render_template('crm_etapas.html', etapas=etapas, status_opcoes=status_opcoes,
+                           etiquetas=etiquetas, sla_padrao=_SLA_PADRAO_DIAS)
 
 
 @app.route('/crm/status/nova', methods=['POST'])
@@ -17904,8 +18347,12 @@ def crm_status_nova():
     conn = db()
     if conn.execute("SELECT 1 FROM crm_status_opcoes WHERE nome=?", (nome,)).fetchone():
         close_db(conn); return jsonify({"ok": False, "erro": "Já existe um status com esse nome"}), 400
+    etapa_slug = (d.get('etapa_slug') or '').strip() or None
+    if etapa_slug and not conn.execute("SELECT 1 FROM crm_etapas WHERE slug=?", (etapa_slug,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Etapa não encontrada"}), 400
     maxord = conn.execute("SELECT COALESCE(MAX(ordem),0) m FROM crm_status_opcoes").fetchone()['m']
-    conn.execute("INSERT INTO crm_status_opcoes (nome,ordem) VALUES (?,?)", (nome, maxord + 1))
+    conn.execute("INSERT INTO crm_status_opcoes (nome,ordem,etapa_slug) VALUES (?,?,?)",
+                 (nome, maxord + 1, etapa_slug))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
@@ -17924,6 +18371,11 @@ def crm_status_editar(sid):
         close_db(conn); return jsonify({"ok": False, "erro": "Status não encontrado"}), 404
     conn.execute("UPDATE crm_leads SET sub_status=? WHERE sub_status=?", (nome, st['nome']))
     conn.execute("UPDATE crm_status_opcoes SET nome=? WHERE id=?", (nome, sid))
+    if 'etapa_slug' in d:
+        novo_slug = (d.get('etapa_slug') or '').strip() or None
+        if novo_slug and not conn.execute("SELECT 1 FROM crm_etapas WHERE slug=?", (novo_slug,)).fetchone():
+            close_db(conn); return jsonify({"ok": False, "erro": "Etapa não encontrada"}), 400
+        conn.execute("UPDATE crm_status_opcoes SET etapa_slug=? WHERE id=?", (novo_slug, sid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
@@ -17940,6 +18392,115 @@ def crm_status_excluir(sid):
     conn.execute("DELETE FROM crm_status_opcoes WHERE id=?", (sid,))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+
+# ─── ETIQUETAS ────────────────────────────────────────────────────────────────
+# Criar/renomear/apagar é só do admin. O consultor marca e desmarca no card, e
+# é isso — assim a etiqueta continua significando a mesma coisa pra todo mundo,
+# que é o que faz o relatório de motivo de perda valer algo.
+@app.route('/crm/etiquetas/nova', methods=['POST'])
+@login_required
+@admin_required
+def crm_etiqueta_nova():
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()
+    cor = (d.get('cor') or '#64748b').strip()
+    if not nome:
+        return jsonify({"ok": False, "erro": "Nome obrigatório"}), 400
+    conn = db()
+    if conn.execute("SELECT 1 FROM crm_etiquetas WHERE nome=?", (nome,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Já existe uma etiqueta com esse nome"}), 400
+    maxord = conn.execute("SELECT COALESCE(MAX(ordem),0) m FROM crm_etiquetas").fetchone()['m']
+    conn.execute("INSERT INTO crm_etiquetas (nome,cor,ordem) VALUES (?,?,?)", (nome, cor, maxord + 1))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/etiquetas/<int:eid>/editar', methods=['POST'])
+@login_required
+@admin_required
+def crm_etiqueta_editar(eid):
+    d = request.json or {}
+    conn = db()
+    et = conn.execute("SELECT * FROM crm_etiquetas WHERE id=?", (eid,)).fetchone()
+    if not et:
+        close_db(conn); return jsonify({"ok": False, "erro": "Etiqueta não encontrada"}), 404
+    nome = (d.get('nome') or '').strip() or et['nome']
+    cor = (d.get('cor') or '').strip() or et['cor']
+    if nome != et['nome'] and conn.execute("SELECT 1 FROM crm_etiquetas WHERE nome=? AND id<>?", (nome, eid)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Já existe uma etiqueta com esse nome"}), 400
+    conn.execute("UPDATE crm_etiquetas SET nome=?, cor=? WHERE id=?", (nome, cor, eid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/etiquetas/<int:eid>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def crm_etiqueta_excluir(eid):
+    """Desativa em vez de deletar a linha: o vínculo lead↔etiqueta fica no banco,
+    então se a etiqueta for reativada os leads voltam marcados — e o histórico
+    de quem foi classificado como o quê não é perdido."""
+    conn = db()
+    if not conn.execute("SELECT 1 FROM crm_etiquetas WHERE id=?", (eid,)).fetchone():
+        close_db(conn); return jsonify({"ok": False, "erro": "Etiqueta não encontrada"}), 404
+    conn.execute("UPDATE crm_etiquetas SET ativo=0 WHERE id=?", (eid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/etiquetas/reordenar', methods=['POST'])
+@login_required
+@admin_required
+def crm_etiquetas_reordenar():
+    ordem = (request.json or {}).get('ordem', [])
+    if not isinstance(ordem, list) or not ordem:
+        return jsonify({"ok": False, "erro": "Ordem inválida"}), 400
+    conn = db()
+    for i, eid in enumerate(ordem, start=1):
+        conn.execute("UPDATE crm_etiquetas SET ordem=? WHERE id=?", (i, eid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/lead/<int:lid>/etiqueta', methods=['POST'])
+@login_required
+def crm_lead_etiqueta(lid):
+    """Marca/desmarca UMA etiqueta no lead. Não mexe em avancou_em: etiquetar diz
+    por que o lead parou, não que ele andou — se zerasse o cronômetro, marcar
+    'Silêncio' deixaria o card verde justamente quando ele está mais parado."""
+    d = request.json or {}
+    try:
+        eid = int(d.get('etiqueta_id') or 0)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "erro": "Etiqueta inválida"}), 400
+    marcar = bool(d.get('marcar'))
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    et = conn.execute("SELECT * FROM crm_etiquetas WHERE id=? AND ativo=1", (eid,)).fetchone()
+    if not et:
+        close_db(conn); return jsonify({"ok": False, "erro": "Etiqueta não encontrada"}), 404
+    if marcar:
+        if DB_MODE == 'postgres':
+            conn.execute("""INSERT INTO crm_lead_etiquetas (lead_id,etiqueta_id,criado_em)
+                VALUES (%s,%s,%s) ON CONFLICT DO NOTHING""", (lid, eid, _agora_sp()))
+        else:
+            conn.execute("""INSERT OR IGNORE INTO crm_lead_etiquetas (lead_id,etiqueta_id,criado_em)
+                VALUES (?,?,?)""", (lid, eid, _agora_sp()))
+    else:
+        conn.execute("DELETE FROM crm_lead_etiquetas WHERE lead_id=? AND etiqueta_id=?", (lid, eid))
+    conn.execute("UPDATE crm_leads SET atualizado_em=? WHERE id=?", (_agora_sp(), lid))
+    conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                 (lid, session.get('nome'), 'edicao',
+                  ('Etiqueta marcada: ' if marcar else 'Etiqueta removida: ') + et['nome'], _agora_sp()))
+    conn.commit()
+    atuais = _etiquetas_dos_leads(conn, [lid]).get(lid, [])
+    close_db(conn)
+    return jsonify({"ok": True, "etiquetas": atuais})
 
 
 @app.route('/crm/status/reordenar', methods=['POST'])
