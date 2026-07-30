@@ -631,6 +631,12 @@
       Esteira / Auditoria
     </a>
     {% endif %}
+    {% if session.perfil == 'admin' %}
+    <a href="/google-ads" class="nav-link {% if '/google-ads' in request.path %}active{% endif %}" onclick="closeSidebar()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+      Conversão Google Ads
+    </a>
+    {% endif %}
     {% if pode_modulo('excluidas') %}
     <a href="/admin/propostas-excluidas" class="nav-link {% if '/propostas-excluidas' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>

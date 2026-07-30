@@ -1033,6 +1033,25 @@ def init_db():
             # LEAD é derivado da etapa dele, nunca gravado — coluna separada
             # dessincroniza (mover de etapa e esquecer de mover de quadro), e um lead
             # em dois lugares ao mesmo tempo é impossível de depurar.
+            # CONVERSAO OFFLINE: uma linha por proposta enviada ao Google Ads.
+            # proposta_id e UNIQUE — e a garantia de que a mesma venda nunca sobe
+            # duas vezes, o que inflaria o ROAS e faria o Google otimizar por um
+            # resultado que nao existe.
+            """CREATE TABLE IF NOT EXISTS google_ads_conversoes (
+                id SERIAL PRIMARY KEY,
+                proposta_id INTEGER UNIQUE NOT NULL,
+                lead_id INTEGER,
+                click_id TEXT,
+                click_tipo TEXT,
+                valor REAL,
+                moeda TEXT DEFAULT 'BRL',
+                conversao_em TEXT,
+                status TEXT DEFAULT 'pendente',
+                tentativas INTEGER DEFAULT 0,
+                detalhe TEXT,
+                criado_em TEXT,
+                enviado_em TEXT
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_quadros (
                 id SERIAL PRIMARY KEY,
                 slug TEXT UNIQUE NOT NULL,
@@ -1695,6 +1714,21 @@ def init_db():
             status TEXT DEFAULT 'pendente',
             lembrete_enviado INTEGER DEFAULT 0,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS google_ads_conversoes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposta_id INTEGER UNIQUE NOT NULL,
+            lead_id INTEGER,
+            click_id TEXT,
+            click_tipo TEXT,
+            valor REAL,
+            moeda TEXT DEFAULT 'BRL',
+            conversao_em TEXT,
+            status TEXT DEFAULT 'pendente',
+            tentativas INTEGER DEFAULT 0,
+            detalhe TEXT,
+            criado_em TEXT,
+            enviado_em TEXT
         );
         CREATE TABLE IF NOT EXISTS crm_quadros (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2732,6 +2766,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_propostas_usuario ON propostas(usuario_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_etq_lead ON crm_lead_etiquetas(lead_id)",
         "CREATE INDEX IF NOT EXISTS idx_propostas_lead ON propostas(lead_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ads_status ON google_ads_conversoes(status)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_lead ON crm_lead_campos(lead_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_campo ON crm_lead_campos(campo_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_etq_etq ON crm_lead_etiquetas(etiqueta_id)",
@@ -8668,6 +8703,209 @@ def vincular_proposta_lead(conn, proposta_id, prop=None):
     return lid, criterio
 
 
+# ═══════════════ CONVERSÃO OFFLINE — GOOGLE ADS ═══════════════════════════════
+# O problema que isso resolve: hoje o Google otimiza pra quem PREENCHE FORMULÁRIO,
+# porque é a única conversão que ele enxerga. Devolvendo a venda com o valor real,
+# ele passa a otimizar por quem COMPRA — que é outra pessoa. O gclid já era
+# capturado na entrada do lead e nunca saía do banco.
+#
+# Sem biblioteca google-ads (dependência pesada, ~30MB): a API REST resolve com
+# requests, que o projeto já usa.
+_ADS_API = 'https://googleads.googleapis.com/v18'
+
+
+def _ads_config():
+    """Credenciais do Google Ads via env. Devolve (config, faltando) — a lista do
+    que falta é o que a tela de diagnóstico mostra, em vez de só falhar calada."""
+    campos = {
+        'client_id': 'GOOGLE_ADS_CLIENT_ID',
+        'client_secret': 'GOOGLE_ADS_CLIENT_SECRET',
+        'refresh_token': 'GOOGLE_ADS_REFRESH_TOKEN',
+        'developer_token': 'GOOGLE_ADS_DEVELOPER_TOKEN',
+        'customer_id': 'GOOGLE_ADS_CUSTOMER_ID',
+        'conversion_action_id': 'GOOGLE_ADS_CONVERSION_ACTION_ID',
+    }
+    cfg, faltando = {}, []
+    for k, env in campos.items():
+        v = (os.environ.get(env) or '').strip()
+        if not v:
+            faltando.append(env)
+        cfg[k] = v
+    # Só dígitos: o Google mostra o id como 123-456-7890 e é fácil colar assim
+    cfg['customer_id'] = re.sub(r'\D', '', cfg['customer_id'])
+    cfg['login_customer_id'] = re.sub(r'\D', '', (os.environ.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID') or ''))
+    return cfg, faltando
+
+
+def _ads_token(cfg):
+    """Troca o refresh_token por um access_token. Vale ~1h; não guardo em cache
+    porque o envio é em lote e raro — pedir um token por rodada é mais simples
+    que administrar expiração, e o custo é uma requisição."""
+    r = _requests.post('https://oauth2.googleapis.com/token', timeout=20, data={
+        'client_id': cfg['client_id'], 'client_secret': cfg['client_secret'],
+        'refresh_token': cfg['refresh_token'], 'grant_type': 'refresh_token'})
+    if r.status_code != 200:
+        raise RuntimeError(f"OAuth falhou ({r.status_code}): {r.text[:300]}")
+    tok = (r.json() or {}).get('access_token')
+    if not tok:
+        raise RuntimeError("OAuth não devolveu access_token")
+    return tok
+
+
+def _ads_click_id_do_lead(conn, lead_id):
+    """(id, tipo) do clique. gclid é o comum; gbraid/wbraid vêm de iOS e de app,
+    onde o Google não entrega gclid — sem eles a conversão do iPhone se perde,
+    e iPhone é metade do tráfego."""
+    if not lead_id:
+        return None, None
+    lead = conn.execute("SELECT gclid, dados_extras FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+    if not lead:
+        return None, None
+    g = (lead['gclid'] or '').strip()
+    if g:
+        return g, 'gclid'
+    for chave in ('gclid', 'gbraid', 'wbraid'):
+        v = _ler_do_extras(lead['dados_extras'], chave) or _ler_do_extras(lead['dados_extras'], 'clique.' + chave)
+        if v:
+            return v, chave
+    return None, None
+
+
+def _ads_valor_da_proposta(prop):
+    """Valor mandado ao Google. Padrão: comissão bruta da corretora — é a RECEITA
+    que a venda gera. Mandar a mensalidade infla o número (não é nosso dinheiro) e
+    mandar o líquido subestima a capacidade de pagar mídia. Ajustável por env pra
+    quem preferir outra régua."""
+    base = (os.environ.get('GOOGLE_ADS_VALOR_BASE') or 'comissao_bruta').strip()
+    mapa = {
+        'comissao_bruta': 'comissao_total_corretora',
+        'comissao_liquida': 'comissao_corretora_liquida',
+        'producao': 'valor',
+    }
+    col = mapa.get(base, 'comissao_total_corretora')
+    try:
+        return round(float(prop[col] or 0), 2)
+    except Exception:
+        return 0.0
+
+
+def _ads_enfileirar(conn, proposta_id, motivo='venda confirmada'):
+    """Registra a venda como conversão A ENVIAR. Idempotente pelo UNIQUE em
+    proposta_id: chamar de novo não duplica, só devolve o que já existe."""
+    prop = conn.execute("SELECT * FROM propostas WHERE id=?", (proposta_id,)).fetchone()
+    if not prop:
+        return None, 'proposta inexistente'
+    ja = conn.execute("SELECT * FROM google_ads_conversoes WHERE proposta_id=?", (proposta_id,)).fetchone()
+    if ja and ja['status'] in ('enviada', 'pendente'):
+        return dict(ja), 'já registrada'
+    lead_id = prop['lead_id'] if 'lead_id' in prop.keys() else None
+    click_id, tipo = _ads_click_id_do_lead(conn, lead_id)
+    valor = _ads_valor_da_proposta(prop)
+    # Sem clique não há o que devolver: a venda não veio de anúncio, ou veio antes
+    # do gclid passar a ser capturado. Fica gravada como 'sem_clique' de propósito,
+    # pra aparecer no diagnóstico em vez de sumir.
+    status = 'pendente' if click_id else 'sem_clique'
+    quando = _agora_sp()
+    if ja:
+        conn.execute("""UPDATE google_ads_conversoes SET lead_id=?, click_id=?, click_tipo=?,
+                        valor=?, status=?, detalhe=? WHERE proposta_id=?""",
+                     (lead_id, click_id, tipo, valor, status, motivo, proposta_id))
+    else:
+        conn.execute("""INSERT INTO google_ads_conversoes
+            (proposta_id, lead_id, click_id, click_tipo, valor, conversao_em, status, detalhe, criado_em)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (proposta_id, lead_id, click_id, tipo, valor, quando, status, motivo, quando))
+    return dict(conn.execute("SELECT * FROM google_ads_conversoes WHERE proposta_id=?",
+                             (proposta_id,)).fetchone()), status
+
+
+def _ads_data_conversao(valor):
+    """Formato exigido: 'yyyy-mm-dd hh:mm:ss+hh:mm'. Sem o fuso o Google recusa."""
+    dt = _parse_dt_seguro(valor) if valor else None
+    if not dt:
+        dt = datetime.now(TZ_SP)
+    if dt.tzinfo is None:
+        dt = TZ_SP.localize(dt)
+    return dt.strftime('%Y-%m-%d %H:%M:%S%z')[:-2] + ':' + dt.strftime('%z')[-2:]
+
+
+def enviar_conversoes_ads(limite=200, so_simular=False):
+    """Sobe as conversões pendentes. Devolve um resumo pra tela e pro log.
+
+    partialFailure=True: se uma conversão do lote for recusada (clique fora da
+    janela, gclid inválido), as outras entram assim mesmo. Sem isso um gclid ruim
+    derrubaria o lote inteiro e nada seria contabilizado."""
+    cfg, faltando = _ads_config()
+    conn = db()
+    pend = conn.execute("""SELECT * FROM google_ads_conversoes
+                           WHERE status='pendente' AND click_id IS NOT NULL AND click_id <> ''
+                           ORDER BY id LIMIT ?""", (limite,)).fetchall()
+    resumo = {'pendentes': len(pend), 'enviadas': 0, 'falhas': 0,
+              'faltando_config': faltando, 'simulado': bool(so_simular), 'erros': []}
+    if not pend:
+        close_db(conn); return resumo
+    if faltando:
+        resumo['erros'].append('Credenciais ausentes: ' + ', '.join(faltando))
+        close_db(conn); return resumo
+    if so_simular:
+        close_db(conn); return resumo
+
+    acao = f"customers/{cfg['customer_id']}/conversionActions/{cfg['conversion_action_id']}"
+    lote = []
+    for c in pend:
+        item = {'conversionAction': acao,
+                'conversionDateTime': _ads_data_conversao(c['conversao_em']),
+                'conversionValue': float(c['valor'] or 0), 'currencyCode': c['moeda'] or 'BRL'}
+        item[c['click_tipo'] or 'gclid'] = c['click_id']
+        lote.append(item)
+    try:
+        token = _ads_token(cfg)
+        headers = {'Authorization': 'Bearer ' + token,
+                   'developer-token': cfg['developer_token'],
+                   'Content-Type': 'application/json'}
+        if cfg['login_customer_id']:
+            headers['login-customer-id'] = cfg['login_customer_id']
+        r = _requests.post(f"{_ADS_API}/customers/{cfg['customer_id']}:uploadClickConversions",
+                           headers=headers, timeout=45,
+                           json={'conversions': lote, 'partialFailure': True})
+        if r.status_code != 200:
+            raise RuntimeError(f"HTTP {r.status_code}: {r.text[:400]}")
+        corpo = r.json() or {}
+        # partialFailureError traz os índices que falharam; sem isso marcaríamos
+        # como enviada uma conversão que o Google recusou.
+        falhou_idx = set()
+        pfe = corpo.get('partialFailureError') or {}
+        for det in (pfe.get('details') or []):
+            for err in (det.get('errors') or []):
+                for el in ((err.get('location') or {}).get('fieldPathElements') or []):
+                    if el.get('fieldName') == 'conversions' and el.get('index') is not None:
+                        falhou_idx.add(int(el['index']))
+        msg_pf = (pfe.get('message') or '')[:400]
+        agora = _agora_sp()
+        for i, c in enumerate(pend):
+            if i in falhou_idx:
+                conn.execute("""UPDATE google_ads_conversoes SET status='falha',
+                                tentativas=COALESCE(tentativas,0)+1, detalhe=? WHERE id=?""",
+                             (msg_pf or 'recusada pelo Google', c['id']))
+                resumo['falhas'] += 1
+            else:
+                conn.execute("""UPDATE google_ads_conversoes SET status='enviada',
+                                enviado_em=?, detalhe='ok' WHERE id=?""", (agora, c['id']))
+                resumo['enviadas'] += 1
+        if msg_pf:
+            resumo['erros'].append(msg_pf)
+        conn.commit()
+    except Exception as e:
+        for c in pend:
+            conn.execute("""UPDATE google_ads_conversoes SET tentativas=COALESCE(tentativas,0)+1,
+                            detalhe=? WHERE id=?""", (str(e)[:400], c['id']))
+        conn.commit()
+        resumo['erros'].append(str(e)[:400])
+        app.logger.error(f"[ADS] envio falhou: {e}")
+    close_db(conn)
+    return resumo
+
+
 def _fechados_com_analise(conn):
     """Clientes FECHADOS (proposta emitida/ativa) cruzados com a última análise
     de conversa deles E com o lead correspondente no CRM. propostas NÃO tem
@@ -10663,6 +10901,26 @@ def atualizar_status_operacional(pid):
     if novo_status == 'Emitida/Ativa':
         conn.execute("""UPDATE parcelas SET status='Pendente de receber'
             WHERE proposta_id=? AND status='Bloqueado - Falta Comprovante'""", (pid,))
+        # Conversão offline: a venda só conta pro Google quando a OPERADORA
+        # confirma. Enfileirar na criação da proposta contaria venda que ainda
+        # pode ser recusada — e aí o Google otimizaria por proposta emitida, não
+        # por cliente. Só enfileira; o envio é em lote.
+        try:
+            _ads_enfileirar(conn, pid, 'proposta emitida/ativa')
+        except Exception as e:
+            app.logger.warning(f"[ADS] não enfileirou proposta {pid}: {e}")
+    # Saiu de Emitida/Ativa (cancelada/suspensa): marca pra não subir mais. O que
+    # JÁ subiu precisa de ajuste de retração no Google — fica registrado como
+    # 'retratar' pra aparecer no diagnóstico, em vez de virar receita fantasma.
+    elif p['status_operacional'] == 'Emitida/Ativa':
+        try:
+            atual = conn.execute("SELECT status FROM google_ads_conversoes WHERE proposta_id=?", (pid,)).fetchone()
+            if atual:
+                novo = 'retratar' if atual['status'] == 'enviada' else 'cancelada'
+                conn.execute("""UPDATE google_ads_conversoes SET status=?, detalhe=?
+                                WHERE proposta_id=?""", (novo, f'proposta virou {novo_status}', pid))
+        except Exception as e:
+            app.logger.warning(f"[ADS] não marcou retração da proposta {pid}: {e}")
 
     # Histórico
     conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
@@ -19532,6 +19790,65 @@ def crm_status_excluir(sid):
     conn.execute("DELETE FROM crm_status_opcoes WHERE id=?", (sid,))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+
+# ─── CONVERSÃO OFFLINE: TELA E AÇÕES ──────────────────────────────────────────
+@app.route('/google-ads')
+@login_required
+@admin_required
+def google_ads_painel():
+    cfg, faltando = _ads_config()
+    conn = db()
+    linhas = conn.execute("""SELECT g.*, p.razao_social, p.consultor, p.criado_em prop_criado,
+                                    l.nome lead_nome
+                             FROM google_ads_conversoes g
+                             LEFT JOIN propostas p ON p.id = g.proposta_id
+                             LEFT JOIN crm_leads l ON l.id = g.lead_id
+                             ORDER BY g.id DESC LIMIT 300""").fetchall()
+    contagem = {}
+    for r in conn.execute("SELECT status, COUNT(*) c, COALESCE(SUM(valor),0) v FROM google_ads_conversoes GROUP BY status").fetchall():
+        contagem[r['status']] = {'n': r['c'], 'valor': r['v']}
+    # Vendas que ainda não entraram na fila — mostra o tamanho do que falta.
+    try:
+        fora = conn.execute("""SELECT COUNT(*) c FROM propostas p
+            WHERE p.status_operacional='Emitida/Ativa' AND p.status <> 'Excluída'
+              AND COALESCE(p.estornada,0)=0
+              AND NOT EXISTS (SELECT 1 FROM google_ads_conversoes g WHERE g.proposta_id=p.id)""").fetchone()['c']
+    except Exception:
+        fora = 0
+    close_db(conn)
+    return render_template('google_ads.html', linhas=[dict(r) for r in linhas],
+                           contagem=contagem, faltando=faltando, fora=fora,
+                           valor_base=(os.environ.get('GOOGLE_ADS_VALOR_BASE') or 'comissao_bruta'),
+                           customer_id=cfg['customer_id'])
+
+
+@app.route('/google-ads/enfileirar', methods=['POST'])
+@login_required
+@admin_required
+def google_ads_enfileirar():
+    """Varre as vendas confirmadas que ainda não estão na fila. É o backfill: as
+    vendas anteriores a esta funcionalidade nunca passaram pelo gatilho."""
+    conn = db()
+    props = conn.execute("""SELECT id FROM propostas
+        WHERE status_operacional='Emitida/Ativa' AND status <> 'Excluída'
+          AND COALESCE(estornada,0)=0
+          AND NOT EXISTS (SELECT 1 FROM google_ads_conversoes g WHERE g.proposta_id=propostas.id)
+        ORDER BY id""").fetchall()
+    placar = {}
+    for p in props:
+        _reg, st = _ads_enfileirar(conn, p['id'], 'backfill manual')
+        placar[st] = placar.get(st, 0) + 1
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "analisadas": len(props), "placar": placar})
+
+
+@app.route('/google-ads/enviar', methods=['POST'])
+@login_required
+@admin_required
+def google_ads_enviar():
+    resumo = enviar_conversoes_ads(limite=int((request.json or {}).get('limite') or 200))
+    return jsonify({"ok": not resumo.get('erros'), **resumo})
 
 
 # ─── QUADROS DO KANBAN ────────────────────────────────────────────────────────
