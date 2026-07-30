@@ -20,6 +20,50 @@
 
 <div class="page">
 
+  {% if por_midia %}
+  <div class="card">
+    <div class="card-header"><h3>Comissão por campanha e criativo</h3></div>
+    <div style="padding:0 16px 6px; font-size:12.5px; color:var(--cinza); line-height:1.55;">
+      Não é qual anúncio traz mais lead — é <b style="color:var(--texto);">qual anúncio paga a folha</b>.
+      Um criativo pode trazer o dobro de leads e metade da comissão, e no relatório de volume ele parece o melhor.
+      Ordenado pelo líquido da Serenus no período filtrado.
+    </div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Campanha</th><th>Criativo</th><th>Origem</th>
+            <th>Vendas</th><th>Produção</th>
+            <th>Comissão bruta</th><th>Repasse</th>
+            <th>Líquido Serenus</th><th>Líquido / venda</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in por_midia %}
+          <tr {% if m.campanha == 'Sem lead vinculado' %}style="opacity:.6;"{% endif %}>
+            <td><strong>{{ m.campanha }}</strong></td>
+            <td style="color:var(--cinza);">{{ m.criativo or '—' }}</td>
+            <td style="color:var(--cinza);">{{ m.origem or '—' }}</td>
+            <td class="td-mono">{{ m.vendas }}</td>
+            <td class="td-mono">{{ m.producao|moeda }}</td>
+            <td class="td-mono" style="color:var(--info);">{{ m.bruto|moeda }}</td>
+            <td class="td-mono" style="color:var(--erro);">{{ m.do_consultor|moeda }}</td>
+            <td class="td-mono" style="color:var(--verde); font-weight:600;">{{ m.liquido|moeda }}</td>
+            <td class="td-mono">{{ m.liquido_por_venda|moeda }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {# 'Sem lead vinculado' aparece de propósito: linha faltando num relatório de
+       dinheiro é pior que linha honesta dizendo que a origem é desconhecida. #}
+    <div style="padding:0 16px 16px; font-size:11.5px; color:var(--cinza-2); line-height:1.5;">
+      Vendas em <b>Sem lead vinculado</b> são propostas que não casaram com nenhum lead do CRM —
+      entraram sem passar pelo funil, ou o telefone/CNPJ divergem. Não têm origem de mídia atribuível.
+    </div>
+  </div>
+  {% endif %}
+
   {% if avisos_comissao %}
   <div class="card" style="border-color:rgba(250,204,21,.35);">
     <div class="card-header"><h3>Diagnóstico de comissão — {{ avisos_comissao|sum(attribute='qtd') }} proposta(s) com comissão zerada</h3></div>

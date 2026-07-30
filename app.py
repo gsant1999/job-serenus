@@ -8722,6 +8722,70 @@ def playbook():
                            total_fechados=len(clientes), total_com_analise=total_com_analise)
 
 
+def _comissao_por_midia(conn, f_mes=None):
+    """Comissão agrupada por CAMPANHA e por CRIATIVO da mídia paga.
+
+    É a pergunta que o relatório de leads não responde: não "qual anúncio gera
+    lead", mas "qual anúncio paga a folha". Um criativo pode trazer o dobro de
+    leads e metade da comissão — e no relatório de volume ele parece o melhor.
+
+    Só é possível por causa das duas costuras: propostas.lead_id liga a venda ao
+    lead, e a campanha/criativo do lead sai do dados_extras que a ingestão já
+    gravava. Sem lead_id isso teria que recasar por telefone a cada consulta.
+
+    Propostas SEM lead_id entram como 'Sem lead vinculado' em vez de sumir: uma
+    linha faltando num relatório de dinheiro é pior que uma linha honesta dizendo
+    que não sabemos a origem.
+    """
+    # Monta o filtro aqui em vez de receber o SQL pronto do /bi: o de lá não tem
+    # prefixo de tabela ('AND mes_meta=?') e nesta query há JOIN, onde a coluna
+    # precisa ser qualificada.
+    if f_mes and f_mes != 'todos':
+        filtro, params = " AND p.mes_meta=?", [f_mes]
+    else:
+        filtro, params = "", []
+    try:
+        rows = conn.execute(f"""
+            SELECT p.id, p.valor, p.comissao_total_corretora bruto,
+                   p.comissao_consultor do_consultor,
+                   p.comissao_corretora_liquida liquido,
+                   p.lead_id, l.dados_extras, l.origem, l.trafego
+            FROM propostas p
+            LEFT JOIN crm_leads l ON l.id = p.lead_id
+            WHERE p.status <> 'Excluída' AND COALESCE(p.estornada,0)=0{filtro}
+        """, params).fetchall()
+    except Exception as e:
+        app.logger.warning(f"[BI/MIDIA] consulta falhou: {e}")
+        return []
+
+    SEM = 'Sem lead vinculado'
+    grupos = {}
+    for r in rows:
+        if not r['lead_id']:
+            campanha, criativo, origem = SEM, '', ''
+        else:
+            campanha = _ler_do_extras(r['dados_extras'], 'utm.campaign') or 'Sem campanha'
+            criativo = _ler_do_extras(r['dados_extras'], 'utm.content') or ''
+            origem = _ler_do_extras(r['dados_extras'], 'utm.source') or (r['origem'] or '')
+        chave = (campanha, criativo)
+        g = grupos.setdefault(chave, {'campanha': campanha, 'criativo': criativo, 'origem': origem,
+                                      'vendas': 0, 'producao': 0.0, 'bruto': 0.0,
+                                      'do_consultor': 0.0, 'liquido': 0.0})
+        g['vendas'] += 1
+        g['producao'] += float(r['valor'] or 0)
+        g['bruto'] += float(r['bruto'] or 0)
+        g['do_consultor'] += float(r['do_consultor'] or 0)
+        g['liquido'] += float(r['liquido'] or 0)
+    out = list(grupos.values())
+    for g in out:
+        # Líquido por venda é o que compara criativos de tamanhos diferentes:
+        # muito volume com ticket baixo deixa de parecer melhor que o contrário.
+        g['liquido_por_venda'] = (g['liquido'] / g['vendas']) if g['vendas'] else 0
+    # Sem vínculo sempre no fim: é ruído de dado, não desempenho de campanha.
+    out.sort(key=lambda g: (g['campanha'] == SEM, -g['liquido']))
+    return out
+
+
 @app.route('/bi')
 @login_required
 def bi():
@@ -8894,11 +8958,14 @@ def bi():
         # Diagnóstico de cadastro é operação da corretora (config de operadora/
         # repasse) — só admin vê, mesma régua do bruto/líquido nesta página.
         avisos_comissao = []
+    # Comissão por campanha/criativo é leitura de investimento em mídia — visão de
+    # corretora, mesma régua do bruto/líquido nesta página.
+    por_midia = _comissao_por_midia(conn, f_mes) if ea else []
     close_db(conn)
     return render_template('bi.html', por_mes=por_mes, por_operadora=por_operadora,
                            por_modalidade=por_modalidade, por_consultor=por_consultor,
                            media_comissao=media_comissao, pct_geral=pct_geral,
-                           avisos_comissao=avisos_comissao,
+                           avisos_comissao=avisos_comissao, por_midia=por_midia,
                            f_mes=f_mes, meses_disponiveis=meses_disponiveis)
 
 # ─── USUÁRIOS ────────────────────────────────────────────────────────────────────
