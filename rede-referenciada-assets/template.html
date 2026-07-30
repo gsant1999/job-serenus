@@ -1,4 +1,4 @@
-<title>Rede Referenciada — SulAmérica</title>
+<title>Rede de Atendimento — SulAmérica — Serenus Corretora</title>
 <style>
   :root{
     --accent:#0F6B5C;
@@ -382,8 +382,9 @@
     </div>
     <div class="titlebar">
       <div>
-        <h1 class="display">Rede Referenciada</h1>
+        <h1 class="display">Rede de Atendimento</h1>
         <div class="plano-tag">SulAmérica · Direto Nacional <span>produto 557 / plano 87507</span></div>
+        <div class="plano-tag" id="atualizadoTag">Atualizado em __DATA_ATUALIZACAO__</div>
       </div>
       <button class="pdfbtn" id="pdfbtn" type="button">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h8l4 4v3"></path><path d="M6 18H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"></path><path d="M6 14h12v8H6z"></path></svg>
@@ -721,6 +722,7 @@
   }
 
   // ---------- Gerador de PDF nativo (sem dependencias, sem window.print) ----------
+  var DATA_ATUALIZACAO = "__DATA_ATUALIZACAO__";
   var PDF_W = 595.28, PDF_H = 841.89, PDF_M = 42;
   var PDF_TIPO_LABEL = {ps:"Pronto Socorro", hm:"Hospital / Maternidade", hd:"Hospital Dia", mc:"Medico / Clinica"};
 
@@ -842,6 +844,8 @@
         cs += "BT /F2 16 Tf " + C_INK + " rg " + PDF_M + " " + y.toFixed(2) + " Td (" + pdfStr(meta.cityLabel) + ") Tj ET\n";
         y -= 15;
         cs += "BT /F1 9 Tf " + C_SOFT + " rg " + PDF_M + " " + y.toFixed(2) + " Td (" + pdfStr(meta.count + " resultados - " + meta.filterLabel) + ") Tj ET\n";
+        y -= 13;
+        cs += "BT /F1 8 Tf " + C_FAINT + " rg " + PDF_M + " " + y.toFixed(2) + " Td (" + pdfStr("Dados atualizados em " + DATA_ATUALIZACAO) + ") Tj ET\n";
         y -= 22;
       } else {
         // Logos menores em toda pagina (nao so na primeira) — pedido explicito:
@@ -957,7 +961,7 @@
       }
     });
     var catNum = newObj("<< /Type /Catalog /Pages " + pagesNum + " 0 R >>");
-    var infoNum = newObj("<< /Title (" + pdfStr("Rede Referenciada - " + meta.cityLabel + " - Serenus Corretora") + ") /Author (" + pdfStr("Serenus Corretora de Saude") + ") /Creator (" + pdfStr("Serenus - Rede Referenciada") + ") >>");
+    var infoNum = newObj("<< /Title (" + pdfStr("Rede de Atendimento - SulAmerica - " + meta.cityLabel + " - Serenus Corretora") + ") /Author (" + pdfStr("Serenus Corretora de Saude") + ") /Creator (" + pdfStr("Serenus - Rede de Atendimento") + ") >>");
 
     var head = "%PDF-1.4\n%âãÏÓ\n";
     var chunks = [head];

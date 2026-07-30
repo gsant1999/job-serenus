@@ -17,6 +17,7 @@ subs = {
     '__LOGO_B64__': rd('logo_b64.txt'),
     '__SER_JPG_W__': '700', '__SER_JPG_H__': '179',
     '__SUL_JPG_W__': '700', '__SUL_JPG_H__': '161',
+    '__DATA_ATUALIZACAO__': '29/07/2026',
 }
 out = tpl
 # longest keys first so __LOGO_B64__ doesn't clobber __SERENUS_LOGO_*_B64__

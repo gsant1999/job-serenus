@@ -523,13 +523,9 @@
     </a>
     {% endif %}
     {% if eh_serenus %}
-    <a href="/rede-referenciada" class="nav-link {% if '/rede-referenciada' in request.path %}active{% endif %}" onclick="closeSidebar()">
+    <a href="/rede-atendimento" class="nav-link {% if request.path.startswith('/rede-atendimento') or request.path.startswith('/rede-referenciada') or request.path.startswith('/rede-vera-cruz') or request.path.startswith('/rede/') or request.path.startswith('/rede-vc/') %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20a6 6 0 0 0-12 0"/><circle cx="12" cy="10" r="4"/><circle cx="12" cy="12" r="10"/></svg>
-      Rede Referenciada (SulAmérica)
-    </a>
-    <a href="/rede-vera-cruz" class="nav-link {% if '/rede-vera-cruz' in request.path %}active{% endif %}" onclick="closeSidebar()">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20a6 6 0 0 0-12 0"/><circle cx="12" cy="10" r="4"/><circle cx="12" cy="12" r="10"/></svg>
-      Rede Vera Cruz
+      Rede de Atendimento
     </a>
     {% endif %}
     {% if pode_modulo('manual') and eh_serenus %}
