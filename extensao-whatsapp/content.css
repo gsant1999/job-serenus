@@ -705,3 +705,84 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   border: none; border-radius: 7px; padding: 7px 12px; font-size: 12px; font-weight: 500; letter-spacing: .2px;
   cursor: pointer; }
 .job-inbox-atender:hover { background: #17c194; }
+
+/* ═══════════════ Ficha do lead (CRM dentro do WhatsApp) ═══════════════
+   Vive no #job-painel-doc, que é filho do document.body. NUNCA dentro do #main:
+   nó estranho na árvore React do WhatsApp corrompe a reconciliação e quebra o
+   envio de mensagem. */
+.job-ficha { display:flex; flex-direction:column; gap:10px; }
+.job-ficha-topo { display:flex; flex-direction:column; gap:6px; }
+.job-ficha-nome { font-size:15px; font-weight:700; color:var(--job-txt); line-height:1.25; }
+.job-ficha-linha { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
+.job-ficha-etapa { font-size:10px; font-weight:700; padding:3px 9px; border-radius:10px;
+                   text-transform:uppercase; letter-spacing:.3px; }
+.job-ficha-saude { font-size:10px; font-weight:700; padding:3px 8px; border-radius:9px; }
+.job-saude-atencao { background:rgba(250,204,21,.18); color:#eab308; }
+.job-saude-atrasado { background:rgba(244,63,94,.18); color:#f43f5e; }
+.job-ficha-resp { font-size:10px; padding:3px 8px; border-radius:9px;
+                  background:var(--job-bg3); color:var(--job-txt-fraco); }
+/* Trava aparece no topo: é o que impede o lead de andar, então é a primeira
+   coisa que interessa a quem abriu a ficha pra fazer o lead andar. */
+.job-ficha-trava { font-size:11.5px; line-height:1.45; padding:8px 10px; border-radius:8px;
+                   background:rgba(244,63,94,.08); border:1px solid rgba(244,63,94,.28);
+                   color:var(--job-txt); }
+.job-ficha-abas { display:flex; gap:4px; border-bottom:1px solid var(--job-borda); padding-bottom:0; }
+.job-ficha-aba { flex:1; background:transparent; border:none; border-bottom:2px solid transparent;
+                 color:var(--job-txt-fraco); font-size:11.5px; font-weight:600; padding:7px 4px;
+                 cursor:pointer; white-space:nowrap; }
+.job-ficha-aba:hover { color:var(--job-txt); }
+.job-ficha-aba.on { color:var(--job-acento); border-bottom-color:var(--job-acento); }
+.job-ficha-corpo { display:flex; flex-direction:column; gap:9px; }
+.job-ficha-campo { display:flex; flex-direction:column; gap:3px; }
+.job-ficha-campo > label { font-size:9.5px; font-weight:700; text-transform:uppercase;
+                           letter-spacing:.4px; color:var(--job-txt-fraco); display:flex;
+                           flex-wrap:wrap; gap:5px; align-items:baseline; }
+.job-ficha-dica { font-size:10px; font-weight:400; text-transform:none; letter-spacing:0;
+                  color:var(--job-txt-fraco); }
+.job-ficha-campo input, .job-ficha-campo select, .job-ficha-campo textarea {
+  width:100%; box-sizing:border-box; background:var(--job-bg2);
+  border:1px solid var(--job-borda); border-radius:7px; padding:7px 9px;
+  color:var(--job-txt); font-size:12.5px; outline:none; font-family:inherit; }
+.job-ficha-campo input:focus, .job-ficha-campo select:focus, .job-ficha-campo textarea:focus {
+  border-color:var(--job-acento); }
+.job-ficha-campo textarea { resize:vertical; }
+.job-ficha-lido { font-size:12.5px; color:var(--job-txt); background:var(--job-bg3);
+                  border:1px solid var(--job-borda); border-radius:7px; padding:7px 9px;
+                  user-select:text; word-break:break-word; }
+.job-ficha-lido.vazio { color:var(--job-txt-fraco); font-style:italic; }
+.job-ficha-etqs { display:flex; flex-wrap:wrap; gap:5px; }
+.job-ficha-etq { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600;
+                 padding:4px 9px; border-radius:11px; cursor:pointer; user-select:none;
+                 background:var(--job-bg2); border:1px solid var(--job-borda);
+                 color:var(--job-txt-fraco); }
+.job-ficha-etq.on { color:#0b1220; border-color:transparent; }
+.job-ficha-etq input { margin:0; cursor:pointer; }
+.job-ficha-grupo { border:1px solid var(--job-borda); border-radius:9px; padding:10px;
+                   display:flex; flex-direction:column; gap:9px; }
+.job-ficha-grupo-tit { font-size:9.5px; font-weight:700; text-transform:uppercase;
+                       letter-spacing:.45px; color:var(--job-txt-fraco); }
+.job-fg-saida { border-color:rgba(244,63,94,.28); background:rgba(244,63,94,.05); }
+.job-fg-saida .job-ficha-grupo-tit { color:#fb7185; }
+.job-fg-automatico { background:rgba(34,211,238,.05); border-color:rgba(34,211,238,.2); }
+.job-fg-pb { border-color:rgba(99,102,241,.3); background:rgba(99,102,241,.05); }
+.job-ficha-rascunho { font-size:10.5px; line-height:1.4; color:#eab308;
+                      background:rgba(250,204,21,.1); border-radius:7px; padding:6px 8px; }
+.job-ficha-passo { display:flex; flex-direction:column; gap:5px; }
+.job-ficha-passo-top { font-size:11.5px; font-weight:700; color:var(--job-txt);
+                       display:flex; gap:6px; align-items:baseline; flex-wrap:wrap; }
+.job-ficha-quando { font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.3px;
+                    background:var(--job-bg3); color:var(--job-txt-fraco);
+                    padding:2px 6px; border-radius:7px; }
+.job-ficha-msg { font-size:12px; line-height:1.5; white-space:pre-wrap; user-select:text;
+                 background:var(--job-bg3); border-radius:7px; padding:8px 9px;
+                 color:var(--job-txt); }
+.job-ficha-usar { align-self:flex-start; background:var(--job-bg2); border:1px solid var(--job-borda);
+                  color:var(--job-txt-fraco); border-radius:6px; padding:4px 10px; font-size:11px;
+                  cursor:pointer; }
+.job-ficha-usar:hover { border-color:var(--job-acento); color:var(--job-txt); }
+.job-ficha-rodape { display:flex; flex-direction:column; gap:5px; }
+.job-ficha-aviso { font-size:11px; line-height:1.4; color:var(--job-txt-fraco); }
+.job-ficha-aviso.ok { color:#4ade80; }
+.job-ficha-aviso.erro { color:#f43f5e; }
+.job-ficha-link { font-size:11px; color:var(--job-txt-fraco); text-decoration:none; text-align:center; }
+.job-ficha-link:hover { color:var(--job-acento); text-decoration:underline; }

@@ -14010,6 +14010,242 @@ def api_whatsapp_lead_criar():
     return _wa_cors(jsonify({"ok": True, "ja_existia": False, "lead_id": lead_id}))
 
 
+# ─── FICHA COMPLETA DO LEAD PRA EXTENSÃO ──────────────────────────────────────
+# UMA chamada devolve tudo que o popup dentro do WhatsApp precisa. É de propósito:
+# o consultor abre a conversa e o painel tem que estar pronto — seis requisições em
+# série (lead, etapas, sub-status, campos, etiquetas, atividades) dariam um painel
+# que monta aos pedaços na frente dele, e aí ninguém usa.
+@app.route('/api/whatsapp/lead/ficha', methods=['GET', 'OPTIONS'])
+def api_whatsapp_lead_ficha():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    tel = _normalizar_telefone(request.args.get('telefone', ''))
+    lid = request.args.get('lead_id', type=int)
+    if not tel and not lid:
+        return _wa_cors(jsonify({"ok": False, "erro": "telefone ou lead_id ausente"})), 400
+    conn = db()
+    try:
+        if lid:
+            lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+        else:
+            achado = _buscar_lead_por_telefone(conn, tel)
+            lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (achado['id'],)).fetchone() if achado else None
+        etapas = [dict(e) for e in carregar_etapas_crm(conn)]
+        etiquetas_todas = carregar_etiquetas_crm(conn)
+        campos_def = carregar_campos_crm(conn)
+        if not lead:
+            close_db(conn)
+            # Sem lead ainda: devolve as listas pro popup já oferecer "criar lead"
+            # com etapa/etiquetas prontas, sem uma segunda ida ao servidor.
+            return _wa_cors(jsonify({
+                "ok": True, "existe": False, "telefone_norm": tel,
+                "etapas": etapas, "etiquetas_todas": etiquetas_todas,
+                "campos_def": campos_def, "origens": _WA_ORIGENS_LEAD}))
+        lead_d = dict(lead)
+        resp_nome = ''
+        if lead['responsavel_id']:
+            u = conn.execute("SELECT nome FROM usuarios WHERE id=?", (lead['responsavel_id'],)).fetchone()
+            resp_nome = (u['nome'] if u else '') or ''
+        etqs = _etiquetas_dos_leads(conn, [lead['id']]).get(lead['id'], [])
+        atividades = [dict(a) for a in conn.execute("""
+            SELECT id, usuario_nome, tipo, descricao, criado_em FROM crm_atividades
+            WHERE lead_id=? ORDER BY id DESC LIMIT 30""", (lead['id'],)).fetchall()]
+        sla = conn.execute("SELECT sla_dias FROM crm_etapas WHERE slug=?", (lead['etapa'] or '',)).fetchone()
+        payload = {
+            "ok": True, "existe": True,
+            "lead": lead_d,
+            "responsavel_nome": resp_nome,
+            "etapas": etapas,
+            "sub_status_etapa": _sub_status_por_etapa(conn).get(lead['etapa'] or '', []),
+            "campos_def": campos_def,
+            "campos_val": valores_campos_lead(conn, lead, campos_def),
+            "campos_faltando": campos_faltando_pra_sair(conn, lead, campos_def),
+            "etiquetas_todas": etiquetas_todas,
+            "etiquetas_marcadas": [e['id'] for e in etqs],
+            "atividades": atividades,
+            "playbook": _playbook_do_lead(lead, [e['nome'] for e in etqs]),
+            "saude": _saude_card(lead_d.get('avancou_em'),
+                                 (sla['sla_dias'] if sla else None), lead_d.get('atualizado_em')),
+            "origens": _WA_ORIGENS_LEAD,
+        }
+    except Exception as e:
+        close_db(conn)
+        app.logger.error(f"[WA/FICHA] {e}")
+        return _wa_cors(jsonify({"ok": False, "erro": "Falha ao montar a ficha"})), 500
+    close_db(conn)
+    return _wa_cors(jsonify(payload))
+
+
+@app.route('/api/whatsapp/lead/salvar', methods=['POST', 'OPTIONS'])
+def api_whatsapp_lead_salvar():
+    """Salva em UMA chamada o que o popup mudou. Aplica na ordem: campos → etiquetas
+    → sub-status → etapa. A etapa é a ÚLTIMA de propósito: ela é a única que pode
+    ser recusada (campo obrigatório em branco), e nessa ordem o consultor não perde
+    o que digitou quando a mudança de etapa é barrada."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    d = request.get_json(silent=True) or {}
+    try:
+        lid = int(d.get('lead_id') or 0)
+    except (TypeError, ValueError):
+        lid = 0
+    if not lid:
+        return _wa_cors(jsonify({"ok": False, "erro": "lead_id ausente"})), 400
+    try:
+        uid = int(d.get('usuario_id') or 0) or None
+    except (TypeError, ValueError):
+        uid = None
+    conn = db()
+    # A extensão guarda só o id do consultor, não o nome — quem resolve é aqui,
+    # senão a atividade ficaria assinada como "Extensão" e o histórico não diria
+    # quem fez o quê.
+    autor = (d.get('usuario_nome') or '').strip()[:80]
+    if not autor and uid:
+        u = conn.execute("SELECT nome FROM usuarios WHERE id=?", (uid,)).fetchone()
+        autor = (u['nome'] if u else '') or ''
+    autor = autor or 'Extensão'
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Lead não encontrado"})), 404
+    mudancas, avisos = [], []
+    try:
+        # 1) Dados básicos
+        campos_simples = {'nome': 80, 'email': 120, 'empresa': 120, 'observacoes': 4000}
+        sets, vals = [], []
+        for k, lim in campos_simples.items():
+            if k in d:
+                novo = (str(d.get(k) or '')).strip()[:lim]
+                if novo != ((lead[k] or '') if k in lead.keys() else ''):
+                    sets.append(f"{k}=?"); vals.append(novo or None)
+                    mudancas.append(k)
+        if 'origem' in d and (d.get('origem') or '') in _WA_ORIGENS_LEAD:
+            if d['origem'] != (lead['origem'] or ''):
+                sets.append("origem=?"); vals.append(d['origem']); mudancas.append('origem')
+        if 'valor_estimado' in d:
+            bruto = str(d.get('valor_estimado') or '').replace('.', '').replace(',', '.')
+            try:
+                v = float(bruto) if bruto else None
+            except ValueError:
+                v = None
+            sets.append("valor_estimado=?"); vals.append(v); mudancas.append('valor')
+        if sets:
+            conn.execute(f"UPDATE crm_leads SET {', '.join(sets)}, atualizado_em=? WHERE id=?",
+                         vals + [_agora_sp(), lid])
+
+        # 2) Campos personalizados (reaproveita o mesmo gravador do CRM, então a
+        #    regra de campo utm/só-se-vazio vale igual aqui)
+        campos = {c['chave']: c for c in carregar_campos_crm(conn)}
+        antes = valores_campos_lead(conn, lead)
+        for chave, valor in (d.get('campos') or {}).items():
+            c = campos.get(chave)
+            if not c or c['fonte'] == 'utm':
+                continue
+            if isinstance(valor, list):
+                valor = ', '.join([str(v) for v in valor if str(v).strip()])
+            novo = ('' if valor is None else str(valor)).strip()
+            if novo != (antes.get(chave, {}).get('valor') or ''):
+                gravar_campo_lead(conn, lid, chave, novo, fonte=f"extensao:{uid or '-'}")
+                mudancas.append(c['nome'])
+        if (d.get('campos') or {}).get('cnpj'):
+            try:
+                _preencher_campos_por_cnpj(conn, lid, d['campos']['cnpj'])
+            except Exception as e:
+                avisos.append(f"CNPJ não consultado: {e}")
+
+        # 3) Etiquetas — lista fechada de ids marcados
+        if isinstance(d.get('etiquetas'), list):
+            querem = {int(x) for x in d['etiquetas'] if str(x).isdigit()}
+            validas = {e['id'] for e in carregar_etiquetas_crm(conn)}
+            querem &= validas
+            atuais = {e['id'] for e in _etiquetas_dos_leads(conn, [lid]).get(lid, [])}
+            for eid in querem - atuais:
+                if DB_MODE == 'postgres':
+                    conn.execute("""INSERT INTO crm_lead_etiquetas (lead_id,etiqueta_id,criado_em)
+                        VALUES (%s,%s,%s) ON CONFLICT DO NOTHING""", (lid, eid, _agora_sp()))
+                else:
+                    conn.execute("""INSERT OR IGNORE INTO crm_lead_etiquetas (lead_id,etiqueta_id,criado_em)
+                        VALUES (?,?,?)""", (lid, eid, _agora_sp()))
+            for eid in atuais - querem:
+                conn.execute("DELETE FROM crm_lead_etiquetas WHERE lead_id=? AND etiqueta_id=?", (lid, eid))
+            if querem != atuais:
+                mudancas.append('etiquetas')
+
+        # 4) Sub-status (validado contra a etapa ATUAL)
+        if 'sub_status' in d:
+            novo_ss = (d.get('sub_status') or '').strip()
+            permitidos = [''] + _sub_status_por_etapa(conn).get(lead['etapa'] or '', [])
+            if novo_ss not in permitidos:
+                avisos.append('Sub-status não existe nesta etapa')
+            elif novo_ss != (lead['sub_status'] or ''):
+                conn.execute("UPDATE crm_leads SET sub_status=?, atualizado_em=?, avancou_em=? WHERE id=?",
+                             (novo_ss or None, _agora_sp(), _agora_sp(), lid))
+                mudancas.append(f'sub-status: {novo_ss or "—"}')
+
+        # 5) Atividade escrita pelo consultor
+        nota = (d.get('atividade') or '').strip()[:4000]
+        if nota:
+            conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                            VALUES (?,?,?,?,?)""", (lid, autor, d.get('atividade_tipo') or 'nota', nota, _agora_sp()))
+
+        if mudancas:
+            conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                            VALUES (?,?,?,?,?)""",
+                         (lid, autor, 'edicao', 'Pelo WhatsApp: ' + ', '.join(mudancas[:12]), _agora_sp()))
+        conn.commit()
+
+        # 6) Etapa por último — a única que pode ser barrada
+        etapa_ok, etapa_erro = True, None
+        nova_etapa = (d.get('etapa') or '').strip()
+        if nova_etapa and nova_etapa != (lead['etapa'] or ''):
+            atual = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+            if nova_etapa not in [e['id'] for e in carregar_etapas_crm(conn)]:
+                etapa_ok, etapa_erro = False, 'Etapa inválida'
+            else:
+                faltando = campos_faltando_pra_sair(conn, atual)
+                if faltando:
+                    etapa_ok = False
+                    etapa_erro = 'Preencha antes de mudar de etapa: ' + ', '.join([f['nome'] for f in faltando])
+                else:
+                    conn.execute("""UPDATE crm_leads SET etapa=?, sub_status=NULL,
+                                    atualizado_em=?, avancou_em=? WHERE id=?""",
+                                 (nova_etapa, _agora_sp(), _agora_sp(), lid))
+                    conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                                    VALUES (?,?,?,?,?)""",
+                                 (lid, autor, 'movimentacao',
+                                  f'Movido de "{lead["etapa"]}" para "{nova_etapa}" (pelo WhatsApp)', _agora_sp()))
+                    conn.commit()
+                    try:
+                        _fluxo_cancelar_por_etapa(conn, lid, nova_etapa)
+                        _fluxo_autoiniciar_por_etapa(conn, lid, nova_etapa)
+                        conn.commit()
+                    except Exception as e:
+                        try: conn.rollback()
+                        except Exception: pass
+                        app.logger.error(f"[WA/FICHA] hook de etapa falhou (lead {lid}): {e}")
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        close_db(conn)
+        app.logger.error(f"[WA/SALVAR] {e}")
+        return _wa_cors(jsonify({"ok": False, "erro": "Falha ao salvar"})), 500
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    fresco = {
+        "lead": dict(lead),
+        "campos_val": valores_campos_lead(conn, lead),
+        "campos_faltando": campos_faltando_pra_sair(conn, lead),
+        "sub_status_etapa": _sub_status_por_etapa(conn).get(lead['etapa'] or '', []),
+        "etiquetas_marcadas": [e['id'] for e in _etiquetas_dos_leads(conn, [lid]).get(lid, [])],
+    }
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "mudou": mudancas, "avisos": avisos,
+                             "etapa_ok": etapa_ok, "etapa_erro": etapa_erro, **fresco}))
+
+
 @app.route('/api/whatsapp/enviar-direto', methods=['POST', 'OPTIONS'])
 def api_whatsapp_enviar_direto():
     """Enfileira uma mensagem direto da conversa aberta no WhatsApp Web — pedido

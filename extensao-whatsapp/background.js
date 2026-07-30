@@ -304,6 +304,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/cnpj/' + encodeURIComponent(dig), 'GET', null, 20000).then(sendResponse);
     return true;
   }
+  // Ficha completa do lead: UMA chamada traz lead, etapas, sub-status, campos,
+  // etiquetas e atividades. Timeout maior que os 10s dos outros porque é o
+  // agregado — mas ainda assim uma ida só, pro painel não montar aos pedaços.
+  if (msg && msg.type === 'ficha_lead') {
+    const q = msg.lead_id ? ('lead_id=' + encodeURIComponent(msg.lead_id))
+                          : ('telefone=' + encodeURIComponent(msg.telefone || ''));
+    chamarJob('/api/whatsapp/lead/ficha?' + q, 'GET', null, 15000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'ficha_salvar') {
+    // repetivel:false — é escrita; repetir cegamente poderia duplicar atividade.
+    chamarJob('/api/whatsapp/lead/salvar', 'POST', msg.dados || {}, 20000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'notas_listar') {
     chamarJob('/api/whatsapp/notas?telefone=' + encodeURIComponent(msg.telefone || ''), 'GET', null, 10000).then(sendResponse);
     return true;

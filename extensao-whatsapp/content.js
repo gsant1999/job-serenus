@@ -995,7 +995,7 @@
         '<span class="job-trilho-item-icone">' + _ICO_NOTA + '</span>' +
         '<span class="job-trilho-item-label">Notas</span>' +
       '</button>' +
-      '<button class="job-trilho-item" data-acao="crm" title="Abrir lead no CRM do JOB">' +
+      '<button class="job-trilho-item" data-secao="ficha" title="Ficha do lead: etapa, sub-status, etiquetas, qualificação e atividade">' +
         '<span class="job-trilho-item-icone">' + _ICO_CRM + '</span>' +
         '<span class="job-trilho-item-label">CRM</span>' +
       '</button>' +
@@ -1005,7 +1005,7 @@
       '<div class="job-trilho-versao" id="job-trilho-versao" title="Versão instalada"></div>';
     trilho.querySelectorAll('.job-trilho-item').forEach((item) => {
       item.addEventListener('click', () => {
-        if (item.dataset.acao === 'crm') { _abrirLeadNoCrm(item); return; }
+        if (item.dataset.acao === 'crm') { _abrirLeadNoCrm(item); return; }  // legado: nenhum botão usa mais
         const secao = item.dataset.secao;
         if (_secaoAtiva === secao) fecharSecao();
         else abrirSecao(secao);
@@ -1177,6 +1177,327 @@
     else if (secao === 'cnpj') abrirSecaoCnpj();
     else if (secao === 'notas') abrirSecaoNotas();
     else if (secao === 'crm') abrirSecaoNovoLead();
+    else if (secao === 'ficha') abrirSecaoFicha();
+  }
+
+  // ═══════════════ Ficha do lead (CRM dentro do WhatsApp) ═══════════════
+  // O painel inteiro do CRM na mesma aba: etapa, sub-status, etiquetas, campos
+  // personalizados, qualificação e atividade. Mora no #job-painel-doc, que é
+  // filho do document.body — NUNCA do #main. Inserir nó estranho na árvore React
+  // do WhatsApp corrompe a reconciliação e quebra o ENVIO DE MENSAGEM (já
+  // aconteceu em produção com a barra de notas).
+  let _ficha = null;        // último payload do servidor
+  let _fichaTel = '';
+  let _fichaSujo = false;   // tem alteração não salva?
+
+  async function abrirSecaoFicha() {
+    setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div><div class="job-sem-analise-txt">Abrindo a ficha do lead…</div></div>');
+    let tel = '';
+    try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+    if (!tel) {
+      setCorpoSecao('<div class="job-erro">Abra uma conversa primeiro pra ver a ficha do lead.</div>');
+      return;
+    }
+    _fichaTel = tel;
+    await _carregarFicha({ telefone: tel });
+  }
+
+  async function _carregarFicha(alvo) {
+    let resp;
+    try { resp = await _safeSendMessage(Object.assign({ type: 'ficha_lead' }, alvo)); } catch (e) { resp = null; }
+    if (!resp || !resp.ok) {
+      setCorpoSecao('<div class="job-erro">Não consegui abrir a ficha agora. ' +
+        '<button class="job-copy" id="job-ficha-retry" style="width:auto;display:inline;padding:4px 10px;margin-left:6px;">Tentar de novo</button></div>');
+      const rt = document.getElementById('job-ficha-retry');
+      if (rt) rt.addEventListener('click', () => _carregarFicha(alvo));
+      return;
+    }
+    _ficha = resp;
+    _fichaSujo = false;
+    if (!resp.existe) { _renderFichaSemLead(); return; }
+    _renderFicha('dados');
+  }
+
+  function _renderFichaSemLead() {
+    setCorpoSecao(
+      '<div class="job-ficha">' +
+        '<div class="job-cnpj-titulo">Sem lead no JOB</div>' +
+        '<div class="job-cnpj-sub">Esse número não está no CRM. Cadastre pra ter etapa, etiquetas e qualificação aqui dentro.</div>' +
+        '<button class="job-cnpj-btn" id="job-ficha-criar">Cadastrar este lead</button>' +
+      '</div>');
+    const b = document.getElementById('job-ficha-criar');
+    if (b) b.addEventListener('click', () => abrirSecaoNovoLead());
+  }
+
+  // Abas em vez de rolagem longa: o consultor está no meio de uma conversa, e o
+  // que ele precisa (mudar etapa, marcar etiqueta) tem que caber sem rolar.
+  const _FICHA_ABAS = [
+    { id: 'dados', rot: 'Lead' },
+    { id: 'qualif', rot: 'Qualificação' },
+    { id: 'ativid', rot: 'Atividade' },
+  ];
+
+  function _renderFicha(aba) {
+    const f = _ficha, l = f.lead || {};
+    const etapaAtual = (f.etapas || []).find((e) => e.id === l.etapa);
+    const falta = f.campos_faltando || [];
+    const saude = f.saude || {};
+    let corpo = '';
+    if (aba === 'dados') corpo = _fichaAbaDados(f, l);
+    else if (aba === 'qualif') corpo = _fichaAbaQualif(f);
+    else corpo = _fichaAbaAtividade(f);
+
+    setCorpoSecao(
+      '<div class="job-ficha">' +
+        '<div class="job-ficha-topo">' +
+          '<div class="job-ficha-nome">' + esc(l.nome || _fichaTel) + '</div>' +
+          '<div class="job-ficha-linha">' +
+            '<span class="job-ficha-etapa" style="background:' + esc((etapaAtual && etapaAtual.cor) || '#64748b') + '22;color:' +
+              esc((etapaAtual && etapaAtual.cor) || '#94a3b8') + ';">' + esc((etapaAtual && etapaAtual.nome) || l.etapa || '—') + '</span>' +
+            (saude.texto ? '<span class="job-ficha-saude job-saude-' + esc(saude.nivel || '') + '">' + esc(saude.texto) + '</span>' : '') +
+            (f.responsavel_nome ? '<span class="job-ficha-resp">' + esc(f.responsavel_nome) + '</span>' : '') +
+          '</div>' +
+        '</div>' +
+        (falta.length
+          ? '<div class="job-ficha-trava">Pra este card sair da etapa: <b>' +
+            falta.map((x) => esc(x.nome)).join(', ') + '</b></div>' : '') +
+        '<div class="job-ficha-abas">' +
+          _FICHA_ABAS.map((t) => '<button class="job-ficha-aba' + (t.id === aba ? ' on' : '') +
+            '" data-aba="' + t.id + '">' + t.rot + '</button>').join('') +
+        '</div>' +
+        '<div class="job-ficha-corpo">' + corpo + '</div>' +
+        '<div class="job-ficha-rodape">' +
+          '<button class="job-cnpj-btn" id="job-ficha-salvar">Salvar no JOB</button>' +
+          '<span class="job-ficha-aviso" id="job-ficha-aviso"></span>' +
+        '</div>' +
+        '<a class="job-ficha-link" id="job-ficha-abrir-crm" href="#">Abrir a ficha completa no JOB</a>' +
+      '</div>');
+    _ligarEventosFicha(aba);
+  }
+
+  function _fichaAbaDados(f, l) {
+    const etqs = new Set(f.etiquetas_marcadas || []);
+    return '' +
+      _campoTxt('nome', 'Nome', l.nome || '') +
+      _campoTxt('empresa', 'Cidade / empresa', l.empresa || '') +
+      _campoTxt('email', 'E-mail', l.email || '') +
+      _campoTxt('valor_estimado', 'Valor estimado', l.valor_estimado != null ? String(l.valor_estimado).replace('.', ',') : '') +
+      '<div class="job-ficha-campo"><label>Etapa</label>' +
+        '<select data-ficha="etapa">' +
+          (f.etapas || []).map((e) => '<option value="' + esc(e.id) + '"' + (e.id === l.etapa ? ' selected' : '') +
+            '>' + esc(e.nome) + '</option>').join('') +
+        '</select></div>' +
+      '<div class="job-ficha-campo"><label>Sub-status <span class="job-ficha-dica">o que falta pra avançar</span></label>' +
+        '<select data-ficha="sub_status">' +
+          '<option value="">Sem sub-status</option>' +
+          (f.sub_status_etapa || []).map((o) => '<option value="' + esc(o) + '"' +
+            (o === (l.sub_status || '') ? ' selected' : '') + '>' + esc(o) + '</option>').join('') +
+          ((l.sub_status && (f.sub_status_etapa || []).indexOf(l.sub_status) === -1)
+            ? '<option value="' + esc(l.sub_status) + '" selected>' + esc(l.sub_status) + ' (de outra etapa)</option>' : '') +
+        '</select></div>' +
+      '<div class="job-ficha-campo"><label>Etiquetas <span class="job-ficha-dica">por que está parado</span></label>' +
+        '<div class="job-ficha-etqs">' +
+          (f.etiquetas_todas || []).map((e) => {
+            const on = etqs.has(e.id);
+            return '<label class="job-ficha-etq' + (on ? ' on' : '') + '"' + (on ? ' style="background:' + esc(e.cor) + '"' : '') +
+              '><input type="checkbox" data-etq="' + e.id + '" data-cor="' + esc(e.cor) + '"' + (on ? ' checked' : '') + '>' +
+              esc(e.nome) + '</label>';
+          }).join('') +
+        '</div></div>';
+  }
+
+  function _fichaAbaQualif(f) {
+    const def = f.campos_def || [], val = f.campos_val || {};
+    // Ordem dos blocos igual à do CRM: o que trava a etapa primeiro, porque é o
+    // que impede o lead de andar. Automático é leitura — quem escreve é o import.
+    const ordem = [
+      { m: 'saida', rot: 'Obrigatório pra sair da etapa' },
+      { m: 'conversa', rot: 'Ao longo da conversa' },
+      { m: 'automatico', rot: 'Chega preenchido' },
+      { m: 'proposta', rot: 'Na proposta' },
+    ];
+    let html = '';
+    ordem.forEach((g) => {
+      const doGrupo = def.filter((c) => c.momento === g.m);
+      if (!doGrupo.length) return;
+      html += '<div class="job-ficha-grupo job-fg-' + g.m + '"><div class="job-ficha-grupo-tit">' + g.rot + '</div>' +
+        doGrupo.map((c) => _fichaCampoPers(c, (val[c.chave] || {}).valor || '')).join('') + '</div>';
+    });
+    return html || '<div class="job-notas-vazio">Nenhum campo cadastrado.</div>';
+  }
+
+  function _fichaCampoPers(c, v) {
+    const dica = c.dica ? '<span class="job-ficha-dica">' + esc(c.dica) + '</span>' : '';
+    let ctrl;
+    if (c.momento === 'automatico' || c.fonte === 'utm') {
+      ctrl = '<div class="job-ficha-lido' + (v ? '' : ' vazio') + '">' + (v ? esc(v) : '— ainda não chegou') + '</div>';
+    } else if (c.tipo === 'select') {
+      ctrl = '<select data-campo="' + esc(c.chave) + '"><option value="">—</option>' +
+        (c.opcoes || []).map((o) => '<option value="' + esc(o) + '"' + (o === v ? ' selected' : '') + '>' + esc(o) + '</option>').join('') +
+        ((v && (c.opcoes || []).indexOf(v) === -1) ? '<option value="' + esc(v) + '" selected>' + esc(v) + ' (fora da lista)</option>' : '') +
+        '</select>';
+    } else if (c.tipo === 'multiselect') {
+      const marc = String(v).split(',').map((x) => x.trim()).filter(Boolean);
+      ctrl = '<div class="job-ficha-etqs" data-campo="' + esc(c.chave) + '" data-multi="1">' +
+        (c.opcoes || []).map((o) => '<label class="job-ficha-etq"><input type="checkbox" value="' + esc(o) + '"' +
+          (marc.indexOf(o) > -1 ? ' checked' : '') + '>' + esc(o) + '</label>').join('') + '</div>';
+    } else if (c.tipo === 'booleano') {
+      ctrl = '<select data-campo="' + esc(c.chave) + '"><option value="">—</option>' +
+        '<option value="Sim"' + (v === 'Sim' ? ' selected' : '') + '>Sim</option>' +
+        '<option value="Não"' + (v === 'Não' ? ' selected' : '') + '>Não</option></select>';
+    } else if (c.tipo === 'texto_longo') {
+      ctrl = '<textarea rows="2" data-campo="' + esc(c.chave) + '">' + esc(v) + '</textarea>';
+    } else {
+      const t = c.tipo === 'data' ? 'date' : (c.tipo === 'mes' ? 'month' : (c.tipo === 'numero' ? 'number' : 'text'));
+      ctrl = '<input type="' + t + '" data-campo="' + esc(c.chave) + '" value="' + esc(v) + '">';
+    }
+    return '<div class="job-ficha-campo"><label>' + esc(c.nome) + dica + '</label>' + ctrl + '</div>';
+  }
+
+  function _fichaAbaAtividade(f) {
+    const ats = f.atividades || [];
+    const pb = f.playbook;
+    let html = '<div class="job-ficha-campo"><label>Registrar atividade</label>' +
+      '<textarea rows="3" id="job-ficha-ativ" placeholder="O que aconteceu nesta conversa…"></textarea></div>';
+    if (pb) {
+      html += '<div class="job-ficha-grupo job-fg-pb"><div class="job-ficha-grupo-tit">Sugestão de mensagem · ' + esc(pb.titulo || '') + '</div>' +
+        (pb.rascunho ? '<div class="job-ficha-rascunho">Rascunho: revise antes de mandar.</div>' : '') +
+        (pb.passos || []).map((p, i) =>
+          '<div class="job-ficha-passo">' +
+            '<div class="job-ficha-passo-top">' + esc(p.titulo || ('Passo ' + (i + 1))) +
+              (p.quando ? '<span class="job-ficha-quando">' + esc(p.quando) + '</span>' : '') + '</div>' +
+            '<div class="job-ficha-msg" id="job-pb-' + i + '">' + esc(p.msg || '') + '</div>' +
+            '<button class="job-ficha-usar" data-pb="' + i + '">Copiar mensagem</button>' +
+          '</div>').join('') +
+        '</div>';
+    }
+    html += '<div class="job-ficha-grupo"><div class="job-ficha-grupo-tit">Histórico</div>' +
+      (ats.length
+        ? ats.map((a) => '<div class="job-nota-item"><div class="job-nota-txt">' + esc(a.descricao || '') + '</div>' +
+            '<div class="job-nota-meta">' + esc([a.usuario_nome, a.tipo, _tempoBrCurto(a.criado_em)].filter(Boolean).join(' · ')) + '</div></div>').join('')
+        : '<div class="job-notas-vazio">Sem atividade registrada ainda.</div>') +
+      '</div>';
+    return html;
+  }
+
+  function _campoTxt(chave, rot, v) {
+    return '<div class="job-ficha-campo"><label>' + esc(rot) + '</label>' +
+      '<input type="text" data-ficha="' + chave + '" value="' + esc(v) + '"></div>';
+  }
+
+  function _ligarEventosFicha(aba) {
+    document.querySelectorAll('.job-ficha-aba').forEach((b) => {
+      b.addEventListener('click', () => {
+        // Guarda o que foi digitado antes de trocar de aba: re-renderizar sem
+        // isso jogaria fora a digitação, que é a pior coisa que um painel faz.
+        _absorverFicha();
+        _renderFicha(b.dataset.aba);
+      });
+    });
+    document.querySelectorAll('.job-ficha [data-ficha], .job-ficha [data-campo], .job-ficha [data-etq]').forEach((el) => {
+      el.addEventListener('input', () => { _fichaSujo = true; });
+      el.addEventListener('change', () => { _fichaSujo = true; });
+    });
+    // Etiqueta pinta na hora — feedback imediato, salvamento vem no Salvar
+    document.querySelectorAll('.job-ficha [data-etq]').forEach((chk) => {
+      chk.addEventListener('change', () => {
+        const lab = chk.closest('.job-ficha-etq');
+        if (!lab) return;
+        lab.classList.toggle('on', chk.checked);
+        lab.style.background = chk.checked ? (chk.dataset.cor || '') : '';
+      });
+    });
+    // Trocar a etapa muda a lista de sub-status, então avisa em vez de mentir
+    const selEtapa = document.querySelector('.job-ficha [data-ficha="etapa"]');
+    if (selEtapa) {
+      selEtapa.addEventListener('change', () => {
+        const av = document.getElementById('job-ficha-aviso');
+        if (av) av.textContent = selEtapa.value !== (_ficha.lead || {}).etapa
+          ? 'Mudança de etapa limpa o sub-status.' : '';
+      });
+    }
+    const salvar = document.getElementById('job-ficha-salvar');
+    if (salvar) salvar.addEventListener('click', () => _salvarFicha(aba));
+    const link = document.getElementById('job-ficha-abrir-crm');
+    if (link && _ficha && _ficha.lead) {
+      link.href = _SITE_BASE_URL_EXT + '/crm?lead=' + _ficha.lead.id;
+      link.target = '_blank';
+      link.rel = 'noopener';
+    }
+    // Copia em vez de escrever na caixa: mexer no DOM de composição do WhatsApp
+    // é justamente o tipo de intervenção que já quebrou o envio de mensagem.
+    document.querySelectorAll('.job-ficha-usar').forEach((b) => {
+      b.addEventListener('click', () => {
+        const el = document.getElementById('job-pb-' + b.dataset.pb);
+        if (!el) return;
+        navigator.clipboard.writeText(el.textContent || '').then(() => {
+          b.textContent = 'Copiado';
+          setTimeout(() => { b.textContent = 'Copiar mensagem'; }, 1500);
+        }).catch(() => { b.textContent = 'Falha ao copiar'; });
+      });
+    });
+  }
+
+  // Lê o DOM pro objeto em memória. Existe porque as abas re-renderizam: sem
+  // absorver antes, trocar de aba apagaria o que o consultor acabou de digitar.
+  let _fichaPend = { base: {}, campos: {}, etiquetas: null, atividade: '', etapa: null, sub_status: null };
+  function _absorverFicha() {
+    document.querySelectorAll('.job-ficha [data-ficha]').forEach((el) => {
+      const k = el.dataset.ficha;
+      if (k === 'etapa') _fichaPend.etapa = el.value;
+      else if (k === 'sub_status') _fichaPend.sub_status = el.value;
+      else _fichaPend.base[k] = el.value;
+    });
+    document.querySelectorAll('.job-ficha [data-campo]').forEach((el) => {
+      if (el.dataset.multi) {
+        _fichaPend.campos[el.dataset.campo] =
+          Array.from(el.querySelectorAll('input:checked')).map((i) => i.value);
+      } else {
+        _fichaPend.campos[el.dataset.campo] = el.value;
+      }
+    });
+    const etqs = document.querySelectorAll('.job-ficha [data-etq]');
+    if (etqs.length) {
+      _fichaPend.etiquetas = Array.from(etqs).filter((c) => c.checked).map((c) => parseInt(c.dataset.etq, 10));
+    }
+    const at = document.getElementById('job-ficha-ativ');
+    if (at) _fichaPend.atividade = at.value || '';
+  }
+
+  async function _salvarFicha(aba) {
+    _absorverFicha();
+    const btn = document.getElementById('job-ficha-salvar');
+    const av = document.getElementById('job-ficha-aviso');
+    const dados = Object.assign({}, _fichaPend.base, {
+      lead_id: _ficha.lead.id,
+      // Só o id: a extensão não guarda o nome do consultor. Quem resolve o nome
+      // pra assinar a atividade é o backend, que já tem a tabela de usuários.
+      usuario_id: _usuarioIdPopup || null,
+      campos: _fichaPend.campos,
+    });
+    if (_fichaPend.etiquetas) dados.etiquetas = _fichaPend.etiquetas;
+    if (_fichaPend.sub_status !== null) dados.sub_status = _fichaPend.sub_status;
+    if (_fichaPend.atividade) dados.atividade = _fichaPend.atividade;
+    if (_fichaPend.etapa && _fichaPend.etapa !== (_ficha.lead || {}).etapa) dados.etapa = _fichaPend.etapa;
+    if (btn) { btn.disabled = true; btn.textContent = 'Salvando…'; }
+    if (av) av.textContent = '';
+    let resp;
+    try { resp = await _safeSendMessage({ type: 'ficha_salvar', dados: dados }); } catch (e) { resp = null; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Salvar no JOB'; }
+    if (!resp || !resp.ok) {
+      if (av) { av.className = 'job-ficha-aviso erro'; av.textContent = (resp && resp.erro) || 'Falha ao salvar — tente de novo.'; }
+      return;
+    }
+    // Recarrega do servidor: é ele quem sabe o que foi aceito (a etapa pode ter
+    // sido barrada) e o que a API do CNPJ preencheu sozinha.
+    _fichaPend = { base: {}, campos: {}, etiquetas: null, atividade: '', etapa: null, sub_status: null };
+    const erros = [].concat(resp.avisos || [], resp.etapa_ok === false ? [resp.etapa_erro] : []).filter(Boolean);
+    await _carregarFicha({ lead_id: _ficha.lead.id });
+    const av2 = document.getElementById('job-ficha-aviso');
+    if (av2) {
+      if (erros.length) { av2.className = 'job-ficha-aviso erro'; av2.textContent = erros.join(' · '); }
+      else { av2.className = 'job-ficha-aviso ok'; av2.textContent = 'Salvo' + ((resp.mudou || []).length ? ': ' + resp.mudou.slice(0, 4).join(', ') : ''); }
+    }
   }
 
   // ═══════════════ Consulta de CNPJ (Receita via BrasilAPI) ═══════════════
