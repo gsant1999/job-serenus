@@ -15241,17 +15241,25 @@ _PLAYBOOK_ETAPA = {
 }
 
 
-def _playbook_do_lead(lead):
+def _playbook_do_lead(lead, etiquetas=None):
     """Escolhe a trilha do Playbook pro lead e devolve as mensagens com {NOME} já
     trocado pelo primeiro nome. A ETIQUETA (por que parou) tem prioridade sobre a
     etapa: saber que o lead achou caro é mais específico do que saber que ele está
-    em Cotação Enviada. Sem etiqueta, cai na trilha da etapa (se houver)."""
-    etq = (lead['sub_status'] if 'sub_status' in lead.keys() else '') or ''
+    em Cotação Enviada. Sem etiqueta, cai na trilha da etapa (se houver).
+
+    `etiquetas` é a lista de nomes marcados no lead. Antes a etiqueta era lida de
+    lead['sub_status'] — desde a separação de 29/07/2026 ela mora em
+    crm_lead_etiquetas, e sub_status virou andamento da etapa, que não tem trilha."""
     etapa = (lead['etapa'] if 'etapa' in lead.keys() else '') or ''
     trilha, origem = None, ''
-    if etq.strip() in _PLAYBOOK_FOLLOWUP:
-        trilha, origem = _PLAYBOOK_FOLLOWUP[etq.strip()], etq.strip()
-    elif etapa in _PLAYBOOK_ETAPA:
+    # Se o lead tem várias etiquetas, vale a primeira que tem trilha — a ordem das
+    # etiquetas é definida pelo admin, então isso respeita a prioridade dele.
+    for nome in (etiquetas or []):
+        n = (nome or '').strip()
+        if n in _PLAYBOOK_FOLLOWUP:
+            trilha, origem = _PLAYBOOK_FOLLOWUP[n], n
+            break
+    if not trilha and etapa in _PLAYBOOK_ETAPA:
         trilha, origem = _PLAYBOOK_ETAPA[etapa], 'Travou antes da cotação'
     if not trilha:
         return None
@@ -15291,7 +15299,9 @@ def crm_lead_detalhe(lid):
         WHERE fi.lead_id=? AND fi.status='ativo' ORDER BY fi.id DESC
     """, (lid,)).fetchall()]
     etiquetas_todas = carregar_etiquetas_crm(conn)
-    etiquetas_marcadas = [e['id'] for e in _etiquetas_dos_leads(conn, [lid]).get(lid, [])]
+    _do_lead = _etiquetas_dos_leads(conn, [lid]).get(lid, [])
+    etiquetas_marcadas = [e['id'] for e in _do_lead]
+    nomes_marcados = [e['nome'] for e in _do_lead]
     sub_status_desta_etapa = _sub_status_por_etapa(conn).get(lead['etapa'] or '', [])
     close_db(conn)
     return jsonify({
@@ -15301,7 +15311,7 @@ def crm_lead_detalhe(lid):
         "etapas": etapas,
         "fluxos_disponiveis": fluxos_disponiveis,
         "fluxos_ativos": fluxos_ativos,
-        "playbook": _playbook_do_lead(lead),
+        "playbook": _playbook_do_lead(lead, nomes_marcados),
         "etiquetas_todas": etiquetas_todas,
         "etiquetas_marcadas": etiquetas_marcadas,
         "sub_status_etapa": sub_status_desta_etapa
@@ -15535,12 +15545,27 @@ def crm_lead_editar(lid):
     if str(responsavel_id) != str(lead['responsavel_id']): changes.append(f'Responsável alterado')
     if sub_status != lead['sub_status']: changes.append(f'Status: "{lead["sub_status"] or "—"}" → "{sub_status or "—"}"')
 
-    conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, email=?, empresa=?,
-                    valor_estimado=?, observacoes=?, origem=?, sub_status=?,
-                    responsavel_id=?, etapa=?, atualizado_em=?
-                    WHERE id=?""",
-        (nome, telefone, email, empresa, valor, observacoes, origem, sub_status,
-         responsavel_id, etapa, _agora_sp(), lid))
+    # Trocar de etapa por aqui zera o sub-status: ele é o andamento DENTRO da
+    # etapa, então "Dados completos" num lead que foi pra Cotação Enviada não
+    # descreve mais nada — e ainda apareceria no card como "(de outra etapa)".
+    # Mudar de etapa também é avanço, logo reinicia o cronômetro da cor.
+    if etapa != lead['etapa']:
+        sub_status = None
+        if lead['sub_status']:
+            changes.append(f'Sub-status limpo (mudou de etapa)')
+        conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, email=?, empresa=?,
+                        valor_estimado=?, observacoes=?, origem=?, sub_status=?,
+                        responsavel_id=?, etapa=?, atualizado_em=?, avancou_em=?
+                        WHERE id=?""",
+            (nome, telefone, email, empresa, valor, observacoes, origem, sub_status,
+             responsavel_id, etapa, _agora_sp(), _agora_sp(), lid))
+    else:
+        conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, email=?, empresa=?,
+                        valor_estimado=?, observacoes=?, origem=?, sub_status=?,
+                        responsavel_id=?, etapa=?, atualizado_em=?
+                        WHERE id=?""",
+            (nome, telefone, email, empresa, valor, observacoes, origem, sub_status,
+             responsavel_id, etapa, _agora_sp(), lid))
 
     if changes:
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",

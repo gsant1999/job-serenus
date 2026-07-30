@@ -62,6 +62,30 @@
   .lead-esfriando-tag { font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:8px; white-space:nowrap; }
   .card-esfriando .lead-esfriando-tag { background:rgba(250,204,21,.22); color:#eab308; }
   .card-frio .lead-esfriando-tag { background:rgba(244,63,94,.22); color:#f43f5e; }
+  .ficha-etqs { display:flex; flex-wrap:wrap; gap:6px; }
+  .ficha-etq { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:12px; cursor:pointer;
+               font-size:11px; font-weight:600; border:1px solid var(--borda); background:var(--panel-2);
+               color:var(--cinza); user-select:none; }
+  .ficha-etq input { margin:0; cursor:pointer; }
+  .ficha-etq.on { color:#0b1220; border-color:transparent; }
+  .pb-origem { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.4px;
+               background:rgba(99,102,241,.18); color:#a5b4fc; padding:2px 8px; border-radius:9px; margin-left:6px; }
+  .pb-resumo { font-size:11.5px; color:var(--cinza-2); line-height:1.5; margin-bottom:10px; }
+  .pb-rascunho { font-size:11px; color:#eab308; background:rgba(250,204,21,.1); border:1px solid rgba(250,204,21,.3);
+                 border-radius:8px; padding:7px 9px; margin-bottom:10px; line-height:1.45; }
+  .pb-passo { border:1px solid var(--borda); border-radius:10px; padding:10px 11px; margin-bottom:8px; background:var(--panel-2); }
+  .pb-passo-top { display:flex; align-items:center; gap:7px; margin-bottom:6px; flex-wrap:wrap; }
+  .pb-quando { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.3px;
+               background:var(--panel-3); color:var(--cinza-2); padding:2px 7px; border-radius:8px; }
+  .pb-titulo { font-size:12px; font-weight:700; color:var(--texto); flex:1; min-width:0; }
+  .pb-formato { font-size:10px; color:var(--cinza-2); }
+  .pb-msg { font-size:12px; color:var(--texto); line-height:1.55; white-space:pre-wrap; background:var(--panel-3);
+            border-radius:8px; padding:9px 10px; user-select:text; }
+  .pb-porque { font-size:10.5px; color:var(--cinza-2); line-height:1.45; margin-top:6px; font-style:italic; }
+  .pb-acoes { display:flex; gap:6px; margin-top:8px; }
+  .pb-acoes button { background:var(--panel-3); border:1px solid var(--borda); color:var(--cinza); border-radius:7px;
+                     padding:5px 10px; font-size:11px; cursor:pointer; }
+  .pb-acoes button:hover { border-color:var(--azul); color:var(--texto); }
   .lead-etqs { display:flex; gap:4px; flex-wrap:wrap; margin-top:7px; }
   .lead-etq { font-size:9.5px; font-weight:700; padding:2px 8px; border-radius:9px; color:#0b1220;
               text-transform:uppercase; letter-spacing:.3px; max-width:100%; overflow:hidden;
@@ -442,6 +466,18 @@
           <select id="ficha-etapa" class="campo-input campo-select">
             {% for e in etapas %}<option value="{{ e.id }}">{{ e.nome }}</option>{% endfor %}
           </select>
+        </div>
+        <div class="campo-grupo">
+          <div class="campo-label">Sub-status <span style="color:var(--cinza-2); font-weight:400;">— o que falta pra avançar desta etapa</span></div>
+          <select id="ficha-sub-status" class="campo-input campo-select" onchange="salvarSubStatusFicha()"></select>
+        </div>
+        <div class="campo-grupo">
+          <div class="campo-label">Etiquetas <span style="color:var(--cinza-2); font-weight:400;">— por que o lead está parado</span></div>
+          <div id="ficha-etiquetas" class="ficha-etqs"></div>
+        </div>
+        <div class="campo-grupo" id="campo-playbook" style="display:none">
+          <div class="campo-label">Sugestão de mensagem <span id="playbook-origem" class="pb-origem"></span></div>
+          <div id="ficha-playbook"></div>
         </div>
         <div class="campo-grupo" id="campo-responsavel" style="display:none">
           <div class="campo-label">Responsável</div>
@@ -880,6 +916,10 @@ async function abrirFicha(id){
   badge.style.background=eo?eo.cor+'33':'#33333333';
   badge.style.color=eo?eo.cor:'#aaa';
 
+  montarSubStatusFicha(d.sub_status_etapa||[], d.lead.sub_status||'');
+  montarEtiquetasFicha(d.etiquetas_todas||[], d.etiquetas_marcadas||[]);
+  montarPlaybook(d.playbook);
+
   const cr=document.getElementById('campo-responsavel');
   if(IS_ADMIN && _usuarios.length){
     cr.style.display='';
@@ -1162,6 +1202,118 @@ async function mudarSubStatus(id, sel){
     if(tag) tag.remove();
   }
   toast(valor?('Sub-status: '+valor):'Sub-status limpo','ok');
+}
+
+// ─── FICHA: sub-status, etiquetas e sugestão de mensagem ──────────────────────
+function montarSubStatusFicha(opcoes, atual){
+  const sel=document.getElementById('ficha-sub-status');
+  if(!sel) return;
+  let html='<option value="">Sem sub-status</option>'
+    +opcoes.map(o=>'<option value="'+o+'"'+(o===atual?' selected':'')+'>'+o+'</option>').join('');
+  // Sub-status herdado de outra etapa: mostra em vez de calar, senão a ficha
+  // diria "sem sub-status" pra um lead que tem um gravado no banco.
+  if(atual && opcoes.indexOf(atual)===-1)
+    html+='<option value="'+atual+'" selected>'+atual+' (de outra etapa)</option>';
+  sel.innerHTML=html;
+  sel.dataset.anterior=atual||'';
+}
+
+async function salvarSubStatusFicha(){
+  if(!_leadAtual) return;
+  const sel=document.getElementById('ficha-sub-status');
+  const r=await fetch('/crm/lead/'+_leadAtual.id+'/sub-status',{method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({sub_status:sel.value})});
+  const d=await r.json();
+  if(!d.ok){ sel.value=sel.dataset.anterior||''; toast(d.erro||'Erro ao mudar sub-status','err'); return; }
+  sel.dataset.anterior=sel.value;
+  _leadAtual.sub_status=sel.value;
+  const card=document.getElementById('card-'+_leadAtual.id);
+  if(card){
+    const cs=card.querySelector('.lead-sub-status');
+    if(cs){ cs.value=sel.value; cs.dataset.anterior=sel.value; }
+    card.classList.remove('card-esfriando','card-frio');
+    const tag=card.querySelector('.lead-esfriando-tag');
+    if(tag) tag.remove();
+  }
+  toast('Sub-status atualizado','ok');
+}
+
+function montarEtiquetasFicha(todas, marcadas){
+  const box=document.getElementById('ficha-etiquetas');
+  if(!box) return;
+  if(!todas.length){
+    box.innerHTML='<span style="font-size:11.5px;color:var(--cinza-2)">Nenhuma etiqueta cadastrada. O admin cria em Etapas, sub-status e etiquetas.</span>';
+    return;
+  }
+  const on=new Set(marcadas);
+  box.innerHTML=todas.map(e=>{
+    const m=on.has(e.id);
+    return '<label class="ficha-etq'+(m?' on':'')+'" style="'+(m?('background:'+e.cor+';'):'')+'">'
+      +'<input type="checkbox" '+(m?'checked':'')+' onchange="etiquetaFicha('+e.id+',\''+e.cor+'\',this)">'
+      +'<span>'+e.nome+'</span></label>';
+  }).join('');
+}
+
+async function etiquetaFicha(eid, cor, chk){
+  if(!_leadAtual) return;
+  const marcar=chk.checked, lab=chk.closest('.ficha-etq');
+  chk.disabled=true;
+  try{
+    const r=await fetch('/crm/lead/'+_leadAtual.id+'/etiqueta',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({etiqueta_id:eid, marcar:marcar})});
+    const d=await r.json();
+    if(!d.ok){ chk.checked=!marcar; toast(d.erro||'Erro ao salvar etiqueta','err'); return; }
+    lab.classList.toggle('on', marcar);
+    lab.style.background = marcar ? cor : '';
+    pintarEtiquetas(_leadAtual.id, d.etiquetas||[]);
+    // A sugestão de mensagem vem da etiqueta, então tem que ser recalculada:
+    // marcar "Achou Caro" e continuar vendo a trilha antiga seria pior que nada.
+    const rp=await fetch('/crm/lead/'+_leadAtual.id);
+    const dp=await rp.json();
+    montarPlaybook(dp.playbook);
+  }catch(e){
+    chk.checked=!marcar; toast('Falha de conexão ao salvar etiqueta','err');
+  }finally{
+    chk.disabled=false;
+  }
+}
+
+function montarPlaybook(pb){
+  const wrap=document.getElementById('campo-playbook');
+  const box=document.getElementById('ficha-playbook');
+  if(!wrap || !box) return;
+  if(!pb){ wrap.style.display='none'; box.innerHTML=''; return; }
+  wrap.style.display='';
+  document.getElementById('playbook-origem').textContent=pb.titulo||'';
+  let html='';
+  if(pb.resumo) html+='<div class="pb-resumo">'+pb.resumo+'</div>';
+  if(pb.rascunho) html+='<div class="pb-rascunho">Rascunho: essa trilha ainda não está no playbook oficial. Revise antes de mandar.</div>';
+  html+=(pb.passos||[]).map((p,i)=>
+    '<div class="pb-passo">'
+    +'<div class="pb-passo-top">'
+      +(p.quando?'<span class="pb-quando">'+p.quando+'</span>':'')
+      +'<span class="pb-titulo">'+(p.titulo||('Passo '+(i+1)))+'</span>'
+      +(p.formato?'<span class="pb-formato">'+p.formato+'</span>':'')
+    +'</div>'
+    +'<div class="pb-msg" id="pb-msg-'+i+'">'+(p.msg||'')+'</div>'
+    +(p.porque?'<div class="pb-porque">'+p.porque+'</div>':'')
+    +'<div class="pb-acoes"><button onclick="copiarPasso('+i+')">Copiar</button></div>'
+    +'</div>').join('');
+  box.innerHTML=html;
+}
+
+async function copiarPasso(i){
+  const el=document.getElementById('pb-msg-'+i);
+  if(!el) return;
+  try{
+    await navigator.clipboard.writeText(el.textContent);
+    toast('Mensagem copiada','ok');
+  }catch(e){
+    // clipboard bloqueado (http, permissão): seleciona pro consultor dar Ctrl+C
+    const sel=window.getSelection(); const rg=document.createRange();
+    rg.selectNodeContents(el); sel.removeAllRanges(); sel.addRange(rg);
+    toast('Selecionado — use Ctrl+C','ok');
+  }
 }
 
 // ─── ETIQUETAS ────────────────────────────────────────────────────────────────
