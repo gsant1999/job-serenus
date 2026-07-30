@@ -102,9 +102,14 @@
   .etq-pop label:hover { background:rgba(148,163,184,.1); border-radius:6px; }
   .etq-pop .bolinha { width:11px; height:11px; border-radius:50%; flex-shrink:0; }
   .etq-pop-vazio { font-size:11.5px; color:var(--cinza-2); padding:4px; }
-  .lead-sub-status { flex:1; min-width:0; background:var(--panel); border:1px solid var(--borda); border-radius:6px; padding:4px 6px; font-size:10.5px; color:var(--cinza); outline:none; cursor:pointer; }
+  .lead-sub-status { min-width:0; width:100%; background:var(--panel); border:1px solid var(--borda); border-radius:6px; padding:5px 22px 5px 8px; font-size:11px; color:var(--cinza); outline:none; cursor:pointer; text-overflow:ellipsis; }
   .lead-sub-status:focus { border-color:var(--azul); }
-  .lead-bottom-row { display:flex; align-items:center; gap:6px; margin-top:8px; }
+  /* Duas linhas em vez de uma: em Novo Lead são 4 controles (sub-status,
+     Etiquetas, WhatsApp, → Contato) e a coluna do Kanban é estreita — tudo na
+     mesma linha esmagava o select até cortar o texto ("Sem su⌄"). */
+  .lead-bottom-row { display:flex; align-items:center; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .lead-bottom-row > .lead-sub-status { flex:1 1 100%; }
+  .lead-acoes-row { display:flex; align-items:center; gap:6px; margin-top:6px; }
   .lead-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
   .lead-nome   { font-size:13.5px; font-weight:600; color:var(--texto); margin-bottom:2px; line-height:1.3; }
   .lead-cidade { font-size:11px; color:var(--cinza); display:flex; align-items:center; gap:4px; }
@@ -143,7 +148,11 @@
   .ficha-etapa-badge { font-size:11px; padding:3px 10px; border-radius:12px; font-weight:600; }
   .ficha-campos { padding:16px 20px; flex:1; }
   .campo-grupo  { margin-bottom:13px; }
-  .campo-label  { font-size:10px; font-weight:600; color:var(--cinza); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; display:flex; align-items:center; gap:5px; }
+  .campo-label  { font-size:10px; font-weight:600; color:var(--cinza); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+  /* O label é flex: um <span> de dica dentro dele encolhia o título até quebrar
+     no hífen ("SUB-" / "STATUS"). A dica fica fora, em caixa normal. */
+  .campo-label > :first-child { white-space:nowrap; }
+  .campo-dica { font-size:11px; color:var(--cinza-2); margin:-2px 0 5px; line-height:1.4; }
   .campo-input  { width:100%; background:var(--panel-2); border:1px solid var(--borda); border-radius:6px; padding:8px 10px; color:var(--texto); font-size:13px; outline:none; transition:border .2s; }
   .campo-input:focus { border-color:var(--azul); }
   .campo-select { appearance:none; cursor:pointer; }
@@ -403,7 +412,9 @@
               <option value="{{ lead.sub_status }}" selected>{{ lead.sub_status }} (de outra etapa)</option>
               {% endif %}
             </select>
-            <button class="lead-etq-btn" onclick="event.stopPropagation(); abrirEtiquetas({{ lead.id }}, this)" title="Etiquetas">Etiquetas</button>
+          </div>
+          <div class="lead-acoes-row">
+            <button class="lead-etq-btn" onclick="event.stopPropagation(); abrirEtiquetas({{ lead.id }}, this)" title="Marcar etiquetas">Etiquetas</button>
             {% if lead.telefone %}
             <button class="lead-wpp-btn" onclick="event.stopPropagation(); wppRapido('{{ lead.telefone }}')" title="Abrir no BotConversa"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></button>
             {% endif %}
@@ -468,11 +479,13 @@
           </select>
         </div>
         <div class="campo-grupo">
-          <div class="campo-label">Sub-status <span style="color:var(--cinza-2); font-weight:400;">— o que falta pra avançar desta etapa</span></div>
+          <div class="campo-label">Sub-status</div>
+          <div class="campo-dica">O que falta pra avançar desta etapa</div>
           <select id="ficha-sub-status" class="campo-input campo-select" onchange="salvarSubStatusFicha()"></select>
         </div>
         <div class="campo-grupo">
-          <div class="campo-label">Etiquetas <span style="color:var(--cinza-2); font-weight:400;">— por que o lead está parado</span></div>
+          <div class="campo-label">Etiquetas</div>
+          <div class="campo-dica">Por que o lead está parado</div>
           <div id="ficha-etiquetas" class="ficha-etqs"></div>
         </div>
         <div class="campo-grupo" id="campo-playbook" style="display:none">
