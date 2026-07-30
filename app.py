@@ -7308,6 +7308,24 @@ def _crm_grupos_duplicados(conn):
 def crm_leads_duplicados():
     conn = db()
     grupos = _crm_grupos_duplicados(conn)
+    # Duplicados POR TELEFONE. Ficaram invisíveis até agora: esta tela só tratava
+    # duplicado SEM número. A canonização do telefone (30/07) revelou 49 números
+    # com mais de um lead, e o log manda revisar aqui — sem esta lista a mensagem
+    # apontava pra uma tela que não mostra o que ela prometia.
+    dup_tel = []
+    try:
+        chaves = conn.execute("""SELECT telefone_norm FROM crm_leads
+            WHERE telefone_norm IS NOT NULL AND telefone_norm <> ''
+            GROUP BY telefone_norm HAVING COUNT(*) > 1
+            ORDER BY COUNT(*) DESC, telefone_norm""").fetchall()
+        for k in chaves:
+            tn = k['telefone_norm']
+            leads = conn.execute("""SELECT l.id, l.nome, l.etapa, l.criado_em, u.nome resp
+                FROM crm_leads l LEFT JOIN usuarios u ON u.id = l.responsavel_id
+                WHERE l.telefone_norm=? ORDER BY l.criado_em, l.id""", (tn,)).fetchall()
+            dup_tel.append({'tel': tn, 'leads': [dict(x) for x in leads]})
+    except Exception as e:
+        app.logger.warning(f"[DUPLICADOS] lista por telefone falhou: {e}")
     close_db(conn)
     extra = sum(g['n'] - 1 for g in grupos)
     linhas = ''.join(
@@ -7322,12 +7340,32 @@ def crm_leads_duplicados():
              '<th style="padding:8px 12px;background:#f3f4f6;">Leads</th><th style="padding:8px 12px;background:#f3f4f6;">A apagar</th></tr></thead>'
              f'<tbody>{linhas or "<tr><td colspan=3 style=padding:20px;text-align:center;color:#16a34a;>Nenhum duplicado sem número.</td></tr>"}</tbody></table>'
              if grupos or True else '')
+
+    def _lin_tel(d):
+        itens = ''.join(
+            f'<li><a href="/crm?lead={x["id"]}" target="_blank">{(x["nome"] or "(sem nome)")}</a>'
+            f' <span class="cinza">· {x["etapa"] or "—"} · {x["resp"] or "sem consultor"}'
+            f' · entrou em {_fmt_data_br(x["criado_em"])}</span></li>' for x in d['leads'])
+        return (f'<div class="grupo"><div class="tel">{_formatar_telefone(d["tel"])}'
+                f' <span class="cinza">— {len(d["leads"])} leads</span></div><ul>{itens}</ul></div>')
+    bloco_tel = (
+        '<h1 style="margin-top:38px;">Mesmo telefone, mais de um lead</h1>'
+        f'<p>{len(dup_tel)} número(s) com mais de um lead. <b>Nada é mesclado automaticamente</b> — '
+        'dois leads podem dividir um telefone de empresa ou de família e serem pessoas diferentes. '
+        'Abra cada um e decida.</p>'
+        + (''.join(_lin_tel(d) for d in dup_tel) if dup_tel
+           else '<p style="color:#16a34a;">Nenhum telefone repetido.</p>'))
+
     html = f"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Leads duplicados</title>
 <style>body{{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:760px;margin:0 auto;padding:32px 22px 80px;color:#1a1d24;line-height:1.5;}}
 h1{{font-size:23px;margin:0 0 12px}} a.voltar{{color:#2563eb;text-decoration:none;font-size:14px;}} tr{{border-bottom:1px solid #eee}}
-.btn{{display:inline-block;background:#2563eb;color:#fff;border:none;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;}}</style>
-</head><body><a class="voltar" href="/crm">← Voltar ao CRM</a><h1>Leads duplicados sem número</h1>{corpo}
+.btn{{display:inline-block;background:#2563eb;color:#fff;border:none;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer;}}
+.grupo{{border:1px solid #e5e7eb;border-radius:9px;padding:10px 14px;margin-bottom:10px;}}
+.tel{{font-weight:700;font-size:14.5px;}} .cinza{{color:#6b7280;font-weight:400;font-size:13px;}}
+.grupo ul{{margin:7px 0 0;padding-left:19px;}} .grupo li{{margin-bottom:3px;font-size:13.5px;}}
+.grupo a{{color:#2563eb;text-decoration:none;}} .grupo a:hover{{text-decoration:underline;}}</style>
+</head><body><a class="voltar" href="/crm">← Voltar ao CRM</a><h1>Leads duplicados sem número</h1>{corpo}{bloco_tel}
 <script>async function mesclar(b){{b.disabled=true;b.textContent='Mesclando...';
 const r=await fetch('/crm/leads-duplicados/aplicar',{{method:'POST'}});const d=await r.json();
 alert(d.ok?('Mesclados '+d.mesclados+' lead(s) duplicado(s).'):'Erro');location.reload();}}</script>
@@ -24692,8 +24730,10 @@ def _backfill_telefone_canonico():
                 por_tabela[tab] = n
             total += n
         # Canonizar pode revelar que dois leads eram a mesma pessoa escrita
-        # diferente. NÃO mescla nada — só avisa, porque mesclar lead é destrutivo e
-        # já existe a tela /crm/leads-duplicados pra isso, com revisão humana.
+        # diferente. NÃO mescla nada — mesclar lead com telefone é destrutivo
+        # (dois leads podem dividir um telefone de empresa ou de família e serem
+        # pessoas diferentes). A lista fica em /crm/leads-duplicados, pra decisão
+        # humana caso a caso.
         dups = 0
         try:
             dups = conn.execute("""SELECT COUNT(*) c FROM (
