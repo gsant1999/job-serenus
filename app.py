@@ -24650,20 +24650,11 @@ def crm_importar():
     
     return html
 
-if __name__ == '__main__':
-    import os
-    # init_db() já roda no import acima
-    print("\n" + "="*52)
-    print(f"  JOB · {BRAND['nome']}")
-    print("="*52)
-    port = int(os.environ.get('PORT', 8080))
-    print(f"  Rodando na porta {port}")
-    # Mostra o admin SEMEADO (env), não um fixo do Serenus — e só a senha se for
-    # o default de dev (numa instância real a senha vem de env e não se imprime).
-    print(f"  Admin:  {SEED_ADMIN_EMAIL}" + ("  / (senha do SEED_ADMIN_SENHA)" if os.environ.get('SEED_ADMIN_SENHA') else " / serenus2025"))
-    print("="*52 + "\n")
-    app.run(debug=False, host='0.0.0.0', port=port)
-
+# ATENÇÃO: tudo daqui pra baixo precisa vir ANTES do bloco __main__.
+# O Railway sobe com "python3 -u app.py" (railway.json startCommand), então
+# __name__ == "__main__" é verdadeiro e app.run() BLOQUEIA — qualquer código
+# depois do bloco abaixo nunca executa em produção. Foi assim que estes dois
+# backfills passaram um deploy inteiro sem rodar, sem erro nenhum no log.
 # ─── BACKFILL do telefone canônico (29/07/2026) ───────────────────────────────
 # Precisa rodar ANTES do vínculo proposta↔lead: o casamento compara telefone_norm,
 # então canonizar depois deixaria o vínculo baseado nos valores velhos.
@@ -24769,7 +24760,26 @@ def _backfill_vinculo_proposta_lead():
 _backfill_vinculo_proposta_lead()
 
 
+
+if __name__ == '__main__':
+    import os
+    # init_db() já roda no import acima
+    print("\n" + "="*52)
+    print(f"  JOB · {BRAND['nome']}")
+    print("="*52)
+    port = int(os.environ.get('PORT', 8080))
+    print(f"  Rodando na porta {port}")
+    # Mostra o admin SEMEADO (env), não um fixo do Serenus — e só a senha se for
+    # o default de dev (numa instância real a senha vem de env e não se imprime).
+    print(f"  Admin:  {SEED_ADMIN_EMAIL}" + ("  / (senha do SEED_ADMIN_SENHA)" if os.environ.get('SEED_ADMIN_SENHA') else " / serenus2025"))
+    print("="*52 + "\n")
+    app.run(debug=False, host='0.0.0.0', port=port)
+
 # ─── DEBUG INFO PARA PRODUÇÃO ────────────────────────────────────────────
+# CÓDIGO MORTO EM PRODUÇÃO: está depois do app.run() acima, que bloqueia. Estes
+# prints nunca saem no Railway (só se algum dia o start virar gunicorn, como no
+# Procfile). Mantidos como estavam — mas NÃO adicione nada aqui embaixo achando
+# que roda no deploy.
 print(f"\n[STARTUP] DATABASE_URL: {os.environ.get('DATABASE_URL', 'NÃO ENCONTRADA')[:80]}")
 print(f"[STARTUP] HAS_POSTGRES: {HAS_POSTGRES}")
 print(f"[STARTUP] Modo BD selecionado: {DB_MODE.upper()}")
