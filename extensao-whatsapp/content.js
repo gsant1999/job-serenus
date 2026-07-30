@@ -1214,6 +1214,8 @@
     }
     _ficha = resp;
     _fichaSujo = false;
+    const idNovo = (resp.lead && resp.lead.id) || null;
+    if (_fichaPend.leadId !== idNovo) _fichaPend = _fichaPendVazio(idNovo);
     if (!resp.existe) { _renderFichaSemLead(); return; }
     _renderFicha('dados');
   }
@@ -1275,23 +1277,35 @@
     _ligarEventosFicha(aba);
   }
 
+  // Valor a exibir: o que o consultor digitou tem prioridade sobre o que veio do
+  // servidor. Sem isso, ir na aba Atividade e voltar apagava tudo que ele escreveu,
+  // porque _renderFicha remontava o HTML sempre a partir de _ficha.
+  function _pend(escopo, chave, doServidor) {
+    const p = _fichaPend[escopo];
+    return (p && Object.prototype.hasOwnProperty.call(p, chave)) ? p[chave] : doServidor;
+  }
+
   function _fichaAbaDados(f, l) {
-    const etqs = new Set(f.etiquetas_marcadas || []);
+    const marcadasPend = _fichaPend.etiquetas;
+    const etqs = new Set(marcadasPend || f.etiquetas_marcadas || []);
     return '' +
-      _campoTxt('nome', 'Nome', l.nome || '') +
-      _campoTxt('empresa', 'Cidade / empresa', l.empresa || '') +
-      _campoTxt('email', 'E-mail', l.email || '') +
-      _campoTxt('valor_estimado', 'Valor estimado', l.valor_estimado != null ? String(l.valor_estimado).replace('.', ',') : '') +
+      _campoTxt('nome', 'Nome', _pend('base', 'nome', l.nome || '')) +
+      _campoTxt('empresa', 'Cidade / empresa', _pend('base', 'empresa', l.empresa || '')) +
+      _campoTxt('email', 'E-mail', _pend('base', 'email', l.email || '')) +
+      _campoTxt('valor_estimado', 'Valor estimado', _pend('base', 'valor_estimado',
+        l.valor_estimado != null ? String(l.valor_estimado).replace('.', ',') : '')) +
       '<div class="job-ficha-campo"><label>Etapa</label>' +
         '<select data-ficha="etapa">' +
-          (f.etapas || []).map((e) => '<option value="' + esc(e.id) + '"' + (e.id === l.etapa ? ' selected' : '') +
+          (f.etapas || []).map((e) => '<option value="' + esc(e.id) + '"' +
+            (e.id === (_fichaPend.etapa || l.etapa) ? ' selected' : '') +
             '>' + esc(e.nome) + '</option>').join('') +
         '</select></div>' +
       '<div class="job-ficha-campo"><label>Sub-status <span class="job-ficha-dica">o que falta pra avançar</span></label>' +
         '<select data-ficha="sub_status">' +
           '<option value="">Sem sub-status</option>' +
           (f.sub_status_etapa || []).map((o) => '<option value="' + esc(o) + '"' +
-            (o === (l.sub_status || '') ? ' selected' : '') + '>' + esc(o) + '</option>').join('') +
+            (o === (_fichaPend.sub_status !== null ? _fichaPend.sub_status : (l.sub_status || '')) ? ' selected' : '') +
+            '>' + esc(o) + '</option>').join('') +
           ((l.sub_status && (f.sub_status_etapa || []).indexOf(l.sub_status) === -1)
             ? '<option value="' + esc(l.sub_status) + '" selected>' + esc(l.sub_status) + ' (de outra etapa)</option>' : '') +
         '</select></div>' +
@@ -1321,7 +1335,12 @@
       const doGrupo = def.filter((c) => c.momento === g.m);
       if (!doGrupo.length) return;
       html += '<div class="job-ficha-grupo job-fg-' + g.m + '"><div class="job-ficha-grupo-tit">' + g.rot + '</div>' +
-        doGrupo.map((c) => _fichaCampoPers(c, (val[c.chave] || {}).valor || '')).join('') + '</div>';
+        doGrupo.map((c) => {
+          const doServidor = (val[c.chave] || {}).valor || '';
+          let v = _pend('campos', c.chave, doServidor);
+          if (Array.isArray(v)) v = v.join(', ');
+          return _fichaCampoPers(c, v);
+        }).join('') + '</div>';
     });
     return html || '<div class="job-notas-vazio">Nenhum campo cadastrado.</div>';
   }
@@ -1358,7 +1377,8 @@
     const ats = f.atividades || [];
     const pb = f.playbook;
     let html = '<div class="job-ficha-campo"><label>Registrar atividade</label>' +
-      '<textarea rows="3" id="job-ficha-ativ" placeholder="O que aconteceu nesta conversa…"></textarea></div>';
+      '<textarea rows="3" id="job-ficha-ativ" placeholder="O que aconteceu nesta conversa…">' +
+      esc(_fichaPend.atividade || '') + '</textarea></div>';
     if (pb) {
       html += '<div class="job-ficha-grupo job-fg-pb"><div class="job-ficha-grupo-tit">Sugestão de mensagem · ' + esc(pb.titulo || '') + '</div>' +
         (pb.rascunho ? '<div class="job-ficha-rascunho">Rascunho: revise antes de mandar.</div>' : '') +
@@ -1440,7 +1460,14 @@
 
   // Lê o DOM pro objeto em memória. Existe porque as abas re-renderizam: sem
   // absorver antes, trocar de aba apagaria o que o consultor acabou de digitar.
-  let _fichaPend = { base: {}, campos: {}, etiquetas: null, atividade: '', etapa: null, sub_status: null };
+  // leadId dentro do rascunho: sem isso o que foi digitado no lead A sobrevivia a
+  // troca de conversa e era GRAVADO no lead B — inclusive nota de atividade, que
+  // entrava no histórico do cliente errado assinada pelo consultor.
+  function _fichaPendVazio(leadId) {
+    return { leadId: leadId || null, base: {}, campos: {}, etiquetas: null,
+             atividade: '', etapa: null, sub_status: null };
+  }
+  let _fichaPend = _fichaPendVazio(null);
   function _absorverFicha() {
     document.querySelectorAll('.job-ficha [data-ficha]').forEach((el) => {
       const k = el.dataset.ficha;
@@ -1468,6 +1495,11 @@
     _absorverFicha();
     const btn = document.getElementById('job-ficha-salvar');
     const av = document.getElementById('job-ficha-aviso');
+    // Cinto de segurança: se o rascunho for de outro lead, não manda nada dele.
+    if (_fichaPend.leadId && _fichaPend.leadId !== _ficha.lead.id) {
+      _fichaPend = _fichaPendVazio(_ficha.lead.id);
+      _absorverFicha();
+    }
     const dados = Object.assign({}, _fichaPend.base, {
       lead_id: _ficha.lead.id,
       // Só o id: a extensão não guarda o nome do consultor. Quem resolve o nome
@@ -1490,7 +1522,7 @@
     }
     // Recarrega do servidor: é ele quem sabe o que foi aceito (a etapa pode ter
     // sido barrada) e o que a API do CNPJ preencheu sozinha.
-    _fichaPend = { base: {}, campos: {}, etiquetas: null, atividade: '', etapa: null, sub_status: null };
+    _fichaPend = _fichaPendVazio(_ficha.lead.id);
     const erros = [].concat(resp.avisos || [], resp.etapa_ok === false ? [resp.etapa_erro] : []).filter(Boolean);
     await _carregarFicha({ lead_id: _ficha.lead.id });
     const av2 = document.getElementById('job-ficha-aviso');

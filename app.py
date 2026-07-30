@@ -8671,10 +8671,15 @@ def achar_lead_da_proposta(conn, prop):
         if r:
             return r, 'telefone'
     for tn in tels:
-        suf = tn[-8:]
-        if len(suf) != 8:
+        suf, ddd = tn[-8:], tn[:2]
+        if len(suf) != 8 or len(ddd) != 2:
             continue
-        r = _unico("SELECT id FROM crm_leads WHERE telefone_norm LIKE ?", ('%' + suf,))
+        # AMARRADO AO MESMO DDD, igual _buscar_lead_por_telefone. Sem isso,
+        # (11) 9681-0150 e (19) 9681-0150 viravam a mesma pessoa — e aqui o
+        # estrago é pior que numa busca: o vínculo é GRAVADO, e passa a mandar a
+        # comissão dessa venda pro gclid de outra pessoa no Google Ads.
+        r = _unico("SELECT id FROM crm_leads WHERE telefone_norm LIKE ? AND telefone_norm LIKE ?",
+                   ('%' + suf, ddd + '%'))
         if r == 'AMBIGUO':
             return None, 'ambiguo_telefone_sufixo'
         if r:
@@ -8765,7 +8770,7 @@ def _ads_click_id_do_lead(conn, lead_id):
     if g:
         return g, 'gclid'
     for chave in ('gclid', 'gbraid', 'wbraid'):
-        v = _ler_do_extras(lead['dados_extras'], chave) or _ler_do_extras(lead['dados_extras'], 'clique.' + chave)
+        v = _campo_de_midia(lead['dados_extras'], chave)
         if v:
             return v, chave
     return None, None
@@ -8798,6 +8803,15 @@ def _ads_enfileirar(conn, proposta_id, motivo='venda confirmada'):
     ja = conn.execute("SELECT * FROM google_ads_conversoes WHERE proposta_id=?", (proposta_id,)).fetchone()
     if ja and ja['status'] in ('enviada', 'pendente'):
         return dict(ja), 'já registrada'
+    # O que JÁ FOI ENVIADO uma vez não volta pra fila. Sem esta guarda, uma venda
+    # que caiu (virou 'retratar') e depois voltou pra Emitida/Ativa era reenfileirada
+    # como 'pendente' — apagando a marca de retratação e subindo a MESMA conversão
+    # de novo, contada duas vezes pelo Google.
+    if ja and (ja['enviado_em'] or ja['status'] == 'retratar'):
+        conn.execute("""UPDATE google_ads_conversoes SET detalhe=? WHERE proposta_id=?""",
+                     ('reativada após envio — precisa de ajuste manual no Google, não reenviar',
+                      proposta_id))
+        return dict(ja), 'ja_enviada_nao_reenvia'
     lead_id = prop['lead_id'] if 'lead_id' in prop.keys() else None
     click_id, tipo = _ads_click_id_do_lead(conn, lead_id)
     valor = _ads_valor_da_proposta(prop)
@@ -8837,9 +8851,26 @@ def enviar_conversoes_ads(limite=200, so_simular=False):
     derrubaria o lote inteiro e nada seria contabilizado."""
     cfg, faltando = _ads_config()
     conn = db()
-    pend = conn.execute("""SELECT * FROM google_ads_conversoes
-                           WHERE status='pendente' AND click_id IS NOT NULL AND click_id <> ''
-                           ORDER BY id LIMIT ?""", (limite,)).fetchall()
+    # Revalida contra a proposta NA HORA DO ENVIO. A venda pode ter sido estornada
+    # ou excluída depois de entrar na fila — e estorno/exclusão não passam pela
+    # troca de status_operacional, então nada as tirava daqui. Mandar receita que
+    # não existe é exatamente o "inflar o ROAS" que este módulo diz impedir.
+    pend = conn.execute("""SELECT g.* FROM google_ads_conversoes g
+                           JOIN propostas p ON p.id = g.proposta_id
+                           WHERE g.status='pendente' AND g.click_id IS NOT NULL AND g.click_id <> ''
+                             AND p.status_operacional='Emitida/Ativa'
+                             AND COALESCE(p.status,'') <> 'Excluída'
+                             AND COALESCE(p.estornada,0)=0
+                           ORDER BY g.id LIMIT ?""", (limite,)).fetchall()
+    # As que ficaram para trás por deixarem de ser venda: saem da fila com o
+    # motivo, em vez de tentarem de novo em toda rodada.
+    conn.execute("""UPDATE google_ads_conversoes SET status='cancelada',
+            detalhe='venda estornada/excluída antes do envio'
+        WHERE status='pendente' AND proposta_id IN (
+            SELECT id FROM propostas
+            WHERE status_operacional <> 'Emitida/Ativa' OR COALESCE(status,'')='Excluída'
+               OR COALESCE(estornada,0)=1)""")
+    conn.commit()
     resumo = {'pendentes': len(pend), 'enviadas': 0, 'falhas': 0,
               'faltando_config': faltando, 'simulado': bool(so_simular), 'erros': []}
     if not pend:
@@ -9113,9 +9144,9 @@ def _comissao_por_midia(conn, f_mes=None):
         if not r['lead_id']:
             campanha, criativo, origem = SEM, '', ''
         else:
-            campanha = _ler_do_extras(r['dados_extras'], 'utm.campaign') or 'Sem campanha'
-            criativo = _ler_do_extras(r['dados_extras'], 'utm.content') or ''
-            origem = _ler_do_extras(r['dados_extras'], 'utm.source') or (r['origem'] or '')
+            campanha = _campo_de_midia(r['dados_extras'], 'campaign') or 'Sem campanha'
+            criativo = _campo_de_midia(r['dados_extras'], 'content') or ''
+            origem = _campo_de_midia(r['dados_extras'], 'source') or (r['origem'] or '')
         chave = (campanha, criativo)
         g = grupos.setdefault(chave, {'campanha': campanha, 'criativo': criativo, 'origem': origem,
                                       'vendas': 0, 'producao': 0.0, 'bruto': 0.0,
@@ -16121,17 +16152,6 @@ def crm():
     for c in campos_def:
         if c['obriga_saida_de']:
             campos_saida_etapa.setdefault(c['obriga_saida_de'], []).append(c)
-    valores_saida = {}
-    trava_falta = {}
-    if campos_saida_etapa:
-        for lead in leads:
-            exig = campos_saida_etapa.get(lead['etapa'] or '')
-            if not exig:
-                continue
-            v = valores_campos_lead(conn, lead, campos_def)
-            valores_saida[lead['id']] = {c['chave']: (v.get(c['chave'], {}).get('valor') or '') for c in exig}
-            trava_falta[lead['id']] = [c['nome'] for c in exig
-                                       if not (v.get(c['chave'], {}).get('valor') or '').strip()]
 
     # Agrupa por etapa. CARDS_POR_COLUNA limita quantos cards viram DOM de fato —
     # colunas do meio do funil acumulam milhares de leads históricos (~4500
@@ -16166,6 +16186,37 @@ def crm():
             kanban[alvo].append(lead)
 
     total = sum(kanban_total.values())
+
+    valores_saida = {}
+    trava_falta = {}
+    if campos_saida_etapa:
+        # UMA query pros valores de trava de TODOS os cards, no lugar de uma por
+        # lead. A versão anterior rodava valores_campos_lead() dentro do laço sobre
+        # a lista inteira de leads filtrados — em produção, com ~4.500 leads numa
+        # coluna, isso eram 4.500 SELECTs sequenciais por carga do /crm, pra montar
+        # a tarja de no máximo 180 cards. Mesmo motivo pelo qual
+        # _etiquetas_dos_leads() já era uma query só.
+        # Só os cards RENDERIZADOS entram: o que não vira DOM não precisa de tarja.
+        renderizados = [l for col in kanban.values() for l in col
+                        if (l['etapa'] or '') in campos_saida_etapa]
+        ids_render = [l['id'] for l in renderizados]
+        por_lead = {}
+        if ids_render:
+            marc = ','.join(['?'] * len(ids_render))
+            try:
+                for r in conn.execute(f"""SELECT lc.lead_id, c.chave, lc.valor
+                                          FROM crm_lead_campos lc
+                                          JOIN crm_campos c ON c.id = lc.campo_id
+                                          WHERE lc.lead_id IN ({marc})""", ids_render).fetchall():
+                    por_lead.setdefault(r['lead_id'], {})[r['chave']] = (r['valor'] or '')
+            except Exception as e:
+                app.logger.warning(f"[CRM] valores de trava: {e}")
+        for lead in renderizados:
+            exig = campos_saida_etapa.get(lead['etapa'] or '') or []
+            vals = por_lead.get(lead['id'], {})
+            valores_saida[lead['id']] = {c['chave']: vals.get(c['chave'], '') for c in exig}
+            trava_falta[lead['id']] = [c['nome'] for c in exig if not (vals.get(c['chave'], '') or '').strip()]
+
 
     # Quantos leads em cada quadro — a aba precisa dizer se vale a pena clicar.
     # Conta sobre a MESMA base filtrada (consultor, busca, data), senão a aba
@@ -16587,9 +16638,11 @@ def carregar_campos_crm(conn=None, momento=None):
 
 
 def _ler_do_extras(extras, caminho):
-    """Lê 'utm.content' dentro do JSON de dados_extras. A ingestão de leads grava
-    utm_source/medium/campaign/term/content e os ids de clique lá desde sempre —
-    é dado que já existe e nunca foi mostrado pra ninguém."""
+    """Lê um caminho ('utm.content') dentro do JSON de dados_extras.
+
+    CUIDADO: existem DOIS formatos gravados em produção, por dois caminhos de
+    ingestão diferentes — use _campo_de_midia() em vez desta função direto, a não
+    ser que você saiba exatamente qual formato está lendo."""
     if not extras or not caminho:
         return ''
     try:
@@ -16603,6 +16656,35 @@ def _ler_do_extras(extras, caminho):
         if d is None:
             return ''
     return str(d).strip() if not isinstance(d, (dict, list)) else ''
+
+
+# Os dois formatos de dados_extras que existem no banco, porque foram escritos por
+# ingestões diferentes e ambos têm histórico:
+#   planilha  -> {"utm": {"source","medium","campaign","term","content"},
+#                 "click": {"gclid","gbraid","wbraid","fbclid","landing","device"}}
+#   webhook   -> {"click": {"utm_source","utm_medium","utm_campaign","utm_content","gclid",...}}
+# Ler só um deles deixava Campanha/Criativo vazios em metade da base — e o pior,
+# em silêncio: a tela mostrava "Sem campanha" como se o lead não tivesse origem.
+_MIDIA_CAMINHOS = {
+    'source':   ('utm.source', 'click.utm_source', 'utm_source', 'source'),
+    'medium':   ('utm.medium', 'click.utm_medium', 'utm_medium', 'medium'),
+    'campaign': ('utm.campaign', 'click.utm_campaign', 'utm_campaign', 'campaign'),
+    'term':     ('utm.term', 'click.utm_term', 'utm_term', 'term'),
+    'content':  ('utm.content', 'click.utm_content', 'utm_content', 'content'),
+    'gclid':    ('click.gclid', 'gclid', 'utm.gclid'),
+    'gbraid':   ('click.gbraid', 'gbraid'),
+    'wbraid':   ('click.wbraid', 'wbraid'),
+    'fbclid':   ('click.fbclid', 'fbclid'),
+}
+
+
+def _campo_de_midia(extras, campo):
+    """Valor de UTM/id de clique tentando todos os formatos conhecidos."""
+    for cam in _MIDIA_CAMINHOS.get(campo, (campo,)):
+        v = _ler_do_extras(extras, cam)
+        if v:
+            return v
+    return ''
 
 
 def valores_campos_lead(conn, lead, campos=None):
@@ -16627,7 +16709,9 @@ def valores_campos_lead(conn, lead, campos=None):
     out = {}
     for c in campos:
         if c['mapa_extras'] and not (salvos.get(c['chave'], {}).get('valor')):
-            v = _ler_do_extras(extras, c['mapa_extras'])
+            # mapa_extras guarda 'utm.campaign'; o que importa é o SUFIXO — o
+            # leitor resiliente resolve os dois formatos a partir dele.
+            v = _campo_de_midia(extras, (c['mapa_extras'] or '').split('.')[-1])
             # Fallback do campo Origem: nem todo lead vem com utm_source (indicação,
             # entrada manual), mas todos têm crm_leads.origem preenchido.
             if not v and c['chave'] == 'origem_midia' and hasattr(lead, 'keys'):
