@@ -27,6 +27,23 @@
 .cronograma .parcela { display:flex; justify-content:space-between; padding:5px 0; font-size:12.5px; color:var(--texto); border-bottom:1px dashed var(--borda); }
 .cronograma .parcela:last-child { border-bottom:none; }
 .aviso { font-size:11px; color:var(--cinza-2); background:var(--panel-3); border:1px solid var(--borda); padding:5px 9px; border-radius:6px; margin-top:5px; display:inline-block; }
+  /* Vinculo do lead. A escolha tem que ser obvia depois de feita — um chip
+     que mostra @lid, nome e etapa, e nao so um id gravado num campo oculto. */
+  .lead-pick { display:flex; align-items:center; gap:12px; justify-content:space-between;
+               background:var(--panel-2); border:1px solid rgba(34,197,94,.3); border-radius:9px; padding:11px 13px; }
+  .lead-pick-info b { font-size:14px; }
+  .lead-pick-sub { font-size:11px; color:var(--cinza); margin-top:3px; }
+  .lead-pick-lid { font-family:ui-monospace,Menlo,monospace; font-size:10px; margin-left:8px;
+                   padding:2px 7px; border-radius:5px; background:rgba(168,85,247,.18); color:#d8b4fe; }
+  .lead-pick-lid.numero { background:rgba(34,197,94,.18); color:#4ade80; }
+  .lead-pick-lid.sem { background:rgba(250,204,21,.15); color:#eab308; }
+  .lead-res { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+  .lead-res-item { display:flex; align-items:center; gap:10px; justify-content:space-between;
+                   background:var(--panel-2); border:1px solid var(--borda); border-radius:8px;
+                   padding:9px 12px; cursor:pointer; text-align:left; width:100%; }
+  .lead-res-item:hover { border-color:var(--azul); }
+  .lead-res-item small { color:var(--cinza); font-size:11px; display:block; margin-top:2px; }
+  .lead-criar { margin-top:14px; border-top:1px solid var(--borda); padding-top:12px; }
 </style>
 {% endblock %}
 
@@ -43,7 +60,44 @@
 <form id="form">
   {# Lead de origem, quando a proposta nasceu da ficha do CRM/extensao. Campo
      oculto porque e chave, nao dado que alguem digita. #}
-  <input type="hidden" name="lead_id_origem" value="{{ lead_id_origem or '' }}">
+  <input type="hidden" name="lead_id_origem" id="lead_id_origem" value="{{ lead_id_origem or '' }}">
+
+  {# LEAD DA VENDA. Ficava so num campo oculto, preenchido quando a venda nascia
+     da ficha do CRM — aberto direto, /nova-proposta nao tinha como amarrar, a
+     venda nascia orfa e o vinculo era re-adivinhado por telefone depois. E dai
+     que vem o passivo de venda sem lead: sem lead nao ha origem de midia, e a
+     venda nao volta pro Google Ads dizendo que aquele anuncio deu dinheiro. #}
+  <div class="form-secao" id="bloco-lead">
+    <h3>Lead no CRM
+      <i class="ajuda-i" title="Toda venda vem de um lead. Amarrar os dois e o que permite saber de qual anuncio, campanha e criativo essa venda veio — e devolver isso ao Google Ads pra ele otimizar por quem COMPRA, e nao por quem so preenche formulario. Sem o lead, a venda nao tem origem.">i</i>
+    </h3>
+    <div id="lead-escolhido" class="lead-pick" hidden>
+      <div class="lead-pick-info">
+        <b id="lead-pick-nome"></b>
+        <span id="lead-pick-lid" class="lead-pick-lid"></span>
+        <div class="lead-pick-sub" id="lead-pick-sub"></div>
+      </div>
+      <button type="button" class="btn-outline" onclick="limparLead()">Trocar</button>
+    </div>
+    <div id="lead-busca-box">
+      <div class="campo">
+        <input type="text" id="lead-busca" autocomplete="off"
+               placeholder="Buscar por nome, telefone ou @lid"
+               oninput="buscarLeads(this.value)">
+        <div class="hint">Cole o @lid direto do card do CRM, ou digite o nome/telefone.</div>
+      </div>
+      <div id="lead-res" class="lead-res"></div>
+      <div id="lead-criar" class="lead-criar" hidden>
+        <div class="hint">Nao achou? Cadastre o lead agora, sem sair desta tela.</div>
+        <div class="form-row form-row-2">
+          <div class="campo"><label>Nome do lead</label><input type="text" id="lead-novo-nome"></div>
+          <div class="campo"><label>Telefone</label><input type="text" id="lead-novo-tel"></div>
+        </div>
+        <button type="button" class="btn-outline" onclick="criarLeadRapido()">Criar lead e vincular</button>
+        <span class="hint" id="lead-novo-aviso"></span>
+      </div>
+    </div>
+  </div>
 
   <div class="form-secao" style="border:1px dashed var(--borda-2); background:var(--panel-2);">
     <h3>Colar dados extraídos</h3>
@@ -723,4 +777,103 @@ function preencherDeTexto() {
   if (status) status.textContent = '✓ Preenchido: ' + achou.join(', ') + '. Confira os campos antes de salvar.';
 }
 </script>
+
+<script>
+// ── Vinculo do lead na venda ────────────────────────────────────────────────
+// Busca no servidor (nome, telefone ou @lid) em vez de exigir que o consultor
+// saiba o id. O @lid aparece no resultado porque e por ele que se reconhece a
+// conversa — telefone hoje nem sempre existe do lado do WhatsApp.
+let _leadTimer = null;
+function buscarLeads(q){
+  clearTimeout(_leadTimer);
+  const cx = document.getElementById('lead-res');
+  const criar = document.getElementById('lead-criar');
+  if(!q || q.trim().length < 2){ cx.innerHTML=''; criar.hidden = true; return; }
+  _leadTimer = setTimeout(async () => {
+    cx.innerHTML = '<div class="hint">buscando...</div>';
+    try{
+      const r = await fetch('/api/crm/leads/buscar?q=' + encodeURIComponent(q.trim()));
+      const d = await r.json();
+      const leads = (d && d.leads) || [];
+      if(!leads.length){
+        cx.innerHTML = '<div class="hint">Nenhum lead encontrado.</div>';
+        criar.hidden = false;
+        const n = document.getElementById('lead-novo-nome');
+        if(n && !n.value) n.value = q.trim();
+        return;
+      }
+      criar.hidden = false;
+      cx.innerHTML = leads.map(l => {
+        const lid = l.chat_id
+          ? '<span class="lead-pick-lid ' + (l.tipo==='numero'?'numero':'') + '">' +
+            (l.tipo==='lid'?'@lid ':'n ') + _e(l.lid_curto) + '</span>'
+          : '<span class="lead-pick-lid sem">sem conversa</span>';
+        return '<button type="button" class="lead-res-item" data-l=\'' +
+          _e(JSON.stringify(l)) + '\'><span><b>' + _e(l.nome) + '</b>' + lid +
+          '<small>' + _e([l.telefone, l.etapa, l.responsavel].filter(Boolean).join(' \u00b7 ')) +
+          '</small></span></button>';
+      }).join('');
+      cx.querySelectorAll('.lead-res-item').forEach(b => {
+        b.addEventListener('click', () => escolherLead(JSON.parse(b.dataset.l)));
+      });
+    }catch(e){ cx.innerHTML = '<div class="hint">Falha na busca.</div>'; }
+  }, 280);
+}
+function _e(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+function escolherLead(l){
+  document.getElementById('lead_id_origem').value = l.id;
+  document.getElementById('lead-pick-nome').textContent = l.nome;
+  const lid = document.getElementById('lead-pick-lid');
+  if(l.chat_id){
+    lid.textContent = (l.tipo==='lid'?'@lid ':'n ') + l.lid_curto;
+    lid.className = 'lead-pick-lid' + (l.tipo==='numero'?' numero':'');
+    lid.title = l.chat_id;
+  }else{
+    lid.textContent = 'sem conversa no WhatsApp';
+    lid.className = 'lead-pick-lid sem';
+    lid.title = 'Este lead ainda nao tem conversa do WhatsApp vinculada';
+  }
+  document.getElementById('lead-pick-sub').textContent =
+    [l.telefone, l.etapa, l.responsavel].filter(Boolean).join(' \u00b7 ');
+  document.getElementById('lead-escolhido').hidden = false;
+  document.getElementById('lead-busca-box').hidden = true;
+}
+function limparLead(){
+  document.getElementById('lead_id_origem').value = '';
+  document.getElementById('lead-escolhido').hidden = true;
+  document.getElementById('lead-busca-box').hidden = false;
+  document.getElementById('lead-busca').value = '';
+  document.getElementById('lead-res').innerHTML = '';
+  document.getElementById('lead-criar').hidden = true;
+}
+async function criarLeadRapido(){
+  const nome = (document.getElementById('lead-novo-nome').value||'').trim();
+  const tel  = (document.getElementById('lead-novo-tel').value||'').trim();
+  const av   = document.getElementById('lead-novo-aviso');
+  if(!nome){ av.textContent = 'Informe o nome.'; return; }
+  av.textContent = 'criando...';
+  try{
+    const r = await fetch('/api/crm/leads/criar-rapido', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({nome:nome, telefone:tel})});
+    const d = await r.json();
+    if(!d.ok){ av.textContent = d.erro || 'Nao deu pra criar.'; return; }
+    av.textContent = d.ja_existia ? 'Ja existia um lead com esse telefone — vinculei esse.' : '';
+    escolherLead({id:d.id, nome:d.nome, telefone:tel, etapa:'Venda Fechada', responsavel:'', chat_id:'', tipo:''});
+  }catch(e){ av.textContent = 'Falha ao criar.'; }
+}
+// Veio da ficha do CRM com o lead ja definido: mostra qual e, em vez de deixar
+// o bloco pedindo busca de um vinculo que ja existe.
+document.addEventListener('DOMContentLoaded', async () => {
+  const id = (document.getElementById('lead_id_origem')||{}).value;
+  if(!id) return;
+  try{
+    const r = await fetch('/api/crm/leads/buscar?q=' + encodeURIComponent(id));
+    const d = await r.json();
+    const l = ((d && d.leads) || []).find(x => String(x.id) === String(id));
+    if(l) escolherLead(l);
+  }catch(e){}
+});
+</script>
+
 {% endblock %}

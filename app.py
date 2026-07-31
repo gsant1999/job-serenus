@@ -6182,6 +6182,90 @@ def nova_proposta():
     return render_template('form.html', supervisoras=sups, operadoras=ops, prefill=prefill,
                            lead_id_origem=(lead_id if lead_id.isdigit() else ''))
 
+@app.route('/api/crm/leads/buscar')
+@login_required
+def api_crm_leads_buscar():
+    """Busca lead pra amarrar na venda. Aceita nome, telefone ou @lid — as tres
+    formas que o consultor tem na mao na hora de cadastrar.
+
+    Sem isso, /nova-proposta so recebia o lead quando a venda nascia da ficha do
+    CRM; aberta direto, a venda nascia orfa e o vinculo era re-adivinhado por
+    telefone depois. E dai que vem o passivo de 25 das 48 vendas sem lead — sem
+    lead nao ha origem de midia, e a venda nao sobe pro Google Ads."""
+    termo = (request.args.get('q') or '').strip()
+    if len(termo) < 2:
+        return jsonify({"ok": True, "leads": []})
+    conn = db()
+    eh_admin = session.get('perfil') == 'admin'
+    like = f'%{termo.lower()}%'
+    so_digitos = re.sub(r'\D', '', termo)
+    # @lid colado da tela vem como "@lid 2184…" ou "2184…@lid": os nao-digitos
+    # saem e sobra o identificador.
+    like_lid = f'%{so_digitos}%' if len(so_digitos) >= 4 else '\x00'
+    q = """SELECT l.id, l.nome, l.telefone, l.telefone_norm, l.etapa, l.responsavel_id,
+                  u.nome AS responsavel_nome, e.nome AS etapa_nome, e.tipo AS etapa_tipo,
+                  (SELECT chat_id FROM wa_chat_lead w WHERE w.lead_id = l.id
+                    ORDER BY w.atualizado_em DESC LIMIT 1) AS chat_id
+           FROM crm_leads l
+           LEFT JOIN usuarios u ON u.id = l.responsavel_id
+           LEFT JOIN crm_etapas e ON e.slug = l.etapa
+           WHERE (LOWER(l.nome) LIKE ? OR l.telefone LIKE ? OR l.telefone_norm LIKE ?
+                  OR l.id IN (SELECT lead_id FROM wa_chat_lead
+                              WHERE lead_id IS NOT NULL AND chat_id LIKE ?))"""
+    params = [like, f'%{so_digitos or termo}%', f'%{so_digitos or termo}%', like_lid]
+    if not eh_admin:
+        q += " AND l.responsavel_id=?"
+        params.append(session['user_id'])
+    q += " ORDER BY l.atualizado_em DESC LIMIT 20"
+    leads = []
+    for r in conn.execute(q, params).fetchall():
+        cid = r['chat_id'] or ''
+        leads.append({
+            'id': r['id'], 'nome': r['nome'] or f"lead #{r['id']}",
+            'telefone': _formatar_telefone(r['telefone_norm'] or r['telefone'] or ''),
+            'etapa': r['etapa_nome'] or r['etapa'] or '', 'etapa_tipo': r['etapa_tipo'] or '',
+            'responsavel': r['responsavel_nome'] or '',
+            'chat_id': cid,
+            'tipo': 'lid' if '@lid' in cid else ('numero' if '@c.us' in cid else ''),
+            'lid_curto': (cid.split('@')[0][:16] + ('…' if len(cid.split('@')[0]) > 16 else '')) if cid else '',
+        })
+    close_db(conn)
+    return jsonify({"ok": True, "leads": leads})
+
+
+@app.route('/api/crm/leads/criar-rapido', methods=['POST'])
+@login_required
+def api_crm_lead_criar_rapido():
+    """Cria o lead na hora, de dentro do formulario da venda. E o que torna a
+    exigencia de lead aceitavel: quem esta cadastrando uma venda real nao pode
+    ser obrigado a abandonar a tela e ir montar ficha no CRM antes."""
+    d = request.get_json(silent=True) or {}
+    nome = (d.get('nome') or '').strip()[:200]
+    telefone = (d.get('telefone') or '').strip()[:40]
+    if not nome:
+        return jsonify({"ok": False, "erro": "Informe o nome do lead"}), 400
+    tel_norm = _normalizar_telefone(telefone) if telefone else None
+    conn = db()
+    if tel_norm:
+        ja = _buscar_lead_por_telefone(conn, tel_norm)
+        if ja:
+            close_db(conn)
+            return jsonify({"ok": True, "id": ja['id'], "nome": ja['nome'], "ja_existia": True})
+    # O cursor tem que ser o DO PROPRIO INSERT: _last_insert_id num cursor
+    # qualquer devolve o id errado (ou None). Ja errei isso aqui antes.
+    cur = conn.execute("""INSERT INTO crm_leads (nome, telefone, telefone_norm, origem, etapa,
+                       responsavel_id, observacoes, criado_em, avancou_em)
+                    VALUES (?,?,?,?,?,?,?,?,?)""",
+                 (nome, telefone or None, tel_norm, 'Cadastro de venda', 'venda_fechada',
+                  session['user_id'], 'Criado no cadastro da venda.', _agora_sp(), _agora_sp()))
+    lid = _last_insert_id(cur)
+    conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                    VALUES (?,?,?,?,?)""",
+                 (lid, session.get('nome'), 'criacao', 'Lead criado no cadastro da venda.', _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "id": lid, "nome": nome, "ja_existia": False})
+
+
 @app.route('/salvar-proposta', methods=['POST'])
 @login_required
 def salvar_proposta():
