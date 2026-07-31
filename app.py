@@ -949,6 +949,25 @@ def init_db():
                 wpp_ok INTEGER DEFAULT 0,
                 visto_em TIMESTAMP
             )""",
+            # MARCA D'ÁGUA DA CONVERSA: até onde ela já foi analisada.
+            # Chaveada pelo chat_id, que é o @lid (ou o JID antigo) — o identificador
+            # que o WhatsApp expõe. O telefone_norm anda junto porque é o balizador
+            # do JOB: o @lid identifica a CONVERSA, o telefone identifica a PESSOA, e
+            # um @lid pode não resolver telefone nenhum (contato sem número exposto).
+            # Sem esta tabela, a varredura diária reanalisaria conversa que não mudou
+            # e pagaria de novo por dado que já temos.
+            """CREATE TABLE IF NOT EXISTS wa_conversa_estado (
+                chat_id TEXT PRIMARY KEY,
+                telefone_norm TEXT,
+                lead_id INTEGER,
+                ultima_msg_id TEXT,
+                ultima_msg_em REAL,
+                ultima_analise_id INTEGER,
+                ultima_analise_em TEXT,
+                msgs_analisadas INTEGER DEFAULT 0,
+                custo_acumulado_usd REAL DEFAULT 0,
+                atualizado_em TEXT
+            )""",
             """CREATE TABLE IF NOT EXISTS wa_chat_lead (
                 chat_id TEXT PRIMARY KEY,
                 lead_id INTEGER,
@@ -1635,6 +1654,18 @@ def init_db():
             wpp_ok INTEGER DEFAULT 0,
             visto_em TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS wa_conversa_estado (
+            chat_id TEXT PRIMARY KEY,
+            telefone_norm TEXT,
+            lead_id INTEGER,
+            ultima_msg_id TEXT,
+            ultima_msg_em REAL,
+            ultima_analise_id INTEGER,
+            ultima_analise_em TEXT,
+            msgs_analisadas INTEGER DEFAULT 0,
+            custo_acumulado_usd REAL DEFAULT 0,
+            atualizado_em TEXT
+        );
         CREATE TABLE IF NOT EXISTS wa_chat_lead (
             chat_id TEXT PRIMARY KEY,
             lead_id INTEGER,
@@ -2244,6 +2275,17 @@ def init_db():
         # card ficava verde só porque alguém mexeu num campo. A cor tem que
         # responder a avanço real no funil.
         ("crm_leads", "avancou_em", "TEXT"),
+        # PROCEDÊNCIA do valor de campo personalizado. A IA pode escrever por cima
+        # do que uma pessoa digitou — o que torna isso seguro é ficar rastreado:
+        #   ia            IA preencheu, ninguém revisou
+        #   ia_validado   consultor conferiu e manteve
+        #   corrigido     consultor mudou (valor_ia guarda o que a IA dizia)
+        #   consultor     pessoa preencheu do zero
+        # valor_ia sobrevive à correção de propósito: é o que permite MEDIR o
+        # acerto da IA por campo depois, em vez de confiar nela por opinião.
+        ("crm_lead_campos", "valor_ia", "TEXT"),
+        ("crm_lead_campos", "revisado_em", "TEXT"),
+        ("crm_lead_campos", "revisado_por", "TEXT"),
         # A COSTURA: propostas nunca teve lead_id, então venda↔lead era casada por
         # telefone em tempo de consulta. Isso funciona até alguém digitar o número
         # diferente na proposta — e aí a venda simplesmente não tem origem. Com a
@@ -2767,6 +2809,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_lead_etq_lead ON crm_lead_etiquetas(lead_id)",
         "CREATE INDEX IF NOT EXISTS idx_propostas_lead ON propostas(lead_id)",
         "CREATE INDEX IF NOT EXISTS idx_ads_status ON google_ads_conversoes(status)",
+        "CREATE INDEX IF NOT EXISTS idx_conv_estado_tel ON wa_conversa_estado(telefone_norm)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_lead ON crm_lead_campos(lead_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_campo ON crm_lead_campos(campo_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_etq_etq ON crm_lead_etiquetas(etiqueta_id)",
@@ -14424,6 +14467,115 @@ def api_whatsapp_lead_criar():
     return _wa_cors(jsonify({"ok": True, "ja_existia": False, "lead_id": lead_id}))
 
 
+# ─── VARREDURA DIÁRIA: O QUE VALE ANALISAR ────────────────────────────────────
+# CONTRATO (a extensão pergunta antes de subir qualquer conversa):
+#
+#   POST /api/whatsapp/conversas/pendentes
+#   {"conversas": [
+#      {"chat_id": "1234@lid",        # identificador da CONVERSA no WhatsApp
+#       "telefone": "19991046030",    # identificador da PESSOA (balizador do JOB)
+#       "ultima_msg_id": "ABC123",    # id da última mensagem que existe hoje
+#       "ultima_msg_em": 1785400000,  # timestamp dela (epoch)
+#       "msgs": 42}                   # total de mensagens na conversa
+#   ]}
+#
+#   -> {"analisar": [{"chat_id": "...", "desde_msg_id": "XYZ", "motivo": "novas_mensagens"}],
+#       "pular":    [{"chat_id": "...", "motivo": "sem_novidade"}]}
+#
+# A extensão SÓ baixa e sobe as conversas que vierem em "analisar", e só a partir
+# de "desde_msg_id". É isso que impede pagar de novo por conversa que não mudou —
+# a decisão é do servidor, que é quem sabe o que já foi analisado.
+#
+# Por que as DUAS chaves: o @lid identifica a conversa (o WhatsApp novo não expõe
+# mais o telefone no data-id), e o telefone identifica a pessoa. Um @lid pode não
+# resolver telefone nenhum; e a mesma pessoa pode aparecer com @lid diferente.
+# Guardando os dois, nenhum dos casos vira reanálise nem lead duplicado.
+_MOTIVOS_PENDENTE = {
+    'nunca_analisada': 'conversa ainda não foi analisada',
+    'novas_mensagens': 'tem mensagem nova desde a última análise',
+    'sem_novidade': 'nada mudou desde a última análise',
+    'sem_mensagem': 'conversa sem mensagem',
+}
+
+
+@app.route('/api/whatsapp/conversas/pendentes', methods=['POST', 'OPTIONS'])
+def api_whatsapp_conversas_pendentes():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    convs = (request.get_json(silent=True) or {}).get('conversas') or []
+    if not isinstance(convs, list):
+        return _wa_cors(jsonify({"ok": False, "erro": "Formato inválido"})), 400
+    convs = convs[:300]
+    conn = db()
+    estados = {}
+    ids = [str((c or {}).get('chat_id') or '') for c in convs if (c or {}).get('chat_id')]
+    if ids:
+        try:
+            marc = ','.join(['?'] * len(ids))
+            for r in conn.execute(f"""SELECT * FROM wa_conversa_estado
+                                      WHERE chat_id IN ({marc})""", ids).fetchall():
+                estados[r['chat_id']] = r
+        except Exception as e:
+            app.logger.warning(f"[VARREDURA] leitura de estado falhou: {e}")
+    analisar, pular = [], []
+    for c in convs:
+        cid = str((c or {}).get('chat_id') or '')
+        if not cid:
+            continue
+        ult_id = str((c or {}).get('ultima_msg_id') or '')
+        if not ult_id:
+            pular.append({'chat_id': cid, 'motivo': 'sem_mensagem'})
+            continue
+        e = estados.get(cid)
+        if not e:
+            analisar.append({'chat_id': cid, 'desde_msg_id': None, 'motivo': 'nunca_analisada'})
+            continue
+        # Marca d'água: a última mensagem de hoje é a mesma da última análise?
+        # Comparo pelo ID, não pelo timestamp — timestamp de WhatsApp tem
+        # granularidade de segundo e mensagens do mesmo segundo empatariam.
+        if (e['ultima_msg_id'] or '') == ult_id:
+            pular.append({'chat_id': cid, 'motivo': 'sem_novidade'})
+        else:
+            analisar.append({'chat_id': cid, 'desde_msg_id': e['ultima_msg_id'],
+                             'motivo': 'novas_mensagens'})
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "analisar": analisar, "pular": pular,
+                             "motivos": _MOTIVOS_PENDENTE}))
+
+
+def registrar_estado_conversa(conn, chat_id, telefone_norm=None, lead_id=None,
+                              ultima_msg_id=None, ultima_msg_em=None,
+                              analise_id=None, msgs=0, custo_usd=0.0):
+    """Carimba até onde esta conversa foi analisada. Chamado DEPOIS de a análise
+    ter sido gravada — nunca antes, senão uma análise que falhasse marcaria a
+    conversa como feita e o dado se perderia em silêncio."""
+    if not chat_id:
+        return
+    agora = _agora_sp()
+    try:
+        ja = conn.execute("SELECT chat_id, custo_acumulado_usd FROM wa_conversa_estado WHERE chat_id=?",
+                          (chat_id,)).fetchone()
+        acum = float((ja['custo_acumulado_usd'] if ja else 0) or 0) + float(custo_usd or 0)
+        if ja:
+            conn.execute("""UPDATE wa_conversa_estado SET telefone_norm=COALESCE(?,telefone_norm),
+                            lead_id=COALESCE(?,lead_id), ultima_msg_id=?, ultima_msg_em=?,
+                            ultima_analise_id=?, ultima_analise_em=?, msgs_analisadas=?,
+                            custo_acumulado_usd=?, atualizado_em=? WHERE chat_id=?""",
+                         (telefone_norm or None, lead_id or None, ultima_msg_id, ultima_msg_em,
+                          analise_id, agora, int(msgs or 0), acum, agora, chat_id))
+        else:
+            conn.execute("""INSERT INTO wa_conversa_estado
+                (chat_id, telefone_norm, lead_id, ultima_msg_id, ultima_msg_em,
+                 ultima_analise_id, ultima_analise_em, msgs_analisadas, custo_acumulado_usd, atualizado_em)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (chat_id, telefone_norm or None, lead_id or None, ultima_msg_id, ultima_msg_em,
+                 analise_id, agora, int(msgs or 0), acum, agora))
+    except Exception as e:
+        app.logger.warning(f"[VARREDURA] não registrou estado de {chat_id}: {e}")
+
+
 # ─── TRANSCRIÇÃO INLINE DOS ÁUDIOS ────────────────────────────────────────────
 # A extensão mostra a transcrição colada embaixo de cada áudio, na própria
 # conversa. Dois endpoints em vez de um: primeiro ela pergunta o que JÁ está em
@@ -16859,10 +17011,14 @@ def valores_campos_lead(conn, lead, campos=None):
     lid = lead['id'] if hasattr(lead, 'keys') else lead
     salvos = {}
     try:
-        for r in conn.execute("""SELECT c.chave, lc.valor, lc.fonte FROM crm_lead_campos lc
+        for r in conn.execute("""SELECT c.chave, lc.valor, lc.fonte, lc.valor_ia, lc.revisado_em
+                                 FROM crm_lead_campos lc
                                  JOIN crm_campos c ON c.id = lc.campo_id
                                  WHERE lc.lead_id=?""", (lid,)).fetchall():
-            salvos[r['chave']] = {'valor': r['valor'] or '', 'fonte': r['fonte'] or ''}
+            k = r.keys()
+            salvos[r['chave']] = {'valor': r['valor'] or '', 'fonte': r['fonte'] or '',
+                                  'valor_ia': (r['valor_ia'] if 'valor_ia' in k else None),
+                                  'revisado_em': (r['revisado_em'] if 'revisado_em' in k else None)}
     except Exception:
         pass
     extras = None
@@ -16903,7 +17059,8 @@ def campos_faltando_pra_sair(conn, lead, campos=None):
             for c in exigidos if not (vals.get(c['chave'], {}).get('valor') or '').strip()]
 
 
-def gravar_campo_lead(conn, lid, chave, valor, fonte='consultor', so_se_vazio=False):
+def gravar_campo_lead(conn, lid, chave, valor, fonte='consultor', so_se_vazio=False,
+                      revisor=None):
     """Grava um campo pelo nome da chave. `so_se_vazio` é o que deixa a API
     reconsultar sem atropelar correção feita à mão: a API só preenche o que está
     em branco. Retorna True se gravou."""
@@ -16915,12 +17072,36 @@ def gravar_campo_lead(conn, lid, chave, valor, fonte='consultor', so_se_vazio=Fa
     if so_se_vazio and atual and (atual['valor'] or '').strip():
         return False
     valor = ('' if valor is None else str(valor)).strip()
-    if atual:
-        conn.execute("""UPDATE crm_lead_campos SET valor=?, fonte=?, atualizado_em=?
-                        WHERE lead_id=? AND campo_id=?""", (valor, fonte, _agora_sp(), lid, c['id']))
+    agora = _agora_sp()
+    veio_da_ia = str(fonte or '').startswith('ia')
+
+    # Estado anterior, pra decidir o ciclo de vida
+    ant = conn.execute("""SELECT valor, fonte, valor_ia FROM crm_lead_campos
+                          WHERE lead_id=? AND campo_id=?""", (lid, c['id'])).fetchone()
+    fonte_ant = (ant['fonte'] if ant and 'fonte' in ant.keys() else '') or ''
+    valor_ant = (ant['valor'] if ant else '') or ''
+    valor_ia_ant = (ant['valor_ia'] if ant and 'valor_ia' in ant.keys() else None)
+
+    if veio_da_ia:
+        fonte_final, valor_ia, rev_em, rev_por = 'ia', valor, None, None
+    elif fonte_ant.startswith('ia') and valor_ia_ant is not None:
+        # Pessoa mexendo em campo que a IA preencheu: manteve ou corrigiu?
+        # O valor_ia NUNCA é apagado aqui — é ele que mede o acerto da IA depois.
+        fonte_final = 'ia_validado' if valor == (valor_ia_ant or '') else 'corrigido'
+        valor_ia, rev_em, rev_por = valor_ia_ant, agora, (revisor or fonte)
     else:
-        conn.execute("""INSERT INTO crm_lead_campos (lead_id,campo_id,valor,fonte,atualizado_em)
-                        VALUES (?,?,?,?,?)""", (lid, c['id'], valor, fonte, _agora_sp()))
+        fonte_final, valor_ia, rev_em, rev_por = (fonte or 'consultor'), valor_ia_ant, None, None
+
+    if atual:
+        conn.execute("""UPDATE crm_lead_campos SET valor=?, fonte=?, atualizado_em=?,
+                        valor_ia=?, revisado_em=?, revisado_por=?
+                        WHERE lead_id=? AND campo_id=?""",
+                     (valor, fonte_final, agora, valor_ia, rev_em, rev_por, lid, c['id']))
+    else:
+        conn.execute("""INSERT INTO crm_lead_campos
+                        (lead_id,campo_id,valor,fonte,atualizado_em,valor_ia,revisado_em,revisado_por)
+                        VALUES (?,?,?,?,?,?,?,?)""",
+                     (lid, c['id'], valor, fonte_final, agora, valor_ia, rev_em, rev_por))
     return True
 
 
