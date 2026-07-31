@@ -2374,6 +2374,9 @@ def init_db():
         # diferente na proposta — e aí a venda simplesmente não tem origem. Com a
         # chave gravada, lead → cotação → proposta → parcela → comissão fecha.
         ("propostas", "lead_id", "INTEGER"),
+        # Nota da extensao vivia so por telefone, fora do lead — invisivel no site.
+        ("lead_notas", "lead_id", "INTEGER"),
+        ("lead_notas", "chat_id", "TEXT"),
         # De onde saiu o vínculo (cnpj / telefone / telefone_sufixo / manual):
         # sem isso não há como auditar um vínculo errado depois.
         ("propostas", "lead_vinculo", "TEXT"),
@@ -14013,8 +14016,20 @@ def api_whatsapp_notas():
         if not tel:
             close_db(conn)
             return _wa_cors(jsonify({"ok": False, "erro": "telefone ausente"})), 400
-        rows = conn.execute("""SELECT id, texto, autor_nome, criado_em FROM lead_notas
-            WHERE telefone_norm=? ORDER BY id DESC LIMIT 100""", (tel,)).fetchall()
+        # Busca pelo LEAD quando ele existe: o telefone do WhatsApp pode mudar
+        # (ou aparecer em formato diferente) e a nota nao pode sumir por isso.
+        lead_g = None
+        try:
+            lead_g = _buscar_lead_por_telefone(conn, tel)
+        except Exception:
+            lead_g = None
+        if lead_g:
+            rows = conn.execute("""SELECT id, texto, autor_nome, criado_em FROM lead_notas
+                WHERE lead_id=? OR telefone_norm=? ORDER BY id DESC LIMIT 100""",
+                (lead_g['id'], tel)).fetchall()
+        else:
+            rows = conn.execute("""SELECT id, texto, autor_nome, criado_em FROM lead_notas
+                WHERE telefone_norm=? ORDER BY id DESC LIMIT 100""", (tel,)).fetchall()
         close_db(conn)
         return _wa_cors(jsonify({"ok": True, "notas": [dict(r) for r in rows]}))
     # POST — cria nota
@@ -14032,13 +14047,42 @@ def api_whatsapp_notas():
     if uid:
         u = conn.execute("SELECT nome FROM usuarios WHERE id=?", (uid,)).fetchone()
         autor = (u['nome'] if u else '') or ''
-    cur = conn.execute("""INSERT INTO lead_notas (telefone_norm, usuario_id, autor_nome, texto, criado_em)
-        VALUES (?,?,?,?,?)""", (tel, uid, autor, texto, _agora_sp()))
+    # A NOTA TEM DONO. Ela nascia amarrada so a um telefone, num canto que o site
+    # nao lia: o consultor escrevia no WhatsApp e aquilo nao existia pra mais
+    # ninguem. Agora ela acha o lead, guarda o vinculo e — o que importa de
+    # verdade — aparece na timeline dele, junto com analise, mudanca de etapa e
+    # venda. A historia do lead tem que estar num lugar so, senao cada um tem um
+    # pedaco e ninguem tem a conversa inteira.
+    lead_nota = None
+    try:
+        lead_nota = _buscar_lead_por_telefone(conn, tel)
+    except Exception as e:
+        app.logger.warning(f"[NOTA] não achei lead de {tel}: {e}")
+    chat_nota = (d.get('chat_id') or '').strip()[:100] or None
+    lid_nota = lead_nota['id'] if lead_nota else None
+    cur = conn.execute("""INSERT INTO lead_notas
+        (telefone_norm, lead_id, chat_id, usuario_id, autor_nome, texto, criado_em)
+        VALUES (?,?,?,?,?,?,?)""",
+        (tel, lid_nota, chat_nota, uid, autor, texto, _agora_sp()))
     nid = _last_insert_id(cur)
+    # Espelha na timeline do lead. Sem isto a nota so existia pra quem abrisse a
+    # extensao naquela conversa — quem olha o lead no site nao via nada.
+    if lid_nota:
+        try:
+            conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                            VALUES (?,?,?,?,?)""",
+                         (lid_nota, autor or 'Extensão WhatsApp', 'nota', texto, _agora_sp()))
+            if chat_nota:
+                registrar_chat_lead(conn, chat_nota, tel, None, lead_id=lid_nota)
+        except Exception as e:
+            app.logger.warning(f"[NOTA] não espelhou na timeline: {e}")
     conn.commit()
-    row = conn.execute("SELECT id, texto, autor_nome, criado_em FROM lead_notas WHERE id=?", (nid,)).fetchone()
+    row = conn.execute("""SELECT id, texto, autor_nome, criado_em, lead_id
+                          FROM lead_notas WHERE id=?""", (nid,)).fetchone()
     close_db(conn)
-    return _wa_cors(jsonify({"ok": True, "nota": dict(row) if row else None}))
+    return _wa_cors(jsonify({"ok": True, "nota": dict(row) if row else None,
+                             "lead_id": lid_nota,
+                             "lead_nome": lead_nota['nome'] if lead_nota else None}))
 
 
 @app.route('/api/whatsapp/notas/excluir', methods=['POST', 'OPTIONS'])
@@ -27438,6 +27482,55 @@ _seed_etiquetas_acao_boot()
 _backfill_telefone_canonico()
 
 
+# ─── BACKFILL das notas da extensão ↔ lead (31/07/2026) ──────────────────────
+# As notas nasceram amarradas só a um telefone, fora do lead e fora da timeline —
+# o consultor escrevia no WhatsApp e o registro não existia pra mais ninguém no
+# site. Aqui as antigas acham o dono e entram na história do lead. Só entra na
+# timeline o que AINDA não estiver lá (uma nota já espelhada não pode duplicar a
+# cada deploy).
+def _backfill_notas_lead():
+    conn = None
+    try:
+        conn = db()
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        if conn.execute("SELECT 1 FROM meta_flags WHERE k='notas_lead_id_20260731'").fetchone():
+            return
+        notas = conn.execute("""SELECT id, telefone_norm, texto, autor_nome, criado_em
+                                FROM lead_notas WHERE lead_id IS NULL""").fetchall()
+        ligadas = espelhadas = 0
+        for n in notas:
+            lead = None
+            try:
+                lead = _buscar_lead_por_telefone(conn, n['telefone_norm'] or '')
+            except Exception:
+                lead = None
+            if not lead:
+                continue
+            conn.execute("UPDATE lead_notas SET lead_id=? WHERE id=?", (lead['id'], n['id']))
+            ligadas += 1
+            ja = conn.execute("""SELECT 1 FROM crm_atividades
+                                 WHERE lead_id=? AND tipo='nota' AND descricao=?""",
+                              (lead['id'], n['texto'])).fetchone()
+            if not ja:
+                conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                                VALUES (?,?,?,?,?)""",
+                             (lead['id'], n['autor_nome'] or 'Extensão WhatsApp', 'nota',
+                              n['texto'], n['criado_em'] or _agora_sp()))
+                espelhadas += 1
+        conn.execute("INSERT INTO meta_flags (k) VALUES ('notas_lead_id_20260731')")
+        conn.commit()
+        print(f"[NOTAS_BACKFILL] {ligadas}/{len(notas)} nota(s) ligada(s) ao lead; {espelhadas} na timeline")
+    except Exception as e:
+        if conn is not None:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[NOTAS_BACKFILL] migração pulada: {e}")
+    finally:
+        if conn is not None:
+            try: close_db(conn)
+            except Exception: pass
+
+
 # ─── BACKFILL do vínculo proposta ↔ lead (29/07/2026) ────────────────────────
 # Roda AQUI e não dentro de init_db(): o casamento usa _normalizar_telefone, que só
 # é definido bem depois no arquivo — dentro do init o nome ainda não existe e a
@@ -27476,6 +27569,7 @@ def _backfill_vinculo_proposta_lead():
 
 
 _backfill_vinculo_proposta_lead()
+_backfill_notas_lead()
 
 
 

@@ -4018,8 +4018,13 @@
     if (!tel) { try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); } }
     if (!tel) return false;
     const { usuarioId } = await _safeStorageGet(['usuarioId']);
+    // Manda o chat_id junto: e com ele que o JOB amarra a nota ao @lid e, de
+    // quebra, registra o vinculo da conversa com o lead.
+    let chatId = '';
+    try { const r = await _pedirPonte('obter_chat_id', {}, 8000); chatId = (r && r.chat_id) || ''; } catch (e) {}
     let resp;
-    try { resp = await _safeSendMessage({ type: 'notas_criar', telefone: tel, texto, usuario_id: usuarioId }); }
+    try { resp = await _safeSendMessage({ type: 'notas_criar', telefone: tel, texto,
+                                          usuario_id: usuarioId, chatId }); }
     catch (e) { resp = null; }
     return !!(resp && resp.ok);
   }

@@ -343,7 +343,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'notas_criar') {
     chamarJob('/api/whatsapp/notas', 'POST',
-      { telefone: msg.telefone, texto: msg.texto, usuario_id: msg.usuario_id }, 10000).then(sendResponse);
+      { telefone: msg.telefone, texto: msg.texto, usuario_id: msg.usuario_id,
+        chat_id: msg.chatId || '' }, 10000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'notas_excluir') {
