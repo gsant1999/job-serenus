@@ -13077,6 +13077,12 @@ def _ia_classificar(http, corpo):
     if http in (401, 403) or 'invalid_api_key' in txt or 'authentication' in txt \
        or 'invalid api key' in txt:
         return 'chave_invalida', 'Chave rejeitada pelo provedor'
+    # O provedor RECLAMOU DO ARQUIVO: isso prova que autenticou, tem crédito e
+    # processou. É saúde, não falha — tratar como erro faria a tela acusar
+    # provedor saudável (aconteceu no primeiro teste em produção).
+    if 'audio_too_short' in txt or 'audio file is too short' in txt \
+       or 'could not be decoded' in txt or 'invalid file format' in txt:
+        return 'ok', ''
     if http == 429:
         return 'limite', 'Limite de uso momentâneo (passa sozinho)'
     if http and http >= 500:
@@ -14691,12 +14697,17 @@ def ia_saude_testar():
     alvo = (request.json or {}).get('provedor') or ''
     res = {}
     if alvo in ('groq', 'openai', ''):
-        # Áudio mínimo válido (WAV de silêncio): o provedor responde 200 com texto
-        # vazio quando está de pé, e o erro de crédito aparece igual.
-        import base64 as _b64
-        wav = _b64.b64encode(
-            b'RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00'
-            b'\x80>\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00').decode('ascii')
+        # WAV de 0,5s de silêncio, montado na hora. A primeira versão tinha ZERO
+        # segundo de áudio e os dois provedores recusavam com 'audio_too_short' —
+        # o teste marcava erro num provedor saudável, que é pior que não testar.
+        import base64 as _b64, struct as _st
+        taxa, dur = 8000, 0.5
+        n = int(taxa * dur)
+        dados = b'\x00\x00' * n
+        cab = (b'RIFF' + _st.pack('<I', 36 + len(dados)) + b'WAVEfmt ' +
+               _st.pack('<IHHIIHH', 16, 1, 1, taxa, taxa * 2, 2, 16) +
+               b'data' + _st.pack('<I', len(dados)))
+        wav = _b64.b64encode(cab + dados).decode('ascii')
         try:
             _transcrever_audio(wav, 'audio/wav')
             res['transcricao'] = 'testado'
