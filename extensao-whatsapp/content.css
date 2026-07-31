@@ -477,6 +477,18 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   font-family: inherit; cursor: pointer; transition: filter .12s; }
 .job-cnpj-btn:hover { filter: brightness(1.06); }
 .job-cnpj-btn:disabled { opacity: .55; cursor: default; }
+/* Seção Conversa: dois botões, um deles claramente o principal. */
+.job-conv-btns { display: flex; flex-direction: column; gap: 2px; }
+.job-cnpj-btn.destaque { background: var(--job-acento); color: var(--job-acento-txt); font-weight: 700; }
+.job-conv-status { margin-top: 12px; font-size: 12px; line-height: 1.5; color: var(--job-txt-fraco); }
+/* Prévia do que foi copiado: prova que o conteúdo certo saiu, sem abrir outro app. */
+.job-conv-previa {
+  margin-top: 12px; padding: 10px 12px; border-radius: 8px;
+  background: var(--job-bg3); border: 1px solid var(--job-bg2);
+  font-size: 11px; line-height: 1.5; color: var(--job-txt-fraco);
+  white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow-y: auto;
+  font-family: ui-monospace, Menlo, monospace;
+}
 .job-cnpj-card { margin-top: 16px; border: 1px solid var(--job-borda); border-radius: 14px;
   padding: 16px; background: var(--job-bg2); }
 /* ── Cadastro de lead novo pela conversa ─────────────────────────────── */

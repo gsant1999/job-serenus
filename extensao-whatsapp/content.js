@@ -943,6 +943,9 @@
   const _ICO_FUNIS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
   const _ICO_INBOX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>';
   const _ICO_CNPJ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-3"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/></svg>';
+  const _ICO_CONVERSA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>' +
+    '<line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="13" y2="13"/></svg>';
   const _ICO_NOTA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>';
   const _ICO_CRM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/><path d="M21 8v6M18 11h6"/></svg>';
   const _ICO_COPIAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
@@ -994,6 +997,10 @@
       '<button class="job-trilho-item" data-secao="cnpj" title="Consultar CNPJ">' +
         '<span class="job-trilho-item-icone">' + _ICO_CNPJ + '</span>' +
         '<span class="job-trilho-item-label">CNPJ</span>' +
+      '</button>' +
+      '<button class="job-trilho-item" data-secao="conversa" title="Copiar ou transcrever a conversa inteira">' +
+        '<span class="job-trilho-item-icone">' + _ICO_CONVERSA + '</span>' +
+        '<span class="job-trilho-item-label">Conversa</span>' +
       '</button>' +
       '<button class="job-trilho-item" data-secao="notas" title="Notas do lead">' +
         '<span class="job-trilho-item-icone">' + _ICO_NOTA + '</span>' +
@@ -1201,6 +1208,7 @@
     else if (secao === 'funis') abrirSecaoFunis();
     else if (secao === 'inbox') abrirSecaoInbox();
     else if (secao === 'cnpj') abrirSecaoCnpj();
+    else if (secao === 'conversa') abrirSecaoConversa();
     else if (secao === 'notas') abrirSecaoNotas();
     else if (secao === 'crm') abrirSecaoNovoLead();
     else if (secao === 'ficha') abrirSecaoFicha();
@@ -1449,6 +1457,84 @@
       TR.diag = { etapa: 'sob_demanda', ultimo: id, cache: TR.cache.size,
                   quando: new Date().toLocaleTimeString('pt-BR') };
     }
+  }
+
+  // ── COPIAR A CONVERSA INTEIRA ───────────────────────────────────────────
+  // Texto e audio transcrito no MESMO fio, na ordem do WhatsApp, com hora e quem
+  // falou. E o que faltava pra conversa sair daqui e virar registro em qualquer
+  // lugar — e-mail pra operadora, ficha do lead, analise fora da ferramenta.
+  // Audio sem transcricao entra marcado, nao sumido: a conversa tem que
+  // continuar fazendo sentido, e quem le precisa saber que ali falta um pedaco.
+  async function conversaEmTexto() {
+    const conv = await _pedirPonte('ler_conversa_completa', { limite: 800 }, 25000);
+    const msgs = (conv && conv.mensagens) || [];
+    if (!msgs.length) return { texto: '', total: 0, semTranscricao: 0 };
+    // Transcricoes: as desta sessao mais as que o JOB ja guardou (nao paga de novo).
+    const ids = msgs.filter((m) => m.tipo === 'ptt' || m.tipo === 'audio').map((m) => m.msg_id);
+    const doServidor = {};
+    if (ids.length) {
+      const r = await _safeSendMessage({ type: 'transcricoes_cache', ids }).catch(() => null);
+      if (r && r.ok) Object.assign(doServidor, r.transcricoes || {});
+    }
+    const quem = (m) => (m.de === 'consultor' ? 'Você' : (conv.titulo || m.nome || 'Cliente'));
+    const linhas = [];
+    let semTranscricao = 0;
+    for (const m of msgs) {
+      let corpo = m.texto;
+      if (m.tipo === 'ptt' || m.tipo === 'audio') {
+        const t = TR.cache.get(m.msg_id) || doServidor[m.msg_id] || '';
+        if (t) corpo = '[áudio] ' + t;
+        else { corpo = '[áudio não transcrito]'; semTranscricao++; }
+      } else if (!corpo && m.rotulo) {
+        corpo = '[' + m.rotulo + ']';
+      }
+      if (!corpo) continue;
+      linhas.push('[' + m.hora + '] ' + quem(m) + ': ' + corpo);
+    }
+    const cab = (conv.titulo ? conv.titulo + ' — ' : '') +
+                'conversa do WhatsApp · ' + linhas.length + ' mensagem(ns)' +
+                ' · copiado em ' + new Date().toLocaleString('pt-BR');
+    return { texto: cab + '\n\n' + linhas.join('\n'), total: linhas.length, semTranscricao };
+  }
+
+  // ── TRANSCREVER TUDO ────────────────────────────────────────────────────
+  // Um a um, de proposito. Disparar dez downloads e dez chamadas de IA de uma vez
+  // trava o WhatsApp e pode estourar o teto de custo sem o consultor ver. O que
+  // ja esta em cache nao e refeito — o segundo clique custa zero.
+  const TRTUDO = { rodando: false, feitos: 0, total: 0, erros: 0, pulados: 0 };
+
+  async function transcreverTudo(aoAndar) {
+    if (TRTUDO.rodando) return TRTUDO;
+    const conv = await _pedirPonte('ler_conversa_completa', { limite: 800 }, 25000);
+    const ids = (conv && conv.audios) || [];
+    Object.assign(TRTUDO, { rodando: true, feitos: 0, total: ids.length, erros: 0, pulados: 0 });
+    if (aoAndar) aoAndar(TRTUDO);
+    try {
+      // Pergunta de uma vez o que ja existe: barato, e evita pagar de novo.
+      const jaTem = {};
+      if (ids.length) {
+        const r = await _safeSendMessage({ type: 'transcricoes_cache', ids }).catch(() => null);
+        if (r && r.ok) Object.assign(jaTem, r.transcricoes || {});
+      }
+      for (const id of ids) {
+        const pronto = TR.cache.get(id) || jaTem[id];
+        if (pronto) {
+          TR.cache.set(id, pronto);
+          trAtualizarSlot(id);
+          TRTUDO.pulados++; TRTUDO.feitos++;
+          if (aoAndar) aoAndar(TRTUDO);
+          continue;
+        }
+        await trTranscrever(id);
+        if (!TR.cache.get(id)) TRTUDO.erros++;
+        TRTUDO.feitos++;
+        if (aoAndar) aoAndar(TRTUDO);
+      }
+    } finally {
+      TRTUDO.rodando = false;
+      if (aoAndar) aoAndar(TRTUDO);
+    }
+    return TRTUDO;
   }
 
   const _ICO_TRANSCREVER = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ' +
@@ -3953,6 +4039,54 @@
   function _tempoBrCurto(iso) {
     const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
     return m ? (m[3] + '/' + m[2] + ' ' + m[4] + ':' + m[5]) : '';
+  }
+
+  async function abrirSecaoConversa() {
+    setCorpoSecao(
+      '<p class="job-sub">Leva a conversa inteira daqui pra fora — texto e áudio transcrito no mesmo fio, ' +
+      'na ordem do WhatsApp, com hora e quem falou.</p>' +
+      '<div class="job-conv-btns">' +
+        '<button class="job-cnpj-btn destaque" id="conv-copiar">Copiar conversa inteira</button>' +
+        '<button class="job-cnpj-btn" id="conv-transcrever">Transcrever todos os áudios</button>' +
+      '</div>' +
+      '<div class="job-conv-status" id="conv-status"></div>' +
+      '<pre class="job-conv-previa" id="conv-previa" hidden></pre>');
+
+    const st = (t) => { const e = document.getElementById('conv-status'); if (e) e.textContent = t; };
+    const bc = document.getElementById('conv-copiar');
+    const bt = document.getElementById('conv-transcrever');
+
+    if (bc) bc.addEventListener('click', async () => {
+      bc.disabled = true; const r0 = bc.textContent; bc.textContent = 'Lendo…';
+      try {
+        const r = await conversaEmTexto();
+        if (!r.total) { st('Nada pra copiar nesta conversa.'); return; }
+        await navigator.clipboard.writeText(r.texto);
+        // Diz o que NAO foi junto. Copiar "com sucesso" escondendo que 6 audios
+        // entraram como [audio nao transcrito] faz a pessoa colar um registro
+        // furado sem saber.
+        st('Copiado: ' + r.total + ' mensagem(ns).' +
+           (r.semTranscricao ? ' ' + r.semTranscricao + ' áudio(s) sem transcrição — use o botão ao lado antes, se precisar deles.' : ''));
+        const pv = document.getElementById('conv-previa');
+        if (pv) { pv.hidden = false; pv.textContent = r.texto.slice(0, 1200) + (r.texto.length > 1200 ? '\n…' : ''); }
+      } catch (e) {
+        st('Não deu pra copiar: ' + ((e && e.message) || e));
+      } finally { bc.disabled = false; bc.textContent = r0; }
+    });
+
+    if (bt) bt.addEventListener('click', async () => {
+      bt.disabled = true; const r0 = bt.textContent;
+      try {
+        await transcreverTudo((p) => {
+          bt.textContent = p.rodando ? ('Transcrevendo ' + p.feitos + '/' + p.total + '…') : r0;
+          st(p.total === 0 ? 'Nenhum áudio nesta conversa.'
+            : (p.feitos + ' de ' + p.total + ' · ' + p.pulados + ' já estava(m) pronto(s)' +
+               (p.erros ? ' · ' + p.erros + ' falhou/falharam' : '')));
+        });
+      } catch (e) {
+        st('Falhou: ' + ((e && e.message) || e));
+      } finally { bt.disabled = false; bt.textContent = r0; }
+    });
   }
 
   async function abrirSecaoNotas() {

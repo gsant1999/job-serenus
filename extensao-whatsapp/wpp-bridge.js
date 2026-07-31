@@ -519,6 +519,50 @@
   // que já usamos pra áudio/PDF (getMessages) — com texto, remetente e hora
   // confiáveis, sem rolar a tela. Inclui a legenda de mídia (caption), que é
   // texto que o cliente/corretor escreveu.
+  // Conversa INTEIRA, na ordem do WhatsApp, com tudo que der pra identificar.
+  //
+  // lerMensagens() serve pra IA e por isso joga fora o que nao tem texto. Pra
+  // copiar a conversa isso nao vale: audio sem legenda e justamente o que o
+  // consultor mais quer levar junto (transcrito), e uma conversa sem os "[foto]"
+  // no meio perde o fio de quem respondeu o que.
+  async function lerConversaCompleta(limite) {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getMessages) return { erro: 'wpp_ausente' };
+    const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
+    if (!chat || !chat.id) return { erro: 'sem_conversa' };
+    let msgs = [];
+    try { msgs = await window.WPP.chat.getMessages(chat.id._serialized, { count: Math.max(50, limite || 800) }); }
+    catch (e) { return { erro: 'falha_mensagens' }; }
+    const ROTULO = { image: 'foto', video: 'vídeo', document: 'documento', sticker: 'figurinha',
+                     location: 'localização', vcard: 'contato', ptt: 'áudio', audio: 'áudio' };
+    const out = [];
+    for (const m of _dedupPorId(msgs)) {
+      if (!m || !m.id) continue;
+      const tipo = m.type || 'chat';
+      let texto = '';
+      if (tipo === 'chat') texto = m.body || '';
+      else if (m.caption) texto = m.caption;
+      out.push({
+        msg_id: m.id._serialized,
+        de: (m.id.fromMe ? 'consultor' : 'lead'),
+        tipo,
+        // Ordem crua do WhatsApp: quem ordena e o t, nao a hora formatada
+        // (que empata dentro do mesmo minuto e embaralha a leitura).
+        t: m.t || 0,
+        hora: fmtHora(m.t),
+        texto: (texto || '').trim().slice(0, 4000),
+        rotulo: ROTULO[tipo] || '',
+        nome: (m.senderObj && (m.senderObj.pushname || m.senderObj.formattedName)) || '',
+      });
+    }
+    out.sort((a, b) => (a.t || 0) - (b.t || 0));
+    return {
+      chat_id: chat.id._serialized,
+      titulo: (chat.formattedTitle || chat.name || ''),
+      mensagens: out,
+      audios: out.filter((x) => x.tipo === 'ptt' || x.tipo === 'audio').map((x) => x.msg_id),
+    };
+  }
+
   async function lerMensagens(limite) {
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getMessages) return { erro: 'wpp_ausente' };
     const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
@@ -846,6 +890,7 @@
       else if (d.tipo === 'baixar_audios_ids') resp = await baixarAudiosPorId(d.ids);
       else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite, d.forcarGrandes);
       else if (d.tipo === 'ler_mensagens') resp = await lerMensagens(d.limite);
+      else if (d.tipo === 'ler_conversa_completa') resp = await lerConversaCompleta(d.limite);
       else if (d.tipo === 'obter_telefone') resp = await obterTelefone(d.resolverLid);
       else if (d.tipo === 'obter_meu_numero') resp = await obterMeuNumero();
       else if (d.tipo === 'obter_chat_id') resp = await obterChatIdAtivo();
