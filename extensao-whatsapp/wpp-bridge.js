@@ -229,13 +229,40 @@
     return [];
   }
 
+  // O ID DA MENSAGEM, sem o remote.
+  //
+  // Aqui estava o erro seguinte: eu comparava o data-id do DOM com o
+  // id._serialized do store, e eles NAO SAO IGUAIS em conversa @lid. O
+  // serializado tem tres partes — fromMe_remote_id — e o WhatsApp escreve no DOM
+  // um remote (@lid) enquanto o store guarda outro (o telefone, @c.us), ou
+  // vice-versa. Comparando a string inteira, nada casa, e a mensagem que esta na
+  // TELA aparece como "nao carregada".
+  //
+  // A ultima parte — o id em si — e a mesma nos dois lados. E o unico pedaco que
+  // identifica a mensagem sem depender de como o WhatsApp resolveu chamar a
+  // pessoa naquele momento.
+  function _idCru(serial) {
+    const p = String(serial || '').split('_');
+    return (p.length > 2 ? p.slice(2).join('_') : p[p.length - 1] || '').trim();
+  }
+
+  function _casa(modelo, alvoSerial, alvoCru) {
+    if (!modelo || !modelo.id) return false;
+    if (modelo.id._serialized === alvoSerial) return true;
+    if (!alvoCru) return false;
+    // .id.id e o id cru na wa-js; se nao existir, tira do serializado dele.
+    const cru = modelo.id.id || _idCru(modelo.id._serialized);
+    return !!cru && cru === alvoCru;
+  }
+
   function _acharModelo(id) {
-    // 1) Colecao da conversa aberta — sem interpretar id nenhum.
+    const cru = _idCru(id);
+    // 1) Colecao da conversa aberta — e onde a mensagem da tela SEMPRE esta.
     try {
-      const m = _colecaoDaConversa().find((x) => x && x.id && x.id._serialized === id);
+      const m = _colecaoDaConversa().find((x) => _casa(x, id, cru));
       if (m) return { msg: m, via: 'colecao' };
     } catch (e) { /* segue */ }
-    // 2) Store global, comparando string com string.
+    // 2) Store global.
     try {
       const W = window.WPP && window.WPP.whatsapp;
       if (W && W.MsgStore) {
@@ -244,7 +271,7 @@
           if (direto) return { msg: direto, via: 'store' };
         }
         if (W.MsgStore.getModelsArray) {
-          const m = W.MsgStore.getModelsArray().find((x) => x && x.id && x.id._serialized === id);
+          const m = W.MsgStore.getModelsArray().find((x) => _casa(x, id, cru));
           if (m) return { msg: m, via: 'store_varredura' };
         }
       }
@@ -293,7 +320,11 @@
           erros[id] = String((e1 && e1.message) || e1 || 'falha no download').slice(0, 90);
         }
       } else {
-        erros[id] = 'mensagem não está carregada — role até ela e tente de novo';
+        // Diagnostico junto: sem saber quantas mensagens estavam visiveis pro
+        // codigo, "nao achei" nao diz se o problema e a busca ou a colecao.
+        let n = 0;
+        try { n = _colecaoDaConversa().length; } catch (e) { n = -1; }
+        erros[id] = 'não achei a mensagem (' + n + ' na conversa)';
       }
       if (!media) {
         // Ultimo recurso: o caminho da wa-js. Funciona em conversa antiga
