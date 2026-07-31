@@ -1226,21 +1226,57 @@
 
   function _trPodeRodar() { return !!document.querySelector('#main'); }
 
+  // QUEM DIZ que a mensagem e audio e o WhatsApp, nao um seletor de CSS.
+  //
+  // Era aqui que estava o problema: eu procurava <audio>, [data-icon="ptt"] e
+  // afins. O WhatsApp trocou a marcacao — nao ha mais <audio> na bolha e o icone
+  // mudou de nome — entao o filtro rejeitava TODA linha e nenhum botao nascia.
+  // Sem erro no console, sem nada quebrado: so silencio, que e o pior modo de
+  // falhar e me custou varias rodadas de adivinhacao.
+  //
+  // Agora eu pergunto pro proprio WhatsApp (wa-js) quais mensagens da conversa
+  // sao ptt/audio e caso com a linha pelo data-id, que e o mesmo id dos dois
+  // lados. Seletor de CSS quebra a cada atualizacao; o tipo da mensagem, nao.
+  const _TR_IDS = new Set();     // msg_ids de audio da conversa aberta
+  let _trChatCarregado = '';
+
+  async function trCarregarIdsDeAudio(forcar) {
+    try {
+      const chat = await _pedirPonte('obter_chat_id', {}, 8000);
+      const cid = (chat && chat.chat_id) || '';
+      if (!cid) return;
+      if (cid === _trChatCarregado && !forcar) return;
+      const r = await _pedirPonte('listar_audios', {}, 15000);
+      const lista = (r && r.audios) || [];
+      if (cid !== _trChatCarregado) { _TR_IDS.clear(); _trChatCarregado = cid; }
+      lista.forEach((a) => a && a.msg_id && _TR_IDS.add(a.msg_id));
+      TR.diag.etapa = 'ids_carregados';
+      TR.diag.audios = _TR_IDS.size;
+      if (_TR_IDS.size) trInjetar();
+    } catch (e) {
+      TR.diag.etapa = 'falha_ids';
+      TR.diag.erro = String((e && e.message) || e);
+    }
+  }
+
   function _trLinhaEhAudio(row) {
-    return !!row.querySelector('audio, [data-icon="ptt"], [data-icon*="audio"], [aria-label*="udio"]');
+    const id = row.getAttribute('data-id') || '';
+    if (id && _TR_IDS.has(id)) return true;
+    // Rede de seguranca, caso a ponte nao responda: varre o que costuma existir
+    // numa bolha de audio HOJE, e nao so o que existia antes.
+    return !!row.querySelector(
+      'audio, [data-icon="ptt"], [data-icon*="audio"], [data-icon*="ptt"],' +
+      '[aria-label*="udio"], [aria-label*="udio de voz"],' +
+      '[data-testid*="audio"], [data-testid*="ptt"]');
   }
 
   // Onde o bloco entra: no fim da bolha, depois da onda. É onde a WaSpeed põe.
   function _trAlvo(row) {
-    const player = row.querySelector('audio');
-    if (player) {
-      // sobe até um container que já tenha largura de bolha
-      let el = player.parentElement;
-      for (let i = 0; i < 4 && el && el !== row; i++) {
-        if (el.clientWidth > 140) return el;
-        el = el.parentElement;
-      }
-    }
+    // A bolha propriamente dita — e onde a WaSpeed poe, e e o unico container
+    // com a largura certa. Sem <audio> na arvore nova, subir a partir do player
+    // deixou de funcionar; procurar a bolha pela classe funciona nos dois mundos.
+    const bolha = row.querySelector('[class*="message-in"], [class*="message-out"]');
+    if (bolha) return bolha;
     return row.firstElementChild || row;
   }
 
@@ -1356,6 +1392,7 @@
 
   function trIniciar() {
     setTimeout(() => {
+      trCarregarIdsDeAudio(true);
       trInjetar();
       const main = document.querySelector('#main') || document.body;
       const obs = new MutationObserver(trAgendarInjecao);
@@ -1364,6 +1401,9 @@
       setInterval(() => {
         const m = document.querySelector('#main');
         if (m && !m._jobTrObservado) { m._jobTrObservado = true; obs.observe(m, { childList: true, subtree: true }); }
+        // Recarrega a lista de audios quando a CONVERSA muda (a funcao sai na
+        // hora se o chat for o mesmo, entao isto nao gera trabalho a toa).
+        trCarregarIdsDeAudio(false);
         trAgendarInjecao();
       }, 4000);
     }, 6000);
@@ -1372,6 +1412,8 @@
   function trDiagnosticoHtml() {
     const d = TR.diag || {};
     return '<div class="job-tr-diag"><b>Transcrição:</b> sob demanda · ' +
+      _TR_IDS.size + ' áudio(s) reconhecido(s) nesta conversa · ' +
+      document.querySelectorAll('.job-tr-slot').length + ' botão(ões) na tela · ' +
       TR.cache.size + ' em memória' + (TR.aviso ? ' · ' + esc(TR.aviso) : '') +
       (d.quando ? ' <span class="job-tr-diag-h">' + esc(d.quando) + '</span>' : '') + '</div>';
   }
