@@ -885,6 +885,17 @@ def init_db():
                 criado_por INTEGER,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            # ÁUDIO QUE NÓS MESMOS MANDAMOS: modelo e funil disparam sempre o MESMO
+            # arquivo. Transcrever uma vez por ARQUIVO e reusar em todo envio é o
+            # resíduo que faz a ferramenta não pagar de novo por conteúdo que ela
+            # própria produziu — e o consultor ver a transcrição na hora, sem espera.
+            """CREATE TABLE IF NOT EXISTS wa_audio_modelo (
+                arquivo TEXT PRIMARY KEY,
+                texto TEXT,
+                segundos REAL,
+                custo_usd REAL,
+                criado_em TEXT
+            )""",
             """CREATE TABLE IF NOT EXISTS whatsapp_transcricoes_cache (
                 msg_id TEXT PRIMARY KEY,
                 texto TEXT NOT NULL,
@@ -1589,6 +1600,13 @@ def init_db():
             resumo TEXT,
             criado_por INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS wa_audio_modelo (
+            arquivo TEXT PRIMARY KEY,
+            texto TEXT,
+            segundos REAL,
+            custo_usd REAL,
+            criado_em TEXT
         );
         CREATE TABLE IF NOT EXISTS whatsapp_transcricoes_cache (
             msg_id TEXT PRIMARY KEY,
@@ -13123,6 +13141,49 @@ def _wa_transcricao_cache_buscar(conn, msg_id):
     return {'texto': row['texto'], 'segundos': row['segundos']}
 
 
+def transcricao_de_modelo(conn, arquivo):
+    """Transcrição do áudio de um MODELO, transcrito UMA VEZ na vida. Todo envio
+    posterior do mesmo arquivo (unitário ou por funil) reusa isso de graça."""
+    if not arquivo:
+        return None
+    try:
+        r = conn.execute("SELECT texto, segundos FROM wa_audio_modelo WHERE arquivo=?", (arquivo,)).fetchone()
+    except Exception:
+        return None
+    if r and (r['texto'] or '').strip():
+        return {'texto': r['texto'], 'segundos': r['segundos']}
+    # Primeira vez: lê o arquivo que já está no nosso armazenamento e transcreve.
+    try:
+        conteudo, ctype = _localizar_anexo(os.path.basename(arquivo))
+        if not conteudo:
+            return None
+        import base64 as _b64
+        res = _transcrever_audio(_b64.b64encode(conteudo).decode('ascii'),
+                                 ctype or 'audio/ogg')
+        if not res or not (res.get('texto') or '').strip():
+            return None
+        conn.execute("""INSERT OR IGNORE INTO wa_audio_modelo
+                        (arquivo, texto, segundos, custo_usd, criado_em) VALUES (?,?,?,?,?)""",
+                     (arquivo, res['texto'], res.get('segundos'), res.get('custo_usd'), _agora_sp()))
+        return {'texto': res['texto'], 'segundos': res.get('segundos')}
+    except Exception as e:
+        app.logger.warning(f"[MODELO_AUDIO] não transcreveu {arquivo}: {e}")
+        return None
+
+
+def marcar_audio_enviado(conn, wpp_msg_id, arquivo):
+    """Liga a mensagem que ACABOU de sair ao texto do modelo. Custo zero: a
+    transcrição já existe. É isso que faz o áudio que nós mandamos aparecer
+    transcrito instantaneamente, sem passar pelo provedor de novo."""
+    if not wpp_msg_id or not arquivo:
+        return False
+    t = transcricao_de_modelo(conn, arquivo)
+    if not t:
+        return False
+    _wa_transcricao_cache_salvar(conn, wpp_msg_id, t['texto'], t.get('segundos'), 0.0)
+    return True
+
+
 def _wa_transcricao_cache_salvar(conn, msg_id, texto, segundos, custo_usd):
     if not msg_id or not texto:
         return
@@ -14345,6 +14406,14 @@ def api_whatsapp_fila_confirmar(fid):
     if bool(d.get('ok')):
         conn.execute("""UPDATE whatsapp_extensao_fila SET status='enviado', enviado_em=?, wpp_msg_id=? WHERE id=?""",
                      (_agora_sp(), str(d.get('wpp_msg_id') or '')[:100], fid))
+        # RESÍDUO: áudio que saiu pela ferramenta já vem com o texto conhecido.
+        # Transcrever de novo seria pagar duas vezes pelo mesmo conteúdo — e o
+        # nosso próprio, que a gente gravou.
+        if (it.get('tipo') or '') == 'audio' and it.get('midia_arquivo') and d.get('wpp_msg_id'):
+            try:
+                marcar_audio_enviado(conn, str(d.get('wpp_msg_id'))[:100], it['midia_arquivo'])
+            except Exception as e:
+                app.logger.warning(f"[MODELO_AUDIO] fila {fid}: {e}")
         if it.get('origem') == 'campanha':
             conn.execute("UPDATE campanha_contato SET status='enviado', enviado_em=? WHERE fila_id=?",
                          (_agora_sp(), fid))
@@ -15993,8 +16062,28 @@ def api_whatsapp_analisar():
     # PDF de várias páginas custa múltiplos disso — enquanto o que preenche o CRM
     # (valor pago, vidas, hospital, operadora) sai da conversa falada. Cortando a
     # mídia fica ~90% do valor por ~20% do custo. É o modo da varredura diária.
-    if d.get('economico'):
-        imagens, documentos = [], []
+    # POLÍTICA DE MÍDIA no modo econômico. Não é "nunca" — é "só quando muda a
+    # resposta". Três casos em que a mídia entra mesmo no econômico:
+    #  1. a conversa quase não tem texto: o lead mandou a cotação em PRINT e falou
+    #     por áudio. Cortar a mídia aqui não economiza, só analisa o nada.
+    #  2. o consultor pediu explicitamente (analise manual, botão).
+    #  3. é a PRIMEIRA mídia daquele conteúdo — o cache por hash já evita repetir,
+    #     então descrever uma vez é o que torna a repetição gratuita depois.
+    if d.get('economico') and not d.get('forcar_midia'):
+        texto_util = sum(len((m.get('texto') or '').strip()) for m in limpa)
+        # 400 caracteres ≈ umas 4 frases. Abaixo disso a conversa escrita não
+        # sustenta uma análise sozinha, e a mídia deixa de ser luxo.
+        pobre_de_texto = texto_util < 400
+        if not pobre_de_texto:
+            if imagens or documentos:
+                app.logger.info(f"[ECONOMICO] {len(imagens)} imagem(ns) e {len(documentos)} PDF(s) "
+                                f"fora da análise ({texto_util} chars de texto)")
+            imagens, documentos = [], []
+        else:
+            # Só a primeira de cada tipo: o que falta é contexto, não volume.
+            imagens, documentos = imagens[:2], documentos[:1]
+            app.logger.info(f"[ECONOMICO] conversa com {texto_util} chars — mídia mantida "
+                            f"({len(imagens)} img, {len(documentos)} pdf)")
     midia_linhas, custo_midia_usd, imgs_lidas, docs_lidos, midias_puladas = _wa_mapear_midias(
         conn, imagens, documentos, custo_ja_gasto_usd=custo_transcricao_usd)
     limpa_ia = limpa
