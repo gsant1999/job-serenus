@@ -529,9 +529,17 @@
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getMessages) return { erro: 'wpp_ausente' };
     const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
     if (!chat || !chat.id) return { erro: 'sem_conversa' };
+    // A COLECAO DO CHAT primeiro. getMessages() monta chave a partir do id e
+    // quebra em conversa @lid — mesma raiz do bug do download. A colecao ja esta
+    // carregada em memoria (e o que a tela desenha) e nao interpreta id nenhum.
     let msgs = [];
-    try { msgs = await window.WPP.chat.getMessages(chat.id._serialized, { count: Math.max(50, limite || 800) }); }
-    catch (e) { return { erro: 'falha_mensagens' }; }
+    try {
+      if (chat.msgs && chat.msgs.getModelsArray) msgs = chat.msgs.getModelsArray() || [];
+    } catch (e) { msgs = []; }
+    if (!msgs.length) {
+      try { msgs = await window.WPP.chat.getMessages(chat.id._serialized, { count: Math.max(50, limite || 800) }); }
+      catch (e) { return { erro: 'falha_mensagens' }; }
+    }
     const ROTULO = { image: 'foto', video: 'vídeo', document: 'documento', sticker: 'figurinha',
                      location: 'localização', vcard: 'contato', ptt: 'áudio', audio: 'áudio' };
     const out = [];

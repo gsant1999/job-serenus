@@ -943,9 +943,6 @@
   const _ICO_FUNIS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
   const _ICO_INBOX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>';
   const _ICO_CNPJ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-3"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/></svg>';
-  const _ICO_CONVERSA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
-    'stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>' +
-    '<line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="13" y2="13"/></svg>';
   const _ICO_NOTA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>';
   const _ICO_CRM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/><path d="M21 8v6M18 11h6"/></svg>';
   const _ICO_COPIAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
@@ -997,10 +994,6 @@
       '<button class="job-trilho-item" data-secao="cnpj" title="Consultar CNPJ">' +
         '<span class="job-trilho-item-icone">' + _ICO_CNPJ + '</span>' +
         '<span class="job-trilho-item-label">CNPJ</span>' +
-      '</button>' +
-      '<button class="job-trilho-item" data-secao="conversa" title="Copiar ou transcrever a conversa inteira">' +
-        '<span class="job-trilho-item-icone">' + _ICO_CONVERSA + '</span>' +
-        '<span class="job-trilho-item-label">Conversa</span>' +
       '</button>' +
       '<button class="job-trilho-item" data-secao="notas" title="Notas do lead">' +
         '<span class="job-trilho-item-icone">' + _ICO_NOTA + '</span>' +
@@ -1208,7 +1201,6 @@
     else if (secao === 'funis') abrirSecaoFunis();
     else if (secao === 'inbox') abrirSecaoInbox();
     else if (secao === 'cnpj') abrirSecaoCnpj();
-    else if (secao === 'conversa') abrirSecaoConversa();
     else if (secao === 'notas') abrirSecaoNotas();
     else if (secao === 'crm') abrirSecaoNovoLead();
     else if (secao === 'ficha') abrirSecaoFicha();
@@ -1333,6 +1325,7 @@
 
   function trInjetar(raizes) {
     if (!_trPodeRodar()) return;
+    try { _barraConvInjetar(); } catch (e) { /* barra e ganho, nao requisito */ }
     const main = document.querySelector('#main');
     let linhas;
     if (raizes && raizes.length) {
@@ -1457,6 +1450,73 @@
       TR.diag = { etapa: 'sob_demanda', ultimo: id, cache: TR.cache.size,
                   quando: new Date().toLocaleTimeString('pt-BR') };
     }
+  }
+
+  // ── BARRA NO CABECALHO DA CONVERSA ──────────────────────────────────────
+  //
+  // Estava no trilho lateral e o Guilherme reclamou com razao: as duas acoes sao
+  // SOBRE A CONVERSA ABERTA, entao o lugar delas e junto do nome dela — nao numa
+  // gaveta que precisa ser aberta pra descobrir a que conversa se referem. Mesma
+  // logica do botao dentro da bolha: a acao mora onde esta o objeto dela.
+  //
+  // So acrescenta filho no fim do cabecalho, nunca mexe em no existente, e e
+  // idempotente (marca .job-barra-conv).
+  function _barraConvInjetar() {
+    const main = document.querySelector('#main');
+    if (!main) return;
+    const cab = main.querySelector('header');
+    if (!cab || cab.querySelector('.job-barra-conv')) return;
+    const box = document.createElement('div');
+    box.className = 'job-barra-conv';
+    box.innerHTML =
+      '<button type="button" class="job-bc-btn" data-ac="transcrever" title="Transcrever todos os áudios desta conversa">' +
+        _ICO_TRANSCREVER + '<span>Transcrever tudo</span></button>' +
+      '<button type="button" class="job-bc-btn" data-ac="copiar" title="Copiar a conversa inteira: texto e áudio transcrito, na ordem, com hora e quem falou">' +
+        _ICO_COPIAR + '<span>Copiar conversa</span></button>';
+    cab.appendChild(box);
+
+    const btn = (ac) => box.querySelector('[data-ac="' + ac + '"]');
+    const rotulo = (b, t) => { const e = b.querySelector('span'); if (e) e.textContent = t; };
+
+    const bt = btn('transcrever');
+    bt.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      if (bt.disabled) return;
+      bt.disabled = true;
+      const r0 = 'Transcrever tudo';
+      try {
+        const p = await transcreverTudo((x) => {
+          rotulo(bt, x.rodando ? (x.feitos + '/' + x.total) : r0);
+        });
+        rotulo(bt, p.total === 0 ? 'Sem áudio'
+          : (p.erros ? p.erros + ' falhou(ram)' : 'Pronto: ' + p.total));
+      } catch (e) {
+        rotulo(bt, 'Falhou');
+      } finally {
+        setTimeout(() => { rotulo(bt, r0); bt.disabled = false; }, 2600);
+      }
+    });
+
+    const bc = btn('copiar');
+    bc.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      if (bc.disabled) return;
+      bc.disabled = true;
+      const r0 = 'Copiar conversa';
+      try {
+        const r = await conversaEmTexto();
+        if (!r.total) { rotulo(bc, 'Conversa vazia'); return; }
+        await navigator.clipboard.writeText(r.texto);
+        // Diz o buraco em vez de esconder: copiar "com sucesso" sem avisar que 6
+        // audios faltaram faz colar um registro furado sem saber.
+        rotulo(bc, r.semTranscricao ? (r.total + ' copiadas · ' + r.semTranscricao + ' áudio(s) sem transcrição')
+                                    : (r.total + ' copiadas'));
+      } catch (e) {
+        rotulo(bc, 'Não deu');
+      } finally {
+        setTimeout(() => { rotulo(bc, r0); bc.disabled = false; }, 3200);
+      }
+    });
   }
 
   // ── COPIAR A CONVERSA INTEIRA ───────────────────────────────────────────
@@ -4180,54 +4240,6 @@
   function _tempoBrCurto(iso) {
     const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
     return m ? (m[3] + '/' + m[2] + ' ' + m[4] + ':' + m[5]) : '';
-  }
-
-  async function abrirSecaoConversa() {
-    setCorpoSecao(
-      '<p class="job-sub">Leva a conversa inteira daqui pra fora — texto e áudio transcrito no mesmo fio, ' +
-      'na ordem do WhatsApp, com hora e quem falou.</p>' +
-      '<div class="job-conv-btns">' +
-        '<button class="job-cnpj-btn destaque" id="conv-copiar">Copiar conversa inteira</button>' +
-        '<button class="job-cnpj-btn" id="conv-transcrever">Transcrever todos os áudios</button>' +
-      '</div>' +
-      '<div class="job-conv-status" id="conv-status"></div>' +
-      '<pre class="job-conv-previa" id="conv-previa" hidden></pre>');
-
-    const st = (t) => { const e = document.getElementById('conv-status'); if (e) e.textContent = t; };
-    const bc = document.getElementById('conv-copiar');
-    const bt = document.getElementById('conv-transcrever');
-
-    if (bc) bc.addEventListener('click', async () => {
-      bc.disabled = true; const r0 = bc.textContent; bc.textContent = 'Lendo…';
-      try {
-        const r = await conversaEmTexto();
-        if (!r.total) { st('Nada pra copiar nesta conversa.'); return; }
-        await navigator.clipboard.writeText(r.texto);
-        // Diz o que NAO foi junto. Copiar "com sucesso" escondendo que 6 audios
-        // entraram como [audio nao transcrito] faz a pessoa colar um registro
-        // furado sem saber.
-        st('Copiado: ' + r.total + ' mensagem(ns).' +
-           (r.semTranscricao ? ' ' + r.semTranscricao + ' áudio(s) sem transcrição — use o botão ao lado antes, se precisar deles.' : ''));
-        const pv = document.getElementById('conv-previa');
-        if (pv) { pv.hidden = false; pv.textContent = r.texto.slice(0, 1200) + (r.texto.length > 1200 ? '\n…' : ''); }
-      } catch (e) {
-        st('Não deu pra copiar: ' + ((e && e.message) || e));
-      } finally { bc.disabled = false; bc.textContent = r0; }
-    });
-
-    if (bt) bt.addEventListener('click', async () => {
-      bt.disabled = true; const r0 = bt.textContent;
-      try {
-        await transcreverTudo((p) => {
-          bt.textContent = p.rodando ? ('Transcrevendo ' + p.feitos + '/' + p.total + '…') : r0;
-          st(p.total === 0 ? 'Nenhum áudio nesta conversa.'
-            : (p.feitos + ' de ' + p.total + ' · ' + p.pulados + ' já estava(m) pronto(s)' +
-               (p.erros ? ' · ' + p.erros + ' falhou/falharam' : '')));
-        });
-      } catch (e) {
-        st('Falhou: ' + ((e && e.message) || e));
-      } finally { bt.disabled = false; bt.textContent = r0; }
-    });
   }
 
   async function abrirSecaoNotas() {

@@ -477,8 +477,25 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   font-family: inherit; cursor: pointer; transition: filter .12s; }
 .job-cnpj-btn:hover { filter: brightness(1.06); }
 .job-cnpj-btn:disabled { opacity: .55; cursor: default; }
-/* Seção Conversa: dois botões, um deles claramente o principal. */
-.job-conv-btns { display: flex; flex-direction: column; gap: 2px; }
+/* Barra no cabeçalho da conversa. Discreta: são ações do WhatsApp, não um
+   banner da extensão — tom e tamanho dos controles nativos, destaque só no
+   hover. Encolhe antes de empurrar qualquer coisa do WhatsApp. */
+.job-barra-conv {
+  display: flex; align-items: center; gap: 4px; margin-left: 8px;
+  flex: 0 1 auto; min-width: 0; overflow: hidden;
+}
+.job-bc-btn {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  background: transparent; border: 1px solid rgba(255,255,255,.13);
+  color: #8696a0; border-radius: 16px; padding: 4px 11px;
+  font-size: 11.5px; font-weight: 600; font-family: inherit;
+  cursor: pointer; white-space: nowrap; transition: .15s;
+}
+.job-bc-btn span { overflow: hidden; text-overflow: ellipsis; }
+.job-bc-btn svg { width: 13px; height: 13px; flex: 0 0 auto; }
+.job-bc-btn:hover { color: #e9edef; border-color: #00a884; background: rgba(0,168,132,.12); }
+.job-bc-btn:disabled { opacity: .75; cursor: default; }
+@media (max-width: 1100px) { .job-bc-btn span { display: none; } .job-bc-btn { padding: 4px 8px; } }
 /* Nome padronizado do contato. Fica na ficha, abaixo do salvar: é ação de
    registro, não de edição do lead — por isso separado por uma linha. */
 .job-nomec { margin: 14px 0 4px; padding-top: 12px; border-top: 1px solid var(--job-bg2); }
@@ -497,15 +514,8 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-nomec-btns .job-cnpj-btn { flex: 1 1 0; margin-top: 8px; font-size: 12px; padding: 9px 6px; }
 .job-nomec-dica { margin-top: 8px; font-size: 10.5px; line-height: 1.5; color: var(--job-txt-fraco); opacity: .8; }
 .job-cnpj-btn.destaque { background: var(--job-acento); color: var(--job-acento-txt); font-weight: 700; }
-.job-conv-status { margin-top: 12px; font-size: 12px; line-height: 1.5; color: var(--job-txt-fraco); }
-/* Prévia do que foi copiado: prova que o conteúdo certo saiu, sem abrir outro app. */
-.job-conv-previa {
-  margin-top: 12px; padding: 10px 12px; border-radius: 8px;
-  background: var(--job-bg3); border: 1px solid var(--job-bg2);
-  font-size: 11px; line-height: 1.5; color: var(--job-txt-fraco);
-  white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow-y: auto;
-  font-family: ui-monospace, Menlo, monospace;
-}
+
+
 .job-cnpj-card { margin-top: 16px; border: 1px solid var(--job-borda); border-radius: 14px;
   padding: 16px; background: var(--job-bg2); }
 /* ── Cadastro de lead novo pela conversa ─────────────────────────────── */
