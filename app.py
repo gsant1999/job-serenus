@@ -6208,7 +6208,6 @@ def api_crm_leads_buscar():
     so_digitos = re.sub(r'\D', '', termo)
     # @lid colado da tela vem como "@lid 2184…" ou "2184…@lid": os nao-digitos
     # saem e sobra o identificador.
-    like_lid = f'%{so_digitos}%' if len(so_digitos) >= 4 else '\x00'
     q = """SELECT l.id, l.nome, l.telefone, l.telefone_norm, l.etapa, l.responsavel_id,
                   u.nome AS responsavel_nome, e.nome AS etapa_nome, e.tipo AS etapa_tipo,
                   (SELECT chat_id FROM wa_chat_lead w WHERE w.lead_id = l.id
@@ -6216,10 +6215,14 @@ def api_crm_leads_buscar():
            FROM crm_leads l
            LEFT JOIN usuarios u ON u.id = l.responsavel_id
            LEFT JOIN crm_etapas e ON e.slug = l.etapa
-           WHERE (LOWER(l.nome) LIKE ? OR l.telefone LIKE ? OR l.telefone_norm LIKE ?
-                  OR l.id IN (SELECT lead_id FROM wa_chat_lead
-                              WHERE lead_id IS NOT NULL AND chat_id LIKE ?))"""
-    params = [like, f'%{so_digitos or termo}%', f'%{so_digitos or termo}%', like_lid]
+           WHERE (LOWER(l.nome) LIKE ? OR l.telefone LIKE ? OR l.telefone_norm LIKE ?"""
+    params = [like, f'%{so_digitos or termo}%', f'%{so_digitos or termo}%']
+    # Mesma correcao do /crm: clausula condicional em vez de valor-sentinela.
+    if len(so_digitos) >= 4:
+        q += (" OR l.id IN (SELECT lead_id FROM wa_chat_lead"
+              " WHERE lead_id IS NOT NULL AND chat_id LIKE ?)")
+        params.append(f'%{so_digitos}%')
+    q += ')'
     if not eh_admin:
         q += " AND l.responsavel_id=?"
         params.append(session['user_id'])
@@ -18052,14 +18055,32 @@ def crm():
         # resultado possivel (parece que o lead nao existe).
         # Aceita colado como esta na tela ("@lid 2184…", "2184…@lid") ou so o numero.
         alvo_lid = f_busca.replace('@lid', '').replace('@c.us', '').replace('@s.whatsapp.net', '').strip()
-        q += (" AND (LOWER(l.nome) LIKE ? OR l.telefone LIKE ? OR LOWER(l.email) LIKE ?"
-              " OR LOWER(COALESCE(l.consultor_externo,'')) LIKE ?"
-              " OR l.id IN (SELECT lead_id FROM wa_chat_lead WHERE lead_id IS NOT NULL AND chat_id LIKE ?))")
         like = f'%{f_busca.lower()}%'
-        # So casa @lid quando o termo tem cara de identificador (digitos), senao
-        # buscar "ana" varreria a wa_chat_lead inteira a toa.
-        like_lid = f'%{alvo_lid}%' if (alvo_lid and alvo_lid.isdigit()) else '\x00sem-match'
-        params.extend([like, f'%{f_busca}%', like, like, like_lid])
+        # Telefone comparado por DIGITO. O consultor copia "(19) 99941-7896" da
+        # tela e colava aqui sem achar nada, porque no banco o numero mora sem
+        # formatacao — a busca so servia pra quem digitasse do jeito guardado.
+        so_dig = re.sub(r'\D', '', f_busca)
+        campos = ("LOWER(l.nome) LIKE ? OR LOWER(l.email) LIKE ?"
+                  " OR LOWER(COALESCE(l.consultor_externo,'')) LIKE ?")
+        params.extend([like, like, like])
+        if so_dig:
+            campos += " OR l.telefone LIKE ? OR l.telefone_norm LIKE ?"
+            params.extend([f'%{so_dig}%', f'%{so_dig}%'])
+        else:
+            campos += " OR l.telefone LIKE ?"
+            params.append(f'%{f_busca}%')
+        # A clausula do @lid so ENTRA quando o termo tem cara de identificador.
+        # Antes eu deixava a clausula sempre e passava um valor-sentinela que nao
+        # casa com nada — e o sentinela era '\x00'. Byte NUL em parametro: o
+        # SQLite engole, o Postgres recusa. Passou no teste local e derrubou o
+        # /crm em producao com qualquer busca por nome ou telefone formatado.
+        # Montar a clausula condicionalmente resolve de vez e ainda e mais rapido:
+        # buscar "ana" nao encosta na wa_chat_lead.
+        if alvo_lid and alvo_lid.isdigit():
+            campos += (" OR l.id IN (SELECT lead_id FROM wa_chat_lead"
+                       " WHERE lead_id IS NOT NULL AND chat_id LIKE ?)")
+            params.append(f'%{alvo_lid}%')
+        q += " AND (" + campos + ")"
 
     q += " ORDER BY l.atualizado_em DESC"
     leads = conn.execute(q, params).fetchall()
