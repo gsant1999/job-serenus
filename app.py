@@ -1003,7 +1003,19 @@ def init_db():
             # um @lid pode não resolver telefone nenhum (contato sem número exposto).
             # Sem esta tabela, a varredura diária reanalisaria conversa que não mudou
             # e pagaria de novo por dado que já temos.
-            """CREATE TABLE IF NOT EXISTS wa_conversa_estado (
+            # DESEMPENHO MEDIDO, nao sentido. "esta lento" so vira conserto quando
+            # tem numero: o que e lento, quanto, e desde quando. Uma linha por
+            # operacao concluida na extensao.
+            """CREATE TABLE IF NOT EXISTS wa_metrica (
+                id SERIAL PRIMARY KEY,
+                operacao TEXT NOT NULL,
+                ms INTEGER,
+                ok INTEGER DEFAULT 1,
+                usuario_id INTEGER,
+                detalhe TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+                        """CREATE TABLE IF NOT EXISTS wa_conversa_estado (
                 chat_id TEXT PRIMARY KEY,
                 telefone_norm TEXT,
                 lead_id INTEGER,
@@ -1727,6 +1739,15 @@ def init_db():
             numero TEXT,
             wpp_ok INTEGER DEFAULT 0,
             visto_em TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS wa_metrica (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operacao TEXT NOT NULL,
+            ms INTEGER,
+            ok INTEGER DEFAULT 1,
+            usuario_id INTEGER,
+            detalhe TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS wa_conversa_estado (
             chat_id TEXT PRIMARY KEY,
@@ -2911,6 +2932,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_ads_status ON google_ads_conversoes(status)",
         "CREATE INDEX IF NOT EXISTS idx_conv_estado_tel ON wa_conversa_estado(telefone_norm)",
         "CREATE INDEX IF NOT EXISTS idx_transcr_filehash ON whatsapp_transcricoes_cache(filehash)",
+        "CREATE INDEX IF NOT EXISTS idx_wa_metrica_op ON wa_metrica(operacao, criado_em)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_lead ON crm_lead_campos(lead_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_campo ON crm_lead_campos(campo_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_etq_etq ON crm_lead_etiquetas(etiqueta_id)",
@@ -14741,9 +14763,16 @@ def api_whatsapp_fila_proximo():
         WHERE responsavel_id=? AND status='enviado'""", (usuario_id,)).fetchone()
     if ultimo and ultimo['m']:
         decorrido = _wa_segundos_desde(ultimo['m'])
-        if decorrido is not None and decorrido < _wa_gate_atual():
+        gate = _wa_gate_atual()
+        if decorrido is not None and decorrido < gate:
             close_db(conn)
-            return _wa_cors(jsonify({"ok": True, "item": None}))
+            # DIZ QUANTO FALTA. Sem isso a extensao so perguntava de 20 em 20
+            # segundos e os dois atrasos se somavam: o gate liberava em 12s, a
+            # extensao so voltava a perguntar aos 20; liberava aos 45, ela so
+            # via aos 60. Num funil de 5 passos isso vira minutos de espera que
+            # nao protegem nada — o gate ja e a protecao.
+            return _wa_cors(jsonify({"ok": True, "item": None,
+                                     "espera_s": round(max(0.0, gate - decorrido), 1)}))
     agora = datetime.now(TZ_SP)
     agora_txt = agora.strftime('%Y-%m-%d %H:%M:%S')
     cutoff_reclaim = (agora - timedelta(minutes=_WA_FILA_RECLAIM_MINUTOS)).strftime('%Y-%m-%d %H:%M:%S')
@@ -15697,6 +15726,108 @@ _MOTIVOS_PENDENTE = {
     'sem_novidade': 'nada mudou desde a última análise',
     'sem_mensagem': 'conversa sem mensagem',
 }
+
+
+def _wa_desempenho(conn):
+    """Quanto tempo as coisas levam, medido — nao sentido.
+
+    Duas fontes, de proposito: a fila JA guarda criado_em e enviado_em, entao o
+    tempo de espera de mensagem pode ser medido no historico inteiro, inclusive
+    de antes de existir medicao nenhuma. wa_metrica cobre o que o servidor nao
+    ve (transcricao, analise, envio visto do lado do navegador).
+
+    Mediana e p95 em vez de media: uma mensagem que ficou presa 40 minutos
+    empurra a media e some da mediana — e o que interessa e o dia normal e o
+    dia ruim, separados."""
+    def _percentis(vals):
+        if not vals:
+            return None
+        vals = sorted(vals)
+        def p(q):
+            i = min(len(vals) - 1, max(0, int(round(q * (len(vals) - 1)))))
+            return vals[i]
+        return {'n': len(vals), 'p50': p(0.50), 'p95': p(0.95), 'max': vals[-1]}
+
+    out = {'fila': None, 'ops': [], 'desde': None}
+    corte = (datetime.now(TZ_SP) - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+    out['desde'] = corte[:10]
+    try:
+        esperas = []
+        for r in conn.execute("""SELECT criado_em, enviado_em FROM whatsapp_extensao_fila
+                                 WHERE status='enviado' AND enviado_em IS NOT NULL
+                                   AND criado_em >= ? ORDER BY id DESC LIMIT 800""", (corte,)).fetchall():
+            a_, b_ = _parse_dt_seguro(r['criado_em']), _parse_dt_seguro(r['enviado_em'])
+            if a_ and b_:
+                seg = (b_ - a_).total_seconds()
+                if 0 <= seg < 86400:
+                    esperas.append(round(seg, 1))
+        out['fila'] = _percentis(esperas)
+    except Exception as e:
+        app.logger.warning(f"[DESEMPENHO] fila: {e}")
+        try: conn.rollback()
+        except Exception: pass
+    try:
+        por_op = {}
+        for r in conn.execute("""SELECT operacao, ms FROM wa_metrica
+                                 WHERE criado_em >= ? AND ms > 0
+                                 ORDER BY id DESC LIMIT 4000""", (corte,)).fetchall():
+            por_op.setdefault(r['operacao'], []).append(int(r['ms'] or 0))
+        for op, vals in sorted(por_op.items()):
+            p = _percentis(vals)
+            if p:
+                out['ops'].append({'operacao': op, 'n': p['n'],
+                                   'p50': round(p['p50'] / 1000.0, 1),
+                                   'p95': round(p['p95'] / 1000.0, 1),
+                                   'max': round(p['max'] / 1000.0, 1)})
+    except Exception as e:
+        app.logger.warning(f"[DESEMPENHO] métricas: {e}")
+        try: conn.rollback()
+        except Exception: pass
+    return out
+
+
+@app.route('/api/whatsapp/metrica', methods=['POST', 'OPTIONS'])
+def api_whatsapp_metrica():
+    """A extensao reporta quanto tempo cada coisa levou.
+
+    Pedido do Guilherme: "voce precisa captar esse tipo de informacao pra
+    melhorias". Ele estava certo — ate aqui toda queixa de lentidao virava eu
+    lendo codigo e adivinhando. Com numero, "esta lento" vira "o envio esta
+    levando 38s desde julho, e antes levava 14".
+
+    Best-effort e barato: aceita lote, guarda so o essencial, e nunca pode
+    atrapalhar a extensao. Sem payload de conversa, sem dado de cliente."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False}), 401)
+    itens = (request.get_json(silent=True) or {}).get('metricas') or []
+    if not isinstance(itens, list):
+        return _wa_cors(jsonify({"ok": False, "erro": "formato"})), 400
+    conn = db()
+    n = 0
+    try:
+        for m in itens[:50]:
+            op = str((m or {}).get('operacao') or '').strip()[:40]
+            if not op:
+                continue
+            try:
+                ms = int((m or {}).get('ms') or 0)
+            except (TypeError, ValueError):
+                ms = 0
+            conn.execute("""INSERT INTO wa_metrica (operacao, ms, ok, usuario_id, detalhe, criado_em)
+                            VALUES (?,?,?,?,?,?)""",
+                         (op, max(0, min(ms, 3_600_000)), 1 if (m or {}).get('ok', True) else 0,
+                          (m or {}).get('usuario_id'), str((m or {}).get('detalhe') or '')[:120] or None,
+                          _agora_sp()))
+            n += 1
+        conn.commit()
+    except Exception as ex:
+        try: conn.rollback()
+        except Exception: pass
+        app.logger.warning(f"[METRICA] {ex}")
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "gravadas": n}))
 
 
 @app.route('/api/whatsapp/chats/vincular', methods=['POST', 'OPTIONS'])
@@ -24173,12 +24304,14 @@ def configuracoes():
             try: conn2.rollback()
             except Exception: pass
             app.logger.warning(f"[API] chaves: {e}")
+        desempenho = _wa_desempenho(conn2)
         varr_cfg = varredura_cfg(conn2)
         varr_consultores = [dict(r) for r in conn2.execute(
             """SELECT id, nome, COALESCE(varredura_ativa,0) varredura_ativa
                FROM usuarios WHERE ativo=1 ORDER BY nome""").fetchall()]
         close_db(conn2)
     return render_template('configuracoes.html', som_atual=som_atual, sons=SONS_NOTIFICACAO,
+                           desempenho=desempenho,
                            varr_cfg=varr_cfg, varr_consultores=varr_consultores,
                            api_chaves=api_chaves, api_escopos=_API_ESCOPOS,
                            notificar_wpp_leads=notificar_wpp_leads)

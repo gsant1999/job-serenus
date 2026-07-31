@@ -142,6 +142,10 @@ async function salvarNotificacaoWpp(ligado){
     border-radius:10px; padding:13px 15px; }
   .ak-chave code { display:block; font-size:13px; word-break:break-all; color:var(--texto);
     background:var(--panel-3); padding:9px 11px; border-radius:7px; margin:8px 0; user-select:all; }
+  .cfg-perf { display:flex; gap:10px; flex-wrap:wrap; }
+  .cfg-perf-item { flex:1 1 140px; background:var(--panel-2); border:1px solid var(--borda); border-radius:9px; padding:11px 13px; }
+  .cfg-perf-item b { display:block; font-size:19px; font-variant-numeric:tabular-nums; }
+  .cfg-perf-item span { display:block; font-size:10px; color:var(--cinza); margin-top:3px; }
 </style>
 <script>
 async function akCriar(b){
@@ -167,6 +171,51 @@ async function akRevogar(id, nome){
 {% endif %}
 
 {% if varr_cfg %}
+<div class="card">
+  <div class="card-header"><h3>Desempenho da extensão<i class="ajuda-i" title="Quanto tempo as coisas realmente levam, medido nos últimos 7 dias. Mediana é o dia normal; p95 é o dia ruim. Média foi evitada de propósito: uma mensagem presa por uma hora distorce a média e some da mediana.">i</i></h3></div>
+  <div class="card-body">
+    <p class="hint">Últimos 7 dias, desde {{ desempenho.desde }}. Serve pra responder "está lento?" com número em vez de impressão.</p>
+
+    {% if desempenho.fila %}
+    <div class="cfg-perf">
+      <div class="cfg-perf-item">
+        <b>{{ desempenho.fila.p50 }}s</b>
+        <span>espera típica da mensagem<i class="ajuda-i" title="Do momento em que a mensagem entra na fila até sair no WhatsApp. Inclui o intervalo anti-bloqueio, que é proposital: enviar de X em X segundos cravado é padrão de robô e queima número.">i</i></span>
+      </div>
+      <div class="cfg-perf-item">
+        <b>{{ desempenho.fila.p95 }}s</b>
+        <span>nos 5% piores casos</span>
+      </div>
+      <div class="cfg-perf-item">
+        <b>{{ desempenho.fila.n }}</b>
+        <span>mensagens medidas</span>
+      </div>
+    </div>
+    {% else %}
+    <div class="hint">Nenhuma mensagem enviada pela fila nos últimos 7 dias.</div>
+    {% endif %}
+
+    {% if desempenho.ops %}
+    <table class="tabela" style="margin-top:14px;">
+      <thead><tr><th>Operação</th><th style="text-align:right;">Típico</th><th style="text-align:right;">p95</th><th style="text-align:right;">Pior</th><th style="text-align:right;">Medições</th></tr></thead>
+      <tbody>
+        {% for o in desempenho.ops %}
+        <tr>
+          <td>{{ o.operacao|replace('_',' ') }}</td>
+          <td style="text-align:right;">{{ o.p50 }}s</td>
+          <td style="text-align:right;">{{ o.p95 }}s</td>
+          <td style="text-align:right;">{{ o.max }}s</td>
+          <td style="text-align:right;">{{ o.n }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="hint" style="margin-top:12px;">Ainda sem medições da extensão — elas começam a chegar conforme os consultores usam a versão nova.</div>
+    {% endif %}
+  </div>
+</div>
+
 <div class="card" style="margin-top:18px;">
   <div class="card-header"><h3>Leitura automática das conversas</h3></div>
   <div style="padding:0 16px 8px; font-size:13px; color:var(--cinza); line-height:1.6;">

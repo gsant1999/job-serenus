@@ -4847,16 +4847,56 @@
   // O limite de ritmo de verdade mora no servidor (/api/whatsapp/fila/proximo);
   // o mutex aqui só evita duas consultas se sobrepondo na MESMA aba.
   let _filaOcupada = false;
+  // Agenda a proxima checagem pro instante em que o servidor VAI liberar, em vez
+  // de esperar o tique fixo. Era aqui a lentidao do funil: o gate anti-bloqueio
+  // libera entre 12s e 45s, e a extensao so perguntava de 20 em 20 — liberou aos
+  // 12, ela so viu aos 20; liberou aos 45, so viu aos 60. Num funil de 5 passos
+  // isso vira minutos de espera que nao protegem nada, porque a protecao e o
+  // gate, nao o atraso de quem pergunta.
+  // ── MEDIR, nao achar ────────────────────────────────────────────────────
+  // Guarda o tempo de cada operacao e manda em lote, de vez em quando. Sem isto
+  // toda queixa de lentidao vira eu lendo codigo e adivinhando; com isto vira
+  // "o envio esta em 38s, antes estava em 14". Nao viaja conteudo de conversa.
+  const _MET = [];
+  function _metrica(operacao, ms, ok, detalhe) {
+    try {
+      _MET.push({ operacao, ms: Math.round(ms), ok: ok !== false, detalhe: detalhe || '' });
+      if (_MET.length >= 12) _enviarMetricas();
+    } catch (e) { /* medir nunca pode atrapalhar */ }
+  }
+  async function _enviarMetricas() {
+    if (!_MET.length) return;
+    const lote = _MET.splice(0, 50);
+    try {
+      const { usuarioId } = await _safeStorageGet(['usuarioId']);
+      lote.forEach((m) => { m.usuario_id = usuarioId || null; });
+      await _safeSendMessage({ type: 'metricas', metricas: lote });
+    } catch (e) { /* perdeu a medida, nao o trabalho */ }
+  }
+  _registrarLoop(setInterval(_enviarMetricas, 120000));
+
+  let _filaTimer = null;
+  function _agendarFila(segundos) {
+    if (_filaTimer) clearTimeout(_filaTimer);
+    const ms = Math.max(600, Math.min((segundos || 0) * 1000 + 400, 60000));
+    _filaTimer = setTimeout(() => { _filaTimer = null; checarFilaDeEnvio(); }, ms);
+  }
+
   async function checarFilaDeEnvio() {
     if (_contextoMorto) return;
     if (_filaOcupada) return;
     const { extKey, usuarioId } = await _safeStorageGet(['extKey', 'usuarioId']);
     if (!extKey || !usuarioId) return;
     _filaOcupada = true;
+    const _t0 = Date.now();
     try {
       const resp = await chrome.runtime.sendMessage({ type: 'fila_proximo', usuario_id: usuarioId });
       const item = resp && resp.ok && resp.item;
-      if (!item) return;
+      if (!item) {
+        // Nada agora: volta exatamente quando o gate abrir.
+        if (resp && typeof resp.espera_s === 'number') _agendarFila(resp.espera_s);
+        return;
+      }
       let envio;
       if (item.tipo && item.tipo !== 'texto' && item.midia_url) {
         // Mídia: o background baixa (CSP), a ponte manda pela wa-js.
@@ -4874,9 +4914,15 @@
         ok: !!(envio && envio.ok), erro: (envio && envio.erro) || null,
         wpp_msg_id: (envio && envio.wpp_msg_id) || null,
       });
+      _metrica('envio_' + (item.tipo || 'texto'), Date.now() - _t0, !!(envio && envio.ok));
+      // Mandou uma: tenta a proxima ja. O servidor decide se pode — aqui so
+      // deixamos de dormir 20s a toa entre uma e outra.
+      _agendarFila(1);
     } catch (e) { /* próxima rodada tenta de novo */ }
     finally { _filaOcupada = false; }
   }
+  // Batida de seguranca: se nada agendar (aba dormiu, erro engolido), a fila
+  // volta a andar sozinha. O caminho normal e o _agendarFila.
   _registrarLoop(setInterval(checarFilaDeEnvio, 20000));
 
   // ═══════════════ Campanha (Fase 2): vigília de resposta + limpeza ═══════════════
