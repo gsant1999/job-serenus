@@ -1,0 +1,322 @@
+{% extends 'base.html' %}
+{% block title %}{{ lead.nome }} — painel do lead{% endblock %}
+
+{% block head %}
+<style>
+  /* Painel 360: leitura de cima pra baixo em ordem de dinheiro — quem é, de onde
+     veio, o que custou, o que virou. Cada bloco responde UMA pergunta. */
+  .pl-cab { display:flex; align-items:flex-start; gap:18px; flex-wrap:wrap;
+            background:var(--panel-2); border:1px solid var(--borda); border-radius:12px;
+            padding:18px 20px; margin-bottom:16px; }
+  .pl-cab-id { flex:1 1 320px; min-width:0; }
+  .pl-nome { font-size:22px; font-weight:700; line-height:1.2; }
+  .pl-sub { font-size:12px; color:var(--cinza); margin-top:6px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .pl-lid { display:inline-flex; align-items:center; gap:6px; font-family:ui-monospace,Menlo,monospace;
+            font-size:11px; background:var(--panel-3); border:1px solid var(--borda);
+            border-radius:6px; padding:3px 9px; }
+  .pl-lid-tag { font-size:8px; font-weight:800; letter-spacing:.3px; padding:1px 5px; border-radius:4px; }
+  .pl-lid-tag.lid { background:rgba(168,85,247,.2); color:#d8b4fe; }
+  .pl-lid-tag.numero { background:rgba(34,197,94,.18); color:#4ade80; }
+  .pl-lid-tag.outro { background:var(--panel-2); color:var(--cinza-2); }
+  /* Sem conversa vinculada é um estado de trabalho, não um vazio: amarelo, e diz o que fazer. */
+  .pl-lid.falta { border-color:rgba(250,204,21,.4); color:#eab308; }
+
+  .pl-num-linha { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .pl-num { flex:1 1 150px; background:var(--panel-2); border:1px solid var(--borda);
+            border-radius:10px; padding:12px 14px; }
+  .pl-num b { display:block; font-size:20px; font-variant-numeric:tabular-nums; line-height:1.25; }
+  .pl-num span { display:block; font-size:10px; color:var(--cinza); margin-top:3px; }
+  .pl-num.ok { border-color:rgba(34,197,94,.3); }
+  .pl-num.alerta { border-color:rgba(250,204,21,.3); }
+
+  .pl-grade { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px; align-items:start; }
+  .pl-box { background:var(--panel-2); border:1px solid var(--borda); border-radius:12px; padding:16px 18px; }
+  .pl-box h2 { font-size:13px; font-weight:700; letter-spacing:.3px; text-transform:uppercase;
+               color:var(--cinza); margin:0 0 12px; display:flex; align-items:center; gap:6px; }
+  .pl-box.largo { grid-column:1 / -1; }
+
+  .pl-linha { display:flex; justify-content:space-between; gap:14px; padding:7px 0;
+              border-bottom:1px solid var(--borda); font-size:13px; }
+  .pl-linha:last-child { border-bottom:none; }
+  .pl-linha dt { color:var(--cinza); flex:0 0 auto; }
+  .pl-linha dd { margin:0; text-align:right; min-width:0; word-break:break-word; }
+  .pl-vazio { font-size:12px; color:var(--cinza); font-style:italic; }
+
+  /* Procedência do dado: quem escreveu importa tanto quanto o valor. */
+  .pl-fonte { font-size:8.5px; font-weight:700; letter-spacing:.3px; text-transform:uppercase;
+              padding:1px 5px; border-radius:4px; margin-left:6px; vertical-align:middle; }
+  .pl-fonte.ia { background:rgba(168,85,247,.18); color:#d8b4fe; }
+  .pl-fonte.ia_validado { background:rgba(34,197,94,.16); color:#4ade80; }
+  .pl-fonte.corrigido { background:rgba(245,158,11,.16); color:#fbbf24; }
+  .pl-fonte.consultor, .pl-fonte.cotacao, .pl-fonte.api_cnpj, .pl-fonte.utm { background:var(--panel-3); color:var(--cinza-2); }
+
+  .pl-tl { list-style:none; margin:0; padding:0; max-height:520px; overflow-y:auto; }
+  .pl-tl li { display:flex; gap:10px; padding:8px 0; border-bottom:1px solid var(--borda); font-size:12.5px; }
+  .pl-tl li:last-child { border-bottom:none; }
+  .pl-tl-quando { flex:0 0 116px; color:var(--cinza); font-size:11px; font-variant-numeric:tabular-nums; }
+  .pl-tl-tipo { flex:0 0 auto; font-size:8.5px; font-weight:700; text-transform:uppercase; letter-spacing:.3px;
+                padding:2px 6px; border-radius:4px; background:var(--panel-3); color:var(--cinza-2); height:fit-content; }
+  .pl-tl-tipo.analise { background:rgba(59,130,246,.16); color:#93c5fd; }
+  .pl-tl-tipo.cotacao { background:rgba(34,197,94,.16); color:#4ade80; }
+  .pl-tl-tipo.etapa { background:rgba(168,85,247,.16); color:#d8b4fe; }
+  .pl-tl-txt { flex:1 1 auto; min-width:0; word-break:break-word; }
+  .pl-tl-quem { color:var(--cinza); font-size:11px; }
+
+  .pl-tab { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .pl-tab th { text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.4px;
+               color:var(--cinza); padding:6px 8px; border-bottom:1px solid var(--borda); font-weight:600; }
+  .pl-tab td { padding:7px 8px; border-bottom:1px solid var(--borda); }
+  .pl-tab td.num, .pl-tab th.num { text-align:right; font-variant-numeric:tabular-nums; }
+
+  .pl-nota { border-bottom:1px solid var(--borda); padding:9px 0; font-size:12.5px; }
+  .pl-nota:last-child { border-bottom:none; }
+  .pl-nota-quem { font-size:10.5px; color:var(--cinza); margin-top:4px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Painel do lead</h1>
+    <div class="sub">Tudo que o JOB sabe sobre esta pessoa, numa tela só.</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <a href="/crm?lead={{ lead.id }}" class="btn-outline">Abrir no CRM</a>
+    <a href="/crm" class="btn-outline">Voltar</a>
+  </div>
+</div>
+
+<div class="page">
+
+<div class="pl-cab">
+  <div class="pl-cab-id">
+    <div class="pl-nome">{{ lead.nome }}</div>
+    <div class="pl-sub">
+      <span class="pill" style="background:{{ (lead.etapa_cor or '#64748b') }}22; color:{{ lead.etapa_cor or '#94a3b8' }};">{{ lead.etapa_nome or lead.etapa or '—' }}</span>
+      {% if lead.sub_status %}<span>{{ lead.sub_status }}</span>{% endif %}
+      {% if saude.idade_txt %}<span title="Tempo desde a última mudança de etapa ou sub-status">sem mexer {{ saude.idade_txt }}</span>{% endif %}
+      {% if lead.responsavel_nome %}<span>· {{ lead.responsavel_nome }}</span>{% endif %}
+      {% if lead.telefone %}<span>· {{ lead.telefone }}</span>{% endif %}
+    </div>
+    <div class="pl-sub" style="margin-top:9px;">
+      {% if wa %}
+        {% for w in wa %}
+        <span class="pl-lid" title="{{ w.chat_id }}{{ ' · ' ~ w.msgs ~ ' mensagens analisadas' if w.msgs }}">
+          <span class="pl-lid-tag {{ w.tipo }}">{{ '@lid' if w.tipo == 'lid' else ('nº' if w.tipo == 'numero' else 'id') }}</span>{{ w.curto }}
+        </span>
+        {% endfor %}
+      {% else %}
+        {# Falta vincular é ação, não ausência: o lead existe, a conversa dele não
+           foi identificada ainda, e sem isso a análise e o custo ficam sem dono. #}
+        <span class="pl-lid falta" title="Este lead ainda não tem conversa do WhatsApp vinculada. Rode 'Sincronizar @lid de todas as conversas' na extensão, ou abra a conversa dele com a extensão ligada.">
+          falta vincular a conversa — checar
+        </span>
+      {% endif %}
+      {% for e in etiquetas %}
+      <span class="pill" style="background:{{ e.cor }}22; color:{{ e.cor }};">{{ e.nome }}</span>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="pl-num-linha">
+  <div class="pl-num">
+    <b>{{ (lead.valor_estimado or 0)|moeda }}</b>
+    <span>valor estimado<i class="ajuda-i" title="O que se espera desta venda. Vem da cotação (1ª opção recomendada, ou a mais barata) quando o consultor não preencheu à mão.">i</i></span>
+  </div>
+  <div class="pl-num {{ 'ok' if vendas else '' }}">
+    <b>{{ receita|moeda }}</b>
+    <span>{{ vendas|length }} venda(s) registrada(s)</span>
+  </div>
+  <div class="pl-num {{ 'ok' if com_liquida > 0 else '' }}">
+    <b>{{ com_liquida|moeda }}</b>
+    <span>comissão líquida da corretora<i class="ajuda-i" title="O que sobra para a corretora depois de pagar o consultor. Fica congelado na proposta no momento do cadastro — não é recalculado aqui.">i</i></span>
+  </div>
+  <div class="pl-num {{ 'alerta' if custo_ia_brl > 1 else '' }}">
+    <b>{{ custo_ia_brl|moeda }}</b>
+    <span>IA gasta com este lead<i class="ajuda-i" title="Soma da leitura das conversas e da transcrição de áudios deste lead. Estimativa pelo preço por token/minuto, não a fatura do provedor. Câmbio fixo configurado no sistema.">i</i></span>
+  </div>
+  <div class="pl-num">
+    <b>{{ ultima.score if ultima and ultima.score is not none else '—' }}</b>
+    <span>score da conversa<i class="ajuda-i" title="Nota de 0 a 1000 que a IA dá pela conversa: urgência, orçamento, perfil e engajamento. Serve para priorizar quem atender primeiro — não é promessa de fechamento.">i</i></span>
+  </div>
+</div>
+
+<div class="pl-grade">
+
+  <div class="pl-box">
+    <h2>De onde veio<i class="ajuda-i" title="A origem é o que liga esta pessoa ao anúncio que a trouxe. Sem ela, a venda não volta para o Google Ads dizendo qual criativo deu dinheiro.">i</i></h2>
+    <dl style="margin:0;">
+      <div class="pl-linha"><dt>Origem</dt><dd>{{ midia.origem or '—' }}</dd></div>
+      <div class="pl-linha"><dt>Tráfego</dt><dd>{{ midia.trafego or '—' }}</dd></div>
+      <div class="pl-linha"><dt>Campanha</dt><dd>{{ midia.campanha or '—' }}</dd></div>
+      <div class="pl-linha"><dt>Criativo</dt><dd>{{ midia.criativo or '—' }}</dd></div>
+      <div class="pl-linha"><dt>Click ID</dt><dd style="font-family:ui-monospace,Menlo,monospace; font-size:11px;">{{ midia.gclid[:28] ~ '…' if midia.gclid|length > 28 else (midia.gclid or '—') }}</dd></div>
+      {% if indicou %}
+      <div class="pl-linha"><dt>Indicado por</dt><dd>{% if indicou.id %}<a href="/lead/{{ indicou.id }}">{{ indicou.nome }}</a>{% else %}{{ indicou.nome }}{% endif %}</dd></div>
+      {% endif %}
+    </dl>
+    {# Não medido é diferente de zero. Dizer qual é o buraco vale mais do que
+       exibir um número inventado de custo por lead. #}
+    <div class="pl-vazio" style="margin-top:12px;">
+      Custo de mídia por lead ainda não é calculado: o sistema guarda a campanha e o criativo,
+      mas não o investimento gasto neles. Para ter custo por lead, falta trazer o gasto diário
+      do Google Ads e da Meta por campanha.
+    </div>
+  </div>
+
+  <div class="pl-box">
+    <h2>Conversa e custo de IA</h2>
+    {% if not analises %}
+      <div class="pl-vazio">Nenhuma conversa analisada ainda.</div>
+    {% else %}
+    <dl style="margin:0;">
+      <div class="pl-linha"><dt>Última análise</dt><dd>{{ ultima.criado_em }}</dd></div>
+      <div class="pl-linha"><dt>Score</dt><dd>{{ ultima.score }} ({{ ultima.score_faixa or '—' }})</dd></div>
+      <div class="pl-linha"><dt>Mensagens lidas</dt><dd>{{ ultima.total_mensagens or 0 }}</dd></div>
+      <div class="pl-linha"><dt>Análises feitas</dt><dd>{{ analises|length }}</dd></div>
+      <div class="pl-linha"><dt>Custo acumulado</dt><dd>US$ {{ '%.4f'|format(custo_ia_usd) }} · {{ custo_ia_brl|moeda }}</dd></div>
+    </dl>
+    <div style="margin-top:10px;">
+      <a href="/whatsapp-analises/{{ ultima.id }}/conversa">Ver a conversa analisada</a>
+    </div>
+    {% endif %}
+    {% if wa %}
+    <div class="pl-vazio" style="margin-top:12px;">
+      {% for w in wa %}{{ w.msgs }} mensagem(ns) lidas em {{ w.curto }}{{ ' · última em ' ~ w.analisado_em if w.analisado_em }}<br>{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="pl-box">
+    <h2>Qualificação<i class="ajuda-i" title="O que se sabe do cliente e QUEM escreveu cada coisa: IA significa que a inteligência extraiu da conversa e ninguém conferiu ainda; corrigido significa que o consultor mudou o que a IA tinha posto.">i</i></h2>
+    {% if not campos %}
+      <div class="pl-vazio">Nada preenchido ainda.</div>
+    {% else %}
+    <dl style="margin:0;">
+      {% for c in campos %}
+      <div class="pl-linha">
+        <dt>{{ c.nome }}</dt>
+        <dd>{{ c.valor }}{% if c.fonte %}<span class="pl-fonte {{ c.fonte }}">{{ c.fonte|replace('_',' ') }}</span>{% endif %}</dd>
+      </div>
+      {% endfor %}
+    </dl>
+    {% endif %}
+  </div>
+
+  <div class="pl-box">
+    <h2>Cotações</h2>
+    {% if not cotacoes %}
+      <div class="pl-vazio">Nenhuma cotação feita para este lead.</div>
+    {% else %}
+    <table class="pl-tab">
+      <thead><tr><th>Quando</th><th class="num">Planos</th><th class="num">Total</th><th>Cliente abriu</th><th></th></tr></thead>
+      <tbody>
+        {% for c in cotacoes %}
+        <tr>
+          <td>{{ c.criado_em }}</td>
+          <td class="num">{{ c.planos }}</td>
+          <td class="num">{{ c.total|moeda }}</td>
+          <td>{{ 'sim (' ~ c.eventos ~ ')' if c.eventos else 'sem registro' }}</td>
+          <td><a href="/cotacao/documento/{{ c.id }}">ver</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  <div class="pl-box largo">
+    <h2>Venda e pós-venda</h2>
+    {% if not vendas %}
+      <div class="pl-vazio">Nenhuma venda registrada para este lead.</div>
+    {% else %}
+      {% for v in vendas %}
+      <div style="margin-bottom:18px;">
+        <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:baseline;">
+          <div>
+            <a href="/proposta/{{ v.id }}" style="font-size:15px; font-weight:700;">{{ v.razao_social }}</a>
+            <div class="pl-vazio" style="font-style:normal;">
+              {{ v.adm_operadora or '—' }} · {{ v.modalidade or '—' }} · {{ v.status_operacional or v.status }}
+              {% if v.vigencia %} · vigência {{ v.vigencia }}{% endif %}
+              {% if v.implantada_em %} · implantada em {{ v.implantada_em }}{% endif %}
+              {% if v.lead_vinculo %} · vínculo por {{ v.lead_vinculo }}{% endif %}
+            </div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:16px; font-weight:700;">{{ (v.valor or 0)|moeda }}<span style="font-size:11px; color:var(--cinza);">/mês</span></div>
+          </div>
+        </div>
+
+        <table class="pl-tab" style="margin-top:10px;">
+          <thead><tr>
+            <th>Parcela</th><th>Competência</th><th>Prevista</th>
+            <th class="num">Consultor<i class="ajuda-i" title="A parte que vai para o consultor nesta parcela.">i</i></th>
+            <th class="num">Corretora<i class="ajuda-i" title="A parte bruta da corretora nesta parcela — antes de descontar o consultor.">i</i></th>
+          </tr></thead>
+          <tbody>
+            {% for p in v.parcelas %}
+            <tr>
+              <td>{{ p.numero }}/{{ v.num_parcelas or v.parcelas|length }}</td>
+              <td>{{ p.competencia or '—' }}</td>
+              <td>{{ p.data_prevista or '—' }}</td>
+              <td class="num">{{ p.valor_consultor|moeda }}</td>
+              <td class="num">{{ p.valor_corretora|moeda }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="pl-vazio">Sem parcelas geradas.</td></tr>
+            {% endfor %}
+          </tbody>
+          <tfoot><tr>
+            <td colspan="3" style="color:var(--cinza); font-size:11px;">Comissão congelada no cadastro</td>
+            <td class="num"><b>{{ v.com_consultor|moeda }}</b></td>
+            <td class="num"><b>{{ v.com_bruta|moeda }}</b></td>
+          </tr></tfoot>
+        </table>
+
+        <div class="pl-vazio" style="margin-top:8px;">
+          {% if v.ads %}
+            Conversão para o Google Ads: <b>{{ v.ads.status }}</b>{{ ' (' ~ v.ads.click_tipo ~ ')' if v.ads.click_tipo }}{{ ' em ' ~ v.ads.conversao_em if v.ads.conversao_em }}.
+          {% else %}
+            Esta venda não subiu para o Google Ads — sem click id do anúncio, o Google não sabe que ela existiu.
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+
+  <div class="pl-box">
+    <h2>Notas do consultor</h2>
+    {% if not notas %}
+      <div class="pl-vazio">Nenhuma nota escrita.</div>
+    {% else %}
+      {% for n in notas %}
+      <div class="pl-nota">
+        {{ n.texto }}
+        <div class="pl-nota-quem">{{ n.autor_nome or 'Extensão WhatsApp' }} · {{ n.criado_em }}</div>
+      </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+
+  <div class="pl-box">
+    <h2>Linha do tempo</h2>
+    {% if not timeline %}
+      <div class="pl-vazio">Sem histórico.</div>
+    {% else %}
+    <ul class="pl-tl">
+      {% for t in timeline %}
+      <li>
+        <span class="pl-tl-quando">{{ t.criado_em }}</span>
+        <span class="pl-tl-tipo {{ t.tipo }}">{{ t.tipo }}</span>
+        <span class="pl-tl-txt">{{ t.descricao }}<span class="pl-tl-quem"> — {{ t.usuario_nome or 'sistema' }}</span></span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+
+</div>
+</div>
+{% endblock %}

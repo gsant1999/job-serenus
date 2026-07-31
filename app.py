@@ -17652,6 +17652,166 @@ _CALIB_CAMPOS = [
 ]
 
 
+@app.route('/lead/<int:lid>')
+@login_required
+def painel_lead(lid):
+    """PAINEL 360 DO LEAD — tudo que o JOB sabe sobre uma pessoa, numa tela.
+
+    O dado ja existia todo; o que nao existia era o lugar onde ele se encontra.
+    Pra responder "esse lead deu dinheiro?" era preciso abrir CRM, propostas,
+    cotacao, financeiro e a analise da conversa, e juntar de cabeca. Aqui a
+    pergunta se responde de uma vez: veio de onde, custou quanto de IA, foi
+    trabalhado como, virou venda de quanto, e quanto disso e comissao.
+
+    Regras que este painel respeita, apuradas no mapeamento do schema:
+      - custo de IA sai SO de whatsapp_analises. wa_conversa_estado e
+        whatsapp_transcricoes_cache descrevem O MESMO dolar em outra
+        granularidade — somar os tres triplicaria a conta;
+      - parcelas.valor e a parte do CONSULTOR; parcelas.valor_corretora e a da
+        CORRETORA. Trocar as duas e o erro classico aqui;
+      - comissao NAO se recalcula: ela fica congelada na proposta;
+      - 'ganho'/'perdido' e crm_etapas.tipo, nunca crm_leads.etapa (que guarda
+        o slug);
+      - ROUND(REAL, n) nao existe no Postgres — arredondamento fica em Python.
+    """
+    conn = db()
+    lead = conn.execute("""SELECT l.*, u.nome AS responsavel_nome,
+                                  e.nome AS etapa_nome, e.tipo AS etapa_tipo, e.cor AS etapa_cor,
+                                  e.sla_dias
+                           FROM crm_leads l
+                           LEFT JOIN usuarios u ON u.id = l.responsavel_id
+                           LEFT JOIN crm_etapas e ON e.slug = l.etapa
+                           WHERE l.id=?""", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); abort(404)
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] not in (None, session.get('user_id')):
+        close_db(conn); abort(403)
+    lead = dict(lead)
+
+    # ── Identidade no WhatsApp ────────────────────────────────────────────
+    wa = []
+    for r in conn.execute("""SELECT c.chat_id, c.telefone, c.telefone_norm, c.nome, c.atualizado_em,
+                                    e.msgs_analisadas, e.ultima_analise_em, e.custo_acumulado_usd
+                             FROM wa_chat_lead c
+                             LEFT JOIN wa_conversa_estado e ON e.chat_id = c.chat_id
+                             WHERE c.lead_id=? ORDER BY c.atualizado_em DESC""", (lid,)).fetchall():
+        cid = r['chat_id'] or ''
+        wa.append({'chat_id': cid,
+                   'tipo': 'lid' if '@lid' in cid else ('numero' if '@c.us' in cid else 'outro'),
+                   'curto': cid.split('@')[0][:20] + ('…' if len(cid.split('@')[0]) > 20 else ''),
+                   'nome': r['nome'] or '', 'visto_em': r['atualizado_em'],
+                   'msgs': r['msgs_analisadas'] or 0, 'analisado_em': r['ultima_analise_em']})
+
+    # ── Origem de midia ───────────────────────────────────────────────────
+    try:
+        extras = json.loads(lead.get('dados_extras') or '{}')
+    except Exception:
+        extras = {}
+    midia = {k: _campo_de_midia(extras, k) for k in ('origem_midia', 'campanha', 'criativo')}
+    midia['gclid'] = lead.get('gclid') or _campo_de_midia(extras, 'gclid') or ''
+    midia['trafego'] = lead.get('trafego') or ''
+    midia['origem'] = lead.get('origem') or ''
+    indicou = None
+    if lead.get('indicado_por_lead_id'):
+        r = conn.execute("SELECT id, nome FROM crm_leads WHERE id=?", (lead['indicado_por_lead_id'],)).fetchone()
+        if r:
+            indicou = {'id': r['id'], 'nome': r['nome']}
+    elif lead.get('indicado_por_nome'):
+        indicou = {'id': None, 'nome': lead['indicado_por_nome']}
+
+    # ── Qualificacao com procedencia ──────────────────────────────────────
+    campos_def = carregar_campos_crm(conn)
+    campos_val = valores_campos_lead(conn, lead, campos_def)
+    campos = []
+    for c in campos_def:
+        v = campos_val.get(c['chave'], {}) or {}
+        if not (v.get('valor') or '').strip():
+            continue
+        campos.append({'nome': c['nome'], 'valor': v.get('valor'), 'momento': c['momento'],
+                       'fonte': v.get('fonte') or '', 'valor_ia': v.get('valor_ia') or ''})
+
+    etiquetas = _etiquetas_dos_leads(conn, [lid]).get(lid, [])
+
+    # ── Conversa e CUSTO DE IA (fonte canonica: whatsapp_analises) ────────
+    analises = [dict(r) for r in conn.execute("""
+        SELECT id, score, score_faixa, total_mensagens, duracao_segundos, criado_em,
+               COALESCE(custo_claude_usd,0) AS c_claude,
+               COALESCE(custo_transcricao_usd,0) AS c_transc
+        FROM whatsapp_analises WHERE lead_id=? ORDER BY criado_em DESC""", (lid,)).fetchall()]
+    custo_ia = sum(float(a['c_claude'] or 0) + float(a['c_transc'] or 0) for a in analises)
+    ultima = analises[0] if analises else None
+
+    # ── Cotacoes ──────────────────────────────────────────────────────────
+    cotacoes = []
+    for r in conn.execute("""SELECT c.id, c.token, c.titulo, c.total, c.criado_em, c.planos_json,
+                                    (SELECT COUNT(*) FROM cotacao_engajamento g
+                                      WHERE g.cotacao_id = c.id) AS eventos
+                             FROM cotacao_salva c WHERE c.lead_id=?
+                             ORDER BY c.criado_em DESC""", (lid,)).fetchall():
+        try:
+            n = len(json.loads(r['planos_json'] or '[]'))
+        except Exception:
+            n = 0
+        cotacoes.append({'id': r['id'], 'token': r['token'], 'titulo': r['titulo'],
+                         'total': float(r['total'] or 0), 'planos': n,
+                         'criado_em': r['criado_em'], 'eventos': r['eventos'] or 0})
+
+    # ── Venda, comissao e parcelas ────────────────────────────────────────
+    vendas = []
+    for p in conn.execute("""SELECT id, razao_social, valor, status, status_operacional, fase,
+                                    adm_operadora, modalidade, vigencia, criado_em, consultor,
+                                    lead_vinculo, num_parcelas,
+                                    COALESCE(comissao_total_corretora,0) AS com_bruta,
+                                    COALESCE(comissao_consultor,0) AS com_consultor,
+                                    COALESCE(comissao_corretora_liquida,0) AS com_liquida
+                             FROM propostas
+                             WHERE lead_id=? AND COALESCE(status,'') <> 'Excluída'
+                             ORDER BY criado_em DESC""", (lid,)).fetchall():
+        p = dict(p)
+        p['parcelas'] = [dict(x) for x in conn.execute("""
+            SELECT numero, competencia, data_prevista,
+                   COALESCE(valor,0) AS valor_consultor,
+                   COALESCE(valor_corretora,0) AS valor_corretora
+            FROM parcelas WHERE proposta_id=? ORDER BY numero""", (p['id'],)).fetchall()]
+        # DATA DE IMPLANTACAO: nao existe coluna pra ela. O unico registro de
+        # quando a proposta virou "Emitida/Ativa" e a linha do historico — e sem
+        # essa data nao ha pos-venda nenhum, so status atual sem quando.
+        imp = conn.execute("""SELECT criado_em FROM historico_proposta
+                              WHERE proposta_id=? AND tipo='status_operacional'
+                                AND descricao LIKE '%Emitida/Ativa'
+                              ORDER BY id DESC LIMIT 1""", (p['id'],)).fetchone()
+        p['implantada_em'] = imp['criado_em'] if imp else None
+        p['ads'] = conn.execute("""SELECT status, click_tipo, valor, conversao_em
+                                   FROM google_ads_conversoes WHERE proposta_id=?""",
+                                (p['id'],)).fetchone()
+        p['ads'] = dict(p['ads']) if p['ads'] else None
+        vendas.append(p)
+
+    receita = sum(float(v['valor'] or 0) for v in vendas)
+    com_bruta = sum(float(v['com_bruta'] or 0) for v in vendas)
+    com_liquida = sum(float(v['com_liquida'] or 0) for v in vendas)
+
+    # ── Linha do tempo (fonte unica: crm_atividades) ──────────────────────
+    timeline = [dict(r) for r in conn.execute("""
+        SELECT tipo, usuario_nome, descricao, criado_em FROM crm_atividades
+        WHERE lead_id=? ORDER BY id DESC LIMIT 120""", (lid,)).fetchall()]
+
+    notas = [dict(r) for r in conn.execute("""
+        SELECT texto, autor_nome, criado_em FROM lead_notas
+        WHERE lead_id=? ORDER BY id DESC LIMIT 30""", (lid,)).fetchall()]
+
+    saude = _saude_card(lead.get('avancou_em'), lead.get('sla_dias'), lead.get('criado_em'))
+    close_db(conn)
+
+    return render_template('painel_lead.html', lead=lead, wa=wa, midia=midia, indicou=indicou,
+                           campos=campos, etiquetas=etiquetas, analises=analises, ultima=ultima,
+                           custo_ia_usd=round(custo_ia, 4), custo_ia_brl=round(custo_ia * _USD_BRL_TAXA, 2),
+                           cotacoes=cotacoes, vendas=vendas, receita=receita,
+                           com_bruta=com_bruta, com_liquida=com_liquida,
+                           timeline=timeline, notas=notas, saude=saude,
+                           taxa_usd_brl=_USD_BRL_TAXA)
+
+
 @app.route('/calibracao')
 @login_required
 @admin_required

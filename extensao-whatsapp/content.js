@@ -1563,6 +1563,23 @@
   // ja esta em cache nao e refeito — o segundo clique custa zero.
   const TRTUDO = { rodando: false, feitos: 0, total: 0, erros: 0, pulados: 0 };
 
+  // Cede o processador. requestAnimationFrame espera o proximo quadro pintar —
+  // e a garantia de que a interface andou; o setTimeout e o piso pra aba em
+  // segundo plano, onde rAF nao dispara.
+  function _respirar() {
+    return new Promise((r) => {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(r, 0));
+      else setTimeout(r, 16);
+    });
+  }
+  function _quandoVisivel() {
+    return new Promise((r) => {
+      if (!document.hidden) return r();
+      const f = () => { if (!document.hidden) { document.removeEventListener('visibilitychange', f); r(); } };
+      document.addEventListener('visibilitychange', f);
+    });
+  }
+
   async function transcreverTudo(aoAndar) {
     if (TRTUDO.rodando) return TRTUDO;
     const conv = await _pedirPonte('ler_conversa_completa', { limite: 800 }, 25000);
@@ -1576,19 +1593,39 @@
         const r = await _safeSendMessage({ type: 'transcricoes_cache', ids }).catch(() => null);
         if (r && r.ok) Object.assign(jaTem, r.transcricoes || {});
       }
+      // Os que ja tem texto saem PRIMEIRO e de uma vez: e so pintar, nao ha
+      // rede nem decodificacao envolvida. Isso faz a maioria dos audios
+      // aparecer instantaneamente e deixa a fila cara so com o que falta.
+      const faltam = [];
       for (const id of ids) {
         const pronto = TR.cache.get(id) || jaTem[id];
         if (pronto) {
           TR.cache.set(id, pronto);
           trAtualizarSlot(id);
           TRTUDO.pulados++; TRTUDO.feitos++;
-          if (aoAndar) aoAndar(TRTUDO);
-          continue;
+        } else {
+          faltam.push(id);
         }
+      }
+      if (aoAndar) aoAndar(TRTUDO);
+
+      for (const id of faltam) {
+        // DEVOLVE A MAO PRO NAVEGADOR entre um audio e outro.
+        //
+        // Era aqui que travava: baixar e decodificar audio em base64 e trabalho
+        // pesado, e um `for` com await encadeado nunca solta o event loop tempo
+        // suficiente — o WhatsApp fica sem processar rolagem, clique e render
+        // enquanto a fila anda. Duas pausas curtas custam quase nada no total e
+        // devolvem a interface pra quem esta usando.
+        await _respirar();
         await trTranscrever(id);
         if (!TR.cache.get(id)) TRTUDO.erros++;
         TRTUDO.feitos++;
         if (aoAndar) aoAndar(TRTUDO);
+        await _respirar();
+        // Aba escondida: para de trabalhar e volta quando ela aparecer. Sem
+        // isso a fila continua consumindo CPU numa aba que ninguem esta vendo.
+        if (document.hidden) await _quandoVisivel();
       }
     } finally {
       TRTUDO.rodando = false;

@@ -19,15 +19,30 @@
   if (window.__jobWppBridge) return;
   window.__jobWppBridge = true;
 
-  async function blobParaBase64(blob) {
-    const buf = await blob.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    let bin = '';
-    const CH = 0x8000; // fatia pra não estourar o argumento do fromCharCode
-    for (let i = 0; i < bytes.length; i += CH) {
-      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
-    }
-    return btoa(bin);
+  // FileReader em vez de montar a string na mao.
+  //
+  // A versao anterior concatenava o audio inteiro em pedacos de 32 KB e chamava
+  // btoa no fim — tudo SINCRONO, na thread da pagina. Este bridge roda no MAIN
+  // world, ou seja, na thread do proprio WhatsApp: um audio de 1 MB vira ~1
+  // milhao de caracteres concatenados e a interface congela enquanto isso.
+  // Transcrever varios seguidos multiplicava o congelamento — era o travamento
+  // que o Guilherme sentia no "transcrever todos".
+  //
+  // readAsDataURL faz a mesma conversao no motor do navegador, fora da thread
+  // de script, e avisa quando termina. O laco manual fica so como reserva.
+  function blobParaBase64(blob) {
+    return new Promise((resolve, reject) => {
+      try {
+        const fr = new FileReader();
+        fr.onload = () => {
+          const s = String(fr.result || '');
+          const v = s.indexOf(',');
+          resolve(v >= 0 ? s.slice(v + 1) : s);
+        };
+        fr.onerror = () => reject(fr.error || new Error('falha ao ler o áudio'));
+        fr.readAsDataURL(blob);
+      } catch (e) { reject(e); }
+    });
   }
 
   function fmtHora(t) {
