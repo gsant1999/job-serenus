@@ -1282,8 +1282,6 @@
   //   - se e audio: icone de ptt/audio ou botao de tocar na propria linha;
   //   - de quem e: o data-id do WhatsApp comeca com "true_" quando a mensagem e
   //     nossa e "false_" quando e do contato — nao depende de classe de CSS.
-  function _trEhNossa(id) { return String(id || '').startsWith('true_'); }
-
   function _trLinhaEhAudio(row) {
     return !!row.querySelector(
       'audio, [data-icon="ptt"], [data-icon*="ptt"], [data-icon*="audio"],' +
@@ -1291,21 +1289,40 @@
       '[aria-label*="udio"], [data-testid*="audio"], [data-testid*="ptt"]');
   }
 
-  function _trAlvo(row) {
-    // A bolha propriamente dita — e onde a WaSpeed poe, e e o unico container
-    // com a largura certa. Sem <audio> na arvore nova, subir a partir do player
-    // deixou de funcionar; procurar a bolha pela classe funciona nos dois mundos.
-    const bolha = row.querySelector('[class*="message-in"], [class*="message-out"]');
-    if (bolha) return bolha;
-    return row.firstElementChild || row;
+  // A BOLHA, achada por geometria — nao por classe de CSS nem por formato de id.
+  //
+  // E o aprendizado da WaSpeed: ela nao tenta descobrir de que lado a mensagem
+  // esta pra depois alinhar. Ela injeta DENTRO da bolha, e o alinhamento vem de
+  // graca — a bolha ja esta no lugar certo, ja tem a cor certa, ja tem a largura
+  // certa. Toda vez que eu tentei deduzir o lado (classe message-out, prefixo
+  // "true_" no data-id) errei, porque essas duas coisas mudam quando o WhatsApp
+  // e redesenhado. A geometria nao muda: a bolha e o maior bloco dentro da linha
+  // que NAO ocupa a linha inteira.
+  function _trBolha(row) {
+    const larguraLinha = row.clientWidth || 1;
+    // Ancora: o controle de tocar o audio esta sempre dentro da bolha.
+    let el = row.querySelector('[data-icon="audio-play"], [data-icon="play"], [data-icon*="ptt"], audio')
+             || row.querySelector('[aria-label*="udio"]');
+    if (!el) return null;
+    let melhor = null;
+    for (let i = 0; i < 8 && el && el !== row; i++) {
+      const w = el.clientWidth;
+      // Larga o bastante pra ser bolha, estreita o bastante pra nao ser a linha.
+      if (w > 150 && w < larguraLinha * 0.94) melhor = el;
+      el = el.parentElement;
+    }
+    return melhor;
   }
 
-  // `raizes` = so os pedacos que MUDARAM. Sem isso, cada varredura percorria
-  // TODA a conversa aberta — numa conversa longa, centenas de linhas, a cada
-  // 400ms de rolagem e ainda de 4 em 4 segundos sem nada ter mudado. Era esse o
-  // travamento: nao o tamanho do arquivo (que Vite reduziria), mas trabalho
-  // repetido em cima de uma lista virtualizada que o WhatsApp reescreve o tempo
-  // todo. Olhar so o que chegou e a diferenca entre O(conversa) e O(novidade).
+  // De que lado ficou — so pra escolher a COR do rotulo. Se errar aqui nada
+  // desalinha, porque quem posiciona e a bolha.
+  function _trLado(bolha, row) {
+    try {
+      const b = bolha.getBoundingClientRect(), r = row.getBoundingClientRect();
+      return (b.left - r.left) > (r.right - b.right) ? 'consultor' : 'lead';
+    } catch (e) { return 'lead'; }
+  }
+
   function trInjetar(raizes) {
     if (!_trPodeRodar()) return;
     const main = document.querySelector('#main');
@@ -1327,11 +1344,13 @@
       const id = row.getAttribute('data-id') || '';
       if (!id || row.querySelector('.job-tr-slot')) continue;
       if (!_trLinhaEhAudio(row)) continue;
+      const bolha = _trBolha(row);
+      if (!bolha) continue;             // sem bolha identificada, nao inventa lugar
       const slot = document.createElement('div');
-      const lado = _trEhNossa(id) ? 'consultor' : 'lead';
-      slot.className = 'job-tr-slot ' + (lado === 'consultor' ? 'job-tr-dir' : 'job-tr-esq');
+      slot.className = 'job-tr-slot ' + (_trLado(bolha, row) === 'consultor' ? 'job-tr-dir' : 'job-tr-esq');
       slot.dataset.msg = id;
-      _trAlvo(row).appendChild(slot);
+      // DENTRO da bolha: herda posicao, largura e cor de quem ja esta no lugar certo.
+      bolha.appendChild(slot);
       trRenderSlot(slot, id);
     }
   }
@@ -1400,7 +1419,11 @@
       const baixado = await _pedirPonte('baixar_audios_ids', { ids: [id] }, 90000);
       const audios = (baixado && baixado.audios) || [];
       if (!audios.length) {
-        TR.erro.set(id, (baixado && baixado.erro) ? ('WhatsApp: ' + baixado.erro) : 'não consegui baixar o áudio');
+        // O bridge agora diz o motivo POR AUDIO — usa ele antes de qualquer
+        // mensagem generica minha.
+        const pq = (baixado && baixado.erros && baixado.erros[id])
+                || (baixado && baixado.erro) || 'não consegui baixar o áudio';
+        TR.erro.set(id, pq);
         TR.cache.set(id, '');
         return;
       }

@@ -208,9 +208,30 @@
     }
     const alvos = (ids || []).slice(0, 10);
     const out = [];
+    // O motivo da falha SOBE. Antes o catch engolia tudo em silêncio e a bolha
+    // só dizia "não consegui baixar o áudio" — sem saída pro consultor e sem
+    // pista pra mim. Um áudio que falha continua não derrubando o lote.
+    const erros = {};
     for (const id of alvos) {
+      let media = null;
       try {
-        const media = await window.WPP.chat.downloadMedia(id);
+        media = await window.WPP.chat.downloadMedia(id);
+      } catch (e1) {
+        // Plano B: pega a mensagem no store e baixa a partir do OBJETO. Passar
+        // só o id falha quando a mensagem não está carregada em memória (áudio
+        // antigo, conversa recém-aberta) — que é o caso comum de quem rola a
+        // conversa pra trás e clica em transcrever.
+        try {
+          const msg = window.WPP.chat.getMessageById
+            ? await window.WPP.chat.getMessageById(id) : null;
+          if (msg) media = await window.WPP.chat.downloadMedia(msg);
+          else erros[id] = 'mensagem não encontrada';
+        } catch (e2) {
+          erros[id] = String((e2 && e2.message) || e2 || 'falha no download').slice(0, 90);
+        }
+      }
+      if (!media) { erros[id] = erros[id] || 'mídia vazia'; continue; }
+      try {
         let b64 = '', mime = 'audio/ogg';
         if (media instanceof Blob) {
           b64 = await blobParaBase64(media);
@@ -221,9 +242,12 @@
           mime = media.mimetype || mime;
         }
         if (b64) out.push({ msg_id: id, base64: b64, mime: (mime || 'audio/ogg').split(';')[0] });
-      } catch (e) { /* um áudio que falhe não pode derrubar o lote */ }
+        else erros[id] = 'áudio veio vazio';
+      } catch (e3) {
+        erros[id] = String((e3 && e3.message) || e3 || 'falha ao ler').slice(0, 90);
+      }
     }
-    return { audios: out };
+    return { audios: out, erros };
   }
 
   async function baixarDocumentos(limite, forcarGrandes) {

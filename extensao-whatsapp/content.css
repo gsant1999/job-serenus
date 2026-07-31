@@ -790,46 +790,43 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 /* ═══════════════ Transcrição dentro da bolha do áudio ═══════════════
    Injetado no fim da bolha, como a WaSpeed faz. Só acrescenta filho, nunca
    altera nó existente do WhatsApp. */
-/* Transcricao colada no audio. Nasce ALINHADA com a bolha — a direita quando o
-   audio e nosso, a esquerda quando e do cliente — e com largura de bolha, nao de
-   tela. Antes atravessava a conversa inteira de ponta a ponta e parecia erro de
-   pagina, nao recurso. De que lado fica vem da wa-js (fromMe), nao de adivinhacao. */
-.job-tr-slot { display: flex; margin: 3px 0 10px; padding: 0 9%; }
-.job-tr-slot.job-tr-dir { justify-content: flex-end; }
-.job-tr-slot.job-tr-esq { justify-content: flex-start; }
-.job-tr-slot > * { max-width: 78%; }
+/* Transcricao DENTRO da bolha do audio. Nao ha alinhamento a fazer aqui: a
+   bolha ja esta no lado certo, com a cor certa e a largura certa. Toda a
+   complexidade anterior (medir lado, empurrar com padding percentual, escolher
+   fundo) existia so porque eu injetava FORA e tentava imitar a bolha. E o
+   aprendizado da WaSpeed — injetar dentro sai de graca o que eu emulava errado. */
+.job-tr-slot {
+  display: block; margin: 6px 0 1px; padding-top: 6px;
+  border-top: 1px solid rgba(255,255,255,.09);
+}
 .job-tr-btn {
   display: inline-flex; align-items: center; gap: 5px;
-  background: rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.14);
-  color: #8696a0; border-radius: 14px; padding: 3px 11px;
-  font-size: 11.5px; font-weight: 600; cursor: pointer; font-family: inherit;
-  transition: .15s; line-height: 1.5;
+  background: transparent; border: none; padding: 1px 0;
+  color: #8696a0; font-size: 11.5px; font-weight: 600; cursor: pointer;
+  font-family: inherit; transition: color .15s; line-height: 1.5;
 }
 .job-tr-btn svg { width: 13px; height: 13px; }
-.job-tr-btn:hover { background: #00a884; border-color: #00a884; color: #fff; }
-.job-tr-btn.mini { padding: 1px 8px; font-size: 10.5px; }
-.job-tr-carregando { font-size: 11.5px; font-style: italic; color: #8696a0; padding: 3px 4px; }
-.job-tr-falhou { font-size: 11px; color: #8696a0; display: inline-flex; gap: 7px;
-                 align-items: center; flex-wrap: wrap; background: rgba(0,0,0,.16);
-                 border-radius: 12px; padding: 3px 5px 3px 11px; max-width: 100%; }
-.job-tr-falhou > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
-/* O texto vira um cartaozinho preso embaixo da bolha: fundo do WhatsApp, canto
-   de cima "quebrado" do lado da bolha, pra ler como continuacao dela. */
-.job-tr-texto {
-  position: relative; font-size: 13px; line-height: 1.45;
-  background: #1f2c33; color: #e9edef;
-  border-radius: 8px; padding: 7px 30px 8px 11px;
-  white-space: pre-wrap; word-break: break-word; user-select: text;
-  box-shadow: 0 1px 1px rgba(0,0,0,.2);
+.job-tr-btn:hover { color: #53bdeb; }
+.job-tr-btn.mini { font-size: 10.5px; text-decoration: underline; }
+.job-tr-carregando { font-size: 11.5px; font-style: italic; color: #8696a0; }
+.job-tr-falhou {
+  font-size: 11px; color: #8696a0; display: flex; gap: 8px;
+  align-items: baseline; flex-wrap: wrap;
 }
-.job-tr-dir .job-tr-texto { background: #0b3d36; border-top-right-radius: 3px; }
-.job-tr-esq .job-tr-texto { border-top-left-radius: 3px; }
+.job-tr-falhou > span { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+/* O texto nao ganha caixa propria: ele E a bolha agora. So o rotulo separa. */
+.job-tr-texto {
+  position: relative; font-size: 13.2px; line-height: 1.45;
+  padding: 0 22px 0 0; white-space: pre-wrap; word-break: break-word;
+  user-select: text; color: inherit;
+}
 .job-tr-tag {
   display: block; font-size: 9px; font-weight: 700; letter-spacing: .6px;
-  text-transform: uppercase; color: #00a884; margin-bottom: 3px;
+  text-transform: uppercase; color: #53bdeb; margin-bottom: 3px; opacity: .85;
 }
+.job-tr-dir .job-tr-tag { color: #7ae3c3; }
 .job-tr-copiar {
-  position: absolute; top: 6px; right: 7px; background: transparent; border: none;
+  position: absolute; top: 0; right: 0; background: transparent; border: none;
   color: currentColor; opacity: .4; cursor: pointer; padding: 2px;
   display: inline-flex; transition: .15s;
 }
