@@ -16594,6 +16594,60 @@ def _wa_extracao_para_qualificacao(ex):
     return q
 
 
+def _wa_extracao_para_campos(ex, valor_cotacao=None):
+    """Mapeia a extração da conversa pros CAMPOS PERSONALIZADOS do CRM.
+
+    Faltava justamente isto: a IA lia a conversa inteira, tirava CNPJ, vidas,
+    operadora, plano atual — e nada daquilo chegava na ficha. O consultor via
+    "89 mensagens analisadas, score 850" e uma ficha em branco, o que dá a
+    impressão correta de que a leitura não serviu pra nada.
+
+    Só devolve o que a conversa disse de fato. O que grava por cima do trabalho
+    do consultor não é decidido aqui: quem grava usa so_se_vazio=True."""
+    c = {}
+    if not isinstance(ex, dict):
+        return c
+    if ex.get('cnpj'):
+        n = re.sub(r'\D', '', str(ex['cnpj']))
+        c['cnpj'] = f"{n[:2]}.{n[2:5]}.{n[5:8]}/{n[8:12]}-{n[12:14]}" if len(n) == 14 else str(ex['cnpj'])
+    if ex.get('tipo_contratacao'):
+        c['tipo_contratacao'] = {'PJ': 'CNPJ / empresarial', 'ADESAO': 'Adesão (PF)',
+                                 'PF': 'Pessoa física'}.get(ex['tipo_contratacao'], ex['tipo_contratacao'])
+    if ex.get('plano_ativo') == 'ATIVO':
+        c['tem_plano_hoje'] = 'Sim'
+        if ex.get('operadora_atual'):
+            c['plano_atual'] = str(ex['operadora_atual']).title()
+    elif ex.get('plano_ativo') == 'SEM_PLANO':
+        c['tem_plano_hoje'] = 'Não'
+    elif ex.get('plano_ativo') == 'CANCELADO_RECENTE':
+        c['tem_plano_hoje'] = 'Não (cancelou recentemente)'
+        if ex.get('operadora_atual'):
+            c['plano_atual'] = str(ex['operadora_atual']).title()
+    if ex.get('operadora_interesse'):
+        v = str(ex['operadora_interesse'])
+        if ex.get('plano_preferido'):
+            v += f" — {ex['plano_preferido']}"
+        c['operadora_cotada'] = v
+    if ex.get('cidade'):
+        c['cidade_rmc'] = str(ex['cidade'])
+    if ex.get('vidas'):
+        c['numero_vidas'] = str(ex['vidas'])
+    elif ex.get('idades'):
+        c['numero_vidas'] = str(len(ex['idades']))
+    if ex.get('idades'):
+        c['composicao_familiar'] = ', '.join(f"{i} anos" for i in sorted(ex['idades']))
+    elif ex.get('faixa_etaria_texto'):
+        c['composicao_familiar'] = ', '.join(ex['faixa_etaria_texto'])
+    # Valor que ele paga HOJE só vale quando a conversa fala do plano atual —
+    # valor de cotação nossa é outra coisa e iria pro campo errado.
+    if valor_cotacao and ex.get('plano_ativo') == 'ATIVO':
+        try:
+            c['valor_pago_hoje'] = f"R$ {float(valor_cotacao):.2f}".replace('.', ',')
+        except (TypeError, ValueError):
+            pass
+    return {k: v for k, v in c.items() if str(v or '').strip()}
+
+
 @app.route('/api/whatsapp/analisar', methods=['POST', 'OPTIONS'])
 def api_whatsapp_analisar():
     """Recebe a conversa raspada pela extensão e devolve score + sugestões.
@@ -17049,6 +17103,32 @@ def api_whatsapp_analisar():
             sets = ', '.join(f"{col} = COALESCE(NULLIF({col}, ''), ?)" for col in qual)
             conn.execute(f"UPDATE crm_leads SET {sets}, atualizado_em=? WHERE id=?",
                          (*qual.values(), _agora_sp(), lead_id))
+        # E TAMBÉM nos campos personalizados — o módulo que o Guilherme pediu pra
+        # qualificação. Sem isto a leitura morria na aba Qualificação antiga e a
+        # ficha nova continuava vazia. so_se_vazio: a IA preenche o buraco, nunca
+        # corrige o consultor. fonte='ia' deixa rastreável quem escreveu o quê.
+        campos_ia, campos_gravados = {}, []
+        try:
+            campos_ia = _wa_extracao_para_campos(an['extracao'], (an.get('valor_cotacao') or {}).get('valor')
+                                                 if isinstance(an.get('valor_cotacao'), dict) else None)
+            for chave, valor in campos_ia.items():
+                if gravar_campo_lead(conn, lead_id, chave, valor, fonte='ia', so_se_vazio=True):
+                    campos_gravados.append(chave)
+            # CNPJ achado na conversa puxa a data de abertura pela API — é de graça
+            # e é exatamente o dado que ninguém tem paciência de ir buscar à mão.
+            if campos_ia.get('cnpj'):
+                try:
+                    _preencher_campos_por_cnpj(conn, lead_id, campos_ia['cnpj'])
+                except Exception as e:
+                    app.logger.info(f"[ANALISE] CNPJ não consultado: {e}")
+            if campos_gravados:
+                conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                                VALUES (?,?,?,?,?)""",
+                             (lead_id, 'Extensão WhatsApp', 'edicao',
+                              'Preenchido pela leitura da conversa: ' + ', '.join(campos_gravados[:12]),
+                              _agora_sp()))
+        except Exception as e:
+            app.logger.warning(f"[ANALISE] campos personalizados: {e}")
 
     # ── Valor da cotação (pedido explícito do Guilherme): quando a IA acha um
     # valor claro num anexo/texto, preenche o campo estruturado valor_estimado
