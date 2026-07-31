@@ -20431,6 +20431,65 @@ def calcular_cotacao(conn, idades, plano_ids, recomendacoes=None):
     return planos, round(total_geral, 2), cont, avisos
 
 
+def registrar_cotacao_no_lead(conn, lead_id, cid, planos, total_geral, idades, titulo=''):
+    """Fecha o ultimo pedaco solto: a cotacao passa a escrever no lead.
+
+    Ate aqui montar uma cotacao nao mexia em nada do CRM. O consultor cotava, o
+    cliente recebia, e no lead continuava valor estimado zerado, operadora em
+    branco e nenhuma linha na timeline. Quem olhasse o funil nao sabia que aquele
+    lead ja tinha proposta na mao — que e justamente o lead mais quente que
+    existe.
+
+    Regra de sempre: preenche buraco, nao corrige consultor (so_se_vazio)."""
+    if not lead_id or not planos:
+        return []
+    escrito = []
+    try:
+        # Valor do lead = o da 1a opcao quando o consultor recomendou uma; senao o
+        # MENOR. Nao a soma dos planos: sao alternativas, o cliente leva uma so —
+        # somar inflaria o pipeline inteiro com dinheiro que nao existe.
+        rec = next((p for p in planos if (p.get('recomendacao') or '').startswith('1')), None)
+        alvo = rec or min(planos, key=lambda p: p.get('total') or 0)
+        valor = float(alvo.get('total') or 0)
+        if valor > 0:
+            atual = conn.execute("SELECT valor_estimado FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+            if atual and not (atual['valor_estimado'] or 0):
+                conn.execute("UPDATE crm_leads SET valor_estimado=?, atualizado_em=? WHERE id=?",
+                             (round(valor, 2), _agora_sp(), lead_id))
+                escrito.append('valor estimado')
+        # Campos personalizados — mesma procedencia rastreavel do resto.
+        ops = []
+        for p in planos:
+            o = (p.get('operadora') or '').strip()
+            if o and o not in ops:
+                ops.append(o)
+        campos = {}
+        if ops:
+            campos['operadora_cotada'] = ', '.join(ops[:4])
+        if idades:
+            campos['numero_vidas'] = str(len(idades))
+            campos['composicao_familiar'] = ', '.join(f"{i} anos" for i in sorted(idades))
+        for chave, val in campos.items():
+            if gravar_campo_lead(conn, lead_id, chave, val, fonte='cotacao', so_se_vazio=True):
+                escrito.append(chave)
+        # Timeline: a linha que faltava pra historia do lead ficar inteira.
+        faixa = ''
+        totais = [float(p.get('total') or 0) for p in planos if (p.get('total') or 0) > 0]
+        if totais:
+            faixa = (f" · R$ {min(totais):.2f}".replace('.', ',') if len(totais) == 1
+                     else f" · de R$ {min(totais):.2f} a R$ {max(totais):.2f}".replace('.', ','))
+        conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                        VALUES (?,?,?,?,?)""",
+                     (lead_id, session.get('nome') or 'Cotação', 'cotacao',
+                      f"Cotação #{cid}: {len(planos)} plano(s){faixa}"
+                      + (f" — {', '.join(ops[:3])}" if ops else '')
+                      + (f" · {len(idades)} vida(s)" if idades else ''),
+                      _agora_sp()))
+    except Exception as e:
+        app.logger.warning(f"[COTACAO_LEAD] não escreveu no lead {lead_id}: {e}")
+    return escrito
+
+
 @app.route('/cotacao/salvar', methods=['POST'])
 @login_required
 def cotacao_salvar():
@@ -20493,7 +20552,13 @@ def cotacao_salvar():
         email_cli = (d.get('cliente_email') or '').strip()
         lead_row = None
         if tel_norm:
-            lead_row = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone()
+            # Casador unico do sistema (mesmo do CRM e da venda): trata DDI, o
+            # nono digito e variacao de formato. Igualdade crua de telefone_norm
+            # deixava a cotacao orfa justamente nos numeros salvos torto.
+            try:
+                lead_row = _buscar_lead_por_telefone(conn, tel_norm)
+            except Exception:
+                lead_row = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=?", (tel_norm,)).fetchone()
         if not lead_row and email_cli:
             lead_row = conn.execute("SELECT id FROM crm_leads WHERE LOWER(email)=LOWER(?)", (email_cli,)).fetchone()
         if lead_row:
@@ -20513,6 +20578,8 @@ def cotacao_salvar():
          json.dumps(cont_faixa), json.dumps(planos), round(total_geral, 2), tabela_ids_json))
     cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+    registrar_cotacao_no_lead(conn, lead_id, cid, planos, total_geral, idades,
+                              (d.get('titulo') or '').strip())
     conn.commit(); close_db(conn)
     return redirect('/cotacao/documento/' + str(cid))
 
