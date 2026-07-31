@@ -121,6 +121,69 @@
   // ── VARREDURA DIÁRIA ──
   // Lista as conversas com atividade nas últimas N horas, SEM ler mensagem
   // nenhuma: só o que o servidor precisa pra decidir o que vale analisar.
+  // TODAS as conversas, com o telefone resolvido SEM tocar na rede.
+  //
+  // O @lid so aparecia nos cards que a extensao ja tinha visto — uma minoria dos
+  // 5.502 leads. Isso e uma varredura unica que amarra tudo de uma vez: le a
+  // lista inteira de conversas e, pra cada @lid, resolve o telefone pelos passos
+  // LOCAIS da escada (cache lid->pn, ContactStore, getPhoneNumber). De proposito
+  // fica de fora o requestPhoneNumber, que fala com o servidor do WhatsApp e
+  // mexe na UI — fazer isso centenas de vezes seguidas e pedir bloqueio.
+  function _telLocalDoLid(wid) {
+    const WA = window.WPP;
+    const dig = (v) => String((v && (v._serialized || v.user)) || v || '').replace(/\D/g, '');
+    try {
+      if (WA.whatsapp && WA.whatsapp.lidPnCache && WA.whatsapp.lidPnCache.getPhoneNumber) {
+        const n = dig(WA.whatsapp.lidPnCache.getPhoneNumber(wid));
+        if (n) return n;
+      }
+    } catch (e) {}
+    try {
+      const cm = WA.whatsapp && WA.whatsapp.ContactStore && WA.whatsapp.ContactStore.get(wid);
+      if (cm) {
+        try { const n = dig(WA.whatsapp.functions.getPnForLid(cm)); if (n) return n; } catch (e) {}
+        const n2 = dig(cm.phoneNumber); if (n2) return n2;
+      }
+    } catch (e) {}
+    try {
+      if (WA.whatsapp && WA.whatsapp.functions && WA.whatsapp.functions.getPhoneNumber) {
+        const n = dig(WA.whatsapp.functions.getPhoneNumber(wid));
+        if (n) return n;
+      }
+    } catch (e) {}
+    return '';
+  }
+
+  async function listarTodasConversas(teto) {
+    if (!window.WPP || !window.WPP.chat) return { erro: 'wpp_ausente' };
+    let chats = [];
+    // ChatStore tem TUDO que ja carregou, sem paginar nem pedir ao servidor.
+    try {
+      const CS = window.WPP.whatsapp && window.WPP.whatsapp.ChatStore;
+      if (CS && CS.getModelsArray) chats = CS.getModelsArray() || [];
+    } catch (e) { chats = []; }
+    if (!chats.length) {
+      try { chats = await window.WPP.chat.list({ count: Math.max(200, teto || 2000), onlyUsers: true }); }
+      catch (e) { return { erro: 'falha_lista' }; }
+    }
+    const out = [];
+    let comLid = 0, resolvidos = 0;
+    for (const c of chats.slice(0, Math.max(50, teto || 2000))) {
+      try {
+        if (!c || !c.id || c.isGroup) continue;
+        const cid = c.id._serialized;
+        if (cid.indexOf('@g.us') > 0 || cid.indexOf('status@') === 0) continue;
+        let tel = '';
+        if (cid.indexOf('@c.us') > 0) tel = cid.split('@')[0].replace(/\D/g, '');
+        else if (cid.indexOf('@lid') > 0) { comLid++; tel = _telLocalDoLid(c.id); if (tel) resolvidos++; }
+        // Sem telefone o servidor nao tem como achar o lead — nao adianta mandar.
+        if (!tel) continue;
+        out.push({ chat_id: cid, telefone: tel, nome: (c.formattedTitle || c.name || '') });
+      } catch (e) { /* um chat problematico nao derruba a varredura */ }
+    }
+    return { conversas: out, total_chats: chats.length, com_lid: comLid, lid_resolvidos: resolvidos };
+  }
+
   async function listarConversasDoDia(horas) {
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.list) return { erro: 'wpp_ausente' };
     const corte = Date.now() / 1000 - (Math.max(1, horas || 24) * 3600);
@@ -899,6 +962,7 @@
       if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite);
       else if (d.tipo === 'listar_audios') resp = await listarAudios();
       else if (d.tipo === 'listar_conversas_dia') resp = await listarConversasDoDia(d.horas);
+      else if (d.tipo === 'listar_todas_conversas') resp = await listarTodasConversas(d.teto);
       else if (d.tipo === 'ler_conversa_de') resp = await lerConversaDe(d.chatId, d.desdeMsgId, d.limite);
       else if (d.tipo === 'baixar_audios_ids') resp = await baixarAudiosPorId(d.ids);
       else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite, d.forcarGrandes);

@@ -15696,6 +15696,48 @@ _MOTIVOS_PENDENTE = {
 }
 
 
+@app.route('/api/whatsapp/chats/vincular', methods=['POST', 'OPTIONS'])
+def api_whatsapp_chats_vincular():
+    """Amarra @lid -> lead em MASSA, a partir da lista inteira de conversas.
+
+    O @lid so aparecia nos cards que a extensao ja tinha tocado — uma minoria dos
+    5.502 leads, porque o vinculo nascia conversa a conversa. Isto e a varredura
+    unica que resolve o passivo: a extensao manda todas as conversas com telefone
+    resolvido e o servidor casa cada uma com o lead pelo mesmo casador do resto do
+    sistema.
+
+    Nao cria lead nenhum e nao mexe em dado de lead: so registra a identidade da
+    conversa. Rodar duas vezes nao muda nada."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    convs = (request.get_json(silent=True) or {}).get('conversas') or []
+    if not isinstance(convs, list):
+        return _wa_cors(jsonify({"ok": False, "erro": "Formato inválido"})), 400
+    convs = convs[:500]
+    conn = db()
+    ligados = sem_lead = 0
+    try:
+        for c in convs:
+            cid = str((c or {}).get('chat_id') or '')
+            tel = str((c or {}).get('telefone') or '')
+            if not cid or not tel:
+                continue
+            if registrar_chat_lead(conn, cid, tel, (c or {}).get('nome') or None):
+                ligados += 1
+            else:
+                sem_lead += 1
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        app.logger.warning(f"[VINCULAR_CHATS] {e}")
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "recebidos": len(convs),
+                             "ligados": ligados, "sem_lead": sem_lead}))
+
+
 @app.route('/api/whatsapp/conversas/pendentes', methods=['POST', 'OPTIONS'])
 def api_whatsapp_conversas_pendentes():
     if request.method == 'OPTIONS':

@@ -318,6 +318,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/analisar', 'POST', msg.payload || {}, 180000).then(sendResponse);
     return true;
   }
+  if (msg && msg.type === 'vincular_chats') {
+    chamarJob('/api/whatsapp/chats/vincular', 'POST', { conversas: msg.conversas || [] }, 45000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'transcricoes_cache') {
     chamarJob('/api/whatsapp/transcricoes', 'POST',
       { ids: msg.ids || [], filehashes: msg.filehashes || {} }, 15000).then(sendResponse);

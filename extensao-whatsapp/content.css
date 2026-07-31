@@ -498,6 +498,9 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 @media (max-width: 1100px) { .job-bc-btn span { display: none; } .job-bc-btn { padding: 4px 8px; } }
 /* Nome padronizado do contato. Fica na ficha, abaixo do salvar: é ação de
    registro, não de edição do lead — por isso separado por uma linha. */
+/* Sincronia de @lid: ação sobre o CRM inteiro, separada da lista de leads. */
+.job-sinc { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--job-bg2); }
+.job-sinc-dica { margin-top: 8px; font-size: 10.5px; line-height: 1.5; color: var(--job-txt-fraco); opacity: .8; }
 .job-nomec { margin: 14px 0 4px; padding-top: 12px; border-top: 1px solid var(--job-bg2); }
 .job-nomec-tit { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700;
                  letter-spacing: .4px; text-transform: uppercase; color: var(--job-txt-fraco); margin-bottom: 8px; }

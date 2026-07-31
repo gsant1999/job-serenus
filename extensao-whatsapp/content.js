@@ -2550,9 +2550,53 @@
     return Math.max(0, Math.floor((Date.now() - t) / 1000));
   }
 
+  // Sincronia de identidade das conversas. Fica aqui, na aba Leads, porque e uma
+  // acao sobre o CRM INTEIRO — nao sobre a conversa aberta.
+  function _blocoSincLid() {
+    return '<div class="job-sinc">' +
+      '<button type="button" class="job-cnpj-btn" id="job-sinc-lid">Sincronizar @lid de todas as conversas</button>' +
+      '<div class="job-sinc-dica" id="job-sinc-dica">Liga cada conversa do seu WhatsApp ao lead certo no CRM, ' +
+        'pra o @lid aparecer nos cards. Só identifica conversa — não cria nem altera lead.</div>' +
+    '</div>';
+  }
+
+  async function _ligarSincLid() {
+    const b = document.getElementById('job-sinc-lid');
+    if (!b) return;
+    const dica = (t) => { const e = document.getElementById('job-sinc-dica'); if (e) e.textContent = t; };
+    b.addEventListener('click', async () => {
+      b.disabled = true; const r0 = b.textContent; b.textContent = 'Lendo conversas…';
+      try {
+        const r = await _pedirPonte('listar_todas_conversas', { teto: 2000 }, 60000);
+        const convs = (r && r.conversas) || [];
+        if (!convs.length) {
+          dica('Não achei conversa com telefone identificável. Role a lista de conversas do WhatsApp e tente de novo.');
+          return;
+        }
+        // Em lotes: 500 conversas num POST so e payload grande e request longo —
+        // se cair no meio, perde tudo. Em lotes, o que ja foi fica salvo.
+        let ligados = 0, semLead = 0, enviados = 0;
+        for (let i = 0; i < convs.length; i += 200) {
+          const lote = convs.slice(i, i + 200);
+          b.textContent = 'Ligando ' + Math.min(i + lote.length, convs.length) + '/' + convs.length + '…';
+          const resp = await _safeSendMessage({ type: 'vincular_chats', conversas: lote }).catch(() => null);
+          if (resp && resp.ok) { ligados += resp.ligados || 0; semLead += resp.sem_lead || 0; }
+          enviados += lote.length;
+        }
+        // Diz o que NAO casou: conversa sem lead no CRM e informacao util
+        // (contato pessoal, fornecedor, grupo) — nao e falha escondida.
+        dica(ligados + ' conversa(s) ligada(s) ao lead. ' + semLead + ' sem lead no CRM. ' +
+             (r.com_lid ? ('Das ' + r.com_lid + ' em @lid, resolvi o telefone de ' + r.lid_resolvidos + '. ') : '') +
+             'Abra o CRM pra ver os @lid nos cards.');
+      } catch (e) {
+        dica('Não deu: ' + ((e && e.message) || e));
+      } finally { b.disabled = false; b.textContent = 'Sincronizar @lid de todas as conversas'; }
+    });
+  }
+
   function renderInbox() {
     if (!_inboxCache.length) {
-      return '<div class="job-sem-analise"><div class="job-sem-analise-txt">Nenhum lead novo esperando. Quando cair um lead pra você, ele aparece aqui na hora.</div></div>';
+      return '<div class="job-sem-analise"><div class="job-sem-analise-txt">Nenhum lead novo esperando. Quando cair um lead pra você, ele aparece aqui na hora.</div></div>' + _blocoSincLid();
     }
     var html = '<div class="job-inbox-lista">';
     _inboxCache.forEach(function (l) {
@@ -2568,7 +2612,7 @@
         '<button class="job-inbox-atender">Atender agora</button>' +
       '</div>';
     });
-    return html + '</div>';
+    return html + '</div>' + _blocoSincLid();
   }
 
   function ligarAcoesInbox() {
@@ -2618,7 +2662,7 @@
     } catch (e) { /* segue mesmo se falhar o report */ }
     _inboxCache = _inboxCache.filter(function (l) { return String(l.id) !== String(leadId); });
     atualizarBadgeInbox();
-    if (_secaoAtiva === 'inbox') { setCorpoSecaoInbox(renderInbox()); ligarAcoesInbox(); }
+    if (_secaoAtiva === 'inbox') { setCorpoSecaoInbox(renderInbox()); ligarAcoesInbox(); _ligarSincLid(); }
     var num = (telefone || '').replace(/\D/g, '');
     if (resp && resp.ok) {
       _avisoInbox('Funil disparado: ' + (resp.passos_enfileirados || 0) + ' mensagem(ns) na fila.', '#0f766e', num);
