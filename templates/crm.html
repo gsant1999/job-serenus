@@ -163,6 +163,20 @@
   .etq-pop-vazio { font-size:11.5px; color:var(--cinza-2); padding:4px; }
   .lead-sub-status { min-width:0; width:100%; background:var(--panel); border:1px solid var(--borda); border-radius:6px; padding:5px 22px 5px 8px; font-size:11px; color:var(--cinza); outline:none; cursor:pointer; text-overflow:ellipsis; }
   .lead-sub-status:focus { border-color:var(--azul); }
+  /* Celula do sub-status com o relogio embutido. O select ganha espaco a
+     direita e o cronometro ocupa esse espaco — parece um controle so. */
+  .ss-cel { position:relative; display:block; flex:1 1 100%; min-width:0; }
+  .ss-cel > .lead-sub-status { width:100%; padding-right:76px; }
+  .ss-cel > [data-cron] { position:absolute; right:24px; top:50%; transform:translateY(-50%);
+      font-style:normal; font-size:10px; font-weight:700; font-variant-numeric:tabular-nums;
+      letter-spacing:.4px; padding:2px 6px; border-radius:5px; pointer-events:none; white-space:nowrap;
+      background:rgba(34,197,94,.16); color:#4ade80; }
+  .ss-cel.morno  > [data-cron] { background:rgba(245,158,11,.16); color:#fbbf24; }
+  .ss-cel.parado > [data-cron] { background:rgba(239,68,68,.16); color:#f87171; }
+  /* Sem sub-status escolhido nao ha o que cronometrar: some o relogio e o
+     select volta a ocupar a celula inteira. */
+  .ss-cel.vazio > [data-cron] { display:none; }
+  .ss-cel.vazio > .lead-sub-status { padding-right:22px; }
   /* Duas linhas em vez de uma: em Novo Lead são 4 controles (sub-status,
      Etiquetas, WhatsApp, → Contato) e a coluna do Kanban é estreita — tudo na
      mesma linha esmagava o select até cortar o texto ("Sem su⌄"). */
@@ -182,11 +196,6 @@
   .lead-trafego { font-size:10px; font-weight:800; padding:2px 8px; border-radius:11px; letter-spacing:.4px; }
   .lead-trafego.pago { background:linear-gradient(135deg,#f59e0b,#ef4444); color:#fff; }
   .lead-trafego.org  { background:rgba(148,163,184,.18); color:#cbd5e1; }
-  .lead-sub-idade { font-size:9.5px; font-weight:700; padding:2px 8px; border-radius:9px;
-                    max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .lead-sub-idade.quente { background:rgba(34,197,94,.16); color:#4ade80; }
-  .lead-sub-idade.morno  { background:rgba(250,204,21,.16); color:#eab308; }
-  .lead-sub-idade.parado { background:rgba(244,63,94,.16); color:#f43f5e; }
   .lead-lid { display:inline-flex; align-items:center; gap:5px; margin-top:7px; cursor:pointer;
               background:var(--panel-3); border:1px solid var(--borda); border-radius:7px;
               padding:3px 8px; max-width:100%; transition:.15s; }
@@ -524,16 +533,7 @@
                andamento não mexe. Um lead que trocou de sub-status hoje está sendo
                trabalhado; um que está no mesmo há 9 dias, não — e isso não
                aparecia em lugar nenhum. #}
-            {# Cronometro do sub-status. data-desde deixa o relogio ANDAR no
-               navegador: sem isso o texto congelava no instante em que a pagina
-               carregou, e um cronometro parado nao cobra acao de ninguem. #}
-            {% if lead.sub_status and esf.idade_txt %}
-            <span class="lead-sub-idade {{ 'quente' if esf.horas < 24 else ('morno' if esf.dias < 5 else 'parado') }}"
-                  id="cron-{{ lead.id }}" data-desde="{{ esf.desde_ts or '' }}"
-                  title="Tempo desde a ultima mudanca de sub-status. Zera quando o sub-status muda ou o lead muda de etapa.">
-              <b>{{ lead.sub_status }}</b> <em data-cron>{{ esf.idade_txt }}</em>
-            </span>
-            {% endif %}
+
           </div>
           {% if wa_do_lead.get(lead.id) %}
           {# @lid no CARD, direto: o consultor identifica a conversa sem abrir a
@@ -559,6 +559,11 @@
           </div>
           <div class="lead-bottom-row">
             {# Só os sub-status DESTA etapa: é o que falta pro lead avançar daqui. #}
+            {# O cronometro fica DENTRO da celula do sub-status, nao ao lado: e a
+               mesma informacao — "o que falta" e "ha quanto tempo falta". Separar
+               em dois lugares obriga o olho a juntar o que ja era uma coisa so. #}
+            <span class="ss-cel{% if not lead.sub_status %} vazio{% elif esf.dias >= 5 %} parado{% elif esf.horas >= 24 %} morno{% endif %}"
+                  id="cron-{{ lead.id }}" data-desde="{{ esf.desde_ts or '' }}">
             <select class="lead-sub-status" data-anterior="{{ lead.sub_status or '' }}" onclick="event.stopPropagation()" onchange="mudarSubStatus({{ lead.id }}, this)">
               <option value="" {% if not lead.sub_status %}selected{% endif %}>Sem sub-status</option>
               {% for opt in sub_status_etapa.get(etapa.id, []) %}
@@ -570,6 +575,14 @@
               <option value="{{ lead.sub_status }}" selected>{{ lead.sub_status }} (de outra etapa)</option>
               {% endif %}
             </select>
+              <em data-cron title="Tempo desde a ultima mudanca de sub-status. Zera quando o sub-status muda ou o card muda de etapa."></em>
+            </span>
+            {# CRONOMETRO colado no proprio sub-status. Fica AQUI, e nao la em cima
+               junto das etiquetas, porque e o mesmo gesto: o consultor olha o que
+               esta pendente e ve, no mesmo lugar, ha quanto tempo esta assim.
+               data-desde faz o relogio andar no navegador; zera quando o
+               sub-status muda ou o lead muda de etapa. #}
+
           </div>
           {% set exig = campos_saida_etapa.get(etapa.id, []) %}
           {% if exig %}
@@ -1155,7 +1168,7 @@ async function abrirFicha(id){
   badge.style.color=eo?eo.cor:'#aaa';
 
   montarSubStatusFicha(d.sub_status_etapa||[], d.lead.sub_status||'');
-  montarCampos(d.campos_def||[], d.campos_val||{});
+  montarCampos(d.campos_def||[], d.campos_val||{}, d.lead.etapa||'');
   montarWaIds(d.wa_ids||[]);
   montarEtiquetasFicha(d.etiquetas_todas||[], d.etiquetas_marcadas||[]);
   montarPlaybook(d.playbook);
@@ -1425,27 +1438,36 @@ async function concluirAgLead(id){
   const r=await fetch('/crm/agenda/'+id+'/concluir',{method:'POST'});
   if((await r.json()).ok){ toast('Concluída','ok'); carregarAgendaLead(); }
 }
-// Cronometro vivo: o mesmo texto do servidor, recalculado a cada 30s no
-// navegador. Sem isto, "ha 2min" continuaria dizendo 2min uma hora depois.
+// Cronometro vivo, de segundo em segundo. O tempo tem que ANDAR na tela: texto
+// parado ("ha 33min") nao cobra acao de ninguem, um relogio correndo cobra.
+// Formato de cronometro mesmo (h:mm:ss), nao de data — quem olha quer sentir o
+// tempo passando, nao ler um carimbo.
 function _cronTexto(segs){
-  if(segs < 900) return 'agora';
-  if(segs < 3600) return 'ha ' + Math.floor(segs/60) + 'min';
-  if(segs < 86400) return 'ha ' + Math.floor(segs/3600) + 'h';
-  return 'ha ' + Math.floor(segs/86400) + 'd';
+  const d = Math.floor(segs/86400);
+  const h = Math.floor(segs/3600) % 24;
+  const m = Math.floor(segs/60) % 60;
+  const s = Math.floor(segs) % 60;
+  const dd = n => String(n).padStart(2,'0');
+  if(d > 0) return d + 'd ' + dd(h) + ':' + dd(m);
+  if(h > 0) return h + ':' + dd(m) + ':' + dd(s);
+  return dd(m) + ':' + dd(s);
 }
 function atualizarCronometros(){
-  const agora = Math.floor(Date.now()/1000);
-  document.querySelectorAll('.lead-sub-idade[data-desde]').forEach(el => {
+  const agora = Date.now()/1000;
+  document.querySelectorAll('.ss-cel[data-desde]').forEach(el => {
     const desde = parseInt(el.dataset.desde||'0', 10);
-    if(!desde) return;
-    const segs = Math.max(0, agora - desde);
     const alvo = el.querySelector('[data-cron]');
-    if(alvo) alvo.textContent = _cronTexto(segs);
-    el.classList.remove('quente','morno','parado');
-    el.classList.add(segs < 86400 ? 'quente' : (segs < 432000 ? 'morno' : 'parado'));
+    if(!desde || !alvo || el.classList.contains('vazio')) return;
+    const segs = Math.max(0, agora - desde);
+    alvo.textContent = _cronTexto(segs);
+    el.classList.remove('morno','parado');
+    if(segs >= 432000) el.classList.add('parado');
+    else if(segs >= 86400) el.classList.add('morno');
   });
 }
-setInterval(atualizarCronometros, 30000);
+// 1s: o cronometro so e cronometro se os segundos mexerem. E so texto — nao
+// mexe em layout, entao nao custa nada nem com centenas de cards na tela.
+setInterval(atualizarCronometros, 1000);
 document.addEventListener('DOMContentLoaded', atualizarCronometros);
 
 async function mudarSubStatus(id, sel){
@@ -1465,22 +1487,14 @@ async function mudarSubStatus(id, sel){
     if(tag) tag.remove();
     // O cronometro tem que zerar NA HORA e comecar a contar do zero. Esperar o
     // F5 pra ver o tempo mudar faz o consultor duvidar se a acao registrou.
-    let cron=document.getElementById('cron-'+id);
-    if(!valor){ if(cron) cron.remove(); }
-    else {
-      if(!cron){
-        cron=document.createElement('span');
-        cron.id='cron-'+id;
-        cron.className='lead-sub-idade quente';
-        cron.title="Tempo desde a ultima mudanca de sub-status. Zera quando o sub-status muda ou o lead muda de etapa.";
-        cron.innerHTML='<b></b> <em data-cron></em>';
-        const linha=card.querySelector('.lead-tags')||card.firstElementChild;
-        if(linha) linha.appendChild(cron);
-      }
-      cron.className='lead-sub-idade quente';
-      cron.dataset.desde=Math.floor(Date.now()/1000);
-      cron.querySelector('b').textContent=valor;
-      cron.querySelector('[data-cron]').textContent='agora';
+    // Zera na hora: o relogio recomeca do 00:00 no mesmo instante em que o
+    // consultor escolhe. Esperar F5 pra ver o tempo mudar faz duvidar se salvou.
+    const cron=document.getElementById('cron-'+id);
+    if(cron){
+      cron.className = valor ? 'ss-cel' : 'ss-cel vazio';
+      cron.dataset.desde = Math.floor(Date.now()/1000);
+      const alvo=cron.querySelector('[data-cron]');
+      if(alvo) alvo.textContent='00:00';
     }
   }
   toast(valor?('Sub-status: '+valor):'Sub-status limpo','ok');
@@ -1490,27 +1504,39 @@ async function mudarSubStatus(id, sel){
 const CP_ROTULO = {automatico:'Chega preenchido', conversa:'Ao longo da conversa',
                    proposta:'No preenchimento da proposta',
                    saida:'Obrigatório pra sair desta etapa'};
-let _cpDef = [], _cpVal = {};
+let _cpDef = [], _cpVal = {}, _cpEtapa = '';
 
 function _esc(v){
   return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;')
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function montarCampos(def, val){
+function montarCampos(def, val, etapaAtual){
   _cpDef = def||[]; _cpVal = val||{};
+  if(etapaAtual!==undefined) _cpEtapa = etapaAtual||'';
   const box=document.getElementById('ficha-campos');
   if(!box) return;
   if(!_cpDef.length){ box.innerHTML=''; return; }
   let html='';
   ['saida','automatico','conversa','proposta'].forEach(m=>{
-    const doGrupo=_cpDef.filter(c=>c.momento===m);
+    // Campo de saida so aparece na etapa que ELE trava. Antes a ficha mostrava
+    // os quatro sempre — um lead em negociacao era interrogado sobre motivo da
+    // perda e data de retorno, que sao perguntas de quem ja perdeu ou ja parou.
+    // Pergunta que nao faz sentido no momento treina o consultor a ignorar o
+    // bloco inteiro, inclusive a pergunta que fazia sentido.
+    let doGrupo=_cpDef.filter(c=>c.momento===m);
+    if(m==='saida') doGrupo=doGrupo.filter(c=>!c.obriga_saida_de || c.obriga_saida_de===_cpEtapa);
     if(!doGrupo.length) return;
     // Saída vem primeiro na ficha: é o que impede o card de andar, então é a
     // primeira coisa que interessa a quem abriu o lead pra fazê-lo andar.
     const cls = m==='saida'?'cp-saida':(m==='automatico'?'cp-auto':(m==='proposta'?'cp-proposta':'cp-conversa'));
+    let rotulo=CP_ROTULO[m];
+    if(m==='saida'){
+      const et=(_etapas||[]).find(e=>e.id===_cpEtapa);
+      if(et) rotulo='Obrigatorio pra sair de '+et.nome;
+    }
     html+='<div class="cp-bloco '+cls+'">'
-      +'<div class="cp-bloco-tit"><span class="pino">'+CP_ROTULO[m]+'</span></div>'
+      +'<div class="cp-bloco-tit"><span class="pino">'+rotulo+'</span></div>'
       +doGrupo.map(c=>_cpCampoHtml(c)).join('')
       +'</div>';
   });
@@ -1621,7 +1647,7 @@ async function salvarCampos(){
       headers:{'Content-Type':'application/json'}, body:JSON.stringify({campos:payload})});
     const d=await r.json();
     if(!d.ok){ aviso.textContent=''; toast(d.erro||'Erro ao salvar','err'); return; }
-    montarCampos(_cpDef, d.campos_val||{});
+    montarCampos(_cpDef, d.campos_val||{}, _cpEtapa);
     aviso.textContent='';
     if(d.cnpj && d.cnpj.abertura) toast('CNPJ consultado: abertura em '+d.cnpj.abertura,'ok');
     else toast(d.mudou&&d.mudou.length?('Salvo: '+d.mudou.join(', ')):'Nada mudou','ok');
