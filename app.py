@@ -17646,9 +17646,20 @@ def crm():
         params.append(f_data_ate)
 
     if f_busca:
-        q += " AND (LOWER(l.nome) LIKE ? OR l.telefone LIKE ? OR LOWER(l.email) LIKE ? OR LOWER(COALESCE(l.consultor_externo,'')) LIKE ?)"
+        # O @lid tambem e criterio de busca: ele aparece no card, na venda e na
+        # varredura, entao copiar de la e colar aqui tem que achar o lead — antes
+        # a busca so olhava nome/telefone/email e devolvia zero, que e o pior
+        # resultado possivel (parece que o lead nao existe).
+        # Aceita colado como esta na tela ("@lid 2184…", "2184…@lid") ou so o numero.
+        alvo_lid = f_busca.replace('@lid', '').replace('@c.us', '').replace('@s.whatsapp.net', '').strip()
+        q += (" AND (LOWER(l.nome) LIKE ? OR l.telefone LIKE ? OR LOWER(l.email) LIKE ?"
+              " OR LOWER(COALESCE(l.consultor_externo,'')) LIKE ?"
+              " OR l.id IN (SELECT lead_id FROM wa_chat_lead WHERE lead_id IS NOT NULL AND chat_id LIKE ?))")
         like = f'%{f_busca.lower()}%'
-        params.extend([like, f'%{f_busca}%', like, like])
+        # So casa @lid quando o termo tem cara de identificador (digitos), senao
+        # buscar "ana" varreria a wa_chat_lead inteira a toa.
+        like_lid = f'%{alvo_lid}%' if (alvo_lid and alvo_lid.isdigit()) else '\x00sem-match'
+        params.extend([like, f'%{f_busca}%', like, like, like_lid])
 
     q += " ORDER BY l.atualizado_em DESC"
     leads = conn.execute(q, params).fetchall()
