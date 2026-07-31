@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rede de Atendimento — Amil — Serenus Corretora</title>
+<style>
+  :root{
+    --am-blue:#004E9A; --am-blue-dk:#003B78; --am-navy:#001F3D; --am-ink:#16211D;
+    --am-soft:#5B6B77; --am-line:#E1E8EC; --am-bg:#F4F8FA; --am-card:#FFFFFF;
+    --am-orange:#F58220; --am-orange-dk:#D96E0F;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--am-bg);color:var(--am-ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-tap-highlight-color:transparent;}
+  [data-theme="dark"]{--am-ink:#EAF2F5;--am-soft:#9FB0BA;--am-line:#233544;--am-bg:#0E1B24;--am-card:#152633;}
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){--am-ink:#EAF2F5;--am-soft:#9FB0BA;--am-line:#233544;--am-bg:#0E1B24;--am-card:#152633;}
+  }
+  .app{max-width:720px;margin:0 auto;padding-bottom:110px;}
+  header.top{position:sticky;top:0;z-index:20;background:var(--am-navy);color:#fff;
+    padding:18px 16px calc(18px + env(safe-area-inset-top,0px));padding-top:calc(18px + env(safe-area-inset-top,0px));}
+  .brandrow{display:flex;align-items:center;gap:16px;margin-bottom:16px;}
+  .brand-serenus img{height:32px;width:auto;display:block;}
+  .branddivider{width:1px;height:32px;background:rgba(255,255,255,.22);flex:0 0 auto;}
+  .brand-am{display:flex;align-items:center;background:#fff;border-radius:10px;padding:7px 14px;
+    box-shadow:0 2px 6px rgba(0,0,0,.18);}
+  .brand-am b{color:var(--am-blue);font-size:20px;font-weight:800;letter-spacing:-.02em;}
+  header.top .brand{display:flex;align-items:center;gap:10px;}
+  header.top .brand-txt{line-height:1.15;flex:1;min-width:0;}
+  header.top .brand-txt b{font-size:16px;display:block;font-family:ui-serif,Georgia,serif;}
+  header.top .brand-txt span{font-size:11.5px;color:#B9D3DE;}
+  header.top .theme-btn{margin-left:auto;background:rgba(255,255,255,.12);border:none;color:#fff;
+    width:32px;height:32px;border-radius:9px;font-size:15px;cursor:pointer;flex:none;}
+
+  .search-wrap{padding:12px 16px 4px;}
+  .search-box{display:flex;align-items:center;gap:8px;background:var(--am-card);border:1px solid var(--am-line);
+    border-radius:12px;padding:10px 12px;}
+  .search-box input{border:none;outline:none;background:transparent;flex:1;font-size:14.5px;color:var(--am-ink);}
+  .search-box svg{flex:none;color:var(--am-soft);width:18px;height:18px;}
+  .search-clear{border:none;background:var(--am-line);color:var(--am-soft);width:20px;height:20px;border-radius:50%;
+    font-size:12px;cursor:pointer;display:none;}
+
+  .tabs{display:flex;gap:8px;padding:10px 16px 0;overflow-x:auto;}
+  .tab{white-space:nowrap;padding:8px 14px;border-radius:999px;border:1px solid var(--am-line);
+    background:var(--am-card);font-size:12.5px;font-weight:600;color:var(--am-soft);cursor:pointer;}
+  .tab.active{background:var(--am-orange);border-color:var(--am-orange);color:#fff;}
+
+  .section-title{padding:18px 16px 8px;font-size:13px;font-weight:800;letter-spacing:.02em;
+    text-transform:uppercase;color:var(--am-blue-dk);}
+  @media (prefers-color-scheme: dark){ .section-title{color:var(--am-blue);} }
+  [data-theme="dark"] .section-title{color:var(--am-blue);}
+
+  .card-list{padding:0 16px;display:flex;flex-direction:column;gap:10px;}
+  .acc{background:var(--am-card);border:1px solid var(--am-line);border-radius:14px;overflow:hidden;}
+  .acc-head{display:flex;align-items:center;justify-content:space-between;padding:13px 14px;cursor:pointer;}
+  .acc-head .t{font-weight:700;font-size:14px;}
+  .acc-head .cnt{font-size:11px;color:var(--am-soft);font-weight:700;flex:none;margin-left:8px;}
+  .acc-body{display:none;padding:0 14px 14px;}
+  .acc.open .acc-body{display:block;}
+  .acc-body .row{padding:9px 0;border-top:1px solid var(--am-line);}
+  .acc-body .row:first-child{border-top:none;padding-top:2px;}
+  .acc-body .row .pn{font-weight:700;font-size:13.5px;}
+  .acc-body .row .pc{font-size:11px;color:var(--am-soft);font-weight:600;margin-left:6px;}
+  .acc-body .row .pe{font-size:12px;color:var(--am-soft);margin-top:2px;}
+  .acc-body .row .pf{font-size:12px;color:var(--am-ink);margin-top:2px;font-weight:600;}
+
+  .empty{padding:40px 16px;text-align:center;color:var(--am-soft);font-size:13.5px;}
+
+  .footerbar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--am-card);
+    border-top:1px solid var(--am-line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));
+    display:flex;gap:10px;max-width:720px;margin:0 auto;}
+  .fbtn{flex:1;border:none;border-radius:12px;padding:12px 10px;font-weight:700;font-size:13.5px;cursor:pointer;}
+  .fbtn.primary{background:var(--am-blue);color:#fff;}
+  .fbtn.secondary{background:var(--am-line);color:var(--am-ink);}
+  .fbtn:disabled{opacity:.55;}
+
+  .toast{position:fixed;left:50%;bottom:86px;transform:translateX(-50%);background:var(--am-navy);color:#fff;
+    padding:10px 16px;border-radius:10px;font-size:12.5px;z-index:60;opacity:0;transition:opacity .2s;
+    max-width:88vw;text-align:center;pointer-events:none;}
+  .toast.show{opacity:1;}
+
+  .modal-ov{position:fixed;inset:0;background:rgba(0,31,61,.55);z-index:70;display:none;
+    align-items:flex-end;justify-content:center;}
+  .modal-ov.show{display:flex;}
+  .modal{background:var(--am-card);width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:20px;
+    padding-bottom:calc(20px + env(safe-area-inset-bottom,0px));}
+  .modal h3{margin:0 0 4px;font-size:16px;}
+  .modal p{margin:0 0 14px;font-size:12.5px;color:var(--am-soft);}
+  .modal label{display:block;font-size:12px;font-weight:700;margin:12px 0 5px;color:var(--am-soft);}
+  .modal input{width:100%;border:1px solid var(--am-line);border-radius:10px;padding:10px 11px;
+    font-size:14px;background:var(--am-bg);color:var(--am-ink);}
+  .modal .row-btns{display:flex;gap:8px;margin-top:6px;}
+  .modal .prazo{flex:1;text-align:center;border:1px solid var(--am-line);border-radius:10px;padding:9px;
+    font-size:12.5px;font-weight:700;cursor:pointer;color:var(--am-soft);}
+  .modal .prazo.active{background:var(--am-blue);border-color:var(--am-blue);color:#fff;}
+  .modal .actions{display:flex;gap:10px;margin-top:18px;}
+  .modal .actions button{flex:1;padding:12px;border-radius:12px;border:none;font-weight:700;font-size:13.5px;cursor:pointer;}
+  .modal .actions .cancel{background:var(--am-line);color:var(--am-ink);}
+  .modal .actions .go{background:var(--am-blue);color:#fff;}
+  .linkbox{background:var(--am-bg);border:1px solid var(--am-line);border-radius:10px;padding:10px;
+    font-size:12px;word-break:break-all;margin-top:10px;color:var(--am-blue-dk);}
+
+  .pv-bar{position:fixed;top:0;left:0;right:0;z-index:90;background:var(--am-navy);color:#fff;
+    display:flex;align-items:center;gap:10px;padding:10px 14px calc(10px + env(safe-area-inset-top,0px));
+    padding-top:calc(10px + env(safe-area-inset-top,0px));}
+  .pv-title{flex:1;font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .pv-title span{display:block;font-weight:500;color:#B9D3DE;font-size:11px;}
+  .pv-acts{display:flex;gap:8px;}
+  .pv-btn{border:none;border-radius:9px;padding:8px 12px;font-size:12.5px;font-weight:700;cursor:pointer;text-decoration:none;color:var(--am-ink);background:#fff;}
+  .pv-primary{background:var(--am-blue);color:#fff;}
+  .pv-hint{position:fixed;top:52px;left:0;right:0;z-index:89;background:#FFF4E5;color:#7A4A00;font-size:11px;
+    padding:6px 14px;text-align:center;}
+  .pv-frame{position:fixed;top:88px;left:0;right:0;bottom:0;z-index:88;width:100%;border:none;}
+  .intro-public{padding:16px;background:linear-gradient(135deg,var(--am-blue),var(--am-navy));color:#fff;margin:12px 16px;border-radius:16px;}
+  .intro-public b{display:block;font-size:15px;margin-bottom:4px;}
+  .intro-public span{font-size:12.5px;color:#D9EEF6;}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brandrow">
+      <div class="brand-serenus">
+        <img src="{{ url_for('static', filename='brand/serenus-logo-light.png') }}" alt="Serenus Corretora" />
+      </div>
+      <div class="branddivider"></div>
+      <div class="brand-am"><b>amil</b></div>
+    </div>
+    <div class="brand">
+      <div class="brand-txt">
+        <b>Rede de Atendimento</b>
+        <span id="planoSub">Amil — carregando...</span>
+      </div>
+      <button class="theme-btn" id="themeBtn" type="button" title="Alternar tema">&#9788;</button>
+    </div>
+  </header>
+
+  <div id="introPublic"></div>
+
+  <div class="search-wrap">
+    <div class="search-box">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="searchInput" type="text" placeholder="Buscar médico, especialidade ou unidade">
+      <button class="search-clear" id="searchClear" type="button">&times;</button>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabsTipo"></div>
+  <div id="content"></div>
+</div>
+
+<div class="footerbar">
+  <button class="fbtn secondary" id="linkBtn" type="button">Link para cliente</button>
+  <button class="fbtn primary" id="pdfbtn" type="button">Gerar PDF</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="modal-ov" id="linkModalOv">
+  <div class="modal">
+    <h3>Gerar link para cliente</h3>
+    <p>Cria um link temporário com a visão atual, sem exigir login.</p>
+    <label>Nome do cliente (opcional, aparece no link)</label>
+    <input type="text" id="linkCliente" placeholder="Ex.: João da Silva - Empresa X">
+    <label>Validade do link</label>
+    <div class="row-btns">
+      <div class="prazo active" data-prazo="24h">24 horas</div>
+      <div class="prazo" data-prazo="7d">7 dias</div>
+      <div class="prazo" data-prazo="30d">30 dias</div>
+    </div>
+    <div id="linkResult"></div>
+    <div class="actions">
+      <button class="cancel" id="linkCancel" type="button">Fechar</button>
+      <button class="go" id="linkGo" type="button">Gerar link</button>
+    </div>
+  </div>
+</div>
+
+<script id="amil-data" type="application/json">__AMIL_DATA__</script>
+<!--REDE_AM_CTX-->
+<script>
+(function(){
+  "use strict";
+  var DB = JSON.parse(document.getElementById("amil-data").textContent);
+  var CTX = (function(){
+    var el = document.getElementById("rede-am-ctx");
+    if(!el) return {modo:"standalone"};
+    try{ return JSON.parse(el.textContent); }catch(e){ return {modo:"standalone"}; }
+  })();
+
+  var state = { tipo: DB.tipos[0] ? DB.tipos[0].chave : "", q: "" };
+
+  function escapeHtml(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+  function norm(s){ return String(s||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,""); }
+  function showToast(msg){
+    var t = document.getElementById("toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(showToast._tm);
+    showToast._tm = setTimeout(function(){ t.classList.remove("show"); }, 3200);
+  }
+
+  var themeBtn = document.getElementById("themeBtn");
+  function applyTheme(t){
+    document.documentElement.setAttribute("data-theme", t);
+    localStorage.setItem("am_theme", t);
+    themeBtn.innerHTML = t === "dark" ? "&#9789;" : "&#9788;";
+  }
+  applyTheme(localStorage.getItem("am_theme") || "light");
+  themeBtn.addEventListener("click", function(){
+    applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
+  });
+
+  if(CTX.modo === "public"){
+    var box = document.getElementById("introPublic");
+    var linhas = [];
+    if(CTX.geradoPara) linhas.push("Preparado para <b>" + escapeHtml(CTX.geradoPara) + "</b>");
+    if(CTX.geradoPor) linhas.push("por " + escapeHtml(CTX.geradoPor) + ", da Serenus Corretora");
+    box.innerHTML = '<div class="intro-public"><b>Rede de atendimento Amil</b>' +
+      '<span>' + (linhas.join(" ") || "Consulte hospitais, unidades e médicos da rede.") +
+      (CTX.expiraTexto ? ' — link válido até ' + escapeHtml(CTX.expiraTexto) : '') + '</span></div>';
+    document.getElementById("linkBtn").style.display = "none";
+  }
+
+  document.getElementById("planoSub").textContent = "Amil " + DB.plano + " — " + DB.cidade;
+
+  var tabsEl = document.getElementById("tabsTipo");
+  tabsEl.innerHTML = DB.tipos.map(function(t){
+    var n = t.especialidades.reduce(function(a,e){return a+e.prestadores.length;}, 0);
+    return '<div class="tab' + (t.chave === state.tipo ? ' active' : '') + '" data-tipo="' + escapeHtml(t.chave) + '">' +
+      escapeHtml(t.label) + ' <small>(' + n + ')</small></div>';
+  }).join("");
+  tabsEl.addEventListener("click", function(e){
+    var el = e.target.closest(".tab");
+    if(!el) return;
+    state.tipo = el.getAttribute("data-tipo");
+    Array.prototype.forEach.call(tabsEl.querySelectorAll(".tab"), function(x){ x.classList.toggle("active", x === el); });
+    render();
+  });
+
+  var searchInput = document.getElementById("searchInput");
+  var searchClear = document.getElementById("searchClear");
+  searchInput.addEventListener("input", function(){
+    state.q = searchInput.value;
+    searchClear.style.display = state.q ? "block" : "none";
+    render();
+  });
+  searchClear.addEventListener("click", function(){
+    searchInput.value = ""; state.q = ""; searchClear.style.display = "none"; render();
+  });
+
+  var content = document.getElementById("content");
+  function matchesQuery(text){
+    if(!state.q) return true;
+    return norm(text).indexOf(norm(state.q)) !== -1;
+  }
+  function currentTipoObj(){
+    return DB.tipos.filter(function(t){ return t.chave === state.tipo; })[0] || {especialidades:[]};
+  }
+
+  function specialtyAcc(esp, idx){
+    var filtered = esp.prestadores.filter(function(p){ return matchesQuery(esp.nome + " " + p.n + " " + (p.e||"")); });
+    if(state.q && !filtered.length) return "";
+    var lista = state.q ? filtered : esp.prestadores;
+    var rows = lista.map(function(p){
+      return '<div class="row"><span class="pn">' + escapeHtml(p.n) + '</span>' +
+        (p.crm ? '<span class="pc">' + escapeHtml(p.crm) + '</span>' : '') +
+        (p.e ? '<div class="pe">' + escapeHtml(p.e) + '</div>' : '') +
+        (p.f && p.f.length ? '<div class="pf">' + p.f.map(escapeHtml).join(" · ") + '</div>' : '') +
+        '</div>';
+    }).join("");
+    return '<div class="acc" data-idx="e' + idx + '"><div class="acc-head"><div><div class="t">' + escapeHtml(esp.nome) + '</div></div>' +
+      '<div class="cnt">' + esp.prestadores.length + '</div></div>' +
+      '<div class="acc-body">' + rows + '</div></div>';
+  }
+
+  function render(){
+    var tipoObj = currentTipoObj();
+    var blocks = tipoObj.especialidades.map(function(esp, i){ return specialtyAcc(esp, i); }).filter(Boolean);
+    var html = '<div class="section-title">' + escapeHtml(tipoObj.label || "") + '</div>';
+    if(blocks.length){
+      html += '<div class="card-list">' + blocks.join("") + '</div>';
+    } else {
+      html += '<div class="empty">Nada encontrado' + (state.q ? ' para "' + escapeHtml(state.q) + '"' : '') + '.</div>';
+    }
+    content.innerHTML = html;
+    Array.prototype.forEach.call(content.querySelectorAll(".acc-head"), function(h){
+      h.addEventListener("click", function(){ h.parentNode.classList.toggle("open"); });
+    });
+    if(state.q){
+      Array.prototype.forEach.call(content.querySelectorAll(".acc"), function(a){ a.classList.add("open"); });
+    }
+  }
+  render();
+
+  // ---------- Link para cliente ----------
+  var linkOv = document.getElementById("linkModalOv");
+  document.getElementById("linkBtn").addEventListener("click", function(){
+    document.getElementById("linkResult").innerHTML = "";
+    linkOv.classList.add("show");
+  });
+  document.getElementById("linkCancel").addEventListener("click", function(){ linkOv.classList.remove("show"); });
+  var prazoSel = "24h";
+  Array.prototype.forEach.call(linkOv.querySelectorAll(".prazo"), function(p){
+    p.addEventListener("click", function(){
+      prazoSel = p.getAttribute("data-prazo");
+      Array.prototype.forEach.call(linkOv.querySelectorAll(".prazo"), function(x){ x.classList.toggle("active", x === p); });
+    });
+  });
+  document.getElementById("linkGo").addEventListener("click", function(){
+    if(!CTX.gerarLinkUrl){ showToast("Disponível apenas dentro do JOB."); return; }
+    var btn = document.getElementById("linkGo");
+    btn.disabled = true; btn.textContent = "Gerando...";
+    fetch(CTX.gerarLinkUrl, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        cliente: document.getElementById("linkCliente").value,
+        prazo: prazoSel, tipo: state.tipo, q: state.q
+      })
+    }).then(function(r){ return r.json(); }).then(function(d){
+      document.getElementById("linkResult").innerHTML =
+        '<div class="linkbox">' + escapeHtml(d.url) + '</div>' +
+        '<div style="font-size:11.5px;color:var(--am-soft);margin-top:6px;">Expira em ' + escapeHtml(d.expiraTexto) + '</div>';
+      if(navigator.clipboard) navigator.clipboard.writeText(d.url).catch(function(){});
+      showToast("Link copiado.");
+    }).catch(function(){
+      showToast("Falha ao gerar o link.");
+    }).finally(function(){
+      btn.disabled = false; btn.textContent = "Gerar link";
+    });
+  });
+
+  // ---------- PDF ----------
+  var PDF_W = 595.28, PDF_H = 841.89, PDF_M = 42;
+  var C_INK = "0 0.31 0.61", C_SOFT = "0.357 0.42 0.467", C_ACC = "0 0.31 0.61", C_FAINT = "0.6 0.65 0.68";
+  var HELV_W = {' ':278,'!':278,'"':355,'#':556,'$':556,'%':889,'&':667,"'":191,'(':333,')':333,'*':389,'+':584,',':278,'-':333,'.':278,'/':278,'0':556,'1':556,'2':556,'3':556,'4':556,'5':556,'6':556,'7':556,'8':556,'9':556,':':278,';':278,'<':584,'=':584,'>':584,'?':556,'@':1015,'A':667,'B':667,'C':722,'D':722,'E':667,'F':611,'G':778,'H':722,'I':278,'J':500,'K':667,'L':556,'M':833,'N':722,'O':778,'P':667,'Q':778,'R':722,'S':667,'T':611,'U':722,'V':667,'W':944,'X':667,'Y':667,'Z':611,'[':278,'\\':278,']':278,'^':469,'_':556,'`':333,'a':556,'b':556,'c':500,'d':556,'e':556,'f':278,'g':556,'h':556,'i':222,'j':222,'k':500,'l':222,'m':833,'n':556,'o':556,'p':556,'q':556,'r':333,'s':500,'t':278,'u':556,'v':500,'w':722,'x':500,'y':500,'z':500,'{':334,'|':260,'}':334,'~':584};
+  var HELVB_W = {' ':278,'!':333,'"':474,'#':556,'$':556,'%':889,'&':722,"'":238,'(':333,')':333,'*':389,'+':584,',':278,'-':333,'.':278,'/':278,'0':556,'1':556,'2':556,'3':556,'4':556,'5':556,'6':556,'7':556,'8':556,'9':556,':':333,';':333,'<':584,'=':584,'>':584,'?':611,'@':975,'A':722,'B':722,'C':722,'D':722,'E':667,'F':611,'G':778,'H':722,'I':278,'J':556,'K':722,'L':611,'M':833,'N':722,'O':778,'P':667,'Q':778,'R':722,'S':667,'T':611,'U':722,'V':667,'W':944,'X':667,'Y':667,'Z':611,'[':333,'\\':278,']':333,'^':584,'_':556,'`':333,'a':556,'b':611,'c':556,'d':611,'e':556,'f':333,'g':611,'h':611,'i':278,'j':278,'k':556,'l':278,'m':889,'n':611,'o':611,'p':611,'q':611,'r':389,'s':556,'t':333,'u':611,'v':556,'w':778,'x':556,'y':556,'z':500,'{':389,'|':280,'}':389,'~':584};
+  function pdfStr(s){
+    s = (s == null ? "" : String(s)); var out = "";
+    for(var i=0;i<s.length;i++){ var code = s.charCodeAt(i), ch = s[i]; if(code > 255) ch = "?";
+      if(ch === "(" || ch === ")" || ch === "\\") out += "\\" + ch; else out += ch; }
+    return out;
+  }
+  function pdfTextWidth(s, size, bold){
+    var tbl = bold ? HELVB_W : HELV_W, total = 0; s = (s == null ? "" : String(s));
+    for(var i=0;i<s.length;i++){ var w = tbl[s[i]]; total += (w == null ? 556 : w); }
+    return total * size / 1000;
+  }
+  function pdfWrap(s, maxW, size, bold){
+    var words = String(s == null ? "" : s).split(" "), lines = [], cur = "";
+    for(var i=0;i<words.length;i++){
+      var test = cur ? cur + " " + words[i] : words[i];
+      if(pdfTextWidth(test, size, bold) > maxW && cur){ lines.push(cur); cur = words[i]; } else { cur = test; }
+    }
+    if(cur) lines.push(cur);
+    return lines.length ? lines : [""];
+  }
+  function buildPdfBlob(sections, meta){
+    var objects = [];
+    function newObj(dict, data){ objects.push({dict: dict, data: data}); return objects.length; }
+    var fReg = newObj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+    var fBold = newObj("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+    var gsWm = newObj("<< /Type /ExtGState /ca 0.06 >>");
+    var pages = [], cs = "", y = 0;
+    function drawWatermark(){
+      var phrase = "SERENUS CORRETORA - MATERIAL EXCLUSIVO";
+      var row3 = phrase + "    " + phrase + "    " + phrase;
+      var ang = 28 * Math.PI / 180;
+      var ca = Math.cos(ang).toFixed(4), sa = Math.sin(ang).toFixed(4), nsa = (-Math.sin(ang)).toFixed(4);
+      cs += "q /GS1 gs 0.42 0.5 0.6 rg BT /F2 9 Tf\n";
+      for(var row=-3; row<15; row++){
+        cs += ca + " " + sa + " " + nsa + " " + ca + " -150 " + (row*58) + " Tm (" + pdfStr(row3) + ") Tj\n";
+      }
+      cs += "ET Q\n";
+    }
+    function startPage(isFirst){
+      cs = "";
+      drawWatermark();
+      cs += "q " + C_INK + " rg 0 " + (PDF_H - 6).toFixed(2) + " " + PDF_W.toFixed(2) + " 6 re f Q\n";
+      if(isFirst){
+        y = PDF_H - 48;
+        cs += "BT /F2 17 Tf " + C_INK + " rg " + PDF_M + " " + y.toFixed(2) + " Td (Rede de Atendimento - Amil - " + pdfStr(meta.title) + ") Tj ET\n";
+        y -= 16;
+        cs += "BT /F1 9 Tf " + C_SOFT + " rg " + PDF_M + " " + y.toFixed(2) + " Td (" + pdfStr(meta.subtitle) + ") Tj ET\n";
+        y -= 24;
+      } else {
+        cs += "BT /F2 8.5 Tf " + C_SOFT + " rg " + PDF_M + " " + (PDF_H - 26).toFixed(2) + " Td (Rede de Atendimento - Amil - " + pdfStr(meta.title) + " - Serenus Corretora) Tj ET\n";
+        y = PDF_H - 48;
+      }
+      pages.push(null);
+    }
+    function endPage(){ pages[pages.length-1] = cs; }
+    function ensure(h){ if(y - h < PDF_M + 8){ endPage(); startPage(false); } }
+    function line(text, opt){
+      opt = opt || {};
+      var size = opt.size || 9, bold = !!opt.bold, color = opt.color || C_INK, gap = opt.gap != null ? opt.gap : 2;
+      var maxW = PDF_W - PDF_M*2, lns = pdfWrap(text, maxW, size, bold);
+      for(var i=0;i<lns.length;i++){
+        ensure(size + gap);
+        cs += "BT /" + (bold?"F2":"F1") + " " + size + " Tf " + color + " rg " + PDF_M + " " + y.toFixed(2) + " Td (" + pdfStr(lns[i]) + ") Tj ET\n";
+        y -= size + gap;
+      }
+    }
+    function groupTitle(text){
+      ensure(30); y -= 8;
+      cs += "q 0.75 0.82 0.86 RG 0.8 w " + PDF_M + " " + (y+3).toFixed(2) + " m " + (PDF_W-PDF_M).toFixed(2) + " " + (y+3).toFixed(2) + " l S Q\n";
+      y -= 5;
+      line(text, {size:10.5, bold:true, color:C_ACC, gap:7});
+    }
+    startPage(true);
+    sections.forEach(function(sec){
+      groupTitle(sec.title);
+      sec.items.forEach(function(it){
+        line(it.n, {size:9.5, bold:true, gap:1.5});
+        if(it.e) line(it.e, {size:8.2, color:C_SOFT, gap:1.5});
+        if(it.f && it.f.length) line(it.f.join("  "), {size:8.2, color:C_SOFT, gap:1.5});
+        y -= 5;
+      });
+    });
+    ensure(58); y -= 10;
+    cs += "q 0.75 0.82 0.86 RG 0.8 w " + PDF_M + " " + (y+4).toFixed(2) + " m " + (PDF_W-PDF_M).toFixed(2) + " " + (y+4).toFixed(2) + " l S Q\n";
+    y -= 6;
+    line("Material exclusivo Serenus Corretora de Saude - uso interno, nao redistribuir.", {size:7.4, bold:true, color:C_INK, gap:2.5});
+    line("Fonte: portal oficial Amil - busca avancada da rede credenciada. Plano " + pdfStr(DB.plano) + ". Gerado em " + meta.dateStr + ".", {size:7, color:C_FAINT, gap:2.5});
+    line("Confirme sempre disponibilidade e cobertura diretamente com o prestador ou com a central Amil.", {size:7, color:C_FAINT, gap:2.5});
+    endPage();
+    var contentNums = pages.map(function(c){ return newObj("<< /Length " + c.length + " >>", c); });
+    var pageNums = [];
+    contentNums.forEach(function(cn){
+      var res = "<< /Font << /F1 " + fReg + " 0 R /F2 " + fBold + " 0 R >> /ExtGState << /GS1 " + gsWm + " 0 R >> >>";
+      pageNums.push(newObj("<< /Type /Page /Parent __PAGES__ /MediaBox [0 0 " + PDF_W + " " + PDF_H + "] /Resources " + res + " /Contents " + cn + " 0 R >>"));
+    });
+    var pagesNum = newObj("<< /Type /Pages /Kids [" + pageNums.map(function(n){return n + " 0 R";}).join(" ") + "] /Count " + pageNums.length + " >>");
+    objects.forEach(function(o, i){
+      if(o.dict && o.dict.indexOf("__PAGES__") !== -1) objects[i].dict = o.dict.replace("__PAGES__", pagesNum + " 0 R");
+    });
+    var catNum = newObj("<< /Type /Catalog /Pages " + pagesNum + " 0 R >>");
+    var infoNum = newObj("<< /Title (Rede de Atendimento - Amil - " + pdfStr(meta.title) + ") /Author (Serenus Corretora de Saude) /Creator (Serenus - Rede de Atendimento) >>");
+    var head = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
+    var chunks = [head], offsets = [0], pos = head.length;
+    for(var i=0;i<objects.length;i++){
+      var num = i+1, o = objects[i], body;
+      if(o.data != null) body = num + " 0 obj\n" + o.dict + "\nstream\n" + o.data + "\nendstream\nendobj\n";
+      else body = num + " 0 obj\n" + o.dict + "\nendobj\n";
+      offsets[num] = pos; chunks.push(body); pos += body.length;
+    }
+    var xrefStart = pos;
+    var xref = "xref\n0 " + (objects.length+1) + "\n0000000000 65535 f \n";
+    for(var j=1;j<=objects.length;j++){ var s = String(offsets[j]); while(s.length < 10) s = "0" + s; xref += s + " 00000 n \n"; }
+    var trailer = "trailer\n<< /Size " + (objects.length+1) + " /Root " + catNum + " 0 R /Info " + infoNum + " 0 R >>\nstartxref\n" + xrefStart + "\n%%EOF";
+    var full = chunks.join("") + xref + trailer;
+    var bytes = new Uint8Array(full.length);
+    for(var k=0;k<full.length;k++) bytes[k] = full.charCodeAt(k) & 0xFF;
+    return new Blob([bytes], {type:"application/pdf"});
+  }
+  function slugify(s){
+    return String(s).toLowerCase()
+      .replace(/[àáâãä]/g,"a").replace(/[èéêë]/g,"e").replace(/[ìíîï]/g,"i")
+      .replace(/[òóôõö]/g,"o").replace(/[ùúûü]/g,"u").replace(/ç/g,"c")
+      .replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+  }
+  function currentSections(){
+    var tipoObj = currentTipoObj(), sections = [];
+    tipoObj.especialidades.forEach(function(esp){
+      var lista = esp.prestadores.filter(function(p){ return matchesQuery(esp.nome + " " + p.n + " " + (p.e||"")); });
+      if(!lista.length) return;
+      sections.push({title: esp.nome, items: lista.map(function(p){
+        return {n: p.n + (p.crm ? " (" + p.crm + ")" : ""), e: p.e, f: p.f};
+      })});
+    });
+    return sections;
+  }
+  document.getElementById("pdfbtn").addEventListener("click", function(){
+    var sections = currentSections();
+    var totalItems = sections.reduce(function(a,s){ return a + s.items.length; }, 0);
+    if(!totalItems){ showToast("Nenhum resultado para gerar PDF. Ajuste a busca."); return; }
+    var btn = document.getElementById("pdfbtn");
+    btn.disabled = true; var prevLabel = btn.innerHTML; btn.innerHTML = "Gerando...";
+    showToast("Gerando PDF com " + totalItems + " itens...");
+    setTimeout(function(){
+      try{
+        var now = new Date();
+        var dateStr = now.toLocaleDateString("pt-BR") + " as " + now.toLocaleTimeString("pt-BR", {hour:"2-digit", minute:"2-digit"});
+        var tipoObj = currentTipoObj();
+        var meta = { title: tipoObj.label, subtitle: totalItems + " itens" + (state.q ? " - busca: " + state.q : "") + " - Atualizado em " + DB.atualizado_em, dateStr: dateStr };
+        var blob = buildPdfBlob(sections, meta);
+        var name = "rede-amil-" + slugify(state.tipo) + ".pdf";
+        var url = URL.createObjectURL(blob);
+        var win = null;
+        try{ win = window.open(url, "_blank"); }catch(e){ win = null; }
+        if(win){
+          showToast("PDF aberto em nova aba - use Salvar/Compartilhar por la.");
+          setTimeout(function(){ URL.revokeObjectURL(url); }, 120000);
+        } else {
+          showPdfViewer(url, name, totalItems);
+        }
+      } catch(e){
+        showToast("Falha ao gerar o PDF: " + (e && e.message ? e.message : e));
+      } finally {
+        btn.disabled = false; btn.innerHTML = prevLabel;
+      }
+    }, 30);
+  });
+  function showPdfViewer(url, filename, count){
+    var old = document.getElementById("pdfviewer");
+    if(old) old.parentNode.removeChild(old);
+    var ov = document.createElement("div");
+    ov.id = "pdfviewer";
+    ov.innerHTML =
+      '<div class="pv-bar"><div class="pv-title">' + escapeHtml(filename) + '<span>' + count + ' itens</span></div>' +
+      '<div class="pv-acts"><a class="pv-btn pv-primary" id="pvSave" href="' + url + '" download="' + escapeHtml(filename) + '">Salvar</a>' +
+      '<button class="pv-btn" id="pvClose" type="button">Fechar</button></div></div>' +
+      '<div class="pv-hint">Se o botao Salvar nao funcionar, use o botao de download/compartilhar do visualizador de PDF abaixo.</div>' +
+      '<iframe class="pv-frame" src="' + url + '" title="PDF"></iframe>';
+    document.body.appendChild(ov);
+    document.getElementById("pvClose").addEventListener("click", function(){
+      ov.parentNode.removeChild(ov);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    });
+    showToast("PDF de " + count + " itens pronto.");
+  }
+})();
+</script>
+</body>
+</html>

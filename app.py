@@ -1114,6 +1114,16 @@ def init_db():
                 revogado INTEGER DEFAULT 0,
                 aberturas INTEGER DEFAULT 0
             )""",
+            """CREATE TABLE IF NOT EXISTS amil_link (
+                id SERIAL PRIMARY KEY,
+                token TEXT UNIQUE NOT NULL,
+                criado_por_id INTEGER, criado_por_nome TEXT,
+                cliente TEXT, tipo TEXT, q TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expira_em TIMESTAMP NOT NULL,
+                revogado INTEGER DEFAULT 0,
+                aberturas INTEGER DEFAULT 0
+            )""",
             """CREATE TABLE IF NOT EXISTS cotacao_legenda_modelo (
                 id SERIAL PRIMARY KEY,
                 nome TEXT NOT NULL,
@@ -1737,6 +1747,16 @@ def init_db():
             token TEXT UNIQUE NOT NULL,
             criado_por_id INTEGER, criado_por_nome TEXT,
             cliente TEXT, plano TEXT, sub TEXT, q TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expira_em TIMESTAMP NOT NULL,
+            revogado INTEGER DEFAULT 0,
+            aberturas INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS amil_link (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token TEXT UNIQUE NOT NULL,
+            criado_por_id INTEGER, criado_por_nome TEXT,
+            cliente TEXT, tipo TEXT, q TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             expira_em TIMESTAMP NOT NULL,
             revogado INTEGER DEFAULT 0,
@@ -16159,6 +16179,74 @@ def rede_vera_cruz_publica(token):
         'geradoPara': r.get('cliente') or None,
     }
     return render_template('rede_vera_cruz.html', rede_vc_ctx=ctx)
+
+
+@app.route('/rede-amil')
+@login_required
+def rede_amil():
+    """Consulta da rede Amil (plano Bronze SP Mais, Campinas) — material exclusivo
+    Serenus, separado das demais operadoras. Ver rede-amil-assets/ na raiz do repo
+    para como os dados foram extraídos e como regerar este template."""
+    ctx = {'modo': 'app', 'gerarLinkUrl': url_for('amil_gerar_link')}
+    return render_template('rede_amil.html', rede_am_ctx=ctx)
+
+
+@app.route('/rede-amil/gerar-link', methods=['POST'])
+@login_required
+def amil_gerar_link():
+    """Gera um link temporário (com prazo de expiração) para mandar ao cliente."""
+    body = request.get_json(silent=True) or {}
+    prazo = body.get('prazo') or '7d'
+    delta = RE_LINK_PRAZOS.get(prazo, RE_LINK_PRAZOS['7d'])
+    expira_em = datetime.now(TZ_SP) + delta
+    token = secrets.token_urlsafe(24)
+
+    cliente = (body.get('cliente') or '').strip()[:120] or None
+
+    conn = db()
+    conn.execute(
+        """INSERT INTO amil_link (token, criado_por_id, criado_por_nome, cliente, tipo, q, expira_em)
+           VALUES (?,?,?,?,?,?,?)""",
+        (token, session.get('user_id'), session.get('nome', ''), cliente,
+         (body.get('tipo') or '')[:80], (body.get('q') or '')[:200],
+         expira_em.strftime('%Y-%m-%d %H:%M:%S'))
+    )
+    conn.commit()
+    close_db(conn)
+
+    return jsonify({
+        'url': _SITE_BASE_URL + url_for('rede_amil_publica', token=token),
+        'expiraTexto': _rede_link_fmt(expira_em),
+        'geradoPara': cliente
+    })
+
+
+@app.route('/rede-am/<token>')
+def rede_amil_publica(token):
+    """Link temporário enviado ao cliente para a rede Amil."""
+    conn = db()
+    row = conn.execute("SELECT * FROM amil_link WHERE token=?", (token,)).fetchone()
+    if not row:
+        close_db(conn)
+        abort(404)
+    r = dict(row)
+    expira_em = _parse_dt_seguro(r.get('expira_em'))
+    expirado = bool(r.get('revogado')) or (expira_em and expira_em.replace(tzinfo=None) < datetime.now(TZ_SP).replace(tzinfo=None))
+    if expirado:
+        close_db(conn)
+        return render_template('rede_referenciada_expirado.html'), 410
+
+    conn.execute("UPDATE amil_link SET aberturas=COALESCE(aberturas,0)+1 WHERE id=?", (r['id'],))
+    conn.commit()
+    close_db(conn)
+
+    ctx = {
+        'modo': 'public',
+        'expiraTexto': _rede_link_fmt(expira_em) if expira_em else None,
+        'geradoPor': r.get('criado_por_nome') or None,
+        'geradoPara': r.get('cliente') or None,
+    }
+    return render_template('rede_amil.html', rede_am_ctx=ctx)
 
 
 @app.route('/manual')
