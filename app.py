@@ -889,6 +889,19 @@ def init_db():
             # arquivo. Transcrever uma vez por ARQUIVO e reusar em todo envio é o
             # resíduo que faz a ferramenta não pagar de novo por conteúdo que ela
             # própria produziu — e o consultor ver a transcrição na hora, sem espera.
+            # SAÚDE DOS PROVEDORES DE IA. Sem crédito, tudo aqui degrada em SILÊNCIO:
+            # a transcrição volta vazia, a análise sai sem IA, e ninguém fica sabendo
+            # até alguém reclamar que "parou de funcionar". Registrar o motivo real da
+            # última falha é o que transforma isso num aviso em vez de um mistério.
+            """CREATE TABLE IF NOT EXISTS ia_provedor_estado (
+                provedor TEXT PRIMARY KEY,
+                status TEXT,
+                detalhe TEXT,
+                http INTEGER,
+                ultima_ok TEXT,
+                ultima_falha TEXT,
+                atualizado_em TEXT
+            )""",
             """CREATE TABLE IF NOT EXISTS wa_audio_modelo (
                 arquivo TEXT PRIMARY KEY,
                 texto TEXT,
@@ -1600,6 +1613,15 @@ def init_db():
             resumo TEXT,
             criado_por INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS ia_provedor_estado (
+            provedor TEXT PRIMARY KEY,
+            status TEXT,
+            detalhe TEXT,
+            http INTEGER,
+            ultima_ok TEXT,
+            ultima_falha TEXT,
+            atualizado_em TEXT
         );
         CREATE TABLE IF NOT EXISTS wa_audio_modelo (
             arquivo TEXT PRIMARY KEY,
@@ -12989,6 +13011,7 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, docume
                 messages=[{"role": "user", "content": conteudo}],
             )
             txt = next((b.text for b in resp.content if b.type == 'text'), '')
+            ia_registrar('claude', True)
             if getattr(resp, 'stop_reason', None) != 'max_tokens':
                 break
             app.logger.warning(f"[CLAUDE] resposta truncada em {max_tokens} tokens (stop_reason=max_tokens)"
@@ -13016,6 +13039,9 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, docume
         return dados
     except Exception as e:
         app.logger.warning(f"[CLAUDE] análise falhou ({_CLAUDE_MODEL}): {e}")
+        # Registra o MOTIVO: sem crédito, chave inválida e limite são três
+        # problemas com donos diferentes, e hoje todos apareciam igual (nada).
+        ia_registrar('claude', False, getattr(e, 'status_code', None), str(e)[:400])
         return None
 
 
@@ -13037,6 +13063,108 @@ _WA_JARGAO_SMS = ("plano de saúde, cotação, operadora, coparticipação, car�
                   "SulAmérica, Porto, Hapvida, NotreDame, Intermédica, MedSênior, Beneficência")
 
 
+# Assinaturas de erro de cada provedor. O que importa distinguir é SEM CRÉDITO
+# (alguém precisa pagar) de CHAVE INVÁLIDA (alguém precisa corrigir a config) e de
+# LIMITE (passa sozinho) — três problemas com donos diferentes.
+_IA_PROVEDORES = ('claude', 'groq', 'openai')
+
+
+def _ia_classificar(http, corpo):
+    txt = str(corpo or '').lower()
+    if 'credit balance is too low' in txt or 'insufficient_quota' in txt \
+       or 'exceeded your current quota' in txt or 'billing' in txt:
+        return 'sem_credito', 'Sem créditos na conta'
+    if http in (401, 403) or 'invalid_api_key' in txt or 'authentication' in txt \
+       or 'invalid api key' in txt:
+        return 'chave_invalida', 'Chave rejeitada pelo provedor'
+    if http == 429:
+        return 'limite', 'Limite de uso momentâneo (passa sozinho)'
+    if http and http >= 500:
+        return 'provedor_fora', f'Provedor com erro {http}'
+    return 'erro', (str(corpo or '')[:180] or f'HTTP {http}')
+
+
+def ia_registrar(provedor, ok, http=None, corpo=None):
+    """Carimba o estado do provedor. Best-effort e nunca levanta: registrar saúde
+    não pode ser o que derruba a análise."""
+    if provedor not in _IA_PROVEDORES:
+        return
+    conn = None
+    try:
+        conn = db()
+        agora = _agora_sp()
+        if ok:
+            status, detalhe = 'ok', ''
+        else:
+            status, detalhe = _ia_classificar(http, corpo)
+        ja = conn.execute("SELECT provedor FROM ia_provedor_estado WHERE provedor=?", (provedor,)).fetchone()
+        if ja:
+            if ok:
+                conn.execute("""UPDATE ia_provedor_estado SET status=?, detalhe='', http=NULL,
+                                ultima_ok=?, atualizado_em=? WHERE provedor=?""",
+                             (status, agora, agora, provedor))
+            else:
+                conn.execute("""UPDATE ia_provedor_estado SET status=?, detalhe=?, http=?,
+                                ultima_falha=?, atualizado_em=? WHERE provedor=?""",
+                             (status, detalhe, http, agora, agora, provedor))
+        else:
+            conn.execute("""INSERT INTO ia_provedor_estado
+                (provedor, status, detalhe, http, ultima_ok, ultima_falha, atualizado_em)
+                VALUES (?,?,?,?,?,?,?)""",
+                (provedor, status, detalhe, http, agora if ok else None,
+                 None if ok else agora, agora))
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        if conn is not None:
+            try: close_db(conn)
+            except Exception: pass
+
+
+@app.context_processor
+def _ctx_ia_alerta():
+    """Aviso de provedor sem crédito em TODA tela do JOB. Uma página de
+    diagnóstico que ninguém abre não avisa nada — o ponto é aparecer sem procurar.
+    Só admin, e só quando é grave (sem crédito / chave rejeitada): limite
+    momentâneo passa sozinho e viraria ruído."""
+    try:
+        if session.get('perfil') != 'admin':
+            return {}
+        graves = [p for p in ia_saude() if p['grave']]
+        return {'ia_alerta': graves}
+    except Exception:
+        return {}
+
+
+def ia_saude(conn=None):
+    """Estado de cada provedor + se a chave existe. É o que a tela mostra."""
+    fechar = False
+    if conn is None:
+        conn = db(); fechar = True
+    envs = {'claude': 'ANTHROPIC_API_KEY', 'groq': 'GROQ_API_KEY', 'openai': 'OPENAI_API_KEY'}
+    estados = {}
+    try:
+        for r in conn.execute("SELECT * FROM ia_provedor_estado").fetchall():
+            estados[r['provedor']] = dict(r)
+    except Exception:
+        pass
+    if fechar:
+        close_db(conn)
+    out = []
+    for p in _IA_PROVEDORES:
+        tem_chave = bool((os.environ.get(envs[p]) or '').strip())
+        e = estados.get(p) or {}
+        st = e.get('status') or ('nunca_usado' if tem_chave else 'sem_chave')
+        if not tem_chave:
+            st = 'sem_chave'
+        out.append({'provedor': p, 'env': envs[p], 'tem_chave': tem_chave, 'status': st,
+                    'detalhe': e.get('detalhe') or '', 'http': e.get('http'),
+                    'ultima_ok': e.get('ultima_ok'), 'ultima_falha': e.get('ultima_falha'),
+                    'grave': st in ('sem_credito', 'chave_invalida')})
+    return out
+
+
 def _transcrever_chamar(url, headers, data, raw, ext, mime, provedor, preco_min):
     """Uma tentativa de transcrição contra um provedor específico. Retorna
     {'texto','segundos','custo_usd','provedor'}, None (áudio sem fala/vazio,
@@ -13045,8 +13173,11 @@ def _transcrever_chamar(url, headers, data, raw, ext, mime, provedor, preco_min)
     import requests as _rq
     files = {'file': (f'audio.{ext}', raw, mime)}
     r = _rq.post(url, headers=headers, files=files, data=data, timeout=90)
+    _prov = 'groq' if 'groq' in (url or '') else 'openai'
     if r.status_code != 200:
+        ia_registrar(_prov, False, r.status_code, r.text[:400])
         raise RuntimeError(f'HTTP {r.status_code}: {r.text[:200]}')
+    ia_registrar(_prov, True)
     try:
         corpo = r.json()
         texto = (corpo.get('text') or '').strip()
@@ -14541,6 +14672,53 @@ def api_whatsapp_lead_criar():
         (lead_id, autor, 'criacao', f'Lead cadastrado pela extensão (origem: {origem})', agora))
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True, "ja_existia": False, "lead_id": lead_id}))
+
+
+# ─── SAÚDE DA IA: TELA E AVISO ────────────────────────────────────────────────
+@app.route('/ia-saude')
+@login_required
+@admin_required
+def ia_saude_painel():
+    return render_template('ia_saude.html', provedores=ia_saude())
+
+
+@app.route('/ia-saude/testar', methods=['POST'])
+@login_required
+@admin_required
+def ia_saude_testar():
+    """Bate de verdade em cada provedor com a chamada mais barata possível. É a
+    diferença entre 'não deu erro ainda' e 'está funcionando agora'."""
+    alvo = (request.json or {}).get('provedor') or ''
+    res = {}
+    if alvo in ('groq', 'openai', ''):
+        # Áudio mínimo válido (WAV de silêncio): o provedor responde 200 com texto
+        # vazio quando está de pé, e o erro de crédito aparece igual.
+        import base64 as _b64
+        wav = _b64.b64encode(
+            b'RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00'
+            b'\x80>\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00').decode('ascii')
+        try:
+            _transcrever_audio(wav, 'audio/wav')
+            res['transcricao'] = 'testado'
+        except Exception as e:
+            res['transcricao'] = str(e)[:200]
+    if alvo in ('claude', ''):
+        try:
+            import anthropic
+            k = (os.environ.get('ANTHROPIC_API_KEY') or '').strip()
+            if not k:
+                ia_registrar('claude', False, None, 'sem chave configurada')
+                res['claude'] = 'sem chave'
+            else:
+                c = anthropic.Anthropic(api_key=k, timeout=30.0, max_retries=0)
+                c.messages.create(model=_CLAUDE_MODEL, max_tokens=4,
+                                  messages=[{"role": "user", "content": "oi"}])
+                ia_registrar('claude', True)
+                res['claude'] = 'ok'
+        except Exception as e:
+            ia_registrar('claude', False, getattr(e, 'status_code', None), str(e)[:400])
+            res['claude'] = str(e)[:200]
+    return jsonify({"ok": True, "resultado": res, "provedores": ia_saude()})
 
 
 # ─── VENDA PRECISA DE LEAD ────────────────────────────────────────────────────

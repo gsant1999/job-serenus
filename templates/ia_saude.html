@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% block title %}Saúde da IA{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Saúde da IA</h1>
+    <div class="sub">Se um provedor fica sem crédito, tudo aqui degrada em silêncio — esta tela existe pra isso não acontecer</div>
+  </div>
+  <div><button class="btn btn-sm" onclick="testar(this)">Testar agora</button></div>
+</div>
+
+<div class="page">
+  <div class="card">
+    <div class="card-header"><h3>Provedores</h3></div>
+    <div style="padding:0 16px 16px; display:flex; flex-direction:column; gap:10px;">
+      {% set rot = {'ok':'Funcionando','sem_credito':'SEM CRÉDITOS','chave_invalida':'Chave rejeitada','limite':'Limite momentâneo','provedor_fora':'Provedor fora do ar','sem_chave':'Sem chave configurada','nunca_usado':'Ainda não usado','erro':'Erro'} %}
+      {% set uso = {'claude':'Análise da conversa e leitura de imagem/PDF','groq':'Transcrição de áudio (provedor principal)','openai':'Transcrição de áudio (reserva, se a Groq falhar)'} %}
+      {% for p in provedores %}
+      <div style="border:1px solid {{ 'rgba(244,63,94,.45)' if p.grave else 'var(--borda)' }}; border-radius:10px; padding:13px 15px; background:{{ 'rgba(244,63,94,.06)' if p.grave else 'var(--panel-2)' }};">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <strong style="font-size:14px; text-transform:capitalize;">{{ p.provedor }}</strong>
+          <span class="tag {{ 'tag-vm' if p.grave else ('tag-verde' if p.status == 'ok' else 'tag-am') }}">{{ rot.get(p.status, p.status) }}</span>
+          <code style="font-size:11px; color:var(--cinza-2);">{{ p.env }}</code>
+        </div>
+        <div style="font-size:12.5px; color:var(--cinza); margin-top:6px; line-height:1.5;">
+          {{ uso.get(p.provedor, '') }}
+          {% if p.detalhe %}<br><b style="color:var(--erro);">{{ p.detalhe }}</b>{% if p.http %} (HTTP {{ p.http }}){% endif %}{% endif %}
+        </div>
+        <div style="font-size:11.5px; color:var(--cinza-2); margin-top:5px;">
+          {% if p.ultima_ok %}último sucesso: {{ p.ultima_ok }}{% else %}sem sucesso registrado{% endif %}
+          {% if p.ultima_falha %} · última falha: {{ p.ultima_falha }}{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div style="padding:0 16px 16px; font-size:12.5px; color:var(--cinza); line-height:1.55;">
+      <b style="color:var(--texto);">O que cada estado significa:</b>
+      <b>Sem créditos</b> — alguém precisa pagar.
+      <b>Chave rejeitada</b> — alguém precisa corrigir a variável no Railway.
+      <b>Limite momentâneo</b> — passa sozinho, não faça nada.
+      São três problemas com donos diferentes, e antes todos apareciam iguais: como nada.
+    </div>
+  </div>
+</div>
+
+<script>
+async function testar(b){
+  b.disabled=true; b.textContent='Testando…';
+  try{
+    const r = await fetch('/ia-saude/testar', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const d = await r.json();
+    alert(Object.entries(d.resultado||{}).map(([k,v])=>k+': '+v).join('\n') || 'sem resposta');
+    location.reload();
+  }catch(e){ alert('Falha ao testar'); b.disabled=false; b.textContent='Testar agora'; }
+}
+</script>
+{% endblock %}

@@ -632,6 +632,10 @@
     </a>
     {% endif %}
     {% if session.perfil == 'admin' %}
+    <a href="/ia-saude" class="nav-link {% if '/ia-saude' in request.path %}active{% endif %}" onclick="closeSidebar()"{% if ia_alerta %} style="color:#f43f5e;"{% endif %}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      Saúde da IA{% if ia_alerta %} ⚠{% endif %}
+    </a>
     <a href="/google-ads" class="nav-link {% if '/google-ads' in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
       Conversão Google Ads
@@ -663,7 +667,21 @@
 </nav>
 
 <div class="main">
-  {% block content %}{% endblock %}
+  {% if ia_alerta %}
+<div class="ia-alerta">
+  <b>IA parada:</b>
+  {% for p in ia_alerta %}<span>{{ p.provedor|capitalize }} — {{ p.detalhe or p.status }}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+  <a href="/ia-saude">ver detalhe</a>
+</div>
+<style>
+  .ia-alerta { background:rgba(244,63,94,.14); border:1px solid rgba(244,63,94,.45);
+               color:#fda4af; border-radius:10px; padding:10px 14px; margin:0 0 14px;
+               font-size:13px; line-height:1.5; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .ia-alerta b { color:#f43f5e; }
+  .ia-alerta a { color:#fff; text-decoration:underline; margin-left:auto; font-weight:600; }
+</style>
+{% endif %}
+{% block content %}{% endblock %}
 </div>
 
 <div id="toast"></div>
