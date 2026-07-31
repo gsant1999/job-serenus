@@ -809,8 +809,10 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-tr-btn:hover { background: #00a884; border-color: #00a884; color: #fff; }
 .job-tr-btn.mini { padding: 1px 8px; font-size: 10.5px; }
 .job-tr-carregando { font-size: 11.5px; font-style: italic; color: #8696a0; padding: 3px 4px; }
-.job-tr-falhou { font-size: 11.5px; color: #8696a0; display: flex; gap: 7px;
-                 align-items: center; flex-wrap: wrap; }
+.job-tr-falhou { font-size: 11px; color: #8696a0; display: inline-flex; gap: 7px;
+                 align-items: center; flex-wrap: wrap; background: rgba(0,0,0,.16);
+                 border-radius: 12px; padding: 3px 5px 3px 11px; max-width: 100%; }
+.job-tr-falhou > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
 /* O texto vira um cartaozinho preso embaixo da bolha: fundo do WhatsApp, canto
    de cima "quebrado" do lado da bolha, pra ler como continuacao dela. */
 .job-tr-texto {

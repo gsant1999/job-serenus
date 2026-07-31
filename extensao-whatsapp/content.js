@@ -1249,6 +1249,9 @@
   const TR = {
     cache: new Map(),        // msg_id -> texto ('' = tentou e não deu)
     ocupado: new Set(),
+    // Motivo POR AUDIO. Era uma string so pra extensao inteira: dois audios
+    // falhando por motivos diferentes mostravam os dois o motivo do ultimo.
+    erro: new Map(),
     aviso: '',
     diag: { etapa: 'nao_iniciou' },
   };
@@ -1266,59 +1269,28 @@
   // Agora eu pergunto pro proprio WhatsApp (wa-js) quais mensagens da conversa
   // sao ptt/audio e caso com a linha pelo data-id, que e o mesmo id dos dois
   // lados. Seletor de CSS quebra a cada atualizacao; o tipo da mensagem, nao.
-  const _TR_IDS = new Set();     // msg_ids de audio da conversa aberta
-  const _TR_LADO = new Map();    // msg_id -> 'consultor' | 'lead'
-  let _trChatCarregado = '';
-
-  async function trCarregarIdsDeAudio(forcar) {
-    try {
-      const chat = await _pedirPonte('obter_chat_id', {}, 8000);
-      const cid = (chat && chat.chat_id) || '';
-      if (!cid) return;
-      if (cid === _trChatCarregado && !forcar) return;
-      // Aproveita a abertura da conversa pra amarrar @lid -> lead no servidor.
-      // E o momento mais frequente e mais barato: o telefone e o chat_id ja
-      // estao resolvidos aqui, e o consultor nao precisa fazer nada. Sem isto o
-      // vinculo so nascia ao ENVIAR pela extensao, e por isso a maioria dos
-      // cards do CRM aparecia sem @lid.
-      try {
-        let tel = '';
-        try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
-        if (tel) _safeSendMessage({ type: 'lead_por_telefone', telefone: tel, chatId: cid,
-                                    nome: nomeDoContato() }).catch(() => {});
-      } catch (e) {}
-      const r = await _pedirPonte('listar_audios', {}, 15000);
-      const lista = (r && r.audios) || [];
-      if (cid !== _trChatCarregado) { _TR_IDS.clear(); _trChatCarregado = cid; }
-      lista.forEach((a) => {
-        if (!a || !a.msg_id) return;
-        _TR_IDS.add(a.msg_id);
-        // De que lado a bolha esta. Vem da wa-js (fromMe), nao de adivinhar
-        // alinhamento no DOM — e o que faz o bloco nascer embaixo da bolha
-        // certa, no lado certo, em vez de largura cheia atravessando a tela.
-        _TR_LADO.set(a.msg_id, a.de === 'consultor' ? 'consultor' : 'lead');
-      });
-      TR.diag.etapa = 'ids_carregados';
-      TR.diag.audios = _TR_IDS.size;
-      if (_TR_IDS.size) trInjetar();
-    } catch (e) {
-      TR.diag.etapa = 'falha_ids';
-      TR.diag.erro = String((e && e.message) || e);
-    }
-  }
+  // DETECCAO 100% LOCAL, sem perguntar nada a ninguem.
+  //
+  // Eu buscava as 400 ultimas mensagens pela wa-js a CADA conversa aberta so pra
+  // saber quais linhas eram audio. Caro — uma leitura do store inteiro por chat,
+  // toda vez — e fragil: quando aquela chamada falhava eu ficava sem os ids, sem
+  // o lado da bolha e sem transcricao. Era exatamente o que estava na tela do
+  // Guilherme: bloco nascendo a esquerda embaixo de um audio nosso, e "nao deu
+  // pra transcrever" nos dois.
+  //
+  // O DOM ja tem as duas informacoes de graca:
+  //   - se e audio: icone de ptt/audio ou botao de tocar na propria linha;
+  //   - de quem e: o data-id do WhatsApp comeca com "true_" quando a mensagem e
+  //     nossa e "false_" quando e do contato — nao depende de classe de CSS.
+  function _trEhNossa(id) { return String(id || '').startsWith('true_'); }
 
   function _trLinhaEhAudio(row) {
-    const id = row.getAttribute('data-id') || '';
-    if (id && _TR_IDS.has(id)) return true;
-    // Rede de seguranca, caso a ponte nao responda: varre o que costuma existir
-    // numa bolha de audio HOJE, e nao so o que existia antes.
     return !!row.querySelector(
-      'audio, [data-icon="ptt"], [data-icon*="audio"], [data-icon*="ptt"],' +
-      '[aria-label*="udio"], [aria-label*="udio de voz"],' +
-      '[data-testid*="audio"], [data-testid*="ptt"]');
+      'audio, [data-icon="ptt"], [data-icon*="ptt"], [data-icon*="audio"],' +
+      '[data-icon="audio-play"], [data-icon="play"],' +
+      '[aria-label*="udio"], [data-testid*="audio"], [data-testid*="ptt"]');
   }
 
-  // Onde o bloco entra: no fim da bolha, depois da onda. É onde a WaSpeed põe.
   function _trAlvo(row) {
     // A bolha propriamente dita — e onde a WaSpeed poe, e e o unico container
     // com a largura certa. Sem <audio> na arvore nova, subir a partir do player
@@ -1356,7 +1328,7 @@
       if (!id || row.querySelector('.job-tr-slot')) continue;
       if (!_trLinhaEhAudio(row)) continue;
       const slot = document.createElement('div');
-      const lado = _TR_LADO.get(id) || (row.querySelector('[class*="message-out"]') ? 'consultor' : 'lead');
+      const lado = _trEhNossa(id) ? 'consultor' : 'lead';
       slot.className = 'job-tr-slot ' + (lado === 'consultor' ? 'job-tr-dir' : 'job-tr-esq');
       slot.dataset.msg = id;
       _trAlvo(row).appendChild(slot);
@@ -1380,8 +1352,12 @@
       // Mensagem curta e discreta: o erro tecnico vai pro title, nao pra tela.
       // Uma linha vermelha do tamanho da conversa inteira pra cada audio que
       // falhou e pior do que nao ter transcricao nenhuma.
-      slot.innerHTML = '<div class="job-tr-falhou" title="' + esc(TR.aviso || '') + '">' +
-        'nao deu pra transcrever <button class="job-tr-btn mini" type="button">tentar de novo</button></div>';
+      // O MOTIVO na tela, curto. "nao deu pra transcrever" sem dizer por que
+      // deixa o consultor sem saida — e me deixa adivinhando de longe.
+      const pq = TR.erro.get(id) || 'motivo desconhecido';
+      slot.innerHTML = '<div class="job-tr-falhou" title="' + esc(pq) + '">' +
+        '<span>' + esc(pq) + '</span>' +
+        '<button class="job-tr-btn mini" type="button">tentar de novo</button></div>';
       const b = slot.querySelector('button');
       if (b) b.addEventListener('click', (ev) => { ev.stopPropagation(); TR.cache.delete(id); trTranscrever(id); });
       return;
@@ -1416,7 +1392,7 @@
       }
       if (cache && cache.ok && typeof cache.gasto_mes_usd === 'number'
           && cache.gasto_mes_usd >= cache.teto_mes_usd) {
-        TR.aviso = 'teto de custo do mês atingido';
+        TR.erro.set(id, 'teto de custo do mês atingido');
         TR.cache.set(id, '');
         return;
       }
@@ -1424,21 +1400,21 @@
       const baixado = await _pedirPonte('baixar_audios_ids', { ids: [id] }, 90000);
       const audios = (baixado && baixado.audios) || [];
       if (!audios.length) {
-        TR.aviso = 'não consegui baixar o áudio (ponte do WhatsApp)';
+        TR.erro.set(id, (baixado && baixado.erro) ? ('WhatsApp: ' + baixado.erro) : 'não consegui baixar o áudio');
         TR.cache.set(id, '');
         return;
       }
       const r = await _safeSendMessage({ type: 'transcrever_audios', audios }).catch(() => null);
       if (!r || !r.ok) {
-        TR.aviso = (r && r.detalhe) || 'falha ao transcrever';
+        TR.erro.set(id, (r && (r.detalhe || r.erro)) || 'o JOB não respondeu');
         TR.cache.set(id, '');
         return;
       }
       TR.cache.set(id, (r.transcricoes || {})[id] || '');
-      TR.aviso = '';
+      TR.erro.delete(id);
     } catch (e) {
       TR.cache.set(id, '');
-      TR.aviso = String((e && e.message) || e).slice(0, 80);
+      TR.erro.set(id, String((e && e.message) || e).slice(0, 90));
     } finally {
       TR.ocupado.delete(id);
       trAtualizarSlot(id);
@@ -1469,7 +1445,6 @@
 
   function trIniciar() {
     setTimeout(() => {
-      trCarregarIdsDeAudio(true);
       trInjetar();
       const main = document.querySelector('#main') || document.body;
       // Passa adiante SO os nos adicionados — e a informacao que o proprio
@@ -1492,7 +1467,6 @@
         if (m && !m._jobTrObservado) {
           m._jobTrObservado = true;
           obs.observe(m, { childList: true, subtree: true });
-          trCarregarIdsDeAudio(false);
           trInjetar();               // varredura cheia UMA vez, na troca de conversa
         }
       }, 4000);
@@ -1502,9 +1476,8 @@
   function trDiagnosticoHtml() {
     const d = TR.diag || {};
     return '<div class="job-tr-diag"><b>Transcrição:</b> sob demanda · ' +
-      _TR_IDS.size + ' áudio(s) reconhecido(s) nesta conversa · ' +
       document.querySelectorAll('.job-tr-slot').length + ' botão(ões) na tela · ' +
-      TR.cache.size + ' em memória' + (TR.aviso ? ' · ' + esc(TR.aviso) : '') +
+      TR.cache.size + ' em memória · ' + TR.erro.size + ' com erro' +
       (d.quando ? ' <span class="job-tr-diag-h">' + esc(d.quando) + '</span>' : '') + '</div>';
   }
 
@@ -1536,7 +1509,7 @@
         linha('Botões injetados', String(document.querySelectorAll('.job-tr-slot').length)) +
         linha('Última etapa', String(d.etapa || '—') + (d.quando ? ' · ' + d.quando : ''),
               d.etapa === 'ponte_fora') +
-        (TR.aviso ? linha('Aviso', TR.aviso, true) : '') +
+        (TR.erro.size ? linha('Último erro', Array.from(TR.erro.values()).slice(-1)[0], true) : '') +
         linha('Varredura (motivo)', VAR.motivo || '—') +
         linha('Varredura', VAR.rodando ? 'rodando agora'
               : (VAR.ultimaRodada ? 'última: ' + new Date(VAR.ultimaRodada).toLocaleTimeString('pt-BR') : 'ainda não rodou')) +
