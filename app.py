@@ -15943,7 +15943,8 @@ def api_whatsapp_chats_vincular():
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
         return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
-    convs = (request.get_json(silent=True) or {}).get('conversas') or []
+    d = request.get_json(silent=True) or {}
+    convs = d.get('conversas') or []
     if not isinstance(convs, list):
         return _wa_cors(jsonify({"ok": False, "erro": "Formato inválido"})), 400
     convs = convs[:500]
@@ -15953,9 +15954,17 @@ def api_whatsapp_chats_vincular():
         for c in convs:
             cid = str((c or {}).get('chat_id') or '')
             tel = str((c or {}).get('telefone') or '')
-            if not cid or not tel:
+            # lead_id EXPLICITO tem prioridade sobre o casamento por telefone.
+            # E o caso do consultor que esta com a conversa aberta e diz "esta
+            # conversa e deste lead" — ele sabe melhor que qualquer heuristica,
+            # e em conversa @lid o telefone as vezes nem existe pra casar.
+            try:
+                lid_ex = int((c or {}).get('lead_id') or 0) or None
+            except (TypeError, ValueError):
+                lid_ex = None
+            if not cid or not (tel or lid_ex):
                 continue
-            if registrar_chat_lead(conn, cid, tel, (c or {}).get('nome') or None):
+            if registrar_chat_lead(conn, cid, tel, (c or {}).get('nome') or None, lead_id=lid_ex):
                 ligados += 1
             else:
                 sem_lead += 1
@@ -16283,6 +16292,10 @@ def api_whatsapp_lead_ficha():
             "playbook": _playbook_do_lead(lead, [e['nome'] for e in etqs]),
             "saude": _saude_card(lead_d.get('avancou_em'),
                                  (sla['sla_dias'] if sla else None), lead_d.get('atualizado_em')),
+            # Quais conversas ja estao amarradas a este lead. A extensao compara
+            # com o chat ABERTO pra saber se oferece o botao de vincular.
+            "wa_chats": [r['chat_id'] for r in conn.execute(
+                "SELECT chat_id FROM wa_chat_lead WHERE lead_id=?", (lead['id'],)).fetchall()],
             "origens": _WA_ORIGENS_LEAD,
         }
     except Exception as e:

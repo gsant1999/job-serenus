@@ -1925,6 +1925,12 @@
       return;
     }
     _ficha = resp;
+    // Qual conversa esta aberta agora. E o que permite oferecer o botao de
+    // vincular exatamente quando falta — e nao oferecer quando ja esta feito.
+    try {
+      const c = await _pedirPonte('obter_chat_id', {}, 8000);
+      _chatAberto = (c && c.chat_id) || '';
+    } catch (e) { _chatAberto = ''; }
     _fichaSujo = false;
     const idNovo = (resp.lead && resp.lead.id) || null;
     if (_fichaPend.leadId !== idNovo) _fichaPend = _fichaPendVazio(idNovo);
@@ -2111,6 +2117,56 @@
   }
   _registrarLoop(setInterval(_tickCronFicha, 1000));
 
+  let _chatAberto = '';
+
+  function _blocoVinculoChat(f, l) {
+    const chats = (f && f.wa_chats) || [];
+    const atual = _chatAberto || '';
+    const jaTem = atual && chats.indexOf(atual) >= 0;
+    const curto = atual ? (atual.split('@')[0].slice(0, 18) + (atual.split('@')[0].length > 18 ? '…' : '')) : '';
+    const eLid = atual.indexOf('@lid') > 0;
+    if (jaTem) {
+      return '<div class="job-vinc ok">' +
+        '<span class="job-vinc-tag ' + (eLid ? 'lid' : 'num') + '">' + (eLid ? '@lid' : 'nº') + '</span>' +
+        '<code>' + esc(curto) + '</code>' +
+        '<span class="job-vinc-txt">conversa vinculada a este lead</span></div>';
+    }
+    if (!atual) {
+      return '<div class="job-vinc"><span class="job-vinc-txt">Não consegui identificar a conversa aberta.</span></div>';
+    }
+    return '<div class="job-vinc falta">' +
+      '<span class="job-vinc-tag ' + (eLid ? 'lid' : 'num') + '">' + (eLid ? '@lid' : 'nº') + '</span>' +
+      '<code>' + esc(curto) + '</code>' +
+      '<button type="button" class="job-vinc-btn" id="job-vincular">Vincular esta conversa a este lead</button>' +
+      '<div class="job-vinc-dica" id="job-vinc-dica">O @lid vive dentro do WhatsApp — só dá pra capturar com a conversa aberta. ' +
+      'Depois disso o lead passa a mostrar o @lid no CRM e a conversa entra nas análises.</div></div>';
+  }
+
+  async function _ligarVinculoChat(l) {
+    const b = document.getElementById('job-vincular');
+    if (!b) return;
+    const dica = (t) => { const e = document.getElementById('job-vinc-dica'); if (e) e.textContent = t; };
+    b.addEventListener('click', async () => {
+      b.disabled = true; const r0 = b.textContent; b.textContent = 'Vinculando…';
+      try {
+        let tel = '';
+        try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+        const r = await _safeSendMessage({ type: 'vincular_chats', conversas: [
+          { chat_id: _chatAberto, telefone: tel, nome: nomeDoContato(), lead_id: l.id }] }).catch(() => null);
+        if (r && r.ok && r.ligados) {
+          b.remove();
+          dica('Pronto: esta conversa agora é deste lead. O @lid já aparece no CRM.');
+        } else {
+          b.disabled = false; b.textContent = r0;
+          dica('Não deu pra vincular. Recarregue a aba do WhatsApp e tente de novo.');
+        }
+      } catch (e) {
+        b.disabled = false; b.textContent = r0;
+        dica('Falhou: ' + ((e && e.message) || e));
+      }
+    });
+  }
+
   function _renderFicha(aba) {
     const f = _ficha, l = f.lead || {};
     const etapaAtual = (f.etapas || []).find((e) => e.id === l.etapa);
@@ -2148,7 +2204,7 @@
         '<a class="job-ficha-link" id="job-ficha-abrir-crm" href="#">Abrir a ficha completa no JOB</a>' +
       '</div>');
     _ligarEventosFicha(aba);
-    if (aba === 'dados') _ligarNomeContato();
+    if (aba === 'dados') { _ligarNomeContato(); _ligarVinculoChat(_ficha.lead || {}); }
   }
 
   // Valor a exibir: o que o consultor digitou tem prioridade sobre o que veio do
@@ -2171,6 +2227,12 @@
       // Agrupado por quadro: a lista vem com as etapas de TODOS os funis, e sem
       // dizer de qual era cada uma o consultor tirava o lead do kanban comercial
       // achando que só estava mudando de etapa (o quadro do lead vem da etapa).
+      // VINCULO DA CONVERSA. O @lid nao e gerado pelo JOB: ele existe dentro do
+      // WhatsApp e so pode ser capturado com a conversa aberta. Aqui o consultor
+      // faz isso num clique — ele sabe melhor que qualquer heuristica que ESTA
+      // conversa e deste lead, e em conversa @lid o telefone as vezes nem existe
+      // pra casar sozinho.
+      _blocoVinculoChat(f, l) +
       '<div class="job-ficha-campo"><label>Etapa</label>' +
         '<select data-ficha="etapa">' + _fichaOpcoesEtapa(f, l) + '</select></div>' +
       // CRONOMETRO junto do sub-status, igual ao card do CRM. Aqui e onde o

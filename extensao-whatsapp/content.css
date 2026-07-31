@@ -499,6 +499,24 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 /* Nome padronizado do contato. Fica na ficha, abaixo do salvar: é ação de
    registro, não de edição do lead — por isso separado por uma linha. */
 /* Sincronia de @lid: ação sobre o CRM inteiro, separada da lista de leads. */
+/* Vínculo da conversa: estado + ação no mesmo lugar. Amarelo quando falta,
+   discreto quando já está feito — resolvido não precisa chamar atenção. */
+.job-vinc { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+            padding: 9px 11px; border-radius: 9px; margin-bottom: 12px;
+            background: var(--job-bg3); border: 1px solid var(--job-bg2); font-size: 11.5px; }
+.job-vinc.falta { border-color: rgba(250,204,21,.4); background: rgba(250,204,21,.06); }
+.job-vinc.ok { border-color: rgba(34,197,94,.3); }
+.job-vinc code { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--job-txt-fraco); }
+.job-vinc-tag { font-size: 8px; font-weight: 800; letter-spacing: .3px; padding: 1px 5px; border-radius: 4px; }
+.job-vinc-tag.lid { background: rgba(168,85,247,.22); color: #d8b4fe; }
+.job-vinc-tag.num { background: rgba(34,197,94,.18); color: #4ade80; }
+.job-vinc-txt { color: var(--job-txt-fraco); }
+.job-vinc-btn { flex: 1 1 100%; margin-top: 4px; padding: 8px; border: none; border-radius: 8px;
+                background: var(--job-acento); color: var(--job-acento-txt);
+                font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.job-vinc-btn:disabled { opacity: .6; cursor: default; }
+.job-vinc-dica { flex: 1 1 100%; font-size: 10px; line-height: 1.5; color: var(--job-txt-fraco); opacity: .85; }
+
 /* Cronômetro do sub-status na ficha: mesma leitura do card do CRM. */
 .job-ficha-cron {
   float: right; font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
