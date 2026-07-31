@@ -524,10 +524,14 @@
                andamento não mexe. Um lead que trocou de sub-status hoje está sendo
                trabalhado; um que está no mesmo há 9 dias, não — e isso não
                aparecia em lugar nenhum. #}
+            {# Cronometro do sub-status. data-desde deixa o relogio ANDAR no
+               navegador: sem isso o texto congelava no instante em que a pagina
+               carregou, e um cronometro parado nao cobra acao de ninguem. #}
             {% if lead.sub_status and esf.idade_txt %}
             <span class="lead-sub-idade {{ 'quente' if esf.horas < 24 else ('morno' if esf.dias < 5 else 'parado') }}"
-                  title="Sub-status '{{ lead.sub_status }}' sem mudar {{ esf.idade_txt }}">
-              {{ lead.sub_status }} {{ esf.idade_txt }}
+                  id="cron-{{ lead.id }}" data-desde="{{ esf.desde_ts or '' }}"
+                  title="Tempo desde a ultima mudanca de sub-status. Zera quando o sub-status muda ou o lead muda de etapa.">
+              <b>{{ lead.sub_status }}</b> <em data-cron>{{ esf.idade_txt }}</em>
             </span>
             {% endif %}
           </div>
@@ -1421,6 +1425,29 @@ async function concluirAgLead(id){
   const r=await fetch('/crm/agenda/'+id+'/concluir',{method:'POST'});
   if((await r.json()).ok){ toast('Concluída','ok'); carregarAgendaLead(); }
 }
+// Cronometro vivo: o mesmo texto do servidor, recalculado a cada 30s no
+// navegador. Sem isto, "ha 2min" continuaria dizendo 2min uma hora depois.
+function _cronTexto(segs){
+  if(segs < 900) return 'agora';
+  if(segs < 3600) return 'ha ' + Math.floor(segs/60) + 'min';
+  if(segs < 86400) return 'ha ' + Math.floor(segs/3600) + 'h';
+  return 'ha ' + Math.floor(segs/86400) + 'd';
+}
+function atualizarCronometros(){
+  const agora = Math.floor(Date.now()/1000);
+  document.querySelectorAll('.lead-sub-idade[data-desde]').forEach(el => {
+    const desde = parseInt(el.dataset.desde||'0', 10);
+    if(!desde) return;
+    const segs = Math.max(0, agora - desde);
+    const alvo = el.querySelector('[data-cron]');
+    if(alvo) alvo.textContent = _cronTexto(segs);
+    el.classList.remove('quente','morno','parado');
+    el.classList.add(segs < 86400 ? 'quente' : (segs < 432000 ? 'morno' : 'parado'));
+  });
+}
+setInterval(atualizarCronometros, 30000);
+document.addEventListener('DOMContentLoaded', atualizarCronometros);
+
 async function mudarSubStatus(id, sel){
   const valor=sel.value, anterior=sel.dataset.anterior||'';
   const r=await fetch('/crm/lead/'+id+'/sub-status',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -1436,6 +1463,25 @@ async function mudarSubStatus(id, sel){
     card.classList.remove('card-esfriando','card-frio');
     const tag=card.querySelector('.lead-esfriando-tag');
     if(tag) tag.remove();
+    // O cronometro tem que zerar NA HORA e comecar a contar do zero. Esperar o
+    // F5 pra ver o tempo mudar faz o consultor duvidar se a acao registrou.
+    let cron=document.getElementById('cron-'+id);
+    if(!valor){ if(cron) cron.remove(); }
+    else {
+      if(!cron){
+        cron=document.createElement('span');
+        cron.id='cron-'+id;
+        cron.className='lead-sub-idade quente';
+        cron.title="Tempo desde a ultima mudanca de sub-status. Zera quando o sub-status muda ou o lead muda de etapa.";
+        cron.innerHTML='<b></b> <em data-cron></em>';
+        const linha=card.querySelector('.lead-tags')||card.firstElementChild;
+        if(linha) linha.appendChild(cron);
+      }
+      cron.className='lead-sub-idade quente';
+      cron.dataset.desde=Math.floor(Date.now()/1000);
+      cron.querySelector('b').textContent=valor;
+      cron.querySelector('[data-cron]').textContent='agora';
+    }
   }
   toast(valor?('Sub-status: '+valor):'Sub-status limpo','ok');
 }

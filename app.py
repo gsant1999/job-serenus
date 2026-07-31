@@ -17424,6 +17424,110 @@ def _wa_calibracao(conn, uid=None):
     return resultado
 
 
+_CALIB_CAMPOS = [
+    ('cnpj', 'CNPJ'), ('tipo_contratacao', 'Tipo de contratação'),
+    ('tem_plano_hoje', 'Tem plano hoje'), ('plano_atual', 'Plano atual'),
+    ('valor_pago_hoje', 'Valor pago hoje'), ('operadora_cotada', 'Operadora cotada'),
+    ('cidade_rmc', 'Cidade'), ('numero_vidas', 'Número de vidas'),
+    ('composicao_familiar', 'Composição familiar'),
+]
+
+
+@app.route('/calibracao')
+@login_required
+@admin_required
+def calibracao_pagina():
+    """Mede a leitura das conversas contra a realidade, em vez de opinar sobre ela.
+
+    Duas perguntas, uma tela: (1) de tudo que a conversa dizia, quanto a extração
+    consegue tirar — campo por campo, nas conversas REAIS já gravadas; (2) o score
+    que ela deu bateu com o que aconteceu depois — o lead virou venda ou se perdeu.
+
+    Não chama IA nenhuma: reprocessa `conversa_json` com o extrator local, que é
+    exatamente a peça que está errando. Roda quantas vezes quiser, de graça."""
+    conn = db()
+    limite = min(int(request.args.get('n', 120) or 120), 400)
+    analises = conn.execute("""SELECT wa.id, wa.lead_id, wa.nome_contato, wa.telefone,
+                                      wa.score, wa.score_faixa, wa.conversa_json, wa.criado_em,
+                                      l.nome AS lead_nome, l.etapa,
+                                      e.nome AS etapa_nome, e.tipo AS etapa_tipo
+                               FROM whatsapp_analises wa
+                               LEFT JOIN crm_leads l ON l.id = wa.lead_id
+                               LEFT JOIN crm_etapas e ON e.slug = l.etapa
+                               WHERE wa.conversa_json IS NOT NULL AND wa.conversa_json != ''
+                               ORDER BY wa.criado_em DESC LIMIT ?""", (limite,)).fetchall()
+
+    captura = {k: {'chave': k, 'nome': n, 'achou': 0} for k, n in _CALIB_CAMPOS}
+    linhas, lidas = [], 0
+    for a in analises:
+        try:
+            msgs = json.loads(a['conversa_json'] or '[]')
+        except Exception:
+            continue
+        if not isinstance(msgs, list) or not msgs:
+            continue
+        lidas += 1
+        try:
+            # _wa_extrair_lead devolve (extracao, flags) — passar a tupla inteira
+            # fazia o mapeamento devolver vazio EM SILÊNCIO, e a tela mostrava 0%
+            # em todo campo como se a extração não funcionasse.
+            ex = _wa_extrair_lead(msgs, a['nome_contato'] or '')
+            if isinstance(ex, tuple):
+                ex = ex[0]
+            campos = _wa_extracao_para_campos(ex)
+        except Exception as e:
+            app.logger.warning(f"[CALIBRACAO] análise {a['id']}: {e}")
+            continue
+        for k in captura:
+            if campos.get(k):
+                captura[k]['achou'] += 1
+        # Só do lead: o que o CLIENTE escreveu é o que a extração tem que ler.
+        # Contar as nossas mensagens inflaria o tamanho e não diz nada.
+        txt_lead = ' '.join((m.get('texto') or '') for m in msgs if m.get('de') == 'lead')
+        linhas.append({
+            'id': a['id'], 'lead_id': a['lead_id'],
+            'nome': a['lead_nome'] or a['nome_contato'] or a['telefone'] or '—',
+            'criado_em': a['criado_em'], 'score': a['score'], 'faixa': a['score_faixa'],
+            'etapa_nome': a['etapa_nome'], 'etapa_tipo': a['etapa_tipo'],
+            'msgs': len(msgs), 'chars_lead': len(txt_lead),
+            'achou': sorted([captura[k]['nome'] for k in captura if campos.get(k)]),
+            'faltou': sorted([captura[k]['nome'] for k in captura if not campos.get(k)]),
+            'n_achou': sum(1 for k in captura if campos.get(k)),
+        })
+    for c in captura.values():
+        c['taxa'] = round(100.0 * c['achou'] / lidas, 1) if lidas else 0.0
+    campos_ord = sorted(captura.values(), key=lambda c: c['taxa'])
+
+    # ── Score x desfecho REAL. Desfecho = etapa de tipo ganho/perdido, e venda
+    # de verdade = proposta amarrada ao lead. Lead ainda em aberto não conta:
+    # ele pode virar qualquer um dos dois, e contá-lo como "não fechou" faria
+    # toda faixa parecer ruim. ──
+    faixas = {}
+    dec = conn.execute("""SELECT wa.score_faixa AS faixa, e.tipo AS tipo,
+                                 COUNT(DISTINCT wa.lead_id) AS n,
+                                 COUNT(DISTINCT p.id) AS vendas
+                          FROM whatsapp_analises wa
+                          JOIN crm_leads l ON l.id = wa.lead_id
+                          JOIN crm_etapas e ON e.slug = l.etapa
+                          LEFT JOIN propostas p ON p.lead_id = l.id
+                          WHERE e.tipo IN ('ganho','perdido') AND wa.score_faixa IS NOT NULL
+                          GROUP BY wa.score_faixa, e.tipo""").fetchall()
+    for r in dec:
+        f = faixas.setdefault(r['faixa'], {'faixa': r['faixa'], 'ganho': 0, 'perdido': 0, 'vendas': 0})
+        f[r['tipo']] = r['n']
+        f['vendas'] += r['vendas'] or 0
+    ordem = {'quente': 0, 'bom': 1, 'morno': 2, 'baixo': 3, 'frio': 4}
+    placar = []
+    for f in sorted(faixas.values(), key=lambda x: ordem.get(x['faixa'], 9)):
+        tot = f['ganho'] + f['perdido']
+        f['total'] = tot
+        f['taxa'] = round(100.0 * f['ganho'] / tot, 1) if tot else None
+        placar.append(f)
+    close_db(conn)
+    return render_template('calibracao.html', campos=campos_ord, linhas=linhas,
+                           lidas=lidas, placar=placar, limite=limite)
+
+
 @app.route('/whatsapp-analises')
 @login_required
 def whatsapp_analises_pagina():
@@ -18527,11 +18631,15 @@ def _saude_card(avancou_em, sla_dias=None, fallback=None):
     ref = avancou_em or fallback
     dt = _parse_dt_seguro(ref) if ref else None
     if not dt:
-        return {'nivel': 'no_prazo', 'classe': '', 'texto': '', 'dias': 0, 'horas': 0, 'idade_txt': ''}
+        return {'nivel': 'no_prazo', 'classe': '', 'texto': '', 'dias': 0, 'horas': 0, 'idade_txt': '', 'desde_ts': None}
     if dt.tzinfo is None:
         dt = TZ_SP.localize(dt)
     segs = (datetime.now(TZ_SP) - dt).total_seconds()
     dias = int(segs / 86400)
+    # Instante da mudanca em epoch: e o que o navegador usa pra fazer o
+    # cronometro ANDAR. Mandar so o texto pronto congelaria o relogio no
+    # momento em que a pagina carregou.
+    desde_ts = int(dt.timestamp())
     # Idade em texto curto. Contar SÓ em dias escondia o card do dia inteiro
     # (dias=0), justamente o lead que está sendo trabalhado agora — o consultor
     # não via nada até o dia seguinte. Em horas o cronômetro anda desde já.
@@ -18544,10 +18652,10 @@ def _saude_card(avancou_em, sla_dias=None, fallback=None):
         idade_txt = f'há {dias}d'
     limite = int(sla_dias) if sla_dias else _SLA_PADRAO_DIAS
     if dias >= limite * 2:
-        return {'nivel': 'atrasado', 'classe': 'card-frio', 'texto': f'Parado há {dias}d', 'dias': dias, 'horas': horas, 'idade_txt': idade_txt}
+        return {'nivel': 'atrasado', 'classe': 'card-frio', 'texto': f'Parado há {dias}d', 'dias': dias, 'horas': horas, 'idade_txt': idade_txt, 'desde_ts': desde_ts}
     if dias >= limite:
-        return {'nivel': 'atencao', 'classe': 'card-esfriando', 'texto': f'Parado há {dias}d', 'dias': dias, 'horas': horas, 'idade_txt': idade_txt}
-    return {'nivel': 'no_prazo', 'classe': '', 'texto': '', 'dias': dias, 'horas': horas, 'idade_txt': idade_txt}
+        return {'nivel': 'atencao', 'classe': 'card-esfriando', 'texto': f'Parado há {dias}d', 'dias': dias, 'horas': horas, 'idade_txt': idade_txt, 'desde_ts': desde_ts}
+    return {'nivel': 'no_prazo', 'classe': '', 'texto': '', 'dias': dias, 'horas': horas, 'idade_txt': idade_txt, 'desde_ts': desde_ts}
 
 
 @app.route('/crm/lead/<int:lid>/sub-status', methods=['POST'])

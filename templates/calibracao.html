@@ -1,0 +1,114 @@
+{% extends 'base.html' %}
+{% block title %}Calibração da leitura{% endblock %}
+
+{% block head %}
+<style>
+  .cal-topo { display:flex; gap:10px; flex-wrap:wrap; margin:0 0 18px; }
+  .cal-num { flex:1 1 150px; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:11px 13px; }
+  .cal-num b { display:block; font-size:20px; font-variant-numeric:tabular-nums; }
+  .cal-num span { display:block; font-size:10px; color:var(--cinza); margin-top:2px; }
+  /* Barra de captura: o comprimento É o dado. Vermelho não é enfeite — é a
+     fila de trabalho, o campo que a extração não está conseguindo ler. */
+  .cal-barra { position:relative; height:20px; background:var(--panel-3); border-radius:4px; overflow:hidden; min-width:120px; }
+  .cal-barra i { position:absolute; inset:0 auto 0 0; display:block; border-radius:4px; }
+  .cal-barra b { position:absolute; inset:0; display:flex; align-items:center; justify-content:flex-end;
+                 padding-right:7px; font-size:10px; font-variant-numeric:tabular-nums; }
+  .cal-b-alto i { background:rgba(34,197,94,.35); }
+  .cal-b-medio i { background:rgba(245,158,11,.35); }
+  .cal-b-baixo i { background:rgba(239,68,68,.35); }
+  .cal-tag { display:inline-block; font-size:9px; padding:2px 6px; border-radius:4px; margin:2px 3px 0 0; }
+  .cal-tag.ok { background:rgba(34,197,94,.15); color:#4ade80; }
+  .cal-tag.no { background:rgba(239,68,68,.13); color:#fca5a5; }
+  .cal-sub { font-size:10px; color:var(--cinza); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Calibração da leitura</h1>
+    <div class="sub">Mede a extração e o score contra as conversas reais já gravadas — {{ lidas }} conversa(s) reprocessada(s).</div>
+  </div>
+</div>
+
+<div class="panel-box">
+  <h2>O que a extração consegue tirar da conversa<i class="ajuda-i" title="Reprocessei as conversas que já estão gravadas no sistema com o mesmo extrator que roda na análise, e contei em quantas ele achou cada campo. Nenhuma IA foi chamada: isto é de graça e pode rodar quantas vezes quiser. Taxa baixa não quer dizer que o dado não estava na conversa — quer dizer que o extrator não soube lê-lo.">i</i></h2>
+  <p class="sub">Ordenado do pior pro melhor: o topo desta lista é a fila de trabalho. Campo que quase nunca é achado é onde a leitura está deixando dinheiro na mesa — o consultor tem que perguntar de novo algo que o cliente já respondeu.</p>
+  {% if not lidas %}
+    <div class="vazio">Nenhuma conversa gravada ainda. Rode a análise pela extensão em algumas conversas e volte aqui.</div>
+  {% else %}
+  <table class="pnl-tab">
+    <thead><tr><th>Campo</th><th style="width:45%;">Taxa de captura</th><th class="num">Achou em</th><th class="num">Ficou em branco</th></tr></thead>
+    <tbody>
+      {% for c in campos %}
+      <tr>
+        <td>{{ c.nome }}</td>
+        <td>
+          <div class="cal-barra {{ 'cal-b-alto' if c.taxa >= 60 else ('cal-b-medio' if c.taxa >= 25 else 'cal-b-baixo') }}">
+            <i style="width:{{ c.taxa }}%;"></i><b>{{ c.taxa }}%</b>
+          </div>
+        </td>
+        <td class="num">{{ c.achou }}</td>
+        <td class="num">{{ lidas - c.achou }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="panel-box">
+  <h2>O score acertou?<i class="ajuda-i" title="Compara a faixa que a IA deu ao lead com o que aconteceu de verdade depois: ele chegou numa etapa de Ganho ou de Perdido. Lead ainda em aberto não entra — ele ainda pode virar qualquer um dos dois, e contá-lo como perdido faria toda faixa parecer ruim. Se as faixas altas não converterem mais que as baixas, o score não está separando nada.">i</i></h2>
+  <p class="sub">O sinal de que o motor funciona é a taxa CAIR de cima pra baixo. Se não cair, ele não está separando quem compra de quem não compra.</p>
+  {% if not placar %}
+    <div class="vazio">Nenhum lead analisado chegou a Ganho ou Perdido ainda — sem desfecho não há o que comparar.</div>
+  {% else %}
+  <table class="pnl-tab">
+    <thead><tr><th>Faixa</th><th class="num">Ganhos</th><th class="num">Perdidos</th><th class="num">Decididos</th><th class="num">Vendas registradas</th><th class="num">Taxa de conversão</th></tr></thead>
+    <tbody>
+      {% for f in placar %}
+      <tr>
+        <td><span class="pill pill-{{ f.faixa }}">{{ f.faixa|upper }}</span></td>
+        <td class="num">{{ f.ganho }}</td>
+        <td class="num">{{ f.perdido }}</td>
+        <td class="num">{{ f.total }}</td>
+        <td class="num">{{ f.vendas }}</td>
+        <td class="num">{{ f.taxa ~ '%' if f.taxa is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="panel-box">
+  <h2>Conversa por conversa<i class="ajuda-i" title="Cada linha é uma conversa real. Verde é o que a extração conseguiu ler; vermelho é o que ficou em branco. Abra a conversa e confira: se o dado ESTAVA escrito lá e mesmo assim ficou vermelho, é falha de leitura e dá pra corrigir. Se não estava, não há o que corrigir.">i</i></h2>
+  <p class="sub">Ordenado da mais recente. O que interessa é o vermelho em conversa longa: cliente que escreveu muito e do qual pouco foi aproveitado.</p>
+  {% if not linhas %}
+    <div class="vazio">Nada para comparar ainda.</div>
+  {% else %}
+  <table class="pnl-tab">
+    <thead><tr><th>Lead</th><th class="num">Msgs</th><th class="num">Score</th><th>Desfecho</th><th class="num">Campos lidos</th><th style="width:42%;">O que leu / o que ficou em branco</th><th>Conferir</th></tr></thead>
+    <tbody>
+      {% for l in linhas %}
+      <tr>
+        <td>{% if l.lead_id %}<a href="/crm?lead={{ l.lead_id }}">{{ l.nome }}</a>{% else %}{{ l.nome }}{% endif %}
+            <div class="cal-sub">{{ l.criado_em }} · {{ l.chars_lead }} caracteres escritos pelo cliente</div></td>
+        <td class="num">{{ l.msgs }}</td>
+        <td class="num">{% if l.score is not none %}<span class="pill pill-{{ l.faixa }}">{{ l.score }}</span>{% else %}—{% endif %}</td>
+        <td>{% if l.etapa_tipo == 'ganho' %}<span class="pill pill-verde">{{ l.etapa_nome }}</span>
+            {% elif l.etapa_tipo == 'perdido' %}<span class="pill pill-erro">{{ l.etapa_nome }}</span>
+            {% elif l.etapa_nome %}<span class="pill pill-cinza">em aberto</span>{% else %}—{% endif %}</td>
+        <td class="num">{{ l.n_achou }}/{{ campos|length }}</td>
+        <td>
+          {% for c in l.achou %}<span class="cal-tag ok">{{ c }}</span>{% endfor %}
+          {% for c in l.faltou %}<span class="cal-tag no">{{ c }}</span>{% endfor %}
+        </td>
+        <td><a href="/whatsapp-analises/{{ l.id }}/conversa">ver conversa</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endblock %}
