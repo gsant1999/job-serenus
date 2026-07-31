@@ -893,6 +893,10 @@
     document.documentElement.style.setProperty('--job-viz', px + 'px');
   }
 
+  // Redimensionar e o momento em que a medida REALMENTE muda — reavalia na
+  // hora, em vez de o usuario esperar ate 12s pelo trilho se ajeitar.
+  window.addEventListener('resize', () => { try { aplicarOffsetVizinhos(); } catch (e) {} });
+
   const JOB_PUSH_MIN_WIDTH = 1360; // trilho+painel+folga mínima pro WhatsApp não espremer
   function aplicarClassesHtml() {
     const html = document.documentElement;
@@ -1324,10 +1328,29 @@
     return row.firstElementChild || row;
   }
 
-  function trInjetar() {
+  // `raizes` = so os pedacos que MUDARAM. Sem isso, cada varredura percorria
+  // TODA a conversa aberta — numa conversa longa, centenas de linhas, a cada
+  // 400ms de rolagem e ainda de 4 em 4 segundos sem nada ter mudado. Era esse o
+  // travamento: nao o tamanho do arquivo (que Vite reduziria), mas trabalho
+  // repetido em cima de uma lista virtualizada que o WhatsApp reescreve o tempo
+  // todo. Olhar so o que chegou e a diferenca entre O(conversa) e O(novidade).
+  function trInjetar(raizes) {
     if (!_trPodeRodar()) return;
     const main = document.querySelector('#main');
-    const linhas = main.querySelectorAll('[data-id]');
+    let linhas;
+    if (raizes && raizes.length) {
+      const vistos = new Set();
+      linhas = [];
+      for (const r of raizes) {
+        if (!r || r.nodeType !== 1 || !main.contains(r)) continue;
+        if (r.hasAttribute && r.hasAttribute('data-id') && !vistos.has(r)) { vistos.add(r); linhas.push(r); }
+        if (r.querySelectorAll) {
+          r.querySelectorAll('[data-id]').forEach((x) => { if (!vistos.has(x)) { vistos.add(x); linhas.push(x); } });
+        }
+      }
+    } else {
+      linhas = main.querySelectorAll('[data-id]');
+    }
     for (const row of linhas) {
       const id = row.getAttribute('data-id') || '';
       if (!id || row.querySelector('.job-tr-slot')) continue;
@@ -1433,9 +1456,15 @@
   // rolagem, sem varredura, sem chamada de rede — a injeção é só criar um botão
   // nas bolhas novas. Foi o reposicionamento por coordenada que pesou antes.
   let _trTimer = null;
-  function trAgendarInjecao() {
+  let _trPend = [];
+  function trAgendarInjecao(raizes) {
+    if (raizes && raizes.length) _trPend.push(...raizes);
     if (_trTimer) return;
-    _trTimer = setTimeout(() => { _trTimer = null; try { trInjetar(); } catch (e) {} }, 400);
+    _trTimer = setTimeout(() => {
+      _trTimer = null;
+      const lote = _trPend; _trPend = [];
+      try { trInjetar(lote); } catch (e) {}
+    }, 400);
   }
 
   function trIniciar() {
@@ -1443,16 +1472,29 @@
       trCarregarIdsDeAudio(true);
       trInjetar();
       const main = document.querySelector('#main') || document.body;
-      const obs = new MutationObserver(trAgendarInjecao);
+      // Passa adiante SO os nos adicionados — e a informacao que o proprio
+      // observer ja entrega de graca e que eu estava jogando fora.
+      const obs = new MutationObserver((regs) => {
+        const novos = [];
+        for (const r of regs) {
+          if (!r.addedNodes) continue;
+          for (const n of r.addedNodes) if (n.nodeType === 1) novos.push(n);
+        }
+        if (novos.length) trAgendarInjecao(novos);
+      });
       obs.observe(main, { childList: true, subtree: true });
       // Troca de conversa troca o #main inteiro: reobserva sem drama.
+      // Ronda so pra reatar o observer quando a CONVERSA troca (#main e
+      // recriado). Nao varre mais a conversa inteira a cada 4s: se nada mudou,
+      // nao ha o que injetar, e o observer avisa quando muda.
       setInterval(() => {
         const m = document.querySelector('#main');
-        if (m && !m._jobTrObservado) { m._jobTrObservado = true; obs.observe(m, { childList: true, subtree: true }); }
-        // Recarrega a lista de audios quando a CONVERSA muda (a funcao sai na
-        // hora se o chat for o mesmo, entao isto nao gera trabalho a toa).
-        trCarregarIdsDeAudio(false);
-        trAgendarInjecao();
+        if (m && !m._jobTrObservado) {
+          m._jobTrObservado = true;
+          obs.observe(m, { childList: true, subtree: true });
+          trCarregarIdsDeAudio(false);
+          trInjetar();               // varredura cheia UMA vez, na troca de conversa
+        }
       }, 4000);
     }, 6000);
   }
@@ -4399,12 +4441,21 @@
   //    de volta pra "Analisar este lead", mesmo com a análise seguindo rodando
   //    por trás (bug real: parecia travado — Guilherme, 21/07). ──
   let _ultimaChaveVista = null;
+  let _tickViz = 0;
   _registrarLoop(setInterval(() => {
     if (!_contextoValido()) { _marcarContextoMorto(); return; }
-    // Outras extensões carregam em tempos diferentes da nossa (e o usuário pode
-    // ligar/desligar as delas em pleno uso) — remedir sempre. É barato: só
-    // escreve no DOM quando o valor muda de fato.
-    aplicarOffsetVizinhos();
+    // Aba em segundo plano nao precisa de nada disto. O consultor deixa o
+    // WhatsApp aberto o dia inteiro atras de outras abas; sem esta linha a
+    // extensao continuava medindo layout a cada 1,5s numa aba que ninguem esta
+    // vendo, e o navegador inteiro pagava por isso.
+    if (document.hidden) return;
+    // Eu dizia no comentario que remedir "e barato". Nao e: _medirVizinhos roda
+    // getComputedStyle + getBoundingClientRect em cada filho do body, e isso
+    // forca o navegador a recalcular layout. A cada 1,5s, pra sempre, em cima
+    // do WhatsApp — era jank garantido. O que ele detecta (outra extensao com
+    // trilho aparecendo ou sumindo) muda raramente: 12s cobre com folga, e
+    // redimensionar a janela reavalia na hora.
+    if ((++_tickViz % 8) === 0) aplicarOffsetVizinhos();
     const chaveAgora = nomeDoContato() || chaveConversa(telefoneDoContato(), nomeDoContato());
     if (chaveAgora === _ultimaChaveVista) return;
     _ultimaChaveVista = chaveAgora;
