@@ -893,6 +893,14 @@ def init_db():
             # a transcrição volta vazia, a análise sai sem IA, e ninguém fica sabendo
             # até alguém reclamar que "parou de funcionar". Registrar o motivo real da
             # última falha é o que transforma isso num aviso em vez de um mistério.
+            # Config em JSON por chave. Criada AQUI e não sob demanda: no Postgres um
+            # SELECT numa tabela inexistente aborta a TRANSAÇÃO INTEIRA, e toda query
+            # seguinte na mesma conexão falha com "current transaction is aborted".
+            # Foi assim que o /configuracoes caiu inteiro por causa de uma config.
+            """CREATE TABLE IF NOT EXISTS meta_flags_valor (
+                k TEXT PRIMARY KEY,
+                v TEXT
+            )""",
             """CREATE TABLE IF NOT EXISTS ia_provedor_estado (
                 provedor TEXT PRIMARY KEY,
                 status TEXT,
@@ -1613,6 +1621,10 @@ def init_db():
             resumo TEXT,
             criado_por INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS meta_flags_valor (
+            k TEXT PRIMARY KEY,
+            v TEXT
         );
         CREATE TABLE IF NOT EXISTS ia_provedor_estado (
             provedor TEXT PRIMARY KEY,
@@ -14722,8 +14734,15 @@ def varredura_cfg(conn=None):
         r = conn.execute("SELECT v FROM meta_flags_valor WHERE k='varredura_cfg'").fetchone()
         if r and r['v']:
             cfg.update(json.loads(r['v']))
-    except Exception:
-        pass
+    except Exception as e:
+        # ROLLBACK obrigatório: no Postgres a transação fica abortada depois de um
+        # erro, e TODA query seguinte na mesma conexão falha. Engolir o erro sem
+        # desfazer é o que derrubou a página inteira, não só esta config.
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        app.logger.warning(f"[VARREDURA] config não lida: {e}")
     if fechar:
         close_db(conn)
     return cfg
