@@ -1217,6 +1217,31 @@
   //
   // SOB DEMANDA muda tudo: sem varredura, sem download em massa, sem custo
   // surpresa. O consultor pede o áudio que ele quer ler.
+  // Ponte generica pro main world. Eu vinha CHAMANDO _pedirPonte sem nunca
+  // te-la escrito — as chamadas falhavam com "_pedirPonte is not defined" e o
+  // erro so aparecia dentro da bolha, no lugar da transcricao. Mesmo protocolo
+  // das outras chamadas do arquivo: reqId unico, listener que se remove, teto
+  // de tempo pra nunca ficar pendurado.
+  function _pedirPonte(tipo, extra, timeoutMs) {
+    return new Promise((resolve) => {
+      const reqId = 'p' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      let pronto = false;
+      function onMsg(ev) {
+        if (ev.source !== window) return;
+        const d = ev.data;
+        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
+        pronto = true;
+        window.removeEventListener('message', onMsg);
+        resolve(d);
+      }
+      window.addEventListener('message', onMsg);
+      window.postMessage(Object.assign({ source: 'JOB_EXT_REQ', tipo, reqId }, extra || {}), '*');
+      setTimeout(() => {
+        if (!pronto) { window.removeEventListener('message', onMsg); resolve({ erro: 'timeout' }); }
+      }, timeoutMs || 15000);
+    });
+  }
+
   const TR = {
     cache: new Map(),        // msg_id -> texto ('' = tentou e não deu)
     ocupado: new Set(),
@@ -1238,6 +1263,7 @@
   // sao ptt/audio e caso com a linha pelo data-id, que e o mesmo id dos dois
   // lados. Seletor de CSS quebra a cada atualizacao; o tipo da mensagem, nao.
   const _TR_IDS = new Set();     // msg_ids de audio da conversa aberta
+  const _TR_LADO = new Map();    // msg_id -> 'consultor' | 'lead'
   let _trChatCarregado = '';
 
   async function trCarregarIdsDeAudio(forcar) {
@@ -1249,7 +1275,14 @@
       const r = await _pedirPonte('listar_audios', {}, 15000);
       const lista = (r && r.audios) || [];
       if (cid !== _trChatCarregado) { _TR_IDS.clear(); _trChatCarregado = cid; }
-      lista.forEach((a) => a && a.msg_id && _TR_IDS.add(a.msg_id));
+      lista.forEach((a) => {
+        if (!a || !a.msg_id) return;
+        _TR_IDS.add(a.msg_id);
+        // De que lado a bolha esta. Vem da wa-js (fromMe), nao de adivinhar
+        // alinhamento no DOM — e o que faz o bloco nascer embaixo da bolha
+        // certa, no lado certo, em vez de largura cheia atravessando a tela.
+        _TR_LADO.set(a.msg_id, a.de === 'consultor' ? 'consultor' : 'lead');
+      });
       TR.diag.etapa = 'ids_carregados';
       TR.diag.audios = _TR_IDS.size;
       if (_TR_IDS.size) trInjetar();
@@ -1289,7 +1322,8 @@
       if (!id || row.querySelector('.job-tr-slot')) continue;
       if (!_trLinhaEhAudio(row)) continue;
       const slot = document.createElement('div');
-      slot.className = 'job-tr-slot';
+      const lado = _TR_LADO.get(id) || (row.querySelector('[class*="message-out"]') ? 'consultor' : 'lead');
+      slot.className = 'job-tr-slot ' + (lado === 'consultor' ? 'job-tr-dir' : 'job-tr-esq');
       slot.dataset.msg = id;
       _trAlvo(row).appendChild(slot);
       trRenderSlot(slot, id);
@@ -1309,14 +1343,17 @@
       return;
     }
     if (texto === '') {
-      slot.innerHTML = '<div class="job-tr-falhou">Não deu pra transcrever' +
-        (TR.aviso ? ' — ' + esc(TR.aviso) : '') + ' <button class="job-tr-btn mini" type="button">tentar de novo</button></div>';
+      // Mensagem curta e discreta: o erro tecnico vai pro title, nao pra tela.
+      // Uma linha vermelha do tamanho da conversa inteira pra cada audio que
+      // falhou e pior do que nao ter transcricao nenhuma.
+      slot.innerHTML = '<div class="job-tr-falhou" title="' + esc(TR.aviso || '') + '">' +
+        'nao deu pra transcrever <button class="job-tr-btn mini" type="button">tentar de novo</button></div>';
       const b = slot.querySelector('button');
       if (b) b.addEventListener('click', (ev) => { ev.stopPropagation(); TR.cache.delete(id); trTranscrever(id); });
       return;
     }
-    slot.innerHTML = '<div class="job-tr-texto">' + esc(texto) +
-      '<button class="job-tr-copiar" type="button" title="Copiar">' + _ICO_COPIAR + '</button></div>';
+    slot.innerHTML = '<div class="job-tr-texto"><span class="job-tr-tag">transcricao</span>' +
+      esc(texto) + '<button class="job-tr-copiar" type="button" title="Copiar">' + _ICO_COPIAR + '</button></div>';
     const c = slot.querySelector('.job-tr-copiar');
     if (c) c.addEventListener('click', (ev) => {
       ev.stopPropagation();
