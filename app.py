@@ -2377,6 +2377,9 @@ def init_db():
         # Nota da extensao vivia so por telefone, fora do lead — invisivel no site.
         ("lead_notas", "lead_id", "INTEGER"),
         ("lead_notas", "chat_id", "TEXT"),
+        # MESMO AUDIO, VARIOS ENVIOS: o filehash e igual em todos. Sem ele, o
+        # audio-modelo mandado pra 50 leads virava 50 transcricoes pagas.
+        ("whatsapp_transcricoes_cache", "filehash", "TEXT"),
         # De onde saiu o vínculo (cnpj / telefone / telefone_sufixo / manual):
         # sem isso não há como auditar um vínculo errado depois.
         ("propostas", "lead_vinculo", "TEXT"),
@@ -2907,6 +2910,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_propostas_lead ON propostas(lead_id)",
         "CREATE INDEX IF NOT EXISTS idx_ads_status ON google_ads_conversoes(status)",
         "CREATE INDEX IF NOT EXISTS idx_conv_estado_tel ON wa_conversa_estado(telefone_norm)",
+        "CREATE INDEX IF NOT EXISTS idx_transcr_filehash ON whatsapp_transcricoes_cache(filehash)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_lead ON crm_lead_campos(lead_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_campo ON crm_lead_campos(campo_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_etq_etq ON crm_lead_etiquetas(etiqueta_id)",
@@ -13444,7 +13448,7 @@ def _transcrever_audio(b64, mime='audio/ogg'):
     return None
 
 
-def _wa_transcricao_cache_buscar(conn, msg_id):
+def _wa_transcricao_cache_buscar(conn, msg_id, filehash=None):
     """Devolve {'texto','segundos'} se esse áudio (pela wpp_msg_id, estável
     entre releituras da mesma conversa) já foi transcrito antes, ou None.
     NUNCA usado pra decidir se um áudio entra ou não na análise — só evita
@@ -13455,6 +13459,16 @@ def _wa_transcricao_cache_buscar(conn, msg_id):
         return None
     row = conn.execute("SELECT texto, segundos FROM whatsapp_transcricoes_cache WHERE msg_id=?",
                         (msg_id,)).fetchone()
+    if not row and filehash:
+        # Mesmo ARQUIVO ja transcrito em outra conversa. O filehash e do conteudo
+        # do audio, entao o audio-modelo que sai pros 50 leads e transcrito uma
+        # vez na vida — nas outras 49 isto responde de graca e na hora.
+        try:
+            row = conn.execute("""SELECT texto, segundos FROM whatsapp_transcricoes_cache
+                                  WHERE filehash=? AND filehash IS NOT NULL LIMIT 1""",
+                               (filehash,)).fetchone()
+        except Exception:
+            row = None
     if not row:
         return None
     return {'texto': row['texto'], 'segundos': row['segundos']}
@@ -13503,13 +13517,13 @@ def marcar_audio_enviado(conn, wpp_msg_id, arquivo):
     return True
 
 
-def _wa_transcricao_cache_salvar(conn, msg_id, texto, segundos, custo_usd):
+def _wa_transcricao_cache_salvar(conn, msg_id, texto, segundos, custo_usd, filehash=None):
     if not msg_id or not texto:
         return
     try:
         conn.execute("""INSERT OR IGNORE INTO whatsapp_transcricoes_cache
-                        (msg_id, texto, segundos, custo_usd) VALUES (?,?,?,?)""",
-                     (msg_id, texto, segundos, custo_usd))
+                        (msg_id, texto, segundos, custo_usd, filehash) VALUES (?,?,?,?,?)""",
+                     (msg_id, texto, segundos, custo_usd, filehash or None))
     except Exception as e:
         app.logger.warning(f"[TRANSCRICAO_CACHE] falhou ao salvar {msg_id}: {e}")
 
@@ -15854,6 +15868,20 @@ def api_whatsapp_transcricoes():
         for r in conn.execute(f"""SELECT msg_id, texto FROM whatsapp_transcricoes_cache
                                   WHERE msg_id IN ({marc})""", ids).fetchall():
             out[r['msg_id']] = r['texto']
+        # Segunda passada por filehash: audio que a extensao ainda nao viu nesta
+        # conversa, mas cujo CONTEUDO ja foi transcrito em outra.
+        hs = (request.get_json(silent=True) or {}).get('filehashes') or {}
+        faltam = {m: h for m, h in hs.items() if m not in out and h}
+        if faltam:
+            vals = list({h for h in faltam.values()})[:400]
+            m2 = ','.join(['?'] * len(vals))
+            porhash = {}
+            for r in conn.execute(f"""SELECT filehash, texto FROM whatsapp_transcricoes_cache
+                                      WHERE filehash IN ({m2})""", vals).fetchall():
+                porhash.setdefault(r['filehash'], r['texto'])
+            for m, h in faltam.items():
+                if porhash.get(h):
+                    out[m] = porhash[h]
         gasto = _gasto_transcricao_mes(conn)
     except Exception as e:
         app.logger.warning(f"[TRANSCRICAO] consulta de cache falhou: {e}")
@@ -15890,8 +15918,12 @@ def api_whatsapp_transcrever():
         mid = str((a or {}).get('msg_id') or '')
         if not mid:
             continue
-        ja = _wa_transcricao_cache_buscar(conn, mid)
+        fh = str((a or {}).get('filehash') or '') or None
+        ja = _wa_transcricao_cache_buscar(conn, mid, fh)
         if ja:
+            # Achou por filehash: carimba tambem neste msg_id, pra proxima
+            # consulta desta conversa nem precisar do filehash.
+            _wa_transcricao_cache_salvar(conn, mid, ja['texto'], ja.get('segundos'), 0.0, fh)
             out[mid] = ja['texto']
             continue
         b64 = (a or {}).get('base64') or ''
@@ -15899,7 +15931,7 @@ def api_whatsapp_transcrever():
             continue
         r = _transcrever_audio(b64, (a or {}).get('mime') or 'audio/ogg')
         if r and (r.get('texto') or '').strip():
-            _wa_transcricao_cache_salvar(conn, mid, r['texto'], r.get('segundos'), r.get('custo_usd'))
+            _wa_transcricao_cache_salvar(conn, mid, r['texto'], r.get('segundos'), r.get('custo_usd'), fh)
             out[mid] = r['texto']
             custo_rodada += float(r.get('custo_usd') or 0)
         else:

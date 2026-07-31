@@ -319,7 +319,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === 'transcricoes_cache') {
-    chamarJob('/api/whatsapp/transcricoes', 'POST', { ids: msg.ids || [] }, 15000).then(sendResponse);
+    chamarJob('/api/whatsapp/transcricoes', 'POST',
+      { ids: msg.ids || [], filehashes: msg.filehashes || {} }, 15000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'transcrever_audios') {

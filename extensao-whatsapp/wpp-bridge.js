@@ -432,7 +432,12 @@
           b64 = str.indexOf(',') >= 0 ? str.split(',')[1] : str;
           mime = media.mimetype || mime;
         }
-        if (b64) out.push({ msg_id: id, base64: b64, mime: (mime || 'audio/ogg').split(';')[0] });
+        // filehash junto: e a identidade do CONTEUDO do audio. Com ele o
+        // servidor reconhece um audio ja transcrito em OUTRA conversa e nao
+        // paga de novo — o caso do audio-modelo que sai pra dezenas de leads.
+        const fh = (achado.msg && achado.msg.mediaData && achado.msg.mediaData.filehash) || '';
+        if (b64) out.push({ msg_id: id, base64: b64, filehash: fh,
+                            mime: (mime || 'audio/ogg').split(';')[0] });
         else erros[id] = 'áudio veio vazio';
       } catch (e3) {
         erros[id] = String((e3 && e3.message) || e3 || 'falha ao ler').slice(0, 90);
