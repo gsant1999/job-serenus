@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+{% block title %}Extrato {{ e.codigo_comissao }}{% endblock %}
+{% block head %}
+<style>
+  .ex-cab { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .ex-num { flex:1 1 150px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px 14px; }
+  .ex-num b { display:block; font-size:19px; font-variant-numeric:tabular-nums; }
+  .ex-num span { display:block; font-size:10px; color:var(--cinza); margin-top:3px; }
+  .ex-lid { font-family:ui-monospace,Menlo,monospace; font-size:10px; padding:1px 6px; border-radius:4px; }
+  .ex-lid.lid { background:rgba(168,85,247,.2); color:#d8b4fe; }
+  .ex-lid.numero { background:rgba(34,197,94,.18); color:#4ade80; }
+  .ex-div-ok { color:var(--cinza); }
+  .ex-div-nao { color:#f87171; font-weight:700; }
+  .ex-motivo { font-size:11px; background:var(--panel-3); border:1px solid var(--borda); border-radius:6px; color:var(--texto); padding:3px 6px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Extrato {{ e.codigo_comissao }}</h1>
+    <div class="sub">{{ e.cadastro_cod }} · {{ e.cadastro_nome }} · gerado em {{ e.geracao }}{{ ' · assistente ' ~ e.assistente if e.assistente }}</div>
+  </div>
+  <div><a href="/comissoes/extrato" class="btn-outline">Voltar</a></div>
+</div>
+
+<div class="page">
+  <div class="ex-cab">
+    <div class="ex-num"><b>{{ e.total_bruto|moeda }}</b><span>bruto do extrato</span></div>
+    <div class="ex-num"><b>{{ e.total_liquido|moeda }}</b><span>líquido das vendas</span></div>
+    <div class="ex-num"><b>{{ e.debitos|moeda }}</b><span>débitos (tarifa)<i class="ajuda-i" title="Descontos do extrato, como tarifa bancária. São rateados em partes IGUAIS entre os consultores presentes neste extrato — quem tem 3 vendas paga o mesmo que quem tem 1.">i</i></span></div>
+    <div class="ex-num"><b>{{ itens|length }}</b><span>linhas</span></div>
+  </div>
+
+  {% if e.nf_situacao %}<div class="alerta atencao">{{ e.nf_situacao }}</div>{% endif %}
+
+  <div class="panel-box">
+    <h2>A pagar por consultor<i class="ajuda-i" title="Líquido das vendas do consultor neste extrato, menos a parte dele no débito. O rateio do débito é por consultor, em partes iguais, independente de quantas vendas ou de quanto vale cada uma.">i</i></h2>
+    <table class="pnl-tab">
+      <thead><tr><th>Consultor</th><th class="num">Vendas</th><th class="num">Líquido</th><th class="num">Débito rateado</th><th class="num">A pagar</th></tr></thead>
+      <tbody>
+        {% for c in por_consultor %}
+        <tr>
+          <td>{{ c.consultor }}</td>
+          <td class="num">{{ c.vendas }}</td>
+          <td class="num">{{ c.liquido|moeda }}</td>
+          <td class="num">{{ c.debito|moeda }}</td>
+          <td class="num"><b>{{ c.a_pagar|moeda }}</b></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel-box">
+    <h2>Linha por linha<i class="ajuda-i" title="Divergência = o que a Affinity pagou menos o que o JOB calculou. O valor da Affinity é o que vale: aqui você diz de quem foi o erro, pra a diferença virar aprendizado em vez de virar rotina.">i</i></h2>
+    <table class="pnl-tab">
+      <thead><tr><th>Cliente</th><th>Proposta</th><th>Lead</th><th class="num">Affinity</th><th class="num">JOB</th><th class="num">Divergência</th><th>De quem foi</th></tr></thead>
+      <tbody>
+        {% for i in itens %}
+        <tr>
+          <td>{{ i.cliente }}<div style="font-size:11px;color:var(--cinza);">{{ i.operadora }} · parc {{ i.parcela }} · vig {{ i.vigencia }}</div></td>
+          <td>{% if i.proposta_id %}<a href="/proposta/{{ i.proposta_id }}">{{ i.numero_proposta }}</a>
+              <div style="font-size:11px;color:var(--cinza);">casou por {{ i.casou_por }}</div>
+              {% else %}<span class="pill pill-erro">{{ i.numero_proposta }} — sem venda no JOB</span>{% endif %}</td>
+          <td>{% if i.lead_id %}<a href="/lead/{{ i.lead_id }}">{% if i.lid_curto %}<span class="ex-lid {{ i.lid_tipo }}">{{ '@lid' if i.lid_tipo == 'lid' else 'nº' }}</span> {{ i.lid_curto }}{% else %}lead #{{ i.lead_id }}{% endif %}</a>
+              {% elif i.proposta_id %}<span class="pill pill-cinza" title="A venda existe no JOB mas não tem lead — sem lead não há origem nem @lid">venda sem lead</span>
+              {% else %}—{% endif %}</td>
+          <td class="num">{{ i.bruto|moeda }}</td>
+          <td class="num">{{ i.job_esperado|moeda if i.job_esperado is not none else '—' }}</td>
+          <td class="num {{ 'ex-div-nao' if i.divergencia and i.divergencia|abs > 0.01 else 'ex-div-ok' }}">
+            {{ i.divergencia|moeda if i.divergencia is not none else '—' }}
+          </td>
+          <td>
+            {% if i.divergencia is not none and i.divergencia|abs > 0.01 %}
+            <select class="ex-motivo" onchange="marcarMotivo({{ i.id }}, this.value)">
+              <option value="a_classificar" {% if i.divergencia_motivo == 'a_classificar' %}selected{% endif %}>a classificar</option>
+              <option value="erro_job" {% if i.divergencia_motivo == 'erro_job' %}selected{% endif %}>erro nosso (cadastro)</option>
+              <option value="erro_affinity" {% if i.divergencia_motivo == 'erro_affinity' %}selected{% endif %}>erro da Affinity</option>
+              <option value="ok" {% if i.divergencia_motivo == 'ok' %}selected{% endif %}>diferença esperada</option>
+            </select>
+            {% else %}<span class="pill pill-verde">bate</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<script>
+async function marcarMotivo(id, motivo){
+  const r = await fetch('/comissoes/extrato/item/' + id + '/motivo', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({motivo: motivo})});
+  const d = await r.json();
+  if(!d.ok) alert(d.erro || 'Não deu pra salvar');
+}
+</script>
+{% endblock %}

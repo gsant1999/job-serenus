@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block title %}Extratos de comissão{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Extratos de comissão</h1>
+    <div class="sub">O que a Affinity pagou, linha por linha, casado com a venda no JOB.</div>
+  </div>
+</div>
+
+<div class="page">
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+  {% for a in avisos %}<div class="alerta atencao">{{ a }}</div>{% endfor %}
+
+  <div class="panel-box">
+    <h2>Importar extrato<i class="ajuda-i" title="O PDF da Affinity é lido direto, sem IA. Cada linha vira um registro casado com a venda pelo número da proposta. O mesmo extrato não entra duas vezes: o código da comissão é único.">i</i></h2>
+    <p class="sub">O extrato é o dinheiro que entrou — a Affinity paga o que está nele. O JOB não corrige o valor: mostra onde divergiu do cálculo dele, pra você classificar se o erro foi nosso ou dela.</p>
+    <form method="post" enctype="multipart/form-data" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <input type="file" name="pdf" accept="application/pdf" required>
+      <button type="submit" class="btn">Ler e importar</button>
+    </form>
+  </div>
+
+  <div class="panel-box">
+    <h2>Extratos importados</h2>
+    {% if not extratos %}
+      <div class="vazio">Nenhum extrato importado ainda.</div>
+    {% else %}
+    <table class="pnl-tab">
+      <thead><tr><th>Código</th><th>Cadastro</th><th>Geração</th><th class="num">Linhas</th><th class="num">Bruto</th><th class="num">Débitos</th><th>Pendências</th><th></th></tr></thead>
+      <tbody>
+        {% for e in extratos %}
+        <tr>
+          <td>{{ e.codigo_comissao or '—' }}</td>
+          {# Axioma e Serenus são bolsos de donos diferentes: o cadastro fica visível em toda linha. #}
+          <td><span class="pill pill-cinza">{{ e.cadastro_cod }}</span> {{ (e.cadastro_nome or '')[:34] }}</td>
+          <td>{{ e.geracao or '—' }}</td>
+          <td class="num">{{ e.itens }}</td>
+          <td class="num">{{ e.total_bruto|moeda }}</td>
+          <td class="num">{{ e.debitos|moeda }}</td>
+          <td>{% if e.pendentes %}<span class="pill pill-erro">{{ e.pendentes }} a resolver</span>{% else %}<span class="pill pill-verde">tudo casado</span>{% endif %}</td>
+          <td><a href="/comissoes/extrato/{{ e.id }}">abrir</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

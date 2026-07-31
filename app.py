@@ -1003,7 +1003,56 @@ def init_db():
             # um @lid pode não resolver telefone nenhum (contato sem número exposto).
             # Sem esta tabela, a varredura diária reanalisaria conversa que não mudou
             # e pagaria de novo por dado que já temos.
-            # DESEMPENHO MEDIDO, nao sentido. "esta lento" so vira conserto quando
+            # EXTRATO DE COMISSAO DA AFFINITY (PDF). O que a Affinity manda no
+            # relatorio E o que ela paga — nao se discute o valor. O que o JOB
+            # precisa saber e POR QUE divergiu do calculo dele: erro nosso no
+            # cadastro ou erro dela. Por isso o extrato entra como registro
+            # proprio, ao lado do calculo, e nunca sobrescreve a proposta.
+            """CREATE TABLE IF NOT EXISTS comissao_extrato (
+                id SERIAL PRIMARY KEY,
+                codigo_comissao TEXT UNIQUE,
+                cadastro_cod TEXT,
+                cadastro_nome TEXT,
+                assistente TEXT,
+                geracao TEXT,
+                previsao TEXT,
+                total_bruto REAL DEFAULT 0,
+                total_liquido REAL DEFAULT 0,
+                debitos REAL DEFAULT 0,
+                nf_situacao TEXT,
+                arquivo TEXT,
+                conferido INTEGER DEFAULT 0,
+                importado_por INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS comissao_extrato_item (
+                id SERIAL PRIMARY KEY,
+                extrato_id INTEGER NOT NULL,
+                operadora TEXT,
+                cliente TEXT,
+                numero_proposta TEXT,
+                parcela INTEGER,
+                data_cadastro TEXT,
+                data_assinatura TEXT,
+                vigencia TEXT,
+                vl_parcela REAL DEFAULT 0,
+                percentual REAL DEFAULT 0,
+                bruto REAL DEFAULT 0,
+                taxa REAL DEFAULT 0,
+                desp_adm REAL DEFAULT 0,
+                iss REAL DEFAULT 0,
+                liquido REAL DEFAULT 0,
+                proposta_id INTEGER,
+                lead_id INTEGER,
+                consultor TEXT,
+                casou_por TEXT,
+                job_esperado REAL,
+                divergencia REAL,
+                divergencia_motivo TEXT,
+                rateio_debito REAL DEFAULT 0,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+                        # DESEMPENHO MEDIDO, nao sentido. "esta lento" so vira conserto quando
             # tem numero: o que e lento, quanto, e desde quando. Uma linha por
             # operacao concluida na extensao.
             """CREATE TABLE IF NOT EXISTS wa_metrica (
@@ -1739,6 +1788,28 @@ def init_db():
             numero TEXT,
             wpp_ok INTEGER DEFAULT 0,
             visto_em TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS comissao_extrato (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo_comissao TEXT UNIQUE,
+            cadastro_cod TEXT, cadastro_nome TEXT, assistente TEXT,
+            geracao TEXT, previsao TEXT,
+            total_bruto REAL DEFAULT 0, total_liquido REAL DEFAULT 0, debitos REAL DEFAULT 0,
+            nf_situacao TEXT, arquivo TEXT, conferido INTEGER DEFAULT 0,
+            importado_por INTEGER, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS comissao_extrato_item (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            extrato_id INTEGER NOT NULL,
+            operadora TEXT, cliente TEXT, numero_proposta TEXT, parcela INTEGER,
+            data_cadastro TEXT, data_assinatura TEXT, vigencia TEXT,
+            vl_parcela REAL DEFAULT 0, percentual REAL DEFAULT 0,
+            bruto REAL DEFAULT 0, taxa REAL DEFAULT 0, desp_adm REAL DEFAULT 0,
+            iss REAL DEFAULT 0, liquido REAL DEFAULT 0,
+            proposta_id INTEGER, lead_id INTEGER, consultor TEXT, casou_por TEXT,
+            job_esperado REAL, divergencia REAL, divergencia_motivo TEXT,
+            rateio_debito REAL DEFAULT 0,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS wa_metrica (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2933,6 +3004,8 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_conv_estado_tel ON wa_conversa_estado(telefone_norm)",
         "CREATE INDEX IF NOT EXISTS idx_transcr_filehash ON whatsapp_transcricoes_cache(filehash)",
         "CREATE INDEX IF NOT EXISTS idx_wa_metrica_op ON wa_metrica(operacao, criado_em)",
+        "CREATE INDEX IF NOT EXISTS idx_extrato_item ON comissao_extrato_item(extrato_id)",
+        "CREATE INDEX IF NOT EXISTS idx_extrato_prop ON comissao_extrato_item(numero_proposta)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_lead ON crm_lead_campos(lead_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_campo ON crm_lead_campos(campo_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_etq_etq ON crm_lead_etiquetas(etiqueta_id)",
@@ -17805,6 +17878,388 @@ _CALIB_CAMPOS = [
     ('cidade_rmc', 'Cidade'), ('numero_vidas', 'Número de vidas'),
     ('composicao_familiar', 'Composição familiar'),
 ]
+
+
+# ═══════════════ EXTRATO DE COMISSAO DA AFFINITY (PDF) ═══════════════
+# A Affinity paga o que esta no relatorio dela, sempre — isso nao se discute.
+# O que o JOB precisa e saber POR QUE divergiu do calculo dele: erro nosso no
+# cadastro ou erro dela. Por isso o extrato entra como registro proprio, ao lado
+# do calculo, e NUNCA sobrescreve a proposta: sobrescrever apagaria justamente a
+# prova de que houve diferenca.
+# Duas formas de linha, porque a Affinity tem duas. Descobertas rodando o leitor
+# contra 13 extratos reais — com UM arquivo eu teria jurado que so existia a
+# primeira, e teria importado comissao errada em silencio.
+#
+# 1) tabela por operadora:  CLIENTE  dd/mm/aaaa dd/mm/aa dd/mm/aa  PROPOSTA  PARC  R$ ...
+#    O espaco antes da primeira data pode NAO EXISTIR quando o nome estoura a
+#    coluna ('...SILVA DE PAIVA22/06/2026') — por isso \s* e nao \s+.
+# 2) credito/antecipacao:   [Antecipação][Parc #1][100,00%] Prop. 1691526 - NOME - [Operadora]  R$ ...
+_EXT_DIN = r'R\$\s*(?P<%s>-?[\d.,]+)'
+_EXT_RX_ITEM = re.compile(
+    r'^(?P<cliente>.+?)\s*(?P<cadastro>\d{2}/\d{2}/\d{2,4})\s+'
+    r'(?P<assinatura>\d{2}/\d{2}/\d{2,4})\s+(?P<vigencia>\d{2}/\d{2}/\d{2,4})\s+'
+    r'(?P<proposta>\d{4,20})\s+(?P<parc>\d{1,3})\s+'
+    + (_EXT_DIN % 'vl_parcela') + r'\s+(?P<pct>[\d,]+)%\s+'
+    + (_EXT_DIN % 'bruto') + r'\s+' + (_EXT_DIN % 'taxa') + r'\s+(?P<pct_adm>[\d,]+)%\s+'
+    + (_EXT_DIN % 'desp') + r'\s+' + (_EXT_DIN % 'iss') + r'\s+' + (_EXT_DIN % 'liquido') + r'\s*$')
+
+_EXT_RX_CREDITO = re.compile(
+    r'^\[(?P<tipo>[^\]]+)\]\[Parc\s*#?(?P<parc>\d{1,3})\]\[(?P<pct>[\d,]+)%\]\s*'
+    r'Prop\.\s*(?P<proposta>\d{4,20})\s*-\s*(?P<cliente>.+?)\s*-\s*\[(?P<operadora>[^\]]+)\]\s+'
+    + (_EXT_DIN % 'bruto') + r'\s+' + (_EXT_DIN % 'taxa') + r'\s+(?P<pct_adm>[\d,]+)%\s+'
+    + (_EXT_DIN % 'desp') + r'\s+' + (_EXT_DIN % 'iss') + r'\s+' + (_EXT_DIN % 'liquido') + r'\s*$')
+
+
+def _ext_casar_item(conn, item):
+    """Acha a venda do JOB pelo NUMERO DA PROPOSTA — que e o unico campo do
+    extrato que identifica a venda sem ambiguidade. Devolve (proposta, criterio).
+
+    O cliente vem TRUNCADO no PDF ('QUANSERVICE INSTRUMENTACAO ANALITIC'), entao
+    casar por nome sozinho erraria; ele so serve pra confirmar o que o numero ja
+    disse, e como ultimo recurso."""
+    num = (item.get('numero_proposta') or '').strip()
+    if num:
+        p = conn.execute("""SELECT * FROM propostas
+                            WHERE REPLACE(REPLACE(COALESCE(numero_proposta,''),'.',''),'-','') = ?
+                              AND COALESCE(status,'') <> 'Excluída'
+                            ORDER BY id DESC LIMIT 1""", (num,)).fetchone()
+        if p:
+            return p, 'numero_proposta'
+    nome = (item.get('cliente') or '').strip()
+    if len(nome) >= 8:
+        p = conn.execute("""SELECT * FROM propostas
+                            WHERE UPPER(COALESCE(razao_social,'')) LIKE ?
+                              AND COALESCE(status,'') <> 'Excluída'
+                            ORDER BY id DESC LIMIT 2""", (nome.upper() + '%',)).fetchall()
+        if len(p) == 1:
+            return p[0], 'razao_social'
+    return None, ''
+
+
+def _ext_num(v):
+    """'R$ 3.342,19' -> 3342.19 ; '-R$ 4,00' -> -4.0"""
+    v = (v or '').replace('R$', '').strip()
+    neg = v.startswith('-')
+    v = v.lstrip('-').replace('.', '').replace(',', '.')
+    try:
+        n = float(v)
+    except ValueError:
+        return 0.0
+    return -n if neg else n
+
+
+def ler_extrato_affinity(caminho_ou_bytes, nome_arquivo=''):
+    """Le o PDF do extrato da Affinity e devolve (cabecalho, itens, avisos).
+
+    Sem IA: o PDF do SisWeb tem camada de texto, entao pdfplumber (ja instalado)
+    resolve de forma deterministica — o mesmo arquivo le igual sempre, o que
+    importa quando o resultado vira pagamento.
+
+    A CONFERENCIA e a parte que impede estrago: a soma das linhas lidas tem que
+    bater com o valor da nota fiscal impresso no proprio extrato. Rodando contra
+    13 extratos reais, foi ela que apontou os dois formatos que eu nao conhecia —
+    com um arquivo so, eu teria importado comissao pela metade sem ninguem ver."""
+    import pdfplumber
+    import io as _io
+    avisos = []
+    origem = _io.BytesIO(caminho_ou_bytes) if isinstance(caminho_ou_bytes, (bytes, bytearray)) else caminho_ou_bytes
+    with pdfplumber.open(origem) as pdf:
+        bruto = '\n'.join((p.extract_text(layout=True) or '') for p in pdf.pages)
+    linhas = [re.sub(r'\s+', ' ', l).strip() for l in bruto.split('\n')]
+    plano = '\n'.join(l for l in linhas if l)
+
+    cab = {'arquivo': (nome_arquivo or '')[:200]}
+    m = re.search(r'^(\d{4,8})\s*-\s*(.+)$', plano, re.M)
+    if m:
+        cab['cadastro_cod'] = m.group(1)
+        cab['cadastro_nome'] = m.group(2).strip()[:160]
+    for chave, rx in [('codigo_comissao', r'Código da Comissão:\s*(\d+)'),
+                      ('assistente', r'Assistente:\s*(.+)'),
+                      ('geracao', r'Geração:\s*(\d{2}/\d{2}/\d{4})'),
+                      ('previsao', r'Previsão:\s*(\d{2}/\d{2}/\d{4})')]:
+        mm = re.search(rx, plano)
+        if mm:
+            cab[chave] = mm.group(1).strip()[:120]
+    mm = re.search(r'(Nota Fiscal[^\n]*)', plano)
+    cab['nf_situacao'] = mm.group(1).strip()[:200] if mm else ''
+
+    itens, operadora = [], None
+    for l in linhas:
+        if not l:
+            continue
+        if re.search(r'\bCadastro\b.*\bProposta\b', l):
+            nome = l.split('Cadastro')[0].strip()
+            if nome:
+                operadora = nome[:120]
+            continue
+        m = _EXT_RX_ITEM.match(l)
+        if m:
+            d = m.groupdict()
+            itens.append({
+                'operadora': operadora, 'cliente': d['cliente'].strip()[:200],
+                'numero_proposta': d['proposta'], 'parcela': int(d['parc']),
+                'data_cadastro': d['cadastro'], 'data_assinatura': d['assinatura'],
+                'vigencia': d['vigencia'], 'vl_parcela': _ext_num(d['vl_parcela']),
+                'percentual': _ext_num(d['pct']), 'bruto': _ext_num(d['bruto']),
+                'taxa': _ext_num(d['taxa']), 'desp_adm': _ext_num(d['desp']),
+                'iss': _ext_num(d['iss']), 'liquido': _ext_num(d['liquido']),
+            })
+            continue
+        m = _EXT_RX_CREDITO.match(l)
+        if m:
+            d = m.groupdict()
+            itens.append({
+                'operadora': d['operadora'].strip()[:120], 'cliente': d['cliente'].strip()[:200],
+                'numero_proposta': d['proposta'], 'parcela': int(d['parc']),
+                'data_cadastro': '', 'data_assinatura': '', 'vigencia': '',
+                'vl_parcela': _ext_num(d['bruto']), 'percentual': _ext_num(d['pct']),
+                'bruto': _ext_num(d['bruto']), 'taxa': _ext_num(d['taxa']),
+                'desp_adm': _ext_num(d['desp']), 'iss': _ext_num(d['iss']),
+                'liquido': _ext_num(d['liquido']), 'tipo': d['tipo'].strip()[:40],
+            })
+
+    # Debito: a linha 'Total de Créditos e Débitos' fecha creditos MENOS debitos,
+    # entao o debito de verdade e a soma das linhas do bloco Débitos — que e onde
+    # mora a tarifa. Ler o total daria zero quando ha credito no mesmo extrato.
+    cab['debitos'] = 0.0
+    em_debitos = False
+    for l in linhas:
+        if l.startswith('Débitos'):
+            em_debitos = True
+            continue
+        if em_debitos:
+            if l.startswith('Total de') or re.search(r'\bCadastro\b.*\bProposta\b', l) or l.startswith('Créditos'):
+                em_debitos = False
+                continue
+            vals = re.findall(r'-?R\$ ?[-\d.,]+', l)
+            if vals:
+                cab['debitos'] += _ext_num(vals[-1])
+    cab['debitos'] = round(cab['debitos'], 2)
+
+    cab['total_bruto'] = round(sum(i['bruto'] for i in itens), 2)
+    cab['total_liquido'] = round(sum(i['liquido'] for i in itens), 2)
+
+    # Conferencia pelo VALOR DA NOTA FISCAL: e o unico total presente em TODOS os
+    # formatos (tabela por operadora, antecipacao, e os dois misturados).
+    impresso = None
+    mm = re.search(r'VALOR DA NOTA FISCAL:\s*R\$ ?([\d.,]+)', plano)
+    if mm:
+        impresso = _ext_num(mm.group(1))
+    else:
+        for rot in ('Total de Comissionamento das Operadoras', 'SubTotal'):
+            for l in linhas:
+                if rot in l:
+                    vals = re.findall(r'R\$ ?[\d.,]+', l)
+                    if vals:
+                        impresso = _ext_num(vals[0])
+                    break
+            if impresso is not None:
+                break
+    cab['total_impresso'] = impresso
+    if impresso is None:
+        avisos.append('Não achei o total impresso no PDF — não deu pra conferir a leitura.')
+    elif abs(impresso - cab['total_bruto']) > 0.01:
+        avisos.append(f"A soma das linhas lidas (R$ {cab['total_bruto']:.2f}) não bate com o total "
+                      f"impresso no extrato (R$ {impresso:.2f}). Alguma linha escapou do leitor.")
+    if not itens:
+        avisos.append('Nenhuma linha de venda reconhecida neste PDF.')
+    return cab, itens, avisos
+
+
+def _ext_casar_item(conn, item):
+    """Acha a venda do JOB pelo NUMERO DA PROPOSTA — o unico campo do extrato que
+    identifica a venda sem ambiguidade. Devolve (proposta, criterio).
+
+    O cliente vem truncado ('QUANSERVICE INSTRUMENTACAO ANALITIC') e as vezes com
+    CNPJ colado na frente ('53.146.159 RANIELLY...'), entao casar por nome sozinho
+    erraria: ele so serve como ultimo recurso, e mesmo assim so quando ha UM
+    candidato."""
+    num = (item.get('numero_proposta') or '').strip()
+    if num:
+        p = conn.execute("""SELECT * FROM propostas
+                            WHERE REPLACE(REPLACE(COALESCE(numero_proposta,''),'.',''),'-','') = ?
+                              AND COALESCE(status,'') <> 'Excluída'
+                            ORDER BY id DESC LIMIT 1""", (num,)).fetchone()
+        if p:
+            return p, 'numero_proposta'
+    nome = re.sub(r'^[\d.\-/]+\s*', '', (item.get('cliente') or '')).strip()
+    if len(nome) >= 10:
+        cand = conn.execute("""SELECT * FROM propostas
+                               WHERE UPPER(COALESCE(razao_social,'')) LIKE ?
+                                 AND COALESCE(status,'') <> 'Excluída'
+                               ORDER BY id DESC LIMIT 2""", (nome.upper() + '%',)).fetchall()
+        if len(cand) == 1:
+            return cand[0], 'razao_social'
+    return None, ''
+
+
+def _ext_ratear_debitos(itens, total_debitos):
+    """Rateia o debito do extrato (tarifa etc) POR CONSULTOR, em partes iguais.
+
+    Regra do Guilherme, 31/07/2026: se o extrato traz 5 empresas — 3 do
+    Guilherme, 1 do Danilo, 1 da Bianca — os R$ 4,00 saem em tres partes iguais,
+    uma por consultor. Nao por venda e nao proporcional ao valor: quem tem 3
+    vendas paga o mesmo que quem tem 1.
+
+    Item sem consultor identificado fica de fora do rateio de proposito — cobrar
+    de 'ninguem' faria a conta fechar no papel e nao no bolso de alguem."""
+    if not total_debitos:
+        return {}
+    consultores = sorted({(i.get('consultor') or '').strip() for i in itens if (i.get('consultor') or '').strip()})
+    if not consultores:
+        return {}
+    valor = abs(float(total_debitos))
+    quota = round(valor / len(consultores), 2)
+    rateio = {c: quota for c in consultores}
+    # Sobra de centavo vai pro primeiro na ordem alfabetica — some, mas some num
+    # lugar previsivel, e a soma do rateio bate exatamente com o debito.
+    resto = round(valor - quota * len(consultores), 2)
+    if resto:
+        rateio[consultores[0]] = round(rateio[consultores[0]] + resto, 2)
+    return rateio
+
+
+@app.route('/comissoes/extrato', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def comissao_extrato():
+    """Importa o extrato de comissao da Affinity (PDF) e mostra a conferencia.
+
+    O extrato E o dinheiro que entrou — a Affinity paga o que esta nele. O JOB
+    nao corrige o valor: ele mostra ONDE divergiu do calculo proprio e deixa
+    classificar se o erro foi nosso (cadastro) ou dela. Sem isso, uma diferenca
+    some no meio do mes e ninguem nunca descobre quem errou."""
+    conn = db()
+    avisos, erro = [], None
+    if request.method == 'POST':
+        arq = request.files.get('pdf')
+        if not arq or not arq.filename:
+            erro = 'Escolha o PDF do extrato.'
+        else:
+            try:
+                dados = arq.read()
+                cab, itens, avisos = ler_extrato_affinity(dados, arq.filename)
+                cod = cab.get('codigo_comissao') or ''
+                ja = conn.execute("SELECT id FROM comissao_extrato WHERE codigo_comissao=?",
+                                  (cod,)).fetchone() if cod else None
+                if ja:
+                    erro = f'Este extrato já foi importado (código {cod}).'
+                elif not itens:
+                    erro = 'Não reconheci nenhuma linha de venda neste PDF.'
+                else:
+                    cur = conn.execute("""INSERT INTO comissao_extrato
+                        (codigo_comissao, cadastro_cod, cadastro_nome, assistente, geracao, previsao,
+                         total_bruto, total_liquido, debitos, nf_situacao, arquivo, importado_por, criado_em)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (cod or None, cab.get('cadastro_cod'), cab.get('cadastro_nome'),
+                         cab.get('assistente'), cab.get('geracao'), cab.get('previsao'),
+                         cab.get('total_bruto', 0), cab.get('total_liquido', 0), cab.get('debitos', 0),
+                         cab.get('nf_situacao'), cab.get('arquivo'), session['user_id'], _agora_sp()))
+                    eid = _last_insert_id(cur)
+                    # 1) casa cada linha com a venda do JOB
+                    for it in itens:
+                        p, criterio = _ext_casar_item(conn, it)
+                        it['proposta_id'] = p['id'] if p else None
+                        it['lead_id'] = (p['lead_id'] if p and 'lead_id' in p.keys() else None)
+                        it['consultor'] = (p['consultor'] if p else '') or ''
+                        it['casou_por'] = criterio
+                        # O que o JOB esperava receber da corretora nesta venda.
+                        it['job_esperado'] = float(p['comissao_total_corretora'] or 0) if p else None
+                        if it['job_esperado'] is not None:
+                            it['divergencia'] = round(it['bruto'] - it['job_esperado'], 2)
+                        else:
+                            it['divergencia'] = None
+                        it['divergencia_motivo'] = ('sem_venda_no_job' if not p
+                                                    else ('' if abs(it['divergencia'] or 0) < 0.01 else 'a_classificar'))
+                    # 2) rateia o debito por consultor
+                    rateio = _ext_ratear_debitos(itens, cab.get('debitos', 0))
+                    quantos = {}
+                    for it in itens:
+                        quantos[it['consultor']] = quantos.get(it['consultor'], 0) + 1
+                    for it in itens:
+                        c = it['consultor']
+                        # A quota do consultor e dividida entre as vendas DELE no
+                        # extrato, pra a soma continuar batendo com o debito total.
+                        it['rateio_debito'] = round(rateio.get(c, 0) / max(1, quantos.get(c, 1)), 2) if c else 0
+                    for it in itens:
+                        conn.execute("""INSERT INTO comissao_extrato_item
+                            (extrato_id, operadora, cliente, numero_proposta, parcela, data_cadastro,
+                             data_assinatura, vigencia, vl_parcela, percentual, bruto, taxa, desp_adm,
+                             iss, liquido, proposta_id, lead_id, consultor, casou_por,
+                             job_esperado, divergencia, divergencia_motivo, rateio_debito, criado_em)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            (eid, it['operadora'], it['cliente'], it['numero_proposta'], it['parcela'],
+                             it['data_cadastro'], it['data_assinatura'], it['vigencia'],
+                             it['vl_parcela'], it['percentual'], it['bruto'], it['taxa'],
+                             it['desp_adm'], it['iss'], it['liquido'], it['proposta_id'], it['lead_id'],
+                             it['consultor'], it['casou_por'], it['job_esperado'], it['divergencia'],
+                             it['divergencia_motivo'], it['rateio_debito'], _agora_sp()))
+                    conn.commit()
+                    close_db(conn)
+                    return redirect(f'/comissoes/extrato/{eid}')
+            except Exception as e:
+                try: conn.rollback()
+                except Exception: pass
+                app.logger.exception('[EXTRATO] falha ao importar')
+                erro = f'Não consegui ler este PDF: {e}'
+    extratos = [dict(r) for r in conn.execute("""
+        SELECT e.*, (SELECT COUNT(*) FROM comissao_extrato_item i WHERE i.extrato_id = e.id) itens,
+               (SELECT COUNT(*) FROM comissao_extrato_item i WHERE i.extrato_id = e.id
+                 AND (i.proposta_id IS NULL OR i.divergencia_motivo = 'a_classificar')) pendentes
+        FROM comissao_extrato e ORDER BY e.id DESC LIMIT 100""").fetchall()]
+    close_db(conn)
+    return render_template('comissao_extrato.html', extratos=extratos, avisos=avisos, erro=erro)
+
+
+@app.route('/comissoes/extrato/<int:eid>')
+@login_required
+@admin_required
+def comissao_extrato_detalhe(eid):
+    conn = db()
+    e = conn.execute("SELECT * FROM comissao_extrato WHERE id=?", (eid,)).fetchone()
+    if not e:
+        close_db(conn); abort(404)
+    itens = [dict(r) for r in conn.execute("""
+        SELECT i.*, p.razao_social, p.consultor AS consultor_venda,
+               (SELECT chat_id FROM wa_chat_lead w WHERE w.lead_id = i.lead_id
+                 ORDER BY w.atualizado_em DESC LIMIT 1) AS chat_id
+        FROM comissao_extrato_item i
+        LEFT JOIN propostas p ON p.id = i.proposta_id
+        WHERE i.extrato_id=? ORDER BY i.id""", (eid,)).fetchall()]
+    for it in itens:
+        cid = it.get('chat_id') or ''
+        it['lid_tipo'] = 'lid' if '@lid' in cid else ('numero' if '@c.us' in cid else '')
+        it['lid_curto'] = (cid.split('@')[0][:16] + ('…' if len(cid.split('@')[0]) > 16 else '')) if cid else ''
+    # Quanto cada consultor recebe deste extrato, ja com o debito rateado.
+    por_consultor = {}
+    for it in itens:
+        c = (it.get('consultor') or '').strip() or '— sem venda no JOB —'
+        d = por_consultor.setdefault(c, {'consultor': c, 'vendas': 0, 'liquido': 0.0, 'debito': 0.0})
+        d['vendas'] += 1
+        d['liquido'] += float(it.get('liquido') or 0)
+        d['debito'] += float(it.get('rateio_debito') or 0)
+    for d in por_consultor.values():
+        d['liquido'] = round(d['liquido'], 2)
+        d['debito'] = round(d['debito'], 2)
+        d['a_pagar'] = round(d['liquido'] - d['debito'], 2)
+    close_db(conn)
+    return render_template('comissao_extrato_detalhe.html', e=dict(e), itens=itens,
+                           por_consultor=sorted(por_consultor.values(), key=lambda x: -x['liquido']))
+
+
+@app.route('/comissoes/extrato/item/<int:iid>/motivo', methods=['POST'])
+@login_required
+@admin_required
+def comissao_extrato_motivo(iid):
+    """Classifica a divergencia: erro nosso ou dela. E o unico jeito de a
+    diferenca virar aprendizado em vez de virar rotina."""
+    motivo = (request.json or {}).get('motivo', '')
+    if motivo not in ('erro_job', 'erro_affinity', 'ok', 'a_classificar'):
+        return jsonify({"ok": False, "erro": "Motivo inválido"}), 400
+    conn = db()
+    conn.execute("UPDATE comissao_extrato_item SET divergencia_motivo=? WHERE id=?", (motivo, iid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
 
 
 @app.route('/lead/<int:lid>')
