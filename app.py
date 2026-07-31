@@ -14708,11 +14708,38 @@ def ia_saude_testar():
                _st.pack('<IHHIIHH', 16, 1, 1, taxa, taxa * 2, 2, 16) +
                b'data' + _st.pack('<I', len(dados)))
         wav = _b64.b64encode(cab + dados).decode('ascii')
-        try:
-            _transcrever_audio(wav, 'audio/wav')
-            res['transcricao'] = 'testado'
-        except Exception as e:
-            res['transcricao'] = str(e)[:200]
+        # Bate em CADA provedor separadamente. Usar _transcrever_audio testaria só a
+        # Groq: ela é a primária e, dando certo, a OpenAI (reserva) nunca é
+        # chamada — o registro dela envelhecia e a tela mostrava 'erro' de um
+        # teste antigo, num provedor que ninguém sabia se estava de pé.
+        import base64 as _b64d
+        raw = _b64d.b64decode(wav)
+        provs = [
+            ('groq', 'https://api.groq.com/openai/v1/audio/transcriptions',
+             (os.environ.get('GROQ_API_KEY') or '').strip(),
+             os.environ.get('GROQ_TRANSCRICAO_MODELO', 'whisper-large-v3-turbo')),
+            ('openai', 'https://api.openai.com/v1/audio/transcriptions',
+             (os.environ.get('OPENAI_API_KEY') or '').strip(),
+             os.environ.get('OPENAI_TRANSCRICAO_MODELO', 'whisper-1')),
+        ]
+        for nome, url, chave, modelo in provs:
+            if not chave:
+                res[nome] = 'sem chave'
+                continue
+            try:
+                rr = _requests.post(url, headers={'Authorization': f'Bearer {chave}'},
+                                    files={'file': ('teste.wav', raw, 'audio/wav')},
+                                    data={'model': modelo, 'language': 'pt'}, timeout=40)
+                if rr.status_code == 200:
+                    ia_registrar(nome, True)
+                    res[nome] = 'ok'
+                else:
+                    ia_registrar(nome, False, rr.status_code, rr.text[:400])
+                    st, det = _ia_classificar(rr.status_code, rr.text[:400])
+                    res[nome] = 'ok' if st == 'ok' else det
+            except Exception as e:
+                ia_registrar(nome, False, None, str(e)[:400])
+                res[nome] = str(e)[:160]
     if alvo in ('claude', ''):
         try:
             import anthropic
