@@ -14667,16 +14667,31 @@ def api_whatsapp_estado():
 # padrão do _importar_leads_automatico) e confirma depois de mandar.
 _WA_FILA_GATE_SEGUNDOS = int(os.environ.get('WA_FILA_GATE_SEGUNDOS', '12'))
 _WA_FILA_GATE_MAX = int(os.environ.get('WA_FILA_GATE_MAX', '45'))
+# MESMA CONVERSA e outro risco. O gate acima existe pra proteger o numero de
+# quem dispara pra MUITA GENTE em sequencia — e ai ele e essencial. Mandar 5
+# mensagens seguidas pra UMA pessoa que acabou de falar com voce nao e disparo em
+# massa: e o que qualquer humano faz. Segurar o funil de um lead so por 45s entre
+# passos nao protege nada e faz a ferramenta parecer quebrada.
+_WA_FILA_GATE_MESMO_MIN = int(os.environ.get('WA_FILA_GATE_MESMO_MIN', '3'))
+_WA_FILA_GATE_MESMO_MAX = int(os.environ.get('WA_FILA_GATE_MESMO_MAX', '8'))
 _WA_FILA_RECLAIM_MINUTOS = 3
 _WA_FILA_MAX_TENTATIVAS = 3
 
 
-def _wa_gate_atual():
+def _wa_gate_atual(mesma_conversa=False):
     """Intervalo mínimo ATÉ o próximo envio do mesmo consultor — sorteado a cada
-    consulta entre GATE e GATE_MAX. Aleatório de propósito: envio de X em X segundos
-    cravado é padrão de robô e queima número; intervalo quebrado parece humano."""
+    consulta. Aleatório de propósito: envio de X em X segundos cravado é padrão de
+    robô e queima número; intervalo quebrado parece humano.
+
+    Duas faixas, porque são dois riscos diferentes: falar com MUITA GENTE em
+    sequência é o que dispara bloqueio, e continua com o intervalo longo. Mandar
+    a próxima mensagem para a MESMA conversa é conversa normal — intervalo curto.
+    """
     import random as _rnd
-    lo, hi = _WA_FILA_GATE_SEGUNDOS, max(_WA_FILA_GATE_SEGUNDOS, _WA_FILA_GATE_MAX)
+    if mesma_conversa:
+        lo, hi = _WA_FILA_GATE_MESMO_MIN, max(_WA_FILA_GATE_MESMO_MIN, _WA_FILA_GATE_MESMO_MAX)
+    else:
+        lo, hi = _WA_FILA_GATE_SEGUNDOS, max(_WA_FILA_GATE_SEGUNDOS, _WA_FILA_GATE_MAX)
     return _rnd.uniform(lo, hi)
 
 
@@ -14759,11 +14774,20 @@ def api_whatsapp_fila_proximo():
     if not usuario_id:
         return _wa_cors(jsonify({"ok": True, "item": None}))
     conn = db()
-    ultimo = conn.execute("""SELECT MAX(enviado_em) m FROM whatsapp_extensao_fila
-        WHERE responsavel_id=? AND status='enviado'""", (usuario_id,)).fetchone()
-    if ultimo and ultimo['m']:
-        decorrido = _wa_segundos_desde(ultimo['m'])
-        gate = _wa_gate_atual()
+    # Precisa saber PRA QUEM foi a ultima e pra quem vai a proxima: o intervalo
+    # curto so vale quando e a mesma conversa.
+    ultimo = conn.execute("""SELECT enviado_em, chat_id FROM whatsapp_extensao_fila
+        WHERE responsavel_id=? AND status='enviado' AND enviado_em IS NOT NULL
+        ORDER BY enviado_em DESC LIMIT 1""", (usuario_id,)).fetchone()
+    if ultimo and ultimo['enviado_em']:
+        decorrido = _wa_segundos_desde(ultimo['enviado_em'])
+        proximo = conn.execute("""SELECT chat_id FROM whatsapp_extensao_fila
+            WHERE responsavel_id=? AND status='pendente'
+              AND (liberar_em IS NULL OR CAST(liberar_em AS TEXT) <= ?)
+            ORDER BY id LIMIT 1""",
+            (usuario_id, datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S'))).fetchone()
+        mesma = bool(proximo and proximo['chat_id'] and proximo['chat_id'] == ultimo['chat_id'])
+        gate = _wa_gate_atual(mesma)
         if decorrido is not None and decorrido < gate:
             close_db(conn)
             # DIZ QUANTO FALTA. Sem isso a extensao so perguntava de 20 em 20

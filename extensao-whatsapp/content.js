@@ -2090,6 +2090,27 @@
     });
   }
 
+  // Mesmo relogio do card do CRM, no mesmo formato — pra os dois lugares
+  // contarem a mesma coisa do mesmo jeito.
+  function _cronFichaTexto(segs) {
+    const d = Math.floor(segs / 86400), h = Math.floor(segs / 3600) % 24;
+    const m = Math.floor(segs / 60) % 60, s2 = Math.floor(segs) % 60;
+    const dd = (n) => String(n).padStart(2, '0');
+    if (d > 0) return d + 'd ' + dd(h) + ':' + dd(m);
+    if (h > 0) return h + ':' + dd(m) + ':' + dd(s2);
+    return dd(m) + ':' + dd(s2);
+  }
+  function _tickCronFicha() {
+    const el = document.getElementById('job-cron-ss');
+    if (!el || !el.dataset.desde) return;
+    const segs = Math.max(0, Date.now() / 1000 - parseInt(el.dataset.desde, 10));
+    el.textContent = _cronFichaTexto(segs);
+    el.classList.remove('morno', 'parado');
+    if (segs >= 432000) el.classList.add('parado');
+    else if (segs >= 86400) el.classList.add('morno');
+  }
+  _registrarLoop(setInterval(_tickCronFicha, 1000));
+
   function _renderFicha(aba) {
     const f = _ficha, l = f.lead || {};
     const etapaAtual = (f.etapas || []).find((e) => e.id === l.etapa);
@@ -2152,7 +2173,15 @@
       // achando que só estava mudando de etapa (o quadro do lead vem da etapa).
       '<div class="job-ficha-campo"><label>Etapa</label>' +
         '<select data-ficha="etapa">' + _fichaOpcoesEtapa(f, l) + '</select></div>' +
-      '<div class="job-ficha-campo"><label>Sub-status <span class="job-ficha-dica">o que falta pra avançar</span></label>' +
+      // CRONOMETRO junto do sub-status, igual ao card do CRM. Aqui e onde o
+      // consultor decide o que fazer com o lead: saber HA QUANTO TEMPO ele esta
+      // parado no mesmo passo muda a decisao, e antes esse tempo so existia no
+      // site. Sem sub-status escolhido nao ha o que cronometrar.
+      '<div class="job-ficha-campo"><label>Sub-status <span class="job-ficha-dica">o que falta pra avançar</span>' +
+        ((l.sub_status && f.saude && f.saude.desde_ts)
+          ? '<span class="job-ficha-cron" id="job-cron-ss" data-desde="' + f.saude.desde_ts + '">' +
+            esc(f.saude.idade_txt || '') + '</span>' : '') +
+        '</label>' +
         '<select data-ficha="sub_status">' +
           '<option value="">Sem sub-status</option>' +
           (f.sub_status_etapa || []).map((o) => '<option value="' + esc(o) + '"' +
@@ -2345,7 +2374,16 @@
     document.querySelectorAll('.job-ficha [data-ficha]').forEach((el) => {
       const k = el.dataset.ficha;
       if (k === 'etapa') _fichaPend.etapa = el.value;
-      else if (k === 'sub_status') _fichaPend.sub_status = el.value;
+      else if (k === 'sub_status') {
+        _fichaPend.sub_status = el.value;
+        // Zera na hora, igual ao card: o consultor acabou de mexer, o tempo
+        // volta pro zero na frente dele em vez de esperar o proximo carregamento.
+        const c = document.getElementById('job-cron-ss');
+        if (c) {
+          if (el.value) { c.dataset.desde = Math.floor(Date.now() / 1000); c.textContent = '00:00'; c.className = 'job-ficha-cron'; }
+          else { c.remove(); }
+        }
+      }
       else _fichaPend.base[k] = el.value;
     });
     document.querySelectorAll('.job-ficha [data-campo]').forEach((el) => {
