@@ -1487,12 +1487,11 @@
       _campoTxt('email', 'E-mail', _pend('base', 'email', l.email || '')) +
       _campoTxt('valor_estimado', 'Valor estimado', _pend('base', 'valor_estimado',
         l.valor_estimado != null ? String(l.valor_estimado).replace('.', ',') : '')) +
+      // Agrupado por quadro: a lista vem com as etapas de TODOS os funis, e sem
+      // dizer de qual era cada uma o consultor tirava o lead do kanban comercial
+      // achando que só estava mudando de etapa (o quadro do lead vem da etapa).
       '<div class="job-ficha-campo"><label>Etapa</label>' +
-        '<select data-ficha="etapa">' +
-          (f.etapas || []).map((e) => '<option value="' + esc(e.id) + '"' +
-            (e.id === (_fichaPend.etapa || l.etapa) ? ' selected' : '') +
-            '>' + esc(e.nome) + '</option>').join('') +
-        '</select></div>' +
+        '<select data-ficha="etapa">' + _fichaOpcoesEtapa(f, l) + '</select></div>' +
       '<div class="job-ficha-campo"><label>Sub-status <span class="job-ficha-dica">o que falta pra avançar</span></label>' +
         '<select data-ficha="sub_status">' +
           '<option value="">Sem sub-status</option>' +
@@ -1511,6 +1510,27 @@
               esc(e.nome) + '</label>';
           }).join('') +
         '</div></div>';
+  }
+
+  function _fichaOpcoesEtapa(f, l) {
+    const sel = _fichaPend.etapa || l.etapa;
+    const opt = (e) => '<option value="' + esc(e.id) + '"' +
+      (e.id === sel ? ' selected' : '') + '>' + esc(e.nome) + '</option>';
+    const quadros = f.quadros || [];
+    if (quadros.length < 2) return (f.etapas || []).map(opt).join('');
+    let html = '';
+    quadros.forEach((q) => {
+      const doQuadro = (f.etapas || []).filter((e) => (e.quadro || 'comercial') === q.slug);
+      if (doQuadro.length) {
+        html += '<optgroup label="' + esc(q.nome) + '">' + doQuadro.map(opt).join('') + '</optgroup>';
+      }
+    });
+    // Etapa que não pertence a quadro nenhum não pode sumir do select, senão o
+    // lead seria movido sozinho ao salvar.
+    const soltas = (f.etapas || []).filter((e) =>
+      !quadros.some((q) => q.slug === (e.quadro || 'comercial')));
+    if (soltas.length) html += '<optgroup label="Sem quadro">' + soltas.map(opt).join('') + '</optgroup>';
+    return html;
   }
 
   function _fichaAbaQualif(f) {

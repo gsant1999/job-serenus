@@ -527,6 +527,14 @@
                       onchange="salvarCampoCard({{ lead.id }}, '{{ c.chave }}', this)">
                 <option value="">— escolha —</option>
                 {% for o in c.opcoes %}<option value="{{ o }}" {% if vals.get(c.chave) == o %}selected{% endif %}>{{ o }}</option>{% endfor %}
+                {# Valor gravado que não está na lista — é o caso do motivo de perda
+                   herdado da coluna antiga, que era texto livre. Sem esta opção o
+                   select mostrava "— escolha —" enquanto o cabeçalho, calculado no
+                   servidor, dizia "Liberado pra mover" em verde: a tela se
+                   contradizendo, e o valor sumindo no Salvar seguinte. #}
+                {% if vals.get(c.chave) and vals.get(c.chave) not in c.opcoes %}
+                <option value="{{ vals.get(c.chave) }}" selected>{{ vals.get(c.chave) }} (fora da lista)</option>
+                {% endif %}
               </select>
               {% else %}
               <input type="date" class="lead-trava-sel{{ '' if vals.get(c.chave) else ' vazio' }}"

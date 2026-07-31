@@ -14546,6 +14546,10 @@ def api_whatsapp_lead_ficha():
             achado = _buscar_lead_por_telefone(conn, tel)
             lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (achado['id'],)).fetchone() if achado else None
         etapas = [dict(e) for e in carregar_etapas_crm(conn)]
+        # Os quadros vão junto: sem eles a extensão listava as etapas de TODOS os
+        # funis sem dizer de qual era cada uma, e o consultor tirava o lead do
+        # kanban comercial achando que só estava mudando de etapa.
+        quadros_lista = carregar_quadros_crm(conn)
         etiquetas_todas = carregar_etiquetas_crm(conn)
         campos_def = carregar_campos_crm(conn)
         if not lead:
@@ -14554,7 +14558,8 @@ def api_whatsapp_lead_ficha():
             # com etapa/etiquetas prontas, sem uma segunda ida ao servidor.
             return _wa_cors(jsonify({
                 "ok": True, "existe": False, "telefone_norm": tel,
-                "etapas": etapas, "etiquetas_todas": etiquetas_todas,
+                "etapas": etapas, "quadros": quadros_lista,
+                "etiquetas_todas": etiquetas_todas,
                 "campos_def": campos_def, "origens": _WA_ORIGENS_LEAD}))
         lead_d = dict(lead)
         resp_nome = ''
@@ -14571,6 +14576,7 @@ def api_whatsapp_lead_ficha():
             "lead": lead_d,
             "responsavel_nome": resp_nome,
             "etapas": etapas,
+            "quadros": quadros_lista,
             "sub_status_etapa": _sub_status_por_etapa(conn).get(lead['etapa'] or '', []),
             "campos_def": campos_def,
             "campos_val": valores_campos_lead(conn, lead, campos_def),
@@ -14657,7 +14663,13 @@ def api_whatsapp_lead_salvar():
                 v = float(bruto) if bruto else None
             except ValueError:
                 v = None
-            sets.append("valor_estimado=?"); vals.append(v); mudancas.append('valor')
+            # Só grava se MUDOU. Antes entrava em toda gravação: `mudancas` nunca
+            # ficava vazio, então todo save inseria uma atividade 'edicao' falsa no
+            # histórico e o painel dizia "Salvo: valor" sem nada ter mudado. Pior:
+            # campo em branco virava None e apagava o valor que existia.
+            atual = lead['valor_estimado'] if 'valor_estimado' in lead.keys() else None
+            if (v is None) != (atual is None) or (v is not None and float(v) != float(atual or 0)):
+                sets.append("valor_estimado=?"); vals.append(v); mudancas.append('valor')
         if sets:
             conn.execute(f"UPDATE crm_leads SET {', '.join(sets)}, atualizado_em=? WHERE id=?",
                          vals + [_agora_sp(), lid])
@@ -19929,15 +19941,28 @@ def crm_etapa_excluir(slug):
     total = conn.execute("SELECT COUNT(*) c FROM crm_etapas WHERE ativo=1").fetchone()['c']
     if total <= 1:
         close_db(conn); return jsonify({"ok": False, "erro": "Não é possível excluir a última etapa"}), 400
-    # Move leads dessa etapa para a primeira etapa restante
+    # Move os leads pra primeira etapa restante DO MESMO QUADRO. A consulta antiga
+    # não filtrava por quadro (é anterior aos múltiplos kanbans): apagar uma etapa
+    # da Nutrição empurrava os leads dela pro 'Novo Lead' do Comercial — o lead
+    # trocava de funil sem ninguém pedir. Só cai em outro quadro se o de origem
+    # ficou sem etapa nenhuma, e a resposta diz isso.
+    quadro_et = (et['quadro_slug'] if 'quadro_slug' in et.keys() else '') or 'comercial'
     restante = conn.execute(
-        "SELECT slug FROM crm_etapas WHERE ativo=1 AND slug<>? ORDER BY ordem, id LIMIT 1", (slug,)
-    ).fetchone()
+        """SELECT slug FROM crm_etapas WHERE ativo=1 AND slug<>?
+           AND COALESCE(NULLIF(quadro_slug,''),'comercial')=? ORDER BY ordem, id LIMIT 1""",
+        (slug, quadro_et)).fetchone()
+    trocou_de_quadro = False
+    if not restante:
+        restante = conn.execute(
+            "SELECT slug FROM crm_etapas WHERE ativo=1 AND slug<>? ORDER BY ordem, id LIMIT 1", (slug,)
+        ).fetchone()
+        trocou_de_quadro = bool(restante)
     destino = restante['slug'] if restante else 'lead_novo'
     conn.execute("UPDATE crm_leads SET etapa=? WHERE etapa=?", (destino, slug))
     conn.execute("DELETE FROM crm_etapas WHERE slug=?", (slug,))
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "leads_movidos_para": destino})
+    return jsonify({"ok": True, "leads_movidos_para": destino,
+                    "trocou_de_quadro": trocou_de_quadro})
 
 
 @app.route('/crm/etapas/reordenar', methods=['POST'])
@@ -20210,6 +20235,18 @@ def crm_lead_campos_salvar(lid):
     return jsonify({"ok": True, "campos_val": vals, "cnpj": puxou_cnpj, "mudou": mudou})
 
 
+def _data_para_iso(v):
+    """dd/mm/aaaa ou yyyy-mm-dd -> yyyy-mm-dd. Vazio se não reconhecer: meia-data
+    num campo de data é pior que campo em branco."""
+    t = str(v or '').strip()
+    m = re.match(r'^(\d{2})/(\d{2})/(\d{4})$', t)
+    if m:
+        return f"{m.group(3)}-{m.group(2)}-{m.group(1)}"
+    if re.match(r'^\d{4}-\d{2}-\d{2}', t):
+        return t[:10]
+    return ''
+
+
 def _preencher_campos_por_cnpj(conn, lid, cnpj):
     """Ponte com a consulta de CNPJ que já existe (BrasilAPI, com cache de 30 dias):
     o consultor digita o CNPJ e a data de abertura + razão social chegam sozinhas.
@@ -20221,9 +20258,12 @@ def _preencher_campos_por_cnpj(conn, lid, cnpj):
         return None
     if not dados:
         return None
-    # A chave é data_abertura e já vem em dd/mm/aaaa — _consultar_cnpj normaliza
-    # as duas APIs (BrasilAPI e ReceitaWS) pro mesmo formato.
-    abertura = (dados.get('data_abertura') or '').strip()
+    # As duas APIs devolvem formatos DIFERENTES — o comentário anterior afirmava o
+    # contrário e estava errado: BrasilAPI manda ISO (2019-03-12) e ReceitaWS manda
+    # dd/mm/aaaa. O campo é tipo 'data', renderizado como <input type="date">, que
+    # descarta qualquer coisa fora de yyyy-mm-dd: o valor sumia da tela e o Salvar
+    # seguinte gravava vazio por cima do que a API tinha trazido.
+    abertura = _data_para_iso(dados.get('data_abertura'))
     if abertura:
         gravar_campo_lead(conn, lid, 'cnpj_data_abertura', abertura, fonte='api_cnpj', so_se_vazio=True)
     return {'nome': dados.get('nome') or '', 'abertura': abertura,
