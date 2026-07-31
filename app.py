@@ -2275,6 +2275,11 @@ def init_db():
         # card ficava verde só porque alguém mexeu num campo. A cor tem que
         # responder a avanço real no funil.
         ("crm_leads", "avancou_em", "TEXT"),
+        # QUEM INDICOU: quando a origem é Indicação, aponta pro LEAD que indicou.
+        # Guardar o id (e não o nome digitado) é o que permite responder "quantas
+        # vendas o fulano já me trouxe" — com nome solto isso nunca fecha conta.
+        ("crm_leads", "indicado_por_lead_id", "INTEGER"),
+        ("crm_leads", "indicado_por_nome", "TEXT"),
         # PROCEDÊNCIA do valor de campo personalizado. A IA pode escrever por cima
         # do que uma pessoa digitou — o que torna isso seguro é ficar rastreado:
         #   ia            IA preencheu, ninguém revisou
@@ -6190,6 +6195,8 @@ def salvar_proposta():
         try:
             _lid, _crit = vincular_proposta_lead(conn, proposta_id,
                                                  lead_id_certo=(request.form.get('lead_id_origem') or None))
+            if not _lid:
+                app.logger.info(f"[VINCULO] proposta {proposta_id} SEM lead ({_crit})")
             if _lid:
                 app.logger.info(f"[VINCULO] proposta {proposta_id} -> lead {_lid} ({_crit})")
         except Exception as _e:
@@ -14467,6 +14474,179 @@ def api_whatsapp_lead_criar():
     return _wa_cors(jsonify({"ok": True, "ja_existia": False, "lead_id": lead_id}))
 
 
+# ─── VENDA PRECISA DE LEAD ────────────────────────────────────────────────────
+@app.route('/proposta/checar-lead', methods=['POST'])
+@login_required
+def proposta_checar_lead():
+    """Antes de gravar a venda, diz se ela tem lead. Se não tiver, devolve o que
+    seria preciso pra criar um na hora — em vez de só barrar o consultor no meio
+    do cadastro. Metade das vendas hoje entra fora do funil (25 de 48), e venda
+    sem lead é venda sem origem de mídia e sem retorno pro Google Ads."""
+    d = request.json or {}
+    lead_id = d.get('lead_id_origem')
+    conn = db()
+    if lead_id:
+        r = conn.execute("SELECT id, nome FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+        if r:
+            close_db(conn)
+            return jsonify({"ok": True, "tem_lead": True, "lead": dict(r), "criterio": "informado"})
+    # Sem id explícito: tenta achar pelos mesmos critérios do vínculo (CNPJ, depois
+    # telefone), pra não obrigar a criar um lead que já existe.
+    falso = {'cnpj': (d.get('cnpj') or ''), 'tel_resp_contrato': (d.get('tel_resp_contrato') or ''),
+             'tel_resp_negociacao': (d.get('tel_resp_negociacao') or '')}
+    class _P(dict):
+        def keys(self): return list(super().keys())
+    achado, criterio = achar_lead_da_proposta(conn, _P(falso))
+    if achado:
+        r = conn.execute("SELECT id, nome FROM crm_leads WHERE id=?", (achado,)).fetchone()
+        close_db(conn)
+        return jsonify({"ok": True, "tem_lead": True, "lead": dict(r) if r else None, "criterio": criterio})
+    close_db(conn)
+    return jsonify({"ok": True, "tem_lead": False, "criterio": criterio,
+                    "sugestao": {"nome": (d.get('razao_social') or d.get('resp_contrato') or ''),
+                                 "telefone": (d.get('tel_resp_contrato') or d.get('tel_resp_negociacao') or ''),
+                                 "email": (d.get('email_resp_contrato') or ''),
+                                 "cnpj": (d.get('cnpj') or '')},
+                    "origens": _WA_ORIGENS_LEAD})
+
+
+@app.route('/proposta/criar-lead', methods=['POST'])
+@login_required
+def proposta_criar_lead():
+    """Cria o lead ali mesmo, com o que o consultor já digitou na proposta. É a
+    saída da trava: em vez de 'você não pode cadastrar', vira 'um clique e a venda
+    nasce ligada'."""
+    d = request.json or {}
+    nome = (d.get('nome') or '').strip()[:120]
+    telefone = (d.get('telefone') or '').strip()
+    if not nome:
+        return jsonify({"ok": False, "erro": "Nome é obrigatório"}), 400
+    tel_norm = _normalizar_telefone(telefone)
+    conn = db()
+    if tel_norm:
+        ja = _buscar_lead_por_telefone(conn, tel_norm)
+        if ja:
+            close_db(conn)
+            return jsonify({"ok": True, "lead_id": ja['id'], "nome": ja['nome'], "ja_existia": True})
+    origem = (d.get('origem') or 'manual')
+    if origem not in _WA_ORIGENS_LEAD:
+        origem = 'manual'
+    etapas = [e['id'] for e in carregar_etapas_crm(conn)]
+    # Nasce como venda fechada: a proposta está sendo cadastrada agora, então
+    # colocar em 'Novo Lead' criaria um card falso no topo do funil.
+    etapa = 'venda_fechada' if 'venda_fechada' in etapas else (etapas[0] if etapas else 'lead_novo')
+    # _last_insert_id PRECISA do cursor deste INSERT — passar outro devolve o id
+    # errado (ou None). Já errei isso nesta mesma base.
+    cur = conn.execute("""INSERT INTO crm_leads (nome, telefone, telefone_norm, email, empresa, origem,
+                    etapa, responsavel_id, criado_em, atualizado_em, avancou_em,
+                    indicado_por_lead_id, indicado_por_nome, qual_cnpj)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 (nome, telefone or None, tel_norm or None, (d.get('email') or '').strip() or None,
+                  (d.get('empresa') or '').strip() or None, origem, etapa, session['user_id'],
+                  _agora_sp(), _agora_sp(), _agora_sp(),
+                  (int(d['indicado_por_lead_id']) if str(d.get('indicado_por_lead_id') or '').isdigit() else None),
+                  (d.get('indicado_por_nome') or '').strip()[:120] or None,
+                  (d.get('cnpj') or '').strip() or None))
+    lid = _last_insert_id(cur)
+    if not lid:
+        lid = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=? OR nome=? ORDER BY id DESC LIMIT 1",
+                           (tel_norm or '', nome)).fetchone()['id']
+    conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                    VALUES (?,?,?,?,?)""",
+                 (lid, session.get('nome'), 'edicao', 'Lead criado no cadastro da proposta', _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "lead_id": lid, "nome": nome, "ja_existia": False})
+
+
+# ─── INDICAÇÃO: QUEM TROUXE QUEM ──────────────────────────────────────────────
+@app.route('/crm/leads/buscar')
+@login_required
+def crm_leads_buscar():
+    """Busca leads por nome ou telefone, pra escolher quem indicou. Devolve pouco
+    de propósito: é um seletor, não uma listagem."""
+    q = (request.args.get('q') or '').strip()
+    excluir = request.args.get('excluir', type=int)
+    if len(q) < 2:
+        return jsonify({"ok": True, "leads": []})
+    conn = db()
+    tel = _normalizar_telefone(q)
+    like = f'%{q.lower()}%'
+    sql = """SELECT l.id, l.nome, l.telefone, l.etapa, u.nome resp
+             FROM crm_leads l LEFT JOIN usuarios u ON u.id = l.responsavel_id
+             WHERE (LOWER(l.nome) LIKE ? OR l.telefone_norm LIKE ?)"""
+    p = [like, ('%' + tel) if tel else '%__nada__%']
+    if excluir:
+        sql += " AND l.id <> ?"
+        p.append(excluir)
+    rows = conn.execute(sql + " ORDER BY l.atualizado_em DESC LIMIT 12", p).fetchall()
+    close_db(conn)
+    return jsonify({"ok": True, "leads": [dict(r) for r in rows]})
+
+
+@app.route('/crm/lead/<int:lid>/indicacao', methods=['POST'])
+@login_required
+def crm_lead_indicacao(lid):
+    """Liga este lead a quem o indicou. Aceita o id de outro lead (o caso bom) ou
+    só um nome, quando quem indicou não é lead do CRM (um parceiro, um cliente
+    antigo). O nome sozinho não fecha conta, mas é melhor que perder a informação."""
+    d = request.json or {}
+    conn = db()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    ind_id = d.get('indicado_por_lead_id')
+    nome = (d.get('indicado_por_nome') or '').strip()[:120]
+    try:
+        ind_id = int(ind_id) if ind_id else None
+    except (TypeError, ValueError):
+        ind_id = None
+    if ind_id == lid:
+        close_db(conn); return jsonify({"ok": False, "erro": "Um lead não pode indicar a si mesmo"}), 400
+    if ind_id:
+        ref = conn.execute("SELECT nome FROM crm_leads WHERE id=?", (ind_id,)).fetchone()
+        if not ref:
+            close_db(conn); return jsonify({"ok": False, "erro": "Quem indicou não foi encontrado"}), 404
+        # Ciclo simples (A indica B, B indica A) não quebra nada hoje, mas embaralha
+        # qualquer contagem de "quantos o fulano trouxe" — recusa e explica.
+        volta = conn.execute("SELECT indicado_por_lead_id FROM crm_leads WHERE id=?", (ind_id,)).fetchone()
+        if volta and volta['indicado_por_lead_id'] == lid:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": "Esses dois já se indicam mutuamente"}), 400
+        nome = nome or (ref['nome'] or '')
+    conn.execute("""UPDATE crm_leads SET indicado_por_lead_id=?, indicado_por_nome=?,
+                    origem=CASE WHEN COALESCE(origem,'')='' OR origem='manual' THEN 'Indicação' ELSE origem END,
+                    atualizado_em=? WHERE id=?""",
+                 (ind_id, nome or None, _agora_sp(), lid))
+    conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                    VALUES (?,?,?,?,?)""",
+                 (lid, session.get('nome'), 'edicao',
+                  ('Indicado por: ' + (nome or f'lead #{ind_id}')) if (ind_id or nome) else 'Indicação removida',
+                  _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "indicado_por_lead_id": ind_id, "indicado_por_nome": nome})
+
+
+def indicacoes_do_lead(conn, lid):
+    """Quem este lead indicou, e o que já virou venda. É a conta que transforma
+    'indicação' de origem solta em canal com resultado medido."""
+    try:
+        rows = conn.execute("""SELECT l.id, l.nome, l.etapa, p.id prop_id, p.razao_social,
+                                      p.comissao_total_corretora com
+                               FROM crm_leads l
+                               LEFT JOIN propostas p ON p.lead_id = l.id
+                                    AND p.status_operacional='Emitida/Ativa'
+                                    AND COALESCE(p.estornada,0)=0 AND COALESCE(p.status,'')<>'Excluída'
+                               WHERE l.indicado_por_lead_id=? ORDER BY l.criado_em DESC""", (lid,)).fetchall()
+    except Exception:
+        return {'indicados': [], 'vendas': 0, 'comissao': 0.0}
+    ind = [dict(r) for r in rows]
+    return {'indicados': ind,
+            'vendas': sum(1 for r in ind if r.get('prop_id')),
+            'comissao': sum(float(r.get('com') or 0) for r in ind if r.get('prop_id'))}
+
+
 # ─── VARREDURA DIÁRIA: O QUE VALE ANALISAR ────────────────────────────────────
 # CONTRATO (a extensão pergunta antes de subir qualquer conversa):
 #
@@ -16804,6 +16984,11 @@ def crm_lead_detalhe(lid):
     campos_val = valores_campos_lead(conn, lead, campos_def)
     # Calculado ANTES do close_db — a conexão já está fechada quando o jsonify roda.
     campos_faltando = campos_faltando_pra_sair(conn, lead, campos_def)
+    indicou = indicacoes_do_lead(conn, lid)
+    ind_por = None
+    if lead['indicado_por_lead_id'] if 'indicado_por_lead_id' in lead.keys() else None:
+        r = conn.execute("SELECT id, nome FROM crm_leads WHERE id=?", (lead['indicado_por_lead_id'],)).fetchone()
+        ind_por = dict(r) if r else None
     etiquetas_todas = carregar_etiquetas_crm(conn)
     _do_lead = _etiquetas_dos_leads(conn, [lid]).get(lid, [])
     etiquetas_marcadas = [e['id'] for e in _do_lead]
@@ -16821,6 +17006,8 @@ def crm_lead_detalhe(lid):
         "campos_def": campos_def,
         "campos_val": campos_val,
         "campos_faltando": campos_faltando,
+        "indicado_por": ind_por,
+        "indicou": indicou,
         "etiquetas_todas": etiquetas_todas,
         "etiquetas_marcadas": etiquetas_marcadas,
         "sub_status_etapa": sub_status_desta_etapa

@@ -1282,16 +1282,18 @@
     if (!main) return;
     const area = main.getBoundingClientRect();
     const vistos = new Set();
-    TR.cache.forEach((texto, id) => {
-      // O data-id do WhatsApp tem @ e . ('false_5519...@c.us_ABC') — sem escapar,
-      // o seletor quebra. Guarda e chamada pelo MESMO caminho (window.CSS), senão
-      // o guard passa e a chamada estoura onde CSS não é global.
-      const idSeguro = (window.CSS && window.CSS.escape) ? window.CSS.escape(id) : id;
-      const linha = main.querySelector('[data-id="' + idSeguro + '"]');
-      if (!linha) return;
+    // UMA varredura das linhas que existem no DOM agora, e pra cada uma vê se
+    // temos transcrição. A versão anterior fazia o contrário — um querySelector
+    // por item do cache — o que com centenas de áudios transcritos custava
+    // centenas de buscas POR QUADRO e travava o carregamento do WhatsApp.
+    // A lista é virtualizada: as linhas no DOM são poucas dezenas, sempre.
+    const linhas = main.querySelectorAll('[data-id]');
+    for (const linha of linhas) {
+      const id = linha.getAttribute('data-id') || '';
+      if (!id || !TR.cache.has(id)) continue;
       const r = linha.getBoundingClientRect();
-      // Fora da área visível da conversa: não desenha (e remove se existia).
-      if (r.bottom < area.top - 40 || r.top > area.bottom + 40) return;
+      if (r.bottom < area.top - 40 || r.top > area.bottom + 40) continue;
+      const texto = TR.cache.get(id);
       vistos.add(id);
       let chip = TR.chips.get(id);
       if (!chip) {
@@ -1306,23 +1308,19 @@
         TR.chips.set(id, chip);
       }
       const aberta = TR.abertas.has(id);
-      const carregando = !TR.cache.has(id) || texto === undefined;
       chip.classList.toggle('aberta', aberta);
-      chip.classList.toggle('carregando', carregando);
       chip.classList.toggle('vazia', texto === '');
       const rotulo = texto === '' ? 'Não deu pra transcrever este áudio'
                    : (aberta ? texto : (texto || '').slice(0, 46) + ((texto || '').length > 46 ? '…' : ''));
-      chip.innerHTML = '<span class="job-tr-seta">' + (aberta ? '▾' : '▸') + '</span>' +
+      const novoHtml = '<span class="job-tr-seta">' + (aberta ? '▾' : '▸') + '</span>' +
                        '<span class="job-tr-txt">' + esc(rotulo) + '</span>';
-      // Ancorada na base da bolha, alinhada com ela. Largura limitada à da bolha
-      // pra não invadir o outro lado da conversa.
+      // Só reescreve o HTML se mudou: innerHTML a cada quadro força reflow à toa.
+      if (chip._html !== novoHtml) { chip.innerHTML = novoHtml; chip._html = novoHtml; }
       const larg = Math.max(150, Math.min(r.width, 420));
       chip.style.width = larg + 'px';
       chip.style.left = Math.round(r.left) + 'px';
       chip.style.top = Math.round(r.bottom - 4) + 'px';
-      chip.style.display = '';
-    });
-    // Some com as etiquetas de áudios que saíram da tela
+    }
     TR.chips.forEach((el, id) => {
       if (!vistos.has(id)) { el.remove(); TR.chips.delete(id); }
     });
@@ -1337,19 +1335,17 @@
   }
 
   function trIniciar() {
+    // SEM MutationObserver. A versão anterior observava #app com subtree:true —
+    // o WhatsApp faz milhares de mutações só pra carregar, e cada uma agendava
+    // uma repintura. Era a causa de "o WhatsApp ficou lento pra abrir".
+    // Rolagem cobre o caso comum; o resto é um relógio de baixa frequência.
     document.addEventListener('scroll', trAgendarPintura, true);
     window.addEventListener('resize', trAgendarPintura);
-    // Troca de conversa e mensagens novas: re-sincroniza com folga, sem ficar
-    // consultando o servidor a cada mutação do DOM.
-    let ultimo = 0;
-    const obs = new MutationObserver(() => {
-      trAgendarPintura();
-      const agora = Date.now();
-      if (agora - ultimo > 4000) { ultimo = agora; trSincronizar(); }
-    });
-    const alvo = document.querySelector('#app') || document.body;
-    obs.observe(alvo, { childList: true, subtree: true });
-    setTimeout(trSincronizar, 2500);
+    setInterval(trAgendarPintura, 1500);     // mensagem nova / troca de conversa
+    setInterval(trSincronizar, 20000);       // consulta ao servidor, com folga
+    // Só começa quando o WhatsApp terminou de montar a conversa: competir com o
+    // carregamento inicial é exatamente o que o consultor sente.
+    setTimeout(trSincronizar, 8000);
   }
 
   // Helper genérico pra falar com a ponte (mesmo padrão de pedirAudios).
