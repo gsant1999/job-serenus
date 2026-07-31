@@ -787,33 +787,34 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-ficha-link { font-size:11px; color:var(--job-txt-fraco); text-decoration:none; text-align:center; }
 .job-ficha-link:hover { color:var(--job-acento); text-decoration:underline; }
 
-/* ═══════════════ Transcrição colada no áudio ═══════════════
-   Vive no document.body, posicionada por coordenada sobre a bolha. NUNCA dentro
-   do #main: além do risco de quebrar o envio (árvore React), a lista é
-   virtualizada e um nó pendurado na linha acabaria sob o áudio de outra pessoa. */
-.job-tr-chip {
-  position: fixed; z-index: 8000; box-sizing: border-box;
-  display: flex; align-items: flex-start; gap: 6px;
-  background: var(--job-bg2); border: 1px solid var(--job-borda);
-  border-radius: 0 0 9px 9px; border-top: none;
-  padding: 4px 9px 5px; cursor: pointer;
-  font-size: 11.5px; line-height: 1.45; color: var(--job-txt-fraco);
-  box-shadow: 0 4px 12px rgba(0,0,0,.18);
-  max-height: 26px; overflow: hidden; transition: max-height .12s ease;
+/* ═══════════════ Transcrição dentro da bolha do áudio ═══════════════
+   Injetado no fim da bolha, como a WaSpeed faz. Só acrescenta filho, nunca
+   altera nó existente do WhatsApp. */
+.job-tr-slot { margin-top: 6px; }
+.job-tr-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(59,130,246,.14); border: 1px solid rgba(59,130,246,.55);
+  color: #60a5fa; border-radius: 20px; padding: 5px 14px;
+  font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit;
+  transition: .15s;
 }
-.job-tr-chip:hover { border-color: var(--job-acento); color: var(--job-txt); }
-.job-tr-chip.aberta {
-  max-height: 320px; overflow-y: auto; z-index: 8001;
-  color: var(--job-txt); cursor: default; user-select: text;
-  border-radius: 0 0 9px 9px;
+.job-tr-btn:hover { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+.job-tr-btn.mini { padding: 2px 9px; font-size: 11px; font-weight: 600; }
+.job-tr-carregando { font-size: 12px; font-style: italic; opacity: .75; padding: 3px 0; }
+.job-tr-falhou { font-size: 12px; opacity: .85; display: flex; gap: 7px;
+                 align-items: center; flex-wrap: wrap; }
+.job-tr-texto {
+  position: relative; font-size: 13.5px; line-height: 1.5;
+  padding: 2px 26px 2px 0; white-space: pre-wrap; word-break: break-word;
+  user-select: text;
 }
-.job-tr-chip.carregando .job-tr-txt::after { content: 'transcrevendo…'; font-style: italic; }
-.job-tr-chip.vazia { opacity: .55; font-style: italic; }
-.job-tr-seta { flex-shrink: 0; font-size: 9px; line-height: 1.7; opacity: .7; }
-.job-tr-txt { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
-.job-tr-chip:not(.aberta) .job-tr-txt {
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.job-tr-copiar {
+  position: absolute; top: 0; right: 0; background: transparent; border: none;
+  color: currentColor; opacity: .45; cursor: pointer; padding: 2px;
+  display: inline-flex; transition: .15s;
 }
+.job-tr-copiar:hover { opacity: 1; }
+.job-tr-copiar.ok { color: #4ade80; opacity: 1; }
 
 /* ═══════════════ Modo desenvolvedor ═══════════════ */
 .job-dev { display:flex; flex-direction:column; gap:2px; }

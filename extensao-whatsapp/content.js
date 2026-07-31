@@ -1203,263 +1203,177 @@
     else if (secao === 'dev') abrirSecaoDev();
   }
 
-  // ═══════════════ Transcrição colada no áudio ═══════════════
-  // As etiquetas vivem no document.body e são POSICIONADAS por coordenada sobre a
-  // bolha do áudio. Não entram na lista de mensagens de propósito:
-  //   1) inserir nó no #main é a árvore React do WhatsApp — foi o que quebrou o
-  //      envio de mensagem quando a barra de notas morava lá;
-  //   2) a lista é VIRTUALIZADA: o WhatsApp recicla as linhas conforme você rola,
-  //      então um nó pendurado na linha acabaria embaixo do áudio de OUTRA pessoa.
-  // Aqui o vínculo id-da-mensagem → posição é refeito a cada quadro, então
-  // reciclagem não consegue trocar o texto de lugar.
+  // ═══════════════ Transcrição dentro da bolha do áudio ═══════════════
+  // Botão "Transcrever" DENTRO da bolha, texto aparecendo ali mesmo — igual à
+  // WaSpeed, que é a referência que o Guilherme passou.
+  //
+  // MUDEI DE POSIÇÃO sobre o #main: eu tinha construído isso como etiqueta
+  // flutuante posicionada por coordenada, pra não encostar na árvore React. A
+  // WaSpeed injeta na bolha e funciona em produção — e a minha versão flutuante
+  // exigia reposicionar a cada rolagem, que foi o que deixou o WhatsApp lento.
+  // O que quebrou o envio naquela vez foi uma BARRA fixa na estrutura do #main,
+  // não um nó no fim de uma bolha. Aqui: só acrescenta filho, nunca altera nó
+  // existente, e a injeção é idempotente (marca .job-tr-slot).
+  //
+  // SOB DEMANDA muda tudo: sem varredura, sem download em massa, sem custo
+  // surpresa. O consultor pede o áudio que ele quer ler.
   const TR = {
     cache: new Map(),        // msg_id -> texto ('' = tentou e não deu)
-    abertas: new Set(),      // msg_id das etiquetas expandidas
-    chips: new Map(),        // msg_id -> elemento
-    chatId: null,
-    fila: [],
-    rodando: false,
-    ligado: true,
+    ocupado: new Set(),
     aviso: '',
-    avisoWaJs: null,
     diag: { etapa: 'nao_iniciou' },
   };
 
-  function _trPodeRodar() {
-    return TR.ligado && !!document.querySelector('#main');
+  function _trPodeRodar() { return !!document.querySelector('#main'); }
+
+  function _trLinhaEhAudio(row) {
+    return !!row.querySelector('audio, [data-icon="ptt"], [data-icon*="audio"], [aria-label*="udio"]');
   }
 
-  // Ids de áudio lidos DIRETO DO DOM, sem wa-js. É a retaguarda: quando a wa-js
-  // quebra (já aconteceu nesta base com o "Module ChatStore was not found"), o
-  // download de áudio novo realmente não tem como funcionar — mas o que JÁ está
-  // transcrito só precisa do id, e continua aparecendo. Antes disso, wa-js fora
-  // significava tela sem nada e sem explicação.
-  function trIdsDoDom() {
-    const main = document.querySelector('#main');
-    if (!main) return [];
-    const ids = [];
-    main.querySelectorAll('[data-id]').forEach((el) => {
-      const id = el.getAttribute('data-id') || '';
-      if (!id) return;
-      // Linha que tem player de áudio. Seletor largo de propósito: id que não for
-      // áudio simplesmente não volta do cache, e o custo disso é zero.
-      if (el.querySelector('audio, [data-icon*="audio"], [aria-label*="udio"], [data-icon="ptt"]')) {
-        ids.push(id);
+  // Onde o bloco entra: no fim da bolha, depois da onda. É onde a WaSpeed põe.
+  function _trAlvo(row) {
+    const player = row.querySelector('audio');
+    if (player) {
+      // sobe até um container que já tenha largura de bolha
+      let el = player.parentElement;
+      for (let i = 0; i < 4 && el && el !== row; i++) {
+        if (el.clientWidth > 140) return el;
+        el = el.parentElement;
       }
-    });
-    return ids;
+    }
+    return row.firstElementChild || row;
   }
 
-  async function trSincronizar() {
+  function trInjetar() {
     if (!_trPodeRodar()) return;
-    TR.diag = { etapa: 'listando', quando: new Date().toLocaleTimeString('pt-BR') };
-    const lista = await _pedirPonte('listar_audios', {}, 20000);
-    if (!lista || lista.erro || !Array.isArray(lista.audios)) {
-      TR.diag = { etapa: 'ponte_fora', erro: (lista && lista.erro) || 'sem_resposta',
-                  quando: new Date().toLocaleTimeString('pt-BR') };
-      // wa-js indisponível: mostra o que já está transcrito lendo os ids do DOM,
-      // e AVISA — falhar em silêncio foi o que fez isso parecer "não funciona".
-      const motivo = (lista && lista.erro) || 'sem_resposta';
-      if (TR.avisoWaJs !== motivo) {
-        TR.avisoWaJs = motivo;
-        console.warn('[JOB] transcrição: ponte do WhatsApp indisponível (' + motivo +
-                     '). Mostrando só o que já estava transcrito.');
-      }
-      const ids = trIdsDoDom();
-      if (ids.length) {
-        const r = await _safeSendMessage({ type: 'transcricoes_cache', ids }).catch(() => null);
-        if (r && r.ok) {
-          Object.keys(r.transcricoes || {}).forEach((k) => TR.cache.set(k, r.transcricoes[k]));
-          trPintar();
-        }
-      }
+    const main = document.querySelector('#main');
+    const linhas = main.querySelectorAll('[data-id]');
+    for (const row of linhas) {
+      const id = row.getAttribute('data-id') || '';
+      if (!id || row.querySelector('.job-tr-slot')) continue;
+      if (!_trLinhaEhAudio(row)) continue;
+      const slot = document.createElement('div');
+      slot.className = 'job-tr-slot';
+      slot.dataset.msg = id;
+      _trAlvo(row).appendChild(slot);
+      trRenderSlot(slot, id);
+    }
+  }
+
+  function trRenderSlot(slot, id) {
+    const texto = TR.cache.get(id);
+    if (TR.ocupado.has(id)) {
+      slot.innerHTML = '<div class="job-tr-carregando">transcrevendo…</div>';
       return;
     }
-    TR.avisoWaJs = null;
-    // Trocou de conversa: limpa tudo, senão a etiqueta do chat anterior fica
-    // flutuando sobre a conversa nova.
-    if (TR.chatId !== lista.chat_id) {
-      TR.chatId = lista.chat_id;
-      TR.fila = [];
-      trLimparChips();
+    if (texto === undefined) {
+      slot.innerHTML = '<button class="job-tr-btn" type="button">' + _ICO_TRANSCREVER + 'Transcrever</button>';
+      const b = slot.querySelector('button');
+      if (b) b.addEventListener('click', (ev) => { ev.stopPropagation(); trTranscrever(id); });
+      return;
     }
-    const ids = lista.audios.map((a) => a.msg_id);
-    TR.diag = { etapa: 'audios_encontrados', total: ids.length,
-                quando: new Date().toLocaleTimeString('pt-BR') };
-    if (!ids.length) return;
-    const faltaCache = ids.filter((id) => !TR.cache.has(id));
-    if (faltaCache.length) {
-      const r = await _safeSendMessage({ type: 'transcricoes_cache', ids: faltaCache }).catch(() => null);
-      if (r && r.ok) {
-        Object.keys(r.transcricoes || {}).forEach((k) => TR.cache.set(k, r.transcricoes[k]));
-        if (typeof r.gasto_mes_usd === 'number' && typeof r.teto_mes_usd === 'number'
-            && r.gasto_mes_usd >= r.teto_mes_usd) {
-          TR.aviso = 'teto de custo do mês atingido';
-        }
-      }
+    if (texto === '') {
+      slot.innerHTML = '<div class="job-tr-falhou">Não deu pra transcrever' +
+        (TR.aviso ? ' — ' + esc(TR.aviso) : '') + ' <button class="job-tr-btn mini" type="button">tentar de novo</button></div>';
+      const b = slot.querySelector('button');
+      if (b) b.addEventListener('click', (ev) => { ev.stopPropagation(); TR.cache.delete(id); trTranscrever(id); });
+      return;
     }
-    trPintar();
-    const pendentes = ids.filter((id) => !TR.cache.has(id));
-    TR.diag = { etapa: 'pronto', total: ids.length,
-                em_cache: ids.length - pendentes.length, na_fila: pendentes.length,
-                etiquetas: TR.chips.size, quando: new Date().toLocaleTimeString('pt-BR') };
-    TR.fila = pendentes;
-    trProcessarFila();
-  }
-
-  async function trProcessarFila() {
-    if (TR.rodando || !TR.fila.length || TR.aviso) return;
-    TR.rodando = true;
-    try {
-      while (TR.fila.length && !TR.aviso) {
-        const lote = TR.fila.splice(0, 3);
-        lote.forEach((id) => trMarcarCarregando(id));
-        const baixados = await _pedirPonte('baixar_audios_ids', { ids: lote }, 90000);
-        const audios = (baixados && baixados.audios) || [];
-        if (!audios.length) { lote.forEach((id) => TR.cache.set(id, '')); trPintar(); continue; }
-        const r = await _safeSendMessage({ type: 'transcrever_audios', audios }).catch(() => null);
-        if (!r || !r.ok) {
-          if (r && r.erro === 'teto_mensal') { TR.aviso = 'teto de custo do mês atingido'; }
-          // Falhou a rodada: devolve pra fila só uma vez, marcando como tentado,
-          // pra não ficar em laço infinito consumindo download de áudio.
-          lote.forEach((id) => { if (!TR.cache.has(id)) TR.cache.set(id, ''); });
-        } else {
-          Object.keys(r.transcricoes || {}).forEach((k) => TR.cache.set(k, r.transcricoes[k]));
-          lote.forEach((id) => { if (!TR.cache.has(id)) TR.cache.set(id, ''); });
-        }
-        trPintar();
-      }
-    } finally {
-      TR.rodando = false;
-    }
-  }
-
-  function trMarcarCarregando(id) {
-    const chip = TR.chips.get(id);
-    if (chip) chip.classList.add('carregando');
-  }
-
-  function trLimparChips() {
-    TR.chips.forEach((el) => el.remove());
-    TR.chips.clear();
-    TR.abertas.clear();
-  }
-
-  // Cria/atualiza as etiquetas SÓ dos áudios visíveis: numa conversa longa há
-  // centenas, e manter todas posicionadas a cada quadro travaria a rolagem.
-  function trPintar() {
-    if (!_trPodeRodar()) { trLimparChips(); return; }
-    const main = document.querySelector('#main');
-    if (!main) return;
-    const area = main.getBoundingClientRect();
-    const vistos = new Set();
-    // UMA varredura das linhas que existem no DOM agora, e pra cada uma vê se
-    // temos transcrição. A versão anterior fazia o contrário — um querySelector
-    // por item do cache — o que com centenas de áudios transcritos custava
-    // centenas de buscas POR QUADRO e travava o carregamento do WhatsApp.
-    // A lista é virtualizada: as linhas no DOM são poucas dezenas, sempre.
-    const linhas = main.querySelectorAll('[data-id]');
-    for (const linha of linhas) {
-      const id = linha.getAttribute('data-id') || '';
-      if (!id || !TR.cache.has(id)) continue;
-      const r = linha.getBoundingClientRect();
-      if (r.bottom < area.top - 40 || r.top > area.bottom + 40) continue;
-      const texto = TR.cache.get(id);
-      vistos.add(id);
-      let chip = TR.chips.get(id);
-      if (!chip) {
-        chip = document.createElement('div');
-        chip.className = 'job-tr-chip';
-        chip.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          if (TR.abertas.has(id)) TR.abertas.delete(id); else TR.abertas.add(id);
-          trPintar();
-        });
-        document.body.appendChild(chip);
-        TR.chips.set(id, chip);
-      }
-      const aberta = TR.abertas.has(id);
-      chip.classList.toggle('aberta', aberta);
-      chip.classList.toggle('vazia', texto === '');
-      const rotulo = texto === '' ? 'Não deu pra transcrever este áudio'
-                   : (aberta ? texto : (texto || '').slice(0, 46) + ((texto || '').length > 46 ? '…' : ''));
-      const novoHtml = '<span class="job-tr-seta">' + (aberta ? '▾' : '▸') + '</span>' +
-                       '<span class="job-tr-txt">' + esc(rotulo) + '</span>';
-      // Só reescreve o HTML se mudou: innerHTML a cada quadro força reflow à toa.
-      if (chip._html !== novoHtml) { chip.innerHTML = novoHtml; chip._html = novoHtml; }
-      const larg = Math.max(150, Math.min(r.width, 420));
-      chip.style.width = larg + 'px';
-      chip.style.left = Math.round(r.left) + 'px';
-      chip.style.top = Math.round(r.bottom - 4) + 'px';
-    }
-    TR.chips.forEach((el, id) => {
-      if (!vistos.has(id)) { el.remove(); TR.chips.delete(id); }
+    slot.innerHTML = '<div class="job-tr-texto">' + esc(texto) +
+      '<button class="job-tr-copiar" type="button" title="Copiar">' + _ICO_COPIAR + '</button></div>';
+    const c = slot.querySelector('.job-tr-copiar');
+    if (c) c.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      navigator.clipboard.writeText(texto).then(() => {
+        c.classList.add('ok');
+        setTimeout(() => c.classList.remove('ok'), 1200);
+      }).catch(() => {});
     });
   }
 
-  // Reposiciona junto com a rolagem. rAF pra não pendurar trabalho em cada evento
-  // de scroll — a lista do WhatsApp dispara muitos por segundo.
-  let _trRaf = null;
-  function trAgendarPintura() {
-    if (_trRaf) return;
-    _trRaf = requestAnimationFrame(() => { _trRaf = null; trPintar(); });
+  function trAtualizarSlot(id) {
+    document.querySelectorAll('.job-tr-slot[data-msg="' + (window.CSS && window.CSS.escape ? window.CSS.escape(id) : id) + '"]')
+      .forEach((slot) => trRenderSlot(slot, id));
+  }
+
+  async function trTranscrever(id) {
+    if (TR.ocupado.has(id)) return;
+    TR.ocupado.add(id);
+    trAtualizarSlot(id);
+    try {
+      // 1) Já transcrito antes? Custa nada e responde na hora.
+      const cache = await _safeSendMessage({ type: 'transcricoes_cache', ids: [id] }).catch(() => null);
+      if (cache && cache.ok && (cache.transcricoes || {})[id]) {
+        TR.cache.set(id, cache.transcricoes[id]);
+        return;
+      }
+      if (cache && cache.ok && typeof cache.gasto_mes_usd === 'number'
+          && cache.gasto_mes_usd >= cache.teto_mes_usd) {
+        TR.aviso = 'teto de custo do mês atingido';
+        TR.cache.set(id, '');
+        return;
+      }
+      // 2) Baixa só ESTE áudio. É o único ponto que precisa da wa-js.
+      const baixado = await _pedirPonte('baixar_audios_ids', { ids: [id] }, 90000);
+      const audios = (baixado && baixado.audios) || [];
+      if (!audios.length) {
+        TR.aviso = 'não consegui baixar o áudio (ponte do WhatsApp)';
+        TR.cache.set(id, '');
+        return;
+      }
+      const r = await _safeSendMessage({ type: 'transcrever_audios', audios }).catch(() => null);
+      if (!r || !r.ok) {
+        TR.aviso = (r && r.detalhe) || 'falha ao transcrever';
+        TR.cache.set(id, '');
+        return;
+      }
+      TR.cache.set(id, (r.transcricoes || {})[id] || '');
+      TR.aviso = '';
+    } catch (e) {
+      TR.cache.set(id, '');
+      TR.aviso = String((e && e.message) || e).slice(0, 80);
+    } finally {
+      TR.ocupado.delete(id);
+      trAtualizarSlot(id);
+      TR.diag = { etapa: 'sob_demanda', ultimo: id, cache: TR.cache.size,
+                  quando: new Date().toLocaleTimeString('pt-BR') };
+    }
+  }
+
+  const _ICO_TRANSCREVER = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>' +
+    '<path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>';
+  // _ICO_COPIAR já existe no arquivo — reusado aqui.
+
+  // Injeção: observa SÓ a lista de mensagens, com folga. Sem reposicionamento em
+  // rolagem, sem varredura, sem chamada de rede — a injeção é só criar um botão
+  // nas bolhas novas. Foi o reposicionamento por coordenada que pesou antes.
+  let _trTimer = null;
+  function trAgendarInjecao() {
+    if (_trTimer) return;
+    _trTimer = setTimeout(() => { _trTimer = null; try { trInjetar(); } catch (e) {} }, 400);
   }
 
   function trIniciar() {
-    // SEM MutationObserver. A versão anterior observava #app com subtree:true —
-    // o WhatsApp faz milhares de mutações só pra carregar, e cada uma agendava
-    // uma repintura. Era a causa de "o WhatsApp ficou lento pra abrir".
-    // Rolagem cobre o caso comum; o resto é um relógio de baixa frequência.
-    document.addEventListener('scroll', trAgendarPintura, true);
-    window.addEventListener('resize', trAgendarPintura);
-    setInterval(trAgendarPintura, 1500);     // mensagem nova / troca de conversa
-    setInterval(trSincronizar, 20000);       // consulta ao servidor, com folga
-    // Só começa quando o WhatsApp terminou de montar a conversa: competir com o
-    // carregamento inicial é exatamente o que o consultor sente.
-    setTimeout(trSincronizar, 8000);
+    setTimeout(() => {
+      trInjetar();
+      const main = document.querySelector('#main') || document.body;
+      const obs = new MutationObserver(trAgendarInjecao);
+      obs.observe(main, { childList: true, subtree: true });
+      // Troca de conversa troca o #main inteiro: reobserva sem drama.
+      setInterval(() => {
+        const m = document.querySelector('#main');
+        if (m && !m._jobTrObservado) { m._jobTrObservado = true; obs.observe(m, { childList: true, subtree: true }); }
+        trAgendarInjecao();
+      }, 4000);
+    }, 6000);
   }
 
-  // Helper genérico pra falar com a ponte (mesmo padrão de pedirAudios).
-  function _pedirPonte(tipo, extra, tetoMs) {
-    return new Promise((resolve) => {
-      const reqId = 'p' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-      let pronto = false;
-      function onMsg(ev) {
-        if (ev.source !== window) return;
-        const d = ev.data;
-        if (!d || d.source !== 'JOB_EXT_RESP' || d.reqId !== reqId) return;
-        pronto = true;
-        window.removeEventListener('message', onMsg);
-        resolve(d);
-      }
-      window.addEventListener('message', onMsg);
-      window.postMessage(Object.assign({ source: 'JOB_EXT_REQ', tipo, reqId }, extra || {}), '*');
-      setTimeout(() => {
-        if (!pronto) { window.removeEventListener('message', onMsg); resolve(null); }
-      }, tetoMs || 30000);
-    });
-  }
-
-  // Diagnóstico legível da transcrição, pra ninguém precisar abrir o console.
-  // Um recurso que falha calado é indistinguível de um recurso que não existe —
-  // foi exatamente o que aconteceu aqui.
   function trDiagnosticoHtml() {
     const d = TR.diag || {};
-    const rot = {
-      nao_iniciou: 'ainda não iniciou (aguarde alguns segundos)',
-      listando: 'procurando áudios na conversa…',
-      ponte_fora: 'a ponte com o WhatsApp não respondeu (' + (d.erro || '?') + ')',
-      audios_encontrados: 'encontrou ' + (d.total || 0) + ' áudio(s), consultando…',
-      pronto: (d.total || 0) + ' áudio(s) · ' + (d.em_cache || 0) + ' já transcrito(s) · ' +
-              (d.na_fila || 0) + ' na fila · ' + (d.etiquetas || 0) + ' etiqueta(s) na tela',
-    };
-    const txt = rot[d.etapa] || d.etapa || '—';
-    const ruim = d.etapa === 'ponte_fora' || (d.etapa === 'pronto' && !d.total);
-    return '<div class="job-tr-diag' + (ruim ? ' ruim' : '') + '">' +
-      '<b>Transcrição:</b> ' + esc(txt) +
-      (TR.aviso ? ' · <b>' + esc(TR.aviso) + '</b>' : '') +
-      (d.quando ? ' <span class="job-tr-diag-h">' + esc(d.quando) + '</span>' : '') +
-      '</div>';
+    return '<div class="job-tr-diag"><b>Transcrição:</b> sob demanda · ' +
+      TR.cache.size + ' em memória' + (TR.aviso ? ' · ' + esc(TR.aviso) : '') +
+      (d.quando ? ' <span class="job-tr-diag-h">' + esc(d.quando) + '</span>' : '') + '</div>';
   }
 
   // ═══════════════ Modo desenvolvedor ═══════════════
@@ -1487,10 +1401,11 @@
         linha('Conversa aberta', (ponte && ponte.chat_id) ? ponte.chat_id : 'nenhuma', !(ponte && ponte.chat_id)) +
         linha('Áudios na conversa', String((ponte && ponte.audios && ponte.audios.length) || 0)) +
         linha('Transcrições em memória', String(TR.cache.size)) +
-        linha('Etiquetas na tela', String(TR.chips.size)) +
+        linha('Botões injetados', String(document.querySelectorAll('.job-tr-slot').length)) +
         linha('Última etapa', String(d.etapa || '—') + (d.quando ? ' · ' + d.quando : ''),
               d.etapa === 'ponte_fora') +
         (TR.aviso ? linha('Aviso', TR.aviso, true) : '') +
+        linha('Varredura (motivo)', VAR.motivo || '—') +
         linha('Varredura', VAR.rodando ? 'rodando agora'
               : (VAR.ultimaRodada ? 'última: ' + new Date(VAR.ultimaRodada).toLocaleTimeString('pt-BR') : 'ainda não rodou')) +
         linha('Varredura (placar)', VAR.placar.analisadas + ' analisadas · ' +
@@ -1515,16 +1430,17 @@
       });
     };
     btn('dev-transcrever', 'transcrever', async () => {
-      await trSincronizar();
-      const d2 = TR.diag || {};
-      return 'etapa=' + d2.etapa + ' · áudios=' + (d2.total || 0) +
-             ' · em cache=' + (d2.em_cache || 0) + ' · na fila=' + (d2.na_fila || 0);
+      trInjetar();
+      return 'botões na tela=' + document.querySelectorAll('.job-tr-slot').length +
+             ' · em memória=' + TR.cache.size;
     });
     btn('dev-varrer', 'varrer', async () => {
       const p = await varreduraRodar(true);
       return 'analisadas=' + p.analisadas + ' · puladas=' + p.puladas + ' · erros=' + p.erros;
     });
-    btn('dev-repintar', 'repintar', async () => { trPintar(); return 'etiquetas=' + TR.chips.size; });
+    btn('dev-repintar', 'repintar', async () => {
+      trInjetar(); return 'slots=' + document.querySelectorAll('.job-tr-slot').length;
+    });
   }
 
   // ═══════════════ Varredura diária das conversas ═══════════════
@@ -1539,12 +1455,36 @@
     PAUSA_ENTRE_MS: 8000,           // respiro entre conversas
     MAX_POR_RODADA: 12,             // teto por rodada, pra nunca virar mutirão
     HORAS: 24,
+    motivo: '',
     placar: { analisadas: 0, puladas: 0, erros: 0 },
   };
 
+  // Config vem do SERVIDOR (/configuracoes). Nasce desligada: um mecanismo que
+  // gasta dinheiro e usa a máquina do consultor não pode ligar sozinho porque
+  // alguém instalou a extensão.
+  async function varreduraConfig() {
+    try {
+      const { usuarioId } = await _safeStorageGet(['usuarioId']);
+      const r = await fetch(_SITE_BASE_URL_EXT + '/api/whatsapp/config-remota' +
+                            (usuarioId ? '?usuario_id=' + encodeURIComponent(usuarioId) : ''),
+                            { cache: 'no-store' });
+      const d = await r.json();
+      return (d && d.varredura) || null;
+    } catch (e) { return null; }
+  }
+
   async function varreduraRodar(manual) {
-    if (VAR.rodando || (!VAR.ligada && !manual)) return VAR.placar;
-    if (!manual && Date.now() - VAR.ultimaRodada < VAR.INTERVALO_MS) return VAR.placar;
+    if (VAR.rodando) return VAR.placar;
+    const cfg = await varreduraConfig();
+    if (!cfg) { VAR.motivo = 'sem_config'; return VAR.placar; }
+    VAR.motivo = cfg.motivo || '';
+    if (!manual && !cfg.pode_rodar) return VAR.placar;
+    // O painel manda os números: intervalo, teto e janela deixam de estar
+    // cravados no código, onde ninguém conseguia mexer.
+    VAR.INTERVALO_MS = Math.max(5, cfg.intervalo_min || 30) * 60000;
+    VAR.MAX_POR_RODADA = Math.max(1, cfg.max_rodada || 12);
+    VAR.HORAS = Math.max(1, cfg.horas || 24);
+    if (!manual && !cfg.rodar_agora && Date.now() - VAR.ultimaRodada < VAR.INTERVALO_MS) return VAR.placar;
     VAR.rodando = true;
     VAR.ultimaRodada = Date.now();
     try {
@@ -1630,9 +1570,9 @@
   }
 
   function varreduraIniciar() {
-    // Primeira rodada com folga: a aba acabou de abrir, o WhatsApp ainda está
-    // carregando conversa, e competir com isso é o que o consultor sente.
-    setTimeout(() => { varreduraRodar(false); }, 120000);
+    // 4 minutos pra primeira checagem e 5 em 5 depois. A checagem em si é um GET
+    // de config; se estiver desligada (o padrão), o custo é isso e mais nada.
+    setTimeout(() => { varreduraRodar(false); }, 240000);
     setInterval(() => { varreduraRodar(false); }, 5 * 60 * 1000);
   }
 

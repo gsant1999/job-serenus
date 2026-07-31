@@ -2315,6 +2315,10 @@ def init_db():
         # card ficava verde só porque alguém mexeu num campo. A cor tem que
         # responder a avanço real no funil.
         ("crm_leads", "avancou_em", "TEXT"),
+        # VARREDURA por consultor: quem participa é decisão do admin no JOB, não
+        # do consultor na extensão — assim o piloto começa em um WhatsApp só e
+        # ninguém fica de fora por esquecer de ligar.
+        ("usuarios", "varredura_ativa", "INTEGER"),
         # QUEM INDICOU: quando a origem é Indicação, aponta pro LEAD que indicou.
         # Guardar o id (e não o nome digitado) é o que permite responder "quantas
         # vendas o fulano já me trouxe" — com nome solto isso nunca fecha conta.
@@ -13990,7 +13994,21 @@ def api_whatsapp_config_remota():
     # marca: a extensão é um artefato único (Chrome Web Store), então ela puxa a
     # marca da INSTÂNCIA que está conectada e mostra no painel — cada cliente vê
     # a marca dele, não "Serenus" fixo.
+    # Varredura vai junto: a extensão já consulta isso a cada ~15min, então não
+    # precisa de mais um canal. O usuario_id vem por query — sem ele responde o
+    # geral (a extensão sem usuário configurado não deve varrer nada).
+    uid = request.args.get('usuario_id', type=int)
+    conn2 = db()
+    cfg = varredura_cfg(conn2)
+    pode, motivo = varredura_pode_agora(cfg, uid, conn2)
+    close_db(conn2)
+    varr = {k: cfg.get(k) for k in ('horas', 'max_rodada', 'intervalo_min',
+                                    'hora_inicio', 'hora_fim', 'dias_uteis')}
+    varr['pode_rodar'] = pode
+    varr['motivo'] = motivo
+    varr['rodar_agora'] = (motivo == 'rodar_agora')
     return _wa_cors(jsonify({"ok": True, "seletores": seletores, "flags": flags,
+                             "varredura": varr,
                              "marca": BRAND['nome_curto'], "marca_nome": BRAND['nome']}))
 
 
@@ -14678,6 +14696,118 @@ def api_whatsapp_lead_criar():
         (lead_id, autor, 'criacao', f'Lead cadastrado pela extensão (origem: {origem})', agora))
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True, "ja_existia": False, "lead_id": lead_id}))
+
+
+# ─── VARREDURA: CONFIGURAÇÃO ──────────────────────────────────────────────────
+# Guardada em meta_flags como JSON (chave 'varredura_cfg'): é config de uma coisa
+# só, não merece tabela própria, e assim já nasce disponível em todo lugar.
+_VARREDURA_PADRAO = {
+    'ativa': False,           # mestre: desligada até alguém ligar de propósito
+    'horas': 24,              # janela de conversas a considerar
+    'max_rodada': 12,         # teto de conversas por rodada
+    'intervalo_min': 30,      # de quanto em quanto tempo
+    'hora_inicio': 8,
+    'hora_fim': 20,
+    'dias_uteis': True,       # não roda sábado/domingo
+    'forcar_ate': None,       # timestamp: "rodar agora" pedido pelo painel
+}
+
+
+def varredura_cfg(conn=None):
+    fechar = False
+    if conn is None:
+        conn = db(); fechar = True
+    cfg = dict(_VARREDURA_PADRAO)
+    try:
+        r = conn.execute("SELECT v FROM meta_flags_valor WHERE k='varredura_cfg'").fetchone()
+        if r and r['v']:
+            cfg.update(json.loads(r['v']))
+    except Exception:
+        pass
+    if fechar:
+        close_db(conn)
+    return cfg
+
+
+def varredura_cfg_salvar(conn, novo):
+    atual = varredura_cfg(conn)
+    atual.update(novo or {})
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags_valor (k TEXT PRIMARY KEY, v TEXT)")
+        if conn.execute("SELECT 1 FROM meta_flags_valor WHERE k='varredura_cfg'").fetchone():
+            conn.execute("UPDATE meta_flags_valor SET v=? WHERE k='varredura_cfg'",
+                         (json.dumps(atual, ensure_ascii=False),))
+        else:
+            conn.execute("INSERT INTO meta_flags_valor (k,v) VALUES ('varredura_cfg',?)",
+                         (json.dumps(atual, ensure_ascii=False),))
+    except Exception as e:
+        app.logger.warning(f"[VARREDURA] não salvou config: {e}")
+    return atual
+
+
+def varredura_pode_agora(cfg, uid=None, conn=None):
+    """Decide se a varredura pode rodar NESTE momento pra ESTE consultor. A
+    resposta vai pra extensão junto com o motivo — 'não roda' sem motivo é o que
+    faz alguém ficar meia hora achando que está quebrado."""
+    if cfg.get('forcar_ate'):
+        try:
+            if float(cfg['forcar_ate']) > time.time():
+                return True, 'rodar_agora'
+        except (TypeError, ValueError):
+            pass
+    if not cfg.get('ativa'):
+        return False, 'desligada'
+    if uid is not None:
+        try:
+            u = (conn or db()).execute("SELECT varredura_ativa FROM usuarios WHERE id=?", (uid,)).fetchone()
+            if not u or not (u['varredura_ativa'] or 0):
+                return False, 'consultor_fora'
+        except Exception:
+            return False, 'consultor_desconhecido'
+    agora = datetime.now(TZ_SP)
+    if cfg.get('dias_uteis') and agora.weekday() >= 5:
+        return False, 'fim_de_semana'
+    if not (int(cfg.get('hora_inicio', 8)) <= agora.hour < int(cfg.get('hora_fim', 20))):
+        return False, 'fora_do_horario'
+    return True, 'ok'
+
+
+@app.route('/configuracoes/varredura', methods=['POST'])
+@login_required
+@admin_required
+def configuracoes_varredura():
+    d = request.json or {}
+    conn = db()
+    if d.get('acao') == 'rodar_agora':
+        # Vale por 10 minutos: tempo de a extensão consultar a config e disparar,
+        # sem deixar o "rodar agora" ligado pra sempre por esquecimento.
+        cfg = varredura_cfg_salvar(conn, {'forcar_ate': time.time() + 600})
+    elif d.get('acao') == 'consultor':
+        try:
+            uid = int(d.get('usuario_id'))
+        except (TypeError, ValueError):
+            close_db(conn); return jsonify({"ok": False, "erro": "Consultor inválido"}), 400
+        conn.execute("UPDATE usuarios SET varredura_ativa=? WHERE id=?",
+                     (1 if d.get('ativo') else 0, uid))
+        cfg = varredura_cfg(conn)
+    else:
+        limpo = {}
+        for k in ('ativa', 'dias_uteis'):
+            if k in d:
+                limpo[k] = bool(d[k])
+        for k, lo, hi in (('horas', 1, 168), ('max_rodada', 1, 60),
+                          ('intervalo_min', 5, 720), ('hora_inicio', 0, 23), ('hora_fim', 1, 24)):
+            if k in d:
+                try:
+                    limpo[k] = max(lo, min(hi, int(d[k])))
+                except (TypeError, ValueError):
+                    pass
+        if limpo.get('hora_fim') is not None and limpo.get('hora_inicio') is not None \
+           and limpo['hora_fim'] <= limpo['hora_inicio']:
+            close_db(conn); return jsonify({"ok": False, "erro": "O fim tem que ser depois do início"}), 400
+        cfg = varredura_cfg_salvar(conn, limpo)
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "cfg": cfg})
 
 
 # ─── SAÚDE DA IA: TELA E AVISO ────────────────────────────────────────────────
@@ -22717,7 +22847,18 @@ def configuracoes():
     # comportamento de sempre; só desliga quando o usuário explicitamente pede.
     notificar_wpp_leads = rd.get('notificar_wpp_leads')
     notificar_wpp_leads = True if notificar_wpp_leads is None else bool(notificar_wpp_leads)
+    # Varredura: só admin configura, mas a página é de todos — o bloco só aparece
+    # pra quem pode mexer.
+    varr_cfg, varr_consultores = None, []
+    if session.get('perfil') == 'admin':
+        conn2 = db()
+        varr_cfg = varredura_cfg(conn2)
+        varr_consultores = [dict(r) for r in conn2.execute(
+            """SELECT id, nome, COALESCE(varredura_ativa,0) varredura_ativa
+               FROM usuarios WHERE ativo=1 ORDER BY nome""").fetchall()]
+        close_db(conn2)
     return render_template('configuracoes.html', som_atual=som_atual, sons=SONS_NOTIFICACAO,
+                           varr_cfg=varr_cfg, varr_consultores=varr_consultores,
                            notificar_wpp_leads=notificar_wpp_leads)
 
 

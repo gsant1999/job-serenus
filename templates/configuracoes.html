@@ -84,4 +84,100 @@ async function salvarNotificacaoWpp(ligado){
   }
 }
 </script>
+
+{% if varr_cfg %}
+<div class="card" style="margin-top:18px;">
+  <div class="card-header"><h3>Leitura automática das conversas</h3></div>
+  <div style="padding:0 16px 8px; font-size:13px; color:var(--cinza); line-height:1.6;">
+    A extensão lê as conversas do dia no WhatsApp do consultor e alimenta o CRM sozinha.
+    Roda <b style="color:var(--texto);">na máquina dele</b>, com o WhatsApp aberto — se a aba fechar, para.
+    Só texto e áudio transcrito: imagem e PDF ficam de fora, que é onde o custo mora.
+  </div>
+
+  <div style="padding:6px 16px 16px; display:flex; flex-direction:column; gap:14px;">
+    <label class="vr-linha">
+      <input type="checkbox" id="vr-ativa" {% if varr_cfg.ativa %}checked{% endif %}>
+      <span><b>Ligar a leitura automática</b><br>
+        <small>Chave geral. Desligado, nenhuma varredura roda, nem pra quem está marcado abaixo.</small></span>
+    </label>
+
+    <div class="vr-grade">
+      <label>Das <input type="number" id="vr-ini" min="0" max="23" value="{{ varr_cfg.hora_inicio }}"> h</label>
+      <label>às <input type="number" id="vr-fim" min="1" max="24" value="{{ varr_cfg.hora_fim }}"> h</label>
+      <label><input type="checkbox" id="vr-uteis" {% if varr_cfg.dias_uteis %}checked{% endif %}> só dias úteis</label>
+    </div>
+    <div class="vr-grade">
+      <label>Conversas das últimas <input type="number" id="vr-horas" min="1" max="168" value="{{ varr_cfg.horas }}"> h</label>
+      <label>No máximo <input type="number" id="vr-max" min="1" max="60" value="{{ varr_cfg.max_rodada }}"> por rodada</label>
+      <label>A cada <input type="number" id="vr-int" min="5" max="720" value="{{ varr_cfg.intervalo_min }}"> min</label>
+    </div>
+
+    <div>
+      <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); margin-bottom:8px;">
+        Quem participa
+      </div>
+      <div class="vr-consultores">
+        {% for c in varr_consultores %}
+        <label class="vr-cons {% if c.varredura_ativa %}on{% endif %}">
+          <input type="checkbox" data-uid="{{ c.id }}" {% if c.varredura_ativa %}checked{% endif %}>
+          {{ c.nome.split()[0] }}
+        </label>
+        {% endfor %}
+      </div>
+      <small style="color:var(--cinza-2); display:block; margin-top:7px;">
+        Comece por um só. O custo real aparece em Análises depois de uma semana, e aí você decide estender.
+      </small>
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <button class="btn btn-sm" onclick="vrSalvar(this)">Salvar</button>
+      <button class="btn-outline btn-sm" onclick="vrAgora(this)">Rodar agora</button>
+      <small style="color:var(--cinza-2);">“Rodar agora” vale por 10 min: a extensão dispara na próxima checagem, sem esperar o intervalo.</small>
+    </div>
+  </div>
+</div>
+
+<style>
+  .vr-linha { display:flex; gap:10px; align-items:flex-start; font-size:13.5px; cursor:pointer; }
+  .vr-linha small { color:var(--cinza-2); font-size:12px; }
+  .vr-grade { display:flex; gap:16px; flex-wrap:wrap; align-items:center; font-size:13px; color:var(--cinza); }
+  .vr-grade input[type=number] { width:64px; background:var(--panel-2); border:1px solid var(--borda);
+    border-radius:7px; padding:5px 8px; color:var(--texto); font-size:13px; }
+  .vr-consultores { display:flex; gap:7px; flex-wrap:wrap; }
+  .vr-cons { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;
+    background:var(--panel-2); border:1px solid var(--borda); border-radius:20px; padding:5px 12px; }
+  .vr-cons.on { border-color:var(--azul); color:var(--texto); }
+</style>
+<script>
+async function _vr(body){
+  const r = await fetch('/configuracoes/varredura', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  return r.json();
+}
+async function vrSalvar(b){
+  b.disabled=true; const t=b.textContent; b.textContent='Salvando…';
+  const d = await _vr({ativa: document.getElementById('vr-ativa').checked,
+    dias_uteis: document.getElementById('vr-uteis').checked,
+    hora_inicio: +document.getElementById('vr-ini').value,
+    hora_fim: +document.getElementById('vr-fim').value,
+    horas: +document.getElementById('vr-horas').value,
+    max_rodada: +document.getElementById('vr-max').value,
+    intervalo_min: +document.getElementById('vr-int').value});
+  b.disabled=false; b.textContent=t;
+  alert(d.ok ? 'Salvo. A extensão pega a mudança na próxima checagem (até 15 min).' : (d.erro||'Erro'));
+}
+async function vrAgora(b){
+  b.disabled=true; const t=b.textContent; b.textContent='Pedindo…';
+  const d = await _vr({acao:'rodar_agora'});
+  b.disabled=false; b.textContent=t;
+  alert(d.ok ? 'Pedido registrado. A extensão dispara na próxima checagem — deixe o WhatsApp aberto.' : 'Erro');
+}
+document.querySelectorAll('.vr-cons input[data-uid]').forEach(el=>{
+  el.addEventListener('change', async ()=>{
+    el.closest('.vr-cons').classList.toggle('on', el.checked);
+    await _vr({acao:'consultor', usuario_id:+el.dataset.uid, ativo:el.checked});
+  });
+});
+</script>
+{% endif %}
 {% endblock %}
