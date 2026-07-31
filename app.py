@@ -16977,6 +16977,27 @@ def crm():
 
     etiquetas_lead = _etiquetas_dos_leads(conn, [l['id'] for l in leads])
 
+    # @lid de cada card, numa query só. O vínculo conversa↔lead precisa ser
+    # reconhecível de relance no quadro, não só dentro da ficha.
+    wa_do_lead = {}
+    _ids_card = [l['id'] for l in leads]
+    if _ids_card:
+        try:
+            _m = ','.join(['?'] * len(_ids_card))
+            for r in conn.execute(f"""SELECT lead_id, chat_id FROM wa_chat_lead
+                                      WHERE lead_id IN ({_m}) ORDER BY atualizado_em DESC""",
+                                  _ids_card).fetchall():
+                if r['lead_id'] in wa_do_lead:
+                    continue          # o mais recente basta pro card
+                cid = r['chat_id'] or ''
+                wa_do_lead[r['lead_id']] = {
+                    'chat_id': cid,
+                    'tipo': 'lid' if '@lid' in cid else ('numero' if '@c.us' in cid else 'outro'),
+                    'curto': cid.split('@')[0][:14] + ('…' if len(cid.split('@')[0]) > 14 else ''),
+                }
+        except Exception as e:
+            app.logger.warning(f"[CRM] @lid dos cards: {e}")
+
     # Campos que travam a saída, por etapa — vão no card porque é lá que o
     # consultor arrasta, e travar sem mostrar o que falta é só frustração.
     campos_def = carregar_campos_crm(conn)
@@ -17088,7 +17109,8 @@ def crm():
                            campos_saida_etapa=campos_saida_etapa, valores_saida=valores_saida,
                            trava_falta=trava_falta,
                            quadros=quadros, quadro_atual=f_quadro, quadro_total=quadro_total,
-                           qs_filtros=qs_filtros, etapas_todas=carregar_etapas_crm())
+                           qs_filtros=qs_filtros, etapas_todas=carregar_etapas_crm(),
+                           wa_do_lead=wa_do_lead)
 
 
 @app.route('/crm/lead/novo', methods=['POST'])

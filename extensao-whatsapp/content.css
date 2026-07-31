@@ -814,3 +814,20 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-tr-chip:not(.aberta) .job-tr-txt {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+
+/* ═══════════════ Modo desenvolvedor ═══════════════ */
+.job-dev { display:flex; flex-direction:column; gap:2px; }
+.job-dev-linha { display:flex; justify-content:space-between; align-items:baseline; gap:10px;
+                 padding:6px 0; border-bottom:1px solid var(--job-borda); font-size:12px; }
+.job-dev-linha span { color:var(--job-txt-fraco); }
+.job-dev-linha b { color:var(--job-txt); text-align:right; word-break:break-all; font-size:11.5px; }
+.job-dev-linha.ruim b { color:#f43f5e; }
+.job-dev-btns { display:flex; flex-direction:column; gap:6px; margin-top:12px; }
+.job-dev-saida { margin-top:10px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+                 font-size:11px; color:var(--job-txt-fraco); background:var(--job-bg3);
+                 border-radius:7px; padding:8px 10px; white-space:pre-wrap; word-break:break-word;
+                 user-select:text; min-height:16px; }
+.job-tr-diag { font-size:11px; color:var(--job-txt-fraco); background:var(--job-bg3);
+               border-radius:7px; padding:6px 9px; margin-bottom:8px; line-height:1.45; }
+.job-tr-diag.ruim { background:rgba(244,63,94,.1); color:#fda4af; }
+.job-tr-diag-h { opacity:.6; }

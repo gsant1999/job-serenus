@@ -995,6 +995,9 @@
         '<span class="job-trilho-item-icone">' + _ICO_NOTA + '</span>' +
         '<span class="job-trilho-item-label">Notas</span>' +
       '</button>' +
+      (_devLigado ? '<button class="job-trilho-item" data-secao="dev" title="Modo desenvolvedor: estado de tudo e disparo manual">' +
+        '<span class="job-trilho-item-icone">&lt;/&gt;</span>' +
+        '<span class="job-trilho-item-label">Dev</span></button>' : '') +
       '<button class="job-trilho-item" data-secao="ficha" title="Ficha do lead: etapa, sub-status, etiquetas, qualificação e atividade">' +
         '<span class="job-trilho-item-icone">' + _ICO_CRM + '</span>' +
         '<span class="job-trilho-item-label">CRM</span>' +
@@ -1042,6 +1045,13 @@
           '<button data-tema="claro" class="' + (temaAtual === 'claro' ? 'ativo' : '') + '">Claro</button>' +
         '</div>' +
       '</div>' +
+      '<div class="job-trilho-config-linha">' +
+        '<span>Modo desenvolvedor</span>' +
+        '<div class="job-trilho-tema-btns">' +
+          '<button data-dev="1" class="' + (_devLigado ? 'ativo' : '') + '">Ligado</button>' +
+          '<button data-dev="0" class="' + (_devLigado ? '' : 'ativo') + '">Desligado</button>' +
+        '</div>' +
+      '</div>' +
       '<button class="job-trilho-config-atualizar" id="job-trilho-atualizar-btn">Forçar verificação de atualização</button>' +
       '<div class="job-trilho-config-nota" id="job-trilho-atualizar-status"></div>' +
       '<button class="job-trilho-config-desligar" id="job-trilho-desligar-btn">Desligar extensão nesta aba</button>';
@@ -1051,7 +1061,19 @@
       const r = btn.getBoundingClientRect();
       pop.style.bottom = (window.innerHeight - r.bottom + r.height + 8) + 'px';
     }
-    pop.querySelectorAll('.job-trilho-tema-btns button').forEach((b) => {
+    pop.querySelectorAll('[data-dev]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        _devLigado = b.dataset.dev === '1';
+        await _safeStorageSet({ jobDevMode: _devLigado });
+        // Recria o trilho pro botão Dev aparecer/sumir na hora.
+        const t = document.getElementById('job-trilho');
+        if (t) t.remove();
+        criarTrilho();
+        const p = document.getElementById('job-trilho-config');
+        if (p) p.remove();
+      });
+    });
+    pop.querySelectorAll('.job-trilho-tema-btns button[data-tema]').forEach((b) => {
       b.addEventListener('click', async () => {
         const novoTema = b.dataset.tema;
         _safeStorageSet({ tema: novoTema });
@@ -1178,6 +1200,7 @@
     else if (secao === 'notas') abrirSecaoNotas();
     else if (secao === 'crm') abrirSecaoNovoLead();
     else if (secao === 'ficha') abrirSecaoFicha();
+    else if (secao === 'dev') abrirSecaoDev();
   }
 
   // ═══════════════ Transcrição colada no áudio ═══════════════
@@ -1199,6 +1222,7 @@
     ligado: true,
     aviso: '',
     avisoWaJs: null,
+    diag: { etapa: 'nao_iniciou' },
   };
 
   function _trPodeRodar() {
@@ -1228,8 +1252,11 @@
 
   async function trSincronizar() {
     if (!_trPodeRodar()) return;
+    TR.diag = { etapa: 'listando', quando: new Date().toLocaleTimeString('pt-BR') };
     const lista = await _pedirPonte('listar_audios', {}, 20000);
     if (!lista || lista.erro || !Array.isArray(lista.audios)) {
+      TR.diag = { etapa: 'ponte_fora', erro: (lista && lista.erro) || 'sem_resposta',
+                  quando: new Date().toLocaleTimeString('pt-BR') };
       // wa-js indisponível: mostra o que já está transcrito lendo os ids do DOM,
       // e AVISA — falhar em silêncio foi o que fez isso parecer "não funciona".
       const motivo = (lista && lista.erro) || 'sem_resposta';
@@ -1257,6 +1284,8 @@
       trLimparChips();
     }
     const ids = lista.audios.map((a) => a.msg_id);
+    TR.diag = { etapa: 'audios_encontrados', total: ids.length,
+                quando: new Date().toLocaleTimeString('pt-BR') };
     if (!ids.length) return;
     const faltaCache = ids.filter((id) => !TR.cache.has(id));
     if (faltaCache.length) {
@@ -1270,9 +1299,10 @@
       }
     }
     trPintar();
-    // O que ainda não tem texto entra na fila, do mais recente pro mais antigo
-    // (lista já vem ordenada assim) — o que interessa aparece primeiro.
     const pendentes = ids.filter((id) => !TR.cache.has(id));
+    TR.diag = { etapa: 'pronto', total: ids.length,
+                em_cache: ids.length - pendentes.length, na_fila: pendentes.length,
+                etiquetas: TR.chips.size, quando: new Date().toLocaleTimeString('pt-BR') };
     TR.fila = pendentes;
     trProcessarFila();
   }
@@ -1408,6 +1438,93 @@
         if (!pronto) { window.removeEventListener('message', onMsg); resolve(null); }
       }, tetoMs || 30000);
     });
+  }
+
+  // Diagnóstico legível da transcrição, pra ninguém precisar abrir o console.
+  // Um recurso que falha calado é indistinguível de um recurso que não existe —
+  // foi exatamente o que aconteceu aqui.
+  function trDiagnosticoHtml() {
+    const d = TR.diag || {};
+    const rot = {
+      nao_iniciou: 'ainda não iniciou (aguarde alguns segundos)',
+      listando: 'procurando áudios na conversa…',
+      ponte_fora: 'a ponte com o WhatsApp não respondeu (' + (d.erro || '?') + ')',
+      audios_encontrados: 'encontrou ' + (d.total || 0) + ' áudio(s), consultando…',
+      pronto: (d.total || 0) + ' áudio(s) · ' + (d.em_cache || 0) + ' já transcrito(s) · ' +
+              (d.na_fila || 0) + ' na fila · ' + (d.etiquetas || 0) + ' etiqueta(s) na tela',
+    };
+    const txt = rot[d.etapa] || d.etapa || '—';
+    const ruim = d.etapa === 'ponte_fora' || (d.etapa === 'pronto' && !d.total);
+    return '<div class="job-tr-diag' + (ruim ? ' ruim' : '') + '">' +
+      '<b>Transcrição:</b> ' + esc(txt) +
+      (TR.aviso ? ' · <b>' + esc(TR.aviso) + '</b>' : '') +
+      (d.quando ? ' <span class="job-tr-diag-h">' + esc(d.quando) + '</span>' : '') +
+      '</div>';
+  }
+
+  // ═══════════════ Modo desenvolvedor ═══════════════
+  // Tudo na mão: o que está de pé, o que falhou e por quê, com botão pra disparar
+  // cada coisa na hora em vez de esperar o relógio. Existe porque um recurso que
+  // falha calado é indistinguível de um recurso que não existe — foi o que
+  // aconteceu com a transcrição, e me custou três rodadas de adivinhação.
+  let _devLigado = false;
+
+  async function abrirSecaoDev() {
+    setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div>' +
+                  '<div class="job-sem-analise-txt">Coletando estado…</div></div>');
+    const ponte = await _pedirPonte('listar_audios', {}, 12000);
+    const temWpp = !(ponte && ponte.erro === 'wpp_ausente');
+    const d = TR.diag || {};
+    const linha = (rot, val, ruim) =>
+      '<div class="job-dev-linha' + (ruim ? ' ruim' : '') + '"><span>' + esc(rot) +
+      '</span><b>' + esc(val) + '</b></div>';
+    setCorpoSecao(
+      '<div class="job-dev">' +
+        '<div class="job-cnpj-titulo">Diagnóstico</div>' +
+        '<div class="job-cnpj-sub">Estado real de cada peça, agora.</div>' +
+        linha('Versão da extensão', (chrome.runtime.getManifest() || {}).version || '?') +
+        linha('Ponte wa-js', temWpp ? 'respondendo' : 'FORA (' + ((ponte && ponte.erro) || 'sem resposta') + ')', !temWpp) +
+        linha('Conversa aberta', (ponte && ponte.chat_id) ? ponte.chat_id : 'nenhuma', !(ponte && ponte.chat_id)) +
+        linha('Áudios na conversa', String((ponte && ponte.audios && ponte.audios.length) || 0)) +
+        linha('Transcrições em memória', String(TR.cache.size)) +
+        linha('Etiquetas na tela', String(TR.chips.size)) +
+        linha('Última etapa', String(d.etapa || '—') + (d.quando ? ' · ' + d.quando : ''),
+              d.etapa === 'ponte_fora') +
+        (TR.aviso ? linha('Aviso', TR.aviso, true) : '') +
+        linha('Varredura', VAR.rodando ? 'rodando agora'
+              : (VAR.ultimaRodada ? 'última: ' + new Date(VAR.ultimaRodada).toLocaleTimeString('pt-BR') : 'ainda não rodou')) +
+        linha('Varredura (placar)', VAR.placar.analisadas + ' analisadas · ' +
+              VAR.placar.puladas + ' puladas · ' + VAR.placar.erros + ' erros') +
+        '<div class="job-dev-btns">' +
+          '<button class="job-cnpj-btn" id="dev-transcrever">Transcrever esta conversa agora</button>' +
+          '<button class="job-cnpj-btn" id="dev-varrer">Rodar a varredura agora</button>' +
+          '<button class="job-cnpj-btn" id="dev-repintar">Repintar etiquetas</button>' +
+        '</div>' +
+        '<div class="job-dev-saida" id="dev-saida"></div>' +
+      '</div>');
+
+    const saida = (t) => { const e = document.getElementById('dev-saida'); if (e) e.textContent = t; };
+    const btn = (id, rot, fn) => {
+      const b = document.getElementById(id);
+      if (!b) return;
+      b.addEventListener('click', async () => {
+        b.disabled = true; const t0 = b.textContent; b.textContent = 'Rodando…';
+        try { saida(await fn() || 'ok'); } catch (e) { saida('ERRO: ' + (e && e.message || e)); }
+        b.disabled = false; b.textContent = t0;
+        abrirSecaoDev();
+      });
+    };
+    btn('dev-transcrever', 'transcrever', async () => {
+      await trSincronizar();
+      const d2 = TR.diag || {};
+      return 'etapa=' + d2.etapa + ' · áudios=' + (d2.total || 0) +
+             ' · em cache=' + (d2.em_cache || 0) + ' · na fila=' + (d2.na_fila || 0);
+    });
+    btn('dev-varrer', 'varrer', async () => {
+      const p = await varreduraRodar(true);
+      return 'analisadas=' + p.analisadas + ' · puladas=' + p.puladas + ' · erros=' + p.erros;
+    });
+    btn('dev-repintar', 'repintar', async () => { trPintar(); return 'etiquetas=' + TR.chips.size; });
   }
 
   // ═══════════════ Varredura diária das conversas ═══════════════
@@ -4164,6 +4281,7 @@
   // recria o trilho se ele sumir), senão o trilho nasce no lado padrão
   // ('direita') e pula pro lado configurado um instante depois, toda vez que
   // o Chrome descarta a aba em segundo plano e recarrega o content script.
+  _safeStorageGet(['jobDevMode']).then((c) => { _devLigado = !!(c && c.jobDevMode); }).catch(() => {});
   carregarPreferenciaLado().then(() => {
     criarTrilho();
     const obs = new MutationObserver(() => {

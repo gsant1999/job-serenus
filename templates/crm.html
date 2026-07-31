@@ -182,6 +182,24 @@
   .lead-trafego { font-size:10px; font-weight:800; padding:2px 8px; border-radius:11px; letter-spacing:.4px; }
   .lead-trafego.pago { background:linear-gradient(135deg,#f59e0b,#ef4444); color:#fff; }
   .lead-trafego.org  { background:rgba(148,163,184,.18); color:#cbd5e1; }
+  .lead-sub-idade { font-size:9.5px; font-weight:700; padding:2px 8px; border-radius:9px;
+                    max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lead-sub-idade.quente { background:rgba(34,197,94,.16); color:#4ade80; }
+  .lead-sub-idade.morno  { background:rgba(250,204,21,.16); color:#eab308; }
+  .lead-sub-idade.parado { background:rgba(244,63,94,.16); color:#f43f5e; }
+  .lead-lid { display:inline-flex; align-items:center; gap:5px; margin-top:7px; cursor:pointer;
+              background:var(--panel-3); border:1px solid var(--borda); border-radius:7px;
+              padding:3px 8px; max-width:100%; transition:.15s; }
+  .lead-lid:hover { border-color:var(--azul); }
+  .lead-lid-tag { font-size:8.5px; font-weight:800; letter-spacing:.4px; padding:1px 5px; border-radius:5px; }
+  .lead-lid-tag.lid { background:rgba(168,85,247,.2); color:#d8b4fe; }
+  .lead-lid-tag.numero { background:rgba(34,197,94,.18); color:#4ade80; }
+  .lead-lid-tag.outro { background:var(--panel-2); color:var(--cinza-2); }
+  .lead-lid-cod { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:10px;
+                  color:var(--cinza); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lead-linha2 { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:3px; }
+  .lead-resp.externo { background:rgba(244,63,94,.12); color:var(--erro); }
+  .lead-resp.sem { background:var(--panel-3); color:var(--cinza-2); font-weight:500; }
   .lead-resp   { font-size:10px; padding:2px 8px; border-radius:8px; background:rgba(139,92,246,.15); color:#c4b5fd; font-weight:600; }
   .lead-meta-row { display:flex; align-items:center; gap:10px; margin-top:8px; font-size:11px; color:var(--cinza); }
   .lead-meta-row span { display:flex; align-items:center; gap:4px; }
@@ -481,7 +499,15 @@
           <div class="lead-card-top">
             <div style="flex:1; min-width:0;">
               <div class="lead-nome">{{ lead.nome }}</div>
-              {% if lead.empresa %}<div class="lead-cidade">{{ lead.empresa }}</div>{% endif %}
+              {# Consultor no TOPO, junto do nome. Estava no meio das tags, embaixo
+                 — na coluna estreita ele caía pra terceira linha e sumia. É a
+                 primeira coisa que o admin procura ao varrer o quadro. #}
+              <div class="lead-linha2">
+                {% if lead.responsavel_nome %}<span class="lead-resp">{{ lead.responsavel_nome.split()[0] }}</span>
+                {% elif lead.consultor_externo %}<span class="lead-resp externo" title="Sem consultor cadastrado no JOB — valor original da planilha">{{ lead.consultor_externo }}</span>
+                {% else %}<span class="lead-resp sem" title="Nenhum consultor responsável">sem consultor</span>{% endif %}
+                {% if lead.empresa %}<span class="lead-cidade">{{ lead.empresa }}</span>{% endif %}
+              </div>
             </div>
             <div class="lead-avatar">{{ lead.nome[0]|upper if lead.nome else '?' }}</div>
           </div>
@@ -492,10 +518,28 @@
             </span>
             {% if lead.trafego == 'Pago' %}<span class="lead-trafego pago" title="Veio de anúncio pago (Google Ads)">PAGO</span>
             {% elif lead.trafego == 'Orgânico' %}<span class="lead-trafego org" title="Veio de tráfego orgânico (não pago)">Orgânico</span>{% endif %}
-            {% if lead.responsavel_nome %}<span class="lead-resp">{{ lead.responsavel_nome.split()[0] }}</span>
-            {% elif lead.consultor_externo %}<span class="lead-resp" style="background:rgba(244,63,94,.12); color:var(--erro);" title="Sem consultor cadastrado no JOB — valor original da planilha">{{ lead.consultor_externo }}</span>{% endif %}
             {% if esf.texto %}<span class="lead-esfriando-tag" title="Tempo sem avançar de etapa ou de sub-status — prazo definido na etapa">{{ esf.texto }}</span>{% endif %}
+            {# Tempo desde a ÚLTIMA MUDANÇA de sub-status. Diferente da tarja de
+               "parado": aquela conta o prazo da etapa, esta diz há quanto tempo o
+               andamento não mexe. Um lead que trocou de sub-status hoje está sendo
+               trabalhado; um que está no mesmo há 9 dias, não — e isso não
+               aparecia em lugar nenhum. #}
+            {% if lead.sub_status and esf.dias is defined and esf.dias > 0 %}
+            <span class="lead-sub-idade {{ 'quente' if esf.dias < 2 else ('morno' if esf.dias < 5 else 'parado') }}"
+                  title="Sub-status '{{ lead.sub_status }}' sem mudar há {{ esf.dias }} dia(s)">
+              {{ lead.sub_status }} há {{ esf.dias }}d
+            </span>
+            {% endif %}
           </div>
+          {% if wa_do_lead.get(lead.id) %}
+          {# @lid no CARD, direto: o consultor identifica a conversa sem abrir a
+             ficha, e clicando cai na ficha desse lead. #}
+          <div class="lead-lid" onclick="event.stopPropagation(); abrirFicha({{ lead.id }})"
+               title="Conversa no WhatsApp: {{ wa_do_lead[lead.id].chat_id }} — clique para abrir a ficha">
+            <span class="lead-lid-tag {{ wa_do_lead[lead.id].tipo }}">{{ '@lid' if wa_do_lead[lead.id].tipo == 'lid' else 'nº' }}</span>
+            <span class="lead-lid-cod">{{ wa_do_lead[lead.id].curto }}</span>
+          </div>
+          {% endif %}
           {% if etqs %}
           <div class="lead-etqs">
             {% for e in etqs %}
