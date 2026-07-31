@@ -279,25 +279,57 @@
     return { msg: null, via: null };
   }
 
-  // Mesmo caminho da wa-js, mas a partir do modelo: cache de blob, e download
-  // pelo proprio modelo (msg.downloadMedia) — que nao interpreta id nenhum.
+  // Tira o Blob de onde ele estiver. Ordem = do mais instantaneo pro mais caro.
+  //
+  // O "audio nao veio apos o download" era eu olhando UM lugar so
+  // (mediaData.mediaBlob.forceToBlob) depois de mandar baixar. O WhatsApp guarda
+  // a midia decifrada em varios lugares dependendo de como ela chegou — se o
+  // audio ja tocou, ela ja esta em memoria e nao ha nada a baixar. E por isso que
+  // as outras ferramentas parecem instantaneas: elas leem o que ja esta ali, em
+  // vez de pedir de novo.
+  function _blobDeQualquerLugar(msg) {
+    const cand = [];
+    const md = msg && msg.mediaData;
+    if (md) {
+      cand.push(md.mediaBlob, md._mediaBlob, md.blob, md.mediaObject, md.preview, md.fullHeightThumb);
+    }
+    if (msg && msg.mediaObject) cand.push(msg.mediaObject, msg.mediaObject.blob);
+    for (const c of cand) {
+      if (!c) continue;
+      try {
+        if (c instanceof Blob) return c;
+        if (typeof c.forceToBlob === 'function') { const b = c.forceToBlob(); if (b) return b; }
+        if (c._blob instanceof Blob) return c._blob;
+        if (c.blob instanceof Blob) return c.blob;
+      } catch (e) { /* proximo */ }
+    }
+    return null;
+  }
+
   async function _blobDoModelo(msg) {
-    const pegar = () => {
-      const md = msg.mediaData;
-      if (md && md.mediaBlob && md.mediaBlob.forceToBlob) {
-        const b = md.mediaBlob.forceToBlob();
-        if (b) return b;
-      }
-      return null;
-    };
     if (!msg.mediaData) throw new Error('mensagem sem mídia');
-    let b = pegar();
+    // 1) JA ESTA AQUI? Audio ouvido (ou pre-carregado pelo WhatsApp) responde na
+    //    hora, sem rede nenhuma. Este e o caminho instantaneo.
+    let b = _blobDeQualquerLugar(msg);
     if (b) return b;
-    if (typeof msg.downloadMedia !== 'function') throw new Error('modelo sem downloadMedia');
-    await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1, isUserInitiated: true });
-    b = pegar();
-    if (!b) throw new Error('áudio não veio após o download');
-    return b;
+    // 2) Caminho oficial da wa-js, mas com O ID DO STORE, nao o do DOM. O do
+    //    store tem remote @c.us, que o parser dela entende; era o id do DOM
+    //    (@lid) que estourava. Usar a funcao pronta e melhor do que refazer o
+    //    que ela ja faz: ela trata cache, retentativa e video-como-documento.
+    try {
+      const ser = msg.id && msg.id._serialized;
+      if (ser) {
+        const m = await window.WPP.chat.downloadMedia(ser);
+        if (m) return m;
+      }
+    } catch (e) { /* cai pro proximo */ }
+    // 3) Baixa pelo proprio modelo e reprocura em todos os lugares.
+    if (typeof msg.downloadMedia === 'function') {
+      await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1, isUserInitiated: true });
+      b = _blobDeQualquerLugar(msg);
+      if (b) return b;
+    }
+    throw new Error('não consegui ler o áudio desta mensagem');
   }
 
   async function baixarAudiosPorId(ids) {

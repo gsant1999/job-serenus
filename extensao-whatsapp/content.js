@@ -1371,14 +1371,19 @@
       // Mensagem curta e discreta: o erro tecnico vai pro title, nao pra tela.
       // Uma linha vermelha do tamanho da conversa inteira pra cada audio que
       // falhou e pior do que nao ter transcricao nenhuma.
-      // O MOTIVO na tela, curto. "nao deu pra transcrever" sem dizer por que
-      // deixa o consultor sem saida — e me deixa adivinhando de longe.
-      const pq = TR.erro.get(id) || 'motivo desconhecido';
-      slot.innerHTML = '<div class="job-tr-falhou" title="' + esc(pq) + '">' +
-        '<span>' + esc(pq) + '</span>' +
-        '<button class="job-tr-btn mini" type="button">tentar de novo</button></div>';
+      // Falhou: volta a ser o MESMO botao de antes, que e o que a pessoa quer
+      // clicar. "tentar de novo" como link separado ao lado de uma frase de erro
+      // e feio e redundante — o botao ja e a tentativa. O motivo fica no
+      // title, discreto, e some assim que der certo.
+      const pq = TR.erro.get(id) || '';
+      slot.innerHTML = '<button class="job-tr-btn falhou" type="button" title="' +
+        esc(pq || 'não deu certo — clique pra tentar de novo') + '">' +
+        _ICO_TRANSCREVER + 'Transcrever</button>' +
+        (pq ? '<span class="job-tr-motivo">' + esc(pq) + '</span>' : '');
       const b = slot.querySelector('button');
-      if (b) b.addEventListener('click', (ev) => { ev.stopPropagation(); TR.cache.delete(id); trTranscrever(id); });
+      if (b) b.addEventListener('click', (ev) => {
+        ev.stopPropagation(); TR.cache.delete(id); TR.erro.delete(id); trTranscrever(id);
+      });
       return;
     }
     slot.innerHTML = '<div class="job-tr-texto"><span class="job-tr-tag">transcricao</span>' +
