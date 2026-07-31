@@ -87,6 +87,87 @@ async function salvarNotificacaoWpp(ligado){
 
 {% if varr_cfg %}
 <div class="card" style="margin-top:18px;">
+  <div class="card-header"><h3>Chaves de API</h3></div>
+  <div style="padding:0 16px 8px; font-size:13px; color:var(--cinza); line-height:1.6;">
+    Porta de acesso da API <b style="color:var(--texto);">sem login</b>: quem integra usa a chave,
+    não a sua sessão. Envie em <code>Authorization: Bearer &lt;chave&gt;</code> — padrão de mercado.
+    <br><b style="color:var(--texto);">A chave é mostrada uma única vez.</b> O JOB guarda só um resumo
+    criptográfico dela: nem eu, nem um vazamento do banco conseguem recuperá-la. Perdeu, revoga e cria outra.
+  </div>
+
+  <div style="padding:6px 16px 16px;">
+    <div class="ak-nova">
+      <input type="text" id="ak-nome" placeholder="Para que é esta chave? (ex: Site de cotação)">
+      <div class="ak-escopos">
+        {% for e in api_escopos %}
+        <label><input type="checkbox" value="{{ e }}" {% if e == 'cotacao:ler' %}checked{% endif %}> {{ e }}</label>
+        {% endfor %}
+      </div>
+      <button class="btn btn-sm" onclick="akCriar(this)">Gerar chave</button>
+    </div>
+    <div id="ak-resultado"></div>
+
+    <table style="width:100%; margin-top:14px; font-size:13px;">
+      <thead><tr>
+        <th style="text-align:left;">Nome</th><th style="text-align:left;">Identificação</th>
+        <th style="text-align:left;">Escopos</th><th>Usos</th><th style="text-align:left;">Último uso</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for k in api_chaves %}
+        <tr {% if k.revogada_em %}style="opacity:.45;"{% endif %}>
+          <td>{{ k.nome }}</td>
+          <td><code style="font-size:11.5px;">{{ k.prefixo }}…</code></td>
+          <td style="color:var(--cinza-2); font-size:11.5px;">{{ k.escopos }}</td>
+          <td class="td-mono" style="text-align:center;">{{ k.usos }}</td>
+          <td style="color:var(--cinza-2); font-size:11.5px;">{{ k.ultimo_uso or 'nunca' }}</td>
+          <td style="text-align:right;">
+            {% if k.revogada_em %}<span class="tag tag-vm">revogada</span>
+            {% else %}<button class="btn-outline btn-sm" onclick="akRevogar({{ k.id }}, '{{ k.nome }}')">Revogar</button>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not api_chaves %}<tr><td colspan="6" style="padding:16px; text-align:center; color:var(--cinza-2);">Nenhuma chave criada.</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+  .ak-nova { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .ak-nova input[type=text] { flex:1; min-width:220px; background:var(--panel-2);
+    border:1px solid var(--borda); border-radius:8px; padding:8px 12px; color:var(--texto); font-size:13px; }
+  .ak-escopos { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--cinza); }
+  .ak-escopos label { display:inline-flex; gap:5px; align-items:center; cursor:pointer; }
+  .ak-chave { margin-top:12px; background:rgba(34,197,94,.08); border:1px solid rgba(34,197,94,.4);
+    border-radius:10px; padding:13px 15px; }
+  .ak-chave code { display:block; font-size:13px; word-break:break-all; color:var(--texto);
+    background:var(--panel-3); padding:9px 11px; border-radius:7px; margin:8px 0; user-select:all; }
+</style>
+<script>
+async function akCriar(b){
+  const nome=document.getElementById('ak-nome').value.trim();
+  if(!nome){ alert('Dê um nome pra chave — é como você vai saber qual revogar depois.'); return; }
+  const escopos=Array.from(document.querySelectorAll('.ak-escopos input:checked')).map(i=>i.value);
+  b.disabled=true; const t=b.textContent; b.textContent='Gerando…';
+  const r=await fetch('/configuracoes/api-chaves',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({acao:'criar',nome,escopos})});
+  const d=await r.json(); b.disabled=false; b.textContent=t;
+  if(!d.ok){ alert(d.erro||'Erro'); return; }
+  document.getElementById('ak-resultado').innerHTML =
+    '<div class="ak-chave"><b>' + d.aviso + '</b><code>' + d.chave + '</code>' +
+    '<button class="btn-outline btn-sm" onclick="navigator.clipboard.writeText(\'' + d.chave + '\');this.textContent=\'Copiado\'">Copiar</button></div>';
+}
+async function akRevogar(id, nome){
+  if(!confirm('Revogar a chave "' + nome + '"? Quem estiver usando ela para de funcionar na hora.')) return;
+  const r=await fetch('/configuracoes/api-chaves',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({acao:'revogar',id})});
+  if((await r.json()).ok) location.reload();
+}
+</script>
+{% endif %}
+
+{% if varr_cfg %}
+<div class="card" style="margin-top:18px;">
   <div class="card-header"><h3>Leitura automática das conversas</h3></div>
   <div style="padding:0 16px 8px; font-size:13px; color:var(--cinza); line-height:1.6;">
     A extensão lê as conversas do dia no WhatsApp do consultor e alimenta o CRM sozinha.

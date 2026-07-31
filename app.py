@@ -897,6 +897,21 @@ def init_db():
             # SELECT numa tabela inexistente aborta a TRANSAÇÃO INTEIRA, e toda query
             # seguinte na mesma conexão falha com "current transaction is aborted".
             # Foi assim que o /configuracoes caiu inteiro por causa de uma config.
+            # CHAVES DE API. A chave NUNCA é guardada: só o SHA-256 dela. Um dump do
+            # banco não dá acesso a nada — padrão de mercado (Stripe, GitHub, OpenAI).
+            """CREATE TABLE IF NOT EXISTS api_chave (
+                id SERIAL PRIMARY KEY,
+                nome TEXT NOT NULL,
+                prefixo TEXT NOT NULL,
+                hash TEXT UNIQUE NOT NULL,
+                escopos TEXT DEFAULT 'cotacao:ler',
+                criado_por INTEGER,
+                criado_em TEXT,
+                ultimo_uso TEXT,
+                usos INTEGER DEFAULT 0,
+                revogada_em TEXT,
+                revogada_por INTEGER
+            )""",
             """CREATE TABLE IF NOT EXISTS meta_flags_valor (
                 k TEXT PRIMARY KEY,
                 v TEXT
@@ -1621,6 +1636,13 @@ def init_db():
             resumo TEXT,
             criado_por INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS api_chave (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL, prefixo TEXT NOT NULL, hash TEXT UNIQUE NOT NULL,
+            escopos TEXT DEFAULT 'cotacao:ler', criado_por INTEGER, criado_em TEXT,
+            ultimo_uso TEXT, usos INTEGER DEFAULT 0,
+            revogada_em TEXT, revogada_por INTEGER
         );
         CREATE TABLE IF NOT EXISTS meta_flags_valor (
             k TEXT PRIMARY KEY,
@@ -2460,6 +2482,12 @@ def init_db():
         # Frescor: quando o preço foi extraído/atualizado do PDC pela última vez
         # (selo de frescor da opção C — a tela avisa o que está velho).
         ("cotacao_tabela", "atualizado_em", "TIMESTAMP"),
+        # Preço é o que muda; sem isto o consumidor da API rebaixa tudo sempre.
+        ("cotacao_preco", "atualizado_em", "TIMESTAMP"),
+        # PNG da cotação gerado no navegador e persistido — é o que permite a API
+        # entregar a IMAGEM sem precisar de navegador no servidor.
+        ("cotacao_salva", "imagem_arquivo", "TEXT"),
+        ("cotacao_salva", "imagem_em", "TEXT"),
         # Módulos liberados por consultor (JSON de chaves). NULL = todos (default,
         # não muda nada). Admin ignora — vê tudo sempre.
         ("usuarios", "modulos", "TEXT"),
@@ -14710,6 +14738,297 @@ def api_whatsapp_lead_criar():
     return _wa_cors(jsonify({"ok": True, "ja_existia": False, "lead_id": lead_id}))
 
 
+# ═══════════════ API PÚBLICA: CHAVES ═══════════════════════════════════════════
+# Padrão de mercado: chave mostrada UMA vez; banco guarda só o SHA-256; prefixo em
+# claro só pra identificar; escopos separam leitura de escrita; revogação imediata.
+_API_ESCOPOS = ['cotacao:ler', 'cotacao:escrever', 'crm:ler']
+_API_PREFIXO = 'job_live_'
+# Teto por chave/minuto: /calcular roda no MESMO processo que serve o CRM — sem
+# teto, um consumidor em laço derruba o sistema pra todo mundo.
+_API_LIMITE_MIN = int(os.environ.get('API_LIMITE_POR_MINUTO', '120'))
+_API_USO = {}
+
+
+def _api_hash(chave):
+    return hashlib.sha256((chave or '').encode('utf-8')).hexdigest()
+
+
+def _api_erro(codigo, msg, http=400, extra=None):
+    corpo = {'ok': False, 'erro': codigo, 'mensagem': msg}
+    if extra:
+        corpo.update(extra)
+    return jsonify(corpo), http
+
+
+def api_requer_chave(escopo):
+    """Autenticação da API pública: sem login, sem cookie, sem sessão."""
+    def deco(f):
+        @wraps(f)
+        def w(*a, **kw):
+            if request.method == 'OPTIONS':
+                return _wa_cors(Response(status=204))
+            auth = (request.headers.get('Authorization') or '').strip()
+            bruta = auth[7:].strip() if auth.lower().startswith('bearer ') \
+                else (request.headers.get('X-API-Key') or '').strip()
+            if not bruta:
+                r = _api_erro('sem_chave', 'Envie a chave em Authorization: Bearer <chave>', 401)
+                r[0].headers['WWW-Authenticate'] = 'Bearer realm="JOB API"'
+                return r
+            conn = db()
+            reg = conn.execute("SELECT * FROM api_chave WHERE hash=?", (_api_hash(bruta),)).fetchone()
+            # Mensagem IGUAL pra chave inexistente e revogada: distinguir as duas
+            # ajuda quem está tentando adivinhar chave.
+            if not reg or reg['revogada_em']:
+                close_db(conn)
+                return _api_erro('chave_invalida', 'Chave inválida ou revogada', 401)
+            escopos = (reg['escopos'] or '').split(',')
+            if escopo not in escopos:
+                close_db(conn)
+                return _api_erro('sem_permissao', f"Esta chave não tem o escopo '{escopo}'",
+                                 403, {'escopos_da_chave': escopos})
+            jan = int(time.time() // 60)
+            marca = (reg['id'], jan)
+            _API_USO[marca] = _API_USO.get(marca, 0) + 1
+            if _API_USO[marca] > _API_LIMITE_MIN:
+                close_db(conn)
+                r = _api_erro('limite_excedido', f'Máximo de {_API_LIMITE_MIN} chamadas por minuto', 429)
+                r[0].headers['Retry-After'] = '60'
+                return r
+            if len(_API_USO) > 5000:
+                for k in [k for k in _API_USO if k[1] < jan - 2]:
+                    _API_USO.pop(k, None)
+            try:
+                conn.execute("UPDATE api_chave SET ultimo_uso=?, usos=COALESCE(usos,0)+1 WHERE id=?",
+                             (_agora_sp(), reg['id']))
+                conn.commit()
+            except Exception:
+                try: conn.rollback()
+                except Exception: pass
+            close_db(conn)
+            # A view pode devolver Response OU a tupla (corpo, status) — que é o
+            # que _api_erro faz. Aplicar CORS direto na tupla estoura.
+            res = f(*a, **kw)
+            if isinstance(res, tuple):
+                return (_wa_cors(res[0]),) + tuple(res[1:])
+            return _wa_cors(res)
+        return w
+    return deco
+
+
+@app.route('/configuracoes/api-chaves', methods=['POST'])
+@login_required
+@admin_required
+def configuracoes_api_chaves():
+    d = request.json or {}
+    conn = db()
+    if d.get('acao') == 'criar':
+        nome = (d.get('nome') or '').strip()
+        if not nome:
+            close_db(conn); return jsonify({"ok": False, "erro": "Dê um nome pra chave"}), 400
+        esc = ','.join([e for e in (d.get('escopos') or []) if e in _API_ESCOPOS]) or 'cotacao:ler'
+        chave = _API_PREFIXO + secrets.token_urlsafe(32).replace('-', '').replace('_', '')[:40]
+        conn.execute("""INSERT INTO api_chave (nome, prefixo, hash, escopos, criado_por, criado_em)
+                        VALUES (?,?,?,?,?,?)""",
+                     (nome[:80], chave[:len(_API_PREFIXO) + 6], _api_hash(chave), esc,
+                      session['user_id'], _agora_sp()))
+        conn.commit()
+        reg = conn.execute("SELECT id FROM api_chave WHERE hash=?", (_api_hash(chave),)).fetchone()
+        close_db(conn)
+        # A chave vai NESTA resposta e em nenhum outro lugar. Perdeu, revoga e cria
+        # outra — é o comportamento correto, não uma limitação.
+        return jsonify({"ok": True, "chave": chave, "id": reg['id'],
+                        "aviso": "Copie agora: esta chave não será mostrada de novo."})
+    if d.get('acao') == 'revogar':
+        try:
+            kid = int(d.get('id'))
+        except (TypeError, ValueError):
+            close_db(conn); return jsonify({"ok": False, "erro": "Chave inválida"}), 400
+        conn.execute("UPDATE api_chave SET revogada_em=?, revogada_por=? WHERE id=? AND revogada_em IS NULL",
+                     (_agora_sp(), session['user_id'], kid))
+        conn.commit(); close_db(conn)
+        return jsonify({"ok": True})
+    close_db(conn)
+    return jsonify({"ok": False, "erro": "Ação desconhecida"}), 400
+
+
+# ═══════════════ API v1 — COTAÇÃO ═════════════════════════════════════════════
+@app.route('/api/v1/cotacao/planos', methods=['GET', 'OPTIONS'])
+@api_requer_chave('cotacao:ler')
+def api_v1_cotacao_planos():
+    conn = db()
+    q, p = "SELECT * FROM cotacao_tabela WHERE 1=1", []
+    for campo in ('modalidade', 'acomodacao', 'coparticipacao', 'operadora'):
+        v = (request.args.get(campo) or '').strip()
+        if v:
+            q += f" AND LOWER({campo})=LOWER(?)"; p.append(v)
+    if (request.args.get('ativo') or '1') != 'todos':
+        q += " AND ativo=?"; p.append(1 if (request.args.get('ativo') or '1') == '1' else 0)
+    lim = min(500, max(1, request.args.get('limite', type=int) or 200))
+    linhas = conn.execute(q + " ORDER BY operadora, plano LIMIT ?", p + [lim]).fetchall()
+    precos = {}
+    ids = [r['id'] for r in linhas]
+    if ids:
+        marc = ','.join(['?'] * len(ids))
+        for r in conn.execute(f"SELECT tabela_id, faixa, preco FROM cotacao_preco "
+                              f"WHERE tabela_id IN ({marc})", ids).fetchall():
+            precos.setdefault(r['tabela_id'], {})[r['faixa']] = round(float(r['preco'] or 0), 2)
+    close_db(conn)
+    return jsonify({'ok': True, 'faixas': FAIXAS_ETARIAS, 'total': len(linhas),
+                    'planos': [{'id': t['id'], 'operadora': t['operadora'], 'plano': t['plano'],
+                                'modalidade': t['modalidade'], 'acomodacao': t['acomodacao'],
+                                'coparticipacao': t['coparticipacao'], 'abrangencia': t['abrangencia'],
+                                'vigencia': t['vigencia'], 'ativo': bool(t['ativo']),
+                                'faixas': precos.get(t['id'], {})} for t in linhas]})
+
+
+@app.route('/api/v1/cotacao/calcular', methods=['POST', 'OPTIONS'])
+@api_requer_chave('cotacao:ler')
+def api_v1_cotacao_calcular():
+    """Calcula sem salvar. É o que a extensão usa pra mostrar preço na conversa
+    sem sujar o banco com cotação de rascunho."""
+    d = request.get_json(silent=True) or {}
+    bruto = d.get('idades') or []
+    if not isinstance(bruto, list) or not bruto:
+        return _api_erro('idades_obrigatorias', 'Envie "idades": [42, 39, 12]')
+    idades = []
+    for x in bruto[:60]:
+        try:
+            i = int(x)
+        except (TypeError, ValueError):
+            return _api_erro('idade_invalida', f'Idade inválida: {x!r}')
+        if i < 0 or i > 120:
+            return _api_erro('idade_invalida', f'Idade fora de 0 a 120: {i}')
+        idades.append(i)
+    pl = d.get('planos') or []
+    ids, recs = [], {}
+    for x in pl[:30]:
+        v = x.get('plano_id') if isinstance(x, dict) else x
+        try:
+            vi = int(v)
+        except (TypeError, ValueError):
+            continue
+        ids.append(vi)
+        if isinstance(x, dict) and x.get('recomendacao'):
+            recs[vi] = x['recomendacao']
+    if not ids:
+        return _api_erro('planos_obrigatorios', 'Envie "planos": [42, 57] ou [{"plano_id": 42}]')
+    conn = db()
+    planos, total, dist, avisos = calcular_cotacao(conn, idades, ids, recs)
+    close_db(conn)
+    return jsonify({'ok': True, 'vidas': len(idades), 'distribuicao': dist,
+                    'resultados': planos, 'total_geral': total, 'avisos': avisos})
+
+
+def _cotacao_completa(conn, c):
+    """Tudo o que existe de uma cotação salva — é o "extrair tudo" do pedido."""
+    d = dict(c)
+    for campo, destino in (('planos_json', 'planos'), ('vidas_json', 'vidas')):
+        try:
+            d[destino] = json.loads(d.get(campo) or '[]')
+        except Exception:
+            d[destino] = []
+        d.pop(campo, None)
+    d['url_publica'] = _SITE_BASE_URL + '/c/' + (d.get('token') or '')
+    d['url_documento'] = '/cotacao/documento/' + str(d.get('id'))
+    d['imagem_url'] = ('/api/v1/cotacao/%s/imagem' % d['id']) if d.get('imagem_arquivo') else None
+    try:
+        d['engajamento'] = [dict(r) for r in conn.execute(
+            "SELECT evento, dados, criado_em FROM cotacao_engajamento WHERE cotacao_id=? ORDER BY id",
+            (d['id'],)).fetchall()]
+    except Exception:
+        d['engajamento'] = []
+    return d
+
+
+@app.route('/api/v1/cotacao/<int:cid>', methods=['GET', 'OPTIONS'])
+@api_requer_chave('cotacao:ler')
+def api_v1_cotacao_ler(cid):
+    conn = db()
+    c = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn); return _api_erro('nao_encontrada', 'Cotação não encontrada', 404)
+    out = _cotacao_completa(conn, c)
+    close_db(conn)
+    return jsonify({'ok': True, 'cotacao': out})
+
+
+@app.route('/api/v1/cotacao/salvas', methods=['GET', 'OPTIONS'])
+@api_requer_chave('cotacao:ler')
+def api_v1_cotacao_salvas():
+    """O mesmo histórico da tela /cotacao/salvas, extraível por inteiro."""
+    conn = db()
+    q, p = "SELECT * FROM cotacao_salva WHERE 1=1", []
+    if request.args.get('lead_id', type=int):
+        q += " AND lead_id=?"; p.append(request.args.get('lead_id', type=int))
+    tel = (request.args.get('telefone') or '').strip()
+    if tel:
+        tn = _normalizar_telefone(tel)
+        if tn:
+            q += " AND cliente_telefone LIKE ?"; p.append('%' + tn[-8:])
+    if (request.args.get('desde') or '').strip():
+        q += " AND CAST(criado_em AS TEXT) >= ?"; p.append(request.args.get('desde'))
+    lim = min(200, max(1, request.args.get('limite', type=int) or 50))
+    linhas = conn.execute(q + " ORDER BY id DESC LIMIT ?", p + [lim]).fetchall()
+    out = [_cotacao_completa(conn, c) for c in linhas]
+    close_db(conn)
+    return jsonify({'ok': True, 'cotacoes': out, 'total': len(out)})
+
+
+@app.route('/api/v1/cotacao/<int:cid>/imagem', methods=['GET', 'OPTIONS'])
+@api_requer_chave('cotacao:ler')
+def api_v1_cotacao_imagem(cid):
+    """PNG da cotação. A imagem é renderizada no NAVEGADOR (html2canvas) e
+    persistida quando alguém abre o documento — o servidor não tem navegador."""
+    conn = db()
+    c = conn.execute("SELECT imagem_arquivo FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+    close_db(conn)
+    if not c:
+        return _api_erro('nao_encontrada', 'Cotação não encontrada', 404)
+    if not c['imagem_arquivo']:
+        return _api_erro('imagem_ausente',
+                         f'Imagem ainda não gerada. Abrir /cotacao/documento/{cid} uma vez a cria.',
+                         404, {'url_documento': f'/cotacao/documento/{cid}'})
+    conteudo, ctype = _localizar_anexo(os.path.basename(c['imagem_arquivo']))
+    if conteudo is None:
+        return _api_erro('imagem_ausente', 'Arquivo não encontrado no armazenamento', 404)
+    resp = Response(conteudo, mimetype=ctype or 'image/png')
+    resp.headers['Cache-Control'] = 'private, max-age=3600'
+    return resp
+
+
+@app.route('/cotacao/<int:cid>/imagem', methods=['POST'])
+def cotacao_guardar_imagem(cid):
+    """A página do documento manda o PNG que ela mesma renderizou. Sem login de
+    propósito: o link público /c/<token> também renderiza, e não tem sessão."""
+    d = request.get_json(silent=True) or {}
+    b64 = (d.get('imagem') or '').strip()
+    if b64.startswith('data:'):
+        b64 = b64.split(',', 1)[-1]
+    if not b64 or len(b64) > 12_000_000:
+        return jsonify({'ok': False, 'erro': 'imagem_invalida'}), 400
+    conn = db()
+    c = conn.execute("SELECT id, imagem_arquivo FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
+    if not c:
+        close_db(conn); return jsonify({'ok': False, 'erro': 'nao_encontrada'}), 404
+    if c['imagem_arquivo']:
+        close_db(conn); return jsonify({'ok': True, 'ja_existia': True})
+    try:
+        import base64 as _b64i, io as _ioi
+        nome = f"COTACAO_{cid}_{secrets.token_hex(6)}.png"
+        upload_arquivo_r2(_ioi.BytesIO(_b64i.b64decode(b64)), f"cotacoes/{nome}")
+        conn.execute("UPDATE cotacao_salva SET imagem_arquivo=?, imagem_em=? WHERE id=?",
+                     (nome, _agora_sp(), cid))
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        close_db(conn)
+        app.logger.warning(f"[COTACAO_IMG] {cid}: {e}")
+        return jsonify({'ok': False, 'erro': 'falha_ao_salvar'}), 500
+    close_db(conn)
+    return jsonify({'ok': True})
+
+
 # ─── VARREDURA: CONFIGURAÇÃO ──────────────────────────────────────────────────
 # Guardada em meta_flags como JSON (chave 'varredura_cfg'): é config de uma coisa
 # só, não merece tabela própria, e assim já nasce disponível em todo lugar.
@@ -19460,6 +19779,66 @@ def material_apoio_pasta_excluir():
     return jsonify({"ok": True})
 
 
+def calcular_cotacao(conn, idades, plano_ids, recomendacoes=None):
+    """MOTOR DE CÁLCULO, fora da rota HTML.
+
+    Estava embutido em /cotacao/salvar, misturado com request.form e redirect —
+    o que obrigaria a API a ser uma CÓPIA. Duas cópias divergem: um dia alguém
+    corrige um arredondamento de um lado só e o preço da tela deixa de bater com
+    o da API.
+
+    Devolve (planos, total_geral, distribuicao, avisos). `avisos` existe porque
+    tabela incompleta NÃO PODE virar preço zero silencioso: numa tela alguém
+    estranha, numa API vira proposta errada mandada pro cliente.
+    """
+    recomendacoes = recomendacoes or {}
+    avisos = []
+    cont = {}
+    for idade in idades:
+        fx = _faixa_da_idade(idade)
+        if fx:
+            cont[fx] = cont.get(fx, 0) + 1
+    hoje = datetime.now(TZ_SP).strftime('%Y-%m')
+    planos, total_geral = [], 0.0
+    rec_map = {'1a': '1ª opção', '2a': '2ª opção', '3a': '3ª opção'}
+    for tid in plano_ids:
+        t = conn.execute("SELECT * FROM cotacao_tabela WHERE id=?", (tid,)).fetchone()
+        if not t:
+            avisos.append({'plano_id': tid, 'codigo': 'plano_inexistente',
+                           'mensagem': 'Plano não encontrado'})
+            continue
+        vig = (t['vigencia'] or '').strip()
+        if vig and len(vig) >= 7 and vig[:7] < hoje:
+            avisos.append({'plano_id': tid, 'codigo': 'vigencia_expirada',
+                           'mensagem': f"Tabela de {t['operadora']} · {t['plano']} venceu em {vig[:7]}"})
+        pmap = {p['faixa']: float(p['preco'] or 0) for p in
+                conn.execute("SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (tid,)).fetchall()}
+        linhas, total = [], 0.0
+        for fx in FAIXAS_ETARIAS:
+            qtd = cont.get(fx, 0)
+            if qtd <= 0:
+                continue
+            ausente = fx not in pmap
+            if ausente:
+                avisos.append({'plano_id': tid, 'codigo': 'preco_ausente',
+                               'mensagem': f"{t['operadora']} · {t['plano']} não tem preço na faixa "
+                                           f"{fx} — {qtd} vida(s) entraram como zero"})
+            preco = pmap.get(fx, 0)
+            sub = preco * qtd
+            total += sub
+            linhas.append({'faixa': fx, 'label': _faixa_label(fx), 'qtd': qtd,
+                           'preco': preco, 'subtotal': round(sub, 2), 'preco_ausente': ausente})
+        total_geral += total
+        planos.append({
+            'plano_id': tid, 'operadora': t['operadora'], 'plano': t['plano'],
+            'modalidade': t['modalidade'], 'acomodacao': t['acomodacao'],
+            'coparticipacao': t['coparticipacao'], 'abrangencia': t['abrangencia'],
+            'vigencia': t['vigencia'], 'linhas': linhas, 'total': round(total, 2),
+            'recomendacao': rec_map.get((recomendacoes.get(tid) or '').strip(), ''),
+        })
+    return planos, round(total_geral, 2), cont, avisos
+
+
 @app.route('/cotacao/salvar', methods=['POST'])
 @login_required
 def cotacao_salvar():
@@ -22868,9 +23247,18 @@ def configuracoes():
     notificar_wpp_leads = True if notificar_wpp_leads is None else bool(notificar_wpp_leads)
     # Varredura: só admin configura, mas a página é de todos — o bloco só aparece
     # pra quem pode mexer.
-    varr_cfg, varr_consultores = None, []
+    varr_cfg, varr_consultores, api_chaves = None, [], []
     if session.get('perfil') == 'admin':
         conn2 = db()
+        try:
+            api_chaves = [dict(r) for r in conn2.execute(
+                """SELECT id, nome, prefixo, escopos, criado_em, ultimo_uso,
+                          COALESCE(usos,0) usos, revogada_em
+                   FROM api_chave ORDER BY revogada_em IS NULL DESC, id DESC""").fetchall()]
+        except Exception as e:
+            try: conn2.rollback()
+            except Exception: pass
+            app.logger.warning(f"[API] chaves: {e}")
         varr_cfg = varredura_cfg(conn2)
         varr_consultores = [dict(r) for r in conn2.execute(
             """SELECT id, nome, COALESCE(varredura_ativa,0) varredura_ativa
@@ -22878,6 +23266,7 @@ def configuracoes():
         close_db(conn2)
     return render_template('configuracoes.html', som_atual=som_atual, sons=SONS_NOTIFICACAO,
                            varr_cfg=varr_cfg, varr_consultores=varr_consultores,
+                           api_chaves=api_chaves, api_escopos=_API_ESCOPOS,
                            notificar_wpp_leads=notificar_wpp_leads)
 
 

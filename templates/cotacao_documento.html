@@ -239,6 +239,27 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script>
+// Persiste o PNG na PRIMEIRA abertura. O servidor não tem navegador pra
+// renderizar a cotação — quem renderiza é esta página, então ela guarda o
+// resultado e a API passa a poder entregar a imagem.
+(function(){
+  var COTACAO_ID = {{ c.id if c else 'null' }};
+  if (!COTACAO_ID) return;
+  window.addEventListener('load', function(){
+    setTimeout(function(){
+      var alvo = document.getElementById('documento');
+      if (!alvo || typeof html2canvas !== 'function') return;
+      html2canvas(alvo, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas){
+        fetch('/cotacao/' + COTACAO_ID + '/imagem', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ imagem: canvas.toDataURL('image/png') })
+        }).catch(function(){});
+      }).catch(function(){});
+    }, 1500);
+  });
+})();
+</script>
+<script>
 async function enviarFeedbackCotacao(tipo, btn) {
   document.querySelectorAll('#fb-cotacao button').forEach(function(b){ b.disabled = true; b.style.opacity = '.6'; });
   try {
