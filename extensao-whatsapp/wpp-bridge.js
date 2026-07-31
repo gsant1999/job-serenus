@@ -202,50 +202,75 @@
   }
 
   // Baixa SÓ os áudios pedidos (os que não têm cache).
-  // Acha o OBJETO da mensagem a partir do id que veio do DOM.
+  // ACHAR e BAIXAR sem passar pelo parser de id da wa-js.
   //
-  // Passar o id cru pro downloadMedia estourava "Cannot read properties of
-  // undefined (reading '_serialized')": a wa-js tenta converter a string em
-  // chave e, em conversa @lid (o WhatsApp novo, que esconde o telefone), essa
-  // conversao devolve undefined. Com o OBJETO em maos nao ha o que converter.
+  // O erro real, agora com etapa nomeada, foi:
+  //   getMessageById: Cannot read properties of undefined (reading '_serialized')
   //
-  // Quatro caminhos, do mais barato pro mais caro, e cada um diz onde parou —
-  // pra proxima falha nomear a etapa em vez de ser mais um "nao deu".
-  async function _acharMensagem(id) {
+  // Fui ler a wa-js empacotada. getMessageById faz MsgKey.fromString(id) e depois
+  // assertGetChat(key.remote). Em conversa @lid — o WhatsApp novo, que esconde o
+  // telefone — esse remote nao vira um Wid valido nesta versao da lib, e estoura
+  // no _serialized. E downloadMedia() chama getMessageById LOGO NA PRIMEIRA
+  // LINHA, entao passar o objeto da mensagem tambem nao adiantava: ela reconverte
+  // pra string e cai no mesmo lugar. Por isso as quatro tentativas anteriores
+  // falharam do mesmo jeito.
+  //
+  // A saida: achar o modelo pela COLECAO da conversa (nenhum id e interpretado) e
+  // baixar direto do modelo, refazendo o que a propria wa-js faz depois de achar
+  // — cache de blob primeiro, download so se precisar.
+  function _colecaoDaConversa() {
     const W = window.WPP && window.WPP.whatsapp;
-    const tentativas = [];
-    // 1) Direto no store, que e onde a mensagem ja esta se a bolha esta na tela.
+    const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
+    if (chat && chat.msgs && chat.msgs.getModelsArray) return chat.msgs.getModelsArray();
+    if (W && W.ChatStore && chat && chat.id) {
+      const c2 = W.ChatStore.get(chat.id);
+      if (c2 && c2.msgs && c2.msgs.getModelsArray) return c2.msgs.getModelsArray();
+    }
+    return [];
+  }
+
+  function _acharModelo(id) {
+    // 1) Colecao da conversa aberta — sem interpretar id nenhum.
     try {
-      if (W && W.MsgStore && W.MsgStore.get) {
-        const m = W.MsgStore.get(id);
-        if (m) return { msg: m, via: 'store' };
-      }
-    } catch (e) { tentativas.push('store: ' + ((e && e.message) || e)); }
-    // 2) Store via chave montada (alguns builds so aceitam MsgKey).
+      const m = _colecaoDaConversa().find((x) => x && x.id && x.id._serialized === id);
+      if (m) return { msg: m, via: 'colecao' };
+    } catch (e) { /* segue */ }
+    // 2) Store global, comparando string com string.
     try {
-      if (W && W.MsgKey && W.MsgStore && W.MsgStore.get) {
-        const k = W.MsgKey.fromString ? W.MsgKey.fromString(id) : new W.MsgKey(id);
-        const m = k && W.MsgStore.get(k);
-        if (m) return { msg: m, via: 'store_key' };
+      const W = window.WPP && window.WPP.whatsapp;
+      if (W && W.MsgStore) {
+        if (W.MsgStore.get) {
+          const direto = W.MsgStore.get(id);
+          if (direto) return { msg: direto, via: 'store' };
+        }
+        if (W.MsgStore.getModelsArray) {
+          const m = W.MsgStore.getModelsArray().find((x) => x && x.id && x.id._serialized === id);
+          if (m) return { msg: m, via: 'store_varredura' };
+        }
       }
-    } catch (e) { tentativas.push('chave: ' + ((e && e.message) || e)); }
-    // 3) API publica da wa-js.
-    try {
-      if (window.WPP.chat.getMessageById) {
-        const m = await window.WPP.chat.getMessageById(id);
-        if (m) return { msg: m, via: 'getMessageById' };
+    } catch (e) { /* segue */ }
+    return { msg: null, via: null };
+  }
+
+  // Mesmo caminho da wa-js, mas a partir do modelo: cache de blob, e download
+  // pelo proprio modelo (msg.downloadMedia) — que nao interpreta id nenhum.
+  async function _blobDoModelo(msg) {
+    const pegar = () => {
+      const md = msg.mediaData;
+      if (md && md.mediaBlob && md.mediaBlob.forceToBlob) {
+        const b = md.mediaBlob.forceToBlob();
+        if (b) return b;
       }
-    } catch (e) { tentativas.push('getMessageById: ' + ((e && e.message) || e)); }
-    // 4) Ultimo recurso: varre as carregadas da conversa aberta.
-    try {
-      const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
-      if (chat && chat.id) {
-        const msgs = await window.WPP.chat.getMessages(chat.id._serialized, { count: 200 });
-        const m = (msgs || []).find((x) => x && x.id && x.id._serialized === id);
-        if (m) return { msg: m, via: 'varredura' };
-      }
-    } catch (e) { tentativas.push('varredura: ' + ((e && e.message) || e)); }
-    return { msg: null, via: null, motivo: tentativas.join(' | ').slice(0, 120) || 'mensagem não encontrada no WhatsApp' };
+      return null;
+    };
+    if (!msg.mediaData) throw new Error('mensagem sem mídia');
+    let b = pegar();
+    if (b) return b;
+    if (typeof msg.downloadMedia !== 'function') throw new Error('modelo sem downloadMedia');
+    await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1, isUserInitiated: true });
+    b = pegar();
+    if (!b) throw new Error('áudio não veio após o download');
+    return b;
   }
 
   async function baixarAudiosPorId(ids) {
@@ -259,23 +284,21 @@
     // pista pra mim. Um áudio que falha continua não derrubando o lote.
     const erros = {};
     for (const id of alvos) {
-      // OBJETO primeiro, id depois. O contrario e o que estourava em conversa @lid.
       let media = null;
-      const achado = await _acharMensagem(id);
+      const achado = _acharModelo(id);
       if (achado.msg) {
         try {
-          media = await window.WPP.chat.downloadMedia(achado.msg);
+          media = await _blobDoModelo(achado.msg);
         } catch (e1) {
-          erros[id] = 'download (' + achado.via + '): ' +
-                      String((e1 && e1.message) || e1 || 'falhou').slice(0, 80);
+          erros[id] = String((e1 && e1.message) || e1 || 'falha no download').slice(0, 90);
         }
       } else {
-        erros[id] = achado.motivo;
+        erros[id] = 'mensagem não está carregada — role até ela e tente de novo';
       }
       if (!media) {
-        // Ainda assim tenta pelo id: em build antigo esse era o caminho que
-        // funcionava, e nao custa nada depois de tudo ja ter falhado.
-        try { media = await window.WPP.chat.downloadMedia(id); } catch (e) {}
+        // Ultimo recurso: o caminho da wa-js. Funciona em conversa antiga
+        // (@c.us), onde o parser de id dela nao tem problema nenhum.
+        try { media = await window.WPP.chat.downloadMedia(id); erros[id] = ''; } catch (e) {}
       }
       if (!media) { erros[id] = erros[id] || 'mídia vazia'; continue; }
       try {
