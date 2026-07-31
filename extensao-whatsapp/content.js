@@ -1198,16 +1198,57 @@
     rodando: false,
     ligado: true,
     aviso: '',
+    avisoWaJs: null,
   };
 
   function _trPodeRodar() {
     return TR.ligado && !!document.querySelector('#main');
   }
 
+  // Ids de áudio lidos DIRETO DO DOM, sem wa-js. É a retaguarda: quando a wa-js
+  // quebra (já aconteceu nesta base com o "Module ChatStore was not found"), o
+  // download de áudio novo realmente não tem como funcionar — mas o que JÁ está
+  // transcrito só precisa do id, e continua aparecendo. Antes disso, wa-js fora
+  // significava tela sem nada e sem explicação.
+  function trIdsDoDom() {
+    const main = document.querySelector('#main');
+    if (!main) return [];
+    const ids = [];
+    main.querySelectorAll('[data-id]').forEach((el) => {
+      const id = el.getAttribute('data-id') || '';
+      if (!id) return;
+      // Linha que tem player de áudio. Seletor largo de propósito: id que não for
+      // áudio simplesmente não volta do cache, e o custo disso é zero.
+      if (el.querySelector('audio, [data-icon*="audio"], [aria-label*="udio"], [data-icon="ptt"]')) {
+        ids.push(id);
+      }
+    });
+    return ids;
+  }
+
   async function trSincronizar() {
     if (!_trPodeRodar()) return;
     const lista = await _pedirPonte('listar_audios', {}, 20000);
-    if (!lista || lista.erro || !Array.isArray(lista.audios)) return;
+    if (!lista || lista.erro || !Array.isArray(lista.audios)) {
+      // wa-js indisponível: mostra o que já está transcrito lendo os ids do DOM,
+      // e AVISA — falhar em silêncio foi o que fez isso parecer "não funciona".
+      const motivo = (lista && lista.erro) || 'sem_resposta';
+      if (TR.avisoWaJs !== motivo) {
+        TR.avisoWaJs = motivo;
+        console.warn('[JOB] transcrição: ponte do WhatsApp indisponível (' + motivo +
+                     '). Mostrando só o que já estava transcrito.');
+      }
+      const ids = trIdsDoDom();
+      if (ids.length) {
+        const r = await _safeSendMessage({ type: 'transcricoes_cache', ids }).catch(() => null);
+        if (r && r.ok) {
+          Object.keys(r.transcricoes || {}).forEach((k) => TR.cache.set(k, r.transcricoes[k]));
+          trPintar();
+        }
+      }
+      return;
+    }
+    TR.avisoWaJs = null;
     // Trocou de conversa: limpa tudo, senão a etiqueta do chat anterior fica
     // flutuando sobre a conversa nova.
     if (TR.chatId !== lista.chat_id) {

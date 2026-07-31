@@ -62,6 +62,17 @@
   .lead-esfriando-tag { font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:8px; white-space:nowrap; }
   .card-esfriando .lead-esfriando-tag { background:rgba(250,204,21,.22); color:#eab308; }
   .card-frio .lead-esfriando-tag { background:rgba(244,63,94,.22); color:#f43f5e; }
+  .wa-id { display:flex; flex-direction:column; gap:2px; background:var(--panel-2);
+           border:1px solid var(--borda); border-radius:8px; padding:8px 10px; margin-bottom:6px; }
+  .wa-id-top { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .wa-id-tag { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.4px;
+               padding:2px 7px; border-radius:8px; }
+  .wa-id-tag.lid { background:rgba(168,85,247,.18); color:#d8b4fe; }
+  .wa-id-tag.numero { background:rgba(34,197,94,.16); color:#4ade80; }
+  .wa-id-tag.outro { background:var(--panel-3); color:var(--cinza-2); }
+  .wa-id-cod { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px;
+               color:var(--texto); user-select:text; }
+  .wa-id-meta { font-size:10.5px; color:var(--cinza-2); line-height:1.45; }
   .cp-bloco { margin:16px 0 4px; }
   .cp-bloco-tit { display:flex; align-items:center; gap:7px; font-size:10px; font-weight:700;
                   text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2);
@@ -631,6 +642,14 @@
           <div class="campo-dica">Por que o lead está parado</div>
           <div id="ficha-etiquetas" class="ficha-etqs"></div>
         </div>
+        {# Identidade no WhatsApp: qual @lid está amarrado a este lead e que
+           número ele resolveu. Sem isso o vínculo existia só no banco, e não
+           havia como conferir se a conversa certa está no lead certo. #}
+        <div class="campo-grupo" id="grupo-waids" style="display:none">
+          <div class="campo-label">Identidade no WhatsApp</div>
+          <div class="campo-dica">Qual conversa está amarrada a este lead</div>
+          <div id="ficha-waids"></div>
+        </div>
         <div id="ficha-campos"></div>
         <div class="campo-grupo" id="campo-playbook" style="display:none">
           <div class="campo-label">Sugestão de mensagem <span id="playbook-origem" class="pb-origem"></span></div>
@@ -1089,6 +1108,7 @@ async function abrirFicha(id){
 
   montarSubStatusFicha(d.sub_status_etapa||[], d.lead.sub_status||'');
   montarCampos(d.campos_def||[], d.campos_val||{});
+  montarWaIds(d.wa_ids||[]);
   montarEtiquetasFicha(d.etiquetas_todas||[], d.etiquetas_marcadas||[]);
   montarPlaybook(d.playbook);
 
@@ -1470,6 +1490,27 @@ async function salvarCampoCard(lid, chave, el){
     }
     toast('Registrado','ok');
   }catch(e){ toast('Falha de conexão','err'); }
+}
+
+function montarWaIds(lista){
+  const box=document.getElementById('ficha-waids');
+  const grupo=document.getElementById('grupo-waids');
+  if(!box||!grupo) return;
+  if(!lista.length){ grupo.style.display='none'; box.innerHTML=''; return; }
+  grupo.style.display='';
+  const rot={lid:'@lid', numero:'número', outro:'outro'};
+  box.innerHTML=lista.map(w=>{
+    const partes=[];
+    if(w.telefone) partes.push('resolve ' + _esc(w.telefone));
+    if(w.msgs_analisadas) partes.push(w.msgs_analisadas + ' msg analisadas');
+    if(w.analisado_em) partes.push('analisado ' + fmtDataBR(w.analisado_em));
+    else partes.push('nunca analisado');
+    return '<div class="wa-id"><div class="wa-id-top">'
+      +'<span class="wa-id-tag '+_esc(w.tipo)+'">'+(rot[w.tipo]||w.tipo)+'</span>'
+      +'<span class="wa-id-cod" title="'+_esc(w.chat_id)+'">'+_esc(w.curto||w.chat_id)+'</span>'
+      +(w.nome?'<span class="wa-id-meta">'+_esc(w.nome)+'</span>':'')
+      +'</div><div class="wa-id-meta">'+_esc(partes.join(' · '))+'</div></div>';
+  }).join('');
 }
 
 async function salvarCampos(){

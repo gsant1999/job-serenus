@@ -16985,6 +16985,32 @@ def crm_lead_detalhe(lid):
     # Calculado ANTES do close_db — a conexão já está fechada quando o jsonify roda.
     campos_faltando = campos_faltando_pra_sair(conn, lead, campos_def)
     indicou = indicacoes_do_lead(conn, lid)
+    # IDENTIDADE NO WHATSAPP: quais chats deste lead o sistema conhece. O @lid é o
+    # que o WhatsApp expõe hoje no lugar do telefone, e até agora só existia no
+    # banco — sem aparecer em lugar nenhum, era impossível conferir se o lead
+    # certo está amarrado à conversa certa.
+    wa_ids = []
+    try:
+        for r in conn.execute("""SELECT c.chat_id, c.telefone, c.telefone_norm, c.nome, c.atualizado_em,
+                                        e.ultima_analise_em, e.msgs_analisadas
+                                 FROM wa_chat_lead c
+                                 LEFT JOIN wa_conversa_estado e ON e.chat_id = c.chat_id
+                                 WHERE c.lead_id=? ORDER BY c.atualizado_em DESC""", (lid,)).fetchall():
+            cid = r['chat_id'] or ''
+            wa_ids.append({
+                'chat_id': cid,
+                # @lid = identidade nova (telefone escondido). @c.us = JID antigo,
+                # onde o número aparece no próprio id.
+                'tipo': 'lid' if '@lid' in cid else ('numero' if '@c.us' in cid else 'outro'),
+                'curto': (cid.split('@')[0][:18] + ('…' if len(cid.split('@')[0]) > 18 else '')) if cid else '',
+                'telefone': _formatar_telefone(r['telefone_norm'] or r['telefone'] or ''),
+                'nome': r['nome'] or '',
+                'visto_em': r['atualizado_em'],
+                'analisado_em': r['ultima_analise_em'],
+                'msgs_analisadas': r['msgs_analisadas'] or 0,
+            })
+    except Exception as e:
+        app.logger.warning(f"[FICHA] identidade WhatsApp: {e}")
     ind_por = None
     if lead['indicado_por_lead_id'] if 'indicado_por_lead_id' in lead.keys() else None:
         r = conn.execute("SELECT id, nome FROM crm_leads WHERE id=?", (lead['indicado_por_lead_id'],)).fetchone()
@@ -17008,6 +17034,7 @@ def crm_lead_detalhe(lid):
         "campos_faltando": campos_faltando,
         "indicado_por": ind_por,
         "indicou": indicou,
+        "wa_ids": wa_ids,
         "etiquetas_todas": etiquetas_todas,
         "etiquetas_marcadas": etiquetas_marcadas,
         "sub_status_etapa": sub_status_desta_etapa
