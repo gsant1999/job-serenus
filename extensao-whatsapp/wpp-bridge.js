@@ -287,6 +287,42 @@
   // audio ja tocou, ela ja esta em memoria e nao ha nada a baixar. E por isso que
   // as outras ferramentas parecem instantaneas: elas leem o que ja esta ali, em
   // vez de pedir de novo.
+  function _paraArrayBuffer(v) {
+    if (!v) return null;
+    if (v instanceof ArrayBuffer) return v;
+    if (ArrayBuffer.isView(v)) return new Uint8Array(v.buffer, v.byteOffset, v.byteLength).slice().buffer;
+    try { return new Uint8Array(v).slice().buffer; } catch (e) { return null; }
+  }
+
+  // O BLOB MORA NO CACHE DE MIDIA, indexado por filehash — nao no modelo.
+  //
+  // Foi o que faltou: reli a wa-js empacotada e ela procura, NESTA ordem,
+  // LruMediaStore(filehash) -> MediaBlobCache(filehash) -> mediaData.mediaBlob.
+  // Eu so olhava o ultimo. Por isso "nao consegui ler o audio" mesmo depois do
+  // download terminar sem erro: o audio estava decifrado, num cache que eu nao
+  // consultava. E tambem por isso as outras ferramentas parecem instantaneas —
+  // pra audio ja ouvido, esse cache responde na hora, sem rede.
+  async function _blobPorFilehash(md) {
+    const W = window.WPP && window.WPP.whatsapp;
+    const fh = md && md.filehash;
+    if (!fh || !W) return null;
+    try {
+      if (W.LruMediaStore && typeof W.LruMediaStore.get === 'function') {
+        const bruto = await W.LruMediaStore.get(fh).catch(() => null);
+        const ab = _paraArrayBuffer(bruto);
+        if (ab) return new Blob([ab], { type: md.mimetype || 'audio/ogg' });
+      }
+    } catch (e) { /* proximo */ }
+    try {
+      if (W.MediaBlobCache && typeof W.MediaBlobCache.has === 'function'
+          && W.MediaBlobCache.has(fh)) {
+        const b = W.MediaBlobCache.get(fh);
+        if (b) return b;
+      }
+    } catch (e) { /* proximo */ }
+    return null;
+  }
+
   function _blobDeQualquerLugar(msg) {
     const cand = [];
     const md = msg && msg.mediaData;
@@ -308,9 +344,12 @@
 
   async function _blobDoModelo(msg) {
     if (!msg.mediaData) throw new Error('mensagem sem mídia');
-    // 1) JA ESTA AQUI? Audio ouvido (ou pre-carregado pelo WhatsApp) responde na
-    //    hora, sem rede nenhuma. Este e o caminho instantaneo.
-    let b = _blobDeQualquerLugar(msg);
+    // 1) JA ESTA AQUI? Mesma ordem da wa-js: cache por filehash primeiro (e onde
+    //    o audio decifrado realmente fica), depois os campos do modelo. Audio ja
+    //    ouvido responde aqui, sem rede — o caminho instantaneo.
+    let b = await _blobPorFilehash(msg.mediaData);
+    if (b) return b;
+    b = _blobDeQualquerLugar(msg);
     if (b) return b;
     // 2) Caminho oficial da wa-js, mas com O ID DO STORE, nao o do DOM. O do
     //    store tem remote @c.us, que o parser dela entende; era o id do DOM
@@ -323,13 +362,32 @@
         if (m) return m;
       }
     } catch (e) { /* cai pro proximo */ }
-    // 3) Baixa pelo proprio modelo e reprocura em todos os lugares.
+    // 3) Baixa pelo proprio modelo e reprocura EM TODOS os lugares — inclusive
+    //    o cache por filehash, que e pra onde o download escreve de verdade.
     if (typeof msg.downloadMedia === 'function') {
       await msg.downloadMedia({ downloadEvenIfExpensive: true, rmrReason: 1, isUserInitiated: true });
+      b = await _blobPorFilehash(msg.mediaData);
+      if (b) return b;
       b = _blobDeQualquerLugar(msg);
       if (b) return b;
     }
-    throw new Error('não consegui ler o áudio desta mensagem');
+    // 4) Ultimo recurso: o <audio> da propria bolha. Se o WhatsApp esta tocando
+    //    ou ja tocou, existe um blob: URL ali — ler dele nao depende de wa-js
+    //    nenhuma. So funciona depois de dar play, entao fica por ultimo.
+    try {
+      const ser = (msg.id && msg.id._serialized) || '';
+      const cru = _idCru(ser);
+      for (const el of document.querySelectorAll('#main [data-id] audio[src^="blob:"]')) {
+        const linha = el.closest('[data-id]');
+        const did = linha && linha.getAttribute('data-id');
+        if (did && (did === ser || _idCru(did) === cru)) {
+          const r = await fetch(el.src);
+          const bl = await r.blob();
+          if (bl && bl.size) return bl;
+        }
+      }
+    } catch (e) { /* acabou */ }
+    throw new Error('áudio não está em cache — toque o áudio uma vez e clique de novo');
   }
 
   async function baixarAudiosPorId(ids) {
