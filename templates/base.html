@@ -679,6 +679,16 @@
                font-size:13px; line-height:1.5; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .ia-alerta b { color:#f43f5e; }
   .ia-alerta a { color:#fff; text-decoration:underline; margin-left:auto; font-weight:600; }
+  /* Ícone de informação: todo termo que é jargão do sistema (e não do negócio)
+     ganha um "i" VISÍVEL do lado, não um tooltip escondido no hover do elemento.
+     Quem usa o JOB é consultor de plano de saúde — dado que ninguém entende é
+     dado que ninguém usa. */
+  .ajuda-i { display:inline-flex; align-items:center; justify-content:center;
+             width:14px; height:14px; border-radius:50%; border:1px solid var(--cinza);
+             color:var(--cinza); font-size:9px; font-weight:700; font-style:normal;
+             line-height:1; cursor:help; vertical-align:middle; margin-left:5px;
+             flex:0 0 auto; user-select:none; }
+  .ajuda-i:hover { border-color:var(--azul); color:var(--azul); }
 </style>
 {% endif %}
 {% block content %}{% endblock %}

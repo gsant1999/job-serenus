@@ -3,6 +3,19 @@
 
 {% block head %}
 <style>
+  .vrd-topo { display:flex; gap:10px; flex-wrap:wrap; margin:0 0 18px; }
+  .vrd-num { flex:1 1 130px; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:10px 12px; }
+  .vrd-num.destaque { border-color:rgba(250,204,21,.35); }
+  .vrd-num b { display:block; font-size:19px; font-variant-numeric:tabular-nums; }
+  .vrd-num span { display:block; font-size:10px; color:var(--cinza); margin-top:2px; }
+  .vrd-lid { font-size:8px; font-weight:800; letter-spacing:.3px; padding:1px 4px; border-radius:4px; margin-right:5px; }
+  .vrd-lid.lid { background:rgba(168,85,247,.2); color:#d8b4fe; }
+  .vrd-lid.numero { background:rgba(34,197,94,.18); color:#4ade80; }
+  .vrd-lid.outro { background:var(--panel-2); color:var(--cinza); }
+  .vrd-id { font-family:ui-monospace,Menlo,monospace; font-size:10px; color:var(--cinza-2); }
+  .vrd-nome { font-size:10px; color:var(--cinza); margin-top:3px; }
+</style>
+<style>
   .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:22px; }
   .kpi { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:16px 18px; }
   .kpi .lbl { font-size:10px; text-transform:uppercase; letter-spacing:.6px; color:var(--cinza-2); font-weight:600; margin-bottom:8px; }
@@ -106,6 +119,46 @@
         <td class="num">{{ c.perdido }}</td>
         <td class="num">{{ c.total }}</td>
         <td class="num">{{ c.taxa_conversao ~ '%' if c.taxa_conversao is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="panel-box">
+  <h2>Varredura: o caminho inteiro, conversa por conversa<i class="ajuda-i" title="A extensão lê as conversas do WhatsApp do dia e a IA extrai o que interessa. Cada linha aqui é uma conversa: quanto dela já foi lida, quanto custou, e o que ela virou no CRM e em venda. Conversa que não mudou desde a última leitura não é lida de novo — por isso não custa duas vezes.">i</i></h2>
+  <p class="sub">Uma linha por conversa do WhatsApp que a IA já leu: até onde ela leu, quanto custou até hoje, e o que aquilo virou — lead, etapa e venda. É aqui que as quatro gravações se encontram.</p>
+  {% if not varredura.linhas %}
+    <div class="vazio">Nenhuma conversa varrida ainda. Ligue a leitura automática em <a href="/configuracoes">Configurações</a> ou rode a análise pela extensão.</div>
+  {% else %}
+  <div class="vrd-topo">
+    <div class="vrd-num"><b>{{ varredura.chats }}</b><span>conversas lidas</span></div>
+    <div class="vrd-num"><b>{{ varredura.msgs }}</b><span>mensagens analisadas</span></div>
+    <div class="vrd-num"><b>{{ varredura.com_lead }}</b><span>viraram lead no CRM</span></div>
+    <div class="vrd-num"><b>{{ varredura.com_venda }}</b><span>viraram venda</span></div>
+    <div class="vrd-num destaque"><b>R$ {{ '%.2f'|format(varredura.total_brl) }}</b><span>custo acumulado (US$ {{ '%.4f'|format(varredura.total_usd) }})</span></div>
+  </div>
+  <table class="pnl-tab">
+    <thead><tr><th>Conversa (@lid)<i class="ajuda-i" title="@lid e o apelido que o WhatsApp novo usa no lugar do telefone: a conversa tem identidade propria e o numero fica escondido. E por ele que o JOB sabe que esta conversa e deste lead. Quando aparece n, e conversa antiga, em que o proprio numero identifica.">i</i></th><th>Lead no CRM</th><th>Etapa</th><th class="num">Score<i class="ajuda-i" title="Nota de 0 a 1000 que a IA dá ao lead pela conversa: urgência, orçamento, perfil e engajamento. Serve para priorizar quem atender primeiro — não é promessa de que vai fechar.">i</i></th><th class="num">Msgs lidas<i class="ajuda-i" title="Quantas mensagens daquela conversa a IA ja leu. O JOB guarda a ultima mensagem lida e, na proxima varredura, comeca dali - nunca rele o que ja pagou.">i</i></th><th>Lida em</th><th>Virou venda</th><th class="num">Custo<i class="ajuda-i" title="Quanto esta conversa custou de IA desde sempre, somando leitura e transcricao de audio. E estimativa pelo preco por token/minuto, nao a fatura do provedor.">i</i></th></tr></thead>
+    <tbody>
+      {% for v in varredura.linhas %}
+      <tr>
+        <td>
+          <span class="vrd-lid {{ v.tipo }}">{{ '@lid' if v.tipo == 'lid' else 'nº' }}</span>
+          <code class="vrd-id" title="{{ v.chat_id }}">{{ v.curto }}</code>
+          {% if v.nome %}<div class="vrd-nome">{{ v.nome }}{{ ' · ' ~ v.telefone if v.telefone }}</div>{% endif %}
+        </td>
+        <td>{% if v.lead_id %}<a href="/crm?lead={{ v.lead_id }}">{{ v.lead_nome or ('lead #' ~ v.lead_id) }}</a>
+            {% else %}<span class="pill pill-cinza" title="Conversa lida, mas sem lead: nada do que a IA extraiu tem onde ser gravado">sem lead</span>{% endif %}</td>
+        <td>{% if v.etapa_tipo == 'ganho' %}<span class="pill pill-verde">{{ v.etapa_nome }}</span>
+            {% elif v.etapa_tipo == 'perdido' %}<span class="pill pill-erro">{{ v.etapa_nome }}</span>
+            {% elif v.etapa_nome %}<span class="pill pill-cinza">{{ v.etapa_nome }}</span>{% else %}—{% endif %}</td>
+        <td class="num">{% if v.score is not none %}<span class="pill pill-{{ v.score_faixa }}">{{ v.score }}</span>{% else %}—{% endif %}</td>
+        <td class="num">{{ v.msgs }}</td>
+        <td>{% if v.analise_id %}<a href="/whatsapp-analises/{{ v.analise_id }}/conversa">{{ v.analisado_em or 'ver' }}</a>{% else %}{{ v.analisado_em or '—' }}{% endif %}</td>
+        <td>{% if v.proposta_id %}<a href="/proposta/{{ v.proposta_id }}" class="pill pill-verde" style="text-decoration:none;">{{ v.razao_social or ('venda #' ~ v.proposta_id) }}</a>{% else %}—{% endif %}</td>
+        <td class="num">R$ {{ '%.2f'|format(v.custo_brl) }}</td>
       </tr>
       {% endfor %}
     </tbody>

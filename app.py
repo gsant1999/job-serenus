@@ -15562,10 +15562,16 @@ def api_whatsapp_conversas_pendentes():
         except Exception as e:
             app.logger.warning(f"[VARREDURA] leitura de estado falhou: {e}")
     analisar, pular = [], []
+    vinculados = 0
     for c in convs:
         cid = str((c or {}).get('chat_id') or '')
         if not cid:
             continue
+        # Grava o vínculo @lid -> lead ANTES de decidir se analisa: mesmo conversa
+        # que vai ser pulada por não ter novidade tem identidade a registrar, e é
+        # justamente a conversa antiga que hoje aparece sem @lid no card.
+        if registrar_chat_lead(conn, cid, (c or {}).get('telefone'), (c or {}).get('nome')):
+            vinculados += 1
         ult_id = str((c or {}).get('ultima_msg_id') or '')
         if not ult_id:
             pular.append({'chat_id': cid, 'motivo': 'sem_mensagem'})
@@ -15582,9 +15588,58 @@ def api_whatsapp_conversas_pendentes():
         else:
             analisar.append({'chat_id': cid, 'desde_msg_id': e['ultima_msg_id'],
                              'motivo': 'novas_mensagens'})
+    conn.commit()
     close_db(conn)
     return _wa_cors(jsonify({"ok": True, "analisar": analisar, "pular": pular,
-                             "motivos": _MOTIVOS_PENDENTE}))
+                             "vinculados": vinculados, "motivos": _MOTIVOS_PENDENTE}))
+
+
+def registrar_chat_lead(conn, chat_id, telefone=None, nome=None, lead_id=None):
+    """Amarra um chat do WhatsApp (@lid) ao lead. Devolve o lead_id amarrado.
+
+    Isto só era gravado quando alguém MANDAVA mensagem pela extensão — por isso o
+    @lid aparecia numa minoria dos cards: a maioria das conversas o consultor
+    responde direto no WhatsApp, sem passar pelo JOB, e o vínculo nunca nascia.
+    Agora a varredura também registra, o que cobre toda conversa que teve troca no
+    dia sem custar nada (é só o identificador, nenhuma IA envolvida)."""
+    if not chat_id:
+        return None
+    tel_norm = _normalizar_telefone(telefone) if telefone else None
+    if not lead_id and tel_norm:
+        try:
+            achado = _buscar_lead_por_telefone(conn, tel_norm)
+            lead_id = achado['id'] if achado else None
+        except Exception:
+            lead_id = None
+    if not (lead_id or tel_norm or nome):
+        return None
+    try:
+        if DB_MODE == 'postgres':
+            conn.execute("""INSERT INTO wa_chat_lead (chat_id, lead_id, telefone, telefone_norm, nome, atualizado_em)
+                VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (chat_id) DO UPDATE SET
+                lead_id=COALESCE(excluded.lead_id, wa_chat_lead.lead_id),
+                telefone=COALESCE(excluded.telefone, wa_chat_lead.telefone),
+                telefone_norm=COALESCE(excluded.telefone_norm, wa_chat_lead.telefone_norm),
+                nome=COALESCE(excluded.nome, wa_chat_lead.nome),
+                atualizado_em=excluded.atualizado_em""",
+                (chat_id, lead_id, telefone, tel_norm, nome or None, _agora_sp()))
+        else:
+            ja = conn.execute("SELECT lead_id, telefone, telefone_norm, nome FROM wa_chat_lead WHERE chat_id=?",
+                              (chat_id,)).fetchone()
+            if ja:
+                conn.execute("""UPDATE wa_chat_lead SET lead_id=COALESCE(?,lead_id),
+                    telefone=COALESCE(?,telefone), telefone_norm=COALESCE(?,telefone_norm),
+                    nome=COALESCE(?,nome), atualizado_em=? WHERE chat_id=?""",
+                    (lead_id, telefone, tel_norm, nome or None, _agora_sp(), chat_id))
+            else:
+                conn.execute("""INSERT INTO wa_chat_lead
+                    (chat_id, lead_id, telefone, telefone_norm, nome, atualizado_em)
+                    VALUES (?,?,?,?,?,?)""",
+                    (chat_id, lead_id, telefone, tel_norm, nome or None, _agora_sp()))
+    except Exception as e:
+        app.logger.warning(f"[WA_CHAT_LEAD] não gravou {chat_id}: {e}")
+        return None
+    return lead_id
 
 
 def registrar_estado_conversa(conn, chat_id, telefone_norm=None, lead_id=None,
@@ -17141,6 +17196,80 @@ def api_whatsapp_analisar():
     }))
 
 
+def _wa_varredura_resumo(conn, uid=None):
+    """A conversa vista como REGISTRO: até onde a IA já leu cada chat, quanto
+    aquilo custou até hoje, e o que aquilo virou no CRM e em venda.
+
+    Isto é o que fechava o circuito e faltava: `wa_conversa_estado` era a única
+    das quatro gravações sem tela nenhuma. O gasto acumulava e a marca d'água
+    avançava sem ninguém conseguir olhar — e um custo que ninguém vê é um custo
+    que ninguém controla. Aqui cada linha amarra chat (@lid) -> lead -> etapa ->
+    proposta -> score, que é o caminho inteiro do dinheiro numa linha só."""
+    linhas = []
+    q = """SELECT e.chat_id, e.telefone_norm, e.lead_id, e.msgs_analisadas,
+                  e.custo_acumulado_usd, e.ultima_analise_id, e.ultima_analise_em,
+                  e.ultima_msg_id, e.atualizado_em,
+                  c.nome AS chat_nome,
+                  l.nome AS lead_nome, l.etapa AS lead_etapa, l.responsavel_id,
+                  et.nome AS etapa_nome, et.tipo AS etapa_tipo,
+                  a.score, a.score_faixa,
+                  p.id AS proposta_id, p.razao_social, p.valor AS valor_proposta
+           FROM wa_conversa_estado e
+           LEFT JOIN wa_chat_lead c ON c.chat_id = e.chat_id
+           LEFT JOIN crm_leads l ON l.id = e.lead_id
+           LEFT JOIN crm_etapas et ON et.slug = l.etapa
+           LEFT JOIN whatsapp_analises a ON a.id = e.ultima_analise_id
+           LEFT JOIN propostas p ON p.lead_id = e.lead_id"""
+    if uid:
+        q += " WHERE l.responsavel_id=?"
+    q += " ORDER BY e.atualizado_em DESC LIMIT 200"
+    try:
+        rows = conn.execute(q, (uid,) if uid else ()).fetchall()
+    except Exception as e:
+        app.logger.warning(f"[VARREDURA] resumo falhou: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return {'linhas': [], 'total_usd': 0, 'total_brl': 0, 'chats': 0,
+                'msgs': 0, 'com_lead': 0, 'com_venda': 0}
+    visto = set()
+    total_usd = msgs = com_lead = com_venda = 0
+    for r in rows:
+        # Um lead com mais de uma proposta multiplica a linha no JOIN. A conversa
+        # é uma só: fico com a primeira (proposta mais recente pela ordem) e não
+        # somo o custo duas vezes — senão o total da tela mentiria pra cima.
+        if r['chat_id'] in visto:
+            continue
+        visto.add(r['chat_id'])
+        cid = r['chat_id'] or ''
+        custo = float(r['custo_acumulado_usd'] or 0)
+        total_usd += custo
+        msgs += int(r['msgs_analisadas'] or 0)
+        if r['lead_id']:
+            com_lead += 1
+        if r['proposta_id']:
+            com_venda += 1
+        linhas.append({
+            'chat_id': cid,
+            'tipo': 'lid' if '@lid' in cid else ('numero' if '@c.us' in cid else 'outro'),
+            'curto': (cid.split('@')[0][:16] + ('…' if len(cid.split('@')[0]) > 16 else '')) if cid else '—',
+            'nome': r['chat_nome'] or r['lead_nome'] or '',
+            'telefone': _formatar_telefone(r['telefone_norm'] or ''),
+            'lead_id': r['lead_id'], 'lead_nome': r['lead_nome'],
+            'etapa_nome': r['etapa_nome'], 'etapa_tipo': r['etapa_tipo'],
+            'score': r['score'], 'score_faixa': r['score_faixa'],
+            'analise_id': r['ultima_analise_id'], 'analisado_em': r['ultima_analise_em'],
+            'msgs': int(r['msgs_analisadas'] or 0),
+            'custo_usd': round(custo, 4), 'custo_brl': round(custo * _USD_BRL_TAXA, 2),
+            'proposta_id': r['proposta_id'], 'razao_social': r['razao_social'],
+            'valor_proposta': r['valor_proposta'],
+        })
+    return {'linhas': linhas, 'total_usd': round(total_usd, 4),
+            'total_brl': round(total_usd * _USD_BRL_TAXA, 2), 'chats': len(linhas),
+            'msgs': msgs, 'com_lead': com_lead, 'com_venda': com_venda}
+
+
 def _wa_custo_resumo(conn, uid=None):
     """Soma o custo estimado da IA por período — hoje, semana, mês, ano e
     total — separando Claude (leitura/análise) de transcrição de áudio
@@ -17231,6 +17360,7 @@ def whatsapp_analises_pagina():
     conn = db()
     calibracao = _wa_calibracao(conn, None if eh_admin else uid)
     custo = _wa_custo_resumo(conn, None if eh_admin else uid)
+    varredura = _wa_varredura_resumo(conn, None if eh_admin else uid)
 
     q = """SELECT wa.id, wa.nome_contato, wa.telefone, wa.score, wa.score_faixa,
                   wa.total_mensagens, wa.criado_em, wa.lead_id, wa.duracao_segundos, wa.criado_por,
@@ -17260,6 +17390,7 @@ def whatsapp_analises_pagina():
             JOIN usuarios u ON u.id = wa.criado_por ORDER BY u.nome""").fetchall()
     close_db(conn)
     return render_template('whatsapp_analises.html', analises=analises, calibracao=calibracao,
+                           varredura=varredura,
                            custo=custo, taxa_usd_brl=_USD_BRL_TAXA, eh_admin=eh_admin,
                            consultores=consultores, f_consultor=f_consultor)
 
@@ -18305,16 +18436,27 @@ def _saude_card(avancou_em, sla_dias=None, fallback=None):
     ref = avancou_em or fallback
     dt = _parse_dt_seguro(ref) if ref else None
     if not dt:
-        return {'nivel': 'no_prazo', 'classe': '', 'texto': '', 'dias': 0}
+        return {'nivel': 'no_prazo', 'classe': '', 'texto': '', 'dias': 0, 'horas': 0, 'idade_txt': ''}
     if dt.tzinfo is None:
         dt = TZ_SP.localize(dt)
-    dias = int((datetime.now(TZ_SP) - dt).total_seconds() / 86400)
+    segs = (datetime.now(TZ_SP) - dt).total_seconds()
+    dias = int(segs / 86400)
+    # Idade em texto curto. Contar SÓ em dias escondia o card do dia inteiro
+    # (dias=0), justamente o lead que está sendo trabalhado agora — o consultor
+    # não via nada até o dia seguinte. Em horas o cronômetro anda desde já.
+    horas = int(segs / 3600)
+    if segs < 3600:
+        idade_txt = 'agora' if segs < 900 else f'há {int(segs / 60)}min'
+    elif dias < 1:
+        idade_txt = f'há {horas}h'
+    else:
+        idade_txt = f'há {dias}d'
     limite = int(sla_dias) if sla_dias else _SLA_PADRAO_DIAS
     if dias >= limite * 2:
-        return {'nivel': 'atrasado', 'classe': 'card-frio', 'texto': f'Parado há {dias}d', 'dias': dias}
+        return {'nivel': 'atrasado', 'classe': 'card-frio', 'texto': f'Parado há {dias}d', 'dias': dias, 'horas': horas, 'idade_txt': idade_txt}
     if dias >= limite:
-        return {'nivel': 'atencao', 'classe': 'card-esfriando', 'texto': f'Parado há {dias}d', 'dias': dias}
-    return {'nivel': 'no_prazo', 'classe': '', 'texto': '', 'dias': dias}
+        return {'nivel': 'atencao', 'classe': 'card-esfriando', 'texto': f'Parado há {dias}d', 'dias': dias, 'horas': horas, 'idade_txt': idade_txt}
+    return {'nivel': 'no_prazo', 'classe': '', 'texto': '', 'dias': dias, 'horas': horas, 'idade_txt': idade_txt}
 
 
 @app.route('/crm/lead/<int:lid>/sub-status', methods=['POST'])

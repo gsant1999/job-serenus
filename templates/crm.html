@@ -524,10 +524,10 @@
                andamento não mexe. Um lead que trocou de sub-status hoje está sendo
                trabalhado; um que está no mesmo há 9 dias, não — e isso não
                aparecia em lugar nenhum. #}
-            {% if lead.sub_status and esf.dias is defined and esf.dias > 0 %}
-            <span class="lead-sub-idade {{ 'quente' if esf.dias < 2 else ('morno' if esf.dias < 5 else 'parado') }}"
-                  title="Sub-status '{{ lead.sub_status }}' sem mudar há {{ esf.dias }} dia(s)">
-              {{ lead.sub_status }} há {{ esf.dias }}d
+            {% if lead.sub_status and esf.idade_txt %}
+            <span class="lead-sub-idade {{ 'quente' if esf.horas < 24 else ('morno' if esf.dias < 5 else 'parado') }}"
+                  title="Sub-status '{{ lead.sub_status }}' sem mudar {{ esf.idade_txt }}">
+              {{ lead.sub_status }} {{ esf.idade_txt }}
             </span>
             {% endif %}
           </div>
