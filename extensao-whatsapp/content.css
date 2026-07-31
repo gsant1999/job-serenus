@@ -479,6 +479,23 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cnpj-btn:disabled { opacity: .55; cursor: default; }
 /* Seção Conversa: dois botões, um deles claramente o principal. */
 .job-conv-btns { display: flex; flex-direction: column; gap: 2px; }
+/* Nome padronizado do contato. Fica na ficha, abaixo do salvar: é ação de
+   registro, não de edição do lead — por isso separado por uma linha. */
+.job-nomec { margin: 14px 0 4px; padding-top: 12px; border-top: 1px solid var(--job-bg2); }
+.job-nomec-tit { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700;
+                 letter-spacing: .4px; text-transform: uppercase; color: var(--job-txt-fraco); margin-bottom: 8px; }
+.job-nomec-i { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px;
+               border-radius: 50%; border: 1px solid var(--job-txt-fraco); font-size: 9px; font-weight: 700;
+               text-transform: none; letter-spacing: 0; cursor: help; flex: 0 0 auto; }
+.job-nomec-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.job-nomec-chip { border: 1px solid var(--job-bg2); background: transparent; color: var(--job-txt-fraco);
+                  border-radius: 20px; padding: 3px 11px; font-size: 11px; cursor: pointer;
+                  font-family: inherit; transition: .15s; }
+.job-nomec-chip:hover { border-color: var(--job-acento); }
+.job-nomec-chip.on { background: var(--job-acento); border-color: var(--job-acento); color: var(--job-acento-txt); font-weight: 600; }
+.job-nomec-btns { display: flex; gap: 6px; }
+.job-nomec-btns .job-cnpj-btn { flex: 1 1 0; margin-top: 8px; font-size: 12px; padding: 9px 6px; }
+.job-nomec-dica { margin-top: 8px; font-size: 10.5px; line-height: 1.5; color: var(--job-txt-fraco); opacity: .8; }
 .job-cnpj-btn.destaque { background: var(--job-acento); color: var(--job-acento-txt); font-weight: 700; }
 .job-conv-status { margin-top: 12px; font-size: 12px; line-height: 1.5; color: var(--job-txt-fraco); }
 /* Prévia do que foi copiado: prova que o conteúdo certo saiu, sem abrir outro app. */

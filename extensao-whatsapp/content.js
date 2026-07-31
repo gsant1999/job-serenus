@@ -1854,6 +1854,145 @@
     { id: 'ativid', rot: 'Atividade' },
   ];
 
+  // ── NOME PADRONIZADO DO CONTATO ─────────────────────────────────────────
+  //
+  // O Guilherme ja nomeia assim na mao ("LEAD | Jenifer (MEU PROPRIO VERA CRUZ)",
+  // "Sandra - Mae Da MARIANE (CLIENTE AMIL)") — o padrao existe, so nao e
+  // consistente, porque depende de ele lembrar da forma naquele dia. O ganho
+  // nao e escrever o nome: e escrever SEMPRE IGUAL, pra busca do WhatsApp achar
+  // e pra bater o olho na lista e saber o que aquilo e.
+  //
+  // Nada automatico, por decisao dele: a agenda do telefone e pessoal e nao pode
+  // ser reescrita pelas costas de ninguem. A extensao PROPOE, ele edita, e so
+  // acontece o que ele clicar.
+  const _PARTES_NOME = [
+    { id: 'etapa',     rot: 'Etapa' },
+    { id: 'origem',    rot: 'Origem' },
+    { id: 'operadora', rot: 'Operadora' },
+    { id: 'cidade',    rot: 'Cidade' },
+    { id: 'consultor', rot: 'Consultor' },
+  ];
+  let _partesLigadas = { etapa: true, origem: true, operadora: false, cidade: false, consultor: false };
+
+  function _pedacoDaFicha(id) {
+    const f = _ficha, l = (f && f.lead) || {};
+    if (id === 'etapa') {
+      const e = ((f.etapas || []).find((x) => x.id === l.etapa)) || {};
+      // Rotulo curto e estavel. O que interessa na lista do WhatsApp e o
+      // ESTADO (e lead? ja e cliente?), nao o nome exato da coluna do funil.
+      if (e.tipo === 'ganho') return 'CLIENTE';
+      if (e.tipo === 'perdido') return '';
+      return 'LEAD';
+    }
+    if (id === 'origem') {
+      const o = (l.origem || '').toString();
+      if (/facebook|meta|instagram/i.test(o)) return 'META';
+      if (/google/i.test(o)) return 'GOOGLE';
+      if (/indica/i.test(o)) return 'INDICACAO';
+      if (/medsenior/i.test(o)) return 'MEDSENIOR';
+      return '';
+    }
+    if (id === 'operadora') {
+      const c = (f.campos_val || {});
+      const v = (c.operadora_cotada && c.operadora_cotada.valor) || (c.plano_atual && c.plano_atual.valor) || '';
+      return (v || '').split(',')[0].trim().toUpperCase();
+    }
+    if (id === 'cidade') return (l.cidade || '').trim();
+    if (id === 'consultor') return (_ficha.responsavel_nome || '').split(' ')[0] || '';
+    return '';
+  }
+
+  function _montarNomeContato() {
+    const l = (_ficha && _ficha.lead) || {};
+    const nome = (l.nome || nomeDoContato() || '').trim();
+    const pre = _partesLigadas.etapa ? _pedacoDaFicha('etapa') : '';
+    const dentro = ['origem', 'operadora', 'cidade', 'consultor']
+      .filter((k) => _partesLigadas[k])
+      .map((k) => _pedacoDaFicha(k))
+      .filter(Boolean);
+    // "LEAD | Gabriela Silveira (META · VERA CRUZ)" — prefixo primeiro porque e
+    // o que agrupa na lista ordenada por nome; o contexto vai entre parenteses,
+    // que e onde o olho ignora quando nao precisa dele.
+    return (pre ? pre + ' | ' : '') + nome + (dentro.length ? ' (' + dentro.join(' · ') + ')' : '');
+  }
+
+  function _vcfDoContato(nome, tel) {
+    const so = String(tel || '').replace(/\D/g, '');
+    const e164 = so ? '+' + (so.startsWith('55') ? so : '55' + so) : '';
+    // vCard 3.0: e o formato que iPhone e Android abrem sem app nenhum. FN e o
+    // que aparece na agenda; N vai igual pra nao virar "sem sobrenome" no iOS.
+    return ['BEGIN:VCARD', 'VERSION:3.0',
+            'N:;' + nome + ';;;', 'FN:' + nome,
+            (e164 ? 'TEL;TYPE=CELL:' + e164 : ''),
+            'NOTE:Cadastrado pelo JOB Serenus',
+            'END:VCARD'].filter(Boolean).join('\r\n');
+  }
+
+  function _blocoNomeContato() {
+    return '<div class="job-nomec">' +
+      '<div class="job-nomec-tit">Nome do contato' +
+        '<span class="job-nomec-i" title="Monta o nome no mesmo padrão sempre, pra você achar o contato pela busca do WhatsApp e entender a lista de relance. Nada é salvo sozinho: você edita e escolhe o que fazer.">i</span>' +
+      '</div>' +
+      '<div class="job-nomec-chips">' +
+        _PARTES_NOME.map((p) => '<button type="button" class="job-nomec-chip' +
+          (_partesLigadas[p.id] ? ' on' : '') + '" data-parte="' + p.id + '">' + p.rot + '</button>').join('') +
+      '</div>' +
+      '<input type="text" class="job-campo" id="job-nomec-val">' +
+      '<div class="job-nomec-btns">' +
+        '<button type="button" class="job-cnpj-btn" id="job-nomec-copiar">Copiar nome</button>' +
+        '<button type="button" class="job-cnpj-btn" id="job-nomec-vcf">Baixar contato (.vcf)</button>' +
+      '</div>' +
+      '<div class="job-nomec-dica" id="job-nomec-dica">Copie e cole em "Novo contato" do WhatsApp. ' +
+        'O .vcf abre direto na agenda do celular — é o que leva o contato pro telefone.</div>' +
+    '</div>';
+  }
+
+  function _ligarNomeContato() {
+    const inp = document.getElementById('job-nomec-val');
+    if (!inp) return;
+    const dica = (t) => { const e = document.getElementById('job-nomec-dica'); if (e) e.textContent = t; };
+    inp.value = _montarNomeContato();
+    document.querySelectorAll('.job-nomec-chip').forEach((c) => {
+      c.addEventListener('click', () => {
+        const k = c.dataset.parte;
+        // Chip sem conteudo naquele lead nao pode "ligar" e nao fazer nada —
+        // isso parece defeito. Diz o que falta em vez de ficar mudo.
+        if (!_partesLigadas[k] && !_pedacoDaFicha(k)) {
+          dica('Este lead não tem ' + (c.textContent || '').toLowerCase() + ' preenchido no CRM.');
+          return;
+        }
+        _partesLigadas[k] = !_partesLigadas[k];
+        c.classList.toggle('on', _partesLigadas[k]);
+        inp.value = _montarNomeContato();
+        // Guarda a escolha: um padrao que muda a cada lead nao e padrao.
+        try { chrome.storage.local.set({ jobNomeContatoPartes: _partesLigadas }); } catch (e) {}
+      });
+    });
+    const bc = document.getElementById('job-nomec-copiar');
+    if (bc) bc.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(inp.value.trim());
+        bc.textContent = 'Copiado';
+        dica('Agora abra "Novo contato" no WhatsApp e cole no campo Nome.');
+        setTimeout(() => { bc.textContent = 'Copiar nome'; }, 1800);
+      } catch (e) { dica('Não consegui copiar — selecione e copie à mão.'); }
+    });
+    const bv = document.getElementById('job-nomec-vcf');
+    if (bv) bv.addEventListener('click', () => {
+      const nome = inp.value.trim();
+      if (!nome) { dica('Escreva um nome antes.'); return; }
+      const tel = ((_ficha && _ficha.lead && _ficha.lead.telefone) || _fichaTel || '');
+      const blob = new Blob([_vcfDoContato(nome, tel)], { type: 'text/vcard;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = nome.replace(/[\\/:*?"<>|]/g, '-').slice(0, 60) + '.vcf';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      dica('Baixado. Abra o arquivo no celular (AirDrop, e-mail ou Drive) pra salvar na agenda.');
+    });
+  }
+
   function _renderFicha(aba) {
     const f = _ficha, l = f.lead || {};
     const etapaAtual = (f.etapas || []).find((e) => e.id === l.etapa);
@@ -1887,9 +2026,11 @@
           '<button class="job-cnpj-btn" id="job-ficha-salvar">Salvar no JOB</button>' +
           '<span class="job-ficha-aviso" id="job-ficha-aviso"></span>' +
         '</div>' +
+        (aba === 'dados' ? _blocoNomeContato() : '') +
         '<a class="job-ficha-link" id="job-ficha-abrir-crm" href="#">Abrir a ficha completa no JOB</a>' +
       '</div>');
     _ligarEventosFicha(aba);
+    if (aba === 'dados') _ligarNomeContato();
   }
 
   // Valor a exibir: o que o consultor digitou tem prioridade sobre o que veio do
@@ -4494,6 +4635,10 @@
   // ('direita') e pula pro lado configurado um instante depois, toda vez que
   // o Chrome descarta a aba em segundo plano e recarrega o content script.
   _safeStorageGet(['jobDevMode']).then((c) => { _devLigado = !!(c && c.jobDevMode); }).catch(() => {});
+  // Padrao de nome escolhido pelo consultor — vale pra todos os leads dele.
+  _safeStorageGet(['jobNomeContatoPartes']).then((c) => {
+    if (c && c.jobNomeContatoPartes) Object.assign(_partesLigadas, c.jobNomeContatoPartes);
+  }).catch(() => {});
   carregarPreferenciaLado().then(() => {
     criarTrilho();
     const obs = new MutationObserver(() => {
