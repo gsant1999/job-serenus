@@ -309,6 +309,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // agregado — mas ainda assim uma ida só, pro painel não montar aos pedaços.
   // Transcrição inline: consulta de cache é barata e frequente; a transcrição em
   // si sobe áudio, então tem timeout bem maior.
+  if (msg && msg.type === 'conversas_pendentes') {
+    chamarJob('/api/whatsapp/conversas/pendentes', 'POST', { conversas: msg.conversas || [] }, 20000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'analisar_varredura') {
+    // Timeout generoso: a analise transcreve audio que ainda nao tem cache.
+    chamarJob('/api/whatsapp/analisar', 'POST', msg.payload || {}, 180000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'transcricoes_cache') {
     chamarJob('/api/whatsapp/transcricoes', 'POST', { ids: msg.ids || [] }, 15000).then(sendResponse);
     return true;

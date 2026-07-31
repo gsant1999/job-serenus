@@ -118,6 +118,63 @@
     return { audios: out, encontrados: audios.length };
   }
 
+  // ── VARREDURA DIÁRIA ──
+  // Lista as conversas com atividade nas últimas N horas, SEM ler mensagem
+  // nenhuma: só o que o servidor precisa pra decidir o que vale analisar.
+  async function listarConversasDoDia(horas) {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.list) return { erro: 'wpp_ausente' };
+    const corte = Date.now() / 1000 - (Math.max(1, horas || 24) * 3600);
+    let chats = [];
+    try { chats = await window.WPP.chat.list({ count: 200, onlyUsers: true }); }
+    catch (e) { return { erro: 'falha_lista' }; }
+    const out = [];
+    for (const c of chats) {
+      try {
+        if (!c || !c.id || c.isGroup) continue;
+        const t = c.t || (c.lastReceivedKey && c.lastReceivedKey.t) || 0;
+        if (t && t < corte) continue;
+        const cid = c.id._serialized;
+        // Telefone só quando o WhatsApp expõe (@c.us). Em @lid ele fica vazio de
+        // propósito — quem resolve a pessoa é o servidor, pelo vínculo já salvo.
+        let tel = '';
+        if (cid.indexOf('@c.us') > 0) tel = cid.split('@')[0].replace(/\D/g, '');
+        const ultima = (c.lastReceivedKey && c.lastReceivedKey._serialized) || '';
+        out.push({ chat_id: cid, telefone: tel, nome: (c.formattedTitle || c.name || ''),
+                   ultima_msg_id: ultima, ultima_msg_em: t, msgs: c.msgs ? c.msgs.length : 0 });
+      } catch (e) { /* um chat problemático não pode derrubar a varredura */ }
+    }
+    return { conversas: out };
+  }
+
+  // Lê UMA conversa (não precisa ser a aberta), opcionalmente só o que veio
+  // DEPOIS de uma mensagem — é o incremental que evita reanalisar o histórico.
+  async function lerConversaDe(chatId, desdeMsgId, limite) {
+    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getMessages) return { erro: 'wpp_ausente' };
+    let msgs = [];
+    try { msgs = await window.WPP.chat.getMessages(chatId, { count: Math.max(50, limite || 400) }); }
+    catch (e) { return { erro: 'falha_mensagens' }; }
+    msgs = _dedupPorId(msgs);
+    let corte = -1;
+    if (desdeMsgId) {
+      corte = msgs.findIndex((m) => m.id && m.id._serialized === desdeMsgId);
+    }
+    // Só o que veio DEPOIS da última analisada. Se não achou a marca (mensagem
+    // apagada, histórico truncado), manda tudo — perder contexto é pior que
+    // pagar de novo, e o caso é raro.
+    const janela = corte >= 0 ? msgs.slice(corte + 1) : msgs;
+    const mensagens = [], audios = [];
+    for (const m of janela) {
+      const de = m.id && m.id.fromMe ? 'consultor' : 'lead';
+      if (m.type === 'chat' && (m.body || '').trim()) {
+        mensagens.push({ de, texto: String(m.body).slice(0, 4000), hora: fmtHora(m.t) });
+      } else if (m.type === 'ptt' || m.type === 'audio') {
+        audios.push({ msg_id: m.id._serialized, de, hora: fmtHora(m.t) });
+      }
+    }
+    const ultima = msgs.length ? msgs[msgs.length - 1].id._serialized : (desdeMsgId || '');
+    return { mensagens, audios, ultima_msg_id: ultima, total_janela: janela.length };
+  }
+
   // Lista os áudios da conversa SEM baixar nada. É o que permite consultar o
   // cache antes: abrir uma conversa antiga não pode significar subir dezenas de
   // megabytes de áudio que já foram transcritos e pagos.
@@ -569,6 +626,8 @@
     try {
       if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite);
       else if (d.tipo === 'listar_audios') resp = await listarAudios();
+      else if (d.tipo === 'listar_conversas_dia') resp = await listarConversasDoDia(d.horas);
+      else if (d.tipo === 'ler_conversa_de') resp = await lerConversaDe(d.chatId, d.desdeMsgId, d.limite);
       else if (d.tipo === 'baixar_audios_ids') resp = await baixarAudiosPorId(d.ids);
       else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite, d.forcarGrandes);
       else if (d.tipo === 'ler_mensagens') resp = await lerMensagens(d.limite);

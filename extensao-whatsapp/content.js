@@ -1373,6 +1373,115 @@
     });
   }
 
+  // ═══════════════ Varredura diária das conversas ═══════════════
+  // Roda sozinha, em segundo plano, e é deliberadamente LENTA: uma conversa por
+  // vez com pausa entre elas. O gargalo não é o servidor, é a máquina do
+  // consultor (baixar e descriptografar áudio) — e ele está trabalhando nela.
+  const VAR = {
+    ligada: true,
+    rodando: false,
+    ultimaRodada: 0,
+    INTERVALO_MS: 30 * 60 * 1000,   // de meia em meia hora
+    PAUSA_ENTRE_MS: 8000,           // respiro entre conversas
+    MAX_POR_RODADA: 12,             // teto por rodada, pra nunca virar mutirão
+    HORAS: 24,
+    placar: { analisadas: 0, puladas: 0, erros: 0 },
+  };
+
+  async function varreduraRodar(manual) {
+    if (VAR.rodando || (!VAR.ligada && !manual)) return VAR.placar;
+    if (!manual && Date.now() - VAR.ultimaRodada < VAR.INTERVALO_MS) return VAR.placar;
+    VAR.rodando = true;
+    VAR.ultimaRodada = Date.now();
+    try {
+      const lista = await _pedirPonte('listar_conversas_dia', { horas: VAR.HORAS }, 40000);
+      const conversas = (lista && lista.conversas) || [];
+      if (!conversas.length) return VAR.placar;
+
+      // 1) PERGUNTA ANTES DE SUBIR: o servidor é quem sabe o que já foi
+      //    analisado. Conversa sem novidade nunca sai daqui.
+      const decisao = await _safeSendMessage({ type: 'conversas_pendentes', conversas }).catch(() => null);
+      if (!decisao || !decisao.ok) return VAR.placar;
+      VAR.placar.puladas += (decisao.pular || []).length;
+      const fila = (decisao.analisar || []).slice(0, VAR.MAX_POR_RODADA);
+      const porId = {};
+      conversas.forEach((c) => { porId[c.chat_id] = c; });
+
+      for (const alvo of fila) {
+        if (!VAR.ligada && !manual) break;
+        try {
+          await varreduraUmaConversa(alvo, porId[alvo.chat_id] || {});
+          VAR.placar.analisadas += 1;
+        } catch (e) {
+          VAR.placar.erros += 1;
+        }
+        await new Promise((r) => setTimeout(r, VAR.PAUSA_ENTRE_MS));
+      }
+    } finally {
+      VAR.rodando = false;
+    }
+    return VAR.placar;
+  }
+
+  async function varreduraUmaConversa(alvo, meta) {
+    const conv = await _pedirPonte('ler_conversa_de',
+      { chatId: alvo.chat_id, desdeMsgId: alvo.desde_msg_id, limite: 400 }, 60000);
+    if (!conv || conv.erro) throw new Error(conv && conv.erro || 'falha_leitura');
+    const audios = conv.audios || [];
+
+    // 2) Áudio já transcrito NÃO é baixado nem enviado: manda só o id, e o
+    //    servidor usa o cache. É o que faz a varredura custar quase nada depois
+    //    que a transcrição inline já passou pela conversa.
+    let cacheados = {};
+    if (audios.length) {
+      const r = await _safeSendMessage({ type: 'transcricoes_cache',
+        ids: audios.map((a) => a.msg_id) }).catch(() => null);
+      if (r && r.ok) cacheados = r.transcricoes || {};
+    }
+    const semCache = audios.filter((a) => !(a.msg_id in cacheados)).map((a) => a.msg_id);
+    const baixados = {};
+    if (semCache.length) {
+      // Lotes pequenos: baixar 30 áudios de uma vez é o que trava a máquina.
+      for (let i = 0; i < semCache.length; i += 3) {
+        const r = await _pedirPonte('baixar_audios_ids', { ids: semCache.slice(i, i + 3) }, 90000);
+        ((r && r.audios) || []).forEach((a) => { baixados[a.msg_id] = a; });
+        await new Promise((res) => setTimeout(res, 1200));
+      }
+    }
+    const payloadAudios = audios.map((a) => {
+      const b = baixados[a.msg_id];
+      return b ? { msg_id: a.msg_id, de: a.de, hora: a.hora, base64: b.base64, mime: b.mime }
+               : { msg_id: a.msg_id, de: a.de, hora: a.hora };   // servidor usa o cache
+    });
+
+    // 3) MODO ECONÔMICO: sem imagem e sem PDF. É onde o custo mora, e o que
+    //    preenche o CRM sai da conversa falada.
+    const { usuarioId } = await _safeStorageGet(['usuarioId']);
+    const resp = await _safeSendMessage({
+      type: 'analisar_varredura',
+      payload: {
+        economico: true,
+        chat_id: alvo.chat_id,
+        telefone: meta.telefone || '',
+        nome: meta.nome || '',
+        usuario_id: usuarioId || null,
+        mensagens: conv.mensagens || [],
+        audios: payloadAudios,
+        ultima_msg_id: conv.ultima_msg_id || meta.ultima_msg_id || '',
+        ultima_msg_em: meta.ultima_msg_em || 0,
+      },
+    });
+    if (!resp || !resp.ok) throw new Error((resp && resp.erro) || 'falha_analise');
+    return resp;
+  }
+
+  function varreduraIniciar() {
+    // Primeira rodada com folga: a aba acabou de abrir, o WhatsApp ainda está
+    // carregando conversa, e competir com isso é o que o consultor sente.
+    setTimeout(() => { varreduraRodar(false); }, 120000);
+    setInterval(() => { varreduraRodar(false); }, 5 * 60 * 1000);
+  }
+
   // ═══════════════ Ficha do lead (CRM dentro do WhatsApp) ═══════════════
   // O painel inteiro do CRM na mesma aba: etapa, sub-status, etiquetas, campos
   // personalizados, qualificação e atividade. Mora no #job-painel-doc, que é
@@ -4027,6 +4136,7 @@
     // Transcrição colada no áudio. Best-effort: se qualquer coisa aqui falhar, o
     // resto da extensão continua funcionando — transcrição é ganho, não requisito.
     try { trIniciar(); } catch (e) { console.warn('[JOB] transcrição não iniciou:', e); }
+    try { varreduraIniciar(); } catch (e) { console.warn('[JOB] varredura não iniciou:', e); }
     verificarVersaoExtensao();
     // Reverifica sozinho a cada 20min, SEMPRE — antes só reagendava quando
     // achava atualização, então uma aba aberta por horas sem update na hora

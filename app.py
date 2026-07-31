@@ -15616,7 +15616,18 @@ def api_whatsapp_analisar():
         if not isinstance(a, dict):
             continue
         b64 = str(a.get('base64') or '')
-        if not b64 or len(b64) > 40_000_000:
+        mid_pre = str(a.get('msg_id') or '').strip()[:100]
+        # Áudio SÓ COM O ID é aceito quando já existe transcrição em cache. É o
+        # que permite a varredura diária não baixar nem subir de novo um áudio já
+        # transcrito — que, depois da transcrição inline, é a maioria deles. Sem
+        # isso, "não pagar de novo pela transcrição" ainda custaria o download no
+        # computador do consultor e o upload do arquivo inteiro.
+        if not b64:
+            if mid_pre and _wa_transcricao_cache_buscar(conn, mid_pre):
+                b64 = ''
+            else:
+                continue
+        if len(b64) > 40_000_000:
             continue
         audios_validos += 1
         it = {'b64': b64, 'mime': str(a.get('mime') or 'audio/ogg'),
@@ -15797,6 +15808,13 @@ def api_whatsapp_analisar():
     # custar R$8,96. Agora descreve UMA vez (Haiku, barato, em paralelo), guarda
     # por hash e reusa; a análise principal roda SÓ-TEXTO. Respeita o teto de
     # R$1: se encostar, para de descrever mídia nova. Pedido do Guilherme. ──
+    # MODO ECONÔMICO: só texto + áudio transcrito, sem descrever imagem nem PDF.
+    # É onde o custo mora: uma imagem custa ~1.500 tokens só pra ser VISTA, e um
+    # PDF de várias páginas custa múltiplos disso — enquanto o que preenche o CRM
+    # (valor pago, vidas, hospital, operadora) sai da conversa falada. Cortando a
+    # mídia fica ~90% do valor por ~20% do custo. É o modo da varredura diária.
+    if d.get('economico'):
+        imagens, documentos = [], []
     midia_linhas, custo_midia_usd, imgs_lidas, docs_lidos, midias_puladas = _wa_mapear_midias(
         conn, imagens, documentos, custo_ja_gasto_usd=custo_transcricao_usd)
     limpa_ia = limpa
@@ -15989,6 +16007,21 @@ def api_whatsapp_analisar():
                      (lead_id, 'Extensão WhatsApp', 'analise',
                       f'Score Lead {score}/1000 ({faixa}) · fase {an["fase_funil"]} · {len(limpa)} mensagens analisadas.',
                       _agora_sp()))
+
+    # MARCA D'ÁGUA — só AQUI, depois de a análise estar gravada. Carimbar antes
+    # faria uma análise que falhasse marcar a conversa como feita, e a conversa
+    # nunca mais seria analisada: o dado se perderia sem erro nenhum aparecer.
+    # Vale pra qualquer análise (manual ou varredura): o consultor que analisa uma
+    # conversa à mão também não deve pagar de novo por ela na varredura da noite.
+    if d.get('chat_id'):
+        registrar_estado_conversa(
+            conn, str(d.get('chat_id'))[:120],
+            telefone_norm=(tel_norm or None), lead_id=(lead_id or None),
+            ultima_msg_id=str(d.get('ultima_msg_id') or '')[:120] or None,
+            ultima_msg_em=(float(d.get('ultima_msg_em') or 0) or None),
+            analise_id=analise_id, msgs=len(limpa),
+            custo_usd=(custo_claude_usd or 0) + (custo_transcricao_usd or 0))
+
     conn.commit(); close_db(conn)
 
     if lead_criado:
