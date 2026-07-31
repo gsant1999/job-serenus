@@ -2488,6 +2488,11 @@ def init_db():
         # entregar a IMAGEM sem precisar de navegador no servidor.
         ("cotacao_salva", "imagem_arquivo", "TEXT"),
         ("cotacao_salva", "imagem_em", "TEXT"),
+        # Etiqueta que não diz o que fazer é enfeite. `acao` é a frase do que
+        # fazer; `momento` é a fase da proposta em que ela faz sentido — é o que
+        # permite destacar só as que cabem AGORA.
+        ("etiquetas", "acao", "TEXT"),
+        ("etiquetas", "momento", "TEXT"),
         # Módulos liberados por consultor (JSON de chaves). NULL = todos (default,
         # não muda nada). Admin ignora — vê tudo sempre.
         ("usuarios", "modulos", "TEXT"),
@@ -6362,16 +6367,38 @@ def ver_proposta(pid):
     if not p: return "Não encontrada", 404
     if session['perfil'] != 'admin' and p['usuario_id'] != session['user_id']: return "Acesso negado", 403
     parcelas = conn.execute("SELECT * FROM parcelas WHERE proposta_id=? ORDER BY numero ASC",(pid,)).fetchall()
-    # Lead correspondente no CRM — propostas não tem lead_id, casa por telefone
-    # (mesmo critério de _buscar_lead_por_telefone/_fechados_com_analise).
+    # Lead correspondente no CRM. USA A CHAVE GRAVADA (propostas.lead_id) — o
+    # comentário antigo dizia "propostas não tem lead_id" e readivinhava por
+    # telefone a cada abertura da tela. Tem desde 29/07; readivinhar significa
+    # mostrar um lead diferente do que está gravado se o telefone mudar.
     lead_crm = None
-    for tel in (p['tel_resp_contrato'] if 'tel_resp_contrato' in p.keys() else None,
-                p['tel_resp_negociacao'] if 'tel_resp_negociacao' in p.keys() else None):
-        tn = _normalizar_telefone(str(tel or ''))
-        if tn:
-            lead_crm = _buscar_lead_por_telefone(conn, tn)
-            if lead_crm:
-                break
+    _lid_prop = (p['lead_id'] if 'lead_id' in p.keys() else None)
+    if _lid_prop:
+        lead_crm = conn.execute(
+            """SELECT id, nome, responsavel_id, etapa, sub_status, telefone, telefone_norm, criado_em
+               FROM crm_leads WHERE id=?""", (_lid_prop,)).fetchone()
+    if not lead_crm:
+        for tel in (p['tel_resp_contrato'] if 'tel_resp_contrato' in p.keys() else None,
+                    p['tel_resp_negociacao'] if 'tel_resp_negociacao' in p.keys() else None):
+            tn = _normalizar_telefone(str(tel or ''))
+            if tn:
+                lead_crm = _buscar_lead_por_telefone(conn, tn)
+                if lead_crm:
+                    break
+    # Identidade no WhatsApp desse lead: o @lid, que o Guilherme quer ver em TODO
+    # lugar onde o lead aparece — não só na ficha do CRM.
+    lead_wa = None
+    if lead_crm:
+        try:
+            r = conn.execute("""SELECT chat_id FROM wa_chat_lead WHERE lead_id=?
+                                ORDER BY atualizado_em DESC LIMIT 1""", (lead_crm['id'],)).fetchone()
+            if r and r['chat_id']:
+                cid = r['chat_id']
+                lead_wa = {'chat_id': cid,
+                           'tipo': 'lid' if '@lid' in cid else ('numero' if '@c.us' in cid else 'outro'),
+                           'curto': cid.split('@')[0][:16] + ('…' if len(cid.split('@')[0]) > 16 else '')}
+        except Exception:
+            pass
     campos_def = conn.execute("SELECT * FROM campos_custom ORDER BY ordem,id").fetchall()
     # Operadora no editar = SELECT da lista única (não texto livre). Antes era
     # input de texto: dava pra digitar um nome que não existe na tabela de preço
@@ -6430,7 +6457,9 @@ def ver_proposta(pid):
 
     return render_template('detalhe.html', p=p, parcelas=parcelas, regime=regime, extras=extras_view,
                            campos_secoes=campos_secoes, valores_edit=valores_edit,
-                           solic_pendente=solic_pendente, comissao_aviso=comissao_aviso, lead_crm=lead_crm)
+                           solic_pendente=solic_pendente, comissao_aviso=comissao_aviso,
+                           lead_crm=lead_crm, lead_wa=lead_wa,
+                           etiquetas_sugeridas=_etiquetas_do_momento(p, lead_crm))
 
 @app.route('/proposta/<int:pid>/consultor', methods=['POST'])
 @login_required
@@ -14736,6 +14765,64 @@ def api_whatsapp_lead_criar():
         (lead_id, autor, 'criacao', f'Lead cadastrado pela extensão (origem: {origem})', agora))
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True, "ja_existia": False, "lead_id": lead_id}))
+
+
+# ─── ETIQUETAS DA PROPOSTA: O QUE FAZER, E QUANDO ─────────────────────────────
+# Etiqueta que só colore não motiva nada. Cada uma passa a carregar a AÇÃO e o
+# MOMENTO em que ela cabe, e a tela destaca as que servem pra fase atual.
+_ETIQUETA_ACAO = {
+    'Atenção estorno': ('Conferir pagamento antes que vire estorno — ligar pro cliente hoje',
+                        'Aguardando Documentos,Em Análise Operadora'),
+    'Campanha':        ('Elegível a campanha da operadora — confirmar antes de emitir',
+                        'Aguardando Documentos,Em Análise Operadora'),
+    'Indicação':       ('Pedir indicação: cliente satisfeito indica na primeira semana',
+                        'Emitida/Ativa'),
+    'Pós-venda':       ('Ligar pra ativar o uso do plano — carteirinha, rede, app',
+                        'Emitida/Ativa'),
+    'Reajuste':        ('Avisar o cliente ANTES do boleto reajustado chegar',
+                        'Emitida/Ativa'),
+    'Renovação':       ('Falar de renovação 60 dias antes do aniversário do contrato',
+                        'Emitida/Ativa'),
+}
+
+
+def _seed_etiquetas_acao(conn):
+    """Preenche ação/momento das etiquetas que já existem. Não cria nem apaga
+    etiqueta: quem manda na lista é o admin."""
+    try:
+        for nome, (acao, momento) in _ETIQUETA_ACAO.items():
+            conn.execute("UPDATE etiquetas SET acao=?, momento=? WHERE nome=? AND COALESCE(acao,'')=''",
+                         (acao, momento, nome))
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        app.logger.warning(f"[ETIQUETAS] seed: {e}")
+
+
+def _etiquetas_do_momento(p, lead):
+    """Quais etiquetas fazem sentido AGORA, e por quê. Devolve lista pronta pra
+    tela — a decisão de o que fazer não deveria depender de o consultor lembrar."""
+    fase = (p['status_operacional'] if 'status_operacional' in p.keys() else '') or ''
+    etapa_lead = ''
+    if lead is not None:
+        try:
+            etapa_lead = (lead['etapa'] or '')
+        except Exception:
+            etapa_lead = ''
+    conn = db()
+    out = []
+    try:
+        for r in conn.execute("SELECT id, nome, cor, acao, momento FROM etiquetas ORDER BY nome").fetchall():
+            momentos = [m.strip() for m in (r['momento'] or '').split(',') if m.strip()]
+            out.append({'id': r['id'], 'nome': r['nome'], 'cor': r['cor'],
+                        'acao': r['acao'] or '',
+                        'cabe_agora': bool(momentos) and fase in momentos})
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        app.logger.warning(f"[ETIQUETAS] momento: {e}")
+    close_db(conn)
+    return {'fase': fase, 'etapa_lead': etapa_lead, 'etiquetas': out}
 
 
 # ═══════════════ API PÚBLICA: CHAVES ═══════════════════════════════════════════
@@ -26868,6 +26955,24 @@ def _backfill_telefone_canonico():
             try: close_db(conn)
             except Exception: pass
 
+
+def _seed_etiquetas_acao_boot():
+    """Preenche ação/momento das etiquetas existentes. Roda no arranque, fora do
+    bloco __main__ — que não executa em produção (app.run bloqueia antes)."""
+    conn = None
+    try:
+        conn = db()
+        _seed_etiquetas_acao(conn)
+        conn.commit()
+    except Exception as e:
+        print(f"[ETIQUETAS] seed pulado: {e}")
+    finally:
+        if conn is not None:
+            try: close_db(conn)
+            except Exception: pass
+
+
+_seed_etiquetas_acao_boot()
 
 _backfill_telefone_canonico()
 

@@ -79,6 +79,21 @@
   padding: 4px 12px; border-radius: 20px;
   font-size: 12px; font-weight: 600;
 }
+
+  .prop-lid { display:inline-flex; align-items:center; gap:6px; text-decoration:none;
+              background:var(--panel-3); border:1px solid var(--borda); border-radius:7px;
+              padding:4px 9px; width:fit-content; transition:.15s; }
+  .prop-lid:hover { border-color:var(--info); }
+  .prop-lid-tag { font-size:8.5px; font-weight:800; letter-spacing:.4px; padding:1px 5px; border-radius:5px; }
+  .prop-lid-tag.lid { background:rgba(168,85,247,.2); color:#d8b4fe; }
+  .prop-lid-tag.numero { background:rgba(34,197,94,.18); color:#4ade80; }
+  .prop-lid-tag.outro { background:var(--panel-2); color:var(--cinza-2); }
+  .prop-lid-cod { font-family:ui-monospace,Menlo,monospace; font-size:10.5px; color:var(--cinza); }
+  .etq-acao { display:flex; flex-direction:column; gap:2px; border:1px solid var(--borda);
+              border-left-width:3px; border-radius:8px; padding:8px 11px; margin-bottom:6px;
+              background:var(--panel-2); }
+  .etq-acao-nome { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; }
+  .etq-acao-txt { font-size:12.5px; color:var(--cinza); line-height:1.45; }
 </style>
 
 <div class="topbar">
@@ -604,11 +619,58 @@
       </div>
 
       {# ── ETIQUETAS (sidebar) ── #}
-      <div class="card" style="margin-bottom:16px;">
+      {% if lead_crm %}
+        <div class="card" style="margin-bottom:14px;">
+          <div style="padding:12px 18px;border-bottom:1px solid var(--borda);display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-size:13px;font-weight:600;">Lead no CRM</div>
+            <a href="/crm?lead={{ lead_crm.id }}" style="font-size:12px;color:var(--info);text-decoration:none;">abrir ficha</a>
+          </div>
+          <div style="padding:12px 18px;display:flex;flex-direction:column;gap:8px;">
+            <a href="/crm?lead={{ lead_crm.id }}" style="font-size:14px;font-weight:600;color:var(--texto);text-decoration:none;">{{ lead_crm.nome }}</a>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+              {% if lead_crm.etapa %}<span class="tag">{{ lead_crm.etapa|replace('_',' ')|title }}</span>{% endif %}
+              {% if lead_crm.sub_status %}<span class="tag tag-am">{{ lead_crm.sub_status }}</span>{% endif %}
+            </div>
+            {% if lead_wa %}
+            {# @lid aqui também: o Guilherme quer a identidade do WhatsApp visível
+               em TODO lugar onde o lead aparece, e clicável pro CRM. #}
+            <a href="/crm?lead={{ lead_crm.id }}" class="prop-lid" title="{{ lead_wa.chat_id }}">
+              <span class="prop-lid-tag {{ lead_wa.tipo }}">{{ '@lid' if lead_wa.tipo == 'lid' else 'nº' }}</span>
+              <span class="prop-lid-cod">{{ lead_wa.curto }}</span>
+            </a>
+            {% else %}
+            <span style="font-size:11.5px;color:var(--cinza-2);">Sem conversa do WhatsApp vinculada a este lead.</span>
+            {% endif %}
+          </div>
+        </div>
+        {% else %}
+        <div class="card" style="margin-bottom:14px;border-color:rgba(250,204,21,.35);">
+          <div style="padding:12px 18px;font-size:12.5px;color:var(--cinza);line-height:1.55;">
+            <b style="color:var(--texto);">Venda sem lead no CRM.</b>
+            Sem lead não há origem de mídia, e ela não sobe pro Google Ads mesmo que tenha vindo de anúncio.
+          </div>
+        </div>
+        {% endif %}
+        <div class="card" style="margin-bottom:16px;">
         <div class="card-header" style="padding:14px 18px;">
           <div style="font-size:13px;font-weight:600;">Etiquetas</div>
           {% if session.perfil == 'admin' %}<button class="btn-ghost" style="font-size:11px;" onclick="novaEtiqueta()">+ Nova</button>{% endif %}
         </div>
+        {% if etiquetas_sugeridas and etiquetas_sugeridas.etiquetas|selectattr('cabe_agora')|list %}
+        {# O que fazer AGORA, pela fase da proposta. Etiqueta que só colore não
+           motiva nada — aqui ela vem com a ação e destacada quando cabe. #}
+        <div style="padding:10px 18px 4px;">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--cinza-2);margin-bottom:7px;">
+            Sugerido nesta fase — {{ etiquetas_sugeridas.fase }}
+          </div>
+          {% for e in etiquetas_sugeridas.etiquetas if e.cabe_agora %}
+          <div class="etq-acao" style="border-color:{{ e.cor }}66;">
+            <span class="etq-acao-nome" style="color:{{ e.cor }};">{{ e.nome }}</span>
+            <span class="etq-acao-txt">{{ e.acao }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
         <div style="padding:10px 18px 14px;display:flex;gap:6px;flex-wrap:wrap;" id="chips-etiquetas">
           <span style="color:var(--cinza-2);font-size:12px;">Carregando...</span>
         </div>
