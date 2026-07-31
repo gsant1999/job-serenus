@@ -1272,6 +1272,17 @@
       const cid = (chat && chat.chat_id) || '';
       if (!cid) return;
       if (cid === _trChatCarregado && !forcar) return;
+      // Aproveita a abertura da conversa pra amarrar @lid -> lead no servidor.
+      // E o momento mais frequente e mais barato: o telefone e o chat_id ja
+      // estao resolvidos aqui, e o consultor nao precisa fazer nada. Sem isto o
+      // vinculo so nascia ao ENVIAR pela extensao, e por isso a maioria dos
+      // cards do CRM aparecia sem @lid.
+      try {
+        let tel = '';
+        try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+        if (tel) _safeSendMessage({ type: 'lead_por_telefone', telefone: tel, chatId: cid,
+                                    nome: nomeDoContato() }).catch(() => {});
+      } catch (e) {}
       const r = await _pedirPonte('listar_audios', {}, 15000);
       const lista = (r && r.audios) || [];
       if (cid !== _trChatCarregado) { _TR_IDS.clear(); _trChatCarregado = cid; }

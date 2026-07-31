@@ -14802,6 +14802,20 @@ def api_whatsapp_lead_por_telefone():
         return _wa_cors(jsonify({"ok": True, "achou": False}))
     conn = db()
     lead = _buscar_lead_por_telefone(conn, tel)
+    # ABRIR A CONVERSA JA AMARRA o @lid ao lead. Era o buraco que deixava a
+    # maioria dos cards sem @lid: o vinculo so nascia ao ENVIAR pela extensao ou
+    # na varredura. Consultar acontece toda vez que o consultor abre um chat —
+    # e o momento mais barato e mais frequente pra gravar, e nao custa nada
+    # (nenhuma IA, nenhum download, e o telefone ja esta resolvido aqui).
+    chat_id = (request.args.get('chat_id') or '').strip()[:100]
+    if chat_id and lead:
+        try:
+            registrar_chat_lead(conn, chat_id, request.args.get('telefone', ''),
+                                (request.args.get('nome') or '').strip()[:200] or None,
+                                lead_id=lead['id'])
+            conn.commit()
+        except Exception as e:
+            app.logger.warning(f"[WA_CHAT_LEAD] consulta não gravou: {e}")
     close_db(conn)
     if not lead:
         return _wa_cors(jsonify({"ok": True, "achou": False}))

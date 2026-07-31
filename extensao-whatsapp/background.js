@@ -351,7 +351,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === 'lead_por_telefone') {
-    chamarJob('/api/whatsapp/lead-por-telefone?telefone=' + encodeURIComponent(msg.telefone || ''), 'GET', null, 10000).then(sendResponse);
+    // Manda o chat_id junto: e o que permite ao JOB amarrar o @lid ao lead na
+    // hora em que o consultor abre a conversa, sem nenhum passo extra pra ele.
+    chamarJob('/api/whatsapp/lead-por-telefone?telefone=' + encodeURIComponent(msg.telefone || '') +
+      (msg.chatId ? '&chat_id=' + encodeURIComponent(msg.chatId) : '') +
+      (msg.nome ? '&nome=' + encodeURIComponent(msg.nome) : ''), 'GET', null, 10000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'lead_criar') {
