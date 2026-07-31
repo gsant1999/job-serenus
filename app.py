@@ -6346,8 +6346,30 @@ def listar_propostas():
             LEFT JOIN supervisoras s ON s.id=p.supervisora_id
             WHERE p.usuario_id=? AND p.status != 'Excluída'
             ORDER BY p.id DESC""",(uid,)).fetchall()
+    # @lid de cada venda, numa query só. O Guilherme quer a identidade do WhatsApp
+    # visível em TODO lugar onde o lead aparece — inclusive na lista de vendas,
+    # onde ela permite reconhecer a conversa sem abrir nada.
+    wa_prop = {}
+    _lids = [r['lead_id'] for r in rows if ('lead_id' in r.keys() and r['lead_id'])]
+    if _lids:
+        try:
+            marc = ','.join(['?'] * len(_lids))
+            for w in conn.execute(f"""SELECT lead_id, chat_id FROM wa_chat_lead
+                                      WHERE lead_id IN ({marc}) ORDER BY atualizado_em DESC""",
+                                  _lids).fetchall():
+                if w['lead_id'] in wa_prop:
+                    continue
+                cid = w['chat_id'] or ''
+                wa_prop[w['lead_id']] = {
+                    'chat_id': cid,
+                    'tipo': 'lid' if '@lid' in cid else ('numero' if '@c.us' in cid else 'outro'),
+                    'curto': cid.split('@')[0][:12] + ('…' if len(cid.split('@')[0]) > 12 else ''),
+                }
+        except Exception as e:
+            app.logger.warning(f"[PROPOSTAS] @lid: {e}")
     close_db(conn)
-    return render_template('propostas.html', propostas=rows, modo_teste=session.get('modo_teste', False))
+    return render_template('propostas.html', propostas=rows, wa_prop=wa_prop,
+                           modo_teste=session.get('modo_teste', False))
 
 @app.route('/admin/modo-teste/toggle', methods=['POST'])
 @login_required

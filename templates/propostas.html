@@ -2,6 +2,18 @@
 {% block title %}Propostas{% endblock %}
 
 {% block content %}
+<style>
+  .lst-lid { display:inline-flex; align-items:center; gap:5px; margin-top:4px; text-decoration:none;
+             font-family:ui-monospace,Menlo,monospace; font-size:10px; color:var(--cinza-2);
+             background:var(--panel-3); border:1px solid var(--borda); border-radius:6px;
+             padding:2px 7px; width:fit-content; transition:.15s; }
+  .lst-lid:hover { border-color:var(--info); color:var(--texto); }
+  .lst-lid.orfa { border-color:rgba(250,204,21,.35); color:#eab308; cursor:default; }
+  .lst-lid-tag { font-size:8px; font-weight:800; letter-spacing:.3px; padding:1px 4px; border-radius:4px; }
+  .lst-lid-tag.lid { background:rgba(168,85,247,.2); color:#d8b4fe; }
+  .lst-lid-tag.numero { background:rgba(34,197,94,.18); color:#4ade80; }
+  .lst-lid-tag.outro { background:var(--panel-2); color:var(--cinza-2); }
+</style>
 <div class="topbar">
   <div>
     <h1>Propostas</h1>
@@ -70,7 +82,22 @@
             data-s="{{ p.razao_social|lower }} {{ p.consultor|lower }} {{ p.adm_operadora|lower }}">
           <td><a href="/proposta/{{ p.id }}" style="color:var(--verde); font-weight:500;">#{{ p.id }}</a></td>
           <td class="td-mono" style="font-size:12px;color:var(--cinza);white-space:nowrap;" title="Dia que o protocolo da venda subiu no sistema">{{ p.criado_em|data_br }}</td>
-          <td><strong>{{ p.razao_social }}</strong></td>
+          <td>
+            <strong>{{ p.razao_social }}</strong>
+            {# @lid embaixo do cliente: reconhece a conversa sem abrir nada, e
+               clicando cai na ficha do lead no CRM. #}
+            {% if p.lead_id and wa_prop.get(p.lead_id) %}
+            <a href="/crm?lead={{ p.lead_id }}" class="lst-lid" onclick="event.stopPropagation()"
+               title="Conversa no WhatsApp: {{ wa_prop[p.lead_id].chat_id }}">
+              <span class="lst-lid-tag {{ wa_prop[p.lead_id].tipo }}">{{ '@lid' if wa_prop[p.lead_id].tipo == 'lid' else 'nº' }}</span>{{ wa_prop[p.lead_id].curto }}
+            </a>
+            {% elif p.lead_id %}
+            <a href="/crm?lead={{ p.lead_id }}" class="lst-lid" onclick="event.stopPropagation()"
+               title="Lead no CRM, mas sem conversa do WhatsApp vinculada">lead #{{ p.lead_id }}</a>
+            {% else %}
+            <span class="lst-lid orfa" title="Venda sem lead no CRM: sem origem de mídia, não sobe pro Google Ads">sem lead</span>
+            {% endif %}
+          </td>
           {% if session.perfil == 'admin' %}<td>{{ p.consultor }}</td>{% endif %}
           <td>{{ p.adm_operadora or '—' }}</td>
           <td><span class="tag tag-verde">{{ p.modalidade }}</span></td>
