@@ -202,6 +202,52 @@
   }
 
   // Baixa SÓ os áudios pedidos (os que não têm cache).
+  // Acha o OBJETO da mensagem a partir do id que veio do DOM.
+  //
+  // Passar o id cru pro downloadMedia estourava "Cannot read properties of
+  // undefined (reading '_serialized')": a wa-js tenta converter a string em
+  // chave e, em conversa @lid (o WhatsApp novo, que esconde o telefone), essa
+  // conversao devolve undefined. Com o OBJETO em maos nao ha o que converter.
+  //
+  // Quatro caminhos, do mais barato pro mais caro, e cada um diz onde parou —
+  // pra proxima falha nomear a etapa em vez de ser mais um "nao deu".
+  async function _acharMensagem(id) {
+    const W = window.WPP && window.WPP.whatsapp;
+    const tentativas = [];
+    // 1) Direto no store, que e onde a mensagem ja esta se a bolha esta na tela.
+    try {
+      if (W && W.MsgStore && W.MsgStore.get) {
+        const m = W.MsgStore.get(id);
+        if (m) return { msg: m, via: 'store' };
+      }
+    } catch (e) { tentativas.push('store: ' + ((e && e.message) || e)); }
+    // 2) Store via chave montada (alguns builds so aceitam MsgKey).
+    try {
+      if (W && W.MsgKey && W.MsgStore && W.MsgStore.get) {
+        const k = W.MsgKey.fromString ? W.MsgKey.fromString(id) : new W.MsgKey(id);
+        const m = k && W.MsgStore.get(k);
+        if (m) return { msg: m, via: 'store_key' };
+      }
+    } catch (e) { tentativas.push('chave: ' + ((e && e.message) || e)); }
+    // 3) API publica da wa-js.
+    try {
+      if (window.WPP.chat.getMessageById) {
+        const m = await window.WPP.chat.getMessageById(id);
+        if (m) return { msg: m, via: 'getMessageById' };
+      }
+    } catch (e) { tentativas.push('getMessageById: ' + ((e && e.message) || e)); }
+    // 4) Ultimo recurso: varre as carregadas da conversa aberta.
+    try {
+      const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
+      if (chat && chat.id) {
+        const msgs = await window.WPP.chat.getMessages(chat.id._serialized, { count: 200 });
+        const m = (msgs || []).find((x) => x && x.id && x.id._serialized === id);
+        if (m) return { msg: m, via: 'varredura' };
+      }
+    } catch (e) { tentativas.push('varredura: ' + ((e && e.message) || e)); }
+    return { msg: null, via: null, motivo: tentativas.join(' | ').slice(0, 120) || 'mensagem não encontrada no WhatsApp' };
+  }
+
   async function baixarAudiosPorId(ids) {
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.downloadMedia) {
       return { erro: 'wpp_ausente' };
@@ -213,22 +259,23 @@
     // pista pra mim. Um áudio que falha continua não derrubando o lote.
     const erros = {};
     for (const id of alvos) {
+      // OBJETO primeiro, id depois. O contrario e o que estourava em conversa @lid.
       let media = null;
-      try {
-        media = await window.WPP.chat.downloadMedia(id);
-      } catch (e1) {
-        // Plano B: pega a mensagem no store e baixa a partir do OBJETO. Passar
-        // só o id falha quando a mensagem não está carregada em memória (áudio
-        // antigo, conversa recém-aberta) — que é o caso comum de quem rola a
-        // conversa pra trás e clica em transcrever.
+      const achado = await _acharMensagem(id);
+      if (achado.msg) {
         try {
-          const msg = window.WPP.chat.getMessageById
-            ? await window.WPP.chat.getMessageById(id) : null;
-          if (msg) media = await window.WPP.chat.downloadMedia(msg);
-          else erros[id] = 'mensagem não encontrada';
-        } catch (e2) {
-          erros[id] = String((e2 && e2.message) || e2 || 'falha no download').slice(0, 90);
+          media = await window.WPP.chat.downloadMedia(achado.msg);
+        } catch (e1) {
+          erros[id] = 'download (' + achado.via + '): ' +
+                      String((e1 && e1.message) || e1 || 'falhou').slice(0, 80);
         }
+      } else {
+        erros[id] = achado.motivo;
+      }
+      if (!media) {
+        // Ainda assim tenta pelo id: em build antigo esse era o caminho que
+        // funcionava, e nao custa nada depois de tudo ja ter falhado.
+        try { media = await window.WPP.chat.downloadMedia(id); } catch (e) {}
       }
       if (!media) { erros[id] = erros[id] || 'mídia vazia'; continue; }
       try {
