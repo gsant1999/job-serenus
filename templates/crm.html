@@ -1877,10 +1877,9 @@ function usarTemplate(i){
 }
 function abrirWppWeb(){
   if(!_leadAtual) return;
-  const tel=(_leadAtual.telefone||'').replace(/\D/g,'');
-  if(!tel){ toast('Sem telefone','err'); return; }
   const msg=document.getElementById('wpp-msg').value.trim()||('Olá '+(_leadAtual.nome||'')+', tudo bem?');
-  window.open('https://wa.me/'+tel+'?text='+encodeURIComponent(msg),'_blank');
+  // O texto vai escrito na caixa do WhatsApp, sem enviar — o consultor revisa.
+  if(!abrirConversaWhatsApp(_leadAtual.telefone, (_leadAtual.chat_id||''), msg)) toast('Sem telefone','err');
 }
 // ── Envio pela fila da extensão: não é síncrono — só funciona quando o
 //    WhatsApp Web de algum computador do responsável estiver aberto com a
@@ -1918,49 +1917,10 @@ function _acompanharFilaWpp(filaId, btn, status, tentativa){
       setTimeout(()=>_acompanharFilaWpp(filaId, btn, status, tentativa+1), INTERVALO_MS);
     }).catch(()=>{ status.textContent='Pendente — não deu pra confirmar agora.'; btn.disabled=false; });
 }
-// Abrir a conversa do lead SEM recarregar o WhatsApp.
-//
-// window.open abria aba nova e o WhatsApp ressincronizava tudo do zero — dezenas
-// de segundos de tela de carregamento cada vez que o consultor queria falar com
-// um lead. Agora o pedido vai pra extensao, que acha a aba do WhatsApp JA aberta,
-// foca nela e troca de conversa por dentro. Nada recarrega.
-//
-// window.open fica so como ultimo recurso: extensao desligada, ou aba do
-// WhatsApp que nem existe ainda — os dois casos em que carregar e inevitavel.
-let _extPresente = false;
-window.addEventListener('message', (ev) => {
-  if(ev.source !== window) return;
-  const d = ev.data;
-  if(d && d.source === 'JOB_SITE_RESP' && d.tipo === 'extensao_presente') _extPresente = true;
-});
-
-function _abrirNoWhatsAppDireto(comDdi){
-  window.open('https://web.whatsapp.com/send?phone='+comDdi,'_blank','noopener');
-}
-
+// Usa o helper central do base.html — antes cada tela tinha a sua copia, e foi
+// isso que deixou metade delas abrindo aba nova depois da correcao.
 function wppRapido(tel, chatId){
-  const digitos=(tel||'').replace(/\D/g,'');
-  if(!digitos && !chatId){ toast('Lead sem telefone cadastrado','err'); return; }
-  const comDdi = digitos ? (digitos.startsWith('55') ? digitos : ('55'+digitos)) : '';
-  if(!_extPresente){ _abrirNoWhatsAppDireto(comDdi); return; }
-  const reqId = 'c'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
-  let respondeu = false;
-  function ouvir(ev){
-    if(ev.source !== window) return;
-    const d = ev.data;
-    if(!d || d.source !== 'JOB_SITE_RESP' || d.reqId !== reqId) return;
-    respondeu = true;
-    window.removeEventListener('message', ouvir);
-    if(!d.ok) _abrirNoWhatsAppDireto(comDdi);
-  }
-  window.addEventListener('message', ouvir);
-  window.postMessage({source:'JOB_SITE_REQ', tipo:'abrir_chat', reqId, telefone: comDdi, chatId: chatId||''}, '*');
-  // Se a extensao nao responder, nao deixa o clique morrer sem nada acontecer.
-  setTimeout(() => {
-    if(respondeu) return;
-    window.removeEventListener('message', ouvir);
-    _abrirNoWhatsAppDireto(comDdi);
-  }, 1800);
+  if(!abrirConversaWhatsApp(tel, chatId)) toast('Lead sem telefone cadastrado','err');
 }
 
 async function uploadAnexo(files){

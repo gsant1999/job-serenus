@@ -331,23 +331,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // carregar do zero e inevitavel.
   if (msg && msg.type === 'abrir_chat_whatsapp') {
     const tel = String(msg.telefone || '').replace(/\D/g, '');
+    const texto = String(msg.texto || '').slice(0, 4000);
     const comDdi = tel ? (tel.startsWith('55') ? tel : '55' + tel) : '';
     chrome.tabs.query({ url: 'https://web.whatsapp.com/*' }, (abas) => {
       const aba = (abas || [])[0];
       if (!aba) {
         if (!comDdi) { sendResponse({ ok: false, motivo: 'sem_telefone' }); return; }
-        chrome.tabs.create({ url: 'https://web.whatsapp.com/send?phone=' + comDdi, active: true },
+        chrome.tabs.create({ url: 'https://web.whatsapp.com/send?phone=' + comDdi + (texto ? '&text=' + encodeURIComponent(texto) : ''), active: true },
           () => sendResponse({ ok: true, motivo: 'aba_nova' }));
         return;
       }
       chrome.tabs.update(aba.id, { active: true }, () => {
         if (aba.windowId != null) { try { chrome.windows.update(aba.windowId, { focused: true }); } catch (e) {} }
-        chrome.tabs.sendMessage(aba.id, { type: 'abrir_chat_aqui', telefone: comDdi, chatId: msg.chatId || '' },
+        chrome.tabs.sendMessage(aba.id, { type: 'abrir_chat_aqui', telefone: comDdi, chatId: msg.chatId || '', texto: msg.texto || '' },
           (r) => {
             if (chrome.runtime.lastError) {
               // Aba aberta mas sem content script (F5 pendente): navega nela
               // mesmo assim — ainda e melhor que abrir outra.
-              if (comDdi) chrome.tabs.update(aba.id, { url: 'https://web.whatsapp.com/send?phone=' + comDdi });
+              if (comDdi) chrome.tabs.update(aba.id, { url: 'https://web.whatsapp.com/send?phone=' + comDdi + (texto ? '&text=' + encodeURIComponent(texto) : '') });
               sendResponse({ ok: true, motivo: 'navegou_na_aba' });
               return;
             }

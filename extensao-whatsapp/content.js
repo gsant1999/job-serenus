@@ -5056,7 +5056,7 @@
     if (!msg || msg.type !== 'abrir_chat_aqui') return;
     (async () => {
       try {
-        const r = await _pedirPonte('abrir_chat', { chatId: msg.chatId || '', telefone: msg.telefone || '' }, 12000);
+        const r = await _pedirPonte('abrir_chat', { chatId: msg.chatId || '', telefone: msg.telefone || '', texto: msg.texto || '' }, 12000);
         responder({ ok: !!(r && r.ok), motivo: (r && r.erro) || '' });
       } catch (e) {
         responder({ ok: false, motivo: String((e && e.message) || e) });

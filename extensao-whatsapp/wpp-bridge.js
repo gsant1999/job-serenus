@@ -825,7 +825,7 @@
   // openChat aceita o id do chat; quando so temos o telefone, monta o
   // '55DDDNUMERO@c.us'. Em conversa @lid o chatId salvo e o unico caminho, e por
   // isso ele vem primeiro: o telefone as vezes nem existe do lado do WhatsApp.
-  async function abrirChat(chatId, telefone) {
+  async function abrirChat(chatId, telefone, texto) {
     if (!window.WPP || !window.WPP.chat) return { erro: 'wpp_ausente' };
     const alvos = [];
     if (chatId) alvos.push(chatId);
@@ -835,6 +835,14 @@
       try {
         if (window.WPP.chat.openChatBottom) await window.WPP.chat.openChatBottom(alvo);
         else await window.WPP.chat.openChat(alvo);
+        // Deixa a mensagem ESCRITA na caixa, sem enviar. O consultor revisa e
+        // manda — que e como ele ja trabalhava com o link wa.me?text=. Enviar
+        // sozinho seria mudar o que o botao faz sem ninguem pedir.
+        if (texto) {
+          try {
+            if (window.WPP.chat.setInputText) await window.WPP.chat.setInputText(texto, alvo);
+          } catch (e) { /* abriu a conversa, que e o principal */ }
+        }
         return { ok: true, chat_id: alvo };
       } catch (e) { /* tenta o proximo */ }
     }
@@ -1007,7 +1015,7 @@
       else if (d.tipo === 'obter_telefone') resp = await obterTelefone(d.resolverLid);
       else if (d.tipo === 'obter_meu_numero') resp = await obterMeuNumero();
       else if (d.tipo === 'obter_chat_id') resp = await obterChatIdAtivo();
-      else if (d.tipo === 'abrir_chat') resp = await abrirChat(d.chatId, d.telefone);
+      else if (d.tipo === 'abrir_chat') resp = await abrirChat(d.chatId, d.telefone, d.texto);
       else if (d.tipo === 'enviar_texto') resp = await enviarTexto(d.chatId, d.texto);
       else if (d.tipo === 'enviar_midia') resp = await enviarMidia(d.chatId, d.midiaTipo, d.dataUrl, d.legenda, d.nomeArquivo);
       else if (d.tipo === 'apagar_conversa') resp = await apagarConversa(d.chatId);

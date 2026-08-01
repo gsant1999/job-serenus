@@ -24,7 +24,7 @@
     try {
       chrome.runtime.sendMessage(
         { type: 'abrir_chat_whatsapp', telefone: String(d.telefone || '').slice(0, 30),
-          chatId: String(d.chatId || '').slice(0, 120) },
+          chatId: String(d.chatId || '').slice(0, 120), texto: String(d.texto || '').slice(0, 4000) },
         (resp) => {
           if (chrome.runtime.lastError) { responder(false, 'extensao_indisponivel'); return; }
           responder(resp && resp.ok, (resp && resp.motivo) || '');

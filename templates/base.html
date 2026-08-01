@@ -925,5 +925,57 @@ function toggleTema() {
 })();
 </script>
 {% block scripts %}{% endblock %}
+<script>
+// ── ABRIR A CONVERSA DO LEAD NO WHATSAPP ────────────────────────────────────
+// Um lugar só, porque isso é feito em várias telas (card do CRM, ficha, agenda,
+// cotações salvas) e antes cada uma resolvia do seu jeito — o que fez metade
+// delas continuar abrindo aba nova depois da correção.
+//
+// Caminho rápido: a extensão foca a aba do WhatsApp JÁ aberta e troca de
+// conversa por dentro, sem recarregar nada. Quando há mensagem pronta, ela é
+// escrita na caixa e NÃO enviada — o consultor revisa e manda, como ele já
+// fazia com o link wa.me?text=.
+//
+// Plano B (extensão desligada, ou sem resposta em 1,8s): wa.me, o de sempre.
+// Um clique nunca pode morrer sem nada acontecer.
+window.JOB_EXT_PRESENTE = false;
+window.addEventListener('message', function (ev) {
+  if (ev.source !== window) return;
+  var d = ev.data;
+  if (d && d.source === 'JOB_SITE_RESP' && d.tipo === 'extensao_presente') window.JOB_EXT_PRESENTE = true;
+});
+
+function _jobWaFallback(tel, texto) {
+  if (!tel) return;
+  var u = 'https://wa.me/' + tel + (texto ? '?text=' + encodeURIComponent(texto) : '');
+  window.open(u, '_blank', 'noopener');
+}
+
+function abrirConversaWhatsApp(telefone, chatId, texto) {
+  var dig = String(telefone || '').replace(/\D/g, '');
+  var comDdi = dig ? (dig.indexOf('55') === 0 ? dig : '55' + dig) : '';
+  if (!comDdi && !chatId) return false;
+  if (!window.JOB_EXT_PRESENTE) { _jobWaFallback(comDdi, texto); return true; }
+  var reqId = 'w' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  var respondeu = false;
+  function ouvir(ev) {
+    if (ev.source !== window) return;
+    var d = ev.data;
+    if (!d || d.source !== 'JOB_SITE_RESP' || d.reqId !== reqId) return;
+    respondeu = true;
+    window.removeEventListener('message', ouvir);
+    if (!d.ok) _jobWaFallback(comDdi, texto);
+  }
+  window.addEventListener('message', ouvir);
+  window.postMessage({ source: 'JOB_SITE_REQ', tipo: 'abrir_chat', reqId: reqId,
+                       telefone: comDdi, chatId: chatId || '', texto: texto || '' }, '*');
+  setTimeout(function () {
+    if (respondeu) return;
+    window.removeEventListener('message', ouvir);
+    _jobWaFallback(comDdi, texto);
+  }, 1800);
+  return true;
+}
+</script>
 </body>
 </html>

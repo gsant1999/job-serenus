@@ -59,8 +59,8 @@
     {% if a.mensagem_lead and not a.mensagem_lead_enviada %}
     <button class="b" style="background:#25d366;color:#04221a;border:none;font-weight:700;" onclick="enviarMsgLead({{ a.id }}, this)">Enviar pro lead</button>
     {% endif %}
-    {% if a.lead_tel %}<a class="b b-wpp" target="_blank"
-      href="https://wa.me/55{{ a.lead_tel|replace('(','')|replace(')','')|replace('-','')|replace(' ','') }}">WhatsApp</a>{% endif %}
+    {% if a.lead_tel %}<button class="b b-wpp" type="button"
+      onclick="abrirConversaWhatsApp('{{ a.lead_tel }}')">WhatsApp</button>{% endif %}
     <a class="b" href="/crm?lead={{ a.lead_id }}">Abrir lead</a>
     <button class="b b-ok" onclick="concluir({{ a.id }})">Concluir</button>
     <button class="b b-del" onclick="excluirAg({{ a.id }})">Excluir</button>
