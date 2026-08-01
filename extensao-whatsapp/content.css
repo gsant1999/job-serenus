@@ -509,18 +509,19 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-doc-duvida { display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: .4px;
                   text-transform: uppercase; padding: 1px 6px; border-radius: 4px; margin-left: 6px;
                   background: rgba(250,204,21,.18); color: #fbbf24; }
-/* O bloco do documento vive DENTRO da bolha do arquivo, como continuação dele —
-   não é um painel solto. Antes herdava as classes do áudio (que empurram com
-   padding percentual porque ficam FORA da bolha) e nascia boiando na esquerda. */
+/* MESMA regra do áudio (.job-tr-slot): o bloco é a última linha da bolha,
+   separado por um filete. Nada de largura própria, fundo próprio ou alinhamento
+   próprio — quem posiciona é a bolha, que já está no lado certo.
+   Aqui NÃO existe proteção contra cair num flex row: medido, flex-basis:100%
+   não quebra linha em container flex-wrap:nowrap (que é o padrão do card do
+   WhatsApp) — só espreme os irmãos. Quem garante o alvo certo é o JS
+   (_trEhLinhaFlex), não este arquivo.
+   width:100% fica: sem ele, numa bolha column-flex com align-items:flex-start
+   o bloco encolhe de 400px pra 94px. */
 .job-doc-slot {
-  display: block; margin-top: 7px; padding-top: 7px;
-  border-top: 1px solid rgba(255,255,255,.1);
-  max-width: 100%; box-sizing: border-box; overflow: hidden;
-  /* A bolha do arquivo é um flex row (ícone | nome | tamanho). Sem isto o bloco
-     entrava como mais uma COLUNA, ao lado do nome do arquivo — que foi o que
-     ficou horrível. Ocupando a linha inteira e indo por último, ele desce pra
-     baixo do documento, igual à transcrição fica embaixo do áudio. */
-  flex: 1 1 100%; width: 100%; order: 99;
+  display: block; margin: 6px 0 1px; padding-top: 6px;
+  border-top: 1px solid rgba(255,255,255,.09);
+  width: 100%; max-width: 100%; box-sizing: border-box;
 }
 /* Nada aqui dentro pode esticar: select herda a largura do pai e virava uma
    barra atravessando a conversa inteira. */
@@ -539,6 +540,8 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
                color: #e9edef; border-radius: 5px; padding: 1px 5px; font-size: 10px;
                font-family: inherit; margin: 0 5px 4px 0; max-width: 100%; }
 .job-doc-sel[hidden] { display: none; }
+/* A etapa e o relógio: o consultor precisa ver que a coisa está andando. */
+.job-doc-etapa { font-variant-numeric: tabular-nums; }
 /* Dica do papel que comprova o vínculo — informa sem travar. */
 .job-doc-dica { color: #7ae3c3; font-size: 10px; margin-top: 2px; }
 .job-doc-dica:empty { display: none; }

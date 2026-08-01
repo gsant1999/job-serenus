@@ -13704,7 +13704,7 @@ def _formatar_docs_extraidos(pessoas, empresa):
     return '\n\n'.join(blocos)
 
 
-def _pdf_extrair_conteudo(b64, max_paginas=4):
+def _pdf_extrair_conteudo(b64, max_paginas=4, minimo_texto=120):
     """Prepara um PDF pro Claude ler MELHOR. Retorna (texto, paginas_jpeg_b64):
     - PDF digital (tem camada de texto, ex: CNH-e, declaração de operadora):
       devolve o texto completo — leitura perfeita, sem depender de visão.
@@ -13724,9 +13724,14 @@ def _pdf_extrair_conteudo(b64, max_paginas=4):
             pgs = pdf.pages[:max_paginas]
             partes = [(pg.extract_text() or '').strip() for pg in pgs]
             texto = '\n\n'.join(p for p in partes if p).strip()
-            # >=120 chars = camada de texto de verdade (menos que isso costuma ser
-            # só número de página/rodapé de scanner — trata como escaneado).
-            if len(texto) >= 120:
+            # QUEM DECIDE O QUE E "TEXTO SUFICIENTE" E O CHAMADOR.
+            # Havia dois limiares brigando: aqui 120, no leitor de documentos 400.
+            # PDF com carimbo de assinatura digital ou rodapé de scanner cai no
+            # vão: esta função já tinha devolvido ZERO páginas, então a regra
+            # "abaixo de 400 olha a imagem" nunca chegava a rodar e o modelo
+            # classificava um carimbo de cartório. Foi assim que a declaração de
+            # união estável virou "outro".
+            if len(texto) >= minimo_texto:
                 return texto, []
             for pg in pgs:
                 try:
@@ -13738,7 +13743,9 @@ def _pdf_extrair_conteudo(b64, max_paginas=4):
                     paginas.append(_b64.b64encode(buf.getvalue()).decode())
                 except Exception:
                     continue
-        return '', paginas
+        # Devolve OS DOIS. O carimbo curto não é o documento, mas é contexto de
+        # graça — jogá-lo fora não ajudava ninguém.
+        return texto, paginas
     except Exception as e:
         app.logger.warning(f"[PDF] extração de conteúdo falhou: {e}")
         return '', []
@@ -14255,9 +14262,13 @@ def _descrever_uma_midia(tipo, b64, mime_ou_nome):
         return None
     conteudo = []
     if tipo == 'documento':
-        texto_pdf, paginas_img = _pdf_extrair_conteudo(b64)
-        if texto_pdf:
+        texto_pdf, paginas_img = _pdf_extrair_conteudo(b64, minimo_texto=400)
+        if texto_pdf and not paginas_img:
             # PDF digital: o texto extraído JÁ é a descrição perfeita — sem custo de IA.
+            # A IMAGEM MANDA quando existe. Aqui o estrago era pior que na leitura
+            # de documento, porque esta descrição vai pro cache por hash: um scan
+            # com rodapé virava "[PDF] Documento digitalizado por CamScanner..."
+            # e essa descrição grudava — reprocessar relia o mesmo rodapé.
             return {'descricao': ('[PDF ' + str(mime_ou_nome or '') + ']\n' + texto_pdf)[:6000], 'custo_usd': 0.0}
         if paginas_img:
             conteudo.append({"type": "text", "text": "Descreva este documento (PDF escaneado, páginas abaixo):"})
@@ -14320,9 +14331,30 @@ _DOC_SISTEMA = (
     "Se o documento estiver EM BRANCO (formulário não preenchido), classifique o "
     "tipo normalmente e diga em observacoes que veio em branco — isso é informação "
     "útil, o consultor precisa saber que falta o cliente preencher.\n"
-    "'identidade' cobre RG, CNH (inclusive CNH-e digital), passaporte e RNE — "
-    "qualquer documento oficial com foto que identifique a pessoa.\n"
-    "'comprovante_endereco' cobre conta de luz, água, telefone e internet."
+    "O texto depois de 'ARQUIVO n:' é o NOME do arquivo. Use como pista, nunca "
+    "como prova: se só o nome sustenta o tipo, classifique assim mesmo e ponha "
+    "certeza 'baixa' — alguém confere na tela.\n\n"
+    "O QUE CADA TIPO COBRE (os 13 são estes; só use 'outro' quando nenhum servir):\n"
+    "'identidade': RG, CNH (inclusive CNH-e digital), passaporte, RNE — documento "
+    "oficial com foto.\n"
+    "'cpf': cartão ou comprovante de inscrição no CPF. Papel sem foto, só número e "
+    "nome — não é 'identidade'.\n"
+    "'comprovante_endereco': conta de luz, água, telefone, internet, gás.\n"
+    "'certidao_casamento': certidão de casamento de cartório. Comprova cônjuge.\n"
+    "'declaracao_uniao_estavel': declaração de convivência ou união estável entre "
+    "duas pessoas. Comprova companheiro(a) como dependente. VALE MESMO EM BRANCO, "
+    "só com os campos por preencher, e mesmo sem firma reconhecida.\n"
+    "'certidao_nascimento': certidão de nascimento. Comprova filho(a) e também a "
+    "filiação de pai/mãe.\n"
+    "'cartao_cnpj': cartão CNPJ ou comprovante de inscrição da Receita Federal.\n"
+    "'contrato_social': contrato social, requerimento de empresário, estatuto, "
+    "alteração contratual.\n"
+    "'carteira_trabalho': CTPS, física ou digital.\n"
+    "'holerite': contracheque, recibo de salário, demonstrativo de pagamento.\n"
+    "'cartao_plano': carteirinha de plano de saúde, de qualquer operadora.\n"
+    "'proposta_operadora': proposta de adesão ou contrato de plano de saúde.\n"
+    "'declaracao_saude': declaração de saúde da operadora (o questionário de "
+    "doenças preexistentes)."
 )
 
 _DOC_SCHEMA = {
@@ -14408,7 +14440,7 @@ def ler_documentos_cliente(arquivos, teto_imagens=24):
         if not b64:
             continue
         if (a.get('tipo') or '') == 'documento':
-            texto, paginas = _pdf_extrair_conteudo(b64, max_paginas=2)
+            texto, paginas = _pdf_extrair_conteudo(b64, max_paginas=2, minimo_texto=400)
             # CAMADA DE TEXTO CURTA NAO E LEITURA. Uma CNH-e tem camada de texto,
             # mas ela e quase so metadado e QR — o modelo lia aquilo, nao via a
             # carteira, e classificava como 'outro'. Contrato ou conta de luz de
@@ -14457,14 +14489,35 @@ def ler_documentos_cliente(arquivos, teto_imagens=24):
     ferramenta = {'name': 'registrar_documentos',
                   'description': 'Classificação dos arquivos e dados extraídos',
                   'input_schema': _DOC_SCHEMA}
+    # ESFORCO BAIXO DE PROPOSITO. Classificar documento e tarefa de VER, nao de
+    # raciocinar: o modelo olha o papel, diz o que e e copia os dados. Sem este
+    # parametro o Sonnet 5 entra no esforco 'high' por padrao e fica pensando em
+    # toda leitura — era o consultor esperando na frente do cliente enquanto o
+    # modelo deliberava sobre uma certidao de nascimento.
+    kw = dict(model=_CLAUDE_MODEL_DESCREVER, max_tokens=3000, system=_DOC_SISTEMA,
+              tools=[ferramenta], tool_choice={'type': 'tool', 'name': 'registrar_documentos'},
+              messages=[{'role': 'user', 'content': conteudo}])
     try:
         client = anthropic.Anthropic(api_key=api_key, timeout=180.0, max_retries=1)
-        resp = client.messages.create(
-            model=_CLAUDE_MODEL_DESCREVER, max_tokens=3000, system=_DOC_SISTEMA,
-            tools=[ferramenta], tool_choice={'type': 'tool', 'name': 'registrar_documentos'},
-            messages=[{'role': 'user', 'content': conteudo}])
+        t0 = time.perf_counter()
+        try:
+            resp = client.messages.create(output_config={'effort': 'medium'}, **kw)
+        except TypeError:
+            # SDK antigo nao conhece output_config. Ler o documento importa mais
+            # que ler rapido — cai pro jeito antigo em vez de falhar.
+            resp = client.messages.create(**kw)
+        ms = (time.perf_counter() - t0) * 1000
+        ti_log = getattr(resp.usage, 'input_tokens', 0) or 0
+        to_log = getattr(resp.usage, 'output_tokens', 0) or 0
+        # MEDIDO, nao estimado: sem isto "demorou muito" e indistinguivel de
+        # rede lenta, download lento ou modelo lento.
+        app.logger.info(f"[DOC] modelo {_CLAUDE_MODEL_DESCREVER} {ms:.0f} ms "
+                        f"in={ti_log} out={to_log} paginas={usados} "
+                        f"arquivos={len(arquivos)} stop={getattr(resp, 'stop_reason', None)}")
         bloco = next((b for b in resp.content if b.type == 'tool_use'), None)
         if not bloco:
+            if getattr(resp, 'stop_reason', '') == 'max_tokens':
+                return None, 'a leitura estourou o limite de tokens — avise o suporte'
             return None, 'o modelo não devolveu estrutura'
         out = dict(bloco.input or {})
     except Exception as e:
@@ -14486,8 +14539,14 @@ def ler_documentos_cliente(arquivos, teto_imagens=24):
         if idx < 1 or idx > len(arquivos) or idx in vistos:
             continue
         vistos.add(idx)
+        # Tipo fora da lista virava 'outro' calado, e depois ninguem sabia se o
+        # modelo tinha errado ou so chutado um nome parecido com o certo.
+        tipo_bruto = (a.get('tipo') or '').strip()
+        if tipo_bruto and tipo_bruto not in _DOC_TIPOS:
+            app.logger.warning(f"[DOC] tipo fora da lista: {tipo_bruto!r} para "
+                               f"{arquivos[idx - 1].get('nome')!r} — virou 'outro'")
         validos.append({'indice': idx, 'nome': arquivos[idx - 1].get('nome') or '',
-                        'tipo': a.get('tipo') if a.get('tipo') in _DOC_TIPOS else 'outro',
+                        'tipo': tipo_bruto if tipo_bruto in _DOC_TIPOS else 'outro',
                         'pessoa': (a.get('pessoa') or '').strip(),
                         'certeza': a.get('certeza') if a.get('certeza') in ('alta', 'media', 'baixa') else 'baixa'})
     # Arquivo que o modelo nao classificou NAO some da tela: entra como 'outro'
@@ -15024,7 +15083,11 @@ def _consultar_cnpj(dig):
     dados = None
     # 1) BrasilAPI (preferida — traz opcao_pelo_mei e QSA completo)
     try:
-        r = _requests.get('https://brasilapi.com.br/api/cnpj/v1/' + dig, timeout=15)
+        # (3, 5) e nao 15: esta consulta roda DENTRO da leitura de documento, com
+        # o consultor olhando a tela. Se a BrasilAPI demorar, o segundo provedor
+        # ainda tenta — 15 s aqui viravam 30 s de espera por um dado que so
+        # preenche campo.
+        r = _requests.get('https://brasilapi.com.br/api/cnpj/v1/' + dig, timeout=(3, 5))
         if r.status_code == 200:
             d = r.json()
             socios = []

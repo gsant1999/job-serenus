@@ -1302,10 +1302,46 @@
       'img[src^="blob:"], [data-testid="media-canvas"], [data-icon="image"]');
   }
 
+  // ETAPA E RELOGIO. Doze segundos em silencio parecem quarenta — foi por isso
+  // que ouvi "compensa mandar pro ChatGPT". O trabalho e o mesmo; o que faltava
+  // era a tela dizer em que pe esta. E de quebra passa a existir um numero:
+  // sem isso "demorou muito" e indistinguivel de download lento ou rede lenta.
+  const _docCrono = new Map();
+
+  function _docPintarEtapa(id) {
+    const e = DOC.estado.get(id) || {};
+    if (e.status !== 'lendo') return;
+    const seg = e.t0 ? Math.round((Date.now() - e.t0) / 1000) : 0;
+    const sel = window.CSS && window.CSS.escape ? window.CSS.escape(id) : id;
+    // So o texto do span e reescrito — re-renderizar o slot inteiro a cada
+    // segundo derrubaria listener e foco.
+    document.querySelectorAll('.job-doc-slot[data-msg="' + sel + '"] .job-doc-etapa')
+      .forEach((el) => { el.textContent = (e.etapa || 'lendo') + '… ' + seg + 's'; });
+  }
+
+  function _docEtapa(id, etapa) {
+    const e = DOC.estado.get(id) || {};
+    e.etapa = etapa;
+    DOC.estado.set(id, e);
+    _docPintarEtapa(id);
+  }
+
+  function _docCronoLigar(id) {
+    _docCronoDesligar(id);
+    _docCrono.set(id, setInterval(() => _docPintarEtapa(id), 1000));
+  }
+
+  function _docCronoDesligar(id) {
+    const t = _docCrono.get(id);
+    if (t) { clearInterval(t); _docCrono.delete(id); }
+  }
+
   function docRenderSlot(slot, id) {
     const e = DOC.estado.get(id) || {};
     if (e.status === 'lendo') {
-      slot.innerHTML = '<div class="job-tr-carregando">lendo o documento…</div>';
+      const seg = e.t0 ? Math.round((Date.now() - e.t0) / 1000) : 0;
+      slot.innerHTML = '<div class="job-tr-carregando"><span class="job-doc-etapa">' +
+        esc((e.etapa || 'lendo') + '… ' + seg + 's') + '</span></div>';
       return;
     }
     if (e.status === 'ok' && e.resultado) {
@@ -1347,8 +1383,11 @@
         (a.nome_final ? '<div class="job-doc-nome">' + esc(a.nome_final) + '</div>' : '') +
         '<div class="job-doc-dica">' + esc(a.parentesco && comprova[a.parentesco]
           ? 'comprova com: ' + comprova[a.parentesco] : '') + '</div>' +
-        (campos.length ? '<div class="job-doc-campos">preencheu: ' + esc(campos.join(', ')) + '</div>'
-                       : '<div class="job-doc-campos">nada novo pro lead</div>') +
+        (campos.length
+          ? '<div class="job-doc-campos">preencheu: ' + esc(campos.join(', ')) + '</div>'
+          : '<div class="job-doc-campos">' + esc(a.pessoa
+              ? 'guardado no lead — a ficha já tinha esses dados'
+              : 'guardado no lead — este papel não traz dado de cadastro') + '</div>') +
         ((r.observacoes || []).length ? '<div class="job-doc-obs" title="' +
            esc(r.observacoes.join(' · ')) + '">' + esc(r.observacoes[0]) + '</div>' : '') +
       '</div>';
@@ -1407,8 +1446,9 @@
   async function docLer(id) {
     const e = DOC.estado.get(id) || {};
     if (e.status === 'lendo') return;
-    DOC.estado.set(id, { status: 'lendo' });
+    DOC.estado.set(id, { status: 'lendo', etapa: 'baixando o arquivo', t0: Date.now() });
     docAtualizarSlot(id);
+    _docCronoLigar(id);
     try {
       const baixado = await _pedirPonte('baixar_midia_ids', { ids: [id] }, 90000);
       const arqs = (baixado && baixado.arquivos) || [];
@@ -1417,6 +1457,7 @@
           erro: (baixado && baixado.erros && baixado.erros[id]) || 'não consegui baixar' });
         return;
       }
+      _docEtapa(id, 'lendo o documento');
       let tel = '';
       try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (x) { tel = telefoneDoContato(); }
       const r = await _safeSendMessage({ type: 'documentos_ler', telefone: tel,
@@ -1431,6 +1472,7 @@
     } catch (x) {
       DOC.estado.set(id, { status: 'erro', erro: String((x && x.message) || x).slice(0, 90) });
     } finally {
+      _docCronoDesligar(id);
       docAtualizarSlot(id);
     }
   }
@@ -1451,28 +1493,41 @@
   // "true_" no data-id) errei, porque essas duas coisas mudam quando o WhatsApp
   // e redesenhado. A geometria nao muda: a bolha e o maior bloco dentro da linha
   // que NAO ocupa a linha inteira.
-  // Pra DOCUMENTO a bolha e o menor bloco que ja tem cara de bolha — nao o
-  // maior. Subindo a partir do icone do PDF, o primeiro ancestral largo o
-  // bastante ja E a bolha; continuar subindo chega no container da linha, que
-  // ocupa a tela toda — foi assim que o bloco saiu atravessando a conversa.
+  // Documento usa A MESMA ancoragem do audio — nao uma propria.
+  //
+  // Tentei o contrario e deu errado duas vezes. O card do arquivo (icone | nome
+  // | tamanho) e um flex ROW: procurar o MENOR ancestral com cara de bolha para
+  // dentro desse card, e o bloco vira mais uma COLUNA, do lado direito do nome
+  // do arquivo. Foi exatamente o que apareceu na tela.
+  // A bolha certa e a mesma que o audio usa: o ancestral MAIS DE FORA que ainda
+  // nao ocupa a linha inteira. Ela e uma coluna, entao o bloco cai EMBAIXO do
+  // arquivo — igual a transcricao cai embaixo do audio.
+  // A unica diferenca fica no fracasso: o audio pode desistir, o documento nao.
+  // Botao que some e pior que botao no lugar mais ou menos certo — foi o que
+  // aconteceu na 2.71.0 e o consultor ficou sem saber como ler o documento.
+  // Elemento SUBSTITUIDO nao pinta filho. Medido no Chrome: appendChild num
+  // <img>/<canvas> entra no DOM e devolve zero client rects — o bloco some da
+  // tela sem erro nenhum. E a ancora de imagem E o proprio <img src="blob:">.
+  const _TR_SUBSTITUIDO = { IMG: 1, CANVAS: 1, VIDEO: 1, AUDIO: 1, IFRAME: 1,
+                            PICTURE: 1, INPUT: 1, EMBED: 1, SVG: 1, svg: 1 };
+
+  // Linha de flex que nao quebra: pousar aqui vira COLUNA ao lado do nome do
+  // arquivo — exatamente o que apareceu na tela. Medido: um filho com
+  // flex-basis:100% NAO quebra linha em container flex-wrap:nowrap, que e o
+  // padrao do card do WhatsApp. Por isso a recusa mora aqui no JS, e nao num
+  // CSS que nunca chegou a pegar.
+  function _trEhLinhaFlex(el) {
+    try {
+      const s = getComputedStyle(el);
+      if (s.display !== 'flex' && s.display !== 'inline-flex') return false;
+      if ((s.flexDirection || 'row').indexOf('column') === 0) return false;
+      return (s.flexWrap || 'nowrap').indexOf('wrap') !== 0;
+    } catch (e) { return false; }
+  }
+
   function _trBolhaDoc(row, ancora) {
-    const larguraLinha = row.clientWidth || 1;
-    let el = ancora;
-    if (!el) return { alvo: row, solto: true };
-    // Primeiro tenta apertado (o menor ancestral com cara de bolha), depois
-    // frouxo. Se nada bater, usa a LINHA — mas marcado como 'solto', e o CSS
-    // limita a largura e alinha ao lado certo.
-    for (const teto of [0.75, 0.94]) {
-      let e2 = el;
-      for (let i = 0; i < 8 && e2 && e2 !== row; i++) {
-        const w = e2.clientWidth;
-        if (w > 160 && w < larguraLinha * teto) return { alvo: e2, solto: false };
-        e2 = e2.parentElement;
-      }
-    }
-    // NUNCA devolver nada. Botao que some e pior que botao no lugar mais ou
-    // menos certo: o consultor fica sem saber como ler o documento, que foi
-    // exatamente o que aconteceu na 2.71.0.
+    const bolha = _trBolha(row, ancora);
+    if (bolha) return { alvo: bolha, solto: false };
     return { alvo: row, solto: true };
   }
 
@@ -1489,10 +1544,16 @@
     }
     if (!el) return null;
     let melhor = null;
-    for (let i = 0; i < 8 && el && el !== row; i++) {
+    // 14 saltos, nao 8. Do controle de tocar ate a bolha do audio sao 4 — o
+    // audio nunca sentiu o teto. Do icone do PDF ate a bolha sao ate 8, e com
+    // teto 8 a busca parava num wrapper do meio do card.
+    for (let i = 0; i < 14 && el && el !== row; i++) {
       const w = el.clientWidth;
-      // Larga o bastante pra ser bolha, estreita o bastante pra nao ser a linha.
-      if (w > 150 && w < larguraLinha * 0.94) melhor = el;
+      // Larga o bastante pra ser bolha, estreita o bastante pra nao ser a linha,
+      // e CAPAZ DE PINTAR FILHO — as duas ultimas guardas sao o que impede o
+      // bloco de virar coluna do card ou de sumir dentro de uma <img>.
+      if (w > 150 && w < larguraLinha * 0.94
+          && !_TR_SUBSTITUIDO[el.tagName] && !_trEhLinhaFlex(el)) melhor = el;
       el = el.parentElement;
     }
     return melhor;
@@ -1529,18 +1590,33 @@
       const id = row.getAttribute('data-id') || '';
       if (!id) continue;
       // Documento/imagem: botao proprio, um por arquivo.
-      if (!row.querySelector('.job-doc-slot') && _docLinhaEhArquivo(row)) {
-        const ancoraD = row.querySelector(
-          '[data-icon="document"], [data-icon*="document"], [data-icon="media-download"],' +
-          'img[src^="blob:"], [data-testid="media-canvas"], [data-icon="image"]');
-        const r = _trBolhaDoc(row, ancoraD);
-        if (r && r.alvo) {
-          const sd = document.createElement('div');
-          sd.className = 'job-doc-slot' + (r.solto ? ' job-doc-solto ' +
-            (_trLado(ancoraD || r.alvo, row) === 'consultor' ? 'job-tr-dir' : 'job-tr-esq') : '');
-          sd.dataset.msg = id;
-          r.alvo.appendChild(sd);
-          docRenderSlot(sd, id);
+      if (_docLinhaEhArquivo(row)) {
+        // Bloco que caiu no fallback NAO e definitivo. Enquanto o WhatsApp
+        // pinta, a linha mede 0px, nenhum ancestral entra na faixa e o bloco
+        // nasce solto; quando a linha ja tem largura, tenta de novo. Mas
+        // MOVENDO o mesmo bloco (appendChild move o que ja esta no DOM) — criar
+        // outro duplicaria o botao, que foi o que aconteceu com "Copiar conversa".
+        let sd = row.querySelector('.job-doc-slot');
+        if (!sd || sd.classList.contains('job-doc-solto')) {
+          const ancoraD = row.querySelector(
+            '[data-icon="document"], [data-icon*="document"], [data-icon="media-download"],' +
+            'img[src^="blob:"], [data-testid="media-canvas"], [data-icon="image"]');
+          const r = _trBolhaDoc(row, ancoraD);
+          const lado = _trLado(ancoraD || r.alvo, row) === 'consultor' ? 'job-tr-dir' : 'job-tr-esq';
+          // Ja estava solto e continua sem bolha: deixa quieto, nao fica pulando.
+          if (r && r.alvo && !(sd && r.solto)) {
+            if (!sd) { sd = document.createElement('div'); sd.dataset.msg = id; }
+            sd.className = 'job-doc-slot' + (r.solto ? ' job-doc-solto ' + lado : '');
+            r.alvo.appendChild(sd);
+            // Ultima defesa: pergunta pra TELA se o bloco existe de verdade.
+            // Alvo substituido (<img>, <canvas>) aceita o filho no DOM e nao
+            // pinta nada — o botao sumia sem erro nenhum.
+            if (!r.solto && !sd.getClientRects().length) {
+              sd.className = 'job-doc-slot job-doc-solto ' + lado;
+              row.appendChild(sd);
+            }
+            docRenderSlot(sd, id);
+          }
         }
       }
       if (row.querySelector('.job-tr-slot[data-msg="' + (window.CSS && window.CSS.escape ? window.CSS.escape(id) : id) + '"]:not(.job-doc-slot)')) continue;
