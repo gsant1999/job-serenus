@@ -1317,30 +1317,74 @@
       // O TIPO E CONFIRMAVEL AQUI. A IA propoe, o consultor decide — e aqui vale
       // dobrado: o tipo vira o NOME do arquivo, e o nome e o que faz a pasta
       // baixada servir pra subir na operadora sem abrir um por um.
-      const sel = '<select class="job-doc-sel" data-doc="' + (a.doc_id || '') + '">' +
-        tipos.map((t) => '<option value="' + t + '"' + (t === a.tipo ? ' selected' : '') + '>' +
-          esc(rot[t] || t) + '</option>').join('') + '</select>';
+      // TRES PERGUNTAS, nesta ordem: que documento e, de quem e, e — se for de
+      // dependente — qual o parentesco. A IA propoe o tipo e o codigo propoe a
+      // titularidade (comparando o nome com o do titular no cadastro), mas quem
+      // confirma e o consultor: e ele que responde pela ficha na operadora, e
+      // certidao de casamento sem dizer que aquele dependente e conjuge nao
+      // comprova vinculo nenhum.
+      const pars = r.parentescos || [];
+      const parRot = r.parentesco_rotulos || {};
+      const comprova = r.parentesco_comprova || {};
+      const sel =
+        '<select class="job-doc-sel" data-campo="tipo" data-doc="' + (a.doc_id || '') + '">' +
+          tipos.map((t) => '<option value="' + t + '"' + (t === a.tipo ? ' selected' : '') + '>' +
+            esc(rot[t] || t) + '</option>').join('') + '</select>' +
+        '<select class="job-doc-sel" data-campo="titularidade" data-doc="' + (a.doc_id || '') + '">' +
+          '<option value=""' + (!a.titularidade ? ' selected' : '') + '>de quem?</option>' +
+          '<option value="titular"' + (a.titularidade === 'titular' ? ' selected' : '') + '>Titular</option>' +
+          '<option value="dependente"' + (a.titularidade === 'dependente' ? ' selected' : '') + '>Dependente</option>' +
+        '</select>' +
+        '<select class="job-doc-sel job-doc-par" data-campo="parentesco" data-doc="' + (a.doc_id || '') + '"' +
+          (a.titularidade === 'dependente' ? '' : ' hidden') + '>' +
+          '<option value="">parentesco?</option>' +
+          pars.map((p) => '<option value="' + p + '"' + (p === a.parentesco ? ' selected' : '') + '>' +
+            esc(parRot[p] || p) + '</option>').join('') + '</select>';
       slot.innerHTML = '<div class="job-doc-lido">' +
         (a.doc_id ? sel : '<span class="job-doc-tipo">' + esc(a.tipo || 'outro') + '</span>') +
         (a.pessoa ? '<span class="job-doc-pessoa">' + esc(a.pessoa) + '</span>' : '') +
         (a.certeza === 'baixa' ? '<span class="job-doc-duvida">conferir</span>' : '') +
         (a.nome_final ? '<div class="job-doc-nome">' + esc(a.nome_final) + '</div>' : '') +
+        '<div class="job-doc-dica">' + esc(a.parentesco && comprova[a.parentesco]
+          ? 'comprova com: ' + comprova[a.parentesco] : '') + '</div>' +
         (campos.length ? '<div class="job-doc-campos">preencheu: ' + esc(campos.join(', ')) + '</div>'
                        : '<div class="job-doc-campos">nada novo pro lead</div>') +
         ((r.observacoes || []).length ? '<div class="job-doc-obs" title="' +
            esc(r.observacoes.join(' · ')) + '">' + esc(r.observacoes[0]) + '</div>' : '') +
       '</div>';
-      const sl = slot.querySelector('.job-doc-sel');
-      if (sl) sl.addEventListener('change', async (ev) => {
-        ev.stopPropagation();
-        const resp = await _safeSendMessage({ type: 'documento_tipo', docId: sl.dataset.doc,
-                                              tipo: sl.value }).catch(() => null);
+      const salvar = async () => {
         const nm = slot.querySelector('.job-doc-nome');
+        const par = slot.querySelector('[data-campo="parentesco"]');
+        const resp = await _safeSendMessage({ type: 'documento_tipo', docId: a.doc_id,
+          tipo: (slot.querySelector('[data-campo="tipo"]') || {}).value,
+          titularidade: (slot.querySelector('[data-campo="titularidade"]') || {}).value,
+          parentesco: par && !par.hidden ? par.value : '' }).catch(() => null);
         if (resp && resp.ok) {
-          a.tipo = sl.value;
           a.nome_final = resp.nome_final;
           if (nm) nm.textContent = resp.nome_final;
-        } else if (nm) { nm.textContent = 'não deu pra salvar o tipo'; }
+        } else if (nm) { nm.textContent = 'não deu pra salvar'; }
+      };
+      slot.querySelectorAll('.job-doc-sel').forEach((sl) => {
+        sl.addEventListener('click', (ev) => ev.stopPropagation());
+        sl.addEventListener('change', async (ev) => {
+          ev.stopPropagation();
+          const par = slot.querySelector('[data-campo="parentesco"]');
+          if (sl.dataset.campo === 'tipo') a.tipo = sl.value;
+          if (sl.dataset.campo === 'titularidade') {
+            a.titularidade = sl.value;
+            // Parentesco so aparece pra dependente — perguntar o parentesco do
+            // titular seria perguntar de quem ele e parente dele mesmo.
+            if (par) { par.hidden = sl.value !== 'dependente'; if (par.hidden) par.value = ''; }
+          }
+          if (sl.dataset.campo === 'parentesco') {
+            a.parentesco = sl.value;
+            // Dica do papel que comprova aquele vinculo. Nao trava nada: quem
+            // decide o que a operadora aceita e o consultor.
+            const dica = slot.querySelector('.job-doc-dica');
+            if (dica) dica.textContent = comprova[sl.value] ? ('comprova com: ' + comprova[sl.value]) : '';
+          }
+          await salvar();
+        });
       });
       return;
     }

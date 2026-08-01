@@ -360,7 +360,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'documento_tipo') {
     chamarJob('/api/whatsapp/documentos/tipo', 'POST',
-      { doc_id: msg.docId, tipo: msg.tipo }, 15000).then(sendResponse);
+      { doc_id: msg.docId, tipo: msg.tipo, titularidade: msg.titularidade || '',
+        parentesco: msg.parentesco || '' }, 15000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'documentos_ler') {

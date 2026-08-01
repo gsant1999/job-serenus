@@ -537,7 +537,11 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-doc-slot.job-doc-solto.job-tr-esq { margin-right: auto; }
 .job-doc-sel { background: rgba(0,0,0,.2); border: 1px solid rgba(255,255,255,.14);
                color: #e9edef; border-radius: 5px; padding: 1px 5px; font-size: 10px;
-               font-family: inherit; margin-right: 6px; }
+               font-family: inherit; margin: 0 5px 4px 0; max-width: 100%; }
+.job-doc-sel[hidden] { display: none; }
+/* Dica do papel que comprova o vínculo — informa sem travar. */
+.job-doc-dica { color: #7ae3c3; font-size: 10px; margin-top: 2px; }
+.job-doc-dica:empty { display: none; }
 /* O nome final e o produto: e ele que faz a pasta servir na operadora. */
 .job-doc-nome { font-family: ui-monospace, Menlo, monospace; font-size: 10px;
                 color: #7ae3c3; margin-top: 3px; word-break: break-all; }

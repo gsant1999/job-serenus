@@ -2602,6 +2602,11 @@ def init_db():
         ("lead_documento", "tamanho", "INTEGER"),
         ("lead_documento", "nome_final", "TEXT"),
         ("lead_documento", "tipo_conferido", "INTEGER"),
+        # DE QUEM E o documento: titular ou dependente, e com qual parentesco.
+        # A operadora nao aceita "documento do cliente" — ela precisa saber que
+        # aquela certidao comprova o vinculo daquele dependente com aquele titular.
+        ("lead_documento", "titularidade", "TEXT"),
+        ("lead_documento", "parentesco", "TEXT"),
         # De onde saiu o vínculo (cnpj / telefone / telefone_sufixo / manual):
         # sem isso não há como auditar um vínculo errado depois.
         ("propostas", "lead_vinculo", "TEXT"),
@@ -14499,6 +14504,25 @@ def ler_documentos_cliente(arquivos, teto_imagens=24):
     return out, None
 
 
+def _doc_propor_titularidade(conn, lead_id, nome_no_documento):
+    """Propoe se o documento e do titular ou de um dependente.
+
+    Quem decide e o CODIGO comparando com o cadastro, nao a IA — ela nao sabe
+    quem e titular nesta venda. E e so uma PROPOSTA: o consultor confirma, porque
+    e ele que responde pela ficha na operadora.
+
+    Sem nome legivel no documento nao ha o que propor: fica vazio pra pessoa
+    dizer, em vez de chutar 'titular' e o consultor aceitar sem olhar."""
+    if not (lead_id and nome_no_documento):
+        return None, None
+    lead = conn.execute("SELECT nome FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+    if lead and doc_mesma_pessoa(nome_no_documento, lead['nome']):
+        return 'titular', None
+    # Nome diferente do titular: e dependente, mas QUAL parentesco so o consultor
+    # sabe — sobrenome igual pode ser filho, irmao ou pai.
+    return 'dependente', None
+
+
 def documentos_para_o_lead(conn, lead_id, leitura, arquivos):
     """Guarda o que foi lido e preenche o lead. AQUI e onde o codigo decide.
 
@@ -14525,6 +14549,7 @@ def documentos_para_o_lead(conn, lead_id, leitura, arquivos):
         # subir na operadora alguem ia catar tudo de novo, um por um.
         chave_arq, tam, mime = None, 0, (arq.get('mime') or '')
         ext = 'pdf' if 'pdf' in mime else ((mime.split('/')[-1] or 'jpg') if mime else 'jpg')
+        titularidade, parentesco = _doc_propor_titularidade(conn, lead_id, cls.get('pessoa'))
         nome_final = _doc_nome_final(cls.get('tipo'), cls.get('pessoa'), ext)
         try:
             import base64 as _b64
@@ -14547,9 +14572,9 @@ def documentos_para_o_lead(conn, lead_id, leitura, arquivos):
                     VALUES (?,?,?,?,?,?,?,?,?)""",
                     (lead_id, h, arq.get('nome'), cls.get('tipo'), cls.get('pessoa'),
                      cls.get('certeza'), json.dumps(cls, ensure_ascii=False), 0, agora))
-            conn.execute("""UPDATE lead_documento SET arquivo=?, mime=?, tamanho=?, nome_final=?
-                            WHERE lead_id=? AND conteudo_hash=?""",
-                         (chave_arq, mime, tam, nome_final, lead_id, h))
+            conn.execute("""UPDATE lead_documento SET arquivo=?, mime=?, tamanho=?, nome_final=?,
+                            titularidade=? WHERE lead_id=? AND conteudo_hash=?""",
+                         (chave_arq, mime, tam, nome_final, titularidade, lead_id, h))
             gravados += 1
         except Exception as e:
             app.logger.warning(f"[DOC] não gravei {arq.get('nome')}: {e}")
@@ -14611,6 +14636,31 @@ def documentos_para_o_lead(conn, lead_id, leitura, arquivos):
     return {'gravados': gravados, 'campos': escritos}
 
 
+# Parentesco e o que a operadora precisa saber junto com o documento: uma
+# certidao de casamento so vale como comprovacao se estiver dito que aquele
+# dependente e conjuge. O vocabulario e o mesmo da Bene, e cada um tem um papel
+# que comprova (ver memoria regras-saude-beneficencia):
+#   conjuge      -> certidao de casamento
+#   companheiro  -> declaracao de uniao estavel
+#   filho        -> certidao de nascimento (ou doc com filiacao)
+#   pai/mae      -> nada extra, a filiacao no doc do titular ja basta
+_DOC_PARENTESCOS = ['conjuge', 'companheiro', 'filho', 'enteado', 'pai_mae',
+                    'irmao', 'neto', 'outro']
+_DOC_PARENTESCO_ROTULO = {
+    'conjuge': 'Cônjuge', 'companheiro': 'Companheiro(a)', 'filho': 'Filho(a)',
+    'enteado': 'Enteado(a)', 'pai_mae': 'Pai/Mãe', 'irmao': 'Irmão(ã)',
+    'neto': 'Neto(a)', 'outro': 'Outro',
+}
+# O papel que comprova cada vinculo — mostrado como dica, nao como trava: quem
+# decide o que a operadora aceita e o consultor, nao o sistema.
+_DOC_PARENTESCO_COMPROVA = {
+    'conjuge': 'certidão de casamento',
+    'companheiro': 'declaração de união estável',
+    'filho': 'certidão de nascimento',
+    'enteado': 'certidão de nascimento + vínculo com o cônjuge',
+    'pai_mae': 'nenhum papel extra — a filiação no documento do titular basta',
+}
+
 _DOC_ROTULO = {
     'identidade': 'RG-CNH', 'cpf': 'CPF', 'comprovante_endereco': 'COMPROVANTE-ENDERECO',
     'cartao_cnpj': 'CARTAO-CNPJ', 'contrato_social': 'CONTRATO-SOCIAL',
@@ -14621,7 +14671,7 @@ _DOC_ROTULO = {
 }
 
 
-def _doc_nome_final(tipo, pessoa, extensao, seq=None):
+def _doc_nome_final(tipo, pessoa, extensao, seq=None, titularidade=None, parentesco=None):
     """Nome do arquivo do jeito que a operadora precisa receber.
 
     'RG-CNH - MARIA S OLIVEIRA.jpg' em vez de 'IMG-20260801-WA0007.jpg'. Esse
@@ -14629,7 +14679,17 @@ def _doc_nome_final(tipo, pessoa, extensao, seq=None):
     sistema da operadora sem abrir arquivo por arquivo pra saber o que é."""
     rot = _DOC_ROTULO.get(tipo or 'outro', 'OUTRO')
     quem = re.sub(r'[^A-Za-zÀ-ÿ0-9 ]+', '', (pessoa or '')).strip().upper()[:40]
-    base = rot + (' - ' + quem if quem else '')
+    # O PAPEL entra no nome: a operadora precisa saber que aquela certidao
+    # comprova o vinculo DAQUELE dependente. 'TITULAR' e 'DEPENDENTE CONJUGE'
+    # sao a diferenca entre a analise aceitar e devolver.
+    papel = ''
+    if titularidade == 'titular':
+        papel = 'TITULAR'
+    elif titularidade == 'dependente':
+        papel = 'DEPENDENTE'
+        if parentesco:
+            papel += ' ' + _DOC_PARENTESCO_ROTULO.get(parentesco, parentesco).upper()
+    base = rot + (' - ' + papel if papel else '') + (' - ' + quem if quem else '')
     if seq:
         base += f' ({seq})'
     ext = (extensao or '').lower().lstrip('.')
@@ -16907,10 +16967,21 @@ def api_whatsapp_documento_tipo():
         close_db(conn)
         return _wa_cors(jsonify({"ok": False, "erro": "documento não encontrado"})), 404
     pessoa = (d.get('pessoa') or doc['pessoa'] or '').strip()
+    titularidade = (d.get('titularidade') or doc['titularidade'] or '').strip() or None
+    if titularidade not in (None, 'titular', 'dependente'):
+        titularidade = None
+    parentesco = (d.get('parentesco') or '').strip() or None
+    if parentesco and parentesco not in _DOC_PARENTESCOS:
+        parentesco = None
+    # Parentesco so faz sentido em dependente. Guardar num documento de titular
+    # deixaria a ficha dizendo que o titular e conjuge de si mesmo.
+    if titularidade != 'dependente':
+        parentesco = None
     ext = (doc['arquivo'] or '').rsplit('.', 1)[-1] if doc['arquivo'] else 'jpg'
-    nome = _doc_nome_final(tipo, pessoa, ext)
-    conn.execute("""UPDATE lead_documento SET tipo=?, pessoa=?, nome_final=?, tipo_conferido=1
-                    WHERE id=?""", (tipo, pessoa or None, nome, doc['id']))
+    nome = _doc_nome_final(tipo, pessoa, ext, titularidade=titularidade, parentesco=parentesco)
+    conn.execute("""UPDATE lead_documento SET tipo=?, pessoa=?, nome_final=?, tipo_conferido=1,
+                    titularidade=?, parentesco=? WHERE id=?""",
+                 (tipo, pessoa or None, nome, titularidade, parentesco, doc['id']))
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True, "nome_final": nome, "tipo": tipo}))
 
@@ -17001,10 +17072,23 @@ def lead_documento_tipo():
     doc = conn.execute("SELECT * FROM lead_documento WHERE id=?", (d.get('doc_id'),)).fetchone()
     if not doc:
         close_db(conn); return jsonify({"ok": False, "erro": "Documento não encontrado"}), 404
+    # As outras duas perguntas: de quem e o documento e, se for de dependente,
+    # qual o parentesco. Parentesco em titular nao existe — zera, senao fica
+    # "TITULAR CONJUGE" no nome do arquivo e ninguem entende a pasta.
+    titularidade = (d.get('titularidade') or '').strip() or None
+    if titularidade not in (None, 'titular', 'dependente'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Titularidade inválida"}), 400
+    parentesco = (d.get('parentesco') or '').strip() or None
+    if titularidade != 'dependente':
+        parentesco = None
+    elif parentesco and parentesco not in _DOC_PARENTESCOS:
+        close_db(conn); return jsonify({"ok": False, "erro": "Parentesco inválido"}), 400
     ext = (doc['arquivo'] or '').rsplit('.', 1)[-1] if doc['arquivo'] else 'jpg'
-    nome = _doc_nome_final(tipo, doc['pessoa'], ext)
-    conn.execute("UPDATE lead_documento SET tipo=?, nome_final=?, tipo_conferido=1 WHERE id=?",
-                 (tipo, nome, doc['id']))
+    nome = _doc_nome_final(tipo, doc['pessoa'], ext, titularidade=titularidade,
+                           parentesco=parentesco)
+    conn.execute("""UPDATE lead_documento SET tipo=?, nome_final=?, tipo_conferido=1,
+                    titularidade=?, parentesco=? WHERE id=?""",
+                 (tipo, nome, titularidade, parentesco, doc['id']))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "nome_final": nome})
 
@@ -17135,17 +17219,20 @@ def api_whatsapp_documentos_ler():
             if not arq:
                 continue
             h2 = _h2.sha256((arq.get('base64') or '').encode('ascii', 'ignore')).hexdigest()
-            r2 = conn2.execute("SELECT id, nome_final FROM lead_documento "
+            r2 = conn2.execute("SELECT id, nome_final, titularidade FROM lead_documento "
                                "WHERE conteudo_hash=? ORDER BY id DESC LIMIT 1", (h2,)).fetchone()
             if r2:
                 a_['doc_id'] = r2['id']
                 a_['nome_final'] = r2['nome_final']
+                a_['titularidade'] = r2['titularidade']
         close_db(conn2)
     except Exception as e:
         app.logger.info(f"[DOC] ids: {e}")
     return _wa_cors(jsonify({
         "ok": True, "lead_id": lead_id, "lidos": len(novos), "ja_lidos": ja,
         "tipos": _DOC_TIPOS, "rotulos": _DOC_ROTULO,
+        "parentescos": _DOC_PARENTESCOS, "parentesco_rotulos": _DOC_PARENTESCO_ROTULO,
+        "parentesco_comprova": _DOC_PARENTESCO_COMPROVA,
         "arquivos": leitura.get('arquivos') or [],
         "pessoas": leitura.get('pessoas') or [],
         "empresa": leitura.get('empresa') or {},
@@ -19800,6 +19887,9 @@ def painel_lead(lid):
                            com_bruta=com_bruta, com_liquida=com_liquida,
                            timeline=timeline, notas=notas, saude=saude, documentos=documentos,
                            doc_tipos=_DOC_TIPOS, doc_rotulos=_DOC_ROTULO,
+                           doc_parentescos=_DOC_PARENTESCOS,
+                           doc_parentesco_rotulos=_DOC_PARENTESCO_ROTULO,
+                           doc_parentesco_comprova=_DOC_PARENTESCO_COMPROVA,
                            taxa_usd_brl=_USD_BRL_TAXA)
 
 

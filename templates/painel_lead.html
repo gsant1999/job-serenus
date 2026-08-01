@@ -71,6 +71,8 @@
   .pl-nota { border-bottom:1px solid var(--borda); padding:9px 0; font-size:12.5px; }
   .pl-nota:last-child { border-bottom:none; }
   .pl-nota-quem { font-size:10.5px; color:var(--cinza); margin-top:4px; }
+  .pl-doc-dica { font-size:10px; color:#7ae3c3; margin-top:3px; }
+  .pl-doc-tipo[hidden] { display:none; }
   .pl-doc-tipo { background:var(--panel-3); border:1px solid var(--borda); color:var(--texto);
                  border-radius:6px; padding:3px 7px; font-size:11.5px; }
 </style>
@@ -303,20 +305,39 @@
       <a class="btn-outline" href="/lead/{{ lead.id }}/documentos.zip">Baixar a pasta completa</a>
     </div>
     <table class="pl-tab">
-      <thead><tr><th>Tipo</th><th>De quem</th><th>Nome do arquivo</th><th>Conferido</th><th></th></tr></thead>
+      <thead><tr><th>Tipo</th><th>De quem</th><th>Titular ou dependente</th><th>Nome do arquivo</th><th>Conferido</th><th></th></tr></thead>
       <tbody>
         {% for d in documentos %}
         <tr>
           <td>
             {# A IA propoe, a pessoa decide — e aqui vale dobrado: o tipo vira o
                NOME do arquivo, e o nome e o que faz a pasta servir na operadora. #}
-            <select class="pl-doc-tipo" data-doc="{{ d.id }}" onchange="mudarTipoDoc(this)">
+            <select class="pl-doc-tipo" data-doc="{{ d.id }}" data-campo="tipo" onchange="mudarDoc(this)">
               {% for t in doc_tipos %}
               <option value="{{ t }}" {% if d.tipo == t %}selected{% endif %}>{{ doc_rotulos.get(t, t) }}</option>
               {% endfor %}
             </select>
           </td>
           <td>{{ d.pessoa or '—' }}</td>
+          <td>
+            {# As outras duas perguntas. O parentesco so aparece quando e
+               dependente — em titular ele nao existe. #}
+            <select class="pl-doc-tipo" data-doc="{{ d.id }}" data-campo="titularidade" onchange="mudarDoc(this)">
+              <option value="" {% if not d.titularidade %}selected{% endif %}>a definir</option>
+              <option value="titular" {% if d.titularidade == 'titular' %}selected{% endif %}>Titular</option>
+              <option value="dependente" {% if d.titularidade == 'dependente' %}selected{% endif %}>Dependente</option>
+            </select>
+            <select class="pl-doc-tipo" data-doc="{{ d.id }}" data-campo="parentesco" onchange="mudarDoc(this)"
+                    {% if d.titularidade != 'dependente' %}hidden{% endif %}>
+              <option value="">parentesco...</option>
+              {% for p in doc_parentescos %}
+              <option value="{{ p }}" {% if d.parentesco == p %}selected{% endif %}>{{ doc_parentesco_rotulos.get(p, p) }}</option>
+              {% endfor %}
+            </select>
+            {% if d.parentesco and doc_parentesco_comprova.get(d.parentesco) %}
+            <div class="pl-doc-dica">comprova o vínculo: {{ doc_parentesco_comprova[d.parentesco] }}</div>
+            {% endif %}
+          </td>
           <td style="font-family:ui-monospace,Menlo,monospace; font-size:11px;">{{ d.nome_final or d.nome_arquivo }}</td>
           <td>{% if d.conferido %}<span class="pill pill-verde">sim</span>
               {% elif d.certeza == 'baixa' %}<span class="pill pill-erro">conferir</span>
@@ -363,9 +384,17 @@
 </div>
 </div>
 <script>
-async function mudarTipoDoc(sel){
+// As tres respostas vao juntas: o nome do arquivo depende das tres, entao
+// mandar so a que mudou faria o servidor recalcular o nome com metade da
+// informacao. Leio a linha inteira e mando o conjunto.
+async function mudarDoc(sel){
+  const id = sel.dataset.doc;
+  const campo = c => document.querySelector('[data-doc="'+id+'"][data-campo="'+c+'"]');
+  const tit = campo('titularidade'), par = campo('parentesco');
+  if(par) par.hidden = (tit.value !== 'dependente');   // some na hora, sem esperar o reload
   const r = await fetch('/lead/documento/tipo', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({doc_id: sel.dataset.doc, tipo: sel.value})});
+    body: JSON.stringify({doc_id: id, tipo: campo('tipo').value,
+                          titularidade: tit ? tit.value : '', parentesco: par ? par.value : ''})});
   const d = await r.json();
   if(!d.ok){ alert(d.erro || 'Não deu pra salvar'); return; }
   location.reload();
