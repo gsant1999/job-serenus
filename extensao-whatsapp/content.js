@@ -1327,7 +1327,8 @@
         (a.nome_final ? '<div class="job-doc-nome">' + esc(a.nome_final) + '</div>' : '') +
         (campos.length ? '<div class="job-doc-campos">preencheu: ' + esc(campos.join(', ')) + '</div>'
                        : '<div class="job-doc-campos">nada novo pro lead</div>') +
-        ((r.observacoes || []).length ? '<div class="job-doc-obs">' + esc(r.observacoes[0]) + '</div>' : '') +
+        ((r.observacoes || []).length ? '<div class="job-doc-obs" title="' +
+           esc(r.observacoes.join(' · ')) + '">' + esc(r.observacoes[0]) + '</div>' : '') +
       '</div>';
       const sl = slot.querySelector('.job-doc-sel');
       if (sl) sl.addEventListener('change', async (ev) => {
@@ -1406,11 +1407,34 @@
   // "true_" no data-id) errei, porque essas duas coisas mudam quando o WhatsApp
   // e redesenhado. A geometria nao muda: a bolha e o maior bloco dentro da linha
   // que NAO ocupa a linha inteira.
-  function _trBolha(row) {
+  // Pra DOCUMENTO a bolha e o menor bloco que ja tem cara de bolha — nao o
+  // maior. Subindo a partir do icone do PDF, o primeiro ancestral largo o
+  // bastante ja E a bolha; continuar subindo chega no container da linha, que
+  // ocupa a tela toda — foi assim que o bloco saiu atravessando a conversa.
+  function _trBolhaDoc(row, ancora) {
     const larguraLinha = row.clientWidth || 1;
-    // Ancora: o controle de tocar o audio esta sempre dentro da bolha.
-    let el = row.querySelector('[data-icon="audio-play"], [data-icon="play"], [data-icon*="ptt"], audio')
-             || row.querySelector('[aria-label*="udio"]');
+    let el = ancora;
+    if (!el) return null;
+    for (let i = 0; i < 8 && el && el !== row; i++) {
+      const w = el.clientWidth;
+      // Bolha do WhatsApp nao passa de ~65% da linha. O teto de 0.75 e folga.
+      if (w > 180 && w < larguraLinha * 0.75) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  function _trBolha(row, ancora) {
+    const larguraLinha = row.clientWidth || 1;
+    // Ancora: algo que esta SEMPRE dentro da bolha. Pra audio e o controle de
+    // tocar; pra documento/imagem e o icone do arquivo ou a propria miniatura.
+    // Antes so conhecia audio — por isso o botao do documento nascia solto na
+    // esquerda da tela, fora de qualquer bolha, que foi o que ficou horrivel.
+    let el = ancora || null;
+    if (!el) {
+      el = row.querySelector('[data-icon="audio-play"], [data-icon="play"], [data-icon*="ptt"], audio')
+           || row.querySelector('[aria-label*="udio"]');
+    }
     if (!el) return null;
     let melhor = null;
     for (let i = 0; i < 8 && el && el !== row; i++) {
@@ -1454,10 +1478,15 @@
       if (!id) continue;
       // Documento/imagem: botao proprio, um por arquivo.
       if (!row.querySelector('.job-doc-slot') && _docLinhaEhArquivo(row)) {
-        const bolhaD = _trBolha(row) || row.firstElementChild;
+        const ancoraD = row.querySelector(
+          '[data-icon="document"], [data-icon*="document"], [data-icon="media-download"],' +
+          'img[src^="blob:"], [data-testid="media-canvas"], [data-icon="image"]');
+        const bolhaD = _trBolhaDoc(row, ancoraD);
+        // Sem bolha identificada NAO injeta: melhor nao ter botao do que ter um
+        // botao boiando na tela sem relacao visivel com arquivo nenhum.
         if (bolhaD) {
           const sd = document.createElement('div');
-          sd.className = 'job-doc-slot job-tr-slot ' + (_trLado(bolhaD, row) === 'consultor' ? 'job-tr-dir' : 'job-tr-esq');
+          sd.className = 'job-doc-slot';
           sd.dataset.msg = id;
           bolhaD.appendChild(sd);
           docRenderSlot(sd, id);
@@ -1591,8 +1620,6 @@
     box.innerHTML =
       '<button type="button" class="job-bc-btn" data-ac="transcrever" title="Transcrever todos os áudios desta conversa">' +
         _ICO_TRANSCREVER + '<span>Transcrever tudo</span></button>' +
-      '<button type="button" class="job-bc-btn" data-ac="copiar" title="Copiar a conversa inteira: texto e áudio transcrito, na ordem, com hora e quem falou">' +
-        _ICO_COPIAR + '<span>Copiar conversa</span></button>' +
       '<button type="button" class="job-bc-btn" data-ac="copiar" title="Copiar a conversa inteira: texto e áudio transcrito, na ordem, com hora e quem falou">' +
         _ICO_COPIAR + '<span>Copiar conversa</span></button>';
     cab.appendChild(box);

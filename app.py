@@ -14293,9 +14293,13 @@ def _descrever_uma_midia(tipo, b64, mime_ou_nome):
 # quem e dependente, o que vai em qual campo, isso o CODIGO decide, com o que ja
 # esta no cadastro. Se a IA errar, o pior caso e o documento cair no lugar errado;
 # ela nunca inventa regra de negocio.
+# A lista saiu do vocabulario da Bene e foi ajustada pelo uso: 'declaracao de
+# uniao estavel' apareceu no primeiro teste real e caiu em 'outro' — comprovacao
+# de vinculo de companheiro e rotina aqui, nao excecao.
 _DOC_TIPOS = ['identidade', 'cpf', 'comprovante_endereco', 'cartao_cnpj',
-              'contrato_social', 'certidao_casamento', 'certidao_nascimento',
-              'carteira_trabalho', 'holerite', 'cartao_plano', 'proposta_operadora', 'outro']
+              'contrato_social', 'certidao_casamento', 'declaracao_uniao_estavel',
+              'certidao_nascimento', 'carteira_trabalho', 'holerite',
+              'cartao_plano', 'proposta_operadora', 'declaracao_saude', 'outro']
 
 _DOC_SISTEMA = (
     "Você lê documentos enviados por clientes de uma corretora de planos de saúde.\n"
@@ -14307,7 +14311,10 @@ _DOC_SISTEMA = (
     "Data é sempre a de NASCIMENTO, nunca emissão ou validade.\n"
     "Duas imagens do mesmo documento (frente e verso) são UMA pessoa, não duas.\n"
     "A mesma pessoa em documentos diferentes (RG e CNH): os dados se somam, não duplicam.\n"
-    "Prefira dizer que não tem certeza a chutar."
+    "Prefira dizer que não tem certeza a chutar.\n"
+    "Se o documento estiver EM BRANCO (formulário não preenchido), classifique o "
+    "tipo normalmente e diga em observacoes que veio em branco — isso é informação "
+    "útil, o consultor precisa saber que falta o cliente preencher."
 )
 
 _DOC_SCHEMA = {
@@ -14594,6 +14601,7 @@ _DOC_ROTULO = {
     'identidade': 'RG-CNH', 'cpf': 'CPF', 'comprovante_endereco': 'COMPROVANTE-ENDERECO',
     'cartao_cnpj': 'CARTAO-CNPJ', 'contrato_social': 'CONTRATO-SOCIAL',
     'certidao_casamento': 'CERTIDAO-CASAMENTO', 'certidao_nascimento': 'CERTIDAO-NASCIMENTO',
+    'declaracao_uniao_estavel': 'UNIAO-ESTAVEL', 'declaracao_saude': 'DECLARACAO-SAUDE',
     'carteira_trabalho': 'CTPS', 'holerite': 'HOLERITE', 'cartao_plano': 'CARTAO-PLANO',
     'proposta_operadora': 'PROPOSTA-OPERADORA', 'outro': 'OUTRO',
 }

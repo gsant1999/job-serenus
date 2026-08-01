@@ -509,6 +509,17 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-doc-duvida { display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: .4px;
                   text-transform: uppercase; padding: 1px 6px; border-radius: 4px; margin-left: 6px;
                   background: rgba(250,204,21,.18); color: #fbbf24; }
+/* O bloco do documento vive DENTRO da bolha do arquivo, como continuação dele —
+   não é um painel solto. Antes herdava as classes do áudio (que empurram com
+   padding percentual porque ficam FORA da bolha) e nascia boiando na esquerda. */
+.job-doc-slot {
+  display: block; margin-top: 7px; padding-top: 7px;
+  border-top: 1px solid rgba(255,255,255,.1);
+  max-width: 100%; box-sizing: border-box; overflow: hidden;
+}
+/* Nada aqui dentro pode esticar: select herda a largura do pai e virava uma
+   barra atravessando a conversa inteira. */
+.job-doc-slot select, .job-doc-slot button { width: auto; max-width: 100%; }
 .job-doc-sel { background: rgba(0,0,0,.2); border: 1px solid rgba(255,255,255,.14);
                color: #e9edef; border-radius: 5px; padding: 1px 5px; font-size: 10px;
                font-family: inherit; margin-right: 6px; }
@@ -516,7 +527,11 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-doc-nome { font-family: ui-monospace, Menlo, monospace; font-size: 10px;
                 color: #7ae3c3; margin-top: 3px; word-break: break-all; }
 .job-doc-campos { color: #8696a0; font-size: 10.5px; margin-top: 3px; }
-.job-doc-obs { color: #d98b8b; font-size: 10.5px; margin-top: 2px; }
+/* A observação da IA é útil mas não é o assunto: duas linhas, o resto no hover.
+   Antes ocupava mais espaço que o próprio documento. */
+.job-doc-obs { color: #d98b8b; font-size: 10px; margin-top: 3px; line-height: 1.4;
+               display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+               overflow: hidden; }
 
 /* Vínculo da conversa: estado + ação no mesmo lugar. Amarelo quando falta,
    discreto quando já está feito — resolvido não precisa chamar atenção. */
