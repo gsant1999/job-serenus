@@ -473,7 +473,9 @@
   async function baixarMidiaPorId(ids) {
     if (!window.WPP || !window.WPP.chat) return { erro: 'wpp_ausente' };
     const out = [], erros = {};
-    for (const id of (ids || []).slice(0, 6)) {
+    // 10 e nao 6: o consultor marca varios documentos de uma vez, e o teto de
+    // paginas de quem le fica no servidor (24), nao aqui.
+    for (const id of (ids || []).slice(0, 10)) {
       const achado = _acharModelo(id);
       if (!achado.msg) { erros[id] = 'mensagem não está carregada'; continue; }
       try {

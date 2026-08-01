@@ -1292,7 +1292,12 @@
   //
   // Quem sabe qual arquivo importa e ele, olhando. Entao o botao vai na bolha do
   // arquivo, igual ao de transcrever audio: um clique, um documento, um custo.
-  const DOC = { estado: new Map() };   // msg_id -> {status, resultado, erro}
+  // sel: quais arquivos o consultor marcou pra ler JUNTOS. Ler em lote nao e so
+  // conforto: e uma chamada de modelo em vez de N, entao sai mais rapido e mais
+  // barato — e o modelo ainda enxerga os documentos como um conjunto (frente e
+  // verso do mesmo RG deixam de virar duas pessoas).
+  const DOC = { estado: new Map(), sel: new Set() };
+  const DOC_MAX_LOTE = 10;
 
   function _docLinhaEhArquivo(row) {
     // Imagem ou PDF na bolha. Audio ja tem o proprio botao e fica de fora.
@@ -1434,8 +1439,49 @@
     } else {
       slot.innerHTML = '<button class="job-tr-btn" type="button">' + _ICO_DOC + 'Ler documento</button>';
     }
+    // A caixinha aparece nos dois casos (parado e erro): e ela que permite
+    // juntar varios arquivos numa leitura so.
+    const marcado = DOC.sel.has(id);
+    slot.insertAdjacentHTML('beforeend',
+      '<label class="job-doc-junta" title="Marque os arquivos que vao juntos e leia todos de uma vez — uma leitura so, mais rapida e mais barata que um por um.">' +
+      '<input type="checkbox" class="job-doc-check"' + (marcado ? ' checked' : '') + '>' +
+      '<span>juntar</span></label>');
+    const cx = slot.querySelector('.job-doc-check');
+    if (cx) cx.addEventListener('change', (ev) => {
+      ev.stopPropagation();
+      if (cx.checked) {
+        if (DOC.sel.size >= DOC_MAX_LOTE) { cx.checked = false; return; }
+        DOC.sel.add(id);
+      } else { DOC.sel.delete(id); }
+      _docBarraAtualizar();
+    });
     const b = slot.querySelector('button');
     if (b) b.addEventListener('click', (ev) => { ev.stopPropagation(); docLer(id); });
+  }
+
+  // O botao de ler o lote mora na barra da conversa, junto de "Transcrever
+  // tudo": e o unico lugar que existe uma vez so, em vez de repetido em cada
+  // bolha, e some sozinho quando nao ha nada marcado.
+  function _docBarraAtualizar() {
+    const barra = document.querySelector('.job-barra-conv');
+    if (!barra) return;
+    let b = barra.querySelector('[data-ac="lerdocs"]');
+    const n = DOC.sel.size;
+    if (!n) { if (b) b.remove(); return; }
+    if (!b) {
+      b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'job-bc-btn';
+      b.dataset.ac = 'lerdocs';
+      b.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (b.disabled) return;
+        docLerVarios(Array.from(DOC.sel));
+      });
+      barra.insertBefore(b, barra.firstChild);
+    }
+    b.title = 'Le os ' + n + ' arquivos marcados numa chamada so';
+    b.innerHTML = _ICO_DOC + '<span>Ler ' + n + ' documento' + (n > 1 ? 's' : '') + '</span>';
   }
 
   function docAtualizarSlot(id) {
@@ -1443,21 +1489,34 @@
     document.querySelectorAll('.job-doc-slot[data-msg="' + sel + '"]').forEach((s) => docRenderSlot(s, id));
   }
 
-  async function docLer(id) {
-    const e = DOC.estado.get(id) || {};
-    if (e.status === 'lendo') return;
-    DOC.estado.set(id, { status: 'lendo', etapa: 'baixando o arquivo', t0: Date.now() });
-    docAtualizarSlot(id);
-    _docCronoLigar(id);
+  // UM caminho so pra ler: um arquivo e o lote de um. Manter duas funcoes quase
+  // iguais e como o bug do "Copiar conversa" duplicado nasce.
+  function docLer(id) { return docLerVarios([id]); }
+
+  async function docLerVarios(ids) {
+    const alvos = (ids || []).filter((id) => (DOC.estado.get(id) || {}).status !== 'lendo');
+    if (!alvos.length) return;
+    alvos.forEach((id) => {
+      DOC.estado.set(id, { status: 'lendo', etapa: 'baixando o arquivo', t0: Date.now() });
+      docAtualizarSlot(id);
+      _docCronoLigar(id);
+    });
+    const falhar = (lista, msg) => lista.forEach((id) =>
+      DOC.estado.set(id, { status: 'erro', erro: msg }));
     try {
-      const baixado = await _pedirPonte('baixar_midia_ids', { ids: [id] }, 90000);
+      const baixado = await _pedirPonte('baixar_midia_ids', { ids: alvos }, 120000);
       const arqs = (baixado && baixado.arquivos) || [];
       if (!arqs.length) {
-        DOC.estado.set(id, { status: 'erro',
-          erro: (baixado && baixado.erros && baixado.erros[id]) || 'não consegui baixar' });
+        falhar(alvos, (baixado && baixado.erros && baixado.erros[alvos[0]]) || 'não consegui baixar');
         return;
       }
-      _docEtapa(id, 'lendo o documento');
+      // Quem nao baixou nao trava quem baixou.
+      const baixados = arqs.map((a) => a.msg_id);
+      alvos.filter((id) => baixados.indexOf(id) < 0).forEach((id) =>
+        DOC.estado.set(id, { status: 'erro',
+          erro: (baixado.erros && baixado.erros[id]) || 'não consegui baixar' }));
+      baixados.forEach((id) => _docEtapa(id, arqs.length > 1
+        ? 'lendo ' + arqs.length + ' documentos' : 'lendo o documento'));
       let tel = '';
       try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (x) { tel = telefoneDoContato(); }
       const r = await _safeSendMessage({ type: 'documentos_ler', telefone: tel,
@@ -1465,15 +1524,25 @@
         arquivos: arqs.map((a) => ({ nome: a.nome, base64: a.base64, mime: a.mime, tipo: a.tipo }))
       }).catch(() => null);
       if (!r || !r.ok) {
-        DOC.estado.set(id, { status: 'erro', erro: (r && r.erro) || 'o JOB não respondeu' });
+        falhar(baixados, (r && r.erro) || 'o JOB não respondeu');
         return;
       }
-      DOC.estado.set(id, { status: 'ok', resultado: r });
+      // Reparte o resultado: o servidor numera por ARQUIVO n, na ordem em que
+      // mandamos. Cada bolha fica com o SEU arquivo, nunca com o do vizinho.
+      arqs.forEach((a, i) => {
+        const meu = (r.arquivos || []).filter((x) => x.indice === i + 1);
+        DOC.estado.set(a.msg_id, { status: 'ok',
+          resultado: Object.assign({}, r, { arquivos: meu.length ? meu : [{}] }) });
+      });
     } catch (x) {
-      DOC.estado.set(id, { status: 'erro', erro: String((x && x.message) || x).slice(0, 90) });
+      falhar(alvos, String((x && x.message) || x).slice(0, 90));
     } finally {
-      _docCronoDesligar(id);
-      docAtualizarSlot(id);
+      alvos.forEach((id) => {
+        DOC.sel.delete(id);
+        _docCronoDesligar(id);
+        docAtualizarSlot(id);
+      });
+      _docBarraAtualizar();
     }
   }
 
@@ -1493,18 +1562,6 @@
   // "true_" no data-id) errei, porque essas duas coisas mudam quando o WhatsApp
   // e redesenhado. A geometria nao muda: a bolha e o maior bloco dentro da linha
   // que NAO ocupa a linha inteira.
-  // Documento usa A MESMA ancoragem do audio — nao uma propria.
-  //
-  // Tentei o contrario e deu errado duas vezes. O card do arquivo (icone | nome
-  // | tamanho) e um flex ROW: procurar o MENOR ancestral com cara de bolha para
-  // dentro desse card, e o bloco vira mais uma COLUNA, do lado direito do nome
-  // do arquivo. Foi exatamente o que apareceu na tela.
-  // A bolha certa e a mesma que o audio usa: o ancestral MAIS DE FORA que ainda
-  // nao ocupa a linha inteira. Ela e uma coluna, entao o bloco cai EMBAIXO do
-  // arquivo — igual a transcricao cai embaixo do audio.
-  // A unica diferenca fica no fracasso: o audio pode desistir, o documento nao.
-  // Botao que some e pior que botao no lugar mais ou menos certo — foi o que
-  // aconteceu na 2.71.0 e o consultor ficou sem saber como ler o documento.
   // Elemento SUBSTITUIDO nao pinta filho. Medido no Chrome: appendChild num
   // <img>/<canvas> entra no DOM e devolve zero client rects — o bloco some da
   // tela sem erro nenhum. E a ancora de imagem E o proprio <img src="blob:">.
@@ -1525,9 +1582,34 @@
     } catch (e) { return false; }
   }
 
+  // O documento PARA NA PRIMEIRA bolha subindo, nao vai ate a mais de fora.
+  //
+  // Errei nas duas pontas antes de acertar. Pegando a mais INTERNA sem filtro,
+  // caia no card do arquivo (icone | nome | tamanho), que e um flex row, e o
+  // bloco virava a coluna da direita. Pegando a mais EXTERNA (o mesmo caminho do
+  // audio), passava da bolha e pousava num wrapper de ~87% da linha — dai o
+  // retangulo gigante vazio atravessando a conversa.
+  // O certo e subir e parar no PRIMEIRO ancestral que sabe pintar um filho
+  // embaixo: nao e elemento substituido e nao e linha de flex sem quebra. Esse
+  // ancestral E a bolha, porque o card foi recusado logo abaixo dela.
   function _trBolhaDoc(row, ancora) {
-    const bolha = _trBolha(row, ancora);
-    if (bolha) return { alvo: bolha, solto: false };
+    const larguraLinha = row.clientWidth || 1;
+    let el = ancora;
+    if (el) {
+      for (const teto of [0.75, 0.94]) {
+        let e2 = el;
+        for (let i = 0; i < 10 && e2 && e2 !== row; i++) {
+          const w = e2.clientWidth;
+          if (w > 160 && w < larguraLinha * teto
+              && !_TR_SUBSTITUIDO[e2.tagName] && !_trEhLinhaFlex(e2)) {
+            return { alvo: e2, solto: false };
+          }
+          e2 = e2.parentElement;
+        }
+      }
+    }
+    // NUNCA devolve vazio: botao que some e pior que botao no lugar mais ou
+    // menos certo. Foi o que aconteceu na 2.71.0.
     return { alvo: row, solto: true };
   }
 
@@ -1544,16 +1626,10 @@
     }
     if (!el) return null;
     let melhor = null;
-    // 14 saltos, nao 8. Do controle de tocar ate a bolha do audio sao 4 — o
-    // audio nunca sentiu o teto. Do icone do PDF ate a bolha sao ate 8, e com
-    // teto 8 a busca parava num wrapper do meio do card.
-    for (let i = 0; i < 14 && el && el !== row; i++) {
+    for (let i = 0; i < 8 && el && el !== row; i++) {
       const w = el.clientWidth;
-      // Larga o bastante pra ser bolha, estreita o bastante pra nao ser a linha,
-      // e CAPAZ DE PINTAR FILHO — as duas ultimas guardas sao o que impede o
-      // bloco de virar coluna do card ou de sumir dentro de uma <img>.
-      if (w > 150 && w < larguraLinha * 0.94
-          && !_TR_SUBSTITUIDO[el.tagName] && !_trEhLinhaFlex(el)) melhor = el;
+      // Larga o bastante pra ser bolha, estreita o bastante pra nao ser a linha.
+      if (w > 150 && w < larguraLinha * 0.94) melhor = el;
       el = el.parentElement;
     }
     return melhor;

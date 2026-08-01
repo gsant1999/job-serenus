@@ -540,6 +540,12 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
                color: #e9edef; border-radius: 5px; padding: 1px 5px; font-size: 10px;
                font-family: inherit; margin: 0 5px 4px 0; max-width: 100%; }
 .job-doc-sel[hidden] { display: none; }
+/* A caixinha de juntar: discreta, do lado do botão, sem competir com ele. */
+.job-doc-junta { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px;
+                 color: #8696a0; font-size: 10.5px; cursor: pointer; vertical-align: middle; }
+.job-doc-junta input { width: 12px; height: 12px; margin: 0; cursor: pointer;
+                       accent-color: #00a884; }
+.job-doc-junta:hover { color: #53bdeb; }
 /* A etapa e o relógio: o consultor precisa ver que a coisa está andando. */
 .job-doc-etapa { font-variant-numeric: tabular-nums; }
 /* Dica do papel que comprova o vínculo — informa sem travar. */
