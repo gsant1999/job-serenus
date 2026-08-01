@@ -1003,7 +1003,24 @@ def init_db():
             # um @lid pode não resolver telefone nenhum (contato sem número exposto).
             # Sem esta tabela, a varredura diária reanalisaria conversa que não mudou
             # e pagaria de novo por dado que já temos.
-            # GASTO DE MIDIA POR DIA/CAMPANHA/ANUNCIO. Leitura pura das plataformas —
+            # DOCUMENTOS LIDOS DO CLIENTE. Guarda o que a IA leu de cada arquivo,
+            # com hash do conteudo: o mesmo documento nunca e pago duas vezes, e
+            # fica o registro de QUEM leu o que — sem isso, dado extraido por IA
+            # vira um valor no campo sem procedencia nenhuma.
+            """CREATE TABLE IF NOT EXISTS lead_documento (
+                id SERIAL PRIMARY KEY,
+                lead_id INTEGER,
+                conteudo_hash TEXT,
+                nome_arquivo TEXT,
+                tipo TEXT,
+                pessoa TEXT,
+                certeza TEXT,
+                dados_json TEXT,
+                custo_usd REAL DEFAULT 0,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(lead_id, conteudo_hash)
+            )""",
+                        # GASTO DE MIDIA POR DIA/CAMPANHA/ANUNCIO. Leitura pura das plataformas —
             # nada aqui altera campanha, orcamento ou anuncio. Guardado no JOB pra
             # o custo por lead nao depender de abrir dois paineis e fazer conta de
             # cabeca, e pra sobreviver a janela de retencao das plataformas.
@@ -1848,6 +1865,13 @@ def init_db():
             numero TEXT,
             wpp_ok INTEGER DEFAULT 0,
             visto_em TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS lead_documento (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER, conteudo_hash TEXT, nome_arquivo TEXT,
+            tipo TEXT, pessoa TEXT, certeza TEXT, dados_json TEXT,
+            custo_usd REAL DEFAULT 0, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(lead_id, conteudo_hash)
         );
         CREATE TABLE IF NOT EXISTS midia_gasto (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -14254,6 +14278,337 @@ def _descrever_uma_midia(tipo, b64, mime_ou_nome):
         return None
 
 
+# ═══════════════ LEITURA DE DOCUMENTO DO CLIENTE ═══════════════
+# Trazido da Bene (ver inteligencia-captura-documentos.md), com o vocabulario do
+# JOB. O desenho que faz isso ser confiavel: a IA responde SO duas perguntas que
+# exigem olhar o papel — "que documento e este?" e "de quem e?". Quem e titular,
+# quem e dependente, o que vai em qual campo, isso o CODIGO decide, com o que ja
+# esta no cadastro. Se a IA errar, o pior caso e o documento cair no lugar errado;
+# ela nunca inventa regra de negocio.
+_DOC_TIPOS = ['identidade', 'cpf', 'comprovante_endereco', 'cartao_cnpj',
+              'contrato_social', 'certidao_casamento', 'certidao_nascimento',
+              'carteira_trabalho', 'holerite', 'cartao_plano', 'proposta_operadora', 'outro']
+
+_DOC_SISTEMA = (
+    "Você lê documentos enviados por clientes de uma corretora de planos de saúde.\n"
+    "Responda SOMENTE o que está escrito no documento.\n\n"
+    "REGRA MAIS IMPORTANTE: nunca chute dígito de CPF, CNPJ ou RG. Se não conseguir "
+    "ler com certeza, deixe o campo vazio e escreva em observacoes o que faltou e de "
+    "quem. Um dígito errado faz a operadora recusar a proposta inteira — muito pior "
+    "que um campo vazio que a pessoa preenche.\n\n"
+    "Data é sempre a de NASCIMENTO, nunca emissão ou validade.\n"
+    "Duas imagens do mesmo documento (frente e verso) são UMA pessoa, não duas.\n"
+    "A mesma pessoa em documentos diferentes (RG e CNH): os dados se somam, não duplicam.\n"
+    "Prefira dizer que não tem certeza a chutar."
+)
+
+_DOC_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'arquivos': {'type': 'array', 'items': {
+            'type': 'object',
+            'properties': {
+                'indice': {'type': 'integer', 'description': 'o n do marcador ARQUIVO n'},
+                'tipo': {'type': 'string', 'enum': _DOC_TIPOS},
+                'pessoa': {'type': 'string', 'description': 'nome completo de quem é o documento, vazio se não der'},
+                'certeza': {'type': 'string', 'enum': ['alta', 'media', 'baixa']},
+            }, 'required': ['indice', 'tipo', 'certeza']}},
+        'pessoas': {'type': 'array', 'items': {
+            'type': 'object',
+            'properties': {
+                'nome': {'type': 'string'}, 'cpf': {'type': 'string'}, 'rg': {'type': 'string'},
+                'nascimento': {'type': 'string', 'description': 'AAAA-MM-DD'},
+                'mae': {'type': 'string'}, 'sexo': {'type': 'string'},
+            }, 'required': ['nome']}},
+        'empresa': {'type': 'object', 'properties': {
+            'cnpj': {'type': 'string'}, 'razao_social': {'type': 'string'},
+            'abertura': {'type': 'string'}}},
+        'endereco': {'type': 'object', 'properties': {
+            'logradouro': {'type': 'string'}, 'numero': {'type': 'string'},
+            'bairro': {'type': 'string'}, 'cidade': {'type': 'string'},
+            'estado': {'type': 'string'}, 'cep': {'type': 'string'}}},
+        'observacoes': {'type': 'array', 'items': {'type': 'string'}},
+    },
+    'required': ['arquivos', 'pessoas'],
+}
+
+
+def _doc_preparar_imagem(b64, mime='image/jpeg'):
+    """Reduz pra 1568px no maior lado e corrige rotacao do celular.
+
+    Acima de 1568 o modelo de visao nao ganha precisao — so custa mais. E foto de
+    celular vem com a rotacao no METADADO, nao no pixel: sem corrigir, metade dos
+    RGs chega deitado e a leitura piora sem motivo."""
+    try:
+        from PIL import Image, ImageOps
+        import io as _io, base64 as _b64
+        img = Image.open(_io.BytesIO(_b64.b64decode(b64)))
+        img = ImageOps.exif_transpose(img)
+        if img.mode not in ('RGB', 'L'):
+            img = img.convert('RGB')
+        maior = max(img.size)
+        if maior > 1568:
+            f = 1568 / maior
+            img = img.resize((int(img.width * f), int(img.height * f)), Image.LANCZOS)
+        buf = _io.BytesIO()
+        img.save(buf, format='JPEG', quality=85, optimize=True)
+        return _b64.b64encode(buf.getvalue()).decode('ascii'), 'image/jpeg'
+    except Exception as e:
+        app.logger.info(f"[DOC] não preparei a imagem ({e}) — mando como veio")
+        return b64, (mime or 'image/jpeg')
+
+
+def ler_documentos_cliente(arquivos, teto_imagens=24):
+    """Le documentos e devolve dado estruturado. Uma chamada, duas tarefas.
+
+    `arquivos`: [{'nome','base64','mime','tipo'('imagem'|'documento')}]
+
+    Distribuicao em RODADAS: pega a 1a pagina de cada arquivo, depois a 2a de
+    cada. Sem isso, um contrato social de 10 paginas no inicio da fila comeria o
+    teto inteiro e os documentos do fim ficariam invisiveis pro modelo.
+    """
+    if not arquivos:
+        return None, 'nenhum arquivo'
+    api_key = (os.environ.get('ANTHROPIC_API_KEY') or '').strip()
+    if not api_key:
+        return None, 'ANTHROPIC_API_KEY não configurada'
+    try:
+        import anthropic
+    except Exception as e:
+        return None, f'pacote anthropic ausente: {e}'
+
+    # 1) prepara: cada arquivo vira uma lista de paginas (imagens) ou texto puro
+    preparados, textos = [], []
+    for i, a in enumerate(arquivos, start=1):
+        nome = (a.get('nome') or f'arquivo {i}')[:120]
+        b64 = (a.get('base64') or '').strip()
+        if not b64:
+            continue
+        if (a.get('tipo') or '') == 'documento':
+            texto, paginas = _pdf_extrair_conteudo(b64, max_paginas=2)
+            if texto:
+                # PDF com camada de texto: leitura perfeita e de graca.
+                textos.append((i, nome, texto[:6000]))
+                preparados.append((i, nome, []))
+                continue
+            preparados.append((i, nome, [(p, 'image/jpeg') for p in (paginas or [])[:2]]))
+        else:
+            preparados.append((i, nome, [_doc_preparar_imagem(b64, a.get('mime'))]))
+
+    # 2) rodadas: 1a pagina de cada, depois 2a de cada, ate o teto
+    conteudo, usados, rodada, sobraram = [], 0, 0, False
+    while usados < teto_imagens:
+        entrou = False
+        for (i, nome, paginas) in preparados:
+            if rodada >= len(paginas):
+                continue
+            if usados >= teto_imagens:
+                sobraram = True
+                break
+            conteudo.append({'type': 'text', 'text': f'ARQUIVO {i}: {nome}'})
+            b, m = paginas[rodada]
+            conteudo.append({'type': 'image', 'source': {'type': 'base64', 'media_type': m, 'data': b}})
+            usados += 1
+            entrou = True
+        if not entrou:
+            break
+        rodada += 1
+    for (i, nome, texto) in textos:
+        conteudo.append({'type': 'text', 'text': f'ARQUIVO {i}: {nome}\n{texto}'})
+    if not conteudo:
+        return None, 'nenhuma página legível'
+    conteudo.append({'type': 'text', 'text':
+        'Classifique cada ARQUIVO e extraia os dados das pessoas. Use a ferramenta.'})
+
+    ferramenta = {'name': 'registrar_documentos',
+                  'description': 'Classificação dos arquivos e dados extraídos',
+                  'input_schema': _DOC_SCHEMA}
+    try:
+        client = anthropic.Anthropic(api_key=api_key, timeout=180.0, max_retries=1)
+        resp = client.messages.create(
+            model=_CLAUDE_MODEL_DESCREVER, max_tokens=3000, system=_DOC_SISTEMA,
+            tools=[ferramenta], tool_choice={'type': 'tool', 'name': 'registrar_documentos'},
+            messages=[{'role': 'user', 'content': conteudo}])
+        bloco = next((b for b in resp.content if b.type == 'tool_use'), None)
+        if not bloco:
+            return None, 'o modelo não devolveu estrutura'
+        out = dict(bloco.input or {})
+    except Exception as e:
+        app.logger.warning(f"[DOC] leitura falhou: {e}")
+        return None, str(e)[:200]
+
+    ti = getattr(resp.usage, 'input_tokens', 0) or 0
+    to = getattr(resp.usage, 'output_tokens', 0) or 0
+    pi, po = _precos_modelo(_CLAUDE_MODEL_DESCREVER)
+    out['custo_usd'] = round(ti * pi / 1e6 + to * po / 1e6, 6)
+
+    # 3) limpeza: nunca aceitar a resposta crua
+    validos, vistos = [], set()
+    for a in (out.get('arquivos') or []):
+        try:
+            idx = int(a.get('indice') or 0)
+        except (TypeError, ValueError):
+            continue
+        if idx < 1 or idx > len(arquivos) or idx in vistos:
+            continue
+        vistos.add(idx)
+        validos.append({'indice': idx, 'nome': arquivos[idx - 1].get('nome') or '',
+                        'tipo': a.get('tipo') if a.get('tipo') in _DOC_TIPOS else 'outro',
+                        'pessoa': (a.get('pessoa') or '').strip(),
+                        'certeza': a.get('certeza') if a.get('certeza') in ('alta', 'media', 'baixa') else 'baixa'})
+    # Arquivo que o modelo nao classificou NAO some da tela: entra como 'outro'
+    # com certeza baixa, pra alguem resolver na mao. Sumir em silencio e pior.
+    for i, a in enumerate(arquivos, start=1):
+        if i not in vistos:
+            validos.append({'indice': i, 'nome': a.get('nome') or '', 'tipo': 'outro',
+                            'pessoa': '', 'certeza': 'baixa'})
+    out['arquivos'] = sorted(validos, key=lambda x: x['indice'])
+    obs = list(out.get('observacoes') or [])
+    if sobraram:
+        obs.append(f'Só couberam {usados} páginas nesta leitura — o resto ficou de fora.')
+    out['observacoes'] = obs
+    return out, None
+
+
+def documentos_para_o_lead(conn, lead_id, leitura, arquivos):
+    """Guarda o que foi lido e preenche o lead. AQUI e onde o codigo decide.
+
+    A IA disse "este arquivo e uma identidade da Maria" e "a Maria tem CPF X".
+    Quem casa a Maria com o titular do cadastro, e qual campo recebe o quê, e
+    esta funcao — deterministica, auditavel, sem criatividade.
+
+    so_se_vazio em tudo: documento confirma o que ja se sabia, nao corrige o
+    consultor. E fonte='ia' deixa rastreavel quem escreveu cada valor."""
+    if not (lead_id and leitura):
+        return {'gravados': 0, 'campos': []}
+    import hashlib as _h
+    agora = _agora_sp()
+    por_indice = {a['indice']: a for a in (leitura.get('arquivos') or [])}
+    gravados = 0
+    for i, arq in enumerate(arquivos, start=1):
+        b64 = (arq.get('base64') or '')
+        if not b64:
+            continue
+        h = _h.sha256(b64.encode('ascii', 'ignore')).hexdigest()
+        cls = por_indice.get(i) or {}
+        try:
+            if DB_MODE == 'postgres':
+                conn.execute("""INSERT INTO lead_documento
+                    (lead_id, conteudo_hash, nome_arquivo, tipo, pessoa, certeza, dados_json, custo_usd, criado_em)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (lead_id, conteudo_hash) DO NOTHING""",
+                    (lead_id, h, arq.get('nome'), cls.get('tipo'), cls.get('pessoa'),
+                     cls.get('certeza'), json.dumps(cls, ensure_ascii=False), 0, agora))
+            else:
+                conn.execute("""INSERT OR IGNORE INTO lead_documento
+                    (lead_id, conteudo_hash, nome_arquivo, tipo, pessoa, certeza, dados_json, custo_usd, criado_em)
+                    VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (lead_id, h, arq.get('nome'), cls.get('tipo'), cls.get('pessoa'),
+                     cls.get('certeza'), json.dumps(cls, ensure_ascii=False), 0, agora))
+            gravados += 1
+        except Exception as e:
+            app.logger.warning(f"[DOC] não gravei {arq.get('nome')}: {e}")
+
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+    if not lead:
+        return {'gravados': gravados, 'campos': []}
+
+    # A pessoa do lead: casa o nome lido com o nome do cadastro. Se nenhum casar,
+    # NAO forca — dado de outra pessoa no campo do titular e pior que campo vazio.
+    titular = None
+    for p in (leitura.get('pessoas') or []):
+        if doc_mesma_pessoa(p.get('nome'), lead['nome']):
+            titular = p
+            break
+    campos = {}
+    if titular:
+        if titular.get('nascimento'):
+            campos['data_nascimento_titular'] = titular['nascimento']
+        if titular.get('cpf'):
+            campos['cpf_titular'] = re.sub(r'\D', '', titular['cpf'])
+    emp = leitura.get('empresa') or {}
+    if emp.get('cnpj'):
+        n = re.sub(r'\D', '', emp['cnpj'])
+        if len(n) == 14:
+            campos['cnpj'] = f"{n[:2]}.{n[2:5]}.{n[5:8]}/{n[8:12]}-{n[12:]}"
+    end = leitura.get('endereco') or {}
+    if end.get('cidade'):
+        campos['cidade_rmc'] = end['cidade']
+    # Quantas pessoas apareceram nos documentos e um sinal de composicao familiar,
+    # mas so conta quem tem nascimento — nome solto num contrato social nao e vida.
+    vidas = [p for p in (leitura.get('pessoas') or []) if p.get('nascimento')]
+    if len(vidas) > 1:
+        campos['numero_vidas'] = str(len(vidas))
+
+    escritos = []
+    for chave, valor in campos.items():
+        try:
+            if gravar_campo_lead(conn, lead_id, chave, valor, fonte='ia', so_se_vazio=True):
+                escritos.append(chave)
+        except Exception as e:
+            app.logger.info(f"[DOC] campo {chave}: {e}")
+    if campos.get('cnpj'):
+        try:
+            _preencher_campos_por_cnpj(conn, lead_id, campos['cnpj'])
+        except Exception as e:
+            app.logger.info(f"[DOC] CNPJ não consultado: {e}")
+
+    tipos = [c.get('tipo') for c in (leitura.get('arquivos') or []) if c.get('tipo') and c['tipo'] != 'outro']
+    if tipos or escritos:
+        desc = 'Documentos lidos: ' + (', '.join(sorted(set(tipos))) or 'nenhum reconhecido')
+        if escritos:
+            desc += ' · preencheu: ' + ', '.join(escritos)
+        duvidas = [c['nome'] for c in (leitura.get('arquivos') or []) if c.get('certeza') == 'baixa']
+        if duvidas:
+            desc += f' · {len(duvidas)} sem certeza, conferir'
+        conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                        VALUES (?,?,?,?,?)""", (lead_id, 'Leitura de documentos', 'documento', desc[:500], agora))
+    return {'gravados': gravados, 'campos': escritos}
+
+
+def _doc_norm_nome(v):
+    """Nome comparavel: sem acento, sem caixa, so letras."""
+    v = (v or '').strip().lower()
+    try:
+        import unicodedata as _u
+        v = ''.join(c for c in _u.normalize('NFD', v) if _u.category(c) != 'Mn')
+    except Exception:
+        pass
+    return re.sub(r'[^a-z ]+', ' ', v).strip()
+
+
+_DOC_PARTICULAS = {'da', 'de', 'do', 'das', 'dos', 'e'}
+
+
+def doc_mesma_pessoa(a, b):
+    """Nome de documento raramente bate caractere a caractere com o que foi
+    digitado: abreviacao, nome do meio faltando, sobrenome de casada.
+
+    Regra: PRIMEIRO nome igual E pelo menos um sobrenome em comum.
+
+    A Bene usava primeiro+ULTIMO, e no teste isso falhou justamente no caso mais
+    comum aqui — 'MARIA S OLIVEIRA' no RG contra 'Maria Oliveira da Silva' no
+    cadastro, que e a mesma pessoa com sobrenome de casada no fim. Exigir o
+    ultimo igual deixaria o CPF dela sem preencher.
+
+    Por que isso continua seguro: a comparacao e sempre contra o nome DAQUELE
+    lead, nao contra uma base inteira. Irmao tem sobrenome em comum mas primeiro
+    nome diferente, e cai fora na primeira condicao. Particula ('da', 'de') nao
+    conta como sobrenome — senao 'Joao da Silva' casaria com 'Maria da Costa'."""
+    pa = [x for x in _doc_norm_nome(a).split() if x not in _DOC_PARTICULAS]
+    pb = [x for x in _doc_norm_nome(b).split() if x not in _DOC_PARTICULAS]
+    if not pa or not pb:
+        return False
+    if pa == pb:
+        return True
+    if pa[0] != pb[0]:
+        return False
+    # Inicial abreviada ('S') nao vale como sobrenome em comum: casaria gente
+    # diferente so por dividir uma letra.
+    sobre_a = {x for x in pa[1:] if len(x) > 1}
+    sobre_b = {x for x in pb[1:] if len(x) > 1}
+    return bool(sobre_a & sobre_b)
+
+
 def _wa_mapear_midias(conn, imagens, documentos, custo_ja_gasto_usd=0.0):
     """Transforma imagens+PDFs em LINHAS de texto pra entrar na conversa em ordem
     cronológica — usando o cache por conteúdo quando já vimos aquela mídia antes,
@@ -16451,6 +16806,79 @@ def api_whatsapp_metrica():
         app.logger.warning(f"[METRICA] {ex}")
     close_db(conn)
     return _wa_cors(jsonify({"ok": True, "gravadas": n}))
+
+
+@app.route('/api/whatsapp/documentos/ler', methods=['POST', 'OPTIONS'])
+def api_whatsapp_documentos_ler():
+    """A extensao manda os documentos da conversa; o JOB le e preenche o lead.
+
+    Roda no SERVIDOR de proposito: a chave da IA nunca vai pro navegador do
+    consultor, o custo fica medido num lugar so, e o cache por conteudo evita
+    pagar duas vezes pelo mesmo RG que o cliente reenviou."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    d = request.get_json(silent=True) or {}
+    arquivos = d.get('arquivos') or []
+    if not isinstance(arquivos, list) or not arquivos:
+        return _wa_cors(jsonify({"ok": False, "erro": "Nenhum documento recebido"})), 400
+    # Teto de payload: 12 arquivos por chamada. Quem soltar a pasta errada nao
+    # gera uma conta surpresa num clique.
+    arquivos = arquivos[:12]
+    conn = db()
+    lead_id = None
+    try:
+        lead_id = int(d.get('lead_id') or 0) or None
+    except (TypeError, ValueError):
+        lead_id = None
+    if not lead_id:
+        tel = _normalizar_telefone(d.get('telefone') or '')
+        if tel:
+            lead = _buscar_lead_por_telefone(conn, tel)
+            lead_id = lead['id'] if lead else None
+
+    # JA LIDO NAO SE PAGA DE NOVO. O cliente reenvia o mesmo RG toda hora.
+    import hashlib as _h
+    novos, ja = [], 0
+    for a in arquivos:
+        b64 = (a.get('base64') or '').strip()
+        if not b64:
+            continue
+        h = _h.sha256(b64.encode('ascii', 'ignore')).hexdigest()
+        if lead_id and conn.execute("SELECT 1 FROM lead_documento WHERE lead_id=? AND conteudo_hash=?",
+                                    (lead_id, h)).fetchone():
+            ja += 1
+            continue
+        novos.append(a)
+    if not novos:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": True, "lidos": 0, "ja_lidos": ja,
+                                 "msg": "Todos esses documentos já tinham sido lidos"}))
+
+    leitura, erro = ler_documentos_cliente(novos)
+    if erro or not leitura:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": erro or "não consegui ler"})), 200
+    res = {}
+    try:
+        res = documentos_para_o_lead(conn, lead_id, leitura, novos)
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        app.logger.warning(f"[DOC] gravação: {e}")
+    close_db(conn)
+    return _wa_cors(jsonify({
+        "ok": True, "lead_id": lead_id, "lidos": len(novos), "ja_lidos": ja,
+        "arquivos": leitura.get('arquivos') or [],
+        "pessoas": leitura.get('pessoas') or [],
+        "empresa": leitura.get('empresa') or {},
+        "endereco": leitura.get('endereco') or {},
+        "observacoes": leitura.get('observacoes') or [],
+        "campos_preenchidos": res.get('campos') or [],
+        "custo_usd": leitura.get('custo_usd') or 0,
+    }))
 
 
 @app.route('/api/whatsapp/chats/vincular', methods=['POST', 'OPTIONS'])
