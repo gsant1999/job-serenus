@@ -26,8 +26,7 @@
   .branddivider{width:1px;height:32px;background:rgba(255,255,255,.22);flex:0 0 auto;}
   .brand-sb{display:flex;align-items:center;background:#fff;border-radius:10px;padding:7px 14px;
     box-shadow:0 2px 6px rgba(0,0,0,.18);}
-  .brand-sb img{height:26px;width:auto;display:block;}
-  .brand-sb b{color:var(--sb-teal-dk);font-size:15px;font-weight:800;letter-spacing:-.01em;}
+  .brand-sb img{height:30px;width:auto;display:block;}
   header.top .brand{display:flex;align-items:center;gap:10px;}
   header.top .brand-txt{line-height:1.15;flex:1;min-width:0;}
   header.top .brand-txt b{font-size:16px;display:block;font-family:ui-serif,Georgia,serif;}
@@ -128,7 +127,7 @@
         <img src="{{ url_for('static', filename='brand/serenus-logo-light.png') }}" alt="Serenus Corretora" />
       </div>
       <div class="branddivider"></div>
-      <div class="brand-sb"><b>Saúde Beneficência</b></div>
+      <div class="brand-sb"><img src="{{ url_for('static', filename='operadoras/saude-beneficencia.png') }}" alt="Saúde Beneficência" /></div>
     </div>
     <div class="brand">
       <div class="brand-txt">
