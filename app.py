@@ -9528,19 +9528,29 @@ def _midia_gravar(conn, canal, linhas):
 
 
 def _meta_ads_config():
-    """Credenciais pra LER gasto na Meta. O token da API de Conversoes costuma
-    nao ter permissao de ads_read — por isso aceita um token proprio e so cai no
-    da conversao se ele nao existir."""
-    conta = (os.environ.get('META_AD_ACCOUNT_ID') or '').strip()
-    if conta and not conta.startswith('act_'):
-        conta = 'act_' + conta.lstrip('act_')
+    """Credenciais pra LER gasto na Meta.
+
+    META_AD_ACCOUNT_ID aceita VARIAS contas separadas por virgula. A Serenus vai
+    ter duas BMs convivendo (a Axioma, onde as campanhas rodam hoje, e a nova da
+    Serenus) — ler so uma faria metade do gasto sumir do custo por lead, e o
+    numero pareceria certo. Uma conta so continua funcionando igual.
+
+    O token da API de Conversoes costuma nao ter ads_read — por isso aceita um
+    token proprio e so cai no da conversao se ele nao existir."""
+    bruto = (os.environ.get('META_AD_ACCOUNT_ID') or '').strip()
+    contas = []
+    for c in re.split(r'[,;\s]+', bruto):
+        c = c.strip()
+        if not c:
+            continue
+        contas.append(c if c.startswith('act_') else 'act_' + c.lstrip('act_'))
     token = (os.environ.get('META_ADS_TOKEN') or os.environ.get('META_ACCESS_TOKEN') or '').strip()
     faltando = []
-    if not conta:
+    if not contas:
         faltando.append('META_AD_ACCOUNT_ID')
     if not token:
         faltando.append('META_ADS_TOKEN (ou META_ACCESS_TOKEN com ads_read)')
-    return {'conta': conta, 'token': token}, faltando
+    return {'contas': contas, 'conta': contas[0] if contas else '', 'token': token}, faltando
 
 
 def puxar_gasto_meta(dias=30):
@@ -9555,34 +9565,41 @@ def puxar_gasto_meta(dias=30):
         return resumo
     campos = ('date_start,spend,impressions,clicks,campaign_id,campaign_name,'
               'adset_name,ad_id,ad_name,account_currency')
-    url = f"https://graph.facebook.com/{_META_API_VERSAO}/{cfg['conta']}/insights"
-    params = {'fields': campos, 'level': 'ad', 'time_increment': 1,
-              'date_preset': 'last_30d' if dias > 7 else 'last_7d',
-              'limit': 500, 'access_token': cfg['token']}
-    linhas, paginas = [], 0
-    try:
-        import requests as _rq
-        while url and paginas < 20:
-            r = _rq.get(url, params=params if paginas == 0 else None, timeout=45)
-            d = r.json() if r.content else {}
-            if d.get('error'):
-                resumo['erros'].append((d['error'] or {}).get('message') or f'HTTP {r.status_code}')
-                break
-            for x in d.get('data', []):
-                linhas.append({
-                    'data': x.get('date_start'), 'conta_id': cfg['conta'],
-                    'campanha_id': x.get('campaign_id'), 'campanha_nome': x.get('campaign_name'),
-                    'conjunto_nome': x.get('adset_name'),
-                    'anuncio_id': x.get('ad_id'), 'anuncio_nome': x.get('ad_name'),
-                    'gasto': float(x.get('spend') or 0),
-                    'impressoes': int(x.get('impressions') or 0),
-                    'cliques': int(x.get('clicks') or 0),
-                    'moeda': x.get('account_currency') or 'BRL',
-                })
-            url = ((d.get('paging') or {}).get('next')) or None
-            paginas += 1
-    except Exception as e:
-        resumo['erros'].append(f'Falha ao falar com a Meta: {e}')
+    linhas = []
+    resumo['contas'] = {}
+    import requests as _rq
+    for conta in cfg['contas']:
+        # Uma conta que falha nao derruba as outras: o gasto que deu pra ler
+        # entra, e a que falhou aparece nomeada no erro.
+        url = f"https://graph.facebook.com/{_META_API_VERSAO}/{conta}/insights"
+        params = {'fields': campos, 'level': 'ad', 'time_increment': 1,
+                  'date_preset': 'last_30d' if dias > 7 else 'last_7d',
+                  'limit': 500, 'access_token': cfg['token']}
+        paginas, n_conta = 0, 0
+        try:
+            while url and paginas < 20:
+                r = _rq.get(url, params=params if paginas == 0 else None, timeout=45)
+                d = r.json() if r.content else {}
+                if d.get('error'):
+                    resumo['erros'].append(f"{conta}: " + ((d['error'] or {}).get('message') or f'HTTP {r.status_code}'))
+                    break
+                for x in d.get('data', []):
+                    n_conta += 1
+                    linhas.append({
+                        'data': x.get('date_start'), 'conta_id': conta,
+                        'campanha_id': x.get('campaign_id'), 'campanha_nome': x.get('campaign_name'),
+                        'conjunto_nome': x.get('adset_name'),
+                        'anuncio_id': x.get('ad_id'), 'anuncio_nome': x.get('ad_name'),
+                        'gasto': float(x.get('spend') or 0),
+                        'impressoes': int(x.get('impressions') or 0),
+                        'cliques': int(x.get('clicks') or 0),
+                        'moeda': x.get('account_currency') or 'BRL',
+                    })
+                url = ((d.get('paging') or {}).get('next')) or None
+                paginas += 1
+        except Exception as e:
+            resumo['erros'].append(f'{conta}: falha ao falar com a Meta: {e}')
+        resumo['contas'][conta] = n_conta
     if linhas:
         conn = db()
         try:
