@@ -396,7 +396,18 @@
       <div class="card" style="margin-bottom:16px;" id="card-documentos">
         <div class="card-header">
           <h3>Documentos</h3>
-          <span style="font-size:11px;color:var(--cinza);">Necessários para enviar à Affinity</span>
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <span style="font-size:11px;color:var(--cinza);">Necessários para enviar à Affinity</span>
+            {# Traz o que o cliente ja mandou no WhatsApp, com o nome padronizado.
+               Botao e nao automatico: o consultor ve o que veio antes de mandar
+               pra operadora. #}
+            {% if p.lead_id %}
+            <button type="button" class="btn-outline btn-sm" id="btn-docs-lead" onclick="trazerDocsDoLead(this)"
+                    title="Copia para esta venda os documentos que o cliente mandou no WhatsApp, já renomeados por tipo">
+              Trazer documentos do lead
+            </button>
+            {% endif %}
+          </div>
         </div>
         <div class="card-body">
 
@@ -1305,6 +1316,18 @@ async function cancelarBoleto(){
 function copiarLinha(){
   const txt=document.getElementById('linha-digitavel-txt');
   if(txt){navigator.clipboard.writeText(txt.textContent.trim());toast('Linha digitável copiada!','ok');}
+}
+
+async function trazerDocsDoLead(btn){
+  const t = btn.textContent; btn.disabled = true; btn.textContent = 'Trazendo…';
+  try{
+    const r = await fetch('/proposta/{{ p.id }}/documentos-do-lead', {method:'POST'});
+    const d = await r.json();
+    if(!d.ok){ alert(d.erro || 'Não deu'); btn.disabled=false; btn.textContent=t; return; }
+    if(!d.copiados){ btn.textContent = 'Nada novo'; setTimeout(()=>{btn.textContent=t; btn.disabled=false;}, 2500); return; }
+    alert(d.copiados + ' documento(s) trazido(s):\n\n' + (d.nomes||[]).join('\n'));
+    location.reload();
+  }catch(e){ alert('Falha de conexão'); btn.disabled=false; btn.textContent=t; }
 }
 </script>
 {% endblock %}

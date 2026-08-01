@@ -16901,6 +16901,78 @@ def api_whatsapp_documento_tipo():
     return _wa_cors(jsonify({"ok": True, "nome_final": nome, "tipo": tipo}))
 
 
+def documentos_do_lead_para_proposta(conn, pid, lead_id, usuario_nome='Sistema'):
+    """Leva os documentos do lead pros anexos da venda.
+
+    O cliente mandou o RG no WhatsApp; o consultor cadastrou a venda. Sem isto,
+    ele teria que baixar tudo e subir de novo, arquivo por arquivo — o mesmo
+    documento, duas vezes, com chance de subir o errado no meio.
+
+    COPIA o arquivo com o nome padronizado em vez de apontar pro mesmo: anexo de
+    proposta e prova documental do que foi vendido, e nao pode mudar se alguem
+    reclassificar o documento no lead depois. Aqui e melhor duplicar bytes do que
+    deixar a prova mudar sozinha.
+
+    Nao duplica: anexo que ja esta na lista fica como esta."""
+    if not (pid and lead_id):
+        return {'copiados': 0, 'nomes': []}
+    docs = conn.execute("""SELECT * FROM lead_documento
+                           WHERE lead_id=? AND arquivo IS NOT NULL ORDER BY tipo, id""",
+                        (lead_id,)).fetchall()
+    if not docs:
+        return {'copiados': 0, 'nomes': []}
+    prop = conn.execute("SELECT anexos FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not prop:
+        return {'copiados': 0, 'nomes': []}
+    try:
+        anexos = json.loads(prop['anexos'] or '[]')
+    except Exception:
+        anexos = []
+    ja = {(x['nome'] if isinstance(x, dict) else x) for x in anexos}
+    novos = []
+    for d in docs:
+        conteudo, _ct = _localizar_anexo(os.path.basename(d['arquivo']))
+        if not conteudo:
+            continue
+        base = d['nome_final'] or os.path.basename(d['arquivo'])
+        raiz, _p, ext = base.rpartition('.')
+        chave = f"prop-{pid}-{(raiz or base)[:60]}.{ext or 'jpg'}".replace('/', '-')
+        if chave in ja:
+            continue
+        try:
+            upload_arquivo_r2(conteudo, chave)
+        except Exception as e:
+            app.logger.warning(f"[DOC->PROP] não copiei {base}: {e}")
+            continue
+        anexos.append(chave)
+        ja.add(chave)
+        novos.append(base)
+    if novos:
+        conn.execute("UPDATE propostas SET anexos=? WHERE id=?", (json.dumps(anexos), pid))
+        conn.execute("""INSERT INTO historico_proposta (proposta_id, usuario_nome, tipo, descricao, criado_em)
+                        VALUES (?,?,?,?,?)""",
+                     (pid, usuario_nome, 'edicao',
+                      f"{len(novos)} documento(s) trazido(s) do lead: " + ', '.join(novos[:6]), _agora_sp()))
+    return {'copiados': len(novos), 'nomes': novos}
+
+
+@app.route('/proposta/<int:pid>/documentos-do-lead', methods=['POST'])
+@login_required
+def proposta_documentos_do_lead(pid):
+    """Traz os documentos do lead pra esta venda. Botao, nao automatico: o
+    consultor ve o que veio antes de mandar pra operadora."""
+    conn = db()
+    p = conn.execute("SELECT id, lead_id FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        close_db(conn); return jsonify({"ok": False, "erro": "Proposta não encontrada"}), 404
+    if not p['lead_id']:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Esta venda não tem lead vinculado — sem lead não há documentos"}), 400
+    res = documentos_do_lead_para_proposta(conn, pid, p['lead_id'], session.get('nome') or 'Sistema')
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, **res})
+
+
 @app.route('/lead/documento/tipo', methods=['POST'])
 @login_required
 def lead_documento_tipo():
