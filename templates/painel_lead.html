@@ -53,6 +53,33 @@
   .pl-num.ok { border-color:var(--ok-bd); }
   .pl-num.alerta { border-color:var(--al-bd); }
 
+  /* Menu da pagina: gruda no topo ao rolar. Escala de 8 no espacamento. */
+  .pl-menu { position:sticky; top:0; z-index:40; display:flex; gap:8px; flex-wrap:wrap;
+             align-items:center; padding:8px 0 16px; background:var(--fundo, var(--panel));
+             margin-bottom:8px; }
+  .pl-menu a { font-size:12px; padding:6px 12px; border-radius:999px; text-decoration:none;
+               border:1px solid var(--borda); color:var(--cinza-2); white-space:nowrap;
+               transition:.15s; }
+  .pl-menu a:hover { color:var(--texto); border-color:var(--cinza); }
+  .pl-menu a.tem { color:var(--texto); border-color:var(--cinza); }
+  .pl-menu a .n { font-size:10px; opacity:.7; margin-left:5px; font-variant-numeric:tabular-nums; }
+  .pl-menu .pl-menu-vazio { font-size:11px; color:var(--cinza); margin-left:auto; }
+
+  /* CAIXA VAZIA NAO E CAIXA. Um cartao dizendo "nenhuma cotacao" ocupava o mesmo
+     espaco de um com cinco cotacoes — era isso que deixava a tela 70% nada.
+     Vazio vira uma linha fina, clicavel, que abre se alguem quiser ver. */
+  .pl-box[data-vazio] { padding:0; background:none; border:none; }
+  .pl-box[data-vazio] > * { display:none; }
+  .pl-box[data-vazio]::before {
+    content:attr(data-sec) " — sem registro ainda";
+    display:block; padding:10px 14px; font-size:12px; color:var(--cinza);
+    border:1px dashed var(--borda); border-radius:10px;
+  }
+  /* Quando o consultor pede pra ver, o cartao volta inteiro. */
+  .pl-box[data-vazio].aberto { padding:16px 18px; background:var(--panel-2);
+                               border:1px solid var(--borda); }
+  .pl-box[data-vazio].aberto > * { display:revert; }
+  .pl-box[data-vazio].aberto::before { display:none; }
   .pl-grade { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px; align-items:start; }
   .pl-box { background:var(--panel-2); border:1px solid var(--borda); border-radius:12px; padding:16px 18px; }
   .pl-box h2 { font-size:13px; font-weight:700; letter-spacing:.3px; text-transform:uppercase;
@@ -263,6 +290,12 @@
   </div>
 </div>
 
+{# MENU DA PAGINA. O painel e longo e a maior parte dele costuma estar vazia:
+   o menu leva direto ao que TEM conteudo, e diz de cara o que ainda nao existe.
+   Construido pelo proprio conteudo, entao nao ha lista pra manter em dois
+   lugares. #}
+<nav class="pl-menu" id="pl-menu" aria-label="Seções desta página"></nav>
+
 <div class="pl-num-linha">
   <div class="pl-num">
     <b>{{ (lead.valor_estimado or 0)|moeda }}</b>
@@ -288,7 +321,7 @@
 
 <div class="pl-grade">
 
-  <div class="pl-box">
+  <div class="pl-box" data-sec="Origem">
     <h2>De onde veio<i class="ajuda-i" title="A origem é o que liga esta pessoa ao anúncio que a trouxe. Sem ela, a venda não volta para o Google Ads dizendo qual criativo deu dinheiro.">i</i></h2>
     <dl style="margin:0;">
       <div class="pl-linha"><dt>Origem</dt><dd>{{ midia.origem or '—' }}</dd></div>
@@ -314,7 +347,7 @@
     </div>
   </div>
 
-  <div class="pl-box">
+  <div class="pl-box" data-sec="Conversa"{% if not analises %} data-vazio="1"{% endif %}>
     <h2>Conversa e custo de IA</h2>
     {% if not analises %}
       <div class="pl-vazio">Nenhuma conversa analisada ainda.</div>
@@ -337,7 +370,7 @@
     {% endif %}
   </div>
 
-  <div class="pl-box">
+  <div class="pl-box" data-sec="Qualificação"{% if not campos %} data-vazio="1"{% endif %}>
     <h2>Qualificação<i class="ajuda-i" title="O que se sabe do cliente e QUEM escreveu cada coisa: IA significa que a inteligência extraiu da conversa e ninguém conferiu ainda; corrigido significa que o consultor mudou o que a IA tinha posto.">i</i></h2>
     {% if not campos %}
       <div class="pl-vazio">Nada preenchido ainda.</div>
@@ -353,7 +386,7 @@
     {% endif %}
   </div>
 
-  <div class="pl-box">
+  <div class="pl-box" data-sec="Cotações"{% if not cotacoes %} data-vazio="1"{% endif %}>
     <h2>Cotações</h2>
     {% if not cotacoes %}
       <div class="pl-vazio">Nenhuma cotação feita para este lead.</div>
@@ -375,7 +408,7 @@
     {% endif %}
   </div>
 
-  <div class="pl-box largo">
+  <div class="pl-box largo" data-sec="Venda"{% if not vendas %} data-vazio="1"{% endif %}>
     <h2>Venda e pós-venda</h2>
     {% if not vendas %}
       <div class="pl-vazio">Nenhuma venda registrada para este lead.</div>
@@ -435,7 +468,7 @@
     {% endif %}
   </div>
 
-  <div class="pl-box largo pl-docs">
+  <div class="pl-box largo pl-docs" data-sec="Documentos"{% if not documentos %} data-vazio="1"{% endif %}>
     <div class="pl-docs-topo">
       <h2 style="margin:0;">Documentos do cliente<i class="ajuda-i" title="Os arquivos que o cliente mandou no WhatsApp, já classificados e renomeados. Baixar a pasta traz tudo com nome padrão (RG-CNH - TITULAR - NOME.pdf), pronto para subir no sistema da operadora sem abrir arquivo por arquivo.">i</i></h2>
       {% if documentos %}
@@ -523,7 +556,7 @@
   </div>
 
   {% if docs_texto %}
-  <div class="pl-box largo">
+  <div class="pl-box largo" data-sec="Dados p/ operadora">
     <div class="pl-docs-topo">
       <h2 style="margin:0;">Dados para o sistema da operadora<i class="ajuda-i" title="Tudo que foi lido dos documentos, no formato de colar direto no cadastro da operadora: uma pessoa por bloco, na ordem dos campos da ficha. Campo que não estava no documento não vira linha — 'não informado' ocupa o lugar do dado e obriga a conferir de novo.">i</i></h2>
       <div class="pl-docs-acoes">
@@ -536,7 +569,7 @@
   </div>
   {% endif %}
 
-  <div class="pl-box">
+  <div class="pl-box" data-sec="Notas"{% if not notas %} data-vazio="1"{% endif %}>
     <h2>Notas do consultor</h2>
     {% if not notas %}
       <div class="pl-vazio">Nenhuma nota escrita.</div>
@@ -550,7 +583,7 @@
     {% endif %}
   </div>
 
-  <div class="pl-box">
+  <div class="pl-box" data-sec="Histórico"{% if not timeline %} data-vazio="1"{% endif %}>
     <h2>Linha do tempo</h2>
     {% if not timeline %}
       <div class="pl-vazio">Sem histórico.</div>
@@ -585,6 +618,41 @@
 </div>
 
 <script>
+// ── Menu da pagina ────────────────────────────────────────────────────────
+// Montado a partir do que esta na tela: nao existe lista pra manter atualizada
+// em dois lugares, e secao nova aparece aqui sozinha.
+(function(){
+  const menu = document.getElementById('pl-menu');
+  if (!menu) return;
+  const caixas = [...document.querySelectorAll('.pl-box[data-sec]')];
+  let vazias = 0;
+  caixas.forEach((c, i) => {
+    const nome = c.dataset.sec;
+    const vazio = c.hasAttribute('data-vazio');
+    if (vazio) { vazias++; return; }                 // menu leva ao que TEM
+    if (!c.id) c.id = 'sec-' + i;
+    const a = document.createElement('a');
+    a.href = '#' + c.id;
+    a.className = 'tem';
+    a.textContent = nome;
+    // Um numero quando ele existe: "Documentos 7" vale mais que "Documentos".
+    const n = c.querySelectorAll('.pl-doc-linha, .pl-tab tbody tr, .pl-tl li, .pl-nota').length;
+    if (n) { const s = document.createElement('span'); s.className = 'n'; s.textContent = n; a.appendChild(s); }
+    menu.appendChild(a);
+  });
+  if (vazias) {
+    const s = document.createElement('span');
+    s.className = 'pl-menu-vazio';
+    s.textContent = vazias + ' seção(ões) ainda sem registro, no fim da página';
+    menu.appendChild(s);
+  }
+  // Clicar na linha fina abre o cartao inteiro.
+  document.querySelectorAll('.pl-box[data-vazio]').forEach((c) => {
+    c.style.cursor = 'pointer';
+    c.addEventListener('click', () => c.classList.add('aberto'), { once: true });
+  });
+})();
+
 // As tres respostas vao juntas: o nome do arquivo depende das tres, entao
 // mandar so a que mudou faria o servidor recalcular o nome com metade da
 // informacao. Leio a linha inteira e mando o conjunto.
