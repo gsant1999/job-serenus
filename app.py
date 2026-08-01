@@ -2907,6 +2907,8 @@ def init_db():
          'Nome da campanha que trouxe o lead'),
         ('criativo', 'Converteu em qual criativo', 'texto', 'automatico', 'utm', None, 'utm.content',
          'Anúncio/criativo que gerou o clique — é o utm_content'),
+        ('landing', 'Página que converteu', 'texto', 'automatico', 'utm', None, 'click.landing',
+         'A página onde o lead preencheu — serve pra tráfego pago e orgânico'),
         ('tipo_plano', 'Tipo de plano', 'select', 'automatico', 'formulario',
          '["Individual","Familiar","Empresarial","Adesão"]', None, None),
         ('tipo_contratacao', 'Tipo de contratação', 'select', 'automatico', 'formulario',
@@ -3016,6 +3018,26 @@ def init_db():
 
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        # O catalogo geral roda UMA vez; campo novo depois disso precisa da propria
+        # flag, senao nunca nasce numa base que ja migrou. Cada migracao tem a sua.
+        if not conn.execute("SELECT 1 FROM meta_flags WHERE k='campo_landing_20260801'").fetchone():
+            try:
+                if not conn.execute("SELECT 1 FROM crm_campos WHERE chave='landing'").fetchone():
+                    ordem = (conn.execute("SELECT COALESCE(MAX(ordem),0) o FROM crm_campos "
+                                          "WHERE momento='automatico'").fetchone()['o'] or 0) + 1
+                    conn.execute("""INSERT INTO crm_campos
+                        (chave,nome,tipo,momento,fonte,opcoes_json,mapa_extras,dica,ordem)
+                        VALUES (?,?,?,?,?,?,?,?,?)""",
+                        ('landing', 'Página que converteu', 'texto', 'automatico', 'utm', None,
+                         'click.landing', 'A página onde o lead preencheu — vale pra pago e pra orgânico',
+                         ordem))
+                conn.execute("INSERT INTO meta_flags (k) VALUES ('campo_landing_20260801')")
+                conn.commit()
+                print("[CAMPO_LANDING] campo 'Página que converteu' criado")
+            except Exception as e:
+                try: conn.rollback()
+                except Exception: pass
+                print(f"[CAMPO_LANDING] migração pulada: {e}")
         ja_campos = conn.execute("SELECT 1 FROM meta_flags WHERE k='campos_personalizados_20260729'").fetchone()
     except Exception:
         ja_campos = True
@@ -18599,6 +18621,7 @@ def painel_lead(lid):
     except Exception:
         extras = {}
     midia = {k: _campo_de_midia(extras, k) for k in ('origem_midia', 'campanha', 'criativo')}
+    midia['landing'] = _campo_de_midia(extras, 'landing')
     midia['gclid'] = lead.get('gclid') or _campo_de_midia(extras, 'gclid') or ''
     midia['trafego'] = lead.get('trafego') or ''
     midia['origem'] = lead.get('origem') or ''
@@ -19754,6 +19777,11 @@ _MIDIA_CAMINHOS = {
     'gbraid':   ('click.gbraid', 'gbraid'),
     'wbraid':   ('click.wbraid', 'wbraid'),
     'fbclid':   ('click.fbclid', 'fbclid'),
+    # A PAGINA QUE CONVERTEU. A ingestao ja gravava isto desde sempre (webhook em
+    # click.landing, planilha em landing_url) — so nunca esteve nesta lista, entao
+    # nenhuma tela conseguia ler. Vale pra pago E pra organico: nao depende de
+    # anuncio, depende da landing mandar a propria URL no formulario.
+    'landing':  ('click.landing', 'landing_url', 'landing', 'utm.landing', 'page', 'url'),
 }
 
 

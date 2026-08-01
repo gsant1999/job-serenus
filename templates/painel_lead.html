@@ -151,6 +151,11 @@
       <div class="pl-linha"><dt>Tráfego</dt><dd>{{ midia.trafego or '—' }}</dd></div>
       <div class="pl-linha"><dt>Campanha</dt><dd>{{ midia.campanha or '—' }}</dd></div>
       <div class="pl-linha"><dt>Criativo</dt><dd>{{ midia.criativo or '—' }}</dd></div>
+      {# A pagina que converteu vale pro pago E pro organico — nao depende de
+         anuncio, so de a landing mandar a propria URL. Link clicavel porque a
+         pergunta seguinte e sempre "que pagina e essa?". #}
+      <div class="pl-linha"><dt>Página que converteu<i class="ajuda-i" title="A página onde este lead preencheu o formulário. Serve para tráfego pago e orgânico: mostra qual página converte, não só qual anúncio trouxe o clique.">i</i></dt>
+        <dd>{% if midia.landing %}<a href="{{ midia.landing }}" target="_blank" rel="noopener" title="{{ midia.landing }}">{{ midia.landing|replace('https://','')|replace('http://','') | truncate(46, True, '…') }}</a>{% else %}—{% endif %}</dd></div>
       <div class="pl-linha"><dt>Click ID</dt><dd style="font-family:ui-monospace,Menlo,monospace; font-size:11px;">{{ midia.gclid[:28] ~ '…' if midia.gclid|length > 28 else (midia.gclid or '—') }}</dd></div>
       {% if indicou %}
       <div class="pl-linha"><dt>Indicado por</dt><dd>{% if indicou.id %}<a href="/lead/{{ indicou.id }}">{{ indicou.nome }}</a>{% else %}{{ indicou.nome }}{% endif %}</dd></div>
