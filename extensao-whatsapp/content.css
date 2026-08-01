@@ -551,6 +551,9 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-doc-junta.marcado { color: #7ae3c3; border-color: rgba(122,227,195,.55);
                          background: rgba(0,168,132,.14); }
 .job-doc-junta.marcado:hover { color: #7ae3c3; border-color: rgba(122,227,195,.8); }
+/* Erro do lote na barra: vermelho discreto, mas visível. */
+.job-bc-btn.job-bc-erro { color: #f0a3a3; }
+.job-bc-btn[disabled] { opacity: .65; cursor: default; }
 /* O caminho de volta: onde o dado foi parar e como refazer. */
 .job-doc-acoes { display: flex; gap: 14px; align-items: center; margin-top: 5px; flex-wrap: wrap; }
 .job-doc-link { display: inline-flex; align-items: center; gap: 4px;

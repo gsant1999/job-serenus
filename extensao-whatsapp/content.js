@@ -1505,12 +1505,20 @@
   // O botao de ler o lote mora na barra da conversa, junto de "Transcrever
   // tudo": e o unico lugar que existe uma vez so, em vez de repetido em cada
   // bolha, e some sozinho quando nao ha nada marcado.
+  // O lote PRESTA CONTAS na barra.
+  //
+  // Antes o botao sumia no fim — inclusive quando dava errado — e as bolhas
+  // selecionadas costumam estar fora da tela, entao o consultor clicava e nao
+  // acontecia nada visivel. Agora a barra mostra que esta lendo, e depois diz
+  // quantos deram certo. Sem isso o lote e um botao que engole o clique.
+  let _docBarraAviso = null;
+
   function _docBarraAtualizar() {
     const barra = document.querySelector('.job-barra-conv');
     if (!barra) return;
     let b = barra.querySelector('[data-ac="lerdocs"]');
     const n = DOC.sel.size;
-    if (!n) { if (b) b.remove(); return; }
+    if (!n && !_docBarraAviso) { if (b) b.remove(); return; }
     if (!b) {
       b = document.createElement('button');
       b.type = 'button';
@@ -1523,8 +1531,26 @@
       });
       barra.insertBefore(b, barra.firstChild);
     }
+    if (_docBarraAviso) {
+      b.disabled = !!_docBarraAviso.ocupado;
+      b.classList.toggle('job-bc-erro', !!_docBarraAviso.erro);
+      b.title = _docBarraAviso.title || '';
+      b.innerHTML = _ICO_DOC + '<span>' + esc(_docBarraAviso.texto) + '</span>';
+      return;
+    }
+    b.disabled = false;
+    b.classList.remove('job-bc-erro');
     b.title = 'Le os ' + n + ' arquivos marcados numa chamada so';
     b.innerHTML = _ICO_DOC + '<span>Ler ' + n + ' documento' + (n > 1 ? 's' : '') + '</span>';
+  }
+
+  function _docBarraDizer(texto, opc) {
+    _docBarraAviso = Object.assign({ texto: texto }, opc || {});
+    _docBarraAtualizar();
+  }
+
+  function _docBarraLimpar(msAte) {
+    setTimeout(() => { _docBarraAviso = null; _docBarraAtualizar(); }, msAte || 5000);
   }
 
   function docAtualizarSlot(id) {
@@ -1544,8 +1570,16 @@
       docAtualizarSlot(id);
       _docCronoLigar(id);
     });
-    const falhar = (lista, msg) => lista.forEach((id) =>
-      DOC.estado.set(id, { status: 'erro', erro: msg }));
+    const lote = alvos.length > 1;
+    let deuCerto = false;
+    const falhar = (lista, msg) => {
+      lista.forEach((id) => DOC.estado.set(id, { status: 'erro', erro: msg }));
+      // A MENSAGEM DE ERRO TEM QUE CHEGAR NA TELA. As bolhas marcadas quase
+      // sempre estao fora da vista quando o lote roda — sem isto, o clique
+      // simplesmente sumia e nao dava nem pra saber o que falhou.
+      if (lote) { _docBarraDizer(String(msg).slice(0, 44), { erro: true, title: msg }); _docBarraLimpar(9000); }
+    };
+    if (lote) _docBarraDizer('baixando ' + alvos.length + ' arquivos…', { ocupado: true });
     try {
       const baixado = await _pedirPonte('baixar_midia_ids', { ids: alvos }, 120000);
       const arqs = (baixado && baixado.arquivos) || [];
@@ -1560,6 +1594,7 @@
           erro: (baixado.erros && baixado.erros[id]) || 'não consegui baixar' }));
       baixados.forEach((id) => _docEtapa(id, arqs.length > 1
         ? 'lendo ' + arqs.length + ' documentos' : 'lendo o documento'));
+      if (lote) _docBarraDizer('lendo ' + arqs.length + ' documentos…', { ocupado: true });
       let tel = '';
       try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (x) { tel = telefoneDoContato(); }
       const r = await _safeSendMessage({ type: 'documentos_ler', telefone: tel,
@@ -1577,11 +1612,22 @@
         DOC.estado.set(a.msg_id, { status: 'ok',
           resultado: Object.assign({}, r, { arquivos: meu.length ? meu : [{}] }) });
       });
+      deuCerto = true;
+      if (lote) {
+        const perdidos = alvos.length - arqs.length;
+        _docBarraDizer(arqs.length + ' lido' + (arqs.length > 1 ? 's' : '') +
+          (perdidos > 0 ? ' · ' + perdidos + ' falhou' : ''),
+          { title: 'Abra a ficha do lead pra ver tudo junto: ' +
+                   (r.lead_id ? _SITE_BASE_URL_EXT + '/lead/' + r.lead_id : 'sem lead vinculado') });
+        _docBarraLimpar(7000);
+      }
     } catch (x) {
       falhar(alvos, String((x && x.message) || x).slice(0, 90));
     } finally {
       alvos.forEach((id) => {
-        DOC.sel.delete(id);
+        // Falhou: A MARCACAO FICA. Limpar a selecao no erro obrigava a remarcar
+        // os quatro arquivos um por um, rolando a conversa toda de novo.
+        if (deuCerto) DOC.sel.delete(id);
         _docCronoDesligar(id);
         docAtualizarSlot(id);
       });
@@ -1709,6 +1755,11 @@
       const id = row.getAttribute('data-id') || '';
       if (!id) continue;
       // Documento/imagem: botao proprio, um por arquivo.
+      // Linha reaproveitada pra OUTRA mensagem: o bloco velho fica pendurado com
+      // o id antigo e passa a mostrar o resultado do vizinho. Some daqui.
+      row.querySelectorAll('.job-doc-slot, .job-tr-slot').forEach((s) => {
+        if (s.dataset.msg && s.dataset.msg !== id) s.remove();
+      });
       if (_docLinhaEhArquivo(row)) {
         // Bloco que caiu no fallback NAO e definitivo. Enquanto o WhatsApp
         // pinta, a linha mede 0px, nenhum ancestral entra na faixa e o bloco
@@ -2064,9 +2115,25 @@
       // observer ja entrega de graca e que eu estava jogando fora.
       const obs = new MutationObserver((regs) => {
         const novos = [];
+        // O NO ADICIONADO NAO BASTA. Quando o WhatsApp re-renderiza o interior de
+        // uma bolha que ja existe, ele apaga o meu bloco junto (ele nao conhece
+        // esse filho) e adiciona os filhos dele de volta. A linha em si nunca e
+        // re-adicionada, e os nos adicionados nao tem data-id nem contem um —
+        // entao a varredura nao visitava aquela linha e o botao sumia de vez.
+        // Era exatamente o que acontecia ao rolar a conversa: o botao ia embora
+        // e nao voltava, mesmo com o arquivo ainda marcado la em cima.
+        // Subir ate a linha resolve os dois casos: linha nova e linha redesenhada.
         for (const r of regs) {
+          const alvo = r.target && r.target.nodeType === 1
+            ? (r.target.closest ? r.target.closest('[data-id]') : null) : null;
+          if (alvo) novos.push(alvo);
           if (!r.addedNodes) continue;
-          for (const n of r.addedNodes) if (n.nodeType === 1) novos.push(n);
+          for (const n of r.addedNodes) {
+            if (n.nodeType !== 1) continue;
+            novos.push(n);
+            const pai = n.closest ? n.closest('[data-id]') : null;
+            if (pai) novos.push(pai);
+          }
         }
         if (novos.length) trAgendarInjecao(novos);
       });
