@@ -543,9 +543,14 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 /* Juntar: BOTÃO, do mesmo tamanho do de ler. Era uma caixinha de 12px dentro de
    uma bolha que o WhatsApp trata inteira como "abrir o arquivo" — errar por dois
    pixels abria o PDF. Alvo grande, e estado marcado que se vê de longe. */
-.job-doc-junta { margin-left: 14px; }
-.job-doc-junta.marcado { color: #7ae3c3; }
-.job-doc-junta.marcado:hover { color: #7ae3c3; }
+/* Alvo grande de propósito: 35x16 era o tamanho da caixinha velha, e errar por
+   dois pixels dentro da bolha do arquivo abre o PDF. */
+.job-doc-junta { margin-left: 12px; padding: 4px 9px; border-radius: 6px;
+                 border: 1px solid rgba(255,255,255,.13); min-height: 24px; }
+.job-doc-junta:hover { border-color: rgba(83,189,235,.5); }
+.job-doc-junta.marcado { color: #7ae3c3; border-color: rgba(122,227,195,.55);
+                         background: rgba(0,168,132,.14); }
+.job-doc-junta.marcado:hover { color: #7ae3c3; border-color: rgba(122,227,195,.8); }
 /* O caminho de volta: onde o dado foi parar e como refazer. */
 .job-doc-acoes { display: flex; gap: 14px; align-items: center; margin-top: 5px; flex-wrap: wrap; }
 .job-doc-link { display: inline-flex; align-items: center; gap: 4px;

@@ -1348,8 +1348,12 @@
     // stopPropagation em cada botao novo que eu criar aqui.
     if (!slot._jobTravado) {
       slot._jobTravado = true;
+      // BORBULHA, nao captura. Na captura o listener do pai roda ANTES do alvo,
+      // entao parar ali matava os proprios botoes — medi, e nem "Ler documento"
+      // respondia. Na borbulha o botao age primeiro e o evento morre aqui,
+      // antes de chegar na bolha do WhatsApp.
       ['click', 'mousedown', 'mouseup', 'pointerdown', 'dblclick'].forEach((ev) =>
-        slot.addEventListener(ev, (x) => x.stopPropagation(), true));
+        slot.addEventListener(ev, (x) => x.stopPropagation()));
     }
     const e = DOC.estado.get(id) || {};
     if (e.status === 'lendo') {
