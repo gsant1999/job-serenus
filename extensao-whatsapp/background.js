@@ -358,6 +358,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true;
   }
+  if (msg && msg.type === 'documento_tipo') {
+    chamarJob('/api/whatsapp/documentos/tipo', 'POST',
+      { doc_id: msg.docId, tipo: msg.tipo }, 15000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'documentos_ler') {
     chamarJob('/api/whatsapp/documentos/ler', 'POST',
       { telefone: msg.telefone, lead_id: msg.leadId || null, arquivos: msg.arquivos || [] },

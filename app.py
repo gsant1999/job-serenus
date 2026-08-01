@@ -2594,6 +2594,14 @@ def init_db():
         # MESMO AUDIO, VARIOS ENVIOS: o filehash e igual em todos. Sem ele, o
         # audio-modelo mandado pra 50 leads virava 50 transcricoes pagas.
         ("whatsapp_transcricoes_cache", "filehash", "TEXT"),
+        # O ARQUIVO em si, nao so o que foi lido dele. Sem guardar, a leitura
+        # servia pra preencher campo e o documento continuava so no WhatsApp —
+        # e na hora de subir na operadora alguem ia catar de novo, um por um.
+        ("lead_documento", "arquivo", "TEXT"),
+        ("lead_documento", "mime", "TEXT"),
+        ("lead_documento", "tamanho", "INTEGER"),
+        ("lead_documento", "nome_final", "TEXT"),
+        ("lead_documento", "tipo_conferido", "INTEGER"),
         # De onde saiu o vínculo (cnpj / telefone / telefone_sufixo / manual):
         # sem isso não há como auditar um vínculo errado depois.
         ("propostas", "lead_vinculo", "TEXT"),
@@ -14491,6 +14499,20 @@ def documentos_para_o_lead(conn, lead_id, leitura, arquivos):
             continue
         h = _h.sha256(b64.encode('ascii', 'ignore')).hexdigest()
         cls = por_indice.get(i) or {}
+        # GUARDA O ARQUIVO, nao so o que foi lido dele. Sem isso a leitura
+        # preenchia campo e o documento continuava so no WhatsApp — e na hora de
+        # subir na operadora alguem ia catar tudo de novo, um por um.
+        chave_arq, tam, mime = None, 0, (arq.get('mime') or '')
+        ext = 'pdf' if 'pdf' in mime else ((mime.split('/')[-1] or 'jpg') if mime else 'jpg')
+        nome_final = _doc_nome_final(cls.get('tipo'), cls.get('pessoa'), ext)
+        try:
+            import base64 as _b64
+            dados = _b64.b64decode(b64)
+            tam = len(dados)
+            chave_arq = f"lead-{lead_id}-{h[:12]}.{ext}"
+            upload_arquivo_r2(dados, chave_arq)
+        except Exception as e:
+            app.logger.warning(f"[DOC] não guardei o arquivo {arq.get('nome')}: {e}")
         try:
             if DB_MODE == 'postgres':
                 conn.execute("""INSERT INTO lead_documento
@@ -14504,6 +14526,9 @@ def documentos_para_o_lead(conn, lead_id, leitura, arquivos):
                     VALUES (?,?,?,?,?,?,?,?,?)""",
                     (lead_id, h, arq.get('nome'), cls.get('tipo'), cls.get('pessoa'),
                      cls.get('certeza'), json.dumps(cls, ensure_ascii=False), 0, agora))
+            conn.execute("""UPDATE lead_documento SET arquivo=?, mime=?, tamanho=?, nome_final=?
+                            WHERE lead_id=? AND conteudo_hash=?""",
+                         (chave_arq, mime, tam, nome_final, lead_id, h))
             gravados += 1
         except Exception as e:
             app.logger.warning(f"[DOC] não gravei {arq.get('nome')}: {e}")
@@ -14563,6 +14588,32 @@ def documentos_para_o_lead(conn, lead_id, leitura, arquivos):
         conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
                         VALUES (?,?,?,?,?)""", (lead_id, 'Leitura de documentos', 'documento', desc[:500], agora))
     return {'gravados': gravados, 'campos': escritos}
+
+
+_DOC_ROTULO = {
+    'identidade': 'RG-CNH', 'cpf': 'CPF', 'comprovante_endereco': 'COMPROVANTE-ENDERECO',
+    'cartao_cnpj': 'CARTAO-CNPJ', 'contrato_social': 'CONTRATO-SOCIAL',
+    'certidao_casamento': 'CERTIDAO-CASAMENTO', 'certidao_nascimento': 'CERTIDAO-NASCIMENTO',
+    'carteira_trabalho': 'CTPS', 'holerite': 'HOLERITE', 'cartao_plano': 'CARTAO-PLANO',
+    'proposta_operadora': 'PROPOSTA-OPERADORA', 'outro': 'OUTRO',
+}
+
+
+def _doc_nome_final(tipo, pessoa, extensao, seq=None):
+    """Nome do arquivo do jeito que a operadora precisa receber.
+
+    'RG-CNH - MARIA S OLIVEIRA.jpg' em vez de 'IMG-20260801-WA0007.jpg'. Esse
+    nome e o que transforma uma pasta de downloads em algo que dá pra subir no
+    sistema da operadora sem abrir arquivo por arquivo pra saber o que é."""
+    rot = _DOC_ROTULO.get(tipo or 'outro', 'OUTRO')
+    quem = re.sub(r'[^A-Za-zÀ-ÿ0-9 ]+', '', (pessoa or '')).strip().upper()[:40]
+    base = rot + (' - ' + quem if quem else '')
+    if seq:
+        base += f' ({seq})'
+    ext = (extensao or '').lower().lstrip('.')
+    if ext not in ('jpg', 'jpeg', 'png', 'webp', 'pdf'):
+        ext = 'pdf' if 'pdf' in (extensao or '') else 'jpg'
+    return f"{base}.{ext}"
 
 
 def _doc_norm_nome(v):
@@ -16808,6 +16859,117 @@ def api_whatsapp_metrica():
     return _wa_cors(jsonify({"ok": True, "gravadas": n}))
 
 
+@app.route('/api/whatsapp/documentos/tipo', methods=['POST', 'OPTIONS'])
+def api_whatsapp_documento_tipo():
+    """O consultor CONFIRMA ou corrige o tipo do documento.
+
+    A IA propoe, a pessoa decide — mesma regra do resto do sistema. E aqui ela
+    vale dobrado: o tipo vira o NOME do arquivo, e o nome e o que faz a pasta
+    baixada servir pra subir na operadora sem abrir um por um."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False}), 401)
+    d = request.get_json(silent=True) or {}
+    tipo = (d.get('tipo') or '').strip()
+    if tipo not in _DOC_TIPOS:
+        return _wa_cors(jsonify({"ok": False, "erro": "tipo inválido"})), 400
+    conn = db()
+    doc = None
+    if d.get('doc_id'):
+        doc = conn.execute("SELECT * FROM lead_documento WHERE id=?", (d['doc_id'],)).fetchone()
+    elif d.get('hash'):
+        doc = conn.execute("SELECT * FROM lead_documento WHERE conteudo_hash=? ORDER BY id DESC LIMIT 1",
+                           (d['hash'],)).fetchone()
+    if not doc:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "documento não encontrado"})), 404
+    pessoa = (d.get('pessoa') or doc['pessoa'] or '').strip()
+    ext = (doc['arquivo'] or '').rsplit('.', 1)[-1] if doc['arquivo'] else 'jpg'
+    nome = _doc_nome_final(tipo, pessoa, ext)
+    conn.execute("""UPDATE lead_documento SET tipo=?, pessoa=?, nome_final=?, tipo_conferido=1
+                    WHERE id=?""", (tipo, pessoa or None, nome, doc['id']))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "nome_final": nome, "tipo": tipo}))
+
+
+@app.route('/lead/documento/tipo', methods=['POST'])
+@login_required
+def lead_documento_tipo():
+    """Corrige o tipo pelo painel. Mesma regra da extensao: a IA propoe, a pessoa
+    decide — e o nome do arquivo acompanha, porque e o nome que serve na
+    operadora."""
+    d = request.json or {}
+    tipo = (d.get('tipo') or '').strip()
+    if tipo not in _DOC_TIPOS:
+        return jsonify({"ok": False, "erro": "Tipo inválido"}), 400
+    conn = db()
+    doc = conn.execute("SELECT * FROM lead_documento WHERE id=?", (d.get('doc_id'),)).fetchone()
+    if not doc:
+        close_db(conn); return jsonify({"ok": False, "erro": "Documento não encontrado"}), 404
+    ext = (doc['arquivo'] or '').rsplit('.', 1)[-1] if doc['arquivo'] else 'jpg'
+    nome = _doc_nome_final(tipo, doc['pessoa'], ext)
+    conn.execute("UPDATE lead_documento SET tipo=?, nome_final=?, tipo_conferido=1 WHERE id=?",
+                 (tipo, nome, doc['id']))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "nome_final": nome})
+
+
+@app.route('/lead/<int:lid>/documentos.zip')
+@login_required
+def lead_documentos_zip(lid):
+    """Baixa TODOS os documentos do lead numa pasta, ja renomeados.
+
+    E o passo que fecha o ciclo: o consultor sobe no sistema da operadora sem
+    abrir arquivo por arquivo pra descobrir o que e cada um. Nome repetido ganha
+    numero em vez de sobrescrever — dois RGs de pessoas diferentes na mesma pasta
+    e comum, e perder um seria perder documento de cliente."""
+    import io as _io, zipfile as _zip
+    conn = db()
+    lead = conn.execute("SELECT id, nome FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); abort(404)
+    docs = conn.execute("""SELECT * FROM lead_documento WHERE lead_id=? AND arquivo IS NOT NULL
+                           ORDER BY tipo, id""", (lid,)).fetchall()
+    close_db(conn)
+    if not docs:
+        abort(404)
+    buf = _io.BytesIO()
+    usados = {}
+    with _zip.ZipFile(buf, 'w', _zip.ZIP_DEFLATED) as z:
+        for d in docs:
+            conteudo, _ctype = _localizar_anexo(os.path.basename(d['arquivo']))
+            if not conteudo:
+                continue
+            nome = d['nome_final'] or os.path.basename(d['arquivo'])
+            usados[nome] = usados.get(nome, 0) + 1
+            if usados[nome] > 1:
+                raiz, ext = nome.rsplit('.', 1) if '.' in nome else (nome, 'jpg')
+                nome = f"{raiz} ({usados[nome]}).{ext}"
+            z.writestr(nome, conteudo)
+    buf.seek(0)
+    limpo = re.sub(r'[^A-Za-z0-9 ]+', '', (lead['nome'] or f'lead-{lid}')).strip()[:50]
+    return send_file(buf, mimetype='application/zip', as_attachment=True,
+                     download_name=f"documentos - {limpo}.zip")
+
+
+@app.route('/lead/<int:lid>/documento/<int:did>')
+@login_required
+def lead_documento_baixar(lid, did):
+    """Um documento, com o nome padronizado."""
+    conn = db()
+    d = conn.execute("SELECT * FROM lead_documento WHERE id=? AND lead_id=?", (did, lid)).fetchone()
+    close_db(conn)
+    if not d or not d['arquivo']:
+        abort(404)
+    conteudo, ctype = _localizar_anexo(os.path.basename(d['arquivo']))
+    if not conteudo:
+        abort(404)
+    import io as _io
+    return send_file(_io.BytesIO(conteudo), mimetype=ctype or d['mime'] or 'application/octet-stream',
+                     as_attachment=True, download_name=d['nome_final'] or os.path.basename(d['arquivo']))
+
+
 @app.route('/api/whatsapp/documentos/ler', methods=['POST', 'OPTIONS'])
 def api_whatsapp_documentos_ler():
     """A extensao manda os documentos da conversa; o JOB le e preenche o lead.
@@ -16869,8 +17031,27 @@ def api_whatsapp_documentos_ler():
         except Exception: pass
         app.logger.warning(f"[DOC] gravação: {e}")
     close_db(conn)
+    # Devolve o id de cada documento guardado, pra extensao poder corrigir o tipo
+    # sem precisar procurar depois.
+    try:
+        conn2 = db()
+        import hashlib as _h2
+        for a_ in (leitura.get('arquivos') or []):
+            arq = novos[a_['indice'] - 1] if 0 < a_['indice'] <= len(novos) else None
+            if not arq:
+                continue
+            h2 = _h2.sha256((arq.get('base64') or '').encode('ascii', 'ignore')).hexdigest()
+            r2 = conn2.execute("SELECT id, nome_final FROM lead_documento "
+                               "WHERE conteudo_hash=? ORDER BY id DESC LIMIT 1", (h2,)).fetchone()
+            if r2:
+                a_['doc_id'] = r2['id']
+                a_['nome_final'] = r2['nome_final']
+        close_db(conn2)
+    except Exception as e:
+        app.logger.info(f"[DOC] ids: {e}")
     return _wa_cors(jsonify({
         "ok": True, "lead_id": lead_id, "lidos": len(novos), "ja_lidos": ja,
+        "tipos": _DOC_TIPOS, "rotulos": _DOC_ROTULO,
         "arquivos": leitura.get('arquivos') or [],
         "pessoas": leitura.get('pessoas') or [],
         "empresa": leitura.get('empresa') or {},
@@ -19504,6 +19685,17 @@ def painel_lead(lid):
         SELECT texto, autor_nome, criado_em FROM lead_notas
         WHERE lead_id=? ORDER BY id DESC LIMIT 30""", (lid,)).fetchall()]
 
+    documentos = []
+    try:
+        documentos = [dict(r) for r in conn.execute(
+            "SELECT id, tipo, pessoa, certeza, nome_final, nome_arquivo, tamanho, "
+            "COALESCE(tipo_conferido,0) conferido, criado_em "
+            "FROM lead_documento WHERE lead_id=? ORDER BY tipo, id", (lid,)).fetchall()]
+    except Exception as e:
+        app.logger.info(f"[PAINEL] documentos: {e}")
+        try: conn.rollback()
+        except Exception: pass
+
     saude = _saude_card(lead.get('avancou_em'), lead.get('sla_dias'), lead.get('criado_em'))
     close_db(conn)
 
@@ -19512,7 +19704,8 @@ def painel_lead(lid):
                            custo_ia_usd=round(custo_ia, 4), custo_ia_brl=round(custo_ia * _USD_BRL_TAXA, 2),
                            cotacoes=cotacoes, vendas=vendas, receita=receita,
                            com_bruta=com_bruta, com_liquida=com_liquida,
-                           timeline=timeline, notas=notas, saude=saude,
+                           timeline=timeline, notas=notas, saude=saude, documentos=documentos,
+                           doc_tipos=_DOC_TIPOS, doc_rotulos=_DOC_ROTULO,
                            taxa_usd_brl=_USD_BRL_TAXA)
 
 

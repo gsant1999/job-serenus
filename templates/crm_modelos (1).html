@@ -1,0 +1,605 @@
+{% extends "base.html" %}
+{% block title %}Modelos de E-mail/SMS/WhatsApp{% endblock %}
+
+{% block head %}
+<style>
+  /* Abas por canal — E-mail/SMS vazios não viram mais seção rolável, só existem ao clicar. */
+  .mo-tabs { display:flex; gap:22px; border-bottom:1px solid var(--borda); max-width:1100px; margin-bottom:22px; }
+  .mo-tab { background:none; border:none; padding:10px 2px; font-family:'Sora',sans-serif; font-size:13px; font-weight:600;
+            color:var(--cinza); cursor:pointer; position:relative; display:flex; align-items:center; gap:7px; }
+  .mo-tab-n { font-size:11px; font-weight:600; color:var(--cinza-2); font-variant-numeric:tabular-nums; }
+  .mo-tab.on { color:var(--texto); }
+  .mo-tab:hover:not(.on) { color:var(--texto); }
+  .mo-tab.on::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; border-radius:2px; background:var(--grad-frio); }
+
+  /* Toolbar do canal: busca + filtros com contagem embutida (substitui a barra de 6 estatísticas). */
+  .mo-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:20px; max-width:1100px; }
+  .wa-busca { flex:0 0 260px; min-width:200px; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; font-size:13px; color:var(--texto); }
+  .wa-busca:focus { outline:none; border-color:var(--azul); }
+  .wa-filtros { display:flex; gap:6px; flex-wrap:wrap; flex:1; }
+  .wa-fchip { background:var(--panel); color:var(--cinza); border:1px solid var(--borda); border-radius:20px; padding:6px 12px;
+              font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px; }
+  .wa-fchip span { font-size:10.5px; color:var(--cinza-2); font-variant-numeric:tabular-nums; }
+  .wa-fchip.on { background:var(--azul); color:#fff; border-color:var(--azul); }
+  .wa-fchip.on span { color:rgba(255,255,255,.75); }
+  .mo-toolbar-acoes { display:flex; gap:8px; margin-left:auto; }
+
+  /* Lista de linhas com detalhe sob demanda — escanear 432 itens é leitura
+     vertical (ícone + nome + meta), não parsear 6 elementos por card. */
+  .mo-lista { display:flex; flex-direction:column; max-width:1100px; margin-bottom:28px; }
+  /* Pasta = consultor (recolhível) */
+  .pasta-wa { border:1px solid var(--borda); border-radius:12px; overflow:hidden; margin-bottom:12px; background:var(--panel); }
+  .pasta-wa-nome { cursor:pointer; list-style:none; user-select:none; font-size:13.5px; font-weight:700; color:var(--texto); padding:12px 16px; background:var(--panel-2); display:flex; align-items:center; gap:8px; }
+  .pasta-wa-nome::-webkit-details-marker { display:none; }
+  .pasta-wa-nome::before { content:'▸'; color:var(--cinza-2); font-size:11px; transition:transform .15s; }
+  .pasta-wa[open] > .pasta-wa-nome::before { transform:rotate(90deg); }
+  .pasta-wa-nome span { color:var(--cinza-2); font-weight:600; font-size:12px; margin-left:auto; }
+  /* Sub-pasta = categoria manual (operadora/material) dentro do consultor */
+  .subpasta-wa { border:1px solid var(--borda); border-radius:9px; overflow:hidden; margin:8px 12px; background:var(--panel-2); }
+  .subpasta-wa-nome { cursor:pointer; list-style:none; user-select:none; font-size:12px; font-weight:700; color:var(--texto); padding:9px 13px; display:flex; align-items:center; gap:7px; }
+  .subpasta-wa-nome::-webkit-details-marker { display:none; }
+  .subpasta-wa-nome::before { content:'▸'; color:var(--cinza-2); font-size:10px; transition:transform .15s; }
+  .subpasta-wa[open] > .subpasta-wa-nome::before { transform:rotate(90deg); }
+  .subpasta-wa-nome span { color:var(--cinza-2); font-weight:600; font-size:11px; margin-left:auto; }
+  /* Tipo = áudio/texto/PDF/imagem/vídeo (dentro da sub-pasta) */
+  .wa-tipo-header { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza); padding:12px 16px 6px; }
+  .wa-tipo-header span { color:var(--cinza-2); }
+  .wa-item { border-bottom:1px solid var(--borda); background:var(--panel); }
+  .wa-item:last-child { border-bottom:none; }
+  .wa-row { display:flex; align-items:center; gap:12px; padding:13px 16px; cursor:pointer; }
+  .wa-row:hover { background:var(--panel-2); }
+  .wa-tico { width:26px; height:26px; border-radius:7px; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .wa-tico svg { width:14px; height:14px; }
+  .wa-tico.t-texto { background:rgba(59,130,246,.14); color:var(--azul); }
+  .wa-tico.t-audio { background:rgba(139,92,246,.16); color:var(--roxo); }
+  .wa-tico.t-imagem { background:var(--verde-soft); color:var(--verde); }
+  .wa-tico.t-video { background:rgba(245,158,11,.14); color:#f59e0b; }
+  .wa-tico.t-documento { background:rgba(250,204,21,.16); color:var(--amarelo); }
+  .wa-row-corpo { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .wa-row-nome { font-size:13.5px; font-weight:700; color:var(--texto); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .wa-row-meta { font-size:11.5px; color:var(--cinza-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mo-chip.off { font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:20px; background:rgba(244,63,94,.15); color:var(--erro); flex-shrink:0; }
+  .mo-variante { font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:20px; background:var(--panel-2); color:var(--cinza); flex-shrink:0; }
+  .wa-fav { background:none; border:none; color:var(--cinza-2); font-size:16px; cursor:pointer; line-height:1; padding:2px; flex-shrink:0; opacity:0; transition:opacity .12s; }
+  .wa-row:hover .wa-fav, .wa-fav.ativo { opacity:1; }
+  .wa-fav.ativo { color:#f5c518; }
+  .wa-row-seta { color:var(--cinza-2); font-size:14px; flex-shrink:0; transition:transform .15s; }
+  .wa-item.aberto .wa-row-seta { transform:rotate(90deg); }
+  .wa-row-detalhe { padding:0 16px 16px 54px; }
+  .mo-preview { font-size:12px; color:var(--cinza-2); background:var(--panel-2); border-radius:8px; padding:10px 12px; white-space:pre-wrap; }
+  .mo-acoes { display:flex; gap:8px; margin-top:10px; align-items:center; }
+
+  /* Estado vazio de canal: card de ação (padrão já aprovado nos Fluxos), não texto cinza solto. */
+  .mo-empty-card { max-width:1100px; background:var(--azul); border:1px solid var(--azul); border-radius:14px; padding:36px 24px;
+                   display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:#fff;
+                   cursor:pointer; transition:transform .1s; }
+  .mo-empty-card:hover { transform:translateY(-2px); }
+  .mo-empty-card svg { width:32px; height:32px; }
+  .mo-empty-label { font-size:14.5px; font-weight:700; }
+  .mo-empty-sub { font-size:12px; opacity:.85; }
+
+  .modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; align-items:center; justify-content:center; overflow-y:auto; padding:30px 0; }
+  .modal-bg.aberto { display:flex; }
+  .modal-card { background:var(--panel); border:1px solid var(--borda); border-radius:14px; padding:24px; width:560px; max-width:92vw; margin:auto; }
+  .modal-card h3 { margin:0 0 14px; font-size:15px; color:var(--texto); }
+  .modal-card input, .modal-card textarea, .modal-card select { width:100%; box-sizing:border-box; background:var(--panel-2); border:1px solid var(--borda);
+                      border-radius:8px; padding:10px 12px; font-size:13px; color:var(--texto); margin-bottom:10px; font-family:inherit; }
+  .modal-card label.campo-label { display:block; font-size:11px; font-weight:700; color:var(--cinza); text-transform:uppercase; letter-spacing:.4px; margin:10px 0 5px; }
+  .modal-acoes { display:flex; justify-content:flex-end; gap:8px; margin-top:6px; }
+  .btn-azul { background:var(--azul); color:#fff; border:none; padding:10px 20px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  .mo-nota { font-size:11.5px; color:var(--cinza-2); line-height:1.5; margin-bottom:10px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Modelos de E-mail/SMS/WhatsApp</h1>
+    <div class="sub">Suba um modelo pronto (HTML de e-mail, texto de SMS ou mensagem de WhatsApp) e ele já aparece na hora de montar um passo de Fluxo — sem precisar mandar o conteúdo pelo chat</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="location.href='/crm/fluxos'">Voltar aos Fluxos</button>
+  </div>
+</div>
+
+<div class="page">
+<div class="mo-tabs">
+  <button class="mo-tab on" data-canal="whatsapp" onclick="mudarAba(this)">WhatsApp <span class="mo-tab-n">{{ modelos_whatsapp|length }}</span></button>
+  <button class="mo-tab" data-canal="email" onclick="mudarAba(this)">E-mail <span class="mo-tab-n">{{ modelos_email|length }}</span></button>
+  <button class="mo-tab" data-canal="sms" onclick="mudarAba(this)">SMS <span class="mo-tab-n">{{ modelos_sms|length }}</span></button>
+</div>
+
+<!-- ═══ Canal WhatsApp (aba padrão — é 99% do uso) ═══ -->
+<div class="canal-painel" data-canal="whatsapp">
+  {% if modelos_whatsapp %}
+  <div class="mo-toolbar">
+    <input type="text" id="wa-busca" class="wa-busca" placeholder="Buscar por nome ou texto…" oninput="filtrarWpp()">
+    <div class="wa-filtros">
+      <button class="wa-fchip on" data-f="todos" onclick="setFiltroWpp(this)">Todos <span>{{ modelos_whatsapp|length }}</span></button>
+      <button class="wa-fchip" data-f="favoritos" onclick="setFiltroWpp(this)">Favoritos <span>{{ modelos_whatsapp|selectattr('favorito')|list|length }}</span></button>
+      <button class="wa-fchip" data-f="texto" onclick="setFiltroWpp(this)">Texto <span>{{ stats_wpp.texto }}</span></button>
+      <button class="wa-fchip" data-f="audio" onclick="setFiltroWpp(this)">Áudio <span>{{ stats_wpp.audio }}</span></button>
+      <button class="wa-fchip" data-f="imagem" onclick="setFiltroWpp(this)">Imagem <span>{{ stats_wpp.imagem }}</span></button>
+      <button class="wa-fchip" data-f="documento" onclick="setFiltroWpp(this)">PDF <span>{{ stats_wpp.documento or 0 }}</span></button>
+    </div>
+    <div class="mo-toolbar-acoes">
+      {% if eh_serenus %}<button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup</button>
+      <button class="btn-outline btn-sm" onclick="document.getElementById('bc-arquivo').click()">Importar fluxos do BotConversa</button>{% endif %}
+      <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">+ Novo modelo</button>
+    </div>
+  </div>
+  {% endif %}
+  <input type="file" id="zv-arquivo" accept=".json" style="display:none" onchange="importarZapVoice(this)">
+  <div id="zv-status" style="display:none; max-width:1100px; margin:0 0 14px; font-size:13px; color:var(--cinza); background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;"></div>
+  <input type="file" id="bc-arquivo" accept=".zip" style="display:none" onchange="importarBotConversa(this)">
+  <div id="bc-status" style="display:none; max-width:1100px; margin:0 0 14px; font-size:13px; color:var(--cinza); background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;"></div>
+
+  {% if modelos_whatsapp %}
+  <div id="wa-lista" class="mo-lista">
+    {% for g in wpp_grupos %}
+    <details class="pasta-wa" open>
+      <summary class="pasta-wa-nome">{{ g.dono }} <span>({{ g.total }})</span></summary>
+      {% for sp in g.subpastas %}
+      {% set mostra_sub = g.subpastas|length > 1 or sp.nome != 'Geral' %}
+      {% if mostra_sub %}<details class="subpasta-wa" open><summary class="subpasta-wa-nome">{{ sp.nome }} <span>({{ sp.total }})</span></summary>{% endif %}
+      {% for ts in sp.tipos %}
+      <div class="wa-tipo-header">{{ ts.tipo }} <span>({{ ts.itens|length }})</span></div>
+      {% for m in ts.itens %}
+    {% set t = m.midia_tipo if m.midia_tipo in ('audio','imagem','video','documento') else 'texto' %}
+    <div class="wa-item"
+         data-nome="{{ (m.nome or '')|lower }}"
+         data-texto="{{ (m.corpo_texto or '')|lower }}"
+         data-tipo="{{ m.midia_tipo or 'texto' }}"
+         data-fav="{{ 1 if m.favorito else 0 }}">
+      <div class="wa-row" onclick="toggleLinha(this)">
+        <span class="wa-tico t-{{ t }}">
+          {%- if t == 'audio' -%}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+          {%- elif t == 'imagem' -%}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          {%- elif t == 'video' -%}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          {%- elif t == 'documento' -%}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          {%- else -%}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          {%- endif -%}
+        </span>
+        <div class="wa-row-corpo">
+          <span class="wa-row-nome">{{ m.nome }}</span>
+          <span class="wa-row-meta">{{ m.categoria or '' }}{{ ' · usado ' ~ m.vezes_usado ~ '×' if m.vezes_usado else '' }}</span>
+        </div>
+        {% if not m.ativo %}<span class="mo-chip off">Desativado</span>{% endif %}
+        <button class="wa-fav {{ 'ativo' if m.favorito else '' }}" onclick="event.stopPropagation(); toggleFavorito({{ m.id }}, this)" title="Favoritar">★</button>
+        <span class="wa-row-seta">›</span>
+      </div>
+      <div class="wa-row-detalhe" hidden>
+        {% if m.corpo_texto %}<div class="mo-preview">{{ m.corpo_texto }}</div>{% endif %}
+        {% if m.midia_tipo == 'audio' and m.midia_arquivo %}
+        <audio controls preload="none" src="/crm/modelos/midia/{{ m.midia_arquivo }}" style="width:100%; margin:8px 0 0; height:34px;"></audio>
+        {% elif m.midia_tipo == 'imagem' and m.midia_arquivo %}
+        <img src="/crm/modelos/midia/{{ m.midia_arquivo }}" alt="" loading="lazy" style="max-width:100%; max-height:160px; border-radius:8px; margin:8px 0 0;">
+        {% elif m.midia_tipo in ('documento','video') and m.midia_arquivo %}
+        <a href="/crm/modelos/midia/{{ m.midia_arquivo }}" target="_blank" rel="noopener" class="btn-ghost" style="font-size:11.5px; display:inline-block; margin-top:8px;">Abrir {{ 'PDF' if m.midia_tipo == 'documento' else 'vídeo' }}</a>
+        {% endif %}
+        <div class="mo-acoes">
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="editarModelo({{ m.id }})">Editar</button>
+          <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" data-nome="{{ m.nome|e }}" onclick="excluirModelo({{ m.id }}, this)">Excluir</button>
+        </div>
+        <div class="mo-editar" id="ed-{{ m.id }}" hidden style="margin-top:8px;">
+          <input id="edn-{{ m.id }}" class="job-inp" value="{{ m.nome|e }}" placeholder="Nome do modelo" style="width:100%; box-sizing:border-box; margin-bottom:6px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto);">
+          <textarea id="edt-{{ m.id }}" placeholder="Texto da mensagem" style="width:100%; box-sizing:border-box; min-height:72px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto); resize:vertical;">{{ m.corpo_texto or '' }}</textarea>
+          <div style="margin-top:8px; font-size:11.5px; color:var(--cinza-2);">{{ 'Trocar arquivo (imagem/áudio/vídeo/PDF) — deixe vazio pra manter o atual' if m.midia_tipo else 'Anexar arquivo (opcional)' }}</div>
+          <input type="file" id="edf-{{ m.id }}" accept="image/*,audio/*,video/*,application/pdf" style="margin-top:4px; font-size:12px; color:var(--cinza);">
+          <div style="display:flex; gap:8px; margin-top:6px;">
+            <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="salvarEdicaoModelo({{ m.id }})">Salvar</button>
+            <button class="btn-ghost" style="font-size:11.5px;" onclick="editarModelo({{ m.id }})">Cancelar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+      {% endfor %}
+      {% endfor %}
+      {% if mostra_sub %}</details>{% endif %}
+      {% endfor %}
+    </details>
+    {% endfor %}
+    <div id="wa-vazio-filtro" style="display:none; text-align:center; padding:24px; color:var(--cinza-2); font-size:13px;">Nenhum modelo bate com esse filtro.</div>
+  </div>
+  {% else %}
+  <div class="mo-empty-card" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    <div class="mo-empty-label">Nenhum modelo de WhatsApp ainda</div>
+    <div class="mo-empty-sub">Crie o primeiro modelo de WhatsApp.</div>
+  </div>
+  {% if eh_serenus %}<div style="max-width:1100px; text-align:center; margin-top:12px;">
+    <button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup do ZapVoice</button>
+    <button class="btn-outline btn-sm" onclick="document.getElementById('bc-arquivo').click()">Importar fluxos do BotConversa</button>
+  </div>{% endif %}
+  {% endif %}
+</div>
+
+<!-- ═══ Canal E-mail ═══ -->
+<div class="canal-painel" data-canal="email" style="display:none;">
+  {% if modelos_email %}
+  <div class="mo-toolbar">
+    <div class="mo-toolbar-acoes">
+      <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-email').classList.add('aberto')">+ Subir modelo de e-mail</button>
+    </div>
+  </div>
+  <div class="mo-lista">
+    {% for m in modelos_email %}
+    <div class="wa-item">
+      <div class="wa-row" onclick="toggleLinha(this)">
+        <span class="wa-tico t-texto">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        </span>
+        <div class="wa-row-corpo">
+          <span class="wa-row-nome">{{ m.nome }}</span>
+          <span class="wa-row-meta">{{ m.assunto or '(sem assunto)' }}</span>
+        </div>
+        {% if m.variante %}<span class="mo-variante">Variante {{ m.variante }}</span>{% endif %}
+        {% if not m.ativo %}<span class="mo-chip off">Desativado</span>{% endif %}
+        <span class="wa-row-seta">›</span>
+      </div>
+      <div class="wa-row-detalhe" hidden>
+        <div class="mo-acoes" style="margin-top:0;">
+          <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" data-nome="{{ m.nome|e }}" onclick="excluirModelo({{ m.id }}, this)">Excluir</button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="mo-empty-card" onclick="document.getElementById('modal-email').classList.add('aberto')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    <div class="mo-empty-label">Nenhum modelo de e-mail ainda</div>
+    <div class="mo-empty-sub">Suba um HTML pronto pra usar em Fluxos</div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ═══ Canal SMS ═══ -->
+<div class="canal-painel" data-canal="sms" style="display:none;">
+  {% if modelos_sms %}
+  <div class="mo-toolbar">
+    <div class="mo-toolbar-acoes">
+      <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-sms').classList.add('aberto')">+ Subir modelo de SMS</button>
+    </div>
+  </div>
+  <div class="mo-lista">
+    {% for m in modelos_sms %}
+    <div class="wa-item">
+      <div class="wa-row" onclick="toggleLinha(this)">
+        <span class="wa-tico t-texto">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </span>
+        <div class="wa-row-corpo">
+          <span class="wa-row-nome">{{ m.nome }}</span>
+          <span class="wa-row-meta">{{ (m.corpo_texto or '')|truncate(70) }}</span>
+        </div>
+        {% if m.variante %}<span class="mo-variante">Variante {{ m.variante }}</span>{% endif %}
+        {% if not m.ativo %}<span class="mo-chip off">Desativado</span>{% endif %}
+        <span class="wa-row-seta">›</span>
+      </div>
+      <div class="wa-row-detalhe" hidden>
+        {% if m.corpo_texto %}<div class="mo-preview">{{ m.corpo_texto }}</div>{% endif %}
+        <div class="mo-acoes">
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="editarModelo({{ m.id }})">Editar</button>
+          <button class="btn-ghost" style="font-size:11.5px;" onclick="toggleModelo({{ m.id }})">{{ 'Desativar' if m.ativo else 'Ativar' }}</button>
+          <button class="btn-ghost" style="font-size:11.5px; color:var(--erro);" data-nome="{{ m.nome|e }}" onclick="excluirModelo({{ m.id }}, this)">Excluir</button>
+        </div>
+        <div class="mo-editar" id="ed-{{ m.id }}" hidden style="margin-top:8px;">
+          <input id="edn-{{ m.id }}" class="job-inp" value="{{ m.nome|e }}" placeholder="Nome do modelo" style="width:100%; box-sizing:border-box; margin-bottom:6px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto);">
+          <textarea id="edt-{{ m.id }}" placeholder="Texto da mensagem" style="width:100%; box-sizing:border-box; min-height:72px; padding:8px 10px; font-size:12.5px; background:var(--fundo-2,#15151e); border:1px solid var(--borda); border-radius:8px; color:var(--texto); resize:vertical;">{{ m.corpo_texto or '' }}</textarea>
+          <div style="margin-top:8px; font-size:11.5px; color:var(--cinza-2);">{{ 'Trocar arquivo (imagem/áudio/vídeo/PDF) — deixe vazio pra manter o atual' if m.midia_tipo else 'Anexar arquivo (opcional)' }}</div>
+          <input type="file" id="edf-{{ m.id }}" accept="image/*,audio/*,video/*,application/pdf" style="margin-top:4px; font-size:12px; color:var(--cinza);">
+          <div style="display:flex; gap:8px; margin-top:6px;">
+            <button class="btn-ghost" style="font-size:11.5px; color:var(--teal);" onclick="salvarEdicaoModelo({{ m.id }})">Salvar</button>
+            <button class="btn-ghost" style="font-size:11.5px;" onclick="editarModelo({{ m.id }})">Cancelar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="mo-empty-card" onclick="document.getElementById('modal-sms').classList.add('aberto')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    <div class="mo-empty-label">Nenhum modelo de SMS ainda</div>
+    <div class="mo-empty-sub">Texto curto pra usar em Fluxos</div>
+  </div>
+  {% endif %}
+</div>
+</div>
+
+<!-- Modal: novo modelo de e-mail -->
+<div class="modal-bg" id="modal-email">
+  <div class="modal-card">
+    <h3>Novo modelo de e-mail</h3>
+    <div class="mo-nota">Cole o HTML completo do e-mail (ou envie o arquivo .html). Use <code>{{nome}}</code> no texto — é substituído automaticamente pelo primeiro nome do lead na hora do envio. Se o HTML usa os tokens <code>[URL_LOGO_SERENUS]</code> e/ou <code>[URL_IMAGEM_HERO]</code>, suba as imagens correspondentes abaixo que eles são substituídos sozinhos.</div>
+    <label class="campo-label">Nome do modelo</label>
+    <input type="text" id="em-nome" placeholder="Ex: MEI 6 Meses - E-mail 1 - Variante A">
+    <label class="campo-label">Assunto</label>
+    <input type="text" id="em-assunto" placeholder="Ex: {{nome}}, você chegou a ver minha mensagem?">
+    <label class="campo-label">Variante (opcional — pra teste A/B)</label>
+    <input type="text" id="em-variante" placeholder="Ex: A ou B">
+    <label class="campo-label">HTML (cole aqui, ou envie um arquivo .html abaixo)</label>
+    <textarea id="em-html" rows="8" placeholder="&lt;!DOCTYPE html&gt;..."></textarea>
+    <label class="campo-label">Ou envie o arquivo .html</label>
+    <input type="file" id="em-arquivo" accept=".html,.htm">
+    <label class="campo-label">Logo (opcional — substitui [URL_LOGO_SERENUS])</label>
+    <input type="file" id="em-logo" accept=".png,.jpg,.jpeg,.webp">
+    <label class="campo-label">Imagem de banner/hero (opcional — substitui [URL_IMAGEM_HERO])</label>
+    <input type="file" id="em-hero" accept=".png,.jpg,.jpeg,.webp">
+    <div class="modal-acoes">
+      <button class="btn-outline btn-sm" onclick="document.getElementById('modal-email').classList.remove('aberto')">Cancelar</button>
+      <button class="btn-azul" onclick="salvarModeloEmail()">Salvar modelo</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: novo modelo de SMS -->
+<div class="modal-bg" id="modal-sms">
+  <div class="modal-card">
+    <h3>Novo modelo de SMS</h3>
+    <div class="mo-nota">Texto livre — use <code>{{nome}}</code> para o nome do lead. Atenção: modelos fora dos aprovados pela operadora podem ser filtrados como spam e não chegar, mesmo a API confirmando envio (já aconteceu em produção). Prefira modelos já aprovados quando possível.</div>
+    <label class="campo-label">Nome do modelo</label>
+    <input type="text" id="sm-nome" placeholder="Ex: MEI 6 Meses - SMS reforço">
+    <label class="campo-label">Variante (opcional)</label>
+    <input type="text" id="sm-variante" placeholder="Ex: A ou B">
+    <label class="campo-label">Texto do SMS (máx. ~160 caracteres por segmento)</label>
+    <textarea id="sm-texto" rows="5" placeholder="{{nome}}, tudo bem? ..."></textarea>
+    <div class="modal-acoes">
+      <button class="btn-outline btn-sm" onclick="document.getElementById('modal-sms').classList.remove('aberto')">Cancelar</button>
+      <button class="btn-azul" onclick="salvarModeloSms()">Salvar modelo</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: novo modelo de WhatsApp -->
+<div class="modal-bg" id="modal-whatsapp">
+  <div class="modal-card">
+    <h3>Novo modelo de WhatsApp</h3>
+    <div class="mo-nota">Vira item da biblioteca da extensão e passo de funil. Mídia é opcional — só áudio OU imagem, nunca as duas. Áudio é enviado como nota de voz; imagem vai com o texto como legenda.</div>
+    <label class="campo-label">Nome do modelo</label>
+    <input type="text" id="wa-nome" placeholder="Ex: Boas-vindas - primeiro contato">
+    <label class="campo-label">Pasta (opcional — organiza dentro do consultor, ex: Amil, Carência, Rede de Atendimento)</label>
+    <input type="text" id="wa-categoria" list="wa-cats" placeholder="Ex: Amil, Coparticipação, Rede…">
+    <datalist id="wa-cats">
+      {% for c in stats_wpp.categorias if stats_wpp %}<option value="{{ c }}">{% endfor %}
+    </datalist>
+    <label class="campo-label">Variante (opcional)</label>
+    <input type="text" id="wa-variante" placeholder="Ex: A ou B">
+    <label class="campo-label">Texto da mensagem</label>
+    <textarea id="wa-texto" rows="5" placeholder="Oi {{nome}}, tudo bem?"></textarea>
+    <label class="campo-label">Mídia (opcional — imagem: jpg/png/webp, áudio: mp3/ogg/m4a/opus/wav, máx. 8MB)</label>
+    <input type="file" id="wa-midia" accept=".jpg,.jpeg,.png,.webp,.gif,.mp3,.ogg,.oga,.m4a,.opus,.wav,.mp4,.mov,.m4v,.3gp,.pdf">
+    <div class="modal-acoes">
+      <button class="btn-outline btn-sm" onclick="document.getElementById('modal-whatsapp').classList.remove('aberto')">Cancelar</button>
+      <button class="btn-azul" onclick="salvarModeloWhatsapp()">Salvar modelo</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function escapar(t){ const d=document.createElement('div'); d.textContent=t==null?'':String(t); return d.innerHTML; }
+// Pastas agora são automáticas (consultor → tipo, agrupado no servidor) — a
+// árvore manual, o filtro por pasta e o mover-pasta foram aposentados.
+
+function mudarAba(btn){
+  document.querySelectorAll('.mo-tab').forEach(function(b){ b.classList.remove('on'); });
+  btn.classList.add('on');
+  document.querySelectorAll('.canal-painel').forEach(function(p){
+    p.style.display = (p.dataset.canal === btn.dataset.canal) ? '' : 'none';
+  });
+}
+
+// Um item expandido por vez — abre o clicado, fecha qualquer outro.
+function toggleLinha(row){
+  var item = row.closest('.wa-item');
+  var det = item.querySelector('.wa-row-detalhe');
+  if (!det) return;
+  var vaiAbrir = det.hasAttribute('hidden');
+  document.querySelectorAll('.wa-item.aberto').forEach(function(o){
+    o.classList.remove('aberto');
+    var d = o.querySelector('.wa-row-detalhe');
+    if (d) d.setAttribute('hidden','');
+  });
+  if (vaiAbrir) {
+    item.classList.add('aberto'); det.removeAttribute('hidden');
+  }
+}
+
+function salvarModeloEmail(){
+  var nome = document.getElementById('em-nome').value.trim();
+  var html = document.getElementById('em-html').value.trim();
+  var arquivo = document.getElementById('em-arquivo').files[0];
+  if (!nome) { alert('Digite o nome do modelo'); return; }
+  if (!html && !arquivo) { alert('Cole o HTML ou envie um arquivo .html'); return; }
+  var fd = new FormData();
+  fd.append('nome', nome);
+  fd.append('assunto', document.getElementById('em-assunto').value.trim());
+  fd.append('variante', document.getElementById('em-variante').value.trim());
+  if (html) fd.append('html', html);
+  if (arquivo) fd.append('arquivo_html', arquivo);
+  var logo = document.getElementById('em-logo').files[0];
+  var hero = document.getElementById('em-hero').files[0];
+  if (logo) fd.append('arquivo_logo', logo);
+  if (hero) fd.append('arquivo_hero', hero);
+  fetch('/crm/modelos/email/novo', {method:'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) {
+        if (d.placeholders_pendentes && d.placeholders_pendentes.length) {
+          alert('Modelo salvo, mas faltou subir: ' + d.placeholders_pendentes.join(', ') + '. O e-mail vai sair com esse token literal até você editar.');
+        }
+        location.reload();
+      } else alert(d.erro || 'Erro ao salvar modelo');
+    });
+}
+
+function salvarModeloSms(){
+  var nome = document.getElementById('sm-nome').value.trim();
+  var texto = document.getElementById('sm-texto').value.trim();
+  if (!nome || !texto) { alert('Preencha nome e texto'); return; }
+  fetch('/crm/modelos/sms/novo', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({nome: nome, texto: texto, variante: document.getElementById('sm-variante').value.trim()})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) location.reload();
+      else alert(d.erro || 'Erro ao salvar modelo');
+    });
+}
+
+function importarZapVoice(inp){
+  var f = inp.files[0];
+  if (!f) return;
+  var st = document.getElementById('zv-status');
+  st.style.display = 'block';
+  var mb = (f.size/1024/1024).toFixed(0);
+  st.innerHTML = 'Importando <b>' + f.name + '</b> (' + mb + ' MB)… arquivos grandes podem levar alguns minutos. Não feche a página.';
+  var fd = new FormData();
+  fd.append('arquivo', f);
+  fetch('/crm/modelos/importar-zapvoice', {method:'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { st.innerHTML = 'Erro: ' + (d.erro || 'falha na importação'); return; }
+      var c = d.contagem;
+      st.innerHTML = 'Importado: <b>' + c.texto + '</b> textos, <b>' + c.audio + '</b> áudios, <b>' +
+        c.imagem + '</b> imagens, <b>' + c.documento + '</b> documentos' +
+        (c.pulados ? ' · ' + c.pulados + ' já existiam' : '') +
+        (c.erros ? ' · ' + c.erros + ' com erro' : '') + '. Recarregando…';
+      setTimeout(function(){ location.reload(); }, 1500);
+    })
+    .catch(function(e){ st.innerHTML = 'Erro: ' + e.message + ' (se o arquivo for muito grande, pode ter estourado o limite de upload).'; });
+  inp.value = '';
+}
+
+function importarBotConversa(inp){
+  var f = inp.files[0];
+  if (!f) return;
+  var st = document.getElementById('bc-status');
+  st.style.display = 'block';
+  var mb = (f.size/1024/1024).toFixed(0);
+  st.innerHTML = 'Importando <b>' + f.name + '</b> (' + mb + ' MB)… pode levar alguns minutos. Não feche a página.';
+  var fd = new FormData();
+  fd.append('arquivo', f);
+  fetch('/crm/modelos/importar-botconversa', {method:'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { st.innerHTML = 'Erro: ' + (d.erro || 'falha na importação'); return; }
+      var c = d.contagem;
+      st.innerHTML = 'Importado: <b>' + c.funis + '</b> funis, <b>' + c.modelos + '</b> modelos' +
+        (c.pulados ? ' · ' + c.pulados + ' funis já existiam' : '') +
+        (c.erros ? ' · ' + c.erros + ' com erro' : '') + '. Veja em Funis. Recarregando…';
+      setTimeout(function(){ location.reload(); }, 1500);
+    })
+    .catch(function(e){ st.innerHTML = 'Erro: ' + e.message + ' (se o arquivo for muito grande, pode ter estourado o limite de upload).'; });
+  inp.value = '';
+}
+
+function salvarModeloWhatsapp(){
+  var nome = document.getElementById('wa-nome').value.trim();
+  var texto = document.getElementById('wa-texto').value.trim();
+  if (!nome || !texto) { alert('Preencha nome e texto'); return; }
+  var fd = new FormData();
+  fd.append('nome', nome);
+  fd.append('texto', texto);
+  fd.append('categoria', document.getElementById('wa-categoria').value.trim());
+  fd.append('variante', document.getElementById('wa-variante').value.trim());
+  var midia = document.getElementById('wa-midia').files[0];
+  if (midia) fd.append('arquivo_midia', midia);
+  fetch('/crm/modelos/whatsapp/novo', {method:'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) location.reload();
+      else alert(d.erro || 'Erro ao salvar modelo');
+    });
+}
+
+var _waFiltro = 'todos';
+function setFiltroWpp(btn){
+  document.querySelectorAll('.wa-fchip').forEach(function(b){ b.classList.remove('on'); });
+  btn.classList.add('on');
+  _waFiltro = btn.dataset.f;
+  filtrarWpp();
+}
+function filtrarWpp(){
+  var q = (document.getElementById('wa-busca').value || '').trim().toLowerCase();
+  var visiveis = 0;
+  document.querySelectorAll('#wa-lista .wa-item').forEach(function(card){
+    var bateBusca = !q || card.dataset.nome.indexOf(q) >= 0 || card.dataset.texto.indexOf(q) >= 0;
+    var bateFiltro = _waFiltro === 'todos'
+      || (_waFiltro === 'favoritos' && card.dataset.fav === '1')
+      || (card.dataset.tipo === _waFiltro);
+    var mostra = bateBusca && bateFiltro;
+    card.style.display = mostra ? '' : 'none';
+    if (mostra) visiveis++;
+  });
+  // Esconde cabeçalho de TIPO sem card visível e pasta de consultor vazia.
+  document.querySelectorAll('#wa-lista .wa-tipo-header').forEach(function(h){
+    var vis = false, n = h.nextElementSibling;
+    while (n && n.classList && n.classList.contains('wa-item')) { if (n.style.display !== 'none') vis = true; n = n.nextElementSibling; }
+    h.style.display = vis ? '' : 'none';
+  });
+  document.querySelectorAll('#wa-lista .subpasta-wa, #wa-lista .pasta-wa').forEach(function(p){
+    var algum = false;
+    p.querySelectorAll('.wa-item').forEach(function(c){ if (c.style.display !== 'none') algum = true; });
+    p.style.display = algum ? '' : 'none';
+  });
+  var vazio = document.getElementById('wa-vazio-filtro');
+  if (vazio) vazio.style.display = visiveis ? 'none' : '';
+}
+function toggleFavorito(id, btn){
+  fetch('/crm/modelos/' + id + '/favorito', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) { alert(d.erro || 'Erro'); return; }
+      var card = btn.closest('.wa-item');
+      btn.classList.toggle('ativo', d.favorito);
+      card.dataset.fav = d.favorito ? '1' : '0';
+      filtrarWpp();
+    });
+}
+
+function toggleModelo(id){
+  fetch('/crm/modelos/' + id + '/toggle', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Erro'); })
+    .catch(function(){ alert('Erro de conexão ao alterar o modelo.'); });
+}
+
+function excluirModelo(id, el){
+  var nome = (el && el.getAttribute && el.getAttribute('data-nome')) || 'este modelo';
+  if (!confirm('Excluir o modelo "' + nome + '"? Passos de fluxo que usam ele vão falhar no próximo envio.')) return;
+  fetch('/crm/modelos/' + id + '/excluir', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Não foi possível excluir.'); })
+    .catch(function(){ alert('Erro ao excluir (conexão ou servidor).'); });
+}
+
+function editarModelo(id){
+  var el = document.getElementById('ed-' + id);
+  if (el) el.hidden = !el.hidden;
+}
+
+function salvarEdicaoModelo(id){
+  var nome = (document.getElementById('edn-' + id).value || '').trim();
+  var texto = document.getElementById('edt-' + id).value;
+  if (!nome) { alert('Dê um nome ao modelo.'); return; }
+  var fd = new FormData();
+  fd.append('nome', nome);
+  fd.append('corpo_texto', texto);
+  var fin = document.getElementById('edf-' + id);
+  if (fin && fin.files && fin.files[0]) fd.append('arquivo_midia', fin.files[0]);
+  fetch('/crm/modelos/' + id + '/editar', {method:'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if (d.ok) location.reload(); else alert(d.erro || 'Erro ao salvar'); })
+    .catch(function(){ alert('Erro de conexão ao salvar.'); });
+}
+
+</script>
+{% endblock %}

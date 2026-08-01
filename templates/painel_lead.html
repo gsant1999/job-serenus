@@ -71,6 +71,8 @@
   .pl-nota { border-bottom:1px solid var(--borda); padding:9px 0; font-size:12.5px; }
   .pl-nota:last-child { border-bottom:none; }
   .pl-nota-quem { font-size:10.5px; color:var(--cinza); margin-top:4px; }
+  .pl-doc-tipo { background:var(--panel-3); border:1px solid var(--borda); color:var(--texto);
+                 border-radius:6px; padding:3px 7px; font-size:11.5px; }
 </style>
 {% endblock %}
 
@@ -291,6 +293,42 @@
     {% endif %}
   </div>
 
+  <div class="pl-box largo">
+    <h2>Documentos do cliente<i class="ajuda-i" title="Os arquivos que o cliente mandou no WhatsApp, já classificados e renomeados. Baixar a pasta traz tudo com nome padrão (RG-CNH - NOME.jpg), pronto para subir no sistema da operadora sem abrir arquivo por arquivo.">i</i></h2>
+    {% if not documentos %}
+      <div class="pl-vazio">Nenhum documento lido ainda. Na extensão, clique em "Ler documento" na bolha do arquivo.</div>
+    {% else %}
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
+      <span class="pl-vazio" style="font-style:normal;">{{ documentos|length }} arquivo(s)</span>
+      <a class="btn-outline" href="/lead/{{ lead.id }}/documentos.zip">Baixar a pasta completa</a>
+    </div>
+    <table class="pl-tab">
+      <thead><tr><th>Tipo</th><th>De quem</th><th>Nome do arquivo</th><th>Conferido</th><th></th></tr></thead>
+      <tbody>
+        {% for d in documentos %}
+        <tr>
+          <td>
+            {# A IA propoe, a pessoa decide — e aqui vale dobrado: o tipo vira o
+               NOME do arquivo, e o nome e o que faz a pasta servir na operadora. #}
+            <select class="pl-doc-tipo" data-doc="{{ d.id }}" onchange="mudarTipoDoc(this)">
+              {% for t in doc_tipos %}
+              <option value="{{ t }}" {% if d.tipo == t %}selected{% endif %}>{{ doc_rotulos.get(t, t) }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>{{ d.pessoa or '—' }}</td>
+          <td style="font-family:ui-monospace,Menlo,monospace; font-size:11px;">{{ d.nome_final or d.nome_arquivo }}</td>
+          <td>{% if d.conferido %}<span class="pill pill-verde">sim</span>
+              {% elif d.certeza == 'baixa' %}<span class="pill pill-erro">conferir</span>
+              {% else %}<span class="pill pill-cinza">pela IA</span>{% endif %}</td>
+          <td><a href="/lead/{{ lead.id }}/documento/{{ d.id }}">baixar</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
   <div class="pl-box">
     <h2>Notas do consultor</h2>
     {% if not notas %}
@@ -324,4 +362,13 @@
 
 </div>
 </div>
+<script>
+async function mudarTipoDoc(sel){
+  const r = await fetch('/lead/documento/tipo', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({doc_id: sel.dataset.doc, tipo: sel.value})});
+  const d = await r.json();
+  if(!d.ok){ alert(d.erro || 'Não deu pra salvar'); return; }
+  location.reload();
+}
+</script>
 {% endblock %}

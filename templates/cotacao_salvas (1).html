@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Cotações Salvas{% endblock %}
+
+{% block head %}
+<style>
+  .topo { display:flex; gap:14px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin:14px 0 18px; }
+  .busca { display:flex; gap:8px; align-items:center; flex:1; min-width:240px; max-width:420px; }
+  .busca input { flex:1; background:var(--panel-2); border:1px solid var(--borda); border-radius:9px; padding:10px 12px; color:var(--texto); font-size:13px; outline:none; }
+  .busca input:focus { border-color:var(--azul); }
+  .busca button { background:var(--azul); color:#fff; border:none; border-radius:9px; padding:10px 16px; font-size:13px; font-weight:600; cursor:pointer; }
+  .stat { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:12px 18px; text-align:center; }
+  .stat .n { font-family:'Sora',sans-serif; font-size:22px; font-weight:800; color:var(--azul); line-height:1; }
+  .stat .l { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); margin-top:4px; }
+
+  table.cot { width:100%; border-collapse:collapse; font-size:13px; background:var(--panel); border:1px solid var(--borda); border-radius:12px; overflow:hidden; }
+  table.cot th { text-align:left; color:var(--cinza-2); font-size:10px; text-transform:uppercase; letter-spacing:.5px; font-weight:600; padding:12px 14px; border-bottom:1px solid var(--borda); background:var(--panel-2); }
+  table.cot td { padding:13px 14px; border-bottom:1px solid var(--borda); color:var(--texto); vertical-align:middle; }
+  table.cot tr:last-child td { border-bottom:none; }
+  table.cot tr:hover td { background:rgba(255,255,255,.02); }
+  .cli { font-weight:600; color:var(--texto); }
+  .cli-sub { font-size:11px; color:var(--cinza-2); margin-top:2px; }
+  td.total { text-align:right; font-weight:700; color:var(--verde); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .acoes { display:flex; gap:6px; justify-content:flex-end; }
+  .b { border:1px solid var(--borda); background:transparent; border-radius:7px; padding:6px 11px; font-size:11px; cursor:pointer; text-decoration:none; color:var(--texto); }
+  .b-abrir { background:var(--azul); color:#fff; border:none; }
+  .b-wpp { color:#25d366; border-color:rgba(37,211,102,.4); }
+  .b-del { color:var(--erro); border-color:rgba(244,63,94,.3); }
+  .vazio { color:var(--cinza-2); font-size:13px; padding:40px; text-align:center; background:var(--panel); border:1px dashed var(--borda); border-radius:12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1 style="margin:0;">Cotações</h1>
+    <div class="sub">Histórico de cotações por cliente</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="location.href='/cotacao'">+ Nova cotação</button>
+  </div>
+</div>
+
+<div class="topo">
+  <form class="busca" method="GET" action="/cotacao/salvas">
+    <input type="text" name="q" value="{{ q }}" placeholder="Buscar por cliente, título ou telefone...">
+    <button type="submit">Buscar</button>
+  </form>
+  <div class="stat"><div class="n">{{ total }}</div><div class="l">Cotações</div></div>
+</div>
+
+{% if cotacoes %}
+<table class="cot">
+  <thead>
+    <tr><th>Cliente</th><th>Título</th>{% if eh_admin %}<th>Corretor</th>{% endif %}<th>Data</th><th style="text-align:right;">Total</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for c in cotacoes %}
+    <tr>
+      <td>
+        <div class="cli">{{ c.cliente_nome or 'Sem nome' }}</div>
+        {% if c.cliente_telefone %}<div class="cli-sub">{{ c.cliente_telefone }}</div>{% endif %}
+        {% if c.aberturas %}<div class="cli-sub" style="color:var(--verde);">Aberta {{ c.aberturas }}x · {{ c.ultima_abertura|datahora_br }}</div>{% endif %}
+      </td>
+      <td>{{ c.titulo }}</td>
+      {% if eh_admin %}<td>{{ c.corretor_nome }}</td>{% endif %}
+      <td>{{ c.criado_em|data_br }}</td>
+      <td class="total">{{ c.total|moeda }}</td>
+      <td>
+        <div class="acoes">
+          <a class="b b-abrir" href="/cotacao/documento/{{ c.id }}">Abrir</a>
+          <a class="b" href="/cotacao/{{ c.id }}/reabrir" style="border-color:rgba(250,204,21,.5);color:#b45309;" title="Cria uma nova cotação (novo link) com base nesta">Nova versão</a>
+          {% if c.token %}<button class="b" onclick="copiarLink('{{ c.token }}')">Copiar link</button>{% endif %}
+          {% if c.token and c.cliente_telefone %}<button class="b b-wpp" onclick="enviarWpp('{{ c.token }}', '{{ c.cliente_telefone }}', '{{ (c.cliente_nome or '')|replace("'", "") }}')">WhatsApp</button>{% endif %}
+          <button class="b" onclick="enviarEmail({{ c.id }}, '{{ (c.cliente_email or '')|replace("'", "") }}')">E-mail</button>
+          <button class="b b-del" onclick="excluir({{ c.id }}, '{{ (c.cliente_nome or c.titulo)|replace("'", "") }}')">Excluir</button>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="vazio">{% if q %}Nenhuma cotação encontrada para "{{ q }}".{% else %}Nenhuma cotação salva ainda. Faça uma cotação e clique em "Gerar cotação do cliente".{% endif %}</div>
+{% endif %}
+
+<script>
+function linkDe(token){ return window.location.origin + '/c/' + token; }
+function copiarLink(token){
+  var url = linkDe(token);
+  if (navigator.clipboard) navigator.clipboard.writeText(url).then(function(){ alert('Link copiado:\n'+url); }, function(){ window.prompt('Copie o link:', url); });
+  else window.prompt('Copie o link:', url);
+}
+function enviarWpp(token, tel, nome){
+  var fone = (tel||'').replace(/\D/g,'');
+  if (fone.length >= 10 && fone.indexOf('55') !== 0) fone = '55' + fone;
+  var msg = 'Olá' + (nome ? ' ' + nome : '') + '! Segue sua cotação de plano de saúde: ' + linkDe(token);
+  window.open('https://wa.me/' + fone + '?text=' + encodeURIComponent(msg), '_blank');
+}
+function enviarEmail(id, email){
+  var dest = email || window.prompt('E-mail do cliente:');
+  if(!dest) return;
+  fetch('/cotacao/'+id+'/enviar-email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:dest})})
+    .then(r=>r.json()).then(d=>{ alert(d.ok?('E-mail enviado para '+d.email):('Erro: '+(d.erro||''))); })
+    .catch(()=>alert('Erro de conexão.'));
+}
+function excluir(id, nome){
+  if (!confirm('Excluir a cotação de "' + nome + '"?')) return;
+  fetch('/cotacao/salvas/' + id + '/excluir', { method:'POST' })
+    .then(r => r.json()).then(d => { if (d.ok) location.reload(); else alert('Erro ao excluir.'); })
+    .catch(() => alert('Erro de conexão.'));
+}
+</script>
+{% endblock %}

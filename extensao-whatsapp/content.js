@@ -1312,14 +1312,35 @@
       const r = e.resultado;
       const a = (r.arquivos || [])[0] || {};
       const campos = (r.campos_preenchidos || []);
+      const rot = r.rotulos || {};
+      const tipos = r.tipos || [];
+      // O TIPO E CONFIRMAVEL AQUI. A IA propoe, o consultor decide — e aqui vale
+      // dobrado: o tipo vira o NOME do arquivo, e o nome e o que faz a pasta
+      // baixada servir pra subir na operadora sem abrir um por um.
+      const sel = '<select class="job-doc-sel" data-doc="' + (a.doc_id || '') + '">' +
+        tipos.map((t) => '<option value="' + t + '"' + (t === a.tipo ? ' selected' : '') + '>' +
+          esc(rot[t] || t) + '</option>').join('') + '</select>';
       slot.innerHTML = '<div class="job-doc-lido">' +
-        '<span class="job-doc-tipo">' + esc((a.tipo || 'outro').replace(/_/g, ' ')) + '</span>' +
+        (a.doc_id ? sel : '<span class="job-doc-tipo">' + esc(a.tipo || 'outro') + '</span>') +
         (a.pessoa ? '<span class="job-doc-pessoa">' + esc(a.pessoa) + '</span>' : '') +
         (a.certeza === 'baixa' ? '<span class="job-doc-duvida">conferir</span>' : '') +
+        (a.nome_final ? '<div class="job-doc-nome">' + esc(a.nome_final) + '</div>' : '') +
         (campos.length ? '<div class="job-doc-campos">preencheu: ' + esc(campos.join(', ')) + '</div>'
                        : '<div class="job-doc-campos">nada novo pro lead</div>') +
         ((r.observacoes || []).length ? '<div class="job-doc-obs">' + esc(r.observacoes[0]) + '</div>' : '') +
       '</div>';
+      const sl = slot.querySelector('.job-doc-sel');
+      if (sl) sl.addEventListener('change', async (ev) => {
+        ev.stopPropagation();
+        const resp = await _safeSendMessage({ type: 'documento_tipo', docId: sl.dataset.doc,
+                                              tipo: sl.value }).catch(() => null);
+        const nm = slot.querySelector('.job-doc-nome');
+        if (resp && resp.ok) {
+          a.tipo = sl.value;
+          a.nome_final = resp.nome_final;
+          if (nm) nm.textContent = resp.nome_final;
+        } else if (nm) { nm.textContent = 'não deu pra salvar o tipo'; }
+      });
       return;
     }
     if (e.status === 'erro') {
