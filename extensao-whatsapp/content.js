@@ -1414,14 +1414,22 @@
   function _trBolhaDoc(row, ancora) {
     const larguraLinha = row.clientWidth || 1;
     let el = ancora;
-    if (!el) return null;
-    for (let i = 0; i < 8 && el && el !== row; i++) {
-      const w = el.clientWidth;
-      // Bolha do WhatsApp nao passa de ~65% da linha. O teto de 0.75 e folga.
-      if (w > 180 && w < larguraLinha * 0.75) return el;
-      el = el.parentElement;
+    if (!el) return { alvo: row, solto: true };
+    // Primeiro tenta apertado (o menor ancestral com cara de bolha), depois
+    // frouxo. Se nada bater, usa a LINHA — mas marcado como 'solto', e o CSS
+    // limita a largura e alinha ao lado certo.
+    for (const teto of [0.75, 0.94]) {
+      let e2 = el;
+      for (let i = 0; i < 8 && e2 && e2 !== row; i++) {
+        const w = e2.clientWidth;
+        if (w > 160 && w < larguraLinha * teto) return { alvo: e2, solto: false };
+        e2 = e2.parentElement;
+      }
     }
-    return null;
+    // NUNCA devolver nada. Botao que some e pior que botao no lugar mais ou
+    // menos certo: o consultor fica sem saber como ler o documento, que foi
+    // exatamente o que aconteceu na 2.71.0.
+    return { alvo: row, solto: true };
   }
 
   function _trBolha(row, ancora) {
@@ -1481,14 +1489,13 @@
         const ancoraD = row.querySelector(
           '[data-icon="document"], [data-icon*="document"], [data-icon="media-download"],' +
           'img[src^="blob:"], [data-testid="media-canvas"], [data-icon="image"]');
-        const bolhaD = _trBolhaDoc(row, ancoraD);
-        // Sem bolha identificada NAO injeta: melhor nao ter botao do que ter um
-        // botao boiando na tela sem relacao visivel com arquivo nenhum.
-        if (bolhaD) {
+        const r = _trBolhaDoc(row, ancoraD);
+        if (r && r.alvo) {
           const sd = document.createElement('div');
-          sd.className = 'job-doc-slot';
+          sd.className = 'job-doc-slot' + (r.solto ? ' job-doc-solto ' +
+            (_trLado(ancoraD || r.alvo, row) === 'consultor' ? 'job-tr-dir' : 'job-tr-esq') : '');
           sd.dataset.msg = id;
-          bolhaD.appendChild(sd);
+          r.alvo.appendChild(sd);
           docRenderSlot(sd, id);
         }
       }

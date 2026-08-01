@@ -520,6 +520,16 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 /* Nada aqui dentro pode esticar: select herda a largura do pai e virava uma
    barra atravessando a conversa inteira. */
 .job-doc-slot select, .job-doc-slot button { width: auto; max-width: 100%; }
+/* Quando a bolha não foi identificada, o bloco vai na linha — e aí ele mesmo
+   se limita e se alinha, em vez de atravessar a conversa. Melhor um botão no
+   lugar mais ou menos certo do que nenhum botão. */
+.job-doc-slot.job-doc-solto {
+  max-width: 380px; border-top: none; margin: 4px 9%;
+  background: rgba(0,0,0,.22); border: 1px solid rgba(255,255,255,.1);
+  border-radius: 8px; padding: 7px 10px;
+}
+.job-doc-slot.job-doc-solto.job-tr-dir { margin-left: auto; }
+.job-doc-slot.job-doc-solto.job-tr-esq { margin-right: auto; }
 .job-doc-sel { background: rgba(0,0,0,.2); border: 1px solid rgba(255,255,255,.14);
                color: #e9edef; border-radius: 5px; padding: 1px 5px; font-size: 10px;
                font-family: inherit; margin-right: 6px; }
