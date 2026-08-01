@@ -9479,6 +9479,24 @@ def _ads_data_conversao(valor):
 # cruzar gasto (plataforma) com lead e venda (nosso banco). Fazer isso ao vivo
 # significaria uma chamada externa por consulta e um numero que muda sozinho.
 # Guardado por dia, o historico fica nosso e sobrevive a janela de retencao deles.
+def _midia_chave(nome):
+    """Chave de casamento tolerante pro NOME da campanha.
+
+    Nome de campanha e digitado por gente: vem com acento, MAIUSCULA, espaco
+    duplo, e as vezes com o pipe do padrao de nomenclatura. Comparar string crua
+    faz "MEI SP" e "mei  sp" virarem campanhas diferentes — e o gasto de uma
+    aparece como 'sem lead' enquanto os leads da outra aparecem como 'sem gasto'.
+    Duas metades da mesma verdade, separadas por um espaco."""
+    v = (nome or '').strip().lower()
+    try:
+        import unicodedata as _u
+        v = ''.join(c for c in _u.normalize('NFD', v) if _u.category(c) != 'Mn')
+    except Exception:
+        pass
+    v = re.sub(r'[^a-z0-9]+', ' ', v).strip()
+    return re.sub(r'\s+', ' ', v)
+
+
 def _midia_gravar(conn, canal, linhas):
     """Grava/atualiza as linhas de gasto. Reimportar o mesmo dia nao duplica —
     e o normal: o gasto do dia de hoje muda ate o dia fechar."""
@@ -18642,14 +18660,18 @@ def midia_painel():
     desde = (datetime.now(TZ_SP) - timedelta(days=dias)).strftime('%Y-%m-%d')
     conn = db()
 
+    # Casa por ID quando o anuncio manda utm_id; senao pelo nome normalizado.
+    # ID e o caminho certo — nome e o que da pra fazer sem depender de ninguem.
     gasto = {}
-    for r in conn.execute("""SELECT canal, campanha_nome, COALESCE(SUM(gasto),0) g,
+    for r in conn.execute("""SELECT canal, campanha_id, campanha_nome, COALESCE(SUM(gasto),0) g,
                                     COALESCE(SUM(impressoes),0) imp, COALESCE(SUM(cliques),0) cli
                              FROM midia_gasto WHERE data >= ?
-                             GROUP BY canal, campanha_nome""", (desde,)).fetchall():
+                             GROUP BY canal, campanha_id, campanha_nome""", (desde,)).fetchall():
         nome = (r['campanha_nome'] or '(sem nome)').strip()
-        d = gasto.setdefault(nome.lower(), {'campanha': nome, 'canal': r['canal'], 'gasto': 0.0,
-                                            'impressoes': 0, 'cliques': 0})
+        chave = str(r['campanha_id'] or '').strip() or _midia_chave(nome)
+        d = gasto.setdefault(chave, {'campanha': nome, 'canal': r['canal'], 'gasto': 0.0,
+                                     'impressoes': 0, 'cliques': 0,
+                                     'apelidos': {_midia_chave(nome)}})
         d['gasto'] += float(r['g'] or 0)
         d['impressoes'] += int(r['imp'] or 0)
         d['cliques'] += int(r['cli'] or 0)
@@ -18658,10 +18680,19 @@ def midia_painel():
     leads = {}
     for l in conn.execute("""SELECT id, dados_extras, criado_em FROM crm_leads
                              WHERE DATE(criado_em) >= ?""", (desde,)).fetchall():
+        cid = (_campo_de_midia(l['dados_extras'], 'campaign_id') or '').strip()
         camp = (_campo_de_midia(l['dados_extras'], 'campaign') or '').strip()
-        if not camp:
+        if not (cid or camp):
             continue
-        d = leads.setdefault(camp.lower(), {'campanha': camp, 'leads': 0, 'ids': []})
+        chave = cid or _midia_chave(camp)
+        # Lead marcado com ID mas gasto ainda so por nome (ou o contrario):
+        # reconcilia pelo apelido, senao a mesma campanha viraria duas linhas.
+        if chave not in gasto:
+            for k, g in gasto.items():
+                if _midia_chave(camp) in g.get('apelidos', set()):
+                    chave = k
+                    break
+        d = leads.setdefault(chave, {'campanha': camp or cid, 'leads': 0, 'ids': []})
         d['leads'] += 1
         d['ids'].append(l['id'])
 
@@ -18672,10 +18703,17 @@ def midia_painel():
                              WHERE COALESCE(p.status,'') <> 'Excluída'
                                AND COALESCE(p.estornada,0)=0
                                AND DATE(p.criado_em) >= ?""", (desde,)).fetchall():
+        cid = (_campo_de_midia(p['dados_extras'], 'campaign_id') or '').strip()
         camp = (_campo_de_midia(p['dados_extras'], 'campaign') or '').strip()
-        if not camp:
+        if not (cid or camp):
             continue
-        d = vendas.setdefault(camp.lower(), {'vendas': 0, 'receita': 0.0})
+        chave = cid or _midia_chave(camp)
+        if chave not in gasto:
+            for k, g in gasto.items():
+                if _midia_chave(camp) in g.get('apelidos', set()):
+                    chave = k
+                    break
+        d = vendas.setdefault(chave, {'vendas': 0, 'receita': 0.0})
         d['vendas'] += 1
         d['receita'] += float(p['com'] or 0)
     close_db(conn)
@@ -20089,6 +20127,10 @@ _MIDIA_CAMINHOS = {
     # nenhuma tela conseguia ler. Vale pra pago E pra organico: nao depende de
     # anuncio, depende da landing mandar a propria URL no formulario.
     'landing':  ('click.landing', 'landing_url', 'landing', 'utm.landing', 'page', 'url'),
+    # ID da campanha e do anuncio. Quando o gestor usa {{campaign.id}}/{{ad.id}},
+    # o casamento deixa de depender do NOME — que muda, ganha acento e espaco.
+    'campaign_id': ('utm.id', 'click.utm_id', 'utm_id', 'campaign_id', 'click.campaign_id'),
+    'ad_id':       ('utm.ad_id', 'click.ad_id', 'ad_id'),
 }
 
 
