@@ -1282,6 +1282,93 @@
   //   - se e audio: icone de ptt/audio ou botao de tocar na propria linha;
   //   - de quem e: o data-id do WhatsApp comeca com "true_" quando a mensagem e
   //     nossa e "false_" quando e do contato — nao depende de classe de CSS.
+  // ── DOCUMENTO: um botao POR ARQUIVO, na propria bolha ─────────────────────
+  //
+  // A primeira versao lia tudo que a conversa tinha. O Guilherme testou e o
+  // resultado foi exatamente o problema: leu um e-mail e a foto de uma fachada de
+  // predio. Pagou pra descobrir que nao era documento. Numa conversa de venda a
+  // maioria das imagens NAO e documento — e print de cotacao, apresentacao de
+  // rede, carteirinha.
+  //
+  // Quem sabe qual arquivo importa e ele, olhando. Entao o botao vai na bolha do
+  // arquivo, igual ao de transcrever audio: um clique, um documento, um custo.
+  const DOC = { estado: new Map() };   // msg_id -> {status, resultado, erro}
+
+  function _docLinhaEhArquivo(row) {
+    // Imagem ou PDF na bolha. Audio ja tem o proprio botao e fica de fora.
+    if (_trLinhaEhAudio(row)) return false;
+    return !!row.querySelector(
+      '[data-icon="document"], [data-icon*="document"], [data-icon="media-download"],' +
+      'img[src^="blob:"], [data-testid="media-canvas"], [data-icon="image"]');
+  }
+
+  function docRenderSlot(slot, id) {
+    const e = DOC.estado.get(id) || {};
+    if (e.status === 'lendo') {
+      slot.innerHTML = '<div class="job-tr-carregando">lendo o documento…</div>';
+      return;
+    }
+    if (e.status === 'ok' && e.resultado) {
+      const r = e.resultado;
+      const a = (r.arquivos || [])[0] || {};
+      const campos = (r.campos_preenchidos || []);
+      slot.innerHTML = '<div class="job-doc-lido">' +
+        '<span class="job-doc-tipo">' + esc((a.tipo || 'outro').replace(/_/g, ' ')) + '</span>' +
+        (a.pessoa ? '<span class="job-doc-pessoa">' + esc(a.pessoa) + '</span>' : '') +
+        (a.certeza === 'baixa' ? '<span class="job-doc-duvida">conferir</span>' : '') +
+        (campos.length ? '<div class="job-doc-campos">preencheu: ' + esc(campos.join(', ')) + '</div>'
+                       : '<div class="job-doc-campos">nada novo pro lead</div>') +
+        ((r.observacoes || []).length ? '<div class="job-doc-obs">' + esc(r.observacoes[0]) + '</div>' : '') +
+      '</div>';
+      return;
+    }
+    if (e.status === 'erro') {
+      slot.innerHTML = '<button class="job-tr-btn falhou" type="button" title="' + esc(e.erro || '') + '">' +
+        _ICO_DOC + 'Ler documento</button>' +
+        '<span class="job-tr-motivo">' + esc(e.erro || '') + '</span>';
+    } else {
+      slot.innerHTML = '<button class="job-tr-btn" type="button">' + _ICO_DOC + 'Ler documento</button>';
+    }
+    const b = slot.querySelector('button');
+    if (b) b.addEventListener('click', (ev) => { ev.stopPropagation(); docLer(id); });
+  }
+
+  function docAtualizarSlot(id) {
+    const sel = window.CSS && window.CSS.escape ? window.CSS.escape(id) : id;
+    document.querySelectorAll('.job-doc-slot[data-msg="' + sel + '"]').forEach((s) => docRenderSlot(s, id));
+  }
+
+  async function docLer(id) {
+    const e = DOC.estado.get(id) || {};
+    if (e.status === 'lendo') return;
+    DOC.estado.set(id, { status: 'lendo' });
+    docAtualizarSlot(id);
+    try {
+      const baixado = await _pedirPonte('baixar_midia_ids', { ids: [id] }, 90000);
+      const arqs = (baixado && baixado.arquivos) || [];
+      if (!arqs.length) {
+        DOC.estado.set(id, { status: 'erro',
+          erro: (baixado && baixado.erros && baixado.erros[id]) || 'não consegui baixar' });
+        return;
+      }
+      let tel = '';
+      try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (x) { tel = telefoneDoContato(); }
+      const r = await _safeSendMessage({ type: 'documentos_ler', telefone: tel,
+        leadId: (_ficha && _ficha.lead && _ficha.lead.id) || null,
+        arquivos: arqs.map((a) => ({ nome: a.nome, base64: a.base64, mime: a.mime, tipo: a.tipo }))
+      }).catch(() => null);
+      if (!r || !r.ok) {
+        DOC.estado.set(id, { status: 'erro', erro: (r && r.erro) || 'o JOB não respondeu' });
+        return;
+      }
+      DOC.estado.set(id, { status: 'ok', resultado: r });
+    } catch (x) {
+      DOC.estado.set(id, { status: 'erro', erro: String((x && x.message) || x).slice(0, 90) });
+    } finally {
+      docAtualizarSlot(id);
+    }
+  }
+
   function _trLinhaEhAudio(row) {
     return !!row.querySelector(
       'audio, [data-icon="ptt"], [data-icon*="ptt"], [data-icon*="audio"],' +
@@ -1343,7 +1430,19 @@
     }
     for (const row of linhas) {
       const id = row.getAttribute('data-id') || '';
-      if (!id || row.querySelector('.job-tr-slot')) continue;
+      if (!id) continue;
+      // Documento/imagem: botao proprio, um por arquivo.
+      if (!row.querySelector('.job-doc-slot') && _docLinhaEhArquivo(row)) {
+        const bolhaD = _trBolha(row) || row.firstElementChild;
+        if (bolhaD) {
+          const sd = document.createElement('div');
+          sd.className = 'job-doc-slot job-tr-slot ' + (_trLado(bolhaD, row) === 'consultor' ? 'job-tr-dir' : 'job-tr-esq');
+          sd.dataset.msg = id;
+          bolhaD.appendChild(sd);
+          docRenderSlot(sd, id);
+        }
+      }
+      if (row.querySelector('.job-tr-slot[data-msg="' + (window.CSS && window.CSS.escape ? window.CSS.escape(id) : id) + '"]:not(.job-doc-slot)')) continue;
       if (!_trLinhaEhAudio(row)) continue;
       const bolha = _trBolha(row);
       if (!bolha) continue;             // sem bolha identificada, nao inventa lugar
@@ -1473,8 +1572,8 @@
         _ICO_TRANSCREVER + '<span>Transcrever tudo</span></button>' +
       '<button type="button" class="job-bc-btn" data-ac="copiar" title="Copiar a conversa inteira: texto e áudio transcrito, na ordem, com hora e quem falou">' +
         _ICO_COPIAR + '<span>Copiar conversa</span></button>' +
-      '<button type="button" class="job-bc-btn" data-ac="docs" title="Ler os documentos que o cliente mandou (RG, CNPJ, comprovante) e preencher a ficha do lead">' +
-        _ICO_DOC + '<span>Ler documentos</span></button>';
+      '<button type="button" class="job-bc-btn" data-ac="copiar" title="Copiar a conversa inteira: texto e áudio transcrito, na ordem, com hora e quem falou">' +
+        _ICO_COPIAR + '<span>Copiar conversa</span></button>';
     cab.appendChild(box);
 
     const btn = (ac) => box.querySelector('[data-ac="' + ac + '"]');
@@ -1496,35 +1595,6 @@
         rotulo(bt, 'Falhou');
       } finally {
         setTimeout(() => { rotulo(bt, r0); bt.disabled = false; }, 2600);
-      }
-    });
-
-    const bd = btn('docs');
-    bd.addEventListener('click', async (ev) => {
-      ev.stopPropagation();
-      if (bd.disabled) return;
-      bd.disabled = true;
-      const r0 = 'Ler documentos';
-      try {
-        const r = await lerDocumentosDaConversa((t) => rotulo(bd, t));
-        if (!r.ok) { rotulo(bd, r.motivo || 'Não deu'); return; }
-        if (!r.lidos) { rotulo(bd, 'Já lidos (' + (r.ja_lidos || 0) + ')'); return; }
-        const tipos = (r.arquivos || []).filter((a) => a.tipo && a.tipo !== 'outro').length;
-        const campos = (r.campos_preenchidos || []).length;
-        rotulo(bd, tipos + ' doc' + (campos ? ' · ' + campos + ' campo(s)' : ' · nada novo'));
-        // A DUVIDA DA IA CHEGA JUNTO. Documento ilegivel que preenche campo em
-        // silencio e pior que documento que nao preencheu nada.
-        const duvida = (r.arquivos || []).filter((a) => a.certeza === 'baixa').length;
-        if (duvida || (r.observacoes || []).length) {
-          setTimeout(() => alert('Leitura dos documentos\n\n' +
-            (r.arquivos || []).map((a) => '• ' + (a.nome || '') + ' → ' + a.tipo +
-              (a.pessoa ? ' (' + a.pessoa + ')' : '') + (a.certeza === 'baixa' ? '  [conferir]' : '')).join('\n') +
-            ((r.observacoes || []).length ? '\n\n' + r.observacoes.join('\n') : '')), 300);
-        }
-      } catch (e) {
-        rotulo(bd, 'Falhou');
-      } finally {
-        setTimeout(() => { rotulo(bd, r0); bd.disabled = false; }, 4000);
       }
     });
 
@@ -1553,43 +1623,6 @@
   const _ICO_DOC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
     'stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
     '<polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
-
-  // ── LER OS DOCUMENTOS DA CONVERSA ───────────────────────────────────────
-  // Sob demanda, com clique — igual a transcricao, e pelo mesmo motivo: ler
-  // documento custa dinheiro. Automatico numa conversa cheia de foto viraria
-  // conta surpresa, e a maioria das imagens de uma conversa de venda nao e
-  // documento (e print de cotacao, foto de carteirinha, meme).
-  //
-  // A leitura acontece no SERVIDOR: a chave da IA nunca chega no navegador do
-  // consultor, e o mesmo documento nao e pago duas vezes (hash por lead).
-  async function lerDocumentosDaConversa(aoAndar) {
-    const dizer = aoAndar || function () {};
-    dizer('Procurando documentos…');
-    let arquivos = [];
-    try {
-      const ri = await rasparImagensVisiveis(() => {});
-      for (const im of (ri.imagens || [])) {
-        if (im.base64) arquivos.push({ nome: im.nome || ('foto ' + (im.hora || '')), base64: im.base64,
-                                       mime: im.mime || 'image/jpeg', tipo: 'imagem' });
-      }
-    } catch (e) { /* segue sem imagem */ }
-    try {
-      const rd = await _pedirPonte('baixar_documentos', { limite: 8, forcarGrandes: false }, 90000);
-      for (const d of ((rd && rd.documentos) || [])) {
-        if (d.base64) arquivos.push({ nome: d.nome || 'documento.pdf', base64: d.base64,
-                                      mime: 'application/pdf', tipo: 'documento' });
-      }
-    } catch (e) { /* segue sem PDF */ }
-    if (!arquivos.length) return { ok: false, motivo: 'Nenhuma foto ou PDF nesta conversa' };
-    dizer('Lendo ' + arquivos.length + '…');
-    let tel = '';
-    try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
-    const r = await _safeSendMessage({ type: 'documentos_ler', telefone: tel,
-                                       leadId: (_ficha && _ficha.lead && _ficha.lead.id) || null,
-                                       arquivos: arquivos.slice(0, 12) }).catch(() => null);
-    if (!r || !r.ok) return { ok: false, motivo: (r && r.erro) || 'o JOB não respondeu' };
-    return r;
-  }
 
   // ── COPIAR A CONVERSA INTEIRA ───────────────────────────────────────────
   // Texto e audio transcrito no MESMO fio, na ordem do WhatsApp, com hora e quem

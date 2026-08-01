@@ -468,6 +468,29 @@
     throw new Error('áudio não está em cache — toque o áudio uma vez e clique de novo');
   }
 
+  // Baixa UMA midia especifica por id — imagem ou PDF. Mesmo motor do audio: o
+  // _acharModelo/_blobDoModelo nunca foi especifico de audio, so o nome era.
+  async function baixarMidiaPorId(ids) {
+    if (!window.WPP || !window.WPP.chat) return { erro: 'wpp_ausente' };
+    const out = [], erros = {};
+    for (const id of (ids || []).slice(0, 6)) {
+      const achado = _acharModelo(id);
+      if (!achado.msg) { erros[id] = 'mensagem não está carregada'; continue; }
+      try {
+        const blob = await _blobDoModelo(achado.msg);
+        const b64 = await blobParaBase64(blob);
+        const m = achado.msg;
+        const mime = (blob.type || m.mimetype || (m.type === 'document' ? 'application/pdf' : 'image/jpeg')).split(';')[0];
+        out.push({ msg_id: id, base64: b64, mime,
+                   nome: m.filename || m.caption || (m.type === 'document' ? 'documento.pdf' : 'foto.jpg'),
+                   tipo: (m.type === 'document' ? 'documento' : 'imagem') });
+      } catch (e) {
+        erros[id] = String((e && e.message) || e).slice(0, 90);
+      }
+    }
+    return { arquivos: out, erros };
+  }
+
   async function baixarAudiosPorId(ids) {
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.downloadMedia) {
       return { erro: 'wpp_ausente' };
@@ -1009,6 +1032,7 @@
       else if (d.tipo === 'listar_todas_conversas') resp = await listarTodasConversas(d.teto);
       else if (d.tipo === 'ler_conversa_de') resp = await lerConversaDe(d.chatId, d.desdeMsgId, d.limite);
       else if (d.tipo === 'baixar_audios_ids') resp = await baixarAudiosPorId(d.ids);
+      else if (d.tipo === 'baixar_midia_ids') resp = await baixarMidiaPorId(d.ids);
       else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite, d.forcarGrandes);
       else if (d.tipo === 'ler_mensagens') resp = await lerMensagens(d.limite);
       else if (d.tipo === 'ler_conversa_completa') resp = await lerConversaCompleta(d.limite);

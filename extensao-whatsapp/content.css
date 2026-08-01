@@ -499,6 +499,19 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 /* Nome padronizado do contato. Fica na ficha, abaixo do salvar: é ação de
    registro, não de edição do lead — por isso separado por uma linha. */
 /* Sincronia de @lid: ação sobre o CRM inteiro, separada da lista de leads. */
+/* Resultado da leitura do documento, dentro da bolha — mesma linguagem da
+   transcrição: o que o sistema descobriu fica junto do objeto descoberto. */
+.job-doc-lido { font-size: 11.5px; line-height: 1.5; }
+.job-doc-tipo { display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: .4px;
+                text-transform: uppercase; padding: 1px 6px; border-radius: 4px;
+                background: rgba(0,168,132,.2); color: #7ae3c3; margin-right: 6px; }
+.job-doc-pessoa { color: #e9edef; font-weight: 600; }
+.job-doc-duvida { display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: .4px;
+                  text-transform: uppercase; padding: 1px 6px; border-radius: 4px; margin-left: 6px;
+                  background: rgba(250,204,21,.18); color: #fbbf24; }
+.job-doc-campos { color: #8696a0; font-size: 10.5px; margin-top: 3px; }
+.job-doc-obs { color: #d98b8b; font-size: 10.5px; margin-top: 2px; }
+
 /* Vínculo da conversa: estado + ação no mesmo lugar. Amarelo quando falta,
    discreto quando já está feito — resolvido não precisa chamar atenção. */
 .job-vinc { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
