@@ -31,6 +31,8 @@
      que mostra @lid, nome e etapa, e nao so um id gravado num campo oculto. */
   .lead-pick { display:flex; align-items:center; gap:12px; justify-content:space-between;
                background:var(--panel-2); border:1px solid rgba(34,197,94,.3); border-radius:9px; padding:11px 13px; }
+  /* display:flex vence [hidden]: sem isto o cartao do lead nascia visivel e vazio. */
+  .lead-pick[hidden] { display:none; }
   .lead-pick-info b { font-size:14px; }
   .lead-pick-sub { font-size:11px; color:var(--cinza); margin-top:3px; }
   .lead-pick-lid { font-family:ui-monospace,Menlo,monospace; font-size:10px; margin-left:8px;
@@ -44,6 +46,48 @@
   .lead-res-item:hover { border-color:var(--azul); }
   .lead-res-item small { color:var(--cinza); font-size:11px; display:block; margin-top:2px; }
   .lead-criar { margin-top:14px; border-top:1px solid var(--borda); padding-top:12px; }
+
+  /* ── Passos: a ordem AQUI e a ordem da venda, entao numerar diz algo ── */
+  .form-secao h3 .passo, .form-interno summary .passo {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:20px; height:20px; border-radius:50%; margin-right:8px;
+    background:var(--panel-3); border:1px solid var(--borda);
+    font-size:10.5px; font-weight:700; color:var(--cinza-2);
+    font-variant-numeric:tabular-nums; vertical-align:middle;
+  }
+  .obrig { font-size:9px; font-weight:700; letter-spacing:.4px; text-transform:uppercase;
+           color:var(--cinza-2); margin-left:6px; vertical-align:middle; opacity:.75; }
+  .sep { border:none; border-top:1px solid var(--borda); margin:18px 0; }
+
+  /* Erro no PROPRIO campo. Um toast no fim nao diz onde esta o problema. */
+  .erro-campo { font-size:11px; color:#f0a3a3; margin-top:5px; min-height:0; }
+  .erro-campo:empty { display:none; }
+  .erro-campo.so-aviso { color:#fbbf24; }
+  .invalido { border-color:#c96a6a !important; }
+  .invalido:focus { outline-color:#c96a6a; }
+
+  /* Interno recolhido: ja vem preenchido, nao e trabalho do consultor. */
+  .form-interno > summary { cursor:pointer; list-style:none; font-size:15px; font-weight:600;
+                            display:flex; align-items:center; gap:8px; }
+  .form-interno > summary::-webkit-details-marker { display:none; }
+  .form-interno > summary::after { content:''; width:7px; height:7px; margin-left:4px;
+    border-right:2px solid var(--cinza); border-bottom:2px solid var(--cinza);
+    transform:rotate(45deg); transition:transform .15s; }
+  .form-interno[open] > summary::after { transform:rotate(-135deg); }
+  .interno-resumo { font-size:12px; color:var(--cinza); font-weight:400; margin-left:auto; }
+
+  /* Salvar sempre a vista, com o que falta escrito ao lado. */
+  .barra-salvar { position:sticky; bottom:0; z-index:20; display:flex; align-items:center;
+                  gap:14px; flex-wrap:wrap; padding:14px 0 18px;
+                  background:linear-gradient(to bottom, transparent, var(--fundo) 38%); }
+  .barra-salvar .btn-salvar { margin:0; }
+  .barra-estado { font-size:12px; }
+  .barra-estado.pendente { color:#fbbf24; }
+  .barra-estado.pronto { color:#4ade80; }
+  [data-theme="light"] .erro-campo { color:#a83232; }
+  [data-theme="light"] .erro-campo.so-aviso { color:#8a5b02; }
+  [data-theme="light"] .barra-estado.pendente { color:#8a5b02; }
+  [data-theme="light"] .barra-estado.pronto { color:#0f7a52; }
 </style>
 {% endblock %}
 
@@ -57,18 +101,20 @@
 </div>
 
 <div class="page" style="max-width:860px;">
-<form id="form">
-  {# Lead de origem, quando a proposta nasceu da ficha do CRM/extensao. Campo
-     oculto porque e chave, nao dado que alguem digita. #}
+<form id="form" novalidate>
   <input type="hidden" name="lead_id_origem" id="lead_id_origem" value="{{ lead_id_origem or '' }}">
 
-  {# LEAD DA VENDA. Ficava so num campo oculto, preenchido quando a venda nascia
-     da ficha do CRM — aberto direto, /nova-proposta nao tinha como amarrar, a
-     venda nascia orfa e o vinculo era re-adivinhado por telefone depois. E dai
-     que vem o passivo de venda sem lead: sem lead nao ha origem de midia, e a
-     venda nao volta pro Google Ads dizendo que aquele anuncio deu dinheiro. #}
+  {# A ORDEM AQUI E A ORDEM DA VENDA, nao a ordem do banco.
+     Antes: ferramenta de colar, dados internos, e um bloco "Proposta" com dez
+     assuntos misturados — numero, datas, tipo de pessoa, documentos, operadora,
+     pessoas, repique, acomodacao, vidas, valor e status, tudo junto.
+     Agora cada bloco responde UMA pergunta, na ordem em que o consultor as
+     responde: de quem e, onde mora, o que comprou, quanto e quando, quem
+     assina, que papel tem. O interno fica por ultimo porque ja vem preenchido. #}
+
+  <!-- ══ 1. DE QUEM E A VENDA ══════════════════════════════════════════ -->
   <div class="form-secao" id="bloco-lead">
-    <h3>Lead no CRM
+    <h3><span class="passo">1</span> De quem é a venda
       <i class="ajuda-i" title="Toda venda vem de um lead. Amarrar os dois e o que permite saber de qual anuncio, campanha e criativo essa venda veio — e devolver isso ao Google Ads pra ele otimizar por quem COMPRA, e nao por quem so preenche formulario. Sem o lead, a venda nao tem origem.">i</i>
     </h3>
     <div id="lead-escolhido" class="lead-pick" hidden>
@@ -81,14 +127,14 @@
     </div>
     <div id="lead-busca-box">
       <div class="campo">
+        <label>Lead no CRM</label>
         <input type="text" id="lead-busca" autocomplete="off"
-               placeholder="Buscar por nome, telefone ou @lid"
-               oninput="buscarLeads(this.value)">
+               placeholder="Buscar por nome, telefone ou @lid" oninput="buscarLeads(this.value)">
         <div class="hint">Cole o @lid direto do card do CRM, ou digite o nome/telefone.</div>
       </div>
       <div id="lead-res" class="lead-res"></div>
       <div id="lead-criar" class="lead-criar" hidden>
-        <div class="hint">Nao achou? Cadastre o lead agora, sem sair desta tela.</div>
+        <div class="hint">Não achou? Cadastre o lead agora, sem sair desta tela.</div>
         <div class="form-row form-row-2">
           <div class="campo"><label>Nome do lead</label><input type="text" id="lead-novo-nome"></div>
           <div class="campo"><label>Telefone</label><input type="text" id="lead-novo-tel"></div>
@@ -97,81 +143,24 @@
         <span class="hint" id="lead-novo-aviso"></span>
       </div>
     </div>
-  </div>
 
-  <div class="form-secao" style="border:1px dashed var(--borda-2); background:var(--panel-2);">
-    <h3>Colar dados extraídos</h3>
-    <div class="aviso" style="display:block; margin-bottom:10px;">Cole aqui o bloco de dados dos documentos (nome, CPF, nascimento, CNPJ etc.) — o formulário abaixo é preenchido automaticamente. Nenhum dado é enviado a serviços externos.</div>
-    <div class="campo">
-      <textarea id="dados-colados" rows="6" placeholder="Cole o bloco de dados aqui..."></textarea>
-    </div>
-    <button type="button" class="btn-outline" onclick="preencherDeTexto()">Preencher automaticamente</button>
-    <div class="hint" id="colar-status"></div>
-  </div>
-
-  <div class="form-secao">
-    <h3>Informações internas</h3>
-    <div class="form-row form-row-2">
-      <div class="campo">
-        <label>Consultor</label>
-        <input type="text" name="consultor" value="{{ session.nome }}" required>
-      </div>
-      <div class="campo">
-        <label>Quem está subindo a venda</label>
-        <select name="quem_subiu">
-          <option value="Consultor">O próprio consultor</option>
-          <option value="Supervisor">Supervisor</option>
-          <option value="Gestor ADM">Gestor ADM</option>
-        </select>
-      </div>
-      <div class="campo">
-        <label>Supervisora da proposta</label>
-        <select name="supervisora_id">
-          <option value="">— Selecione —</option>
-          {% for s in supervisoras %}<option value="{{ s.id }}">{{ s.nome }}</option>{% endfor %}
-        </select>
-        {% if not supervisoras %}<div class="aviso">Nenhuma supervisora cadastrada. {% if session.perfil == 'admin' %}<a href="/supervisoras" style="color:var(--azul); font-weight:600;">Cadastrar →</a>{% endif %}</div>{% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="form-secao">
-    <h3>Proposta</h3>
-
-    <div class="campo" style="margin-bottom:14px;">
-      <label>Proposta possui número?</label>
-      <div class="radios">
-        <label class="radio"><input type="radio" name="proposta_tem_numero" value="Sim" onchange="toggleNum(this)"><span>Sim</span></label>
-        <label class="radio"><input type="radio" name="proposta_tem_numero" value="Não" onchange="toggleNum(this)" checked><span>Não</span></label>
-      </div>
-    </div>
-    <div class="campo" id="campo-num" style="display:none; margin-bottom:14px;">
-      <label>Nº da proposta</label>
-      <input type="text" name="numero_proposta">
-    </div>
+    <hr class="sep">
 
     <div class="form-row form-row-2">
       <div class="campo">
-        <label>Vigência <span style="color:var(--cinza);font-size:11px;">(data de início do plano)</span></label>
-        <input type="date" name="vigencia" required>
-        <div class="aviso">Somente mês atual. Retroativas: justificar nas observações.</div>
-      </div>
-      <div class="campo">
-        <label>Data de Fechamento <span style="color:var(--cinza);font-size:11px;">(mês da meta comercial)</span></label>
-        <input type="date" name="data_fechamento" id="data_fechamento">
-        <div class="aviso">Deixe em branco para usar o mês atual como meta.</div>
-      </div>
-    </div>
-    <div class="form-row form-row-2">
-      <div class="campo">
-        <label>Tipo de pessoa</label>
-        <select name="tipo_pessoa" id="tipo_pessoa" required onchange="toggleDocs()">
+        <label>Tipo de pessoa <span class="obrig">obrigatório</span></label>
+        <select name="tipo_pessoa" id="tipo_pessoa" required onchange="toggleDocs(); ajustarRotulos()">
           <option value="">— Selecione —</option>
           <option value="PF">PF (Pessoa Física)</option>
           <option value="PME">PME (Empresarial)</option>
           <option value="PJ">PJ (Empresarial)</option>
           <option value="Adesão">Adesão</option>
         </select>
+        <div class="hint">Define o resto do formulário: empresa pede CNPJ, pessoa física não.</div>
+      </div>
+      <div class="campo">
+        <label id="rot-razao">Razão social / beneficiário <span class="obrig">obrigatório</span></label>
+        <input type="text" name="razao_social" required>
       </div>
     </div>
 
@@ -187,42 +176,7 @@
       </div>
     </div>
 
-    <div class="campo" style="margin-bottom:14px;">
-      <label>Modalidade</label>
-      <div class="hint">PORTE 1: até 28 vidas · PORTE 2: 29 a 99 vidas · PJ: 99+ vidas</div>
-      <div class="radios" style="margin-top:8px;">
-        <label class="radio"><input type="radio" name="modalidade" value="ADESÃO" required><span>ADESÃO</span></label>
-        <label class="radio"><input type="radio" name="modalidade" value="PF"><span>PF</span></label>
-        <label class="radio"><input type="radio" name="modalidade" value="PME PORTE 1"><span>PME P1</span></label>
-        <label class="radio"><input type="radio" name="modalidade" value="PME PORTE 2"><span>PME P2</span></label>
-        <label class="radio"><input type="radio" name="modalidade" value="PJ"><span>PJ</span></label>
-        <label class="radio"><input type="radio" name="modalidade" value="PME PORTE 2 (ODONTO)"><span>PME P2 Odonto</span></label>
-        <label class="radio"><input type="radio" name="modalidade" value="PJ (ODONTO)"><span>PJ Odonto</span></label>
-      </div>
-    </div>
-
-    <div class="form-row form-row-2">
-      <div class="campo">
-        <label>Operadora / Administradora</label>
-        <select name="adm_operadora" required onchange="calcPreview()">
-          <option value="">— Selecione —</option>
-          {% for o in operadoras %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="campo">
-        <label>Produto / Plano</label>
-        <input type="text" name="produto" id="produto" list="lista-produtos" placeholder="Selecione ou digite">
-        <datalist id="lista-produtos"></datalist>
-        <div class="hint">Os planos cadastrados em Produtos aparecem aqui ao escolher a operadora.</div>
-      </div>
-    </div>
-
-    <div class="campo" style="margin-bottom:14px;">
-      <label>Razão Social / Beneficiário</label>
-      <input type="text" name="razao_social" required>
-    </div>
-
-    <div class="campo" style="margin-bottom:14px;">
+    <div class="campo" style="margin-top:14px;">
       <label>Titular e dependentes</label>
       <div class="form-row form-row-2" style="margin-bottom:8px;">
         <input type="text" name="nome_titular" id="nome_titular" placeholder="Nome do titular">
@@ -232,9 +186,108 @@
       <button type="button" class="btn-ghost" style="font-size:12px; margin-top:6px;" onclick="addDependente()">+ Adicionar dependente</button>
       <textarea name="titular_dependentes" id="titular_dependentes" style="display:none;"></textarea>
       <input type="hidden" name="dependentes_json" id="dependentes_json" value="[]">
+      <div class="hint">O total de vidas é calculado a partir daqui — titular mais dependentes.</div>
+    </div>
+  </div>
+
+  <!-- ══ 2. ONDE A PESSOA ESTA ═════════════════════════════════════════ -->
+  <div class="form-secao">
+    <h3><span class="passo">2</span> Onde a pessoa está
+      <i class="ajuda-i" title="No plano de saude a regiao decide preco e rede credenciada: a mesma familia paga valores diferentes em Campinas e em Sao Paulo, e a rede de hospitais muda. Sem cidade e estado a proposta nao da pra conferir nem pra cotar de novo.">i</i>
+    </h3>
+    <div class="form-row form-row-3">
+      <div class="campo">
+        <label>CEP</label>
+        <input type="text" name="cep" id="cep" placeholder="00000-000" oninput="mascaraCEP(this)" onblur="buscarCEP(this.value)">
+        <div class="hint" id="cep-status">Preenche o endereço sozinho.</div>
+      </div>
+      <div class="campo" style="grid-column:span 2;">
+        <label>Rua / avenida</label>
+        <input type="text" name="logradouro" id="logradouro">
+      </div>
+    </div>
+    <div class="form-row form-row-3" style="margin-top:12px;">
+      <div class="campo"><label>Número</label><input type="text" name="numero_end" id="numero_end"></div>
+      <div class="campo"><label>Bairro</label><input type="text" name="bairro" id="bairro"></div>
+      <div class="campo">
+        <label>Cidade <span class="obrig">obrigatório</span></label>
+        <input type="text" name="cidade" id="cidade" required>
+      </div>
+    </div>
+    <div class="form-row form-row-3" style="margin-top:12px;">
+      <div class="campo">
+        <label>Estado <span class="obrig">obrigatório</span></label>
+        <select name="estado" id="estado" required>
+          <option value="">—</option>
+          {% for uf in ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'] %}
+          <option value="{{ uf }}">{{ uf }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 3. O QUE FOI VENDIDO ══════════════════════════════════════════ -->
+  <div class="form-secao">
+    <h3><span class="passo">3</span> O que foi vendido</h3>
+    <div class="form-row form-row-2">
+      <div class="campo">
+        <label>Operadora / administradora <span class="obrig">obrigatório</span></label>
+        <select name="adm_operadora" required onchange="calcPreview()">
+          <option value="">— Selecione —</option>
+          {% for o in operadoras %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="campo">
+        <label>Produto / plano</label>
+        <input type="text" name="produto" id="produto" list="lista-produtos" placeholder="Selecione ou digite">
+        <datalist id="lista-produtos"></datalist>
+        <div class="hint">Os planos cadastrados em Produtos aparecem ao escolher a operadora.</div>
+      </div>
     </div>
 
-    <div class="campo" style="margin-bottom:14px; padding:14px 16px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px;">
+    <div class="campo" style="margin-top:14px;">
+      <label>Modalidade <span class="obrig">obrigatório</span></label>
+      <div class="hint">PORTE 1: até 28 vidas · PORTE 2: 29 a 99 vidas · PJ: 99 ou mais</div>
+      <div class="radios" style="margin-top:8px;">
+        <label class="radio"><input type="radio" name="modalidade" value="ADESÃO" onchange="validarCampo(this)"><span>ADESÃO</span></label>
+        <label class="radio"><input type="radio" name="modalidade" value="PF" onchange="validarCampo(this)"><span>PF</span></label>
+        <label class="radio"><input type="radio" name="modalidade" value="PME PORTE 1" onchange="validarCampo(this)"><span>PME P1</span></label>
+        <label class="radio"><input type="radio" name="modalidade" value="PME PORTE 2" onchange="validarCampo(this)"><span>PME P2</span></label>
+        <label class="radio"><input type="radio" name="modalidade" value="PJ" onchange="validarCampo(this)"><span>PJ</span></label>
+        <label class="radio"><input type="radio" name="modalidade" value="PME PORTE 2 (ODONTO)" onchange="validarCampo(this)"><span>PME P2 Odonto</span></label>
+        <label class="radio"><input type="radio" name="modalidade" value="PJ (ODONTO)" onchange="validarCampo(this)"><span>PJ Odonto</span></label>
+      </div>
+      <div class="erro-campo" data-erro="modalidade"></div>
+    </div>
+
+    <div class="form-row form-row-3" style="margin-top:14px;">
+      <div class="campo">
+        <label>Tipo de contrato <span class="obrig">obrigatório</span></label>
+        <div class="radios" style="margin-top:4px;">
+          <label class="radio"><input type="radio" name="tipo_contrato" value="Saúde" onchange="validarCampo(this)"><span>Saúde</span></label>
+          <label class="radio"><input type="radio" name="tipo_contrato" value="Odonto" onchange="validarCampo(this)"><span>Odonto</span></label>
+        </div>
+        <div class="erro-campo" data-erro="tipo_contrato"></div>
+      </div>
+      <div class="campo">
+        <label>Acomodação <span class="obrig">obrigatório</span></label>
+        <div class="radios" style="margin-top:4px;">
+          <label class="radio"><input type="radio" name="acomodacao" value="Enfermaria" onchange="validarCampo(this)"><span>Enfermaria</span></label>
+          <label class="radio"><input type="radio" name="acomodacao" value="Apartamento" onchange="validarCampo(this)"><span>Apartamento</span></label>
+        </div>
+        <div class="erro-campo" data-erro="acomodacao"></div>
+      </div>
+      <div class="campo">
+        <label>Coparticipação <span class="obrig">obrigatório</span></label>
+        <div class="radios" style="margin-top:4px;">
+          <label class="radio"><input type="radio" name="fator_moderador" value="Com coparticipação" onchange="validarCampo(this)"><span>Com</span></label>
+          <label class="radio"><input type="radio" name="fator_moderador" value="Sem coparticipação" onchange="validarCampo(this)"><span>Sem</span></label>
+        </div>
+        <div class="erro-campo" data-erro="fator_moderador"></div>
+      </div>
+    </div>
+
+    <div class="campo" style="margin-top:14px; padding:14px 16px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px;">
       <label class="radio" style="display:inline-flex; margin-bottom:0;">
         <input type="checkbox" name="tem_repique" id="tem_repique" value="1" onchange="toggleRepique()">
         <span>Tem vida em repique</span>
@@ -247,41 +300,50 @@
         </div>
       </div>
     </div>
+  </div>
 
-    <div class="form-row form-row-3">
+  <!-- ══ 4. QUANTO E QUANDO ════════════════════════════════════════════ -->
+  <div class="form-secao">
+    <h3><span class="passo">4</span> Quanto e quando</h3>
+    <div class="form-row form-row-2">
       <div class="campo">
-        <label>Tipo de contrato</label>
-        <div class="radios" style="margin-top:4px;">
-          <label class="radio"><input type="radio" name="tipo_contrato" value="Saúde" required><span>Saúde</span></label>
-          <label class="radio"><input type="radio" name="tipo_contrato" value="Odonto"><span>Odonto</span></label>
-        </div>
+        <label>Total de vidas <span class="obrig">obrigatório</span></label>
+        <input type="number" name="total_vidas" id="total_vidas" min="1" required oninput="calcPreview(); validarCampo(this)">
+        <div class="hint">Sem contar o repique.</div>
       </div>
       <div class="campo">
-        <label>Acomodação</label>
-        <div class="radios" style="margin-top:4px;">
-          <label class="radio"><input type="radio" name="acomodacao" value="Enfermaria" required><span>Enf.</span></label>
-          <label class="radio"><input type="radio" name="acomodacao" value="Apartamento"><span>Apto.</span></label>
-        </div>
-      </div>
-      <div class="campo">
-        <label>Coparticipação</label>
-        <div class="radios" style="margin-top:4px;">
-          <label class="radio"><input type="radio" name="fator_moderador" value="Com coparticipação" required><span>Com</span></label>
-          <label class="radio"><input type="radio" name="fator_moderador" value="Sem coparticipação"><span>Sem</span></label>
-        </div>
+        <label>Valor mensal (R$) <span class="obrig">obrigatório</span></label>
+        <input type="text" name="valor" id="valor" placeholder="0,00" required oninput="formatarValor(this); calcPreview(); validarCampo(this)">
+        <div class="hint">Sem taxas, sem IOF.</div>
       </div>
     </div>
 
     <div class="form-row form-row-2" style="margin-top:14px;">
       <div class="campo">
-        <label>Total de vidas</label>
-        <input type="number" name="total_vidas" min="1" required oninput="calcPreview()">
-        <div class="aviso">Sem repique</div>
+        <label>Vigência <span class="obrig">obrigatório</span></label>
+        <input type="date" name="vigencia" id="vigencia" required onchange="validarCampo(this)">
+        <div class="hint">Data de início do plano. Retroativa: justifique nas observações.</div>
       </div>
       <div class="campo">
-        <label>Valor mensal (R$)</label>
-        <input type="text" name="valor" id="valor" placeholder="0,00" required oninput="formatarValor(this); calcPreview()">
-        <div class="aviso">Sem taxas, sem IOF</div>
+        <label>Data de fechamento</label>
+        <input type="date" name="data_fechamento" id="data_fechamento">
+        <div class="hint">Mês da meta comercial. Em branco usa o mês atual.</div>
+      </div>
+    </div>
+
+    <div class="form-row form-row-3" style="margin-top:14px;">
+      <div class="campo">
+        <label>Vencimento da 1ª mensalidade <span class="obrig">obrigatório</span></label>
+        <input type="date" name="vencimento_1" id="vencimento_1" required onchange="validarCampo(this)">
+      </div>
+      <div class="campo">
+        <label>Previsão de pagamento da 1ª <span class="obrig">obrigatório</span></label>
+        <input type="date" name="previsao_1" id="previsao_1" required onchange="validarCampo(this)">
+      </div>
+      <div class="campo">
+        <label>Dia de vencimento das demais</label>
+        <input type="number" name="dia_vencimento" min="1" max="28" placeholder="Ex: 10" oninput="calcPreview()">
+        <div class="hint">Define o cronograma das comissões futuras.</div>
       </div>
     </div>
 
@@ -300,51 +362,29 @@
         <div id="parcelas-list"></div>
       </div>
     </div>
-
-    <div class="campo" style="margin-top:14px;">
-      <label>Status da venda</label>
-      <select name="venda_status">
-        <option value="Sim">Confirmada</option>
-        <option value="Pendente">Pendente</option>
-        <option value="Não">Cancelada</option>
-      </select>
-    </div>
   </div>
 
+  <!-- ══ 5. QUEM RESPONDE PELO CONTRATO ════════════════════════════════ -->
   <div class="form-secao">
-    <h3>Financeiro</h3>
-    <div class="form-row form-row-2">
-      <div class="campo"><label>Vencimento da 1ª mensalidade</label><input type="date" name="vencimento_1" required></div>
-      <div class="campo"><label>Previsão de pagamento da 1ª</label><input type="date" name="previsao_1" required></div>
-      <div class="campo">
-        <label>Dia de vencimento das demais mensalidades</label>
-        <input type="number" name="dia_vencimento" min="1" max="28" placeholder="Ex: 10" oninput="calcPreview()">
-        <div class="hint">Dia do mês em que o cliente paga as próximas mensalidades. Define o cronograma de comissões futuras.</div>
-      </div>
+    <h3><span class="passo">5</span> Quem responde pelo contrato</h3>
+    <div class="form-row form-row-3">
+      <div class="campo"><label>Responsável pelo contrato <span class="obrig">obrigatório</span></label><input type="text" name="resp_contrato" required onblur="validarCampo(this)"></div>
+      <div class="campo"><label>E-mail <span class="obrig">obrigatório</span></label><input type="email" name="email_resp_contrato" required onblur="validarCampo(this)"></div>
+      <div class="campo"><label>Telefone <span class="obrig">obrigatório</span></label><input type="tel" name="tel_resp_contrato" required onblur="validarCampo(this)"></div>
     </div>
-  </div>
-
-  <div class="form-secao">
-    <h3>Contatos</h3>
-    <div class="campo" style="margin-bottom:14px;">
-      <label>Responsável pelo contrato</label>
-      <input type="text" name="resp_contrato" required>
+    <div class="campo" style="margin-top:10px;">
+      <label class="radio" style="display:inline-flex;">
+        <input type="checkbox" id="mesmo-resp" onchange="copiarResponsavel(this)">
+        <span>A negociação foi com a mesma pessoa</span>
+      </label>
     </div>
-    <div class="form-row form-row-2">
-      <div class="campo"><label>E-mail</label><input type="email" name="email_resp_contrato" required></div>
-      <div class="campo"><label>Telefone</label><input type="tel" name="tel_resp_contrato" required></div>
-    </div>
-    <hr style="border:none; border-top:1px solid var(--borda); margin:16px 0;">
-    <div class="campo" style="margin-bottom:14px;">
-      <label>Responsável pela negociação</label>
-      <input type="text" name="resp_negociacao" required>
-    </div>
-    <div class="form-row form-row-2">
-      <div class="campo"><label>E-mail</label><input type="email" name="email_resp_negociacao" required></div>
-      <div class="campo"><label>Telefone</label><input type="tel" name="tel_resp_negociacao" required></div>
+    <div class="form-row form-row-3" style="margin-top:10px;">
+      <div class="campo"><label>Responsável pela negociação <span class="obrig">obrigatório</span></label><input type="text" name="resp_negociacao" required onblur="validarCampo(this)"></div>
+      <div class="campo"><label>E-mail <span class="obrig">obrigatório</span></label><input type="email" name="email_resp_negociacao" required onblur="validarCampo(this)"></div>
+      <div class="campo"><label>Telefone <span class="obrig">obrigatório</span></label><input type="tel" name="tel_resp_negociacao" required onblur="validarCampo(this)"></div>
     </div>
     <div class="campo" style="margin-top:14px;">
-      <label>Contatos adicionais? (RH, Financeiro, DP)</label>
+      <label>Contatos adicionais (RH, financeiro, DP)</label>
       <div class="radios">
         <label class="radio"><input type="radio" name="contatos_adicionais" value="Sim" onchange="toggleContatos(this)"><span>Sim</span></label>
         <label class="radio"><input type="radio" name="contatos_adicionais" value="Não" onchange="toggleContatos(this)" checked><span>Não</span></label>
@@ -360,9 +400,24 @@
     <div id="campos-custom"></div>
   </div>
 
+  <!-- ══ 6. PAPELADA ═══════════════════════════════════════════════════ -->
   <div class="form-secao">
-    <h3>Documentos</h3>
+    <h3><span class="passo">6</span> Papelada</h3>
     <div class="form-row form-row-2">
+      <div class="campo">
+        <label>A proposta já tem número na operadora?</label>
+        <div class="radios">
+          <label class="radio"><input type="radio" name="proposta_tem_numero" value="Sim" onchange="toggleNum(this)"><span>Sim</span></label>
+          <label class="radio"><input type="radio" name="proposta_tem_numero" value="Não" onchange="toggleNum(this)" checked><span>Ainda não</span></label>
+        </div>
+      </div>
+      <div class="campo" id="campo-num" style="display:none;">
+        <label>Nº da proposta</label>
+        <input type="text" name="numero_proposta">
+      </div>
+    </div>
+
+    <div class="form-row form-row-2" style="margin-top:14px;">
       <div class="campo">
         <label>Contrato assinado</label>
         <div class="upload-box" id="box-contrato" onclick="document.getElementById('contratoInput').click()">
@@ -399,7 +454,62 @@
     </div>
   </div>
 
-  <button type="button" class="btn-salvar" onclick="enviar()">Salvar proposta</button>
+  <!-- ══ 7. INTERNO — ja vem preenchido, fica recolhido ════════════════ -->
+  <details class="form-secao form-interno">
+    <summary>
+      <span class="passo">7</span> Registro interno
+      <span class="interno-resumo" id="interno-resumo"></span>
+    </summary>
+    <div style="margin-top:14px;">
+      <div class="form-row form-row-3">
+        <div class="campo">
+          <label>Consultor</label>
+          <input type="text" name="consultor" id="consultor" value="{{ session.nome }}" required onchange="resumoInterno()">
+        </div>
+        <div class="campo">
+          <label>Quem está subindo a venda</label>
+          <select name="quem_subiu" id="quem_subiu" onchange="resumoInterno()">
+            <option value="Consultor">O próprio consultor</option>
+            <option value="Supervisor">Supervisor</option>
+            <option value="Gestor ADM">Gestor ADM</option>
+          </select>
+        </div>
+        <div class="campo">
+          <label>Supervisora da proposta</label>
+          <select name="supervisora_id" id="supervisora_id" onchange="resumoInterno()">
+            <option value="">— Selecione —</option>
+            {% for s in supervisoras %}<option value="{{ s.id }}">{{ s.nome }}</option>{% endfor %}
+          </select>
+          {% if not supervisoras %}<div class="aviso">Nenhuma supervisora cadastrada. {% if session.perfil == 'admin' %}<a href="/supervisoras" style="color:var(--azul); font-weight:600;">Cadastrar →</a>{% endif %}</div>{% endif %}
+        </div>
+      </div>
+      <div class="form-row form-row-2" style="margin-top:12px;">
+        <div class="campo">
+          <label>Status da venda</label>
+          <select name="venda_status" id="venda_status" onchange="resumoInterno()">
+            <option value="Sim">Confirmada</option>
+            <option value="Pendente">Pendente</option>
+            <option value="Não">Cancelada</option>
+          </select>
+        </div>
+      </div>
+      <hr class="sep">
+      {# A ferramenta de colar vive aqui: e atalho de digitacao, nao etapa da
+         venda. Estava em segundo lugar na tela, antes de o consultor saber do
+         que se tratava. #}
+      <div class="campo">
+        <label>Colar dados extraídos dos documentos</label>
+        <textarea id="dados-colados" rows="5" placeholder="Cole o bloco de dados aqui e o formulário se preenche."></textarea>
+        <button type="button" class="btn-outline" style="margin-top:8px;" onclick="preencherDeTexto()">Preencher automaticamente</button>
+        <div class="hint" id="colar-status">Nenhum dado sai do JOB: a leitura é feita aqui mesmo, no navegador.</div>
+      </div>
+    </div>
+  </details>
+
+  <div class="barra-salvar">
+    <div class="barra-estado" id="barra-estado"></div>
+    <button type="button" class="btn-salvar" onclick="enviar()">Salvar proposta</button>
+  </div>
 
 </form>
 </div>
@@ -582,10 +692,166 @@ function renderCampoCustom(c) {
   else { const t = ['number','email','tel','date'].includes(c.tipo) ? c.tipo : 'text'; input = `<input type="${t}" name="${nome}" placeholder="${c.placeholder||''}" ${req}>`; }
   return `<div class="campo" style="margin-bottom:14px;"><label>${c.label}${reqMark}</label>${input}${ajuda}</div>`;
 }
+
+// ═══ VALIDACAO NA HORA, NO CAMPO ══════════════════════════════════════════
+// Antes: um toast generico no fim ("Selecione: modalidade") e o navegador
+// silencioso. O consultor preenchia trinta campos, clicava em salvar e
+// descobria o erro sem saber ONDE. Agora cada campo se corrige sozinho ao sair
+// dele, e no salvar a tela leva o consultor ate o primeiro problema.
+const REGRAS = {
+  cpf_titular:  v => !v || _cpfOk(v) || 'CPF não confere — revise os dígitos',
+  cnpj:         v => !v || _cnpjOk(v) || 'CNPJ não confere — revise os dígitos',
+  email_resp_contrato:   v => !v || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) || 'E-mail inválido',
+  email_resp_negociacao: v => !v || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v) || 'E-mail inválido',
+  tel_resp_contrato:     v => !v || v.replace(/\D/g,'').length >= 10 || 'Telefone incompleto',
+  tel_resp_negociacao:   v => !v || v.replace(/\D/g,'').length >= 10 || 'Telefone incompleto',
+  total_vidas:  v => (parseInt(v||0) >= 1) || 'Pelo menos uma vida',
+  valor:        v => (_num(v) > 0) || 'O valor mensal não pode ser zero',
+};
+function _num(v){ return parseFloat(String(v||'').replace(/\./g,'').replace(',','.')) || 0; }
+function _digOk(d, pesos){
+  let s = 0; for (let i=0;i<pesos.length;i++) s += parseInt(d[i]) * pesos[i];
+  const r = s % 11; return String(r < 2 ? 0 : 11 - r);
+}
+function _cpfOk(v){
+  const d = String(v).replace(/\D/g,'');
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  return _digOk(d,[10,9,8,7,6,5,4,3,2]) === d[9] && _digOk(d,[11,10,9,8,7,6,5,4,3,2]) === d[10];
+}
+function _cnpjOk(v){
+  const d = String(v).replace(/\D/g,'');
+  if (d.length !== 14 || /^(\d)\1{13}$/.test(d)) return false;
+  return _digOk(d,[5,4,3,2,9,8,7,6,5,4,3,2]) === d[12] && _digOk(d,[6,5,4,3,2,9,8,7,6,5,4,3,2]) === d[13];
+}
+function _erroBox(el){
+  const campo = el.closest('.campo') || el.parentElement;
+  let b = campo.querySelector('.erro-campo[data-erro="'+(el.name||'x')+'"]') || campo.querySelector('.erro-campo');
+  if (!b){ b = document.createElement('div'); b.className = 'erro-campo'; campo.appendChild(b); }
+  return b;
+}
+function validarCampo(el){
+  if (!el || !el.name) return true;
+  // Radio: valida o grupo inteiro, não o botão clicado.
+  if (el.type === 'radio'){
+    const ok = !!document.querySelector('[name="'+el.name+'"]:checked');
+    const b = document.querySelector('.erro-campo[data-erro="'+el.name+'"]');
+    if (b){ b.textContent = ok ? '' : 'Escolha uma opção'; }
+    return ok;
+  }
+  const v = (el.value || '').trim();
+  let msg = '';
+  if (el.required && !v) msg = 'Falta preencher';
+  else if (REGRAS[el.name]){ const r = REGRAS[el.name](v); if (r !== true) msg = r; }
+  const b = _erroBox(el);
+  b.textContent = msg;
+  el.classList.toggle('invalido', !!msg);
+  return !msg;
+}
+// Coerência entre datas: erro que só aparece olhando duas juntas.
+function validarDatas(){
+  const venc = document.getElementById('vencimento_1');
+  const prev = document.getElementById('previsao_1');
+  if (venc && prev && venc.value && prev.value && prev.value < venc.value){
+    _erroBox(prev).textContent = 'A previsão de pagamento é anterior ao vencimento';
+    prev.classList.add('invalido'); return false;
+  }
+  return true;
+}
+// Vidas contra porte: a regra já estava escrita na tela como dica e ninguém
+// conferia. Avisa, não trava — porte errado se corrige, venda perdida não.
+function conferirPorte(){
+  const n = parseInt((document.getElementById('total_vidas')||{}).value || 0);
+  const m = (document.querySelector('[name="modalidade"]:checked')||{}).value || '';
+  const b = document.querySelector('.erro-campo[data-erro="modalidade"]');
+  if (!b || !n || !m) return;
+  let aviso = '';
+  if (m === 'PME PORTE 1' && n > 28) aviso = n + ' vidas passa do PORTE 1 (até 28) — confira a modalidade';
+  if (m === 'PME PORTE 2' && (n < 29 || n > 99)) aviso = 'PORTE 2 é de 29 a 99 vidas — confira';
+  if (m === 'PJ' && n < 99) aviso = 'PJ costuma ser 99 vidas ou mais — confira';
+  b.textContent = aviso;
+  b.classList.toggle('so-aviso', !!aviso);
+}
+
+function camposObrigatorios(){
+  return Array.from(document.querySelectorAll('#form [required]'))
+    .filter(el => el.offsetParent !== null || el.type === 'radio');
+}
+function atualizarBarra(){
+  const faltam = camposObrigatorios().filter(el =>
+    el.type === 'radio' ? !document.querySelector('[name="'+el.name+'"]:checked') : !(el.value||'').trim());
+  const nomes = new Set(faltam.map(e => e.name));
+  const b = document.getElementById('barra-estado');
+  if (!b) return;
+  b.textContent = nomes.size ? nomes.size + ' campo(s) obrigatório(s) em branco' : 'Tudo preenchido';
+  b.className = 'barra-estado ' + (nomes.size ? 'pendente' : 'pronto');
+}
+
+function ajustarRotulos(){
+  // "Razão social" só faz sentido em empresa. Em PF o campo é o nome de quem
+  // compra — o mesmo campo, a pergunta certa.
+  const tp = (document.getElementById('tipo_pessoa')||{}).value || '';
+  const r = document.getElementById('rot-razao');
+  if (r) r.innerHTML = (tp === 'PF' || tp === 'Adesão' ? 'Nome do beneficiário' : 'Razão social da empresa')
+    + ' <span class="obrig">obrigatório</span>';
+}
+function copiarResponsavel(cx){
+  if (!cx.checked) return;
+  const par = [['resp_contrato','resp_negociacao'],['email_resp_contrato','email_resp_negociacao'],
+               ['tel_resp_contrato','tel_resp_negociacao']];
+  par.forEach(([de,para]) => {
+    const a = document.querySelector('[name="'+de+'"]'), b = document.querySelector('[name="'+para+'"]');
+    if (a && b){ b.value = a.value; validarCampo(b); }
+  });
+  atualizarBarra();
+}
+function resumoInterno(){
+  const g = n => { const e = document.getElementById(n); return e ? (e.options ? e.options[e.selectedIndex].text : e.value) : ''; };
+  const r = document.getElementById('interno-resumo');
+  if (r) r.textContent = [g('consultor'), g('venda_status')].filter(Boolean).join(' · ');
+}
+function mascaraCEP(el){
+  const d = el.value.replace(/\D/g,'').slice(0,8);
+  el.value = d.length > 5 ? d.slice(0,5) + '-' + d.slice(5) : d;
+}
+async function buscarCEP(v){
+  const dig = String(v||'').replace(/\D/g,'');
+  const st = document.getElementById('cep-status');
+  if (dig.length !== 8){ if (st) st.textContent = 'Preenche o endereço sozinho.'; return; }
+  if (st) st.textContent = 'Consultando...';
+  try {
+    const r = await fetch('/api/cep/' + dig);
+    const d = await r.json();
+    if (!d.ok){ if (st) st.textContent = d.erro || 'CEP não encontrado'; return; }
+    // Não sobrescreve o que já foi digitado: o CEP ajuda, não manda.
+    const set = (id, val) => { const e = document.getElementById(id); if (e && val && !e.value) e.value = val; };
+    set('logradouro', d.cep.logradouro); set('bairro', d.cep.bairro); set('cidade', d.cep.cidade);
+    const uf = document.getElementById('estado'); if (uf && d.cep.estado && !uf.value) uf.value = d.cep.estado;
+    if (st) st.textContent = (d.cep.cidade || '') + (d.cep.estado ? ' · ' + d.cep.estado : '');
+    atualizarBarra();
+  } catch(e){ if (st) st.textContent = 'Não consegui consultar agora.'; }
+}
+document.addEventListener('input', (e) => { if (e.target.closest('#form')) atualizarBarra(); });
+document.addEventListener('DOMContentLoaded', () => { ajustarRotulos(); resumoInterno(); atualizarBarra(); });
+
 async function enviar() {
   const form = document.getElementById('form');
+  // VALIDA TUDO e LEVA ATE O PRIMEIRO ERRO. Um toast dizendo "selecione
+  // modalidade" numa tela de 40 campos nao diz onde ela esta.
+  let primeiro = null, ok = true;
   for (const r of ['modalidade','tipo_contrato','acomodacao','fator_moderador']) {
-    if (!form.querySelector(`[name=${r}]:checked`)) { toast('Selecione: '+r.replace(/_/g,' '),'err'); return; }
+    const grupo = form.querySelector('[name="'+r+'"]');
+    if (grupo && !validarCampo(grupo)) { ok = false; primeiro = primeiro || grupo; }
+  }
+  for (const el of camposObrigatorios()) {
+    if (el.type === 'radio') continue;
+    if (!validarCampo(el)) { ok = false; primeiro = primeiro || el; }
+  }
+  if (!validarDatas()) { ok = false; primeiro = primeiro || document.getElementById('previsao_1'); }
+  if (!ok) {
+    const alvo = primeiro && (primeiro.closest('.campo') || primeiro);
+    if (alvo) { alvo.scrollIntoView({behavior:'smooth', block:'center'}); try { primeiro.focus(); } catch(e){} }
+    toast('Confira os campos marcados em vermelho', 'err');
+    return;
   }
   const btn = document.querySelector('.btn-salvar');
   btn.textContent='Salvando...'; btn.disabled=true;
@@ -700,7 +966,7 @@ function parseDadosColados(texto) {
       resto.forEach(l => {
         if (reData.test(l)) p.nasc = l;
         else if (/^EMISS[ÃA]O:/i.test(l)) p.emissao = l.replace(/^EMISS[ÃA]O:\s*/i, '');
-        else if (/^NATURAL:/i.test(l)) p.natural = l.replace(/^NATURAL:\s*/i, '');
+        else if (/^NATURAL(\s+DE)?:/i.test(l)) p.natural = l.replace(/^NATURAL(\s+DE)?:\s*/i, '');
         else if (/^CNES/i.test(l)) p.cnes = l.replace(/^CNES\S*:\s*/i, '');
         else if (!p.rg && !reData.test(l)) p.rg = l; // primeira linha "solta" após o CPF = RG
         else filiacao.push(l);

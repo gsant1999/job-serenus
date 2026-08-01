@@ -2540,6 +2540,15 @@ def init_db():
 
     # ─── MIGRAÇÕES: adiciona colunas novas em tabelas existentes ─────────
     migracoes = [
+        # DE ONDE A PESSOA E. Nao e enfeite de cadastro: no plano de saude a
+        # regiao decide preco e rede credenciada, e a proposta nao guardava isso
+        # em lugar nenhum — ficava so no papel que o cliente mandou.
+        ("propostas", "cep", "TEXT"),
+        ("propostas", "logradouro", "TEXT"),
+        ("propostas", "numero_end", "TEXT"),
+        ("propostas", "bairro", "TEXT"),
+        ("propostas", "cidade", "TEXT"),
+        ("propostas", "estado", "TEXT"),
         ("propostas", "estornada", "INTEGER DEFAULT 0"),
         ("propostas", "estorno_info", "TEXT"),
         ("propostas", "cpf_titular", "TEXT"),
@@ -6531,6 +6540,29 @@ def nova_proposta():
     return render_template('form.html', supervisoras=sups, operadoras=ops, prefill=prefill,
                            lead_id_origem=(lead_id if lead_id.isdigit() else ''))
 
+@app.route('/api/cep/<cep>')
+@login_required
+def api_cep(cep):
+    """CEP -> endereco. So leitura, e o resultado nao e verdade absoluta: o
+    consultor corrige o que estiver errado. Timeout curto de proposito — isto
+    roda com alguem esperando na tela do cadastro."""
+    dig = re.sub(r'\D', '', cep or '')
+    if len(dig) != 8:
+        return jsonify({"ok": False, "erro": "CEP precisa de 8 dígitos"}), 400
+    try:
+        import requests as _r
+        resp = _r.get(f'https://brasilapi.com.br/api/cep/v1/{dig}', timeout=(3, 5))
+        if resp.status_code != 200:
+            return jsonify({"ok": False, "erro": "CEP não encontrado"})
+        d = resp.json()
+        return jsonify({"ok": True, "cep": {
+            "logradouro": d.get('street') or '', "bairro": d.get('neighborhood') or '',
+            "cidade": d.get('city') or '', "estado": (d.get('state') or '').upper()[:2]}})
+    except Exception as e:
+        app.logger.info(f"[CEP] {e}")
+        return jsonify({"ok": False, "erro": "Não consegui consultar agora"})
+
+
 @app.route('/api/crm/leads/buscar')
 @login_required
 def api_crm_leads_buscar():
@@ -6694,8 +6726,9 @@ def salvar_proposta():
             regime_aplicado,num_parcelas,distribuicao_parcelas,
             comissao_total_corretora,comissao_consultor,comissao_corretora_liquida,
             observacoes,anexos,contrato_arquivo,comprovante_boleto,campos_extras,quem_subiu,
-            mes_meta,status_operacional
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            mes_meta,status_operacional,
+            cep,logradouro,numero_end,bairro,cidade,estado
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
             session['user_id'],d.get('consultor'),d.get('supervisora_id') or None,
             d.get('proposta_tem_numero'),d.get('numero_proposta'),
             d.get('vigencia'),d.get('modalidade'),d.get('tipo_pessoa'),
@@ -6712,7 +6745,10 @@ def salvar_proposta():
             c['total_corretora'],c['consultor'],c['liquido'],
             d.get('observacoes'),json.dumps(nomes),contrato_arq,comprovante_arq,
             json.dumps(extras, ensure_ascii=False),d.get('quem_subiu','Consultor'),
-            mes_meta,'Aguardando Documentos'
+            mes_meta,'Aguardando Documentos',
+            (d.get('cep') or '').strip() or None, (d.get('logradouro') or '').strip() or None,
+            (d.get('numero_end') or '').strip() or None, (d.get('bairro') or '').strip() or None,
+            (d.get('cidade') or '').strip() or None, (d.get('estado') or '').strip().upper()[:2] or None
         ))
         proposta_id = _last_insert_id(cur)
         # Amarra ao lead na hora: é aqui que o telefone/CNPJ estão frescos e certos.
@@ -14413,7 +14449,12 @@ _DOC_SISTEMA = (
     "ler com certeza, deixe o campo vazio e escreva em observacoes o que faltou e de "
     "quem. Um dígito errado faz a operadora recusar a proposta inteira — muito pior "
     "que um campo vazio que a pessoa preenche.\n\n"
-    "Data é sempre a de NASCIMENTO, nunca emissão ou validade.\n"
+    "Há DUAS datas e elas vão em campos diferentes: 'nascimento' é a data de "
+    "nascimento; 'emissao' é a data em que o documento foi expedido. Nunca troque "
+    "uma pela outra, e nunca use a validade.\n"
+    "'natural_cidade' e 'natural_uf' são a NATURALIDADE — onde a pessoa nasceu, "
+    "que no RG e na CNH aparece como 'naturalidade' ou 'local de nascimento'. "
+    "Não é o endereço onde ela mora hoje.\n"
     "Duas imagens do mesmo documento (frente e verso) são UMA pessoa, não duas.\n"
     "A mesma pessoa em documentos diferentes (RG e CNH): os dados se somam, não duplicam.\n"
     "Prefira dizer que não tem certeza a chutar.\n"
@@ -14470,6 +14511,9 @@ _DOC_SCHEMA = {
                 'pai': {'type': 'string', 'description': 'nome completo do pai, se aparecer'},
                 'mae': {'type': 'string'}, 'sexo': {'type': 'string'},
                 'cns': {'type': 'string', 'description': 'numero do Cartao Nacional de Saude (SUS), 15 digitos'},
+                'natural_cidade': {'type': 'string', 'description': 'cidade de nascimento (naturalidade)'},
+                'natural_uf': {'type': 'string', 'description': 'UF de nascimento, duas letras'},
+                'emissao': {'type': 'string', 'description': 'data de EMISSAO do documento, AAAA-MM-DD — nao confundir com nascimento'},
             }, 'required': ['nome']}},
         'contato': {'type': 'object', 'properties': {
             'telefone': {'type': 'string'}, 'email': {'type': 'string'}}},
@@ -14797,6 +14841,19 @@ def docs_texto_bloco(conn, lead_id):
         cns = re.sub(r'\D', '', str(p.get('cns') or ''))
         if cns:
             L.append('CNES: ' + cns)
+        # Naturalidade e emissao entram DEPOIS do CNES, nao no meio: o formato
+        # que o Guilherme ditou fixa a 2a linha como CPF e a 4a como nascimento,
+        # e enfiar campo novo la no meio quebraria quem ja usa o bloco.
+        nat = ' - '.join(x for x in [(p.get('natural_cidade') or '').strip().upper(),
+                                     (p.get('natural_uf') or '').strip().upper()] if x)
+        if nat:
+            # 'NATURAL:' e nao 'NATURAL DE:' — e o rotulo que o formulario de
+            # proposta ja sabe ler. Emitir um e esperar outro quebraria o unico
+            # caminho automatico entre as duas telas.
+            L.append('NATURAL: ' + nat)
+        emi = _doc_data_br(p.get('emissao'))
+        if emi:
+            L.append('EMISSAO: ' + emi)
         blocos.append('\n'.join(L))
 
     end = e.get('endereco') or {}
