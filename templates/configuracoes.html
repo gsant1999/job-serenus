@@ -142,6 +142,14 @@ async function salvarNotificacaoWpp(ligado){
     border-radius:10px; padding:13px 15px; }
   .ak-chave code { display:block; font-size:13px; word-break:break-all; color:var(--texto);
     background:var(--panel-3); padding:9px 11px; border-radius:7px; margin:8px 0; user-select:all; }
+  .can-tab td, .can-tab th { vertical-align: top; }
+  .can-sub { font-size: 11px; color: var(--cinza); }
+  .can-chip { font-size: 9px; padding: 1px 5px; border-radius: 4px; margin-left: 4px;
+              background: rgba(239,68,68,.14); color: #fca5a5; text-transform: uppercase;
+              letter-spacing: .4px; font-weight: 700; }
+  .can-grave { color: #fca5a5; font-weight: 600; }
+  .can-aviso { color: #fbbf24; }
+  .can-bom { color: #4ade80; }
   .cfg-perf { display:flex; gap:10px; flex-wrap:wrap; }
   .cfg-perf-item { flex:1 1 140px; background:var(--panel-2); border:1px solid var(--borda); border-radius:9px; padding:11px 13px; }
   .cfg-perf-item b { display:block; font-size:19px; font-variant-numeric:tabular-nums; }
@@ -168,6 +176,49 @@ async function akRevogar(id, nome){
   if((await r.json()).ok) location.reload();
 }
 </script>
+{% endif %}
+
+{% if canario %}
+<div class="card">
+  <div class="card-header"><h3>Saúde da extensão<i class="ajuda-i" title="A extensão roda dentro do WhatsApp, que muda sem avisar. A cada 6 horas ela testa cada peça em separado e conta o resultado aqui. O objetivo é você descobrir uma quebra em horas, por esta tela, e não dias depois pela reclamação de um consultor. Nada aqui envia mensagem nem baixa arquivo: só verifica se as peças respondem.">i</i></h3></div>
+  <div class="card-body">
+    {% if not canario.ultima %}
+      <div class="vazio">A extensão ainda não reportou nada. O primeiro teste roda 40 segundos depois de abrir o WhatsApp.</div>
+    {% else %}
+    {# O cabecalho e o resumo que decide se vale continuar lendo: quantas pecas
+       cairam, e ha quanto tempo a extensao nao da noticia. Verde velho engana
+       mais que vermelho — se ela parou de falar, isso tem que aparecer. #}
+    <p class="hint">
+      Última notícia da extensão: <b>{{ canario.ultima }}</b> ({{ canario.ha }}).
+      {% if canario.criticas_quebradas %}
+        <span class="can-grave">{{ canario.criticas_quebradas }} peça(s) crítica(s) fora do ar — isto derruba envio e leitura de conversa.</span>
+      {% elif canario.quebradas %}
+        <span class="can-aviso">{{ canario.quebradas }} peça(s) com problema, nenhuma crítica.</span>
+      {% else %}
+        <span class="can-bom">Tudo respondendo.</span>
+      {% endif %}
+    </p>
+    <table class="pnl-tab can-tab">
+      <thead><tr><th>O que</th><th>Estado</th><th>Assim desde</th><th>Detalhe</th></tr></thead>
+      <tbody>
+        {% for l in canario.linhas %}
+        <tr>
+          <td>{{ l.rotulo }}{% if l.critica %} <span class="can-chip">crítica</span>{% endif %}</td>
+          <td>
+            {% if l.ok is none %}<span class="pill pill-cinza">sem dado</span>
+            {% elif l.ok %}<span class="pill pill-verde">funciona</span>
+            {% else %}<span class="pill pill-erro">quebrou</span>{% endif %}
+          </td>
+          <td>{{ l.ha or '—' }}{% if l.desde %}<div class="can-sub">{{ l.desde }}</div>{% endif %}</td>
+          <td class="can-sub">{{ l.detalhe or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">"Crítica" é a peça que, caindo, faz mensagem não sair — e mensagem que não sai custa lead, ao contrário de um botão que some. Quando uma delas vira de funcionando para quebrada, o sino avisa na hora; enquanto continua quebrada, não repete, pra o aviso não virar paisagem.</p>
+    {% endif %}
+  </div>
+</div>
 {% endif %}
 
 {% if varr_cfg %}

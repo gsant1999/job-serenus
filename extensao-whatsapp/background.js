@@ -322,6 +322,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/metrica', 'POST', { metricas: msg.metricas || [] }, 12000).then(sendResponse);
     return true;
   }
+
+  // O canario: a extensao contando o que ainda funciona nela.
+  if (msg && msg.type === 'canario') {
+    chamarJob('/api/whatsapp/canario', 'POST',
+      { versao: msg.versao || '', checagens: msg.checagens || [] }, 12000).then(sendResponse);
+    return true;
+  }
   // ABRIR A CONVERSA NA ABA QUE JA EXISTE.
   //
   // Pedido do Guilherme: o botao do CRM abria aba nova e o WhatsApp recarregava

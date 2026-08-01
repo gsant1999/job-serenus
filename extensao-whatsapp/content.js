@@ -2107,6 +2107,83 @@
     }, 400);
   }
 
+
+  // ── CANARIO ──────────────────────────────────────────────────────────────
+  // A extensao vive dentro do WhatsApp, que muda sem avisar. Quando muda, o
+  // sintoma chega distorcido ("o JOB parou", "o WhatsApp travou") e dias
+  // depois. Isto pergunta a cada peca se ela ainda funciona e manda pro JOB.
+  //
+  // As sondas de TELA medem o que quebrou de verdade em 01/08: de todas as
+  // bolhas de arquivo visiveis, quantas ficaram sem o bloco. E o teste do
+  // sintoma, nao do seletor — se o WhatsApp trocar o nome do icone, isto acusa
+  // do mesmo jeito que se ele trocar a arvore.
+  function _canarioTela() {
+    const main = document.querySelector('#main');
+    if (!main) return [];                     // nenhuma conversa aberta: nao avalia
+    const out = [];
+    const linhas = main.querySelectorAll('[data-id]');
+    out.push({ cap: 'dom_linhas', ok: linhas.length > 0, ms: 0,
+               detalhe: linhas.length + ' linhas na tela' });
+    if (!linhas.length) return out;
+    let arq = 0, arqOk = 0, aud = 0, audOk = 0;
+    for (const row of linhas) {
+      try {
+        if (_trLinhaEhAudio(row)) {
+          aud++;
+          if (row.querySelector('.job-tr-slot')) audOk++;
+        } else if (_docLinhaEhArquivo(row)) {
+          arq++;
+          if (row.querySelector('.job-doc-slot')) arqOk++;
+        }
+      } catch (e) { /* uma linha estranha nao derruba a rodada */ }
+    }
+    // Zero bolhas daquele tipo na tela nao e falha — e ausencia de amostra.
+    if (arq) out.push({ cap: 'dom_arquivo', ok: arqOk === arq, ms: 0,
+                        detalhe: arqOk + ' de ' + arq + ' bolhas de arquivo com o bloco' });
+    if (aud) out.push({ cap: 'dom_audio', ok: audOk === aud, ms: 0,
+                        detalhe: audOk + ' de ' + aud + ' bolhas de audio com o bloco' });
+    return out;
+  }
+
+  async function canarioRodar(motivo) {
+    let daPonte = [];
+    try {
+      const r = await _pedirPonte('canario', {}, 20000);
+      daPonte = (r && r.checagens) || [];
+    } catch (e) {
+      // A ponte nao responder JA E a noticia: significa que o mundo do
+      // WhatsApp nao esta alcancavel a partir daqui.
+      daPonte = [{ cap: 'wa_js', ok: false, ms: 0,
+                   detalhe: 'a ponte nao respondeu: ' + String((e && e.message) || e).slice(0, 120) }];
+    }
+    const checagens = daPonte.concat(_canarioTela());
+    if (!checagens.length) return null;
+    try {
+      await _safeSendMessage({ type: 'canario', versao: _versaoExt(), checagens: checagens });
+    } catch (e) { /* sem rede agora; a proxima rodada conta */ }
+    const ruins = checagens.filter((c) => !c.ok);
+    if (ruins.length) console.warn('[JOB canario] ' + motivo + ' — quebrado:',
+      ruins.map((c) => c.cap + ' (' + (c.detalhe || '') + ')').join(' | '));
+    return checagens;
+  }
+
+  function _versaoExt() {
+    try { return (chrome.runtime.getManifest() || {}).version || ''; } catch (e) { return ''; }
+  }
+
+  // Rodar na hora, do console, quando eu precisar diagnosticar junto com ele:
+  //   window.__jobCanario().then(console.table)
+  try { window.__jobCanario = () => canarioRodar('pedido na mao'); } catch (e) {}
+
+  function canarioIniciar() {
+    // 40 s depois de carregar: o WhatsApp precisa ter subido o store, e a
+    // primeira meia dezena de segundos ja e disputada demais.
+    setTimeout(() => { canarioRodar('na abertura'); }, 40000);
+    // De 6 em 6 horas. Nao e monitoramento de segundo a segundo — e detectar
+    // uma atualizacao do WhatsApp no mesmo dia, em vez de na semana seguinte.
+    setInterval(() => { canarioRodar('rodada periodica'); }, 6 * 60 * 60 * 1000);
+  }
+
   function trIniciar() {
     setTimeout(() => {
       trInjetar();
@@ -2150,6 +2227,7 @@
           trInjetar();               // varredura cheia UMA vez, na troca de conversa
         }
       }, 4000);
+      try { canarioIniciar(); } catch (e) { /* canario nao pode derrubar a extensao */ }
     }, 6000);
   }
 

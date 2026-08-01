@@ -1112,6 +1112,20 @@ def init_db():
                         # DESEMPENHO MEDIDO, nao sentido. "esta lento" so vira conserto quando
             # tem numero: o que e lento, quanto, e desde quando. Uma linha por
             # operacao concluida na extensao.
+            """CREATE TABLE IF NOT EXISTS wa_canario (
+                id SERIAL PRIMARY KEY,
+                capacidade TEXT NOT NULL,
+                ok INTEGER DEFAULT 1,
+                detalhe TEXT,
+                ms INTEGER,
+                versao TEXT,
+                usuario_id INTEGER,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            # O CANARIO. A extensao vive dentro do WhatsApp, que muda sem avisar.
+            # Cada capacidade e testada em separado e o resultado vem pra ca — o
+            # ponto e descobrir que quebrou em minutos, por um painel, e nao tres
+            # dias depois pela reclamacao de uma consultora.
             """CREATE TABLE IF NOT EXISTS wa_metrica (
                 id SERIAL PRIMARY KEY,
                 operacao TEXT NOT NULL,
@@ -1911,6 +1925,16 @@ def init_db():
             proposta_id INTEGER, lead_id INTEGER, consultor TEXT, casou_por TEXT,
             job_esperado REAL, divergencia REAL, divergencia_motivo TEXT,
             rateio_debito REAL DEFAULT 0,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS wa_canario (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            capacidade TEXT NOT NULL,
+            ok INTEGER DEFAULT 1,
+            detalhe TEXT,
+            ms INTEGER,
+            versao TEXT,
+            usuario_id INTEGER,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS wa_metrica (
@@ -16974,7 +16998,7 @@ def api_whatsapp_metrica():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False}), 401)
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     itens = (request.get_json(silent=True) or {}).get('metricas') or []
     if not isinstance(itens, list):
         return _wa_cors(jsonify({"ok": False, "erro": "formato"})), 400
@@ -17014,7 +17038,7 @@ def api_whatsapp_documento_tipo():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False}), 401)
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.get_json(silent=True) or {}
     tipo = (d.get('tipo') or '').strip()
     if tipo not in _DOC_TIPOS:
@@ -17334,6 +17358,153 @@ def api_whatsapp_documentos_ler():
         "campos_preenchidos": res.get('campos') or [],
         "custo_usd": leitura.get('custo_usd') or 0,
     }))
+
+
+
+# ── CANARIO DA EXTENSAO ────────────────────────────────────────────────────────
+# A extensao roda DENTRO do WhatsApp, que muda sem avisar ninguem. Quando muda,
+# o sintoma chega distorcido ("o JOB parou", "o WhatsApp travou") e dias depois.
+# Cada capacidade e testada isolada, de proposito: saber QUAL peca caiu e a
+# diferenca entre trocar uma linha e reescrever a ponte.
+# Frase curta que funciona nos dois lugares: na tabela do painel e na frase
+# "<isto> parou" do alerta. Sem jargao: quem le e quem vende, nao quem programa.
+_CANARIO_ROTULO = {
+    'wa_js':        'A ponte com o WhatsApp',
+    'conta':        'A identificação da conta logada',
+    'conversa':     'A leitura da conversa aberta',
+    'mensagens':    'A leitura das mensagens',
+    'achar_msg':    'A busca de mensagem por id (o caminho do @lid)',
+    'midia':        'O acesso à mídia guardada (áudio, foto, PDF)',
+    'baixar':       'O download de midia',
+    'enviar':       'O envio de mensagem',
+    'dom_linhas':   'O reconhecimento das mensagens na tela',
+    'dom_arquivo':  'O bloco de ler documento nas bolhas de arquivo',
+    'dom_audio':    'O bloco de transcrever nas bolhas de áudio',
+}
+# Capacidade que, caindo, faz MENSAGEM NAO SAIR. Falha barulhenta e chata;
+# falha silenciosa custa lead. Estas viram notificacao na hora.
+_CANARIO_CRITICAS = {'wa_js', 'enviar', 'conversa', 'achar_msg'}
+
+
+def _canario_ha(quando):
+    """'ha 3 dias' diz mais que uma data. E o tempo desde a virada que amarra a
+    quebra a uma atualizacao do WhatsApp."""
+    dt = _parse_dt_seguro(quando)
+    if not dt:
+        return ''
+    try:
+        agora = datetime.now(TZ_SP)
+        # O banco guarda hora de SP sem fuso; o parse pode devolver ingenuo.
+        seg = (agora.replace(tzinfo=None) - dt.replace(tzinfo=None)).total_seconds()
+    except Exception:
+        return ''
+    if seg < 0:
+        return 'agora'
+    if seg < 3600:
+        return f'há {int(seg // 60)} min'
+    if seg < 86400:
+        return f'há {int(seg // 3600)} h'
+    d = int(seg // 86400)
+    return f'há {d} dia' + ('s' if d > 1 else '')
+
+
+def _canario_estado(conn):
+    """Ultimo resultado de cada capacidade, e desde quando esta assim.
+
+    'Desde quando' e o dado que importa: e ele que amarra a quebra a uma
+    atualizacao do WhatsApp, em vez de deixar todo mundo adivinhando."""
+    linhas = []
+    for cap in _CANARIO_ROTULO:
+        ult = conn.execute("""SELECT ok, detalhe, versao, criado_em FROM wa_canario
+                              WHERE capacidade=? ORDER BY id DESC LIMIT 1""", (cap,)).fetchone()
+        if not ult:
+            linhas.append({'cap': cap, 'rotulo': _CANARIO_ROTULO[cap], 'estado': 'sem dado',
+                           'ok': None, 'desde': None, 'detalhe': None,
+                           'critica': cap in _CANARIO_CRITICAS})
+            continue
+        # Ha quanto tempo esta neste estado: a primeira leitura, subindo, que
+        # ainda concorda com a de agora.
+        desde = ult['criado_em']
+        for r in conn.execute("""SELECT ok, criado_em FROM wa_canario WHERE capacidade=?
+                                 ORDER BY id DESC LIMIT 200""", (cap,)).fetchall():
+            if int(r['ok'] or 0) != int(ult['ok'] or 0):
+                break
+            desde = r['criado_em']
+        linhas.append({'cap': cap, 'rotulo': _CANARIO_ROTULO[cap],
+                       'ok': bool(ult['ok']), 'estado': 'funciona' if ult['ok'] else 'quebrou',
+                       'desde': _fmt_datahora_br(desde) if desde else None,
+                       'ha': _canario_ha(desde),
+                       'detalhe': ult['detalhe'], 'versao': ult['versao'],
+                       'critica': cap in _CANARIO_CRITICAS})
+    linhas.sort(key=lambda x: (x['ok'] is not False, not x['critica']))
+    # A ULTIMA NOTICIA vale por um item de lista. Se a extensao parar de falar,
+    # todas as linhas continuam verdes eternamente — e verde velho engana mais
+    # que vermelho. Sem canario chegando, nao se sabe nada.
+    ult = conn.execute("SELECT MAX(criado_em) AS q FROM wa_canario").fetchone()
+    return {'linhas': linhas,
+            'ultima': _fmt_datahora_br(ult['q']) if ult and ult['q'] else None,
+            'ha': _canario_ha(ult['q']) if ult and ult['q'] else None,
+            'quebradas': sum(1 for x in linhas if x['ok'] is False),
+            'criticas_quebradas': sum(1 for x in linhas if x['ok'] is False and x['critica'])}
+
+
+@app.route('/api/whatsapp/canario', methods=['POST', 'OPTIONS'])
+def api_whatsapp_canario():
+    """A extensao conta o que ainda funciona nela. Ninguem pergunta, ela avisa.
+
+    Nao envia mensagem, nao baixa midia, nao mexe em nada: so verifica que as
+    pecas existem e respondem. Rodar isto nao pode custar nada, senao vira mais
+    um motivo de o WhatsApp ficar lento."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    d = request.get_json(silent=True) or {}
+    checagens = d.get('checagens') or []
+    if not isinstance(checagens, list):
+        return _wa_cors(jsonify({"ok": False, "erro": "formato"})), 400
+    versao = str(d.get('versao') or '')[:20]
+    uid = d.get('usuario_id')
+    conn = db()
+    quebrou_agora = []
+    try:
+        for c in checagens[:40]:
+            cap = str((c or {}).get('cap') or '').strip()[:24]
+            if cap not in _CANARIO_ROTULO:
+                continue
+            ok = 1 if (c or {}).get('ok') else 0
+            try:
+                ms = max(0, min(int((c or {}).get('ms') or 0), 600000))
+            except (TypeError, ValueError):
+                ms = 0
+            ant = conn.execute("""SELECT ok FROM wa_canario WHERE capacidade=?
+                                  ORDER BY id DESC LIMIT 1""", (cap,)).fetchone()
+            conn.execute("""INSERT INTO wa_canario
+                            (capacidade, ok, detalhe, ms, versao, usuario_id, criado_em)
+                            VALUES (?,?,?,?,?,?,?)""",
+                         (cap, ok, str((c or {}).get('detalhe') or '')[:200] or None,
+                          ms, versao, uid, _agora_sp()))
+            # SO A VIRADA notifica. Repetir o aviso a cada rodada treina todo
+            # mundo a ignorar o sino, e ai o proximo aviso de verdade se perde.
+            if not ok and ant is not None and int(ant['ok'] or 0) == 1:
+                quebrou_agora.append(cap)
+        conn.commit()
+    except Exception as ex:
+        try: conn.rollback()
+        except Exception: pass
+        close_db(conn)
+        app.logger.warning(f"[CANARIO] {ex}")
+        return _wa_cors(jsonify({"ok": False})), 200
+    close_db(conn)
+    for cap in quebrou_agora:
+        grave = cap in _CANARIO_CRITICAS
+        _notificar_admins(
+            'alerta' if grave else 'aviso',
+            ('WhatsApp mudou: ' if grave else 'Extensao: ') + _CANARIO_ROTULO[cap] + ' parou',
+            ('Isto derruba envio e leitura de conversa. ' if grave else '')
+            + 'Detectado pelo canário da extensão ' + (versao or 's/versao') + '.',
+            '/configuracoes')
+    return _wa_cors(jsonify({"ok": True, "gravadas": len(checagens), "quebrou": quebrou_agora}))
 
 
 @app.route('/api/whatsapp/chats/vincular', methods=['POST', 'OPTIONS'])
@@ -26456,7 +26627,7 @@ def configuracoes():
     notificar_wpp_leads = True if notificar_wpp_leads is None else bool(notificar_wpp_leads)
     # Varredura: só admin configura, mas a página é de todos — o bloco só aparece
     # pra quem pode mexer.
-    varr_cfg, varr_consultores, api_chaves = None, [], []
+    varr_cfg, varr_consultores, api_chaves, canario = None, [], [], None
     if session.get('perfil') == 'admin':
         conn2 = db()
         try:
@@ -26469,13 +26640,18 @@ def configuracoes():
             except Exception: pass
             app.logger.warning(f"[API] chaves: {e}")
         desempenho = _wa_desempenho(conn2)
+        try:
+            canario = _canario_estado(conn2)
+        except Exception as e:
+            app.logger.warning(f"[CANARIO] painel: {e}")
+            canario = None
         varr_cfg = varredura_cfg(conn2)
         varr_consultores = [dict(r) for r in conn2.execute(
             """SELECT id, nome, COALESCE(varredura_ativa,0) varredura_ativa
                FROM usuarios WHERE ativo=1 ORDER BY nome""").fetchall()]
         close_db(conn2)
     return render_template('configuracoes.html', som_atual=som_atual, sons=SONS_NOTIFICACAO,
-                           desempenho=desempenho,
+                           desempenho=desempenho, canario=canario,
                            varr_cfg=varr_cfg, varr_consultores=varr_consultores,
                            api_chaves=api_chaves, api_escopos=_API_ESCOPOS,
                            notificar_wpp_leads=notificar_wpp_leads)

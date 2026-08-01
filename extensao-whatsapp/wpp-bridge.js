@@ -470,6 +470,73 @@
 
   // Baixa UMA midia especifica por id — imagem ou PDF. Mesmo motor do audio: o
   // _acharModelo/_blobDoModelo nunca foi especifico de audio, so o nome era.
+
+  // ── CANARIO ──────────────────────────────────────────────────────────────
+  // Verifica que cada peca AINDA EXISTE e responde. Nao envia mensagem, nao
+  // baixa midia, nao abre conversa: uma rodada tem que custar quase nada, senao
+  // vira mais um motivo de o WhatsApp ficar lento — que e a queixa que originou
+  // metade das correcoes deste arquivo.
+  //
+  // Capacidade que NAO DA PRA AVALIAR agora (nenhuma conversa aberta, por
+  // exemplo) e OMITIDA da resposta. Reportar 'ok' sem ter testado e pior que
+  // nao reportar: verde falso e o que faz alguem parar de olhar o painel.
+  async function canarioProbe() {
+    const out = [];
+    const p = (cap, fn) => {
+      const t0 = Date.now();
+      try {
+        const r = fn();
+        if (r === undefined) return;                 // nao avaliavel: omite
+        out.push({ cap, ok: !!r, ms: Date.now() - t0,
+                   detalhe: r === true || r ? null : 'nao respondeu' });
+      } catch (e) {
+        out.push({ cap, ok: false, ms: Date.now() - t0,
+                   detalhe: String((e && e.message) || e).slice(0, 180) });
+      }
+    };
+    p('wa_js', () => !!(window.WPP && window.WPP.chat && window.WPP.whatsapp));
+    if (!(window.WPP && window.WPP.chat)) return { checagens: out };
+
+    p('enviar', () => typeof WPP.chat.sendTextMessage === 'function' &&
+                     typeof WPP.chat.sendFileMessage === 'function');
+    p('baixar', () => typeof WPP.chat.downloadMedia === 'function');
+    p('conta', () => {
+      const id = WPP.conn && WPP.conn.getMyUserId && WPP.conn.getMyUserId();
+      return !!(id && (id._serialized || id.user));
+    });
+    p('midia', () => {
+      // O cofre onde a midia decifrada mora antes de virar blob. E o caminho
+      // que a transcricao e a leitura de documento usam em conversa @lid.
+      const m = window.WPP.whatsapp;
+      return !!(m && (m.LruMediaStore || m.MediaBlobCache));
+    });
+
+    const chat = (() => { try { return WPP.chat.getActiveChat(); } catch (e) { return null; } })();
+    // Sem conversa aberta nao da pra testar leitura — e isso nao e defeito.
+    if (!chat) return { checagens: out };
+    p('conversa', () => !!(chat.id && (chat.id._serialized || chat.id.user)));
+
+    let msgs = null;
+    try {
+      msgs = await WPP.chat.getMessages(chat.id, { count: 3 });
+    } catch (e) {
+      out.push({ cap: 'mensagens', ok: false, ms: 0,
+                 detalhe: String((e && e.message) || e).slice(0, 180) });
+    }
+    if (msgs) {
+      p('mensagens', () => Array.isArray(msgs));
+      const alvo = (msgs || []).find((m) => m && m.id);
+      if (alvo) {
+        const bruto = alvo.id._serialized || String(alvo.id);
+        p('achar_msg', () => {
+          const a = _acharModelo(bruto);
+          return !!(a && a.msg);
+        });
+      }
+    }
+    return { checagens: out };
+  }
+
   async function baixarMidiaPorId(ids) {
     if (!window.WPP || !window.WPP.chat) return { erro: 'wpp_ausente' };
     const out = [], erros = {};
@@ -1035,6 +1102,7 @@
       else if (d.tipo === 'ler_conversa_de') resp = await lerConversaDe(d.chatId, d.desdeMsgId, d.limite);
       else if (d.tipo === 'baixar_audios_ids') resp = await baixarAudiosPorId(d.ids);
       else if (d.tipo === 'baixar_midia_ids') resp = await baixarMidiaPorId(d.ids);
+      else if (d.tipo === 'canario') resp = await canarioProbe();
       else if (d.tipo === 'baixar_documentos') resp = await baixarDocumentos(d.limite, d.forcarGrandes);
       else if (d.tipo === 'ler_mensagens') resp = await lerMensagens(d.limite);
       else if (d.tipo === 'ler_conversa_completa') resp = await lerConversaCompleta(d.limite);
