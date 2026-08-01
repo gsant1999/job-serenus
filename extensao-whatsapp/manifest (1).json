@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "JOB — Análise de WhatsApp",
+  "version": "2.65.0",
+  "description": "Painel dentro do WhatsApp Web: analisa o lead, calcula o Score e envia mensagens da biblioteca de modelos.",
+  "permissions": ["storage", "notifications"],
+  "host_permissions": [
+    "https://web.whatsapp.com/*",
+    "https://*.up.railway.app/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "JOB — Análise de WhatsApp"
+  },
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
+  "web_accessible_resources": [
+    { "resources": ["logo_arcos.png"], "matches": ["https://web.whatsapp.com/*"] }
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["wa-js.vendor.js", "wpp-bridge.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

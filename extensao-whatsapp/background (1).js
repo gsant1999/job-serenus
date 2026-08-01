@@ -322,48 +322,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/metrica', 'POST', { metricas: msg.metricas || [] }, 12000).then(sendResponse);
     return true;
   }
-  // ABRIR A CONVERSA NA ABA QUE JA EXISTE.
-  //
-  // Pedido do Guilherme: o botao do CRM abria aba nova e o WhatsApp recarregava
-  // tudo. Aqui o caminho e outro — acha a aba do WhatsApp Web ja aberta, foca
-  // nela e manda o content script trocar de conversa por dentro. Nada recarrega.
-  // So cria aba nova quando NAO existe nenhuma, que e o unico caso em que
-  // carregar do zero e inevitavel.
-  if (msg && msg.type === 'abrir_chat_whatsapp') {
-    const tel = String(msg.telefone || '').replace(/\D/g, '');
-    const texto = String(msg.texto || '').slice(0, 4000);
-    const comDdi = tel ? (tel.startsWith('55') ? tel : '55' + tel) : '';
-    chrome.tabs.query({ url: 'https://web.whatsapp.com/*' }, (abas) => {
-      const aba = (abas || [])[0];
-      if (!aba) {
-        if (!comDdi) { sendResponse({ ok: false, motivo: 'sem_telefone' }); return; }
-        chrome.tabs.create({ url: 'https://web.whatsapp.com/send?phone=' + comDdi + (texto ? '&text=' + encodeURIComponent(texto) : ''), active: true },
-          () => sendResponse({ ok: true, motivo: 'aba_nova' }));
-        return;
-      }
-      chrome.tabs.update(aba.id, { active: true }, () => {
-        if (aba.windowId != null) { try { chrome.windows.update(aba.windowId, { focused: true }); } catch (e) {} }
-        chrome.tabs.sendMessage(aba.id, { type: 'abrir_chat_aqui', telefone: comDdi, chatId: msg.chatId || '', texto: msg.texto || '' },
-          (r) => {
-            if (chrome.runtime.lastError) {
-              // Aba aberta mas sem content script (F5 pendente): navega nela
-              // mesmo assim — ainda e melhor que abrir outra.
-              if (comDdi) chrome.tabs.update(aba.id, { url: 'https://web.whatsapp.com/send?phone=' + comDdi + (texto ? '&text=' + encodeURIComponent(texto) : '') });
-              sendResponse({ ok: true, motivo: 'navegou_na_aba' });
-              return;
-            }
-            sendResponse({ ok: !!(r && r.ok), motivo: (r && r.motivo) || '' });
-          });
-      });
-    });
-    return true;
-  }
-  if (msg && msg.type === 'documentos_ler') {
-    chamarJob('/api/whatsapp/documentos/ler', 'POST',
-      { telefone: msg.telefone, lead_id: msg.leadId || null, arquivos: msg.arquivos || [] },
-      180000).then(sendResponse);
-    return true;
-  }
   if (msg && msg.type === 'vincular_chats') {
     chamarJob('/api/whatsapp/chats/vincular', 'POST', { conversas: msg.conversas || [] }, 45000).then(sendResponse);
     return true;

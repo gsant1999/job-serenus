@@ -1472,9 +1472,7 @@
       '<button type="button" class="job-bc-btn" data-ac="transcrever" title="Transcrever todos os áudios desta conversa">' +
         _ICO_TRANSCREVER + '<span>Transcrever tudo</span></button>' +
       '<button type="button" class="job-bc-btn" data-ac="copiar" title="Copiar a conversa inteira: texto e áudio transcrito, na ordem, com hora e quem falou">' +
-        _ICO_COPIAR + '<span>Copiar conversa</span></button>' +
-      '<button type="button" class="job-bc-btn" data-ac="docs" title="Ler os documentos que o cliente mandou (RG, CNPJ, comprovante) e preencher a ficha do lead">' +
-        _ICO_DOC + '<span>Ler documentos</span></button>';
+        _ICO_COPIAR + '<span>Copiar conversa</span></button>';
     cab.appendChild(box);
 
     const btn = (ac) => box.querySelector('[data-ac="' + ac + '"]');
@@ -1499,35 +1497,6 @@
       }
     });
 
-    const bd = btn('docs');
-    bd.addEventListener('click', async (ev) => {
-      ev.stopPropagation();
-      if (bd.disabled) return;
-      bd.disabled = true;
-      const r0 = 'Ler documentos';
-      try {
-        const r = await lerDocumentosDaConversa((t) => rotulo(bd, t));
-        if (!r.ok) { rotulo(bd, r.motivo || 'Não deu'); return; }
-        if (!r.lidos) { rotulo(bd, 'Já lidos (' + (r.ja_lidos || 0) + ')'); return; }
-        const tipos = (r.arquivos || []).filter((a) => a.tipo && a.tipo !== 'outro').length;
-        const campos = (r.campos_preenchidos || []).length;
-        rotulo(bd, tipos + ' doc' + (campos ? ' · ' + campos + ' campo(s)' : ' · nada novo'));
-        // A DUVIDA DA IA CHEGA JUNTO. Documento ilegivel que preenche campo em
-        // silencio e pior que documento que nao preencheu nada.
-        const duvida = (r.arquivos || []).filter((a) => a.certeza === 'baixa').length;
-        if (duvida || (r.observacoes || []).length) {
-          setTimeout(() => alert('Leitura dos documentos\n\n' +
-            (r.arquivos || []).map((a) => '• ' + (a.nome || '') + ' → ' + a.tipo +
-              (a.pessoa ? ' (' + a.pessoa + ')' : '') + (a.certeza === 'baixa' ? '  [conferir]' : '')).join('\n') +
-            ((r.observacoes || []).length ? '\n\n' + r.observacoes.join('\n') : '')), 300);
-        }
-      } catch (e) {
-        rotulo(bd, 'Falhou');
-      } finally {
-        setTimeout(() => { rotulo(bd, r0); bd.disabled = false; }, 4000);
-      }
-    });
-
     const bc = btn('copiar');
     bc.addEventListener('click', async (ev) => {
       ev.stopPropagation();
@@ -1548,47 +1517,6 @@
         setTimeout(() => { rotulo(bc, r0); bc.disabled = false; }, 3200);
       }
     });
-  }
-
-  const _ICO_DOC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
-    'stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
-    '<polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
-
-  // ── LER OS DOCUMENTOS DA CONVERSA ───────────────────────────────────────
-  // Sob demanda, com clique — igual a transcricao, e pelo mesmo motivo: ler
-  // documento custa dinheiro. Automatico numa conversa cheia de foto viraria
-  // conta surpresa, e a maioria das imagens de uma conversa de venda nao e
-  // documento (e print de cotacao, foto de carteirinha, meme).
-  //
-  // A leitura acontece no SERVIDOR: a chave da IA nunca chega no navegador do
-  // consultor, e o mesmo documento nao e pago duas vezes (hash por lead).
-  async function lerDocumentosDaConversa(aoAndar) {
-    const dizer = aoAndar || function () {};
-    dizer('Procurando documentos…');
-    let arquivos = [];
-    try {
-      const ri = await rasparImagensVisiveis(() => {});
-      for (const im of (ri.imagens || [])) {
-        if (im.base64) arquivos.push({ nome: im.nome || ('foto ' + (im.hora || '')), base64: im.base64,
-                                       mime: im.mime || 'image/jpeg', tipo: 'imagem' });
-      }
-    } catch (e) { /* segue sem imagem */ }
-    try {
-      const rd = await _pedirPonte('baixar_documentos', { limite: 8, forcarGrandes: false }, 90000);
-      for (const d of ((rd && rd.documentos) || [])) {
-        if (d.base64) arquivos.push({ nome: d.nome || 'documento.pdf', base64: d.base64,
-                                      mime: 'application/pdf', tipo: 'documento' });
-      }
-    } catch (e) { /* segue sem PDF */ }
-    if (!arquivos.length) return { ok: false, motivo: 'Nenhuma foto ou PDF nesta conversa' };
-    dizer('Lendo ' + arquivos.length + '…');
-    let tel = '';
-    try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
-    const r = await _safeSendMessage({ type: 'documentos_ler', telefone: tel,
-                                       leadId: (_ficha && _ficha.lead && _ficha.lead.id) || null,
-                                       arquivos: arquivos.slice(0, 12) }).catch(() => null);
-    if (!r || !r.ok) return { ok: false, motivo: (r && r.erro) || 'o JOB não respondeu' };
-    return r;
   }
 
   // ── COPIAR A CONVERSA INTEIRA ───────────────────────────────────────────
@@ -5123,20 +5051,6 @@
 
   // A ponte avisa quando ENTRA uma mensagem (só o chatId). Se for de um número em
   // vigília, reporta a resposta ao JOB e tira da vigília.
-  // O site do JOB pediu pra abrir uma conversa NESTA aba (via background).
-  chrome.runtime.onMessage.addListener((msg, _rem, responder) => {
-    if (!msg || msg.type !== 'abrir_chat_aqui') return;
-    (async () => {
-      try {
-        const r = await _pedirPonte('abrir_chat', { chatId: msg.chatId || '', telefone: msg.telefone || '', texto: msg.texto || '' }, 12000);
-        responder({ ok: !!(r && r.ok), motivo: (r && r.erro) || '' });
-      } catch (e) {
-        responder({ ok: false, motivo: String((e && e.message) || e) });
-      }
-    })();
-    return true;
-  });
-
   window.addEventListener('message', async (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
