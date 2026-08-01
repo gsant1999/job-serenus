@@ -1,10 +1,10 @@
 {% extends 'base.html' %}
-{% block title %}Conversão offline — Google Ads{% endblock %}
+{% block title %}Conversão offline — Google Ads e Meta{% endblock %}
 {% block content %}
 <div class="topbar">
   <div>
-    <h1>Conversão offline · Google Ads</h1>
-    <div class="sub">Devolve a VENDA ao Google, com valor real, para ele otimizar por quem compra — não por quem preenche formulário</div>
+    <h1>Conversão offline</h1>
+    <div class="sub">Devolve a VENDA ao Google e à Meta, com valor real, para eles otimizarem por quem compra — não por quem preenche formulário</div>
   </div>
   <div style="display:flex; gap:8px;">
     <button class="btn-outline btn-sm" onclick="enfileirar(this)">Buscar vendas não enfileiradas</button>
@@ -76,6 +76,63 @@
       </table>
     </div>
   </div>
+
+  <div class="card" style="margin-top:22px;">
+    <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <h3>Meta (Facebook e Instagram)<i class="ajuda-i" title="Mesma venda, outro destino. A Meta casa o evento com o clique pelo fbclid, que o JOB já captura na entrada do lead. E-mail e telefone vão junto, com hash SHA-256, só para melhorar o casamento — o dado do cliente nunca sai em claro.">i</i></h3>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-outline btn-sm" onclick="enfileirarMeta(this)">Buscar vendas não enfileiradas</button>
+        <button class="btn btn-sm" onclick="enviarMeta(this)">Enviar pendentes</button>
+      </div>
+    </div>
+    <div style="padding:0 16px 16px;">
+      {% if m_faltando %}
+      <div style="font-size:13px; color:var(--cinza); line-height:1.6; margin-bottom:14px;">
+        A fila já registra as vendas; o que ainda não acontece é o envio. Defina no Railway:
+        <div style="margin:10px 0; display:flex; flex-wrap:wrap; gap:6px;">
+          {% for f in m_faltando %}<code style="background:var(--panel-3); padding:3px 9px; border-radius:6px; font-size:12px;">{{ f }}</code>{% endfor %}
+        </div>
+        <b style="color:var(--texto);">Onde nascem:</b> o <code>META_PIXEL_ID</code> é o id do conjunto de dados no
+        Gerenciador de Eventos. O <code>META_ACCESS_TOKEN</code> é gerado ali mesmo, em
+        <b style="color:var(--texto);">Conversions API → Gerar token de acesso</b>.
+        Opcional: <code>META_TEST_EVENT_CODE</code>, para conferir no Testar Eventos sem sujar o dado real.
+      </div>
+      {% endif %}
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+        {% for st, d in m_contagem.items() %}
+        <div style="flex:1 1 130px; background:var(--panel-2); border:1px solid var(--borda); border-radius:9px; padding:10px 12px;">
+          <b style="display:block; font-size:18px;">{{ d.n }}</b>
+          <span style="font-size:10px; color:var(--cinza);">{{ st }} · {{ d.valor|moeda }}</span>
+        </div>
+        {% endfor %}
+        {% if m_fora %}
+        <div style="flex:1 1 130px; background:var(--panel-2); border:1px solid rgba(250,204,21,.35); border-radius:9px; padding:10px 12px;">
+          <b style="display:block; font-size:18px;">{{ m_fora }}</b>
+          <span style="font-size:10px; color:var(--cinza);">venda(s) fora da fila</span>
+        </div>
+        {% endif %}
+      </div>
+      {% if not m_linhas %}
+        <div style="font-size:12px; color:var(--cinza); font-style:italic;">Nenhuma venda na fila da Meta ainda. Use "Buscar vendas não enfileiradas".</div>
+      {% else %}
+      <table class="tabela">
+        <thead><tr><th>Venda</th><th>Lead</th><th>fbclid</th><th style="text-align:right;">Valor</th><th>Status</th><th>Detalhe</th></tr></thead>
+        <tbody>
+          {% for l in m_linhas[:60] %}
+          <tr>
+            <td><a href="/proposta/{{ l.proposta_id }}">{{ l.razao_social or ('venda #' ~ l.proposta_id) }}</a></td>
+            <td>{% if l.lead_id %}<a href="/lead/{{ l.lead_id }}">{{ l.lead_nome or ('lead #' ~ l.lead_id) }}</a>{% else %}—{% endif %}</td>
+            <td style="font-family:ui-monospace,Menlo,monospace; font-size:10px;">{{ (l.fbclid or '—')[:22] }}{{ '…' if l.fbclid and l.fbclid|length > 22 }}</td>
+            <td style="text-align:right;">{{ l.valor|moeda }}</td>
+            <td>{{ l.status }}</td>
+            <td style="font-size:11px; color:var(--cinza);">{{ (l.detalhe or '')[:70] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+  </div>
 </div>
 
 <script>
@@ -90,6 +147,13 @@ async function _p(url, body, btn, rot){
 }
 function enfileirar(b){ _p('/google-ads/enfileirar', {}, b,
   d => d.analisadas + ' venda(s) analisada(s).\n' + JSON.stringify(d.placar||{}, null, 1)); }
+function enfileirarMeta(b){ _p('/meta-ads/enfileirar', {}, b,
+  d => d.analisadas + ' venda(s) analisada(s).\n' + JSON.stringify(d.placar||{}, null, 1)); }
+function enviarMeta(b){ _p('/meta-ads/enviar', {}, b,
+  d => { const r = d.resumo || d;
+    return 'Pendentes: ' + r.pendentes + '\nEnviadas: ' + r.enviadas + '\nRecusadas: ' + r.falhas +
+      ((r.faltando_config||[]).length ? '\n\nFalta configurar: ' + r.faltando_config.join(', ') : '') +
+      ((r.erros||[]).length ? '\n\n' + r.erros.join('\n') : ''); }); }
 function enviar(b){ _p('/google-ads/enviar', {}, b,
   d => 'Pendentes: ' + d.pendentes + '\nEnviadas: ' + d.enviadas + '\nRecusadas: ' + d.falhas +
        (d.faltando_config && d.faltando_config.length ? '\n\nFalta configurar: ' + d.faltando_config.join(', ') : '') +

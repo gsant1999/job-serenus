@@ -1003,7 +1003,26 @@ def init_db():
             # um @lid pode não resolver telefone nenhum (contato sem número exposto).
             # Sem esta tabela, a varredura diária reanalisaria conversa que não mudou
             # e pagaria de novo por dado que já temos.
-            # EXTRATO DE COMISSAO DA AFFINITY (PDF). O que a Affinity manda no
+            # CONVERSAO OFFLINE PRA META. Tabela propria em vez de reaproveitar a do
+            # Google: aquela tem UNIQUE(proposta_id) e funciona — enfiar a Meta la
+            # dentro obrigaria a mexer no que ja esta rodando. Mesma forma, mesmo
+            # ciclo de status, dois destinos independentes.
+            """CREATE TABLE IF NOT EXISTS meta_conversoes (
+                id SERIAL PRIMARY KEY,
+                proposta_id INTEGER NOT NULL UNIQUE,
+                lead_id INTEGER,
+                fbclid TEXT,
+                valor REAL DEFAULT 0,
+                moeda TEXT DEFAULT 'BRL',
+                conversao_em TIMESTAMP,
+                status TEXT DEFAULT 'pendente',
+                detalhe TEXT,
+                event_id TEXT,
+                tentativas INTEGER DEFAULT 0,
+                enviado_em TIMESTAMP,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+                        # EXTRATO DE COMISSAO DA AFFINITY (PDF). O que a Affinity manda no
             # relatorio E o que ela paga — nao se discute o valor. O que o JOB
             # precisa saber e POR QUE divergiu do calculo dele: erro nosso no
             # cadastro ou erro dela. Por isso o extrato entra como registro
@@ -1808,6 +1827,15 @@ def init_db():
             numero TEXT,
             wpp_ok INTEGER DEFAULT 0,
             visto_em TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS meta_conversoes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposta_id INTEGER NOT NULL UNIQUE,
+            lead_id INTEGER, fbclid TEXT,
+            valor REAL DEFAULT 0, moeda TEXT DEFAULT 'BRL',
+            conversao_em TIMESTAMP, status TEXT DEFAULT 'pendente', detalhe TEXT,
+            event_id TEXT, tentativas INTEGER DEFAULT 0, enviado_em TIMESTAMP,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS comissao_extrato (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -9215,6 +9243,104 @@ def _ads_click_id_do_lead(conn, lead_id):
     return None, None
 
 
+# ═══════════════ CONVERSAO OFFLINE PRA META ═══════════════
+# Mesmo raciocinio do Google: o anuncio otimiza pelo que a gente devolve. Se so
+# devolvemos "virou lead", a Meta aprende a trazer quem PREENCHE FORMULARIO. Se
+# devolvemos a venda, ela aprende a trazer quem COMPRA — que e outra pessoa, e a
+# diferenca entre CAC caindo e CAC subindo com o mesmo orcamento.
+#
+# A Meta usa a Conversions API: um POST por lote no dataset (pixel). O que casa o
+# evento com o clique e o `fbc`, montado a partir do fbclid — que o JOB ja captura
+# na ingestao (_MIDIA_CAMINHOS) desde antes disto existir.
+_META_API_VERSAO = os.environ.get('META_API_VERSAO', 'v21.0').strip() or 'v21.0'
+
+
+def _meta_config():
+    """Credenciais da Meta via env. Devolve (config, faltando) — a lista do que
+    falta e o que a tela mostra, em vez de falhar calada."""
+    campos = {'pixel_id': 'META_PIXEL_ID', 'access_token': 'META_ACCESS_TOKEN'}
+    cfg, faltando = {}, []
+    for k, env in campos.items():
+        v = (os.environ.get(env) or '').strip()
+        if not v:
+            faltando.append(env)
+        cfg[k] = v
+    # Opcional: codigo de teste do Events Manager, pra conferir sem sujar o dado.
+    cfg['test_event_code'] = (os.environ.get('META_TEST_EVENT_CODE') or '').strip()
+    return cfg, faltando
+
+
+def _meta_hash(v):
+    """SHA-256 do dado normalizado, como a Meta exige. E-mail e telefone melhoram
+    MUITO o casamento quando o fbclid sozinho nao basta — e vao hasheados, entao
+    o dado do cliente nunca sai daqui em claro."""
+    v = (v or '').strip().lower()
+    if not v:
+        return None
+    return hashlib.sha256(v.encode('utf-8')).hexdigest()
+
+
+def _meta_fbc(fbclid, quando):
+    """Formato exigido: 'fb.1.<timestamp_ms>.<fbclid>'. Sem isso a Meta nao liga
+    o evento ao clique e a conversao vira dado solto."""
+    if not fbclid:
+        return None
+    dt = _parse_dt_seguro(quando) if quando else None
+    if not dt:
+        dt = datetime.now(TZ_SP)
+    if dt.tzinfo is None:
+        dt = TZ_SP.localize(dt)
+    return f"fb.1.{int(dt.timestamp() * 1000)}.{fbclid}"
+
+
+def _meta_click_do_lead(conn, lead_id):
+    """fbclid do lead. Diferente do Google, aqui e um so — a Meta nao tem os
+    equivalentes de gbraid/wbraid."""
+    if not lead_id:
+        return None
+    lead = conn.execute("SELECT dados_extras FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+    if not lead:
+        return None
+    return _campo_de_midia(lead['dados_extras'], 'fbclid') or None
+
+
+def _meta_enfileirar(conn, proposta_id, motivo='venda confirmada'):
+    """Registra a venda como conversao A ENVIAR pra Meta. Idempotente pelo UNIQUE
+    em proposta_id. Mesmas guardas do Google, pelos mesmos motivos:
+    'sem_clique' nao e definitivo (vira pendente quando o fbclid aparecer), e o
+    que ja foi enviado NAO volta pra fila — reenviar conta a venda duas vezes."""
+    prop = conn.execute("SELECT * FROM propostas WHERE id=?", (proposta_id,)).fetchone()
+    if not prop:
+        return None, 'proposta inexistente'
+    ja = conn.execute("SELECT * FROM meta_conversoes WHERE proposta_id=?", (proposta_id,)).fetchone()
+    if ja and ja['status'] in ('enviada', 'pendente'):
+        return dict(ja), 'já registrada'
+    if ja and (ja['enviado_em'] or ja['status'] == 'retratar'):
+        conn.execute("UPDATE meta_conversoes SET detalhe=? WHERE proposta_id=?",
+                     ('reativada após envio — ajuste manual no Events Manager, não reenviar', proposta_id))
+        return dict(ja), 'ja_enviada_nao_reenvia'
+    lead_id = prop['lead_id'] if 'lead_id' in prop.keys() else None
+    fbclid = _meta_click_do_lead(conn, lead_id)
+    valor = _ads_valor_da_proposta(prop)   # mesma regua do Google: receita, nao mensalidade
+    status = 'pendente' if fbclid else 'sem_clique'
+    agora = _agora_sp()
+    quando_venda = (prop['criado_em'] if 'criado_em' in prop.keys() else None) or agora
+    # event_id estavel: se o mesmo evento subir duas vezes (retentativa, deploy no
+    # meio do lote), a Meta deduplica em vez de contar a venda dobrada.
+    event_id = f"job-venda-{proposta_id}"
+    if ja:
+        conn.execute("""UPDATE meta_conversoes SET lead_id=?, fbclid=?, valor=?, status=?,
+                        detalhe=?, conversao_em=?, event_id=? WHERE proposta_id=?""",
+                     (lead_id, fbclid, valor, status, motivo, quando_venda, event_id, proposta_id))
+    else:
+        conn.execute("""INSERT INTO meta_conversoes
+            (proposta_id, lead_id, fbclid, valor, conversao_em, status, detalhe, event_id, criado_em)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (proposta_id, lead_id, fbclid, valor, quando_venda, status, motivo, event_id, agora))
+    return dict(conn.execute("SELECT * FROM meta_conversoes WHERE proposta_id=?",
+                             (proposta_id,)).fetchone()), status
+
+
 def _ads_valor_da_proposta(prop):
     """Valor mandado ao Google. Padrão: comissão bruta da corretora — é a RECEITA
     que a venda gera. Mandar a mensalidade infla o número (não é nosso dinheiro) e
@@ -9289,6 +9415,102 @@ def _ads_data_conversao(valor):
     if dt.tzinfo is None:
         dt = TZ_SP.localize(dt)
     return dt.strftime('%Y-%m-%d %H:%M:%S%z')[:-2] + ':' + dt.strftime('%z')[-2:]
+
+
+def enviar_conversoes_meta(limite=200, so_simular=False):
+    """Sobe as conversoes pendentes pra Meta. Devolve resumo pra tela e pro log.
+
+    Revalida contra a proposta NA HORA: a venda pode ter sido estornada ou
+    excluida depois de entrar na fila, e mandar receita que nao existe e
+    exatamente o inflar de ROAS que este modulo diz impedir."""
+    cfg, faltando = _meta_config()
+    conn = db()
+    pend = conn.execute("""SELECT m.* FROM meta_conversoes m
+                           JOIN propostas p ON p.id = m.proposta_id
+                           WHERE m.status='pendente' AND m.fbclid IS NOT NULL AND m.fbclid <> ''
+                             AND p.status_operacional='Emitida/Ativa'
+                             AND COALESCE(p.status,'') <> 'Excluída'
+                             AND COALESCE(p.estornada,0)=0
+                           ORDER BY m.id LIMIT ?""", (limite,)).fetchall()
+    conn.execute("""UPDATE meta_conversoes SET status='cancelada',
+            detalhe='venda estornada/excluída antes do envio'
+        WHERE status='pendente' AND proposta_id IN (
+            SELECT id FROM propostas
+            WHERE status_operacional <> 'Emitida/Ativa' OR COALESCE(status,'')='Excluída'
+               OR COALESCE(estornada,0)=1)""")
+    conn.commit()
+    resumo = {'pendentes': len(pend), 'enviadas': 0, 'falhas': 0,
+              'faltando_config': faltando, 'simulado': bool(so_simular), 'erros': []}
+    if not pend:
+        close_db(conn); return resumo
+    if faltando:
+        resumo['erros'].append('Credenciais ausentes: ' + ', '.join(faltando))
+        close_db(conn); return resumo
+    if so_simular:
+        close_db(conn); return resumo
+
+    eventos, ids = [], []
+    for c in pend:
+        lead = conn.execute("SELECT nome, email, telefone_norm FROM crm_leads WHERE id=?",
+                            (c['lead_id'],)).fetchone() if c['lead_id'] else None
+        quando = _parse_dt_seguro(c['conversao_em']) or datetime.now(TZ_SP)
+        if quando.tzinfo is None:
+            quando = TZ_SP.localize(quando)
+        user = {'fbc': _meta_fbc(c['fbclid'], c['conversao_em'])}
+        if lead:
+            em = _meta_hash(lead['email'])
+            if em:
+                user['em'] = [em]
+            tel = (lead['telefone_norm'] or '').strip()
+            if tel:
+                # E.164 sem '+', como a Meta espera antes do hash.
+                user['ph'] = [_meta_hash(tel if tel.startswith('55') else '55' + tel)]
+        eventos.append({
+            'event_name': 'Purchase',
+            'event_time': int(quando.timestamp()),
+            'event_id': c['event_id'] or f"job-venda-{c['proposta_id']}",
+            # 'system_generated': o evento nasceu no nosso sistema, nao num
+            # navegador. Dizer 'website' aqui seria mentir sobre a origem e a
+            # Meta usa isso na atribuicao.
+            'action_source': 'system_generated',
+            'user_data': {k: v for k, v in user.items() if v},
+            'custom_data': {'value': float(c['valor'] or 0), 'currency': c['moeda'] or 'BRL'},
+        })
+        ids.append(c['id'])
+
+    url = f"https://graph.facebook.com/{_META_API_VERSAO}/{cfg['pixel_id']}/events"
+    corpo = {'data': eventos, 'access_token': cfg['access_token']}
+    if cfg.get('test_event_code'):
+        corpo['test_event_code'] = cfg['test_event_code']
+    try:
+        import requests as _rq
+        r = _rq.post(url, json=corpo, timeout=45)
+        dados = r.json() if r.content else {}
+    except Exception as e:
+        conn.execute(f"""UPDATE meta_conversoes SET tentativas=COALESCE(tentativas,0)+1, detalhe=?
+                         WHERE id IN ({','.join(['?'] * len(ids))})""",
+                     [f'falha de rede: {e}'] + ids)
+        conn.commit(); close_db(conn)
+        resumo['falhas'] = len(ids)
+        resumo['erros'].append(f'Falha ao falar com a Meta: {e}')
+        return resumo
+
+    if r.status_code == 200 and not dados.get('error'):
+        marc = ','.join(['?'] * len(ids))
+        conn.execute(f"""UPDATE meta_conversoes SET status='enviada', enviado_em=?,
+                         detalhe=?, tentativas=COALESCE(tentativas,0)+1
+                         WHERE id IN ({marc})""",
+                     [_agora_sp(), f"recebidos: {dados.get('events_received', len(eventos))}"] + ids)
+        resumo['enviadas'] = len(ids)
+    else:
+        erro = (dados.get('error') or {}).get('message') or f'HTTP {r.status_code}'
+        marc = ','.join(['?'] * len(ids))
+        conn.execute(f"""UPDATE meta_conversoes SET tentativas=COALESCE(tentativas,0)+1,
+                         detalhe=? WHERE id IN ({marc})""", [str(erro)[:400]] + ids)
+        resumo['falhas'] = len(ids)
+        resumo['erros'].append(str(erro)[:400])
+    conn.commit(); close_db(conn)
+    return resumo
 
 
 def enviar_conversoes_ads(limite=200, so_simular=False):
@@ -11388,6 +11610,12 @@ def atualizar_status_operacional(pid):
             _ads_enfileirar(conn, pid, 'proposta emitida/ativa')
         except Exception as e:
             app.logger.warning(f"[ADS] não enfileirou proposta {pid}: {e}")
+        # Meta no MESMO gatilho: a venda e a mesma, os destinos e que sao dois.
+        # Falha num nao pode impedir o outro — por isso try separado.
+        try:
+            _meta_enfileirar(conn, pid, 'proposta emitida/ativa')
+        except Exception as e:
+            app.logger.warning(f"[META] não enfileirou proposta {pid}: {e}")
     # Saiu de Emitida/Ativa (cancelada/suspensa): marca pra não subir mais. O que
     # JÁ subiu precisa de ajuste de retração no Google — fica registrado como
     # 'retratar' pra aparecer no diagnóstico, em vez de virar receita fantasma.
@@ -23069,11 +23297,36 @@ def google_ads_painel():
                               WHERE g.proposta_id=p.id AND g.status <> 'sem_clique')""").fetchone()['c']
     except Exception:
         fora = 0
+    # META, no mesmo painel: e a mesma venda indo pra dois lugares, e ver
+    # separado esconderia o caso que mais importa — a venda que subiu pra um e
+    # nao pro outro.
+    mcfg, mfaltando = _meta_config()
+    m_contagem, m_linhas, m_fora = {}, [], 0
+    try:
+        for r in conn.execute("SELECT status, COUNT(*) c, COALESCE(SUM(valor),0) v FROM meta_conversoes GROUP BY status").fetchall():
+            m_contagem[r['status']] = {'n': r['c'], 'valor': r['v']}
+        m_linhas = [dict(r) for r in conn.execute("""SELECT m.*, p.razao_social, p.consultor,
+                                                          l.nome lead_nome
+                                                   FROM meta_conversoes m
+                                                   LEFT JOIN propostas p ON p.id = m.proposta_id
+                                                   LEFT JOIN crm_leads l ON l.id = m.lead_id
+                                                   ORDER BY m.id DESC LIMIT 300""").fetchall()]
+        m_fora = conn.execute("""SELECT COUNT(*) c FROM propostas p
+            WHERE p.status_operacional='Emitida/Ativa' AND p.status <> 'Excluída'
+              AND COALESCE(p.estornada,0)=0
+              AND NOT EXISTS (SELECT 1 FROM meta_conversoes m
+                              WHERE m.proposta_id=p.id AND m.status <> 'sem_clique')""").fetchone()['c']
+    except Exception as e:
+        app.logger.warning(f"[META] painel: {e}")
+        try: conn.rollback()
+        except Exception: pass
     close_db(conn)
     return render_template('google_ads.html', linhas=[dict(r) for r in linhas],
                            contagem=contagem, faltando=faltando, fora=fora,
                            valor_base=(os.environ.get('GOOGLE_ADS_VALOR_BASE') or 'comissao_bruta'),
-                           customer_id=cfg['customer_id'])
+                           customer_id=cfg['customer_id'],
+                           m_linhas=m_linhas, m_contagem=m_contagem, m_faltando=mfaltando,
+                           m_fora=m_fora, m_pixel=mcfg.get('pixel_id') or '')
 
 
 @app.route('/google-ads/enfileirar', methods=['POST'])
@@ -23095,6 +23348,34 @@ def google_ads_enfileirar():
         placar[st] = placar.get(st, 0) + 1
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "analisadas": len(props), "placar": placar})
+
+
+@app.route('/meta-ads/enfileirar', methods=['POST'])
+@login_required
+@admin_required
+def meta_ads_enfileirar():
+    """Backfill da Meta: varre as vendas confirmadas que ainda nao estao na fila."""
+    conn = db()
+    props = conn.execute("""SELECT id FROM propostas
+        WHERE status_operacional='Emitida/Ativa' AND status <> 'Excluída'
+          AND COALESCE(estornada,0)=0
+          AND NOT EXISTS (SELECT 1 FROM meta_conversoes m
+                          WHERE m.proposta_id=propostas.id AND m.status <> 'sem_clique')
+        ORDER BY id""").fetchall()
+    placar = {}
+    for p in props:
+        _reg, st = _meta_enfileirar(conn, p['id'], 'backfill manual')
+        placar[st] = placar.get(st, 0) + 1
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "analisadas": len(props), "placar": placar})
+
+
+@app.route('/meta-ads/enviar', methods=['POST'])
+@login_required
+@admin_required
+def meta_ads_enviar():
+    so_simular = bool((request.json or {}).get('simular'))
+    return jsonify({"ok": True, "resumo": enviar_conversoes_meta(so_simular=so_simular)})
 
 
 @app.route('/google-ads/enviar', methods=['POST'])
