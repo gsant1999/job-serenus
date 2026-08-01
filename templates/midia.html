@@ -1,0 +1,122 @@
+{% extends 'base.html' %}
+{% block title %}Custo por campanha{% endblock %}
+{% block head %}
+<style>
+  .md-num-linha { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .md-num { flex:1 1 145px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px 14px; }
+  .md-num b { display:block; font-size:20px; font-variant-numeric:tabular-nums; }
+  .md-num span { display:block; font-size:10px; color:var(--cinza); margin-top:3px; }
+  .md-num.alerta { border-color:rgba(250,204,21,.35); }
+  .md-tab { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .md-tab th { text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.4px;
+               color:var(--cinza); padding:7px 8px; border-bottom:1px solid var(--borda); font-weight:600; }
+  .md-tab td { padding:8px; border-bottom:1px solid var(--borda); }
+  .md-tab td.num, .md-tab th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .md-canal { font-size:8.5px; font-weight:800; letter-spacing:.3px; padding:1px 6px; border-radius:4px; text-transform:uppercase; }
+  .md-canal.meta { background:rgba(59,130,246,.18); color:#93c5fd; }
+  .md-canal.google { background:rgba(234,179,8,.18); color:#fde047; }
+  /* Linha sem par é fila de trabalho, não enfeite: gasto sem lead significa
+     rastreamento quebrado; lead sem gasto significa campanha não importada. */
+  .md-alerta { color:#eab308; font-size:10.5px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Custo por campanha</h1>
+    <div class="sub">Gasto, leads e vendas na mesma linha — últimos {{ dias }} dias</div>
+  </div>
+  <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="puxar('meta', this)">Puxar gasto da Meta</button>
+    <button class="btn-outline btn-sm" onclick="puxar('google', this)">Puxar gasto do Google</button>
+  </div>
+</div>
+
+<div class="page">
+  {% if m_faltando or g_faltando %}
+  <div class="card" style="border-color:rgba(250,204,21,.4); margin-bottom:16px;">
+    <div class="card-header"><h3>Falta configurar para conseguir puxar</h3></div>
+    <div style="padding:0 16px 16px; font-size:13px; color:var(--cinza); line-height:1.6;">
+      Só leitura — nada aqui altera campanha, orçamento ou anúncio.
+      {% if m_faltando %}<div style="margin-top:8px;"><b style="color:var(--texto);">Meta:</b>
+        {% for f in m_faltando %}<code style="background:var(--panel-3); padding:2px 8px; border-radius:6px; font-size:12px; margin-right:5px;">{{ f }}</code>{% endfor %}
+        <div style="font-size:12px; margin-top:5px;">O <code>META_AD_ACCOUNT_ID</code> é o número da conta de anúncios (o <code>act_…</code>).
+        O token da API de Conversões normalmente <b style="color:var(--texto);">não</b> serve aqui: leitura de gasto exige permissão <code>ads_read</code>.</div>
+      </div>{% endif %}
+      {% if g_faltando %}<div style="margin-top:10px;"><b style="color:var(--texto);">Google:</b>
+        {% for f in g_faltando %}<code style="background:var(--panel-3); padding:2px 8px; border-radius:6px; font-size:12px; margin-right:5px;">{{ f }}</code>{% endfor %}
+      </div>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="md-num-linha">
+    <div class="md-num"><b>{{ tot.gasto|moeda }}</b><span>investido</span></div>
+    <div class="md-num"><b>{{ tot.leads }}</b><span>leads</span></div>
+    <div class="md-num"><b>{{ tot.cpl|moeda if tot.cpl is not none else '—' }}</b>
+      <span>custo por lead<i class="ajuda-i" title="Gasto dividido pelos leads que chegaram com o nome dessa campanha na UTM, no período. É a conta que diz se a mídia está cara — mas depende de a campanha estar marcada certo na URL do anúncio.">i</i></span></div>
+    <div class="md-num"><b>{{ tot.vendas }}</b><span>vendas</span></div>
+    <div class="md-num"><b>{{ tot.cac|moeda if tot.cac is not none else '—' }}</b>
+      <span>custo por venda (CAC)<i class="ajuda-i" title="Gasto dividido pelas vendas que vieram dessas campanhas. É o número que decide se vale aumentar o orçamento: compare com a comissão média por venda.">i</i></span></div>
+    <div class="md-num"><b>{{ tot.roas if tot.roas is not none else '—' }}{{ 'x' if tot.roas is not none }}</b>
+      <span>retorno<i class="ajuda-i" title="Comissão gerada dividida pelo que foi gasto. 3x significa R$ 3 de comissão para cada R$ 1 de mídia. Usa comissão, não mensalidade — mensalidade não é o dinheiro que entra na corretora.">i</i></span></div>
+  </div>
+
+  {% if tot.gasto_sem_lead %}
+  <div class="alerta atencao" style="margin-bottom:14px;">
+    <b>{{ tot.gasto_sem_lead|moeda }}</b> de gasto não casou com nenhum lead. Quase sempre é marcação:
+    o <code>utm_campaign</code> do anúncio precisa bater com o nome da campanha. Peça ao gestor para usar
+    <code>utm_campaign={{ '{{campaign.name}}' }}</code> — aí a Meta preenche sozinha e para de depender de digitação.
+  </div>
+  {% endif %}
+
+  <div class="panel-box">
+    <h2>Por campanha</h2>
+    {% if not linhas %}
+      <div class="vazio">Nada ainda. Use os botões acima para puxar o gasto — é só leitura.</div>
+    {% else %}
+    <table class="md-tab">
+      <thead><tr>
+        <th>Campanha</th><th class="num">Gasto</th><th class="num">Cliques</th>
+        <th class="num">Leads</th><th class="num">CPL</th>
+        <th class="num">Vendas</th><th class="num">CAC</th>
+        <th class="num">Comissão</th><th class="num">Retorno</th>
+      </tr></thead>
+      <tbody>
+        {% for l in linhas %}
+        <tr>
+          <td>
+            {% if l.canal != '—' %}<span class="md-canal {{ l.canal }}">{{ l.canal }}</span> {% endif %}{{ l.campanha }}
+            {% if l.so_gasto %}<div class="md-alerta">gastou e não trouxe lead identificado</div>
+            {% elif l.so_lead %}<div class="md-alerta">trouxe lead, mas o gasto não foi importado</div>{% endif %}
+          </td>
+          <td class="num">{{ l.gasto|moeda }}</td>
+          <td class="num">{{ l.cliques }}</td>
+          <td class="num">{{ l.leads }}</td>
+          <td class="num">{{ l.cpl|moeda if l.cpl is not none else '—' }}</td>
+          <td class="num">{{ l.vendas }}</td>
+          <td class="num">{{ l.cac|moeda if l.cac is not none else '—' }}</td>
+          <td class="num">{{ l.receita|moeda }}</td>
+          <td class="num">{{ (l.roas ~ 'x') if l.roas is not none else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+</div>
+<script>
+async function puxar(canal, btn){
+  const t = btn.textContent; btn.disabled = true; btn.textContent = 'Puxando…';
+  try{
+    const r = await fetch('/midia/puxar', {method:'POST', headers:{'Content-Type':'application/json'},
+                                           body: JSON.stringify({canal: canal, dias: {{ dias }}})});
+    const d = await r.json(); const s = d.resumo || {};
+    alert('Linhas: ' + (s.linhas||0) + '\nGasto: R$ ' + (s.gasto||0) +
+      ((s.faltando||[]).length ? '\n\nFalta configurar: ' + s.faltando.join(', ') : '') +
+      ((s.erros||[]).length ? '\n\n' + s.erros.join('\n') : ''));
+    location.reload();
+  }catch(e){ alert('Falha de conexão'); btn.disabled=false; btn.textContent=t; }
+}
+</script>
+{% endblock %}

@@ -1003,7 +1003,28 @@ def init_db():
             # um @lid pode não resolver telefone nenhum (contato sem número exposto).
             # Sem esta tabela, a varredura diária reanalisaria conversa que não mudou
             # e pagaria de novo por dado que já temos.
-            # CONVERSAO OFFLINE PRA META. Tabela propria em vez de reaproveitar a do
+            # GASTO DE MIDIA POR DIA/CAMPANHA/ANUNCIO. Leitura pura das plataformas —
+            # nada aqui altera campanha, orcamento ou anuncio. Guardado no JOB pra
+            # o custo por lead nao depender de abrir dois paineis e fazer conta de
+            # cabeca, e pra sobreviver a janela de retencao das plataformas.
+            """CREATE TABLE IF NOT EXISTS midia_gasto (
+                id SERIAL PRIMARY KEY,
+                canal TEXT NOT NULL,
+                data TEXT NOT NULL,
+                conta_id TEXT,
+                campanha_id TEXT,
+                campanha_nome TEXT,
+                conjunto_nome TEXT,
+                anuncio_id TEXT,
+                anuncio_nome TEXT,
+                gasto REAL DEFAULT 0,
+                impressoes INTEGER DEFAULT 0,
+                cliques INTEGER DEFAULT 0,
+                moeda TEXT DEFAULT 'BRL',
+                atualizado_em TIMESTAMP,
+                UNIQUE(canal, data, campanha_id, anuncio_id)
+            )""",
+                        # CONVERSAO OFFLINE PRA META. Tabela propria em vez de reaproveitar a do
             # Google: aquela tem UNIQUE(proposta_id) e funciona — enfiar a Meta la
             # dentro obrigaria a mexer no que ja esta rodando. Mesma forma, mesmo
             # ciclo de status, dois destinos independentes.
@@ -1827,6 +1848,15 @@ def init_db():
             numero TEXT,
             wpp_ok INTEGER DEFAULT 0,
             visto_em TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS midia_gasto (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            canal TEXT NOT NULL, data TEXT NOT NULL, conta_id TEXT,
+            campanha_id TEXT, campanha_nome TEXT, conjunto_nome TEXT,
+            anuncio_id TEXT, anuncio_nome TEXT,
+            gasto REAL DEFAULT 0, impressoes INTEGER DEFAULT 0, cliques INTEGER DEFAULT 0,
+            moeda TEXT DEFAULT 'BRL', atualizado_em TIMESTAMP,
+            UNIQUE(canal, data, campanha_id, anuncio_id)
         );
         CREATE TABLE IF NOT EXISTS meta_conversoes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3096,6 +3126,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_wa_metrica_op ON wa_metrica(operacao, criado_em)",
         "CREATE INDEX IF NOT EXISTS idx_extrato_item ON comissao_extrato_item(extrato_id)",
         "CREATE INDEX IF NOT EXISTS idx_extrato_prop ON comissao_extrato_item(numero_proposta)",
+        "CREATE INDEX IF NOT EXISTS idx_midia_gasto ON midia_gasto(canal, data)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_lead ON crm_lead_campos(lead_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_campo_campo ON crm_lead_campos(campo_id)",
         "CREATE INDEX IF NOT EXISTS idx_lead_etq_etq ON crm_lead_etiquetas(etiqueta_id)",
@@ -9437,6 +9468,176 @@ def _ads_data_conversao(valor):
     if dt.tzinfo is None:
         dt = TZ_SP.localize(dt)
     return dt.strftime('%Y-%m-%d %H:%M:%S%z')[:-2] + ':' + dt.strftime('%z')[-2:]
+
+
+# ═══════════════ GASTO DE MIDIA (LEITURA PURA) ═══════════════
+# So GET. Nao existe nenhuma chamada aqui que crie, pause ou altere campanha,
+# conjunto, anuncio ou orcamento — e nem vai existir: o Guilherme foi explicito
+# em "somente puxar os dados", e essa e a linha.
+#
+# Por que guardar no JOB em vez de consultar na hora: o custo por lead precisa
+# cruzar gasto (plataforma) com lead e venda (nosso banco). Fazer isso ao vivo
+# significaria uma chamada externa por consulta e um numero que muda sozinho.
+# Guardado por dia, o historico fica nosso e sobrevive a janela de retencao deles.
+def _midia_gravar(conn, canal, linhas):
+    """Grava/atualiza as linhas de gasto. Reimportar o mesmo dia nao duplica —
+    e o normal: o gasto do dia de hoje muda ate o dia fechar."""
+    n = 0
+    agora = _agora_sp()
+    for l in linhas:
+        chave = (canal, l.get('data'), l.get('campanha_id') or '', l.get('anuncio_id') or '')
+        ja = conn.execute("""SELECT id FROM midia_gasto
+                             WHERE canal=? AND data=? AND COALESCE(campanha_id,'')=?
+                               AND COALESCE(anuncio_id,'')=?""", chave).fetchone()
+        if ja:
+            conn.execute("""UPDATE midia_gasto SET campanha_nome=?, conjunto_nome=?, anuncio_nome=?,
+                            gasto=?, impressoes=?, cliques=?, moeda=?, conta_id=?, atualizado_em=?
+                            WHERE id=?""",
+                         (l.get('campanha_nome'), l.get('conjunto_nome'), l.get('anuncio_nome'),
+                          l.get('gasto', 0), l.get('impressoes', 0), l.get('cliques', 0),
+                          l.get('moeda', 'BRL'), l.get('conta_id'), agora, ja['id']))
+        else:
+            conn.execute("""INSERT INTO midia_gasto
+                (canal, data, conta_id, campanha_id, campanha_nome, conjunto_nome, anuncio_id,
+                 anuncio_nome, gasto, impressoes, cliques, moeda, atualizado_em)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (canal, l.get('data'), l.get('conta_id'), l.get('campanha_id'), l.get('campanha_nome'),
+                 l.get('conjunto_nome'), l.get('anuncio_id'), l.get('anuncio_nome'),
+                 l.get('gasto', 0), l.get('impressoes', 0), l.get('cliques', 0),
+                 l.get('moeda', 'BRL'), agora))
+        n += 1
+    return n
+
+
+def _meta_ads_config():
+    """Credenciais pra LER gasto na Meta. O token da API de Conversoes costuma
+    nao ter permissao de ads_read — por isso aceita um token proprio e so cai no
+    da conversao se ele nao existir."""
+    conta = (os.environ.get('META_AD_ACCOUNT_ID') or '').strip()
+    if conta and not conta.startswith('act_'):
+        conta = 'act_' + conta.lstrip('act_')
+    token = (os.environ.get('META_ADS_TOKEN') or os.environ.get('META_ACCESS_TOKEN') or '').strip()
+    faltando = []
+    if not conta:
+        faltando.append('META_AD_ACCOUNT_ID')
+    if not token:
+        faltando.append('META_ADS_TOKEN (ou META_ACCESS_TOKEN com ads_read)')
+    return {'conta': conta, 'token': token}, faltando
+
+
+def puxar_gasto_meta(dias=30):
+    """GET /insights por DIA e por ANUNCIO. Nada mais que leitura.
+
+    level='ad' e time_increment=1 de proposito: gasto agregado por campanha nao
+    responde 'qual criativo custou caro', que e a pergunta que importa quando se
+    tem varios anuncios na mesma campanha."""
+    cfg, faltando = _meta_ads_config()
+    resumo = {'canal': 'meta', 'linhas': 0, 'gasto': 0.0, 'faltando': faltando, 'erros': []}
+    if faltando:
+        return resumo
+    campos = ('date_start,spend,impressions,clicks,campaign_id,campaign_name,'
+              'adset_name,ad_id,ad_name,account_currency')
+    url = f"https://graph.facebook.com/{_META_API_VERSAO}/{cfg['conta']}/insights"
+    params = {'fields': campos, 'level': 'ad', 'time_increment': 1,
+              'date_preset': 'last_30d' if dias > 7 else 'last_7d',
+              'limit': 500, 'access_token': cfg['token']}
+    linhas, paginas = [], 0
+    try:
+        import requests as _rq
+        while url and paginas < 20:
+            r = _rq.get(url, params=params if paginas == 0 else None, timeout=45)
+            d = r.json() if r.content else {}
+            if d.get('error'):
+                resumo['erros'].append((d['error'] or {}).get('message') or f'HTTP {r.status_code}')
+                break
+            for x in d.get('data', []):
+                linhas.append({
+                    'data': x.get('date_start'), 'conta_id': cfg['conta'],
+                    'campanha_id': x.get('campaign_id'), 'campanha_nome': x.get('campaign_name'),
+                    'conjunto_nome': x.get('adset_name'),
+                    'anuncio_id': x.get('ad_id'), 'anuncio_nome': x.get('ad_name'),
+                    'gasto': float(x.get('spend') or 0),
+                    'impressoes': int(x.get('impressions') or 0),
+                    'cliques': int(x.get('clicks') or 0),
+                    'moeda': x.get('account_currency') or 'BRL',
+                })
+            url = ((d.get('paging') or {}).get('next')) or None
+            paginas += 1
+    except Exception as e:
+        resumo['erros'].append(f'Falha ao falar com a Meta: {e}')
+    if linhas:
+        conn = db()
+        try:
+            resumo['linhas'] = _midia_gravar(conn, 'meta', linhas)
+            conn.commit()
+        except Exception as e:
+            try: conn.rollback()
+            except Exception: pass
+            resumo['erros'].append(str(e)[:200])
+        close_db(conn)
+    resumo['gasto'] = round(sum(l['gasto'] for l in linhas), 2)
+    return resumo
+
+
+def puxar_gasto_google(dias=30):
+    """Relatorio de campanha do Google Ads (searchStream). So leitura: e uma
+    query GAQL de SELECT, nao existe mutate nenhum."""
+    cfg, faltando = _ads_config()
+    resumo = {'canal': 'google', 'linhas': 0, 'gasto': 0.0, 'faltando': faltando, 'erros': []}
+    if faltando:
+        return resumo
+    try:
+        token = _ads_token(cfg)
+    except Exception as e:
+        resumo['erros'].append(f'Não consegui autenticar: {e}')
+        return resumo
+    if not token:
+        resumo['erros'].append('Não consegui autenticar no Google Ads')
+        return resumo
+    gaql = ("SELECT segments.date, campaign.id, campaign.name, metrics.cost_micros, "
+            "metrics.impressions, metrics.clicks FROM campaign "
+            f"WHERE segments.date DURING LAST_{30 if dias > 7 else 7}_DAYS")
+    linhas = []
+    try:
+        import requests as _rq
+        r = _rq.post(f"{_ADS_API}/customers/{cfg['customer_id']}/googleAds:searchStream",
+                     headers={'Authorization': f'Bearer {token}',
+                              'developer-token': cfg['developer_token'],
+                              'Content-Type': 'application/json'},
+                     json={'query': gaql}, timeout=60)
+        if r.status_code != 200:
+            resumo['erros'].append(f'HTTP {r.status_code}: {r.text[:200]}')
+        else:
+            for bloco in (r.json() or []):
+                for x in bloco.get('results', []):
+                    camp = x.get('campaign') or {}
+                    met = x.get('metrics') or {}
+                    linhas.append({
+                        'data': (x.get('segments') or {}).get('date'),
+                        'conta_id': cfg['customer_id'],
+                        'campanha_id': str(camp.get('id') or ''), 'campanha_nome': camp.get('name'),
+                        'conjunto_nome': None, 'anuncio_id': None, 'anuncio_nome': None,
+                        # cost_micros: 1 real = 1.000.000. Dividir errado aqui daria
+                        # um CAC mil vezes menor e ninguem desconfiaria do numero.
+                        'gasto': round(int(met.get('costMicros') or 0) / 1_000_000, 2),
+                        'impressoes': int(met.get('impressions') or 0),
+                        'cliques': int(met.get('clicks') or 0),
+                        'moeda': 'BRL',
+                    })
+    except Exception as e:
+        resumo['erros'].append(f'Falha ao falar com o Google: {e}')
+    if linhas:
+        conn = db()
+        try:
+            resumo['linhas'] = _midia_gravar(conn, 'google', linhas)
+            conn.commit()
+        except Exception as e:
+            try: conn.rollback()
+            except Exception: pass
+            resumo['erros'].append(str(e)[:200])
+        close_db(conn)
+    resumo['gasto'] = round(sum(l['gasto'] for l in linhas), 2)
+    return resumo
 
 
 def enviar_conversoes_meta(limite=200, so_simular=False):
@@ -18420,6 +18621,112 @@ def _ext_ratear_debitos(itens, total_debitos):
     if resto:
         rateio[consultores[0]] = round(rateio[consultores[0]] + resto, 2)
     return rateio
+
+
+@app.route('/midia')
+@login_required
+@admin_required
+def midia_painel():
+    """CUSTO POR LEAD E POR VENDA, por campanha.
+
+    Junta tres coisas que ate agora viviam separadas: o GASTO (plataforma), os
+    LEADS (nosso banco, pela campanha na UTM) e as VENDAS (propostas.lead_id).
+    Sem as tres na mesma linha, "essa campanha vale a pena?" nao tem resposta —
+    so tem opiniao.
+
+    O casamento e pelo NOME da campanha, e isso e uma fragilidade honesta: se o
+    gestor nao usa os parametros dinamicos, o utm_campaign vem digitado a mao e
+    nao bate. Por isso a tela mostra separado o gasto que NAO casou com lead
+    nenhum, em vez de diluir no total e fingir que fechou."""
+    dias = min(int(request.args.get('dias', 30) or 30), 90)
+    desde = (datetime.now(TZ_SP) - timedelta(days=dias)).strftime('%Y-%m-%d')
+    conn = db()
+
+    gasto = {}
+    for r in conn.execute("""SELECT canal, campanha_nome, COALESCE(SUM(gasto),0) g,
+                                    COALESCE(SUM(impressoes),0) imp, COALESCE(SUM(cliques),0) cli
+                             FROM midia_gasto WHERE data >= ?
+                             GROUP BY canal, campanha_nome""", (desde,)).fetchall():
+        nome = (r['campanha_nome'] or '(sem nome)').strip()
+        d = gasto.setdefault(nome.lower(), {'campanha': nome, 'canal': r['canal'], 'gasto': 0.0,
+                                            'impressoes': 0, 'cliques': 0})
+        d['gasto'] += float(r['g'] or 0)
+        d['impressoes'] += int(r['imp'] or 0)
+        d['cliques'] += int(r['cli'] or 0)
+
+    # Leads e vendas por campanha, no mesmo periodo.
+    leads = {}
+    for l in conn.execute("""SELECT id, dados_extras, criado_em FROM crm_leads
+                             WHERE DATE(criado_em) >= ?""", (desde,)).fetchall():
+        camp = (_campo_de_midia(l['dados_extras'], 'campaign') or '').strip()
+        if not camp:
+            continue
+        d = leads.setdefault(camp.lower(), {'campanha': camp, 'leads': 0, 'ids': []})
+        d['leads'] += 1
+        d['ids'].append(l['id'])
+
+    vendas = {}
+    for p in conn.execute("""SELECT p.id, p.lead_id, COALESCE(p.comissao_total_corretora,0) com,
+                                    l.dados_extras
+                             FROM propostas p JOIN crm_leads l ON l.id = p.lead_id
+                             WHERE COALESCE(p.status,'') <> 'Excluída'
+                               AND COALESCE(p.estornada,0)=0
+                               AND DATE(p.criado_em) >= ?""", (desde,)).fetchall():
+        camp = (_campo_de_midia(p['dados_extras'], 'campaign') or '').strip()
+        if not camp:
+            continue
+        d = vendas.setdefault(camp.lower(), {'vendas': 0, 'receita': 0.0})
+        d['vendas'] += 1
+        d['receita'] += float(p['com'] or 0)
+    close_db(conn)
+
+    linhas = []
+    for chave in set(list(gasto) + list(leads)):
+        g = gasto.get(chave, {})
+        lv = leads.get(chave, {})
+        vd = vendas.get(chave, {})
+        gt = round(float(g.get('gasto') or 0), 2)
+        nl = int(lv.get('leads') or 0)
+        nv = int(vd.get('vendas') or 0)
+        rec = round(float(vd.get('receita') or 0), 2)
+        linhas.append({
+            'campanha': g.get('campanha') or lv.get('campanha') or chave,
+            'canal': g.get('canal') or '—',
+            'gasto': gt, 'cliques': g.get('cliques') or 0,
+            'leads': nl, 'vendas': nv, 'receita': rec,
+            # Sem gasto nao existe custo por lead: mostrar zero seria dizer que
+            # saiu de graca. None vira '—' na tela, que e a verdade.
+            'cpl': round(gt / nl, 2) if (gt and nl) else None,
+            'cac': round(gt / nv, 2) if (gt and nv) else None,
+            'roas': round(rec / gt, 2) if gt else None,
+            'so_gasto': bool(gt and not nl),
+            'so_lead': bool(nl and not gt),
+        })
+    linhas.sort(key=lambda x: -(x['gasto'] or 0))
+    tot = {'gasto': round(sum(l['gasto'] for l in linhas), 2),
+           'leads': sum(l['leads'] for l in linhas),
+           'vendas': sum(l['vendas'] for l in linhas),
+           'receita': round(sum(l['receita'] for l in linhas), 2)}
+    tot['cpl'] = round(tot['gasto'] / tot['leads'], 2) if tot['leads'] and tot['gasto'] else None
+    tot['cac'] = round(tot['gasto'] / tot['vendas'], 2) if tot['vendas'] and tot['gasto'] else None
+    tot['roas'] = round(tot['receita'] / tot['gasto'], 2) if tot['gasto'] else None
+    tot['gasto_sem_lead'] = round(sum(l['gasto'] for l in linhas if l['so_gasto']), 2)
+
+    _mcfg, m_faltando = _meta_ads_config()
+    _gcfg, g_faltando = _ads_config()
+    return render_template('midia.html', linhas=linhas, tot=tot, dias=dias,
+                           m_faltando=m_faltando, g_faltando=g_faltando)
+
+
+@app.route('/midia/puxar', methods=['POST'])
+@login_required
+@admin_required
+def midia_puxar():
+    canal = (request.json or {}).get('canal', 'meta')
+    dias = min(int((request.json or {}).get('dias', 30) or 30), 90)
+    if canal == 'google':
+        return jsonify({"ok": True, "resumo": puxar_gasto_google(dias)})
+    return jsonify({"ok": True, "resumo": puxar_gasto_meta(dias)})
 
 
 @app.route('/comissoes/extrato', methods=['GET', 'POST'])
