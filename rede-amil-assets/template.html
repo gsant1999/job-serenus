@@ -147,6 +147,7 @@
     </div>
   </div>
 
+  <div class="tabs" id="tabsPlano"></div>
   <div class="tabs" id="tabsCidade"></div>
   <div class="tabs" id="tabsTipo"></div>
   <div id="content"></div>
@@ -191,10 +192,14 @@
     try{ return JSON.parse(el.textContent); }catch(e){ return {modo:"standalone"}; }
   })();
 
-  var state = { cidade: DB.cidades[0] ? DB.cidades[0].nome : "", tipo: "", q: "" };
-  function currentCidadeObj(){
-    return DB.cidades.filter(function(c){ return c.nome === state.cidade; })[0] || {tipos:[]};
+  var state = { plano: DB.planos[0] ? DB.planos[0].nome : "", cidade: "", tipo: "", q: "" };
+  function currentPlanoObj(){
+    return DB.planos.filter(function(p){ return p.nome === state.plano; })[0] || {cidades:[]};
   }
+  function currentCidadeObj(){
+    return currentPlanoObj().cidades.filter(function(c){ return c.nome === state.cidade; })[0] || {tipos:[]};
+  }
+  state.cidade = (currentPlanoObj().cidades[0] || {}).nome || "";
   state.tipo = (currentCidadeObj().tipos[0] || {}).chave || "";
 
   function escapeHtml(s){
@@ -232,11 +237,35 @@
     document.getElementById("linkBtn").style.display = "none";
   }
 
-  document.getElementById("planoSub").textContent = "Amil " + DB.plano + " — " + DB.cidades.map(function(c){return c.nome;}).join(", ");
+  function updatePlanoSub(){
+    document.getElementById("planoSub").textContent = "Amil " + state.plano + " — " + currentPlanoObj().cidades.map(function(c){return c.nome;}).join(", ");
+  }
+  updatePlanoSub();
+
+  var planosEl = document.getElementById("tabsPlano");
+  function renderPlanoTabs(){
+    planosEl.innerHTML = DB.planos.map(function(p){
+      return '<div class="tab' + (p.nome === state.plano ? ' active' : '') + '" data-plano="' + escapeHtml(p.nome) + '">' +
+        escapeHtml(p.nome) + '</div>';
+    }).join("");
+  }
+  renderPlanoTabs();
+  planosEl.addEventListener("click", function(e){
+    var el = e.target.closest(".tab");
+    if(!el) return;
+    state.plano = el.getAttribute("data-plano");
+    state.cidade = (currentPlanoObj().cidades[0] || {}).nome || "";
+    state.tipo = (currentCidadeObj().tipos[0] || {}).chave || "";
+    renderPlanoTabs();
+    renderCidadeTabs();
+    renderTipoTabs();
+    updatePlanoSub();
+    render();
+  });
 
   var cidadesEl = document.getElementById("tabsCidade");
   function renderCidadeTabs(){
-    cidadesEl.innerHTML = DB.cidades.map(function(c){
+    cidadesEl.innerHTML = currentPlanoObj().cidades.map(function(c){
       return '<div class="tab' + (c.nome === state.cidade ? ' active' : '') + '" data-cidade="' + escapeHtml(c.nome) + '">' +
         escapeHtml(c.nome) + '</div>';
     }).join("");
@@ -452,7 +481,7 @@
     cs += "q 0.75 0.82 0.86 RG 0.8 w " + PDF_M + " " + (y+4).toFixed(2) + " m " + (PDF_W-PDF_M).toFixed(2) + " " + (y+4).toFixed(2) + " l S Q\n";
     y -= 6;
     line("Material exclusivo Serenus Corretora de Saude - uso interno, nao redistribuir.", {size:7.4, bold:true, color:C_INK, gap:2.5});
-    line("Fonte: portal oficial Amil - busca avancada da rede credenciada. Plano " + pdfStr(DB.plano) + ". Gerado em " + meta.dateStr + ".", {size:7, color:C_FAINT, gap:2.5});
+    line("Fonte: portal oficial Amil - busca avancada da rede credenciada. Plano " + pdfStr(state.plano) + ". Gerado em " + meta.dateStr + ".", {size:7, color:C_FAINT, gap:2.5});
     line("Confirme sempre disponibilidade e cobertura diretamente com o prestador ou com a central Amil.", {size:7, color:C_FAINT, gap:2.5});
     endPage();
     var contentNums = pages.map(function(c){ return newObj("<< /Length " + c.length + " >>", c); });
