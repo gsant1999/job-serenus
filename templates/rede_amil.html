@@ -26,7 +26,7 @@
   .branddivider{width:1px;height:32px;background:rgba(255,255,255,.22);flex:0 0 auto;}
   .brand-am{display:flex;align-items:center;background:#fff;border-radius:10px;padding:7px 14px;
     box-shadow:0 2px 6px rgba(0,0,0,.18);}
-  .brand-am b{color:var(--am-blue);font-size:20px;font-weight:800;letter-spacing:-.02em;}
+  .brand-am img{height:22px;width:auto;display:block;}
   header.top .brand{display:flex;align-items:center;gap:10px;}
   header.top .brand-txt{line-height:1.15;flex:1;min-width:0;}
   header.top .brand-txt b{font-size:16px;display:block;font-family:ui-serif,Georgia,serif;}
@@ -126,7 +126,7 @@
         <img src="{{ url_for('static', filename='brand/serenus-logo-light.png') }}" alt="Serenus Corretora" />
       </div>
       <div class="branddivider"></div>
-      <div class="brand-am"><b>amil</b></div>
+      <div class="brand-am"><img src="{{ url_for('static', filename='operadoras/amil-saude.svg') }}" alt="Amil" /></div>
     </div>
     <div class="brand">
       <div class="brand-txt">
