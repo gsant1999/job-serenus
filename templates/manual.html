@@ -327,7 +327,7 @@
 
   <h3 id="crm-kanban">Kanban e cards</h3>
   <p>Cada coluna é uma etapa do funil; arraste o card para mudar de etapa. O número no topo da coluna é o total real de leads dela, mas por desempenho cada coluna mostra até <strong>60 cards</strong> — para achar um lead específico em coluna grande, use a busca e os filtros (consultor, etapa, status, origem, período). A barra de rolagem horizontal fica no rodapé do kanban.</p>
-  <p>O card avisa quando o lead está parado: borda <strong>amarela</strong> ("Esfriando") após 2 dias sem nenhuma ação; <strong>vermelha</strong> ("Frio") após 5. Qualquer atividade registrada zera a contagem. Direto no card, sem abrir a ficha: o seletor de <strong>status</strong> (Follow up 1, 2, 3+, Aguardando resposta…) e o botão verde que abre a conversa no <strong>BotConversa</strong>.</p>
+  <p>O card avisa quando o lead está parado: borda <strong>amarela</strong> ("Esfriando") após 2 dias sem nenhuma ação; <strong>vermelha</strong> ("Frio") após 5. Qualquer atividade registrada zera a contagem. Direto no card, sem abrir a ficha: o seletor de <strong>sub-status</strong> com o cronômetro de quanto tempo ele está parado nele, e o botão verde que abre a conversa no <strong>WhatsApp</strong>.</p>
 
   <h3 id="crm-ficha">Ficha do lead</h3>
   <p>Clique no card para abrir. As abas: <strong>Dados</strong> (contato, responsável, etapa, valor estimado), <strong>Qualificação</strong> (tipo de plano, idade, cidade, CNPJ, plano atual), <strong>WhatsApp</strong> (conversa e recursos de contato), <strong>Anexos</strong>, <strong>Timeline</strong> (histórico completo de tudo que aconteceu) e <strong>Agenda</strong> (lembretes de retorno — os atrasados e os do dia aparecem em <strong>Agenda</strong> no topo do CRM).</p>
@@ -335,12 +335,12 @@
   <h3 id="crm-whatsapp">WhatsApp, SMS e e-mail: o canal certo</h3>
   <div class="man-tbl-wrap"><table>
     <tr><th>Consultor</th><th>Canal com o lead</th></tr>
-    <tr><td>Prisciele, Juliana, Jenifer</td><td>WhatsApp oficial da Serenus, (19) 93619-6877, operado pelo <strong>BotConversa</strong>. Botão "Abrir conversa no BotConversa" na ficha e no card.</td></tr>
+    <tr><td>Prisciele, Juliana, Jenifer</td><td>WhatsApp oficial da Serenus, (19) 93619-6877. O botão verde do card abre a conversa no WhatsApp Web, onde a extensão do JOB roda.</td></tr>
     <tr><td>Guilherme, Bianca, Gabriel, Danilo</td><td>WhatsApp pessoal de cada um. Botão "Abrir WhatsApp Web" na aba WhatsApp abre a conversa já com a mensagem pronta, pelo número de quem está logado.</td></tr>
   </table></div>
   <p>Ainda na aba WhatsApp, para quando <strong>o cliente não atende ao telefone</strong>:</p>
   <ul>
-    <li><strong>SMS de reforço</strong> — mensagem curta avisando que tentamos contato, com o link do WhatsApp do consultor certo (o do BotConversa para as meninas, o pessoal para os demais). Sempre mostra a prévia antes de enviar, porque SMS custa crédito.</li>
+    <li><strong>SMS de reforço</strong> — mensagem curta avisando que tentamos contato, com o link do WhatsApp do consultor certo (o número oficial para as meninas, o pessoal para os demais). Sempre mostra a prévia antes de enviar, porque SMS custa crédito.</li>
     <li><strong>Corrigir contato (e-mail)</strong> — quando o telefone da planilha parece errado: manda um e-mail ao lead com um botão que abre o WhatsApp do consultor. O JOB registra quando o cliente clica.</li>
   </ul>
 
@@ -351,7 +351,7 @@
     <li><strong>Transferência em massa</strong> — move todos os leads de um consultor (ou de um nome legado tipo "Erenir", "Cliciane", "LEAD SISTEMA") para outro, com filtros de etapa, origem e período.</li>
     <li><strong>Transferir Leads (planilha)</strong> — suba uma planilha (Nome, Telefone, Consultora; modelo disponível para baixar). O JOB casa cada linha pelo telefone, mostra a tela de conferência onde você marca sim/não lead a lead, escolhe a <strong>fase do funil</strong> em que eles entram, e confirma. Linhas não encontradas viram criação opcional, uma a uma, sem nunca duplicar.</li>
   </ul>
-  <div class="man-box dica"><b class="rotulo">Automático</b>Sempre que o destino da transferência é Prisciele, Juliana ou Jenifer, o JOB também reatribui a conversa no <strong>BotConversa</strong> para ela, pela API oficial — a titularidade muda nos dois sistemas de uma vez. Se o lead nunca falou pelo WhatsApp oficial, o JOB apenas registra isso na timeline e segue.</div>
+  
 
   <h3>Etapas e status do funil <span class="man-quem admin">Admin</span></h3>
   <p>Botão <strong>Etapas</strong> no CRM: crie, renomeie, recolora, reordene e exclua tanto as <strong>etapas</strong> (colunas do kanban) quanto os <strong>status</strong> de follow-up dos cards. Ao excluir uma etapa, os leads dela são movidos automaticamente para a etapa seguinte.</p>
@@ -422,7 +422,7 @@
   <div class="man-tbl-wrap"><table>
     <tr><th>Integração</th><th>O que faz</th></tr>
     <tr><td>Planilhas de leads</td><td>Meta e Google alimentam o CRM sozinhas a cada 15 minutos (e pelo botão Buscar leads agora).</td></tr>
-    <tr><td>BotConversa</td><td>WhatsApp oficial das meninas: abrir conversa pelo card/ficha e reatribuição automática de titularidade nas transferências.</td></tr>
+    
     <tr><td>Asaas</td><td>Boleto de adesão e pagamento de comissão por PIX, com status atualizado por webhook.</td></tr>
     <tr><td>Brevo</td><td>Envio de todos os e-mails (protocolo, antecipação, cotação, recuperação de senha, contato com lead).</td></tr>
     <tr><td>GTI SMS</td><td>SMS de reforço do CRM (limite rígido de 160 caracteres por mensagem).</td></tr>
@@ -442,7 +442,7 @@
     <li><strong>Cada e-mail leva os documentos certos.</strong> Protocolo = documentos iniciais. Antecipação = contrato assinado + comprovante. Sem mistura.</li>
     <li><strong>Competência financeira vem da emissão.</strong> Lançar um custo antigo olhando o mês atual não o coloca no mês errado — a data de emissão decide.</li>
     <li><strong>Transferência manual é sagrada.</strong> A importação automática de planilhas nunca sobrescreve o responsável de um lead que já tem dono.</li>
-    <li><strong>Canal certo por consultor.</strong> Meninas = BotConversa (número oficial da Serenus). Demais = WhatsApp pessoal. O JOB escolhe sozinho nos links e SMS — não force o canal errado à mão.</li>
+    <li><strong>Canal certo por consultor.</strong> Meninas = número oficial da Serenus. Demais = WhatsApp pessoal. O JOB escolhe sozinho nos links e SMS — não force o canal errado à mão.</li>
     <li><strong>Parcelas recebidas não se mexem.</strong> Recalcular comissão (edição de valor, troca de consultor) só regenera as parcelas ainda pendentes.</li>
   </ul>
 </section>

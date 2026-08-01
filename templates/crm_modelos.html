@@ -123,15 +123,13 @@
       <button class="wa-fchip" data-f="documento" onclick="setFiltroWpp(this)">PDF <span>{{ stats_wpp.documento or 0 }}</span></button>
     </div>
     <div class="mo-toolbar-acoes">
-      {% if eh_serenus %}<button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup</button>
-      <button class="btn-outline btn-sm" onclick="document.getElementById('bc-arquivo').click()">Importar fluxos do BotConversa</button>{% endif %}
+      {% if eh_serenus %}<button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup</button>{% endif %}
       <button class="btn-azul" style="padding:8px 16px; font-size:12.5px;" onclick="document.getElementById('modal-whatsapp').classList.add('aberto')">+ Novo modelo</button>
     </div>
   </div>
   {% endif %}
   <input type="file" id="zv-arquivo" accept=".json" style="display:none" onchange="importarZapVoice(this)">
   <div id="zv-status" style="display:none; max-width:1100px; margin:0 0 14px; font-size:13px; color:var(--cinza); background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;"></div>
-  <input type="file" id="bc-arquivo" accept=".zip" style="display:none" onchange="importarBotConversa(this)">
   <div id="bc-status" style="display:none; max-width:1100px; margin:0 0 14px; font-size:13px; color:var(--cinza); background:var(--panel); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;"></div>
 
   {% if modelos_whatsapp %}
@@ -215,7 +213,6 @@
   </div>
   {% if eh_serenus %}<div style="max-width:1100px; text-align:center; margin-top:12px;">
     <button class="btn-outline btn-sm" onclick="document.getElementById('zv-arquivo').click()">Importar backup do ZapVoice</button>
-    <button class="btn-outline btn-sm" onclick="document.getElementById('bc-arquivo').click()">Importar fluxos do BotConversa</button>
   </div>{% endif %}
   {% endif %}
 </div>
@@ -478,28 +475,7 @@ function importarZapVoice(inp){
   inp.value = '';
 }
 
-function importarBotConversa(inp){
-  var f = inp.files[0];
-  if (!f) return;
-  var st = document.getElementById('bc-status');
-  st.style.display = 'block';
-  var mb = (f.size/1024/1024).toFixed(0);
-  st.innerHTML = 'Importando <b>' + f.name + '</b> (' + mb + ' MB)… pode levar alguns minutos. Não feche a página.';
-  var fd = new FormData();
-  fd.append('arquivo', f);
-  fetch('/crm/modelos/importar-botconversa', {method:'POST', body: fd})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if (!d.ok) { st.innerHTML = 'Erro: ' + (d.erro || 'falha na importação'); return; }
-      var c = d.contagem;
-      st.innerHTML = 'Importado: <b>' + c.funis + '</b> funis, <b>' + c.modelos + '</b> modelos' +
-        (c.pulados ? ' · ' + c.pulados + ' funis já existiam' : '') +
-        (c.erros ? ' · ' + c.erros + ' com erro' : '') + '. Veja em Funis. Recarregando…';
-      setTimeout(function(){ location.reload(); }, 1500);
-    })
-    .catch(function(e){ st.innerHTML = 'Erro: ' + e.message + ' (se o arquivo for muito grande, pode ter estourado o limite de upload).'; });
-  inp.value = '';
-}
+
 
 function salvarModeloWhatsapp(){
   var nome = document.getElementById('wa-nome').value.trim();

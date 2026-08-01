@@ -632,7 +632,7 @@
           <div class="lead-acoes-row">
             <button class="lead-etq-btn" onclick="event.stopPropagation(); abrirEtiquetas({{ lead.id }}, this)" title="Marcar etiquetas">Etiquetas</button>
             {% if lead.telefone %}
-            <button class="lead-wpp-btn" onclick="event.stopPropagation(); wppRapido('{{ lead.telefone }}')" title="Abrir no BotConversa"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></button>
+            <button class="lead-wpp-btn" onclick="event.stopPropagation(); wppRapido('{{ lead.telefone }}')" title="Abrir a conversa no WhatsApp"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></button>
             {% endif %}
             {% if etapa.id == 'lead_novo' %}
             <button class="lead-topo-btn" onclick="event.stopPropagation(); moverParaContato({{ lead.id }}, this)" title="Já atendi manualmente — mover pro Primeiro Contato">→ Contato</button>
@@ -921,11 +921,7 @@
         </div>
 
         <div id="tab-whatsapp" class="ficha-tab-pane">
-          {% if eh_serenus %}<div id="botconversa-box" style="display:none; background:rgba(37,211,102,.08); border:1px solid rgba(37,211,102,.3); border-radius:10px; padding:14px; margin-bottom:14px;">
-            <div style="font-size:13px; font-weight:600; color:var(--texto); margin-bottom:4px;">Este lead usa o WhatsApp oficial da Serenus (BotConversa)</div>
-            <div style="font-size:11.5px; color:var(--cinza); margin-bottom:10px;">Abre a conversa filtrada pelo telefone do lead numa janela separada.</div>
-            <button class="btn-ficha" style="width:100%; background:#25d366; color:#04221a; border:none; font-weight:700;" onclick="abrirBotConversa()">Abrir conversa no BotConversa</button>
-          </div>{% endif %}
+
           <div class="wpp-box">
             <div class="wpp-header">
                             <div>
@@ -1195,10 +1191,6 @@ async function abrirFicha(id){
   // WhatsApp tab
   const tel=(d.lead.telefone||'').replace(/\D/g,'');
   document.getElementById('wpp-tel-display').textContent=d.lead.telefone||'(sem telefone)';
-  const CONSULTORAS_BOOTCONVERSA=['Prisciele Azevedo','Juliana Azevedo','Jenifer Aparecida Lobregat dos Santos'];
-  const _bcBox=document.getElementById('botconversa-box'); // só existe na marca Serenus
-  if(_bcBox) _bcBox.style.display=
-    CONSULTORAS_BOOTCONVERSA.includes(d.lead.responsavel_nome) ? 'block' : 'none';
   document.getElementById('wpp-templates').innerHTML=WPP_TEMPLATES.map((t,i)=>
     `<button class="wpp-template" onclick="usarTemplate(${i})">${t.replace('{nome}', d.lead.nome||'')}</button>`).join('');
   document.getElementById('wpp-msg').value='';
@@ -1926,19 +1918,16 @@ function _acompanharFilaWpp(filaId, btn, status, tentativa){
       setTimeout(()=>_acompanharFilaWpp(filaId, btn, status, tentativa+1), INTERVALO_MS);
     }).catch(()=>{ status.textContent='Pendente — não deu pra confirmar agora.'; btn.disabled=false; });
 }
-const BOTCONVERSA_COMPANY_ID='206993';
-function _abrirBotConversaPorTelefone(tel){
+// O botao verde do card abria o BotConversa, que a Serenus nao usa mais.
+// Agora abre a conversa no proprio WhatsApp Web — que e onde a extensao do JOB
+// roda, entao o consultor cai direto no lugar onde tem a ficha, a transcricao e
+// o funil. Trocar o destino e melhor do que tirar o botao: a acao que ele fazia
+// (falar com este lead agora) continua sendo a mais usada da tela.
+function wppRapido(tel){
   const digitos=(tel||'').replace(/\D/g,'');
   if(!digitos){ toast('Lead sem telefone cadastrado','err'); return; }
-  const url='https://app.botconversa.com.br/'+BOTCONVERSA_COMPANY_ID+'/inbox?tab=all&status=all&search='+encodeURIComponent(digitos);
-  window.open(url,'botconversa','width=1100,height=750,noopener');
-}
-function wppRapido(tel){
-  _abrirBotConversaPorTelefone(tel);
-}
-function abrirBotConversa(){
-  if(!_leadAtual) return;
-  _abrirBotConversaPorTelefone(_leadAtual.telefone);
+  const comDdi = digitos.startsWith('55') ? digitos : ('55'+digitos);
+  window.open('https://web.whatsapp.com/send?phone='+comDdi,'_blank','noopener');
 }
 
 async function uploadAnexo(files){

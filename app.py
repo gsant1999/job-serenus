@@ -3805,7 +3805,7 @@ def admin_required(f):
 MODO_OPERADOR = (os.environ.get('MODO_OPERADOR', '1').strip().lower() not in ('0', 'false', 'nao', 'não', ''))
 
 # Marca é do Serenus? Usado pra esconder recursos específicos do Serenus
-# (importar-meninas, BotConversa/ZapVoice, Affinity, manual) nas outras marcas.
+# (importar-meninas, ZapVoice, Affinity, manual) nas outras marcas.
 def _eh_serenus():
     return BRAND.get('nome_curto', '').strip().lower() == 'serenus'
 
@@ -3821,7 +3821,7 @@ _ROTAS_OPERADOR = (
 # Prefixos específicos do Serenus (integração/parceiro/conteúdo). Somem nas
 # outras marcas.
 _ROTAS_SERENUS = (
-    '/crm/importar-meninas', '/crm/modelos/importar-botconversa',
+    '/crm/importar-meninas',
     '/crm/modelos/importar-zapvoice', '/manual',
 )
 # Sufixos em /proposta/<id>/... do fluxo Affinity (parceiro do Serenus): envio
@@ -19816,15 +19816,6 @@ def crm_lead_editar(lid):
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
                      (lid, session.get('nome'), 'edicao', '; '.join(changes)))
 
-    # Se o responsável mudou pra uma das meninas, reatribui a titularidade no
-    # BotConversa também (best-effort — falha lá não desfaz a edição no JOB).
-    if str(responsavel_id) != str(lead['responsavel_id']):
-        nova = conn.execute("SELECT nome FROM usuarios WHERE id=?", (responsavel_id,)).fetchone() if responsavel_id else None
-        if nova and nova['nome'] in CONSULTORAS_BOOTCONVERSA:
-            ok_bc, msg_bc = _botconversa_transferir_titularidade(telefone, nova['nome'])
-            conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
-                         (lid, session.get('nome'), 'edicao', f'BotConversa: {msg_bc}'))
-
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 
@@ -23782,73 +23773,17 @@ def _enviar_whatsapp_waspeed(token, fone, mensagem):
 # WhatsApp da corretora (BootConversa + API oficial Meta) — usado pelas 3 consultoras
 # de retrabalho. Os demais consultores usam o próprio WhatsApp pessoal (usuarios.telefone).
 NUMERO_WHATSAPP_SERENUS = '5519936196877'
-CONSULTORAS_BOOTCONVERSA = ('Prisciele Azevedo', 'Juliana Azevedo', 'Jenifer Aparecida Lobregat dos Santos')
-
-# ID de "manager" (atendente) de cada menina dentro do BotConversa — usado pra
-# reatribuir a titularidade da conversa quando o lead é transferido pra elas
-# no JOB. Descoberto via GET /managers/ da API do BotConversa (não muda
-# sozinho, só se a conta de alguma delas for recriada lá).
-BOTCONVERSA_MANAGER_IDS = {
-    'Prisciele Azevedo': 603923,
-    'Juliana Azevedo': 599938,
-    'Jenifer Aparecida Lobregat dos Santos': 603922,
-}
-BOTCONVERSA_API_BASE = 'https://backend.botconversa.com.br/api/v1/webhook'
-
-
-def _botconversa_transferir_titularidade(telefone, menina_nome):
-    """Reatribui a conversa do lead (por telefone) pro atendente certo no
-    BotConversa, quando o responsável no JOB vira uma das 3 meninas — a
-    titularidade muda nos dois sistemas ao mesmo tempo, não só no JOB.
-    Nunca lança exceção (best-effort — se o BotConversa falhar, a transferência
-    no JOB já aconteceu e continua valendo; só não sincroniza lá).
-    Retorna (ok: bool, msg: str)."""
-    # BotConversa é integração específica do Serenus (managers/meninas fixos).
-    # Já seria inerte sem a API key numa instância de cliente, mas gateamos
-    # explícito pra deixar claro que não roda fora do Serenus.
-    if not _eh_serenus():
-        return False, 'integração indisponível'
-    api_key = os.environ.get('BOTCONVERSA_API_KEY', '').strip()
-    if not api_key:
-        return False, 'BOTCONVERSA_API_KEY não configurada'
-    manager_id = BOTCONVERSA_MANAGER_IDS.get(menina_nome)
-    if not manager_id:
-        return False, f'"{menina_nome}" não é uma consultora do BotConversa'
-    digitos = re.sub(r'\D', '', telefone or '')
-    if not digitos:
-        return False, 'Lead sem telefone'
-    if len(digitos) <= 11:
-        digitos = '55' + digitos
-    try:
-        import requests as _rq
-        headers = {'API-KEY': api_key}
-        r = _rq.get(f'{BOTCONVERSA_API_BASE}/subscriber/get_by_phone/{digitos}/', headers=headers, timeout=15)
-        if r.status_code == 404:
-            return False, 'Lead não tem conversa no BotConversa (nunca escreveu pelo WhatsApp oficial)'
-        if r.status_code != 200:
-            return False, f'BotConversa: erro {r.status_code} ao buscar assinante'
-        subscriber_id = r.json().get('id')
-        if not subscriber_id:
-            return False, 'BotConversa: assinante sem id na resposta'
-        r2 = _rq.post(f'{BOTCONVERSA_API_BASE}/subscriber/{subscriber_id}/change_conversation_status/',
-                       headers={**headers, 'Content-Type': 'application/json'},
-                       json={'open_conversation': True, 'manager': manager_id}, timeout=15)
-        if r2.status_code not in (200, 201, 204):
-            return False, f'BotConversa: erro {r2.status_code} ao reatribuir'
-        return True, f'Conversa reatribuída a {menina_nome} no BotConversa'
-    except Exception as e:
-        return False, f'Falha ao falar com o BotConversa: {e}'
-
+CONSULTORAS_CANAL_OFICIAL = ('Prisciele Azevedo', 'Juliana Azevedo', 'Jenifer Aparecida Lobregat dos Santos')
 
 def _whatsapp_do_consultor(conn, responsavel_id):
     """Retorna o número (só dígitos, com 55) que o LEAD deve chamar pra falar com
-    o consultor responsável. Prisciele/Juliana/Jenifer usam o WhatsApp oficial da
-    Serenus via BootConversa (número fixo); os demais usam o WhatsApp pessoal deles."""
+    o consultor responsável. Prisciele/Juliana/Jenifer atendem pelo WhatsApp
+    oficial da Serenus (número fixo); os demais usam o WhatsApp pessoal deles."""
     if responsavel_id:
         row = conn.execute("SELECT nome, telefone FROM usuarios WHERE id=?", (responsavel_id,)).fetchone()
         if row:
             rd = dict(row)
-            if rd['nome'] in CONSULTORAS_BOOTCONVERSA:
+            if rd['nome'] in CONSULTORAS_CANAL_OFICIAL:
                 return NUMERO_WHATSAPP_SERENUS
             fone = _waspeed_normaliza_fone(rd.get('telefone') or '')
             if fone:
@@ -24753,10 +24688,6 @@ def crm_transferir_em_massa():
     if not qtd:
         close_db(conn)
         return jsonify({"ok": True, "transferidos": 0, "msg": "Nenhum lead encontrado com esses filtros"})
-    # Se o destino é uma das meninas, cada lead também tem a titularidade
-    # reatribuída no BotConversa (best-effort, não trava a transferência no JOB).
-    destino_eh_menina = npa in CONSULTORAS_BOOTCONVERSA
-    bc_ok, bc_falhou = 0, 0
     # Transfere
     for r in leads_a_transferir:
         rd = dict(r)
@@ -24764,12 +24695,6 @@ def crm_transferir_em_massa():
         conn.execute("UPDATE crm_leads SET responsavel_id=?, consultor_externo=NULL, atualizado_em=? WHERE id=?",
                     (cpa, _agora_sp(), lid))
         desc = f"Lead transferido de {nde} para {npa}"
-        if destino_eh_menina:
-            telefone_lead = conn.execute("SELECT telefone FROM crm_leads WHERE id=?", (lid,)).fetchone()['telefone']
-            ok_bc, msg_bc = _botconversa_transferir_titularidade(telefone_lead, npa)
-            desc += f" · BotConversa: {msg_bc}"
-            bc_ok += 1 if ok_bc else 0
-            bc_falhou += 0 if ok_bc else 1
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                     (lid, 'Sistema', 'transferencia', desc, _agora_sp()))
     conn.commit()
@@ -24777,10 +24702,7 @@ def crm_transferir_em_massa():
     # Notifica o novo responsável (resumo)
     _notificar(cpa, 'lead', 'Leads transferidos',
                f"Você recebeu {qtd} lead(s) de {nde}", '/crm')
-    resp = {"ok": True, "transferidos": qtd, "de": nde, "para": npa}
-    if destino_eh_menina:
-        resp["botconversa"] = {"reatribuidos": bc_ok, "nao_sincronizados": bc_falhou}
-    return jsonify(resp)
+    return jsonify({"ok": True, "transferidos": qtd, "de": nde, "para": npa})
 
 
 @app.route('/crm/config')
@@ -25172,8 +25094,7 @@ def _importar_leads_automatico():
 # numa etapa do funil (ou manualmente pelo atendente). Cada fluxo tem N passos
 # com um delay em dias; o motor roda 1x/dia (+ fallback por request, mesmo
 # padrão do auto-pull de leads) e envia o passo pendente de cada inscrição ativa.
-# Canal WhatsApp usa WaSpeed (BotConversa fica de fora por ora — bug de
-# salvamento confirmado no editor deles no bloco de Integração, ver histórico).
+# Canal WhatsApp usa WaSpeed.
 
 FLUXO_TEMPLATES = {
     # ── Lead de Cotação (LP Geral) ──
@@ -25336,38 +25257,6 @@ def _fluxo_render_texto(s, nome='', consultor='', link=''):
                      .replace('{link}', link or ''))
 
 
-def _enviar_botconversa_texto(telefone, texto):
-    """Envia texto pelo WhatsApp oficial (BotConversa / API Meta), via API REST
-    deles — não depende do editor de fluxos do BotConversa (que tem bug de
-    salvamento). Só entrega se o contato tem conversa recente lá (janela de
-    24h da Meta); fora disso retorna erro honesto em vez de sumir calado.
-    Retorna (ok, erro)."""
-    api_key = os.environ.get('BOTCONVERSA_API_KEY', '').strip()
-    if not api_key:
-        return False, 'BOTCONVERSA_API_KEY não configurada'
-    digitos = re.sub(r'\D', '', telefone or '')
-    if not digitos:
-        return False, 'Telefone inválido'
-    if len(digitos) <= 11:
-        digitos = '55' + digitos
-    try:
-        import requests as _rq
-        headers = {'API-KEY': api_key}
-        r = _rq.get(f'{BOTCONVERSA_API_BASE}/subscriber/get_by_phone/{digitos}/', headers=headers, timeout=15)
-        if r.status_code == 404:
-            return False, 'Contato nunca conversou no WhatsApp oficial (BotConversa)'
-        if r.status_code != 200:
-            return False, f'BotConversa: erro {r.status_code} ao buscar contato'
-        sid = r.json().get('id')
-        r2 = _rq.post(f'{BOTCONVERSA_API_BASE}/subscriber/{sid}/send_message/',
-                       headers=headers, json={'type': 'text', 'value': texto}, timeout=15)
-        if r2.status_code in (200, 201):
-            return True, None
-        return False, f'BotConversa: erro {r2.status_code} ao enviar (janela de 24h da Meta pode ter expirado)'
-    except Exception as e:
-        return False, f'Falha no BotConversa: {e}'
-
-
 def _seed_fluxos_padrao(conn):
     """Cadastra os 3 fluxos pré-definidos na primeira vez que a tabela `fluxos`
     estiver vazia. Não sobrescreve edições feitas depois (gatilho_etapa, ativo)."""
@@ -25480,7 +25369,9 @@ def _fluxo_autoiniciar_por_etapa(conn, lead_id, nova_etapa):
 
 
 _FLUXO_MAX_POR_RODADA = 50
-FLUXO_CANAIS = ('email', 'sms', 'whatsapp', 'botconversa')
+# 'botconversa' saiu em 31/07/2026: a Serenus nao usa mais. Passos antigos
+# continuam no banco (historico preservado), mas nao da mais pra criar novo.
+FLUXO_CANAIS = ('email', 'sms', 'whatsapp')
 
 
 def _renderizar_modelo_html(html, nome_lead):
@@ -25586,8 +25477,10 @@ def _fluxo_executar_passo(conn, passo, lead):
         ok, erro = _enviar_whatsapp_waspeed(token, lead.get('telefone'), texto)
         return ok, erro, modelo_id
     if canal == 'botconversa':
-        ok, erro = _enviar_botconversa_texto(lead.get('telefone'), texto)
-        return ok, erro, modelo_id
+        # Canal removido em 31/07/2026 — o BotConversa deixou de existir pra
+        # Serenus. Passo antigo de fluxo nao envia nada e diz por que, em vez de
+        # falhar com "canal desconhecido" e parecer defeito do sistema.
+        return False, 'Canal BotConversa foi removido — troque o passo para WhatsApp', modelo_id
     return False, f'Canal desconhecido: {canal}', modelo_id
 
 
@@ -25823,8 +25716,8 @@ def crm_fluxo_salvar(fid):
                 close_db(conn); return jsonify({"ok": False, "erro": f"Modelo de e-mail inválido: {template}"}), 400
             if canal == 'sms' and template not in SMS_TEMPLATES_LEAD:
                 close_db(conn); return jsonify({"ok": False, "erro": f"Modelo de SMS inválido: {template}"}), 400
-            if canal in ('whatsapp', 'botconversa'):
-                close_db(conn); return jsonify({"ok": False, "erro": "WhatsApp/BotConversa usam texto próprio, não modelo"}), 400
+            if canal == 'whatsapp':
+                close_db(conn); return jsonify({"ok": False, "erro": "WhatsApp usa texto próprio, não modelo"}), 400
             conteudo = None
         else:
             if not isinstance(conteudo, dict):
@@ -26194,159 +26087,10 @@ def crm_importar_zapvoice():
             os.unlink(tmp.name)
         except Exception:
             pass
-
-
-@app.route('/crm/modelos/importar-botconversa', methods=['POST'])
-@login_required
-@admin_required
-def crm_importar_botconversa():
-    """Importa fluxos extraídos do BotConversa pra biblioteca de WhatsApp do
-    JOB. Cada fluxo do BotConversa vira um whatsapp_funis; cada passo (texto
-    ou mídia) do fluxo vira um modelos_conteudo, ligado em ordem via
-    whatsapp_funil_passos — mesmo padrão da importação do ZapVoice, mas
-    reconstruindo também a sequência (funil), não só a biblioteca solta de
-    mensagens.
-    Aceita dois formatos de entrada:
-    1) multipart/form-data com campo 'arquivo' = .zip (manifest.json + pasta
-       media/ com os binários já baixados) — feito por
-       scripts/botconversa_extract.py, que roda na máquina de quem tem
-       acesso ao BotConversa.
-    2) JSON puro (Content-Type: application/json) com a lista de fluxos
-       direto — cada passo de mídia leva uma 'url' pública (o BotConversa
-       guarda mídia em S3 sem exigir login pra baixar) em vez de
-       'arquivo_local'; o próprio servidor busca o binário. Evita ter que
-       fazer upload de um zip grande pelo navegador — só texto (o manifest é
-       leve), o download pesado roda direto no servidor pra R2.
-    Dedup por nome de funil — re-subir o mesmo zip/manifest não duplica.
-    Dedup também de mídia dentro da mesma importação (por hash do
-    arquivo_local OU pela própria url) — o mesmo binário (ex.: PDF de rede
-    de atendimento reaproveitado em vários fluxos parecidos) é enviado pro
-    storage uma única vez, mesmo se vier em lotes/requisições separadas,
-    porque o nome final no storage é sempre determinístico."""
-    import io as _io
-    import hashlib as _hashlib
-    from urllib.parse import urlparse
-
-    zf = None
-    tmp_path = None
-    if request.files.get('arquivo'):
-        import zipfile as _zip, tempfile as _tmp
-        f = request.files['arquivo']
-        tmp = _tmp.NamedTemporaryFile(delete=False, suffix='.zip')
-        f.save(tmp.name)
-        tmp.close()
-        tmp_path = tmp.name
-        try:
-            zf = _zip.ZipFile(tmp_path)
-            manifesto = json.loads(zf.read('manifest.json'))
-        except KeyError:
-            zf.close(); os.unlink(tmp_path)
-            return jsonify({"ok": False, "erro": "Zip inválido: falta manifest.json"}), 400
-        except Exception as e:
-            if zf: zf.close()
-            os.unlink(tmp_path)
-            return jsonify({"ok": False, "erro": f"Zip inválido: {e}"}), 400
-    else:
-        manifesto = request.get_json(silent=True)
-        if manifesto is None:
-            return jsonify({"ok": False, "erro": "Envie o .zip exportado ou um JSON com a lista de fluxos"}), 400
-        if isinstance(manifesto, dict):
-            manifesto = manifesto.get('fluxos') or []
-
-    def _obter_bytes(passo):
-        arq_local = passo.get('arquivo_local')
-        if arq_local and zf:
-            try:
-                return zf.read(f'media/{arq_local}')
-            except KeyError:
-                return None
-        url = passo.get('url')
-        if url:
-            try:
-                r = _requests.get(url, timeout=30)
-                r.raise_for_status()
-                return r.content
-            except Exception as e:
-                app.logger.warning(f"[IMPORT-BC] falhou baixar mídia {url}: {e}")
-                return None
-        return None
-
-    try:
-        conn = db()
-        existentes = {r['nome'] for r in conn.execute("SELECT nome FROM whatsapp_funis").fetchall()}
-        criado_por = session.get('user_id')
-        contagem = {'funis': 0, 'modelos': 0, 'pulados': 0, 'erros': 0}
-        cache_midia = {}  # identidade da mídia (arquivo_local ou url) -> nome_arq já subido
-        for fluxo in manifesto:
-            nome_funil = (fluxo.get('nome') or '').strip()[:200]
-            if not nome_funil or nome_funil in existentes:
-                contagem['pulados'] += 1
-                continue
-            try:
-                categoria = (fluxo.get('categoria') or '').strip()[:120] or None
-                conn.execute("INSERT INTO whatsapp_funis (nome, categoria, ativo, criado_por) VALUES (?,?,1,?)",
-                             (nome_funil, categoria, criado_por))
-                fid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
-                       else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
-                ordem = 0
-                for passo in (fluxo.get('passos') or []):
-                    tipo = passo.get('tipo')
-                    if tipo == 'texto':
-                        texto = (passo.get('texto') or '').strip()
-                        if not texto:
-                            continue
-                        ordem += 1
-                        conn.execute("""INSERT INTO modelos_conteudo
-                            (tipo, nome, corpo_texto, ativo, criado_por, categoria) VALUES ('whatsapp',?,?,1,?,?)""",
-                            (f"{nome_funil} #{ordem}"[:200], texto[:4000], criado_por, categoria))
-                    elif tipo in ('imagem', 'video', 'audio', 'documento'):
-                        identidade = passo.get('arquivo_local') or passo.get('url')
-                        if not identidade:
-                            continue
-                        ordem += 1
-                        nome_arq = cache_midia.get(identidade)
-                        if not nome_arq:
-                            # nome determinístico (hash da identidade — arquivo_local do
-                            # script já é nomeado pelo hash do conteúdo; url vira hash
-                            # aqui) — mesmo binário reaproveitado em fluxos diferentes
-                            # sobe uma vez só, mesmo em importações/lotes separados,
-                            # porque o nome final é sempre o mesmo.
-                            ext = os.path.splitext(urlparse(identidade).path if identidade.startswith('http') else identidade)[1] or '.bin'
-                            h = _hashlib.sha1(identidade.encode('utf-8')).hexdigest()[:20]
-                            nome_arq = f"MODELO_WPP_BC_{h}{ext}"[:120]
-                            if not os.path.exists(os.path.join(UPLOAD_FOLDER, nome_arq)):
-                                dados_bin = _obter_bytes(passo)
-                                if not dados_bin:
-                                    contagem['erros'] += 1
-                                    continue
-                                upload_arquivo_r2(_io.BytesIO(dados_bin), f"modelos/{nome_arq}")
-                            cache_midia[identidade] = nome_arq
-                        conn.execute("""INSERT INTO modelos_conteudo
-                            (tipo, nome, ativo, criado_por, midia_arquivo, midia_tipo, categoria) VALUES ('whatsapp',?,1,?,?,?,?)""",
-                            (f"{nome_funil} #{ordem}"[:200], criado_por, nome_arq, tipo, categoria))
-                    else:
-                        continue
-                    mid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
-                           else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
-                    conn.execute("INSERT INTO whatsapp_funil_passos (funil_id, ordem, modelo_id, delay_segundos) VALUES (?,?,?,?)",
-                                 (fid, ordem, mid, 5))
-                    contagem['modelos'] += 1
-                existentes.add(nome_funil)
-                contagem['funis'] += 1
-                conn.commit()
-            except Exception as e:
-                contagem['erros'] += 1
-                app.logger.warning(f"[IMPORT-BC] falhou fluxo \"{fluxo.get('nome')}\": {e}")
-        close_db(conn)
-        return jsonify({"ok": True, "contagem": contagem})
-    finally:
-        if zf:
-            zf.close()
-        if tmp_path:
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
+# O importador de fluxos do BotConversa foi removido em 31/07/2026 junto com a
+# ferramenta. Era uma ponte de mudanca, ja atravessada: os fluxos que
+# interessavam viraram whatsapp_funis e continuam la. O script de extracao segue
+# no repo e o codigo desta rota esta no historico do git, se um dia faltar algo.
 
 
 @app.route('/crm/modelos/<int:mid>/favorito', methods=['POST'])
@@ -27702,11 +27446,11 @@ def crm_importar_meninas():
     Casa cada linha com um lead já existente no JOB (por telefone) e deixa o
     admin conferir/flegar linha a linha antes de transferir — nunca duplica."""
     if request.method == 'GET':
-        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_BOOTCONVERSA)
+        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_CANAL_OFICIAL)
 
     f = request.files.get('arquivo')
     if not f or not f.filename:
-        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_BOOTCONVERSA,
+        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_CANAL_OFICIAL,
                                erro='Selecione um arquivo.')
 
     nome_arq = f.filename.lower()
@@ -27734,12 +27478,12 @@ def crm_importar_meninas():
             delim = ';' if primeira.count(';') >= primeira.count(',') else ','
             rows = [list(r) for r in csv.reader(io.StringIO(raw), delimiter=delim)]
     except Exception as e:
-        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_BOOTCONVERSA,
+        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_CANAL_OFICIAL,
                                erro='Erro ao ler o arquivo: ' + str(e)[:200])
 
     rows = [r for r in rows if any((str(c) or '').strip() for c in r)]
     if len(rows) < 2:
-        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_BOOTCONVERSA,
+        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_CANAL_OFICIAL,
                                erro='O arquivo não tem linhas de dados.')
 
     header = rows[0]
@@ -27753,7 +27497,7 @@ def crm_importar_meninas():
         elif nh in ('consultora', 'consultor', 'menina', 'destino'):
             idx['consultora'] = i
     if 'nome' not in idx or 'telefone' not in idx or 'consultora' not in idx:
-        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_BOOTCONVERSA,
+        return render_template('crm_importar_meninas.html', meninas=CONSULTORAS_CANAL_OFICIAL,
                                erro='O arquivo precisa ter as colunas "Nome", "Telefone" e "Consultora". Baixe o modelo.')
 
     conn = db()
@@ -27774,7 +27518,7 @@ def crm_importar_meninas():
         if menina_id:
             u = conn.execute("SELECT nome FROM usuarios WHERE id=?", (menina_id,)).fetchone()
             menina_nome_resolvida = u['nome'] if u else None
-        if not menina_id or menina_nome_resolvida not in CONSULTORAS_BOOTCONVERSA:
+        if not menina_id or menina_nome_resolvida not in CONSULTORAS_CANAL_OFICIAL:
             # Consultora não reconhecida como uma das meninas — não processa a linha
             nao_encontrados.append({'nome': nome_l, 'telefone': tel_raw, 'consultora': consultora_raw,
                                     'erro': 'Consultora não reconhecida'})
@@ -27807,7 +27551,7 @@ def crm_importar_meninas():
     etapas = carregar_etapas_crm(conn)
     close_db(conn)
 
-    return render_template('crm_importar_meninas_revisar.html', meninas=CONSULTORAS_BOOTCONVERSA,
+    return render_template('crm_importar_meninas_revisar.html', meninas=CONSULTORAS_CANAL_OFICIAL,
                            encontrados=encontrados, nao_encontrados=nao_encontrados, etapas=etapas)
 
 
@@ -27837,7 +27581,7 @@ def crm_importar_meninas_confirmar():
         if not lead:
             continue
         menina = conn.execute("SELECT nome FROM usuarios WHERE id=?", (menina_id,)).fetchone()
-        if not menina or menina['nome'] not in CONSULTORAS_BOOTCONVERSA:
+        if not menina or menina['nome'] not in CONSULTORAS_CANAL_OFICIAL:
             continue
         if etapa_destino:
             conn.execute("UPDATE crm_leads SET responsavel_id=?, etapa=?, consultor_externo=NULL, atualizado_em=? WHERE id=?",
@@ -27848,8 +27592,6 @@ def crm_importar_meninas_confirmar():
         desc = f'Transferido para {menina["nome"]} via importação de planilha (leads meninas)'
         if etapa_destino and etapa_destino != lead['etapa']:
             desc += f' — movido para "{etapa_destino}"'
-        ok_bc, msg_bc = _botconversa_transferir_titularidade(lead['telefone'], menina['nome'])
-        desc += f' · BotConversa: {msg_bc}'
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                      (lid, session.get('nome'), 'movimentacao', desc, _agora_sp()))
         transferidos += 1
@@ -27871,7 +27613,7 @@ def crm_importar_meninas_criar():
         return jsonify({"ok": False, "erro": "Dados incompletos"}), 400
     conn = db()
     menina = conn.execute("SELECT nome FROM usuarios WHERE id=?", (menina_id,)).fetchone()
-    if not menina or menina['nome'] not in CONSULTORAS_BOOTCONVERSA:
+    if not menina or menina['nome'] not in CONSULTORAS_CANAL_OFICIAL:
         close_db(conn); return jsonify({"ok": False, "erro": "Consultora inválida"}), 400
     tel_norm = _normalizar_telefone(tel_raw)
     if tel_norm:
@@ -27897,9 +27639,9 @@ def crm_importar_meninas_criar():
 # Fluxo: sobe uma lista (ex: MEIs que completaram 6 meses) numa campanha
 # nomeada, dispara e-mail/SMS em massa reaproveitando os mesmos modelos do
 # CRM principal. Só vira lead de verdade quando o contato responde pelo
-# WhatsApp oficial com a mensagem pronta do fluxo do BotConversa — isso chega
-# aqui via /webhook/botconversa (configurado como Bloco de Integração dentro
-# do fluxo, no painel do BotConversa — não dá pra configurar isso via API).
+# WhatsApp oficial. A entrada por webhook do BotConversa foi removida em
+# 31/07/2026; o que existia continua no banco, e contato frio novo entra pela
+# extensão ou pela importação.
 # Acesso restrito a admin (pedido explícito: "acesso apenas de gestão").
 
 @app.route('/crm/frios')
@@ -28131,82 +27873,12 @@ def crm_frios_enviar(cid):
             falhas += 1
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "enviados": enviados, "falhas": falhas})
-
-
-@app.route('/webhook/botconversa', methods=['POST'])
-def webhook_botconversa():
-    """Recebe o aviso do Bloco de Integração do BotConversa quando um contato
-    da base fria responde no fluxo — NÃO cria o lead direto (pedido explícito:
-    gestão quer revisar antes de promover pro CRM principal). Só marca o
-    contato como 'respondeu', pronto pra promoção manual em /crm/frios.
-    Protegido por token na query string (não tem sessão de usuário aqui, é
-    uma chamada servidor-a-servidor do BotConversa).
-    Payload esperado: {telefone: '5519...'}."""
-    token_esperado = os.environ.get('BOTCONVERSA_WEBHOOK_TOKEN', '').strip()
-    if token_esperado and request.args.get('token', '').strip() != token_esperado:
-        return jsonify({"ok": False, "erro": "Token inválido"}), 401
-    d = request.json or {}
-    telefone = (d.get('telefone') or d.get('phone') or '').strip()
-    tel_norm = _normalizar_telefone(telefone)
-    if not tel_norm:
-        return jsonify({"ok": False, "erro": "Telefone ausente ou inválido no payload"}), 400
-
-    conn = db()
-    contato = conn.execute(
-        "SELECT * FROM contatos_frios WHERE telefone_norm=? AND status NOT IN ('respondeu','convertido') ORDER BY id DESC LIMIT 1",
-        (tel_norm,)).fetchone()
-    if not contato:
-        close_db(conn)
-        return jsonify({"ok": False, "erro": "Nenhum contato frio pendente com esse telefone"}), 404
-    ct = dict(contato)
-
-    conn.execute("UPDATE contatos_frios SET status='respondeu' WHERE id=?", (ct['id'],))
-    conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "contato_id": ct['id']})
-
-
-@app.route('/webhook/botconversa/disparo', methods=['POST'])
-def webhook_botconversa_disparo():
-    """Recebe o aviso do Bloco de Integração colocado no INÍCIO do fluxo de
-    disparo (o mesmo fluxo que a Transmissão do BotConversa dispara pra cada
-    contato da lista). Chega um POST por contato, no momento exato em que a
-    mensagem é enviada — assim a lista inteira do disparo cai automaticamente
-    na Base Fria do JOB, sem precisar subir CSV duas vezes.
-    Protegido por token na query string.
-    Payload esperado: {telefone, nome, campanha (opcional, texto livre)}."""
-    token_esperado = os.environ.get('BOTCONVERSA_WEBHOOK_TOKEN', '').strip()
-    if token_esperado and request.args.get('token', '').strip() != token_esperado:
-        return jsonify({"ok": False, "erro": "Token inválido"}), 401
-    d = request.json or {}
-    telefone = (d.get('telefone') or d.get('phone') or '').strip()
-    nome = (d.get('nome') or d.get('name') or '').strip() or 'Sem nome'
-    campanha_nome = (d.get('campanha') or 'Disparos BotConversa').strip()
-    tel_norm = _normalizar_telefone(telefone)
-    if not tel_norm:
-        return jsonify({"ok": False, "erro": "Telefone ausente ou inválido no payload"}), 400
-
-    conn = db()
-    campanha = conn.execute("SELECT id FROM campanhas_frias WHERE nome=?", (campanha_nome,)).fetchone()
-    if campanha:
-        cid = campanha['id']
-    else:
-        conn.execute("INSERT INTO campanhas_frias (nome, descricao, criado_em) VALUES (?,?,?)",
-                     (campanha_nome, 'Criada automaticamente a partir do disparo do BotConversa', _agora_sp()))
-        cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
-               else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
-
-    ja_existe = conn.execute(
-        "SELECT id FROM contatos_frios WHERE campanha_id=? AND telefone_norm=?", (cid, tel_norm)).fetchone()
-    if ja_existe:
-        close_db(conn)
-        return jsonify({"ok": True, "contato_id": ja_existe['id'], "duplicado": True})
-
-    conn.execute("""INSERT INTO contatos_frios (campanha_id, nome, telefone, telefone_norm, status, criado_em)
-        VALUES (?,?,?,?,'novo',?)""", (cid, nome, telefone, tel_norm, _agora_sp()))
-    contato_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
-                  else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
-    conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "contato_id": contato_id, "campanha_id": cid})
+# Os webhooks do BotConversa foram removidos em 31/07/2026 — a Serenus deixou de
+# usar a ferramenta. Eram duas portas abertas na internet esperando uma chamada
+# que nunca mais vem: /webhook/botconversa (resposta no fluxo da base fria) e
+# /webhook/botconversa/disparo (transmissao). Porta que ninguem usa e superficie
+# de ataque de graca. O que ja tinha entrado por elas continua no banco —
+# contatos_frios, campanhas_frias e campanha_contato nao foram tocados.
 
 
 @app.route('/crm/frios/contato/<int:cid>/promover', methods=['POST'])
