@@ -516,6 +516,11 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   display: block; margin-top: 7px; padding-top: 7px;
   border-top: 1px solid rgba(255,255,255,.1);
   max-width: 100%; box-sizing: border-box; overflow: hidden;
+  /* A bolha do arquivo é um flex row (ícone | nome | tamanho). Sem isto o bloco
+     entrava como mais uma COLUNA, ao lado do nome do arquivo — que foi o que
+     ficou horrível. Ocupando a linha inteira e indo por último, ele desce pra
+     baixo do documento, igual à transcrição fica embaixo do áudio. */
+  flex: 1 1 100%; width: 100%; order: 99;
 }
 /* Nada aqui dentro pode esticar: select herda a largura do pai e virava uma
    barra atravessando a conversa inteira. */

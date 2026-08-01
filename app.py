@@ -14314,7 +14314,10 @@ _DOC_SISTEMA = (
     "Prefira dizer que não tem certeza a chutar.\n"
     "Se o documento estiver EM BRANCO (formulário não preenchido), classifique o "
     "tipo normalmente e diga em observacoes que veio em branco — isso é informação "
-    "útil, o consultor precisa saber que falta o cliente preencher."
+    "útil, o consultor precisa saber que falta o cliente preencher.\n"
+    "'identidade' cobre RG, CNH (inclusive CNH-e digital), passaporte e RNE — "
+    "qualquer documento oficial com foto que identifique a pessoa.\n"
+    "'comprovante_endereco' cobre conta de luz, água, telefone e internet."
 )
 
 _DOC_SCHEMA = {
@@ -14401,12 +14404,23 @@ def ler_documentos_cliente(arquivos, teto_imagens=24):
             continue
         if (a.get('tipo') or '') == 'documento':
             texto, paginas = _pdf_extrair_conteudo(b64, max_paginas=2)
-            if texto:
-                # PDF com camada de texto: leitura perfeita e de graca.
+            # CAMADA DE TEXTO CURTA NAO E LEITURA. Uma CNH-e tem camada de texto,
+            # mas ela e quase so metadado e QR — o modelo lia aquilo, nao via a
+            # carteira, e classificava como 'outro'. Contrato ou conta de luz de
+            # verdade tem muito texto. Abaixo de 400 caracteres, olha a IMAGEM da
+            # pagina, que e onde o documento realmente esta.
+            if texto and len(texto.strip()) >= 400:
                 textos.append((i, nome, texto[:6000]))
                 preparados.append((i, nome, []))
                 continue
-            preparados.append((i, nome, [(p, 'image/jpeg') for p in (paginas or [])[:2]]))
+            if paginas:
+                preparados.append((i, nome, [(p, 'image/jpeg') for p in (paginas or [])[:2]]))
+                if texto and texto.strip():
+                    textos.append((i, nome, texto[:1500]))
+            else:
+                preparados.append((i, nome, []))
+                if texto:
+                    textos.append((i, nome, texto[:6000]))
         else:
             preparados.append((i, nome, [_doc_preparar_imagem(b64, a.get('mime'))]))
 
