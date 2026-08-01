@@ -8,7 +8,15 @@ Sabe IF 200 Standard e Selection IF 200 Standard.
 Fonte: https://portal.saudebeneficencia.com.br/PlanodeSaude/pls_paginaGuiaMedico.jsp
 Coleta em 31/07/2026.
 
-Colunas bene_raw.tsv (9): nome | crm | razaoSocial | especialidade | endereco | telefone | tipoPrestador | cidade | plano
+Colunas bene_raw.tsv e bene_aux_raw.tsv (9): nome | crm | razaoSocial | especialidade | endereco | telefone | tipoPrestador | cidade | plano
+
+bene_raw.tsv = Consultorios/Terapias (busca sem filtro de tipo de prestador).
+bene_aux_raw.tsv = Hospitais/Exames/Laboratorios (a busca sem filtro NAO retorna esses
+tipos apesar do contador de resultados incluir; foi preciso filtrar NR_SEQ_TIPO_PRESTADOR
+explicitamente por tipo). Hospitais frequentemente tem varias especialidades por
+prestador, separadas por ";" (ex.: "Hospital Geral;Pronto Socorro Obstetrico") -- essas
+sao explodidas em categorias separadas para aparecerem no filtro certo (ex.: Pronto-
+Socorro).
 """
 import json
 import os
@@ -34,32 +42,40 @@ def title_pt(s):
     return " ".join(out)
 
 
-def main():
-    path = os.path.join(REPO, "bene_raw.tsv")
+def ler_linhas(nome_arquivo):
+    path = os.path.join(REPO, nome_arquivo)
+    if not os.path.exists(path):
+        return []
     with open(path, "r", encoding="utf-8") as f:
-        lines = [l.rstrip("\n") for l in f if l.strip()]
+        return [l.rstrip("\n") for l in f if l.strip()]
+
+
+def main():
+    linhas = ler_linhas("bene_raw.tsv") + ler_linhas("bene_aux_raw.tsv")
 
     # plano -> cidade -> tipo -> especialidade -> lista de prestadores (dedup)
     data = {}
     seen = set()
-    for line in lines:
+    for line in linhas:
         parts = line.split("\t")
         if len(parts) < 9:
             continue
-        nome, crm, razao, esp, end, fone, tipo, cidade, plano = parts[:9]
-        esp = esp.strip() or "Não especificado"
+        nome, crm, razao, esp_raw, end, fone, tipo, cidade, plano = parts[:9]
         tipo = tipo.strip() or "Outros"
         key = (plano, cidade, nome, crm, end)
         if key in seen:
             continue
         seen.add(key)
-        data.setdefault(plano, {}).setdefault(cidade, {}).setdefault(tipo, {}).setdefault(esp, []).append({
+        prestador = {
             "n": title_pt(nome),
             "crm": crm.strip() or None,
             "razao": title_pt(razao) if razao.strip() else None,
             "e": end.strip() or None,
             "f": [fone.strip()] if fone.strip() else [],
-        })
+        }
+        especialidades = [e.strip() for e in esp_raw.split(";") if e.strip()] or ["Não especificado"]
+        for esp in especialidades:
+            data.setdefault(plano, {}).setdefault(cidade, {}).setdefault(tipo, {}).setdefault(esp, []).append(prestador)
 
     for plano in data:
         for cidade in data[plano]:
