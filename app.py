@@ -20130,12 +20130,43 @@ def painel_lead(lid):
         SELECT texto, autor_nome, criado_em FROM lead_notas
         WHERE lead_id=? ORDER BY id DESC LIMIT 30""", (lid,)).fetchall()]
 
-    documentos = []
+    documentos, doc_grupos, doc_pendentes = [], [], 0
     try:
         documentos = [dict(r) for r in conn.execute(
+            # titularidade e parentesco PRECISAM vir. Sem elas o seletor nascia
+            # em "a definir" e, ao trocar o tipo, a tela mandava vazio de volta:
+            # apagava o que ja estava gravado e refazia o nome do arquivo sem o
+            # papel. Perder "DEPENDENTE CONJUGE" do nome quebra a pasta na
+            # operadora, que e justamente pra isso que ela existe.
             "SELECT id, tipo, pessoa, certeza, nome_final, nome_arquivo, tamanho, "
+            "titularidade, parentesco, "
             "COALESCE(tipo_conferido,0) conferido, criado_em "
             "FROM lead_documento WHERE lead_id=? ORDER BY tipo, id", (lid,)).fetchall()]
+        # AGRUPA PELO QUE O CONSULTOR PRECISA DECIDIR, nao pela ordem do banco.
+        # A pergunta na frente da operadora nao e "que arquivos tem"; e "esta
+        # pessoa esta completa?". Entao: primeiro o que falta definir (a fila de
+        # trabalho), depois o titular, depois cada dependente com o vinculo dele.
+        pendentes = [d for d in documentos if not d.get('titularidade')]
+        titular = [d for d in documentos if d.get('titularidade') == 'titular']
+        deps = [d for d in documentos if d.get('titularidade') == 'dependente']
+        grupos = []
+        if pendentes:
+            grupos.append({'chave': 'pendente', 'titulo': 'Falta definir de quem é',
+                           'sub': 'Sem isto o nome do arquivo não serve na operadora',
+                           'itens': pendentes})
+        if titular:
+            grupos.append({'chave': 'titular', 'titulo': 'Titular',
+                           'sub': (titular[0].get('pessoa') or ''), 'itens': titular})
+        por_par = {}
+        for d in deps:
+            por_par.setdefault(d.get('parentesco') or '', []).append(d)
+        for par, itens in sorted(por_par.items(), key=lambda kv: kv[0] or 'zzz'):
+            rot = _DOC_PARENTESCO_ROTULO.get(par, 'Dependente')
+            grupos.append({'chave': 'dep', 'titulo': 'Dependente — ' + rot if par else 'Dependente',
+                           'sub': (itens[0].get('pessoa') or ''),
+                           'comprova': _DOC_PARENTESCO_COMPROVA.get(par), 'itens': itens})
+        doc_grupos = grupos
+        doc_pendentes = len(pendentes)
     except Exception as e:
         app.logger.info(f"[PAINEL] documentos: {e}")
         try: conn.rollback()
@@ -20150,6 +20181,7 @@ def painel_lead(lid):
                            cotacoes=cotacoes, vendas=vendas, receita=receita,
                            com_bruta=com_bruta, com_liquida=com_liquida,
                            timeline=timeline, notas=notas, saude=saude, documentos=documentos,
+                           doc_grupos=doc_grupos, doc_pendentes=doc_pendentes,
                            doc_tipos=_DOC_TIPOS, doc_rotulos=_DOC_ROTULO,
                            doc_parentescos=_DOC_PARENTESCOS,
                            doc_parentesco_rotulos=_DOC_PARENTESCO_ROTULO,

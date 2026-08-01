@@ -71,10 +71,84 @@
   .pl-nota { border-bottom:1px solid var(--borda); padding:9px 0; font-size:12.5px; }
   .pl-nota:last-child { border-bottom:none; }
   .pl-nota-quem { font-size:10.5px; color:var(--cinza); margin-top:4px; }
-  .pl-doc-dica { font-size:10px; color:#7ae3c3; margin-top:3px; }
-  .pl-doc-tipo[hidden] { display:none; }
-  .pl-doc-tipo { background:var(--panel-3); border:1px solid var(--borda); color:var(--texto);
-                 border-radius:6px; padding:3px 7px; font-size:11.5px; }
+  /* DOCUMENTOS — grade, não tabela.
+     Numa tabela cada célula se acomoda ao conteúdo, e três selects de larguras
+     diferentes fazem a coluna dançar linha a linha: foi o que ficou torto.
+     A grade fixa as colunas uma vez e todas as linhas obedecem. */
+  .pl-docs-topo { display:flex; justify-content:space-between; align-items:center;
+                  gap:14px; flex-wrap:wrap; margin-bottom:14px; }
+  .pl-docs-acoes { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .pl-chip { font-size:10.5px; font-weight:700; letter-spacing:.3px; text-transform:uppercase;
+             padding:4px 9px; border-radius:999px; }
+  .pl-chip.pendente { background:rgba(250,204,21,.14); color:#fbbf24; border:1px solid rgba(250,204,21,.3); }
+  .pl-chip.pronto { background:rgba(34,197,94,.13); color:#4ade80; border:1px solid rgba(34,197,94,.28); }
+
+  /* Cada pessoa é um bloco. É assim que a operadora analisa a proposta, e é
+     assim que o consultor confere antes de subir: pessoa por pessoa. */
+  .pl-docs-tabela { border:1px solid var(--borda); border-radius:10px; overflow:hidden; }
+  .pl-grupo-cab { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+                  padding:9px 14px; background:var(--panel-3);
+                  border-top:1px solid var(--borda); border-bottom:1px solid var(--borda); }
+  .pl-grupo:first-of-type .pl-grupo-cab { border-top:none; }
+  .pl-grupo.pendente .pl-grupo-cab { background:rgba(250,204,21,.08); }
+  .pl-grupo-tit { font-size:12px; font-weight:700; letter-spacing:.3px; text-transform:uppercase; }
+  .pl-grupo.pendente .pl-grupo-tit { color:#fbbf24; }
+  .pl-grupo-sub { font-size:12.5px; color:var(--texto); }
+  .pl-grupo-n { font-size:10.5px; color:var(--cinza); font-variant-numeric:tabular-nums;
+                background:var(--panel-2); border-radius:999px; padding:1px 8px; }
+  .pl-grupo-dica { font-size:11px; color:#7ae3c3; margin-left:auto; }
+
+  .pl-doc-cab, .pl-doc-linha {
+    display:grid; align-items:center; gap:14px; padding:8px 14px;
+    grid-template-columns:200px 150px 250px minmax(200px,1fr) 84px 60px;
+  }
+  /* UM controle por célula, e nada quebra linha: era o selo caindo pra segunda
+     linha e os dois selects empilhando que faziam cada linha ter uma altura
+     diferente — a "desalinhada" da queixa. */
+  .pl-doc-linha { min-height:46px; }
+  .pl-doc-cab { font-size:9.5px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza);
+                font-weight:600; padding-top:11px; padding-bottom:9px; background:var(--panel-2);
+                min-height:0; }
+  .pl-doc-linha { border-top:1px solid var(--borda); font-size:12.5px; }
+  .pl-grupo .pl-doc-linha:first-of-type { border-top:none; }
+  .pl-doc-linha.falta { background:rgba(250,204,21,.04); }
+  .pl-doc-c { min-width:0; display:flex; align-items:center; gap:8px; flex-wrap:nowrap; }
+  .pl-doc-pessoa { color:var(--texto); }
+  /* O nome é o produto: é ele que faz a pasta servir. Monoespaçado e inteiro no
+     hover, cortado na tela pra não empurrar as outras colunas. */
+  .pl-doc-arq { font-family:ui-monospace,Menlo,monospace; font-size:11px; color:#7ae3c3;
+                white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
+  .pl-doc-fim { justify-content:flex-end; }
+  /* "baixar" era um link azul sobre fundo quase preto: sumia. Vira um alvo
+     legível, com a mesma altura dos selects. */
+  .pl-doc-baixar { display:inline-flex; align-items:center; height:30px; padding:0 11px;
+                   border:1px solid var(--borda); border-radius:7px; font-size:11px;
+                   font-weight:600; color:var(--cinza-2); text-decoration:none; }
+  .pl-doc-baixar:hover { color:var(--texto); border-color:var(--cinza); background:var(--panel-3); }
+  .pl-doc-msg { font-size:10.5px; color:#4ade80; margin-right:9px; }
+  .pl-doc-msg.ruim { color:#fca5a5; }
+
+  /* Todos os selects com a MESMA altura e a mesma cara — a mistura de alturas
+     era metade do desalinhamento. */
+  .pl-sel { background:var(--panel-3); border:1px solid var(--borda); color:var(--texto);
+            border-radius:7px; padding:5px 8px; font-size:11.5px; font-family:inherit;
+            height:30px; min-width:0; flex:1 1 0; cursor:pointer; }
+  .pl-sel.larga { flex:1 1 100%; }
+  .pl-sel:hover { border-color:var(--cinza); }
+  .pl-sel[hidden] { display:none; }
+  .pl-doc-selo { font-size:8.5px; font-weight:800; letter-spacing:.3px; text-transform:uppercase;
+                 padding:2px 6px; border-radius:4px; white-space:nowrap; }
+  .pl-doc-selo.ok { background:rgba(34,197,94,.16); color:#4ade80; }
+  .pl-doc-selo.ia { background:rgba(168,85,247,.16); color:#d8b4fe; }
+  .pl-doc-selo.duvida { background:rgba(250,204,21,.16); color:#fbbf24; }
+
+  /* Tela estreita: a grade vira lista, com o rótulo antes de cada campo. */
+  @media (max-width:900px) {
+    .pl-doc-cab { display:none; }
+    .pl-doc-linha { grid-template-columns:1fr; gap:7px; padding:12px 14px; }
+    .pl-doc-fim { justify-content:flex-start; }
+    .pl-doc-arq { white-space:normal; word-break:break-all; }
+  }
 </style>
 {% endblock %}
 
@@ -295,58 +369,84 @@
     {% endif %}
   </div>
 
-  <div class="pl-box largo">
-    <h2>Documentos do cliente<i class="ajuda-i" title="Os arquivos que o cliente mandou no WhatsApp, já classificados e renomeados. Baixar a pasta traz tudo com nome padrão (RG-CNH - NOME.jpg), pronto para subir no sistema da operadora sem abrir arquivo por arquivo.">i</i></h2>
+  <div class="pl-box largo pl-docs">
+    <div class="pl-docs-topo">
+      <h2 style="margin:0;">Documentos do cliente<i class="ajuda-i" title="Os arquivos que o cliente mandou no WhatsApp, já classificados e renomeados. Baixar a pasta traz tudo com nome padrão (RG-CNH - TITULAR - NOME.pdf), pronto para subir no sistema da operadora sem abrir arquivo por arquivo.">i</i></h2>
+      {% if documentos %}
+      <div class="pl-docs-acoes">
+        {# O numero que importa nao e quantos arquivos tem: e quantos ainda nao
+           servem. Arquivo sem dono sai da pasta com o nome errado. #}
+        {% if doc_pendentes %}
+          <span class="pl-chip pendente">{{ doc_pendentes }} de {{ documentos|length }} sem dono</span>
+        {% else %}
+          <span class="pl-chip pronto">{{ documentos|length }} arquivo(s) prontos</span>
+        {% endif %}
+        <a class="btn-outline" href="/lead/{{ lead.id }}/documentos.zip">Baixar a pasta completa</a>
+      </div>
+      {% endif %}
+    </div>
+
     {% if not documentos %}
       <div class="pl-vazio">Nenhum documento lido ainda. Na extensão, clique em "Ler documento" na bolha do arquivo.</div>
     {% else %}
-    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
-      <span class="pl-vazio" style="font-style:normal;">{{ documentos|length }} arquivo(s)</span>
-      <a class="btn-outline" href="/lead/{{ lead.id }}/documentos.zip">Baixar a pasta completa</a>
+
+    {# UMA tabela, com faixas por pessoa. O cabecalho de colunas repetido a cada
+       grupo era ruido: quatro vezes a mesma informacao na mesma tela. #}
+    <div class="pl-docs-tabela">
+      <div class="pl-doc-cab">
+        <span>Tipo do documento</span><span>De quem</span><span>Titular ou dependente</span>
+        <span>Nome que vai pra operadora</span><span>Conferido</span><span></span>
+      </div>
+    {% for g in doc_grupos %}
+    <section class="pl-grupo {{ g.chave }}">
+      <header class="pl-grupo-cab">
+        <span class="pl-grupo-tit">{{ g.titulo }}</span>
+        {% if g.sub %}<span class="pl-grupo-sub">{{ g.sub }}</span>{% endif %}
+        <span class="pl-grupo-n">{{ g.itens|length }}</span>
+        {% if g.comprova %}<span class="pl-grupo-dica">comprova com: {{ g.comprova }}</span>{% endif %}
+      </header>
+
+      {% for d in g.itens %}
+      <div class="pl-doc-linha{{ ' falta' if not d.titularidade }}">
+        <div class="pl-doc-c">
+          <select class="pl-sel larga" data-doc="{{ d.id }}" data-campo="tipo" onchange="mudarDoc(this)">
+            {% for tp in doc_tipos %}
+            <option value="{{ tp }}" {% if d.tipo == tp %}selected{% endif %}>{{ doc_rotulos.get(tp, tp) }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="pl-doc-c pl-doc-pessoa">{{ d.pessoa or '—' }}</div>
+
+        <div class="pl-doc-c">
+          <select class="pl-sel" data-doc="{{ d.id }}" data-campo="titularidade" onchange="mudarDoc(this)">
+            <option value="" {% if not d.titularidade %}selected{% endif %}>a definir</option>
+            <option value="titular" {% if d.titularidade == 'titular' %}selected{% endif %}>Titular</option>
+            <option value="dependente" {% if d.titularidade == 'dependente' %}selected{% endif %}>Dependente</option>
+          </select>
+          <select class="pl-sel" data-doc="{{ d.id }}" data-campo="parentesco" onchange="mudarDoc(this)"
+                  {% if d.titularidade != 'dependente' %}hidden{% endif %}>
+            <option value="">parentesco…</option>
+            {% for p in doc_parentescos %}
+            <option value="{{ p }}" {% if d.parentesco == p %}selected{% endif %}>{{ doc_parentesco_rotulos.get(p, p) }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="pl-doc-c pl-doc-arq" title="{{ d.nome_final or d.nome_arquivo }}">{{ d.nome_final or d.nome_arquivo }}</div>
+
+        <div class="pl-doc-c">
+          <span class="pl-doc-selo {{ 'ok' if d.conferido else ('duvida' if d.certeza == 'baixa' else 'ia') }}">
+            {{ 'conferido' if d.conferido else ('conferir' if d.certeza == 'baixa' else 'pela IA') }}</span>
+        </div>
+        <div class="pl-doc-c pl-doc-fim">
+          <a class="pl-doc-baixar" href="/lead/{{ lead.id }}/documento/{{ d.id }}">baixar</a>
+        </div>
+      </div>
+      {% endfor %}
+    </section>
+    {% endfor %}
     </div>
-    <table class="pl-tab">
-      <thead><tr><th>Tipo</th><th>De quem</th><th>Titular ou dependente</th><th>Nome do arquivo</th><th>Conferido</th><th></th></tr></thead>
-      <tbody>
-        {% for d in documentos %}
-        <tr>
-          <td>
-            {# A IA propoe, a pessoa decide — e aqui vale dobrado: o tipo vira o
-               NOME do arquivo, e o nome e o que faz a pasta servir na operadora. #}
-            <select class="pl-doc-tipo" data-doc="{{ d.id }}" data-campo="tipo" onchange="mudarDoc(this)">
-              {% for t in doc_tipos %}
-              <option value="{{ t }}" {% if d.tipo == t %}selected{% endif %}>{{ doc_rotulos.get(t, t) }}</option>
-              {% endfor %}
-            </select>
-          </td>
-          <td>{{ d.pessoa or '—' }}</td>
-          <td>
-            {# As outras duas perguntas. O parentesco so aparece quando e
-               dependente — em titular ele nao existe. #}
-            <select class="pl-doc-tipo" data-doc="{{ d.id }}" data-campo="titularidade" onchange="mudarDoc(this)">
-              <option value="" {% if not d.titularidade %}selected{% endif %}>a definir</option>
-              <option value="titular" {% if d.titularidade == 'titular' %}selected{% endif %}>Titular</option>
-              <option value="dependente" {% if d.titularidade == 'dependente' %}selected{% endif %}>Dependente</option>
-            </select>
-            <select class="pl-doc-tipo" data-doc="{{ d.id }}" data-campo="parentesco" onchange="mudarDoc(this)"
-                    {% if d.titularidade != 'dependente' %}hidden{% endif %}>
-              <option value="">parentesco...</option>
-              {% for p in doc_parentescos %}
-              <option value="{{ p }}" {% if d.parentesco == p %}selected{% endif %}>{{ doc_parentesco_rotulos.get(p, p) }}</option>
-              {% endfor %}
-            </select>
-            {% if d.parentesco and doc_parentesco_comprova.get(d.parentesco) %}
-            <div class="pl-doc-dica">comprova o vínculo: {{ doc_parentesco_comprova[d.parentesco] }}</div>
-            {% endif %}
-          </td>
-          <td style="font-family:ui-monospace,Menlo,monospace; font-size:11px;">{{ d.nome_final or d.nome_arquivo }}</td>
-          <td>{% if d.conferido %}<span class="pill pill-verde">sim</span>
-              {% elif d.certeza == 'baixa' %}<span class="pill pill-erro">conferir</span>
-              {% else %}<span class="pill pill-cinza">pela IA</span>{% endif %}</td>
-          <td><a href="/lead/{{ lead.id }}/documento/{{ d.id }}">baixar</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
     {% endif %}
   </div>
 
@@ -391,12 +491,37 @@ async function mudarDoc(sel){
   const id = sel.dataset.doc;
   const campo = c => document.querySelector('[data-doc="'+id+'"][data-campo="'+c+'"]');
   const tit = campo('titularidade'), par = campo('parentesco');
-  if(par) par.hidden = (tit.value !== 'dependente');   // some na hora, sem esperar o reload
-  const r = await fetch('/lead/documento/tipo', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({doc_id: id, tipo: campo('tipo').value,
-                          titularidade: tit ? tit.value : '', parentesco: par ? par.value : ''})});
-  const d = await r.json();
-  if(!d.ok){ alert(d.erro || 'Não deu pra salvar'); return; }
+  const linha = sel.closest('.pl-doc-linha');
+  const ehDep = !!(tit && tit.value === 'dependente');
+  if(par) par.hidden = !ehDep;                 // some na hora, sem esperar o reload
+  const dizer = (txt, ruim) => {
+    if(!linha) return;
+    let m = linha.querySelector('.pl-doc-msg');
+    if(!m){ m = document.createElement('span'); m.className = 'pl-doc-msg';
+            (linha.querySelector('.pl-doc-fim') || linha).prepend(m); }
+    m.textContent = txt; m.classList.toggle('ruim', !!ruim);
+    if(!ruim) setTimeout(() => { if(m) m.textContent = ''; }, 2200);
+  };
+  let d = null;
+  try {
+    const r = await fetch('/lead/documento/tipo', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({doc_id: id, tipo: campo('tipo').value,
+                            titularidade: tit ? tit.value : '', parentesco: par ? par.value : ''})});
+    d = await r.json();
+  } catch(e) { d = null; }
+  // Erro na PRÓPRIA LINHA, não num alert: o alert tira o foco e não diz qual
+  // arquivo falhou quando são sete na tela.
+  if(!d || !d.ok){ dizer((d && d.erro) || 'não deu pra salvar', true); return; }
+  // Virou dependente e ainda não disse o vínculo: NÃO recarrega. Recarregando,
+  // a linha muda de grupo e o consultor perde o lugar antes de completar a
+  // resposta — e o vínculo é justamente o que a operadora cobra.
+  if(ehDep && par && !par.value){
+    const arq = linha && linha.querySelector('.pl-doc-arq');
+    if(arq){ arq.textContent = d.nome_final; arq.title = d.nome_final; }
+    dizer('falta o vínculo');
+    par.focus();
+    return;
+  }
   location.reload();
 }
 </script>
