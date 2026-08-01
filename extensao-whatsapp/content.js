@@ -5051,6 +5051,20 @@
 
   // A ponte avisa quando ENTRA uma mensagem (só o chatId). Se for de um número em
   // vigília, reporta a resposta ao JOB e tira da vigília.
+  // O site do JOB pediu pra abrir uma conversa NESTA aba (via background).
+  chrome.runtime.onMessage.addListener((msg, _rem, responder) => {
+    if (!msg || msg.type !== 'abrir_chat_aqui') return;
+    (async () => {
+      try {
+        const r = await _pedirPonte('abrir_chat', { chatId: msg.chatId || '', telefone: msg.telefone || '' }, 12000);
+        responder({ ok: !!(r && r.ok), motivo: (r && r.erro) || '' });
+      } catch (e) {
+        responder({ ok: false, motivo: String((e && e.message) || e) });
+      }
+    })();
+    return true;
+  });
+
   window.addEventListener('message', async (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;

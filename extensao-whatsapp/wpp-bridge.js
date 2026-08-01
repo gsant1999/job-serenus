@@ -820,6 +820,27 @@
   //    wa-js aceita pra mandar, mesmo quando o telefone real não é exposto.
   //    É o jeito à prova de falha de mandar pra conversa que está na tela,
   //    sem depender de descobrir o número. ──
+  // Troca de conversa POR DENTRO — sem recarregar a pagina.
+  //
+  // openChat aceita o id do chat; quando so temos o telefone, monta o
+  // '55DDDNUMERO@c.us'. Em conversa @lid o chatId salvo e o unico caminho, e por
+  // isso ele vem primeiro: o telefone as vezes nem existe do lado do WhatsApp.
+  async function abrirChat(chatId, telefone) {
+    if (!window.WPP || !window.WPP.chat) return { erro: 'wpp_ausente' };
+    const alvos = [];
+    if (chatId) alvos.push(chatId);
+    const dig = String(telefone || '').replace(/\D/g, '');
+    if (dig) alvos.push((dig.startsWith('55') ? dig : '55' + dig) + '@c.us');
+    for (const alvo of alvos) {
+      try {
+        if (window.WPP.chat.openChatBottom) await window.WPP.chat.openChatBottom(alvo);
+        else await window.WPP.chat.openChat(alvo);
+        return { ok: true, chat_id: alvo };
+      } catch (e) { /* tenta o proximo */ }
+    }
+    return { erro: 'nao_abriu' };
+  }
+
   async function obterChatIdAtivo() {
     if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getActiveChat) {
       return { erro: 'wpp_ausente' };
@@ -986,6 +1007,7 @@
       else if (d.tipo === 'obter_telefone') resp = await obterTelefone(d.resolverLid);
       else if (d.tipo === 'obter_meu_numero') resp = await obterMeuNumero();
       else if (d.tipo === 'obter_chat_id') resp = await obterChatIdAtivo();
+      else if (d.tipo === 'abrir_chat') resp = await abrirChat(d.chatId, d.telefone);
       else if (d.tipo === 'enviar_texto') resp = await enviarTexto(d.chatId, d.texto);
       else if (d.tipo === 'enviar_midia') resp = await enviarMidia(d.chatId, d.midiaTipo, d.dataUrl, d.legenda, d.nomeArquivo);
       else if (d.tipo === 'apagar_conversa') resp = await apagarConversa(d.chatId);
