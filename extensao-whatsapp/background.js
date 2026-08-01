@@ -366,7 +366,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'documentos_ler') {
     chamarJob('/api/whatsapp/documentos/ler', 'POST',
-      { telefone: msg.telefone, lead_id: msg.leadId || null, arquivos: msg.arquivos || [] },
+      { telefone: msg.telefone, lead_id: msg.leadId || null, reler: !!msg.reler,
+        arquivos: msg.arquivos || [] },
       180000).then(sendResponse);
     return true;
   }

@@ -1342,6 +1342,15 @@
   }
 
   function docRenderSlot(slot, id) {
+    // A bolha inteira do arquivo e clicavel pelo WhatsApp: qualquer clique que
+    // escape do nosso bloco abre o PDF. Uma trava so, na captura, vale por
+    // todos os controles de dentro — e nao depende de eu lembrar de repetir
+    // stopPropagation em cada botao novo que eu criar aqui.
+    if (!slot._jobTravado) {
+      slot._jobTravado = true;
+      ['click', 'mousedown', 'mouseup', 'pointerdown', 'dblclick'].forEach((ev) =>
+        slot.addEventListener(ev, (x) => x.stopPropagation(), true));
+    }
     const e = DOC.estado.get(id) || {};
     if (e.status === 'lendo') {
       const seg = e.t0 ? Math.round((Date.now() - e.t0) / 1000) : 0;
@@ -1381,20 +1390,40 @@
           '<option value="">parentesco?</option>' +
           pars.map((p) => '<option value="' + p + '"' + (p === a.parentesco ? ' selected' : '') + '>' +
             esc(parRot[p] || p) + '</option>').join('') + '</select>';
+      // SEM LEAD VINCULADO nao existe onde guardar, entao nao existe doc_id, e
+      // sem doc_id nao existem os tres seletores. Isso acontecia CALADO: a tela
+      // mostrava um "OUTRO" fixo que ninguem conseguia corrigir e o consultor
+      // achava que a leitura tinha errado. Agora diz o motivo.
+      const semLead = !a.doc_id;
+      const ondeFoi = r.lead_id
+        ? '<a class="job-doc-link" href="' + _SITE_BASE_URL_EXT + '/lead/' + r.lead_id +
+          '" target="_blank" rel="noopener" title="Abre a ficha do lead no JOB: os documentos guardados, os campos preenchidos e o botao de baixar a pasta inteira">' +
+          _ICO_ABRIR + 'ver no JOB</a>'
+        : '';
       slot.innerHTML = '<div class="job-doc-lido">' +
-        (a.doc_id ? sel : '<span class="job-doc-tipo">' + esc(a.tipo || 'outro') + '</span>') +
+        (a.doc_id ? sel : '<span class="job-doc-tipo">' + esc(rot[a.tipo] || a.tipo || 'sem tipo') + '</span>') +
         (a.pessoa ? '<span class="job-doc-pessoa">' + esc(a.pessoa) + '</span>' : '') +
         (a.certeza === 'baixa' ? '<span class="job-doc-duvida">conferir</span>' : '') +
+        (a.ja_lido ? '<span class="job-doc-duvida" title="Este arquivo ja tinha sido lido antes — isto e o que esta gravado, nao custou nada agora. Use ler de novo se estiver errado.">ja lido</span>' : '') +
         (a.nome_final ? '<div class="job-doc-nome">' + esc(a.nome_final) + '</div>' : '') +
         '<div class="job-doc-dica">' + esc(a.parentesco && comprova[a.parentesco]
           ? 'comprova com: ' + comprova[a.parentesco] : '') + '</div>' +
-        (campos.length
-          ? '<div class="job-doc-campos">preencheu: ' + esc(campos.join(', ')) + '</div>'
-          : '<div class="job-doc-campos">' + esc(a.pessoa
-              ? 'guardado no lead — a ficha já tinha esses dados'
-              : 'guardado no lead — este papel não traz dado de cadastro') + '</div>') +
+        (semLead
+          ? '<div class="job-doc-campos job-doc-alerta">esta conversa não está ligada a um lead — nada foi guardado e não dá pra classificar. Vincule o lead na aba do JOB e leia de novo.</div>'
+          : (campos.length
+              ? '<div class="job-doc-campos">preencheu: ' + esc(campos.join(', ')) + '</div>'
+              : '<div class="job-doc-campos">' + esc(a.pessoa
+                  ? 'guardado no lead — a ficha já tinha esses dados'
+                  : 'guardado no lead — este papel não traz dado de cadastro') + '</div>')) +
         ((r.observacoes || []).length ? '<div class="job-doc-obs" title="' +
            esc(r.observacoes.join(' · ')) + '">' + esc(r.observacoes[0]) + '</div>' : '') +
+        // O caminho de volta: onde o dado foi parar, e como refazer se saiu
+        // errado. Sem o "ler de novo" uma classificacao ruim ficava presa pra
+        // sempre — o arquivo ja estava no cache por conteudo.
+        '<div class="job-doc-acoes">' + ondeFoi +
+          '<button type="button" class="job-doc-link" data-ac="reler" ' +
+          'title="Le este arquivo outra vez, do zero, ignorando o que ja estava gravado">refazer a leitura</button>' +
+        '</div>' +
       '</div>';
       const salvar = async () => {
         const nm = slot.querySelector('.job-doc-nome');
@@ -1408,6 +1437,12 @@
           if (nm) nm.textContent = resp.nome_final;
         } else if (nm) { nm.textContent = 'não deu pra salvar'; }
       };
+      const rl = slot.querySelector('[data-ac="reler"]');
+      if (rl) rl.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        DOC.estado.delete(id);
+        docLerVarios([id], true);
+      });
       slot.querySelectorAll('.job-doc-sel').forEach((sl) => {
         sl.addEventListener('click', (ev) => ev.stopPropagation());
         sl.addEventListener('change', async (ev) => {
@@ -1433,29 +1468,33 @@
       return;
     }
     if (e.status === 'erro') {
-      slot.innerHTML = '<button class="job-tr-btn falhou" type="button" title="' + esc(e.erro || '') + '">' +
+      slot.innerHTML = '<button class="job-tr-btn falhou" type="button" data-ac="ler" title="' + esc(e.erro || '') + '">' +
         _ICO_DOC + 'Ler documento</button>' +
         '<span class="job-tr-motivo">' + esc(e.erro || '') + '</span>';
     } else {
-      slot.innerHTML = '<button class="job-tr-btn" type="button">' + _ICO_DOC + 'Ler documento</button>';
+      slot.innerHTML = '<button class="job-tr-btn" type="button" data-ac="ler">' + _ICO_DOC + 'Ler documento</button>';
     }
-    // A caixinha aparece nos dois casos (parado e erro): e ela que permite
-    // juntar varios arquivos numa leitura so.
+    // BOTAO, nao caixinha de 12px. A caixinha era alvo pequeno demais dentro de
+    // uma bolha que o WhatsApp inteira trata como "abrir o arquivo": errar por
+    // dois pixels abria o PDF. Agora e um botao do mesmo tamanho do outro, e
+    // nenhum clique dentro do bloco chega no WhatsApp.
     const marcado = DOC.sel.has(id);
     slot.insertAdjacentHTML('beforeend',
-      '<label class="job-doc-junta" title="Marque os arquivos que vao juntos e leia todos de uma vez — uma leitura so, mais rapida e mais barata que um por um.">' +
-      '<input type="checkbox" class="job-doc-check"' + (marcado ? ' checked' : '') + '>' +
-      '<span>juntar</span></label>');
-    const cx = slot.querySelector('.job-doc-check');
-    if (cx) cx.addEventListener('change', (ev) => {
+      '<button type="button" class="job-tr-btn job-doc-junta' + (marcado ? ' marcado' : '') +
+      '" data-ac="juntar" title="Junta este arquivo com outros e le todos numa chamada so — mais rapido e mais barato que um por um.">' +
+      (marcado ? _ICO_CHECK + 'Marcado' : _ICO_MAIS + 'Juntar') + '</button>');
+    const j = slot.querySelector('[data-ac="juntar"]');
+    if (j) j.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      if (cx.checked) {
-        if (DOC.sel.size >= DOC_MAX_LOTE) { cx.checked = false; return; }
+      if (DOC.sel.has(id)) { DOC.sel.delete(id); }
+      else {
+        if (DOC.sel.size >= DOC_MAX_LOTE) return;
         DOC.sel.add(id);
-      } else { DOC.sel.delete(id); }
+      }
+      docAtualizarSlot(id);
       _docBarraAtualizar();
     });
-    const b = slot.querySelector('button');
+    const b = slot.querySelector('[data-ac="ler"]');
     if (b) b.addEventListener('click', (ev) => { ev.stopPropagation(); docLer(id); });
   }
 
@@ -1493,7 +1532,7 @@
   // iguais e como o bug do "Copiar conversa" duplicado nasce.
   function docLer(id) { return docLerVarios([id]); }
 
-  async function docLerVarios(ids) {
+  async function docLerVarios(ids, reler) {
     const alvos = (ids || []).filter((id) => (DOC.estado.get(id) || {}).status !== 'lendo');
     if (!alvos.length) return;
     alvos.forEach((id) => {
@@ -1520,7 +1559,7 @@
       let tel = '';
       try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (x) { tel = telefoneDoContato(); }
       const r = await _safeSendMessage({ type: 'documentos_ler', telefone: tel,
-        leadId: (_ficha && _ficha.lead && _ficha.lead.id) || null,
+        leadId: (_ficha && _ficha.lead && _ficha.lead.id) || null, reler: !!reler,
         arquivos: arqs.map((a) => ({ nome: a.nome, base64: a.base64, mime: a.mime, tipo: a.tipo }))
       }).catch(() => null);
       if (!r || !r.ok) {
@@ -1874,6 +1913,9 @@
   const _ICO_DOC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
     'stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
     '<polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
+  const _ICO_MAIS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+  const _ICO_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  const _ICO_ABRIR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M10 14 21 3M18 13v8H3V6h8"/></svg>';
 
   // ── COPIAR A CONVERSA INTEIRA ───────────────────────────────────────────
   // Texto e audio transcrito no MESMO fio, na ordem do WhatsApp, com hora e quem

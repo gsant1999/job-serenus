@@ -540,12 +540,21 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
                color: #e9edef; border-radius: 5px; padding: 1px 5px; font-size: 10px;
                font-family: inherit; margin: 0 5px 4px 0; max-width: 100%; }
 .job-doc-sel[hidden] { display: none; }
-/* A caixinha de juntar: discreta, do lado do botão, sem competir com ele. */
-.job-doc-junta { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px;
-                 color: #8696a0; font-size: 10.5px; cursor: pointer; vertical-align: middle; }
-.job-doc-junta input { width: 12px; height: 12px; margin: 0; cursor: pointer;
-                       accent-color: #00a884; }
-.job-doc-junta:hover { color: #53bdeb; }
+/* Juntar: BOTÃO, do mesmo tamanho do de ler. Era uma caixinha de 12px dentro de
+   uma bolha que o WhatsApp trata inteira como "abrir o arquivo" — errar por dois
+   pixels abria o PDF. Alvo grande, e estado marcado que se vê de longe. */
+.job-doc-junta { margin-left: 14px; }
+.job-doc-junta.marcado { color: #7ae3c3; }
+.job-doc-junta.marcado:hover { color: #7ae3c3; }
+/* O caminho de volta: onde o dado foi parar e como refazer. */
+.job-doc-acoes { display: flex; gap: 14px; align-items: center; margin-top: 5px; flex-wrap: wrap; }
+.job-doc-link { display: inline-flex; align-items: center; gap: 4px;
+                background: none; border: none; padding: 0; font-family: inherit;
+                color: #8696a0; font-size: 10.5px; cursor: pointer; text-decoration: none; }
+.job-doc-link svg { width: 11px; height: 11px; }
+.job-doc-link:hover { color: #53bdeb; text-decoration: underline; }
+/* Sem lead vinculado o bloco não funciona — isso tem que gritar, não sussurrar. */
+.job-doc-alerta { color: #fbbf24; }
 /* A etapa e o relógio: o consultor precisa ver que a coisa está andando. */
 .job-doc-etapa { font-variant-numeric: tabular-nums; }
 /* Dica do papel que comprova o vínculo — informa sem travar. */

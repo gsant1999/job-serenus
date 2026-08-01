@@ -17241,31 +17241,59 @@ def api_whatsapp_documentos_ler():
             lead = _buscar_lead_por_telefone(conn, tel)
             lead_id = lead['id'] if lead else None
 
-    # JA LIDO NAO SE PAGA DE NOVO. O cliente reenvia o mesmo RG toda hora.
+    # JA LIDO NAO SE PAGA DE NOVO — mas TEM QUE VOLTAR PRA TELA.
+    #
+    # Antes o arquivo ja lido era simplesmente pulado e a resposta saia sem a
+    # lista de arquivos. A extensao lia essa lista vazia e pintava "OUTRO" e
+    # "nada novo pro lead" — uma classificacao que o modelo nunca deu. O
+    # consultor via um erro que nao existia, e como nao vinha doc_id, sumiam
+    # junto os tres seletores. Agora o que ja foi lido volta do banco com o que
+    # esta gravado.
     import hashlib as _h
-    novos, ja = [], 0
-    for a in arquivos:
+    reler = bool(d.get('reler'))
+    novos, prontos = [], []
+    for i, a in enumerate(arquivos, start=1):
         b64 = (a.get('base64') or '').strip()
         if not b64:
             continue
         h = _h.sha256(b64.encode('ascii', 'ignore')).hexdigest()
-        if lead_id and conn.execute("SELECT 1 FROM lead_documento WHERE lead_id=? AND conteudo_hash=?",
-                                    (lead_id, h)).fetchone():
-            ja += 1
+        antigo = conn.execute(
+            "SELECT * FROM lead_documento WHERE lead_id=? AND conteudo_hash=?",
+            (lead_id, h)).fetchone() if lead_id else None
+        if antigo is not None and not reler:
+            prontos.append({
+                'indice': i, 'nome': a.get('nome') or '', 'ja_lido': True,
+                'tipo': antigo['tipo'] or 'outro', 'pessoa': antigo['pessoa'] or '',
+                'certeza': antigo['certeza'] or 'baixa', 'doc_id': antigo['id'],
+                'nome_final': antigo['nome_final'], 'titularidade': antigo['titularidade'],
+                'parentesco': antigo['parentesco'],
+            })
             continue
-        novos.append(a)
-    if not novos:
-        close_db(conn)
-        return _wa_cors(jsonify({"ok": True, "lidos": 0, "ja_lidos": ja,
-                                 "msg": "Todos esses documentos já tinham sido lidos"}))
+        novos.append((i, a))
 
-    leitura, erro = ler_documentos_cliente(novos)
-    if erro or not leitura:
-        close_db(conn)
-        return _wa_cors(jsonify({"ok": False, "erro": erro or "não consegui ler"})), 200
+    leitura, erro = ({}, None)
+    if novos:
+        leitura, erro = ler_documentos_cliente([x[1] for x in novos])
+        if erro or not leitura:
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": False, "erro": erro or "não consegui ler"})), 200
+        # O modelo numera 1..N sobre os NOVOS; a tela numera sobre o que foi
+        # enviado. Sem esta traducao, ler 1 arquivo novo junto de 2 ja lidos
+        # entregava o resultado na bolha errada.
+        for x in (leitura.get('arquivos') or []):
+            k = x.get('indice') or 0
+            if 0 < k <= len(novos):
+                x['indice'] = novos[k - 1][0]
     res = {}
     try:
-        res = documentos_para_o_lead(conn, lead_id, leitura, novos)
+        # A funcao numera de 1 a N sobre a lista que recebe; a leitura ja foi
+        # renumerada pro indice da tela. Reindexo de volta so pra ela.
+        _lt = dict(leitura)
+        _lt['arquivos'] = [dict(x, indice=k + 1) for k, x in enumerate(
+            sorted((leitura.get('arquivos') or []),
+                   key=lambda y: [n[0] for n in novos].index(y['indice'])
+                   if y.get('indice') in [n[0] for n in novos] else 999))]
+        res = documentos_para_o_lead(conn, lead_id, _lt, [x[1] for x in novos])
         conn.commit()
     except Exception as e:
         try: conn.rollback()
@@ -17277,8 +17305,9 @@ def api_whatsapp_documentos_ler():
     try:
         conn2 = db()
         import hashlib as _h2
+        _por_indice = {n[0]: n[1] for n in novos}
         for a_ in (leitura.get('arquivos') or []):
-            arq = novos[a_['indice'] - 1] if 0 < a_['indice'] <= len(novos) else None
+            arq = _por_indice.get(a_.get('indice'))
             if not arq:
                 continue
             h2 = _h2.sha256((arq.get('base64') or '').encode('ascii', 'ignore')).hexdigest()
@@ -17292,11 +17321,12 @@ def api_whatsapp_documentos_ler():
     except Exception as e:
         app.logger.info(f"[DOC] ids: {e}")
     return _wa_cors(jsonify({
-        "ok": True, "lead_id": lead_id, "lidos": len(novos), "ja_lidos": ja,
+        "ok": True, "lead_id": lead_id, "lidos": len(novos), "ja_lidos": len(prontos),
         "tipos": _DOC_TIPOS, "rotulos": _DOC_ROTULO,
         "parentescos": _DOC_PARENTESCOS, "parentesco_rotulos": _DOC_PARENTESCO_ROTULO,
         "parentesco_comprova": _DOC_PARENTESCO_COMPROVA,
-        "arquivos": leitura.get('arquivos') or [],
+        "arquivos": sorted((leitura.get('arquivos') or []) + prontos,
+                           key=lambda x: x.get('indice') or 0),
         "pessoas": leitura.get('pessoas') or [],
         "empresa": leitura.get('empresa') or {},
         "endereco": leitura.get('endereco') or {},
