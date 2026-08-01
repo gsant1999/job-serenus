@@ -1112,6 +1112,17 @@ def init_db():
                         # DESEMPENHO MEDIDO, nao sentido. "esta lento" so vira conserto quando
             # tem numero: o que e lento, quanto, e desde quando. Uma linha por
             # operacao concluida na extensao.
+            # O QUE FOI LIDO DOS DOCUMENTOS, guardado. Antes so os arquivos
+            # ficavam; as pessoas, o endereco e a empresa iam pro lead como campo
+            # solto e o conjunto se perdia — e e o conjunto que a operadora pede.
+            """CREATE TABLE IF NOT EXISTS lead_extracao (
+                lead_id INTEGER PRIMARY KEY,
+                pessoas_json TEXT,
+                empresa_json TEXT,
+                endereco_json TEXT,
+                contato_json TEXT,
+                atualizado_em TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS wa_canario (
                 id SERIAL PRIMARY KEY,
                 capacidade TEXT NOT NULL,
@@ -1926,6 +1937,14 @@ def init_db():
             job_esperado REAL, divergencia REAL, divergencia_motivo TEXT,
             rateio_debito REAL DEFAULT 0,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS lead_extracao (
+            lead_id INTEGER PRIMARY KEY,
+            pessoas_json TEXT,
+            empresa_json TEXT,
+            endereco_json TEXT,
+            contato_json TEXT,
+            atualizado_em TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS wa_canario (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -6438,9 +6457,49 @@ def nova_proposta():
         pessoas = ia.get('documentos_pessoas') or []
         empresa = ia.get('dados_empresa') or {}
         extr = diag.get('extracao') or {}
+        # O QUE VEIO DOS DOCUMENTOS TEM PRECEDENCIA sobre o que a IA deduziu da
+        # conversa: um RG lido e melhor fonte que uma frase no WhatsApp. Antes
+        # este caminho so olhava a analise da conversa, entao lead que mandou os
+        # documentos pela extensao abria a proposta em branco.
+        _ex = _extracao_ler(conn, int(lead_id))
+        if _ex.get('pessoas'):
+            pessoas = _ex['pessoas']
+        if _ex.get('empresa', {}).get('cnpj'):
+            empresa = _ex['empresa']
 
-        def _iso(dt):  # DD/MM/AAAA -> YYYY-MM-DD (pro input type=date)
-            m = re.match(r'(\d{1,2})/(\d{1,2})/(\d{4})', str(dt or ''))
+        # QUEM E O TITULAR nao se adivinha por ordem da lista: o consultor ja
+        # respondeu isso documento por documento. Endereco e contato nao entram
+        # aqui porque o formulario nao tem esses campos — eles vao no bloco de
+        # texto, que e onde servem.
+        try:
+            papeis = {}
+            for r_ in conn.execute("""SELECT pessoa, titularidade, parentesco FROM lead_documento
+                                      WHERE lead_id=? AND pessoa IS NOT NULL AND pessoa<>''""",
+                                   (int(lead_id),)).fetchall():
+                atual = papeis.get(r_['pessoa']) or {}
+                papeis[r_['pessoa']] = {'titularidade': r_['titularidade'] or atual.get('titularidade'),
+                                        'parentesco': r_['parentesco'] or atual.get('parentesco')}
+            def _papel(nome):
+                for k, v_ in papeis.items():
+                    if doc_mesma_pessoa(k, nome):
+                        return v_
+                return {}
+            tit_doc = next((p for p in pessoas if _papel(p.get('nome')).get('titularidade') == 'titular'), None)
+            if tit_doc:
+                pessoas = [tit_doc] + [p for p in pessoas if p is not tit_doc]
+            for p in pessoas:
+                p['_parentesco'] = _DOC_PARENTESCO_ROTULO.get(_papel(p.get('nome')).get('parentesco'), '')
+        except Exception as e_:
+            app.logger.info(f"[PROPOSTA] papeis: {e_}")
+        def _iso(dt):  # aceita DD/MM/AAAA e AAAA-MM-DD -> YYYY-MM-DD (input type=date)
+            s = str(dt or '').strip()
+            # A leitura de documento ja devolve ISO; so a analise de conversa
+            # devolve BR. Aceitar so um dos dois deixava a data de nascimento
+            # em branco justo quando ela vinha do RG, que e a fonte boa.
+            m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})$', s)
+            if m:
+                return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+            m = re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})', s)
             return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}" if m else ''
 
         if pessoas:
@@ -6448,7 +6507,8 @@ def nova_proposta():
             prefill['nome_titular'] = tit.get('nome') or ''
             prefill['cpf_titular'] = tit.get('cpf') or ''
             prefill['data_nasc_titular'] = _iso(tit.get('nascimento'))
-            prefill['dependentes'] = [{'nome': p.get('nome') or '', 'nasc': _iso(p.get('nascimento')), 'parentesco': ''}
+            prefill['dependentes'] = [{'nome': p.get('nome') or '', 'nasc': _iso(p.get('nascimento')),
+                                       'parentesco': p.get('_parentesco') or ''}
                                       for p in pessoas[1:] if p.get('nome')]
             prefill['total_vidas'] = len(pessoas)
         cnpj = (empresa.get('cnpj') or extr.get('cnpj') or '').strip()
@@ -6458,7 +6518,12 @@ def nova_proposta():
                                    or (lead['nome'] if lead else '') or '')
         if lead and lead['valor_estimado']:
             prefill['valor'] = f"{float(lead['valor_estimado']):.2f}".replace('.', ',')
-        prefill['docs_texto'] = diag.get('docs_extraidos') or ''
+        # O bloco pronto pra colar na operadora vai junto: quem abre a proposta
+        # normalmente vai preencher o sistema deles logo em seguida.
+        try:
+            prefill['docs_texto'] = docs_texto_bloco(conn, int(lead_id)) or (diag.get('docs_extraidos') or '')
+        except Exception:
+            prefill['docs_texto'] = diag.get('docs_extraidos') or ''
     close_db(conn)
     # Propaga o id do lead pro formulário: e a chave que liga a venda a origem de
     # midia. Sem ela, salvar_proposta re-adivinha por telefone/CNPJ justamente no
@@ -14378,7 +14443,11 @@ _DOC_SISTEMA = (
     "'cartao_plano': carteirinha de plano de saúde, de qualquer operadora.\n"
     "'proposta_operadora': proposta de adesão ou contrato de plano de saúde.\n"
     "'declaracao_saude': declaração de saúde da operadora (o questionário de "
-    "doenças preexistentes)."
+    "doenças preexistentes).\n\n"
+    "Copie TAMBÉM, quando aparecerem: o nome do pai, o órgão emissor e a UF do RG "
+    "(ex: 'SSP SP'), o número do Cartão Nacional de Saúde (SUS, 15 dígitos), o "
+    "telefone e o e-mail. Estes campos alimentam a ficha da operadora — vazio é "
+    "melhor que chutado, mas o que está escrito no papel não pode ficar de fora."
 )
 
 _DOC_SCHEMA = {
@@ -14396,9 +14465,14 @@ _DOC_SCHEMA = {
             'type': 'object',
             'properties': {
                 'nome': {'type': 'string'}, 'cpf': {'type': 'string'}, 'rg': {'type': 'string'},
+                'rg_emissor': {'type': 'string', 'description': 'orgao e UF do RG, ex: SSP SP'},
                 'nascimento': {'type': 'string', 'description': 'AAAA-MM-DD'},
+                'pai': {'type': 'string', 'description': 'nome completo do pai, se aparecer'},
                 'mae': {'type': 'string'}, 'sexo': {'type': 'string'},
+                'cns': {'type': 'string', 'description': 'numero do Cartao Nacional de Saude (SUS), 15 digitos'},
             }, 'required': ['nome']}},
+        'contato': {'type': 'object', 'properties': {
+            'telefone': {'type': 'string'}, 'email': {'type': 'string'}}},
         'empresa': {'type': 'object', 'properties': {
             'cnpj': {'type': 'string'}, 'razao_social': {'type': 'string'},
             'abertura': {'type': 'string'}}},
@@ -14587,6 +14661,183 @@ def ler_documentos_cliente(arquivos, teto_imagens=24):
     return out, None
 
 
+
+def _extracao_guardar(conn, lead_id, leitura):
+    """Guarda o que foi lido dos documentos, ACUMULANDO entre leituras.
+
+    O cliente manda o RG hoje e o comprovante amanha. Se cada leitura
+    sobrescrevesse a anterior, o bloco pra operadora nunca ficaria completo.
+    Entao: pessoa nova entra, pessoa que ja existe recebe so os campos que
+    estavam VAZIOS. Documento nao corrige o que ja estava preenchido — ele
+    completa."""
+    if not (lead_id and leitura):
+        return
+    r = conn.execute("SELECT * FROM lead_extracao WHERE lead_id=?", (lead_id,)).fetchone()
+    def _j(v, padrao):
+        try:
+            return json.loads(v) if v else padrao
+        except Exception:
+            return padrao
+    pessoas = _j(r['pessoas_json'], []) if r else []
+    empresa = _j(r['empresa_json'], {}) if r else {}
+    endereco = _j(r['endereco_json'], {}) if r else {}
+    contato = _j(r['contato_json'], {}) if r else {}
+
+    for nova in (leitura.get('pessoas') or []):
+        if not (nova.get('nome') or '').strip():
+            continue
+        alvo = next((p for p in pessoas if doc_mesma_pessoa(p.get('nome'), nova.get('nome'))), None)
+        if alvo is None:
+            pessoas.append({k: v for k, v in nova.items() if v})
+            continue
+        for k, v in nova.items():
+            if v and not alvo.get(k):
+                alvo[k] = v
+    for origem, destino in ((leitura.get('empresa') or {}, empresa),
+                            (leitura.get('endereco') or {}, endereco),
+                            (leitura.get('contato') or {}, contato)):
+        for k, v in origem.items():
+            if v and not destino.get(k):
+                destino[k] = v
+
+    dados = (json.dumps(pessoas, ensure_ascii=False), json.dumps(empresa, ensure_ascii=False),
+             json.dumps(endereco, ensure_ascii=False), json.dumps(contato, ensure_ascii=False),
+             _agora_sp(), lead_id)
+    if r:
+        conn.execute("""UPDATE lead_extracao SET pessoas_json=?, empresa_json=?, endereco_json=?,
+                        contato_json=?, atualizado_em=? WHERE lead_id=?""", dados)
+    else:
+        conn.execute("""INSERT INTO lead_extracao (pessoas_json, empresa_json, endereco_json,
+                        contato_json, atualizado_em, lead_id) VALUES (?,?,?,?,?,?)""", dados)
+
+
+def _extracao_ler(conn, lead_id):
+    r = conn.execute("SELECT * FROM lead_extracao WHERE lead_id=?", (lead_id,)).fetchone()
+    if not r:
+        return {'pessoas': [], 'empresa': {}, 'endereco': {}, 'contato': {}}
+    def _j(v, padrao):
+        try:
+            return json.loads(v) if v else padrao
+        except Exception:
+            return padrao
+    return {'pessoas': _j(r['pessoas_json'], []), 'empresa': _j(r['empresa_json'], {}),
+            'endereco': _j(r['endereco_json'], {}), 'contato': _j(r['contato_json'], {}),
+            'atualizado_em': r['atualizado_em']}
+
+
+def _doc_data_br(v):
+    """AAAA-MM-DD -> DD/MM/AAAA. Aceita o que ja vier em BR."""
+    s = str(v or '').strip()
+    m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})', s)
+    if m:
+        return f"{int(m.group(3)):02d}/{int(m.group(2)):02d}/{m.group(1)}"
+    m = re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})', s)
+    if m:
+        return f"{int(m.group(1)):02d}/{int(m.group(2)):02d}/{m.group(3)}"
+    return ''
+
+
+def _doc_cpf_br(v):
+    d = re.sub(r'\D', '', str(v or ''))
+    return f"{d[:3]}.{d[3:6]}.{d[6:9]}-{d[9:11]}" if len(d) == 11 else (str(v or '').strip())
+
+
+def _doc_cnpj_br(v):
+    d = re.sub(r'\D', '', str(v or ''))
+    return f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:14]}" if len(d) == 14 else (str(v or '').strip())
+
+
+def _doc_cep_br(v):
+    d = re.sub(r'\D', '', str(v or ''))
+    return f"{d[:5]}-{d[5:8]}" if len(d) == 8 else (str(v or '').strip())
+
+
+def _doc_fone_br(v):
+    d = re.sub(r'\D', '', str(v or ''))
+    if d.startswith('55') and len(d) > 11:
+        d = d[2:]
+    if len(d) == 11:
+        return f"({d[:2]}) {d[2:7]}-{d[7:]}"
+    if len(d) == 10:
+        return f"({d[:2]}) {d[2:6]}-{d[6:]}"
+    return str(v or '').strip()
+
+
+def docs_texto_bloco(conn, lead_id):
+    """O bloco de texto puro que se cola no sistema da operadora.
+
+    Formato ditado pelo Guilherme, e a ordem das linhas IMPORTA — e a ordem em
+    que os campos aparecem na ficha da operadora. Campo que nao existe some: a
+    linha inteira sai, nunca vira "nao informado", porque "nao informado" ocupa
+    o lugar do dado e obriga a conferir de novo.
+    Tudo em MAIUSCULAS menos o e-mail."""
+    e = _extracao_ler(conn, lead_id)
+    blocos = []
+    for p in (e.get('pessoas') or []):
+        L = []
+        nome = (p.get('nome') or '').strip()
+        if not nome:
+            continue
+        L.append(nome.upper())
+        cpf = _doc_cpf_br(p.get('cpf'))
+        if cpf:
+            L.append(cpf)
+        rg = (p.get('rg') or '').strip()
+        if rg:
+            L.append(' '.join(x for x in [rg, (p.get('rg_emissor') or '').strip()] if x).upper())
+        nasc = _doc_data_br(p.get('nascimento'))
+        if nasc:
+            L.append(nasc)
+        # O pai vem antes da mae. Se so um existir, sai um so — a linha que falta
+        # simplesmente nao aparece.
+        if (p.get('pai') or '').strip():
+            L.append(p['pai'].strip().upper())
+        if (p.get('mae') or '').strip():
+            L.append(p['mae'].strip().upper())
+        cns = re.sub(r'\D', '', str(p.get('cns') or ''))
+        if cns:
+            L.append('CNES: ' + cns)
+        blocos.append('\n'.join(L))
+
+    end = e.get('endereco') or {}
+    L = []
+    if (end.get('logradouro') or '').strip():
+        L.append(end['logradouro'].strip().upper())
+    if str(end.get('numero') or '').strip():
+        L.append(str(end['numero']).strip().upper())
+    if (end.get('bairro') or '').strip():
+        L.append(end['bairro'].strip().upper())
+    if (end.get('cidade') or '').strip():
+        L.append(end['cidade'].strip().upper())
+    cep = _doc_cep_br(end.get('cep'))
+    if cep:
+        L.append('CEP: ' + cep)
+    if L:
+        blocos.append('\n'.join(L))
+
+    emp = e.get('empresa') or {}
+    L = []
+    cnpj = _doc_cnpj_br(emp.get('cnpj'))
+    if cnpj:
+        L.append('CNPJ: ' + cnpj)
+    if (emp.get('razao_social') or '').strip():
+        L.append(emp['razao_social'].strip().upper())
+    if L:
+        blocos.append('\n'.join(L))
+
+    con = e.get('contato') or {}
+    L = []
+    fone = _doc_fone_br(con.get('telefone'))
+    if fone:
+        L.append(fone)
+    if (con.get('email') or '').strip():
+        L.append(con['email'].strip())        # e-mail e a UNICA coisa que nao vira maiuscula
+    if L:
+        blocos.append('\n'.join(L))
+
+    return '\n\n'.join(blocos)
+
+
 def _doc_propor_titularidade(conn, lead_id, nome_no_documento):
     """Propoe se o documento e do titular ou de um dependente.
 
@@ -14661,6 +14912,13 @@ def documentos_para_o_lead(conn, lead_id, leitura, arquivos):
             gravados += 1
         except Exception as e:
             app.logger.warning(f"[DOC] não gravei {arq.get('nome')}: {e}")
+
+    # Guarda o conjunto ANTES de mexer no lead: e ele que vira o bloco de texto
+    # da operadora e o pre-preenchimento da proposta.
+    try:
+        _extracao_guardar(conn, lead_id, leitura)
+    except Exception as e:
+        app.logger.warning(f"[DOC] extracao: {e}")
 
     lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
     if not lead:
@@ -17231,8 +17489,13 @@ def lead_documento_baixar(lid, did):
     if not conteudo:
         abort(404)
     import io as _io
+    # ?ver=1 mostra na tela em vez de baixar. Conferir se o arquivo e mesmo o que
+    # a IA disse nao pode custar um download, uma pasta cheia e um arquivo aberto
+    # a mais — e a conferencia que faz o consultor confiar no resto.
+    inline = request.args.get('ver') == '1'
     return send_file(_io.BytesIO(conteudo), mimetype=ctype or d['mime'] or 'application/octet-stream',
-                     as_attachment=True, download_name=d['nome_final'] or os.path.basename(d['arquivo']))
+                     as_attachment=not inline,
+                     download_name=d['nome_final'] or os.path.basename(d['arquivo']))
 
 
 @app.route('/api/whatsapp/documentos/ler', methods=['POST', 'OPTIONS'])
@@ -20130,7 +20393,13 @@ def painel_lead(lid):
         SELECT texto, autor_nome, criado_em FROM lead_notas
         WHERE lead_id=? ORDER BY id DESC LIMIT 30""", (lid,)).fetchall()]
 
-    documentos, doc_grupos, doc_pendentes = [], [], 0
+    documentos, doc_grupos, doc_pendentes, docs_texto = [], [], 0, ''
+    try:
+        docs_texto = docs_texto_bloco(conn, lid)
+    except Exception as e:
+        app.logger.info(f"[PAINEL] bloco de texto: {e}")
+        try: conn.rollback()
+        except Exception: pass
     try:
         documentos = [dict(r) for r in conn.execute(
             # titularidade e parentesco PRECISAM vir. Sem elas o seletor nascia
@@ -20182,6 +20451,7 @@ def painel_lead(lid):
                            com_bruta=com_bruta, com_liquida=com_liquida,
                            timeline=timeline, notas=notas, saude=saude, documentos=documentos,
                            doc_grupos=doc_grupos, doc_pendentes=doc_pendentes,
+                           docs_texto=docs_texto,
                            doc_tipos=_DOC_TIPOS, doc_rotulos=_DOC_ROTULO,
                            doc_parentescos=_DOC_PARENTESCOS,
                            doc_parentesco_rotulos=_DOC_PARENTESCO_ROTULO,

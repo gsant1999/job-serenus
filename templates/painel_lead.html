@@ -3,6 +3,30 @@
 
 {% block head %}
 <style>
+  /* ── TEMA: nenhuma cor literal daqui pra baixo ────────────────────────────
+     O modo claro existe no JOB e este painel o ignorava. Medido pelos jurados:
+     var(--al-fg) sobre branco da 1,7:1 de contraste — o ambar da pendencia, que e a
+     informacao mais importante da tela, era o que mais sumia. Mesmo nome de
+     variavel, outro valor por tema; nenhum componente sabe em que tema esta. */
+  .page {
+    --ok-fg:var(--ok-fg);   --ok-bg:rgba(34,197,94,.14);   --ok-bd:rgba(34,197,94,.30);
+    --al-fg:#f6cb4e;   --al-bg:rgba(250,204,21,.10);  --al-bd:rgba(250,204,21,.36);
+    --ia-fg:var(--ia-fg);   --ia-bg:var(--ia-bg);  --ia-bd:rgba(168,85,247,.30);
+    --arq-fg:var(--arq-fg);
+    --info-bg:var(--info-bg);
+    --visor-bg:#0b0b12;
+  }
+  [data-theme="light"] .page {
+    --ok-fg:#0f7a52;   --ok-bg:rgba(15,122,82,.10);   --ok-bd:rgba(15,122,82,.28);
+    --al-fg:#8a5b02;   --al-bg:rgba(180,120,4,.13);   --al-bd:rgba(180,120,4,.34);
+    --ia-fg:#6d28d9;   --ia-bg:rgba(109,40,217,.10);  --ia-bd:rgba(109,40,217,.24);
+    --arq-fg:#0d6b52;
+    --info-bg:rgba(59,130,246,.10);
+    /* Cinza medio, como visualizador de PDF: em fundo branco um PDF branco
+       sangraria e ninguem veria onde acaba a folha. */
+    --visor-bg:#5b6270;
+  }
+
   /* Painel 360: leitura de cima pra baixo em ordem de dinheiro — quem é, de onde
      veio, o que custou, o que virou. Cada bloco responde UMA pergunta. */
   .pl-cab { display:flex; align-items:flex-start; gap:18px; flex-wrap:wrap;
@@ -15,19 +39,19 @@
             font-size:11px; background:var(--panel-3); border:1px solid var(--borda);
             border-radius:6px; padding:3px 9px; }
   .pl-lid-tag { font-size:8px; font-weight:800; letter-spacing:.3px; padding:1px 5px; border-radius:4px; }
-  .pl-lid-tag.lid { background:rgba(168,85,247,.2); color:#d8b4fe; }
-  .pl-lid-tag.numero { background:rgba(34,197,94,.18); color:#4ade80; }
+  .pl-lid-tag.lid { background:var(--ia-bg); color:var(--ia-fg); }
+  .pl-lid-tag.numero { background:var(--ok-bg); color:var(--ok-fg); }
   .pl-lid-tag.outro { background:var(--panel-2); color:var(--cinza-2); }
   /* Sem conversa vinculada é um estado de trabalho, não um vazio: amarelo, e diz o que fazer. */
-  .pl-lid.falta { border-color:rgba(250,204,21,.4); color:#eab308; }
+  .pl-lid.falta { border-color:var(--al-bd); color:var(--al-fg); }
 
   .pl-num-linha { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
   .pl-num { flex:1 1 150px; background:var(--panel-2); border:1px solid var(--borda);
             border-radius:10px; padding:12px 14px; }
   .pl-num b { display:block; font-size:20px; font-variant-numeric:tabular-nums; line-height:1.25; }
   .pl-num span { display:block; font-size:10px; color:var(--cinza); margin-top:3px; }
-  .pl-num.ok { border-color:rgba(34,197,94,.3); }
-  .pl-num.alerta { border-color:rgba(250,204,21,.3); }
+  .pl-num.ok { border-color:var(--ok-bd); }
+  .pl-num.alerta { border-color:var(--al-bd); }
 
   .pl-grade { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px; align-items:start; }
   .pl-box { background:var(--panel-2); border:1px solid var(--borda); border-radius:12px; padding:16px 18px; }
@@ -45,9 +69,9 @@
   /* Procedência do dado: quem escreveu importa tanto quanto o valor. */
   .pl-fonte { font-size:8.5px; font-weight:700; letter-spacing:.3px; text-transform:uppercase;
               padding:1px 5px; border-radius:4px; margin-left:6px; vertical-align:middle; }
-  .pl-fonte.ia { background:rgba(168,85,247,.18); color:#d8b4fe; }
-  .pl-fonte.ia_validado { background:rgba(34,197,94,.16); color:#4ade80; }
-  .pl-fonte.corrigido { background:rgba(245,158,11,.16); color:#fbbf24; }
+  .pl-fonte.ia { background:var(--ia-bg); color:var(--ia-fg); }
+  .pl-fonte.ia_validado { background:var(--ok-bg); color:var(--ok-fg); }
+  .pl-fonte.corrigido { background:var(--al-bg); color:var(--al-fg); }
   .pl-fonte.consultor, .pl-fonte.cotacao, .pl-fonte.api_cnpj, .pl-fonte.utm { background:var(--panel-3); color:var(--cinza-2); }
 
   .pl-tl { list-style:none; margin:0; padding:0; max-height:520px; overflow-y:auto; }
@@ -56,9 +80,9 @@
   .pl-tl-quando { flex:0 0 116px; color:var(--cinza); font-size:11px; font-variant-numeric:tabular-nums; }
   .pl-tl-tipo { flex:0 0 auto; font-size:8.5px; font-weight:700; text-transform:uppercase; letter-spacing:.3px;
                 padding:2px 6px; border-radius:4px; background:var(--panel-3); color:var(--cinza-2); height:fit-content; }
-  .pl-tl-tipo.analise { background:rgba(59,130,246,.16); color:#93c5fd; }
-  .pl-tl-tipo.cotacao { background:rgba(34,197,94,.16); color:#4ade80; }
-  .pl-tl-tipo.etapa { background:rgba(168,85,247,.16); color:#d8b4fe; }
+  .pl-tl-tipo.analise { background:var(--info-bg); color:var(--ia-fg); }
+  .pl-tl-tipo.cotacao { background:var(--ok-bg); color:var(--ok-fg); }
+  .pl-tl-tipo.etapa { background:var(--ia-bg); color:var(--ia-fg); }
   .pl-tl-txt { flex:1 1 auto; min-width:0; word-break:break-word; }
   .pl-tl-quem { color:var(--cinza); font-size:11px; }
 
@@ -80,8 +104,8 @@
   .pl-docs-acoes { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .pl-chip { font-size:10.5px; font-weight:700; letter-spacing:.3px; text-transform:uppercase;
              padding:4px 9px; border-radius:999px; }
-  .pl-chip.pendente { background:rgba(250,204,21,.14); color:#fbbf24; border:1px solid rgba(250,204,21,.3); }
-  .pl-chip.pronto { background:rgba(34,197,94,.13); color:#4ade80; border:1px solid rgba(34,197,94,.28); }
+  .pl-chip.pendente { background:var(--al-bg); color:var(--al-fg); border:1px solid var(--al-bd); }
+  .pl-chip.pronto { background:var(--ok-bg); color:var(--ok-fg); border:1px solid var(--ok-bd); }
 
   /* Cada pessoa é um bloco. É assim que a operadora analisa a proposta, e é
      assim que o consultor confere antes de subir: pessoa por pessoa. */
@@ -90,17 +114,17 @@
                   padding:9px 14px; background:var(--panel-3);
                   border-top:1px solid var(--borda); border-bottom:1px solid var(--borda); }
   .pl-grupo:first-of-type .pl-grupo-cab { border-top:none; }
-  .pl-grupo.pendente .pl-grupo-cab { background:rgba(250,204,21,.08); }
+  .pl-grupo.pendente .pl-grupo-cab { background:var(--al-bg); }
   .pl-grupo-tit { font-size:12px; font-weight:700; letter-spacing:.3px; text-transform:uppercase; }
-  .pl-grupo.pendente .pl-grupo-tit { color:#fbbf24; }
+  .pl-grupo.pendente .pl-grupo-tit { color:var(--al-fg); }
   .pl-grupo-sub { font-size:12.5px; color:var(--texto); }
   .pl-grupo-n { font-size:10.5px; color:var(--cinza); font-variant-numeric:tabular-nums;
                 background:var(--panel-2); border-radius:999px; padding:1px 8px; }
-  .pl-grupo-dica { font-size:11px; color:#7ae3c3; margin-left:auto; }
+  .pl-grupo-dica { font-size:11px; color:var(--arq-fg); margin-left:auto; }
 
   .pl-doc-cab, .pl-doc-linha {
     display:grid; align-items:center; gap:14px; padding:8px 14px;
-    grid-template-columns:200px 150px 250px minmax(200px,1fr) 84px 60px;
+    grid-template-columns:190px 140px 246px minmax(180px,1fr) 86px 118px;
   }
   /* UM controle por célula, e nada quebra linha: era o selo caindo pra segunda
      linha e os dois selects empilhando que faziam cada linha ter uma altura
@@ -111,22 +135,64 @@
                 min-height:0; }
   .pl-doc-linha { border-top:1px solid var(--borda); font-size:12.5px; }
   .pl-grupo .pl-doc-linha:first-of-type { border-top:none; }
-  .pl-doc-linha.falta { background:rgba(250,204,21,.04); }
+  .pl-doc-linha.falta { background:var(--al-bg); }
   .pl-doc-c { min-width:0; display:flex; align-items:center; gap:8px; flex-wrap:nowrap; }
   .pl-doc-pessoa { color:var(--texto); }
   /* O nome é o produto: é ele que faz a pasta servir. Monoespaçado e inteiro no
      hover, cortado na tela pra não empurrar as outras colunas. */
-  .pl-doc-arq { font-family:ui-monospace,Menlo,monospace; font-size:11px; color:#7ae3c3;
+  .pl-doc-arq { font-family:ui-monospace,Menlo,monospace; font-size:11px; color:var(--arq-fg);
                 white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
-  .pl-doc-fim { justify-content:flex-end; }
+  .pl-doc-fim { justify-content:flex-end; gap:6px; }
   /* "baixar" era um link azul sobre fundo quase preto: sumia. Vira um alvo
      legível, com a mesma altura dos selects. */
   .pl-doc-baixar { display:inline-flex; align-items:center; height:30px; padding:0 11px;
                    border:1px solid var(--borda); border-radius:7px; font-size:11px;
                    font-weight:600; color:var(--cinza-2); text-decoration:none; }
   .pl-doc-baixar:hover { color:var(--texto); border-color:var(--cinza); background:var(--panel-3); }
-  .pl-doc-msg { font-size:10.5px; color:#4ade80; margin-right:9px; }
-  .pl-doc-msg.ruim { color:#fca5a5; }
+  .pl-doc-msg { font-size:10.5px; color:var(--ok-fg); margin-right:9px; }
+
+  /* ── Ver o arquivo sem baixar ── */
+  .pl-modal { position:fixed; inset:0; z-index:900; background:rgba(0,0,0,.72);
+              display:flex; align-items:center; justify-content:center; padding:26px; }
+  .pl-modal[hidden] { display:none; }
+  .pl-modal-cx { background:var(--panel-2); border:1px solid var(--borda); border-radius:12px;
+                 width:min(980px,100%); height:min(88vh,100%); display:flex; flex-direction:column;
+                 overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,.45); }
+  .pl-modal-cab { display:flex; align-items:center; gap:10px; padding:10px 14px;
+                  border-bottom:1px solid var(--borda); background:var(--panel-3); }
+  .pl-modal-nome { flex:1 1 auto; min-width:0; font-family:ui-monospace,Menlo,monospace;
+                   font-size:11.5px; color:var(--texto); overflow:hidden; text-overflow:ellipsis;
+                   white-space:nowrap; }
+  .pl-modal-corpo { flex:1 1 auto; min-height:0; display:flex; align-items:center;
+                    justify-content:center; background:var(--visor-bg); }
+  .pl-modal-vis { width:100%; height:100%; border:none; object-fit:contain; background:var(--visor-bg); }
+  img.pl-modal-vis { background:transparent; }
+
+  /* Pulso de espera. A cor vem do tema (currentColor), não fixa: preto sumiria
+     no escuro e branco sumiria no claro. */
+  .pl-pulso { position:relative; height:45px; width:45px; color:var(--cinza); }
+  .pl-pulso::before, .pl-pulso::after,
+  .pl-pulso-ponto::before, .pl-pulso-ponto::after {
+    content:''; position:absolute; inset:0; border-radius:50%;
+    background-color:currentColor; animation:pl-pulsar 2s linear infinite;
+    transform:scale(0); opacity:0;
+  }
+  .pl-pulso::after { animation-delay:-.5s; }
+  .pl-pulso-ponto::before { animation-delay:-1s; }
+  .pl-pulso-ponto::after { animation-delay:-1.5s; }
+  @keyframes pl-pulsar { 0% { transform:scale(0); opacity:1; } 100% { transform:scale(1); opacity:0; } }
+  @media (prefers-reduced-motion:reduce) {
+    .pl-pulso::before, .pl-pulso::after,
+    .pl-pulso-ponto::before, .pl-pulso-ponto::after { animation-duration:6s; }
+  }
+
+  /* ── O texto pronto pra colar na operadora ── */
+  .pl-docs-texto { margin:0; padding:14px 16px; background:var(--panel-3);
+                   border:1px solid var(--borda); border-radius:10px;
+                   font-family:ui-monospace,Menlo,monospace; font-size:12px; line-height:1.65;
+                   white-space:pre-wrap; word-break:break-word; max-height:420px; overflow:auto; }
+  .btn-outline.destaque { border-color:var(--azul); color:var(--azul); }
+  .pl-doc-msg.ruim { color:var(--al-fg); }
 
   /* Todos os selects com a MESMA altura e a mesma cara — a mistura de alturas
      era metade do desalinhamento. */
@@ -138,9 +204,9 @@
   .pl-sel[hidden] { display:none; }
   .pl-doc-selo { font-size:8.5px; font-weight:800; letter-spacing:.3px; text-transform:uppercase;
                  padding:2px 6px; border-radius:4px; white-space:nowrap; }
-  .pl-doc-selo.ok { background:rgba(34,197,94,.16); color:#4ade80; }
-  .pl-doc-selo.ia { background:rgba(168,85,247,.16); color:#d8b4fe; }
-  .pl-doc-selo.duvida { background:rgba(250,204,21,.16); color:#fbbf24; }
+  .pl-doc-selo.ok { background:var(--ok-bg); color:var(--ok-fg); }
+  .pl-doc-selo.ia { background:var(--ia-bg); color:var(--ia-fg); }
+  .pl-doc-selo.duvida { background:var(--al-bg); color:var(--al-fg); }
 
   /* Tela estreita: a grade vira lista, com o rótulo antes de cada campo. */
   @media (max-width:900px) {
@@ -440,7 +506,13 @@
             {{ 'conferido' if d.conferido else ('conferir' if d.certeza == 'baixa' else 'pela IA') }}</span>
         </div>
         <div class="pl-doc-c pl-doc-fim">
-          <a class="pl-doc-baixar" href="/lead/{{ lead.id }}/documento/{{ d.id }}">baixar</a>
+          {# Ver antes de baixar: a conferencia nao pode custar um download, uma
+             pasta cheia e um arquivo aberto a mais. #}
+          <button type="button" class="pl-doc-baixar" title="Ver o arquivo sem baixar"
+                  onclick="verDoc({{ d.id }}, this)"
+                  data-nome="{{ d.nome_final or d.nome_arquivo }}"
+                  data-mime="{{ d.mime or '' }}">ver</button>
+          <a class="pl-doc-baixar" href="/lead/{{ lead.id }}/documento/{{ d.id }}" title="Baixar este arquivo">baixar</a>
         </div>
       </div>
       {% endfor %}
@@ -449,6 +521,20 @@
     </div>
     {% endif %}
   </div>
+
+  {% if docs_texto %}
+  <div class="pl-box largo">
+    <div class="pl-docs-topo">
+      <h2 style="margin:0;">Dados para o sistema da operadora<i class="ajuda-i" title="Tudo que foi lido dos documentos, no formato de colar direto no cadastro da operadora: uma pessoa por bloco, na ordem dos campos da ficha. Campo que não estava no documento não vira linha — 'não informado' ocupa o lugar do dado e obriga a conferir de novo.">i</i></h2>
+      <div class="pl-docs-acoes">
+        <button type="button" class="btn-outline" onclick="copiarDocsTexto(this)">Copiar tudo</button>
+        <a class="btn-outline destaque" href="/nova-proposta?lead={{ lead.id }}">Criar proposta com estes dados</a>
+      </div>
+    </div>
+    <pre class="pl-docs-texto" id="pl-docs-texto">{{ docs_texto }}</pre>
+    <p class="pl-vazio" style="margin-top:8px;">Confira antes de usar: CPF e RG errados fazem a operadora recusar a proposta inteira.</p>
+  </div>
+  {% endif %}
 
   <div class="pl-box">
     <h2>Notas do consultor</h2>
@@ -483,6 +569,21 @@
 
 </div>
 </div>
+<!-- Ver o documento sem sair da tela. -->
+<div class="pl-modal" id="pl-modal" hidden onclick="if(event.target===this) fecharDoc()">
+  <div class="pl-modal-cx">
+    <header class="pl-modal-cab">
+      <span class="pl-modal-nome" id="pl-modal-nome"></span>
+      <a class="pl-doc-baixar" id="pl-modal-baixar" href="#">baixar</a>
+      <button type="button" class="pl-doc-baixar" onclick="fecharDoc()">fechar</button>
+    </header>
+    <div class="pl-modal-corpo" id="pl-modal-corpo">
+      <!-- Pulso enquanto carrega: a cor vem do tema, nunca fixa. -->
+      <div class="pl-pulso"><span class="pl-pulso-ponto"></span></div>
+    </div>
+  </div>
+</div>
+
 <script>
 // As tres respostas vao juntas: o nome do arquivo depende das tres, entao
 // mandar so a que mudou faria o servidor recalcular o nome com metade da
@@ -523,6 +624,44 @@ async function mudarDoc(sel){
     return;
   }
   location.reload();
+}
+
+// ── Ver o arquivo sem baixar ──
+function verDoc(id, botao){
+  const m = document.getElementById('pl-modal');
+  const corpo = document.getElementById('pl-modal-corpo');
+  const nome = botao.dataset.nome || '';
+  const url = '/lead/{{ lead.id }}/documento/' + id + '?ver=1';
+  document.getElementById('pl-modal-nome').textContent = nome;
+  const bx = document.getElementById('pl-modal-baixar');
+  bx.href = '/lead/{{ lead.id }}/documento/' + id;
+  corpo.innerHTML = '<div class="pl-pulso"><span class="pl-pulso-ponto"></span></div>';
+  m.hidden = false;
+  document.body.style.overflow = 'hidden';
+  // PDF no <iframe>, imagem no <img>. O visualizador do próprio navegador já
+  // pagina e dá zoom — não vale embutir um leitor de PDF pra isso.
+  const ehPdf = /\.pdf$/i.test(nome) || (botao.dataset.mime || '').indexOf('pdf') >= 0;
+  const el = document.createElement(ehPdf ? 'iframe' : 'img');
+  el.className = 'pl-modal-vis';
+  el.onload = () => { const p = corpo.querySelector('.pl-pulso'); if(p) p.remove(); };
+  el.onerror = () => { corpo.innerHTML = '<div class="pl-vazio">Não consegui abrir este arquivo aqui. Use o baixar.</div>'; };
+  el.src = url;
+  corpo.appendChild(el);
+}
+function fecharDoc(){
+  const m = document.getElementById('pl-modal');
+  m.hidden = true;
+  document.getElementById('pl-modal-corpo').innerHTML = '';
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', (e) => { if(e.key === 'Escape') fecharDoc(); });
+
+async function copiarDocsTexto(b){
+  const t = document.getElementById('pl-docs-texto');
+  if(!t) return;
+  try { await navigator.clipboard.writeText(t.textContent); b.textContent = 'Copiado'; }
+  catch(e){ b.textContent = 'Não deu — selecione e copie'; }
+  setTimeout(() => { b.textContent = 'Copiar tudo'; }, 2200);
 }
 </script>
 {% endblock %}
