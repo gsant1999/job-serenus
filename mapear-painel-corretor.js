@@ -20,7 +20,7 @@
 // 3. Cole este arquivo inteiro e dê Enter. Ele responde "mapeador ligado".
 // 4. FAÇA UMA COTAÇÃO DE VERDADE na tela, do jeito que você faz sempre.
 // 5. Volte ao console e digite:   JOBMAPA.relatorio()
-// 6. Copie tudo que aparecer e me mande.
+// 6. Ele BAIXA o arquivo mapa-painel.json — arraste esse arquivo pro Claude.
 // ─────────────────────────────────────────────────────────────────────────────
 
 window.JOBMAPA = (function () {
@@ -119,14 +119,20 @@ window.JOBMAPA = (function () {
         },
       };
       console.log(saida);
-      // Copia pro clipboard quando o navegador deixa — é muito texto pra
-      // selecionar na mão.
+      // BAIXA UM ARQUIVO em vez de depender do clipboard.
+      // O clipboard parecia mais simples e não é: basta a pessoa selecionar
+      // qualquer coisa no console depois, e o conteúdo se perde. Arquivo fica
+      // na pasta de Downloads e é só arrastar.
       try {
-        copy(JSON.stringify(saida, null, 1));
-        console.log('%c copiado pro clipboard — pode colar pro Claude ',
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([JSON.stringify(saida, null, 1)],
+                                              { type: 'application/json' }));
+        a.download = 'mapa-painel.json';
+        a.click();
+        console.log('%c baixei mapa-painel.json — arraste o arquivo pro Claude ',
                     'background:#3b82f6;color:#fff;padding:2px 6px;');
       } catch (e) {
-        console.log('Selecione o objeto acima, clique com o botão direito e "Copy object".');
+        console.log('Não consegui baixar. Selecione o objeto acima, botão direito, "Copy object".');
       }
       return saida;
     },
