@@ -346,6 +346,24 @@
   .crm-fila-rel { margin-left:auto; font-size:11.5px; color:var(--cinza-2); text-decoration:none; }
   .crm-fila-rel:hover { color:var(--azul); text-decoration:underline; }
   @media (max-width:640px) { .crm-fila-rel { margin-left:0; } }
+  /* A identidade do WhatsApp EM EVIDENCIA e clicavel: e a porta pro painel do
+     lead, que reune conversa, documentos, cotacoes, venda e custo. Cor por
+     token pros dois temas — roxo claro some no fundo branco. */
+  .campo-grupo { --wa-fg:#c4b5fd; --wa-bg:rgba(139,92,246,.10); --wa-bd:rgba(139,92,246,.38); }
+  [data-theme="light"] .campo-grupo { --wa-fg:#5b21b6; --wa-bg:rgba(91,33,182,.07); --wa-bd:rgba(91,33,182,.28); }
+  a.wa-id { display:block; text-decoration:none; padding:12px 14px; border-radius:10px;
+            background:var(--wa-bg); border:1px solid var(--wa-bd); transition:.15s; }
+  a.wa-id:hover { border-color:var(--wa-fg); background:color-mix(in srgb, var(--wa-bg) 60%, transparent); }
+  a.wa-id .wa-id-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  a.wa-id .wa-id-cod { font-family:ui-monospace,Menlo,monospace; font-size:14px; font-weight:700;
+                       color:var(--wa-fg); letter-spacing:.2px; }
+  a.wa-id .wa-id-tag { background:var(--wa-fg); color:var(--panel); font-weight:800;
+                       font-size:9px; letter-spacing:.4px; padding:2px 7px; border-radius:5px;
+                       text-transform:uppercase; }
+  .wa-id-abrir { margin-left:auto; font-size:10.5px; font-weight:700; letter-spacing:.3px;
+                 text-transform:uppercase; color:var(--wa-fg); opacity:.65; white-space:nowrap; }
+  a.wa-id:hover .wa-id-abrir { opacity:1; }
+  a.wa-id .wa-id-meta { color:var(--cinza); font-size:11.5px; margin-top:5px; }
   .quadro-abas { display:flex; gap:8px; flex-wrap:wrap; align-items:center;
                  padding:20px 28px 0; margin:0 0 4px; }
   .quadro-aba { display:inline-flex; align-items:center; gap:7px; text-decoration:none;
@@ -1819,11 +1837,18 @@ function montarWaIds(lista){
     if(w.msgs_analisadas) partes.push(w.msgs_analisadas + ' msg analisadas');
     if(w.analisado_em) partes.push('analisado ' + fmtDataBR(w.analisado_em));
     else partes.push('nunca analisado');
-    return '<div class="wa-id"><div class="wa-id-top">'
+    // O @lid VIRA PORTA pro painel do lead — tudo que o JOB sabe daquela pessoa
+    // numa tela so. Era um texto solto: identificava a conversa e nao levava a
+    // lugar nenhum, sendo que a tela que reune isso ja existe.
+    const alvo = (_leadAtual && _leadAtual.id) ? ('/lead/' + _leadAtual.id) : '';
+    return '<a class="wa-id" ' + (alvo ? 'href="' + alvo + '"' : '') +
+      ' title="Abrir o painel deste lead: conversa, documentos, cotações, venda e custo, numa tela só">'
+      +'<div class="wa-id-top">'
       +'<span class="wa-id-tag '+_esc(w.tipo)+'">'+(rot[w.tipo]||w.tipo)+'</span>'
       +'<span class="wa-id-cod" title="'+_esc(w.chat_id)+'">'+_esc(w.curto||w.chat_id)+'</span>'
       +(w.nome?'<span class="wa-id-meta">'+_esc(w.nome)+'</span>':'')
-      +'</div><div class="wa-id-meta">'+_esc(partes.join(' · '))+'</div></div>';
+      +'<span class="wa-id-abrir">abrir painel</span>'
+      +'</div><div class="wa-id-meta">'+_esc(partes.join(' · '))+'</div></a>';
   }).join('');
 }
 
