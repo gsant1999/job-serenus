@@ -37,7 +37,10 @@
   }
   /* ─── MODO CLARO CORPORATIVO ─── */
   [data-theme="light"] {
-    --bg:#F4F6F9; --panel:#FFFFFF; --panel-2:#f0f2f5; --panel-3:#e8ebf0;
+    /* Branco puro em tela cheia cansa e achata tudo: sem degrau entre fundo e
+       cartao, nada parece elevado. O fundo desce e ganha um leve azul (o frio
+       da marca), e o cartao fica quase branco em vez de branco. */
+    --bg:#eaeef4; --panel:#fcfdff; --panel-2:#f2f5f9; --panel-3:#e6ebf2;
     --borda:rgba(0,0,0,.08); --borda-2:rgba(0,0,0,.14);
     /* --cinza-2 era #8c93a8: 3,1:1 sobre branco, abaixo do minimo legivel. Isso
      derrubava de uma vez os rotulos de filtro, as datas dos cards e o "+
@@ -183,8 +186,27 @@
   .btn { background:var(--grad-frio); color:#fff; text-decoration:none; padding:9px 17px;
     border-radius:9px; font-size:13px; font-weight:600; border:none; cursor:pointer;
     font-family:'Inter',sans-serif; transition:opacity .15s, transform .15s; display:inline-flex; align-items:center; gap:6px; }
-  .btn:hover { opacity:.88; transform:translateY(-1px); }
-  .btn:active { transform:translateY(0); }
+  .btn:hover { opacity:1; transform:translateY(-1px); filter:saturate(1.15) brightness(1.06);
+               box-shadow:0 6px 18px rgba(31,216,164,.22); }
+  .btn:active { transform:translateY(0); box-shadow:none; }
+  /* O botao de contorno ganha o degrade da marca ao passar o cursor: e o unico
+     momento em que ele precisa dizer "sou clicavel", e no claro ele estava
+     apagado demais pra dizer isso parado. */
+  .btn-outline { position:relative; transition:.18s; }
+  .btn-outline:hover { color:#fff !important; border-color:transparent !important;
+                       background:var(--grad-frio); transform:translateY(-1px);
+                       box-shadow:0 6px 16px rgba(59,130,246,.22); }
+  .btn-outline:active { transform:translateY(0); box-shadow:none; }
+
+  /* ── FILTRO LIGADO SE VE DE LONGE ────────────────────────────────────────
+     Um filtro ativo mudava so o texto de dentro do select. Com sete filtros na
+     tela, ninguem sabe quais estao valendo — e ai o gestor olha um relatorio
+     recortado achando que e a lista inteira. Ligado fica colorido; desligado
+     fica neutro. Serve nas duas telas de filtro do sistema. */
+  .filtro-on { border-color:var(--verde) !important; color:var(--verde) !important;
+               background:var(--verde-soft) !important; font-weight:600; }
+  [data-theme="light"] .filtro-on { border-color:#0f7a52 !important; color:#0f7a52 !important;
+                                    background:rgba(15,122,82,.09) !important; }
   .btn-outline { background:transparent; color:var(--texto); border:1px solid var(--borda-2);
     padding:8px 15px; border-radius:9px; font-size:13px; font-weight:500;
     text-decoration:none; transition:.15s; display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
@@ -754,6 +776,21 @@
 </div>
 
 <div id="toast"></div>
+<script>
+// Marca visualmente quais filtros estao valendo. Usado pelo /propostas e pelo
+// /crm — a mesma logica nos dois, pra quem aprende numa tela saber ler a outra.
+function marcarFiltrosAtivos(raiz){
+  const box = typeof raiz === 'string' ? document.querySelector(raiz) : raiz;
+  if(!box) return;
+  box.querySelectorAll('select, input[type=text], input[type=date], input[type=search]')
+     .forEach((el) => el.classList.toggle('filtro-on', !!(el.value || '').trim()));
+}
+document.addEventListener('input',  (e) => { const b = e.target.closest('.toolbar, .crm-filtros'); if(b) marcarFiltrosAtivos(b); });
+document.addEventListener('change', (e) => { const b = e.target.closest('.toolbar, .crm-filtros'); if(b) marcarFiltrosAtivos(b); });
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.toolbar, .crm-filtros').forEach(marcarFiltrosAtivos);
+});
+</script>
 <script>
 /* ── Sidebar mobile ── */
 function toggleSidebar() {

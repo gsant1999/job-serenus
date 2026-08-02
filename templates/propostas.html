@@ -241,7 +241,7 @@
       <input type="date" id="fDe" onchange="filtrar()">
       até <input type="date" id="fAte" onchange="filtrar()">
     </label>
-    <button type="button" class="btn-outline" onclick="limparFiltros()">Limpar</button>
+    <button type="button" class="btn-outline" onclick="limparFiltros()">Limpar filtros</button>
   </div>
 
   {# O RECORTE VIRA RELATORIO: quantas vendas, quanto somam e quanto rendem.
@@ -453,6 +453,7 @@ function limparFiltros() {
   ['busca','fModal','fTipo','fCons','fOper','fStatus','fLead','fDe','fAte']
     .forEach((id) => { const e = document.getElementById(id); if (e) e.value = ''; });
   filtrar();
+  marcarFiltrosAtivos('.toolbar');   // o destaque some junto com o filtro
 }
 // O CSV LE O DADO, NAO A TELA.
 //

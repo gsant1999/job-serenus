@@ -379,6 +379,7 @@
   /* O azul do sistema sobre branco fica em 3,7:1 — escurece so no claro. */
   .btn-salvar-filtro { border-color:var(--azul); color:var(--azul); }
   [data-theme="light"] .btn-salvar-filtro { border-color:#1d4ed8; color:#1d4ed8; }
+  #crm-limpar[hidden] { display:none; }
   /* O avatar tinha texto branco sobre gradiente claro: 1,1:1, invisivel. */
   [data-theme="light"] .lead-avatar { background:linear-gradient(135deg,#1d4ed8,#5b21b6); color:#fff; }
   /* Placeholder do campo de busca: cinza claro demais pra ler. */
@@ -643,7 +644,10 @@
       <input type="date" name="data_ate" value="{{ filtros.data_ate }}">
     </div>
     <button type="submit" class="btn-filtrar">Filtrar</button>
-    <button type="button" class="btn-limpar" onclick="location.href='/crm'">Limpar</button>
+    {# MESMO PADRAO DO /propostas: o "Limpar" so aparece quando ha filtro
+       valendo, e o marcador verde diz quais estao ligados. Quem aprende a ler
+       uma tela de filtro do sistema passa a ler a outra. #}
+    <button type="button" class="btn-limpar" id="crm-limpar" onclick="location.href='/crm'" hidden>Limpar filtros</button>
     <button type="button" class="btn-limpar btn-salvar-filtro" onclick="salvarFiltroAtual()">Salvar filtro</button>
   </form>
 
@@ -2423,5 +2427,20 @@ document.addEventListener('click', (e) => {
   const m = document.getElementById('crm-mais');
   if (m && !m.contains(e.target)) m.classList.remove('aberto');
 });
+
+// O "Limpar" so existe quando ha o que limpar — botao que nunca faz nada vira
+// paisagem. Mesma regra do /propostas.
+(function(){
+  const box = document.querySelector('.crm-filtros'), btn = document.getElementById('crm-limpar');
+  if(!box || !btn) return;
+  const ver = () => {
+    const algum = [...box.querySelectorAll('select, input[type=text], input[type=date], input[type=search]')]
+      .some((el) => (el.value || '').trim());
+    btn.hidden = !algum;
+  };
+  ver();
+  box.addEventListener('input', ver);
+  box.addEventListener('change', ver);
+})();
 </script>
 {% endblock %}
