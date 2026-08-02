@@ -3,6 +3,20 @@
 
 {% block head %}
 <style>
+  /* Perguntar na hora: caixa pequena, uma pergunta, dois botões. */
+  .entrada-fundo { position:fixed; inset:0; z-index:900; background:rgba(0,0,0,.6);
+    display:flex; align-items:center; justify-content:center; padding:20px;
+    backdrop-filter:blur(3px); }
+  .entrada-cx { background:var(--panel); border:1px solid var(--borda-2); border-radius:12px;
+    padding:20px 22px; width:min(420px,100%); box-shadow:0 24px 60px rgba(0,0,0,.45); }
+  .entrada-cx h3 { margin:0 0 14px; font-size:15px; }
+  .entrada-campo { margin-bottom:14px; }
+  .entrada-campo label { display:block; font-size:12px; color:var(--cinza); margin-bottom:5px; }
+  .entrada-campo select, .entrada-campo input { width:100%; }
+  .entrada-dica { font-size:11px; color:var(--cinza-2); margin-top:5px; line-height:1.45; }
+  .entrada-vazio { border-color:var(--rosa) !important; }
+  .entrada-acoes { display:flex; gap:8px; justify-content:flex-end; margin-top:18px; }
+
   /* ── Cabeçalho: hierarquia por frequência de uso ── */
   .crm-acoes { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .btn-primario-sm { display:inline-flex; align-items:center; gap:6px;
@@ -1185,13 +1199,66 @@ function drop(e, etapa){
   const card=document.getElementById('card-'+_dragging);
   const col=document.getElementById('body-'+etapa);
   if(!card||!col) return;
-  // Guarda de onde o card veio: se o servidor recusar a mudança (campo obrigatório
+  // PERGUNTA NA HORA, em vez de recusar e mandar procurar.
+// A trava de campo obrigatório existia só pra SAIR da etapa — por isso 216
+// perdas estavam com "Não informado": ninguém era barrado ao jogar o card em
+// Perdido, só ao tentar tirar de lá, e ninguém tira. Agora a etapa de destino
+// pode exigir, e o que ela exige é perguntado no momento em que a coisa
+// acontece: é o único instante em que o consultor lembra o motivo.
+async function mover(id, etapa, campos){
+  const r = await fetch('/crm/lead/'+id+'/mover', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({etapa, campos: campos||{}})});
+  const d = await r.json();
+  if(d.ok || !d.pedir_entrada || !d.pedir_entrada.length) return d;
+  const respostas = await perguntarEntrada(d.pedir_entrada);
+  if(!respostas) return {ok:false, erro:'Movimentação cancelada', cancelado:true};
+  return mover(id, etapa, respostas);
+}
+
+function perguntarEntrada(campos){
+  return new Promise(resolve => {
+    const fundo = document.createElement('div');
+    fundo.className = 'entrada-fundo';
+    fundo.innerHTML =
+      '<div class="entrada-cx">' +
+        '<h3>Antes de mover</h3>' +
+        campos.map((c,i) => '<div class="entrada-campo"><label>' + c.nome + '</label>' +
+          (c.opcoes && c.opcoes.length
+            ? '<select data-ch="' + c.chave + '"><option value="">— Selecione —</option>' +
+              c.opcoes.map(o => '<option value="' + o + '">' + o + '</option>').join('') + '</select>'
+            : '<input type="' + (c.chave.indexOf('data') === 0 ? 'date' : 'text') + '" data-ch="' + c.chave + '">') +
+          (c.dica ? '<div class="entrada-dica">' + c.dica + '</div>' : '') + '</div>').join('') +
+        '<div class="entrada-acoes">' +
+          '<button type="button" class="btn-outline btn-sm" data-ac="cancelar">Cancelar</button>' +
+          '<button type="button" class="btn-primario-sm" data-ac="ok">Mover</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(fundo);
+    const fechar = (v) => { fundo.remove(); resolve(v); };
+    fundo.querySelector('[data-ac="cancelar"]').onclick = () => fechar(null);
+    fundo.addEventListener('click', e => { if(e.target === fundo) fechar(null); });
+    fundo.querySelector('[data-ac="ok"]').onclick = () => {
+      const out = {};
+      let faltou = false;
+      fundo.querySelectorAll('[data-ch]').forEach(el => {
+        const v = (el.value||'').trim();
+        if(!v){ faltou = true; el.classList.add('entrada-vazio'); } else { el.classList.remove('entrada-vazio'); }
+        out[el.dataset.ch] = v;
+      });
+      if(faltou) return;          // sem resposta nao move: e o ponto da trava
+      fechar(out);
+    };
+    const p = fundo.querySelector('select,input'); if(p) p.focus();
+  });
+}
+
+// Guarda de onde o card veio: se o servidor recusar a mudança (campo obrigatório
   // em branco), ele volta pra coluna original — deixar o card na coluna nova com
   // o banco dizendo outra coisa é pior que não mover.
   const origem=card.parentElement, vizinho=card.nextElementSibling, id=_dragging;
   col.prepend(card); atualizarContadores();
-  fetch('/crm/lead/'+id+'/mover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({etapa})})
-    .then(r=>r.json()).then(d=>{
+  mover(id, etapa)
+    .then(d=>{
       if(d.ok) return;
       if(origem){ origem.insertBefore(card, vizinho); atualizarContadores(); }
       toast(d.erro||'Erro ao mover','err');
@@ -1913,9 +1980,7 @@ function pintarEtiquetas(lid, etqs){
 async function moverParaContato(id, btn){
   if(btn){ btn.disabled=true; btn.textContent='Movendo...'; }
   try{
-    const r=await fetch('/crm/lead/'+id+'/mover',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({etapa:'primeiro_contato'})});
-    const d=await r.json();
+    const d=await mover(id,'primeiro_contato');
     if(d.ok){
       toast('Movido pro Primeiro Contato','ok');
       const card=document.getElementById('card-'+id);

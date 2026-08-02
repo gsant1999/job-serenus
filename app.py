@@ -2691,6 +2691,11 @@ def init_db():
         # sem isso não há como auditar um vínculo errado depois.
         ("propostas", "lead_vinculo", "TEXT"),
         # sub-status agora pertence a UMA etapa (NULL = vale em todas)
+        # A trava so existia pra SAIR da etapa. Por isso 216 perdas estavam com
+        # 'Nao informado': ninguem era barrado ao JOGAR o card em Perdido, so ao
+        # tentar tirar de la — e ninguem tira. Motivo de perda tem que ser pedido
+        # na hora em que a perda acontece.
+        ("crm_campos", "obriga_entrada_em", "TEXT"),
         ("crm_status_opcoes", "etapa_slug", "TEXT"),
         # prazo em dias até o card virar de cor nesta etapa (NULL = padrão global)
         ("crm_etapas", "sla_dias", "INTEGER"),
@@ -3154,6 +3159,13 @@ def init_db():
                         conn.execute("""INSERT OR IGNORE INTO crm_lead_campos (lead_id,campo_id,valor,fonte,atualizado_em)
                             VALUES (?,?,?,?,?)""", (r['id'], cid['id'], str(r['v']).strip(), 'migracao', _agora_sp()))
                     herdados += 1
+            # Liga a trava de ENTRADA no motivo de perda. 'tipo:perdido' cobre
+            # qualquer etapa de perda, inclusive as que ainda vao ser criadas.
+            try:
+                conn.execute("UPDATE crm_campos SET obriga_entrada_em='tipo:perdido' "
+                             "WHERE chave='motivo_perda'")
+            except Exception:
+                pass
             conn.execute("INSERT INTO meta_flags (k) VALUES ('campos_saida_20260729')")
             conn.commit()
             print(f"[CAMPOS_SAIDA] 4 campos de trava criados; {herdados} motivo(s) de perda herdado(s)")
@@ -21957,6 +21969,28 @@ def crm_lead_mover(lid):
             return jsonify({"ok": False, "erro": "Preencha antes de mover: " +
                             ', '.join([f['nome'] for f in faltando]),
                             "faltando": faltando, "etapa_atual": etapa_ant}), 400
+        # E o que a etapa de DESTINO exige. A tela pode mandar os valores junto
+        # ({campos: {...}}), e ai a gente grava e deixa passar — o consultor
+        # responde uma vez, na hora, em vez de ser barrado e ter que abrir a
+        # ficha pra procurar onde preencher.
+        _tipo_dest = conn.execute("SELECT tipo FROM crm_etapas WHERE slug=?",
+                                  (nova_etapa,)).fetchone()
+        _tipo_dest = (_tipo_dest['tipo'] if _tipo_dest else '') or ''
+        _entrada = (request.json or {}).get('campos') or {}
+        for _ch, _v in _entrada.items():
+            if str(_v or '').strip():
+                gravar_campo_lead(conn, lid, _ch, str(_v).strip(), fonte='consultor')
+        faltando_ent = campos_faltando_pra_entrar(conn, nova_etapa, lead, tipo_destino=_tipo_dest)
+        if faltando_ent:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": "Antes de mover para esta etapa: " +
+                            ', '.join([f['nome'] for f in faltando_ent]),
+                            "pedir_entrada": faltando_ent, "etapa_destino": nova_etapa,
+                            "etapa_atual": etapa_ant}), 400
+        # perdido_motivo e coluna e tem relatorio em cima: mantem espelhado.
+        if _tipo_dest == 'perdido' and _entrada.get('motivo_perda'):
+            conn.execute("UPDATE crm_leads SET perdido_motivo=? WHERE id=?",
+                         (str(_entrada['motivo_perda']).strip()[:120], lid))
     # avancou_em só é carimbado quando a etapa REALMENTE mudou: arrastar o card
     # de volta pra mesma coluna não é avanço e não deve zerar o cronômetro.
     if etapa_ant != nova_etapa:
@@ -22060,6 +22094,7 @@ def carregar_campos_crm(conn=None, momento=None):
                         'fonte': r['fonte'] or 'consultor', 'opcoes': opcoes,
                         'mapa_extras': r['mapa_extras'] or '',
                         'obriga_saida_de': r['obriga_saida_de'] or '',
+                        'obriga_entrada_em': (r['obriga_entrada_em'] if 'obriga_entrada_em' in r.keys() else '') or '',
                         'dica': r['dica'] or '', 'ordem': r['ordem']})
     except Exception:
         out = []
@@ -22183,6 +22218,28 @@ def campos_faltando_pra_sair(conn, lead, campos=None):
         return []
     vals = valores_campos_lead(conn, lead, campos)
     return [{'nome': c['nome'], 'chave': c['chave'], 'opcoes': c['opcoes']}
+            for c in exigidos if not (vals.get(c['chave'], {}).get('valor') or '').strip()]
+
+
+def campos_faltando_pra_entrar(conn, etapa_destino, lead, campos=None, tipo_destino=''):
+    """Campos que a etapa de DESTINO exige antes de aceitar o card.
+
+    'tipo:perdido' vale pra QUALQUER etapa de perda — o funil pode ter mais de
+    uma, e pode ser renomeada; amarrar num slug so faria a trava sumir no dia em
+    que alguem criasse 'Perdido por preco'.
+    """
+    if not etapa_destino:
+        return []
+    if campos is None:
+        campos = carregar_campos_crm(conn)
+    alvos = {etapa_destino}
+    if tipo_destino:
+        alvos.add('tipo:' + tipo_destino)
+    exigidos = [c for c in campos if (c.get('obriga_entrada_em') or '') in alvos]
+    if not exigidos:
+        return []
+    vals = valores_campos_lead(conn, lead, campos)
+    return [{'nome': c['nome'], 'chave': c['chave'], 'opcoes': c['opcoes'], 'dica': c.get('dica') or ''}
             for c in exigidos if not (vals.get(c['chave'], {}).get('valor') or '').strip()]
 
 
