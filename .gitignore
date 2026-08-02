@@ -4,3 +4,10 @@ __pycache__/
 *.backup
 *.save
 dist/
+
+# pipeline ingest: documentos originais e convertidos ficam locais,
+# nunca vao pro git (podem conter dados de cliente/saude - LGPD)
+docs/*
+!docs/.gitkeep
+knowledge/*
+!knowledge/.gitkeep
