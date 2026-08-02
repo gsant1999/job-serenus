@@ -261,7 +261,7 @@
   {% if sem_lead %}
   <div class="lst-aviso">
     <b>{{ sem_lead }}</b>
-    <span>venda(s) sem lead no CRM — sem origem de mídia, elas não sobem pro Google Ads dizendo qual anúncio deu dinheiro.</span>
+    <span>venda(s) sem lead no CRM — sem lead não há origem de mídia, e é a origem que vai permitir devolver a venda pra Meta e pro Google como conversão.</span>
   </div>
   {% endif %}
 
@@ -332,7 +332,7 @@
                  title="Lead no CRM, mas sem conversa do WhatsApp vinculada">lead #{{ p.lead_id }}</a>
               {% else %}
               <button type="button" class="lst-vincular" onclick="abrirVinculo({{ p.id }}, this)"
-                      title="Esta venda não tem lead no CRM: sem origem de mídia, ela não sobe pro Google Ads. Clique pra vincular agora.">
+                      title="Esta venda não tem lead no CRM. Sem lead não há origem de mídia — e sem origem ela nunca vai poder voltar pra Meta nem pro Google como conversão. Clique pra vincular agora.">
                 sem lead — vincular
               </button>
               {% endif %}

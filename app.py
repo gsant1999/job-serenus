@@ -7425,7 +7425,8 @@ def api_crm_leads_buscar():
     Sem isso, /nova-proposta so recebia o lead quando a venda nascia da ficha do
     CRM; aberta direto, a venda nascia orfa e o vinculo era re-adivinhado por
     telefone depois. E dai que vem o passivo de 25 das 48 vendas sem lead — sem
-    lead nao ha origem de midia, e a venda nao sobe pro Google Ads."""
+    lead nao ha origem de midia, e a venda nao volta como conversao pra Meta nem
+    pro Google — e a Meta e hoje a origem que mais traz lead."""
     termo = (request.args.get('q') or '').strip()
     if len(termo) < 2:
         return jsonify({"ok": True, "leads": []})

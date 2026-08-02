@@ -208,6 +208,21 @@
      tela, ninguem sabe quais estao valendo — e ai o gestor olha um relatorio
      recortado achando que e a lista inteira. Ligado fica colorido; desligado
      fica neutro. Serve nas duas telas de filtro do sistema. */
+  /* ── AMARELO SEMPRE LEVA CONTORNO ────────────────────────────────────────
+     Amarelo e a cor mais luminosa do circulo: encosta no branco no tema claro
+     e brilha demais no escuro. Nos dois casos o contorno devolve a borda que o
+     fundo nao da — escuro no claro, BRANCO no escuro.
+     paint-order poe o traco POR BAIXO do preenchimento; sem isso ele come o
+     miolo da letra e o texto fica sujo em tamanho pequeno. */
+  .txt-contorno {
+    -webkit-text-stroke:.5px #ffffff;
+    paint-order:stroke fill;
+    text-shadow:0 0 1px rgba(255,255,255,.30);
+  }
+  [data-theme="light"] .txt-contorno {
+    -webkit-text-stroke:.55px #10131c;
+    text-shadow:0 0 1px rgba(16,19,28,.35);
+  }
   .filtro-on { border-color:var(--verde) !important; color:var(--verde) !important;
                background:var(--verde-soft) !important; font-weight:600; }
   [data-theme="light"] .filtro-on { border-color:#0f7a52 !important; color:#0f7a52 !important;
@@ -802,6 +817,34 @@
 <script>
 // Marca visualmente quais filtros estao valendo. Usado pelo /propostas e pelo
 // /crm — a mesma logica nos dois, pra quem aprende numa tela saber ler a outra.
+// Contorno no amarelo, em TODA tela do sistema e nos dois temas.
+//
+// Enumerar seletor por seletor nao se sustenta: sao 34 usos de amarelo em 22
+// templates, e o proximo que alguem escrever ficaria de fora. Entao a regra se
+// aplica sozinha — varre o texto, le a cor JA CALCULADA e marca o que for
+// amarelo. Funciona pro que existe hoje e pro que vier depois.
+function contornarAmarelo(){
+  // Vale nos DOIS temas: o que muda e a COR do contorno, e isso quem resolve e
+  // o CSS. Aqui so se decide o que e amarelo.
+  document.querySelectorAll('.page *, .topbar *').forEach((el) => {
+    if(el.children.length) return;                    // so quem realmente pinta texto
+    const txt = (el.textContent || '').trim();
+    if(!txt) return;
+    const m = (getComputedStyle(el).color || '').match(/[\d.]+/g);
+    if(!m) return;
+    const [r, g, b] = m.map(Number);
+    // Faixa do ambar/amarelo: vermelho e verde altos, azul baixo.
+    const amarelo = r > 195 && g > 140 && b < 130 && (r - b) > 90 && (g - b) > 60;
+    el.classList.toggle('txt-contorno', amarelo);
+  });
+}
+document.addEventListener('DOMContentLoaded', contornarAmarelo);
+// O tema troca sem recarregar: refaz a varredura quando o atributo muda.
+try {
+  new MutationObserver(contornarAmarelo)
+    .observe(document.documentElement, {attributes:true, attributeFilter:['data-theme']});
+} catch(e) { /* sem observer, vale o que foi feito no carregamento */ }
+
 function marcarFiltrosAtivos(raiz){
   const box = typeof raiz === 'string' ? document.querySelector(raiz) : raiz;
   if(!box) return;
