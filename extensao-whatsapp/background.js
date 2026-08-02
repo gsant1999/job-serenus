@@ -363,8 +363,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       msg.type === 'cotador_catalogo'    ? { type: 'cotador_catalogo', pedido: msg.pedido } :
       msg.type === 'cotador_modalidades' ? { type: 'cotador_modalidades', pedido: msg.pedido } :
                                            { type: 'cotador_estado' };
-    chrome.tabs.query({ url: 'https://beta.paineldocorretor.com.br/*' }, (abas) => {
-      const aba = (abas || [])[0];
+    // Procura o Painel em QUALQUER endereço deles, não só no beta.
+    //
+    // O mapeamento foi feito no beta.paineldocorretor.com.br e o endereço ficou
+    // fixo no código. Aí o consultor abriu o Painel normal, de produção, e a
+    // extensão disse "Painel fechado" com o Painel bem aberto na frente dele —
+    // o pior tipo de erro, o que faz duvidar de si mesmo em vez do sistema.
+    chrome.tabs.query({ url: ['https://paineldocorretor.com.br/*',
+                              'https://*.paineldocorretor.com.br/*'] }, (abas) => {
+      // Prefere a aba que o consultor está usando: se ele tem beta e produção
+      // abertos, a ativa é a que ele acabou de olhar.
+      const lista = abas || [];
+      const aba = lista.filter((a) => a.active)[0] || lista[0];
       if (!aba) { sendResponse({ ok: false, motivo: 'painel_fechado' }); return; }
       chrome.tabs.sendMessage(aba.id, oQuePedir, (r) => {
         if (chrome.runtime.lastError) {

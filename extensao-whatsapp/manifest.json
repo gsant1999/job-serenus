@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JOB — Análise de WhatsApp",
-  "version": "2.83.0",
+  "version": "2.84.0",
   "description": "Painel dentro do WhatsApp Web: analisa o lead, calcula o Score e envia mensagens da biblioteca de modelos.",
   "permissions": [
     "notifications",
@@ -12,7 +12,8 @@
     "https://web.whatsapp.com/*",
     "https://*.up.railway.app/*",
     "https://job-serenus-production.up.railway.app/*",
-    "https://beta.paineldocorretor.com.br/*"
+    "https://paineldocorretor.com.br/*",
+    "https://*.paineldocorretor.com.br/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -71,7 +72,8 @@
     },
     {
       "matches": [
-        "https://beta.paineldocorretor.com.br/*"
+        "https://paineldocorretor.com.br/*",
+        "https://*.paineldocorretor.com.br/*"
       ],
       "js": [
         "cotador-painel.js"
@@ -81,7 +83,8 @@
     },
     {
       "matches": [
-        "https://beta.paineldocorretor.com.br/*"
+        "https://paineldocorretor.com.br/*",
+        "https://*.paineldocorretor.com.br/*"
       ],
       "js": [
         "painel-bridge.js"

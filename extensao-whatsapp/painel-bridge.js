@@ -14,8 +14,14 @@
 (function () {
   'use strict';
 
-  const CHAVE = 'cotador_painel_hashes';
-  const CHAVE_MOD = 'cotador_painel_modalidades';
+  // Guardado POR ENDEREÇO, não misturado.
+  //
+  // O beta e o Painel de produção são servidores diferentes, com deploys
+  // diferentes — os identificadores de função de um não valem no outro. Uma
+  // chave só para os dois faria o que fosse aprendido por último sobrescrever
+  // o outro, e a cotação sairia chamando a função errada sem dar erro.
+  const CHAVE = 'cotador_painel_hashes:' + location.origin;
+  const CHAVE_MOD = 'cotador_painel_modalidades:' + location.origin;
   const pendentes = new Map();
   let seq = 0;
 
