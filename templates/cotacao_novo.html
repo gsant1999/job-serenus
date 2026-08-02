@@ -660,10 +660,18 @@
       return;
     }
     c.innerHTML = '<div class="cv-ops-vazio">Perguntando ao Painel…</div>';
-    var r = await pedir('cotar', {
-      pedido: { cidade: cidadeEscolhida, modalidade: mod,
-                vidas: vidasLista(), somenteOperadoras: true, maxPlanos: 0 }
-    }, 40000);
+    var base = { cidade: cidadeEscolhida, modalidade: mod, vidas: vidasLista() };
+    // Reaproveita a cotação já aberta: listar operadoras é pergunta de apoio,
+    // não merece criar um registro novo dentro do sistema deles.
+    var rc = await pedir('passo', { pedido: Object.assign({ acao: 'criar', reaproveitar: true }, base) }, 45000);
+    if (!rc.ok) {
+      c.innerHTML = '<div class="cv-ops-vazio">Não deu pra listar agora. ' +
+        'Dá pra cotar mesmo assim: sem escolher operadora, ele busca em todas.</div>';
+      operadoras = []; opsEscolhidas = null;
+      return;
+    }
+    var r = await pedir('passo', { pedido: Object.assign(
+      { acao: 'operadoras', cotacaoId: rc.dados.cotacaoId }, base) }, 45000);
     if (!r.ok) {
       c.innerHTML = '<div class="cv-ops-vazio">Não deu pra listar agora. ' +
         'Dá pra cotar mesmo assim: sem escolher operadora, ele busca em todas.</div>';
@@ -748,15 +756,107 @@
       }
     };
 
-    // Teto generoso: o preço é uma consulta por plano, e o ritmo é de propósito
-    // irregular. Quarenta planos podem passar de meio minuto.
-    var r = await pedir('cotar', { pedido: pedido }, 180000);
+    var r = await cotarPassoAPasso(pedido);
     el('andando').className = 'cv-andando';
     atualizarBotao();
     if (!r.ok) { tratarFalha(r.motivo, r); return; }
     mostrarSinal('on', 'Painel conectado', '');
     desenhar(r.dados);
   };
+
+  // ── O ritmo mora AQUI, não na aba do Painel ────────────────────────────
+  //
+  // A aba do Painel fica em segundo plano enquanto você olha esta tela, e o
+  // Chrome estrangula temporizador de aba escondida: uma espera de 300ms lá
+  // vira até um minuto depois de alguns minutos oculta. Como são umas quinze
+  // esperas numa cotação, o que devia levar dez segundos levava quinze
+  // minutos. Não era a rede da Trindade — era o navegador dormindo.
+  //
+  // Esta aba está à vista, então o relógio dela é confiável. Cada passo lá é
+  // uma chamada e acabou; a pausa entre eles acontece aqui. Para o servidor
+  // deles nada muda: o espaçamento irregular é exatamente o mesmo.
+  function respira(min, max) {
+    return new Promise(function (r) { setTimeout(r, min + Math.random() * (max - min)); });
+  }
+
+  async function cotarPassoAPasso(p) {
+    var t0 = Date.now();
+    var base = { cidade: p.cidade, modalidade: p.modalidade, vidas: p.vidas };
+    var passo = function (extra) {
+      var ped = { acao: extra.acao };
+      for (var k in base) ped[k] = base[k];
+      for (var k2 in extra) ped[k2] = extra[k2];
+      return pedir('passo', { pedido: ped }, 45000);
+    };
+
+    mostrarAndamento({ fase: 'criando' });
+    var r = await passo({ acao: 'criar' });
+    if (!r.ok) return r;
+    var cotacaoId = r.dados.cotacaoId, url = r.dados.url;
+    await respira(400, 1100);
+
+    mostrarAndamento({ fase: 'operadoras' });
+    r = await passo({ acao: 'operadoras', cotacaoId: cotacaoId });
+    if (!r.ok) return r;
+    var todas = r.dados.operadoras || [];
+    var escolhidas = (p.operadoraIds && p.operadoraIds.length)
+      ? todas.filter(function (o) { return p.operadoraIds.indexOf(o.id) >= 0; })
+      : todas;
+    operadoras = todas;
+    if (!escolhidas.length) return { ok: false, motivo: 'nenhuma_operadora_na_cidade' };
+    await respira(300, 900);
+
+    // Duas por vez: um corretor clica numa operadora de cada vez, e quatro
+    // saindo no mesmo instante é coisa que a tela deles nunca faz.
+    var planos = [];
+    for (var i = 0; i < escolhidas.length; i += 2) {
+      var lote = escolhidas.slice(i, i + 2);
+      var res = await Promise.all(lote.map(function (o) {
+        return passo({ acao: 'planos', cotacaoId: cotacaoId, operadoraId: o.id });
+      }));
+      res.forEach(function (x) {
+        if (x.ok && x.dados && x.dados.planos) planos.push.apply(planos, x.dados.planos);
+      });
+      mostrarAndamento({ fase: 'planos', feito: Math.min(i + 2, escolhidas.length),
+                         total: escolhidas.length });
+      if (i + 2 < escolhidas.length) await respira(280, 900);
+    }
+    if (!planos.length) return { ok: false, motivo: 'nenhum_plano_na_cidade' };
+
+    r = await passo({ acao: 'selecionar', planos: planos, exigencias: p.exigencias,
+                      maxPlanos: p.maxPlanos });
+    if (!r.ok) return r;
+    var alvo = r.dados.alvo || [];
+    var descartados = r.dados.descartados || 0;
+    if (!alvo.length) {
+      return { ok: true, dados: { planos: [], planosEncontrados: planos.length,
+        descartados: descartados, ms: Date.now() - t0, cotacaoId: cotacaoId, url: url } };
+    }
+
+    var resultado = [];
+    for (var j = 0; j < alvo.length; j++) {
+      var rp = await passo({ acao: 'preco', cotacaoId: cotacaoId, plano: alvo[j] });
+      var cartao = (rp.ok && rp.dados && rp.dados.cartao) || null;
+      var linha = Object.assign({}, alvo[j], cartao
+        ? { total: cartao.total, faixas: cartao.faixas, conferido: cartao.conferido }
+        // Sem preço não inventa: o plano aparece marcado, e o consultor sabe
+        // que aquele ficou sem resposta em vez de sumir da lista calado.
+        : { total: null, faixas: [], motivo: rp.motivo || 'sem_valor_na_resposta' });
+      resultado.push(linha);
+      mostrarAndamento({ fase: 'precos', feito: j + 1, total: alvo.length });
+      if (j + 1 < alvo.length) await respira(240, 780);
+    }
+
+    resultado.sort(function (a, b) {
+      return (a.total == null) - (b.total == null) || (a.total - b.total);
+    });
+    return { ok: true, dados: {
+      cotacaoId: cotacaoId, url: url, cidade: p.cidade, vidas: p.vidas,
+      operadoras: escolhidas, planosEncontrados: planos.length,
+      planosCotados: resultado.length, descartados: descartados,
+      suspeitos: resultado.filter(function (x) { return x.total != null && !x.conferido; }).length,
+      ms: Date.now() - t0, planos: resultado } };
+  }
 
   // ── resultado ──────────────────────────────────────────────────────────
   function desenhar(d) {

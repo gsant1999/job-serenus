@@ -448,6 +448,57 @@
     };
   }
 
+  // ── Um passo por vez, sem relógio aqui dentro ─────────────────────────────
+  //
+  //  Quem manda no ritmo passou a ser a tela do JOB, e por um motivo medido:
+  //  esta aba fica em SEGUNDO PLANO enquanto o consultor olha o JOB, e o Chrome
+  //  estrangula temporizador de aba escondida. As esperas de 300–900ms que eu
+  //  programei aqui viravam ate um minuto cada depois de alguns minutos oculta
+  //  — quinze esperas numa cotacao, e o que era pra levar dez segundos levava
+  //  quinze minutos. Nao era a rede da Trindade: era o navegador dormindo.
+  //
+  //  Aqui cada acao e uma chamada e acabou. A pausa entre elas acontece na aba
+  //  visivel, onde o relogio funciona — e o disfarce continua igual, porque o
+  //  que o servidor deles ve e exatamente o mesmo espacamento irregular.
+  let _cartoesAtuais = [];
+
+  async function passo(p) {
+    const a = (p && p.acao) || '';
+    if (a === 'criar') {
+      // Consulta de apoio (só listar operadoras) reaproveita a cotação que já
+      // existe. Criar uma por pergunta deixaria dezenas de cotações vazias com
+      // o nome do corretor dentro do sistema deles num dia de trabalho.
+      if (p.reaproveitar && ultimaCotacao) {
+        return { cotacaoId: ultimaCotacao,
+                 url: ORIGEM + '/cotacoes/' + ultimaCotacao + '/edit', reaproveitada: true };
+      }
+      _cartoesAtuais = [];
+      ultimaCotacao = await criarCotacao(p.titulo);
+      return { cotacaoId: ultimaCotacao,
+               url: ORIGEM + '/cotacoes/' + ultimaCotacao + '/edit' };
+    }
+    if (a === 'operadoras') {
+      return { operadoras: (await operadorasDaCidade(p.cotacaoId, p))
+        .map((o) => ({ id: o.id, nome: o.nome, logotipo: o.logotipo })) };
+    }
+    if (a === 'planos') {
+      return { planos: await planosDaOperadora(p.cotacaoId, p, p.operadoraId) };
+    }
+    if (a === 'selecionar') {
+      // A peneira mora aqui, e nao na tela, pra existir uma regra so. Duas
+      // copias da mesma regra divergem no primeiro ajuste.
+      const servem = (p.planos || []).filter((pl) => serve(pl, p.vidas, p.exigencias));
+      return { alvo: servem.slice(0, p.maxPlanos || 20),
+               encontrados: (p.planos || []).length, descartados: (p.planos || []).length - servem.length };
+    }
+    if (a === 'preco') {
+      const r = await precoDoPlano(p.cotacaoId, p, p.plano, _cartoesAtuais);
+      _cartoesAtuais = r.estado;
+      return { cartao: r.cartao };
+    }
+    throw new Error('passo_desconhecido:' + a);
+  }
+
   // ── Catálogo: o que existe, sem perguntar preço ───────────────────────────
   //
   //  Cotar responde "quanto custa para ESTE cliente". O catálogo responde
@@ -576,6 +627,13 @@
     if (d.tipo === 'estado') {
       responder({ ok: true, pronto: !faltando().length, faltando: faltando(),
                   modalidades: Object.keys(MODALIDADES).map(Number) });
+      return;
+    }
+    if (d.tipo === 'passo') {
+      const f = faltando();
+      if (f.length) { responder({ ok: false, motivo: 'precisa_aprender', faltando: f }); return; }
+      try { responder({ ok: true, dados: await passo(d.pedido) }); }
+      catch (e) { responder({ ok: false, motivo: String(e && e.message || e) }); }
       return;
     }
     if (d.tipo === 'descobrir_modalidades') {

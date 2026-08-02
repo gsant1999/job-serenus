@@ -372,12 +372,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && (msg.type === 'cotar_painel' || msg.type === 'cotador_pronto' ||
               msg.type === 'cotador_cidades' || msg.type === 'cotador_catalogo' ||
-              msg.type === 'cotador_modalidades')) {
+              msg.type === 'cotador_modalidades' || msg.type === 'cotador_passo')) {
     const oQuePedir =
       msg.type === 'cotar_painel'        ? { type: 'cotar_aqui', pedido: msg.pedido } :
       msg.type === 'cotador_cidades'     ? { type: 'cotador_cidades', termo: msg.termo } :
       msg.type === 'cotador_catalogo'    ? { type: 'cotador_catalogo', pedido: msg.pedido } :
       msg.type === 'cotador_modalidades' ? { type: 'cotador_modalidades', pedido: msg.pedido } :
+      msg.type === 'cotador_passo'       ? { type: 'cotador_passo', pedido: msg.pedido } :
                                            { type: 'cotador_estado' };
     // Guarda quem pediu, pra devolver o andamento pra aba certa.
     if ((msg.type === 'cotar_painel' || msg.type === 'cotador_catalogo') &&

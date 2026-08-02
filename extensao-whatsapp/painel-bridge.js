@@ -90,6 +90,7 @@
     cotador_cidades:  ['cidades',   8000],
     cotador_catalogo: ['catalogo', 180000], // uma cidade tem ~19 operadoras, uma a uma
     cotador_modalidades: ['descobrir_modalidades', 40000],
+    cotador_passo: ['passo', 30000],   // uma acao so: nunca deveria demorar tanto
   };
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

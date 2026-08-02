@@ -20,7 +20,7 @@
 (function () {
   'use strict';
 
-  const _SABE = ['abrir_chat', 'cotar', 'catalogo', 'cotador_estado',
+  const _SABE = ['abrir_chat', 'cotar', 'passo', 'catalogo', 'cotador_estado',
                  'cotador_cidades', 'descobrir_modalidades'];
   let _versao = '';
   try { _versao = chrome.runtime.getManifest().version; } catch (e) { /* contexto órfão */ }
@@ -35,6 +35,7 @@
                texto: String(d.texto || '').slice(0, 4000) };
     }
     if (d.tipo === 'cotar') return { type: 'cotar_painel', pedido: d.pedido };
+    if (d.tipo === 'passo') return { type: 'cotador_passo', pedido: d.pedido };
     if (d.tipo === 'catalogo') return { type: 'cotador_catalogo', pedido: d.pedido };
     if (d.tipo === 'descobrir_modalidades') {
       return { type: 'cotador_modalidades', pedido: d.pedido };
