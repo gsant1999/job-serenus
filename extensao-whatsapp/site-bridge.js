@@ -30,6 +30,10 @@
                texto: String(d.texto || '').slice(0, 4000) };
     }
     if (d.tipo === 'cotar') return { type: 'cotar_painel', pedido: d.pedido };
+    if (d.tipo === 'catalogo') return { type: 'cotador_catalogo', pedido: d.pedido };
+    if (d.tipo === 'descobrir_modalidades') {
+      return { type: 'cotador_modalidades', pedido: d.pedido };
+    }
     if (d.tipo === 'cotador_estado') return { type: 'cotador_pronto' };
     if (d.tipo === 'cotador_cidades') {
       return { type: 'cotador_cidades', termo: String(d.termo || '').slice(0, 80) };

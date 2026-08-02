@@ -1387,6 +1387,39 @@ def init_db():
                 nome TEXT NOT NULL,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            # Catálogo: o que EXISTE, por cidade e tipo de contratação. Não tem
+            # preço — preço muda toda hora e sai ao vivo. Isto aqui muda pouco
+            # e é o que responde "quem atende Hortolândia em PME, com e sem
+            # coparticipação" sem precisar chamar ninguém.
+            """CREATE TABLE IF NOT EXISTS catalogo_operadora (
+                id SERIAL PRIMARY KEY,
+                cidade TEXT NOT NULL, modalidade INTEGER NOT NULL,
+                operadora_id INTEGER NOT NULL, nome TEXT DEFAULT '', logotipo TEXT DEFAULT '',
+                visto_em TIMESTAMP, sumiu_em TIMESTAMP,
+                UNIQUE (cidade, modalidade, operadora_id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS catalogo_plano (
+                id SERIAL PRIMARY KEY,
+                cidade TEXT NOT NULL, modalidade INTEGER NOT NULL,
+                operadora_id INTEGER, operadora TEXT DEFAULT '', administradora TEXT DEFAULT '',
+                produto_id INTEGER, produto TEXT DEFAULT '',
+                plano_id INTEGER, plano TEXT DEFAULT '', acomodacao INTEGER DEFAULT 0,
+                tabela_id INTEGER, tabela TEXT DEFAULT '', contratacao INTEGER DEFAULT 0,
+                coparticipacao INTEGER DEFAULT 0, copart_tipo TEXT DEFAULT '',
+                copart_faixa TEXT DEFAULT 'Sem',
+                remissao INTEGER DEFAULT 0, mei INTEGER DEFAULT 0,
+                vida_min INTEGER DEFAULT 0, vida_max INTEGER DEFAULT 0,
+                chave TEXT DEFAULT '',
+                visto_em TIMESTAMP, sumiu_em TIMESTAMP,
+                UNIQUE (cidade, modalidade, chave)
+            )""",
+            """CREATE TABLE IF NOT EXISTS catalogo_varredura (
+                id SERIAL PRIMARY KEY,
+                usuario_id INTEGER, iniciado_em TIMESTAMP, terminado_em TIMESTAMP,
+                alvos INTEGER DEFAULT 0, feitos INTEGER DEFAULT 0,
+                chamadas INTEGER DEFAULT 0, operadoras INTEGER DEFAULT 0, planos INTEGER DEFAULT 0,
+                estado TEXT DEFAULT 'rodando', erro TEXT DEFAULT ''
+            )""",
             """CREATE TABLE IF NOT EXISTS cotacao_salva (
                 id SERIAL PRIMARY KEY,
                 token TEXT, orientacao TEXT DEFAULT 'horizontal', lead_id INTEGER,
@@ -2226,6 +2259,35 @@ def init_db():
             codigo INTEGER PRIMARY KEY,
             nome TEXT NOT NULL,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS catalogo_operadora (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cidade TEXT NOT NULL, modalidade INTEGER NOT NULL,
+            operadora_id INTEGER NOT NULL, nome TEXT DEFAULT '', logotipo TEXT DEFAULT '',
+            visto_em TIMESTAMP, sumiu_em TIMESTAMP,
+            UNIQUE (cidade, modalidade, operadora_id)
+        );
+        CREATE TABLE IF NOT EXISTS catalogo_plano (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cidade TEXT NOT NULL, modalidade INTEGER NOT NULL,
+            operadora_id INTEGER, operadora TEXT DEFAULT '', administradora TEXT DEFAULT '',
+            produto_id INTEGER, produto TEXT DEFAULT '',
+            plano_id INTEGER, plano TEXT DEFAULT '', acomodacao INTEGER DEFAULT 0,
+            tabela_id INTEGER, tabela TEXT DEFAULT '', contratacao INTEGER DEFAULT 0,
+            coparticipacao INTEGER DEFAULT 0, copart_tipo TEXT DEFAULT '',
+            copart_faixa TEXT DEFAULT 'Sem',
+            remissao INTEGER DEFAULT 0, mei INTEGER DEFAULT 0,
+            vida_min INTEGER DEFAULT 0, vida_max INTEGER DEFAULT 0,
+            chave TEXT DEFAULT '',
+            visto_em TIMESTAMP, sumiu_em TIMESTAMP,
+            UNIQUE (cidade, modalidade, chave)
+        );
+        CREATE TABLE IF NOT EXISTS catalogo_varredura (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER, iniciado_em TIMESTAMP, terminado_em TIMESTAMP,
+            alvos INTEGER DEFAULT 0, feitos INTEGER DEFAULT 0,
+            chamadas INTEGER DEFAULT 0, operadoras INTEGER DEFAULT 0, planos INTEGER DEFAULT 0,
+            estado TEXT DEFAULT 'rodando', erro TEXT DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS cotacao_salva (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24006,6 +24068,255 @@ def api_whatsapp_cotacao_modalidades():
     conn = db()
     return _wa_cors(jsonify({'ok': True, 'modalidades': _modalidades_conhecidas(conn),
                              'faixas': [_FAIXA_JOB_PARA_PAINEL.get(f, f) for f in FAIXAS_ETARIAS]}))
+
+
+# ─── CATÁLOGO DO PAINEL ─────────────────────────────────────────────────────
+#
+# Cotar responde "quanto custa pra este cliente". O catálogo responde "o que
+# existe nesta cidade": quais operadoras atendem, quais planos elas têm, com e
+# sem coparticipação, enfermaria ou apartamento, de quantas a quantas vidas.
+#
+# Isso não depende de cliente e não precisa de preço — então varre uma vez e
+# fica guardado. É o que permite responder na hora, sem chamar ninguém, e é o
+# que dá pra comparar mês a mês pra enxergar o que a operadora mudou.
+
+_COPART_COMPLETA = ('total', 'complet', 'integral')
+
+
+def _copart_faixa(tem, tipo):
+    """Normaliza coparticipação em Sem / Parcial / Completa.
+
+    O Painel escreve o tipo em texto livre ("Parcial ", "Sem Coparticipação ").
+    Guardamos o texto cru também: se aparecer um tipo que não conhecemos, o
+    relatório mostra ele em vez de jogar num balde errado."""
+    t = str(tipo or '').strip().lower()
+    if not tem:
+        return 'Sem'
+    if 'parcial' in t:
+        return 'Parcial'
+    if any(x in t for x in _COPART_COMPLETA):
+        return 'Completa'
+    return 'Com'          # tem coparticipação, mas o tipo veio em branco
+
+
+def _catalogo_gravar(conn, d):
+    """Grava uma varredura de uma cidade + modalidade. Devolve o que entrou."""
+    cidade = str(d.get('cidade') or '').strip()
+    if not cidade:
+        raise ValueError('sem_cidade')
+    try:
+        modalidade = int(d.get('modalidade'))
+    except Exception:
+        raise ValueError('sem_modalidade')
+    agora = _agora_sp()
+
+    n_op = 0
+    for o in (d.get('operadoras') or []):
+        try:
+            conn.execute(
+                """INSERT INTO catalogo_operadora
+                     (cidade, modalidade, operadora_id, nome, logotipo, visto_em, sumiu_em)
+                   VALUES (?,?,?,?,?,?,NULL)
+                   ON CONFLICT (cidade, modalidade, operadora_id) DO UPDATE SET
+                     nome=excluded.nome, logotipo=excluded.logotipo,
+                     visto_em=excluded.visto_em, sumiu_em=NULL""",
+                (cidade, modalidade, int(o.get('id')), str(o.get('nome') or '')[:120],
+                 str(o.get('logotipo') or '')[:300], agora))
+            n_op += 1
+        except Exception:
+            continue
+
+    n_pl = 0
+    chaves_vistas = []
+    for p in (d.get('planos') or []):
+        if p.get('erro') or not p.get('chave'):
+            continue
+        chaves_vistas.append(str(p.get('chave'))[:60])
+        try:
+            conn.execute(
+                """INSERT INTO catalogo_plano
+                     (cidade, modalidade, operadora_id, operadora, administradora,
+                      produto_id, produto, plano_id, plano, acomodacao,
+                      tabela_id, tabela, contratacao, coparticipacao, copart_tipo, copart_faixa,
+                      remissao, mei, vida_min, vida_max, chave, visto_em, sumiu_em)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)
+                   ON CONFLICT (cidade, modalidade, chave) DO UPDATE SET
+                     operadora=excluded.operadora, administradora=excluded.administradora,
+                     produto=excluded.produto, plano=excluded.plano,
+                     acomodacao=excluded.acomodacao, tabela=excluded.tabela,
+                     contratacao=excluded.contratacao,
+                     coparticipacao=excluded.coparticipacao, copart_tipo=excluded.copart_tipo,
+                     copart_faixa=excluded.copart_faixa, remissao=excluded.remissao,
+                     mei=excluded.mei, vida_min=excluded.vida_min, vida_max=excluded.vida_max,
+                     visto_em=excluded.visto_em, sumiu_em=NULL""",
+                (cidade, modalidade, p.get('operadoraId'), str(p.get('operadora') or '')[:120],
+                 str(p.get('administradora') or '')[:120],
+                 p.get('produtoId'), str(p.get('produto') or '')[:160],
+                 p.get('planoId'), str(p.get('plano') or '')[:160],
+                 int(p.get('acomodacao') or 0),
+                 p.get('tabelaId'), str(p.get('tabela') or '').strip()[:160],
+                 int(p.get('contratacao') or 0),
+                 1 if p.get('coparticipacao') else 0,
+                 str(p.get('coparticipacaoTipo') or '').strip()[:60],
+                 _copart_faixa(p.get('coparticipacao'), p.get('coparticipacaoTipo')),
+                 1 if p.get('remissao') else 0, 1 if p.get('mei') else 0,
+                 int(p.get('vidaMin') or 0), int(p.get('vidaMax') or 0),
+                 str(p.get('chave'))[:60], agora))
+            n_pl += 1
+        except Exception:
+            continue
+
+    # O que estava no catálogo dessa cidade e NÃO veio agora foi retirado pela
+    # operadora. Não apaga: marca a data. Saber que um plano saiu de linha vale
+    # tanto quanto saber que ele existe.
+    #
+    # A comparação é pelo que veio, não por carimbo de tempo. Comparar
+    # `visto_em <> agora` parecia mais simples e era errado: duas varreduras da
+    # mesma cidade dentro do mesmo segundo têm o mesmo carimbo, e aí nada é
+    # marcado como retirado — o catálogo ficaria com plano morto para sempre,
+    # sem ninguém perceber.
+    def _marcar_sumidos(tabela, coluna, vistos):
+        if not vistos:
+            return
+        marcas = ','.join(['?'] * len(vistos))
+        conn.execute(
+            "UPDATE %s SET sumiu_em=? WHERE cidade=? AND modalidade=? AND sumiu_em IS NULL "
+            "AND %s NOT IN (%s)" % (tabela, coluna, marcas),
+            tuple([agora, cidade, modalidade] + list(vistos)))
+
+    try:
+        _marcar_sumidos('catalogo_plano', 'chave', chaves_vistas)
+        _marcar_sumidos('catalogo_operadora', 'operadora_id',
+                        [int(o.get('id')) for o in (d.get('operadoras') or []) if o.get('id')])
+    except Exception:
+        pass
+    conn.commit()
+    return {'operadoras': n_op, 'planos': n_pl}
+
+
+def _catalogo_cidades_sugeridas(conn, limite=40):
+    """Cidades onde a Serenus vende de verdade, das mais movimentadas pras menos.
+
+    Varrer o Brasil inteiro seriam 5.570 cidades e nenhuma delas interessa se
+    não tem cliente lá. O JOB já sabe onde vendemos — é de lá que sai a lista."""
+    try:
+        linhas = conn.execute(
+            """SELECT cidade, estado, COUNT(*) AS n FROM propostas
+                WHERE cidade IS NOT NULL AND TRIM(cidade)<>''
+                GROUP BY cidade, estado ORDER BY n DESC""").fetchall()
+    except Exception:
+        return []
+    saida = []
+    for r in linhas[:limite]:
+        uf = (r['estado'] or '').strip().upper()
+        nome = (r['cidade'] or '').strip()
+        if not nome:
+            continue
+        # O Painel só aceita "Cidade - UF". Sem UF a gente não adivinha.
+        saida.append({'cidade': ('%s - %s' % (nome, uf)) if uf else nome,
+                      'propostas': r['n'], 'tem_uf': bool(uf)})
+    return saida
+
+
+@app.route('/cotacao/catalogo')
+@login_required
+def cotacao_catalogo():
+    conn = db()
+    try:
+        ult = conn.execute(
+            "SELECT * FROM catalogo_varredura ORDER BY id DESC LIMIT 1").fetchone()
+    except Exception:
+        ult = None
+    try:
+        resumo = conn.execute(
+            """SELECT cidade, modalidade, COUNT(*) AS planos,
+                      COUNT(DISTINCT operadora) AS operadoras, MAX(visto_em) AS visto
+                 FROM catalogo_plano WHERE sumiu_em IS NULL
+                GROUP BY cidade, modalidade ORDER BY cidade, modalidade""").fetchall()
+    except Exception:
+        resumo = []
+    return render_template('cotacao_catalogo.html',
+                           modalidades=_modalidades_conhecidas(conn),
+                           sugeridas=_catalogo_cidades_sugeridas(conn),
+                           resumo=[dict(r) for r in resumo],
+                           ultima=dict(ult) if ult else None)
+
+
+@app.route('/cotacao/catalogo/gravar', methods=['POST'])
+@login_required
+def cotacao_catalogo_gravar():
+    d = request.get_json(silent=True) or {}
+    conn = db()
+    try:
+        r = _catalogo_gravar(conn, d)
+    except ValueError as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 400
+    except Exception:
+        conn.rollback()
+        return jsonify({'ok': False, 'erro': 'falha_ao_gravar'}), 500
+    return jsonify({'ok': True, **r})
+
+
+@app.route('/cotacao/catalogo.json')
+@login_required
+def cotacao_catalogo_json():
+    """O catálogo já varrido, filtrável. É esta rota que responde 'quem atende
+    Hortolândia em PME sem coparticipação' sem chamar o Painel."""
+    conn = db()
+    onde, args = ['sumiu_em IS NULL'], []
+    for campo, arg in (('cidade', 'cidade'), ('operadora', 'operadora'),
+                       ('copart_faixa', 'coparticipacao')):
+        v = (request.args.get(arg) or '').strip()
+        if v:
+            onde.append('%s=?' % campo)
+            args.append(v)
+    for campo, arg in (('modalidade', 'modalidade'), ('acomodacao', 'acomodacao'),
+                       ('mei', 'mei')):
+        v = (request.args.get(arg) or '').strip()
+        if v.lstrip('-').isdigit():
+            onde.append('%s=?' % campo)
+            args.append(int(v))
+    vidas = (request.args.get('vidas') or '').strip()
+    if vidas.isdigit():
+        onde.append('(vida_min=0 OR vida_min<=?) AND (vida_max=0 OR vida_max>=?)')
+        args += [int(vidas), int(vidas)]
+    try:
+        linhas = conn.execute(
+            "SELECT * FROM catalogo_plano WHERE %s ORDER BY operadora, produto, plano"
+            % ' AND '.join(onde), tuple(args)).fetchall()
+    except Exception:
+        linhas = []
+    return jsonify({'ok': True, 'total': len(linhas), 'planos': [dict(r) for r in linhas]})
+
+
+@app.route('/cotacao/catalogo/varredura', methods=['POST'])
+@login_required
+def cotacao_catalogo_varredura():
+    """Abre e fecha o registro de uma varredura, pra saber quando foi a última
+    e se ela terminou ou parou no meio."""
+    d = request.get_json(silent=True) or {}
+    conn = db()
+    if d.get('acao') == 'abrir':
+        cur = conn.execute(
+            """INSERT INTO catalogo_varredura (usuario_id, iniciado_em, alvos, estado)
+               VALUES (?,?,?,'rodando')""",
+            (session.get('user_id'), _agora_sp(), int(d.get('alvos') or 0)))
+        conn.commit()
+        return jsonify({'ok': True, 'id': _last_insert_id(cur)})
+    try:
+        vid = int(d.get('id'))
+    except Exception:
+        return jsonify({'ok': False, 'erro': 'sem_id'}), 400
+    conn.execute(
+        """UPDATE catalogo_varredura
+              SET feitos=?, chamadas=?, operadoras=?, planos=?, estado=?, erro=?, terminado_em=?
+            WHERE id=?""",
+        (int(d.get('feitos') or 0), int(d.get('chamadas') or 0),
+         int(d.get('operadoras') or 0), int(d.get('planos') or 0),
+         str(d.get('estado') or 'terminada')[:20], str(d.get('erro') or '')[:300],
+         _agora_sp() if d.get('estado') != 'rodando' else None, vid))
+    conn.commit()
+    return jsonify({'ok': True})
 
 
 @app.route('/cotacao/tabelas')

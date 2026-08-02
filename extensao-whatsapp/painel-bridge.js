@@ -79,9 +79,11 @@
   // O que a extensão aceita pedir daqui, e quanto tempo espera por cada um.
   // Lista fechada de propósito: o que não está aqui não atravessa.
   const ACEITOS = {
-    cotar_aqui:      ['cotar',   90000],   // preço é sequencial: 20 planos dão uns 15s
-    cotador_estado:  ['estado',   5000],
-    cotador_cidades: ['cidades',  8000],
+    cotar_aqui:       ['cotar',    90000],  // preço é sequencial: 20 planos dão uns 15s
+    cotador_estado:   ['estado',    5000],
+    cotador_cidades:  ['cidades',   8000],
+    cotador_catalogo: ['catalogo', 180000], // uma cidade tem ~19 operadoras, uma a uma
+    cotador_modalidades: ['descobrir_modalidades', 40000],
   };
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

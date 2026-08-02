@@ -1,0 +1,502 @@
+{% extends "base.html" %}
+{% block title %}Catálogo de planos{% endblock %}
+
+{% block head %}
+<style>
+  .ct-topo { margin:4px 0 18px; }
+  .ct-topo h1 { margin:0 0 4px; font-size:22px; letter-spacing:-.4px; }
+  .ct-topo p { margin:0; color:var(--cinza); font-size:13px; max-width:74ch; line-height:1.55; }
+
+  .ct-abas { display:flex; gap:6px; margin:0 0 16px; border-bottom:1px solid var(--borda); }
+  .ct-aba { padding:9px 16px; border:none; background:none; color:var(--cinza); font-size:13px;
+    font-weight:650; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; }
+  .ct-aba:hover { color:var(--texto); }
+  .ct-aba.on { color:var(--verde); border-bottom-color:var(--verde); }
+  .ct-painel { display:none; } .ct-painel.on { display:block; }
+
+  .ct-bloco { background:var(--panel); border:1px solid var(--borda); border-radius:14px;
+    padding:18px; margin-bottom:16px; }
+  .ct-bloco h3 { margin:0 0 3px; font-size:13px; text-transform:uppercase; letter-spacing:.6px;
+    position:relative; padding-left:11px; }
+  .ct-bloco h3::before { content:''; position:absolute; left:0; top:1px; bottom:1px; width:3px;
+    border-radius:3px; background:var(--grad-frio); }
+  .ct-bloco .ajuda { margin:0 0 14px 11px; font-size:11.5px; color:var(--cinza-2); line-height:1.55; max-width:72ch; }
+
+  .ct-cidades { display:flex; flex-wrap:wrap; gap:6px; max-height:220px; overflow:auto; padding:2px; }
+  .ct-cid { padding:6px 11px; border-radius:8px; border:1px solid var(--borda-2);
+    background:var(--panel-2); color:var(--cinza); font-size:12px; font-weight:600; cursor:pointer; }
+  .ct-cid.on { border-color:var(--verde); color:var(--verde); background:var(--verde-soft); }
+  .ct-cid small { opacity:.65; font-weight:500; margin-left:4px; }
+  .ct-cid.sem-uf { border-style:dashed; opacity:.55; cursor:not-allowed; }
+
+  .ct-linha-acao { display:flex; gap:9px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+  .ct-conta { font-size:12.5px; color:var(--cinza); }
+  .ct-conta b { color:var(--texto); font-variant-numeric:tabular-nums; }
+
+  .ct-barra { height:6px; border-radius:6px; background:var(--panel-3); overflow:hidden; margin-top:12px; }
+  .ct-barra i { display:block; height:100%; width:0; background:var(--grad-frio); transition:width .3s ease; }
+  .ct-log { margin-top:10px; max-height:200px; overflow:auto; font-size:11.5px;
+    font-variant-numeric:tabular-nums; color:var(--cinza); }
+  .ct-log div { padding:2px 0; border-bottom:1px solid var(--borda); }
+  .ct-log b { color:var(--texto); }
+
+  .ct-tab { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .ct-tab th { text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:.5px;
+    color:var(--cinza-2); padding:8px 10px; border-bottom:1px solid var(--borda-2); font-weight:700;
+    position:sticky; top:0; background:var(--panel); }
+  .ct-tab td { padding:9px 10px; border-bottom:1px solid var(--borda); }
+  .ct-tab tbody tr:hover { background:var(--panel-2); }
+  .ct-tab td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .ct-rolagem { max-height:62vh; overflow:auto; border:1px solid var(--borda); border-radius:12px;
+    background:var(--panel); }
+
+  .et { font-size:10px; padding:3px 8px; border-radius:6px; border:1px solid var(--borda);
+    background:var(--panel-3); color:var(--cinza); font-weight:650; white-space:nowrap; }
+  .et.sem { color:var(--verde); border-color:var(--verde); }
+  .et.parcial { color:var(--laranja); border-color:rgba(251,146,60,.45); }
+  .et.completa { color:var(--rosa); border-color:rgba(244,63,124,.45); }
+
+  .ct-filtros { display:flex; gap:9px; flex-wrap:wrap; align-items:flex-end; margin-bottom:14px; }
+  .ct-fg { display:flex; flex-direction:column; gap:4px; }
+  .ct-fg label { font-size:9.5px; text-transform:uppercase; letter-spacing:.5px;
+    color:var(--cinza-2); font-weight:700; }
+  .ct-fg select, .ct-fg input { background:var(--panel-2); border:1px solid var(--borda-2);
+    border-radius:9px; padding:8px 11px; color:var(--texto); font-size:13px; outline:none; }
+  .ct-fg select:focus, .ct-fg input:focus { border-color:var(--azul); }
+
+  .ct-vazio { text-align:center; padding:48px 20px; color:var(--cinza); }
+  .ct-vazio strong { display:block; color:var(--texto); font-size:15px; margin-bottom:6px; }
+  .ct-vazio p { margin:0 auto; max-width:52ch; font-size:13px; line-height:1.6; }
+
+  .ct-i { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px;
+    border-radius:50%; border:1px solid var(--cinza-2); color:var(--cinza-2); font-size:9px;
+    font-weight:700; cursor:help; margin-left:5px; font-style:normal; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ct-topo">
+  <h1>Catálogo de planos</h1>
+  <p>O que existe em cada cidade — quais operadoras atendem, quais planos elas têm, com e sem
+     coparticipação, enfermaria ou apartamento, de quantas a quantas vidas. Sem preço: preço muda
+     toda hora e sai ao vivo na <a href="/cotacao/novo">cotação</a>. Isto aqui muda pouco, então
+     varremos uma vez e fica guardado.</p>
+</div>
+
+<div class="ct-abas">
+  <button type="button" class="ct-aba on" data-p="consultar">Consultar</button>
+  <button type="button" class="ct-aba" data-p="varrer">Atualizar catálogo</button>
+</div>
+
+<!-- ────────────────────────── CONSULTAR ────────────────────────── -->
+<div class="ct-painel on" id="p-consultar">
+  <div class="ct-filtros">
+    <div class="ct-fg"><label>Cidade</label>
+      <select id="fCidade"><option value="">todas</option></select></div>
+    <div class="ct-fg"><label>Contratação</label>
+      <select id="fModalidade"><option value="">todas</option></select></div>
+    <div class="ct-fg"><label>Coparticipação</label>
+      <select id="fCopart">
+        <option value="">tanto faz</option>
+        <option value="Sem">Sem</option>
+        <option value="Parcial">Parcial</option>
+        <option value="Completa">Completa</option>
+      </select></div>
+    <div class="ct-fg"><label>Acomodação</label>
+      <select id="fAcomodacao">
+        <option value="">tanto faz</option>
+        <option value="0">Enfermaria</option>
+        <option value="1">Apartamento</option>
+      </select></div>
+    <div class="ct-fg"><label>MEI</label>
+      <select id="fMei"><option value="">tanto faz</option><option value="1">só quem aceita</option></select></div>
+    <div class="ct-fg"><label>Vidas
+        <i class="ct-i" title="Mostra só os planos que aceitam essa quantidade de vidas.">i</i></label>
+      <input id="fVidas" type="number" min="1" max="99" placeholder="qualquer" style="width:96px"></div>
+    <div class="ct-fg"><label>&nbsp;</label>
+      <button type="button" class="btn btn-sm" id="btFiltrar">Filtrar</button></div>
+  </div>
+
+  <div class="ct-conta" id="conta" style="margin-bottom:10px"></div>
+  <div class="ct-rolagem">
+    <table class="ct-tab">
+      <thead><tr>
+        <th>Operadora</th><th>Produto / plano</th><th>Tabela</th>
+        <th>Acomodação</th><th>Coparticipação</th><th class="num">Vidas</th><th>Cidade</th>
+      </tr></thead>
+      <tbody id="corpo"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ────────────────────────── VARRER ────────────────────────── -->
+<div class="ct-painel" id="p-varrer">
+  <div id="sinalVarre" class="ct-bloco" style="border-color:var(--laranja);display:none">
+    <h3>Antes de varrer</h3>
+    <div class="ajuda" id="sinalVarreTxt"></div>
+  </div>
+
+  <div class="ct-bloco">
+    <h3>Tipos de contratação</h3>
+    <p class="ajuda">O Painel identifica cada tipo por um número, e o nome só existe na tela deles.
+       Em vez de adivinhar — o que faria a cotação pedir preço do produto errado —, a extensão
+       pergunta quem atende em cada código e você reconhece qual é qual pela lista de operadoras.
+       É uma vez só.</p>
+    <div id="mods"></div>
+    <div class="ct-linha-acao">
+      <button type="button" class="btn-outline btn-sm" id="btDescobrir">Descobrir códigos</button>
+      <span class="ct-conta" id="descobrirMsg"></span>
+    </div>
+  </div>
+
+  <div class="ct-bloco">
+    <h3>Cidades</h3>
+    <p class="ajuda">Saem das propostas já fechadas no JOB, das mais movimentadas para as menos —
+       varrer o Brasil seriam 5.570 cidades e nenhuma interessa se não temos cliente lá.
+       As tracejadas estão sem estado cadastrado na proposta: o Painel exige "Cidade - UF", então
+       elas ficam de fora até alguém corrigir o cadastro.</p>
+    <div class="ct-cidades" id="cidades"></div>
+    <div class="ct-linha-acao">
+      <button type="button" class="btn-outline btn-sm" id="btTodas">Marcar todas</button>
+      <button type="button" class="btn-outline btn-sm" id="btNenhuma">Desmarcar</button>
+      <span class="ct-conta" id="contaAlvos"></span>
+    </div>
+  </div>
+
+  <div class="ct-bloco">
+    <h3>Rodar a varredura</h3>
+    <p class="ajuda">Uma consulta por operadora, uma cidade de cada vez, com intervalo irregular
+       de propósito. Não é lentidão: é o que faz a varredura parecer um corretor trabalhando em
+       vez de um robô. Pode parar no meio — o que já entrou fica guardado, e a próxima rodada
+       continua de onde parou.</p>
+    <div class="ct-linha-acao">
+      <button type="button" class="btn" id="btVarrer" disabled>Começar</button>
+      <button type="button" class="btn-outline btn-sm" id="btParar" style="display:none">Parar</button>
+      <span class="ct-conta" id="previsao"></span>
+    </div>
+    <div class="ct-barra"><i id="barra"></i></div>
+    <div class="ct-log" id="log"></div>
+  </div>
+
+  {% if resumo %}
+  <div class="ct-bloco">
+    <h3>O que já está guardado</h3>
+    <table class="ct-tab">
+      <thead><tr><th>Cidade</th><th>Contratação</th><th class="num">Operadoras</th>
+        <th class="num">Planos</th><th>Última varredura</th></tr></thead>
+      <tbody>
+        {% for r in resumo %}
+        <tr><td>{{ r.cidade }}</td>
+            <td>{{ modalidades.get(r.modalidade, 'código ' ~ r.modalidade) }}</td>
+            <td class="num">{{ r.operadoras }}</td>
+            <td class="num">{{ r.planos }}</td>
+            <td>{{ r.visto or '—' }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  'use strict';
+  var SUGERIDAS = {{ sugeridas|tojson }};
+  var MODALIDADES = {{ modalidades|tojson }};
+  var RESUMO = {{ resumo|tojson }};
+
+  var el = function (i) { return document.getElementById(i); };
+
+  // ── abas ───────────────────────────────────────────────────────────────
+  document.querySelectorAll('.ct-aba').forEach(function (b) {
+    b.onclick = function () {
+      document.querySelectorAll('.ct-aba').forEach(function (x) { x.classList.remove('on'); });
+      document.querySelectorAll('.ct-painel').forEach(function (x) { x.classList.remove('on'); });
+      b.classList.add('on');
+      el('p-' + b.dataset.p).classList.add('on');
+    };
+  });
+
+  // ── ponte com a extensão (igual à da tela de cotação) ──────────────────
+  var pendentes = {}, seq = 0;
+  window.addEventListener('message', function (ev) {
+    if (ev.source !== window) return;
+    var d = ev.data;
+    if (!d || d.source !== 'JOB_SITE_RESP' || !d.reqId) return;
+    var p = pendentes[d.reqId];
+    if (!p) return;
+    delete pendentes[d.reqId];
+    clearTimeout(p.relogio);
+    p.resolve(d);
+  });
+  function pedir(tipo, extra, ms) {
+    return new Promise(function (resolve) {
+      var reqId = 'ct' + (++seq) + '-' + Date.now();
+      var relogio = setTimeout(function () {
+        delete pendentes[reqId];
+        resolve({ ok: false, motivo: 'extensao_nao_respondeu' });
+      }, ms || 20000);
+      pendentes[reqId] = { resolve: resolve, relogio: relogio };
+      var m = { source: 'JOB_SITE_REQ', tipo: tipo, reqId: reqId };
+      for (var k in (extra || {})) m[k] = extra[k];
+      window.postMessage(m, '*');
+    });
+  }
+
+  // ── consultar ──────────────────────────────────────────────────────────
+  function montarFiltros() {
+    var cs = {};
+    RESUMO.forEach(function (r) { cs[r.cidade] = 1; });
+    Object.keys(cs).sort().forEach(function (c) {
+      var o = document.createElement('option'); o.value = c; o.textContent = c;
+      el('fCidade').appendChild(o);
+    });
+    Object.keys(MODALIDADES).forEach(function (c) {
+      var o = document.createElement('option'); o.value = c; o.textContent = MODALIDADES[c];
+      el('fModalidade').appendChild(o);
+    });
+  }
+
+  async function filtrar() {
+    var q = [];
+    [['cidade', 'fCidade'], ['modalidade', 'fModalidade'], ['coparticipacao', 'fCopart'],
+     ['acomodacao', 'fAcomodacao'], ['mei', 'fMei'], ['vidas', 'fVidas']].forEach(function (par) {
+      var v = (el(par[1]).value || '').trim();
+      if (v) q.push(par[0] + '=' + encodeURIComponent(v));
+    });
+    var r = await fetch('/cotacao/catalogo.json?' + q.join('&'))
+      .then(function (x) { return x.json(); }).catch(function () { return { ok: false }; });
+    desenhar((r && r.planos) || []);
+  }
+
+  function desenhar(planos) {
+    var corpo = el('corpo');
+    corpo.innerHTML = '';
+    if (!planos.length) {
+      el('conta').textContent = '';
+      corpo.innerHTML = '<tr><td colspan="7"><div class="ct-vazio">' +
+        '<strong>Nada no catálogo ainda</strong>' +
+        '<p>Vá em <b>Atualizar catálogo</b>, escolha as cidades e rode a varredura uma vez. ' +
+        'Depois disso esta consulta responde na hora, sem chamar o Painel.</p></div></td></tr>';
+      return;
+    }
+    var ops = {};
+    planos.forEach(function (p) { ops[p.operadora] = 1; });
+    el('conta').innerHTML = '<b>' + planos.length + '</b> planos de <b>' +
+      Object.keys(ops).length + '</b> operadoras';
+
+    planos.forEach(function (p) {
+      var cls = p.copart_faixa === 'Sem' ? 'sem'
+              : p.copart_faixa === 'Parcial' ? 'parcial'
+              : p.copart_faixa === 'Completa' ? 'completa' : '';
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><b>' + (p.operadora || '—') + '</b>' +
+          (p.administradora && p.administradora !== p.operadora
+            ? '<br><span style="font-size:10.5px;color:var(--cinza-2)">via ' + p.administradora + '</span>' : '') + '</td>' +
+        '<td>' + (p.plano || '—') +
+          '<br><span style="font-size:10.5px;color:var(--cinza-2)">' + (p.produto || '') + '</span></td>' +
+        '<td>' + (p.tabela || '—') + (p.mei ? ' <span class="et">MEI</span>' : '') + '</td>' +
+        '<td>' + (p.acomodacao ? 'Apartamento' : 'Enfermaria') + '</td>' +
+        '<td><span class="et ' + cls + '">' + (p.copart_faixa || '—') + '</span>' +
+          (p.copart_tipo && p.copart_faixa === 'Com'
+            ? '<br><span style="font-size:10px;color:var(--cinza-2)">' + p.copart_tipo + '</span>' : '') + '</td>' +
+        '<td class="num">' + (p.vida_min || '?') + '–' + (p.vida_max || '?') + '</td>' +
+        '<td>' + p.cidade + '</td>';
+      corpo.appendChild(tr);
+    });
+  }
+  el('btFiltrar').onclick = filtrar;
+
+  // ── modalidades ────────────────────────────────────────────────────────
+  function montarMods() {
+    var c = el('mods');
+    var chaves = Object.keys(MODALIDADES);
+    c.innerHTML = chaves.length
+      ? chaves.map(function (k) {
+          return '<span class="et" style="margin-right:6px">' + k + ' = <b>' +
+                 MODALIDADES[k] + '</b></span>';
+        }).join('')
+      : '<span class="ct-conta">Nenhum código batizado ainda.</span>';
+  }
+
+  el('btDescobrir').onclick = async function () {
+    var cidade = (alvos()[0] || (SUGERIDAS[0] || {}).cidade);
+    if (!cidade) { el('descobrirMsg').textContent = 'Escolha uma cidade primeiro.'; return; }
+    this.disabled = true;
+    el('descobrirMsg').textContent = 'Perguntando ao Painel por ' + cidade + '…';
+    var r = await pedir('descobrir_modalidades', { pedido: { cidade: cidade } }, 60000);
+    this.disabled = false;
+    if (!r.ok) { el('descobrirMsg').textContent = 'Não deu: ' + (r.motivo || '?'); return; }
+    var achados = (r.dados && r.dados.achados) || [];
+    if (!achados.length) { el('descobrirMsg').textContent = 'Nenhum código respondeu.'; return; }
+    el('descobrirMsg').textContent = '';
+    var c = el('mods');
+    c.innerHTML = achados.map(function (a) {
+      return '<div style="display:flex;gap:9px;align-items:center;margin:7px 0;flex-wrap:wrap">' +
+        '<span class="et">código ' + a.codigo + '</span>' +
+        '<span style="font-size:12px;color:var(--cinza);flex:1;min-width:220px">' +
+          a.quantas + ' operadoras: ' + a.amostra.join(', ') + '…</span>' +
+        '<input data-cod="' + a.codigo + '" placeholder="PF, PME, Adesão…" value="' +
+          (MODALIDADES[a.codigo] || '') + '" style="background:var(--panel-2);' +
+          'border:1px solid var(--borda-2);border-radius:8px;padding:6px 10px;' +
+          'color:var(--texto);font-size:12.5px;width:150px">' +
+        '<button type="button" class="btn btn-sm" data-salvar="' + a.codigo + '">Salvar</button></div>';
+    }).join('');
+    c.querySelectorAll('[data-salvar]').forEach(function (b) {
+      b.onclick = async function () {
+        var cod = b.dataset.salvar;
+        var nome = (c.querySelector('[data-cod="' + cod + '"]').value || '').trim();
+        if (!nome) return;
+        var resp = await fetch('/cotacao/modalidade', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ codigo: Number(cod), nome: nome })
+        }).then(function (x) { return x.json(); }).catch(function () { return { ok: false }; });
+        if (resp.ok) {
+          MODALIDADES = resp.modalidades;
+          b.textContent = 'Salvo';
+          atualizarPrevisao();
+        }
+      };
+    });
+  };
+
+  // ── cidades ────────────────────────────────────────────────────────────
+  var marcadas = {};
+  function montarCidades() {
+    var c = el('cidades');
+    if (!SUGERIDAS.length) {
+      c.innerHTML = '<span class="ct-conta">Nenhuma proposta com cidade cadastrada ainda. ' +
+        'Assim que houver, as cidades aparecem aqui sozinhas.</span>';
+      return;
+    }
+    c.innerHTML = '';
+    SUGERIDAS.forEach(function (s) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ct-cid' + (s.tem_uf ? '' : ' sem-uf') + (marcadas[s.cidade] ? ' on' : '');
+      b.innerHTML = s.cidade + '<small>' + s.propostas + '</small>';
+      if (!s.tem_uf) { b.title = 'Sem estado na proposta — o Painel exige "Cidade - UF".'; }
+      else {
+        b.onclick = function () {
+          if (marcadas[s.cidade]) delete marcadas[s.cidade]; else marcadas[s.cidade] = 1;
+          montarCidades(); atualizarPrevisao();
+        };
+      }
+      c.appendChild(b);
+    });
+  }
+  function alvos() { return Object.keys(marcadas); }
+  el('btTodas').onclick = function () {
+    SUGERIDAS.forEach(function (s) { if (s.tem_uf) marcadas[s.cidade] = 1; });
+    montarCidades(); atualizarPrevisao();
+  };
+  el('btNenhuma').onclick = function () { marcadas = {}; montarCidades(); atualizarPrevisao(); };
+
+  function atualizarPrevisao() {
+    var nCid = alvos().length;
+    var nMod = Object.keys(MODALIDADES).length || 1;
+    var pares = nCid * nMod;
+    el('contaAlvos').innerHTML = nCid ? '<b>' + nCid + '</b> cidade(s) marcada(s)' : '';
+    // ~19 operadoras por cidade, ~0,6s por consulta com o intervalo humano.
+    var seg = Math.round(pares * 20 * 0.65);
+    el('previsao').innerHTML = pares
+      ? '<b>' + pares + '</b> combinação(ões) de cidade e contratação · ' +
+        'cerca de <b>' + (seg > 90 ? Math.round(seg / 60) + ' min' : seg + 's') + '</b>'
+      : 'Marque ao menos uma cidade.';
+    el('btVarrer').disabled = !pares || !ligado;
+  }
+
+  // ── varrer ─────────────────────────────────────────────────────────────
+  var ligado = false, parar = false;
+
+  function anotar(txt) {
+    var d = document.createElement('div');
+    d.innerHTML = txt;
+    el('log').insertBefore(d, el('log').firstChild);
+  }
+
+  el('btParar').onclick = function () { parar = true; this.disabled = true; this.textContent = 'Parando…'; };
+
+  el('btVarrer').onclick = async function () {
+    var cidades = alvos();
+    var mods = Object.keys(MODALIDADES).map(Number);
+    if (!cidades.length || !mods.length) return;
+    parar = false;
+    this.disabled = true;
+    el('btParar').style.display = ''; el('btParar').disabled = false;
+    el('btParar').textContent = 'Parar';
+    el('log').innerHTML = '';
+
+    var pares = [];
+    cidades.forEach(function (c) { mods.forEach(function (m) { pares.push([c, m]); }); });
+
+    var varredura = await fetch('/cotacao/catalogo/varredura', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acao: 'abrir', alvos: pares.length })
+    }).then(function (x) { return x.json(); }).catch(function () { return {}; });
+
+    var feitos = 0, chamadas = 0, nOps = 0, nPls = 0, erro = '';
+    for (var i = 0; i < pares.length; i++) {
+      if (parar) { erro = 'parada pelo usuário'; break; }
+      var cidade = pares[i][0], mod = pares[i][1];
+      anotar('<b>' + cidade + '</b> · ' + (MODALIDADES[mod] || ('código ' + mod)) + ' — perguntando…');
+
+      var r = await pedir('catalogo', { pedido: { cidade: cidade, modalidade: mod } }, 240000);
+      if (!r.ok) {
+        anotar('<b>' + cidade + '</b> · ' + (MODALIDADES[mod] || mod) +
+               ' — <span style="color:var(--rosa)">não deu: ' + (r.motivo || '?') + '</span>');
+        if (r.motivo === 'painel_fechado' || r.motivo === 'precisa_aprender') {
+          erro = r.motivo; break;      // sem sentido continuar batendo na porta
+        }
+      } else {
+        var g = await fetch('/cotacao/catalogo/gravar', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(r.dados)
+        }).then(function (x) { return x.json(); }).catch(function () { return { ok: false }; });
+        chamadas += (r.dados.chamadas || 0);
+        nOps += (r.dados.operadoras || []).length;
+        nPls += (g.planos || 0);
+        anotar('<b>' + cidade + '</b> · ' + (MODALIDADES[mod] || mod) + ' — ' +
+               (r.dados.operadoras || []).length + ' operadoras, ' + (g.planos || 0) +
+               ' planos guardados (' + ((r.dados.ms || 0) / 1000).toFixed(1) + 's)');
+      }
+      feitos++;
+      el('barra').style.width = Math.round(feitos / pares.length * 100) + '%';
+    }
+
+    if (varredura.id) {
+      await fetch('/cotacao/catalogo/varredura', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: varredura.id, feitos: feitos, chamadas: chamadas,
+                               operadoras: nOps, planos: nPls,
+                               estado: erro ? 'interrompida' : 'terminada', erro: erro })
+      }).catch(function () {});
+    }
+    anotar(erro ? '<b style="color:var(--laranja)">Parou: ' + erro + '</b>'
+                : '<b style="color:var(--verde)">Terminou. ' + nPls + ' planos no catálogo.</b>');
+    el('btParar').style.display = 'none';
+    this.disabled = false;
+    atualizarPrevisao();
+  };
+
+  // ── início ─────────────────────────────────────────────────────────────
+  (async function () {
+    montarFiltros(); montarMods(); montarCidades(); filtrar();
+    var r = await pedir('cotador_estado', {}, 8000);
+    ligado = !!(r.ok && !(r.faltando || []).length);
+    if (!ligado) {
+      el('sinalVarre').style.display = '';
+      el('sinalVarreTxt').innerHTML = r.ok
+        ? '<b>A extensão ainda não sabe como o Painel cota.</b> Abra o Painel do Corretor e faça ' +
+          'uma cotação normal, na mão, uma vez. Depois recarregue esta página.'
+        : '<b>A extensão não respondeu.</b> A consulta abaixo continua funcionando (ela lê o que ' +
+          'já está guardado), mas atualizar o catálogo precisa da extensão e do Painel aberto.';
+    }
+    atualizarPrevisao();
+  })();
+})();
+</script>
+{% endblock %}

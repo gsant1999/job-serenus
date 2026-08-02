@@ -448,6 +448,119 @@
     };
   }
 
+  // ── Catálogo: o que existe, sem perguntar preço ───────────────────────────
+  //
+  //  Cotar responde "quanto custa para ESTE cliente". O catálogo responde
+  //  "o que existe nesta cidade" — quais operadoras atendem, quais planos elas
+  //  têm, com e sem coparticipação, enfermaria ou apartamento, de quantas a
+  //  quantas vidas. Isso não muda por cliente e não precisa de preço, então dá
+  //  pra varrer uma vez e guardar no JOB.
+  //
+  //  Uma cidade+modalidade por chamada, de propósito: quem manda no ritmo é a
+  //  tela do JOB, que pode parar no meio, mostrar andamento e espaçar a
+  //  varredura ao longo do dia. Um botão que dispara mil chamadas de uma vez
+  //  seria rápido e seria exatamente o que não podemos fazer.
+  async function catalogo(p) {
+    if (!p || !p.cidade) throw new Error('sem_cidade');
+    const t0 = Date.now();
+    const modalidade = p.modalidade == null ? 2 : p.modalidade;
+
+    // Vidas só existem aqui porque o filtro deles exige; o catálogo é o mesmo.
+    // Uma vida por faixa faz a lista vir completa, sem corte por quantidade.
+    const vidas = (p.vidas && p.vidas.length) ? p.vidas
+      : ['00-18', '19-23', '24-28', '29-33', '34-38', '39-43', '44-48', '49-53', '54-58', '59-199']
+        .map((f) => ({ faixa: f, quantidade: 1 }));
+    const pedido = { cidade: p.cidade, modalidade, vidas };
+
+    let cotacaoId = ultimaCotacao;
+    if (!cotacaoId) {
+      cotacaoId = await criarCotacao(p.titulo);
+      ultimaCotacao = cotacaoId;
+      await respira(400, 1100);
+    }
+
+    const operadoras = await operadorasDaCidade(cotacaoId, pedido);
+    let chamadas = 1;
+    const planos = [];
+    for (let i = 0; i < operadoras.length; i++) {
+      await respira(320, 950);
+      try {
+        const lista = await planosDaOperadora(cotacaoId, pedido, operadoras[i].id);
+        chamadas++;
+        lista.forEach((pl) => planos.push({
+          operadoraId: operadoras[i].id,
+          operadora: (pl.operadora || {}).nome || operadoras[i].nome,
+          administradora: (pl.administradora || {}).nome || '',
+          produtoId: (pl.produto || {}).id, produto: (pl.produto || {}).nome || '',
+          planoId: (pl.plano || {}).id, plano: (pl.plano || {}).nome || '',
+          acomodacao: (pl.plano || {}).acomodacao,
+          tabelaId: (pl.tabela || {}).id, tabela: (pl.tabela || {}).nome || '',
+          contratacao: (pl.tabela || {}).contratacao,
+          coparticipacao: !!(pl.tabela || {}).coparticipacao,
+          coparticipacaoTipo: ((pl.tabela || {}).coparticipacaoTipo || '').trim(),
+          remissao: !!(pl.tabela || {}).remissao,
+          mei: (pl.tabela || {}).mei === true,
+          vidaMin: (pl.tabela || {}).qtdVidaMin, vidaMax: (pl.tabela || {}).qtdVidaMax,
+          chave: pl.key,
+        }));
+      } catch (e) {
+        // Uma operadora que falha não pode derrubar a varredura inteira: a
+        // próxima rodada pega o que ficou faltando.
+        planos.push({ operadoraId: operadoras[i].id, operadora: operadoras[i].nome,
+                      erro: String(e && e.message || e) });
+      }
+      if (p.aoAndar !== false) {
+        window.postMessage({ source: 'JOB_COTADOR', tipo: 'andamento', reqId: p.reqId,
+                             fase: 'catalogo', feito: i + 1, total: operadoras.length }, ORIGEM);
+      }
+    }
+
+    return {
+      cidade: p.cidade, modalidade, chamadas, ms: Date.now() - t0,
+      operadoras: operadoras.map((o) => ({ id: o.id, nome: o.nome, logotipo: o.logotipo })),
+      planos,
+    };
+  }
+
+  // Descobre quais códigos de modalidade existem, sem chutar.
+  //
+  // Sabemos que 2 é PME porque foi o que a captura mostrou. Os outros (PF,
+  // Adesão) são números que ninguém documentou. Em vez de adivinhar — o que
+  // faria a cotação pedir preço do produto errado e mostrar como certo —, a
+  // extensão pergunta por cada código e traz de volta QUEM atende em cada um.
+  // O Guilherme olha a lista de operadoras e reconhece qual é qual: a lista de
+  // PF não se parece com a de PME.
+  //
+  // Custo: seis consultas leves, uma vez na vida. Não vale automatizar mais
+  // que isso; vale menos ainda errar.
+  async function descobrirModalidades(cidade) {
+    if (!cidade) throw new Error('sem_cidade');
+    let cotacaoId = ultimaCotacao;
+    if (!cotacaoId) {
+      cotacaoId = await criarCotacao();
+      ultimaCotacao = cotacaoId;
+      await respira(400, 1100);
+    }
+    const vidas = [{ faixa: '29-33', quantidade: 1 }];
+    const achados = [];
+    for (let m = 0; m <= 5; m++) {
+      try {
+        const ops = await operadorasDaCidade(cotacaoId, { cidade, modalidade: m, vidas });
+        if (ops.length) {
+          achados.push({ codigo: m, quantas: ops.length,
+                         amostra: ops.slice(0, 6).map((o) => o.nome) });
+          MODALIDADES[m] = true;
+        }
+      } catch (e) { /* código que não existe responde erro: só pular */ }
+      await respira(300, 900);
+    }
+    if (achados.length) {
+      window.postMessage({ source: 'JOB_COTADOR', tipo: 'modalidades',
+                           dados: Object.keys(MODALIDADES).map(Number) }, ORIGEM);
+    }
+    return { cidade, achados };
+  }
+
   // ── Ponte com o resto da extensão ─────────────────────────────────────────
 
   function faltando() {
@@ -463,6 +576,21 @@
     if (d.tipo === 'estado') {
       responder({ ok: true, pronto: !faltando().length, faltando: faltando(),
                   modalidades: Object.keys(MODALIDADES).map(Number) });
+      return;
+    }
+    if (d.tipo === 'descobrir_modalidades') {
+      const f = faltando();
+      if (f.length) { responder({ ok: false, motivo: 'precisa_aprender', faltando: f }); return; }
+      try { responder({ ok: true, dados: await descobrirModalidades((d.pedido || {}).cidade) }); }
+      catch (e) { responder({ ok: false, motivo: String(e && e.message || e) }); }
+      return;
+    }
+    if (d.tipo === 'catalogo') {
+      const f = faltando();
+      if (f.length) { responder({ ok: false, motivo: 'precisa_aprender', faltando: f }); return; }
+      try {
+        responder({ ok: true, dados: await catalogo({ ...(d.pedido || {}), reqId: d.reqId }) });
+      } catch (e) { responder({ ok: false, motivo: String(e && e.message || e) }); }
       return;
     }
     if (d.tipo === 'cidades') {
