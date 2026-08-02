@@ -37,9 +37,27 @@
   #t tbody tr:hover { background:var(--panel-2); }
 
   .cel-topo { display:flex; align-items:baseline; gap:9px; }
-  .cel-id { font-family:ui-monospace,Menlo,monospace; font-size:11px; color:var(--cinza-2);
-            text-decoration:none; flex:0 0 auto; }
-  .cel-id:hover { color:var(--verde); }
+  /* O numero e a porta da proposta: tem que PARECER porta. */
+  .cel-id { display:inline-flex; align-items:center; gap:6px; flex:0 0 auto;
+            font-family:ui-monospace,Menlo,monospace; font-size:11.5px; font-weight:600;
+            color:var(--cinza); text-decoration:none; padding:3px 8px; border-radius:7px;
+            border:1px solid var(--borda-2); background:var(--panel-2); transition:.15s; }
+  .cel-id-abrir { font-family:'Inter',sans-serif; font-size:9.5px; font-weight:600;
+                  letter-spacing:.4px; text-transform:uppercase; color:var(--cinza-2);
+                  opacity:0; max-width:0; overflow:hidden; transition:.15s; }
+  .cel-id:hover { color:var(--verde); border-color:var(--verde); background:var(--verde-soft); }
+  .cel-id:hover .cel-id-abrir { opacity:1; max-width:40px; color:var(--verde); }
+
+  /* Quem fica com quanto: o dono ao lado do valor, sempre. */
+  .cel-partes { text-align:right; }
+  .parte { display:flex; align-items:baseline; justify-content:flex-end; gap:8px; }
+  .parte + .parte { margin-top:3px; }
+  .parte span { font-size:10.5px; color:var(--cinza); }
+  .parte b { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; font-weight:600;
+             color:var(--texto); font-variant-numeric:tabular-nums; min-width:92px; }
+  .parte b.ganho { color:var(--verde); font-size:13.5px; }
+  /* A bruta e a conta de onde as outras saem, nao um terceiro pagamento. */
+  .parte.fraca span, .parte.fraca b { color:var(--cinza-2); font-size:10.5px; font-weight:500; }
   .cel-forte { font-weight:600; font-size:13px; }
   /* A segunda linha e o detalhe: existe pra quem precisa, sem competir com o
      nome nem com o dinheiro. */
@@ -47,8 +65,8 @@
              font-size:11px; color:var(--cinza); margin-top:5px; }
   .cel-sub b { color:var(--texto); font-weight:600; }
   .cel-conta { justify-content:flex-end; font-variant-numeric:tabular-nums; }
-  .lst-data { font-family:ui-monospace,Menlo,monospace; font-size:10.5px; color:var(--cinza-2);
-              white-space:nowrap; }
+  .lst-data { font-size:10.5px; color:var(--cinza); white-space:nowrap; }
+  .lst-data b { font-family:ui-monospace,Menlo,monospace; color:var(--texto); font-weight:600; }
   #t td strong { font-weight:600; }
 
   /* O nome do cliente é a âncora da linha: uma linha só, o resto no hover. */
@@ -87,6 +105,9 @@
   .filtro-per input { width:auto; padding:7px 9px; font-size:12px; }
 
   /* O recorte vira relatorio. Sem os totais, filtro so esconde linha. */
+  /* display:flex vence o atributo hidden — sem esta linha a caixa aparecia
+     vazia, com borda e tudo, antes de qualquer filtro. */
+  .lst-total[hidden] { display:none; }
   .lst-total { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
                padding:12px 16px; margin-bottom:14px; border-radius:10px;
                background:var(--panel); border:1px solid var(--borda-2); }
@@ -224,9 +245,9 @@
           {% if session.perfil == 'admin' %}<th>Consultor</th>{% endif %}
           <th class="num">Valor mensal</th>
           {% if session.perfil == 'admin' %}
-          <th class="num">Comissão<i class="ajuda-i" title="Bruta é o total da corretora nesta venda. Repasse é a parte do consultor. Líquido é o que sobra pra corretora depois do repasse.">i</i></th>
+          <th class="num">Quem fica com quanto<i class="ajuda-i" title="Bruta é o total que a operadora paga à corretora nesta venda. Consultor é o repasse dele. Corretora é o que sobra depois do repasse.">i</i></th>
           {% else %}
-          <th class="num">Minha comissão</th>
+          <th class="num">Minha comissão<i class="ajuda-i" title="Quanto você recebe por esta venda, já com o seu nível de repasse aplicado.">i</i></th>
           {% endif %}
           <th>Situação</th>
         </tr>
@@ -250,11 +271,19 @@
           {# QUEM: numero, nome, quando entrou, e o vinculo com o CRM #}
           <td>
             <div class="cel-topo">
-              <a class="cel-id" href="/proposta/{{ p.id }}">#{{ p.id }}</a>
+              {# O NUMERO E A PORTA DA PROPOSTA. Antes era um texto cinza pequeno
+                 que nao parecia clicavel; agora tem cara de botao e diz o que
+                 acontece ao clicar. #}
+              <a class="cel-id" href="/proposta/{{ p.id }}"
+                 title="Abrir a proposta #{{ p.id }} inteira: parcelas, comissões, documentos e histórico">
+                #{{ p.id }}<span class="cel-id-abrir">abrir</span>
+              </a>
               <strong class="lst-cliente" title="{{ p.razao_social }}">{{ p.razao_social }}</strong>
             </div>
             <div class="cel-sub">
-              <span class="lst-data" title="Dia que o protocolo da venda subiu no sistema">{{ p.criado_em|data_br }}</span>
+              {# A data sozinha nao dizia de que: podia ser vigencia, pagamento,
+                 fechamento. Agora diz. #}
+              <span class="lst-data" title="Dia em que esta venda foi cadastrada no JOB. Não é a vigência do plano nem a data de pagamento.">cadastrada em <b>{{ p.criado_em|data_br }}</b></span>
               {% if p.lead_id and wa_prop.get(p.lead_id) %}
               <a href="/crm?lead={{ p.lead_id }}" class="lst-lid" onclick="event.stopPropagation()"
                  title="Conversa no WhatsApp: {{ wa_prop[p.lead_id].chat_id }}">
@@ -288,15 +317,19 @@
           {# DINHEIRO: o liquido em cima, e a conta que leva ate ele embaixo.
              As tres continuam na tela, como ele pediu — mas empilhadas, porque
              sao a mesma grandeza vista de tres jeitos. #}
+          {# CADA VALOR COM O DONO AO LADO. Tres numeros empilhados sem dizer de
+             quem e cada um faziam o consultor achar que ia receber o errado, e o
+             admin ter que decorar a ordem. E o consultor so ve o dele. #}
           {% if session.perfil == 'admin' %}
-          <td class="td-mono">
-            <div class="lst-val ganho">{{ (p.comissao_corretora_liquida or 0)|moeda }}</div>
-            <div class="cel-sub cel-conta">
-              bruta {{ (p.comissao_total_corretora or 0)|moeda }} · repasse {{ (p.comissao_consultor or 0)|moeda }}
-            </div>
+          <td class="cel-partes">
+            <div class="parte"><span>corretora</span><b class="ganho">{{ (p.comissao_corretora_liquida or 0)|moeda }}</b></div>
+            <div class="parte"><span>consultor</span><b>{{ (p.comissao_consultor or 0)|moeda }}</b></div>
+            <div class="parte fraca"><span>bruta</span><b>{{ (p.comissao_total_corretora or 0)|moeda }}</b></div>
           </td>
           {% else %}
-          <td class="td-mono lst-val ganho">{{ (p.comissao_consultor or 0)|moeda }}</td>
+          <td class="cel-partes">
+            <div class="parte"><span>você recebe</span><b class="ganho">{{ (p.comissao_consultor or 0)|moeda }}</b></div>
+          </td>
           {% endif %}
 
           {# COMO ESTA: status e desde quando vale #}
