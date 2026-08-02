@@ -3,6 +3,11 @@
 
 {% block head %}
 <style>
+  .ag-vazio-hoje { text-align:center; padding:34px 20px; color:var(--cinza);
+                   border:1px dashed var(--borda-2); border-radius:12px; }
+  .ag-vazio-hoje b { display:block; font-size:15px; color:var(--texto); margin-bottom:6px; }
+  .ag-vazio-hoje span { font-size:12.5px; }
+
   .ag-sec { margin-bottom:22px; }
   .ag-tit { font-family:'Sora',sans-serif; font-size:13px; font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
   .ag-tit .n { font-size:11px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:1px 8px; color:var(--cinza); }
@@ -31,8 +36,6 @@
   <div>
     <h1 style="margin:0;">Agenda</h1>
     <div class="sub">Atividades agendadas nos leads do CRM</div>
-
-{% include '_fila_hoje.html' %}
   </div>
   <div style="display:flex; gap:8px;">
     {% if eh_admin %}
@@ -70,15 +73,19 @@
 </div>
 {% endmacro %}
 
-<div class="ag-sec">
-  <div class="ag-tit" style="color:var(--erro);">Atrasadas <span class="n">{{ atrasadas|length }}</span></div>
-  {% for a in atrasadas %}{{ card(a, 'atrasada') }}{% else %}<div class="vazio">Nenhuma atividade atrasada.</div>{% endfor %}
-</div>
+{# A FILA SUBSTITUI 'Atrasadas' e 'Hoje' — nao empilha em cima delas. Eu tinha
+   deixado as duas coisas na tela e a mesma tarefa aparecia duas vezes, com
+   botoes diferentes em cada uma. Remover antes de organizar. #}
+{% include '_fila_hoje.html' %}
 
+{% if not fila_n or not (fila_n.atrasadas or fila_n.hoje) %}
 <div class="ag-sec">
-  <div class="ag-tit" style="color:var(--amarelo);">Hoje <span class="n">{{ de_hoje|length }}</span></div>
-  {% for a in de_hoje %}{{ card(a, 'hoje') }}{% else %}<div class="vazio">Nada agendado para hoje.</div>{% endfor %}
+  <div class="ag-vazio-hoje">
+    <b>Nada para fazer hoje.</b>
+    <span>Quando entrar lead novo, cotação ficar parada ou vencer um gatilho de retorno, a tarefa aparece aqui sozinha.</span>
+  </div>
 </div>
+{% endif %}
 
 <div class="ag-sec">
   <div class="ag-tit" style="color:var(--azul);">Próximas <span class="n">{{ proximas|length }}</span></div>

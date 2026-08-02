@@ -2761,6 +2761,13 @@ def init_db():
         # com 5.086 leads sem primeiro contato — porque so existia o que alguem
         # digitou a mao, e ninguem digita. 'regra' diz QUEM criou (qual gatilho),
         # e e por ela que a tarefa nao nasce duas vezes pro mesmo lead.
+        # INSTRUMENTACAO. Sem isto nao da pra responder se a regra funciona — e
+        # sem saber se funciona, nao ha o que um modelo aprenda depois. Barato
+        # agora, impossivel de recuperar depois: o que nao for gravado hoje esta
+        # perdido pra sempre.
+        ("crm_agenda", "concluida_em", "TEXT"),
+        ("crm_agenda", "adiada_vezes", "INTEGER DEFAULT 0"),
+        ("crm_agenda", "concluida_por", "TEXT"),
         ("crm_agenda", "regra", "TEXT"),
         ("crm_agenda", "prioridade", "INTEGER DEFAULT 2"),
         ("crm_agenda", "motivo", "TEXT"),
@@ -7225,7 +7232,8 @@ def crm_agenda_feito(aid):
         close_db(conn); return jsonify({"ok": False, "erro": "Tarefa não encontrada"}), 404
     if session.get('perfil') != 'admin' and t['usuario_id'] != session.get('user_id'):
         close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
-    conn.execute("UPDATE crm_agenda SET status='concluida' WHERE id=?", (aid,))
+    conn.execute("UPDATE crm_agenda SET status='concluida', concluida_em=?, concluida_por=? WHERE id=?",
+                 (_agora_sp(), session.get('nome') or '', aid))
     conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
                     VALUES (?,?,?,?,?)""",
                  (t['lead_id'], session.get('nome'), 'atividade',
@@ -7252,7 +7260,9 @@ def crm_agenda_adiar(aid):
     if session.get('perfil') != 'admin' and t['usuario_id'] != session.get('user_id'):
         close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
     nova = (datetime.now(TZ_SP) + _td(days=dias)).strftime('%Y-%m-%d 09:00')
-    conn.execute("UPDATE crm_agenda SET data_hora=? WHERE id=?", (nova, aid))
+    # Contar adiamento importa: tarefa adiada cinco vezes nao e tarefa, e recusa.
+    conn.execute("UPDATE crm_agenda SET data_hora=?, adiada_vezes=COALESCE(adiada_vezes,0)+1 WHERE id=?",
+                 (nova, aid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "nova": _fmt_datahora_br(nova)})
 
@@ -7314,10 +7324,12 @@ def api_whatsapp_fila_acao():
         except (TypeError, ValueError):
             dias = 1
         nova = (datetime.now(TZ_SP) + _td(days=dias)).strftime('%Y-%m-%d 09:00')
-        conn.execute("UPDATE crm_agenda SET data_hora=? WHERE id=?", (nova, aid))
+        conn.execute("UPDATE crm_agenda SET data_hora=?, adiada_vezes=COALESCE(adiada_vezes,0)+1 WHERE id=?",
+                     (nova, aid))
     else:
         u = conn.execute("SELECT nome FROM usuarios WHERE id=?", (uid,)).fetchone()
-        conn.execute("UPDATE crm_agenda SET status='concluida' WHERE id=?", (aid,))
+        conn.execute("UPDATE crm_agenda SET status='concluida', concluida_em=?, concluida_por=? WHERE id=?",
+                     (_agora_sp(), (u['nome'] if u else 'Extensão'), aid))
         conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
                         VALUES (?,?,?,?,?)""",
                      (t['lead_id'], (u['nome'] if u else 'Extensão'), 'atividade',
