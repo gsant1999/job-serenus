@@ -101,6 +101,132 @@
                                border:1px solid var(--borda); }
   .pl-box[data-vazio].aberto > * { display:revert; }
   .pl-box[data-vazio].aberto::before { display:none; }
+
+  /* ═══ PAINEL DO LEAD — identidade JOB ═════════════════════════════════════
+     Teal #1fd8a4 e o gradiente frio do logo sao a marca; Sora no numero que
+     importa, Inter no resto. A regra que faltava: UM destaque por tela. Cinco
+     cartoes do mesmo peso, quatro deles zerados, e o que faz a tela parecer
+     "dado jogado" — se tudo grita, nada e ouvido. */
+
+  .pl-hero { display:flex; gap:24px; align-items:stretch; flex-wrap:wrap;
+             background:var(--panel-2); border:1px solid var(--borda);
+             border-radius:16px; padding:24px; margin-bottom:16px; }
+  [data-theme="light"] .pl-hero { background:#fff; box-shadow:0 1px 3px rgba(16,24,40,.06); }
+  .pl-hero-id { flex:1 1 380px; min-width:0; display:flex; flex-direction:column; gap:8px; }
+  .pl-hero-linha { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .pl-hero-nome { font-family:'Sora',Inter,sans-serif; font-size:28px; font-weight:700;
+                  line-height:1.15; margin:0; letter-spacing:-.6px; }
+  .pl-etapa { font-size:11px; font-weight:700; letter-spacing:.3px; padding:4px 11px;
+              border-radius:999px; background:color-mix(in srgb, var(--c) 16%, transparent);
+              color:var(--c); border:1px solid color-mix(in srgb, var(--c) 34%, transparent); }
+  .pl-etiq { font-size:10.5px; font-weight:600; padding:3px 9px; border-radius:999px;
+             background:color-mix(in srgb, var(--c) 14%, transparent); color:var(--c); }
+  .pl-hero-sub { display:flex; gap:16px; flex-wrap:wrap; font-size:12.5px; color:var(--cinza); }
+  .pl-hero-tags { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px; }
+
+  /* O UNICO elemento com o gradiente da marca na tela inteira. */
+  .pl-hero-valor { flex:0 0 auto; min-width:220px; display:flex; flex-direction:column;
+                   justify-content:center; gap:4px; padding:20px 24px; border-radius:14px;
+                   background:var(--grad-frio); color:#08131a; }
+  .pl-hero-valor-n { font-family:'Sora',Inter,sans-serif; font-size:30px; font-weight:800;
+                     letter-spacing:-1px; line-height:1; font-variant-numeric:tabular-nums; }
+  .pl-hero-valor-r { font-size:11.5px; font-weight:600; opacity:.75; }
+  .pl-hero-valor .ajuda-i { border-color:rgba(0,0,0,.3); color:#08131a; }
+
+  .pl-nums { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+             gap:8px; margin-bottom:24px; }
+  .pl-n { padding:14px 16px; border-radius:12px; border:1px solid var(--borda); }
+  .pl-n b { display:block; font-family:'Sora',Inter,sans-serif; font-size:19px; font-weight:700;
+            font-variant-numeric:tabular-nums; letter-spacing:-.4px; color:var(--cinza); }
+  .pl-n span { display:block; font-size:11px; color:var(--cinza); margin-top:4px; }
+  /* Numero que tem valor fica firme e na cor da marca; zero fica quieto. */
+  .pl-n.vivo { background:var(--panel-2); border-color:var(--borda-2); }
+  .pl-n.vivo b { color:var(--verde); }
+  .pl-n.alerta b { color:var(--amarelo); }
+  [data-theme="light"] .pl-n.vivo { background:#fff; box-shadow:0 1px 2px rgba(16,24,40,.05); }
+
+  /* A barra de estado: uma frase, largura inteira. O olho pega isto primeiro. */
+  .pl-estado { display:flex; flex-direction:column; gap:2px; padding:14px 18px;
+               border-radius:12px; margin-bottom:16px; border:1px solid transparent; }
+  .pl-estado b { font-size:14px; }
+  .pl-estado span { font-size:12px; opacity:.9; }
+  .pl-estado.falta    { background:var(--al-bg); border-color:var(--al-bd); color:var(--al-fg); }
+  .pl-estado.conferir { background:var(--ia-bg); border-color:var(--ia-bd); color:var(--ia-fg); }
+  .pl-estado.pronta   { background:var(--ok-bg); border-color:var(--ok-bd); color:var(--ok-fg); }
+
+  .pl-bandeja { border:1px solid var(--al-bd); background:var(--al-bg);
+                border-radius:12px; padding:16px 18px; margin-bottom:16px; }
+  .pl-bandeja > header { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; margin-bottom:8px; }
+  .pl-bandeja > header b { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--al-fg); }
+  .pl-bandeja > header span { font-size:11.5px; color:var(--cinza); }
+  .pl-pend { padding:12px 0; border-top:1px solid var(--borda); }
+  .pl-pend-topo { display:flex; gap:16px; align-items:center; justify-content:space-between; }
+  .pl-chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; align-items:center; }
+  .pl-chip-b { background:var(--panel); border:1px solid var(--borda-2); color:var(--texto);
+               border-radius:999px; padding:6px 14px; font-size:11.5px; font-weight:600;
+               font-family:inherit; cursor:pointer; transition:.15s; }
+  .pl-chip-b:hover { border-color:var(--verde); color:var(--verde); }
+  /* O select de "outro vinculo" e a saida rara, nao o controle principal:
+     nao pode ocupar a linha inteira e roubar o olho dos chips, que sao o
+     caminho de um clique. */
+  .pl-chips .pl-sel { flex:0 0 auto; width:auto; max-width:180px; }
+
+  .pl-fichas { display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:16px; }
+  .pl-ficha { border:1px solid var(--borda); border-radius:14px; overflow:hidden;
+              background:var(--panel-2); }
+  [data-theme="light"] .pl-ficha { background:#fff; box-shadow:0 1px 3px rgba(16,24,40,.06); }
+  .pl-ficha.falta { border-color:var(--al-bd); }
+  .pl-ficha-cab { display:flex; justify-content:space-between; align-items:flex-start;
+                  gap:12px; padding:16px 18px; border-bottom:1px solid var(--borda); }
+  .pl-ficha-papel { font-size:10px; font-weight:700; letter-spacing:.6px;
+                    text-transform:uppercase; color:var(--cinza); }
+  .pl-ficha-nome { font-family:'Sora',Inter,sans-serif; font-size:16px; font-weight:700;
+                   line-height:1.25; margin-top:3px; }
+  .pl-selo { font-size:10px; font-weight:700; letter-spacing:.3px; padding:4px 10px;
+             border-radius:999px; white-space:nowrap; }
+  .pl-selo.falta    { background:var(--al-bg); color:var(--al-fg); }
+  .pl-selo.conferir { background:var(--ia-bg); color:var(--ia-fg); }
+  .pl-selo.pronta   { background:var(--ok-bg); color:var(--ok-fg); }
+
+  .pl-item { display:grid; grid-template-columns:auto 1fr auto; gap:12px; align-items:start;
+             padding:12px 18px; border-top:1px solid var(--borda); }
+  .pl-ficha .pl-item:first-of-type { border-top:none; }
+  .pl-item-marca { width:9px; height:9px; border-radius:50%; margin-top:5px; box-sizing:border-box;
+                   display:inline-block; flex:0 0 auto; }
+  .pl-item-marca.ok  { background:var(--ok-fg); }
+  .pl-item-marca.ia  { background:var(--ia-fg); }
+  .pl-item-marca.nao { background:none; border:1.5px dashed var(--al-bd); }
+  .pl-item-txt { min-width:0; }
+  .pl-item-rot { font-size:12.5px; font-weight:600; }
+  .pl-item.vazio .pl-item-rot { color:var(--cinza); font-weight:500; }
+  /* O nome do arquivo importa, mas e verificacao e nao decisao: fica apagado. */
+  .pl-item-arq { font-family:ui-monospace,Menlo,monospace; font-size:10.5px; color:var(--arq-fg);
+                 margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pl-item-falta { font-size:11px; color:var(--al-fg); margin-top:3px; }
+  .pl-item-extra-tag { font-size:9px; font-weight:700; text-transform:uppercase; color:var(--cinza);
+                       border:1px solid var(--borda-2); border-radius:4px; padding:0 5px; margin-left:5px; }
+  .pl-item-acoes { display:flex; gap:12px; align-items:center; opacity:.5; transition:.15s; }
+  .pl-item:hover .pl-item-acoes { opacity:1; }
+  .pl-ajuste { grid-column:1 / -1; display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .pl-ajuste[hidden] { display:none; }
+  .pl-legenda { display:flex; gap:24px; align-items:center; flex-wrap:wrap;
+                font-size:11px; color:var(--cinza); margin-top:16px; }
+  .pl-legenda .pl-item-marca { margin:0 6px 0 0; }
+
+  .pl-sel { background:var(--input-bg); border:1px solid var(--borda-2); color:var(--texto);
+            border-radius:8px; padding:6px 10px; font-size:11.5px; font-family:inherit;
+            height:32px; cursor:pointer; max-width:100%; }
+  .pl-sel[hidden] { display:none; }
+  .pl-doc-link { display:inline-flex; align-items:center; gap:4px; background:none; border:none;
+                 padding:0; font-family:inherit; font-size:11px; font-weight:600;
+                 color:var(--cinza); cursor:pointer; text-decoration:none; }
+  .pl-doc-link:hover { color:var(--texto); }
+  .pl-doc-link.ok { color:var(--verde); }
+  .pl-msg { font-size:10.5px; color:var(--verde); }
+  .pl-msg.ruim { color:var(--al-fg); }
+  .pl-vazio-expl { font-size:12.5px; line-height:1.65; color:var(--cinza);
+                   padding:16px 18px; border:1px dashed var(--borda-2); border-radius:12px; }
+
   .pl-grade { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px; align-items:start; }
   .pl-box { background:var(--panel-2); border:1px solid var(--borda); border-radius:12px; padding:16px 18px; }
   .pl-box h2 { font-size:13px; font-weight:700; letter-spacing:.3px; text-transform:uppercase;
@@ -282,17 +408,19 @@
 
 <div class="page">
 
-<div class="pl-cab">
-  <div class="pl-cab-id">
-    <div class="pl-nome">{{ lead.nome }}</div>
-    <div class="pl-sub">
-      <span class="pill" style="background:{{ (lead.etapa_cor or '#64748b') }}22; color:{{ lead.etapa_cor or '#94a3b8' }};">{{ lead.etapa_nome or lead.etapa or '—' }}</span>
-      {% if lead.sub_status %}<span>{{ lead.sub_status }}</span>{% endif %}
-      {% if saude.idade_txt %}<span title="Tempo desde a última mudança de etapa ou sub-status">sem mexer {{ saude.idade_txt }}</span>{% endif %}
-      {% if lead.responsavel_nome %}<span>· {{ lead.responsavel_nome }}</span>{% endif %}
-      {% if lead.telefone %}<span>· {{ lead.telefone }}</span>{% endif %}
+<header class="pl-hero">
+  <div class="pl-hero-id">
+    <div class="pl-hero-linha">
+      <h2 class="pl-hero-nome">{{ lead.nome }}</h2>
+      <span class="pl-etapa" style="--c:{{ lead.etapa_cor or '#1fd8a4' }};">{{ lead.etapa_nome or lead.etapa or '—' }}</span>
     </div>
-    <div class="pl-sub" style="margin-top:9px;">
+    <div class="pl-hero-sub">
+      {% if lead.sub_status %}<span>{{ lead.sub_status }}</span>{% endif %}
+      {% if saude.idade_txt %}<span title="Tempo desde a última mudança de etapa ou sub-status">parado há {{ saude.idade_txt }}</span>{% endif %}
+      {% if lead.responsavel_nome %}<span>{{ lead.responsavel_nome }}</span>{% endif %}
+      {% if lead.telefone %}<span>{{ lead.telefone }}</span>{% endif %}
+    </div>
+    <div class="pl-hero-tags">
       {% if wa %}
         {% for w in wa %}
         <span class="pl-lid" title="{{ w.chat_id }}{{ ' · ' ~ w.msgs ~ ' mensagens analisadas' if w.msgs }}">
@@ -300,45 +428,36 @@
         </span>
         {% endfor %}
       {% else %}
-        {# Falta vincular é ação, não ausência: o lead existe, a conversa dele não
-           foi identificada ainda, e sem isso a análise e o custo ficam sem dono. #}
-        <span class="pl-lid falta" title="Este lead ainda não tem conversa do WhatsApp vinculada. Rode 'Sincronizar @lid de todas as conversas' na extensão, ou abra a conversa dele com a extensão ligada.">
-          falta vincular a conversa — checar
+        <span class="pl-lid falta" title="Este lead ainda não tem conversa do WhatsApp vinculada. Rode 'Sincronizar @lid de todas as conversas' na extensão.">
+          falta vincular a conversa
         </span>
       {% endif %}
-      {% for e in etiquetas %}
-      <span class="pill" style="background:{{ e.cor }}22; color:{{ e.cor }};">{{ e.nome }}</span>
-      {% endfor %}
+      {% for e in etiquetas %}<span class="pl-etiq" style="--c:{{ e.cor }};">{{ e.nome }}</span>{% endfor %}
     </div>
   </div>
-</div>
 
-{# MENU DA PAGINA. O painel e longo e a maior parte dele costuma estar vazia:
-   o menu leva direto ao que TEM conteudo, e diz de cara o que ainda nao existe.
-   Construido pelo proprio conteudo, entao nao ha lista pra manter em dois
-   lugares. #}
-<nav class="pl-menu" id="pl-menu" aria-label="Seções desta página"></nav>
+  {# UM destaque só. Cinco cartoes do mesmo peso, quatro deles zerados, era o
+     que fazia a tela parecer "dado jogado": se tudo grita, nada e ouvido. #}
+  <div class="pl-hero-valor">
+    <span class="pl-hero-valor-n">{{ (lead.valor_estimado or 0)|moeda }}</span>
+    <span class="pl-hero-valor-r">valor estimado desta venda<i class="ajuda-i" title="O que se espera desta venda. Vem da cotação (1ª opção recomendada, ou a mais barata) quando o consultor não preencheu à mão.">i</i></span>
+  </div>
+</header>
 
-<div class="pl-num-linha">
-  <div class="pl-num {{ 'destaque' if lead.valor_estimado else 'zero' }}">
-    <b>{{ (lead.valor_estimado or 0)|moeda }}</b>
-    <span>valor estimado<i class="ajuda-i" title="O que se espera desta venda. Vem da cotação (1ª opção recomendada, ou a mais barata) quando o consultor não preencheu à mão.">i</i></span>
+{# Os numeros secundarios: quietos, e o zero mais quieto ainda. #}
+<div class="pl-nums">
+  <div class="pl-n {{ 'vivo' if vendas }}">
+    <b>{{ receita|moeda }}</b><span>{{ vendas|length }} venda(s) registrada(s)</span>
   </div>
-  <div class="pl-num {{ 'destaque' if vendas else 'zero' }}">
-    <b>{{ receita|moeda }}</b>
-    <span>{{ vendas|length }} venda(s) registrada(s)</span>
+  <div class="pl-n {{ 'vivo' if com_liquida > 0 }}">
+    <b>{{ com_liquida|moeda }}</b><span>comissão líquida<i class="ajuda-i" title="O que sobra para a corretora depois de pagar o consultor. Fica congelado na proposta no momento do cadastro.">i</i></span>
   </div>
-  <div class="pl-num {{ 'destaque' if com_liquida > 0 else 'zero' }}">
-    <b>{{ com_liquida|moeda }}</b>
-    <span>comissão líquida da corretora<i class="ajuda-i" title="O que sobra para a corretora depois de pagar o consultor. Fica congelado na proposta no momento do cadastro — não é recalculado aqui.">i</i></span>
+  <div class="pl-n {{ 'alerta' if custo_ia_brl > 1 }}">
+    <b>{{ custo_ia_brl|moeda }}</b><span>IA gasta com este lead<i class="ajuda-i" title="Soma da leitura das conversas e da transcrição de áudios. Estimativa pelo preço por token, não a fatura do provedor.">i</i></span>
   </div>
-  <div class="pl-num {{ 'alerta' if custo_ia_brl > 1 else ('zero' if not custo_ia_brl else '') }}">
-    <b>{{ custo_ia_brl|moeda }}</b>
-    <span>IA gasta com este lead<i class="ajuda-i" title="Soma da leitura das conversas e da transcrição de áudios deste lead. Estimativa pelo preço por token/minuto, não a fatura do provedor. Câmbio fixo configurado no sistema.">i</i></span>
-  </div>
-  <div class="pl-num {{ 'zero' if not (ultima and ultima.score is not none) }}">
+  <div class="pl-n {{ 'vivo' if ultima and ultima.score is not none }}">
     <b>{{ ultima.score if ultima and ultima.score is not none else '—' }}</b>
-    <span>score da conversa<i class="ajuda-i" title="Nota de 0 a 1000 que a IA dá pela conversa: urgência, orçamento, perfil e engajamento. Serve para priorizar quem atender primeiro — não é promessa de fechamento.">i</i></span>
+    <span>score da conversa<i class="ajuda-i" title="Nota de 0 a 1000 que a IA dá pela conversa: urgência, orçamento, perfil e engajamento. Serve para priorizar quem atender primeiro.">i</i></span>
   </div>
 </div>
 
