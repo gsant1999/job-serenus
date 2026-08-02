@@ -12,25 +12,51 @@
 //
 // Escopo mínimo de propósito: ignora qualquer mensagem que não seja a nossa, não
 // lê nada da página e não devolve dado nenhum pra ela além do "deu certo".
+//
+// A partir da versão 2.83 também leva pedido de COTAÇÃO. A tela de cotação do
+// JOB não consegue falar com o Painel do Corretor sozinha: quem fala é a aba do
+// Painel, com a sessão do próprio corretor. A página pede aqui, a extensão faz
+// lá, e o resultado volta pro JOB.
 (function () {
   'use strict';
+
+  // Lista fechada do que a página pode pedir. O que não está aqui não passa —
+  // é a diferença entre uma ponte e um buraco.
+  function traduzir(d) {
+    if (d.tipo === 'abrir_chat') {
+      return { type: 'abrir_chat_whatsapp',
+               telefone: String(d.telefone || '').slice(0, 30),
+               chatId: String(d.chatId || '').slice(0, 120),
+               texto: String(d.texto || '').slice(0, 4000) };
+    }
+    if (d.tipo === 'cotar') return { type: 'cotar_painel', pedido: d.pedido };
+    if (d.tipo === 'cotador_estado') return { type: 'cotador_pronto' };
+    if (d.tipo === 'cotador_cidades') {
+      return { type: 'cotador_cidades', termo: String(d.termo || '').slice(0, 80) };
+    }
+    return null;
+  }
+
   window.addEventListener('message', (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
-    if (!d || d.source !== 'JOB_SITE_REQ' || d.tipo !== 'abrir_chat') return;
-    const responder = (ok, motivo) => {
-      window.postMessage({ source: 'JOB_SITE_RESP', reqId: d.reqId, ok: !!ok, motivo: motivo || '' }, '*');
+    if (!d || d.source !== 'JOB_SITE_REQ') return;
+    const pedido = traduzir(d);
+    if (!pedido) return;
+    const responder = (resp) => {
+      window.postMessage({ source: 'JOB_SITE_RESP', reqId: d.reqId,
+                           ok: !!(resp && resp.ok), motivo: (resp && resp.motivo) || '',
+                           dados: (resp && resp.dados) || null,
+                           faltando: (resp && resp.faltando) || [],
+                           modalidades: (resp && resp.modalidades) || [] }, '*');
     };
     try {
-      chrome.runtime.sendMessage(
-        { type: 'abrir_chat_whatsapp', telefone: String(d.telefone || '').slice(0, 30),
-          chatId: String(d.chatId || '').slice(0, 120), texto: String(d.texto || '').slice(0, 4000) },
-        (resp) => {
-          if (chrome.runtime.lastError) { responder(false, 'extensao_indisponivel'); return; }
-          responder(resp && resp.ok, (resp && resp.motivo) || '');
-        });
+      chrome.runtime.sendMessage(pedido, (resp) => {
+        if (chrome.runtime.lastError) { responder({ ok: false, motivo: 'extensao_indisponivel' }); return; }
+        responder(resp);
+      });
     } catch (e) {
-      responder(false, 'extensao_indisponivel');
+      responder({ ok: false, motivo: 'extensao_indisponivel' });
     }
   });
   // Deixa a página saber que a extensão está aqui — assim o botão só promete o

@@ -15,14 +15,19 @@
   'use strict';
 
   const CHAVE = 'cotador_painel_hashes';
+  const CHAVE_MOD = 'cotador_painel_modalidades';
   const pendentes = new Map();
   let seq = 0;
 
-  // Devolve os hashes de sessões anteriores assim que a página carrega.
+  // Devolve o que foi aprendido em sessões anteriores assim que a página carrega.
   try {
-    chrome.storage.local.get([CHAVE], (r) => {
-      const d = r && r[CHAVE];
-      if (d) window.postMessage({ source: 'JOB_COTADOR_BRIDGE', tipo: 'restaurar', dados: d }, '*');
+    chrome.storage.local.get([CHAVE, CHAVE_MOD], (r) => {
+      const d = (r && r[CHAVE]) || null;
+      const mods = (r && r[CHAVE_MOD]) || [];
+      if (d || mods.length) {
+        window.postMessage({ source: 'JOB_COTADOR_BRIDGE', tipo: 'restaurar',
+                             dados: { ...(d || {}), modalidades: mods } }, '*');
+      }
     });
   } catch (e) { /* sem armazenamento a extensão aprende de novo, só isso */ }
 
@@ -33,6 +38,10 @@
 
     if (d.tipo === 'aprendeu' && d.dados) {
       try { chrome.storage.local.set({ [CHAVE]: d.dados }); } catch (e) { /* idem */ }
+      return;
+    }
+    if (d.tipo === 'modalidades' && Array.isArray(d.dados)) {
+      try { chrome.storage.local.set({ [CHAVE_MOD]: d.dados }); } catch (e) { /* idem */ }
       return;
     }
     const espera = pendentes.get(d.reqId);
@@ -57,26 +66,28 @@
     }
   });
 
-  function perguntarPagina(tipo, pedido, responder, msLimite) {
+  function perguntarPagina(tipo, extra, responder, msLimite) {
     const reqId = 'c' + (++seq) + '-' + Date.now();
     const relogio = setTimeout(() => {
       pendentes.delete(reqId);
       responder({ ok: false, motivo: 'demorou_demais' });
     }, msLimite);
     pendentes.set(reqId, { responder, relogio });
-    window.postMessage({ source: 'JOB_COTADOR_BRIDGE', tipo, reqId, pedido }, '*');
+    window.postMessage({ source: 'JOB_COTADOR_BRIDGE', tipo, reqId, ...extra }, '*');
   }
 
+  // O que a extensão aceita pedir daqui, e quanto tempo espera por cada um.
+  // Lista fechada de propósito: o que não está aqui não atravessa.
+  const ACEITOS = {
+    cotar_aqui:      ['cotar',   90000],   // preço é sequencial: 20 planos dão uns 15s
+    cotador_estado:  ['estado',   5000],
+    cotador_cidades: ['cidades',  8000],
+  };
+
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (!msg) return;
-    if (msg.type === 'cotar_aqui') {
-      // Teto generoso: o preço é sequencial e 20 planos podem levar uns 6s.
-      perguntarPagina('cotar', msg.pedido, sendResponse, 90000);
-      return true;
-    }
-    if (msg.type === 'cotador_estado') {
-      perguntarPagina('estado', null, sendResponse, 5000);
-      return true;
-    }
+    if (!msg || !ACEITOS[msg.type]) return;
+    const [tipo, limite] = ACEITOS[msg.type];
+    perguntarPagina(tipo, { pedido: msg.pedido, termo: msg.termo }, sendResponse, limite);
+    return true;
   });
 })();

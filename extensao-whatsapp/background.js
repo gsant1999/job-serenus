@@ -354,10 +354,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   //
   // Nao foca a aba de proposito. Roubar o foco no meio de um atendimento e
   // pior que esperar: o consultor esta no WhatsApp falando com o cliente.
-  if (msg && (msg.type === 'cotar_painel' || msg.type === 'cotador_pronto')) {
-    const oQuePedir = msg.type === 'cotar_painel'
-      ? { type: 'cotar_aqui', pedido: msg.pedido }
-      : { type: 'cotador_estado' };
+  if (msg && (msg.type === 'cotar_painel' || msg.type === 'cotador_pronto' ||
+              msg.type === 'cotador_cidades')) {
+    const oQuePedir =
+      msg.type === 'cotar_painel'    ? { type: 'cotar_aqui', pedido: msg.pedido } :
+      msg.type === 'cotador_cidades' ? { type: 'cotador_cidades', termo: msg.termo } :
+                                       { type: 'cotador_estado' };
     chrome.tabs.query({ url: 'https://beta.paineldocorretor.com.br/*' }, (abas) => {
       const aba = (abas || [])[0];
       if (!aba) { sendResponse({ ok: false, motivo: 'painel_fechado' }); return; }

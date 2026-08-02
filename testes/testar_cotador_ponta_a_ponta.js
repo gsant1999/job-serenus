@@ -196,6 +196,18 @@ function perguntar(tipo, pedido, msLimite) {
      '8. nada nosso aparece no console da pagina',
      'chaves suspeitas=' + JSON.stringify(chaves.filter((k) => /job|jcp|cotador/i.test(k))));
 
+  // 10. A busca de operadoras nao cria cotacao nova nem sai pedindo preco
+  const criouAntes = chamou.criar;
+  const precoAntes = chamou.preco;
+  const so = await perguntar('cotar', {
+    cidade: 'São Paulo - SP', vidas: [{ faixa: '29-33', quantidade: 10 }], somenteOperadoras: true,
+  }, 20000);
+  ok(so.ok && (so.dados.operadoras || []).length > 5, '10. lista operadoras da cidade',
+     (so.dados && so.dados.operadoras || []).length + ' operadoras');
+  ok(chamou.criar === criouAntes, '10b. reaproveita a cotacao, nao cria outra',
+     'criadas no total=' + chamou.criar);
+  ok(chamou.preco === precoAntes, '10c. nao pede preco de nada');
+
   // 9. Cidade faltando é erro claro, não cotação vazia
   const semCidade = await perguntar('cotar', { vidas: [{ faixa: '29-33', quantidade: 1 }] });
   ok(semCidade.ok === false && semCidade.motivo === 'sem_cidade',

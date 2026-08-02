@@ -77,6 +77,17 @@
   <a href="/cotacao/documento/{{ editar_id }}" style="color:var(--azul);text-decoration:none;margin-left:10px;">Cancelar</a>
 </div>
 {% endif %}
+<!-- Porta de entrada da cotação ao vivo. Sem item novo no menu: ele já tem
+     itens demais, e as duas telas são a mesma tarefa por caminhos diferentes. -->
+<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--panel);
+            border:1px solid var(--verde);border-radius:12px;padding:12px 16px;margin-bottom:14px;">
+  <div style="flex:1;min-width:240px;font-size:13px;line-height:1.5;">
+    <b>Cotação ao vivo</b> — busca o preço no Painel do Corretor na hora, pela sua sessão.
+    <span style="color:var(--cinza)">Não depende de ninguém manter tabela aqui dentro.
+    Esta tela continua funcionando normalmente.</span>
+  </div>
+  <a class="btn btn-sm" href="/cotacao/novo">Experimentar</a>
+</div>
 <div class="topbar">
   <div>
     <h1 style="margin:0;">Cotação</h1>

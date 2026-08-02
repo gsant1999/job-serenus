@@ -71,6 +71,18 @@
   const PAPEIS = ['criar', 'operadoras', 'planos', 'preco'];
   const APRENDIDO = { criar: null, operadoras: null, planos: null, preco: null };
 
+  // Códigos de modalidade vistos em cotação de verdade.
+  //
+  // Só sabemos com certeza que 2 é PME, porque foi o que a captura mostrou.
+  // Chutar o número de PF ou Adesão seria pedir preço do produto errado e
+  // mostrar como certo. Então a extensão anota os que ela VÊ: o consultor faz
+  // uma cotação de PF na mão uma vez, e a partir daí PF fica disponível.
+  const MODALIDADES = {};
+
+  // Última cotação criada nesta aba. Serve de "rascunho" para as perguntas de
+  // apoio (lista de operadoras), pra não criar uma cotação por pergunta.
+  let ultimaCotacao = null;
+
   // ── Reconhecer a chamada pelo formato do corpo ────────────────────────────
   // O hash muda; o formato não. `{filtro:{...}}` só existe na busca de
   // operadora, `operadoraId` só na lista de planos, e o preço é o único que
@@ -94,6 +106,25 @@
     window.postMessage({ source: 'JOB_COTADOR', tipo: 'aprendeu', dados: { ...APRENDIDO } }, ORIGEM);
   }
 
+  // Anota qual código de modalidade o corretor usou de verdade.
+  //
+  // O corpo diz `modalidade: 2` e mais nada — o nome ("PME") está na tela
+  // deles, não na chamada. Então a extensão só coleta o NÚMERO, e quem dá
+  // nome é o Guilherme, uma vez, na tela de cotação do JOB. Chutar que 1 é PF
+  // seria pedir preço do produto errado e mostrar como certo.
+  function anotarModalidade(papel, corpo) {
+    if (papel !== 'operadoras' && papel !== 'planos') return;
+    try {
+      const d = JSON.parse(corpo)[0];
+      const m = (d.filtro || d).modalidade;
+      if (typeof m === 'number' && !MODALIDADES[m]) {
+        MODALIDADES[m] = true;
+        window.postMessage({ source: 'JOB_COTADOR', tipo: 'modalidades',
+                             dados: Object.keys(MODALIDADES).map(Number) }, ORIGEM);
+      }
+    } catch (e) { /* corpo em formato novo: ignora, não inventa */ }
+  }
+
   // Escuta a página sem atrapalhar: repassa a chamada igualzinha e só anota.
   const fetchOriginal = window.fetch;
   window.fetch = function (...args) {
@@ -104,8 +135,11 @@
         const h = cfg.headers;
         const pega = (k) => (typeof h.get === 'function' ? h.get(k) : h[k]);
         const hash = pega('next-action') || pega('Next-Action');
-        if (hash) guardar(classificar(url, cfg.body), hash,
-                          pega('next-router-state-tree') || pega('Next-Router-State-Tree'));
+        if (hash) {
+          const papel = classificar(url, cfg.body);
+          guardar(papel, hash, pega('next-router-state-tree') || pega('Next-Router-State-Tree'));
+          anotarModalidade(papel, cfg.body);
+        }
       }
     } catch (e) { /* observar nunca pode quebrar a página do corretor */ }
     return fetchOriginal.apply(this, args);
@@ -121,6 +155,9 @@
     PAPEIS.forEach((k) => {
       const v = ev.data.dados[k];
       if (v && typeof v.hash === 'string') APRENDIDO[k] = { hash: v.hash, arvore: v.arvore || null };
+    });
+    (ev.data.dados.modalidades || []).forEach((m) => {
+      if (typeof m === 'number') MODALIDADES[m] = true;
     });
   });
 
@@ -245,6 +282,20 @@
     return m[1];
   }
 
+  // A única chamada que não é Server Action: API JSON limpa, sem hash, e é de
+  // onde sai a string EXATA de cidade que todo o resto espera. Montar
+  // "São Paulo/SP" na mão não funciona — tem que ser o formato deles.
+  async function buscarCidades(termo) {
+    const t = String(termo || '').trim();
+    if (t.length < 3) return [];
+    const resp = await fetchOriginal.call(window,
+      ORIGEM + '/api/cidades?term=' + encodeURIComponent(t),
+      { credentials: 'include', headers: { accept: 'application/json' } });
+    if (!resp.ok) throw new Error('http_' + resp.status);
+    const d = await resp.json();
+    return Array.isArray(d) ? d : [];
+  }
+
   function filtroBase(p) {
     return { cidade: p.cidade, modalidade: p.modalidade == null ? 2 : p.modalidade,
              credenciados: [], perfil: '$undefined', vidas: p.vidas };
@@ -300,16 +351,40 @@
     };
     const t0 = Date.now();
 
-    avisa('criando');
-    const cotacaoId = await criarCotacao(p.titulo);
-
-    await respira(400, 1100);
+    // Consulta de apoio reaproveita a última cotação; só cotação de verdade
+    // cria uma nova.
+    //
+    // Toda chamada ao Painel precisa de um id de cotação na URL, inclusive a
+    // pergunta boba "quais operadoras atendem essa cidade?". Criando uma por
+    // pergunta, o consultor deixaria dezenas de cotações vazias no sistema
+    // deles num dia de trabalho — cada uma com o nome dele. Rastro puro, e do
+    // tipo que fica.
+    let cotacaoId = null;
+    if (p.somenteOperadoras && ultimaCotacao) {
+      cotacaoId = ultimaCotacao;
+    } else {
+      avisa('criando');
+      cotacaoId = await criarCotacao(p.titulo);
+      ultimaCotacao = cotacaoId;
+      await respira(400, 1100);
+    }
     avisa('operadoras');
     const todas = await operadorasDaCidade(cotacaoId, p);
     await respira(300, 900);
     const escolhidas = Array.isArray(p.operadoraIds) && p.operadoraIds.length
       ? todas.filter((o) => p.operadoraIds.includes(o.id))
       : todas;
+
+    // A tela pergunta "quais operadoras atendem essa cidade?" antes de deixar o
+    // consultor escolher. Sem esta saída, essa pergunta viraria uma cotação
+    // inteira — dezenas de consultas ao Painel só pra desenhar uns botões.
+    if (p.somenteOperadoras) {
+      return { cotacaoId, url: ORIGEM + '/cotacoes/' + cotacaoId + '/edit',
+               cidade: p.cidade, vidas: p.vidas,
+               operadoras: todas.map((o) => ({ id: o.id, nome: o.nome, logotipo: o.logotipo })),
+               planosEncontrados: 0, planosCotados: 0, descartados: 0, suspeitos: 0,
+               ms: Date.now() - t0, planos: [] };
+    }
 
     // Duas listas por vez, com respiro entre os lotes.
     //
@@ -386,7 +461,13 @@
       { source: 'JOB_COTADOR', tipo: 'resposta', reqId: d.reqId, ...payload }, ORIGEM);
 
     if (d.tipo === 'estado') {
-      responder({ ok: true, pronto: !faltando().length, faltando: faltando() });
+      responder({ ok: true, pronto: !faltando().length, faltando: faltando(),
+                  modalidades: Object.keys(MODALIDADES).map(Number) });
+      return;
+    }
+    if (d.tipo === 'cidades') {
+      try { responder({ ok: true, dados: await buscarCidades(d.termo) }); }
+      catch (e) { responder({ ok: false, motivo: String(e && e.message || e) }); }
       return;
     }
     if (d.tipo === 'cotar') {

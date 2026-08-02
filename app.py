@@ -1348,6 +1348,45 @@ def init_db():
                 tabela_id INTEGER NOT NULL,
                 nome TEXT NOT NULL, cidade TEXT DEFAULT '', cobertura TEXT DEFAULT ''
             )""",
+            # Cotação ao vivo: cada rodada feita no Painel do Corretor pela
+            # extensão. Não é tabela de preço nossa — é o histórico do que foi
+            # perguntado e do que veio. Serve pra responder se o Painel cair e
+            # pra enxergar reajuste comparando a mesma combinação ao longo do
+            # tempo, que era o motivo de guardar.
+            """CREATE TABLE IF NOT EXISTS cotacao_viva (
+                id SERIAL PRIMARY KEY,
+                lead_id INTEGER, usuario_id INTEGER, origem TEXT DEFAULT 'site',
+                cidade TEXT NOT NULL, modalidade INTEGER DEFAULT 2,
+                vidas_json TEXT DEFAULT '[]', filtros_json TEXT DEFAULT '{}',
+                resultado_json TEXT DEFAULT '[]',
+                planos_cotados INTEGER DEFAULT 0, suspeitos INTEGER DEFAULT 0,
+                ms INTEGER DEFAULT 0,
+                painel_cotacao_id TEXT DEFAULT '', painel_url TEXT DEFAULT '',
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            # Uma linha por plano cotado, achatada de propósito: é assim que dá
+            # pra perguntar "quanto custava este plano nesta cidade no mês
+            # passado" sem abrir JSON de rodada nenhuma.
+            """CREATE TABLE IF NOT EXISTS cotacao_viva_preco (
+                id SERIAL PRIMARY KEY,
+                viva_id INTEGER NOT NULL,
+                cidade TEXT NOT NULL, modalidade INTEGER DEFAULT 2,
+                operadora TEXT DEFAULT '', produto TEXT DEFAULT '', plano TEXT DEFAULT '',
+                tabela_nome TEXT DEFAULT '', chave TEXT DEFAULT '',
+                acomodacao INTEGER DEFAULT 0, coparticipacao INTEGER DEFAULT 0,
+                vidas_assinatura TEXT DEFAULT '',
+                total REAL DEFAULT 0, faixas_json TEXT DEFAULT '[]',
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            # O nome de cada código de modalidade do Painel. Só sabemos que 2 é
+            # PME porque foi o que a captura mostrou; os outros o Guilherme
+            # batiza quando aparecerem. Chutar seria pedir preço do produto
+            # errado e mostrar como certo.
+            """CREATE TABLE IF NOT EXISTS cotacao_modalidade (
+                codigo INTEGER PRIMARY KEY,
+                nome TEXT NOT NULL,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS cotacao_salva (
                 id SERIAL PRIMARY KEY,
                 token TEXT, orientacao TEXT DEFAULT 'horizontal', lead_id INTEGER,
@@ -2160,6 +2199,33 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tabela_id INTEGER NOT NULL,
             nome TEXT NOT NULL, cidade TEXT DEFAULT '', cobertura TEXT DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS cotacao_viva (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER, usuario_id INTEGER, origem TEXT DEFAULT 'site',
+            cidade TEXT NOT NULL, modalidade INTEGER DEFAULT 2,
+            vidas_json TEXT DEFAULT '[]', filtros_json TEXT DEFAULT '{}',
+            resultado_json TEXT DEFAULT '[]',
+            planos_cotados INTEGER DEFAULT 0, suspeitos INTEGER DEFAULT 0,
+            ms INTEGER DEFAULT 0,
+            painel_cotacao_id TEXT DEFAULT '', painel_url TEXT DEFAULT '',
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS cotacao_viva_preco (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            viva_id INTEGER NOT NULL,
+            cidade TEXT NOT NULL, modalidade INTEGER DEFAULT 2,
+            operadora TEXT DEFAULT '', produto TEXT DEFAULT '', plano TEXT DEFAULT '',
+            tabela_nome TEXT DEFAULT '', chave TEXT DEFAULT '',
+            acomodacao INTEGER DEFAULT 0, coparticipacao INTEGER DEFAULT 0,
+            vidas_assinatura TEXT DEFAULT '',
+            total REAL DEFAULT 0, faixas_json TEXT DEFAULT '[]',
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS cotacao_modalidade (
+            codigo INTEGER PRIMARY KEY,
+            nome TEXT NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS cotacao_salva (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23695,6 +23761,251 @@ def cotacao_vera_cruz_ver(cid):
     dados_json = row['dados_json'] or 'null'
     initial_state_js = dados_json.replace('</', '<\\/')
     return render_template('cotacao_vera_cruz.html', initial_state_js=initial_state_js)
+
+
+# ─── COTAÇÃO AO VIVO ────────────────────────────────────────────────────────
+#
+# A tela /cotacao antiga usa as tabelas de preço que alguém cadastrou no JOB.
+# Esta usa o Painel do Corretor ao vivo, pela extensão, e por isso não tem
+# tabela nenhuma pra manter — a fonte é sempre a mesma que o consultor usaria
+# na mão. As duas convivem: a antiga continua no ar até esta provar seu valor.
+#
+# O servidor aqui NÃO cota. Ele não tem como: quem fala com a Trindade é a aba
+# do próprio corretor, com a sessão dele. O Flask só guarda o que voltou.
+
+# O Painel manda '59-199' na última faixa; o JOB sempre chamou de '59+'. Duas
+# grafias pra mesma coisa dariam relatório furado seis meses depois.
+_FAIXA_PAINEL_PARA_JOB = {'59-199': '59+'}
+_FAIXA_JOB_PARA_PAINEL = {'59+': '59-199'}
+
+
+def _faixa_do_painel(f):
+    return _FAIXA_PAINEL_PARA_JOB.get(str(f or ''), str(f or ''))
+
+
+def _vidas_assinatura(vidas):
+    """Texto curto e estável que identifica a composição de vidas.
+
+    É o que permite perguntar 'quanto custava ESTA MESMA combinação no mês
+    passado'. Ordenado pela faixa, sempre com as dez, pra que duas cotações
+    iguais gerem a mesma assinatura mesmo que tenham chegado em ordem diferente.
+    """
+    m = {}
+    for v in (vidas or []):
+        try:
+            m[_faixa_do_painel(v.get('faixa'))] = int(v.get('quantidade') or 0)
+        except Exception:
+            continue
+    return '|'.join('%s:%d' % (f, m.get(f, 0)) for f in FAIXAS_ETARIAS)
+
+
+def _cotacao_viva_gravar(conn, d, usuario_id, origem):
+    """Guarda uma rodada de cotação ao vivo. Devolve o id, ou levanta ValueError.
+
+    Grava em dois lugares de propósito: a rodada inteira em JSON (pra reabrir a
+    tela exatamente como ela estava) e uma linha achatada por plano (pra
+    conseguir perguntar preço ao longo do tempo sem abrir JSON nenhum).
+    """
+    cidade = str(d.get('cidade') or '').strip()
+    if not cidade:
+        raise ValueError('sem_cidade')
+    planos = d.get('planos') or []
+    if not isinstance(planos, list):
+        raise ValueError('planos_invalidos')
+
+    vidas = d.get('vidas') or []
+    try:
+        modalidade = int(d.get('modalidade') or 2)
+    except Exception:
+        modalidade = 2
+    assinatura = _vidas_assinatura(vidas)
+    lead_id = d.get('lead_id')
+    try:
+        lead_id = int(lead_id) if lead_id else None
+    except Exception:
+        lead_id = None
+
+    cur = conn.execute(
+        """INSERT INTO cotacao_viva
+             (lead_id, usuario_id, origem, cidade, modalidade, vidas_json, filtros_json,
+              resultado_json, planos_cotados, suspeitos, ms, painel_cotacao_id, painel_url, criado_em)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (lead_id, usuario_id, origem, cidade, modalidade,
+         json.dumps(vidas, ensure_ascii=False),
+         json.dumps(d.get('filtros') or {}, ensure_ascii=False),
+         json.dumps(planos, ensure_ascii=False),
+         len([p for p in planos if p.get('total') is not None]),
+         int(d.get('suspeitos') or 0), int(d.get('ms') or 0),
+         str(d.get('cotacaoId') or '')[:60], str(d.get('url') or '')[:300],
+         _agora_sp()))
+    vid = _last_insert_id(cur)
+
+    for p in planos:
+        if p.get('total') is None:
+            continue          # plano sem preço não vira histórico de preço
+        try:
+            conn.execute(
+                """INSERT INTO cotacao_viva_preco
+                     (viva_id, cidade, modalidade, operadora, produto, plano, tabela_nome,
+                      chave, acomodacao, coparticipacao, vidas_assinatura, total, faixas_json, criado_em)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (vid, cidade, modalidade,
+                 str((p.get('operadora') or {}).get('nome') or '')[:120],
+                 str((p.get('produto') or {}).get('nome') or '')[:160],
+                 str((p.get('plano') or {}).get('nome') or '')[:160],
+                 str((p.get('tabela') or {}).get('nome') or '')[:160],
+                 str(p.get('key') or '')[:60],
+                 int((p.get('plano') or {}).get('acomodacao') or 0),
+                 1 if (p.get('tabela') or {}).get('coparticipacao') else 0,
+                 assinatura, float(p.get('total') or 0),
+                 json.dumps([{'faixa': _faixa_do_painel(f.get('faixa')),
+                              'quantidade': f.get('quantidade'),
+                              'unitario': f.get('unitario')}
+                             for f in (p.get('faixas') or [])], ensure_ascii=False),
+                 _agora_sp()))
+        except Exception:
+            # Uma linha de histórico que falha não pode derrubar a cotação que
+            # o consultor acabou de fazer. A rodada em JSON já está salva.
+            continue
+    conn.commit()
+    return vid
+
+
+def _modalidades_conhecidas(conn):
+    """Códigos de modalidade que já têm nome. O 2 vem semeado (PME, confirmado
+    na captura); os outros o Guilherme batiza quando aparecerem."""
+    try:
+        linhas = conn.execute(
+            "SELECT codigo, nome FROM cotacao_modalidade ORDER BY codigo").fetchall()
+    except Exception:
+        linhas = []
+    m = {int(r['codigo']): r['nome'] for r in linhas}
+    m.setdefault(2, 'PME')
+    return m
+
+
+@app.route('/cotacao/novo')
+@login_required
+def cotacao_novo():
+    """Cotação ao vivo no Painel do Corretor, pela extensão."""
+    conn = db()
+    lead = None
+    try:
+        lid = int(request.args.get('lead') or 0)
+    except Exception:
+        lid = 0
+    if lid:
+        try:
+            r = conn.execute("SELECT id, nome, telefone FROM crm_lead WHERE id=?", (lid,)).fetchone()
+            if r:
+                lead = {'id': r['id'], 'nome': r['nome'], 'telefone': r['telefone']}
+        except Exception:
+            lead = None
+    return render_template('cotacao_novo.html',
+                           faixas=FAIXAS_ETARIAS,
+                           faixas_painel=[_FAIXA_JOB_PARA_PAINEL.get(f, f) for f in FAIXAS_ETARIAS],
+                           modalidades=_modalidades_conhecidas(conn),
+                           lead=lead, salva=None)
+
+
+@app.route('/cotacao/viva/salvar', methods=['POST'])
+@login_required
+def cotacao_viva_salvar():
+    d = request.get_json(silent=True) or {}
+    conn = db()
+    try:
+        vid = _cotacao_viva_gravar(conn, d, session.get('user_id'), 'site')
+    except ValueError as e:
+        return jsonify({'ok': False, 'erro': str(e)}), 400
+    except Exception:
+        conn.rollback()
+        return jsonify({'ok': False, 'erro': 'falha_ao_salvar'}), 500
+    return jsonify({'ok': True, 'id': vid, 'url': '/cotacao/viva/%d' % vid})
+
+
+@app.route('/cotacao/viva/<int:vid>')
+@login_required
+def cotacao_viva_ver(vid):
+    conn = db()
+    r = conn.execute("SELECT * FROM cotacao_viva WHERE id=?", (vid,)).fetchone()
+    if not r:
+        abort(404)
+    salva = dict(r)
+    for k in ('vidas_json', 'filtros_json', 'resultado_json'):
+        try:
+            salva[k[:-5]] = json.loads(salva.get(k) or ('[]' if k != 'filtros_json' else '{}'))
+        except Exception:
+            salva[k[:-5]] = [] if k != 'filtros_json' else {}
+    return render_template('cotacao_novo.html',
+                           faixas=FAIXAS_ETARIAS,
+                           faixas_painel=[_FAIXA_JOB_PARA_PAINEL.get(f, f) for f in FAIXAS_ETARIAS],
+                           modalidades=_modalidades_conhecidas(conn),
+                           lead=None, salva=salva)
+
+
+@app.route('/cotacao/modalidade', methods=['POST'])
+@login_required
+def cotacao_modalidade_nomear():
+    """Dá nome a um código de modalidade que a extensão viu no Painel.
+
+    A extensão coleta o número; o nome está na tela deles, não na chamada. Em
+    vez de adivinhar, o JOB pergunta uma vez a quem sabe."""
+    d = request.get_json(silent=True) or {}
+    try:
+        codigo = int(d.get('codigo'))
+    except Exception:
+        return jsonify({'ok': False, 'erro': 'codigo_invalido'}), 400
+    nome = str(d.get('nome') or '').strip()[:40]
+    if not nome:
+        return jsonify({'ok': False, 'erro': 'sem_nome'}), 400
+    conn = db()
+    try:
+        conn.execute("DELETE FROM cotacao_modalidade WHERE codigo=?", (codigo,))
+        conn.execute("INSERT INTO cotacao_modalidade (codigo, nome, criado_em) VALUES (?,?,?)",
+                     (codigo, nome, _agora_sp()))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        return jsonify({'ok': False, 'erro': 'falha_ao_salvar'}), 500
+    return jsonify({'ok': True, 'modalidades': _modalidades_conhecidas(conn)})
+
+
+@app.route('/api/whatsapp/cotacao', methods=['POST', 'OPTIONS'])
+def api_whatsapp_cotacao():
+    """A extensão manda pro JOB a cotação que ela acabou de fazer no Painel.
+
+    Mesmo caminho da tela, autenticação diferente: aqui quem fala é a extensão
+    (chave), não uma sessão de navegador."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Chave da extensão inválida'})), 401
+    d = request.get_json(silent=True) or {}
+    conn = db()
+    try:
+        uid = int(d.get('usuario_id') or 0) or None
+    except Exception:
+        uid = None
+    try:
+        vid = _cotacao_viva_gravar(conn, d, uid, 'extensao')
+    except ValueError as e:
+        return _wa_cors(jsonify({'ok': False, 'erro': str(e)})), 400
+    except Exception:
+        conn.rollback()
+        return _wa_cors(jsonify({'ok': False, 'erro': 'falha_ao_salvar'})), 500
+    return _wa_cors(jsonify({'ok': True, 'id': vid, 'url': '/cotacao/viva/%d' % vid}))
+
+
+@app.route('/api/whatsapp/cotacao/modalidades', methods=['GET', 'OPTIONS'])
+def api_whatsapp_cotacao_modalidades():
+    """Nomes já batizados, pra extensão mostrar o mesmo rótulo que o site."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Chave da extensão inválida'})), 401
+    conn = db()
+    return _wa_cors(jsonify({'ok': True, 'modalidades': _modalidades_conhecidas(conn),
+                             'faixas': [_FAIXA_JOB_PARA_PAINEL.get(f, f) for f in FAIXAS_ETARIAS]}))
 
 
 @app.route('/cotacao/tabelas')

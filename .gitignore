@@ -11,3 +11,4 @@ docs/*
 !docs/.gitkeep
 knowledge/*
 !knowledge/.gitkeep
+.previa/
