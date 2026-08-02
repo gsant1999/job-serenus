@@ -28,15 +28,17 @@
      a linha inteira ter 100px de altura. */
   #t td.td-mono, #t th.num { white-space:nowrap; font-variant-numeric:tabular-nums; text-align:right; }
   #t th.num { text-align:right; }
-  #t td, #t th { padding:9px 12px; vertical-align:middle; }
+  #t td, #t th { padding:9px 9px; vertical-align:middle; }
+  .lst-data { font-family:ui-monospace,Menlo,monospace; font-size:10.5px; color:var(--cinza-2);
+              margin-left:8px; white-space:nowrap; }
   #t td strong { font-weight:600; }
 
   /* O nome do cliente é a âncora da linha: uma linha só, o resto no hover. */
-  .lst-cliente { display:block; max-width:280px; overflow:hidden; text-overflow:ellipsis;
+  .lst-cliente { display:inline-block; vertical-align:middle; max-width:230px; overflow:hidden; text-overflow:ellipsis;
                  white-space:nowrap; }
   /* Consultor e operadora tambem numa linha: dois nomes quebrando em duas
      linhas cada faziam a linha crescer de novo, que era o problema original. */
-  #t td.lst-1l { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:150px; }
+  #t td.lst-1l { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:120px; }
 
   /* Cor com significado: o repasse ao consultor não é erro, era vermelho à toa.
      Só o número que a pessoa procura fica firme; os outros ficam quietos. */
@@ -66,17 +68,19 @@
 
   /* Rolagem lateral dita em palavras, e com sombra na borda enquanto houver
      conteudo escondido. Sem isso, duas colunas existiam so pra quem adivinhava. */
-  /* ROLAGEM LATERAL DITA DE FORMA VISUAL, nao com uma frase.
-     Ele pediu visual e eu tinha escrito um texto acima da tabela — que alem de
-     feio, some da vista justamente de quem ja rolou a pagina.
-     A borda direita ganha um esmaecido: o conteudo "continua" em vez de acabar
-     no talho reto, que e o que o olho le como "tem mais ali". Some sozinho
-     quando chega no fim. */
-  .table-wrap { position:relative; }
-  .table-wrap::after { content:''; position:absolute; top:0; right:0; bottom:0; width:56px;
-                       pointer-events:none; opacity:0; transition:opacity .2s;
-                       background:linear-gradient(to right, transparent, var(--panel) 78%); }
-  .table-wrap.tem-mais::after { opacity:1; }
+  /* ROLAGEM LATERAL: BARRA SEMPRE VISIVEL.
+     Tentei um esmaecido na borda e ele nao serviu — no macOS a barra so aparece
+     durante a rolagem, entao a tabela parecia acabar ali; e o degrade ainda
+     APAGAVA os numeros da ultima coluna, o que se le como defeito e nao como
+     "tem mais". Barra de rolagem e a linguagem universal disto: todo mundo
+     entende sem legenda, e ela nao cobre dado nenhum. */
+  .table-wrap { position:relative; overflow-x:auto; scrollbar-color:var(--cinza-2) var(--panel-3);
+                padding-bottom:2px; }
+  .table-wrap::-webkit-scrollbar { height:12px; }
+  .table-wrap::-webkit-scrollbar-track { background:var(--panel-3); border-radius:8px; }
+  .table-wrap::-webkit-scrollbar-thumb { background:var(--cinza-2); border-radius:8px;
+                                         border:3px solid var(--panel-3); }
+  .table-wrap::-webkit-scrollbar-thumb:hover { background:var(--cinza); }
 
   /* Busca de lead na propria linha. */
   .lst-busca { position:absolute; z-index:60; background:var(--panel); border:1px solid var(--borda-2);
@@ -146,7 +150,6 @@
       <thead>
         <tr>
           <th>ID</th>
-          <th>Data</th>
           <th>Cliente</th>
           {% if session.perfil == 'admin' %}<th>Consultor</th>{% endif %}
           <th>Operadora</th>
@@ -154,7 +157,7 @@
           <th class="num">Vidas</th>
           <th class="num">Valor</th>
           {% if session.perfil == 'admin' %}
-          <th class="num">Comissão bruta</th>
+          <th class="num">Bruta<i class="ajuda-i" title="Comissão bruta da corretora nesta venda, antes de descontar o repasse ao consultor.">i</i></th>
           <th class="num">Repasse</th>
           <th class="num">Líquido</th>
           {% else %}
@@ -169,9 +172,12 @@
         <tr data-m="{{ p.modalidade }}" data-t="{{ p.tipo_contrato }}"
             data-s="{{ p.razao_social|lower }} {{ p.consultor|lower }} {{ p.adm_operadora|lower }}">
           <td><a href="/proposta/{{ p.id }}" style="color:var(--verde); font-weight:500;">#{{ p.id }}</a></td>
-          <td class="td-mono" style="font-size:12px;color:var(--cinza);white-space:nowrap;" title="Dia que o protocolo da venda subiu no sistema">{{ p.criado_em|data_br }}</td>
           <td>
             <strong class="lst-cliente" title="{{ p.razao_social }}">{{ p.razao_social }}</strong>
+            {# A data e metadado do cliente, nao coluna de varredura: sai da
+               grade e vem pra ca, e a tabela passa a CABER na tela — melhor que
+               qualquer aviso de rolagem, porque nao sobra o que rolar. #}
+            <span class="lst-data" title="Dia que o protocolo da venda subiu no sistema">{{ p.criado_em|data_br }}</span>
             {# @lid embaixo do cliente: reconhece a conversa sem abrir nada, e
                clicando cai na ficha do lead no CRM. #}
             {% if p.lead_id and wa_prop.get(p.lead_id) %}
@@ -218,7 +224,7 @@
               <span style="background:#f1f5f9;color:#475569;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;">Ag. Doc.</span>
             {% endif %}
           </td>
-          <td>{{ p.vigencia }}</td>
+          <td class="td-mono" style="white-space:nowrap;">{{ p.vigencia|data_br }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -354,7 +360,7 @@ async function vincular(pid, leadId, btn){
     const tem = w.scrollWidth - w.clientWidth > 8;
     // Some assim que a pessoa rola: aviso que fica pra sempre vira paisagem.
     const naPonta = w.scrollLeft > 8;
-    w.classList.toggle('tem-mais', tem && !naPonta);
+    w.classList.toggle('tem-mais', tem && !naPonta);   // reservado
   };
   medir();
   w.addEventListener('scroll', medir, {passive:true});
