@@ -6430,9 +6430,14 @@ def dashboard():
         mes_atual_sp = datetime.now(TZ_SP).strftime('%Y-%m')
         if mes_atual_sp not in meses_disponiveis:
             meses_disponiveis.insert(0, mes_atual_sp)
+        # A FILA VEM PRIMEIRO. O dashboard abria com dinheiro do mes e o consultor
+        # nao sabia o que fazer AGORA — a informacao mais acionavel da tela.
+        fila = _agenda_fila(conn, uid, eh_admin=False, limite=6)
+        fila_n = _agenda_resumo(conn, uid, eh_admin=False)
         close_db(conn)
         return render_template('dashboard_admin.html', m=m, ultimas=ultimas,
                                por_operadora=por_operadora, por_consultor=por_consultor,
+                               fila=fila, fila_n=fila_n,
                                ciclo=ciclo_atual(), f_mes=f_mes, meses_disponiveis=meses_disponiveis)
     else:
         m = {}
@@ -6495,8 +6500,11 @@ def dashboard():
         ultimas = conn.execute("SELECT * FROM propostas WHERE usuario_id=? AND status != 'Excluída' ORDER BY id DESC LIMIT 5",(uid,)).fetchall()
         por_operadora = conn.execute("""SELECT adm_operadora,COUNT(*) qtd,COALESCE(SUM(valor),0) valor
             FROM propostas WHERE usuario_id=? AND status != 'Excluída' GROUP BY adm_operadora ORDER BY valor DESC LIMIT 6""",(uid,)).fetchall()
+        fila = _agenda_fila(conn, uid, eh_admin=False, limite=6)
+        fila_n = _agenda_resumo(conn, uid, eh_admin=False)
         close_db(conn)
         return render_template('dashboard_consultor.html', m=m, ultimas=ultimas,
+                               fila=fila, fila_n=fila_n,
                                por_operadora=por_operadora, pendentes_aceite=pendentes_aceite,
                                pendencias_comprovante=pendencias_comprovante)
 
@@ -22115,8 +22123,14 @@ def crm():
     sub_status_opcoes = _sub_status_opcoes_nomes(conn)
     sub_status_etapa = _sub_status_por_etapa(conn)
     etiquetas_todas = carregar_etiquetas_crm(conn)
+    # A fila de trabalho sobe pro CRM: e aqui que a pessoa esta o dia inteiro.
+    try:
+        fila = _crm_fila_acao(conn, session['user_id'], session.get('perfil') == 'admin')
+    except Exception as e:
+        app.logger.info(f"[CRM] fila de acao: {e}")
+        fila = None
     close_db(conn)
-    return render_template('crm.html', kanban=kanban, kanban_total=kanban_total,
+    return render_template('crm.html', fila=fila, kanban=kanban, kanban_total=kanban_total,
                            kanban_valor=kanban_valor, cards_por_coluna=CARDS_POR_COLUNA,
                            etapas=etapas, total=total, responsaveis=responsaveis, eh_admin=eh_admin,
                            filtros=filtros_ativos, consultores_externos=consultores_externos,
@@ -23038,6 +23052,53 @@ def _normalizar_origem_label(origem):
     if 'manual' in o:
         return 'Manual'
     return (origem or 'Outros').strip().split('(')[0].strip().title()
+
+
+
+def _crm_fila_acao(conn, uid, eh_admin):
+    """Os quatro numeros que dizem o que esta travando o funil AGORA.
+
+    Vivem no /crm, nao no painel: sao trabalho do dia, e trabalho tem que estar
+    onde a pessoa ja esta. O painel ficou so com o relatorio do mes, que se olha
+    de vez em quando — juntos, um atrapalhava o outro.
+
+    Conta por SQL agregado, nao carregando os 5 mil leads em memoria como o
+    painel faz: isto roda em TODA abertura do CRM e nao pode pesar."""
+    from datetime import timedelta as _td
+    hoje = datetime.now(TZ_SP)
+    corte_novo = (hoje - _td(days=30)).strftime('%Y-%m-%d')
+    corte_parado = (hoje - _td(days=7)).strftime('%Y-%m-%d')
+    corte_frio = (hoje - _td(days=60)).strftime('%Y-%m-%d')
+
+    dono = "" if eh_admin else " AND l.responsavel_id=?"
+    p = [] if eh_admin else [uid]
+    # Etapa aberta = nem ganho nem perdido.
+    abertas = """l.etapa IN (SELECT slug FROM crm_etapas
+                             WHERE ativo=1 AND COALESCE(tipo,'normal')='normal')"""
+    teve = """EXISTS (SELECT 1 FROM crm_atividades a WHERE a.lead_id=l.id
+                      AND a.tipo IN ('whatsapp','atividade','nota','email','ligacao'))"""
+    frio = f"(l.responsavel_id IS NULL AND NOT {teve} AND substr(CAST(l.criado_em AS TEXT),1,10) < ?)"
+
+    def _um(sql, extra):
+        try:
+            r = conn.execute(f"SELECT COUNT(*) c FROM crm_leads l WHERE {abertas}{dono} AND {sql}",
+                             p + extra).fetchone()
+            return int((r['c'] if hasattr(r, 'keys') else r[0]) or 0)
+        except Exception as e:
+            app.logger.info(f"[CRM] fila: {e}")
+            try: conn.rollback()
+            except Exception: pass
+            return 0
+
+    return {
+        'sem_dono': _um(f"NOT {frio} AND l.responsavel_id IS NULL "
+                        "AND substr(CAST(l.criado_em AS TEXT),1,10) >= ?", [corte_frio, corte_novo]),
+        'sem_contato': _um(f"NOT {frio} AND NOT {teve}", [corte_frio]),
+        'parados': _um(f"NOT {frio} AND COALESCE(substr(CAST(l.avancou_em AS TEXT),1,10), "
+                       "substr(CAST(l.criado_em AS TEXT),1,10)) < ?", [corte_frio, corte_parado]),
+        'frios': _um(frio.replace('(', '(', 1), [corte_frio]),
+        'corte_novo': corte_novo,
+    }
 
 
 @app.route('/crm/painel')

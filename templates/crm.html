@@ -328,6 +328,24 @@
      elas nao herdavam o recuo e nasciam desalinhadas do filtro logo abaixo —
      e coladas na linha da topbar, sem respiro. Aqui elas repetem o mesmo
      recuo horizontal da pagina e ganham o ar de cima. */
+  /* Fila de acao: uma faixa, nao quatro cartoes. Cartao grande e pra numero que
+     se contempla; isto e pra clicar e resolver. Some quando nao ha o que fazer. */
+  .crm-fila { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+              padding:10px 14px; margin-bottom:14px; border-radius:12px;
+              background:var(--panel); border:1px solid var(--borda); }
+  .crm-fila-tit { font-size:10px; font-weight:700; letter-spacing:.6px;
+                  text-transform:uppercase; color:var(--cinza-2); margin-right:4px; }
+  .crm-fila-item { display:inline-flex; align-items:baseline; gap:6px; text-decoration:none;
+                   padding:5px 12px; border-radius:999px; border:1px solid var(--borda-2);
+                   background:var(--panel-2); transition:.15s; }
+  .crm-fila-item b { font-family:'Sora',sans-serif; font-size:14px; color:var(--amarelo);
+                     font-variant-numeric:tabular-nums; }
+  .crm-fila-item span { font-size:11.5px; color:var(--cinza); }
+  .crm-fila-item:hover { border-color:var(--amarelo); }
+  .crm-fila-item:hover span { color:var(--texto); }
+  .crm-fila-rel { margin-left:auto; font-size:11.5px; color:var(--cinza-2); text-decoration:none; }
+  .crm-fila-rel:hover { color:var(--azul); text-decoration:underline; }
+  @media (max-width:640px) { .crm-fila-rel { margin-left:0; } }
   .quadro-abas { display:flex; gap:8px; flex-wrap:wrap; align-items:center;
                  padding:20px 28px 0; margin:0 0 4px; }
   .quadro-aba { display:inline-flex; align-items:center; gap:7px; text-decoration:none;
@@ -461,6 +479,32 @@
 {% endif %}
 
 <div class="page" style="padding-right:0;{% if quadros|length > 1 %} padding-top:12px;{% endif %}">
+
+  {# A FILA DE TRABALHO mora aqui, e nao no painel. E o que trava o funil HOJE,
+     e trabalho tem que estar onde a pessoa ja esta o dia inteiro. So aparece
+     quando ha o que fazer: fila zerada e quatro zeros ocupando o topo. #}
+  {% if fila and (fila.sem_dono or fila.sem_contato or fila.parados) %}
+  <div class="crm-fila">
+    <span class="crm-fila-tit">Precisa de ação</span>
+    {% if fila.sem_dono %}
+    <a class="crm-fila-item" href="/crm?sem_responsavel=1&nao_frio=1&abertos=1&data_de={{ fila.corte_novo }}">
+      <b>{{ fila.sem_dono|numero }}</b><span>sem dono</span>
+    </a>
+    {% endif %}
+    {% if fila.sem_contato %}
+    <a class="crm-fila-item" href="/crm?sem_contato=1&nao_frio=1&abertos=1">
+      <b>{{ fila.sem_contato|numero }}</b><span>sem 1º contato</span>
+    </a>
+    {% endif %}
+    {% if fila.parados %}
+    <a class="crm-fila-item" href="/crm?parados=1&nao_frio=1&abertos=1">
+      <b>{{ fila.parados|numero }}</b><span>parados há 7 dias ou mais</span>
+    </a>
+    {% endif %}
+    <a class="crm-fila-rel" href="/crm/painel">ver o relatório do período</a>
+  </div>
+  {% endif %}
+
 
   <!-- ── FILTROS ── -->
   <form method="GET" action="/crm" class="crm-filtros" id="form-filtros">

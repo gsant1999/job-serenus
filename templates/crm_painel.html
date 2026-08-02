@@ -98,34 +98,9 @@
    fileira de sete numeros, e o mais importante ("96% da base nunca foi
    tocada") ficava com o mesmo peso do "pipeline estimado". #}
 
-<section class="bloco-acao">
-  <div class="bloco-cab">
-    <h2>Precisa de ação</h2>
-    <span class="bloco-sub">O que está travando o funil agora. Clique para abrir a lista.</span>
-  </div>
-  <div class="kpi-grid acao">
-    <a class="kpi acao-item {{ 'alerta' if cards.sem_dono else '' }}" href="/crm?sem_responsavel=1&nao_frio=1&abertos=1&data_de={{ cards.corte_novo }}">
-      <div class="lbl">Sem dono</div>
-      <div class="val">{{ cards.sem_dono|numero }}</div>
-      <div class="sub">leads dos últimos 30 dias que ninguém está atendendo</div>
-    </a>
-    <a class="kpi acao-item {{ 'alerta' if cards.sem_contato else '' }}" href="/crm?sem_contato=1&nao_frio=1&abertos=1">
-      <div class="lbl">Sem 1º contato</div>
-      <div class="val">{{ cards.sem_contato|numero }}</div>
-      <div class="sub">de {{ cards.aberto|numero }} em aberto — {{ cards.taxa_contato }}% já tiveram contato registrado</div>
-    </a>
-    <a class="kpi acao-item {{ 'alerta' if cards.parados else '' }}" href="/crm?parados=1&nao_frio=1&abertos=1">
-      <div class="lbl">Parados há 7 dias ou mais</div>
-      <div class="val">{{ cards.parados|numero }}</div>
-      <div class="sub">sem mudar de etapa nem de sub-status</div>
-    </a>
-    <div class="kpi acao-item frio">
-      <div class="lbl">Base fria<i class="ajuda-i" title="Lead aberto, sem dono e sem nenhum contato ha mais de 60 dias. Nao e pipeline, e historico — por isso fica FORA da conta da conversao. Deixar esses no denominador fazia a taxa medir uma base que ninguem trabalhou.">i</i></div>
-      <div class="val">{{ cards.frios|numero }}</div>
-      <div class="sub">fora da conta de conversão</div>
-    </div>
-  </div>
-</section>
+{# A FILA DE ACAO SUBIU PRO /crm. Esta pagina passa a ser so o relatorio do
+   periodo: coisa que se olha de vez em quando, nao o trabalho do dia. Juntas,
+   uma atrapalhava a outra e a pagina ficava longa e sem proposito. #}
 
 <section class="bloco-resultado">
   <div class="bloco-cab">
