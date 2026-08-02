@@ -28,6 +28,10 @@
                overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .mt-sel { background:var(--panel-3); border:1px solid var(--borda); color:var(--texto);
             border-radius:7px; padding:5px 8px; font-size:11.5px; font-family:inherit; height:30px; }
+  /* A explicação aparece na linha que ele acabou de marcar — é onde a dúvida
+     existe, não num manual. */
+  .mt-expl { font-size:11px; color:var(--info); margin-top:5px; line-height:1.45; max-width:210px; }
+  .mt-expl:empty { display:none; }
   .mt-vazio { text-align:center; padding:50px 20px; color:var(--cinza); }
   .mt-vazio b { display:block; font-size:16px; color:var(--texto); margin-bottom:6px; }
 </style>
@@ -60,7 +64,7 @@
     <div class="mt-lote">
       <select id="mt-lote-motivo" class="mt-sel" style="height:34px;">
         <option value="">Aplicar em lote…</option>
-        {% for o in opcoes %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
+        {% for o in opcoes %}<option value="{{ o }}" title="{{ ajuda.get(o, '') }}">{{ o }}</option>{% endfor %}
       </select>
       <button type="button" class="btn-outline btn-sm" onclick="aplicarLote(false)">nas vazias desta tela</button>
       <button type="button" class="btn-primario-sm" id="mt-salvar" onclick="salvar()">Salvar</button>
@@ -89,8 +93,9 @@
           <td>
             <select class="mt-sel mt-motivo" onchange="marcar(this)">
               <option value="">—</option>
-              {% for o in opcoes %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
+              {% for o in opcoes %}<option value="{{ o }}" title="{{ ajuda.get(o, '') }}">{{ o }}</option>{% endfor %}
             </select>
+            <div class="mt-expl"></div>
           </td>
         </tr>
         {% endfor %}
@@ -106,8 +111,11 @@
 </div>
 
 <script>
+const AJUDA = {{ ajuda|tojson }};
 function marcar(sel){
   const tr = sel.closest('tr');
+  const ex = tr.querySelector('.mt-expl');
+  if(ex) ex.textContent = AJUDA[sel.value] || '';
   tr.classList.toggle('feito', !!sel.value);
   contar();
 }

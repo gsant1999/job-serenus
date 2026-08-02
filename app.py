@@ -18785,12 +18785,7 @@ def api_whatsapp_lead_ficha():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
-        return _wa_cors(jsonify({
-        # Os motivos de perda e o que cada um QUER DIZER viajam com a ficha: a
-        # extensao precisa perguntar dentro do WhatsApp, e quem pergunta tem que
-        # explicar.
-        "motivos_perda": _motivos_perda_lista(conn),
-        "motivos_ajuda": MOTIVO_PERDA_AJUDA,"ok": False, "erro": "Chave da extensão inválida"})), 401
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     tel = _normalizar_telefone(request.args.get('telefone', ''))
     lid = request.args.get('lead_id', type=int)
     if not tel and not lid:
@@ -18814,6 +18809,11 @@ def api_whatsapp_lead_ficha():
             # Sem lead ainda: devolve as listas pro popup já oferecer "criar lead"
             # com etapa/etiquetas prontas, sem uma segunda ida ao servidor.
             return _wa_cors(jsonify({
+            # Os motivos de perda e o que cada um QUER DIZER viajam com a ficha:
+            # a extensao precisa perguntar dentro do WhatsApp, e quem pergunta
+            # tem que explicar.
+            "motivos_perda": _motivos_perda_lista(conn),
+            "motivos_ajuda": MOTIVO_PERDA_AJUDA,
                 "ok": True, "existe": False, "telefone_norm": tel,
                 "etapas": etapas, "quadros": quadros_lista,
                 "etiquetas_todas": etiquetas_todas,
@@ -18849,6 +18849,11 @@ def api_whatsapp_lead_ficha():
             "wa_chats": [r['chat_id'] for r in conn.execute(
                 "SELECT chat_id FROM wa_chat_lead WHERE lead_id=?", (lead['id'],)).fetchall()],
             "origens": _WA_ORIGENS_LEAD,
+            # Os motivos de perda e o que cada um QUER DIZER viajam com a ficha:
+            # a extensao precisa perguntar dentro do WhatsApp, e quem pergunta
+            # tem que explicar.
+            "motivos_perda": _motivos_perda_lista(conn),
+            "motivos_ajuda": MOTIVO_PERDA_AJUDA,
         }
     except Exception as e:
         close_db(conn)

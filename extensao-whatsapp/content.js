@@ -2782,6 +2782,7 @@
       _blocoVinculoChat(f, l) +
       '<div class="job-ficha-campo"><label>Etapa</label>' +
         '<select data-ficha="etapa">' + _fichaOpcoesEtapa(f, l) + '</select></div>' +
+        _perdaHtml() +
       // CRONOMETRO junto do sub-status, igual ao card do CRM. Aqui e onde o
       // consultor decide o que fazer com o lead: saber HA QUANTO TEMPO ele esta
       // parado no mesmo passo muda a decisao, e antes esse tempo so existia no
@@ -2945,7 +2946,9 @@
         const av = document.getElementById('job-ficha-aviso');
         if (av) av.textContent = selEtapa.value !== (_ficha.lead || {}).etapa
           ? 'Mudança de etapa limpa o sub-status.' : '';
+        _perdaMostrar(selEtapa.value);
       });
+      _perdaMostrar(selEtapa.value);
     }
     const salvar = document.getElementById('job-ficha-salvar');
     if (salvar) salvar.addEventListener('click', () => _salvarFicha(aba));
@@ -2967,6 +2970,43 @@
         }).catch(() => { b.textContent = 'Falha ao copiar'; });
       });
     });
+  }
+
+  // ── MOTIVO DA PERDA, DENTRO DO WHATSAPP ─────────────────────────────────
+  // O consultor acabou de ler a conversa: e o unico instante em que ele sabe
+  // por que perdeu. Obrigar a abrir o site pra responder e garantir que ele nao
+  // responde — foi assim que 216 perdas ficaram com "Nao informado".
+  function _perdaEhEtapaPerdida(slug) {
+    const e = ((_ficha && _ficha.etapas) || []).find((x) => (x.id || x.slug) === slug);
+    return !!(e && (e.tipo === 'perdido'));
+  }
+
+  function _perdaMostrar(slug) {
+    const cx = document.getElementById('job-perda-bloco');
+    if (!cx) return;
+    const mostra = _perdaEhEtapaPerdida(slug) && slug !== ((_ficha.lead || {}).etapa || '');
+    cx.hidden = !mostra;
+    if (mostra) {
+      const sel = cx.querySelector('[data-campo="motivo_perda"]');
+      if (sel && !sel.options.length) {
+        const ops = (_ficha.motivos_perda || []);
+        sel.innerHTML = '<option value="">— por que perdeu? —</option>' +
+          ops.map((o) => '<option value="' + esc(o) + '">' + esc(o) + '</option>').join('');
+        sel.addEventListener('change', () => {
+          const ex = cx.querySelector('.job-perda-expl');
+          if (ex) ex.textContent = ((_ficha.motivos_ajuda || {})[sel.value] || '');
+        });
+      }
+    }
+  }
+
+  function _perdaHtml() {
+    return '<div class="job-perda" id="job-perda-bloco" hidden>' +
+      '<div class="job-perda-tit">Por que perdeu?' +
+      '<i class="job-i" title="A operadora nao pede isso; quem pede e voce. Sem motivo, o relatorio de perda nao existe e o mes que vem ninguem sabe o que consertar. Responda agora, que voce acabou de ler a conversa.">i</i></div>' +
+      '<select class="job-perda-sel" data-campo="motivo_perda"></select>' +
+      '<div class="job-perda-expl"></div>' +
+      '</div>';
   }
 
   // Lê o DOM pro objeto em memória. Existe porque as abas re-renderizam: sem

@@ -998,3 +998,22 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
                border-radius:7px; padding:6px 9px; margin-bottom:8px; line-height:1.45; }
 .job-tr-diag.ruim { background:rgba(244,63,94,.1); color:#fda4af; }
 .job-tr-diag-h { opacity:.6; }
+
+/* ── Motivo da perda dentro do WhatsApp ──
+   Aparece só quando a etapa escolhida é de perda. É o instante em que o
+   consultor acabou de ler a conversa — o único em que ele sabe o motivo. */
+.job-perda { margin: 8px 0 4px; padding: 10px 12px; border-radius: 9px;
+             background: rgba(244,63,124,.07); border: 1px solid rgba(244,63,124,.28); }
+.job-perda[hidden] { display: none; }
+.job-perda-tit { font-size: 11.5px; font-weight: 700; color: #f7a8c0; margin-bottom: 7px;
+                 display: flex; align-items: center; gap: 5px; }
+.job-perda-sel { width: 100%; background: rgba(0,0,0,.25); color: #e9edef;
+                 border: 1px solid rgba(255,255,255,.14); border-radius: 6px;
+                 padding: 6px 8px; font-size: 11.5px; font-family: inherit; }
+.job-perda-expl { font-size: 11px; color: #7ae3c3; margin-top: 7px; line-height: 1.5; }
+.job-perda-expl:empty { display: none; }
+/* O "i" da extensão: mesmo papel do "i" do site. */
+.job-i { display: inline-flex; align-items: center; justify-content: center;
+         width: 13px; height: 13px; border-radius: 50%; font-size: 9px; font-style: normal;
+         font-weight: 700; background: rgba(255,255,255,.12); color: #8696a0; cursor: help; }
+.job-i:hover { background: rgba(83,189,235,.25); color: #53bdeb; }
