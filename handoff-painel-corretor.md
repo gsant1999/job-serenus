@@ -123,11 +123,97 @@ posição dele pode mudar quando eles mexerem no layout. A leitura tem que ser
 por âncora semântica (a chave da faixa, o `R$`), nunca por posição, e o canário
 tem que gritar se um plano voltar sem preço.
 
+## O que já está construído (02/08/2026)
+
+Na extensão, versão 2.82.0:
+
+- `extensao-whatsapp/cotador-painel.js` — o motor, no contexto da página do
+  Painel. Faz criar → operadoras → planos → preço e devolve o resultado pronto.
+- `extensao-whatsapp/painel-bridge.js` — a ponte, e quem guarda o que foi
+  aprendido entre uma sessão e outra.
+- `background.js` — acha a aba do Painel e repassa o pedido. Não rouba o foco:
+  o consultor está no WhatsApp falando com o cliente.
+
+Ainda **não tem tela**. O motor responde a quem perguntar; a interface (o
+formulário de cotação e a lista de planos com preço) é o próximo passo.
+
+### Como ele aprende
+
+Não existe hash escrito no código. Na primeira vez, o consultor faz **uma**
+cotação normal na mão, com o Painel aberto — e é só isso. A extensão reconhece
+cada chamada pelo formato do corpo e guarda o identificador que veio junto.
+Depois disso ela cota sozinha, e o aprendizado sobrevive a fechar o navegador.
+
+Quando a Trindade fizer deploy e os identificadores mudarem, o cotador diz
+`precisa_aprender` em vez de devolver número errado. O conserto é o consultor
+fazer uma cotação na mão de novo.
+
+### Não ser descoberto
+
+Exigência do Guilherme, e ela mandou no desenho:
+
+| Risco | O que foi feito |
+|---|---|
+| Cabeçalho nosso na chamada | Só os quatro que a tela deles já manda. Testado: nenhum intruso. |
+| Rastro no console da máquina | Nada no `window`, nada de `console.log`. A trava anti-duplicação é não-enumerável. |
+| Etiqueta dentro do sistema deles | A cotação nasce com o título padrão `"Cotação"`, igual ao da tela. |
+| Cadência de robô | Espera irregular entre chamadas, e no máximo duas simultâneas. |
+
+O custo está declarado: a cotação sai em **segundos**, não em um segundo. Dá
+pra ir mais rápido a qualquer momento — é uma constante no código — mas aí
+começa a parecer o que é.
+
+## Duas armadilhas que os testes pegaram
+
+Ficam registradas porque as duas devolviam resultado **plausível e errado**,
+que é o tipo que passa despercebido:
+
+1. **A faixa etária mais cara sumia.** As nove primeiras faixas têm rótulo
+   `"54 a 58"`; a última diz `"59 ou mais"`. Lendo pelo rótulo, o detalhamento
+   vinha com nove linhas — e o total continuava certo, porque vem de outro
+   lugar. Agora a leitura ancora na chave da linha (`59-199`), e existe uma
+   conferência permanente: a soma das faixas tem que fechar com o total, senão
+   o plano sai marcado como suspeito.
+
+2. **A rota ia errada nas chamadas de preço.** O cabeçalho de rota era um só
+   para as quatro ações, e a primeira aprendida é a da tela `/cotacoes/nova`,
+   que não tem id de cotação. Agora cada ação guarda a sua.
+
+## Como conferir sem tocar no Painel
+
+```
+python3 testes/testar_cotador_painel.py
+node testes/testar_cotador_ponta_a_ponta.js
+```
+
+O primeiro confere os parsers contra as respostas reais capturadas; o segundo
+roda o cotador inteiro contra um servidor falso que devolve essas respostas.
+Nenhum dos dois chama a Trindade. Precisam do arquivo de mapeamento em
+`~/Downloads/mapa-painel-v2.json`.
+
 ## Quanto tempo leva um multicálculo
 
 Medido: 22 chamadas reais, mediana 130ms, pior caso 858ms.
 
 Uma cotação completa = 1 chamada de lista por operadora + 1 de preço por plano
-escolhido. Com as chamadas em paralelo, 20 combinações fecham em **menos de um
-segundo**. O gargalo não vai ser a rede deles — vai ser quantas a gente dispara
-de uma vez sem parecer robô. Começar com 4 simultâneas e medir.
+escolhido.
+
+A rede deles nunca foi o gargalo — o gargalo é o disfarce, e ele é escolha
+nossa. Com o ritmo humano que ficou no código (duas listas por vez, preço um a
+um, espera irregular), a conta para 3 operadoras e 10 planos é:
+
+| Etapa | Chamadas | Tempo |
+|---|---|---|
+| Criar a cotação | 1 | ~0,6s |
+| Operadoras da cidade | 1 | ~0,8s |
+| Planos por operadora | 3, de duas em duas | ~1,5s |
+| Preço, um por plano | 10 | ~7s |
+| **Total** | **15** | **~10s** |
+
+Dez segundos para dez planos com preço e detalhamento por faixa. Hoje isso é
+o consultor abrindo o Painel, preenchendo o formulário e clicando plano por
+plano — minutos, e sem o resultado voltando pro JOB.
+
+O filtro de vidas e exigências roda **antes** de pedir preço: cada plano que
+não serve pro cliente é ~700ms que não acontece. É o botão de velocidade mais
+seguro que temos, porque não mexe no disfarce.
