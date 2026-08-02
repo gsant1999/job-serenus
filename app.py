@@ -6814,6 +6814,103 @@ def proposta_plataforma_preview(pid):
                     "avisada_em": d.get('plataforma_avisada_em')})
 
 
+
+# ── MUTIRAO: as perdas antigas que ficaram sem motivo ─────────────────────────
+# A trava nova so vale daqui pra frente. O passivo (216 perdas com "Nao
+# informado") nao se resolve sozinho, e uma a uma pela ficha ninguem faz.
+# Esta tela existe pra ser fechada: quando o numero chegar a zero, ela some do
+# painel e nao volta.
+
+def _campo_motivo_perda(conn):
+    return conn.execute("SELECT id, opcoes_json FROM crm_campos WHERE chave='motivo_perda'").fetchone()
+
+
+@app.route('/crm/mutirao-perdas')
+@login_required
+@admin_required
+def crm_mutirao_perdas():
+    conn = db()
+    campo = _campo_motivo_perda(conn)
+    try:
+        opcoes = json.loads(campo['opcoes_json'] or '[]') if campo else []
+    except Exception:
+        opcoes = []
+    # Sem motivo NEM na coluna NEM no campo — as duas fontes existem e alguem
+    # pode ter preenchido so uma delas.
+    linhas = conn.execute("""
+        SELECT l.id, l.nome, l.telefone, l.origem, l.criado_em, l.avancou_em,
+               e.nome AS etapa_nome, u.nome AS responsavel
+          FROM crm_leads l
+          JOIN crm_etapas e ON e.slug = l.etapa AND e.tipo = 'perdido'
+          LEFT JOIN usuarios u ON u.id = l.responsavel_id
+         WHERE COALESCE(NULLIF(TRIM(COALESCE(l.perdido_motivo,'')), ''), '') = ''
+           AND l.id NOT IN (SELECT lead_id FROM crm_lead_campos
+                            WHERE campo_id = ? AND TRIM(COALESCE(valor,'')) <> '')
+         ORDER BY COALESCE(l.avancou_em, l.criado_em) DESC
+    """, (campo['id'] if campo else 0,)).fetchall()
+    # A ultima coisa que aconteceu ajuda a lembrar por que se perdeu — sem isso
+    # e um nome numa lista e o consultor chuta.
+    ultimas = {}
+    if linhas:
+        ids = [r['id'] for r in linhas]
+        marc = ','.join(['?'] * len(ids))
+        try:
+            for r in conn.execute(f"""SELECT lead_id, descricao, criado_em FROM crm_atividades
+                                      WHERE lead_id IN ({marc})
+                                      ORDER BY id DESC""", ids).fetchall():
+                ultimas.setdefault(r['lead_id'], (r['descricao'] or '')[:110])
+        except Exception:
+            pass
+    close_db(conn)
+    itens = [{**dict(r), 'ultima': ultimas.get(r['id'], ''),
+              'quando': _fmt_data_br(r['avancou_em'] or r['criado_em'])} for r in linhas]
+    return render_template('crm_mutirao_perdas.html', itens=itens, opcoes=opcoes)
+
+
+@app.route('/crm/mutirao-perdas/salvar', methods=['POST'])
+@login_required
+@admin_required
+def crm_mutirao_perdas_salvar():
+    """Grava em lote. Escreve nos DOIS lugares: a coluna, de onde o painel le, e
+    o campo, que e o que a ficha mostra."""
+    d = request.json or {}
+    itens = d.get('itens') or []
+    if not isinstance(itens, list) or not itens:
+        return jsonify({"ok": False, "erro": "Nada para salvar"}), 400
+    conn = db()
+    campo = _campo_motivo_perda(conn)
+    try:
+        validas = set(json.loads(campo['opcoes_json'] or '[]')) if campo else set()
+    except Exception:
+        validas = set()
+    n = 0
+    try:
+        for it in itens[:500]:
+            try:
+                lid = int(it.get('id') or 0)
+            except (TypeError, ValueError):
+                continue
+            motivo = str(it.get('motivo') or '').strip()
+            if not lid or not motivo or (validas and motivo not in validas):
+                continue
+            conn.execute("UPDATE crm_leads SET perdido_motivo=? WHERE id=?", (motivo[:120], lid))
+            gravar_campo_lead(conn, lid, 'motivo_perda', motivo, fonte='mutirao')
+            conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao)
+                            VALUES (?,?,?,?)""",
+                         (lid, session.get('nome'), 'nota',
+                          f'Motivo da perda preenchido no mutirão: {motivo}'))
+            n += 1
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        close_db(conn)
+        app.logger.warning(f"[MUTIRAO] {e}")
+        return jsonify({"ok": False, "erro": "Não consegui salvar"}), 200
+    close_db(conn)
+    return jsonify({"ok": True, "gravados": n})
+
+
 @app.route('/api/cep/<cep>')
 @login_required
 def api_cep(cep):

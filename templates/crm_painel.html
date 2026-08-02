@@ -225,7 +225,15 @@
 
   <!-- Motivos de perda -->
   <div class="panel-box">
-    <h2>Motivos de perda</h2>
+    <h2>Motivos de perda
+      {# O link so aparece quando ha o que resolver: tela de mutirao existe pra
+         ser fechada, nao pra morar no menu. #}
+      {% set sem_motivo = perdas | selectattr('motivo', 'equalto', 'Não informado') | map(attribute='qtd') | sum %}
+      {% if sem_motivo %}
+      <a href="/crm/mutirao-perdas" class="btn-outline btn-sm" style="margin-left:10px; font-size:11px;">
+        Preencher as {{ sem_motivo }} sem motivo</a>
+      {% endif %}
+    </h2>
     {% if perdas %}
     <table class="pnl-tab">
       <thead><tr><th>Motivo</th><th style="text-align:right;">Qtd</th></tr></thead>

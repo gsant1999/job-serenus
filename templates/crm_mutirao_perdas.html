@@ -1,0 +1,147 @@
+{% extends 'base.html' %}
+{% block title %}Perdas sem motivo{% endblock %}
+
+{% block head %}
+<style>
+  /* Uma tela feita pra ser FECHADA. Quando o contador chegar a zero ela some do
+     painel e não volta — por isso o desenho é de mutirão, não de relatório:
+     linha densa, um clique resolve, e ação em lote pro que ninguém lembra. */
+  .mt-topo { display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+             background:var(--panel-2); border:1px solid var(--borda); border-radius:12px;
+             padding:14px 18px; margin-bottom:14px; position:sticky; top:0; z-index:30;
+             backdrop-filter:blur(12px); }
+  .mt-contador b { font-size:22px; font-variant-numeric:tabular-nums; }
+  .mt-contador span { font-size:12px; color:var(--cinza); display:block; }
+  .mt-lote { display:flex; align-items:center; gap:8px; margin-left:auto; flex-wrap:wrap; }
+  .mt-lote select { min-width:190px; }
+
+  .mt-tab { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .mt-tab th { text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:.5px;
+               color:var(--cinza); font-weight:600; padding:8px 10px;
+               border-bottom:1px solid var(--borda); }
+  .mt-tab td { padding:9px 10px; border-bottom:1px solid var(--borda); vertical-align:middle; }
+  .mt-tab tr.feito { opacity:.45; }
+  .mt-nome { font-weight:600; }
+  .mt-sub { font-size:11px; color:var(--cinza); margin-top:2px; }
+  /* O que aconteceu por último: é o que faz o consultor lembrar em vez de chutar. */
+  .mt-ultima { font-size:11px; color:var(--cinza-2); max-width:340px;
+               overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mt-sel { background:var(--panel-3); border:1px solid var(--borda); color:var(--texto);
+            border-radius:7px; padding:5px 8px; font-size:11.5px; font-family:inherit; height:30px; }
+  .mt-vazio { text-align:center; padding:50px 20px; color:var(--cinza); }
+  .mt-vazio b { display:block; font-size:16px; color:var(--texto); margin-bottom:6px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Perdas sem motivo</h1>
+    <div class="sub">O passivo de antes da trava. Preencher aqui é o que faz o relatório de perda existir.</div>
+  </div>
+  <a href="/crm/painel" class="btn-outline">Voltar ao painel</a>
+</div>
+
+<div class="page">
+{% if not itens %}
+  <div class="mt-vazio">
+    <b>Nenhuma perda sem motivo.</b>
+    Toda perda registrada tem um motivo — o relatório de perda está completo.
+  </div>
+{% else %}
+
+  <div class="mt-topo">
+    <div class="mt-contador">
+      <b id="mt-falta">{{ itens|length }}</b>
+      <span>perdas ainda sem motivo</span>
+    </div>
+    {# A ação em lote existe porque perda antiga ninguém lembra. Sem ela, a tela
+       vira 216 decisões individuais e não é feita nunca. #}
+    <div class="mt-lote">
+      <select id="mt-lote-motivo" class="mt-sel" style="height:34px;">
+        <option value="">Aplicar em lote…</option>
+        {% for o in opcoes %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
+      </select>
+      <button type="button" class="btn-outline btn-sm" onclick="aplicarLote(false)">nas vazias desta tela</button>
+      <button type="button" class="btn-primario-sm" id="mt-salvar" onclick="salvar()">Salvar</button>
+    </div>
+  </div>
+
+  <div class="panel-box" style="padding:0; overflow:hidden;">
+    <table class="mt-tab">
+      <thead><tr>
+        <th style="width:32%;">Lead</th>
+        <th style="width:14%;">Perdido em</th>
+        <th style="width:16%;">Consultor</th>
+        <th>Última coisa que aconteceu</th>
+        <th style="width:210px;">Motivo</th>
+      </tr></thead>
+      <tbody>
+        {% for i in itens %}
+        <tr data-id="{{ i.id }}">
+          <td>
+            <div class="mt-nome"><a href="/lead/{{ i.id }}" target="_blank" rel="noopener">{{ i.nome or 'Sem nome' }}</a></div>
+            <div class="mt-sub">{{ i.telefone or '—' }}{% if i.origem %} · {{ i.origem }}{% endif %}</div>
+          </td>
+          <td>{{ i.quando or '—' }}<div class="mt-sub">{{ i.etapa_nome }}</div></td>
+          <td>{{ i.responsavel or 'Sem responsável' }}</td>
+          <td class="mt-ultima" title="{{ i.ultima }}">{{ i.ultima or '—' }}</td>
+          <td>
+            <select class="mt-sel mt-motivo" onchange="marcar(this)">
+              <option value="">—</option>
+              {% for o in opcoes %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
+            </select>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <p class="hint" style="margin-top:12px;">
+    Perda antiga que ninguém lembra: marque <b>Sumiu</b> ou <b>Lead inválido</b> em lote e siga.
+    Motivo chutado é pior que motivo genérico — o relatório passa a mentir em vez de só faltar.
+  </p>
+{% endif %}
+</div>
+
+<script>
+function marcar(sel){
+  const tr = sel.closest('tr');
+  tr.classList.toggle('feito', !!sel.value);
+  contar();
+}
+function contar(){
+  const total = document.querySelectorAll('.mt-motivo').length;
+  const feitos = [...document.querySelectorAll('.mt-motivo')].filter(s => s.value).length;
+  document.getElementById('mt-falta').textContent = total - feitos;
+}
+// Só nas vazias, de propósito: quem já respondeu à mão não pode ser atropelado
+// por um clique em lote.
+function aplicarLote(){
+  const v = document.getElementById('mt-lote-motivo').value;
+  if(!v){ toast('Escolha o motivo do lote','err'); return; }
+  let n = 0;
+  document.querySelectorAll('.mt-motivo').forEach(s => {
+    if(!s.value){ s.value = v; s.closest('tr').classList.add('feito'); n++; }
+  });
+  contar();
+  toast(n + ' marcada(s) — confira e salve','ok');
+}
+async function salvar(){
+  const itens = [...document.querySelectorAll('tr[data-id]')]
+    .map(tr => ({id: tr.dataset.id, motivo: tr.querySelector('.mt-motivo').value}))
+    .filter(x => x.motivo);
+  if(!itens.length){ toast('Nada marcado ainda','err'); return; }
+  const b = document.getElementById('mt-salvar');
+  b.disabled = true; b.textContent = 'Salvando...';
+  try{
+    const r = await fetch('/crm/mutirao-perdas/salvar', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({itens})});
+    const d = await r.json();
+    if(d.ok){ toast(d.gravados + ' perda(s) com motivo','ok'); setTimeout(()=>location.reload(), 900); }
+    else { toast(d.erro || 'Erro','err'); b.disabled = false; b.textContent = 'Salvar'; }
+  }catch(e){ toast('Erro de conexão','err'); b.disabled = false; b.textContent = 'Salvar'; }
+}
+</script>
+{% endblock %}
