@@ -2,6 +2,37 @@
 {% block title %}Fluxo de Caixa{% endblock %}
 
 {% block content %}
+<style>
+  /* O caminho do dinheiro, na ordem em que ele anda. A conta fica VISIVEL: os
+     sinais de + e = dizem que as tres primeiras somam na quarta, coisa que
+     cinco cartoes iguais nao conseguiam dizer. */
+  .fx-caminho { display:flex; gap:12px; align-items:stretch; flex-wrap:wrap; margin-bottom:22px; }
+  .fx-etapas { flex:1 1 640px; display:flex; align-items:stretch; gap:10px; flex-wrap:wrap;
+               background:var(--panel); border:1px solid var(--borda); border-radius:14px;
+               padding:16px 18px; }
+  .fx-etapa { flex:1 1 150px; display:flex; flex-direction:column; gap:3px;
+              border-left:3px solid var(--c, var(--borda-2)); padding-left:12px; }
+  .fx-lbl { font-size:10px; font-weight:700; letter-spacing:.5px; text-transform:uppercase;
+            color:var(--cinza-2); display:flex; align-items:center; gap:2px; }
+  .fx-etapa b { font-family:'Sora',sans-serif; font-size:19px; font-weight:700;
+                color:var(--c, var(--texto)); font-variant-numeric:tabular-nums;
+                letter-spacing:-.4px; line-height:1.15; }
+  .fx-sub { font-size:10.5px; color:var(--cinza); }
+  .fx-mais { align-self:center; font-size:16px; color:var(--cinza-2); font-weight:600;
+             flex:0 0 auto; }
+  /* O total e o unico destaque: e a pergunta que a tela existe pra responder. */
+  .fx-total { flex:1 1 190px; border-left:none; border-radius:10px; padding:12px 14px;
+              background:var(--verde-soft); border:1px solid rgba(31,216,164,.28); }
+  .fx-total b { font-size:24px; color:var(--verde); }
+  .fx-total .fx-lbl { color:var(--verde); }
+  /* Historico fora da faixa: ja saiu, nao disputa atencao com o que esta parado. */
+  .fx-historico { flex:0 1 220px; display:flex; flex-direction:column; gap:3px;
+                  justify-content:center; padding:16px 18px; border-radius:14px;
+                  border:1px dashed var(--borda-2); }
+  .fx-historico b { font-family:'Sora',sans-serif; font-size:17px; color:var(--cinza);
+                    font-variant-numeric:tabular-nums; }
+  @media (max-width:760px) { .fx-mais { display:none; } }
+</style>
 <div class="topbar">
   <div>
     <h1>Fluxo de Caixa</h1>
@@ -89,32 +120,43 @@
     </div>
   </div>
 
-  <!-- Cards totais -->
-  <div class="metricas" style="grid-template-columns:repeat(5,1fr); margin-bottom:22px;">
-    <div class="metrica" style="border-top:3px solid #f59e0b;">
-      <div class="lbl">Pendente de receber</div>
-      <div class="val" style="font-size:18px; color:#d97706;">{{ totais['Pendente de receber']|moeda  }}</div>
-      <div class="sub">aguardando operadora</div>
+  {# O DINHEIRO E UM CAMINHO, e a tela mostrava cinco caixas iguais.
+     Sao tres etapas do MESMO dinheiro — a operadora ainda nao pagou, ja pagou e
+     esta aqui, ja esta liberado pro consultor — e o "total em aberto" e a soma
+     das tres, nao uma sexta grandeza. Pago total nao pertence a esse caminho:
+     e historico, ja saiu. Mostrar tudo com o mesmo peso escondia justamente a
+     unica coisa que a tela precisa dizer: onde o dinheiro esta parado. #}
+  <div class="fx-caminho">
+    <div class="fx-etapas">
+      <div class="fx-etapa" style="--c:#f59e0b;">
+        <span class="fx-lbl">Pendente de receber<i class="ajuda-i" title="A operadora ainda não pagou esta comissão. Não está na conta de ninguém.">i</i></span>
+        <b>{{ totais['Pendente de receber']|moeda }}</b>
+        <span class="fx-sub">aguardando a operadora</span>
+      </div>
+      <span class="fx-mais">+</span>
+      <div class="fx-etapa" style="--c:var(--info);">
+        <span class="fx-lbl">Em caixa<i class="ajuda-i" title="A operadora já pagou e o dinheiro está na conta da corretora, mas ainda não foi repassado ao consultor.">i</i></span>
+        <b>{{ totais['Recebido e não repassado']|moeda }}</b>
+        <span class="fx-sub">recebido, não repassado</span>
+      </div>
+      <span class="fx-mais">+</span>
+      <div class="fx-etapa" style="--c:var(--verde);">
+        <span class="fx-lbl">Liberado p/ corretor<i class="ajuda-i" title="Já liberado: falta o aceite do consultor e o pagamento da sexta-feira.">i</i></span>
+        <b>{{ totais['Liberado para o corretor']|moeda }}</b>
+        <span class="fx-sub">aguardando aceite e sexta</span>
+      </div>
+      <span class="fx-mais fx-igual">=</span>
+      {# O UNICO destaque da faixa: e a pergunta que a tela existe pra responder. #}
+      <div class="fx-etapa fx-total">
+        <span class="fx-lbl">Total em aberto</span>
+        <b>{{ totais['total_em_aberto']|moeda }}</b>
+        <span class="fx-sub">dinheiro que ainda não chegou no consultor</span>
+      </div>
     </div>
-    <div class="metrica" style="border-top:3px solid var(--info);">
-      <div class="lbl">Em caixa</div>
-      <div class="val" style="font-size:18px; color:var(--info);">{{ totais['Recebido e não repassado']|moeda  }}</div>
-      <div class="sub">recebido, não repassado</div>
-    </div>
-    <div class="metrica" style="border-top:3px solid var(--verde);">
-      <div class="lbl">Liberado p/ corretor</div>
-      <div class="val" style="font-size:18px; color:var(--verde);">{{ totais['Liberado para o corretor']|moeda  }}</div>
-      <div class="sub">aguardando aceite e sexta</div>
-    </div>
-    <div class="metrica" style="border-top:3px solid #64748b;">
-      <div class="lbl">Pago total</div>
-      <div class="val" style="font-size:18px; color:var(--cinza);">{{ totais['Pago ao corretor']|moeda  }}</div>
-      <div class="sub">histórico</div>
-    </div>
-    <div class="metrica" style="border-top:3px solid var(--erro);">
-      <div class="lbl">Total em aberto</div>
-      <div class="val" style="font-size:18px; color:var(--erro);">{{ totais['total_em_aberto']|moeda  }}</div>
-      <div class="sub">pendente + caixa + liberado</div>
+    <div class="fx-historico">
+      <span class="fx-lbl">Já pago ao corretor</span>
+      <b>{{ totais['Pago ao corretor']|moeda }}</b>
+      <span class="fx-sub">histórico — fora do caminho acima</span>
     </div>
   </div>
 
