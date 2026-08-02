@@ -56,6 +56,31 @@
                background:rgba(250,204,21,.08); border:1px solid rgba(250,204,21,.3);
                font-size:12.5px; color:#eab308; }
   .lst-aviso b { font-family:'Sora',sans-serif; font-size:15px; }
+
+  /* O aviso da linha e um BOTAO: informar sem dar o que fazer e so barulho. */
+  .lst-vincular { display:inline-flex; align-items:center; margin-top:4px; padding:2px 8px;
+                  font-family:inherit; font-size:10px; font-weight:600; cursor:pointer;
+                  border-radius:6px; background:rgba(250,204,21,.10);
+                  border:1px solid rgba(250,204,21,.38); color:#eab308; transition:.15s; }
+  .lst-vincular:hover { background:rgba(250,204,21,.2); border-color:#eab308; }
+
+  /* Rolagem lateral dita em palavras, e com sombra na borda enquanto houver
+     conteudo escondido. Sem isso, duas colunas existiam so pra quem adivinhava. */
+  .lst-rolagem { font-size:11.5px; color:var(--cinza-2); padding:0 0 8px; }
+  .table-wrap.tem-mais { position:relative; }
+  .table-wrap.tem-mais::after { content:''; position:absolute; top:0; right:0; bottom:0; width:36px;
+                                pointer-events:none; background:linear-gradient(to right,transparent,var(--panel)); }
+
+  /* Busca de lead na propria linha. */
+  .lst-busca { position:absolute; z-index:60; background:var(--panel); border:1px solid var(--borda-2);
+               border-radius:10px; padding:10px; width:330px; box-shadow:0 12px 30px rgba(0,0,0,.45); }
+  .lst-busca input { width:100%; }
+  .lst-busca-res { max-height:210px; overflow:auto; margin-top:8px; }
+  .lst-busca-item { display:block; width:100%; text-align:left; background:none; border:none;
+                    padding:7px 8px; border-radius:7px; cursor:pointer; color:var(--texto);
+                    font-family:inherit; font-size:12px; }
+  .lst-busca-item:hover { background:var(--panel-2); }
+  .lst-busca-item small { display:block; color:var(--cinza); font-size:10.5px; }
   .lst-aviso span { color:var(--cinza); }
 </style>
 <div class="topbar">
@@ -105,10 +130,13 @@
 
   <div class="card">
     {% if propostas %}
+    {# "Todo obvio precisa ser dito": a tabela rola pro lado e nada dizia isso.
+       O aviso some sozinho quando a pessoa rola, pra nao virar paisagem. #}
+    <div class="lst-rolagem" id="lst-rolagem" hidden>mais colunas para o lado — status e vigência estão à direita</div>
     {# A tabela e mais larga que a tela e o body esconde o excesso: sem este
        container, "Status" e "Vigencia" ficavam INALCANCAVEIS — nao dava nem pra
        rolar ate elas. A classe ja existia no sistema e esta tela nao usava. #}
-    <div class="table-wrap">
+    <div class="table-wrap" id="wrap-t">
     <table id="t">
       <thead>
         <tr>
@@ -149,7 +177,15 @@
             {% elif p.lead_id %}
             <a href="/crm?lead={{ p.lead_id }}" class="lst-lid" onclick="event.stopPropagation()"
                title="Lead no CRM, mas sem conversa do WhatsApp vinculada">lead #{{ p.lead_id }}</a>
-            {% endif %}{# sem lead nao vira etiqueta por linha: esta contado no topo #}
+            {% else %}
+            {# O aviso VOLTOU pra linha, e agora resolve. Tirei ele achando que
+               a contagem no topo bastava — nao basta: o total diz QUANTAS estao
+               erradas, a linha diz QUAL, e sem isso nao da pra consertar. #}
+            <button type="button" class="lst-vincular" onclick="abrirVinculo({{ p.id }}, this)"
+                    title="Esta venda não tem lead no CRM: sem origem de mídia, ela não sobe pro Google Ads. Clique pra vincular agora.">
+              sem lead — vincular
+            </button>
+            {% endif %}
           </td>
           {% if session.perfil == 'admin' %}<td class="lst-1l" title="{{ p.consultor }}">{{ p.consultor }}</td>{% endif %}
           <td class="lst-1l" title="{{ p.adm_operadora or '' }}">{{ p.adm_operadora or '—' }}</td>
@@ -248,5 +284,77 @@ async function recalcularTodas(btn) {
   } catch(e) { alert('Erro de rede ao recalcular.'); }
   finally { btn.textContent = txt; btn.disabled = false; }
 }
+
+// ── Vincular o lead sem sair da lista ──────────────────────────────────────
+// O aviso "sem lead" so informava. Agora ele abre a busca aqui mesmo: nome,
+// telefone ou @lid, as tres formas que o consultor tem na mao.
+let _vinBox = null;
+function fecharVinculo(){ if(_vinBox){ _vinBox.remove(); _vinBox = null; } }
+document.addEventListener('click', (e) => {
+  if(_vinBox && !_vinBox.contains(e.target) && !e.target.classList.contains('lst-vincular')) fecharVinculo();
+});
+function abrirVinculo(pid, btn){
+  fecharVinculo();
+  const cx = document.createElement('div');
+  cx.className = 'lst-busca';
+  cx.innerHTML = '<input type="text" placeholder="Nome, telefone ou @lid" autocomplete="off">' +
+                 '<div class="lst-busca-res"><small style="color:var(--cinza);font-size:11px;">Digite pelo menos 2 letras.</small></div>';
+  document.body.appendChild(cx);
+  const r = btn.getBoundingClientRect();
+  cx.style.top = (window.scrollY + r.bottom + 6) + 'px';
+  cx.style.left = Math.min(r.left, window.innerWidth - 350) + 'px';
+  _vinBox = cx;
+  const inp = cx.querySelector('input'), res = cx.querySelector('.lst-busca-res');
+  inp.focus();
+  let t = null;
+  inp.addEventListener('input', () => {
+    clearTimeout(t);
+    t = setTimeout(async () => {
+      if(inp.value.trim().length < 2){ res.innerHTML = ''; return; }
+      res.innerHTML = '<small style="color:var(--cinza);font-size:11px;">buscando…</small>';
+      try {
+        const d = await (await fetch('/api/crm/leads/buscar?q=' + encodeURIComponent(inp.value))).json();
+        const ls = (d && d.leads) || [];
+        if(!ls.length){ res.innerHTML = '<small style="color:var(--cinza);font-size:11px;">Nenhum lead encontrado.</small>'; return; }
+        res.innerHTML = '';
+        ls.forEach((l) => {
+          const b = document.createElement('button');
+          b.type = 'button'; b.className = 'lst-busca-item';
+          b.innerHTML = '<b>' + (l.nome || 'sem nome') + '</b><small>' +
+                        [l.telefone || '', l.etapa_nome || '', l.responsavel_nome || ''].filter(Boolean).join(' · ') + '</small>';
+          b.onclick = () => vincular(pid, l.id, btn);
+          res.appendChild(b);
+        });
+      } catch(e){ res.innerHTML = '<small style="color:#fca5a5;font-size:11px;">Falhou a busca.</small>'; }
+    }, 250);
+  });
+}
+async function vincular(pid, leadId, btn){
+  btn.textContent = 'vinculando…'; btn.disabled = true;
+  let d = null;
+  try {
+    d = await (await fetch('/proposta/' + pid + '/vincular-lead', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({lead_id: leadId})})).json();
+  } catch(e){ d = null; }
+  fecharVinculo();
+  if(!d || !d.ok){ btn.textContent = (d && d.erro) || 'não deu — tente de novo'; btn.disabled = false; return; }
+  location.reload();
+}
+
+// ── "Todo obvio precisa ser dito": avisa que a tabela rola pro lado ────────
+(function(){
+  const w = document.getElementById('wrap-t'), aviso = document.getElementById('lst-rolagem');
+  if(!w) return;
+  const medir = () => {
+    const tem = w.scrollWidth - w.clientWidth > 8;
+    // Some assim que a pessoa rola: aviso que fica pra sempre vira paisagem.
+    const naPonta = w.scrollLeft > 8;
+    w.classList.toggle('tem-mais', tem && !naPonta);
+    if(aviso) aviso.hidden = !(tem && !naPonta);
+  };
+  medir();
+  w.addEventListener('scroll', medir, {passive:true});
+  window.addEventListener('resize', medir);
+})();
 </script>
 {% endblock %}
