@@ -36,13 +36,17 @@
   .lead-pick-info b { font-size:14px; }
   .lead-pick-sub { font-size:11px; color:var(--cinza); margin-top:3px; }
   .lead-pick-lid { font-family:ui-monospace,Menlo,monospace; font-size:10px; margin-left:8px;
-                   padding:2px 7px; border-radius:5px; background:rgba(168,85,247,.18); color:#d8b4fe; }
-  .lead-pick-lid.numero { background:rgba(34,197,94,.18); color:#4ade80; }
-  .lead-pick-lid.sem { background:rgba(250,204,21,.15); color:#eab308; }
+                   padding:2px 7px; border-radius:5px; background:rgba(168,85,247,.18); color:var(--ia-fg); }
+  .lead-pick-lid.numero { background:rgba(34,197,94,.18); color:var(--ok-fg); }
+  .lead-pick-lid.sem { background:rgba(250,204,21,.15); color:var(--al-fg); }
   .lead-res { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+  /* color:var(--texto) NAO e detalhe: <button> nao herda a cor do texto, pega o
+     cinza escuro padrao do navegador. No tema escuro o nome do lead ficava
+     preto no preto — dava pra ver o telefone embaixo e nao o nome. */
   .lead-res-item { display:flex; align-items:center; gap:10px; justify-content:space-between;
                    background:var(--panel-2); border:1px solid var(--borda); border-radius:8px;
-                   padding:9px 12px; cursor:pointer; text-align:left; width:100%; }
+                   padding:9px 12px; cursor:pointer; text-align:left; width:100%;
+                   color:var(--texto); font-family:inherit; font-size:13px; }
   .lead-res-item:hover { border-color:var(--azul); }
   .lead-res-item small { color:var(--cinza); font-size:11px; display:block; margin-top:2px; }
   .lead-criar { margin-top:14px; border-top:1px solid var(--borda); padding-top:12px; }
@@ -65,11 +69,11 @@
   #bloco-resp-fin[hidden] { display:none; }
 
   /* Erro no PROPRIO campo. Um toast no fim nao diz onde esta o problema. */
-  .erro-campo { font-size:11px; color:#f0a3a3; margin-top:5px; min-height:0; }
+  .erro-campo { font-size:11px; color:var(--err-fg); margin-top:5px; min-height:0; }
   .erro-campo:empty { display:none; }
-  .erro-campo.so-aviso { color:#fbbf24; }
-  .invalido { border-color:#c96a6a !important; }
-  .invalido:focus { outline-color:#c96a6a; }
+  .erro-campo.so-aviso { color:var(--al-fg); }
+  .invalido { border-color:var(--err-bd) !important; }
+  .invalido:focus { outline-color:var(--err-bd); }
 
   /* Interno recolhido: ja vem preenchido, nao e trabalho do consultor. */
   .form-interno > summary { cursor:pointer; list-style:none; font-size:15px; font-weight:600;
@@ -82,17 +86,35 @@
   .interno-resumo { font-size:12px; color:var(--cinza); font-weight:400; margin-left:auto; }
 
   /* Salvar sempre a vista, com o que falta escrito ao lado. */
+  /* A barra flutua sobre o formulario, entao o que passa por baixo tem que
+     DESAPARECER, nao ficar legivel atras do texto. O degrade de antes so
+     escurecia: em rolagem o 'N campos obrigatorios' colidia com o rotulo do
+     campo que passava embaixo e virava sopa de letra.
+     Fundo translucido + desfoque resolve — a mesma receita da barra do topo.
+     A margem negativa e o padding fazem o desfoque ir de ponta a ponta; sem
+     isso as beiradas ficavam nitidas e o texto vazava pelos lados. */
   .barra-salvar { position:sticky; bottom:0; z-index:20; display:flex; align-items:center;
-                  gap:14px; flex-wrap:wrap; padding:14px 0 18px;
-                  background:linear-gradient(to bottom, transparent, var(--fundo) 38%); }
+                  gap:14px; flex-wrap:wrap;
+                  margin:8px -18px 0; padding:14px 18px 16px;
+                  background:var(--barra-bg);
+                  backdrop-filter:blur(14px) saturate(140%);
+                  -webkit-backdrop-filter:blur(14px) saturate(140%);
+                  border-top:1px solid var(--borda); }
+  /* Cor de estado com valor por tema. Amarelo #fbbf24 sobre fundo claro da
+     1,7:1 de contraste — some. Verde e roxo idem. */
+  :root { --barra-bg:rgba(12,12,18,.78);
+          --ok-fg:#4ade80; --al-fg:#f6cb4e; --ia-fg:#d8b4fe; --err-fg:#f0a3a3; --err-bd:#c96a6a; }
+  [data-theme="light"] { --barra-bg:rgba(244,246,249,.82);
+          --ok-fg:#0f7a52; --al-fg:#8a5b02; --ia-fg:#6d28d9; --err-fg:#a83232; --err-bd:#c0392b; }
+  /* Navegador sem suporte a desfoque nao pode mostrar texto por baixo: cai pro
+     fundo solido, que e feio mas legivel. */
+  @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
+    .barra-salvar { background:var(--bg); }
+  }
   .barra-salvar .btn-salvar { margin:0; }
   .barra-estado { font-size:12px; }
-  .barra-estado.pendente { color:#fbbf24; }
-  .barra-estado.pronto { color:#4ade80; }
-  [data-theme="light"] .erro-campo { color:#a83232; }
-  [data-theme="light"] .erro-campo.so-aviso { color:#8a5b02; }
-  [data-theme="light"] .barra-estado.pendente { color:#8a5b02; }
-  [data-theme="light"] .barra-estado.pronto { color:#0f7a52; }
+  .barra-estado.pendente { color:var(--al-fg); }
+  .barra-estado.pronto { color:var(--ok-fg); }
 </style>
 {% endblock %}
 
