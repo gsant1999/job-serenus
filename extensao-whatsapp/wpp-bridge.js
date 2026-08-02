@@ -1064,10 +1064,15 @@
       _jobInboundLigado = true;
     } catch (e) { /* tenta de novo no timer */ }
   }
+  // A wa-js agora chega DEPOIS que o WhatsApp abre (ela custava meio segundo
+  // de compilacao disputando a thread com a inicializacao dele). Esta ronda e
+  // o que reata o gancho quando ela finalmente aparece — e o teto existe pra
+  // nao ficar batendo pra sempre se ela nao vier.
   ligarInbound();
+  let _jobInboundTentativas = 0;
   const _jobInboundTimer = setInterval(() => {
     ligarInbound();
-    if (_jobInboundLigado) clearInterval(_jobInboundTimer);
+    if (_jobInboundLigado || ++_jobInboundTentativas > 100) clearInterval(_jobInboundTimer);
   }, 3000);
 
   // ── Checa por LEITURA se um chat já teve resposta do contato (fallback do evento

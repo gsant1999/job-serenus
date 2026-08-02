@@ -1,0 +1,58 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Bancada: custo da wa-js</title>
+<!--
+  Duas perguntas, uma resposta cada:
+
+  1. A wa-js funciona quando entra por tag de <script>, em vez de vir no
+     manifesto? Se nao funcionar, adiar a carga quebra transcricao e envio —
+     e e melhor descobrir aqui do que no WhatsApp do consultor.
+
+  2. Quanto ela custa pra ler e compilar? E esse tempo que estava sendo
+     disputado com a inicializacao do WhatsApp.
+
+  Abre direto no navegador, sem servidor.
+-->
+<body style="font:13px/1.7 ui-monospace,monospace;padding:20px;background:#111;color:#ddd">
+<pre id="saida">medindo…</pre>
+<script>
+const L = [];
+const mostrar = () => document.getElementById('saida').textContent = L.join('\n');
+
+(async () => {
+  // Tamanho do arquivo, do jeito que o navegador vai ler.
+  const t0 = performance.now();
+  const resp = await fetch('../extensao-whatsapp/wa-js.vendor.js');
+  const txt = await resp.text();
+  const tBaixar = performance.now() - t0;
+  L.push('arquivo:            ' + (txt.length / 1024).toFixed(0) + ' KB');
+  L.push('ler do disco:       ' + tBaixar.toFixed(0) + ' ms');
+
+  // Compilar de verdade, que e o custo que aparece na thread da pagina.
+  const t1 = performance.now();
+  const s = document.createElement('script');
+  s.src = '../extensao-whatsapp/wa-js.vendor.js';
+  const carregou = new Promise((ok, erro) => { s.onload = ok; s.onerror = erro; });
+  document.head.appendChild(s);
+  try { await carregou; } catch (e) { L.push('ERRO ao carregar'); mostrar(); return; }
+  const tExec = performance.now() - t1;
+  L.push('carregar+compilar:  ' + tExec.toFixed(0) + ' ms');
+  L.push('');
+
+  // A pergunta que decide o projeto: ela se instala sozinha por tag?
+  const temWPP = typeof window.WPP === 'object' && window.WPP !== null;
+  L.push('window.WPP existe:  ' + (temWPP ? 'SIM' : 'NAO'));
+  if (temWPP) {
+    const partes = ['chat', 'whatsapp', 'conn', 'webpack'].filter((k) => !!window.WPP[k]);
+    L.push('modulos presentes:  ' + (partes.join(', ') || '(nenhum)'));
+    L.push('');
+    L.push('VEREDITO: a wa-js se instala por tag de script — adiar a carga e seguro.');
+    L.push('Fora do WhatsApp ela nao acha o app pra remendar, entao os modulos');
+    L.push('ficam inertes; o que este teste prova e que o arquivo executa e se');
+    L.push('registra sozinho, que e o unico ponto que o adiamento muda.');
+  } else {
+    L.push('VEREDITO: NAO se instala por tag — NAO adiar a carga.');
+  }
+  mostrar();
+})().catch((e) => { L.push('explodiu: ' + e); mostrar(); });
+</script>
