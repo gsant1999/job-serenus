@@ -6480,12 +6480,22 @@ def dashboard():
 # Onde a venda e OPERADA no sistema da operadora. A Serenus vende; quem tem os
 # acessos aos paineis das operadoras nem sempre e a Serenus. Isso muda o que
 # acontece depois do cadastro, entao vira dado, nao combinado por WhatsApp.
-_PLATAFORMAS_VENDA = ['Serenus', 'Affinity (Serenus)', 'Affinity (Axioma)']
+# O CONSULTOR NAO PRECISA SABER A ESTRUTURA DA PARCERIA. Ele precisa saber o que
+# acontece com a venda dele. Entao a tela pergunta UMA coisa — quem lanca isto na
+# operadora — e o sistema traduz pra plataforma certa aqui atras.
+# Axioma saiu: nao se protocola mais venda por la (cadastro em encerramento).
+_PLATAFORMA_PADRAO = 'Affinity (Serenus)'
 _PLATAFORMA_PAPEL = {
-    'propria': 'Eu subo na operadora',
-    'ciencia': 'Eu subo — só avisar a plataforma',
-    'processar': 'A plataforma sobe por mim',
+    'propria': 'Eu mesmo lanço na operadora',
+    'ciencia': 'Eu lanço e aviso a operação',
+    'processar': 'A operação lança por mim',
 }
+
+
+def _plataforma_do_papel(papel):
+    """Papel escolhido na tela -> plataforma de verdade. 'propria' e a Serenus
+    resolvendo sozinha; qualquer outro passa pela operacao parceira."""
+    return 'Serenus' if (papel or 'propria') == 'propria' else _PLATAFORMA_PADRAO
 
 
 
@@ -6594,7 +6604,7 @@ def nova_proposta():
     close_db(conn2)
     return render_template('form.html', supervisoras=sups, operadoras=ops, prefill=prefill,
                            consultores=consultores,
-                           plataformas=_PLATAFORMAS_VENDA,
+                           papeis=_PLATAFORMA_PAPEL,
                            lead_id_origem=(lead_id if lead_id.isdigit() else ''))
 
 
@@ -6981,8 +6991,10 @@ def salvar_proposta():
             (int(d.get('consultor_usuario_id')) if str(d.get('consultor_usuario_id') or '').isdigit() else None),
             session['user_id'],
             1 if d.get('vigencia_confirmada') == '1' else 0,
-            (d.get('plataforma_venda') or '').strip() or None,
-            (d.get('plataforma_papel') or '').strip() or None,
+            # A plataforma DERIVA do papel: um campo a menos na tela e um lugar
+            # so pra mudar se a parceria mudar.
+            _plataforma_do_papel(d.get('plataforma_papel')),
+            (d.get('plataforma_papel') or 'propria').strip(),
             (d.get('resp_fin_nome') or '').strip() or None,
             (d.get('resp_fin_cpf') or '').strip() or None,
             (d.get('resp_fin_nascimento') or '').strip() or None,

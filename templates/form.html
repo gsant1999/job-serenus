@@ -350,19 +350,12 @@
 
     <div class="form-row form-row-2">
       <div class="campo">
-        <label>Quem opera esta venda na operadora
-          <i class="ajuda-i" title="A Serenus vende, mas quem tem acesso ao painel da operadora nem sempre e a Serenus. Isso muda o que acontece DEPOIS do cadastro: se sou eu que subo, a plataforma so precisa saber que existe; se e a plataforma que sobe, ela precisa receber a venda pra trabalhar. Combinar isso por WhatsApp e o que faz venda parar no meio sem ninguem notar.">i</i>
+        <label>Quem lança esta venda na operadora
+          <i class="ajuda-i" title="Toda venda precisa ser lancada no sistema da operadora pra virar contrato. Aqui voce diz quem faz isso: voce mesmo, ou a nossa operacao. Se for voce, o cadastro segue normal. Se pedir pra operacao, ela recebe a proposta e os documentos e lanca por voce. Em qualquer um dos casos a venda e a comissao continuam suas.">i</i>
         </label>
-        <select name="plataforma_venda" id="plataforma_venda" onchange="ajustarPapel()">
-          {% for p in plataformas %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
-        </select>
-      </div>
-      <div class="campo" id="campo-papel">
-        <label>O que a plataforma precisa fazer</label>
-        <select name="plataforma_papel" id="plataforma_papel">
-          <option value="propria">Eu subo na operadora — ninguém mais envolvido</option>
-          <option value="ciencia">Eu subo na operadora — só dar ciência à plataforma</option>
-          <option value="processar">A plataforma sobe a venda por mim</option>
+        <select name="plataforma_papel" id="plataforma_papel" onchange="papelDica()">
+          {% for chave, rotulo in papeis.items() %}
+          <option value="{{ chave }}">{{ rotulo }}</option>{% endfor %}
         </select>
         <div class="hint" id="papel-dica"></div>
       </div>
@@ -1002,29 +995,17 @@ function donoMudou(){
                                                                  : 'A comissão vai para ' + nome + '.';
   resumoInterno();
 }
-// Quem opera a venda muda o que acontece DEPOIS do cadastro. A dica diz o que
-// vai acontecer, em vez de deixar o consultor deduzir do nome da opcao.
-function ajustarPapel(){
-  const p = (document.getElementById('plataforma_venda')||{}).value || '';
-  const sel = document.getElementById('plataforma_papel');
-  const propria = p === 'Serenus';
-  if (sel){
-    Array.from(sel.options).forEach(o => { o.hidden = propria ? (o.value !== 'propria') : (o.value === 'propria'); });
-    if (propria) sel.value = 'propria';
-    else if (sel.value === 'propria') sel.value = 'ciencia';
-  }
-  papelDica();
-}
+// A dica diz o que VAI ACONTECER com a venda, em linguagem de quem vende — sem
+// nomear parceiro nem explicar estrutura societaria pra quem so quer vender.
 function papelDica(){
-  const v = (document.getElementById('plataforma_papel')||{}).value || '';
-  const p = (document.getElementById('plataforma_venda')||{}).value || '';
+  const v = (document.getElementById('plataforma_papel')||{}).value || 'propria';
   const d = document.getElementById('papel-dica');
   if (!d) return;
-  d.textContent = v === 'ciencia'  ? 'A proposta nasce com um aviso pendente para a ' + p + ' — ciência, sem ação da parte deles.'
-                : v === 'processar' ? 'A proposta nasce esperando a ' + p + ' subir na operadora.'
-                : 'Ninguém além da Serenus precisa saber desta venda.';
+  d.textContent = v === 'ciencia'   ? 'Você lança e a operação fica sabendo, sem precisar fazer nada.'
+                : v === 'processar' ? 'A operação recebe a proposta e os documentos e lança por você.'
+                : 'Você lança direto na operadora. Ninguém mais é acionado.';
 }
-document.addEventListener('DOMContentLoaded', () => { try { donoMudou(); ajustarPapel(); } catch(e){} });
+document.addEventListener('DOMContentLoaded', () => { try { donoMudou(); papelDica(); } catch(e){} });
 
 function resumoInterno(){
   const g = n => { const e = document.getElementById(n); return e ? (e.options ? (e.options[e.selectedIndex]||{}).text : e.value) : ''; };
@@ -1060,7 +1041,6 @@ document.addEventListener('change', (e) => {
       ? 'Marcada como confirmada — entra nos relatórios como vigência real.'
       : 'Fica como previsão até alguém confirmar. Retroativa: justifique nas observações.';
   }
-  if (e.target && e.target.id === 'plataforma_papel') papelDica();
 });
 document.addEventListener('DOMContentLoaded', () => { ajustarRotulos(); resumoInterno(); mostrarIdades(); atualizarBarra(); });
 
