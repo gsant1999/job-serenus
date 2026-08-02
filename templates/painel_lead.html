@@ -16,6 +16,20 @@
     --info-bg:var(--info-bg);
     --visor-bg:#0b0b12;
   }
+  /* SUPERFICIE. No claro o cartao caia quase na mesma luminancia do fundo:
+     tudo virava cinza sobre cinza, sem separacao e sem vida. Cartao branco
+     sobre fundo cinza, com sombra de 1px — a escada que o olho precisa. */
+  [data-theme="light"] .page .pl-box,
+  [data-theme="light"] .page .pl-cab,
+  [data-theme="light"] .page .pl-num,
+  [data-theme="light"] .page .pl-ficha {
+    background:#fff; border-color:rgba(16,24,40,.10);
+    box-shadow:0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.04);
+  }
+  [data-theme="light"] .page .pl-docs-texto,
+  [data-theme="light"] .page .pl-sel { background:#f6f8fb; }
+  [data-theme="light"] .pl-menu { background:#f3f4f7; }
+
   [data-theme="light"] .page {
     --ok-fg:#0f7a52;   --ok-bg:rgba(15,122,82,.10);   --ok-bd:rgba(15,122,82,.28);
     --al-fg:#8a5b02;   --al-bg:rgba(180,120,4,.13);   --al-bd:rgba(180,120,4,.34);
@@ -48,7 +62,14 @@
   .pl-num-linha { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
   .pl-num { flex:1 1 150px; background:var(--panel-2); border:1px solid var(--borda);
             border-radius:10px; padding:12px 14px; }
-  .pl-num b { display:block; font-size:20px; font-variant-numeric:tabular-nums; line-height:1.25; }
+  .pl-num b { display:block; font-size:22px; font-weight:700; font-variant-numeric:tabular-nums;
+              line-height:1.2; letter-spacing:-.4px; }
+  /* NUMERO ZERO NAO GRITA. Quatro "R$ 0,00" do mesmo tamanho e peso do numero
+     que importa e o que faz a tela parecer "dado jogado": tudo pesa igual,
+     entao nada comunica. Zero fica apagado; o que tem valor fica firme. */
+  .pl-num.zero b { color:var(--cinza); font-weight:600; }
+  .pl-num.zero { background:none; box-shadow:none !important; }
+  .pl-num.destaque b { color:var(--ok-fg); }
   .pl-num span { display:block; font-size:10px; color:var(--cinza); margin-top:3px; }
   .pl-num.ok { border-color:var(--ok-bd); }
   .pl-num.alerta { border-color:var(--al-bd); }
@@ -214,6 +235,8 @@
   }
 
   /* ── O texto pronto pra colar na operadora ── */
+  .pl-vazio-expl { font-size:12.5px; line-height:1.6; color:var(--cinza-2);
+                   padding:14px 16px; border:1px dashed var(--borda); border-radius:10px; }
   .pl-docs-texto { margin:0; padding:14px 16px; background:var(--panel-3);
                    border:1px solid var(--borda); border-radius:10px;
                    font-family:ui-monospace,Menlo,monospace; font-size:12px; line-height:1.65;
@@ -297,23 +320,23 @@
 <nav class="pl-menu" id="pl-menu" aria-label="Seções desta página"></nav>
 
 <div class="pl-num-linha">
-  <div class="pl-num">
+  <div class="pl-num {{ 'destaque' if lead.valor_estimado else 'zero' }}">
     <b>{{ (lead.valor_estimado or 0)|moeda }}</b>
     <span>valor estimado<i class="ajuda-i" title="O que se espera desta venda. Vem da cotação (1ª opção recomendada, ou a mais barata) quando o consultor não preencheu à mão.">i</i></span>
   </div>
-  <div class="pl-num {{ 'ok' if vendas else '' }}">
+  <div class="pl-num {{ 'destaque' if vendas else 'zero' }}">
     <b>{{ receita|moeda }}</b>
     <span>{{ vendas|length }} venda(s) registrada(s)</span>
   </div>
-  <div class="pl-num {{ 'ok' if com_liquida > 0 else '' }}">
+  <div class="pl-num {{ 'destaque' if com_liquida > 0 else 'zero' }}">
     <b>{{ com_liquida|moeda }}</b>
     <span>comissão líquida da corretora<i class="ajuda-i" title="O que sobra para a corretora depois de pagar o consultor. Fica congelado na proposta no momento do cadastro — não é recalculado aqui.">i</i></span>
   </div>
-  <div class="pl-num {{ 'alerta' if custo_ia_brl > 1 else '' }}">
+  <div class="pl-num {{ 'alerta' if custo_ia_brl > 1 else ('zero' if not custo_ia_brl else '') }}">
     <b>{{ custo_ia_brl|moeda }}</b>
     <span>IA gasta com este lead<i class="ajuda-i" title="Soma da leitura das conversas e da transcrição de áudios deste lead. Estimativa pelo preço por token/minuto, não a fatura do provedor. Câmbio fixo configurado no sistema.">i</i></span>
   </div>
-  <div class="pl-num">
+  <div class="pl-num {{ 'zero' if not (ultima and ultima.score is not none) }}">
     <b>{{ ultima.score if ultima and ultima.score is not none else '—' }}</b>
     <span>score da conversa<i class="ajuda-i" title="Nota de 0 a 1000 que a IA dá pela conversa: urgência, orçamento, perfil e engajamento. Serve para priorizar quem atender primeiro — não é promessa de fechamento.">i</i></span>
   </div>
@@ -555,7 +578,6 @@
     {% endif %}
   </div>
 
-  {% if docs_texto %}
   <div class="pl-box largo" data-sec="Dados p/ operadora">
     <div class="pl-docs-topo">
       <h2 style="margin:0;">Dados para o sistema da operadora<i class="ajuda-i" title="Tudo que foi lido dos documentos, no formato de colar direto no cadastro da operadora: uma pessoa por bloco, na ordem dos campos da ficha. Campo que não estava no documento não vira linha — 'não informado' ocupa o lugar do dado e obriga a conferir de novo.">i</i></h2>
@@ -564,10 +586,21 @@
         <a class="btn-outline destaque" href="/nova-proposta?lead={{ lead.id }}">Criar proposta com estes dados</a>
       </div>
     </div>
+    {% if docs_texto %}
     <pre class="pl-docs-texto" id="pl-docs-texto">{{ docs_texto }}</pre>
     <p class="pl-vazio" style="margin-top:8px;">Confira antes de usar: CPF e RG errados fazem a operadora recusar a proposta inteira.</p>
+    {% else %}
+    {# NUNCA SUMIR CALADO. Antes esta seção inteira desaparecia quando não havia
+       dado, e a leitura certa era "o sistema não faz isso". Faz — falta ler os
+       documentos, e é isso que a tela passa a dizer. #}
+    <div class="pl-vazio-expl">
+      Ainda não tenho os dados deste cliente em texto.
+      Eles saem da <b>leitura dos documentos</b>: abra a conversa no WhatsApp com a extensão ligada,
+      marque os arquivos e clique em <b>Ler documento</b>.
+      O que for lido aparece aqui já no formato de colar no cadastro da operadora.
+    </div>
+    {% endif %}
   </div>
-  {% endif %}
 
   <div class="pl-box" data-sec="Notas"{% if not notas %} data-vazio="1"{% endif %}>
     <h2>Notas do consultor</h2>

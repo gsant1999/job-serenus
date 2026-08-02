@@ -14931,6 +14931,78 @@ def _extracao_ler(conn, lead_id):
             'atualizado_em': r['atualizado_em']}
 
 
+
+def _extracao_resgatar(conn, lead_id):
+    """Reconstitui o extraido de leads ANTERIORES a esta tabela.
+
+    O bloco pra colar na operadora so aparecia quando lead_extracao tinha
+    linha — e ela nasceu hoje. Para todo lead antigo a secao sumia da tela sem
+    dizer por que, e a impressao certa era "o sistema nao faz isso". Faz: o dado
+    estava espalhado na analise da conversa, nos campos do lead e nos documentos.
+    Isto junta e grava uma vez."""
+    if _extracao_ler(conn, lead_id).get('pessoas'):
+        return
+    pessoas, empresa, endereco, contato = [], {}, {}, {}
+    # 1) o que a analise da conversa ja tinha extraido dos documentos
+    try:
+        r = conn.execute("""SELECT sugestoes_json FROM whatsapp_analises WHERE lead_id=?
+                            ORDER BY id DESC LIMIT 1""", (lead_id,)).fetchone()
+        diag = json.loads((r['sugestoes_json'] if r else '') or '{}')
+        ia = diag.get('ia') or {}
+        for p in (ia.get('documentos_pessoas') or []):
+            if (p.get('nome') or '').strip():
+                pessoas.append({k: v for k, v in p.items() if v})
+        empresa = {k: v for k, v in (ia.get('dados_empresa') or {}).items() if v}
+    except Exception:
+        pass
+    # 2) os nomes que os proprios documentos deram, quando a analise nao tinha
+    try:
+        for r in conn.execute("""SELECT DISTINCT pessoa FROM lead_documento
+                                 WHERE lead_id=? AND pessoa IS NOT NULL AND pessoa<>''""",
+                              (lead_id,)).fetchall():
+            if not any(doc_mesma_pessoa(p.get('nome'), r['pessoa']) for p in pessoas):
+                pessoas.append({'nome': r['pessoa']})
+    except Exception:
+        pass
+    # 3) a ficha do lead: telefone, e o que o consultor ja preencheu a mao
+    try:
+        lead = conn.execute("SELECT nome, telefone FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+        if lead:
+            if lead['telefone']:
+                contato['telefone'] = lead['telefone']
+            if (lead['nome'] or '').strip() and not any(
+                    doc_mesma_pessoa(p.get('nome'), lead['nome']) for p in pessoas):
+                pessoas.insert(0, {'nome': lead['nome']})
+        for r in conn.execute("""SELECT c.nome_tecnico, v.valor FROM crm_lead_campos v
+                                 JOIN campos_custom c ON c.id=v.campo_id WHERE v.lead_id=?""",
+                              (lead_id,)).fetchall():
+            k, v = (r['nome_tecnico'] or ''), (r['valor'] or '')
+            if not v:
+                continue
+            if 'cnpj' in k and not empresa.get('cnpj'):
+                empresa['cnpj'] = v
+            elif 'razao' in k and not empresa.get('razao_social'):
+                empresa['razao_social'] = v
+            elif 'cidade' in k and not endereco.get('cidade'):
+                endereco['cidade'] = v
+            elif 'email' in k and not contato.get('email'):
+                contato['email'] = v
+            elif 'cpf' in k and pessoas and not pessoas[0].get('cpf'):
+                pessoas[0]['cpf'] = v
+            elif ('nasc' in k) and pessoas and not pessoas[0].get('nascimento'):
+                pessoas[0]['nascimento'] = v
+    except Exception as e:
+        app.logger.info(f"[EXTRACAO] resgate campos: {e}")
+    if not (pessoas or empresa or endereco or contato):
+        return
+    _extracao_guardar(conn, lead_id, {'pessoas': pessoas, 'empresa': empresa,
+                                      'endereco': endereco, 'contato': contato})
+    try:
+        conn.commit()
+    except Exception:
+        pass
+
+
 def _doc_data_br(v):
     """AAAA-MM-DD -> DD/MM/AAAA. Aceita o que ja vier em BR."""
     s = str(v or '').strip()
@@ -20636,6 +20708,7 @@ def painel_lead(lid):
     documentos, doc_fichas, doc_pendentes_lista = [], [], []
     doc_pendentes, doc_faltam, doc_conferir, docs_texto = 0, 0, 0, ''
     try:
+        _extracao_resgatar(conn, lid)
         docs_texto = docs_texto_bloco(conn, lid)
     except Exception as e:
         app.logger.info(f"[PAINEL] bloco de texto: {e}")
