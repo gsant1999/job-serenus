@@ -2540,6 +2540,23 @@ def init_db():
 
     # ─── MIGRAÇÕES: adiciona colunas novas em tabelas existentes ─────────
     migracoes = [
+        # QUEM E O DONO DA VENDA e QUEM SUBIU sao duas perguntas diferentes, e
+        # so a segunda o sistema sabia. 'consultor' era texto livre: dava pra
+        # digitar qualquer coisa, e comissao paga por nome escrito a mao e
+        # divergencia esperando pra acontecer.
+        ("propostas", "consultor_usuario_id", "INTEGER"),
+        ("propostas", "subido_por_usuario_id", "INTEGER"),
+        # VIGENCIA: no cadastro e PREVISAO, nao fato. Em Adesao e PF da pra
+        # confirmar cedo; em PME so existe no fim — contrato aprovado, boletado,
+        # cliente pagou e o pagamento compensou. Guardar como se fosse certa
+        # desde o inicio e o que faz o relatorio mentir.
+        ("propostas", "vigencia_confirmada", "INTEGER DEFAULT 0"),
+        ("propostas", "vigencia_confirmada_em", "TEXT"),
+        # QUEM OPERA A VENDA no sistema da operadora. A Affinity tem os acessos;
+        # as vezes a Serenus sobe e so avisa, as vezes a Affinity e quem faz.
+        ("propostas", "plataforma_venda", "TEXT"),
+        ("propostas", "plataforma_papel", "TEXT"),
+        ("propostas", "plataforma_avisada_em", "TEXT"),
         # DE ONDE A PESSOA E. Nao e enfeite de cadastro: no plano de saude a
         # regiao decide preco e rede credenciada, e a proposta nao guardava isso
         # em lugar nenhum — ficava so no papel que o cliente mandou.
@@ -6440,6 +6457,18 @@ def dashboard():
                                pendencias_comprovante=pendencias_comprovante)
 
 # ─── PROPOSTAS ───────────────────────────────────────────────────────────────────
+# Onde a venda e OPERADA no sistema da operadora. A Serenus vende; quem tem os
+# acessos aos paineis das operadoras nem sempre e a Serenus. Isso muda o que
+# acontece depois do cadastro, entao vira dado, nao combinado por WhatsApp.
+_PLATAFORMAS_VENDA = ['Serenus', 'Affinity (Serenus)', 'Affinity (Axioma)']
+_PLATAFORMA_PAPEL = {
+    'propria': 'Eu subo na operadora',
+    'ciencia': 'Eu subo — só avisar a plataforma',
+    'processar': 'A plataforma sobe por mim',
+}
+
+
+
 @app.route('/nova-proposta')
 @login_required
 def nova_proposta():
@@ -6537,7 +6566,15 @@ def nova_proposta():
     # Propaga o id do lead pro formulário: e a chave que liga a venda a origem de
     # midia. Sem ela, salvar_proposta re-adivinha por telefone/CNPJ justamente no
     # caso em que a resposta certa ja estava na mao.
+    # DONO DA VENDA vira gente de verdade, nao texto digitado. E quem sobe a
+    # venda e a sessao — o formulario so mostra, nao pergunta.
+    conn2 = db()
+    consultores = [dict(r) for r in conn2.execute(
+        "SELECT id, nome FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()]
+    close_db(conn2)
     return render_template('form.html', supervisoras=sups, operadoras=ops, prefill=prefill,
+                           consultores=consultores,
+                           plataformas=_PLATAFORMAS_VENDA,
                            lead_id_origem=(lead_id if lead_id.isdigit() else ''))
 
 @app.route('/api/cep/<cep>')
@@ -6727,8 +6764,10 @@ def salvar_proposta():
             comissao_total_corretora,comissao_consultor,comissao_corretora_liquida,
             observacoes,anexos,contrato_arquivo,comprovante_boleto,campos_extras,quem_subiu,
             mes_meta,status_operacional,
-            cep,logradouro,numero_end,bairro,cidade,estado
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            cep,logradouro,numero_end,bairro,cidade,estado,
+            consultor_usuario_id,subido_por_usuario_id,vigencia_confirmada,
+            plataforma_venda,plataforma_papel
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
             session['user_id'],d.get('consultor'),d.get('supervisora_id') or None,
             d.get('proposta_tem_numero'),d.get('numero_proposta'),
             d.get('vigencia'),d.get('modalidade'),d.get('tipo_pessoa'),
@@ -6748,7 +6787,14 @@ def salvar_proposta():
             mes_meta,'Aguardando Documentos',
             (d.get('cep') or '').strip() or None, (d.get('logradouro') or '').strip() or None,
             (d.get('numero_end') or '').strip() or None, (d.get('bairro') or '').strip() or None,
-            (d.get('cidade') or '').strip() or None, (d.get('estado') or '').strip().upper()[:2] or None
+            (d.get('cidade') or '').strip() or None, (d.get('estado') or '').strip().upper()[:2] or None,
+            # O DONO vem do formulario (pode ser outro consultor); QUEM SUBIU e
+            # sempre a sessao — isso nao se declara, se observa.
+            (int(d.get('consultor_usuario_id')) if str(d.get('consultor_usuario_id') or '').isdigit() else None),
+            session['user_id'],
+            1 if d.get('vigencia_confirmada') == '1' else 0,
+            (d.get('plataforma_venda') or '').strip() or None,
+            (d.get('plataforma_papel') or '').strip() or None
         ))
         proposta_id = _last_insert_id(cur)
         # Amarra ao lead na hora: é aqui que o telefone/CNPJ estão frescos e certos.
@@ -14706,6 +14752,122 @@ def ler_documentos_cliente(arquivos, teto_imagens=24):
 
 
 
+
+# O QUE A OPERADORA ESPERA DE CADA PESSOA.
+#
+# E isto que transforma inventario em conferencia: sem uma lista do que DEVERIA
+# chegar, "faltando" nao existe como estado — a tela so consegue dizer o que ja
+# chegou, e o consultor descobre o que falta na recusa da operadora.
+#
+# Cada vaga aceita mais de um tipo de proposito. Filho pequeno nao tem RG, tem
+# certidao de nascimento; exigir os dois criaria pendencia falsa, e checklist que
+# grita lobo para de ser lido na terceira vez.
+_DOC_SLOTS_PADRAO = [
+    {'k': 'foto', 'rotulo': 'Documento com foto (RG ou CNH)', 'tipos': ['identidade']},
+]
+_DOC_SLOTS = {
+    'titular': [
+        {'k': 'foto', 'rotulo': 'Documento com foto (RG ou CNH)', 'tipos': ['identidade']},
+        {'k': 'end',  'rotulo': 'Comprovante de endereço', 'tipos': ['comprovante_endereco']},
+    ],
+    'conjuge': [
+        {'k': 'foto', 'rotulo': 'Documento com foto (RG ou CNH)', 'tipos': ['identidade']},
+        {'k': 'vinc', 'rotulo': 'Certidão de casamento', 'tipos': ['certidao_casamento']},
+    ],
+    'companheiro': [
+        {'k': 'foto', 'rotulo': 'Documento com foto (RG ou CNH)', 'tipos': ['identidade']},
+        {'k': 'vinc', 'rotulo': 'Declaração de união estável', 'tipos': ['declaracao_uniao_estavel']},
+    ],
+    'filho': [
+        {'k': 'doc', 'rotulo': 'Documento com foto ou certidão de nascimento',
+         'tipos': ['identidade', 'certidao_nascimento']},
+    ],
+    'enteado': [
+        {'k': 'doc', 'rotulo': 'Documento com foto ou certidão de nascimento',
+         'tipos': ['identidade', 'certidao_nascimento']},
+        {'k': 'vinc', 'rotulo': 'Vínculo com o cônjuge (casamento ou união estável)',
+         'tipos': ['certidao_casamento', 'declaracao_uniao_estavel']},
+    ],
+    'neto': [
+        {'k': 'doc', 'rotulo': 'Documento com foto ou certidão de nascimento',
+         'tipos': ['identidade', 'certidao_nascimento']},
+    ],
+}
+# Empresa so entra quando a venda E empresarial. Cobrar cartao CNPJ num plano
+# individual marcaria pendencia que nunca vai ser resolvida.
+_DOC_SLOTS_EMPRESA = [
+    {'k': 'cnpj', 'rotulo': 'Cartão CNPJ', 'tipos': ['cartao_cnpj']},
+    {'k': 'social', 'rotulo': 'Contrato social ou requerimento de empresário',
+     'tipos': ['contrato_social']},
+]
+
+
+def _doc_fichas(documentos, empresarial=False):
+    """Monta uma ficha por PESSOA, com o que chegou e o que falta.
+
+    Agrupa por (nome, parentesco) e nao so por parentesco: dois filhos sao duas
+    pessoas, e juntar os dois numa ficha so faria a certidao de um cobrir a
+    falta do outro."""
+    pendentes = [d for d in documentos if not d.get('titularidade')]
+    fichas, ordem = {}, []
+    for d in documentos:
+        if not d.get('titularidade'):
+            continue
+        pap = 'titular' if d['titularidade'] == 'titular' else (d.get('parentesco') or '')
+        chave = ((d.get('pessoa') or '').strip().lower(), pap)
+        if chave not in fichas:
+            fichas[chave] = {'pessoa': d.get('pessoa') or '', 'papel': pap,
+                             'titularidade': d['titularidade'], 'itens': []}
+            ordem.append(chave)
+        fichas[chave]['itens'].append(d)
+
+    saida = []
+    for chave in ordem:
+        f = fichas[chave]
+        slots = list(_DOC_SLOTS.get(f['papel'], _DOC_SLOTS_PADRAO))
+        if f['titularidade'] == 'titular' and empresarial:
+            slots = slots + _DOC_SLOTS_EMPRESA
+        usados, linhas, faltam, conferir = set(), [], 0, 0
+        for s in slots:
+            achado = next((d for d in f['itens']
+                           if d.get('tipo') in s['tipos'] and id(d) not in usados), None)
+            if achado is not None:
+                usados.add(id(achado))
+                if not achado.get('conferido'):
+                    conferir += 1
+            else:
+                faltam += 1
+            linhas.append({'rotulo': s['rotulo'], 'doc': achado})
+        # Papel que chegou alem do esperado nao some: entra como extra.
+        extras = [d for d in f['itens'] if id(d) not in usados]
+        for d in extras:
+            if not d.get('conferido'):
+                conferir += 1
+        if f['papel'] == 'titular':
+            titulo = 'Titular'
+        elif f['papel']:
+            titulo = _DOC_PARENTESCO_ROTULO.get(f['papel'], 'Dependente')
+        else:
+            titulo = 'Dependente'
+        # TRES estados, nao dois. "Tudo chegou" e diferente de "alguem conferiu":
+        # verde facil demais e verde que ninguem acredita.
+        if faltam:
+            estado, estado_txt = 'falta', f'Falta {faltam} documento' + ('s' if faltam > 1 else '')
+        elif conferir:
+            estado, estado_txt = 'conferir', f'Falta conferir {conferir}'
+        else:
+            estado, estado_txt = 'pronta', 'Conferida'
+        saida.append({
+            'pessoa': f['pessoa'], 'papel': f['papel'], 'titulo': titulo,
+            'titularidade': f['titularidade'], 'linhas': linhas, 'extras': extras,
+            'estado': estado, 'estado_txt': estado_txt,
+            'faltam': faltam, 'conferir': conferir,
+            'comprova': _DOC_PARENTESCO_COMPROVA.get(f['papel']),
+        })
+    saida.sort(key=lambda x: (x['titularidade'] != 'titular', x['estado'] == 'pronta'))
+    return saida, pendentes
+
+
 def _extracao_guardar(conn, lead_id, leitura):
     """Guarda o que foi lido dos documentos, ACUMULANDO entre leituras.
 
@@ -17493,6 +17655,27 @@ def lead_documento_tipo():
                  (tipo, nome, titularidade, parentesco, doc['id']))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "nome_final": nome})
+
+
+@app.route('/lead/documento/conferir', methods=['POST'])
+@login_required
+def lead_documento_conferir():
+    """Um clique pra dizer "conferi este".
+
+    Sem isto o estado "Conferida" da ficha era inalcancavel: o unico jeito de
+    marcar conferido era trocar o tipo do documento, o que obrigava a mexer num
+    campo certo so pra sair do roxo. Verde que nao da pra alcancar nao e meta,
+    e uma barra que nunca muda de cor."""
+    d = request.json or {}
+    conn = db()
+    doc = conn.execute("SELECT id FROM lead_documento WHERE id=?", (d.get('doc_id'),)).fetchone()
+    if not doc:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Documento não encontrado"}), 404
+    conn.execute("UPDATE lead_documento SET tipo_conferido=? WHERE id=?",
+                 (0 if d.get('desmarcar') else 1, doc['id']))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "conferido": not d.get('desmarcar')})
 
 
 @app.route('/lead/<int:lid>/documentos.zip')
@@ -20450,7 +20633,8 @@ def painel_lead(lid):
         SELECT texto, autor_nome, criado_em FROM lead_notas
         WHERE lead_id=? ORDER BY id DESC LIMIT 30""", (lid,)).fetchall()]
 
-    documentos, doc_grupos, doc_pendentes, docs_texto = [], [], 0, ''
+    documentos, doc_fichas, doc_pendentes_lista = [], [], []
+    doc_pendentes, doc_faltam, doc_conferir, docs_texto = 0, 0, 0, ''
     try:
         docs_texto = docs_texto_bloco(conn, lid)
     except Exception as e:
@@ -20468,31 +20652,23 @@ def painel_lead(lid):
             "titularidade, parentesco, "
             "COALESCE(tipo_conferido,0) conferido, criado_em "
             "FROM lead_documento WHERE lead_id=? ORDER BY tipo, id", (lid,)).fetchall()]
-        # AGRUPA PELO QUE O CONSULTOR PRECISA DECIDIR, nao pela ordem do banco.
         # A pergunta na frente da operadora nao e "que arquivos tem"; e "esta
-        # pessoa esta completa?". Entao: primeiro o que falta definir (a fila de
-        # trabalho), depois o titular, depois cada dependente com o vinculo dele.
-        pendentes = [d for d in documentos if not d.get('titularidade')]
-        titular = [d for d in documentos if d.get('titularidade') == 'titular']
-        deps = [d for d in documentos if d.get('titularidade') == 'dependente']
-        grupos = []
-        if pendentes:
-            grupos.append({'chave': 'pendente', 'titulo': 'Falta definir de quem é',
-                           'sub': 'Sem isto o nome do arquivo não serve na operadora',
-                           'itens': pendentes})
-        if titular:
-            grupos.append({'chave': 'titular', 'titulo': 'Titular',
-                           'sub': (titular[0].get('pessoa') or ''), 'itens': titular})
-        por_par = {}
-        for d in deps:
-            por_par.setdefault(d.get('parentesco') or '', []).append(d)
-        for par, itens in sorted(por_par.items(), key=lambda kv: kv[0] or 'zzz'):
-            rot = _DOC_PARENTESCO_ROTULO.get(par, 'Dependente')
-            grupos.append({'chave': 'dep', 'titulo': 'Dependente — ' + rot if par else 'Dependente',
-                           'sub': (itens[0].get('pessoa') or ''),
-                           'comprova': _DOC_PARENTESCO_COMPROVA.get(par), 'itens': itens})
-        doc_grupos = grupos
-        doc_pendentes = len(pendentes)
+        # pessoa esta completa?". Entao a unidade da tela e a PESSOA, com o
+        # checklist do que a operadora espera dela.
+        empresarial = False
+        try:
+            _v = conn.execute("""SELECT tipo_pessoa FROM propostas WHERE lead_id=?
+                                 ORDER BY id DESC LIMIT 1""", (lid,)).fetchone()
+            if _v and (_v['tipo_pessoa'] or '') in ('PME', 'PJ'):
+                empresarial = True
+            elif (_extracao_ler(conn, lid).get('empresa') or {}).get('cnpj'):
+                empresarial = True
+        except Exception:
+            pass
+        doc_fichas, doc_pendentes_lista = _doc_fichas(documentos, empresarial)
+        doc_pendentes = len(doc_pendentes_lista)
+        doc_faltam = sum(f['faltam'] for f in doc_fichas)
+        doc_conferir = sum(f['conferir'] for f in doc_fichas)
     except Exception as e:
         app.logger.info(f"[PAINEL] documentos: {e}")
         try: conn.rollback()
@@ -20507,7 +20683,9 @@ def painel_lead(lid):
                            cotacoes=cotacoes, vendas=vendas, receita=receita,
                            com_bruta=com_bruta, com_liquida=com_liquida,
                            timeline=timeline, notas=notas, saude=saude, documentos=documentos,
-                           doc_grupos=doc_grupos, doc_pendentes=doc_pendentes,
+                           doc_fichas=doc_fichas, doc_pendentes_lista=doc_pendentes_lista,
+                           doc_pendentes=doc_pendentes, doc_faltam=doc_faltam,
+                           doc_conferir=doc_conferir,
                            docs_texto=docs_texto,
                            doc_tipos=_DOC_TIPOS, doc_rotulos=_DOC_ROTULO,
                            doc_parentescos=_DOC_PARENTESCOS,

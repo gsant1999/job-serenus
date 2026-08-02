@@ -287,6 +287,28 @@
       </div>
     </div>
 
+    <hr class="sep">
+
+    <div class="form-row form-row-2">
+      <div class="campo">
+        <label>Quem opera esta venda na operadora
+          <i class="ajuda-i" title="A Serenus vende, mas quem tem acesso ao painel da operadora nem sempre e a Serenus. Isso muda o que acontece DEPOIS do cadastro: se sou eu que subo, a plataforma so precisa saber que existe; se e a plataforma que sobe, ela precisa receber a venda pra trabalhar. Combinar isso por WhatsApp e o que faz venda parar no meio sem ninguem notar.">i</i>
+        </label>
+        <select name="plataforma_venda" id="plataforma_venda" onchange="ajustarPapel()">
+          {% for p in plataformas %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="campo" id="campo-papel">
+        <label>O que a plataforma precisa fazer</label>
+        <select name="plataforma_papel" id="plataforma_papel">
+          <option value="propria">Eu subo na operadora — ninguém mais envolvido</option>
+          <option value="ciencia">Eu subo na operadora — só dar ciência à plataforma</option>
+          <option value="processar">A plataforma sobe a venda por mim</option>
+        </select>
+        <div class="hint" id="papel-dica"></div>
+      </div>
+    </div>
+
     <div class="campo" style="margin-top:14px; padding:14px 16px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px;">
       <label class="radio" style="display:inline-flex; margin-bottom:0;">
         <input type="checkbox" name="tem_repique" id="tem_repique" value="1" onchange="toggleRepique()">
@@ -308,8 +330,9 @@
     <div class="form-row form-row-2">
       <div class="campo">
         <label>Total de vidas <span class="obrig">obrigatório</span></label>
-        <input type="number" name="total_vidas" id="total_vidas" min="1" required oninput="calcPreview(); validarCampo(this)">
-        <div class="hint">Sem contar o repique.</div>
+        <input type="number" name="total_vidas" id="total_vidas" min="1" required
+               oninput="VIDAS_NA_MAO = true; calcPreview(); validarCampo(this); somarVidas()">
+        <div class="hint" id="vidas-dica">Somado de titular mais dependentes. Pode editar.</div>
       </div>
       <div class="campo">
         <label>Valor mensal (R$) <span class="obrig">obrigatório</span></label>
@@ -320,9 +343,15 @@
 
     <div class="form-row form-row-2" style="margin-top:14px;">
       <div class="campo">
-        <label>Vigência <span class="obrig">obrigatório</span></label>
+        <label>Previsão de vigência <span class="obrig">obrigatório</span>
+          <i class="ajuda-i" title="No cadastro isto e PREVISAO, nao fato. Em Adesao e PF da pra confirmar cedo. Em PME a vigencia so existe no fim: contrato aprovado, boletado, cliente pagou e o pagamento compensou. Guardar como se fosse certa desde o inicio e o que faz o relatorio mentir — por isso ela nasce marcada como prevista e alguem confirma depois, na esteira.">i</i>
+        </label>
         <input type="date" name="vigencia" id="vigencia" required onchange="validarCampo(this)">
-        <div class="hint">Data de início do plano. Retroativa: justifique nas observações.</div>
+        <label class="radio" style="display:inline-flex; margin-top:8px;">
+          <input type="checkbox" name="vigencia_confirmada" id="vigencia_confirmada" value="1">
+          <span>Já está confirmada pela operadora</span>
+        </label>
+        <div class="hint" id="vig-dica">Fica como previsão até alguém confirmar. Retroativa: justifique nas observações.</div>
       </div>
       <div class="campo">
         <label>Data de fechamento</label>
@@ -332,13 +361,18 @@
     </div>
 
     <div class="form-row form-row-3" style="margin-top:14px;">
+      {# NAO SAO OBRIGATORIAS NO CADASTRO. No PME o boleto so existe depois da
+         analise da operadora — exigir a data aqui obriga o consultor a inventar
+         uma, e numero inventado e pior que campo vazio. Viram obrigatorias na
+         esteira, quando o boleto existe de verdade. #}
       <div class="campo">
-        <label>Vencimento da 1ª mensalidade <span class="obrig">obrigatório</span></label>
-        <input type="date" name="vencimento_1" id="vencimento_1" required onchange="validarCampo(this)">
+        <label>Vencimento da 1ª mensalidade</label>
+        <input type="date" name="vencimento_1" id="vencimento_1" onchange="validarCampo(this)">
+        <div class="hint">Só existe depois que a operadora boletar. Pode ficar em branco.</div>
       </div>
       <div class="campo">
-        <label>Previsão de pagamento da 1ª <span class="obrig">obrigatório</span></label>
-        <input type="date" name="previsao_1" id="previsao_1" required onchange="validarCampo(this)">
+        <label>Previsão de pagamento da 1ª</label>
+        <input type="date" name="previsao_1" id="previsao_1" onchange="validarCampo(this)">
       </div>
       <div class="campo">
         <label>Dia de vencimento das demais</label>
@@ -463,16 +497,21 @@
     <div style="margin-top:14px;">
       <div class="form-row form-row-3">
         <div class="campo">
-          <label>Consultor</label>
-          <input type="text" name="consultor" id="consultor" value="{{ session.nome }}" required onchange="resumoInterno()">
+          <label>Dono da venda
+            <i class="ajuda-i" title="O corretor a quem a comissao pertence. Era um campo de texto livre: dava pra digitar qualquer nome, e comissao paga por nome escrito a mao vira divergencia. Agora e uma pessoa cadastrada no sistema.">i</i>
+          </label>
+          <select id="consultor_usuario_id" name="consultor_usuario_id" onchange="donoMudou()">
+            {% for c in consultores %}
+            <option value="{{ c.id }}" data-nome="{{ c.nome }}" {% if c.id == session.user_id %}selected{% endif %}>{{ c.nome }}</option>
+            {% endfor %}
+          </select>
+          <input type="hidden" name="consultor" id="consultor" value="{{ session.nome }}">
+          <div class="hint" id="dono-dica"></div>
         </div>
         <div class="campo">
-          <label>Quem está subindo a venda</label>
-          <select name="quem_subiu" id="quem_subiu" onchange="resumoInterno()">
-            <option value="Consultor">O próprio consultor</option>
-            <option value="Supervisor">Supervisor</option>
-            <option value="Gestor ADM">Gestor ADM</option>
-          </select>
+          <label>Quem está subindo</label>
+          <input type="text" value="{{ session.nome }}" disabled>
+          <div class="hint">Registrado automaticamente: é você, logado agora. Não se declara.</div>
         </div>
         <div class="campo">
           <label>Supervisora da proposta</label>
@@ -574,6 +613,34 @@ function syncDeps() {
   DEPS.forEach(d=>{ if(d.nome) txt += '\nDependente: '+d.nome+(d.parentesco?' ('+d.parentesco+')':''); });
   document.getElementById('titular_dependentes').value = txt;
   document.getElementById('dependentes_json').value = JSON.stringify(DEPS.filter(d=>d.nome));
+  somarVidas();
+}
+
+// TOTAL DE VIDAS SOMA SOZINHO: titular + dependentes com nome.
+// Continua editavel — tem venda em que o numero de vidas do contrato nao e o
+// numero de gente listada aqui (empresa que so lista os titulares, por
+// exemplo). Digitou na mao, a soma para de mandar naquela proposta; o campo
+// avisa quando o que esta escrito difere de quem esta listado.
+let VIDAS_NA_MAO = false;
+function somarVidas() {
+  const el = document.getElementById('total_vidas');
+  if (!el) return;
+  const tit = (document.getElementById('nome_titular').value || '').trim() ? 1 : 0;
+  const n = tit + DEPS.filter(d => (d.nome || '').trim()).length;
+  const dica = document.getElementById('vidas-dica');
+  if (!VIDAS_NA_MAO) {
+    if (n > 0) el.value = n;
+    if (dica) dica.textContent = n > 0 ? 'Somado de quem está listado acima. Pode editar.' : 'Sem contar o repique.';
+    if (dica) dica.classList.remove('so-aviso');
+  } else if (dica) {
+    const digitado = parseInt(el.value || 0);
+    const difere = n > 0 && digitado !== n;
+    dica.textContent = difere
+      ? 'Você digitou ' + digitado + ', mas há ' + n + ' pessoa(s) listada(s) acima.'
+      : 'Sem contar o repique.';
+    dica.classList.toggle('so-aviso', difere);
+  }
+  try { calcPreview(); conferirPorte(); } catch (e) {}
 }
 document.getElementById('nome_titular').addEventListener('input', syncDeps);
 
@@ -804,10 +871,47 @@ function copiarResponsavel(cx){
   });
   atualizarBarra();
 }
+// O dono da venda e uma pessoa do sistema; o campo texto 'consultor' continua
+// existindo porque meio sistema le por ele — passa a ser espelho, nao entrada.
+function donoMudou(){
+  const s = document.getElementById('consultor_usuario_id');
+  if (!s) return;
+  const op = s.options[s.selectedIndex];
+  const nome = op ? (op.dataset.nome || op.text) : '';
+  const h = document.getElementById('consultor'); if (h) h.value = nome;
+  const d = document.getElementById('dono-dica');
+  if (d) d.textContent = (String(s.value) === String(USUARIO_ID)) ? 'A comissão é sua.'
+                                                                 : 'A comissão vai para ' + nome + '.';
+  resumoInterno();
+}
+// Quem opera a venda muda o que acontece DEPOIS do cadastro. A dica diz o que
+// vai acontecer, em vez de deixar o consultor deduzir do nome da opcao.
+function ajustarPapel(){
+  const p = (document.getElementById('plataforma_venda')||{}).value || '';
+  const sel = document.getElementById('plataforma_papel');
+  const propria = p === 'Serenus';
+  if (sel){
+    Array.from(sel.options).forEach(o => { o.hidden = propria ? (o.value !== 'propria') : (o.value === 'propria'); });
+    if (propria) sel.value = 'propria';
+    else if (sel.value === 'propria') sel.value = 'ciencia';
+  }
+  papelDica();
+}
+function papelDica(){
+  const v = (document.getElementById('plataforma_papel')||{}).value || '';
+  const p = (document.getElementById('plataforma_venda')||{}).value || '';
+  const d = document.getElementById('papel-dica');
+  if (!d) return;
+  d.textContent = v === 'ciencia'  ? 'A proposta nasce com um aviso pendente para a ' + p + ' — ciência, sem ação da parte deles.'
+                : v === 'processar' ? 'A proposta nasce esperando a ' + p + ' subir na operadora.'
+                : 'Ninguém além da Serenus precisa saber desta venda.';
+}
+document.addEventListener('DOMContentLoaded', () => { try { donoMudou(); ajustarPapel(); } catch(e){} });
+
 function resumoInterno(){
-  const g = n => { const e = document.getElementById(n); return e ? (e.options ? e.options[e.selectedIndex].text : e.value) : ''; };
+  const g = n => { const e = document.getElementById(n); return e ? (e.options ? (e.options[e.selectedIndex]||{}).text : e.value) : ''; };
   const r = document.getElementById('interno-resumo');
-  if (r) r.textContent = [g('consultor'), g('venda_status')].filter(Boolean).join(' · ');
+  if (r) r.textContent = [g('consultor_usuario_id'), g('venda_status')].filter(Boolean).join(' · ');
 }
 function mascaraCEP(el){
   const d = el.value.replace(/\D/g,'').slice(0,8);
@@ -831,6 +935,15 @@ async function buscarCEP(v){
   } catch(e){ if (st) st.textContent = 'Não consegui consultar agora.'; }
 }
 document.addEventListener('input', (e) => { if (e.target.closest('#form')) atualizarBarra(); });
+document.addEventListener('change', (e) => {
+  if (e.target && e.target.id === 'vigencia_confirmada'){
+    const d = document.getElementById('vig-dica');
+    if (d) d.textContent = e.target.checked
+      ? 'Marcada como confirmada — entra nos relatórios como vigência real.'
+      : 'Fica como previsão até alguém confirmar. Retroativa: justifique nas observações.';
+  }
+  if (e.target && e.target.id === 'plataforma_papel') papelDica();
+});
 document.addEventListener('DOMContentLoaded', () => { ajustarRotulos(); resumoInterno(); atualizarBarra(); });
 
 async function enviar() {
@@ -901,6 +1014,7 @@ function preencherFormulario(dados, bannerMsg) {
 }
 
 // ─── Pré-preenchimento a partir da análise do lead (extensão) ───
+const USUARIO_ID = {{ session.user_id|tojson }};
 const PREFILL = {{ prefill|tojson }};
 if (PREFILL && Object.keys(PREFILL).length) {
   preencherFormulario(PREFILL, 'Pré-preenchido com os dados extraídos da análise do lead. <b>Confira tudo</b> (principalmente CPF/RG e valores) e complete o financeiro antes de salvar.');
