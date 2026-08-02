@@ -17940,13 +17940,16 @@ def lead_documento_tipo():
     decide — e o nome do arquivo acompanha, porque e o nome que serve na
     operadora."""
     d = request.json or {}
-    tipo = (d.get('tipo') or '').strip()
-    if tipo not in _DOC_TIPOS:
-        return jsonify({"ok": False, "erro": "Tipo inválido"}), 400
     conn = db()
     doc = conn.execute("SELECT * FROM lead_documento WHERE id=?", (d.get('doc_id'),)).fetchone()
     if not doc:
         close_db(conn); return jsonify({"ok": False, "erro": "Documento não encontrado"}), 404
+    # TIPO AUSENTE E "NAO MEXE", nao "vira outro". Quem resolve de quem e o
+    # arquivo pela bandeja nao tem o seletor de tipo na tela — mandar o campo
+    # vazio dali apagaria a classificacao que a leitura tinha acertado.
+    tipo = (d.get('tipo') or '').strip() or (doc['tipo'] or 'outro')
+    if tipo not in _DOC_TIPOS:
+        close_db(conn); return jsonify({"ok": False, "erro": "Tipo inválido"}), 400
     # As outras duas perguntas: de quem e o documento e, se for de dependente,
     # qual o parentesco. Parentesco em titular nao existe — zera, senao fica
     # "TITULAR CONJUGE" no nome do arquivo e ninguem entende a pasta.
