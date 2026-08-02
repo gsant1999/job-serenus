@@ -65,8 +65,8 @@
   [data-theme="light"] .topbar { background:rgba(255,255,255,.88); border-bottom:1px solid var(--borda); }
   [data-theme="light"] .topbar h1, [data-theme="light"] .card-header h3,
   [data-theme="light"] h1, [data-theme="light"] h2, [data-theme="light"] h3 { color:var(--texto); }
-  [data-theme="light"] .btn-outline { color:var(--texto); border-color:rgba(0,0,0,.18); }
-  [data-theme="light"] .btn-outline:hover { color:var(--azul); border-color:var(--azul); }
+  /* (o estado do botao secundario no claro esta definido junto com o escuro,
+     mais abaixo — aqui so ficava brigando por especificidade) */
   [data-theme="light"] .tag { background:rgba(0,0,0,.06); }
   [data-theme="light"] .col-count { background:rgba(0,0,0,.08); }
   [data-theme="light"] .hamburger span { background:var(--texto); }
@@ -183,20 +183,15 @@
   .sino-vazio { padding:30px 16px; text-align:center; color:var(--cinza-2); font-size:12.5px; }
 
   /* ═══ BUTTONS ═══ */
-  .btn { background:var(--grad-frio); color:#fff; text-decoration:none; padding:9px 17px;
-    border-radius:9px; font-size:13px; font-weight:600; border:none; cursor:pointer;
-    font-family:'Inter',sans-serif; transition:opacity .15s, transform .15s; display:inline-flex; align-items:center; gap:6px; }
+  .btn { background:var(--grad-frio); color:#fff; text-decoration:none; padding:0 18px;
+    min-height:38px; border-radius:10px; font-size:13px; font-weight:700; border:none; cursor:pointer;
+    font-family:'Inter',sans-serif; transition:.18s; display:inline-flex; align-items:center; gap:7px; }
   .btn:hover { opacity:1; transform:translateY(-1px); filter:saturate(1.15) brightness(1.06);
                box-shadow:0 6px 18px rgba(31,216,164,.22); }
   .btn:active { transform:translateY(0); box-shadow:none; }
   /* O botao de contorno ganha o degrade da marca ao passar o cursor: e o unico
      momento em que ele precisa dizer "sou clicavel", e no claro ele estava
      apagado demais pra dizer isso parado. */
-  .btn-outline { position:relative; transition:.18s; }
-  .btn-outline:hover { color:#fff !important; border-color:transparent !important;
-                       background:var(--grad-frio); transform:translateY(-1px);
-                       box-shadow:0 6px 16px rgba(59,130,246,.22); }
-  .btn-outline:active { transform:translateY(0); box-shadow:none; }
 
   /* ── FILTRO LIGADO SE VE DE LONGE ────────────────────────────────────────
      Um filtro ativo mudava so o texto de dentro do select. Com sete filtros na
@@ -207,10 +202,25 @@
                background:var(--verde-soft) !important; font-weight:600; }
   [data-theme="light"] .filtro-on { border-color:#0f7a52 !important; color:#0f7a52 !important;
                                     background:rgba(15,122,82,.09) !important; }
-  .btn-outline { background:transparent; color:var(--texto); border:1px solid var(--borda-2);
-    padding:8px 15px; border-radius:9px; font-size:13px; font-weight:500;
-    text-decoration:none; transition:.15s; display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
-  .btn-outline:hover { border-color:var(--azul); color:#fff; }
+  /* ── BOTAO SECUNDARIO ────────────────────────────────────────────────────
+     O estado PARADO e o que se ve 99% do tempo, e ele estava transparente com
+     uma borda cinza fina: nao parecia botao, parecia texto com contorno.
+     Agora tem superficie propria, altura de alvo confortavel e canto mais
+     macio. O degrade da marca entra no hover, com elevacao — e ali que ele
+     confirma que e clicavel. */
+  .btn-outline { background:var(--panel-2); color:var(--texto);
+    border:1px solid var(--borda-2); padding:0 16px; min-height:38px; border-radius:10px;
+    font-size:13px; font-weight:600; text-decoration:none; cursor:pointer;
+    display:inline-flex; align-items:center; gap:7px;
+    transition:background .18s, border-color .18s, color .18s, transform .18s, box-shadow .18s; }
+  .btn-outline:hover { color:#fff; border-color:transparent;
+    background-image:var(--grad-frio); transform:translateY(-1px);
+    box-shadow:0 6px 16px rgba(59,130,246,.26); }
+  .btn-outline:active { transform:translateY(0); box-shadow:none; }
+  [data-theme="light"] .btn-outline { background:#fff; border-color:rgba(16,24,40,.14);
+    box-shadow:0 1px 2px rgba(16,24,40,.05); }
+  [data-theme="light"] .btn-outline:hover { color:#fff; border-color:transparent;
+    box-shadow:0 6px 16px rgba(59,130,246,.28); }
   .btn-ghost { background:transparent; color:var(--cinza); border:none; padding:6px 10px;
     font-size:13px; cursor:pointer; font-family:inherit; transition:.15s; }
   .btn-ghost:hover { color:var(--texto); }
