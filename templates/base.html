@@ -26,11 +26,9 @@
     --borda:rgba(255,255,255,.07); --borda-2:rgba(255,255,255,.12);
     --texto:#eef0f6; --cinza:#9aa1b5; --cinza-2:#646b80;
     --teal:#1fd8a4; --azul:#3b82f6; --roxo:#8b5cf6;
-    --rosa:#f43f7c; --laranja:#fb923c; --am:#ffd60a;
+    --rosa:#f43f7c; --laranja:#fb923c; --am:#facc15;
     --verde:#1fd8a4; --verde-2:#17b88a; --verde-soft:rgba(31,216,164,.12);
-    /* Amarelo VIVO: #facc15 e um ambar meio mostarda. #ffd60a e amarelo de
-     verdade, e com o contorno em volta ele aguenta ser vivo sem sujar. */
-    --amarelo:#ffd60a; --erro:#f43f5e; --info:#3b82f6;
+    --amarelo:#facc15; --erro:#f43f5e; --info:#3b82f6;
     --grad-frio:linear-gradient(135deg,#1fd8a4 0%,#3b82f6 50%,#8b5cf6 100%);
     --grad-quente:linear-gradient(135deg,#f43f7c 0%,#fb923c 55%,#facc15 100%);
     --sidebar-w: 236px;
@@ -52,9 +50,12 @@
     --card-bg:#FFFFFF; --input-bg:#f8f9fb;
     --verde:#17a882; --verde-2:#13906d; --verde-soft:rgba(23,168,130,.1);
     --rosa:#e0265e; --info:#2563eb;
-    /* No claro o amarelo puro sumiria; com o contorno preto em volta ele pode
-       continuar vivo em vez de virar mostarda escura. */
-    --amarelo:#ffc800; --am:#ffc800;
+    /* AMARELO NAO EXISTE NO TEMA CLARO. Amarelo e a cor mais luminosa que
+       existe: sobre branco ele nunca vai ter contraste, e toda tentativa de
+       salvar (escurecer ate virar mostarda, contornar a letra) sai pior que o
+       problema. Aqui "atencao" vira LARANJA QUEIMADO, que diz a mesma coisa e
+       se le sem truque nenhum. O amarelo fica onde ele funciona: no escuro. */
+    --amarelo:#c2410c; --am:#c2410c;
   }
   [data-theme="light"] .sidebar { background:#1a1d2e; }
   [data-theme="light"] .sidebar .nav-link { color:#c5c9d8; }
@@ -213,22 +214,6 @@
      tela, ninguem sabe quais estao valendo — e ai o gestor olha um relatorio
      recortado achando que e a lista inteira. Ligado fica colorido; desligado
      fica neutro. Serve nas duas telas de filtro do sistema. */
-  /* ── AMARELO SEMPRE LEVA CONTORNO ────────────────────────────────────────
-     Amarelo e a cor mais luminosa do circulo: encosta no branco no tema claro
-     e brilha demais no escuro. Nos dois casos o contorno devolve a borda que o
-     fundo nao da — escuro no claro, BRANCO no escuro.
-     paint-order poe o traco POR BAIXO do preenchimento; sem isso ele come o
-     miolo da letra e o texto fica sujo em tamanho pequeno. */
-  .txt-contorno {
-    -webkit-text-stroke:1px #ffffff;
-    paint-order:stroke fill;
-    font-weight:800;
-    text-shadow:0 0 2px rgba(255,255,255,.45);
-  }
-  [data-theme="light"] .txt-contorno {
-    -webkit-text-stroke:1px #0b0e16;
-    text-shadow:0 0 2px rgba(11,14,22,.5);
-  }
   .filtro-on { border-color:var(--verde) !important; color:var(--verde) !important;
                background:var(--verde-soft) !important; font-weight:600; }
   [data-theme="light"] .filtro-on { border-color:#0f7a52 !important; color:#0f7a52 !important;
@@ -823,34 +808,6 @@
 <script>
 // Marca visualmente quais filtros estao valendo. Usado pelo /propostas e pelo
 // /crm — a mesma logica nos dois, pra quem aprende numa tela saber ler a outra.
-// Contorno no amarelo, em TODA tela do sistema e nos dois temas.
-//
-// Enumerar seletor por seletor nao se sustenta: sao 34 usos de amarelo em 22
-// templates, e o proximo que alguem escrever ficaria de fora. Entao a regra se
-// aplica sozinha — varre o texto, le a cor JA CALCULADA e marca o que for
-// amarelo. Funciona pro que existe hoje e pro que vier depois.
-function contornarAmarelo(){
-  // Vale nos DOIS temas: o que muda e a COR do contorno, e isso quem resolve e
-  // o CSS. Aqui so se decide o que e amarelo.
-  document.querySelectorAll('.page *, .topbar *').forEach((el) => {
-    if(el.children.length) return;                    // so quem realmente pinta texto
-    const txt = (el.textContent || '').trim();
-    if(!txt) return;
-    const m = (getComputedStyle(el).color || '').match(/[\d.]+/g);
-    if(!m) return;
-    const [r, g, b] = m.map(Number);
-    // Faixa do ambar/amarelo: vermelho e verde altos, azul baixo.
-    const amarelo = r > 195 && g > 140 && b < 130 && (r - b) > 90 && (g - b) > 60;
-    el.classList.toggle('txt-contorno', amarelo);
-  });
-}
-document.addEventListener('DOMContentLoaded', contornarAmarelo);
-// O tema troca sem recarregar: refaz a varredura quando o atributo muda.
-try {
-  new MutationObserver(contornarAmarelo)
-    .observe(document.documentElement, {attributes:true, attributeFilter:['data-theme']});
-} catch(e) { /* sem observer, vale o que foi feito no carregamento */ }
-
 function marcarFiltrosAtivos(raiz){
   const box = typeof raiz === 'string' ? document.querySelector(raiz) : raiz;
   if(!box) return;

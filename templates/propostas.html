@@ -9,6 +9,7 @@
      no claro ou no escuro. No claro os tons escurecem pra manter contraste
      legivel sobre branco; verde e roxo claros somem em fundo claro. */
   .page {
+    --av-fg:#facc15; --av-bg:rgba(250,204,21,.10); --av-bd:rgba(250,204,21,.38);
     --lid-tag:#a855f7; --lid-cod:#d8b4fe; --lid-bg:rgba(168,85,247,.10); --lid-bd:rgba(168,85,247,.32);
     --id-fg:#8b9dff;   --id-bg:rgba(139,157,255,.12); --id-bd:rgba(139,157,255,.35);
     --id-hv:#c7d2fe;   --id-hv-bg:rgba(139,157,255,.24);
@@ -18,6 +19,8 @@
     --p-bruta-bg:rgba(192,132,252,.12);
   }
   [data-theme="light"] .page {
+    /* atencao no claro e LARANJA: amarelo sobre branco nao existe */
+    --av-fg:#c2410c; --av-bg:rgba(194,65,12,.09); --av-bd:rgba(194,65,12,.30);
     --lid-tag:#7e22ce; --lid-cod:#581c87; --lid-bg:rgba(126,34,206,.07); --lid-bd:rgba(126,34,206,.26);
     --id-fg:#3730a3;   --id-bg:rgba(55,48,163,.09);   --id-bd:rgba(55,48,163,.28);
     --id-hv:#1e1b6b;   --id-hv-bg:rgba(55,48,163,.16);
@@ -129,8 +132,8 @@
      gritando a mesma coisa. Vira um aviso só, no topo, com o total. */
   .lst-aviso { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
                padding:10px 14px; margin-bottom:14px; border-radius:10px;
-               background:rgba(250,204,21,.08); border:1px solid rgba(250,204,21,.3);
-               font-size:12.5px; color:#eab308; }
+               background:var(--av-bg); border:1px solid var(--av-bd);
+               font-size:12.5px; color:var(--av-fg); }
   .lst-aviso b { font-family:'Sora',sans-serif; font-size:15px; }
 
   /* A barra do gestor: muitos filtros, todos combinaveis, numa linha que quebra
@@ -159,9 +162,9 @@
   /* O aviso da linha e um BOTAO: informar sem dar o que fazer e so barulho. */
   .lst-vincular { display:inline-flex; align-items:center; padding:2px 8px;
                   font-family:inherit; font-size:10px; font-weight:600; cursor:pointer;
-                  border-radius:6px; background:rgba(250,204,21,.10);
-                  border:1px solid rgba(250,204,21,.38); color:#eab308; transition:.15s; }
-  .lst-vincular:hover { background:rgba(250,204,21,.2); border-color:#eab308; }
+                  border-radius:6px; background:var(--av-bg);
+                  border:1px solid var(--av-bd); color:var(--av-fg); transition:.15s; }
+  .lst-vincular:hover { background:var(--av-bd); border-color:var(--av-fg); }
 
   /* Rolagem lateral dita em palavras, e com sombra na borda enquanto houver
      conteudo escondido. Sem isso, duas colunas existiam so pra quem adivinhava. */
