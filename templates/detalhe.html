@@ -864,7 +864,9 @@
     <div class="campo" style="margin-bottom:20px;"><label>Particularidades / Regra de carência</label><textarea id="ea-particularidades" style="min-height:80px;font-size:13px;" placeholder="Ex: solicito redução de carência por portabilidade..."></textarea></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       <button class="btn" style="flex:1;min-width:160px;" id="ea-btn-enviar" onclick="enviarEmailAffinity()">Enviar para a Affinity</button>
-      {% if session.modo_teste %}<button class="btn-outline" style="flex:1;min-width:160px;border-color:rgba(245,158,11,.5);color:#f59e0b;" id="ea-btn-teste" onclick="enviarEmailTeste()">Enviar teste para mim</button>{% endif %}
+      {# SEMPRE visivel. Estava atras do 'modo teste', que quase ninguem liga —
+         entao na pratica nao existia jeito de testar antes de mandar de verdade. #}
+      <button class="btn-outline" style="flex:1;min-width:160px;border-color:rgba(245,158,11,.5);color:#f59e0b;" id="ea-btn-teste" onclick="enviarEmailTeste()">Enviar teste só para mim</button>
       <button class="btn-outline" onclick="copiarEmailAffinity()">Copiar e-mail</button>
       <button class="btn-outline" onclick="copiarWhatsAffinity()" title="Resumo pro grupo, avisando que é mensagem automática e que o e-mail foi enviado">Copiar msg do grupo</button>
       <button class="btn-outline" onclick="fecharEmailAffinity()">Cancelar</button>
@@ -1214,9 +1216,11 @@ async function enviarEmailTeste(){
   const assunto=document.getElementById('ea-assunto').value.trim();const corpo=document.getElementById('ea-corpo').value.trim();const partic=document.getElementById('ea-particularidades').value.trim();
   if(!assunto||!corpo){toast('Preencha assunto e corpo','err');return;}
   const btn=document.getElementById('ea-btn-teste');btn.disabled=true;btn.textContent='Enviando...';
-  try{const res=await fetch(`/proposta/${PROP_ID}/enviar-teste`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assunto,corpo,particularidades:partic})});const d=await res.json();toast(d.msg||(d.ok?'Teste enviado':'Erro'),d.ok?'ok':'err');}
+  try{const res=await fetch(`/proposta/${PROP_ID}/enviar-teste`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assunto,corpo,particularidades:partic,tipo:document.getElementById('ea-tipo').value})});const d=await res.json();
+  const st=document.getElementById('ea-status'); st.style.display='block'; st.textContent=d.msg||'';
+  toast(d.ok?'Teste enviado':'Falhou — veja a mensagem','err'.replace('err',d.ok?'ok':'err'));}
   catch(e){toast('Erro de conexão','err');}
-  btn.disabled=false;btn.textContent='Enviar teste para mim';
+  btn.disabled=false;btn.textContent='Enviar teste só para mim';
 }
 async function enviarEmailAffinity(){
   const assunto=document.getElementById('ea-assunto').value.trim();const corpo=document.getElementById('ea-corpo').value.trim();const partic=document.getElementById('ea-particularidades').value.trim();const status=document.getElementById('ea-status');

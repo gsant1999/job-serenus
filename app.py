@@ -6036,7 +6036,8 @@ def excluir_anexo(pid):
     return jsonify({"ok": True})
 
 # ─── EMAIL UTILITÁRIO ────────────────────────────────────────────────────────
-def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None, remetente_nome=None):
+def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None, remetente_nome=None,
+                  sincrono=False):
     """Envia email via API do Brevo (HTTPS porta 443 — nunca bloqueada pelo Railway).
     Configure BREVO_API_KEY no Railway. SMTP_USER define o remetente.
     destinatario: string (1 email) ou lista de emails.
@@ -6149,7 +6150,11 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None, remet
 
     # Com anexos: envia SÍNCRONO para capturar e reportar erros reais do Brevo.
     # Sem anexos: mantém envio em background (rápido para o usuário).
-    if attach_payload:
+    # sincrono=True: quem chamou VAI MOSTRAR o resultado na tela, entao precisa
+    # do resultado de verdade. Sem isso o e-mail sem anexo saia numa thread e a
+    # funcao devolvia True na hora — a tela dizia 'enviado', o historico gravava
+    # 'enviado', e o e-mail podia nunca ter saido. Foi o que aconteceu.
+    if attach_payload or sincrono:
         ok, _erro = _construir_e_enviar()
         _enviar_email.ultimo_erro = _erro
         return ok
@@ -8667,10 +8672,16 @@ def _montar_email_html_profissional(corpo_texto, particularidades='', eh_teste=F
 @login_required
 @admin_required
 def enviar_email_teste(pid):
-    """Envia o e-mail de protocolo APENAS para guilherme@serenuscorretora.com.br (modo teste)."""
-    DEST_TESTE = "guilherme@serenuscorretora.com.br"
+    """Manda o e-mail SO PRA QUEM ESTA LOGADO, pra conferir antes de mandar de
+    verdade. Vai pro e-mail do proprio usuario, nao pra um endereco fixo: quem
+    testa e quem precisa receber."""
+    conn0 = db()
+    _u = conn0.execute("SELECT email FROM usuarios WHERE id=?", (session['user_id'],)).fetchone()
+    close_db(conn0)
+    DEST_TESTE = (_u['email'] if _u and _u['email'] else '').strip() or "guilherme@serenuscorretora.com.br"
 
     d = request.json or {}
+    tipo = 'ciencia' if d.get('tipo') == 'ciencia' else 'protocolo'
     assunto      = d.get('assunto', '').strip()
     corpo_texto  = d.get('corpo', '').strip()
     particularidades = d.get('particularidades', '').strip()
@@ -8680,24 +8691,24 @@ def enviar_email_teste(pid):
 
     # Busca a proposta — anexa SÓ os documentos iniciais (extras), igual ao envio real.
     # Comprovante e proposta assinada NÃO vão no protocolo (são da antecipação).
+    # O teste tem que ser IGUAL ao envio real, inclusive nos anexos — testar sem
+    # anexo e nao testar a parte que mais falha (tamanho, arquivo sumido).
     lista_anexos = []
     conn = db()
-    p = conn.execute("SELECT anexos FROM propostas WHERE id=?", (pid,)).fetchone()
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if p and tipo == 'protocolo':
+        lista_anexos = _plataforma_anexos(conn, dict(p))
     close_db(conn)
-    if p:
-        try:
-            _raw = json.loads(p['anexos']) if p['anexos'] else []
-            extras = [x['nome'] if isinstance(x, dict) else x for x in _raw]
-            lista_anexos.extend([a for a in extras if a])
-        except Exception:
-            pass
     print(f"[TESTE PROTOCOLO pid={pid}] anexos iniciais ({len(lista_anexos)}): {lista_anexos} | UPLOAD_FOLDER={UPLOAD_FOLDER}")
 
     corpo_html = _montar_email_html_profissional(corpo_texto, particularidades, eh_teste=True, pid=pid)
-    enviado = _enviar_email(DEST_TESTE, f"[TESTE] {assunto}", corpo_html, anexos=lista_anexos)
+    enviado = _enviar_email(DEST_TESTE, f"[TESTE] {assunto}", corpo_html,
+                            anexos=lista_anexos, sincrono=True)
 
     if enviado:
-        return jsonify({"ok": True, "msg": f"E-mail de teste enviado para {DEST_TESTE} com {len(lista_anexos)} documento(s) inicial(is). Verifique sua caixa de entrada."})
+        return jsonify({"ok": True, "msg": f"Teste enviado para {DEST_TESTE}"
+                        + (f" com {len(lista_anexos)} anexo(s)." if lista_anexos else " (sem anexo, como a ciência).")
+                        + " Confira a caixa de entrada e o spam."})
     else:
         erro = getattr(_enviar_email, 'ultimo_erro', None) or "BREVO_API_KEY não configurada no Railway."
         return jsonify({"ok": False, "msg": f"Falha no envio: {erro}"}), 500
@@ -8744,7 +8755,8 @@ def enviar_plataforma(pid):
 
     corpo_html = _montar_email_html_profissional(corpo_texto, particularidades, eh_teste=False, pid=pid)
 
-    enviado = _enviar_email(DEST_AFFINITY, assunto, corpo_html, cc=CC_SERENUS, anexos=lista_anexos)
+    enviado = _enviar_email(DEST_AFFINITY, assunto, corpo_html, cc=CC_SERENUS,
+                            anexos=lista_anexos, sincrono=True)
 
     if enviado:
         # So o PEDIDO de cadastro move o status. Ciencia e recado: a proposta ja
@@ -8761,8 +8773,12 @@ def enviar_plataforma(pid):
         return jsonify({"ok": True, "msg": ("E-mail enviado. Status atualizado para 'Em Análise Operadora'."
                                             if tipo == 'protocolo' else "Aviso de ciência enviado.")})
     else:
+        # O MOTIVO chega na tela. Antes voltava 'Falha' e ninguem sabia se era
+        # chave, anexo grande ou endereco recusado.
+        _msg = getattr(_enviar_email, 'ultimo_erro', None) or \
+               'Não consegui enviar. Confira a BREVO_API_KEY no Railway.'
         close_db(conn)
-        return jsonify({"ok": False, "msg": "BREVO_API_KEY não configurada no Railway. E-mail não enviado."}), 500
+        return jsonify({"ok": False, "msg": str(_msg)[:400]}), 200
 
 
 # ─── ANTECIPAÇÃO DE COMISSÃO (Affinity) ──────────────────────────────────────
