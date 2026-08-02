@@ -310,11 +310,18 @@
   // aqui mas não achou a aba do Painel. Dois problemas diferentes, duas
   // instruções diferentes — antes os dois caíam no mesmo aviso genérico.
   var extensaoPresente = false;
+  var extensaoVersao = '';
+  var extensaoSabeCotar = false;
   window.addEventListener('message', function (ev) {
     if (ev.source !== window) return;
     var d = ev.data;
     if (d && d.source === 'JOB_SITE_RESP' && d.tipo === 'extensao_presente') {
       extensaoPresente = true;
+      extensaoVersao = d.versao || '';
+      // A ponte velha nao manda esta lista. Ausencia AQUI ja e o diagnostico:
+      // esta aba ficou com o script antigo, que ignora pedido de cotacao em
+      // silencio — e silencio vira "Painel fechado", que e mentira.
+      extensaoSabeCotar = !!(d.sabe && d.sabe.indexOf('cotar') >= 0);
       return;
     }
     if (!d || d.source !== 'JOB_SITE_RESP' || !d.reqId) return;
@@ -355,6 +362,16 @@
       html: '<b>A extensão está instalada mas não atendeu.</b> Costuma ser atualização ' +
             'pendente.<ol><li>Abra <code>chrome://extensions</code> e clique no ↻ da extensão do JOB.</li>' +
             '<li>Recarregue esta página.</li></ol>'
+    },
+    aba_desatualizada: {
+      classe: 'off', rotulo: 'Recarregue esta página',
+      html: '<b>Esta aba ficou com uma versão antiga da extensão.</b> Acontece quando a ' +
+            'página é recarregada <i>antes</i> da extensão — o script velho continua nela e ' +
+            'ignora o pedido de cotação em silêncio.' +
+            '<ol><li>Aperte <b>F5 aqui</b>.</li></ol>' +
+            '<p style="margin:8px 0 0;color:var(--cinza)">Só isso. A ordem certa, quando ' +
+            'atualizar a extensão, é: primeiro o ↻ em chrome://extensions, depois o F5 nas ' +
+            'abas abertas.</p>'
     },
     painel_fechado: {
       classe: 'off', rotulo: 'Painel fechado',
@@ -398,10 +415,16 @@
   }
 
   function tratarFalha(motivo, extra) {
-    // Se a extensão se anunciou nesta página, o problema não é ela estar
-    // faltando — é ela não ter achado a aba do Painel. Mandar o consultor
-    // reinstalar a extensão nesse caso é perder o tempo dele.
-    if (motivo === 'extensao_nao_respondeu' && extensaoPresente) motivo = 'painel_fechado';
+    // Não responder tem DUAS causas, e mandar a instrução errada custa caro:
+    // o consultor vai atrás do Painel quando o problema está nesta aba.
+    //
+    // Se a extensão se anunciou mas não sabe cotar, esta página ficou com o
+    // script antigo — acontece quando a página é recarregada ANTES da extensão.
+    // Ela ignora o pedido calada, a tela espera até estourar o tempo, e antes
+    // isso virava "Painel fechado", que é o diagnóstico errado.
+    if (motivo === 'extensao_nao_respondeu' && extensaoPresente) {
+      motivo = extensaoSabeCotar ? 'painel_fechado' : 'aba_desatualizada';
+    }
     var e = EXPLICA[motivo];
     if (!e) {
       mostrarSinal('off', 'Não deu certo',

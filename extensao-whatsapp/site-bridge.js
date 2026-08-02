@@ -46,7 +46,6 @@
     const d = ev.data;
     if (!d || d.source !== 'JOB_SITE_REQ') return;
     const pedido = traduzir(d);
-    if (!pedido) return;
     const responder = (resp) => {
       window.postMessage({ source: 'JOB_SITE_RESP', reqId: d.reqId,
                            ok: !!(resp && resp.ok), motivo: (resp && resp.motivo) || '',
@@ -58,6 +57,16 @@
                            // de chutar "deve estar fechado".
                            abasExaminadas: (resp && resp.abasExaminadas) }, '*');
     };
+    // Pedido que esta ponte nao conhece merece uma NEGATIVA, nao silencio.
+    //
+    // Antes ela simplesmente voltava, a pagina esperava ate estourar o tempo e
+    // o tempo estourado era lido como "o Painel deve estar fechado". Custou uma
+    // rodada inteira de investigacao no lugar errado. Agora, quando o site
+    // pedir algo que so uma ponte mais nova sabe fazer, ele ouve isso na hora.
+    if (!pedido) {
+      if (d.reqId) responder({ ok: false, motivo: 'ponte_nao_conhece:' + (d.tipo || '') });
+      return;
+    }
     try {
       chrome.runtime.sendMessage(pedido, (resp) => {
         if (chrome.runtime.lastError) { responder({ ok: false, motivo: 'extensao_indisponivel' }); return; }
@@ -69,5 +78,17 @@
   });
   // Deixa a página saber que a extensão está aqui — assim o botão só promete o
   // caminho rápido quando ele existe de verdade.
-  window.postMessage({ source: 'JOB_SITE_RESP', tipo: 'extensao_presente', ok: true }, '*');
+  //
+  // Vai junto a VERSAO e o que esta ponte sabe fazer. Sem isso, uma aba que
+  // ficou com a ponte velha (a pagina foi recarregada ANTES da extensao) se
+  // anuncia igualzinho a uma nova, ignora calada o pedido de cotacao, e a tela
+  // fica esperando ate estourar o tempo — e entao acusa "Painel fechado", que
+  // e o diagnostico errado. Com a versao na mao, a tela sabe dizer a verdade:
+  // recarregue ESTA pagina.
+  let _versao = '';
+  try { _versao = chrome.runtime.getManifest().version; } catch (e) { /* contexto orfao */ }
+  window.postMessage({ source: 'JOB_SITE_RESP', tipo: 'extensao_presente', ok: true,
+                       versao: _versao,
+                       sabe: ['abrir_chat', 'cotar', 'catalogo', 'cotador_estado',
+                              'cotador_cidades', 'descobrir_modalidades'] }, '*');
 })();
