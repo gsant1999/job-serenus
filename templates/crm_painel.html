@@ -3,6 +3,19 @@
 
 {% block head %}
 <style>
+  .bloco-cab { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin:0 0 12px; }
+  .bloco-cab h2 { font-size:15px; margin:0; }
+  .bloco-sub { font-size:12px; color:var(--cinza); }
+  .bloco-acao { margin-bottom:26px; }
+  .bloco-resultado { margin-bottom:22px; }
+  /* O bloco de acao e clicavel: numero que nao leva a lugar nenhum vira
+     decoracao. Cada card abre o funil ja filtrado por aquele problema. */
+  .kpi.acao-item { text-decoration:none; color:inherit; display:block; transition:border-color .15s; }
+  a.kpi.acao-item:hover { border-color:var(--azul); }
+  .kpi.acao-item.alerta .val { color:var(--am); }
+  .kpi.acao-item.frio { opacity:.72; }
+  .kpi.acao-item.frio .val { color:var(--cinza); }
+
   .pnl-topbar { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
   .pnl-filtros { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin:14px 0 22px; padding:14px; background:var(--panel); border:1px solid var(--borda); border-radius:12px; }
   .pnl-filtros .fg { display:flex; flex-direction:column; gap:3px; }
@@ -70,40 +83,77 @@
   <a class="btn-l" href="/crm/painel">Limpar</a>
 </form>
 
-<!-- KPIs -->
-<div class="kpi-grid">
-  <div class="kpi accent-azul">
-    <div class="lbl">Total de leads</div>
-    <div class="val">{{ cards.total|numero }}</div>
+{# DOIS BLOCOS, de proposito.
+   Em cima o que precisa de acao HOJE — e onde o consultor age. Embaixo o
+   resultado do periodo — e onde se presta conta. Antes era tudo a mesma
+   fileira de sete numeros, e o mais importante ("96% da base nunca foi
+   tocada") ficava com o mesmo peso do "pipeline estimado". #}
+
+<section class="bloco-acao">
+  <div class="bloco-cab">
+    <h2>Precisa de ação</h2>
+    <span class="bloco-sub">O que está travando o funil agora. Clique para abrir a lista.</span>
   </div>
-  <div class="kpi">
-    <div class="lbl">Em aberto</div>
-    <div class="val">{{ cards.aberto|numero }}</div>
-    <div class="sub">no pipeline ativo</div>
+  <div class="kpi-grid acao">
+    <a class="kpi acao-item {{ 'alerta' if cards.sem_dono else '' }}" href="/crm?sem_responsavel=1&nao_frio=1&abertos=1&data_de={{ cards.corte_novo }}">
+      <div class="lbl">Sem dono</div>
+      <div class="val">{{ cards.sem_dono|numero }}</div>
+      <div class="sub">leads dos últimos 30 dias que ninguém está atendendo</div>
+    </a>
+    <a class="kpi acao-item {{ 'alerta' if cards.sem_contato else '' }}" href="/crm?sem_contato=1&nao_frio=1&abertos=1">
+      <div class="lbl">Sem 1º contato</div>
+      <div class="val">{{ cards.sem_contato|numero }}</div>
+      <div class="sub">{{ cards.taxa_contato }}% dos abertos já foram contatados</div>
+    </a>
+    <a class="kpi acao-item {{ 'alerta' if cards.parados else '' }}" href="/crm?parados=1&nao_frio=1&abertos=1">
+      <div class="lbl">Parados há 7 dias ou mais</div>
+      <div class="val">{{ cards.parados|numero }}</div>
+      <div class="sub">sem mudar de etapa nem de sub-status</div>
+    </a>
+    <div class="kpi acao-item frio">
+      <div class="lbl">Base fria<i class="ajuda-i" title="Lead aberto, sem dono e sem nenhum contato ha mais de 60 dias. Nao e pipeline, e historico — por isso fica FORA da conta da conversao. Deixar esses no denominador fazia a taxa medir uma base que ninguem trabalhou.">i</i></div>
+      <div class="val">{{ cards.frios|numero }}</div>
+      <div class="sub">fora da conta de conversão</div>
+    </div>
   </div>
-  <div class="kpi accent-verde">
-    <div class="lbl">Ganhos</div>
-    <div class="val">{{ cards.ganhos|numero }}</div>
+</section>
+
+<section class="bloco-resultado">
+  <div class="bloco-cab">
+    <h2>Resultado do período</h2>
+    <span class="bloco-sub">Sobre os {{ cards.trabalhaveis|numero }} leads trabalháveis — base fria não entra.</span>
   </div>
-  <div class="kpi accent-erro">
-    <div class="lbl">Perdidos</div>
-    <div class="val">{{ cards.perdidos|numero }}</div>
+  <div class="kpi-grid">
+    <div class="kpi accent-azul">
+      <div class="lbl">Leads trabalháveis</div>
+      <div class="val">{{ cards.trabalhaveis|numero }}</div>
+      <div class="sub">de {{ cards.total|numero }} no total</div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">Em aberto</div>
+      <div class="val">{{ cards.aberto|numero }}</div>
+      <div class="sub">no pipeline ativo</div>
+    </div>
+    <div class="kpi accent-verde">
+      <div class="lbl">Ganhos</div>
+      <div class="val">{{ cards.ganhos|numero }}</div>
+    </div>
+    <div class="kpi accent-erro">
+      <div class="lbl">Perdidos</div>
+      <div class="val">{{ cards.perdidos|numero }}</div>
+    </div>
+    <div class="kpi accent-verde">
+      <div class="lbl">Taxa de conversão<i class="ajuda-i" title="Ganhos dividido por DECIDIDOS (ganhos + perdidos) — nao pelo total. Lead ainda em aberto pode virar qualquer um dos dois, e conta-lo como perdido faria a taxa parecer pior do que e. Base fria esta fora.">i</i></div>
+      <div class="val">{{ cards.taxa_conv }}%</div>
+      <div class="sub">{{ cards.ganhos }} de {{ cards.ganhos + cards.perdidos }} decididos</div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">Pipeline estimado</div>
+      <div class="val" style="font-size:20px;">{{ cards.pipeline_valor|moeda }}</div>
+      <div class="sub">soma do valor estimado em aberto</div>
+    </div>
   </div>
-  <div class="kpi accent-verde">
-    <div class="lbl">Taxa de conversão</div>
-    <div class="val">{{ cards.taxa_conv }}%</div>
-    <div class="sub">ganhos / decididos</div>
-  </div>
-  <div class="kpi accent-amarelo">
-    <div class="lbl">Sem 1º contato</div>
-    <div class="val">{{ cards.sem_contato|numero }}</div>
-    <div class="sub">{{ cards.taxa_contato }}% dos abertos contatados</div>
-  </div>
-  <div class="kpi">
-    <div class="lbl">Pipeline estimado</div>
-    <div class="val" style="font-size:20px;">{{ cards.pipeline_valor|moeda }}</div>
-    <div class="sub">soma do valor estimado em aberto</div>
-  </div>
+</section>
 </div>
 
 <div class="pnl-row">

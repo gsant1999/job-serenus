@@ -21329,6 +21329,17 @@ def crm():
     f_sub_status = request.args.get('sub_status', '').strip()
     f_etiqueta  = request.args.get('etiqueta', '').strip()   # id da etiqueta, ou 'sem'
     f_cor       = request.args.get('cor', '').strip()        # atrasado | atencao | no_prazo | fora_do_prazo
+    # Filas de trabalho vindas do painel. Numero que nao leva a lugar nenhum e
+    # decoracao: cada card do bloco 'Precisa de acao' abre a lista dele aqui.
+    f_sem_resp  = request.args.get('sem_responsavel', '') == '1'
+    f_sem_cont  = request.args.get('sem_contato', '') == '1'
+    f_parados   = request.args.get('parados', '') == '1'
+    # Base fria fora, com a MESMA definicao do painel — senao o card diz 8 e a
+    # lista abre 118, e o consultor deixa de confiar nos dois.
+    f_nao_frio  = request.args.get('nao_frio', '') == '1'
+    # So os ABERTOS: o painel nao conta ganho nem perdido nas filas de trabalho —
+    # venda fechada nao esta 'parada', esta pronta.
+    f_abertos   = request.args.get('abertos', '') == '1'
     # Deep-link pra abrir uma ficha específica ao carregar a página (notificação
     # do sino, WhatsApp, agenda, etc. montam /crm?lead=<id> — antes esse parâmetro
     # era lido em vários lugares mas NUNCA consumido aqui nem no JS, então todo
@@ -21364,6 +21375,26 @@ def crm():
            LEFT JOIN usuarios u ON u.id = l.responsavel_id
            WHERE 1=1 """
     params = []
+
+    if f_sem_resp:
+        q += " AND l.responsavel_id IS NULL"
+    if f_sem_cont:
+        # Sem NENHUM contato de verdade — criacao e movimentacao automatica nao
+        # contam, senao todo lead nasce 'contatado'.
+        q += (" AND l.id NOT IN (SELECT DISTINCT lead_id FROM crm_atividades "
+              "WHERE tipo IN ('whatsapp','atividade','nota','email','ligacao'))")
+    from datetime import timedelta as _tdq
+    if f_parados:
+        q += " AND COALESCE(l.avancou_em, l.criado_em) < ?"
+        params.append((datetime.now(TZ_SP) - _tdq(days=7)).strftime('%Y-%m-%d'))
+    if f_abertos:
+        q += (" AND l.etapa NOT IN (SELECT slug FROM crm_etapas "
+              "WHERE tipo IN ('ganho','perdido'))")
+    if f_nao_frio:
+        q += (" AND NOT (l.responsavel_id IS NULL AND l.criado_em < ? AND l.id NOT IN "
+              "(SELECT DISTINCT lead_id FROM crm_atividades "
+              "WHERE tipo IN ('whatsapp','atividade','nota','email','ligacao')))")
+        params.append((datetime.now(TZ_SP) - _tdq(days=60)).strftime('%Y-%m-%d'))
 
     # Consultor só vê os próprios; admin pode filtrar por consultor
     if not eh_admin:
@@ -22506,7 +22537,8 @@ def crm_painel():
     etapa_cor = {e['slug']: (e['cor'] or '#3b82f6') for e in etapas}
     etapa_ordem = [e['slug'] for e in etapas]
 
-    q = "SELECT id, etapa, responsavel_id, origem, criado_em, valor_estimado, perdido_motivo FROM crm_leads WHERE 1=1"
+    q = ("SELECT id, etapa, responsavel_id, origem, criado_em, valor_estimado, "
+         "perdido_motivo, avancou_em FROM crm_leads WHERE 1=1")
     params = []
     if not eh_admin:
         q += " AND responsavel_id=?"; params.append(uid)
@@ -22529,6 +22561,20 @@ def crm_painel():
         pass
     close_db(conn)
 
+    # ── BASE FRIA SAI DA CONTA ────────────────────────────────────────────────
+    # Lead aberto, sem dono e sem nenhum contato ha mais de 60 dias nao e
+    # pipeline: e historico. Deixar isso no denominador fazia a conversao medir
+    # uma coisa que ninguem trabalhou — o painel dizia 5,3% de conversao com 96%
+    # da base nunca tocada, e os dois numeros nao falavam do mesmo assunto.
+    from datetime import timedelta as _td
+    corte_frio = (datetime.now(TZ_SP) - _td(days=60)).strftime('%Y-%m-%d')
+    corte_novo = (datetime.now(TZ_SP) - _td(days=30)).strftime('%Y-%m-%d')
+    corte_parado = (datetime.now(TZ_SP) - _td(days=7)).strftime('%Y-%m-%d')
+
+    def _dia(v):
+        return str(v or '')[:10]
+
+    frios, sem_dono_novos, parados = 0, 0, 0
     total = len(leads)
     ganhos = perdidos = aberto = sem_contato = 0
     pipeline_valor = 0.0
@@ -22549,10 +22595,21 @@ def crm_painel():
             mot = (l['perdido_motivo'] or '').strip() or 'Não informado'
             motivos_perda[mot] = motivos_perda.get(mot, 0) + 1
         else:
+            eh_frio = (not l['responsavel_id'] and l['id'] not in contato_ids
+                       and _dia(l['criado_em']) and _dia(l['criado_em']) < corte_frio)
+            if eh_frio:
+                frios += 1
+                continue          # base fria nao entra em pipeline nem em conversao
             aberto += 1
             pipeline_valor += float(l['valor_estimado'] or 0)
             if l['id'] not in contato_ids:
                 sem_contato += 1
+            # A FILA DE TRABALHO: sem dono e ainda quente, e parado ha uma semana.
+            if not l['responsavel_id'] and _dia(l['criado_em']) >= corte_novo:
+                sem_dono_novos += 1
+            ult = _dia(l['avancou_em']) or _dia(l['criado_em'])
+            if ult and ult < corte_parado:
+                parados += 1
 
         org = _normalizar_origem_label(l['origem'])
         do = por_origem.setdefault(org, {'total': 0, 'ganhos': 0})
@@ -22596,6 +22653,10 @@ def crm_painel():
         'total': total, 'ganhos': ganhos, 'perdidos': perdidos, 'aberto': aberto,
         'taxa_conv': taxa_conv, 'pipeline_valor': pipeline_valor,
         'sem_contato': sem_contato, 'taxa_contato': taxa_contato,
+        # O que precisa de acao hoje, separado do que e resultado do periodo.
+        'frios': frios, 'sem_dono': sem_dono_novos, 'parados': parados,
+        'corte_novo': corte_novo,
+        'trabalhaveis': total - frios,
     }
 
     return render_template('crm_painel.html', cards=cards, funil=funil, origens=origens,
