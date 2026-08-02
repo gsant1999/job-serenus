@@ -3,6 +3,33 @@
 
 {% block head %}
 <style>
+  /* ── Cabeçalho: hierarquia por frequência de uso ── */
+  .crm-acoes { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .btn-primario-sm { display:inline-flex; align-items:center; gap:6px;
+    padding:7px 14px; border-radius:8px; border:none; cursor:pointer;
+    background:var(--grad-frio); color:#fff; font-size:12.5px; font-weight:600;
+    font-family:inherit; }
+  .btn-primario-sm:hover { filter:brightness(1.08); }
+
+  /* "Mais": o que se usa uma vez por mês não disputa espaço com o do dia. */
+  .crm-mais { position:relative; }
+  .crm-mais > button { display:inline-flex; align-items:center; gap:5px; }
+  .crm-mais-menu { display:none; position:absolute; right:0; top:calc(100% + 6px);
+    z-index:60; min-width:270px; padding:6px;
+    background:var(--panel); border:1px solid var(--borda-2); border-radius:10px;
+    box-shadow:0 18px 44px rgba(0,0,0,.34); }
+  .crm-mais.aberto .crm-mais-menu { display:block; }
+  .crm-mais-tit { font-size:9.5px; text-transform:uppercase; letter-spacing:.5px;
+    color:var(--cinza-2); font-weight:700; padding:8px 10px 4px; }
+  .crm-mais-menu button { display:block; width:100%; text-align:left;
+    background:none; border:none; cursor:pointer; font-family:inherit;
+    color:var(--texto); font-size:12.5px; font-weight:600;
+    padding:7px 10px; border-radius:7px; }
+  .crm-mais-menu button:hover { background:var(--panel-3); }
+  /* A explicação em voz baixa: quem já sabe o que é ignora, quem não sabe lê. */
+  .crm-mais-menu button small { display:block; font-weight:400; font-size:11px;
+    color:var(--cinza); margin-top:2px; line-height:1.4; }
+
   /* Topbar do CRM: menor e sempre com os botões visíveis (nunca corta "+ Novo Lead"/"Agenda"
      em janela estreita — quebra pra 2ª linha em vez de sumir/cortar). Este <style> só carrega
      nesta página, então a regra abaixo não afeta o topbar de outras telas. */
@@ -337,26 +364,61 @@
     <h1>CRM</h1>
     <div class="sub">Pipeline de vendas · {{ total }} leads</div>
   </div>
-  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-    <button class="btn-outline btn-sm" onclick="abrirNovoLead()">+ Novo Lead</button>
-    {% if eh_admin %}
-    {# Destacado e no começo: era o 6o de 9 botoes identicos e ficava invisivel,
-       sendo que e a porta de TODA a configuracao do funil. #}
-    <button class="btn-config-funil" onclick="location.href='/crm/etapas/gerenciar'"
-            title="Etapas do funil, prazo de cor do card, sub-status por etapa, etiquetas e campos personalizados">
-      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"
-           stroke-linecap="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
-      Configurar funil
+  {# CABECALHO POR FREQUENCIA DE USO, nao por ordem de criacao.
+     Eram oito botoes com o mesmo peso: o "+ Novo Lead", que se usa toda hora,
+     tinha o mesmo tamanho e a mesma cor do "Mesclar duplicados", que se usa
+     uma vez por mes. Quando tudo tem o mesmo destaque, nada tem destaque.
+     Agora: a acao do dia em primeiro e cheia; as duas telas que se abre sempre
+     ao lado; e o resto — configuracao e operacao em massa — atras de "Mais",
+     que e onde coisa rara deve morar. "Importar" saiu: os leads entram
+     sozinhos pela planilha [AUTOMACAO], entao aquele botao so servia pra
+     alguem importar duplicado sem querer. #}
+  <div class="crm-acoes">
+    <button class="btn-primario-sm" onclick="abrirNovoLead()">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+           stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      Novo lead
     </button>
-    {% endif %}
     <button class="btn-outline btn-sm" onclick="location.href='/crm/agenda'">Agenda</button>
     {% if eh_admin %}
-    <button class="btn-outline btn-sm" id="btn-buscar-leads" onclick="buscarLeadsAgora(this)">Buscar leads agora</button>
     <button class="btn-outline btn-sm" onclick="location.href='/crm/painel'">Painel</button>
-    <button class="btn-outline btn-sm" onclick="location.href='/crm/importar'">Importar</button>
-    <button class="btn-outline btn-sm" onclick="abrirModalTransferencia()">Transferência em massa</button>
-    {% if eh_serenus %}<button class="btn-outline btn-sm" onclick="location.href='/crm/importar-meninas'">Transferir Leads</button>{% endif %}
-    <button class="btn-outline btn-sm" onclick="mesclarDuplicados(this)">Mesclar duplicados</button>
+
+    <div class="crm-mais" id="crm-mais">
+      <button class="btn-outline btn-sm" onclick="event.stopPropagation(); document.getElementById('crm-mais').classList.toggle('aberto')">
+        Mais
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor"
+             stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="crm-mais-menu">
+        <div class="crm-mais-tit">Funil</div>
+        <button type="button" onclick="location.href='/crm/etapas/gerenciar'">
+          Configurar funil
+          <small>Etapas, prazo de cor do card, sub-status, etiquetas e campos</small>
+        </button>
+
+        <div class="crm-mais-tit">Leads</div>
+        <button type="button" id="btn-buscar-leads" onclick="buscarLeadsAgora(this)">
+          Buscar leads agora
+          <small>Puxa da planilha na hora, sem esperar a rodada automática</small>
+        </button>
+        <button type="button" onclick="mesclarDuplicados(this)">
+          Mesclar duplicados
+          <small>Junta leads repetidos pelo telefone</small>
+        </button>
+
+        <div class="crm-mais-tit">Time</div>
+        <button type="button" onclick="abrirModalTransferencia()">
+          Transferência em massa
+          <small>Passa vários leads de um consultor para outro</small>
+        </button>
+        {% if eh_serenus %}
+        <button type="button" onclick="location.href='/crm/importar-meninas'">
+          Transferir leads
+          <small>Distribui leads entre as consultoras</small>
+        </button>
+        {% endif %}
+      </div>
+    </div>
     {% endif %}
   </div>
 </div>
@@ -2167,5 +2229,12 @@ renderFiltrosSalvos();
 {% if lead_focus %}
 abrirFicha({{ lead_focus }});
 {% endif %}
+
+// Menu fecha ao clicar fora: menu que so fecha no proprio botao fica aberto
+// atras do conteudo e o consultor clica no lugar errado.
+document.addEventListener('click', (e) => {
+  const m = document.getElementById('crm-mais');
+  if (m && !m.contains(e.target)) m.classList.remove('aberto');
+});
 </script>
 {% endblock %}
