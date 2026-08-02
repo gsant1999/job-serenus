@@ -345,6 +345,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       { versao: msg.versao || '', checagens: msg.checagens || [] }, 12000).then(sendResponse);
     return true;
   }
+  // COTAR NO PAINEL DO CORRETOR, DA ABA QUE O CORRETOR JA DEIXOU ABERTA.
+  //
+  // A cotacao nao pode sair daqui nem do servidor do JOB: quem fala com a
+  // Trindade e a sessao do proprio corretor, na aba dele. Este trecho so acha
+  // essa aba e repassa o pedido — se ela nao existir, diz isso em vez de
+  // tentar abrir uma e logar alguem.
+  //
+  // Nao foca a aba de proposito. Roubar o foco no meio de um atendimento e
+  // pior que esperar: o consultor esta no WhatsApp falando com o cliente.
+  if (msg && (msg.type === 'cotar_painel' || msg.type === 'cotador_pronto')) {
+    const oQuePedir = msg.type === 'cotar_painel'
+      ? { type: 'cotar_aqui', pedido: msg.pedido }
+      : { type: 'cotador_estado' };
+    chrome.tabs.query({ url: 'https://beta.paineldocorretor.com.br/*' }, (abas) => {
+      const aba = (abas || [])[0];
+      if (!aba) { sendResponse({ ok: false, motivo: 'painel_fechado' }); return; }
+      chrome.tabs.sendMessage(aba.id, oQuePedir, (r) => {
+        if (chrome.runtime.lastError) {
+          // Aba aberta mas sem o script (extensao atualizada e sem F5 ainda).
+          sendResponse({ ok: false, motivo: 'painel_precisa_recarregar' });
+          return;
+        }
+        sendResponse(r || { ok: false, motivo: 'sem_resposta' });
+      });
+    });
+    return true;
+  }
   // ABRIR A CONVERSA NA ABA QUE JA EXISTE.
   //
   // Pedido do Guilherme: o botao do CRM abria aba nova e o WhatsApp recarregava
