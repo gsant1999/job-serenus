@@ -6485,17 +6485,19 @@ def dashboard():
 # operadora — e o sistema traduz pra plataforma certa aqui atras.
 # Axioma saiu: nao se protocola mais venda por la (cadastro em encerramento).
 _PLATAFORMA_PADRAO = 'Affinity (Serenus)'
+# DUAS opcoes, nao tres. A terceira ('eu lanco e aviso') pedia ao vendedor uma
+# decisao que nao e dele: avisar ou nao o escritorio e assunto de bastidor. Ele
+# decide uma coisa so — se ele mesmo faz o cadastro ou se pede pra fazerem.
 _PLATAFORMA_PAPEL = {
-    'propria': 'Eu mesmo lanço na operadora',
-    'ciencia': 'Eu lanço e aviso a operação',
-    'processar': 'A operação lança por mim',
+    'propria': 'Eu mesmo faço',
+    'processar': 'Quero que façam por mim',
 }
 
 
 def _plataforma_do_papel(papel):
     """Papel escolhido na tela -> plataforma de verdade. 'propria' e a Serenus
     resolvendo sozinha; qualquer outro passa pela operacao parceira."""
-    return 'Serenus' if (papel or 'propria') == 'propria' else _PLATAFORMA_PADRAO
+    return _PLATAFORMA_PADRAO if (papel or 'propria') == 'processar' else 'Serenus'
 
 
 

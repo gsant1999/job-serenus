@@ -350,8 +350,8 @@
 
     <div class="form-row form-row-2">
       <div class="campo">
-        <label>Quem lança esta venda na operadora
-          <i class="ajuda-i" title="Toda venda precisa ser lancada no sistema da operadora pra virar contrato. Aqui voce diz quem faz isso: voce mesmo, ou a nossa operacao. Se for voce, o cadastro segue normal. Se pedir pra operacao, ela recebe a proposta e os documentos e lanca por voce. Em qualquer um dos casos a venda e a comissao continuam suas.">i</i>
+        <label>Quem faz o cadastro na operadora
+          <i class="ajuda-i" title="Depois de cadastrada aqui, a proposta ainda precisa ser lancada no site da operadora pra virar contrato. Voce escolhe se faz isso ou se prefere que facam por voce. Pedindo, a proposta e os documentos seguem prontos pra quem cadastra. A venda e a comissao sao suas nos dois casos.">i</i>
         </label>
         <select name="plataforma_papel" id="plataforma_papel" onchange="papelDica()">
           {% for chave, rotulo in papeis.items() %}
@@ -682,18 +682,20 @@ function _rotIdade(iso){
   if (a === null) return '';
   return a + (a === 1 ? ' ano' : ' anos') + (a < 18 ? ' · menor' : '');
 }
-// Menor de 18 em PF ou Adesao SEMPRE tem responsavel financeiro. A regra e do
-// mercado, nao do sistema — por isso a tela explica o porque em vez de so
-// abrir um campo do nada.
+// O gatilho e o menor ser o TITULAR, nao ser dependente.
+//
+// Errei nisto na primeira versao: pedia responsavel sempre que aparecesse
+// qualquer menor. Mas dependente menor tem titular adulto — e o titular JA e o
+// responsavel. Pedir uma terceira pessoa ali e inventar trabalho.
+// Quem precisa de responsavel financeiro e o plano feito PARA a crianca: ela e
+// a titular, e quem paga nao esta no contrato.
 function precisaRespFin(){
   const tp = (document.getElementById('tipo_pessoa')||{}).value || '';
   if (tp !== 'PF' && tp !== 'Adesão') return null;
-  const menores = [];
   const at = idadeDe((document.getElementById('data_nasc_titular')||{}).value);
+  if (at === null || at >= 18) return null;
   const nt = (document.getElementById('nome_titular')||{}).value || 'o titular';
-  if (at !== null && at < 18) menores.push(nt + ' (' + at + ')');
-  DEPS.forEach(d => { const a = idadeDe(d.nasc); if (a !== null && a < 18) menores.push((d.nome || 'dependente') + ' (' + a + ')'); });
-  return menores.length ? menores : null;
+  return [nt + ' (' + at + ')'];
 }
 function mostrarIdades(){
   const it = document.getElementById('idade-titular');
@@ -706,9 +708,9 @@ function mostrarIdades(){
   bloco.hidden = !menores;
   const mot = document.getElementById('resp-fin-motivo');
   if (menores && mot){
-    mot.textContent = 'Aparece porque ' + menores.join(', ') + (menores.length > 1 ? ' são menores' : ' é menor')
-      + ' de 18 anos num plano ' + ((document.getElementById('tipo_pessoa')||{}).value)
-      + '. Ele pode entrar no plano ou apenas responder pelo pagamento.';
+    mot.textContent = 'Aparece porque ' + menores[0] + ' é o titular e tem menos de 18 anos num plano '
+      + ((document.getElementById('tipo_pessoa')||{}).value)
+      + '. O responsável pode entrar no plano ou apenas responder pelo pagamento.';
   }
   // Obrigatorio so quando o bloco esta em cena.
   ['resp_fin_nome','resp_fin_cpf','resp_fin_parentesco'].forEach(id => {
@@ -1001,9 +1003,9 @@ function papelDica(){
   const v = (document.getElementById('plataforma_papel')||{}).value || 'propria';
   const d = document.getElementById('papel-dica');
   if (!d) return;
-  d.textContent = v === 'ciencia'   ? 'Você lança e a operação fica sabendo, sem precisar fazer nada.'
-                : v === 'processar' ? 'A operação recebe a proposta e os documentos e lança por você.'
-                : 'Você lança direto na operadora. Ninguém mais é acionado.';
+  d.textContent = v === 'processar'
+    ? 'A proposta e os documentos seguem prontos para quem vai cadastrar.'
+    : 'Você entra no site da operadora e cadastra. Aqui fica só o registro.';
 }
 document.addEventListener('DOMContentLoaded', () => { try { donoMudou(); papelDica(); } catch(e){} });
 
