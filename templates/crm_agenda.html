@@ -39,6 +39,13 @@
   </div>
   <div style="display:flex; gap:8px;">
     {% if eh_admin %}
+      {# Sem este botao o motor so rodava por POST e ninguem conseguia gerar a
+         fila pelo navegador. Manual de proposito por enquanto: da pra ver o que
+         ele cria antes de soltar na base inteira. #}
+      <button class="btn-outline btn-sm" id="btn-gerar-fila" onclick="gerarFila(this)"
+              title="Roda as regras e cria as tarefas que faltam. Não duplica: rodar de novo não cria nada repetido.">
+        Atualizar a fila
+      </button>
       {% if ver_todos %}<button class="btn-outline btn-sm" onclick="location.href='/crm/agenda'">Só as minhas</button>
       {% else %}<button class="btn-outline btn-sm" onclick="location.href='/crm/agenda?todos=1'">Ver de todos</button>{% endif %}
     {% endif %}
@@ -93,6 +100,21 @@
 </div>
 
 <script>
+async function gerarFila(b){
+  b.disabled = true; const r0 = b.textContent; b.textContent = 'Procurando...';
+  try{
+    const r = await fetch('/crm/agenda/gerar', {method:'POST'});
+    const d = await r.json();
+    if(!d.ok){ toast(d.erro || 'Não deu', 'err'); b.disabled = false; b.textContent = r0; return; }
+    // Diz o que criou e por qual regra: 'pronto' não ensina nada sobre o motor.
+    const det = Object.entries(d.criadas || {}).filter(([,v]) => v)
+      .map(([k,v]) => v + ' ' + ({primeiro_contato:'sem 1º contato', parado_sem_resposta:'parados',
+                                  cotacao_parada:'cotação parada', gatilho_retorno:'gatilho vencido'}[k] || k)).join(', ');
+    toast(d.total ? (d.total + ' tarefa(s): ' + det) : 'Nada novo — a fila já está em dia', d.total ? 'ok' : 'ok');
+    if(d.total) setTimeout(() => location.reload(), 1200);
+    else { b.disabled = false; b.textContent = r0; }
+  }catch(e){ toast('Erro de conexão','err'); b.disabled = false; b.textContent = r0; }
+}
 async function concluir(id){
   const r = await fetch('/crm/agenda/'+id+'/concluir', {method:'POST'});
   if ((await r.json()).ok) { toast('Concluída', 'ok'); setTimeout(()=>location.reload(), 500); }
