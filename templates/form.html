@@ -187,7 +187,8 @@
         <input type="text" name="nome_titular" id="nome_titular" placeholder="Nome do titular">
         <input type="date" name="data_nasc_titular" id="data_nasc_titular" title="Nascimento do titular" onchange="mostrarIdades()">
       </div>
-      <div class="hint" id="idade-titular" style="margin-bottom:8px;"></div>
+      <div class="hint" id="idade-titular" style="margin-bottom:4px;"></div>
+      <div class="erro-campo" id="erro-beneficiarios" style="margin-bottom:8px;"></div>
       <div id="lista-dependentes"></div>
       <button type="button" class="btn-ghost" style="font-size:12px; margin-top:6px;" onclick="addDependente()">+ Adicionar dependente</button>
       <textarea name="titular_dependentes" id="titular_dependentes" style="display:none;"></textarea>
@@ -697,11 +698,36 @@ function precisaRespFin(){
   const nt = (document.getElementById('nome_titular')||{}).value || 'o titular';
   return [nt + ' (' + at + ')'];
 }
+// DUAS COMBINACOES QUE NAO EXISTEM. Nao sao preferencia nossa: a operadora
+// recusa, entao deixar cadastrar e deixar o consultor descobrir depois, com o
+// cliente ja avisado de que fechou.
+//   1. PME com titular menor. Em PME o menor E SEMPRE dependente de alguem.
+//   2. PF ou Adesao com titular menor E dependentes. Menor nao carrega
+//      dependente — quem carrega e o adulto.
+function erroBeneficiarios(){
+  const tp = (document.getElementById('tipo_pessoa')||{}).value || '';
+  const at = idadeDe((document.getElementById('data_nasc_titular')||{}).value);
+  if (at === null || at >= 18) return '';
+  const deps = DEPS.filter(d => (d.nome || '').trim()).length;
+  if (tp === 'PME' || tp === 'PJ')
+    return 'Em ' + tp + ' o titular não pode ser menor de 18. O menor entra como dependente de um titular adulto.';
+  if ((tp === 'PF' || tp === 'Adesão') && deps)
+    return 'Titular menor de 18 não pode ter dependentes. Se são duas pessoas no plano, o titular tem que ser o adulto.';
+  return '';
+}
+
 function mostrarIdades(){
   const it = document.getElementById('idade-titular');
   if (it) it.textContent = _rotIdade((document.getElementById('data_nasc_titular')||{}).value);
   const ir = document.getElementById('idade-resp-fin');
   if (ir) ir.textContent = _rotIdade((document.getElementById('resp_fin_nascimento')||{}).value);
+  // O impedimento aparece na hora, junto de quem o causou.
+  const cx = document.getElementById('erro-beneficiarios');
+  if (cx){
+    const e = erroBeneficiarios();
+    cx.textContent = e;
+    cx.classList.toggle('so-aviso', false);
+  }
   const bloco = document.getElementById('bloco-resp-fin');
   if (!bloco) return;
   const menores = precisaRespFin();
@@ -1060,6 +1086,15 @@ async function enviar() {
     if (!validarCampo(el)) { ok = false; primeiro = primeiro || el; }
   }
   if (!validarDatas()) { ok = false; primeiro = primeiro || document.getElementById('previsao_1'); }
+  // Contrato que a operadora recusa nao entra no sistema: nao adianta salvar
+  // pra descobrir depois, com o cliente ja avisado de que fechou.
+  const eBenef = erroBeneficiarios();
+  if (eBenef) {
+    ok = false;
+    const cx = document.getElementById('erro-beneficiarios');
+    if (cx) cx.textContent = eBenef;
+    primeiro = primeiro || document.getElementById('data_nasc_titular');
+  }
   if (!ok) {
     const alvo = primeiro && (primeiro.closest('.campo') || primeiro);
     if (alvo) { alvo.scrollIntoView({behavior:'smooth', block:'center'}); try { primeiro.focus(); } catch(e){} }
