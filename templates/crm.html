@@ -351,6 +351,38 @@
      token pros dois temas — roxo claro some no fundo branco. */
   .campo-grupo { --wa-fg:#c4b5fd; --wa-bg:rgba(139,92,246,.10); --wa-bd:rgba(139,92,246,.38); }
   [data-theme="light"] .campo-grupo { --wa-fg:#5b21b6; --wa-bg:rgba(91,33,182,.07); --wa-bd:rgba(91,33,182,.28); }
+
+  /* ── MODO CLARO DO CRM ───────────────────────────────────────────────────
+     As etiquetas do card foram pintadas pro fundo escuro: texto claro sobre
+     fundo translucido. No claro isso vira claro-sobre-claro e some. Medido na
+     tela, nove elementos abaixo do minimo legivel (4,5:1) — o pior deles a
+     1,1:1, ou seja, invisivel.
+     Aqui cada um recebe o tom escuro equivalente, mantendo o MESMO significado
+     de cor: roxo continua roxo, ambar continua ambar, so muda a luminancia. */
+  [data-theme="light"] .lead-resp { background:rgba(91,33,182,.10); color:#5b21b6; }
+  [data-theme="light"] .origem-badge-manual { background:rgba(91,33,182,.12); color:#5b21b6; }
+  [data-theme="light"] .origem-badge-fb { background:rgba(29,78,216,.12); color:#1d4ed8; }
+  [data-theme="light"] .origem-badge-google { background:rgba(180,83,9,.12); color:#b45309; }
+  [data-theme="light"] .origem-badge-medsenior { background:rgba(15,122,82,.12); color:#0f7a52; }
+  [data-theme="light"] .lead-lid-tag.falta { background:rgba(146,64,14,.12); color:#92400e; }
+  [data-theme="light"] .lead-lid-tag.lid { background:rgba(109,40,217,.12); color:#6d28d9; }
+  [data-theme="light"] .lead-lid-tag.numero { background:rgba(15,122,82,.12); color:#0f7a52; }
+  [data-theme="light"] .lead-lid { color:#3f3f52; }
+  [data-theme="light"] .lead-topo-btn { background:rgba(29,78,216,.10); color:#1d4ed8; }
+  [data-theme="light"] .lead-topo-btn:hover { background:rgba(29,78,216,.18); }
+  [data-theme="light"] .col-count { background:rgba(16,24,40,.07); color:#475069; }
+  [data-theme="light"] .crm-filtros .btn-limpar { color:#3f4657; border-color:rgba(16,24,40,.20); }
+  /* O azul do sistema sobre branco da 3,7:1 no texto branco em cima dele:
+     escurece so no claro, mantendo a mesma cor de acao. */
+  [data-theme="light"] .crm-filtros .btn-filtrar { background:#1d4ed8; }
+  [data-theme="light"] .crm-col-add { color:#3f4657; }
+  /* O azul do sistema sobre branco fica em 3,7:1 — escurece so no claro. */
+  .btn-salvar-filtro { border-color:var(--azul); color:var(--azul); }
+  [data-theme="light"] .btn-salvar-filtro { border-color:#1d4ed8; color:#1d4ed8; }
+  /* O avatar tinha texto branco sobre gradiente claro: 1,1:1, invisivel. */
+  [data-theme="light"] .lead-avatar { background:linear-gradient(135deg,#1d4ed8,#5b21b6); color:#fff; }
+  /* Placeholder do campo de busca: cinza claro demais pra ler. */
+  [data-theme="light"] .crm-filtros input::placeholder { color:#6b7280; opacity:1; }
   a.wa-id { display:block; text-decoration:none; padding:12px 14px; border-radius:10px;
             background:var(--wa-bg); border:1px solid var(--wa-bd); transition:.15s; }
   a.wa-id:hover { border-color:var(--wa-fg); background:color-mix(in srgb, var(--wa-bg) 60%, transparent); }
@@ -612,7 +644,7 @@
     </div>
     <button type="submit" class="btn-filtrar">Filtrar</button>
     <button type="button" class="btn-limpar" onclick="location.href='/crm'">Limpar</button>
-    <button type="button" class="btn-limpar" onclick="salvarFiltroAtual()" style="border-color:var(--azul);color:var(--azul);">Salvar filtro</button>
+    <button type="button" class="btn-limpar btn-salvar-filtro" onclick="salvarFiltroAtual()">Salvar filtro</button>
   </form>
 
   <!-- Filtros salvos -->

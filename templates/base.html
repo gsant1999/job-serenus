@@ -39,7 +39,11 @@
   [data-theme="light"] {
     --bg:#F4F6F9; --panel:#FFFFFF; --panel-2:#f0f2f5; --panel-3:#e8ebf0;
     --borda:rgba(0,0,0,.08); --borda-2:rgba(0,0,0,.14);
-    --texto:#1a1d2e; --cinza:#5a6278; --cinza-2:#8c93a8;
+    /* --cinza-2 era #8c93a8: 3,1:1 sobre branco, abaixo do minimo legivel. Isso
+     derrubava de uma vez os rotulos de filtro, as datas dos cards e o "+
+     adicionar" de todas as telas no tema claro. #6b7280 da 4,8:1 e mantem a
+     hierarquia (texto > cinza > cinza-2). */
+  --texto:#1a1d2e; --cinza:#5a6278; --cinza-2:#667085;
     --card-bg:#FFFFFF; --input-bg:#f8f9fb;
     --verde:#17a882; --verde-2:#13906d; --verde-soft:rgba(23,168,130,.1);
     --rosa:#e0265e; --info:#2563eb;
@@ -291,7 +295,14 @@
   textarea { resize:vertical; min-height:70px; line-height:1.5; }
   select { cursor:pointer; }
   select option { background:var(--panel-2); color:var(--texto); }
-  input[type=date] { color-scheme:dark; }
+  /* color-scheme diz ao NAVEGADOR de que cor desenhar o que ele mesmo desenha:
+     o icone do calendario, o relogio, o seletor. Estava fixo em 'dark' pra
+     todo campo de data do sistema — entao no tema claro o icone continuava
+     claro e sumia no fundo branco. Agora acompanha o tema. */
+  input[type=date], input[type=time], input[type=datetime-local] { color-scheme:dark; }
+  [data-theme="light"] input[type=date],
+  [data-theme="light"] input[type=time],
+  [data-theme="light"] input[type=datetime-local] { color-scheme:light; }
   .radios { display:flex; gap:10px; flex-wrap:wrap; margin-top:4px; }
   .radio { display:inline-flex; align-items:center; gap:7px; cursor:pointer; padding:7px 12px;
     border:1px solid var(--borda-2); border-radius:8px; font-size:13px; transition:.15s; background:var(--panel-2); }
