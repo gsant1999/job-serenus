@@ -9,6 +9,7 @@
      no claro ou no escuro. No claro os tons escurecem pra manter contraste
      legivel sobre branco; verde e roxo claros somem em fundo claro. */
   .page {
+    --lid-tag:#a855f7; --lid-cod:#d8b4fe; --lid-bg:rgba(168,85,247,.10); --lid-bd:rgba(168,85,247,.32);
     --id-fg:#8b9dff;   --id-bg:rgba(139,157,255,.12); --id-bd:rgba(139,157,255,.35);
     --id-hv:#c7d2fe;   --id-hv-bg:rgba(139,157,255,.24);
     --p-corr:#1fd8a4;                 /* o que fica com a corretora */
@@ -17,6 +18,7 @@
     --p-bruta-bg:rgba(192,132,252,.12);
   }
   [data-theme="light"] .page {
+    --lid-tag:#7e22ce; --lid-cod:#581c87; --lid-bg:rgba(126,34,206,.07); --lid-bd:rgba(126,34,206,.26);
     --id-fg:#3730a3;   --id-bg:rgba(55,48,163,.09);   --id-bd:rgba(55,48,163,.28);
     --id-hv:#1e1b6b;   --id-hv-bg:rgba(55,48,163,.16);
     --p-corr:#0f7a52;
@@ -25,16 +27,20 @@
     --p-bruta-bg:rgba(109,40,217,.10);
   }
 
-  .lst-lid { display:inline-flex; align-items:center; gap:5px; text-decoration:none;
-             font-family:ui-monospace,Menlo,monospace; font-size:10px; color:var(--cinza-2);
-             background:var(--panel-3); border:1px solid var(--borda); border-radius:6px;
-             padding:2px 7px; width:fit-content; transition:.15s; }
-  .lst-lid:hover { border-color:var(--info); color:var(--texto); }
-  .lst-lid.orfa { border-color:rgba(250,204,21,.35); color:#eab308; cursor:default; }
-  .lst-lid-tag { font-size:8px; font-weight:800; letter-spacing:.3px; padding:1px 4px; border-radius:4px; }
-  .lst-lid-tag.lid { background:rgba(168,85,247,.2); color:#d8b4fe; }
-  .lst-lid-tag.numero { background:rgba(34,197,94,.18); color:#4ade80; }
-  .lst-lid-tag.outro { background:var(--panel-2); color:var(--cinza-2); }
+  /* ── @LID: CHEIO, NAO TRANSLUCIDO ────────────────────────────────────────
+     A etiqueta era roxo-claro sobre roxo-claro: no tema claro ficava
+     literalmente ilegivel. Etiqueta pequena com fundo translucido nao sobrevive
+     em fundo claro — o jeito que sobrevive nos dois e fundo CHEIO com texto
+     branco. E o codigo sai do cinza: e a identidade da conversa, nao rodape. */
+  .lst-lid { display:inline-flex; align-items:center; gap:6px; text-decoration:none;
+             font-family:ui-monospace,Menlo,monospace; font-size:10.5px; font-weight:600;
+             color:var(--lid-cod); background:var(--lid-bg); border:1px solid var(--lid-bd);
+             border-radius:7px; padding:3px 8px; width:fit-content; transition:.15s; }
+  .lst-lid:hover { border-color:var(--lid-tag); color:var(--texto); }
+  .lst-lid-tag { font-size:8.5px; font-weight:800; letter-spacing:.4px; padding:2px 5px;
+                 border-radius:4px; color:#fff; background:var(--lid-tag); text-transform:lowercase; }
+  .lst-lid-tag.numero { background:var(--p-corr); }
+  .lst-lid-tag.outro { background:var(--cinza); }
 
   /* ── A LISTA COMO LISTA ──────────────────────────────────────────────────
      Aplicando UX_APRENDIZADOS: "remova antes de organizar" e "quando tudo é
@@ -77,7 +83,7 @@
   .cel-partes { text-align:right; }
   .parte { display:flex; align-items:baseline; justify-content:flex-end; gap:8px; }
   .parte + .parte { margin-top:3px; }
-  .parte span { font-size:10.5px; color:var(--cinza); }
+  .parte span { font-size:10.5px; color:var(--texto); opacity:.7; font-weight:500; }
   .parte b { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; font-weight:600;
              font-variant-numeric:tabular-nums; min-width:92px; }
   .parte.corr b { color:var(--p-corr); font-size:13.5px; }
@@ -90,12 +96,15 @@
   .cel-forte { font-weight:600; font-size:13px; }
   /* A segunda linha e o detalhe: existe pra quem precisa, sem competir com o
      nome nem com o dinheiro. */
+  /* A segunda linha era cinza inteira. Cinza e pra RUIDO, e ali tem informacao:
+     quando entrou, qual plano, quantas vidas. Sobe pro texto normal, so um
+     ponto menor — hierarquia por TAMANHO, nao por apagar a cor. */
   .cel-sub { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
-             font-size:11px; color:var(--cinza); margin-top:5px; }
+             font-size:11.5px; color:var(--texto); opacity:.82; margin-top:5px; }
   .cel-sub b { color:var(--texto); font-weight:600; }
   .cel-conta { justify-content:flex-end; font-variant-numeric:tabular-nums; }
-  .lst-data { font-size:10.5px; color:var(--cinza); white-space:nowrap; }
-  .lst-data b { font-family:ui-monospace,Menlo,monospace; color:var(--texto); font-weight:600; }
+  .lst-data { font-size:11px; color:var(--texto); opacity:.72; white-space:nowrap; }
+  .lst-data b { font-family:ui-monospace,Menlo,monospace; color:var(--texto); font-weight:700; opacity:1; }
   #t td strong { font-weight:600; }
 
   /* O nome do cliente é a âncora da linha: uma linha só, o resto no hover. */

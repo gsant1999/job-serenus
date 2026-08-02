@@ -40,7 +40,7 @@
     /* Branco puro em tela cheia cansa e achata tudo: sem degrau entre fundo e
        cartao, nada parece elevado. O fundo desce e ganha um leve azul (o frio
        da marca), e o cartao fica quase branco em vez de branco. */
-    --bg:#eaeef4; --panel:#fcfdff; --panel-2:#f2f5f9; --panel-3:#e6ebf2;
+    --bg:#e7ecf3; --panel:#ffffff; --panel-2:#eef2f8; --panel-3:#e2e8f1;
     --borda:rgba(0,0,0,.08); --borda-2:rgba(0,0,0,.14);
     /* --cinza-2 era #8c93a8: 3,1:1 sobre branco, abaixo do minimo legivel. Isso
      derrubava de uma vez os rotulos de filtro, as datas dos cards e o "+
@@ -62,7 +62,10 @@
     background:var(--input-bg); border-color:rgba(0,0,0,.12); color:var(--texto);
   }
   /* Contraste no claro: elementos que tinham cor escura/branca fixa */
-  [data-theme="light"] .topbar { background:rgba(255,255,255,.88); border-bottom:1px solid var(--borda); }
+  /* A topbar deixa de ser branca sobre branco: leve lavagem fria, que da o
+     degrau que faltava entre ela e o conteudo. */
+  [data-theme="light"] .topbar { background:linear-gradient(180deg,#ffffff,#f5f8fd);
+    border-bottom:1px solid rgba(16,24,40,.08); }
   [data-theme="light"] .topbar h1, [data-theme="light"] .card-header h3,
   [data-theme="light"] h1, [data-theme="light"] h2, [data-theme="light"] h3 { color:var(--texto); }
   /* (o estado do botao secundario no claro esta definido junto com o escuro,
@@ -141,9 +144,16 @@
 
   /* ═══ MAIN ═══ */
   .main { margin-left:var(--sidebar-w); flex:1; display:flex; flex-direction:column; min-height:100vh; min-width:0; }
+  /* A MARCA PRECISA EXISTIR EM REPOUSO. Medido: no tema claro havia cinco
+     superficies brancas (topbar, botao, cartao, campo, fundo) dentro de 21
+     pontos de luminancia e NENHUMA cor da marca — a cor so aparecia no hover,
+     que quase ninguem ve. Um fio do degrade sob a topbar poe a marca em todas
+     as telas ao custo de 3px, sem competir com nada. */
   .topbar { background:rgba(12,12,18,.85); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
     border-bottom:1px solid var(--borda); padding:14px 28px;
     display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:90; }
+  .topbar::after { content:''; position:absolute; left:0; right:0; bottom:-3px; height:3px;
+    background:var(--grad-frio); opacity:.85; }
   .topbar h1 { font-family:'Sora',sans-serif; font-size:18px; color:#fff; font-weight:700; letter-spacing:-.3px; }
   .topbar .sub { font-size:11.5px; color:var(--cinza); margin-top:2px; }
 
@@ -217,8 +227,11 @@
     background-image:var(--grad-frio); transform:translateY(-1px);
     box-shadow:0 6px 16px rgba(59,130,246,.26); }
   .btn-outline:active { transform:translateY(0); box-shadow:none; }
-  [data-theme="light"] .btn-outline { background:#fff; border-color:rgba(16,24,40,.14);
-    box-shadow:0 1px 2px rgba(16,24,40,.05); }
+  /* Botao branco sobre topbar branca nao existe. Ganha um fundo levemente frio
+     e uma borda com cor, pra ser objeto e nao recorte. */
+  [data-theme="light"] .btn-outline { background:#f4f7fd; border-color:rgba(59,130,246,.28);
+    color:#1e2536; box-shadow:0 1px 2px rgba(16,24,40,.06); }
+  [data-theme="light"] .btn-outline:hover { background-image:var(--grad-frio); }
   [data-theme="light"] .btn-outline:hover { color:#fff; border-color:transparent;
     box-shadow:0 6px 16px rgba(59,130,246,.28); }
   .btn-ghost { background:transparent; color:var(--cinza); border:none; padding:6px 10px;
