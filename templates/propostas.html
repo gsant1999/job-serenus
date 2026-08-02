@@ -66,10 +66,17 @@
 
   /* Rolagem lateral dita em palavras, e com sombra na borda enquanto houver
      conteudo escondido. Sem isso, duas colunas existiam so pra quem adivinhava. */
-  .lst-rolagem { font-size:11.5px; color:var(--cinza-2); padding:0 0 8px; }
-  .table-wrap.tem-mais { position:relative; }
-  .table-wrap.tem-mais::after { content:''; position:absolute; top:0; right:0; bottom:0; width:36px;
-                                pointer-events:none; background:linear-gradient(to right,transparent,var(--panel)); }
+  /* ROLAGEM LATERAL DITA DE FORMA VISUAL, nao com uma frase.
+     Ele pediu visual e eu tinha escrito um texto acima da tabela — que alem de
+     feio, some da vista justamente de quem ja rolou a pagina.
+     A borda direita ganha um esmaecido: o conteudo "continua" em vez de acabar
+     no talho reto, que e o que o olho le como "tem mais ali". Some sozinho
+     quando chega no fim. */
+  .table-wrap { position:relative; }
+  .table-wrap::after { content:''; position:absolute; top:0; right:0; bottom:0; width:56px;
+                       pointer-events:none; opacity:0; transition:opacity .2s;
+                       background:linear-gradient(to right, transparent, var(--panel) 78%); }
+  .table-wrap.tem-mais::after { opacity:1; }
 
   /* Busca de lead na propria linha. */
   .lst-busca { position:absolute; z-index:60; background:var(--panel); border:1px solid var(--borda-2);
@@ -130,9 +137,7 @@
 
   <div class="card">
     {% if propostas %}
-    {# "Todo obvio precisa ser dito": a tabela rola pro lado e nada dizia isso.
-       O aviso some sozinho quando a pessoa rola, pra nao virar paisagem. #}
-    <div class="lst-rolagem" id="lst-rolagem" hidden>mais colunas para o lado — status e vigência estão à direita</div>
+
     {# A tabela e mais larga que a tela e o body esconde o excesso: sem este
        container, "Status" e "Vigencia" ficavam INALCANCAVEIS — nao dava nem pra
        rolar ate elas. A classe ja existia no sistema e esta tela nao usava. #}
@@ -343,14 +348,13 @@ async function vincular(pid, leadId, btn){
 
 // ── "Todo obvio precisa ser dito": avisa que a tabela rola pro lado ────────
 (function(){
-  const w = document.getElementById('wrap-t'), aviso = document.getElementById('lst-rolagem');
+  const w = document.getElementById('wrap-t');
   if(!w) return;
   const medir = () => {
     const tem = w.scrollWidth - w.clientWidth > 8;
     // Some assim que a pessoa rola: aviso que fica pra sempre vira paisagem.
     const naPonta = w.scrollLeft > 8;
     w.classList.toggle('tem-mais', tem && !naPonta);
-    if(aviso) aviso.hidden = !(tem && !naPonta);
   };
   medir();
   w.addEventListener('scroll', medir, {passive:true});
