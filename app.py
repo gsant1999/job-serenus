@@ -6623,10 +6623,32 @@ def _cfg_valor(conn, chave, padrao=''):
     return (r['valor'] if r and r['valor'] else padrao)
 
 
-def _plataforma_email_destino(conn, plataforma):
-    """E-mail da plataforma, configuravel — nunca escrito no codigo."""
-    chave = 'email_' + re.sub(r'[^a-z0-9]+', '_', (plataforma or '').lower()).strip('_')
-    return _cfg_valor(conn, chave, '')
+# UM lugar so. O preview mostrava o destino de uma fonte e o envio usava outra
+# escrita dentro da funcao — dava pra ler 'vai pra X' e o e-mail chegar em Y.
+_PLATAFORMA_DEST_PADRAO = ("pamela.lima@affinitycorretora.com.br, "
+                           "kaique.silva@affinitycorretora.com.br, "
+                           "equipe.pl@affinitycorretora.com.br")
+_PLATAFORMA_CC_PADRAO = "guilherme@serenuscorretora.com.br"
+
+
+def _plataforma_destinos():
+    conn = db()
+    try:
+        return _cfg_valor(conn, 'plataforma_email_destino', '') or _PLATAFORMA_DEST_PADRAO
+    finally:
+        close_db(conn)
+
+
+def _plataforma_copia():
+    conn = db()
+    try:
+        return _cfg_valor(conn, 'plataforma_email_copia', '') or _PLATAFORMA_CC_PADRAO
+    finally:
+        close_db(conn)
+
+
+def _plataforma_email_destino(conn, plataforma=None):
+    return _cfg_valor(conn, 'plataforma_email_destino', '') or _PLATAFORMA_DEST_PADRAO
 
 
 def _plataforma_dados(conn, pid):
@@ -6652,17 +6674,17 @@ def _plataforma_assunto(d, tipo):
 
 
 def _plataforma_corpo(d, tipo, docs=None):
-    """Corpo do e-mail. Texto de gente, nao despejo de campos do banco."""
+    """Corpo em TEXTO PURO — a tela edita num textarea e quem transforma em
+    e-mail bonito e o `_montar_email_html_profissional`, que ja existe. Devolver
+    HTML aqui faria o consultor editar tag no meio do texto."""
     linhas = []
     def li(rot, val):
         if val not in (None, '', 0):
-            linhas.append(f"<tr><td style='padding:4px 14px 4px 0;color:#666;'>{rot}</td>"
-                          f"<td style='padding:4px 0;'><b>{val}</b></td></tr>")
+            linhas.append(f"{rot}: {val}")
     li('Cliente', d.get('razao_social'))
-    li('Titular', d.get('nome_titular'))
     li('CNPJ', d.get('cnpj'))
     li('CPF do titular', d.get('cpf_titular'))
-    li('Cidade / UF', d.get('_local'))
+    li('Cidade/UF', d.get('_local'))
     li('Operadora', d.get('adm_operadora'))
     li('Produto', d.get('produto'))
     li('Modalidade', d.get('modalidade'))
@@ -6671,34 +6693,32 @@ def _plataforma_corpo(d, tipo, docs=None):
     li('Vidas', d.get('_vidas'))
     li('Valor mensal', d.get('_valor'))
     li('Vigencia', (d.get('_vig') or '') + ('' if d.get('_vig_confirmada') else ' (previsao, a confirmar)'))
-    li('Nº da proposta', d.get('numero_proposta'))
+    li('No da proposta', d.get('numero_proposta'))
+    if d.get('resp_fin_nome'):
+        linhas.append('')
+        linhas.append(f"Responsavel financeiro: {d['resp_fin_nome']}"
+                      + (f" ({d.get('resp_fin_parentesco')})" if d.get('resp_fin_parentesco') else ''))
+        li('CPF do responsavel', d.get('resp_fin_cpf'))
 
     if tipo == 'protocolo':
-        abertura = ("Segue proposta para <b>protocolo no sistema da operadora</b>. "
-                    "Os documentos do cliente vao em anexo, ja nomeados.")
-        fecho = ("Qualquer pendencia de documento ou divergencia de dado, e so responder "
-                 "este e-mail que a gente resolve com o cliente.")
+        cab = ("Segue proposta para cadastro no sistema da operadora. "
+               "Os documentos do cliente vao em anexo, ja nomeados.")
+        pe = ("Qualquer pendencia de documento ou divergencia de dado, e so responder "
+              "este e-mail que resolvemos com o cliente.")
     else:
-        abertura = ("Esta venda foi <b>protocolada por nos</b> diretamente no sistema da "
-                    "operadora. <b>Nao e preciso fazer nada</b> — este e-mail e so para "
-                    "ciencia e para o acompanhamento de voces.")
-        fecho = "Qualquer duvida, e so responder este e-mail."
+        cab = ("Esta venda ja foi cadastrada por nos diretamente no sistema da operadora. "
+               "NAO E PRECISO FAZER NADA — este e-mail e apenas para ciencia e acompanhamento.")
+        pe = "Qualquer duvida, e so responder este e-mail."
 
-    anexos_html = ''
-    if tipo == 'protocolo' and docs:
-        itens = ''.join(f"<li>{d_}</li>" for d_ in docs)
-        anexos_html = (f"<p style='margin:16px 0 6px;'><b>Documentos em anexo ({len(docs)})</b></p>"
-                       f"<ul style='margin:0;padding-left:18px;color:#333;'>{itens}</ul>")
-    elif tipo == 'protocolo':
-        anexos_html = ("<p style='margin:16px 0 6px;color:#a15c00;'><b>Sem documentos anexados.</b> "
-                       "Vamos enviar em seguida.</p>")
-
-    return (
-        "<div style='font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;line-height:1.55;'>"
-        f"<p>Ola,</p><p>{abertura}</p>"
-        "<table style='border-collapse:collapse;margin:14px 0;'>" + ''.join(linhas) + "</table>"
-        f"{anexos_html}<p>{fecho}</p>"
-        "<p style='margin-top:18px;'>Obrigado,<br>Serenus Corretora de Saude</p></div>")
+    corpo = [cab, ''] + linhas
+    if tipo == 'protocolo':
+        corpo += ['']
+        if docs:
+            corpo += [f"Documentos em anexo ({len(docs)}):"] + [f"- {x}" for x in docs]
+        else:
+            corpo += ["Sem documentos anexados — vamos enviar em seguida."]
+    corpo += ['', pe]
+    return "\n".join(corpo)
 
 
 def _plataforma_anexos(conn, d):
@@ -6749,7 +6769,8 @@ def _plataforma_whats(d, tipo, destino):
     linhas.append("Nao precisa fazer nada — e so ciencia." if tipo != 'protocolo'
                   else "Pedimos que voces protocolem no sistema da operadora.")
     linhas.append("")
-    linhas.append(f"_Mensagem automatica do JOB. O e-mail com os detalhes foi enviado para {destino or 'a plataforma'}._")
+    # Sem endereco de e-mail aqui: e mensagem de grupo, nao cabecalho de e-mail.
+    linhas.append("_Mensagem automatica do JOB. O e-mail com os detalhes ja foi enviado._")
     return "\n".join(linhas)
 
 
@@ -6767,6 +6788,7 @@ def proposta_plataforma_preview(pid):
     close_db(conn)
     nomes = [n or os.path.basename(f) for f, n in anexos]
     return jsonify({"ok": True, "tipo": tipo, "destino": destino,
+                    "papel": d.get('plataforma_papel') or 'propria',
                     "plataforma": d.get('plataforma_venda') or '',
                     "assunto": _plataforma_assunto(d, tipo),
                     "corpo": _plataforma_corpo(d, tipo, nomes),
@@ -8685,10 +8707,15 @@ def enviar_email_teste(pid):
 @admin_required
 def enviar_plataforma(pid):
     """Envia o e-mail de protocolo para a Affinity via Brevo com HTML profissional."""
-    DEST_AFFINITY = "pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br"
-    CC_SERENUS = "guilherme@serenuscorretora.com.br"
+    DEST_AFFINITY = _plataforma_destinos()
+    CC_SERENUS = _plataforma_copia()
 
     d = request.json or {}
+    # DUAS conversas com a mesma empresa: 'ciencia' (ja cadastramos, so avisa) e
+    # 'protocolo' (cadastrem por nos, com os documentos). Tratar as duas como uma
+    # so era o que fazia o consultor mandar documento onde nao precisava — e nao
+    # ter como avisar quando so queria avisar.
+    tipo = 'ciencia' if d.get('tipo') == 'ciencia' else 'protocolo'
     assunto      = d.get('assunto', '').strip()
     corpo_texto  = d.get('corpo', '').strip()
     particularidades = d.get('particularidades', '').strip()
@@ -8702,18 +8729,14 @@ def enviar_plataforma(pid):
     # Coleta SÓ os documentos iniciais (extras): Contrato Social, RG, CNPJ, etc.
     # O comprovante de pagamento e a proposta assinada NÃO vão no protocolo —
     # são documentos finais, usados apenas na antecipação de comissão.
+    # Ciencia nao leva anexo: e recado, nao processo. E o protocolo passa a levar
+    # os documentos do cliente com o nome padronizado, nao so os anexos soltos.
     lista_anexos = []
-    try:
-        _raw = json.loads(p['anexos']) if p['anexos'] else []
-        extras = [x['nome'] if isinstance(x, dict) else x for x in _raw]
-        lista_anexos.extend([a for a in extras if a])
-    except Exception:
-        pass
-
-    # Trava: exige ao menos um documento inicial anexado
-    if not lista_anexos:
-        close_db(conn)
-        return jsonify({"ok": False, "msg": "Anexe ao menos um documento inicial (Contrato Social, RG, CNPJ, etc.) antes de enviar o protocolo à Affinity."}), 400
+    if tipo == 'protocolo':
+        lista_anexos = _plataforma_anexos(conn, dict(p))
+        if not lista_anexos:
+            close_db(conn)
+            return jsonify({"ok": False, "msg": "Anexe ao menos um documento inicial (Contrato Social, RG, CNPJ, etc.) antes de pedir o cadastro."}), 400
 
     if not assunto or not corpo_texto:
         close_db(conn)
@@ -8724,12 +8747,19 @@ def enviar_plataforma(pid):
     enviado = _enviar_email(DEST_AFFINITY, assunto, corpo_html, cc=CC_SERENUS, anexos=lista_anexos)
 
     if enviado:
-        conn.execute("UPDATE propostas SET status_operacional='Em Análise Operadora' WHERE id=?", (pid,))
+        # So o PEDIDO de cadastro move o status. Ciencia e recado: a proposta ja
+        # estava onde estava, e mexer no status por causa de um aviso faria o
+        # painel contar etapa que nao aconteceu.
+        if tipo == 'protocolo':
+            conn.execute("UPDATE propostas SET status_operacional='Em Análise Operadora' WHERE id=?", (pid,))
+        conn.execute("UPDATE propostas SET plataforma_avisada_em=? WHERE id=?", (_agora_sp(), pid))
         conn.execute("""INSERT INTO historico_proposta (proposta_id,usuario_id,usuario_nome,tipo,descricao,criado_em)
             VALUES (?,?,?,?,?,?)""", (pid, session['user_id'], session.get('nome','admin'),
-            'plataforma', f"E-mail de protocolo enviado à Affinity. Assunto: {assunto}", datetime.now(TZ_SP)))
+            'plataforma', ('Pedido de cadastro enviado' if tipo == 'protocolo' else 'Aviso de ciência enviado')
+            + f" ({len(lista_anexos)} anexo(s)). Assunto: {assunto}", datetime.now(TZ_SP)))
         conn.commit(); close_db(conn)
-        return jsonify({"ok": True, "msg": "E-mail enviado. Status atualizado para 'Em Análise Operadora'."})
+        return jsonify({"ok": True, "msg": ("E-mail enviado. Status atualizado para 'Em Análise Operadora'."
+                                            if tipo == 'protocolo' else "Aviso de ciência enviado.")})
     else:
         close_db(conn)
         return jsonify({"ok": False, "msg": "BREVO_API_KEY não configurada no Railway. E-mail não enviado."}), 500
@@ -8781,8 +8811,8 @@ def antecipacao_preview(pid):
 def antecipacao_enviar(pid):
     """Envia o e-mail de solicitação de antecipação de comissão à Affinity, com anexos.
     Registra no histórico da proposta."""
-    DEST_AFFINITY = "pamela.lima@affinitycorretora.com.br, kaique.silva@affinitycorretora.com.br, equipe.pl@affinitycorretora.com.br"
-    CC_SERENUS = "guilherme@serenuscorretora.com.br"
+    DEST_AFFINITY = _plataforma_destinos()
+    CC_SERENUS = _plataforma_copia()
 
     d = request.json or {}
     numero_contrato = (d.get('numero_contrato') or '').strip()

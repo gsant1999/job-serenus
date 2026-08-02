@@ -837,10 +837,24 @@
 <div class="modal-overlay" id="modal-email-affinity">
   <div class="modal" style="max-width:700px;max-height:90vh;overflow-y:auto;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-      <h3 style="margin:0;">Enviar à Affinity</h3>
+      <h3 style="margin:0;" id="ea-titulo">Enviar à Affinity</h3>
       <button class="btn-outline" style="font-size:12px;padding:4px 10px;" onclick="fecharEmailAffinity()">Fechar</button>
     </div>
+    {# DUAS conversas com a mesma empresa. Antes so existia o pedido de cadastro,
+       entao avisar que a gente mesmo ja cadastrou nao tinha caminho nenhum. #}
+    <div class="campo" style="margin-bottom:14px;">
+      <label>O que você quer dizer a eles</label>
+      <select id="ea-tipo" onchange="montarEmailAffinity()" style="font-size:13px;">
+        <option value="protocolo">Peço que cadastrem na operadora — vou mandar os documentos</option>
+        <option value="ciencia">Só ciência — eu já cadastrei, eles não precisam fazer nada</option>
+      </select>
+      <div class="hint" id="ea-tipo-dica" style="margin-top:6px;"></div>
+    </div>
     <div id="ea-aviso-doc" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#92400e;">Proposta sem documentos anexados. Envio bloqueado.</div>
+    <div id="ea-anexos" style="display:none;background:var(--panel-2,#1b1b27);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;">
+      <strong>Anexos que vão junto</strong>
+      <ul id="ea-anexos-lista" style="margin:8px 0 0;padding-left:18px;line-height:1.7;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;"></ul>
+    </div>
     <div style="background:var(--panel-2,#1b1b27);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12.5px;line-height:1.8;">
       <strong>Para:</strong> Pâmela Lima, Kaique Silva, Equipe PL (Affinity)<br>
       <strong>Cópia:</strong> guilherme@serenuscorretora.com.br
@@ -851,7 +865,8 @@
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       <button class="btn" style="flex:1;min-width:160px;" id="ea-btn-enviar" onclick="enviarEmailAffinity()">Enviar para a Affinity</button>
       {% if session.modo_teste %}<button class="btn-outline" style="flex:1;min-width:160px;border-color:rgba(245,158,11,.5);color:#f59e0b;" id="ea-btn-teste" onclick="enviarEmailTeste()">Enviar teste para mim</button>{% endif %}
-      <button class="btn-outline" onclick="copiarEmailAffinity()">Copiar</button>
+      <button class="btn-outline" onclick="copiarEmailAffinity()">Copiar e-mail</button>
+      <button class="btn-outline" onclick="copiarWhatsAffinity()" title="Resumo pro grupo, avisando que é mensagem automática e que o e-mail foi enviado">Copiar msg do grupo</button>
       <button class="btn-outline" onclick="fecharEmailAffinity()">Cancelar</button>
     </div>
     <div id="ea-status" style="margin-top:12px;font-size:12.5px;color:var(--cinza);display:none;"></div>
@@ -1144,17 +1159,55 @@ async function confirmarExclusao(){
 }
 
 // ── E-MAIL AFFINITY ──
+let EA_WHATS='';
 async function abrirEmailAffinity(){
-  const res=await fetch(`/proposta/${PROP_ID}/email-affinity`);const d=await res.json();
+  // O tipo comeca no que a proposta ja diz: quem pediu pra cadastrarem abre no
+  // pedido; quem cadastrou sozinho abre na ciencia.
+  const r0=await fetch(`/proposta/${PROP_ID}/plataforma/preview`).then(r=>r.json()).catch(()=>null);
+  document.getElementById('ea-tipo').value =
+    (r0 && r0.papel === 'processar') ? 'protocolo' : (r0 ? 'ciencia' : 'protocolo');
+  await montarEmailAffinity();
+  document.getElementById('ea-status').style.display='none';
+  document.getElementById('modal-email-affinity').classList.add('open');
+}
+
+async function montarEmailAffinity(){
+  const tipo=document.getElementById('ea-tipo').value;
+  const res=await fetch(`/proposta/${PROP_ID}/plataforma/preview?tipo=${tipo}`);
+  const d=await res.json();
   if(!d.ok){toast('Erro ao montar e-mail','err');return;}
   document.getElementById('ea-assunto').value=d.assunto||'';
   document.getElementById('ea-corpo').value=d.corpo||'';
   document.getElementById('ea-particularidades').value='';
-  const aviso=document.getElementById('ea-aviso-doc');const btn=document.getElementById('ea-btn-enviar');
-  if(d.aviso_anexo){aviso.style.display='block';btn.disabled=true;btn.style.opacity='.4';btn.style.cursor='not-allowed';}
-  else{aviso.style.display='none';btn.disabled=false;btn.style.opacity='1';btn.style.cursor='';}
-  document.getElementById('ea-status').style.display='none';
-  document.getElementById('modal-email-affinity').classList.add('open');
+  EA_WHATS=d.whats||'';
+  document.getElementById('ea-titulo').textContent =
+    tipo==='protocolo' ? 'Pedir cadastro na operadora' : 'Avisar que já cadastramos';
+  document.getElementById('ea-tipo-dica').textContent =
+    tipo==='protocolo' ? 'Vai com os documentos do cliente anexados, já renomeados.'
+                       : 'Vai sem anexo — é recado, não processo. Não muda o status da proposta.';
+  // A lista de anexos e o bloqueio so existem no pedido de cadastro.
+  const cxA=document.getElementById('ea-anexos'), ul=document.getElementById('ea-anexos-lista');
+  const aviso=document.getElementById('ea-aviso-doc'), btn=document.getElementById('ea-btn-enviar');
+  const anexos=d.anexos||[];
+  if(tipo==='protocolo'){
+    ul.innerHTML=anexos.map(a=>`<li>${a}</li>`).join('');
+    cxA.style.display=anexos.length?'block':'none';
+    const trava=!anexos.length;
+    aviso.style.display=trava?'block':'none';
+    btn.disabled=trava; btn.style.opacity=trava?'.4':'1'; btn.style.cursor=trava?'not-allowed':'';
+    btn.textContent='Pedir cadastro';
+  } else {
+    cxA.style.display='none'; aviso.style.display='none';
+    btn.disabled=false; btn.style.opacity='1'; btn.style.cursor='';
+    btn.textContent='Enviar aviso';
+  }
+}
+
+function copiarWhatsAffinity(){
+  if(!EA_WHATS){toast('Abra o e-mail primeiro','err');return;}
+  navigator.clipboard.writeText(EA_WHATS)
+    .then(()=>toast('Mensagem do grupo copiada','ok'))
+    .catch(()=>toast('Não consegui copiar','err'));
 }
 function fecharEmailAffinity(){document.getElementById('modal-email-affinity').classList.remove('open');}
 async function enviarEmailTeste(){
@@ -1169,10 +1222,10 @@ async function enviarEmailAffinity(){
   const assunto=document.getElementById('ea-assunto').value.trim();const corpo=document.getElementById('ea-corpo').value.trim();const partic=document.getElementById('ea-particularidades').value.trim();const status=document.getElementById('ea-status');
   if(!assunto||!corpo){toast('Preencha assunto e corpo','err');return;}
   const btn=document.getElementById('ea-btn-enviar');btn.disabled=true;btn.textContent='Enviando...';status.style.display='block';status.textContent='Enviando via Brevo...';
-  try{const res=await fetch(`/proposta/${PROP_ID}/enviar-plataforma`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assunto,corpo,particularidades:partic})});const d=await res.json();
+  try{const res=await fetch(`/proposta/${PROP_ID}/enviar-plataforma`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assunto,corpo,particularidades:partic,tipo:document.getElementById('ea-tipo').value})});const d=await res.json();
   if(d.ok){toast(d.msg||'E-mail enviado','ok');fecharEmailAffinity();setTimeout(()=>location.reload(),1400);}
-  else{toast(d.msg||'Falha','err');status.textContent=d.msg||'Erro';btn.disabled=false;btn.textContent='Enviar para a Affinity';}}
-  catch(e){toast('Erro de conexão','err');btn.disabled=false;btn.textContent='Enviar para a Affinity';}
+  else{toast(d.msg||'Falha','err');status.textContent=d.msg||'Erro';btn.disabled=false;montarEmailAffinity();}}
+  catch(e){toast('Erro de conexão','err');btn.disabled=false;montarEmailAffinity();}
 }
 function copiarEmailAffinity(){
   const txt=`Assunto: ${document.getElementById('ea-assunto').value}\n\n${document.getElementById('ea-corpo').value}${document.getElementById('ea-particularidades').value?'\n\n'+document.getElementById('ea-particularidades').value:''}`;
