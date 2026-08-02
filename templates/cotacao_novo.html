@@ -360,7 +360,10 @@
       classe: 'off', rotulo: 'Painel fechado',
       html: '<b>O Painel do Corretor precisa estar aberto numa aba.</b> A cotação sai da ' +
             'sua sessão lá — nenhuma senha passa pelo JOB.' +
-            '<ol><li>Abra <a href="https://paineldocorretor.com.br/cotacoes" target="_blank" rel="noopener">o Painel</a> e faça login.</li>' +
+            // O endereço do Painel é o beta. O paineldocorretor.com.br sem o
+            // beta é o site de vendas da Agger, não o sistema — mandar o
+            // consultor pra lá no meio de um atendimento é pior que não linkar.
+            '<ol><li>Abra <a href="https://beta.paineldocorretor.com.br/cotacoes" target="_blank" rel="noopener">o Painel</a> e faça login.</li>' +
             '<li>Volte aqui e recarregue.</li></ol>' +
             '<p style="margin:8px 0 0;color:var(--cinza)">Se ele já está aberto, confira se a ' +
             'extensão foi recarregada depois da última atualização — ela precisa saber procurar ' +
@@ -394,7 +397,7 @@
     else { a.className = 'cv-aviso'; a.innerHTML = ''; }
   }
 
-  function tratarFalha(motivo) {
+  function tratarFalha(motivo, extra) {
     // Se a extensão se anunciou nesta página, o problema não é ela estar
     // faltando — é ela não ter achado a aba do Painel. Mandar o consultor
     // reinstalar a extensão nesse caso é perder o tempo dele.
@@ -407,13 +410,22 @@
         'Se repetir, me mande esse código.');
       return;
     }
-    mostrarSinal(e.classe, e.rotulo, e.html);
+    var html = e.html;
+    // Se a extensão olhou as abas e não achou nenhuma do Painel, dizer isso.
+    // "Painel fechado" sem número é palpite; com número, dá pra saber se o
+    // problema é a aba ou é a extensão não estar enxergando as abas.
+    if (motivo === 'painel_fechado' && extra && extra.abasExaminadas != null) {
+      html += '<p style="margin:8px 0 0;font-size:11.5px;color:var(--cinza-2)">' +
+        'A extensão olhou ' + extra.abasExaminadas + ' aba(s) abertas e nenhuma era do Painel. ' +
+        'Se ele está aberto agora, recarregue a extensão em chrome://extensions.</p>';
+    }
+    mostrarSinal(e.classe, e.rotulo, html);
   }
 
   async function conferirLigacao() {
     var r = await pedir('cotador_estado', {}, 8000);
     pronto = !!(r.ok && r.dados !== false);
-    if (!r.ok) { pronto = false; tratarFalha(r.motivo); atualizarBotao(); return; }
+    if (!r.ok) { pronto = false; tratarFalha(r.motivo, r); atualizarBotao(); return; }
     if (r.faltando && r.faltando.length) {
       pronto = false; tratarFalha('precisa_aprender'); atualizarBotao(); return;
     }
@@ -662,7 +674,7 @@
     var r = await pedir('cotar', { pedido: pedido }, 180000);
     el('andando').className = 'cv-andando';
     atualizarBotao();
-    if (!r.ok) { tratarFalha(r.motivo); return; }
+    if (!r.ok) { tratarFalha(r.motivo, r); return; }
     mostrarSinal('on', 'Painel conectado', '');
     desenhar(r.dados);
   };

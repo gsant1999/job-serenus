@@ -363,19 +363,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       msg.type === 'cotador_catalogo'    ? { type: 'cotador_catalogo', pedido: msg.pedido } :
       msg.type === 'cotador_modalidades' ? { type: 'cotador_modalidades', pedido: msg.pedido } :
                                            { type: 'cotador_estado' };
-    // Procura o Painel em QUALQUER endereço deles, não só no beta.
+    // Lista TODAS as abas e filtra aqui, em vez de pedir ao Chrome pra casar
+    // endereço.
     //
-    // O mapeamento foi feito no beta.paineldocorretor.com.br e o endereço ficou
-    // fixo no código. Aí o consultor abriu o Painel normal, de produção, e a
-    // extensão disse "Painel fechado" com o Painel bem aberto na frente dele —
-    // o pior tipo de erro, o que faz duvidar de si mesmo em vez do sistema.
-    chrome.tabs.query({ url: ['https://paineldocorretor.com.br/*',
-                              'https://*.paineldocorretor.com.br/*'] }, (abas) => {
-      // Prefere a aba que o consultor está usando: se ele tem beta e produção
-      // abertos, a ativa é a que ele acabou de olhar.
-      const lista = abas || [];
+    // O filtro por padrão de URL do chrome.tabs.query devolve lista vazia sem
+    // dizer por quê quando a permissão daquele endereço não está valendo
+    // naquele instante — e vazio é indistinguível de "não tem aba aberta".
+    // Foi assim que a extensão disse "Painel fechado" com o Painel na frente
+    // do Guilherme. Filtrando pelo endereço aqui dentro, a única coisa que
+    // precisa valer é a permissão "tabs", que a extensão já tem desde sempre.
+    chrome.tabs.query({}, (todas) => {
+      const lista = (todas || []).filter(
+        (a) => a.url && a.url.indexOf('paineldocorretor.com.br') >= 0);
+      // Prefere a aba que o consultor está usando: se ele tem mais de uma
+      // aberta, a ativa é a que ele acabou de olhar.
       const aba = lista.filter((a) => a.active)[0] || lista[0];
-      if (!aba) { sendResponse({ ok: false, motivo: 'painel_fechado' }); return; }
+      if (!aba) {
+        // Diz quantas abas foram examinadas: sem isso, "Painel fechado" é
+        // palpite, e quem está do outro lado não tem como saber se o problema
+        // é a aba ou a extensão.
+        sendResponse({ ok: false, motivo: 'painel_fechado',
+                       abasExaminadas: (todas || []).length });
+        return;
+      }
       chrome.tabs.sendMessage(aba.id, oQuePedir, (r) => {
         if (chrome.runtime.lastError) {
           // Aba aberta mas sem o script (extensao atualizada e sem F5 ainda).

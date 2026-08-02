@@ -52,7 +52,11 @@
                            ok: !!(resp && resp.ok), motivo: (resp && resp.motivo) || '',
                            dados: (resp && resp.dados) || null,
                            faltando: (resp && resp.faltando) || [],
-                           modalidades: (resp && resp.modalidades) || [] }, '*');
+                           modalidades: (resp && resp.modalidades) || [],
+                           // Quantas abas o background examinou. Vai junto pra
+                           // tela poder dizer o que aconteceu de verdade em vez
+                           // de chutar "deve estar fechado".
+                           abasExaminadas: (resp && resp.abasExaminadas) }, '*');
     };
     try {
       chrome.runtime.sendMessage(pedido, (resp) => {
