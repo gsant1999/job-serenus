@@ -1260,6 +1260,11 @@
     erro: new Map(),
     aviso: '',
     diag: { etapa: 'nao_iniciou' },
+    // Contadores de custo. Existem porque "a extensao ta lenta" e
+    // indistinguivel de "o WhatsApp ta lento" sem numero — e porque, sem medir,
+    // eu ia adivinhar qual das dez coisas era a culpada. Aparecem no modo
+    // desenvolvedor e vao no canario.
+    perf: { regs: 0, passadas: 0, linhas: 0, ms: 0, pior: 0, puladas: 0 },
   };
 
   function _trPodeRodar() { return !!document.querySelector('#main'); }
@@ -1741,6 +1746,7 @@
 
   function trInjetar(raizes) {
     if (!_trPodeRodar()) return;
+    const _t0 = performance.now();
     try { _barraConvInjetar(); } catch (e) { /* barra e ganho, nao requisito */ }
     const main = document.querySelector('#main');
     let linhas;
@@ -1757,15 +1763,29 @@
     } else {
       linhas = main.querySelectorAll('[data-id]');
     }
+    TR.perf.passadas++;
+    TR.perf.linhas += linhas.length;
     for (const row of linhas) {
       const id = row.getAttribute('data-id') || '';
       if (!id) continue;
+      // A LINHA JA ESTA PRONTA? Entao nao mede nada dela.
+      //
+      // Antes, toda passada refazia a conta inteira em toda linha: procurar
+      // icone, medir largura de oito ancestrais, pedir retangulo. Medir
+      // geometria forca o navegador a recalcular o layout na hora — e isso,
+      // vezes as linhas da tela, vezes as passadas, era o travamento.
+      // A esmagadora maioria das linhas nao mudou nada desde a ultima vez.
+      if (row._jobPronta === id) { TR.perf.puladas++; continue; }
       // Documento/imagem: botao proprio, um por arquivo.
       // Linha reaproveitada pra OUTRA mensagem: o bloco velho fica pendurado com
       // o id antigo e passa a mostrar o resultado do vizinho. Some daqui.
-      row.querySelectorAll('.job-doc-slot, .job-tr-slot').forEach((s) => {
-        if (s.dataset.msg && s.dataset.msg !== id) s.remove();
-      });
+      if (row._jobId !== id) {
+        row._jobId = id;
+        row.querySelectorAll('.job-doc-slot, .job-tr-slot').forEach((s) => {
+          if (s.dataset.msg && s.dataset.msg !== id) s.remove();
+        });
+      }
+      let pendente = false;
       if (_docLinhaEhArquivo(row)) {
         // Bloco que caiu no fallback NAO e definitivo. Enquanto o WhatsApp
         // pinta, a linha mede 0px, nenhum ancestral entra na faixa e o bloco
@@ -1773,7 +1793,16 @@
         // MOVENDO o mesmo bloco (appendChild move o que ja esta no DOM) — criar
         // outro duplicaria o botao, que foi o que aconteceu com "Copiar conversa".
         let sd = row.querySelector('.job-doc-slot');
-        if (!sd || sd.classList.contains('job-doc-solto')) {
+        const solto = !!(sd && sd.classList.contains('job-doc-solto'));
+        // Tentar pra sempre e o que custava caro. A bolha aparece nos
+        // primeiros instantes de pintura ou nao aparece mais — depois de
+        // algumas tentativas o bloco solto E o resultado final, e remedir a
+        // geometria daquela linha a cada mutacao da conversa nao muda nada,
+        // so gasta. Cinco e folga: na pratica acerta na primeira ou na segunda.
+        if (solto) sd._jobTentativas = (sd._jobTentativas || 0) + 1;
+        const tentarDeNovo = solto && sd._jobTentativas <= 5;
+        pendente = tentarDeNovo;
+        if (!sd || tentarDeNovo) {
           const ancoraD = row.querySelector(
             '[data-icon="document"], [data-icon*="document"], [data-icon="media-download"],' +
             'img[src^="blob:"], [data-testid="media-canvas"], [data-icon="image"]');
@@ -1792,11 +1821,26 @@
               row.appendChild(sd);
             }
             docRenderSlot(sd, id);
+            // Nasceu solto: a linha ainda nao pode ser dada por pronta, senao
+            // ela nunca mais tenta achar a bolha e o botao fica pra sempre no
+            // canto. Continua pendente ate acertar ou gastar as tentativas.
+            if (sd.classList.contains('job-doc-solto')) {
+              pendente = (sd._jobTentativas || 0) <= 5;
+            }
           }
         }
       }
-      if (row.querySelector('.job-tr-slot[data-msg="' + (window.CSS && window.CSS.escape ? window.CSS.escape(id) : id) + '"]:not(.job-doc-slot)')) continue;
-      if (!_trLinhaEhAudio(row)) continue;
+      if (row.querySelector('.job-tr-slot[data-msg="' + (window.CSS && window.CSS.escape ? window.CSS.escape(id) : id) + '"]:not(.job-doc-slot)')) {
+        if (!pendente) row._jobPronta = id;
+        continue;
+      }
+      if (!_trLinhaEhAudio(row)) {
+        // Nao e audio e o documento ja esta resolvido: nao ha mais nada pra
+        // fazer nesta linha enquanto ela for esta mensagem. E o caso da imensa
+        // maioria das linhas de uma conversa — texto puro.
+        if (!pendente) row._jobPronta = id;
+        continue;
+      }
       const bolha = _trBolha(row);
       if (!bolha) continue;             // sem bolha identificada, nao inventa lugar
       const slot = document.createElement('div');
@@ -1805,7 +1849,11 @@
       // DENTRO da bolha: herda posicao, largura e cor de quem ja esta no lugar certo.
       bolha.appendChild(slot);
       trRenderSlot(slot, id);
+      if (!pendente) row._jobPronta = id;
     }
+    const _gasto = performance.now() - _t0;
+    TR.perf.ms += _gasto;
+    if (_gasto > TR.perf.pior) TR.perf.pior = _gasto;
   }
 
   function trRenderSlot(slot, id) {
@@ -2196,8 +2244,27 @@
       const main = document.querySelector('#main') || document.body;
       // Passa adiante SO os nos adicionados — e a informacao que o proprio
       // observer ja entrega de graca e que eu estava jogando fora.
+      // NAO ESCUTAR A SI MESMA. Era isto que travava o WhatsApp.
+      //
+      // A extensao escreve no DOM (cria o bloco, troca o innerHTML do botao,
+      // pinta a etapa da leitura a cada segundo). Cada escrita dessas e uma
+      // mutacao DENTRO do #main — que este mesmo observer via, e que agendava
+      // outra passada, que escrevia de novo. Laco fechado: com uma conversa
+      // aberta a extensao ficava varrendo a tela pra sempre, sozinha, medindo
+      // geometria linha por linha. Nao era lentidao de uma funcao: era trabalho
+      // que nunca terminava.
+      //
+      // O truque e um closest SO, com os dois seletores juntos. Se o que vier
+      // primeiro subindo for um bloco NOSSO, a mutacao foi nossa e nao
+      // interessa. Se for a linha do WhatsApp, ai sim ha o que fazer. Um
+      // closest a mais por registro custaria caro justamente nos momentos de
+      // rolagem, que e quando ha milhares deles.
+      const _MEU = '.job-doc-slot, .job-tr-slot, .job-barra-conv, .job-painel, .job-modal';
       const obs = new MutationObserver((regs) => {
-        const novos = [];
+        // Set, nao array: rolar a conversa gera milhares de registros que
+        // apontam pra mesma meia duzia de linhas. Sem isto, a mesma linha era
+        // varrida centenas de vezes na mesma passada.
+        const novos = new Set();
         // O NO ADICIONADO NAO BASTA. Quando o WhatsApp re-renderiza o interior de
         // uma bolha que ja existe, ele apaga o meu bloco junto (ele nao conhece
         // esse filho) e adiciona os filhos dele de volta. A linha em si nunca e
@@ -2207,18 +2274,37 @@
         // e nao voltava, mesmo com o arquivo ainda marcado la em cima.
         // Subir ate a linha resolve os dois casos: linha nova e linha redesenhada.
         for (const r of regs) {
-          const alvo = r.target && r.target.nodeType === 1
-            ? (r.target.closest ? r.target.closest('[data-id]') : null) : null;
-          if (alvo) novos.push(alvo);
-          if (!r.addedNodes) continue;
+          const t = r.target;
+          // O WhatsApp APAGOU um bloco nosso. Acontece toda vez que ele
+          // redesenha o interior de uma bolha: ele nao conhece aquele filho e
+          // leva junto. Aqui a linha precisa perder a marca de "ja esta
+          // pronta", senao o botao some ao rolar a conversa e nao volta — que
+          // era o bug antigo, e o pulo de linha pronta o traria de volta.
+          if (r.removedNodes && r.removedNodes.length) {
+            for (const n of r.removedNodes) {
+              if (n.nodeType !== 1 || !n.classList) continue;
+              if (!n.classList.contains('job-doc-slot') && !n.classList.contains('job-tr-slot')) continue;
+              const linha = t && t.closest ? t.closest('[data-id]') : null;
+              if (linha) { linha._jobPronta = null; novos.add(linha); }
+            }
+          }
+          if (t && t.nodeType === 1 && t.closest) {
+            const alvo = t.closest('[data-id], ' + _MEU);
+            // Achou um bloco nosso antes da linha: escrita nossa, ignora.
+            if (alvo && alvo.hasAttribute('data-id')) novos.add(alvo);
+          }
+          if (!r.addedNodes || !r.addedNodes.length) continue;
           for (const n of r.addedNodes) {
             if (n.nodeType !== 1) continue;
-            novos.push(n);
-            const pai = n.closest ? n.closest('[data-id]') : null;
-            if (pai) novos.push(pai);
+            if (n.classList && (n.classList.contains('job-doc-slot') ||
+                                n.classList.contains('job-tr-slot'))) continue;
+            const pai = n.closest ? n.closest('[data-id], ' + _MEU) : null;
+            if (pai && pai.hasAttribute('data-id')) novos.add(pai);
+            else if (!pai && n.querySelector && n.querySelector('[data-id]')) novos.add(n);
           }
         }
-        if (novos.length) trAgendarInjecao(novos);
+        TR.perf.regs += regs.length;
+        if (novos.size) trAgendarInjecao([...novos]);
       });
       obs.observe(main, { childList: true, subtree: true });
       // Troca de conversa troca o #main inteiro: reobserva sem drama.
@@ -2239,10 +2325,23 @@
 
   function trDiagnosticoHtml() {
     const d = TR.diag || {};
+    const p = TR.perf;
+    // Quanto a extensao custou desde que a aba abriu.
+    //
+    // "A extensao ta lenta" e indistinguivel de "o WhatsApp ta lento" sem
+    // numero. Media e enganosa aqui — uma passada de 400ms trava a digitacao
+    // e some numa media de centenas de passadas —, entao mostra a PIOR
+    // tambem. E "linhas puladas" e a medida direta do conserto: quanto maior
+    // a proporcao, menos geometria esta sendo remedida a toa.
+    const total = p.linhas || 1;
+    const perf = '<div class="job-tr-diag"><b>Custo:</b> ' +
+      p.passadas + ' passada(s) · ' + Math.round(p.ms) + 'ms no total · pior ' +
+      Math.round(p.pior) + 'ms · ' + p.regs + ' mutações vistas · ' +
+      Math.round(p.puladas / total * 100) + '% das linhas puladas</div>';
     return '<div class="job-tr-diag"><b>Transcrição:</b> sob demanda · ' +
       document.querySelectorAll('.job-tr-slot').length + ' botão(ões) na tela · ' +
       TR.cache.size + ' em memória · ' + TR.erro.size + ' com erro' +
-      (d.quando ? ' <span class="job-tr-diag-h">' + esc(d.quando) + '</span>' : '') + '</div>';
+      (d.quando ? ' <span class="job-tr-diag-h">' + esc(d.quando) + '</span>' : '') + '</div>' + perf;
   }
 
   // ═══════════════ Modo desenvolvedor ═══════════════

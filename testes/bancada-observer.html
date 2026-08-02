@@ -1,0 +1,140 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Bancada: o laço do observador</title>
+<!--
+  Reproduz o padrão exato que travava o WhatsApp e mede as duas versões.
+
+  A extensão observa o #main com subtree:true e escreve dentro do #main
+  (cria o bloco, troca o innerHTML do botão). A pergunta desta bancada é
+  simples: quantas passadas de varredura acontecem por UMA mudança de verdade
+  do WhatsApp?
+
+  Resposta esperada:
+    antes  — não converge: cada escrita nossa gera outra passada, pra sempre.
+    depois — uma passada por mudança real, e ponto.
+
+  Não é o content.js rodando: é o mecanismo dele, isolado. Serve pra provar o
+  tamanho do problema e do conserto, não pra substituir o teste na tela.
+-->
+<body style="font:13px/1.6 ui-monospace,monospace;padding:20px;background:#111;color:#ddd">
+<pre id="saida">rodando…</pre>
+<script>
+const LINHAS = 60;          // conversa aberta, mais ou menos uma tela cheia
+const DOCS = 8;             // quantas delas são documento/imagem
+const ESCRITAS_POR_LINHA = 2;
+
+function montar() {
+  const main = document.createElement('div');
+  main.id = 'main';
+  for (let i = 0; i < LINHAS; i++) {
+    const row = document.createElement('div');
+    row.setAttribute('data-id', 'msg_' + i);
+    row.innerHTML = '<div class="bolha"><span>texto ' + i + '</span></div>';
+    if (i < DOCS) row.querySelector('.bolha').innerHTML += '<i data-icon="document"></i>';
+    main.appendChild(row);
+  }
+  document.body.appendChild(main);
+  return main;
+}
+
+// A varredura: pra cada linha do lote, escreve nos nossos blocos — que é
+// exatamente o que a extensão faz ao pintar botão e etapa.
+function varrer(main, linhas, contador) {
+  contador.passadas++;
+  contador.linhas += linhas.length;
+  for (const row of linhas) {
+    let slot = row.querySelector('.job-doc-slot');
+    if (!slot && row.querySelector('[data-icon="document"]')) {
+      slot = document.createElement('div');
+      slot.className = 'job-doc-slot';
+      row.querySelector('.bolha').appendChild(slot);
+    }
+    if (slot) {
+      for (let k = 0; k < ESCRITAS_POR_LINHA; k++) {
+        slot.innerHTML = '<button>Ler documento</button>';   // escrita nossa
+      }
+    }
+  }
+}
+
+// Sem setTimeout: o navegador estrangula temporizador de aba inativa e o
+// resultado vira sorte. Aqui as mutações são drenadas à mão com takeRecords(),
+// que é síncrono — o teste mede o MECANISMO, não o relógio da máquina.
+const TETO = 40;            // se passar disso, não converge: é laço
+
+function medir(filtrarProprias) {
+  const main = montar();
+  const c = { passadas: 0, linhas: 0, regs: 0, convergiu: false };
+  const MEU = '.job-doc-slot, .job-tr-slot';
+  let pend = new Set();
+
+  const processar = (regs) => {
+    c.regs += regs.length;
+    for (const r of regs) {
+        const t = r.target;
+        if (t && t.nodeType === 1 && t.closest) {
+          if (filtrarProprias) {
+            const alvo = t.closest('[data-id], ' + MEU);
+            if (alvo && alvo.hasAttribute('data-id')) pend.add(alvo);
+          } else {
+            const alvo = t.closest('[data-id]');
+            if (alvo) pend.add(alvo);
+          }
+        }
+        // Nó adicionado: é assim que uma mensagem nova chega, e é o caminho
+        // que o teste anterior deixava de fora — por isso não disparava nada.
+        for (const n of (r.addedNodes || [])) {
+          if (n.nodeType !== 1) continue;
+          if (filtrarProprias && n.classList &&
+              (n.classList.contains('job-doc-slot') || n.classList.contains('job-tr-slot'))) continue;
+          const pai = n.closest ? n.closest(filtrarProprias ? '[data-id], ' + MEU : '[data-id]') : null;
+          if (pai && pai.hasAttribute('data-id')) pend.add(pai);
+        }
+    }
+  };
+
+  const obs = new MutationObserver(() => {});
+  obs.observe(main, { childList: true, subtree: true });
+
+  // UMA mudança de verdade do WhatsApp: chegou mensagem nova.
+  const nova = document.createElement('div');
+  nova.setAttribute('data-id', 'msg_nova');
+  nova.innerHTML = '<div class="bolha"><i data-icon="document"></i></div>';
+  main.appendChild(nova);
+
+  // Bombeia até o sistema ficar quieto ou até estourar o teto. Ficar quieto é
+  // o que se espera de um mecanismo que não se alimenta: a mudança entra, a
+  // varredura roda uma vez, e acabou.
+  while (c.passadas < TETO) {
+    processar(obs.takeRecords());
+    if (!pend.size) { c.convergiu = true; break; }
+    const lote = [...pend]; pend.clear();
+    varrer(main, lote, c);
+  }
+  obs.disconnect();
+  main.remove();
+  return c;
+}
+
+(() => {
+  const antes = medir(false);
+  const depois = medir(true);
+  const L = [];
+  const fmt = (n, c) => n.padEnd(9) + String(c.passadas).padStart(9) +
+    String(c.linhas).padStart(11) + String(c.regs).padStart(11) +
+    (c.convergiu ? '     parou' : '   NAO PAROU');
+  L.push('Uma mensagem nova numa conversa de ' + LINHAS + ' linhas.');
+  L.push('Bombeado a mao ate ficar quieto, com teto de ' + TETO + ' passadas.');
+  L.push('');
+  L.push('           passadas  linhas-varridas  mutações   fim');
+  L.push(fmt('antes', antes));
+  L.push(fmt('depois', depois));
+  L.push('');
+  const ok = depois.convergiu && !antes.convergiu;
+  L.push('VEREDITO: ' + (ok
+    ? 'o laco existia (antes nunca parava) e foi fechado (depois para sozinho)'
+    : 'inconclusivo — antes.convergiu=' + antes.convergiu +
+      ' depois.convergiu=' + depois.convergiu));
+  document.getElementById('saida').textContent = L.join('\n');
+})();
+</script>
