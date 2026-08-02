@@ -315,6 +315,10 @@
   window.addEventListener('message', function (ev) {
     if (ev.source !== window) return;
     var d = ev.data;
+    if (d && d.source === 'JOB_SITE_RESP' && d.tipo === 'andamento') {
+      mostrarAndamento(d);
+      return;
+    }
     if (d && d.source === 'JOB_SITE_RESP' && d.tipo === 'extensao_presente') {
       extensaoPresente = true;
       extensaoVersao = d.versao || '';
@@ -344,6 +348,34 @@
       for (var k in (extra || {})) msg[k] = extra[k];
       window.postMessage(msg, '*');
     });
+  }
+
+  // Diz em que pé está, com número, nos dois lugares — na coluna dos planos
+  // (onde o olho está) e na barrinha do formulário.
+  var FASES = {
+    criando:    'Abrindo a cotação no Painel…',
+    operadoras: 'Vendo quem atende nessa cidade…',
+    planos:     'Listando os planos de cada operadora…',
+    precos:     'Buscando o preço de cada plano…'
+  };
+  function mostrarAndamento(a) {
+    var titulo = FASES[a.fase] || 'Consultando o Painel…';
+    var det = '';
+    var pct = 8;
+    if (a.total) {
+      det = a.feito + ' de ' + a.total +
+            (a.fase === 'precos' ? ' planos com preço' : ' operadoras');
+      // Preço é a etapa longa: ocupa de 40% a 100% da barra. As anteriores
+      // dividem os primeiros 40%. Barra que anda no ritmo errado mente.
+      pct = a.fase === 'precos' ? 40 + (a.feito / a.total) * 60
+                                : 10 + (a.feito / a.total) * 30;
+    }
+    var f = el('cvFase'), fd = el('cvFaseDet'), b2 = el('cvBarra2');
+    if (f) f.textContent = titulo;
+    if (fd && det) fd.textContent = det;
+    if (b2) b2.style.width = Math.round(pct) + '%';
+    el('andandoTxt').textContent = titulo + (det ? ' · ' + det : '');
+    el('barra').style.width = Math.round(pct) + '%';
   }
 
   // ── estado da ligação ──────────────────────────────────────────────────
@@ -689,8 +721,19 @@
     el('andando').className = 'cv-andando ver';
     el('barra').style.width = '4%';
     el('andandoTxt').textContent = 'Abrindo a cotação no Painel…';
-    el('resultado').innerHTML = '';
     el('resumo').textContent = '';
+    // O andamento vai PRA ONDE A PESSOA ESTA OLHANDO.
+    //
+    // Antes eu apagava esta coluna e punha a barrinha lá no fim do formulário,
+    // fora da tela. O consultor ficava encarando um retângulo vazio sem saber
+    // se estava rodando ou se tinha quebrado — e quinze segundos de nada
+    // parecem um minuto. O trabalho é o mesmo; o que faltava era dizer.
+    el('resultado').innerHTML =
+      '<div class="cv-vazio"><strong id="cvFase">Perguntando ao Painel…</strong>' +
+      '<p id="cvFaseDet">Isto leva alguns segundos: o JOB pergunta plano por plano, ' +
+      'com intervalo, para não parecer robô no sistema deles.</p>' +
+      '<div class="cv-barra" style="max-width:320px;margin:16px auto 0">' +
+      '<i id="cvBarra2"></i></div></div>';
 
     var pedido = {
       cidade: cidadeEscolhida,

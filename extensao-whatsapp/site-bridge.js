@@ -102,6 +102,18 @@
   // fica esperando ate estourar o tempo — e entao acusa "Painel fechado", que
   // e o diagnostico errado. Com a versao na mao, a tela sabe dizer a verdade:
   // recarregue ESTA pagina.
+  // Andamento da cotação chegando da extensão: repassa pra página, que é quem
+  // mostra. Sem isto a tela fica muda enquanto o Painel é consultado plano a
+  // plano, e mudez de quinze segundos parece defeito.
+  try {
+    chrome.runtime.onMessage.addListener((m) => {
+      if (m && m.type === 'cotacao_andamento') {
+        window.postMessage({ source: 'JOB_SITE_RESP', tipo: 'andamento',
+                             fase: m.fase, feito: m.feito, total: m.total }, '*');
+      }
+    });
+  } catch (e) { /* sem andamento a cotação ainda funciona, só fica calada */ }
+
   window.postMessage({ source: 'JOB_SITE_RESP', tipo: 'extensao_presente', ok: true,
                        versao: _versao, sabe: _SABE }, '*');
 })();

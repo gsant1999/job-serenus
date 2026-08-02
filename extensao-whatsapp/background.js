@@ -157,6 +157,10 @@ async function baixarMidiaDataUrl(url) {
   }
 }
 
+// Qual aba pediu a cotação em curso — pra saber pra onde devolver o andamento.
+// Uma só: cotar é ação de um consultor por vez, não fila.
+let _abaQuePediuCotacao = null;
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'ping') {
     chamarJob('/api/whatsapp/ping', 'GET', null, 15000).then(sendResponse);
@@ -354,6 +358,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   //
   // Nao foca a aba de proposito. Roubar o foco no meio de um atendimento e
   // pior que esperar: o consultor esta no WhatsApp falando com o cliente.
+  // ANDAMENTO DA COTACAO, DE VOLTA PRA QUEM PEDIU.
+  //
+  // A aba do Painel avisa a cada plano cotado, mas esse aviso morria aqui: nao
+  // havia quem escutasse, e a tela do JOB ficava com um retangulo vazio por
+  // quinze segundos. Quinze segundos sem sinal parecem um minuto, e o
+  // consultor nao tem como saber se esta rodando ou se quebrou.
+  if (msg && msg.type === 'cotacao_andamento') {
+    if (_abaQuePediuCotacao != null) {
+      chrome.tabs.sendMessage(_abaQuePediuCotacao, msg, () => { void chrome.runtime.lastError; });
+    }
+    return;   // nao responde: e aviso de mao unica
+  }
   if (msg && (msg.type === 'cotar_painel' || msg.type === 'cotador_pronto' ||
               msg.type === 'cotador_cidades' || msg.type === 'cotador_catalogo' ||
               msg.type === 'cotador_modalidades')) {
@@ -363,6 +379,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       msg.type === 'cotador_catalogo'    ? { type: 'cotador_catalogo', pedido: msg.pedido } :
       msg.type === 'cotador_modalidades' ? { type: 'cotador_modalidades', pedido: msg.pedido } :
                                            { type: 'cotador_estado' };
+    // Guarda quem pediu, pra devolver o andamento pra aba certa.
+    if ((msg.type === 'cotar_painel' || msg.type === 'cotador_catalogo') &&
+        sender && sender.tab && sender.tab.id != null) {
+      _abaQuePediuCotacao = sender.tab.id;
+    }
     // Lista TODAS as abas e filtra aqui, em vez de pedir ao Chrome pra casar
     // endereço.
     //
