@@ -66,6 +66,9 @@
 {% endblock %}
 
 {% block content %}
+{# Esta era a UNICA pagina do sistema sem o container .page — por isso o titulo
+   nascia colado na barra lateral e nada tinha margem. #}
+<div class="page">
 <div class="pnl-topbar">
   <div>
     <h1 style="margin:0;">Painel do CRM</h1>
@@ -109,7 +112,7 @@
     <a class="kpi acao-item {{ 'alerta' if cards.sem_contato else '' }}" href="/crm?sem_contato=1&nao_frio=1&abertos=1">
       <div class="lbl">Sem 1º contato</div>
       <div class="val">{{ cards.sem_contato|numero }}</div>
-      <div class="sub">{{ cards.taxa_contato }}% dos abertos já foram contatados</div>
+      <div class="sub">de {{ cards.aberto|numero }} em aberto — {{ cards.taxa_contato }}% já tiveram contato registrado</div>
     </a>
     <a class="kpi acao-item {{ 'alerta' if cards.parados else '' }}" href="/crm?parados=1&nao_frio=1&abertos=1">
       <div class="lbl">Parados há 7 dias ou mais</div>
@@ -165,6 +168,7 @@
   <!-- Funil por etapa -->
   <div class="panel-box">
     <h2>Funil por etapa</h2>
+    <div class="pnl-nota" style="margin:-8px 0 14px;">Quantos leads estão parados em cada etapa agora. O comprimento da barra já é a proporção — sem percentual aqui, porque nesta tela % significa conversão.</div>
     {% if funil %}
       {% set maxq = funil|map(attribute='qtd')|max %}
       {% for f in funil %}
@@ -173,7 +177,7 @@
         <div class="bar-track">
           <div class="bar-fill" style="width:{{ (f.qtd / maxq * 100) if maxq else 0 }}%; background:{{ f.cor }};"></div>
         </div>
-        <div class="bar-val">{{ f.qtd|numero }} · {{ f.pct }}%</div>
+        <div class="bar-val">{{ f.qtd|numero }}</div>
       </div>
       {% endfor %}
     {% else %}
@@ -261,5 +265,6 @@
       <div class="vazio">Nenhum lead marcado como perdido no período.</div>
     {% endif %}
   </div>
+</div>
 </div>
 {% endblock %}
