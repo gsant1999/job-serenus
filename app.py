@@ -23946,6 +23946,65 @@ def _modalidades_conhecidas(conn):
     return m
 
 
+# ─── SELETOR DE CIDADE ──────────────────────────────────────────────────────
+#
+# A busca de cidade é a primeira coisa que o consultor toca na tela. Ela não
+# pode depender da extensão nem da aba do Painel estar aberta — se depender,
+# a tela nasce quebrada quando qualquer uma das duas falha, e foi exatamente
+# isso que aconteceu.
+#
+# A lista é a do IBGE, no mesmo formato que o Painel usa ("Cidade - UF").
+# Conferido: as 18 cidades que apareceram nas capturas do Painel batem letra
+# por letra com o IBGE, acento incluído. Não é palpite — se um dia divergir, a
+# cotação avisa, porque o Painel recusa cidade que ele não conhece.
+_MUNICIPIOS = None
+_MUNICIPIOS_BUSCA = None
+
+
+def _sem_acento(s):
+    import unicodedata
+    return ''.join(c for c in unicodedata.normalize('NFD', str(s or ''))
+                   if unicodedata.category(c) != 'Mn').lower()
+
+
+def _municipios():
+    """Carrega a lista uma vez por processo. 5.571 nomes, ~115 KB."""
+    global _MUNICIPIOS, _MUNICIPIOS_BUSCA
+    if _MUNICIPIOS is None:
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   'dados', 'municipios.json'), encoding='utf-8') as f:
+                _MUNICIPIOS = json.load(f)
+        except Exception:
+            _MUNICIPIOS = []
+        _MUNICIPIOS_BUSCA = [_sem_acento(x) for x in _MUNICIPIOS]
+    return _MUNICIPIOS
+
+
+@app.route('/api/cidades')
+@login_required
+def api_cidades():
+    """Mesma busca do Painel: trecho do nome, sem ligar pra acento.
+
+    Quem digita 'hortolandia' tem que achar 'Hortolândia' — no Painel acha, e
+    se aqui não achasse o consultor ia jurar que a cidade não existe."""
+    termo = _sem_acento(request.args.get('term') or '')
+    if len(termo) < 2:
+        return jsonify([])
+    _municipios()
+    # Quem começa com o termo vem antes de quem só contém: buscando "campinas",
+    # a cidade que interessa não pode ficar atrás de "Nova Campinas".
+    comeca, contem = [], []
+    for i, chave in enumerate(_MUNICIPIOS_BUSCA):
+        if chave.startswith(termo):
+            comeca.append(_MUNICIPIOS[i])
+        elif termo in chave:
+            contem.append(_MUNICIPIOS[i])
+        if len(comeca) >= 40:
+            break
+    return jsonify((comeca + contem)[:40])
+
+
 @app.route('/cotacao/novo')
 @login_required
 def cotacao_novo():
@@ -24287,6 +24346,32 @@ def cotacao_catalogo_json():
     except Exception:
         linhas = []
     return jsonify({'ok': True, 'total': len(linhas), 'planos': [dict(r) for r in linhas]})
+
+
+@app.route('/cotacao/catalogo/operadoras.json')
+@login_required
+def cotacao_catalogo_operadoras():
+    """Operadoras de uma cidade, do catálogo já varrido.
+
+    Existe pra tela de cotação não ficar cega quando a extensão ou a aba do
+    Painel não estiverem prontas: o JOB responde com o que já sabe, e só chama
+    o Painel quando não sabe."""
+    conn = db()
+    cidade = (request.args.get('cidade') or '').strip()
+    try:
+        modalidade = int(request.args.get('modalidade') or 2)
+    except Exception:
+        modalidade = 2
+    if not cidade:
+        return jsonify({'ok': False, 'operadoras': []})
+    try:
+        linhas = conn.execute(
+            """SELECT operadora_id AS id, nome, logotipo, visto_em FROM catalogo_operadora
+                WHERE cidade=? AND modalidade=? AND sumiu_em IS NULL ORDER BY nome""",
+            (cidade, modalidade)).fetchall()
+    except Exception:
+        linhas = []
+    return jsonify({'ok': True, 'operadoras': [dict(r) for r in linhas]})
 
 
 @app.route('/cotacao/catalogo/varredura', methods=['POST'])

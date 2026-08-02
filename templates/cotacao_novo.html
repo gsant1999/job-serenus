@@ -305,9 +305,18 @@
   // na aba do Painel. Aqui só pedimos e esperamos.
   var pendentes = {};
   var seq = 0;
+  // A extensão se anuncia ao carregar. Guardar isso muda o diagnóstico: sem o
+  // anúncio, ela não está nesta página; com o anúncio e sem resposta, ela está
+  // aqui mas não achou a aba do Painel. Dois problemas diferentes, duas
+  // instruções diferentes — antes os dois caíam no mesmo aviso genérico.
+  var extensaoPresente = false;
   window.addEventListener('message', function (ev) {
     if (ev.source !== window) return;
     var d = ev.data;
+    if (d && d.source === 'JOB_SITE_RESP' && d.tipo === 'extensao_presente') {
+      extensaoPresente = true;
+      return;
+    }
     if (!d || d.source !== 'JOB_SITE_RESP' || !d.reqId) return;
     var p = pendentes[d.reqId];
     if (!p) return;
@@ -383,6 +392,10 @@
   }
 
   function tratarFalha(motivo) {
+    // Se a extensão se anunciou nesta página, o problema não é ela estar
+    // faltando — é ela não ter achado a aba do Painel. Mandar o consultor
+    // reinstalar a extensão nesse caso é perder o tempo dele.
+    if (motivo === 'extensao_nao_respondeu' && extensaoPresente) motivo = 'painel_fechado';
     var e = EXPLICA[motivo];
     if (!e) {
       mostrarSinal('off', 'Não deu certo',
@@ -503,8 +516,14 @@
     // Espera o consultor parar de digitar. Sem isso, "hortolandia" viraria oito
     // consultas ao Painel — barulho na rede deles à toa.
     relogioCidade = setTimeout(async function () {
-      var r = await pedir('cotador_cidades', { termo: termo }, 8000);
-      var lista = (r.ok && r.dados) || [];
+      // Busca no PRÓPRIO JOB, não no Painel.
+      //
+      // A lista é a do IBGE, no mesmo formato que eles usam. Passar pela
+      // extensão aqui fazia a tela nascer quebrada toda vez que a extensão ou
+      // a aba do Painel não estivessem prontas — e escolher a cidade é a
+      // primeira coisa que a pessoa faz.
+      var lista = await fetch('/api/cidades?term=' + encodeURIComponent(termo))
+        .then(function (x) { return x.json(); }).catch(function () { return []; });
       var box = el('sugCidade');
       box.innerHTML = '';
       if (!lista.length) { box.className = 'cv-sug'; return; }
@@ -531,25 +550,61 @@
   var operadoras = [];
   var opsEscolhidas = null;   // null = todas
 
+  // Primeiro o que o JOB já sabe, depois o Painel.
+  //
+  // O catálogo existe justamente pra isso: responder na hora, de graça, e
+  // deixar a tela útil mesmo quando a extensão está fora do ar. Só quando o
+  // JOB não conhece a cidade é que vale incomodar o Painel.
   async function carregarOperadoras() {
     var c = el('operadoras');
+    var mod = Number(el('modalidade').value || 2);
+    c.innerHTML = '<div class="cv-ops-vazio">Procurando…</div>';
+
+    var doJob = await fetch('/cotacao/catalogo/operadoras.json?cidade=' +
+        encodeURIComponent(cidadeEscolhida) + '&modalidade=' + mod)
+      .then(function (x) { return x.json(); }).catch(function () { return {}; });
+    if (doJob.operadoras && doJob.operadoras.length) {
+      operadoras = doJob.operadoras;
+      desenharOperadoras('do catálogo do JOB, sem consultar o Painel');
+      return;
+    }
+
+    if (!pronto) {
+      c.innerHTML = '<div class="cv-ops-vazio">Esta cidade ainda não está no catálogo, e a ' +
+        'extensão não respondeu pra perguntar ao Painel. Você pode cotar assim mesmo — vai ' +
+        'buscar em todas as operadoras da cidade.</div>';
+      operadoras = []; opsEscolhidas = null;
+      return;
+    }
     c.innerHTML = '<div class="cv-ops-vazio">Perguntando ao Painel…</div>';
     var r = await pedir('cotar', {
-      pedido: { cidade: cidadeEscolhida, modalidade: Number(el('modalidade').value || 2),
+      pedido: { cidade: cidadeEscolhida, modalidade: mod,
                 vidas: vidasLista(), somenteOperadoras: true, maxPlanos: 0 }
-    }, 30000);
-    if (!r.ok) { c.innerHTML = '<div class="cv-ops-vazio">Não deu pra listar agora.</div>'; return; }
+    }, 40000);
+    if (!r.ok) {
+      c.innerHTML = '<div class="cv-ops-vazio">Não deu pra listar agora. ' +
+        'Dá pra cotar mesmo assim: sem escolher operadora, ele busca em todas.</div>';
+      operadoras = []; opsEscolhidas = null;
+      return;
+    }
     operadoras = (r.dados && r.dados.operadoras) || [];
-    desenharOperadoras();
+    desenharOperadoras('perguntado ao Painel agora');
   }
 
-  function desenharOperadoras() {
+  function desenharOperadoras(origem) {
     var c = el('operadoras');
     if (!operadoras.length) {
       c.innerHTML = '<div class="cv-ops-vazio">Nenhuma operadora atende essa cidade nesse tipo de contratação.</div>';
       return;
     }
     c.innerHTML = '';
+    if (origem) {
+      var nota = document.createElement('div');
+      nota.className = 'cv-ops-vazio';
+      nota.style.cssText = 'width:100%;margin-bottom:2px';
+      nota.textContent = origem;
+      c.appendChild(nota);
+    }
     operadoras.forEach(function (o) {
       var ligada = !opsEscolhidas || opsEscolhidas.indexOf(o.id) >= 0;
       var b = document.createElement('button');

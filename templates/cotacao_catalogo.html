@@ -156,6 +156,18 @@
        As tracejadas estão sem estado cadastrado na proposta: o Painel exige "Cidade - UF", então
        elas ficam de fora até alguém corrigir o cadastro.</p>
     <div class="ct-cidades" id="cidades"></div>
+    <!-- Nem toda cidade que interessa já teve venda. Quem vai abrir praça nova
+         precisa poder varrer antes de ter a primeira proposta de lá. -->
+    <div class="ct-linha-acao" style="position:relative">
+      <div class="ct-fg" style="flex:1;max-width:320px;position:relative">
+        <label>Adicionar outra cidade</label>
+        <input id="buscaCidade" type="text" autocomplete="off" placeholder="digite 3 letras…">
+        <div id="sugCid" class="ct-cidades" style="position:absolute;top:100%;left:0;right:0;
+             z-index:30;background:var(--panel-3);border:1px solid var(--borda-2);
+             border-radius:10px;margin-top:4px;display:none;flex-direction:column;
+             max-height:200px;padding:5px"></div>
+      </div>
+    </div>
     <div class="ct-linha-acao">
       <button type="button" class="btn-outline btn-sm" id="btTodas">Marcar todas</button>
       <button type="button" class="btn-outline btn-sm" id="btNenhuma">Desmarcar</button>
@@ -389,6 +401,42 @@
     });
   }
   function alvos() { return Object.keys(marcadas); }
+
+  // Busca de cidade no próprio JOB (lista do IBGE, mesmo formato do Painel).
+  // Não passa pela extensão de propósito: escolher cidade precisa funcionar
+  // mesmo com a extensão fora do ar.
+  var relCid = null;
+  el('buscaCidade').addEventListener('input', function (e) {
+    var termo = e.target.value.trim();
+    clearTimeout(relCid);
+    var box = el('sugCid');
+    if (termo.length < 3) { box.style.display = 'none'; return; }
+    relCid = setTimeout(async function () {
+      var lista = await fetch('/api/cidades?term=' + encodeURIComponent(termo))
+        .then(function (x) { return x.json(); }).catch(function () { return []; });
+      box.innerHTML = '';
+      if (!lista.length) { box.style.display = 'none'; return; }
+      lista.slice(0, 20).forEach(function (nome) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 'ct-cid'; b.textContent = nome;
+        b.style.textAlign = 'left';
+        b.onclick = function () {
+          if (!SUGERIDAS.some(function (s) { return s.cidade === nome; })) {
+            SUGERIDAS.push({ cidade: nome, propostas: 0, tem_uf: true });
+          }
+          marcadas[nome] = 1;
+          el('buscaCidade').value = '';
+          box.style.display = 'none';
+          montarCidades(); atualizarPrevisao();
+        };
+        box.appendChild(b);
+      });
+      box.style.display = 'flex';
+    }, 300);
+  });
+  document.addEventListener('click', function (e) {
+    if (e.target.id !== 'buscaCidade') el('sugCid').style.display = 'none';
+  });
   el('btTodas').onclick = function () {
     SUGERIDAS.forEach(function (s) { if (s.tem_uf) marcadas[s.cidade] = 1; });
     montarCidades(); atualizarPrevisao();

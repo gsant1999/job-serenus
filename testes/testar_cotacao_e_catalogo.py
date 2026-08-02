@@ -172,5 +172,30 @@ vivos = conn.execute("SELECT COUNT(*) AS n FROM catalogo_plano WHERE sumiu_em IS
 ok(vivos['n'] == 3, '13c. a marca de retirado foi desfeita', str(vivos['n']))
 
 
+# 14. Seletor de cidade do proprio JOB (lista do IBGE, formato do Painel)
+cid = c.get('/api/cidades?term=hortolandia').get_json()
+ok(cid == ['Hortolândia - SP'], '14. acha sem acento igual ao Painel', json.dumps(cid, ensure_ascii=False))
+cid2 = c.get('/api/cidades?term=hor').get_json()
+ok('Horizonte - CE' in cid2 and 'Belo Horizonte - MG' in cid2,
+   '14b. trecho no meio do nome tambem acha', '%d resultados' % len(cid2))
+ok(cid2.index('Horizonte - CE') < cid2.index('Belo Horizonte - MG'),
+   '14c. quem COMECA com o termo vem antes')
+ok(c.get('/api/cidades?term=c').get_json() == [], '14d. uma letra so nao busca')
+ok(len(c.get('/api/cidades?term=sao').get_json()) <= 40, '14e. teto de 40 sugestoes')
+# As 18 cidades vistas no Painel de verdade tem que existir aqui
+vistas = ['Belo Horizonte - MG', 'Hortolândia - SP', 'Campinas - SP', 'São Paulo - SP',
+          'Novo Horizonte do Sul - MS', 'Monte Horebe - PB']
+faltando = [v for v in vistas
+            if v not in c.get('/api/cidades?term=' + v.split(' - ')[0][:6]).get_json()]
+ok(not faltando, '14f. as cidades reais do Painel existem no JOB', str(faltando))
+
+# 15. Operadoras do catalogo, sem passar pela extensao
+op = c.get('/cotacao/catalogo/operadoras.json?cidade=Campinas - SP&modalidade=2').get_json()
+ok(op['ok'] and len(op['operadoras']) == 2,
+   '15. tela pega operadoras do catalogo sem o Painel', str(len(op['operadoras'])))
+op2 = c.get('/cotacao/catalogo/operadoras.json?cidade=Cidade Inexistente - XX').get_json()
+ok(op2['operadoras'] == [], '15b. cidade sem catalogo devolve vazio, nao erro')
+
+
 print('\n' + ('%d FALHA(S)' % len(falhas) if falhas else 'tudo passou (final)'))
 sys.exit(1 if falhas else 0)
