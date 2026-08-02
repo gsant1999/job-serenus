@@ -512,69 +512,118 @@
       <div class="pl-vazio">Nenhum documento lido ainda. Na extensão, clique em "Ler documento" na bolha do arquivo.</div>
     {% else %}
 
-    {# UMA tabela, com faixas por pessoa. O cabecalho de colunas repetido a cada
-       grupo era ruido: quatro vezes a mesma informacao na mesma tela. #}
-    <div class="pl-docs-tabela">
-      <div class="pl-doc-cab">
-        <span>Tipo do documento</span><span>De quem</span><span>Titular ou dependente</span>
-        <span>Nome que vai pra operadora</span><span>Conferido</span><span></span>
-      </div>
-    {% for g in doc_grupos %}
-    <section class="pl-grupo {{ g.chave }}">
-      <header class="pl-grupo-cab">
-        <span class="pl-grupo-tit">{{ g.titulo }}</span>
-        {% if g.sub %}<span class="pl-grupo-sub">{{ g.sub }}</span>{% endif %}
-        <span class="pl-grupo-n">{{ g.itens|length }}</span>
-        {% if g.comprova %}<span class="pl-grupo-dica">comprova com: {{ g.comprova }}</span>{% endif %}
-      </header>
+    {# A BARRA DE ESTADO responde, em frase, a unica pergunta da tela: da pra
+       subir esta proposta na operadora? "2 de 7" diz o quanto, nao o que fazer. #}
+    <div class="pl-estado {{ 'falta' if (doc_pendentes or doc_faltam) else ('conferir' if doc_conferir else 'pronta') }}">
+      {% if doc_pendentes or doc_faltam %}
+        <b>Falta resolver antes de subir na operadora</b>
+        <span>{% if doc_pendentes %}{{ doc_pendentes }} arquivo(s) sem dono{% endif %}{% if doc_pendentes and doc_faltam %} · {% endif %}{% if doc_faltam %}{{ doc_faltam }} documento(s) que o cliente ainda não mandou{% endif %}</span>
+      {% elif doc_conferir %}
+        <b>Tudo chegou — falta conferir {{ doc_conferir }}</b>
+        <span>A leitura foi da IA e ninguém confirmou ainda.</span>
+      {% else %}
+        <b>Família completa e conferida</b>
+        <span>Pode baixar a pasta e subir na operadora.</span>
+      {% endif %}
+    </div>
 
-      {% for d in g.itens %}
-      <div class="pl-doc-linha{{ ' falta' if not d.titularidade }}">
-        <div class="pl-doc-c">
-          <select class="pl-sel larga" data-doc="{{ d.id }}" data-campo="tipo" onchange="mudarDoc(this)">
-            {% for tp in doc_tipos %}
-            <option value="{{ tp }}" {% if d.tipo == tp %}selected{% endif %}>{{ doc_rotulos.get(tp, tp) }}</option>
-            {% endfor %}
-          </select>
+    {% if doc_pendentes_lista %}
+    <section class="pl-bandeja">
+      <header><b>Sem dono</b><span>De quem é cada um? Um clique resolve.</span></header>
+      {% for d in doc_pendentes_lista %}
+      <div class="pl-pend" data-doc-linha data-doc="{{ d.id }}">
+        <div class="pl-pend-topo">
+          <span class="pl-item-arq" title="{{ d.nome_final or d.nome_arquivo }}">{{ d.nome_final or d.nome_arquivo }}</span>
+          <button type="button" class="pl-doc-link" onclick="verDoc({{ d.id }}, this)"
+                  data-nome="{{ d.nome_final or d.nome_arquivo }}" data-mime="{{ d.mime or '' }}">ver o arquivo</button>
         </div>
-
-        <div class="pl-doc-c pl-doc-pessoa">{{ d.pessoa or '—' }}</div>
-
-        <div class="pl-doc-c">
-          <select class="pl-sel" data-doc="{{ d.id }}" data-campo="titularidade" onchange="mudarDoc(this)">
-            <option value="" {% if not d.titularidade %}selected{% endif %}>a definir</option>
-            <option value="titular" {% if d.titularidade == 'titular' %}selected{% endif %}>Titular</option>
-            <option value="dependente" {% if d.titularidade == 'dependente' %}selected{% endif %}>Dependente</option>
+        <div class="pl-chips">
+          <button type="button" class="pl-chip-b" onclick="resolver({{ d.id }},'titular','')">Titular</button>
+          {% for p in ['conjuge','companheiro','filho','pai_mae'] %}
+          <button type="button" class="pl-chip-b" onclick="resolver({{ d.id }},'dependente','{{ p }}')">{{ doc_parentesco_rotulos.get(p, p) }}</button>
+          {% endfor %}
+          <select class="pl-sel" onchange="if(this.value) resolver({{ d.id }},'dependente',this.value)">
+            <option value="">outro vínculo…</option>
+            {% for p in doc_parentescos %}<option value="{{ p }}">{{ doc_parentesco_rotulos.get(p, p) }}</option>{% endfor %}
           </select>
-          <select class="pl-sel" data-doc="{{ d.id }}" data-campo="parentesco" onchange="mudarDoc(this)"
-                  {% if d.titularidade != 'dependente' %}hidden{% endif %}>
-            <option value="">parentesco…</option>
-            {% for p in doc_parentescos %}
-            <option value="{{ p }}" {% if d.parentesco == p %}selected{% endif %}>{{ doc_parentesco_rotulos.get(p, p) }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="pl-doc-c pl-doc-arq" title="{{ d.nome_final or d.nome_arquivo }}">{{ d.nome_final or d.nome_arquivo }}</div>
-
-        <div class="pl-doc-c">
-          <span class="pl-doc-selo {{ 'ok' if d.conferido else ('duvida' if d.certeza == 'baixa' else 'ia') }}">
-            {{ 'conferido' if d.conferido else ('conferir' if d.certeza == 'baixa' else 'pela IA') }}</span>
-        </div>
-        <div class="pl-doc-c pl-doc-fim">
-          {# Ver antes de baixar: a conferencia nao pode custar um download, uma
-             pasta cheia e um arquivo aberto a mais. #}
-          <button type="button" class="pl-doc-baixar" title="Ver o arquivo sem baixar"
-                  onclick="verDoc({{ d.id }}, this)"
-                  data-nome="{{ d.nome_final or d.nome_arquivo }}"
-                  data-mime="{{ d.mime or '' }}">ver</button>
-          <a class="pl-doc-baixar" href="/lead/{{ lead.id }}/documento/{{ d.id }}" title="Baixar este arquivo">baixar</a>
         </div>
       </div>
       {% endfor %}
     </section>
-    {% endfor %}
+    {% endif %}
+
+    {# UMA FICHA POR PESSOA: e assim que a operadora analisa a proposta. #}
+    <div class="pl-fichas">
+      {% for f in doc_fichas %}
+      <section class="pl-ficha {{ f.estado }}">
+        <header class="pl-ficha-cab">
+          <div>
+            <span class="pl-ficha-papel">{{ f.titulo }}</span>
+            <div class="pl-ficha-nome">{{ f.pessoa or 'sem nome no documento' }}</div>
+          </div>
+          <span class="pl-selo {{ f.estado }}">{{ f.estado_txt }}</span>
+        </header>
+        {% for l in f.linhas %}
+        <div class="pl-item {{ 'vazio' if not l.doc }}"{% if l.doc %} data-doc-linha data-doc="{{ l.doc.id }}"{% endif %}>
+          <span class="pl-item-marca {{ 'ok' if l.doc and l.doc.conferido else ('ia' if l.doc else 'nao') }}"></span>
+          <div class="pl-item-txt">
+            <div class="pl-item-rot">{{ l.rotulo }}</div>
+            {% if l.doc %}
+            <div class="pl-item-arq" title="{{ l.doc.nome_final or l.doc.nome_arquivo }}">{{ l.doc.nome_final or l.doc.nome_arquivo }}</div>
+            {% else %}
+            <div class="pl-item-falta">não recebido{% if f.comprova %} — {{ f.comprova }}{% endif %}</div>
+            {% endif %}
+          </div>
+          {% if l.doc %}
+          <div class="pl-item-acoes">
+            {% if not l.doc.conferido %}<button type="button" class="pl-doc-link ok" onclick="conferir({{ l.doc.id }}, this)">conferi</button>{% endif %}
+            <button type="button" class="pl-doc-link" onclick="verDoc({{ l.doc.id }}, this)"
+                    data-nome="{{ l.doc.nome_final or l.doc.nome_arquivo }}" data-mime="{{ l.doc.mime or '' }}">ver</button>
+            <a class="pl-doc-link" href="/lead/{{ lead.id }}/documento/{{ l.doc.id }}">baixar</a>
+            <button type="button" class="pl-doc-link" onclick="ajustar(this)">ajustar</button>
+          </div>
+          <div class="pl-ajuste" hidden>
+            <select class="pl-sel" data-doc="{{ l.doc.id }}" data-campo="tipo" onchange="mudarDoc(this)">
+              {% for tp in doc_tipos %}<option value="{{ tp }}" {% if l.doc.tipo == tp %}selected{% endif %}>{{ doc_rotulos.get(tp, tp) }}</option>{% endfor %}
+            </select>
+            <select class="pl-sel" data-doc="{{ l.doc.id }}" data-campo="titularidade" onchange="mudarDoc(this)">
+              <option value="" {% if not l.doc.titularidade %}selected{% endif %}>a definir</option>
+              <option value="titular" {% if l.doc.titularidade == 'titular' %}selected{% endif %}>Titular</option>
+              <option value="dependente" {% if l.doc.titularidade == 'dependente' %}selected{% endif %}>Dependente</option>
+            </select>
+            <select class="pl-sel" data-doc="{{ l.doc.id }}" data-campo="parentesco" onchange="mudarDoc(this)"
+                    {% if l.doc.titularidade != 'dependente' %}hidden{% endif %}>
+              <option value="">vínculo…</option>
+              {% for p in doc_parentescos %}<option value="{{ p }}" {% if l.doc.parentesco == p %}selected{% endif %}>{{ doc_parentesco_rotulos.get(p, p) }}</option>{% endfor %}
+            </select>
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+        {% for d in f.extras %}
+        <div class="pl-item extra" data-doc-linha data-doc="{{ d.id }}">
+          <span class="pl-item-marca {{ 'ok' if d.conferido else 'ia' }}"></span>
+          <div class="pl-item-txt">
+            <div class="pl-item-rot">{{ doc_rotulos.get(d.tipo, d.tipo) }} <span class="pl-item-extra-tag">extra</span></div>
+            <div class="pl-item-arq" title="{{ d.nome_final or d.nome_arquivo }}">{{ d.nome_final or d.nome_arquivo }}</div>
+          </div>
+          <div class="pl-item-acoes">
+            {% if not d.conferido %}<button type="button" class="pl-doc-link ok" onclick="conferir({{ d.id }}, this)">conferi</button>{% endif %}
+            <button type="button" class="pl-doc-link" onclick="verDoc({{ d.id }}, this)"
+                    data-nome="{{ d.nome_final or d.nome_arquivo }}" data-mime="{{ d.mime or '' }}">ver</button>
+            <a class="pl-doc-link" href="/lead/{{ lead.id }}/documento/{{ d.id }}">baixar</a>
+          </div>
+        </div>
+        {% endfor %}
+      </section>
+      {% endfor %}
     </div>
+
+    <p class="pl-legenda">
+      <span class="pl-item-marca ok"></span> conferido por gente
+      <span class="pl-item-marca ia"></span> lido pela IA, falta conferir
+      <span class="pl-item-marca nao"></span> não recebido
+    </p>
     {% endif %}
   </div>
 
