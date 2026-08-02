@@ -6821,6 +6821,30 @@ def proposta_plataforma_preview(pid):
 # Esta tela existe pra ser fechada: quando o numero chegar a zero, ela some do
 # painel e nao volta.
 
+# O que cada motivo QUER DIZER. Sem isto, "Sumiu" e "Nao e o decisor" viram
+# escolha por eliminacao, e o relatorio de perda mede o chute do consultor.
+# Frase curta e no lugar onde ele escolhe — nao num manual que ninguem abre.
+MOTIVO_PERDA_AJUDA = {
+    'Preço': 'Achou caro e não fechou nem com desconto ou plano menor. Se ele fechou com um mais barato em OUTRA corretora, é "Fechou com outro".',
+    'Fechou com outro': 'Comprou plano de saúde, mas com outro corretor ou direto na operadora. A venda existiu — só não foi nossa.',
+    'Rede insuficiente': 'O hospital ou o médico que ele queria não está na rede do plano que a gente conseguia oferecer.',
+    'Carência': 'Precisava usar antes do prazo de carência, ou não conseguiu aproveitar carência do plano antigo.',
+    'Não é o decisor': 'Falamos com quem não decide. O sócio, o RH ou o cônjuge não aprovou e não conseguimos chegar em quem decide.',
+    'Recusado pela operadora': 'A operadora não aceitou a proposta — por saúde declarada, região, porte da empresa ou análise interna.',
+    'Sumiu': 'Parou de responder e não deu motivo. Use quando não dá pra saber o que houve.',
+    'Fora de área': 'A operadora não vende ou não tem rede na cidade dele.',
+    'Lead inválido': 'Número errado, teste, duplicado, ou pessoa que nunca pediu cotação. Não era um cliente em potencial.',
+}
+
+
+def _motivos_perda_lista(conn):
+    try:
+        r = conn.execute("SELECT opcoes_json FROM crm_campos WHERE chave='motivo_perda'").fetchone()
+        return json.loads(r['opcoes_json'] or '[]') if r else []
+    except Exception:
+        return []
+
+
 def _campo_motivo_perda(conn):
     return conn.execute("SELECT id, opcoes_json FROM crm_campos WHERE chave='motivo_perda'").fetchone()
 
@@ -6864,7 +6888,8 @@ def crm_mutirao_perdas():
     close_db(conn)
     itens = [{**dict(r), 'ultima': ultimas.get(r['id'], ''),
               'quando': _fmt_data_br(r['avancou_em'] or r['criado_em'])} for r in linhas]
-    return render_template('crm_mutirao_perdas.html', itens=itens, opcoes=opcoes)
+    return render_template('crm_mutirao_perdas.html', itens=itens, opcoes=opcoes,
+                           ajuda=MOTIVO_PERDA_AJUDA)
 
 
 @app.route('/crm/mutirao-perdas/salvar', methods=['POST'])
@@ -18760,7 +18785,12 @@ def api_whatsapp_lead_ficha():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+        return _wa_cors(jsonify({
+        # Os motivos de perda e o que cada um QUER DIZER viajam com a ficha: a
+        # extensao precisa perguntar dentro do WhatsApp, e quem pergunta tem que
+        # explicar.
+        "motivos_perda": _motivos_perda_lista(conn),
+        "motivos_ajuda": MOTIVO_PERDA_AJUDA,"ok": False, "erro": "Chave da extensão inválida"})), 401
     tel = _normalizar_telefone(request.args.get('telefone', ''))
     lid = request.args.get('lead_id', type=int)
     if not tel and not lid:
@@ -18978,6 +19008,18 @@ def api_whatsapp_lead_salvar():
                 if faltando:
                     etapa_ok = False
                     etapa_erro = 'Preencha antes de mudar de etapa: ' + ', '.join([f['nome'] for f in faltando])
+                # A etapa de DESTINO tambem exige. Os campos ja foram gravados no
+                # passo 1 desta mesma chamada, entao o consultor responde dentro
+                # do WhatsApp e a etapa vai junto — sem abrir o site.
+                _td = conn.execute("SELECT tipo FROM crm_etapas WHERE slug=?", (nova_etapa,)).fetchone()
+                _falta_ent = [] if faltando else campos_faltando_pra_entrar(
+                    conn, nova_etapa, atual, tipo_destino=((_td['tipo'] if _td else '') or ''))
+                if faltando:
+                    pass                      # ja tratado acima
+                elif _falta_ent:
+                    etapa_ok = False
+                    etapa_erro = ('Antes de mover para esta etapa: '
+                                  + ', '.join([f['nome'] for f in _falta_ent]))
                 else:
                     conn.execute("""UPDATE crm_leads SET etapa=?, sub_status=NULL,
                                     atualizado_em=?, avancou_em=? WHERE id=?""",
@@ -18986,6 +19028,10 @@ def api_whatsapp_lead_salvar():
                                     VALUES (?,?,?,?,?)""",
                                  (lid, autor, 'movimentacao',
                                   f'Movido de "{lead["etapa"]}" para "{nova_etapa}" (pelo WhatsApp)', _agora_sp()))
+                    _mp = ((d.get('campos') or {}).get('motivo_perda') or '').strip()
+                    if _mp:
+                        conn.execute("UPDATE crm_leads SET perdido_motivo=? WHERE id=?",
+                                     (_mp[:120], lid))
                     conn.commit()
                     try:
                         _fluxo_cancelar_por_etapa(conn, lid, nova_etapa)
@@ -22336,7 +22382,11 @@ def campos_faltando_pra_entrar(conn, etapa_destino, lead, campos=None, tipo_dest
     if not exigidos:
         return []
     vals = valores_campos_lead(conn, lead, campos)
-    return [{'nome': c['nome'], 'chave': c['chave'], 'opcoes': c['opcoes'], 'dica': c.get('dica') or ''}
+    # A explicacao de cada opcao viaja JUNTO. Quem pergunta e quem tem que
+    # explicar — mandar so a lista obriga cada tela a inventar a propria ajuda.
+    return [{'nome': c['nome'], 'chave': c['chave'], 'opcoes': c['opcoes'],
+             'dica': c.get('dica') or '',
+             'ajuda_opcoes': (MOTIVO_PERDA_AJUDA if c['chave'] == 'motivo_perda' else {})}
             for c in exigidos if not (vals.get(c['chave'], {}).get('valor') or '').strip()]
 
 
@@ -22766,10 +22816,12 @@ def crm_painel():
                 parados += 1
 
         org = _normalizar_origem_label(l['origem'])
-        do = por_origem.setdefault(org, {'total': 0, 'ganhos': 0})
+        do = por_origem.setdefault(org, {'total': 0, 'ganhos': 0, 'perdidos': 0})
         do['total'] += 1
         if tipo == 'ganho':
             do['ganhos'] += 1
+        elif tipo == 'perdido':
+            do['perdidos'] += 1
 
         nome = usuarios.get(l['responsavel_id'], 'Sem responsável')
         c = por_consultor.setdefault(nome, {'total': 0, 'ganhos': 0, 'perdidos': 0, 'aberto': 0})
@@ -22790,15 +22842,34 @@ def crm_painel():
               'qtd': por_etapa.get(s, 0),
               'pct': round(por_etapa.get(s, 0) / total * 100, 1) if total else 0}
              for s in etapa_ordem]
+    # UMA definicao de conversao na tela inteira: ganhos sobre DECIDIDOS.
+    #
+    # Estava com duas. Origem dividia por TODOS os leads e consultor dividia so
+    # pelos decididos — as duas chamadas de "conversao", uma do lado da outra.
+    # Dava pra ler que o Guilherme converte 60% e a Meta 0,3%, numeros que nao
+    # se comparam de jeito nenhum. Lead em aberto ainda pode virar os dois lados;
+    # conta-lo como perdido faz a taxa mentir pra baixo.
+    #
+    # E o DENOMINADOR VAI JUNTO. 60% de 5 decisoes e ruido; 4,7% de 85 e sinal.
+    # Sem a base do lado, os dois numeros parecem a mesma coisa — foi por isso
+    # que a tela ficou "sem funcao real".
+    _BASE_MINIMA = 10
+
+    def _conv(ganhos_, perdidos_):
+        dec = ganhos_ + perdidos_
+        return {'decididos': dec,
+                'conv': round(ganhos_ / dec * 100, 1) if dec else None,
+                'confiavel': dec >= _BASE_MINIMA}
+
     origens = sorted(
         [{'nome': k, 'total': v['total'], 'ganhos': v['ganhos'],
-          'conv': round(v['ganhos'] / v['total'] * 100, 1) if v['total'] else 0,
-          'pct': round(v['total'] / total * 100, 1) if total else 0}
+          'perdidos': v.get('perdidos', 0),
+          'pct': round(v['total'] / total * 100, 1) if total else 0,
+          **_conv(v['ganhos'], v.get('perdidos', 0))}
          for k, v in por_origem.items()],
         key=lambda x: -x['total'])
     consultores = sorted(
-        [{'nome': k, **v,
-          'conv': round(v['ganhos'] / (v['ganhos'] + v['perdidos']) * 100, 1) if (v['ganhos'] + v['perdidos']) else 0}
+        [{'nome': k, **v, **_conv(v['ganhos'], v['perdidos'])}
          for k, v in por_consultor.items()],
         key=lambda x: -x['total'])
     perdas = sorted([{'motivo': k, 'qtd': v} for k, v in motivos_perda.items()], key=lambda x: -x['qtd'])

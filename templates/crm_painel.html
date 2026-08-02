@@ -42,6 +42,12 @@
   .panel-box .vazio { color:var(--cinza-2); font-size:12px; padding:8px 0; }
 
   .bar-row { display:flex; align-items:center; gap:10px; margin-bottom:11px; }
+  /* Percentual sem base e chute com cara de dado. Base pequena fica apagada e
+     com o motivo no hover, em vez de competir com o numero que se sustenta. */
+  .conv { font-variant-numeric:tabular-nums; font-weight:600; }
+  .conv.fraca { color:var(--cinza-2); font-weight:500; }
+  .conv.vazio { color:var(--cinza-2); font-weight:500; font-size:11px; font-style:italic; }
+  .pnl-nota { font-size:10.5px; color:var(--cinza-2); margin-top:12px; line-height:1.55; }
   .bar-label { width:130px; font-size:12px; color:var(--cinza); flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .bar-track { flex:1; height:22px; background:var(--panel-2); border-radius:6px; overflow:hidden; position:relative; }
   .bar-fill { height:100%; border-radius:6px; min-width:2px; transition:width .4s; }
@@ -154,7 +160,6 @@
     </div>
   </div>
 </section>
-</div>
 
 <div class="pnl-row">
   <!-- Funil por etapa -->
@@ -187,10 +192,14 @@
         <div class="bar-track">
           <div class="bar-fill" style="width:{{ (o.total / maxo * 100) if maxo else 0 }}%; background:var(--azul);"></div>
         </div>
-        <div class="bar-val">{{ o.total|numero }} · {{ o.conv }}%</div>
+        <div class="bar-val">{{ o.total|numero }}
+          {% if o.conv is not none %}<span class="conv {{ 'fraca' if not o.confiavel }}"
+              title="{{ o.ganhos }} ganho(s) de {{ o.decididos }} decidido(s){{ ' — base pequena demais pra confiar' if not o.confiavel }}">{{ o.conv }}%</span>
+          {% else %}<span class="conv vazio" title="Nenhum lead desta origem foi decidido ainda">sem decisão</span>{% endif %}
+        </div>
       </div>
       {% endfor %}
-      <div style="font-size:10px;color:var(--cinza-2);margin-top:10px;">Percentual ao lado = taxa de conversão da origem.</div>
+      <div class="pnl-nota">Conversão = ganhos ÷ <b>decididos</b> (ganhos + perdidos). Lead em aberto fica fora: ele ainda pode virar os dois lados. Percentual apagado é base pequena demais pra confiar.</div>
     {% else %}
       <div class="vazio">Sem dados no período.</div>
     {% endif %}
@@ -204,7 +213,7 @@
     {% if consultores %}
     <table class="pnl-tab">
       <thead>
-        <tr><th>Consultor</th><th style="text-align:right;">Leads</th><th style="text-align:right;">Aberto</th><th style="text-align:right;">Ganhos</th><th style="text-align:right;">Conv.</th></tr>
+        <tr><th>Consultor</th><th style="text-align:right;">Leads</th><th style="text-align:right;">Aberto</th><th style="text-align:right;">Ganhos</th><th style="text-align:right;">Decididos<i class="ajuda-i" title="Ganhos mais perdidos. É o denominador da conversão — sem ele, 60% de 5 decisões parece igual a 60% de 500.">i</i></th><th style="text-align:right;">Conv.</th></tr>
       </thead>
       <tbody>
         {% for c in consultores %}
@@ -213,7 +222,12 @@
           <td class="num">{{ c.total|numero }}</td>
           <td class="num">{{ c.aberto|numero }}</td>
           <td class="num">{{ c.ganhos|numero }}</td>
-          <td class="num"><span class="pill {{ 'pill-verde' if c.conv >= 20 else ('pill-cinza' if c.conv > 0 else 'pill-cinza') }}">{{ c.conv }}%</span></td>
+          <td class="num">{{ c.decididos|numero }}</td>
+          <td class="num">
+            {% if c.conv is none %}<span class="conv vazio">sem decisão</span>
+            {% elif not c.confiavel %}<span class="conv fraca" title="{{ c.ganhos }} de {{ c.decididos }} — base pequena demais pra tirar conclusão">{{ c.conv }}%</span>
+            {% else %}<span class="pill {{ 'pill-verde' if c.conv >= 20 else 'pill-cinza' }}">{{ c.conv }}%</span>{% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
