@@ -323,6 +323,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // A fila de hoje: mesma consulta do dashboard e da agenda.
+  if (msg && msg.type === 'fila_hoje') {
+    chrome.storage.local.get(['usuarioId']).then(({ usuarioId }) =>
+      chamarJob('/api/whatsapp/fila?usuario_id=' + (usuarioId || 0), 'GET', null, 12000)
+    ).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'fila_acao') {
+    chrome.storage.local.get(['usuarioId']).then(({ usuarioId }) =>
+      chamarJob('/api/whatsapp/fila/acao', 'POST',
+        { tarefa_id: msg.tarefa_id, usuario_id: usuarioId || 0,
+          acao: msg.acao, dias: msg.dias || 1 }, 12000)
+    ).then(sendResponse);
+    return true;
+  }
+
   // O canario: a extensao contando o que ainda funciona nela.
   if (msg && msg.type === 'canario') {
     chamarJob('/api/whatsapp/canario', 'POST',

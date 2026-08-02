@@ -1,0 +1,77 @@
+{# ═══ A FILA DE HOJE ═══════════════════════════════════════════════════════════
+   UM componente, três telas (dashboard admin, dashboard consultor e a agenda).
+   Antes cada superfície teria a própria lista, e três listas parecidas com
+   comportamentos diferentes é o que faz o consultor não confiar em nenhuma.
+
+   A regra que orienta o desenho: a tela responde "o que eu faço AGORA?" e nada
+   além disso. Sem contadores decorativos, sem gráfico, sem filtro. Quem quiser
+   o resto abre a agenda. #}
+
+{% if fila_n and (fila_n.atrasadas or fila_n.hoje) %}
+<div class="fila-hoje">
+  <div class="fila-cab">
+    <div>
+      <span class="fila-tit">Sua fila de hoje</span>
+      <span class="fila-cont">
+        {% if fila_n.atrasadas %}<b class="atraso">{{ fila_n.atrasadas }} atrasada{{ 's' if fila_n.atrasadas > 1 }}</b> · {% endif %}
+        {{ fila_n.hoje }} para hoje
+      </span>
+    </div>
+    <a href="/crm/agenda" class="fila-todas">ver todas</a>
+  </div>
+
+  {% for t in fila %}
+  <div class="fila-item{{ ' atrasado' if t.atrasada }}" data-tarefa="{{ t.id }}">
+    <div class="fila-info">
+      <div class="fila-linha1">
+        <span class="fila-assunto">{{ t.assunto }}</span>
+        <a class="fila-lead" href="/lead/{{ t.lead_id }}">{{ t.lead_nome or 'Sem nome' }}</a>
+        {% if t.atrasada %}<span class="fila-tag">desde {{ t.quando_br[:10] }}</span>{% endif %}
+      </div>
+      {# O motivo existe pra tarefa não virar "fazer follow-up": o consultor abre,
+         não sabe o que dizer e adia. #}
+      {% if t.motivo %}<div class="fila-motivo">{{ t.motivo }}</div>{% endif %}
+      {% if t.mensagem_lead %}
+      <div class="fila-frase" id="frase-{{ t.id }}">{{ t.mensagem_lead }}</div>
+      {% endif %}
+    </div>
+    <div class="fila-acoes">
+      {% if t.lead_tel %}
+      <button type="button" class="btn-outline btn-sm"
+              onclick="filaFalar('{{ t.lead_tel }}', {{ t.id }})">Falar no WhatsApp</button>
+      {% endif %}
+      <button type="button" class="btn-outline btn-sm" onclick="filaFeito({{ t.id }})">Concluir</button>
+      <button type="button" class="btn-ghost btn-sm" onclick="filaAdiar({{ t.id }}, 1)"
+              title="Adia para amanhã de manhã">Amanhã</button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<script>
+// Copia a frase e abre a conversa: o consultor cola e edita. Escrever direto na
+// caixa do WhatsApp é o tipo de intervenção que já quebrou o envio antes.
+function filaFalar(tel, id){
+  const f = document.getElementById('frase-' + id);
+  const abrir = () => window.open('https://web.whatsapp.com/send?phone=' + String(tel).replace(/\D/g,''), '_blank');
+  if(f && navigator.clipboard){
+    navigator.clipboard.writeText(f.textContent.trim()).then(abrir).catch(abrir);
+  } else { abrir(); }
+}
+async function filaFeito(id){
+  const r = await fetch('/crm/agenda/' + id + '/feito', {method:'POST'});
+  const d = await r.json();
+  if(d.ok){ const el = document.querySelector('[data-tarefa="'+id+'"]'); if(el) el.remove(); }
+  else if(window.toast) toast(d.erro || 'Não deu', 'err');
+}
+async function filaAdiar(id, dias){
+  const r = await fetch('/crm/agenda/' + id + '/adiar', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({dias})});
+  const d = await r.json();
+  if(d.ok){
+    const el = document.querySelector('[data-tarefa="'+id+'"]'); if(el) el.remove();
+    if(window.toast) toast('Adiada para ' + d.nova, 'ok');
+  }
+}
+</script>
+{% endif %}

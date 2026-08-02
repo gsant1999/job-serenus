@@ -7257,6 +7257,75 @@ def crm_agenda_adiar(aid):
     return jsonify({"ok": True, "nova": _fmt_datahora_br(nova)})
 
 
+
+@app.route('/api/whatsapp/fila', methods=['GET', 'OPTIONS'])
+def api_whatsapp_fila():
+    """A fila de hoje DENTRO do WhatsApp. Mesma consulta do dashboard e da
+    agenda — os tres tem que dizer o mesmo numero, senao ninguem confia em
+    nenhum. E aqui e onde o consultor ja esta: a tarefa aparece onde o trabalho
+    acontece, nao numa tela que ele teria que lembrar de abrir."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    try:
+        uid = int(request.args.get('usuario_id') or 0)
+    except (TypeError, ValueError):
+        uid = 0
+    if not uid:
+        return _wa_cors(jsonify({"ok": False, "erro": "usuario_id ausente"})), 400
+    conn = db()
+    try:
+        fila = _agenda_fila(conn, uid, eh_admin=False, limite=20)
+        resumo = _agenda_resumo(conn, uid, eh_admin=False)
+    finally:
+        close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "resumo": resumo, "fila": [
+        {'id': t['id'], 'lead_id': t['lead_id'], 'lead': t['lead_nome'],
+         'telefone': t['lead_tel'], 'assunto': t['assunto'], 'motivo': t['motivo'],
+         'frase': t['mensagem_lead'], 'atrasada': t['atrasada'], 'quando': t['quando_br']}
+        for t in fila]}))
+
+
+@app.route('/api/whatsapp/fila/acao', methods=['POST', 'OPTIONS'])
+def api_whatsapp_fila_acao():
+    """Concluir ou adiar sem sair do WhatsApp."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    d = request.get_json(silent=True) or {}
+    try:
+        aid = int(d.get('tarefa_id') or 0)
+        uid = int(d.get('usuario_id') or 0)
+    except (TypeError, ValueError):
+        aid = uid = 0
+    if not aid or not uid:
+        return _wa_cors(jsonify({"ok": False, "erro": "tarefa_id/usuario_id ausente"})), 400
+    conn = db()
+    t = conn.execute("SELECT * FROM crm_agenda WHERE id=?", (aid,)).fetchone()
+    if not t or t['usuario_id'] != uid:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Tarefa de outro consultor"})), 403
+    if d.get('acao') == 'adiar':
+        from datetime import timedelta as _td
+        try:
+            dias = max(1, min(int(d.get('dias') or 1), 90))
+        except (TypeError, ValueError):
+            dias = 1
+        nova = (datetime.now(TZ_SP) + _td(days=dias)).strftime('%Y-%m-%d 09:00')
+        conn.execute("UPDATE crm_agenda SET data_hora=? WHERE id=?", (nova, aid))
+    else:
+        u = conn.execute("SELECT nome FROM usuarios WHERE id=?", (uid,)).fetchone()
+        conn.execute("UPDATE crm_agenda SET status='concluida' WHERE id=?", (aid,))
+        conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                        VALUES (?,?,?,?,?)""",
+                     (t['lead_id'], (u['nome'] if u else 'Extensão'), 'atividade',
+                      f"Concluiu pelo WhatsApp: {t['assunto']}", _agora_sp()))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
+
+
 @app.route('/api/cep/<cep>')
 @login_required
 def api_cep(cep):
@@ -25588,7 +25657,7 @@ def crm_agenda():
             FROM crm_agenda a JOIN crm_leads l ON l.id=a.lead_id
             LEFT JOIN usuarios u ON u.id=a.usuario_id
             WHERE a.status='pendente' AND a.usuario_id=? ORDER BY a.data_hora""", (uid,)).fetchall()
-    close_db(conn)
+    conn2 = conn
     hoje = datetime.now(TZ_SP).strftime('%Y-%m-%d')
     atrasadas, de_hoje, proximas = [], [], []
     for r in rows:
@@ -25601,7 +25670,12 @@ def crm_agenda():
             de_hoje.append(d)
         else:
             proximas.append(d)
-    return render_template('crm_agenda.html', atrasadas=atrasadas, de_hoje=de_hoje,
+    # MESMA fonte do dashboard e da extensao: se os tres discordarem no numero,
+    # o consultor para de confiar nos tres.
+    fila = _agenda_fila(conn2, uid, eh_admin=(eh_admin and bool(request.args.get('todos'))), limite=60)
+    fila_n = _agenda_resumo(conn2, uid, eh_admin=(eh_admin and bool(request.args.get('todos'))))
+    close_db(conn2)
+    return render_template('crm_agenda.html', fila=fila, fila_n=fila_n, atrasadas=atrasadas, de_hoje=de_hoje,
                            proximas=proximas, eh_admin=eh_admin,
                            ver_todos=bool(request.args.get('todos')))
 

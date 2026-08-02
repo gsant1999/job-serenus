@@ -1017,3 +1017,27 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
          width: 13px; height: 13px; border-radius: 50%; font-size: 9px; font-style: normal;
          font-weight: 700; background: rgba(255,255,255,.12); color: #8696a0; cursor: help; }
 .job-i:hover { background: rgba(83,189,235,.25); color: #53bdeb; }
+
+/* ── A fila de hoje no trilho ── */
+.job-fila-badge { position:absolute; top:3px; right:6px; min-width:16px; height:16px;
+                  border-radius:8px; padding:0 4px; font-size:9.5px; font-weight:800;
+                  display:flex; align-items:center; justify-content:center;
+                  background:rgba(83,189,235,.85); color:#0b141a; }
+.job-fila-badge.atraso { background:#f43f7c; color:#fff; }
+.job-fila-badge[hidden] { display:none; }
+.job-fila-cab { font-size:11.5px; color:#8696a0; padding:2px 0 10px; }
+.job-fila-atraso { color:#f7a8c0; }
+.job-fila-item { background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08);
+                 border-radius:9px; padding:11px 12px; margin-bottom:9px; }
+/* Atrasado ganha um trilho, nao um fundo: com a fila cheia, cor em tudo para
+   de significar atraso. */
+.job-fila-item.atrasada { border-left:3px solid #f43f7c; }
+.job-fila-tit { font-size:12.5px; font-weight:700; color:#e9edef; }
+.job-fila-lead { font-size:11.5px; color:#8696a0; margin-top:2px; }
+.job-fila-tag { color:#f7a8c0; margin-left:6px; font-size:10px; }
+.job-fila-motivo { font-size:11px; color:#8696a0; margin-top:6px; line-height:1.5; }
+/* A frase e o que se copia: parece mensagem, nao legenda. */
+.job-fila-frase { font-size:11.5px; color:#e9edef; background:rgba(0,0,0,.24);
+                  border:1px solid rgba(255,255,255,.08); border-radius:7px;
+                  padding:8px 10px; margin-top:8px; line-height:1.55; }
+.job-fila-acoes { display:flex; gap:12px; margin-top:9px; flex-wrap:wrap; }

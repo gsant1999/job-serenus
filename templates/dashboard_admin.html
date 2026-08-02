@@ -6,6 +6,8 @@
   <div>
     <h1>Dashboard</h1>
     <div class="sub">Visão geral da operação</div>
+
+{% include '_fila_hoje.html' %}
   </div>
   <div style="display:flex; gap:10px; align-items:center;">
     <select id="sel-mes-dash" onchange="location.href='/?mes='+this.value" style="background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:9px 12px; color:var(--texto); font-size:13px; outline:none;">

@@ -1002,6 +1002,11 @@
       (_devLigado ? '<button class="job-trilho-item" data-secao="dev" title="Modo desenvolvedor: estado de tudo e disparo manual">' +
         '<span class="job-trilho-item-icone">&lt;/&gt;</span>' +
         '<span class="job-trilho-item-label">Dev</span></button>' : '') +
+      '<button class="job-trilho-item" data-secao="fila" title="Sua fila de hoje: o que o JOB diz pra fazer agora, com o motivo e a frase pronta">' +
+        '<span class="job-trilho-item-icone">' + _ICO_FILA + '</span>' +
+        '<span class="job-trilho-item-label">Hoje</span>' +
+        '<span class="job-fila-badge" id="job-fila-badge" hidden></span>' +
+      '</button>' +
       '<button class="job-trilho-item" data-secao="ficha" title="Ficha do lead: etapa, sub-status, etiquetas, qualificação e atividade">' +
         '<span class="job-trilho-item-icone">' + _ICO_CRM + '</span>' +
         '<span class="job-trilho-item-label">CRM</span>' +
@@ -1203,6 +1208,7 @@
     else if (secao === 'cnpj') abrirSecaoCnpj();
     else if (secao === 'notas') abrirSecaoNotas();
     else if (secao === 'crm') abrirSecaoNovoLead();
+    else if (secao === 'fila') abrirSecaoFila();
     else if (secao === 'ficha') abrirSecaoFicha();
     else if (secao === 'dev') abrirSecaoDev();
   }
@@ -2976,6 +2982,100 @@
   // O consultor acabou de ler a conversa: e o unico instante em que ele sabe
   // por que perdeu. Obrigar a abrir o site pra responder e garantir que ele nao
   // responde — foi assim que 216 perdas ficaram com "Nao informado".
+  // ── FILA DE HOJE, DENTRO DO WHATSAPP ────────────────────────────────────
+  // A tarefa aparece ONDE O TRABALHO ACONTECE. A /crm/agenda com 0 futuras ja
+  // provou que tela separada nao e aberta. Mesma consulta do dashboard e da
+  // agenda: os tres dizem o mesmo numero.
+  const _ICO_FILA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/>' +
+    '<path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4"/></svg>';
+
+  let _fila = [];
+
+  async function abrirSecaoFila() {
+    const p = document.getElementById('job-painel-corpo');
+    if (!p) return;
+    p.innerHTML = '<div class="job-vazio">carregando sua fila…</div>';
+    const r = await _safeSendMessage({ type: 'fila_hoje' }).catch(() => null);
+    if (!r || !r.ok) {
+      p.innerHTML = '<div class="job-vazio">Não consegui carregar a fila agora.</div>';
+      return;
+    }
+    _fila = r.fila || [];
+    _filaBadge(r.resumo || {});
+    if (!_fila.length) {
+      p.innerHTML = '<div class="job-vazio"><b>Nada na fila de hoje.</b><br>' +
+        'Quando entrar lead novo ou uma cotação ficar parada, aparece aqui.</div>';
+      return;
+    }
+    const res = r.resumo || {};
+    p.innerHTML =
+      '<div class="job-fila-cab">' +
+        (res.atrasadas ? '<b class="job-fila-atraso">' + res.atrasadas + ' atrasada(s)</b> · ' : '') +
+        (res.hoje || 0) + ' para hoje</div>' +
+      _fila.map((t) => _filaItem(t)).join('');
+    p.querySelectorAll('[data-fila]').forEach((b) => {
+      b.addEventListener('click', () => _filaAcao(b.dataset.fila, parseInt(b.dataset.id, 10), b));
+    });
+  }
+
+  function _filaItem(t) {
+    return '<div class="job-fila-item' + (t.atrasada ? ' atrasada' : '') + '" id="job-fila-' + t.id + '">' +
+      '<div class="job-fila-tit">' + esc(t.assunto) + '</div>' +
+      '<div class="job-fila-lead">' + esc(t.lead || 'Sem nome') +
+        (t.atrasada ? '<span class="job-fila-tag">desde ' + esc((t.quando || '').slice(0, 10)) + '</span>' : '') +
+      '</div>' +
+      (t.motivo ? '<div class="job-fila-motivo">' + esc(t.motivo) + '</div>' : '') +
+      (t.frase ? '<div class="job-fila-frase">' + esc(t.frase) + '</div>' : '') +
+      '<div class="job-fila-acoes">' +
+        (t.telefone ? '<button type="button" class="job-tr-btn" data-fila="abrir" data-id="' + t.id + '">Abrir conversa</button>' : '') +
+        '<button type="button" class="job-tr-btn" data-fila="feito" data-id="' + t.id + '">Concluir</button>' +
+        '<button type="button" class="job-tr-btn" data-fila="adiar" data-id="' + t.id + '">Amanhã</button>' +
+      '</div></div>';
+  }
+
+  async function _filaAcao(acao, id, botao) {
+    const t = _fila.find((x) => x.id === id);
+    if (!t) return;
+    if (acao === 'abrir') {
+      // Copia a frase e abre a conversa NA ABA QUE JA ESTA CARREGADA — abrir um
+      // popup novo faz o WhatsApp carregar tudo de novo.
+      try { if (t.frase) await navigator.clipboard.writeText(t.frase); } catch (e) {}
+      try {
+        await _pedirPonte('abrir_chat', { telefone: t.telefone, texto: t.frase || '' }, 15000);
+      } catch (e) {
+        window.open('https://web.whatsapp.com/send?phone=' + String(t.telefone).replace(/\D/g, ''), '_blank');
+      }
+      return;
+    }
+    botao.disabled = true;
+    const r = await _safeSendMessage({ type: 'fila_acao', tarefa_id: id,
+      acao: acao === 'adiar' ? 'adiar' : 'feito', dias: 1 }).catch(() => null);
+    if (r && r.ok) {
+      const el = document.getElementById('job-fila-' + id);
+      if (el) el.remove();
+      _fila = _fila.filter((x) => x.id !== id);
+      _filaBadge({ hoje: _fila.length });
+    } else {
+      botao.disabled = false;
+    }
+  }
+
+  function _filaBadge(res) {
+    const b = document.getElementById('job-fila-badge');
+    if (!b) return;
+    const n = (res.atrasadas || 0) + (res.hoje || 0);
+    b.hidden = !n;
+    b.textContent = n > 99 ? '99+' : String(n);
+    b.classList.toggle('atraso', !!res.atrasadas);
+  }
+
+  // O numero aparece no trilho sem o consultor precisar abrir a secao.
+  async function filaAtualizarBadge() {
+    const r = await _safeSendMessage({ type: 'fila_hoje' }).catch(() => null);
+    if (r && r.ok) _filaBadge(r.resumo || {});
+  }
+
   function _perdaEhEtapaPerdida(slug) {
     const e = ((_ficha && _ficha.etapas) || []).find((x) => (x.id || x.slug) === slug);
     return !!(e && (e.tipo === 'perdido'));

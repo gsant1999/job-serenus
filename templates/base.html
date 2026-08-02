@@ -216,6 +216,35 @@
      secao de formulario e o numero das metricas do dashboard brancos no branco
      pelo mesmo motivo. */
 
+
+  /* ═══ FILA DE HOJE ═══ Um componente, três telas. */
+  .fila-hoje { background:var(--panel); border:1px solid var(--borda); border-radius:12px;
+               overflow:hidden; margin-bottom:18px; }
+  .fila-cab { display:flex; align-items:center; justify-content:space-between; gap:12px;
+              padding:13px 18px; border-bottom:1px solid var(--borda); flex-wrap:wrap; }
+  .fila-tit { font-family:'Sora',sans-serif; font-size:14px; font-weight:600; }
+  .fila-cont { font-size:12px; color:var(--cinza); margin-left:10px; }
+  .fila-cont .atraso { color:var(--rosa); }
+  .fila-todas { font-size:12px; }
+  .fila-item { display:flex; gap:14px; align-items:flex-start; justify-content:space-between;
+               padding:13px 18px; border-bottom:1px solid var(--borda); flex-wrap:wrap; }
+  .fila-item:last-child { border-bottom:none; }
+  /* Atrasado tem um trilho, não um fundo colorido: com a fila cheia, bloco
+     colorido em tudo vira ruído e para de significar atraso. */
+  .fila-item.atrasado { border-left:3px solid var(--rosa); padding-left:15px; }
+  .fila-info { flex:1 1 320px; min-width:0; }
+  .fila-linha1 { display:flex; align-items:baseline; gap:9px; flex-wrap:wrap; }
+  .fila-assunto { font-size:13.5px; font-weight:600; }
+  .fila-lead { font-size:13px; }
+  .fila-tag { font-size:10px; color:var(--rosa); }
+  .fila-motivo { font-size:11.5px; color:var(--cinza); margin-top:4px; line-height:1.5; }
+  /* A frase pronta em bloco próprio: é o que se copia, então tem que parecer
+     texto de mensagem, não legenda. */
+  .fila-frase { font-size:12px; color:var(--texto); background:var(--panel-2);
+                border:1px solid var(--borda); border-radius:8px;
+                padding:8px 11px; margin-top:8px; line-height:1.55; }
+  .fila-acoes { display:flex; gap:7px; align-items:center; flex-wrap:wrap; }
+
   /* ═══ CARDS ═══ */
   .card { background:var(--panel); border-radius:12px; border:1px solid var(--borda); overflow:hidden; margin-bottom:16px; }
   .card-header { padding:14px 20px; border-bottom:1px solid var(--borda); display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
