@@ -2757,6 +2757,13 @@ def init_db():
         # continua sempre ligado, não tem como desligar — só o WhatsApp).
         ("usuarios", "notificar_wpp_leads", "INTEGER DEFAULT 1"),
         # Mensagem pronta pro lead, escrita já no agendamento (fica 1 clique pra enviar quando o lembrete chegar)
+        # TAREFA QUE NASCE SOZINHA. A agenda tinha 1 atrasada, 0 hoje e 0 futuras
+        # com 5.086 leads sem primeiro contato — porque so existia o que alguem
+        # digitou a mao, e ninguem digita. 'regra' diz QUEM criou (qual gatilho),
+        # e e por ela que a tarefa nao nasce duas vezes pro mesmo lead.
+        ("crm_agenda", "regra", "TEXT"),
+        ("crm_agenda", "prioridade", "INTEGER DEFAULT 2"),
+        ("crm_agenda", "motivo", "TEXT"),
         ("crm_agenda", "mensagem_lead", "TEXT"),
         ("crm_agenda", "mensagem_lead_enviada", "INTEGER DEFAULT 0"),
         # Confirmação de leitura do lembrete: link de 1 toque na própria mensagem do WhatsApp
@@ -6934,6 +6941,312 @@ def crm_mutirao_perdas_salvar():
         return jsonify({"ok": False, "erro": "Não consegui salvar"}), 200
     close_db(conn)
     return jsonify({"ok": True, "gravados": n})
+
+
+
+# ═══ MOTOR DA AGENDA ══════════════════════════════════════════════════════════
+# A agenda tinha 1 atrasada, 0 hoje e 0 futuras — com 5.086 leads sem primeiro
+# contato. Nao era falta de disciplina: so existia o que alguem digitou a mao, e
+# ninguem digita. Aqui a tarefa NASCE do que o sistema ja sabe.
+#
+# Tres decisoes que vieram do estudo e das criticas dos consultores:
+#
+# 1. TETO POR PESSOA. Um consultor que tambem atende, cota e fecha faz 20 a 25
+#    leads novos por dia. Fila maior que isso nao e ambicao, e paralisia — a
+#    pessoa para de encarar QUALQUER fila. Por isso o motor tem teto diario.
+# 2. TAREFA NASCE COM O MOTIVO E A FRASE. "Fazer follow-up" faz o consultor
+#    abrir, nao saber o que dizer e adiar. Toda tarefa carrega por que existe e
+#    como comecar a conversa.
+# 3. NADA DE LIGACAO COMO PRIMEIRO TOQUE, nada de audio pra quem nunca
+#    respondeu. Numero desconhecido nao e atendido no interior, e audio nao
+#    solicitado pra silencio total e o caminho mais curto pro bloqueio.
+
+AGENDA_TETO_DIA = 25          # tarefas novas por consultor por dia
+AGENDA_TETO_BACKLOG = 15      # dessas, quantas podem vir da base antiga
+
+_AGENDA_REGRAS = [
+    {
+        'chave': 'primeiro_contato',
+        'titulo': 'Falar pela primeira vez',
+        'prioridade': 1,
+        'motivo': 'Este lead pediu cotação e nunca recebeu resposta. Quanto mais tempo passa, menos ele lembra que pediu.',
+        'frase': 'Oi {primeiro_nome}, aqui é o {consultor} da Serenus. Você pediu uma cotação de plano de saúde — consegue me dizer quantas pessoas entrariam no plano e a idade de cada uma?',
+    },
+    {
+        'chave': 'parado_sem_resposta',
+        'titulo': 'Retomar quem parou de responder',
+        'prioridade': 2,
+        'motivo': 'A conversa começou e parou. Sem um toque agora, vira "Sumiu" — que é o motivo de perda que não ensina nada.',
+        'frase': '{primeiro_nome}, tudo bem? Fiquei de te ajudar com o plano. Ainda faz sentido pra você, ou prefere que eu volte a falar mais pra frente?',
+    },
+    {
+        'chave': 'cotacao_parada',
+        'titulo': 'Cotação enviada e sem retorno',
+        'prioridade': 1,
+        'motivo': 'A cotação foi enviada e o cliente não respondeu. É o momento de maior chance de fechar — e o de maior chance de perder pro concorrente que ligou depois.',
+        'frase': '{primeiro_nome}, conseguiu olhar a cotação que te mandei? Se o valor ficou acima do que você esperava, me diz que eu vejo outra opção.',
+    },
+    {
+        'chave': 'gatilho_retorno',
+        'titulo': 'Chegou a data de voltar a falar',
+        'prioridade': 1,
+        'motivo': 'Este lead foi perdido, mas com uma data pra voltar. A data chegou — e em plano de saúde perder por preço hoje não é perder pra sempre.',
+        'frase': '{primeiro_nome}, tudo bem? Na época você achou o valor alto. Os planos reajustaram e apareceram opções novas — quer que eu faça uma comparação rápida com o que você tem hoje?',
+    },
+]
+_AGENDA_POR_CHAVE = {r['chave']: r for r in _AGENDA_REGRAS}
+
+
+def _agenda_frase(regra, lead, consultor):
+    nome = (lead['nome'] or '').strip().split(' ')[0] if lead['nome'] else 'tudo bem'
+    return (regra['frase']
+            .replace('{primeiro_nome}', nome)
+            .replace('{consultor}', (consultor or 'Serenus').split(' ')[0]))
+
+
+def _agenda_ja_tem(conn, lead_id, chave):
+    """Nao repete a mesma tarefa pro mesmo lead enquanto a anterior estiver de pe."""
+    return conn.execute("""SELECT 1 FROM crm_agenda
+                           WHERE lead_id=? AND regra=? AND status='pendente'""",
+                        (lead_id, chave)).fetchone() is not None
+
+
+def _agenda_criar(conn, lead, chave, quando, consultor_nome=''):
+    r = _AGENDA_POR_CHAVE.get(chave)
+    if not r or _agenda_ja_tem(conn, lead['id'], chave):
+        return False
+    conn.execute("""INSERT INTO crm_agenda
+        (lead_id, usuario_id, assunto, descricao, data_hora, status, regra, prioridade,
+         motivo, mensagem_lead, criado_em)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (lead['id'], lead['responsavel_id'], r['titulo'], '', quando, 'pendente',
+         chave, r['prioridade'], r['motivo'],
+         _agenda_frase(r, lead, consultor_nome), _agora_sp()))
+    return True
+
+
+def agenda_gerar(conn, limite_por_pessoa=None):
+    """Roda as regras e cria o que falta. Idempotente: rodar duas vezes no mesmo
+    dia nao duplica nada, porque cada regra so cria se nao houver pendente igual.
+
+    Devolve {'chave': quantas}, pra dar pra medir se o motor esta produzindo."""
+    teto = limite_por_pessoa or AGENDA_TETO_DIA
+    agora = datetime.now(TZ_SP)
+    hoje = agora.strftime('%Y-%m-%d')
+    from datetime import timedelta as _td
+
+    usuarios = {u['id']: u['nome'] for u in conn.execute(
+        "SELECT id, nome FROM usuarios WHERE ativo=1").fetchall()}
+    # Quantas tarefas cada um ja tem em aberto: o teto e sobre a FILA, nao sobre
+    # o que foi criado hoje. Fila de 200 nao vira 225 no dia seguinte.
+    fila = {}
+    for r in conn.execute("""SELECT usuario_id, COUNT(*) c FROM crm_agenda
+                             WHERE status='pendente' GROUP BY usuario_id""").fetchall():
+        fila[r['usuario_id']] = r['c']
+
+    tipos_contato = "('whatsapp','atividade','nota','email','ligacao')"
+    contatados = {r['lead_id'] for r in conn.execute(
+        f"SELECT DISTINCT lead_id FROM crm_atividades WHERE tipo IN {tipos_contato}").fetchall()}
+
+    etapas_fim = {e['slug'] for e in conn.execute(
+        "SELECT slug FROM crm_etapas WHERE tipo IN ('ganho','perdido')").fetchall()}
+    etapas_perda = {e['slug'] for e in conn.execute(
+        "SELECT slug FROM crm_etapas WHERE tipo='perdido'").fetchall()}
+
+    criadas = {r['chave']: 0 for r in _AGENDA_REGRAS}
+
+    def _pode(uid):
+        if not uid:
+            return False
+        return fila.get(uid, 0) < teto
+
+    def _marcar(uid):
+        fila[uid] = fila.get(uid, 0) + 1
+
+    # A ORDEM E A DA CHANCE DE FECHAR, nao a da idade do lead. Com teto por
+    # pessoa, o que roda primeiro e o que ganha vaga na fila — entao cotacao
+    # parada e gatilho vencido entram antes do lead novo, e o 'parado ha dias'
+    # fica por ultimo.
+    # ── 1. Cotacao enviada e parada ha 2 dias. E o momento de maior chance —
+    #      e o de maior chance de perder pro concorrente que ligou depois.
+    corte_cot = (agora - _td(days=2)).strftime('%Y-%m-%d')
+    try:
+        for c in conn.execute("""SELECT lead_id, MAX(criado_em) q FROM cotacao_salva
+                                 WHERE lead_id IS NOT NULL GROUP BY lead_id""").fetchall():
+            if str(c['q'] or '')[:10] >= corte_cot:
+                continue
+            l = conn.execute("SELECT * FROM crm_leads WHERE id=?", (c['lead_id'],)).fetchone()
+            if not l or l['etapa'] in etapas_fim or not _pode(l['responsavel_id']):
+                continue
+            if _agenda_criar(conn, l, 'cotacao_parada', hoje + ' 09:00',
+                             usuarios.get(l['responsavel_id'], '')):
+                criadas['cotacao_parada'] += 1
+                _marcar(l['responsavel_id'])
+    except Exception as e:
+        app.logger.info(f"[AGENDA] cotacoes: {e}")
+    # ── 2. Perdido com data de retorno que chegou. E o melhor estoque da casa:
+    #      telefone qualificado, dor conhecida e motivo registrado.
+    try:
+        cid = conn.execute("SELECT id FROM crm_campos WHERE chave='data_retorno'").fetchone()
+        if cid:
+            for r in conn.execute("""SELECT lead_id, valor FROM crm_lead_campos
+                                     WHERE campo_id=? AND TRIM(COALESCE(valor,'')) <> ''""",
+                                  (cid['id'],)).fetchall():
+                if str(r['valor'])[:10] > hoje:
+                    continue
+                l = conn.execute("SELECT * FROM crm_leads WHERE id=?", (r['lead_id'],)).fetchone()
+                if not l or l['etapa'] not in etapas_perda or not _pode(l['responsavel_id']):
+                    continue
+                if _agenda_criar(conn, l, 'gatilho_retorno', hoje + ' 09:00',
+                                 usuarios.get(l['responsavel_id'], '')):
+                    criadas['gatilho_retorno'] += 1
+                    _marcar(l['responsavel_id'])
+    except Exception as e:
+        app.logger.info(f"[AGENDA] gatilhos: {e}")
+
+    # ── 3. Lead novo que nunca foi tocado. Do mais RECENTE pro mais antigo: lead
+    #      de oito meses tem valor quase zero e ainda queima a reputacao do numero.
+    corte_backlog = (agora - _td(days=60)).strftime('%Y-%m-%d')
+    n_back = 0
+    for l in conn.execute("""SELECT * FROM crm_leads
+                             WHERE responsavel_id IS NOT NULL
+                             ORDER BY criado_em DESC LIMIT 4000""").fetchall():
+        if l['etapa'] in etapas_fim or l['id'] in contatados:
+            continue
+        if not _pode(l['responsavel_id']):
+            continue
+        antigo = str(l['criado_em'] or '')[:10] < corte_backlog
+        if antigo:
+            if n_back >= AGENDA_TETO_BACKLOG:
+                continue
+            n_back += 1
+        if _agenda_criar(conn, l, 'primeiro_contato', hoje + ' 09:00',
+                         usuarios.get(l['responsavel_id'], '')):
+            criadas['primeiro_contato'] += 1
+            _marcar(l['responsavel_id'])
+    # ── 4. Conversa que comecou e parou ha 3 dias ou mais.
+    corte_parado = (agora - _td(days=3)).strftime('%Y-%m-%d')
+    for l in conn.execute("""SELECT * FROM crm_leads
+                             WHERE responsavel_id IS NOT NULL
+                               AND COALESCE(atualizado_em, criado_em) < ?
+                             ORDER BY COALESCE(atualizado_em, criado_em) DESC LIMIT 2000""",
+                          (corte_parado,)).fetchall():
+        if l['etapa'] in etapas_fim or l['id'] not in contatados:
+            continue
+        if not _pode(l['responsavel_id']):
+            continue
+        if _agenda_criar(conn, l, 'parado_sem_resposta', hoje + ' 09:00',
+                         usuarios.get(l['responsavel_id'], '')):
+            criadas['parado_sem_resposta'] += 1
+            _marcar(l['responsavel_id'])
+    conn.commit()
+    return criadas
+
+
+
+def _agenda_fila(conn, uid, eh_admin=False, limite=50):
+    """A fila de hoje de UMA pessoa: atrasado primeiro, depois hoje.
+
+    Mesma consulta pros tres lugares (dashboard, /crm/agenda e extensao) — assim
+    os tres dizem o MESMO numero. Painel que discorda da lista e pior que painel
+    nenhum."""
+    hoje = datetime.now(TZ_SP).strftime('%Y-%m-%d')
+    q = """SELECT a.*, l.nome lead_nome, l.telefone lead_tel, l.etapa lead_etapa
+             FROM crm_agenda a JOIN crm_leads l ON l.id = a.lead_id
+            WHERE a.status='pendente' AND SUBSTR(a.data_hora,1,10) <= ?"""
+    par = [hoje]
+    if not eh_admin:
+        q += " AND a.usuario_id=?"
+        par.append(uid)
+    q += " ORDER BY a.prioridade, a.data_hora LIMIT ?"
+    par.append(limite)
+    saida = []
+    for r in conn.execute(q, par).fetchall():
+        d = dict(r)
+        d['atrasada'] = str(d.get('data_hora') or '')[:10] < hoje
+        d['quando_br'] = _fmt_datahora_br(d.get('data_hora'))
+        saida.append(d)
+    return saida
+
+
+def _agenda_resumo(conn, uid, eh_admin=False):
+    """Os tres numeros da fila. Mesma fonte da lista — o card e a lista tem que
+    dizer o mesmo, senao ninguem confia nos dois."""
+    hoje = datetime.now(TZ_SP).strftime('%Y-%m-%d')
+
+    def _c(cond, extra):
+        q = "SELECT COUNT(*) c FROM crm_agenda WHERE status='pendente'"
+        p = []
+        if not eh_admin:
+            q += " AND usuario_id=?"
+            p.append(uid)
+        q += cond
+        p += extra
+        return conn.execute(q, p).fetchone()['c']
+
+    return {
+        'atrasadas': _c(" AND SUBSTR(data_hora,1,10) < ?", [hoje]),
+        'hoje': _c(" AND SUBSTR(data_hora,1,10) = ?", [hoje]),
+        'total': _c("", []),
+    }
+
+
+@app.route('/crm/agenda/gerar', methods=['POST'])
+@login_required
+@admin_required
+def crm_agenda_gerar():
+    """Roda o motor na mao. Existe pra dar pra testar sem esperar a rodada."""
+    conn = db()
+    try:
+        r = agenda_gerar(conn)
+    except Exception as e:
+        close_db(conn)
+        app.logger.warning(f"[AGENDA] geracao: {e}")
+        return jsonify({"ok": False, "erro": str(e)[:200]}), 200
+    close_db(conn)
+    return jsonify({"ok": True, "criadas": r, "total": sum(r.values())})
+
+
+@app.route('/crm/agenda/<int:aid>/feito', methods=['POST'])
+@login_required
+def crm_agenda_feito(aid):
+    """Conclui a tarefa e deixa rastro na timeline do lead."""
+    conn = db()
+    t = conn.execute("SELECT * FROM crm_agenda WHERE id=?", (aid,)).fetchone()
+    if not t:
+        close_db(conn); return jsonify({"ok": False, "erro": "Tarefa não encontrada"}), 404
+    if session.get('perfil') != 'admin' and t['usuario_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    conn.execute("UPDATE crm_agenda SET status='concluida' WHERE id=?", (aid,))
+    conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                    VALUES (?,?,?,?,?)""",
+                 (t['lead_id'], session.get('nome'), 'atividade',
+                  f"Concluiu: {t['assunto']}", _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/agenda/<int:aid>/adiar', methods=['POST'])
+@login_required
+def crm_agenda_adiar(aid):
+    """Adiar em UM clique. Agenda que nao se consegue mexer vira agenda ignorada
+    — e volta ao estado de hoje: 1 atrasada, 0 futuras."""
+    dias = 1
+    try:
+        dias = max(1, min(int((request.json or {}).get('dias') or 1), 90))
+    except (TypeError, ValueError):
+        dias = 1
+    from datetime import timedelta as _td
+    conn = db()
+    t = conn.execute("SELECT * FROM crm_agenda WHERE id=?", (aid,)).fetchone()
+    if not t:
+        close_db(conn); return jsonify({"ok": False}), 404
+    if session.get('perfil') != 'admin' and t['usuario_id'] != session.get('user_id'):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    nova = (datetime.now(TZ_SP) + _td(days=dias)).strftime('%Y-%m-%d 09:00')
+    conn.execute("UPDATE crm_agenda SET data_hora=? WHERE id=?", (nova, aid))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "nova": _fmt_datahora_br(nova)})
 
 
 @app.route('/api/cep/<cep>')
