@@ -24374,6 +24374,39 @@ def cotacao_catalogo_operadoras():
     return jsonify({'ok': True, 'operadoras': [dict(r) for r in linhas]})
 
 
+@app.route('/cotacao/catalogo/produtos.json')
+@login_required
+def cotacao_catalogo_produtos():
+    """Produtos de uma cidade (opcionalmente de uma operadora), do catálogo.
+
+    Serve pra escolher ANTES de cotar. Cada plano que o consultor não quer é
+    uma consulta de ~1s ao Painel que não acontece — é o jeito mais eficaz de
+    deixar a cotação rápida, e o único que não mexe no disfarce."""
+    conn = db()
+    cidade = (request.args.get('cidade') or '').strip()
+    try:
+        modalidade = int(request.args.get('modalidade') or 2)
+    except Exception:
+        modalidade = 2
+    if not cidade:
+        return jsonify({'ok': False, 'produtos': []})
+    onde = ['cidade=?', 'modalidade=?', 'sumiu_em IS NULL']
+    args = [cidade, modalidade]
+    ops = [x for x in (request.args.get('operadoras') or '').split(',') if x.strip().isdigit()]
+    if ops:
+        onde.append('operadora_id IN (%s)' % ','.join(['?'] * len(ops)))
+        args += [int(x) for x in ops]
+    try:
+        linhas = conn.execute(
+            """SELECT produto_id, produto, operadora_id, operadora, COUNT(*) AS planos
+                 FROM catalogo_plano WHERE %s
+                GROUP BY produto_id, produto, operadora_id, operadora
+                ORDER BY operadora, produto""" % ' AND '.join(onde), tuple(args)).fetchall()
+    except Exception:
+        linhas = []
+    return jsonify({'ok': True, 'produtos': [dict(r) for r in linhas]})
+
+
 @app.route('/cotacao/catalogo/varredura', methods=['POST'])
 @login_required
 def cotacao_catalogo_varredura():

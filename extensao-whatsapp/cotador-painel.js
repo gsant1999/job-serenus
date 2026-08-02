@@ -487,9 +487,18 @@
     if (a === 'selecionar') {
       // A peneira mora aqui, e nao na tela, pra existir uma regra so. Duas
       // copias da mesma regra divergem no primeiro ajuste.
-      const servem = (p.planos || []).filter((pl) => serve(pl, p.vidas, p.exigencias));
+      let candidatos = p.planos || [];
+      // Produto escolhido pelo consultor corta antes de tudo. Cada plano que
+      // ele nao quer e uma consulta de ~1s ao Painel que nao acontece — e o
+      // jeito mais eficaz de acelerar sem mexer no disfarce.
+      if (Array.isArray(p.produtoIds) && p.produtoIds.length) {
+        candidatos = candidatos.filter(
+          (pl) => p.produtoIds.indexOf((pl.produto || {}).id) >= 0);
+      }
+      const servem = candidatos.filter((pl) => serve(pl, p.vidas, p.exigencias));
       return { alvo: servem.slice(0, p.maxPlanos || 20),
-               encontrados: (p.planos || []).length, descartados: (p.planos || []).length - servem.length };
+               encontrados: (p.planos || []).length,
+               descartados: (p.planos || []).length - servem.length };
     }
     if (a === 'preco') {
       const r = await precoDoPlano(p.cotacaoId, p, p.plano, _cartoesAtuais);

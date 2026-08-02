@@ -197,5 +197,18 @@ op2 = c.get('/cotacao/catalogo/operadoras.json?cidade=Cidade Inexistente - XX').
 ok(op2['operadoras'] == [], '15b. cidade sem catalogo devolve vazio, nao erro')
 
 
+# 16. Produtos do catalogo, pra escolher ANTES de cotar
+pr = c.get('/cotacao/catalogo/produtos.json?cidade=Campinas - SP&modalidade=2').get_json()
+nomes = sorted(x['produto'] for x in pr['produtos'])
+ok(pr['ok'] and len(pr['produtos']) == 3, '16. lista produtos da cidade', str(nomes))
+ok(all('planos' in x and 'operadora' in x for x in pr['produtos']),
+   '16b. cada produto diz quantos planos e de quem')
+pr2 = c.get('/cotacao/catalogo/produtos.json?cidade=Campinas - SP&modalidade=2&operadoras=93').get_json()
+ok(all(x['operadora'] == 'Amil' for x in pr2['produtos']),
+   '16c. filtra produtos por operadora', str([x['produto'] for x in pr2['produtos']]))
+pr3 = c.get('/cotacao/catalogo/produtos.json?cidade=Nao Varrida - SP').get_json()
+ok(pr3['produtos'] == [], '16d. cidade sem catalogo devolve vazio, nao erro')
+
+
 print('\n' + ('%d FALHA(S)' % len(falhas) if falhas else 'tudo passou (final)'))
 sys.exit(1 if falhas else 0)

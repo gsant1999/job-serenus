@@ -250,9 +250,20 @@
       </div>
     </div>
 
+    <div class="cv-bloco">
+      <h3>Produtos</h3>
+      <p class="ajuda">Escolha o produto que interessa e o JOB pede preço só dele.
+         Cada plano fora da lista é cerca de um segundo a menos de espera —
+         é o que mais acelera a cotação.</p>
+      <div class="cv-ops" id="produtos">
+        <div class="cv-ops-vazio">Escolha a cidade primeiro.</div>
+      </div>
+    </div>
+
     <div class="cv-acao">
       <button type="button" class="btn" id="btCotar" disabled>Cotar agora</button>
     </div>
+    <p class="ajuda" id="previsaoCotar" style="margin:8px 0 0 2px"></p>
     <div class="cv-andando" id="andando">
       <div class="cv-barra"><i id="barra"></i></div>
       <p id="andandoTxt"></p>
@@ -294,6 +305,13 @@
   var SALVA_VIDAS = {{ (salva.vidas if salva else None)|tojson }};
 
   var el = function (id) { return document.getElementById(id); };
+  // Nome de plano e motivo de erro vêm do sistema deles: tratados como texto,
+  // nunca como HTML.
+  var esc = function (s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  };
   var moeda = function (v) {
     return (v == null) ? '—' : 'R$ ' + Number(v).toLocaleString('pt-BR',
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -618,6 +636,7 @@
           el('cidade').value = nome;
           box.className = 'cv-sug';
           carregarOperadoras();
+          carregarProdutos();
           atualizarBotao();
         };
         box.appendChild(b);
@@ -709,10 +728,88 @@
         if (i >= 0) opsEscolhidas.splice(i, 1); else opsEscolhidas.push(o.id);
         if (opsEscolhidas.length === operadoras.length) opsEscolhidas = null;
         desenharOperadoras();
+        carregarProdutos();
       };
       c.appendChild(b);
     });
   }
+
+  // ── produtos ───────────────────────────────────────────────────────────
+  //
+  // Vêm do catálogo do JOB, não do Painel: é consulta instantânea e de graça.
+  // Se a cidade ainda não foi varrida, o bloco explica isso em vez de fingir
+  // que não existe produto nenhum.
+  var produtosLista = [];
+  var produtosEscolhidos = null;     // null = todos
+
+  async function carregarProdutos() {
+    var c = el('produtos');
+    if (!cidadeEscolhida) { c.innerHTML = '<div class="cv-ops-vazio">Escolha a cidade primeiro.</div>'; return; }
+    var q = '/cotacao/catalogo/produtos.json?cidade=' + encodeURIComponent(cidadeEscolhida) +
+            '&modalidade=' + Number(el('modalidade').value || 2) +
+            (opsEscolhidas && opsEscolhidas.length ? '&operadoras=' + opsEscolhidas.join(',') : '');
+    var r = await fetch(q).then(function (x) { return x.json(); }).catch(function () { return {}; });
+    produtosLista = (r && r.produtos) || [];
+    desenharProdutos();
+  }
+
+  function desenharProdutos() {
+    var c = el('produtos');
+    if (!produtosLista.length) {
+      c.innerHTML = '<div class="cv-ops-vazio">Esta cidade ainda não foi varrida no ' +
+        '<a href="/cotacao/catalogo">catálogo</a>, então não sei quais produtos existem aqui. ' +
+        'Dá pra cotar assim mesmo — vai pedir preço de todos os planos que couberem.</div>';
+      produtosEscolhidos = null;
+      atualizarPrevisaoCotar();
+      return;
+    }
+    c.innerHTML = '';
+    produtosLista.forEach(function (pr) {
+      var ligado = !produtosEscolhidos || produtosEscolhidos.indexOf(pr.produto_id) >= 0;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cv-op' + (ligado ? ' on' : '');
+      b.innerHTML = '<span>' + esc(pr.produto || '(sem nome)') +
+        '<small style="opacity:.6;margin-left:5px">' + pr.planos + '</small></span>';
+      b.title = pr.operadora + ' · ' + pr.planos + ' plano(s) no catálogo';
+      b.onclick = function () {
+        if (!produtosEscolhidos) {
+          produtosEscolhidos = produtosLista.map(function (x) { return x.produto_id; });
+        }
+        var i = produtosEscolhidos.indexOf(pr.produto_id);
+        if (i >= 0) produtosEscolhidos.splice(i, 1); else produtosEscolhidos.push(pr.produto_id);
+        if (produtosEscolhidos.length === produtosLista.length) produtosEscolhidos = null;
+        desenharProdutos();
+      };
+      c.appendChild(b);
+    });
+    atualizarPrevisaoCotar();
+  }
+
+  // Diz quanto vai custar de espera ANTES de clicar. Sem isso o consultor
+  // descobre que pediu 40 planos só depois de esperar quarenta segundos.
+  function atualizarPrevisaoCotar() {
+    var p = el('previsaoCotar');
+    if (!p) return;
+    if (!produtosLista.length) { p.textContent = ''; return; }
+    var alvos = produtosLista.filter(function (x) {
+      return !produtosEscolhidos || produtosEscolhidos.indexOf(x.produto_id) >= 0;
+    });
+    var planos = alvos.reduce(function (s, x) { return s + x.planos; }, 0);
+    var teto = Math.max(1, Number(el('maxPlanos').value) || 12);
+    var vai = Math.min(planos, teto);
+    p.textContent = vai
+      ? 'Vai pedir preço de até ' + vai + ' plano(s) — cerca de ' +
+        Math.max(3, Math.round(vai * 1.1)) + 's.'
+      : 'Nenhum produto marcado.';
+  }
+
+  el('modalidade').addEventListener('change', function () {
+    // Trocar o tipo de contratação muda quem atende e o que existe: recomeça.
+    opsEscolhidas = null; produtosEscolhidos = null;
+    if (cidadeEscolhida) { carregarOperadoras(); carregarProdutos(); }
+  });
+  el('maxPlanos').addEventListener('input', atualizarPrevisaoCotar);
 
   function vidasLista() {
     return FAIXAS.map(function (f) { return { faixa: f, quantidade: vidas[f] || 0 }; })
@@ -749,6 +846,7 @@
       vidas: vidasLista(),
       operadoraIds: opsEscolhidas || [],
       maxPlanos: Math.max(1, Number(el('maxPlanos').value) || 12),
+      produtoIds: produtosEscolhidos || [],
       exigencias: {
         coparticipacao: exigencias.copart == null ? null : !!exigencias.copart,
         acomodacao: exigencias.acomodacao == null ? null : exigencias.acomodacao,
@@ -824,7 +922,7 @@
     if (!planos.length) return { ok: false, motivo: 'nenhum_plano_na_cidade' };
 
     r = await passo({ acao: 'selecionar', planos: planos, exigencias: p.exigencias,
-                      maxPlanos: p.maxPlanos });
+                      produtoIds: p.produtoIds || [], maxPlanos: p.maxPlanos });
     if (!r.ok) return r;
     var alvo = r.dados.alvo || [];
     var descartados = r.dados.descartados || 0;
@@ -836,6 +934,13 @@
     var resultado = [];
     for (var j = 0; j < alvo.length; j++) {
       var rp = await passo({ acao: 'preco', cotacaoId: cotacaoId, plano: alvo[j] });
+      // Uma segunda chance por plano. O Painel solta erro passageiro de vez em
+      // quando, e perder o preço de um plano por um soluço é caro: o consultor
+      // não sabe se aquele plano é ruim ou se só não respondeu.
+      if (!rp.ok) {
+        await respira(600, 1400);
+        rp = await passo({ acao: 'preco', cotacaoId: cotacaoId, plano: alvo[j] });
+      }
       var cartao = (rp.ok && rp.dados && rp.dados.cartao) || null;
       var linha = Object.assign({}, alvo[j], cartao
         ? { total: cartao.total, faixas: cartao.faixas, conferido: cartao.conferido }
@@ -888,7 +993,7 @@
       var marcas = [];
       marcas.push('<span class="marca">' + (pl.acomodacao ? 'Apartamento' : 'Enfermaria') + '</span>');
       marcas.push('<span class="marca ' + (tb.coparticipacao ? 'copart' : 'sem-copart') + '">' +
-                  (tb.coparticipacao ? ('Copart. ' + (tb.coparticipacaoTipo || '').trim()) : 'Sem copart.') + '</span>');
+                  (tb.coparticipacao ? ('Copart. ' + esc((tb.coparticipacaoTipo || '').trim())) : 'Sem copart.') + '</span>');
       if (tb.mei === true) marcas.push('<span class="marca">MEI</span>');
       if (tb.qtdVidaMin) marcas.push('<span class="marca">' + tb.qtdVidaMin + '–' + tb.qtdVidaMax + ' vidas</span>');
 
@@ -896,15 +1001,20 @@
 
       div.innerHTML =
         '<div class="cv-linha">' +
-          '<div>' + (logo ? '<img class="cv-logo" src="' + logo + '" alt="' + (op.nome || '') + '">'
-                          : '<b>' + (op.nome || '') + '</b>') + '</div>' +
-          '<div class="cv-nome"><strong>' + (pl.nome || '—') + '</strong>' +
-            '<span>' + (pr.nome || '') + (tb.nome ? ' · ' + tb.nome.trim() : '') + '</span></div>' +
+          '<div>' + (logo ? '<img class="cv-logo" src="' + esc(logo) + '" alt="' + esc(op.nome || '') + '">'
+                          : '<b>' + esc(op.nome || '') + '</b>') + '</div>' +
+          '<div class="cv-nome"><strong>' + esc(pl.nome || '—') + '</strong>' +
+            '<span>' + esc(pr.nome || '') + (tb.nome ? ' · ' + esc(tb.nome.trim()) : '') + '</span></div>' +
           '<div class="marcas">' + marcas.join('') + '</div>' +
           '<div class="cv-valor' + (p.total != null && p.conferido === false ? ' suspeito' : '') + '">' +
             '<b>' + moeda(p.total) + '</b><span>' +
-            (p.total == null ? (p.motivo === 'sem_valor_na_resposta' ? 'sem preço' : 'falhou')
-                             : 'por mês, ' + totalVidas() + ' vidas') + '</span></div>' +
+            // Mostra o MOTIVO, não só "falhou". Um plano sem preço com a causa
+            // escondida vira adivinhação — e eu perdi uma rodada inteira sem
+            // saber por que todos falharam.
+            (p.total == null
+              ? '<span title="' + esc(p.motivo || '') + '">' +
+                (p.motivo === 'sem_valor_na_resposta' ? 'sem preço' : (p.motivo || 'falhou')) + '</span>'
+              : 'por mês, ' + totalVidas() + ' vidas') + '</span></div>' +
         '</div>' +
         '<div class="cv-detalhe"></div>';
 
