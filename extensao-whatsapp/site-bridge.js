@@ -20,6 +20,11 @@
 (function () {
   'use strict';
 
+  const _SABE = ['abrir_chat', 'cotar', 'catalogo', 'cotador_estado',
+                 'cotador_cidades', 'descobrir_modalidades'];
+  let _versao = '';
+  try { _versao = chrome.runtime.getManifest().version; } catch (e) { /* contexto órfão */ }
+
   // Lista fechada do que a página pode pedir. O que não está aqui não passa —
   // é a diferença entre uma ponte e um buraco.
   function traduzir(d) {
@@ -52,11 +57,23 @@
                            dados: (resp && resp.dados) || null,
                            faltando: (resp && resp.faltando) || [],
                            modalidades: (resp && resp.modalidades) || [],
+                           versao: (resp && resp.versao) || undefined,
+                           sabe: (resp && resp.sabe) || undefined,
                            // Quantas abas o background examinou. Vai junto pra
                            // tela poder dizer o que aconteceu de verdade em vez
                            // de chutar "deve estar fechado".
                            abasExaminadas: (resp && resp.abasExaminadas) }, '*');
     };
+    // "Voce esta ai?" — a pagina PERGUNTA em vez de so esperar o anuncio.
+    //
+    // O anuncio e postado quando este script carrega. Se isso acontecer antes
+    // de a pagina ter registrado o ouvinte dela, a mensagem se perde no ar e a
+    // pagina conclui que nao ha extensao — para sempre, porque anuncio nao se
+    // repete. Perguntar tira a corrida do caminho.
+    if (d.tipo === 'ping') {
+      responder({ ok: true, versao: _versao, sabe: _SABE });
+      return;
+    }
     // Pedido que esta ponte nao conhece merece uma NEGATIVA, nao silencio.
     //
     // Antes ela simplesmente voltava, a pagina esperava ate estourar o tempo e
@@ -85,10 +102,6 @@
   // fica esperando ate estourar o tempo — e entao acusa "Painel fechado", que
   // e o diagnostico errado. Com a versao na mao, a tela sabe dizer a verdade:
   // recarregue ESTA pagina.
-  let _versao = '';
-  try { _versao = chrome.runtime.getManifest().version; } catch (e) { /* contexto orfao */ }
   window.postMessage({ source: 'JOB_SITE_RESP', tipo: 'extensao_presente', ok: true,
-                       versao: _versao,
-                       sabe: ['abrir_chat', 'cotar', 'catalogo', 'cotador_estado',
-                              'cotador_cidades', 'descobrir_modalidades'] }, '*');
+                       versao: _versao, sabe: _SABE }, '*');
 })();

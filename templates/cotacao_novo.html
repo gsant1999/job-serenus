@@ -408,7 +408,11 @@
   function mostrarSinal(classe, rotulo, ajuda) {
     var s = el('sinal');
     s.className = 'cv-sinal ' + (classe || '');
-    s.querySelector('span').textContent = rotulo;
+    // Versão da extensão junto do estado. Passei três rodadas sem saber se a
+    // aba estava com o script novo ou velho — com isto na tela, a primeira
+    // pergunta some.
+    s.querySelector('span').textContent = rotulo +
+      (extensaoPresente ? ' · ext ' + (extensaoVersao || '?') : ' · sem extensão');
     var a = el('aviso');
     if (ajuda) { a.innerHTML = ajuda; a.className = 'cv-aviso ver'; }
     else { a.className = 'cv-aviso'; a.innerHTML = ''; }
@@ -446,6 +450,15 @@
   }
 
   async function conferirLigacao() {
+    // Pergunta antes de assumir. O anúncio da extensão pode chegar antes de
+    // esta página estar ouvindo, e anúncio perdido não se repete — a tela
+    // concluía "não tem extensão" para sempre.
+    var pong = await pedir('ping', {}, 2500);
+    if (pong.ok) {
+      extensaoPresente = true;
+      extensaoVersao = pong.versao || extensaoVersao;
+      extensaoSabeCotar = !!(pong.sabe && pong.sabe.indexOf('cotar') >= 0);
+    }
     var r = await pedir('cotador_estado', {}, 8000);
     pronto = !!(r.ok && r.dados !== false);
     if (!r.ok) { pronto = false; tratarFalha(r.motivo, r); atualizarBotao(); return; }
