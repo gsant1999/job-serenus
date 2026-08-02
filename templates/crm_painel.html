@@ -3,6 +3,18 @@
 
 {% block head %}
 <style>
+  .med-aviso { color:var(--al-fg); }
+  .med-alerta { color:var(--al-fg); font-weight:600; }
+  /* O comprimento da barra E o dado. Verde nao e enfeite: e a regra que o time
+     cumpre; vermelho e a que ele ignora. */
+  .med-barra { position:relative; height:18px; background:var(--panel-3); border-radius:4px; overflow:hidden; }
+  .med-barra i { position:absolute; inset:0 auto 0 0; display:block; border-radius:4px; }
+  .med-barra b { position:absolute; inset:0; display:flex; align-items:center; justify-content:flex-end;
+                 padding-right:7px; font-size:10px; font-variant-numeric:tabular-nums; }
+  .med-barra.ok i { background:var(--ok-bg); }
+  .med-barra.meio i { background:var(--al-bg); }
+  .med-barra.ruim i { background:rgba(239,68,68,.3); }
+
   .bloco-cab { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin:0 0 12px; }
   .bloco-cab h2 { font-size:15px; margin:0; }
   .bloco-sub { font-size:12px; color:var(--cinza); }
@@ -215,6 +227,72 @@
       <div class="vazio">Sem dados no período.</div>
     {% endif %}
   </div>
+
+  {% if medicao and medicao.criadas %}
+  <!-- A agenda está funcionando? -->
+  <div class="panel-box largo">
+    <h2>A agenda está funcionando?<i class="ajuda-i" title="Mede a fila de tarefas dos ultimos 30 dias. Nao mede quantas tarefas foram criadas (isso enche em um dia) — mede quantas foram CUMPRIDAS, em quanto tempo, e quantas viraram venda. Mediana e p95, nunca media: uma tarefa concluida tres semanas depois desloca a media inteira e some da mediana, e e a mediana que descreve o dia normal.">i</i></h2>
+    <p class="sub">
+      Últimos {{ medicao.dias }} dias · {{ medicao.feitas }} de {{ medicao.criadas }} tarefas cumpridas
+      (<b>{{ medicao.cumprimento }}%</b>).
+      {% if not medicao.confiavel %}
+      <span class="med-aviso">Amostra ainda pequena — abaixo de 30 tarefas cumpridas qualquer taxa é ruído. Não decida por estes números ainda.</span>
+      {% endif %}
+    </p>
+
+    <table class="pnl-tab">
+      <thead><tr>
+        <th>Regra</th>
+        <th class="num">Criadas</th>
+        <th class="num">Cumpridas</th>
+        <th style="width:16%;">Cumprimento</th>
+        <th class="num">Atrasadas</th>
+        <th class="num">Recusadas<i class="ajuda-i" title="Adiada tres vezes ou mais. Tarefa adiada varias vezes nao e tarefa adiada, e recusa — e este e o numero que mostra qual regra o time ignora na pratica.">i</i></th>
+        <th class="num">Tempo até fazer<i class="ajuda-i" title="Mediana e p95 em horas, entre a tarefa nascer e ser concluida. A mediana e o dia normal; o p95 e o dia ruim.">i</i></th>
+        <th class="num">Viraram venda</th>
+      </tr></thead>
+      <tbody>
+        {% for l in medicao.linhas %}
+        <tr>
+          <td>{{ l.nome }}</td>
+          <td class="num">{{ l.criadas }}</td>
+          <td class="num">{{ l.feitas }}</td>
+          <td>
+            <div class="med-barra {{ 'ok' if l.cumprimento >= 80 else ('meio' if l.cumprimento >= 50 else 'ruim') }}">
+              <i style="width:{{ l.cumprimento }}%;"></i><b>{{ l.cumprimento }}%</b>
+            </div>
+          </td>
+          <td class="num">{{ l.atrasadas }}</td>
+          <td class="num{{ ' med-alerta' if l.recusadas }}">{{ l.recusadas }}</td>
+          <td class="num">{% if l.p50 is not none %}{{ l.p50 }}h · p95 {{ l.p95 }}h{% else %}—{% endif %}</td>
+          <td class="num">{{ l.ganhos if l.amostra_ok else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="sub" style="margin-top:10px;">
+      "Viraram venda" só aparece quando a regra tem 20 tarefas cumpridas ou mais. Com menos que
+      isso o número existe mas não significa nada, e um número sem significado na tela vira decisão errada.
+    </p>
+
+    {% if medicao.por_pessoa %}
+    <h2 style="margin-top:22px;">Fila por consultor<i class="ajuda-i" title="Se a coluna de atrasadas cresce semana a semana em alguem, a fila daquela pessoa virou lista de culpa e ela vai abandonar a agenda. Acima de 20 atrasadas e hora de conversar, nao de cobrar.">i</i></h2>
+    <table class="pnl-tab">
+      <thead><tr><th>Consultor</th><th class="num">Cumpridas</th><th class="num">Em aberto</th><th class="num">Atrasadas</th></tr></thead>
+      <tbody>
+        {% for p in medicao.por_pessoa %}
+        <tr>
+          <td>{{ p.nome }}</td>
+          <td class="num">{{ p.feitas or 0 }}</td>
+          <td class="num">{{ p.abertas or 0 }}</td>
+          <td class="num{{ ' med-alerta' if (p.atrasadas or 0) > 20 }}">{{ p.atrasadas or 0 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+  {% endif %}
 
   <!-- Motivos de perda -->
   <div class="panel-box">

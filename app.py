@@ -7361,6 +7361,40 @@ def api_cep(cep):
         return jsonify({"ok": False, "erro": "Não consegui consultar agora"})
 
 
+
+@app.route('/proposta/<int:pid>/vincular-lead', methods=['POST'])
+@login_required
+def proposta_vincular_lead(pid):
+    """Amarra a venda a um lead direto da lista, sem abrir a proposta.
+
+    O aviso "sem lead" existia so pra informar, e informar sem dar o que fazer
+    e so barulho: a pessoa via o problema em 14 linhas e nao tinha por onde
+    resolver nenhuma. Agora o aviso E o botao."""
+    d = request.json or {}
+    try:
+        lid = int(d.get('lead_id') or 0)
+    except (TypeError, ValueError):
+        lid = 0
+    if not lid:
+        return jsonify({"ok": False, "erro": "Escolha um lead"}), 400
+    conn = db()
+    try:
+        achado, criterio = vincular_proposta_lead(conn, pid, lead_id_certo=lid)
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        close_db(conn)
+        app.logger.warning(f"[PROPOSTA] vincular lead: {e}")
+        return jsonify({"ok": False, "erro": "não deu pra vincular"}), 200
+    lead = conn.execute("SELECT nome FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    close_db(conn)
+    if not achado:
+        return jsonify({"ok": False, "erro": "lead não encontrado"}), 200
+    return jsonify({"ok": True, "lead_id": achado, "ja_era": criterio == 'ja_vinculado',
+                    "nome": (lead['nome'] if lead else '')})
+
+
 @app.route('/api/crm/leads/buscar')
 @login_required
 def api_crm_leads_buscar():
@@ -23182,6 +23216,95 @@ def _crm_fila_acao(conn, uid, eh_admin):
     }
 
 
+
+def _agenda_medicao(conn, dias=30):
+    """A agenda esta funcionando? Com numero, nao com impressao.
+
+    Mediana e p95, nunca media: uma tarefa concluida tres semanas depois desloca
+    a media inteira e some da mediana — e e a mediana que descreve o dia normal.
+
+    Este e o passo que torna possivel aprender depois. Sem medir a regra hoje,
+    qualquer modelo daqui a tres meses vai aprender ruido com cara de padrao."""
+    from datetime import timedelta as _td
+    desde = (datetime.now(TZ_SP) - _td(days=dias)).strftime('%Y-%m-%d')
+    hoje = datetime.now(TZ_SP).strftime('%Y-%m-%d')
+
+    linhas = []
+    for chave, r in _AGENDA_POR_CHAVE.items():
+        criadas = conn.execute("""SELECT COUNT(*) c FROM crm_agenda
+                                  WHERE regra=? AND SUBSTR(criado_em,1,10) >= ?""",
+                               (chave, desde)).fetchone()['c']
+        if not criadas:
+            continue
+        feitas = conn.execute("""SELECT COUNT(*) c FROM crm_agenda
+                                 WHERE regra=? AND status='concluida'
+                                   AND SUBSTR(criado_em,1,10) >= ?""",
+                              (chave, desde)).fetchone()['c']
+        atrasadas = conn.execute("""SELECT COUNT(*) c FROM crm_agenda
+                                    WHERE regra=? AND status='pendente'
+                                      AND SUBSTR(data_hora,1,10) < ?""",
+                                 (chave, hoje)).fetchone()['c']
+        # Adiada varias vezes nao e adiamento, e recusa — e o numero que mostra
+        # qual regra o time ignora na pratica.
+        recusadas = conn.execute("""SELECT COUNT(*) c FROM crm_agenda
+                                    WHERE regra=? AND COALESCE(adiada_vezes,0) >= 3
+                                      AND SUBSTR(criado_em,1,10) >= ?""",
+                                 (chave, desde)).fetchone()['c']
+        # Horas entre criar e concluir, so das que foram concluidas.
+        horas = []
+        for x in conn.execute("""SELECT criado_em, concluida_em FROM crm_agenda
+                                 WHERE regra=? AND status='concluida'
+                                   AND concluida_em IS NOT NULL
+                                   AND SUBSTR(criado_em,1,10) >= ?""",
+                              (chave, desde)).fetchall():
+            a1, b1 = _parse_dt_seguro(x['criado_em']), _parse_dt_seguro(x['concluida_em'])
+            if a1 and b1:
+                h = (b1.replace(tzinfo=None) - a1.replace(tzinfo=None)).total_seconds() / 3600
+                if 0 <= h < 24 * 90:
+                    horas.append(h)
+        horas.sort()
+        def _pct(p):
+            if not horas:
+                return None
+            i = min(len(horas) - 1, int(round((len(horas) - 1) * p)))
+            return round(horas[i], 1)
+        # Virou venda? So conta lead que teve tarefa desta regra.
+        ganhos = conn.execute("""SELECT COUNT(DISTINCT a.lead_id) c
+                                   FROM crm_agenda a
+                                   JOIN crm_leads l ON l.id = a.lead_id
+                                   JOIN crm_etapas e ON e.slug = l.etapa AND e.tipo='ganho'
+                                  WHERE a.regra=? AND SUBSTR(a.criado_em,1,10) >= ?""",
+                              (chave, desde)).fetchone()['c']
+        linhas.append({
+            'chave': chave, 'nome': r['titulo'], 'criadas': criadas, 'feitas': feitas,
+            'cumprimento': round(feitas / criadas * 100, 1) if criadas else 0,
+            'atrasadas': atrasadas, 'recusadas': recusadas,
+            'p50': _pct(0.50), 'p95': _pct(0.95), 'ganhos': ganhos,
+            'amostra_ok': feitas >= 20,
+        })
+    linhas.sort(key=lambda x: -x['criadas'])
+
+    por_pessoa = [dict(r) for r in conn.execute("""
+        SELECT u.nome,
+               SUM(CASE WHEN a.status='concluida' THEN 1 ELSE 0 END) feitas,
+               SUM(CASE WHEN a.status='pendente' THEN 1 ELSE 0 END) abertas,
+               SUM(CASE WHEN a.status='pendente' AND SUBSTR(a.data_hora,1,10) < ? THEN 1 ELSE 0 END) atrasadas
+          FROM crm_agenda a JOIN usuarios u ON u.id = a.usuario_id
+         WHERE SUBSTR(a.criado_em,1,10) >= ?
+         GROUP BY u.nome ORDER BY atrasadas DESC, feitas DESC""", (hoje, desde)).fetchall()]
+
+    tot_c = sum(x['criadas'] for x in linhas)
+    tot_f = sum(x['feitas'] for x in linhas)
+    return {
+        'dias': dias, 'linhas': linhas, 'por_pessoa': por_pessoa,
+        'criadas': tot_c, 'feitas': tot_f,
+        'cumprimento': round(tot_f / tot_c * 100, 1) if tot_c else 0,
+        # Abaixo disso qualquer taxa e ruido — e dizer isso na tela evita que
+        # alguem tome decisao em cima de tres tarefas.
+        'confiavel': tot_f >= 30,
+    }
+
+
 @app.route('/crm/painel')
 @login_required
 def crm_painel():
@@ -23344,7 +23467,18 @@ def crm_painel():
         'trabalhaveis': total - frios,
     }
 
+    # A MEDICAO DA AGENDA MORA AQUI, nao num item novo do menu. O menu ja tem 25
+    # itens; tela nova entra dentro de uma que existe.
+    conn3 = db()
+    try:
+        medicao = _agenda_medicao(conn3)
+    except Exception as e:
+        app.logger.info(f"[AGENDA] medicao: {e}")
+        medicao = None
+    finally:
+        close_db(conn3)
     return render_template('crm_painel.html', cards=cards, funil=funil, origens=origens,
+                           medicao=medicao,
                            consultores=consultores, perdas=perdas, eh_admin=eh_admin,
                            filtros={'data_de': f_de, 'data_ate': f_ate})
 
