@@ -3,6 +3,28 @@
 
 {% block content %}
 <style>
+  /* ── COR COM SIGNIFICADO, NOS DOIS TEMAS ────────────────────────────────
+     Cada parte do dinheiro tem a sua cor, e o numero da venda tem a dele. Os
+     valores mudam por tema, os nomes nao — nenhum componente aqui sabe se esta
+     no claro ou no escuro. No claro os tons escurecem pra manter contraste
+     legivel sobre branco; verde e roxo claros somem em fundo claro. */
+  .page {
+    --id-fg:#8b9dff;   --id-bg:rgba(139,157,255,.12); --id-bd:rgba(139,157,255,.35);
+    --id-hv:#c7d2fe;   --id-hv-bg:rgba(139,157,255,.24);
+    --p-corr:#1fd8a4;                 /* o que fica com a corretora */
+    --p-cons:#60a5fa;                 /* o repasse ao consultor */
+    --p-bruta:#c084fc;                /* o total que veio da operadora */
+    --p-bruta-bg:rgba(192,132,252,.12);
+  }
+  [data-theme="light"] .page {
+    --id-fg:#3730a3;   --id-bg:rgba(55,48,163,.09);   --id-bd:rgba(55,48,163,.28);
+    --id-hv:#1e1b6b;   --id-hv-bg:rgba(55,48,163,.16);
+    --p-corr:#0f7a52;
+    --p-cons:#1d4ed8;
+    --p-bruta:#6d28d9;
+    --p-bruta-bg:rgba(109,40,217,.10);
+  }
+
   .lst-lid { display:inline-flex; align-items:center; gap:5px; text-decoration:none;
              font-family:ui-monospace,Menlo,monospace; font-size:10px; color:var(--cinza-2);
              background:var(--panel-3); border:1px solid var(--borda); border-radius:6px;
@@ -38,15 +60,18 @@
 
   .cel-topo { display:flex; align-items:baseline; gap:9px; }
   /* O numero e a porta da proposta: tem que PARECER porta. */
+  /* O numero tem cor de LINK desde o comeco: cinza so vira colorido no hover
+     obriga a pessoa a descobrir passando o mouse em cima, e quem nao passa
+     nunca sabe que da pra clicar. */
   .cel-id { display:inline-flex; align-items:center; gap:6px; flex:0 0 auto;
-            font-family:ui-monospace,Menlo,monospace; font-size:11.5px; font-weight:600;
-            color:var(--cinza); text-decoration:none; padding:3px 8px; border-radius:7px;
-            border:1px solid var(--borda-2); background:var(--panel-2); transition:.15s; }
+            font-family:ui-monospace,Menlo,monospace; font-size:11.5px; font-weight:700;
+            color:var(--id-fg); text-decoration:none; padding:3px 8px; border-radius:7px;
+            border:1px solid var(--id-bd); background:var(--id-bg); transition:.15s; }
   .cel-id-abrir { font-family:'Inter',sans-serif; font-size:9.5px; font-weight:600;
                   letter-spacing:.4px; text-transform:uppercase; color:var(--cinza-2);
                   opacity:0; max-width:0; overflow:hidden; transition:.15s; }
-  .cel-id:hover { color:var(--verde); border-color:var(--verde); background:var(--verde-soft); }
-  .cel-id:hover .cel-id-abrir { opacity:1; max-width:40px; color:var(--verde); }
+  .cel-id:hover { color:var(--id-hv); border-color:var(--id-fg); background:var(--id-hv-bg); }
+  .cel-id:hover .cel-id-abrir { opacity:1; max-width:40px; color:var(--id-hv); }
 
   /* Quem fica com quanto: o dono ao lado do valor, sempre. */
   .cel-partes { text-align:right; }
@@ -54,10 +79,14 @@
   .parte + .parte { margin-top:3px; }
   .parte span { font-size:10.5px; color:var(--cinza); }
   .parte b { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; font-weight:600;
-             color:var(--texto); font-variant-numeric:tabular-nums; min-width:92px; }
-  .parte b.ganho { color:var(--verde); font-size:13.5px; }
-  /* A bruta e a conta de onde as outras saem, nao um terceiro pagamento. */
-  .parte.fraca span, .parte.fraca b { color:var(--cinza-2); font-size:10.5px; font-weight:500; }
+             font-variant-numeric:tabular-nums; min-width:92px; }
+  .parte.corr b { color:var(--p-corr); font-size:13.5px; }
+  .parte.cons b { color:var(--p-cons); }
+  /* A bruta e o total que veio da operadora: cor propria, porque ela e a origem
+     das outras duas — nao um terceiro pagamento, mas tambem nao um detalhe. */
+  .parte.bruta b { color:var(--p-bruta); background:var(--p-bruta-bg);
+                   border-radius:5px; padding:1px 6px; min-width:0; }
+  .parte.bruta span { color:var(--p-bruta); opacity:.8; }
   .cel-forte { font-weight:600; font-size:13px; }
   /* A segunda linha e o detalhe: existe pra quem precisa, sem competir com o
      nome nem com o dinheiro. */
@@ -80,7 +109,7 @@
      Só o número que a pessoa procura fica firme; os outros ficam quietos. */
   .lst-val { color:var(--cinza); }
   .lst-val.forte { color:var(--texto); font-weight:600; }
-  .lst-val.ganho { color:var(--verde); font-weight:600; }
+  .lst-val.ganho { color:var(--p-corr); font-weight:600; }
 
   /* Uma etiqueta por linha, não duas competindo. Modalidade e tipo viram um
      texto só, discreto — quem filtra usa o filtro, não a cor. */
@@ -322,13 +351,13 @@
              admin ter que decorar a ordem. E o consultor so ve o dele. #}
           {% if session.perfil == 'admin' %}
           <td class="cel-partes">
-            <div class="parte"><span>corretora</span><b class="ganho">{{ (p.comissao_corretora_liquida or 0)|moeda }}</b></div>
-            <div class="parte"><span>consultor</span><b>{{ (p.comissao_consultor or 0)|moeda }}</b></div>
-            <div class="parte fraca"><span>bruta</span><b>{{ (p.comissao_total_corretora or 0)|moeda }}</b></div>
+            <div class="parte corr"><span>corretora</span><b>{{ (p.comissao_corretora_liquida or 0)|moeda }}</b></div>
+            <div class="parte cons"><span>consultor</span><b>{{ (p.comissao_consultor or 0)|moeda }}</b></div>
+            <div class="parte bruta"><span>bruta</span><b>{{ (p.comissao_total_corretora or 0)|moeda }}</b></div>
           </td>
           {% else %}
           <td class="cel-partes">
-            <div class="parte"><span>você recebe</span><b class="ganho">{{ (p.comissao_consultor or 0)|moeda }}</b></div>
+            <div class="parte corr"><span>você recebe</span><b>{{ (p.comissao_consultor or 0)|moeda }}</b></div>
           </td>
           {% endif %}
 
