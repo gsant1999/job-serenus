@@ -3,7 +3,7 @@
 
 {% block content %}
 <style>
-  .lst-lid { display:inline-flex; align-items:center; gap:5px; margin-top:4px; text-decoration:none;
+  .lst-lid { display:inline-flex; align-items:center; gap:5px; text-decoration:none;
              font-family:ui-monospace,Menlo,monospace; font-size:10px; color:var(--cinza-2);
              background:var(--panel-3); border:1px solid var(--borda); border-radius:6px;
              padding:2px 7px; width:fit-content; transition:.15s; }
@@ -28,13 +28,31 @@
      a linha inteira ter 100px de altura. */
   #t td.td-mono, #t th.num { white-space:nowrap; font-variant-numeric:tabular-nums; text-align:right; }
   #t th.num { text-align:right; }
-  #t td, #t th { padding:9px 9px; vertical-align:middle; }
+  /* LINHA MAIS GROSSA, a pedido dele — e agora ela merece: cada celula carrega
+     uma resposta inteira em duas alturas de texto, entao o ar nao e desperdicio,
+     e o que separa um bloco do outro. */
+  #t td { padding:14px 12px; vertical-align:top; }
+  #t th { padding:10px 12px; vertical-align:middle; }
+  #t tbody tr { border-bottom:1px solid var(--borda); }
+  #t tbody tr:hover { background:var(--panel-2); }
+
+  .cel-topo { display:flex; align-items:baseline; gap:9px; }
+  .cel-id { font-family:ui-monospace,Menlo,monospace; font-size:11px; color:var(--cinza-2);
+            text-decoration:none; flex:0 0 auto; }
+  .cel-id:hover { color:var(--verde); }
+  .cel-forte { font-weight:600; font-size:13px; }
+  /* A segunda linha e o detalhe: existe pra quem precisa, sem competir com o
+     nome nem com o dinheiro. */
+  .cel-sub { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+             font-size:11px; color:var(--cinza); margin-top:5px; }
+  .cel-sub b { color:var(--texto); font-weight:600; }
+  .cel-conta { justify-content:flex-end; font-variant-numeric:tabular-nums; }
   .lst-data { font-family:ui-monospace,Menlo,monospace; font-size:10.5px; color:var(--cinza-2);
-              margin-left:8px; white-space:nowrap; }
+              white-space:nowrap; }
   #t td strong { font-weight:600; }
 
   /* O nome do cliente é a âncora da linha: uma linha só, o resto no hover. */
-  .lst-cliente { display:inline-block; vertical-align:middle; max-width:230px; overflow:hidden; text-overflow:ellipsis;
+  .lst-cliente { display:inline-block; vertical-align:middle; max-width:300px; font-size:13.5px; overflow:hidden; text-overflow:ellipsis;
                  white-space:nowrap; }
   /* Consultor e operadora tambem numa linha: dois nomes quebrando em duas
      linhas cada faziam a linha crescer de novo, que era o problema original. */
@@ -59,8 +77,28 @@
                font-size:12.5px; color:#eab308; }
   .lst-aviso b { font-family:'Sora',sans-serif; font-size:15px; }
 
+  /* A barra do gestor: muitos filtros, todos combinaveis, numa linha que quebra
+     sozinha. Cada select no tamanho do conteudo — a regra global do sistema poe
+     width:100% e faria um por linha. */
+  .toolbar.filtros { align-items:center; row-gap:8px; }
+  .toolbar.filtros select { width:auto; flex:0 0 auto; min-width:130px; max-width:220px; }
+  .filtro-per { display:inline-flex; align-items:center; gap:6px; font-size:11.5px;
+                color:var(--cinza); white-space:nowrap; }
+  .filtro-per input { width:auto; padding:7px 9px; font-size:12px; }
+
+  /* O recorte vira relatorio. Sem os totais, filtro so esconde linha. */
+  .lst-total { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;
+               padding:12px 16px; margin-bottom:14px; border-radius:10px;
+               background:var(--panel); border:1px solid var(--borda-2); }
+  .lst-total b { font-family:'Sora',sans-serif; font-size:16px; color:var(--texto);
+                 font-variant-numeric:tabular-nums; }
+  .lst-total span { font-size:11.5px; color:var(--cinza); }
+  .lst-total i { display:inline-block; width:1px; height:16px; background:var(--borda-2);
+                 margin:0 8px; }
+  .lst-total-fraco { color:var(--cinza-2) !important; font-variant-numeric:tabular-nums; }
+
   /* O aviso da linha e um BOTAO: informar sem dar o que fazer e so barulho. */
-  .lst-vincular { display:inline-flex; align-items:center; margin-top:4px; padding:2px 8px;
+  .lst-vincular { display:inline-flex; align-items:center; padding:2px 8px;
                   font-family:inherit; font-size:10px; font-weight:600; cursor:pointer;
                   border-radius:6px; background:rgba(250,204,21,.10);
                   border:1px solid rgba(250,204,21,.38); color:#eab308; transition:.15s; }
@@ -117,7 +155,11 @@
 
 <div class="page">
 
-  <div class="toolbar">
+  {# TUDO NA MAO DO GESTOR: os filtros se combinam, e o que sobra na tela vira
+     o relatorio — com os totais do recorte e o CSV do que esta filtrado, nao da
+     lista inteira. Tudo no navegador: as linhas ja estao aqui, entao nao ha
+     ida ao servidor a cada mexida. #}
+  <div class="toolbar filtros">
     <input type="text" id="busca" placeholder="Buscar cliente, consultor, operadora..." oninput="filtrar()">
     <select id="fModal" onchange="filtrar()">
       <option value="">Todas modalidades</option>
@@ -129,7 +171,32 @@
       <option value="">Saúde + Odonto</option>
       <option>Saúde</option><option>Odonto</option>
     </select>
+    {% if session.perfil == 'admin' %}
+    <select id="fCons" onchange="filtrar()"><option value="">Todos os consultores</option>
+      {% for c in propostas|map(attribute='consultor')|reject('none')|unique|sort %}<option>{{ c }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    <select id="fOper" onchange="filtrar()"><option value="">Todas as operadoras</option>
+      {% for o in propostas|map(attribute='adm_operadora')|reject('none')|unique|sort %}<option>{{ o }}</option>{% endfor %}
+    </select>
+    <select id="fStatus" onchange="filtrar()"><option value="">Qualquer situação</option>
+      {% for s in propostas|map(attribute='status_operacional')|reject('none')|unique|sort %}<option>{{ s }}</option>{% endfor %}
+    </select>
+    <select id="fLead" onchange="filtrar()">
+      <option value="">Com e sem lead</option>
+      <option value="1">Só com lead</option>
+      <option value="0">Só sem lead</option>
+    </select>
+    <label class="filtro-per">cadastro de
+      <input type="date" id="fDe" onchange="filtrar()">
+      até <input type="date" id="fAte" onchange="filtrar()">
+    </label>
+    <button type="button" class="btn-outline" onclick="limparFiltros()">Limpar</button>
   </div>
+
+  {# O RECORTE VIRA RELATORIO: quantas vendas, quanto somam e quanto rendem.
+     Sem isso o filtro so esconde linha — com isso ele responde pergunta. #}
+  <div class="lst-total" id="lst-total" hidden></div>
 
   {% set sem_lead = propostas|rejectattr('lead_id')|list|length %}
   {% if sem_lead %}
@@ -148,68 +215,91 @@
     <div class="table-wrap" id="wrap-t">
     <table id="t">
       <thead>
+        {# DADOS EM BLOCOS, nao em doze colunas soltas. Cada coluna agora responde
+           uma pergunta inteira — quem e o cliente, o que ele comprou, quanto
+           rende, como esta — em vez de espalhar pedaços da mesma resposta. #}
         <tr>
-          <th>ID</th>
           <th>Cliente</th>
+          <th>O que foi vendido</th>
           {% if session.perfil == 'admin' %}<th>Consultor</th>{% endif %}
-          <th>Operadora</th>
-          <th>Plano</th>
-          <th class="num">Vidas</th>
-          <th class="num">Valor</th>
+          <th class="num">Valor mensal</th>
           {% if session.perfil == 'admin' %}
-          <th class="num">Bruta<i class="ajuda-i" title="Comissão bruta da corretora nesta venda, antes de descontar o repasse ao consultor.">i</i></th>
-          <th class="num">Repasse</th>
-          <th class="num">Líquido</th>
+          <th class="num">Comissão<i class="ajuda-i" title="Bruta é o total da corretora nesta venda. Repasse é a parte do consultor. Líquido é o que sobra pra corretora depois do repasse.">i</i></th>
           {% else %}
           <th class="num">Minha comissão</th>
           {% endif %}
-          <th>Status</th>
-          <th>Vigência</th>
+          <th>Situação</th>
         </tr>
       </thead>
       <tbody>
         {% for p in propostas %}
         <tr data-m="{{ p.modalidade }}" data-t="{{ p.tipo_contrato }}"
+            data-c="{{ p.consultor }}" data-o="{{ p.adm_operadora }}"
+            data-st="{{ p.status_operacional or 'Aguardando Doc.' }}"
+            data-lead="{{ '1' if p.lead_id else '0' }}"
+            data-dt="{{ (p.criado_em or '')[:10] }}"
+            data-vig="{{ (p.vigencia or '')[:10] }}"
+            data-val="{{ p.valor or 0 }}"
+            data-cb="{{ p.comissao_total_corretora or 0 }}"
+            data-cc="{{ p.comissao_consultor or 0 }}"
+            data-cl="{{ p.comissao_corretora_liquida or 0 }}"
+            data-id="{{ p.id }}" data-cli="{{ p.razao_social }}" data-vidas="{{ p.total_vidas or 0 }}"
+            data-leadid="{{ p.lead_id or '' }}" data-prod="{{ p.produto or '' }}"
             data-s="{{ p.razao_social|lower }} {{ p.consultor|lower }} {{ p.adm_operadora|lower }}">
-          <td><a href="/proposta/{{ p.id }}" style="color:var(--verde); font-weight:500;">#{{ p.id }}</a></td>
+
+          {# QUEM: numero, nome, quando entrou, e o vinculo com o CRM #}
           <td>
-            <strong class="lst-cliente" title="{{ p.razao_social }}">{{ p.razao_social }}</strong>
-            {# A data e metadado do cliente, nao coluna de varredura: sai da
-               grade e vem pra ca, e a tabela passa a CABER na tela — melhor que
-               qualquer aviso de rolagem, porque nao sobra o que rolar. #}
-            <span class="lst-data" title="Dia que o protocolo da venda subiu no sistema">{{ p.criado_em|data_br }}</span>
-            {# @lid embaixo do cliente: reconhece a conversa sem abrir nada, e
-               clicando cai na ficha do lead no CRM. #}
-            {% if p.lead_id and wa_prop.get(p.lead_id) %}
-            <a href="/crm?lead={{ p.lead_id }}" class="lst-lid" onclick="event.stopPropagation()"
-               title="Conversa no WhatsApp: {{ wa_prop[p.lead_id].chat_id }}">
-              <span class="lst-lid-tag {{ wa_prop[p.lead_id].tipo }}">{{ '@lid' if wa_prop[p.lead_id].tipo == 'lid' else 'nº' }}</span>{{ wa_prop[p.lead_id].curto }}
-            </a>
-            {% elif p.lead_id %}
-            <a href="/crm?lead={{ p.lead_id }}" class="lst-lid" onclick="event.stopPropagation()"
-               title="Lead no CRM, mas sem conversa do WhatsApp vinculada">lead #{{ p.lead_id }}</a>
-            {% else %}
-            {# O aviso VOLTOU pra linha, e agora resolve. Tirei ele achando que
-               a contagem no topo bastava — nao basta: o total diz QUANTAS estao
-               erradas, a linha diz QUAL, e sem isso nao da pra consertar. #}
-            <button type="button" class="lst-vincular" onclick="abrirVinculo({{ p.id }}, this)"
-                    title="Esta venda não tem lead no CRM: sem origem de mídia, ela não sobe pro Google Ads. Clique pra vincular agora.">
-              sem lead — vincular
-            </button>
-            {% endif %}
+            <div class="cel-topo">
+              <a class="cel-id" href="/proposta/{{ p.id }}">#{{ p.id }}</a>
+              <strong class="lst-cliente" title="{{ p.razao_social }}">{{ p.razao_social }}</strong>
+            </div>
+            <div class="cel-sub">
+              <span class="lst-data" title="Dia que o protocolo da venda subiu no sistema">{{ p.criado_em|data_br }}</span>
+              {% if p.lead_id and wa_prop.get(p.lead_id) %}
+              <a href="/crm?lead={{ p.lead_id }}" class="lst-lid" onclick="event.stopPropagation()"
+                 title="Conversa no WhatsApp: {{ wa_prop[p.lead_id].chat_id }}">
+                <span class="lst-lid-tag {{ wa_prop[p.lead_id].tipo }}">{{ '@lid' if wa_prop[p.lead_id].tipo == 'lid' else 'nº' }}</span>{{ wa_prop[p.lead_id].curto }}
+              </a>
+              {% elif p.lead_id %}
+              <a href="/crm?lead={{ p.lead_id }}" class="lst-lid" onclick="event.stopPropagation()"
+                 title="Lead no CRM, mas sem conversa do WhatsApp vinculada">lead #{{ p.lead_id }}</a>
+              {% else %}
+              <button type="button" class="lst-vincular" onclick="abrirVinculo({{ p.id }}, this)"
+                      title="Esta venda não tem lead no CRM: sem origem de mídia, ela não sobe pro Google Ads. Clique pra vincular agora.">
+                sem lead — vincular
+              </button>
+              {% endif %}
+            </div>
           </td>
+
+          {# O QUE: operadora, plano e quantas vidas, juntos — sao a mesma resposta #}
+          <td>
+            <div class="cel-forte">{{ p.adm_operadora or '—' }}</div>
+            <div class="cel-sub">
+              {{ p.modalidade }} · {{ p.tipo_contrato }} ·
+              <b>{{ p.total_vidas }}</b> vida{{ 's' if (p.total_vidas or 0) != 1 }}
+            </div>
+          </td>
+
           {% if session.perfil == 'admin' %}<td class="lst-1l" title="{{ p.consultor }}">{{ p.consultor }}</td>{% endif %}
-          <td class="lst-1l" title="{{ p.adm_operadora or '' }}">{{ p.adm_operadora or '—' }}</td>
-          <td class="lst-plano"><b>{{ p.modalidade }}</b><br>{{ p.tipo_contrato }}</td>
-          <td class="td-mono">{{ p.total_vidas }}</td>
-          <td class="td-mono lst-val forte">{{ p.valor|moeda  }}</td>
+
+          <td class="td-mono lst-val forte">{{ p.valor|moeda }}</td>
+
+          {# DINHEIRO: o liquido em cima, e a conta que leva ate ele embaixo.
+             As tres continuam na tela, como ele pediu — mas empilhadas, porque
+             sao a mesma grandeza vista de tres jeitos. #}
           {% if session.perfil == 'admin' %}
-          <td class="td-mono lst-val">{{ (p.comissao_total_corretora or 0)|moeda  }}</td>
-          <td class="td-mono lst-val">{{ (p.comissao_consultor or 0)|moeda  }}</td>
-          <td class="td-mono lst-val ganho">{{ (p.comissao_corretora_liquida or 0)|moeda  }}</td>
+          <td class="td-mono">
+            <div class="lst-val ganho">{{ (p.comissao_corretora_liquida or 0)|moeda }}</div>
+            <div class="cel-sub cel-conta">
+              bruta {{ (p.comissao_total_corretora or 0)|moeda }} · repasse {{ (p.comissao_consultor or 0)|moeda }}
+            </div>
+          </td>
           {% else %}
-          <td class="td-mono lst-val ganho">{{ (p.comissao_consultor or 0)|moeda  }}</td>
+          <td class="td-mono lst-val ganho">{{ (p.comissao_consultor or 0)|moeda }}</td>
           {% endif %}
+
+          {# COMO ESTA: status e desde quando vale #}
           <td>
             {% set so = p.status_operacional or 'Aguardando Doc.' %}
             {% if so == 'Emitida/Ativa' %}
@@ -223,8 +313,8 @@
             {% else %}
               <span style="background:#f1f5f9;color:#475569;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;">Ag. Doc.</span>
             {% endif %}
+            <div class="cel-sub">vigência {{ p.vigencia|data_br }}</div>
           </td>
-          <td class="td-mono" style="white-space:nowrap;">{{ p.vigencia|data_br }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -253,23 +343,96 @@ async function toggleModoTeste(ev) {
     if (typeof toast === 'function') toast('Erro ao alternar modo teste', 'err');
   }
 }
+// TODOS OS FILTROS SE COMBINAM. Cada um corta um pedaço, e o que sobra na tela
+// é o relatório — com os totais embaixo e o CSV do recorte, não da lista inteira.
+const _v = (id) => { const e = document.getElementById(id); return e ? e.value : ''; };
 function filtrar() {
-  const b = busca.value.toLowerCase(), m = fModal.value, t = fTipo.value;
+  const b = _v('busca').toLowerCase(), m = _v('fModal'), tp = _v('fTipo'),
+        c = _v('fCons'), o = _v('fOper'), st = _v('fStatus'), ld = _v('fLead'),
+        de = _v('fDe'), ate = _v('fAte');
+  let n = 0, val = 0, cb = 0, cc = 0, cl = 0;
   document.querySelectorAll('#t tbody tr').forEach(tr => {
-    const ok = (!b||(tr.dataset.s||'').includes(b))&&(!m||tr.dataset.m===m)&&(!t||tr.dataset.t===t);
-    tr.style.display = ok?'':'none';
+    const d = tr.dataset;
+    const ok = (!b  || (d.s || '').includes(b))
+            && (!m  || d.m === m)
+            && (!tp || d.t === tp)
+            && (!c  || d.c === c)
+            && (!o  || d.o === o)
+            && (!st || d.st === st)
+            && (ld === '' || d.lead === ld)
+            // Período pelo dia do cadastro. Comparação de texto funciona porque
+            // a data está em AAAA-MM-DD, que ordena igual ao calendário.
+            && (!de  || (d.dt && d.dt >= de))
+            && (!ate || (d.dt && d.dt <= ate));
+    tr.style.display = ok ? '' : 'none';
+    if (ok) { n++; val += +d.val || 0; cb += +d.cb || 0; cc += +d.cc || 0; cl += +d.cl || 0; }
   });
+  pintarTotal(n, val, cb, cc, cl);
 }
+const _brl = (x) => 'R$ ' + (x || 0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+function pintarTotal(n, val, cb, cc, cl) {
+  const box = document.getElementById('lst-total');
+  if (!box) return;
+  const total = document.querySelectorAll('#t tbody tr').length;
+  // Só aparece quando há recorte: sem filtro, o total da lista inteira já está
+  // no cabeçalho e repetir seria ruído.
+  if (n === total) { box.hidden = true; return; }
+  box.hidden = false;
+  const ehAdmin = {{ 'true' if session.perfil == 'admin' else 'false' }};
+  box.innerHTML =
+    '<b>' + n + '</b><span>de ' + total + ' venda(s) neste recorte</span>' +
+    '<i></i><b>' + _brl(val) + '</b><span>em mensalidade</span>' +
+    (ehAdmin
+      ? '<i></i><b>' + _brl(cl) + '</b><span>líquido da corretora</span>' +
+        '<i></i><span class="lst-total-fraco">bruta ' + _brl(cb) + ' · repasse ' + _brl(cc) + '</span>'
+      : '<i></i><b>' + _brl(cc) + '</b><span>de comissão</span>');
+}
+function limparFiltros() {
+  ['busca','fModal','fTipo','fCons','fOper','fStatus','fLead','fDe','fAte']
+    .forEach((id) => { const e = document.getElementById(id); if (e) e.value = ''; });
+  filtrar();
+}
+// O CSV LE O DADO, NAO A TELA.
+//
+// Antes ele copiava o texto das celulas. Isso funcionava enquanto cada coluna
+// da tela era um campo — mas ao agrupar (operadora + plano + vidas numa celula
+// so), o arquivo passaria a sair com campos grudados, e relatorio com campo
+// grudado nao da pra somar nem filtrar no Excel.
+// Agora cada campo sai na sua coluna, venha ou nao junto na tela. Nada se perde
+// no caminho da tela pro arquivo.
+const CSV_COLS = [
+  ['id',      'ID',                (d) => d.id],
+  ['cliente', 'Cliente',           (d) => d.cli],
+  ['data',    'Data do cadastro',  (d) => _dataBR(d.dt)],
+  ['cons',    'Consultor',         (d) => d.c],
+  ['oper',    'Operadora',         (d) => d.o],
+  ['prod',    'Produto/plano',     (d) => d.prod],
+  ['moda',    'Modalidade',        (d) => d.m],
+  ['tipo',    'Tipo de contrato',  (d) => d.t],
+  ['vidas',   'Vidas',             (d) => d.vidas],
+  ['valor',   'Valor mensal',      (d) => _num(d.val)],
+  ['cb',      'Comissao bruta',    (d) => _num(d.cb)],
+  ['cc',      'Repasse consultor', (d) => _num(d.cc)],
+  ['cl',      'Liquido corretora', (d) => _num(d.cl)],
+  ['status',  'Situacao',          (d) => d.st],
+  ['vig',     'Vigencia',          (d) => _dataBR(d.vig)],
+  ['lead',    'Lead no CRM',       (d) => d.leadid || 'sem lead'],
+];
+function _dataBR(s){ if(!s) return ''; const p = s.split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : s; }
+// Vírgula decimal: é o que o Excel em português entende como número.
+function _num(v){ return (Number(v)||0).toFixed(2).replace('.', ','); }
 function exportar() {
-  const rows = [];
-  document.querySelectorAll('#t thead th, #t tbody tr').forEach((el,i)=>{
-    if (i===0) rows.push([...el.querySelectorAll('th')].map(x=>`"${x.innerText}"`));
-    else if (el.style.display!=='none') rows.push([...el.querySelectorAll('td')].map(x=>`"${x.innerText.trim()}"`));
+  const linhas = [CSV_COLS.map(c => '"' + c[1] + '"').join(';')];
+  let n = 0;
+  document.querySelectorAll('#t tbody tr').forEach((tr) => {
+    if (tr.style.display === 'none') return;   // exporta o RECORTE, não a lista toda
+    n++;
+    linhas.push(CSV_COLS.map((c) => '"' + String(c[2](tr.dataset) ?? '').replace(/"/g, '""') + '"').join(';'));
   });
-  const csv = rows.map(r=>r.join(',')).join('\n');
+  // Ponto e vírgula: separador que o Excel brasileiro abre sem pedir nada.
   const a = document.createElement('a');
-  a.href = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(csv);
-  a.download = `job_${new Date().toISOString().slice(0,10)}.csv`;
+  a.href = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(linhas.join('\n'));
+  a.download = 'propostas_' + new Date().toISOString().slice(0,10) + (n ? '_' + n + 'reg' : '') + '.csv';
   a.click();
 }
 async function recalcularTodas(btn) {
