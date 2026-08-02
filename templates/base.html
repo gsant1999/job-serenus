@@ -235,7 +235,10 @@
 
   /* ═══ FORMS ═══ */
   .form-secao { background:var(--panel); border-radius:12px; border:1px solid var(--borda); padding:20px 22px; margin-bottom:14px; }
-  .form-secao h3 { font-family:'Sora',sans-serif; font-size:14px; color:#fff; margin-bottom:16px; font-weight:600;
+  /* var(--texto), nao #fff: esta regra vem DEPOIS do override do tema claro e
+     com a mesma especificidade, entao ganhava — e o titulo da secao ficava
+     branco no branco. A variavel acerta os dois temas de uma vez. */
+  .form-secao h3 { font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin-bottom:16px; font-weight:600;
     padding-left:11px; position:relative; }
   .form-secao h3::before { content:''; position:absolute; left:0; top:2px; bottom:2px; width:3px; border-radius:3px; background:var(--grad-frio); }
   .form-row { display:grid; gap:12px; margin-bottom:12px; }

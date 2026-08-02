@@ -58,6 +58,11 @@
   .obrig { font-size:9px; font-weight:700; letter-spacing:.4px; text-transform:uppercase;
            color:var(--cinza-2); margin-left:6px; vertical-align:middle; opacity:.75; }
   .sep { border:none; border-top:1px solid var(--borda); margin:18px 0; }
+  /* O bloco do responsavel financeiro chama atencao porque ele APARECEU: o
+     consultor precisa entender que o sistema pediu algo a mais, e por que. */
+  :root { --al-bg-f:rgba(250,204,21,.07); --al-bd-f:rgba(250,204,21,.32); }
+  [data-theme="light"] { --al-bg-f:rgba(180,120,4,.08); --al-bd-f:rgba(180,120,4,.30); }
+  #bloco-resp-fin[hidden] { display:none; }
 
   /* Erro no PROPRIO campo. Um toast no fim nao diz onde esta o problema. */
   .erro-campo { font-size:11px; color:#f0a3a3; margin-top:5px; min-height:0; }
@@ -149,7 +154,7 @@
     <div class="form-row form-row-2">
       <div class="campo">
         <label>Tipo de pessoa <span class="obrig">obrigatório</span></label>
-        <select name="tipo_pessoa" id="tipo_pessoa" required onchange="toggleDocs(); ajustarRotulos()">
+        <select name="tipo_pessoa" id="tipo_pessoa" required onchange="toggleDocs(); ajustarRotulos(); mostrarIdades()">
           <option value="">— Selecione —</option>
           <option value="PF">PF (Pessoa Física)</option>
           <option value="PME">PME (Empresarial)</option>
@@ -178,15 +183,64 @@
 
     <div class="campo" style="margin-top:14px;">
       <label>Titular e dependentes</label>
-      <div class="form-row form-row-2" style="margin-bottom:8px;">
+      <div class="form-row form-row-2" style="margin-bottom:4px;">
         <input type="text" name="nome_titular" id="nome_titular" placeholder="Nome do titular">
-        <input type="date" name="data_nasc_titular" id="data_nasc_titular" title="Nascimento do titular">
+        <input type="date" name="data_nasc_titular" id="data_nasc_titular" title="Nascimento do titular" onchange="mostrarIdades()">
       </div>
+      <div class="hint" id="idade-titular" style="margin-bottom:8px;"></div>
       <div id="lista-dependentes"></div>
       <button type="button" class="btn-ghost" style="font-size:12px; margin-top:6px;" onclick="addDependente()">+ Adicionar dependente</button>
       <textarea name="titular_dependentes" id="titular_dependentes" style="display:none;"></textarea>
       <input type="hidden" name="dependentes_json" id="dependentes_json" value="[]">
       <div class="hint">O total de vidas é calculado a partir daqui — titular mais dependentes.</div>
+    </div>
+
+    {# RESPONSAVEL FINANCEIRO. Plano de menor de 18 em PF ou Adesao SEMPRE tem
+       um, e ele nem sempre e vida do contrato: as vezes so paga. O bloco nasce
+       escondido e aparece sozinho quando as duas condicoes batem — com o
+       motivo escrito, pra ninguem achar que o sistema inventou um campo. #}
+    <div id="bloco-resp-fin" hidden style="margin-top:16px; padding:16px; border:1px solid var(--al-bd-f);
+         background:var(--al-bg-f); border-radius:10px;">
+      <div style="display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:4px;">
+        <b style="font-size:13.5px;">Responsável financeiro</b>
+        <span class="obrig">obrigatório</span>
+        <i class="ajuda-i" title="Plano para menor de 18 anos em PF ou Adesao sempre tem um responsavel financeiro. Ele pode ou nao entrar no plano como vida: as vezes e so quem paga. A operadora precisa saber quem e e qual o parentesco com o titular — sem isso a proposta volta.">i</i>
+      </div>
+      <div class="hint" id="resp-fin-motivo" style="margin-bottom:12px;"></div>
+      <div class="form-row form-row-3">
+        <div class="campo"><label>Nome completo</label><input type="text" name="resp_fin_nome" id="resp_fin_nome"></div>
+        <div class="campo"><label>CPF</label><input type="text" name="resp_fin_cpf" id="resp_fin_cpf" placeholder="000.000.000-00" oninput="mascaraCPF(this)"></div>
+        <div class="campo">
+          <label>Nascimento</label>
+          <input type="date" name="resp_fin_nascimento" id="resp_fin_nascimento" onchange="mostrarIdades()">
+          <div class="hint" id="idade-resp-fin"></div>
+        </div>
+      </div>
+      <div class="form-row form-row-3" style="margin-top:12px;">
+        <div class="campo">
+          <label>Parentesco com o titular</label>
+          <select name="resp_fin_parentesco" id="resp_fin_parentesco">
+            <option value="">— Selecione —</option>
+            <option value="pai">Pai</option>
+            <option value="mae">Mãe</option>
+            <option value="avo">Avô</option>
+            <option value="avoa">Avó</option>
+            <option value="padrasto">Padrasto</option>
+            <option value="madrasta">Madrasta</option>
+            <option value="tio">Tio(a)</option>
+            <option value="irmao">Irmão(ã)</option>
+            <option value="tutor">Tutor legal</option>
+            <option value="outro">Outro</option>
+          </select>
+          <div class="hint">Quem a operadora aceita varia — pai, mãe e avós passam em praticamente todas.</div>
+        </div>
+        <div class="campo"><label>Telefone</label><input type="tel" name="resp_fin_telefone" id="resp_fin_telefone"></div>
+        <div class="campo"><label>E-mail</label><input type="email" name="resp_fin_email" id="resp_fin_email"></div>
+      </div>
+      <label class="radio" style="display:inline-flex; margin-top:12px;">
+        <input type="checkbox" name="resp_fin_no_plano" id="resp_fin_no_plano" value="1" onchange="somarVidas()">
+        <span>O responsável financeiro também entra no plano como vida</span>
+      </label>
     </div>
   </div>
 
@@ -241,6 +295,11 @@
         <label>Produto / plano</label>
         <input type="text" name="produto" id="produto" list="lista-produtos" placeholder="Selecione ou digite">
         <datalist id="lista-produtos"></datalist>
+        <datalist id="lista-parentesco">
+          <option value="Cônjuge"><option value="Companheiro(a)"><option value="Filho(a)">
+          <option value="Enteado(a)"><option value="Pai"><option value="Mãe">
+          <option value="Irmão(ã)"><option value="Neto(a)"><option value="Avô"><option value="Avó">
+        </datalist>
         <div class="hint">Os planos cadastrados em Produtos aparecem ao escolher a operadora.</div>
       </div>
     </div>
@@ -601,12 +660,70 @@ function renderDeps() {
   c.innerHTML = DEPS.map((d,i)=>`
     <div class="form-row" style="grid-template-columns:1.5fr 1fr 1fr auto; gap:8px; margin-bottom:6px;">
       <input type="text" placeholder="Nome do dependente" value="${d.nome}" onchange="DEPS[${i}].nome=this.value;syncDeps()">
-      <input type="date" value="${d.nasc}" onchange="DEPS[${i}].nasc=this.value;syncDeps()" title="Nascimento">
-      <input type="text" placeholder="Parentesco" value="${d.parentesco}" onchange="DEPS[${i}].parentesco=this.value;syncDeps()">
+      <div>
+        <input type="date" value="${d.nasc}" onchange="DEPS[${i}].nasc=this.value;syncDeps()" title="Nascimento" style="width:100%;">
+        <div class="hint" style="margin-top:2px;">${_rotIdade(d.nasc)}</div>
+      </div>
+      <input type="text" placeholder="Parentesco" list="lista-parentesco" value="${d.parentesco}" onchange="DEPS[${i}].parentesco=this.value;syncDeps()">
       <button type="button" class="btn-ghost" style="color:var(--rosa);" onclick="DEPS.splice(${i},1);renderDeps();syncDeps()">×</button>
     </div>`).join('');
   syncDeps();
 }
+
+// ═══ IDADE ════════════════════════════════════════════════════════════════
+// A idade nao e enfeite: e ela que decide se cabe responsavel financeiro, e e
+// ela que a operadora usa pra faixa de preco. Estava so a data na tela, e
+// contar anos de cabeca no meio do cadastro e onde o erro entra.
+function idadeDe(iso){
+  if (!iso) return null;
+  const d = new Date(iso + 'T00:00:00');
+  if (isNaN(d)) return null;
+  const h = new Date();
+  let a = h.getFullYear() - d.getFullYear();
+  const m = h.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && h.getDate() < d.getDate())) a--;
+  return (a >= 0 && a < 130) ? a : null;
+}
+function _rotIdade(iso){
+  const a = idadeDe(iso);
+  if (a === null) return '';
+  return a + (a === 1 ? ' ano' : ' anos') + (a < 18 ? ' · menor' : '');
+}
+// Menor de 18 em PF ou Adesao SEMPRE tem responsavel financeiro. A regra e do
+// mercado, nao do sistema — por isso a tela explica o porque em vez de so
+// abrir um campo do nada.
+function precisaRespFin(){
+  const tp = (document.getElementById('tipo_pessoa')||{}).value || '';
+  if (tp !== 'PF' && tp !== 'Adesão') return null;
+  const menores = [];
+  const at = idadeDe((document.getElementById('data_nasc_titular')||{}).value);
+  const nt = (document.getElementById('nome_titular')||{}).value || 'o titular';
+  if (at !== null && at < 18) menores.push(nt + ' (' + at + ')');
+  DEPS.forEach(d => { const a = idadeDe(d.nasc); if (a !== null && a < 18) menores.push((d.nome || 'dependente') + ' (' + a + ')'); });
+  return menores.length ? menores : null;
+}
+function mostrarIdades(){
+  const it = document.getElementById('idade-titular');
+  if (it) it.textContent = _rotIdade((document.getElementById('data_nasc_titular')||{}).value);
+  const ir = document.getElementById('idade-resp-fin');
+  if (ir) ir.textContent = _rotIdade((document.getElementById('resp_fin_nascimento')||{}).value);
+  const bloco = document.getElementById('bloco-resp-fin');
+  if (!bloco) return;
+  const menores = precisaRespFin();
+  bloco.hidden = !menores;
+  const mot = document.getElementById('resp-fin-motivo');
+  if (menores && mot){
+    mot.textContent = 'Aparece porque ' + menores.join(', ') + (menores.length > 1 ? ' são menores' : ' é menor')
+      + ' de 18 anos num plano ' + ((document.getElementById('tipo_pessoa')||{}).value)
+      + '. Ele pode entrar no plano ou apenas responder pelo pagamento.';
+  }
+  // Obrigatorio so quando o bloco esta em cena.
+  ['resp_fin_nome','resp_fin_cpf','resp_fin_parentesco'].forEach(id => {
+    const e = document.getElementById(id); if (e) e.required = !!menores;
+  });
+  try { atualizarBarra(); } catch(e){}
+}
+
 function syncDeps() {
   const tit = document.getElementById('nome_titular').value;
   let txt = tit ? ('Titular: '+tit) : '';
@@ -626,7 +743,8 @@ function somarVidas() {
   const el = document.getElementById('total_vidas');
   if (!el) return;
   const tit = (document.getElementById('nome_titular').value || '').trim() ? 1 : 0;
-  const n = tit + DEPS.filter(d => (d.nome || '').trim()).length;
+  const rf = (document.getElementById('resp_fin_no_plano') || {}).checked ? 1 : 0;
+  const n = tit + DEPS.filter(d => (d.nome || '').trim()).length + rf;
   const dica = document.getElementById('vidas-dica');
   if (!VIDAS_NA_MAO) {
     if (n > 0) el.value = n;
@@ -640,7 +758,7 @@ function somarVidas() {
       : 'Sem contar o repique.';
     dica.classList.toggle('so-aviso', difere);
   }
-  try { calcPreview(); conferirPorte(); } catch (e) {}
+  try { calcPreview(); conferirPorte(); mostrarIdades(); } catch (e) {}
 }
 document.getElementById('nome_titular').addEventListener('input', syncDeps);
 
@@ -944,7 +1062,7 @@ document.addEventListener('change', (e) => {
   }
   if (e.target && e.target.id === 'plataforma_papel') papelDica();
 });
-document.addEventListener('DOMContentLoaded', () => { ajustarRotulos(); resumoInterno(); atualizarBarra(); });
+document.addEventListener('DOMContentLoaded', () => { ajustarRotulos(); resumoInterno(); mostrarIdades(); atualizarBarra(); });
 
 async function enviar() {
   const form = document.getElementById('form');

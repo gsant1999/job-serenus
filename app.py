@@ -2557,6 +2557,17 @@ def init_db():
         ("propostas", "plataforma_venda", "TEXT"),
         ("propostas", "plataforma_papel", "TEXT"),
         ("propostas", "plataforma_avisada_em", "TEXT"),
+        # RESPONSAVEL FINANCEIRO. Plano de menor de 18 em PF ou Adesao SEMPRE tem
+        # um — e ele nem sempre entra no plano: as vezes so paga. Sem guardar
+        # quem e e o parentesco com o titular, a operadora devolve a proposta e
+        # ninguem sabe pra quem ligar.
+        ("propostas", "resp_fin_nome", "TEXT"),
+        ("propostas", "resp_fin_cpf", "TEXT"),
+        ("propostas", "resp_fin_nascimento", "TEXT"),
+        ("propostas", "resp_fin_parentesco", "TEXT"),
+        ("propostas", "resp_fin_telefone", "TEXT"),
+        ("propostas", "resp_fin_email", "TEXT"),
+        ("propostas", "resp_fin_no_plano", "INTEGER DEFAULT 0"),
         # DE ONDE A PESSOA E. Nao e enfeite de cadastro: no plano de saude a
         # regiao decide preco e rede credenciada, e a proposta nao guardava isso
         # em lugar nenhum — ficava so no papel que o cliente mandou.
@@ -6060,7 +6071,13 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None, remet
         import base64, re as _re
         total_bytes = 0
         LIMITE_BYTES = 9 * 1024 * 1024  # ~9MB de arquivos brutos (Brevo aceita até ~10MB no payload)
-        for nome in anexos:
+        for item in anexos:
+            if not item:
+                continue
+            # Aceita 'arquivo.pdf' OU ('arquivo.pdf', 'NOME QUE O OUTRO LADO VE').
+            # Quem recebe a proposta abre uma pasta de anexos: 'RG-CNH - TITULAR
+            # - BRUNO.pdf' se le, '20260801_doc_IMG-2231.pdf' nao.
+            nome, nome_desejado = (item if isinstance(item, (tuple, list)) else (item, None))
             if not nome:
                 continue
             conteudo, _ctype = _localizar_anexo(nome)
@@ -6075,9 +6092,12 @@ def _enviar_email(destinatario, assunto, corpo_html, cc=None, anexos=None, remet
                 conteudo_b64 = base64.b64encode(conteudo).decode('ascii')
                 total_bytes += tam
                 # Nome amigável: remove prefixo timestamp/categoria
-                nome_limpo = os.path.basename(nome)
-                partes = nome_limpo.split('_', 3)
-                nome_exibe = partes[-1] if len(partes) >= 2 else nome_limpo
+                nome_limpo = os.path.basename(nome_desejado or nome)
+                if nome_desejado:
+                    nome_exibe = nome_limpo
+                else:
+                    partes = nome_limpo.split('_', 3)
+                    nome_exibe = partes[-1] if len(partes) >= 2 else nome_limpo
                 # SANITIZA: Brevo rejeita nomes com espaços/acentos/caracteres especiais.
                 base_nome, ext = os.path.splitext(nome_exibe)
                 base_nome = _re.sub(r'[^A-Za-z0-9._-]', '_', base_nome)   # troca espaço/acento por _
@@ -6577,6 +6597,172 @@ def nova_proposta():
                            plataformas=_PLATAFORMAS_VENDA,
                            lead_id_origem=(lead_id if lead_id.isdigit() else ''))
 
+
+# ── AVISO A PLATAFORMA DE VENDA (Affinity) ────────────────────────────────────
+# Sao DUAS conversas diferentes com a mesma empresa, e tratar as duas como uma
+# so e o que faz venda parar no meio:
+#   ciencia   — eu ja subi na operadora, voces nao precisam fazer nada. Sem
+#               anexo: e recado, nao processo.
+#   protocolo — subam voces por mim. Aqui vao os documentos, com nome que se le.
+# NADA SAI SOZINHO. O consultor le, ajusta se quiser, e manda.
+
+def _cfg_valor(conn, chave, padrao=''):
+    r = conn.execute("SELECT valor FROM config WHERE chave=?", (chave,)).fetchone()
+    return (r['valor'] if r and r['valor'] else padrao)
+
+
+def _plataforma_email_destino(conn, plataforma):
+    """E-mail da plataforma, configuravel — nunca escrito no codigo."""
+    chave = 'email_' + re.sub(r'[^a-z0-9]+', '_', (plataforma or '').lower()).strip('_')
+    return _cfg_valor(conn, chave, '')
+
+
+def _plataforma_dados(conn, pid):
+    p = conn.execute("SELECT * FROM propostas WHERE id=?", (pid,)).fetchone()
+    if not p:
+        return None
+    d = dict(p)
+    d['_vidas'] = d.get('total_vidas') or 0
+    d['_valor'] = _moeda(d.get('valor') or 0)
+    d['_vig'] = _fmt_data_br(d.get('vigencia'))
+    d['_vig_confirmada'] = bool(d.get('vigencia_confirmada'))
+    d['_local'] = ' / '.join(x for x in [d.get('cidade'), d.get('estado')] if x)
+    return d
+
+
+def _plataforma_assunto(d, tipo):
+    quem = d.get('razao_social') or d.get('nome_titular') or 'cliente'
+    num = (d.get('numero_proposta') or '').strip()
+    marca = f" — proposta {num}" if num else ""
+    if tipo == 'protocolo':
+        return f"Solicitacao de protocolo: {quem} — {d.get('adm_operadora') or 'operadora'}{marca}"
+    return f"Ciencia: venda protocolada por nos — {quem} — {d.get('adm_operadora') or 'operadora'}{marca}"
+
+
+def _plataforma_corpo(d, tipo, docs=None):
+    """Corpo do e-mail. Texto de gente, nao despejo de campos do banco."""
+    linhas = []
+    def li(rot, val):
+        if val not in (None, '', 0):
+            linhas.append(f"<tr><td style='padding:4px 14px 4px 0;color:#666;'>{rot}</td>"
+                          f"<td style='padding:4px 0;'><b>{val}</b></td></tr>")
+    li('Cliente', d.get('razao_social'))
+    li('Titular', d.get('nome_titular'))
+    li('CNPJ', d.get('cnpj'))
+    li('CPF do titular', d.get('cpf_titular'))
+    li('Cidade / UF', d.get('_local'))
+    li('Operadora', d.get('adm_operadora'))
+    li('Produto', d.get('produto'))
+    li('Modalidade', d.get('modalidade'))
+    li('Acomodacao', d.get('acomodacao'))
+    li('Coparticipacao', d.get('fator_moderador'))
+    li('Vidas', d.get('_vidas'))
+    li('Valor mensal', d.get('_valor'))
+    li('Vigencia', (d.get('_vig') or '') + ('' if d.get('_vig_confirmada') else ' (previsao, a confirmar)'))
+    li('Nº da proposta', d.get('numero_proposta'))
+
+    if tipo == 'protocolo':
+        abertura = ("Segue proposta para <b>protocolo no sistema da operadora</b>. "
+                    "Os documentos do cliente vao em anexo, ja nomeados.")
+        fecho = ("Qualquer pendencia de documento ou divergencia de dado, e so responder "
+                 "este e-mail que a gente resolve com o cliente.")
+    else:
+        abertura = ("Esta venda foi <b>protocolada por nos</b> diretamente no sistema da "
+                    "operadora. <b>Nao e preciso fazer nada</b> — este e-mail e so para "
+                    "ciencia e para o acompanhamento de voces.")
+        fecho = "Qualquer duvida, e so responder este e-mail."
+
+    anexos_html = ''
+    if tipo == 'protocolo' and docs:
+        itens = ''.join(f"<li>{d_}</li>" for d_ in docs)
+        anexos_html = (f"<p style='margin:16px 0 6px;'><b>Documentos em anexo ({len(docs)})</b></p>"
+                       f"<ul style='margin:0;padding-left:18px;color:#333;'>{itens}</ul>")
+    elif tipo == 'protocolo':
+        anexos_html = ("<p style='margin:16px 0 6px;color:#a15c00;'><b>Sem documentos anexados.</b> "
+                       "Vamos enviar em seguida.</p>")
+
+    return (
+        "<div style='font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222;line-height:1.55;'>"
+        f"<p>Ola,</p><p>{abertura}</p>"
+        "<table style='border-collapse:collapse;margin:14px 0;'>" + ''.join(linhas) + "</table>"
+        f"{anexos_html}<p>{fecho}</p>"
+        "<p style='margin-top:18px;'>Obrigado,<br>Serenus Corretora de Saude</p></div>")
+
+
+def _plataforma_anexos(conn, d):
+    """Os arquivos do PROTOCOLO, com o nome que o outro lado consegue ler.
+
+    Regra que ja existia e continua valendo: contrato assinado e comprovante de
+    pagamento NAO vao no protocolo — sao documentos finais, usados na
+    antecipacao de comissao. O que muda e que agora vao junto os documentos do
+    cliente lidos pela extensao, com o nome padronizado ('RG-CNH - TITULAR -
+    BRUNO.pdf') em vez de '20260801_doc_IMG-2231.pdf'."""
+    saida, vistos = [], set()
+    lead_id = d.get('lead_id')
+    if lead_id:
+        for r in conn.execute("""SELECT arquivo, nome_final, nome_arquivo FROM lead_documento
+                                 WHERE lead_id=? AND arquivo IS NOT NULL
+                                 ORDER BY titularidade DESC, tipo""", (lead_id,)).fetchall():
+            base = os.path.basename(r['arquivo'])
+            if base in vistos:
+                continue
+            vistos.add(base)
+            saida.append((base, r['nome_final'] or r['nome_arquivo'] or base))
+    try:
+        for nome in (json.loads(d.get('anexos') or '[]') or []):
+            n = nome.get('nome') if isinstance(nome, dict) else nome
+            b = os.path.basename(n or '')
+            if b and b not in vistos:
+                vistos.add(b)
+                saida.append((b, None))
+    except Exception:
+        pass
+    return saida
+
+
+def _plataforma_whats(d, tipo, destino):
+    """Resumo pro grupo. Diz que e automatico e que o e-mail ja foi — senao a
+    gestora fica sem saber se precisa responder aqui ou la."""
+    cab = ('Protocolo solicitado' if tipo == 'protocolo' else 'Venda protocolada por nos')
+    linhas = [f"*{cab}*", ""]
+    for rot, val in (('Cliente', d.get('razao_social')), ('Operadora', d.get('adm_operadora')),
+                     ('Produto', d.get('produto')), ('Modalidade', d.get('modalidade')),
+                     ('Vidas', d.get('_vidas')), ('Valor', d.get('_valor')),
+                     ('Cidade', d.get('_local')),
+                     ('Vigencia', (d.get('_vig') or '') + ('' if d.get('_vig_confirmada') else ' (previsao)')),
+                     ('Nº proposta', d.get('numero_proposta'))):
+        if val not in (None, '', 0):
+            linhas.append(f"{rot}: {val}")
+    linhas.append("")
+    linhas.append("Nao precisa fazer nada — e so ciencia." if tipo != 'protocolo'
+                  else "Pedimos que voces protocolem no sistema da operadora.")
+    linhas.append("")
+    linhas.append(f"_Mensagem automatica do JOB. O e-mail com os detalhes foi enviado para {destino or 'a plataforma'}._")
+    return "\n".join(linhas)
+
+
+@app.route('/proposta/<int:pid>/plataforma/preview')
+@login_required
+def proposta_plataforma_preview(pid):
+    """Monta o e-mail pra pessoa LER antes de mandar. Nada sai sozinho."""
+    tipo = 'protocolo' if request.args.get('tipo') == 'protocolo' else 'ciencia'
+    conn = db()
+    d = _plataforma_dados(conn, pid)
+    if not d:
+        close_db(conn); return jsonify({"ok": False, "erro": "Proposta não encontrada"}), 404
+    destino = _plataforma_email_destino(conn, d.get('plataforma_venda'))
+    anexos = _plataforma_anexos(conn, d) if tipo == 'protocolo' else []
+    close_db(conn)
+    nomes = [n or os.path.basename(f) for f, n in anexos]
+    return jsonify({"ok": True, "tipo": tipo, "destino": destino,
+                    "plataforma": d.get('plataforma_venda') or '',
+                    "assunto": _plataforma_assunto(d, tipo),
+                    "corpo": _plataforma_corpo(d, tipo, nomes),
+                    "anexos": nomes,
+                    "whats": _plataforma_whats(d, tipo, destino),
+                    "avisada_em": d.get('plataforma_avisada_em')})
+
+
 @app.route('/api/cep/<cep>')
 @login_required
 def api_cep(cep):
@@ -6766,8 +6952,10 @@ def salvar_proposta():
             mes_meta,status_operacional,
             cep,logradouro,numero_end,bairro,cidade,estado,
             consultor_usuario_id,subido_por_usuario_id,vigencia_confirmada,
-            plataforma_venda,plataforma_papel
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            plataforma_venda,plataforma_papel,
+            resp_fin_nome,resp_fin_cpf,resp_fin_nascimento,resp_fin_parentesco,
+            resp_fin_telefone,resp_fin_email,resp_fin_no_plano
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
             session['user_id'],d.get('consultor'),d.get('supervisora_id') or None,
             d.get('proposta_tem_numero'),d.get('numero_proposta'),
             d.get('vigencia'),d.get('modalidade'),d.get('tipo_pessoa'),
@@ -6794,7 +6982,14 @@ def salvar_proposta():
             session['user_id'],
             1 if d.get('vigencia_confirmada') == '1' else 0,
             (d.get('plataforma_venda') or '').strip() or None,
-            (d.get('plataforma_papel') or '').strip() or None
+            (d.get('plataforma_papel') or '').strip() or None,
+            (d.get('resp_fin_nome') or '').strip() or None,
+            (d.get('resp_fin_cpf') or '').strip() or None,
+            (d.get('resp_fin_nascimento') or '').strip() or None,
+            (d.get('resp_fin_parentesco') or '').strip() or None,
+            (d.get('resp_fin_telefone') or '').strip() or None,
+            (d.get('resp_fin_email') or '').strip() or None,
+            1 if d.get('resp_fin_no_plano') == '1' else 0
         ))
         proposta_id = _last_insert_id(cur)
         # Amarra ao lead na hora: é aqui que o telefone/CNPJ estão frescos e certos.
