@@ -3135,6 +3135,27 @@ def init_db():
         ('data_retorno', 'Data de retorno', 'nutricao', None,
          'Entra no calendário — é o que tira o lead do esquecimento'),
     ]
+    # LIMPEZA UNICA: tirar da agenda as tarefas que o motor criou em 02/08.
+    # Elas foram parar no lugar errado — agenda e compromisso com hora marcada
+    # que o consultor escolheu; "falar pela primeira vez com 25 leads" e fila de
+    # trabalho, outra coisa. O motor e a instrumentacao continuam; o que muda e
+    # onde a saida cai, e isso vai ser refeito. So apaga PENDENTE e so o que
+    # tem `regra` preenchida: compromisso marcado a mao nunca teve regra.
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        if not conn.execute("SELECT 1 FROM meta_flags WHERE k='agenda_auto_limpa_20260802'").fetchone():
+            n = conn.execute("""SELECT COUNT(*) c FROM crm_agenda
+                                WHERE status='pendente' AND regra IS NOT NULL AND regra <> ''""").fetchone()['c']
+            conn.execute("""DELETE FROM crm_agenda
+                            WHERE status='pendente' AND regra IS NOT NULL AND regra <> ''""")
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('agenda_auto_limpa_20260802')")
+            conn.commit()
+            print(f"[AGENDA] {n} tarefa(s) automatica(s) removida(s) da agenda")
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        print(f"[AGENDA] limpeza pulada: {e}")
+
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
         ja_saida = conn.execute("SELECT 1 FROM meta_flags WHERE k='campos_saida_20260729'").fetchone()
