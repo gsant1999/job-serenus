@@ -44,3 +44,17 @@ ERP em **Flask + PostgreSQL (Railway)** da Serenus Corretora de Saúde. Um arqui
 
 - MedSênior PF sem registro de `recebimento`.
 - Chaves de produção já expostas em chat — rotacionar quando possível (Postgres, ASAAS_API_KEY, BREVO_API_KEY).
+
+## Base de conhecimento (knowledge/)
+
+Este projeto usa o pipeline `ingest` para converter documentos (PDF, Word, Excel,
+imagens, audio) em Markdown antes de servirem de contexto.
+
+- Documentos originais ficam em `docs/` (nao processados).
+- Versoes em Markdown, prontas para leitura, ficam em `knowledge/`.
+- Para converter um novo documento: `ingest docs/arquivo.pdf`
+- Para reprocessar uma pasta inteira: `ingest docs/`
+
+Sempre que a tarefa envolver informacao de um documento (contrato, manual, livro,
+especificacao), procure primeiro em `knowledge/*.md` antes de pedir o arquivo bruto
+ao usuario — o Markdown ja esta estruturado e e mais confiavel que o PDF original.
