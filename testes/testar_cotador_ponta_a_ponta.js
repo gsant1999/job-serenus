@@ -56,6 +56,7 @@ captura.chamadas.forEach((c) => {
 // O servidor falso: responde pelo hash, na ordem em que a captura registrou.
 const chamou = { criar: 0, abrir: 0, vidas: 0, filtro: 0, operadoras: 0, planos: 0, preco: 0 };
 const corposEnviados = [];
+let SEM_REDIRECT = false;   // ligado no teste do caminho de reserva
 function servidorFalso(url, cfg) {
   const hash = cfg.headers['next-action'];
   const papel = Object.keys(hashes).find((k) => hashes[k] === hash);
@@ -64,8 +65,15 @@ function servidorFalso(url, cfg) {
   const lista = porPapel[papel];
   const c = lista[Math.min(chamou[papel], lista.length - 1)];
   chamou[papel]++;
+  // Cabeçalhos de resposta: o cotador procura o destino do redirecionamento
+  // pra saber o id da cotação nova. Sem isso aqui, o teste não exercita o
+  // caminho principal — só o de reserva.
+  const cabResp = new Map(papel === 'criar' && !SEM_REDIRECT
+    ? [['x-action-redirect', '/cotacoes/019fc330-c810-79f3-a00f-8004ecd1a841/edit']] : []);
   return Promise.resolve({
     ok: true, status: 200, url: ORIGEM + url,
+    headers: { get: (k) => cabResp.get(String(k).toLowerCase()) || null,
+               keys: () => cabResp.keys() },
     text: () => Promise.resolve(c.resposta),
   });
 }
@@ -247,6 +255,25 @@ function perguntar(tipo, pedido, msLimite) {
   const envFiltro = corposEnviados.find((c) => c.papel === 'operadoras');
   ok(envFiltro && envFiltro.corpo[0].filtro.vidas.length === 10,
      '12c. a busca de operadoras tambem manda as dez');
+
+
+  // 13. O id da cotacao vem do CABECALHO de redirecionamento, nao do texto.
+  //     Pescar "cotacaoId" no meio do render bate na captura, mas bater numa
+  //     captura nao e garantia: se o texto certo deixar de ser o primeiro, a
+  //     extensao passa a escrever no orcamento de outro cliente, calada.
+  ok(dados.cotacaoId === '019fc330-c810-79f3-a00f-8004ecd1a841',
+     '13. usa o id que veio no cabecalho', dados.cotacaoId);
+
+  // Sem o cabecalho, cai no texto do corpo e continua funcionando.
+  SEM_REDIRECT = true;
+  const rReserva = await perguntar('cotar', {
+    cidade: 'São Paulo - SP', vidas: [{ faixa: '29-33', quantidade: 10 }],
+    operadoraIds: [93], maxPlanos: 2,
+  }, 40000);
+  SEM_REDIRECT = false;
+  ok(rReserva.ok && rReserva.dados.cotacaoId === '019fc330-c810-79f3-a00f-8004ecd1a841',
+     '13b. sem cabecalho, o texto do corpo serve de reserva',
+     (rReserva.dados || {}).cotacaoId || rReserva.motivo);
 
 
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'tudo passou'));

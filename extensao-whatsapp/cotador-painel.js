@@ -101,6 +101,9 @@
   // build; aprendido observando, como todo o resto — nunca escrito à mão.
   let _rsc = '';
 
+  // De onde veio o id da última cotação criada — entra no diagnóstico.
+  let _idVeioDe = '';
+
   // ── Reconhecer a chamada pelo formato do corpo ────────────────────────────
   // O hash muda; o formato não. `{filtro:{...}}` só existe na busca de
   // operadora, `operadoraId` só na lista de planos, e o preço é o único que
@@ -290,7 +293,8 @@
       const err = new Error('http_' + resp.status + ' em ' + papel);
       err.enviei = JSON.stringify(corpo).slice(0, 400);
       err.responderam = pista;
-      err.arvore = arv ? decodeURIComponent(arv).slice(0, 160) : '(sem árvore)';
+      err.arvore = (arv ? decodeURIComponent(arv).slice(0, 140) : '(sem árvore)') +
+                   ' · id veio de: ' + (_idVeioDe || '?');
       throw err;
     }
     return { texto: await resp.text(), resp };
@@ -379,17 +383,37 @@
   async function criarCotacao(titulo) {
     // Título igual ao que a tela deles manda por padrão. "Cotação JOB" seria
     // uma etiqueta nossa dentro do sistema deles — resíduo puro.
-    const { texto } = await acao('criar', '/cotacoes/nova', [{ titulo: titulo || 'Cotação' }]);
-    // Ler o id por "cotacaoId", e não pelo primeiro UUID do corpo.
+    const { texto, resp } = await acao('criar', '/cotacoes/nova', [{ titulo: titulo || 'Cotação' }]);
+
+    // O ENDEREÇO DE DESTINO é a fonte confiável do id, não o texto do corpo.
     //
-    // A resposta do "criar" é o render inteiro da página nova, e nele vêm
-    // JUNTO os ids das cotações antigas da lista. O primeiro UUID do texto é
-    // de outra cotação — a de outro cliente. Seria o pior tipo de erro: a
-    // extensão cotaria calada dentro do orçamento errado. "cotacaoId" aparece
-    // uma vez só e é sempre o da cotação recém-criada (conferido na captura).
-    const m = String(texto).match(/"cotacaoId":"([0-9a-f-]{36})"/i);
-    if (!m) throw new Error('sem_id_de_cotacao');
-    return m[1];
+    // Eu vinha pescando "cotacaoId" no meio do render — e o render traz junto
+    // os ids das cotações antigas da lista. Bateu na captura, mas bater numa
+    // captura não é garantia: se um dia o texto certo não for o primeiro, a
+    // extensão passa a escrever dentro do orçamento de outro cliente, calada.
+    //
+    // Quando uma ação do Next redireciona, o destino vem em cabeçalho. Se ele
+    // estiver lá, é ele que manda; o texto fica só de reserva.
+    let id = '';
+    let deOnde = '';
+    for (const nome of ['x-action-redirect', 'x-nextjs-redirect', 'location']) {
+      const v = resp.headers.get(nome);
+      const mm = v && v.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+      if (mm) { id = mm[0]; deOnde = nome; break; }
+    }
+    if (!id) {
+      const m = String(texto).match(/"cotacaoId":"([0-9a-f-]{36})"/i);
+      if (m) { id = m[1]; deOnde = 'corpo'; }
+    }
+    if (!id) {
+      const e = new Error('sem_id_de_cotacao');
+      e.enviei = '(criar)';
+      e.responderam = 'cabeçalhos vistos: ' + [...resp.headers.keys()].join(', ');
+      e.arvore = '';
+      throw e;
+    }
+    _idVeioDe = deOnde;
+    return id;
   }
 
   // A única chamada que não é Server Action: API JSON limpa, sem hash, e é de
