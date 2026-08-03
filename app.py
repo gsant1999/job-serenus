@@ -21283,7 +21283,21 @@ def api_whatsapp_analisar():
                                f"{usuario_popup['nome']} (escolhido no popup). Cadastre o telefone do consultor "
                                "em Usuários no JOB pra atribuição automática.")
 
-    lead = _buscar_lead_por_telefone(conn, tel_norm)
+    # LEAD_ID EXPLICITO GANHA DO CASAMENTO POR TELEFONE.
+    #
+    # A varredura por filtro parte do CRM: ela JA SABE de qual lead e a conversa
+    # (o lote guarda lead_id + chat_id). Sem aceitar isso aqui, ela mandava a
+    # analise sem telefone, o casamento nao achava ninguem, e 28 analises foram
+    # gravadas ORFAS — pagas, e invisiveis no CRM e no painel do lead.
+    lead = None
+    try:
+        _lid_ex = int(d.get('lead_id') or 0) or None
+    except (TypeError, ValueError):
+        _lid_ex = None
+    if _lid_ex:
+        lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (_lid_ex,)).fetchone()
+    if lead is None:
+        lead = _buscar_lead_por_telefone(conn, tel_norm)
     # Fallback por NOME: contato salvo no WhatsApp não expõe o telefone no DOM
     # novo, então a extensão manda só o nome. Casa por nome exato (case-insensitive)
     # — MAS se houver homônimo (nome comum, tipo "Maria Silva"), NÃO adivinha:

@@ -311,28 +311,46 @@
   // continuar de pe enquanto isso nao acontece.
   async function _mensagensDoChat(chatId, quantas) {
     const alvo = String(chatId || '');
-    let msgs = [];
-    try {
-      const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
-      // So usa a colecao se ela for DESTE chat — em outro, devolveria a conversa
-      // errada calada, que e pior que nao devolver nada.
-      const mesmo = chat && chat.id && (!alvo || chat.id._serialized === alvo);
-      if (mesmo && chat.msgs && chat.msgs.getModelsArray) {
-        msgs = chat.msgs.getModelsArray() || [];
-      } else if (alvo) {
-        const W = window.WPP.whatsapp;
-        const c2 = W && W.ChatStore && W.ChatStore.get && W.ChatStore.get(alvo);
-        if (c2 && c2.msgs && c2.msgs.getModelsArray) msgs = c2.msgs.getModelsArray() || [];
-      }
-    } catch (e) { msgs = []; }
-    if (msgs && msgs.length) return msgs;
-    if (!window.WPP.chat.getMessages) return [];
-    try {
-      return (await window.WPP.chat.getMessages(alvo, { count: Math.max(12, quantas || 200) })) || [];
-    } catch (e) {
-      return [];
+    const chat = (() => {
+      try { return window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat(); }
+      catch (e) { return null; }
+    })();
+    const ehAtiva = !!(chat && chat.id && (!alvo || chat.id._serialized === alvo));
+
+    // A COLECAO SO SERVE PRA CONVERSA ABERTA.
+    //
+    // Erro que custou uma varredura inteira (03/08): eu pus a colecao na frente
+    // pra TODA conversa. Na aberta ela e completa — e o que a tela desenha. Em
+    // conversa FECHADA o WhatsApp so mantem em memoria o que ja carregou, que e
+    // quase sempre a ULTIMA mensagem. Resultado: 28 conversas lidas com UMA
+    // mensagem cada, score de lixo, e nenhum aviso de que algo estava errado.
+    // getMessages e quem CARREGA; a colecao so espelha o que ja esta carregado.
+    if (ehAtiva) {
+      try {
+        if (chat.msgs && chat.msgs.getModelsArray) {
+          const m = chat.msgs.getModelsArray() || [];
+          if (m.length) return m;
+        }
+      } catch (e) { /* cai pro getMessages */ }
     }
+    if (window.WPP.chat.getMessages) {
+      try {
+        const m = await window.WPP.chat.getMessages(alvo, { count: Math.max(12, quantas || 200) });
+        if (m && m.length) return m;
+      } catch (e) { /* wa-js quebrada: cai pra colecao, ver abaixo */ }
+    }
+    // Ultimo recurso — quando a wa-js esta quebrada (foi o caso as 11:22 de
+    // 03/08). Melhor pouca mensagem que nenhuma, MAS quem chama precisa saber
+    // que pode vir incompleto: por isso o total viaja no retorno da leitura.
+    try {
+      if (ehAtiva && chat.msgs && chat.msgs.getModelsArray) return chat.msgs.getModelsArray() || [];
+      const W = window.WPP.whatsapp;
+      const c2 = alvo && W && W.ChatStore && W.ChatStore.get && W.ChatStore.get(alvo);
+      if (c2 && c2.msgs && c2.msgs.getModelsArray) return c2.msgs.getModelsArray() || [];
+    } catch (e) { /* nada */ }
+    return [];
   }
+
 
   function _colecaoDaConversa() {
     const W = window.WPP && window.WPP.whatsapp;

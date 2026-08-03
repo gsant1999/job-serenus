@@ -2576,6 +2576,7 @@
         chat_id: alvo.chat_id,
         telefone: meta.telefone || '',
         nome: meta.nome || '',
+        lead_id: meta.lead_id || null,
         usuario_id: usuarioId || null,
         mensagens: conv.mensagens || [],
         audios: payloadAudios,
@@ -3687,7 +3688,11 @@
       }
       let ok = false, erro = '';
       try {
-        await varreduraUmaConversa({ chat_id: item.chat_id }, {});
+        // O LEAD VAI JUNTO. O lote sabe de quem e a conversa; sem mandar, a
+        // analise era gravada sem dono e nao aparecia em lugar nenhum.
+        await varreduraUmaConversa(
+          { chat_id: item.chat_id },
+          { lead_id: item.lead_id, nome: item.nome || '' });
         ok = true;
       } catch (e) {
         // O MOTIVO VIAJA. "deu erro em alguns" nao serve pra ninguem: o painel
