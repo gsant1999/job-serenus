@@ -551,7 +551,13 @@
 
     const chat = (() => { try { return WPP.chat.getActiveChat(); } catch (e) { return null; } })();
     // Sem conversa aberta nao da pra testar leitura — e isso nao e defeito.
-    if (!chat) return { checagens: out };
+    //
+    // MAS TEM QUE SER DITO. O teste parcial voltava calado, a tela seguia
+    // mostrando o estado da ultima rodada completa, e quem clicou em 'Testar
+    // agora' lia a linha velha como se fosse a resposta do teste que ele acabou
+    // de pedir. Foi o que aconteceu: 'quebrou as 11:22' continuou na tela depois
+    // da correcao ja instalada, porque nao havia conversa aberta pra testar.
+    if (!chat) return { checagens: out, semConversa: true };
     p('conversa', () => !!(chat.id && (chat.id._serialized || chat.id.user)));
 
     // O CANARIO TEM QUE TESTAR O CAMINHO QUE O PRODUTO USA. Ele chamava

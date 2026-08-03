@@ -464,6 +464,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: false, motivo: 'aba_sem_extensao' });
           return;
         }
+        // 'semConversa' sobe junto: sem conversa aberta o teste e parcial, e a
+        // tela precisa dizer isso em vez de deixar a linha velha passar por nova.
         sendResponse(r || { ok: false, motivo: 'sem_resposta' });
       });
     });
@@ -513,6 +515,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'vincular_chats') {
     chamarJob('/api/whatsapp/chats/vincular', 'POST', { conversas: msg.conversas || [] }, 45000).then(sendResponse);
+    return true;
+  }
+  // "Nao e lead": marca a conversa como pessoal. O JOB para de ler e, na
+  // revisao das 19h, apaga o card que tiver nascido dela antes da marcacao.
+  if (msg && msg.type === 'ignorar_conversa') {
+    chamarJob('/api/whatsapp/ignorar', 'POST', {
+      chat_id: msg.chat_id || '', telefone: msg.telefone || '',
+      nome: msg.nome || '', motivo: msg.motivo || '', desmarcar: !!msg.desmarcar,
+    }, 20000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'transcricoes_cache') {

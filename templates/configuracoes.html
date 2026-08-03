@@ -399,6 +399,14 @@ function testarCanario(){
     window.removeEventListener('message', ouvir);
     b.disabled = false; b.textContent = 'Testar agora';
     if(d.ok){
+      // TESTE PARCIAL TEM QUE SE ANUNCIAR. Sem conversa aberta, a ponte não
+      // consegue testar leitura — e a tabela continua mostrando o estado da
+      // última rodada completa. Quem clicou lia a linha velha como resposta do
+      // teste novo, e concluía que a correção não funcionou.
+      if(d.semConversa){
+        dizer('Testei só as peças que dá sem conversa. Abra uma conversa no WhatsApp e teste de novo — as linhas de leitura abaixo ainda são da rodada anterior.', 'erro');
+        return;
+      }
       dizer('Teste feito. Atualizando a tabela…', 'bom');
       setTimeout(()=>location.reload(), 700);
       return;

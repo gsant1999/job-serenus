@@ -2239,10 +2239,11 @@
   }
 
   async function canarioRodar(motivo) {
-    let daPonte = [];
+    let daPonte = [], semConversa = false;
     try {
       const r = await _pedirPonte('canario', {}, 20000);
       daPonte = (r && r.checagens) || [];
+      semConversa = !!(r && r.semConversa);
     } catch (e) {
       // A ponte nao responder JA E a noticia: significa que o mundo do
       // WhatsApp nao esta alcancavel a partir daqui.
@@ -2257,6 +2258,7 @@
     const ruins = checagens.filter((c) => !c.ok);
     if (ruins.length) console.warn('[JOB canario] ' + motivo + ' — quebrado:',
       ruins.map((c) => c.cap + ' (' + (c.detalhe || '') + ')').join(' | '));
+    checagens.semConversa = semConversa;
     return checagens;
   }
 
@@ -2858,6 +2860,43 @@
     });
   }
 
+  // MARCAR A CONVERSA COMO PESSOAL.
+  //
+  // Pede confirmacao porque o efeito e silencioso e duradouro: a partir daqui o
+  // JOB nao le mais esta conversa nem cria card dela. Uma pessoa que marcar sem
+  // querer o proprio lead ia passar dias sem entender por que ele "sumiu" — a
+  // frase do confirm diz exatamente isso, e onde desfazer.
+  function _ligarNaoLead(l) {
+    const b = document.getElementById('job-nao-lead');
+    if (!b) return;
+    b.addEventListener('click', async () => {
+      const nome = nomeDoContato() || 'esta conversa';
+      if (!confirm('Marcar "' + nome + '" como NÃO É LEAD?\n\n'
+                 + 'O JOB para de ler esta conversa e nunca mais cria lead dela.\n'
+                 + 'Serve pra amigo, família, fornecedor — quem não é cliente.\n\n'
+                 + 'Dá pra desfazer no JOB, em Leads excluídos.')) return;
+      b.disabled = true; const r0 = b.textContent; b.textContent = 'Marcando…';
+      const aviso = document.getElementById('job-ficha-aviso');
+      const dizer = (t) => { if (aviso) aviso.textContent = t; };
+      try {
+        let tel = '';
+        try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+        const r = await _safeSendMessage({ type: 'ignorar_conversa',
+          chat_id: _chatAberto, telefone: tel, nome: nome }).catch(() => null);
+        if (r && r.ok) {
+          b.textContent = 'Marcada como pessoal';
+          dizer('Pronto: esta conversa não vira mais lead.');
+        } else {
+          b.disabled = false; b.textContent = r0;
+          dizer('Não deu pra marcar' + ((r && r.erro) ? ': ' + r.erro : '') + '.');
+        }
+      } catch (e) {
+        b.disabled = false; b.textContent = r0;
+        dizer('Falhou: ' + ((e && e.message) || e));
+      }
+    });
+  }
+
   function _renderFicha(aba) {
     const f = _ficha, l = f.lead || {};
     const etapaAtual = (f.etapas || []).find((e) => e.id === l.etapa);
@@ -2889,6 +2928,14 @@
         '<div class="job-ficha-corpo">' + corpo + '</div>' +
         '<div class="job-ficha-rodape">' +
           '<button class="job-cnpj-btn" id="job-ficha-salvar">Salvar no JOB</button>' +
+          // NAO E LEAD. O consultor fala com amigo, familia e fornecedor no
+          // mesmo WhatsApp, e cada analise virava um card no CRM. O botao mora
+          // ao lado do Salvar porque e a mesma decisao, invertida: "isto entra"
+          // ou "isto nunca entra". Discreto de proposito — e acao rara, mas tem
+          // que estar onde a pessoa ja esta olhando quando percebe o engano.
+          '<button class="job-nao-lead" id="job-nao-lead" ' +
+            'title="Marca esta conversa como pessoal: o JOB para de ler e nunca mais cria lead dela.">' +
+            'Não é lead</button>' +
           '<span class="job-ficha-aviso" id="job-ficha-aviso"></span>' +
         '</div>' +
         (aba === 'dados' ? _blocoNomeContato() : '') +
@@ -2896,6 +2943,7 @@
       '</div>');
     _ligarEventosFicha(aba);
     if (aba === 'dados') { _ligarNomeContato(); _ligarVinculoChat(_ficha.lead || {}); }
+    _ligarNaoLead(_ficha.lead || {});
   }
 
   // Valor a exibir: o que o consultor digitou tem prioridade sobre o que veio do
@@ -5903,6 +5951,9 @@
         const checagens = await canarioRodar('pedido pela tela do JOB');
         const ruins = (checagens || []).filter((c) => !c.ok);
         responder({ ok: true, total: (checagens || []).length, quebradas: ruins.length,
+                    // Teste parcial precisa CHEGAR na tela como parcial, senao
+                    // a pessoa le a linha velha como resposta do teste novo.
+                    semConversa: !!(checagens && checagens.semConversa),
                     versao: _versaoExt() });
       } catch (e) {
         responder({ ok: false, motivo: String((e && e.message) || e).slice(0, 160) });

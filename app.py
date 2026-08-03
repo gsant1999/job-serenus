@@ -27863,40 +27863,86 @@ def agenda_confirmar(token):
 
 
 def _revisar_leads_do_dia():
-    """Fim do dia: aponta o que a extensão cadastrou hoje e não parece ser lead.
+    """Fim do dia: apaga os cards que entraram de conversa marcada como pessoal.
 
-    A marcação "não é lead" depende de alguém lembrar de marcar na hora. Isto é
-    a rede embaixo: no fim do dia varre o que entrou pela extensão e não deu
-    sinal nenhum de negociação — sem cotação, sem proposta, sem uma atividade
-    escrita por gente. NÃO APAGA NADA. Só avisa, com o link pra decidir.
+    A conversa é analisada no instante em que o consultor abre — às vezes antes
+    de ele ter tempo de marcar "não é lead". Quando ele marca depois, o card já
+    nasceu. Isto é o acerto de contas: às 19h varre as conversas marcadas,
+    encontra os leads que vieram delas e apaga.
 
-    Apagar sozinho seria pior que o problema: um lead bom que ainda não tinha
-    virado nada sumiria sem ninguém ver."""
+    Só apaga o que foi MARCADO por gente. Não há heurística aqui: adivinhar quem
+    é amigo pelo nome apagaria justamente o lead que se chama pelo apelido. E
+    mesmo marcado, lead com proposta ou cotação NÃO sai — se aquilo virou
+    negociação, a marcação é que estava errada, e o dado vale mais que o flag.
+
+    Cada exclusão fica em /crm/excluidos com o motivo, igual às feitas na mão."""
     try:
         conn = db()
-        hoje = datetime.now(TZ_SP).strftime('%Y-%m-%d')
-        rows = conn.execute("""
-            SELECT l.id, l.nome, l.telefone
+        # Os leads ligados a conversas marcadas — pelo chat_id e pelo telefone,
+        # porque o mesmo contato aparece nos dois formatos.
+        alvos = conn.execute("""
+            SELECT DISTINCT l.id, l.nome, l.telefone, l.telefone_norm, l.etapa,
+                   l.origem, l.responsavel_id, l.criado_em
             FROM crm_leads l
-            WHERE l.origem LIKE '%extens%'
-              AND substr(CAST(l.criado_em AS TEXT), 1, 10) = ?
-              AND NOT EXISTS (SELECT 1 FROM propostas p WHERE p.lead_id = l.id)
-              AND NOT EXISTS (SELECT 1 FROM cotacao_salva c WHERE c.lead_id = l.id)
-              AND NOT EXISTS (SELECT 1 FROM crm_atividades a WHERE a.lead_id = l.id
-                              AND a.tipo IN ('nota','atividade','whatsapp','email','ligacao'))
-            ORDER BY l.id DESC LIMIT 40""", (hoje,)).fetchall()
+            WHERE EXISTS (
+                    SELECT 1 FROM wa_chat_lead w JOIN wa_conversa_ignorada i
+                      ON i.chat_id = w.chat_id
+                    WHERE w.lead_id = l.id)
+               OR (l.telefone_norm IS NOT NULL AND l.telefone_norm <> '' AND EXISTS (
+                    SELECT 1 FROM wa_conversa_ignorada i2
+                    WHERE i2.telefone_norm = l.telefone_norm))
+            LIMIT 200""").fetchall()
+
+        apagados, mantidos = [], []
+        for lead in alvos:
+            lid = lead['id']
+            # Virou negociação? Então a marcação é que estava errada.
+            tem = 0
+            for tab in ('propostas', 'cotacao_salva'):
+                try:
+                    tem += conn.execute(f"SELECT COUNT(*) c FROM {tab} WHERE lead_id=?", (lid,)).fetchone()['c']
+                except Exception:
+                    pass
+            if tem:
+                mantidos.append(lead['nome'] or f'#{lid}')
+                continue
+            try:
+                resp_nome = ''
+                if lead['responsavel_id']:
+                    r = conn.execute("SELECT nome FROM usuarios WHERE id=?", (lead['responsavel_id'],)).fetchone()
+                    resp_nome = (r['nome'] if r else '') or ''
+                conn.execute("""INSERT INTO crm_lead_excluido
+                    (lead_id, nome, telefone, telefone_norm, etapa, origem, responsavel_nome,
+                     criado_em_lead, dados_json, motivo, excluido_por, excluido_por_id, excluido_em)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (lid, lead['nome'], lead['telefone'], lead['telefone_norm'], lead['etapa'],
+                     lead['origem'], resp_nome, str(lead['criado_em'] or ''), '',
+                     'Conversa marcada como “não é lead” pelo consultor',
+                     'Revisão automática das 19h', None, _agora_sp()))
+                conn.execute("DELETE FROM crm_atividades WHERE lead_id=?", (lid,))
+                conn.execute("DELETE FROM crm_leads WHERE id=?", (lid,))
+                apagados.append(lead['nome'] or f'#{lid}')
+            except Exception as e:
+                app.logger.warning(f"[REVISAO_DIA] lead {lid}: {e}")
+        conn.commit()
         close_db(conn)
-        if not rows:
-            return
-        nomes = ', '.join((dict(r).get('nome') or 'sem nome') for r in list(rows)[:6])
-        _notificar_admins(
-            'crm',
-            f'{len(rows)} lead(s) de hoje pra conferir',
-            f'Entraram pela extensão e não viraram nada ainda: {nomes}'
-            + ('…' if len(rows) > 6 else '')
-            + '. Se não forem leads, exclua — fica registrado em Excluídos.',
-            '/crm?origem=extens&data_de=' + hoje)
-        app.logger.info(f"[REVISAO_DIA] {len(rows)} lead(s) sugeridos pra conferência")
+
+        if apagados:
+            _notificar_admins(
+                'crm', f'{len(apagados)} lead(s) removidos na revisão das 19h',
+                'Vieram de conversas marcadas como “não é lead”: '
+                + ', '.join(apagados[:6]) + ('…' if len(apagados) > 6 else '')
+                + '. Estão registrados em Leads excluídos.',
+                '/crm/excluidos')
+        if mantidos:
+            # Contradição merece aviso, não silêncio: alguém marcou como pessoal
+            # uma conversa que tem cotação ou proposta. Um dos dois está errado.
+            _notificar_admins(
+                'crm', f'{len(mantidos)} conversa(s) marcadas como pessoais têm negociação',
+                'Não apaguei: ' + ', '.join(mantidos[:6]) + ('…' if len(mantidos) > 6 else '')
+                + '. Ou a marcação foi engano, ou a proposta está no lead errado.',
+                '/crm')
+        app.logger.info(f"[REVISAO_DIA] {len(apagados)} apagado(s), {len(mantidos)} mantido(s)")
     except Exception as e:
         app.logger.warning(f"[REVISAO_DIA] {e}")
 

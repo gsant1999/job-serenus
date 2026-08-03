@@ -66,6 +66,7 @@
                            faltando: (resp && resp.faltando) || [],
                            modalidades: (resp && resp.modalidades) || [],
                            versao: (resp && resp.versao) || undefined,
+                           semConversa: (resp && resp.semConversa) || undefined,
                            sabe: (resp && resp.sabe) || undefined,
                            // Quantas abas o background examinou. Vai junto pra
                            // tela poder dizer o que aconteceu de verdade em vez
