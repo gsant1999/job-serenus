@@ -107,26 +107,35 @@
   /* Grid de logos: a marca é como o corretor reconhece a operadora, mais
      rápido do que lendo o nome. Cartão claro sempre — logo de operadora é
      feito pra fundo branco e some no escuro. */
-  .cv-grade { display:grid; grid-template-columns:repeat(auto-fill, minmax(148px, 1fr));
-    gap:12px; }
-  .cv-cartao { background:var(--panel); border:1px solid var(--borda-2); border-radius:12px;
-    padding:16px 14px; cursor:pointer; display:flex; flex-direction:column; gap:8px;
-    align-items:center; justify-content:center; min-height:104px; text-align:center;
-    color:var(--texto); font-family:inherit; transition:border-color .15s, transform .12s; }
-  .cv-cartao:hover { border-color:var(--azul); transform:translateY(-1px); }
-  .cv-cartao.on { border-color:var(--verde); background:var(--verde-soft); }
-  .cv-cartao .logo { height:38px; width:100%; display:flex; align-items:center;
-    justify-content:center; background:#fff; border-radius:8px; padding:6px; }
+  /* O logo É o cartão. Sem nome embaixo: a marca já diz quem é, e mais rápido
+     do que se lê — repetir em texto só rouba espaço do que importa. O nome
+     fica no title, pra quem passa o cursor e pra leitor de tela. */
+  .cv-grade { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr));
+    gap:14px; }
+  .cv-cartao { background:var(--panel); border:1px solid var(--borda-2); border-radius:14px;
+    padding:0; cursor:pointer; display:flex; flex-direction:column; gap:0;
+    align-items:stretch; justify-content:center; text-align:center;
+    color:var(--texto); font-family:inherit; overflow:hidden;
+    transition:border-color .15s, transform .12s, box-shadow .15s; }
+  .cv-cartao:hover { border-color:var(--azul); transform:translateY(-2px);
+    box-shadow:0 6px 18px rgba(0,0,0,.14); }
+  .cv-cartao.on { border-color:var(--verde); box-shadow:0 0 0 1px var(--verde); }
+  /* Fundo branco sempre: logo de operadora é feito pra fundo claro e some no
+     tema escuro. É o único ponto da tela que não segue o tema, e de propósito. */
+  .cv-cartao .logo { height:112px; width:100%; display:flex; align-items:center;
+    justify-content:center; background:#fff; padding:22px 20px; }
   .cv-cartao .logo img { max-height:100%; max-width:100%; object-fit:contain; }
-  .cv-cartao b { font-size:13px; font-weight:650; line-height:1.3; }
-  .cv-cartao small { font-size:11px; color:var(--cinza-2); }
-  .cv-cartao.on small { color:var(--verde); }
+  .cv-cartao > b { font-size:14px; font-weight:650; line-height:1.3; padding:34px 14px; }
+  .cv-cartao > small { font-size:11px; color:var(--cinza-2); padding:7px 10px;
+    background:var(--panel-2); border-top:1px solid var(--borda); }
+  .cv-cartao.on > small { color:var(--verde); background:var(--verde-soft);
+    border-top-color:var(--verde); }
 
   /* Níveis mais fundos (produto, linha, plano) são lista, não grid: aí o que
      importa é ler as diferenças entre eles, não reconhecer uma marca. */
   .cv-grade.lista { grid-template-columns:1fr; gap:6px; }
   .cv-grade.lista .cv-cartao { flex-direction:row; justify-content:flex-start;
-    text-align:left; min-height:0; padding:12px 14px; gap:12px; }
+    align-items:center; text-align:left; min-height:0; padding:13px 15px; gap:12px; }
   .cv-grade.lista .cv-cartao .txt { flex:1; min-width:0; }
   .cv-grade.lista .cv-cartao .txt b { display:block; }
   .cv-grade.lista .cv-cartao .txt small { display:block; margin-top:2px; }
@@ -705,28 +714,51 @@
     return { txt: 'Com coparticipação', cls: 'co-parcial' };
   }
 
+  // O PAINEL PRIMEIRO, sempre que ele estiver ao alcance.
+  //
+  // Eu lia do catálogo primeiro porque é instantâneo — e estava errado. Quem
+  // atende MUDA com a faixa etária, e o catálogo foi varrido com outra
+  // distribuição: em Campinas, PF, faixa 19-23, o Painel mostra a Saúde
+  // Beneficência e o JOB não mostrava. Uma operadora faltando é uma venda
+  // perdida sem ninguém saber que existia — isso não se troca por 300ms.
+  //
+  // O catálogo continua valendo como reserva: quando a extensão não responde,
+  // uma lista aproximada é melhor que tela vazia — e aí a tela diz que é
+  // aproximada, em vez de deixar parecer certa.
   async function carregarOperadoras() {
     var mod = modalidadeAtiva();
     el('navLista').className = 'cv-grade';
-    el('navLista').innerHTML = '<div class="cv-ops-vazio">Procurando…</div>';
+    el('navLista').innerHTML = '<div class="cv-ops-vazio">Perguntando ao Painel…</div>';
+
+    if (pronto) {
+      var b = base();
+      var rc = await pedir('passo', { pedido: Object.assign({ acao: 'criar', reaproveitar: true }, b) }, 45000);
+      if (rc.ok) {
+        var r = await pedir('passo', { pedido: Object.assign(
+          { acao: 'operadoras', cotacaoId: rc.dados.cotacaoId }, b) }, 45000);
+        if (r.ok) {
+          operadoras = (r.dados && r.dados.operadoras) || [];
+          el('mainSub').textContent = 'Escolha a operadora e vá até o plano do seu cliente.';
+          voltarPara('operadoras');
+          return;
+        }
+      }
+    }
+
     var doJob = await fetch('/cotacao/catalogo/operadoras.json?cidade=' +
         encodeURIComponent(cidadeEscolhida) + '&modalidade=' + mod)
       .then(function (x) { return x.json(); }).catch(function () { return {}; });
     if (doJob.operadoras && doJob.operadoras.length) {
-      operadoras = doJob.operadoras; voltarPara('operadoras'); return;
-    }
-    if (!pronto) {
-      el('navLista').innerHTML = '<div class="cv-ops-vazio">Esta cidade ainda não está no ' +
-        '<a href="/cotacao/catalogo">catálogo</a> e a extensão não respondeu pra perguntar ao Painel.</div>';
+      operadoras = doJob.operadoras;
+      // Diz que é reserva. Lista do catálogo foi levantada com OUTRA
+      // distribuição de vidas, então pode faltar ou sobrar operadora.
+      el('mainSub').innerHTML = 'Do catálogo do JOB, porque o Painel não respondeu — ' +
+        'pode faltar operadora que só aparece nesta faixa etária.';
+      voltarPara('operadoras');
       return;
     }
-    var b = base();
-    var rc = await pedir('passo', { pedido: Object.assign({ acao: 'criar', reaproveitar: true }, b) }, 45000);
-    if (!rc.ok) { el('navLista').innerHTML = '<div class="cv-ops-vazio">Não deu pra listar agora.</div>'; return; }
-    var r = await pedir('passo', { pedido: Object.assign({ acao: 'operadoras', cotacaoId: rc.dados.cotacaoId }, b) }, 45000);
-    if (!r.ok) { el('navLista').innerHTML = '<div class="cv-ops-vazio">Não deu pra listar agora.</div>'; return; }
-    operadoras = (r.dados && r.dados.operadoras) || [];
-    voltarPara('operadoras');
+    el('navLista').innerHTML = '<div class="cv-ops-vazio">Não deu pra listar agora, e esta cidade ' +
+      'ainda não está no <a href="/cotacao/catalogo">catálogo</a>.</div>';
   }
 
   async function garantirPlanos(operadoraId) {
@@ -763,11 +795,12 @@
     });
   }
 
-  function cartao(html, aoClicar, ligado) {
+  function cartao(html, aoClicar, ligado, titulo) {
     var b = document.createElement('button');
     b.type = 'button';
     b.className = 'cv-cartao' + (ligado ? ' on' : '');
     b.innerHTML = html;
+    if (titulo) b.title = titulo;
     b.onclick = aoClicar;
     return b;
   }
@@ -785,15 +818,18 @@
       operadoras.forEach(function (o) {
         var quantos = selecionados.filter(function (x) { return (x.operadora || {}).id === o.id; }).length;
         c.appendChild(cartao(
-          (o.logotipo ? '<span class="logo"><img src="' + esc(o.logotipo) + '" alt="' + esc(o.nome) + '"></span>' : '') +
-          '<b>' + esc(o.nome) + '</b>' +
+          // Só o logo, grande. O nome embaixo era repetição: a marca já diz
+          // quem é, e mais rápido do que se lê. Fica no title pra quem passar
+          // o cursor e pra leitor de tela.
+          (o.logotipo ? '<span class="logo"><img src="' + esc(o.logotipo) + '" alt="' + esc(o.nome) + '"></span>'
+                      : '<b>' + esc(o.nome) + '</b>') +
           (quantos ? '<small>' + quantos + ' marcado(s)</small>' : ''),
           async function () {
             opAtual = o;
             var pls = await garantirPlanos(o.id);
             if (!pls) { c.innerHTML = '<div class="cv-ops-vazio">Não deu pra abrir agora.</div>'; return; }
             voltarPara('produtos');
-          }, quantos > 0));
+          }, quantos > 0, o.nome));
       });
       return;
     }
