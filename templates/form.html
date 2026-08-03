@@ -14,18 +14,31 @@
 .btn-salvar:hover { background-position:100% 50%; transform:translateY(-2px); box-shadow:0 12px 34px rgba(59,130,246,.45); }
 .btn-salvar:disabled { background:#3a3a4c; cursor:not-allowed; transform:none; box-shadow:none; }
 .preview { background:linear-gradient(135deg,rgba(31,216,164,.08),rgba(59,130,246,.06)); border:1px solid rgba(31,216,164,.25); border-radius:12px; padding:20px 22px; margin-top:16px; display:none; }
-.preview h4 { font-family:'Sora',sans-serif; font-size:14px; color:#fff; margin-bottom:14px; font-weight:600; }
+/* #fff CRAVADO NAO EXISTE AQUI. Este bloco nasceu so no tema escuro: no claro
+   o titulo, o "1.7 mens" e o "1.4 mens" ficavam branco sobre quase-branco —
+   invisiveis — e o cronograma virava uma lousa cinza no meio do cartao claro.
+   Tudo agora sai de token, que e o que sabe em que tema estamos. */
+.preview h4 { font-family:'Sora',sans-serif; font-size:14px; color:var(--texto); margin-bottom:14px; font-weight:600; }
 .preview .row { display:flex; justify-content:space-between; padding:6px 0; font-size:13px; color:var(--cinza); }
 .preview .row span:last-child { color:var(--texto); font-weight:500; }
 .preview .row:not(:last-child) { border-bottom:1px solid var(--borda); }
 .preview .total span { color:var(--teal) !important; font-weight:700 !important; font-size:14px; }
 .preview .total { padding-top:10px; border-top:1.5px solid var(--borda-2) !important; margin-top:4px; }
-.preview .regime-info { background:rgba(255,255,255,.05); padding:9px 12px; border-radius:8px; font-size:12px; color:var(--cinza); margin-bottom:14px; }
-.preview .regime-info strong { color:#fff; }
-.cronograma { background:rgba(0,0,0,.2); border-radius:9px; padding:12px 14px; margin-top:12px; }
+.preview .regime-info { background:var(--panel-2); padding:9px 12px; border-radius:8px; font-size:12px; color:var(--cinza); margin-bottom:14px; }
+.preview .regime-info strong { color:var(--texto); }
+.cronograma { background:var(--panel-2); border:1px solid var(--borda); border-radius:9px; padding:12px 14px; margin-top:12px; }
 .cronograma .titulo { font-size:10.5px; color:var(--cinza-2); font-weight:600; text-transform:uppercase; letter-spacing:.6px; margin-bottom:9px; }
 .cronograma .parcela { display:flex; justify-content:space-between; padding:5px 0; font-size:12.5px; color:var(--texto); border-bottom:1px dashed var(--borda); }
 .cronograma .parcela:last-child { border-bottom:none; }
+/* CAIXA ALTA NA PROPOSTA. E como a operadora recebe e como o cadastro dela
+   guarda — nome digitado em caixa mista chega la e vira divergencia na analise.
+   O text-transform e so o que se VE enquanto digita; quem grava em caixa alta
+   de verdade e o JS no envio, porque CSS nao muda o valor do campo.
+   E-MAIL FICA DE FORA: caixa alta em e-mail nao ajuda em nada e ainda deixa o
+   endereco com cara de errado pra quem confere. */
+#form input[type="text"]:not([name*="email"]),
+#form input[type="tel"] { text-transform:uppercase; }
+#form input[type="email"] { text-transform:none; }
 .aviso { font-size:11px; color:var(--cinza-2); background:var(--panel-3); border:1px solid var(--borda); padding:5px 9px; border-radius:6px; margin-top:5px; display:inline-block; }
   /* Vinculo do lead. A escolha tem que ser obvia depois de feita — um chip
      que mostra @lid, nome e etapa, e nao so um id gravado num campo oculto. */
@@ -1126,6 +1139,14 @@ async function enviar() {
     toast('Confira os campos marcados em vermelho', 'err');
     return;
   }
+  // CAIXA ALTA NO QUE VAI SER GRAVADO. Aqui, e nao no oninput de cada campo:
+  // subir a letra enquanto a pessoa digita atrapalha quem esta corrigindo o
+  // meio de uma palavra. O olho ja ve maiuscula pelo text-transform; o valor
+  // sobe de uma vez, no envio. E-mail passa intacto.
+  form.querySelectorAll('input[type="text"], input[type="tel"]').forEach((el) => {
+    if (/e?mail/i.test(el.name || '') || /e?mail/i.test(el.id || '')) return;
+    if (el.value) el.value = el.value.toUpperCase();
+  });
   const btn = document.querySelector('.btn-salvar');
   btn.textContent='Salvando...'; btn.disabled=true;
   try {
