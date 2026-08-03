@@ -1322,13 +1322,33 @@
   const DOC = { estado: new Map(), sel: new Set() };
   const DOC_MAX_LOTE = 10;
 
-  function _docLinhaEhArquivo(row) {
+  // UMA LISTA SO. Antes a mesma lista de ancoras estava escrita em dois lugares
+  // (o "e arquivo?" e o "onde encolho o bloco?") — bastava eu melhorar uma pra
+  // foto ser reconhecida e mesmo assim nao ganhar botao, que foi o que
+  // aconteceu: PDF com "Juntar" e a foto do RG ao lado sem nada.
+  const _DOC_ANCORAS =
+    '[data-icon="document"], [data-icon*="document"], [data-icon="media-download"],' +
+    '[data-testid="media-canvas"], [data-icon="image"], [data-testid="image-thumb"],' +
+    'img[src^="blob:"], img[src^="data:image"]';
+
+  function _docAncora(row) {
     // Imagem ou PDF na bolha. Audio ja tem o proprio botao e fica de fora.
-    if (_trLinhaEhAudio(row)) return false;
-    return !!row.querySelector(
-      '[data-icon="document"], [data-icon*="document"], [data-icon="media-download"],' +
-      'img[src^="blob:"], [data-testid="media-canvas"], [data-icon="image"]');
+    if (_trLinhaEhAudio(row)) return null;
+    for (const el of row.querySelectorAll(_DOC_ANCORAS)) {
+      if (el.tagName === 'IMG') {
+        // Figurinha, emoji e foto de perfil tambem sao <img>. Nao ha documento
+        // nenhum pra ler ali — e um botao "Ler documento" embaixo de cada
+        // figurinha da conversa seria pior que nao ter botao.
+        const w = el.clientWidth || el.naturalWidth || 0;
+        if (w && w < 90) continue;
+        if (el.closest('[data-icon="sticker"], [aria-label*="igurinha"], [aria-label*="ticker"]')) continue;
+      }
+      return el;
+    }
+    return null;
   }
+
+  function _docLinhaEhArquivo(row) { return !!_docAncora(row); }
 
   // ETAPA E RELOGIO. Doze segundos em silencio parecem quarenta — foi por isso
   // que ouvi "compensa mandar pro ChatGPT". O trabalho e o mesmo; o que faltava
@@ -1815,9 +1835,7 @@
         const tentarDeNovo = solto && sd._jobTentativas <= 5;
         pendente = tentarDeNovo;
         if (!sd || tentarDeNovo) {
-          const ancoraD = row.querySelector(
-            '[data-icon="document"], [data-icon*="document"], [data-icon="media-download"],' +
-            'img[src^="blob:"], [data-testid="media-canvas"], [data-icon="image"]');
+          const ancoraD = _docAncora(row);
           const r = _trBolhaDoc(row, ancoraD);
           const lado = _trLado(ancoraD || r.alvo, row) === 'consultor' ? 'job-tr-dir' : 'job-tr-esq';
           // Ja estava solto e continua sem bolha: deixa quieto, nao fica pulando.
