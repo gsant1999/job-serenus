@@ -3576,7 +3576,81 @@
       '<button type="button" class="job-cnpj-btn" id="job-sinc-lid">Sincronizar @lid de todas as conversas</button>' +
       '<div class="job-sinc-dica" id="job-sinc-dica">Liga cada conversa do seu WhatsApp ao lead certo no CRM, ' +
         'pra o @lid aparecer nos cards. Só identifica conversa — não cria nem altera lead.</div>' +
+      // PASSO 2, e ele depende do 1: só alcança lead que já tem conversa ligada.
+      // Por isso mora logo abaixo, na mesma caixa, em vez de virar outra tela.
+      '<div class="job-sinc-sep"></div>' +
+      '<div class="job-sinc-per">' +
+        '<span>Leads que entraram de</span>' +
+        '<input type="date" id="job-var-de">' +
+        '<span>a</span>' +
+        '<input type="date" id="job-var-ate">' +
+      '</div>' +
+      '<button type="button" class="job-cnpj-btn" id="job-var-leads">Atualizar o CRM lendo essas conversas</button>' +
+      '<div class="job-sinc-dica" id="job-var-dica">Lê a conversa de cada lead SEU do período, interpreta e ' +
+        'preenche o CRM — inclusive avançando a etapa pelo score. Não cadastra ninguém novo: ' +
+        'só entra quem já é lead, então amigo e fornecedor ficam de fora. Deixe esta aba aberta até terminar.</div>' +
     '</div>';
+  }
+
+  // VARREDURA PELOS LEADS. O avesso da varredura de todo dia: em vez de pegar
+  // as conversas recentes do WhatsApp, pega os LEADS do consultor no período e
+  // lê a conversa de cada um.
+  //
+  // Duas coisas que isso resolve e a outra não: alcança conversa antiga (a
+  // diária tem teto de 7 dias) e não cadastra ninguém — tudo que entra na fila
+  // já é lead, então amigo e família ficam de fora por construção, sem depender
+  // de alguém marcar depois.
+  async function _ligarVarreduraLeads() {
+    const b = document.getElementById('job-var-leads');
+    if (!b) return;
+    const dica = (t) => { const e = document.getElementById('job-var-dica'); if (e) e.textContent = t; };
+    b.addEventListener('click', async () => {
+      const de = (document.getElementById('job-var-de') || {}).value || '';
+      const ate = (document.getElementById('job-var-ate') || {}).value || '';
+      const { usuarioId } = await _safeStorageGet(['usuarioId']);
+      if (!usuarioId) {
+        dica('Escolha o consultor no popup da extensão primeiro — é ele que diz de quem são os leads.');
+        return;
+      }
+      b.disabled = true; const r0 = b.textContent; b.textContent = 'Montando a lista…';
+      try {
+        const lista = await _safeSendMessage({ type: 'varredura_leads', consultor_id: usuarioId,
+                                               de: de, ate: ate, teto: 300 }).catch(() => null);
+        if (!lista || !lista.ok) {
+          b.disabled = false; b.textContent = r0;
+          dica('Não consegui montar a lista' + ((lista && lista.erro) ? ': ' + lista.erro : '.'));
+          return;
+        }
+        const fila = lista.conversas || [];
+        const semLigacao = lista.sem_conversa_vinculada || 0;
+        if (!fila.length) {
+          b.disabled = false; b.textContent = r0;
+          dica('Nenhum lead seu com conversa vinculada nesse período.' +
+               (semLigacao ? ' ' + semLigacao + ' lead(s) sem conversa ligada — rode "Sincronizar @lid" ali em cima primeiro.' : ''));
+          return;
+        }
+        let ok = 0, erro = 0;
+        for (let i = 0; i < fila.length; i++) {
+          b.textContent = 'Lendo ' + (i + 1) + '/' + fila.length + '…';
+          try {
+            await varreduraUmaConversa({ chat_id: fila[i].chat_id }, {});
+            ok++;
+          } catch (e) { erro++; }
+          // O MESMO respiro da varredura diária. Ler 300 conversas em rajada
+          // dentro do WhatsApp de alguém é o tipo de padrão que chama atenção —
+          // e o custo de ir devagar aqui é zero, porque isto roda uma vez.
+          await new Promise((r) => setTimeout(r, VAR.PAUSA_ENTRE_MS));
+          dica(ok + ' lida(s), ' + erro + ' com erro. Deixe a aba aberta.');
+        }
+        b.disabled = false; b.textContent = r0;
+        dica('Pronto: ' + ok + ' conversa(s) lida(s), ' + erro + ' com erro.' +
+             (semLigacao ? ' ' + semLigacao + ' lead(s) do período ficaram de fora por não ter conversa ligada.' : '') +
+             ' Abra o CRM pra ver o que foi preenchido.');
+      } catch (e) {
+        b.disabled = false; b.textContent = r0;
+        dica('Não deu: ' + ((e && e.message) || e));
+      }
+    });
   }
 
   async function _ligarSincLid() {
@@ -3681,7 +3755,7 @@
     } catch (e) { /* segue mesmo se falhar o report */ }
     _inboxCache = _inboxCache.filter(function (l) { return String(l.id) !== String(leadId); });
     atualizarBadgeInbox();
-    if (_secaoAtiva === 'inbox') { setCorpoSecaoInbox(renderInbox()); ligarAcoesInbox(); _ligarSincLid(); }
+    if (_secaoAtiva === 'inbox') { setCorpoSecaoInbox(renderInbox()); ligarAcoesInbox(); _ligarSincLid(); _ligarVarreduraLeads(); }
     var num = (telefone || '').replace(/\D/g, '');
     if (resp && resp.ok) {
       _avisoInbox('Funil disparado: ' + (resp.passos_enfileirados || 0) + ' mensagem(ns) na fila.', '#0f766e', num);

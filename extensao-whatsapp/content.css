@@ -615,6 +615,18 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-ficha-cron.parado { background: rgba(239,68,68,.16); color: #f87171; }
 .job-sinc { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--job-bg2); }
 .job-sinc-dica { margin-top: 8px; font-size: 10.5px; line-height: 1.5; color: var(--job-txt-fraco); opacity: .8; }
+/* Separador entre os dois passos da mesma caixa: sincronizar o @lid e depois
+   ler as conversas. Ficam juntos porque o segundo DEPENDE do primeiro. */
+.job-sinc-sep { height: 1px; background: var(--job-borda); margin: 14px 0 12px; }
+.job-sinc-per { display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  font-size: 12px; color: var(--job-txt-fraco); margin-bottom: 9px; }
+.job-sinc-per input[type="date"] { background: var(--job-bg2); border: 1px solid var(--job-borda);
+  border-radius: 7px; padding: 5px 8px; color: var(--job-txt); font-size: 12px;
+  font-family: inherit; color-scheme: dark; }
+/* O calendário nativo do Chrome se pinta pelo color-scheme, não pelas nossas
+   variáveis. Cravar 'dark' deixaria ele escuro dentro do tema claro. */
+body[data-job-tema="claro"] .job-sinc-per input[type="date"] { color-scheme: light; }
+
 .job-nomec { margin: 14px 0 4px; padding-top: 12px; border-top: 1px solid var(--job-bg2); }
 .job-nomec-tit { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700;
                  letter-spacing: .4px; text-transform: uppercase; color: var(--job-txt-fraco); margin-bottom: 8px; }

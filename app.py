@@ -19433,6 +19433,96 @@ def api_whatsapp_chats_vincular():
                              "ligados": ligados, "sem_lead": sem_lead}))
 
 
+@app.route('/api/whatsapp/varredura/leads', methods=['GET', 'OPTIONS'])
+def api_whatsapp_varredura_leads():
+    """As conversas a ler PARTINDO DOS LEADS — o avesso da varredura normal.
+
+    A varredura de todo dia parte da lista de conversas do WhatsApp: pega o que
+    teve mensagem nas últimas horas. Serve pro dia a dia e tem dois problemas
+    pra atualizar um CRM inteiro: não alcança conversa antiga (o teto é 7 dias)
+    e traz junto amigo, família e fornecedor — que viram card.
+
+    Aqui a lista vem do CRM: os leads DAQUELE consultor, no período pedido, que
+    já têm conversa vinculada. Nada de novo é cadastrado, porque tudo que entra
+    já é lead. É o que permite varrer um mês inteiro sem encher o funil de gente
+    que não é cliente.
+
+    Só devolve o que ler; quem lê e manda analisar é a extensão, na máquina do
+    consultor — o servidor não tem acesso ao WhatsApp de ninguém."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    try:
+        uid = int(request.args.get('consultor_id') or 0) or None
+    except (TypeError, ValueError):
+        uid = None
+    if not uid:
+        return _wa_cors(jsonify({"ok": False, "erro": "Diga de qual consultor"})), 400
+    de = (request.args.get('de') or '').strip()[:10]
+    ate = (request.args.get('ate') or '').strip()[:10]
+    try:
+        teto = min(int(request.args.get('teto') or 300), 800)
+    except (TypeError, ValueError):
+        teto = 300
+
+    conn = db()
+    q = """SELECT w.chat_id, l.id lead_id, l.nome, l.etapa, l.telefone,
+                  (SELECT MAX(a.criado_em) FROM whatsapp_analises a WHERE a.lead_id = l.id) analisado_em
+           FROM crm_leads l
+           JOIN wa_chat_lead w ON w.lead_id = l.id
+           WHERE l.responsavel_id = ?
+             AND NOT EXISTS (SELECT 1 FROM wa_conversa_ignorada i
+                             WHERE i.chat_id = w.chat_id
+                                OR (i.telefone_norm IS NOT NULL AND i.telefone_norm <> ''
+                                    AND i.telefone_norm = l.telefone_norm))"""
+    p = [uid]
+    # Período sobre a ENTRADA do lead (criado_em) — é assim que ele pensa o
+    # recorte ("os leads de julho"), não pela data da última mensagem.
+    if de:
+        q += " AND substr(CAST(l.criado_em AS TEXT), 1, 10) >= ?"
+        p.append(de)
+    if ate:
+        q += " AND substr(CAST(l.criado_em AS TEXT), 1, 10) <= ?"
+        p.append(ate)
+    # Quem nunca foi analisado primeiro: se o teto cortar, corta no que já tem
+    # leitura, não no que está virgem.
+    q += " ORDER BY analisado_em NULLS FIRST, l.id DESC" if DB_MODE == 'postgres' \
+         else " ORDER BY (analisado_em IS NOT NULL), l.id DESC"
+    q += " LIMIT ?"
+    p.append(teto)
+    try:
+        rows = conn.execute(q, p).fetchall()
+    except Exception as e:
+        close_db(conn)
+        app.logger.warning(f"[VARREDURA_LEADS] {e}")
+        return _wa_cors(jsonify({"ok": False, "erro": "não consegui montar a lista"})), 500
+
+    # Quantos leads dele NÃO têm conversa vinculada — é o numero que explica
+    # por que a varredura alcança menos do que o consultor espera, e o que
+    # fazer a respeito (sincronizar o @lid antes).
+    faltam = 0
+    try:
+        fq = "SELECT COUNT(*) c FROM crm_leads l WHERE l.responsavel_id=? AND NOT EXISTS " \
+             "(SELECT 1 FROM wa_chat_lead w WHERE w.lead_id=l.id)"
+        fp = [uid]
+        if de:
+            fq += " AND substr(CAST(l.criado_em AS TEXT), 1, 10) >= ?"; fp.append(de)
+        if ate:
+            fq += " AND substr(CAST(l.criado_em AS TEXT), 1, 10) <= ?"; fp.append(ate)
+        faltam = conn.execute(fq, fp).fetchone()['c']
+    except Exception:
+        pass
+    close_db(conn)
+    return _wa_cors(jsonify({
+        "ok": True,
+        "conversas": [{"chat_id": r['chat_id'], "lead_id": r['lead_id'],
+                       "nome": r['nome'] or '', "etapa": r['etapa'] or '',
+                       "ja_analisado": bool(r['analisado_em'])} for r in rows],
+        "sem_conversa_vinculada": faltam,
+    }))
+
+
 @app.route('/api/whatsapp/conversas/pendentes', methods=['POST', 'OPTIONS'])
 def api_whatsapp_conversas_pendentes():
     if request.method == 'OPTIONS':
