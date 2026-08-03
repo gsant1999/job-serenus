@@ -543,6 +543,16 @@
     if (a === 'planos') {
       return { planos: await planosDaOperadora(p.cotacaoId, p, p.operadoraId) };
     }
+    // Gravar cidade e contratação sem precisar listar operadora nenhuma.
+    //
+    // Quando o consultor já escolheu o plano na navegação, a cotação pula a
+    // listagem inteira e vai direto ao preço — mas o preço lê a cidade DA
+    // cotação. Sem este passo separado, pular a listagem traria de volta o
+    // http_500 por outro caminho.
+    if (a === 'filtro') {
+      await salvarFiltro(p.cotacaoId, p);
+      return { ok: true };
+    }
     if (a === 'selecionar') {
       // A peneira mora aqui, e nao na tela, pra existir uma regra so. Duas
       // copias da mesma regra divergem no primeiro ajuste.
@@ -662,7 +672,12 @@
     }
     const vidas = [{ faixa: '29-33', quantidade: 1 }];
     const achados = [];
-    for (let m = 0; m <= 5; m++) {
+    // Até 9, não até 5. A tela deles tem PF, PME e Adesão em Saúde E os mesmos
+    // três em Dental — são seis combinações possíveis, e eu só procurava seis
+    // códigos contando a partir do zero. Sondar alguns a mais custa uma
+    // consulta leve cada e evita concluir que um tipo "não existe" quando na
+    // verdade eu é que parei de procurar cedo.
+    for (let m = 0; m <= 9; m++) {
       try {
         const ops = await operadorasDaCidade(cotacaoId, { cidade, modalidade: m, vidas });
         if (ops.length) {
