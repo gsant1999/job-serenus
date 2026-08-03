@@ -343,6 +343,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // Rodizio da varredura: a extensao pergunta o que venceu e devolve o que
+  // varreu. O content script nao consegue falar com o JOB direto (CSP do
+  // WhatsApp), entao passa por aqui como todo o resto.
+  if (msg && msg.type === 'catalogo_proximo') {
+    chamarJob('/api/whatsapp/catalogo/proximo', 'GET', null, 15000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'catalogo_gravar') {
+    chamarJob('/api/whatsapp/catalogo/gravar', 'POST', msg.dados || {}, 30000).then(sendResponse);
+    return true;
+  }
   // O canario: a extensao contando o que ainda funciona nela.
   if (msg && msg.type === 'canario') {
     chamarJob('/api/whatsapp/canario', 'POST',

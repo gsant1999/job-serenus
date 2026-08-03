@@ -6002,6 +6002,63 @@
   _registrarLoop(setInterval(buscarInbox, 45000));
   ligarLoopInbox();
 
+  // ── VARREDURA DO CATALOGO, UM PEDACO POR VEZ ─────────────────────────────
+  //
+  //  Varrer todas as cidades de uma vez seriam centenas de consultas seguidas
+  //  ao Painel — rapido, e exatamente o pico que nao se parece com nenhum
+  //  corretor trabalhando. Entao vira rotina de fundo: de tempos em tempos
+  //  pergunta ao JOB se alguma cidade venceu o intervalo e faz UMA.
+  //
+  //  Mora aqui, no WhatsApp, porque esta e a aba que fica aberta o dia todo.
+  //  Agendador no servidor nao resolveria: quem fala com o Painel e o
+  //  navegador do corretor, nao o Railway.
+  //
+  //  Regras de convivencia, e elas sao o ponto:
+  //   · so roda se a aba do Painel estiver aberta — nunca abre aba sozinha;
+  //   · uma cidade por rodada, nunca duas;
+  //   · intervalo longo e irregular entre rodadas;
+  //   · datar mesmo quando falha, senao um alvo problematico bateria na porta
+  //     deles sem parar, todo ciclo, pra sempre.
+  const _VARRE_MIN = 22 * 60 * 1000;      // ~22 min entre tentativas
+  let _varreOcupada = false;
+
+  async function varreduraDeFundo() {
+    if (_varreOcupada) return;
+    _varreOcupada = true;
+    try {
+      const alvo = await chrome.runtime.sendMessage({ type: 'catalogo_proximo' });
+      if (!alvo || !alvo.ok || !alvo.alvo) return;      // nada vencido: fica quieto
+      const a = alvo.alvo;
+      const vidas = (alvo.faixas || []).map((f) => ({ faixa: f, quantidade: 1 }));
+      const r = await chrome.runtime.sendMessage({
+        type: 'cotador_catalogo',
+        pedido: { cidade: a.cidade, modalidade: a.modalidade, vidas },
+      });
+      if (!r || !r.ok) {
+        // Painel fechado nao e erro do alvo: nao data, so tenta na proxima.
+        if (r && (r.motivo === 'painel_fechado' || r.motivo === 'painel_precisa_recarregar')) return;
+        await chrome.runtime.sendMessage({ type: 'catalogo_gravar',
+          dados: { cidade: a.cidade, modalidade: a.modalidade,
+                   erro: (r && r.motivo) || 'sem_resposta' } });
+        return;
+      }
+      await chrome.runtime.sendMessage({ type: 'catalogo_gravar', dados: r.dados });
+    } catch (e) {
+      /* varredura de fundo nunca pode atrapalhar o consultor */
+    } finally {
+      _varreOcupada = false;
+    }
+  }
+
+  // Primeira tentativa bem depois de abrir: os primeiros minutos do WhatsApp
+  // ja sao disputados, e isto nao tem pressa nenhuma.
+  setTimeout(varreduraDeFundo, 4 * 60 * 1000);
+  _registrarLoop(setInterval(() => {
+    // Intervalo irregular: um relogio certinho de 22 em 22 minutos, todo dia,
+    // e um padrao. Somar um tanto aleatorio nao custa nada e tira o padrao.
+    if (Math.random() < 0.75) varreduraDeFundo();
+  }, _VARRE_MIN));
+
   // Formata o telefone (dígitos) num rótulo BR legível pro aviso de limpeza.
   function fmtTelLimpezaBr(t) {
     const d = String(t || '').replace(/\D/g, '');

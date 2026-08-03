@@ -176,7 +176,20 @@
   </div>
 
   <div class="ct-bloco">
-    <h3>Rodar a varredura</h3>
+    <h3>Rodízio mensal</h3>
+    <p class="ajuda">Varrer tudo de uma vez seriam centenas de consultas seguidas ao Painel —
+       rápido, e exatamente o pico que não se parece com nenhum corretor trabalhando.
+       Marcadas aqui, as cidades são revisitadas <b>uma por vez, ao longo do mês</b>, pela
+       extensão, enquanto você trabalha. Ela só age com o Painel aberto e nunca abre aba sozinha.</p>
+    <div class="ct-linha-acao">
+      <button type="button" class="btn-outline btn-sm" id="btRodizio">Pôr as marcadas no rodízio</button>
+      <span class="ct-conta" id="rodizioMsg"></span>
+    </div>
+    <div id="rodizioLista" style="margin-top:12px"></div>
+  </div>
+
+  <div class="ct-bloco">
+    <h3>Rodar a varredura agora</h3>
     <p class="ajuda">Uma consulta por operadora, uma cidade de cada vez, com intervalo irregular
        de propósito. Não é lentidão: é o que faz a varredura parecer um corretor trabalhando em
        vez de um robô. Pode parar no meio — o que já entrou fica guardado, e a próxima rodada
@@ -530,9 +543,55 @@
     atualizarPrevisao();
   };
 
+  // ── rodízio mensal ─────────────────────────────────────────────────────
+  async function carregarRodizio() {
+    var r = await fetch('/cotacao/catalogo/alvos')
+      .then(function (x) { return x.json(); }).catch(function () { return {}; });
+    var alvos = (r && r.alvos) || [];
+    var c = el('rodizioLista');
+    if (!alvos.length) {
+      c.innerHTML = '<span class="ct-conta">Nada no rodízio ainda. Marque cidades acima e ' +
+        'clique no botão — depois disso a extensão cuida sozinha.</span>';
+      return;
+    }
+    c.innerHTML = '<table class="ct-tab"><thead><tr><th>Cidade</th><th>Contratação</th>' +
+      '<th>Última varredura</th><th class="num">Planos</th><th>A cada</th></tr></thead><tbody>' +
+      alvos.map(function (a) {
+        var atrasado = !a.ultima_em;
+        return '<tr><td>' + a.cidade + '</td>' +
+          '<td>' + (MODALIDADES[a.modalidade] || ('código ' + a.modalidade)) + '</td>' +
+          '<td' + (atrasado ? ' style="color:var(--laranja)"' : '') + '>' +
+            (a.ultima_em || 'nunca — está na fila') +
+            (a.ultimo_erro ? ' <span style="color:var(--rosa)">· ' + a.ultimo_erro + '</span>' : '') +
+          '</td>' +
+          '<td class="num">' + (a.planos || 0) + '</td>' +
+          '<td>' + (a.intervalo_dias || 30) + ' dias</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  el('btRodizio').onclick = async function () {
+    var cidades = alvos();
+    var mods = Object.keys(MODALIDADES).map(Number);
+    if (!cidades.length) { el('rodizioMsg').textContent = 'Marque ao menos uma cidade.'; return; }
+    var lista = [];
+    cidades.forEach(function (cid) {
+      mods.forEach(function (m) { lista.push({ cidade: cid, modalidade: m, intervalo_dias: 30 }); });
+    });
+    this.disabled = true;
+    var r = await fetch('/cotacao/catalogo/alvos', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ alvos: lista })
+    }).then(function (x) { return x.json(); }).catch(function () { return { ok: false }; });
+    this.disabled = false;
+    el('rodizioMsg').textContent = r.ok
+      ? lista.length + ' combinação(ões) no rodízio. A extensão começa sozinha.'
+      : 'Não deu pra salvar.';
+    carregarRodizio();
+  };
+
   // ── início ─────────────────────────────────────────────────────────────
   (async function () {
-    montarFiltros(); montarMods(); montarCidades(); filtrar();
+    montarFiltros(); montarMods(); montarCidades(); filtrar(); carregarRodizio();
     var r = await pedir('cotador_estado', {}, 8000);
     ligado = !!(r.ok && !(r.faltando || []).length);
     if (!ligado) {

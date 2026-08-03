@@ -222,6 +222,13 @@
       <div class="cv-campo">
         <label for="modalidade">Tipo de contratação</label>
         <select id="modalidade"></select>
+        <!-- PF e Adesão existem no Painel, mas como códigos que ninguém
+             documentou. Em vez de chutar (o que faria cotar produto errado
+             mostrando como certo), a extensão pergunta e você batiza. -->
+        <div id="modFaltando" style="display:none;font-size:11.5px;margin-top:6px">
+          <button type="button" class="btn-outline btn-sm" id="btAcharMod">Faltam PF e Adesão?</button>
+        </div>
+        <div id="modAchados" style="font-size:12px;margin-top:8px"></div>
       </div>
     </div>
 
@@ -576,14 +583,59 @@
 
   function montarModalidades() {
     var s = el('modalidade');
+    var antes = s.value;
     s.innerHTML = '';
     Object.keys(MODALIDADES).forEach(function (c) {
       var o = document.createElement('option');
       o.value = c; o.textContent = MODALIDADES[c];
       s.appendChild(o);
     });
-    s.value = '2';
+    s.value = (antes && MODALIDADES[antes]) ? antes : '2';
+    // A tela deles tem PF, PME e Adesão. Enquanto tivermos menos que isso,
+    // oferece descobrir — em vez de deixar o consultor achando que só existe PME.
+    el('modFaltando').style.display = Object.keys(MODALIDADES).length < 3 ? 'block' : 'none';
   }
+
+  // Descobre os códigos perguntando ao Painel quem atende em cada um.
+  //
+  // Chutar que 1 é PF seria pedir preço do produto errado e mostrar como certo.
+  // A extensão traz a lista de operadoras de cada código e você reconhece qual
+  // é qual — a lista de PF não se parece com a de PME. Uma vez na vida.
+  el('btAcharMod').onclick = async function () {
+    var cidade = cidadeEscolhida;
+    if (!cidade) { el('modAchados').textContent = 'Escolha a cidade primeiro.'; return; }
+    this.disabled = true;
+    el('modAchados').textContent = 'Perguntando ao Painel por ' + cidade + '…';
+    var r = await pedir('descobrir_modalidades', { pedido: { cidade: cidade } }, 90000);
+    this.disabled = false;
+    if (!r.ok) { el('modAchados').textContent = 'Não deu: ' + (r.motivo || '?'); return; }
+    var achados = (r.dados && r.dados.achados) || [];
+    if (!achados.length) { el('modAchados').textContent = 'Nenhum código respondeu.'; return; }
+    var c = el('modAchados');
+    c.innerHTML = achados.map(function (a) {
+      return '<div style="display:flex;gap:7px;align-items:center;margin:7px 0;flex-wrap:wrap">' +
+        '<span class="marca">código ' + a.codigo + '</span>' +
+        '<span style="flex:1;min-width:170px;color:var(--cinza);font-size:11.5px">' +
+          a.quantas + ' operadoras: ' + esc(a.amostra.join(', ')) + '…</span>' +
+        '<input data-cod="' + a.codigo + '" placeholder="PF, PME, Adesão…" value="' +
+          esc(MODALIDADES[a.codigo] || '') + '" style="background:var(--panel-2);' +
+          'border:1px solid var(--borda-2);border-radius:8px;padding:6px 9px;' +
+          'color:var(--texto);font-size:12.5px;width:130px">' +
+        '<button type="button" class="btn btn-sm" data-salvar="' + a.codigo + '">Salvar</button></div>';
+    }).join('');
+    c.querySelectorAll('[data-salvar]').forEach(function (b) {
+      b.onclick = async function () {
+        var cod = b.dataset.salvar;
+        var nome = (c.querySelector('[data-cod="' + cod + '"]').value || '').trim();
+        if (!nome) return;
+        var resp = await fetch('/cotacao/modalidade', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ codigo: Number(cod), nome: nome })
+        }).then(function (x) { return x.json(); }).catch(function () { return { ok: false }; });
+        if (resp.ok) { MODALIDADES = resp.modalidades; montarModalidades(); b.textContent = 'Salvo'; }
+      };
+    });
+  };
 
   // ── vidas por faixa ────────────────────────────────────────────────────
   var vidas = {};

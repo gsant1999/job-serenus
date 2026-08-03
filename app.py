@@ -1413,6 +1413,18 @@ def init_db():
                 visto_em TIMESTAMP, sumiu_em TIMESTAMP,
                 UNIQUE (cidade, modalidade, chave)
             )""",
+            # Rodizio da varredura: o que precisa ser revisitado e de quanto em
+            # quanto tempo. Uma cidade+contratacao por vez, espalhado ao longo
+            # do mes — 350 cotacoes de uma vez seria rapido e seria exatamente
+            # o que nao podemos fazer.
+            """CREATE TABLE IF NOT EXISTS catalogo_alvo (
+                id SERIAL PRIMARY KEY,
+                cidade TEXT NOT NULL, modalidade INTEGER NOT NULL,
+                ativo INTEGER DEFAULT 1, intervalo_dias INTEGER DEFAULT 30,
+                ultima_em TIMESTAMP, ultimo_erro TEXT DEFAULT '',
+                planos INTEGER DEFAULT 0, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (cidade, modalidade)
+            )""",
             """CREATE TABLE IF NOT EXISTS catalogo_varredura (
                 id SERIAL PRIMARY KEY,
                 usuario_id INTEGER, iniciado_em TIMESTAMP, terminado_em TIMESTAMP,
@@ -2281,6 +2293,14 @@ def init_db():
             chave TEXT DEFAULT '',
             visto_em TIMESTAMP, sumiu_em TIMESTAMP,
             UNIQUE (cidade, modalidade, chave)
+        );
+        CREATE TABLE IF NOT EXISTS catalogo_alvo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cidade TEXT NOT NULL, modalidade INTEGER NOT NULL,
+            ativo INTEGER DEFAULT 1, intervalo_dias INTEGER DEFAULT 30,
+            ultima_em TIMESTAMP, ultimo_erro TEXT DEFAULT '',
+            planos INTEGER DEFAULT 0, criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (cidade, modalidade)
         );
         CREATE TABLE IF NOT EXISTS catalogo_varredura (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24089,6 +24109,128 @@ def cotacao_modalidade_nomear():
         conn.rollback()
         return jsonify({'ok': False, 'erro': 'falha_ao_salvar'}), 500
     return jsonify({'ok': True, 'modalidades': _modalidades_conhecidas(conn)})
+
+
+# ─── RODÍZIO DA VARREDURA ───────────────────────────────────────────────────
+#
+# Varrer 350 combinações de uma vez seria rápido e seria exatamente o que não
+# podemos fazer: é um pico que não se parece com nenhum corretor trabalhando.
+#
+# Então vira rotina de fundo: a extensão pergunta de tempos em tempos "tem
+# alguma cidade vencida?" e faz UMA. Espalhado ao longo do mês, cada pedaço é
+# indistinguível de alguém olhando planos — porque é exatamente isso que um
+# corretor faz o dia inteiro.
+#
+# Mora na extensão do WhatsApp de propósito: é a aba que fica aberta o dia
+# todo. Um agendador no servidor não resolveria — quem fala com o Painel é o
+# navegador do corretor, não o Railway.
+
+def _catalogo_alvo_vencido(conn):
+    """O alvo mais atrasado que já passou do intervalo. None se nada vencido."""
+    try:
+        linhas = conn.execute(
+            """SELECT * FROM catalogo_alvo WHERE ativo=1
+                ORDER BY (ultima_em IS NULL) DESC, ultima_em ASC LIMIT 20""").fetchall()
+    except Exception:
+        return None
+    agora = datetime.now(TZ_SP)
+    for r in linhas:
+        if not r['ultima_em']:
+            return dict(r)          # nunca varrido: é o mais urgente que existe
+        d = _parse_dt_seguro(r['ultima_em'])
+        if not d:
+            return dict(r)
+        if d.tzinfo is None:
+            d = TZ_SP.localize(d)
+        if (agora - d).days >= int(r['intervalo_dias'] or 30):
+            return dict(r)
+    return None
+
+
+@app.route('/cotacao/catalogo/alvos', methods=['GET', 'POST'])
+@login_required
+def cotacao_catalogo_alvos():
+    """Quais cidades entram no rodízio mensal."""
+    conn = db()
+    if request.method == 'POST':
+        d = request.get_json(silent=True) or {}
+        itens = d.get('alvos') or []
+        try:
+            if d.get('substituir'):
+                conn.execute("DELETE FROM catalogo_alvo")
+            for it in itens:
+                cidade = str(it.get('cidade') or '').strip()
+                if not cidade:
+                    continue
+                try:
+                    mod = int(it.get('modalidade'))
+                except Exception:
+                    continue
+                conn.execute(
+                    """INSERT INTO catalogo_alvo (cidade, modalidade, ativo, intervalo_dias, criado_em)
+                       VALUES (?,?,1,?,?)
+                       ON CONFLICT (cidade, modalidade) DO UPDATE SET
+                         ativo=1, intervalo_dias=excluded.intervalo_dias""",
+                    (cidade, mod, int(it.get('intervalo_dias') or 30), _agora_sp()))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            return jsonify({'ok': False, 'erro': 'falha_ao_salvar'}), 500
+    try:
+        linhas = conn.execute(
+            "SELECT * FROM catalogo_alvo ORDER BY cidade, modalidade").fetchall()
+    except Exception:
+        linhas = []
+    venc = _catalogo_alvo_vencido(conn)
+    return jsonify({'ok': True, 'alvos': [dict(r) for r in linhas],
+                    'vencido': venc, 'agora': _agora_sp()})
+
+
+@app.route('/api/whatsapp/catalogo/proximo', methods=['GET', 'OPTIONS'])
+def api_whatsapp_catalogo_proximo():
+    """A extensão pergunta: tem alguma cidade vencida pra varrer agora?"""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Chave da extensão inválida'})), 401
+    conn = db()
+    alvo = _catalogo_alvo_vencido(conn)
+    return _wa_cors(jsonify({'ok': True, 'alvo': alvo,
+                             'faixas': [_FAIXA_JOB_PARA_PAINEL.get(f, f) for f in FAIXAS_ETARIAS]}))
+
+
+@app.route('/api/whatsapp/catalogo/gravar', methods=['POST', 'OPTIONS'])
+def api_whatsapp_catalogo_gravar():
+    """A extensão devolve o resultado de uma varredura e o alvo é datado."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Chave da extensão inválida'})), 401
+    d = request.get_json(silent=True) or {}
+    conn = db()
+    erro = str(d.get('erro') or '')[:200]
+    r = {'operadoras': 0, 'planos': 0}
+    if not erro:
+        try:
+            r = _catalogo_gravar(conn, d)
+        except ValueError as e:
+            return _wa_cors(jsonify({'ok': False, 'erro': str(e)})), 400
+        except Exception:
+            conn.rollback()
+            return _wa_cors(jsonify({'ok': False, 'erro': 'falha_ao_gravar'})), 500
+    # Data mesmo quando deu erro: sem isso um alvo problemático seria tentado
+    # sem parar, todo ciclo, para sempre — e seria justamente o alvo que mais
+    # bate na porta deles.
+    try:
+        conn.execute(
+            """UPDATE catalogo_alvo SET ultima_em=?, ultimo_erro=?, planos=?
+                WHERE cidade=? AND modalidade=?""",
+            (_agora_sp(), erro, int(r.get('planos') or 0),
+             str(d.get('cidade') or ''), int(d.get('modalidade') or 2)))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    return _wa_cors(jsonify({'ok': True, **r}))
 
 
 @app.route('/api/whatsapp/cotacao', methods=['POST', 'OPTIONS'])

@@ -210,5 +210,46 @@ pr3 = c.get('/cotacao/catalogo/produtos.json?cidade=Nao Varrida - SP').get_json(
 ok(pr3['produtos'] == [], '16d. cidade sem catalogo devolve vazio, nao erro')
 
 
+# 17. Rodizio mensal: alvos, quem esta vencido, e datar depois de varrer
+rv = c.post('/cotacao/catalogo/alvos', json={'alvos': [
+    {'cidade': 'Campinas - SP', 'modalidade': 2, 'intervalo_dias': 30},
+    {'cidade': 'Hortolandia - SP', 'modalidade': 2, 'intervalo_dias': 30}]}).get_json()
+ok(rv['ok'] and len(rv['alvos']) == 2, '17. poe cidades no rodizio', str(len(rv['alvos'])))
+ok(rv['vencido'] is not None, '17b. quem nunca foi varrido ja conta como vencido',
+   (rv['vencido'] or {}).get('cidade'))
+
+# Duas vezes o mesmo alvo nao duplica
+rv2 = c.post('/cotacao/catalogo/alvos', json={'alvos': [
+    {'cidade': 'Campinas - SP', 'modalidade': 2}]}).get_json()
+ok(len(rv2['alvos']) == 2, '17c. por o mesmo alvo de novo nao duplica', str(len(rv2['alvos'])))
+
+# A extensao sem chave nao consegue perguntar nem gravar
+ok(c.get('/api/whatsapp/catalogo/proximo').status_code == 401,
+   '17d. extensao sem chave e barrada ao perguntar')
+ok(c.post('/api/whatsapp/catalogo/gravar', json={}).status_code == 401,
+   '17e. extensao sem chave e barrada ao gravar')
+
+# Depois de varrer, o alvo fica datado e sai da fila
+conn.execute("UPDATE catalogo_alvo SET ultima_em=? WHERE cidade=?", (A._agora_sp(), 'Campinas - SP'))
+conn.commit()
+rv3 = c.get('/cotacao/catalogo/alvos').get_json()
+venc = rv3['vencido']
+ok(venc and venc['cidade'] == 'Hortolandia - SP',
+   '17f. o vencido passa a ser o outro', (venc or {}).get('cidade'))
+
+# Com todos datados hoje, nada vencido
+conn.execute("UPDATE catalogo_alvo SET ultima_em=?", (A._agora_sp(),))
+conn.commit()
+ok(c.get('/cotacao/catalogo/alvos').get_json()['vencido'] is None,
+   '17g. com tudo em dia, a extensao nao tem o que fazer')
+
+# Alvo antigo volta pra fila
+conn.execute("UPDATE catalogo_alvo SET ultima_em='2020-01-01 10:00:00' WHERE cidade=?",
+             ('Hortolandia - SP',))
+conn.commit()
+v4 = c.get('/cotacao/catalogo/alvos').get_json()['vencido']
+ok(v4 and v4['cidade'] == 'Hortolandia - SP', '17h. passado o intervalo, volta pra fila')
+
+
 print('\n' + ('%d FALHA(S)' % len(falhas) if falhas else 'tudo passou (final)'))
 sys.exit(1 if falhas else 0)
