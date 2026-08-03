@@ -21,7 +21,7 @@
   'use strict';
 
   const _SABE = ['abrir_chat', 'cotar', 'passo', 'abas', 'catalogo', 'cotador_estado',
-                 'cotador_cidades', 'descobrir_modalidades'];
+                 'cotador_cidades', 'descobrir_modalidades', 'canario_agora'];
   let _versao = '';
   try { _versao = chrome.runtime.getManifest().version; } catch (e) { /* contexto órfão */ }
 
@@ -34,6 +34,10 @@
                chatId: String(d.chatId || '').slice(0, 120),
                texto: String(d.texto || '').slice(0, 4000) };
     }
+    // 'Testar agora' da tela de Configuracoes: a pagina pede o diagnostico na
+    // hora, em vez de esperar a rodada de 6h — que era a unica forma de saber
+    // se uma peca voltou a funcionar depois de uma correcao.
+    if (d.tipo === 'canario_agora') return { type: 'canario_agora' };
     if (d.tipo === 'cotar') return { type: 'cotar_painel', pedido: d.pedido };
     // `aba` diz em QUAL aba do Painel executar. É o que permite a tela rodar
     // mais de uma frente ao mesmo tempo sem que duas escrevam na mesma cotação.

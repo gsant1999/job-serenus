@@ -182,8 +182,18 @@ async function akRevogar(id, nome){
 <div class="card">
   <div class="card-header"><h3>Saúde da extensão<i class="ajuda-i" title="A extensão roda dentro do WhatsApp, que muda sem avisar. A cada 6 horas ela testa cada peça em separado e conta o resultado aqui. O objetivo é você descobrir uma quebra em horas, por esta tela, e não dias depois pela reclamação de um consultor. Nada aqui envia mensagem nem baixa arquivo: só verifica se as peças respondem.">i</i></h3></div>
   <div class="card-body">
+    {# TESTAR AGORA. Sem este botão, saber se uma peça voltou a funcionar era
+       esperar a rodada de 6 h ou reabrir o WhatsApp — e até lá a tela continuava
+       dizendo "quebrou" mesmo com a correção já no ar. Diagnóstico que só se
+       atualiza sozinho não serve pra confirmar conserto. #}
+    <div class="can-testar-linha">
+      <button type="button" class="btn-testar-canario" id="btn-canario" onclick="testarCanario()">
+        Testar agora
+      </button>
+      <span class="can-testar-msg" id="canario-msg">Roda o teste na hora, na aba do WhatsApp que estiver aberta.</span>
+    </div>
     {% if not canario.ultima %}
-      <div class="vazio">A extensão ainda não reportou nada. O primeiro teste roda 40 segundos depois de abrir o WhatsApp.</div>
+      <div class="vazio">A extensão ainda não reportou nada. O primeiro teste roda 40 segundos depois de abrir o WhatsApp — ou clique em "Testar agora".</div>
     {% else %}
     {# O cabecalho e o resumo que decide se vale continuar lendo: quantas pecas
        cairam, e ha quanto tempo a extensao nao da noticia. Verde velho engana
@@ -328,6 +338,14 @@ async function akRevogar(id, nome){
   .vr-cons { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer;
     background:var(--panel-2); border:1px solid var(--borda); border-radius:20px; padding:5px 12px; }
   .vr-cons.on { border-color:var(--azul); color:var(--texto); }
+  .can-testar-linha { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .btn-testar-canario { background:var(--azul); color:#fff; border:none; border-radius:8px;
+    padding:8px 16px; font-size:13px; font-weight:600; cursor:pointer; transition:.15s; }
+  .btn-testar-canario:hover { filter:brightness(1.08); }
+  .btn-testar-canario:disabled { opacity:.6; cursor:progress; }
+  .can-testar-msg { font-size:12.5px; color:var(--cinza-2); }
+  .can-testar-msg.erro { color:var(--rosa); }
+  .can-testar-msg.bom { color:var(--verde); }
 </style>
 <script>
 async function _vr(body){
@@ -359,6 +377,53 @@ document.querySelectorAll('.vr-cons input[data-uid]').forEach(el=>{
     await _vr({acao:'consultor', usuario_id:+el.dataset.uid, ativo:el.checked});
   });
 });
+
+// TESTAR AGORA: pede o diagnóstico à extensão na hora e recarrega a tabela.
+// Fala com a extensão pelo mesmo caminho da cotação (postMessage → site-bridge).
+// Cada erro tem a SUA frase: "não respondeu" e "WhatsApp fechado" pedem coisas
+// diferentes de quem está lendo, e um "erro" genérico não diz nem por onde começar.
+function testarCanario(){
+  const b = document.getElementById('btn-canario');
+  const m = document.getElementById('canario-msg');
+  if(!b || b.disabled) return;
+  const dizer = (txt, classe) => { m.className = 'can-testar-msg' + (classe ? ' ' + classe : ''); m.textContent = txt; };
+  b.disabled = true; b.textContent = 'Testando…';
+  dizer('Pedindo o teste à extensão…');
+  const reqId = 'can' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+  let respondeu = false;
+  function ouvir(ev){
+    if(ev.source !== window) return;
+    const d = ev.data;
+    if(!d || d.source !== 'JOB_SITE_RESP' || d.reqId !== reqId) return;
+    respondeu = true;
+    window.removeEventListener('message', ouvir);
+    b.disabled = false; b.textContent = 'Testar agora';
+    if(d.ok){
+      dizer('Teste feito. Atualizando a tabela…', 'bom');
+      setTimeout(()=>location.reload(), 700);
+      return;
+    }
+    const mot = String(d.motivo || '');
+    if(mot.indexOf('whatsapp_fechado') > -1)
+      dizer('Abra o WhatsApp Web numa aba — o teste só existe de dentro dele.', 'erro');
+    else if(mot.indexOf('aba_sem_extensao') > -1)
+      dizer('A aba do WhatsApp está aberta mas sem a extensão. Dê F5 nela.', 'erro');
+    else if(mot.indexOf('ponte_nao_conhece') > -1)
+      dizer('Sua extensão é anterior a este botão. Recarregue ela em chrome://extensions.', 'erro');
+    else
+      dizer('Não consegui testar' + (mot ? ' (' + mot + ')' : '') + '.', 'erro');
+  }
+  window.addEventListener('message', ouvir);
+  window.postMessage({source:'JOB_SITE_REQ', tipo:'canario_agora', reqId:reqId}, '*');
+  // O canário roda até 20 s de leitura lá dentro; 30 s cobre com folga sem
+  // deixar o botão travado pra sempre se a extensão não estiver escutando.
+  setTimeout(()=>{
+    if(respondeu) return;
+    window.removeEventListener('message', ouvir);
+    b.disabled = false; b.textContent = 'Testar agora';
+    dizer('A extensão não respondeu. Ela está instalada e o WhatsApp aberto?', 'erro');
+  }, 30000);
+}
 </script>
 {% endif %}
 {% endblock %}

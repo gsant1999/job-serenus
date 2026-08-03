@@ -5890,6 +5890,27 @@
     return true;
   });
 
+  // "TESTAR AGORA", pedido da tela de Configuracoes do JOB.
+  //
+  // Sem isto, saber se uma peca voltou a funcionar era esperar a rodada
+  // periodica (6h) ou reabrir o WhatsApp — e enquanto isso a tela continuava
+  // dizendo "quebrou" mesmo depois da correcao ter subido. Diagnostico que so
+  // atualiza sozinho nao serve pra confirmar conserto.
+  chrome.runtime.onMessage.addListener((msg, _rem, responder) => {
+    if (!msg || msg.type !== 'canario_agora') return;
+    (async () => {
+      try {
+        const checagens = await canarioRodar('pedido pela tela do JOB');
+        const ruins = (checagens || []).filter((c) => !c.ok);
+        responder({ ok: true, total: (checagens || []).length, quebradas: ruins.length,
+                    versao: _versaoExt() });
+      } catch (e) {
+        responder({ ok: false, motivo: String((e && e.message) || e).slice(0, 160) });
+      }
+    })();
+    return true;
+  });
+
   window.addEventListener('message', async (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;

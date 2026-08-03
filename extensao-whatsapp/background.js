@@ -451,6 +451,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // nela e manda o content script trocar de conversa por dentro. Nada recarrega.
   // So cria aba nova quando NAO existe nenhuma, que e o unico caso em que
   // carregar do zero e inevitavel.
+  // "Testar agora" da tela de Configuracoes: manda o canario rodar JA, na aba
+  // do WhatsApp que estiver aberta, e devolve o resultado pra pagina.
+  // Sem aba aberta nao ha o que testar — e isso e resposta, nao erro: o
+  // diagnostico so existe de dentro do WhatsApp.
+  if (msg && msg.type === 'canario_agora') {
+    chrome.tabs.query({}, (abas) => {
+      const aba = (abas || []).find((a) => a && a.url && a.url.indexOf('web.whatsapp.com') > -1);
+      if (!aba) { sendResponse({ ok: false, motivo: 'whatsapp_fechado' }); return; }
+      chrome.tabs.sendMessage(aba.id, { type: 'canario_agora' }, (r) => {
+        if (chrome.runtime.lastError) {
+          sendResponse({ ok: false, motivo: 'aba_sem_extensao' });
+          return;
+        }
+        sendResponse(r || { ok: false, motivo: 'sem_resposta' });
+      });
+    });
+    return true;
+  }
   if (msg && msg.type === 'abrir_chat_whatsapp') {
     const tel = String(msg.telefone || '').replace(/\D/g, '');
     const texto = String(msg.texto || '').slice(0, 4000);
