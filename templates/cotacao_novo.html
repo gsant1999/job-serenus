@@ -478,6 +478,25 @@
   // ── estado da ligação ──────────────────────────────────────────────────
   var pronto = false;
   var EXPLICA = {
+    // O ATALHO VENCEU — e o conserto é do consultor, não meu.
+    //
+    // O Painel do Corretor é Next.js: cada ação de servidor tem um código
+    // gerado por BUILD. Quando a Trindade publica uma versão, os códigos que a
+    // extensão aprendeu viram inválidos e o servidor responde 404. Não é bug
+    // nosso nem deles — é o preço de conversar por dentro do sistema.
+    //
+    // A extensão reaprende sozinha OBSERVANDO: basta uma cotação feita na mão
+    // no Painel. Por isso este aviso não pede pra "avisar o suporte": pede a
+    // única coisa que resolve, e que leva um minuto.
+    hash_expirado: { classe: 'off', rotulo: 'O Painel foi atualizado',
+      html: '<b>O Painel do Corretor publicou uma versão nova e o atalho que o JOB usava venceu.</b> ' +
+            'Isso acontece de tempos em tempos e o conserto é rápido — a extensão reaprende sozinha ' +
+            'vendo você usar o Painel uma vez.' +
+            '<ol><li>Vá na aba do <b>Painel do Corretor</b>.</li>' +
+            '<li>Faça <b>uma cotação na mão</b>, até <b>ver o preço na tela</b> — é esse passo que ela precisa ver.</li>' +
+            '<li>Volte aqui e clique em <b>Cotar</b> de novo.</li></ol>' +
+            '<p style="margin:8px 0 0;font-size:11.5px;color:var(--cinza-2)">Não precisa salvar nem ' +
+            'terminar a cotação lá — só chegar até o preço aparecer.</p>' },
     extensao_nao_respondeu: { classe: 'off', rotulo: 'Extensão não responde',
       html: '<b>A extensão do JOB não respondeu.</b> Sem ela esta tela não cota, porque quem ' +
             'fala com o Painel é o seu próprio navegador.<ol><li>Confira se a extensão está ' +
@@ -515,7 +534,10 @@
     if (motivo === 'extensao_nao_respondeu' && extensaoPresente) {
       motivo = extensaoSabeCotar ? 'painel_fechado' : 'aba_desatualizada';
     }
-    var e = EXPLICA[motivo];
+    // O motivo vem com o passo colado ('hash_expirado:preco') pra o diagnóstico
+    // não perder onde quebrou. A explicação é a mesma pros sete passos.
+    var e = EXPLICA[motivo] || (String(motivo || '').indexOf('hash_expirado') === 0
+                                ? EXPLICA.hash_expirado : null);
     if (!e) {
       // Os DOIS lados da chamada que falhou: o que eu mandei e o que eles
       // responderam. A resposta sozinha é um digest opaco do Next e não diz
@@ -1242,6 +1264,13 @@
       return;
     }
     var comPreco = planos.filter(function (p) { return p.total != null; });
+    // NENHUM PREÇO E TODOS PELO MESMO MOTIVO: isso não é "os planos não têm
+    // preço", é uma peça quebrada. O consultor precisa do conserto no topo, não
+    // de um rótulo repetido em cada cartão que ele teria que decifrar sozinho.
+    if (!comPreco.length && planos.length &&
+        planos.every(function (p) { return String(p.motivo || '').indexOf('hash_expirado') === 0; })) {
+      tratarFalha('hash_expirado');
+    }
     el('resumo').innerHTML = '<b>' + comPreco.length + '</b> com preço · mais barato <b>' +
       moeda(comPreco.length ? comPreco[0].total : null) + '</b> · <b>' +
       ((d.ms || 0) / 1000).toFixed(1) + 's</b>' +
@@ -1270,7 +1299,9 @@
             '<b>' + moeda(p.total) + '</b><span>' +
             (p.total == null
               ? '<span title="' + esc(p.motivo || '') + '">' +
-                (p.motivo === 'sem_valor_na_resposta' ? 'sem preço' : esc(p.motivo || 'falhou')) + '</span>'
+                (p.motivo === 'sem_valor_na_resposta' ? 'sem preço'
+                 : String(p.motivo || '').indexOf('hash_expirado') === 0 ? 'Painel atualizado'
+                 : esc(p.motivo || 'falhou')) + '</span>'
               : 'por mês, ' + totalVidas() + ' vidas') + '</span></div>' +
         '</div><div class="cv-detalhe"></div>';
       var det = div.querySelector('.cv-detalhe');

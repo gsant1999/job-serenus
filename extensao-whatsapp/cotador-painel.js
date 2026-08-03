@@ -300,6 +300,30 @@
       // rodada e o Guilherme refaz o trabalho todo.
       let pista = '';
       try { pista = (await resp.text() || '').replace(/\s+/g, ' ').slice(0, 80); } catch (e) {}
+      // 404 = O HASH MORREU. Não é falha do pedido: é o Next dizendo que essa
+      // ação não existe neste build. Acontece toda vez que a Trindade publica
+      // — o `next-action` é gerado por build, e o que aprendemos ontem vira
+      // inválido hoje. Os outros papéis continuam valendo porque cada um tem o
+      // seu, e só se reaprende o que o consultor usou desde o deploy deles.
+      //
+      // ESQUECER É O CONSERTO. Insistindo, a extensão manda o mesmo hash morto
+      // pra sempre e todo preço volta 404 — que foi o que aconteceu. Apagando,
+      // a próxima cotação FEITA NA MÃO no Painel é observada e o hash volta
+      // sozinho, sem ninguém mexer em código.
+      if (resp.status === 404) {
+        APRENDIDO[papel] = null;
+        try {
+          window.postMessage({ source: 'JOB_COTADOR', tipo: 'aprendeu',
+                               dados: { ...APRENDIDO } }, ORIGEM);
+        } catch (e) {}
+        const morto = new Error('hash_expirado:' + papel);
+        morto.enviei = JSON.stringify(corpo).slice(0, 200);
+        morto.responderam = pista;
+        morto.comoResolver = 'O Painel do Corretor foi atualizado e o atalho de "' + papel +
+          '" venceu. Faça UMA cotação na mão no Painel, até ver o preço na tela — ' +
+          'a extensão aprende de novo sozinha e volta a cotar daqui.';
+        throw morto;
+      }
       const err = new Error('http_' + resp.status + ' em ' + papel);
       err.enviei = JSON.stringify(corpo).slice(0, 400);
       err.responderam = pista;
