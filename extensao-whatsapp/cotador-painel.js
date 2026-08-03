@@ -96,6 +96,16 @@
   // Última cotação criada nesta aba. Serve de "rascunho" para as perguntas de
   // apoio (lista de operadoras), pra não criar uma cotação por pergunta.
   let ultimaCotacao = null;
+  // A pergunta que criou a última cotação. Reaproveitar só vale enquanto a
+  // pergunta for a mesma — a cotação guarda cidade, contratação e distribuição
+  // de vidas DENTRO dela, e o servidor deles responde com base nisso. Reusar
+  // com outra faixa devolve a lista da faixa antiga, calada.
+  let ultimaAssinatura = '';
+
+  function assinaturaDoPedido(p) {
+    const v = (p.vidas || []).map((x) => x.faixa + ':' + x.quantidade).sort().join('|');
+    return [p.cidade || '', p.modalidade == null ? 2 : p.modalidade, v].join('§');
+  }
 
   // O parâmetro ?_rsc=... que a navegação deles usa. É um identificador do
   // build; aprendido observando, como todo o resto — nunca escrito à mão.
@@ -479,9 +489,36 @@
     return _TODAS_FAIXAS.map((f) => ({ faixa: f, quantidade: m[f] || 0 }));
   }
 
+  // O NOME da distribuição, e por que ele importa.
+  //
+  // A captura trazia "GERAL" e eu copiei. Mas o modal do Painel mostra o campo
+  // preenchido com "Geral" — ou seja, esse é o nome que a cotação já nasce
+  // tendo. Se o servidor deles casa a distribuição PELO NOME pra atualizar,
+  // mandar "GERAL" não acha a que existe e tenta criar uma segunda: estoura.
+  //
+  // Tenta os dois, na ordem do mais provável. Duas tentativas numa ação que
+  // acontece uma vez por cotação é barato; ficar sem preço não é.
+  const _NOMES_DIST = ['Geral', 'GERAL'];
+  let _nomeDistBom = '';
+
   async function salvarVidas(cotacaoId, vidas) {
-    await acao('vidas', `/cotacoes/${cotacaoId}/edit`,
-               [{ cotacaoId, nome: 'GERAL', vidas: _vidasCompletas(vidas) }], cotacaoId);
+    const nomes = _nomeDistBom ? [_nomeDistBom] : _NOMES_DIST;
+    let ultimo = null;
+    for (const nome of nomes) {
+      try {
+        await acao('vidas', `/cotacoes/${cotacaoId}/edit`,
+                   [{ cotacaoId, nome, vidas: _vidasCompletas(vidas) }], cotacaoId);
+        _nomeDistBom = nome;      // achou o certo: não tenta o outro de novo
+        return;
+      } catch (e) {
+        ultimo = e;
+        await respira(200, 500);
+      }
+    }
+    if (ultimo) {
+      ultimo.arvore = (ultimo.arvore || '') + ' · nomes tentados: ' + nomes.join(', ');
+      throw ultimo;
+    }
   }
 
   async function salvarFiltro(cotacaoId, p) {
@@ -670,12 +707,14 @@
       // Consulta de apoio (só listar operadoras) reaproveita a cotação que já
       // existe. Criar uma por pergunta deixaria dezenas de cotações vazias com
       // o nome do corretor dentro do sistema deles num dia de trabalho.
-      if (p.reaproveitar && ultimaCotacao) {
+      const assinatura = assinaturaDoPedido(p);
+      if (p.reaproveitar && ultimaCotacao && ultimaAssinatura === assinatura) {
         return { cotacaoId: ultimaCotacao,
                  url: ORIGEM + '/cotacoes/' + ultimaCotacao + '/edit', reaproveitada: true };
       }
       _cartoesAtuais = [];
       ultimaCotacao = await criarCotacao(p.titulo);
+      ultimaAssinatura = assinatura;
       // As vidas vão JUNTO com a criação, sempre. Separar em outro passo seria
       // dar chance de existir cotação sem distribuição — e cotação sem
       // distribuição é exatamente a que devolve 500 no preço.

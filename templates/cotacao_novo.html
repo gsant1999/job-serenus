@@ -533,7 +533,13 @@
   // número que o Painel usa é problema nosso, e a extensão aprende sozinha
   // lendo o rótulo na tela deles.
   var ramo = 'Saúde';
-  var tiposEscolhidos = [];
+  // UM tipo por vez, não vários.
+  //
+  // Eu tinha feito multi-escolha porque ele falou em "mesclar". Ele voltou
+  // atrás com o motivo certo: cada categoria tem produto diferente, e misturar
+  // PF com PME na mesma lista confunde quem está cotando. Uma categoria por
+  // vez, e a lista mostra só o que é dela.
+  var tipoEscolhido = '';
   var TIPOS = ['PF', 'PME', 'Adesão'];
 
   function nomeCompleto(t) { return ramo === 'Dental' ? (t + ' Dental') : t; }
@@ -551,7 +557,7 @@
       var b = document.createElement('button');
       b.type = 'button';
       b.textContent = t;
-      b.className = tiposEscolhidos.indexOf(t) >= 0 ? 'on' : '';
+      b.className = (tipoEscolhido === t) ? 'on' : '';
       if (cod == null) {
         // Sem código conhecido não dá pra cotar este tipo — e prometer que dá
         // seria pior que dizer o que falta.
@@ -561,8 +567,8 @@
                   'desse tipo lá uma vez e ele aprende sozinho.';
       } else {
         b.onclick = function () {
-          var i = tiposEscolhidos.indexOf(t);
-          if (i >= 0) tiposEscolhidos.splice(i, 1); else tiposEscolhidos.push(t);
+          if (tipoEscolhido === t) return;   // já é este: clicar de novo não faz nada
+          tipoEscolhido = t;
           montarSegTipo();
           recomecar();
         };
@@ -576,7 +582,7 @@
       el('segRamo').querySelectorAll('button').forEach(function (x) { x.classList.remove('on'); });
       b.classList.add('on');
       ramo = b.dataset.v;
-      tiposEscolhidos = [];
+      tipoEscolhido = '';
       montarSegTipo();
       recomecar();
     };
@@ -724,7 +730,9 @@
   var nivel = 'operadoras', opAtual = null, produtoAtual = null, linhaAtual = null;
 
   function tipoAtivo() {
-    return tiposEscolhidos.length ? tiposEscolhidos[0] : (codigoDe('PME') != null ? 'PME' : TIPOS.filter(function (t) { return codigoDe(t) != null; })[0]);
+    if (tipoEscolhido) return tipoEscolhido;
+    if (codigoDe('PME') != null) return 'PME';
+    return TIPOS.filter(function (t) { return codigoDe(t) != null; })[0];
   }
   function modalidadeAtiva() {
     var t = tipoAtivo();
@@ -1065,8 +1073,8 @@
 
     // Os tipos marcados, ou o que estiver ativo. Cada um roda a sua rodada e o
     // resultado vem junto, com etiqueta de qual tipo é cada linha.
-    var tipos = tiposEscolhidos.length ? tiposEscolhidos.slice() : [tipoAtivo()];
-    var feitos = 0, total = selecionados.length * tipos.length;
+    var tipos = [tipoAtivo()];
+    var feitos = 0, total = selecionados.length;
     var aoAndar = function () {
       feitos++;
       mostrarAndamento({ fase: 'precos', feito: feitos, total: total });
@@ -1159,7 +1167,7 @@
     el('btSalvar').onclick = async function () {
       this.disabled = true;
       var corpo = Object.assign({}, d, { lead_id: LEAD || null, modalidade: modalidadeAtiva(),
-        filtros: { exigencias: exigencias, ramo: ramo, tipos: tiposEscolhidos,
+        filtros: { exigencias: exigencias, ramo: ramo, tipo: tipoAtivo(),
                    planos: selecionados.map(function (x) { return x.key; }) } });
       var resp = await fetch('/cotacao/viva/salvar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1209,6 +1217,9 @@
     if (cidadeEscolhida && modalidadeAtiva() != null) carregarOperadoras();
   }
 
+  // Um tipo já vem marcado: tela com três botões e nenhum aceso deixa a
+  // pessoa sem saber o que está valendo.
+  tipoEscolhido = tipoAtivo() || '';
   montarSegTipo();
   montarFaixas();
   pintarFixar();
