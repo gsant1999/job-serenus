@@ -97,6 +97,10 @@
   // apoio (lista de operadoras), pra não criar uma cotação por pergunta.
   let ultimaCotacao = null;
 
+  // O parâmetro ?_rsc=... que a navegação deles usa. É um identificador do
+  // build; aprendido observando, como todo o resto — nunca escrito à mão.
+  let _rsc = '';
+
   // ── Reconhecer a chamada pelo formato do corpo ────────────────────────────
   // O hash muda; o formato não. `{filtro:{...}}` só existe na busca de
   // operadora, `operadoraId` só na lista de planos, e o preço é o único que
@@ -211,6 +215,12 @@
     try {
       const url = (args[0] && args[0].url) || String(args[0] || '');
       const cfg = args[1] || {};
+      // A navegação deles é um GET com o cabeçalho RSC. Guardar o ?_rsc= dele
+      // deixa o nosso carregamento de página idêntico ao que a tela faz.
+      if (!_rsc && /[?&]_rsc=/.test(url)) {
+        const m = url.match(/[?&]_rsc=([^&]+)/);
+        if (m) _rsc = m[1];
+      }
       if (typeof cfg.body === 'string' && cfg.headers) {
         const h = cfg.headers;
         const pega = (k) => (typeof h.get === 'function' ? h.get(k) : h[k]);
@@ -402,7 +412,29 @@
   // aqui que a cotação passa a saber quantas vidas tem e de que cidade é, e o
   // pedido de preço depende das duas coisas: ele manda só a identidade do
   // plano e espera que o resto já esteja gravado.
+  // CARREGAR A PÁGINA antes de mexer na cotação.
+  //
+  // Era isto que faltava e dava http_500 em 'vidas'. No Next, a ação do
+  // servidor nasce ligada ao render daquela página — a tela deles navega pra
+  // /cotacoes/<id>/edit (um GET com o cabeçalho RSC) e só então dispara abrir
+  // e vidas. Eu pulava a navegação e chamava uma função que, do ponto de vista
+  // do servidor, ainda não tinha sido criada naquele contexto.
+  //
+  // Não muda nada na tela do consultor: é a mesma requisição que o roteador
+  // deles faz por baixo, sem trocar de página.
+  async function carregarPaginaCotacao(cotacaoId) {
+    const q = _rsc ? ('?_rsc=' + _rsc) : '';
+    const cab = { 'rsc': '1', 'accept': '*/*' };
+    const arv = arvorePara('abrir', cotacaoId);
+    if (arv) cab['next-router-state-tree'] = arv;
+    try {
+      await fetchOriginal.call(window, `${ORIGEM}/cotacoes/${cotacaoId}/edit${q}`,
+                               { headers: cab, credentials: 'include' });
+    } catch (e) { /* se a navegação falhar, o passo seguinte acusa com detalhe */ }
+  }
+
   async function abrirCotacao(cotacaoId) {
+    await carregarPaginaCotacao(cotacaoId);
     await acao('abrir', `/cotacoes/${cotacaoId}/edit`, [cotacaoId], cotacaoId);
   }
 

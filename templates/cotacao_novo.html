@@ -63,6 +63,11 @@
     outline:none; font-family:inherit; }
   .cv-campo input:focus { border-color:var(--azul); }
   .cv-campo input::placeholder { color:var(--cinza-2); }
+  .cv-fixar { position:absolute; right:8px; top:50%; transform:translateY(-50%);
+    background:none; border:none; cursor:pointer; font-size:12px; padding:4px 6px;
+    color:var(--cinza-2); font-family:inherit; border-radius:6px; }
+  .cv-fixar:hover { color:var(--texto); background:var(--panel-2); }
+  .cv-fixar.on { color:var(--verde); }
 
   .cv-campo-bt { width:100%; text-align:left; background:var(--panel);
     border:1px solid var(--borda-2); border-radius:11px; padding:12px 14px;
@@ -281,8 +286,11 @@
 
     <div class="cv-campo">
       <input id="cidade" type="text" autocomplete="off" placeholder="Cidade…"
-             value="{{ salva.cidade if salva else '' }}">
+             value="{{ salva.cidade if salva else (cidade_preferida or '') }}">
       <div id="sugCidade" class="cv-sug"></div>
+      <!-- A cidade de sempre vem preenchida; trocar continua sendo um clique.
+           Fixar guarda no JOB, não no navegador: a preferência segue a pessoa. -->
+      <button type="button" class="cv-fixar" id="btFixarCidade" title="Deixar como cidade padrão"></button>
     </div>
 
     <button type="button" class="cv-campo-bt" id="btVidas">
@@ -632,11 +640,31 @@
   });
 
   // ── cidade ─────────────────────────────────────────────────────────────
-  var cidadeEscolhida = {{ (salva.cidade if salva else '')|tojson }};
+  var CIDADE_PREFERIDA = {{ (cidade_preferida or '')|tojson }};
+  var cidadeEscolhida = {{ (salva.cidade if salva else '')|tojson }} || CIDADE_PREFERIDA;
+
+  function pintarFixar() {
+    var b = el('btFixarCidade');
+    var fixada = cidadeEscolhida && cidadeEscolhida === CIDADE_PREFERIDA;
+    b.className = 'cv-fixar' + (fixada ? ' on' : '');
+    b.textContent = fixada ? 'fixada' : 'fixar';
+    b.title = fixada ? 'Esta é a sua cidade padrão — clique pra soltar'
+                     : 'Deixar como cidade padrão, pra já vir preenchida';
+    b.style.display = cidadeEscolhida ? '' : 'none';
+  }
+  el('btFixarCidade').onclick = async function () {
+    var nova = (cidadeEscolhida === CIDADE_PREFERIDA) ? '' : cidadeEscolhida;
+    var r = await fetch('/cotacao/preferencia', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chave: 'cidade', valor: nova })
+    }).then(function (x) { return x.json(); }).catch(function () { return { ok: false }; });
+    if (r.ok) { CIDADE_PREFERIDA = r.valor || ''; pintarFixar(); }
+  };
   var relogioCidade = null;
   el('cidade').addEventListener('input', function (e) {
     var termo = e.target.value.trim();
     cidadeEscolhida = '';
+    pintarFixar();
     atualizarBotao();
     clearTimeout(relogioCidade);
     if (termo.length < 3) { el('sugCidade').className = 'cv-sug'; return; }
@@ -653,6 +681,7 @@
           cidadeEscolhida = nome;
           el('cidade').value = nome;
           box.className = 'cv-sug';
+          pintarFixar();
           recomecar();
           atualizarBotao();
         };
@@ -1148,6 +1177,7 @@
 
   montarSegTipo();
   montarFaixas();
+  pintarFixar();
   recomecar();
   if (SALVA) desenhar({ planos: SALVA, ms: 0, planosCotados: SALVA.length });
   conferirLigacao();

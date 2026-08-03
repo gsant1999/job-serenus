@@ -1417,6 +1417,13 @@ def init_db():
             # quanto tempo. Uma cidade+contratacao por vez, espalhado ao longo
             # do mes — 350 cotacoes de uma vez seria rapido e seria exatamente
             # o que nao podemos fazer.
+            # Preferencia por usuario. Hoje so a cidade, mas a tabela e generica
+            # de proposito: a proxima preferencia entra sem migracao.
+            """CREATE TABLE IF NOT EXISTS cotacao_preferencia (
+                usuario_id INTEGER NOT NULL, chave TEXT NOT NULL, valor TEXT DEFAULT '',
+                atualizado_em TIMESTAMP,
+                PRIMARY KEY (usuario_id, chave)
+            )""",
             """CREATE TABLE IF NOT EXISTS catalogo_alvo (
                 id SERIAL PRIMARY KEY,
                 cidade TEXT NOT NULL, modalidade INTEGER NOT NULL,
@@ -2293,6 +2300,11 @@ def init_db():
             chave TEXT DEFAULT '',
             visto_em TIMESTAMP, sumiu_em TIMESTAMP,
             UNIQUE (cidade, modalidade, chave)
+        );
+        CREATE TABLE IF NOT EXISTS cotacao_preferencia (
+            usuario_id INTEGER NOT NULL, chave TEXT NOT NULL, valor TEXT DEFAULT '',
+            atualizado_em TIMESTAMP,
+            PRIMARY KEY (usuario_id, chave)
         );
         CREATE TABLE IF NOT EXISTS catalogo_alvo (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24025,6 +24037,41 @@ def api_cidades():
     return jsonify((comeca + contem)[:40])
 
 
+def _pref_cotacao(conn, uid, chave, padrao=''):
+    try:
+        r = conn.execute("SELECT valor FROM cotacao_preferencia WHERE usuario_id=? AND chave=?",
+                         (uid, chave)).fetchone()
+        return (r['valor'] if r else '') or padrao
+    except Exception:
+        return padrao
+
+
+@app.route('/cotacao/preferencia', methods=['POST'])
+@login_required
+def cotacao_preferencia():
+    """Guarda a cidade que o consultor mais usa.
+
+    No servidor e nao no navegador: a preferencia segue a PESSOA, nao a maquina.
+    Quem atende de casa e do escritorio nao deve reconfigurar em cada uma."""
+    d = request.get_json(silent=True) or {}
+    chave = str(d.get('chave') or '').strip()[:40]
+    if chave not in ('cidade',):
+        return jsonify({'ok': False, 'erro': 'chave_desconhecida'}), 400
+    valor = str(d.get('valor') or '').strip()[:120]
+    conn = db()
+    uid = session.get('user_id')
+    try:
+        conn.execute("DELETE FROM cotacao_preferencia WHERE usuario_id=? AND chave=?", (uid, chave))
+        if valor:
+            conn.execute("""INSERT INTO cotacao_preferencia (usuario_id, chave, valor, atualizado_em)
+                            VALUES (?,?,?,?)""", (uid, chave, valor, _agora_sp()))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        return jsonify({'ok': False, 'erro': 'falha_ao_salvar'}), 500
+    return jsonify({'ok': True, 'valor': valor})
+
+
 @app.route('/cotacao/novo')
 @login_required
 def cotacao_novo():
@@ -24046,6 +24093,7 @@ def cotacao_novo():
                            faixas=FAIXAS_ETARIAS,
                            faixas_painel=[_FAIXA_JOB_PARA_PAINEL.get(f, f) for f in FAIXAS_ETARIAS],
                            modalidades=_modalidades_conhecidas(conn),
+                           cidade_preferida=_pref_cotacao(conn, session.get('user_id'), 'cidade'),
                            lead=lead, salva=None)
 
 
@@ -24081,6 +24129,7 @@ def cotacao_viva_ver(vid):
                            faixas=FAIXAS_ETARIAS,
                            faixas_painel=[_FAIXA_JOB_PARA_PAINEL.get(f, f) for f in FAIXAS_ETARIAS],
                            modalidades=_modalidades_conhecidas(conn),
+                           cidade_preferida='',
                            lead=None, salva=salva)
 
 

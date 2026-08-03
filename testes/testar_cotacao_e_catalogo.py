@@ -258,5 +258,15 @@ ok(c.post('/api/whatsapp/cotacao/modalidade', json={'codigo': 3},
           headers={'X-Extension-Key': 'errada'}).status_code == 401,
    '18b. chave errada tambem nao')
 
+# 19. Cidade preferida: fica no servidor, segue a pessoa
+r19 = c.post('/cotacao/preferencia', json={'chave': 'cidade', 'valor': 'Campinas - SP'}).get_json()
+ok(r19['ok'] and r19['valor'] == 'Campinas - SP', '19. guarda a cidade padrao')
+ok('Campinas - SP' in c.get('/cotacao/novo').get_data(as_text=True),
+   '19b. a cidade padrao ja vem preenchida na tela')
+r19b = c.post('/cotacao/preferencia', json={'chave': 'cidade', 'valor': ''}).get_json()
+ok(r19b['ok'] and r19b['valor'] == '', '19c. da pra soltar a cidade padrao')
+ok(c.post('/cotacao/preferencia', json={'chave': 'qualquer', 'valor': 'x'}).status_code == 400,
+   '19d. chave desconhecida e recusada')
+
 print('\n' + ('%d FALHA(S)' % len(falhas) if falhas else 'tudo passou (final)'))
 sys.exit(1 if falhas else 0)
