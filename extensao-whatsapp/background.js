@@ -317,19 +317,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/conversas/pendentes', 'POST', { conversas: msg.conversas || [] }, 20000).then(sendResponse);
     return true;
   }
-  // A lista vem do CRM, nao do WhatsApp: os leads DAQUELE consultor no periodo
-  // pedido, so os que ja tem conversa vinculada. E o que permite varrer um mes
-  // inteiro sem cadastrar amigo e fornecedor junto.
-  if (msg && msg.type === 'varredura_leads') {
-    const q = new URLSearchParams();
-    q.set('consultor_id', String(msg.consultor_id || ''));
-    if (msg.de) q.set('de', msg.de);
-    if (msg.ate) q.set('ate', msg.ate);
-    if (msg.teto) q.set('teto', String(msg.teto));
-    chamarJob('/api/whatsapp/varredura/leads?' + q.toString(), 'GET', null, 30000).then(sendResponse);
-    return true;
-  }
-  // UM item por vez — o servidor e quem tem a fila. Ver o comentario da rota.
   if (msg && msg.type === 'varredura_proximo') {
     chamarJob('/api/whatsapp/varredura/proximo?consultor_id=' +
       encodeURIComponent(msg.consultor_id || ''), 'GET', null, 20000).then(sendResponse);
