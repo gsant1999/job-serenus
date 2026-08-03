@@ -88,9 +88,8 @@
     const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
     if (!chat || !chat.id) return { erro: 'sem_conversa' };
     const chatId = chat.id._serialized;
-    let msgs = [];
-    try { msgs = await window.WPP.chat.getMessages(chatId, { count: 200 }); }
-    catch (e) { return { erro: 'falha_mensagens' }; }
+    const msgs = await _mensagensDoChat(chatId, 200);
+    if (!msgs.length) return { erro: 'falha_mensagens' };
     // NÃO filtra por marca d'água (já tentamos — bug real: um áudio que ficou
     // de fora do teto numa rodada anterior, ou que não foi transcrito porque a
     // chave não estava configurada na hora, ficava escondido PRA SEMPRE, sem
@@ -227,10 +226,9 @@
   // Lê UMA conversa (não precisa ser a aberta), opcionalmente só o que veio
   // DEPOIS de uma mensagem — é o incremental que evita reanalisar o histórico.
   async function lerConversaDe(chatId, desdeMsgId, limite) {
-    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getMessages) return { erro: 'wpp_ausente' };
-    let msgs = [];
-    try { msgs = await window.WPP.chat.getMessages(chatId, { count: Math.max(50, limite || 400) }); }
-    catch (e) { return { erro: 'falha_mensagens' }; }
+    if (!window.WPP || !window.WPP.chat) return { erro: 'wpp_ausente' };
+    let msgs = await _mensagensDoChat(chatId, Math.max(50, limite || 400));
+    if (!msgs.length) return { erro: 'falha_mensagens' };
     msgs = _dedupPorId(msgs);
     let corte = -1;
     if (desdeMsgId) {
@@ -257,15 +255,14 @@
   // cache antes: abrir uma conversa antiga não pode significar subir dezenas de
   // megabytes de áudio que já foram transcritos e pagos.
   async function listarAudios() {
-    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getMessages) {
+    if (!window.WPP || !window.WPP.chat) {
       return { erro: 'wpp_ausente' };
     }
     const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
     if (!chat || !chat.id) return { erro: 'sem_conversa' };
     const chatId = chat.id._serialized;
-    let msgs = [];
-    try { msgs = await window.WPP.chat.getMessages(chatId, { count: 400 }); }
-    catch (e) { return { erro: 'falha_mensagens' }; }
+    const msgs = await _mensagensDoChat(chatId, 400);
+    if (!msgs.length) return { erro: 'falha_mensagens' };
     const audios = _dedupPorId(msgs.filter((m) => m.type === 'ptt' || m.type === 'audio'));
     return {
       chat_id: chatId,
@@ -296,6 +293,47 @@
   // A saida: achar o modelo pela COLECAO da conversa (nenhum id e interpretado) e
   // baixar direto do modelo, refazendo o que a propria wa-js faz depois de achar
   // — cache de blob primeiro, download so se precisar.
+  // AS MENSAGENS DE UM CHAT, POR DOIS CAMINHOS.
+  //
+  // 03/08/2026: WPP.chat.getMessages() comecou a estourar
+  // "Cannot read properties of undefined (reading 'get')" — a wa-js foi por agua
+  // abaixo com uma atualizacao do WhatsApp, como ela sempre vai. Como TODA
+  // leitura de conversa passava por ela, caiu tudo de uma vez: analise, audio,
+  // documento, checagem de resposta.
+  //
+  // A colecao do chat (chat.msgs.getModelsArray) e outro caminho: ja esta em
+  // memoria — e o que a tela desenha —, nao monta chave a partir do id e nao
+  // depende dos modulos internos que a wa-js resolve na carga. Ela vem PRIMEIRO
+  // agora. getMessages fica como reforco pra quando a colecao estiver vazia
+  // (conversa recem-aberta, historico ainda nao rolado), que e onde ela ajuda.
+  //
+  // Isto nao dispensa atualizar a wa-js quando ela quebrar — so faz a extensao
+  // continuar de pe enquanto isso nao acontece.
+  async function _mensagensDoChat(chatId, quantas) {
+    const alvo = String(chatId || '');
+    let msgs = [];
+    try {
+      const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
+      // So usa a colecao se ela for DESTE chat — em outro, devolveria a conversa
+      // errada calada, que e pior que nao devolver nada.
+      const mesmo = chat && chat.id && (!alvo || chat.id._serialized === alvo);
+      if (mesmo && chat.msgs && chat.msgs.getModelsArray) {
+        msgs = chat.msgs.getModelsArray() || [];
+      } else if (alvo) {
+        const W = window.WPP.whatsapp;
+        const c2 = W && W.ChatStore && W.ChatStore.get && W.ChatStore.get(alvo);
+        if (c2 && c2.msgs && c2.msgs.getModelsArray) msgs = c2.msgs.getModelsArray() || [];
+      }
+    } catch (e) { msgs = []; }
+    if (msgs && msgs.length) return msgs;
+    if (!window.WPP.chat.getMessages) return [];
+    try {
+      return (await window.WPP.chat.getMessages(alvo, { count: Math.max(12, quantas || 200) })) || [];
+    } catch (e) {
+      return [];
+    }
+  }
+
   function _colecaoDaConversa() {
     const W = window.WPP && window.WPP.whatsapp;
     const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
@@ -516,23 +554,22 @@
     if (!chat) return { checagens: out };
     p('conversa', () => !!(chat.id && (chat.id._serialized || chat.id.user)));
 
-    let msgs = null;
-    try {
-      msgs = await WPP.chat.getMessages(chat.id, { count: 3 });
-    } catch (e) {
-      out.push({ cap: 'mensagens', ok: false, ms: 0,
-                 detalhe: String((e && e.message) || e).slice(0, 180) });
-    }
-    if (msgs) {
-      p('mensagens', () => Array.isArray(msgs));
-      const alvo = (msgs || []).find((m) => m && m.id);
-      if (alvo) {
-        const bruto = alvo.id._serialized || String(alvo.id);
-        p('achar_msg', () => {
-          const a = _acharModelo(bruto);
-          return !!(a && a.msg);
-        });
-      }
+    // O CANARIO TEM QUE TESTAR O CAMINHO QUE O PRODUTO USA. Ele chamava
+    // WPP.chat.getMessages direto: quando ela quebrou (03/08), o canario acusou
+    // 'a leitura das mensagens quebrou' — mas a leitura de verdade continuava
+    // funcionando pela colecao do chat. Pior: 'achar_msg', que e CRITICA, ficava
+    // sem dado nenhum, porque so rodava se getMessages tivesse respondido.
+    // Alarme falso de um lado e cegueira do outro, na mesma queda.
+    let msgs = [];
+    try { msgs = await _mensagensDoChat(chat.id._serialized, 3); } catch (e) { msgs = []; }
+    p('mensagens', () => Array.isArray(msgs) && msgs.length > 0);
+    const alvo = (msgs || []).find((m) => m && m.id);
+    if (alvo) {
+      const bruto = alvo.id._serialized || String(alvo.id);
+      p('achar_msg', () => {
+        const a = _acharModelo(bruto);
+        return !!(a && a.msg);
+      });
     }
     return { checagens: out };
   }
@@ -627,9 +664,8 @@
     const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
     if (!chat || !chat.id) return { erro: 'sem_conversa' };
     const chatId = chat.id._serialized;
-    let msgs = [];
-    try { msgs = await window.WPP.chat.getMessages(chatId, { count: 200 }); }
-    catch (e) { return { erro: 'falha_mensagens' }; }
+    const msgs = await _mensagensDoChat(chatId, 200);
+    if (!msgs.length) return { erro: 'falha_mensagens' };
     // Só PDF — é o único formato de documento que a Claude lê nativamente.
     // Sem filtro por marca d'água — mesmo motivo do áudio (ver baixarAudios).
     // O mime confiável mora em m.mediaData.mimetype (a wa-js nem sempre espelha
@@ -705,20 +741,14 @@
   // consultor mais quer levar junto (transcrito), e uma conversa sem os "[foto]"
   // no meio perde o fio de quem respondeu o que.
   async function lerConversaCompleta(limite) {
-    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getMessages) return { erro: 'wpp_ausente' };
+    if (!window.WPP || !window.WPP.chat) return { erro: 'wpp_ausente' };
     const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
     if (!chat || !chat.id) return { erro: 'sem_conversa' };
-    // A COLECAO DO CHAT primeiro. getMessages() monta chave a partir do id e
-    // quebra em conversa @lid — mesma raiz do bug do download. A colecao ja esta
-    // carregada em memoria (e o que a tela desenha) e nao interpreta id nenhum.
-    let msgs = [];
-    try {
-      if (chat.msgs && chat.msgs.getModelsArray) msgs = chat.msgs.getModelsArray() || [];
-    } catch (e) { msgs = []; }
-    if (!msgs.length) {
-      try { msgs = await window.WPP.chat.getMessages(chat.id._serialized, { count: Math.max(50, limite || 800) }); }
-      catch (e) { return { erro: 'falha_mensagens' }; }
-    }
+    // A COLECAO DO CHAT primeiro (ver _mensagensDoChat): getMessages() monta
+    // chave a partir do id e quebra em conversa @lid — mesma raiz do bug do
+    // download — e agora tambem quebra sozinha quando o WhatsApp atualiza.
+    const msgs = await _mensagensDoChat(chat.id._serialized, Math.max(50, limite || 800));
+    if (!msgs.length) return { erro: 'falha_mensagens' };
     const ROTULO = { image: 'foto', video: 'vídeo', document: 'documento', sticker: 'figurinha',
                      location: 'localização', vcard: 'contato', ptt: 'áudio', audio: 'áudio' };
     const out = [];
@@ -751,13 +781,12 @@
   }
 
   async function lerMensagens(limite) {
-    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getMessages) return { erro: 'wpp_ausente' };
+    if (!window.WPP || !window.WPP.chat) return { erro: 'wpp_ausente' };
     const chat = window.WPP.chat.getActiveChat && window.WPP.chat.getActiveChat();
     if (!chat || !chat.id) return { erro: 'sem_conversa' };
     const chatId = chat.id._serialized;
-    let msgs = [];
-    try { msgs = await window.WPP.chat.getMessages(chatId, { count: Math.max(50, limite || 500) }); }
-    catch (e) { return { erro: 'falha_mensagens' }; }
+    const msgs = await _mensagensDoChat(chatId, Math.max(50, limite || 500));
+    if (!msgs.length) return { erro: 'falha_mensagens' };
     // DEDUP por id (_dedupPorId): pedir 'count' maior que o total faz o
     // getMessages buscar no servidor e devolver de novo mensagens que já
     // estavam no cache — vinham DUPLICADAS ("Perfeito, sem pressa." 2x).
@@ -1083,9 +1112,9 @@
   //    chat.new_message, que nem sempre dispara). Lê as últimas msgs e vê se a mais
   //    recente NÃO é nossa (fromMe===false) = o contato respondeu. Mais confiável. ──
   async function checarInbound(chatId) {
-    if (!window.WPP || !window.WPP.chat || !window.WPP.chat.getMessages) return { inbound: false };
+    if (!window.WPP || !window.WPP.chat) return { inbound: false };
     try {
-      const msgs = await window.WPP.chat.getMessages(chatId, { count: 12 });
+      const msgs = await _mensagensDoChat(chatId, 12);
       if (!msgs || !msgs.length) return { inbound: false };
       let nossas = 0;
       for (const m of msgs) { if (m && m.id && m.id.fromMe) nossas++; }
