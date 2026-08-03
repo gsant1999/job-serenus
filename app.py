@@ -19579,6 +19579,29 @@ def api_whatsapp_varredura_proximo():
         uid = None
     if not uid:
         return _wa_cors(jsonify({"ok": True, "item": None}))
+
+    # EXTENSAO VELHA NAO CONSOME A FILA.
+    #
+    # Ate a 3.15.0 a leitura pegava UMA mensagem por conversa fechada e gravava
+    # a analise sem dono — 29 leituras pagas e inuteis. Se uma aba ficou com a
+    # versao antiga, ela torraria a fila de novo em silencio, e o estrago so
+    # apareceria depois. O servidor recusa e diz o que fazer; a fila espera.
+    def _versao_maior_ou_igual(v, minimo):
+        def _t(x):
+            p = [int(n) for n in str(x).split('.') if n.isdigit()]
+            return tuple(p + [0] * (3 - len(p)))[:3]
+        try:
+            return _t(v) >= _t(minimo)
+        except Exception:
+            return False
+    _MIN_VARREDURA = '3.16.0'
+    versao = (request.args.get('versao') or '').strip()
+    if not _versao_maior_ou_igual(versao, _MIN_VARREDURA):
+        return _wa_cors(jsonify({
+            "ok": True, "item": None, "bloqueado": True,
+            "motivo": f"Extensão {versao or 'antiga'} — a varredura exige {_MIN_VARREDURA}. "
+                      "Recarregue em chrome://extensions e dê F5 no WhatsApp."}))
+
     conn = db()
     r = conn.execute("""SELECT i.id, i.lead_id, i.chat_id, i.lead_nome, i.lote_id
         FROM varredura_item i JOIN varredura_lote t ON t.id = i.lote_id

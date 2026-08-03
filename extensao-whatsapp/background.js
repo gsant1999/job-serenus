@@ -318,8 +318,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === 'varredura_proximo') {
+    // A VERSAO VAI JUNTO: o servidor recusa a fila pra extensao anterior a
+    // 3.16.0, que lia 1 mensagem por conversa e gravava analise sem dono.
+    let _v = '';
+    try { _v = (chrome.runtime.getManifest() || {}).version || ''; } catch (e) {}
     chamarJob('/api/whatsapp/varredura/proximo?consultor_id=' +
-      encodeURIComponent(msg.consultor_id || ''), 'GET', null, 20000).then(sendResponse);
+      encodeURIComponent(msg.consultor_id || '') + '&versao=' + encodeURIComponent(_v),
+      'GET', null, 20000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'varredura_resultado') {
