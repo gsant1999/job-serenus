@@ -1146,9 +1146,21 @@
         }
       }
       var rp = await passo({ acao: 'preco', cotacaoId: cotacaoId, plano: alvo[j] });
-      if (!rp.ok) {
+      // REPETIR SÓ FAZ SENTIDO PRA SOLUÇO. Quando o atalho venceu (o Painel
+      // publicou), a extensão apaga o hash e a segunda tentativa volta
+      // 'precisa_aprender' — que SUBSTITUÍA o motivo real e escondia o que
+      // tinha acontecido. Foi o que apareceu na tela: o diagnóstico certo saía
+      // na primeira e era engolido pela segunda.
+      var _venceu = function (m) {
+        m = String(m || '');
+        return m.indexOf('hash_expirado') === 0 || m === 'precisa_aprender';
+      };
+      if (!rp.ok && !_venceu(rp.motivo)) {
         await respira(600, 1400);
-        rp = await passo({ acao: 'preco', cotacaoId: cotacaoId, plano: alvo[j] });
+        var rp2 = await passo({ acao: 'preco', cotacaoId: cotacaoId, plano: alvo[j] });
+        // Se a repetição só descobriu que o atalho venceu, o motivo que vale é
+        // o da primeira — ele diz o que houve, o outro diz só a consequência.
+        rp = (!rp2.ok && _venceu(rp2.motivo)) ? rp : rp2;
       }
       var cartao = (rp.ok && rp.dados && rp.dados.cartao) || null;
       resultado.push(Object.assign({}, alvo[j], { _tipo: b._tipo }, cartao
@@ -1267,9 +1279,17 @@
     // NENHUM PREÇO E TODOS PELO MESMO MOTIVO: isso não é "os planos não têm
     // preço", é uma peça quebrada. O consultor precisa do conserto no topo, não
     // de um rótulo repetido em cada cartão que ele teria que decifrar sozinho.
-    if (!comPreco.length && planos.length &&
-        planos.every(function (p) { return String(p.motivo || '').indexOf('hash_expirado') === 0; })) {
-      tratarFalha('hash_expirado');
+    if (!comPreco.length && planos.length && planos.every(function (p) {
+          var m = String(p.motivo || '');
+          return m.indexOf('hash_expirado') === 0 || m === 'precisa_aprender';
+        })) {
+      // Os dois casos pedem a MESMA coisa de quem está na frente da tela: uma
+      // cotação na mão no Painel. 'hash_expirado' é o atalho que venceu;
+      // 'precisa_aprender' é o mesmo estado depois de a extensão já ter
+      // apagado o atalho. Explicar diferente seria diferenciar o que, pra ele,
+      // é idêntico.
+      tratarFalha(planos[0] && String(planos[0].motivo) === 'precisa_aprender'
+                  ? 'precisa_aprender' : 'hash_expirado');
     }
     el('resumo').innerHTML = '<b>' + comPreco.length + '</b> com preço · mais barato <b>' +
       moeda(comPreco.length ? comPreco[0].total : null) + '</b> · <b>' +
