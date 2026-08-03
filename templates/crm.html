@@ -543,6 +543,13 @@
           Ler conversas destes leads
           <small>Usa o filtro atual · a extensão lê uma por vez e preenche o CRM</small>
         </button>
+        {# O acompanhamento precisa ter porta de entrada. Antes o link do lote só
+           aparecia UMA vez, no alerta logo depois de criar: quem fechasse aquela
+           janela perdia o caminho. #}
+        <button type="button" onclick="location.href='/crm/varreduras'">
+          Varreduras feitas
+          <small>Andamento e resultado de cada leitura, com os erros</small>
+        </button>
 
         <div class="crm-mais-tit">Time</div>
         <button type="button" onclick="abrirModalTransferencia()">

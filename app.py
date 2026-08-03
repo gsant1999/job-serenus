@@ -19632,6 +19632,31 @@ def api_whatsapp_varredura_item():
     return _wa_cors(jsonify({"ok": True}))
 
 
+@app.route('/crm/varreduras')
+@login_required
+def crm_varreduras():
+    """A lista dos lotes. Existe porque o link do lote so aparecia UMA vez, no
+    alerta logo depois de criar: quem fechasse aquela janela perdia o caminho e
+    nao tinha como voltar. Acompanhamento que so se acha por link salvo nao e
+    acompanhamento."""
+    conn = db()
+    try:
+        rows = conn.execute("""SELECT t.*, u.nome consultor,
+            (SELECT COUNT(*) FROM varredura_item i WHERE i.lote_id=t.id AND i.status='lido') lidos,
+            (SELECT COUNT(*) FROM varredura_item i WHERE i.lote_id=t.id AND i.status='erro') erros,
+            (SELECT COUNT(*) FROM varredura_item i WHERE i.lote_id=t.id AND i.status IN ('pendente','lendo')) fila
+            FROM varredura_lote t LEFT JOIN usuarios u ON u.id=t.consultor_id
+            ORDER BY t.id DESC LIMIT 100""").fetchall()
+        lotes = [dict(r) for r in rows]
+    except Exception as e:
+        app.logger.warning(f"[VARREDURAS] {e}")
+        lotes = []
+    close_db(conn)
+    for l in lotes:
+        l['quando'] = _fmt_datahora_br(l.get('criado_em'))
+    return render_template('crm_varreduras.html', lotes=lotes)
+
+
 @app.route('/crm/varredura/<int:lote_id>')
 @login_required
 def crm_varredura_painel(lote_id):

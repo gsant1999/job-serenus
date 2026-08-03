@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Varreduras de conversa{% endblock %}
+
+{% block head %}
+<style>
+  .vs-tab { width:100%; border-collapse:collapse; font-size:13px; }
+  .vs-tab th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.5px;
+               color:var(--cinza-2); font-weight:700; padding:9px 12px; border-bottom:1px solid var(--borda); }
+  .vs-tab td { padding:11px 12px; border-bottom:1px solid var(--borda); }
+  .vs-tab tr:hover td { background:var(--panel-2); }
+  .vs-tab a { color:var(--azul); text-decoration:none; font-weight:600; }
+  .vs-num { font-variant-numeric:tabular-nums; }
+  .vs-pill { font-size:11px; padding:2px 9px; border-radius:12px; font-weight:600; }
+  .vs-pill.rodando { background:rgba(59,130,246,.14); color:var(--info); }
+  .vs-pill.concluido { background:rgba(31,216,164,.18); color:var(--teal); }
+  .vs-vazio { text-align:center; padding:46px 20px; color:var(--cinza-2); font-size:13.5px; }
+  .vs-voltar { color:var(--azul); text-decoration:none; font-size:13px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page">
+  <h2 style="margin:0 0 4px;">Varreduras de conversa</h2>
+  <a class="vs-voltar" href="/crm">← Voltar ao CRM</a>
+
+  {% if not lotes %}
+    <div class="vs-vazio">
+      Nenhuma varredura ainda. Filtre os leads no CRM e use
+      <b>Mais → Ler conversas destes leads</b>.
+    </div>
+  {% else %}
+  <div style="overflow-x:auto; margin-top:18px;">
+    <table class="vs-tab">
+      <thead><tr>
+        <th>Lote</th><th>Consultor</th><th>Filtro</th>
+        <th class="vs-num">Leads</th><th class="vs-num">Lidos</th>
+        <th class="vs-num">Erros</th><th class="vs-num">Na fila</th>
+        <th>Estado</th><th>Criada</th>
+      </tr></thead>
+      <tbody>
+        {% for l in lotes %}
+        <tr>
+          <td><a href="/crm/varredura/{{ l.id }}">#{{ l.id }}</a></td>
+          <td>{{ l.consultor or '—' }}</td>
+          <td style="color:var(--cinza-2); font-size:12px;">{{ l.filtro_txt or '—' }}</td>
+          <td class="vs-num">{{ l.total }}</td>
+          <td class="vs-num" style="color:var(--teal);">{{ l.lidos }}</td>
+          <td class="vs-num" style="color:{{ 'var(--rosa)' if l.erros else 'var(--cinza-2)' }};">{{ l.erros }}</td>
+          <td class="vs-num">{{ l.fila }}</td>
+          <td><span class="vs-pill {{ l.status }}">{{ l.status }}</span></td>
+          <td style="white-space:nowrap; color:var(--cinza-2); font-size:12px;">{{ l.quando }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
