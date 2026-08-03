@@ -3,17 +3,24 @@
 
 {% block head %}
 <style>
-  /* A tela inteira depende de uma coisa que pode não estar lá: a aba do Painel
-     aberta. Então o estado dessa ligação não é rodapé — é a primeira coisa. */
-  .cv-topo { display:flex; align-items:flex-start; justify-content:space-between;
-    gap:16px; flex-wrap:wrap; margin:4px 0 18px; }
-  .cv-topo h1 { margin:0 0 4px; font-size:22px; letter-spacing:-.4px; }
-  .cv-topo p { margin:0; color:var(--cinza); font-size:13px; max-width:62ch; line-height:1.5; }
+  /* ── Estudo da tela do Painel, na linguagem do JOB ─────────────────────────
+     O que vale copiar deles não é a cor, é a HIERARQUIA: a coluna da esquerda
+     é uma pilha de decisões, não um formulário. Três pesos visuais para três
+     tipos de escolha — segmentado para o que é excludente, campo para o que é
+     busca, título e lista para o que é refinamento. E o grid de logos é o
+     conteúdo principal, porque o corretor reconhece a operadora pela marca
+     antes de ler o nome.
+     A pele é do JOB: os mesmos tokens do resto do sistema, claro e escuro. */
 
-  .cv-sinal { display:inline-flex; align-items:center; gap:9px; padding:9px 15px;
-    border-radius:11px; font-size:12.5px; font-weight:650; border:1px solid var(--borda-2);
+  .cv-topo { display:flex; align-items:flex-start; justify-content:space-between;
+    gap:16px; flex-wrap:wrap; margin:4px 0 16px; }
+  .cv-topo h1 { margin:0 0 3px; font-size:21px; letter-spacing:-.4px; }
+  .cv-topo p { margin:0; color:var(--cinza); font-size:12.5px; max-width:62ch; line-height:1.5; }
+
+  .cv-sinal { display:inline-flex; align-items:center; gap:9px; padding:8px 14px;
+    border-radius:11px; font-size:12px; font-weight:650; border:1px solid var(--borda-2);
     background:var(--panel-2); color:var(--cinza); white-space:nowrap; }
-  .cv-sinal .bolinha { width:9px; height:9px; border-radius:50%; background:var(--cinza-2); flex:none; }
+  .cv-sinal .bolinha { width:8px; height:8px; border-radius:50%; background:var(--cinza-2); flex:none; }
   .cv-sinal.on { color:var(--verde); border-color:var(--verde); background:var(--verde-soft); }
   .cv-sinal.on .bolinha { background:var(--verde); box-shadow:0 0 0 4px var(--verde-soft); }
   .cv-sinal.off { color:var(--rosa); border-color:var(--rosa); background:rgba(244,63,124,.1); }
@@ -21,157 +28,155 @@
   .cv-sinal.aprender { color:var(--laranja); border-color:var(--laranja); background:rgba(251,146,60,.12); }
   .cv-sinal.aprender .bolinha { background:var(--laranja); }
 
-  /* Aviso que vem com instrução. Aviso sem ação é barulho. */
-  .cv-aviso { display:none; margin:0 0 18px; padding:14px 18px; border-radius:12px;
+  .cv-aviso { display:none; margin:0 0 16px; padding:14px 18px; border-radius:12px;
     border:1px solid var(--laranja); background:rgba(251,146,60,.1); font-size:13px; line-height:1.6; }
   .cv-aviso.ver { display:block; }
   .cv-aviso b { color:var(--texto); }
   .cv-aviso ol { margin:8px 0 0 18px; padding:0; }
   .cv-aviso li { margin:3px 0; }
+  .cv-salva { margin:0 0 14px; padding:10px 14px; border-radius:10px; font-size:12.5px;
+    background:var(--panel-2); border:1px solid var(--borda); color:var(--cinza); }
 
-  .cv-grade { display:grid; grid-template-columns:minmax(320px,380px) 1fr; gap:18px; align-items:start; }
-  @media (max-width:1000px) { .cv-grade { grid-template-columns:1fr; } }
+  .cv-tela { display:grid; grid-template-columns:288px 1fr; gap:26px; align-items:start; }
+  @media (max-width:960px) { .cv-tela { grid-template-columns:1fr; } }
 
-  .cv-bloco { background:var(--panel); border:1px solid var(--borda); border-radius:14px;
-    padding:18px; margin-bottom:16px; }
-  .cv-bloco h3 { margin:0 0 3px; font-size:13px; text-transform:uppercase; letter-spacing:.6px;
-    color:var(--texto); position:relative; padding-left:11px; }
-  .cv-bloco h3::before { content:''; position:absolute; left:0; top:1px; bottom:1px; width:3px;
-    border-radius:3px; background:var(--grad-frio); }
-  .cv-bloco .ajuda { margin:0 0 14px 11px; font-size:11.5px; color:var(--cinza-2); line-height:1.5; }
+  /* ── Coluna de decisões ─────────────────────────────────────────────────── */
+  .cv-lado { display:flex; flex-direction:column; gap:12px; }
 
-  .cv-campo { display:flex; flex-direction:column; gap:4px; margin-bottom:13px; position:relative; }
-  .cv-campo label { font-size:9.5px; text-transform:uppercase; letter-spacing:.5px;
-    color:var(--cinza-2); font-weight:700; }
-  .cv-campo input, .cv-campo select { background:var(--panel-2); border:1px solid var(--borda-2);
-    border-radius:9px; padding:10px 12px; color:var(--texto); font-size:13.5px; outline:none; width:100%; }
-  .cv-campo input:focus, .cv-campo select:focus { border-color:var(--azul); background:var(--panel-3); }
+  /* Segmentado: fundo recuado, o escolhido sobe. É o que diz "escolha uma
+     destas" sem precisar de rótulo nenhum. */
+  .cv-seg { display:flex; gap:3px; padding:3px; border-radius:11px;
+    background:var(--panel-2); border:1px solid var(--borda); }
+  .cv-seg button { flex:1; padding:9px 8px; border:none; border-radius:8px; cursor:pointer;
+    background:none; color:var(--cinza); font-size:13px; font-weight:650;
+    font-family:inherit; transition:background .15s, color .15s; }
+  .cv-seg button:hover { color:var(--texto); }
+  .cv-seg button.on { background:var(--panel); color:var(--texto);
+    box-shadow:0 1px 3px rgba(0,0,0,.16); }
+  [data-theme="light"] .cv-seg button.on { box-shadow:0 1px 3px rgba(0,0,0,.09); }
+  .cv-seg button.on::after { content:''; display:block; height:2px; margin:6px auto -2px;
+    width:18px; border-radius:2px; background:var(--grad-frio); }
+
+  .cv-campo { position:relative; }
+  .cv-campo input { width:100%; background:var(--panel); border:1px solid var(--borda-2);
+    border-radius:11px; padding:12px 14px; color:var(--texto); font-size:13.5px;
+    outline:none; font-family:inherit; }
+  .cv-campo input:focus { border-color:var(--azul); }
+  .cv-campo input::placeholder { color:var(--cinza-2); }
+
+  .cv-campo-bt { width:100%; text-align:left; background:var(--panel);
+    border:1px solid var(--borda-2); border-radius:11px; padding:12px 14px;
+    color:var(--texto); font-size:13.5px; cursor:pointer; font-family:inherit;
+    display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .cv-campo-bt:hover { border-color:var(--azul); }
+  .cv-campo-bt.vazio { color:var(--cinza-2); }
+  .cv-campo-bt::after { content:'⌄'; color:var(--cinza-2); font-size:14px; line-height:1; }
 
   .cv-sug { position:absolute; top:100%; left:0; right:0; z-index:40; margin-top:4px;
-    background:var(--panel-3); border:1px solid var(--borda-2); border-radius:10px;
-    max-height:230px; overflow:auto; display:none; box-shadow:0 12px 30px rgba(0,0,0,.28); }
+    background:var(--panel-3); border:1px solid var(--borda-2); border-radius:11px;
+    max-height:240px; overflow:auto; display:none; box-shadow:0 12px 30px rgba(0,0,0,.28); }
   .cv-sug.ver { display:block; }
   .cv-sug button { display:block; width:100%; text-align:left; background:none; border:none;
-    padding:9px 13px; color:var(--texto); font-size:13px; cursor:pointer; }
-  .cv-sug button:hover, .cv-sug button.sel { background:var(--verde-soft); color:var(--verde); }
+    padding:9px 13px; color:var(--texto); font-size:13px; cursor:pointer; font-family:inherit; }
+  .cv-sug button:hover { background:var(--verde-soft); color:var(--verde); }
 
-  /* Vidas por faixa. Dez linhas com contador — o consultor pensa em "quantas
-     pessoas de cada idade", não em digitar idade por idade. */
-  .cv-faixas { display:flex; flex-direction:column; gap:5px; }
-  .cv-fx { display:flex; align-items:center; gap:9px; padding:5px 9px; border-radius:8px;
-    background:var(--panel-2); border:1px solid transparent; }
-  .cv-fx.tem { border-color:var(--verde); background:var(--verde-soft); }
-  .cv-fx span.rot { flex:1; font-size:12.5px; color:var(--cinza); font-variant-numeric:tabular-nums; }
-  .cv-fx.tem span.rot { color:var(--texto); font-weight:600; }
-  .cv-fx button { width:26px; height:26px; border-radius:7px; border:1px solid var(--borda-2);
-    background:var(--panel-3); color:var(--texto); font-size:15px; line-height:1; cursor:pointer; flex:none; }
-  .cv-fx button:hover { border-color:var(--azul); color:var(--azul); }
-  .cv-fx input { width:44px; text-align:center; background:var(--panel-3); border:1px solid var(--borda-2);
-    border-radius:7px; padding:4px; color:var(--texto); font-size:13px; font-variant-numeric:tabular-nums; }
-  .cv-total-vidas { margin-top:11px; padding-top:11px; border-top:1px dashed var(--borda-2);
-    display:flex; justify-content:space-between; font-size:13px; }
-  .cv-total-vidas b { font-size:17px; font-variant-numeric:tabular-nums; }
+  /* Refinamento: título forte, opções como texto. Peso baixo de propósito —
+     são ajustes, não a decisão principal. */
+  .cv-refino { margin-top:6px; }
+  .cv-refino h4 { margin:0 0 6px; font-size:13.5px; font-weight:700; color:var(--texto); }
+  .cv-opts { display:flex; flex-direction:column; gap:2px; align-items:flex-start; }
+  .cv-opts button { background:none; border:none; padding:3px 0; cursor:pointer;
+    color:var(--cinza); font-size:13px; font-family:inherit; text-align:left; }
+  .cv-opts button:hover { color:var(--texto); }
+  .cv-opts button.on { color:var(--verde); font-weight:650; }
+  .cv-opts button.on::before { content:'✓ '; }
 
-  .cv-link { background:none; border:none; padding:0; color:var(--azul); cursor:pointer;
-    font-size:11.5px; font-weight:600; text-decoration:underline; }
+  /* ── Área principal ─────────────────────────────────────────────────────── */
+  .cv-main-topo { display:flex; align-items:flex-start; justify-content:space-between;
+    gap:16px; flex-wrap:wrap; margin-bottom:16px; }
+  .cv-main-topo h2 { margin:0 0 3px; font-size:19px; letter-spacing:-.3px; }
+  .cv-main-topo p { margin:0; font-size:12.5px; color:var(--cinza); }
+  .cv-main-acao .btn { min-width:132px; justify-content:center; }
 
-  /* Janela de configuração. Fica fora do formulário de propósito: quem está
-     atendendo cliente não pode tropeçar numa tabela de administração. */
-  .cv-janela { display:none; position:fixed; inset:0; z-index:200;
-    background:rgba(0,0,0,.55); padding:24px; overflow:auto; }
-  .cv-janela.ver { display:flex; align-items:flex-start; justify-content:center; }
-  .cv-janela-cx { background:var(--panel); border:1px solid var(--borda-2); border-radius:16px;
-    width:100%; max-width:860px; margin:auto; box-shadow:0 24px 60px rgba(0,0,0,.4); }
-  .cv-janela-topo { display:flex; gap:16px; align-items:flex-start; padding:20px 22px 14px;
-    border-bottom:1px solid var(--borda); }
-  .cv-janela-topo h2 { margin:0 0 4px; font-size:17px; }
-  .cv-janela-topo p { margin:0; font-size:12.5px; color:var(--cinza); line-height:1.55; max-width:66ch; }
-  .cv-janela-x { background:none; border:none; color:var(--cinza); font-size:24px; line-height:1;
-    cursor:pointer; padding:0 4px; }
-  .cv-janela-x:hover { color:var(--texto); }
-  .cv-janela-corpo { padding:18px 22px; }
-  .cv-janela-pe { display:flex; gap:10px; align-items:center; justify-content:flex-end;
-    padding:14px 22px 18px; border-top:1px solid var(--borda); }
-  .cv-janela-pe span { flex:1; font-size:12px; color:var(--cinza); }
-
-  /* Um cartão por código: o número, quem atende (a lista INTEIRA, que é o que
-     permite comparar com o Painel lado a lado) e o que é. */
-  .cv-ramo { margin-bottom:18px; }
-  .cv-ramo > h4 { margin:0 0 9px; font-size:10px; text-transform:uppercase; letter-spacing:.6px;
-    color:var(--cinza-2); font-weight:700; }
-  .cv-mod-cx { display:grid; grid-template-columns:1fr 160px; gap:14px; align-items:center;
-    padding:12px 14px; border:1px solid var(--borda-2); border-radius:11px;
-    background:var(--panel-2); margin-bottom:8px; }
-  .cv-mod-cx.pronto { border-color:var(--verde); background:var(--verde-soft); }
-  .cv-mod-cx .quem { font-size:12px; color:var(--cinza); line-height:1.5; }
-  .cv-mod-cx .quem b { color:var(--texto); display:block; margin-bottom:3px; font-size:12.5px; }
-  .cv-mod-cx select { background:var(--panel); border:1px solid var(--borda-2);
-    border-radius:9px; padding:9px 11px; color:var(--texto); font-size:13px; width:100%; }
-  .cv-mod-cx select:focus { border-color:var(--azul); outline:none; }
-  @media (max-width:640px) { .cv-mod-cx { grid-template-columns:1fr; } }
-
-  .cv-pills { display:flex; gap:6px; flex-wrap:wrap; }
-  .cv-pill { padding:7px 13px; border-radius:9px; border:1px solid var(--borda-2);
-    background:var(--panel-2); color:var(--cinza); font-size:12px; font-weight:600; cursor:pointer; }
-  .cv-pill:hover { border-color:var(--azul); color:var(--texto); }
-  .cv-pill.on { border-color:var(--verde); color:var(--verde); background:var(--verde-soft); }
-
-  .cv-ops { display:flex; flex-wrap:wrap; gap:7px; }
-  .cv-op { display:flex; align-items:center; gap:7px; padding:6px 11px 6px 7px; border-radius:9px;
-    border:1px solid var(--borda-2); background:var(--panel-2); cursor:pointer; font-size:12.5px;
-    color:var(--cinza); font-weight:600; }
-  .cv-op img { height:17px; width:auto; max-width:52px; object-fit:contain; }
-  .cv-op.on { border-color:var(--verde); color:var(--verde); background:var(--verde-soft); }
-  .cv-ops-vazio { font-size:12px; color:var(--cinza-2); line-height:1.5; }
-
-  /* Navegação em níveis: operadora → produto → linha → plano. */
-  .cv-migalha { display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:11.5px;
-    color:var(--cinza-2); margin-bottom:10px; min-height:18px; }
+  .cv-migalha { display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:12px;
+    color:var(--cinza-2); margin-bottom:12px; min-height:16px; }
   .cv-migalha button { background:none; border:none; color:var(--azul); cursor:pointer;
-    font-size:11.5px; padding:0; font-weight:600; }
+    font-size:12px; padding:0; font-weight:650; font-family:inherit; }
   .cv-migalha span.sep { opacity:.5; }
 
-  .cv-nav { display:flex; flex-direction:column; gap:5px; max-height:340px; overflow:auto; }
-  .cv-nav-item { display:flex; align-items:center; gap:10px; padding:9px 11px; border-radius:9px;
-    border:1px solid var(--borda-2); background:var(--panel-2); cursor:pointer; text-align:left;
-    width:100%; color:var(--texto); }
-  .cv-nav-item:hover { border-color:var(--azul); background:var(--panel-3); }
-  .cv-nav-item.on { border-color:var(--verde); background:var(--verde-soft); }
-  .cv-nav-item img { height:20px; max-width:64px; object-fit:contain; flex:none; }
-  .cv-nav-item .txt { flex:1; min-width:0; }
-  .cv-nav-item .txt b { display:block; font-size:13px; font-weight:650; }
-  .cv-nav-item .txt small { display:block; font-size:10.5px; color:var(--cinza-2); margin-top:2px; }
-  .cv-nav-item .seta { color:var(--cinza-2); font-size:15px; flex:none; }
-  .cv-nav-eti { display:flex; gap:5px; flex-wrap:wrap; margin-top:4px; }
-  .cv-nav-eti span { font-size:9.5px; padding:2px 6px; border-radius:5px; border:1px solid var(--borda);
-    background:var(--panel-3); color:var(--cinza); font-weight:650; }
-  .cv-nav-eti span.co-parcial { color:var(--laranja); border-color:rgba(251,146,60,.45); }
-  .cv-nav-eti span.co-completa { color:var(--rosa); border-color:rgba(244,63,124,.45); }
-  .cv-nav-eti span.co-sem { color:var(--verde); border-color:var(--verde); }
+  /* Grid de logos: a marca é como o corretor reconhece a operadora, mais
+     rápido do que lendo o nome. Cartão claro sempre — logo de operadora é
+     feito pra fundo branco e some no escuro. */
+  .cv-grade { display:grid; grid-template-columns:repeat(auto-fill, minmax(148px, 1fr));
+    gap:12px; }
+  .cv-cartao { background:var(--panel); border:1px solid var(--borda-2); border-radius:12px;
+    padding:16px 14px; cursor:pointer; display:flex; flex-direction:column; gap:8px;
+    align-items:center; justify-content:center; min-height:104px; text-align:center;
+    color:var(--texto); font-family:inherit; transition:border-color .15s, transform .12s; }
+  .cv-cartao:hover { border-color:var(--azul); transform:translateY(-1px); }
+  .cv-cartao.on { border-color:var(--verde); background:var(--verde-soft); }
+  .cv-cartao .logo { height:38px; width:100%; display:flex; align-items:center;
+    justify-content:center; background:#fff; border-radius:8px; padding:6px; }
+  .cv-cartao .logo img { max-height:100%; max-width:100%; object-fit:contain; }
+  .cv-cartao b { font-size:13px; font-weight:650; line-height:1.3; }
+  .cv-cartao small { font-size:11px; color:var(--cinza-2); }
+  .cv-cartao.on small { color:var(--verde); }
 
-  .cv-selecao { margin-top:12px; padding-top:11px; border-top:1px dashed var(--borda-2);
+  /* Níveis mais fundos (produto, linha, plano) são lista, não grid: aí o que
+     importa é ler as diferenças entre eles, não reconhecer uma marca. */
+  .cv-grade.lista { grid-template-columns:1fr; gap:6px; }
+  .cv-grade.lista .cv-cartao { flex-direction:row; justify-content:flex-start;
+    text-align:left; min-height:0; padding:12px 14px; gap:12px; }
+  .cv-grade.lista .cv-cartao .txt { flex:1; min-width:0; }
+  .cv-grade.lista .cv-cartao .txt b { display:block; }
+  .cv-grade.lista .cv-cartao .txt small { display:block; margin-top:2px; }
+  .cv-grade.lista .cv-cartao .seta { color:var(--cinza-2); font-size:15px; }
+
+  .cv-eti { display:flex; gap:5px; flex-wrap:wrap; margin-top:5px; }
+  .cv-eti span { font-size:9.5px; padding:2px 7px; border-radius:5px; border:1px solid var(--borda);
+    background:var(--panel-3); color:var(--cinza); font-weight:650; }
+  .cv-eti span.co-parcial { color:var(--laranja); border-color:rgba(251,146,60,.45); }
+  .cv-eti span.co-completa { color:var(--rosa); border-color:rgba(244,63,124,.45); }
+  .cv-eti span.co-sem { color:var(--verde); border-color:var(--verde); }
+
+  .cv-selecao { margin-top:14px; padding-top:12px; border-top:1px dashed var(--borda-2);
     font-size:12px; color:var(--cinza); display:none; }
   .cv-selecao.ver { display:block; }
-  .cv-selecao .lista { display:flex; flex-wrap:wrap; gap:5px; margin-top:7px; }
+  .cv-selecao .lista { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
   .cv-selecao .marcado { display:inline-flex; align-items:center; gap:6px; font-size:11px;
     padding:4px 9px; border-radius:7px; border:1px solid var(--verde); background:var(--verde-soft);
     color:var(--verde); font-weight:600; }
   .cv-selecao .marcado button { background:none; border:none; color:inherit; cursor:pointer;
-    font-size:13px; line-height:1; padding:0; }
+    font-size:13px; line-height:1; padding:0; font-family:inherit; }
 
-  .cv-acao { display:flex; gap:9px; align-items:center; }
-  .cv-acao .btn { flex:1; justify-content:center; }
+  /* Vidas por faixa */
+  .cv-faixas { display:flex; flex-direction:column; gap:5px; }
+  .cv-fx { display:flex; align-items:center; gap:9px; padding:6px 10px; border-radius:9px;
+    background:var(--panel-2); border:1px solid transparent; }
+  .cv-fx.tem { border-color:var(--verde); background:var(--verde-soft); }
+  .cv-fx span.rot { flex:1; font-size:13px; color:var(--cinza); font-variant-numeric:tabular-nums; }
+  .cv-fx.tem span.rot { color:var(--texto); font-weight:600; }
+  .cv-fx button { width:28px; height:28px; border-radius:8px; border:1px solid var(--borda-2);
+    background:var(--panel); color:var(--texto); font-size:16px; line-height:1; cursor:pointer;
+    flex:none; font-family:inherit; }
+  .cv-fx button:hover { border-color:var(--azul); color:var(--azul); }
+  .cv-fx input { width:48px; text-align:center; background:var(--panel); border:1px solid var(--borda-2);
+    border-radius:8px; padding:5px; color:var(--texto); font-size:13px;
+    font-variant-numeric:tabular-nums; font-family:inherit; }
+  .cv-total-vidas { margin-top:12px; padding-top:12px; border-top:1px dashed var(--borda-2);
+    display:flex; justify-content:space-between; font-size:13px; }
+  .cv-total-vidas b { font-size:18px; font-variant-numeric:tabular-nums; }
 
-  /* Andamento com número, não com espera cega. */
-  .cv-andando { display:none; margin-top:13px; }
+  /* Andamento */
+  .cv-andando { display:none; margin-top:16px; }
   .cv-andando.ver { display:block; }
   .cv-barra { height:6px; border-radius:6px; background:var(--panel-3); overflow:hidden; }
   .cv-barra i { display:block; height:100%; width:0; background:var(--grad-frio); transition:width .28s ease; }
-  .cv-andando p { margin:7px 0 0; font-size:12px; color:var(--cinza); }
+  .cv-andando p { margin:8px 0 0; font-size:12.5px; color:var(--cinza); }
 
   /* Resultado */
   .cv-res-topo { display:flex; align-items:center; justify-content:space-between; gap:12px;
-    flex-wrap:wrap; margin-bottom:12px; }
+    flex-wrap:wrap; margin:20px 0 12px; }
   .cv-res-topo h2 { margin:0; font-size:16px; }
   .cv-res-topo .resumo { font-size:12px; color:var(--cinza); }
   .cv-res-topo .resumo b { color:var(--texto); font-variant-numeric:tabular-nums; }
@@ -207,15 +212,29 @@
   .cv-detalhe td.num { text-align:right; }
   .cv-detalhe tr.soma td { font-weight:700; border-bottom:none; padding-top:8px; }
 
-  .cv-vazio { text-align:center; padding:56px 22px; color:var(--cinza); border:1px dashed var(--borda-2);
-    border-radius:14px; background:var(--panel); }
+  .cv-vazio { text-align:center; padding:52px 22px; color:var(--cinza); border:1px dashed var(--borda-2);
+    border-radius:14px; background:var(--panel); grid-column:1/-1; }
   .cv-vazio strong { display:block; color:var(--texto); font-size:15px; margin-bottom:6px; }
   .cv-vazio p { margin:0 auto; max-width:46ch; font-size:13px; line-height:1.6; }
+  .cv-ops-vazio { font-size:12.5px; color:var(--cinza-2); line-height:1.55; grid-column:1/-1; }
 
-  .cv-i { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px;
-    border-radius:50%; border:1px solid var(--cinza-2); color:var(--cinza-2); font-size:9px;
-    font-weight:700; cursor:help; margin-left:5px; vertical-align:middle; font-style:normal; }
-  .cv-i:hover { border-color:var(--azul); color:var(--azul); }
+  /* Janelas (vidas, e configuração quando precisar) */
+  .cv-janela { display:none; position:fixed; inset:0; z-index:200;
+    background:rgba(0,0,0,.55); padding:24px; overflow:auto; }
+  .cv-janela.ver { display:flex; align-items:flex-start; justify-content:center; }
+  .cv-janela-cx { background:var(--panel); border:1px solid var(--borda-2); border-radius:16px;
+    width:100%; max-width:860px; margin:auto; box-shadow:0 24px 60px rgba(0,0,0,.4); }
+  .cv-janela-topo { display:flex; gap:16px; align-items:flex-start; padding:20px 22px 14px;
+    border-bottom:1px solid var(--borda); }
+  .cv-janela-topo h2 { margin:0 0 4px; font-size:17px; }
+  .cv-janela-topo p { margin:0; font-size:12.5px; color:var(--cinza); line-height:1.55; max-width:66ch; }
+  .cv-janela-x { background:none; border:none; color:var(--cinza); font-size:24px; line-height:1;
+    cursor:pointer; padding:0 4px; font-family:inherit; }
+  .cv-janela-x:hover { color:var(--texto); }
+  .cv-janela-corpo { padding:18px 22px; }
+  .cv-janela-pe { display:flex; gap:10px; align-items:center; justify-content:flex-end;
+    padding:14px 22px 18px; border-top:1px solid var(--borda); }
+  .cv-janela-pe span { flex:1; font-size:12px; color:var(--cinza); }
 </style>
 {% endblock %}
 
@@ -223,11 +242,8 @@
 <div class="cv-topo">
   <div>
     <h1>Cotação ao vivo</h1>
-    <p>Os preços vêm do Painel do Corretor na hora, pela sua própria sessão — o JOB
-       não guarda tabela de preço, então não existe tabela desatualizada aqui.
-       Para ver <b>o que existe</b> em cada cidade sem pedir preço, use o
-       <a href="/cotacao/catalogo">catálogo</a>.
-       {% if not salva %}A tela antiga continua funcionando em <a href="/cotacao">/cotacao</a>.{% endif %}</p>
+    <p>Preço do Painel do Corretor na hora, pela sua própria sessão. O JOB não guarda
+       tabela — então não existe tabela desatualizada aqui.</p>
   </div>
   <div id="sinal" class="cv-sinal"><i class="bolinha"></i><span>verificando…</span></div>
 </div>
@@ -235,154 +251,105 @@
 <div id="aviso" class="cv-aviso"></div>
 
 {% if salva %}
-<div class="cv-bloco">
-  <h3>Cotação salva</h3>
-  <p class="ajuda">Feita em {{ salva.criado_em }} · {{ salva.cidade }} ·
-     {{ salva.planos_cotados }} plano(s) · {{ (salva.ms/1000)|round(1) }}s
-     {% if salva.painel_url %}· <a href="{{ salva.painel_url }}" target="_blank" rel="noopener">abrir no Painel</a>{% endif %}</p>
+<div class="cv-salva">Cotação de {{ salva.criado_em }} · {{ salva.cidade }} ·
+  {{ salva.planos_cotados }} plano(s)
+  {% if salva.painel_url %}· <a href="{{ salva.painel_url }}" target="_blank" rel="noopener">abrir no Painel</a>{% endif %}
 </div>
 {% endif %}
 
-<div class="cv-grade">
-  <div>
-    <div class="cv-bloco">
-      <h3>Quem vamos cotar</h3>
-      <p class="ajuda">A cidade precisa ser a mesma que o Painel usa — por isso a busca,
-         em vez de digitar livre.</p>
+<div class="cv-tela">
+  <!-- ── Coluna de decisões ──────────────────────────────────────────────
+       Três pesos visuais para três tipos de escolha, que é o que a tela do
+       Painel faz bem: segmentado para o que é excludente, campo com seta para
+       o que é busca, título e lista para o que é refinamento. -->
+  <aside class="cv-lado">
+    <div class="cv-seg" id="segRamo">
+      <button type="button" class="on" data-v="Saúde">Saúde</button>
+      <button type="button" data-v="Dental">Dental</button>
+    </div>
 
-      <div class="cv-campo">
-        <label for="cidade">Cidade</label>
-        <input id="cidade" type="text" autocomplete="off" placeholder="digite 3 letras…"
-               value="{{ salva.cidade if salva else '' }}">
-        <div id="sugCidade" class="cv-sug"></div>
-      </div>
+    <div class="cv-seg" id="segTipo" title="Dá pra marcar mais de um"></div>
 
-      <div class="cv-campo">
-        <label for="modalidade">Tipo de contratação</label>
-        <select id="modalidade"></select>
-        <!-- Isto é configuração, e configuração não fica no meio do caminho de
-             quem está atendendo cliente. Aqui vai só um lembrete discreto; o
-             trabalho acontece numa janela à parte, com espaço. -->
-        <div id="modFaltando" style="display:none;font-size:11.5px;margin-top:6px">
-          <button type="button" class="cv-link" id="btAcharMod"></button>
-        </div>
+    <div class="cv-campo">
+      <input id="cidade" type="text" autocomplete="off" placeholder="Cidade…"
+             value="{{ salva.cidade if salva else '' }}">
+      <div id="sugCidade" class="cv-sug"></div>
+    </div>
+
+    <button type="button" class="cv-campo-bt" id="btVidas">
+      <span id="vidasResumo">Quantas vidas…</span>
+    </button>
+
+    <div class="cv-refino">
+      <h4>Acomodação</h4>
+      <div class="cv-opts" data-grupo="acomodacao">
+        <button type="button" data-v="0">Quarto Coletivo</button>
+        <button type="button" data-v="1">Quarto Individual</button>
       </div>
     </div>
 
-    <div class="cv-bloco">
-      <h3>Vidas por faixa etária</h3>
-      <p class="ajuda">É assim que a operadora cobra: um preço por faixa, multiplicado
-         por quantas pessoas há nela.</p>
-      <div class="cv-faixas" id="faixas"></div>
-      <div class="cv-total-vidas">
-        <span>Total de vidas
-          <i class="cv-i" title="Planos PME costumam exigir de 3 a 29 vidas. Quem ficar fora dessa conta some da lista antes de pedir preço.">i</i>
-        </span>
-        <b id="totalVidas">0</b>
+    <div class="cv-refino">
+      <h4>Coparticipação</h4>
+      <div class="cv-opts" data-grupo="copart">
+        <button type="button" data-v="1">Com coparticipação</button>
+        <button type="button" data-v="0">Sem coparticipação</button>
       </div>
     </div>
 
-    <div class="cv-bloco">
-      <h3>Exigências do cliente</h3>
-      <p class="ajuda">Cada plano descartado aqui é uma consulta a menos ao Painel —
-         é o que deixa a cotação rápida sem correr risco.</p>
-
-      <div class="cv-campo">
-        <label>Coparticipação</label>
-        <div class="cv-pills" data-grupo="copart">
-          <button type="button" class="cv-pill on" data-v="">Tanto faz</button>
-          <button type="button" class="cv-pill" data-v="1">Com</button>
-          <button type="button" class="cv-pill" data-v="0">Sem</button>
-        </div>
+    <div class="cv-refino">
+      <h4>MEI</h4>
+      <div class="cv-opts" data-grupo="mei">
+        <button type="button" data-v="1">Aceita MEI</button>
       </div>
+    </div>
+  </aside>
 
-      <div class="cv-campo">
-        <label>Acomodação</label>
-        <div class="cv-pills" data-grupo="acomodacao">
-          <button type="button" class="cv-pill on" data-v="">Tanto faz</button>
-          <button type="button" class="cv-pill" data-v="0">Enfermaria</button>
-          <button type="button" class="cv-pill" data-v="1">Apartamento</button>
-        </div>
+  <!-- ── Área principal ─────────────────────────────────────────────────── -->
+  <main class="cv-main">
+    <div class="cv-main-topo">
+      <div>
+        <h2 id="mainTitulo">Quais planos deseja comparar?</h2>
+        <p id="mainSub">Escolha a operadora e vá até o plano do seu cliente.</p>
       </div>
-
-      <div class="cv-campo">
-        <label>MEI</label>
-        <div class="cv-pills" data-grupo="mei">
-          <button type="button" class="cv-pill on" data-v="">Tanto faz</button>
-          <button type="button" class="cv-pill" data-v="1">Só quem aceita MEI</button>
-        </div>
-      </div>
-
-      <div class="cv-campo">
-        <label for="maxPlanos">Até quantos planos cotar
-          <i class="cv-i" title="Cada plano é uma consulta separada ao Painel, de menos de um segundo. Vinte planos levam cerca de quinze segundos.">i</i>
-        </label>
-        <input id="maxPlanos" type="number" min="1" max="40" value="12">
+      <div class="cv-main-acao">
+        <button type="button" class="btn" id="btCotar" disabled>Cotar</button>
       </div>
     </div>
 
-    <!-- Operadora → produto → linha → plano, como no Painel.
-         Escolher o plano exato é o que deixa a cotação rápida: só o que está
-         marcado vai a preço, e cada plano é cerca de um segundo. -->
-    <div class="cv-bloco">
-      <h3>Planos a cotar</h3>
-      <p class="ajuda" id="navAjuda">Escolha a cidade primeiro.</p>
-      <div id="navMigalha" class="cv-migalha"></div>
-      <div id="navLista" class="cv-nav"></div>
-      <div id="navSel" class="cv-selecao"></div>
-    </div>
+    <div id="navMigalha" class="cv-migalha"></div>
+    <div id="navLista" class="cv-grade"></div>
+    <div id="navSel" class="cv-selecao"></div>
 
-    <div class="cv-acao">
-      <button type="button" class="btn" id="btCotar" disabled>Cotar agora</button>
-    </div>
-    <p class="ajuda" id="previsaoCotar" style="margin:8px 0 0 2px"></p>
     <div class="cv-andando" id="andando">
       <div class="cv-barra"><i id="barra"></i></div>
       <p id="andandoTxt"></p>
     </div>
-  </div>
 
-  <div>
-    <div class="cv-res-topo">
-      <h2>Planos</h2>
+    <div class="cv-res-topo" id="resTopo" style="display:none">
+      <h2>Planos com preço</h2>
       <div class="resumo" id="resumo"></div>
     </div>
-    <div id="resultado">
-      <!-- Caixote vazio explica o que vai cair aqui e o que falta pra isso.
-           Espaço em branco sem legenda vira "será que quebrou?". -->
-      <div class="cv-vazio">
-        <strong>Os planos aparecem aqui</strong>
-        <p>Escolha a cidade e diga quantas vidas há em cada faixa. Ao cotar, o JOB
-           pergunta ao Painel do Corretor plano por plano e devolve o valor mensal,
-           com a conta aberta por faixa etária.</p>
-        <p style="margin-top:10px;color:var(--cinza-2);font-size:12px">
-           Nada é cobrado e nada é enviado ao cliente: a cotação só sai daqui quando
-           você mandar salvar.</p>
-      </div>
-    </div>
-  </div>
+    <div id="resultado"></div>
+  </main>
 </div>
 
-<!-- Configuração dos tipos de contratação, fora do caminho de quem atende.
-     Só abre quando você pede, e fecha sem deixar nada pela metade. -->
-<div class="cv-janela" id="janelaMod">
-  <div class="cv-janela-cx">
+<!-- Vidas por faixa: janela, como no Painel. Fora do caminho até ser pedida. -->
+<div class="cv-janela" id="janelaVidas">
+  <div class="cv-janela-cx" style="max-width:560px">
     <div class="cv-janela-topo">
       <div>
-        <h2>Tipos de contratação</h2>
-        <p>O Painel identifica cada tipo por um número e o nome só existe na tela deles.
-           Compare a lista de operadoras com a que aparece no Painel e diga qual é qual —
-           é uma vez só, e depois o JOB nunca mais pergunta.</p>
+        <h2>Distribuição de vidas</h2>
+        <p>É assim que a operadora cobra: um preço por faixa etária, multiplicado por
+           quantas pessoas há nela.</p>
       </div>
-      <button type="button" class="cv-janela-x" id="fecharMod" title="Fechar">×</button>
+      <button type="button" class="cv-janela-x" id="fecharVidas" title="Fechar">×</button>
     </div>
-    <div class="cv-janela-corpo" id="modAchados">
-      <p class="cv-ops-vazio">Escolha a cidade na tela antes de abrir isto.</p>
+    <div class="cv-janela-corpo">
+      <div class="cv-faixas" id="faixas"></div>
+      <div class="cv-total-vidas"><span>Total de vidas</span><b id="totalVidas">0</b></div>
     </div>
     <div class="cv-janela-pe">
-      <span id="modSalvoMsg"></span>
-      <button type="button" class="btn-outline btn-sm" id="btAchar">Perguntar ao Painel</button>
-      <button type="button" class="btn" id="btSalvarMods" disabled>Salvar</button>
+      <button type="button" class="btn" id="okVidas">Confirmar</button>
     </div>
   </div>
 </div>
@@ -393,63 +360,47 @@
 (function () {
   'use strict';
 
-  var FAIXAS  = {{ faixas_painel|tojson }};   // como o Painel chama
-  var ROTULOS = {{ faixas|tojson }};          // como o JOB sempre chamou
+  var FAIXAS  = {{ faixas_painel|tojson }};
+  var ROTULOS = {{ faixas|tojson }};
   var MODALIDADES = {{ modalidades|tojson }};
   var LEAD = {{ (lead.id if lead else 0)|tojson }};
   var SALVA = {{ (salva.resultado if salva else None)|tojson }};
   var SALVA_VIDAS = {{ (salva.vidas if salva else None)|tojson }};
 
   var el = function (id) { return document.getElementById(id); };
-  // Nome de plano e motivo de erro vêm do sistema deles: tratados como texto,
-  // nunca como HTML.
   var esc = function (s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   };
   var moeda = function (v) {
     return (v == null) ? '—' : 'R$ ' + Number(v).toLocaleString('pt-BR',
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
+  function respira(min, max) {
+    return new Promise(function (r) { setTimeout(r, min + Math.random() * (max - min)); });
+  }
 
   // ── conversa com a extensão ────────────────────────────────────────────
-  // A página não consegue falar com o Painel do Corretor: navegador nenhum
-  // deixa um site chamar outro com a sessão do usuário. Quem faz é a extensão,
-  // na aba do Painel. Aqui só pedimos e esperamos.
-  var pendentes = {};
-  var seq = 0;
-  // A extensão se anuncia ao carregar. Guardar isso muda o diagnóstico: sem o
-  // anúncio, ela não está nesta página; com o anúncio e sem resposta, ela está
-  // aqui mas não achou a aba do Painel. Dois problemas diferentes, duas
-  // instruções diferentes — antes os dois caíam no mesmo aviso genérico.
-  var extensaoPresente = false;
-  var extensaoVersao = '';
-  var extensaoSabeCotar = false;
+  var pendentes = {}, seq = 0;
+  var extensaoPresente = false, extensaoVersao = '', extensaoSabeCotar = false;
   window.addEventListener('message', function (ev) {
     if (ev.source !== window) return;
     var d = ev.data;
-    if (d && d.source === 'JOB_SITE_RESP' && d.tipo === 'andamento') {
-      mostrarAndamento(d);
-      return;
-    }
-    if (d && d.source === 'JOB_SITE_RESP' && d.tipo === 'extensao_presente') {
+    if (!d || d.source !== 'JOB_SITE_RESP') return;
+    if (d.tipo === 'andamento') { mostrarAndamento(d); return; }
+    if (d.tipo === 'extensao_presente') {
       extensaoPresente = true;
       extensaoVersao = d.versao || '';
-      // A ponte velha nao manda esta lista. Ausencia AQUI ja e o diagnostico:
-      // esta aba ficou com o script antigo, que ignora pedido de cotacao em
-      // silencio — e silencio vira "Painel fechado", que e mentira.
       extensaoSabeCotar = !!(d.sabe && d.sabe.indexOf('cotar') >= 0);
       return;
     }
-    if (!d || d.source !== 'JOB_SITE_RESP' || !d.reqId) return;
+    if (!d.reqId) return;
     var p = pendentes[d.reqId];
     if (!p) return;
     delete pendentes[d.reqId];
     clearTimeout(p.relogio);
     p.resolve(d);
   });
-
   function pedir(tipo, extra, ms) {
     return new Promise(function (resolve) {
       var reqId = 'cv' + (++seq) + '-' + Date.now();
@@ -458,356 +409,147 @@
         resolve({ ok: false, motivo: 'extensao_nao_respondeu' });
       }, ms || 15000);
       pendentes[reqId] = { resolve: resolve, relogio: relogio };
-      var msg = { source: 'JOB_SITE_REQ', tipo: tipo, reqId: reqId };
-      for (var k in (extra || {})) msg[k] = extra[k];
-      window.postMessage(msg, '*');
+      var m = { source: 'JOB_SITE_REQ', tipo: tipo, reqId: reqId };
+      for (var k in (extra || {})) m[k] = extra[k];
+      window.postMessage(m, '*');
     });
-  }
-
-  // Diz em que pé está, com número, nos dois lugares — na coluna dos planos
-  // (onde o olho está) e na barrinha do formulário.
-  var FASES = {
-    criando:    'Abrindo a cotação no Painel…',
-    operadoras: 'Vendo quem atende nessa cidade…',
-    planos:     'Listando os planos de cada operadora…',
-    precos:     'Buscando o preço de cada plano…'
-  };
-  function mostrarAndamento(a) {
-    var titulo = FASES[a.fase] || 'Consultando o Painel…';
-    var det = '';
-    var pct = 8;
-    if (a.total) {
-      det = a.feito + ' de ' + a.total +
-            (a.fase === 'precos' ? ' planos com preço' : ' operadoras');
-      // Preço é a etapa longa: ocupa de 40% a 100% da barra. As anteriores
-      // dividem os primeiros 40%. Barra que anda no ritmo errado mente.
-      pct = a.fase === 'precos' ? 40 + (a.feito / a.total) * 60
-                                : 10 + (a.feito / a.total) * 30;
-    }
-    var f = el('cvFase'), fd = el('cvFaseDet'), b2 = el('cvBarra2');
-    if (f) f.textContent = titulo;
-    if (fd && det) fd.textContent = det;
-    if (b2) b2.style.width = Math.round(pct) + '%';
-    el('andandoTxt').textContent = titulo + (det ? ' · ' + det : '');
-    el('barra').style.width = Math.round(pct) + '%';
   }
 
   // ── estado da ligação ──────────────────────────────────────────────────
   var pronto = false;
-
   var EXPLICA = {
-    extensao_nao_respondeu: {
-      classe: 'off', rotulo: 'Extensão não responde',
-      html: '<b>A extensão do JOB não respondeu.</b> Sem ela esta tela não cota, ' +
-            'porque quem fala com o Painel é o seu próprio navegador.' +
-            '<ol><li>Confira se a extensão está instalada e ligada.</li>' +
-            '<li>Recarregue esta página.</li></ol>'
-    },
-    extensao_indisponivel: {
-      classe: 'off', rotulo: 'Extensão indisponível',
-      html: '<b>A extensão está instalada mas não atendeu.</b> Costuma ser atualização ' +
-            'pendente.<ol><li>Abra <code>chrome://extensions</code> e clique no ↻ da extensão do JOB.</li>' +
-            '<li>Recarregue esta página.</li></ol>'
-    },
-    aba_desatualizada: {
-      classe: 'off', rotulo: 'Recarregue esta página',
-      html: '<b>Esta aba ficou com uma versão antiga da extensão.</b> Acontece quando a ' +
-            'página é recarregada <i>antes</i> da extensão — o script velho continua nela e ' +
-            'ignora o pedido de cotação em silêncio.' +
-            '<ol><li>Aperte <b>F5 aqui</b>.</li></ol>' +
-            '<p style="margin:8px 0 0;color:var(--cinza)">Só isso. A ordem certa, quando ' +
-            'atualizar a extensão, é: primeiro o ↻ em chrome://extensions, depois o F5 nas ' +
-            'abas abertas.</p>'
-    },
-    painel_fechado: {
-      classe: 'off', rotulo: 'Painel fechado',
-      html: '<b>O Painel do Corretor precisa estar aberto numa aba.</b> A cotação sai da ' +
-            'sua sessão lá — nenhuma senha passa pelo JOB.' +
-            // O endereço do Painel é o beta. O paineldocorretor.com.br sem o
-            // beta é o site de vendas da Agger, não o sistema — mandar o
-            // consultor pra lá no meio de um atendimento é pior que não linkar.
-            '<ol><li>Abra <a href="https://beta.paineldocorretor.com.br/cotacoes" target="_blank" rel="noopener">o Painel</a> e faça login.</li>' +
-            '<li>Volte aqui e recarregue.</li></ol>' +
-            '<p style="margin:8px 0 0;color:var(--cinza)">Se ele já está aberto, confira se a ' +
-            'extensão foi recarregada depois da última atualização — ela precisa saber procurar ' +
-            'a aba.</p>'
-    },
-    painel_precisa_recarregar: {
-      classe: 'off', rotulo: 'Painel precisa de F5',
-      html: '<b>A aba do Painel está aberta mas sem a extensão dentro.</b> Acontece ' +
-            'quando a extensão foi atualizada depois que a aba abriu.' +
-            '<ol><li>Vá na aba do Painel e aperte F5.</li><li>Volte aqui e recarregue.</li></ol>'
-    },
-    precisa_aprender: {
-      classe: 'aprender', rotulo: 'Falta ensinar uma vez',
-      html: '<b>A extensão ainda não sabe como o Painel cota.</b> Ela aprende olhando, ' +
-            'uma vez só — e reaprende sozinha depois disso.' +
-            '<ol><li>Vá na aba do Painel e faça <b>uma cotação normal, na mão</b>, ' +
-            'até aparecer preço de plano na tela.</li>' +
-            '<li>Volte aqui e recarregue.</li></ol>' +
-            '<p style="margin:8px 0 0;color:var(--cinza)">Isso existe porque o Painel muda os ' +
-            'identificadores internos a cada atualização deles. Preferimos que a extensão ' +
-            'reaprenda a que ela devolva um preço errado com cara de certo.</p>'
-    }
+    extensao_nao_respondeu: { classe: 'off', rotulo: 'Extensão não responde',
+      html: '<b>A extensão do JOB não respondeu.</b> Sem ela esta tela não cota, porque quem ' +
+            'fala com o Painel é o seu próprio navegador.<ol><li>Confira se a extensão está ' +
+            'instalada e ligada.</li><li>Recarregue esta página.</li></ol>' },
+    aba_desatualizada: { classe: 'off', rotulo: 'Recarregue esta página',
+      html: '<b>Esta aba ficou com uma versão antiga da extensão.</b> Acontece quando a página é ' +
+            'recarregada <i>antes</i> da extensão.<ol><li>Aperte <b>F5 aqui</b>.</li></ol>' },
+    extensao_indisponivel: { classe: 'off', rotulo: 'Extensão indisponível',
+      html: '<b>A extensão está instalada mas não atendeu.</b><ol><li>Abra ' +
+            '<code>chrome://extensions</code> e clique no ↻ da extensão do JOB.</li>' +
+            '<li>Recarregue esta página.</li></ol>' },
+    painel_fechado: { classe: 'off', rotulo: 'Painel fechado',
+      html: '<b>O Painel do Corretor precisa estar aberto numa aba.</b> A cotação sai da sua ' +
+            'sessão lá — nenhuma senha passa pelo JOB.<ol><li>Abra ' +
+            '<a href="https://beta.paineldocorretor.com.br/cotacoes" target="_blank" rel="noopener">o Painel</a> ' +
+            'e faça login.</li><li>Volte aqui e recarregue.</li></ol>' },
+    painel_precisa_recarregar: { classe: 'off', rotulo: 'Painel precisa de F5',
+      html: '<b>A aba do Painel está aberta mas sem a extensão dentro.</b>' +
+            '<ol><li>Vá na aba do Painel e aperte F5.</li><li>Volte aqui e recarregue.</li></ol>' },
+    precisa_aprender: { classe: 'aprender', rotulo: 'Falta ensinar uma vez',
+      html: '<b>A extensão ainda não sabe como o Painel cota.</b> Ela aprende olhando, uma vez só.' +
+            '<ol><li>Vá na aba do Painel e faça <b>uma cotação normal, na mão</b>, até aparecer ' +
+            'preço na tela.</li><li>Volte aqui e recarregue.</li></ol>' }
   };
-
   function mostrarSinal(classe, rotulo, ajuda) {
     var s = el('sinal');
     s.className = 'cv-sinal ' + (classe || '');
-    // Versão da extensão junto do estado. Passei três rodadas sem saber se a
-    // aba estava com o script novo ou velho — com isto na tela, a primeira
-    // pergunta some.
     s.querySelector('span').textContent = rotulo +
       (extensaoPresente ? ' · ext ' + (extensaoVersao || '?') : ' · sem extensão');
     var a = el('aviso');
     if (ajuda) { a.innerHTML = ajuda; a.className = 'cv-aviso ver'; }
     else { a.className = 'cv-aviso'; a.innerHTML = ''; }
   }
-
   function tratarFalha(motivo, extra) {
-    // Não responder tem DUAS causas, e mandar a instrução errada custa caro:
-    // o consultor vai atrás do Painel quando o problema está nesta aba.
-    //
-    // Se a extensão se anunciou mas não sabe cotar, esta página ficou com o
-    // script antigo — acontece quando a página é recarregada ANTES da extensão.
-    // Ela ignora o pedido calada, a tela espera até estourar o tempo, e antes
-    // isso virava "Painel fechado", que é o diagnóstico errado.
     if (motivo === 'extensao_nao_respondeu' && extensaoPresente) {
       motivo = extensaoSabeCotar ? 'painel_fechado' : 'aba_desatualizada';
     }
     var e = EXPLICA[motivo];
     if (!e) {
-      mostrarSinal('off', 'Não deu certo',
-        '<b>A cotação não foi.</b> O motivo que voltou foi <code>' +
-        String(motivo || 'desconhecido').replace(/[<>&]/g, '') + '</code>. ' +
-        'Se repetir, me mande esse código.');
+      mostrarSinal('off', 'Não deu certo', '<b>A cotação não foi.</b> O motivo que voltou foi ' +
+        '<code>' + esc(motivo || 'desconhecido') + '</code>. Se repetir, me mande esse código.');
       return;
     }
     var html = e.html;
-    // Se a extensão olhou as abas e não achou nenhuma do Painel, dizer isso.
-    // "Painel fechado" sem número é palpite; com número, dá pra saber se o
-    // problema é a aba ou é a extensão não estar enxergando as abas.
     if (motivo === 'painel_fechado' && extra && extra.abasExaminadas != null) {
-      html += '<p style="margin:8px 0 0;font-size:11.5px;color:var(--cinza-2)">' +
-        'A extensão olhou ' + extra.abasExaminadas + ' aba(s) abertas e nenhuma era do Painel. ' +
-        'Se ele está aberto agora, recarregue a extensão em chrome://extensions.</p>';
+      html += '<p style="margin:8px 0 0;font-size:11.5px;color:var(--cinza-2)">A extensão olhou ' +
+        extra.abasExaminadas + ' aba(s) e nenhuma era do Painel.</p>';
     }
     mostrarSinal(e.classe, e.rotulo, html);
   }
 
-  async function conferirLigacao() {
-    // Pergunta antes de assumir. O anúncio da extensão pode chegar antes de
-    // esta página estar ouvindo, e anúncio perdido não se repete — a tela
-    // concluía "não tem extensão" para sempre.
-    var pong = await pedir('ping', {}, 2500);
-    if (pong.ok) {
-      extensaoPresente = true;
-      extensaoVersao = pong.versao || extensaoVersao;
-      extensaoSabeCotar = !!(pong.sabe && pong.sabe.indexOf('cotar') >= 0);
+  var FASES = { criando: 'Abrindo a cotação no Painel…',
+                operadoras: 'Vendo quem atende nessa cidade…',
+                planos: 'Listando os planos…', precos: 'Buscando o preço de cada plano…' };
+  function mostrarAndamento(a) {
+    var titulo = FASES[a.fase] || 'Consultando o Painel…';
+    var det = '', pct = 8;
+    if (a.total) {
+      det = a.feito + ' de ' + a.total + (a.fase === 'precos' ? ' com preço' : '');
+      pct = a.fase === 'precos' ? 40 + (a.feito / a.total) * 60 : 10 + (a.feito / a.total) * 30;
     }
-    var r = await pedir('cotador_estado', {}, 8000);
-    pronto = !!(r.ok && r.dados !== false);
-    if (!r.ok) { pronto = false; tratarFalha(r.motivo, r); atualizarBotao(); return; }
-    if (r.faltando && r.faltando.length) {
-      pronto = false; tratarFalha('precisa_aprender'); atualizarBotao(); return;
-    }
-    pronto = true;
-    mostrarSinal('on', 'Painel conectado', '');
-    novasModalidades(r.modalidades || []);
-    atualizarBotao();
+    el('andandoTxt').textContent = titulo + (det ? ' · ' + det : '');
+    el('barra').style.width = Math.round(pct) + '%';
   }
 
-  // Códigos de modalidade que a extensão viu mas o JOB ainda não sabe o nome.
-  // Chutar que 1 é PF seria pedir preço do produto errado — então perguntamos.
-  function novasModalidades(vistas) {
-    var novas = (vistas || []).filter(function (c) { return !MODALIDADES[c]; });
-    if (!novas.length) return;
-    var a = el('aviso');
-    a.className = 'cv-aviso ver';
-    a.innerHTML = '<b>Apareceu um tipo de contratação novo no Painel.</b> ' +
-      'A extensão vê o código, mas o nome só existe na tela deles. Como se chama ' +
-      'o tipo <b>' + novas[0] + '</b>?' +
-      '<div style="display:flex;gap:8px;margin-top:10px;max-width:340px">' +
-      '<input id="nomeMod" class="cv-campo" style="flex:1;background:var(--panel-2);' +
-      'border:1px solid var(--borda-2);border-radius:9px;padding:8px 11px;color:var(--texto)" ' +
-      'placeholder="PF, Adesão…"><button type="button" class="btn btn-sm" id="btMod">Salvar</button></div>';
-    el('btMod').onclick = async function () {
-      var nome = (el('nomeMod').value || '').trim();
-      if (!nome) return;
-      var resp = await fetch('/cotacao/modalidade', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codigo: novas[0], nome: nome })
-      }).then(function (r) { return r.json(); }).catch(function () { return { ok: false }; });
-      if (resp.ok) { MODALIDADES = resp.modalidades; montarModalidades(); novasModalidades(vistas); }
-    };
-  }
-
-  function montarModalidades() {
-    var s = el('modalidade');
-    var antes = s.value;
-    s.innerHTML = '';
-    // Saúde e Dental em grupos separados. Seis itens numa lista corrida fazem
-    // o consultor ler todos pra achar o que quer; separados, ele vai direto.
-    var grupos = { 'Saúde': [], 'Dental': [] };
-    Object.keys(MODALIDADES).forEach(function (c) {
-      grupos[/dental|odonto/i.test(MODALIDADES[c]) ? 'Dental' : 'Saúde'].push(c);
-    });
-    ['Saúde', 'Dental'].forEach(function (ramo) {
-      if (!grupos[ramo].length) return;
-      // Com um grupo só, rótulo de grupo é enfeite: some.
-      var destino = s;
-      if (grupos['Saúde'].length && grupos['Dental'].length) {
-        destino = document.createElement('optgroup');
-        destino.label = ramo;
-        s.appendChild(destino);
-      }
-      grupos[ramo].forEach(function (c) {
-        var o = document.createElement('option');
-        o.value = c; o.textContent = MODALIDADES[c];
-        destino.appendChild(o);
-      });
-    });
-    s.value = (antes && MODALIDADES[antes]) ? antes : '2';
-    // A tela deles tem PF, PME e Adesão. Enquanto tivermos menos que isso,
-    // oferece descobrir — em vez de deixar o consultor achando que só existe PME.
-    // São seis no Painel: PF, PME e Adesão, em Saúde e em Dental. Enquanto
-    // houver menos, oferece descobrir.
-    var falta = 6 - Object.keys(MODALIDADES).length;
-    el('modFaltando').style.display = falta > 0 ? 'block' : 'none';
-    var bt = el('btAcharMod');
-    if (bt) bt.textContent = Object.keys(MODALIDADES).length <= 1
-      ? 'Faltam PF, Adesão e os de Dental?'
-      : 'Descobrir os ' + falta + ' que faltam';
-  }
-
-  // ── Tipos de contratação: janela à parte ────────────────────────────────
+  // ── ramo e tipo ────────────────────────────────────────────────────────
   //
-  // Chutar que 1 é PF seria pedir preço do produto errado e mostrar como certo.
-  // Então a extensão pergunta ao Painel quem atende em cada código e você
-  // reconhece qual é qual comparando com a tela deles — por isso a lista de
-  // operadoras aparece INTEIRA aqui, e não cortada com reticências: cortada,
-  // não dá pra comparar, que é a única coisa que esta janela serve pra fazer.
-  var OPCOES = ['PF', 'PME', 'Adesão', 'PF Dental', 'PME Dental', 'Adesão Dental'];
+  // Saúde ou Dental, e um ou mais tipos. O consultor escolhe em palavras; o
+  // número que o Painel usa é problema nosso, e a extensão aprende sozinha
+  // lendo o rótulo na tela deles.
+  var ramo = 'Saúde';
+  var tiposEscolhidos = [];
+  var TIPOS = ['PF', 'PME', 'Adesão'];
 
-  function ramoDe(amostra) {
-    var dental = (amostra || []).filter(function (n) { return /odonto|dental/i.test(n); }).length;
-    return dental >= Math.ceil((amostra || []).length / 2) ? 'Dental' : 'Saúde';
+  function nomeCompleto(t) { return ramo === 'Dental' ? (t + ' Dental') : t; }
+  function codigoDe(t) {
+    var alvo = nomeCompleto(t);
+    var achado = Object.keys(MODALIDADES).filter(function (c) { return MODALIDADES[c] === alvo; });
+    return achado.length ? Number(achado[0]) : null;
   }
 
-  // Diz em cima de QUE pergunta a lista foi montada. Sem isso o consultor
-  // compara com a tela do Painel dele — que pode estar noutra faixa — e conclui
-  // que o JOB errou.
-  function contexto() {
-    var v = vidasLista();
-    if (!v.length) return '';
-    var i = FAIXAS.indexOf(v[0].faixa);
-    return ', faixa ' + (i >= 0 ? ROTULOS[i] : v[0].faixa) + (v.length > 1 ? ' e outras' : '');
-  }
-
-  function abrirJanelaMod() {
-    el('janelaMod').className = 'cv-janela ver';
-    el('btAchar').disabled = !cidadeEscolhida;
-    if (!cidadeEscolhida) {
-      el('modAchados').innerHTML =
-        '<p class="cv-ops-vazio">Escolha a cidade na tela antes — a pergunta é sempre ' +
-        'sobre uma cidade, porque quem atende muda de lugar pra lugar.</p>';
-    }
-  }
-  function fecharJanelaMod() { el('janelaMod').className = 'cv-janela'; }
-
-  el('btAcharMod').onclick = abrirJanelaMod;
-  el('fecharMod').onclick = fecharJanelaMod;
-  el('janelaMod').addEventListener('click', function (ev) {
-    if (ev.target === el('janelaMod')) fecharJanelaMod();
-  });
-  document.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Escape') fecharJanelaMod();
-  });
-
-  el('btAchar').onclick = async function () {
-    if (!cidadeEscolhida) return;
-    this.disabled = true;
-    el('modAchados').innerHTML = '<p class="cv-ops-vazio">Perguntando ao Painel por ' +
-      esc(cidadeEscolhida) + contexto() + '… isto leva alguns segundos.</p>';
-    // Vai com as MESMAS vidas do formulário: quem atende muda com a faixa
-    // etária, e a lista precisa bater com a que você está vendo no Painel.
-    var r = await pedir('descobrir_modalidades',
-      { pedido: { cidade: cidadeEscolhida, vidas: vidasLista() } }, 90000);
-    this.disabled = false;
-    if (!r.ok) {
-      el('modAchados').innerHTML = '<p class="cv-ops-vazio">Não deu: ' + esc(r.motivo || '?') + '</p>';
-      return;
-    }
-    var achados = (r.dados && r.dados.achados) || [];
-    if (!achados.length) {
-      el('modAchados').innerHTML = '<p class="cv-ops-vazio">Nenhum código respondeu para esta cidade.</p>';
-      return;
-    }
-    desenharAchados(achados);
-  };
-
-  function desenharAchados(achados) {
-    var grupos = { 'Saúde': [], 'Dental': [] };
-    achados.forEach(function (a) { grupos[ramoDe(a.amostra)].push(a); });
-    var html = '';
-    ['Saúde', 'Dental'].forEach(function (ramo) {
-      if (!grupos[ramo].length) return;
-      html += '<div class="cv-ramo"><h4>' + ramo + '</h4>';
-      grupos[ramo].forEach(function (a) {
-        var jaTem = MODALIDADES[a.codigo] || '';
-        html += '<div class="cv-mod-cx' + (jaTem ? ' pronto' : '') + '" data-cx="' + a.codigo + '">' +
-          '<div class="quem"><b>Código ' + a.codigo + ' · ' + a.quantas + ' operadoras</b>' +
-            esc(a.amostra.join(', ')) + (a.quantas > a.amostra.length ? ' e outras' : '') + '</div>' +
-          '<select data-cod="' + a.codigo + '">' +
-            '<option value="">— o que é? —</option>' +
-            OPCOES.filter(function (o) {
-              return ramo === 'Dental' ? /Dental/.test(o) : !/Dental/.test(o);
-            }).map(function (o) {
-              return '<option' + (jaTem === o ? ' selected' : '') + '>' + o + '</option>';
-            }).join('') +
-          '</select></div>';
-      });
-      html += '</div>';
-    });
-    el('modAchados').innerHTML =
-      '<p style="font-size:11.5px;color:var(--cinza-2);margin:0 0 14px">' +
-      'Quem atende <b>' + esc(cidadeEscolhida) + contexto() + '</b>. ' +
-      'Ponha o Painel na mesma cidade e faixa pra comparar linha por linha.</p>' + html;
-    el('btSalvarMods').disabled = false;
-    // Marca verde na hora em que você escolhe: sem isso, com seis cartões, não
-    // dá pra saber de bate-pronto quais já estão resolvidos.
-    el('modAchados').querySelectorAll('select[data-cod]').forEach(function (sel) {
-      sel.onchange = function () {
-        var cx = el('modAchados').querySelector('[data-cx="' + sel.dataset.cod + '"]');
-        if (cx) cx.className = 'cv-mod-cx' + (sel.value ? ' pronto' : '');
-      };
+  function montarSegTipo() {
+    var c = el('segTipo');
+    c.innerHTML = '';
+    TIPOS.forEach(function (t) {
+      var cod = codigoDe(t);
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = t;
+      b.className = tiposEscolhidos.indexOf(t) >= 0 ? 'on' : '';
+      if (cod == null) {
+        // Sem código conhecido não dá pra cotar este tipo — e prometer que dá
+        // seria pior que dizer o que falta.
+        b.disabled = true;
+        b.style.opacity = '.45';
+        b.title = 'O JOB ainda não viu ' + nomeCompleto(t) + ' no Painel. Faça uma cotação ' +
+                  'desse tipo lá uma vez e ele aprende sozinho.';
+      } else {
+        b.onclick = function () {
+          var i = tiposEscolhidos.indexOf(t);
+          if (i >= 0) tiposEscolhidos.splice(i, 1); else tiposEscolhidos.push(t);
+          montarSegTipo();
+          recomecar();
+        };
+      }
+      c.appendChild(b);
     });
   }
 
-  el('btSalvarMods').onclick = async function () {
-    this.disabled = true;
-    var campos = el('modAchados').querySelectorAll('select[data-cod]');
-    var quantos = 0;
-    for (var i = 0; i < campos.length; i++) {
-      if (!campos[i].value) continue;
-      var resp = await fetch('/cotacao/modalidade', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codigo: Number(campos[i].dataset.cod), nome: campos[i].value })
-      }).then(function (x) { return x.json(); }).catch(function () { return { ok: false }; });
-      if (resp.ok) { MODALIDADES = resp.modalidades; quantos++; }
-    }
-    this.disabled = false;
-    montarModalidades();
-    el('modSalvoMsg').textContent = quantos
-      ? quantos + ' tipo(s) salvo(s). Já aparecem na tela.' : 'Escolha ao menos um.';
-    if (quantos) setTimeout(fecharJanelaMod, 900);
-  };
+  el('segRamo').querySelectorAll('button').forEach(function (b) {
+    b.onclick = function () {
+      el('segRamo').querySelectorAll('button').forEach(function (x) { x.classList.remove('on'); });
+      b.classList.add('on');
+      ramo = b.dataset.v;
+      tiposEscolhidos = [];
+      montarSegTipo();
+      recomecar();
+    };
+  });
 
-  // ── vidas por faixa ────────────────────────────────────────────────────
+  // ── vidas ──────────────────────────────────────────────────────────────
   var vidas = {};
   FAIXAS.forEach(function (f) { vidas[f] = 0; });
   if (SALVA_VIDAS) SALVA_VIDAS.forEach(function (v) { vidas[v.faixa] = v.quantidade; });
 
+  function totalVidas() {
+    return FAIXAS.reduce(function (s, f) { return s + (vidas[f] || 0); }, 0);
+  }
+  function vidasLista() {
+    return FAIXAS.map(function (f) { return { faixa: f, quantidade: vidas[f] || 0 }; })
+                 .filter(function (v) { return v.quantidade > 0; });
+  }
   function montarFaixas() {
     var c = el('faixas');
     c.innerHTML = '';
@@ -831,21 +573,33 @@
       c.appendChild(d);
     });
     el('totalVidas').textContent = totalVidas();
+    var r = el('vidasResumo');
+    var t = totalVidas();
+    r.textContent = t ? (t + (t === 1 ? ' vida' : ' vidas')) : 'Quantas vidas…';
+    el('btVidas').className = 'cv-campo-bt' + (t ? '' : ' vazio');
     atualizarBotao();
   }
-  function totalVidas() {
-    return FAIXAS.reduce(function (s, f) { return s + (vidas[f] || 0); }, 0);
-  }
+  el('btVidas').onclick = function () { el('janelaVidas').className = 'cv-janela ver'; };
+  el('fecharVidas').onclick = el('okVidas').onclick = function () {
+    el('janelaVidas').className = 'cv-janela';
+    recomecar();
+  };
+  el('janelaVidas').addEventListener('click', function (ev) {
+    if (ev.target === el('janelaVidas')) el('janelaVidas').className = 'cv-janela';
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') el('janelaVidas').className = 'cv-janela';
+  });
 
-  // ── exigências ─────────────────────────────────────────────────────────
+  // ── refinamentos ───────────────────────────────────────────────────────
   var exigencias = {};
-  document.querySelectorAll('.cv-pills').forEach(function (g) {
-    g.querySelectorAll('.cv-pill').forEach(function (b) {
+  document.querySelectorAll('.cv-opts').forEach(function (g) {
+    g.querySelectorAll('button').forEach(function (b) {
       b.onclick = function () {
-        g.querySelectorAll('.cv-pill').forEach(function (x) { x.classList.remove('on'); });
-        b.classList.add('on');
-        var v = b.dataset.v;
-        exigencias[g.dataset.grupo] = (v === '') ? null : Number(v);
+        var ligado = b.classList.contains('on');
+        g.querySelectorAll('button').forEach(function (x) { x.classList.remove('on'); });
+        if (!ligado) b.classList.add('on');
+        exigencias[g.dataset.grupo] = ligado ? null : Number(b.dataset.v);
       };
     });
   });
@@ -853,22 +607,13 @@
   // ── cidade ─────────────────────────────────────────────────────────────
   var cidadeEscolhida = {{ (salva.cidade if salva else '')|tojson }};
   var relogioCidade = null;
-
   el('cidade').addEventListener('input', function (e) {
     var termo = e.target.value.trim();
     cidadeEscolhida = '';
     atualizarBotao();
     clearTimeout(relogioCidade);
     if (termo.length < 3) { el('sugCidade').className = 'cv-sug'; return; }
-    // Espera o consultor parar de digitar. Sem isso, "hortolandia" viraria oito
-    // consultas ao Painel — barulho na rede deles à toa.
     relogioCidade = setTimeout(async function () {
-      // Busca no PRÓPRIO JOB, não no Painel.
-      //
-      // A lista é a do IBGE, no mesmo formato que eles usam. Passar pela
-      // extensão aqui fazia a tela nascer quebrada toda vez que a extensão ou
-      // a aba do Painel não estivessem prontas — e escolher a cidade é a
-      // primeira coisa que a pessoa faz.
       var lista = await fetch('/api/cidades?term=' + encodeURIComponent(termo))
         .then(function (x) { return x.json(); }).catch(function () { return []; });
       var box = el('sugCidade');
@@ -881,9 +626,7 @@
           cidadeEscolhida = nome;
           el('cidade').value = nome;
           box.className = 'cv-sug';
-          selecionados = []; planosPorOperadora = {};
-          desenharSelecao();
-          carregarOperadoras();
+          recomecar();
           atualizarBotao();
         };
         box.appendChild(b);
@@ -895,21 +638,37 @@
     if (!e.target.closest('.cv-campo')) el('sugCidade').className = 'cv-sug';
   });
 
-  // ── Navegação: operadora → produto → linha → plano ──────────────────────
-  //
-  // É a mesma ordem do Painel, e não por imitação: é a ordem em que o
-  // consultor pensa. Ele não escolhe "um plano" no vácuo — escolhe a
-  // operadora, dentro dela o produto da região, dentro dele a linha (com ou
-  // sem coparticipação, MEI ou não) e só então o plano com a acomodação.
-  //
-  // Ganho concreto: marcando o plano exato, a cotação pede preço só dele. A
-  // lista de planos de uma operadora vem numa consulta só, e a partir dela os
-  // três níveis são montados aqui, sem incomodar o Painel de novo.
-  var operadoras = [];
-  var planosPorOperadora = {};     // id da operadora -> planos crus
-  var selecionados = [];           // planos marcados pra cotar
-  var nivel = 'operadoras';
-  var opAtual = null, produtoAtual = null, linhaAtual = null;
+  // ── navegação: operadora → produto → linha → plano ─────────────────────
+  var operadoras = [], planosPorOperadora = {}, selecionados = [];
+  var nivel = 'operadoras', opAtual = null, produtoAtual = null, linhaAtual = null;
+
+  function tipoAtivo() {
+    return tiposEscolhidos.length ? tiposEscolhidos[0] : (codigoDe('PME') != null ? 'PME' : TIPOS.filter(function (t) { return codigoDe(t) != null; })[0]);
+  }
+  function modalidadeAtiva() {
+    var t = tipoAtivo();
+    return t ? codigoDe(t) : null;
+  }
+  function base() {
+    return { cidade: cidadeEscolhida, modalidade: modalidadeAtiva(), vidas: vidasLista() };
+  }
+
+  function recomecar() {
+    selecionados = []; planosPorOperadora = {}; operadoras = [];
+    opAtual = null; produtoAtual = null; linhaAtual = null; nivel = 'operadoras';
+    desenharSelecao();
+    el('resTopo').style.display = 'none';
+    el('resultado').innerHTML = '';
+    if (cidadeEscolhida && modalidadeAtiva() != null) carregarOperadoras();
+    else {
+      desenharMigalha();
+      el('navLista').className = 'cv-grade';
+      el('navLista').innerHTML = '<div class="cv-ops-vazio">' +
+        (!cidadeEscolhida ? 'Escolha a cidade para ver quem atende lá.'
+                          : 'Escolha o tipo de contratação.') + '</div>';
+    }
+    atualizarBotao();
+  }
 
   function chavePlano(pl) { return pl.key; }
   function marcado(pl) {
@@ -920,7 +679,6 @@
     if (i >= 0) selecionados.splice(i, 1); else selecionados.push(pl);
     desenharNav(); desenharSelecao(); atualizarBotao();
   }
-
   function copartEtiqueta(tb) {
     if (!tb.coparticipacao) return { txt: 'Sem coparticipação', cls: 'co-sem' };
     var t = String(tb.coparticipacaoTipo || '').trim().toLowerCase();
@@ -929,49 +687,41 @@
     return { txt: 'Com coparticipação', cls: 'co-parcial' };
   }
 
-  async function garantirPlanos(operadoraId) {
-    if (planosPorOperadora[operadoraId]) return planosPorOperadora[operadoraId];
-    el('navLista').innerHTML = '<div class="cv-ops-vazio">Perguntando ao Painel…</div>';
-    var base = { cidade: cidadeEscolhida, modalidade: Number(el('modalidade').value || 2),
-                 vidas: vidasLista() };
-    var rc = await pedir('passo', { pedido: Object.assign({ acao: 'criar', reaproveitar: true }, base) }, 45000);
-    if (!rc.ok) return null;
-    var r = await pedir('passo', { pedido: Object.assign(
-      { acao: 'planos', cotacaoId: rc.dados.cotacaoId, operadoraId: operadoraId }, base) }, 45000);
-    if (!r.ok) return null;
-    planosPorOperadora[operadoraId] = (r.dados && r.dados.planos) || [];
-    return planosPorOperadora[operadoraId];
-  }
-
   async function carregarOperadoras() {
-    var mod = Number(el('modalidade').value || 2);
-    el('navAjuda').textContent = 'Escolha a operadora e vá até o plano que interessa.';
+    var mod = modalidadeAtiva();
+    el('navLista').className = 'cv-grade';
     el('navLista').innerHTML = '<div class="cv-ops-vazio">Procurando…</div>';
-    planosPorOperadora = {};
-    // Primeiro o catálogo do JOB: instantâneo e de graça. Só pergunta ao
-    // Painel quando o JOB ainda não conhece a cidade.
     var doJob = await fetch('/cotacao/catalogo/operadoras.json?cidade=' +
         encodeURIComponent(cidadeEscolhida) + '&modalidade=' + mod)
       .then(function (x) { return x.json(); }).catch(function () { return {}; });
     if (doJob.operadoras && doJob.operadoras.length) {
-      operadoras = doJob.operadoras;
-      voltarPara('operadoras');
-      return;
+      operadoras = doJob.operadoras; voltarPara('operadoras'); return;
     }
     if (!pronto) {
       el('navLista').innerHTML = '<div class="cv-ops-vazio">Esta cidade ainda não está no ' +
         '<a href="/cotacao/catalogo">catálogo</a> e a extensão não respondeu pra perguntar ao Painel.</div>';
-      operadoras = [];
       return;
     }
-    var base = { cidade: cidadeEscolhida, modalidade: mod, vidas: vidasLista() };
-    var rc = await pedir('passo', { pedido: Object.assign({ acao: 'criar', reaproveitar: true }, base) }, 45000);
+    var b = base();
+    var rc = await pedir('passo', { pedido: Object.assign({ acao: 'criar', reaproveitar: true }, b) }, 45000);
     if (!rc.ok) { el('navLista').innerHTML = '<div class="cv-ops-vazio">Não deu pra listar agora.</div>'; return; }
-    var r = await pedir('passo', { pedido: Object.assign(
-      { acao: 'operadoras', cotacaoId: rc.dados.cotacaoId }, base) }, 45000);
+    var r = await pedir('passo', { pedido: Object.assign({ acao: 'operadoras', cotacaoId: rc.dados.cotacaoId }, b) }, 45000);
     if (!r.ok) { el('navLista').innerHTML = '<div class="cv-ops-vazio">Não deu pra listar agora.</div>'; return; }
     operadoras = (r.dados && r.dados.operadoras) || [];
     voltarPara('operadoras');
+  }
+
+  async function garantirPlanos(operadoraId) {
+    if (planosPorOperadora[operadoraId]) return planosPorOperadora[operadoraId];
+    el('navLista').innerHTML = '<div class="cv-ops-vazio">Perguntando ao Painel…</div>';
+    var b = base();
+    var rc = await pedir('passo', { pedido: Object.assign({ acao: 'criar', reaproveitar: true }, b) }, 45000);
+    if (!rc.ok) return null;
+    var r = await pedir('passo', { pedido: Object.assign(
+      { acao: 'planos', cotacaoId: rc.dados.cotacaoId, operadoraId: operadoraId }, b) }, 45000);
+    if (!r.ok) return null;
+    planosPorOperadora[operadoraId] = (r.dados && r.dados.planos) || [];
+    return planosPorOperadora[operadoraId];
   }
 
   function voltarPara(n) {
@@ -985,24 +735,20 @@
   function desenharMigalha() {
     var m = el('navMigalha');
     if (!opAtual) { m.innerHTML = ''; return; }
-    var partes = ['<button type="button" data-v="operadoras">Operadoras</button>'];
-    partes.push('<span class="sep">›</span><button type="button" data-v="produtos">' +
-                esc(opAtual.nome) + '</button>');
-    if (produtoAtual) {
-      partes.push('<span class="sep">›</span><button type="button" data-v="linhas">' +
-                  esc(produtoAtual) + '</button>');
-    }
-    if (linhaAtual) partes.push('<span class="sep">›</span><span>' + esc(linhaAtual.nome) + '</span>');
-    m.innerHTML = partes.join('');
+    var p = ['<button type="button" data-v="operadoras">Operadoras</button>'];
+    p.push('<span class="sep">›</span><button type="button" data-v="produtos">' + esc(opAtual.nome) + '</button>');
+    if (produtoAtual) p.push('<span class="sep">›</span><button type="button" data-v="linhas">' + esc(produtoAtual) + '</button>');
+    if (linhaAtual) p.push('<span class="sep">›</span><span>' + esc(linhaAtual.nome) + '</span>');
+    m.innerHTML = p.join('');
     m.querySelectorAll('button').forEach(function (b) {
       b.onclick = function () { voltarPara(b.dataset.v); };
     });
   }
 
-  function item(html, aoClicar, ligado) {
+  function cartao(html, aoClicar, ligado) {
     var b = document.createElement('button');
     b.type = 'button';
-    b.className = 'cv-nav-item' + (ligado ? ' on' : '');
+    b.className = 'cv-cartao' + (ligado ? ' on' : '');
     b.innerHTML = html;
     b.onclick = aoClicar;
     return b;
@@ -1011,24 +757,23 @@
   function desenharNav() {
     var c = el('navLista');
     c.innerHTML = '';
+    c.className = nivel === 'operadoras' ? 'cv-grade' : 'cv-grade lista';
 
     if (nivel === 'operadoras') {
       if (!operadoras.length) {
-        c.innerHTML = '<div class="cv-ops-vazio">Nenhuma operadora atende essa cidade nesse tipo de contratação.</div>';
+        c.innerHTML = '<div class="cv-ops-vazio">Nenhuma operadora atende essa cidade neste tipo.</div>';
         return;
       }
       operadoras.forEach(function (o) {
-        var quantos = selecionados.filter(function (x) {
-          return (x.operadora || {}).id === o.id; }).length;
-        c.appendChild(item(
-          (o.logotipo ? '<img src="' + esc(o.logotipo) + '" alt="">' : '') +
-          '<span class="txt"><b>' + esc(o.nome) + '</b>' +
-          (quantos ? '<small>' + quantos + ' plano(s) marcado(s)</small>' : '') + '</span>' +
-          '<span class="seta">›</span>',
+        var quantos = selecionados.filter(function (x) { return (x.operadora || {}).id === o.id; }).length;
+        c.appendChild(cartao(
+          (o.logotipo ? '<span class="logo"><img src="' + esc(o.logotipo) + '" alt="' + esc(o.nome) + '"></span>' : '') +
+          '<b>' + esc(o.nome) + '</b>' +
+          (quantos ? '<small>' + quantos + ' marcado(s)</small>' : ''),
           async function () {
             opAtual = o;
             var pls = await garantirPlanos(o.id);
-            if (!pls) { el('navLista').innerHTML = '<div class="cv-ops-vazio">Não deu pra abrir agora.</div>'; return; }
+            if (!pls) { c.innerHTML = '<div class="cv-ops-vazio">Não deu pra abrir agora.</div>'; return; }
             voltarPara('produtos');
           }, quantos > 0));
       });
@@ -1045,20 +790,15 @@
       });
       Object.keys(porProduto).sort().forEach(function (nome) {
         var marcados = porProduto[nome].filter(marcado).length;
-        c.appendChild(item(
-          '<span class="txt"><b>' + esc(nome) + '</b><small>' +
-          porProduto[nome].length + ' plano(s)' +
-          (marcados ? ' · ' + marcados + ' marcado(s)' : '') + '</small></span>' +
-          '<span class="seta">›</span>',
+        c.appendChild(cartao(
+          '<span class="txt"><b>' + esc(nome) + '</b><small>' + porProduto[nome].length + ' plano(s)' +
+          (marcados ? ' · ' + marcados + ' marcado(s)' : '') + '</small></span><span class="seta">›</span>',
           function () { produtoAtual = nome; voltarPara('linhas'); }, marcados > 0));
       });
       return;
     }
 
     if (nivel === 'linhas') {
-      // A "linha" é a combinação tabela + coparticipação + MEI. É assim que o
-      // Painel agrupa, e é assim que o consultor decide: o mesmo plano muda de
-      // preço conforme a linha.
       var porLinha = {};
       pls.filter(function (pl) { return ((pl.produto || {}).nome || '(sem produto)') === produtoAtual; })
          .forEach(function (pl) {
@@ -1067,30 +807,25 @@
         (porLinha[ch] = porLinha[ch] || { nome: (tb.nome || 'Linha').trim(), tb: tb, planos: [] }).planos.push(pl);
       });
       Object.keys(porLinha).forEach(function (ch) {
-        var L = porLinha[ch];
-        var co = copartEtiqueta(L.tb);
+        var L = porLinha[ch], co = copartEtiqueta(L.tb);
         var marcados = L.planos.filter(marcado).length;
-        c.appendChild(item(
-          '<span class="txt"><b>' + esc(L.nome) + '</b>' +
-          '<span class="cv-nav-eti"><span class="' + co.cls + '">' + co.txt + '</span>' +
+        c.appendChild(cartao(
+          '<span class="txt"><b>' + esc(L.nome) + '</b><span class="cv-eti">' +
+          '<span class="' + co.cls + '">' + co.txt + '</span>' +
           '<span>' + (L.tb.mei === true ? 'MEI' : 'Não MEI') + '</span>' +
           (L.tb.qtdVidaMin ? '<span>' + L.tb.qtdVidaMin + '–' + L.tb.qtdVidaMax + ' vidas</span>' : '') +
-          '</span>' +
-          '<small>' + L.planos.length + ' plano(s)' +
-          (marcados ? ' · ' + marcados + ' marcado(s)' : '') + '</small></span>' +
-          '<span class="seta">›</span>',
-          function () { linhaAtual = L; voltarPara('planos'); nivel = 'planos'; desenharMigalha(); desenharNav(); },
+          '</span><small>' + L.planos.length + ' plano(s)' +
+          (marcados ? ' · ' + marcados + ' marcado(s)' : '') + '</small></span><span class="seta">›</span>',
+          function () { linhaAtual = L; nivel = 'planos'; desenharMigalha(); desenharNav(); },
           marcados > 0));
       });
       return;
     }
 
-    // nivel === 'planos'
     (linhaAtual ? linhaAtual.planos : []).forEach(function (pl) {
-      var acom = (pl.plano || {}).acomodacao ? 'Apartamento' : 'Enfermaria';
-      c.appendChild(item(
-        '<span class="txt"><b>' + esc((pl.plano || {}).nome || '—') + '</b>' +
-        '<small>' + acom + '</small></span>' +
+      var acom = (pl.plano || {}).acomodacao ? 'Quarto Individual' : 'Quarto Coletivo';
+      c.appendChild(cartao(
+        '<span class="txt"><b>' + esc((pl.plano || {}).nome || '—') + '</b><small>' + acom + '</small></span>' +
         '<span class="seta">' + (marcado(pl) ? '✓' : '+') + '</span>',
         function () { alternar(pl); }, marcado(pl)));
     });
@@ -1101,175 +836,31 @@
     if (!selecionados.length) { s.className = 'cv-selecao'; s.innerHTML = ''; return; }
     s.className = 'cv-selecao ver';
     s.innerHTML = '<b>' + selecionados.length + ' plano(s) marcado(s)</b> — cerca de ' +
-      Math.max(3, Math.round(selecionados.length * 1.1)) + 's de consulta' +
-      '<div class="lista"></div>';
+      Math.max(3, Math.round(selecionados.length * 1.1)) + 's de consulta<div class="lista"></div>';
     var lista = s.querySelector('.lista');
     selecionados.forEach(function (pl) {
       var e = document.createElement('span');
       e.className = 'marcado';
-      e.innerHTML = esc((pl.operadora || {}).nome + ' · ' + ((pl.plano || {}).nome || '')) +
+      e.innerHTML = esc(((pl.operadora || {}).nome || '') + ' · ' + ((pl.plano || {}).nome || '')) +
         '<button type="button" title="Tirar">×</button>';
       e.querySelector('button').onclick = function () { alternar(pl); };
       lista.appendChild(e);
     });
   }
 
-  el('modalidade').addEventListener('change', function () {
-    // Trocar o tipo de contratação muda quem atende e o que existe: recomeça.
-    selecionados = []; planosPorOperadora = {};
-    desenharSelecao();
-    if (cidadeEscolhida) carregarOperadoras();
-  });
-
-
-  function vidasLista() {
-    return FAIXAS.map(function (f) { return { faixa: f, quantidade: vidas[f] || 0 }; })
-                 .filter(function (v) { return v.quantidade > 0; });
-  }
-
   function atualizarBotao() {
-    el('btCotar').disabled = !(pronto && cidadeEscolhida && totalVidas() > 0);
+    el('btCotar').disabled = !(pronto && cidadeEscolhida && totalVidas() > 0 &&
+                               modalidadeAtiva() != null);
   }
 
   // ── cotar ──────────────────────────────────────────────────────────────
-  el('btCotar').onclick = async function () {
-    el('btCotar').disabled = true;
-    el('andando').className = 'cv-andando ver';
-    el('barra').style.width = '4%';
-    el('andandoTxt').textContent = 'Abrindo a cotação no Painel…';
-    el('resumo').textContent = '';
-    // O andamento vai PRA ONDE A PESSOA ESTA OLHANDO.
-    //
-    // Antes eu apagava esta coluna e punha a barrinha lá no fim do formulário,
-    // fora da tela. O consultor ficava encarando um retângulo vazio sem saber
-    // se estava rodando ou se tinha quebrado — e quinze segundos de nada
-    // parecem um minuto. O trabalho é o mesmo; o que faltava era dizer.
-    el('resultado').innerHTML =
-      '<div class="cv-vazio"><strong id="cvFase">Perguntando ao Painel…</strong>' +
-      '<p id="cvFaseDet">Isto leva alguns segundos: o JOB pergunta plano por plano, ' +
-      'com intervalo, para não parecer robô no sistema deles.</p>' +
-      '<div class="cv-barra" style="max-width:320px;margin:16px auto 0">' +
-      '<i id="cvBarra2"></i></div></div>';
-
-    var pedido = {
-      cidade: cidadeEscolhida,
-      modalidade: Number(el('modalidade').value || 2),
-      vidas: vidasLista(),
-      // Planos marcados na navegação. Com eles, a cotação pula a listagem
-      // inteira e vai direto ao preço do que foi escolhido.
-      planosEscolhidos: selecionados,
-      maxPlanos: Math.max(1, Number(el('maxPlanos').value) || 12),
-      exigencias: {
-        coparticipacao: exigencias.copart == null ? null : !!exigencias.copart,
-        acomodacao: exigencias.acomodacao == null ? null : exigencias.acomodacao,
-        mei: exigencias.mei === 1 ? true : null
-      }
-    };
-
-    var r = await cotarPassoAPasso(pedido);
-    el('andando').className = 'cv-andando';
-    atualizarBotao();
-    if (!r.ok) { tratarFalha(r.motivo, r); return; }
-    mostrarSinal('on', 'Painel conectado', '');
-    desenhar(r.dados);
-  };
-
-  // ── O ritmo mora AQUI, não na aba do Painel ────────────────────────────
-  //
-  // A aba do Painel fica em segundo plano enquanto você olha esta tela, e o
-  // Chrome estrangula temporizador de aba escondida: uma espera de 300ms lá
-  // vira até um minuto depois de alguns minutos oculta. Como são umas quinze
-  // esperas numa cotação, o que devia levar dez segundos levava quinze
-  // minutos. Não era a rede da Trindade — era o navegador dormindo.
-  //
-  // Esta aba está à vista, então o relógio dela é confiável. Cada passo lá é
-  // uma chamada e acabou; a pausa entre eles acontece aqui. Para o servidor
-  // deles nada muda: o espaçamento irregular é exatamente o mesmo.
-  function respira(min, max) {
-    return new Promise(function (r) { setTimeout(r, min + Math.random() * (max - min)); });
-  }
-
-  // O laço de preços, um só pros dois caminhos.
-  //
-  // Antes de existir esta função eu tinha o mesmo laço escrito duas vezes, e a
-  // segunda cópia já estava nascendo diferente. Duas cópias da mesma regra
-  // divergem no primeiro ajuste — e aqui o ajuste seria em cima de dinheiro.
-  // O Painel guarda no máximo ~20 cenários por cotação. Passar disso não dá
-  // erro limpo: some cenário, e como eu identifico o preço novo comparando com
-  // os que já estavam lá, um cenário perdido casaria preço com o plano errado.
-  // Quinze é folga proposital sobre o teto que o Guilherme conhece.
-  var POR_COTACAO = 15;
-
-  // ── Várias frentes, uma por aba do Painel ───────────────────────────────
-  //
-  // Uma cotação de 350 planos leva uns seis minutos numa frente só. Com o
-  // consultor esperando, isso é inviável.
-  //
-  // Cada aba do Painel aberta vira uma frente, com a SUA cotação. Precisa ser
-  // a sua própria: duas frentes escrevendo na mesma cotação embaralhariam os
-  // preços, porque é a ordem dos cenários dentro dela que identifica qual
-  // preço é de qual plano.
-  //
-  // Teto de 3 de propósito. Mais frentes é mais rápido e é também mais
-  // simultâneo do lado deles — e simultaneidade é justamente o que denuncia
-  // que não tem gente clicando. Três abas com ritmo humano cada ainda passa
-  // por corretor apressado; dez não passa por nada.
+  var POR_COTACAO = 15;   // o Painel guarda ~20 cenários por cotação; folga proposital
   var MAX_FRENTES = 3;
 
-  async function precosEmFrentes(alvo, cotacaoIdInicial, base, p) {
-    var rAbas = await pedir('abas', {}, 8000);
-    var frentes = Math.max(1, Math.min(MAX_FRENTES, (rAbas.ok && rAbas.abas) || 1));
-    // Não vale abrir frente pra pouca coisa: o custo de criar cotação extra
-    // come o ganho.
-    if (alvo.length < 8) frentes = 1;
-
-    var feitos = 0;
-    var aoAndar = function () {
-      feitos++;
-      mostrarAndamento({ fase: 'precos', feito: feitos, total: alvo.length });
-    };
-
-    if (frentes === 1) {
-      var passo1 = passoNaAba(base, null);
-      await passo1({ acao: 'filtro', cotacaoId: cotacaoIdInicial });
-      await respira(300, 900);
-      return await precosDe(alvo, cotacaoIdInicial, passo1, aoAndar);
-    }
-
-    // Reparte alternando, não em blocos: se uma frente cair, o estrago fica
-    // espalhado por operadoras diferentes em vez de derrubar um bloco inteiro.
-    var baldes = [];
-    for (var i = 0; i < frentes; i++) baldes.push([]);
-    alvo.forEach(function (pl, i) { baldes[i % frentes].push(pl); });
-
-    var partes = await Promise.all(baldes.map(async function (lote, idx) {
-      if (!lote.length) return [];
-      var passoAqui = passoNaAba(base, idx);
-      // A primeira frente reaproveita a cotação que já existe; as outras
-      // precisam da sua, na aba delas.
-      var cid = cotacaoIdInicial;
-      if (idx > 0) {
-        var nova = await passoAqui({ acao: 'criar' });
-        if (!nova.ok) return [];
-        cid = nova.dados.cotacaoId;
-      }
-      await passoAqui({ acao: 'filtro', cotacaoId: cid });
-      await respira(300, 900);
-      return await precosDe(lote, cid, passoAqui, aoAndar);
-    }));
-
-    var junto = [].concat.apply([], partes);
-    junto.sort(function (a, b) {
-      return (a.total == null) - (b.total == null) || (a.total - b.total);
-    });
-    return junto;
-  }
-
-  // Monta um "passo" amarrado a uma aba. `aba` nulo = a aba ativa.
-  function passoNaAba(base, aba) {
+  function passoNaAba(b, aba) {
     return function (extra) {
       var ped = { acao: extra.acao };
-      for (var k in base) ped[k] = base[k];
+      for (var k in b) ped[k] = b[k];
       for (var k2 in extra) ped[k2] = extra[k2];
       var msg = { pedido: ped };
       if (aba != null) msg.aba = aba;
@@ -1277,13 +868,9 @@
     };
   }
 
-  async function precosDe(alvo, cotacaoId, passo, aoAndar) {
-    var resultado = [];
-    var noLote = 0;
+  async function precosDe(alvo, cotacaoId, passo, b, aoAndar) {
+    var resultado = [], noLote = 0;
     for (var j = 0; j < alvo.length; j++) {
-      // Cotação cheia: abre outra e recomeça a contagem. Preço errado numa
-      // proposta é o pior defeito possível deste sistema — vale trocar de
-      // cotação de sobra em vez de descobrir o teto na prática.
       if (noLote >= POR_COTACAO) {
         var nova = await passo({ acao: 'criar' });
         if (nova.ok) {
@@ -1294,128 +881,121 @@
         }
       }
       var rp = await passo({ acao: 'preco', cotacaoId: cotacaoId, plano: alvo[j] });
-      // Uma segunda chance por plano. O Painel solta erro passageiro de vez em
-      // quando, e perder o preço por um soluço é caro: o consultor não sabe se
-      // aquele plano é ruim ou se só não respondeu.
       if (!rp.ok) {
         await respira(600, 1400);
         rp = await passo({ acao: 'preco', cotacaoId: cotacaoId, plano: alvo[j] });
       }
       var cartao = (rp.ok && rp.dados && rp.dados.cartao) || null;
-      resultado.push(Object.assign({}, alvo[j], cartao
+      resultado.push(Object.assign({}, alvo[j], { _tipo: b._tipo }, cartao
         ? { total: cartao.total, faixas: cartao.faixas, conferido: cartao.conferido }
-        // Sem preço não inventa: o plano aparece marcado, e o consultor sabe
-        // que aquele ficou sem resposta em vez de sumir da lista calado.
         : { total: null, faixas: [], motivo: rp.motivo || 'sem_valor_na_resposta' }));
       noLote++;
-      if (aoAndar) aoAndar(); else mostrarAndamento({ fase: 'precos', feito: j + 1, total: alvo.length });
+      if (aoAndar) aoAndar();
       if (j + 1 < alvo.length) await respira(240, 780);
     }
-    resultado.sort(function (a, b) {
-      return (a.total == null) - (b.total == null) || (a.total - b.total);
-    });
     return resultado;
   }
 
-  async function cotarPassoAPasso(p) {
+  // Um tipo de contratação por vez, e dentro dele várias frentes se houver mais
+  // de uma aba do Painel. Cada frente com a SUA cotação: é a ordem dos cenários
+  // dentro dela que identifica de qual plano é cada preço.
+  async function cotarTipo(planos, b, aoAndar, frentes) {
+    var passo0 = passoNaAba(b, null);
+    var r0 = await passo0({ acao: 'criar' });
+    if (!r0.ok) return { erro: r0.motivo, planos: [] };
+    var cid = r0.dados.cotacaoId, url = r0.dados.url;
+    if (planos.length < 8 || frentes <= 1) {
+      await passo0({ acao: 'filtro', cotacaoId: cid });
+      await respira(300, 900);
+      return { url: url, planos: await precosDe(planos, cid, passo0, b, aoAndar) };
+    }
+    var baldes = [];
+    for (var i = 0; i < frentes; i++) baldes.push([]);
+    planos.forEach(function (pl, i) { baldes[i % frentes].push(pl); });
+    var partes = await Promise.all(baldes.map(async function (lote, idx) {
+      if (!lote.length) return [];
+      var pa = passoNaAba(b, idx);
+      var c = cid;
+      if (idx > 0) {
+        var nv = await pa({ acao: 'criar' });
+        if (!nv.ok) return [];
+        c = nv.dados.cotacaoId;
+      }
+      await pa({ acao: 'filtro', cotacaoId: c });
+      await respira(300, 900);
+      return await precosDe(lote, c, pa, b, aoAndar);
+    }));
+    return { url: url, planos: [].concat.apply([], partes) };
+  }
+
+  el('btCotar').onclick = async function () {
+    if (!selecionados.length) {
+      mostrarSinal('aprender', 'Escolha os planos',
+        '<b>Marque ao menos um plano.</b> Navegue pela operadora até o plano do seu cliente e ' +
+        'clique nele. Só o que estiver marcado vai a preço — é isso que deixa a cotação rápida.');
+      return;
+    }
+    el('btCotar').disabled = true;
+    el('andando').className = 'cv-andando ver';
+    el('barra').style.width = '4%';
+    el('andandoTxt').textContent = 'Abrindo a cotação no Painel…';
+    el('resTopo').style.display = 'none';
+    el('resultado').innerHTML = '';
+
     var t0 = Date.now();
-    var base = { cidade: p.cidade, modalidade: p.modalidade, vidas: p.vidas };
-    var passo = function (extra) {
-      var ped = { acao: extra.acao };
-      for (var k in base) ped[k] = base[k];
-      for (var k2 in extra) ped[k2] = extra[k2];
-      return pedir('passo', { pedido: ped }, 45000);
+    var rAbas = await pedir('abas', {}, 8000);
+    var frentes = Math.max(1, Math.min(MAX_FRENTES, (rAbas.ok && rAbas.abas) || 1));
+
+    // Os tipos marcados, ou o que estiver ativo. Cada um roda a sua rodada e o
+    // resultado vem junto, com etiqueta de qual tipo é cada linha.
+    var tipos = tiposEscolhidos.length ? tiposEscolhidos.slice() : [tipoAtivo()];
+    var feitos = 0, total = selecionados.length * tipos.length;
+    var aoAndar = function () {
+      feitos++;
+      mostrarAndamento({ fase: 'precos', feito: feitos, total: total });
     };
 
-    mostrarAndamento({ fase: 'criando' });
-    var r = await passo({ acao: 'criar' });
-    if (!r.ok) return r;
-    var cotacaoId = r.dados.cotacaoId, url = r.dados.url;
-    await respira(400, 1100);
-
-    // CAMINHO CURTO: o consultor já escolheu os planos na navegação.
-    //
-    // Aqui não há nada pra descobrir — nem quem atende, nem o que existe. Só
-    // grava a cidade na cotação (o preço lê de lá) e pergunta o preço do que
-    // foi marcado. É a diferença entre 12 consultas e 40.
-    if (p.planosEscolhidos && p.planosEscolhidos.length) {
-      var res = await precosEmFrentes(p.planosEscolhidos, cotacaoId, base, p);
-      return { ok: true, dados: {
-        cotacaoId: cotacaoId, url: url, cidade: p.cidade, vidas: p.vidas,
-        operadoras: operadoras, planosEncontrados: p.planosEscolhidos.length,
-        planosCotados: res.length, descartados: 0,
-        suspeitos: res.filter(function (x) { return x.total != null && !x.conferido; }).length,
-        ms: Date.now() - t0, planos: res } };
+    var todos = [], url = '', erro = '';
+    for (var i = 0; i < tipos.length; i++) {
+      var b = base();
+      b.modalidade = codigoDe(tipos[i]);
+      b._tipo = nomeCompleto(tipos[i]);
+      if (b.modalidade == null) continue;
+      var r = await cotarTipo(selecionados, b, aoAndar, frentes);
+      if (r.erro) { erro = r.erro; break; }
+      url = url || r.url;
+      todos = todos.concat(r.planos);
     }
 
-    mostrarAndamento({ fase: 'operadoras' });
-    r = await passo({ acao: 'operadoras', cotacaoId: cotacaoId });
-    if (!r.ok) return r;
-    var todas = r.dados.operadoras || [];
-    var escolhidas = (p.operadoraIds && p.operadoraIds.length)
-      ? todas.filter(function (o) { return p.operadoraIds.indexOf(o.id) >= 0; })
-      : todas;
-    operadoras = todas;
-    if (!escolhidas.length) return { ok: false, motivo: 'nenhuma_operadora_na_cidade' };
-    await respira(300, 900);
-
-    // Duas por vez: um corretor clica numa operadora de cada vez, e quatro
-    // saindo no mesmo instante é coisa que a tela deles nunca faz.
-    var planos = [];
-    for (var i = 0; i < escolhidas.length; i += 2) {
-      var lote = escolhidas.slice(i, i + 2);
-      var res = await Promise.all(lote.map(function (o) {
-        return passo({ acao: 'planos', cotacaoId: cotacaoId, operadoraId: o.id });
-      }));
-      res.forEach(function (x) {
-        if (x.ok && x.dados && x.dados.planos) planos.push.apply(planos, x.dados.planos);
-      });
-      mostrarAndamento({ fase: 'planos', feito: Math.min(i + 2, escolhidas.length),
-                         total: escolhidas.length });
-      if (i + 2 < escolhidas.length) await respira(280, 900);
-    }
-    if (!planos.length) return { ok: false, motivo: 'nenhum_plano_na_cidade' };
-
-    r = await passo({ acao: 'selecionar', planos: planos, exigencias: p.exigencias,
-                      produtoIds: p.produtoIds || [], maxPlanos: p.maxPlanos });
-    if (!r.ok) return r;
-    var alvo = r.dados.alvo || [];
-    var descartados = r.dados.descartados || 0;
-    if (!alvo.length) {
-      return { ok: true, dados: { planos: [], planosEncontrados: planos.length,
-        descartados: descartados, ms: Date.now() - t0, cotacaoId: cotacaoId, url: url } };
-    }
-
-    var resultado = await precosDe(alvo, cotacaoId, passo);
-    return { ok: true, dados: {
-      cotacaoId: cotacaoId, url: url, cidade: p.cidade, vidas: p.vidas,
-      operadoras: escolhidas, planosEncontrados: planos.length,
-      planosCotados: resultado.length, descartados: descartados,
-      suspeitos: resultado.filter(function (x) { return x.total != null && !x.conferido; }).length,
-      ms: Date.now() - t0, planos: resultado } };
-  }
+    el('andando').className = 'cv-andando';
+    el('btCotar').disabled = false;
+    if (erro) { tratarFalha(erro); return; }
+    mostrarSinal('on', 'Painel conectado', '');
+    todos.sort(function (a, b2) {
+      return (a.total == null) - (b2.total == null) || (a.total - b2.total);
+    });
+    desenhar({ planos: todos, url: url, cidade: cidadeEscolhida, vidas: vidasLista(),
+               planosCotados: todos.length, ms: Date.now() - t0,
+               suspeitos: todos.filter(function (x) { return x.total != null && !x.conferido; }).length });
+  };
 
   // ── resultado ──────────────────────────────────────────────────────────
   function desenhar(d) {
     var planos = (d && d.planos) || [];
     var caixa = el('resultado');
+    el('resTopo').style.display = 'flex';
     if (!planos.length) {
-      caixa.innerHTML = '<div class="cv-vazio"><strong>Nenhum plano serviu</strong>' +
-        '<p>O Painel achou ' + (d.planosEncontrados || 0) + ' plano(s) nessa cidade, mas ' +
-        (d.descartados || 0) + ' saíram por não caber nas vidas ou nas exigências. ' +
-        'Afrouxe uma exigência ou revise a quantidade de vidas.</p></div>';
       el('resumo').textContent = '';
+      caixa.innerHTML = '<div class="cv-vazio"><strong>Nenhum preço voltou</strong>' +
+        '<p>Os planos marcados não devolveram valor. Se repetir, me diga o motivo que aparece ' +
+        'na linha do plano.</p></div>';
       return;
     }
-
     var comPreco = planos.filter(function (p) { return p.total != null; });
-    var barato = comPreco.length ? comPreco[0].total : null;
-    el('resumo').innerHTML =
-      '<b>' + comPreco.length + '</b> com preço · mais barato <b>' + moeda(barato) + '</b>' +
-      ' · ' + (d.descartados || 0) + ' descartados antes de consultar · <b>' +
+    el('resumo').innerHTML = '<b>' + comPreco.length + '</b> com preço · mais barato <b>' +
+      moeda(comPreco.length ? comPreco[0].total : null) + '</b> · <b>' +
       ((d.ms || 0) / 1000).toFixed(1) + 's</b>' +
-      (d.suspeitos ? ' · <span style="color:var(--laranja)">' + d.suspeitos +
-        ' com detalhamento que não fecha</span>' : '');
+      (d.suspeitos ? ' · <span style="color:var(--laranja)">' + d.suspeitos + ' com detalhamento que não fecha</span>' : '');
 
     caixa.innerHTML = '';
     planos.forEach(function (p, i) {
@@ -1423,33 +1003,26 @@
       div.className = 'cv-plano' + (i === 0 && p.total != null ? ' melhor' : '');
       var op = p.operadora || {}, pl = p.plano || {}, tb = p.tabela || {}, pr = p.produto || {};
       var marcas = [];
-      marcas.push('<span class="marca">' + (pl.acomodacao ? 'Apartamento' : 'Enfermaria') + '</span>');
+      if (p._tipo) marcas.push('<span class="marca">' + esc(p._tipo) + '</span>');
+      marcas.push('<span class="marca">' + (pl.acomodacao ? 'Quarto Individual' : 'Quarto Coletivo') + '</span>');
       marcas.push('<span class="marca ' + (tb.coparticipacao ? 'copart' : 'sem-copart') + '">' +
-                  (tb.coparticipacao ? ('Copart. ' + esc((tb.coparticipacaoTipo || '').trim())) : 'Sem copart.') + '</span>');
+        (tb.coparticipacao ? ('Copart. ' + esc((tb.coparticipacaoTipo || '').trim())) : 'Sem copart.') + '</span>');
       if (tb.mei === true) marcas.push('<span class="marca">MEI</span>');
-      if (tb.qtdVidaMin) marcas.push('<span class="marca">' + tb.qtdVidaMin + '–' + tb.qtdVidaMax + ' vidas</span>');
-
       var logo = (operadoras.filter(function (o) { return o.id === op.id; })[0] || {}).logotipo;
-
       div.innerHTML =
         '<div class="cv-linha">' +
           '<div>' + (logo ? '<img class="cv-logo" src="' + esc(logo) + '" alt="' + esc(op.nome || '') + '">'
                           : '<b>' + esc(op.nome || '') + '</b>') + '</div>' +
-          '<div class="cv-nome"><strong>' + esc(pl.nome || '—') + '</strong>' +
-            '<span>' + esc(pr.nome || '') + (tb.nome ? ' · ' + esc(tb.nome.trim()) : '') + '</span></div>' +
+          '<div class="cv-nome"><strong>' + esc(pl.nome || '—') + '</strong><span>' +
+            esc(pr.nome || '') + (tb.nome ? ' · ' + esc(tb.nome.trim()) : '') + '</span></div>' +
           '<div class="marcas">' + marcas.join('') + '</div>' +
           '<div class="cv-valor' + (p.total != null && p.conferido === false ? ' suspeito' : '') + '">' +
             '<b>' + moeda(p.total) + '</b><span>' +
-            // Mostra o MOTIVO, não só "falhou". Um plano sem preço com a causa
-            // escondida vira adivinhação — e eu perdi uma rodada inteira sem
-            // saber por que todos falharam.
             (p.total == null
               ? '<span title="' + esc(p.motivo || '') + '">' +
-                (p.motivo === 'sem_valor_na_resposta' ? 'sem preço' : (p.motivo || 'falhou')) + '</span>'
+                (p.motivo === 'sem_valor_na_resposta' ? 'sem preço' : esc(p.motivo || 'falhou')) + '</span>'
               : 'por mês, ' + totalVidas() + ' vidas') + '</span></div>' +
-        '</div>' +
-        '<div class="cv-detalhe"></div>';
-
+        '</div><div class="cv-detalhe"></div>';
       var det = div.querySelector('.cv-detalhe');
       div.querySelector('.cv-linha').onclick = function () {
         if (det.className.indexOf('ver') >= 0) { det.className = 'cv-detalhe'; return; }
@@ -1459,25 +1032,24 @@
       caixa.appendChild(div);
     });
 
-    // Salvar é ação explícita: cotação é rascunho até alguém dizer que vale.
     var rodape = document.createElement('div');
     rodape.style.cssText = 'display:flex;gap:9px;margin-top:14px;align-items:center;flex-wrap:wrap';
     rodape.innerHTML = '<button type="button" class="btn" id="btSalvar">Salvar no JOB</button>' +
-      (d.url ? '<a class="btn-outline" href="' + d.url + '" target="_blank" rel="noopener">Abrir no Painel</a>' : '') +
+      (d.url ? '<a class="btn-outline" href="' + esc(d.url) + '" target="_blank" rel="noopener">Abrir no Painel</a>' : '') +
       '<span id="salvoMsg" style="font-size:12px;color:var(--cinza)"></span>';
     caixa.appendChild(rodape);
 
-    document.getElementById('btSalvar').onclick = async function () {
+    el('btSalvar').onclick = async function () {
       this.disabled = true;
-      var corpo = Object.assign({}, d, { lead_id: LEAD || null,
-        filtros: { exigencias: exigencias,
+      var corpo = Object.assign({}, d, { lead_id: LEAD || null, modalidade: modalidadeAtiva(),
+        filtros: { exigencias: exigencias, ramo: ramo, tipos: tiposEscolhidos,
                    planos: selecionados.map(function (x) { return x.key; }) } });
       var resp = await fetch('/cotacao/viva/salvar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(corpo)
-      }).then(function (r) { return r.json(); }).catch(function () { return { ok: false }; });
-      var m = document.getElementById('salvoMsg');
-      if (resp.ok) { m.innerHTML = 'Salva. <a href="' + resp.url + '">abrir</a>'; }
+      }).then(function (x) { return x.json(); }).catch(function () { return { ok: false }; });
+      var m = el('salvoMsg');
+      if (resp.ok) m.innerHTML = 'Salva. <a href="' + resp.url + '">abrir</a>';
       else { m.textContent = 'Não consegui salvar. Tente de novo.'; this.disabled = false; }
     };
   }
@@ -1488,25 +1060,42 @@
     var linhas = f.filter(function (x) { return x.quantidade > 0; }).map(function (x) {
       var i = FAIXAS.indexOf(x.faixa);
       return '<tr><td>' + (i >= 0 ? ROTULOS[i] : x.faixa) + ' anos</td>' +
-             '<td class="num">' + x.quantidade + '</td>' +
-             '<td class="num">' + moeda(x.unitario) + '</td>' +
-             '<td class="num">' + moeda(x.quantidade * x.unitario) + '</td></tr>';
+        '<td class="num">' + x.quantidade + '</td>' +
+        '<td class="num">' + moeda(x.unitario) + '</td>' +
+        '<td class="num">' + moeda(x.quantidade * x.unitario) + '</td></tr>';
     }).join('');
     return '<table><thead><tr><th>Faixa</th><th class="num">Vidas</th>' +
-           '<th class="num">Por vida</th><th class="num">Subtotal</th></tr></thead>' +
-           '<tbody>' + linhas + '<tr class="soma"><td colspan="3">Total por mês</td>' +
-           '<td class="num">' + moeda(p.total) + '</td></tr></tbody></table>' +
-           (p.conferido === false
-             ? '<p style="margin:8px 0 0;font-size:11.5px;color:var(--laranja)">' +
-               'A soma das faixas não fecha com o total. O total é o que o Painel diz; ' +
-               'o detalhamento pode estar incompleto. Confira no Painel antes de enviar ao cliente.</p>'
-             : '');
+      '<th class="num">Por vida</th><th class="num">Subtotal</th></tr></thead><tbody>' + linhas +
+      '<tr class="soma"><td colspan="3">Total por mês</td><td class="num">' + moeda(p.total) +
+      '</td></tr></tbody></table>' +
+      (p.conferido === false
+        ? '<p style="margin:8px 0 0;font-size:11.5px;color:var(--laranja)">A soma das faixas não ' +
+          'fecha com o total. O total é o que o Painel diz; confira antes de enviar ao cliente.</p>' : '');
   }
 
   // ── início ─────────────────────────────────────────────────────────────
-  montarModalidades();
+  async function conferirLigacao() {
+    var pong = await pedir('ping', {}, 2500);
+    if (pong.ok) {
+      extensaoPresente = true;
+      extensaoVersao = pong.versao || extensaoVersao;
+      extensaoSabeCotar = !!(pong.sabe && pong.sabe.indexOf('cotar') >= 0);
+    }
+    var r = await pedir('cotador_estado', {}, 8000);
+    if (!r.ok) { pronto = false; tratarFalha(r.motivo, r); atualizarBotao(); return; }
+    if (r.faltando && r.faltando.length) {
+      pronto = false; tratarFalha('precisa_aprender'); atualizarBotao(); return;
+    }
+    pronto = true;
+    mostrarSinal('on', 'Painel conectado', '');
+    atualizarBotao();
+    if (cidadeEscolhida && modalidadeAtiva() != null) carregarOperadoras();
+  }
+
+  montarSegTipo();
   montarFaixas();
-  if (SALVA) { desenhar({ planos: SALVA, ms: 0, descartados: 0, planosEncontrados: SALVA.length }); }
+  recomecar();
+  if (SALVA) desenhar({ planos: SALVA, ms: 0, planosCotados: SALVA.length });
   conferirLigacao();
 })();
 </script>
