@@ -22312,12 +22312,17 @@ def crm():
         # tela e colava aqui sem achar nada, porque no banco o numero mora sem
         # formatacao — a busca so servia pra quem digitasse do jeito guardado.
         so_dig = re.sub(r'\D', '', f_busca)
+        # O 55 NAO PODE DECIDIR SE ACHA OU NAO. O mesmo numero esta gravado com
+        # DDI (veio do WhatsApp) e sem DDI (veio da planilha) — quem busca com
+        # os dois formatos tem que achar os dois. Procuro pelo miolo: sem o 55
+        # da frente, o resto do numero e igual nos dois jeitos.
+        sem_ddi = so_dig[2:] if (len(so_dig) > 11 and so_dig.startswith('55')) else so_dig
         campos = ("LOWER(l.nome) LIKE ? OR LOWER(l.email) LIKE ?"
                   " OR LOWER(COALESCE(l.consultor_externo,'')) LIKE ?")
         params.extend([like, like, like])
         if so_dig:
             campos += " OR l.telefone LIKE ? OR l.telefone_norm LIKE ?"
-            params.extend([f'%{so_dig}%', f'%{so_dig}%'])
+            params.extend([f'%{sem_ddi}%', f'%{sem_ddi}%'])
         else:
             campos += " OR l.telefone LIKE ?"
             params.append(f'%{f_busca}%')

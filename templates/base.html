@@ -1100,6 +1100,53 @@ function abrirConversaWhatsApp(telefone, chatId, texto) {
   }, 1800);
   return true;
 }
+
+// ── TELEFONE NO PADRAO (99) 99999-9999 ──────────────────────────────────────
+// Um lugar so, porque telefone e digitado em varias telas (busca do CRM, ficha
+// do lead, responsaveis da proposta) e cada uma escrevendo a sua regra e como
+// nasce a divergencia: o mesmo numero guardado de tres jeitos e depois nao
+// achado por nenhum deles.
+//
+// O 55 DO BRASIL SOME. Ele nao e informacao aqui — todo mundo nesta corretora
+// e do Brasil, e mante-lo so ocupa espaco e atrapalha a comparacao. DDI de
+// FORA fica: um numero de Portugal ou dos EUA sem o codigo do pais nao serve
+// pra ligar nem pra abrir conversa. O sinal e o '+' digitado pela pessoa.
+function mascaraTelefoneBR(el, opcoes) {
+  var v = el.value || '';
+  var busca = !!(opcoes && opcoes.busca);
+  // No campo de busca o mesmo espaco procura nome e e-mail. Letra na tela
+  // significa que nao e telefone — a mascara sai de cena e nao estraga o que
+  // a pessoa esta escrevendo.
+  if (busca && /[a-zA-Z@]/.test(v)) return;
+  var internacional = v.trim().charAt(0) === '+' && !/^\+\s*55/.test(v.trim());
+  if (internacional) {
+    // Nao formata: cada pais tem o seu desenho. So limpa o que nao e numero.
+    var lim = '+' + v.replace(/[^\d]/g, '');
+    if (lim !== v) el.value = lim;
+    return;
+  }
+  var d = v.replace(/\D/g, '');
+  if (d.length > 11 && d.slice(0, 2) === '55') d = d.slice(2);
+  d = d.slice(0, 11);
+  if (!d) { el.value = ''; return; }
+  var nove = d.length > 10;                   // celular (9 digitos) ou fixo (8)
+  var s = '(' + d.slice(0, 2);
+  if (d.length > 2) s += ') ' + d.slice(2, nove ? 7 : 6);
+  if (d.length > 6) s += '-' + d.slice(nove ? 7 : 6, 11);
+  el.value = s;
+}
+
+// Liga a mascara em tudo que se declarar telefone, inclusive no que aparecer
+// depois (dependente novo, ficha aberta por cima). Sem isso eu teria que
+// lembrar de repetir o oninput em cada campo novo — e um dia nao lembraria.
+document.addEventListener('input', function (ev) {
+  var el = ev.target;
+  if (!el || el.tagName !== 'INPUT') return;
+  if (el.dataset.telefone === undefined
+      && el.type !== 'tel'
+      && !/^(tel|telefone)/i.test(el.name || '')) return;
+  mascaraTelefoneBR(el, { busca: el.dataset.telefone === 'busca' });
+});
 </script>
 </body>
 </html>

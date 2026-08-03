@@ -561,7 +561,8 @@
   <form method="GET" action="/crm" class="crm-filtros" id="form-filtros">
     <div class="filtro-grupo">
       <label>Buscar</label>
-      <input type="text" name="q" value="{{ filtros.q }}" placeholder="Nome, telefone, email" style="width:170px;">
+      <input type="text" name="q" value="{{ filtros.q }}" placeholder="Nome, telefone, email"
+             data-telefone="busca" inputmode="text" style="width:170px;">
     </div>
     <div class="filtro-grupo">
       <label>Etapa</label>
@@ -856,7 +857,7 @@
       <div class="ficha-campos">
         <div class="campo-grupo">
           <div class="campo-label">Telefone / WhatsApp</div>
-          <input type="text" id="ficha-telefone" class="campo-input" placeholder="+55 19 99999-9999">
+          <input type="text" id="ficha-telefone" class="campo-input" data-telefone placeholder="(19) 99999-9999">
         </div>
         <div class="campo-grupo">
           <div class="campo-label">E-mail</div>
