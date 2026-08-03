@@ -285,5 +285,12 @@ if r20.get('documento'):
        '20f. coparticipacao no formato da apresentacao', pl[0]['coparticipacao'])
     ok(abs(linha['total'] - 1234.56) < .01, '20g. total bate com o cotado', str(linha['total']))
 
+# 21. Periodo torto no banco nao pode virar opcao de ciclo na tela
+ok(A._mes_meta_valido('2026-07'), '21. aceita AAAA-MM')
+ok(not A._mes_meta_valido('7202'), '21b. recusa 7202 (foi o que apareceu como /7202)')
+ok(not A._mes_meta_valido('2026-13'), '21c. recusa mes 13')
+ok(not A._mes_meta_valido('07/2026'), '21d. recusa formato invertido')
+ok(not A._mes_meta_valido(''), '21e. recusa vazio')
+
 print('\n' + ('%d FALHA(S)' % len(falhas) if falhas else 'tudo passou (final)'))
 sys.exit(1 if falhas else 0)

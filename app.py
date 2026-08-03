@@ -8,6 +8,14 @@ import pytz
 
 TZ_SP = pytz.timezone('America/Sao_Paulo')  # Campinas, SP
 
+def _mes_meta_valido(v):
+    """True so pra 'AAAA-MM' de verdade. Existe porque dado torto no banco
+    virava opcao de periodo na tela — e periodo que nao existe nao pode ser
+    oferecido como escolha."""
+    import re as _re
+    return bool(_re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', str(v or '')))
+
+
 def _agora_sp():
     """Timestamp 'YYYY-MM-DD HH:MM:SS' na hora de São Paulo (para gravar no banco).
     Nunca usar CURRENT_TIMESTAMP explícito em INSERT/UPDATE: no Postgres é UTC."""
@@ -6615,6 +6623,13 @@ def dashboard():
             FROM propostas WHERE status != 'Excluída'{filtro_mes_sql} GROUP BY consultor ORDER BY valor DESC""", filtro_mes_params).fetchall()
         meses_disponiveis = [r['mes_meta'] if hasattr(r,'keys') else r[0] for r in conn.execute(
             "SELECT DISTINCT mes_meta FROM propostas WHERE mes_meta IS NOT NULL AND mes_meta != '' ORDER BY mes_meta DESC").fetchall()]
+        # So periodo bem formado entra no seletor.
+        #
+        # Uma proposta com mes_meta torto (o Guilherme viu um '7202', que e
+        # 2027 digitado ao contrario) virava uma opcao chamada '/7202' — um
+        # periodo que nao existe, oferecido como se existisse. Filtrar aqui nao
+        # conserta o dado; impede que o dado errado vire escolha na tela.
+        meses_disponiveis = [x for x in meses_disponiveis if _mes_meta_valido(x)]
         mes_atual_sp = datetime.now(TZ_SP).strftime('%Y-%m')
         if mes_atual_sp not in meses_disponiveis:
             meses_disponiveis.insert(0, mes_atual_sp)
@@ -11327,6 +11342,8 @@ def bi():
     base_sql = "status <> 'Excluída' AND COALESCE(estornada,0)=0" + filtro_mes_sql
     meses_disponiveis = [r['mes_meta'] if hasattr(r, 'keys') else r[0] for r in conn.execute(
         "SELECT DISTINCT mes_meta FROM propostas WHERE mes_meta IS NOT NULL AND mes_meta != '' ORDER BY mes_meta DESC").fetchall()]
+    # Mesmo filtro do dashboard: periodo torto no banco nao vira opcao na tela.
+    meses_disponiveis = [x for x in meses_disponiveis if _mes_meta_valido(x)]
     mes_atual_sp = datetime.now(TZ_SP).strftime('%Y-%m')
     if mes_atual_sp not in meses_disponiveis:
         meses_disponiveis.insert(0, mes_atual_sp)
