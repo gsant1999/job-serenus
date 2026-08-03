@@ -68,8 +68,22 @@
   // tela /cotacoes/nova, que não tem id de cotação nenhum — e ela ia junto nas
   // chamadas de preço, que precisam da rota /cotacoes/<id>/edit. O pedido saía
   // com a rota errada em silêncio.
-  const PAPEIS = ['criar', 'operadoras', 'planos', 'preco'];
-  const APRENDIDO = { criar: null, operadoras: null, planos: null, preco: null };
+  // Sete ações, não quatro.
+  //
+  // Eu tinha mapeado só as quatro que devolvem dado e achei que bastava. Não
+  // bastava: o preço voltava http_500 em TODO plano, porque o servidor deles
+  // não recebe as vidas no pedido de preço — ele lê da COTAÇÃO. E quem grava
+  // as vidas na cotação é a ação 'vidas', que a tela deles dispara logo depois
+  // de criar e que eu nunca chamava. O mesmo vale pro 'filtro' (cidade e tipo
+  // de contratação): também fica guardado na cotação, não vai no pedido.
+  //
+  // Lição, e é ela que vale: eu tratei como "as chamadas que trazem coisa" o
+  // que na verdade era "as chamadas que trazem coisa MAIS o estado que elas
+  // pressupõem". As que não devolvem nada eram justamente as que montavam o
+  // terreno.
+  const PAPEIS = ['criar', 'abrir', 'vidas', 'filtro', 'operadoras', 'planos', 'preco'];
+  const APRENDIDO = { criar: null, abrir: null, vidas: null, filtro: null,
+                      operadoras: null, planos: null, preco: null };
 
   // Códigos de modalidade vistos em cotação de verdade.
   //
@@ -92,9 +106,17 @@
     try { d = JSON.parse(corpo); } catch (e) { return null; }
     if (!Array.isArray(d) || !d.length) return null;
     if (/\/cotacoes\/nova$/.test(url) && d[0] && typeof d[0].titulo === 'string') return 'criar';
+    // ["<uuid>"] e só isso: abrir a cotação.
+    if (d.length === 1 && typeof d[0] === 'string') return 'abrir';
+    // [{cotacaoId, nome, vidas}] — grava a distribuição de vidas NA cotação.
+    if (d.length === 1 && d[0] && d[0].cotacaoId && Array.isArray(d[0].vidas)) return 'vidas';
     if (d.length === 1 && d[0] && d[0].filtro && d[0].filtro.cidade) return 'operadoras';
     if (d.length === 1 && d[0] && d[0].operadoraId && Array.isArray(d[0].vidas)) return 'planos';
     if (d.length === 2 && typeof d[0] === 'string' && d[1] && d[1].key && d[1].plano) return 'preco';
+    // [uuid, {cidade, modalidade...}] SEM key — grava cidade e contratação na
+    // cotação. Vem depois do 'preco' na ordem dos testes de propósito: o preço
+    // também tem cidade, e sem essa ordem os dois se confundiriam.
+    if (d.length === 2 && typeof d[0] === 'string' && d[1] && d[1].cidade) return 'filtro';
     return null;
   }
 
@@ -296,6 +318,28 @@
     return Array.isArray(d) ? d : [];
   }
 
+  // Monta o terreno na cotação recém-criada.
+  //
+  // Nada disso devolve dado — e foi por isso que passou despercebido. Mas é
+  // aqui que a cotação passa a saber quantas vidas tem e de que cidade é, e o
+  // pedido de preço depende das duas coisas: ele manda só a identidade do
+  // plano e espera que o resto já esteja gravado.
+  async function abrirCotacao(cotacaoId) {
+    await acao('abrir', `/cotacoes/${cotacaoId}/edit`, [cotacaoId], cotacaoId);
+  }
+
+  async function salvarVidas(cotacaoId, vidas) {
+    await acao('vidas', `/cotacoes/${cotacaoId}/edit`,
+               [{ cotacaoId, nome: 'GERAL', vidas: vidas || [] }], cotacaoId);
+  }
+
+  async function salvarFiltro(cotacaoId, p) {
+    await acao('filtro', `/cotacoes/${cotacaoId}/edit?d=cenarios`,
+               [cotacaoId, { cidade: p.cidade,
+                             modalidade: p.modalidade == null ? 2 : p.modalidade,
+                             credenciados: [], perfil: '$undefined' }], cotacaoId);
+  }
+
   function filtroBase(p) {
     return { cidade: p.cidade, modalidade: p.modalidade == null ? 2 : p.modalidade,
              credenciados: [], perfil: '$undefined', vidas: p.vidas };
@@ -366,10 +410,17 @@
       avisa('criando');
       cotacaoId = await criarCotacao(p.titulo);
       ultimaCotacao = cotacaoId;
+      // Mesmo terreno que o caminho passo a passo monta. Sem isto o preço volta
+      // http_500 em todo plano — o servidor deles lê as vidas da cotação, não
+      // do pedido. Deixar as duas rotas diferentes seria plantar o mesmo bug
+      // de novo no dia em que a extensão do WhatsApp usar esta função.
+      await abrirCotacao(cotacaoId);
+      await salvarVidas(cotacaoId, p.vidas);
       await respira(400, 1100);
     }
     avisa('operadoras');
     const todas = await operadorasDaCidade(cotacaoId, p);
+    await salvarFiltro(cotacaoId, p);
     await respira(300, 900);
     const escolhidas = Array.isArray(p.operadoraIds) && p.operadoraIds.length
       ? todas.filter((o) => p.operadoraIds.includes(o.id))
@@ -474,12 +525,20 @@
       }
       _cartoesAtuais = [];
       ultimaCotacao = await criarCotacao(p.titulo);
+      // As vidas vão JUNTO com a criação, sempre. Separar em outro passo seria
+      // dar chance de existir cotação sem distribuição — e cotação sem
+      // distribuição é exatamente a que devolve 500 no preço.
+      await abrirCotacao(ultimaCotacao);
+      await salvarVidas(ultimaCotacao, p.vidas);
       return { cotacaoId: ultimaCotacao,
                url: ORIGEM + '/cotacoes/' + ultimaCotacao + '/edit' };
     }
     if (a === 'operadoras') {
-      return { operadoras: (await operadorasDaCidade(p.cotacaoId, p))
-        .map((o) => ({ id: o.id, nome: o.nome, logotipo: o.logotipo })) };
+      const lista = await operadorasDaCidade(p.cotacaoId, p);
+      // Grava a cidade e o tipo de contratação na cotação: o pedido de preço
+      // não os manda, lê daqui.
+      await salvarFiltro(p.cotacaoId, p);
+      return { operadoras: lista.map((o) => ({ id: o.id, nome: o.nome, logotipo: o.logotipo })) };
     }
     if (a === 'planos') {
       return { planos: await planosDaOperadora(p.cotacaoId, p, p.operadoraId) };

@@ -31,12 +31,17 @@ function papelDe(c) {
   try { d = JSON.parse(c.enviou); } catch (e) { return null; }
   if (!Array.isArray(d) || !d.length) return null;
   if (/\/cotacoes\/nova$/.test(c.url) && typeof (d[0] || {}).titulo === 'string') return 'criar';
+  if (d.length === 1 && typeof d[0] === 'string') return 'abrir';
+  if (d.length === 1 && d[0].cotacaoId && Array.isArray(d[0].vidas)) return 'vidas';
   if (d.length === 1 && d[0].filtro) return 'operadoras';
   if (d.length === 1 && d[0].operadoraId) return 'planos';
   if (d.length === 2 && typeof d[0] === 'string' && d[1].key) return 'preco';
+  if (d.length === 2 && typeof d[0] === 'string' && d[1].cidade) return 'filtro';
   return null;
 }
-const porPapel = { criar: [], operadoras: [], planos: [], preco: [] };
+
+const porPapel = { criar: [], abrir: [], vidas: [], filtro: [],
+                   operadoras: [], planos: [], preco: [] };
 const hashes = {};       // papel -> hash, só pra rotear o servidor falso
 const aprendido = {};    // papel -> {hash, arvore}, do jeito que o cotador guarda
 captura.chamadas.forEach((c) => {
@@ -49,7 +54,7 @@ captura.chamadas.forEach((c) => {
 });
 
 // O servidor falso: responde pelo hash, na ordem em que a captura registrou.
-const chamou = { criar: 0, operadoras: 0, planos: 0, preco: 0 };
+const chamou = { criar: 0, abrir: 0, vidas: 0, filtro: 0, operadoras: 0, planos: 0, preco: 0 };
 const corposEnviados = [];
 function servidorFalso(url, cfg) {
   const hash = cfg.headers['next-action'];
@@ -212,6 +217,25 @@ function perguntar(tipo, pedido, msLimite) {
   const semCidade = await perguntar('cotar', { vidas: [{ faixa: '29-33', quantidade: 1 }] });
   ok(semCidade.ok === false && semCidade.motivo === 'sem_cidade',
      '9. sem cidade, erro claro', semCidade.motivo);
+
+  // 11. A SEQUENCIA que faltava: criar -> abrir -> vidas, antes de qualquer preco.
+  //     Era isto que faltava e fazia TODO preco voltar http_500: o servidor deles
+  //     nao recebe as vidas no pedido de preco, ele le da cotacao.
+  const ordem = corposEnviados.map((c) => c.papel);
+  ok(ordem[0] === 'criar' && ordem[1] === 'abrir' && ordem[2] === 'vidas',
+     '11. grava as vidas na cotacao logo apos criar', ordem.slice(0, 4).join(' -> '));
+  const iVidas = ordem.indexOf('vidas'), iPreco = ordem.indexOf('preco');
+  ok(iVidas >= 0 && iVidas < iPreco, '11b. as vidas entram ANTES do primeiro preco',
+     'vidas=' + iVidas + ' preco=' + iPreco);
+  const iFiltro = ordem.indexOf('filtro');
+  ok(iFiltro >= 0 && iFiltro < iPreco, '11c. a cidade tambem e gravada antes do preco',
+     'filtro=' + iFiltro);
+  const envVidas = corposEnviados.find((c) => c.papel === 'vidas');
+  ok(envVidas && envVidas.corpo[0].cotacaoId === dados.cotacaoId &&
+     Array.isArray(envVidas.corpo[0].vidas) && envVidas.corpo[0].vidas.length > 0,
+     '11d. manda as vidas certas, na cotacao certa',
+     JSON.stringify(envVidas ? envVidas.corpo[0].vidas : null));
+
 
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'tudo passou'));
   process.exit(falhas ? 1 : 0);

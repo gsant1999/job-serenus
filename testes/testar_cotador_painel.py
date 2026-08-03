@@ -21,12 +21,18 @@ def classificar(url, corpo):
         return None
     if re.search(r'/cotacoes/nova$', url) and isinstance(x[0], dict) and isinstance(x[0].get('titulo'), str):
         return 'criar'
+    if len(x) == 1 and isinstance(x[0], str):
+        return 'abrir'
+    if len(x) == 1 and isinstance(x[0], dict) and x[0].get('cotacaoId') and isinstance(x[0].get('vidas'), list):
+        return 'vidas'
     if len(x) == 1 and isinstance(x[0], dict) and isinstance(x[0].get('filtro'), dict) and x[0]['filtro'].get('cidade'):
         return 'operadoras'
     if len(x) == 1 and isinstance(x[0], dict) and x[0].get('operadoraId') and isinstance(x[0].get('vidas'), list):
         return 'planos'
     if len(x) == 2 and isinstance(x[0], str) and isinstance(x[1], dict) and x[1].get('key') and x[1].get('plano'):
         return 'preco'
+    if len(x) == 2 and isinstance(x[0], str) and isinstance(x[1], dict) and x[1].get('cidade'):
+        return 'filtro'
     return None
 
 
@@ -114,7 +120,7 @@ for c in chamadas:
     h = (c.get('cabecalhos') or {}).get('next-action')
     if p and h:
         papeis.setdefault(p, set()).add(h)
-ok(len(papeis) == 4, '1. reconhece os 4 papeis', str(sorted(papeis)))
+ok(len(papeis) == 7, '1. reconhece os 7 papeis', str(sorted(papeis)))
 for p, hs in sorted(papeis.items()):
     ok(len(hs) == 1, '1.%s: um hash so' % p, list(hs)[0][:14] + '...')
 
