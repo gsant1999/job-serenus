@@ -430,6 +430,25 @@
   .tipo-btn:hover, .tipo-btn.sel { background:var(--azul); color:#fff; border-color:var(--azul); }
 
   /* WhatsApp tab */
+  .pess-box { background:var(--panel-2); border:1px solid var(--borda); border-radius:10px;
+              padding:14px 16px; margin-bottom:16px; }
+  .pess-topo { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+  .pess-tit { font-size:13px; font-weight:600; color:var(--texto); }
+  .pess-btn-juntar { background:var(--panel-3); color:var(--texto); border:1px solid var(--borda);
+                     border-radius:7px; padding:5px 11px; font-size:12px; font-weight:600; cursor:pointer; }
+  .pess-btn-juntar:hover { border-color:var(--azul); }
+  .pess-lista { display:flex; flex-direction:column; gap:8px; }
+  .pess-vazio { font-size:12.5px; color:var(--cinza-2); }
+  .pess-item { display:flex; align-items:center; gap:9px; flex-wrap:wrap;
+               background:var(--panel); border:1px solid var(--borda); border-radius:8px; padding:8px 10px; }
+  .pess-chip { font-family:ui-monospace,Menlo,monospace; font-size:10.5px; background:var(--panel-3);
+               color:var(--cinza); border-radius:5px; padding:2px 6px; }
+  .pess-nome { font-size:12.5px; color:var(--texto); font-weight:600; flex:1; min-width:110px; }
+  .pess-tel { font-size:11.5px; color:var(--cinza-2); }
+  .pess-papel { background:var(--panel-2); border:1px solid var(--borda); color:var(--texto);
+                border-radius:6px; padding:3px 7px; font-size:11.5px; }
+  .pess-x { background:none; border:none; color:var(--cinza-2); cursor:pointer; font-size:15px; line-height:1; padding:2px 5px; }
+  .pess-x:hover { color:var(--rosa); }
   .wpp-box { background:var(--panel-2); border-radius:10px; padding:16px; border:1px solid var(--borda); }
   .wpp-header { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
   .wpp-tel { font-size:13px; color:#4ade80; font-weight:600; }
@@ -1133,6 +1152,22 @@
 
         <div id="tab-whatsapp" class="ficha-tab-pane">
 
+          {# PESSOAS DA NEGOCIAÇÃO. Uma venda costuma ter mais de um decisor — o
+             dono fecha, a esposa participa — e cada um fala de um WhatsApp.
+             Antes, cada conversa virava um lead solto e o histórico da MESMA
+             negociação ficava partido em dois cards que não se falavam. #}
+          <div class="pess-box">
+            <div class="pess-topo">
+              <div class="pess-tit">Pessoas desta negociação
+                <i class="ajuda-i" title="Cada conversa do WhatsApp ligada a este lead. Quando mais de uma pessoa participa da venda (o titular e o cônjuge, o sócio, o RH), junte todas aqui: o histórico fica num card só e você vê de quem é cada conversa.">i</i>
+              </div>
+              {% if eh_admin %}
+              <button type="button" class="pess-btn-juntar" onclick="abrirJuntarLead()">Juntar outro lead</button>
+              {% endif %}
+            </div>
+            <div id="pess-lista" class="pess-lista"><div class="pess-vazio">carregando…</div></div>
+          </div>
+
           <div class="wpp-box">
             <div class="wpp-header">
                             <div>
@@ -1437,6 +1472,7 @@ async function abrirFicha(id){
   document.getElementById('ficha-nome').value=d.lead.nome||'';
   document.getElementById('ficha-telefone').value=d.lead.telefone||'';
   _fichaWppAtualizar();
+  carregarContatosLead();
   document.getElementById('ficha-email').value=d.lead.email||'';
   document.getElementById('ficha-empresa').value=d.lead.empresa||'';
   document.getElementById('ficha-valor').value=d.lead.valor_estimado?Number(d.lead.valor_estimado).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
@@ -2208,6 +2244,75 @@ function wppRapido(tel, chatId){
 // O botao em destaque da ficha usa o campo de telefone AO VIVO, nao o do
 // lead carregado — se o consultor acabou de corrigir um numero digitado
 // errado, e pra esse numero corrigido que a conversa tem que abrir.
+// ── PESSOAS DA NEGOCIAÇÃO ───────────────────────────────────────────────────
+let _PAPEIS = [];
+async function carregarContatosLead(){
+  const cx = document.getElementById('pess-lista');
+  if(!cx || !_leadAtual) return;
+  cx.innerHTML = '<div class="pess-vazio">carregando…</div>';
+  let d = null;
+  try { d = await (await fetch('/crm/lead/'+_leadAtual.id+'/contatos')).json(); } catch(e){}
+  if(!d || !d.ok){ cx.innerHTML = '<div class="pess-vazio">não consegui carregar as conversas.</div>'; return; }
+  _PAPEIS = d.papeis || [];
+  if(!d.contatos.length){
+    // Sem conversa ligada não é erro — é o estado normal de quem entrou pela
+    // planilha. Diz o que fazer, em vez de só mostrar vazio.
+    cx.innerHTML = '<div class="pess-vazio">Nenhuma conversa ligada ainda. Abra a conversa no WhatsApp com a extensão para vincular, ou junte outro lead que já tenha.</div>';
+    return;
+  }
+  cx.innerHTML = d.contatos.map(c => {
+    const ops = ['<option value="">quem é?</option>'].concat(
+      _PAPEIS.map(p => '<option value="'+p+'"'+(p===c.papel?' selected':'')+'>'+p+'</option>')).join('');
+    return '<div class="pess-item">'
+      + '<span class="pess-chip">'+(c.tipo==='lid'?'@lid':'tel')+' '+escHtml(c.curto)+'</span>'
+      + '<span class="pess-nome">'+escHtml(c.nome || 'sem nome')+'</span>'
+      + (c.telefone ? '<span class="pess-tel">'+escHtml(c.telefone)+'</span>' : '')
+      + '<select class="pess-papel" data-chat="'+escHtml(c.chat_id)+'">'+ops+'</select>'
+      + '<button class="pess-x" data-solta="'+escHtml(c.chat_id)+'" title="Soltar esta conversa deste lead">&times;</button>'
+      + '</div>';
+  }).join('');
+  cx.querySelectorAll('.pess-papel').forEach(sel => sel.addEventListener('change', async () => {
+    await fetch('/crm/lead/'+_leadAtual.id+'/contatos/papel', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({chat_id: sel.dataset.chat, papel: sel.value})});
+    toast('Anotado','ok');
+  }));
+  cx.querySelectorAll('[data-solta]').forEach(b => b.addEventListener('click', async () => {
+    if(!confirm('Soltar esta conversa deste lead? O histórico dela não é apagado.')) return;
+    const r = await (await fetch('/crm/lead/'+_leadAtual.id+'/contatos/desvincular', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({chat_id: b.dataset.solta})})).json();
+    if(r.ok){ toast('Conversa solta','ok'); carregarContatosLead(); } else toast('Não deu','err');
+  }));
+}
+function escHtml(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// JUNTAR: traz outro lead pra dentro deste. Destrutivo e sem desfazer, então
+// pergunta pelo id exato (busca) em vez de adivinhar por nome parecido — juntar
+// duas pessoas diferentes com sobrenome igual custa uma venda.
+async function abrirJuntarLead(){
+  if(!_leadAtual) return;
+  const termo = prompt('Juntar outro lead NESTE (#'+_leadAtual.id+' — '+(_leadAtual.nome||'')+').\n\nDigite o nome ou telefone do lead que vai ser absorvido:');
+  if(!termo) return;
+  let d = null;
+  try {
+    d = await (await fetch('/crm/leads/buscar?excluir='+_leadAtual.id+'&q='+encodeURIComponent(termo))).json();
+  } catch(e){}
+  if(!d || !d.ok || !d.leads.length){ alert('Não achei nenhum lead com "'+termo+'".'); return; }
+  const lista = d.leads.map((l,i) => (i+1)+') #'+l.id+' — '+(l.nome||'sem nome')+' · '+(l.telefone||'sem telefone')+' · '+(l.etapa||'')).join('\n');
+  const esc = prompt('Qual deles?\n\n'+lista+'\n\nDigite o NÚMERO da linha (1 a '+d.leads.length+'):');
+  const idx = parseInt(esc,10);
+  if(!idx || idx < 1 || idx > d.leads.length) return;
+  const alvo = d.leads[idx-1];
+  const papel = prompt('Quem é essa pessoa na negociação?\n\n'+_PAPEIS.join(', ')+'\n\n(pode deixar em branco)') || '';
+  if(!confirm('Juntar #'+alvo.id+' ("'+(alvo.nome||'')+'") dentro de #'+_leadAtual.id+'?\n\nTUDO do #'+alvo.id+' vem pra cá — conversas, histórico, cotações, propostas e anexos — e o card dele é APAGADO.\n\nIsso não tem desfazer.')) return;
+  const r = await (await fetch('/crm/lead/'+_leadAtual.id+'/juntar', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({outro_id: alvo.id, papel: papel})})).json();
+  if(r.ok){ toast('Leads juntados','ok'); carregarContatosLead(); abrirFicha(_leadAtual.id); }
+  else alert(r.erro || 'Não consegui juntar.');
+}
+
 function wppDaFicha(){
   const tel = (document.getElementById('ficha-telefone').value||'').trim();
   const btn = document.getElementById('ficha-wpp');

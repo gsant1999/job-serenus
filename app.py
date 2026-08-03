@@ -2838,6 +2838,13 @@ def init_db():
         # card ficava verde só porque alguém mexeu num campo. A cor tem que
         # responder a avanço real no funil.
         ("crm_leads", "avancou_em", "TEXT"),
+        # QUEM É a pessoa daquela conversa dentro da negociação: "Titular",
+        # "Esposa", "Sócio", "Filho". Uma venda tem mais de um decisor com
+        # frequência — o dono fecha, a esposa participa — e cada um fala de um
+        # WhatsApp. Sem isto, ou viravam dois leads sem ligação nenhuma (foi o
+        # que aconteceu: João num card, Mariana noutro), ou o consultor juntava
+        # e perdia de vista de quem era cada conversa.
+        ("wa_chat_lead", "papel", "TEXT"),
         # VARREDURA por consultor: quem participa é decisão do admin no JOB, não
         # do consultor na extensão — assim o piloto começa em um WhatsApp só e
         # ninguém fica de fora por esquecer de ligar.
@@ -23422,6 +23429,199 @@ def crm_lead_atividade(lid):
     conn.execute("UPDATE crm_leads SET atualizado_em=? WHERE id=?", (_agora_sp(), lid))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+
+# ── PESSOAS DA NEGOCIAÇÃO ────────────────────────────────────────────────────
+# Uma venda costuma ter mais de um decisor, e cada um fala de um WhatsApp: o dono
+# fecha, a esposa participa, o sócio aprova. Até aqui cada conversa virava um
+# LEAD separado, sem ligação nenhuma — o histórico da mesma negociação ficava
+# partido em dois cards que não se falavam.
+#
+# O vínculo conversa↔lead já era muitos-pra-um no banco (chat_id é a chave, o
+# lead_id repete). O que faltava era poder dizer isso de propósito, e dizer QUEM
+# é cada um.
+_PAPEIS_CONTATO = ['Titular', 'Cônjuge', 'Sócio', 'Filho(a)', 'Responsável financeiro',
+                   'Contador', 'RH', 'Outro']
+
+
+def _contatos_do_lead(conn, lid):
+    """As conversas penduradas neste lead, com quem é cada pessoa."""
+    try:
+        rows = conn.execute("""SELECT chat_id, telefone, nome, papel, atualizado_em
+                               FROM wa_chat_lead WHERE lead_id=?
+                               ORDER BY atualizado_em DESC, chat_id""", (lid,)).fetchall()
+    except Exception:
+        return []
+    out = []
+    for r in rows:
+        cid = r['chat_id'] or ''
+        out.append({
+            'chat_id': cid,
+            'curto': cid.split('@')[0],
+            'tipo': 'lid' if '@lid' in cid else ('numero' if '@c.us' in cid else 'outro'),
+            'telefone': _formatar_telefone(r['telefone'] or '') or '',
+            'nome': r['nome'] or '',
+            'papel': (r['papel'] if 'papel' in r.keys() else '') or '',
+        })
+    return out
+
+
+@app.route('/crm/lead/<int:lid>/contatos')
+@login_required
+def crm_lead_contatos(lid):
+    conn = db()
+    lead = conn.execute("SELECT id, nome, responsavel_id FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] not in (None, session['user_id']):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    contatos = _contatos_do_lead(conn, lid)
+    close_db(conn)
+    return jsonify({"ok": True, "contatos": contatos, "papeis": _PAPEIS_CONTATO})
+
+
+@app.route('/crm/lead/<int:lid>/contatos/papel', methods=['POST'])
+@login_required
+def crm_lead_contato_papel(lid):
+    """Diz quem é a pessoa daquela conversa. Só rótulo — não move nada."""
+    d = request.json or {}
+    chat_id = str(d.get('chat_id') or '').strip()
+    papel = str(d.get('papel') or '').strip()
+    if papel and papel not in _PAPEIS_CONTATO:
+        return jsonify({"ok": False, "erro": "Papel inválido"}), 400
+    conn = db()
+    lead = conn.execute("SELECT id, responsavel_id FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] not in (None, session['user_id']):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    n = conn.execute("UPDATE wa_chat_lead SET papel=? WHERE chat_id=? AND lead_id=?",
+                     (papel or None, chat_id, lid)).rowcount
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": bool(n)})
+
+
+@app.route('/crm/lead/<int:lid>/contatos/desvincular', methods=['POST'])
+@login_required
+def crm_lead_contato_desvincular(lid):
+    """Solta a conversa deste lead. Não apaga a conversa nem o histórico dela —
+    só desfaz a ligação, pra quando alguém juntou o contato errado."""
+    d = request.json or {}
+    chat_id = str(d.get('chat_id') or '').strip()
+    conn = db()
+    lead = conn.execute("SELECT id, responsavel_id FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+    if session.get('perfil') != 'admin' and lead['responsavel_id'] not in (None, session['user_id']):
+        close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+    n = conn.execute("UPDATE wa_chat_lead SET lead_id=NULL WHERE chat_id=? AND lead_id=?",
+                     (chat_id, lid)).rowcount
+    if n:
+        conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
+                     (lid, session.get('nome'), 'edicao',
+                      f'Conversa {chat_id.split("@")[0]} desvinculada deste lead.', _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": bool(n)})
+
+
+# Tabelas que apontam pro lead. Ao juntar, TUDO vai junto — deixar uma de fora
+# significa histórico órfão apontando pra um lead que não existe mais.
+_TABELAS_LEAD_ID = [
+    'comissao_extrato_item', 'cotacao_salva', 'cotacao_viva', 'crm_agenda',
+    'crm_atividades', 'crm_email_log', 'crm_lead_campos', 'crm_sms_log',
+    'fluxo_inscricoes', 'google_ads_conversoes', 'lead_documento', 'lead_extracao',
+    'lead_notas', 'meta_conversoes', 'propostas', 'wa_chat_lead',
+    'wa_conversa_estado', 'whatsapp_analises', 'whatsapp_extensao_fila',
+]
+
+
+@app.route('/crm/lead/<int:lid>/juntar', methods=['POST'])
+@login_required
+def crm_lead_juntar(lid):
+    """Junta OUTRO lead neste: traz conversas, histórico, cotações, propostas e
+    anexos, e apaga o card que sobrou.
+
+    É destrutivo e não tem desfazer, então: só admin, e o lead absorvido é
+    identificado pelo id — não por nome parecido. Adivinhar quem é duplicado e
+    juntar sozinho é como se perde venda de gente diferente com o mesmo
+    sobrenome."""
+    if session.get('perfil') != 'admin':
+        return jsonify({"ok": False, "erro": "Só admin pode juntar leads"}), 403
+    d = request.json or {}
+    try:
+        outro = int(d.get('outro_id') or 0)
+    except (TypeError, ValueError):
+        outro = 0
+    if not outro or outro == lid:
+        return jsonify({"ok": False, "erro": "Informe o outro lead"}), 400
+    papel = str(d.get('papel') or '').strip()
+    if papel and papel not in _PAPEIS_CONTATO:
+        papel = ''
+
+    conn = db()
+    fica = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    sai = conn.execute("SELECT * FROM crm_leads WHERE id=?", (outro,)).fetchone()
+    if not fica or not sai:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lead não encontrado"}), 404
+
+    # QUAIS conversas sao do outro lead — TEM que ser lido ANTES de mover, senao
+    # nao da mais pra distinguir quem chegou de quem ja estava, e o papel
+    # ("Conjuge") grudava tambem no titular. Medido: aconteceu no primeiro teste.
+    try:
+        vieram = [r['chat_id'] for r in conn.execute(
+            "SELECT chat_id FROM wa_chat_lead WHERE lead_id=?", (outro,)).fetchall()]
+    except Exception:
+        vieram = []
+
+    movidos = {}
+    try:
+        for tab in _TABELAS_LEAD_ID:
+            try:
+                n = conn.execute(f"UPDATE {tab} SET lead_id=? WHERE lead_id=?", (lid, outro)).rowcount or 0
+                if n:
+                    movidos[tab] = n
+            except Exception as e:
+                app.logger.warning(f"[JUNTAR] {tab}: {e}")
+        # Etiquetas: a mesma etiqueta nos dois leads violaria a chave — move só
+        # as que faltam e joga fora o resto.
+        try:
+            conn.execute("""DELETE FROM crm_lead_etiquetas WHERE lead_id=? AND etiqueta_id IN
+                            (SELECT etiqueta_id FROM crm_lead_etiquetas WHERE lead_id=?)""", (outro, lid))
+            conn.execute("UPDATE crm_lead_etiquetas SET lead_id=? WHERE lead_id=?", (lid, outro))
+        except Exception as e:
+            app.logger.warning(f"[JUNTAR] etiquetas: {e}")
+
+        # O que estava vazio no que fica, herda de quem sai — juntar não pode
+        # perder dado que só existia num dos dois.
+        for col in ('telefone', 'telefone_norm', 'email', 'empresa', 'observacoes', 'origem'):
+            try:
+                if not (fica[col] if col in fica.keys() else None) and (sai[col] if col in sai.keys() else None):
+                    conn.execute(f"UPDATE crm_leads SET {col}=? WHERE id=?", (sai[col], lid))
+            except Exception:
+                pass
+
+        # As conversas que vieram ganham o papel informado ("Cônjuge"), pra não
+        # virar um monte de @lid solto sem se saber de quem é cada um.
+        if papel and vieram:
+            marc = ','.join(['?'] * len(vieram))
+            conn.execute(f"UPDATE wa_chat_lead SET papel=COALESCE(papel,?) "
+                         f"WHERE lead_id=? AND chat_id IN ({marc})", [papel, lid] + vieram)
+        conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                        VALUES (?,?,?,?,?)""",
+                     (lid, session.get('nome'), 'edicao',
+                      f'Lead #{outro} ("{sai["nome"] or "sem nome"}") juntado neste'
+                      + (f' como {papel}.' if papel else '.'), _agora_sp()))
+        conn.execute("DELETE FROM crm_leads WHERE id=?", (outro,))
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        close_db(conn)
+        app.logger.warning(f"[JUNTAR] falhou: {e}")
+        return jsonify({"ok": False, "erro": "Não consegui juntar: " + str(e)[:120]}), 500
+    close_db(conn)
+    return jsonify({"ok": True, "movidos": movidos,
+                    "conversas": sum(v for k, v in movidos.items() if k == 'wa_chat_lead')})
 
 
 @app.route('/crm/lead/<int:lid>/editar', methods=['POST'])
