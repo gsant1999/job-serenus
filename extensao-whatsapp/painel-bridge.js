@@ -78,7 +78,7 @@
       pendentes.delete(d.reqId);
       clearTimeout(espera.relogio);
       espera.responder({ ok: !!d.ok, motivo: d.motivo || '', faltando: d.faltando || [],
-                         dados: d.dados || null });
+                         dados: d.dados || null, detalhe: d.detalhe || null });
     }
   });
 

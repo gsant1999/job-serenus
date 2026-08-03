@@ -269,9 +269,19 @@
       // ações na sequência, saber que uma delas deu 500 não diz nada. Com o
       // papel e o começo da resposta, o problema fica no lugar em vez de virar
       // suspeita geral.
+      // Vai o que EU MANDEI junto com o que eles responderam.
+      //
+      // A resposta sozinha é um digest opaco do Next: não diz nada. O que
+      // resolve é comparar o meu corpo com o que a tela deles manda — e pra
+      // isso o corpo precisa aparecer. Sem ele, eu peço captura nova a cada
+      // rodada e o Guilherme refaz o trabalho todo.
       let pista = '';
-      try { pista = (await resp.text() || '').replace(/\s+/g, ' ').slice(0, 90); } catch (e) {}
-      throw new Error('http_' + resp.status + ' em ' + papel + (pista ? ' — ' + pista : ''));
+      try { pista = (await resp.text() || '').replace(/\s+/g, ' ').slice(0, 80); } catch (e) {}
+      const err = new Error('http_' + resp.status + ' em ' + papel);
+      err.enviei = JSON.stringify(corpo).slice(0, 400);
+      err.responderam = pista;
+      err.arvore = arv ? decodeURIComponent(arv).slice(0, 160) : '(sem árvore)';
+      throw err;
     }
     return { texto: await resp.text(), resp };
   }
@@ -808,7 +818,13 @@
       const f = faltando();
       if (f.length) { responder({ ok: false, motivo: 'precisa_aprender', faltando: f }); return; }
       try { responder({ ok: true, dados: await passo(d.pedido) }); }
-      catch (e) { responder({ ok: false, motivo: String(e && e.message || e) }); }
+      catch (e) {
+        // O detalhe viaja junto: sem ele o motivo vira 'http_500' de novo, e
+        // eu volto a adivinhar entre sete passos.
+        responder({ ok: false, motivo: String(e && e.message || e),
+                    detalhe: e && e.enviei ? { enviei: e.enviei, responderam: e.responderam,
+                                               arvore: e.arvore } : null });
+      }
       return;
     }
     if (d.tipo === 'descobrir_modalidades') {

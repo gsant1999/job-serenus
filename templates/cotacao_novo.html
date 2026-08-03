@@ -457,8 +457,26 @@
     }
     var e = EXPLICA[motivo];
     if (!e) {
-      mostrarSinal('off', 'Não deu certo', '<b>A cotação não foi.</b> O motivo que voltou foi ' +
-        '<code>' + esc(motivo || 'desconhecido') + '</code>. Se repetir, me mande esse código.');
+      // Os DOIS lados da chamada que falhou: o que eu mandei e o que eles
+      // responderam. A resposta sozinha é um digest opaco do Next e não diz
+      // nada; o que resolve é comparar meu corpo com o que a tela deles manda.
+      var det = '';
+      if (extra && extra.detalhe) {
+        det = '<div style="margin-top:10px;font-size:11px;line-height:1.5">' +
+          '<div style="color:var(--cinza-2)">o que o JOB mandou</div>' +
+          '<code style="display:block;word-break:break-all;color:var(--texto)">' +
+            esc(extra.detalhe.enviei || '') + '</code>' +
+          '<div style="color:var(--cinza-2);margin-top:7px">o que o Painel respondeu</div>' +
+          '<code style="display:block;word-break:break-all">' +
+            esc(extra.detalhe.responderam || '') + '</code>' +
+          '<div style="color:var(--cinza-2);margin-top:7px">rota enviada</div>' +
+          '<code style="display:block;word-break:break-all">' +
+            esc(extra.detalhe.arvore || '') + '</code></div>';
+      }
+      mostrarSinal('off', 'Não deu certo', '<b>A cotação não foi.</b> Deu ' +
+        '<code>' + esc(motivo || 'desconhecido') + '</code>.' + det +
+        (det ? '<p style="margin:9px 0 0;color:var(--cinza)">Me mande este bloco inteiro — ' +
+               'é com ele que eu acho o problema.</p>' : ''));
       return;
     }
     var html = e.html;
@@ -902,7 +920,7 @@
   async function cotarTipo(planos, b, aoAndar, frentes) {
     var passo0 = passoNaAba(b, null);
     var r0 = await passo0({ acao: 'criar' });
-    if (!r0.ok) return { erro: r0.motivo, planos: [] };
+    if (!r0.ok) return { erro: r0.motivo, detalhe: r0.detalhe, planos: [] };
     var cid = r0.dados.cotacaoId, url = r0.dados.url;
     if (planos.length < 8 || frentes <= 1) {
       await passo0({ acao: 'filtro', cotacaoId: cid });
@@ -955,21 +973,21 @@
       mostrarAndamento({ fase: 'precos', feito: feitos, total: total });
     };
 
-    var todos = [], url = '', erro = '';
+    var todos = [], url = '', erro = '', detalheErro = null;
     for (var i = 0; i < tipos.length; i++) {
       var b = base();
       b.modalidade = codigoDe(tipos[i]);
       b._tipo = nomeCompleto(tipos[i]);
       if (b.modalidade == null) continue;
       var r = await cotarTipo(selecionados, b, aoAndar, frentes);
-      if (r.erro) { erro = r.erro; break; }
+      if (r.erro) { erro = r.erro; detalheErro = r.detalhe; break; }
       url = url || r.url;
       todos = todos.concat(r.planos);
     }
 
     el('andando').className = 'cv-andando';
     el('btCotar').disabled = false;
-    if (erro) { tratarFalha(erro); return; }
+    if (erro) { tratarFalha(erro, { detalhe: detalheErro }); return; }
     mostrarSinal('on', 'Painel conectado', '');
     todos.sort(function (a, b2) {
       return (a.total == null) - (b2.total == null) || (a.total - b2.total);

@@ -67,6 +67,7 @@
                            // tela poder dizer o que aconteceu de verdade em vez
                            // de chutar "deve estar fechado".
                            abas: (resp && resp.abas),
+                           detalhe: (resp && resp.detalhe) || null,
                            abasExaminadas: (resp && resp.abasExaminadas) }, '*');
     };
     // "Voce esta ai?" — a pagina PERGUNTA em vez de so esperar o anuncio.
