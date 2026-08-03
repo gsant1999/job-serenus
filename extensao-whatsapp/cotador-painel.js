@@ -662,7 +662,7 @@
   //
   // Custo: seis consultas leves, uma vez na vida. Não vale automatizar mais
   // que isso; vale menos ainda errar.
-  async function descobrirModalidades(cidade) {
+  async function descobrirModalidades(cidade, vidasPedidas) {
     if (!cidade) throw new Error('sem_cidade');
     let cotacaoId = ultimaCotacao;
     if (!cotacaoId) {
@@ -670,7 +670,14 @@
       ultimaCotacao = cotacaoId;
       await respira(400, 1100);
     }
-    const vidas = [{ faixa: '29-33', quantidade: 1 }];
+    // A faixa etária MUDA quem atende.
+    //
+    // Eu perguntava sempre com 29-33 fixo, e a lista que voltava não batia com
+    // a que o consultor estava vendo no Painel se ele estivesse olhando 59+.
+    // Como esta descoberta serve exatamente pra ele comparar as duas listas,
+    // perguntar com outra faixa tornava a janela inútil — e pior, parecia erro.
+    const vidas = (vidasPedidas && vidasPedidas.length)
+      ? vidasPedidas : [{ faixa: '29-33', quantidade: 1 }];
     const achados = [];
     // Até 9, não até 5. A tela deles tem PF, PME e Adesão em Saúde E os mesmos
     // três em Dental — são seis combinações possíveis, e eu só procurava seis
@@ -692,7 +699,7 @@
       window.postMessage({ source: 'JOB_COTADOR', tipo: 'modalidades',
                            dados: Object.keys(MODALIDADES).map(Number) }, ORIGEM);
     }
-    return { cidade, achados };
+    return { cidade, vidas, achados };
   }
 
   // ── Ponte com o resto da extensão ─────────────────────────────────────────
@@ -722,7 +729,10 @@
     if (d.tipo === 'descobrir_modalidades') {
       const f = faltando();
       if (f.length) { responder({ ok: false, motivo: 'precisa_aprender', faltando: f }); return; }
-      try { responder({ ok: true, dados: await descobrirModalidades((d.pedido || {}).cidade) }); }
+      try {
+        const q = d.pedido || {};
+        responder({ ok: true, dados: await descobrirModalidades(q.cidade, q.vidas) });
+      }
       catch (e) { responder({ ok: false, motivo: String(e && e.message || e) }); }
       return;
     }

@@ -72,17 +72,43 @@
     display:flex; justify-content:space-between; font-size:13px; }
   .cv-total-vidas b { font-size:17px; font-variant-numeric:tabular-nums; }
 
-  /* Uma linha por código descoberto: número, quem atende, e o que é.
-     Grade de três colunas em vez de campos empilhados — antes virava um
-     despejo de dados com um campo de texto solto repetido seis vezes. */
-  .cv-mod-linha { display:grid; grid-template-columns:auto 1fr 132px; gap:8px;
-    align-items:center; padding:5px 0; }
-  .cv-mod-linha .marca { justify-self:start; }
-  .cv-mod-linha .quem { font-size:11px; color:var(--cinza-2); overflow:hidden;
-    text-overflow:ellipsis; white-space:nowrap; cursor:help; }
-  .cv-mod-linha select { background:var(--panel-2); border:1px solid var(--borda-2);
-    border-radius:8px; padding:6px 8px; color:var(--texto); font-size:12px; width:100%; }
-  .cv-mod-linha select:focus { border-color:var(--azul); outline:none; }
+  .cv-link { background:none; border:none; padding:0; color:var(--azul); cursor:pointer;
+    font-size:11.5px; font-weight:600; text-decoration:underline; }
+
+  /* Janela de configuração. Fica fora do formulário de propósito: quem está
+     atendendo cliente não pode tropeçar numa tabela de administração. */
+  .cv-janela { display:none; position:fixed; inset:0; z-index:200;
+    background:rgba(0,0,0,.55); padding:24px; overflow:auto; }
+  .cv-janela.ver { display:flex; align-items:flex-start; justify-content:center; }
+  .cv-janela-cx { background:var(--panel); border:1px solid var(--borda-2); border-radius:16px;
+    width:100%; max-width:860px; margin:auto; box-shadow:0 24px 60px rgba(0,0,0,.4); }
+  .cv-janela-topo { display:flex; gap:16px; align-items:flex-start; padding:20px 22px 14px;
+    border-bottom:1px solid var(--borda); }
+  .cv-janela-topo h2 { margin:0 0 4px; font-size:17px; }
+  .cv-janela-topo p { margin:0; font-size:12.5px; color:var(--cinza); line-height:1.55; max-width:66ch; }
+  .cv-janela-x { background:none; border:none; color:var(--cinza); font-size:24px; line-height:1;
+    cursor:pointer; padding:0 4px; }
+  .cv-janela-x:hover { color:var(--texto); }
+  .cv-janela-corpo { padding:18px 22px; }
+  .cv-janela-pe { display:flex; gap:10px; align-items:center; justify-content:flex-end;
+    padding:14px 22px 18px; border-top:1px solid var(--borda); }
+  .cv-janela-pe span { flex:1; font-size:12px; color:var(--cinza); }
+
+  /* Um cartão por código: o número, quem atende (a lista INTEIRA, que é o que
+     permite comparar com o Painel lado a lado) e o que é. */
+  .cv-ramo { margin-bottom:18px; }
+  .cv-ramo > h4 { margin:0 0 9px; font-size:10px; text-transform:uppercase; letter-spacing:.6px;
+    color:var(--cinza-2); font-weight:700; }
+  .cv-mod-cx { display:grid; grid-template-columns:1fr 160px; gap:14px; align-items:center;
+    padding:12px 14px; border:1px solid var(--borda-2); border-radius:11px;
+    background:var(--panel-2); margin-bottom:8px; }
+  .cv-mod-cx.pronto { border-color:var(--verde); background:var(--verde-soft); }
+  .cv-mod-cx .quem { font-size:12px; color:var(--cinza); line-height:1.5; }
+  .cv-mod-cx .quem b { color:var(--texto); display:block; margin-bottom:3px; font-size:12.5px; }
+  .cv-mod-cx select { background:var(--panel); border:1px solid var(--borda-2);
+    border-radius:9px; padding:9px 11px; color:var(--texto); font-size:13px; width:100%; }
+  .cv-mod-cx select:focus { border-color:var(--azul); outline:none; }
+  @media (max-width:640px) { .cv-mod-cx { grid-template-columns:1fr; } }
 
   .cv-pills { display:flex; gap:6px; flex-wrap:wrap; }
   .cv-pill { padding:7px 13px; border-radius:9px; border:1px solid var(--borda-2);
@@ -234,13 +260,12 @@
       <div class="cv-campo">
         <label for="modalidade">Tipo de contratação</label>
         <select id="modalidade"></select>
-        <!-- PF e Adesão existem no Painel, mas como códigos que ninguém
-             documentou. Em vez de chutar (o que faria cotar produto errado
-             mostrando como certo), a extensão pergunta e você batiza. -->
+        <!-- Isto é configuração, e configuração não fica no meio do caminho de
+             quem está atendendo cliente. Aqui vai só um lembrete discreto; o
+             trabalho acontece numa janela à parte, com espaço. -->
         <div id="modFaltando" style="display:none;font-size:11.5px;margin-top:6px">
-          <button type="button" class="btn-outline btn-sm" id="btAcharMod">Faltam PF e Adesão?</button>
+          <button type="button" class="cv-link" id="btAcharMod"></button>
         </div>
-        <div id="modAchados" style="font-size:12px;margin-top:8px"></div>
       </div>
     </div>
 
@@ -334,6 +359,30 @@
            Nada é cobrado e nada é enviado ao cliente: a cotação só sai daqui quando
            você mandar salvar.</p>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Configuração dos tipos de contratação, fora do caminho de quem atende.
+     Só abre quando você pede, e fecha sem deixar nada pela metade. -->
+<div class="cv-janela" id="janelaMod">
+  <div class="cv-janela-cx">
+    <div class="cv-janela-topo">
+      <div>
+        <h2>Tipos de contratação</h2>
+        <p>O Painel identifica cada tipo por um número e o nome só existe na tela deles.
+           Compare a lista de operadoras com a que aparece no Painel e diga qual é qual —
+           é uma vez só, e depois o JOB nunca mais pergunta.</p>
+      </div>
+      <button type="button" class="cv-janela-x" id="fecharMod" title="Fechar">×</button>
+    </div>
+    <div class="cv-janela-corpo" id="modAchados">
+      <p class="cv-ops-vazio">Escolha a cidade na tela antes de abrir isto.</p>
+    </div>
+    <div class="cv-janela-pe">
+      <span id="modSalvoMsg"></span>
+      <button type="button" class="btn-outline btn-sm" id="btAchar">Perguntar ao Painel</button>
+      <button type="button" class="btn" id="btSalvarMods" disabled>Salvar</button>
     </div>
   </div>
 </div>
@@ -631,57 +680,86 @@
       : 'Descobrir os ' + falta + ' que faltam';
   }
 
-  // Descobre os códigos perguntando ao Painel quem atende em cada um.
+  // ── Tipos de contratação: janela à parte ────────────────────────────────
   //
   // Chutar que 1 é PF seria pedir preço do produto errado e mostrar como certo.
-  // A extensão traz a lista de operadoras de cada código e você reconhece qual
-  // é qual — a lista de PF não se parece com a de PME. Uma vez na vida.
-  el('btAcharMod').onclick = async function () {
-    var cidade = cidadeEscolhida;
-    if (!cidade) { el('modAchados').textContent = 'Escolha a cidade primeiro.'; return; }
-    this.disabled = true;
-    el('modAchados').textContent = 'Perguntando ao Painel por ' + cidade + '…';
-    var r = await pedir('descobrir_modalidades', { pedido: { cidade: cidade } }, 90000);
-    this.disabled = false;
-    if (!r.ok) { el('modAchados').textContent = 'Não deu: ' + (r.motivo || '?'); return; }
-    var achados = (r.dados && r.dados.achados) || [];
-    if (!achados.length) { el('modAchados').textContent = 'Nenhum código respondeu.'; return; }
-    desenharAchados(achados);
-  };
+  // Então a extensão pergunta ao Painel quem atende em cada código e você
+  // reconhece qual é qual comparando com a tela deles — por isso a lista de
+  // operadoras aparece INTEIRA aqui, e não cortada com reticências: cortada,
+  // não dá pra comparar, que é a única coisa que esta janela serve pra fazer.
+  var OPCOES = ['PF', 'PME', 'Adesão', 'PF Dental', 'PME Dental', 'Adesão Dental'];
 
-  // Saúde ou Dental, deduzido de quem atende.
-  //
-  // Não é chute sobre o que o código significa — é leitura do que voltou: se a
-  // maioria das operadoras daquele código tem "odonto" ou "dental" no nome, é
-  // plano odontológico. Isso só agrupa e sugere; quem confirma é você, e é por
-  // isso que a sugestão vem escrita no campo em vez de ser aplicada sozinha.
   function ramoDe(amostra) {
-    var dental = (amostra || []).filter(function (n) {
-      return /odonto|dental/i.test(n);
-    }).length;
+    var dental = (amostra || []).filter(function (n) { return /odonto|dental/i.test(n); }).length;
     return dental >= Math.ceil((amostra || []).length / 2) ? 'Dental' : 'Saúde';
   }
 
-  var OPCOES = ['PF', 'PME', 'Adesão', 'PF Dental', 'PME Dental', 'Adesão Dental'];
+  // Diz em cima de QUE pergunta a lista foi montada. Sem isso o consultor
+  // compara com a tela do Painel dele — que pode estar noutra faixa — e conclui
+  // que o JOB errou.
+  function contexto() {
+    var v = vidasLista();
+    if (!v.length) return '';
+    var i = FAIXAS.indexOf(v[0].faixa);
+    return ', faixa ' + (i >= 0 ? ROTULOS[i] : v[0].faixa) + (v.length > 1 ? ' e outras' : '');
+  }
+
+  function abrirJanelaMod() {
+    el('janelaMod').className = 'cv-janela ver';
+    el('btAchar').disabled = !cidadeEscolhida;
+    if (!cidadeEscolhida) {
+      el('modAchados').innerHTML =
+        '<p class="cv-ops-vazio">Escolha a cidade na tela antes — a pergunta é sempre ' +
+        'sobre uma cidade, porque quem atende muda de lugar pra lugar.</p>';
+    }
+  }
+  function fecharJanelaMod() { el('janelaMod').className = 'cv-janela'; }
+
+  el('btAcharMod').onclick = abrirJanelaMod;
+  el('fecharMod').onclick = fecharJanelaMod;
+  el('janelaMod').addEventListener('click', function (ev) {
+    if (ev.target === el('janelaMod')) fecharJanelaMod();
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') fecharJanelaMod();
+  });
+
+  el('btAchar').onclick = async function () {
+    if (!cidadeEscolhida) return;
+    this.disabled = true;
+    el('modAchados').innerHTML = '<p class="cv-ops-vazio">Perguntando ao Painel por ' +
+      esc(cidadeEscolhida) + contexto() + '… isto leva alguns segundos.</p>';
+    // Vai com as MESMAS vidas do formulário: quem atende muda com a faixa
+    // etária, e a lista precisa bater com a que você está vendo no Painel.
+    var r = await pedir('descobrir_modalidades',
+      { pedido: { cidade: cidadeEscolhida, vidas: vidasLista() } }, 90000);
+    this.disabled = false;
+    if (!r.ok) {
+      el('modAchados').innerHTML = '<p class="cv-ops-vazio">Não deu: ' + esc(r.motivo || '?') + '</p>';
+      return;
+    }
+    var achados = (r.dados && r.dados.achados) || [];
+    if (!achados.length) {
+      el('modAchados').innerHTML = '<p class="cv-ops-vazio">Nenhum código respondeu para esta cidade.</p>';
+      return;
+    }
+    desenharAchados(achados);
+  };
 
   function desenharAchados(achados) {
-    var c = el('modAchados');
     var grupos = { 'Saúde': [], 'Dental': [] };
     achados.forEach(function (a) { grupos[ramoDe(a.amostra)].push(a); });
-
     var html = '';
     ['Saúde', 'Dental'].forEach(function (ramo) {
       if (!grupos[ramo].length) return;
-      html += '<div style="margin-top:12px"><div style="font-size:9.5px;text-transform:uppercase;' +
-        'letter-spacing:.5px;color:var(--cinza-2);font-weight:700;margin-bottom:6px">' + ramo + '</div>';
+      html += '<div class="cv-ramo"><h4>' + ramo + '</h4>';
       grupos[ramo].forEach(function (a) {
         var jaTem = MODALIDADES[a.codigo] || '';
-        html += '<div class="cv-mod-linha">' +
-          '<span class="marca">' + a.codigo + '</span>' +
-          '<span class="quem" title="' + esc(a.amostra.join(', ')) + '">' +
-            a.quantas + ': ' + esc(a.amostra.slice(0, 3).join(', ')) + '…</span>' +
+        html += '<div class="cv-mod-cx' + (jaTem ? ' pronto' : '') + '" data-cx="' + a.codigo + '">' +
+          '<div class="quem"><b>Código ' + a.codigo + ' · ' + a.quantas + ' operadoras</b>' +
+            esc(a.amostra.join(', ')) + (a.quantas > a.amostra.length ? ' e outras' : '') + '</div>' +
           '<select data-cod="' + a.codigo + '">' +
-            '<option value="">— escolha —</option>' +
+            '<option value="">— o que é? —</option>' +
             OPCOES.filter(function (o) {
               return ramo === 'Dental' ? /Dental/.test(o) : !/Dental/.test(o);
             }).map(function (o) {
@@ -691,30 +769,39 @@
       });
       html += '</div>';
     });
-    html += '<div class="ct-linha-acao" style="margin-top:12px">' +
-      '<button type="button" class="btn btn-sm" id="btSalvarMods">Salvar</button>' +
-      '<span id="modSalvoMsg" style="font-size:11.5px;color:var(--cinza)"></span></div>';
-    c.innerHTML = html;
-
-    el('btSalvarMods').onclick = async function () {
-      this.disabled = true;
-      var quantos = 0;
-      var campos = c.querySelectorAll('select[data-cod]');
-      for (var i = 0; i < campos.length; i++) {
-        var nome = campos[i].value;
-        if (!nome) continue;
-        var resp = await fetch('/cotacao/modalidade', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ codigo: Number(campos[i].dataset.cod), nome: nome })
-        }).then(function (x) { return x.json(); }).catch(function () { return { ok: false }; });
-        if (resp.ok) { MODALIDADES = resp.modalidades; quantos++; }
-      }
-      this.disabled = false;
-      montarModalidades();
-      el('modSalvoMsg').textContent = quantos
-        ? quantos + ' tipo(s) salvo(s).' : 'Escolha ao menos um.';
-    };
+    el('modAchados').innerHTML =
+      '<p style="font-size:11.5px;color:var(--cinza-2);margin:0 0 14px">' +
+      'Quem atende <b>' + esc(cidadeEscolhida) + contexto() + '</b>. ' +
+      'Ponha o Painel na mesma cidade e faixa pra comparar linha por linha.</p>' + html;
+    el('btSalvarMods').disabled = false;
+    // Marca verde na hora em que você escolhe: sem isso, com seis cartões, não
+    // dá pra saber de bate-pronto quais já estão resolvidos.
+    el('modAchados').querySelectorAll('select[data-cod]').forEach(function (sel) {
+      sel.onchange = function () {
+        var cx = el('modAchados').querySelector('[data-cx="' + sel.dataset.cod + '"]');
+        if (cx) cx.className = 'cv-mod-cx' + (sel.value ? ' pronto' : '');
+      };
+    });
   }
+
+  el('btSalvarMods').onclick = async function () {
+    this.disabled = true;
+    var campos = el('modAchados').querySelectorAll('select[data-cod]');
+    var quantos = 0;
+    for (var i = 0; i < campos.length; i++) {
+      if (!campos[i].value) continue;
+      var resp = await fetch('/cotacao/modalidade', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codigo: Number(campos[i].dataset.cod), nome: campos[i].value })
+      }).then(function (x) { return x.json(); }).catch(function () { return { ok: false }; });
+      if (resp.ok) { MODALIDADES = resp.modalidades; quantos++; }
+    }
+    this.disabled = false;
+    montarModalidades();
+    el('modSalvoMsg').textContent = quantos
+      ? quantos + ' tipo(s) salvo(s). Já aparecem na tela.' : 'Escolha ao menos um.';
+    if (quantos) setTimeout(fecharJanelaMod, 900);
+  };
 
   // ── vidas por faixa ────────────────────────────────────────────────────
   var vidas = {};
