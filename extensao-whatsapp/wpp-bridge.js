@@ -549,7 +549,11 @@
         const blob = await _blobDoModelo(achado.msg);
         const b64 = await blobParaBase64(blob);
         const m = achado.msg;
-        const mime = (blob.type || m.mimetype || (m.type === 'document' ? 'application/pdf' : 'image/jpeg')).split(';')[0];
+        // EM DOCUMENTO, QUEM MANDA E O m.mimetype. O blob.type que o WhatsApp
+        // devolve pra PDF ja veio 'image/jpeg' (e a miniatura da 1a pagina), e
+        // com isso a carta de permanencia foi parar na pasta como OUTRO.jpeg.
+        const mime = ((m.type === 'document' ? (m.mimetype || blob.type) : (blob.type || m.mimetype))
+                      || (m.type === 'document' ? 'application/pdf' : 'image/jpeg')).split(';')[0];
         out.push({ msg_id: id, base64: b64, mime,
                    nome: m.filename || m.caption || (m.type === 'document' ? 'documento.pdf' : 'foto.jpg'),
                    tipo: (m.type === 'document' ? 'documento' : 'imagem') });

@@ -16197,7 +16197,7 @@ def documentos_para_o_lead(conn, lead_id, leitura, arquivos):
         # preenchia campo e o documento continuava so no WhatsApp — e na hora de
         # subir na operadora alguem ia catar tudo de novo, um por um.
         chave_arq, tam, mime = None, 0, (arq.get('mime') or '')
-        ext = 'pdf' if 'pdf' in mime else ((mime.split('/')[-1] or 'jpg') if mime else 'jpg')
+        ext = _doc_extensao(arq.get('nome'), mime)
         titularidade, parentesco = _doc_propor_titularidade(conn, lead_id, cls.get('pessoa'))
         nome_final = _doc_nome_final(cls.get('tipo'), cls.get('pessoa'), ext)
         try:
@@ -16325,6 +16325,23 @@ _DOC_ROTULO = {
     'carteira_trabalho': 'CTPS', 'holerite': 'HOLERITE', 'cartao_plano': 'CARTAO-PLANO',
     'proposta_operadora': 'PROPOSTA-OPERADORA', 'outro': 'OUTRO',
 }
+
+
+def _doc_extensao(nome, mime):
+    """A extensao certa do arquivo — o NOME manda, o mime e o desempate.
+
+    O mime que chega do WhatsApp mente: uma carta de permanencia em PDF chegou
+    como image/jpeg e virou 'OUTRO.jpeg' na pasta. Nome com extensao e o dado
+    mais confiavel que existe aqui: quem mandou o arquivo mandou o nome junto."""
+    ext = (nome or '').strip().rsplit('.', 1)
+    ext = ext[1].lower()[:5] if len(ext) == 2 else ''
+    if ext in ('pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'gif', 'tif', 'tiff'):
+        return ext
+    m = (mime or '').lower()
+    if 'pdf' in m:
+        return 'pdf'
+    sub = m.split('/')[-1].split(';')[0].strip()
+    return sub[:5] if sub else 'jpg'
 
 
 def _doc_nome_final(tipo, pessoa, extensao, seq=None, titularidade=None, parentesco=None):
@@ -18637,7 +18654,7 @@ def api_whatsapp_documento_tipo():
     # deixaria a ficha dizendo que o titular e conjuge de si mesmo.
     if titularidade != 'dependente':
         parentesco = None
-    ext = (doc['arquivo'] or '').rsplit('.', 1)[-1] if doc['arquivo'] else 'jpg'
+    ext = _doc_extensao(doc['arquivo'] or doc['nome_arquivo'], doc['mime'])
     nome = _doc_nome_final(tipo, pessoa, ext, titularidade=titularidade, parentesco=parentesco)
     conn.execute("""UPDATE lead_documento SET tipo=?, pessoa=?, nome_final=?, tipo_conferido=1,
                     titularidade=?, parentesco=? WHERE id=?""",
@@ -18746,7 +18763,7 @@ def lead_documento_tipo():
         parentesco = None
     elif parentesco and parentesco not in _DOC_PARENTESCOS:
         close_db(conn); return jsonify({"ok": False, "erro": "Parentesco inválido"}), 400
-    ext = (doc['arquivo'] or '').rsplit('.', 1)[-1] if doc['arquivo'] else 'jpg'
+    ext = _doc_extensao(doc['arquivo'] or doc['nome_arquivo'], doc['mime'])
     nome = _doc_nome_final(tipo, doc['pessoa'], ext, titularidade=titularidade,
                            parentesco=parentesco)
     conn.execute("""UPDATE lead_documento SET tipo=?, nome_final=?, tipo_conferido=1,
