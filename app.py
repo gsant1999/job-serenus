@@ -17322,8 +17322,39 @@ Serenus pelo contato abaixo.</p>
 
 
 _EXTENSAO_ARQUIVOS = ['manifest.json', 'background.js', 'content.js', 'content.css', 'wpp-bridge.js',
+                      'site-bridge.js', 'painel-bridge.js', 'cotador-painel.js',
                       'wa-js.vendor.js', 'popup.html', 'popup.js', 'icon16.png', 'icon48.png',
                       'icon128.png', 'logo_arcos.png']
+
+
+def _extensao_arquivos_faltando():
+    """Confere o zip contra o manifest ANTES de servir. Existe porque esta lista
+    ficou pra tras quando a extensao ganhou site-bridge.js, painel-bridge.js e
+    cotador-painel.js: o download entregava um pacote que o proprio manifest
+    referenciava mas nao continha, e o Chrome recusava a instalacao inteira com
+    'Nao foi possivel carregar site-bridge.js'. Lista escrita a mao vira mentira
+    silenciosa — aqui ela e checada contra a verdade, que e o manifest."""
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extensao-whatsapp')
+    try:
+        d = json.load(open(os.path.join(base, 'manifest.json')))
+    except Exception:
+        return []
+    exigidos = {'manifest.json'}
+    for cs in d.get('content_scripts', []):
+        exigidos.update(cs.get('js', []))
+        exigidos.update(cs.get('css', []))
+    for r in d.get('web_accessible_resources', []):
+        exigidos.update(r.get('resources', []))
+    sw = (d.get('background') or {}).get('service_worker')
+    if sw:
+        exigidos.add(sw)
+    pop = (d.get('action') or {}).get('default_popup')
+    if pop:
+        exigidos.add(pop)
+    exigidos.update((d.get('icons') or {}).values())
+    # Falta = o manifest pede, e o zip nao leva (ou o arquivo nem existe no disco).
+    return sorted(n for n in exigidos
+                  if n not in _EXTENSAO_ARQUIVOS or not os.path.exists(os.path.join(base, n)))
 
 
 def _extensao_versao():
@@ -17342,6 +17373,17 @@ def extensao_download():
     a pasta na hora — nunca fica um zip velho pra trás."""
     import zipfile as _zip, io as _io
     base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extensao-whatsapp')
+    # PACOTE INCOMPLETO NAO SAI DAQUI. Entregar um zip a que falta um arquivo do
+    # manifest gasta o tempo de quem instala procurando o erro na maquina dela —
+    # foi exatamente o que aconteceu: consultor mudou a pasta de lugar tres vezes
+    # atras de um defeito que estava no pacote.
+    faltando = _extensao_arquivos_faltando()
+    if faltando:
+        app.logger.error(f"[EXTENSAO] download bloqueado, faltam no pacote: {faltando}")
+        return Response(
+            'O pacote da extensão está incompleto no servidor (faltando: '
+            + ', '.join(faltando) + '). Avise o Guilherme — não instale por enquanto.',
+            status=500, mimetype='text/plain; charset=utf-8')
     buf = _io.BytesIO()
     with _zip.ZipFile(buf, 'w', _zip.ZIP_DEFLATED) as zf:
         for nome in _EXTENSAO_ARQUIVOS:
@@ -17380,7 +17422,7 @@ def extensao_instalar():
 
 <ol>
   <li><b>Baixe</b> o arquivo no botão acima e <b>descompacte</b> (clique com o botão direito &rarr; "Abrir"/"Extrair"). Vai virar uma pasta chamada <code>job-serenus-extensao-__VER__</code>.</li>
-  <li>Deixe essa pasta num lugar que você não vá apagar (ex.: Documentos).</li>
+  <li>Deixe essa pasta num lugar que você <b>não vá apagar</b> e que <b>não seja sincronizado pelo OneDrive</b> &mdash; crie uma pasta na raiz do disco, tipo <code>C:\\JOB\\extensao</code>. Dentro de Documentos ou Área de Trabalho o OneDrive costuma deixar os arquivos "na nuvem", e aí o Chrome não consegue ler.</li>
   <li>No Chrome, abra <code>chrome://extensions</code>.</li>
   <li>Ligue o <b>"Modo do desenvolvedor"</b> (canto superior direito).</li>
   <li>Clique em <b>"Carregar sem compactação"</b> e escolha a <b>pasta</b> que você descompactou.</li>
@@ -17388,6 +17430,14 @@ def extensao_instalar():
 </ol>
 
 <div class="aviso"><b>Quando sair uma atualização:</b> você vai baixar de novo por este link, descompactar por cima, e em <code>chrome://extensions</code> clicar no <b>&#8635; (recarregar)</b> da extensão + <b>F5</b> no WhatsApp. (Quando a Chrome Web Store aprovar, isso passa a ser automático e este passo some.)</div>
+
+<div class="aviso" style="background:#eff6ff;border-color:#93c5fd">
+  <b>Deu erro "Não foi possível carregar ... para o script"?</b> É pasta incompleta ou arquivo
+  que o OneDrive deixou na nuvem. Não adianta mudar a pasta de lugar levando os arquivos antigos
+  junto: <b>apague a pasta inteira</b>, baixe de novo por este link e descompacte do zero numa
+  pasta fora do OneDrive. Em <code>chrome://extensions</code>, <b>remova</b> a extensão com erro
+  antes de carregar a nova.
+</div>
 </body></html>"""
     html = html.replace('__VER__', ver or '')
     return Response(html, mimetype='text/html')
