@@ -2210,9 +2210,18 @@
   // bolhas de arquivo visiveis, quantas ficaram sem o bloco. E o teste do
   // sintoma, nao do seletor — se o WhatsApp trocar o nome do icone, isto acusa
   // do mesmo jeito que se ele trocar a arvore.
-  function _canarioTela() {
+  async function _canarioTela() {
     const main = document.querySelector('#main');
     if (!main) return [];                     // nenhuma conversa aberta: nao avalia
+    // MEDIR DEPOIS DE INJETAR, nao no meio.
+    //
+    // Ele contava as bolhas no instante em que rodava — inclusive as que
+    // acabaram de entrar na tela pela rolagem e que o injetor ainda nao tinha
+    // visitado. Dava '4 de 5' e '12 de 14' e acusava quebra num bloco que
+    // funciona: media a corrida, nao a capacidade. Forca uma passada e da um
+    // tempo pro DOM assentar antes de contar.
+    try { trInjetar(); } catch (e) { /* injetar nao pode derrubar o canario */ }
+    await new Promise((r) => setTimeout(r, 350));
     const out = [];
     const linhas = main.querySelectorAll('[data-id]');
     out.push({ cap: 'dom_linhas', ok: linhas.length > 0, ms: 0,
@@ -2250,7 +2259,7 @@
       daPonte = [{ cap: 'wa_js', ok: false, ms: 0,
                    detalhe: 'a ponte nao respondeu: ' + String((e && e.message) || e).slice(0, 120) }];
     }
-    const checagens = daPonte.concat(_canarioTela());
+    const checagens = daPonte.concat(await _canarioTela());
     if (!checagens.length) return null;
     try {
       await _safeSendMessage({ type: 'canario', versao: _versaoExt(), checagens: checagens });
