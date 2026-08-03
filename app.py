@@ -2956,6 +2956,14 @@ def init_db():
         # que aconteceu: João num card, Mariana noutro), ou o consultor juntava
         # e perdia de vista de quem era cada conversa.
         ("wa_chat_lead", "papel", "TEXT"),
+        # DE ONDE VEIO O CUSTO. A analise gravava quanto custou, mas nao de
+        # onde veio: nao dava pra distinguir uma leitura que o consultor pediu
+        # na conversa de uma varredura em massa que alguem disparou. Quando a
+        # conta cresce, "de onde veio isso?" e a primeira pergunta — e ela nao
+        # tinha resposta. origem: manual | varredura | varredura_lote | inbox.
+        ("whatsapp_analises", "origem", "TEXT"),
+        ("whatsapp_analises", "lote_id", "INTEGER"),
+        ("whatsapp_analises", "chat_id", "TEXT"),
         # VARREDURA por consultor: quem participa é decisão do admin no JOB, não
         # do consultor na extensão — assim o piloto começa em um WhatsApp só e
         # ninguém fica de fora por esquecer de ligar.
@@ -21430,17 +21438,26 @@ def api_whatsapp_analisar():
     tokens_saida = ia_info.get('tokens_saida') or 0
     duracao_segundos = round(time.monotonic() - t_inicio, 2)
 
+    # DE ONDE VEIO, e por quem. Sem isto o custo aparecia sem procedencia: nao
+    # dava pra separar a leitura que o consultor pediu na conversa de uma
+    # varredura em massa. 'manual' e o padrao porque analise sem rotulo veio da
+    # conversa aberta — o caminho antigo, que nao manda origem.
+    _origem = (str(d.get('origem') or '') or ('varredura' if d.get('economico') else 'manual'))[:30]
+    try:
+        _lote = int(d.get('lote_id') or 0) or None
+    except (TypeError, ValueError):
+        _lote = None
     conn.execute("""INSERT INTO whatsapp_analises
         (lead_id, telefone, telefone_norm, nome_contato, total_mensagens, conversa_json,
          score, score_faixa, sugestoes_json, resumo, criado_por, criado_em,
          custo_claude_usd, custo_transcricao_usd, tokens_entrada, tokens_saida, audio_segundos,
-         duracao_segundos)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         duracao_segundos, origem, lote_id, chat_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (lead_id, telefone, tel_norm, nome, len(limpa), json.dumps(limpa, ensure_ascii=False),
          score, faixa, json.dumps(diagnostico, ensure_ascii=False), an['descricao'],
          d.get('usuario_id'), _agora_sp(),
          custo_claude_usd, custo_transcricao_usd, tokens_entrada, tokens_saida, audio_segundos_total,
-         duracao_segundos))
+         duracao_segundos, _origem, _lote, str(d.get('chat_id') or '')[:120]))
     analise_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == "postgres"
                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
 
@@ -22269,11 +22286,27 @@ def painel_lead(lid):
     etiquetas = _etiquetas_dos_leads(conn, [lid]).get(lid, [])
 
     # ── Conversa e CUSTO DE IA (fonte canonica: whatsapp_analises) ────────
+    # CADA LEITURA COM PROCEDENCIA: quanto custou, quando, quem mandou e de onde
+    # veio. Custo somado sem detalhe nao se audita — a pergunta que aparece
+    # quando a conta cresce e "de onde veio isso?", e ela precisa de resposta
+    # na mesma tela.
     analises = [dict(r) for r in conn.execute("""
-        SELECT id, score, score_faixa, total_mensagens, duracao_segundos, criado_em,
-               COALESCE(custo_claude_usd,0) AS c_claude,
-               COALESCE(custo_transcricao_usd,0) AS c_transc
-        FROM whatsapp_analises WHERE lead_id=? ORDER BY criado_em DESC""", (lid,)).fetchall()]
+        SELECT a.id, a.score, a.score_faixa, a.total_mensagens, a.duracao_segundos, a.criado_em,
+               COALESCE(a.custo_claude_usd,0) AS c_claude,
+               COALESCE(a.custo_transcricao_usd,0) AS c_transc,
+               COALESCE(a.origem,'') AS origem, a.lote_id,
+               COALESCE(u.nome,'') AS quem
+        FROM whatsapp_analises a LEFT JOIN usuarios u ON u.id = a.criado_por
+        WHERE a.lead_id=? ORDER BY a.criado_em DESC""", (lid,)).fetchall()]
+    _ROT_ORIGEM = {'manual': 'leitura pedida na conversa',
+                   'varredura': 'varredura automática do dia',
+                   'varredura_lote': 'varredura em lote pelo CRM',
+                   'inbox': 'atendimento de lead novo', '': 'origem não registrada'}
+    for a in analises:
+        a['origem_rot'] = _ROT_ORIGEM.get(a['origem'], a['origem'])
+        a['custo_usd'] = float(a['c_claude'] or 0) + float(a['c_transc'] or 0)
+        a['custo_brl'] = round(a['custo_usd'] * _USD_BRL_TAXA, 2)
+        a['quando'] = _fmt_datahora_br(a['criado_em'])
     custo_ia = sum(float(a['c_claude'] or 0) + float(a['c_transc'] or 0) for a in analises)
     ultima = analises[0] if analises else None
 

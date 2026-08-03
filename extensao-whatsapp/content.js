@@ -2577,6 +2577,9 @@
         telefone: meta.telefone || '',
         nome: meta.nome || '',
         lead_id: meta.lead_id || null,
+        // De ONDE veio esta leitura, pra o custo ter procedencia no painel.
+        origem: meta.origem || 'varredura',
+        lote_id: meta.lote_id || null,
         usuario_id: usuarioId || null,
         mensagens: conv.mensagens || [],
         audios: payloadAudios,
@@ -3692,7 +3695,8 @@
         // analise era gravada sem dono e nao aparecia em lugar nenhum.
         await varreduraUmaConversa(
           { chat_id: item.chat_id },
-          { lead_id: item.lead_id, nome: item.nome || '' });
+          { lead_id: item.lead_id, nome: item.nome || '',
+            origem: 'varredura_lote', lote_id: item.lote_id });
         ok = true;
       } catch (e) {
         // O MOTIVO VIAJA. "deu erro em alguns" nao serve pra ninguem: o painel

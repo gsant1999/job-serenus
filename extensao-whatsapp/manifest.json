@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JOB — Análise de WhatsApp",
-  "version": "3.15.0",
+  "version": "3.16.0",
   "description": "Painel dentro do WhatsApp Web: analisa o lead, calcula o Score e envia mensagens da biblioteca de modelos.",
   "permissions": [
     "notifications",
