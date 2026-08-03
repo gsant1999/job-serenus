@@ -165,9 +165,14 @@
 
   /* ═══ SINO DE NOTIFICAÇÕES (na sidebar — nunca sobrepõe conteúdo) ═══ */
   #sino-wrap { flex-shrink:0; margin-left:auto; }
-  #sino-btn { position:relative; width:32px; height:32px; border-radius:50%; border:1px solid rgba(255,255,255,.14);
-    background:rgba(255,255,255,.05); color:#c5c9d8; cursor:pointer; display:flex; align-items:center;
-    justify-content:center; transition:.15s; }
+  #sino-btn { position:relative; width:32px; height:32px; border-radius:50%;
+    border:1px solid var(--borda-2); background:var(--panel-2); color:var(--cinza);
+    cursor:pointer; display:flex; align-items:center; justify-content:center; transition:.15s; }
+  /* Era branco translucido sobre branco: no tema claro o sino sumia — sem
+     borda visivel, sem contraste no icone. Agora usa os mesmos tokens do resto
+     do sistema, entao funciona nos dois temas por construcao, nao por sorte. */
+  [data-theme="light"] #sino-btn { background:#fff; border-color:var(--borda-2); color:var(--cinza); }
+  [data-theme="light"] #sino-btn:hover { background:var(--panel-2); }
   #sino-btn:hover { color:var(--texto); border-color:var(--azul); }
   #sino-btn svg { width:16px; height:16px; }
   #sino-btn.tem-nova { color:var(--texto); border-color:var(--azul); animation:sino-pulse 2s ease-in-out infinite; }

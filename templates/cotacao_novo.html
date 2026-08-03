@@ -258,6 +258,7 @@
 {% endblock %}
 
 {% block content %}
+<div class="page">
 <div class="cv-topo">
   <div>
     <h1>Cotação ao vivo</h1>
@@ -358,6 +359,8 @@
     <div id="resultado"></div>
   </main>
 </div>
+
+</div><!-- /.page -->
 
 <!-- Vidas por faixa: janela, como no Painel. Fora do caminho até ser pedida. -->
 <div class="cv-janela" id="janelaVidas">
@@ -728,6 +731,7 @@
 
   // ── navegação: operadora → produto → linha → plano ─────────────────────
   var operadoras = [], planosPorOperadora = {}, selecionados = [];
+  var urlDaPergunta = '';   // a cotação do Painel que respondeu a lista atual
   var nivel = 'operadoras', opAtual = null, produtoAtual = null, linhaAtual = null;
 
   function tipoAtivo() {
@@ -824,9 +828,19 @@
           // Sem esta linha, comparar com a tela do Painel — que pode estar com
           // outra distribuição — parece erro do JOB quando são duas perguntas
           // diferentes.
+          // Link pra MESMA pergunta no Painel.
+          //
+          // A cotação que o JOB acabou de usar já está lá com esta cidade,
+          // este tipo e esta distribuição de vidas. Abrir por aqui é a única
+          // forma de comparar as duas telas sem margem pra dúvida — sem isso,
+          // duas respostas a perguntas diferentes parecem erro, e eu passei
+          // três rodadas argumentando em vez de dar o meio de conferir.
+          urlDaPergunta = rc.dados.url || '';
           el('mainSub').innerHTML = 'Quem atende <b>' + esc(cidadeEscolhida) + '</b> · ' +
-            esc(nomeCompleto(tipoAtivo() || '')) + ' · <b>' + esc(resumoVidas()) + '</b>. ' +
-            'Quem atende muda com a faixa etária.';
+            esc(nomeCompleto(tipoAtivo() || '')) + ' · <b>' + esc(resumoVidas()) + '</b> · ' +
+            operadoras.length + ' operadoras' +
+            (urlDaPergunta ? ' · <a href="' + esc(urlDaPergunta) + '" target="_blank" ' +
+              'rel="noopener">conferir esta mesma pergunta no Painel</a>' : '');
           voltarPara('operadoras');
           return;
         }
