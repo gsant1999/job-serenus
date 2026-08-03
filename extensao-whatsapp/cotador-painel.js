@@ -262,7 +262,17 @@
       method: 'POST', headers: cab, body: JSON.stringify(corpo),
       credentials: 'include', redirect: 'follow',
     });
-    if (!resp.ok && resp.status !== 303) throw new Error('http_' + resp.status);
+    if (!resp.ok && resp.status !== 303) {
+      // DIZ QUAL PASSO FALHOU, e o que o servidor deles respondeu.
+      //
+      // 'http_500' sozinho me custou duas rodadas de adivinhação: com sete
+      // ações na sequência, saber que uma delas deu 500 não diz nada. Com o
+      // papel e o começo da resposta, o problema fica no lugar em vez de virar
+      // suspeita geral.
+      let pista = '';
+      try { pista = (await resp.text() || '').replace(/\s+/g, ' ').slice(0, 90); } catch (e) {}
+      throw new Error('http_' + resp.status + ' em ' + papel + (pista ? ' — ' + pista : ''));
+    }
     return { texto: await resp.text(), resp };
   }
 
@@ -386,9 +396,26 @@
     await acao('abrir', `/cotacoes/${cotacaoId}/edit`, [cotacaoId], cotacaoId);
   }
 
+  // AS DEZ FAIXAS, sempre — inclusive as zeradas.
+  //
+  // A tela deles manda a distribuição completa; eu mandava só as faixas com
+  // gente dentro. Parecia equivalente e não é: quem grava a distribuição na
+  // cotação é este passo, e mandar meia distribuição deixa a cotação num
+  // estado que a tela deles nunca produz. Quando o objetivo é ser
+  // indistinguível do que eles fazem, "equivalente" não basta — tem que ser
+  // igual.
+  const _TODAS_FAIXAS = ['00-18', '19-23', '24-28', '29-33', '34-38',
+                         '39-43', '44-48', '49-53', '54-58', '59-199'];
+
+  function _vidasCompletas(vidas) {
+    const m = {};
+    (vidas || []).forEach((v) => { m[v.faixa] = Number(v.quantidade) || 0; });
+    return _TODAS_FAIXAS.map((f) => ({ faixa: f, quantidade: m[f] || 0 }));
+  }
+
   async function salvarVidas(cotacaoId, vidas) {
     await acao('vidas', `/cotacoes/${cotacaoId}/edit`,
-               [{ cotacaoId, nome: 'GERAL', vidas: vidas || [] }], cotacaoId);
+               [{ cotacaoId, nome: 'GERAL', vidas: _vidasCompletas(vidas) }], cotacaoId);
   }
 
   async function salvarFiltro(cotacaoId, p) {
@@ -400,7 +427,7 @@
 
   function filtroBase(p) {
     return { cidade: p.cidade, modalidade: p.modalidade == null ? 2 : p.modalidade,
-             credenciados: [], perfil: '$undefined', vidas: p.vidas };
+             credenciados: [], perfil: '$undefined', vidas: _vidasCompletas(p.vidas) };
   }
 
   async function operadorasDaCidade(cotacaoId, p) {

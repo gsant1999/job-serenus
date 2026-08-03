@@ -237,6 +237,18 @@ function perguntar(tipo, pedido, msLimite) {
      JSON.stringify(envVidas ? envVidas.corpo[0].vidas : null));
 
 
+  // 12. As DEZ faixas, sempre. A tela deles manda a distribuicao completa; meia
+  //     distribuicao deixa a cotacao num estado que a tela deles nunca produz.
+  const vs = envVidas ? envVidas.corpo[0].vidas : [];
+  ok(vs.length === 10, '12. manda as dez faixas, inclusive as zeradas', vs.length + ' faixas');
+  ok(vs.filter((f) => f.quantidade > 0).length === 1 &&
+     vs.filter((f) => f.faixa === '29-33')[0].quantidade === 10,
+     '12b. a quantidade cai na faixa certa');
+  const envFiltro = corposEnviados.find((c) => c.papel === 'operadoras');
+  ok(envFiltro && envFiltro.corpo[0].filtro.vidas.length === 10,
+     '12c. a busca de operadoras tambem manda as dez');
+
+
   console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'tudo passou'));
   process.exit(falhas ? 1 : 0);
 })().catch((e) => { console.error('EXPLODIU:', e); process.exit(1); });
