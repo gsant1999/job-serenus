@@ -1093,11 +1093,21 @@ function abrirConversaWhatsApp(telefone, chatId, texto) {
   window.addEventListener('message', ouvir);
   window.postMessage({ source: 'JOB_SITE_REQ', tipo: 'abrir_chat', reqId: reqId,
                        telefone: comDdi, chatId: chatId || '', texto: texto || '' }, '*');
+  // 1800ms ERA CURTO DEMAIS pro caminho de verdade: site → ponte → background
+  // → focar a aba → content script → wa-js abrindo a conversa, tudo isso
+  // ainda mais lento quando a aba do WhatsApp estava em segundo plano (o
+  // Chrome atrasa aba inativa). O QUE ACONTECIA: a extensao ainda ia
+  // responder OK um instante depois, so que o site ja tinha desistido e
+  // aberto o wa.me — daí os DOIS resultados juntos que o Guilherme viu
+  // (a aba certa trocou de conversa por dentro E uma aba nova pipocou por
+  // cima). 6s da folga de sobra pro caminho normal e ainda cobre o pior caso
+  // sem deixar quem clicou plantado — o proprio content script desiste do
+  // dele em 12s se a extensao estiver mesmo travada.
   setTimeout(function () {
     if (respondeu) return;
     window.removeEventListener('message', ouvir);
     _jobWaFallback(comDdi, texto);
-  }, 1800);
+  }, 6000);
   return true;
 }
 

@@ -2196,8 +2196,19 @@ function wppRapido(tel, chatId){
 // errado, e pra esse numero corrigido que a conversa tem que abrir.
 function wppDaFicha(){
   const tel = (document.getElementById('ficha-telefone').value||'').trim();
-  if(!abrirConversaWhatsApp(tel, (_leadAtual&&_leadAtual.chat_id)||''))
-    toast('Lead sem telefone cadastrado','err');
+  const btn = document.getElementById('ficha-wpp');
+  // Trava o botao por um instante: o caminho de verdade (focar a aba, trocar
+  // de conversa por dentro) leva ate 6s quando a aba do WhatsApp estava em
+  // segundo plano. Sem isso, clicar de novo enquanto espera abria uma
+  // segunda conversa por cima da primeira.
+  if (btn && btn.dataset.abrindo) return;
+  if(!abrirConversaWhatsApp(tel, (_leadAtual&&_leadAtual.chat_id)||'')){
+    toast('Lead sem telefone cadastrado','err'); return;
+  }
+  if (btn) {
+    btn.dataset.abrindo = '1';
+    setTimeout(()=>{ delete btn.dataset.abrindo; }, 2500);
+  }
 }
 // Sem numero, o botao apagado e o title ja dizem o motivo — melhor que deixar
 // clicar e so entao mostrar o erro.
