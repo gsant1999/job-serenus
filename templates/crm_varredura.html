@@ -3,7 +3,8 @@
 
 {% block head %}
 <style>
-  .vr-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:16px 0 18px; }
+  .vr-kpis { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin:16px 0 18px; }
+  @media (max-width:900px) { .vr-kpis { grid-template-columns:repeat(2,1fr); } }
   .vr-kpi { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:14px 16px; }
   .vr-kpi .n { font-family:'Sora',sans-serif; font-size:24px; font-weight:700; line-height:1; }
   .vr-kpi .l { font-size:11px; color:var(--cinza); text-transform:uppercase; letter-spacing:.5px; margin-top:6px; }
@@ -23,6 +24,11 @@
   .pill-st.erro { background:rgba(244,63,94,.14); color:var(--rosa); }
   .pill-st.lendo { background:rgba(59,130,246,.14); color:var(--info); }
   .pill-st.pendente { background:rgba(148,163,184,.15); color:var(--cinza); }
+  /* "Nunca abordado" tem cor PRÓPRIA — nem verde (não foi lido) nem vermelha
+     (não quebrou). É uma terceira coisa: trabalho a fazer. */
+  .pill-st.vazia { background:rgba(245,158,11,.16); color:var(--amarelo,#f59e0b); }
+  .vr-tab tr.vazia td { background:rgba(245,158,11,.05); }
+  .vr-nunca { color:var(--amarelo,#f59e0b); font-size:12px; }
   .vr-motivo { color:var(--rosa); font-size:12px; }
   .vr-voltar { color:var(--azul); text-decoration:none; font-size:13px; }
 </style>
@@ -62,15 +68,24 @@
   <div class="vr-kpis">
     <div class="vr-kpi"><div class="n">{{ lote.total }}</div><div class="l">Leads no lote</div></div>
     <div class="vr-kpi"><div class="n" style="color:var(--teal);">{{ cont.lido }}</div><div class="l">Lidos</div></div>
+    <div class="vr-kpi"><div class="n" style="color:var(--amarelo,#f59e0b);">{{ cont.vazia }}</div><div class="l">Nunca abordados</div></div>
     <div class="vr-kpi"><div class="n" style="color:var(--rosa);">{{ cont.erro }}</div><div class="l">Com erro</div></div>
     <div class="vr-kpi"><div class="n" style="color:var(--cinza);">{{ cont.pendente + cont.lendo }}</div><div class="l">Na fila</div></div>
   </div>
 
   <div class="vr-barra">
     <i style="width:{{ (cont.lido / lote.total * 100) if lote.total else 0 }}%;background:var(--teal);"></i>
+    <i style="width:{{ (cont.vazia / lote.total * 100) if lote.total else 0 }}%;background:var(--amarelo,#f59e0b);"></i>
     <i style="width:{{ (cont.erro / lote.total * 100) if lote.total else 0 }}%;background:var(--rosa);"></i>
   </div>
 
+  {% if cont.vazia %}
+  <p style="font-size:12.5px;color:var(--cinza);margin:14px 0 6px;">
+    <b style="color:var(--amarelo,#f59e0b);">{{ cont.vazia }} lead(s) você nunca chamou</b> — existe o
+    cadastro, mas não há nenhuma mensagem trocada. Não é falha do sistema: é fila de trabalho.
+    Clique no nome pra abrir o card e falar com a pessoa.
+  </p>
+  {% endif %}
   {% if cont.erro %}
   <p style="font-size:12.5px;color:var(--cinza);margin:14px 0 6px;">
     Os que deram erro aparecem primeiro, com o motivo. Erro aqui quase sempre é
@@ -83,12 +98,12 @@
       <thead><tr><th>Lead</th><th>Conversa</th><th>Estado</th><th>Quando</th><th>Motivo</th></tr></thead>
       <tbody>
         {% for i in itens %}
-        <tr class="{{ 'erro' if i.status == 'erro' }}">
+        <tr class="{{ i.status if i.status in ('erro','vazia') else '' }}">
           <td><a href="/crm?lead={{ i.lead_id }}" style="color:var(--azul);text-decoration:none;">{{ i.lead_nome or ('#' ~ i.lead_id) }}</a></td>
           <td style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--cinza-2);">{{ (i.chat_id or '').split('@')[0] }}</td>
-          <td><span class="pill-st {{ i.status }}">{{ i.status }}</span></td>
+          <td><span class="pill-st {{ i.status }}">{{ 'nunca abordado' if i.status == 'vazia' else i.status }}</span></td>
           <td style="white-space:nowrap;color:var(--cinza-2);font-size:12px;">{{ i.quando or '—' }}</td>
-          <td class="vr-motivo">{{ i.erro or '' }}</td>
+          <td class="{{ 'vr-nunca' if i.status == 'vazia' else 'vr-motivo' }}">{{ i.erro or '' }}</td>
         </tr>
         {% endfor %}
       </tbody>

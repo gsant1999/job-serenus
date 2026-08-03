@@ -34,6 +34,7 @@
       <thead><tr>
         <th>Lote</th><th>Consultor</th><th>Filtro</th>
         <th class="vs-num">Leads</th><th class="vs-num">Lidos</th>
+        <th class="vs-num">Nunca abordados</th>
         <th class="vs-num">Erros</th><th class="vs-num">Na fila</th>
         <th>Estado</th><th>Criada</th>
       </tr></thead>
@@ -45,6 +46,7 @@
           <td style="color:var(--cinza-2); font-size:12px;">{{ l.filtro_txt or '—' }}</td>
           <td class="vs-num">{{ l.total }}</td>
           <td class="vs-num" style="color:var(--teal);">{{ l.lidos }}</td>
+          <td class="vs-num" style="color:{{ 'var(--amarelo,#f59e0b)' if l.vazias else 'var(--cinza-2)' }};">{{ l.vazias }}</td>
           <td class="vs-num" style="color:{{ 'var(--rosa)' if l.erros else 'var(--cinza-2)' }};">{{ l.erros }}</td>
           <td class="vs-num">{{ l.fila }}</td>
           <td><span class="vs-pill {{ l.status }}">{{ l.status }}</span></td>

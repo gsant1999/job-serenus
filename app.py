@@ -19625,9 +19625,17 @@ def api_whatsapp_varredura_item():
         return _wa_cors(jsonify({"ok": False, "erro": "sem item"})), 400
     ok = bool(d.get('ok'))
     erro = str(d.get('erro') or '')[:200]
+    # CONVERSA VAZIA NÃO É ERRO — é notícia. Quer dizer que existe lead no CRM e
+    # NENHUMA mensagem trocada com ele: ninguém chamou essa pessoa. Misturar
+    # isso com falha técnica esconde as duas coisas: quem olha a lista vermelha
+    # procurando defeito acha lead não abordado, e desiste de olhar.
+    # Aqui vira estado próprio, e a tela transforma em fila de trabalho.
+    estado = 'lido' if ok else ('vazia' if 'vazia' in erro.lower() else 'erro')
+    if estado == 'vazia':
+        erro = 'Você nunca trocou mensagem com esta pessoa.'
     conn = db()
     conn.execute("UPDATE varredura_item SET status=?, erro=?, atualizado_em=? WHERE id=?",
-                 ('lido' if ok else 'erro', erro or None, _agora_sp(), item_id))
+                 (estado, erro or None, _agora_sp(), item_id))
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
 
@@ -19644,6 +19652,7 @@ def crm_varreduras():
         rows = conn.execute("""SELECT t.*, u.nome consultor,
             (SELECT COUNT(*) FROM varredura_item i WHERE i.lote_id=t.id AND i.status='lido') lidos,
             (SELECT COUNT(*) FROM varredura_item i WHERE i.lote_id=t.id AND i.status='erro') erros,
+            (SELECT COUNT(*) FROM varredura_item i WHERE i.lote_id=t.id AND i.status='vazia') vazias,
             (SELECT COUNT(*) FROM varredura_item i WHERE i.lote_id=t.id AND i.status IN ('pendente','lendo')) fila
             FROM varredura_lote t LEFT JOIN usuarios u ON u.id=t.consultor_id
             ORDER BY t.id DESC LIMIT 100""").fetchall()
@@ -19668,13 +19677,14 @@ def crm_varredura_painel(lote_id):
     itens = conn.execute("""SELECT i.*, u.nome consultor FROM varredura_item i
         LEFT JOIN varredura_lote t ON t.id=i.lote_id
         LEFT JOIN usuarios u ON u.id=t.consultor_id
-        WHERE i.lote_id=? ORDER BY (i.status='erro') DESC, i.id""", (lote_id,)).fetchall()
+        WHERE i.lote_id=? ORDER BY (i.status='erro') DESC, (i.status='vazia') DESC, i.id""",
+        (lote_id,)).fetchall()
     cons = conn.execute("SELECT nome FROM usuarios WHERE id=?", (lote['consultor_id'],)).fetchone()
     close_db(conn)
     itens = [dict(r) for r in itens]
     for i in itens:
         i['quando'] = _fmt_datahora_br(i.get('atualizado_em'))
-    cont = {'pendente': 0, 'lendo': 0, 'lido': 0, 'erro': 0}
+    cont = {'pendente': 0, 'lendo': 0, 'lido': 0, 'erro': 0, 'vazia': 0}
     for i in itens:
         cont[i['status']] = cont.get(i['status'], 0) + 1
     return render_template('crm_varredura.html', lote=dict(lote), itens=itens, cont=cont,
