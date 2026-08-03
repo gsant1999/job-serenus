@@ -1079,35 +1079,65 @@ function abrirConversaWhatsApp(telefone, chatId, texto) {
   var dig = String(telefone || '').replace(/\D/g, '');
   var comDdi = dig ? (dig.indexOf('55') === 0 ? dig : '55' + dig) : '';
   if (!comDdi && !chatId) return false;
-  if (!window.JOB_EXT_PRESENTE) { _jobWaFallback(comDdi, texto); return true; }
-  var reqId = 'w' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-  var respondeu = false;
-  function ouvir(ev) {
+
+  function pedirChat() {
+    var reqId = 'w' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+    var respondeu = false;
+    function ouvir(ev) {
+      if (ev.source !== window) return;
+      var d = ev.data;
+      if (!d || d.source !== 'JOB_SITE_RESP' || d.reqId !== reqId) return;
+      respondeu = true;
+      window.removeEventListener('message', ouvir);
+      if (!d.ok) _jobWaFallback(comDdi, texto);
+    }
+    window.addEventListener('message', ouvir);
+    window.postMessage({ source: 'JOB_SITE_REQ', tipo: 'abrir_chat', reqId: reqId,
+                         telefone: comDdi, chatId: chatId || '', texto: texto || '' }, '*');
+    // 6s da folga pro caminho de verdade — site → ponte → background → focar a
+    // aba → content script → wa-js abrindo a conversa — que fica mais lento
+    // ainda com a aba do WhatsApp em segundo plano (o Chrome atrasa aba
+    // inativa). O proprio content script desiste do dele em 12s se a extensao
+    // estiver mesmo travada; 6s aqui cobre o caso normal sem deixar quem
+    // clicou plantado no pior caso.
+    setTimeout(function () {
+      if (respondeu) return;
+      window.removeEventListener('message', ouvir);
+      _jobWaFallback(comDdi, texto);
+    }, 6000);
+  }
+
+  if (window.JOB_EXT_PRESENTE) { pedirChat(); return true; }
+
+  // O ANUNCIO DE PRESENCA E SO UMA VEZ, no instante em que o site-bridge.js
+  // carrega — se a pagina registrar o ouvinte um pouco depois disso (ou a
+  // extensao injetar atrasada), o anuncio se perde no ar PRA SEMPRE, e o botao
+  // passa o resto da vida da aba caindo direto no wa.me sem nem tentar,
+  // mesmo com a extensao instalada e funcionando. Foi isso que o Guilherme viu:
+  // nao era o caminho de 6s falhando, era o botao nunca chegando a tentar.
+  // Em vez de confiar cegamente no anuncio, pergunta NA HORA DO CLIQUE.
+  var pingId = 'ping' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  var pingRespondeu = false;
+  function ouvirPing(ev) {
     if (ev.source !== window) return;
     var d = ev.data;
-    if (!d || d.source !== 'JOB_SITE_RESP' || d.reqId !== reqId) return;
-    respondeu = true;
-    window.removeEventListener('message', ouvir);
-    if (!d.ok) _jobWaFallback(comDdi, texto);
+    if (!d || d.source !== 'JOB_SITE_RESP' || d.reqId !== pingId) return;
+    pingRespondeu = true;
+    window.removeEventListener('message', ouvirPing);
+    if (d.ok) { window.JOB_EXT_PRESENTE = true; pedirChat(); }
+    else { _jobWaFallback(comDdi, texto); }
   }
-  window.addEventListener('message', ouvir);
-  window.postMessage({ source: 'JOB_SITE_REQ', tipo: 'abrir_chat', reqId: reqId,
-                       telefone: comDdi, chatId: chatId || '', texto: texto || '' }, '*');
-  // 1800ms ERA CURTO DEMAIS pro caminho de verdade: site → ponte → background
-  // → focar a aba → content script → wa-js abrindo a conversa, tudo isso
-  // ainda mais lento quando a aba do WhatsApp estava em segundo plano (o
-  // Chrome atrasa aba inativa). O QUE ACONTECIA: a extensao ainda ia
-  // responder OK um instante depois, so que o site ja tinha desistido e
-  // aberto o wa.me — daí os DOIS resultados juntos que o Guilherme viu
-  // (a aba certa trocou de conversa por dentro E uma aba nova pipocou por
-  // cima). 6s da folga de sobra pro caminho normal e ainda cobre o pior caso
-  // sem deixar quem clicou plantado — o proprio content script desiste do
-  // dele em 12s se a extensao estiver mesmo travada.
+  window.addEventListener('message', ouvirPing);
+  window.postMessage({ source: 'JOB_SITE_REQ', tipo: 'ping', reqId: pingId }, '*');
+  // A ponte, se existir, ja esta de pe havia muito tempo (a pagina carregou
+  // faz tempo) — responder "estou aqui" e imediato. 500ms so cobre essa
+  // pergunta, nao o caminho inteiro; se vier ok, quem espera de verdade e o
+  // pedirChat() logo em seguida, com os 6s dele.
   setTimeout(function () {
-    if (respondeu) return;
-    window.removeEventListener('message', ouvir);
+    if (pingRespondeu) return;
+    window.removeEventListener('message', ouvirPing);
     _jobWaFallback(comDdi, texto);
-  }, 6000);
+  }, 500);
   return true;
 }
 
