@@ -2667,7 +2667,7 @@
 
   async function _carregarFicha(alvo) {
     let resp;
-    try { resp = await _safeSendMessage(Object.assign({ type: 'ficha_lead' }, alvo)); } catch (e) { resp = null; }
+    try { resp = await _safeSendMessage(Object.assign({ type: 'ficha_lead', chat_id: _chatAberto }, alvo)); } catch (e) { resp = null; }
     if (!resp || !resp.ok) {
       setCorpoSecao('<div class="job-erro">Não consegui abrir a ficha agora. ' +
         '<button class="job-copy" id="job-ficha-retry" style="width:auto;display:inline;padding:4px 10px;margin-left:6px;">Tentar de novo</button></div>');
@@ -2685,6 +2685,7 @@
     _fichaSujo = false;
     const idNovo = (resp.lead && resp.lead.id) || null;
     if (_fichaPend.leadId !== idNovo) _fichaPend = _fichaPendVazio(idNovo);
+    _fichaIgnorada = !!resp.ignorada;
     if (!resp.existe) { _renderFichaSemLead(); return; }
     _renderFicha('dados');
   }
@@ -2695,9 +2696,22 @@
         '<div class="job-cnpj-titulo">Sem lead no JOB</div>' +
         '<div class="job-cnpj-sub">Esse número não está no CRM. Cadastre pra ter etapa, etiquetas e qualificação aqui dentro.</div>' +
         '<button class="job-cnpj-btn" id="job-ficha-criar">Cadastrar este lead</button>' +
+        // AQUI É ONDE ELE MAIS FAZ FALTA, e era exatamente onde faltava: eu
+        // tinha posto o "Não é lead" só no rodapé da FICHA, que só existe
+        // quando já há lead. Na conversa que NÃO é lead — o caso do amigo, do
+        // fornecedor, do colega — a tela era só "Cadastrar", como se a única
+        // resposta possível fosse sim. As duas respostas moram juntas agora.
+        (_fichaIgnorada
+          ? '<div class="job-nao-lead marcada">Marcada como pessoal — o JOB não lê esta conversa.' +
+            '<button type="button" id="job-desmarcar">desfazer</button></div>'
+          : '<button class="job-nao-lead" id="job-nao-lead" ' +
+            'title="Marca esta conversa como pessoal: o JOB nunca lê nem cria lead dela.">' +
+            'Não é lead — nunca ler esta conversa</button>') +
+        '<div class="job-sinc-dica" id="job-ficha-aviso"></div>' +
       '</div>');
     const b = document.getElementById('job-ficha-criar');
     if (b) b.addEventListener('click', () => abrirSecaoNovoLead());
+    _ligarNaoLead({});
   }
 
   // Abas em vez de rolagem longa: o consultor está no meio de uma conversa, e o
@@ -2869,6 +2883,9 @@
   _registrarLoop(setInterval(_tickCronFicha, 1000));
 
   let _chatAberto = '';
+  // Se a conversa aberta ja foi marcada como pessoal. Vem do servidor com a
+  // ficha — o botao precisa dizer 'ja esta marcada', nao se oferecer de novo.
+  let _fichaIgnorada = false;
 
   function _blocoVinculoChat(f, l) {
     const chats = (f && f.wa_chats) || [];
@@ -2925,6 +2942,18 @@
   // querer o proprio lead ia passar dias sem entender por que ele "sumiu" — a
   // frase do confirm diz exatamente isso, e onde desfazer.
   function _ligarNaoLead(l) {
+    // DESFAZER TEM QUE EXISTIR. Marcar errado e facil (o cliente que manda do
+    // numero pessoal), e sem volta o consultor perde o lead sem entender.
+    const d = document.getElementById('job-desmarcar');
+    if (d) d.addEventListener('click', async () => {
+      d.disabled = true; d.textContent = 'desfazendo…';
+      let tel = '';
+      try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+      const r = await _safeSendMessage({ type: 'ignorar_conversa', chat_id: _chatAberto,
+                                         telefone: tel, desmarcar: true }).catch(() => null);
+      if (r && r.ok) { _fichaIgnorada = false; abrirSecaoFicha(); }
+      else { d.disabled = false; d.textContent = 'desfazer'; }
+    });
     const b = document.getElementById('job-nao-lead');
     if (!b) return;
     b.addEventListener('click', async () => {
@@ -2991,9 +3020,11 @@
           // ao lado do Salvar porque e a mesma decisao, invertida: "isto entra"
           // ou "isto nunca entra". Discreto de proposito — e acao rara, mas tem
           // que estar onde a pessoa ja esta olhando quando percebe o engano.
-          '<button class="job-nao-lead" id="job-nao-lead" ' +
-            'title="Marca esta conversa como pessoal: o JOB para de ler e nunca mais cria lead dela.">' +
-            'Não é lead</button>' +
+          (_fichaIgnorada
+            ? '<div class="job-nao-lead marcada">Marcada como pessoal<button type="button" id="job-desmarcar">desfazer</button></div>'
+            : '<button class="job-nao-lead" id="job-nao-lead" ' +
+              'title="Marca esta conversa como pessoal: o JOB para de ler e nunca mais cria lead dela.">' +
+              'Não é lead</button>') +
           '<span class="job-ficha-aviso" id="job-ficha-aviso"></span>' +
         '</div>' +
         (aba === 'dados' ? _blocoNomeContato() : '') +

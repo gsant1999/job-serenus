@@ -546,8 +546,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === 'ficha_lead') {
-    const q = msg.lead_id ? ('lead_id=' + encodeURIComponent(msg.lead_id))
-                          : ('telefone=' + encodeURIComponent(msg.telefone || ''));
+    let q = msg.lead_id ? ('lead_id=' + encodeURIComponent(msg.lead_id))
+                        : ('telefone=' + encodeURIComponent(msg.telefone || ''));
+    // O chat_id vai junto: conversa em @lid nao tem telefone, e e justamente ela
+    // que precisa ser reconhecida como 'ja marcada como pessoal'.
+    if (msg.chat_id) q += '&chat_id=' + encodeURIComponent(msg.chat_id);
     chamarJob('/api/whatsapp/lead/ficha?' + q, 'GET', null, 15000).then(sendResponse);
     return true;
   }

@@ -19919,9 +19919,21 @@ def api_whatsapp_lead_ficha():
         return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     tel = _normalizar_telefone(request.args.get('telefone', ''))
     lid = request.args.get('lead_id', type=int)
+    chat_id = (request.args.get('chat_id') or '').strip()[:120]
     if not tel and not lid:
         return _wa_cors(jsonify({"ok": False, "erro": "telefone ou lead_id ausente"})), 400
     conn = db()
+    # JA MARCADA COMO PESSOAL? Sem isto o consultor marca, sai da conversa,
+    # volta e ve o botao como se nada tivesse acontecido — e marca de novo, sem
+    # saber se da primeira vez pegou.
+    ignorada = False
+    try:
+        ignorada = bool(conn.execute(
+            "SELECT 1 FROM wa_conversa_ignorada WHERE chat_id=? OR (telefone_norm IS NOT NULL "
+            "AND telefone_norm <> '' AND telefone_norm=?)",
+            (chat_id or '__nada__', tel or '__nada__')).fetchone())
+    except Exception:
+        pass
     try:
         if lid:
             lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
@@ -19945,7 +19957,7 @@ def api_whatsapp_lead_ficha():
             # tem que explicar.
             "motivos_perda": _motivos_perda_lista(conn),
             "motivos_ajuda": MOTIVO_PERDA_AJUDA,
-                "ok": True, "existe": False, "telefone_norm": tel,
+                "ok": True, "existe": False, "telefone_norm": tel, "ignorada": ignorada,
                 "etapas": etapas, "quadros": quadros_lista,
                 "etiquetas_todas": etiquetas_todas,
                 "campos_def": campos_def, "origens": _WA_ORIGENS_LEAD}))
@@ -19960,7 +19972,7 @@ def api_whatsapp_lead_ficha():
             WHERE lead_id=? ORDER BY id DESC LIMIT 30""", (lead['id'],)).fetchall()]
         sla = conn.execute("SELECT sla_dias FROM crm_etapas WHERE slug=?", (lead['etapa'] or '',)).fetchone()
         payload = {
-            "ok": True, "existe": True,
+            "ok": True, "existe": True, "ignorada": ignorada,
             "lead": lead_d,
             "responsavel_nome": resp_nome,
             "etapas": etapas,
