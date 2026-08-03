@@ -22687,10 +22687,14 @@ def crm_lead_novo():
     eh_admin = session.get('perfil') == 'admin'
     resp_id = int(d.get('responsavel_id') or uid) if eh_admin else uid
     conn = db()
-    conn.execute("""INSERT INTO crm_leads (nome, telefone, email, empresa, origem,
+    # telefone_norm JUNTO, sempre. Ele e a chave que reconhece "ja e a mesma
+    # pessoa": sem ele o lead fica invisivel pro casamento e a extensao cria
+    # outro do zero. Foi assim que um unico cliente virou tres cards.
+    conn.execute("""INSERT INTO crm_leads (nome, telefone, telefone_norm, email, empresa, origem,
                     etapa, responsavel_id, valor_estimado, observacoes)
-                    VALUES (?,?,?,?,?,?,?,?,?)""",
-        (d.get('nome'), d.get('telefone'), d.get('email'), d.get('empresa'),
+                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (d.get('nome'), d.get('telefone'), _normalizar_telefone(d.get('telefone') or '') or None,
+         d.get('email'), d.get('empresa'),
          d.get('origem', 'manual'), d.get('etapa', 'lead_novo'), resp_id,
          float(d.get('valor_estimado') or 0) or None, d.get('observacoes')))
     lead_id = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE=="postgres" else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
@@ -23452,6 +23456,11 @@ def crm_lead_editar(lid):
     # aviso do que faltava preencher.
     etapa = d.get('etapa', lead['etapa'])
 
+    # O NUMERO NORMALIZADO ANDA COLADO NO TELEFONE. Editar o telefone e deixar o
+    # telefone_norm velho (ou vazio) e o que fazia o lead sumir do casamento: a
+    # extensao nao achava mais e criava outro card da mesma pessoa.
+    tel_norm = _normalizar_telefone(telefone or '') or None
+
     # Detectar mudanças para timeline
     changes = []
     if nome != lead['nome']: changes.append(f'Nome: "{lead["nome"]}" → "{nome}"')
@@ -23479,18 +23488,18 @@ def crm_lead_editar(lid):
         sub_status = None
         if lead['sub_status']:
             changes.append(f'Sub-status limpo (mudou de etapa)')
-        conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, email=?, empresa=?,
+        conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, telefone_norm=?, email=?, empresa=?,
                         valor_estimado=?, observacoes=?, origem=?, sub_status=?,
                         responsavel_id=?, etapa=?, atualizado_em=?, avancou_em=?
                         WHERE id=?""",
-            (nome, telefone, email, empresa, valor, observacoes, origem, sub_status,
+            (nome, telefone, tel_norm, email, empresa, valor, observacoes, origem, sub_status,
              responsavel_id, etapa, _agora_sp(), _agora_sp(), lid))
     else:
-        conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, email=?, empresa=?,
+        conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, telefone_norm=?, email=?, empresa=?,
                         valor_estimado=?, observacoes=?, origem=?, sub_status=?,
                         responsavel_id=?, etapa=?, atualizado_em=?
                         WHERE id=?""",
-            (nome, telefone, email, empresa, valor, observacoes, origem, sub_status,
+            (nome, telefone, tel_norm, email, empresa, valor, observacoes, origem, sub_status,
              responsavel_id, etapa, _agora_sp(), lid))
 
     if changes:
@@ -33035,6 +33044,51 @@ _TABELAS_TELEFONE_NORM = ['crm_leads', 'contatos_frios', 'whatsapp_analises',
                           'campanha_contato', 'wa_chat_lead', 'lead_notas']
 
 
+def _backfill_telefone_norm_vazio():
+    """Preenche telefone_norm a partir do telefone, onde ele ficou vazio.
+
+    O backfill canonico ao lado recalcula telefone_norm a PARTIR DELE MESMO —
+    entao quem estava vazio continuava vazio, e ficou de fora justamente de quem
+    mais precisava. Lead com telefone e sem telefone_norm e invisivel pro
+    casamento: a extensao nao acha e cria outro card da mesma pessoa. Foi assim
+    que um cliente virou tres leads.
+
+    Nao mescla nada e nao inventa numero: so escreve a forma canonica do que ja
+    estava gravado. Rodar duas vezes nao muda nada."""
+    conn = None
+    try:
+        conn = db()
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        if conn.execute("SELECT 1 FROM meta_flags WHERE k='telefone_norm_vazio_20260803'").fetchone():
+            return
+        n = 0
+        for tab in _TABELAS_TELEFONE_NORM:
+            try:
+                rows = conn.execute(
+                    f"SELECT id, telefone FROM {tab} "
+                    "WHERE (telefone_norm IS NULL OR telefone_norm='') "
+                    "AND telefone IS NOT NULL AND telefone <> ''").fetchall()
+            except Exception:
+                continue          # tabela sem 'id' ou sem 'telefone': segue
+            for r in rows:
+                novo = _normalizar_telefone(r['telefone'] or '')
+                if novo:
+                    n += conn.execute(f"UPDATE {tab} SET telefone_norm=? WHERE id=?",
+                                      (novo, r['id'])).rowcount or 0
+        conn.execute("INSERT INTO meta_flags (k) VALUES ('telefone_norm_vazio_20260803')")
+        conn.commit()
+        print(f"[TELEFONE_NORM_VAZIO] {n} registro(s) passaram a ser reconheciveis")
+    except Exception as e:
+        if conn is not None:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[TELEFONE_NORM_VAZIO] migração pulada: {e}")
+    finally:
+        if conn is not None:
+            try: close_db(conn)
+            except Exception: pass
+
+
 def _backfill_telefone_canonico():
     conn = None
     try:
@@ -33108,6 +33162,8 @@ def _seed_etiquetas_acao_boot():
 _seed_etiquetas_acao_boot()
 
 _backfill_telefone_canonico()
+# Depois do canonico: ele padroniza o que existe, este preenche o que faltava.
+_backfill_telefone_norm_vazio()
 
 
 # ─── BACKFILL das notas da extensão ↔ lead (31/07/2026) ──────────────────────
