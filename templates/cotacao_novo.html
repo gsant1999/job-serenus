@@ -570,7 +570,7 @@
           if (tipoEscolhido === t) return;   // já é este: clicar de novo não faz nada
           tipoEscolhido = t;
           montarSegTipo();
-          recomecar();
+          recomecar(false);      // mantém o que já foi marcado em outro tipo
         };
       }
       c.appendChild(b);
@@ -582,9 +582,9 @@
       el('segRamo').querySelectorAll('button').forEach(function (x) { x.classList.remove('on'); });
       b.classList.add('on');
       ramo = b.dataset.v;
-      tipoEscolhido = '';
+      tipoEscolhido = tipoAtivo() || '';
       montarSegTipo();
-      recomecar();
+      recomecar(false);
     };
   });
 
@@ -644,7 +644,7 @@
   el('btVidas').onclick = function () { el('janelaVidas').className = 'cv-janela ver'; };
   el('fecharVidas').onclick = el('okVidas').onclick = function () {
     el('janelaVidas').className = 'cv-janela';
-    recomecar();
+    recomecar(false);   // vidas mudam o preço, não o plano: seleção continua
   };
   el('janelaVidas').addEventListener('click', function (ev) {
     if (ev.target === el('janelaVidas')) el('janelaVidas').className = 'cv-janela';
@@ -709,11 +709,12 @@
         var b = document.createElement('button');
         b.type = 'button'; b.textContent = nome;
         b.onclick = function () {
+          var trocou = (nome !== cidadeEscolhida);
           cidadeEscolhida = nome;
           el('cidade').value = nome;
           box.className = 'cv-sug';
           pintarFixar();
-          recomecar();
+          recomecar(trocou);      // cidade nova invalida os planos marcados
           atualizarBotao();
         };
         box.appendChild(b);
@@ -742,8 +743,18 @@
     return { cidade: cidadeEscolhida, modalidade: modalidadeAtiva(), vidas: vidasLista() };
   }
 
-  function recomecar() {
-    selecionados = []; planosPorOperadora = {}; operadoras = [];
+  // Trocar de TIPO não apaga o que já foi marcado.
+  //
+  // Na escolha, um tipo por vez — misturar produto de PF com PME na mesma
+  // lista confunde. Mas a cotação FINAL pode ter os dois, pro consultor
+  // apresentar as duas soluções ao cliente e explicar. Então a seleção
+  // atravessa a troca de tipo; cada plano lembra em qual foi escolhido.
+  //
+  // Cidade é outra história: plano de Campinas não existe em Sorocaba. Aí
+  // limpa, senão a cotação sairia pedindo preço de plano que não é de lá.
+  function recomecar(limparSelecao) {
+    if (limparSelecao) selecionados = [];
+    planosPorOperadora = {}; operadoras = [];
     opAtual = null; produtoAtual = null; linhaAtual = null; nivel = 'operadoras';
     desenharSelecao();
     el('resTopo').style.display = 'none';
@@ -765,7 +776,13 @@
   }
   function alternar(pl) {
     var i = selecionados.findIndex(function (x) { return chavePlano(x) === chavePlano(pl); });
-    if (i >= 0) selecionados.splice(i, 1); else selecionados.push(pl);
+    if (i >= 0) selecionados.splice(i, 1);
+    else {
+      // Cada plano lembra em que tipo foi escolhido: é com isso que a cotação
+      // final pergunta o preço de cada um na modalidade certa.
+      selecionados.push(Object.assign({}, pl, {
+        _tipo: nomeCompleto(tipoAtivo() || ''), _modalidade: modalidadeAtiva() }));
+    }
     desenharNav(); desenharSelecao(); atualizarBotao();
   }
   function copartEtiqueta(tb) {
@@ -966,7 +983,8 @@
     selecionados.forEach(function (pl) {
       var e = document.createElement('span');
       e.className = 'marcado';
-      e.innerHTML = esc(((pl.operadora || {}).nome || '') + ' · ' + ((pl.plano || {}).nome || '')) +
+      e.innerHTML = '<b style="font-weight:700">' + esc(pl._tipo || '') + '</b> ' +
+        esc(((pl.operadora || {}).nome || '') + ' · ' + ((pl.plano || {}).nome || '')) +
         '<button type="button" title="Tirar">×</button>';
       e.querySelector('button').onclick = function () { alternar(pl); };
       lista.appendChild(e);
@@ -1073,7 +1091,14 @@
 
     // Os tipos marcados, ou o que estiver ativo. Cada um roda a sua rodada e o
     // resultado vem junto, com etiqueta de qual tipo é cada linha.
-    var tipos = [tipoAtivo()];
+    // Agrupa por modalidade: cada plano é cotado no tipo em que foi escolhido.
+    // Uma rodada por grupo, e o resultado sai numa lista só — que é a mescla
+    // que interessa, a da proposta pro cliente.
+    var grupos = {};
+    selecionados.forEach(function (pl) {
+      var k = String(pl._modalidade == null ? modalidadeAtiva() : pl._modalidade);
+      (grupos[k] = grupos[k] || []).push(pl);
+    });
     var feitos = 0, total = selecionados.length;
     var aoAndar = function () {
       feitos++;
@@ -1081,12 +1106,12 @@
     };
 
     var todos = [], url = '', erro = '', detalheErro = null;
-    for (var i = 0; i < tipos.length; i++) {
+    var chaves = Object.keys(grupos);
+    for (var i = 0; i < chaves.length; i++) {
       var b = base();
-      b.modalidade = codigoDe(tipos[i]);
-      b._tipo = nomeCompleto(tipos[i]);
-      if (b.modalidade == null) continue;
-      var r = await cotarTipo(selecionados, b, aoAndar, frentes);
+      b.modalidade = Number(chaves[i]);
+      b._tipo = (grupos[chaves[i]][0] || {})._tipo || '';
+      var r = await cotarTipo(grupos[chaves[i]], b, aoAndar, frentes);
       if (r.erro) { erro = r.erro; detalheErro = r.detalhe; break; }
       url = url || r.url;
       todos = todos.concat(r.planos);
@@ -1223,7 +1248,7 @@
   montarSegTipo();
   montarFaixas();
   pintarFixar();
-  recomecar();
+  recomecar(true);
   if (SALVA) desenhar({ planos: SALVA, ms: 0, planosCotados: SALVA.length });
   conferirLigacao();
 })();
