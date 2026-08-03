@@ -275,6 +275,12 @@
   .ficha-header-info { flex:1; min-width:0; }
   .ficha-nome-edit { font-size:17px; font-weight:700; color:var(--texto); background:transparent; border:none; border-bottom:2px solid transparent; width:100%; outline:none; padding:2px 0; transition:.2s; }
   .ficha-nome-edit:focus { border-bottom-color:var(--azul); }
+  .ficha-wpp { display:flex; align-items:center; justify-content:center; gap:8px;
+               width:100%; margin:14px 0 4px; padding:11px 14px; border:none; border-radius:9px;
+               background:#25D366; color:#fff; font-size:13.5px; font-weight:700;
+               cursor:pointer; transition:.15s; }
+  .ficha-wpp:hover { background:#1fbd5a; }
+  .ficha-wpp:disabled { background:var(--panel-3); color:var(--cinza-2); cursor:not-allowed; }
   .ficha-subheader { display:flex; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap; }
   .ficha-etapa-badge { font-size:11px; padding:3px 10px; border-radius:12px; font-weight:600; }
   .ficha-campos { padding:16px 20px; flex:1; }
@@ -854,6 +860,14 @@
         </div>
       </div>
 
+      <!-- A CONVERSA E A ACAO MAIS FEITA DESTA TELA e estava escondida num
+           icone pequeno da lista. Aqui ela e a primeira coisa depois do nome:
+           quem abre a ficha quase sempre abre pra falar com a pessoa. -->
+      <button type="button" class="ficha-wpp" id="ficha-wpp" onclick="wppDaFicha()">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.91-4.45 9.91-9.91C21.96 6.45 17.5 2 12.04 2zm5.8 14.16c-.24.68-1.2 1.26-1.97 1.42-.53.11-1.21.2-3.52-.75-2.95-1.22-4.85-4.22-5-4.42-.14-.2-1.19-1.58-1.19-3.02s.75-2.14 1.02-2.43c.27-.29.59-.37.78-.37.19 0 .39 0 .56.01.18.01.42-.7.66.5.24.57.81 1.98.88 2.12.07.14.12.31.02.5-.09.2-.14.32-.28.49-.14.17-.29.38-.42.51-.14.14-.28.29-.12.57.16.28.72 1.19 1.55 1.93 1.07.95 1.97 1.25 2.25 1.39.28.14.44.12.6-.07.16-.19.69-.81.88-1.08.19-.28.37-.23.63-.14.26.09 1.66.78 1.94.93.28.14.47.21.54.32.07.12.07.67-.17 1.35z"/></svg>
+        <span>Abrir conversa no WhatsApp</span>
+      </button>
+
       <div class="ficha-campos">
         <div class="campo-grupo">
           <div class="campo-label">Telefone / WhatsApp</div>
@@ -1408,6 +1422,7 @@ async function abrirFicha(id){
 
   document.getElementById('ficha-nome').value=d.lead.nome||'';
   document.getElementById('ficha-telefone').value=d.lead.telefone||'';
+  _fichaWppAtualizar();
   document.getElementById('ficha-email').value=d.lead.email||'';
   document.getElementById('ficha-empresa').value=d.lead.empresa||'';
   document.getElementById('ficha-valor').value=d.lead.valor_estimado?Number(d.lead.valor_estimado).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
@@ -2176,6 +2191,27 @@ function _acompanharFilaWpp(filaId, btn, status, tentativa){
 function wppRapido(tel, chatId){
   if(!abrirConversaWhatsApp(tel, chatId)) toast('Lead sem telefone cadastrado','err');
 }
+// O botao em destaque da ficha usa o campo de telefone AO VIVO, nao o do
+// lead carregado — se o consultor acabou de corrigir um numero digitado
+// errado, e pra esse numero corrigido que a conversa tem que abrir.
+function wppDaFicha(){
+  const tel = (document.getElementById('ficha-telefone').value||'').trim();
+  if(!abrirConversaWhatsApp(tel, (_leadAtual&&_leadAtual.chat_id)||''))
+    toast('Lead sem telefone cadastrado','err');
+}
+// Sem numero, o botao apagado e o title ja dizem o motivo — melhor que deixar
+// clicar e so entao mostrar o erro.
+function _fichaWppAtualizar(){
+  const tel=(document.getElementById('ficha-telefone').value||'').replace(/\D/g,'');
+  const btn=document.getElementById('ficha-wpp');
+  if(!btn) return;
+  btn.disabled = tel.length < 10;
+  btn.title = btn.disabled ? 'Preencha o telefone pra abrir a conversa' : '';
+}
+document.addEventListener('DOMContentLoaded', ()=>{
+  const el=document.getElementById('ficha-telefone');
+  if(el) el.addEventListener('input', _fichaWppAtualizar);
+});
 
 async function uploadAnexo(files){
   if(!_leadAtual||!files.length) return;
