@@ -415,6 +415,12 @@
   .quadro-qtd { font-size:11px; font-weight:700; background:var(--panel-3); color:var(--cinza-2);
                 padding:1px 7px; border-radius:9px; }
   .quadro-aba.on .quadro-qtd { background:var(--qc, var(--azul)); color:#0b1220; }
+  .quadro-exportar { display:inline-flex; align-items:center; gap:6px; text-decoration:none;
+                      padding:6px 12px; border-radius:8px; border:1px solid var(--borda);
+                      color:var(--cinza); font-size:12.5px; font-weight:600; margin-left:auto;
+                      transition:.15s; }
+  .quadro-exportar:hover { color:var(--texto); border-color:var(--verde); background:var(--verde-soft); }
+  @media (max-width:640px) { .quadro-exportar { margin-left:0; } }
   .btn-config-funil { display:inline-flex; align-items:center; gap:6px; background:rgba(99,102,241,.14);
                       border:1px solid rgba(99,102,241,.45); color:#a5b4fc; border-radius:8px;
                       padding:6px 13px; font-size:12px; font-weight:600; cursor:pointer; transition:.15s; }
@@ -520,10 +526,12 @@
   </div>
 </div>
 
-{# Abas de quadro: só aparecem se houver mais de um. Com um quadro só, uma aba
-   solitária seria ruído puro. #}
-{% if quadros|length > 1 %}
+{# Abas de quadro (só aparecem se houver mais de um — com um só, uma aba
+   solitária seria ruído puro) e o download em Excel, sempre presente: cada
+   aba baixa o funil que ela mostra, com os filtros ativos, não a base
+   inteira disfarçada. #}
 <div class="quadro-abas">
+  {% if quadros|length > 1 %}
   {% for q in quadros %}
   <a class="quadro-aba {{ 'on' if q.slug == quadro_atual else '' }}"
      href="?quadro={{ q.slug }}{{ ('&' ~ qs_filtros) if qs_filtros else '' }}"
@@ -532,10 +540,16 @@
     <span class="quadro-qtd">{{ quadro_total.get(q.slug, 0) }}</span>
   </a>
   {% endfor %}
+  {% endif %}
+  <a class="quadro-exportar"
+     href="/crm/exportar?quadro={{ quadro_atual }}{{ ('&' ~ qs_filtros) if qs_filtros else '' }}"
+     title="Baixa em Excel os leads deste funil, com os filtros que estão ativos agora">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    Baixar Excel
+  </a>
 </div>
-{% endif %}
 
-<div class="page" style="padding-right:0;{% if quadros|length > 1 %} padding-top:12px;{% endif %}">
+<div class="page" style="padding-right:0; padding-top:12px;">
 
   {# A FILA DE TRABALHO mora aqui, e nao no painel. E o que trava o funil HOJE,
      e trabalho tem que estar onde a pessoa ja esta o dia inteiro. So aparece

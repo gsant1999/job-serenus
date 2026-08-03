@@ -22159,65 +22159,12 @@ def carregar_status_crm(conn=None):
         ]
     return status
 
-@app.route('/crm')
-@login_required
-def crm():
-    conn = db()
-    uid = session['user_id']
-    eh_admin = session.get('perfil') == 'admin'
-
-    # ── Filtros ──
-    f_etapa     = request.args.get('etapa', '').strip()
-    f_consultor = request.args.get('consultor', '').strip()  # id do responsável
-    f_origem    = request.args.get('origem', '').strip()
-    f_data_de   = request.args.get('data_de', '').strip()     # YYYY-MM-DD
-    f_data_ate  = request.args.get('data_ate', '').strip()    # YYYY-MM-DD
-    f_busca     = request.args.get('q', '').strip()
-    f_externo   = request.args.get('externo', '').strip()  # consultor externo (não cadastrado)
-    f_sub_status = request.args.get('sub_status', '').strip()
-    f_etiqueta  = request.args.get('etiqueta', '').strip()   # id da etiqueta, ou 'sem'
-    f_cor       = request.args.get('cor', '').strip()        # atrasado | atencao | no_prazo | fora_do_prazo
-    # Filas de trabalho vindas do painel. Numero que nao leva a lugar nenhum e
-    # decoracao: cada card do bloco 'Precisa de acao' abre a lista dele aqui.
-    f_sem_resp  = request.args.get('sem_responsavel', '') == '1'
-    f_sem_cont  = request.args.get('sem_contato', '') == '1'
-    f_parados   = request.args.get('parados', '') == '1'
-    # Base fria fora, com a MESMA definicao do painel — senao o card diz 8 e a
-    # lista abre 118, e o consultor deixa de confiar nos dois.
-    f_nao_frio  = request.args.get('nao_frio', '') == '1'
-    # So os ABERTOS: o painel nao conta ganho nem perdido nas filas de trabalho —
-    # venda fechada nao esta 'parada', esta pronta.
-    f_abertos   = request.args.get('abertos', '') == '1'
-    # Deep-link pra abrir uma ficha específica ao carregar a página (notificação
-    # do sino, WhatsApp, agenda, etc. montam /crm?lead=<id> — antes esse parâmetro
-    # era lido em vários lugares mas NUNCA consumido aqui nem no JS, então todo
-    # link "específico" caía no quadro geral). Só o id (int), nunca entra no
-    # WHERE do kanban — o JS busca a ficha via fetch('/crm/lead/<id>') direto,
-    # funciona mesmo se o card não estiver renderizado na coluna/página atual.
-    try:
-        f_lead = int(request.args.get('lead', '') or 0) or None
-    except (TypeError, ValueError):
-        f_lead = None
-
-    # Lista de consultores para o filtro (admin vê todos os usuários ativos)
-    responsaveis = []
-    consultores_externos = []
-    if eh_admin:
-        responsaveis = conn.execute(
-            "SELECT id, nome, perfil FROM usuarios WHERE ativo=1 ORDER BY nome"
-        ).fetchall()
-        # Consultores externos que aparecem na planilha mas não são usuários
-        try:
-            ext = conn.execute("""
-                SELECT DISTINCT consultor_externo FROM crm_leads
-                WHERE consultor_externo IS NOT NULL AND consultor_externo != ''
-                ORDER BY consultor_externo
-            """).fetchall()
-            consultores_externos = [r['consultor_externo'] if hasattr(r,'keys') else r[0] for r in ext]
-        except Exception:
-            pass
-
-    # Monta query
+def _crm_montar_query(uid, eh_admin, f_etapa, f_consultor, f_origem, f_data_de, f_data_ate,
+                       f_busca, f_externo, f_sub_status, f_etiqueta, f_sem_resp, f_sem_cont,
+                       f_parados, f_nao_frio, f_abertos):
+    """O WHERE do funil — extraído do /crm pra ser o MESMO usado na exportação em
+    Excel. Sem isso o botão de baixar corria o risco de mostrar um total e
+    entregar outro, cada rota interpretando os filtros do seu jeito."""
     q = """SELECT l.*, u.nome as responsavel_nome
            FROM crm_leads l
            LEFT JOIN usuarios u ON u.id = l.responsavel_id
@@ -22340,7 +22287,93 @@ def crm():
         q += " AND (" + campos + ")"
 
     q += " ORDER BY l.atualizado_em DESC"
-    leads = conn.execute(q, params).fetchall()
+    return q, params
+
+
+def _crm_ler_filtros_url():
+    """Os mesmos nomes de querystring que o /crm lê — usado pela exportação pra
+    ler filtro igual, sem reinventar."""
+    return {
+        'etapa': request.args.get('etapa', '').strip(),
+        'consultor': request.args.get('consultor', '').strip(),
+        'origem': request.args.get('origem', '').strip(),
+        'data_de': request.args.get('data_de', '').strip(),
+        'data_ate': request.args.get('data_ate', '').strip(),
+        'busca': request.args.get('q', '').strip(),
+        'externo': request.args.get('externo', '').strip(),
+        'sub_status': request.args.get('sub_status', '').strip(),
+        'etiqueta': request.args.get('etiqueta', '').strip(),
+        'cor': request.args.get('cor', '').strip(),
+        'sem_resp': request.args.get('sem_responsavel', '') == '1',
+        'sem_cont': request.args.get('sem_contato', '') == '1',
+        'parados': request.args.get('parados', '') == '1',
+        'nao_frio': request.args.get('nao_frio', '') == '1',
+        'abertos': request.args.get('abertos', '') == '1',
+    }
+
+
+@app.route('/crm')
+@login_required
+def crm():
+    conn = db()
+    uid = session['user_id']
+    eh_admin = session.get('perfil') == 'admin'
+
+    # ── Filtros ──
+    f_etapa     = request.args.get('etapa', '').strip()
+    f_consultor = request.args.get('consultor', '').strip()  # id do responsável
+    f_origem    = request.args.get('origem', '').strip()
+    f_data_de   = request.args.get('data_de', '').strip()     # YYYY-MM-DD
+    f_data_ate  = request.args.get('data_ate', '').strip()    # YYYY-MM-DD
+    f_busca     = request.args.get('q', '').strip()
+    f_externo   = request.args.get('externo', '').strip()  # consultor externo (não cadastrado)
+    f_sub_status = request.args.get('sub_status', '').strip()
+    f_etiqueta  = request.args.get('etiqueta', '').strip()   # id da etiqueta, ou 'sem'
+    f_cor       = request.args.get('cor', '').strip()        # atrasado | atencao | no_prazo | fora_do_prazo
+    # Filas de trabalho vindas do painel. Numero que nao leva a lugar nenhum e
+    # decoracao: cada card do bloco 'Precisa de acao' abre a lista dele aqui.
+    f_sem_resp  = request.args.get('sem_responsavel', '') == '1'
+    f_sem_cont  = request.args.get('sem_contato', '') == '1'
+    f_parados   = request.args.get('parados', '') == '1'
+    # Base fria fora, com a MESMA definicao do painel — senao o card diz 8 e a
+    # lista abre 118, e o consultor deixa de confiar nos dois.
+    f_nao_frio  = request.args.get('nao_frio', '') == '1'
+    # So os ABERTOS: o painel nao conta ganho nem perdido nas filas de trabalho —
+    # venda fechada nao esta 'parada', esta pronta.
+    f_abertos   = request.args.get('abertos', '') == '1'
+    # Deep-link pra abrir uma ficha específica ao carregar a página (notificação
+    # do sino, WhatsApp, agenda, etc. montam /crm?lead=<id> — antes esse parâmetro
+    # era lido em vários lugares mas NUNCA consumido aqui nem no JS, então todo
+    # link "específico" caía no quadro geral). Só o id (int), nunca entra no
+    # WHERE do kanban — o JS busca a ficha via fetch('/crm/lead/<id>') direto,
+    # funciona mesmo se o card não estiver renderizado na coluna/página atual.
+    try:
+        f_lead = int(request.args.get('lead', '') or 0) or None
+    except (TypeError, ValueError):
+        f_lead = None
+
+    # Lista de consultores para o filtro (admin vê todos os usuários ativos)
+    responsaveis = []
+    consultores_externos = []
+    if eh_admin:
+        responsaveis = conn.execute(
+            "SELECT id, nome, perfil FROM usuarios WHERE ativo=1 ORDER BY nome"
+        ).fetchall()
+        # Consultores externos que aparecem na planilha mas não são usuários
+        try:
+            ext = conn.execute("""
+                SELECT DISTINCT consultor_externo FROM crm_leads
+                WHERE consultor_externo IS NOT NULL AND consultor_externo != ''
+                ORDER BY consultor_externo
+            """).fetchall()
+            consultores_externos = [r['consultor_externo'] if hasattr(r,'keys') else r[0] for r in ext]
+        except Exception:
+            pass
+
+    leads = conn.execute(*_crm_montar_query(
+        uid, eh_admin, f_etapa, f_consultor, f_origem, f_data_de, f_data_ate,
+        f_busca, f_externo, f_sub_status, f_etiqueta, f_sem_resp, f_sem_cont,
+        f_parados, f_nao_frio, f_abertos)).fetchall()
 
     # Etapas do QUADRO selecionado. Quadro inválido cai no primeiro em vez de
     # mostrar um kanban vazio — link velho no favorito não pode virar tela em branco.
@@ -22514,6 +22547,86 @@ def crm():
                            quadros=quadros, quadro_atual=f_quadro, quadro_total=quadro_total,
                            qs_filtros=qs_filtros, etapas_todas=carregar_etapas_crm(),
                            wa_do_lead=wa_do_lead)
+
+
+@app.route('/crm/exportar')
+@login_required
+def crm_exportar():
+    """Excel com os leads do quadro (Funil Comercial ou Nutrição) aberto na
+    tela, respeitando os MESMOS filtros ativos — baixa o que a pessoa esta
+    vendo, não a base inteira disfarçada."""
+    import openpyxl, io as _io
+    conn = db()
+    uid = session['user_id']
+    eh_admin = session.get('perfil') == 'admin'
+    fl = _crm_ler_filtros_url()
+
+    leads = conn.execute(*_crm_montar_query(
+        uid, eh_admin, fl['etapa'], fl['consultor'], fl['origem'], fl['data_de'], fl['data_ate'],
+        fl['busca'], fl['externo'], fl['sub_status'], fl['etiqueta'], fl['sem_resp'], fl['sem_cont'],
+        fl['parados'], fl['nao_frio'], fl['abertos'])).fetchall()
+
+    quadros = carregar_quadros_crm(conn)
+    f_quadro = (request.args.get('quadro') or '').strip()
+    if f_quadro not in [q['slug'] for q in quadros]:
+        f_quadro = quadros[0]['slug']
+    quadro_nome = next((q['nome'] for q in quadros if q['slug'] == f_quadro), f_quadro)
+    etapas_do_quadro = {e['id']: e['nome'] for e in carregar_etapas_crm(conn, quadro=f_quadro)}
+    # Mesma regra do kanban: só entra quem pertence a ESTE quadro — sem isso um
+    # lead do Comercial apareceria também na planilha de Nutrição.
+    leads = [l for l in leads if (l['etapa'] or '') in etapas_do_quadro]
+
+    if fl['cor']:
+        sla_por_etapa = {}
+        try:
+            for r in conn.execute("SELECT slug, sla_dias FROM crm_etapas").fetchall():
+                sla_por_etapa[r['slug']] = r['sla_dias']
+        except Exception:
+            pass
+        def _cor_bate(lead):
+            s = _saude_card(lead['avancou_em'], sla_por_etapa.get(lead['etapa'] or ''), lead['atualizado_em'])
+            return s['nivel'] in ('atencao', 'atrasado') if fl['cor'] == 'fora_do_prazo' else s['nivel'] == fl['cor']
+        leads = [l for l in leads if _cor_bate(l)]
+
+    etiquetas_lead = _etiquetas_dos_leads(conn, [l['id'] for l in leads])
+    responsavel_de = {}
+    if leads:
+        try:
+            for r in conn.execute("SELECT id, nome FROM usuarios").fetchall():
+                responsavel_de[r['id']] = r['nome']
+        except Exception:
+            pass
+    close_db(conn)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = (quadro_nome or 'Leads')[:31]
+    cabecalho = ['ID', 'Nome', 'Telefone', 'E-mail', 'Cidade/Empresa', 'Valor estimado',
+                 'Etapa', 'Sub-status', 'Responsável', 'Consultor externo', 'Origem',
+                 'Etiquetas', 'Observações', 'Criado em', 'Atualizado em']
+    ws.append(cabecalho)
+    for l in leads:
+        etqs = ', '.join(e['nome'] for e in etiquetas_lead.get(l['id'], []))
+        ws.append([
+            l['id'], l['nome'] or '', l['telefone'] or '', l['email'] or '',
+            l['empresa'] or '', float(l['valor_estimado']) if l['valor_estimado'] else None,
+            etapas_do_quadro.get(l['etapa'] or '', l['etapa'] or ''), l['sub_status'] or '',
+            responsavel_de.get(l['responsavel_id'], '') or (l['consultor_externo'] or ''),
+            l['consultor_externo'] or '', l['origem'] or '', etqs, l['observacoes'] or '',
+            _fmt_datahora_br(l['criado_em']), _fmt_datahora_br(l['atualizado_em']),
+        ])
+    larguras = (7, 26, 16, 26, 22, 14, 18, 16, 18, 18, 14, 22, 40, 16, 16)
+    for col, larg in zip('ABCDEFGHIJKLMNO', larguras):
+        ws.column_dimensions[col].width = larg
+    ws.freeze_panes = 'A2'
+
+    buf = _io.BytesIO(); wb.save(buf); buf.seek(0)
+    nome_arq = 'leads-%s-%s.xlsx' % (
+        re.sub(r'[^a-z0-9]+', '-', (quadro_nome or 'crm').lower()).strip('-'),
+        datetime.now(TZ_SP).strftime('%Y-%m-%d'))
+    return Response(buf.getvalue(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f'attachment; filename={nome_arq}'})
 
 
 @app.route('/crm/lead/novo', methods=['POST'])
