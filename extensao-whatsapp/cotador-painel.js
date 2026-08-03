@@ -775,6 +775,65 @@
       } catch (e) { /* a matriz por faixa ja vale sozinha */ }
       return { cidade: p.cidade, modalidade: p.modalidade, linhas };
     }
+    // AUTOTESTE: roda os sete passos, um a um, e conta o que aconteceu.
+    //
+    // Existe porque "nao deu certo" pode ser qualquer um de sete lugares, e
+    // pedir pro Guilherme descrever o sintoma me fez adivinhar errado quatro
+    // vezes. Um clique dele, e eu recebo onde parou, com o motivo e o tempo.
+    if (a === 'autoteste') {
+      const r = [];
+      const passoTeste = async (nome, fn) => {
+        const t = Date.now();
+        try { const v = await fn(); r.push({ passo: nome, ok: true, ms: Date.now() - t, nota: v || '' }); return v; }
+        catch (e) {
+          r.push({ passo: nome, ok: false, ms: Date.now() - t,
+                   erro: String(e && e.message || e),
+                   enviei: (e && e.enviei || '').slice(0, 220) });
+          return null;
+        }
+      };
+      r.push({ passo: 'aprendido', ok: !faltando().length,
+               nota: faltando().length ? 'falta: ' + faltando().join(', ') : 'os 7 papéis' });
+
+      let cid = await passoTeste('criar', async () => {
+        _cartoesAtuais = [];
+        const id = await criarCotacao();
+        ultimaCotacao = id;
+        return id + ' (id veio de: ' + (_idVeioDe || '?') + ')';
+      });
+      cid = ultimaCotacao;
+      if (!cid) return { linhas: r };
+
+      await passoTeste('carregar página', async () => { await carregarPaginaCotacao(cid); return 'ok'; });
+      await passoTeste('abrir', async () => {
+        await acao('abrir', `/cotacoes/${cid}/edit`, [cid], cid); return 'ok';
+      });
+      await passoTeste('vidas', async () => {
+        await salvarVidas(cid, p.vidas);
+        return 'nome que funcionou: ' + (_nomeDistBom || '?');
+      });
+      await passoTeste('filtro', async () => { await salvarFiltro(cid, p); return 'ok'; });
+
+      const ops = await passoTeste('operadoras', async () => {
+        const l = await operadorasDaCidade(cid, p);
+        return l.length + ': ' + l.slice(0, 8).map((o) => o.nome).join(', ');
+      });
+      const lista = ops ? await operadorasDaCidade(cid, p).catch(() => []) : [];
+      if (lista.length) {
+        const pls = await passoTeste('planos (' + lista[0].nome + ')', async () => {
+          const l = await planosDaOperadora(cid, p, lista[0].id);
+          return l.length + ' planos';
+        });
+        const todos = await planosDaOperadora(cid, p, lista[0].id).catch(() => []);
+        if (todos.length) {
+          await passoTeste('preço (' + ((todos[0].plano || {}).nome || '?') + ')', async () => {
+            const x = await precoDoPlano(cid, p, todos[0], []);
+            return x.cartao ? ('R$ ' + x.cartao.total) : 'sem valor na resposta';
+          });
+        }
+      }
+      return { linhas: r, cotacao: ORIGEM + '/cotacoes/' + cid + '/edit' };
+    }
     if (a === 'filtro') {
       await salvarFiltro(p.cotacaoId, p);
       return { ok: true };
