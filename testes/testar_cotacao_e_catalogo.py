@@ -268,5 +268,22 @@ ok(r19b['ok'] and r19b['valor'] == '', '19c. da pra soltar a cidade padrao')
 ok(c.post('/cotacao/preferencia', json={'chave': 'qualquer', 'valor': 'x'}).status_code == 400,
    '19d. chave desconhecida e recusada')
 
+# 20. A cotacao ao vivo alimenta a apresentacao antiga (documento, link, PDF)
+r20 = c.post('/cotacao/viva/salvar', json=dict(corpo, cliente_nome='Fulano de Tal',
+                                               cliente_telefone='19999990000')).get_json()
+ok(r20['ok'] and r20.get('documento'), '20. gera o documento de apresentacao', json.dumps(r20))
+if r20.get('documento'):
+    doc = c.get('/cotacao/documento/%d' % r20['documento'])
+    ok(doc.status_code == 200, '20b. o documento do cliente abre', 'status=%d' % doc.status_code)
+    html20 = doc.get_data(as_text=True)
+    ok('Bronze SP' in html20, '20c. o plano cotado aparece na apresentacao')
+    ok('Fulano de Tal' in html20, '20d. o nome do cliente aparece')
+    linha = conn.execute('SELECT * FROM cotacao_salva WHERE id=?', (r20['documento'],)).fetchone()
+    pl = json.loads(linha['planos_json'])
+    ok(len(pl) == 1, '20e. so o plano COM preco entra na proposta', str(len(pl)))
+    ok(pl[0]['coparticipacao'] in ('Sem','Parcial','Completa','Com'),
+       '20f. coparticipacao no formato da apresentacao', pl[0]['coparticipacao'])
+    ok(abs(linha['total'] - 1234.56) < .01, '20g. total bate com o cotado', str(linha['total']))
+
 print('\n' + ('%d FALHA(S)' % len(falhas) if falhas else 'tudo passou (final)'))
 sys.exit(1 if falhas else 0)

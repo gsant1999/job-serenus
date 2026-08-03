@@ -74,6 +74,11 @@
   .cv-lembrar.on { color:var(--verde); font-weight:600; }
   .cv-lembrar.on .marca { background:var(--verde); border-color:var(--verde); color:#fff; }
 
+  .cv-lead { font-size:11.5px; color:var(--cinza-2); line-height:1.5; margin-top:-4px; }
+  .cv-lead.ok { color:var(--verde); font-weight:600; }
+  .cv-lead button { background:none; border:none; color:var(--cinza-2); cursor:pointer;
+    font-size:11.5px; text-decoration:underline; padding:0 0 0 6px; font-family:inherit; }
+
   .cv-campo-bt { width:100%; text-align:left; background:var(--panel);
     border:1px solid var(--borda-2); border-radius:11px; padding:12px 14px;
     color:var(--texto); font-size:13.5px; cursor:pointer; font-family:inherit;
@@ -281,11 +286,7 @@
 </div>
 
 <div id="aviso" class="cv-aviso"></div>
-<!-- Um clique roda os sete passos e conta onde parou. Existe porque "não deu
-     certo" pode ser qualquer um deles, e pedir descrição do sintoma me fez
-     adivinhar errado quatro vezes seguidas. -->
-<div style="margin:-6px 0 14px"><button type="button" class="cv-link" id="btAutoteste">
-  testar a ligação passo a passo</button></div>
+
 
 {% if salva %}
 <div class="cv-salva">Cotação de {{ salva.criado_em }} · {{ salva.cidade }} ·
@@ -323,6 +324,19 @@
     <button type="button" class="cv-campo-bt" id="btVidas">
       <span id="vidasResumo">Quantas vidas…</span>
     </button>
+
+    <!-- Cliente e lead. A cotação nasce ligada ao lead do CRM: sem vínculo,
+         a venda não volta como conversão pra Meta nem pro Google, e o funil
+         não sabe que aquele lead recebeu proposta. -->
+    <div class="cv-refino">
+      <h4>Cliente</h4>
+      <div class="cv-campo" style="margin-top:6px">
+        <input id="cliNome" type="text" autocomplete="off" placeholder="Nome do cliente…">
+        <div id="sugLead" class="cv-sug"></div>
+      </div>
+      <div class="cv-campo"><input id="cliTel" type="text" placeholder="Telefone…"></div>
+      <div id="leadLigado" class="cv-lead"></div>
+    </div>
 
     <div class="cv-refino">
       <h4>Acomodação</h4>
@@ -378,40 +392,6 @@
 </div>
 
 </div><!-- /.page -->
-
-<div class="cv-janela" id="janelaTeste">
-  <div class="cv-janela-cx" style="max-width:720px">
-    <div class="cv-janela-topo">
-      <div><h2>Teste da ligação</h2>
-        <p>Roda os sete passos que a cotação usa, um por um, e mostra onde parou.</p></div>
-      <button type="button" class="cv-janela-x" id="fecharTeste" title="Fechar">×</button>
-    </div>
-    <div class="cv-janela-corpo" id="testeCorpo"><p class="cv-ops-vazio">Rodando…</p></div>
-    <div class="cv-janela-pe">
-      <span id="testeMsg"></span>
-      <button type="button" class="btn" id="btCopiarTeste">Copiar pra mandar</button>
-    </div>
-  </div>
-</div>
-
-<!-- Quem atende cada idade: pergunta ao Painel faixa por faixa e monta a
-     matriz. Responde de uma vez "por que fulana não aparece" — e o que sai daí
-     é inteligência de mercado, não só depuração. -->
-<div class="cv-janela" id="janelaCobertura">
-  <div class="cv-janela-cx">
-    <div class="cv-janela-topo">
-      <div>
-        <h2>Quem atende cada idade</h2>
-        <p id="cobSub">Uma consulta por faixa etária, direto no Painel. Mostra a quem cada
-           operadora vende — e por que alguma some quando você muda a idade ou o número de vidas.</p>
-      </div>
-      <button type="button" class="cv-janela-x" id="fecharCobertura" title="Fechar">×</button>
-    </div>
-    <div class="cv-janela-corpo" id="cobCorpo">
-      <p class="cv-ops-vazio">Carregando…</p>
-    </div>
-  </div>
-</div>
 
 <!-- Vidas por faixa: janela, como no Painel. Fora do caminho até ser pedida. -->
 <div class="cv-janela" id="janelaVidas">
@@ -890,10 +870,7 @@
           el('mainSub').innerHTML = 'Quem atende <b>' + esc(cidadeEscolhida) + '</b> · ' +
             esc(nomeCompleto(tipoAtivo() || '')) + ' · <b>' + esc(resumoVidas()) + '</b> · ' +
             operadoras.length + ' operadoras' +
-            (urlDaPergunta ? ' · <a href="' + esc(urlDaPergunta) + '" target="_blank" ' +
-              'rel="noopener">conferir no Painel</a>' : '') +
-            ' · <button type="button" class="cv-link" id="btCobertura">quem atende cada idade</button>';
-          el('btCobertura').onclick = verCobertura;
+            '';
           voltarPara('operadoras');
           return;
         }
@@ -1063,103 +1040,61 @@
                                modalidadeAtiva() != null);
   }
 
-  // ── autoteste ──────────────────────────────────────────────────────────
-  var textoTeste = '';
-  el('fecharTeste').onclick = function () { el('janelaTeste').className = 'cv-janela'; };
-  el('btCopiarTeste').onclick = function () {
-    navigator.clipboard.writeText(textoTeste).then(function () {
-      el('testeMsg').textContent = 'Copiado.';
-    }).catch(function () { el('testeMsg').textContent = 'Selecione e copie na mão.'; });
-  };
-  el('btAutoteste').onclick = async function () {
-    el('janelaTeste').className = 'cv-janela ver';
-    el('testeCorpo').innerHTML = '<p class="cv-ops-vazio">Rodando os sete passos…</p>';
-    el('testeMsg').textContent = '';
-    var r = await pedir('passo', { pedido: { acao: 'autoteste', cidade: cidadeEscolhida,
-                                             modalidade: modalidadeAtiva(), vidas: vidasLista() } }, 120000);
-    if (!r.ok) {
-      textoTeste = 'nem chegou a rodar: ' + (r.motivo || '?');
-      el('testeCorpo').innerHTML = '<p class="cv-ops-vazio">' + esc(textoTeste) + '</p>';
-      return;
-    }
-    var linhas = (r.dados && r.dados.linhas) || [];
-    var txt = ['TESTE DA LIGACAO · ext ' + (extensaoVersao || '?'),
-               'cidade: ' + (cidadeEscolhida || '(nenhuma)') +
-               ' · tipo: ' + nomeCompleto(tipoAtivo() || '') + ' (código ' + modalidadeAtiva() + ')' +
-               ' · ' + resumoVidas()];
-    var html = '<table class="cv-cob" style="width:100%"><tbody>';
-    linhas.forEach(function (l) {
-      var marca = l.ok ? '●' : '×';
-      txt.push(marca + ' ' + l.passo + (l.ms != null ? ' (' + l.ms + 'ms)' : '') + ' — ' +
-               (l.ok ? (l.nota || 'ok') : (l.erro || 'falhou')) +
-               (l.enviei ? '\n    mandei: ' + l.enviei : ''));
-      html += '<tr><td class="' + (l.ok ? 'sim' : 'nao') + '" style="width:22px">' + marca + '</td>' +
-        '<td class="op">' + esc(l.passo) + '</td>' +
-        '<td style="text-align:left;color:var(--cinza);word-break:break-word">' +
-        esc(l.ok ? (l.nota || 'ok') : (l.erro || 'falhou')) +
-        (l.enviei ? '<br><code style="font-size:10px;color:var(--cinza-2)">' + esc(l.enviei) + '</code>' : '') +
-        '</td><td style="color:var(--cinza-2);white-space:nowrap">' +
-        (l.ms != null ? l.ms + 'ms' : '') + '</td></tr>';
-    });
-    html += '</tbody></table>';
-    if (r.dados.cotacao) {
-      html += '<p style="margin-top:12px;font-size:12px"><a href="' + esc(r.dados.cotacao) +
-        '" target="_blank" rel="noopener">abrir esta cotação no Painel</a></p>';
-      txt.push('cotação: ' + r.dados.cotacao);
-    }
-    textoTeste = txt.join('\n');
-    el('testeCorpo').innerHTML = html;
-  };
+  // ── cliente e lead ─────────────────────────────────────────────────────
+  //
+  // A cotação nasce ligada ao lead. Sem vínculo, a venda não volta como
+  // conversão pra Meta nem pro Google, e o funil não sabe que aquele lead
+  // recebeu proposta — foi assim que 25 de 48 vendas ficaram órfãs.
+  var leadEscolhido = LEAD || 0;
+  var leadNome = '';
+  var relLead = null;
 
-  // ── quem atende cada idade ─────────────────────────────────────────────
-  el('fecharCobertura').onclick = function () { el('janelaCobertura').className = 'cv-janela'; };
-  el('janelaCobertura').addEventListener('click', function (ev) {
-    if (ev.target === el('janelaCobertura')) el('janelaCobertura').className = 'cv-janela';
+  function pintarLead() {
+    var c = el('leadLigado');
+    if (leadEscolhido) {
+      c.className = 'cv-lead ok';
+      c.innerHTML = '✓ ligada ao lead ' + esc(leadNome || ('#' + leadEscolhido)) +
+        '<button type="button" id="btSoltarLead">soltar</button>';
+      el('btSoltarLead').onclick = function () {
+        leadEscolhido = 0; leadNome = ''; pintarLead();
+      };
+    } else {
+      c.className = 'cv-lead';
+      c.textContent = 'Sem lead ligado. Digite o nome ou o telefone e escolha na lista — ' +
+        'ou salve assim mesmo, que o JOB tenta casar pelo telefone.';
+    }
+  }
+
+  el('cliNome').addEventListener('input', function (e) {
+    var termo = e.target.value.trim();
+    leadEscolhido = 0; leadNome = ''; pintarLead();
+    clearTimeout(relLead);
+    var box = el('sugLead');
+    if (termo.length < 2) { box.className = 'cv-sug'; return; }
+    relLead = setTimeout(async function () {
+      var r = await fetch('/api/crm/leads/buscar?q=' + encodeURIComponent(termo))
+        .then(function (x) { return x.json(); }).catch(function () { return {}; });
+      var leads = (r && r.leads) || [];
+      box.innerHTML = '';
+      if (!leads.length) { box.className = 'cv-sug'; return; }
+      leads.slice(0, 12).forEach(function (l) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.innerHTML = '<b>' + esc(l.nome || '(sem nome)') + '</b>' +
+          (l.telefone ? '<br><span style="font-size:11px;color:var(--cinza-2)">' +
+            esc(l.telefone) + '</span>' : '');
+        b.onclick = function () {
+          leadEscolhido = l.id; leadNome = l.nome || '';
+          el('cliNome').value = l.nome || '';
+          if (l.telefone) el('cliTel').value = l.telefone;
+          box.className = 'cv-sug';
+          pintarLead();
+        };
+        box.appendChild(b);
+      });
+      box.className = 'cv-sug ver';
+    }, 300);
   });
-
-  async function verCobertura() {
-    if (!cidadeEscolhida || modalidadeAtiva() == null) return;
-    el('janelaCobertura').className = 'cv-janela ver';
-    el('cobCorpo').innerHTML = '<p class="cv-ops-vazio">Perguntando ao Painel, uma faixa por vez — ' +
-      'são onze consultas, leva uns dez segundos.</p>';
-    var r = await pedir('passo', { pedido: { acao: 'cobertura', cidade: cidadeEscolhida,
-                                             modalidade: modalidadeAtiva(), vidas: vidasLista() } }, 120000);
-    if (!r.ok) {
-      el('cobCorpo').innerHTML = '<p class="cv-ops-vazio">Não deu: ' + esc(r.motivo || '?') + '</p>';
-      return;
-    }
-    desenharCobertura((r.dados && r.dados.linhas) || []);
-  }
-
-  function desenharCobertura(linhas) {
-    // Matriz operadora × faixa. Ler por linha responde "quem atende os 59+";
-    // ler por coluna responde "a partir de que idade a fulana vende".
-    var todas = {};
-    linhas.forEach(function (l) {
-      (l.operadoras || []).forEach(function (n) { todas[n] = true; });
-    });
-    var nomes = Object.keys(todas).sort();
-    if (!nomes.length) {
-      el('cobCorpo').innerHTML = '<p class="cv-ops-vazio">Nenhuma operadora respondeu.</p>';
-      return;
-    }
-    var cab = linhas.map(function (l) {
-      if (l.faixa === 'todas') return '<th title="uma vida em cada faixa">10 vidas</th>';
-      var i = FAIXAS.indexOf(l.faixa);
-      return '<th>' + (i >= 0 ? ROTULOS[i] : l.faixa) + '</th>';
-    }).join('');
-    var corpo = nomes.map(function (n) {
-      return '<tr><td class="op">' + esc(n) + '</td>' + linhas.map(function (l) {
-        var tem = (l.operadoras || []).indexOf(n) >= 0;
-        return '<td class="' + (tem ? 'sim' : 'nao') + '">' + (tem ? '●' : '·') + '</td>';
-      }).join('') + '</tr>';
-    }).join('');
-    el('cobSub').innerHTML = 'Em <b>' + esc(cidadeEscolhida) + '</b> · ' +
-      esc(nomeCompleto(tipoAtivo() || '')) + '. Cada coluna é uma consulta com <b>uma vida</b> ' +
-      'naquela faixa; a última é com uma vida em cada faixa. Bolinha cheia = atende.';
-    el('cobCorpo').innerHTML = '<div style="overflow:auto"><table class="cv-cob">' +
-      '<thead><tr><th></th>' + cab + '</tr></thead><tbody>' + corpo + '</tbody></table></div>';
-  }
 
   // ── cotar ──────────────────────────────────────────────────────────────
   var POR_COTACAO = 15;   // o Painel guarda ~20 cenários por cotação; folga proposital
@@ -1356,7 +1291,12 @@
 
     el('btSalvar').onclick = async function () {
       this.disabled = true;
-      var corpo = Object.assign({}, d, { lead_id: LEAD || null, modalidade: modalidadeAtiva(),
+      var corpo = Object.assign({}, d, {
+        lead_id: leadEscolhido || null,
+        cliente_nome: el('cliNome').value.trim(),
+        cliente_telefone: el('cliTel').value.trim(),
+        titulo: el('cliNome').value.trim() ? ('Cotação — ' + el('cliNome').value.trim()) : 'Cotação',
+        modalidade: modalidadeAtiva(),
         filtros: { exigencias: exigencias, ramo: ramo, tipo: tipoAtivo(),
                    planos: selecionados.map(function (x) { return x.key; }) } });
       var resp = await fetch('/cotacao/viva/salvar', {
@@ -1364,8 +1304,15 @@
         body: JSON.stringify(corpo)
       }).then(function (x) { return x.json(); }).catch(function () { return { ok: false }; });
       var m = el('salvoMsg');
-      if (resp.ok) m.innerHTML = 'Salva. <a href="' + resp.url + '">abrir</a>';
-      else { m.textContent = 'Não consegui salvar. Tente de novo.'; this.disabled = false; }
+      if (resp.ok && resp.documento) {
+        // Vai direto pra apresentação de sempre: é lá que estão o link do
+        // cliente, o PDF, o WhatsApp e a nova versão.
+        m.textContent = 'Salva. Abrindo a apresentação…';
+        window.location.href = resp.url;
+      } else if (resp.ok) {
+        m.innerHTML = 'Salva no histórico' + (resp.aviso ? ' (' + esc(resp.aviso) + ')' : '') + '.';
+        this.disabled = false;
+      } else { m.textContent = 'Não consegui salvar. Tente de novo.'; this.disabled = false; }
     };
   }
 
@@ -1413,6 +1360,7 @@
   montarSegTipo();
   montarFaixas();
   pintarFixar();
+  pintarLead();
   recomecar(true);
   if (SALVA) desenhar({ planos: SALVA, ms: 0, planosCotados: SALVA.length });
   conferirLigacao();

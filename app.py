@@ -24097,6 +24097,55 @@ def cotacao_novo():
                            lead=lead, salva=None)
 
 
+def _copart_texto(tb):
+    """'Sem' / 'Parcial' / 'Completa', do jeito que a apresentacao ja mostra."""
+    if not (tb or {}).get('coparticipacao'):
+        return 'Sem'
+    t = str((tb or {}).get('coparticipacaoTipo') or '').strip().lower()
+    if 'parcial' in t:
+        return 'Parcial'
+    if any(x in t for x in ('total', 'complet', 'integral')):
+        return 'Completa'
+    return 'Com'
+
+
+def _viva_para_apresentacao(d):
+    """Traduz a cotacao ao vivo pro formato que o documento do cliente ja usa.
+
+    Reaproveitar em vez de refazer: o documento, o link publico, o PDF, o envio
+    por WhatsApp e a nova versao ja existem e ja foram testados em cima da
+    `cotacao_salva`. Fazer a tela nova gravar tambem nesse formato entrega toda
+    essa experiencia de uma vez, e sem duplicar regra de apresentacao."""
+    planos, total_geral, cont_faixa = [], 0.0, {}
+    for p in (d.get('planos') or []):
+        if p.get('total') is None:
+            continue          # plano sem preco nao vai pra proposta do cliente
+        linhas = []
+        for f in (p.get('faixas') or []):
+            fx = _faixa_do_painel(f.get('faixa'))
+            qtd = int(f.get('quantidade') or 0)
+            if qtd <= 0:
+                continue
+            preco = float(f.get('unitario') or 0)
+            cont_faixa[fx] = qtd
+            linhas.append({'faixa': fx, 'label': _faixa_label(fx), 'qtd': qtd,
+                           'preco': preco, 'subtotal': round(preco * qtd, 2)})
+        tb = p.get('tabela') or {}
+        total = float(p.get('total') or 0)
+        total_geral += total
+        planos.append({
+            'operadora': (p.get('operadora') or {}).get('nome') or '',
+            'plano': (p.get('plano') or {}).get('nome') or '',
+            'modalidade': p.get('_tipo') or '',
+            'acomodacao': 'Apartamento' if (p.get('plano') or {}).get('acomodacao') else 'Enfermaria',
+            'coparticipacao': _copart_texto(tb),
+            'abrangencia': (p.get('produto') or {}).get('nome') or '',
+            'vigencia': '',
+            'linhas': linhas, 'total': round(total, 2), 'recomendacao': '',
+        })
+    return planos, round(total_geral, 2), cont_faixa
+
+
 @app.route('/cotacao/viva/salvar', methods=['POST'])
 @login_required
 def cotacao_viva_salvar():
@@ -24109,7 +24158,65 @@ def cotacao_viva_salvar():
     except Exception:
         conn.rollback()
         return jsonify({'ok': False, 'erro': 'falha_ao_salvar'}), 500
-    return jsonify({'ok': True, 'id': vid, 'url': '/cotacao/viva/%d' % vid})
+
+    # Alem do historico, a cotacao entra na apresentacao de sempre.
+    planos, total_geral, cont_faixa = _viva_para_apresentacao(d)
+    if not planos:
+        return jsonify({'ok': True, 'id': vid, 'url': '/cotacao/viva/%d' % vid,
+                        'aviso': 'nenhum plano com preco'})
+
+    try:
+        lead_id = int(d.get('lead_id')) if d.get('lead_id') else None
+    except Exception:
+        lead_id = None
+    cliente_tel = str(d.get('cliente_telefone') or '').strip()
+    cliente_email = str(d.get('cliente_email') or '').strip()
+    # Sem lead escolhido, tenta casar por telefone e e-mail — mesmo casador do
+    # CRM e da venda. Cotacao orfa e o comeco de venda sem origem de midia.
+    if not lead_id:
+        try:
+            tel_norm = _normalizar_telefone(cliente_tel)
+            row = _buscar_lead_por_telefone(conn, tel_norm) if tel_norm else None
+            if not row and cliente_email:
+                row = conn.execute("SELECT id FROM crm_leads WHERE LOWER(email)=LOWER(?)",
+                                   (cliente_email,)).fetchone()
+            if row:
+                lead_id = row['id'] if hasattr(row, 'keys') else row[0]
+        except Exception:
+            lead_id = None
+
+    urow = conn.execute("SELECT nome, email FROM usuarios WHERE id=?",
+                        (session.get('user_id'),)).fetchone()
+    token = secrets.token_urlsafe(9)
+    try:
+        conn.execute("""INSERT INTO cotacao_salva
+            (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email,
+             corretor_telefone, cliente_nome, cliente_email, cliente_telefone, titulo,
+             vidas_json, planos_json, total, tabela_ids_json)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (token, 'horizontal', lead_id, session.get('user_id'),
+             (urow['nome'] if urow else '') or session.get('nome') or '',
+             (urow['email'] if urow else '') or '', '',
+             str(d.get('cliente_nome') or '').strip(), cliente_email, cliente_tel,
+             str(d.get('titulo') or 'Cotação').strip(),
+             json.dumps(cont_faixa), json.dumps(planos, ensure_ascii=False),
+             total_geral, '[]'))
+        cid = _last_insert_id(conn.cursor() if hasattr(conn, 'cursor') else conn)
+        if not cid:
+            cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+        try:
+            registrar_cotacao_no_lead(conn, lead_id, cid, planos, total_geral, [],
+                                      str(d.get('titulo') or '').strip())
+        except Exception:
+            pass          # o registro no lead e ganho, nao requisito da cotacao
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        return jsonify({'ok': True, 'id': vid, 'url': '/cotacao/viva/%d' % vid,
+                        'aviso': 'salvou o historico, mas nao gerou a apresentacao'})
+    return jsonify({'ok': True, 'id': vid, 'documento': cid, 'lead_id': lead_id,
+                    'url': '/cotacao/documento/%d' % cid})
 
 
 @app.route('/cotacao/viva/<int:vid>')
