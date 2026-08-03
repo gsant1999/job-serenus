@@ -16,6 +16,33 @@ def _mes_meta_valido(v):
     return bool(_re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', str(v or '')))
 
 
+def _mes_meta_de_data(valor, hoje=None):
+    """Ciclo de vendas ('AAAA-MM') a partir da data de fechamento digitada.
+
+    Existe porque o campo de data do navegador aceita ano de cinco digitos: um
+    '7' a mais em 2026 virou '72026-07-16', o corte dos 7 primeiros caracteres
+    gravou '72026-0' e a tela passou a oferecer um ciclo '/7202' que nao existe.
+    Aqui a data e LIDA de verdade — em AAAA-MM-DD ou no formato brasileiro,
+    com barra ou traco — e so vira ciclo se for uma data plausivel. Qualquer
+    outra coisa cai no mes corrente, que e o comportamento de sempre pra
+    proposta lancada sem data de fechamento."""
+    hoje = hoje or datetime.now(TZ_SP)
+    s = str(valor or '').strip()
+    ano = mes = None
+    m = re.match(r'^(\d{4})[-/](\d{1,2})(?:[-/]\d{1,2})?$', s)          # AAAA-MM-DD
+    if m:
+        ano, mes = int(m.group(1)), int(m.group(2))
+    else:
+        m = re.match(r'^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$', s)         # DD/MM/AAAA
+        if m:
+            ano, mes = int(m.group(3)), int(m.group(2))
+    # Fora da janela nao e engano de digitacao, e dado impossivel: proposta de
+    # 1998 ou de 2087 nao existe nesta corretora.
+    if ano and mes and 1 <= mes <= 12 and (hoje.year - 5) <= ano <= (hoje.year + 5):
+        return '%04d-%02d' % (ano, mes)
+    return hoje.strftime('%Y-%m')
+
+
 def _agora_sp():
     """Timestamp 'YYYY-MM-DD HH:MM:SS' na hora de São Paulo (para gravar no banco).
     Nunca usar CURRENT_TIMESTAMP explícito em INSERT/UPDATE: no Postgres é UTC."""
@@ -4400,6 +4427,13 @@ BRAND = {
 
 
 @app.context_processor
+def _inject_ano_atual():
+    """`ano_atual` em qualquer template — serve pra travar o min/max dos campos
+    de data, que sem limite aceitam ano de cinco digitos."""
+    return {'ano_atual': datetime.now(TZ_SP).year}
+
+
+@app.context_processor
 def _inject_brand():
     """`brand.*`, `eh_serenus` e `modo_operador` em qualquer template — a marca
     é configurável por instância (white-label), e esses flags escondem do menu
@@ -7735,7 +7769,9 @@ def salvar_proposta():
         # do calendário de quando a proposta foi lançada no sistema (Guilherme,
         # 20/07: "não respeita o calendário de vendas do mês").
         data_fechamento = d.get('data_fechamento','').strip()
-        mes_meta = data_fechamento[:7] if (data_fechamento and len(data_fechamento) >= 7) else datetime.now(TZ_SP).strftime('%Y-%m')
+        # Cortar os 7 primeiros caracteres da data era a origem do ciclo '/7202':
+        # o campo de data do navegador aceita ano de cinco digitos.
+        mes_meta = _mes_meta_de_data(data_fechamento)
         # Produção do CICLO ANTES desta venda + esta venda = produção que define o nível.
         prod_antes = _producao_mes(conn, session['user_id'], mes_meta)
         prod_acumulada = prod_antes + valor

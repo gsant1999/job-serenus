@@ -430,7 +430,10 @@
       </div>
       <div class="campo">
         <label>Data de fechamento</label>
-        <input type="date" name="data_fechamento" id="data_fechamento">
+        <!-- min/max: o campo de data do navegador aceita ano de cinco digitos.
+             Um '7' a mais em 2026 virou um ciclo de vendas que nao existe. -->
+        <input type="date" name="data_fechamento" id="data_fechamento"
+               min="{{ ano_atual - 2 }}-01-01" max="{{ ano_atual + 2 }}-12-31">
         <div class="hint">Mês da meta comercial. Em branco usa o mês atual.</div>
       </div>
     </div>
