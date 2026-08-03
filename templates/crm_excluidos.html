@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Leads excluídos{% endblock %}
+
+{% block head %}
+<style>
+  .exc-topo { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  .exc-aviso { background:var(--panel-2); border:1px solid var(--borda); border-left:3px solid var(--azul);
+               border-radius:9px; padding:12px 15px; font-size:13px; color:var(--cinza);
+               line-height:1.55; margin:16px 0 20px; max-width:760px; }
+  .exc-tab { width:100%; border-collapse:collapse; font-size:13px; }
+  .exc-tab th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.5px;
+                color:var(--cinza-2); font-weight:700; padding:9px 12px; border-bottom:1px solid var(--borda); }
+  .exc-tab td { padding:11px 12px; border-bottom:1px solid var(--borda); vertical-align:top; }
+  .exc-tab tr:hover td { background:var(--panel-2); }
+  .exc-nome { font-weight:600; color:var(--texto); }
+  .exc-sub { font-size:11.5px; color:var(--cinza-2); margin-top:2px; }
+  .exc-quem { white-space:nowrap; }
+  .exc-motivo { color:var(--cinza); font-style:italic; }
+  .exc-motivo.vazio { color:var(--cinza-2); font-style:normal; }
+  .exc-vazio { text-align:center; padding:46px 20px; color:var(--cinza-2); font-size:13.5px; }
+  .exc-voltar { color:var(--azul); text-decoration:none; font-size:13px; }
+  .exc-voltar:hover { text-decoration:underline; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page">
+  <div class="exc-topo">
+    <div>
+      <h2 style="margin:0 0 4px;">Leads excluídos</h2>
+      <a class="exc-voltar" href="/crm">← Voltar ao CRM</a>
+    </div>
+  </div>
+
+  {# O PORQUÊ na tela, não só na cabeça de quem construiu: quem abre isto está
+     desconfiado de alguma coisa, e precisa saber o que a lista prova e o que
+     ela não prova. #}
+  <div class="exc-aviso">
+    Todo lead excluído fica registrado aqui, com quem apagou e quando.
+    {% if eh_admin %}
+      Você está vendo <b>todas</b> as exclusões.
+    {% else %}
+      Você está vendo <b>as suas</b> exclusões — o histórico dos outros é de gestão.
+    {% endif %}
+    Lead com proposta ligada não pode ser excluído: venda não se apaga por engano.
+  </div>
+
+  {% if not linhas %}
+    <div class="exc-vazio">Nenhum lead foi excluído ainda.</div>
+  {% else %}
+  <div style="overflow-x:auto;">
+    <table class="exc-tab">
+      <thead>
+        <tr>
+          <th>Quem era</th>
+          <th>Etapa</th>
+          <th>Consultor</th>
+          <th>Excluído por</th>
+          <th>Quando</th>
+          <th>Motivo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in linhas %}
+        <tr>
+          <td>
+            <div class="exc-nome">{{ l.nome or 'sem nome' }}</div>
+            <div class="exc-sub">
+              #{{ l.lead_id }}{% if l.tel %} · {{ l.tel }}{% endif %}{% if l.origem %} · {{ l.origem }}{% endif %}
+            </div>
+          </td>
+          <td>{{ l.etapa or '—' }}</td>
+          <td>{{ l.responsavel_nome or 'sem consultor' }}</td>
+          <td class="exc-quem">{{ l.excluido_por or '—' }}</td>
+          <td class="exc-quem">{{ l.quando or '—' }}</td>
+          <td class="exc-motivo {{ 'vazio' if not l.motivo }}">{{ l.motivo or 'não informado' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

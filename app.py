@@ -1201,6 +1201,32 @@ def init_db():
                 nome TEXT,
                 atualizado_em TIMESTAMP
             )""",
+            # Ver o comentário no schema do SQLite: conversa marcada como "não é
+            # lead" não é lida nem vira card, e lead excluído deixa rastro.
+            """CREATE TABLE IF NOT EXISTS wa_conversa_ignorada (
+                chat_id TEXT PRIMARY KEY,
+                telefone_norm TEXT,
+                nome TEXT,
+                motivo TEXT,
+                criado_por TEXT,
+                criado_em TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS crm_lead_excluido (
+                id SERIAL PRIMARY KEY,
+                lead_id INTEGER,
+                nome TEXT,
+                telefone TEXT,
+                telefone_norm TEXT,
+                etapa TEXT,
+                origem TEXT,
+                responsavel_nome TEXT,
+                criado_em_lead TEXT,
+                dados_json TEXT,
+                motivo TEXT,
+                excluido_por TEXT,
+                excluido_por_id INTEGER,
+                excluido_em TEXT
+            )""",
             """CREATE TABLE IF NOT EXISTS funil_execucao (
                 id SERIAL PRIMARY KEY,
                 job_uid TEXT,
@@ -2110,6 +2136,39 @@ def init_db():
             telefone_norm TEXT,
             nome TEXT,
             atualizado_em TIMESTAMP
+        );
+        -- CONVERSA QUE NAO E LEAD. O consultor fala com amigo, familia e
+        -- fornecedor no mesmo WhatsApp — e cada analise virava um card no CRM
+        -- ("Bianca Amiga", "Danilo BB"). Marcada aqui, a extensao nao le nem
+        -- cria nada. E o consultor quem sinaliza: adivinhar quem e amigo pelo
+        -- nome erraria justamente no lead que se chama pelo apelido.
+        CREATE TABLE IF NOT EXISTS wa_conversa_ignorada (
+            chat_id TEXT PRIMARY KEY,
+            telefone_norm TEXT,
+            nome TEXT,
+            motivo TEXT,
+            criado_por TEXT,
+            criado_em TEXT
+        );
+        -- LIXEIRA COM NOME E HORA. Excluir lead apagava sem deixar rastro: nao
+        -- dava pra saber se um card sumiu por limpeza legitima ou pra esconder
+        -- venda de alguem. Aqui fica o retrato do que foi apagado, quem apagou
+        -- e quando — visivel no CRM, que e onde a suspeita nasce.
+        CREATE TABLE IF NOT EXISTS crm_lead_excluido (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER,
+            nome TEXT,
+            telefone TEXT,
+            telefone_norm TEXT,
+            etapa TEXT,
+            origem TEXT,
+            responsavel_nome TEXT,
+            criado_em_lead TEXT,
+            dados_json TEXT,
+            motivo TEXT,
+            excluido_por TEXT,
+            excluido_por_id INTEGER,
+            excluido_em TEXT
         );
         CREATE TABLE IF NOT EXISTS funil_execucao (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -19219,6 +19278,62 @@ def api_whatsapp_canario():
     return _wa_cors(jsonify({"ok": True, "gravadas": len(checagens), "quebrou": quebrou_agora}))
 
 
+@app.route('/api/whatsapp/ignorar', methods=['POST', 'OPTIONS'])
+def api_whatsapp_ignorar():
+    """Marca (ou desmarca) uma conversa como "não é lead".
+
+    A partir daqui a extensão não lê nem cria card pra ela. Guarda o chat_id E o
+    telefone: o mesmo contato aparece ora como @lid, ora como número, e marcar
+    num formato só deixaria a porta aberta no outro."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    d = request.get_json(silent=True) or {}
+    chat_id = str(d.get('chat_id') or '').strip()[:120]
+    tel_norm = _normalizar_telefone(str(d.get('telefone') or ''))
+    if not chat_id and not tel_norm:
+        return _wa_cors(jsonify({"ok": False, "erro": "Sem conversa"})), 400
+    desmarcar = bool(d.get('desmarcar'))
+    conn = db()
+    try:
+        if desmarcar:
+            conn.execute("DELETE FROM wa_conversa_ignorada WHERE chat_id=? OR (telefone_norm IS NOT NULL "
+                         "AND telefone_norm <> '' AND telefone_norm=?)",
+                         (chat_id or '__nada__', tel_norm or '__nada__'))
+        else:
+            chave = chat_id or ('tel:' + tel_norm)
+            quem = ''
+            try:
+                u = conn.execute("SELECT nome FROM usuarios WHERE id=?",
+                                 (int(d.get('usuario_id') or 0),)).fetchone()
+                quem = (u['nome'] if u else '') or ''
+            except Exception:
+                pass
+            if DB_MODE == 'postgres':
+                conn.execute("""INSERT INTO wa_conversa_ignorada
+                    (chat_id, telefone_norm, nome, motivo, criado_por, criado_em)
+                    VALUES (?,?,?,?,?,?) ON CONFLICT (chat_id) DO UPDATE SET
+                    telefone_norm=excluded.telefone_norm, nome=excluded.nome""",
+                    (chave, tel_norm or None, str(d.get('nome') or '')[:120],
+                     str(d.get('motivo') or '')[:200], quem, _agora_sp()))
+            else:
+                conn.execute("""INSERT OR REPLACE INTO wa_conversa_ignorada
+                    (chat_id, telefone_norm, nome, motivo, criado_por, criado_em)
+                    VALUES (?,?,?,?,?,?)""",
+                    (chave, tel_norm or None, str(d.get('nome') or '')[:120],
+                     str(d.get('motivo') or '')[:200], quem, _agora_sp()))
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except Exception: pass
+        close_db(conn)
+        app.logger.warning(f"[IGNORAR] {e}")
+        return _wa_cors(jsonify({"ok": False, "erro": "não consegui gravar"})), 500
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "ignorada": not desmarcar}))
+
+
 @app.route('/api/whatsapp/chats/vincular', methods=['POST', 'OPTIONS'])
 def api_whatsapp_chats_vincular():
     """Amarra @lid -> lead em MASSA, a partir da lista inteira de conversas.
@@ -20439,6 +20554,27 @@ def api_whatsapp_analisar():
 
     t_inicio = time.monotonic()
     d = request.json or {}
+
+    # CONVERSA MARCADA COMO "NÃO É LEAD" NÃO É LIDA. Sai antes de gastar IA e
+    # antes de qualquer gravação: o consultor fala com amigo e família no mesmo
+    # WhatsApp, e cada análise virava um card no CRM. Quem sinaliza é ele —
+    # adivinhar pelo nome erraria justamente no lead que se chama pelo apelido.
+    _cid_ig = str(d.get('chat_id') or '').strip()
+    _tel_ig = _normalizar_telefone(str(d.get('telefone') or ''))
+    if _cid_ig or _tel_ig:
+        try:
+            _cn = db()
+            _ig = _cn.execute(
+                "SELECT chat_id FROM wa_conversa_ignorada WHERE chat_id=? OR (telefone_norm IS NOT NULL "
+                "AND telefone_norm <> '' AND telefone_norm=?)",
+                (_cid_ig or '__nada__', _tel_ig or '__nada__')).fetchone()
+            close_db(_cn)
+            if _ig:
+                return _wa_cors(jsonify({"ok": False, "ignorada": True,
+                                         "erro": "Esta conversa está marcada como “não é lead”."})), 200
+        except Exception as e:
+            app.logger.info(f"[IGNORADA] checagem pulada: {e}")
+
     mensagens = d.get('mensagens') or []
     # A conversa pode legitimamente não ter NENHUM texto (ex: lead cujo primeiro
     # contato foi só um áudio, ou só mandou uma foto de cotação sem escrever
@@ -23755,6 +23891,14 @@ def crm_lead_anexo(lid):
 @app.route('/crm/lead/<int:lid>/excluir', methods=['POST'])
 @login_required
 def crm_lead_excluir(lid):
+    """Exclui o lead — e GUARDA o retrato de quem era, quem apagou e quando.
+
+    Antes apagava sem deixar rastro. Num CRM de comissão isso é um buraco: não
+    dava pra distinguir limpeza legítima (o amigo que a extensão cadastrou por
+    engano) de card sumindo pra esconder venda. O registro fica em /crm/excluidos,
+    visível pra quem manda — é o que torna a exclusão segura de liberar."""
+    d = request.json or {}
+    motivo = str(d.get('motivo') or '').strip()[:200]
     conn = db()
     lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
     if not lead:
@@ -23762,10 +23906,65 @@ def crm_lead_excluir(lid):
     # Admin pode excluir qualquer lead; consultor só os seus próprios
     if session.get('perfil') != 'admin' and lead['responsavel_id'] != session['user_id']:
         close_db(conn); return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+
+    # VENDA NÃO SE APAGA POR ENGANO. Lead com proposta é história de dinheiro:
+    # some daqui e o financeiro fica com uma proposta órfã.
+    try:
+        n_prop = conn.execute("SELECT COUNT(*) c FROM propostas WHERE lead_id=?", (lid,)).fetchone()['c']
+    except Exception:
+        n_prop = 0
+    if n_prop:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": f"Este lead tem {n_prop} proposta(s) ligada(s). "
+                        "Desligue a proposta antes de excluir."}), 400
+
+    try:
+        resp_nome = ''
+        if lead['responsavel_id']:
+            r = conn.execute("SELECT nome FROM usuarios WHERE id=?", (lead['responsavel_id'],)).fetchone()
+            resp_nome = (r['nome'] if r else '') or ''
+        conn.execute("""INSERT INTO crm_lead_excluido
+            (lead_id, nome, telefone, telefone_norm, etapa, origem, responsavel_nome,
+             criado_em_lead, dados_json, motivo, excluido_por, excluido_por_id, excluido_em)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (lid, lead['nome'], lead['telefone'], lead['telefone_norm'], lead['etapa'],
+             lead['origem'], resp_nome, str(lead['criado_em'] or ''),
+             json.dumps({k: str(lead[k]) for k in lead.keys()}, ensure_ascii=False)[:8000],
+             motivo, session.get('nome') or '', session.get('user_id'), _agora_sp()))
+    except Exception as e:
+        app.logger.warning(f"[EXCLUIR_LEAD] não registrei o histórico: {e}")
+
     conn.execute("DELETE FROM crm_atividades WHERE lead_id=?", (lid,))
     conn.execute("DELETE FROM crm_leads WHERE id=?", (lid,))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+
+@app.route('/crm/excluidos')
+@login_required
+def crm_excluidos():
+    """Quem foi apagado, por quem e quando. Existe pra prevenir mau uso: a
+    exclusão só pode ser fácil se ela for visível."""
+    conn = db()
+    eh_admin = session.get('perfil') == 'admin'
+    try:
+        if eh_admin:
+            rows = conn.execute("""SELECT * FROM crm_lead_excluido
+                                   ORDER BY id DESC LIMIT 300""").fetchall()
+        else:
+            # Consultor vê o que ele mesmo apagou — o histórico dos outros é
+            # informação de gestão.
+            rows = conn.execute("""SELECT * FROM crm_lead_excluido WHERE excluido_por_id=?
+                                   ORDER BY id DESC LIMIT 300""", (session['user_id'],)).fetchall()
+        linhas = [dict(r) for r in rows]
+    except Exception as e:
+        app.logger.warning(f"[EXCLUIDOS] {e}")
+        linhas = []
+    close_db(conn)
+    for l in linhas:
+        l['quando'] = _fmt_datahora_br(l.get('excluido_em'))
+        l['tel'] = _formatar_telefone(l.get('telefone') or '')
+    return render_template('crm_excluidos.html', linhas=linhas, eh_admin=eh_admin)
 
 
 @app.route('/crm/stats')
@@ -27661,6 +27860,45 @@ def agenda_confirmar(token):
         conn.commit()
     close_db(conn)
     return render_template('agenda_confirmado.html', assunto=ad.get('assunto'), ja_confirmado=ja_confirmado)
+
+
+def _revisar_leads_do_dia():
+    """Fim do dia: aponta o que a extensão cadastrou hoje e não parece ser lead.
+
+    A marcação "não é lead" depende de alguém lembrar de marcar na hora. Isto é
+    a rede embaixo: no fim do dia varre o que entrou pela extensão e não deu
+    sinal nenhum de negociação — sem cotação, sem proposta, sem uma atividade
+    escrita por gente. NÃO APAGA NADA. Só avisa, com o link pra decidir.
+
+    Apagar sozinho seria pior que o problema: um lead bom que ainda não tinha
+    virado nada sumiria sem ninguém ver."""
+    try:
+        conn = db()
+        hoje = datetime.now(TZ_SP).strftime('%Y-%m-%d')
+        rows = conn.execute("""
+            SELECT l.id, l.nome, l.telefone
+            FROM crm_leads l
+            WHERE l.origem LIKE '%extens%'
+              AND substr(CAST(l.criado_em AS TEXT), 1, 10) = ?
+              AND NOT EXISTS (SELECT 1 FROM propostas p WHERE p.lead_id = l.id)
+              AND NOT EXISTS (SELECT 1 FROM cotacao_salva c WHERE c.lead_id = l.id)
+              AND NOT EXISTS (SELECT 1 FROM crm_atividades a WHERE a.lead_id = l.id
+                              AND a.tipo IN ('nota','atividade','whatsapp','email','ligacao'))
+            ORDER BY l.id DESC LIMIT 40""", (hoje,)).fetchall()
+        close_db(conn)
+        if not rows:
+            return
+        nomes = ', '.join((dict(r).get('nome') or 'sem nome') for r in list(rows)[:6])
+        _notificar_admins(
+            'crm',
+            f'{len(rows)} lead(s) de hoje pra conferir',
+            f'Entraram pela extensão e não viraram nada ainda: {nomes}'
+            + ('…' if len(rows) > 6 else '')
+            + '. Se não forem leads, exclua — fica registrado em Excluídos.',
+            '/crm?origem=extens&data_de=' + hoje)
+        app.logger.info(f"[REVISAO_DIA] {len(rows)} lead(s) sugeridos pra conferência")
+    except Exception as e:
+        app.logger.warning(f"[REVISAO_DIA] {e}")
 
 
 def _notificar_leads_parados():
@@ -32025,6 +32263,10 @@ def _iniciar_scheduler_backup():
                       next_run_time=datetime.now(TZ_SP) + timedelta(seconds=40))
         # Leads parados (7+ dias sem atividade): resumo diário às 09:00 SP
         sched.add_job(_notificar_leads_parados, 'cron', hour=9, minute=0, max_instances=1)
+        # Revisão do fim do dia: o que a extensão cadastrou hoje e não parece lead.
+        # 19:00 e não 23:00 de propósito — tem que chegar enquanto ainda há
+        # alguém pra olhar, senão o aviso amanhece velho junto com o problema.
+        sched.add_job(_revisar_leads_do_dia, 'cron', hour=19, minute=0, max_instances=1)
         # Fluxos de nutrição do CRM: dispara os passos pendentes 1x/dia às 08:00 SP
         sched.add_job(_processar_fluxos_pendentes, 'cron', hour=8, minute=0, max_instances=1)
         sched.start()

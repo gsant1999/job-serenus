@@ -294,6 +294,9 @@
   .campo-input:focus { border-color:var(--azul); }
   .campo-select { appearance:none; cursor:pointer; }
   .ficha-acoes  { padding:14px 20px; border-top:1px solid var(--borda); display:flex; gap:8px; flex-wrap:wrap; }
+  .btn-excluir-lead { background:transparent; border:1px solid var(--borda); color:var(--cinza-2);
+                      margin-left:auto; }
+  .btn-excluir-lead:hover { border-color:var(--rosa); color:var(--rosa); }
   .btn-ficha    { padding:9px 14px; border-radius:7px; border:none; font-size:12px; font-weight:600; cursor:pointer; transition:.15s; flex:1; min-width:80px; }
   .btn-salvar   { background:var(--azul); color:#fff; }
   .btn-salvar:hover { background:#2563eb; }
@@ -526,6 +529,12 @@
         <button type="button" onclick="mesclarDuplicados(this)">
           Mesclar duplicados
           <small>Junta leads repetidos pelo telefone</small>
+        </button>
+        {# EXCLUSÃO VISÍVEL. Excluir só pode ser fácil se der pra auditar: aqui
+           fica quem apagou, quem era e quando. #}
+        <button type="button" onclick="location.href='/crm/excluidos'">
+          Leads excluídos
+          <small>Quem foi apagado, por quem e quando</small>
         </button>
 
         <div class="crm-mais-tit">Time</div>
@@ -985,6 +994,11 @@
 
       <div class="ficha-acoes">
         <button class="btn-ficha btn-salvar" onclick="salvarFicha()">Salvar</button>
+        {# NÃO É LEAD: o caso do amigo que a extensão cadastrou sozinha. Fica ao
+           lado do Salvar, discreto — é ação rara, mas tem que estar onde a
+           pessoa já está olhando quando percebe o engano. #}
+        <button class="btn-ficha btn-excluir-lead" onclick="excluirLeadFicha()"
+                title="Apaga este lead. Fica registrado em Leads excluídos com o seu nome.">Não é lead — excluir</button>
       </div>
 
       <!-- Modal: Modelos de SMS -->
@@ -1671,6 +1685,19 @@ document.querySelectorAll('.tipo-btn').forEach(btn=>{
     document.getElementById('ativ-tipo-label').textContent=L[_tipoAtiv]||_tipoAtiv;
   });
 });
+
+// EXCLUIR: pede o motivo e avisa que fica registrado. O motivo não é
+// burocracia — é o que separa "amigo cadastrado por engano" de card sumindo
+// sem explicação, quando alguém for auditar meses depois.
+async function excluirLeadFicha(){
+  if(!_leadAtual) return;
+  const motivo = prompt('Excluir "'+(_leadAtual.nome||'este lead')+'"?\n\nIsso fica registrado em Leads excluídos com o seu nome, a data e o motivo.\n\nPor que não é lead? (ex: amigo, fornecedor, engano da extensão)');
+  if(motivo === null) return;
+  const r = await (await fetch('/crm/lead/'+_leadAtual.id+'/excluir', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({motivo: motivo})})).json();
+  if(r.ok){ toast('Lead excluído','ok'); fecharFicha(); setTimeout(()=>location.reload(), 600); }
+  else alert(r.erro || 'Não consegui excluir.');
+}
 
 async function salvarFicha(){
   if(!_leadAtual) return;
