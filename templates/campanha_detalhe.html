@@ -34,6 +34,14 @@
 .st.respondeu { background:rgba(31,216,164,.2); color:var(--teal); font-weight:700; }
 .st.sem_resposta, .st.invalido { background:rgba(244,63,94,.12); color:var(--rosa); }
 .st.excluido { background:rgba(148,163,184,.12); color:var(--cinza); }
+/* A data do disparo é o que se procura na tela — ganha peso e um fundo
+   levíssimo pra se achar de relance. Sai de token, então acompanha o tema. */
+.camp-quando { display:inline-block; font-weight:700; color:var(--info);
+  background:color-mix(in srgb, var(--info) 12%, transparent);
+  border-radius:5px; padding:1px 7px; }
+@supports not (background: color-mix(in srgb, red 10%, transparent)) {
+  .camp-quando { background:transparent; }
+}
 </style>
 {% endblock %}
 
@@ -94,9 +102,7 @@
     <div style="font-size:12.5px;margin-top:12px;border-top:1px solid var(--borda);padding-top:12px;display:flex;gap:22px;flex-wrap:wrap;">
       <div><span style="color:var(--cinza);">
         {% if janela.dias > 1 %}Disparado entre:{% else %}Disparado em:{% endif %}</span>
-        <b>{{ janela.inicio }}{% if janela.dias > 1 %} e {{ janela.fim }}{% endif %}</b>
-        {% if janela.dias > 1 %}<span style="color:var(--cinza-2);"> · {{ janela.dias }} dias</span>
-        {% else %}<span style="color:var(--cinza-2);"> · num dia só</span>{% endif %}
+        <span class="camp-quando">{{ janela.inicio }}{% if janela.dias > 1 %} e {{ janela.fim }} · {{ janela.dias }} dias{% else %} · num dia só{% endif %}</span>
         {% if janela.em_andamento %}<span style="color:var(--cinza-2);"> · ainda rodando</span>{% endif %}
       </div>
       <div><span style="color:var(--cinza);">Já enviados:</span> <b>{{ janela.enviados }}</b> de {{ contatos|length }}</div>

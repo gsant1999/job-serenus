@@ -14,6 +14,18 @@
 .camp-card a.nome { font-size:16px; font-weight:700; color:var(--texto); text-decoration:none; }
 .camp-card a.nome:hover { color:var(--teal); }
 .camp-sub { font-size:11.5px; color:var(--cinza); margin-top:2px; }
+/* A DATA DO DISPARO É O QUE SE PROCURA nesta linha — o resto (id, teto) é
+   referência. Ela ganha peso e um fundo levíssimo pra se achar de relance numa
+   lista de campanhas com nomes parecidos. Sai de token nos dois temas: no claro
+   o mesmo azul precisa escurecer, senão vira mancha sem contraste. */
+.camp-quando { display:inline-block; font-weight:700; color:var(--info);
+  background:color-mix(in srgb, var(--info) 12%, transparent);
+  border-radius:5px; padding:1px 7px; margin-left:2px; }
+/* Fallback pra navegador sem color-mix: cor sólida, sem fundo — melhor perder o
+   realce do fundo do que exibir um retângulo preto. */
+@supports not (background: color-mix(in srgb, red 10%, transparent)) {
+  .camp-quando { background:transparent; }
+}
 .camp-metrics { display:flex; gap:20px; font-size:12px; color:var(--cinza); text-align:center; }
 .camp-metrics b { font-family:'Sora',sans-serif; font-size:17px; display:block; color:var(--texto); }
 .camp-bar { height:5px; background:var(--borda); display:flex; }
@@ -129,9 +141,8 @@ input.campo:focus, textarea.campo:focus { outline:none; border-color:var(--teal)
           <a class="nome" href="/campanha/{{ c.id }}">{{ c.nome }}</a>
           {# A data do disparo fica JUNTO do nome, não numa coluna nova: é o que
              responde "essa campanha é de quando?" antes de abrir. #}
-          <div class="camp-sub">#{{ c.id }} · teto {{ c.teto_dia }}/dia por consultor{% if c.disp_ini %} ·
-            {% if c.disp_dias > 1 %}disparada de {{ c.disp_ini }} a {{ c.disp_fim }} ({{ c.disp_dias }} dias)
-            {% else %}disparada em {{ c.disp_ini }}{% endif %}
+          <div class="camp-sub">#{{ c.id }} · teto {{ c.teto_dia }}/dia por consultor{% if c.disp_ini %}
+            <span class="camp-quando">{% if c.disp_dias > 1 %}disparada de {{ c.disp_ini }} a {{ c.disp_fim }} · {{ c.disp_dias }} dias{% else %}disparada em {{ c.disp_ini }}{% endif %}</span>
           {% endif %}</div>
         </div>
         <div class="camp-metrics">
