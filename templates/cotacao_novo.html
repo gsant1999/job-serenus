@@ -254,6 +254,18 @@
   .cv-janela-pe { display:flex; gap:10px; align-items:center; justify-content:flex-end;
     padding:14px 22px 18px; border-top:1px solid var(--borda); }
   .cv-janela-pe span { flex:1; font-size:12px; color:var(--cinza); }
+
+  .cv-cob { border-collapse:collapse; font-size:12px; width:100%; }
+  .cv-cob th { padding:6px 7px; font-size:9.5px; text-transform:uppercase; letter-spacing:.4px;
+    color:var(--cinza-2); font-weight:700; border-bottom:1px solid var(--borda-2);
+    white-space:nowrap; text-align:center; }
+  .cv-cob td { padding:6px 7px; border-bottom:1px solid var(--borda); text-align:center; }
+  .cv-cob td.op { text-align:left; white-space:nowrap; color:var(--texto); font-weight:600;
+    position:sticky; left:0; background:var(--panel); }
+  .cv-cob td.sim { color:var(--verde); font-size:15px; }
+  .cv-cob td.nao { color:var(--borda-2); }
+  .cv-cob tbody tr:hover td { background:var(--panel-2); }
+  .cv-cob tbody tr:hover td.op { background:var(--panel-2); }
 </style>
 {% endblock %}
 
@@ -361,6 +373,25 @@
 </div>
 
 </div><!-- /.page -->
+
+<!-- Quem atende cada idade: pergunta ao Painel faixa por faixa e monta a
+     matriz. Responde de uma vez "por que fulana não aparece" — e o que sai daí
+     é inteligência de mercado, não só depuração. -->
+<div class="cv-janela" id="janelaCobertura">
+  <div class="cv-janela-cx">
+    <div class="cv-janela-topo">
+      <div>
+        <h2>Quem atende cada idade</h2>
+        <p id="cobSub">Uma consulta por faixa etária, direto no Painel. Mostra a quem cada
+           operadora vende — e por que alguma some quando você muda a idade ou o número de vidas.</p>
+      </div>
+      <button type="button" class="cv-janela-x" id="fecharCobertura" title="Fechar">×</button>
+    </div>
+    <div class="cv-janela-corpo" id="cobCorpo">
+      <p class="cv-ops-vazio">Carregando…</p>
+    </div>
+  </div>
+</div>
 
 <!-- Vidas por faixa: janela, como no Painel. Fora do caminho até ser pedida. -->
 <div class="cv-janela" id="janelaVidas">
@@ -840,7 +871,9 @@
             esc(nomeCompleto(tipoAtivo() || '')) + ' · <b>' + esc(resumoVidas()) + '</b> · ' +
             operadoras.length + ' operadoras' +
             (urlDaPergunta ? ' · <a href="' + esc(urlDaPergunta) + '" target="_blank" ' +
-              'rel="noopener">conferir esta mesma pergunta no Painel</a>' : '');
+              'rel="noopener">conferir no Painel</a>' : '') +
+            ' · <button type="button" class="cv-link" id="btCobertura">quem atende cada idade</button>';
+          el('btCobertura').onclick = verCobertura;
           voltarPara('operadoras');
           return;
         }
@@ -1008,6 +1041,56 @@
   function atualizarBotao() {
     el('btCotar').disabled = !(pronto && cidadeEscolhida && totalVidas() > 0 &&
                                modalidadeAtiva() != null);
+  }
+
+  // ── quem atende cada idade ─────────────────────────────────────────────
+  el('fecharCobertura').onclick = function () { el('janelaCobertura').className = 'cv-janela'; };
+  el('janelaCobertura').addEventListener('click', function (ev) {
+    if (ev.target === el('janelaCobertura')) el('janelaCobertura').className = 'cv-janela';
+  });
+
+  async function verCobertura() {
+    if (!cidadeEscolhida || modalidadeAtiva() == null) return;
+    el('janelaCobertura').className = 'cv-janela ver';
+    el('cobCorpo').innerHTML = '<p class="cv-ops-vazio">Perguntando ao Painel, uma faixa por vez — ' +
+      'são onze consultas, leva uns dez segundos.</p>';
+    var r = await pedir('passo', { pedido: { acao: 'cobertura', cidade: cidadeEscolhida,
+                                             modalidade: modalidadeAtiva(), vidas: vidasLista() } }, 120000);
+    if (!r.ok) {
+      el('cobCorpo').innerHTML = '<p class="cv-ops-vazio">Não deu: ' + esc(r.motivo || '?') + '</p>';
+      return;
+    }
+    desenharCobertura((r.dados && r.dados.linhas) || []);
+  }
+
+  function desenharCobertura(linhas) {
+    // Matriz operadora × faixa. Ler por linha responde "quem atende os 59+";
+    // ler por coluna responde "a partir de que idade a fulana vende".
+    var todas = {};
+    linhas.forEach(function (l) {
+      (l.operadoras || []).forEach(function (n) { todas[n] = true; });
+    });
+    var nomes = Object.keys(todas).sort();
+    if (!nomes.length) {
+      el('cobCorpo').innerHTML = '<p class="cv-ops-vazio">Nenhuma operadora respondeu.</p>';
+      return;
+    }
+    var cab = linhas.map(function (l) {
+      if (l.faixa === 'todas') return '<th title="uma vida em cada faixa">10 vidas</th>';
+      var i = FAIXAS.indexOf(l.faixa);
+      return '<th>' + (i >= 0 ? ROTULOS[i] : l.faixa) + '</th>';
+    }).join('');
+    var corpo = nomes.map(function (n) {
+      return '<tr><td class="op">' + esc(n) + '</td>' + linhas.map(function (l) {
+        var tem = (l.operadoras || []).indexOf(n) >= 0;
+        return '<td class="' + (tem ? 'sim' : 'nao') + '">' + (tem ? '●' : '·') + '</td>';
+      }).join('') + '</tr>';
+    }).join('');
+    el('cobSub').innerHTML = 'Em <b>' + esc(cidadeEscolhida) + '</b> · ' +
+      esc(nomeCompleto(tipoAtivo() || '')) + '. Cada coluna é uma consulta com <b>uma vida</b> ' +
+      'naquela faixa; a última é com uma vida em cada faixa. Bolinha cheia = atende.';
+    el('cobCorpo').innerHTML = '<div style="overflow:auto"><table class="cv-cob">' +
+      '<thead><tr><th></th>' + cab + '</tr></thead><tbody>' + corpo + '</tbody></table></div>';
   }
 
   // ── cotar ──────────────────────────────────────────────────────────────

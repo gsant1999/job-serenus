@@ -739,6 +739,42 @@
     // listagem inteira e vai direto ao preço — mas o preço lê a cidade DA
     // cotação. Sem este passo separado, pular a listagem traria de volta o
     // http_500 por outro caminho.
+    // QUEM ATENDE, FAIXA POR FAIXA.
+    //
+    // O Guilherme perguntou por que a MedSenior nao aparece e por que a Saude
+    // Beneficencia some no 59+. Eu vinha respondendo com deducao em cima de uma
+    // captura antiga — e deducao nao encerra pergunta. Isto pergunta ao Painel
+    // uma vez por faixa e devolve a matriz: quem atende cada idade, e com
+    // quantas vidas.
+    //
+    // Onze consultas leves, sob demanda, so quando alguem pede. Vale porque
+    // responde de uma vez uma classe inteira de duvida — e o que sai daqui e
+    // inteligencia de mercado, nao so depuracao: diz a quem cada operadora
+    // vende.
+    if (a === 'cobertura') {
+      const faixas = _TODAS_FAIXAS;
+      const linhas = [];
+      let cid = ultimaCotacao;
+      if (!cid) { cid = await criarCotacao(); ultimaCotacao = cid; await respira(400, 1100); }
+      for (const f of faixas) {
+        const vidas = [{ faixa: f, quantidade: 1 }];
+        try {
+          const ops = await operadorasDaCidade(cid, { cidade: p.cidade, modalidade: p.modalidade, vidas });
+          linhas.push({ faixa: f, vidas: 1, operadoras: ops.map((o) => o.nome) });
+        } catch (e) {
+          linhas.push({ faixa: f, vidas: 1, erro: String(e && e.message || e), operadoras: [] });
+        }
+        await respira(260, 800);
+      }
+      // E uma rodada com as dez faixas cheias: e assim que aparece quem so
+      // vende a partir de um numero minimo de vidas.
+      try {
+        const todas = faixas.map((f) => ({ faixa: f, quantidade: 1 }));
+        const ops = await operadorasDaCidade(cid, { cidade: p.cidade, modalidade: p.modalidade, vidas: todas });
+        linhas.push({ faixa: 'todas', vidas: 10, operadoras: ops.map((o) => o.nome) });
+      } catch (e) { /* a matriz por faixa ja vale sozinha */ }
+      return { cidade: p.cidade, modalidade: p.modalidade, linhas };
+    }
     if (a === 'filtro') {
       await salvarFiltro(p.cotacaoId, p);
       return { ok: true };
