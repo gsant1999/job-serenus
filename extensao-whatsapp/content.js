@@ -35,49 +35,17 @@
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  // ── A wa-js entra DEPOIS que o WhatsApp terminou de abrir ─────────────────
+  // A wa-js volta a carregar junto com o resto, pelo manifesto.
   //
-  //  A wa-js tem meio megabyte e, ao carregar, se enfia no carregador de
-  //  modulos do proprio WhatsApp. Ela estava no manifesto junto com o resto,
-  //  ou seja, o navegador tinha que ler, compilar e deixar ela remendar o
-  //  WhatsApp AO MESMO TEMPO em que o WhatsApp tentava subir. Era disputa pela
-  //  mesma thread no pior momento possivel — a tela da barrinha de carregando
-  //  parada por muito tempo.
+  // Eu tinha passado a injeta-la DEPOIS que o WhatsApp abre, pra tirar meio
+  // segundo de compilacao do caminho da inicializacao. Ganho real, e eu avisei
+  // que nao conseguia testar dentro do WhatsApp — o Guilherme testou: a tela
+  // ficava EM BRANCO ao voltar pra aba. Carregar a wa-js com o app ja rodando
+  // mexe no carregador de modulos dele em hora ruim.
   //
-  //  Nada aqui deixou de funcionar: transcricao, leitura de documento, envio e
-  //  o aviso de mensagem nova continuam iguais. So passam a existir alguns
-  //  segundos depois, quando a conversa ja esta na tela e a maquina esta livre.
-  //  A ponte ja era escrita pra isso: todo handler dela confere se a wa-js
-  //  existe antes de usar, e o gancho de mensagem nova tenta de novo sozinho.
-  function _carregarWaJs() {
-    if (window.__jobWaJsPedida) return;
-    window.__jobWaJsPedida = true;
-    try {
-      const s = document.createElement('script');
-      s.src = chrome.runtime.getURL('wa-js.vendor.js');
-      // Some do DOM assim que executa: script pendurado na pagina de terceiro
-      // e rastro, e este nao precisa ficar.
-      s.onload = () => { try { s.remove(); } catch (e) {} };
-      (document.head || document.documentElement).appendChild(s);
-    } catch (e) { /* sem wa-js a extensao perde recurso, nao quebra */ }
-  }
-
-  function _agendarWaJs() {
-    // Espera a lista de conversas existir: e o sinal de que o WhatsApp acabou
-    // de subir. Antes disso, qualquer trabalho nosso e trabalho tirado dele.
-    let tentativas = 0;
-    const olhar = () => {
-      const pronto = document.querySelector('#pane-side') || document.querySelector('#main');
-      if (pronto || ++tentativas > 60) {          // teto de 60s: nao espera pra sempre
-        const ocioso = window.requestIdleCallback || ((fn) => setTimeout(fn, 1500));
-        ocioso(_carregarWaJs, { timeout: 4000 });
-        return;
-      }
-      setTimeout(olhar, 1000);
-    };
-    olhar();
-  }
-  _agendarWaJs();
+  // Fica registrado pra ninguem tentar de novo achando que e otimizacao de
+  // graca: WhatsApp em branco custa o dia do consultor; meio segundo na
+  // abertura custa meio segundo.
 
   // Base do site do JOB — pro link "Gerenciar funis no site". Padrão é produção;
   // se o popup configurou outra URL (jobUrl), hidrata daqui pra respeitar.
