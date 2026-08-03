@@ -134,11 +134,69 @@
   // deles, não na chamada. Então a extensão só coleta o NÚMERO, e quem dá
   // nome é o Guilherme, uma vez, na tela de cotação do JOB. Chutar que 1 é PF
   // seria pedir preço do produto errado e mostrar como certo.
+  // O NOME está na tela deles. Basta olhar.
+  //
+  // Eu vinha pedindo pro Guilherme batizar cada código, e ele tem razão em não
+  // querer: descobrir os parâmetros do Painel é obrigação nossa. Quando ele faz
+  // uma cotação, a tela deles tem os dois seletores na cara — Saúde/Dental e
+  // PF/PME/Adesão — com o escolhido marcado. É só ler junto com o código.
+  //
+  // Falha em silêncio de propósito. Se eles redesenharem e o rótulo não for
+  // achado, a extensão simplesmente não aprende o nome: o código continua
+  // funcionando e ninguém recebe preço errado. Rótulo é conveniência; preço é
+  // dinheiro, e por isso preço nunca depende de leitura de tela.
+  const _RAMOS = ['Saúde', 'Saude', 'Dental', 'Odonto'];
+  const _TIPOS = ['PF', 'PME', 'Adesão', 'Adesao'];
+
+  function _marcado(el) {
+    if (!el) return false;
+    if (el.getAttribute('aria-selected') === 'true') return true;
+    if (el.getAttribute('aria-checked') === 'true') return true;
+    if (el.getAttribute('data-state') === 'active') return true;
+    if (el.getAttribute('data-headlessui-state') === 'selected') return true;
+    // Sem atributo semântico, sobra a aparência: o botão escolhido do par tem
+    // fundo próprio. Só vale como último recurso, e por isso vem por último.
+    try {
+      const c = getComputedStyle(el).backgroundColor;
+      return !!c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent';
+    } catch (e) { return false; }
+  }
+
+  function _rotuloAtivo(candidatos) {
+    const alvos = [];
+    document.querySelectorAll('button, [role="tab"], [role="radio"], label').forEach((el) => {
+      const t = (el.textContent || '').trim();
+      if (candidatos.indexOf(t) >= 0) alvos.push(el);
+    });
+    // Só confia quando existe o PAR na tela (Saúde e Dental, ou PF/PME/Adesão).
+    // Um rótulo solto pode ser qualquer coisa escrita em qualquer lugar.
+    if (alvos.length < 2) return '';
+    const escolhido = alvos.filter(_marcado);
+    return escolhido.length === 1 ? (escolhido[0].textContent || '').trim() : '';
+  }
+
+  function _nomeDaModalidadeNaTela() {
+    const ramo = _rotuloAtivo(_RAMOS);
+    const tipo = _rotuloAtivo(_TIPOS);
+    if (!tipo) return '';
+    const t = tipo === 'Adesao' ? 'Adesão' : tipo;
+    const ehDental = ramo === 'Dental' || ramo === 'Odonto';
+    return ehDental ? (t + ' Dental') : t;
+  }
+
   function anotarModalidade(papel, corpo) {
     if (papel !== 'operadoras' && papel !== 'planos') return;
     try {
       const d = JSON.parse(corpo)[0];
       const m = (d.filtro || d).modalidade;
+      if (typeof m === 'number') {
+        const nome = _nomeDaModalidadeNaTela();
+        if (nome && MODALIDADES[m] !== nome) {
+          MODALIDADES[m] = nome;
+          window.postMessage({ source: 'JOB_COTADOR', tipo: 'modalidade_nomeada',
+                               codigo: m, nome }, ORIGEM);
+        }
+      }
       if (typeof m === 'number' && !MODALIDADES[m]) {
         MODALIDADES[m] = true;
         window.postMessage({ source: 'JOB_COTADOR', tipo: 'modalidades',

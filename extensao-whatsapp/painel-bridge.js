@@ -46,6 +46,16 @@
       try { chrome.storage.local.set({ [CHAVE]: d.dados }); } catch (e) { /* idem */ }
       return;
     }
+    // A extensao descobriu sozinha como se chama um codigo: manda pro JOB
+    // guardar. Sem passar pelo consultor — era isso que estava sobrando.
+    if (d.tipo === 'modalidade_nomeada' && d.codigo != null && d.nome) {
+      try {
+        chrome.runtime.sendMessage({ type: 'modalidade_nomeada',
+                                     codigo: d.codigo, nome: d.nome },
+                                   () => { void chrome.runtime.lastError; });
+      } catch (e) { /* sem JOB, o nome fica so nesta aba */ }
+      return;
+    }
     if (d.tipo === 'modalidades' && Array.isArray(d.dados)) {
       try { chrome.storage.local.set({ [CHAVE_MOD]: d.dados }); } catch (e) { /* idem */ }
       return;

@@ -251,5 +251,12 @@ v4 = c.get('/cotacao/catalogo/alvos').get_json()['vencido']
 ok(v4 and v4['cidade'] == 'Hortolandia - SP', '17h. passado o intervalo, volta pra fila')
 
 
+# 18. A extensao batiza o codigo sozinha (le o rotulo na tela do Painel)
+ok(c.post('/api/whatsapp/cotacao/modalidade', json={'codigo': 3, 'nome': 'Adesao'}).status_code == 401,
+   '18. sem chave, nao batiza')
+ok(c.post('/api/whatsapp/cotacao/modalidade', json={'codigo': 3},
+          headers={'X-Extension-Key': 'errada'}).status_code == 401,
+   '18b. chave errada tambem nao')
+
 print('\n' + ('%d FALHA(S)' % len(falhas) if falhas else 'tudo passou (final)'))
 sys.exit(1 if falhas else 0)

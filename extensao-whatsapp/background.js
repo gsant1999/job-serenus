@@ -346,6 +346,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Rodizio da varredura: a extensao pergunta o que venceu e devolve o que
   // varreu. O content script nao consegue falar com o JOB direto (CSP do
   // WhatsApp), entao passa por aqui como todo o resto.
+  if (msg && msg.type === 'modalidade_nomeada') {
+    chamarJob('/api/whatsapp/cotacao/modalidade', 'POST',
+              { codigo: msg.codigo, nome: msg.nome }, 15000, null, { repetivel: true })
+      .then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'catalogo_proximo') {
     chamarJob('/api/whatsapp/catalogo/proximo', 'GET', null, 15000).then(sendResponse);
     return true;

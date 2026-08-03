@@ -24259,6 +24259,38 @@ def api_whatsapp_cotacao():
     return _wa_cors(jsonify({'ok': True, 'id': vid, 'url': '/cotacao/viva/%d' % vid}))
 
 
+@app.route('/api/whatsapp/cotacao/modalidade', methods=['POST', 'OPTIONS'])
+def api_whatsapp_cotacao_modalidade():
+    """A extensão descobriu sozinha como um código se chama.
+
+    Ela lê o rótulo na tela do Painel junto com o código — Saúde/Dental e
+    PF/PME/Adesão estão lá, marcados. Antes disso o JOB perguntava ao
+    consultor, e ele tinha razão em reclamar: descobrir os parâmetros do
+    Painel é obrigação nossa, não pergunta pra quem está atendendo cliente."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({'ok': False, 'erro': 'Chave da extensão inválida'})), 401
+    d = request.get_json(silent=True) or {}
+    try:
+        codigo = int(d.get('codigo'))
+    except Exception:
+        return _wa_cors(jsonify({'ok': False, 'erro': 'codigo_invalido'})), 400
+    nome = str(d.get('nome') or '').strip()[:40]
+    if not nome:
+        return _wa_cors(jsonify({'ok': False, 'erro': 'sem_nome'})), 400
+    conn = db()
+    try:
+        conn.execute("DELETE FROM cotacao_modalidade WHERE codigo=?", (codigo,))
+        conn.execute("INSERT INTO cotacao_modalidade (codigo, nome, criado_em) VALUES (?,?,?)",
+                     (codigo, nome, _agora_sp()))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        return _wa_cors(jsonify({'ok': False, 'erro': 'falha_ao_salvar'})), 500
+    return _wa_cors(jsonify({'ok': True, 'modalidades': _modalidades_conhecidas(conn)}))
+
+
 @app.route('/api/whatsapp/cotacao/modalidades', methods=['GET', 'OPTIONS'])
 def api_whatsapp_cotacao_modalidades():
     """Nomes já batizados, pra extensão mostrar o mesmo rótulo que o site."""
