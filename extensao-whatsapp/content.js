@@ -3800,6 +3800,11 @@
     if (_secaoAtiva !== 'inbox') return;
     setCorpoSecaoInbox(renderInbox());
     ligarAcoesInbox();
+    // FALTAVA ISTO. O botao de sincronizar @lid era desenhado toda vez, mas o
+    // clique so era ligado quando a lista se redesenhava por OUTRO motivo
+    // (atender um lead). Ao abrir a aba — o caminho normal — ele estava la,
+    // visivel e morto: clicar nao fazia nada e nao dizia nada.
+    _ligarSincLid();
   }
 
   async function buscarInbox() {
