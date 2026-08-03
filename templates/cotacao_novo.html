@@ -63,11 +63,16 @@
     outline:none; font-family:inherit; }
   .cv-campo input:focus { border-color:var(--azul); }
   .cv-campo input::placeholder { color:var(--cinza-2); }
-  .cv-fixar { position:absolute; right:8px; top:50%; transform:translateY(-50%);
-    background:none; border:none; cursor:pointer; font-size:12px; padding:4px 6px;
-    color:var(--cinza-2); font-family:inherit; border-radius:6px; }
-  .cv-fixar:hover { color:var(--texto); background:var(--panel-2); }
-  .cv-fixar.on { color:var(--verde); }
+  .cv-lembrar { display:flex; align-items:center; gap:9px; width:100%; text-align:left;
+    background:none; border:none; padding:2px 2px 4px; cursor:pointer; font-family:inherit;
+    color:var(--cinza); font-size:12.5px; margin-top:-4px; }
+  .cv-lembrar:hover { color:var(--texto); }
+  .cv-lembrar .marca { width:17px; height:17px; border-radius:5px; flex:none;
+    border:1.5px solid var(--borda-2); display:flex; align-items:center;
+    justify-content:center; font-size:11px; color:transparent; }
+  .cv-lembrar:hover .marca { border-color:var(--azul); }
+  .cv-lembrar.on { color:var(--verde); font-weight:600; }
+  .cv-lembrar.on .marca { background:var(--verde); border-color:var(--verde); color:#fff; }
 
   .cv-campo-bt { width:100%; text-align:left; background:var(--panel);
     border:1px solid var(--borda-2); border-radius:11px; padding:12px 14px;
@@ -288,10 +293,14 @@
       <input id="cidade" type="text" autocomplete="off" placeholder="Cidade…"
              value="{{ salva.cidade if salva else (cidade_preferida or '') }}">
       <div id="sugCidade" class="cv-sug"></div>
-      <!-- A cidade de sempre vem preenchida; trocar continua sendo um clique.
-           Fixar guarda no JOB, não no navegador: a preferência segue a pessoa. -->
-      <button type="button" class="cv-fixar" id="btFixarCidade" title="Deixar como cidade padrão"></button>
     </div>
+    <!-- Linha própria, com palavra inteira e marca visível.
+         Eu tinha posto isso como um "fixada" cinza de 12px encostado na borda
+         do campo — o Guilherme pediu a função duas vezes sem achar que ela já
+         existia. Recurso que não se acha é recurso que não existe. -->
+    <button type="button" class="cv-lembrar" id="btFixarCidade">
+      <span class="marca"></span><span class="txt"></span>
+    </button>
 
     <button type="button" class="cv-campo-bt" id="btVidas">
       <span id="vidasResumo">Quantas vidas…</span>
@@ -581,6 +590,18 @@
   function totalVidas() {
     return FAIXAS.reduce(function (s, f) { return s + (vidas[f] || 0); }, 0);
   }
+  // Texto curto da distribuição, pra caber numa linha: "2 vidas (19-23, 24-28)".
+  function resumoVidas() {
+    var v = vidasLista();
+    if (!v.length) return 'sem vidas';
+    var t = totalVidas();
+    var nomes = v.map(function (x) {
+      var i = FAIXAS.indexOf(x.faixa);
+      return i >= 0 ? ROTULOS[i] : x.faixa;
+    });
+    return t + (t === 1 ? ' vida' : ' vidas') + ' (' + nomes.join(', ') + ')';
+  }
+
   function vidasLista() {
     return FAIXAS.map(function (f) { return { faixa: f, quantidade: vidas[f] || 0 }; })
                  .filter(function (v) { return v.quantidade > 0; });
@@ -646,11 +667,15 @@
   function pintarFixar() {
     var b = el('btFixarCidade');
     var fixada = cidadeEscolhida && cidadeEscolhida === CIDADE_PREFERIDA;
-    b.className = 'cv-fixar' + (fixada ? ' on' : '');
-    b.textContent = fixada ? 'fixada' : 'fixar';
-    b.title = fixada ? 'Esta é a sua cidade padrão — clique pra soltar'
-                     : 'Deixar como cidade padrão, pra já vir preenchida';
-    b.style.display = cidadeEscolhida ? '' : 'none';
+    b.className = 'cv-lembrar' + (fixada ? ' on' : '');
+    b.querySelector('.marca').textContent = fixada ? '✓' : '';
+    // A frase diz a cidade pelo nome e o que acontece. "Fixar" sozinho não
+    // conta o que muda; isto conta.
+    b.querySelector('.txt').textContent = fixada
+      ? 'Esta é a sua cidade padrão — já vem preenchida'
+      : 'Lembrar ' + cidadeEscolhida + ' como minha cidade';
+    b.style.display = cidadeEscolhida ? 'flex' : 'none';
+    b.title = fixada ? 'Clique pra soltar' : 'Clique pra guardar; trocar segue livre';
   }
   el('btFixarCidade').onclick = async function () {
     var nova = (cidadeEscolhida === CIDADE_PREFERIDA) ? '' : cidadeEscolhida;
@@ -767,7 +792,16 @@
           { acao: 'operadoras', cotacaoId: rc.dados.cotacaoId }, b) }, 45000);
         if (r.ok) {
           operadoras = (r.dados && r.dados.operadoras) || [];
-          el('mainSub').textContent = 'Escolha a operadora e vá até o plano do seu cliente.';
+          // DIZ EM CIMA DE QUE PERGUNTA a lista foi montada.
+          //
+          // Quem atende muda com a faixa etária: com 1 vida em 19-23 a
+          // MedSênior não aparece, e com o mesmo cliente aos 60 ela aparece.
+          // Sem esta linha, comparar com a tela do Painel — que pode estar com
+          // outra distribuição — parece erro do JOB quando são duas perguntas
+          // diferentes.
+          el('mainSub').innerHTML = 'Quem atende <b>' + esc(cidadeEscolhida) + '</b> · ' +
+            esc(nomeCompleto(tipoAtivo() || '')) + ' · <b>' + esc(resumoVidas()) + '</b>. ' +
+            'Quem atende muda com a faixa etária.';
           voltarPara('operadoras');
           return;
         }
