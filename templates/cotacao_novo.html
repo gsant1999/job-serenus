@@ -72,6 +72,18 @@
     display:flex; justify-content:space-between; font-size:13px; }
   .cv-total-vidas b { font-size:17px; font-variant-numeric:tabular-nums; }
 
+  /* Uma linha por código descoberto: número, quem atende, e o que é.
+     Grade de três colunas em vez de campos empilhados — antes virava um
+     despejo de dados com um campo de texto solto repetido seis vezes. */
+  .cv-mod-linha { display:grid; grid-template-columns:auto 1fr 132px; gap:8px;
+    align-items:center; padding:5px 0; }
+  .cv-mod-linha .marca { justify-self:start; }
+  .cv-mod-linha .quem { font-size:11px; color:var(--cinza-2); overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; cursor:help; }
+  .cv-mod-linha select { background:var(--panel-2); border:1px solid var(--borda-2);
+    border-radius:8px; padding:6px 8px; color:var(--texto); font-size:12px; width:100%; }
+  .cv-mod-linha select:focus { border-color:var(--azul); outline:none; }
+
   .cv-pills { display:flex; gap:6px; flex-wrap:wrap; }
   .cv-pill { padding:7px 13px; border-radius:9px; border:1px solid var(--borda-2);
     background:var(--panel-2); color:var(--cinza); font-size:12px; font-weight:600; cursor:pointer; }
@@ -585,15 +597,38 @@
     var s = el('modalidade');
     var antes = s.value;
     s.innerHTML = '';
+    // Saúde e Dental em grupos separados. Seis itens numa lista corrida fazem
+    // o consultor ler todos pra achar o que quer; separados, ele vai direto.
+    var grupos = { 'Saúde': [], 'Dental': [] };
     Object.keys(MODALIDADES).forEach(function (c) {
-      var o = document.createElement('option');
-      o.value = c; o.textContent = MODALIDADES[c];
-      s.appendChild(o);
+      grupos[/dental|odonto/i.test(MODALIDADES[c]) ? 'Dental' : 'Saúde'].push(c);
+    });
+    ['Saúde', 'Dental'].forEach(function (ramo) {
+      if (!grupos[ramo].length) return;
+      // Com um grupo só, rótulo de grupo é enfeite: some.
+      var destino = s;
+      if (grupos['Saúde'].length && grupos['Dental'].length) {
+        destino = document.createElement('optgroup');
+        destino.label = ramo;
+        s.appendChild(destino);
+      }
+      grupos[ramo].forEach(function (c) {
+        var o = document.createElement('option');
+        o.value = c; o.textContent = MODALIDADES[c];
+        destino.appendChild(o);
+      });
     });
     s.value = (antes && MODALIDADES[antes]) ? antes : '2';
     // A tela deles tem PF, PME e Adesão. Enquanto tivermos menos que isso,
     // oferece descobrir — em vez de deixar o consultor achando que só existe PME.
-    el('modFaltando').style.display = Object.keys(MODALIDADES).length < 3 ? 'block' : 'none';
+    // São seis no Painel: PF, PME e Adesão, em Saúde e em Dental. Enquanto
+    // houver menos, oferece descobrir.
+    var falta = 6 - Object.keys(MODALIDADES).length;
+    el('modFaltando').style.display = falta > 0 ? 'block' : 'none';
+    var bt = el('btAcharMod');
+    if (bt) bt.textContent = Object.keys(MODALIDADES).length <= 1
+      ? 'Faltam PF, Adesão e os de Dental?'
+      : 'Descobrir os ' + falta + ' que faltam';
   }
 
   // Descobre os códigos perguntando ao Painel quem atende em cada um.
@@ -611,31 +646,75 @@
     if (!r.ok) { el('modAchados').textContent = 'Não deu: ' + (r.motivo || '?'); return; }
     var achados = (r.dados && r.dados.achados) || [];
     if (!achados.length) { el('modAchados').textContent = 'Nenhum código respondeu.'; return; }
+    desenharAchados(achados);
+  };
+
+  // Saúde ou Dental, deduzido de quem atende.
+  //
+  // Não é chute sobre o que o código significa — é leitura do que voltou: se a
+  // maioria das operadoras daquele código tem "odonto" ou "dental" no nome, é
+  // plano odontológico. Isso só agrupa e sugere; quem confirma é você, e é por
+  // isso que a sugestão vem escrita no campo em vez de ser aplicada sozinha.
+  function ramoDe(amostra) {
+    var dental = (amostra || []).filter(function (n) {
+      return /odonto|dental/i.test(n);
+    }).length;
+    return dental >= Math.ceil((amostra || []).length / 2) ? 'Dental' : 'Saúde';
+  }
+
+  var OPCOES = ['PF', 'PME', 'Adesão', 'PF Dental', 'PME Dental', 'Adesão Dental'];
+
+  function desenharAchados(achados) {
     var c = el('modAchados');
-    c.innerHTML = achados.map(function (a) {
-      return '<div style="display:flex;gap:7px;align-items:center;margin:7px 0;flex-wrap:wrap">' +
-        '<span class="marca">código ' + a.codigo + '</span>' +
-        '<span style="flex:1;min-width:170px;color:var(--cinza);font-size:11.5px">' +
-          a.quantas + ' operadoras: ' + esc(a.amostra.join(', ')) + '…</span>' +
-        '<input data-cod="' + a.codigo + '" placeholder="PF, PME, Adesão…" value="' +
-          esc(MODALIDADES[a.codigo] || '') + '" style="background:var(--panel-2);' +
-          'border:1px solid var(--borda-2);border-radius:8px;padding:6px 9px;' +
-          'color:var(--texto);font-size:12.5px;width:130px">' +
-        '<button type="button" class="btn btn-sm" data-salvar="' + a.codigo + '">Salvar</button></div>';
-    }).join('');
-    c.querySelectorAll('[data-salvar]').forEach(function (b) {
-      b.onclick = async function () {
-        var cod = b.dataset.salvar;
-        var nome = (c.querySelector('[data-cod="' + cod + '"]').value || '').trim();
-        if (!nome) return;
+    var grupos = { 'Saúde': [], 'Dental': [] };
+    achados.forEach(function (a) { grupos[ramoDe(a.amostra)].push(a); });
+
+    var html = '';
+    ['Saúde', 'Dental'].forEach(function (ramo) {
+      if (!grupos[ramo].length) return;
+      html += '<div style="margin-top:12px"><div style="font-size:9.5px;text-transform:uppercase;' +
+        'letter-spacing:.5px;color:var(--cinza-2);font-weight:700;margin-bottom:6px">' + ramo + '</div>';
+      grupos[ramo].forEach(function (a) {
+        var jaTem = MODALIDADES[a.codigo] || '';
+        html += '<div class="cv-mod-linha">' +
+          '<span class="marca">' + a.codigo + '</span>' +
+          '<span class="quem" title="' + esc(a.amostra.join(', ')) + '">' +
+            a.quantas + ': ' + esc(a.amostra.slice(0, 3).join(', ')) + '…</span>' +
+          '<select data-cod="' + a.codigo + '">' +
+            '<option value="">— escolha —</option>' +
+            OPCOES.filter(function (o) {
+              return ramo === 'Dental' ? /Dental/.test(o) : !/Dental/.test(o);
+            }).map(function (o) {
+              return '<option' + (jaTem === o ? ' selected' : '') + '>' + o + '</option>';
+            }).join('') +
+          '</select></div>';
+      });
+      html += '</div>';
+    });
+    html += '<div class="ct-linha-acao" style="margin-top:12px">' +
+      '<button type="button" class="btn btn-sm" id="btSalvarMods">Salvar</button>' +
+      '<span id="modSalvoMsg" style="font-size:11.5px;color:var(--cinza)"></span></div>';
+    c.innerHTML = html;
+
+    el('btSalvarMods').onclick = async function () {
+      this.disabled = true;
+      var quantos = 0;
+      var campos = c.querySelectorAll('select[data-cod]');
+      for (var i = 0; i < campos.length; i++) {
+        var nome = campos[i].value;
+        if (!nome) continue;
         var resp = await fetch('/cotacao/modalidade', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ codigo: Number(cod), nome: nome })
+          body: JSON.stringify({ codigo: Number(campos[i].dataset.cod), nome: nome })
         }).then(function (x) { return x.json(); }).catch(function () { return { ok: false }; });
-        if (resp.ok) { MODALIDADES = resp.modalidades; montarModalidades(); b.textContent = 'Salvo'; }
-      };
-    });
-  };
+        if (resp.ok) { MODALIDADES = resp.modalidades; quantos++; }
+      }
+      this.disabled = false;
+      montarModalidades();
+      el('modSalvoMsg').textContent = quantos
+        ? quantos + ' tipo(s) salvo(s).' : 'Escolha ao menos um.';
+    };
+  }
 
   // ── vidas por faixa ────────────────────────────────────────────────────
   var vidas = {};
