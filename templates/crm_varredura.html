@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Varredura de conversas{% endblock %}
+
+{% block head %}
+<style>
+  .vr-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:16px 0 18px; }
+  .vr-kpi { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:14px 16px; }
+  .vr-kpi .n { font-family:'Sora',sans-serif; font-size:24px; font-weight:700; line-height:1; }
+  .vr-kpi .l { font-size:11px; color:var(--cinza); text-transform:uppercase; letter-spacing:.5px; margin-top:6px; }
+  .vr-barra { height:10px; border-radius:6px; overflow:hidden; display:flex; background:var(--borda); margin-bottom:8px; }
+  .vr-barra > i { height:100%; display:block; }
+  .vr-cab { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; }
+  .vr-nota { background:var(--panel-2); border:1px solid var(--borda); border-left:3px solid var(--azul);
+             border-radius:9px; padding:12px 15px; font-size:13px; color:var(--cinza);
+             line-height:1.55; margin-bottom:18px; max-width:780px; }
+  .vr-tab { width:100%; border-collapse:collapse; font-size:13px; }
+  .vr-tab th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.5px;
+               color:var(--cinza-2); font-weight:700; padding:9px 12px; border-bottom:1px solid var(--borda); }
+  .vr-tab td { padding:10px 12px; border-bottom:1px solid var(--borda); }
+  .vr-tab tr.erro td { background:rgba(244,63,94,.05); }
+  .pill-st { font-size:11px; padding:2px 9px; border-radius:12px; font-weight:600; }
+  .pill-st.lido { background:rgba(31,216,164,.18); color:var(--teal); }
+  .pill-st.erro { background:rgba(244,63,94,.14); color:var(--rosa); }
+  .pill-st.lendo { background:rgba(59,130,246,.14); color:var(--info); }
+  .pill-st.pendente { background:rgba(148,163,184,.15); color:var(--cinza); }
+  .vr-motivo { color:var(--rosa); font-size:12px; }
+  .vr-voltar { color:var(--azul); text-decoration:none; font-size:13px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page">
+  <div class="vr-cab">
+    <div>
+      <h2 style="margin:0 0 4px;">Varredura de conversas · lote #{{ lote.id }}</h2>
+      <div style="font-size:12.5px;color:var(--cinza);">
+        {{ consultor or 'sem consultor' }} · {{ lote.total }} lead(s) · {{ lote.filtro_txt or '' }}
+      </div>
+      <a class="vr-voltar" href="/crm">← Voltar ao CRM</a>
+    </div>
+    <div>
+      {% if cont.pendente or cont.lendo %}
+      <span class="pill-st lendo">em andamento</span>
+      {% else %}
+      <span class="pill-st lido">terminado</span>
+      {% endif %}
+    </div>
+  </div>
+
+  {# O QUE ESTA TELA PROVA e o que ela NÃO prova. Quem abre isto quer decidir se
+     pode confiar no resultado — e pra isso precisa saber que a fila anda no
+     ritmo do servidor, não da tela aberta. #}
+  <div class="vr-nota">
+    A extensão pega <b>um lead por vez</b>, lê a conversa e devolve o resultado — com
+    <b>25 segundos de intervalo</b> entre um e outro. Nada roda preso na máquina do consultor:
+    se ele fechar o WhatsApp, o lote espera e continua quando abrir de novo.
+    {% if cont.pendente or cont.lendo %}
+      <br>Esta página <b>não</b> atualiza sozinha — recarregue pra ver o andamento.
+    {% endif %}
+  </div>
+
+  <div class="vr-kpis">
+    <div class="vr-kpi"><div class="n">{{ lote.total }}</div><div class="l">Leads no lote</div></div>
+    <div class="vr-kpi"><div class="n" style="color:var(--teal);">{{ cont.lido }}</div><div class="l">Lidos</div></div>
+    <div class="vr-kpi"><div class="n" style="color:var(--rosa);">{{ cont.erro }}</div><div class="l">Com erro</div></div>
+    <div class="vr-kpi"><div class="n" style="color:var(--cinza);">{{ cont.pendente + cont.lendo }}</div><div class="l">Na fila</div></div>
+  </div>
+
+  <div class="vr-barra">
+    <i style="width:{{ (cont.lido / lote.total * 100) if lote.total else 0 }}%;background:var(--teal);"></i>
+    <i style="width:{{ (cont.erro / lote.total * 100) if lote.total else 0 }}%;background:var(--rosa);"></i>
+  </div>
+
+  {% if cont.erro %}
+  <p style="font-size:12.5px;color:var(--cinza);margin:14px 0 6px;">
+    Os que deram erro aparecem primeiro, com o motivo. Erro aqui quase sempre é
+    conversa apagada do WhatsApp ou telefone que mudou de dono — não é o lead que sumiu.
+  </p>
+  {% endif %}
+
+  <div style="overflow-x:auto;">
+    <table class="vr-tab">
+      <thead><tr><th>Lead</th><th>Conversa</th><th>Estado</th><th>Quando</th><th>Motivo</th></tr></thead>
+      <tbody>
+        {% for i in itens %}
+        <tr class="{{ 'erro' if i.status == 'erro' }}">
+          <td><a href="/crm?lead={{ i.lead_id }}" style="color:var(--azul);text-decoration:none;">{{ i.lead_nome or ('#' ~ i.lead_id) }}</a></td>
+          <td style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--cinza-2);">{{ (i.chat_id or '').split('@')[0] }}</td>
+          <td><span class="pill-st {{ i.status }}">{{ i.status }}</span></td>
+          <td style="white-space:nowrap;color:var(--cinza-2);font-size:12px;">{{ i.quando or '—' }}</td>
+          <td class="vr-motivo">{{ i.erro or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

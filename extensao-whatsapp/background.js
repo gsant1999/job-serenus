@@ -329,6 +329,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/varredura/leads?' + q.toString(), 'GET', null, 30000).then(sendResponse);
     return true;
   }
+  // UM item por vez — o servidor e quem tem a fila. Ver o comentario da rota.
+  if (msg && msg.type === 'varredura_proximo') {
+    chamarJob('/api/whatsapp/varredura/proximo?consultor_id=' +
+      encodeURIComponent(msg.consultor_id || ''), 'GET', null, 20000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'varredura_resultado') {
+    chamarJob('/api/whatsapp/varredura/item', 'POST',
+      { item_id: msg.item_id, ok: !!msg.ok, erro: msg.erro || '' }, 20000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'analisar_varredura') {
     // Timeout generoso: a analise transcreve audio que ainda nao tem cache.
     chamarJob('/api/whatsapp/analisar', 'POST', msg.payload || {}, 180000).then(sendResponse);

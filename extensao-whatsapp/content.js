@@ -2587,11 +2587,60 @@
     return resp;
   }
 
+  // ── O @lid se liga sozinho, uma vez por dia ──────────────────────────────
+  //
+  // Isto era só um botão, e botão depende de alguém lembrar. O resultado
+  // aparecia no CRM como "@lid falta vincular" na maioria dos cards — dos 70
+  // leads de julho de uma consultora, UM tinha conversa ligada. E sem o
+  // vínculo, nada mais funciona direito: o card não mostra a conversa, a
+  // varredura por leads não alcança ninguém, e a mesma pessoa vira dois leads
+  // porque o sistema não reconhece que já a conhece.
+  //
+  // Não usa IA e não cria nem altera lead: lista as conversas e pergunta ao
+  // servidor de quem é cada uma. O custo é uma listagem local e alguns POSTs.
+  // Por isso pode rodar sozinho — o que era caro (analisar) continua sendo
+  // decisão de quem manda, na tela de varredura.
+  const _SINC_CADA_MS = 24 * 60 * 60 * 1000;
+
+  async function _sincLidAuto() {
+    try {
+      const { usuarioId } = await _safeStorageGet(['usuarioId']);
+      // Sem consultor escolhido no popup não dá pra saber de quem é o WhatsApp
+      // — e ligar conversa ao lead errado é pior que não ligar.
+      if (!usuarioId) return;
+      const chave = 'job_sinc_lid_em';
+      const guardado = await _safeStorageGet([chave]);
+      const ultimo = Number(guardado[chave] || 0);
+      if (Date.now() - ultimo < _SINC_CADA_MS) return;
+
+      const r = await _pedirPonte('listar_todas_conversas', { teto: 2000 }, 60000);
+      const convs = (r && r.conversas) || [];
+      if (!convs.length) return;
+      let ligados = 0;
+      for (let i = 0; i < convs.length; i += 200) {
+        const resp = await _safeSendMessage({ type: 'vincular_chats',
+                                              conversas: convs.slice(i, i + 200) }).catch(() => null);
+        if (resp && resp.ok) ligados += resp.ligados || 0;
+        // Respiro entre lotes: são POSTs grandes, e não há pressa nenhuma aqui.
+        await new Promise((x) => setTimeout(x, 1500));
+      }
+      // Marca DEPOIS de terminar: se cair no meio, tenta de novo na próxima
+      // abertura em vez de esperar 24h com o trabalho pela metade.
+      try { await chrome.storage.local.set({ [chave]: Date.now() }); } catch (e) {}
+      if (ligados) console.log('[JOB] @lid: ' + ligados + ' conversa(s) ligadas ao lead.');
+    } catch (e) { /* silencioso de proposito: e manutencao, nao tarefa do consultor */ }
+  }
+
   function varreduraIniciar() {
     // 4 minutos pra primeira checagem e 5 em 5 depois. A checagem em si é um GET
     // de config; se estiver desligada (o padrão), o custo é isso e mais nada.
     setTimeout(() => { varreduraRodar(false); }, 240000);
     setInterval(() => { varreduraRodar(false); }, 5 * 60 * 1000);
+    // O vínculo roda ANTES da varredura (90s), porque a varredura por leads
+    // depende dele. E fora do horário comercial também: ligar identidade não
+    // incomoda ninguém e não gasta IA.
+    setTimeout(() => { _sincLidAuto(); }, 90000);
+    setInterval(() => { _sincLidAuto(); }, 6 * 60 * 60 * 1000);
   }
 
   // ═══════════════ Ficha do lead (CRM dentro do WhatsApp) ═══════════════
@@ -3651,6 +3700,56 @@
         dica('Não deu: ' + ((e && e.message) || e));
       }
     });
+  }
+
+  // ── FILA DO SERVIDOR ────────────────────────────────────────────────────
+  //
+  // O consultor nao aperta nada: quando existe lote pra ele, a extensao pega UM
+  // item, le, devolve o resultado e espera o intervalo que o servidor mandou.
+  //
+  // Por que nao um laco com tudo de uma vez: (1) segurava a aba dele e qualquer
+  // fechada perdia o progresso; (2) ler dezenas em rajada dentro do WhatsApp e
+  // padrao de robo, e numero derrubado custa muito mais que uma varredura lenta.
+  // Um por vez, com respiro, roda no fundo sem ninguem esperando na frente.
+  const FILA = { rodando: false, proximaEm: 0 };
+
+  async function filaVarreduraTick() {
+    if (FILA.rodando || Date.now() < FILA.proximaEm) return;
+    let usuarioId = null;
+    try { ({ usuarioId } = await _safeStorageGet(['usuarioId'])); } catch (e) { return; }
+    if (!usuarioId) return;
+    FILA.rodando = true;
+    try {
+      const r = await _safeSendMessage({ type: 'varredura_proximo', consultor_id: usuarioId })
+        .catch(() => null);
+      const item = r && r.ok && r.item;
+      if (!item) {
+        // Sem fila: nao adianta perguntar de novo em seguida.
+        FILA.proximaEm = Date.now() + 120000;
+        return;
+      }
+      let ok = false, erro = '';
+      try {
+        await varreduraUmaConversa({ chat_id: item.chat_id }, {});
+        ok = true;
+      } catch (e) {
+        // O MOTIVO VIAJA. "deu erro em alguns" nao serve pra ninguem: o painel
+        // precisa dizer em QUAL lead e POR QUE, pra separar conversa apagada de
+        // peca quebrada.
+        erro = String((e && e.message) || e).slice(0, 180);
+      }
+      await _safeSendMessage({ type: 'varredura_resultado', item_id: item.item_id,
+                               ok: ok, erro: erro }).catch(() => null);
+      FILA.proximaEm = Date.now() + Math.max(5, item.espera_seg || 25) * 1000;
+    } finally {
+      FILA.rodando = false;
+    }
+  }
+
+  function filaVarreduraIniciar() {
+    // Comeca depois da extensao assentar; o relogio real e o proximaEm.
+    setTimeout(() => { filaVarreduraTick(); }, 60000);
+    setInterval(() => { filaVarreduraTick(); }, 15000);
   }
 
   async function _ligarSincLid() {
@@ -5798,6 +5897,7 @@
     // resto da extensão continua funcionando — transcrição é ganho, não requisito.
     try { trIniciar(); } catch (e) { console.warn('[JOB] transcrição não iniciou:', e); }
     try { varreduraIniciar(); } catch (e) { console.warn('[JOB] varredura não iniciou:', e); }
+    try { filaVarreduraIniciar(); } catch (e) { console.warn('[JOB] fila não iniciou:', e); }
     verificarVersaoExtensao();
     // Reverifica sozinho a cada 20min, SEMPRE — antes só reagendava quando
     // achava atualização, então uma aba aberta por horas sem update na hora

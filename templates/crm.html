@@ -536,6 +536,13 @@
           Leads excluídos
           <small>Quem foi apagado, por quem e quando</small>
         </button>
+        {# Age sobre O QUE ESTÁ FILTRADO NA TELA — por isso mora aqui, e não numa
+           tela própria: o recorte já foi feito acima, pedir de novo seria fazer
+           duas vezes e abrir espaço pra divergir. #}
+        <button type="button" onclick="varrerFiltrados(this)">
+          Ler conversas destes leads
+          <small>Usa o filtro atual · a extensão lê uma por vez e preenche o CRM</small>
+        </button>
 
         <div class="crm-mais-tit">Time</div>
         <button type="button" onclick="abrirModalTransferencia()">
@@ -1333,6 +1340,31 @@ let _tipoAtiv  = 'nota';
 let _usuarios  = [];
 let _etapas    = {{ etapas|tojson }};
 const IS_ADMIN = {{ 'true' if eh_admin else 'false' }};
+
+// Monta a fila com os leads QUE ESTÃO NA TELA. Manda a querystring inteira —
+// é ela que carrega o filtro atual, e o servidor a lê com o mesmo código do
+// kanban, então o que entra na fila é exatamente o que você está vendo.
+async function varrerFiltrados(btn){
+  var qs = window.location.search || '';
+  btn.disabled = true; var t = btn.textContent;
+  try {
+    var r = await (await fetch('/crm/varredura/criar' + qs, {method:'POST'})).json();
+    if(!r.ok){
+      alert(r.erro || 'Não consegui montar a fila.');
+      return;
+    }
+    var msg = 'Fila criada com ' + r.total + ' lead(s).';
+    if(r.sem_conversa) msg += '\n\n' + r.sem_conversa + ' lead(s) do filtro ficaram de fora por não ter ' +
+      'conversa vinculada — rode "Sincronizar @lid" na extensão pra alcançar eles.';
+    msg += '\n\nA extensão do consultor lê uma conversa por vez, com intervalo. ' +
+           'O WhatsApp Web dele precisa estar aberto.\n\nAbrir o acompanhamento?';
+    if(confirm(msg)) location.href = '/crm/varredura/' + r.lote_id;
+  } catch(e){
+    alert('Não deu: ' + (e && e.message ? e.message : e));
+  } finally {
+    btn.disabled = false; btn.textContent = t;
+  }
+}
 
 function mesclarDuplicados(btn){
   if (!confirm('Mesclar leads duplicados SEM número (mesmo nome + consultor)?\n\nMantém o mais antigo, move o histórico pra ele e apaga os demais. Leads com número não são tocados.')) return;

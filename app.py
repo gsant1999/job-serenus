@@ -1203,6 +1203,35 @@ def init_db():
             )""",
             # Ver o comentário no schema do SQLite: conversa marcada como "não é
             # lead" não é lida nem vira card, e lead excluído deixa rastro.
+            # A FILA VIVE NO SERVIDOR, nao na aba do consultor.
+            #
+            # A primeira versao rodava um laco dentro da pagina: se ela fechasse
+            # (ou o Chrome adormecesse a aba), perdia-se o progresso e ninguem
+            # sabia onde parou. Com a fila aqui, a extensao pede UM item por vez,
+            # devolve o resultado e some — a maquina dela nunca segura nada, e
+            # retomar e so continuar pedindo. E o que permite ir devagar sem
+            # custo: o ritmo e do servidor, nao da paciencia de quem esta com a
+            # tela aberta.
+            """CREATE TABLE IF NOT EXISTS varredura_lote (
+                id SERIAL PRIMARY KEY,
+                consultor_id INTEGER,
+                criado_por TEXT,
+                filtro_txt TEXT,
+                total INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'rodando',
+                criado_em TEXT,
+                terminado_em TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS varredura_item (
+                id SERIAL PRIMARY KEY,
+                lote_id INTEGER,
+                lead_id INTEGER,
+                chat_id TEXT,
+                lead_nome TEXT,
+                status TEXT DEFAULT 'pendente',
+                erro TEXT,
+                atualizado_em TEXT
+            )""",
             """CREATE TABLE IF NOT EXISTS wa_conversa_ignorada (
                 chat_id TEXT PRIMARY KEY,
                 telefone_norm TEXT,
@@ -2142,6 +2171,29 @@ def init_db():
         -- ("Bianca Amiga", "Danilo BB"). Marcada aqui, a extensao nao le nem
         -- cria nada. E o consultor quem sinaliza: adivinhar quem e amigo pelo
         -- nome erraria justamente no lead que se chama pelo apelido.
+        -- Ver o comentario no schema do Postgres: a fila da varredura vive no
+        -- SERVIDOR, pra a aba do consultor nao segurar nada e o progresso nao
+        -- se perder se ela fechar.
+        CREATE TABLE IF NOT EXISTS varredura_lote (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            consultor_id INTEGER,
+            criado_por TEXT,
+            filtro_txt TEXT,
+            total INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'rodando',
+            criado_em TEXT,
+            terminado_em TEXT
+        );
+        CREATE TABLE IF NOT EXISTS varredura_item (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lote_id INTEGER,
+            lead_id INTEGER,
+            chat_id TEXT,
+            lead_nome TEXT,
+            status TEXT DEFAULT 'pendente',
+            erro TEXT,
+            atualizado_em TEXT
+        );
         CREATE TABLE IF NOT EXISTS wa_conversa_ignorada (
             chat_id TEXT PRIMARY KEY,
             telefone_norm TEXT,
@@ -19431,6 +19483,177 @@ def api_whatsapp_chats_vincular():
     close_db(conn)
     return _wa_cors(jsonify({"ok": True, "recebidos": len(convs),
                              "ligados": ligados, "sem_lead": sem_lead}))
+
+
+@app.route('/crm/varredura/criar', methods=['POST'])
+@login_required
+def crm_varredura_criar():
+    """Monta a fila a partir dos LEADS QUE ESTÃO NA TELA — os mesmos filtros.
+
+    O consultor já filtrou o que quer olhar; pedir de novo em outra tela seria
+    fazer o trabalho duas vezes e abrir espaço pra divergir. Reusa
+    `_crm_montar_query`, que é o WHERE do próprio kanban."""
+    fl = _crm_ler_filtros_url()
+    conn = db()
+    uid = session['user_id']
+    eh_admin = session.get('perfil') == 'admin'
+    leads = conn.execute(*_crm_montar_query(
+        uid, eh_admin, fl['etapa'], fl['consultor'], fl['origem'], fl['data_de'], fl['data_ate'],
+        fl['busca'], fl['externo'], fl['sub_status'], fl['etiqueta'], fl['sem_resp'], fl['sem_cont'],
+        fl['parados'], fl['nao_frio'], fl['abertos'])).fetchall()
+
+    # Só entra lead COM conversa vinculada — sem ela não há o que ler. E fora os
+    # marcados como "não é lead".
+    vinc = {}
+    ids = [l['id'] for l in leads]
+    if ids:
+        marc = ','.join(['?'] * len(ids))
+        try:
+            for r in conn.execute(f"""SELECT w.lead_id, w.chat_id FROM wa_chat_lead w
+                WHERE w.lead_id IN ({marc})
+                  AND NOT EXISTS (SELECT 1 FROM wa_conversa_ignorada i WHERE i.chat_id = w.chat_id)""",
+                ids).fetchall():
+                vinc.setdefault(r['lead_id'], r['chat_id'])
+        except Exception as e:
+            app.logger.warning(f"[VARREDURA_LOTE] vinculos: {e}")
+
+    alvos = [(l['id'], l['nome'] or '', vinc[l['id']]) for l in leads if l['id'] in vinc]
+    fora = len(leads) - len(alvos)
+    if not alvos:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Nenhum dos leads filtrados tem conversa vinculada. "
+                        "Rode 'Sincronizar @lid' na extensão primeiro.", "sem_conversa": fora}), 400
+
+    # De quem é a fila: a extensão de CADA consultor pede os itens dela. Com
+    # filtro de consultor, é ele; senão, é quem está criando.
+    try:
+        alvo_uid = int(fl['consultor']) if (fl['consultor'] or '').isdigit() else uid
+    except (TypeError, ValueError):
+        alvo_uid = uid
+
+    desc = 'todos os filtros da tela' if not any(
+        [fl['etapa'], fl['data_de'], fl['data_ate'], fl['busca'], fl['origem'], fl['etiqueta']]) else ' · '.join(
+        x for x in [('etapa ' + fl['etapa']) if fl['etapa'] else '',
+                    ('de ' + fl['data_de']) if fl['data_de'] else '',
+                    ('até ' + fl['data_ate']) if fl['data_ate'] else '',
+                    ('busca "' + fl['busca'] + '"') if fl['busca'] else '',
+                    ('origem ' + fl['origem']) if fl['origem'] else ''] if x)
+
+    cur = conn.execute("""INSERT INTO varredura_lote
+        (consultor_id, criado_por, filtro_txt, total, status, criado_em)
+        VALUES (?,?,?,?,?,?)""",
+        (alvo_uid, session.get('nome') or '', desc[:300], len(alvos), 'rodando', _agora_sp()))
+    lote_id = _last_insert_id(cur)
+    if lote_id is None:
+        lote_id = conn.execute("SELECT id FROM varredura_lote ORDER BY id DESC LIMIT 1").fetchone()['id']
+    for lid, nome, cid in alvos:
+        conn.execute("""INSERT INTO varredura_item (lote_id, lead_id, chat_id, lead_nome, status, atualizado_em)
+                        VALUES (?,?,?,?,?,?)""", (lote_id, lid, cid, nome[:120], 'pendente', _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "lote_id": lote_id, "total": len(alvos), "sem_conversa": fora})
+
+
+@app.route('/api/whatsapp/varredura/proximo', methods=['GET', 'OPTIONS'])
+def api_whatsapp_varredura_proximo():
+    """UM item por vez. É o que mantém a máquina do consultor livre.
+
+    A extensão pergunta, lê uma conversa, devolve o resultado e pergunta de
+    novo. Nada de laço segurando a aba; se ela fechar, o lote fica esperando e
+    continua quando o WhatsApp abrir. O ritmo (espera_seg) também vem daqui —
+    quem decide o compasso é o servidor, não a paciência de quem está na tela."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    try:
+        uid = int(request.args.get('consultor_id') or 0) or None
+    except (TypeError, ValueError):
+        uid = None
+    if not uid:
+        return _wa_cors(jsonify({"ok": True, "item": None}))
+    conn = db()
+    r = conn.execute("""SELECT i.id, i.lead_id, i.chat_id, i.lead_nome, i.lote_id
+        FROM varredura_item i JOIN varredura_lote t ON t.id = i.lote_id
+        WHERE t.consultor_id=? AND t.status='rodando' AND i.status='pendente'
+        ORDER BY i.id LIMIT 1""", (uid,)).fetchone()
+    if not r:
+        # Fecha os lotes que acabaram — sem isso ficam 'rodando' pra sempre e o
+        # painel mente sobre o que ainda está em pé.
+        try:
+            conn.execute("""UPDATE varredura_lote SET status='concluido', terminado_em=?
+                WHERE consultor_id=? AND status='rodando'
+                  AND NOT EXISTS (SELECT 1 FROM varredura_item i
+                                  WHERE i.lote_id = varredura_lote.id AND i.status='pendente')""",
+                (_agora_sp(), uid))
+            conn.commit()
+        except Exception as e:
+            app.logger.info(f"[VARREDURA_LOTE] fechar: {e}")
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": True, "item": None}))
+    conn.execute("UPDATE varredura_item SET status='lendo', atualizado_em=? WHERE id=?",
+                 (_agora_sp(), r['id']))
+    falta = conn.execute("""SELECT COUNT(*) c FROM varredura_item
+                            WHERE lote_id=? AND status='pendente'""", (r['lote_id'],)).fetchone()['c']
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True, "item": {
+        "item_id": r['id'], "lote_id": r['lote_id'], "lead_id": r['lead_id'],
+        "chat_id": r['chat_id'], "nome": r['lead_nome'] or ''},
+        "faltam": falta,
+        # 25s entre conversas. Ler dezenas em rajada dentro do WhatsApp é
+        # padrão de robô — e número derrubado custa muito mais que uma varredura
+        # lenta. Roda em segundo plano; ninguém está esperando na frente da tela.
+        "espera_seg": 25}))
+
+
+@app.route('/api/whatsapp/varredura/item', methods=['POST', 'OPTIONS'])
+def api_whatsapp_varredura_item():
+    """O resultado de UM item — inclusive o erro, com o motivo por escrito.
+
+    'Deu erro em alguns' não serve pra ninguém: o que resolve é saber em QUAL
+    lead e POR QUÊ, pra decidir se é conversa apagada, telefone trocado ou peça
+    quebrada."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    d = request.get_json(silent=True) or {}
+    try:
+        item_id = int(d.get('item_id') or 0)
+    except (TypeError, ValueError):
+        item_id = 0
+    if not item_id:
+        return _wa_cors(jsonify({"ok": False, "erro": "sem item"})), 400
+    ok = bool(d.get('ok'))
+    erro = str(d.get('erro') or '')[:200]
+    conn = db()
+    conn.execute("UPDATE varredura_item SET status=?, erro=?, atualizado_em=? WHERE id=?",
+                 ('lido' if ok else 'erro', erro or None, _agora_sp(), item_id))
+    conn.commit(); close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
+
+
+@app.route('/crm/varredura/<int:lote_id>')
+@login_required
+def crm_varredura_painel(lote_id):
+    """Onde se vê se deu certo — e onde errou, lead por lead."""
+    conn = db()
+    lote = conn.execute("SELECT * FROM varredura_lote WHERE id=?", (lote_id,)).fetchone()
+    if not lote:
+        close_db(conn); abort(404)
+    itens = conn.execute("""SELECT i.*, u.nome consultor FROM varredura_item i
+        LEFT JOIN varredura_lote t ON t.id=i.lote_id
+        LEFT JOIN usuarios u ON u.id=t.consultor_id
+        WHERE i.lote_id=? ORDER BY (i.status='erro') DESC, i.id""", (lote_id,)).fetchall()
+    cons = conn.execute("SELECT nome FROM usuarios WHERE id=?", (lote['consultor_id'],)).fetchone()
+    close_db(conn)
+    itens = [dict(r) for r in itens]
+    for i in itens:
+        i['quando'] = _fmt_datahora_br(i.get('atualizado_em'))
+    cont = {'pendente': 0, 'lendo': 0, 'lido': 0, 'erro': 0}
+    for i in itens:
+        cont[i['status']] = cont.get(i['status'], 0) + 1
+    return render_template('crm_varredura.html', lote=dict(lote), itens=itens, cont=cont,
+                           consultor=(cons['nome'] if cons else ''))
 
 
 @app.route('/api/whatsapp/varredura/leads', methods=['GET', 'OPTIONS'])
