@@ -127,7 +127,12 @@ input.campo:focus, textarea.campo:focus { outline:none; border-color:var(--teal)
       <div class="camp-card-top">
         <div>
           <a class="nome" href="/campanha/{{ c.id }}">{{ c.nome }}</a>
-          <div class="camp-sub">#{{ c.id }} · teto {{ c.teto_dia }}/dia por consultor</div>
+          {# A data do disparo fica JUNTO do nome, não numa coluna nova: é o que
+             responde "essa campanha é de quando?" antes de abrir. #}
+          <div class="camp-sub">#{{ c.id }} · teto {{ c.teto_dia }}/dia por consultor{% if c.disp_ini %} ·
+            {% if c.disp_dias > 1 %}disparada de {{ c.disp_ini }} a {{ c.disp_fim }} ({{ c.disp_dias }} dias)
+            {% else %}disparada em {{ c.disp_ini }}{% endif %}
+          {% endif %}</div>
         </div>
         <div class="camp-metrics">
           <div><b>{{ tot }}</b>contatos</div>

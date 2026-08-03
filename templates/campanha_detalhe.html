@@ -86,6 +86,22 @@
       <span><i style="background:var(--rosa);"></i>Sem resposta {{ sr }}</span>
       <span><i style="background:var(--cinza-2,#6b7280);"></i>Conversas apagadas {{ ex }}</span>
     </div>
+    {# QUANDO O DISPARO CORREU. A tela só dizia o que falta; uma campanha
+       "concluída" não contava se foi num dia ou arrastou três semanas — e é
+       isso que diz se o teto de 20/dia está apertado ou se alguém parou no
+       meio. Sai da hora real de cada envio, não da criação da campanha. #}
+    {% if janela and janela.enviados %}
+    <div style="font-size:12.5px;margin-top:12px;border-top:1px solid var(--borda);padding-top:12px;display:flex;gap:22px;flex-wrap:wrap;">
+      <div><span style="color:var(--cinza);">
+        {% if janela.dias > 1 %}Disparado entre:{% else %}Disparado em:{% endif %}</span>
+        <b>{{ janela.inicio }}{% if janela.dias > 1 %} e {{ janela.fim }}{% endif %}</b>
+        {% if janela.dias > 1 %}<span style="color:var(--cinza-2);"> · {{ janela.dias }} dias</span>
+        {% else %}<span style="color:var(--cinza-2);"> · num dia só</span>{% endif %}
+        {% if janela.em_andamento %}<span style="color:var(--cinza-2);"> · ainda rodando</span>{% endif %}
+      </div>
+      <div><span style="color:var(--cinza);">Já enviados:</span> <b>{{ janela.enviados }}</b> de {{ contatos|length }}</div>
+    </div>
+    {% endif %}
     {% if eta and (eta.lote_seg > 0 or eta.falta_total > 0) %}
     <div style="font-size:12.5px;margin-top:12px;border-top:1px solid var(--borda);padding-top:12px;display:flex;gap:22px;flex-wrap:wrap;">
       {% if eta.lote_seg > 0 %}<div><span style="color:var(--cinza);">Lote na fila agora:</span> <b style="color:var(--info);">~{{ eta.lote_min }} min</b> pra terminar de enviar</div>{% endif %}

@@ -8730,7 +8730,12 @@ def campanhas():
         (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id) total,
         (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.enviado_em IS NOT NULL) enviados,
         (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.status='respondeu') respondeu,
-        (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.status IN ('pendente','enfileirado')) na_fila
+        (SELECT COUNT(*) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.status IN ('pendente','enfileirado')) na_fila,
+        -- Quando o disparo correu de verdade. Da hora de cada envio, nao do
+        -- criado_em: campanha criada na sexta e disparada na segunda nao levou
+        -- tres dias de disparo, levou zero — e e essa diferenca que se mede.
+        (SELECT MIN(x.enviado_em) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.enviado_em IS NOT NULL) ini_envio,
+        (SELECT MAX(x.enviado_em) FROM campanha_contato x WHERE x.campanha_id=c.id AND x.enviado_em IS NOT NULL) fim_envio
         FROM campanha c ORDER BY c.id DESC""").fetchall()
     pastas = [r['categoria'] for r in conn.execute(
         """SELECT DISTINCT categoria FROM modelos_conteudo
@@ -8749,7 +8754,16 @@ def campanhas():
     todos_usuarios = [dict(r) for r in conn.execute(
         "SELECT id, nome, perfil, COALESCE(disparo_participa,0) participa FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()]
     close_db(conn)
-    return render_template('campanhas.html', campanhas=[dict(r) for r in rows],
+    lista = []
+    for r in rows:
+        d = dict(r)
+        di, df = _parse_dt_seguro(d.get('ini_envio')), _parse_dt_seguro(d.get('fim_envio'))
+        d['disp_ini'] = _fmt_data_br(d.get('ini_envio'))
+        d['disp_fim'] = _fmt_data_br(d.get('fim_envio'))
+        # Mesmo dia conta 1, não 0: "levou 0 dias" não quer dizer nada.
+        d['disp_dias'] = ((df.date() - di.date()).days + 1) if (di and df) else 0
+        lista.append(d)
+    return render_template('campanhas.html', campanhas=lista,
                            pastas_saudacao=pastas, funis=funis, presenca=presenca,
                            modelos_saudacao=modelos_saud,
                            todos_usuarios=todos_usuarios,
@@ -8899,6 +8913,38 @@ def campanha_criar():
     return redirect(url_for('campanha_detalhe', cid=cid))
 
 
+def _campanha_janela(conn, cid, camp=None):
+    """Quando o disparo começou, quando terminou e quantos dias levou.
+
+    A tela dizia o que falta, nunca o que já correu: uma campanha "concluída"
+    não contava se foi num dia ou arrastou três semanas — e é isso que decide
+    se o teto de 20/dia está apertado demais ou se alguém parou no meio.
+
+    Sai da hora real de cada envio (campanha_contato.enviado_em), não de
+    criado_em: campanha criada na sexta e disparada na segunda não levou 3 dias
+    de disparo, levou zero — e essa diferença é o que se quer medir."""
+    out = {'inicio': '', 'fim': '', 'dias': 0, 'enviados': 0, 'em_andamento': False}
+    try:
+        r = conn.execute("""SELECT MIN(enviado_em) ini, MAX(enviado_em) fim, COUNT(enviado_em) n
+                            FROM campanha_contato
+                            WHERE campanha_id=? AND enviado_em IS NOT NULL""", (cid,)).fetchone()
+    except Exception:
+        return out
+    if not r or not r['n']:
+        return out
+    di, df = _parse_dt_seguro(r['ini']), _parse_dt_seguro(r['fim'])
+    out['enviados'] = r['n']
+    out['inicio'] = _fmt_data_br(r['ini'])
+    out['fim'] = _fmt_data_br(r['fim'])
+    if di and df:
+        # Dias CORRIDOS entre o primeiro e o último envio, contando o próprio
+        # dia: tudo no mesmo dia = 1, não 0. "Levou 0 dias" não quer dizer nada.
+        out['dias'] = (df.date() - di.date()).days + 1
+    st = (camp['status'] if camp is not None and 'status' in camp.keys() else '') or ''
+    out['em_andamento'] = st not in ('concluida', 'concluída', 'cancelada')
+    return out
+
+
 @app.route('/campanha/<int:cid>')
 @login_required
 @admin_required
@@ -8937,6 +8983,7 @@ def campanha_detalhe(cid):
         SUM(CASE WHEN status='sem_resposta' THEN 1 ELSE 0 END) sem_resposta,
         SUM(CASE WHEN status='excluido' THEN 1 ELSE 0 END) excluido
         FROM campanha_contato WHERE campanha_id=?""", (cid,)).fetchone()
+    janela = _campanha_janela(conn, cid, camp)
     # Saudação vinda de pasta dos Modelos? mostra os textos de lá. Funil ligado?
     saud_cat = (camp['saudacao_categoria'] if 'saudacao_categoria' in camp.keys() else '') or ''
     funil = None
@@ -8961,6 +9008,7 @@ def campanha_detalhe(cid):
     return render_template('campanha_detalhe.html', camp=dict(camp), msgs=msgs,
                            contatos=[dict(r) for r in contatos], saud_cat=saud_cat, funil=funil,
                            porcons=porcons, resumo=dict(resumo) if resumo else {}, eta=eta,
+                           janela=janela,
                            modelos_saudacao=modelos_saud, funis=funis_todos, saud_marcados=saud_marcados,
                            mensagens_atuais=(_json.loads(camp['mensagens'] or '[]') if not (camp['saudacao_categoria'] or saud_marcados) else []))
 
