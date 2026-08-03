@@ -528,9 +528,25 @@
                              credenciados: [], perfil: '$undefined' }], cotacaoId);
   }
 
+  // NA BUSCA, só as faixas com gente. Na distribuição, todas as dez.
+  //
+  // São coisas diferentes e eu tinha igualado as duas. A ação 'vidas' grava a
+  // DISTRIBUIÇÃO da cotação: ali o zero é informação ("nesta faixa não tem
+  // ninguém"), e a tela deles manda as dez. Já a busca de operadoras é uma
+  // PERGUNTA: mandar a faixa 00-18 com zero é dizer "quero quem atenda 00-18",
+  // e aí some toda operadora que não cobre aquela idade.
+  //
+  // Era isso que derrubava a MedSênior, que só vende a partir dos 59, e a
+  // Saúde Beneficência. Na captura todas as dez faixas tinham 1 vida, então
+  // 18 operadoras cobriam tudo e o erro não aparecia.
+  function _vidasComGente(vidas) {
+    const v = (vidas || []).filter((x) => Number(x.quantidade) > 0);
+    return v.length ? v : _vidasCompletas(vidas);
+  }
+
   function filtroBase(p) {
     return { cidade: p.cidade, modalidade: p.modalidade == null ? 2 : p.modalidade,
-             credenciados: [], perfil: '$undefined', vidas: _vidasCompletas(p.vidas) };
+             credenciados: [], perfil: '$undefined', vidas: _vidasComGente(p.vidas) };
   }
 
   async function operadorasDaCidade(cotacaoId, p) {

@@ -252,9 +252,16 @@ function perguntar(tipo, pedido, msLimite) {
   ok(vs.filter((f) => f.quantidade > 0).length === 1 &&
      vs.filter((f) => f.faixa === '29-33')[0].quantidade === 10,
      '12b. a quantidade cai na faixa certa');
+  // Na BUSCA, so as faixas com gente — e nao as dez. Mandar 00-18 com zero e
+  // dizer "quero quem atenda 00-18", e ai some a operadora que so vende pra
+  // quem tem 59+. Foi isso que derrubava a MedSenior da lista.
   const envFiltro = corposEnviados.find((c) => c.papel === 'operadoras');
-  ok(envFiltro && envFiltro.corpo[0].filtro.vidas.length === 10,
-     '12c. a busca de operadoras tambem manda as dez');
+  const vf = envFiltro ? envFiltro.corpo[0].filtro.vidas : [];
+  ok(vf.length === 1 && vf[0].faixa === '29-33',
+     '12c. a busca leva SO as faixas com gente', JSON.stringify(vf));
+  const envPlanos = corposEnviados.find((c) => c.papel === 'planos');
+  ok(envPlanos && envPlanos.corpo[0].vidas.length === 1,
+     '12d. a busca de planos idem', JSON.stringify(envPlanos ? envPlanos.corpo[0].vidas : []));
 
 
   // 13. O id da cotacao vem do CABECALHO de redirecionamento, nao do texto.
