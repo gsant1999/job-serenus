@@ -1345,6 +1345,15 @@
       }
       return el;
     }
+    // ULTIMO RECURSO, por GEOMETRIA. Foto no WhatsApp nem sempre e <img>: ja
+    // apareceu como <canvas> e como <div style="background-image:url(blob:…)">.
+    // Perseguir a marcacao do dia e perder — e por isso que a conta de agua
+    // ficava sem bloco enquanto o PDF ao lado tinha. Aqui a pergunta e outra:
+    // tem alguma coisa desenhada, grande, dentro desta bolha?
+    for (const el of row.querySelectorAll('canvas, div[style*="blob:"], div[style*="url("]')) {
+      const w = el.clientWidth || 0, h = el.clientHeight || 0;
+      if (w >= 90 && h >= 60) return el;
+    }
     return null;
   }
 
