@@ -399,7 +399,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         (a) => a.url && a.url.indexOf('paineldocorretor.com.br') >= 0);
       // Prefere a aba que o consultor está usando: se ele tem mais de uma
       // aberta, a ativa é a que ele acabou de olhar.
-      const aba = lista.filter((a) => a.active)[0] || lista[0];
+      // Quantas abas do Painel existem: a tela usa isso pra decidir se pode
+      // dividir o trabalho em mais de uma frente.
+      if (msg.type === 'cotador_abas') { sendResponse({ ok: true, abas: lista.length }); return; }
+      // Aba escolhida por indice, quando a tela esta rodando varias frentes em
+      // paralelo. Cada frente tem a SUA aba e a sua cotacao — sem isso duas
+      // frentes escreveriam na mesma cotacao e os precos se embaralhariam.
+      const aba = (msg.aba != null && lista.length)
+        ? lista[msg.aba % lista.length]
+        : (lista.filter((a) => a.active)[0] || lista[0]);
       if (!aba) {
         // Diz quantas abas foram examinadas: sem isso, "Painel fechado" é
         // palpite, e quem está do outro lado não tem como saber se o problema

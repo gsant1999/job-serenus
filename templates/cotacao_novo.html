@@ -976,9 +976,105 @@
   // Antes de existir esta função eu tinha o mesmo laço escrito duas vezes, e a
   // segunda cópia já estava nascendo diferente. Duas cópias da mesma regra
   // divergem no primeiro ajuste — e aqui o ajuste seria em cima de dinheiro.
-  async function precosDe(alvo, cotacaoId, passo) {
+  // O Painel guarda no máximo ~20 cenários por cotação. Passar disso não dá
+  // erro limpo: some cenário, e como eu identifico o preço novo comparando com
+  // os que já estavam lá, um cenário perdido casaria preço com o plano errado.
+  // Quinze é folga proposital sobre o teto que o Guilherme conhece.
+  var POR_COTACAO = 15;
+
+  // ── Várias frentes, uma por aba do Painel ───────────────────────────────
+  //
+  // Uma cotação de 350 planos leva uns seis minutos numa frente só. Com o
+  // consultor esperando, isso é inviável.
+  //
+  // Cada aba do Painel aberta vira uma frente, com a SUA cotação. Precisa ser
+  // a sua própria: duas frentes escrevendo na mesma cotação embaralhariam os
+  // preços, porque é a ordem dos cenários dentro dela que identifica qual
+  // preço é de qual plano.
+  //
+  // Teto de 3 de propósito. Mais frentes é mais rápido e é também mais
+  // simultâneo do lado deles — e simultaneidade é justamente o que denuncia
+  // que não tem gente clicando. Três abas com ritmo humano cada ainda passa
+  // por corretor apressado; dez não passa por nada.
+  var MAX_FRENTES = 3;
+
+  async function precosEmFrentes(alvo, cotacaoIdInicial, base, p) {
+    var rAbas = await pedir('abas', {}, 8000);
+    var frentes = Math.max(1, Math.min(MAX_FRENTES, (rAbas.ok && rAbas.abas) || 1));
+    // Não vale abrir frente pra pouca coisa: o custo de criar cotação extra
+    // come o ganho.
+    if (alvo.length < 8) frentes = 1;
+
+    var feitos = 0;
+    var aoAndar = function () {
+      feitos++;
+      mostrarAndamento({ fase: 'precos', feito: feitos, total: alvo.length });
+    };
+
+    if (frentes === 1) {
+      var passo1 = passoNaAba(base, null);
+      await passo1({ acao: 'filtro', cotacaoId: cotacaoIdInicial });
+      await respira(300, 900);
+      return await precosDe(alvo, cotacaoIdInicial, passo1, aoAndar);
+    }
+
+    // Reparte alternando, não em blocos: se uma frente cair, o estrago fica
+    // espalhado por operadoras diferentes em vez de derrubar um bloco inteiro.
+    var baldes = [];
+    for (var i = 0; i < frentes; i++) baldes.push([]);
+    alvo.forEach(function (pl, i) { baldes[i % frentes].push(pl); });
+
+    var partes = await Promise.all(baldes.map(async function (lote, idx) {
+      if (!lote.length) return [];
+      var passoAqui = passoNaAba(base, idx);
+      // A primeira frente reaproveita a cotação que já existe; as outras
+      // precisam da sua, na aba delas.
+      var cid = cotacaoIdInicial;
+      if (idx > 0) {
+        var nova = await passoAqui({ acao: 'criar' });
+        if (!nova.ok) return [];
+        cid = nova.dados.cotacaoId;
+      }
+      await passoAqui({ acao: 'filtro', cotacaoId: cid });
+      await respira(300, 900);
+      return await precosDe(lote, cid, passoAqui, aoAndar);
+    }));
+
+    var junto = [].concat.apply([], partes);
+    junto.sort(function (a, b) {
+      return (a.total == null) - (b.total == null) || (a.total - b.total);
+    });
+    return junto;
+  }
+
+  // Monta um "passo" amarrado a uma aba. `aba` nulo = a aba ativa.
+  function passoNaAba(base, aba) {
+    return function (extra) {
+      var ped = { acao: extra.acao };
+      for (var k in base) ped[k] = base[k];
+      for (var k2 in extra) ped[k2] = extra[k2];
+      var msg = { pedido: ped };
+      if (aba != null) msg.aba = aba;
+      return pedir('passo', msg, 45000);
+    };
+  }
+
+  async function precosDe(alvo, cotacaoId, passo, aoAndar) {
     var resultado = [];
+    var noLote = 0;
     for (var j = 0; j < alvo.length; j++) {
+      // Cotação cheia: abre outra e recomeça a contagem. Preço errado numa
+      // proposta é o pior defeito possível deste sistema — vale trocar de
+      // cotação de sobra em vez de descobrir o teto na prática.
+      if (noLote >= POR_COTACAO) {
+        var nova = await passo({ acao: 'criar' });
+        if (nova.ok) {
+          cotacaoId = nova.dados.cotacaoId;
+          await passo({ acao: 'filtro', cotacaoId: cotacaoId });
+          noLote = 0;
+          await respira(400, 1100);
+        }
+      }
       var rp = await passo({ acao: 'preco', cotacaoId: cotacaoId, plano: alvo[j] });
       // Uma segunda chance por plano. O Painel solta erro passageiro de vez em
       // quando, e perder o preço por um soluço é caro: o consultor não sabe se
@@ -993,7 +1089,8 @@
         // Sem preço não inventa: o plano aparece marcado, e o consultor sabe
         // que aquele ficou sem resposta em vez de sumir da lista calado.
         : { total: null, faixas: [], motivo: rp.motivo || 'sem_valor_na_resposta' }));
-      mostrarAndamento({ fase: 'precos', feito: j + 1, total: alvo.length });
+      noLote++;
+      if (aoAndar) aoAndar(); else mostrarAndamento({ fase: 'precos', feito: j + 1, total: alvo.length });
       if (j + 1 < alvo.length) await respira(240, 780);
     }
     resultado.sort(function (a, b) {
@@ -1024,9 +1121,7 @@
     // grava a cidade na cotação (o preço lê de lá) e pergunta o preço do que
     // foi marcado. É a diferença entre 12 consultas e 40.
     if (p.planosEscolhidos && p.planosEscolhidos.length) {
-      await passo({ acao: 'filtro', cotacaoId: cotacaoId });
-      await respira(300, 900);
-      var res = await precosDe(p.planosEscolhidos, cotacaoId, passo);
+      var res = await precosEmFrentes(p.planosEscolhidos, cotacaoId, base, p);
       return { ok: true, dados: {
         cotacaoId: cotacaoId, url: url, cidade: p.cidade, vidas: p.vidas,
         operadoras: operadoras, planosEncontrados: p.planosEscolhidos.length,

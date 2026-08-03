@@ -20,7 +20,7 @@
 (function () {
   'use strict';
 
-  const _SABE = ['abrir_chat', 'cotar', 'passo', 'catalogo', 'cotador_estado',
+  const _SABE = ['abrir_chat', 'cotar', 'passo', 'abas', 'catalogo', 'cotador_estado',
                  'cotador_cidades', 'descobrir_modalidades'];
   let _versao = '';
   try { _versao = chrome.runtime.getManifest().version; } catch (e) { /* contexto órfão */ }
@@ -35,7 +35,10 @@
                texto: String(d.texto || '').slice(0, 4000) };
     }
     if (d.tipo === 'cotar') return { type: 'cotar_painel', pedido: d.pedido };
-    if (d.tipo === 'passo') return { type: 'cotador_passo', pedido: d.pedido };
+    // `aba` diz em QUAL aba do Painel executar. É o que permite a tela rodar
+    // mais de uma frente ao mesmo tempo sem que duas escrevam na mesma cotação.
+    if (d.tipo === 'passo') return { type: 'cotador_passo', pedido: d.pedido, aba: d.aba };
+    if (d.tipo === 'abas') return { type: 'cotador_abas' };
     if (d.tipo === 'catalogo') return { type: 'cotador_catalogo', pedido: d.pedido };
     if (d.tipo === 'descobrir_modalidades') {
       return { type: 'cotador_modalidades', pedido: d.pedido };
@@ -63,6 +66,7 @@
                            // Quantas abas o background examinou. Vai junto pra
                            // tela poder dizer o que aconteceu de verdade em vez
                            // de chutar "deve estar fechado".
+                           abas: (resp && resp.abas),
                            abasExaminadas: (resp && resp.abasExaminadas) }, '*');
     };
     // "Voce esta ai?" — a pagina PERGUNTA em vez de so esperar o anuncio.
