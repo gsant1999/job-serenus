@@ -293,7 +293,7 @@
           <td>{{ pg.razao_social }}</td>
           <td class="td-mono">{{ pg.numero }}</td>
           <td class="td-mono" style="color:var(--cinza); font-weight:500;">{{ pg.valor|moeda  }}</td>
-          <td style="font-size:12px; color:var(--cinza);">{{ pg.data_pagamento or '—' }}</td>
+          <td style="font-size:12px; color:var(--cinza);">{{ pg.data_pagamento|data_br or '—' }}</td>
         </tr>
         {% endfor %}
       </tbody>

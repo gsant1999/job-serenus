@@ -162,7 +162,7 @@
           <td class="td-mono">{{ p.total_vidas }}</td>
           <td class="td-mono">{{ p.valor|moeda  }}</td>
           <td class="td-mono" style="color:var(--verde);">{{ (p.comissao_corretora_liquida or 0)|moeda  }}</td>
-          <td>{{ p.vigencia }}</td>
+          <td>{{ p.vigencia|data_br }}</td>
         </tr>
         {% endfor %}
       </tbody>

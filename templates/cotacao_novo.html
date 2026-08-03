@@ -289,7 +289,7 @@
 
 
 {% if salva %}
-<div class="cv-salva">Cotação de {{ salva.criado_em }} · {{ salva.cidade }} ·
+<div class="cv-salva">Cotação de {{ salva.criado_em|datahora_br }} · {{ salva.cidade }} ·
   {{ salva.planos_cotados }} plano(s)
   {% if salva.painel_url %}· <a href="{{ salva.painel_url }}" target="_blank" rel="noopener">abrir no Painel</a>{% endif %}
 </div>

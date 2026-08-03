@@ -58,7 +58,7 @@
       <tbody>
         {% for i in itens %}
         <tr>
-          <td>{{ i.cliente }}<div style="font-size:11px;color:var(--cinza);">{{ i.operadora }} · parc {{ i.parcela }} · vig {{ i.vigencia }}</div></td>
+          <td>{{ i.cliente }}<div style="font-size:11px;color:var(--cinza);">{{ i.operadora }} · parc {{ i.parcela }} · vig {{ i.vigencia|data_br }}</div></td>
           <td>{% if i.proposta_id %}<a href="/proposta/{{ i.proposta_id }}">{{ i.numero_proposta }}</a>
               <div style="font-size:11px;color:var(--cinza);">casou por {{ i.casou_por }}</div>
               {% else %}<span class="pill pill-erro">{{ i.numero_proposta }} — sem venda no JOB</span>{% endif %}</td>

@@ -93,7 +93,7 @@
       {% for l in linhas %}
       <tr>
         <td>{% if l.lead_id %}<a href="/crm?lead={{ l.lead_id }}">{{ l.nome }}</a>{% else %}{{ l.nome }}{% endif %}
-            <div class="cal-sub">{{ l.criado_em }} · {{ l.chars_lead }} caracteres escritos pelo cliente</div></td>
+            <div class="cal-sub">{{ l.criado_em|datahora_br }} · {{ l.chars_lead }} caracteres escritos pelo cliente</div></td>
         <td class="num">{{ l.msgs }}</td>
         <td class="num">{% if l.score is not none %}<span class="pill pill-{{ l.faixa }}">{{ l.score }}</span>{% else %}—{% endif %}</td>
         <td>{% if l.etapa_tipo == 'ganho' %}<span class="pill pill-verde">{{ l.etapa_nome }}</span>

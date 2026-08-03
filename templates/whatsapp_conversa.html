@@ -47,7 +47,7 @@
 <div class="topbar">
   <div>
     <h1 style="margin:0;">Conversa salva — {{ a.nome_contato or a.telefone or 'contato' }}</h1>
-    <div class="sub">Registro da conversa no momento da análise ({{ a.criado_em }}) — a análise mais recente do lead sempre guarda o histórico completo até ali</div>
+    <div class="sub">Registro da conversa no momento da análise ({{ a.criado_em|datahora_br }}) — a análise mais recente do lead sempre guarda o histórico completo até ali</div>
   </div>
   <div style="display:flex; gap:8px;">
     {% if a.lead_id %}<button class="btn-outline btn-sm" onclick="location.href='/crm?lead={{ a.lead_id }}'">Abrir lead no CRM</button>{% endif %}

@@ -262,9 +262,9 @@
                     {% elif st == 'Liberado para o corretor' %}
                       {% if parc.aceite_corretor %}
                         <button class="btn" style="padding:8px 13px;font-size:12px;" onclick="acao({{ parc.id }},'pagar')">Confirmar pagamento (sexta)</button>
-                        <span class="tag tag-verde" style="font-size:10.5px;">✓ Corretor de acordo · {{ parc.data_aceite[:10] if parc.data_aceite else '' }}</span>
+                        <span class="tag tag-verde" style="font-size:10.5px;">✓ Corretor de acordo · {{ parc.data_aceite|data_br }}</span>
                       {% else %}<span style="font-size:11px;color:var(--am);">Aguardando aceite do corretor</span>{% endif %}
-                    {% elif st == 'Pago ao corretor' %}<span style="font-size:11px;color:var(--teal);">✓ Pago{% if parc.data_pagamento %} · {{ parc.data_pagamento[:10] }}{% endif %}</span>{% endif %}
+                    {% elif st == 'Pago ao corretor' %}<span style="font-size:11px;color:var(--teal);">✓ Pago{% if parc.data_pagamento %} · {{ parc.data_pagamento|data_br }}{% endif %}</span>{% endif %}
                     <details style="margin-top:2px;">
                       <summary style="font-size:10.5px;color:var(--cinza-2);cursor:pointer;">Alterar manualmente</summary>
                       <select onchange="mudarStatus({{ parc.id }},this.value)" style="font-size:11px;padding:5px 7px;border:1px solid var(--borda-2);border-radius:6px;background:var(--panel-2);color:var(--texto);cursor:pointer;margin-top:5px;">
@@ -374,7 +374,7 @@
               <div style="font-size:13px;font-weight:600;">{{ p.razao_social }}</div>
               <div style="font-size:11.5px;color:var(--cinza);margin-top:2px;">
                 <span style="background:rgba(31,216,164,.12);color:var(--teal);padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-right:6px;">Titular</span>
-                {% if p.data_nasc_titular %}Nasc: {{ p.data_nasc_titular }}{% endif %}
+                {% if p.data_nasc_titular %}Nasc: {{ p.data_nasc_titular|data_br }}{% endif %}
                 {% if p.cpf_titular %} · CPF: {{ p.cpf_titular }}{% endif %}
               </div>
             </div>
@@ -547,7 +547,7 @@
               <div style="background:var(--panel-2);padding:12px;border-radius:8px;text-align:center;">
                 <div style="font-size:9px;color:var(--cinza);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Vencimento</div>
                 <div style="font-size:13px;color:var(--texto);margin-top:4px;font-weight:600;">
-                  {% if p.adesao_vencimento %}{{ p.adesao_vencimento.split('-')|reverse|join('/') if '-' in (p.adesao_vencimento or '') else p.adesao_vencimento }}{% else %}—{% endif %}
+                  {% if p.adesao_vencimento %}{{ p.adesao_vencimento|data_br }}{% else %}—{% endif %}
                 </div>
               </div>
             </div>

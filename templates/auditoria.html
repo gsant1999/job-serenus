@@ -27,7 +27,7 @@
           <div style="margin-top:8px;font-size:12.5px;">
             <strong>Valor:</strong> {{ (p.valor or 0)|moeda }}
             &nbsp;·&nbsp;
-            <strong>Vigência:</strong> {{ p.vigencia or '—' }}
+            <strong>Vigência:</strong> {{ p.vigencia|data_br or '—' }}
           </div>
           {% if p.pendencias_json %}
           <div style="margin-top:8px;font-size:12px;color:var(--rosa);">

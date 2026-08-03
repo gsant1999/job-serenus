@@ -34,7 +34,7 @@
     <div class="ee-card">
       <div class="ee-top">
         <div class="ee-quem"><b>{{ e.usuario_nome or 'Não identificado' }}</b> · v{{ e.versao or '?' }}</div>
-        <div class="ee-quando">{{ e.criado_em }}</div>
+        <div class="ee-quando">{{ e.criado_em|datahora_br }}</div>
       </div>
       <div class="ee-msg">{{ e.mensagem }}</div>
       {% if e.url %}<div class="ee-url">{{ e.url }}</div>{% endif %}

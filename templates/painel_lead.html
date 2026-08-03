@@ -496,7 +496,7 @@
       <div class="pl-vazio">Nenhuma conversa analisada ainda.</div>
     {% else %}
     <dl style="margin:0;">
-      <div class="pl-linha"><dt>Última análise</dt><dd>{{ ultima.criado_em }}</dd></div>
+      <div class="pl-linha"><dt>Última análise</dt><dd>{{ ultima.criado_em|datahora_br }}</dd></div>
       <div class="pl-linha"><dt>Score</dt><dd>{{ ultima.score }} ({{ ultima.score_faixa or '—' }})</dd></div>
       <div class="pl-linha"><dt>Mensagens lidas</dt><dd>{{ ultima.total_mensagens or 0 }}</dd></div>
       <div class="pl-linha"><dt>Análises feitas</dt><dd>{{ analises|length }}</dd></div>
@@ -508,7 +508,7 @@
     {% endif %}
     {% if wa %}
     <div class="pl-vazio" style="margin-top:12px;">
-      {% for w in wa %}{{ w.msgs }} mensagem(ns) lidas em {{ w.curto }}{{ ' · última em ' ~ w.analisado_em if w.analisado_em }}<br>{% endfor %}
+      {% for w in wa %}{{ w.msgs }} mensagem(ns) lidas em {{ w.curto }}{{ ' · última em ' ~ w.analisado_em|datahora_br if w.analisado_em }}<br>{% endfor %}
     </div>
     {% endif %}
   </div>
@@ -539,7 +539,7 @@
       <tbody>
         {% for c in cotacoes %}
         <tr>
-          <td>{{ c.criado_em }}</td>
+          <td>{{ c.criado_em|datahora_br }}</td>
           <td class="num">{{ c.planos }}</td>
           <td class="num">{{ c.total|moeda }}</td>
           <td>{{ 'sim (' ~ c.eventos ~ ')' if c.eventos else 'sem registro' }}</td>
@@ -563,8 +563,8 @@
             <a href="/proposta/{{ v.id }}" style="font-size:15px; font-weight:700;">{{ v.razao_social }}</a>
             <div class="pl-vazio" style="font-style:normal;">
               {{ v.adm_operadora or '—' }} · {{ v.modalidade or '—' }} · {{ v.status_operacional or v.status }}
-              {% if v.vigencia %} · vigência {{ v.vigencia }}{% endif %}
-              {% if v.implantada_em %} · implantada em {{ v.implantada_em }}{% endif %}
+              {% if v.vigencia %} · vigência {{ v.vigencia|data_br }}{% endif %}
+              {% if v.implantada_em %} · implantada em {{ v.implantada_em|data_br }}{% endif %}
               {% if v.lead_vinculo %} · vínculo por {{ v.lead_vinculo }}{% endif %}
             </div>
           </div>
@@ -584,7 +584,7 @@
             <tr>
               <td>{{ p.numero }}/{{ v.num_parcelas or v.parcelas|length }}</td>
               <td>{{ p.competencia or '—' }}</td>
-              <td>{{ p.data_prevista or '—' }}</td>
+              <td>{{ p.data_prevista|data_br or '—' }}</td>
               <td class="num">{{ p.valor_consultor|moeda }}</td>
               <td class="num">{{ p.valor_corretora|moeda }}</td>
             </tr>
@@ -601,7 +601,7 @@
 
         <div class="pl-vazio" style="margin-top:8px;">
           {% if v.ads %}
-            Conversão para o Google Ads: <b>{{ v.ads.status }}</b>{{ ' (' ~ v.ads.click_tipo ~ ')' if v.ads.click_tipo }}{{ ' em ' ~ v.ads.conversao_em if v.ads.conversao_em }}.
+            Conversão para o Google Ads: <b>{{ v.ads.status }}</b>{{ ' (' ~ v.ads.click_tipo ~ ')' if v.ads.click_tipo }}{{ ' em ' ~ v.ads.conversao_em|datahora_br if v.ads.conversao_em }}.
           {% else %}
             Esta venda não subiu para o Google Ads — sem click id do anúncio, o Google não sabe que ela existiu.
           {% endif %}
@@ -779,7 +779,7 @@
       {% for n in notas %}
       <div class="pl-nota">
         {{ n.texto }}
-        <div class="pl-nota-quem">{{ n.autor_nome or 'Extensão WhatsApp' }} · {{ n.criado_em }}</div>
+        <div class="pl-nota-quem">{{ n.autor_nome or 'Extensão WhatsApp' }} · {{ n.criado_em|datahora_br }}</div>
       </div>
       {% endfor %}
     {% endif %}
@@ -793,7 +793,7 @@
     <ul class="pl-tl">
       {% for t in timeline %}
       <li>
-        <span class="pl-tl-quando">{{ t.criado_em }}</span>
+        <span class="pl-tl-quando">{{ t.criado_em|datahora_br }}</span>
         <span class="pl-tl-tipo {{ t.tipo }}">{{ t.tipo }}</span>
         <span class="pl-tl-txt">{{ t.descricao }}<span class="pl-tl-quem"> — {{ t.usuario_nome or 'sistema' }}</span></span>
       </li>

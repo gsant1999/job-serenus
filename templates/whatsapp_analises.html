@@ -156,7 +156,7 @@
             {% elif v.etapa_nome %}<span class="pill pill-cinza">{{ v.etapa_nome }}</span>{% else %}—{% endif %}</td>
         <td class="num">{% if v.score is not none %}<span class="pill pill-{{ v.score_faixa }}">{{ v.score }}</span>{% else %}—{% endif %}</td>
         <td class="num">{{ v.msgs }}</td>
-        <td>{% if v.analise_id %}<a href="/whatsapp-analises/{{ v.analise_id }}/conversa">{{ v.analisado_em or 'ver' }}</a>{% else %}{{ v.analisado_em or '—' }}{% endif %}</td>
+        <td>{% if v.analise_id %}<a href="/whatsapp-analises/{{ v.analise_id }}/conversa">{{ v.analisado_em|datahora_br or 'ver' }}</a>{% else %}{{ v.analisado_em or '—' }}{% endif %}</td>
         <td>{% if v.proposta_id %}<a href="/proposta/{{ v.proposta_id }}" class="pill pill-verde" style="text-decoration:none;">{{ v.razao_social or ('venda #' ~ v.proposta_id) }}</a>{% else %}—{% endif %}</td>
         <td class="num">R$ {{ '%.2f'|format(v.custo_brl) }}</td>
       </tr>
@@ -185,7 +185,7 @@
     <tbody>
       {% for a in analises %}
       <tr>
-        <td>{{ a.criado_em }}</td>
+        <td>{{ a.criado_em|datahora_br }}</td>
         <td>{{ a.nome_contato or a.telefone or '—' }}</td>
         {% if eh_admin %}<td>{{ a.consultor_nome or '—' }}</td>{% endif %}
         <td class="num">{{ a.score if a.score is not none else '—' }}</td>

@@ -67,7 +67,7 @@
         <div><span class="pill" style="background:var(--teal);"></span><span class="quem">{{ r.nome or r.telefone_norm or '—' }}</span> respondeu
           <div class="meta" style="margin-left:14px;">{{ r.consultor or '—' }} · <a href="/campanha/{{ r.cid }}" style="color:var(--cinza);">{{ r.campanha }}</a></div>
         </div>
-        <div class="meta">{{ r.respondeu_em }}</div>
+        <div class="meta">{{ r.respondeu_em|datahora_br }}</div>
       </div>
       {% else %}<div class="linha" style="color:var(--cinza);">Nenhuma resposta ainda.</div>{% endfor %}
     </div>
@@ -78,7 +78,7 @@
         <div><span class="quem">{{ e.nome or '—' }}</span>
           <div class="meta" style="margin-left:0;">{{ e.consultor or '—' }} · <a href="/campanha/{{ e.cid }}" style="color:var(--cinza);">{{ e.campanha }}</a></div>
         </div>
-        <div class="meta">{{ e.enviado_em }}</div>
+        <div class="meta">{{ e.enviado_em|datahora_br }}</div>
       </div>
       {% else %}<div class="linha" style="color:var(--cinza);">Nenhum envio ainda.</div>{% endfor %}
     </div>
