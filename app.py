@@ -23777,7 +23777,12 @@ def crm_lead_juntar(lid):
 
         # O que estava vazio no que fica, herda de quem sai — juntar não pode
         # perder dado que só existia num dos dois.
-        for col in ('telefone', 'telefone_norm', 'email', 'empresa', 'observacoes', 'origem'):
+        # responsavel_id ENTRA na lista: juntar um lead sem dono com outro que
+        # tem dono deixava o card final orfao — some da fila de todo mundo e
+        # ninguem atende. Foi o caso do Samuel: o card com a venda estava sem
+        # consultor, os outros dois eram do Guilherme.
+        for col in ('telefone', 'telefone_norm', 'email', 'empresa', 'observacoes',
+                    'origem', 'responsavel_id'):
             try:
                 if not (fica[col] if col in fica.keys() else None) and (sai[col] if col in sai.keys() else None):
                     conn.execute(f"UPDATE crm_leads SET {col}=? WHERE id=?", (sai[col], lid))
@@ -33605,12 +33610,24 @@ def _backfill_telefone_norm_vazio():
                     "WHERE (telefone_norm IS NULL OR telefone_norm='') "
                     "AND telefone IS NOT NULL AND telefone <> ''").fetchall()
             except Exception:
+                # NO POSTGRES, ERRO ENVENENA A TRANSACAO INTEIRA. Sem este
+                # rollback, a primeira tabela sem 'id' (wa_chat_lead) derrubava
+                # tudo que veio ANTES junto com ela: os leads ja corrigidos
+                # voltavam ao estado torto no commit final, que tambem falhava.
+                # A migracao dizia "pulada" e nao mudava nada — de novo, toda
+                # vez que subia. No SQLite isso passa; no Postgres, nao.
+                try: conn.rollback()
+                except Exception: pass
                 continue          # tabela sem 'id' ou sem 'telefone': segue
             for r in rows:
                 novo = _normalizar_telefone(r['telefone'] or '')
                 if novo:
                     n += conn.execute(f"UPDATE {tab} SET telefone_norm=? WHERE id=?",
                                       (novo, r['id'])).rowcount or 0
+            # Fecha cada tabela por si: o que ja foi corrigido nao pode depender
+            # de a proxima dar certo.
+            try: conn.commit()
+            except Exception: pass
         conn.execute("INSERT INTO meta_flags (k) VALUES ('telefone_norm_vazio_20260803')")
         conn.commit()
         print(f"[TELEFONE_NORM_VAZIO] {n} registro(s) passaram a ser reconheciveis")
