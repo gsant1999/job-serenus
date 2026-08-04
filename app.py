@@ -23105,20 +23105,43 @@ def crm():
     # "Falar" é atividade de gente: whatsapp, ligação, e-mail, nota, atividade.
     # Criação e movimentação automática não contam, senão todo lead nasce
     # atendido e a etiqueta nunca apareceria.
+    # O NÚMERO DA COLUNA, não só a marca no card. Com 482 marcados, a etiqueta
+    # individual vira paisagem — mas o TOTAL no cabeçalho é o número que decide
+    # o dia: "482 dos 769 nunca foram chamados" é um problema de operação, não
+    # um detalhe de card. E leva pro filtro que mostra só eles.
+    sem_chamar_total = 0
     sem_chamar = {}
     _ids_novo = [l['id'] for l in leads if (l['etapa'] or '') == 'lead_novo']
     if _ids_novo:
         try:
             _m = ','.join(['?'] * len(_ids_novo))
             _lim = (datetime.now(TZ_SP) - timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+            # JANELA DE 30 DIAS, e ela é o que faz a etiqueta valer alguma coisa.
+            #
+            # Sem teto, 637 dos 769 leads em "Novo Lead" recebem a marca — alguns
+            # parados desde agosto de 2025. Etiqueta em 83% da coluna não é
+            # aviso, é papel de parede: some do olho no primeiro dia e leva
+            # junto a atenção que a etiqueta de verdade precisaria ter.
+            #
+            # O que ela existe pra dizer é "ESTE chegou e ninguém chamou", não
+            # "a base tem passivo histórico". Passivo histórico é outro
+            # problema, com outra tela e outra decisão (limpar ou nutrir).
+            _piso = (datetime.now(TZ_SP) - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
             for r in conn.execute(f"""SELECT l.id FROM crm_leads l
                 WHERE l.id IN ({_m})
                   AND CAST(l.criado_em AS TEXT) < ?
+                  AND CAST(l.criado_em AS TEXT) >= ?
                   AND NOT EXISTS (SELECT 1 FROM crm_atividades a WHERE a.lead_id = l.id
                                   AND a.tipo IN ('whatsapp','atividade','nota','email','ligacao'))""",
-                _ids_novo + [_lim]).fetchall():
+                _ids_novo + [_lim, _piso]).fetchall():
                 d = _saude_card(None, None, next((x['criado_em'] for x in leads if x['id'] == r['id']), None))
                 sem_chamar[r['id']] = d.get('dias') or 1
+            sem_chamar_total = conn.execute(
+                """SELECT COUNT(*) c FROM crm_leads l WHERE l.etapa='lead_novo'
+                     AND CAST(l.criado_em AS TEXT) < ? AND CAST(l.criado_em AS TEXT) >= ?
+                     AND NOT EXISTS (SELECT 1 FROM crm_atividades a WHERE a.lead_id = l.id
+                         AND a.tipo IN ('whatsapp','atividade','nota','email','ligacao'))""",
+                (_lim, _piso)).fetchone()['c']
         except Exception as e:
             app.logger.warning(f"[SEM_CHAMAR] {e}")
 
@@ -23261,7 +23284,7 @@ def crm():
                            trava_falta=trava_falta,
                            quadros=quadros, quadro_atual=f_quadro, quadro_total=quadro_total,
                            qs_filtros=qs_filtros, etapas_todas=carregar_etapas_crm(),
-                           sem_chamar=sem_chamar,
+                           sem_chamar=sem_chamar, sem_chamar_total=sem_chamar_total,
                            wa_do_lead=wa_do_lead)
 
 

@@ -109,6 +109,10 @@
      sobre ninguém ter falado com a pessoa. Duas falhas diferentes não podem
      ter a mesma cara, senão viram a mesma coisa aos olhos de quem varre a
      coluna. Ponto pulsando: é a única do card que pede ação hoje. */
+  .col-sem-chamar { display:inline-block; margin-top:5px; font-size:10.5px; font-weight:700;
+    padding:3px 9px; border-radius:8px; text-decoration:none;
+    background:rgba(244,63,94,.14); color:#fb7185; border:1px solid rgba(244,63,94,.3); }
+  .col-sem-chamar:hover { background:rgba(244,63,94,.24); }
   .lead-sem-chamar { font-size:9.5px; font-weight:700; padding:2px 7px 2px 6px;
     border-radius:8px; white-space:nowrap; display:inline-flex; align-items:center; gap:5px;
     background:rgba(244,63,94,.16); color:#fb7185; border:1px solid rgba(244,63,94,.35); }
@@ -754,6 +758,15 @@
         <div class="col-valor" id="valor-{{ etapa.id }}">
           {% if kanban_valor[etapa.id] > 0 %}R$ {{ kanban_valor[etapa.id]|numero }}{% endif %}
         </div>
+        {# O TOTAL onde o total pertence. A marca no card acha UM; este número
+           mostra o tamanho do buraco — e é clicável, porque número que não leva
+           a lugar nenhum é decoração. #}
+        {% if etapa.id == 'lead_novo' and sem_chamar_total %}
+        <a class="col-sem-chamar" href="/crm?etapa=lead_novo&sem_contato=1"
+           title="Leads que entraram nos últimos 30 dias, estão há mais de um dia em Novo Lead e ninguém falou com eles. Clique pra ver só esses.">
+          {{ sem_chamar_total }} sem chamar
+        </a>
+        {% endif %}
       </div>
       <div class="col-body" id="body-{{ etapa.id }}">
         {% for lead in kanban[etapa.id] %}
