@@ -164,18 +164,112 @@
       <div class="campo"><label>Forma de pagamento</label>{{ select_forma_pagamento('c-forma') }}</div>
       <button class="btn" id="btn-add-custo" onclick="addLanc('custo')">Adicionar</button>
     </div>
+    {# Centro de custo e tipo em linha própria: são os dois eixos que os
+       dashboards do PRD cortam. Canal só acende quando o centro é Mídia —
+       Meta/Google em despesa de aluguel seria ruído que estraga a soma. #}
+    <div class="add-row" style="grid-template-columns:1fr 1fr 1fr 1fr; margin-top:-8px;">
+      <div class="campo"><label>Centro de custo</label>
+        <select id="c-centro" onchange="_canalMidiaVisivel()">
+          <option value="">—</option>
+          {% for cc in centros_custo %}<option value="{{ cc }}">{{ cc }}</option>{% endfor %}
+        </select></div>
+      <div class="campo"><label>Tipo de lançamento</label>
+        <select id="c-tipol">
+          <option value="">—</option>
+          {% for t in tipos_lancamento %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select></div>
+      <div class="campo" id="campo-canal" style="display:none;"><label>Canal de mídia</label>
+        <select id="c-canal">
+          <option value="">—</option>
+          {% for cm in canais_midia %}<option value="{{ cm }}">{{ cm }}</option>{% endfor %}
+        </select></div>
+      <div class="campo"><label>Status</label>
+        <select id="c-status">
+          {% for s in status_lancamento %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+        </select></div>
+    </div>
     <div style="font-size:11px; color:var(--cinza-2); margin:-6px 0 14px;">A competência do lançamento é sempre a do mês de <b>emissão</b> — não do mês que você está vendo agora. Parcelado em N vezes gera N lançamentos, um por mês a partir da emissão.</div>
+
+    {# ── Calendário de vencimentos (PRD 5) ──────────────────────────────────
+       Uma barra por dia: onde os pagamentos se concentram e qual dia aperta.
+       Clicar num dia não filtra ainda — os atalhos de faixa fazem esse papel
+       e cobrem o que o PRD pediu; dia a dia seria mais UI sem mais resposta. #}
+    {% if cal_total %}
+    <div class="card" style="padding:14px 16px; margin-bottom:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+        <b style="font-size:13.5px;">Calendário de vencimentos</b>
+        <span style="font-size:11.5px; color:var(--cinza-2);">{{ cal_total|moeda }} vencendo neste mês</span>
+      </div>
+      <div style="display:flex; align-items:flex-end; gap:2px; height:74px;">
+        {% for d in calendario %}
+        <div style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%;"
+             title="Dia {{ '%02d'|format(d.dia) }}{% if d.qtd %} · {{ d.valor|moeda }} em {{ d.qtd }} lançamento(s){% else %} · nada vence{% endif %}">
+          <div style="height:{{ d.pct }}%; min-height:{{ 2 if d.valor else 0 }}px; border-radius:2px 2px 0 0;
+                      background:{{ 'var(--rosa)' if d.hoje else 'var(--azul)' }}; opacity:{{ '1' if d.valor else '.15' }};"></div>
+        </div>
+        {% endfor %}
+      </div>
+      <div style="display:flex; gap:2px; margin-top:4px;">
+        {% for d in calendario %}
+        <div style="flex:1; text-align:center; font-size:8.5px; font-variant-numeric:tabular-nums;
+                    color:{{ 'var(--rosa)' if d.hoje else 'var(--cinza-2)' }};">{{ d.dia if d.dia % 5 == 0 or d.dia == 1 or d.hoje else '' }}</div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {# ── Filtros (PRD 4). O de faixa de vencimento é o mais urgente. ── #}
+    <form method="get" class="card" style="padding:12px 16px; margin-bottom:14px; display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end;">
+      <input type="hidden" name="mes" value="{{ mes }}">
+      <div class="campo" style="min-width:190px;"><label>Vence entre</label>
+        <select name="faixa" onchange="this.form.submit()">
+          <option value="">Todo o mês</option>
+          <option value="01-10" {{ 'selected' if filtros.faixa=='01-10' }}>Dias 01 a 10</option>
+          <option value="11-20" {{ 'selected' if filtros.faixa=='11-20' }}>Dias 11 a 20</option>
+          <option value="21-31" {{ 'selected' if filtros.faixa=='21-31' }}>Dias 21 a 31</option>
+          <option value="proximos7" {{ 'selected' if filtros.faixa=='proximos7' }}>Próximos 7 dias</option>
+          <option value="vencidas" {{ 'selected' if filtros.faixa=='vencidas' }}>VENCIDAS</option>
+        </select></div>
+      <div class="campo" style="min-width:150px;"><label>Centro de custo</label>
+        <select name="centro" onchange="this.form.submit()">
+          <option value="">Todos</option>
+          {% for cc in centros_custo %}<option value="{{ cc }}" {{ 'selected' if filtros.centro==cc }}>{{ cc }}</option>{% endfor %}
+        </select></div>
+      <div class="campo" style="min-width:130px;"><label>Status</label>
+        <select name="status_lanc" onchange="this.form.submit()">
+          <option value="">Todos</option>
+          {% for s in status_lancamento %}<option value="{{ s }}" {{ 'selected' if filtros.status_lanc==s }}>{{ s }}</option>{% endfor %}
+          <option value="Vencido" {{ 'selected' if filtros.status_lanc=='Vencido' }}>Vencido</option>
+        </select></div>
+      <div class="campo" style="min-width:140px;"><label>Tipo</label>
+        <select name="tipo_lanc" onchange="this.form.submit()">
+          <option value="">Todos</option>
+          {% for t in tipos_lancamento %}<option value="{{ t }}" {{ 'selected' if filtros.tipo_lanc==t }}>{{ t }}</option>{% endfor %}
+        </select></div>
+      <div class="campo" style="min-width:170px;"><label>Meio de pagamento</label>
+        <select name="meio" onchange="this.form.submit()">
+          <option value="">Todos</option>
+          {% for m in meios_pagamento %}<option value="{{ m.id }}" {{ 'selected' if filtros.meio == m.id|string }}>{{ m.nome }}</option>{% endfor %}
+        </select></div>
+      {% if filtros.faixa or filtros.centro or filtros.status_lanc or filtros.tipo_lanc or filtros.meio %}
+      <a href="/financeiro?mes={{ mes }}" style="font-size:12.5px; color:var(--azul); text-decoration:none; padding-bottom:8px;">limpar filtros</a>
+      {% endif %}
+    </form>
     <div class="card">
       <div class="tbl-wrap">
       <table class="tbl">
-        <thead><tr><th>Descrição</th><th>Categoria</th><th>Emissão</th><th>Vencimento</th><th>Valor</th><th>Pago por</th><th>Fonte</th><th>Forma</th><th>Status</th><th>Comprovante</th><th></th></tr></thead>
+        <thead><tr><th>Descrição</th><th>Centro de custo</th><th>Categoria</th><th>Emissão</th><th>Vencimento</th><th>Valor</th><th>Pago por</th><th>Fonte</th><th>Forma</th><th>Status</th><th>Comprovante</th><th></th></tr></thead>
         <tbody id="tbody-custos">
           {% for c in custos %}
           <tr data-id="{{ c.id }}">
             <td class="td-descricao">{{ c.descricao }}</td>
+            <td class="td-centro" style="font-size:12px;">{{ c.centro_custo or '—' }}{% if c.canal_midia %} <span style="color:var(--cinza-2);">· {{ c.canal_midia }}</span>{% endif %}</td>
             <td class="td-categoria">{% if c.categoria == 'fixo' %}Fixo{% elif c.categoria == 'recorrente' %}Recorrente{% elif c.categoria == 'parcela_unica' %}Parcela única{% else %}{{ c.categoria or '—' }}{% endif %}</td>
             <td class="td-emissao">{{ (c.data_emissao|data_br) if c.data_emissao else (c.data_lancamento|data_br or '—') }}</td>
-            <td class="td-vencimento">{{ (c.data_vencimento|data_br) if c.data_vencimento else '—' }}</td>
+            {# Vencimento em vermelho quando venceu e não foi pago: é o dado que
+               a pessoa abre esta tela pra encontrar, e cor economiza a leitura
+               linha por linha. #}
+            <td class="td-vencimento" {% if c.status_efetivo == 'Vencido' %}style="color:var(--rosa); font-weight:600;"{% endif %}>{{ (c.data_vencimento|data_br) if c.data_vencimento else '—' }}</td>
             <td class="neg td-valor">{{ c.valor|moeda  }}</td>
             <td class="td-pagou">{{ c.pago_por or '—' }}</td>
             <td class="td-fonte">{% if c.fonte_pagamento == 'Caixa' %}Caixa{% elif c.fonte_pagamento == 'Terceiro' %}Terceiro{% else %}—{% endif %}</td>
@@ -185,8 +279,11 @@
               {% elif c.forma_pagamento == 'pix' %}Pix{% elif c.forma_pagamento == 'cartao_credito' %}Cartão crédito{% elif c.forma_pagamento == 'cartao_debito' %}Cartão débito{% elif c.forma_pagamento == 'boleto' %}Boleto{% elif c.forma_pagamento == 'dinheiro' %}Dinheiro{% elif c.forma_pagamento == 'transferencia' %}Transferência{% else %}—{% endif %}
             </td>
             <td>
-              <span class="badge-status {{ 'badge-pago' if c.status in ('Pago','Conciliado') else 'badge-previsto' }}">{{ c.status }}</span>
-              {% if c.status == 'Previsto' %}<button class="btn-ghost" style="color:var(--verde);" onclick="conciliar({{ c.id }})">Marcar pago</button>{% endif %}
+              {# status_efetivo, não status: 'Vencido' é derivado do vencimento
+                 na hora da leitura, e é ele que a pessoa precisa ver. #}
+              <span class="badge-status {{ 'badge-pago' if c.status in ('Pago','Conciliado') else 'badge-previsto' }}"
+                    {% if c.status_efetivo == 'Vencido' %}style="background:rgba(244,63,94,.16); color:var(--rosa);"{% endif %}>{{ c.status_efetivo }}</span>
+              {% if c.status != 'Pago' %}<button class="btn-ghost" style="color:var(--verde);" onclick="conciliar({{ c.id }})">Marcar pago</button>{% endif %}
             </td>
             <td style="white-space:nowrap;">
               {% if c.comprovante %}
@@ -468,6 +565,18 @@ function atualizarPreviewMeio(selectId) {
   prev.textContent = partes.join(' · ');
 }
 
+// Canal de mídia só existe quando o centro é Mídia. Some (e limpa) fora
+// disso, senão fica um Meta/Google preso num lançamento de aluguel.
+function _canalMidiaVisivel() {
+  const c = document.getElementById('c-centro');
+  const campo = document.getElementById('campo-canal');
+  const sel = document.getElementById('c-canal');
+  if (!c || !campo) return;
+  const eMidia = c.value === 'Mídia';
+  campo.style.display = eMidia ? '' : 'none';
+  if (!eMidia && sel) sel.value = '';
+}
+
 async function addLanc(tipo) {
   let body = {tipo};
   if (tipo==='custo') {
@@ -475,6 +584,8 @@ async function addLanc(tipo) {
     body.data_emissao=val('c-emissao'); body.data_vencimento=val('c-vencimento');
     body.num_parcelas=val('c-parcelas') || 1;
     body.pago_por=val('c-pagou'); body.fonte_pagamento=val('c-fonte');
+    body.centro_custo=val('c-centro'); body.tipo_lancamento=val('c-tipol');
+    body.canal_midia=val('c-canal'); body.status=val('c-status');
     Object.assign(body, lerFormaPagamento('c-forma'));
     if (!body.data_emissao) { toast('Informe a data de emissão', 'err'); return; }
   }

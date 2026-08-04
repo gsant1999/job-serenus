@@ -1,5 +1,5 @@
 # HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
-import os, sqlite3, json, hashlib, secrets, re, threading, time, mimetypes
+import os, sqlite3, json, hashlib, secrets, re, threading, time, mimetypes, calendar
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response, g, render_template_string
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -3095,6 +3095,26 @@ def init_db():
         # sempre (derivado do tipo do meio quando há vínculo), pra não quebrar
         # nenhum código que já lê forma_pagamento direto.
         ("lancamentos", "meio_pagamento_id", "INTEGER"),
+        # ── PRD Financeiro, Fase 1 (Gabriel/Karen, jul/2026) ──────────────────
+        # Sem estes dois campos nenhum dashboard do PRD tem como ser calculado:
+        # eles são os eixos de corte que hoje não existem.
+        #
+        # Por que colunas NOVAS e não reusar `tipo`/`categoria`: as duas já têm
+        # dono. `tipo` separa custo/fixo/aporte/reembolso (o que a linha É no
+        # fluxo de caixa) e `categoria` está preenchida com parcela_unica,
+        # recorrente, fixo. Empilhar um terceiro significado ali quebraria as
+        # telas que já leem esses campos — e o PRD pede um eixo diferente.
+        #
+        # centro_custo: Estrutura, Ferramentas, Mídia, Pessoal, Impostos. É o
+        # que responde "quanto da receita vai pra mídia" (64% do gasto).
+        ("lancamentos", "centro_custo", "TEXT"),
+        # tipo_lancamento: Fixo, Variável, Recorrente, Parcelado, Pontual —
+        # a natureza do gasto, que é outra pergunta que `tipo` não responde.
+        ("lancamentos", "tipo_lancamento", "TEXT"),
+        # canal_midia: Meta ou Google, só em lançamento de mídia. Prioridade
+        # média no PRD, mas a coluna é barata agora e é pré-requisito da Fase 3
+        # (CPL, CAC, ROI) — deixar pra depois obrigaria a repreencher à mão.
+        ("lancamentos", "canal_midia", "TEXT"),
         ("fluxo_passos", "conteudo", "TEXT"),
         ("fluxo_envio_log", "modelo_id", "INTEGER"),
         # Telefone do usuário (WhatsApp p/ notificações via WaSpeed e link wa.me nos e-mails)
@@ -12758,6 +12778,70 @@ def score_utilizacao():
 def competencia_atual():
     return date.today().strftime('%Y-%m')
 
+
+# ═══════════ FINANCEIRO — PRD Fase 1: vencimento, status e centro de custo ════
+# Listas fechadas num lugar só: a tela, o filtro e o formulário leem daqui, e
+# um valor novo aparece nos três sem ninguém lembrar de três lugares.
+CENTROS_CUSTO = ['Estrutura', 'Ferramentas', 'Mídia', 'Pessoal', 'Impostos']
+TIPOS_LANCAMENTO = ['Fixo', 'Variável', 'Recorrente', 'Parcelado', 'Pontual']
+CANAIS_MIDIA = ['Meta', 'Google']
+# 'Agendado' é débito automático — alguém MARCA que está agendado.
+# 'Vencido' NÃO entra aqui de propósito: ver _lanc_status_efetivo.
+STATUS_LANCAMENTO = ['Previsto', 'Agendado', 'Pago']
+
+
+def _lanc_status_efetivo(status, data_vencimento, hoje=None):
+    """Status que a tela mostra — 'Vencido' é CALCULADO, nunca gravado.
+
+    O PRD pede o status Vencido junto de Pago/Previsto/Agendado, mas gravar
+    'Vencido' no banco criaria uma mentira com data de validade: a linha só
+    vira vencida quando o dia passa, e ninguém vai rodar um job de madrugada
+    reescrevendo o status de todo lançamento em aberto. Guardado, ele estaria
+    errado no dia seguinte à gravação — e pior, um lançamento pago depois
+    ficaria 'Vencido' pra sempre.
+
+    Derivar na leitura é sempre verdade e não precisa de manutenção: em aberto
+    + vencimento no passado = Vencido."""
+    st = (status or 'Previsto').strip()
+    if st == 'Pago':
+        return 'Pago'
+    dt = _parse_dt_seguro(data_vencimento) if data_vencimento else None
+    if not dt:
+        return st
+    ref = hoje or date.today()
+    d = dt.date() if hasattr(dt, 'date') else dt
+    return 'Vencido' if d < ref else st
+
+
+def _lanc_faixa_where(faixa, coluna='l.data_vencimento'):
+    """WHERE da faixa de vencimento + os parâmetros. Devolve ('', []) quando
+    não há filtro, pra quem chama concatenar sem if.
+
+    Os atalhos são os do PRD: 01–10, 11–20, 21–31, próximos 7 dias e VENCIDAS.
+    Comparo como TEXTO porque data_vencimento é TEXT em 'AAAA-MM-DD' (e no
+    Postgres substr em data exige CAST — armadilha já conhecida deste projeto).
+    Formato ISO ordena igual como texto e como data, então funciona nos dois
+    bancos sem função de data nenhuma."""
+    f = (faixa or '').strip()
+    if not f:
+        return '', []
+    hoje = date.today()
+    if f == 'vencidas':
+        # Em aberto E com vencimento no passado. Sem o status, um lançamento
+        # já pago apareceria como vencido só por ter data antiga.
+        return (" AND COALESCE(l.status,'') <> 'Pago' AND {c} IS NOT NULL AND {c} <> ''"
+                " AND {c} < ?".format(c=coluna), [hoje.strftime('%Y-%m-%d')])
+    if f == 'proximos7':
+        return (" AND {c} >= ? AND {c} <= ?".format(c=coluna),
+                [hoje.strftime('%Y-%m-%d'), (hoje + timedelta(days=7)).strftime('%Y-%m-%d')])
+    dias = {'01-10': ('01', '10'), '11-20': ('11', '20'), '21-31': ('21', '31')}.get(f)
+    if not dias:
+        return '', []
+    # Só o DIA do vencimento importa aqui — a competência já é filtrada à parte,
+    # então comparar os dois últimos caracteres da data resolve sem CAST.
+    return (" AND {c} IS NOT NULL AND {c} <> '' AND substr({c}, 9, 2) BETWEEN ? AND ?".format(c=coluna),
+            list(dias))
+
 def gerar_fixo_mes(ano_mes):
     """Gera os lançamentos de FIXO do mês para cada consultor com fixo.
     Pago em 2 fluxos: dia 15 e dia 30 (metade em cada), conforme o calendário."""
@@ -12905,11 +12989,36 @@ def financeiro():
         GROUP BY competencia ORDER BY competencia""").fetchall()
     # Lançamentos do mês (custos vêm com o meio de pagamento vinculado, se
     # houver, pra mostrar "Nubank •••• 4521" em vez de só "Cartão crédito").
+    # ── Filtros do PRD (Fase 1). Combináveis entre si; vazio = sem filtro. ──
+    f_faixa = (request.args.get('faixa') or '').strip()
+    f_centro = (request.args.get('centro') or '').strip()
+    f_status = (request.args.get('status_lanc') or '').strip()
+    f_tipo_l = (request.args.get('tipo_lanc') or '').strip()
+    f_meio = (request.args.get('meio') or '').strip()
+    _w, _p = _lanc_faixa_where(f_faixa)
+    if f_centro:
+        _w += " AND COALESCE(l.centro_custo,'') = ?"; _p.append(f_centro)
+    if f_tipo_l:
+        _w += " AND COALESCE(l.tipo_lancamento,'') = ?"; _p.append(f_tipo_l)
+    if f_meio:
+        _w += " AND CAST(l.meio_pagamento_id AS TEXT) = ?"; _p.append(f_meio)
+    # 'Vencido' é derivado, então não vira WHERE: filtra depois, em Python,
+    # pelo mesmo _lanc_status_efetivo que a tela usa — assim o que o filtro
+    # entende por vencido é exatamente o que a tela mostra como vencido.
+    if f_status and f_status != 'Vencido':
+        _w += " AND COALESCE(l.status,'Previsto') = ?"; _p.append(f_status)
+
     custos = conn.execute("""SELECT l.*, mp.nome AS meio_nome, mp.tipo AS meio_tipo, mp.banco AS meio_banco,
             mp.titular AS meio_titular, mp.final_cartao AS meio_final_cartao,
             mp.dia_vencimento_fatura AS meio_dia_vencimento
         FROM lancamentos l LEFT JOIN meios_pagamento mp ON mp.id = l.meio_pagamento_id
-        WHERE l.tipo='custo' AND l.data_competencia=? ORDER BY l.id DESC""", (mes,)).fetchall()
+        WHERE l.tipo='custo' AND l.data_competencia=?""" + _w + " ORDER BY l.id DESC",
+        [mes] + _p).fetchall()
+    custos = [dict(c) for c in custos]
+    for c in custos:
+        c['status_efetivo'] = _lanc_status_efetivo(c.get('status'), c.get('data_vencimento'))
+    if f_status == 'Vencido':
+        custos = [c for c in custos if c['status_efetivo'] == 'Vencido']
     aportes = conn.execute("SELECT * FROM lancamentos WHERE tipo='aporte' AND data_competencia=? ORDER BY id DESC", (mes,)).fetchall()
     reembolsos = conn.execute("SELECT * FROM lancamentos WHERE tipo='reembolso' AND data_competencia=? ORDER BY id DESC", (mes,)).fetchall()
     fixos = conn.execute("""SELECT l.*, u.nome consultor_nome FROM lancamentos l
@@ -12978,14 +13087,48 @@ def financeiro():
         [{'socio': s, 'saldo': v} for s, v in saldo_socios.items() if abs(v) > 0.005],
         key=lambda x: -x['saldo'])
 
+    # ─── Calendário de vencimentos (PRD 5) ───
+    # Uma barra por dia do mês: mostra onde os pagamentos se concentram e qual
+    # dia aperta o caixa. Soma custo E fixo, porque quem olha quer saber o que
+    # sai do caixa naquele dia — a separação contábil não muda o aperto.
+    cal_dias, cal_max, cal_total = {}, 0, 0
+    try:
+        for r in conn.execute("""SELECT substr(data_vencimento, 9, 2) dia,
+                   COALESCE(SUM(valor),0) v, COUNT(*) n
+            FROM lancamentos
+            WHERE tipo IN ('custo','fixo') AND data_competencia=?
+              AND data_vencimento IS NOT NULL AND data_vencimento <> ''
+            GROUP BY 1""", (mes,)).fetchall():
+            if not (r['dia'] or '').isdigit():
+                continue
+            d = int(r['dia'])
+            cal_dias[d] = {'valor': float(r['v'] or 0), 'qtd': r['n']}
+            cal_max = max(cal_max, cal_dias[d]['valor'])
+            cal_total += cal_dias[d]['valor']
+    except Exception as e:
+        app.logger.warning(f"[FINANCEIRO] calendário de vencimentos: {e}")
+    _ano, _m = int(mes[:4]), int(mes[5:7])
+    _ult = calendar.monthrange(_ano, _m)[1]
+    calendario = [{'dia': d, 'valor': cal_dias.get(d, {}).get('valor', 0),
+                   'qtd': cal_dias.get(d, {}).get('qtd', 0),
+                   'pct': round(100 * cal_dias.get(d, {}).get('valor', 0) / cal_max) if cal_max else 0,
+                   'hoje': (date.today().year == _ano and date.today().month == _m
+                            and date.today().day == d)}
+                  for d in range(1, _ult + 1)]
     close_db(conn)
+
     return render_template('financeiro.html', mes=mes, futuras=futuras,
         custos=custos, aportes=aportes, fixos=fixos, reembolsos=reembolsos,
         meios_pagamento=meios_pagamento,
         receber_mes=receber_mes, pagar_consultor=pagar_consultor,
         total_custos=total_custos, total_custos_puro=total_custos_puro, total_fixos=total_fixos,
         total_aportes=total_aportes, total_reembolsos=total_reembolsos,
-        saldo=saldo, dre=dre, saldo_socios=saldo_socios_lista, lancamento_focus=lancamento_focus)
+        saldo=saldo, dre=dre, saldo_socios=saldo_socios_lista, lancamento_focus=lancamento_focus,
+        centros_custo=CENTROS_CUSTO, tipos_lancamento=TIPOS_LANCAMENTO,
+        canais_midia=CANAIS_MIDIA, status_lancamento=STATUS_LANCAMENTO,
+        calendario=calendario, cal_total=cal_total,
+        filtros={'faixa': f_faixa, 'centro': f_centro, 'status_lanc': f_status,
+                 'tipo_lanc': f_tipo_l, 'meio': f_meio})
 
 def _proximo_mes(competencia, n):
     """Soma n meses a uma competência 'YYYY-MM'. Retorna 'YYYY-MM'."""
@@ -13157,16 +13300,37 @@ def lancamento_salvar():
         valor_i = round(valor_total - valor_parcela * (num_parcelas - 1), 2) if i == num_parcelas - 1 else valor_parcela
         competencia_i = _proximo_mes(competencia_base, i) if competencia_base else competencia_atual()
         desc_i = f"{descricao} ({i+1}/{num_parcelas})" if num_parcelas > 1 else descricao
+        # Centro de custo / tipo / canal: só aceita o que está na lista fechada.
+        # Valor livre aqui viraria "Midia", "mídia" e "MÍDIA" como três centros
+        # diferentes, e o dashboard de 64% em mídia sairia errado e calado.
+        _centro = (d.get('centro_custo') or '').strip()
+        _centro = _centro if _centro in CENTROS_CUSTO else None
+        _tipol = (d.get('tipo_lancamento') or '').strip()
+        _tipol = _tipol if _tipol in TIPOS_LANCAMENTO else None
+        _canal = (d.get('canal_midia') or '').strip()
+        # Canal de mídia só faz sentido em lançamento de mídia — em outro
+        # centro seria ruído que estraga a soma por canal.
+        _canal = _canal if (_canal in CANAIS_MIDIA and _centro == 'Mídia') else None
+        # Parcelado se declara sozinho: quem lança em N parcelas está dizendo
+        # o tipo pela própria ação, e obrigar a repetir no seletor só gera
+        # divergência entre o que foi marcado e o que a linha é.
+        if not _tipol and num_parcelas > 1:
+            _tipol = 'Parcelado'
+        _status_ini = (d.get('status') or 'Previsto').strip()
+        if _status_ini not in STATUS_LANCAMENTO:
+            _status_ini = 'Previsto'
         conn.execute("""INSERT INTO lancamentos
             (tipo,categoria,descricao,valor,data_competencia,data_lancamento,data_emissao,data_vencimento,
-             socio,recorrente,status,pago_por,fonte_pagamento,forma_pagamento,meio_pagamento_id,grupo_parcela,parcela_num,parcela_total)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             socio,recorrente,status,pago_por,fonte_pagamento,forma_pagamento,meio_pagamento_id,grupo_parcela,parcela_num,parcela_total,
+             centro_custo,tipo_lancamento,canal_midia)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (tipo, d.get('categoria', ''), desc_i, valor_i, competencia_i,
              data_emissao or competencia_i, data_emissao or None, data_vencimento or None,
-             d.get('socio', ''), 1 if d.get('recorrente') else 0, 'Previsto',
+             d.get('socio', ''), 1 if d.get('recorrente') else 0, _status_ini,
              (d.get('pago_por') or '').strip(), (d.get('fonte_pagamento') or '').strip(),
              forma_pagamento, meio_pagamento_id,
-             grupo, i + 1 if num_parcelas > 1 else None, num_parcelas if num_parcelas > 1 else None))
+             grupo, i + 1 if num_parcelas > 1 else None, num_parcelas if num_parcelas > 1 else None,
+             _centro, _tipol, _canal))
         lid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
         ids.append(lid)
