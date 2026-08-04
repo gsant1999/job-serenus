@@ -24239,6 +24239,37 @@ def crm_lead_juntar(lid):
 
         # O que estava vazio no que fica, herda de quem sai — juntar não pode
         # perder dado que só existia num dos dois.
+        # A ETAPA MAIS AVANCADA GANHA, venha ela de qual lado vier.
+        #
+        # Herdar so campo vazio nao serve pra etapa: os dois SEMPRE tem uma. Sem
+        # esta regra, juntar o card antigo (Venda Fechada, com a conversa e o
+        # historico) dentro do card novo (Novo Lead, criado por engano) rebaixava
+        # a venda pro topo do funil — e some do relatorio de fechamento sem
+        # ninguem perceber. A direcao da fusao nao pode decidir isso.
+        #
+        # 'ganho' vence qualquer outra: venda fechada e o fim da linha. Fora
+        # isso, a de maior ordem no funil.
+        try:
+            _ord = {}
+            _tipo = {}
+            for e in conn.execute("SELECT slug, ordem, tipo FROM crm_etapas").fetchall():
+                _ord[e['slug']] = e['ordem'] or 0
+                _tipo[e['slug']] = e['tipo'] or 'normal'
+            _fica_et = (fica['etapa'] if 'etapa' in fica.keys() else '') or ''
+            _sai_et = (sai['etapa'] if 'etapa' in sai.keys() else '') or ''
+            def _peso(et):
+                return (2 if _tipo.get(et) == 'ganho' else (0 if _tipo.get(et) == 'perdido' else 1),
+                        _ord.get(et, 0))
+            if _sai_et and _peso(_sai_et) > _peso(_fica_et):
+                conn.execute("UPDATE crm_leads SET etapa=? WHERE id=?", (_sai_et, lid))
+                conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                                VALUES (?,?,?,?,?)""",
+                             (lid, session.get('nome'), 'etapa',
+                              f'Etapa veio do lead juntado (#{outro}): "{_fica_et}" → "{_sai_et}" — '
+                              'a mais avançada prevalece.', _agora_sp()))
+        except Exception as e:
+            app.logger.warning(f"[JUNTAR] etapa: {e}")
+
         # responsavel_id ENTRA na lista: juntar um lead sem dono com outro que
         # tem dono deixava o card final orfao — some da fila de todo mundo e
         # ninguem atende. Foi o caso do Samuel: o card com a venda estava sem
