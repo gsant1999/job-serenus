@@ -20102,7 +20102,13 @@ def api_whatsapp_varredura_proximo():
             return _t(v) >= _t(minimo)
         except Exception:
             return False
-    _MIN_VARREDURA = '3.16.0'
+    # 3.21.0: sem ela faltam as tres correcoes de 04/08 contra o crash por
+    # falta de memoria (gate entre as tres rotinas, auto-carregamento de
+    # conversa @lid nunca aberta, e a marca d'agua que evita reler a conversa
+    # inteira em todo item da fila). Extensao mais velha SERIA capaz de
+    # consumir a fila, so que do jeito que estava derrubando o WhatsApp — por
+    # isso o teto sobe junto com o fix, nao so quando quebra de vez.
+    _MIN_VARREDURA = '3.21.0'
     versao = (request.args.get('versao') or '').strip()
     if not _versao_maior_ou_igual(versao, _MIN_VARREDURA):
         return _wa_cors(jsonify({
