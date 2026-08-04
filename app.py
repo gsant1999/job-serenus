@@ -15330,8 +15330,27 @@ _IA_PROVEDORES = ('claude', 'groq', 'openai')
 
 def _ia_classificar(http, corpo):
     txt = str(corpo or '').lower()
+    # LIMITE VEM ANTES DE CREDITO, e a ordem e o conserto.
+    #
+    # 03/08: a tela acusou "Groq sem creditos" numa conta que nunca teve
+    # pagamento — plano gratuito. A mensagem de RATE LIMIT do Groq traz um link
+    # pra pagina de upgrade, que contem a palavra 'billing'; o teste de credito
+    # rodava primeiro e casava com o link. Diagnostico invertido: "alguem
+    # precisa pagar" quando a resposta certa era "passa sozinho, nao faca nada"
+    # — e passou mesmo, 12 minutos depois.
+    #
+    # Sem credito NAO alterna: falha e continua falhando. Limite alterna — ali
+    # o ultimo sucesso e a ultima falha estavam a UM segundo de distancia.
+    _limite = ('rate limit' in txt or 'rate_limit' in txt or 'ratelimit' in txt
+               or 'try again in' in txt or 'requests per' in txt or 'tokens per' in txt)
+    if http == 429 and _limite:
+        return 'limite', 'Limite do plano (passa sozinho)'
+    # 'billing' sozinho nao prova nada — e link. Credito de verdade fala em
+    # SALDO, cota esgotada ou pagamento recusado.
     if 'credit balance is too low' in txt or 'insufficient_quota' in txt \
-       or 'exceeded your current quota' in txt or 'billing' in txt:
+       or 'exceeded your current quota' in txt or 'insufficient credit' in txt \
+       or 'payment required' in txt or 'billing_hard_limit' in txt \
+       or ('billing' in txt and not _limite):
         return 'sem_credito', 'Sem créditos na conta'
     if http in (401, 403) or 'invalid_api_key' in txt or 'authentication' in txt \
        or 'invalid api key' in txt:
