@@ -7,12 +7,58 @@
     <div class="sub">Devolve a VENDA ao Google e à Meta, com valor real, para eles otimizarem por quem compra — não por quem preenche formulário</div>
   </div>
   <div style="display:flex; gap:8px;">
+    <button class="btn-outline btn-sm" onclick="testar(this)">Testar ligação</button>
     <button class="btn-outline btn-sm" onclick="enfileirar(this)">Buscar vendas não enfileiradas</button>
     <button class="btn btn-sm" onclick="enviar(this)">Enviar pendentes</button>
   </div>
 </div>
 
 <div class="page">
+  {# A CORRENTE INTEIRA, NA ORDEM. O Google e o ULTIMO elo: credencial certa com
+     zero clique capturado manda zero conversao. Sem este quadro, "nada foi
+     enviado" nao diz se o problema e a chave, a captura ou o status da venda. #}
+  {% if rastreio %}
+  {% set sem_clique = (rastreio.leads_com_clique or 0) == 0 and (rastreio.leads_extras_clique or 0) == 0 %}
+  <div class="card" style="{% if sem_clique %}border-color:rgba(244,63,94,.45);{% endif %}">
+    <div class="card-header">
+      <h3>Do clique até a venda<i class="ajuda-i" title="O Google só aceita a conversão se ela vier com o identificador do clique (gclid). Ele nasce na URL do anúncio, atravessa a página, a planilha e o CRM, e só então volta pro Google. Se ele se perde em qualquer ponto, não há o que enviar — mesmo com todas as credenciais certas.">i</i></h3>
+    </div>
+    <div style="padding:0 16px 16px;">
+      <div style="display:flex; flex-wrap:wrap; gap:10px;">
+        {% set elos = [
+          ('Leads com clique do anúncio', (rastreio.leads_com_clique or 0) + (rastreio.leads_extras_clique or 0), rastreio.leads or 0,
+           'O gclid tem que chegar junto com o lead. Se está zerado, ele se perde antes do CRM: ou o anúncio não marca a URL (auto-tagging), ou quem grava a planilha não leva a coluna do clique.'),
+          ('Propostas ligadas a um lead', rastreio.propostas_com_lead or 0, rastreio.propostas or 0,
+           'Proposta sem lead não tem de onde herdar o clique — a venda existe, mas não dá pra dizer de qual anúncio veio.'),
+          ('Vendas marcadas como Emitida/Ativa', rastreio.vendas or 0, rastreio.propostas or 0,
+           'Só entra na fila a proposta com este status. Venda fechada de verdade que ficou em outro status não é enviada.'),
+          ('Vendas com clique — o que dá pra enviar hoje', rastreio.vendas_com_clique or 0, rastreio.vendas or 0,
+           'É o número final. Enquanto for zero, ligar as credenciais não muda nada: não existe conversão para mandar.')
+        ] %}
+        {% for nome, tem, total, porque in elos %}
+        <div style="flex:1; min-width:200px; border:1px solid var(--borda); border-radius:9px; padding:11px 13px;
+                    {% if tem == 0 %}border-color:rgba(244,63,94,.4);{% endif %}">
+          <div style="font-size:20px; font-weight:700; color:{{ 'var(--rosa)' if tem == 0 else 'var(--texto)' }}; font-variant-numeric:tabular-nums;">
+            {{ tem }}<span style="font-size:12px; font-weight:500; color:var(--cinza-2);"> de {{ total }}</span>
+          </div>
+          <div style="font-size:11.5px; color:var(--cinza); margin-top:3px; line-height:1.45;">{{ nome }}</div>
+          {% if tem == 0 %}<div style="font-size:11px; color:var(--cinza-2); margin-top:6px; line-height:1.5;">{{ porque }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% if sem_clique %}
+      <div style="margin-top:13px; font-size:12.5px; color:var(--cinza); line-height:1.6;
+                  background:var(--panel-2); border-radius:8px; padding:11px 13px;">
+        <b style="color:var(--texto);">Nenhum lead chegou com identificador de clique.</b>
+        A página captura o gclid e manda no formulário, e o JOB sabe ler a coluna — o elo que falta é no meio:
+        quem grava a planilha de leads precisa criar a coluna <code>gclid</code> (e <code>gbraid</code>/<code>wbraid</code>,
+        que é o que o iPhone manda no lugar do gclid) e preencher com o que vem do formulário.
+        Enquanto isso não existir, a conversão offline não tem o que enviar.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
   {% if faltando %}
   <div class="card" style="border-color:rgba(250,204,21,.4);">
     <div class="card-header"><h3>Falta configurar para conseguir enviar</h3></div>
@@ -30,6 +76,8 @@
     </div>
   </div>
   {% endif %}
+
+  <div class="card" id="teste-saida" style="display:none;"></div>
 
   <div class="card">
     <div class="card-header"><h3>Situação da fila</h3></div>
@@ -158,5 +206,40 @@ function enviar(b){ _p('/google-ads/enviar', {}, b,
   d => 'Pendentes: ' + d.pendentes + '\nEnviadas: ' + d.enviadas + '\nRecusadas: ' + d.falhas +
        (d.faltando_config && d.faltando_config.length ? '\n\nFalta configurar: ' + d.faltando_config.join(', ') : '') +
        ((d.erros||[]).length ? '\n\n' + d.erros.join('\n') : '')); }
+
+// TESTE DE LIGAÇÃO. Não recarrega a página (o resultado é o conteúdo) e não
+// envia venda nenhuma. Cada degrau aparece separado porque o valor está em
+// saber ONDE parou — "não funcionou" não conserta nada.
+async function testar(b){
+  const t = b.textContent; b.disabled = true; b.textContent = 'Testando…';
+  const cx = document.getElementById('teste-saida');
+  cx.style.display = 'block';
+  cx.innerHTML = '<div style="padding:14px; color:var(--cinza); font-size:13px;">Falando com o Google…</div>';
+  try{
+    const d = await (await fetch('/google-ads/testar', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body:'{}'})).json();
+    const linhas = (d.passos||[]).map(p =>
+      '<div style="display:flex; gap:10px; padding:9px 0; border-bottom:1px solid var(--borda);">'
+      + '<div style="flex-shrink:0; width:74px; font-size:10.5px; font-weight:700; text-transform:uppercase;'
+      + ' letter-spacing:.4px; padding-top:2px; color:' + (p.ok ? 'var(--teal)' : 'var(--rosa)') + ';">'
+      + (p.ok ? 'passou' : 'parou aqui') + '</div>'
+      + '<div style="flex:1; min-width:0;"><div style="font-size:13px; font-weight:600; color:var(--texto);">'
+      + _e(p.nome) + '</div>'
+      + '<div style="font-size:12px; color:var(--cinza); margin-top:2px; line-height:1.5; word-break:break-word;">'
+      + _e(p.detalhe) + '</div>'
+      + (p.dica ? '<div style="font-size:12px; color:var(--amarelo,#f59e0b); margin-top:5px; line-height:1.5;">'
+                  + _e(p.dica) + '</div>' : '')
+      + '</div></div>').join('');
+    cx.innerHTML = '<div class="card-header"><h3>' + (d.ok ? 'Ligação funcionando' : 'A ligação parou no meio')
+      + '</h3></div><div style="padding:0 16px 14px;">' + linhas
+      + (d.ok ? '<div style="font-size:12.5px; color:var(--cinza); margin-top:11px; line-height:1.6;">'
+              + 'As credenciais estão certas. Isso não quer dizer que haja conversão para enviar — veja o '
+              + 'quadro "Do clique até a venda" acima.</div>' : '') + '</div>';
+  }catch(e){
+    cx.innerHTML = '<div style="padding:14px; color:var(--rosa); font-size:13px;">Não consegui falar com o servidor.</div>';
+  }
+  b.disabled = false; b.textContent = t;
+}
+function _e(s){ const d = document.createElement('div'); d.textContent = (s==null?'':String(s)); return d.innerHTML; }
 </script>
 {% endblock %}

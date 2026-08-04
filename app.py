@@ -29305,8 +29305,10 @@ def google_ads_painel():
         app.logger.warning(f"[META] painel: {e}")
         try: conn.rollback()
         except Exception: pass
+    rastreio = _ads_rastreio(conn)
     close_db(conn)
     return render_template('google_ads.html', linhas=[dict(r) for r in linhas],
+                           rastreio=rastreio,
                            contagem=contagem, faltando=faltando, fora=fora,
                            valor_base=(os.environ.get('GOOGLE_ADS_VALOR_BASE') or 'comissao_bruta'),
                            customer_id=cfg['customer_id'],
@@ -29369,6 +29371,192 @@ def meta_ads_enviar():
 def google_ads_enviar():
     resumo = enviar_conversoes_ads(limite=int((request.json or {}).get('limite') or 200))
     return jsonify({"ok": not resumo.get('erros'), **resumo})
+
+
+def _ads_testar_conexao():
+    """Testa a ligação com o Google Ads SEM enviar venda nenhuma.
+
+    Por que uma rota só pra isso: ligar seis credenciais e descobrir se prestam
+    só quando a primeira venda real falha é o jeito errado de fazer. Aqui cada
+    degrau é testado separado, então o erro aponta o culpado em vez de dizer
+    'não funcionou': chave errada, token não aprovado, conta errada ou ação de
+    conversão inexistente dão mensagens diferentes.
+
+    O último degrau usa um gclid inválido de propósito. Se o Google responder
+    "clique não encontrado", está tudo certo — ele autenticou, achou a conta,
+    achou a ação de conversão e só não achou aquele clique (que não existe
+    mesmo). Esse erro é a APROVAÇÃO do teste, não a reprovação dele."""
+    passos = []
+
+    def passo(nome, ok, detalhe='', dica=''):
+        passos.append({'nome': nome, 'ok': bool(ok), 'detalhe': str(detalhe)[:500], 'dica': dica})
+        return ok
+
+    cfg, faltando = _ads_config()
+    if not passo('Credenciais no servidor', not faltando,
+                 'Faltando: ' + ', '.join(faltando) if faltando else 'as 6 estão configuradas',
+                 'Cadastre as variáveis no Railway e faça o redeploy.' if faltando else ''):
+        return {'ok': False, 'passos': passos}
+
+    try:
+        token = _ads_token(cfg)
+        passo('Login (OAuth)', True, 'access_token recebido')
+    except Exception as e:
+        passo('Login (OAuth)', False, e,
+              'Client ID, Client Secret ou Refresh Token errados/expirados. '
+              'O refresh token morre se a senha da conta Google mudar ou se o acesso for revogado.')
+        return {'ok': False, 'passos': passos}
+
+    headers = {'Authorization': 'Bearer ' + token,
+               'developer-token': cfg['developer_token'],
+               'Content-Type': 'application/json'}
+    if cfg['login_customer_id']:
+        headers['login-customer-id'] = cfg['login_customer_id']
+
+    # Degrau 2: a conta existe e este token enxerga ela? Uma consulta de leitura,
+    # que não altera nada — é aqui que aparece developer token não aprovado.
+    conta = ''
+    try:
+        r = _requests.post(f"{_ADS_API}/customers/{cfg['customer_id']}/googleAds:search",
+                           headers=headers, timeout=30,
+                           json={'query': 'SELECT customer.id, customer.descriptive_name, '
+                                          'customer.currency_code, customer.time_zone FROM customer LIMIT 1'})
+        if r.status_code == 200:
+            res = ((r.json() or {}).get('results') or [{}])[0].get('customer') or {}
+            conta = res.get('descriptiveName') or ''
+            passo('Conta do Google Ads', True,
+                  f"{conta or '(sem nome)'} · id {res.get('id') or cfg['customer_id']} · "
+                  f"{res.get('currencyCode') or '?'} · fuso {res.get('timeZone') or '?'}")
+        else:
+            corpo = r.text[:400]
+            dica = ''
+            if 'DEVELOPER_TOKEN' in corpo.upper():
+                dica = ('O developer token está em modo teste ou não foi aprovado. Só token com acesso '
+                        'Basic/Standard fala com conta real — peça a aprovação no Google Ads API Center.')
+            elif r.status_code == 403:
+                dica = ('A conta existe mas este login não tem permissão nela. Se ela fica dentro de um '
+                        'MCC, cadastre GOOGLE_ADS_LOGIN_CUSTOMER_ID com o id do MCC (só dígitos).')
+            elif r.status_code == 404:
+                dica = 'Customer ID não encontrado — confira o número, sem hífens.'
+            passo('Conta do Google Ads', False, f"HTTP {r.status_code}: {corpo}", dica)
+            return {'ok': False, 'passos': passos}
+    except Exception as e:
+        passo('Conta do Google Ads', False, e, '')
+        return {'ok': False, 'passos': passos}
+
+    # Degrau 3: a ação de conversão existe e é do tipo que aceita upload?
+    acao_nome = ''
+    try:
+        r = _requests.post(f"{_ADS_API}/customers/{cfg['customer_id']}/googleAds:search",
+                           headers=headers, timeout=30,
+                           json={'query': 'SELECT conversion_action.id, conversion_action.name, '
+                                          'conversion_action.type, conversion_action.status '
+                                          'FROM conversion_action WHERE conversion_action.id = '
+                                          f"{int(re.sub(r'[^0-9]', '', cfg['conversion_action_id']) or 0)}"})
+        achou = ((r.json() or {}).get('results') or []) if r.status_code == 200 else []
+        if achou:
+            ca = achou[0].get('conversionAction') or {}
+            acao_nome = ca.get('name') or ''
+            tipo = ca.get('type') or ''
+            ok_tipo = tipo in ('UPLOAD_CLICKS', 'UPLOAD_CALLS')
+            passo('Ação de conversão', ok_tipo,
+                  f"{acao_nome} · tipo {tipo} · {ca.get('status') or '?'}",
+                  '' if ok_tipo else ('Esta ação não é do tipo "Importar > Cliques" (UPLOAD_CLICKS). '
+                                      'Conversão offline por gclid só entra numa ação desse tipo — '
+                                      'crie uma nova no Google Ads e use o id dela.'))
+            if not ok_tipo:
+                return {'ok': False, 'passos': passos, 'conta': conta}
+        else:
+            passo('Ação de conversão', False,
+                  f"HTTP {r.status_code}: {r.text[:300]}" if r.status_code != 200 else 'id não encontrado nesta conta',
+                  'O Conversion Action ID não existe nesta conta. Ele aparece na URL quando você abre a '
+                  'conversão em Metas > Conversões (ctId=...).')
+            return {'ok': False, 'passos': passos, 'conta': conta}
+    except Exception as e:
+        passo('Ação de conversão', False, e, '')
+        return {'ok': False, 'passos': passos, 'conta': conta}
+
+    # Degrau 4: o envio de verdade, com um clique que não existe. validateOnly
+    # não serve aqui — ele nem tenta casar o clique, então passaria sempre.
+    try:
+        agora = datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S%z')
+        agora = agora[:-2] + ':' + agora[-2:] if len(agora) > 5 else agora
+        r = _requests.post(f"{_ADS_API}/customers/{cfg['customer_id']}:uploadClickConversions",
+                           headers=headers, timeout=45,
+                           json={'conversions': [{
+                               'conversionAction': f"customers/{cfg['customer_id']}/conversionActions/{cfg['conversion_action_id']}",
+                               'gclid': 'TESTE_JOB_SEM_CLIQUE_REAL',
+                               'conversionDateTime': agora,
+                               'conversionValue': 0.01, 'currencyCode': 'BRL'}],
+                               'partialFailure': True})
+        corpo = r.text[:600]
+        # "clique não encontrado" é o resultado ESPERADO — prova que tudo antes
+        # funcionou. Só um gclid real de um clique real completaria.
+        esperado = any(s in corpo.upper() for s in
+                       ('CLICK_NOT_FOUND', 'GCLID_DATE_TIME_PAIR_NOT_FOUND', 'UNPARSEABLE_GCLID',
+                        'INVALID_CONVERSION_ACTION', 'EXPIRED_GCLID', 'NO_CONVERSION_ACTION_FOUND'))
+        if r.status_code == 200 and esperado:
+            passo('Envio de conversão', True,
+                  'O Google recusou o clique de teste (que não existe mesmo) — sinal de que autenticação, '
+                  'conta e ação de conversão estão todas certas.')
+        elif r.status_code == 200:
+            passo('Envio de conversão', True, 'Aceito sem erro. Resposta: ' + corpo)
+        else:
+            passo('Envio de conversão', False, f"HTTP {r.status_code}: {corpo}", '')
+            return {'ok': False, 'passos': passos, 'conta': conta}
+    except Exception as e:
+        passo('Envio de conversão', False, e, '')
+        return {'ok': False, 'passos': passos, 'conta': conta}
+
+    return {'ok': True, 'passos': passos, 'conta': conta, 'acao': acao_nome}
+
+
+@app.route('/google-ads/testar', methods=['POST'])
+@login_required
+@admin_required
+def google_ads_testar():
+    """Teste de ligação com o Google, sem mandar venda nenhuma."""
+    try:
+        return jsonify(_ads_testar_conexao())
+    except Exception as e:
+        app.logger.error(f"[ADS] teste falhou: {e}")
+        return jsonify({'ok': False, 'passos': [{'nome': 'Teste', 'ok': False,
+                                                 'detalhe': str(e)[:400], 'dica': ''}]})
+
+
+def _ads_rastreio(conn):
+    """De onde vem (ou não vem) o gclid. É o diagnóstico que faltava.
+
+    A conversão offline tem quatro elos, e o Google é o ÚLTIMO. Sem isto,
+    ligar as credenciais e ver 'nada foi enviado' não diz qual elo quebrou —
+    o clique que nunca foi capturado, a venda que nunca virou Emitida/Ativa ou
+    a proposta que não sabe de qual lead veio."""
+    d = {}
+    try:
+        d['leads'] = conn.execute("SELECT COUNT(*) c FROM crm_leads").fetchone()['c']
+        d['leads_com_clique'] = conn.execute(
+            "SELECT COUNT(*) c FROM crm_leads WHERE COALESCE(gclid,'') <> ''").fetchone()['c']
+        d['leads_extras_clique'] = conn.execute(
+            """SELECT COUNT(*) c FROM crm_leads WHERE COALESCE(dados_extras,'') LIKE '%gclid%'
+               OR COALESCE(dados_extras,'') LIKE '%gbraid%'""").fetchone()['c']
+        d['leads_pago'] = conn.execute(
+            "SELECT COUNT(*) c FROM crm_leads WHERE trafego='Pago'").fetchone()['c']
+        d['propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
+        d['propostas_com_lead'] = conn.execute(
+            "SELECT COUNT(*) c FROM propostas WHERE lead_id IS NOT NULL").fetchone()['c']
+        d['vendas'] = conn.execute(
+            "SELECT COUNT(*) c FROM propostas WHERE status_operacional='Emitida/Ativa'").fetchone()['c']
+        d['vendas_com_clique'] = conn.execute(
+            """SELECT COUNT(*) c FROM propostas p JOIN crm_leads l ON l.id = p.lead_id
+               WHERE p.status_operacional='Emitida/Ativa' AND COALESCE(l.gclid,'') <> ''""").fetchone()['c']
+        d['status_propostas'] = [dict(r) for r in conn.execute(
+            """SELECT COALESCE(status_operacional,'(vazio)') s, COUNT(*) n FROM propostas
+               GROUP BY 1 ORDER BY n DESC LIMIT 10""").fetchall()]
+    except Exception as e:
+        app.logger.warning(f"[ADS] rastreio: {e}")
+        try: conn.rollback()
+        except Exception: pass
+    return d
 
 
 # ─── QUADROS DO KANBAN ────────────────────────────────────────────────────────
