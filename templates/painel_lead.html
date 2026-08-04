@@ -225,13 +225,16 @@
   .pl-doc-link.ok { color:var(--verde); }
   .pl-msg { font-size:10.5px; color:var(--verde); }
   .pl-msg.ruim { color:var(--al-fg); }
-  .pl-custo { width:100%; border-collapse:collapse; font-size:12px; margin-top:12px; }
-  .pl-custo th { text-align:left; font-size:9.5px; text-transform:uppercase; letter-spacing:.5px;
-                 color:var(--cinza-2); font-weight:700; padding:5px 7px; border-bottom:1px solid var(--borda); }
-  .pl-custo td { padding:6px 7px; border-bottom:1px solid var(--borda); color:var(--cinza); }
-  .pl-custo td.num, .pl-custo th.num { text-align:right; font-variant-numeric:tabular-nums; }
-  .pl-custo tr.soma td { font-weight:700; color:var(--texto); border-bottom:none; }
-  .pl-custo a { color:var(--azul); text-decoration:none; }
+  .pl-custo { margin-top:12px; border-top:1px solid var(--borda); }
+  .pl-custo-item { padding:7px 0; border-bottom:1px solid var(--borda); }
+  .pl-custo-l1 { display:flex; justify-content:space-between; align-items:baseline; gap:8px;
+                 font-size:12.5px; color:var(--texto); }
+  .pl-custo-l1 b { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .pl-custo-l2 { font-size:11px; color:var(--cinza-2); margin-top:2px; line-height:1.45; }
+  .pl-custo-l2 a { color:var(--azul); text-decoration:none; }
+  .pl-custo-total { display:flex; justify-content:space-between; align-items:baseline; gap:8px;
+                    padding-top:8px; font-size:12.5px; font-weight:700; color:var(--texto); }
+  .pl-custo-total b { font-variant-numeric:tabular-nums; }
   .pl-vazio-expl { font-size:12.5px; line-height:1.65; color:var(--cinza);
                    padding:16px 18px; border:1px dashed var(--borda-2); border-radius:12px; }
 
@@ -513,31 +516,28 @@
       <a href="/whatsapp-analises/{{ ultima.id }}/conversa">Ver a conversa analisada</a>
     </div>
 
-    {# DE ONDE VEM CADA CENTAVO. Custo somado nao se audita: quando a conta
-       cresce, a pergunta e "de onde veio isso?", e ela precisa de resposta na
-       mesma tela — quando foi, quem mandou, e se foi leitura pedida na conversa
-       ou varredura em massa. #}
-    <table class="pl-custo">
-      <thead><tr><th>Quando</th><th>De onde veio</th><th>Quem mandou</th>
-                 <th class="num">Msgs</th><th class="num">Custo</th></tr></thead>
-      <tbody>
-        {% for a in analises %}
-        <tr>
-          <td>{{ a.quando }}</td>
-          <td>{{ a.origem_rot }}{% if a.lote_id %}
-            <a href="/crm/varredura/{{ a.lote_id }}" title="Abrir o lote">#{{ a.lote_id }}</a>{% endif %}</td>
-          <td>{{ a.quem or '—' }}</td>
-          <td class="num">{{ a.total_mensagens or 0 }}</td>
-          <td class="num">{{ a.custo_brl|moeda }}</td>
-        </tr>
-        {% endfor %}
-        <tr class="soma">
-          <td colspan="3">Total</td>
-          <td class="num">{{ analises|sum(attribute='total_mensagens') }}</td>
-          <td class="num">{{ custo_ia_brl|moeda }}</td>
-        </tr>
-      </tbody>
-    </table>
+    {# DE ONDE VEM CADA CENTAVO — em LISTA, não em tabela.
+       Cinco colunas não cabem num cartão de um terço de tela: a tabela vazava
+       por cima da borda. Cada leitura vira duas linhas empilhadas, que é o que
+       cabe e é o que se lê de relance. #}
+    <div class="pl-custo">
+      {% for a in analises %}
+      <div class="pl-custo-item">
+        <div class="pl-custo-l1">
+          <span>{{ a.quando }}</span>
+          <b>{{ a.custo_brl|moeda }}</b>
+        </div>
+        <div class="pl-custo-l2">
+          {{ a.origem_rot }}{% if a.lote_id %} <a href="/crm/varredura/{{ a.lote_id }}">#{{ a.lote_id }}</a>{% endif %}
+          · {{ a.quem or 'sem autor' }} · {{ a.total_mensagens or 0 }} msg
+        </div>
+      </div>
+      {% endfor %}
+      <div class="pl-custo-total">
+        <span>{{ analises|length }} leitura(s) · {{ analises|sum(attribute='total_mensagens') }} msg</span>
+        <b>{{ custo_ia_brl|moeda }}</b>
+      </div>
+    </div>
     {% endif %}
     {% if wa %}
     <div class="pl-vazio" style="margin-top:12px;">
