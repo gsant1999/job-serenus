@@ -24273,7 +24273,9 @@ _MIDIA_CAMINHOS = {
     'campaign': ('utm.campaign', 'click.utm_campaign', 'utm_campaign', 'campaign'),
     'term':     ('utm.term', 'click.utm_term', 'utm_term', 'term'),
     'content':  ('utm.content', 'click.utm_content', 'utm_content', 'content'),
-    'gclid':    ('click.gclid', 'gclid', 'utm.gclid'),
+    # 'gcl_id' (com underline) é como o formulário de lead do próprio Google
+    # nomeia o campo no payload — chegava e era descartado por causa do nome.
+    'gclid':    ('click.gclid', 'gclid', 'utm.gclid', 'click.gcl_id', 'gcl_id'),
     'gbraid':   ('click.gbraid', 'gbraid'),
     'wbraid':   ('click.wbraid', 'wbraid'),
     'fbclid':   ('click.fbclid', 'fbclid'),
@@ -24742,8 +24744,14 @@ def crm_lead_juntar(lid):
         # tem dono deixava o card final orfao — some da fila de todo mundo e
         # ninguem atende. Foi o caso do Samuel: o card com a venda estava sem
         # consultor, os outros dois eram do Guilherme.
+        # gclid/trafego/dados_extras ENTRAM na lista pelo mesmo motivo: o card
+        # que veio do anúncio costuma ser o vazio (só nome e telefone), e o card
+        # que o consultor encheu à mão é o que fica. Sem herdar, juntar apagava o
+        # identificador do clique — e com ele a única prova de que aquela venda
+        # veio de mídia paga. O lead absorvido é DELETADO logo depois: o que não
+        # for herdado aqui não existe em lugar nenhum.
         for col in ('telefone', 'telefone_norm', 'email', 'empresa', 'observacoes',
-                    'origem', 'responsavel_id'):
+                    'origem', 'responsavel_id', 'gclid', 'trafego', 'dados_extras'):
             try:
                 if not (fica[col] if col in fica.keys() else None) and (sai[col] if col in sai.keys() else None):
                     conn.execute(f"UPDATE crm_leads SET {col}=? WHERE id=?", (sai[col], lid))
@@ -30182,7 +30190,12 @@ def webhook_sheets():
             # UTM/click (mesma lógica de _processar_lead) — o Apps Script pode mandar
             # esses campos junto do lead; se não mandar, fica vazio (sem quebrar nada).
             utm_medium = (lead.get('utm_medium') or '').strip()
-            gclid = (lead.get('gclid') or '').strip()
+            # gbraid/wbraid: é o que o Google manda no lugar do gclid quando o
+            # clique vem de iPhone ou de dentro de um app. Metade do tráfego.
+            # Só o gclid era lido aqui, então essa metade nunca teve como voltar
+            # pro Google — e a saída (_ads_click_id_do_lead) já sabia lê-los.
+            gclid = (lead.get('gclid') or lead.get('gbraid') or lead.get('wbraid')
+                     or lead.get('gcl_id') or '').strip()
             _med = utm_medium.lower()
             if _med in ('cpc', 'ppc', 'paid', 'paidsearch', 'paid_search', 'paid-search', 'display', 'cpm'):
                 trafego = 'Pago'
@@ -30191,7 +30204,8 @@ def webhook_sheets():
             else:
                 trafego = None
             click = {k: (lead.get(k) or '').strip() for k in
-                     ('utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'landing_url')}
+                     ('utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+                      'gclid', 'gbraid', 'wbraid', 'landing_url')}
             click = {k: v for k, v in click.items() if v}
             dados_extras_wh = json.dumps({'click': click}, ensure_ascii=False) if click else None
 
@@ -30238,6 +30252,33 @@ def webhook_sheets():
                         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)",
                                      (lid, consultor or 'Sistema', 'movimentacao',
                                       f'Consultor {consultor} atribuído da planilha (lead estava sem responsável)', _agora_sp()))
+
+                # ── CLIQUE DO ANÚNCIO EM LEAD QUE JÁ EXISTE ──
+                # O identificador do clique só era gravado na CRIAÇÃO. Quem já
+                # estava no CRM (a maioria — o Apps Script reenvia, e o mesmo
+                # telefone volta) tinha o gclid lido, montado e jogado fora.
+                # Preenche só o que está vazio: nunca troca um clique por outro,
+                # porque o primeiro é o que trouxe a pessoa.
+                if gclid or trafego or dados_extras_wh:
+                    try:
+                        _at = conn.execute(
+                            "SELECT gclid, trafego, dados_extras FROM crm_leads WHERE id=?", (lid,)).fetchone()
+                        _sets, _vals = [], []
+                        if gclid and not ((_at['gclid'] or '').strip() if _at else ''):
+                            _sets.append('gclid=?'); _vals.append(gclid)
+                        if trafego and not ((_at['trafego'] or '').strip() if _at else ''):
+                            _sets.append('trafego=?'); _vals.append(trafego)
+                        if dados_extras_wh and not ((_at['dados_extras'] or '').strip() if _at else ''):
+                            _sets.append('dados_extras=?'); _vals.append(dados_extras_wh)
+                        if _sets:
+                            conn.execute(f"UPDATE crm_leads SET {', '.join(_sets)} WHERE id=?", _vals + [lid])
+                            if gclid and 'gclid=?' in _sets:
+                                conn.execute("""INSERT INTO crm_atividades
+                                    (lead_id, usuario_nome, tipo, descricao, criado_em) VALUES (?,?,?,?,?)""",
+                                    (lid, 'Sistema', 'edicao',
+                                     'Identificador do clique do anúncio registrado neste lead', _agora_sp()))
+                    except Exception as e:
+                        app.logger.info(f"[WEBHOOK_SHEETS] clique não gravado no lead {lid}: {e}")
 
                 # ── DECISÃO: reativar ou apenas atualizar? ──
                 # Reativa SOMENTE se a nova solicitação for MAIS RECENTE que a criação
