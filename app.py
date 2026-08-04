@@ -20221,7 +20221,7 @@ def api_whatsapp_varredura_proximo():
     # varredura isso faz a tela do consultor pular de conversa em conversa.
     # 3.22 reverte. Abaixo disso a fila nao anda: e melhor a varredura parar e
     # dizer o motivo do que rodar mexendo na tela de quem esta trabalhando.
-    _MIN_VARREDURA = '3.25.0'
+    _MIN_VARREDURA = '3.26.0'
     versao = (request.args.get('versao') or '').strip()
     if not _versao_maior_ou_igual(versao, _MIN_VARREDURA):
         return _wa_cors(jsonify({
@@ -20236,6 +20236,33 @@ def api_whatsapp_varredura_proximo():
     # própria wa-js se comporta: o que carrega, fica). Multiplicado por uma
     # fila de 76 leads, é exatamente o tipo de acúmulo que derruba a aba por
     # falta de memória — mais provável que concorrência entre rotinas.
+    # ITEM PRESO EM 'lendo' VOLTA PRA FILA.
+    #
+    # A extensão marca 'lendo' ao pegar e só reporta no fim. Se a aba morrer
+    # nesse meio — crash de memória, F5 do consultor, ou o recarregamento
+    # estratégico que a própria extensão faz pra liberar RAM — o item ficava
+    # 'lendo' PARA SEMPRE: some da fila (a busca só pega 'pendente'), o lote
+    # nunca fecha, e aquele lead simplesmente não é lido, sem erro nenhum.
+    #
+    # A fila de ENVIO já tinha essa rede desde sempre (_WA_FILA_RECLAIM_MINUTOS);
+    # a de varredura não. Mesmo teto: 10 min é folga de sobra pra uma leitura,
+    # que leva segundos, e curto o bastante pra não segurar a fila.
+    try:
+        _corte = (datetime.now(TZ_SP) - timedelta(minutes=10)).strftime('%Y-%m-%d %H:%M:%S')
+        _voltaram = conn.execute("""UPDATE varredura_item SET status='pendente'
+            WHERE status='lendo' AND COALESCE(atualizado_em,'') < ?
+              AND lote_id IN (SELECT id FROM varredura_lote
+                              WHERE consultor_id=? AND status='rodando')""",
+            (_corte, uid))
+        conn.commit()
+        _n = getattr(_voltaram, 'rowcount', 0) or 0
+        if _n:
+            app.logger.info(f"[VARREDURA_LOTE] {_n} item(ns) presos em 'lendo' voltaram pra fila")
+    except Exception as e:
+        app.logger.info(f"[VARREDURA_LOTE] reclaim: {e}")
+        try: conn.rollback()
+        except Exception: pass
+
     r = conn.execute("""SELECT i.id, i.lead_id, i.chat_id, i.lead_nome, i.lote_id,
                                 e.ultima_msg_id
         FROM varredura_item i JOIN varredura_lote t ON t.id = i.lote_id

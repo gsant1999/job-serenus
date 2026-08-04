@@ -3864,6 +3864,49 @@
   // Um por vez, com respiro, roda no fundo sem ninguem esperando na frente.
   const FILA = { rodando: false, proximaEm: 0 };
 
+  // ── VÁLVULA DE ESCAPE: RECARREGAR PRA LIBERAR RAM ─────────────────────────
+  //
+  // O que sobra depois de tudo: a memória que NÃO é nossa. Cada conversa lida
+  // fica retida pela wa-js e pelo React do WhatsApp, e eles não devolvem. Os
+  // tetos que pus nos nossos caches (v3.24) e a marca d'água (v3.21) reduziram
+  // o nosso lado; o lado deles só zera recarregando a página.
+  //
+  // Não tento chamar o coletor de lixo nem limpar os Stores internos deles —
+  // mexer nos Stores quebra a UI, e o coletor não é chamável de fora.
+  //
+  // TRÊS TRAVAS, porque um recarregamento na hora errada é pior que o crash:
+  //  · só ENTRE leads (nunca no meio de um) — se recarregar com um item
+  //    'lendo', ele ficaria preso no servidor. Existe reclaim de 10 min lá
+  //    agora, mas depender dele seria desperdiçar 10 minutos de fila;
+  //  · só com a aba EM SEGUNDO PLANO — recarregar o WhatsApp na cara de quem
+  //    está digitando perde a mensagem pela metade;
+  //  · nunca duas vezes em menos de 10 min, mesmo que a contagem zere por bug.
+  //    É a trava que torna um laço de recarregamento impossível.
+  const _RELOAD_A_CADA = 15;          // leads lidos antes de liberar a RAM
+  const _RELOAD_INTERVALO_MIN = 10;   // piso entre dois recarregamentos
+  let _lidosNestaSessao = 0;
+
+  async function _talvezRecarregarPraLiberarRam() {
+    if (_lidosNestaSessao < _RELOAD_A_CADA) return false;
+    // Aba visível = o consultor está nela. Espera ele sair (a contagem fica
+    // acumulada; recarrega no primeiro tick com a aba escondida).
+    if (document.visibilityState === 'visible') return false;
+    try {
+      const { jobUltimoReload } = await _safeStorageGet(['jobUltimoReload']);
+      const desde = Date.now() - (jobUltimoReload || 0);
+      if (jobUltimoReload && desde < _RELOAD_INTERVALO_MIN * 60000) return false;
+      await chrome.storage.local.set({
+        jobReloadMemoria: true,       // o boot lê isto pra retomar sozinho
+        jobUltimoReload: Date.now(),  // gravado ANTES de recarregar: se o boot
+                                      // falhar, o piso de tempo ainda vale e
+                                      // não vira laço
+      });
+    } catch (e) { return false; }     // sem storage: não recarrega às cegas
+    console.log('[JOB] ' + _lidosNestaSessao + ' leads lidos — recarregando pra liberar memória.');
+    window.location.reload();
+    return true;
+  }
+
   async function filaVarreduraTick() {
     if (FILA.rodando || Date.now() < FILA.proximaEm) return;
     let usuarioId = null;
@@ -3909,6 +3952,11 @@
       await _safeSendMessage({ type: 'varredura_resultado', item_id: item.item_id,
                                ok: ok, erro: erro }).catch(() => null);
       FILA.proximaEm = Date.now() + Math.max(5, item.espera_seg || 25) * 1000;
+      // AQUI e em nenhum outro lugar: o item já foi reportado ao servidor, o
+      // gate já foi solto, e o próximo ainda não foi pego. É o único instante
+      // em que recarregar não perde trabalho nem prende lead nenhum.
+      _lidosNestaSessao++;
+      await _talvezRecarregarPraLiberarRam();
     } finally {
       FILA.rodando = false;
     }
@@ -3918,6 +3966,26 @@
     // Comeca depois da extensao assentar; o relogio real e o proximaEm.
     setTimeout(() => { filaVarreduraTick(); }, 60000);
     setInterval(() => { filaVarreduraTick(); }, 15000);
+    _retomarSeFoiReloadDeMemoria();
+  }
+
+  // Voltou de um recarregamento nosso? Retoma a fila sem esperar o minuto
+  // inteiro — senão cada liberação de RAM custaria um minuto parado, e numa
+  // fila de 76 leads isso vira cinco minutos jogados fora.
+  //
+  // A flag é apagada ANTES de retomar: se a retomada falhar por qualquer
+  // motivo, o próximo boot é um boot normal. Flag que sobrevive ao próprio
+  // uso é o que transforma um recurso destes em laço.
+  async function _retomarSeFoiReloadDeMemoria() {
+    try {
+      const { jobReloadMemoria } = await _safeStorageGet(['jobReloadMemoria']);
+      if (!jobReloadMemoria) return;
+      await chrome.storage.local.set({ jobReloadMemoria: false });
+      // A wa-js precisa assentar antes de qualquer leitura — sem esta espera a
+      // primeira conversa depois do reload volta vazia (falha_mensagens).
+      setTimeout(() => { filaVarreduraTick(); }, 20000);
+      console.log('[JOB] retomando a fila depois de liberar memória.');
+    } catch (e) { /* sem storage: o tick normal de 60s assume */ }
   }
 
   async function _ligarSincLid() {
