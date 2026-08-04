@@ -3447,7 +3447,8 @@ def init_db():
          'Sem isso ninguém sabe em que pé está a proposta na operadora'),
         ('motivo_perda', 'Motivo da perda', 'negociacao_perdida',
          ['Preço', 'Fechou com outro', 'Rede insuficiente', 'Carência', 'Não é o decisor',
-          'Recusado pela operadora', 'Sumiu', 'Fora de área', 'Lead inválido'],
+          'Recusado pela operadora', 'Recusado pelo corretor', 'Sumiu', 'Fora de área',
+          'Lead inválido'],
          'É o que faz existir relatório de perda — sem motivo, a perda não ensina nada'),
         ('gatilho_retorno', 'Gatilho de retorno', 'nutricao',
          ['Reajuste', 'Fim de carência', '12 meses portabilidade', '6 meses de CNPJ',
@@ -7212,6 +7213,12 @@ MOTIVO_PERDA_AJUDA = {
     'Sumiu': 'Parou de responder e não deu motivo. Use quando não dá pra saber o que houve.',
     'Fora de área': 'A operadora não vende ou não tem rede na cidade dele.',
     'Lead inválido': 'Número errado, teste, duplicado, ou pessoa que nunca pediu cotação. Não era um cliente em potencial.',
+    # NOSSA recusa, não a da operadora. São coisas diferentes e o relatório de
+    # perda precisa saber qual foi: "recusado pela operadora" é mercado, "pelo
+    # corretor" é decisão nossa — e decisão nossa exige justificativa escrita,
+    # senão vira caixa preta onde qualquer desistência se esconde.
+    'Recusado pelo corretor': 'NÓS decidimos não seguir — pré-existência que inviabiliza, perfil de risco, '
+                              'cliente problemático, valor que não paga o trabalho. Escreva o porquê no campo abaixo.',
 }
 
 
@@ -33990,6 +33997,61 @@ _TABELAS_TELEFONE_NORM = ['crm_leads', 'contatos_frios', 'whatsapp_analises',
                           'campanha_contato', 'wa_chat_lead', 'lead_notas']
 
 
+def _migrar_motivo_recusa_corretor():
+    """Acrescenta 'Recusado pelo corretor' e o campo de justificativa.
+
+    A lista de motivos nasce UMA vez, do CAMPOS_SAIDA, e depois vive no banco —
+    mexer no codigo nao alcanca quem ja existe. Esta migracao alcanca.
+
+    Por que justificativa separada e nao so o motivo: recusa NOSSA e decisao,
+    nao mercado. 'A operadora recusou' se explica sozinho; 'nos recusamos'
+    precisa dizer por que, senao o relatorio de perda vira caixa preta onde
+    qualquer desistencia se esconde."""
+    conn = None
+    try:
+        conn = db()
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        if conn.execute("SELECT 1 FROM meta_flags WHERE k='motivo_recusa_corretor_20260803'").fetchone():
+            return
+        r = conn.execute("SELECT id, opcoes_json FROM crm_campos WHERE chave='motivo_perda'").fetchone()
+        if r:
+            try:
+                ops = json.loads(r['opcoes_json'] or '[]')
+            except Exception:
+                ops = []
+            if 'Recusado pelo corretor' not in ops:
+                # Logo depois de 'Recusado pela operadora': as duas recusas
+                # juntas, pra a diferenca ficar obvia na hora de escolher.
+                if 'Recusado pela operadora' in ops:
+                    ops.insert(ops.index('Recusado pela operadora') + 1, 'Recusado pelo corretor')
+                else:
+                    ops.append('Recusado pelo corretor')
+                conn.execute("UPDATE crm_campos SET opcoes_json=? WHERE id=?",
+                             (json.dumps(ops, ensure_ascii=False), r['id']))
+        ja = conn.execute("SELECT 1 FROM crm_campos WHERE chave='motivo_recusa_just'").fetchone()
+        if not ja:
+            ordem = conn.execute("SELECT COALESCE(MAX(ordem),0)+1 o FROM crm_campos").fetchone()['o']
+            conn.execute("""INSERT INTO crm_campos
+                (chave, nome, tipo, opcoes_json, momento, obriga_saida_de, dica, ordem, ativo)
+                VALUES (?,?,?,?,?,?,?,?,1)""",
+                ('motivo_recusa_just', 'Por que recusamos', 'texto', '[]', 'saida', None,
+                 'Só aparece quando o motivo da perda é "Recusado pelo corretor". '
+                 'Escreva o porquê — ex: possui pré-existência que inviabiliza, '
+                 'perfil de risco, valor não paga o trabalho.', ordem))
+        conn.execute("INSERT INTO meta_flags (k) VALUES ('motivo_recusa_corretor_20260803')")
+        conn.commit()
+        print("[MOTIVO_RECUSA] 'Recusado pelo corretor' + campo de justificativa prontos")
+    except Exception as e:
+        if conn is not None:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[MOTIVO_RECUSA] migração pulada: {e}")
+    finally:
+        if conn is not None:
+            try: close_db(conn)
+            except Exception: pass
+
+
 def _backfill_telefone_norm_vazio():
     """Preenche telefone_norm a partir do telefone, onde ele ficou vazio.
 
@@ -34122,6 +34184,7 @@ _seed_etiquetas_acao_boot()
 _backfill_telefone_canonico()
 # Depois do canonico: ele padroniza o que existe, este preenche o que faltava.
 _backfill_telefone_norm_vazio()
+_migrar_motivo_recusa_corretor()
 
 
 # ─── BACKFILL das notas da extensão ↔ lead (31/07/2026) ──────────────────────

@@ -446,8 +446,15 @@
         <!-- min/max: o campo de data do navegador aceita ano de cinco digitos.
              Um '7' a mais em 2026 virou um ciclo de vendas que nao existe. -->
         <input type="date" name="data_fechamento" id="data_fechamento"
-               min="{{ ano_atual - 2 }}-01-01" max="{{ ano_atual + 2 }}-12-31">
+               min="{{ ano_atual - 2 }}-01-01" max="{{ ano_atual + 2 }}-12-31"
+               oninput="mostrarCiclo()">
         <div class="hint">Mês da meta comercial. Em branco usa o mês atual.</div>
+        {# O CICLO NA CARA, ANTES DE SALVAR. Esta data decide em qual mês a venda
+           conta — e isso ficava invisível: quem punha uma data de julho numa
+           venda de agosto só descobria dias depois, ao não achar ela no
+           dashboard. Aconteceu duas vezes hoje. Agora a consequência aparece no
+           instante da escolha, e em laranja quando não é o mês corrente. #}
+        <div class="hint" id="ciclo-aviso" style="margin-top:6px;font-weight:600;"></div>
       </div>
     </div>
 
@@ -1435,6 +1442,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     if(l) escolherLead(l);
   }catch(e){}
 });
+
+// Mostra em que CICLO a venda vai cair, na hora. Mesma regra do servidor
+// (_mes_meta_de_data): a data manda; em branco, mês corrente.
+function mostrarCiclo(){
+  var el = document.getElementById('ciclo-aviso');
+  if(!el) return;
+  var v = (document.getElementById('data_fechamento')||{}).value || '';
+  var hoje = new Date();
+  var mesAtual = hoje.getFullYear() + '-' + String(hoje.getMonth()+1).padStart(2,'0');
+  var m = /^(\d{4})-(\d{2})/.exec(v);
+  var ciclo = m ? (m[1] + '-' + m[2]) : mesAtual;
+  var MES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho',
+             'Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  var nome = MES[parseInt(ciclo.slice(5,7),10)-1] + '/' + ciclo.slice(0,4);
+  var atual = (ciclo === mesAtual);
+  el.textContent = 'Esta venda vai contar no ciclo de ' + nome +
+    (atual ? '' : ' — não é o mês atual, confira se é isso mesmo.');
+  el.style.color = atual ? 'var(--cinza)' : 'var(--amarelo, #f59e0b)';
+}
+document.addEventListener('DOMContentLoaded', mostrarCiclo);
 </script>
 
 {% endblock %}

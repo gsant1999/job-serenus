@@ -1915,6 +1915,20 @@ function montarCampos(def, val, etapaAtual){
     // bloco inteiro, inclusive a pergunta que fazia sentido.
     let doGrupo=_cpDef.filter(c=>c.momento===m);
     if(m==='saida') doGrupo=doGrupo.filter(c=>!c.obriga_saida_de || c.obriga_saida_de===_cpEtapa);
+    // A JUSTIFICATIVA SÓ EXISTE PRA UMA RESPOSTA. "Por que recusamos" não faz
+    // sentido quando a operadora é que recusou, nem quando o lead sumiu — e
+    // campo que aparece sem vir ao caso é o que treina o consultor a ignorar o
+    // bloco inteiro. Aparece só quando o motivo escolhido é a nossa recusa.
+    if(m==='saida'){
+      // DUAS condições, não uma. Só o motivo não basta: o campo tem
+      // obriga_saida_de vazio (pra não virar obrigatório em toda perda), então
+      // ele passa pelo filtro de etapa e apareceria em Nutrição com um motivo
+      // velho ainda guardado. Tem que ser a etapa da perda E a nossa recusa.
+      const mot=(_cpVal['motivo_perda']||{}).valor||'';
+      if(_cpEtapa!=='negociacao_perdida' || mot!=='Recusado pelo corretor'){
+        doGrupo=doGrupo.filter(c=>c.chave!=='motivo_recusa_just');
+      }
+    }
     if(!doGrupo.length) return;
     // Saída vem primeiro na ficha: é o que impede o card de andar, então é a
     // primeira coisa que interessa a quem abriu o lead pra fazê-lo andar.
@@ -1934,6 +1948,28 @@ function montarCampos(def, val, etapaAtual){
   box.innerHTML=html;
 }
 
+// Trocar o motivo redesenha o bloco NA HORA: escolher "Recusado pelo corretor"
+// e só descobrir que falta justificativa depois de salvar seria pedir o
+// trabalho duas vezes. Guarda o que já foi digitado antes de redesenhar.
+function _cpMotivoMudou(){
+  _cpColher();
+  montarCampos(_cpDef, _cpVal);
+  const ta=document.querySelector('[data-chave="motivo_recusa_just"]');
+  if(ta) ta.focus();
+}
+
+// Lê o que está na tela pros valores em memória — sem isso, redesenhar apaga
+// o que a pessoa acabou de escrever.
+function _cpColher(){
+  document.querySelectorAll('#ficha-campos [data-chave]').forEach(el=>{
+    const ch=el.dataset.chave;
+    let v;
+    if(el.dataset.multi) v=[...el.querySelectorAll('input:checked')].map(i=>i.value).join(', ');
+    else v=el.value||'';
+    _cpVal[ch]=Object.assign({}, _cpVal[ch]||{}, {valor:v});
+  });
+}
+
 function _cpCampoHtml(c){
   const v=(_cpVal[c.chave]||{}).valor||'', fonte=(_cpVal[c.chave]||{}).fonte||'';
   let corpo;
@@ -1941,7 +1977,8 @@ function _cpCampoHtml(c){
   if(c.momento==='automatico' || c.fonte==='utm'){
     corpo='<div class="cp-lido'+(v?'':' vazio')+'">'+(v?_esc(v):'— ainda não chegou')+'</div>';
   }else if(c.tipo==='select'){
-    corpo='<select class="campo-input campo-select" data-chave="'+c.chave+'">'
+    const gatilho = c.chave==='motivo_perda' ? ' onchange="_cpMotivoMudou()"' : '';
+    corpo='<select class="campo-input campo-select" data-chave="'+c.chave+'"'+gatilho+'>'
       +'<option value="">—</option>'
       +(c.opcoes||[]).map(o=>'<option value="'+_esc(o)+'"'+(o===v?' selected':'')+'>'+_esc(o)+'</option>').join('')
       // Valor gravado que saiu da lista (operadora desativada, cidade digitada
