@@ -10773,6 +10773,18 @@ def vincular_proposta_lead(conn, proposta_id, prop=None, lead_id_certo=None):
 # Google aposentar esta, troca a variável e pronto, sem deploy de código.
 _ADS_API_VERSAO = (os.environ.get('GOOGLE_ADS_API_VERSAO') or 'v25').strip() or 'v25'
 _ADS_API = f'https://googleads.googleapis.com/{_ADS_API_VERSAO}'
+# ONDE A CONVERSÃO É ENTREGUE HOJE. O caminho antigo (uploadClickConversions, na
+# API do Google Ads) foi FECHADO pra integração nova — medido em 04/08/2026, ele
+# responde CUSTOMER_NOT_ALLOWLISTED_FOR_THIS_FEATURE com a mensagem "New
+# integrations for uploading click conversions should use the Data Manager API".
+# Quem já usava continua; quem está começando, como a Serenus, só entra por aqui.
+_DM_API = 'https://datamanager.googleapis.com/v1'
+# Os dois escopos, porque são dois trabalhos diferentes com o MESMO refresh token:
+# 'adwords' lê a conta e a ação de conversão (diagnóstico), 'datamanager' entrega
+# a conversão. Um refresh token gerado só com 'adwords' autentica e depois toma
+# 403 na entrega — foi exatamente o que aconteceu no primeiro teste.
+_ADS_ESCOPOS = ('https://www.googleapis.com/auth/adwords',
+                'https://www.googleapis.com/auth/datamanager')
 # Teto de tentativas por conversão. Erro de rede/token é passageiro e merece
 # retry; erro permanente não pode ficar batendo na porta do Google pra sempre.
 _ADS_MAX_TENTATIVAS = int(os.environ.get('GOOGLE_ADS_MAX_TENTATIVAS', '4') or 4)
@@ -10817,6 +10829,52 @@ def _ads_token(cfg):
     if not tok:
         raise RuntimeError("OAuth não devolveu access_token")
     return tok
+
+
+def _dm_evento(c):
+    """Uma conversão no formato da Data Manager API.
+
+    Campos conferidos no discovery oficial da API (não em documentação de
+    terceiro): `adIdentifiers.gclid|gbraid|wbraid`, `eventTimestamp` (RFC3339
+    com fuso), `conversionValue`, `currency`, `transactionId`.
+
+    transactionId é o que era orderId no caminho antigo: identidade da conversão
+    do lado do Google. Sem ele, reenvio conta a venda duas vezes."""
+    ev = {'eventTimestamp': _conversao_dt_sp(c['conversao_em']).isoformat(timespec='seconds'),
+          'conversionValue': float(c['valor'] or 0),
+          'currency': c['moeda'] or 'BRL',
+          'transactionId': f"job-proposta-{c['proposta_id']}"}
+    tipo = (c['click_tipo'] or 'gclid')
+    ev['adIdentifiers'] = {tipo if tipo in ('gclid', 'gbraid', 'wbraid') else 'gclid': c['click_id']}
+    return ev
+
+
+def _dm_destino(cfg):
+    """Pra onde vai: a conta do Google Ads e, dentro dela, a ação de conversão."""
+    return [{'operatingAccount': {'accountType': 'GOOGLE_ADS', 'accountId': cfg['customer_id']},
+             'productDestinationId': cfg['conversion_action_id']}]
+
+
+def _dm_erro_legivel(status, corpo):
+    """Traduz o erro do Google pra uma frase que diz o que fazer.
+
+    O erro cru chega em inglês e truncado no meio da causa. Os dois que
+    realmente acontecem no começo têm conserto conhecido — e um deles (escopo)
+    engana, porque a autenticação FUNCIONA e só a entrega é recusada."""
+    alto = (corpo or '').upper()
+    if 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' in alto or 'INSUFFICIENT AUTHENTICATION SCOPES' in alto.upper():
+        return ('O login funciona, mas foi autorizado só para ler o Google Ads — não para entregar '
+                'conversão. Gere um refresh token novo autorizando também o escopo '
+                'https://www.googleapis.com/auth/datamanager e substitua GOOGLE_ADS_REFRESH_TOKEN.')
+    if 'SERVICE_DISABLED' in alto or 'DATAMANAGER.GOOGLEAPIS.COM' in alto and 'DISABLED' in alto:
+        return ('A Data Manager API não está habilitada no projeto do Google Cloud desta chave. '
+                'Habilite "Data Manager API" no console e tente de novo.')
+    if 'PERMISSION_DENIED' in alto:
+        return ('A conta do Google Ads existe, mas este login não tem permissão de gravar nela. '
+                'Confira se o usuário que autorizou tem acesso de administrador à conta.')
+    if status == 404:
+        return 'Conta ou ação de conversão não encontrada — confira o Customer ID e o Conversion Action ID.'
+    return f'HTTP {status}: {(corpo or "")[:300]}'
 
 
 def _ads_click_id_do_lead(conn, lead_id):
@@ -11379,42 +11437,33 @@ def enviar_conversoes_ads(limite=200, so_simular=False):
     if so_simular:
         close_db(conn); return resumo
 
-    acao = f"customers/{cfg['customer_id']}/conversionActions/{cfg['conversion_action_id']}"
-    lote = []
-    for c in pend:
-        item = {'conversionAction': acao,
-                'conversionDateTime': _ads_data_conversao(c['conversao_em']),
-                'conversionValue': float(c['valor'] or 0), 'currencyCode': c['moeda'] or 'BRL',
-                # orderId: identidade da conversão no lado do Google. Sem ele, (1)
-                # um reenvio acidental conta a MESMA venda duas vezes e infla o
-                # ROAS, e (2) estorno depois do envio não tem como ser retratado —
-                # a retratação é justamente por orderId. É o campo que transforma
-                # 'enviada' em algo reversível.
-                'orderId': f"job-proposta-{c['proposta_id']}"}
-        item[c['click_tipo'] or 'gclid'] = c['click_id']
-        lote.append(item)
+    # Data Manager API: até 2000 eventos por chamada. A fila é menor que isso na
+    # prática, mas o teto está aqui pra não descobrir o limite em produção.
+    lote = [_dm_evento(c) for c in pend[:2000]]
     try:
         token = _ads_token(cfg)
-        headers = {'Authorization': 'Bearer ' + token,
-                   'developer-token': cfg['developer_token'],
-                   'Content-Type': 'application/json'}
-        if cfg['login_customer_id']:
-            headers['login-customer-id'] = cfg['login_customer_id']
-        r = _requests.post(f"{_ADS_API}/customers/{cfg['customer_id']}:uploadClickConversions",
-                           headers=headers, timeout=45,
-                           json={'conversions': lote, 'partialFailure': True})
+        headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
+        r = _requests.post(f"{_DM_API}/events:ingest", headers=headers, timeout=45,
+                           json={'destinations': _dm_destino(cfg), 'events': lote})
         if r.status_code != 200:
-            raise RuntimeError(f"HTTP {r.status_code}: {r.text[:400]}")
+            raise RuntimeError(_dm_erro_legivel(r.status_code, r.text))
         corpo = r.json() or {}
-        # partialFailureError traz os índices que falharam; sem isso marcaríamos
-        # como enviada uma conversão que o Google recusou.
+        # A Data Manager devolve os erros por evento em `errors`, com o índice do
+        # evento. Mesma regra do caminho antigo: sem saber QUEM falhou, ninguém é
+        # promovido a 'enviada' — que é estado irreversível.
         falhou_idx = set()
-        pfe = corpo.get('partialFailureError') or {}
-        for det in (pfe.get('details') or []):
-            for err in (det.get('errors') or []):
-                for el in ((err.get('location') or {}).get('fieldPathElements') or []):
-                    if el.get('fieldName') == 'conversions' and el.get('index') is not None:
-                        falhou_idx.add(int(el['index']))
+        msgs_err = []
+        for err in (corpo.get('errors') or []):
+            msgs_err.append(str(err.get('errorMessage') or err.get('message') or err)[:200])
+            idx = err.get('eventIndex')
+            if idx is None:
+                idx = ((err.get('location') or {}).get('eventIndex'))
+            if idx is not None:
+                try:
+                    falhou_idx.add(int(idx))
+                except (TypeError, ValueError):
+                    pass
+        pfe = {'message': ' · '.join(msgs_err)} if msgs_err else {}
         msg_pf = (pfe.get('message') or '')[:400]
         # HOUVE ERRO MAS NÃO SEI DE QUEM. Se o Google reclamou e nenhum índice
         # veio no formato esperado, o lote inteiro seria marcado 'enviada' —
@@ -29580,36 +29629,31 @@ def _ads_testar_conexao():
         passo('Ação de conversão', False, e, '')
         return {'ok': False, 'passos': passos, 'conta': conta}
 
-    # Degrau 4: o envio de verdade, com um clique que não existe. validateOnly
-    # não serve aqui — ele nem tenta casar o clique, então passaria sempre.
+    # Degrau 4: a ENTREGA, pela Data Manager API — que é por onde passa qualquer
+    # integração nova (o caminho antigo do Google Ads foi fechado). validateOnly
+    # deixa o Google conferir o pedido inteiro sem gravar conversão nenhuma, que
+    # é exatamente o que um botão de teste deve fazer.
     try:
-        agora = datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S%z')
-        agora = agora[:-2] + ':' + agora[-2:] if len(agora) > 5 else agora
-        r = _requests.post(f"{_ADS_API}/customers/{cfg['customer_id']}:uploadClickConversions",
-                           headers=headers, timeout=45,
-                           json={'conversions': [{
-                               'conversionAction': f"customers/{cfg['customer_id']}/conversionActions/{cfg['conversion_action_id']}",
-                               'gclid': 'TESTE_JOB_SEM_CLIQUE_REAL',
-                               'conversionDateTime': agora,
-                               'conversionValue': 0.01, 'currencyCode': 'BRL'}],
-                               'partialFailure': True})
-        corpo = r.text[:600]
-        # "clique não encontrado" é o resultado ESPERADO — prova que tudo antes
-        # funcionou. Só um gclid real de um clique real completaria.
-        esperado = any(s in corpo.upper() for s in
-                       ('CLICK_NOT_FOUND', 'GCLID_DATE_TIME_PAIR_NOT_FOUND', 'UNPARSEABLE_GCLID',
-                        'INVALID_CONVERSION_ACTION', 'EXPIRED_GCLID', 'NO_CONVERSION_ACTION_FOUND'))
-        if r.status_code == 200 and esperado:
-            passo('Envio de conversão', True,
-                  'O Google recusou o clique de teste (que não existe mesmo) — sinal de que autenticação, '
-                  'conta e ação de conversão estão todas certas.')
-        elif r.status_code == 200:
-            passo('Envio de conversão', True, 'Aceito sem erro. Resposta: ' + corpo)
+        r = _requests.post(f"{_DM_API}/events:ingest", timeout=45,
+                           headers={'Authorization': headers['Authorization'],
+                                    'Content-Type': 'application/json'},
+                           json={'destinations': _dm_destino(cfg),
+                                 'events': [{'adIdentifiers': {'gclid': 'TESTE_JOB_SEM_CLIQUE_REAL'},
+                                             'eventTimestamp': datetime.now(TZ_SP).isoformat(timespec='seconds'),
+                                             'conversionValue': 0.01, 'currency': 'BRL',
+                                             'transactionId': 'job-teste-conexao'}],
+                                 'validateOnly': True})
+        if r.status_code == 200:
+            passo('Entrega da conversão', True,
+                  'O Google aceitou o pedido de teste sem gravar nada (validação). Autenticação, conta '
+                  'e ação de conversão estão todas certas.')
         else:
-            passo('Envio de conversão', False, f"HTTP {r.status_code}: {corpo}", '')
+            passo('Entrega da conversão', False, _dm_erro_legivel(r.status_code, r.text),
+                  'Este é o degrau que fica faltando quando o refresh token foi gerado só para ler o '
+                  'Google Ads. Entregar conversão exige um segundo escopo.')
             return {'ok': False, 'passos': passos, 'conta': conta}
     except Exception as e:
-        passo('Envio de conversão', False, e, '')
+        passo('Entrega da conversão', False, e, '')
         return {'ok': False, 'passos': passos, 'conta': conta}
 
     return {'ok': True, 'passos': passos, 'conta': conta, 'acao': acao_nome}
@@ -33490,6 +33534,27 @@ def _gerar_fixo_automatico():
     except Exception as e:
         app.logger.warning(f"[FIXO] geração automática falhou: {e}")
 
+def _enviar_conversoes_automatico():
+    """Sobe as conversões pendentes sem ninguém clicar.
+
+    Só age quando há credencial completa e fila pendente — assim, enquanto a
+    configuração não estiver pronta, isso não faz barulho nem gasta chamada."""
+    try:
+        _cfg, faltando = _ads_config()
+        if faltando:
+            return
+        conn = db()
+        n = conn.execute("SELECT COUNT(*) c FROM google_ads_conversoes WHERE status='pendente'").fetchone()['c']
+        close_db(conn)
+        if not n:
+            return
+        res = enviar_conversoes_ads(limite=200)
+        app.logger.info(f"[ADS] envio automático: {res.get('enviadas')} enviada(s), "
+                        f"{res.get('falhas')} recusada(s)")
+    except Exception as e:
+        app.logger.warning(f"[ADS] envio automático falhou: {e}")
+
+
 def _auto_pull_leads_throttled():
     global _ULTIMO_AUTO_PULL
     try:
@@ -33514,6 +33579,15 @@ def _auto_pull_leads_throttled():
                 pass
             try:
                 _gerar_fixo_automatico()
+            except Exception:
+                pass
+            # A CONVERSÃO PRECISA SAIR SOZINHA. O enfileiramento sempre foi
+            # automático (dispara quando a proposta vira Emitida/Ativa), mas o
+            # envio dependia de um admin abrir a tela e clicar. Ninguém abre uma
+            # tela que não chama — e o clique tem prazo: passados 90 dias, o
+            # Google recusa a conversão inteira. A fila apodrecia em silêncio.
+            try:
+                _enviar_conversoes_automatico()
             except Exception:
                 pass
             finally:
@@ -33586,6 +33660,11 @@ def _iniciar_scheduler_backup():
         sched.add_job(_revisar_leads_do_dia, 'cron', hour=19, minute=0, max_instances=1)
         # Fluxos de nutrição do CRM: dispara os passos pendentes 1x/dia às 08:00 SP
         sched.add_job(_processar_fluxos_pendentes, 'cron', hour=8, minute=0, max_instances=1)
+        # Envio das conversões: de hora em hora. O par (scheduler + gatilho por
+        # request) é o mesmo do import de leads, e pelo mesmo motivo — o
+        # APScheduler morre em restart, então nenhum dos dois sozinho basta.
+        sched.add_job(_enviar_conversoes_automatico, 'interval', hours=1, max_instances=1,
+                      id='enviar_conversoes', replace_existing=True)
         sched.start()
         _SCHEDULER_INICIADO = True
         app.logger.info("[SCHEDULER] ✅ Backup (22:00 SP) + Importação de leads (boot + a cada 15 min) agendados")
