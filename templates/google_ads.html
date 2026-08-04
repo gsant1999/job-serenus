@@ -82,7 +82,7 @@
   <div class="card">
     <div class="card-header"><h3>Situação da fila</h3></div>
     <div style="padding:0 16px 16px; display:flex; flex-wrap:wrap; gap:10px;">
-      {% set rot = {'pendente':'A enviar','enviada':'Enviadas','sem_clique':'Sem clique de anúncio','falha':'Recusadas pelo Google','retratar':'Precisam de retratação','cancelada':'Canceladas antes de subir'} %}
+      {% set rot = {'pendente':'A enviar','enviada':'Enviadas','sem_clique':'Sem clique de anúncio','falha':'Recusadas pelo Google','retratar':'Precisam de retratação','cancelada':'Canceladas antes de subir','fora_da_janela':'Venda velha demais para o Google'} %}
       {% for st, d in contagem.items() %}
       <div style="flex:1; min-width:170px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;">
         <div style="font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2);">{{ rot.get(st, st) }}</div>

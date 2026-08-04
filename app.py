@@ -10765,7 +10765,20 @@ def vincular_proposta_lead(conn, proposta_id, prop=None, lead_id_certo=None):
 #
 # Sem biblioteca google-ads (dependência pesada, ~30MB): a API REST resolve com
 # requests, que o projeto já usa.
-_ADS_API = 'https://googleads.googleapis.com/v18'
+#
+# VERSÃO: o Google aposenta cada versão da API ~1 ano depois de lançar, e a
+# aposentada responde 404 — todo envio falha de uma vez, sem aviso. Estava
+# travada em v18, que já estava morta antes do primeiro envio real (medido em
+# 04/08/2026: v15..v19 = 404; v20..v25 = vivas). Por isso fica em env: quando o
+# Google aposentar esta, troca a variável e pronto, sem deploy de código.
+_ADS_API_VERSAO = (os.environ.get('GOOGLE_ADS_API_VERSAO') or 'v25').strip() or 'v25'
+_ADS_API = f'https://googleads.googleapis.com/{_ADS_API_VERSAO}'
+# Teto de tentativas por conversão. Erro de rede/token é passageiro e merece
+# retry; erro permanente não pode ficar batendo na porta do Google pra sempre.
+_ADS_MAX_TENTATIVAS = int(os.environ.get('GOOGLE_ADS_MAX_TENTATIVAS', '4') or 4)
+# Janela do Google entre o CLIQUE e a conversão. Venda mais velha que isso é
+# recusada — enfileirar não adianta, só enche a fila de falha permanente.
+_ADS_JANELA_DIAS = int(os.environ.get('GOOGLE_ADS_JANELA_DIAS', '90') or 90)
 
 
 def _ads_config():
@@ -10971,6 +10984,16 @@ def _ads_enfileirar(conn, proposta_id, motivo='venda confirmada'):
     # pra aparecer no diagnóstico em vez de sumir.
     status = 'pendente' if click_id else 'sem_clique'
     quando = _agora_sp()
+    # FORA DA JANELA DO GOOGLE. Ele só casa a conversão com o clique dentro de
+    # ~90 dias. Mandar venda mais velha é recusa garantida — e no backfill isso
+    # é a base histórica inteira falhando em bloco, escondendo as recusas que
+    # realmente importam. Fica com status próprio, visível, sem tentar.
+    _quando_venda_dt = _conversao_dt_sp(
+        (prop['criado_em'] if 'criado_em' in prop.keys() else None) or quando)
+    if click_id and (datetime.now(TZ_SP) - _quando_venda_dt).days > _ADS_JANELA_DIAS:
+        status = 'fora_da_janela'
+        motivo = (f"venda de {_quando_venda_dt.strftime('%d/%m/%Y')} — passou dos "
+                  f"{_ADS_JANELA_DIAS} dias que o Google aceita entre o clique e a conversão")
     # A conversão aconteceu quando a VENDA aconteceu, não quando alguém apertou o
     # botão. No backfill da base histórica isso era a diferença entre reportar a
     # data certa e mandar tudo com a data de hoje — o que distorce a atribuição e
@@ -10989,14 +11012,34 @@ def _ads_enfileirar(conn, proposta_id, motivo='venda confirmada'):
                              (proposta_id,)).fetchone()), status
 
 
-def _ads_data_conversao(valor):
-    """Formato exigido: 'yyyy-mm-dd hh:mm:ss+hh:mm'. Sem o fuso o Google recusa."""
+def _ads_data_conversao(valor, ja_em_sp=False):
+    """Formato exigido: 'yyyy-mm-dd hh:mm:ss+hh:mm'. Sem o fuso o Google recusa.
+
+    ARMADILHA DO FUSO: propostas.criado_em nasce do DEFAULT CURRENT_TIMESTAMP,
+    que no Postgres do Railway (sessão em UTC) e no SQLite grava UTC — mas a
+    coluna não tem fuso, então volta como hora "solta". Carimbar isso como -03:00
+    empurra a venda 3 horas PRA FRENTE: a de agora vira uma conversão no futuro
+    (o Google recusa) e a da noite pula pro dia seguinte (atribuição no dia
+    errado). `ja_em_sp=True` é pra valor que veio de _agora_sp(), esse sim já
+    em horário de São Paulo.
+
+    Nunca devolve data no futuro: se der, usa agora. Conversão adiantada é
+    recusada em bloco, e um relógio fora de sincronia não pode derrubar o lote."""
+    dt = _conversao_dt_sp(valor, ja_em_sp=ja_em_sp)
+    return dt.strftime('%Y-%m-%d %H:%M:%S%z')[:-2] + ':' + dt.strftime('%z')[-2:]
+
+
+def _conversao_dt_sp(valor, ja_em_sp=False):
+    """Momento da conversão como datetime COM fuso de São Paulo. Ver a armadilha
+    documentada em _ads_data_conversao — vale igual pra Meta, que manda o mesmo
+    instante como epoch e erraria 3 horas do mesmo jeito."""
     dt = _parse_dt_seguro(valor) if valor else None
     if not dt:
-        dt = datetime.now(TZ_SP)
+        return datetime.now(TZ_SP)
     if dt.tzinfo is None:
-        dt = TZ_SP.localize(dt)
-    return dt.strftime('%Y-%m-%d %H:%M:%S%z')[:-2] + ':' + dt.strftime('%z')[-2:]
+        dt = TZ_SP.localize(dt) if ja_em_sp else pytz.utc.localize(dt).astimezone(TZ_SP)
+    agora = datetime.now(TZ_SP)
+    return agora if dt > agora else dt
 
 
 # ═══════════════ GASTO DE MIDIA (LEITURA PURA) ═══════════════
@@ -11240,9 +11283,7 @@ def enviar_conversoes_meta(limite=200, so_simular=False):
     for c in pend:
         lead = conn.execute("SELECT nome, email, telefone_norm FROM crm_leads WHERE id=?",
                             (c['lead_id'],)).fetchone() if c['lead_id'] else None
-        quando = _parse_dt_seguro(c['conversao_em']) or datetime.now(TZ_SP)
-        if quando.tzinfo is None:
-            quando = TZ_SP.localize(quando)
+        quando = _conversao_dt_sp(c['conversao_em'])
         user = {'fbc': _meta_fbc(c['fbclid'], c['conversao_em'])}
         if lead:
             em = _meta_hash(lead['email'])
@@ -11343,7 +11384,13 @@ def enviar_conversoes_ads(limite=200, so_simular=False):
     for c in pend:
         item = {'conversionAction': acao,
                 'conversionDateTime': _ads_data_conversao(c['conversao_em']),
-                'conversionValue': float(c['valor'] or 0), 'currencyCode': c['moeda'] or 'BRL'}
+                'conversionValue': float(c['valor'] or 0), 'currencyCode': c['moeda'] or 'BRL',
+                # orderId: identidade da conversão no lado do Google. Sem ele, (1)
+                # um reenvio acidental conta a MESMA venda duas vezes e infla o
+                # ROAS, e (2) estorno depois do envio não tem como ser retratado —
+                # a retratação é justamente por orderId. É o campo que transforma
+                # 'enviada' em algo reversível.
+                'orderId': f"job-proposta-{c['proposta_id']}"}
         item[c['click_tipo'] or 'gclid'] = c['click_id']
         lote.append(item)
     try:
@@ -11369,9 +11416,20 @@ def enviar_conversoes_ads(limite=200, so_simular=False):
                     if el.get('fieldName') == 'conversions' and el.get('index') is not None:
                         falhou_idx.add(int(el['index']))
         msg_pf = (pfe.get('message') or '')[:400]
+        # HOUVE ERRO MAS NÃO SEI DE QUEM. Se o Google reclamou e nenhum índice
+        # veio no formato esperado, o lote inteiro seria marcado 'enviada' —
+        # e 'enviada' é irreversível (a guarda de reenvio nunca mais deixa subir).
+        # Marcar errado pra sempre é pior que tentar de novo: nesse caso ninguém
+        # é promovido, todos voltam pra fila com o motivo.
+        cego = bool(pfe) and not falhou_idx
         agora = _agora_sp()
         for i, c in enumerate(pend):
-            if i in falhou_idx:
+            if cego:
+                conn.execute("""UPDATE google_ads_conversoes SET status='pendente',
+                                tentativas=COALESCE(tentativas,0)+1, detalhe=? WHERE id=?""",
+                             (f"lote recusado sem dizer qual: {msg_pf}"[:400], c['id']))
+                resumo['falhas'] += 1
+            elif i in falhou_idx:
                 conn.execute("""UPDATE google_ads_conversoes SET status='falha',
                                 tentativas=COALESCE(tentativas,0)+1, detalhe=? WHERE id=?""",
                              (msg_pf or 'recusada pelo Google', c['id']))
@@ -11384,9 +11442,19 @@ def enviar_conversoes_ads(limite=200, so_simular=False):
             resumo['erros'].append(msg_pf)
         conn.commit()
     except Exception as e:
+        # Erro do lote inteiro (rede, token, versão da API fora do ar). Volta pra
+        # fila — mas com teto: sem ele a mesma conversão quebrada é retentada em
+        # toda rodada, pra sempre, e o log vira ruído que ninguém lê. Depois do
+        # teto ela para com o motivo escrito, esperando decisão humana.
         for c in pend:
-            conn.execute("""UPDATE google_ads_conversoes SET tentativas=COALESCE(tentativas,0)+1,
-                            detalhe=? WHERE id=?""", (str(e)[:400], c['id']))
+            tent = (c['tentativas'] or 0) + 1
+            if tent >= _ADS_MAX_TENTATIVAS:
+                conn.execute("""UPDATE google_ads_conversoes SET status='falha', tentativas=?,
+                                detalhe=? WHERE id=?""",
+                             (tent, f"parou após {tent} tentativas: {e}"[:400], c['id']))
+            else:
+                conn.execute("""UPDATE google_ads_conversoes SET tentativas=?, detalhe=? WHERE id=?""",
+                             (tent, f"tentativa {tent}: {e}"[:400], c['id']))
         conn.commit()
         resumo['erros'].append(str(e)[:400])
         app.logger.error(f"[ADS] envio falhou: {e}")
@@ -29437,7 +29505,13 @@ def _ads_testar_conexao():
                 dica = ('A conta existe mas este login não tem permissão nela. Se ela fica dentro de um '
                         'MCC, cadastre GOOGLE_ADS_LOGIN_CUSTOMER_ID com o id do MCC (só dígitos).')
             elif r.status_code == 404:
-                dica = 'Customer ID não encontrado — confira o número, sem hífens.'
+                # 404 aqui quase nunca é o id: é a VERSÃO da API. O Google
+                # aposenta cada uma ~1 ano depois de lançar e a antiga some, o
+                # que derruba tudo de uma vez sem nenhuma outra pista.
+                dica = (f'A API está configurada na versão {_ADS_API_VERSAO}. Se ela foi aposentada, '
+                        'o Google responde 404 em tudo — troque GOOGLE_ADS_API_VERSAO por uma versão '
+                        'ativa. Se a versão estiver certa, o Customer ID é que não existe (só dígitos, '
+                        'sem hífens).')
             passo('Conta do Google Ads', False, f"HTTP {r.status_code}: {corpo}", dica)
             return {'ok': False, 'passos': passos}
     except Exception as e:
