@@ -18018,6 +18018,38 @@ def _extensao_versao():
         return ''
 
 
+@app.route('/extensao/manifesto-instalacao')
+@login_required
+def extensao_manifesto_instalacao():
+    """Lista os arquivos da extensão pra instalação automática (sem zip).
+
+    MESMA LISTA do download em zip (_EXTENSAO_ARQUIVOS) — uma fonte só pros
+    dois caminhos, senão um deles fica pra trás quando a extensão ganha
+    arquivo novo (foi exatamente o que já aconteceu com o zip)."""
+    faltando = _extensao_arquivos_faltando()
+    if faltando:
+        return jsonify({"ok": False, "erro": "Pacote incompleto no servidor: " + ', '.join(faltando)}), 500
+    return jsonify({"ok": True, "versao": _extensao_versao(), "arquivos": _EXTENSAO_ARQUIVOS})
+
+
+@app.route('/extensao/arquivo/<nome>')
+@login_required
+def extensao_arquivo(nome):
+    """Um arquivo cru da extensão, pra instalação automática escrever direto
+    numa pasta do computador da pessoa — sem passar por zip.
+
+    SÓ os nomes da lista curada. Nada de path livre: reusar `nome` num
+    os.path.join sem essa checagem seria abrir a pasta inteira do servidor
+    pra quem soubesse o caminho (../../app.py etc.)."""
+    if nome not in _EXTENSAO_ARQUIVOS:
+        abort(404)
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extensao-whatsapp')
+    caminho = os.path.join(base, nome)
+    if not os.path.exists(caminho):
+        abort(404)
+    return send_from_directory(base, nome)
+
+
 @app.route('/extensao/download')
 @login_required
 def extensao_download():
@@ -18065,32 +18097,113 @@ def extensao_instalar():
   ol{padding-left:22px} li{margin:10px 0}
   code{background:#f3f4f6;padding:2px 6px;border-radius:5px;font-size:13px}
   .btn{display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:13px 22px;border-radius:10px;
-    font-weight:600;font-size:15px;margin:8px 0 20px}
+    font-weight:600;font-size:15px;margin:8px 8px 8px 0;border:none;cursor:pointer;font-family:inherit}
+  .btn:disabled{opacity:.55;cursor:progress}
+  .btn.sec{background:#fff;color:#2563eb;border:1.5px solid #2563eb}
   .aviso{background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:12px 14px;font-size:13.5px;margin-top:24px}
+  .progresso{margin:14px 0 22px;font-size:13.5px}
+  .progresso .linha{padding:3px 0;color:#6b7280}
+  .progresso .linha.ok{color:#16a34a}
+  .progresso .linha.erro{color:#dc2626;font-weight:600}
+  #passoManual{display:none}
 </style></head><body>
 <h1>Instalar a extensão do JOB no seu Chrome</h1>
-<div class="sub">Versão __VER__ · enquanto a Chrome Web Store não libera, instale assim (leva 1 minuto).</div>
+<div class="sub">Versão __VER__ · enquanto a Chrome Web Store não libera, instale assim.</div>
 
-<a class="btn" href="/extensao/download">Baixar a extensão (.zip)</a>
+<button class="btn" id="btnAuto" onclick="instalarAutomatico()">Instalar automaticamente (sem baixar .zip)</button>
+<a class="btn sec" href="/extensao/download">Baixar o .zip manualmente</a>
+<div id="progresso" class="progresso"></div>
 
-<ol>
+<div class="aviso" id="semSuporte" style="display:none;background:#eff6ff;border-color:#93c5fd">
+  Este navegador não tem o recurso de instalação automática (só funciona no Chrome/Edge, versão
+  recente, em computador). Use o botão <b>"Baixar o .zip manualmente"</b> e peça pra alguém te
+  ajudar a descompactar — ou avise o Guilherme.
+</div>
+
+<ol id="passoManual">
   <li><b>Baixe</b> o arquivo no botão acima e <b>descompacte</b> (clique com o botão direito &rarr; "Abrir"/"Extrair"). Vai virar uma pasta chamada <code>job-serenus-extensao-__VER__</code>.</li>
   <li>Deixe essa pasta num lugar que você <b>não vá apagar</b> e que <b>não seja sincronizado pelo OneDrive</b> &mdash; crie uma pasta na raiz do disco, tipo <code>C:\\JOB\\extensao</code>. Dentro de Documentos ou Área de Trabalho o OneDrive costuma deixar os arquivos "na nuvem", e aí o Chrome não consegue ler.</li>
+</ol>
+<ol id="passoComum" start="1">
   <li>No Chrome, abra <code>chrome://extensions</code>.</li>
   <li>Ligue o <b>"Modo do desenvolvedor"</b> (canto superior direito).</li>
-  <li>Clique em <b>"Carregar sem compactação"</b> e escolha a <b>pasta</b> que você descompactou.</li>
+  <li>Clique em <b>"Carregar sem compactação"</b> e escolha a <b>pasta</b> que você acabou de criar/descompactar.</li>
   <li>Pronto: abra o <b>WhatsApp Web</b> e dê <b>F5</b>. O painel do JOB aparece na lateral.</li>
 </ol>
 
-<div class="aviso"><b>Quando sair uma atualização:</b> você vai baixar de novo por este link, descompactar por cima, e em <code>chrome://extensions</code> clicar no <b>&#8635; (recarregar)</b> da extensão + <b>F5</b> no WhatsApp. (Quando a Chrome Web Store aprovar, isso passa a ser automático e este passo some.)</div>
+<div class="aviso"><b>Quando sair uma atualização:</b> volte nesta mesma página e clique em
+<b>"Instalar automaticamente"</b> de novo, escolhendo a <b>mesma pasta</b> — os arquivos são
+regravados por cima, sem duplicar nada. Depois, em <code>chrome://extensions</code>, clique no
+<b>&#8635; (recarregar)</b> da extensão + <b>F5</b> no WhatsApp. (Quando a Chrome Web Store aprovar,
+isso passa a ser automático e este passo some.)</div>
 
 <div class="aviso" style="background:#eff6ff;border-color:#93c5fd">
   <b>Deu erro "Não foi possível carregar ... para o script"?</b> É pasta incompleta ou arquivo
   que o OneDrive deixou na nuvem. Não adianta mudar a pasta de lugar levando os arquivos antigos
-  junto: <b>apague a pasta inteira</b>, baixe de novo por este link e descompacte do zero numa
-  pasta fora do OneDrive. Em <code>chrome://extensions</code>, <b>remova</b> a extensão com erro
-  antes de carregar a nova.
+  junto: crie uma pasta <b>nova</b>, fora do OneDrive (ex: <code>C:\\JOB\\extensao</code>), rode a
+  instalação automática apontando pra ela, e em <code>chrome://extensions</code> <b>remova</b> a
+  extensão com erro antes de carregar a nova.
 </div>
+
+<script>
+async function instalarAutomatico(){
+  const btn = document.getElementById('btnAuto');
+  const cx = document.getElementById('progresso');
+  if (!window.showDirectoryPicker){
+    document.getElementById('semSuporte').style.display = 'block';
+    document.getElementById('passoManual').style.display = 'block';
+    document.getElementById('passoComum').setAttribute('start', '3');
+    return;
+  }
+  let raiz;
+  try {
+    // O USUARIO ESCOLHE A PASTA DE DESTINO — pode ser uma que ja existe (pra
+    // atualizar por cima) ou criar uma nova ali na hora (o botao "Nova pasta"
+    // do proprio seletor do sistema). Nenhum arquivo passa por zip.
+    raiz = await window.showDirectoryPicker({ mode: 'readwrite', id: 'job-extensao' });
+  } catch (e) { return; }  // cancelou o seletor: nao e erro, so desistiu
+  btn.disabled = true; btn.textContent = 'Instalando…';
+  cx.innerHTML = '';
+  function linha(txt, cls){
+    const d = document.createElement('div');
+    d.className = 'linha' + (cls ? ' ' + cls : '');
+    d.textContent = txt;
+    cx.appendChild(d);
+    return d;
+  }
+  try {
+    const r = await fetch('/extensao/manifesto-instalacao');
+    const m = await r.json();
+    if (!m.ok){ linha('Não consegui: ' + (m.erro || 'erro no servidor'), 'erro'); btn.disabled = false; btn.textContent = 'Instalar automaticamente (sem baixar .zip)'; return; }
+    let feitos = 0;
+    for (const nome of m.arquivos){
+      const li = linha('Copiando ' + nome + '…');
+      try {
+        const resp = await fetch('/extensao/arquivo/' + encodeURIComponent(nome));
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const bytes = await resp.blob();
+        const handle = await raiz.getFileHandle(nome, { create: true });
+        const writable = await handle.createWritable();
+        await writable.write(bytes);
+        await writable.close();
+        li.textContent = nome; li.className = 'linha ok';
+        feitos++;
+      } catch (e) {
+        li.textContent = nome + ' — falhou: ' + (e && e.message || e); li.className = 'linha erro';
+      }
+    }
+    if (feitos === m.arquivos.length){
+      linha('Pronto — ' + feitos + ' arquivo(s) na pasta "' + raiz.name + '".', 'ok');
+      linha('Agora: chrome://extensions → Carregar sem compactação → escolha essa mesma pasta.', 'ok');
+    } else {
+      linha((m.arquivos.length - feitos) + ' arquivo(s) falharam. Tente de novo antes de carregar no Chrome.', 'erro');
+    }
+  } catch (e) {
+    linha('Falhou: ' + (e && e.message || e), 'erro');
+  }
+  btn.disabled = false; btn.textContent = 'Instalar de novo / atualizar';
+}
+</script>
 </body></html>"""
     html = html.replace('__VER__', ver or '')
     return Response(html, mimetype='text/html')
@@ -20102,13 +20215,13 @@ def api_whatsapp_varredura_proximo():
             return _t(v) >= _t(minimo)
         except Exception:
             return False
-    # 3.21.0: sem ela faltam as tres correcoes de 04/08 contra o crash por
-    # falta de memoria (gate entre as tres rotinas, auto-carregamento de
-    # conversa @lid nunca aberta, e a marca d'agua que evita reler a conversa
-    # inteira em todo item da fila). Extensao mais velha SERIA capaz de
-    # consumir a fila, so que do jeito que estava derrubando o WhatsApp — por
-    # isso o teto sobe junto com o fix, nao so quando quebra de vez.
-    _MIN_VARREDURA = '3.21.0'
+    # 3.22.0: as versoes 3.20 e 3.21 tem um defeito MEU — eu pus openChatBottom
+    # na leitura achando que ele carregava a conversa sem mexer na tela, e ele
+    # NAVEGA (abrirChat usa exatamente esse metodo pra abrir conversa). Numa
+    # varredura isso faz a tela do consultor pular de conversa em conversa.
+    # 3.22 reverte. Abaixo disso a fila nao anda: e melhor a varredura parar e
+    # dizer o motivo do que rodar mexendo na tela de quem esta trabalhando.
+    _MIN_VARREDURA = '3.22.0'
     versao = (request.args.get('versao') or '').strip()
     if not _versao_maior_ou_igual(versao, _MIN_VARREDURA):
         return _wa_cors(jsonify({

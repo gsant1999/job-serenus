@@ -349,22 +349,15 @@
       if (c2 && c2.msgs && c2.msgs.getModelsArray) return c2.msgs.getModelsArray() || [];
     } catch (e) { /* nada */ }
 
-    // ULTIMÍSSIMO RECURSO: a conversa nunca foi aberta nesta sessão do
-    // WhatsApp Web, então nada acima achou nada — nem a coleção (que só existe
-    // pra chat carregado) nem getMessages (que em algumas contas exige que o
-    // chat já esteja "conhecido"). openChatBottom carrega o chat NA MEMÓRIA
-    // sem trocar a tela que o consultor está vendo (é o mesmo método que o
-    // WhatsApp Web usa por baixo pra pré-carregar conversa antes de focar
-    // nela) — diferente de openChat, que navegaria a tela dele à força.
-    // Isso é o que resolve o "falha_mensagens" de conversa @lid nunca aberta,
-    // sem precisar que ninguém clique em nada.
-    if (alvo && window.WPP.chat.openChatBottom) {
-      try {
-        await window.WPP.chat.openChatBottom(alvo);
-        const m2 = await window.WPP.chat.getMessages(alvo, { count: Math.max(12, quantas || 200) });
-        if (m2 && m2.length) return m2;
-      } catch (e) { /* também não achou — desiste mesmo */ }
-    }
+    // NAO USAR openChatBottom AQUI. Eu tentei em 04/08 pra resolver o
+    // 'falha_mensagens' de conversa @lid nunca aberta, na suposicao de que ele
+    // carregava o chat "na memoria sem trocar a tela". ERRADO: ele NAVEGA a
+    // tela — a prova esta neste mesmo arquivo, em abrirChat(), que usa
+    // exatamente este metodo justamente PARA abrir a conversa. Numa varredura
+    // que percorre dezenas de leads isso vira a tela do consultor pulando de
+    // conversa em conversa sozinha, piscando. Se um dia for preciso carregar
+    // conversa nunca aberta, tem que ser por um caminho que comprovadamente
+    // nao mexe na navegacao — e comprovado medindo, nao supondo.
     return [];
   }
 
