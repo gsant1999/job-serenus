@@ -9322,6 +9322,84 @@ def _crm_grupos_duplicados(conn):
         HAVING COUNT(*) > 1 ORDER BY n DESC""").fetchall()
 
 
+def _dup_nome_tokens(nome):
+    """Palavras do nome, sem acento e sem pontuacao — pra comparar 'Zé Luiz' com
+    'JOSE LUIZ' sem depender de como foi digitado."""
+    import unicodedata as _u
+    t = _u.normalize('NFKD', (nome or '')).encode('ascii', 'ignore').decode().lower()
+    t = t.replace('ze ', 'jose ')          # apelido comum que quebrava a comparacao
+    return [w for w in re.sub(r'[^a-z0-9 ]', ' ', t).split() if len(w) > 1]
+
+
+def _dup_semelhanca(nomes):
+    """Quanto os nomes de um grupo se parecem. E SUGESTAO, nao veredito.
+
+    Aprendi na marra que essa classificacao erra dos dois lados: 'Ze Luiz' e
+    'JOSE LUIZ' sao a mesma pessoa e o algoritmo dizia que nao; 'Jonas Estevao'
+    e 'Maria Helena' dividem o telefone e nao sao. Por isso ela ordena a fila e
+    colore o aviso — quem decide e quem conhece o cliente."""
+    toks = [_dup_nome_tokens(n) for n in nomes]
+    txt = [' '.join(t) for t in toks]
+    if len(set(txt)) == 1:
+        return 'identico', 'Nomes iguais'
+    for i, a in enumerate(toks):
+        for b in toks[i + 1:]:
+            if a and b and (all(w in b for w in a) or all(w in a for w in b)):
+                return 'contido', 'Um nome está contido no outro'
+    if all(t for t in toks) and len(set(t[0] for t in toks)) == 1:
+        return 'primeiro', 'Só o primeiro nome coincide'
+    return 'diferente', 'Nomes sem relação — provavelmente pessoas diferentes'
+
+
+@app.route('/crm/duplicados')
+@login_required
+@admin_required
+def crm_duplicados():
+    """Telefones com mais de um lead, lado a lado, pra decidir um a um.
+
+    NAO junta sozinho, de proposito. A semelhanca do nome e sugestao: o
+    algoritmo ja errou nos dois sentidos aqui, e num CRM de saude misturar o
+    historico de duas pessoas e pior que conviver com um cadastro repetido."""
+    conn = db()
+    grupos = []
+    try:
+        tels = [r['telefone_norm'] for r in conn.execute(
+            """SELECT telefone_norm FROM crm_leads
+               WHERE telefone_norm IS NOT NULL AND telefone_norm <> ''
+               GROUP BY telefone_norm HAVING COUNT(*) > 1""").fetchall()]
+        for tel in tels:
+            rows = conn.execute("""SELECT l.id, l.nome, l.etapa, l.origem, l.criado_em,
+                l.email, l.empresa, l.responsavel_id,
+                (SELECT COUNT(*) FROM propostas p WHERE p.lead_id=l.id) props,
+                (SELECT COUNT(*) FROM wa_chat_lead w WHERE w.lead_id=l.id) convs,
+                (SELECT COUNT(*) FROM crm_atividades a WHERE a.lead_id=l.id) ativs,
+                (SELECT COUNT(*) FROM cotacao_salva cs WHERE cs.lead_id=l.id) cots
+                FROM crm_leads l WHERE l.telefone_norm=? ORDER BY l.id""", (tel,)).fetchall()
+            leads = [dict(r) for r in rows]
+            etapas_nome = {e['id']: e['nome'] for e in carregar_etapas_crm(conn)}
+            for l in leads:
+                l['etapa_nome'] = etapas_nome.get(l['etapa'] or '', l['etapa'] or '')
+                l['quando'] = _fmt_data_br(l['criado_em'])
+                # QUANTO ELE CARREGA: e o que decide qual sobrevive. O sugerido e
+                # o que tem mais historia — perder o vazio custa nada, perder o
+                # cheio custa a venda.
+                l['peso'] = (l['props'] * 100) + (l['cots'] * 20) + (l['convs'] * 10) + l['ativs']
+            leads.sort(key=lambda x: -x['peso'])
+            sem, rot = _dup_semelhanca([l['nome'] for l in leads])
+            grupos.append({'tel': _formatar_telefone(tel), 'tel_norm': tel,
+                           'leads': leads, 'semelhanca': sem, 'rotulo': rot,
+                           'tem_proposta': any(l['props'] for l in leads)})
+        ordem = {'identico': 0, 'contido': 1, 'primeiro': 2, 'diferente': 3}
+        grupos.sort(key=lambda g: (ordem.get(g['semelhanca'], 9), g['tel']))
+    except Exception as e:
+        app.logger.warning(f"[DUPLICADOS] {e}")
+    close_db(conn)
+    cont = {}
+    for g in grupos:
+        cont[g['semelhanca']] = cont.get(g['semelhanca'], 0) + 1
+    return render_template('crm_duplicados.html', grupos=grupos, cont=cont)
+
+
 @app.route('/crm/leads-duplicados')
 @login_required
 @admin_required

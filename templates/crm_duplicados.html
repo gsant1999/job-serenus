@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Telefones repetidos{% endblock %}
+
+{% block head %}
+<style>
+  .dp-nota { background:var(--panel-2); border:1px solid var(--borda); border-left:3px solid var(--azul);
+             border-radius:9px; padding:12px 15px; font-size:13px; color:var(--cinza);
+             line-height:1.55; margin:16px 0 20px; max-width:820px; }
+  .dp-resumo { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+  .dp-chip { font-size:11.5px; font-weight:700; padding:4px 11px; border-radius:20px; }
+  .dp-chip.identico  { background:rgba(31,216,164,.16); color:var(--teal); }
+  .dp-chip.contido   { background:rgba(59,130,246,.14); color:var(--info); }
+  .dp-chip.primeiro  { background:rgba(245,158,11,.16); color:var(--amarelo,#f59e0b); }
+  .dp-chip.diferente { background:rgba(244,63,94,.14); color:var(--rosa); }
+
+  .dp-grupo { border:1px solid var(--borda); border-radius:11px; margin-bottom:14px;
+              background:var(--panel); overflow:hidden; }
+  .dp-grupo.diferente { border-color:rgba(244,63,94,.35); }
+  .dp-cab { display:flex; align-items:center; justify-content:space-between; gap:12px;
+            flex-wrap:wrap; padding:11px 15px; border-bottom:1px solid var(--borda);
+            background:var(--panel-2); }
+  .dp-tel { font-weight:700; font-size:14px; color:var(--texto); font-variant-numeric:tabular-nums; }
+  .dp-cards { display:flex; gap:12px; flex-wrap:wrap; padding:14px 15px; }
+  .dp-card { flex:1; min-width:250px; border:1px solid var(--borda); border-radius:9px;
+             padding:11px 13px; background:var(--panel-2); }
+  .dp-card.fica { border-color:var(--teal); background:rgba(31,216,164,.06); }
+  .dp-nome { font-weight:700; font-size:13.5px; color:var(--texto); }
+  .dp-meta { font-size:11.5px; color:var(--cinza-2); margin-top:3px; line-height:1.55; }
+  .dp-tem { display:flex; gap:6px; flex-wrap:wrap; margin-top:7px; }
+  .dp-tem span { font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:6px;
+                 background:var(--panel-3); color:var(--cinza); }
+  .dp-tem span.forte { background:rgba(31,216,164,.18); color:var(--teal); }
+  .dp-fica-tag { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px;
+                 color:var(--teal); }
+  .dp-acoes { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .dp-btn { border:1px solid var(--borda); background:var(--panel); color:var(--texto);
+            border-radius:8px; padding:6px 13px; font-size:12.5px; font-weight:600;
+            cursor:pointer; font-family:inherit; }
+  .dp-btn.juntar:hover { border-color:var(--teal); color:var(--teal); }
+  .dp-btn:disabled { opacity:.5; cursor:progress; }
+  .dp-vazio { text-align:center; padding:46px 20px; color:var(--cinza-2); font-size:13.5px; }
+  .dp-voltar { color:var(--azul); text-decoration:none; font-size:13px; }
+  .dp-card a { color:var(--azul); text-decoration:none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page">
+  <h2 style="margin:0 0 4px;">Telefones repetidos</h2>
+  <a class="dp-voltar" href="/crm">← Voltar ao CRM</a>
+
+  {# O QUE ESTA TELA NÃO FAZ, e por quê. Quem chega aqui precisa saber que a
+     sugestão de semelhança é chute educado — o algoritmo já errou nos dois
+     sentidos com esta base, e num CRM de saúde misturar o histórico de duas
+     pessoas é pior que conviver com um cadastro repetido. #}
+  <div class="dp-nota">
+    Cada bloco é um telefone com mais de um lead. <b>Nada é juntado sozinho</b> — a etiqueta
+    de semelhança é sugestão, não veredito: o mesmo número pode ser de marido e esposa,
+    ou da empresa inteira.
+    <br>O card marcado como <b style="color:var(--teal);">FICA</b> é o que carrega mais história
+    (proposta, cotação, conversa, atividades). Juntar traz tudo dos outros pra ele e apaga
+    os demais — a etapa mais avançada sempre prevalece, e não tem desfazer.
+  </div>
+
+  {% if cont %}
+  <div class="dp-resumo">
+    {% if cont.identico %}<span class="dp-chip identico">{{ cont.identico }} com nomes iguais</span>{% endif %}
+    {% if cont.contido %}<span class="dp-chip contido">{{ cont.contido }} com um nome dentro do outro</span>{% endif %}
+    {% if cont.primeiro %}<span class="dp-chip primeiro">{{ cont.primeiro }} só com o primeiro nome igual</span>{% endif %}
+    {% if cont.diferente %}<span class="dp-chip diferente">{{ cont.diferente }} sem relação — confira antes</span>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if not grupos %}
+    <div class="dp-vazio">Nenhum telefone repetido. Nada a fazer aqui.</div>
+  {% else %}
+    {% for g in grupos %}
+    <div class="dp-grupo {{ g.semelhanca }}" id="grupo-{{ g.tel_norm }}">
+      <div class="dp-cab">
+        <div>
+          <span class="dp-tel">{{ g.tel }}</span>
+          <span class="dp-chip {{ g.semelhanca }}" style="margin-left:8px;">{{ g.rotulo }}</span>
+          {% if g.tem_proposta %}
+          <span class="dp-chip primeiro" style="margin-left:6px;"
+                title="Um destes leads tem proposta ligada — juntar move a proposta pro card que fica.">tem proposta</span>
+          {% endif %}
+        </div>
+        <div class="dp-acoes">
+          <button class="dp-btn juntar"
+                  onclick="juntarGrupo(this, {{ g.leads[0].id }}, {{ g.leads[1:]|map(attribute='id')|list|tojson }}, '{{ g.leads[0].nome|replace("'", "") }}')">
+            Juntar em #{{ g.leads[0].id }}
+          </button>
+        </div>
+      </div>
+      <div class="dp-cards">
+        {% for l in g.leads %}
+        <div class="dp-card {{ 'fica' if loop.first }}">
+          {% if loop.first %}<div class="dp-fica-tag">fica</div>{% endif %}
+          <div class="dp-nome">
+            <a href="/crm?lead={{ l.id }}" target="_blank">{{ l.nome or 'sem nome' }}</a>
+          </div>
+          <div class="dp-meta">
+            #{{ l.id }} · {{ l.etapa_nome }} · entrou em {{ l.quando }}
+            {% if l.origem %} · {{ l.origem }}{% endif %}
+            {% if l.email %}<br>{{ l.email }}{% endif %}
+            {% if l.empresa %}<br>{{ l.empresa }}{% endif %}
+          </div>
+          <div class="dp-tem">
+            {% if l.props %}<span class="forte">{{ l.props }} proposta(s)</span>{% endif %}
+            {% if l.cots %}<span class="forte">{{ l.cots }} cotação(ões)</span>{% endif %}
+            {% if l.convs %}<span class="forte">{{ l.convs }} conversa(s)</span>{% endif %}
+            <span>{{ l.ativs }} atividade(s)</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  {% endif %}
+</div>
+
+<script>
+// Junta um grupo inteiro no primeiro card. Grupo de 3 vira duas chamadas — o
+// motor junta dois por vez, e fazer em sequência mantém a mesma regra de etapa
+// e de herança que já foi testada, em vez de inventar um caminho novo pra três.
+async function juntarGrupo(btn, ficaId, outrosIds, nome){
+  if(!outrosIds.length) return;
+  if(!confirm('Juntar ' + outrosIds.length + ' cadastro(s) dentro de #' + ficaId +
+              ' ("' + nome + '")?\n\nTudo dos outros vem pra cá — conversas, histórico, ' +
+              'cotações, propostas e anexos — e os cards deles são APAGADOS.\n\nIsso não tem desfazer.')) return;
+  btn.disabled = true; const t = btn.textContent;
+  let feitos = 0;
+  for(const outro of outrosIds){
+    btn.textContent = 'Juntando ' + (feitos+1) + '/' + outrosIds.length + '…';
+    try{
+      const r = await (await fetch('/crm/lead/' + ficaId + '/juntar', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({outro_id: outro})})).json();
+      if(!r.ok){ alert('Parou no #' + outro + ': ' + (r.erro||'erro')); break; }
+      feitos++;
+    }catch(e){ alert('Falhou no #' + outro + ': ' + e); break; }
+  }
+  if(feitos){ location.reload(); }
+  else { btn.disabled = false; btn.textContent = t; }
+}
+</script>
+{% endblock %}

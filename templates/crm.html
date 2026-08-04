@@ -544,9 +544,16 @@
           Buscar leads agora
           <small>Puxa da planilha na hora, sem esperar a rodada automática</small>
         </button>
+        {# DUAS PORTAS, DE PROPÓSITO. A de cima junta sozinha o caso seguro (mesmo
+           nome, sem telefone). A de baixo é telefone repetido com nome diferente —
+           aí pode ser marido e esposa, e juntar sozinho estragaria o histórico. #}
         <button type="button" onclick="mesclarDuplicados(this)">
           Mesclar duplicados
-          <small>Junta leads repetidos pelo telefone</small>
+          <small>Junta automaticamente os que têm o mesmo nome e nenhum telefone</small>
+        </button>
+        <button type="button" onclick="location.href='/crm/duplicados'">
+          Telefones repetidos
+          <small>Mesmo número em mais de um lead · você decide um a um</small>
         </button>
         {# EXCLUSÃO VISÍVEL. Excluir só pode ser fácil se der pra auditar: aqui
            fica quem apagou, quem era e quando. #}
