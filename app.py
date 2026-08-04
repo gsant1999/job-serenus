@@ -1240,6 +1240,21 @@ def init_db():
                 criado_por TEXT,
                 criado_em TEXT
             )""",
+            # CLIQUE GUARDADO ATE O LEAD CHEGAR. A pagina avisa o JOB na hora em
+            # que a pessoa envia o formulario, mas o lead so entra no CRM depois
+            # (passa pelo n8n e pela planilha, que tem cache). Sem este lugar de
+            # espera, o clique chegaria antes do lead e seria descartado.
+            """CREATE TABLE IF NOT EXISTS clique_pendente (
+                telefone_norm TEXT PRIMARY KEY,
+                gclid TEXT,
+                gbraid TEXT,
+                wbraid TEXT,
+                fbclid TEXT,
+                landing TEXT,
+                utm_json TEXT,
+                criado_em TEXT,
+                aplicado_em TEXT
+            )""",
             """CREATE TABLE IF NOT EXISTS crm_lead_excluido (
                 id SERIAL PRIMARY KEY,
                 lead_id INTEGER,
@@ -2366,6 +2381,12 @@ def init_db():
             fonte TEXT,
             atualizado_em TEXT,
             PRIMARY KEY (lead_id, campo_id)
+        );
+        CREATE TABLE IF NOT EXISTS clique_pendente (
+            telefone_norm TEXT PRIMARY KEY,
+            gclid TEXT, gbraid TEXT, wbraid TEXT, fbclid TEXT,
+            landing TEXT, utm_json TEXT,
+            criado_em TEXT, aplicado_em TEXT
         );
         CREATE TABLE IF NOT EXISTS operadoras (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29667,6 +29688,139 @@ def _ads_testar_conexao():
     return {'ok': True, 'passos': passos, 'conta': conta, 'acao': acao_nome}
 
 
+def _clique_aplicar_no_lead(conn, lead_id, tel_norm):
+    """Se havia um clique guardado pra este telefone, gruda no lead.
+
+    Chamado depois que o lead nasce. É o que fecha a corrida: a página avisa o
+    JOB na hora do envio do formulário, mas o lead só entra no CRM minutos
+    depois (n8n, planilha, cache do Google). Sem isto, o clique chegava antes
+    do lead e não tinha onde encostar."""
+    if not lead_id or not tel_norm:
+        return False
+    try:
+        p = conn.execute("SELECT * FROM clique_pendente WHERE telefone_norm=?", (tel_norm,)).fetchone()
+        if not p:
+            return False
+        # A COLUNA gclid SÓ RECEBE gclid. gbraid/wbraid ficam em dados_extras,
+        # que é de onde _ads_click_id_do_lead os lê COM O TIPO CERTO. Enfiar um
+        # gbraid na coluna do gclid faria o envio rotular o identificador
+        # errado, e o Google recusa — o campo tem que casar com a origem.
+        clique_col = (p['gclid'] or '').strip()
+        if not (clique_col or (p['gbraid'] or '').strip() or (p['wbraid'] or '').strip()):
+            return False
+        atual = conn.execute("SELECT gclid, dados_extras FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+        if atual and (atual['gclid'] or '').strip():
+            return False  # já tem clique: o primeiro é o que trouxe a pessoa
+        extras = {}
+        try:
+            extras = json.loads((atual['dados_extras'] if atual else '') or '{}') or {}
+        except Exception:
+            extras = {}
+        cl = extras.get('click') or {}
+        for k in ('gclid', 'gbraid', 'wbraid', 'fbclid'):
+            if (p[k] or '').strip():
+                cl[k] = p[k].strip()
+        if (p['landing'] or '').strip():
+            cl['landing'] = p['landing'].strip()
+        try:
+            for k, v in (json.loads(p['utm_json'] or '{}') or {}).items():
+                cl.setdefault(k, v)
+        except Exception:
+            pass
+        extras['click'] = cl
+        conn.execute("UPDATE crm_leads SET gclid=?, dados_extras=?, trafego=COALESCE(NULLIF(trafego,''),?) WHERE id=?",
+                     (clique_col or None, json.dumps(extras, ensure_ascii=False), 'Pago', lead_id))
+        conn.execute("UPDATE clique_pendente SET aplicado_em=? WHERE telefone_norm=?", (_agora_sp(), tel_norm))
+        conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                        VALUES (?,?,?,?,?)""",
+                     (lead_id, 'Sistema', 'edicao',
+                      'Clique do anúncio ligado a este lead (avisado pela página no envio do formulário)',
+                      _agora_sp()))
+        return True
+    except Exception as e:
+        app.logger.info(f"[CLIQUE] não aplicado no lead {lead_id}: {e}")
+        return False
+
+
+@app.route('/api/clique', methods=['POST', 'OPTIONS'])
+def api_clique():
+    """A landing page avisa o JOB, na hora, de qual clique trouxe a pessoa.
+
+    POR QUE ISTO EXISTE: o caminho normal do lead é página -> n8n -> planilha ->
+    JOB, e quem grava a planilha não leva o identificador do clique. Medido:
+    1.417 linhas, nenhuma coluna de clique; 5.627 leads no CRM, zero com gclid.
+    Enquanto essa coluna não existir, a conversão offline não tem o que enviar.
+    Este atalho tira o n8n do caminho do CLIQUE (o lead continua indo por lá,
+    sem nada duplicado): a página manda telefone + clique direto pra cá.
+
+    NÃO CRIA LEAD, de propósito. Só encosta o clique num lead que já existe, ou
+    guarda esperando ele chegar. Endpoint público — landing page não tem como
+    guardar segredo —, e por isso o pior que alguém de fora consegue fazer é
+    encostar um clique errado num telefone que ele já conhece. Não expõe
+    nenhum dado: responde sempre a mesma coisa, ache ou não ache o lead."""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    d = request.json or {}
+    tel = _normalizar_telefone(str(d.get('telefone') or d.get('phone') or ''))
+    ids = {k: str(d.get(k) or '').strip()[:200] for k in ('gclid', 'gbraid', 'wbraid', 'fbclid')}
+    if not tel or not any(ids.values()):
+        return _wa_cors(jsonify({'ok': True}))
+    utm = {k: str(d.get(k) or '').strip()[:200] for k in
+           ('utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content')}
+    utm = {k: v for k, v in utm.items() if v}
+    landing = str(d.get('landing_url') or d.get('page') or '').strip()[:500]
+    try:
+        conn = db()
+        agora = _agora_sp()
+        # DB_MODE, nao `is_pg`: is_pg e variavel local de init_db, nao existe
+        # no escopo do modulo — usar aqui viraria NameError engolido pelo except.
+        if DB_MODE == 'postgres':
+            conn.execute("""INSERT INTO clique_pendente
+                (telefone_norm,gclid,gbraid,wbraid,fbclid,landing,utm_json,criado_em)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (telefone_norm) DO NOTHING""",
+                (tel, ids['gclid'], ids['gbraid'], ids['wbraid'], ids['fbclid'],
+                 landing, json.dumps(utm, ensure_ascii=False), agora))
+        else:
+            conn.execute("""INSERT OR IGNORE INTO clique_pendente
+                (telefone_norm,gclid,gbraid,wbraid,fbclid,landing,utm_json,criado_em)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                (tel, ids['gclid'], ids['gbraid'], ids['wbraid'], ids['fbclid'],
+                 landing, json.dumps(utm, ensure_ascii=False), agora))
+        # Se o lead já existe (pessoa que voltou), gruda agora mesmo.
+        lead = conn.execute("SELECT id FROM crm_leads WHERE telefone_norm=? ORDER BY id LIMIT 1",
+                            (tel,)).fetchone()
+        if lead:
+            _clique_aplicar_no_lead(conn, lead['id'], tel)
+        conn.commit(); close_db(conn)
+    except Exception as e:
+        app.logger.warning(f"[CLIQUE] falhou: {e}")
+    return _wa_cors(jsonify({'ok': True}))
+
+
+def _clique_casar_pendentes(limite=500):
+    """Casa os cliques que estavam esperando com os leads que já chegaram.
+
+    Roda junto do import: o lead entra pela planilha alguns minutos depois do
+    formulário, então é aqui que a maior parte dos cliques encontra seu dono."""
+    n = 0
+    try:
+        conn = db()
+        pend = conn.execute("""SELECT p.telefone_norm, l.id lead_id
+            FROM clique_pendente p JOIN crm_leads l ON l.telefone_norm = p.telefone_norm
+            WHERE p.aplicado_em IS NULL AND COALESCE(l.gclid,'') = ''
+            ORDER BY p.criado_em LIMIT ?""", (limite,)).fetchall()
+        for r in pend:
+            if _clique_aplicar_no_lead(conn, r['lead_id'], r['telefone_norm']):
+                n += 1
+        conn.commit(); close_db(conn)
+        if n:
+            app.logger.info(f"[CLIQUE] {n} clique(s) ligados ao lead")
+    except Exception as e:
+        app.logger.warning(f"[CLIQUE] casamento falhou: {e}")
+    return n
+
+
 def _ads_redirect_uri():
     """Endereço de volta da autorização. Tem que bater LETRA POR LETRA com o que
     está cadastrado no cliente OAuth do Google — é a causa do redirect_uri_mismatch."""
@@ -29734,7 +29888,7 @@ def google_ads_autorizado():
                           f'Resposta: <code>{str(d)[:400]}</code><br><br>Se vier <code>invalid_grant</code>, '
                           'o código já foi usado — comece de novo pelo botão Autorizar.')
         conn = db()
-        if is_pg:
+        if DB_MODE == 'postgres':
             conn.execute("""INSERT INTO config (chave,valor) VALUES (%s,%s)
                             ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor""",
                          ('google_ads_refresh_token', d['refresh_token']))
@@ -33683,6 +33837,11 @@ def _auto_pull_leads_throttled():
             # envio dependia de um admin abrir a tela e clicar. Ninguém abre uma
             # tela que não chama — e o clique tem prazo: passados 90 dias, o
             # Google recusa a conversão inteira. A fila apodrecia em silêncio.
+            # Antes de enviar, casa os cliques que chegaram na frente do lead.
+            try:
+                _clique_casar_pendentes()
+            except Exception:
+                pass
             try:
                 _enviar_conversoes_automatico()
             except Exception:
