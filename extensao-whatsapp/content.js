@@ -123,6 +123,51 @@
   let _contextoMorto = false;
   const _idsLoops = [];
   function _registrarLoop(id) { _idsLoops.push(id); return id; }
+
+  // ── TETO DE MEMÓRIA DOS CACHES ────────────────────────────────────────────
+  //
+  // POR QUE EXISTE: a aba do WhatsApp fica aberta o dia inteiro, e vários Maps
+  // aqui só cresciam. O pior deles guardava o resultado COMPLETO de cada
+  // análise (leitura de IA de imagens e PDFs, texto extraído de documento,
+  // transcrições) e nunca soltava no caminho de sucesso. Isso não derruba a
+  // aba em rajada — vai empurrando pro teto do V8 ao longo das horas, que é
+  // o "Aw, Snap!" aparecendo no meio da tarde sem causa aparente.
+  //
+  // Map em JS mantém ORDEM DE INSERÇÃO. Então o mais antigo é o primeiro do
+  // iterador — não preciso guardar timestamp pra saber quem sai.
+  //
+  // NADA AQUI É FONTE DE VERDADE: análise perdida o painel rebusca no servidor,
+  // transcrição perdida volta ao botão "Transcrever" (e o servidor tem cache,
+  // então não paga de novo), documento perdido volta ao botão "Ler documento".
+  // Por isso dá pra despejar sem quebrar tela — o que NÃO dá é despejar
+  // trabalho em andamento, e é isso que o `protegido` abaixo garante.
+  function _capMap(mapa, teto, protegido) {
+    if (!mapa || mapa.size <= teto) return 0;
+    let saiu = 0;
+    for (const [k, v] of mapa) {
+      // `mapa.size` puro: o delete abaixo JÁ reduz o size. Eu tinha escrito
+      // `mapa.size - saiu` aqui e isso descontava duas vezes — parava a 55 com
+      // teto de 50, deixando o Map sempre acima do limite. Pego no teste.
+      if (mapa.size <= teto) break;
+      if (protegido && protegido(v, k)) continue;   // em andamento: fica
+      mapa.delete(k);                               // apagar durante o for de Map é seguro
+      saiu++;
+    }
+    return saiu;
+  }
+
+  // Set não tem o que priorizar (todo item pesa igual e nenhum é resultado de
+  // trabalho), então limpar inteiro é mais simples e mais barato que despejar
+  // um a um. O custo de esvaziar é reprocessar no máximo um item repetido.
+  function _capSet(conjunto, teto) {
+    if (conjunto && conjunto.size > teto) { conjunto.clear(); return true; }
+    return false;
+  }
+
+  const _TETO_ANALISES = 50;
+  const _TETO_DOC = 100;
+  const _TETO_TR = 100;
+  const _TETO_SETS = 200;
   function _contextoValido() {
     try { return !!(chrome.runtime && chrome.runtime.id); } catch (e) { return false; }
   }
@@ -1664,6 +1709,11 @@
         DOC.estado.set(a.msg_id, { status: 'ok',
           resultado: Object.assign({}, r, { arquivos: meu.length ? meu : [{}] }) });
       });
+      // Aqui é onde este Map realmente engorda: cada entrada carrega a resposta
+      // inteira do servidor (texto extraído do documento). Documento 'lendo'
+      // nunca sai — despejar ele deixaria o cronômetro girando pra sempre numa
+      // bolha que ninguém mais atualiza.
+      _capMap(DOC.estado, _TETO_DOC, (v) => v && v.status === 'lendo');
       deuCerto = true;
       if (lote) {
         const perdidos = alvos.length - arqs.length;
@@ -1986,6 +2036,12 @@
     } finally {
       TR.ocupado.delete(id);
       trAtualizarSlot(id);
+      // No finally: vale pro caminho de sucesso E pro de erro, e os dois
+      // inserem em TR.cache. Áudio sendo transcrito agora (TR.ocupado) nunca
+      // sai — perder a entrada no meio faria o slot voltar pro botão enquanto
+      // a transcrição ainda está em voo.
+      _capMap(TR.cache, _TETO_TR, (_v, k) => TR.ocupado.has(k));
+      _capMap(TR.erro, _TETO_TR, (_v, k) => TR.ocupado.has(k));
       TR.diag = { etapa: 'sob_demanda', ultimo: id, cache: TR.cache.size,
                   quando: new Date().toLocaleTimeString('pt-BR') };
     }
@@ -2147,6 +2203,9 @@
         const pronto = TR.cache.get(id) || jaTem[id];
         if (pronto) {
           TR.cache.set(id, pronto);
+          // "Transcrever tudo" numa conversa longa insere em rajada — sem teto
+          // aqui, uma única rodada já estoura sozinha o limite.
+          _capMap(TR.cache, _TETO_TR, (_v, k) => TR.ocupado.has(k));
           trAtualizarSlot(id);
           TRTUDO.pulados++; TRTUDO.feitos++;
         } else {
@@ -4129,6 +4188,12 @@
   function cancelarAnalise(reqId) {
     if (!reqId) return;
     _cancelados.add(reqId);
+    // Só recebia .add(), nunca saía nada. Cada item é uma string curta, então
+    // o peso é pequeno — mas é crescimento sem teto numa aba que fica aberta o
+    // dia inteiro. Esvaziar é seguro: o Set só serve pra descartar a resposta
+    // de uma análise que o consultor cancelou, e essas respostas chegam em
+    // segundos. Um reqId antigo já não tem mais resposta em voo pra ignorar.
+    _capSet(_cancelados, _TETO_SETS);
     const a = _analises.get(reqId);
     if (a) a.status = 'cancelado';
     try { chrome.runtime.sendMessage({ type: 'cancelar', reqId }); } catch (e) { /* ignore */ }
@@ -5740,6 +5805,18 @@
       iniciadoEm: Date.now(), statusTexto: 'Lendo a conversa…',
     };
     _analises.set(reqId, entrada);
+    // ESTE É O MAIOR DOS TRÊS: cada entrada guarda o resultado COMPLETO da
+    // análise (leitura de IA em imagens e PDFs, docs_extraidos, transcrições)
+    // e, até agora, o caminho de sucesso nunca removia — só o de erro.
+    //
+    // 'rodando' e 'cancelado' NUNCA saem. Despejar uma análise em andamento
+    // faria o painel "perder" a análise e mostrar "Analisar este lead" com ela
+    // ainda rodando por trás — que é exatamente o bug documentado na
+    // sincronizarPainelComConversa ("trava depois de clicar Analisar").
+    // 'cancelado' fica porque a tela precisa dizer que foi cancelada; sem a
+    // entrada, o painel voltaria a oferecer analisar como se nada tivesse sido.
+    _capMap(_analises, _TETO_ANALISES,
+            (a) => a && (a.status === 'rodando' || a.status === 'cancelado'));
     atualizarPilula();
     try {
       const painelRolavel = acharPainelRolavel();
