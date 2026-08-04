@@ -2961,6 +2961,10 @@ def init_db():
         # na conversa de uma varredura em massa que alguem disparou. Quando a
         # conta cresce, "de onde veio isso?" e a primeira pergunta — e ela nao
         # tinha resposta. origem: manual | varredura | varredura_lote | inbox.
+        # QUANTAS VEZES JA TENTAMOS. Timeout e queda de rede sao passageiros:
+        # marcar como erro definitivo joga o lead fora por um soluco de rede, e
+        # ele nunca mais e lido. Com o contador, volta pra fila ate um teto.
+        ("varredura_item", "tentativas", "INTEGER"),
         ("whatsapp_analises", "origem", "TEXT"),
         ("whatsapp_analises", "lote_id", "INTEGER"),
         ("whatsapp_analises", "chat_id", "TEXT"),
@@ -19705,14 +19709,43 @@ def api_whatsapp_varredura_item():
     # isso com falha técnica esconde as duas coisas: quem olha a lista vermelha
     # procurando defeito acha lead não abordado, e desiste de olhar.
     # Aqui vira estado próprio, e a tela transforma em fila de trabalho.
-    estado = 'lido' if ok else ('vazia' if 'vazia' in erro.lower() else 'erro')
-    if estado == 'vazia':
-        erro = 'Você nunca trocou mensagem com esta pessoa.'
+    # TIMEOUT NAO E FALHA, E "TENTE DE NOVO" — e era exatamente o que a tela
+    # dizia, enquanto o sistema tratava como definitivo e nunca mais lia aquele
+    # lead. Soluco de rede, deploy do Railway reiniciando, analise longa demais:
+    # nada disso e motivo pra descartar a pessoa. Volta pra fila.
+    #
+    # COM TETO. Sem contador, um lead que sempre estoura o tempo giraria pra
+    # sempre, segurando a fila atras dele e gastando a cada volta.
+    _passageiro = any(x in erro.lower() for x in (
+        'demorou mais que', 'não respondeu', 'nao respondeu', 'failed to fetch',
+        'timeout', 'networkerror', 'load failed', 'aborted'))
+    MAX_TENTATIVAS = 3
     conn = db()
-    conn.execute("UPDATE varredura_item SET status=?, erro=?, atualizado_em=? WHERE id=?",
-                 (estado, erro or None, _agora_sp(), item_id))
+    _t = 0
+    try:
+        r0 = conn.execute("SELECT COALESCE(tentativas,0) t FROM varredura_item WHERE id=?",
+                          (item_id,)).fetchone()
+        _t = (r0['t'] if r0 else 0) or 0
+    except Exception:
+        _t = 0
+    if ok:
+        estado = 'lido'
+    elif 'vazia' in erro.lower():
+        estado = 'vazia'
+        erro = 'Você nunca trocou mensagem com esta pessoa.'
+    elif _passageiro and _t + 1 < MAX_TENTATIVAS:
+        estado = 'pendente'
+        _t += 1
+        erro = f'Tentativa {_t} falhou ({erro[:80]}) — volta pra fila.'
+    else:
+        estado = 'erro'
+        if _passageiro:
+            _t += 1                      # o contador tem que bater com a frase
+            erro = f'Falhou {_t}x seguidas: {erro[:120]}'
+    conn.execute("UPDATE varredura_item SET status=?, erro=?, tentativas=?, atualizado_em=? WHERE id=?",
+                 (estado, erro or None, _t, _agora_sp(), item_id))
     conn.commit(); close_db(conn)
-    return _wa_cors(jsonify({"ok": True}))
+    return _wa_cors(jsonify({"ok": True, "estado": estado, "tentativas": _t}))
 
 
 @app.route('/crm/varredura/<int:lote_id>/parar', methods=['POST'])

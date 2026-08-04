@@ -333,8 +333,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === 'analisar_varredura') {
-    // Timeout generoso: a analise transcreve audio que ainda nao tem cache.
-    chamarJob('/api/whatsapp/analisar', 'POST', msg.payload || {}, 180000).then(sendResponse);
+    // 300s, nao 180. Conversa longa com audio sem cache passa de tres minutos
+    // com folga — e desistir no meio nao economizava nada: o servidor terminava
+    // a analise e cobrava por ela do mesmo jeito, so que o resultado se perdia
+    // e o lead virava 'erro'. Pagar e jogar fora e o pior dos dois mundos.
+    chamarJob('/api/whatsapp/analisar', 'POST', msg.payload || {}, 300000).then(sendResponse);
     return true;
   }
   if (msg && msg.type === 'metricas') {
