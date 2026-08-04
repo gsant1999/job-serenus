@@ -3,7 +3,7 @@
 
 {% block head %}
 <style>
-  .vr-kpis { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin:16px 0 18px; }
+  .vr-kpis { display:grid; grid-template-columns:repeat(6,1fr); gap:12px; margin:16px 0 18px; }
   @media (max-width:900px) { .vr-kpis { grid-template-columns:repeat(2,1fr); } }
   .vr-kpi { background:var(--panel); border:1px solid var(--borda); border-radius:12px; padding:14px 16px; }
   .vr-kpi .n { font-family:'Sora',sans-serif; font-size:24px; font-weight:700; line-height:1; }
@@ -30,6 +30,12 @@
   .vr-tab tr.vazia td { background:rgba(245,158,11,.05); }
   .vr-nunca { color:var(--amarelo,#f59e0b); font-size:12px; }
   .vr-motivo { color:var(--rosa); font-size:12px; }
+  /* SEM CONVERSA é outra categoria ainda: nem lido, nem erro de leitura, nem
+     fila de trabalho — é lead que NÃO ENTROU porque não havia @lid pra ler.
+     Cor roxa pra não colidir com nenhuma das outras três. */
+  .pill-st.sem_conversa { background:rgba(168,85,247,.16); color:#c4b5fd; }
+  .vr-tab tr.sem_conversa td { background:rgba(168,85,247,.05); }
+  .vr-resolvido { color:var(--teal); font-size:11.5px; font-weight:600; }
   .vr-voltar { color:var(--azul); text-decoration:none; font-size:13px; }
   .vr-btn { border-radius:8px; padding:7px 14px; font-size:12.5px; font-weight:600;
             cursor:pointer; font-family:inherit; border:1px solid var(--borda);
@@ -83,6 +89,7 @@
     <div class="vr-kpi"><div class="n" style="color:var(--amarelo,#f59e0b);">{{ cont.vazia }}</div><div class="l">Nunca abordados</div></div>
     <div class="vr-kpi"><div class="n" style="color:var(--rosa);">{{ cont.erro }}</div><div class="l">Com erro</div></div>
     <div class="vr-kpi"><div class="n" style="color:var(--cinza);">{{ cont.pendente + cont.lendo }}</div><div class="l">Na fila</div></div>
+    <div class="vr-kpi"><div class="n" style="color:#c4b5fd;">{{ cont.sem_conversa }}</div><div class="l">Não entraram</div></div>
   </div>
 
   <div class="vr-barra">
@@ -101,8 +108,33 @@
   {% if cont.erro %}
   <p style="font-size:12.5px;color:var(--cinza);margin:14px 0 6px;">
     Os que deram erro aparecem primeiro, com o motivo. Erro aqui quase sempre é
-    conversa apagada do WhatsApp ou telefone que mudou de dono — não é o lead que sumiu.
+    conversa apagada do WhatsApp, telefone que mudou de dono, ou @lid que o consultor
+    nunca abriu nesta sessão do WhatsApp Web (abrir a conversa uma vez e retomar resolve).
   </p>
+  {% endif %}
+
+  {% if cont.sem_conversa %}
+  <div class="vr-nota" style="border-left-color:#a855f7;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap;">
+      <div>
+        <b style="color:#c4b5fd;">{{ cont.sem_conversa }} lead(s) não entraram nesta varredura</b> —
+        não tinham conversa vinculada (@lid) na hora em que o lote foi criado. Não é erro de leitura:
+        é lead que ainda precisa ser ligado a uma conversa antes de poder ser lido.
+        {% if cont.sem_conversa_resolvido %}
+          <br><b style="color:var(--teal);">{{ cont.sem_conversa_resolvido }}</b> deles já ganharam
+          conversa vinculada desde então — dá pra mandar pra uma fila nova agora.
+        {% else %}
+          <br>Rode <b>"Sincronizar @lid"</b> na extensão, ou junte o lead certo em
+          <a href="/crm/duplicados" style="color:var(--azul);">Telefones repetidos</a>, e volte aqui.
+        {% endif %}
+      </div>
+      <button type="button" class="vr-btn" id="btn-reenfileirar" onclick="reenfileirarResolvidos(this)"
+              {{ 'disabled' if not cont.sem_conversa_resolvido }}
+              style="{{ '' if cont.sem_conversa_resolvido else 'opacity:.5;' }} white-space:nowrap;">
+        Colocar {{ cont.sem_conversa_resolvido or 0 }} na fila
+      </button>
+    </div>
+  </div>
   {% endif %}
 
   <div style="overflow-x:auto;">
@@ -110,10 +142,12 @@
       <thead><tr><th>Lead</th><th>Conversa</th><th>Estado</th><th>Quando</th><th>Motivo</th></tr></thead>
       <tbody>
         {% for i in itens %}
-        <tr class="{{ i.status if i.status in ('erro','vazia') else '' }}">
+        <tr class="{{ i.status if i.status in ('erro','vazia','sem_conversa') else '' }}">
           <td><a href="/crm?lead={{ i.lead_id }}" style="color:var(--azul);text-decoration:none;">{{ i.lead_nome or ('#' ~ i.lead_id) }}</a></td>
-          <td style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--cinza-2);">{{ (i.chat_id or '').split('@')[0] }}</td>
-          <td><span class="pill-st {{ i.status }}">{{ 'nunca abordado' if i.status == 'vazia' else i.status }}</span></td>
+          <td style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--cinza-2);">{{ (i.chat_id or '').split('@')[0] if i.chat_id else '—' }}</td>
+          <td><span class="pill-st {{ i.status }}">{{ 'nunca abordado' if i.status == 'vazia' else ('sem conversa' if i.status == 'sem_conversa' else i.status) }}</span>
+            {% if i.status == 'sem_conversa' and i.ja_resolvido %}<div class="vr-resolvido">já tem conversa agora</div>{% endif %}
+          </td>
           <td style="white-space:nowrap;color:var(--cinza-2);font-size:12px;">{{ i.quando or '—' }}</td>
           <td class="{{ 'vr-nunca' if i.status == 'vazia' else 'vr-motivo' }}">{{ i.erro or '' }}</td>
         </tr>
@@ -137,6 +171,18 @@ async function mudarVarredura(btn, parar){
     if(r.ok) location.reload();
     else { alert(r.erro || 'Não consegui.'); btn.disabled = false; }
   }catch(e){ alert('Não deu: ' + e); btn.disabled = false; }
+}
+
+// Fecha o ciclo do "43 de fora": pega quem estava sem conversa NESTE lote e,
+// pra quem já ganhou @lid desde então, cria uma fila nova — sem voltar pra
+// tela de filtro e refazer tudo.
+async function reenfileirarResolvidos(btn){
+  const t = btn.textContent; btn.disabled = true; btn.textContent = 'Criando fila…';
+  try{
+    const r = await (await fetch(location.pathname + '/reenfileirar-resolvidos', {method:'POST'})).json();
+    if(r.ok){ location.href = '/crm/varredura/' + r.lote_id; }
+    else { alert(r.erro || 'Não consegui.'); btn.disabled = false; btn.textContent = t; }
+  }catch(e){ alert('Não deu: ' + e); btn.disabled = false; btn.textContent = t; }
 }
 </script>
 {% endblock %}

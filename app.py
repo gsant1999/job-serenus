@@ -20005,7 +20005,13 @@ def crm_varredura_criar():
             app.logger.warning(f"[VARREDURA_LOTE] vinculos: {e}")
 
     alvos = [(l['id'], l['nome'] or '', vinc[l['id']]) for l in leads if l['id'] in vinc]
-    fora = len(leads) - len(alvos)
+    # QUEM FICOU DE FORA, NÃO SÓ QUANTOS. Antes o "43 de fora" morria no alerta:
+    # fechou a janela, ninguém mais sabia QUAIS. E "de fora" não é erro só —
+    # normalmente é lead sem conversa vinculada ainda, que "Sincronizar @lid"
+    # resolve. Guardando cada um como item do lote, a lista fica visível e
+    # revisável na mesma tela dos que leram — inclusive depois de ajustar.
+    excluidos = [l for l in leads if l['id'] not in vinc]
+    fora = len(excluidos)
     if not alvos:
         close_db(conn)
         return jsonify({"ok": False, "erro": "Nenhum dos leads filtrados tem conversa vinculada. "
@@ -20054,6 +20060,11 @@ def crm_varredura_criar():
     for lid, nome, cid in alvos:
         conn.execute("""INSERT INTO varredura_item (lote_id, lead_id, chat_id, lead_nome, status, atualizado_em)
                         VALUES (?,?,?,?,?,?)""", (lote_id, lid, cid, nome[:120], 'pendente', _agora_sp()))
+    for l in excluidos:
+        conn.execute("""INSERT INTO varredura_item (lote_id, lead_id, chat_id, lead_nome, status, erro, atualizado_em)
+                        VALUES (?,?,?,?,?,?,?)""",
+                     (lote_id, l['id'], None, (l['nome'] or '')[:120], 'sem_conversa',
+                      'não tinha conversa vinculada (@lid) na hora que a varredura foi criada', _agora_sp()))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True, "lote_id": lote_id, "total": len(alvos), "sem_conversa": fora})
 
@@ -20262,18 +20273,95 @@ def crm_varredura_painel(lote_id):
     itens = conn.execute("""SELECT i.*, u.nome consultor FROM varredura_item i
         LEFT JOIN varredura_lote t ON t.id=i.lote_id
         LEFT JOIN usuarios u ON u.id=t.consultor_id
-        WHERE i.lote_id=? ORDER BY (i.status='erro') DESC, (i.status='vazia') DESC, i.id""",
+        WHERE i.lote_id=?
+        ORDER BY (i.status='sem_conversa') DESC, (i.status='erro') DESC, (i.status='vazia') DESC, i.id""",
         (lote_id,)).fetchall()
     cons = conn.execute("SELECT nome FROM usuarios WHERE id=?", (lote['consultor_id'],)).fetchone()
+    # QUEM CONTINUA SEM CONVERSA, agora — não na hora que o lote foi criado.
+    # O card "Sem conversa vinculada" tem um botão que resolve exatamente isto
+    # (vincular pela extensão ou juntar num lead com @lid), e sem reconferir o
+    # botão "Adicionar à fila" nunca saberia se ainda valia a pena aparecer.
+    ids_sem_conversa = [dict(i)['lead_id'] for i in itens if dict(i)['status'] == 'sem_conversa']
+    ainda_sem = set()
+    if ids_sem_conversa:
+        marc = ','.join(['?'] * len(ids_sem_conversa))
+        try:
+            tem = {r['lead_id'] for r in conn.execute(
+                f"""SELECT DISTINCT w.lead_id FROM wa_chat_lead w
+                    WHERE w.lead_id IN ({marc})
+                      AND NOT EXISTS (SELECT 1 FROM wa_conversa_ignorada g WHERE g.chat_id = w.chat_id)""",
+                ids_sem_conversa).fetchall()}
+            ainda_sem = set(ids_sem_conversa) - tem
+        except Exception as e:
+            app.logger.warning(f"[VARREDURA] reconferência sem_conversa: {e}")
+            ainda_sem = set(ids_sem_conversa)
     close_db(conn)
     itens = [dict(r) for r in itens]
     for i in itens:
         i['quando'] = _fmt_datahora_br(i.get('atualizado_em'))
-    cont = {'pendente': 0, 'lendo': 0, 'lido': 0, 'erro': 0, 'vazia': 0}
+        if i['status'] == 'sem_conversa':
+            i['ja_resolvido'] = i['lead_id'] not in ainda_sem
+    cont = {'pendente': 0, 'lendo': 0, 'lido': 0, 'erro': 0, 'vazia': 0, 'sem_conversa': 0}
     for i in itens:
         cont[i['status']] = cont.get(i['status'], 0) + 1
+    cont['sem_conversa_resolvido'] = sum(1 for i in itens if i.get('ja_resolvido'))
     return render_template('crm_varredura.html', lote=dict(lote), itens=itens, cont=cont,
                            consultor=(cons['nome'] if cons else ''))
+
+
+@app.route('/crm/varredura/<int:lote_id>/reenfileirar-resolvidos', methods=['POST'])
+@login_required
+def crm_varredura_reenfileirar_resolvidos(lote_id):
+    """Pega quem ficou 'sem conversa' neste lote e, pra quem JÁ TEM conversa
+    agora, cria uma fila nova. É o botão que fecha o ciclo do "43 de fora":
+    depois de rodar 'Sincronizar @lid' ou juntar o lead certo, não devolve
+    pra tela de filtro — resolve dali mesmo, só com quem estava faltando."""
+    conn = db()
+    lote = conn.execute("SELECT * FROM varredura_lote WHERE id=?", (lote_id,)).fetchone()
+    if not lote:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lote não encontrado"}), 404
+    pendentes = conn.execute(
+        "SELECT lead_id, lead_nome FROM varredura_item WHERE lote_id=? AND status='sem_conversa'",
+        (lote_id,)).fetchall()
+    if not pendentes:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Este lote não tem lead marcado como sem conversa."}), 400
+    ids = [p['lead_id'] for p in pendentes]
+    marc = ','.join(['?'] * len(ids))
+    vinc = {}
+    for r in conn.execute(f"""SELECT w.lead_id, w.chat_id FROM wa_chat_lead w
+        WHERE w.lead_id IN ({marc})
+          AND NOT EXISTS (SELECT 1 FROM wa_conversa_ignorada i WHERE i.chat_id = w.chat_id)""",
+        ids).fetchall():
+        vinc.setdefault(r['lead_id'], r['chat_id'])
+    alvos = [(p['lead_id'], p['lead_nome'] or '', vinc[p['lead_id']]) for p in pendentes if p['lead_id'] in vinc]
+    if not alvos:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Nenhum destes ganhou conversa vinculada ainda."}), 400
+    uid = session['user_id']
+    alvo_uid = lote['consultor_id'] or uid
+    ja = conn.execute("""SELECT id FROM varredura_lote
+                          WHERE consultor_id=? AND status='rodando'
+                            AND EXISTS (SELECT 1 FROM varredura_item i
+                                        WHERE i.lote_id=varredura_lote.id AND i.status='pendente')
+                          ORDER BY id LIMIT 1""", (alvo_uid,)).fetchone()
+    if ja:
+        close_db(conn)
+        return jsonify({"ok": False, "em_andamento": ja['id'],
+                        "erro": f"Já existe a varredura #{ja['id']} rodando pra este consultor."}), 409
+    cur = conn.execute("""INSERT INTO varredura_lote
+        (consultor_id, criado_por, filtro_txt, total, status, criado_em)
+        VALUES (?,?,?,?,?,?)""",
+        (alvo_uid, session.get('nome') or '', f'ajustados do lote #{lote_id} (estavam sem conversa)',
+         len(alvos), 'rodando', _agora_sp()))
+    novo_id = _last_insert_id(cur)
+    if novo_id is None:
+        novo_id = conn.execute("SELECT id FROM varredura_lote ORDER BY id DESC LIMIT 1").fetchone()['id']
+    for lid, nome, cid in alvos:
+        conn.execute("""INSERT INTO varredura_item (lote_id, lead_id, chat_id, lead_nome, status, atualizado_em)
+                        VALUES (?,?,?,?,?,?)""", (novo_id, lid, cid, nome[:120], 'pendente', _agora_sp()))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True, "lote_id": novo_id, "total": len(alvos)})
 
 
 @app.route('/api/whatsapp/conversas/pendentes', methods=['POST', 'OPTIONS'])
