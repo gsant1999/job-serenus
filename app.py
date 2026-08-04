@@ -20221,7 +20221,7 @@ def api_whatsapp_varredura_proximo():
     # varredura isso faz a tela do consultor pular de conversa em conversa.
     # 3.22 reverte. Abaixo disso a fila nao anda: e melhor a varredura parar e
     # dizer o motivo do que rodar mexendo na tela de quem esta trabalhando.
-    _MIN_VARREDURA = '3.24.0'
+    _MIN_VARREDURA = '3.25.0'
     versao = (request.args.get('versao') or '').strip()
     if not _versao_maior_ou_igual(versao, _MIN_VARREDURA):
         return _wa_cors(jsonify({

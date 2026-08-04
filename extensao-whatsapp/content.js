@@ -168,6 +168,76 @@
   const _TETO_DOC = 100;
   const _TETO_TR = 100;
   const _TETO_SETS = 200;
+
+  // ── SHADOW DOM NAS BOLHAS DA CONVERSA ─────────────────────────────────────
+  //
+  // Os blocos que injetamos DENTRO das bolhas (.job-doc-slot e .job-tr-slot)
+  // passam a viver num Shadow Root. Dois ganhos concretos:
+  //
+  // 1. CSS não vaza nos dois sentidos. O content.css tem 124 KB no escopo
+  //    global do WhatsApp, com classes genéricas (.faixa-bom, .faixa-medio…)
+  //    que podem colidir com as deles. Dentro do shadow, nada disso escapa —
+  //    e o CSS deles também para de mexer no nosso.
+  //
+  // 2. Nossas próprias mutações somem do radar do MutationObserver. Hoje
+  //    existe um bloco defensivo inteiro (o seletor _MEU com closest) só pra
+  //    filtrar as escritas que nós mesmos causamos dentro do #main — o
+  //    comentário lá diz "NAO ESCUTAR A SI MESMA. Era isto que travava o
+  //    WhatsApp". Mutação dentro de shadow root não atravessa a fronteira:
+  //    o observer nem fica sabendo. Deixa de precisar filtrar.
+  //
+  // O QUE ISSO **NÃO** RESOLVE, e é importante não esperar: o React continua
+  // podendo remover o HOSPEDEIRO, porque ele segue sendo um filho estranho
+  // dentro de uma árvore que o React gerencia. O "botão some ao rolar a
+  // conversa" é isso, e quem resolve continua sendo a reinjeção (_jobPronta +
+  // observer), não o Shadow DOM.
+  //
+  // mode:'open' de propósito: permite reencontrar a raiz por host.shadowRoot,
+  // sem precisar de um Map lateral guardando host→raiz — que num código que
+  // já está brigando com memória seria mais uma estrutura pra vazar. O
+  // isolamento de CSS e de mutação é idêntico nos dois modos; 'closed' só
+  // esconderia de scripts externos, e o WhatsApp não tem motivo pra procurar.
+  let _folhaJob = null;
+  const _raizesSemFolha = [];
+
+  (async function _carregarFolhaJob() {
+    try {
+      if (typeof CSSStyleSheet === 'undefined' || !('replace' in CSSStyleSheet.prototype)) return;
+      const txt = await (await fetch(chrome.runtime.getURL('content.css'))).text();
+      const folha = new CSSStyleSheet();
+      await folha.replace(txt);
+      _folhaJob = folha;
+      // UMA folha só, compartilhada por referência entre todas as raízes —
+      // não é uma cópia de 124 KB por bolha.
+      for (const r of _raizesSemFolha) {
+        try { r.adoptedStyleSheets = [folha]; } catch (e) { /* raiz já morreu */ }
+      }
+      _raizesSemFolha.length = 0;
+    } catch (e) { /* fica o <link> de reserva */ }
+  })();
+
+  function _jobRaiz(host) {
+    if (!host || !host.attachShadow) return host;      // sem suporte: comportamento antigo
+    if (host.shadowRoot) return host.shadowRoot;       // já tem: reaproveita
+    let raiz;
+    try { raiz = host.attachShadow({ mode: 'open' }); }
+    catch (e) { return host; }                          // não pôde: não quebra a bolha
+    if (_folhaJob) {
+      try { raiz.adoptedStyleSheets = [_folhaJob]; } catch (e) { /* nada */ }
+    } else {
+      // A folha ainda está carregando. O <link> segura o estilo enquanto isso
+      // (o navegador busca o arquivo uma vez e reusa), e a raiz entra na fila
+      // pra receber a folha compartilhada assim que ela chegar.
+      try {
+        const l = document.createElement('link');
+        l.rel = 'stylesheet';
+        l.href = chrome.runtime.getURL('content.css');
+        raiz.appendChild(l);
+      } catch (e) { /* nada */ }
+      _raizesSemFolha.push(raiz);
+    }
+    return raiz;
+  }
   function _contextoValido() {
     try { return !!(chrome.runtime && chrome.runtime.id); } catch (e) { return false; }
   }
@@ -1417,8 +1487,15 @@
     const sel = window.CSS && window.CSS.escape ? window.CSS.escape(id) : id;
     // So o texto do span e reescrito — re-renderizar o slot inteiro a cada
     // segundo derrubaria listener e foco.
-    document.querySelectorAll('.job-doc-slot[data-msg="' + sel + '"] .job-doc-etapa')
-      .forEach((el) => { el.textContent = (e.etapa || 'lendo') + '… ' + seg + 's'; });
+    //
+    // DOIS PASSOS, e não um seletor só: '.job-doc-slot ... .job-doc-etapa'
+    // atravessaria a fronteira do shadow e não acharia nada — seletor de fora
+    // não enxerga dentro da raiz. Acha o hospedeiro na luz, entra na raiz dele.
+    document.querySelectorAll('.job-doc-slot[data-msg="' + sel + '"]').forEach((host) => {
+      const raiz = host.shadowRoot || host;
+      raiz.querySelectorAll('.job-doc-etapa')
+        .forEach((el) => { el.textContent = (e.etapa || 'lendo') + '… ' + seg + 's'; });
+    });
   }
 
   function _docEtapa(id, etapa) {
@@ -1452,10 +1529,14 @@
       ['click', 'mousedown', 'mouseup', 'pointerdown', 'dblclick'].forEach((ev) =>
         slot.addEventListener(ev, (x) => x.stopPropagation()));
     }
+    // A trava acima fica no HOSPEDEIRO de propósito: clique e mouse são
+    // eventos compostos, então atravessam a fronteira do shadow e chegam aqui
+    // do mesmo jeito. Continua valendo por todos os controles de dentro.
+    const raiz = _jobRaiz(slot);
     const e = DOC.estado.get(id) || {};
     if (e.status === 'lendo') {
       const seg = e.t0 ? Math.round((Date.now() - e.t0) / 1000) : 0;
-      slot.innerHTML = '<div class="job-tr-carregando"><span class="job-doc-etapa">' +
+      raiz.innerHTML = '<div class="job-tr-carregando"><span class="job-doc-etapa">' +
         esc((e.etapa || 'lendo') + '… ' + seg + 's') + '</span></div>';
       return;
     }
@@ -1501,7 +1582,7 @@
           '" target="_blank" rel="noopener" title="Abre a ficha do lead no JOB: os documentos guardados, os campos preenchidos e o botao de baixar a pasta inteira">' +
           _ICO_ABRIR + 'ver no JOB</a>'
         : '';
-      slot.innerHTML = '<div class="job-doc-lido">' +
+      raiz.innerHTML = '<div class="job-doc-lido">' +
         (a.doc_id ? sel : '<span class="job-doc-tipo">' + esc(rot[a.tipo] || a.tipo || 'sem tipo') + '</span>') +
         (a.pessoa ? '<span class="job-doc-pessoa">' + esc(a.pessoa) + '</span>' : '') +
         (a.certeza === 'baixa' ? '<span class="job-doc-duvida">conferir</span>' : '') +
@@ -1527,28 +1608,28 @@
         '</div>' +
       '</div>';
       const salvar = async () => {
-        const nm = slot.querySelector('.job-doc-nome');
-        const par = slot.querySelector('[data-campo="parentesco"]');
+        const nm = raiz.querySelector('.job-doc-nome');
+        const par = raiz.querySelector('[data-campo="parentesco"]');
         const resp = await _safeSendMessage({ type: 'documento_tipo', docId: a.doc_id,
-          tipo: (slot.querySelector('[data-campo="tipo"]') || {}).value,
-          titularidade: (slot.querySelector('[data-campo="titularidade"]') || {}).value,
+          tipo: (raiz.querySelector('[data-campo="tipo"]') || {}).value,
+          titularidade: (raiz.querySelector('[data-campo="titularidade"]') || {}).value,
           parentesco: par && !par.hidden ? par.value : '' }).catch(() => null);
         if (resp && resp.ok) {
           a.nome_final = resp.nome_final;
           if (nm) nm.textContent = resp.nome_final;
         } else if (nm) { nm.textContent = 'não deu pra salvar'; }
       };
-      const rl = slot.querySelector('[data-ac="reler"]');
+      const rl = raiz.querySelector('[data-ac="reler"]');
       if (rl) rl.addEventListener('click', (ev) => {
         ev.stopPropagation();
         DOC.estado.delete(id);
         docLerVarios([id], true);
       });
-      slot.querySelectorAll('.job-doc-sel').forEach((sl) => {
+      raiz.querySelectorAll('.job-doc-sel').forEach((sl) => {
         sl.addEventListener('click', (ev) => ev.stopPropagation());
         sl.addEventListener('change', async (ev) => {
           ev.stopPropagation();
-          const par = slot.querySelector('[data-campo="parentesco"]');
+          const par = raiz.querySelector('[data-campo="parentesco"]');
           if (sl.dataset.campo === 'tipo') a.tipo = sl.value;
           if (sl.dataset.campo === 'titularidade') {
             a.titularidade = sl.value;
@@ -1560,7 +1641,7 @@
             a.parentesco = sl.value;
             // Dica do papel que comprova aquele vinculo. Nao trava nada: quem
             // decide o que a operadora aceita e o consultor.
-            const dica = slot.querySelector('.job-doc-dica');
+            const dica = raiz.querySelector('.job-doc-dica');
             if (dica) dica.textContent = comprova[sl.value] ? ('comprova com: ' + comprova[sl.value]) : '';
           }
           await salvar();
@@ -1569,11 +1650,11 @@
       return;
     }
     if (e.status === 'erro') {
-      slot.innerHTML = '<button class="job-tr-btn falhou" type="button" data-ac="ler" title="' + esc(e.erro || '') + '">' +
+      raiz.innerHTML = '<button class="job-tr-btn falhou" type="button" data-ac="ler" title="' + esc(e.erro || '') + '">' +
         _ICO_DOC + 'Ler documento</button>' +
         '<span class="job-tr-motivo">' + esc(e.erro || '') + '</span>';
     } else {
-      slot.innerHTML = '<button class="job-tr-btn" type="button" data-ac="ler">' + _ICO_DOC + 'Ler documento</button>';
+      raiz.innerHTML = '<button class="job-tr-btn" type="button" data-ac="ler">' + _ICO_DOC + 'Ler documento</button>';
     }
     // BOTAO, nao caixinha de 12px. A caixinha era alvo pequeno demais dentro de
     // uma bolha que o WhatsApp inteira trata como "abrir o arquivo": errar por
@@ -1584,7 +1665,7 @@
       '<button type="button" class="job-tr-btn job-doc-junta' + (marcado ? ' marcado' : '') +
       '" data-ac="juntar" title="Junta este arquivo com outros e le todos numa chamada so — mais rapido e mais barato que um por um.">' +
       (marcado ? _ICO_CHECK + 'Marcado' : _ICO_MAIS + 'Juntar') + '</button>');
-    const j = slot.querySelector('[data-ac="juntar"]');
+    const j = raiz.querySelector('[data-ac="juntar"]');
     if (j) j.addEventListener('click', (ev) => {
       ev.stopPropagation();
       if (DOC.sel.has(id)) { DOC.sel.delete(id); }
@@ -1595,7 +1676,7 @@
       docAtualizarSlot(id);
       _docBarraAtualizar();
     });
-    const b = slot.querySelector('[data-ac="ler"]');
+    const b = raiz.querySelector('[data-ac="ler"]');
     if (b) b.addEventListener('click', (ev) => { ev.stopPropagation(); docLer(id); });
   }
 
@@ -1946,14 +2027,15 @@
   }
 
   function trRenderSlot(slot, id) {
+    const raiz = _jobRaiz(slot);
     const texto = TR.cache.get(id);
     if (TR.ocupado.has(id)) {
-      slot.innerHTML = '<div class="job-tr-carregando">transcrevendo…</div>';
+      raiz.innerHTML = '<div class="job-tr-carregando">transcrevendo…</div>';
       return;
     }
     if (texto === undefined) {
-      slot.innerHTML = '<button class="job-tr-btn" type="button">' + _ICO_TRANSCREVER + 'Transcrever</button>';
-      const b = slot.querySelector('button');
+      raiz.innerHTML = '<button class="job-tr-btn" type="button">' + _ICO_TRANSCREVER + 'Transcrever</button>';
+      const b = raiz.querySelector('button');
       if (b) b.addEventListener('click', (ev) => { ev.stopPropagation(); trTranscrever(id); });
       return;
     }
@@ -1966,19 +2048,19 @@
       // e feio e redundante — o botao ja e a tentativa. O motivo fica no
       // title, discreto, e some assim que der certo.
       const pq = TR.erro.get(id) || '';
-      slot.innerHTML = '<button class="job-tr-btn falhou" type="button" title="' +
+      raiz.innerHTML = '<button class="job-tr-btn falhou" type="button" title="' +
         esc(pq || 'não deu certo — clique pra tentar de novo') + '">' +
         _ICO_TRANSCREVER + 'Transcrever</button>' +
         (pq ? '<span class="job-tr-motivo">' + esc(pq) + '</span>' : '');
-      const b = slot.querySelector('button');
+      const b = raiz.querySelector('button');
       if (b) b.addEventListener('click', (ev) => {
         ev.stopPropagation(); TR.cache.delete(id); TR.erro.delete(id); trTranscrever(id);
       });
       return;
     }
-    slot.innerHTML = '<div class="job-tr-texto"><span class="job-tr-tag">transcricao</span>' +
+    raiz.innerHTML = '<div class="job-tr-texto"><span class="job-tr-tag">transcricao</span>' +
       esc(texto) + '<button class="job-tr-copiar" type="button" title="Copiar">' + _ICO_COPIAR + '</button></div>';
-    const c = slot.querySelector('.job-tr-copiar');
+    const c = raiz.querySelector('.job-tr-copiar');
     if (c) c.addEventListener('click', (ev) => {
       ev.stopPropagation();
       navigator.clipboard.writeText(texto).then(() => {
