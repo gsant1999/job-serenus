@@ -2570,8 +2570,18 @@
   }
 
   async function varreduraUmaConversa(alvo, meta) {
+    // O TETO MUDA COM A MARCA D'ÁGUA. Pedir a conversa por chatId faz a wa-js
+    // CARREGAR aquele tanto de mensagens na memória do WhatsApp Web — e ela
+    // não devolve depois; é assim que o cliente deles funciona (confirmado
+    // lendo _mensagensDoChat: conversa fechada só mantém em memória o que já
+    // carregou). Com marca d'água (leitura de novo, o caso comum numa fila
+    // grande) 120 é folga de sobra pro que chegou de novo; sem ela (primeira
+    // vez que este chat é lido) mantém 400, porque aí é a única chance de
+    // pegar o histórico. Não é micro-otimização: é o que evita que ler uma
+    // fila de 70+ leads acumule o histórico inteiro de todos eles na aba.
+    const teto = alvo.desde_msg_id ? 120 : 400;
     const conv = await _pedirPonte('ler_conversa_de',
-      { chatId: alvo.chat_id, desdeMsgId: alvo.desde_msg_id, limite: 400 }, 60000);
+      { chatId: alvo.chat_id, desdeMsgId: alvo.desde_msg_id, limite: teto }, 60000);
     if (!conv || conv.erro) throw new Error(conv && conv.erro || 'falha_leitura');
     const audios = conv.audios || [];
 
@@ -3739,8 +3749,11 @@
       try {
         // O LEAD VAI JUNTO. O lote sabe de quem e a conversa; sem mandar, a
         // analise era gravada sem dono e nao aparecia em lugar nenhum.
+        // A MARCA D'ÁGUA TAMBÉM VAI JUNTO — antes não ia, e por isso todo lead
+        // deste caminho lia a conversa inteira de novo, mesmo o que já tinha
+        // sido lido no dia anterior.
         await varreduraUmaConversa(
-          { chat_id: item.chat_id },
+          { chat_id: item.chat_id, desde_msg_id: item.desde_msg_id || null },
           { lead_id: item.lead_id, nome: item.nome || '',
             origem: 'varredura_lote', lote_id: item.lote_id });
         ok = true;

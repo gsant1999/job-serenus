@@ -20111,8 +20111,16 @@ def api_whatsapp_varredura_proximo():
                       "Recarregue em chrome://extensions e dê F5 no WhatsApp."}))
 
     conn = db()
-    r = conn.execute("""SELECT i.id, i.lead_id, i.chat_id, i.lead_nome, i.lote_id
+    # A MARCA D'ÁGUA TEM QUE VIAJAR JUNTO. Sem ela, TODO lead deste caminho —
+    # mesmo o que já foi lido ontem — pedia a conversa inteira de novo (até 400
+    # mensagens) pro WhatsApp Web guardar na memória pra sempre (é assim que a
+    # própria wa-js se comporta: o que carrega, fica). Multiplicado por uma
+    # fila de 76 leads, é exatamente o tipo de acúmulo que derruba a aba por
+    # falta de memória — mais provável que concorrência entre rotinas.
+    r = conn.execute("""SELECT i.id, i.lead_id, i.chat_id, i.lead_nome, i.lote_id,
+                                e.ultima_msg_id
         FROM varredura_item i JOIN varredura_lote t ON t.id = i.lote_id
+        LEFT JOIN wa_conversa_estado e ON e.chat_id = i.chat_id
         WHERE t.consultor_id=? AND t.status='rodando' AND i.status='pendente'
         ORDER BY i.id LIMIT 1""", (uid,)).fetchone()
     if not r:
@@ -20136,7 +20144,8 @@ def api_whatsapp_varredura_proximo():
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True, "item": {
         "item_id": r['id'], "lote_id": r['lote_id'], "lead_id": r['lead_id'],
-        "chat_id": r['chat_id'], "nome": r['lead_nome'] or ''},
+        "chat_id": r['chat_id'], "nome": r['lead_nome'] or '',
+        "desde_msg_id": r['ultima_msg_id'] or None},
         "faltam": falta,
         # 25s entre conversas. Ler dezenas em rajada dentro do WhatsApp é
         # padrão de robô — e número derrubado custa muito mais que uma varredura
