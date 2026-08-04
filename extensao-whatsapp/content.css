@@ -444,6 +444,15 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-sug-tag.p-baixa { color: var(--job-txt-fraco); background: var(--job-bg3); }
 .job-sug-txt { font-size: 12.5px; line-height: 1.5; color: var(--job-txt-fraco); }
 .job-sug-txt b { color: var(--job-txt); }
+/* "Falta perguntar": o dado que trava a venda + a pergunta pronta. Clicável
+   inteiro (copia), por isso o cursor e a borda que reage ao hover. */
+.job-falta { border: 1px solid var(--job-borda); border-left-width: 2px; border-radius: 8px;
+  padding: 7px 10px; margin-bottom: 7px; cursor: pointer; background: var(--job-bg2);
+  transition: border-color .15s; }
+.job-falta:hover { border-color: var(--job-acento); }
+.job-falta b { display: block; font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .4px; color: var(--job-txt-fraco); margin-bottom: 2px; }
+.job-falta span { font-size: 12.5px; line-height: 1.45; color: var(--job-txt); }
 /* Linha "dono do lead" — cor por estado, tema-safe (era hex inline) */
 .job-lead-dono { font-size: 11.5px; margin: 4px 0 2px; }
 .job-lead-dono.ok { color: var(--job-sucesso); }

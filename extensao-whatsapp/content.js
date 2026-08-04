@@ -5349,15 +5349,45 @@
       ? '<div class="job-sec">O que a IA leu nos PDFs (' + (ia.documentos_lidos || docsLidos.length) + ')</div>' +
         docsLidos.map((t) => '<div class="job-img-lida">' + _svgIco('documento', 11) + ' ' + esc(t) + '</div>').join('')
       : '';
+    // O QUE FALTA PERGUNTAR. Vem da leitura da conversa: os dados de
+    // qualificação que ainda não existem e travam esta venda, já com a pergunta
+    // escrita. Clicar copia — a distância entre "sei o que falta" e "perguntei"
+    // tem que ser um clique, senão continua faltando.
+    const faltas = (ia.o_que_falta || []).filter((f) => f && f.pergunta);
+    const blocoFalta = faltas.length
+      ? '<div class="job-sec">Falta perguntar (' + faltas.length + ')</div>' +
+        faltas.map((f) =>
+          '<div class="job-falta" data-q="' + esc(f.pergunta) + '" title="Clique para copiar a pergunta">' +
+          '<b>' + esc(f.dado || '') + '</b><span>' + esc(f.pergunta) + '</span></div>').join('')
+      : '';
     return (
       '<div class="job-sec">Leitura da IA <span class="job-ia-badge">Claude</span></div>' +
       '<div class="job-resumo">' + esc(ia.resumo || '') + '</div>' +
       blocoImgs +
       blocoDocs +
       alertas +
+      blocoFalta +
       (acoes ? '<div class="job-sec">Próximas ações (IA)</div>' + acoes : '')
     );
   }
+
+  // Copia a pergunta que falta com um clique. Delegado no documento porque a
+  // ficha é remontada inteira a cada análise — listener por elemento morreria.
+  document.addEventListener('click', (ev) => {
+    const el = ev.target && ev.target.closest && ev.target.closest('.job-falta');
+    if (!el || !el.dataset.q) return;
+    navigator.clipboard.writeText(el.dataset.q).then(() => {
+      const antes = el.style.borderColor;
+      el.style.borderColor = 'var(--job-acento)';
+      const marca = el.querySelector('b');
+      const txt = marca ? marca.textContent : '';
+      if (marca) marca.textContent = 'copiado';
+      setTimeout(() => {
+        el.style.borderColor = antes;
+        if (marca) marca.textContent = txt;
+      }, 1400);
+    }).catch(() => {});
+  }, true);
 
   function ligarBotaoCopiar() {
     const b = document.getElementById('job-copy-btn');

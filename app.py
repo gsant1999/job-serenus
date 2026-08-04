@@ -14341,7 +14341,14 @@ def _wa_extrair_lead(mensagens, nome_contato=''):
           'faixa_etaria_texto': [], 'tipo_contratacao': None, 'cnpj': None, 'tem_cnpj': None, 'plano_ativo': None,
           'operadora_atual': None, 'operadora_interesse': None, 'plano_preferido': None,
           'cobertura_desejada': None, 'copart_pref': None, 'urgencia': None, 'saude': None,
-          'concorrencia': None, 'decisor': 'decisor', 'objecoes': [], 'tags': []}
+          'concorrencia': None, 'decisor': 'decisor', 'objecoes': [], 'tags': [],
+          # QUALIFICAÇÃO QUE SÓ A IA ENXERGA. O regex nunca preenche nenhum destes:
+          # ou o dado vem numa frase que ele não sabe reconhecer ("pago quase
+          # seiscentos", "todo maio vem o aumento"), ou nunca foi pedido a ninguém.
+          # Ficam None até a leitura da conversa preencher — ver _wa_aplicar_conversa_ia.
+          'valor_pago_hoje': None, 'mes_reajuste': None, 'hospital_preferencia': [],
+          'condicoes_saude': None, 'composicao_familiar': [], 'tipo_plano': None,
+          'nascimento_titular': None, 'quem_decide': None, 'tipo_contratacao_crm': None}
     flags = {'gestante_imediato': False, 'downgrade_severo': False, 'mismatch_cobertura': False,
              'uso_imediato_sem_port': False, 'risco_terapias_intensas': False,
              'copart_mismatch': False, 'urgencia_le30': False}
@@ -14979,8 +14986,9 @@ _CLAUDE_SYSTEM_ANALISE = (
     "faixas_etarias (uma entrada por faixa com gente cotada nela) em vez de idades, nunca invente "
     "uma idade exata que a cotação não informa. Só preencha a partir de um anexo que você tem "
     "certeza que É sobre plano de saúde. Deixe vazio o que não conseguir confirmar num anexo desse "
-    "tipo — nunca projete o assunto da conversa sobre uma imagem não relacionada, e nunca repita um "
-    "dado que só apareceu no texto (esse o motor de regras já cobre sozinho). Pra plano_preferido: "
+    "tipo — nunca projete o assunto da conversa sobre uma imagem não relacionada. Este bloco é só "
+    "de ANEXO; o que estiver escrito ou falado na conversa vai no bloco dados_da_conversa. "
+    "Pra plano_preferido: "
     "é o plano que o CLIENTE demonstrou GOSTAR/PREFERIR de verdade (elogiou, disse que quer esse, "
     "escolheu) — NÃO é automaticamente o último que o consultor apresentou nem o último anexo "
     "enviado. Se o cliente não expressou preferência clara, deixe vazio em vez de chutar pelo mais "
@@ -15013,6 +15021,34 @@ _CLAUDE_SYSTEM_ANALISE = (
     "suficiente pra você descrever o que ele é, está legível pra extrair os campos dele: campo em "
     "branco num documento legível é FALHA DE LEITURA sua, não ausência do dado — releia com calma e "
     "preencha tudo o que estiver escrito.\n\n"
+    "QUALIFICAÇÃO — LEIA A CONVERSA INTEIRA (bloco dados_da_conversa): este é o bloco que vira a "
+    "ficha do lead no CRM e decide o follow-up. Aqui você extrai do TEXTO e dos ÁUDIOS "
+    "TRANSCRITOS da conversa, não dos anexos. O motor de regras que te mandaram é burro de "
+    "propósito: ele só acha o que está escrito na forma exata que ele espera. Ele NÃO entende "
+    "'somos eu, minha esposa e as duas crianças' (quatro vidas), 'faço tratamento no coração' "
+    "(condição de saúde), 'pago quase seiscentos' (valor atual), 'todo ano em maio vem o "
+    "aumento' (mês de reajuste), 'contanto que atenda no Vera Cruz' (hospital de preferência). "
+    "Você entende — então PREENCHA. Se o dado está na conversa em qualquer forma, ele é seu.\n"
+    "Vá atrás de cada campo, um por um, antes de dar por encerrado. Releia a conversa procurando "
+    "especificamente o que ficou vazio. Campo vazio quando a resposta está na conversa é FALHA "
+    "SUA, não ausência do dado — e cada campo vazio custa uma pergunta que o consultor vai ter "
+    "que refazer pro cliente que já respondeu.\n"
+    "Ao mesmo tempo: NÃO INVENTE e não deduza por estatística. 'Provavelmente é familiar porque "
+    "citou filho' não vale se ele não disse que quer incluir o filho no plano. Vazio honesto é "
+    "melhor que chute — o que está no CRM vai ser usado como verdade numa ligação.\n"
+    "Cuidados que já deram errado: valor_pago_hoje é o que o cliente paga HOJE no plano dele, "
+    "NUNCA o preço da nossa cotação (esses dois trocados destroem a conta de economia); "
+    "mes_reajuste é o mês de aniversário do plano ATUAL dele; hospital_preferencia é hospital "
+    "que o CLIENTE fez questão (não todo hospital citado na conversa pelo consultor); "
+    "condicoes_saude é o que foi dito sobre saúde de qualquer pessoa do plano, em português "
+    "simples e curto ('mãe faz hemodiálise', 'filho em terapia ABA', 'nada declarado'), sem "
+    "diagnóstico inventado.\n\n"
+    "O QUE FALTA (campo o_que_falta): depois de preencher tudo o que dava, liste os dados de "
+    "qualificação que continuam faltando E que fazem falta pra avançar ESSA venda. É isso que "
+    "vira a próxima pergunta do consultor. Um item por dado, com o nome do dado e a pergunta "
+    "pronta pra mandar (ex: dado 'CNPJ', pergunta 'Me manda o cartão CNPJ da empresa pra eu "
+    "fechar a cotação?'). Não liste o que não importa pra este lead — pedir CNPJ pra pessoa "
+    "física é perder a viagem.\n\n"
     "Julgue também a RELEVÂNCIA COMERCIAL da conversa como um todo: 'alta' = negociação real "
     "de plano de saúde com um cliente em potencial; 'media' = tem interesse mas disperso/incompleto; "
     "'baixa' = conversa desconexa com só menções soltas ao tema; 'nenhuma' = não é conversa de venda "
@@ -15068,6 +15104,56 @@ _CLAUDE_SCHEMA_ANALISE = {
             },
             "required": ["idades", "faixas_etarias", "vidas", "tipo_contratacao", "cidade", "cnpj", "operadora_interesse", "plano_preferido", "valor_cotacao"],
             "additionalProperties": False
+        },
+        "dados_da_conversa": {
+            "type": "object",
+            "description": "Qualificação extraída do TEXTO e dos ÁUDIOS TRANSCRITOS da conversa (não dos anexos). É este bloco que preenche a ficha do lead no CRM. Preencha tudo o que a conversa disser de qualquer forma — o motor de regras só pega frase padronizada, você pega o resto. Use '' / [] só pro que realmente não foi dito.",
+            "properties": {
+                "tem_plano_hoje": {"type": "string", "enum": ["", "sim", "nao", "cancelou_recente"],
+                           "description": "O cliente tem plano de saúde ATIVO hoje? 'cancelou_recente' se perdeu/cancelou há pouco tempo."},
+                "operadora_atual": {"type": "string", "description": "Operadora do plano que ele tem HOJE. Vazio se não tem plano ou não disse."},
+                "valor_pago_hoje": {"type": "string", "description": "Quanto ele paga HOJE no plano atual, só o número (ex: '580,00'). Vale valor aproximado dito por extenso ('quase seiscentos' -> '600,00'). NUNCA o preço da nossa cotação. Vazio se não disse."},
+                "mes_reajuste": {"type": "string", "description": "Mês de aniversário/reajuste do plano ATUAL dele, nome do mês em português (ex: 'maio'). Vazio se não disse."},
+                "hospital_preferencia": {"type": "array", "items": {"type": "string"},
+                           "description": "Hospitais que o CLIENTE fez questão de ter na rede. Só o que ele pediu — não todo hospital citado pelo consultor. [] se não pediu nenhum."},
+                "condicoes_saude": {"type": "string", "description": "O que foi dito sobre saúde de qualquer pessoa que vai entrar no plano, curto e em português simples (ex: 'mãe faz hemodiálise; titular hipertenso'). 'nada declarado' se ele afirmou que são todos saudáveis. Vazio se o assunto não apareceu."},
+                "composicao_familiar": {"type": "array", "items": {"type": "string", "enum": ["Cônjuge", "Filhos", "Pais", "Sócio"]},
+                           "description": "Quem entra no plano além do titular, pelo que a conversa disse. [] se é só ele ou se não deu pra saber."},
+                "tipo_plano": {"type": "string", "enum": ["", "Individual", "Familiar", "Empresarial", "Adesão"],
+                           "description": "Individual = só o titular; Familiar = titular + dependentes; Empresarial = via CNPJ/PME; Adesão = por entidade de classe/sindicato."},
+                "tipo_contratacao": {"type": "string", "enum": ["", "CNPJ", "MEI", "PF", "Adesão"],
+                           "description": "Como vai ser contratado. 'MEI' quando ele disse ser MEI — muda a regra de carência de CNPJ novo."},
+                "cnpj": {"type": "string", "description": "CNPJ dito na conversa, só dígitos. Vale mesmo se veio quebrado em várias mensagens ou ditado num áudio. Vazio se não foi dito."},
+                "cidade": {"type": "string", "description": "Cidade onde o cliente mora / onde vai usar o plano. Vazio se não foi dito."},
+                "idades": {"type": "array", "items": {"type": "integer"},
+                           "description": "Idade de cada pessoa que entra no plano, dita na conversa. Não confunda com tempo ('faz 5 anos que tenho o plano'). [] se não foi dito."},
+                "vidas": {"type": "string", "description": "Quantas pessoas entram no plano, em número (ex: '4'). Conte gente descrita sem número ('eu, minha esposa e as duas crianças' = 4). Vazio se não deu pra saber."},
+                "data_nascimento_titular": {"type": "string", "description": "Data de nascimento do titular dita na conversa, DD/MM/AAAA. Vazio se não foi dita."},
+                "operadora_interesse": {"type": "string", "description": "Operadora que ele quer / que está sendo cotada pra ele. Vazio se não definiu."},
+                "urgencia": {"type": "string", "enum": ["", "ate_30_dias", "31_60_dias", "sem_pressa"],
+                           "description": "Prazo que o CLIENTE demonstrou pra contratar."},
+                "quem_decide": {"type": "string", "description": "Quem bate o martelo, se a conversa disser (ex: 'ele mesmo', 'esposa decide junto', 'sócio precisa aprovar'). Vazio se não deu pra saber."},
+                "confianca": {"type": "string", "enum": ["alta", "media", "baixa"],
+                           "description": "Quão sólido está o que você preencheu neste bloco: 'alta' = dito com todas as letras; 'media' = deduzido do contexto imediato; 'baixa' = conversa confusa/curta demais."}
+            },
+            "required": ["tem_plano_hoje", "operadora_atual", "valor_pago_hoje", "mes_reajuste",
+                         "hospital_preferencia", "condicoes_saude", "composicao_familiar", "tipo_plano",
+                         "tipo_contratacao", "cnpj", "cidade", "idades", "vidas", "data_nascimento_titular",
+                         "operadora_interesse", "urgencia", "quem_decide", "confianca"],
+            "additionalProperties": False
+        },
+        "o_que_falta": {
+            "type": "array",
+            "description": "Dados de qualificação que continuam faltando E que fazem falta pra avançar ESTA venda. Vira a próxima pergunta do consultor. [] se não falta nada relevante.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "dado": {"type": "string", "description": "Nome curto do que falta (ex: 'CNPJ', 'Idades dos dependentes', 'Valor pago hoje')."},
+                    "pergunta": {"type": "string", "description": "A pergunta pronta pro consultor mandar no WhatsApp, no tom dele, curta."}
+                },
+                "required": ["dado", "pergunta"],
+                "additionalProperties": False
+            }
         },
         "documentos_pessoas": {
             "type": "array",
@@ -15128,7 +15214,8 @@ _CLAUDE_SCHEMA_ANALISE = {
                             "description": "Alertas/riscos (ex: cliente sumiu, objeção não resolvida, pediu para parar)."}
     },
     "required": ["resumo", "fase_funil", "relevancia_comercial", "leitura_imagens", "leitura_documentos",
-                 "dados_extraidos_anexos", "documentos_pessoas", "dados_empresa",
+                 "dados_extraidos_anexos", "dados_da_conversa", "o_que_falta",
+                 "documentos_pessoas", "dados_empresa",
                  "proximas_acoes", "sinais_atencao"],
     "additionalProperties": False
 }
@@ -16811,6 +16898,128 @@ def _wa_mapear_midias(conn, imagens, documentos, custo_ja_gasto_usd=0.0):
     return linhas, round(custo, 6), n_img, n_doc, puladas
 
 
+_WA_MESES_NOME = ('janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho',
+                  'agosto', 'setembro', 'outubro', 'novembro', 'dezembro')
+
+
+def _wa_aplicar_conversa_ia(ex, conv):
+    """Traz pro `ex` o que a IA leu no TEXTO da conversa.
+
+    Por que existe: o motor de regras é a única coisa que lia texto, e ele só
+    acha frase no formato que ele espera. "Somos eu, minha esposa e as duas
+    crianças" não vira 4 vidas; "pago quase seiscentos" não vira valor; "todo
+    maio vem o aumento" não vira mês de reajuste. Metade da ficha nascia vazia
+    por isso — e ficha vazia é o consultor repetindo pergunta que o cliente já
+    respondeu.
+
+    PRECEDÊNCIA: quem chama aplica ISTO ANTES do bloco de anexo, de propósito.
+    Um número lido numa cotação vale mais que o mesmo número entendido de uma
+    frase, então o anexo escreve por cima depois. Documento pessoal (RG/CNH)
+    vence os dois, e é aplicado por último.
+
+    Devolve True se mexeu em alguma coisa (pra recalcular o score)."""
+    if not isinstance(conv, dict):
+        return False
+    mexeu = False
+
+    def _txt(k):
+        return str(conv.get(k) or '').strip()
+
+    # Campos que o regex NUNCA preencheu: aqui não há disputa, é tudo ganho.
+    valor = _txt('valor_pago_hoje')
+    if valor:
+        limpo = re.sub(r'[^\d,.]', '', valor)
+        if ',' in limpo and '.' in limpo:
+            limpo = limpo.replace('.', '').replace(',', '.')
+        elif ',' in limpo:
+            limpo = limpo.replace(',', '.')
+        try:
+            v = float(limpo)
+            if 0 < v < 1_000_000:
+                ex['valor_pago_hoje'] = round(v, 2)
+                mexeu = True
+        except ValueError:
+            pass
+    mes = _txt('mes_reajuste').lower()
+    for nome_mes in _WA_MESES_NOME:
+        if nome_mes in mes or (nome_mes == 'março' and 'marco' in mes):
+            ex['mes_reajuste'] = nome_mes.capitalize()
+            mexeu = True
+            break
+    hosp = [str(h).strip() for h in (conv.get('hospital_preferencia') or []) if str(h).strip()]
+    if hosp:
+        ex['hospital_preferencia'] = hosp[:6]
+        mexeu = True
+    if _txt('condicoes_saude'):
+        ex['condicoes_saude'] = _txt('condicoes_saude')[:400]
+        mexeu = True
+    comp = [c for c in (conv.get('composicao_familiar') or [])
+            if c in ('Cônjuge', 'Filhos', 'Pais', 'Sócio')]
+    if comp:
+        ex['composicao_familiar'] = list(dict.fromkeys(comp))
+        mexeu = True
+    if _txt('tipo_plano') in ('Individual', 'Familiar', 'Empresarial', 'Adesão'):
+        ex['tipo_plano'] = _txt('tipo_plano')
+        mexeu = True
+    if re.match(r'^\d{2}/\d{2}/\d{4}$', _txt('data_nascimento_titular')):
+        ex['nascimento_titular'] = _txt('data_nascimento_titular')
+        mexeu = True
+    if _txt('quem_decide'):
+        ex['quem_decide'] = _txt('quem_decide')[:120]
+        mexeu = True
+
+    # Campos que o regex TAMBÉM tenta: a IA só entra onde ele ficou em branco.
+    # Não é humildade — é que o regex, quando acerta, acertou por match literal,
+    # e literal não alucina.
+    if not ex.get('cidade') and _txt('cidade'):
+        ex['cidade'] = _txt('cidade').title()
+        mexeu = True
+    if not ex.get('cnpj'):
+        dig = re.sub(r'\D', '', _txt('cnpj'))
+        if len(dig) == 14:
+            ex['cnpj'] = dig
+            ex['tem_cnpj'] = True
+            mexeu = True
+    if not ex.get('operadora_interesse') and _txt('operadora_interesse'):
+        ex['operadora_interesse'] = _wa_canonizar_operadora(_txt('operadora_interesse'))
+        mexeu = True
+    if not ex.get('operadora_atual') and _txt('operadora_atual'):
+        ex['operadora_atual'] = _wa_canonizar_operadora(_txt('operadora_atual'))
+        mexeu = True
+    if not ex.get('plano_ativo'):
+        ex['plano_ativo'] = {'sim': 'ATIVO', 'nao': 'SEM_PLANO',
+                             'cancelou_recente': 'CANCELADO_RECENTE'}.get(_txt('tem_plano_hoje'))
+        mexeu = mexeu or bool(ex['plano_ativo'])
+    # MEI é PJ pro motor de score, mas NÃO pro CRM: é justamente o MEI que
+    # dispara a conversa dos 6 meses de abertura. O motor recebe PJ, a ficha
+    # recebe MEI — por isso os dois campos, e não um só.
+    if _txt('tipo_contratacao') in ('CNPJ', 'MEI', 'PF', 'Adesão'):
+        ex['tipo_contratacao_crm'] = _txt('tipo_contratacao')
+        mexeu = True
+    if not ex.get('tipo_contratacao'):
+        ex['tipo_contratacao'] = {'CNPJ': 'PJ', 'MEI': 'PJ', 'PF': 'PF',
+                                  'Adesão': 'ADESAO'}.get(_txt('tipo_contratacao'))
+        mexeu = mexeu or bool(ex['tipo_contratacao'])
+    if not ex.get('urgencia'):
+        ex['urgencia'] = {'ate_30_dias': '<=30', '31_60_dias': '31-60',
+                          'sem_pressa': '>=60'}.get(_txt('urgencia'))
+        mexeu = mexeu or bool(ex['urgencia'])
+    if not ex.get('idades'):
+        idades = [i for i in (conv.get('idades') or []) if isinstance(i, int) and 0 <= i <= 120]
+        if idades:
+            ex['idades'] = idades
+            mexeu = True
+    if not ex.get('vidas'):
+        n = re.sub(r'\D', '', _txt('vidas'))
+        if n and 0 < int(n) < 1000:
+            ex['vidas'] = int(n)
+            mexeu = True
+        elif ex.get('idades'):
+            ex['vidas'] = len(ex['idades'])
+            mexeu = True
+    return mexeu
+
+
 def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=None, links=None):
     """Orquestra a análise completa: extração + score oficial + diagnóstico + IA."""
     ex, flags, msgs_lead = _wa_extrair_lead(mensagens, nome_contato)
@@ -16820,7 +17029,10 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
         return {k: ex[k] for k in ('nome', 'cidade', 'idades', 'faixa_etaria_texto', 'vidas', 'tipo_contratacao',
                                     'cnpj', 'tem_cnpj', 'plano_ativo', 'operadora_atual', 'operadora_interesse',
                                     'plano_preferido', 'cobertura_desejada', 'copart_pref',
-                                    'urgencia', 'saude', 'decisor', 'objecoes')}
+                                    'urgencia', 'saude', 'decisor', 'objecoes',
+                                    'valor_pago_hoje', 'mes_reajuste', 'hospital_preferencia',
+                                    'condicoes_saude', 'composicao_familiar', 'tipo_plano',
+                                    'nascimento_titular', 'quem_decide', 'tipo_contratacao_crm')}
 
     extracao = _montar_extracao(ex)
     tinha_chave_claude = bool(os.environ.get('ANTHROPIC_API_KEY', '').strip())
@@ -16838,6 +17050,11 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
     # de recalcular o score final com o dado correto.
     dados_anexo = (ia or {}).get('dados_extraidos_anexos') or {}
     houve_enriquecimento_ia = False
+    # TEXTO PRIMEIRO, ANEXO POR CIMA. A leitura da conversa entra antes de
+    # propósito: o que a IA entendeu de uma frase é bom, mas o que ela LEU numa
+    # cotação é melhor — então o bloco de anexo, logo abaixo, sobrescreve.
+    if _wa_aplicar_conversa_ia(ex, (ia or {}).get('dados_da_conversa')):
+        houve_enriquecimento_ia = True
     if dados_anexo.get('idades'):
         idades_validas = [i for i in dados_anexo['idades'] if isinstance(i, int) and 0 <= i <= 99]
         if idades_validas:
@@ -16896,6 +17113,14 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
         ex['idades'] = idades_docs
         ex['faixa_etaria_texto'] = []
         ex['vidas'] = max(ex.get('vidas') or 0, len(idades_docs))
+        houve_enriquecimento_ia = True
+    # Nascimento do TITULAR: só quando há UM documento pessoal na conversa. Com
+    # dois ou mais não dá pra saber qual é o titular sem chutar, e chutar aqui
+    # coloca a data do dependente no campo que define a faixa etária da proposta.
+    _pes_nasc = [p for p in ((ia or {}).get('documentos_pessoas') or [])
+                 if re.match(r'^\d{2}/\d{2}/\d{4}$', str((p or {}).get('nascimento') or '').strip())]
+    if len(_pes_nasc) == 1:
+        ex['nascimento_titular'] = _pes_nasc[0]['nascimento'].strip()
         houve_enriquecimento_ia = True
     # Valor da cotação: não é campo de score, só passa direto pra quem chamou
     # preencher valor_estimado/observações do lead — não mexe em ex/score.
@@ -21019,7 +21244,7 @@ def _wa_extracao_para_qualificacao(ex):
     return q
 
 
-def _wa_extracao_para_campos(ex, valor_cotacao=None):
+def _wa_extracao_para_campos(ex):
     """Mapeia a extração da conversa pros CAMPOS PERSONALIZADOS do CRM.
 
     Faltava justamente isto: a IA lia a conversa inteira, tirava CNPJ, vidas,
@@ -21035,9 +21260,16 @@ def _wa_extracao_para_campos(ex, valor_cotacao=None):
     if ex.get('cnpj'):
         n = re.sub(r'\D', '', str(ex['cnpj']))
         c['cnpj'] = f"{n[:2]}.{n[2:5]}.{n[5:8]}/{n[8:12]}-{n[12:14]}" if len(n) == 14 else str(ex['cnpj'])
-    if ex.get('tipo_contratacao'):
-        c['tipo_contratacao'] = {'PJ': 'CNPJ / empresarial', 'ADESAO': 'Adesão (PF)',
-                                 'PF': 'Pessoa física'}.get(ex['tipo_contratacao'], ex['tipo_contratacao'])
+    # O campo é um SELECT com opções ["CNPJ","MEI","PF","Adesão"]. Gravava
+    # "CNPJ / empresarial" e "Pessoa física" — valores fora da lista, que a ficha
+    # exibe como "(fora da lista)": legível, mas sujo, e não filtrável.
+    if ex.get('tipo_contratacao_crm'):
+        c['tipo_contratacao'] = ex['tipo_contratacao_crm']
+    elif ex.get('tipo_contratacao'):
+        c['tipo_contratacao'] = {'PJ': 'CNPJ', 'ADESAO': 'Adesão',
+                                 'PF': 'PF'}.get(ex['tipo_contratacao'], ex['tipo_contratacao'])
+    if ex.get('tipo_plano') in ('Individual', 'Familiar', 'Empresarial', 'Adesão'):
+        c['tipo_plano'] = ex['tipo_plano']
     if ex.get('plano_ativo') == 'ATIVO':
         c['tem_plano_hoje'] = 'Sim'
         if ex.get('operadora_atual'):
@@ -21059,17 +21291,55 @@ def _wa_extracao_para_campos(ex, valor_cotacao=None):
         c['numero_vidas'] = str(ex['vidas'])
     elif ex.get('idades'):
         c['numero_vidas'] = str(len(ex['idades']))
+    # composicao_familiar é MULTISELECT (Cônjuge/Filhos/Pais/Sócio). Escrevia
+    # "34 anos, 31 anos" nele — texto que a lista não aceita, dado que morria na
+    # tela. As idades já vivem em numero_vidas/idade; aqui vai QUEM entra.
+    if ex.get('composicao_familiar'):
+        c['composicao_familiar'] = ', '.join(ex['composicao_familiar'])
     if ex.get('idades'):
-        c['composicao_familiar'] = ', '.join(f"{i} anos" for i in sorted(ex['idades']))
+        c['idade_informada'] = ', '.join(f"{i} anos" for i in sorted(ex['idades']))
     elif ex.get('faixa_etaria_texto'):
-        c['composicao_familiar'] = ', '.join(ex['faixa_etaria_texto'])
-    # Valor que ele paga HOJE só vale quando a conversa fala do plano atual —
-    # valor de cotação nossa é outra coisa e iria pro campo errado.
-    if valor_cotacao and ex.get('plano_ativo') == 'ATIVO':
+        c['idade_informada'] = ', '.join(ex['faixa_etaria_texto'])
+    # Campo do tipo 'data' = <input type="date">, que só entende AAAA-MM-DD.
+    # A conversa e os documentos falam DD/MM/AAAA — sem esta conversão o campo
+    # aparece vazio e o próximo save apaga o que a IA tinha achado.
+    if ex.get('nascimento_titular'):
+        _m = re.match(r'^(\d{2})/(\d{2})/(\d{4})$', str(ex['nascimento_titular']).strip())
+        if _m:
+            c['data_nascimento_titular'] = f"{_m.group(3)}-{_m.group(2)}-{_m.group(1)}"
+    # VALOR PAGO HOJE: é o que o CLIENTE paga no plano dele. Antes vinha de
+    # valor_cotacao — que é o preço da NOSSA proposta. Os dois trocados quebram
+    # exatamente a conta que esse campo existe pra fazer (quanto ele economiza).
+    if ex.get('valor_pago_hoje'):
         try:
-            c['valor_pago_hoje'] = f"R$ {float(valor_cotacao):.2f}".replace('.', ',')
+            # Campo do tipo moeda: o input pede "0,00" — o "R$" na frente virava
+            # texto que o próprio campo não sabe reler.
+            c['valor_pago_hoje'] = f"{float(ex['valor_pago_hoje']):.2f}".replace('.', ',')
         except (TypeError, ValueError):
             pass
+    # O campo é do tipo 'mes' — vira <input type="month">, que só aceita AAAA-MM.
+    # Gravar "Maio" ali some da tela E é apagado no próximo save. Como o reajuste
+    # é anual, o que interessa é a PRÓXIMA ocorrência: é ela que dispara a
+    # nutrição ("liga antes do aumento").
+    if ex.get('mes_reajuste'):
+        try:
+            n = _WA_MESES_NOME.index(str(ex['mes_reajuste']).strip().lower()) + 1
+            hoje = datetime.now(TZ_SP)
+            ano = hoje.year if n > hoje.month else hoje.year + 1
+            c['mes_reajuste'] = f"{ano}-{n:02d}"
+        except ValueError:
+            pass
+    if ex.get('hospital_preferencia'):
+        c['hospital_preferencia'] = ', '.join(ex['hospital_preferencia'])
+    # Saúde e quem decide não têm campo próprio no catálogo — vão pras notas da
+    # qualificação, que é onde o consultor lê antes de ligar.
+    notas = []
+    if ex.get('condicoes_saude'):
+        notas.append(f"Saúde: {ex['condicoes_saude']}")
+    if ex.get('quem_decide'):
+        notas.append(f"Quem decide: {ex['quem_decide']}")
+    if notas:
+        c['qualificacao_notas'] = ' · '.join(notas)
     return {k: v for k, v in c.items() if str(v or '').strip()}
 
 
@@ -21569,8 +21839,7 @@ def api_whatsapp_analisar():
         # corrige o consultor. fonte='ia' deixa rastreável quem escreveu o quê.
         campos_ia, campos_gravados = {}, []
         try:
-            campos_ia = _wa_extracao_para_campos(an['extracao'], (an.get('valor_cotacao') or {}).get('valor')
-                                                 if isinstance(an.get('valor_cotacao'), dict) else None)
+            campos_ia = _wa_extracao_para_campos(an['extracao'])
             for chave, valor in campos_ia.items():
                 if gravar_campo_lead(conn, lead_id, chave, valor, fonte='ia', so_se_vazio=True):
                     campos_gravados.append(chave)
