@@ -427,7 +427,8 @@
     </div>
     <div class="pl-hero-sub">
       {% if lead.sub_status %}<span>{{ lead.sub_status }}</span>{% endif %}
-      {% if saude.idade_txt %}<span title="Tempo desde a última mudança de etapa ou sub-status">parado há {{ saude.idade_txt }}</span>{% endif %}
+      {# idade_txt já vem com o "há" ("há 11d") — repetir aqui gerava "parado há há 11d". #}
+      {% if saude.idade_txt %}<span title="Tempo desde a última mudança de etapa ou sub-status">parado {{ saude.idade_txt }}</span>{% endif %}
       {% if lead.responsavel_nome %}<span>{{ lead.responsavel_nome }}</span>{% endif %}
       {% if lead.telefone %}<span>{{ lead.telefone }}</span>{% endif %}
     </div>
@@ -541,7 +542,11 @@
     {% endif %}
     {% if wa %}
     <div class="pl-vazio" style="margin-top:12px;">
-      {% for w in wa %}{{ w.msgs }} mensagem(ns) lidas em {{ w.curto }}{{ ' · última em ' ~ w.analisado_em|datahora_br if w.analisado_em }}<br>{% endfor %}
+      {# SÓ MOSTRA SE TIVER O QUE DIZER. Este contador vive em wa_conversa_estado
+         e zera quando a marca d'água é limpa (releitura) — e aí a linha dizia
+         "0 mensagens lidas" logo abaixo de uma tabela somando 190. Duas
+         verdades na mesma tela é pior que uma informação a menos. #}
+      {% for w in wa %}{% if w.msgs %}{{ w.msgs }} mensagem(ns) lidas em {{ w.curto }}{{ ' · última em ' ~ w.analisado_em|datahora_br if w.analisado_em }}<br>{% endif %}{% endfor %}
     </div>
     {% endif %}
   </div>
