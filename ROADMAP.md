@@ -55,6 +55,21 @@ Legenda: [ ] pendente · [~] em andamento · [x] feito · (?) aguardando decisã
 - [x] Custos com justificativa: quem pagou (Gabriel/Guilherme/Karen/Danilo/Bianca/Caixa) + fonte (Caixa ou Terceiro) + comprovante anexado
 - [x] Comprovante pelo celular: link tokenizado /u/<token> com QR — abre a câmera, fotografa e sobe direto
 
+### PRD Módulo Financeiro (Gabriel/Karen, jul/2026) — `knowledge/prd-financeiro.docx.md`
+
+- [x] **Fase 1** (04/08/2026, commit `0540827`): campos centro_custo / tipo_lancamento / canal_midia; filtro de faixa de vencimento (01-10, 11-20, 21-31, próximos 7 dias, VENCIDAS) + centro + status + tipo + meio de pagamento; status **Vencido calculado** (nunca gravado — gravar viraria mentira com data de validade); calendário de vencimentos por dia
+- [ ] **BACKFILL — bloqueia a Fase 2.** Medido em produção 04/08/2026: **51 de 51 lançamentos sem `centro_custo` E sem `tipo_lancamento`**; 14 dos 51 também sem `data_vencimento`. Total parado: R$ 28.156,60 (37 custos = R$ 21.156,60 + 14 fixos = R$ 7.000,00).
+  Consequência: os dashboards da Fase 2 (pizza por centro, mídia ÷ receita, Fixo × Ferramentas × Mídia) saem **vazios ou pela metade** até isso ser preenchido — não é um detalhe cosmético, é o eixo de corte de todos eles.
+  Padrão sugerido (mutirão com sugestão por palavra-chave + confirmação em lote, igual ao mutirão de motivo de perda do CRM). Mapeamento inferido das planilhas e das descrições reais:
+  - **Estrutura** — ALUGUEL (R$ 8.250 em 3 lanç.), CONDOMINIO (R$ 685,78), MOVEIS FREITAS (3× R$ 1.167), MOVEIS PARAISO (4× R$ 600), FRIGOBAR, MESA RECEPÇÃO
+  - **Pessoal** — FIXO JULIANA AZEVEDO (6× R$ 500), FIXO JENIFER (4× R$ 500), demais "FIXO <nome>"
+  - **Ferramentas** — hosting, Agger, WaSpeed, Funenseg
+  - **Mídia** — Meta e Google Ads (+ `canal_midia`); é o bloco de 64% do gasto segundo o PRD
+  - **Impostos** — a confirmar; ADVOGADO GABRIEL (2× R$ 1.250) provavelmente Estrutura, não Imposto — **perguntar antes de assumir**
+- [ ] **Fase 2** — dashboards de despesa e receita, fluxo de caixa projetado, DRE gerencial (aproveitar a aba DRE que já existe)
+- [ ] **Fase 3** — dashboards de mídia (CPL, CAC, ROI/ROAS, payback), alertas automáticos, indicadores (runway, break-even). Depende da conversão offline/gclid pra CPL e CAC fazerem sentido
+- (?) PRD recomenda **centralizar a mídia num único meio de pagamento** — hoje está em 3 cartões (Porto, BB, Renner), o que dificulta conciliação. Decisão do Gabriel, não técnica
+
 ## Estratégicos (aguardando lapidação com o Guilherme)
 
 - (?) **RevOps de raiz** — correção 03/07: já existe uma base real, não é do zero. `/crm/painel` (desde 28/06) já mostra KPIs (total, abertos, ganhos, perdidos, taxa de conversão, sem 1º contato, pipeline estimado), funil por etapa, leads por origem com conversão, ranking de consultores e motivos de perda, com filtro por período. O que falta pra virar "funil único MKT→Vendas→CS de raiz": estender a medição pra além do CRM (cotação → proposta → pós-venda/renovação), metas por etapa, receita por canal de origem
