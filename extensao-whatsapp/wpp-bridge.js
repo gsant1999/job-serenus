@@ -19,6 +19,57 @@
   if (window.__jobWppBridge) return;
   window.__jobWppBridge = true;
 
+  // ── TRAVA DE NAVEGAÇÃO ────────────────────────────────────────────────────
+  //
+  // POR QUE EXISTE: em 04/08/2026 eu (Claude) coloquei openChatBottom dentro de
+  // _mensagensDoChat pra resolver leitura de conversa @lid nunca aberta,
+  // afirmando que ele "carrega na memória sem trocar a tela". Está errado —
+  // ele NAVEGA (abrirChat usa exatamente esse método justamente pra abrir
+  // conversa). Numa varredura de dezenas de leads, a tela do consultor passou
+  // a pular de conversa em conversa enquanto ele trabalhava.
+  //
+  // O comentário "não use openChatBottom aqui" não impede ninguém. Isto impede.
+  //
+  // COMO FUNCIONA: enquanto uma rotina de LEITURA está rodando, _lendo > 0 e
+  // nenhuma navegação passa. Contador (não booleano) porque leituras podem se
+  // sobrepor — booleano seria zerado pela primeira que terminasse, liberando a
+  // trava com outra ainda em curso. try/finally garante que nunca fica presa.
+  let _lendo = 0;
+
+  async function _comLeitura(fn) {
+    _lendo++;
+    try { return await fn(); } finally { _lendo--; }
+  }
+
+  // Clique humano que cai no meio de uma leitura não pode ser descartado: o
+  // consultor pediu, e a alternativa (recusar) faz o site abrir o wa.me numa
+  // aba nova — justamente o que o botão existe pra evitar. Leitura dura
+  // segundos, então esperar um pouco resolve sem perder a intenção dele.
+  async function _esperarLeitura(tetoMs) {
+    const ate = Date.now() + (tetoMs || 4000);
+    while (_lendo > 0 && Date.now() < ate) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return _lendo === 0;
+  }
+
+  // ÚNICO caminho de navegação da ponte. Qualquer função que queira trocar a
+  // conversa da tela passa por aqui — e aqui a trava é conferida.
+  async function _navegarConversa(alvo) {
+    if (_lendo > 0) {
+      const liberou = await _esperarLeitura(4000);
+      if (!liberou) {
+        console.warn('[JOB] navegação recusada: leitura em andamento (alvo ' + alvo + ')');
+        return { ok: false, erro: 'leitura_em_andamento' };
+      }
+    }
+    if (!window.WPP || !window.WPP.chat) return { ok: false, erro: 'wpp_ausente' };
+    if (window.WPP.chat.openChatBottom) await window.WPP.chat.openChatBottom(alvo);
+    else if (window.WPP.chat.openChat) await window.WPP.chat.openChat(alvo);
+    else return { ok: false, erro: 'sem_metodo_navegacao' };
+    return { ok: true };
+  }
+
   // FileReader em vez de montar a string na mao.
   //
   // A versao anterior concatenava o audio inteiro em pedacos de 32 KB e chamava
@@ -992,8 +1043,14 @@
     if (dig) alvos.push((dig.startsWith('55') ? dig : '55' + dig) + '@c.us');
     for (const alvo of alvos) {
       try {
-        if (window.WPP.chat.openChatBottom) await window.WPP.chat.openChatBottom(alvo);
-        else await window.WPP.chat.openChat(alvo);
+        // Passa pela trava: se uma leitura estiver rodando, espera ela sair
+        // antes de trocar a tela (e desiste se demorar demais). É a mesma
+        // porta que as rotinas de varredura encontram fechada.
+        const nav = await _navegarConversa(alvo);
+        if (!nav.ok) {
+          if (nav.erro === 'leitura_em_andamento') return { erro: nav.erro };
+          continue;   // método ausente/wpp fora: tenta o próximo alvo
+        }
         // Deixa a mensagem ESCRITA na caixa, sem enviar. O consultor revisa e
         // manda — que e como ele ja trabalhava com o link wa.me?text=. Enviar
         // sozinho seria mudar o que o botao faz sem ninguem pedir.
@@ -1161,11 +1218,30 @@
     } catch (e) { return { inbound: false }; }
   }
 
+  // TIPOS QUE SÓ LEEM. Enquanto um deles roda, _navegarConversa recusa —
+  // então nenhuma leitura consegue trocar a tela do consultor, nem por
+  // engano de quem editar essas funções depois.
+  //
+  // A marcação fica AQUI, no despacho, e não dentro de cada função: é um lugar
+  // só em vez de treze, e um tipo de leitura novo que alguém adicione amanhã
+  // só precisa entrar nesta lista pra já nascer protegido.
+  //
+  // 'abrir_chat', 'enviar_*' e 'apagar_conversa' NÃO entram: são ações que o
+  // consultor pediu, e navegar é o trabalho delas.
+  const _TIPOS_LEITURA = new Set([
+    'baixar_audios', 'listar_audios', 'listar_conversas_dia', 'listar_todas_conversas',
+    'ler_conversa_de', 'baixar_audios_ids', 'baixar_midia_ids', 'canario',
+    'baixar_documentos', 'ler_mensagens', 'ler_conversa_completa',
+    'obter_telefone', 'obter_meu_numero', 'obter_chat_id', 'checar_inbound',
+  ]);
+
   window.addEventListener('message', async (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
     if (!d || d.source !== 'JOB_EXT_REQ') return;
     let resp;
+    const _ehLeitura = _TIPOS_LEITURA.has(d.tipo);
+    if (_ehLeitura) _lendo++;
     try {
       if (d.tipo === 'baixar_audios') resp = await baixarAudios(d.limite);
       else if (d.tipo === 'listar_audios') resp = await listarAudios();
@@ -1188,6 +1264,13 @@
       else if (d.tipo === 'checar_inbound') resp = await checarInbound(d.chatId);
       else return;
     } catch (e) { resp = { erro: 'excecao' }; }
+    finally {
+      // SEMPRE solta a trava — inclusive no `return` do else (tipo
+      // desconhecido) e em qualquer exceção. Contador preso em 1 travaria a
+      // navegação pro resto da vida da aba, e o consultor ficaria com o botão
+      // "Abrir conversa" morto sem nenhuma pista do motivo.
+      if (_ehLeitura) _lendo--;
+    }
     resp.source = 'JOB_EXT_RESP';
     resp.reqId = d.reqId;
     window.postMessage(resp, '*');
