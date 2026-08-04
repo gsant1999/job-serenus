@@ -23093,6 +23093,35 @@ def crm():
 
     etiquetas_lead = _etiquetas_dos_leads(conn, [l['id'] for l in leads])
 
+    # SEM CHAMAR: lead parado em "Novo Lead" há mais de um dia sem NINGUÉM ter
+    # falado com ele. É a falha mais cara do funil e a mais fácil de não ver —
+    # o card fica ali, com cara de novo, enquanto envelhece.
+    #
+    # CALCULADO, não gravado: some sozinho no instante em que alguém fala com a
+    # pessoa ou o card muda de etapa. Etiqueta gravada precisaria de alguém pra
+    # tirar, e etiqueta que sobra depois de resolvida vira ruído — em pouco
+    # tempo ninguém mais olha pra nenhuma.
+    #
+    # "Falar" é atividade de gente: whatsapp, ligação, e-mail, nota, atividade.
+    # Criação e movimentação automática não contam, senão todo lead nasce
+    # atendido e a etiqueta nunca apareceria.
+    sem_chamar = {}
+    _ids_novo = [l['id'] for l in leads if (l['etapa'] or '') == 'lead_novo']
+    if _ids_novo:
+        try:
+            _m = ','.join(['?'] * len(_ids_novo))
+            _lim = (datetime.now(TZ_SP) - timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+            for r in conn.execute(f"""SELECT l.id FROM crm_leads l
+                WHERE l.id IN ({_m})
+                  AND CAST(l.criado_em AS TEXT) < ?
+                  AND NOT EXISTS (SELECT 1 FROM crm_atividades a WHERE a.lead_id = l.id
+                                  AND a.tipo IN ('whatsapp','atividade','nota','email','ligacao'))""",
+                _ids_novo + [_lim]).fetchall():
+                d = _saude_card(None, None, next((x['criado_em'] for x in leads if x['id'] == r['id']), None))
+                sem_chamar[r['id']] = d.get('dias') or 1
+        except Exception as e:
+            app.logger.warning(f"[SEM_CHAMAR] {e}")
+
     # @lid de cada card, numa query só. O vínculo conversa↔lead precisa ser
     # reconhecível de relance no quadro, não só dentro da ficha.
     wa_do_lead = {}
@@ -23232,6 +23261,7 @@ def crm():
                            trava_falta=trava_falta,
                            quadros=quadros, quadro_atual=f_quadro, quadro_total=quadro_total,
                            qs_filtros=qs_filtros, etapas_todas=carregar_etapas_crm(),
+                           sem_chamar=sem_chamar,
                            wa_do_lead=wa_do_lead)
 
 

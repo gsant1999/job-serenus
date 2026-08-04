@@ -105,6 +105,17 @@
   .lead-esfriando-tag { font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:8px; white-space:nowrap; }
   .card-esfriando .lead-esfriando-tag { background:rgba(250,204,21,.22); color:#eab308; }
   .card-frio .lead-esfriando-tag { background:rgba(244,63,94,.22); color:#f43f5e; }
+  /* Cor PRÓPRIA, diferente de "parado": parado é sobre prazo de etapa; este é
+     sobre ninguém ter falado com a pessoa. Duas falhas diferentes não podem
+     ter a mesma cara, senão viram a mesma coisa aos olhos de quem varre a
+     coluna. Ponto pulsando: é a única do card que pede ação hoje. */
+  .lead-sem-chamar { font-size:9.5px; font-weight:700; padding:2px 7px 2px 6px;
+    border-radius:8px; white-space:nowrap; display:inline-flex; align-items:center; gap:5px;
+    background:rgba(244,63,94,.16); color:#fb7185; border:1px solid rgba(244,63,94,.35); }
+  .lead-sem-chamar::before { content:''; width:5px; height:5px; border-radius:50%;
+    background:#fb7185; animation:semChamarPulso 1.8s ease-in-out infinite; }
+  @keyframes semChamarPulso { 0%,100% { opacity:1; } 50% { opacity:.25; } }
+  @media (prefers-reduced-motion: reduce) { .lead-sem-chamar::before { animation:none; } }
   .wa-id { display:flex; flex-direction:column; gap:2px; background:var(--panel-2);
            border:1px solid var(--borda); border-radius:8px; padding:8px 10px; margin-bottom:6px; }
   .wa-id-top { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
@@ -778,6 +789,18 @@
             {% if lead.trafego == 'Pago' %}<span class="lead-trafego pago" title="Veio de anúncio pago (Google Ads)">PAGO</span>
             {% elif lead.trafego == 'Orgânico' %}<span class="lead-trafego org" title="Veio de tráfego orgânico (não pago)">Orgânico</span>{% endif %}
             {% if esf.texto %}<span class="lead-esfriando-tag" title="Tempo sem avançar de etapa ou de sub-status — prazo definido na etapa">{{ esf.texto }}</span>{% endif %}
+            {# SEM CHAMAR — a falha mais cara do funil e a mais fácil de não ver:
+               o card fica em "Novo Lead" com cara de novo enquanto envelhece.
+               Calculada, não gravada: some sozinha no instante em que alguém
+               fala com a pessoa ou o card sai da etapa. Etiqueta gravada
+               precisaria de alguém pra tirar — e etiqueta que sobra depois de
+               resolvida vira ruído, até ninguém mais olhar pra nenhuma. #}
+            {% if sem_chamar.get(lead.id) %}
+            <span class="lead-sem-chamar"
+                  title="Está em Novo Lead há {{ sem_chamar[lead.id] }} dia(s) e ninguém falou com esta pessoa. Some sozinha quando você registrar um contato ou mover o card.">
+              Sem chamar {{ sem_chamar[lead.id] }}d
+            </span>
+            {% endif %}
             {# Tempo desde a ÚLTIMA MUDANÇA de sub-status. Diferente da tarja de
                "parado": aquela conta o prazo da etapa, esta diz há quanto tempo o
                andamento não mexe. Um lead que trocou de sub-status hoje está sendo
