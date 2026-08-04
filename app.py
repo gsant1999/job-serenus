@@ -1,6 +1,6 @@
 # HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
 import os, sqlite3, json, hashlib, secrets, re, threading, time, mimetypes
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response, g
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response, g, render_template_string
 from datetime import datetime, timedelta, date
 from functools import wraps
 from dateutil.relativedelta import relativedelta
@@ -10793,6 +10793,22 @@ _ADS_MAX_TENTATIVAS = int(os.environ.get('GOOGLE_ADS_MAX_TENTATIVAS', '4') or 4)
 _ADS_JANELA_DIAS = int(os.environ.get('GOOGLE_ADS_JANELA_DIAS', '90') or 90)
 
 
+def _ads_refresh_token_guardado():
+    """Refresh token gerado pela autorização feita DENTRO do JOB.
+
+    Existe porque o token do env foi emitido só com o escopo de leitura do
+    Google Ads, e entregar conversão exige um segundo escopo. Trocar isso pelo
+    env significaria refazer o passo à mão toda vez que o Google expirar o
+    consentimento; guardado aqui, virar a chave é um botão."""
+    try:
+        conn = db()
+        r = conn.execute("SELECT valor FROM config WHERE chave='google_ads_refresh_token'").fetchone()
+        close_db(conn)
+        return ((r['valor'] if r else '') or '').strip()
+    except Exception:
+        return ''
+
+
 def _ads_config():
     """Credenciais do Google Ads via env. Devolve (config, faltando) — a lista do
     que falta é o que a tela de diagnóstico mostra, em vez de só falhar calada."""
@@ -10810,6 +10826,13 @@ def _ads_config():
         if not v:
             faltando.append(env)
         cfg[k] = v
+    # O token autorizado no JOB tem os DOIS escopos e por isso vence o do env,
+    # que só sabe ler. Se ninguém autorizou ainda, fica o do env.
+    guardado = _ads_refresh_token_guardado()
+    if guardado:
+        cfg['refresh_token'] = guardado
+        if 'GOOGLE_ADS_REFRESH_TOKEN' in faltando:
+            faltando.remove('GOOGLE_ADS_REFRESH_TOKEN')
     # Só dígitos: o Google mostra o id como 123-456-7890 e é fácil colar assim
     cfg['customer_id'] = re.sub(r'\D', '', cfg['customer_id'])
     cfg['login_customer_id'] = re.sub(r'\D', '', (os.environ.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID') or ''))
@@ -11445,48 +11468,33 @@ def enviar_conversoes_ads(limite=200, so_simular=False):
         headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
         r = _requests.post(f"{_DM_API}/events:ingest", headers=headers, timeout=45,
                            json={'destinations': _dm_destino(cfg), 'events': lote})
+        # TUDO OU NADA. A Data Manager API não tem envio parcial: um evento
+        # inválido derruba o lote inteiro com 400. Então não existe "quem
+        # falhou" — ou entrou tudo, ou nada entrou. Tratar como parcial marcaria
+        # como enviada uma conversão que o Google nunca recebeu.
         if r.status_code != 200:
             raise RuntimeError(_dm_erro_legivel(r.status_code, r.text))
         corpo = r.json() or {}
-        # A Data Manager devolve os erros por evento em `errors`, com o índice do
-        # evento. Mesma regra do caminho antigo: sem saber QUEM falhou, ninguém é
-        # promovido a 'enviada' — que é estado irreversível.
+        # E 200 NÃO QUER DIZER QUE ENTROU. O processamento é assíncrono: o que
+        # volta é um requestId, e o resultado real só sai depois (até 24h) em
+        # requestStatus:retrieve. Guardo o requestId pra ser possível auditar —
+        # sem ele, "enviada" seria uma palavra sem prova nenhuma por trás.
+        req_id = (corpo.get('requestId') or '').strip()
+        avisos = [str(w)[:150] for w in (corpo.get('fieldWarnings') or corpo.get('warnings') or [])]
         falhou_idx = set()
-        msgs_err = []
-        for err in (corpo.get('errors') or []):
-            msgs_err.append(str(err.get('errorMessage') or err.get('message') or err)[:200])
-            idx = err.get('eventIndex')
-            if idx is None:
-                idx = ((err.get('location') or {}).get('eventIndex'))
-            if idx is not None:
-                try:
-                    falhou_idx.add(int(idx))
-                except (TypeError, ValueError):
-                    pass
-        pfe = {'message': ' · '.join(msgs_err)} if msgs_err else {}
-        msg_pf = (pfe.get('message') or '')[:400]
-        # HOUVE ERRO MAS NÃO SEI DE QUEM. Se o Google reclamou e nenhum índice
-        # veio no formato esperado, o lote inteiro seria marcado 'enviada' —
-        # e 'enviada' é irreversível (a guarda de reenvio nunca mais deixa subir).
-        # Marcar errado pra sempre é pior que tentar de novo: nesse caso ninguém
-        # é promovido, todos voltam pra fila com o motivo.
-        cego = bool(pfe) and not falhou_idx
+        msg_pf = (' · '.join(avisos))[:400] if avisos else ''
         agora = _agora_sp()
-        for i, c in enumerate(pend):
-            if cego:
-                conn.execute("""UPDATE google_ads_conversoes SET status='pendente',
-                                tentativas=COALESCE(tentativas,0)+1, detalhe=? WHERE id=?""",
-                             (f"lote recusado sem dizer qual: {msg_pf}"[:400], c['id']))
-                resumo['falhas'] += 1
-            elif i in falhou_idx:
-                conn.execute("""UPDATE google_ads_conversoes SET status='falha',
-                                tentativas=COALESCE(tentativas,0)+1, detalhe=? WHERE id=?""",
-                             (msg_pf or 'recusada pelo Google', c['id']))
-                resumo['falhas'] += 1
-            else:
-                conn.execute("""UPDATE google_ads_conversoes SET status='enviada',
-                                enviado_em=?, detalhe='ok' WHERE id=?""", (agora, c['id']))
-                resumo['enviadas'] += 1
+        # O lote inteiro foi aceito (o 400 já teria caído no except). O detalhe
+        # guarda o requestId porque é a ÚNICA forma de perguntar depois ao Google
+        # o que aconteceu com estas conversões.
+        det = (f"aceito · requestId {req_id}" if req_id else 'aceito')
+        if msg_pf:
+            det += ' · avisos: ' + msg_pf
+        for c in pend:
+            conn.execute("""UPDATE google_ads_conversoes SET status='enviada',
+                            enviado_em=?, detalhe=? WHERE id=?""", (agora, det[:400], c['id']))
+            resumo['enviadas'] += 1
+        resumo['request_id'] = req_id
         if msg_pf:
             resumo['erros'].append(msg_pf)
         conn.commit()
@@ -29657,6 +29665,95 @@ def _ads_testar_conexao():
         return {'ok': False, 'passos': passos, 'conta': conta}
 
     return {'ok': True, 'passos': passos, 'conta': conta, 'acao': acao_nome}
+
+
+def _ads_redirect_uri():
+    """Endereço de volta da autorização. Tem que bater LETRA POR LETRA com o que
+    está cadastrado no cliente OAuth do Google — é a causa do redirect_uri_mismatch."""
+    base = (os.environ.get('APP_URL') or 'https://job-serenus-production.up.railway.app').strip().rstrip('/')
+    return base + '/google-ads/autorizado'
+
+
+@app.route('/google-ads/autorizar')
+@login_required
+@admin_required
+def google_ads_autorizar():
+    """Manda pro Google pedindo os DOIS escopos e volta com o refresh token.
+
+    Por que dentro do JOB: o cliente OAuth da Serenus é do tipo 'aplicativo Web',
+    então não aceita http://localhost — o caminho de linha de comando morre com
+    redirect_uri_mismatch. Aqui o endereço de volta é fixo e conhecido, e o
+    token cai direto no lugar certo, sem ninguém copiar segredo pra lugar nenhum."""
+    cfg, _ = _ads_config()
+    if not cfg['client_id']:
+        return "Falta GOOGLE_ADS_CLIENT_ID no servidor.", 400
+    from urllib.parse import urlencode
+    return redirect('https://accounts.google.com/o/oauth2/v2/auth?' + urlencode({
+        'client_id': cfg['client_id'],
+        'redirect_uri': _ads_redirect_uri(),
+        'response_type': 'code',
+        'access_type': 'offline',
+        # prompt=consent é obrigatório aqui: sem ele o Google devolve só o
+        # access_token quando já existe consentimento, e o refresh_token —
+        # que é o que precisamos guardar — não vem.
+        'prompt': 'consent',
+        'include_granted_scopes': 'true',
+        'scope': ' '.join(_ADS_ESCOPOS),
+    }))
+
+
+@app.route('/google-ads/autorizado')
+@login_required
+@admin_required
+def google_ads_autorizado():
+    """Volta do Google: troca o código por refresh token e guarda."""
+    erro = (request.args.get('error') or '').strip()
+    codigo = (request.args.get('code') or '').strip()
+    def pagina(titulo, corpo, cor='var(--rosa)'):
+        return render_template_string(
+            """{% extends 'base.html' %}{% block content %}<div class="page">
+            <div class="card"><div class="card-header"><h3>{{ t }}</h3></div>
+            <div style="padding:0 16px 18px; font-size:13.5px; line-height:1.7; color:var(--cinza); max-width:70ch;">
+            {{ c|safe }}<div style="margin-top:16px;"><a class="btn btn-sm" href="/google-ads">Voltar para Conversão offline</a></div>
+            </div></div></div>{% endblock %}""", t=titulo, c=corpo)
+    if erro:
+        return pagina('A autorização não foi concluída',
+                      f'O Google respondeu <code>{erro}</code>. Se for <code>redirect_uri_mismatch</code>, '
+                      f'falta cadastrar <code>{_ads_redirect_uri()}</code> como URI de redirecionamento '
+                      'autorizado no cliente OAuth, no Google Cloud.')
+    if not codigo:
+        return pagina('Faltou o código', 'O Google não devolveu o código de autorização. Tente de novo.')
+    cfg, _ = _ads_config()
+    try:
+        r = _requests.post('https://oauth2.googleapis.com/token', timeout=25, data={
+            'code': codigo, 'client_id': cfg['client_id'], 'client_secret': cfg['client_secret'],
+            'redirect_uri': _ads_redirect_uri(), 'grant_type': 'authorization_code'})
+        d = r.json() or {}
+        if r.status_code != 200 or not d.get('refresh_token'):
+            return pagina('O Google não devolveu um refresh token',
+                          f'Resposta: <code>{str(d)[:400]}</code><br><br>Se vier <code>invalid_grant</code>, '
+                          'o código já foi usado — comece de novo pelo botão Autorizar.')
+        conn = db()
+        if is_pg:
+            conn.execute("""INSERT INTO config (chave,valor) VALUES (%s,%s)
+                            ON CONFLICT (chave) DO UPDATE SET valor=EXCLUDED.valor""",
+                         ('google_ads_refresh_token', d['refresh_token']))
+        else:
+            conn.execute("INSERT OR REPLACE INTO config (chave,valor) VALUES (?,?)",
+                         ('google_ads_refresh_token', d['refresh_token']))
+        conn.commit(); close_db(conn)
+        escopos = d.get('scope') or ''
+        tem_dm = 'datamanager' in escopos
+        return pagina('Autorização concluída',
+                      ('Escopos autorizados: <code>' + (escopos or '(não informado)') + '</code><br><br>'
+                       + ('O escopo de entrega de conversão está presente. Use "Testar ligação" na tela '
+                          'de Conversão offline para confirmar ponta a ponta.'
+                          if tem_dm else
+                          '<b style="color:var(--rosa);">Atenção: o escopo de entrega (datamanager) NÃO veio.</b> '
+                          'Ele é sensível e precisa estar marcado na tela de consentimento OAuth do projeto, '
+                          'em Google Auth Platform &gt; Acesso a dados.')))
+    except Exception as e:
+        return pagina('Falhou ao trocar o código', f'<code>{str(e)[:400]}</code>')
 
 
 @app.route('/google-ads/testar', methods=['POST'])
