@@ -31,6 +31,12 @@
   .vr-nunca { color:var(--amarelo,#f59e0b); font-size:12px; }
   .vr-motivo { color:var(--rosa); font-size:12px; }
   .vr-voltar { color:var(--azul); text-decoration:none; font-size:13px; }
+  .vr-btn { border-radius:8px; padding:7px 14px; font-size:12.5px; font-weight:600;
+            cursor:pointer; font-family:inherit; border:1px solid var(--borda);
+            background:var(--panel-2); color:var(--texto); transition:.15s; }
+  .vr-btn.parar:hover { border-color:var(--rosa); color:var(--rosa); }
+  .vr-btn.retomar:hover { border-color:var(--teal); color:var(--teal); }
+  .vr-btn:disabled { opacity:.55; cursor:progress; }
 </style>
 {% endblock %}
 
@@ -44,9 +50,15 @@
       </div>
       <a class="vr-voltar" href="/crm">← Voltar ao CRM</a>
     </div>
-    <div>
-      {% if cont.pendente or cont.lendo %}
+    <div style="display:flex; align-items:center; gap:10px;">
+      {% if lote.status == 'parado' %}
+      <span class="pill-st erro">parada</span>
+      <button type="button" class="vr-btn retomar" onclick="mudarVarredura(this, false)">Retomar</button>
+      {% elif cont.pendente or cont.lendo %}
       <span class="pill-st lendo">em andamento</span>
+      {# FREIO DE MAO. 353 leads levam 2h30 e gastam a cada item — quem começa
+         com o filtro errado precisa parar AGORA, não esperar terminar. #}
+      <button type="button" class="vr-btn parar" onclick="mudarVarredura(this, true)">Parar agora</button>
       {% else %}
       <span class="pill-st lido">terminado</span>
       {% endif %}
@@ -110,4 +122,21 @@
     </table>
   </div>
 </div>
+<script>
+// Parar/retomar. NÃO apaga nada: o lido continua lido, a fila fica guardada.
+// Item que estava sendo lido volta pra fila — se a extensão já tinha pegado,
+// o resultado pode nunca chegar, e sem isso ele ficaria preso pra sempre.
+async function mudarVarredura(btn, parar){
+  if(parar && !confirm('Parar a varredura agora?\n\nO que já foi lido continua lido. ' +
+     'O resto fica guardado na fila e você pode retomar quando quiser.')) return;
+  btn.disabled = true; btn.textContent = parar ? 'Parando…' : 'Retomando…';
+  try{
+    const r = await (await fetch(location.pathname + '/parar', {method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({retomar: !parar})})).json();
+    if(r.ok) location.reload();
+    else { alert(r.erro || 'Não consegui.'); btn.disabled = false; }
+  }catch(e){ alert('Não deu: ' + e); btn.disabled = false; }
+}
+</script>
 {% endblock %}

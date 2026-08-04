@@ -19566,6 +19566,24 @@ def crm_varredura_criar():
                     ('busca "' + fl['busca'] + '"') if fl['busca'] else '',
                     ('origem ' + fl['origem']) if fl['origem'] else ''] if x)
 
+    # UMA VARREDURA POR CONSULTOR DE CADA VEZ.
+    #
+    # Duas rodando disputam a MESMA fila: a extensao pede "o proximo item" e o
+    # servidor entrega pela ordem de id, entao a segunda so comeca a andar
+    # quando a primeira acabar — mas as duas aparecem 'rodando' e o consultor
+    # fica olhando um lote parado sem entender. Pior: da pra empilhar 353 leads
+    # em cima de 26 sem perceber, e o gasto vira surpresa.
+    ja = conn.execute("""SELECT id, total FROM varredura_lote
+                          WHERE consultor_id=? AND status='rodando'
+                            AND EXISTS (SELECT 1 FROM varredura_item i
+                                        WHERE i.lote_id=varredura_lote.id AND i.status='pendente')
+                          ORDER BY id LIMIT 1""", (alvo_uid,)).fetchone()
+    if ja:
+        close_db(conn)
+        return jsonify({"ok": False, "em_andamento": ja['id'],
+                        "erro": f"Já existe a varredura #{ja['id']} rodando pra este consultor. "
+                                "Espere terminar ou pare ela antes de começar outra."}), 409
+
     cur = conn.execute("""INSERT INTO varredura_lote
         (consultor_id, criado_por, filtro_txt, total, status, criado_em)
         VALUES (?,?,?,?,?,?)""",
@@ -19688,6 +19706,34 @@ def api_whatsapp_varredura_item():
                  (estado, erro or None, _agora_sp(), item_id))
     conn.commit(); close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
+
+
+@app.route('/crm/varredura/<int:lote_id>/parar', methods=['POST'])
+@login_required
+def crm_varredura_parar(lote_id):
+    """Freio de mao. Uma varredura de 353 leads leva 2h30 e gasta dinheiro a
+    cada item — quem comeca uma sem querer (ou com o filtro errado) precisa de
+    um jeito de parar AGORA, nao de esperar terminar.
+
+    Nao apaga nada: o que ja foi lido continua lido, e o que estava na fila fica
+    guardado. Retomar continua de onde parou."""
+    d = request.json or {}
+    novo = 'rodando' if d.get('retomar') else 'parado'
+    conn = db()
+    lote = conn.execute("SELECT id, status FROM varredura_lote WHERE id=?", (lote_id,)).fetchone()
+    if not lote:
+        close_db(conn); return jsonify({"ok": False, "erro": "Lote não encontrado"}), 404
+    conn.execute("UPDATE varredura_lote SET status=? WHERE id=?", (novo, lote_id))
+    # Item que estava 'lendo' volta pra fila: se a extensao ja tinha pegado ele,
+    # o resultado pode nunca chegar, e sem isto ele ficaria preso pra sempre.
+    if novo == 'parado':
+        conn.execute("UPDATE varredura_item SET status='pendente' WHERE lote_id=? AND status='lendo'",
+                     (lote_id,))
+    conn.commit()
+    falta = conn.execute("SELECT COUNT(*) c FROM varredura_item WHERE lote_id=? AND status='pendente'",
+                         (lote_id,)).fetchone()['c']
+    close_db(conn)
+    return jsonify({"ok": True, "status": novo, "na_fila": falta})
 
 
 @app.route('/crm/varreduras')

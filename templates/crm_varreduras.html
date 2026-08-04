@@ -15,6 +15,12 @@
   .vs-pill.concluido { background:rgba(31,216,164,.18); color:var(--teal); }
   .vs-vazio { text-align:center; padding:46px 20px; color:var(--cinza-2); font-size:13.5px; }
   .vs-voltar { color:var(--azul); text-decoration:none; font-size:13px; }
+  .vs-pill.parado { background:rgba(244,63,94,.14); color:var(--rosa); }
+  .vs-btn { border:1px solid var(--borda); background:var(--panel-2); color:var(--texto);
+            border-radius:7px; padding:4px 11px; font-size:11.5px; font-weight:600;
+            cursor:pointer; font-family:inherit; }
+  .vs-btn:hover { border-color:var(--rosa); color:var(--rosa); }
+  .vs-btn:disabled { opacity:.55; cursor:progress; }
 </style>
 {% endblock %}
 
@@ -36,7 +42,7 @@
         <th class="vs-num">Leads</th><th class="vs-num">Lidos</th>
         <th class="vs-num">Nunca abordados</th>
         <th class="vs-num">Erros</th><th class="vs-num">Na fila</th>
-        <th>Estado</th><th>Criada</th>
+        <th>Estado</th><th>Criada</th><th></th>
       </tr></thead>
       <tbody>
         {% for l in lotes %}
@@ -51,6 +57,13 @@
           <td class="vs-num">{{ l.fila }}</td>
           <td><span class="vs-pill {{ l.status }}">{{ l.status }}</span></td>
           <td style="white-space:nowrap; color:var(--cinza-2); font-size:12px;">{{ l.quando }}</td>
+          {# Parar direto daqui: quem abre esta lista com duas varreduras rodando
+             precisa parar UMA sem ter que entrar nela. #}
+          <td>{% if l.status == 'rodando' %}
+            <button type="button" class="vs-btn" onclick="pararLote(this, {{ l.id }})">Parar</button>
+          {% elif l.status == 'parado' %}
+            <button type="button" class="vs-btn" onclick="retomarLote(this, {{ l.id }})">Retomar</button>
+          {% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -58,4 +71,16 @@
   </div>
   {% endif %}
 </div>
+<script>
+async function _lote(btn, id, retomar){
+  if(!retomar && !confirm('Parar a varredura #' + id + '?\n\nO que já foi lido continua lido. ' +
+     'O resto fica guardado e você pode retomar depois.')) return;
+  btn.disabled = true; btn.textContent = retomar ? 'Retomando…' : 'Parando…';
+  const r = await (await fetch('/crm/varredura/' + id + '/parar', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({retomar: retomar})})).json();
+  if(r.ok) location.reload(); else { alert(r.erro || 'Não deu'); btn.disabled = false; }
+}
+function pararLote(b, id){ _lote(b, id, false); }
+function retomarLote(b, id){ _lote(b, id, true); }
+</script>
 {% endblock %}
