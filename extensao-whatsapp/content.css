@@ -486,6 +486,15 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   transition: .12s; }
 .job-nao-lead:hover { border-color: var(--job-danger-bd); color: var(--job-danger); }
 .job-nao-lead:disabled { opacity: .55; cursor: default; }
+/* "Abrir no JOB" mora ao lado do Salvar: e a saida pra ficha completa, usada o
+   tempo todo. Contorno em vez de preenchido — o Salvar continua sendo a acao
+   principal do rodape, este e o atalho. */
+.job-ficha-abrir { display: block; width: 100%; margin-top: 7px; padding: 9px;
+  border-radius: 9px; text-align: center; text-decoration: none;
+  background: transparent; border: 1px solid var(--job-acento);
+  color: var(--job-acento); font-size: 13px; font-weight: 600;
+  font-family: inherit; transition: .12s; box-sizing: border-box; }
+.job-ficha-abrir:hover { background: var(--job-acento); color: var(--job-acento-txt); }
 /* Já marcada: deixa de ser botão e vira estado — com o desfazer do lado, porque
    marcar errado é fácil (o cliente que escreve do número pessoal) e sem volta o
    consultor perde o lead sem entender por quê. */

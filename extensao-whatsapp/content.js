@@ -3029,10 +3029,15 @@
             : '<button class="job-nao-lead" id="job-nao-lead" ' +
               'title="Marca esta conversa como pessoal: o JOB para de ler e nunca mais cria lead dela.">' +
               'Não é lead</button>') +
+          // ABRIR NO JOB SOBE PRO RODAPE. Ele existia, mas como link discreto
+          // DEPOIS do bloco 'Nome do contato' — que e longo — entao vivia fora
+          // da vista: pra achar era preciso rolar ate o fim de uma coluna
+          // estreita. Aqui fica junto do Salvar, que e onde a mao ja esta.
+          '<a class="job-ficha-abrir" id="job-ficha-abrir-crm" href="#" target="_blank" rel="noopener">' +
+            'Abrir no JOB</a>' +
           '<span class="job-ficha-aviso" id="job-ficha-aviso"></span>' +
         '</div>' +
         (aba === 'dados' ? _blocoNomeContato() : '') +
-        '<a class="job-ficha-link" id="job-ficha-abrir-crm" href="#">Abrir a ficha completa no JOB</a>' +
       '</div>');
     _ligarEventosFicha(aba);
     if (aba === 'dados') { _ligarNomeContato(); _ligarVinculoChat(_ficha.lead || {}); }

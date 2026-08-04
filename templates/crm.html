@@ -181,6 +181,9 @@
                     color:#fb7185; margin-bottom:6px; }
   .lead-trava-campo { display:flex; flex-direction:column; gap:3px; margin-bottom:6px; }
   .lead-trava-campo:last-child { margin-bottom:0; }
+  .lead-trava-fixo { font-size:12px; font-weight:600; color:var(--texto);
+    background:var(--panel-2); border:1px solid var(--borda); border-radius:7px;
+    padding:5px 9px; cursor:default; }
   .lead-trava-lbl { font-size:9.5px; color:var(--cinza-2); text-transform:uppercase; letter-spacing:.3px; }
   .lead-trava-sel { width:100%; background:var(--panel); border:1px solid var(--borda); border-radius:6px;
                     padding:5px 7px; font-size:11px; color:var(--texto); outline:none; cursor:pointer; }
@@ -850,7 +853,13 @@
             {% for c in exig %}
             <div class="lead-trava-campo">
               <span class="lead-trava-lbl">{{ c.nome }}</span>
-              {% if c.tipo == 'select' %}
+              {# JÁ RESPONDIDO VIRA TEXTO, não seletor. Um lead perdido não se
+                 relê pra escolher de novo — se relê pra SABER por que se perdeu,
+                 e um <select> esconde a resposta atrás de um controle. Fica
+                 fixo no card; trocar é decisão consciente, dentro da ficha. #}
+              {% if vals.get(c.chave) %}
+              <div class="lead-trava-fixo" title="Para alterar, abra a ficha do lead">{{ vals.get(c.chave) }}</div>
+              {% elif c.tipo == 'select' %}
               <select class="lead-trava-sel{{ '' if vals.get(c.chave) else ' vazio' }}"
                       onclick="event.stopPropagation()"
                       onchange="salvarCampoCard({{ lead.id }}, '{{ c.chave }}', this)">
@@ -1760,6 +1769,28 @@ async function salvarFicha(){
   const r=await fetch('/crm/lead/'+_leadAtual.id+'/editar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
   const d=await r.json();
   if(d.ok){
+    // UM SALVAR SÓ. Havia dois botões — "Salvar" embaixo e "Salvar
+    // qualificação" no meio do bloco de campos — e quem escrevia a
+    // justificativa e clicava no de baixo perdia o que escreveu, sem aviso.
+    // Ninguém tem que aprender que uma tela tem duas gravações: o Salvar
+    // grava a ficha INTEIRA, incluindo os campos.
+    try {
+      const cx=document.getElementById('ficha-campos');
+      if(cx){
+        const cp={};
+        cx.querySelectorAll('[data-chave]').forEach(el=>{
+          cp[el.dataset.chave] = el.dataset.multi
+            ? Array.from(el.querySelectorAll('input:checked')).map(i=>i.value)
+            : el.value;
+        });
+        if(Object.keys(cp).length){
+          const rc=await fetch('/crm/lead/'+_leadAtual.id+'/campos',{method:'POST',
+            headers:{'Content-Type':'application/json'}, body:JSON.stringify({campos:cp})});
+          const dc=await rc.json();
+          if(dc.ok) montarCampos(_cpDef, dc.campos_val||{}, p.etapa);
+        }
+      }
+    } catch(e){ /* a ficha já foi salva; o campo avisa sozinho se falhar */ }
     toast('Lead salvo!','ok');
     const card=document.getElementById('card-'+_leadAtual.id);
     if(card){
