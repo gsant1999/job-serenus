@@ -2605,9 +2605,26 @@ async function criarLead(){
     origem:document.getElementById('nl-origem')?.value||'manual',
     observacoes:document.getElementById('nl-obs')?.value?.trim(),
   };
-  const r=await fetch('/crm/lead/novo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
-  if((await r.json()).ok){ toast('Lead criado!','ok'); fechar('modal-novo-lead'); setTimeout(()=>location.reload(),700); }
-  else toast('Erro ao criar','err');
+  let d = await (await fetch('/crm/lead/novo',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
+  // TELEFONE JÁ CADASTRADO: abre o que existe, em vez de criar o segundo card.
+  // Duplicata do mesmo número foi o que fez a conversa ficar num lead e a
+  // proposta no outro, com a tela pedindo pra vincular algo já vinculado.
+  // Criar mesmo assim continua possível — telefone de empresa e de família
+  // se repetem de verdade — mas passa a ser escolha, não acidente.
+  if(d.duplicado){
+    if(confirm(d.erro + '\n\nAbrir o lead que já existe?\n\n' +
+               '(Cancelar cadastra assim mesmo, como pessoa diferente.)')){
+      fechar('modal-novo-lead');
+      location.href = '/crm?lead=' + d.lead_id;
+      return;
+    }
+    p.confirmo_duplicado = 1;
+    d = await (await fetch('/crm/lead/novo',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})).json();
+  }
+  if(d.ok){ toast('Lead criado!','ok'); fechar('modal-novo-lead'); setTimeout(()=>location.reload(),700); }
+  else toast(d.erro||'Erro ao criar','err');
 }
 
 // ── Filtros salvos (localStorage) ──

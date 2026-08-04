@@ -23290,6 +23290,23 @@ def crm_lead_novo():
     eh_admin = session.get('perfil') == 'admin'
     resp_id = int(d.get('responsavel_id') or uid) if eh_admin else uid
     conn = db()
+    # JA EXISTE ESSE TELEFONE? A extensao checa antes de criar, a planilha
+    # checa, e o cadastro manual nao checava — era o unico caminho que gerava
+    # duplicata silenciosa. Foi assim que o Joao Vitor virou dois cards com o
+    # MESMO numero: um com a conversa, outro com a proposta, e a tela dizendo
+    # "falta vincular" num lead cuja conversa ja estava vinculada no outro.
+    #
+    # NAO BLOQUEIA: telefone de empresa e de familia se repetem de verdade.
+    # Devolve quem ja existe e deixa a pessoa decidir — bloquear resolveria o
+    # duplicado criando um problema pior, o de nao conseguir cadastrar.
+    _tel_novo = _normalizar_telefone(d.get('telefone') or '')
+    if _tel_novo and not d.get('confirmo_duplicado'):
+        ja = _buscar_lead_por_telefone(conn, _tel_novo)
+        if ja:
+            close_db(conn)
+            return jsonify({"ok": False, "duplicado": True, "lead_id": ja['id'],
+                            "nome": ja['nome'] or '',
+                            "erro": f'Já existe um lead com esse telefone: "{ja["nome"] or "sem nome"}".'}), 409
     # telefone_norm JUNTO, sempre. Ele e a chave que reconhece "ja e a mesma
     # pessoa": sem ele o lead fica invisivel pro casamento e a extensao cria
     # outro do zero. Foi assim que um unico cliente virou tres cards.
