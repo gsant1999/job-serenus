@@ -22151,9 +22151,31 @@ def _wa_varredura_resumo(conn, uid=None):
             'proposta_id': r['proposta_id'], 'razao_social': r['razao_social'],
             'valor_proposta': r['valor_proposta'],
         })
+    # O TOTAL DA TELA NÃO É O GASTO. Duas razões, e as duas enganam pra baixo:
+    # (1) a lista tem LIMIT 200, então a partir do chat 201 o total pararia de
+    # crescer; (2) só conversa com marca d'água entra aqui — análise gravada sem
+    # chat_id (a maioria da base histórica) não tem linha nenhuma nesta tabela.
+    # Medido em 04/08/2026: esta soma dava US$ 2,68 enquanto o gasto real de IA
+    # era US$ 6,94. Uma tela de custo que mostra 39% do custo é pior que nenhuma.
+    real = {'usd': 0.0, 'analises': 0}
+    try:
+        r = conn.execute("""SELECT COUNT(*) n,
+                COALESCE(SUM(COALESCE(custo_claude_usd,0) + COALESCE(custo_transcricao_usd,0)),0) usd
+            FROM whatsapp_analises""" + (" WHERE criado_por=?" if uid else ""),
+            (uid,) if uid else ()).fetchone()
+        real = {'usd': float(r['usd'] or 0), 'analises': int(r['n'] or 0)}
+    except Exception as e:
+        app.logger.warning(f"[VARREDURA] custo real: {e}")
+        try: conn.rollback()
+        except Exception: pass
     return {'linhas': linhas, 'total_usd': round(total_usd, 4),
             'total_brl': round(total_usd * _USD_BRL_TAXA, 2), 'chats': len(linhas),
-            'msgs': msgs, 'com_lead': com_lead, 'com_venda': com_venda}
+            'msgs': msgs, 'com_lead': com_lead, 'com_venda': com_venda,
+            'truncado': len(linhas) >= 200,
+            'real_usd': round(real['usd'], 4),
+            'real_brl': round(real['usd'] * _USD_BRL_TAXA, 2),
+            'real_analises': real['analises'],
+            'fora_brl': round(max(0.0, real['usd'] - total_usd) * _USD_BRL_TAXA, 2)}
 
 
 def _wa_custo_resumo(conn, uid=None):

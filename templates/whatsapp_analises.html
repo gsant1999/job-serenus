@@ -6,6 +6,17 @@
   .vrd-topo { display:flex; gap:10px; flex-wrap:wrap; margin:0 0 18px; }
   .vrd-num { flex:1 1 130px; background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:10px 12px; }
   .vrd-num.destaque { border-color:rgba(250,204,21,.35); }
+  .vrd-aviso { background:var(--panel-2); border:1px solid var(--borda); border-left:3px solid var(--amarelo,#f59e0b);
+    border-radius:8px; padding:10px 13px; margin:-8px 0 16px; font-size:12.5px; color:var(--cinza); line-height:1.55; }
+  .vrd-aviso b { color:var(--texto); }
+  /* Texto longo pede medida de leitura: ~68 caracteres por linha e respiro entre
+     parágrafos. Sem isso vira uma parede da largura da tela que ninguém lê. */
+  .panel-box.intel { border-left:3px solid var(--azul); }
+  .intel-corpo { max-width:70ch; margin-top:14px; }
+  .intel-corpo p { font-size:13.5px; line-height:1.75; color:var(--cinza); margin:0 0 14px; }
+  .intel-corpo p:last-child { margin-bottom:0; }
+  .intel-corpo b { color:var(--texto); font-weight:600; }
+  .intel-corpo i { color:var(--cinza-2); font-style:italic; }
   .vrd-num b { display:block; font-size:19px; font-variant-numeric:tabular-nums; }
   .vrd-num span { display:block; font-size:10px; color:var(--cinza); margin-top:2px; }
   .vrd-lid { font-size:8px; font-weight:800; letter-spacing:.3px; padding:1px 4px; border-radius:4px; margin-right:5px; }
@@ -126,6 +137,60 @@
   {% endif %}
 </div>
 
+<div class="panel-box intel">
+  <h2>O que a leitura aprendeu — e o que ela estava proibida de aprender</h2>
+  <p class="sub">Registro do que mudou em 04/08/2026, e por quê. Fica aqui porque é esta tela que mostra o resultado.</p>
+
+  <div class="intel-corpo">
+    <p><b>O diagnóstico não era falta de esforço da IA. Era uma proibição escrita.</b></p>
+
+    <p>A leitura de conversa tinha duas camadas. Um motor de regras lia o texto por
+    expressões fixas, e a IA lia as imagens e os PDFs. Entre as duas havia uma
+    instrução, no comando dado à IA, que dizia com todas as letras:
+    <i>nunca repita um dado que só apareceu no texto — o motor de regras já cobre
+    isso sozinho.</i></p>
+
+    <p>Só que o motor de regras não cobre. Ele encontra o que está escrito na forma
+    exata que ele espera, e nada além disso. Não entende <i>“somos eu, minha esposa e
+    as duas crianças”</i> como quatro vidas. Não entende <i>“pago quase seiscentos”</i>
+    como o valor do plano atual. Não entende <i>“todo maio vem o aumento”</i> como mês
+    de reajuste, nem <i>“contanto que atenda no Vera Cruz”</i> como hospital de
+    preferência. Para saúde, ele conhecia dez doenças pelo nome — quem dissesse
+    <i>“faço tratamento no coração”</i> não era registrado.</p>
+
+    <p>A IA lia essas frases. Entendia todas. E era instruída a ignorá-las.</p>
+
+    <p>O efeito aparecia como ficha vazia depois de uma leitura cara. Na varredura de
+    47 conversas, nome e decisor saíram em 47; CNPJ, em 14; saúde declarada, em 10.
+    Três campos nunca foram preenchidos uma única vez — entre eles o hospital de
+    preferência, cuja própria descrição no sistema diz que é
+    <i>“a pergunta que fecha venda — hoje ela morre no histórico do WhatsApp”</i>.
+    A IA lia o histórico do WhatsApp inteiro e não podia usá-lo.</p>
+
+    <p><b>O que mudou.</b> A proibição virou ordem de precedência: documento pessoal
+    vale mais que anexo, anexo vale mais que texto, e texto vale mais que expressão
+    fixa. A IA passou a extrair do texto e dos áudios transcritos, com a instrução
+    de reler o que ficou em branco antes de encerrar — <i>campo vazio quando a
+    resposta está na conversa é falha de leitura, e cada um custa uma pergunta que o
+    cliente já respondeu</i> — e com o contrapeso de que chute é pior que vazio,
+    porque o que entra aqui vira verdade numa ligação.</p>
+
+    <p>Junto veio o <b>“falta perguntar”</b>: o que ainda trava aquela venda, com a
+    pergunta pronta para mandar. E quatro campos que recebiam valor que o próprio
+    campo não aceitava — o valor pago hoje que na verdade era o preço da nossa
+    cotação, a composição familiar escrita como idades, o mês e a data em formato
+    que a tela apagava no salvamento seguinte.</p>
+
+    <p><b>O que isso ensina para o resto do sistema.</b> A instrução foi escrita para
+    evitar duplicação, e o raciocínio era defensável no dia em que foi escrita. O
+    erro não foi a decisão: foi ela ter continuado valendo depois que deixou de ser
+    verdade, sem nada medindo se ainda era. Vale a mesma pergunta em qualquer lugar
+    onde uma camada foi proibida de fazer algo porque outra “já faz”. A conta que
+    interessa não é quanto a leitura custa, e sim quantos campos ela preenche por
+    conversa — e esse número, agora, dá para acompanhar aqui embaixo.</p>
+  </div>
+</div>
+
 <div class="panel-box">
   <h2>Varredura: o caminho inteiro, conversa por conversa<i class="ajuda-i" title="A extensão lê as conversas do WhatsApp do dia e a IA extrai o que interessa. Cada linha aqui é uma conversa: quanto dela já foi lida, quanto custou, e o que ela virou no CRM e em venda. Conversa que não mudou desde a última leitura não é lida de novo — por isso não custa duas vezes.">i</i></h2>
   <p class="sub">Uma linha por conversa do WhatsApp que a IA já leu: até onde ela leu, quanto custou até hoje, e o que aquilo virou — lead, etapa e venda. É aqui que as quatro gravações se encontram.</p>
@@ -137,8 +202,22 @@
     <div class="vrd-num"><b>{{ varredura.msgs }}</b><span>mensagens analisadas</span></div>
     <div class="vrd-num"><b>{{ varredura.com_lead }}</b><span>viraram lead no CRM</span></div>
     <div class="vrd-num"><b>{{ varredura.com_venda }}</b><span>viraram venda</span></div>
-    <div class="vrd-num destaque"><b>R$ {{ '%.2f'|format(varredura.total_brl) }}</b><span>custo acumulado (US$ {{ '%.4f'|format(varredura.total_usd) }})</span></div>
+    <div class="vrd-num"><b>R$ {{ '%.2f'|format(varredura.total_brl) }}</b><span>custo destas conversas<i class="ajuda-i" title="Só o que estas conversas com marca d'água custaram. Não é o gasto total de IA — veja o número ao lado.">i</i></span></div>
+    <div class="vrd-num destaque"><b>R$ {{ '%.2f'|format(varredura.real_brl) }}</b><span>gasto total de IA · {{ varredura.real_analises }} leituras<i class="ajuda-i" title="Tudo o que a leitura de conversa já custou, somando as análises que não têm marca d'água (as antigas, feitas antes do controle por conversa). É estimativa pelo preço por token e por minuto de áudio, não a fatura do provedor.">i</i></span></div>
   </div>
+  {% if varredura.fora_brl > 0.01 %}
+  {# A DIFERENÇA TEM QUE APARECER, não ser escondida. Custo que a tela não mostra
+     é custo que ninguém controla — que é a razão de esta tela existir. #}
+  <div class="vrd-aviso">
+    <b>R$ {{ '%.2f'|format(varredura.fora_brl) }} de leitura não aparece na lista abaixo.</b>
+    São análises gravadas sem identificador de conversa — o controle por conversa (marca d'água)
+    é recente, e o que veio antes dele não tem linha aqui. O dinheiro foi gasto e está contado no
+    total; só não dá para dizer de qual conversa veio.
+  </div>
+  {% endif %}
+  {% if varredura.truncado %}
+  <div class="vrd-aviso">A lista mostra as 200 conversas mais recentes. O gasto total acima considera todas.</div>
+  {% endif %}
   <table class="pnl-tab">
     <thead><tr><th>Conversa (@lid)<i class="ajuda-i" title="@lid e o apelido que o WhatsApp novo usa no lugar do telefone: a conversa tem identidade propria e o numero fica escondido. E por ele que o JOB sabe que esta conversa e deste lead. Quando aparece n, e conversa antiga, em que o proprio numero identifica.">i</i></th><th>Lead no CRM</th><th>Etapa</th><th class="num">Score<i class="ajuda-i" title="Nota de 0 a 1000 que a IA dá ao lead pela conversa: urgência, orçamento, perfil e engajamento. Serve para priorizar quem atender primeiro — não é promessa de que vai fechar.">i</i></th><th class="num">Msgs lidas<i class="ajuda-i" title="Quantas mensagens daquela conversa a IA ja leu. O JOB guarda a ultima mensagem lida e, na proxima varredura, comeca dali - nunca rele o que ja pagou.">i</i></th><th>Lida em</th><th>Virou venda</th><th class="num">Custo<i class="ajuda-i" title="Quanto esta conversa custou de IA desde sempre, somando leitura e transcricao de audio. E estimativa pelo preco por token/minuto, nao a fatura do provedor.">i</i></th></tr></thead>
     <tbody>
