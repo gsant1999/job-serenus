@@ -2461,6 +2461,35 @@
     });
   }
 
+  // ═══════════════ GATE ÚNICO PRA QUEM MEXE NA WA-JS ═══════════════
+  //
+  // Existem TRÊS rotinas de fundo que tocam o WhatsApp por conta própria:
+  // mandar da fila de envio (checarFilaDeEnvio), a varredura diária automática
+  // (varreduraRodar) e a varredura em fila do painel do CRM (filaVarreduraTick).
+  // Cada uma sozinha já tenta ser leve — uma conversa por vez, com pausa. O
+  // problema é que elas não sabiam UMA DA OUTRA: nada impedia a varredura
+  // automática de disparar no meio de uma varredura em fila, ou o envio de
+  // acontecer junto com as duas. Três rotinas mexendo no WhatsApp Web AO MESMO
+  // TEMPO, na MESMA aba — que já é pesada sozinha —, é o tipo de carga que
+  // trava a aba ou derruba a conexão. Isso é diferente de mandar mensagem
+  // rápido demais (que o servidor já regula em _WA_FILA_GATE_*): aqui o
+  // problema é volume de trabalho simultâneo, não velocidade de envio.
+  //
+  // Por isso este gate: quem quiser tocar a wa-js tenta pegar; se outra rotina
+  // já está com ele, desiste dessa vez e tenta de novo daqui a pouco — nunca
+  // duas ao mesmo tempo.
+  const _JOB_GATE = { ocupado: false, por: '' };
+  function _jobGateTentar(quem) {
+    if (_JOB_GATE.ocupado) return false;
+    _JOB_GATE.ocupado = true;
+    _JOB_GATE.por = quem;
+    return true;
+  }
+  function _jobGateSoltar() {
+    _JOB_GATE.ocupado = false;
+    _JOB_GATE.por = '';
+  }
+
   // ═══════════════ Varredura diária das conversas ═══════════════
   // Roda sozinha, em segundo plano, e é deliberadamente LENTA: uma conversa por
   // vez com pausa entre elas. O gargalo não é o servidor, é a máquina do
@@ -2503,6 +2532,10 @@
     VAR.MAX_POR_RODADA = Math.max(1, cfg.max_rodada || 12);
     VAR.HORAS = Math.max(1, cfg.horas || 24);
     if (!manual && !cfg.rodar_agora && Date.now() - VAR.ultimaRodada < VAR.INTERVALO_MS) return VAR.placar;
+    // Não marca ultimaRodada antes de conseguir o gate: se outra rotina está
+    // usando o WhatsApp agora, esta tentativa não conta como "rodou" — o
+    // próximo tick (em minutos, não em INTERVALO_MS inteiro) tenta de novo.
+    if (!_jobGateTentar('varredura_auto')) return VAR.placar;
     VAR.rodando = true;
     VAR.ultimaRodada = Date.now();
     try {
@@ -2531,6 +2564,7 @@
       }
     } finally {
       VAR.rodando = false;
+      _jobGateSoltar();
     }
     return VAR.placar;
   }
@@ -3694,6 +3728,13 @@
         FILA.proximaEm = Date.now() + 120000;
         return;
       }
+      // Outra rotina (envio ou varredura automática) está usando o WhatsApp
+      // agora. O item continua 'pendente' no servidor — não perde o lugar na
+      // fila, só tenta de novo em breve em vez de disputar a aba.
+      if (!_jobGateTentar('varredura_fila')) {
+        FILA.proximaEm = Date.now() + 5000;
+        return;
+      }
       let ok = false, erro = '';
       try {
         // O LEAD VAI JUNTO. O lote sabe de quem e a conversa; sem mandar, a
@@ -3708,6 +3749,8 @@
         // precisa dizer em QUAL lead e POR QUE, pra separar conversa apagada de
         // peca quebrada.
         erro = String((e && e.message) || e).slice(0, 180);
+      } finally {
+        _jobGateSoltar();
       }
       await _safeSendMessage({ type: 'varredura_resultado', item_id: item.item_id,
                                ok: ok, erro: erro }).catch(() => null);
@@ -6059,27 +6102,32 @@
         if (resp && typeof resp.espera_s === 'number') _agendarFila(resp.espera_s);
         return;
       }
-      let envio;
-      if (item.tipo && item.tipo !== 'texto' && item.midia_url) {
-        // Mídia: o background baixa (CSP), a ponte manda pela wa-js.
-        const dl = await chrome.runtime.sendMessage({ type: 'baixar_midia', url: item.midia_url });
-        if (dl && dl.ok) {
-          envio = await pedirEnviarMidia(item.chat_id, item.tipo, dl.dataUrl, item.texto, _nomeArquivoDaUrl(item.midia_url));
+      // Outra rotina (varredura automática ou em fila) está usando o
+      // WhatsApp agora. A mensagem continua na fila do servidor — só adia.
+      if (!_jobGateTentar('envio')) { _agendarFila(5); return; }
+      try {
+        let envio;
+        if (item.tipo && item.tipo !== 'texto' && item.midia_url) {
+          // Mídia: o background baixa (CSP), a ponte manda pela wa-js.
+          const dl = await chrome.runtime.sendMessage({ type: 'baixar_midia', url: item.midia_url });
+          if (dl && dl.ok) {
+            envio = await pedirEnviarMidia(item.chat_id, item.tipo, dl.dataUrl, item.texto, _nomeArquivoDaUrl(item.midia_url));
+          } else {
+            envio = { ok: false, erro: (dl && dl.erro) || 'falha ao baixar a mídia' };
+          }
         } else {
-          envio = { ok: false, erro: (dl && dl.erro) || 'falha ao baixar a mídia' };
+          envio = await pedirEnviarTexto(item.chat_id, item.texto);
         }
-      } else {
-        envio = await pedirEnviarTexto(item.chat_id, item.texto);
-      }
-      await chrome.runtime.sendMessage({
-        type: 'fila_confirmar', fila_id: item.id,
-        ok: !!(envio && envio.ok), erro: (envio && envio.erro) || null,
-        wpp_msg_id: (envio && envio.wpp_msg_id) || null,
-      });
-      _metrica('envio_' + (item.tipo || 'texto'), Date.now() - _t0, !!(envio && envio.ok));
-      // Mandou uma: tenta a proxima ja. O servidor decide se pode — aqui so
-      // deixamos de dormir 20s a toa entre uma e outra.
-      _agendarFila(1);
+        await chrome.runtime.sendMessage({
+          type: 'fila_confirmar', fila_id: item.id,
+          ok: !!(envio && envio.ok), erro: (envio && envio.erro) || null,
+          wpp_msg_id: (envio && envio.wpp_msg_id) || null,
+        });
+        _metrica('envio_' + (item.tipo || 'texto'), Date.now() - _t0, !!(envio && envio.ok));
+        // Mandou uma: tenta a proxima ja. O servidor decide se pode — aqui so
+        // deixamos de dormir 20s a toa entre uma e outra.
+        _agendarFila(1);
+      } finally { _jobGateSoltar(); }
     } catch (e) { /* próxima rodada tenta de novo */ }
     finally { _filaOcupada = false; }
   }

@@ -20176,9 +20176,15 @@ def api_whatsapp_varredura_item():
     #
     # COM TETO. Sem contador, um lead que sempre estoura o tempo giraria pra
     # sempre, segurando a fila atras dele e gastando a cada volta.
+    # 'falha_mensagens' entrou na lista em 04/08: é o caso da conversa @lid
+    # nunca aberta na sessão do WhatsApp Web — a extensão agora tenta
+    # pré-carregar sozinha (openChatBottom) antes de desistir, mas esse
+    # carregamento é assíncrono e pode não estar pronto na primeira tentativa.
+    # Tratar como passageiro dá o tempo de que precisa, sem exigir que alguém
+    # abra a conversa na mão.
     _passageiro = any(x in erro.lower() for x in (
         'demorou mais que', 'não respondeu', 'nao respondeu', 'failed to fetch',
-        'timeout', 'networkerror', 'load failed', 'aborted'))
+        'timeout', 'networkerror', 'load failed', 'aborted', 'falha_mensagens'))
     MAX_TENTATIVAS = 3
     conn = db()
     _t = 0
