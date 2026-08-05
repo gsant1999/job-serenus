@@ -76,17 +76,41 @@ Conforme demonstrado nos testes econométricos de regressão logística, **model
 
 ---
 
-## 4. Estrutura Matemática do Score Lead Multidimensional
+## 4. Costura do Sistema Atual de Pesos com o Sistema Novo
 
-A pontuação final do lead ($S_{lead} \in [0, 1000]$) é calculada por:
+O novo sistema **não descarta as 16 categorias legadas do `app.py`**, mas as organiza e repondera em **3 Blocos Principais de Pontuação**, enriquecidos pelas métricas de CRO, SPIN e 5 C's:
 
-$$S_{lead} = \text{Clamp}\left( w_1 \cdot C_{\text{CRO}} + w_2 \cdot S_{\text{SPIN}} + w_3 \cdot P_{\text{Perfil}} - P_{\text{Atrito}}, \, 0, \, 1000 \right)$$
+$$\text{Score Final} = \text{Bloco 1 (Perfil e 5 Cs)} + \text{Bloco 2 (Vetor CRO MECLABS)} + \text{Bloco 3 (Dinamismo SPIN)}$$
 
-Onde:
-- **Componente CRO ($C_{\text{CRO}}$):** $4M + 3V + 2(I - F) - 2A$
-- **Componente SPIN ($S_{\text{SPIN}}$):** Pontua a transição de Necessidades Implícitas $\rightarrow$ Explícitas e presença de perguntas de implicação/solução.
-- **Componente Perfil ($P_{\text{Perfil}}$):** Avaliação dos 5 C's (Vidas, PJ vs PF, fit de rede de atendimento).
-- **Penalidades ($P_{\text{Atrito}}$):** Sinais de restrição em MEI recente (< 6 meses), recusa de coparticipação sem budget ou histórico de inadimplência.
+---
+
+### Tabela Comparativa de Pesos: Sistema Atual vs. Sistema Novo Costurado
+
+| Categoria / Vetor | Sistema Atual (Teto 1000) | Sistema Novo Costurado (Teto 1000) | Justificativa Teórica & Regra de Negócio |
+|---|---|---|---|
+| **[Bloco 1] Vidas & Porte** | 10 a 50 pts | **20 a 100 pts** | *Capital/Capacidade*: PMEs (5+ vidas) geram maior ticket e comissão no JOB. |
+| **[Bloco 1] PJ, CNPJ & MEI** | 30 a 50 pts | **40 a 100 pts** | *Caráter/Capital*: Distingue CNPJ consolidado (>6 meses, +100pts) de MEI recente (+50pts) ou PF (+40pts). |
+| **[Bloco 1] Fit Geográfico & Rede** | 25 a 50 pts | **35 a 100 pts** | *Condições*: Alinhamento da operadora (ex: Vera Cruz em Campinas) + hospital preferido. |
+| **[Bloco 1] Plano Atual & Upgrade** | 25 a 50 pts | **30 a 100 pts** | *Capacidade*: Troca de operadora T1/T2 ou migração de plano ativo com histórico de pagamento. |
+| **[Bloco 2] Motivação ($4M$)** | 15 a 40 pts (Budget) | **até 120 pts** | *MECLABS (Peso 4)*: Dor aguda (reajuste alto no plano atual, gestação, urgência médica). |
+| **[Bloco 2] Proposta de Valor ($3V$)** | 10 a 50 pts (Cobertura) | **até 90 pts** | *MECLABS (Peso 3)*: Alinhamento entre a necessidade do cliente e o preço/cobertura ofertado. |
+| **[Bloco 2] Incentivo à Ação ($2I$)** | 0 a 30 pts (Prontidão) | **até 60 pts** | *MECLABS (Peso 2)*: Janela de carência, promoção de adesão ou desconto de tabela. |
+| **[Bloco 2] Fricções ($2F$)** | 0 a 40 pts (Forma Pag.) | **até -40 pts (Penalidade)** | *MECLABS (Peso -2)*: Falta de documentação, burocracia de carência ou CPT exigida. |
+| **[Bloco 2] Ansiedades ($2A$)** | 10 a 40 pts (Inadimpl.) | **até -40 pts (Penalidade)** | *MECLABS (Peso -2)*: Insegurança do cliente quanto a preço, medo de carência ou trocas. |
+| **[Bloco 3] Necessidades Explícitas** | 0 a 35 pts (Regras) | **até 100 pts** | *SPIN Selling*: Lead verbalizou intenção firme de compra (*"Quero contratar a Unimed por R$ 600"*). |
+| **[Bloco 3] Perguntas de Implicação** | N/A (não existia) | **até 75 pts** | *SPIN Selling*: Lead reconheceu a gravidade e o custo financeiro/social do problema atual. |
+| **[Bloco 3] Estágio de Avanço** | N/A (não existia) | **até 75 pts** | *SPIN Selling*: Ação concreta (envio de cotação anterior, agendamento, envio de documentos). |
+
+---
+
+### Faixas de Classificação do Lead (Notas de Corte)
+
+- **900 a 1000 pts — QUENTE (Fechamento Imediato):** Documentos pessoais/CNPJ enviados + Necessidade Explícita confirmada.
+- **750 a 899 pts — QUENTE (Alta Propensão):** Contratação PME ou urgência declarada + alinhamento de preço.
+- **550 a 749 pts — MÉDIO (Em Maturação):** Negociação real que exige envio/ajuste de proposta ou esclarecimento de ansiedades.
+- **350 a 549 pts — BAIXO (Baixo Engajamento):** Fricção alta, falta de documentação ou dúvida de orçamento.
+- **Abaixo de 350 pts — IMPROVÁVEL (Sem Relevância Comercial):** Conversa pessoal ou lead sem perfil para plano de saúde.
+
 
 ---
 
