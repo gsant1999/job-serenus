@@ -1300,6 +1300,29 @@ def init_db():
                 valor TEXT,
                 atualizado_em TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS wa_aprendizado_leads (
+                id SERIAL PRIMARY KEY,
+                lead_id INTEGER,
+                desfecho TEXT NOT NULL,
+                motivo_perda TEXT,
+                score_no_momento INTEGER,
+                vetores_cro TEXT,
+                indicadores_spin TEXT,
+                fator_chave_vitoria_derrota TEXT,
+                objecoes_superadas TEXT,
+                duracao_dias REAL,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS wa_padroes_recorrentes (
+                id SERIAL PRIMARY KEY,
+                tipo TEXT NOT NULL,
+                categoria TEXT NOT NULL,
+                titulo TEXT NOT NULL,
+                descricao TEXT NOT NULL,
+                frequencia INTEGER DEFAULT 1,
+                impacto_conversao_pct REAL,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS lead_notas (
                 id SERIAL PRIMARY KEY,
                 telefone_norm TEXT NOT NULL,
@@ -24619,6 +24642,71 @@ def crm_lead_qualificacao(lid):
     return jsonify({"ok": True})
 
 
+def _registrar_aprendizado_lead(conn, lead_id, desfecho, motivo_perda=None):
+    """Sintetiza e registra o aprendizado pós-mortem de um lead (GANHO ou PERDIDO).
+    Executa em modo best-effort (nunca trava a transação do CRM se falhar)."""
+    try:
+        lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+        if not lead:
+            return
+        lead_dict = dict(lead)
+        tel_norm = _normalizar_telefone(str(lead_dict.get('telefone') or ''))
+        analise = None
+        if tel_norm:
+            analise = conn.execute("SELECT * FROM whatsapp_analises WHERE telefone_norm=? ORDER BY id DESC LIMIT 1", (tel_norm,)).fetchone()
+        
+        score = (analise['score'] if analise else None) or lead_dict.get('score_lead') or 0
+        vetores_cro = {}
+        indicadores_spin = {}
+        
+        if analise:
+            try:
+                diag = json.loads(analise['diagnostico_json'] or '{}')
+                vetores_cro = diag.get('vetores_cro') or {}
+                indicadores_spin = diag.get('spin') or {}
+            except Exception:
+                pass
+        
+        fator_chave = f"Lead encerrado como {desfecho}" + (f" por {motivo_perda}" if motivo_perda else "")
+        
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+        if api_key and analise and analise.get('conversa_json'):
+            try:
+                import anthropic
+                client = anthropic.Anthropic(api_key=api_key, timeout=20.0, max_retries=1)
+                prompt = (
+                    f"Análise de pós-mortem de vendas do JOB Serenus:\n"
+                    f"Lead: {lead_dict.get('nome') or 'Cliente'}, Desfecho: {desfecho}, Motivo Perda: {motivo_perda or 'N/A'}.\n"
+                    f"Conversa transcrita: {str(analise['conversa_json'])[:8000]}\n\n"
+                    f"Responda em uma frase curta (máximo 140 chars) o FATOR CHAVE determinante para este desfecho."
+                )
+                res = client.messages.create(
+                    model=_CLAUDE_MODEL,
+                    max_tokens=150,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                txt_ia = next((b.text for b in res.content if b.type == 'text'), '').strip()
+                if txt_ia:
+                    fator_chave = txt_ia[:300]
+            except Exception as e:
+                app.logger.info(f"[APRENDIZADO-IA] Síntese post-mortem via Claude pulada: {e}")
+
+        conn.execute("""
+            INSERT INTO wa_aprendizado_leads 
+            (lead_id, desfecho, motivo_perda, score_no_momento, vetores_cro, indicadores_spin, fator_chave_vitoria_derrota, criado_em)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (lead_id, desfecho, motivo_perda or None, score, json.dumps(vetores_cro), json.dumps(indicadores_spin), fator_chave, _agora_sp()))
+        
+        cat = 'OBJICAO' if desfecho == 'PERDIDO' else 'FECHAMENTO'
+        tit = (motivo_perda or 'Venda Concluída') if desfecho == 'PERDIDO' else 'Fechamento com Sucesso'
+        conn.execute("""
+            INSERT INTO wa_padroes_recorrentes (tipo, categoria, titulo, descricao, frequencia, atualizado_em)
+            VALUES (?, ?, ?, ?, 1, ?)
+        """, ('RISCO' if desfecho == 'PERDIDO' else 'OPORTUNIDADE', cat, tit[:100], fator_chave[:300], _agora_sp()))
+    except Exception as e:
+        app.logger.warning(f"[APRENDIZADO-LEAD] Falha ao registrar aprendizado do lead {lead_id}: {e}")
+
+
 @app.route('/crm/lead/<int:lid>/mover', methods=['POST'])
 @login_required
 def crm_lead_mover(lid):
@@ -24681,6 +24769,10 @@ def crm_lead_mover(lid):
         try:
             _fluxo_cancelar_por_etapa(conn, lid, nova_etapa)
             _fluxo_autoiniciar_por_etapa(conn, lid, nova_etapa)
+            if _tipo_dest in ('perdido', 'ganho'):
+                _desf = 'PERDIDO' if _tipo_dest == 'perdido' else 'GANHO'
+                _mp = (_entrada.get('motivo_perda') if isinstance(_entrada, dict) else None)
+                _registrar_aprendizado_lead(conn, lid, _desf, motivo_perda=_mp)
             conn.commit()
         except Exception as e:
             try:

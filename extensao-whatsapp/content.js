@@ -2110,7 +2110,8 @@
         TR.cache.set(id, '');
         return;
       }
-      TR.cache.set(id, (r.transcricoes || {})[id] || '');
+      const txt = ((r.transcricoes || {})[id] || '').strip ? (r.transcricoes[id] || '').strip() : String(r.transcricoes[id] || '').trim();
+      TR.cache.set(id, txt || '[áudio não transcrito]');
       TR.erro.delete(id);
     } catch (e) {
       TR.cache.set(id, '');
@@ -2306,7 +2307,7 @@
         // devolvem a interface pra quem esta usando.
         await _respirar();
         await trTranscrever(id);
-        if (!TR.cache.get(id)) TRTUDO.erros++;
+        if (TR.erro.has(id)) TRTUDO.erros++;
         TRTUDO.feitos++;
         if (aoAndar) aoAndar(TRTUDO);
         await _respirar();

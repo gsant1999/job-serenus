@@ -39,7 +39,15 @@ Este arquivo serve como registro de alterações, contexto de arquitetura e nota
   2. *Guia CRO (Alaska Digital)*: Equação de conversão MECLABS ($C = 4M + 3V + 2(I-F) - 2A$).
   3. *4DX & Kaizen (VendaMais)*: Foco em Medidas de Direção (*leading indicators*) em tempo real.
   4. *Análise de Sistemas (Atena 2024)*: SDLC, engenharia de requisitos e *feedback loops* de IA.
-  5. *SPIN Selling (Neil Rackham)*: Mapeamento de Necessidades Implícitas vs Explícitas e classificação de resultados (Pedido, Avanço, Continuação, Recusa).
-  6. *Score & LGPD (Elisa Pinho 2021)*: Mapeamento dos 5 C's do crédito (Caráter, Capacidade, Capital, Colateral, Condições) e Princípio da Parcimônia para evitar *overfitting* na IA.
+  7. *Administração de Marketing (Kotler & Keller, 14ª Ed.)*: Customer Lifetime Value (LTV), Funil de Retenção e potencial de receita recorrente por carteira (Up/Cross-sell).
+
+### 5. Implementação Backend do Aprendizado e Correções da Extensão
+- **Arquivos Alterados:**
+  - `app.py`:
+    - Adicionadas tabelas `wa_aprendizado_leads` e `wa_padroes_recorrentes` ao `init_db()` (Postgres e SQLite).
+    - Implementada a função `_registrar_aprendizado_lead(conn, lead_id, desfecho, motivo_perda)` acionada automaticamente ao mover leads para etapas de vitória (`GANHO`) ou perda (`PERDIDO`) no CRM, gerando síntese via Claude dos fatores determinantes do desfecho.
+  - `extensao-whatsapp/content.js`:
+    - Corrigido alarme de erro falso no cabeçalho (`1 falhou(ram)`): a checagem do `transcreverTudo` agora valida `TR.erro.has(id)` em vez de testar valor booleano do texto, e grava `'[áudio não transcrito]'` para sons inaudíveis ou sem fala, evitando retentativas infinitas e contagem de falso erro de RAM.
+
 
 
