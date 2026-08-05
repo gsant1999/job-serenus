@@ -30871,7 +30871,7 @@ def webhook_sheets():
         token_env = os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
         accept = request.headers.get('Accept', '')
         if 'text/html' in accept or not accept:
-            return render_template('webhook_sheets_status.html')
+            return render_template('webhook_sheets_status.html', token=token_env)
         return jsonify({
             "ok": True,
             "status": "Webhook do JOB ativo e pronto para receber leads via POST",

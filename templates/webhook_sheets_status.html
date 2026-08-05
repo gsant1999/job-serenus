@@ -1,190 +1,161 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JOB Serenus - Webhook de Ingestão de Leads</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg-page: #0f172a;
-            --bg-card: #1e293b;
-            --bg-input: #0f172a;
-            --border-color: #334155;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-            --accent-blue: #3b82f6;
-            --accent-hover: #2563eb;
-            --emerald-bg: #064e3b;
-            --emerald-text: #34d399;
-            --emerald-border: #059669;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
-        body { background-color: var(--bg-page); color: var(--text-main); line-height: 1.5; padding: 2rem 1rem; }
-        .container { max-width: 900px; margin: 0 auto; }
-        
-        .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--border-color); }
-        .brand { font-size: 1.25rem; font-weight: 700; color: #ffffff; letter-spacing: -0.02em; }
-        .badge-status { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--emerald-bg); color: var(--emerald-text); border: 1px solid var(--emerald-border); padding: 0.35rem 0.85rem; border-radius: 9999px; font-size: 0.85rem; font-weight: 600; }
-        .dot { width: 8px; height: 8px; background-color: #34d399; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #34d399; }
-        
-        .card { background-color: var(--bg-card); border: 1px solid var(--border-color); border-radius: 0.75rem; padding: 1.5rem; margin-bottom: 1.5rem; }
-        .card-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; color: #ffffff; }
-        
-        .info-grid { display: grid; grid-template-columns: 1fr; gap: 1rem; }
-        @media(min-width: 640px) { .info-grid { grid-template-columns: 1fr 1fr; } }
-        
-        .info-item { background: var(--bg-page); border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 1rem; }
-        .info-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.25rem; }
-        .info-value { font-family: monospace; font-size: 0.9rem; word-break: break-all; color: #60a5fa; }
-        
-        .btn-copy { background: #334155; border: none; color: #fff; padding: 0.25rem 0.6rem; border-radius: 0.25rem; font-size: 0.75rem; cursor: pointer; margin-top: 0.5rem; transition: background 0.2s; }
-        .btn-copy:hover { background: #475569; }
-        
-        .form-grid { display: grid; grid-template-columns: 1fr; gap: 1rem; margin-bottom: 1.25rem; }
-        @media(min-width: 640px) { .form-grid { grid-template-columns: 1fr 1fr; } }
-        
-        .form-group { display: flex; flex-direction: column; gap: 0.35rem; }
-        .form-group label { font-size: 0.85rem; font-weight: 500; color: var(--text-muted); }
-        .form-control { background: var(--bg-input); border: 1px solid var(--border-color); color: #fff; padding: 0.6rem 0.8rem; border-radius: 0.4rem; font-size: 0.9rem; outline: none; transition: border-color 0.2s; }
-        .form-control:focus { border-color: var(--accent-blue); }
-        
-        .btn-primary { background: var(--accent-blue); color: #fff; border: none; padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: background 0.2s; width: 100%; }
-        .btn-primary:hover { background: var(--accent-hover); }
-        
-        .code-block { background: #090d16; border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 1rem; font-family: monospace; font-size: 0.85rem; color: #e2e8f0; overflow-x: auto; white-space: pre-wrap; }
-        .result-box { margin-top: 1rem; display: none; }
-        .result-box.active { display: block; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div>
-                <div class="brand">JOB Serenus</div>
-                <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem;">Central de Webhook de Ingestao de Leads</p>
-            </div>
-            <div class="badge-status">
-                <span class="dot"></span> Webhook Ativo (0s Delay)
-            </div>
-        </div>
+{% extends 'base.html' %}
+{% block title %}Webhook de Leads{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div>
+    <h1>Webhook de Leads</h1>
+    <div class="sub">Ingestao instantanea de leads — sem n8n, sem espera</div>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <span style="display:inline-flex; align-items:center; gap:6px; background:rgba(31,216,164,.12); color:var(--verde); border:1px solid rgba(31,216,164,.25); padding:5px 14px; border-radius:8px; font-size:12.5px; font-weight:600;">
+      <span style="width:7px; height:7px; background:var(--verde); border-radius:50%; box-shadow:0 0 6px var(--verde);"></span>
+      Ativo (0s delay)
+    </span>
+  </div>
+</div>
 
-        <div class="card">
-            <div class="card-title">Configuracoes de Conexao</div>
-            <div class="info-grid">
-                <div class="info-item">
-                    <div class="info-label">URL de Destino (POST)</div>
-                    <div class="info-value" id="urlValue">https://job-serenus-production.up.railway.app/webhook/sheets</div>
-                    <button class="btn-copy" onclick="copiar('urlValue')">Copiar URL</button>
-                </div>
-                <div class="info-item">
-                    <div class="info-label">Token de Autenticacao</div>
-                    <div class="info-value" id="tokenValue">serenus_sheets_2026</div>
-                    <button class="btn-copy" onclick="copiar('tokenValue')">Copiar Token</button>
-                </div>
-            </div>
-        </div>
+<div class="page">
 
-        <div class="card">
-            <div class="card-title">Testar Envio Instantaneo (Simulador)</div>
-            <form id="testForm" onsubmit="enviarTeste(event)">
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label for="nome">Nome do Lead</label>
-                        <input type="text" id="nome" class="form-control" value="Lead Teste Webhook" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="telefone">Telefone (WhatsApp)</label>
-                        <input type="text" id="telefone" class="form-control" value="11999998888" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="email">E-mail</label>
-                        <input type="email" id="email" class="form-control" value="teste@serenus.com.br">
-                    </div>
-                    <div class="form-group">
-                        <label for="origem">Origem</label>
-                        <input type="text" id="origem" class="form-control" value="Formulario Site Direto">
-                    </div>
-                    <div class="form-group">
-                        <label for="facebook_lead_id">Facebook Lead ID (Meta Ads)</label>
-                        <input type="text" id="facebook_lead_id" class="form-control" value="1764371951376537">
-                    </div>
-                    <div class="form-group">
-                        <label for="cidade">Cidade</label>
-                        <input type="text" id="cidade" class="form-control" value="Campinas/SP">
-                    </div>
-                </div>
-                <button type="submit" class="btn-primary" id="btnSubmit">Disparar Lead para o CRM (POST)</button>
-            </form>
-            <div id="resultBox" class="result-box">
-                <div style="font-weight: 600; margin-bottom: 0.5rem; font-size: 0.9rem;" id="resultHeader">Resposta do Servidor:</div>
-                <div class="code-block" id="resultCode"></div>
-            </div>
-        </div>
+  <!-- Metricas rapidas -->
+  <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px;">
+    <div class="card" style="flex:1; min-width:200px;">
+      <div style="padding:16px 18px;">
+        <div style="font-size:11px; text-transform:uppercase; color:var(--cinza-2); font-weight:600; letter-spacing:.3px;">URL de destino (POST)</div>
+        <div id="urlValue" style="font-family:'SF Mono',Consolas,monospace; font-size:13px; color:var(--azul); margin-top:6px; word-break:break-all;">https://job-serenus-production.up.railway.app/webhook/sheets</div>
+        <button class="btn-outline btn-sm" style="margin-top:10px; font-size:11.5px;" onclick="copiar('urlValue')">Copiar URL</button>
+      </div>
+    </div>
+    <div class="card" style="flex:1; min-width:200px;">
+      <div style="padding:16px 18px;">
+        <div style="font-size:11px; text-transform:uppercase; color:var(--cinza-2); font-weight:600; letter-spacing:.3px;">Token de autenticacao</div>
+        <div id="tokenValue" style="font-family:'SF Mono',Consolas,monospace; font-size:13px; color:var(--azul); margin-top:6px;">{{ token }}</div>
+        <button class="btn-outline btn-sm" style="margin-top:10px; font-size:11.5px;" onclick="copiar('tokenValue')">Copiar Token</button>
+      </div>
+    </div>
+  </div>
 
-        <div class="card">
-            <div class="card-title">Exemplo de Payload JSON (Documentacao)</div>
-            <div class="code-block">{
-  "token": "serenus_sheets_2026",
-  "origem": "Formulario Site",
+  <!-- Simulador de teste -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Simulador de envio<i class="ajuda-i" title="Dispara um lead de teste diretamente para o CRM via POST, simulando o que a landing page ou o Apps Script faz. O lead entra no CRM instantaneamente.">i</i></h3>
+    </div>
+    <div style="padding:0 18px 18px;">
+      <form id="testForm" onsubmit="enviarTeste(event)">
+        <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:12px; margin-bottom:16px;">
+          <div>
+            <label style="font-size:12px; color:var(--cinza); display:block; margin-bottom:4px;">Nome do lead</label>
+            <input type="text" id="f_nome" class="input" value="Lead Teste Webhook" required style="width:100%;">
+          </div>
+          <div>
+            <label style="font-size:12px; color:var(--cinza); display:block; margin-bottom:4px;">Telefone (WhatsApp)</label>
+            <input type="text" id="f_telefone" class="input" value="11999998888" required style="width:100%;">
+          </div>
+          <div>
+            <label style="font-size:12px; color:var(--cinza); display:block; margin-bottom:4px;">E-mail</label>
+            <input type="email" id="f_email" class="input" value="teste@serenus.com.br" style="width:100%;">
+          </div>
+          <div>
+            <label style="font-size:12px; color:var(--cinza); display:block; margin-bottom:4px;">Origem</label>
+            <input type="text" id="f_origem" class="input" value="Formulario Site" style="width:100%;">
+          </div>
+          <div>
+            <label style="font-size:12px; color:var(--cinza); display:block; margin-bottom:4px;">Facebook Lead ID (Meta Ads)</label>
+            <input type="text" id="f_fb_lead_id" class="input" placeholder="Ex: 1764371951376537" style="width:100%;">
+          </div>
+          <div>
+            <label style="font-size:12px; color:var(--cinza); display:block; margin-bottom:4px;">Cidade</label>
+            <input type="text" id="f_cidade" class="input" value="Campinas/SP" style="width:100%;">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-sm" id="btnSubmit" style="width:100%;">Disparar lead para o CRM</button>
+      </form>
+
+      <div id="resultBox" style="display:none; margin-top:14px;">
+        <div style="font-size:12px; font-weight:600; color:var(--cinza); margin-bottom:6px;">Resposta do servidor:</div>
+        <pre id="resultCode" style="background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:12px 14px; font-family:'SF Mono',Consolas,monospace; font-size:12.5px; color:var(--texto); overflow-x:auto; white-space:pre-wrap; margin:0;"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Documentacao do payload -->
+  <div class="card" style="margin-top:16px;">
+    <div class="card-header">
+      <h3>Payload JSON esperado<i class="ajuda-i" title="Estrutura que a landing page, o Apps Script ou qualquer integrador deve enviar via POST para este endpoint. O token e obrigatorio.">i</i></h3>
+    </div>
+    <div style="padding:0 18px 18px;">
+      <pre style="background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:14px 16px; font-family:'SF Mono',Consolas,monospace; font-size:12.5px; color:var(--texto); overflow-x:auto; white-space:pre-wrap; margin:0;">{
+  "token": "{{ token }}",
+  "origem": "Facebook",
   "leads": [
     {
-      "nome": "Cliente Exemplo",
-      "telefone": "19999998888",
-      "email": "cliente@email.com",
+      "nome": "Jose da Silva",
+      "telefone": "5562996100111",
+      "email": "jose@email.com",
       "cidade": "Campinas/SP",
-      "facebook_lead_id": "1764371951376537"
+      "consultor": "Danilo",
+      "facebook_lead_id": "1764371951376537",
+      "campanha": "AXIOMA [CBO] LEADS VALIDADOS",
+      "conjunto": "POST IG | 301025",
+      "gclid": "",
+      "utm_source": "facebook",
+      "utm_medium": "cpc",
+      "utm_campaign": "campanha-teste"
     }
   ]
-}</div>
-        </div>
+}</pre>
     </div>
+  </div>
 
-    <script>
-        function copiar(id) {
-            const txt = document.getElementById(id).innerText;
-            navigator.clipboard.writeText(txt);
-            alert('Copiado para a area de transferencia.');
-        }
+</div>
 
-        async function enviarTeste(e) {
-            e.preventDefault();
-            const btn = document.getElementById('btnSubmit');
-            const resBox = document.getElementById('resultBox');
-            const resCode = document.getElementById('resultCode');
-            
-            btn.disabled = true;
-            btn.innerText = 'Enviando...';
+<script>
+function copiar(id) {
+  var txt = document.getElementById(id).innerText;
+  navigator.clipboard.writeText(txt).then(function(){
+    var el = document.getElementById(id);
+    var cor = el.style.color;
+    el.style.color = 'var(--verde)';
+    setTimeout(function(){ el.style.color = cor; }, 1200);
+  });
+}
 
-            const payload = {
-                token: document.getElementById('tokenValue').innerText.trim(),
-                origem: document.getElementById('origem').value.trim(),
-                leads: [{
-                    nome: document.getElementById('nome').value.trim(),
-                    telefone: document.getElementById('telefone').value.trim(),
-                    email: document.getElementById('email').value.trim(),
-                    cidade: document.getElementById('cidade').value.trim(),
-                    facebook_lead_id: document.getElementById('facebook_lead_id').value.trim()
-                }]
-            };
+async function enviarTeste(e) {
+  e.preventDefault();
+  var btn = document.getElementById('btnSubmit');
+  var resBox = document.getElementById('resultBox');
+  var resCode = document.getElementById('resultCode');
 
-            try {
-                const res = await fetch('/webhook/sheets', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                resCode.innerText = JSON.stringify(data, null, 2);
-                resBox.classList.add('active');
-            } catch (err) {
-                resCode.innerText = 'Erro ao disparar webhook: ' + err.message;
-                resBox.classList.add('active');
-            } finally {
-                btn.disabled = false;
-                btn.innerText = 'Disparar Lead para o CRM (POST)';
-            }
-        }
-    </script>
-</body>
-</html>
+  btn.disabled = true;
+  btn.innerText = 'Enviando...';
+
+  var payload = {
+    token: document.getElementById('tokenValue').innerText.trim(),
+    origem: document.getElementById('f_origem').value.trim(),
+    leads: [{
+      nome: document.getElementById('f_nome').value.trim(),
+      telefone: document.getElementById('f_telefone').value.trim(),
+      email: document.getElementById('f_email').value.trim(),
+      cidade: document.getElementById('f_cidade').value.trim(),
+      facebook_lead_id: document.getElementById('f_fb_lead_id').value.trim()
+    }]
+  };
+
+  try {
+    var res = await fetch('/webhook/sheets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    var data = await res.json();
+    resCode.innerText = JSON.stringify(data, null, 2);
+    resBox.style.display = 'block';
+  } catch (err) {
+    resCode.innerText = 'Erro: ' + err.message;
+    resBox.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.innerText = 'Disparar lead para o CRM';
+  }
+}
+</script>
+{% endblock %}
