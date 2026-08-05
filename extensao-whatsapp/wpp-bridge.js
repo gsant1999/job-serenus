@@ -390,6 +390,27 @@
         if (m && m.length) return m;
       } catch (e) { /* wa-js quebrada: cai pra colecao, ver abaixo */ }
     }
+
+    // CONVERSA QUE O CONSULTOR NUNCA ABRIU: materializa o chat e tenta de novo.
+    //
+    // Foi ler a wa-js empacotada que explicou o 'falha_mensagens' (27 dos 30
+    // erros da fila). getMessages faz assertGetChat(), que só OLHA no
+    // ChatStore — sincrono. Conversa nunca aberta não está lá, então ele fica
+    // sem `lastReceivedKey`, a consulta sai sem âncora e volta vazia. A
+    // própria lib tem o par disso: assertFindChat(), que faz
+    // `await chat.find(e)` e materializa o chat antes de usar.
+    //
+    // find é BUSCA, não navegação — é o oposto do openChatBottom que eu tentei
+    // de manhã e que virava a tela do consultor. Nada aqui toca na interface;
+    // e a trava de navegação continua valendo, então se eu estiver errado de
+    // novo ela barra em vez de deixar piscar.
+    if (alvo && window.WPP.chat.find) {
+      try {
+        await window.WPP.chat.find(alvo);
+        const m3 = await window.WPP.chat.getMessages(alvo, { count: Math.max(12, quantas || 200) });
+        if (m3 && m3.length) return m3;
+      } catch (e) { /* nem com find: cai pros recursos abaixo */ }
+    }
     // Ultimo recurso — quando a wa-js esta quebrada (foi o caso as 11:22 de
     // 03/08). Melhor pouca mensagem que nenhuma, MAS quem chama precisa saber
     // que pode vir incompleto: por isso o total viaja no retorno da leitura.

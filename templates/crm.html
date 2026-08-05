@@ -593,6 +593,29 @@
   </div>
 </div>
 
+{# VARREDURA PARADA — trabalho que alguém interrompeu e ninguém retomou.
+   Medido em 04/08/2026: 513 leads pendentes em 6 lotes parados, nenhum deles
+   visível em lugar nenhum. Aparece só quando existe, e some sozinho quando a
+   fila zera — aviso permanente vira paisagem e para de ser lido. #}
+{% if varreduras_paradas %}
+<div style="background:var(--panel-2); border:1px solid var(--borda); border-left:3px solid var(--amarelo,#f59e0b);
+            border-radius:9px; padding:11px 14px; margin:0 0 14px; font-size:13px; line-height:1.6;">
+  <b style="color:var(--texto);">
+    {{ varreduras_paradas|sum(attribute='pendentes') }} lead(s) esperando em
+    {{ varreduras_paradas|length }} varredura(s) parada(s)
+  </b>
+  <span style="color:var(--cinza);"> — alguém interrompeu e a fila ficou guardada. O que já foi lido continua lido.</span>
+  <div style="margin-top:7px; display:flex; gap:8px; flex-wrap:wrap;">
+    {% for v in varreduras_paradas %}
+    <a href="/crm/varredura/{{ v.id }}" style="font-size:12px; text-decoration:none; color:var(--azul);
+              border:1px solid var(--borda); border-radius:7px; padding:4px 10px;">
+      #{{ v.id }} · {{ v.consultor or 'sem consultor' }} · {{ v.pendentes }} na fila
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 {# Abas de quadro (só aparecem se houver mais de um — com um só, uma aba
    solitária seria ruído puro) e o download em Excel, sempre presente: cada
    aba baixa o funil que ela mostra, com os filtros ativos, não a base

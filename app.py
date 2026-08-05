@@ -20385,7 +20385,7 @@ def api_whatsapp_varredura_proximo():
     # varredura isso faz a tela do consultor pular de conversa em conversa.
     # 3.22 reverte. Abaixo disso a fila nao anda: e melhor a varredura parar e
     # dizer o motivo do que rodar mexendo na tela de quem esta trabalhando.
-    _MIN_VARREDURA = '3.26.0'
+    _MIN_VARREDURA = '3.27.0'
     versao = (request.args.get('versao') or '').strip()
     if not _versao_maior_ou_igual(versao, _MIN_VARREDURA):
         return _wa_cors(jsonify({
@@ -24200,8 +24200,31 @@ def crm():
     except Exception as e:
         app.logger.info(f"[CRM] fila de acao: {e}")
         fila = None
+    # VARREDURA PARADA NÃO PODE FICAR INVISÍVEL.
+    #
+    # Medido em 04/08/2026: 513 leads pendentes em 6 lotes, TODOS parados —
+    # e nenhum deles aparecia em lugar nenhum do CRM. 'parado' só nasce do
+    # botão "Parar agora", ou seja, alguém interrompeu (quase sempre ao ver
+    # erro) e a fila ficou lá, esquecida. Sem aviso, o trabalho pago já feito
+    # (o lote lê e cobra por lead) fica parado sem ninguém decidir nada.
+    varreduras_paradas = []
+    try:
+        _uid_v = session['user_id']
+        varreduras_paradas = [dict(r) for r in conn.execute(
+            """SELECT l.id, l.total, u.nome consultor,
+                      (SELECT COUNT(*) FROM varredura_item i
+                       WHERE i.lote_id=l.id AND i.status='pendente') pendentes
+               FROM varredura_lote l LEFT JOIN usuarios u ON u.id = l.consultor_id
+               WHERE l.status='parado'""" + ('' if eh_admin else " AND l.consultor_id=?") +
+            """ ORDER BY l.id DESC LIMIT 5""",
+            () if eh_admin else (_uid_v,)).fetchall()]
+        varreduras_paradas = [v for v in varreduras_paradas if v['pendentes']]
+    except Exception as e:
+        app.logger.info(f"[CRM] aviso de varredura parada: {e}")
     close_db(conn)
+
     return render_template('crm.html', fila=fila, kanban=kanban, kanban_total=kanban_total,
+                           varreduras_paradas=varreduras_paradas,
                            kanban_valor=kanban_valor, cards_por_coluna=CARDS_POR_COLUNA,
                            etapas=etapas, total=total, responsaveis=responsaveis, eh_admin=eh_admin,
                            filtros=filtros_ativos, consultores_externos=consultores_externos,
