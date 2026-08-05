@@ -24814,7 +24814,8 @@ _MIDIA_CAMINHOS = {
     'gclid':    ('click.gclid', 'gclid', 'utm.gclid', 'click.gcl_id', 'gcl_id'),
     'gbraid':   ('click.gbraid', 'gbraid'),
     'wbraid':   ('click.wbraid', 'wbraid'),
-    'fbclid':   ('click.fbclid', 'fbclid'),
+    'fbclid':   ('click.fbclid', 'fbclid', 'click.facebook_lead_id', 'facebook_lead_id', 'click.fb_lead_id', 'fb_lead_id'),
+    'facebook_lead_id': ('click.facebook_lead_id', 'facebook_lead_id', 'click.fb_lead_id', 'fb_lead_id', 'click.fbclid', 'fbclid'),
     # A PAGINA QUE CONVERTEU. A ingestao ja gravava isto desde sempre (webhook em
     # click.landing, planilha em landing_url) — so nunca esteve nesta lista, entao
     # nenhuma tela conseguia ler. Vale pra pago E pra organico: nao depende de
@@ -30843,11 +30844,11 @@ def webhook_sheets_diagnostico():
     })
 
 
-@app.route('/webhook/sheets', methods=['POST'])
+@app.route('/webhook/sheets', methods=['GET', 'POST'])
 def webhook_sheets():
     """
-    Recebe leads do Google Sheets via Apps Script.
-    Payload esperado:
+    Recebe leads do Google Sheets via Apps Script ou formulários web.
+    Payload esperado (POST):
     {
       "token": "SEU_TOKEN_AQUI",
       "origem": "Facebook" | "Google" | "MedSenior",
@@ -30860,11 +30861,33 @@ def webhook_sheets():
           "email": "fulano@gmail.com",
           "cidade": "Campinas",
           "tipo": "PF",
-          "num_pessoas": "1"
+          "num_pessoas": "1",
+          "facebook_lead_id": "1764371951376537"
         }, ...
       ]
     }
     """
+    if request.method == 'GET':
+        token_env = os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
+        return jsonify({
+            "ok": True,
+            "status": "Webhook do JOB ativo e pronto para receber leads via POST",
+            "webhook_url": "https://job-serenus-production.up.railway.app/webhook/sheets",
+            "metodo_esperado": "POST",
+            "exemplo_payload": {
+                "token": token_env,
+                "origem": "Formulário Site",
+                "leads": [
+                    {
+                        "nome": "Exemplo",
+                        "telefone": "11999999999",
+                        "email": "exemplo@email.com",
+                        "facebook_lead_id": "1764371951376537"
+                    }
+                ]
+            }
+        }), 200
+
     try:
         data = request.get_json(force=True) or {}
 
@@ -30940,25 +30963,34 @@ def webhook_sheets():
             if num_pess:
                 obs += f" | Pessoas: {num_pess}"
 
-            # UTM/click (mesma lógica de _processar_lead) — o Apps Script pode mandar
+            # UTM/click (mesma lógica de _processar_lead) — o Apps Script ou formulário pode mandar
             # esses campos junto do lead; se não mandar, fica vazio (sem quebrar nada).
             utm_medium = (lead.get('utm_medium') or '').strip()
             # gbraid/wbraid: é o que o Google manda no lugar do gclid quando o
             # clique vem de iPhone ou de dentro de um app. Metade do tráfego.
-            # Só o gclid era lido aqui, então essa metade nunca teve como voltar
-            # pro Google — e a saída (_ads_click_id_do_lead) já sabia lê-los.
             gclid = (lead.get('gclid') or lead.get('gbraid') or lead.get('wbraid')
                      or lead.get('gcl_id') or '').strip()
+
+            # Facebook Lead ID (Meta Lead Ads / formulário)
+            fb_lead_id = (lead.get('facebook_lead_id') or lead.get('fb_lead_id')
+                          or lead.get('lead_id_meta') or lead.get('fbclid') or '').strip()
+
             _med = utm_medium.lower()
             if _med in ('cpc', 'ppc', 'paid', 'paidsearch', 'paid_search', 'paid-search', 'display', 'cpm'):
                 trafego = 'Pago'
-            elif utm_medium or (lead.get('utm_source') or '').strip() or (lead.get('utm_campaign') or '').strip():
-                trafego = 'Orgânico'
+            elif utm_medium or (lead.get('utm_source') or '').strip() or (lead.get('utm_campaign') or '').strip() or fb_lead_id or gclid:
+                trafego = 'Orgânico' if not (gclid or fb_lead_id) else 'Pago'
             else:
                 trafego = None
+
             click = {k: (lead.get(k) or '').strip() for k in
                      ('utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-                      'gclid', 'gbraid', 'wbraid', 'landing_url')}
+                      'gclid', 'gbraid', 'wbraid', 'landing_url', 'facebook_lead_id', 'fb_lead_id', 'fbclid')}
+            if fb_lead_id:
+                click['facebook_lead_id'] = fb_lead_id
+                if 'fbclid' not in click or not click['fbclid']:
+                    click['fbclid'] = fb_lead_id
+
             click = {k: v for k, v in click.items() if v}
             dados_extras_wh = json.dumps({'click': click}, ensure_ascii=False) if click else None
 
