@@ -23429,14 +23429,24 @@ def painel_lead(lid):
                                 AND descricao LIKE '%Emitida/Ativa'
                               ORDER BY id DESC LIMIT 1""", (p['id'],)).fetchone()
         p['implantada_em'] = imp['criado_em'] if imp else None
-        p['ads'] = conn.execute("""SELECT status, click_tipo, valor, conversao_em
-                                   FROM google_ads_conversoes WHERE proposta_id=?""",
-                                (p['id'],)).fetchone()
-        p['ads'] = dict(p['ads']) if p['ads'] else None
-        p['meta'] = conn.execute("""SELECT status, valor, conversao_em
-                                    FROM meta_conversoes WHERE proposta_id=?""",
-                                 (p['id'],)).fetchone()
-        p['meta'] = dict(p['meta']) if p['meta'] else None
+        try:
+            p['ads'] = conn.execute("""SELECT status, click_tipo, valor, conversao_em
+                                       FROM google_ads_conversoes WHERE proposta_id=?""",
+                                    (p['id'],)).fetchone()
+            p['ads'] = dict(p['ads']) if p['ads'] else None
+        except Exception as e:
+            app.logger.warning(f"[PAINEL] ads: {e}")
+            p['ads'] = None
+
+        try:
+            p['meta'] = conn.execute("""SELECT status, valor, conversao_em
+                                        FROM meta_conversoes WHERE proposta_id=?""",
+                                     (p['id'],)).fetchone()
+            p['meta'] = dict(p['meta']) if p['meta'] else None
+        except Exception as e:
+            app.logger.warning(f"[PAINEL] meta: {e}")
+            p['meta'] = None
+
         vendas.append(p)
 
     receita = sum(float(v['valor'] or 0) for v in vendas)
