@@ -486,6 +486,32 @@
         <dd>{% if midia.landing %}<a href="{{ midia.landing }}" target="_blank" rel="noopener" title="{{ midia.landing }}">{{ midia.landing|replace('https://','')|replace('http://','') | truncate(46, True, '…') }}</a>{% else %}—{% endif %}</dd></div>
       {% set gtxt = (midia.gclid or '')|string %}
       <div class="pl-linha"><dt>Click ID</dt><dd style="font-family:ui-monospace,Menlo,monospace; font-size:11px;">{{ gtxt[:28] ~ '…' if gtxt|length > 28 else (gtxt or '—') }}</dd></div>
+      <div class="pl-linha"><dt>Google Ads<i class="ajuda-i" title="Status da conversão offline enviada ao Google Ads para esta proposta.">i</i></dt>
+        <dd>
+          {% if midia.ads_status == 'enviada' %}
+            <span style="color:var(--verde); font-weight:600;" title="{{ midia.ads_detalhe or '' }}">Enviada (confirmada)</span>
+          {% elif midia.ads_status == 'pendente' %}
+            <span style="color:var(--amarelo); font-weight:600;">Na fila (envio automático)</span>
+          {% elif midia.ads_status %}
+            <span style="color:var(--vermelho); font-weight:600;" title="{{ midia.ads_detalhe or '' }}">{{ midia.ads_status }}</span>
+          {% else %}
+            <span style="color:var(--texto-mutado);">— sem proposta ativa</span>
+          {% endif %}
+        </dd>
+      </div>
+      <div class="pl-linha"><dt>Meta CAPI<i class="ajuda-i" title="Status da conversão enviada à Meta Conversions API (Facebook/Instagram).">i</i></dt>
+        <dd>
+          {% if midia.meta_status == 'enviada' %}
+            <span style="color:var(--verde); font-weight:600;" title="{{ midia.meta_detalhe or '' }}">Enviada (confirmada)</span>
+          {% elif midia.meta_status == 'pendente' %}
+            <span style="color:var(--amarelo); font-weight:600;">Na fila (envio automático)</span>
+          {% elif midia.meta_status %}
+            <span style="color:var(--vermelho); font-weight:600;" title="{{ midia.meta_detalhe or '' }}">{{ midia.meta_status }}</span>
+          {% else %}
+            <span style="color:var(--texto-mutado);">— sem proposta ativa</span>
+          {% endif %}
+        </dd>
+      </div>
       {% if indicou %}
       <div class="pl-linha"><dt>Indicado por</dt><dd>{% if indicou.id %}<a href="/lead/{{ indicou.id }}">{{ indicou.nome }}</a>{% else %}{{ indicou.nome }}{% endif %}</dd></div>
       {% endif %}

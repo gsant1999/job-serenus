@@ -23449,6 +23449,11 @@ def painel_lead(lid):
 
         vendas.append(p)
 
+    midia['ads_status'] = next((v['ads'].get('status') for v in vendas if v.get('ads') and v['ads'].get('status')), None)
+    midia['ads_detalhe'] = next((v['ads'].get('detalhe') for v in vendas if v.get('ads') and v['ads'].get('detalhe')), None)
+    midia['meta_status'] = next((v['meta'].get('status') for v in vendas if v.get('meta') and v['meta'].get('status')), None)
+    midia['meta_detalhe'] = next((v['meta'].get('detalhe') for v in vendas if v.get('meta') and v['meta'].get('detalhe')), None)
+
     receita = sum(float(v['valor'] or 0) for v in vendas)
     com_bruta = sum(float(v['com_bruta'] or 0) for v in vendas)
     com_liquida = sum(float(v['com_liquida'] or 0) for v in vendas)
@@ -23676,6 +23681,11 @@ def api_lead_sincronizar_midia(lid):
     conn = db()
     ok, gclid, msg = _sincronizar_midia_lead_completo(conn, lid)
     close_db(conn)
+    try:
+        enviar_conversoes_ads(limite=50)
+        enviar_conversoes_meta(so_simular=False)
+    except Exception:
+        pass
     if request.method == 'GET' and not request.is_json:
         flash(msg, 'success' if ok else 'warning')
         return redirect(f'/lead/{lid}')
