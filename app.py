@@ -30869,23 +30869,15 @@ def webhook_sheets():
     """
     if request.method == 'GET':
         token_env = os.environ.get('SHEETS_WEBHOOK_TOKEN', 'serenus_sheets_2026')
+        accept = request.headers.get('Accept', '')
+        if 'text/html' in accept or not accept:
+            return render_template('webhook_sheets_status.html')
         return jsonify({
             "ok": True,
             "status": "Webhook do JOB ativo e pronto para receber leads via POST",
             "webhook_url": "https://job-serenus-production.up.railway.app/webhook/sheets",
             "metodo_esperado": "POST",
-            "exemplo_payload": {
-                "token": token_env,
-                "origem": "Formulário Site",
-                "leads": [
-                    {
-                        "nome": "Exemplo",
-                        "telefone": "11999999999",
-                        "email": "exemplo@email.com",
-                        "facebook_lead_id": "1764371951376537"
-                    }
-                ]
-            }
+            "token": token_env
         }), 200
 
     try:
