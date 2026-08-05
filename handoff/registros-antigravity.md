@@ -50,7 +50,17 @@ Este arquivo serve como registro de alterações, contexto de arquitetura e nota
   - `scripts/retroalimentar_aprendizado_guilherme.py`:
     - Script CLI em Python para executar a retroalimentação de inteligência em lote diretamente no terminal.
   - `extensao-whatsapp/content.js`:
-    - Corrigido alarme de erro falso no cabeçalho (`1 falhou(ram)`): a checagem do `transcreverTudo` agora valida `TR.erro.has(id)` em vez de testar valor booleano do texto, e grava `'[áudio não transcrito]'` para sons inaudíveis ou sem fala, evitando retentativas infinitas e contagem de falso erro de RAM.
+### 6. Sincronização de Mídia (Google Sheets) & Comunicação de Venda (Google Ads / Meta CAPI)
+- **Arquivos Alterados:**
+  - `app.py`:
+    - Implementada a função `_sincronizar_midia_lead_completo(conn, lead_id)` e rotas `/lead/<id>/sincronizar-midia` e `/lead/<id>/comunicar-venda`.
+    - Atualizado o `_clique_backfill_lead` para fundir `click` (gclid, fbclid, landing_url) e `midia` (campanha, criativo, utms) mesmo se `dados_extras` já possuir conteúdo.
+    - Conectado o enfileiramento automático de vendas nas tabelas `google_ads_conversoes` e `meta_conversoes` no momento da sincronização.
+  - `templates/painel_lead.html`:
+    - Adicionados os botões **`🔄 Buscar / Sincronizar da Planilha`** e **`🚀 Comunicar Venda ao Google & Meta`** no quadro "De onde veio" da tela 360 do lead ([`/lead/<id>`](file:///lead/<id>)).
+    - Adicionado atalho direto para o painel de conversão offline ([`/google-ads`](file:///google-ads)).
+  - `templates/google_ads.html`:
+    - Adicionados links diretos da tabela de conversões para os painéis dos leads ([`/lead/<id>`](file:///lead/<id>)).
 
 
 

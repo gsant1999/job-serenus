@@ -23433,6 +23433,10 @@ def painel_lead(lid):
                                    FROM google_ads_conversoes WHERE proposta_id=?""",
                                 (p['id'],)).fetchone()
         p['ads'] = dict(p['ads']) if p['ads'] else None
+        p['meta'] = conn.execute("""SELECT status, valor, conversao_em
+                                    FROM meta_conversoes WHERE proposta_id=?""",
+                                 (p['id'],)).fetchone()
+        p['meta'] = dict(p['meta']) if p['meta'] else None
         vendas.append(p)
 
     receita = sum(float(v['valor'] or 0) for v in vendas)
@@ -23508,6 +23512,186 @@ def painel_lead(lid):
                            doc_parentesco_rotulos=_DOC_PARENTESCO_ROTULO,
                            doc_parentesco_comprova=_DOC_PARENTESCO_COMPROVA,
                            taxa_usd_brl=_USD_BRL_TAXA)
+
+
+def _sincronizar_midia_lead_completo(conn, lead_id):
+    """Sincroniza mídia (gclid, fbclid, campanha, criativo, utms) para um lead:
+    1. Busca clique_pendente pelo telefone_norm do lead.
+    2. Busca nas linhas do Google Sheets (aba Página1 e Facebook).
+    3. Atualiza gclid, origem, trafego e dados_extras no crm_leads.
+    4. Se o lead tiver proposta Emitida/Ativa ou cadastrada, enfileira no Google Ads e Meta Ads.
+    Devolve (sucesso, gclid, mensagem)."""
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+    if not lead:
+        return False, None, "Lead não encontrado"
+        
+    lead_dict = dict(lead)
+    tel_norm = _normalizar_telefone(str(lead_dict.get('telefone') or ''))
+    nome = (lead_dict.get('nome') or '').strip().lower()
+    
+    gclid = (lead_dict.get('gclid') or '').strip()
+    origem = (lead_dict.get('origem') or '').strip()
+    trafego = (lead_dict.get('trafego') or '').strip()
+    
+    ex_str = lead_dict.get('dados_extras') or '{}'
+    try:
+        extras = json.loads(ex_str) if isinstance(ex_str, str) else (ex_str or {})
+    except Exception:
+        extras = {}
+        
+    click = extras.get('click') if isinstance(extras.get('click'), dict) else {}
+    midia = extras.get('midia') if isinstance(extras.get('midia'), dict) else {}
+    
+    sincronizou_algo = False
+    motivo_log = []
+
+    # 1. Tenta buscar em clique_pendente
+    if tel_norm:
+        cp = conn.execute("SELECT * FROM clique_pendente WHERE telefone_norm=?", (tel_norm,)).fetchone()
+        if cp:
+            cp_dict = dict(cp)
+            if cp_dict.get('gclid') and not gclid:
+                gclid = cp_dict['gclid']
+                click['gclid'] = gclid
+                sincronizou_algo = True
+                motivo_log.append('gclid do clique_pendente')
+            if cp_dict.get('landing') and not click.get('landing'):
+                click['landing'] = cp_dict['landing']
+                sincronizou_algo = True
+            if cp_dict.get('fbclid') and not click.get('fbclid'):
+                click['fbclid'] = cp_dict['fbclid']
+                sincronizou_algo = True
+
+    # 2. Busca nas planilhas do Sheets
+    try:
+        leads_sheets = _listar_leads_do_sheets()
+        for row in leads_sheets:
+            row_tel = _normalizar_telefone(_col(row, 'Celular', 'Whatsapp', 'WhatsApp', 'Telefone', 'Contato'))
+            row_nome = (_col(row, 'Nome', 'nome') or '').strip().lower()
+            
+            # Bate por telefone ou nome
+            if (tel_norm and row_tel and (tel_norm in row_tel or row_tel in tel_norm)) or (nome and row_nome and (nome in row_nome or row_nome in nome)):
+                row_gclid = _col(row, 'gclid', 'GCLID', 'GClid')
+                row_fbclid = _col(row, 'fbclid', 'FBCLID')
+                row_gbraid = _col(row, 'gbraid', 'GBRAID')
+                row_wbraid = _col(row, 'wbraid', 'WBRAID')
+                row_landing = _col(row, 'landing_url', 'landing', 'Landing', 'page', 'url')
+                
+                row_source = _col(row, 'UTM SOURCE', 'utm_source', 'utm source')
+                row_medium = _col(row, 'utm_medium', 'UTM MEDIUM', 'utm medium')
+                row_campaign = _col(row, 'utm_campaign', 'UTM CAMPAIGN', 'utm campaign')
+                row_term = _col(row, 'utm_term', 'UTM TERM', 'utm term')
+                row_content = _col(row, 'UTM_Content', 'utm_content', 'UTM CONTENT', 'utm content')
+                row_origem_sheets = row.get('_origem') or _col(row, 'origem', 'Origem')
+                
+                if row_gclid:
+                    gclid = row_gclid
+                    click['gclid'] = row_gclid
+                    sincronizou_algo = True
+                    motivo_log.append('gclid do Sheets')
+                if row_fbclid:
+                    click['fbclid'] = row_fbclid
+                    sincronizou_algo = True
+                if row_gbraid:
+                    click['gbraid'] = row_gbraid
+                    sincronizou_algo = True
+                if row_wbraid:
+                    click['wbraid'] = row_wbraid
+                    sincronizou_algo = True
+                if row_landing:
+                    click['landing'] = row_landing
+                    sincronizou_algo = True
+                    
+                if row_campaign:
+                    midia['campanha'] = row_campaign
+                    midia['campaign'] = row_campaign
+                    sincronizou_algo = True
+                if row_content:
+                    midia['criativo'] = row_content
+                    midia['content'] = row_content
+                    sincronizou_algo = True
+                if row_source:
+                    midia['source'] = row_source
+                    origem = row_source
+                    sincronizou_algo = True
+                if row_medium:
+                    midia['medium'] = row_medium
+                    if row_medium.lower() in ('cpc', 'ppc', 'paid', 'paidsearch'):
+                        trafego = 'Pago'
+                    sincronizou_algo = True
+                break
+    except Exception as e:
+        app.logger.warning(f"[SINCRONIZAR-MIDIA] Erro na leitura do Sheets: {e}")
+
+    # Atualiza o lead no banco
+    extras['click'] = click
+    extras['midia'] = midia
+    sets, vals = [], []
+    if gclid:
+        sets.append('gclid=?')
+        vals.append(gclid)
+    if origem:
+        sets.append('origem=?')
+        vals.append(origem)
+    if trafego:
+        sets.append('trafego=?')
+        vals.append(trafego)
+    sets.append('dados_extras=?')
+    vals.append(json.dumps(extras, ensure_ascii=False))
+    
+    conn.execute(f"UPDATE crm_leads SET {', '.join(sets)} WHERE id=?", vals + [lead_id])
+    conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                    VALUES (?,?,?,?,?)""",
+                 (lead_id, session.get('nome') or 'Sistema', 'edicao',
+                  'Sincronização manual de mídia (Google Sheets / Meta) executada', _agora_sp()))
+    conn.commit()
+
+    # Re-enfileira nas propostas para Google Ads e Meta Ads
+    props = conn.execute("SELECT id FROM propostas WHERE lead_id=? AND COALESCE(status,'') <> 'Excluída'", (lead_id,)).fetchall()
+    ads_status, meta_status = None, None
+    for p in props:
+        pid = p['id'] if hasattr(p, 'keys') else p[0]
+        _, ads_status = _ads_enfileirar(conn, pid, 'sincronizacao_manual_painel')
+        _, meta_status = _meta_enfileirar(conn, pid, 'sincronizacao_manual_painel')
+    conn.commit()
+    
+    msg_res = "Sincronizado do Sheets com sucesso!" if sincronizou_algo else "Dados conferidos com a planilha."
+    return True, gclid, f"{msg_res} (Google Ads: {ads_status or 'sem proposta'}, Meta: {meta_status or 'sem proposta'})"
+
+
+@app.route('/lead/<int:lid>/sincronizar-midia', methods=['GET', 'POST'])
+@app.route('/crm/lead/<int:lid>/sincronizar-midia', methods=['GET', 'POST'])
+@login_required
+def api_lead_sincronizar_midia(lid):
+    conn = db()
+    ok, gclid, msg = _sincronizar_midia_lead_completo(conn, lid)
+    close_db(conn)
+    if request.method == 'GET' and not request.is_json:
+        flash(msg, 'success' if ok else 'warning')
+        return redirect(f'/lead/{lid}')
+    return jsonify({"ok": ok, "gclid": gclid, "msg": msg})
+
+
+@app.route('/lead/<int:lid>/comunicar-venda', methods=['POST'])
+@app.route('/crm/lead/<int:lid>/comunicar-venda', methods=['POST'])
+@login_required
+def api_lead_comunicar_venda(lid):
+    """Envia imediatamente a conversão offline deste lead para o Google Ads e Meta Ads."""
+    conn = db()
+    props = conn.execute("SELECT id FROM propostas WHERE lead_id=? AND COALESCE(status,'') <> 'Excluída'", (lid,)).fetchall()
+    if not props:
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "Este lead ainda não possui proposta registrada para comunicar venda."}), 400
+    for p in props:
+        pid = p['id'] if hasattr(p, 'keys') else p[0]
+        _ads_enfileirar(conn, pid, 'comunicacao_manual_venda')
+        _meta_enfileirar(conn, pid, 'comunicacao_manual_venda')
+    conn.commit()
+    close_db(conn)
+    
+    res_ads = enviar_conversoes_ads(limite=50)
+    res_meta = enviar_conversoes_meta(so_simular=False)
+    return jsonify({"ok": True, "google_ads": res_ads, "meta_ads": res_meta, "msg": "Conversão da venda enviada com sucesso para o Google Ads e Meta Ads!"})
 
 
 @app.route('/calibracao')

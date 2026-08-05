@@ -110,7 +110,13 @@
           {% for l in linhas %}
           <tr>
             <td><a href="/proposta/{{ l.proposta_id }}" style="color:var(--info); text-decoration:none;">{{ l.razao_social or ('#' ~ l.proposta_id) }}</a></td>
-            <td style="color:var(--cinza);">{{ l.lead_nome or '— sem lead' }}</td>
+            <td>
+              {% if l.lead_id %}
+                <a href="/lead/{{ l.lead_id }}" style="color:var(--info); font-weight:600; text-decoration:none;">{{ l.lead_nome or ('lead #' ~ l.lead_id) }}</a>
+              {% else %}
+                <span style="color:var(--cinza);">— sem lead</span>
+              {% endif %}
+            </td>
             <td class="td-mono" style="color:var(--cinza);">{{ (l.click_tipo or '—') }}{% if l.click_id %} · {{ l.click_id[:14] }}…{% endif %}</td>
             <td class="td-mono">{{ (l.valor or 0)|moeda }}</td>
             <td>

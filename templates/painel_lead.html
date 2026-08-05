@@ -482,18 +482,25 @@
       <div class="pl-linha"><dt>Tráfego</dt><dd>{{ midia.trafego or '—' }}</dd></div>
       <div class="pl-linha"><dt>Campanha</dt><dd>{{ midia.campanha or '—' }}</dd></div>
       <div class="pl-linha"><dt>Criativo</dt><dd>{{ midia.criativo or '—' }}</dd></div>
-      {# A pagina que converteu vale pro pago E pro organico — nao depende de
-         anuncio, so de a landing mandar a propria URL. Link clicavel porque a
-         pergunta seguinte e sempre "que pagina e essa?". #}
-      <div class="pl-linha"><dt>Página que converteu<i class="ajuda-i" title="A página onde este lead preencheu o formulário. Serve para tráfego pago e orgânico: mostra qual página converte, não só qual anúncio trouxe o clique.">i</i></dt>
+      <div class="pl-linha"><dt>Página que converteu<i class="ajuda-i" title="A página onde este lead preencheu o formulário.">i</i></dt>
         <dd>{% if midia.landing %}<a href="{{ midia.landing }}" target="_blank" rel="noopener" title="{{ midia.landing }}">{{ midia.landing|replace('https://','')|replace('http://','') | truncate(46, True, '…') }}</a>{% else %}—{% endif %}</dd></div>
       <div class="pl-linha"><dt>Click ID</dt><dd style="font-family:ui-monospace,Menlo,monospace; font-size:11px;">{{ midia.gclid[:28] ~ '…' if midia.gclid|length > 28 else (midia.gclid or '—') }}</dd></div>
       {% if indicou %}
       <div class="pl-linha"><dt>Indicado por</dt><dd>{% if indicou.id %}<a href="/lead/{{ indicou.id }}">{{ indicou.nome }}</a>{% else %}{{ indicou.nome }}{% endif %}</dd></div>
       {% endif %}
     </dl>
-    {# Não medido é diferente de zero. Dizer qual é o buraco vale mais do que
-       exibir um número inventado de custo por lead. #}
+    <div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+      <button type="button" class="btn-outline btn-sm" id="btnSincMidia" onclick="sincronizarMidiaLead({{ lead.id }})">
+        🔄 Buscar / Sincronizar da Planilha
+      </button>
+      {% if vendas %}
+      <button type="button" class="btn-outline btn-sm destaque" id="btnComVenda" onclick="comunicarVendaGoogleMeta({{ lead.id }})">
+        🚀 Comunicar Venda ao Google & Meta
+      </button>
+      {% endif %}
+      <a href="/google-ads" class="btn-outline btn-sm" style="margin-left:auto;">Painel de Conversão Offline</a>
+    </div>
+    <div id="msgStatusMidia" style="font-size:11.5px; color:var(--verde); margin-top:8px; display:none;"></div>
     <div class="pl-vazio" style="margin-top:12px;">
       Custo de mídia por lead ainda não é calculado: o sistema guarda a campanha e o criativo,
       mas não o investimento gasto neles. Para ter custo por lead, falta trazer o gasto diário
@@ -964,9 +971,49 @@ function fecharDoc(){
 }
 document.addEventListener('keydown', (e) => { if(e.key === 'Escape') fecharDoc(); });
 
-async function copiarDocsTexto(b){
-  const t = document.getElementById('pl-docs-texto');
-  if(!t) return;
+async function sincronizarMidiaLead(lid){
+  const btn = document.getElementById('btnSincMidia');
+  const msg = document.getElementById('msgStatusMidia');
+  if(btn) { btn.disabled = true; btn.textContent = '🔄 Buscando na Planilha...'; }
+  if(msg) { msg.style.display = 'block'; msg.textContent = 'Buscando dados no Google Sheets e repassando para o CRM...'; }
+  try {
+    const res = await fetch('/lead/' + lid + '/sincronizar-midia', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    const d = await res.json();
+    if(d.ok){
+      if(msg) { msg.className = 'pl-msg'; msg.textContent = d.msg || 'Mídia sincronizada com sucesso!'; }
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      if(msg) { msg.className = 'pl-msg ruim'; msg.textContent = d.erro || 'Falha ao sincronizar mídia.'; }
+      if(btn) { btn.disabled = false; btn.textContent = '🔄 Buscar / Sincronizar da Planilha'; }
+    }
+  } catch(e) {
+    if(msg) { msg.className = 'pl-msg ruim'; msg.textContent = 'Erro ao conectar ao servidor.'; }
+    if(btn) { btn.disabled = false; btn.textContent = '🔄 Buscar / Sincronizar da Planilha'; }
+  }
+}
+
+async function comunicarVendaGoogleMeta(lid){
+  const btn = document.getElementById('btnComVenda');
+  const msg = document.getElementById('msgStatusMidia');
+  if(btn) { btn.disabled = true; btn.textContent = '🚀 Enviando ao Google & Meta...'; }
+  if(msg) { msg.style.display = 'block'; msg.className = 'pl-msg'; msg.textContent = 'Disparando conversão offline para Google Ads e Meta CAPI...'; }
+  try {
+    const res = await fetch('/lead/' + lid + '/comunicar-venda', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    const d = await res.json();
+    if(d.ok){
+      if(msg) { msg.className = 'pl-msg'; msg.textContent = d.msg || 'Conversão de venda comunicada ao Google e Meta!'; }
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      if(msg) { msg.className = 'pl-msg ruim'; msg.textContent = d.erro || 'Não foi possível enviar a conversão.'; }
+      if(btn) { btn.disabled = false; btn.textContent = '🚀 Comunicar Venda ao Google & Meta'; }
+    }
+  } catch(e) {
+    if(msg) { msg.className = 'pl-msg ruim'; msg.textContent = 'Erro ao conectar ao servidor.'; }
+    if(btn) { btn.disabled = false; btn.textContent = '🚀 Comunicar Venda ao Google & Meta'; }
+  }
+}
+</script>
+{% endblock %}
   try { await navigator.clipboard.writeText(t.textContent); b.textContent = 'Copiado'; }
   catch(e){ b.textContent = 'Não deu — selecione e copie'; }
   setTimeout(() => { b.textContent = 'Copiar tudo'; }, 2200);
