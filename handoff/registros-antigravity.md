@@ -46,6 +46,9 @@ Este arquivo serve como registro de alterações, contexto de arquitetura e nota
   - `app.py`:
     - Adicionadas tabelas `wa_aprendizado_leads` e `wa_padroes_recorrentes` ao `init_db()` (Postgres e SQLite).
     - Implementada a função `_registrar_aprendizado_lead(conn, lead_id, desfecho, motivo_perda)` acionada automaticamente ao mover leads para etapas de vitória (`GANHO`) ou perda (`PERDIDO`) no CRM, gerando síntese via Claude dos fatores determinantes do desfecho.
+    - Criada a rota de administração `/admin/crm/retroalimentar-aprendizado` (aceita parâmetro `consultor`, default `'Guilherme'`) para rodar em lote a síntese de IA sobre todas as vendas fechadas e perdidas históricas.
+  - `scripts/retroalimentar_aprendizado_guilherme.py`:
+    - Script CLI em Python para executar a retroalimentação de inteligência em lote diretamente no terminal.
   - `extensao-whatsapp/content.js`:
     - Corrigido alarme de erro falso no cabeçalho (`1 falhou(ram)`): a checagem do `transcreverTudo` agora valida `TR.erro.has(id)` em vez de testar valor booleano do texto, e grava `'[áudio não transcrito]'` para sons inaudíveis ou sem fala, evitando retentativas infinitas e contagem de falso erro de RAM.
 

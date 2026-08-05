@@ -32147,6 +32147,70 @@ def admin_crm_corrigir_leads():
         return jsonify({'ok': False, 'erro': str(e)}), 500
 
 
+@app.route('/admin/crm/retroalimentar-aprendizado', methods=['GET', 'POST'])
+@login_required
+def admin_crm_retroalimentar_aprendizado():
+    """Rota de administração para retroalimentar a análise de inteligência em lote 
+    de todas as vendas/leads fechados ou perdidos de um consultor (default: Guilherme)."""
+    if session.get('perfil') != 'admin':
+        return jsonify({'ok': False, 'erro': 'Acesso negado'}), 403
+
+    consultor = request.args.get('consultor') or (request.json or {}).get('consultor') or 'Guilherme'
+    conn = db()
+    try:
+        usuarios = conn.execute(
+            "SELECT id, nome FROM usuarios WHERE nome LIKE ? OR email LIKE ?",
+            (f'%{consultor}%', f'%{consultor}%')
+        ).fetchall()
+        uids = [u['id'] if hasattr(u, 'keys') else u[0] for u in usuarios]
+        
+        if not uids:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": f"Nenhum consultor encontrado com o nome '{consultor}'"}), 404
+            
+        ph_uids = ','.join(['?'] * len(uids))
+        leads = conn.execute(f"""
+            SELECT id, nome, etapa, perdido_motivo 
+            FROM crm_leads 
+            WHERE responsavel_id IN ({ph_uids})
+              AND (
+                etapa IN ('Ganhou', 'GANHO', 'Perdido', 'PERDIDO', 'Proposta cadastrada', 'Ativo', 'Contrato emitido')
+                OR perdido_motivo IS NOT NULL
+              )
+            ORDER BY id DESC
+        """, tuple(uids)).fetchall()
+        
+        processados = 0
+        erros = 0
+        for l in leads:
+            lead_dict = dict(l) if hasattr(l, 'keys') else {'id': l[0], 'nome': l[1], 'etapa': l[2], 'perdido_motivo': l[3]}
+            lid = lead_dict['id']
+            etapa = str(lead_dict.get('etapa') or '').upper()
+            motivo = lead_dict.get('perdido_motivo')
+            desfecho = 'PERDIDO' if ('PERDIDO' in etapa or motivo) else 'GANHO'
+            try:
+                _registrar_aprendizado_lead(conn, lid, desfecho, motivo_perda=motivo)
+                conn.commit()
+                processados += 1
+            except Exception as e:
+                erros += 1
+                app.logger.warning(f"[RETRO-ANALISE] Erro no lead {lid}: {e}")
+                
+        close_db(conn)
+        return jsonify({
+            "ok": True,
+            "consultor": consultor,
+            "total_encontrados": len(leads),
+            "processados_sucesso": processados,
+            "erros": erros,
+            "mensagem": f"Retroalimentação concluída para {consultor}: {processados} leads analisados."
+        })
+    except Exception as e:
+        close_db(conn)
+        app.logger.error(f"[RETRO-ANALISE] Falha geral: {e}")
+        return jsonify({"ok": False, "erro": str(e)}), 500
+
+
 # ─── CRM CONFIG ───────────────────────────────────────────────────
 @app.route('/crm/transferir-em-massa', methods=['POST'])
 @login_required
