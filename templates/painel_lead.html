@@ -1013,8 +1013,9 @@ async function comunicarVendaGoogleMeta(lid){
     if(btn) { btn.disabled = false; btn.textContent = '🚀 Comunicar Venda ao Google & Meta'; }
   }
 }
-</script>
-{% endblock %}
+async function copiarDocsTexto(b){
+  const t = document.getElementById('pl-docs-texto');
+  if(!t) return;
   try { await navigator.clipboard.writeText(t.textContent); b.textContent = 'Copiado'; }
   catch(e){ b.textContent = 'Não deu — selecione e copie'; }
   setTimeout(() => { b.textContent = 'Copiar tudo'; }, 2200);
