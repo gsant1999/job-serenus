@@ -34743,6 +34743,43 @@ def _col(row, *names):
     return ''
 
 
+def _clique_backfill_lead(conn, lead_id, gclid, click, trafego):
+    """Gruda o identificador do clique num lead que JÁ existe.
+
+    Só preenche o que está vazio — nunca troca um clique por outro: o primeiro
+    é o que trouxe a pessoa, e sobrescrever daria o crédito da venda pro
+    anúncio errado.
+
+    Devolve True se gravou alguma coisa (pra quem quiser contar)."""
+    if not lead_id or not (gclid or click or trafego):
+        return False
+    try:
+        at = conn.execute("SELECT gclid, trafego, dados_extras FROM crm_leads WHERE id=?",
+                          (lead_id,)).fetchone()
+        if not at:
+            return False
+        sets, vals = [], []
+        if gclid and not ((at['gclid'] or '').strip()):
+            sets.append('gclid=?'); vals.append(gclid)
+        if trafego and not ((at['trafego'] or '').strip()):
+            sets.append('trafego=?'); vals.append(trafego)
+        if click and not ((at['dados_extras'] or '').strip()):
+            sets.append('dados_extras=?')
+            vals.append(json.dumps({'click': click}, ensure_ascii=False))
+        if not sets:
+            return False
+        conn.execute(f"UPDATE crm_leads SET {', '.join(sets)} WHERE id=?", vals + [lead_id])
+        if gclid and 'gclid=?' in sets:
+            conn.execute("""INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao, criado_em)
+                            VALUES (?,?,?,?,?)""",
+                         (lead_id, 'Sistema', 'edicao',
+                          'Identificador do clique do anúncio registrado (veio da planilha)', _agora_sp()))
+        return True
+    except Exception as e:
+        app.logger.info(f"[CLIQUE] backfill no lead {lead_id} falhou: {e}")
+        return False
+
+
 def _processar_lead(row, conn):
     """
     Processa um lead bruto da planilha:
@@ -34817,6 +34854,18 @@ def _processar_lead(row, conn):
     if telefone_norm:
         dup = _buscar_lead_por_telefone(conn, telefone_norm)
         if dup:
+            # DUPLICADO NÃO SIGNIFICA JOGAR A LINHA FORA INTEIRA.
+            #
+            # A planilha ganhou as colunas de clique DEPOIS que os leads já
+            # estavam no CRM. Então a linha que finalmente traz o gclid é
+            # justamente uma que cai aqui como duplicada — e o clique era
+            # descartado junto, sem deixar rastro. Medido em 04/08/2026: a
+            # planilha tinha 1 gclid real e o CRM continuava com 0.
+            #
+            # O mesmo já foi corrigido no /webhook/sheets; este é o caminho de
+            # PULL (a rodada de 15 min), que ficou pra trás.
+            _clique_backfill_lead(conn, dup['id'] if hasattr(dup, 'keys') else dup[0],
+                                  gclid, click, trafego)
             return (False, f'Duplicado (tel {telefone})', None)
 
     if email:
@@ -34825,6 +34874,8 @@ def _processar_lead(row, conn):
             (email,)
         ).fetchone()
         if dup:
+            _clique_backfill_lead(conn, dup['id'] if hasattr(dup, 'keys') else dup[0],
+                                  gclid, click, trafego)
             return (False, f'Duplicado (email {email})', None)
 
     # Validação mínima
