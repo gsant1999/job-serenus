@@ -23338,11 +23338,11 @@ def painel_lead(lid):
         extras = json.loads(lead.get('dados_extras') or '{}')
     except Exception:
         extras = {}
-    midia = {k: _campo_de_midia(extras, k) for k in ('origem_midia', 'campanha', 'criativo')}
-    midia['landing'] = _campo_de_midia(extras, 'landing')
-    midia['gclid'] = lead.get('gclid') or _campo_de_midia(extras, 'gclid') or ''
-    midia['trafego'] = lead.get('trafego') or ''
-    midia['origem'] = lead.get('origem') or ''
+    midia = {k: (_campo_de_midia(extras, k) or '') for k in ('origem_midia', 'campanha', 'criativo')}
+    midia['landing'] = _campo_de_midia(extras, 'landing') or ''
+    midia['gclid'] = str(lead.get('gclid') or _campo_de_midia(extras, 'gclid') or '')
+    midia['trafego'] = str(lead.get('trafego') or '')
+    midia['origem'] = str(lead.get('origem') or '')
     indicou = None
     if lead.get('indicado_por_lead_id'):
         r = conn.execute("SELECT id, nome FROM crm_leads WHERE id=?", (lead['indicado_por_lead_id'],)).fetchone()
