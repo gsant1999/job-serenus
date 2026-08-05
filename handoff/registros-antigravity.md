@@ -25,9 +25,10 @@ Este arquivo serve como registro de alterações, contexto de arquitetura e nota
 
 ---
 
-## Próximos Passos Agendados
-1. **Refinamento da IA de Leitura de Conversas (`_wa_analisar_conversa` / `_analisar_com_claude` em `app.py`):**
-   - Ampliar e enriquecer a janela de contexto transmitida ao modelo.
-   - Melhorar o parsing de mensagens e áudios para evitar que conversas longas recebam avaliações incompletas.
-2. **Evolução do Sistema de Score do Lead (`_wa_score_lead` em `app.py`):**
-   - Refinar os pesos e parâmetros de qualificação (vidas, tipo PJ/CNPJ, idades, operadora atual vs desejada e urgência).
+### 3. Melhorias na IA de Leitura e Score do Lead (`app.py`)
+- **Commit:** em andamento
+- **Arquivos Alterados:**
+  - `app.py`:
+    - Ampliada a janela de contexto de texto de conversas longas enviadas para a Claude de **24.000 para 48.000 caracteres**, permitindo analisar históricos extensos de atendimento sem perda de mensagens.
+    - Ampliado o teto de transcrição de áudio salvas em resumo de **600 para 1.500 caracteres**, garantindo que depoimentos e falas longas de voz do lead sejam consideras integralmente na análise de IA e no cálculo do Score.
+

@@ -15663,7 +15663,7 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, docume
                 continue
             quem = 'CLIENTE' if m.get('de') == 'lead' else 'CONSULTOR'
             linhas.append(f"[{m.get('hora', '')}] {quem}: {txt}")
-        conversa_txt = '\n'.join(linhas)[:24000]
+        conversa_txt = '\n'.join(linhas)[:48000]
 
         # Blocos de imagem (base64). Cada uma precedida de um rótulo de texto pra
         # preservar quem-enviou e quando (a Claude cruza a imagem com a conversa).
@@ -22103,7 +22103,7 @@ def api_whatsapp_analisar():
         if 'texto' not in it:
             continue
         audio_msgs.append({'de': it['de'], 'texto': '🎤 ' + it['texto'][:4000], 'hora': it['hora']})
-        transcricoes.append({'de': it['de'], 'hora': it['hora'], 'texto': it['texto'][:600]})
+        transcricoes.append({'de': it['de'], 'hora': it['hora'], 'texto': it['texto'][:1500]})
     if audio_msgs:
         combinado = limpa + audio_msgs
         combinado.sort(key=lambda m: _wa_parse_hora(m.get('hora') or '') or datetime.min)
