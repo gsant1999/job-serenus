@@ -10928,6 +10928,7 @@ def _dm_evento(c):
     transactionId é o que era orderId no caminho antigo: identidade da conversão
     do lado do Google. Sem ele, reenvio conta a venda duas vezes."""
     ev = {'eventTimestamp': _conversao_dt_sp(c['conversao_em']).isoformat(timespec='seconds'),
+          'eventSource': 'FIRST_PARTY',
           'conversionValue': float(c['valor'] or 0),
           'currency': c['moeda'] or 'BRL',
           'transactionId': f"job-proposta-{c['proposta_id']}",
@@ -30410,7 +30411,8 @@ def _ads_testar_conexao():
     # deixa o Google conferir o pedido inteiro sem gravar conversão nenhuma, que
     # é exatamente o que um botão de teste deve fazer.
     try:
-        ev_teste = {'adIdentifiers': {'gclid': 'TESTE_JOB_SEM_CLIQUE_REAL'},
+        ev_teste = {'eventSource': 'FIRST_PARTY',
+                    'adIdentifiers': {'gclid': 'TESTE_JOB_SEM_CLIQUE_REAL'},
                     'eventTimestamp': datetime.now(TZ_SP).isoformat(timespec='seconds'),
                     'conversionValue': 0.01, 'currency': 'BRL',
                     'transactionId': 'job-teste-conexao',
