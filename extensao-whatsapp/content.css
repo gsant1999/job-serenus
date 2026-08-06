@@ -508,6 +508,51 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   text-align: center; text-decoration: none; transition: background .12s; }
 .job-cot-nova:hover { background: var(--job-bg3-hover); }
 
+/* ── Cotar dentro da conversa ─────────────────────────────────────── */
+.job-cot-rot { display: block; font-size: 11.5px; font-weight: 600; color: var(--job-txt-fraco);
+  margin: 12px 0 5px; }
+.job-cot-dica { font-size: 11.5px; color: var(--job-txt-fraco); line-height: 1.5; margin-top: 6px; }
+.job-cot-dica.ok { color: var(--job-acento); font-weight: 600; }
+.job-cot-campo-sug { position: relative; }
+.job-cot-sug { display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+  margin-top: 4px; max-height: 190px; overflow: auto; background: var(--job-bg3);
+  border: 1px solid var(--job-borda); border-radius: 10px; }
+.job-cot-sug.ver { display: block; }
+.job-cot-sug button { display: block; width: 100%; text-align: left; background: none;
+  border: none; padding: 9px 11px; font-size: 12.5px; color: var(--job-txt);
+  font-family: inherit; cursor: pointer; }
+.job-cot-sug button:hover { background: var(--job-bg3-hover); }
+.job-cot-seg { display: flex; gap: 5px; }
+.job-cot-seg button { flex: 1; padding: 9px 4px; border-radius: 9px; background: var(--job-bg2);
+  border: 1px solid var(--job-borda); color: var(--job-txt-fraco); font-size: 12.5px;
+  font-weight: 600; font-family: inherit; cursor: pointer; transition: .12s; }
+.job-cot-seg button.on { background: var(--job-acento); border-color: var(--job-acento);
+  color: var(--job-acento-txt); }
+.job-cot-ops { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.job-cot-op { text-align: left; padding: 11px 12px; border-radius: 10px; background: var(--job-bg2);
+  border: 1px solid var(--job-borda); color: var(--job-txt); font-size: 13px; font-weight: 600;
+  font-family: inherit; cursor: pointer; transition: .12s; }
+.job-cot-op:hover { border-color: var(--job-acento); }
+.job-cot-plano { display: flex; align-items: flex-start; gap: 9px; padding: 10px 11px;
+  border-radius: 10px; background: var(--job-bg2); border: 1px solid var(--job-borda);
+  margin-bottom: 6px; cursor: pointer; }
+.job-cot-plano.bloq { opacity: .45; cursor: default; }
+.job-cot-plano input { margin-top: 2px; accent-color: var(--job-acento); }
+.job-cot-plano b { font-size: 12.5px; font-weight: 600; color: var(--job-txt); }
+.job-cot-plano small { display: block; font-size: 11px; color: var(--job-txt-fraco); margin-top: 2px; }
+.job-cot-barra { height: 4px; border-radius: 3px; background: var(--job-bg3); overflow: hidden;
+  margin: 4px 0 10px; }
+.job-cot-barra i { display: block; height: 100%; background: var(--job-acento); transition: width .3s; }
+.job-cot-res { display: flex; align-items: baseline; gap: 8px; padding: 9px 11px; border-radius: 9px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda); margin-bottom: 6px; }
+.job-cot-res-n { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--job-txt); }
+.job-cot-res-v { flex: none; font-size: 13px; font-weight: 700; color: var(--job-acento);
+  font-variant-numeric: tabular-nums; }
+/* Sem preço não some e não vira zero: fica visível e apagado, dizendo que
+   aquele plano existe mas o valor não voltou. */
+.job-cot-res.sem { border-style: dashed; }
+.job-cot-res.sem .job-cot-res-v { color: var(--job-txt-fraco); font-weight: 600; font-style: italic; }
+
 /* ── Consulta de CNPJ ─────────────────────────────────────────────── */
 .job-cnpj-titulo { font-size: 16px; font-weight: 600; color: var(--job-txt); }
 .job-cnpj-sub { font-size: 12px; color: var(--job-txt-fraco); line-height: 1.5; margin: 4px 0 16px; }

@@ -3815,10 +3815,18 @@
           (lista.length ? ' · ' + lista.length + (lista.length === 1 ? ' cotação' : ' cotações') : '') +
         '</div>' +
         corpo +
+        // Cotar acontece AQUI. O link pro JOB continua existindo porque a tela
+        // de lá compara 20 planos de várias operadoras de uma vez, o que não
+        // cabe num painel de conversa — mas deixou de ser o caminho principal.
+        '<button class="job-cot-bt-mandar" id="job-cot-agora" style="width:100%;margin-top:2px">' +
+          (lista.length ? 'Cotar de novo, aqui mesmo' : 'Cotar agora, sem sair da conversa') +
+        '</button>' +
         '<a class="job-cot-nova" href="' + esc(linkNovo) + '" target="_blank" rel="noopener">' +
-          (lista.length ? 'Nova cotação no JOB' : 'Cotar no JOB') +
+          'Abrir a tela completa no JOB' +
         '</a>' +
       '</div>');
+    const ba = document.getElementById('job-cot-agora');
+    if (ba) ba.addEventListener('click', abrirSecaoCotarInline);
 
     document.querySelectorAll('.job-cot-bt-copiar').forEach((b) => {
       b.addEventListener('click', () => {
@@ -3876,6 +3884,338 @@
       btn.textContent = 'Falhou — tentar de novo';
       btn.disabled = false;
     }
+  }
+
+  // ── Cotar dentro da conversa, sem abrir aba ───────────────────────────
+  //
+  // QUEM MARCA O RITMO É ESTA ABA, e isso não é detalhe de estilo.
+  //
+  // O motor (cotador-painel.js) roda na aba do Painel do Corretor, que fica em
+  // SEGUNDO PLANO enquanto o consultor olha o WhatsApp. O Chrome estrangula
+  // temporizador de aba escondida: as pausas de 300–900ms viravam até um minuto
+  // cada, e o que era pra levar dez segundos levava quinze minutos. Por isso o
+  // motor expõe "um passo por vez, sem relógio lá dentro" e a pausa acontece
+  // aqui, na aba visível, onde o relógio funciona. O espaçamento irregular que
+  // o servidor deles vê continua exatamente o mesmo.
+  const _COT_FAIXAS = ['00-18', '19-23', '24-28', '29-33', '34-38',
+                       '39-43', '44-48', '49-53', '54-58', '59-199'];
+  // Teto baixo de propósito. Na tela do JOB o consultor compara 20 planos com
+  // calma; aqui ele está com o cliente digitando do outro lado. Cada preço é
+  // uma ida ao Painel com pausa humana no meio — 6 é o que cabe numa conversa.
+  const _COT_MAX = 6;
+  let _cot = null;   // estado do fluxo aberto agora
+
+  function _cotRespira(min, max) {
+    const faixa = max - min;
+    const ms = Math.random() < 0.85
+      ? min + Math.random() * faixa * 0.45
+      : max + Math.random() * faixa * 1.6;
+    return new Promise((r) => setTimeout(r, ms));
+  }
+  function _cotEmbaralhar(lista) {
+    const c = lista.slice();
+    for (let i = c.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = c[i]; c[i] = c[j]; c[j] = t;
+    }
+    return c;
+  }
+  // Idade solta ("5, 50, 55") em vez das dez faixas: num painel estreito, dez
+  // contadores é um formulário; o consultor tem a idade na conversa, não a
+  // faixa. A conversão é a mesma tabela da ANS que o JOB usa.
+  function _cotFaixaDaIdade(i) {
+    const lim = [[18, 0], [23, 1], [28, 2], [33, 3], [38, 4], [43, 5], [48, 6], [53, 7], [58, 8]];
+    for (let k = 0; k < lim.length; k++) if (i <= lim[k][0]) return _COT_FAIXAS[lim[k][1]];
+    return _COT_FAIXAS[9];
+  }
+  function _cotVidasDeTexto(txt) {
+    const idades = String(txt || '').split(/[,;eE\s]+/)
+      .map((s) => parseInt(s, 10)).filter((n) => !isNaN(n) && n >= 0 && n <= 120);
+    const conta = {};
+    idades.forEach((i) => { const f = _cotFaixaDaIdade(i); conta[f] = (conta[f] || 0) + 1; });
+    return { vidas: _COT_FAIXAS.filter((f) => conta[f]).map((f) => ({ faixa: f, quantidade: conta[f] })),
+             total: idades.length };
+  }
+
+  function _cotPasso(pedido, ms) {
+    return new Promise((resolve) => {
+      let respondeu = false;
+      const relogio = setTimeout(() => {
+        if (!respondeu) { respondeu = true; resolve({ ok: false, motivo: 'sem_resposta_a_tempo' }); }
+      }, ms || 45000);
+      _safeSendMessage({ type: 'cotador_passo', pedido: pedido }).then((r) => {
+        if (respondeu) return;
+        respondeu = true; clearTimeout(relogio); resolve(r || { ok: false, motivo: 'sem_resposta' });
+      }).catch(() => {
+        if (respondeu) return;
+        respondeu = true; clearTimeout(relogio); resolve({ ok: false, motivo: 'extensao_indisponivel' });
+      });
+    });
+  }
+
+  // Cada motivo vira uma frase que diz O QUE FAZER. "precisa_aprender" sozinho
+  // manda o consultor abrir um chamado; a instrução resolve em um minuto.
+  const _COT_EXPLICA = {
+    painel_fechado: 'Abra o <b>Painel do Corretor</b> numa aba e deixe logado. O JOB busca o preço pela sua sessão lá.',
+    painel_precisa_recarregar: 'A aba do Painel do Corretor está aberta, mas precisa de <b>F5</b> depois da atualização da extensão.',
+    precisa_aprender: 'Vá na aba do <b>Painel do Corretor</b> e faça uma cotação na mão até <b>ver o preço na tela</b>. ' +
+      'A extensão aprende vendo você usar, e destrava sozinha — não precisa terminar nem salvar a cotação lá.',
+    hash_expirado: 'O Painel do Corretor publicou uma versão nova e um atalho venceu. ' +
+      'Faça uma cotação na mão lá até <b>ver o preço</b> — a extensão reaprende sozinha.',
+    sem_resposta_a_tempo: 'O Painel demorou demais pra responder. Confira se a aba dele está aberta e tente de novo.',
+    extensao_indisponivel: 'A extensão não respondeu. Recarregue a página do WhatsApp (F5).'
+  };
+  function _cotMotivo(m) {
+    const s = String(m || '');
+    if (s.indexOf('hash_expirado') === 0) return _COT_EXPLICA.hash_expirado;
+    return _COT_EXPLICA[s] || 'Não consegui falar com o Painel do Corretor agora. Motivo: ' + esc(s || 'desconhecido');
+  }
+  function _cotErro(motivo, aoVoltar) {
+    setCorpoSecao('<div class="job-cot-wrap">' +
+      '<div class="job-ia-alerta">' + _cotMotivo(motivo) + '</div>' +
+      '<button class="job-cnpj-btn" id="job-cot-volta">Voltar</button></div>');
+    const b = document.getElementById('job-cot-volta');
+    if (b) b.addEventListener('click', aoVoltar || abrirSecaoCotacao);
+  }
+
+  function abrirSecaoCotarInline() {
+    const v = _cot || {};
+    setCorpoSecao(
+      '<div class="job-cot-wrap">' +
+        '<div class="job-cnpj-titulo">Cotar agora</div>' +
+        '<div class="job-cnpj-sub">Preço buscado no Painel do Corretor na hora, pela sua sessão.</div>' +
+        '<label class="job-cot-rot">Cidade</label>' +
+        '<div class="job-cot-campo-sug">' +
+          '<input id="job-cot-cidade" class="job-cnpj-input" autocomplete="off" placeholder="Campinas - SP" value="' + esc(v.cidade || '') + '">' +
+          '<div id="job-cot-sug" class="job-cot-sug"></div>' +
+        '</div>' +
+        '<label class="job-cot-rot">Tipo</label>' +
+        '<div class="job-cot-seg" id="job-cot-tipo">' +
+          ['PF', 'PME', 'Adesão'].map((t) =>
+            '<button type="button" data-v="' + t + '"' +
+            ((v.modalidade || 'PF') === t ? ' class="on"' : '') + '>' + t + '</button>').join('') +
+        '</div>' +
+        '<label class="job-cot-rot">Idades de quem vai usar</label>' +
+        '<input id="job-cot-idades" class="job-cnpj-input" placeholder="5, 50, 55" value="' + esc(v.idades || '') + '">' +
+        '<div class="job-cot-dica" id="job-cot-dica">Separe por vírgula. Uma idade por pessoa.</div>' +
+        '<button class="job-cnpj-btn" id="job-cot-buscar">Buscar operadoras</button>' +
+        '<button class="job-cot-nova" id="job-cot-cancelar" style="border:none;cursor:pointer;width:100%;font-family:inherit">Voltar às cotações</button>' +
+      '</div>');
+
+    const iCid = document.getElementById('job-cot-cidade');
+    const iIda = document.getElementById('job-cot-idades');
+    const dica = document.getElementById('job-cot-dica');
+    const box = document.getElementById('job-cot-sug');
+    let relogioCid = null;
+
+    // Conta as vidas enquanto ele digita. Sem isso, "5, 50, 55" e "5 50 55"
+    // parecem a mesma coisa e um deles vira uma vida só, descoberto só depois
+    // de a cotação inteira sair errada.
+    const contar = () => {
+      const r = _cotVidasDeTexto(iIda.value);
+      dica.textContent = r.total
+        ? r.total + (r.total === 1 ? ' vida' : ' vidas') + ' · ' +
+          r.vidas.map((x) => x.quantidade + '× ' + x.faixa.replace('-199', '+')).join(', ')
+        : 'Separe por vírgula. Uma idade por pessoa.';
+      dica.classList.toggle('ok', r.total > 0);
+    };
+    iIda.addEventListener('input', contar);
+    contar();
+
+    document.querySelectorAll('#job-cot-tipo button').forEach((b) => {
+      b.addEventListener('click', () => {
+        document.querySelectorAll('#job-cot-tipo button').forEach((o) => o.classList.remove('on'));
+        b.classList.add('on');
+      });
+    });
+
+    iCid.addEventListener('input', () => {
+      clearTimeout(relogioCid);
+      const termo = iCid.value.trim();
+      if (termo.length < 3) { box.className = 'job-cot-sug'; return; }
+      relogioCid = setTimeout(async () => {
+        let r;
+        try { r = await _safeSendMessage({ type: 'cotador_cidades', termo: termo }); }
+        catch (e) { r = null; }
+        const lista = (r && r.ok && r.dados && r.dados.cidades) || [];
+        if (!lista.length) { box.className = 'job-cot-sug'; return; }
+        box.innerHTML = lista.slice(0, 8).map((c) =>
+          '<button type="button" data-v="' + esc(c.nome || c) + '">' + esc(c.nome || c) + '</button>').join('');
+        box.className = 'job-cot-sug ver';
+        box.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+          iCid.value = b.dataset.v; box.className = 'job-cot-sug';
+        }));
+      }, 300);
+    });
+
+    document.getElementById('job-cot-cancelar').addEventListener('click', abrirSecaoCotacao);
+    document.getElementById('job-cot-buscar').addEventListener('click', () => {
+      const r = _cotVidasDeTexto(iIda.value);
+      if (!iCid.value.trim()) { dica.textContent = 'Falta a cidade.'; dica.classList.remove('ok'); return; }
+      if (!r.total) { dica.textContent = 'Falta a idade de quem vai usar o plano.'; dica.classList.remove('ok'); return; }
+      const tipo = (document.querySelector('#job-cot-tipo button.on') || {}).dataset;
+      _cot = { cidade: iCid.value.trim(), modalidade: (tipo && tipo.v) || 'PF',
+               idades: iIda.value, vidas: r.vidas, totalVidas: r.total };
+      _cotBuscarOperadoras();
+    });
+  }
+
+  function _cotBase() {
+    return { cidade: _cot.cidade, modalidade: _cot.modalidade, vidas: _cot.vidas,
+             titulo: (nomeDoContato() || 'Cliente') + ' · ' + _cot.cidade + ' · ' + _cot.modalidade };
+  }
+  function _cotEsperando(txt, sub) {
+    setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div>' +
+      '<div class="job-sem-analise-txt">' + esc(txt) + '</div>' +
+      (sub ? '<div class="job-cot-dica" style="text-align:center">' + esc(sub) + '</div>' : '') + '</div>');
+  }
+
+  async function _cotBuscarOperadoras() {
+    _cotEsperando('Vendo quem atende ' + _cot.cidade + '…');
+    const b = _cotBase();
+    // reaproveitar: a pergunta "quem atende essa cidade?" não merece uma cotação
+    // nova no sistema deles. Dezenas de cotações vazias com o nome do consultor
+    // num dia de trabalho é rastro do tipo que fica.
+    const rc = await _cotPasso(Object.assign({ acao: 'criar', reaproveitar: true }, b));
+    if (!rc.ok) { _cotErro(rc.motivo, abrirSecaoCotarInline); return; }
+    _cot.cotacaoId = rc.dados.cotacaoId;
+    await _cotRespira(400, 1100);
+    const r = await _cotPasso(Object.assign({ acao: 'operadoras', cotacaoId: _cot.cotacaoId }, b));
+    if (!r.ok) { _cotErro(r.motivo, abrirSecaoCotarInline); return; }
+    _cot.operadoras = (r.dados && r.dados.operadoras) || [];
+    _cotPintarOperadoras();
+  }
+
+  function _cotPintarOperadoras() {
+    const ops = _cot.operadoras || [];
+    setCorpoSecao('<div class="job-cot-wrap">' +
+      '<div class="job-cnpj-titulo">Operadoras</div>' +
+      '<div class="job-cnpj-sub">Quem atende <b>' + esc(_cot.cidade) + '</b> · ' +
+        esc(_cot.modalidade) + ' · ' + _cot.totalVidas + (_cot.totalVidas === 1 ? ' vida' : ' vidas') + '</div>' +
+      (ops.length
+        ? '<div class="job-cot-ops">' + ops.map((o) =>
+            '<button type="button" class="job-cot-op" data-id="' + esc(o.id) + '">' + esc(o.nome) + '</button>').join('') + '</div>'
+        : '<div class="job-cot-vazio"><div class="job-cot-vazio-t">Nenhuma operadora atende essa combinação.</div>' +
+          '<div class="job-cot-vazio-s">Quem atende muda com a idade e o tipo. Confira a cidade e as idades.</div></div>') +
+      '<button class="job-cot-nova" id="job-cot-voltar" style="border:none;cursor:pointer;width:100%;font-family:inherit">Mudar cidade, tipo ou idades</button>' +
+    '</div>');
+    document.getElementById('job-cot-voltar').addEventListener('click', abrirSecaoCotarInline);
+    document.querySelectorAll('.job-cot-op').forEach((b) => b.addEventListener('click', () => {
+      const o = ops.filter((x) => String(x.id) === b.dataset.id)[0];
+      if (o) _cotBuscarPlanos(o);
+    }));
+  }
+
+  async function _cotBuscarPlanos(op) {
+    _cotEsperando('Vendo os planos da ' + op.nome + '…');
+    const r = await _cotPasso(Object.assign({ acao: 'planos', cotacaoId: _cot.cotacaoId,
+                                             operadoraId: op.id }, _cotBase()));
+    if (!r.ok) { _cotErro(r.motivo, _cotPintarOperadoras); return; }
+    _cot.operadoraAtual = op;
+    _cot.planos = (r.dados && r.dados.planos) || [];
+    _cotPintarPlanos();
+  }
+
+  function _cotPintarPlanos() {
+    const pls = _cot.planos || [];
+    setCorpoSecao('<div class="job-cot-wrap">' +
+      '<div class="job-cnpj-titulo">' + esc(_cot.operadoraAtual.nome) + '</div>' +
+      '<div class="job-cnpj-sub">Marque até ' + _COT_MAX + ' planos. Cada preço é uma consulta ao Painel.</div>' +
+      (pls.length
+        ? pls.map((p, i) =>
+            '<label class="job-cot-plano"><input type="checkbox" data-i="' + i + '">' +
+              '<span><b>' + esc(p.nome || 'Plano') + '</b>' +
+              (p.acomodacao || p.coparticipacao
+                ? '<small>' + esc([p.acomodacao, p.coparticipacao].filter(Boolean).join(' · ')) + '</small>'
+                : '') + '</span></label>').join('')
+        : '<div class="job-cot-vazio"><div class="job-cot-vazio-t">Nenhum plano dessa operadora serve para essas vidas.</div></div>') +
+      '<button class="job-cnpj-btn" id="job-cot-precos" disabled>Ver preços</button>' +
+      '<button class="job-cot-nova" id="job-cot-volta-ops" style="border:none;cursor:pointer;width:100%;font-family:inherit">Outra operadora</button>' +
+    '</div>');
+    const bt = document.getElementById('job-cot-precos');
+    const marcados = () => Array.prototype.slice.call(
+      document.querySelectorAll('.job-cot-plano input:checked')).map((c) => pls[+c.dataset.i]);
+    document.querySelectorAll('.job-cot-plano input').forEach((c) => c.addEventListener('change', () => {
+      const n = marcados().length;
+      // Trava o teto marcando os outros como indisponíveis em vez de deixar
+      // marcar e reclamar depois — o consultor não perde o clique.
+      document.querySelectorAll('.job-cot-plano input').forEach((o) => {
+        o.disabled = (n >= _COT_MAX && !o.checked);
+        o.parentElement.classList.toggle('bloq', o.disabled);
+      });
+      bt.disabled = !n;
+      bt.textContent = n ? 'Ver preços de ' + n + (n === 1 ? ' plano' : ' planos') : 'Ver preços';
+    }));
+    document.getElementById('job-cot-volta-ops').addEventListener('click', _cotPintarOperadoras);
+    bt.addEventListener('click', () => _cotPrecos(marcados()));
+  }
+
+  // Preço é sequencial por imposição do Painel: a resposta traz os cenários
+  // juntos, sem dizer qual é de qual plano — a diferença pra resposta anterior
+  // é o plano que se acabou de pedir. Ordem sorteada porque duas cotações da
+  // mesma cidade produziriam a mesma sequência de chamadas, e sequência
+  // repetida é padrão.
+  async function _cotPrecos(alvo) {
+    const fila = _cotEmbaralhar(alvo);
+    const feitos = [];
+    for (let i = 0; i < fila.length; i++) {
+      setCorpoSecao('<div class="job-cot-wrap">' +
+        '<div class="job-cnpj-titulo">Buscando preços</div>' +
+        '<div class="job-cnpj-sub">' + (i + 1) + ' de ' + fila.length + ' · ' + esc(_cot.operadoraAtual.nome) + '</div>' +
+        '<div class="job-cot-barra"><i style="width:' + Math.round((i / fila.length) * 100) + '%"></i></div>' +
+        (feitos.length ? _cotCartoes(feitos) : '') +
+        '<div class="job-cot-dica">Um plano por vez, com pausa entre eles — é assim que o Painel é usado à mão.</div>' +
+      '</div>');
+      const r = await _cotPasso(Object.assign({ acao: 'preco', cotacaoId: _cot.cotacaoId,
+                                               plano: fila[i] }, _cotBase()));
+      const cartao = (r.ok && r.dados && r.dados.cartao) || null;
+      // Sem valor NÃO inventa e não some: entra marcado como não cotado. Preço
+      // errado numa proposta é pior que preço faltando.
+      feitos.push(Object.assign({}, fila[i], cartao
+        ? { total: cartao.total, faixas: cartao.faixas, conferido: cartao.conferido }
+        : { total: null, motivo: r.motivo || 'sem_valor_na_resposta' }));
+      if (i + 1 < fila.length) await _cotRespira(240, 780);
+    }
+    feitos.sort((a, b) => (a.total == null) - (b.total == null) || (a.total - b.total));
+    _cot.resultado = feitos;
+    _cotPintarResultado();
+  }
+
+  function _cotCartoes(lista) {
+    return lista.map((p) =>
+      '<div class="job-cot-res' + (p.total == null ? ' sem' : '') + '">' +
+        '<div class="job-cot-res-n">' + esc(p.nome || 'Plano') + '</div>' +
+        '<div class="job-cot-res-v">' +
+          (p.total == null ? 'sem preço' : _cotMoeda(p.total)) +
+        '</div>' +
+      '</div>').join('');
+  }
+
+  function _cotPintarResultado() {
+    const r = _cot.resultado || [];
+    const comPreco = r.filter((p) => p.total != null);
+    setCorpoSecao('<div class="job-cot-wrap">' +
+      '<div class="job-cnpj-titulo">' + esc(_cot.operadoraAtual.nome) + '</div>' +
+      '<div class="job-cnpj-sub">' + esc(_cot.cidade) + ' · ' + esc(_cot.modalidade) + ' · ' +
+        _cot.totalVidas + (_cot.totalVidas === 1 ? ' vida' : ' vidas') + '</div>' +
+      _cotCartoes(r) +
+      (comPreco.length
+        ? '<button class="job-cot-bt-mandar" id="job-cot-mandar" style="width:100%;margin-top:8px">Mandar na conversa</button>'
+        : '<div class="job-ia-alerta">Nenhum preço voltou. Isso não quer dizer que não exista — o Painel não respondeu o valor.</div>') +
+      '<button class="job-cot-nova" id="job-cot-mais" style="border:none;cursor:pointer;width:100%;font-family:inherit">Cotar outra operadora</button>' +
+    '</div>');
+    document.getElementById('job-cot-mais').addEventListener('click', _cotPintarOperadoras);
+    const bm = document.getElementById('job-cot-mandar');
+    if (bm) bm.addEventListener('click', () => _cotMandarTexto(bm, comPreco));
+  }
+
+  function _cotMandarTexto(btn, lista) {
+    const linhas = lista.map((p) =>
+      p.nome + ' — ' + _cotMoeda(p.total) + '/mês');
+    const txt = _cot.operadoraAtual.nome + ' · ' + _cot.cidade + ' · ' +
+      _cot.totalVidas + (_cot.totalVidas === 1 ? ' vida' : ' vidas') + '\n\n' + linhas.join('\n');
+    btn.dataset.url = txt;   // _cotMandar manda o conteúdo de dataset.url
+    _cotMandar(btn);
   }
 
   function abrirSecaoCnpj() {
