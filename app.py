@@ -30314,6 +30314,7 @@ def google_ads_painel():
         try: conn.rollback()
         except Exception: pass
     rastreio = _ads_rastreio(conn)
+    m_rastreio = _meta_rastreio(conn)
     close_db(conn)
 
     linhas_enriquecidas = [_enriquecer_linha_conversao(r) for r in linhas]
@@ -30333,7 +30334,7 @@ def google_ads_painel():
         m_contagem[st]['descricao'] = info['descricao']
 
     return render_template('google_ads.html', linhas=linhas_enriquecidas,
-                           rastreio=rastreio,
+                           rastreio=rastreio, m_rastreio=m_rastreio,
                            contagem=contagem, faltando=faltando, fora=fora,
                            valor_base=(os.environ.get('GOOGLE_ADS_VALOR_BASE') or 'comissao_bruta'),
                            customer_id=cfg['customer_id'],
@@ -30837,6 +30838,77 @@ def _ads_rastreio(conn):
         try: conn.rollback()
         except Exception: pass
     return d
+
+
+def _meta_rastreio(conn):
+    """De onde vem (ou não vem) o fbclid para a Meta Conversions API."""
+    d = {}
+    try:
+        d['leads'] = conn.execute("SELECT COUNT(*) c FROM crm_leads").fetchone()['c']
+        d['leads_com_clique'] = conn.execute(
+            "SELECT COUNT(*) c FROM crm_leads WHERE COALESCE(fbclid,'') <> ''").fetchone()['c']
+        d['leads_extras_clique'] = conn.execute(
+            """SELECT COUNT(*) c FROM crm_leads WHERE COALESCE(dados_extras,'') LIKE '%fbclid%'""").fetchone()['c']
+        d['leads_pago'] = conn.execute(
+            "SELECT COUNT(*) c FROM crm_leads WHERE trafego='Pago'").fetchone()['c']
+        d['propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
+        d['propostas_com_lead'] = conn.execute(
+            "SELECT COUNT(*) c FROM propostas WHERE lead_id IS NOT NULL").fetchone()['c']
+        d['vendas'] = conn.execute(
+            "SELECT COUNT(*) c FROM propostas WHERE status_operacional='Emitida/Ativa'").fetchone()['c']
+        d['vendas_com_clique'] = conn.execute(
+            """SELECT COUNT(*) c FROM propostas p JOIN crm_leads l ON l.id = p.lead_id
+               WHERE p.status_operacional='Emitida/Ativa' AND COALESCE(l.fbclid,'') <> ''""").fetchone()['c']
+    except Exception as e:
+        app.logger.warning(f"[META] rastreio: {e}")
+        try: conn.rollback()
+        except Exception: pass
+    return d
+
+
+def _meta_testar_conexao():
+    """Testa a ligação com a Graph API / Conversions API da Meta."""
+    passos = []
+
+    def passo(nome, ok, detalhe='', dica=''):
+        passos.append({'nome': nome, 'ok': bool(ok), 'detalhe': str(detalhe)[:500], 'dica': dica})
+        return ok
+
+    cfg, faltando = _meta_config()
+    if not passo('Credenciais no servidor', not faltando,
+                 'Faltando: ' + ', '.join(faltando) if faltando else 'Pixel ID e Token configurados',
+                 'Cadastre META_PIXEL_ID e META_ACCESS_TOKEN no Railway.' if faltando else ''):
+        return {'ok': False, 'passos': passos}
+
+    try:
+        url = f"https://graph.facebook.com/v19.0/{cfg['pixel_id']}?access_token={cfg['access_token']}&fields=id,name"
+        r = _requests.get(url, timeout=15)
+        if r.status_code == 200:
+            dados = r.json() or {}
+            passo('Pixel da Meta', True, f"Pixel: {dados.get('name', '')} (ID {dados.get('id', cfg['pixel_id'])})")
+        else:
+            corpo = r.text[:300]
+            passo('Pixel da Meta', False, f"HTTP {r.status_code}: {corpo}",
+                  'Verifique se o META_PIXEL_ID e o META_ACCESS_TOKEN estão corretos no Gerenciador de Eventos da Meta.')
+            return {'ok': False, 'passos': passos}
+    except Exception as e:
+        passo('Pixel da Meta', False, e, '')
+        return {'ok': False, 'passos': passos}
+
+    return {'ok': True, 'passos': passos, 'pixel_id': cfg['pixel_id']}
+
+
+@app.route('/meta-ads/testar', methods=['POST'])
+@login_required
+@admin_required
+def meta_ads_testar():
+    """Teste de ligação com a Meta, sem mandar venda nenhuma."""
+    try:
+        return jsonify(_meta_testar_conexao())
+    except Exception as e:
+        app.logger.error(f"[META] teste falhou: {e}")
+        return jsonify({'ok': False, 'passos': [{'nome': 'Teste Meta', 'ok': False,
+                                                 'detalhe': str(e)[:400], 'dica': ''}]})
 
 
 # ─── QUADROS DO KANBAN ────────────────────────────────────────────────────────
