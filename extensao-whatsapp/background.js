@@ -405,6 +405,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     return;   // nao responde: e aviso de mao unica
   }
+  // A EXTENSAO REAPRENDEU — conta pra TODAS as abas do JOB.
+  //
+  // Diferente do andamento, que volta so pra quem pediu: aqui nao houve
+  // pedido. O consultor estava com a tela do JOB parada em "Falta ensinar uma
+  // vez", foi ate o Painel, refez o passo, e a extensao aprendeu sozinha. Sem
+  // este aviso ele precisa adivinhar que ja pode voltar, e a unica forma de
+  // descobrir era apertando F5. Era esse o F5 que o incomodava.
+  //
+  // Vai pra todas as abas do JOB porque ele costuma ter mais de uma aberta, e
+  // nao da pra saber qual esta esperando.
+  if (msg && msg.type === 'cotador_aprendeu') {
+    chrome.tabs.query({}, (todas) => {
+      (todas || []).forEach((a) => {
+        if (!a || !a.url) return;
+        if (a.url.indexOf('job-serenus') < 0 && a.url.indexOf('localhost') < 0) return;
+        chrome.tabs.sendMessage(a.id, { type: 'cotador_aprendeu', papeis: msg.papeis || [] },
+                                () => { void chrome.runtime.lastError; });
+      });
+    });
+    return;   // aviso de mao unica, como o andamento
+  }
   if (msg && (msg.type === 'cotar_painel' || msg.type === 'cotador_pronto' ||
               msg.type === 'cotador_cidades' || msg.type === 'cotador_catalogo' ||
               msg.type === 'cotador_modalidades' || msg.type === 'cotador_passo')) {

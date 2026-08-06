@@ -122,6 +122,13 @@
         window.postMessage({ source: 'JOB_SITE_RESP', tipo: 'andamento',
                              fase: m.fase, feito: m.feito, total: m.total }, '*');
       }
+      // A extensao reaprendeu o atalho que tinha vencido. A tela estava parada
+      // pedindo pro consultor ensinar; agora ela pode se destravar sozinha, sem
+      // recarregar a pagina.
+      if (m && m.type === 'cotador_aprendeu') {
+        window.postMessage({ source: 'JOB_SITE_RESP', tipo: 'cotador_aprendeu',
+                             papeis: m.papeis || [] }, '*');
+      }
     });
   } catch (e) { /* sem andamento a cotação ainda funciona, só fica calada */ }
 

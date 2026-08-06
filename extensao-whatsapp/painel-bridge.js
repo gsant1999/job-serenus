@@ -44,6 +44,20 @@
 
     if (d.tipo === 'aprendeu' && d.dados) {
       try { chrome.storage.local.set({ [CHAVE]: d.dados }); } catch (e) { /* idem */ }
+      // AVISA O JOB QUE JÁ APRENDEU.
+      //
+      // Aqui a corrente parava. A extensão reaprendia na hora em que o
+      // consultor refazia o passo no Painel, guardava, e não contava pra
+      // ninguém — a tela do JOB seguia com "Falta ensinar uma vez" na cara
+      // dele até apertar F5. Era esse o F5.
+      //
+      // Agora o aviso segue pro background, que repassa às abas do JOB. A tela
+      // confere de novo sozinha e volta a cotar sem recarregar nada.
+      try {
+        const papeis = Object.keys(d.dados).filter((k) => d.dados[k] && d.dados[k].hash);
+        chrome.runtime.sendMessage({ type: 'cotador_aprendeu', papeis },
+                                   () => { void chrome.runtime.lastError; });
+      } catch (e) { /* sem o aviso, volta a depender do F5 — não quebra nada */ }
       return;
     }
     // A extensao descobriu sozinha como se chama um codigo: manda pro JOB

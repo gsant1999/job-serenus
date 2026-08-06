@@ -618,6 +618,25 @@
     var d = ev.data;
     if (!d || d.source !== 'JOB_SITE_RESP') return;
     if (d.tipo === 'andamento') { mostrarAndamento(d); return; }
+    // A EXTENSÃO REAPRENDEU — a tela se destrava sozinha.
+    //
+    // Este é o fim do F5. Antes: o atalho do Painel vencia, a tela dizia
+    // "Falta ensinar uma vez", o consultor ia lá e refazia o passo, a extensão
+    // aprendia na hora — e a tela continuava com o mesmo aviso na cara dele,
+    // porque ninguém a avisava. Só recarregando.
+    //
+    // Agora o aviso chega e ela mesma refaz a pergunta. Se estiver tudo certo,
+    // o aviso some e o botão Cotar acende, sem recarregar nada.
+    if (d.tipo === 'cotador_aprendeu') {
+      mostrarSinal('aprender', 'Aprendeu — conferindo', '');
+      conferirLigacao().then(function () {
+        // Só retoma a listagem se a pessoa já tinha escolhido cidade e tipo.
+        // Recarregar a lista de quem ainda não pediu nada seria mexer na tela
+        // sem ela ter pedido.
+        if (pronto && cidadeEscolhida && tipoAtivo()) carregarOperadoras();
+      });
+      return;
+    }
     if (d.tipo === 'extensao_presente') {
       extensaoPresente = true;
       extensaoVersao = d.versao || '';
@@ -647,6 +666,20 @@
 
   // ── estado da ligação ──────────────────────────────────────────────────
   var pronto = false;
+
+  // Cada papel que a extensão aprende corresponde a UM gesto no Painel. Vence
+  // um por vez, então pedir "uma cotação inteira" quando só o preço venceu é
+  // mandar a pessoa fazer cinco passos a mais do que precisa.
+  var PASSO_HUMANO = {
+    criar:      'Clique em <b>Nova cotação</b>.',
+    abrir:      'Abra <b>uma cotação que já existe</b>.',
+    vidas:      'Numa cotação, <b>informe as vidas</b> (idades ou faixas).',
+    filtro:     'Numa cotação, <b>escolha a cidade e o tipo</b> de contratação.',
+    operadoras: 'Vá até a <b>lista de operadoras</b> aparecer.',
+    planos:     '<b>Clique numa operadora</b> e veja os planos dela.',
+    preco:      'Vá até <b>ver o preço na tela</b>.'
+  };
+
   var EXPLICA = {
     // O ATALHO VENCEU — e o conserto é do consultor, não meu.
     //
@@ -659,14 +692,13 @@
     // no Painel. Por isso este aviso não pede pra "avisar o suporte": pede a
     // única coisa que resolve, e que leva um minuto.
     hash_expirado: { classe: 'off', rotulo: 'O Painel foi atualizado',
-      html: '<b>O Painel do Corretor publicou uma versão nova e o atalho que o JOB usava venceu.</b> ' +
-            'Isso acontece de tempos em tempos e o conserto é rápido — a extensão reaprende sozinha ' +
-            'vendo você usar o Painel uma vez.' +
+      html: '<b>O Painel do Corretor publicou uma versão nova e um atalho que o JOB usava venceu.</b> ' +
+            'A extensão reaprende sozinha vendo você usar o Painel.' +
             '<ol><li>Vá na aba do <b>Painel do Corretor</b>.</li>' +
-            '<li>Faça <b>uma cotação na mão</b>, até <b>ver o preço na tela</b> — é esse passo que ela precisa ver.</li>' +
-            '<li>Volte aqui e clique em <b>Cotar</b> de novo.</li></ol>' +
-            '<p style="margin:8px 0 0;font-size:11.5px;color:var(--cinza-2)">Não precisa salvar nem ' +
-            'terminar a cotação lá — só chegar até o preço aparecer.</p>' },
+            '<li id="passoAprender">Faça uma cotação na mão até <b>ver o preço na tela</b>.</li></ol>' +
+            '<p style="margin:8px 0 0;font-size:11.5px;color:var(--cinza-2)">Não precisa voltar aqui nem ' +
+            'recarregar: assim que ela aprender, esta tela se destrava sozinha. E não precisa salvar ' +
+            'nem terminar a cotação lá.</p>' },
     extensao_nao_respondeu: { classe: 'off', rotulo: 'Extensão não responde',
       html: '<b>A extensão do JOB não respondeu.</b> Sem ela esta tela não cota, porque quem ' +
             'fala com o Painel é o seu próprio navegador.<ol><li>Confira se a extensão está ' +
@@ -705,9 +737,13 @@
       motivo = extensaoSabeCotar ? 'painel_fechado' : 'aba_desatualizada';
     }
     // O motivo vem com o passo colado ('hash_expirado:preco') pra o diagnóstico
-    // não perder onde quebrou. A explicação é a mesma pros sete passos.
+    // não perder onde quebrou. E vence UM passo por vez, não os sete — dizer
+    // "faça uma cotação inteira" quando só o passo do preço venceu é mandar a
+    // pessoa fazer cinco coisas a mais do que precisa.
     var e = EXPLICA[motivo] || (String(motivo || '').indexOf('hash_expirado') === 0
                                 ? EXPLICA.hash_expirado : null);
+    var qualPasso = String(motivo || '').indexOf('hash_expirado:') === 0
+      ? String(motivo).split(':')[1] : '';
     if (!e) {
       // Os DOIS lados da chamada que falhou: o que eu mandei e o que eles
       // responderam. A resposta sozinha é um digest opaco do Next e não diz
@@ -732,6 +768,13 @@
       return;
     }
     var html = e.html;
+    // Troca o passo genérico pelo que realmente venceu. Cada papel do cotador
+    // corresponde a UM gesto no Painel, e refazer só ele basta.
+    if (qualPasso && PASSO_HUMANO[qualPasso]) {
+      html = html.replace('Faça uma cotação na mão até <b>ver o preço na tela</b>.',
+        PASSO_HUMANO[qualPasso] + ' <span style="color:var(--cinza-2)">(só isso — o que venceu foi ' +
+        'o atalho de <code>' + esc(qualPasso) + '</code>)</span>');
+    }
     if (motivo === 'painel_fechado' && extra && extra.abasExaminadas != null) {
       html += '<p style="margin:8px 0 0;font-size:11.5px;color:var(--cinza-2)">A extensão olhou ' +
         extra.abasExaminadas + ' aba(s) e nenhuma era do Painel.</p>';
