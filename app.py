@@ -10931,7 +10931,7 @@ def _dm_evento(c):
           'conversionValue': float(c['valor'] or 0),
           'currency': c['moeda'] or 'BRL',
           'transactionId': f"job-proposta-{c['proposta_id']}",
-          'userDataConsent': {'adUserData': 'GRANTED', 'adPersonalization': 'GRANTED'}}
+          'consent': {'adUserData': 'CONSENT_GRANTED', 'adPersonalization': 'CONSENT_GRANTED'}}
     tipo = (c['click_tipo'] or 'gclid')
     ev['adIdentifiers'] = {tipo if tipo in ('gclid', 'gbraid', 'wbraid') else 'gclid': c['click_id']}
     return ev
@@ -30414,7 +30414,7 @@ def _ads_testar_conexao():
                     'eventTimestamp': datetime.now(TZ_SP).isoformat(timespec='seconds'),
                     'conversionValue': 0.01, 'currency': 'BRL',
                     'transactionId': 'job-teste-conexao',
-                    'userDataConsent': {'adUserData': 'GRANTED', 'adPersonalization': 'GRANTED'}}
+                    'consent': {'adUserData': 'CONSENT_GRANTED', 'adPersonalization': 'CONSENT_GRANTED'}}
         r = _requests.post(f"{_DM_API}/events:ingest", timeout=45,
                            headers={'Authorization': headers['Authorization'],
                                     'Content-Type': 'application/json'},
