@@ -318,6 +318,130 @@ filtros da nova tela** (conferir uma a uma antes de apagar):
 - ordenação `operadora A-Z, depois menor preço`
 - separação de tabelas incompletas
 
+### 7.3-bis PASSO 7C — a troca de motor, detalhada
+
+> Escrito em 06/08/2026, depois do handoff do backend. Os seis pontos entregues
+> (301, contexto, 3 rotas de bloco, status-tabelas, chave de escrita, N+1 +
+> `elegivel`) estão certos. **Falta o 7c, e é ele que liga todos os outros.**
+
+**Por que ele é o que falta:** a aba Cotar continua sendo o cotador **ao vivo** —
+recebe preço da extensão lendo o Painel do Corretor, não do `calcular_cotacao()`.
+Enquanto for assim:
+
+- as 152 tabelas não servem pra cotar;
+- a dependência do Painel e do F5 não acabou — que é o motivo do projeto existir;
+- o ganho medido de 6 min 14 s para meio segundo não acontece;
+- o N+1 corrigido e a flag `elegivel: false` ficam num caminho que ninguém percorre.
+  Não há onde a interface mostrar `elegivel`: `grep` em `cotacao_novo.html` não
+  encontra `elegivel`, `preco_ausente` nem `incompleta`, porque o dado não chega lá.
+
+#### A armadilha: 7c NÃO é só backend
+
+Hoje quem monta a navegação operadora → produto → linha → plano e quem pede o preço
+é o **JavaScript de `cotacao_novo.html`**, falando com a extensão. Trocar o motor
+significa esse JS parar de falar com a extensão e passar a falar com o servidor.
+
+**`templates/` é do Claude Code. `app.py` é do Antigravity.** Para ninguém escrever
+no arquivo do outro, o 7c se divide assim:
+
+- **Antigravity:** expõe os dois endpoints abaixo. Não encosta em `templates/`.
+- **Claude Code:** reescreve o JS da aba Cotar para consumi-los. Não encosta em `app.py`.
+
+#### O que o backend precisa expor
+
+Os endpoints `/api/v1/cotacao/planos` e `/api/v1/cotacao/calcular` já existem e fazem
+a conta certa — **mas exigem `@api_requer_chave('cotacao:ler')`**, e o navegador do
+consultor tem sessão, não chave de API. Por isso os dois abaixo, com sessão:
+
+```
+GET /cotacao/bloco/planos
+    ?cidade=Campinas - SP & modalidade=PME & acomodacao= & coparticipacao=
+    & mei= & op=Amil & op=Porto Saúde
+    @login_required
+
+    -> { "ok": true,
+         "planos": [ { "id": 10, "operadora": "Amil", "entidade": "",
+                       "produto": "Amil Fácil", "linha": "Amil S200",
+                       "plano": "Amil S200", "logo": "/static/...",
+                       "modalidade": "PME", "acomodacao": "Enfermaria",
+                       "coparticipacao": "Sem", "cidade": "Campinas - SP",
+                       "abrangencia": "Regional", "vigencia": "2026-12",
+                       "precos_ok": 10, "dias_atualizado": 4, "frescor": "fresca",
+                       "idade_min": 0 } ] }
+
+    idade_min = menor faixa COM preço. É o que separa "tabela quebrada" de
+    "a operadora não vende para essa idade" (Medsênior vende de 44 em diante,
+    confirmado pelo Guilherme). A tela usa isso pra avisar antes de cotar,
+    em vez de deixar cotar e mostrar zero depois.
+
+POST /cotacao/bloco/calcular
+    @login_required
+    corpo: { "idades": [42, 39, 12], "planos": [10, 22, 37] }
+           (aceitar também "faixas": {"00-18": 1, "34-38": 2} — a janela de
+            distribuição de vidas da tela trabalha por faixa, não por idade)
+
+    -> { "ok": true, "vidas": 3, "distribuicao": {...},
+         "resultados": [ { "plano_id": 10, "operadora": "...", "plano": "...",
+                           "total": 1287.5, "elegivel": true,
+                           "linhas": [ { "faixa": "34-38", "label": "...", "qtd": 2,
+                                         "preco": 300.0, "subtotal": 600.0,
+                                         "preco_ausente": false } ] } ],
+         "total_geral": 0, "avisos": [ { "plano_id": 10, "codigo": "...",
+                                         "mensagem": "..." } ] }
+
+    Mesma estrutura que calcular_cotacao() já devolve, mais o `elegivel`.
+    Não somar plano com elegivel:false no total_geral.
+```
+
+#### O que NÃO pode quebrar
+
+1. **O contexto do template é aditivo.** `cotacao_novo()` continua passando
+   `faixas`, `faixas_painel`, `modalidades`, `cidade_preferida`, `lead` e `salva`.
+   Acrescentar é livre; renomear ou remover quebra a tela.
+2. **A cotação ao vivo NÃO é apagada — ela vira o plano B.** É exatamente o "lazy
+   como rede" do §4.2: cidade que ainda não está no cache continua cotável pelo
+   Painel. Base local primeiro; ao vivo quando não houver tabela para aquela
+   combinação. Apagar o caminho ao vivo deixaria a corretora sem cotar qualquer
+   cidade fora de Campinas e Sorocaba.
+3. **`/cotacao/salvar` continua gravando em `cotacao_salva`** com o mesmo formato —
+   as 40 cotações existentes e os links `/c/<token>` já enviados a clientes têm que
+   continuar abrindo. Token é imutável.
+
+#### Query string do 301
+
+O redirect preserva `?idades=30,35&modalidade=PME`, mas `/cotacao/novo` não lê nada
+disso — conferido: a rota não toca `request.args` para esses campos. Quem tinha o
+link salvo cai numa tela que descarta o pedido **em silêncio**, o que é pior que um
+erro, porque parece que funcionou.
+
+Ler no `cotacao_novo()` e passar ao template: `idades`, `fx_0`..`fx_9`, `modalidade`,
+`acomodacao`, `coparticipacao`, `op` (repetível) e `mei`. O frontend pré-preenche.
+
+#### Subir a branch
+
+Nada foi commitado ainda, então ninguém conseguiu conferir uma linha. Subir assim:
+
+```bash
+git checkout -b backend-cotacao
+git add app.py
+git commit -m "feat(cotacao): motor local, rotas de bloco e chave de escrita"
+git push -u origin backend-cotacao
+```
+
+**Só `app.py`.** Sem merge em `main` — o deploy é automático do `main`, sem staging,
+e `main` já tem a tela consolidada esperando por esses endpoints.
+
+#### O que vai ser conferido na branch
+
+- Se o `ok:false` cobre **cada consulta** ou só o `try` externo. Foi exatamente aí
+  que o painel da Meta escorregou: o `except` devolvia o dicionário pela metade, que
+  é truthy, e a tela desenhou zeros que ninguém mediu (commit `7bf5bbc`).
+- Se `close_db(conn)` está depois de toda leitura. Código depois dele falha em
+  silêncio dentro do try — já aconteceu 3× neste projeto.
+- Se `is_pg` não vazou para fora de `init_db()` (usar `DB_MODE == 'postgres'`).
+- Se as 5 duplicidades foram comparadas antes de fundir, e não apagadas direto.
+- Se o backfill de `entidade` é idempotente por `meta_flags`.
+
 ### 7.4 Consolidação das quatro rotas em uma
 
 `/cotacao/novo` absorve `/cotacao/salvas`, `/cotacao/tabelas` e `/cotacao/legendas`
