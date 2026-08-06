@@ -27330,18 +27330,22 @@ def _viva_para_apresentacao(d):
         if p.get('total') is None:
             continue          # plano sem preco nao vai pra proposta do cliente
         linhas = []
+        elegivel = True
         for f in (p.get('faixas') or []):
             fx = _faixa_do_painel(f.get('faixa'))
             qtd = int(f.get('quantidade') or 0)
             if qtd <= 0:
                 continue
             preco = float(f.get('unitario') or 0)
+            if preco <= 0:
+                elegivel = False
             cont_faixa[fx] = qtd
             linhas.append({'faixa': fx, 'label': _faixa_label(fx), 'qtd': qtd,
                            'preco': preco, 'subtotal': round(preco * qtd, 2)})
         tb = p.get('tabela') or {}
         total = float(p.get('total') or 0)
-        total_geral += total
+        if elegivel:
+            total_geral += total
         planos.append({
             'operadora': (p.get('operadora') or {}).get('nome') or '',
             'plano': (p.get('plano') or {}).get('nome') or '',
@@ -27351,6 +27355,7 @@ def _viva_para_apresentacao(d):
             'abrangencia': (p.get('produto') or {}).get('nome') or '',
             'vigencia': '',
             'linhas': linhas, 'total': round(total, 2), 'recomendacao': '',
+            'elegivel': elegivel,
         })
     return planos, round(total_geral, 2), cont_faixa
 
@@ -29415,7 +29420,7 @@ def registrar_cotacao_no_lead(conn, lead_id, cid, planos, total_geral, idades, t
                 escrito.append('valor estimado')
         # Campos personalizados — mesma procedencia rastreavel do resto.
         ops = []
-        for p in planos:
+        for p in planos_validos:
             o = (p.get('operadora') or '').strip()
             if o and o not in ops:
                 ops.append(o)
@@ -29430,7 +29435,7 @@ def registrar_cotacao_no_lead(conn, lead_id, cid, planos, total_geral, idades, t
                 escrito.append(chave)
         # Timeline: a linha que faltava pra historia do lead ficar inteira.
         faixa = ''
-        totais = [float(p.get('total') or 0) for p in planos if (p.get('total') or 0) > 0]
+        totais = [float(p.get('total') or 0) for p in planos_validos if (p.get('total') or 0) > 0]
         if totais:
             faixa = (f" · R$ {min(totais):.2f}".replace('.', ',') if len(totais) == 1
                      else f" · de R$ {min(totais):.2f} a R$ {max(totais):.2f}".replace('.', ','))
@@ -29456,41 +29461,12 @@ def cotacao_salvar():
     if not idades or not tabela_ids:
         return redirect('/cotacao?idades=' + (d.get('idades', '') or ''))
 
-    cont_faixa = {}
-    for idade in idades:
-        fx = _faixa_da_idade(idade)
-        if fx:
-            cont_faixa[fx] = cont_faixa.get(fx, 0) + 1
-
     conn = db()
-    planos = []
-    total_geral = 0.0
+    recomendacoes = {}
     for tid in tabela_ids:
-        t = conn.execute("SELECT * FROM cotacao_tabela WHERE id=?", (tid,)).fetchone()
-        if not t:
-            continue
-        precos = conn.execute("SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (tid,)).fetchall()
-        pmap = {p['faixa']: float(p['preco'] or 0) for p in precos}
-        linhas = []
-        total = 0.0
-        for fx in FAIXAS_ETARIAS:
-            qtd = cont_faixa.get(fx, 0)
-            if qtd <= 0:
-                continue
-            preco = pmap.get(fx, 0)
-            sub = preco * qtd
-            total += sub
-            linhas.append({'faixa': fx, 'label': _faixa_label(fx), 'qtd': qtd, 'preco': preco, 'subtotal': round(sub, 2)})
-        total_geral += total
-        rec_map = {'1a': '1ª opção', '2a': '2ª opção', '3a': '3ª opção'}
-        rec_raw = (d.get(f'rec_{tid}') or '').strip()
-        planos.append({
-            'operadora': t['operadora'], 'plano': t['plano'], 'modalidade': t['modalidade'],
-            'acomodacao': t['acomodacao'], 'coparticipacao': t['coparticipacao'],
-            'abrangencia': t['abrangencia'], 'vigencia': t['vigencia'],
-            'linhas': linhas, 'total': round(total, 2),
-            'recomendacao': rec_map.get(rec_raw, ''),
-        })
+        recomendacoes[tid] = (d.get(f'rec_{tid}') or '').strip()
+    
+    planos, total_geral, _, _ = calcular_cotacao(conn, idades, tabela_ids, recomendacoes=recomendacoes)
 
     # Dados do corretor (logado) — busca do banco para garantir nome/email
     urow = conn.execute("SELECT nome, email FROM usuarios WHERE id=?", (session.get('user_id'),)).fetchone()
