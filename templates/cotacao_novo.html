@@ -1606,10 +1606,16 @@
     return (v == null || v === '') ? '—' : 'R$ ' + Number(v).toLocaleString('pt-BR',
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
+  // Vigência chega em dois formatos: data cheia ("2026-08-01 00:00:00", que é o
+  // que está gravado nas 46 tabelas da Porto) e ano-mês ("2026-12", que é como o
+  // extrator manda). Os dois têm que virar data legível — sem isso o ano-mês
+  // aparecia cru na tela, no meio de datas em pt-BR.
   var dataBr = function (s) {
     if (!s) return '—';
     var d = String(s).slice(0, 10).split('-');
-    return d.length === 3 ? (d[2] + '/' + d[1] + '/' + d[0]) : String(s).slice(0, 10);
+    if (d.length >= 3) return d[2].slice(0, 2) + '/' + d[1] + '/' + d[0];
+    if (d.length === 2) return d[1] + '/' + d[0];
+    return String(s).slice(0, 10);
   };
 
   var PAINEL = { cotar: 'pnCotar', salvas: 'pnSalvas', tabelas: 'pnTabelas', legendas: 'pnLegendas' };
