@@ -1323,23 +1323,54 @@
   // eram PF e PME. Então esta função procura nos nomes de campo prováveis e,
   // não achando, DIZ QUE NÃO SABE em vez de inventar requisito — que aqui
   // seria mandar o consultor prometer o que não pode cumprir.
+  // Cache dos requisitos, por entidade. Entidade muda muito pouco e a resposta
+  // é a mesma o dia inteiro — perguntar de novo a cada redesenho da lista seria
+  // uma chamada ao Painel por passada de mouse.
+  var reqEntidade = {};
+  // Quem já está sendo perguntado NESTE momento.
+  //
+  // Marcar "em andamento" gravando `undefined` no cache não marcaria nada:
+  // `undefined` é o mesmo valor de "nunca perguntei", e a guarda passaria
+  // batido. Como cada resposta redesenha a lista, e o redesenho dispara a
+  // busca das outras, com 19 entidades isso viraria uma rajada de chamadas
+  // repetidas ao Painel — exatamente o padrão que não pode acontecer lá.
+  var reqPedindo = {};
+
   function requisitosDaEntidade(E) {
-    var b = E && E.bruto;
-    if (b && typeof b === 'object') {
-      var partes = [];
-      ['nomeCompleto', 'razaoSocial', 'descricao', 'requisitos', 'elegibilidade']
-        .forEach(function (k) { if (b[k] && typeof b[k] === 'string') partes.push(b[k]); });
-      ['profissoes', 'categorias', 'ocupacoes'].forEach(function (k) {
-        if (Array.isArray(b[k]) && b[k].length) {
-          partes.push(b[k].map(function (x) {
-            return typeof x === 'string' ? x : (x && (x.nome || x.descricao)) || '';
-          }).filter(Boolean).join(', '));
-        }
-      });
-      if (partes.length) return partes.join(' — ');
+    if (!E || !Object.prototype.hasOwnProperty.call(reqEntidade, E.nome)) {
+      return 'Carregando quem pode entrar…';
     }
-    return 'Quem pode entrar nesta entidade ainda não está no JOB. Confira no Painel do ' +
-           'Corretor, no "i" ao lado do nome dela, antes de prometer ao cliente.';
+    var r = reqEntidade[E.nome];
+    if (r === null) {
+      return 'Não deu pra ler quem entra nesta entidade. Confira no Painel do Corretor, ' +
+             'no "i" ao lado do nome dela, antes de prometer ao cliente.';
+    }
+    var t = r.nome || E.nome;
+    if (r.profissoes && r.profissoes.length) {
+      t += '\n\nAceita: ' + r.profissoes.join(', ');
+    }
+    return t;
+  }
+
+  // Pergunta ao Painel quem pode entrar. Os três parâmetros já vêm no próprio
+  // plano — entidade, administradora.id e produto.id — então não é preciso
+  // capturar nada: é a mesma chamada que o "i" deles faz.
+  async function carregarRequisitos(E) {
+    if (!E || !E.nome) return;
+    if (reqPedindo[E.nome] || Object.prototype.hasOwnProperty.call(reqEntidade, E.nome)) return;
+    reqPedindo[E.nome] = true;
+    var ref = (E.planos || [])[0] || {};
+    var admId = (ref.administradora && ref.administradora.id) || null;
+    var prodId = (ref.produto && ref.produto.id) || null;
+    if (admId == null) { reqEntidade[E.nome] = null; delete reqPedindo[E.nome]; return; }
+    var r = await pedir('passo', { pedido: { acao: 'entidade', entidade: E.nome,
+      administradoraId: admId, produtoId: prodId, cidade: cidadeEscolhida,
+      modalidade: modalidadeAtiva() } }, 15000);
+    reqEntidade[E.nome] = (r && r.ok && r.dados) ? r.dados : null;
+    delete reqPedindo[E.nome];
+    // Só repinta se a pessoa ainda está olhando a lista de entidades — mexer na
+    // tela depois que ela navegou seria puxar o tapete.
+    if (nivel === 'entidades') desenharNav();
   }
 
   // Agrupa por entidade. Devolve [] quando nenhum plano tem entidade — que é
@@ -1428,14 +1459,22 @@
       if (!ents.length) { voltarPara('produtos'); return; }
       ents.forEach(function (E) {
         var marcados = E.planos.filter(marcado).length;
-        var req = requisitosDaEntidade(E);
+        var r = reqEntidade[E.nome];
+        // O nome por extenso vale mais que a sigla: "ANASPL" não diz nada, e
+        // "Associação Nacional dos Servidores Públicos" já responde metade da
+        // pergunta antes de abrir o "i".
+        var extenso = (r && r.nome && r.nome !== E.nome) ? r.nome : '';
+        var quantas = (r && r.profissoes && r.profissoes.length) || 0;
         c.appendChild(cartao(
           '<span class="txt"><b>' + esc(E.nome) + '</b>' +
-            (req ? '<i class="ajuda-i" data-req="' + esc(E.nome) + '" title="' + esc(req) + '">i</i>' : '') +
+            '<i class="ajuda-i" title="' + esc(requisitosDaEntidade(E)) + '">i</i>' +
+            (extenso ? '<small style="color:var(--texto)">' + esc(extenso) + '</small>' : '') +
             '<small>' + (E.adm ? esc(E.adm) + ' · ' : '') + E.planos.length + ' plano(s)' +
+            (quantas ? ' · aceita ' + quantas + ' profissões' : '') +
             (marcados ? ' · ' + marcados + ' marcado(s)' : '') + '</small></span>' +
           '<span class="seta">›</span>',
           function () { entidadeAtual = E.nome; voltarPara('produtos'); }, marcados > 0));
+        carregarRequisitos(E);
       });
       return;
     }

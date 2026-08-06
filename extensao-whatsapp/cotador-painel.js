@@ -82,6 +82,13 @@
   // pressupõem". As que não devolvem nada eram justamente as que montavam o
   // terreno.
   const PAPEIS = ['criar', 'abrir', 'vidas', 'filtro', 'operadoras', 'planos', 'preco'];
+  // Papéis OPCIONAIS: a extensão aprende e guarda, mas a falta deles não
+  // impede de cotar. `entidade` (quem pode entrar na entidade de adesão) é
+  // assim — é informação valiosa, não caminho crítico. Se entrasse em PAPEIS,
+  // quem nunca abriu um "i" no Painel ficaria travado em "falta ensinar" sem
+  // conseguir cotar, por causa de um dado que nem sempre se usa.
+  const PAPEIS_EXTRA = ['entidade'];
+  const PAPEIS_TODOS = PAPEIS.concat(PAPEIS_EXTRA);
   const APRENDIDO = { criar: null, abrir: null, vidas: null, filtro: null,
                       operadoras: null, planos: null, preco: null };
 
@@ -130,6 +137,12 @@
     if (d.length === 1 && d[0] && d[0].filtro && d[0].filtro.cidade) return 'operadoras';
     if (d.length === 1 && d[0] && d[0].operadoraId && Array.isArray(d[0].vidas)) return 'planos';
     if (d.length === 2 && typeof d[0] === 'string' && d[1] && d[1].key && d[1].plano) return 'preco';
+    // [{entidade, administradoraId, produtoId}] — quem pode entrar na entidade.
+    // É o que o Painel pede quando alguém abre o "i" ao lado dela: devolve o
+    // nome por extenso e a lista de profissões aceitas. Na adesão isso é a
+    // PRIMEIRA pergunta (o cliente pode entrar?), e até aqui só existia lá.
+    if (d.length === 1 && d[0] && typeof d[0].entidade === 'string' &&
+        d[0].administradoraId != null) return 'entidade';
     // [uuid, {cidade, modalidade...}] SEM key — grava cidade e contratação na
     // cotação. Vem depois do 'preco' na ordem dos testes de propósito: o preço
     // também tem cidade, e sem essa ordem os dois se confundiriam.
@@ -255,7 +268,10 @@
     // Só aceita no formato certo. Se o guardado for de uma versão anterior da
     // extensão, o cotador prefere dizer que não sabe e aprender de novo — meio
     // hash restaurado seria pior que hash nenhum.
-    PAPEIS.forEach((k) => {
+    // Restaura os obrigatórios E os opcionais: guardar o `entidade` e não
+    // restaurar faria a extensão reaprender ele a cada recarga da aba, o que
+    // na prática é nunca ter.
+    PAPEIS_TODOS.forEach((k) => {
       const v = ev.data.dados[k];
       if (v && typeof v.hash === 'string') APRENDIDO[k] = { hash: v.hash, arvore: v.arvore || null };
     });
@@ -336,6 +352,26 @@
 
   // A resposta vem em linhas "N:conteudo". As ações de dado põem o resultado
   // numa linha que é JSON puro — pegamos a primeira que for array de objeto.
+  // Irmão do primeiroArray, pra resposta que é OBJETO e não lista.
+  //
+  // O primeiroArray exige `Array.isArray`, então respostas como a dos
+  // requisitos da entidade — { nome, profissoes } — passavam batido por ele e
+  // voltavam nulas. Um exige lista, o outro exige objeto com conteúdo; separar
+  // evita que um relaxe o critério do outro.
+  function primeiroObjeto(texto) {
+    for (const linha of String(texto).split('\n')) {
+      const v = linha.indexOf(':');
+      if (v < 0) continue;
+      const resto = linha.slice(v + 1);
+      if (resto[0] !== '{') continue;
+      try {
+        const d = JSON.parse(resto);
+        if (d && typeof d === 'object' && !Array.isArray(d) && Object.keys(d).length) return d;
+      } catch (e) { /* linha de componente, não de dado */ }
+    }
+    return null;
+  }
+
   function primeiroArray(texto) {
     for (const linha of String(texto).split('\n')) {
       const v = linha.indexOf(':');
@@ -772,6 +808,31 @@
     }
     if (a === 'planos') {
       return { planos: await planosDaOperadora(p.cotacaoId, p, p.operadoraId) };
+    }
+    // QUEM PODE ENTRAR NA ENTIDADE.
+    //
+    // Na adesão a entidade é o portão: não adianta o plano ser bom se o
+    // cliente não se encaixa. O Painel guarda isso atrás do "i" ao lado do
+    // nome dela, e devolve exatamente { nome, profissoes }:
+    //
+    //   { "nome": "Associação Nacional dos Servidores Públicos e Profissionais
+    //             Liberais",
+    //     "profissoes": ["Administrador", "Arquiteto", "Assistente Social", …] }
+    //
+    // Os três parâmetros já vêm no próprio plano (entidade, administradora.id
+    // e produto.id), então o JOB pergunta sem precisar de mais nada.
+    if (a === 'entidade') {
+      if (!p.entidade || p.administradoraId == null) throw new Error('sem_entidade');
+      const { texto } = await acao('entidade', `/cotacoes/${p.cotacaoId || ultimaCotacao || ''}/edit?d=cenarios`,
+        [{ entidade: p.entidade, administradoraId: p.administradoraId, produtoId: p.produtoId }],
+        p.cotacaoId || ultimaCotacao);
+      const o = primeiroObjeto(texto) || {};
+      return {
+        entidade: p.entidade,
+        nome: typeof o.nome === 'string' ? o.nome : '',
+        profissoes: Array.isArray(o.profissoes)
+          ? o.profissoes.filter((x) => typeof x === 'string') : [],
+      };
     }
     // Gravar cidade e contratação sem precisar listar operadora nenhuma.
     //
