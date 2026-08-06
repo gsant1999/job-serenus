@@ -3719,7 +3719,13 @@
     return 'há ' + Math.floor(dias / 30) + ' meses';
   }
 
+  // Quem chega pelo botão "Cotar" da análise já disse o que quer: cotar. Este
+  // sinal pula a lista de cotações antigas e abre o formulário direto, com as
+  // idades que a análise já extraiu da conversa.
+  let _cotDireto = false;
+
   async function abrirSecaoCotacao() {
+    if (_cotDireto) { _cotDireto = false; abrirSecaoCotarInline(); return; }
     setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div>' +
                   '<div class="job-sem-analise-txt">Procurando as cotações deste cliente…</div></div>');
     let tel = '';
@@ -6212,12 +6218,12 @@
     const bc = document.getElementById('job-cotar');
     if (bc) {
       bc.addEventListener('click', () => {
-        const q = [];
-        if (bc.dataset.lead) q.push('lead_id=' + encodeURIComponent(bc.dataset.lead));
-        if (bc.dataset.nome) q.push('cliente_nome=' + encodeURIComponent(bc.dataset.nome));
-        if (bc.dataset.telefone) q.push('cliente_telefone=' + encodeURIComponent(bc.dataset.telefone));
-        if (bc.dataset.idades) q.push('idades=' + encodeURIComponent(bc.dataset.idades));
-        window.open(_SITE_BASE_URL_EXT + '/cotacao' + (q.length ? '?' + q.join('&') : ''), '_blank');
+        // Abria aba nova no JOB. Agora cota aqui mesmo, com as idades que a
+        // análise já leu da conversa — era o último lugar da extensão que
+        // obrigava o consultor a sair do atendimento pra cotar.
+        _cot = { idades: bc.dataset.idades || '', cidade: '', modalidade: 'PF' };
+        _cotDireto = true;
+        abrirSecao('cotacao');
       });
     }
     // Copiar a ANÁLISE COMPLETA (tudo de uma vez).
