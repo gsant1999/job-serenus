@@ -3825,23 +3825,20 @@ def init_db():
         if not conn.execute("SELECT 1 FROM meta_flags WHERE k='cot_entidade_backfill_20260805b'").fetchone():
             rows = conn.execute("""SELECT id, operadora, linha, modalidade FROM cotacao_tabela
                                    WHERE modalidade LIKE '%Ades%' OR operadora LIKE '%Affix%'
-                                      OR operadora LIKE '%SUPERMED%' OR linha LIKE '%(%'""").fetchall()
+                                      OR operadora LIKE '%SUPERMED%' OR (linha LIKE '%(%' AND modalidade LIKE '%Ades%')""").fetchall()
             for r in rows:
                 tid = r['id']
                 op = (r['operadora'] or '').strip()
                 lin = (r['linha'] or '').strip()
                 ent = ''
-                new_op = op
                 new_lin = lin
+                
                 if op.startswith('Affix '):
                     ent = op[6:].strip()
-                    new_op = 'Affix'
                 elif op.startswith('SUPERMED - '):
                     ent = op[11:].strip()
-                    new_op = 'SUPERMED'
                 elif ' - ' in op:
                     parts = op.split(' - ', 1)
-                    new_op = parts[0].strip()
                     ent = parts[1].strip()
 
                 if not ent and '(' in lin and ')' in lin:
@@ -3849,40 +3846,57 @@ def init_db():
                     idx2 = lin.rfind(')')
                     if idx2 > idx1:
                         ent = lin[idx1 + 1:idx2].strip()
+                        new_lin = lin[:idx1].strip()
+                        
+                if ent and '(' in ent and ')' in ent:
+                    e_idx = ent.find('(')
+                    ent = ent[:e_idx].strip()
 
-                if ent or new_op != op:
-                    conn.execute("UPDATE cotacao_tabela SET operadora=?, entidade=?, linha=? WHERE id=?",
-                                 (new_op, ent, new_lin, tid))
+                if ent or new_lin != lin:
+                    conn.execute("UPDATE cotacao_tabela SET entidade=?, linha=? WHERE id=?",
+                                 (ent, new_lin, tid))
             conn.execute("INSERT INTO meta_flags (k) VALUES ('cot_entidade_backfill_20260805b')")
             conn.commit()
             print("[COTACAO] Backfill de entidade em cotacao_tabela aplicado")
     except Exception as e:
-        if is_pg:
-            try: conn.rollback()
-            except Exception: pass
+        try: conn.rollback()
+        except Exception: pass
         print(f"[COTACAO] backfill entidade pulado: {e}")
 
     # ─── Passo 4: Deduplicação inteligente de tabelas com preços 100% idênticos ───
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
         conn.commit()
-        if not conn.execute("SELECT 1 FROM meta_flags WHERE k='cot_dedup_duplicidades_20260805'").fetchone():
+        
+        passo3_ok = conn.execute("SELECT 1 FROM meta_flags WHERE k='cot_entidade_backfill_20260805b'").fetchone()
+        ja_dedup = conn.execute("SELECT 1 FROM meta_flags WHERE k='cot_dedup_duplicidades_20260805'").fetchone()
+        
+        if passo3_ok and not ja_dedup:
             dups = conn.execute("""
                 SELECT operadora, plano, modalidade, acomodacao, coparticipacao,
-                       COALESCE(tipo_cnpj,'') tc, COALESCE(cidade,'') cid, COALESCE(entidade,'') ent, COUNT(*) cnt
+                       COALESCE(tipo_cnpj,'') tc, COALESCE(cidade,'') cid, COALESCE(entidade,'') ent, 
+                       COALESCE(linha,'') lin, COALESCE(abrangencia,'') abr, COALESCE(vigencia,'') vig, COUNT(*) cnt
                 FROM cotacao_tabela
-                GROUP BY operadora, plano, modalidade, acomodacao, coparticipacao, 6, 7, 8
+                WHERE ativo=1
+                GROUP BY operadora, plano, modalidade, acomodacao, coparticipacao, 6, 7, 8, 9, 10, 11
                 HAVING COUNT(*) > 1
             """).fetchall()
             for d in dups:
-                tids = [r['id'] for r in conn.execute("""
-                    SELECT id FROM cotacao_tabela
-                    WHERE operadora=? AND plano=? AND modalidade=? AND acomodacao=?
-                      AND coparticipacao=? AND COALESCE(tipo_cnpj,'')=?
-                      AND COALESCE(cidade,'')=? AND COALESCE(entidade,'')=?
-                    ORDER BY id DESC
+                tabela_rows = conn.execute("""
+                    SELECT t.id,
+                           (SELECT COUNT(*) FROM cotacao_preco p WHERE p.tabela_id=t.id AND p.preco > 0) as completude
+                    FROM cotacao_tabela t
+                    WHERE t.operadora=? AND t.plano=? AND t.modalidade=? AND t.acomodacao=?
+                      AND t.coparticipacao=? AND COALESCE(t.tipo_cnpj,'')=?
+                      AND COALESCE(t.cidade,'')=? AND COALESCE(t.entidade,'')=?
+                      AND COALESCE(t.linha,'')=? AND COALESCE(t.abrangencia,'')=? AND COALESCE(t.vigencia,'')=?
+                      AND t.ativo=1
+                    ORDER BY completude DESC, COALESCE(t.atualizado_em, t.criado_em) DESC, t.id DESC
                 """, (d['operadora'], d['plano'], d['modalidade'], d['acomodacao'],
-                      d['coparticipacao'], d['tc'], d['cid'], d['ent'])).fetchall()]
+                      d['coparticipacao'], d['tc'], d['cid'], d['ent'], d['lin'], d['abr'], d['vig'])).fetchall()
+                
+                tids = [r['id'] for r in tabela_rows]
+                
                 if len(tids) > 1:
                     p1 = {r['faixa']: float(r['preco'] or 0) for r in conn.execute(
                         "SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (tids[0],)).fetchall()}
@@ -3890,16 +3904,15 @@ def init_db():
                         p2 = {r['faixa']: float(r['preco'] or 0) for r in conn.execute(
                             "SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (rem_id,)).fetchall()}
                         if p1 == p2:
-                            conn.execute("DELETE FROM cotacao_preco WHERE tabela_id=?", (rem_id,))
-                            conn.execute("DELETE FROM cotacao_rede WHERE tabela_id=?", (rem_id,))
-                            conn.execute("DELETE FROM cotacao_tabela WHERE id=?", (rem_id,))
+                            # Inativa em vez de deletar para não quebrar referências em cotacao_salva.tabela_ids_json
+                            conn.execute("UPDATE cotacao_tabela SET ativo=0, atualizado_em=?, plano = plano || ' (Duplicada)' WHERE id=?", 
+                                         (_agora_sp(), rem_id))
             conn.execute("INSERT INTO meta_flags (k) VALUES ('cot_dedup_duplicidades_20260805')")
             conn.commit()
-            print("[COTACAO] Dedup de duplicidades com preços idênticos aplicado")
+            print("[COTACAO] Dedup de duplicidades com preços idênticos aplicado (referências preservadas)")
     except Exception as e:
-        if is_pg:
-            try: conn.rollback()
-            except Exception: pass
+        try: conn.rollback()
+        except Exception: pass
         print(f"[COTACAO] dedup duplicidades pulado: {e}")
 
     # ─── funil_execucao: era PK só em usuario_id (1 execução por consultor).
@@ -27330,18 +27343,22 @@ def _viva_para_apresentacao(d):
         if p.get('total') is None:
             continue          # plano sem preco nao vai pra proposta do cliente
         linhas = []
+        elegivel = True
         for f in (p.get('faixas') or []):
             fx = _faixa_do_painel(f.get('faixa'))
             qtd = int(f.get('quantidade') or 0)
             if qtd <= 0:
                 continue
             preco = float(f.get('unitario') or 0)
+            if preco <= 0:
+                elegivel = False
             cont_faixa[fx] = qtd
             linhas.append({'faixa': fx, 'label': _faixa_label(fx), 'qtd': qtd,
                            'preco': preco, 'subtotal': round(preco * qtd, 2)})
         tb = p.get('tabela') or {}
         total = float(p.get('total') or 0)
-        total_geral += total
+        if elegivel:
+            total_geral += total
         planos.append({
             'operadora': (p.get('operadora') or {}).get('nome') or '',
             'plano': (p.get('plano') or {}).get('nome') or '',
@@ -27351,6 +27368,7 @@ def _viva_para_apresentacao(d):
             'abrangencia': (p.get('produto') or {}).get('nome') or '',
             'vigencia': '',
             'linhas': linhas, 'total': round(total, 2), 'recomendacao': '',
+            'elegivel': elegivel,
         })
     return planos, round(total_geral, 2), cont_faixa
 
@@ -29415,7 +29433,7 @@ def registrar_cotacao_no_lead(conn, lead_id, cid, planos, total_geral, idades, t
                 escrito.append('valor estimado')
         # Campos personalizados — mesma procedencia rastreavel do resto.
         ops = []
-        for p in planos:
+        for p in planos_validos:
             o = (p.get('operadora') or '').strip()
             if o and o not in ops:
                 ops.append(o)
@@ -29430,7 +29448,7 @@ def registrar_cotacao_no_lead(conn, lead_id, cid, planos, total_geral, idades, t
                 escrito.append(chave)
         # Timeline: a linha que faltava pra historia do lead ficar inteira.
         faixa = ''
-        totais = [float(p.get('total') or 0) for p in planos if (p.get('total') or 0) > 0]
+        totais = [float(p.get('total') or 0) for p in planos_validos if (p.get('total') or 0) > 0]
         if totais:
             faixa = (f" · R$ {min(totais):.2f}".replace('.', ',') if len(totais) == 1
                      else f" · de R$ {min(totais):.2f} a R$ {max(totais):.2f}".replace('.', ','))
@@ -29456,41 +29474,12 @@ def cotacao_salvar():
     if not idades or not tabela_ids:
         return redirect('/cotacao?idades=' + (d.get('idades', '') or ''))
 
-    cont_faixa = {}
-    for idade in idades:
-        fx = _faixa_da_idade(idade)
-        if fx:
-            cont_faixa[fx] = cont_faixa.get(fx, 0) + 1
-
     conn = db()
-    planos = []
-    total_geral = 0.0
+    recomendacoes = {}
     for tid in tabela_ids:
-        t = conn.execute("SELECT * FROM cotacao_tabela WHERE id=?", (tid,)).fetchone()
-        if not t:
-            continue
-        precos = conn.execute("SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (tid,)).fetchall()
-        pmap = {p['faixa']: float(p['preco'] or 0) for p in precos}
-        linhas = []
-        total = 0.0
-        for fx in FAIXAS_ETARIAS:
-            qtd = cont_faixa.get(fx, 0)
-            if qtd <= 0:
-                continue
-            preco = pmap.get(fx, 0)
-            sub = preco * qtd
-            total += sub
-            linhas.append({'faixa': fx, 'label': _faixa_label(fx), 'qtd': qtd, 'preco': preco, 'subtotal': round(sub, 2)})
-        total_geral += total
-        rec_map = {'1a': '1ª opção', '2a': '2ª opção', '3a': '3ª opção'}
-        rec_raw = (d.get(f'rec_{tid}') or '').strip()
-        planos.append({
-            'operadora': t['operadora'], 'plano': t['plano'], 'modalidade': t['modalidade'],
-            'acomodacao': t['acomodacao'], 'coparticipacao': t['coparticipacao'],
-            'abrangencia': t['abrangencia'], 'vigencia': t['vigencia'],
-            'linhas': linhas, 'total': round(total, 2),
-            'recomendacao': rec_map.get(rec_raw, ''),
-        })
+        recomendacoes[tid] = (d.get(f'rec_{tid}') or '').strip()
+    
+    planos, total_geral, _, _ = calcular_cotacao(conn, idades, tabela_ids, recomendacoes=recomendacoes)
 
     # Dados do corretor (logado) — busca do banco para garantir nome/email
     urow = conn.execute("SELECT nome, email FROM usuarios WHERE id=?", (session.get('user_id'),)).fetchone()
