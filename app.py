@@ -26790,8 +26790,10 @@ def cotacao_bloco_planos():
             q += " AND (COALESCE(cidade,'')='' OR LOWER(cidade)=LOWER(?))"
             params.append(f_cidade)
         if f_modalidade and f_modalidade.lower() != 'todos':
+            _mod_map = {'1': 'PF', '2': 'PME', '3': 'Adesão'}
+            f_mod_alvo = _mod_map.get(f_modalidade, f_modalidade)
             q += " AND LOWER(modalidade)=LOWER(?)"
-            params.append(f_modalidade)
+            params.append(f_mod_alvo)
         if f_acomodacao and f_acomodacao.lower() != 'todos':
             q += " AND LOWER(acomodacao)=LOWER(?)"
             params.append(f_acomodacao)
@@ -27908,6 +27910,17 @@ def cotacao_tabela_excluir(tid):
     conn = db()
     conn.execute("DELETE FROM cotacao_preco WHERE tabela_id=?", (tid,))
     conn.execute("DELETE FROM cotacao_tabela WHERE id=?", (tid,))
+    conn.commit(); close_db(conn)
+    return jsonify({"ok": True})
+
+
+@app.route('/cotacao/tabelas/excluir-todas', methods=['POST'])
+@login_required
+@admin_required
+def cotacao_tabelas_excluir_todas():
+    conn = db()
+    conn.execute("DELETE FROM cotacao_preco")
+    conn.execute("DELETE FROM cotacao_tabela")
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
 

@@ -534,6 +534,7 @@
       <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas/importar-pdf'">Importar PDF</button>
       <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas/importar'">Importar CSV</button>
       <button class="btn-outline btn-sm" onclick="location.href='/cotacao/operadoras-logos'">Logos</button>
+      <button class="btn-outline btn-sm" style="color:#ef4444; border-color:currentColor" onclick="zerarTabelasJob()">Zerar base</button>
     </div>
   </div>
   <div id="corpoTabelas"><div class="cv-carregando">Carregando…</div></div>
@@ -1030,7 +1031,7 @@
     el('navLista').innerHTML = '<div class="cv-ops-vazio">Consultando planos no banco do JOB…</div>';
 
     var doJob = await fetch('/cotacao/bloco/planos?cidade=' +
-        encodeURIComponent(cidadeEscolhida || '') + '&modalidade=' + encodeURIComponent(mod || ''))
+        encodeURIComponent(cidadeEscolhida || '') + '&modalidade=' + encodeURIComponent(tipoAtivo() || ''))
       .then(function (x) { return x.json(); }).catch(function () { return {}; });
 
     if (doJob && doJob.ok && doJob.planos && doJob.planos.length > 0) {
@@ -1642,7 +1643,7 @@
     }
 
     var doJob = await fetch('/cotacao/bloco/planos?cidade=' + encodeURIComponent(cidadeEscolhida || '') +
-      '&modalidade=' + encodeURIComponent(modalidadeAtiva() || ''))
+      '&modalidade=' + encodeURIComponent(tipoAtivo() || ''))
       .then(function (res) { return res.json(); }).catch(function () { return { ok: false }; });
 
     if (doJob && doJob.ok && (doJob.planos || []).length > 0) {
@@ -1885,6 +1886,14 @@
     });
     el('corpoTabelas').innerHTML = h + '</tbody></table>';
   }
+
+  window.zerarTabelasJob = function () {
+    if (!confirm('Tem certeza de que deseja excluir TODAS as tabelas de preço do JOB?\n\nIsso apagará todas as 129+ tabelas do cache local para você recomeçar do zero. Esta ação não pode ser desfeita.')) return;
+    postar('/cotacao/tabelas/excluir-todas').then(function () {
+      alert('Todas as tabelas de preço foram removidas do sistema.');
+      recarregar('tabelas');
+    });
+  };
 
   /* ── Legendas ──────────────────────────────────────────────────────────── */
   function verLegendas(d) {
