@@ -358,7 +358,16 @@
   // requisitos da entidade — { nome, profissoes } — passavam batido por ele e
   // voltavam nulas. Um exige lista, o outro exige objeto com conteúdo; separar
   // evita que um relaxe o critério do outro.
-  function primeiroObjeto(texto) {
+  // Procura o objeto que SERVE, não o primeiro que aparece.
+  //
+  // Escrevi este irmão do primeiroArray e caí no mesmo defeito que ele tem: a
+  // resposta traz vários blocos, e pegar o primeiro pega o errado. No caso da
+  // entidade, o bloco útil vem no índice 1; o 0 é outra coisa, e a tela
+  // mostrava a sigla sozinha sem profissão nenhuma.
+  //
+  // Recebe quem decide se serve. Assim quem chama diz o que procura, em vez de
+  // torcer pra ordem não mudar do lado deles.
+  function objetoQueServe(texto, serve) {
     for (const linha of String(texto).split('\n')) {
       const v = linha.indexOf(':');
       if (v < 0) continue;
@@ -366,7 +375,7 @@
       if (resto[0] !== '{') continue;
       try {
         const d = JSON.parse(resto);
-        if (d && typeof d === 'object' && !Array.isArray(d) && Object.keys(d).length) return d;
+        if (d && typeof d === 'object' && !Array.isArray(d) && serve(d)) return d;
       } catch (e) { /* linha de componente, não de dado */ }
     }
     return null;
@@ -877,7 +886,10 @@
       const { texto } = await acao('entidade', `/cotacoes/${cid}/edit?d=cenarios`,
         [{ entidade: p.entidade, administradoraId: p.administradoraId, produtoId: p.produtoId }],
         cid);
-      const o = primeiroObjeto(texto) || {};
+      // O que serve é o bloco que TEM nome ou lista de profissões — não o
+      // primeiro objeto da resposta, que é outra coisa.
+      const o = objetoQueServe(texto, (d) =>
+        typeof d.nome === 'string' || Array.isArray(d.profissoes)) || {};
       return {
         entidade: p.entidade,
         nome: typeof o.nome === 'string' ? o.nome : '',
