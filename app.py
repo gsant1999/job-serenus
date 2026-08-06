@@ -26591,8 +26591,131 @@ def _cotacao_viva_gravar(conn, d, usuario_id, origem):
             # Uma linha de histórico que falha não pode derrubar a cotação que
             # o consultor acabou de fazer. A rodada em JSON já está salva.
             continue
+
+    # A base local aprende com esta cotação. É o que faz o cache se encher
+    # sozinho enquanto o consultor trabalha, em vez de depender de alguém
+    # exportar e subir arquivo à mão.
+    #
+    # Vem DEPOIS do histórico e ANTES do commit de propósito: se o aprendizado
+    # falhar, a cotação e o histórico já estão íntegros e nada se perde. E vem
+    # antes do close_db porque código depois dele falha em silêncio — já
+    # aconteceu três vezes neste projeto.
+    try:
+        n = _aprender_do_vivo(conn, cidade, modalidade, planos)
+        if n:
+            app.logger.info(f"[COTACAO] base local aprendeu {n} plano(s) de {cidade}")
+    except Exception as e:
+        app.logger.warning(f"[COTACAO] aprendizado da base pulado: {e}")
+        if DB_MODE == 'postgres':
+            try: conn.rollback()
+            except Exception: pass
+
     conn.commit()
     return vid
+
+
+def _aprender_do_vivo(conn, cidade, modalidade, planos):
+    """Cada cotação ao vivo alimenta a base local. Tijolo por tijolo.
+
+    É esta função que faz o cache se construir sozinho. O consultor cota no
+    Painel como sempre cotou, e o que voltou fica guardado — sem exportar
+    arquivo, sem colar script, sem subir nada à mão.
+
+    O dado já vinha completo: `cotacao_viva_preco` grava o preço UNITÁRIO por
+    faixa de cada plano cotado. O que não existia era o passo que copia isso
+    para `cotacao_tabela` + `cotacao_preco`, que é de onde a cotação rápida lê.
+
+    DUAS REGRAS QUE VALEM A PENA ENTENDER:
+
+    1. Preço novo SUBSTITUI o antigo, e a data é atualizada (decisão do
+       Guilherme, 06/08/2026). Se a operadora reajustou, o que vale é o de
+       agora — e o `atualizado_em` conta desde quando.
+
+    2. Faixa que não veio nesta cotação NÃO é apagada. Uma cotação de 3 vidas
+       só traz preço de 3 faixas; a próxima traz outras. Apagar as ausentes
+       zeraria a tabela a cada cotação e ela nunca completaria. É isto que
+       diferencia este caminho do importar-pdc, que troca a tabela inteira
+       porque recebe as 10 faixas de uma vez.
+    """
+    if not planos:
+        return 0
+    nome_modal = _modalidades_conhecidas(conn).get(int(modalidade or 2), 'PME')
+    eh_adesao = 'ades' in _norm_txt(nome_modal)
+    agora = _agora_sp()
+    aprendidos = 0
+
+    for p in planos:
+        try:
+            operadora = str((p.get('operadora') or {}).get('nome') or '').strip()[:120]
+            plano = str((p.get('plano') or {}).get('nome') or '').strip()[:160]
+            faixas = [f for f in (p.get('faixas') or []) if f and f.get('unitario')]
+            if not operadora or not plano or not faixas:
+                continue
+
+            tb = p.get('tabela') or {}
+            acomodacao = 'Apartamento' if (p.get('plano') or {}).get('acomodacao') else 'Enfermaria'
+            copart = _copart_texto(tb)
+            linha = str(tb.get('nome') or '').strip()[:160]
+
+            # Na Adesão a "linha" do Painel é "Administradora - Entidade"
+            # ("Affix - ANSP"). Em PME/PF é o nome comercial da linha
+            # ("Linha Amil"), sem entidade nenhuma — por isso só se separa aqui.
+            # A entidade entra na chave: o MESMO plano em duas entidades tem
+            # preço diferente e são duas tabelas.
+            entidade = ''
+            if eh_adesao:
+                m = re.match(r'^(.{2,40}?)\s+-\s+(.{2,40})$', linha)
+                if m:
+                    entidade = re.sub(r'\s*\([^)]*\)\s*', ' ', m.group(2)).strip()[:120]
+
+            ex = conn.execute(
+                """SELECT id FROM cotacao_tabela WHERE operadora=? AND plano=? AND modalidade=?
+                     AND acomodacao=? AND coparticipacao=? AND COALESCE(cidade,'')=?
+                     AND COALESCE(entidade,'')=?""",
+                (operadora, plano, nome_modal, acomodacao, copart, cidade or '', entidade)).fetchone()
+
+            if ex:
+                tid = ex['id']
+                conn.execute("UPDATE cotacao_tabela SET ativo=1, atualizado_em=?, linha=? WHERE id=?",
+                             (agora, linha, tid))
+            else:
+                conn.execute(
+                    """INSERT INTO cotacao_tabela
+                         (operadora, plano, modalidade, acomodacao, coparticipacao,
+                          cidade, entidade, linha, ativo, atualizado_em)
+                       VALUES (?,?,?,?,?,?,?,?,1,?)""",
+                    (operadora, plano, nome_modal, acomodacao, copart,
+                     cidade or '', entidade, linha, agora))
+                tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+                       else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+
+            for f in faixas:
+                fx = str(f.get('faixa') or '').strip()
+                if fx not in FAIXAS_ETARIAS:
+                    continue
+                try:
+                    valor = float(f.get('unitario') or 0)
+                except (TypeError, ValueError):
+                    continue
+                if valor <= 0:
+                    continue
+                achou = conn.execute(
+                    "SELECT id FROM cotacao_preco WHERE tabela_id=? AND faixa=?", (tid, fx)).fetchone()
+                if achou:
+                    conn.execute("UPDATE cotacao_preco SET preco=? WHERE id=?", (valor, achou['id']))
+                else:
+                    conn.execute("INSERT INTO cotacao_preco (tabela_id, faixa, preco) VALUES (?,?,?)",
+                                 (tid, fx, valor))
+            aprendidos += 1
+        except Exception as e:
+            # Um plano que falha não pode derrubar o aprendizado dos outros nem
+            # a cotação que o consultor acabou de fazer.
+            app.logger.warning(f"[COTACAO] aprender do vivo, plano ignorado: {e}")
+            if DB_MODE == 'postgres':
+                try: conn.rollback()
+                except Exception: pass
+            continue
+    return aprendidos
 
 
 def _modalidades_conhecidas(conn):
