@@ -30182,6 +30182,90 @@ def crm_status_excluir(sid):
 
 
 # ─── CONVERSÃO OFFLINE: TELA E AÇÕES ──────────────────────────────────────────
+STATUS_CONVERSAO_MAP = {
+    'pendente': {
+        'label': 'Pronta para envio',
+        'badge_class': 'badge-warning',
+        'descricao': 'Venda com clique rastreado (gclid/fbclid), pronta para envio em lote.'
+    },
+    'enviada': {
+        'label': 'Enviada com sucesso',
+        'badge_class': 'badge-success',
+        'descricao': 'Conversão entregue e confirmada pela plataforma de anúncios.'
+    },
+    'sem_clique': {
+        'label': 'Sem clique de anúncio',
+        'badge_class': 'badge-secondary',
+        'descricao': 'Venda orgânica ou sem código de clique. Não pode ser enviada ao Google/Meta.'
+    },
+    'fora_da_janela': {
+        'label': 'Fora da janela (90 dias)',
+        'badge_class': 'badge-secondary',
+        'descricao': 'Venda realizada há mais de 90 dias do clique (limite máximo de atribuição).'
+    },
+    'retratar': {
+        'label': 'Estornada / Cancelada',
+        'badge_class': 'badge-danger',
+        'descricao': 'Proposta cancelada após ter sido enviada.'
+    },
+    'erro': {
+        'label': 'Erro no envio',
+        'badge_class': 'badge-danger',
+        'descricao': 'Falha reportada pela API durante a entrega.'
+    },
+    'cancelada': {
+        'label': 'Cancelada antes do envio',
+        'badge_class': 'badge-danger',
+        'descricao': 'Venda cancelada ou estornada antes do envio.'
+    }
+}
+
+
+def _enriquecer_linha_conversao(linha):
+    """Enriquece o dicionário da linha de conversão com rótulos e badges humanos."""
+    d = dict(linha) if linha else {}
+    st = d.get('status') or ''
+    info = STATUS_CONVERSAO_MAP.get(st, {
+        'label': st.capitalize() if st else 'Desconhecido',
+        'badge_class': 'badge-secondary',
+        'descricao': d.get('detalhe') or ''
+    })
+    d['status_label'] = info['label']
+    d['status_badge'] = info['badge_class']
+    d['status_descricao'] = d.get('detalhe') or info['descricao']
+    return d
+
+
+def _enfileirar_resposta_humana(analisadas, placar, plataforma='Google Ads'):
+    """Gera resposta rica e legível para a ação de enfileirar/varrer vendas."""
+    if analisadas == 0:
+        msg = f"Nenhuma nova venda pendente encontrada para enfileirar no {plataforma}."
+    else:
+        partes = []
+        for st, qtd in placar.items():
+            info = STATUS_CONVERSAO_MAP.get(st, {'label': st})
+            partes.append(f"{qtd} {info['label'].lower()}")
+        msg = f"{analisadas} venda(s) analisada(s): " + ", ".join(partes) + "."
+
+    detalhes = []
+    for st, qtd in placar.items():
+        info = STATUS_CONVERSAO_MAP.get(st, {'label': st, 'descricao': ''})
+        detalhes.append({
+            'status': st,
+            'label': info['label'],
+            'quantidade': qtd,
+            'descricao': info['descricao']
+        })
+
+    return {
+        "ok": True,
+        "analisadas": analisadas,
+        "placar": placar,
+        "mensagem": msg,
+        "detalhes": detalhes
+    }
+
+
 @app.route('/google-ads')
 @login_required
 @admin_required
@@ -30214,12 +30298,12 @@ def google_ads_painel():
     try:
         for r in conn.execute("SELECT status, COUNT(*) c, COALESCE(SUM(valor),0) v FROM meta_conversoes GROUP BY status").fetchall():
             m_contagem[r['status']] = {'n': r['c'], 'valor': r['v']}
-        m_linhas = [dict(r) for r in conn.execute("""SELECT m.*, p.razao_social, p.consultor,
-                                                          l.nome lead_nome
-                                                   FROM meta_conversoes m
-                                                   LEFT JOIN propostas p ON p.id = m.proposta_id
-                                                   LEFT JOIN crm_leads l ON l.id = m.lead_id
-                                                   ORDER BY m.id DESC LIMIT 300""").fetchall()]
+        m_linhas = conn.execute("""SELECT m.*, p.razao_social, p.consultor,
+                                          l.nome lead_nome
+                                   FROM meta_conversoes m
+                                   LEFT JOIN propostas p ON p.id = m.proposta_id
+                                   LEFT JOIN crm_leads l ON l.id = m.lead_id
+                                   ORDER BY m.id DESC LIMIT 300""").fetchall()
         m_fora = conn.execute("""SELECT COUNT(*) c FROM propostas p
             WHERE p.status_operacional='Emitida/Ativa' AND p.status <> 'Excluída'
               AND COALESCE(p.estornada,0)=0
@@ -30231,13 +30315,31 @@ def google_ads_painel():
         except Exception: pass
     rastreio = _ads_rastreio(conn)
     close_db(conn)
-    return render_template('google_ads.html', linhas=[dict(r) for r in linhas],
+
+    linhas_enriquecidas = [_enriquecer_linha_conversao(r) for r in linhas]
+    m_linhas_enriquecidas = [_enriquecer_linha_conversao(r) for r in m_linhas]
+
+    for st, info in STATUS_CONVERSAO_MAP.items():
+        if st not in contagem:
+            contagem[st] = {'n': 0, 'valor': 0.0}
+        contagem[st]['label'] = info['label']
+        contagem[st]['badge_class'] = info['badge_class']
+        contagem[st]['descricao'] = info['descricao']
+
+        if st not in m_contagem:
+            m_contagem[st] = {'n': 0, 'valor': 0.0}
+        m_contagem[st]['label'] = info['label']
+        m_contagem[st]['badge_class'] = info['badge_class']
+        m_contagem[st]['descricao'] = info['descricao']
+
+    return render_template('google_ads.html', linhas=linhas_enriquecidas,
                            rastreio=rastreio,
                            contagem=contagem, faltando=faltando, fora=fora,
                            valor_base=(os.environ.get('GOOGLE_ADS_VALOR_BASE') or 'comissao_bruta'),
                            customer_id=cfg['customer_id'],
-                           m_linhas=m_linhas, m_contagem=m_contagem, m_faltando=mfaltando,
-                           m_fora=m_fora, m_pixel=mcfg.get('pixel_id') or '')
+                           m_linhas=m_linhas_enriquecidas, m_contagem=m_contagem, m_faltando=mfaltando,
+                           m_fora=m_fora, m_pixel=mcfg.get('pixel_id') or '',
+                           status_map=STATUS_CONVERSAO_MAP)
 
 
 @app.route('/google-ads/enfileirar', methods=['POST'])
@@ -30258,7 +30360,7 @@ def google_ads_enfileirar():
         _reg, st = _ads_enfileirar(conn, p['id'], 'backfill manual')
         placar[st] = placar.get(st, 0) + 1
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "analisadas": len(props), "placar": placar})
+    return jsonify(_enfileirar_resposta_humana(len(props), placar, 'Google Ads'))
 
 
 @app.route('/meta-ads/enfileirar', methods=['POST'])
@@ -30278,7 +30380,7 @@ def meta_ads_enfileirar():
         _reg, st = _meta_enfileirar(conn, p['id'], 'backfill manual')
         placar[st] = placar.get(st, 0) + 1
     conn.commit(); close_db(conn)
-    return jsonify({"ok": True, "analisadas": len(props), "placar": placar})
+    return jsonify(_enfileirar_resposta_humana(len(props), placar, 'Meta Ads'))
 
 
 @app.route('/meta-ads/enviar', methods=['POST'])
@@ -30286,7 +30388,19 @@ def meta_ads_enfileirar():
 @admin_required
 def meta_ads_enviar():
     so_simular = bool((request.json or {}).get('simular'))
-    return jsonify({"ok": True, "resumo": enviar_conversoes_meta(so_simular=so_simular)})
+    resumo = enviar_conversoes_meta(so_simular=so_simular)
+    pend = resumo.get('pendentes', 0)
+    env = resumo.get('enviadas', 0)
+    erros = resumo.get('erros') or []
+    if pend == 0:
+        msg = "Nenhuma conversão pendente para enviar à Meta no momento."
+    elif erros and env == 0:
+        msg = f"Falha no envio de {pend} conversão(ões) à Meta: {erros[0]}"
+    elif env > 0:
+        msg = f"{env} conversão(ões) enviada(s) com sucesso para a Meta!"
+    else:
+        msg = f"{pend} conversão(ões) processada(s)."
+    return jsonify({"ok": not erros, "mensagem": msg, "resumo": resumo})
 
 
 @app.route('/google-ads/enviar', methods=['POST'])
@@ -30294,7 +30408,18 @@ def meta_ads_enviar():
 @admin_required
 def google_ads_enviar():
     resumo = enviar_conversoes_ads(limite=int((request.json or {}).get('limite') or 200))
-    return jsonify({"ok": not resumo.get('erros'), **resumo})
+    pend = resumo.get('pendentes', 0)
+    env = resumo.get('enviadas', 0)
+    erros = resumo.get('erros') or []
+    if pend == 0:
+        msg = "Nenhuma conversão pendente para enviar ao Google Ads no momento."
+    elif erros and env == 0:
+        msg = f"Falha no envio de {pend} conversão(ões) ao Google Ads: {erros[0]}"
+    elif env > 0:
+        msg = f"{env} conversão(ões) enviada(s) com sucesso ao Google Ads!"
+    else:
+        msg = f"{pend} conversão(ões) processada(s)."
+    return jsonify({"ok": not erros, "mensagem": msg, **resumo})
 
 
 def _ads_testar_conexao():
