@@ -3791,6 +3791,31 @@ def init_db():
             except Exception: pass
             print(f"[TZFIX] pulado: {e}")
 
+    # ─── COTAÇÃO · atualizado_em: as tabelas carregadas pelo formulário, pelo CSV
+    # e pelo PDF nunca gravaram esse campo — só o importador do Painel do Corretor
+    # gravava. Resultado medido em 05/08/2026: 0 de 152 tabelas com data, e o selo
+    # de frescor classificava TODAS como "sem data" (vermelho). Não dá pra ancorar
+    # frescor em campo vazio.
+    #
+    # O backfill usa criado_em, não a data de hoje: a tabela nunca foi atualizada,
+    # então a última vez que ela recebeu preço FOI quando nasceu. Carimbar hoje
+    # deixaria 152 tabelas antigas passando por novas — mentira com aparência de
+    # dado. Idempotente pelo meta_flags e só toca em quem está NULL. ───
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        conn.commit()
+        if not conn.execute("SELECT 1 FROM meta_flags WHERE k='cot_atualizado_em_20260805'").fetchone():
+            conn.execute("""UPDATE cotacao_tabela SET atualizado_em = criado_em
+                            WHERE atualizado_em IS NULL AND criado_em IS NOT NULL""")
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('cot_atualizado_em_20260805')")
+            conn.commit()
+            print("[COTACAO] Backfill atualizado_em <- criado_em aplicado")
+    except Exception as e:
+        if is_pg:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[COTACAO] backfill atualizado_em pulado: {e}")
+
     # ─── funil_execucao: era PK só em usuario_id (1 execução por consultor).
     # Passa a permitir VÁRIAS execuções simultâneas por consultor (funil pra
     # leads diferentes ao mesmo tempo) — troca a PK pra id autoincremento e
@@ -27340,13 +27365,16 @@ def cotacao_tabela_nova():
         return redirect('/cotacao/tabelas/nova')
 
     conn = db()
+    # atualizado_em SEMPRE — é a âncora do selo de frescor. Sem ela a tabela
+    # nasce marcada "sem data" (= vermelha) para sempre, que foi exatamente o
+    # que aconteceu com as 152 tabelas que já estavam em produção.
     conn.execute("""INSERT INTO cotacao_tabela
-        (operadora, plano, modalidade, acomodacao, coparticipacao, linha, tipo_cnpj, abrangencia, vigencia, ativo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+        (operadora, plano, modalidade, acomodacao, coparticipacao, linha, tipo_cnpj, abrangencia, vigencia, ativo, atualizado_em)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
         (operadora, plano, (d.get('modalidade') or 'PME').strip(),
          (d.get('acomodacao') or 'Enfermaria').strip(), (d.get('coparticipacao') or 'Sem').strip(),
          (d.get('linha') or '').strip(), (d.get('tipo_cnpj') or '').strip(),
-         (d.get('abrangencia') or '').strip(), (d.get('vigencia') or '').strip()))
+         (d.get('abrangencia') or '').strip(), (d.get('vigencia') or '').strip(), _agora_sp()))
     tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     for fx in FAIXAS_ETARIAS:
@@ -27378,13 +27406,15 @@ def cotacao_tabela_editar(tid):
                                coparts=COTACAO_COPART, tab=dict(t), precos=precos,
                                form_action='/cotacao/tabelas/%d/editar' % tid)
     d = request.form
+    # Editar a mão também é atualizar: quem corrigiu um preço no formulário fez a
+    # tabela ficar fresca de novo, e o selo tem que refletir isso.
     conn.execute("""UPDATE cotacao_tabela SET operadora=?, plano=?, modalidade=?, acomodacao=?,
-        coparticipacao=?, linha=?, tipo_cnpj=?, abrangencia=?, vigencia=? WHERE id=?""",
+        coparticipacao=?, linha=?, tipo_cnpj=?, abrangencia=?, vigencia=?, atualizado_em=? WHERE id=?""",
         ((d.get('operadora') or '').strip(), (d.get('plano') or '').strip(),
          (d.get('modalidade') or 'PME').strip(), (d.get('acomodacao') or 'Enfermaria').strip(),
          (d.get('coparticipacao') or 'Sem').strip(), (d.get('linha') or '').strip(),
          (d.get('tipo_cnpj') or '').strip(), (d.get('abrangencia') or '').strip(),
-         (d.get('vigencia') or '').strip(), tid))
+         (d.get('vigencia') or '').strip(), _agora_sp(), tid))
     for fx in FAIXAS_ETARIAS:
         try:
             preco = float((d.get('preco_' + fx) or '0').replace('.', '').replace(',', '.')) if d.get('preco_' + fx) else 0
@@ -27542,11 +27572,11 @@ def cotacao_import():
             continue
         try:
             conn.execute("""INSERT INTO cotacao_tabela
-                (operadora, plano, modalidade, acomodacao, coparticipacao, linha, tipo_cnpj, abrangencia, vigencia, ativo)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                (operadora, plano, modalidade, acomodacao, coparticipacao, linha, tipo_cnpj, abrangencia, vigencia, ativo, atualizado_em)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
                 (operadora, plano, cell('modalidade', 'PME') or 'PME',
                  cell('acomodacao', 'Enfermaria') or 'Enfermaria', cell('coparticipacao', 'Sem') or 'Sem',
-                 cell('linha'), cell('tipo_cnpj'), cell('abrangencia'), cell('vigencia')))
+                 cell('linha'), cell('tipo_cnpj'), cell('abrangencia'), cell('vigencia'), _agora_sp()))
             tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                    else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             for fx, i in faixa_idx.items():
@@ -27726,12 +27756,12 @@ def cotacao_import_pdf_salvar():
         if not operadora or not plano:
             continue
         conn.execute("""INSERT INTO cotacao_tabela
-            (operadora, plano, modalidade, acomodacao, coparticipacao, linha, tipo_cnpj, abrangencia, vigencia, ativo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+            (operadora, plano, modalidade, acomodacao, coparticipacao, linha, tipo_cnpj, abrangencia, vigencia, ativo, atualizado_em)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
             (operadora, plano, (d.get(f'modalidade_{j}') or 'PME').strip(),
              (d.get(f'acomodacao_{j}') or 'Enfermaria').strip(), (d.get(f'coparticipacao_{j}') or 'Sem').strip(),
              (d.get('linha_global') or '').strip(), (d.get('tipo_cnpj_global') or '').strip(),
-             (d.get(f'abrangencia_{j}') or '').strip(), (d.get(f'vigencia_{j}') or '').strip()))
+             (d.get(f'abrangencia_{j}') or '').strip(), (d.get(f'vigencia_{j}') or '').strip(), _agora_sp()))
         tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
         for k, fx in enumerate(FAIXAS_ETARIAS):
@@ -27813,12 +27843,13 @@ def cotacao_importar_pdc():
     # Aceita tanto {cidade, modalidade, planos:[...]} quanto uma lista/1 plano só.
     if isinstance(dados, list):
         planos = dados
-        cidade_g, modalidade_g, tipo_cnpj_g = '', '', ''
+        cidade_g, modalidade_g, tipo_cnpj_g, abrangencia_g = '', '', '', ''
     else:
         planos = dados.get('planos') or ([dados] if dados.get('plano') else [])
         cidade_g = (dados.get('cidade') or '').strip()
         modalidade_g = dados.get('modalidade') or ''
         tipo_cnpj_g = (dados.get('tipo_cnpj') or '').strip()
+        abrangencia_g = (dados.get('abrangencia') or '').strip()
 
     conn = db()
     agora = _agora_sp()
@@ -27850,6 +27881,9 @@ def cotacao_importar_pdc():
         acomodacao = _norm_acomodacao_pdc(p.get('acomodacao'))
         copart = _norm_copart_pdc(p.get('coparticipacao'))
         tipo_cnpj = (p.get('tipo_cnpj') or tipo_cnpj_g or '').strip()
+        # Campo próprio, vindo do extrator. Vazio é vazio — melhor não saber a
+        # abrangência do que registrar a cidade no lugar dela.
+        abrangencia = (p.get('abrangencia') or abrangencia_g or '').strip()[:60]
 
         existente = conn.execute("""SELECT id FROM cotacao_tabela WHERE operadora=? AND plano=?
             AND modalidade=? AND acomodacao=? AND coparticipacao=? AND COALESCE(cidade,'')=?
@@ -27859,14 +27893,23 @@ def cotacao_importar_pdc():
             tid = existente['id']
             conn.execute("DELETE FROM cotacao_preco WHERE tabela_id=?", (tid,))
             conn.execute("DELETE FROM cotacao_rede WHERE tabela_id=?", (tid,))
-            conn.execute("UPDATE cotacao_tabela SET ativo=1, abrangencia=?, atualizado_em=? WHERE id=?",
-                         (cidade, agora, tid))
+            # NÃO escrever cidade em abrangencia. Abrangência é Nacional /
+            # Estadual / Regional / Municipal — o alcance da cobertura. Cidade é
+            # onde a tabela vale. Gravar uma na outra faz o filtro de abrangência
+            # da tela virar uma lista de cidades, e some o alcance real do plano.
+            # Só sobrescreve abrangencia quando o extrator mandou de fato.
+            if abrangencia:
+                conn.execute("UPDATE cotacao_tabela SET ativo=1, abrangencia=?, atualizado_em=? WHERE id=?",
+                             (abrangencia, agora, tid))
+            else:
+                conn.execute("UPDATE cotacao_tabela SET ativo=1, atualizado_em=? WHERE id=?",
+                             (agora, tid))
             cont['planos_atualizados'] += 1
         else:
             conn.execute("""INSERT INTO cotacao_tabela
                 (operadora, plano, modalidade, acomodacao, coparticipacao, tipo_cnpj, cidade, abrangencia, ativo, atualizado_em)
                 VALUES (?,?,?,?,?,?,?,?,1,?)""",
-                (operadora, plano, modalidade, acomodacao, copart, tipo_cnpj, cidade, cidade, agora))
+                (operadora, plano, modalidade, acomodacao, copart, tipo_cnpj, cidade, abrangencia, agora))
             tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                    else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             cont['planos_novos'] += 1
