@@ -73,7 +73,25 @@
    (que era exatamente o caso da Meta antes: sem rastreio, sem teste de
    ligação, com status cru na tabela). #}
 
+{# Tudo que o painel abaixo lê. Se uma consulta falhar no servidor, a chave não
+   chega — e aí o `or 0` transformaria "não consegui medir" em "medi e deu zero",
+   que é uma acusação com número. Confere antes de desenhar. #}
+{% set _ELOS_OBRIG = ['leads','leads_com_clique','leads_extras_clique',
+                      'propostas','propostas_com_lead','vendas','vendas_com_clique'] %}
+
 {% macro bloco_rastreio(r, plat, id_clique) %}
+  {% set r = r or {} %}
+  {% if (_ELOS_OBRIG | select('in', r) | list | length) < (_ELOS_OBRIG | length) %}
+  <div class="card" style="border-color:rgba(250,204,21,.4);">
+    <div class="card-header"><h3>Não foi possível medir o caminho do clique</h3></div>
+    <div style="padding:0 16px 16px;color:var(--cinza-2);">
+      Uma das consultas ao banco falhou nesta carga. Os números do
+      {{ 'Google' if plat == 'google' else 'Meta' }} ficam fora daqui até a leitura
+      voltar — melhor não mostrar nada do que mostrar zero sem ter contado.
+      Recarregue a página; se persistir, é caso de olhar o log.
+    </div>
+  </div>
+  {% else %}
   {% set sem_clique = (r.leads_com_clique or 0) == 0 and (r.leads_extras_clique or 0) == 0 %}
   <div class="card" style="{% if sem_clique %}border-color:rgba(244,63,94,.45);{% endif %}">
     <div class="card-header">
@@ -115,6 +133,7 @@
       {% endif %}
     </div>
   </div>
+  {% endif %}
 {% endmacro %}
 
 {% macro bloco_fila(cont, fora, plat) %}

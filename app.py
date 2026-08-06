@@ -30841,28 +30841,44 @@ def _ads_rastreio(conn):
 
 
 def _meta_rastreio(conn):
-    """De onde vem (ou não vem) o fbclid para a Meta Conversions API."""
+    """De onde vem (ou não vem) o fbclid para a Meta Conversions API.
+
+    NÃO EXISTE crm_leads.fbclid. O gclid tem coluna própria (migração em
+    'crm_leads','gclid'), o fbclid não — ele mora dentro de dados_extras, em
+    click.fbclid, que é de onde _meta_click_do_lead já o lê. Consultar a coluna
+    inexistente levantava exceção na SEGUNDA query, e o except devolvia o dict
+    PELA METADE (só 'leads'), que é truthy: a tela aceitava como se fosse uma
+    medição completa e pintava 'de 0' nos totais de proposta e venda — os
+    mesmos que a aba do Google mostrava certos, na mesma página.
+
+    Cada contagem tem seu próprio try: uma que falhe não pode mais apagar as
+    outras. E a chave só entra no dict quando foi medida de verdade — quem
+    consome distingue 'medi e deu zero' de 'não consegui medir'."""
     d = {}
-    try:
-        d['leads'] = conn.execute("SELECT COUNT(*) c FROM crm_leads").fetchone()['c']
-        d['leads_com_clique'] = conn.execute(
-            "SELECT COUNT(*) c FROM crm_leads WHERE COALESCE(fbclid,'') <> ''").fetchone()['c']
-        d['leads_extras_clique'] = conn.execute(
-            """SELECT COUNT(*) c FROM crm_leads WHERE COALESCE(dados_extras,'') LIKE '%fbclid%'""").fetchone()['c']
-        d['leads_pago'] = conn.execute(
-            "SELECT COUNT(*) c FROM crm_leads WHERE trafego='Pago'").fetchone()['c']
-        d['propostas'] = conn.execute("SELECT COUNT(*) c FROM propostas").fetchone()['c']
-        d['propostas_com_lead'] = conn.execute(
-            "SELECT COUNT(*) c FROM propostas WHERE lead_id IS NOT NULL").fetchone()['c']
-        d['vendas'] = conn.execute(
-            "SELECT COUNT(*) c FROM propostas WHERE status_operacional='Emitida/Ativa'").fetchone()['c']
-        d['vendas_com_clique'] = conn.execute(
-            """SELECT COUNT(*) c FROM propostas p JOIN crm_leads l ON l.id = p.lead_id
-               WHERE p.status_operacional='Emitida/Ativa' AND COALESCE(l.fbclid,'') <> ''""").fetchone()['c']
-    except Exception as e:
-        app.logger.warning(f"[META] rastreio: {e}")
-        try: conn.rollback()
-        except Exception: pass
+
+    def conta(chave, sql):
+        try:
+            d[chave] = conn.execute(sql).fetchone()['c']
+        except Exception as e:
+            app.logger.warning(f"[META] rastreio '{chave}': {e}")
+            try: conn.rollback()
+            except Exception: pass
+
+    conta('leads', "SELECT COUNT(*) c FROM crm_leads")
+    # fbclid vive em dados_extras (click.fbclid) — não há coluna dedicada.
+    conta('leads_com_clique',
+          "SELECT COUNT(*) c FROM crm_leads WHERE COALESCE(dados_extras,'') LIKE '%fbclid%'")
+    # Sem coluna própria, não existe uma segunda fonte pra somar: fica 0 de
+    # propósito, senão o total contaria o mesmo lead duas vezes.
+    d['leads_extras_clique'] = 0
+    conta('leads_pago', "SELECT COUNT(*) c FROM crm_leads WHERE trafego='Pago'")
+    conta('propostas', "SELECT COUNT(*) c FROM propostas")
+    conta('propostas_com_lead', "SELECT COUNT(*) c FROM propostas WHERE lead_id IS NOT NULL")
+    conta('vendas', "SELECT COUNT(*) c FROM propostas WHERE status_operacional='Emitida/Ativa'")
+    conta('vendas_com_clique',
+          """SELECT COUNT(*) c FROM propostas p JOIN crm_leads l ON l.id = p.lead_id
+             WHERE p.status_operacional='Emitida/Ativa'
+               AND COALESCE(l.dados_extras,'') LIKE '%fbclid%'""")
     return d
 
 
