@@ -231,36 +231,100 @@ ser marcado **não elegível** e ficar fora do ranking de preço — não apenas
 
 ---
 
-## 7. Frontend — o que o backend precisa entregar
+## 7. Consolidação da tela — Passo 7
 
 **Direção definida pelo Guilherme em 05/08/2026, e ela mudou:** a UX de
 `/cotacao/novo` **fica como está** (espelha o Painel do Corretor, os consultores já
 têm o hábito) e só melhora. Não redesenhar. O plano antigo pedia "interface moderna e
 intuitiva do zero" — **isso está cancelado**.
 
-Consolidação: `/cotacao/novo` vira a tela única e absorve as funções de
-`/cotacao/salvas`, `/cotacao/tabelas` e `/cotacao/legendas`. A rota `/cotacao`
-(índice antigo) é **descontinuada**. Resultado: 4 itens de menu viram 1.
+### 7.1 O ponto que ninguém tinha notado: as duas telas fazem coisas opostas
 
-O backend precisa fazer a rota `cotacao_novo()` passar, além do que já passa:
+- **`/cotacao/novo`** é o cotador **ao vivo**: puxa preço do Painel do Corretor pela
+  sessão do consultor, via extensão, e grava em `cotacao_viva` (2 registros). O
+  subtítulo dele, hoje, na tela, diz: *"O JOB não guarda tabela — então não existe
+  tabela desatualizada aqui."*
+- **`/cotacao`** é o multicálculo da **base local**: lê `cotacao_tabela` +
+  `cotacao_preco` (as 152) e é o que alimenta `cotacao_salva` (as 40 cotações).
 
-| Bloco | Dado necessário | De onde |
-|---|---|---|
-| Salvas | mesma lista de `cotacao_salvas()` — `cotacoes`, `eh_admin`, `q`, `total` | `cotacao_salva`, respeitando o filtro por `corretor_id` de quem não é admin |
-| Tabelas | mesma lista de `cotacao_tabelas()` — com `dias_atualizado`, `frescor`, `precos_ok`, `n_velhas`, `watchlist` | `cotacao_tabela` + `cotacao_preco` + `cotacao_watchlist` |
-| Legendas | `modelos` de `cotacao_legendas()` | `cotacao_legenda_modelo` |
-| Status | o payload do `/api/cotacao/status-tabelas` | §5, Passo 6 |
+Manter a primeira e matar a segunda, como está pedido, tiraria do ar justamente a tela
+que usa a base local — que é tudo o que este projeto está construindo.
 
-**Restrições:**
-- **Permissão por bloco.** Tabelas e legendas são `@admin_required` hoje. Ao fundir,
-  o consultor comum não pode ver nem receber esses dados — filtrar no servidor, não
-  esconder no template.
-- **Carga sob demanda.** Não empilhar 152 tabelas + 40 cotações + legendas em cada
-  abertura de `/cotacao/novo` — a tela existe para cotar rápido. Preferir rotas
-  `?bloco=salvas|tabelas|legendas` devolvendo JSON, com a tela buscando ao abrir a aba.
-- Manter `/cotacao/salvas`, `/cotacao/tabelas` e `/cotacao/legendas` respondendo por
-  enquanto (links antigos, favoritos). Só `/cotacao` sai, redirecionando 301 para
-  `/cotacao/novo`.
+**Resolução:** mantém-se a **interface** do `/cotacao/novo` (layout, fluxo, hábito) e
+**troca-se o motor por baixo** para a base local. A cara boa fica, o mecanismo passa a
+ser o do cache. O `/cotacao` sai porque a função dele sobe para dentro dessa cara.
+
+**Consequência obrigatória:** aquele subtítulo vira mentira no minuto da troca. Tem que
+ser reescrito para dizer a verdade nova — que o preço vem da base do JOB, com a data da
+última atualização à vista. O frontend cuida disso.
+
+### 7.2 Bônus: some uma implementação duplicada do cálculo
+
+`cotacao()` (app.py ~26263) calcula **inline**, com laço próprio sobre `cotacao_preco`,
+separado de `calcular_cotacao()` (~28480). São dois motores para a mesma conta — que é
+exatamente o risco que o docstring de `calcular_cotacao` descreve: *"Duas cópias
+divergem: um dia alguém corrige um arredondamento de um lado só e o preço da tela deixa
+de bater com o da API."* Já aconteceu.
+
+Ao descontinuar `/cotacao`, **`calcular_cotacao()` fica como motor único.** Não portar
+o laço inline para lugar nenhum.
+
+**Funções do `cotacao()` que precisam sobreviver dentro de `calcular_cotacao()` ou dos
+filtros da nova tela** (conferir uma a uma antes de apagar):
+
+- filtro `mei` — `tipo_cnpj` vazio OU em (`todos`, `todos os portes`, `todos os tipos`) OU igual ao valor pedido
+- filtro múltiplo por operadora (`op` repetido)
+- filtros `modalidade`, `acomodacao`, `coparticipacao`
+- distribuição por faixa (`fx_0`..`fx_9`) convertida em idades representativas `[5,20,25,30,35,40,45,50,55,60]`
+- ordenação `operadora A-Z, depois menor preço`
+- separação de tabelas incompletas
+
+### 7.3 Consolidação das quatro rotas em uma
+
+`/cotacao/novo` absorve `/cotacao/salvas`, `/cotacao/tabelas` e `/cotacao/legendas`
+como abas. `/cotacao` é descontinuada. Quatro itens de menu viram um.
+
+**Layout já definido pelo frontend** — a aba "Cotar" é a tela atual intacta; as outras
+três entram como painéis irmãos, carregados só quando abertos.
+
+O backend precisa entregar **três rotas JSON novas**, uma por aba. Não empilhar 152
+tabelas + 40 cotações + legendas na abertura de `/cotacao/novo`: a tela existe para
+cotar rápido, e carregar tudo no primeiro paint mata os 2-3 segundos que o usuário
+tolera.
+
+```
+GET /cotacao/bloco/salvas?q=<busca>
+    -> { "ok": true, "eh_admin": bool, "total": int,
+         "cotacoes": [ { id, titulo, cliente_nome, cliente_telefone, cliente_email,
+                         token, criado_em, planos_cotados, valor_total } ] }
+    Regra: quem NÃO é admin só recebe as próprias (corretor_id). Filtrar no SQL.
+
+GET /cotacao/bloco/tabelas                      [admin]
+    -> { "ok": true, "n_velhas": int,
+         "tabelas": [ { id, operadora, plano, entidade, modalidade, acomodacao,
+                        coparticipacao, cidade, abrangencia, vigencia,
+                        precos_ok, dias_atualizado, frescor } ],
+         "watchlist": [ { id, cidade, modalidade } ] }
+    frescor: "fresca" | "ok" | "velha" | "sem_data"  (mesma régua de cotacao_tabelas())
+
+GET /cotacao/bloco/legendas                     [admin]
+    -> { "ok": true, "modelos": [ { id, nome, corpo } ] }
+```
+
+**Regra de contrato, a mesma do §5 e inegociável:** consulta que falha **não devolve a
+chave com zero**. Devolver `{"ok": false, "erro": "<texto curto>"}` e deixar a tela
+dizer "não foi possível carregar". Zero significa "medi e deu zero", nunca "não
+consegui medir". Foi exatamente esse defeito que gerou o commit `7bf5bbc`.
+
+**Permissão é no servidor, não no template.** Tabelas e legendas são `@admin_required`
+hoje. O consultor comum não pode nem receber o JSON — a rota responde 403, não uma
+lista vazia.
+
+**Rotas antigas continuam respondendo** (links salvos, favoritos). Só `/cotacao` sai,
+com redirect 301 para `/cotacao/novo`. As ações POST já existentes
+(`/cotacao/legendas/salvar`, `/cotacao/salvas/<id>/excluir`, `/cotacao/watchlist/add`,
+`/cotacao/tabelas/<id>/excluir`, os importadores) **ficam onde estão** — a tela nova
+chama as mesmas URLs. Não recriar nenhuma.
 
 ---
 
