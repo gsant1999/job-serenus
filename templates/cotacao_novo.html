@@ -567,6 +567,32 @@
 
 </div><!-- /.page -->
 
+<!-- Quem pode entrar na entidade.
+     Com 47 profissões, a pergunta real do consultor não é "quais são" — é
+     "o meu cliente pode?". Por isso a busca vem primeiro e as profissões
+     viram etiquetas: ler uma parede de texto pra achar "Arquiteto" é o que
+     o tooltip nativo obrigava a fazer. -->
+<div class="cv-janela" id="janelaEnt">
+  <div class="cv-janela-cx" style="max-width:620px">
+    <div class="cv-janela-topo">
+      <div>
+        <h2 id="entSigla">Entidade</h2>
+        <p id="entNome"></p>
+      </div>
+      <button type="button" class="cv-janela-x" id="fecharEnt" title="Fechar">×</button>
+    </div>
+    <div class="cv-janela-corpo">
+      <input type="text" id="entBusca" placeholder="A profissão do seu cliente… ex: arquiteto"
+             autocomplete="off"
+             style="width:100%;background:var(--panel);border:1px solid var(--borda-2);
+                    border-radius:11px;padding:12px 14px;color:var(--texto);font-size:13.5px;
+                    font-family:inherit;outline:none;margin-bottom:14px;">
+      <div id="entResposta" style="font-size:13px;margin-bottom:12px;"></div>
+      <div id="entLista" class="cv-eti" style="gap:6px;"></div>
+    </div>
+  </div>
+</div>
+
 <!-- Vidas por faixa: janela, como no Painel. Fora do caminho até ser pedida. -->
 <div class="cv-janela" id="janelaVidas">
   <div class="cv-janela-cx" style="max-width:560px">
@@ -1326,7 +1352,42 @@
   // Cache dos requisitos, por entidade. Entidade muda muito pouco e a resposta
   // é a mesma o dia inteiro — perguntar de novo a cada redesenho da lista seria
   // uma chamada ao Painel por passada de mouse.
-  var reqEntidade = {};
+  // GUARDA NO NAVEGADOR, não só na memória da página.
+  //
+  // Estava só num objeto JS: F5 e perguntava tudo de novo ao Painel. Isso é
+  // lento pra quem usa e é chamada repetida lá — o oposto do que a gente quer.
+  // Entidade muda muito pouco: o que vale hoje vale no mês que vem.
+  //
+  // Fica no navegador e não no banco do JOB porque isso não depende de rota
+  // nova. O lugar certo, mais pra frente, é o banco — aí um consultor abre e
+  // TODO MUNDO já tem, em vez de cada máquina descobrir por si.
+  var CACHE_ENT = 'job_ent_req_v1';
+  var CACHE_DIAS = 30;
+
+  function lerCacheEnt() {
+    try {
+      var c = JSON.parse(localStorage.getItem(CACHE_ENT) || '{}');
+      var lim = Date.now() - CACHE_DIAS * 86400000;
+      var out = {};
+      Object.keys(c).forEach(function (k) {
+        // Só o que ainda vale, e só o que deu certo: guardar erro faria o
+        // JOB lembrar de uma falha de rede por 30 dias.
+        if (c[k] && c[k].em > lim && c[k].v && !c[k].v._erro) out[k] = c[k].v;
+      });
+      return out;
+    } catch (e) { return {}; }
+  }
+
+  function gravarCacheEnt(nome, valor) {
+    if (!valor || valor._erro) return;
+    try {
+      var c = JSON.parse(localStorage.getItem(CACHE_ENT) || '{}');
+      c[nome] = { em: Date.now(), v: valor };
+      localStorage.setItem(CACHE_ENT, JSON.stringify(c));
+    } catch (e) { /* sem cache a tela ainda funciona, só pergunta de novo */ }
+  }
+
+  var reqEntidade = lerCacheEnt();
   // Quem já está sendo perguntado NESTE momento.
   //
   // Marcar "em andamento" gravando `undefined` no cache não marcaria nada:
@@ -1366,6 +1427,60 @@
     return t;
   }
 
+  // ── Janela de "quem pode entrar" ────────────────────────────────────────
+  //
+  // A busca vem antes da lista de propósito. Com 47 profissões, a pergunta do
+  // consultor não é "quais são" — é "o meu cliente é arquiteto, ele pode?".
+  // Ler parede de texto pra descobrir isso é o que o tooltip nativo obrigava.
+  var entAberta = null;
+
+  function abrirJanelaEnt(E) {
+    entAberta = E;
+    var r = reqEntidade[E.nome] || {};
+    el('entSigla').textContent = E.nome;
+    el('entNome').textContent = r.nome && r.nome !== E.nome
+      ? r.nome : (E.adm ? 'Administrada por ' + E.adm : '');
+    el('entBusca').value = '';
+    pintarProfissoes('');
+    el('janelaEnt').className = 'cv-janela ver';
+    el('entBusca').focus();
+  }
+
+  function pintarProfissoes(termo) {
+    var E = entAberta || {};
+    var r = reqEntidade[E.nome] || {};
+    var todas = r.profissoes || [];
+    var lista = el('entLista'), resp = el('entResposta');
+    if (!todas.length) {
+      resp.innerHTML = '<span style="color:var(--laranja)">' +
+        esc(requisitosDaEntidade(E)) + '</span>';
+      lista.innerHTML = '';
+      return;
+    }
+    var t = (termo || '').trim().toLowerCase();
+    var achou = t ? todas.filter(function (p) { return p.toLowerCase().indexOf(t) >= 0; }) : todas;
+    if (t) {
+      // Resposta primeiro, lista depois. É sim ou não que resolve o atendimento.
+      resp.innerHTML = achou.length
+        ? '<b style="color:var(--verde)">Pode entrar.</b> ' + achou.length +
+          ' profissão(ões) da entidade combinam com "' + esc(termo) + '".'
+        : '<b style="color:var(--rosa)">Não achei "' + esc(termo) + '" na lista.</b> ' +
+          'Veja abaixo se alguma se aproxima — o nome na entidade pode ser outro.';
+    } else {
+      resp.innerHTML = '<span style="color:var(--cinza)">Aceita <b style="color:var(--texto)">' +
+        todas.length + '</b> profissões. Digite acima para conferir a do seu cliente.</span>';
+    }
+    lista.innerHTML = (achou.length ? achou : todas).map(function (p) {
+      return '<span>' + esc(p) + '</span>';
+    }).join('');
+  }
+
+  el('entBusca').addEventListener('input', function (e) { pintarProfissoes(e.target.value); });
+  el('fecharEnt').onclick = function () { el('janelaEnt').className = 'cv-janela'; };
+  el('janelaEnt').addEventListener('click', function (e) {
+    if (e.target === el('janelaEnt')) el('janelaEnt').className = 'cv-janela';
+  });
+
   // Pergunta ao Painel quem pode entrar. Os três parâmetros já vêm no próprio
   // plano — entidade, administradora.id e produto.id — então não é preciso
   // capturar nada: é a mesma chamada que o "i" deles faz.
@@ -1383,6 +1498,7 @@
     reqEntidade[E.nome] = (r && r.ok && r.dados)
       ? r.dados
       : { _erro: (r && (r.motivo || r.erro)) || 'sem_resposta' };
+    gravarCacheEnt(E.nome, reqEntidade[E.nome]);
     delete reqPedindo[E.nome];
     // Só repinta se a pessoa ainda está olhando a lista de entidades — mexer na
     // tela depois que ela navegou seria puxar o tapete.
@@ -1481,15 +1597,22 @@
         // pergunta antes de abrir o "i".
         var extenso = (r && r.nome && r.nome !== E.nome) ? r.nome : '';
         var quantas = (r && r.profissoes && r.profissoes.length) || 0;
-        c.appendChild(cartao(
+        var cart = cartao(
           '<span class="txt"><b>' + esc(E.nome) + '</b>' +
-            '<i class="ajuda-i" title="' + esc(requisitosDaEntidade(E)) + '">i</i>' +
+            '<i class="ajuda-i" data-ent="' + esc(E.nome) + '" title="' +
+              (quantas ? 'Ver quem pode entrar' : esc(requisitosDaEntidade(E))) + '">i</i>' +
             (extenso ? '<small style="color:var(--texto)">' + esc(extenso) + '</small>' : '') +
             '<small>' + (E.adm ? esc(E.adm) + ' · ' : '') + E.planos.length + ' plano(s)' +
             (quantas ? ' · aceita ' + quantas + ' profissões' : '') +
             (marcados ? ' · ' + marcados + ' marcado(s)' : '') + '</small></span>' +
           '<span class="seta">›</span>',
-          function () { entidadeAtual = E.nome; voltarPara('produtos'); }, marcados > 0));
+          function () { entidadeAtual = E.nome; voltarPara('produtos'); }, marcados > 0);
+        // O "i" abre a janela em vez de navegar. Sem o stopPropagation o clique
+        // subiria pro cartão e entraria na entidade — a pessoa pediu pra LER,
+        // não pra escolher.
+        var ic = cart.querySelector('.ajuda-i');
+        if (ic) ic.onclick = function (ev) { ev.stopPropagation(); abrirJanelaEnt(E); };
+        c.appendChild(cart);
         carregarRequisitos(E);
       });
       return;
