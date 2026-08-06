@@ -10930,7 +10930,8 @@ def _dm_evento(c):
     ev = {'eventTimestamp': _conversao_dt_sp(c['conversao_em']).isoformat(timespec='seconds'),
           'conversionValue': float(c['valor'] or 0),
           'currency': c['moeda'] or 'BRL',
-          'transactionId': f"job-proposta-{c['proposta_id']}"}
+          'transactionId': f"job-proposta-{c['proposta_id']}",
+          'userDataConsent': {'adUserData': 'GRANTED', 'adPersonalization': 'GRANTED'}}
     tipo = (c['click_tipo'] or 'gclid')
     ev['adIdentifiers'] = {tipo if tipo in ('gclid', 'gbraid', 'wbraid') else 'gclid': c['click_id']}
     return ev
@@ -10943,17 +10944,13 @@ def _dm_destino(cfg):
 
 
 def _dm_erro_legivel(status, corpo):
-    """Traduz o erro do Google pra uma frase que diz o que fazer.
-
-    O erro cru chega em inglês e truncado no meio da causa. Os dois que
-    realmente acontecem no começo têm conserto conhecido — e um deles (escopo)
-    engana, porque a autenticação FUNCIONA e só a entrega é recusada."""
+    """Traduz o erro do Google pra uma frase que diz o que fazer."""
     alto = (corpo or '').upper()
-    if 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' in alto or 'INSUFFICIENT AUTHENTICATION SCOPES' in alto.upper():
+    if 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' in alto or 'INSUFFICIENT AUTHENTICATION SCOPES' in alto:
         return ('O login funciona, mas foi autorizado só para ler o Google Ads — não para entregar '
                 'conversão. Gere um refresh token novo autorizando também o escopo '
                 'https://www.googleapis.com/auth/datamanager e substitua GOOGLE_ADS_REFRESH_TOKEN.')
-    if 'SERVICE_DISABLED' in alto or 'DATAMANAGER.GOOGLEAPIS.COM' in alto and 'DISABLED' in alto:
+    if 'SERVICE_DISABLED' in alto or ('DATAMANAGER.GOOGLEAPIS.COM' in alto and 'DISABLED' in alto):
         return ('A Data Manager API não está habilitada no projeto do Google Cloud desta chave. '
                 'Habilite "Data Manager API" no console e tente de novo.')
     if 'PERMISSION_DENIED' in alto:
@@ -10961,7 +10958,24 @@ def _dm_erro_legivel(status, corpo):
                 'Confira se o usuário que autorizou tem acesso de administrador à conta.')
     if status == 404:
         return 'Conta ou ação de conversão não encontrada — confira o Customer ID e o Conversion Action ID.'
-    return f'HTTP {status}: {(corpo or "")[:300]}'
+
+    try:
+        dados = json.loads(corpo) if corpo else {}
+        err = dados.get('error') or {}
+        msg = err.get('message') or ''
+        details = err.get('details') or []
+        violacoes = []
+        for d in details:
+            for f in d.get('fieldViolations') or []:
+                violacoes.append(f"{f.get('field')}: {f.get('description')}")
+        if violacoes:
+            return f"HTTP {status}: {'; '.join(violacoes)}"
+        if msg and msg != 'There was a problem with the request.':
+            return f"HTTP {status}: {msg}"
+    except Exception:
+        pass
+
+    return f'HTTP {status}: {(corpo or "")[:350]}'
 
 
 def _ads_click_id_do_lead(conn, lead_id):
@@ -30396,23 +30410,30 @@ def _ads_testar_conexao():
     # deixa o Google conferir o pedido inteiro sem gravar conversão nenhuma, que
     # é exatamente o que um botão de teste deve fazer.
     try:
+        ev_teste = {'adIdentifiers': {'gclid': 'TESTE_JOB_SEM_CLIQUE_REAL'},
+                    'eventTimestamp': datetime.now(TZ_SP).isoformat(timespec='seconds'),
+                    'conversionValue': 0.01, 'currency': 'BRL',
+                    'transactionId': 'job-teste-conexao',
+                    'userDataConsent': {'adUserData': 'GRANTED', 'adPersonalization': 'GRANTED'}}
         r = _requests.post(f"{_DM_API}/events:ingest", timeout=45,
                            headers={'Authorization': headers['Authorization'],
                                     'Content-Type': 'application/json'},
                            json={'destinations': _dm_destino(cfg),
-                                 'events': [{'adIdentifiers': {'gclid': 'TESTE_JOB_SEM_CLIQUE_REAL'},
-                                             'eventTimestamp': datetime.now(TZ_SP).isoformat(timespec='seconds'),
-                                             'conversionValue': 0.01, 'currency': 'BRL',
-                                             'transactionId': 'job-teste-conexao'}],
+                                 'events': [ev_teste],
                                  'validateOnly': True})
         if r.status_code == 200:
             passo('Entrega da conversão', True,
                   'O Google aceitou o pedido de teste sem gravar nada (validação). Autenticação, conta '
                   'e ação de conversão estão todas certas.')
         else:
-            passo('Entrega da conversão', False, _dm_erro_legivel(r.status_code, r.text),
-                  'Este é o degrau que fica faltando quando o refresh token foi gerado só para ler o '
-                  'Google Ads. Entregar conversão exige um segundo escopo.')
+            erro_msg = _dm_erro_legivel(r.status_code, r.text)
+            dica = ''
+            if 'SCOPE' in (r.text or '').upper():
+                dica = ('Este é o degrau que fica faltando quando o refresh token foi gerado só para ler o '
+                        'Google Ads. Entregar conversão exige um segundo escopo.')
+            elif r.status_code == 400:
+                dica = ('Erro 400 nos parâmetros da requisição para a Data Manager API. Confira a resposta do Google.')
+            passo('Entrega da conversão', False, erro_msg, dica)
             return {'ok': False, 'passos': passos, 'conta': conta}
     except Exception as e:
         passo('Entrega da conversão', False, e, '')
