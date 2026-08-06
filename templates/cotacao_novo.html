@@ -143,18 +143,54 @@
   .cv-lembrar.on { color:var(--verde); font-weight:600; }
   .cv-lembrar.on .marca { background:var(--verde); border-color:var(--verde); color:#fff; }
 
-  .cv-lead { font-size:11.5px; color:var(--cinza-2); line-height:1.5; margin-top:-4px; }
-  .cv-lead.ok { color:var(--verde); font-weight:600; }
+  /* Cliente = passo 1. Ele vem antes de tudo porque sem lead a cotação não sai:
+     pedir por último faz o consultor preencher a tela inteira pra descobrir no
+     fim que o botão não acende. Cartão fechado, com estado visível na borda —
+     dois inputs brancos soltos no meio da coluna não diziam que eram uma trava. */
+  .cv-cliente { border:1px solid var(--borda-2); border-radius:13px; padding:12px;
+    background:var(--panel-2); display:flex; flex-direction:column; gap:9px; }
+  .cv-cliente.falta { border-color:rgba(251,146,60,.45); }
+  .cv-cliente.ok { border-color:rgba(34,197,94,.45); }
+  .cv-cliente-topo { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .cv-cliente-topo h4 { margin:0; font-size:13.5px; font-weight:700; color:var(--texto); }
+  .cv-cliente-selo { font-size:10.5px; font-weight:700; letter-spacing:.03em;
+    text-transform:uppercase; padding:3px 7px; border-radius:6px; flex:none; }
+  .cv-cliente.falta .cv-cliente-selo { color:var(--laranja); background:rgba(251,146,60,.13); }
+  .cv-cliente.ok .cv-cliente-selo { color:var(--verde); background:rgba(34,197,94,.13); }
+  /* Um grupo, não dois campos. Nome e telefone são a mesma pergunta. */
+  /* Sem overflow:hidden — a lista de sugestões é posicionada em absoluto e
+     nascia cortada dentro do grupo, escondendo o telefone do lead. */
+  .cv-cli-campos { border:1px solid var(--borda-2); border-radius:10px;
+    background:var(--panel); }
+  .cv-cli-campos .cv-campo input { border:none; border-radius:0; background:transparent;
+    padding:10px 12px; font-size:13.5px; }
+  .cv-cli-campos .cv-campo + .cv-campo input { border-top:1px solid var(--borda-2); }
+  .cv-cli-campos:focus-within { border-color:var(--azul); }
+  .cv-cliente.ok .cv-cli-campos { display:none; }
+  /* Ligado: o cartão encolhe pra uma linha de identidade. O consultor já
+     resolveu isso; manter dois campos abertos ocupa espaço do que falta. */
+  .cv-cli-ligado { display:none; align-items:center; gap:9px; }
+  .cv-cliente.ok .cv-cli-ligado { display:flex; }
+  .cv-cli-ini { width:30px; height:30px; border-radius:9px; flex:none;
+    background:rgba(34,197,94,.15); color:var(--verde); font-size:12px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; }
+  .cv-cli-nome { flex:1; min-width:0; font-size:13px; font-weight:650; color:var(--texto);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cv-cli-nome small { display:block; font-weight:500; font-size:11px; color:var(--cinza-2); }
+
+  .cv-lead { font-size:11.5px; color:var(--cinza-2); line-height:1.5; }
+  .cv-lead.ok { margin-top:-3px; }
   /* Sem lead a cotação não sai. O aviso é laranja, não cinza: cinza é nota de
      rodapé, e isto é uma trava — quem lê precisa entender que o botão não vai
      acender enquanto não resolver. */
-  .cv-lead.falta { color:var(--laranja); }
-  .cv-lead.falta b { color:var(--texto); }
-  .cv-lead.falta button { display:block; margin-top:6px; background:var(--panel-2);
+  /* A saída da trava. Estilo preso ao id: o texto ao redor deixou de ser
+     laranja, e a regra antes dependia da classe .falta do parágrafo. */
+  #btCriarLead { display:block; margin-top:7px; background:var(--panel);
     border:1px solid var(--laranja); color:var(--laranja); border-radius:8px;
-    padding:6px 11px; font-size:11.5px; font-weight:650; cursor:pointer; font-family:inherit; }
-  .cv-lead.falta button:hover { background:rgba(251,146,60,.12); }
-  .cv-lead.falta button:disabled { opacity:.6; cursor:default; }
+    padding:6px 11px; font-size:11.5px; font-weight:650; cursor:pointer;
+    font-family:inherit; text-decoration:none; }
+  #btCriarLead:hover { background:rgba(251,146,60,.12); }
+  #btCriarLead:disabled { opacity:.6; cursor:default; }
   .cv-lead button { background:none; border:none; color:var(--cinza-2); cursor:pointer;
     font-size:11.5px; text-decoration:underline; padding:0 0 0 6px; font-family:inherit; }
 
@@ -413,6 +449,29 @@
        Painel faz bem: segmentado para o que é excludente, campo com seta para
        o que é busca, título e lista para o que é refinamento. -->
   <aside class="cv-lado">
+    <!-- Primeira decisão da tela. A cotação nasce ligada ao lead do CRM: sem
+         vínculo, a venda não volta como conversão pra Meta nem pro Google, e o
+         funil não sabe que aquele lead recebeu proposta. Por isso vem antes do
+         ramo, da cidade e das vidas — é o que decide se o botão vai acender. -->
+    <div class="cv-cliente falta" id="cxCliente">
+      <div class="cv-cliente-topo">
+        <h4>Cliente</h4>
+        <span class="cv-cliente-selo" id="cliSelo">obrigatório</span>
+      </div>
+      <div class="cv-cli-campos">
+        <div class="cv-campo">
+          <input id="cliNome" type="text" autocomplete="off" placeholder="Nome do cliente…">
+          <div id="sugLead" class="cv-sug"></div>
+        </div>
+        <div class="cv-campo"><input id="cliTel" type="text" placeholder="Telefone…"></div>
+      </div>
+      <div class="cv-cli-ligado">
+        <span class="cv-cli-ini" id="cliIni"></span>
+        <span class="cv-cli-nome" id="cliRotulo"></span>
+      </div>
+      <div id="leadLigado" class="cv-lead"></div>
+    </div>
+
     <div class="cv-seg" id="segRamo">
       <button type="button" class="on" data-v="Saúde">Saúde</button>
       <button type="button" data-v="Dental">Dental</button>
@@ -436,19 +495,6 @@
     <button type="button" class="cv-campo-bt" id="btVidas">
       <span id="vidasResumo">Quantas vidas…</span>
     </button>
-
-    <!-- Cliente e lead. A cotação nasce ligada ao lead do CRM: sem vínculo,
-         a venda não volta como conversão pra Meta nem pro Google, e o funil
-         não sabe que aquele lead recebeu proposta. -->
-    <div class="cv-refino">
-      <h4>Cliente</h4>
-      <div class="cv-campo" style="margin-top:6px">
-        <input id="cliNome" type="text" autocomplete="off" placeholder="Nome do cliente…">
-        <div id="sugLead" class="cv-sug"></div>
-      </div>
-      <div class="cv-campo"><input id="cliTel" type="text" placeholder="Telefone…"></div>
-      <div id="leadLigado" class="cv-lead"></div>
-    </div>
 
     <div class="cv-refino">
       <h4>Acomodação</h4>
@@ -1793,12 +1839,23 @@
     // vínculo. Reavaliar aqui é impossível de esquecer no próximo que surgir.
     atualizarBotao();
     var c = el('leadLigado');
+    var cx = el('cxCliente');
+    cx.className = 'cv-cliente ' + (leadEscolhido ? 'ok' : 'falta');
+    el('cliSelo').textContent = leadEscolhido ? 'ligado' : 'obrigatório';
     if (leadEscolhido) {
+      // Ligado, o cartão vira uma linha de identidade: quem é, o telefone e a
+      // saída. O que já foi resolvido não precisa continuar ocupando dois campos.
+      var nomeL = leadNome || ('#' + leadEscolhido);
+      el('cliIni').textContent = nomeL.replace(/[^A-Za-zÀ-ÿ ]/g, '').trim()
+        .split(/\s+/).slice(0, 2).map(function (p) { return p.charAt(0); }).join('').toUpperCase() || '?';
+      var telL = (el('cliTel').value || '').trim();
+      el('cliRotulo').innerHTML = esc(nomeL) +
+        (telL ? '<small>' + esc(telL) + '</small>' : '');
       c.className = 'cv-lead ok';
-      c.innerHTML = '✓ ligada ao lead ' + esc(leadNome || ('#' + leadEscolhido)) +
-        '<button type="button" id="btSoltarLead">soltar</button>';
+      c.innerHTML = '<button type="button" id="btSoltarLead">trocar de cliente</button>';
       el('btSoltarLead').onclick = function () {
         leadEscolhido = 0; leadNome = ''; pintarLead();
+        el('cliNome').focus();
       };
     } else {
       // Trava com saída. Só dizer "falta o lead" pararia o consultor no meio
@@ -1806,9 +1863,10 @@
       // então o botão de criar fica aqui, com o que ele já digitou.
       var nome = (el('cliNome').value || '').trim();
       var tel = (el('cliTel').value || '').trim();
-      c.className = 'cv-lead falta';
-      c.innerHTML = '<b>Ligue a um lead do CRM para cotar.</b> ' +
-        'Digite o nome ou o telefone e escolha na lista.' +
+      // O selo "obrigatório" já carrega o alarme. Repetir laranja aqui embaixo
+      // fazia a coluna inteira parecer erro — o texto volta a ser instrução.
+      c.className = 'cv-lead';
+      c.innerHTML = 'Digite o nome ou o telefone e escolha o lead na lista.' +
         (nome || tel
           ? '<button type="button" id="btCriarLead">Criar lead' +
             (nome ? ' “' + esc(nome) + '”' : '') + '</button>'
