@@ -3867,23 +3867,36 @@ def init_db():
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
         conn.commit()
-        if not conn.execute("SELECT 1 FROM meta_flags WHERE k='cot_dedup_duplicidades_20260805'").fetchone():
+        
+        passo3_ok = conn.execute("SELECT 1 FROM meta_flags WHERE k='cot_entidade_backfill_20260805b'").fetchone()
+        ja_dedup = conn.execute("SELECT 1 FROM meta_flags WHERE k='cot_dedup_duplicidades_20260805'").fetchone()
+        
+        if passo3_ok and not ja_dedup:
             dups = conn.execute("""
                 SELECT operadora, plano, modalidade, acomodacao, coparticipacao,
-                       COALESCE(tipo_cnpj,'') tc, COALESCE(cidade,'') cid, COALESCE(entidade,'') ent, COUNT(*) cnt
+                       COALESCE(tipo_cnpj,'') tc, COALESCE(cidade,'') cid, COALESCE(entidade,'') ent, 
+                       COALESCE(linha,'') lin, COALESCE(abrangencia,'') abr, COALESCE(vigencia,'') vig, COUNT(*) cnt
                 FROM cotacao_tabela
-                GROUP BY operadora, plano, modalidade, acomodacao, coparticipacao, 6, 7, 8
+                WHERE ativo=1
+                GROUP BY operadora, plano, modalidade, acomodacao, coparticipacao, 6, 7, 8, 9, 10, 11
                 HAVING COUNT(*) > 1
             """).fetchall()
             for d in dups:
-                tids = [r['id'] for r in conn.execute("""
-                    SELECT id FROM cotacao_tabela
-                    WHERE operadora=? AND plano=? AND modalidade=? AND acomodacao=?
-                      AND coparticipacao=? AND COALESCE(tipo_cnpj,'')=?
-                      AND COALESCE(cidade,'')=? AND COALESCE(entidade,'')=?
-                    ORDER BY id DESC
+                tabela_rows = conn.execute("""
+                    SELECT t.id,
+                           (SELECT COUNT(*) FROM cotacao_preco p WHERE p.tabela_id=t.id AND p.preco > 0) as completude
+                    FROM cotacao_tabela t
+                    WHERE t.operadora=? AND t.plano=? AND t.modalidade=? AND t.acomodacao=?
+                      AND t.coparticipacao=? AND COALESCE(t.tipo_cnpj,'')=?
+                      AND COALESCE(t.cidade,'')=? AND COALESCE(t.entidade,'')=?
+                      AND COALESCE(t.linha,'')=? AND COALESCE(t.abrangencia,'')=? AND COALESCE(t.vigencia,'')=?
+                      AND t.ativo=1
+                    ORDER BY completude DESC, COALESCE(t.atualizado_em, t.criado_em) DESC, t.id DESC
                 """, (d['operadora'], d['plano'], d['modalidade'], d['acomodacao'],
-                      d['coparticipacao'], d['tc'], d['cid'], d['ent'])).fetchall()]
+                      d['coparticipacao'], d['tc'], d['cid'], d['ent'], d['lin'], d['abr'], d['vig'])).fetchall()
+                
+                tids = [r['id'] for r in tabela_rows]
+                
                 if len(tids) > 1:
                     p1 = {r['faixa']: float(r['preco'] or 0) for r in conn.execute(
                         "SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (tids[0],)).fetchall()}
@@ -3891,16 +3904,15 @@ def init_db():
                         p2 = {r['faixa']: float(r['preco'] or 0) for r in conn.execute(
                             "SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (rem_id,)).fetchall()}
                         if p1 == p2:
-                            conn.execute("DELETE FROM cotacao_preco WHERE tabela_id=?", (rem_id,))
-                            conn.execute("DELETE FROM cotacao_rede WHERE tabela_id=?", (rem_id,))
-                            conn.execute("DELETE FROM cotacao_tabela WHERE id=?", (rem_id,))
+                            # Inativa em vez de deletar para não quebrar referências em cotacao_salva.tabela_ids_json
+                            conn.execute("UPDATE cotacao_tabela SET ativo=0, atualizado_em=?, plano = plano || ' (Duplicada)' WHERE id=?", 
+                                         (_agora_sp(), rem_id))
             conn.execute("INSERT INTO meta_flags (k) VALUES ('cot_dedup_duplicidades_20260805')")
             conn.commit()
-            print("[COTACAO] Dedup de duplicidades com preços idênticos aplicado")
+            print("[COTACAO] Dedup de duplicidades com preços idênticos aplicado (referências preservadas)")
     except Exception as e:
-        if is_pg:
-            try: conn.rollback()
-            except Exception: pass
+        try: conn.rollback()
+        except Exception: pass
         print(f"[COTACAO] dedup duplicidades pulado: {e}")
 
     # ─── funil_execucao: era PK só em usuario_id (1 execução por consultor).
