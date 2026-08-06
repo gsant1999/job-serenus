@@ -1084,6 +1084,36 @@
       return;
     }
 
+    // Base local vazia e a tela achando que não dá pra cotar ao vivo.
+    //
+    // `pronto` é decidido UMA VEZ, no conferirLigacao() do carregamento da
+    // página — quando ainda não havia cidade escolhida nem tipo confirmado.
+    // Quem chega aqui já escolheu os dois. Se aquela primeira pergunta falhou
+    // por qualquer motivo passageiro, o `if (pronto)` abaixo pulava o caminho
+    // ao vivo inteiro, o tratarFalha nunca rodava, e o consultor recebia só a
+    // mensagem genérica do fim — sem uma palavra sobre o que houve.
+    //
+    // Refaz a pergunta AGORA e, se ainda não der, diz o motivo real: extensão
+    // ausente, Painel fechado, hash expirado, precisa aprender. O tratarFalha
+    // já sabe explicar cada um e mostra o que foi enviado e o que voltou.
+    if (!pronto) {
+      el('navLista').innerHTML = '<div class="cv-ops-vazio">Conferindo a ligação com o Painel…</div>';
+      var pong2 = await pedir('ping', {}, 2500);
+      if (pong2.ok) {
+        extensaoPresente = true;
+        extensaoVersao = pong2.versao || extensaoVersao;
+        extensaoSabeCotar = !!(pong2.sabe && pong2.sabe.indexOf('cotar') >= 0);
+      }
+      var est = await pedir('cotador_estado', {}, 8000);
+      if (est.ok && !(est.faltando && est.faltando.length)) {
+        pronto = true;
+        mostrarSinal('on', 'Painel conectado', '');
+      } else {
+        tratarFalha(est.ok ? 'precisa_aprender' : est.motivo, est);
+      }
+      atualizarBotao();
+    }
+
     if (pronto) {
       el('navLista').innerHTML = '<div class="cv-ops-vazio">Buscando operadoras no Painel do Corretor…</div>';
       var b = base();
@@ -1133,7 +1163,19 @@
       voltarPara('operadoras');
       return;
     }
-    el('navLista').innerHTML = '<div class="cv-ops-vazio">Não foi possível listar as operadoras ao vivo nem no banco local. Verifique o status da conexão ou importe tabelas no catálogo.</div>';
+    // Fim de linha: nem base local, nem Painel ao vivo, nem catálogo.
+    // Diz as duas coisas separadamente — quem lê precisa saber que são dois
+    // caminhos e que os dois falharam, não um problema só. E a segunda frase
+    // é a próxima ação concreta, não um conselho genérico.
+    el('navLista').innerHTML = '<div class="cv-ops-vazio">' +
+      '<b>Nenhum dos dois caminhos respondeu.</b><br>' +
+      'A base do JOB não tem tabela para <b>' + esc(cidadeEscolhida || 'esta cidade') + '</b> · ' +
+      esc(nomeCompleto(tipoAtivo() || '')) + ', e a consulta ao vivo no Painel também não voltou.' +
+      '<br><br>Para encher a base: abra o Painel do Corretor, faça uma cotação desta cidade com ' +
+      '1 vida em cada faixa etária, rode o extrator e suba o arquivo em ' +
+      '<a href="/cotacao/novo#tabelas">Tabelas de preço</a>. ' +
+      'Se o aviso acima explicou uma falha da extensão, resolva ela primeiro.' +
+      '</div>';
   }
 
   async function garantirPlanos(operadoraId) {
