@@ -28697,10 +28697,10 @@ def api_cotacao_status_tabelas():
         total = conn.execute("SELECT COUNT(*) c FROM cotacao_tabela").fetchone()['c']
         ativas = conn.execute("SELECT COUNT(*) c FROM cotacao_tabela WHERE ativo=1").fetchone()['c']
 
-        # Completas: tabelas com 10 faixas em cotacao_preco
+        # Completas: tabelas com 10 faixas em cotacao_preco com preco > 0
         completas = conn.execute("""
             SELECT COUNT(*) c FROM (
-                SELECT tabela_id FROM cotacao_preco GROUP BY tabela_id HAVING COUNT(*) >= 10
+                SELECT tabela_id FROM cotacao_preco WHERE preco > 0 GROUP BY tabela_id HAVING COUNT(*) >= 10
             ) t
         """).fetchone()['c']
 
