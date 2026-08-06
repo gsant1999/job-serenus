@@ -765,8 +765,10 @@
   function nomeCompleto(t) { return ramo === 'Dental' ? (t + ' Dental') : t; }
   function codigoDe(t) {
     var alvo = nomeCompleto(t);
-    var achado = Object.keys(MODALIDADES).filter(function (c) { return MODALIDADES[c] === alvo; });
-    return achado.length ? Number(achado[0]) : null;
+    var achado = Object.keys(MODALIDADES).filter(function (c) { return MODALIDADES[c] === alvo || MODALIDADES[c] === t; });
+    if (achado.length) return Number(achado[0]);
+    var fixos = { 'PF': 1, 'PME': 2, 'Adesão': 3 };
+    return fixos[t] != null ? fixos[t] : null;
   }
 
   function montarSegTipo() {
@@ -980,7 +982,7 @@
     desenharSelecao();
     el('resTopo').style.display = 'none';
     el('resultado').innerHTML = '';
-    if (cidadeEscolhida && modalidadeAtiva() != null) carregarOperadoras();
+    if (cidadeEscolhida && (modalidadeAtiva() != null || tipoAtivo() != null)) carregarOperadoras();
     else {
       desenharMigalha();
       el('navLista').className = 'cv-grade';
@@ -1053,8 +1055,15 @@
             coparticipacao: (p.coparticipacao || '').toLowerCase().indexOf('com') >= 0,
             coparticipacaoTipo: p.coparticipacao || '',
             mei: p.mei === true || (p.modalidade || '').toLowerCase() === 'mei',
-            qtdVidaMin: p.idade_min || 0,
-            qtdVidaMax: 99
+            // idade_min é a IDADE a partir da qual a operadora vende (44 na
+            // Medsênior). Não é quantidade de vidas. Estava indo para
+            // qtdVidaMin, e o cartão renderiza "qtdVidaMin–qtdVidaMax vidas":
+            // a Medsênior aparecia como "44–99 vidas" para o corretor, que lê
+            // como "exige no mínimo 44 vidas". Número certo, legenda errada.
+            // A base local não informa mínimo de vidas — então não inventa.
+            idadeMin: p.idade_min || 0,
+            qtdVidaMin: 0,
+            qtdVidaMax: 0
           },
           plano: {
             nome: p.plano || '',
@@ -1076,6 +1085,7 @@
     }
 
     if (pronto) {
+      el('navLista').innerHTML = '<div class="cv-ops-vazio">Buscando operadoras no Painel do Corretor…</div>';
       var b = base();
       var rc = await pedir('passo', { pedido: Object.assign({ acao: 'criar', reaproveitar: true }, b) }, 45000);
       if (rc.ok) {
@@ -1100,11 +1110,14 @@
           urlDaPergunta = rc.dados.url || '';
           el('mainSub').innerHTML = 'Quem atende <b>' + esc(cidadeEscolhida) + '</b> · ' +
             esc(nomeCompleto(tipoAtivo() || '')) + ' · <b>' + esc(resumoVidas()) + '</b> · ' +
-            operadoras.length + ' operadoras' +
-            '';
+            operadoras.length + ' operadoras via <b>Painel do Corretor (ao vivo)</b>';
           voltarPara('operadoras');
           return;
+        } else {
+          tratarFalha(r.motivo, r);
         }
+      } else {
+        tratarFalha(rc.motivo, rc);
       }
     }
 
@@ -1120,8 +1133,7 @@
       voltarPara('operadoras');
       return;
     }
-    el('navLista').innerHTML = '<div class="cv-ops-vazio">Não deu pra listar agora, e esta cidade ' +
-      'ainda não está no <a href="/cotacao/catalogo">catálogo</a>.</div>';
+    el('navLista').innerHTML = '<div class="cv-ops-vazio">Não foi possível listar as operadoras ao vivo nem no banco local. Verifique o status da conexão ou importe tabelas no catálogo.</div>';
   }
 
   async function garantirPlanos(operadoraId) {
@@ -1129,10 +1141,10 @@
     el('navLista').innerHTML = '<div class="cv-ops-vazio">Perguntando ao Painel…</div>';
     var b = base();
     var rc = await pedir('passo', { pedido: Object.assign({ acao: 'criar', reaproveitar: true }, b) }, 45000);
-    if (!rc.ok) return null;
+    if (!rc.ok) { tratarFalha(rc.motivo, rc); return null; }
     var r = await pedir('passo', { pedido: Object.assign(
       { acao: 'planos', cotacaoId: rc.dados.cotacaoId, operadoraId: operadoraId }, b) }, 45000);
-    if (!r.ok) return null;
+    if (!r.ok) { tratarFalha(r.motivo, r); return null; }
     planosPorOperadora[operadoraId] = (r.dados && r.dados.planos) || [];
     return planosPorOperadora[operadoraId];
   }
@@ -1231,6 +1243,8 @@
           '<span class="' + co.cls + '">' + co.txt + '</span>' +
           '<span>' + (L.tb.mei === true ? 'MEI' : 'Não MEI') + '</span>' +
           (L.tb.qtdVidaMin ? '<span>' + L.tb.qtdVidaMin + '–' + L.tb.qtdVidaMax + ' vidas</span>' : '') +
+          (L.tb.idadeMin ? '<span title="A operadora não vende este plano para quem tem menos que isso">a partir de ' +
+            L.tb.idadeMin + ' anos</span>' : '') +
           '</span><small>' + L.planos.length + ' plano(s)' +
           (marcados ? ' · ' + marcados + ' marcado(s)' : '') + '</small></span><span class="seta">›</span>',
           function () { linhaAtual = L; nivel = 'planos'; desenharMigalha(); desenharNav(); },
@@ -1650,7 +1664,7 @@
       pronto = true;
       mostrarSinal('on', 'Base do JOB (cache local)', '');
       atualizarBotao();
-      if (cidadeEscolhida && modalidadeAtiva() != null) carregarOperadoras();
+      if (cidadeEscolhida && (modalidadeAtiva() != null || tipoAtivo() != null)) carregarOperadoras();
       return;
     }
 
@@ -1662,7 +1676,7 @@
     pronto = true;
     mostrarSinal('on', 'Painel conectado', '');
     atualizarBotao();
-    if (cidadeEscolhida && modalidadeAtiva() != null) carregarOperadoras();
+    if (cidadeEscolhida && (modalidadeAtiva() != null || tipoAtivo() != null)) carregarOperadoras();
   }
 
   // Um tipo já vem marcado: tela com três botões e nenhum aceso deixa a
