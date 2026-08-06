@@ -606,6 +606,16 @@
     return (v == null) ? '—' : 'R$ ' + Number(v).toLocaleString('pt-BR',
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
+  // Campo do Painel que às vezes vem string, às vezes {id, nome} — e que
+  // quando NÃO existe chega como a string "$undefined", porque é assim que o
+  // Next.js serializa `undefined`. Sem tratar, "$undefined" aparecia na tela
+  // como se fosse o nome de uma entidade.
+  var textoPainel = function (v) {
+    if (v == null) return '';
+    if (typeof v === 'object') v = v.nome || v.descricao || '';
+    var t = String(v).trim();
+    return (!t || t === '$undefined' || t === 'undefined' || t === 'null') ? '' : t;
+  };
   function respira(min, max) {
     return new Promise(function (r) { setTimeout(r, min + Math.random() * (max - min)); });
   }
@@ -1346,8 +1356,24 @@
 
     (linhaAtual ? linhaAtual.planos : []).forEach(function (pl) {
       var acom = (pl.plano || {}).acomodacao ? 'Quarto Individual' : 'Quarto Coletivo';
+      // A ENTIDADE, quando existe, é o que distingue dois planos de mesmo nome.
+      //
+      // Na Adesão o mesmo plano é vendido por entidades diferentes, com preço
+      // diferente. O cartão mostrava só nome e acomodação, e a tela ficava com
+      // "Bronze SP Mais · Quarto Coletivo" repetido duas vezes, sem nada que
+      // dissesse qual era qual — impossível escolher. O Painel manda isso
+      // pronto no campo `entidade` do plano; ninguém estava lendo.
+      var ent = textoPainel(pl.entidade);
+      var adm = textoPainel(pl.administradora);
+      // Só mostra a administradora quando ela não é a própria operadora: em
+      // PF e PME o Painel repete o nome da operadora ali, e repetir na tela é
+      // ruído.
+      var opNome = textoPainel(pl.operadora);
+      var sub = acom;
+      if (ent) sub += ' · <b style="color:var(--texto)">' + esc(ent) + '</b>';
+      if (adm && adm !== opNome) sub += ' · ' + esc(adm);
       c.appendChild(cartao(
-        '<span class="txt"><b>' + esc((pl.plano || {}).nome || '—') + '</b><small>' + acom + '</small></span>' +
+        '<span class="txt"><b>' + esc((pl.plano || {}).nome || '—') + '</b><small>' + sub + '</small></span>' +
         '<span class="seta">' + (marcado(pl) ? '✓' : '+') + '</span>',
         function () { alternar(pl); }, marcado(pl)));
     });

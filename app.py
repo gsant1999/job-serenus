@@ -26614,6 +26614,23 @@ def _cotacao_viva_gravar(conn, d, usuario_id, origem):
     return vid
 
 
+def _texto_painel(v):
+    """Texto de um campo que o Painel manda como string OU como {id, nome}.
+
+    E que às vezes não manda: o Next.js serializa `undefined` como a STRING
+    "$undefined", que chega aqui parecendo um valor legítimo. Gravar isso no
+    banco criaria uma entidade chamada "$undefined" — o mesmo tipo de sujeira
+    que faz um filtro de tela listar lixo como se fosse opção."""
+    if v is None:
+        return ''
+    if isinstance(v, dict):
+        v = v.get('nome') or v.get('descricao') or ''
+    t = str(v).strip()
+    if not t or t in ('$undefined', 'undefined', 'null', 'None'):
+        return ''
+    return t
+
+
 def _aprender_do_vivo(conn, cidade, modalidade, planos):
     """Cada cotação ao vivo alimenta a base local. Tijolo por tijolo.
 
@@ -26662,8 +26679,21 @@ def _aprender_do_vivo(conn, cidade, modalidade, planos):
             # ("Linha Amil"), sem entidade nenhuma — por isso só se separa aqui.
             # A entidade entra na chave: o MESMO plano em duas entidades tem
             # preço diferente e são duas tabelas.
-            entidade = ''
-            if eh_adesao:
+            # A ENTIDADE VEM PRONTA DO PAINEL, no campo `entidade` do plano.
+            #
+            # Eu tinha derivado ela do nome da "linha" ("Affix - ANSP"), o que
+            # funcionava por acidente: na tela de Adesão a linha é "COM Odonto",
+            # e aí os dois planos de mesmo nome em entidades diferentes viravam
+            # UMA tabela só, uma sobrescrevendo a outra. Foi o Guilherme quem
+            # viu, olhando "Bronze SP Mais" repetido na tela sem nada que
+            # distinguisse.
+            #
+            # Em PF e PME o Painel manda a string "$undefined" (é assim que o
+            # Next.js serializa "não existe") — que precisa virar vazio, senão
+            # entra no banco como se fosse o nome de uma entidade.
+            entidade = _texto_painel(p.get('entidade'))[:120]
+            if not entidade and eh_adesao:
+                # Rede: algumas telas trazem a entidade colada na linha.
                 m = re.match(r'^(.{2,40}?)\s+-\s+(.{2,40})$', linha)
                 if m:
                     entidade = re.sub(r'\s*\([^)]*\)\s*', ' ', m.group(2)).strip()[:120]
