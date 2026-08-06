@@ -23430,7 +23430,7 @@ def painel_lead(lid):
                               ORDER BY id DESC LIMIT 1""", (p['id'],)).fetchone()
         p['implantada_em'] = imp['criado_em'] if imp else None
         try:
-            p['ads'] = conn.execute("""SELECT status, click_tipo, valor, conversao_em
+            p['ads'] = conn.execute("""SELECT status, click_tipo, valor, conversao_em, detalhe
                                        FROM google_ads_conversoes WHERE proposta_id=?""",
                                     (p['id'],)).fetchone()
             p['ads'] = dict(p['ads']) if p['ads'] else None
@@ -23439,7 +23439,7 @@ def painel_lead(lid):
             p['ads'] = None
 
         try:
-            p['meta'] = conn.execute("""SELECT status, valor, conversao_em
+            p['meta'] = conn.execute("""SELECT status, valor, conversao_em, detalhe
                                         FROM meta_conversoes WHERE proposta_id=?""",
                                      (p['id'],)).fetchone()
             p['meta'] = dict(p['meta']) if p['meta'] else None

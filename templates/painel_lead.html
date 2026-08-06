@@ -491,9 +491,15 @@
           {% if midia.ads_status == 'enviada' %}
             <span style="color:var(--verde); font-weight:600;" title="{{ midia.ads_detalhe or '' }}">Enviada (confirmada)</span>
           {% elif midia.ads_status == 'pendente' %}
-            <span style="color:var(--amarelo); font-weight:600;">Na fila (envio automático)</span>
+            {% if not midia.gclid %}
+              <span style="color:var(--amarelo); font-weight:600;" title="Aguardando Click ID (gclid) da planilha para poder enviar">Na fila (falta gclid)</span>
+            {% else %}
+              <span style="color:var(--amarelo); font-weight:600;">Na fila (envio automático)</span>
+            {% endif %}
+          {% elif midia.ads_status == 'falha' %}
+            <span style="color:var(--vermelho); font-weight:600;" title="{{ midia.ads_detalhe or '' }}">Falha no envio{% if midia.ads_detalhe %}: {{ midia.ads_detalhe|truncate(35, True, '…') }}{% endif %}</span>
           {% elif midia.ads_status %}
-            <span style="color:var(--vermelho); font-weight:600;" title="{{ midia.ads_detalhe or '' }}">{{ midia.ads_status }}</span>
+            <span style="color:var(--vermelho); font-weight:600;" title="{{ midia.ads_detalhe or '' }}">{{ midia.ads_status }}{% if midia.ads_detalhe %}: {{ midia.ads_detalhe|truncate(35, True, '…') }}{% endif %}</span>
           {% else %}
             <span style="color:var(--texto-mutado);">— sem proposta ativa</span>
           {% endif %}
@@ -504,9 +510,15 @@
           {% if midia.meta_status == 'enviada' %}
             <span style="color:var(--verde); font-weight:600;" title="{{ midia.meta_detalhe or '' }}">Enviada (confirmada)</span>
           {% elif midia.meta_status == 'pendente' %}
-            <span style="color:var(--amarelo); font-weight:600;">Na fila (envio automático)</span>
+            {% if not (midia.fbclid or midia.gclid) %}
+              <span style="color:var(--amarelo); font-weight:600;" title="Aguardando fbclid ou dados de mídia do lead">Na fila (falta fbclid)</span>
+            {% else %}
+              <span style="color:var(--amarelo); font-weight:600;">Na fila (envio automático)</span>
+            {% endif %}
+          {% elif midia.meta_status == 'falha' %}
+            <span style="color:var(--vermelho); font-weight:600;" title="{{ midia.meta_detalhe or '' }}">Falha no envio{% if midia.meta_detalhe %}: {{ midia.meta_detalhe|truncate(35, True, '…') }}{% endif %}</span>
           {% elif midia.meta_status %}
-            <span style="color:var(--vermelho); font-weight:600;" title="{{ midia.meta_detalhe or '' }}">{{ midia.meta_status }}</span>
+            <span style="color:var(--vermelho); font-weight:600;" title="{{ midia.meta_detalhe or '' }}">{{ midia.meta_status }}{% if midia.meta_detalhe %}: {{ midia.meta_detalhe|truncate(35, True, '…') }}{% endif %}</span>
           {% else %}
             <span style="color:var(--texto-mutado);">— sem proposta ativa</span>
           {% endif %}
