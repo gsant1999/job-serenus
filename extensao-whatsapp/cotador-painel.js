@@ -446,8 +446,45 @@
   // igualmente espaçadas em 40ms não existem em navegação humana; o mesmo
   // volume com intervalo irregular é só um corretor com pressa. O custo disso
   // é a cotação sair em segundos em vez de em um segundo, e vale pagar.
+  // PAUSA COM FORMATO DE GENTE.
+  //
+  // Era `min + Math.random() * (max - min)`: sorteio uniforme, todo valor da
+  // faixa igualmente provável. Isso já variava, mas variava de um jeito que não
+  // existe em ninguém — o histograma sai reto, e reto é assinatura de máquina
+  // tanto quanto intervalo fixo.
+  //
+  // Pessoa clica rápido quase sempre e de vez em quando para: lê uma tela,
+  // atende alguém, se distrai. Então: 85% das vezes na parte baixa da faixa,
+  // 15% numa pausa longa de verdade.
+  //
+  // A MÉDIA CAI um pouco (≈723ms contra 750ms numa faixa 400–1100), então isto
+  // não deixa a cotação mais lenta. E não faria diferença mesmo: medido em
+  // produção, as pausas são 3% do tempo de uma cotação — os outros 97% são o
+  // Painel respondendo.
   function respira(min, max) {
-    return new Promise((r) => setTimeout(r, min + Math.random() * (max - min)));
+    const faixa = max - min;
+    const ms = Math.random() < 0.85
+      ? min + Math.random() * faixa * 0.45
+      : max + Math.random() * faixa * 1.6;
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  // Embaralha (Fisher-Yates), sem alterar o original.
+  //
+  // A ordem de consulta era sempre a mesma: a lista chega do Painel numa
+  // ordem, e a gente percorria do começo ao fim, toda vez. Duas cotações da
+  // mesma cidade produziam a MESMA sequência de chamadas — e sequência
+  // repetida é padrão, que é o que se procura quando se procura robô.
+  //
+  // Custa zero: o resultado é ordenado por preço no fim, então a ordem em que
+  // se pergunta não muda nada do que o consultor vê.
+  function embaralhar(lista) {
+    const a = (lista || []).slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
   }
 
   async function criarCotacao(titulo) {
@@ -707,19 +744,26 @@
     // mesmo milissegundo é coisa que a tela deles nunca faz — um corretor
     // clica numa operadora de cada vez. Duas ainda cabe em "o cara clicou
     // rápido"; quatro não cabe em nada.
+    // Ordem sorteada a cada rodada: quem clica não começa sempre pela primeira
+    // da lista. `escolhidas` continua intacta pro retorno — só a ordem em que
+    // se pergunta é que muda.
+    const ordemOps = embaralhar(escolhidas);
     const planos = [];
-    for (let i = 0; i < escolhidas.length; i += 2) {
-      const lote = escolhidas.slice(i, i + 2);
+    for (let i = 0; i < ordemOps.length; i += 2) {
+      const lote = ordemOps.slice(i, i + 2);
       const r = await Promise.all(lote.map((o) =>
         planosDaOperadora(cotacaoId, p, o.id).catch(() => [])));
       r.forEach((lista) => planos.push(...lista));
-      avisa('planos', Math.min(i + 2, escolhidas.length), escolhidas.length);
-      if (i + 2 < escolhidas.length) await respira(280, 900);
+      avisa('planos', Math.min(i + 2, ordemOps.length), ordemOps.length);
+      if (i + 2 < ordemOps.length) await respira(280, 900);
     }
 
     const candidatos = planos.filter((pl) => serve(pl, p.vidas, p.exigencias));
     const teto = p.maxPlanos || 20;
-    const alvo = candidatos.slice(0, teto);
+    // Embaralha DEPOIS do corte, não antes: antes mudaria QUAIS planos entram
+    // no teto de 20, e isso é resultado diferente pro consultor. Depois muda
+    // só a ordem de perguntar, que ninguém vê.
+    const alvo = embaralhar(candidatos.slice(0, teto));
 
     // Preço é sequencial por imposição deles: a resposta traz todos os
     // cenários juntos, sem dizer qual preço é de qual plano. Um por vez, a
