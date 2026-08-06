@@ -1027,7 +1027,52 @@
   async function carregarOperadoras() {
     var mod = modalidadeAtiva();
     el('navLista').className = 'cv-grade';
-    el('navLista').innerHTML = '<div class="cv-ops-vazio">Perguntando ao Painel…</div>';
+    el('navLista').innerHTML = '<div class="cv-ops-vazio">Consultando planos no banco do JOB…</div>';
+
+    var doJob = await fetch('/cotacao/bloco/planos?cidade=' +
+        encodeURIComponent(cidadeEscolhida || '') + '&modalidade=' + encodeURIComponent(mod || ''))
+      .then(function (x) { return x.json(); }).catch(function () { return {}; });
+
+    if (doJob && doJob.ok && doJob.planos && doJob.planos.length > 0) {
+      var opsMap = {}, plsMap = {};
+      doJob.planos.forEach(function (p) {
+        var opNome = (p.operadora || '(sem operadora)').trim();
+        if (!opsMap[opNome]) {
+          opsMap[opNome] = { id: opNome, nome: opNome, logotipo: p.logo || '' };
+        }
+        var plObj = {
+          _local: true,
+          _db_id: p.id,
+          key: 'loc_' + p.id,
+          id: 'loc_' + p.id,
+          operadora: opsMap[opNome],
+          produto: { nome: p.produto || p.plano || '(sem produto)' },
+          tabela: {
+            nome: p.linha || p.plano || '',
+            coparticipacao: (p.coparticipacao || '').toLowerCase().indexOf('com') >= 0,
+            coparticipacaoTipo: p.coparticipacao || '',
+            mei: p.mei === true || (p.modalidade || '').toLowerCase() === 'mei',
+            qtdVidaMin: p.idade_min || 0,
+            qtdVidaMax: 99
+          },
+          plano: {
+            nome: p.plano || '',
+            acomodacao: (p.acomodacao || '').toLowerCase().indexOf('indiv') >= 0 || (p.acomodacao || '').toLowerCase().indexOf('apart') >= 0
+          },
+          frescor: p.frescor,
+          dias_atualizado: p.dias_atualizado
+        };
+        (plsMap[opNome] = plsMap[opNome] || []).push(plObj);
+      });
+      operadoras = Object.keys(opsMap).sort().map(function (k) { return opsMap[k]; });
+      planosPorOperadora = plsMap;
+      urlDaPergunta = '';
+      el('mainSub').innerHTML = 'Quem atende <b>' + esc(cidadeEscolhida) + '</b> · ' +
+        esc(nomeCompleto(tipoAtivo() || '')) + ' · <b>' + esc(resumoVidas()) + '</b> · ' +
+        operadoras.length + ' operadoras via <b>base do JOB</b> (sem dependência do Painel ao vivo)';
+      voltarPara('operadoras');
+      return;
+    }
 
     if (pronto) {
       var b = base();
@@ -1340,6 +1385,44 @@
   // de uma aba do Painel. Cada frente com a SUA cotação: é a ordem dos cenários
   // dentro dela que identifica de qual plano é cada preço.
   async function cotarTipo(planos, b, aoAndar, frentes) {
+    if (planos.length > 0 && planos[0]._local) {
+      if (aoAndar) aoAndar();
+      var respCal = await fetch('/cotacao/bloco/calcular', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          planos: planos.map(function (p) { return p._db_id; }),
+          faixas: vidasLista()
+        })
+      }).then(function (r) { return r.json(); }).catch(function () { return { ok: false }; });
+
+      if (!respCal.ok) {
+        return { erro: respCal.erro || 'Falha ao calcular na base local', planos: [] };
+      }
+
+      var resMap = {};
+      (respCal.resultados || []).forEach(function (r) { resMap[r.plano_id] = r; });
+
+      var calculados = planos.map(function (pl) {
+        var res = resMap[pl._db_id];
+        if (!res || res.elegivel === false || res.total == null) {
+          var ausenteMsg = (res && res.elegivel === false) ? 'idade inelegível' : 'sem preço no banco';
+          return Object.assign({}, pl, { total: null, faixas: [], motivo: ausenteMsg });
+        }
+        var faixasMapped = (res.linhas || []).map(function (L) {
+          return {
+            faixa: L.faixa,
+            quantidade: L.qtd || L.quantidade || 0,
+            unitario: L.preco || L.unitario || 0
+          };
+        });
+        return Object.assign({}, pl, { total: res.total, faixas: faixasMapped, conferido: true });
+      });
+
+      if (aoAndar) aoAndar();
+      return { url: '', planos: calculados };
+    }
+
     var passo0 = passoNaAba(b, null);
     var r0 = await passo0({ acao: 'criar' });
     if (!r0.ok) return { erro: r0.motivo, detalhe: r0.detalhe, planos: [] };
@@ -1557,6 +1640,19 @@
       extensaoVersao = pong.versao || extensaoVersao;
       extensaoSabeCotar = !!(pong.sabe && pong.sabe.indexOf('cotar') >= 0);
     }
+
+    var doJob = await fetch('/cotacao/bloco/planos?cidade=' + encodeURIComponent(cidadeEscolhida || '') +
+      '&modalidade=' + encodeURIComponent(modalidadeAtiva() || ''))
+      .then(function (res) { return res.json(); }).catch(function () { return { ok: false }; });
+
+    if (doJob && doJob.ok && (doJob.planos || []).length > 0) {
+      pronto = true;
+      mostrarSinal('on', 'Base do JOB (cache local)', '');
+      atualizarBotao();
+      if (cidadeEscolhida && modalidadeAtiva() != null) carregarOperadoras();
+      return;
+    }
+
     var r = await pedir('cotador_estado', {}, 8000);
     if (!r.ok) { pronto = false; tratarFalha(r.motivo, r); atualizarBotao(); return; }
     if (r.faltando && r.faltando.length) {
