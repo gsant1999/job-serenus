@@ -1,5 +1,5 @@
 # HOTFIX 20.06.2026 20:59 — Force rebuild (indentação OK, sintaxe verificada)
-import os, sqlite3, json, hashlib, secrets, re, threading, time, mimetypes, calendar
+import os, sqlite3, json, hashlib, hmac, secrets, re, threading, time, mimetypes, calendar
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, send_from_directory, send_file, abort, Response, g, render_template_string
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -3200,6 +3200,8 @@ def init_db():
         # Cidade/região da tabela de preço (o PDC calcula por cidade — preço e
         # rede valem por cidade, não dá pra assumir "vale em qualquer lugar").
         ("cotacao_tabela", "cidade", "TEXT DEFAULT ''"),
+        # Entidade de classe para planos de Adesão (ANSP, ASCOSERVI, OAB, etc.)
+        ("cotacao_tabela", "entidade", "TEXT DEFAULT ''"),
         # Frescor: quando o preço foi extraído/atualizado do PDC pela última vez
         # (selo de frescor da opção C — a tela avisa o que está velho).
         ("cotacao_tabela", "atualizado_em", "TIMESTAMP"),
@@ -3815,6 +3817,90 @@ def init_db():
             try: conn.rollback()
             except Exception: pass
         print(f"[COTACAO] backfill atualizado_em pulado: {e}")
+
+    # ─── Passo 3: Backfill da coluna `entidade` em cotacao_tabela ───
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        conn.commit()
+        if not conn.execute("SELECT 1 FROM meta_flags WHERE k='cot_entidade_backfill_20260805b'").fetchone():
+            rows = conn.execute("""SELECT id, operadora, linha, modalidade FROM cotacao_tabela
+                                   WHERE modalidade LIKE '%Ades%' OR operadora LIKE '%Affix%'
+                                      OR operadora LIKE '%SUPERMED%' OR linha LIKE '%(%'""").fetchall()
+            for r in rows:
+                tid = r['id']
+                op = (r['operadora'] or '').strip()
+                lin = (r['linha'] or '').strip()
+                ent = ''
+                new_op = op
+                new_lin = lin
+                if op.startswith('Affix '):
+                    ent = op[6:].strip()
+                    new_op = 'Affix'
+                elif op.startswith('SUPERMED - '):
+                    ent = op[11:].strip()
+                    new_op = 'SUPERMED'
+                elif ' - ' in op:
+                    parts = op.split(' - ', 1)
+                    new_op = parts[0].strip()
+                    ent = parts[1].strip()
+
+                if not ent and '(' in lin and ')' in lin:
+                    idx1 = lin.find('(')
+                    idx2 = lin.rfind(')')
+                    if idx2 > idx1:
+                        ent = lin[idx1 + 1:idx2].strip()
+
+                if ent or new_op != op:
+                    conn.execute("UPDATE cotacao_tabela SET operadora=?, entidade=?, linha=? WHERE id=?",
+                                 (new_op, ent, new_lin, tid))
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('cot_entidade_backfill_20260805b')")
+            conn.commit()
+            print("[COTACAO] Backfill de entidade em cotacao_tabela aplicado")
+    except Exception as e:
+        if is_pg:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[COTACAO] backfill entidade pulado: {e}")
+
+    # ─── Passo 4: Deduplicação inteligente de tabelas com preços 100% idênticos ───
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta_flags (k TEXT PRIMARY KEY)")
+        conn.commit()
+        if not conn.execute("SELECT 1 FROM meta_flags WHERE k='cot_dedup_duplicidades_20260805'").fetchone():
+            dups = conn.execute("""
+                SELECT operadora, plano, modalidade, acomodacao, coparticipacao,
+                       COALESCE(tipo_cnpj,'') tc, COALESCE(cidade,'') cid, COALESCE(entidade,'') ent, COUNT(*) cnt
+                FROM cotacao_tabela
+                GROUP BY operadora, plano, modalidade, acomodacao, coparticipacao, 6, 7, 8
+                HAVING COUNT(*) > 1
+            """).fetchall()
+            for d in dups:
+                tids = [r['id'] for r in conn.execute("""
+                    SELECT id FROM cotacao_tabela
+                    WHERE operadora=? AND plano=? AND modalidade=? AND acomodacao=?
+                      AND coparticipacao=? AND COALESCE(tipo_cnpj,'')=?
+                      AND COALESCE(cidade,'')=? AND COALESCE(entidade,'')=?
+                    ORDER BY id DESC
+                """, (d['operadora'], d['plano'], d['modalidade'], d['acomodacao'],
+                      d['coparticipacao'], d['tc'], d['cid'], d['ent'])).fetchall()]
+                if len(tids) > 1:
+                    p1 = {r['faixa']: float(r['preco'] or 0) for r in conn.execute(
+                        "SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (tids[0],)).fetchall()}
+                    for rem_id in tids[1:]:
+                        p2 = {r['faixa']: float(r['preco'] or 0) for r in conn.execute(
+                            "SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (rem_id,)).fetchall()}
+                        if p1 == p2:
+                            conn.execute("DELETE FROM cotacao_preco WHERE tabela_id=?", (rem_id,))
+                            conn.execute("DELETE FROM cotacao_rede WHERE tabela_id=?", (rem_id,))
+                            conn.execute("DELETE FROM cotacao_tabela WHERE id=?", (rem_id,))
+            conn.execute("INSERT INTO meta_flags (k) VALUES ('cot_dedup_duplicidades_20260805')")
+            conn.commit()
+            print("[COTACAO] Dedup de duplicidades com preços idênticos aplicado")
+    except Exception as e:
+        if is_pg:
+            try: conn.rollback()
+            except Exception: pass
+        print(f"[COTACAO] dedup duplicidades pulado: {e}")
 
     # ─── funil_execucao: era PK só em usuario_id (1 execução por consultor).
     # Passa a permitir VÁRIAS execuções simultâneas por consultor (funil pra
@@ -26261,7 +26347,10 @@ def _parse_idades(texto):
 @app.route('/cotacao')
 @login_required
 def cotacao():
-    """Tela de cotação (multicálculo): idades + filtros -> comparativo de planos."""
+    """Redirecionamento 301 para a nova tela de cotação (/cotacao/novo)."""
+    qs = request.query_string.decode('utf-8')
+    dest = '/cotacao/novo' + (f'?{qs}' if qs else '')
+    return redirect(dest, code=301)
     conn = db()
     try:
         operadoras = [r['operadora'] for r in conn.execute(
@@ -26616,7 +26705,7 @@ def cotacao_preferencia():
 @app.route('/cotacao/novo')
 @login_required
 def cotacao_novo():
-    """Cotação ao vivo no Painel do Corretor, pela extensão."""
+    """Cotação no JOB Serenus com base local (multicálculo em cache)."""
     conn = db()
     lead = None
     try:
@@ -26625,17 +26714,400 @@ def cotacao_novo():
         lid = 0
     if lid:
         try:
-            r = conn.execute("SELECT id, nome, telefone FROM crm_lead WHERE id=?", (lid,)).fetchone()
+            r = conn.execute("SELECT id, nome, telefone FROM crm_leads WHERE id=?", (lid,)).fetchone()
             if r:
                 lead = {'id': r['id'], 'nome': r['nome'], 'telefone': r['telefone']}
         except Exception:
             lead = None
+
+    try:
+        operadoras = [r['operadora'] for r in conn.execute(
+            "SELECT DISTINCT operadora FROM cotacao_tabela WHERE ativo=1 ORDER BY operadora").fetchall()]
+    except Exception:
+        operadoras = []
+    operadoras_cards = [{'nome': op, 'logo': _logo_operadora_url(conn, op)} for op in operadoras]
+    modalidades = _modalidades_conhecidas(conn)
+    cidade_preferida = _pref_cotacao(conn, session.get('user_id'), 'cidade')
+    close_db(conn)
+
+    f_ops = [x.strip() for x in request.args.getlist('op') if x.strip()]
+    prefill = {
+        'idades': (request.args.get('idades') or '').strip(),
+        'modalidade': (request.args.get('modalidade') or '').strip(),
+        'acomodacao': (request.args.get('acomodacao') or '').strip(),
+        'coparticipacao': (request.args.get('coparticipacao') or '').strip(),
+        'mei': (request.args.get('mei') or '').strip(),
+        'op': f_ops,
+    }
+    for i in range(10):
+        prefill[f'fx_{i}'] = (request.args.get(f'fx_{i}') or '').strip()
+
     return render_template('cotacao_novo.html',
                            faixas=FAIXAS_ETARIAS,
                            faixas_painel=[_FAIXA_JOB_PARA_PAINEL.get(f, f) for f in FAIXAS_ETARIAS],
-                           modalidades=_modalidades_conhecidas(conn),
-                           cidade_preferida=_pref_cotacao(conn, session.get('user_id'), 'cidade'),
-                           lead=lead, salva=None)
+                           modalidades=modalidades,
+                           cidade_preferida=cidade_preferida,
+                           lead=lead, salva=None,
+                           operadoras=operadoras,
+                           operadoras_cards=operadoras_cards,
+                           prefill=prefill,
+                           idades=prefill['idades'],
+                           modalidade=prefill['modalidade'],
+                           acomodacao=prefill['acomodacao'],
+                           coparticipacao=prefill['coparticipacao'],
+                           mei=prefill['mei'],
+                           op_list=f_ops,
+                           fx_0=prefill['fx_0'],
+                           fx_1=prefill['fx_1'],
+                           fx_2=prefill['fx_2'],
+                           fx_3=prefill['fx_3'],
+                           fx_4=prefill['fx_4'],
+                           fx_5=prefill['fx_5'],
+                           fx_6=prefill['fx_6'],
+                           fx_7=prefill['fx_7'],
+                           fx_8=prefill['fx_8'],
+                           fx_9=prefill['fx_9'])
+
+
+# ── Passo 7c & 7d: Rotas JSON para abas de /cotacao/novo (com sessão) ──
+
+@app.route('/cotacao/bloco/planos', methods=['GET'])
+@login_required
+def cotacao_bloco_planos():
+    """Retorna planos da base local filtrados para a aba Cotar de /cotacao/novo."""
+    conn = db()
+    try:
+        f_cidade = (request.args.get('cidade') or '').strip()
+        f_modalidade = (request.args.get('modalidade') or '').strip()
+        f_acomodacao = (request.args.get('acomodacao') or '').strip()
+        f_copart = (request.args.get('coparticipacao') or '').strip()
+        f_mei = (request.args.get('mei') or '').strip()
+        f_ops = [x.strip() for x in request.args.getlist('op') if x.strip()]
+
+        q = "SELECT * FROM cotacao_tabela WHERE ativo=1"
+        params = []
+        if f_cidade:
+            q += " AND (COALESCE(cidade,'')='' OR LOWER(cidade)=LOWER(?))"
+            params.append(f_cidade)
+        if f_modalidade and f_modalidade.lower() != 'todos':
+            q += " AND LOWER(modalidade)=LOWER(?)"
+            params.append(f_modalidade)
+        if f_acomodacao and f_acomodacao.lower() != 'todos':
+            q += " AND LOWER(acomodacao)=LOWER(?)"
+            params.append(f_acomodacao)
+        if f_copart and f_copart.lower() != 'todos':
+            q += " AND LOWER(coparticipacao)=LOWER(?)"
+            params.append(f_copart)
+        if f_mei:
+            q += " AND (COALESCE(tipo_cnpj,'')='' OR LOWER(tipo_cnpj) IN ('todos','todos os portes','todos os tipos') OR LOWER(tipo_cnpj)=LOWER(?))"
+            params.append(f_mei)
+        if f_ops:
+            marc_ops = ','.join(['?'] * len(f_ops))
+            q += f" AND operadora IN ({marc_ops})"
+            params.extend(f_ops)
+
+        rows = conn.execute(q, params).fetchall()
+        t_ids = [r['id'] for r in rows]
+
+        precos_map = {}
+        if t_ids:
+            marc = ','.join(['?'] * len(t_ids))
+            for pr in conn.execute(f"SELECT tabela_id, faixa, preco FROM cotacao_preco WHERE tabela_id IN ({marc}) AND preco>0", t_ids).fetchall():
+                precos_map.setdefault(pr['tabela_id'], {})[pr['faixa']] = float(pr['preco'] or 0)
+
+        hoje_dt = datetime.now(TZ_SP)
+        hoje_date = hoje_dt.date()
+        hoje_ym = hoje_dt.strftime('%Y-%m')
+        
+        def _fx_min_idade(fx):
+            try:
+                return int(str(fx).split('-')[0].replace('+', '').strip())
+            except (ValueError, IndexError, TypeError):
+                return 0
+
+        logo_cache = {}
+        planos = []
+        for r in rows:
+            t = dict(r)
+            tid = t['id']
+            op = (t.get('operadora') or '').strip()
+            if op not in logo_cache:
+                logo_cache[op] = _logo_operadora_url(conn, op)
+
+            dt = _parse_dt_seguro(t.get('atualizado_em'))
+            vig = (t.get('vigencia') or '').strip()
+            vig_expirada = bool(vig and len(vig) >= 7 and vig[:7] < hoje_ym)
+
+            if dt is not None:
+                dias = max(0, (hoje_date - dt.date()).days)
+                frescor = 'velha' if (vig_expirada or dias > 21) else ('ok' if dias > 7 else 'fresca')
+            else:
+                dias = None
+                frescor = 'sem_data'
+
+            pmap = precos_map.get(tid, {})
+            precos_ok = len(pmap)
+            valid_fxs = [fx for fx, prc in pmap.items() if prc > 0]
+            idade_min = min([_fx_min_idade(fx) for fx in valid_fxs]) if valid_fxs else 0
+            menor_preco = min(pmap.values()) if pmap else float('inf')
+
+            planos.append({
+                "id": tid,
+                "operadora": op,
+                "entidade": t.get('entidade') or '',
+                "produto": t.get('produto') or t.get('plano') or '',
+                "linha": t.get('linha') or t.get('plano') or '',
+                "plano": t.get('plano') or '',
+                "logo": logo_cache[op],
+                "modalidade": t.get('modalidade') or '',
+                "acomodacao": t.get('acomodacao') or '',
+                "coparticipacao": t.get('coparticipacao') or '',
+                "cidade": t.get('cidade') or '',
+                "abrangencia": t.get('abrangencia') or '',
+                "vigencia": t.get('vigencia') or '',
+                "precos_ok": precos_ok,
+                "dias_atualizado": dias,
+                "frescor": frescor,
+                "idade_min": idade_min,
+                "_menor_preco": menor_preco
+            })
+
+        planos.sort(key=lambda x: (x['operadora'].lower(), x['_menor_preco'], x['plano'].lower()))
+        for p in planos:
+            p.pop('_menor_preco', None)
+
+        close_db(conn)
+        return jsonify({"ok": True, "planos": planos})
+    except Exception as e:
+        close_db(conn)
+        app.logger.warning(f"[COTACAO] bloco/planos falhou: {e}")
+        return jsonify({"ok": False, "erro": str(e)}), 500
+
+
+@app.route('/cotacao/bloco/calcular', methods=['POST'])
+@login_required
+def cotacao_bloco_calcular():
+    """Calcula cotação com a base local para a aba Cotar em /cotacao/novo sem chave de API."""
+    conn = db()
+    try:
+        d = request.get_json(silent=True) or {}
+        idades_raw = d.get('idades') or []
+        idades = []
+        if isinstance(idades_raw, list) and idades_raw:
+            for x in idades_raw[:60]:
+                try:
+                    i = int(x)
+                    if 0 <= i <= 120:
+                        idades.append(i)
+                except (TypeError, ValueError):
+                    pass
+        
+        if 'faixas' in d and not idades:
+            fx_val = d['faixas']
+            _rep_map = {'00-18': 5, '19-23': 20, '24-28': 25, '29-33': 30, '34-38': 35,
+                        '39-43': 40, '44-48': 45, '49-53': 50, '54-58': 55, '59+': 60}
+            if isinstance(fx_val, dict):
+                for fx, qtd in fx_val.items():
+                    try:
+                        q = int(qtd)
+                        rep = _rep_map.get(str(fx).strip())
+                        if q > 0 and rep is not None:
+                            idades.extend([rep] * q)
+                    except (TypeError, ValueError):
+                        pass
+            elif isinstance(fx_val, list):
+                for item in fx_val:
+                    if isinstance(item, dict):
+                        try:
+                            q = int(item.get('quantidade') or item.get('qtd') or 0)
+                            rep = _rep_map.get(str(item.get('faixa')).strip())
+                            if q > 0 and rep is not None:
+                                idades.extend([rep] * q)
+                        except (TypeError, ValueError):
+                            pass
+
+        if not idades:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": "Idades ou faixas obrigatórias"}), 400
+
+        pl = d.get('planos') or []
+        ids, recs = [], {}
+        for x in pl[:50]:
+            v = x.get('plano_id') if isinstance(x, dict) else x
+            try:
+                vi = int(v)
+                ids.append(vi)
+                if isinstance(x, dict) and x.get('recomendacao'):
+                    recs[vi] = x['recomendacao']
+            except (TypeError, ValueError):
+                pass
+        
+        if not ids:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": "Lista de planos obrigatória"}), 400
+
+        planos, total, dist, avisos = calcular_cotacao(conn, idades, ids, recs)
+        close_db(conn)
+        return jsonify({
+            "ok": True,
+            "vidas": len(idades),
+            "distribuicao": dist,
+            "resultados": planos,
+            "total_geral": total,
+            "avisos": avisos
+        })
+    except Exception as e:
+        close_db(conn)
+        app.logger.warning(f"[COTACAO] bloco/calcular falhou: {e}")
+        return jsonify({"ok": False, "erro": str(e)}), 500
+
+
+@app.route('/cotacao/bloco/salvas', methods=['GET'])
+@login_required
+def cotacao_bloco_salvas():
+    """Aba Cotações Salvas: devolve cotações em JSON."""
+    conn = db()
+    try:
+        eh_admin = session.get('perfil') == 'admin'
+        user_id = session.get('user_id')
+        q = (request.args.get('q') or '').strip()
+
+        base = "SELECT * FROM cotacao_salva WHERE 1=1"
+        params = []
+        if not eh_admin:
+            base += " AND corretor_id=?"; params.append(user_id)
+        if q:
+            base += " AND (LOWER(cliente_nome) LIKE ? OR LOWER(titulo) LIKE ? OR cliente_telefone LIKE ?)"
+            like = f"%{q.lower()}%"
+            params.extend([like, like, f"%{q}%"])
+        base += " ORDER BY id DESC"
+
+        rows = conn.execute(base, params).fetchall()
+        cots = []
+        for r in rows:
+            d = dict(r)
+            planos_cotados = 0
+            try:
+                pj = json.loads(d.get('planos_json') or '[]')
+                planos_cotados = len(pj)
+            except Exception:
+                pass
+            cots.append({
+                "id": d['id'],
+                "titulo": d.get('titulo') or '',
+                "cliente_nome": d.get('cliente_nome') or '',
+                "cliente_telefone": d.get('cliente_telefone') or '',
+                "cliente_email": d.get('cliente_email') or '',
+                "token": d.get('token') or '',
+                "criado_em": str(d.get('criado_em') or ''),
+                "planos_cotados": planos_cotados,
+                "valor_total": float(d.get('valor_total') or 0)
+            })
+
+        total = conn.execute(
+            "SELECT COUNT(*) c FROM cotacao_salva" + ("" if eh_admin else " WHERE corretor_id=?"),
+            ([] if eh_admin else [user_id])).fetchone()['c']
+
+        close_db(conn)
+        return jsonify({
+            "ok": True,
+            "eh_admin": eh_admin,
+            "total": total,
+            "cotacoes": cots
+        })
+    except Exception as e:
+        close_db(conn)
+        app.logger.warning(f"[COTACAO] bloco/salvas falhou: {e}")
+        return jsonify({"ok": False, "erro": str(e)}), 500
+
+
+@app.route('/cotacao/bloco/tabelas', methods=['GET'])
+@login_required
+@admin_required
+def cotacao_bloco_tabelas():
+    """Aba Tabelas de Preço (Admin): devolve lista de tabelas e watchlist em JSON."""
+    conn = db()
+    try:
+        rows = conn.execute("""
+            SELECT t.*, (SELECT COUNT(*) FROM cotacao_preco p WHERE p.tabela_id=t.id AND p.preco>0) AS precos_ok
+            FROM cotacao_tabela t ORDER BY t.operadora, t.plano
+        """).fetchall()
+
+        hoje_dt = datetime.now(TZ_SP)
+        hoje_date = hoje_dt.date()
+        hoje_ym = hoje_dt.strftime('%Y-%m')
+        tabelas, n_velhas = [], 0
+
+        for r in rows:
+            t = dict(r)
+            dt = _parse_dt_seguro(t.get('atualizado_em'))
+            vig = (t.get('vigencia') or '').strip()
+            vig_expirada = False
+            if vig and len(vig) >= 7 and vig[:7] < hoje_ym:
+                vig_expirada = True
+
+            if dt is not None:
+                dias = max(0, (hoje_date - dt.date()).days)
+                t['dias_atualizado'] = dias
+                if vig_expirada or dias > 21:
+                    t['frescor'] = 'velha'
+                elif dias > 7:
+                    t['frescor'] = 'ok'
+                else:
+                    t['frescor'] = 'fresca'
+            else:
+                t['dias_atualizado'] = None
+                t['frescor'] = 'sem_data'
+
+            if t['frescor'] in ('velha', 'sem_data'):
+                n_velhas += 1
+
+            tabelas.append({
+                "id": t['id'],
+                "operadora": t.get('operadora') or '',
+                "plano": t.get('plano') or '',
+                "entidade": t.get('entidade') or '',
+                "modalidade": t.get('modalidade') or '',
+                "acomodacao": t.get('acomodacao') or '',
+                "coparticipacao": t.get('coparticipacao') or '',
+                "cidade": t.get('cidade') or '',
+                "abrangencia": t.get('abrangencia') or '',
+                "vigencia": t.get('vigencia') or '',
+                "precos_ok": t.get('precos_ok') or 0,
+                "dias_atualizado": t['dias_atualizado'],
+                "frescor": t['frescor']
+            })
+
+        watchlist = [dict(w) for w in conn.execute(
+            "SELECT id, cidade, modalidade FROM cotacao_watchlist ORDER BY cidade, modalidade").fetchall()]
+
+        close_db(conn)
+        return jsonify({
+            "ok": True,
+            "n_velhas": n_velhas,
+            "tabelas": tabelas,
+            "watchlist": watchlist
+        })
+    except Exception as e:
+        close_db(conn)
+        app.logger.warning(f"[COTACAO] bloco/tabelas falhou: {e}")
+        return jsonify({"ok": False, "erro": str(e)}), 500
+
+
+@app.route('/cotacao/bloco/legendas', methods=['GET'])
+@login_required
+@admin_required
+def cotacao_bloco_legendas():
+    """Aba Modelos de Legenda (Admin): devolve lista de modelos em JSON."""
+    conn = db()
+    try:
+        modelos = [dict(r) for r in conn.execute("SELECT id, nome, corpo FROM cotacao_legenda_modelo ORDER BY id DESC").fetchall()]
+        close_db(conn)
+        return jsonify({"ok": True, "modelos": modelos})
+    except Exception as e:
+        close_db(conn)
+        app.logger.warning(f"[COTACAO] bloco/legendas falhou: {e}")
+        return jsonify({"ok": False, "erro": str(e)}), 500
 
 
 def _copart_texto(tb):
@@ -27827,16 +28299,33 @@ def _validar_precos_faixa(precos_job):
     return True, ''
 
 
+def _checar_auth_escrita_cotacao():
+    """Verifica permissão de escrita em tabelas de cotação.
+    Permite se:
+    1. Usuário admin estiver logado na sessão Web; OR
+    2. Header X-Cotacao-Key bater com a env COTACAO_WRITE_API_KEY (via hmac.compare_digest).
+    Se COTACAO_WRITE_API_KEY não estiver no ambiente, o acesso por chave fica desabilitado.
+    """
+    if session.get('user_id') and session.get('perfil') == 'admin':
+        return True
+    hdr_key = (request.headers.get('X-Cotacao-Key') or '').strip()
+    env_key = (os.environ.get('COTACAO_WRITE_API_KEY') or '').strip()
+    if hdr_key and env_key and hmac.compare_digest(hdr_key, env_key):
+        return True
+    return False
+
+
 @app.route('/cotacao/tabelas/importar-pdc', methods=['POST'])
-@login_required
-@admin_required
 def cotacao_importar_pdc():
     """Importa o JSON extraído do Painel do Corretor (scripts/pdc_extrator_console.js).
     Cada plano vira/atualiza uma linha em cotacao_tabela + os preços por faixa em
     cotacao_preco + a rede em cotacao_rede. Dedup por (operadora, plano,
-    modalidade, acomodacao, coparticipacao, cidade, tipo_cnpj) — re-subir o mesmo
+    modalidade, acomodacao, coparticipacao, cidade, tipo_cnpj, entidade) — re-subir o mesmo
     plano ATUALIZA (apaga preços/rede antigos e regrava), não duplica. Assim dá
     pra rodar de novo pra atualizar valores sem virar bagunça."""
+    if not _checar_auth_escrita_cotacao():
+        return jsonify({"ok": False, "erro": "Acesso negado: requer sessão admin ou X-Cotacao-Key válida"}), 403
+
     dados = request.get_json(silent=True)
     if dados is None:
         return jsonify({"ok": False, "erro": "Envie o JSON exportado pelo script do PDC"}), 400
@@ -27858,6 +28347,11 @@ def cotacao_importar_pdc():
     for p in planos:
         operadora = (p.get('operadora') or '').strip()
         plano = (p.get('plano') or '').strip()
+        entidade = (p.get('entidade') or '').strip()
+        admin_nome = (p.get('administradora_nome') or p.get('administradora') or '').strip()
+        if not operadora and admin_nome:
+            operadora = admin_nome
+
         precos = p.get('precos') or {}
         if not operadora or not plano or not precos:
             cont['ignorados'] += 1
@@ -27887,29 +28381,24 @@ def cotacao_importar_pdc():
 
         existente = conn.execute("""SELECT id FROM cotacao_tabela WHERE operadora=? AND plano=?
             AND modalidade=? AND acomodacao=? AND coparticipacao=? AND COALESCE(cidade,'')=?
-            AND COALESCE(tipo_cnpj,'')=?""",
-            (operadora, plano, modalidade, acomodacao, copart, cidade, tipo_cnpj)).fetchone()
+            AND COALESCE(tipo_cnpj,'')=? AND COALESCE(entidade,'')=?""",
+            (operadora, plano, modalidade, acomodacao, copart, cidade, tipo_cnpj, entidade)).fetchone()
         if existente:
             tid = existente['id']
             conn.execute("DELETE FROM cotacao_preco WHERE tabela_id=?", (tid,))
             conn.execute("DELETE FROM cotacao_rede WHERE tabela_id=?", (tid,))
-            # NÃO escrever cidade em abrangencia. Abrangência é Nacional /
-            # Estadual / Regional / Municipal — o alcance da cobertura. Cidade é
-            # onde a tabela vale. Gravar uma na outra faz o filtro de abrangência
-            # da tela virar uma lista de cidades, e some o alcance real do plano.
-            # Só sobrescreve abrangencia quando o extrator mandou de fato.
             if abrangencia:
-                conn.execute("UPDATE cotacao_tabela SET ativo=1, abrangencia=?, atualizado_em=? WHERE id=?",
-                             (abrangencia, agora, tid))
+                conn.execute("UPDATE cotacao_tabela SET ativo=1, abrangencia=?, entidade=?, atualizado_em=? WHERE id=?",
+                             (abrangencia, entidade, agora, tid))
             else:
-                conn.execute("UPDATE cotacao_tabela SET ativo=1, atualizado_em=? WHERE id=?",
-                             (agora, tid))
+                conn.execute("UPDATE cotacao_tabela SET ativo=1, entidade=?, atualizado_em=? WHERE id=?",
+                             (entidade, agora, tid))
             cont['planos_atualizados'] += 1
         else:
             conn.execute("""INSERT INTO cotacao_tabela
-                (operadora, plano, modalidade, acomodacao, coparticipacao, tipo_cnpj, cidade, abrangencia, ativo, atualizado_em)
-                VALUES (?,?,?,?,?,?,?,?,1,?)""",
-                (operadora, plano, modalidade, acomodacao, copart, tipo_cnpj, cidade, abrangencia, agora))
+                (operadora, plano, modalidade, acomodacao, coparticipacao, tipo_cnpj, cidade, abrangencia, entidade, ativo, atualizado_em)
+                VALUES (?,?,?,?,?,?,?,?,?,1,?)""",
+                (operadora, plano, modalidade, acomodacao, copart, tipo_cnpj, cidade, abrangencia, entidade, agora))
             tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                    else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
             cont['planos_novos'] += 1
@@ -27957,6 +28446,90 @@ def cotacao_watchlist_excluir(wid):
     conn.execute("DELETE FROM cotacao_watchlist WHERE id=?", (wid,))
     conn.commit(); close_db(conn)
     return jsonify({"ok": True})
+
+
+@app.route('/api/cotacao/status-tabelas', methods=['GET'])
+@login_required
+def api_cotacao_status_tabelas():
+    """Status consolidado do catálogo de tabelas, frescor e watchlist."""
+    conn = db()
+    try:
+        total = conn.execute("SELECT COUNT(*) c FROM cotacao_tabela").fetchone()['c']
+        ativas = conn.execute("SELECT COUNT(*) c FROM cotacao_tabela WHERE ativo=1").fetchone()['c']
+
+        # Completas: tabelas com 10 faixas em cotacao_preco
+        completas = conn.execute("""
+            SELECT COUNT(*) c FROM (
+                SELECT tabela_id FROM cotacao_preco GROUP BY tabela_id HAVING COUNT(*) >= 10
+            ) t
+        """).fetchone()['c']
+
+        agora_dt = datetime.now(TZ_SP)
+        tabelas = conn.execute("SELECT id, operadora, vigencia, atualizado_em FROM cotacao_tabela WHERE ativo=1").fetchall()
+        frescor = {"fresca": 0, "ok": 0, "velha": 0, "sem_data": 0}
+        ops_dict = {}
+        ult_sinc = None
+
+        for t in tabelas:
+            op = (t['operadora'] or 'Outras').strip()
+            if op not in ops_dict:
+                ops_dict[op] = {'tabelas': 0, 'mais_velha_dias': 0}
+            ops_dict[op]['tabelas'] += 1
+
+            dt_at = _parse_dt_seguro(t['atualizado_em'])
+            vig = (t['vigencia'] or '').strip()
+            vig_expirada = False
+            if vig and len(vig) >= 7:
+                hoje_ym = agora_dt.strftime('%Y-%m')
+                if vig[:7] < hoje_ym:
+                    vig_expirada = True
+
+            if dt_at:
+                if dt_at.tzinfo is None:
+                    dt_at = TZ_SP.localize(dt_at)
+                if ult_sinc is None or dt_at > ult_sinc:
+                    ult_sinc = dt_at
+                dias = (agora_dt - dt_at).days
+                if dias > ops_dict[op]['mais_velha_dias']:
+                    ops_dict[op]['mais_velha_dias'] = dias
+
+                if vig_expirada or dias > 21:
+                    frescor['velha'] += 1
+                elif dias > 7:
+                    frescor['ok'] += 1
+                else:
+                    frescor['fresca'] += 1
+            else:
+                frescor['sem_data'] += 1
+
+        operadoras = [{'nome': k, 'tabelas': v['tabelas'], 'mais_velha_dias': v['mais_velha_dias']}
+                      for k, v in sorted(ops_dict.items(), key=lambda x: x[0])]
+
+        w_rows = conn.execute("SELECT cidade, modalidade FROM cotacao_watchlist ORDER BY id").fetchall()
+        watchlist = []
+        for w in w_rows:
+            cid, mod = (w['cidade'] or '').strip(), (w['modalidade'] or '').strip()
+            cnt = conn.execute("""
+                SELECT COUNT(*) c FROM cotacao_tabela
+                WHERE ativo=1 AND COALESCE(cidade,'')=? AND COALESCE(modalidade,'')=?
+            """, (cid, mod)).fetchone()['c']
+            watchlist.append({'cidade': cid, 'modalidade': mod, 'tabelas': cnt})
+
+        close_db(conn)
+        return jsonify({
+            "ok": True,
+            "total": total,
+            "ativas": ativas,
+            "completas": completas,
+            "frescor": frescor,
+            "ultima_sincronizacao": ult_sinc.isoformat() if ult_sinc else None,
+            "operadoras": operadoras,
+            "watchlist": watchlist
+        })
+    except Exception as e:
+        close_db(conn)
+        app.logger.warning(f"[COTACAO] status-tabelas falhou: {e}")
+        return jsonify({"ok": False, "erro": str(e)}), 500
 
 
 @app.route('/cotacao/watchlist.json')
@@ -28510,14 +29083,9 @@ def material_apoio_pasta_excluir():
 def calcular_cotacao(conn, idades, plano_ids, recomendacoes=None):
     """MOTOR DE CÁLCULO, fora da rota HTML.
 
-    Estava embutido em /cotacao/salvar, misturado com request.form e redirect —
-    o que obrigaria a API a ser uma CÓPIA. Duas cópias divergem: um dia alguém
-    corrige um arredondamento de um lado só e o preço da tela deixa de bater com
-    o da API.
-
-    Devolve (planos, total_geral, distribuicao, avisos). `avisos` existe porque
-    tabela incompleta NÃO PODE virar preço zero silencioso: numa tela alguém
-    estranha, numa API vira proposta errada mandada pro cliente.
+    Elimina N+1 de consultas no Postgres: busca todas as tabelas e preços em lote
+    (2 queries no total) em vez de 2 queries por plano no loop.
+    Devolve (planos, total_geral, distribuicao, avisos).
     """
     recomendacoes = recomendacoes or {}
     avisos = []
@@ -28529,8 +29097,20 @@ def calcular_cotacao(conn, idades, plano_ids, recomendacoes=None):
     hoje = datetime.now(TZ_SP).strftime('%Y-%m')
     planos, total_geral = [], 0.0
     rec_map = {'1a': '1ª opção', '2a': '2ª opção', '3a': '3ª opção'}
-    for tid in plano_ids:
-        t = conn.execute("SELECT * FROM cotacao_tabela WHERE id=?", (tid,)).fetchone()
+
+    v_ids = [int(tid) for tid in plano_ids if isinstance(tid, (int, str)) and str(tid).isdigit()]
+    if not v_ids:
+        return [], 0.0, cont, avisos
+
+    marc = ','.join(['?'] * len(v_ids))
+    tabelas_map = {r['id']: r for r in conn.execute(f"SELECT * FROM cotacao_tabela WHERE id IN ({marc})", v_ids).fetchall()}
+    precos_raw = conn.execute(f"SELECT tabela_id, faixa, preco FROM cotacao_preco WHERE tabela_id IN ({marc})", v_ids).fetchall()
+    precos_map = {}
+    for pr in precos_raw:
+        precos_map.setdefault(pr['tabela_id'], {})[pr['faixa']] = float(pr['preco'] or 0)
+
+    for tid in v_ids:
+        t = tabelas_map.get(tid)
         if not t:
             avisos.append({'plano_id': tid, 'codigo': 'plano_inexistente',
                            'mensagem': 'Plano não encontrado'})
@@ -28539,29 +29119,33 @@ def calcular_cotacao(conn, idades, plano_ids, recomendacoes=None):
         if vig and len(vig) >= 7 and vig[:7] < hoje:
             avisos.append({'plano_id': tid, 'codigo': 'vigencia_expirada',
                            'mensagem': f"Tabela de {t['operadora']} · {t['plano']} venceu em {vig[:7]}"})
-        pmap = {p['faixa']: float(p['preco'] or 0) for p in
-                conn.execute("SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (tid,)).fetchall()}
+        pmap = precos_map.get(tid, {})
         linhas, total = [], 0.0
+        elegivel = True
         for fx in FAIXAS_ETARIAS:
             qtd = cont.get(fx, 0)
             if qtd <= 0:
                 continue
             ausente = fx not in pmap
             if ausente:
+                elegivel = False
                 avisos.append({'plano_id': tid, 'codigo': 'preco_ausente',
                                'mensagem': f"{t['operadora']} · {t['plano']} não tem preço na faixa "
-                                           f"{fx} — {qtd} vida(s) entraram como zero"})
+                                           f"{fx} — {qtd} vida(s) não cobertas"})
             preco = pmap.get(fx, 0)
             sub = preco * qtd
             total += sub
             linhas.append({'faixa': fx, 'label': _faixa_label(fx), 'qtd': qtd,
                            'preco': preco, 'subtotal': round(sub, 2), 'preco_ausente': ausente})
-        total_geral += total
+        if elegivel:
+            total_geral += total
         planos.append({
             'plano_id': tid, 'operadora': t['operadora'], 'plano': t['plano'],
+            'entidade': t['entidade'] if 'entidade' in t.keys() else '',
             'modalidade': t['modalidade'], 'acomodacao': t['acomodacao'],
             'coparticipacao': t['coparticipacao'], 'abrangencia': t['abrangencia'],
             'vigencia': t['vigencia'], 'linhas': linhas, 'total': round(total, 2),
+            'elegivel': elegivel,
             'recomendacao': rec_map.get((recomendacoes.get(tid) or '').strip(), ''),
         })
     return planos, round(total_geral, 2), cont, avisos
@@ -28570,23 +29154,18 @@ def calcular_cotacao(conn, idades, plano_ids, recomendacoes=None):
 def registrar_cotacao_no_lead(conn, lead_id, cid, planos, total_geral, idades, titulo=''):
     """Fecha o ultimo pedaco solto: a cotacao passa a escrever no lead.
 
-    Ate aqui montar uma cotacao nao mexia em nada do CRM. O consultor cotava, o
-    cliente recebia, e no lead continuava valor estimado zerado, operadora em
-    branco e nenhuma linha na timeline. Quem olhasse o funil nao sabia que aquele
-    lead ja tinha proposta na mao — que e justamente o lead mais quente que
-    existe.
-
-    Regra de sempre: preenche buraco, nao corrige consultor (so_se_vazio)."""
+    Regra de sempre: preenche buraco, nao corrige consultor (so_se_vazio).
+    Filtra planos não elegíveis (faixa de idade sem preço) para não eleger
+    erroneamente um plano incompleto como "mais barato"."""
     if not lead_id or not planos:
         return []
     escrito = []
     try:
-        # Valor do lead = o da 1a opcao quando o consultor recomendou uma; senao o
-        # MENOR. Nao a soma dos planos: sao alternativas, o cliente leva uma so —
-        # somar inflaria o pipeline inteiro com dinheiro que nao existe.
-        rec = next((p for p in planos if (p.get('recomendacao') or '').startswith('1')), None)
-        alvo = rec or min(planos, key=lambda p: p.get('total') or 0)
-        valor = float(alvo.get('total') or 0)
+        # Considera apenas planos elegíveis (onde elegivel=True) e com total > 0
+        planos_validos = [p for p in planos if p.get('elegivel', True) and (p.get('total') or 0) > 0]
+        rec = next((p for p in planos_validos if (p.get('recomendacao') or '').startswith('1')), None)
+        alvo = rec or (min(planos_validos, key=lambda p: p.get('total') or 0) if planos_validos else None)
+        valor = float(alvo.get('total') or 0) if alvo else 0.0
         if valor > 0:
             atual = conn.execute("SELECT valor_estimado FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
             if atual and not (atual['valor_estimado'] or 0):

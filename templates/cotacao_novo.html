@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Cotação ao vivo{% endblock %}
+{% block title %}Cotação{% endblock %}
 
 {% block head %}
 <style>
@@ -36,6 +36,75 @@
   .cv-aviso li { margin:3px 0; }
   .cv-salva { margin:0 0 14px; padding:10px 14px; border-radius:10px; font-size:12.5px;
     background:var(--panel-2); border:1px solid var(--borda); color:var(--cinza); }
+
+  /* ── Abas do módulo ───────────────────────────────────────────────────────
+     Quatro telas viraram uma. A barra nasce do mesmo segmentado da coluna da
+     esquerda de propósito — o consultor já aprendeu esse gesto ali, e repetir
+     um padrão que ele conhece custa menos que ensinar um novo.
+     Diferença: aqui é navegação, não filtro. Por isso a barra ocupa a largura
+     toda e fica acima de tudo, onde se lê "onde eu estou".
+     Cotar é a primeira e a padrão porque é a razão da tela existir; as outras
+     três são consulta e manutenção, e só carregam quando pedidas. */
+  .cv-abas { display:flex; gap:3px; padding:3px; border-radius:12px; margin:0 0 18px;
+    background:var(--panel-2); border:1px solid var(--borda); overflow-x:auto; }
+  .cv-abas button { flex:1; min-width:104px; padding:10px 14px; border:none; border-radius:9px;
+    cursor:pointer; background:none; color:var(--cinza); font-size:13px; font-weight:650;
+    font-family:inherit; white-space:nowrap; transition:background .15s, color .15s; }
+  .cv-abas button:hover { color:var(--texto); }
+  .cv-abas button.on { background:var(--panel); color:var(--texto);
+    box-shadow:0 1px 3px rgba(0,0,0,.16); }
+  [data-theme="light"] .cv-abas button.on { box-shadow:0 1px 3px rgba(0,0,0,.09); }
+  .cv-abas button.on::after { content:''; display:block; height:2px; margin:7px auto -3px;
+    width:20px; border-radius:2px; background:var(--grad-frio); }
+  .cv-abas .cont { display:inline-block; margin-left:7px; padding:1px 7px; border-radius:20px;
+    font-size:10.5px; font-weight:700; background:var(--borda-2); color:var(--cinza); }
+  .cv-abas button.on .cont { background:var(--azul); color:#fff; }
+
+  .cv-painel { display:none; }
+  .cv-painel.ver { display:block; }
+
+  /* Estado de carga e de falha dos painéis. A falha é AMARELA e diz que não
+     conseguiu ler — nunca desenha lista vazia, porque lista vazia significa
+     "não tem nada", que é uma afirmação diferente de "não consegui saber". */
+  .cv-carregando { padding:30px 4px; text-align:center; color:var(--cinza-2); font-size:13px; }
+  .cv-falha { padding:16px 18px; border-radius:12px; font-size:13px; line-height:1.6;
+    border:1px solid var(--laranja); background:rgba(251,146,60,.1); }
+  .cv-falha b { color:var(--texto); }
+  .cv-falha a { color:var(--azul); }
+  .cv-vazio { padding:34px 4px; text-align:center; color:var(--cinza-2); font-size:13px; }
+
+  .cv-painel-topo { display:flex; align-items:flex-start; justify-content:space-between;
+    gap:16px; flex-wrap:wrap; margin:0 0 16px; }
+  .cv-painel-topo h2 { margin:0 0 3px; font-size:19px; letter-spacing:-.3px; }
+  .cv-painel-topo p { margin:0; font-size:12.5px; color:var(--cinza); max-width:64ch; line-height:1.5; }
+  .cv-painel-acoes { display:flex; gap:7px; flex-wrap:wrap; }
+
+  /* Tabela e botõezinhos de linha: vieram de cotacao_salvas.html e
+     cotacao_tabelas.html, onde estavam definidos DENTRO de cada arquivo. Ao
+     fundir as telas eles precisavam vir junto, senão a lista renderiza crua.
+     Mesmos nomes de classe de propósito — é a mesma peça, e duplicar com outro
+     nome é como um sistema fica remendado. */
+  table.cot { width:100%; border-collapse:collapse; font-size:13px; background:var(--panel);
+    border:1px solid var(--borda); border-radius:12px; overflow:hidden; }
+  table.cot th { text-align:left; color:var(--cinza-2); font-size:10px; text-transform:uppercase;
+    letter-spacing:.5px; font-weight:600; padding:12px 14px; border-bottom:1px solid var(--borda);
+    background:var(--panel-2); }
+  table.cot td { padding:13px 14px; border-bottom:1px solid var(--borda); color:var(--texto);
+    vertical-align:middle; font-variant-numeric:tabular-nums; }
+  table.cot tr:last-child td { border-bottom:none; }
+  table.cot tr:hover td { background:rgba(255,255,255,.02); }
+  [data-theme="light"] table.cot tr:hover td { background:rgba(0,0,0,.02); }
+  .cv-painel .b { border:1px solid var(--borda); background:transparent; border-radius:7px;
+    padding:6px 11px; font-size:11px; cursor:pointer; text-decoration:none; color:var(--texto);
+    font-family:inherit; }
+  .cv-painel .b:hover { border-color:var(--borda-2); }
+  .cv-painel .b:disabled { opacity:.55; cursor:default; }
+  /* Destrutivo é a única cor diferente da linha, e vem depois de um vão — o
+     clique acidental em Excluir custa o link que o cliente já recebeu. */
+  .cv-painel .b-del { color:var(--erro); border-color:rgba(244,63,94,.3); }
+
+  /* A tabela larga rola dentro dela mesma; a página nunca anda de lado. */
+  #corpoSalvas, #corpoTabelas { overflow-x:auto; }
 
   .cv-tela { display:grid; grid-template-columns:288px 1fr; gap:26px; align-items:start; }
   @media (max-width:960px) { .cv-tela { grid-template-columns:1fr; } }
@@ -276,11 +345,44 @@
 
 {% block content %}
 <div class="page">
+<!-- O título e o subtítulo descrevem A TELA, e a tela agora é o módulo inteiro.
+     Estava escrito aqui "o JOB não guarda tabela, então não existe tabela
+     desatualizada" — frase verdadeira quando esta página só cotava ao vivo, e
+     que passou a se contradizer sozinha no instante em que ganhou uma aba
+     chamada Tabelas de preço listando tabelas vencidas.
+     A explicação de como o preço é buscado desceu para dentro da aba Cotar,
+     que é onde ela é verdade. O selo da extensão foi junto pelo mesmo motivo:
+     ele só diz respeito a cotar, e ficava alarmando quem estava só olhando
+     cotação salva. -->
 <div class="cv-topo">
   <div>
-    <h1>Cotação ao vivo</h1>
-    <p>Preço do Painel do Corretor na hora, pela sua própria sessão. O JOB não guarda
-       tabela — então não existe tabela desatualizada aqui.</p>
+    <h1>Cotação</h1>
+    <p>Montar o comparativo, reenviar o que já foi cotado e cuidar da base de
+       preço — tudo em um lugar só.</p>
+  </div>
+</div>
+
+<!-- ── Abas: quatro telas viraram uma ──────────────────────────────────────
+     Cotar é a atual, inteira e sem mexer no fluxo. Salvas, Tabelas e Legendas
+     eram /cotacao/salvas, /cotacao/tabelas e /cotacao/legendas.
+     Tabelas e Legendas são de admin — e a checagem aqui só ESCONDE o botão. A
+     que vale é a do servidor, que responde 403. Esconder no template é
+     conveniência, nunca segurança. -->
+<div class="cv-abas" id="abas" role="tablist">
+  <button type="button" class="on" data-aba="cotar" role="tab">Cotar</button>
+  <button type="button" data-aba="salvas" role="tab">Cotações salvas<span class="cont" id="contSalvas" style="display:none"></span></button>
+  {% if session.perfil == 'admin' %}
+  <button type="button" data-aba="tabelas" role="tab">Tabelas de preço<span class="cont" id="contVelhas" style="display:none"></span></button>
+  <button type="button" data-aba="legendas" role="tab">Legendas</button>
+  {% endif %}
+</div>
+
+<div class="cv-painel ver" id="pnCotar" role="tabpanel">
+
+<div class="cv-painel-topo" style="margin-bottom:14px">
+  <div>
+    <p style="margin:0">Preço buscado no Painel do Corretor na hora, pela sua própria
+       sessão — por isso depende da extensão estar ligada.</p>
   </div>
   <div id="sinal" class="cv-sinal"><i class="bolinha"></i><span>verificando…</span></div>
 </div>
@@ -390,6 +492,67 @@
     <div id="resultado"></div>
   </main>
 </div>
+
+</div><!-- /#pnCotar -->
+
+<!-- ── Cotações salvas ─────────────────────────────────────────────────────
+     Era /cotacao/salvas. O consultor volta aqui pra reenviar link pro cliente,
+     não pra administrar registro — por isso Copiar link e WhatsApp vêm antes,
+     e Excluir fica separado do resto (ação destrutiva longe da confirmação). -->
+<div class="cv-painel" id="pnSalvas" role="tabpanel">
+  <div class="cv-painel-topo">
+    <div>
+      <h2>Cotações salvas</h2>
+      <p>O que já foi montado e enviado. O link de cada uma é permanente — o
+         cliente abre a mesma página hoje ou daqui a um mês.</p>
+    </div>
+    <div class="cv-painel-acoes">
+      <input type="text" id="buscaSalvas" placeholder="Nome ou telefone do cliente…"
+             style="background:var(--panel);border:1px solid var(--borda-2);border-radius:10px;
+                    padding:9px 13px;color:var(--texto);font-size:13px;font-family:inherit;outline:none;min-width:220px;">
+    </div>
+  </div>
+  <div id="corpoSalvas"><div class="cv-carregando">Carregando…</div></div>
+</div>
+
+{% if session.perfil == 'admin' %}
+<!-- ── Tabelas de preço (admin) ────────────────────────────────────────────
+     Era /cotacao/tabelas. É a tela de manutenção do cache: é daqui que se vê
+     se o preço que o corretor está mostrando ao cliente ainda vale.
+     Envolvido no mesmo `if` do botão: sem isso o painel ficava no HTML de todo
+     mundo como marcação morta. A trava que vale continua sendo a do servidor. -->
+<div class="cv-painel" id="pnTabelas" role="tabpanel">
+  <div class="cv-painel-topo">
+    <div>
+      <h2>Tabelas de preço</h2>
+      <p>A base de onde a cotação sai. Cada tabela mostra há quantos dias o preço
+         foi conferido pela última vez — é isso que separa uma cotação confiável
+         de um número velho enviado ao cliente.</p>
+    </div>
+    <div class="cv-painel-acoes">
+      <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas/nova'">Nova tabela</button>
+      <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas/importar-pdf'">Importar PDF</button>
+      <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas/importar'">Importar CSV</button>
+      <button class="btn-outline btn-sm" onclick="location.href='/cotacao/operadoras-logos'">Logos</button>
+    </div>
+  </div>
+  <div id="corpoTabelas"><div class="cv-carregando">Carregando…</div></div>
+</div>
+
+<!-- ── Legendas (admin) ────────────────────────────────────────────────────
+     Era /cotacao/legendas. Texto que acompanha a cotação quando ela vai pro
+     cliente. O formulário continua postando pra mesma rota de sempre. -->
+<div class="cv-painel" id="pnLegendas" role="tabpanel">
+  <div class="cv-painel-topo">
+    <div>
+      <h2>Modelos de legenda</h2>
+      <p>O texto que vai junto quando a cotação é enviada. Escrever uma vez aqui
+         evita reescrever a cada envio.</p>
+    </div>
+  </div>
+  <div id="corpoLegendas"><div class="cv-carregando">Carregando…</div></div>
+</div>
+{% endif %}
 
 </div><!-- /.page -->
 
@@ -1415,6 +1578,342 @@
   recomecar(true);
   if (SALVA) desenhar({ planos: SALVA, ms: 0, planosCotados: SALVA.length });
   conferirLigacao();
+})();
+</script>
+
+<script>
+/* ═══ ABAS DO MÓDULO ═══════════════════════════════════════════════════════
+   Bloco PRÓPRIO, de propósito. O motor de cotar acima é o que dá dinheiro e
+   está funcionando — não se mexe nele para acrescentar navegação. Este código
+   não compartilha uma variável sequer com ele.
+
+   Regra que atravessa o arquivo inteiro: consulta que falha NUNCA vira lista
+   vazia na tela. Lista vazia afirma "não tem nada"; falha afirma "não consegui
+   saber". São coisas diferentes e o consultor precisa distinguir — foi
+   exatamente confundir as duas que gerou o painel da Meta mostrando zeros que
+   nunca foram medidos.
+
+   Enquanto as rotas /cotacao/bloco/* não existirem no backend, cada painel cai
+   no aviso honesto com link para a tela antiga. A tela já serve hoje e melhora
+   sozinha quando o backend chegar. */
+(function () {
+  var el = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  };
+  var moeda = function (v) {
+    return (v == null || v === '') ? '—' : 'R$ ' + Number(v).toLocaleString('pt-BR',
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  // Vigência chega em dois formatos: data cheia ("2026-08-01 00:00:00", que é o
+  // que está gravado nas 46 tabelas da Porto) e ano-mês ("2026-12", que é como o
+  // extrator manda). Os dois têm que virar data legível — sem isso o ano-mês
+  // aparecia cru na tela, no meio de datas em pt-BR.
+  var dataBr = function (s) {
+    if (!s) return '—';
+    var d = String(s).slice(0, 10).split('-');
+    if (d.length >= 3) return d[2].slice(0, 2) + '/' + d[1] + '/' + d[0];
+    if (d.length === 2) return d[1] + '/' + d[0];
+    return String(s).slice(0, 10);
+  };
+
+  var PAINEL = { cotar: 'pnCotar', salvas: 'pnSalvas', tabelas: 'pnTabelas', legendas: 'pnLegendas' };
+  var ANTIGA = { salvas: '/cotacao/salvas', tabelas: '/cotacao/tabelas', legendas: '/cotacao/legendas' };
+  var carregado = {};
+
+  /* ── Navegação ─────────────────────────────────────────────────────────── */
+  function trocar(aba, semHash) {
+    if (!PAINEL[aba]) aba = 'cotar';
+    var bt = document.querySelector('#abas button[data-aba="' + aba + '"]');
+    if (!bt) aba = 'cotar';                       // aba de admin pedida por quem não é
+    Object.keys(PAINEL).forEach(function (k) {
+      var p = el(PAINEL[k]);
+      if (p) p.classList.toggle('ver', k === aba);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('#abas button'), function (b) {
+      b.classList.toggle('on', b.dataset.aba === aba);
+      b.setAttribute('aria-selected', b.dataset.aba === aba ? 'true' : 'false');
+    });
+    if (!semHash) history.replaceState(null, '', aba === 'cotar' ? location.pathname : '#' + aba);
+    if (aba !== 'cotar' && !carregado[aba]) carregar(aba);
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('#abas button'), function (b) {
+    b.addEventListener('click', function () { trocar(b.dataset.aba); });
+  });
+
+  /* ── Busca ao servidor, com falha que fala ──────────────────────────────── */
+  function falha(alvo, aba, motivo) {
+    var link = ANTIGA[aba] ? ' Enquanto isso, a tela antiga continua no ar: ' +
+      '<a href="' + ANTIGA[aba] + '">abrir ' + esc(aba) + '</a>.' : '';
+    el(alvo).innerHTML = '<div class="cv-falha"><b>Não foi possível carregar.</b> ' +
+      esc(motivo) + link + '</div>';
+  }
+
+  function carregar(aba) {
+    var alvo = { salvas: 'corpoSalvas', tabelas: 'corpoTabelas', legendas: 'corpoLegendas' }[aba];
+    var url = { salvas: '/cotacao/bloco/salvas', tabelas: '/cotacao/bloco/tabelas',
+                legendas: '/cotacao/bloco/legendas' }[aba];
+    if (aba === 'salvas') {
+      var q = (el('buscaSalvas').value || '').trim();
+      if (q) url += '?q=' + encodeURIComponent(q);
+    }
+    el(alvo).innerHTML = '<div class="cv-carregando">Carregando…</div>';
+    fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) {
+        if (r.status === 403) throw new Error('Esta aba é de administrador.');
+        if (r.status === 404) throw new Error('A rota ainda não existe no servidor.');
+        if (!r.ok) throw new Error('O servidor respondeu ' + r.status + '.');
+        return r.json();
+      })
+      .then(function (d) {
+        // ok:false é resposta legítima do contrato — o servidor tentou e não conseguiu.
+        if (!d || d.ok !== true) throw new Error((d && d.erro) || 'Resposta fora do formato esperado.');
+        ({ salvas: verSalvas, tabelas: verTabelas, legendas: verLegendas })[aba](d);
+        carregado[aba] = true;
+      })
+      .catch(function (e) { falha(alvo, aba, e.message || 'Erro de rede.'); });
+  }
+
+  /* ── Cotações salvas ───────────────────────────────────────────────────── */
+  function verSalvas(d) {
+    var lista = d.cotacoes || [];
+    var c = el('contSalvas');
+    if (c && d.total) { c.textContent = d.total; c.style.display = ''; }
+    if (!lista.length) {
+      el('corpoSalvas').innerHTML = '<div class="cv-vazio">Nenhuma cotação salva ainda. ' +
+        'As que você montar na aba Cotar aparecem aqui.</div>';
+      return;
+    }
+    var h = '<table class="cot"><thead><tr><th>Cliente</th><th>Cotação</th>' +
+            '<th>Planos</th><th>Valor</th><th>Quando</th><th></th></tr></thead><tbody>';
+    lista.forEach(function (x) {
+      h += '<tr>' +
+        '<td><b>' + esc(x.cliente_nome || '(sem nome)') + '</b>' +
+          (x.cliente_telefone ? '<br><span style="color:var(--cinza-2);font-size:11px">' +
+            esc(x.cliente_telefone) + '</span>' : '') + '</td>' +
+        '<td>' + esc(x.titulo || '—') + '</td>' +
+        '<td>' + (x.planos_cotados || 0) + '</td>' +
+        '<td>' + moeda(x.valor_total) + '</td>' +
+        '<td>' + dataBr(x.criado_em) + '</td>' +
+        '<td style="white-space:nowrap">' +
+          (x.token ? '<button class="b" data-ac="link" data-t="' + esc(x.token) + '">Copiar link</button>' : '') +
+          (x.token && x.cliente_telefone ? '<button class="b" data-ac="wpp" data-t="' + esc(x.token) +
+            '" data-tel="' + esc(x.cliente_telefone) + '" data-n="' + esc(x.cliente_nome || '') + '">WhatsApp</button>' : '') +
+          '<button class="b" data-ac="doc" data-id="' + x.id + '">Abrir</button>' +
+          '<span style="display:inline-block;width:14px"></span>' +
+          '<button class="b b-del" data-ac="del" data-id="' + x.id +
+            '" data-n="' + esc(x.cliente_nome || x.titulo || '') + '">Excluir</button>' +
+        '</td></tr>';
+    });
+    el('corpoSalvas').innerHTML = h + '</tbody></table>';
+  }
+
+  // Busca com respiro: não dispara a cada tecla.
+  var tBusca = null;
+  var cxBusca = el('buscaSalvas');
+  if (cxBusca) cxBusca.addEventListener('input', function () {
+    clearTimeout(tBusca);
+    tBusca = setTimeout(function () { carregado.salvas = false; carregar('salvas'); }, 400);
+  });
+
+  /* ── Tabelas de preço ──────────────────────────────────────────────────── */
+  var SELO = {
+    fresca:   { t: 'conferida esta semana', cor: 'var(--verde)' },
+    ok:       { t: 'conferida há pouco',    cor: 'var(--laranja)' },
+    velha:    { t: 'precisa conferir',      cor: 'var(--rosa)' },
+    sem_data: { t: 'nunca conferida',       cor: 'var(--cinza-2)' }
+  };
+
+  function verTabelas(d) {
+    var lista = d.tabelas || [];
+    var c = el('contVelhas');
+    if (c && d.n_velhas) { c.textContent = d.n_velhas; c.style.display = ''; }
+
+    var h = '';
+    if (d.n_velhas) {
+      h += '<div class="cv-falha" style="margin-bottom:16px"><b>' + d.n_velhas +
+        ' tabela(s) com preço a conferir.</b> Cotação feita com elas pode sair com valor ' +
+        'vencido — e o link enviado ao cliente é permanente, não dá pra corrigir depois.</div>';
+    }
+
+    // Watchlist: quais cidades ficam quentes.
+    h += '<div class="cv-painel-topo" style="margin-bottom:10px"><div>' +
+      '<h2 style="font-size:15px">Cidades que ficam atualizadas</h2>' +
+      '<p>A sincronização usa esta lista para saber o que manter fresco.</p></div></div>' +
+      '<div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:22px">';
+    (d.watchlist || []).forEach(function (w) {
+      h += '<span style="display:inline-flex;align-items:center;gap:7px;padding:6px 11px;' +
+        'border-radius:20px;background:var(--panel-2);border:1px solid var(--borda);font-size:12px">' +
+        esc(w.cidade) + ' · ' + esc(w.modalidade) +
+        '<button data-ac="wldel" data-id="' + w.id + '" title="Remover" style="background:none;' +
+        'border:none;color:var(--erro);cursor:pointer;font-size:15px;line-height:1;padding:0">&times;</button></span>';
+    });
+    if (!(d.watchlist || []).length) {
+      h += '<span style="color:var(--cinza-2);font-size:12.5px">Nenhuma cidade marcada ainda.</span>';
+    }
+    h += '</div>';
+
+    if (!lista.length) {
+      h += '<div class="cv-vazio">Nenhuma tabela cadastrada.</div>';
+      el('corpoTabelas').innerHTML = h;
+      return;
+    }
+    h += '<table class="cot"><thead><tr><th>Operadora</th><th>Plano</th><th>Onde vale</th>' +
+         '<th>Faixas</th><th>Preço conferido</th><th></th></tr></thead><tbody>';
+    lista.forEach(function (t) {
+      var s = SELO[t.frescor] || SELO.sem_data;
+      var dias = (t.dias_atualizado == null) ? 'sem data'
+               : (t.dias_atualizado === 0 ? 'hoje' : 'há ' + t.dias_atualizado + ' dia(s)');
+      h += '<tr>' +
+        '<td><b>' + esc(t.operadora || '—') + '</b>' +
+          (t.entidade ? '<br><span style="color:var(--cinza-2);font-size:11px">' +
+            esc(t.entidade) + '</span>' : '') + '</td>' +
+        '<td>' + esc(t.plano || '—') +
+          '<br><span style="color:var(--cinza-2);font-size:11px">' +
+          esc([t.modalidade, t.acomodacao, t.coparticipacao].filter(Boolean).join(' · ')) + '</span></td>' +
+        '<td>' + esc(t.cidade || t.abrangencia || '—') + '</td>' +
+        '<td>' + (t.precos_ok || 0) + ' de 10</td>' +
+        '<td><span style="display:inline-flex;align-items:center;gap:7px">' +
+          '<i style="width:7px;height:7px;border-radius:50%;background:' + s.cor + ';flex:none"></i>' +
+          esc(dias) + '</span>' +
+          '<br><span style="color:var(--cinza-2);font-size:11px">' + esc(s.t) +
+          (t.vigencia ? ' · vigência ' + dataBr(t.vigencia) : '') + '</span></td>' +
+        '<td style="white-space:nowrap">' +
+          '<a class="b" href="/cotacao/tabelas/' + t.id + '/editar" style="text-decoration:none">Editar</a>' +
+          '<span style="display:inline-block;width:14px"></span>' +
+          '<button class="b b-del" data-ac="tdel" data-id="' + t.id +
+            '" data-n="' + esc((t.operadora || '') + ' · ' + (t.plano || '')) + '">Excluir</button>' +
+        '</td></tr>';
+    });
+    el('corpoTabelas').innerHTML = h + '</tbody></table>';
+  }
+
+  /* ── Legendas ──────────────────────────────────────────────────────────── */
+  function verLegendas(d) {
+    var lista = d.modelos || [];
+    var h = '<form method="POST" action="/cotacao/legendas/salvar" id="fmLeg" ' +
+      'style="background:var(--panel-2);border:1px solid var(--borda);border-radius:12px;padding:16px;margin-bottom:22px">' +
+      '<input type="hidden" name="id" id="legId">' +
+      '<div style="margin-bottom:10px"><input type="text" name="nome" id="legNome" required ' +
+        'placeholder="Nome do modelo (ex: Primeiro contato)" style="width:100%;background:var(--panel);' +
+        'border:1px solid var(--borda-2);border-radius:10px;padding:11px 13px;color:var(--texto);' +
+        'font-size:13px;font-family:inherit;outline:none"></div>' +
+      '<div style="margin-bottom:12px"><textarea name="corpo" id="legCorpo" rows="4" required ' +
+        'placeholder="O texto que vai junto com a cotação…" style="width:100%;background:var(--panel);' +
+        'border:1px solid var(--borda-2);border-radius:10px;padding:11px 13px;color:var(--texto);' +
+        'font-size:13px;font-family:inherit;outline:none;resize:vertical"></textarea></div>' +
+      '<div style="display:flex;gap:7px"><button type="submit" class="btn btn-sm" id="legSalvar">Salvar modelo</button>' +
+      '<button type="button" class="btn-outline btn-sm" data-ac="legcancel" style="display:none" id="legCancel">Cancelar edição</button></div>' +
+      '</form>';
+
+    if (!lista.length) {
+      h += '<div class="cv-vazio">Nenhum modelo salvo. O primeiro que você escrever aparece aqui.</div>';
+    } else {
+      lista.forEach(function (m) {
+        h += '<div style="background:var(--panel-2);border:1px solid var(--borda);border-radius:12px;' +
+          'padding:14px 16px;margin-bottom:9px">' +
+          '<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">' +
+          '<b style="font-size:13.5px">' + esc(m.nome) + '</b>' +
+          '<span style="white-space:nowrap">' +
+            '<button class="b" data-ac="legedit" data-id="' + m.id + '">Editar</button>' +
+            '<span style="display:inline-block;width:14px"></span>' +
+            '<button class="b b-del" data-ac="legdel" data-id="' + m.id +
+              '" data-n="' + esc(m.nome) + '">Excluir</button></span></div>' +
+          '<p style="margin:8px 0 0;font-size:12.5px;color:var(--cinza);line-height:1.6;white-space:pre-wrap">' +
+          esc(m.corpo) + '</p></div>';
+      });
+    }
+    el('corpoLegendas').innerHTML = h;
+    el('corpoLegendas')._modelos = lista;
+  }
+
+  /* ── Ações ─────────────────────────────────────────────────────────────── */
+  function postar(url, corpo) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(corpo || {})
+    });
+  }
+
+  function recarregar(aba) { carregado[aba] = false; carregar(aba); }
+
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest('[data-ac]');
+    if (!b) return;
+    var ac = b.dataset.ac;
+
+    if (ac === 'link') {
+      var url = location.origin + '/c/' + b.dataset.t;
+      navigator.clipboard.writeText(url).then(function () {
+        // Reação imediata: sem isso a pessoa clica de novo achando que falhou.
+        var antes = b.textContent;
+        b.textContent = 'Link copiado';
+        setTimeout(function () { b.textContent = antes; }, 1800);
+      });
+      return;
+    }
+    if (ac === 'wpp') {
+      var nome = (b.dataset.n || '').split(' ')[0];
+      var txt = (nome ? nome + ', ' : '') + 'segue a sua cotação: ' +
+        location.origin + '/c/' + b.dataset.t;
+      var tel = (b.dataset.tel || '').replace(/\D/g, '');
+      if (tel.length <= 11) tel = '55' + tel;
+      window.open('https://wa.me/' + tel + '?text=' + encodeURIComponent(txt), '_blank', 'noopener');
+      return;
+    }
+    if (ac === 'doc') { window.open('/cotacao/documento/' + b.dataset.id, '_blank', 'noopener'); return; }
+
+    if (ac === 'del') {
+      if (!confirm('Excluir a cotação de ' + (b.dataset.n || 'sem nome') +
+                   '?\n\nO link que o cliente recebeu para de funcionar.')) return;
+      b.disabled = true; b.textContent = 'Excluindo…';
+      postar('/cotacao/salvas/' + b.dataset.id + '/excluir').then(function () { recarregar('salvas'); });
+      return;
+    }
+    if (ac === 'tdel') {
+      if (!confirm('Excluir a tabela ' + (b.dataset.n || '') +
+                   '?\n\nOs preços dela somem e ela deixa de aparecer nas cotações.')) return;
+      b.disabled = true; b.textContent = 'Excluindo…';
+      postar('/cotacao/tabelas/' + b.dataset.id + '/excluir').then(function () { recarregar('tabelas'); });
+      return;
+    }
+    if (ac === 'wldel') {
+      postar('/cotacao/watchlist/' + b.dataset.id + '/excluir').then(function () { recarregar('tabelas'); });
+      return;
+    }
+    if (ac === 'legdel') {
+      if (!confirm('Excluir o modelo "' + (b.dataset.n || '') + '"?')) return;
+      b.disabled = true;
+      postar('/cotacao/legendas/' + b.dataset.id + '/excluir').then(function () { recarregar('legendas'); });
+      return;
+    }
+    if (ac === 'legedit') {
+      var m = (el('corpoLegendas')._modelos || []).filter(function (x) {
+        return String(x.id) === String(b.dataset.id); })[0];
+      if (!m) return;
+      el('legId').value = m.id; el('legNome').value = m.nome; el('legCorpo').value = m.corpo;
+      // Rótulo conta a consequência: salvar aqui SUBSTITUI, não cria outro.
+      el('legSalvar').textContent = 'Salvar alteração';
+      el('legCancel').style.display = '';
+      el('legNome').focus();
+      return;
+    }
+    if (ac === 'legcancel') {
+      el('fmLeg').reset(); el('legId').value = '';
+      el('legSalvar').textContent = 'Salvar modelo';
+      el('legCancel').style.display = 'none';
+      return;
+    }
+  });
+
+  /* ── Entrada: respeita #aba na URL, senão abre em Cotar ─────────────────── */
+  trocar((location.hash || '').replace('#', '') || 'cotar', true);
+  window.addEventListener('hashchange', function () {
+    trocar((location.hash || '').replace('#', '') || 'cotar', true);
+  });
 })();
 </script>
 {% endblock %}
