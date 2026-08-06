@@ -26364,99 +26364,6 @@ def cotacao():
     qs = request.query_string.decode('utf-8')
     dest = '/cotacao/novo' + (f'?{qs}' if qs else '')
     return redirect(dest, code=301)
-    conn = db()
-    try:
-        operadoras = [r['operadora'] for r in conn.execute(
-            "SELECT DISTINCT operadora FROM cotacao_tabela WHERE ativo=1 ORDER BY operadora").fetchall()]
-    except Exception:
-        operadoras = []
-    operadoras_cards = [{'nome': op, 'logo': _logo_operadora_url(conn, op)} for op in operadoras]
-
-    idades_txt = request.args.get('idades', '').strip()
-    f_modalidade = request.args.get('modalidade', '').strip()
-    f_acomodacao = request.args.get('acomodacao', '').strip()
-    f_copart = request.args.get('coparticipacao', '').strip()
-    f_ops = [x.strip() for x in request.args.getlist('op') if x.strip()]
-    f_mei = request.args.get('mei', '').strip()
-
-    resultados = []
-    idades = _parse_idades(idades_txt)
-    # Também aceita distribuição por faixa etária (qtd por faixa) — converte em idades representativas
-    _REP_IDADE = [5, 20, 25, 30, 35, 40, 45, 50, 55, 60]
-    extra_idades = []
-    for i, fx in enumerate(FAIXAS_ETARIAS):
-        try:
-            n = int(request.args.get('fx_%d' % i, '') or 0)
-        except Exception:
-            n = 0
-        if n > 0:
-            extra_idades += [_REP_IDADE[i]] * n
-    if extra_idades:
-        idades = idades + extra_idades
-        idades_txt = ', '.join(str(x) for x in idades)
-    cont_faixa = {}
-    for idade in idades:
-        fx = _faixa_da_idade(idade)
-        if fx:
-            cont_faixa[fx] = cont_faixa.get(fx, 0) + 1
-
-    if idades:
-        q = "SELECT * FROM cotacao_tabela WHERE ativo=1"
-        params = []
-        if f_modalidade:
-            q += " AND modalidade=?"; params.append(f_modalidade)
-        if f_acomodacao:
-            q += " AND acomodacao=?"; params.append(f_acomodacao)
-        if f_copart:
-            q += " AND coparticipacao=?"; params.append(f_copart)
-        if f_ops:
-            q += " AND operadora IN (" + ",".join(["?"] * len(f_ops)) + ")"; params.extend(f_ops)
-        if f_mei:
-            q += " AND (COALESCE(tipo_cnpj,'')='' OR LOWER(tipo_cnpj) IN ('todos','todos os portes','todos os tipos') OR tipo_cnpj=?)"; params.append(f_mei)
-        tabelas = conn.execute(q, params).fetchall()
-
-        for t in tabelas:
-            td = dict(t)
-            precos = conn.execute("SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (td['id'],)).fetchall()
-            pmap = {p['faixa']: float(p['preco'] or 0) for p in precos}
-            total = 0.0
-            faltam = False
-            detalhe = []
-            for fx, qtd in cont_faixa.items():
-                preco = pmap.get(fx, 0)
-                if preco <= 0:
-                    faltam = True
-                total += preco * qtd
-                detalhe.append({'faixa': fx, 'qtd': qtd, 'preco_unit': preco, 'subtotal': preco * qtd})
-            resultados.append({
-                'tabela_id': td['id'],
-                'operadora': td['operadora'], 'plano': td['plano'],
-                'modalidade': td['modalidade'], 'acomodacao': td['acomodacao'],
-                'coparticipacao': td['coparticipacao'], 'abrangencia': td.get('abrangencia'),
-                'linha': td.get('linha') or '', 'tipo_cnpj': td.get('tipo_cnpj') or '',
-                'vigencia': td.get('vigencia'), 'total': round(total, 2),
-                'incompleta': faltam, 'detalhe': sorted(detalhe, key=lambda x: x['faixa']),
-            })
-        resultados.sort(key=lambda x: (_norm_txt(x['operadora']), x['total']))  # operadora A-Z, depois menor preco
-        completas = [r for r in resultados if not r['incompleta']]
-        if completas:
-            min(completas, key=lambda x: x['total'])['melhor'] = True
-
-    close_db(conn)
-    prefill = {
-        'lead_id': (request.args.get('lead_id') or '').strip(),
-        'nome': (request.args.get('cliente_nome') or '').strip(),
-        'telefone': (request.args.get('cliente_telefone') or '').strip(),
-        'email': (request.args.get('cliente_email') or '').strip(),
-    }
-    return render_template('cotacao.html', operadoras=operadoras, operadoras_cards=operadoras_cards,
-                           resultados=resultados, idades_txt=idades_txt, total_vidas=len(idades),
-                           modalidades=COTACAO_MODALIDADES, acomodacoes=COTACAO_ACOMODACOES,
-                           coparts=COTACAO_COPART, faixas=FAIXAS_ETARIAS,
-                           tipos_cnpj=['MEI', 'ME', 'LTDA', 'Demais portes', 'Todos os portes'],
-                           eh_admin=(session.get('perfil') == 'admin'), prefill=prefill,
-                           filtros={'modalidade': f_modalidade, 'acomodacao': f_acomodacao,
-                                    'coparticipacao': f_copart, 'ops': f_ops, 'mei': f_mei})
 
 
 @app.route('/cotacao/vera-cruz')
@@ -27055,7 +26962,7 @@ def cotacao_bloco_planos():
                 "_menor_preco": menor_preco
             })
 
-        planos.sort(key=lambda x: (x['operadora'].lower(), x['_menor_preco'], x['plano'].lower()))
+        planos.sort(key=lambda x: (_norm_txt(x['operadora']), x['_menor_preco'], _norm_txt(x['plano'])))
         for p in planos:
             p.pop('_menor_preco', None)
 
@@ -28697,10 +28604,10 @@ def api_cotacao_status_tabelas():
         total = conn.execute("SELECT COUNT(*) c FROM cotacao_tabela").fetchone()['c']
         ativas = conn.execute("SELECT COUNT(*) c FROM cotacao_tabela WHERE ativo=1").fetchone()['c']
 
-        # Completas: tabelas com 10 faixas em cotacao_preco
+        # Completas: tabelas com 10 faixas em cotacao_preco com preco > 0
         completas = conn.execute("""
             SELECT COUNT(*) c FROM (
-                SELECT tabela_id FROM cotacao_preco GROUP BY tabela_id HAVING COUNT(*) >= 10
+                SELECT tabela_id FROM cotacao_preco WHERE preco > 0 GROUP BY tabela_id HAVING COUNT(*) >= 10
             ) t
         """).fetchone()['c']
 
