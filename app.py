@@ -26962,7 +26962,7 @@ def cotacao_bloco_planos():
                 "_menor_preco": menor_preco
             })
 
-        planos.sort(key=lambda x: (x['operadora'].lower(), x['_menor_preco'], x['plano'].lower()))
+        planos.sort(key=lambda x: (_norm_txt(x['operadora']), x['_menor_preco'], _norm_txt(x['plano'])))
         for p in planos:
             p.pop('_menor_preco', None)
 
