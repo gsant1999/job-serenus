@@ -544,7 +544,13 @@
       <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas/importar-pdf'">Importar PDF</button>
       <button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas/importar'">Importar CSV</button>
       <button class="btn-outline btn-sm" onclick="location.href='/cotacao/operadoras-logos'">Logos</button>
-      <button class="btn-outline btn-sm" style="color:#ef4444; border-color:currentColor" onclick="zerarTabelasJob()">Zerar base</button>
+      <!-- Zerar base fica SEPARADO por um vão, e depois de um traço.
+           Estava encostado em "Logos" — ação irreversível a um pixel de ação
+           rotineira. É o botão que apagou as 152 tabelas. -->
+      <span style="width:1px;align-self:stretch;background:var(--borda);margin:0 5px"></span>
+      <button class="btn-outline btn-sm" id="btZerar"
+              style="color:var(--erro);border-color:rgba(244,63,94,.4)"
+              onclick="zerarTabelasJob()">Zerar base</button>
     </div>
   </div>
   <div id="corpoTabelas"><div class="cv-carregando">Carregando…</div></div>
@@ -2382,7 +2388,12 @@
     sem_data: { t: 'nunca conferida',       cor: 'var(--cinza-2)' }
   };
 
+  // O último resultado do servidor, pra confirmação de apagar contar o número
+  // de verdade em vez de um número escrito no código.
+  var _ultimoTabelas = null;
+
   function verTabelas(d) {
+    _ultimoTabelas = d;
     var lista = d.tabelas || [];
     var c = el('contVelhas');
     if (c && d.n_velhas) { c.textContent = d.n_velhas; c.style.display = ''; }
@@ -2446,11 +2457,41 @@
     el('corpoTabelas').innerHTML = h + '</tbody></table>';
   }
 
+  // ZERAR A BASE — a ação mais destrutiva desta tela.
+  //
+  // A confirmação dizia "todas as 129+ tabelas": número escrito no código.
+  // Hoje a base tem outra quantidade, amanhã terá outra, e ele diria 129 pra
+  // sempre. Confirmação que mente é pior que confirmação nenhuma — a pessoa
+  // decide com base num número que não é o dela.
+  //
+  // Agora conta na hora, e diz o que de fato se perde: o PREÇO. A tabela se
+  // recadastra em minutos; o preço por faixa só volta cotando de novo no
+  // Painel, plano a plano — 6 min 14 s por 20 planos, medido.
   window.zerarTabelasJob = function () {
-    if (!confirm('Tem certeza de que deseja excluir TODAS as tabelas de preço do JOB?\n\nIsso apagará todas as 129+ tabelas do cache local para você recomeçar do zero. Esta ação não pode ser desfeita.')) return;
+    var d = (_ultimoTabelas || {});
+    var n = (d.tabelas || []).length;
+    var precos = (d.tabelas || []).reduce(function (s, t) { return s + (t.precos_ok || 0); }, 0);
+    if (!n) { alert('A base já está vazia — não há tabela para apagar.'); return; }
+
+    if (!confirm(
+        'Apagar as ' + n + ' tabela(s) de preço do JOB?\n\n' +
+        'Você perde ' + precos + ' preço(s) por faixa etária. Eles só voltam ' +
+        'cotando de novo no Painel, plano a plano.\n\n' +
+        'Não dá pra desfazer.')) return;
+
+    // Segunda barreira: digitar. Um "OK" no susto é fácil demais pra uma ação
+    // que custa horas de recotação.
+    var conf = prompt('Para confirmar, digite APAGAR (em maiúsculas):', '');
+    if ((conf || '').trim().toUpperCase() !== 'APAGAR') {
+      alert('Nada foi apagado.');
+      return;
+    }
+
+    var b = el('btZerar');
+    if (b) { b.disabled = true; b.textContent = 'Apagando…'; }
     postar('/cotacao/tabelas/excluir-todas').then(function () {
-      alert('Todas as tabelas de preço foram removidas do sistema.');
       recarregar('tabelas');
+      if (b) { b.disabled = false; b.textContent = 'Zerar base'; }
     });
   };
 
