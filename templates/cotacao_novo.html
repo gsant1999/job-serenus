@@ -1010,7 +1010,15 @@
   // ── navegação: operadora → produto → linha → plano ─────────────────────
   var operadoras = [], planosPorOperadora = {}, selecionados = [];
   var urlDaPergunta = '';   // a cotação do Painel que respondeu a lista atual
+  // Na Adesão a ENTIDADE entra entre a operadora e o produto.
+  //
+  // Não é organização: é a ordem em que a decisão realmente acontece. A
+  // entidade é o portão — se o cliente não pode entrar nela, o produto não
+  // importa. Escolher produto primeiro e descobrir depois que ele não se
+  // encaixa é o caminho de fazer a cotação duas vezes.
+  // Em PF e PME não existe entidade, e o nível é pulado.
   var nivel = 'operadoras', opAtual = null, produtoAtual = null, linhaAtual = null;
+  var entidadeAtual = null;
 
   function tipoAtivo() {
     if (tipoEscolhido) return tipoEscolhido;
@@ -1252,17 +1260,76 @@
 
   function voltarPara(n) {
     nivel = n;
-    if (n === 'operadoras') { opAtual = null; produtoAtual = null; linhaAtual = null; }
+    if (n === 'operadoras') { opAtual = null; entidadeAtual = null; produtoAtual = null; linhaAtual = null; }
+    if (n === 'entidades') { entidadeAtual = null; produtoAtual = null; linhaAtual = null; }
     if (n === 'produtos') { produtoAtual = null; linhaAtual = null; }
     if (n === 'linhas') { linhaAtual = null; }
     desenharMigalha(); desenharNav();
+  }
+
+  // Os planos da operadora atual, já cortados pela entidade quando há uma.
+  // Todo nível abaixo da entidade enxerga só o que pertence a ela.
+  function planosDoCaminho() {
+    var pls = planosPorOperadora[opAtual ? opAtual.id : ''] || [];
+    if (!entidadeAtual) return pls;
+    return pls.filter(function (pl) { return textoPainel(pl.entidade) === entidadeAtual; });
+  }
+
+  // O QUE O CLIENTE PRECISA CUMPRIR PRA ENTRAR NA ENTIDADE.
+  //
+  // No Painel isso é um "i" ao lado da entidade, com o nome por extenso e a
+  // lista de profissões aceitas ("Associação Nacional dos Servidores Públicos
+  // e Profissionais Liberais: Administrador, Arquiteto, Assistente Social…").
+  // É a primeira pergunta da adesão, e hoje só existe lá.
+  //
+  // Ainda não sabemos se o Painel manda isso junto do plano — nas cotações
+  // guardadas o campo `entidade` só apareceu como "$undefined", porque todas
+  // eram PF e PME. Então esta função procura nos nomes de campo prováveis e,
+  // não achando, DIZ QUE NÃO SABE em vez de inventar requisito — que aqui
+  // seria mandar o consultor prometer o que não pode cumprir.
+  function requisitosDaEntidade(E) {
+    var b = E && E.bruto;
+    if (b && typeof b === 'object') {
+      var partes = [];
+      ['nomeCompleto', 'razaoSocial', 'descricao', 'requisitos', 'elegibilidade']
+        .forEach(function (k) { if (b[k] && typeof b[k] === 'string') partes.push(b[k]); });
+      ['profissoes', 'categorias', 'ocupacoes'].forEach(function (k) {
+        if (Array.isArray(b[k]) && b[k].length) {
+          partes.push(b[k].map(function (x) {
+            return typeof x === 'string' ? x : (x && (x.nome || x.descricao)) || '';
+          }).filter(Boolean).join(', '));
+        }
+      });
+      if (partes.length) return partes.join(' — ');
+    }
+    return 'Quem pode entrar nesta entidade ainda não está no JOB. Confira no Painel do ' +
+           'Corretor, no "i" ao lado do nome dela, antes de prometer ao cliente.';
+  }
+
+  // Agrupa por entidade. Devolve [] quando nenhum plano tem entidade — que é
+  // o caso de PF e PME, e é o sinal pra pular o nível inteiro.
+  function entidadesDe(pls) {
+    var m = {};
+    (pls || []).forEach(function (pl) {
+      var e = textoPainel(pl.entidade);
+      if (!e) return;
+      if (!m[e]) m[e] = { nome: e, adm: textoPainel(pl.administradora), bruto: pl.entidade, planos: [] };
+      m[e].planos.push(pl);
+    });
+    return Object.keys(m).sort().map(function (k) { return m[k]; });
   }
 
   function desenharMigalha() {
     var m = el('navMigalha');
     if (!opAtual) { m.innerHTML = ''; return; }
     var p = ['<button type="button" data-v="operadoras">Operadoras</button>'];
-    p.push('<span class="sep">›</span><button type="button" data-v="produtos">' + esc(opAtual.nome) + '</button>');
+    // A operadora leva de volta ao nível seguinte a ela, que na Adesão é a
+    // entidade e nos outros é o produto.
+    var temEnt = entidadesDe(planosPorOperadora[opAtual.id] || []).length > 0;
+    p.push('<span class="sep">›</span><button type="button" data-v="' + (temEnt ? 'entidades' : 'produtos') +
+           '">' + esc(opAtual.nome) + '</button>');
+    if (entidadeAtual) p.push('<span class="sep">›</span><button type="button" data-v="produtos">' +
+                              esc(entidadeAtual) + '</button>');
     if (produtoAtual) p.push('<span class="sep">›</span><button type="button" data-v="linhas">' + esc(produtoAtual) + '</button>');
     if (linhaAtual) p.push('<span class="sep">›</span><span>' + esc(linhaAtual.nome) + '</span>');
     m.innerHTML = p.join('');
@@ -1304,13 +1371,38 @@
             opAtual = o;
             var pls = await garantirPlanos(o.id);
             if (!pls) { c.innerHTML = '<div class="cv-ops-vazio">Não deu pra abrir agora.</div>'; return; }
-            voltarPara('produtos');
+            // Só entra no nível de entidade se houver entidade. Em PF e PME
+            // não há, e um nível com um item só é um clique cobrado à toa.
+            voltarPara(entidadesDe(pls).length ? 'entidades' : 'produtos');
           }, quantos > 0, o.nome));
       });
       return;
     }
 
-    var pls = planosPorOperadora[opAtual.id] || [];
+    var pls = planosDoCaminho();
+
+    // ── ENTIDADE (só na Adesão) ────────────────────────────────────────────
+    //
+    // O "i" existe porque a entidade é a única coisa nesta tela que o cliente
+    // precisa CUMPRIR, não escolher. O consultor tem que saber dizer "você
+    // pode entrar nesta" antes de mostrar preço — senão monta a cotação
+    // inteira e descobre no fim que não servia.
+    if (nivel === 'entidades') {
+      var ents = entidadesDe(planosPorOperadora[opAtual.id] || []);
+      if (!ents.length) { voltarPara('produtos'); return; }
+      ents.forEach(function (E) {
+        var marcados = E.planos.filter(marcado).length;
+        var req = requisitosDaEntidade(E);
+        c.appendChild(cartao(
+          '<span class="txt"><b>' + esc(E.nome) + '</b>' +
+            (req ? '<i class="ajuda-i" data-req="' + esc(E.nome) + '" title="' + esc(req) + '">i</i>' : '') +
+            '<small>' + (E.adm ? esc(E.adm) + ' · ' : '') + E.planos.length + ' plano(s)' +
+            (marcados ? ' · ' + marcados + ' marcado(s)' : '') + '</small></span>' +
+          '<span class="seta">›</span>',
+          function () { entidadeAtual = E.nome; voltarPara('produtos'); }, marcados > 0));
+      });
+      return;
+    }
 
     if (nivel === 'produtos') {
       var porProduto = {};
