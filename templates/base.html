@@ -794,10 +794,21 @@
                font-size:13px; line-height:1.5; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .ia-alerta b { color:#f43f5e; }
   .ia-alerta a { color:#fff; text-decoration:underline; margin-left:auto; font-weight:600; }
+</style>
+{% endif %}
+
+<style>
   /* Ícone de informação: todo termo que é jargão do sistema (e não do negócio)
-     ganha um "i" VISÍVEL do lado, não um tooltip escondido no hover do elemento.
-     Quem usa o JOB é consultor de plano de saúde — dado que ninguém entende é
-     dado que ninguém usa. */
+     ganha um "i" VISÍVEL do lado, não um tooltip escondido no hover do
+     elemento. Quem usa o JOB é consultor de plano de saúde — dado que ninguém
+     entende é dado que ninguém usa.
+
+     ESTE BLOCO FICA FORA DO BLOCO CONDICIONAL DO ALERTA DE IA, DE PROPÓSITO.
+     Ele estava dentro, então a regra só existia quando havia alerta na tela —
+     e nas outras horas o "i" virava um "i" em itálico solto, sem círculo, sem
+     cursor de ajuda. Em 17 templates, 14 deles só na ficha do lead. Um estilo
+     que depende de outra coisa estar acontecendo funciona quase nunca, e o
+     "quase" é o que faz ninguém notar. */
   .ajuda-i { display:inline-flex; align-items:center; justify-content:center;
              width:14px; height:14px; border-radius:50%; border:1px solid var(--cinza);
              color:var(--cinza); font-size:9px; font-weight:700; font-style:normal;
@@ -805,7 +816,6 @@
              flex:0 0 auto; user-select:none; }
   .ajuda-i:hover { border-color:var(--azul); color:var(--azul); }
 </style>
-{% endif %}
 {% block content %}{% endblock %}
 </div>
 
