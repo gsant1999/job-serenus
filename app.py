@@ -1654,6 +1654,16 @@ def init_db():
                 lida INTEGER DEFAULT 0,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS cotacao_entidade (
+                id SERIAL PRIMARY KEY,
+                sigla TEXT NOT NULL,
+                nome TEXT DEFAULT '',
+                administradora TEXT DEFAULT '',
+                profissoes_json TEXT DEFAULT '[]',
+                atualizado_em TIMESTAMP,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE INDEX IF NOT EXISTS idx_cotacao_entidade_sigla_adm ON cotacao_entidade (sigla, administradora)""",
             """CREATE TABLE IF NOT EXISTS cotacao_vera_cruz_salva (
                 id SERIAL PRIMARY KEY,
                 corretor_id INTEGER, corretor_nome TEXT, cliente_nome TEXT,
@@ -2604,6 +2614,16 @@ def init_db():
             lida INTEGER DEFAULT 0,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS cotacao_entidade (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sigla TEXT NOT NULL,
+            nome TEXT DEFAULT '',
+            administradora TEXT DEFAULT '',
+            profissoes_json TEXT DEFAULT '[]',
+            atualizado_em TIMESTAMP,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_cotacao_entidade_sigla_adm ON cotacao_entidade (sigla, administradora);
         CREATE TABLE IF NOT EXISTS solicitacoes_edicao (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             proposta_id INTEGER NOT NULL,
@@ -26855,6 +26875,186 @@ def cotacao_novo():
                            fx_7=prefill['fx_7'],
                            fx_8=prefill['fx_8'],
                            fx_9=prefill['fx_9'])
+
+
+# ── Catálogo de Entidades da Cotação ──
+
+@app.route('/cotacao/entidade', methods=['GET'])
+@login_required
+def api_cotacao_entidade():
+    """Busca entidade de classe por sigla (e administradora)."""
+    conn = db()
+    try:
+        sigla = _texto_painel(request.args.get('sigla'))
+        adm = _texto_painel(request.args.get('administradora'))
+        
+        if not sigla:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": "Sigla não informada"}), 400
+
+        q = "SELECT * FROM cotacao_entidade WHERE sigla=?"
+        params = [sigla]
+        if adm:
+            q += " AND administradora=?"
+            params.append(adm)
+        
+        # Pega a primeira que bater
+        r = conn.execute(q, params).fetchone()
+        
+        if not r:
+            close_db(conn)
+            # Não achar não é erro, é normal no primeiro acesso
+            return jsonify({"ok": True, "achou": False})
+            
+        import json
+        profissoes = []
+        try:
+            profissoes = json.loads(r['profissoes_json'] or '[]')
+        except Exception:
+            pass
+            
+        dias = 0
+        if r['atualizado_em']:
+            dt_at = _parse_dt_seguro(r['atualizado_em'])
+            if dt_at:
+                if dt_at.tzinfo is None:
+                    dt_at = TZ_SP.localize(dt_at)
+                dias = (datetime.now(TZ_SP) - dt_at).days
+
+        close_db(conn)
+        return jsonify({
+            "ok": True,
+            "achou": True,
+            "sigla": r['sigla'],
+            "nome": r['nome'],
+            "administradora": r['administradora'],
+            "profissoes": profissoes,
+            "dias_atualizado": dias
+        })
+    except Exception as e:
+        close_db(conn)
+        app.logger.warning(f"[COTACAO] Erro ao ler entidade: {e}")
+        return jsonify({"ok": False, "erro": "Não foi possível ler os dados da entidade."}), 500
+
+
+@app.route('/cotacao/entidade', methods=['POST'])
+@login_required
+def api_cotacao_entidade_salvar():
+    """Grava ou atualiza uma entidade de classe."""
+    conn = db()
+    try:
+        d = request.get_json(silent=True) or {}
+        sigla = _texto_painel(d.get('sigla'))
+        adm = _texto_painel(d.get('administradora'))
+        nome = _texto_painel(d.get('nome'))
+        prof_novas = d.get('profissoes')
+        if not isinstance(prof_novas, list):
+            prof_novas = []
+        
+        if not sigla:
+            close_db(conn)
+            return jsonify({"ok": False, "erro": "Sigla não informada"}), 400
+
+        existente = conn.execute(
+            "SELECT id, profissoes_json FROM cotacao_entidade WHERE sigla=? AND administradora=?", 
+            (sigla, adm)
+        ).fetchone()
+
+        import json
+        
+        if existente:
+            # Não sobrescreve lista cheia com lista vazia
+            if not prof_novas:
+                try:
+                    prof_atuais = json.loads(existente['profissoes_json'] or '[]')
+                    if prof_atuais:
+                        prof_novas = prof_atuais
+                except Exception:
+                    pass
+            
+            prof_str = json.dumps(prof_novas, ensure_ascii=False)
+            conn.execute("""
+                UPDATE cotacao_entidade 
+                SET nome=?, profissoes_json=?, atualizado_em=CURRENT_TIMESTAMP
+                WHERE id=?
+            """, (nome, prof_str, existente['id']))
+            conn.commit()
+            close_db(conn)
+            return jsonify({"ok": True, "id": existente['id'], "criou": False})
+        else:
+            prof_str = json.dumps(prof_novas, ensure_ascii=False)
+            cur = conn.cursor()
+            if DB_MODE == 'postgres':
+                cur.execute("""
+                    INSERT INTO cotacao_entidade (sigla, nome, administradora, profissoes_json, atualizado_em)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    RETURNING id
+                """, (sigla, nome, adm, prof_str))
+                new_id = cur.fetchone()[0]
+            else:
+                cur.execute("""
+                    INSERT INTO cotacao_entidade (sigla, nome, administradora, profissoes_json, atualizado_em)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (sigla, nome, adm, prof_str))
+                new_id = cur.lastrowid
+            conn.commit()
+            close_db(conn)
+            return jsonify({"ok": True, "id": new_id, "criou": True})
+
+    except Exception as e:
+        try: conn.rollback()
+        except: pass
+        close_db(conn)
+        app.logger.warning(f"[COTACAO] Erro ao gravar entidade: {e}")
+        return jsonify({"ok": False, "erro": "Não foi possível gravar a entidade."}), 500
+
+
+@app.route('/cotacao/bloco/entidades', methods=['GET'])
+@login_required
+def cotacao_bloco_entidades():
+    """Lista todas as entidades (para painel admin)."""
+    if session.get('perfil') != 'admin':
+        return jsonify({"ok": False, "erro": "Acesso negado"}), 403
+        
+    conn = db()
+    try:
+        rows = conn.execute("SELECT * FROM cotacao_entidade ORDER BY sigla").fetchall()
+        
+        agora_dt = datetime.now(TZ_SP)
+        entidades = []
+        import json
+        
+        for r in rows:
+            qtd = 0
+            try:
+                profissoes = json.loads(r['profissoes_json'] or '[]')
+                qtd = len(profissoes)
+            except Exception:
+                pass
+                
+            dias = 0
+            if r['atualizado_em']:
+                dt_at = _parse_dt_seguro(r['atualizado_em'])
+                if dt_at:
+                    if dt_at.tzinfo is None:
+                        dt_at = TZ_SP.localize(dt_at)
+                    dias = (agora_dt - dt_at).days
+                    
+            entidades.append({
+                "id": r['id'],
+                "sigla": r['sigla'],
+                "nome": r['nome'],
+                "administradora": r['administradora'],
+                "qtd_profissoes": qtd,
+                "dias_atualizado": dias
+            })
+            
+        close_db(conn)
+        return jsonify({"ok": True, "entidades": entidades})
+    except Exception as e:
+        close_db(conn)
+        app.logger.warning(f"[COTACAO] Erro ao listar entidades: {e}")
+        return jsonify({"ok": False, "erro": "Não foi possível listar as entidades."}), 500
 
 
 # ── Passo 7c & 7d: Rotas JSON para abas de /cotacao/novo (com sessão) ──
