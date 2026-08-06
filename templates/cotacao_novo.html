@@ -1039,8 +1039,34 @@
     var t = tipoAtivo();
     return t ? codigoDe(t) : null;
   }
+  // TÍTULO DA COTAÇÃO NO PAINEL.
+  //
+  // Ia tudo como "Cotação". Deu 415 linhas idênticas na lista deles, criadas
+  // em rajada — inútil pra achar qualquer coisa depois, e com cara de máquina.
+  //
+  // A solução não é inventar nome pra despistar: é dar o nome que a cotação
+  // realmente tem. Cliente, cidade e tipo já são diferentes de verdade em cada
+  // uma, então o texto varia sozinho, fica pesquisável, e para de parecer o
+  // que não é. Nome útil resolve o problema real e o aparente de uma vez.
+  function tituloCotacao() {
+    var partes = [];
+    var nome = (el('cliNome').value || '').trim();
+    if (nome) partes.push(nome);
+    if (cidadeEscolhida) partes.push(cidadeEscolhida);
+    var t = tipoAtivo();
+    if (t) partes.push(nomeCompleto(t));
+    // Sem cliente ainda (as consultas de apoio acontecem antes de escolher),
+    // a composição de vidas distingue uma da outra.
+    if (!nome) {
+      var n = totalVidas();
+      if (n) partes.push(n + (n === 1 ? ' vida' : ' vidas'));
+    }
+    return partes.length ? partes.join(' · ') : 'Cotação';
+  }
+
   function base() {
-    return { cidade: cidadeEscolhida, modalidade: modalidadeAtiva(), vidas: vidasLista() };
+    return { cidade: cidadeEscolhida, modalidade: modalidadeAtiva(),
+             vidas: vidasLista(), titulo: tituloCotacao() };
   }
 
   // Trocar de TIPO não apaga o que já foi marcado.
@@ -1887,7 +1913,11 @@
         lead_id: leadEscolhido || null,
         cliente_nome: el('cliNome').value.trim(),
         cliente_telefone: el('cliTel').value.trim(),
-        titulo: el('cliNome').value.trim() ? ('Cotação — ' + el('cliNome').value.trim()) : 'Cotação',
+        // Mesmo título da cotação no Painel: cliente · cidade · tipo. Na aba
+        // Salvas o "Cotação — Fulano" repetia a palavra Cotação numa coluna
+        // que já se chama Cotação, e escondia cidade e tipo, que é o que
+        // distingue duas do mesmo cliente.
+        titulo: tituloCotacao(),
         modalidade: modalidadeAtiva(),
         filtros: { exigencias: exigencias, ramo: ramo, tipo: tipoAtivo(),
                    planos: selecionados.map(function (x) { return x.key; }) } });
