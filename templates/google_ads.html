@@ -1,252 +1,391 @@
 {% extends 'base.html' %}
-{% block title %}Conversão offline — Google Ads e Meta{% endblock %}
-{% block content %}
-<div class="topbar">
-  <div>
-    <h1>Conversão offline</h1>
-    <div class="sub">Devolve a VENDA ao Google e à Meta, com valor real, para eles otimizarem por quem compra — não por quem preenche formulário</div>
-  </div>
-  <div style="display:flex; gap:8px;">
-    <button class="btn-outline btn-sm" onclick="location.href='/google-ads/autorizar'">Autorizar no Google</button>
-    <button class="btn-outline btn-sm" onclick="testar(this)">Testar ligação</button>
-    <button class="btn-outline btn-sm" onclick="enfileirar(this)">Buscar vendas não enfileiradas</button>
-    <button class="btn btn-sm" onclick="enviar(this)">Enviar pendentes</button>
-  </div>
-</div>
+{% block title %}Conversão offline — Google Ads e Meta Ads{% endblock %}
 
-<div class="page">
-  {# A CORRENTE INTEIRA, NA ORDEM. O Google e o ULTIMO elo: credencial certa com
-     zero clique capturado manda zero conversao. Sem este quadro, "nada foi
-     enviado" nao diz se o problema e a chave, a captura ou o status da venda. #}
-  {% if rastreio %}
-  {% set sem_clique = (rastreio.leads_com_clique or 0) == 0 and (rastreio.leads_extras_clique or 0) == 0 %}
+{% block head %}
+<style>
+  /* DUAS PLATAFORMAS, DUAS ABAS. Antes tudo dividia a mesma tela: os quatro
+     botões do topo eram do Google mas pareciam globais, e a Meta era um cartão
+     espremido no rodapé com formatação diferente. Quem operava não tinha como
+     saber a qual plataforma um botão pertencia — e um clique errado aqui manda
+     faturamento pro lugar errado. */
+  .plat-abas { display:flex; gap:8px; border-bottom:1px solid var(--borda); margin-bottom:20px; }
+  .plat-aba { padding:11px 20px 12px; font-size:13.5px; font-weight:600; cursor:pointer;
+              color:var(--cinza); border-bottom:2px solid transparent; margin-bottom:-1px;
+              background:none; border-top:none; border-left:none; border-right:none;
+              font-family:inherit; display:flex; align-items:center; gap:9px; }
+  .plat-aba:hover { color:var(--texto); }
+  /* Cada plataforma tem a SUA cor, e ela é a mesma da aba até o último cartão
+     dentro dela. É o que deixa claro, de relance, em qual mundo você está. */
+  .plat-aba.ativa[data-plat="google"] { color:var(--texto); border-bottom-color:#4285f4; }
+  .plat-aba.ativa[data-plat="meta"]   { color:var(--texto); border-bottom-color:#0866ff; }
+  .plat-pino { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .plat-pino.google { background:#4285f4; }
+  .plat-pino.meta   { background:#0866ff; }
+  .plat-aba .cont { font-size:11px; font-weight:700; padding:1px 7px; border-radius:20px;
+                    background:var(--panel-3); color:var(--cinza); }
+  .plat-painel { display:none; }
+  .plat-painel.ativo { display:block; }
+
+  /* Barra de ações da plataforma: mora DENTRO do painel dela, nunca no topo da
+     página. Botão de plataforma em barra global é o que criava a ambiguidade. */
+  .plat-acoes { display:flex; align-items:center; justify-content:space-between; gap:12px;
+                flex-wrap:wrap; background:var(--panel-2); border:1px solid var(--borda);
+                border-left:3px solid var(--borda); border-radius:10px;
+                padding:12px 15px; margin-bottom:16px; }
+  .plat-acoes.google { border-left-color:#4285f4; }
+  .plat-acoes.meta   { border-left-color:#0866ff; }
+  .plat-acoes .quem { font-size:12.5px; color:var(--cinza); line-height:1.5; }
+  .plat-acoes .quem b { color:var(--texto); }
+  .plat-acoes .btns { display:flex; gap:8px; flex-wrap:wrap; }
+
+  .elo-cx { display:flex; flex-wrap:wrap; gap:10px; }
+  .elo { flex:1; min-width:195px; border:1px solid var(--borda); border-radius:9px; padding:11px 13px; }
+  .elo.zero { border-color:rgba(244,63,94,.4); }
+  .elo .n { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--texto); }
+  .elo.zero .n { color:var(--rosa); }
+  .elo .n small { font-size:12px; font-weight:500; color:var(--cinza-2); }
+  .elo .rot { font-size:11.5px; color:var(--cinza); margin-top:3px; line-height:1.45; }
+  .elo .pq { font-size:11px; color:var(--cinza-2); margin-top:6px; line-height:1.5; }
+
+  .kpi-fila { display:flex; flex-wrap:wrap; gap:10px; }
+  .kpi-fila > div { flex:1; min-width:165px; background:var(--panel-2); border:1px solid var(--borda);
+                    border-radius:10px; padding:12px 14px; }
+  .kpi-fila .lbl { font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2); }
+  .kpi-fila .val { font-size:21px; font-weight:700; color:var(--texto); font-variant-numeric:tabular-nums; }
+  .kpi-fila .sub { font-size:11.5px; color:var(--cinza); }
+
+  .cfg-falta { font-size:13px; color:var(--cinza); line-height:1.6; }
+  .cfg-falta code { background:var(--panel-3); padding:3px 9px; border-radius:6px; font-size:12px; }
+  .cfg-falta b { color:var(--texto); }
+  .cfg-chaves { margin:10px 0; display:flex; flex-wrap:wrap; gap:6px; }
+
+  .aviso-elo { margin-top:13px; font-size:12.5px; color:var(--cinza); line-height:1.6;
+               background:var(--panel-2); border-radius:8px; padding:11px 13px; }
+  .aviso-elo b { color:var(--texto); }
+  .td-clique { font-family:ui-monospace,Menlo,monospace; font-size:10.5px; color:var(--cinza); }
+</style>
+{% endblock %}
+
+{% block content %}
+{# MACROS: os dois painéis são construídos pelo MESMO molde. É o que garante
+   simetria de verdade — se um ganha um bloco, o outro ganha igual, e não dá
+   pra uma plataforma silenciosamente ficar com menos diagnóstico que a outra
+   (que era exatamente o caso da Meta antes: sem rastreio, sem teste de
+   ligação, com status cru na tabela). #}
+
+{% macro bloco_rastreio(r, plat, id_clique) %}
+  {% set sem_clique = (r.leads_com_clique or 0) == 0 and (r.leads_extras_clique or 0) == 0 %}
   <div class="card" style="{% if sem_clique %}border-color:rgba(244,63,94,.45);{% endif %}">
     <div class="card-header">
-      <h3>Do clique até a venda<i class="ajuda-i" title="O Google só aceita a conversão se ela vier com o identificador do clique (gclid). Ele nasce na URL do anúncio, atravessa a página, a planilha e o CRM, e só então volta pro Google. Se ele se perde em qualquer ponto, não há o que enviar — mesmo com todas as credenciais certas.">i</i></h3>
+      <h3>Do clique até a venda<i class="ajuda-i" title="A plataforma só aceita a conversão se ela vier com o identificador do clique ({{ id_clique }}). Ele nasce na URL do anúncio, atravessa a página, a planilha e o CRM, e só então volta. Se ele se perde em qualquer ponto, não há o que enviar — mesmo com todas as credenciais certas.">i</i></h3>
     </div>
     <div style="padding:0 16px 16px;">
-      <div style="display:flex; flex-wrap:wrap; gap:10px;">
+      <div class="elo-cx">
         {% set elos = [
-          ('Leads com clique do anúncio', (rastreio.leads_com_clique or 0) + (rastreio.leads_extras_clique or 0), rastreio.leads or 0,
-           'O gclid tem que chegar junto com o lead. Se está zerado, ele se perde antes do CRM: ou o anúncio não marca a URL (auto-tagging), ou quem grava a planilha não leva a coluna do clique.'),
-          ('Propostas ligadas a um lead', rastreio.propostas_com_lead or 0, rastreio.propostas or 0,
+          ('Leads com clique do anúncio', (r.leads_com_clique or 0) + (r.leads_extras_clique or 0), r.leads or 0,
+           'O ' ~ id_clique ~ ' tem que chegar junto com o lead. Se está zerado, ele se perde antes do CRM: ou o anúncio não marca a URL, ou quem grava a planilha não leva a coluna do clique.'),
+          ('Propostas ligadas a um lead', r.propostas_com_lead or 0, r.propostas or 0,
            'Proposta sem lead não tem de onde herdar o clique — a venda existe, mas não dá pra dizer de qual anúncio veio.'),
-          ('Vendas marcadas como Emitida/Ativa', rastreio.vendas or 0, rastreio.propostas or 0,
+          ('Vendas marcadas como Emitida/Ativa', r.vendas or 0, r.propostas or 0,
            'Só entra na fila a proposta com este status. Venda fechada de verdade que ficou em outro status não é enviada.'),
-          ('Vendas com clique — o que dá pra enviar hoje', rastreio.vendas_com_clique or 0, rastreio.vendas or 0,
+          ('Vendas com clique — o que dá pra enviar hoje', r.vendas_com_clique or 0, r.vendas or 0,
            'É o número final. Enquanto for zero, ligar as credenciais não muda nada: não existe conversão para mandar.')
         ] %}
         {% for nome, tem, total, porque in elos %}
-        <div style="flex:1; min-width:200px; border:1px solid var(--borda); border-radius:9px; padding:11px 13px;
-                    {% if tem == 0 %}border-color:rgba(244,63,94,.4);{% endif %}">
-          <div style="font-size:20px; font-weight:700; color:{{ 'var(--rosa)' if tem == 0 else 'var(--texto)' }}; font-variant-numeric:tabular-nums;">
-            {{ tem }}<span style="font-size:12px; font-weight:500; color:var(--cinza-2);"> de {{ total }}</span>
-          </div>
-          <div style="font-size:11.5px; color:var(--cinza); margin-top:3px; line-height:1.45;">{{ nome }}</div>
-          {% if tem == 0 %}<div style="font-size:11px; color:var(--cinza-2); margin-top:6px; line-height:1.5;">{{ porque }}</div>{% endif %}
+        <div class="elo {{ 'zero' if tem == 0 }}">
+          <div class="n">{{ tem }}<small> de {{ total }}</small></div>
+          <div class="rot">{{ nome }}</div>
+          {% if tem == 0 %}<div class="pq">{{ porque }}</div>{% endif %}
         </div>
         {% endfor %}
       </div>
       {% if sem_clique %}
-      <div style="margin-top:13px; font-size:12.5px; color:var(--cinza); line-height:1.6;
-                  background:var(--panel-2); border-radius:8px; padding:11px 13px;">
-        <b style="color:var(--texto);">Nenhum lead chegou com identificador de clique.</b>
-        A página captura o gclid e manda no formulário, e o JOB sabe ler a coluna — o elo que falta é no meio:
-        quem grava a planilha de leads precisa criar a coluna <code>gclid</code> (e <code>gbraid</code>/<code>wbraid</code>,
-        que é o que o iPhone manda no lugar do gclid) e preencher com o que vem do formulário.
-        Enquanto isso não existir, a conversão offline não tem o que enviar.
+      <div class="aviso-elo">
+        <b>Nenhum lead chegou com identificador de clique.</b>
+        {% if plat == 'google' %}
+          A página captura o <code>gclid</code> e manda no formulário, e o JOB sabe ler a coluna — o elo que
+          falta costuma ser no meio: quem grava a planilha precisa levar as colunas <code>gclid</code>,
+          <code>gbraid</code> e <code>wbraid</code> (as duas últimas são o que o iPhone manda no lugar do gclid).
+          Confira também se a marcação automática está ligada na conta do Google Ads.
+        {% else %}
+          A Meta casa o evento pelo <code>fbclid</code>, que vem na URL do anúncio. Sem ele chegando junto do
+          lead, não há como ligar a venda ao anúncio que a trouxe.
+        {% endif %}
       </div>
       {% endif %}
     </div>
   </div>
-  {% endif %}
-  {% if faltando %}
-  <div class="card" style="border-color:rgba(250,204,21,.4);">
-    <div class="card-header"><h3>Falta configurar para conseguir enviar</h3></div>
-    <div style="padding:0 16px 16px; font-size:13px; color:var(--cinza); line-height:1.6;">
-      A fila já funciona e as vendas continuam sendo registradas — o que ainda não acontece é o envio.
-      Defina no Railway as variáveis:
-      <div style="margin:10px 0; display:flex; flex-wrap:wrap; gap:6px;">
-        {% for f in faltando %}<code style="background:var(--panel-3); padding:3px 9px; border-radius:6px; font-size:12px;">{{ f }}</code>{% endfor %}
-      </div>
-      <b style="color:var(--texto);">Onde cada uma nasce:</b> as três primeiras saem de um projeto no Google Cloud com a API do Google Ads
-      habilitada (OAuth de aplicativo para computador). O <code>DEVELOPER_TOKEN</code> sai do próprio Google Ads,
-      em Ferramentas → Centro de API. O <code>CUSTOMER_ID</code> é o número da conta (só dígitos).
-      O <code>CONVERSION_ACTION_ID</code> é o id de uma ação de conversão criada como
-      <b style="color:var(--texto);">Importar → Cliques (upload)</b> — sem ela o Google não aceita o envio.
-    </div>
-  </div>
-  {% endif %}
+{% endmacro %}
 
-  <div class="card" id="teste-saida" style="display:none;"></div>
-
+{% macro bloco_fila(cont, fora, plat) %}
   <div class="card">
     <div class="card-header"><h3>Situação da fila</h3></div>
-    <div style="padding:0 16px 16px; display:flex; flex-wrap:wrap; gap:10px;">
-      {% set rot = {'pendente':'A enviar','enviada':'Enviadas','sem_clique':'Sem clique de anúncio','falha':'Recusadas pelo Google','retratar':'Precisam de retratação','cancelada':'Canceladas antes de subir','fora_da_janela':'Venda velha demais para o Google'} %}
-      {% for st, d in contagem.items() %}
-      <div style="flex:1; min-width:170px; background:var(--panel-2); border:1px solid var(--borda); border-radius:10px; padding:12px 14px;">
-        <div style="font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--cinza-2);">{{ rot.get(st, st) }}</div>
-        <div style="font-size:21px; font-weight:700; color:var(--texto);">{{ d.n }}</div>
-        <div style="font-size:11.5px; color:var(--cinza);">{{ d.valor|moeda }}</div>
+    <div style="padding:0 16px 16px;">
+      {# SÓ O QUE TEM ALGUMA COISA. O backend preenche os 7 status com zero de
+         propósito (app.py, "for st, info in STATUS_CONVERSAO_MAP.items()"), então
+         `cont` NUNCA vem vazio — sete cartões zerados apareciam sempre, e sete
+         zeros lado a lado não informam nada, só escondem o número que importa.
+         O total de fato vazio é tratado embaixo, com uma frase. #}
+      {% set com_valor = cont.items() | selectattr('1.n') | list %}
+      <div class="kpi-fila">
+        {% for st, d in com_valor %}
+        {# label e descrição vêm do status_map do backend — a mesma nomenclatura
+           nas duas plataformas, em vez do texto cru do banco que a Meta mostrava. #}
+        {% set info = status_map.get(st) %}
+        <div title="{{ info.descricao if info else '' }}">
+          <div class="lbl">{{ info.label if info else st }}</div>
+          <div class="val">{{ d.n }}</div>
+          <div class="sub">{{ d.valor|moeda }}</div>
+        </div>
+        {% endfor %}
+        {% if not com_valor %}
+        <div style="flex:1;"><div class="sub" style="padding:4px 0;">Nenhuma venda na fila ainda. Use "Buscar vendas não enfileiradas".</div></div>
+        {% endif %}
       </div>
-      {% endfor %}
-      {% if not contagem %}<div style="color:var(--cinza-2); font-size:13px; padding:8px;">Nenhuma venda na fila ainda. Use "Buscar vendas não enfileiradas".</div>{% endif %}
-    </div>
-    <div style="padding:0 16px 16px; font-size:12.5px; color:var(--cinza); line-height:1.55;">
-      {% if fora %}<b style="color:var(--texto);">{{ fora }} venda(s) confirmada(s) ainda fora da fila.</b> Clique em "Buscar vendas não enfileiradas".<br>{% endif %}
-      Valor enviado: <b style="color:var(--texto);">{{ {'comissao_bruta':'comissão bruta da corretora','comissao_liquida':'comissão líquida','producao':'produção (mensalidade)'}.get(valor_base, valor_base) }}</b>
-      — é a receita que a venda gera. Mandar a mensalidade inflaria o número (não é nosso dinheiro) e mandar o líquido subestimaria
-      a capacidade de pagar mídia. Muda em <code>GOOGLE_ADS_VALOR_BASE</code>.
+      {% if fora %}
+      <div style="margin-top:12px; font-size:12.5px; color:var(--cinza); line-height:1.55;">
+        <b style="color:var(--texto);">{{ fora }} venda(s) confirmada(s) ainda fora da fila.</b>
+        Clique em "Buscar vendas não enfileiradas".
+      </div>
+      {% endif %}
+      {% if plat == 'google' %}
+      <div style="margin-top:10px; font-size:12.5px; color:var(--cinza); line-height:1.55;">
+        Valor enviado: <b style="color:var(--texto);">{{ {'comissao_bruta':'comissão bruta da corretora','comissao_liquida':'comissão líquida','producao':'produção (mensalidade)'}.get(valor_base, valor_base) }}</b>
+        — é a receita que a venda gera. Mandar a mensalidade inflaria o número (não é nosso dinheiro) e mandar
+        o líquido subestimaria a capacidade de pagar mídia. Muda em <code>GOOGLE_ADS_VALOR_BASE</code>.
+      </div>
+      {% endif %}
     </div>
   </div>
+{% endmacro %}
 
+{% macro bloco_tabela(itens, campo_clique, rotulo_clique) %}
   <div class="card">
     <div class="card-header"><h3>Últimas conversões</h3></div>
     <div style="overflow-x:auto;">
       <table>
-        <thead><tr><th>Proposta</th><th>Lead</th><th>Clique</th><th>Valor</th><th>Status</th><th>Detalhe</th></tr></thead>
+        <thead><tr><th>Venda</th><th>Lead</th><th>{{ rotulo_clique }}</th><th>Valor</th><th>Status</th><th>Detalhe</th></tr></thead>
         <tbody>
-          {% for l in linhas %}
+          {% for l in itens[:60] %}
           <tr>
-            <td><a href="/proposta/{{ l.proposta_id }}" style="color:var(--info); text-decoration:none;">{{ l.razao_social or ('#' ~ l.proposta_id) }}</a></td>
+            <td><a href="/proposta/{{ l.proposta_id }}" style="color:var(--info); text-decoration:none;">{{ l.razao_social or ('venda #' ~ l.proposta_id) }}</a></td>
             <td>
-              {% if l.lead_id %}
-                <a href="/lead/{{ l.lead_id }}" style="color:var(--info); font-weight:600; text-decoration:none;">{{ l.lead_nome or ('lead #' ~ l.lead_id) }}</a>
-              {% else %}
-                <span style="color:var(--cinza);">— sem lead</span>
-              {% endif %}
+              {% if l.lead_id %}<a href="/lead/{{ l.lead_id }}" style="color:var(--info); font-weight:600; text-decoration:none;">{{ l.lead_nome or ('lead #' ~ l.lead_id) }}</a>
+              {% else %}<span style="color:var(--cinza);">— sem lead</span>{% endif %}
             </td>
-            <td class="td-mono" style="color:var(--cinza);">{{ (l.click_tipo or '—') }}{% if l.click_id %} · {{ l.click_id[:14] }}…{% endif %}</td>
+            {% set clique = l[campo_clique] %}
+            <td class="td-clique">{% if clique %}{{ clique[:20] }}{{ '…' if clique|length > 20 }}{% else %}—{% endif %}</td>
             <td class="td-mono">{{ (l.valor or 0)|moeda }}</td>
             <td>
-              {% set cor = {'enviada':'tag-verde','pendente':'tag-am','falha':'tag-vm','retratar':'tag-vm'}.get(l.status,'') %}
-              <span class="tag {{ cor }}">{{ rot.get(l.status, l.status) }}</span>
+              {# badge_class do backend (badge-success, badge-warning…) NÃO existe
+                 no CSS deste projeto — usar direto renderiza sem estilo nenhum.
+                 Traduzido aqui pras classes .tag-* que o base.html define. #}
+              {% set info = status_map.get(l.status) %}
+              {% set cor = {'badge-success':'tag-verde','badge-warning':'tag-am',
+                            'badge-danger':'tag-rosa','badge-secondary':'tag-cinza'}.get(info.badge_class if info else '', 'tag-cinza') %}
+              <span class="tag {{ cor }}" title="{{ info.descricao if info else '' }}">{{ info.label if info else l.status }}</span>
             </td>
             <td style="color:var(--cinza-2); font-size:12px;">{{ (l.detalhe or '')[:90] }}</td>
           </tr>
           {% endfor %}
-          {% if not linhas %}<tr><td colspan="6" style="text-align:center; padding:22px; color:var(--cinza-2);">Nada na fila ainda.</td></tr>{% endif %}
+          {% if not itens %}<tr><td colspan="6" style="text-align:center; padding:22px; color:var(--cinza-2);">Nada na fila ainda.</td></tr>{% endif %}
         </tbody>
       </table>
     </div>
   </div>
+{% endmacro %}
 
-  <div class="card" style="margin-top:22px;">
-    <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-      <h3>Meta (Facebook e Instagram)<i class="ajuda-i" title="Mesma venda, outro destino. A Meta casa o evento com o clique pelo fbclid, que o JOB já captura na entrada do lead. E-mail e telefone vão junto, com hash SHA-256, só para melhorar o casamento — o dado do cliente nunca sai em claro.">i</i></h3>
-      <div style="display:flex; gap:8px;">
-        <button class="btn-outline btn-sm" onclick="enfileirarMeta(this)">Buscar vendas não enfileiradas</button>
-        <button class="btn btn-sm" onclick="enviarMeta(this)">Enviar pendentes</button>
+<div class="topbar">
+  <div>
+    <h1>Conversão offline</h1>
+    <div class="sub">Devolve a VENDA às plataformas de anúncio, com valor real, para elas otimizarem por quem compra — não por quem preenche formulário</div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="plat-abas">
+    <button type="button" class="plat-aba ativa" data-plat="google" onclick="abrirPlat('google')">
+      <span class="plat-pino google"></span>Google Ads
+      {% if contagem.get('pendente') and contagem['pendente'].n %}<span class="cont">{{ contagem['pendente'].n }}</span>{% endif %}
+    </button>
+    <button type="button" class="plat-aba" data-plat="meta" onclick="abrirPlat('meta')">
+      <span class="plat-pino meta"></span>Meta Ads
+      {% if m_contagem.get('pendente') and m_contagem['pendente'].n %}<span class="cont">{{ m_contagem['pendente'].n }}</span>{% endif %}
+    </button>
+  </div>
+
+  {# ══════════════ GOOGLE ADS ══════════════ #}
+  <div class="plat-painel ativo" id="painel-google">
+    <div class="plat-acoes google">
+      <div class="quem">
+        <b>Google Ads</b> · casa a venda pelo <b>gclid</b> · envia pela Data Manager API
+        {% if customer_id %}<br>Conta <b>{{ customer_id }}</b>{% endif %}
+      </div>
+      <div class="btns">
+        <button class="btn-outline btn-sm" onclick="location.href='/google-ads/autorizar'">Autorizar no Google</button>
+        <button class="btn-outline btn-sm" onclick="testarPlat(this,'google')">Testar ligação</button>
+        <button class="btn-outline btn-sm" onclick="enfileirar(this,'google')">Buscar vendas não enfileiradas</button>
+        <button class="btn btn-sm" onclick="enviar(this,'google')">Enviar pendentes</button>
       </div>
     </div>
-    <div style="padding:0 16px 16px;">
-      {% if m_faltando %}
-      <div style="font-size:13px; color:var(--cinza); line-height:1.6; margin-bottom:14px;">
-        A fila já registra as vendas; o que ainda não acontece é o envio. Defina no Railway:
-        <div style="margin:10px 0; display:flex; flex-wrap:wrap; gap:6px;">
-          {% for f in m_faltando %}<code style="background:var(--panel-3); padding:3px 9px; border-radius:6px; font-size:12px;">{{ f }}</code>{% endfor %}
+
+    {% if faltando %}
+    <div class="card" style="border-color:rgba(250,204,21,.4);">
+      <div class="card-header"><h3>Falta configurar para o Google conseguir enviar</h3></div>
+      <div style="padding:0 16px 16px;" class="cfg-falta">
+        A fila já funciona e as vendas continuam sendo registradas — o que ainda não acontece é o envio.
+        Defina no Railway as variáveis:
+        <div class="cfg-chaves">
+          {% for f in faltando %}<code>{{ f }}</code>{% endfor %}
         </div>
-        <b style="color:var(--texto);">Onde nascem:</b> o <code>META_PIXEL_ID</code> é o id do conjunto de dados no
-        Gerenciador de Eventos. O <code>META_ACCESS_TOKEN</code> é gerado ali mesmo, em
-        <b style="color:var(--texto);">Conversions API → Gerar token de acesso</b>.
+        <b>Onde cada uma nasce:</b> as três primeiras saem de um projeto no Google Cloud com a API do Google Ads
+        habilitada (OAuth de aplicativo para computador). O <code>DEVELOPER_TOKEN</code> sai do próprio Google Ads,
+        em Ferramentas → Centro de API. O <code>CUSTOMER_ID</code> é o número da conta (só dígitos).
+        O <code>CONVERSION_ACTION_ID</code> é o id de uma ação de conversão criada como
+        <b>Importar → Cliques (upload)</b> — sem ela o Google não aceita o envio.
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card" id="teste-google" style="display:none;"></div>
+    {% if rastreio %}{{ bloco_rastreio(rastreio, 'google', 'gclid') }}{% endif %}
+    {{ bloco_fila(contagem, fora, 'google') }}
+    {{ bloco_tabela(linhas, 'click_id', 'Clique (gclid)') }}
+  </div>
+
+  {# ══════════════ META ADS ══════════════ #}
+  <div class="plat-painel" id="painel-meta">
+    <div class="plat-acoes meta">
+      <div class="quem">
+        <b>Meta Ads</b> (Facebook e Instagram) · casa a venda pelo <b>fbclid</b> · envia pela Conversions API
+        {% if m_pixel %}<br>Conjunto de dados <b>{{ m_pixel }}</b>{% endif %}
+        <br><span style="color:var(--cinza-2);">E-mail e telefone vão com hash SHA-256, só para melhorar o casamento — o dado do cliente nunca sai em claro.</span>
+      </div>
+      <div class="btns">
+        <button class="btn-outline btn-sm" onclick="testarPlat(this,'meta')">Testar ligação</button>
+        <button class="btn-outline btn-sm" onclick="enfileirar(this,'meta')">Buscar vendas não enfileiradas</button>
+        <button class="btn btn-sm" onclick="enviar(this,'meta')">Enviar pendentes</button>
+      </div>
+    </div>
+
+    {% if m_faltando %}
+    <div class="card" style="border-color:rgba(250,204,21,.4);">
+      <div class="card-header"><h3>Falta configurar para a Meta conseguir enviar</h3></div>
+      <div style="padding:0 16px 16px;" class="cfg-falta">
+        A fila já registra as vendas; o que ainda não acontece é o envio. Defina no Railway:
+        <div class="cfg-chaves">
+          {% for f in m_faltando %}<code>{{ f }}</code>{% endfor %}
+        </div>
+        <b>Onde nascem:</b> o <code>META_PIXEL_ID</code> é o id do conjunto de dados no Gerenciador de Eventos.
+        O <code>META_ACCESS_TOKEN</code> é gerado ali mesmo, em
+        <b>Conversions API → Gerar token de acesso</b>.
         Opcional: <code>META_TEST_EVENT_CODE</code>, para conferir no Testar Eventos sem sujar o dado real.
       </div>
-      {% endif %}
-      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
-        {% for st, d in m_contagem.items() %}
-        <div style="flex:1 1 130px; background:var(--panel-2); border:1px solid var(--borda); border-radius:9px; padding:10px 12px;">
-          <b style="display:block; font-size:18px;">{{ d.n }}</b>
-          <span style="font-size:10px; color:var(--cinza);">{{ st }} · {{ d.valor|moeda }}</span>
-        </div>
-        {% endfor %}
-        {% if m_fora %}
-        <div style="flex:1 1 130px; background:var(--panel-2); border:1px solid rgba(250,204,21,.35); border-radius:9px; padding:10px 12px;">
-          <b style="display:block; font-size:18px;">{{ m_fora }}</b>
-          <span style="font-size:10px; color:var(--cinza);">venda(s) fora da fila</span>
-        </div>
-        {% endif %}
-      </div>
-      {% if not m_linhas %}
-        <div style="font-size:12px; color:var(--cinza); font-style:italic;">Nenhuma venda na fila da Meta ainda. Use "Buscar vendas não enfileiradas".</div>
-      {% else %}
-      <table class="tabela">
-        <thead><tr><th>Venda</th><th>Lead</th><th>fbclid</th><th style="text-align:right;">Valor</th><th>Status</th><th>Detalhe</th></tr></thead>
-        <tbody>
-          {% for l in m_linhas[:60] %}
-          <tr>
-            <td><a href="/proposta/{{ l.proposta_id }}">{{ l.razao_social or ('venda #' ~ l.proposta_id) }}</a></td>
-            <td>{% if l.lead_id %}<a href="/lead/{{ l.lead_id }}">{{ l.lead_nome or ('lead #' ~ l.lead_id) }}</a>{% else %}—{% endif %}</td>
-            <td style="font-family:ui-monospace,Menlo,monospace; font-size:10px;">{{ (l.fbclid or '—')[:22] }}{{ '…' if l.fbclid and l.fbclid|length > 22 }}</td>
-            <td style="text-align:right;">{{ l.valor|moeda }}</td>
-            <td>{{ l.status }}</td>
-            <td style="font-size:11px; color:var(--cinza);">{{ (l.detalhe or '')[:70] }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% endif %}
     </div>
+    {% endif %}
+
+    <div class="card" id="teste-meta" style="display:none;"></div>
+    {% if m_rastreio %}{{ bloco_rastreio(m_rastreio, 'meta', 'fbclid') }}{% endif %}
+    {{ bloco_fila(m_contagem, m_fora, 'meta') }}
+    {{ bloco_tabela(m_linhas, 'fbclid', 'Clique (fbclid)') }}
   </div>
 </div>
 
 <script>
-async function _p(url, body, btn, rot){
+// A aba escolhida sobrevive ao reload — as ações recarregam a página, e voltar
+// pro Google depois de mandar a Meta faria a pessoa perder o resultado de vista.
+const PLATS = ['google', 'meta'];
+function abrirPlat(p){
+  PLATS.forEach(function(x){
+    document.getElementById('painel-' + x).classList.toggle('ativo', x === p);
+    document.querySelector('.plat-aba[data-plat="' + x + '"]').classList.toggle('ativa', x === p);
+  });
+  try { localStorage.setItem('conv_plat', p); } catch(e){}
+}
+try {
+  const salva = localStorage.getItem('conv_plat');
+  if (salva && PLATS.indexOf(salva) > -1) abrirPlat(salva);
+} catch(e){}
+
+// ROTA VEM DA PLATAFORMA, nunca de um valor fixo no botão. Era esse acoplamento
+// solto que deixava um botão do Google e um da Meta parecerem iguais — aqui o
+// prefixo é derivado, então não existe botão apontando pro lugar errado.
+function _rota(plat, acao){ return '/' + (plat === 'meta' ? 'meta-ads' : 'google-ads') + '/' + acao; }
+
+async function _p(url, btn, rot){
   const t = btn.textContent; btn.disabled = true; btn.textContent = 'Processando…';
   try{
-    const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})});
+    const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
     const d = await r.json();
     alert(rot(d));
     location.reload();
-  }catch(e){ alert('Falha de conexão'); btn.disabled=false; btn.textContent=t; }
+  }catch(e){ alert('Falha de conexão'); btn.disabled = false; btn.textContent = t; }
 }
-function enfileirar(b){ _p('/google-ads/enfileirar', {}, b,
-  d => d.analisadas + ' venda(s) analisada(s).\n' + JSON.stringify(d.placar||{}, null, 1)); }
-function enfileirarMeta(b){ _p('/meta-ads/enfileirar', {}, b,
-  d => d.analisadas + ' venda(s) analisada(s).\n' + JSON.stringify(d.placar||{}, null, 1)); }
-function enviarMeta(b){ _p('/meta-ads/enviar', {}, b,
-  d => { const r = d.resumo || d;
-    return 'Pendentes: ' + r.pendentes + '\nEnviadas: ' + r.enviadas + '\nRecusadas: ' + r.falhas +
-      ((r.faltando_config||[]).length ? '\n\nFalta configurar: ' + r.faltando_config.join(', ') : '') +
-      ((r.erros||[]).length ? '\n\n' + r.erros.join('\n') : ''); }); }
-function enviar(b){ _p('/google-ads/enviar', {}, b,
-  d => 'Pendentes: ' + d.pendentes + '\nEnviadas: ' + d.enviadas + '\nRecusadas: ' + d.falhas +
-       (d.faltando_config && d.faltando_config.length ? '\n\nFalta configurar: ' + d.faltando_config.join(', ') : '') +
-       ((d.erros||[]).length ? '\n\n' + d.erros.join('\n') : '')); }
 
-// TESTE DE LIGAÇÃO. Não recarrega a página (o resultado é o conteúdo) e não
+function enfileirar(b, plat){
+  // O backend JÁ monta a frase em português (campo `mensagem`) e a explicação de
+  // cada status (`detalhes`, com label e descrição do STATUS_CONVERSAO_MAP).
+  // Antes isto mostrava JSON.stringify(d.placar) — chave crua de banco
+  // ("sem_clique": 3) num alerta de produção, jogando fora o trabalho que o
+  // servidor já tinha feito de traduzir.
+  _p(_rota(plat, 'enfileirar'), b, function(d){
+    let txt = d.mensagem || ((d.analisadas || 0) + ' venda(s) analisada(s).');
+    (d.detalhes || []).forEach(function(x){
+      if (x.descricao) txt += '\n\n' + x.quantidade + ' · ' + x.label + '\n' + x.descricao;
+    });
+    return txt;
+  });
+}
+
+function enviar(b, plat){
+  _p(_rota(plat, 'enviar'), b, function(d){
+    // A rota da Meta devolve {resumo:{...}} e a do Google devolve o resumo na
+    // raiz. Normalizado aqui pra mensagem ser a mesma nas duas.
+    const r = d.resumo || d;
+    return 'Pendentes: ' + (r.pendentes || 0) +
+           '\nEnviadas: ' + (r.enviadas || 0) +
+           '\nRecusadas: ' + (r.falhas || 0) +
+           ((r.faltando_config || []).length ? '\n\nFalta configurar: ' + r.faltando_config.join(', ') : '') +
+           ((r.erros || []).length ? '\n\n' + r.erros.join('\n') : '');
+  });
+}
+
+// TESTE DE LIGAÇÃO. Não recarrega a página (o resultado É o conteúdo) e não
 // envia venda nenhuma. Cada degrau aparece separado porque o valor está em
 // saber ONDE parou — "não funcionou" não conserta nada.
-async function testar(b){
+async function testarPlat(b, plat){
   const t = b.textContent; b.disabled = true; b.textContent = 'Testando…';
-  const cx = document.getElementById('teste-saida');
+  const nome = plat === 'meta' ? 'a Meta' : 'o Google';
+  const cx = document.getElementById('teste-' + plat);
   cx.style.display = 'block';
-  cx.innerHTML = '<div style="padding:14px; color:var(--cinza); font-size:13px;">Falando com o Google…</div>';
+  cx.innerHTML = '<div style="padding:14px; color:var(--cinza); font-size:13px;">Falando com ' + nome + '…</div>';
   try{
-    const d = await (await fetch('/google-ads/testar', {method:'POST',
+    const d = await (await fetch(_rota(plat, 'testar'), {method:'POST',
       headers:{'Content-Type':'application/json'}, body:'{}'})).json();
-    const linhas = (d.passos||[]).map(p =>
-      '<div style="display:flex; gap:10px; padding:9px 0; border-bottom:1px solid var(--borda);">'
-      + '<div style="flex-shrink:0; width:74px; font-size:10.5px; font-weight:700; text-transform:uppercase;'
-      + ' letter-spacing:.4px; padding-top:2px; color:' + (p.ok ? 'var(--teal)' : 'var(--rosa)') + ';">'
-      + (p.ok ? 'passou' : 'parou aqui') + '</div>'
-      + '<div style="flex:1; min-width:0;"><div style="font-size:13px; font-weight:600; color:var(--texto);">'
-      + _e(p.nome) + '</div>'
-      + '<div style="font-size:12px; color:var(--cinza); margin-top:2px; line-height:1.5; word-break:break-word;">'
-      + _e(p.detalhe) + '</div>'
-      + (p.dica ? '<div style="font-size:12px; color:var(--amarelo,#f59e0b); margin-top:5px; line-height:1.5;">'
-                  + _e(p.dica) + '</div>' : '')
-      + '</div></div>').join('');
+    const linhas = (d.passos || []).map(function(p){
+      return '<div style="display:flex; gap:10px; padding:9px 0; border-bottom:1px solid var(--borda);">'
+        + '<div style="flex-shrink:0; width:74px; font-size:10.5px; font-weight:700; text-transform:uppercase;'
+        + ' letter-spacing:.4px; padding-top:2px; color:' + (p.ok ? 'var(--teal)' : 'var(--rosa)') + ';">'
+        + (p.ok ? 'passou' : 'parou aqui') + '</div>'
+        + '<div style="flex:1; min-width:0;"><div style="font-size:13px; font-weight:600; color:var(--texto);">'
+        + _e(p.nome) + '</div>'
+        + '<div style="font-size:12px; color:var(--cinza); margin-top:2px; line-height:1.5; word-break:break-word;">'
+        + _e(p.detalhe) + '</div>'
+        + (p.dica ? '<div style="font-size:12px; color:var(--amarelo,#f59e0b); margin-top:5px; line-height:1.5;">'
+                    + _e(p.dica) + '</div>' : '')
+        + '</div></div>';
+    }).join('');
     cx.innerHTML = '<div class="card-header"><h3>' + (d.ok ? 'Ligação funcionando' : 'A ligação parou no meio')
       + '</h3></div><div style="padding:0 16px 14px;">' + linhas
       + (d.ok ? '<div style="font-size:12.5px; color:var(--cinza); margin-top:11px; line-height:1.6;">'
               + 'As credenciais estão certas. Isso não quer dizer que haja conversão para enviar — veja o '
-              + 'quadro "Do clique até a venda" acima.</div>' : '') + '</div>';
+              + 'quadro "Do clique até a venda" abaixo.</div>' : '') + '</div>';
   }catch(e){
     cx.innerHTML = '<div style="padding:14px; color:var(--rosa); font-size:13px;">Não consegui falar com o servidor.</div>';
   }
   b.disabled = false; b.textContent = t;
 }
-function _e(s){ const d = document.createElement('div'); d.textContent = (s==null?'':String(s)); return d.innerHTML; }
+
+function _e(s){ const d = document.createElement('div'); d.textContent = (s == null ? '' : String(s)); return d.innerHTML; }
 </script>
 {% endblock %}
