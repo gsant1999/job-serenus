@@ -1490,25 +1490,70 @@
   // Pergunta ao Painel quem pode entrar. Os três parâmetros já vêm no próprio
   // plano — entidade, administradora.id e produto.id — então não é preciso
   // capturar nada: é a mesma chamada que o "i" deles faz.
+  // TRÊS CAMADAS, da mais barata pra mais cara:
+  //
+  //   1. navegador  — instantâneo, e não sai da máquina
+  //   2. banco do JOB — uma ida ao servidor. Um consultor descobre, a
+  //      corretora inteira passa a ter. É o que faz o Painel ser perguntado
+  //      UMA vez na empresa, e não uma vez por pessoa.
+  //   3. Painel ao vivo — só quando ninguém nunca perguntou. O resultado sobe
+  //      pro JOB na mesma hora, então essa camada tende a nunca mais rodar
+  //      pra aquela entidade.
+  //
+  // A ordem importa por causa do rastro: cada pergunta ao Painel é uma
+  // chamada dentro do sistema deles.
   async function carregarRequisitos(E) {
     if (!E || !E.nome) return;
     if (reqPedindo[E.nome] || Object.prototype.hasOwnProperty.call(reqEntidade, E.nome)) return;
     reqPedindo[E.nome] = true;
+
     var ref = (E.planos || [])[0] || {};
     var admId = (ref.administradora && ref.administradora.id) || null;
     var prodId = (ref.produto && ref.produto.id) || null;
-    if (admId == null) { reqEntidade[E.nome] = null; delete reqPedindo[E.nome]; return; }
+
+    function fechar(valor) {
+      reqEntidade[E.nome] = valor;
+      gravarCacheEnt(E.nome, valor);
+      delete reqPedindo[E.nome];
+      if (nivel === 'entidades') desenharNav();
+    }
+
+    // ── camada 2: o banco do JOB ──
+    var doJob = await fetch('/cotacao/entidade?sigla=' + encodeURIComponent(E.nome) +
+        '&administradora=' + encodeURIComponent(E.adm || ''))
+      .then(function (x) { return x.json(); }).catch(function () { return null; });
+
+    // `achou: false` NÃO é erro — é "ninguém capturou ainda", e é o sinal pra
+    // perguntar ao Painel. Tratar como falha faria a tela desistir na hora em
+    // que ela deveria justamente ir buscar.
+    if (doJob && doJob.ok && doJob.achou) {
+      fechar({ nome: doJob.nome || '', profissoes: doJob.profissoes || [] });
+      return;
+    }
+
+    // ── camada 3: o Painel, pela extensão ──
+    if (admId == null) { fechar({ _erro: 'sem_administradora' }); return; }
     var r = await pedir('passo', { pedido: { acao: 'entidade', entidade: E.nome,
       administradoraId: admId, produtoId: prodId, cidade: cidadeEscolhida,
       modalidade: modalidadeAtiva() } }, 15000);
-    reqEntidade[E.nome] = (r && r.ok && r.dados)
+
+    var valor = (r && r.ok && r.dados)
       ? r.dados
       : { _erro: (r && (r.motivo || r.erro)) || 'sem_resposta' };
-    gravarCacheEnt(E.nome, reqEntidade[E.nome]);
-    delete reqPedindo[E.nome];
-    // Só repinta se a pessoa ainda está olhando a lista de entidades — mexer na
-    // tela depois que ela navegou seria puxar o tapete.
-    if (nivel === 'entidades') desenharNav();
+
+    // Sobe pro JOB o que o Painel respondeu. Só o que deu certo: gravar erro
+    // faria a corretora inteira herdar uma falha de rede de uma máquina só.
+    if (!valor._erro && (valor.nome || (valor.profissoes || []).length)) {
+      fetch('/cotacao/entidade', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sigla: E.nome, administradora: E.adm || '',
+                               nome: valor.nome || '', profissoes: valor.profissoes || [] })
+      }).catch(function () { /* sem gravar, a próxima pessoa pergunta de novo */ });
+    }
+
+    // fechar() guarda nas duas camadas locais e repinta — mas só se a pessoa
+    // ainda estiver olhando a lista, senão seria puxar o tapete dela.
+    fechar(valor);
   }
 
   // Agrupa por entidade. Devolve [] quando nenhum plano tem entidade — que é
