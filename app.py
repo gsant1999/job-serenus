@@ -21221,6 +21221,105 @@ def api_whatsapp_lead_ficha():
     return _wa_cors(jsonify(payload))
 
 
+@app.route('/api/whatsapp/cotacoes', methods=['GET', 'OPTIONS'])
+def api_whatsapp_cotacoes():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+
+    tel = _normalizar_telefone(request.args.get('telefone', ''))
+    lid = request.args.get('lead_id', type=int)
+
+    if not tel and not lid:
+        return _wa_cors(jsonify({"ok": False, "erro": "telefone ou lead_id ausente"})), 400
+
+    conn = db()
+    try:
+        achado_id = None
+        lead_nome = ""
+        
+        if lid:
+            lead = conn.execute("SELECT id, nome FROM crm_leads WHERE id=?", (lid,)).fetchone()
+            if lead:
+                achado_id = lead['id']
+                lead_nome = lead['nome']
+        else:
+            achado = _buscar_lead_por_telefone(conn, tel)
+            if achado:
+                achado_id = achado['id']
+                lead = conn.execute("SELECT nome FROM crm_leads WHERE id=?", (achado_id,)).fetchone()
+                if lead:
+                    lead_nome = lead['nome']
+
+        if not achado_id:
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": True, "lead_id": None, "cotacoes": []}))
+            
+        rows = conn.execute("""
+            SELECT id, titulo, token, total, planos_json, criado_em 
+            FROM cotacao_salva 
+            WHERE lead_id = ? 
+            ORDER BY criado_em DESC 
+            LIMIT 10
+        """, (achado_id,)).fetchall()
+        
+        agora_dt = datetime.now(TZ_SP)
+        agora_date = agora_dt.date()
+        
+        cotacoes = []
+        import json
+        for r in rows:
+            qtd_planos = None
+            if r['planos_json']:
+                try:
+                    planos_arr = json.loads(r['planos_json'])
+                    if isinstance(planos_arr, list):
+                        qtd_planos = len(planos_arr)
+                except Exception:
+                    pass
+                    
+            url = None
+            if r['token']:
+                url = f"{_SITE_BASE_URL.rstrip('/')}/c/{r['token']}"
+                
+            dias = 0
+            if r['criado_em']:
+                dt_criacao = _parse_dt_seguro(r['criado_em'])
+                if dt_criacao:
+                    if dt_criacao.tzinfo is None:
+                        dt_criacao = TZ_SP.localize(dt_criacao)
+                    dias = (agora_date - dt_criacao.date()).days
+                    criado_str = dt_criacao.isoformat()
+                else:
+                    criado_str = r['criado_em']
+            else:
+                criado_str = None
+                
+            cotacoes.append({
+                "id": r['id'],
+                "titulo": r['titulo'],
+                "token": r['token'],
+                "url": url,
+                "total": r['total'],
+                "planos_cotados": qtd_planos,
+                "criado_em": criado_str,
+                "dias": dias
+            })
+
+        close_db(conn)
+        return _wa_cors(jsonify({
+            "ok": True, 
+            "lead_id": achado_id, 
+            "lead_nome": lead_nome, 
+            "cotacoes": cotacoes
+        }))
+    except Exception as e:
+        close_db(conn)
+        app.logger.warning(f"[WA/COTACOES] Erro ao buscar cotações do lead {lid or tel}: {e}")
+        return _wa_cors(jsonify({"ok": False, "erro": "Não foi possível carregar as cotações."})), 500
+
+
 @app.route('/api/whatsapp/lead/salvar', methods=['POST', 'OPTIONS'])
 def api_whatsapp_lead_salvar():
     """Salva em UMA chamada o que o popup mudou. Aplica na ordem: campos → etiquetas
