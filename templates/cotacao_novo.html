@@ -1737,6 +1737,16 @@
   var relLead = null;
 
   function pintarLead() {
+    // O BOTÃO É REAVALIADO AQUI, sempre.
+    //
+    // Quando o lead virou obrigatório pra cotar, eu pus `leadEscolhido` na
+    // condição do botão e só chamei atualizarBotao() em UM dos quatro lugares
+    // que mexem no vínculo. Escolhendo o lead na lista, a tela dizia "ligada ao
+    // lead" e o botão continuava desligado — clicava e não acontecia nada.
+    //
+    // pintarLead() roda em TODOS eles, porque é ele quem desenha o estado do
+    // vínculo. Reavaliar aqui é impossível de esquecer no próximo que surgir.
+    atualizarBotao();
     var c = el('leadLigado');
     if (leadEscolhido) {
       c.className = 'cv-lead ok';
