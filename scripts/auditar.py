@@ -32,9 +32,44 @@ def sh(*args):
     return subprocess.run(args, capture_output=True, text=True).stdout
 
 
+def base_de(ref):
+    """Contra o que comparar. Uma branch se compara com o ponto em que ela
+    nasceu, não com o meu working tree.
+
+    Sem isto, auditar a branch de outra pessoa enquanto estou na minha compara
+    o código DELA com o MEU — e acusa como defeito dela tudo que eu mudei. Foi
+    assim que o auditor gritou "21 blocos inalcançáveis" numa entrega em que o
+    código morto tinha sido removido: as linhas eram minhas, não dela."""
+    if not ref:
+        return None
+    # Sempre contra a MAIN, não contra o HEAD.
+    #
+    # Usando HEAD, auditar a branch em que eu já estou dava merge-base = ela
+    # mesma, e o diff saía vazio — "nada a apontar" numa branch cheia de
+    # defeito. Contra a main, o ponto de partida é o mesmo esteja eu onde
+    # estiver.
+    base = sh('git', 'merge-base', 'main', ref).strip()
+    if not base:
+        return ref + '~1'
+    # Se a base é a própria ref, ela já foi mergeada: aí o que interessa é o
+    # que ELA acrescentou, então compara com o pai dela.
+    ref_sha = sh('git', 'rev-parse', ref).strip()
+    return (ref + '~1') if base == ref_sha else base
+
+
+def conteudo(ref):
+    """O app.py COMO ESTÁ naquela referência — não o do disco."""
+    if not ref:
+        return open(APP, encoding='utf-8').read()
+    return sh('git', 'show', f'{ref}:{APP}')
+
+
 def linhas_novas(ref):
     """Só as linhas ACRESCENTADAS, com o número no arquivo final."""
-    diff = sh('git', 'diff', '-U0', ref, '--', APP) if ref else sh('git', 'diff', '-U0', '--', APP)
+    if ref:
+        diff = sh('git', 'diff', '-U0', base_de(ref), ref, '--', APP)
+    else:
+        diff = sh('git', 'diff', '-U0', '--', APP)
     out, n = [], 0
     for l in diff.split('\n'):
         m = re.match(r'^@@ -\d+(?:,\d+)? \+(\d+)', l)
@@ -151,13 +186,36 @@ def checar_colunas(novas, cols):
     return erros
 
 
+def avisar_branch():
+    """Em que branch o diretório está AGORA.
+
+    `git checkout -b` troca a branch do diretório de trabalho COMPARTILHADO.
+    Quando o Antigravity cria uma branch pra mexer no app.py, o meu próximo
+    commit de frontend cai nela sem aviso — e o `git push origin main` "tem
+    sucesso" sem empurrar nada, porque a referência main não se moveu.
+
+    Aconteceu três vezes em 06/08/2026. Prometer lembrar não resolveu; então
+    o auditor fala antes de qualquer coisa."""
+    atual = sh('git', 'rev-parse', '--abbrev-ref', 'HEAD').strip()
+    if atual and atual != 'main':
+        print(f"  ATENÇÃO: o diretório está na branch '{atual}', não em main.")
+        print(f"           Commit feito agora vai pra ela. Se não era a intenção:")
+        print(f"             git checkout main\n")
+    return atual
+
+
 def main():
     ref = sys.argv[1] if len(sys.argv) > 1 else None
-    fonte = open(APP, encoding='utf-8').read()
+    avisar_branch()
+    # O esquema sai do MESMO ponto que está sendo auditado. Lendo o do disco,
+    # uma coluna criada na branch apareceria como inexistente, e uma que só
+    # existe no meu working tree faria passar defeito que na branch é real.
+    fonte = conteudo(ref)
     achados = []
 
     # 0. FRONTEIRA — quem mexeu no que
-    st = sh('git', 'diff', '--name-only', ref) if ref else sh('git', 'diff', '--name-only')
+    st = (sh('git', 'diff', '--name-only', base_de(ref), ref) if ref
+          else sh('git', 'diff', '--name-only'))
     fora = [f for f in st.split('\n')
             if f and f != APP and (f.startswith('templates/') or f.startswith('extensao-whatsapp/'))]
     if fora:
@@ -210,8 +268,18 @@ def main():
                                     f"{mortas} bloco(s) inalcançáveis depois do return em {fn.name}()"))
             if (isinstance(no, ast.Expr) and isinstance(no.value, ast.Call)
                     and getattr(no.value.func, 'id', '') == 'close_db'):
-                depois = [x for x in corpo[i + 1:]
-                          if 'conn.execute' in ast.dump(x) or 'conn.commit' in ast.dump(x)]
+                # Procura pela ESTRUTURA, não pelo texto. `'conn.execute' in
+                # ast.dump(x)` nunca casava: a árvore guarda
+                # Attribute(value=Name(id='conn'), attr='execute'), e a string
+                # "conn.execute" não aparece em lugar nenhum do dump.
+                def usa_conn(no):
+                    for d in ast.walk(no):
+                        if (isinstance(d, ast.Attribute)
+                                and getattr(d.value, 'id', '') == 'conn'
+                                and d.attr in ('execute', 'commit', 'cursor', 'rollback')):
+                            return True
+                    return False
+                depois = [x for x in corpo[i + 1:] if usa_conn(x)]
                 if depois and (ln in novas_ns or any(getattr(x, 'lineno', 0) in novas_ns for x in depois)):
                     achados.append(('DEPOIS DO close_db', ln,
                                     f"{fn.name}() usa conn depois de fechar — falha em silêncio"))
