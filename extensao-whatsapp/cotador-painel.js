@@ -867,9 +867,16 @@
     // e produto.id), então o JOB pergunta sem precisar de mais nada.
     if (a === 'entidade') {
       if (!p.entidade || p.administradoraId == null) throw new Error('sem_entidade');
-      const { texto } = await acao('entidade', `/cotacoes/${p.cotacaoId || ultimaCotacao || ''}/edit?d=cenarios`,
+      // Toda ação do Painel precisa de um id de cotação na URL, inclusive esta.
+      // A tela não manda o id (ela só sabe da entidade), então reaproveita o da
+      // última. Sem isso a URL saía como /cotacoes//edit e o servidor recusava.
+      // NÃO cria uma nova: seria uma cotação vazia no sistema deles a cada "i"
+      // aberto, que é justamente o rastro que a gente está tentando reduzir.
+      const cid = p.cotacaoId || ultimaCotacao;
+      if (!cid) throw new Error('sem_cotacao_aberta');
+      const { texto } = await acao('entidade', `/cotacoes/${cid}/edit?d=cenarios`,
         [{ entidade: p.entidade, administradoraId: p.administradoraId, produtoId: p.produtoId }],
-        p.cotacaoId || ultimaCotacao);
+        cid);
       const o = primeiroObjeto(texto) || {};
       return {
         entidade: p.entidade,

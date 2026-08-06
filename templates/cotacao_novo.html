@@ -1341,9 +1341,23 @@
       return 'Carregando quem pode entrar…';
     }
     var r = reqEntidade[E.nome];
-    if (r === null) {
-      return 'Não deu pra ler quem entra nesta entidade. Confira no Painel do Corretor, ' +
-             'no "i" ao lado do nome dela, antes de prometer ao cliente.';
+    if (r === null || (r && r._erro)) {
+      // O MOTIVO VAI JUNTO. Um aviso que só diz "não deu" obriga a pessoa a
+      // abrir o console pra descobrir o que houve — e cada motivo tem uma
+      // saída diferente.
+      var m = (r && r._erro) || '';
+      if (m.indexOf('nao_aprendeu') >= 0) {
+        return 'A extensão ainda não viu como o Painel mostra isso.\n\n' +
+               'Abra a aba do Painel, clique UMA vez no "i" ao lado de qualquer ' +
+               'entidade, e volte aqui. Ela aprende sozinha.';
+      }
+      if (m.indexOf('sem_cotacao_aberta') >= 0) {
+        return 'Escolha a cidade e cote uma vez primeiro — a consulta precisa de ' +
+               'uma cotação aberta no Painel para perguntar.';
+      }
+      return 'Não deu pra ler quem entra nesta entidade' + (m ? ' (' + m + ')' : '') +
+             '. Confira no Painel do Corretor, no "i" ao lado do nome dela, ' +
+             'antes de prometer ao cliente.';
     }
     var t = r.nome || E.nome;
     if (r.profissoes && r.profissoes.length) {
@@ -1366,7 +1380,9 @@
     var r = await pedir('passo', { pedido: { acao: 'entidade', entidade: E.nome,
       administradoraId: admId, produtoId: prodId, cidade: cidadeEscolhida,
       modalidade: modalidadeAtiva() } }, 15000);
-    reqEntidade[E.nome] = (r && r.ok && r.dados) ? r.dados : null;
+    reqEntidade[E.nome] = (r && r.ok && r.dados)
+      ? r.dados
+      : { _erro: (r && (r.motivo || r.erro)) || 'sem_resposta' };
     delete reqPedindo[E.nome];
     // Só repinta se a pessoa ainda está olhando a lista de entidades — mexer na
     // tela depois que ela navegou seria puxar o tapete.
