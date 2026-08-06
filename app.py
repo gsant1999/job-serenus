@@ -3825,23 +3825,20 @@ def init_db():
         if not conn.execute("SELECT 1 FROM meta_flags WHERE k='cot_entidade_backfill_20260805b'").fetchone():
             rows = conn.execute("""SELECT id, operadora, linha, modalidade FROM cotacao_tabela
                                    WHERE modalidade LIKE '%Ades%' OR operadora LIKE '%Affix%'
-                                      OR operadora LIKE '%SUPERMED%' OR linha LIKE '%(%'""").fetchall()
+                                      OR operadora LIKE '%SUPERMED%' OR (linha LIKE '%(%' AND modalidade LIKE '%Ades%')""").fetchall()
             for r in rows:
                 tid = r['id']
                 op = (r['operadora'] or '').strip()
                 lin = (r['linha'] or '').strip()
                 ent = ''
-                new_op = op
                 new_lin = lin
+                
                 if op.startswith('Affix '):
                     ent = op[6:].strip()
-                    new_op = 'Affix'
                 elif op.startswith('SUPERMED - '):
                     ent = op[11:].strip()
-                    new_op = 'SUPERMED'
                 elif ' - ' in op:
                     parts = op.split(' - ', 1)
-                    new_op = parts[0].strip()
                     ent = parts[1].strip()
 
                 if not ent and '(' in lin and ')' in lin:
@@ -3849,17 +3846,21 @@ def init_db():
                     idx2 = lin.rfind(')')
                     if idx2 > idx1:
                         ent = lin[idx1 + 1:idx2].strip()
+                        new_lin = lin[:idx1].strip()
+                        
+                if ent and '(' in ent and ')' in ent:
+                    e_idx = ent.find('(')
+                    ent = ent[:e_idx].strip()
 
-                if ent or new_op != op:
-                    conn.execute("UPDATE cotacao_tabela SET operadora=?, entidade=?, linha=? WHERE id=?",
-                                 (new_op, ent, new_lin, tid))
+                if ent or new_lin != lin:
+                    conn.execute("UPDATE cotacao_tabela SET entidade=?, linha=? WHERE id=?",
+                                 (ent, new_lin, tid))
             conn.execute("INSERT INTO meta_flags (k) VALUES ('cot_entidade_backfill_20260805b')")
             conn.commit()
             print("[COTACAO] Backfill de entidade em cotacao_tabela aplicado")
     except Exception as e:
-        if is_pg:
-            try: conn.rollback()
-            except Exception: pass
+        try: conn.rollback()
+        except Exception: pass
         print(f"[COTACAO] backfill entidade pulado: {e}")
 
     # ─── Passo 4: Deduplicação inteligente de tabelas com preços 100% idênticos ───
