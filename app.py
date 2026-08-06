@@ -26710,8 +26710,15 @@ def cotacao_novo():
     """Cotação no JOB Serenus com base local (multicálculo em cache)."""
     conn = db()
     lead = None
+    # Aceita `lead` E `lead_id`. O botão "Nova cotação" da ficha do lead
+    # (templates/crm.html, novaCotacaoLead) monta a URL com lead_id, além de
+    # cliente_nome/telefone/email — e apontava para /cotacao, que agora é um
+    # redirect 301 para cá. O 301 repassa a query inteira, mas aqui só se lia
+    # `lead`: o consultor clicava no lead e caía numa cotação em branco, sem
+    # vínculo e sem os dados do cliente. Vínculo perdido é o pior tipo de perda
+    # silenciosa aqui, porque a cotação segue e nasce órfã do CRM.
     try:
-        lid = int(request.args.get('lead') or 0)
+        lid = int(request.args.get('lead') or request.args.get('lead_id') or 0)
     except Exception:
         lid = 0
     if lid:
@@ -26740,6 +26747,12 @@ def cotacao_novo():
         'coparticipacao': (request.args.get('coparticipacao') or '').strip(),
         'mei': (request.args.get('mei') or '').strip(),
         'op': f_ops,
+        # Vindos da ficha do lead no CRM. Servem quando o lead_id não casa com
+        # nenhum registro (lead excluído, ou link antigo) — aí pelo menos o nome
+        # e o telefone do cliente chegam preenchidos em vez de a tela abrir vazia.
+        'cliente_nome': (request.args.get('cliente_nome') or '').strip(),
+        'cliente_telefone': (request.args.get('cliente_telefone') or '').strip(),
+        'cliente_email': (request.args.get('cliente_email') or '').strip(),
     }
     for i in range(10):
         prefill[f'fx_{i}'] = (request.args.get(f'fx_{i}') or '').strip()

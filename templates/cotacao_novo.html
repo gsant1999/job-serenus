@@ -588,6 +588,12 @@
   var ROTULOS = {{ faixas|tojson }};
   var MODALIDADES = {{ modalidades|tojson }};
   var LEAD = {{ (lead.id if lead else 0)|tojson }};
+  var LEAD_NOME = {{ (lead.nome if lead else '')|tojson }};
+  var LEAD_TEL = {{ (lead.telefone if lead else '')|tojson }};
+  // Vem da ficha do lead no CRM (botão "Nova cotação") e de link com filtro.
+  // A rota já montava tudo isto e passava; a tela não lia nada — o consultor
+  // clicava no lead e abria uma cotação em branco, sem vínculo e sem cliente.
+  var PREFILL = {{ (prefill or {})|tojson }};
   var SALVA = {{ (salva.resultado if salva else None)|tojson }};
   var SALVA_VIDAS = {{ (salva.vidas if salva else None)|tojson }};
 
@@ -1333,7 +1339,7 @@
   // conversão pra Meta nem pro Google, e o funil não sabe que aquele lead
   // recebeu proposta — foi assim que 25 de 48 vendas ficaram órfãs.
   var leadEscolhido = LEAD || 0;
-  var leadNome = '';
+  var leadNome = LEAD_NOME || '';
   var relLead = null;
 
   function pintarLead() {
@@ -1721,9 +1727,59 @@
     if (cidadeEscolhida && (modalidadeAtiva() != null || tipoAtivo() != null)) carregarOperadoras();
   }
 
+  // Chega com a pergunta pronta: veio da ficha do lead ou de um link com filtro.
+  //
+  // A rota já montava tudo isto e passava ao template; ninguém lia. Quem clicava
+  // em "Nova cotação" na ficha do lead abria uma tela em branco e redigitava
+  // nome, telefone e vidas que o JOB já tinha na mão.
+  //
+  // Só preenche o que está VAZIO — nunca por cima do que a pessoa digitou, que
+  // é a mesma regra do resto do sistema (preenche buraco, não corrige ninguém).
+  function aplicarPrefill() {
+    var P = PREFILL || {};
+    if (!el('cliNome').value) el('cliNome').value = LEAD_NOME || P.cliente_nome || '';
+    if (!el('cliTel').value) el('cliTel').value = LEAD_TEL || P.cliente_telefone || '';
+
+    if (P.modalidade && TIPOS.indexOf(nomeCompleto(P.modalidade)) >= 0) {
+      tipoEscolhido = nomeCompleto(P.modalidade);
+    }
+
+    // Vidas: por faixa (fx_0..fx_9) ou por lista de idades. As duas formas
+    // existem porque a tela antiga aceitava as duas e há link salvo de cada.
+    //
+    // `vidas` é indexado pelos rótulos do Painel (FAIXAS); ROTULOS são os do
+    // JOB ('00-18' … '59+'), na mesma ordem. A faixa de uma idade sai dos
+    // próprios rótulos, e não de um mapa fixo à parte: mapa duplicado é o que
+    // faz a tela silenciosamente errar quando a lista de faixas muda.
+    var pos = 0;
+    ROTULOS.forEach(function (rot, i) {
+      var n = parseInt(P['fx_' + i] || '0', 10);
+      if (n > 0) { vidas[FAIXAS[i]] = n; pos += n; }
+    });
+    if (!pos && P.idades) {
+      var limites = ROTULOS.map(function (rot) {
+        var m = String(rot).match(/^(\d+)\s*(?:-\s*(\d+))?/);
+        if (!m) return null;
+        return { min: Number(m[1]), max: m[2] ? Number(m[2]) : 200 };
+      });
+      String(P.idades).split(',').forEach(function (x) {
+        var idade = parseInt(String(x).trim(), 10);
+        if (isNaN(idade) || idade < 0 || idade > 120) return;
+        for (var i = 0; i < limites.length; i++) {
+          if (limites[i] && idade >= limites[i].min && idade <= limites[i].max) {
+            vidas[FAIXAS[i]] = (vidas[FAIXAS[i]] || 0) + 1; pos++; return;
+          }
+        }
+      });
+    }
+    // Não precisa repintar aqui: montarFaixas() roda logo depois e já atualiza
+    // o total, o resumo e o estado do botão Cotar.
+  }
+
   // Um tipo já vem marcado: tela com três botões e nenhum aceso deixa a
   // pessoa sem saber o que está valendo.
   tipoEscolhido = tipoAtivo() || '';
+  aplicarPrefill();
   montarSegTipo();
   montarFaixas();
   pintarFixar();
