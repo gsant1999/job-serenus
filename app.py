@@ -26885,7 +26885,11 @@ def cotacao_bloco_planos():
     except Exception as e:
         close_db(conn)
         app.logger.warning(f"[COTACAO] bloco/planos falhou: {e}")
-        return jsonify({"ok": False, "erro": str(e)}), 500
+        # A exceção crua do Postgres vai pro LOG, não pra tela. O template
+        # imprime este `erro` direto pro consultor, e mensagem de banco
+        # ("column X does not exist", trecho de SQL) entrega a stack e não
+        # ajuda quem está do outro lado. O log acima guarda o texto inteiro.
+        return jsonify({"ok": False, "erro": "Não foi possível ler os dados agora."}), 500
 
 
 @app.route('/cotacao/bloco/calcular', methods=['POST'])
@@ -26963,7 +26967,11 @@ def cotacao_bloco_calcular():
     except Exception as e:
         close_db(conn)
         app.logger.warning(f"[COTACAO] bloco/calcular falhou: {e}")
-        return jsonify({"ok": False, "erro": str(e)}), 500
+        # A exceção crua do Postgres vai pro LOG, não pra tela. O template
+        # imprime este `erro` direto pro consultor, e mensagem de banco
+        # ("column X does not exist", trecho de SQL) entrega a stack e não
+        # ajuda quem está do outro lado. O log acima guarda o texto inteiro.
+        return jsonify({"ok": False, "erro": "Não foi possível ler os dados agora."}), 500
 
 
 @app.route('/cotacao/bloco/salvas', methods=['GET'])
@@ -27005,7 +27013,13 @@ def cotacao_bloco_salvas():
                 "token": d.get('token') or '',
                 "criado_em": str(d.get('criado_em') or ''),
                 "planos_cotados": planos_cotados,
-                "valor_total": float(d.get('valor_total') or 0)
+                # A coluna chama-se `total` (ver CREATE TABLE de cotacao_salva).
+                # Estava lendo d.get('valor_total'), que não existe: devolvia
+                # None, o `or 0` transformava em 0.0, e a aba Salvas mostrava
+                # R$ 0,00 nas 40 cotações — R$ 84.015,41 apresentados como zero.
+                # Zero medido e zero por engano são indistinguíveis na tela; o
+                # nome da chave de saída fica, o de leitura é que estava errado.
+                "valor_total": float(d.get('total') or 0)
             })
 
         total = conn.execute(
@@ -27022,7 +27036,11 @@ def cotacao_bloco_salvas():
     except Exception as e:
         close_db(conn)
         app.logger.warning(f"[COTACAO] bloco/salvas falhou: {e}")
-        return jsonify({"ok": False, "erro": str(e)}), 500
+        # A exceção crua do Postgres vai pro LOG, não pra tela. O template
+        # imprime este `erro` direto pro consultor, e mensagem de banco
+        # ("column X does not exist", trecho de SQL) entrega a stack e não
+        # ajuda quem está do outro lado. O log acima guarda o texto inteiro.
+        return jsonify({"ok": False, "erro": "Não foi possível ler os dados agora."}), 500
 
 
 @app.route('/cotacao/bloco/tabelas', methods=['GET'])
@@ -27095,7 +27113,11 @@ def cotacao_bloco_tabelas():
     except Exception as e:
         close_db(conn)
         app.logger.warning(f"[COTACAO] bloco/tabelas falhou: {e}")
-        return jsonify({"ok": False, "erro": str(e)}), 500
+        # A exceção crua do Postgres vai pro LOG, não pra tela. O template
+        # imprime este `erro` direto pro consultor, e mensagem de banco
+        # ("column X does not exist", trecho de SQL) entrega a stack e não
+        # ajuda quem está do outro lado. O log acima guarda o texto inteiro.
+        return jsonify({"ok": False, "erro": "Não foi possível ler os dados agora."}), 500
 
 
 @app.route('/cotacao/bloco/legendas', methods=['GET'])
@@ -27111,7 +27133,11 @@ def cotacao_bloco_legendas():
     except Exception as e:
         close_db(conn)
         app.logger.warning(f"[COTACAO] bloco/legendas falhou: {e}")
-        return jsonify({"ok": False, "erro": str(e)}), 500
+        # A exceção crua do Postgres vai pro LOG, não pra tela. O template
+        # imprime este `erro` direto pro consultor, e mensagem de banco
+        # ("column X does not exist", trecho de SQL) entrega a stack e não
+        # ajuda quem está do outro lado. O log acima guarda o texto inteiro.
+        return jsonify({"ok": False, "erro": "Não foi possível ler os dados agora."}), 500
 
 
 def _copart_texto(tb):
@@ -28544,7 +28570,11 @@ def api_cotacao_status_tabelas():
     except Exception as e:
         close_db(conn)
         app.logger.warning(f"[COTACAO] status-tabelas falhou: {e}")
-        return jsonify({"ok": False, "erro": str(e)}), 500
+        # A exceção crua do Postgres vai pro LOG, não pra tela. O template
+        # imprime este `erro` direto pro consultor, e mensagem de banco
+        # ("column X does not exist", trecho de SQL) entrega a stack e não
+        # ajuda quem está do outro lado. O log acima guarda o texto inteiro.
+        return jsonify({"ok": False, "erro": "Não foi possível ler os dados agora."}), 500
 
 
 @app.route('/cotacao/watchlist.json')

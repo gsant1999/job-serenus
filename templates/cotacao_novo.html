@@ -1818,6 +1818,13 @@
         if (r.status === 403) throw new Error('Esta aba é de administrador.');
         if (r.status === 404) throw new Error('A rota ainda não existe no servidor.');
         if (!r.ok) throw new Error('O servidor respondeu ' + r.status + '.');
+        // Quem não tem permissão não leva 403: o admin_required deste projeto
+        // devolve redirect pro painel, o fetch segue o 302 e chega HTML com
+        // status 200. Sem esta checagem o r.json() estourava com um erro de
+        // sintaxe de JSON, e a tela dizia "resposta fora do formato esperado"
+        // quando a verdade simples é que aquela pessoa não tem acesso.
+        var tipo = r.headers.get('Content-Type') || '';
+        if (tipo.indexOf('json') < 0) throw new Error('Você não tem acesso a esta aba.');
         return r.json();
       })
       .then(function (d) {
