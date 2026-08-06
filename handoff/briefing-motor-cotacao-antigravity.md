@@ -258,7 +258,46 @@ ser o do cache. O `/cotacao` sai porque a função dele sobe para dentro dessa c
 ser reescrito para dizer a verdade nova — que o preço vem da base do JOB, com a data da
 última atualização à vista. O frontend cuida disso.
 
-### 7.2 Bônus: some uma implementação duplicada do cálculo
+### 7.2 O ganho de velocidade — medido, e um N+1 que impede o "<50ms"
+
+Os dois lados, medidos em 05/08/2026:
+
+```
+COTAÇÃO AO VIVO (numeros reais de cotacao_viva.ms, em producao)
+  20 planos, Campinas - SP ....... 373,6 s   = 6 min 14 s   (18,7 s por plano)
+   1 plano ........................  1,5 s
+
+BASE LOCAL (calcular_cotacao com 152 tabelas x 10 faixas)
+   10 planos ->  20 consultas ...... ~0,1 a 0,2 s no Postgres da Railway
+   30 planos ->  60 consultas ...... ~0,2 a 0,5 s
+  152 planos -> 304 consultas ...... ~0,9 a 2,4 s
+```
+
+O ganho para uma cotação típica é de **6 minutos para menos de meio segundo**.
+
+**Mas o "<50ms" do plano antigo não é alcançável hoje**, e a razão é um N+1:
+`calcular_cotacao()` faz **duas consultas por plano** dentro do laço `for tid in
+plano_ids` — um `SELECT * FROM cotacao_tabela WHERE id=?` e um `SELECT faixa, preco
+FROM cotacao_preco WHERE tabela_id=?`. Comparar as 152 vira 304 idas ao banco.
+
+**Correção (backend, pequena):** buscar tudo de uma vez, exatamente como
+`api_v1_cotacao_planos()` (app.py ~19010) já faz:
+
+```python
+marc = ','.join(['?'] * len(ids))
+conn.execute(f"SELECT tabela_id, faixa, preco FROM cotacao_preco WHERE tabela_id IN ({marc})", ids)
+```
+
+304 consultas viram 2. Aí sim o "<50ms" é real, e ele deixa de crescer com o catálogo
+— que é o que importa, porque o cache existe justamente para crescer.
+
+**O que não some:** os 6 minutos não desaparecem, eles **mudam de lugar**. Saem do
+momento em que o cliente está esperando no telefone e vão para a sincronização, que
+roda uma vez por cidade, sem ninguém do outro lado. Com a watchlist atual (Campinas e
+Sorocaba × PF/PME/Adesão = 6 combinações), a carga inicial custa da ordem de meia hora
+de extração — uma vez — e depois só quando a tabela vence.
+
+### 7.3 Bônus: some uma implementação duplicada do cálculo
 
 `cotacao()` (app.py ~26263) calcula **inline**, com laço próprio sobre `cotacao_preco`,
 separado de `calcular_cotacao()` (~28480). São dois motores para a mesma conta — que é
@@ -279,7 +318,7 @@ filtros da nova tela** (conferir uma a uma antes de apagar):
 - ordenação `operadora A-Z, depois menor preço`
 - separação de tabelas incompletas
 
-### 7.3 Consolidação das quatro rotas em uma
+### 7.4 Consolidação das quatro rotas em uma
 
 `/cotacao/novo` absorve `/cotacao/salvas`, `/cotacao/tabelas` e `/cotacao/legendas`
 como abas. `/cotacao` é descontinuada. Quatro itens de menu viram um.
