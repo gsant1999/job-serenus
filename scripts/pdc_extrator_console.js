@@ -7,6 +7,15 @@
    lê os preços por faixa), junta tudo e baixa um .json pronto pra subir
    no JOB (Cotação > Importar do Painel do Corretor).
    Roda na SUA sessão, no seu ritmo (com pausa entre os planos).
+
+   ADESÃO: também lê a ENTIDADE DE CLASSE e a administradora de cada plano.
+   Na adesão a entidade muda preço e elegibilidade, e o JOB usa ela pra
+   separar as linhas — sem ela, duas entidades do mesmo plano viram uma só
+   e uma sobrescreve a outra. Se o Painel não trouxer a entidade rotulada,
+   o script PERGUNTA uma vez no fim, com o que ele achou já preenchido.
+   Ele não chuta: entidade errada é preço errado enviado ao cliente.
+   No fim sai uma tabela no console com a contagem por entidade — confira
+   ela antes de subir o arquivo.
    ===================================================================== */
 (async () => {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -42,8 +51,51 @@
       acomodacao: g(/Quarto individual \(apartamento\)|Apartamento|Enfermaria|Quarto coletivo/i),
       coparticipacao: g(/Sem coparticipa[çc][aã]o|Com coparticipa[çc][aã]o/i),
       modalidade: (t.match(/Sa[uú]de\s+(PME|PF|Ades[aã]o)/i) || [])[0] || null,
+      entidade: acharEntidade(t),
+      administradora: acharAdministradora(t),
       precos,
     };
+  }
+
+  // ── Entidade de classe e administradora (só existem na Adesão) ────────────
+  //
+  // Na Adesão a entidade muda PREÇO e ELEGIBILIDADE — dois planos iguais em
+  // entidades diferentes são linhas diferentes, e o JOB usa a entidade na chave
+  // de deduplicação. Sem ela, uma entidade sobrescreve a outra na importação.
+  //
+  // Antes isso vinha grudado no nome da operadora ("Affix ANSP") porque as
+  // tabelas eram digitadas à mão. O filtro de operadora da tela listava quatro
+  // "Affix" como se fossem quatro operadoras.
+  //
+  // A leitura tenta o rótulo primeiro, que é o único jeito confiável. Se o
+  // Painel não rotular, o script NÃO inventa: devolve vazio e pergunta uma vez
+  // no fim, com o que conseguiu achar já preenchido. Chutar aqui seria pior que
+  // não ter — entidade errada é preço errado enviado ao cliente.
+  function acharEntidade(t) {
+    const rotulado = t.match(/Entidade(?:\s+de\s+classe)?\s*:?\s*\n?\s*([^\n]{2,60})/i);
+    if (rotulado) {
+      const v = rotulado[1].trim().replace(/^[-–:]\s*/, '');
+      if (v && !/^(n[ãa]o|nenhuma|-{1,2})$/i.test(v)) return limparEntidade(v);
+    }
+    // Siglas que já apareceram nas tabelas da corretora. Serve de rede, não de
+    // regra: uma sigla nova não é reconhecida, e é por isso que existe a
+    // pergunta de confirmação.
+    const conhecida = t.match(/\b(ANSP|ASCOSERVI|FNEL|UNIPRO|ANASPL)\b/);
+    return conhecida ? conhecida[1] : '';
+  }
+
+  // Tira o parêntese descritivo: "ANASPL  (curso superior)" -> "ANASPL".
+  // O que está entre parênteses é a categoria profissional, não o nome da
+  // entidade, e colado ali ele quebra o agrupamento no JOB.
+  function limparEntidade(v) {
+    return String(v).replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  }
+
+  function acharAdministradora(t) {
+    const rotulado = t.match(/Administradora\s*:?\s*\n?\s*([^\n]{2,60})/i);
+    if (rotulado) return rotulado[1].trim().replace(/^[-–:]\s*/, '');
+    const conhecida = t.match(/\b(Qualicorp|Affix|Elo Benef[íi]cios|Allcare|Alian[çc]a Adm|Plural)\b/i);
+    return conhecida ? conhecida[1] : '';
   }
 
   // Acha os botões "Ver detalhes" (um por plano no comparativo).
@@ -70,10 +122,14 @@
     if (ok) {
       await sleep(400);
       const d = lerDetalhe();
-      const jaTem = planos.some(x => x.operadora === d.operadora && x.plano === d.plano && x.acomodacao === d.acomodacao && x.coparticipacao === d.coparticipacao);
+      // A entidade entra na comparação: na Adesão, o MESMO plano em entidades
+      // diferentes tem preço diferente e são duas linhas. Sem ela aqui, o
+      // segundo virava "repetido, pulei" e a tabela dele nunca era extraída.
+      const jaTem = planos.some(x => x.operadora === d.operadora && x.plano === d.plano && x.acomodacao === d.acomodacao && x.coparticipacao === d.coparticipacao && (x.entidade || '') === (d.entidade || ''));
       if (d.plano && Object.keys(d.precos).length && !jaTem) {
         planos.push(d);
-        console.log('%c[PDC]  ✓ ' + (d.operadora || '') + ' — ' + d.plano + ' (' + Object.keys(d.precos).length + ' faixas)', 'color:#0a7');
+        console.log('%c[PDC]  ✓ ' + (d.operadora || '') + (d.entidade ? ' [' + d.entidade + ']' : '') +
+          ' — ' + d.plano + ' (' + Object.keys(d.precos).length + ' faixas)', 'color:#0a7');
       } else if (jaTem) {
         console.log('[PDC]  (plano repetido, pulei)');
       } else {
@@ -87,12 +143,52 @@
     await sleep(600); // ritmo humano — não martelar o PDC
   }
 
+  // ── Confirmação da entidade, uma vez por rodada ──────────────────────────
+  //
+  // Só pergunta na Adesão, e só se algum plano ficou sem. Uma rodada é sempre
+  // uma entidade — ela é escolhida no Painel ANTES de gerar o comparativo —,
+  // então uma pergunta resolve a lista inteira.
+  //
+  // Vem preenchida com o que foi lido da página: se o Painel rotulou, é só dar
+  // OK. Se não rotulou, quem sabe a resposta é você, e digitar é melhor que o
+  // script chutar. Cancelar deixa em branco, e aí o JOB importa sem entidade —
+  // o que só atrapalha quando existe mais de uma entidade do mesmo plano.
+  const ehAdesao = planos.some(p => /ades/i.test(p.modalidade || ''));
+  const semEntidade = planos.filter(p => !p.entidade);
+  if (ehAdesao && semEntidade.length) {
+    const achada = (planos.find(p => p.entidade) || {}).entidade || '';
+    const resp = prompt(
+      'ADESÃO — qual a entidade de classe desta cotação?\n\n' +
+      semEntidade.length + ' de ' + planos.length + ' plano(s) vieram sem ela.\n' +
+      'Ex: ANSP, ASCOSERVI, FNEL, UNIPRO, ANASPL.\n\n' +
+      'Sem entidade, duas entidades do mesmo plano viram uma linha só no JOB ' +
+      'e uma sobrescreve a outra.',
+      achada);
+    if (resp && resp.trim()) {
+      const v = limparEntidade(resp);
+      semEntidade.forEach(p => { p.entidade = v; });
+      console.log('%c[PDC] Entidade "' + v + '" aplicada a ' + semEntidade.length + ' plano(s).', 'color:#0a7');
+    } else {
+      console.warn('[PDC] Sem entidade. Se houver mais de uma entidade do mesmo plano, ' +
+                   'a importação vai juntar as duas numa linha só.');
+    }
+  }
+
   const saida = {
     cidade,
     modalidade: (planos[0] && planos[0].modalidade) || '',
     extraido_em: new Date().toISOString(),
     planos,
   };
+
+  // Mostra o que vai subir, agrupado por entidade — é a última chance de ver
+  // que algo saiu torto ANTES do arquivo virar preço na tela do cliente.
+  const porEntidade = {};
+  planos.forEach(p => {
+    const k = p.entidade || '(sem entidade)';
+    porEntidade[k] = (porEntidade[k] || 0) + 1;
+  });
+  console.table(Object.keys(porEntidade).map(k => ({ entidade: k, planos: porEntidade[k] })));
   console.log('%c[PDC] Pronto: ' + planos.length + ' planos.', 'color:#0a7;font-weight:bold', saida);
 
   const nome = ('pdc_' + cidade + '_' + saida.modalidade).replace(/[^\w]+/g, '_').slice(0, 60) + '.json';
