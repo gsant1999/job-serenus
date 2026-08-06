@@ -27359,6 +27359,21 @@ def _viva_para_apresentacao(d):
 @login_required
 def cotacao_viva_salvar():
     d = request.get_json(silent=True) or {}
+    # SEM LEAD NÃO SALVA.
+    #
+    # A trava da tela é conveniência; esta é a que vale. Cotação sem lead não
+    # volta como conversão pra Meta nem pro Google, e o funil não fica sabendo
+    # que aquele lead recebeu proposta — foi assim que 25 de 48 vendas ficaram
+    # órfãs, e o "o JOB tenta casar pelo telefone" que existia antes é
+    # exatamente o "tenta" onde elas se perdiam.
+    try:
+        _lead = int(d.get('lead_id') or 0)
+    except (TypeError, ValueError):
+        _lead = 0
+    if not _lead:
+        return jsonify({'ok': False, 'erro': 'sem_lead',
+                        'mensagem': 'Ligue a cotação a um lead do CRM antes de salvar.'}), 400
+
     conn = db()
     try:
         vid = _cotacao_viva_gravar(conn, d, session.get('user_id'), 'site')
