@@ -26596,15 +26596,17 @@ def _cotacao_viva_gravar(conn, d, usuario_id, origem):
 
 
 def _modalidades_conhecidas(conn):
-    """Códigos de modalidade que já têm nome. O 2 vem semeado (PME, confirmado
-    na captura); os outros o Guilherme batiza quando aparecerem."""
+    """Códigos de modalidade que já têm nome. Os códigos 1 (PF), 2 (PME) e 3 (Adesão)
+    vêm semeados por padrão para garantir que a cotação funcione no Painel sem falhas."""
     try:
         linhas = conn.execute(
             "SELECT codigo, nome FROM cotacao_modalidade ORDER BY codigo").fetchall()
     except Exception:
         linhas = []
     m = {int(r['codigo']): r['nome'] for r in linhas}
+    m.setdefault(1, 'PF')
     m.setdefault(2, 'PME')
+    m.setdefault(3, 'Adesão')
     return m
 
 
@@ -29139,13 +29141,28 @@ def calcular_cotacao(conn, idades, plano_ids, recomendacoes=None):
             qtd = cont.get(fx, 0)
             if qtd <= 0:
                 continue
-            ausente = fx not in pmap
+            # "Não tem preço" é preco <= 0, NÃO é linha faltando no dicionário.
+            #
+            # Estava `fx not in pmap`, que testa se a LINHA existe em cotacao_preco.
+            # Só que o formulário de tabela (/cotacao/tabelas/nova e /editar) grava
+            # SEMPRE as 10 faixas, pondo 0 no campo deixado em branco. A linha
+            # existe, o valor é zero, e o teste de pertinência passava batido:
+            # elegivel ficava True, preco_ausente False, nenhum aviso — e a vida
+            # daquela faixa custava R$ 0,00. Medido: família de 30 e 60 anos, plano
+            # com a faixa 29-33 em branco dava R$ 400,00 contra R$ 1.000,00 do
+            # concorrente completo, e ganhava como "mais barato".
+            #
+            # É também o que o resto do arquivo já entende por preço: o
+            # /cotacao/bloco/planos filtra `AND preco>0`, o precos_ok conta
+            # `preco>0` e o _validar_precos_faixa exige `> 0`. Esta função era a
+            # única usando outra régua.
+            preco = float(pmap.get(fx) or 0)
+            ausente = preco <= 0
             if ausente:
                 elegivel = False
                 avisos.append({'plano_id': tid, 'codigo': 'preco_ausente',
                                'mensagem': f"{t['operadora']} · {t['plano']} não tem preço na faixa "
                                            f"{fx} — {qtd} vida(s) não cobertas"})
-            preco = pmap.get(fx, 0)
             sub = preco * qtd
             total += sub
             linhas.append({'faixa': fx, 'label': _faixa_label(fx), 'qtd': qtd,
