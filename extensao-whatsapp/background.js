@@ -308,6 +308,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/cnpj/' + encodeURIComponent(dig), 'GET', null, 20000).then(sendResponse);
     return true;
   }
+  // Cotações já feitas pra este cliente. A extensão pergunta isso toda vez que
+  // uma conversa abre, então lista vazia é resposta normal (cliente que nunca
+  // foi cotado) e não pode virar erro na tela.
+  if (msg && msg.type === 'cotacoes_do_lead') {
+    const qs = msg.lead_id
+      ? 'lead_id=' + encodeURIComponent(msg.lead_id)
+      : 'telefone=' + encodeURIComponent(String(msg.telefone || '').replace(/\D/g, ''));
+    chamarJob('/api/whatsapp/cotacoes?' + qs, 'GET', null, 15000).then(sendResponse);
+    return true;
+  }
   // Ficha completa do lead: UMA chamada traz lead, etapas, sub-status, campos,
   // etiquetas e atividades. Timeout maior que os 10s dos outros porque é o
   // agregado — mas ainda assim uma ida só, pro painel não montar aos pedaços.

@@ -1071,6 +1071,7 @@
   const _ICO_INBOX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>';
   const _ICO_CNPJ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-3"/><path d="M9 9v.01M9 12v.01M9 15v.01M9 18v.01"/></svg>';
   const _ICO_NOTA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>';
+  const _ICO_COTACAO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="16" y2="11"/><line x1="8" y1="15" x2="13" y2="15"/></svg>';
   const _ICO_CRM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/><path d="M21 8v6M18 11h6"/></svg>';
   const _ICO_COPIAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 
@@ -1121,6 +1122,10 @@
       '<button class="job-trilho-item" data-secao="cnpj" title="Consultar CNPJ">' +
         '<span class="job-trilho-item-icone">' + _ICO_CNPJ + '</span>' +
         '<span class="job-trilho-item-label">CNPJ</span>' +
+      '</button>' +
+      '<button class="job-trilho-item" data-secao="cotacao" title="Cotações deste cliente: ver, copiar o link e mandar na conversa">' +
+        '<span class="job-trilho-item-icone">' + _ICO_COTACAO + '</span>' +
+        '<span class="job-trilho-item-label">Cotações</span>' +
       '</button>' +
       '<button class="job-trilho-item" data-secao="notas" title="Notas do lead">' +
         '<span class="job-trilho-item-icone">' + _ICO_NOTA + '</span>' +
@@ -1333,6 +1338,7 @@
     else if (secao === 'funis') abrirSecaoFunis();
     else if (secao === 'inbox') abrirSecaoInbox();
     else if (secao === 'cnpj') abrirSecaoCnpj();
+    else if (secao === 'cotacao') abrirSecaoCotacao();
     else if (secao === 'notas') abrirSecaoNotas();
     else if (secao === 'crm') abrirSecaoNovoLead();
     else if (secao === 'fila') abrirSecaoFila();
@@ -3684,6 +3690,194 @@
     } catch (e) { /* sem conversa aberta, tudo bem */ }
     return '';
   }
+  // ── Cotações do cliente, dentro da conversa ────────────────────────────
+  //
+  // O ganho aqui não é "ter cotação na extensão". É NÃO SAIR DA CONVERSA:
+  // hoje o cliente pergunta "e aquele orçamento?" e o consultor troca de aba,
+  // abre o JOB, procura na lista, copia o link e volta. Cada troca de aba no
+  // meio de um atendimento é uma chance de perder o cliente.
+  //
+  // Esta é a metade que NÃO depende da base local de preço estar cheia: mostra
+  // o que já existe, não cota nada. Cotar aqui dentro vem depois.
+  let _cotCache = { chave: '', dados: null };
+
+  // Valor ausente devolve vazio, NUNCA "R$ 0,00" — Number(null) é 0, e zero
+  // afirma "esta cotação não vale nada". Esse defeito já mostrou R$ 84.015,41
+  // como R$ 0,00 na tela do JOB (commit 004b4ad); aqui é na frente do cliente.
+  function _cotMoeda(v) {
+    if (v === null || v === undefined || v === '') return '';
+    const n = Number(v);
+    if (!isFinite(n)) return '';
+    return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function _cotQuando(dias) {
+    if (typeof dias !== 'number' || !isFinite(dias) || dias < 0) return '';
+    if (dias === 0) return 'hoje';
+    if (dias === 1) return 'ontem';
+    if (dias < 30) return 'há ' + dias + ' dias';
+    if (dias < 60) return 'há 1 mês';
+    return 'há ' + Math.floor(dias / 30) + ' meses';
+  }
+
+  async function abrirSecaoCotacao() {
+    setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div>' +
+                  '<div class="job-sem-analise-txt">Procurando as cotações deste cliente…</div></div>');
+    let tel = '';
+    try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+    tel = String(tel || '').replace(/\D/g, '');
+    if (!tel) {
+      setCorpoSecao('<div class="job-cot-wrap"><div class="job-ia-alerta">' +
+        'Não consegui identificar o telefone desta conversa. Abra a conversa do cliente e tente de novo.' +
+        '</div></div>');
+      return;
+    }
+    // O cache é por telefone e só dura enquanto o painel está aberto: o
+    // consultor abre a seção várias vezes na mesma conversa, e não faz sentido
+    // bater no servidor a cada uma. Trocou de conversa, a chave muda sozinha.
+    let resp = (_cotCache.chave === tel) ? _cotCache.dados : null;
+    if (!resp) {
+      try { resp = await _safeSendMessage({ type: 'cotacoes_do_lead', telefone: tel }); }
+      catch (e) { resp = null; }
+      if (resp && resp.ok) _cotCache = { chave: tel, dados: resp };
+    }
+    // Falha NÃO é lista vazia. Lista vazia afirma "nunca cotamos pra este
+    // cliente"; falha afirma "não consegui saber". A primeira, dita errada,
+    // vira um consultor dizendo ao cliente que nunca cotou — quando cotou.
+    if (!resp || !resp.ok) {
+      setCorpoSecao('<div class="job-cot-wrap">' +
+        '<div class="job-ia-alerta">' + esc((resp && resp.erro) ||
+          'Não consegui carregar as cotações agora. Isso não quer dizer que não existam.') + '</div>' +
+        '<button class="job-cnpj-btn" id="job-cot-retry">Tentar de novo</button>' +
+      '</div>');
+      const br = document.getElementById('job-cot-retry');
+      if (br) br.addEventListener('click', () => { _cotCache = { chave: '', dados: null }; abrirSecaoCotacao(); });
+      return;
+    }
+    _cotPintar(resp, tel);
+  }
+
+  function _cotPintar(resp, tel) {
+    const lista = resp.cotacoes || [];
+    const nome = resp.lead_nome || nomeDoContato() || 'este cliente';
+    const linkNovo = _SITE_BASE_URL_EXT + '/cotacao/novo' +
+      (resp.lead_id ? '?lead=' + encodeURIComponent(resp.lead_id) : '');
+
+    let corpo;
+    if (!lista.length) {
+      // Vazio com saída. Dizer só "nenhuma cotação" deixa o consultor parado
+      // com o cliente esperando do outro lado.
+      corpo = '<div class="job-cot-vazio">' +
+          '<div class="job-cot-vazio-t">Nenhuma cotação para ' + esc(nome) + '.</div>' +
+          '<div class="job-cot-vazio-s">' +
+            (resp.lead_id ? 'Este cliente já é lead no CRM — dá pra cotar agora.'
+                          : 'Este número ainda não é um lead do CRM. A cotação só sai com o lead ligado.') +
+          '</div>' +
+        '</div>';
+    } else {
+      // O título salvo começa com o nome do cliente ("Beatriz · Campinas - SP ·
+      // Adesão"), mas o nome já está no cabeçalho e é o mesmo em todos os
+      // cartões. Repetido três vezes, ele empurra pra segunda linha justamente
+      // o que diferencia uma cotação da outra. Corta só quando bate mesmo.
+      const semNome = (t) => {
+        const s = String(t || '');
+        const corte = s.indexOf(' · ');
+        if (corte > 0 && nome && s.slice(0, corte).trim() === String(nome).trim()) {
+          return s.slice(corte + 3);
+        }
+        return s;
+      };
+      corpo = lista.map((c) => {
+        const partes = [];
+        if (c.planos_cotados) partes.push(c.planos_cotados + (c.planos_cotados === 1 ? ' plano' : ' planos'));
+        if (c.total) partes.push(_cotMoeda(c.total));
+        return '<div class="job-cot-item">' +
+            '<div class="job-cot-item-topo">' +
+              '<div class="job-cot-item-t">' + esc(semNome(c.titulo) || 'Cotação #' + c.id) + '</div>' +
+              (_cotQuando(c.dias) ? '<span class="job-cot-item-q">' + esc(_cotQuando(c.dias)) + '</span>' : '') +
+            '</div>' +
+            (partes.length ? '<div class="job-cot-item-s">' + esc(partes.join(' · ')) + '</div>' : '') +
+            (c.url
+              ? '<div class="job-cot-item-acoes">' +
+                  '<button class="job-cot-bt-mandar" data-url="' + esc(c.url) + '">Mandar na conversa</button>' +
+                  '<button class="job-cot-bt-copiar" data-url="' + esc(c.url) + '">Copiar link</button>' +
+                '</div>'
+              // Sem token não existe link público. Dizer o motivo evita o
+              // consultor procurar um botão que nunca vai aparecer.
+              : '<div class="job-cot-item-s job-cot-sem-link">Sem link público — abra no JOB para gerar.</div>') +
+          '</div>';
+      }).join('');
+    }
+
+    setCorpoSecao(
+      '<div class="job-cot-wrap">' +
+        '<div class="job-cnpj-titulo">Cotações</div>' +
+        '<div class="job-cnpj-sub">' + esc(nome) +
+          (lista.length ? ' · ' + lista.length + (lista.length === 1 ? ' cotação' : ' cotações') : '') +
+        '</div>' +
+        corpo +
+        '<a class="job-cot-nova" href="' + esc(linkNovo) + '" target="_blank" rel="noopener">' +
+          (lista.length ? 'Nova cotação no JOB' : 'Cotar no JOB') +
+        '</a>' +
+      '</div>');
+
+    document.querySelectorAll('.job-cot-bt-copiar').forEach((b) => {
+      b.addEventListener('click', () => {
+        navigator.clipboard.writeText(b.dataset.url || '').then(() => {
+          const antes = b.textContent;
+          b.textContent = 'Copiado';
+          setTimeout(() => { b.textContent = antes; }, 1500);
+        });
+      });
+    });
+    document.querySelectorAll('.job-cot-bt-mandar').forEach((b) => {
+      b.addEventListener('click', () => _cotMandar(b));
+    });
+  }
+
+  // Manda o link na conversa aberta pelo mesmo caminho dos outros envios da
+  // extensão (enviar_direto), pra a mensagem entrar no histórico do lead no
+  // CRM igual às outras — e não como um texto solto que ninguém registrou.
+  async function _cotMandar(btn) {
+    const url = btn.dataset.url || '';
+    if (!url) return;
+    const antes = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Enviando…';
+    const { usuarioId } = await _safeStorageGet(['usuarioId']);
+    if (!usuarioId) {
+      btn.textContent = 'Escolha seu usuário no popup';
+      btn.disabled = false;
+      setTimeout(() => { btn.textContent = antes; }, 2600);
+      return;
+    }
+    let nome = nomeDoContato();
+    let chatId = '';
+    try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
+    let telefone = await garantirTelefone(nome, chatId);
+    nome = nomeMaisConfiavel(nome);
+    if (!chatId && !telefone) {
+      btn.textContent = 'Não identifiquei a conversa';
+      btn.disabled = false;
+      setTimeout(() => { btn.textContent = antes; }, 2600);
+      return;
+    }
+    try {
+      const payload = { telefone, nome, texto: url, usuario_id: usuarioId };
+      if (chatId) payload.chat_id = chatId;
+      const r = await chrome.runtime.sendMessage({ type: 'enviar_direto', payload });
+      if (r && r.ok) {
+        btn.textContent = 'Enviado';
+        setTimeout(() => { btn.textContent = antes; btn.disabled = false; }, 2000);
+      } else {
+        btn.textContent = 'Falhou — tentar de novo';
+        btn.disabled = false;
+      }
+    } catch (e) {
+      btn.textContent = 'Falhou — tentar de novo';
+      btn.disabled = false;
+    }
+  }
+
   function abrirSecaoCnpj() {
     const pre = _cnpjNaConversa();
     setCorpoSecao(
