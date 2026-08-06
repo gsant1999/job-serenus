@@ -26819,8 +26819,11 @@ def cotacao_bloco_planos():
         hoje_date = hoje_dt.date()
         hoje_ym = hoje_dt.strftime('%Y-%m')
         
-        _fx_min_map = {'00-18': 0, '19-23': 19, '24-28': 24, '29-33': 29, '34-38': 34,
-                       '39-43': 39, '44-48': 44, '49-53': 49, '54-58': 54, '59+': 59}
+        def _fx_min_idade(fx):
+            try:
+                return int(str(fx).split('-')[0].replace('+', '').strip())
+            except (ValueError, IndexError, TypeError):
+                return 0
 
         logo_cache = {}
         planos = []
@@ -26845,7 +26848,7 @@ def cotacao_bloco_planos():
             pmap = precos_map.get(tid, {})
             precos_ok = len(pmap)
             valid_fxs = [fx for fx, prc in pmap.items() if prc > 0]
-            idade_min = min([_fx_min_map.get(fx, 0) for fx in valid_fxs]) if valid_fxs else 0
+            idade_min = min([_fx_min_idade(fx) for fx in valid_fxs]) if valid_fxs else 0
             menor_preco = min(pmap.values()) if pmap else float('inf')
 
             planos.append({
