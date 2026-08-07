@@ -25,6 +25,44 @@
   const pendentes = new Map();
   let seq = 0;
 
+  // O QUE UM APRENDE, TODOS RECEBEM — mas a máquina local sempre tem razão.
+  //
+  // O `next-action` é gerado por BUILD, não por usuário: é a mesma string pros
+  // oito consultores. Hoje cada máquina reaprende sozinha, e um deploy da
+  // Trindade custa oito aprendizados manuais pra descobrir a mesma coisa.
+  //
+  // A nuvem entra como PALPITE, nunca como verdade. Deu 404, o cotador apaga o
+  // papel (já fazia isso), a máquina reaprende observando e publica o novo.
+  // Esta ordem é o que protege do deploy gradual: quando duas versões do Painel
+  // coexistem, o hash certo numa máquina é 404 na outra — e aí cada uma
+  // converge pro servidor que ELA está atingindo, sem uma derrubar a outra.
+  //
+  // Só o HASH atravessa. A `arvore` (next-router-state-tree) fica local até
+  // alguém confirmar que ela não carrega nada do corretor.
+  const PAPEIS_CONHECIDOS = ['criar', 'abrir', 'vidas', 'filtro', 'operadoras',
+                             'planos', 'preco', 'entidade'];
+  let ultimoPublicado = {};
+
+  function publicarNaNuvem(dados) {
+    try {
+      const vivos = {}, mortos = [];
+      PAPEIS_CONHECIDOS.forEach((k) => {
+        const agora = dados[k] && dados[k].hash;
+        const antes = ultimoPublicado[k];
+        if (agora) vivos[k] = agora;
+        // Só é MORTE quando havia hash e ele sumiu — o cotador zera o papel
+        // exatamente no 404. Papel que nunca existiu não é morte, é silêncio,
+        // e mandar isso como morte apagaria o acerto de outra máquina.
+        else if (antes) mortos.push({ papel: k, hash: antes });
+      });
+      if (!Object.keys(vivos).length && !mortos.length) return;
+      ultimoPublicado = vivos;
+      chrome.runtime.sendMessage(
+        { type: 'cotador_nuvem_gravar', origem: location.origin, papeis: vivos, mortos },
+        () => { void chrome.runtime.lastError; });
+    } catch (e) { /* sem nuvem, continua funcionando como antes */ }
+  }
+
   // Devolve o que foi aprendido em sessões anteriores assim que a página carrega.
   try {
     chrome.storage.local.get([CHAVE, CHAVE_MOD], (r) => {
@@ -34,6 +72,33 @@
         window.postMessage({ source: 'JOB_COTADOR_BRIDGE', tipo: 'restaurar',
                              dados: { ...(d || {}), modalidades: mods } }, '*');
       }
+      Object.keys(d || {}).forEach((k) => {
+        if (d[k] && d[k].hash) ultimoPublicado[k] = d[k].hash;
+      });
+      // Depois do local, pergunta à nuvem — e só usa o que falta aqui.
+      try {
+        chrome.runtime.sendMessage(
+          { type: 'cotador_nuvem_ler', origem: location.origin },
+          (resp) => {
+            void chrome.runtime.lastError;
+            const nuvem = (resp && resp.ok && resp.papeis) || null;
+            if (!nuvem) return;
+            const novos = {};
+            Object.keys(nuvem).forEach((k) => {
+              if (!(d && d[k] && d[k].hash) && typeof nuvem[k] === 'string') {
+                novos[k] = { hash: nuvem[k], arvore: null };
+              }
+            });
+            if (!Object.keys(novos).length) return;
+            window.postMessage({ source: 'JOB_COTADOR_BRIDGE', tipo: 'restaurar',
+                                 dados: novos }, '*');
+            // Guarda o palpite também: se ele funcionar, na próxima abertura
+            // já vale como local e a nuvem nem precisa ser consultada.
+            try {
+              chrome.storage.local.set({ [CHAVE]: { ...(d || {}), ...novos } });
+            } catch (e2) {}
+          });
+      } catch (e2) { /* sem nuvem, é o comportamento de antes */ }
     });
   } catch (e) { /* sem armazenamento a extensão aprende de novo, só isso */ }
 
@@ -44,6 +109,7 @@
 
     if (d.tipo === 'aprendeu' && d.dados) {
       try { chrome.storage.local.set({ [CHAVE]: d.dados }); } catch (e) { /* idem */ }
+      publicarNaNuvem(d.dados);
       // AVISA O JOB QUE JÁ APRENDEU.
       //
       // Aqui a corrente parava. A extensão reaprendia na hora em que o

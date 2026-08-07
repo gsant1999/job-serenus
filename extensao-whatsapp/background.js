@@ -431,6 +431,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   //
   // Vai pra todas as abas do JOB porque ele costuma ter mais de uma aberta, e
   // nao da pra saber qual esta esperando.
+  // O que um consultor ensina, os outros recebem. O `next-action` é por BUILD,
+  // não por usuário — é a mesma string pra todo mundo. Sem isto, um deploy da
+  // Trindade custa um aprendizado manual POR PESSOA pra descobrir o mesmo.
+  //
+  // Prazo curto e falha silenciosa de propósito: isto é conveniência. Se o JOB
+  // estiver fora do ar, a extensão aprende sozinha como sempre aprendeu — não
+  // pode virar dependência pra cotar.
+  if (msg && msg.type === 'cotador_nuvem_ler') {
+    chamarJob('/api/whatsapp/cotador/hashes?origem=' + encodeURIComponent(msg.origem || ''),
+              'GET', null, 6000).then((r) => sendResponse(r || { ok: false }))
+                                .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg && msg.type === 'cotador_nuvem_gravar') {
+    chamarJob('/api/whatsapp/cotador/hashes', 'POST',
+              { origem: msg.origem || '', papeis: msg.papeis || {}, mortos: msg.mortos || [] },
+              8000, null, { repetivel: true })
+      .then(() => {}).catch(() => {});
+    return;   // aviso de mão única: ninguém espera resposta pra continuar cotando
+  }
   if (msg && msg.type === 'cotador_aprendeu') {
     chrome.tabs.query({}, (todas) => {
       (todas || []).forEach((a) => {
