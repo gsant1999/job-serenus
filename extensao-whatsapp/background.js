@@ -318,6 +318,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/cotacoes?' + qs, 'GET', null, 15000).then(sendResponse);
     return true;
   }
+  // Salvar no JOB a cotação feita dentro da conversa. Timeout maior que os
+  // outros porque grava em dois lugares (histórico vivo + apresentação).
+  if (msg && msg.type === 'cotacao_salvar') {
+    chamarJob('/api/whatsapp/cotacao/salvar', 'POST', msg.payload || {}, 25000).then(sendResponse);
+    return true;
+  }
   // Ficha completa do lead: UMA chamada traz lead, etapas, sub-status, campos,
   // etiquetas e atividades. Timeout maior que os 10s dos outros porque é o
   // agregado — mas ainda assim uma ida só, pro painel não montar aos pedaços.

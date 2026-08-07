@@ -3763,6 +3763,9 @@
   }
 
   function _cotPintar(resp, tel) {
+    // Guarda o lead da conversa: salvar a cotação exige vínculo, e é aqui
+    // que ele já veio resolvido pelo servidor.
+    _cotLead = { id: resp.lead_id || 0, nome: resp.lead_nome || '', telefone: tel || '' };
     const lista = resp.cotacoes || [];
     const nome = resp.lead_nome || nomeDoContato() || 'este cliente';
     const linkNovo = _SITE_BASE_URL_EXT + '/cotacao/novo' +
@@ -3909,7 +3912,16 @@
   // calma; aqui ele está com o cliente digitando do outro lado. Cada preço é
   // uma ida ao Painel com pausa humana no meio — 6 é o que cabe numa conversa.
   const _COT_MAX = 6;
-  let _cot = null;   // estado do fluxo aberto agora
+  // MODALIDADE É CÓDIGO, NÃO TEXTO. O filtro que vai pro Painel usa 1/2/3, e
+  // eu mandei "PF"/"PME"/"Adesão": o Painel recebia um valor que não existe e
+  // devolvia lista de outro tipo de contratação. O rótulo fica só na tela.
+  const _COT_TIPOS = [{ cod: 1, rot: 'PF' }, { cod: 2, rot: 'PME' }, { cod: 3, rot: 'Adesão' }];
+  function _cotRotulo(cod) {
+    const t = _COT_TIPOS.filter((x) => x.cod === Number(cod))[0];
+    return t ? t.rot : '';
+  }
+  let _cot = null;      // estado do fluxo aberto agora
+  let _cotLead = null;  // lead da conversa, resolvido pelo servidor
 
   function _cotRespira(min, max) {
     const faixa = max - min;
@@ -3941,6 +3953,21 @@
     idades.forEach((i) => { const f = _cotFaixaDaIdade(i); conta[f] = (conta[f] || 0) + 1; });
     return { vidas: _COT_FAIXAS.filter((f) => conta[f]).map((f) => ({ faixa: f, quantidade: conta[f] })),
              total: idades.length };
+  }
+
+  // O plano vem do Painel como OBJETO: nome, acomodação e coparticipação moram
+  // em p.plano e p.tabela, não na raiz. Eu lia p.nome e a lista inteira saía
+  // com "Plano" em toda linha — o consultor escolheria no escuro.
+  function _cotNomePlano(p) {
+    return ((p && p.plano) || {}).nome || (p && p.nome) || 'Plano';
+  }
+  function _cotDetalhePlano(p) {
+    const pl = (p && p.plano) || {}, tb = (p && p.tabela) || {};
+    const partes = [pl.acomodacao ? 'Apartamento' : 'Enfermaria',
+                    tb.coparticipacao ? 'Com coparticipação' : 'Sem coparticipação'];
+    const prod = ((p && p.produto) || {}).nome;
+    if (prod) partes.push(prod);
+    return partes.join(' · ');
   }
 
   function _cotPasso(pedido, ms) {
@@ -3997,9 +4024,9 @@
         '</div>' +
         '<label class="job-cot-rot">Tipo</label>' +
         '<div class="job-cot-seg" id="job-cot-tipo">' +
-          ['PF', 'PME', 'Adesão'].map((t) =>
-            '<button type="button" data-v="' + t + '"' +
-            ((v.modalidade || 'PF') === t ? ' class="on"' : '') + '>' + t + '</button>').join('') +
+          _COT_TIPOS.map((t) =>
+            '<button type="button" data-v="' + t.cod + '"' +
+            (Number(v.modalidade || 1) === t.cod ? ' class="on"' : '') + '>' + t.rot + '</button>').join('') +
         '</div>' +
         '<label class="job-cot-rot">Idades de quem vai usar</label>' +
         '<input id="job-cot-idades" class="job-cnpj-input" placeholder="5, 50, 55" value="' + esc(v.idades || '') + '">' +
@@ -4060,7 +4087,7 @@
       if (!iCid.value.trim()) { dica.textContent = 'Falta a cidade.'; dica.classList.remove('ok'); return; }
       if (!r.total) { dica.textContent = 'Falta a idade de quem vai usar o plano.'; dica.classList.remove('ok'); return; }
       const tipo = (document.querySelector('#job-cot-tipo button.on') || {}).dataset;
-      _cot = { cidade: iCid.value.trim(), modalidade: (tipo && tipo.v) || 'PF',
+      _cot = { cidade: iCid.value.trim(), modalidade: Number((tipo && tipo.v) || 1),
                idades: iIda.value, vidas: r.vidas, totalVidas: r.total };
       _cotBuscarOperadoras();
     });
@@ -4068,7 +4095,7 @@
 
   function _cotBase() {
     return { cidade: _cot.cidade, modalidade: _cot.modalidade, vidas: _cot.vidas,
-             titulo: (nomeDoContato() || 'Cliente') + ' · ' + _cot.cidade + ' · ' + _cot.modalidade };
+             titulo: (nomeDoContato() || 'Cliente') + ' · ' + _cot.cidade + ' · ' + _cotRotulo(_cot.modalidade) };
   }
   function _cotEsperando(txt, sub) {
     setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div>' +
@@ -4097,7 +4124,7 @@
     setCorpoSecao('<div class="job-cot-wrap">' +
       '<div class="job-cnpj-titulo">Operadoras</div>' +
       '<div class="job-cnpj-sub">Quem atende <b>' + esc(_cot.cidade) + '</b> · ' +
-        esc(_cot.modalidade) + ' · ' + _cot.totalVidas + (_cot.totalVidas === 1 ? ' vida' : ' vidas') + '</div>' +
+        esc(_cotRotulo(_cot.modalidade)) + ' · ' + _cot.totalVidas + (_cot.totalVidas === 1 ? ' vida' : ' vidas') + '</div>' +
       (ops.length
         ? '<div class="job-cot-ops">' + ops.map((o) =>
             '<button type="button" class="job-cot-op" data-id="' + esc(o.id) + '">' + esc(o.nome) + '</button>').join('') + '</div>'
@@ -4130,10 +4157,8 @@
       (pls.length
         ? pls.map((p, i) =>
             '<label class="job-cot-plano"><input type="checkbox" data-i="' + i + '">' +
-              '<span><b>' + esc(p.nome || 'Plano') + '</b>' +
-              (p.acomodacao || p.coparticipacao
-                ? '<small>' + esc([p.acomodacao, p.coparticipacao].filter(Boolean).join(' · ')) + '</small>'
-                : '') + '</span></label>').join('')
+              '<span><b>' + esc(_cotNomePlano(p)) + '</b>' +
+              '<small>' + esc(_cotDetalhePlano(p)) + '</small></span></label>').join('')
         : '<div class="job-cot-vazio"><div class="job-cot-vazio-t">Nenhum plano dessa operadora serve para essas vidas.</div></div>') +
       '<button class="job-cnpj-btn" id="job-cot-precos" disabled>Ver preços</button>' +
       '<button class="job-cot-nova" id="job-cot-volta-ops" style="border:none;cursor:pointer;width:100%;font-family:inherit">Outra operadora</button>' +
@@ -4190,7 +4215,7 @@
   function _cotCartoes(lista) {
     return lista.map((p) =>
       '<div class="job-cot-res' + (p.total == null ? ' sem' : '') + '">' +
-        '<div class="job-cot-res-n">' + esc(p.nome || 'Plano') + '</div>' +
+        '<div class="job-cot-res-n">' + esc(_cotNomePlano(p)) + '</div>' +
         '<div class="job-cot-res-v">' +
           (p.total == null ? 'sem preço' : _cotMoeda(p.total)) +
         '</div>' +
@@ -4202,22 +4227,80 @@
     const comPreco = r.filter((p) => p.total != null);
     setCorpoSecao('<div class="job-cot-wrap">' +
       '<div class="job-cnpj-titulo">' + esc(_cot.operadoraAtual.nome) + '</div>' +
-      '<div class="job-cnpj-sub">' + esc(_cot.cidade) + ' · ' + esc(_cot.modalidade) + ' · ' +
+      '<div class="job-cnpj-sub">' + esc(_cot.cidade) + ' · ' + esc(_cotRotulo(_cot.modalidade)) + ' · ' +
         _cot.totalVidas + (_cot.totalVidas === 1 ? ' vida' : ' vidas') + '</div>' +
       _cotCartoes(r) +
       (comPreco.length
-        ? '<button class="job-cot-bt-mandar" id="job-cot-mandar" style="width:100%;margin-top:8px">Mandar na conversa</button>'
+        ? '<button class="job-cot-bt-mandar" id="job-cot-mandar" style="width:100%;margin-top:8px">Mandar na conversa</button>' +
+          '<button class="job-cot-bt-copiar" id="job-cot-salvar" style="width:100%;margin-top:6px">Salvar no JOB (gera link)</button>' +
+          '<div class="job-cot-dica" id="job-cot-salvo"></div>'
         : '<div class="job-ia-alerta">Nenhum preço voltou. Isso não quer dizer que não exista — o Painel não respondeu o valor.</div>') +
       '<button class="job-cot-nova" id="job-cot-mais" style="border:none;cursor:pointer;width:100%;font-family:inherit">Cotar outra operadora</button>' +
     '</div>');
     document.getElementById('job-cot-mais').addEventListener('click', _cotPintarOperadoras);
     const bm = document.getElementById('job-cot-mandar');
     if (bm) bm.addEventListener('click', () => _cotMandarTexto(bm, comPreco));
+    const bs = document.getElementById('job-cot-salvar');
+    if (bs) bs.addEventListener('click', () => _cotSalvarNoJob(bs, comPreco));
+  }
+
+  // Salva no JOB o que acabou de ser cotado: vira registro, ganha link público
+  // e conta na produção. Sem isso a cotação mais rápida do sistema seria a
+  // única que não existe em lugar nenhum.
+  //
+  // Os planos vão COMO VIERAM DO PAINEL. O servidor lê p['plano']['nome'],
+  // p['operadora']['nome'] e f['unitario'] — achatar aqui quebraria a leitura
+  // e foi exatamente o que me custou uma rodada de conserto.
+  async function _cotSalvarNoJob(btn, lista) {
+    const aviso = document.getElementById('job-cot-salvo');
+    const dizer = (t, ok) => { if (aviso) { aviso.textContent = t; aviso.classList.toggle('ok', !!ok); } };
+    if (!lista.length) { dizer('Não há preço para salvar.'); return; }
+    const { usuarioId } = await _safeStorageGet(['usuarioId']);
+    if (!usuarioId) { dizer('Escolha seu usuário no popup da extensão primeiro.'); return; }
+    // A trava do lead é do servidor, mas dizer aqui poupa uma ida e explica o
+    // que fazer — o consultor está no meio de um atendimento.
+    if (!_cotLead || !_cotLead.id) {
+      dizer('Este número ainda não é um lead do CRM. Cadastre o lead para salvar a cotação.');
+      return;
+    }
+    btn.disabled = true;
+    const antes = btn.textContent;
+    btn.textContent = 'Salvando…';
+    let r;
+    try {
+      r = await _safeSendMessage({ type: 'cotacao_salvar', payload: {
+        usuario_id: usuarioId,
+        lead_id: _cotLead.id,
+        telefone: _cotLead.telefone || '',
+        cliente_nome: _cotLead.nome || nomeDoContato() || '',
+        cliente_telefone: _cotLead.telefone || '',
+        titulo: (_cotLead.nome || nomeDoContato() || 'Cliente') + ' · ' + _cot.cidade +
+                ' · ' + _cotRotulo(_cot.modalidade),
+        cidade: _cot.cidade,
+        modalidade: _cot.modalidade,
+        vidas: _cot.vidas,
+        planos: lista.map((p) => Object.assign({}, p, { _tipo: _cotRotulo(_cot.modalidade) }))
+      } });
+    } catch (e) { r = null; }
+    btn.disabled = false;
+    btn.textContent = antes;
+    if (!r || !r.ok) {
+      const m = (r && r.erro) || '';
+      dizer(m === 'sem_lead' ? 'A cotação só é salva com um lead do CRM ligado.'
+          : m === 'usuario_invalido' ? 'Seu usuário não foi reconhecido. Escolha de novo no popup.'
+          : m === 'sem_cidade' ? 'Faltou a cidade na cotação.'
+          : 'Não consegui salvar agora. Os preços continuam aqui — tente de novo.');
+      return;
+    }
+    // A lista de cotações do cliente muda a partir de agora.
+    _cotCache = { chave: '', dados: null };
+    btn.textContent = 'Salvo no JOB';
+    dizer('Cotação salva. O link já pode ser mandado pela aba Cotações.', true);
   }
 
   function _cotMandarTexto(btn, lista) {
     const linhas = lista.map((p) =>
-      p.nome + ' — ' + _cotMoeda(p.total) + '/mês');
+      _cotNomePlano(p) + ' — ' + _cotMoeda(p.total) + '/mês');
     const txt = _cot.operadoraAtual.nome + ' · ' + _cot.cidade + ' · ' +
       _cot.totalVidas + (_cot.totalVidas === 1 ? ' vida' : ' vidas') + '\n\n' + linhas.join('\n');
     btn.dataset.url = txt;   // _cotMandar manda o conteúdo de dataset.url
@@ -6221,7 +6304,7 @@
         // Abria aba nova no JOB. Agora cota aqui mesmo, com as idades que a
         // análise já leu da conversa — era o último lugar da extensão que
         // obrigava o consultor a sair do atendimento pra cotar.
-        _cot = { idades: bc.dataset.idades || '', cidade: '', modalidade: 'PF' };
+        _cot = { idades: bc.dataset.idades || '', cidade: '', modalidade: 1 };
         _cotDireto = true;
         abrirSecao('cotacao');
       });
