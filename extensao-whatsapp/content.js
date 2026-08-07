@@ -4519,6 +4519,31 @@
   const _cotLogos = {};        // memória desta aba, pra não ir ao storage a cada pintura
   let _cotLogosLidos = false;
 
+  // LOGOS QUE O PAINEL NÃO TEM, embutidas na extensão.
+  //
+  // Cinco operadoras vinham sem logo porque o Painel não devolve a delas — não
+  // era falha da busca. Baixei do site oficial de cada uma, aparei a folga e
+  // guardei aqui. Vêm de `chrome-extension://`, que é o único endereço de
+  // imagem que a página do WhatsApp aceita sem discussão.
+  //
+  // A comparação é por trecho do nome normalizado, porque o Painel escreve
+  // "Plano de Saúde Vera Cruz" e o arquivo se chama só "vera-cruz". Casar por
+  // igualdade exata quebraria no dia em que eles mudarem o nome comercial.
+  const _COT_LOGOS_PROPRIAS = [
+    { chave: 'vera cruz',    arq: 'logos/vera-cruz.png' },
+    { chave: 'salusmed',     arq: 'logos/salusmed.png' },
+    { chave: 'samp',         arq: 'logos/samp.png' },
+    { chave: 'santa tereza', arq: 'logos/santa-tereza.png' },
+    { chave: 'select',       arq: 'logos/select.png' },
+  ];
+  function _cotLogoPropria(nome) {
+    const n = String(nome || '').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const achou = _COT_LOGOS_PROPRIAS.filter((x) => n.indexOf(x.chave) >= 0)[0];
+    if (!achou) return '';
+    try { return chrome.runtime.getURL(achou.arq); } catch (e) { return ''; }
+  }
+
   function _cotChaveLogo(nome) {
     return 'logo_op:' + String(nome || '').trim().toLowerCase().slice(0, 60);
   }
@@ -4542,6 +4567,19 @@
     for (let i = 0; i < ops.length; i++) {
       const o = ops[i];
       const chave = _cotChaveLogo(o.nome);
+      // A embutida vence: já está na máquina, não vai à rede e é justamente
+      // das operadoras que o Painel não cobre.
+      const propria = _cotLogoPropria(o.nome);
+      if (propria) {
+        const alvoP = document.querySelector('.job-cot-op[data-id="' + String(o.id).replace(/"/g, '') + '"]');
+        if (alvoP && !alvoP.querySelector('img')) {
+          const imgP = document.createElement('img');
+          imgP.alt = ''; imgP.src = propria;
+          alvoP.insertBefore(imgP, alvoP.firstChild);
+        }
+        _cotLogos[chave] = propria;
+        continue;
+      }
       if (!o.logotipo) continue;                 // o Painel não tem logo dessa: a inicial é a resposta
       let dado = _cotLogos[chave];
       // FRACASSO NÃO É PERMANENTE.
