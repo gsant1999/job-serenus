@@ -47,7 +47,11 @@
      três são consulta e manutenção, e só carregam quando pedidas. */
   .cv-abas { display:flex; gap:3px; padding:3px; border-radius:12px; margin:0 0 18px;
     background:var(--panel-2); border:1px solid var(--borda); overflow-x:auto; }
-  .cv-abas button { flex:1; min-width:104px; padding:10px 14px; border:none; border-radius:9px;
+  /* flex:1 com flex-basis 0 dava a mesma largura a todas as abas, e o texto
+     com o contador transbordava POR CIMA da aba seguinte — "Cotações salvas 4"
+     invadia "Tabelas de preço". Com basis auto, cada aba pede o tamanho do
+     proprio conteudo e o contador cabe. */
+  .cv-abas button { flex:1 1 auto; min-width:104px; padding:10px 14px; border:none; border-radius:9px;
     cursor:pointer; background:none; color:var(--cinza); font-size:13px; font-weight:650;
     font-family:inherit; white-space:nowrap; transition:background .15s, color .15s; }
   .cv-abas button:hover { color:var(--texto); }
@@ -212,6 +216,49 @@
 
   /* Refinamento: título forte, opções como texto. Peso baixo de propósito —
      são ajustes, não a decisão principal. */
+  /* Pastas das Cotacoes salvas: consultor -> cliente -> cotacoes.
+     So o nivel do consultor nao resolve — um consultor com 60 cotacoes
+     continua sendo uma pilha de 60 linhas. Quem se procura e o CLIENTE. */
+  .cv-pasta { display:flex; align-items:center; gap:8px; margin:22px 0 8px;
+    font-size:14px; font-weight:700; color:var(--texto); }
+  .cv-pasta-i { display:flex; color:var(--cinza-2); }
+  .cv-pasta-n { margin-left:auto; font-size:11.5px; font-weight:600; color:var(--cinza-2);
+    background:var(--panel-2); border-radius:6px; padding:2px 8px; }
+  .cv-cliente-pasta { border:1px solid var(--borda-2); border-radius:11px;
+    margin-bottom:8px; overflow:hidden; background:var(--panel); }
+  .cv-cliente-pasta > summary { display:flex; align-items:center; gap:10px; cursor:pointer;
+    padding:11px 13px; list-style:none; font-size:13.5px; }
+  .cv-cliente-pasta > summary::-webkit-details-marker { display:none; }
+  .cv-cliente-pasta > summary::before { content:''; width:7px; height:7px; flex:none;
+    border-right:2px solid var(--cinza-2); border-bottom:2px solid var(--cinza-2);
+    transform:rotate(-45deg); transition:transform .16s; }
+  .cv-cliente-pasta[open] > summary::before { transform:rotate(45deg); }
+  .cv-cliente-pasta > summary:hover { background:var(--panel-2); }
+  .cv-cli-nome { font-weight:700; color:var(--texto); }
+  .cv-cli-tel { font-size:11.5px; color:var(--cinza-2); }
+  .cv-cli-n { margin-left:auto; font-size:11.5px; color:var(--cinza-2); }
+  /* A tabela estourava a largura e o "Quando" saia da tela. Rolagem propria
+     na tabela, nunca na pagina. */
+  .cv-cliente-pasta table.cot { margin:0; }
+  .cv-cliente-pasta { }
+  .cv-cliente-pasta > table, .cv-cliente-pasta table.cot { width:100%; }
+  .cv-sub { font-size:11px; color:var(--cinza-2); }
+  .cv-sem-tipo { color:var(--cinza-2); font-style:italic; }
+  .cv-num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .cv-acoes { white-space:nowrap; text-align:right; }
+  .cv-acoes .b + .b { margin-left:5px; }
+
+  /* Rolagem lateral fica NA LISTA, nunca na pagina. E a coluna de ACOES fica
+     presa a direita: e a coluna mais usada da tela, e era justamente a que
+     saia de vista quando a tabela nao cabia. */
+  .cv-salvas-lista table.cot { display:block; overflow-x:auto; }
+  .cv-salvas-lista table.cot th:last-child,
+  .cv-salvas-lista table.cot td:last-child { position:sticky; right:0;
+    background:var(--panel); box-shadow:-8px 0 12px -8px rgba(0,0,0,.35); }
+  [data-theme="light"] .cv-salvas-lista table.cot td:last-child,
+  [data-theme="light"] .cv-salvas-lista table.cot th:last-child {
+    box-shadow:-8px 0 12px -8px rgba(0,0,0,.12); }
+
   .cv-refino { margin-top:6px; }
   .cv-refino h4 { margin:0 0 6px; font-size:13.5px; font-weight:700; color:var(--texto); }
   .cv-opts { display:flex; flex-direction:column; gap:2px; align-items:flex-start; }
@@ -2486,6 +2533,9 @@
   }
 
   /* ── Cotações salvas ───────────────────────────────────────────────────── */
+  var ICONE_PASTA = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 ' +
+    '2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>';
   var salvasFiltroCidade = '';
   var salvasFiltroModalidade = '';
   var salvasDados = null;
@@ -2530,43 +2580,70 @@
       grupos['meus|Minhas Cotações'] = filtrada;
     }
 
+    // SUBPASTA POR CLIENTE, dentro do consultor.
+    //
+    // Só o nível do consultor não resolve o que o Guilherme pediu: um consultor
+    // com 60 cotações continua sendo uma pilha de 60 linhas. Quem ele procura é
+    // o CLIENTE — "cadê o que eu mandei pra Maria" —, e por cliente costumam
+    // existir várias versões da mesma proposta. Cliente é a pasta que responde
+    // a pergunta; a data ordena dentro dela.
     var h = '';
-    Object.keys(grupos).forEach(function(k) {
+    Object.keys(grupos).sort().forEach(function (k) {
       var nome = k.split('|')[1];
       if (d.eh_admin) {
-        h += '<h3 style="margin: 20px 0 10px 0; border-bottom: 1px solid var(--borda); padding-bottom: 5px; color: var(--cinza-1);">' +
-             '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:text-bottom;margin-right:5px">' +
-             '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>' + 
-             esc(nome) + '</h3>';
+        h += '<div class="cv-pasta"><span class="cv-pasta-i">' + ICONE_PASTA + '</span>' +
+             esc(nome) + '<span class="cv-pasta-n">' + grupos[k].length + '</span></div>';
       }
-      h += '<table class="cot"><thead><tr><th>Cliente</th><th>Cotação</th>' +
-              '<th>Modalidades</th><th>Planos</th><th>Valor</th><th>Quando</th><th></th></tr></thead><tbody>';
+      // Agrupa por cliente. Sem lead e sem nome, cai em "(sem nome)" — que é a
+      // verdade e mantém a cotação visível, em vez de sumir num grupo qualquer.
+      var porCliente = {};
       grupos[k].forEach(function (x) {
-        var modsTxt = (x.modalidades && x.modalidades.length) 
-                        ? esc(x.modalidades.join(', ')) 
-                        : '<span style="color:var(--cinza-2);font-style:italic">tipo não registrado</span>';
-        h += '<tr>' +
-          '<td><b>' + esc(x.cliente_nome || '(sem nome)') + '</b>' +
-            (x.cliente_telefone ? '<br><span style="color:var(--cinza-2);font-size:11px">' +
-              esc(x.cliente_telefone) + '</span>' : '') + '</td>' +
-          '<td>' + esc(x.titulo || '—') + '</td>' +
-          '<td>' + modsTxt + '</td>' +
-          '<td>' + (x.planos_cotados || 0) + '</td>' +
-          '<td>' + moeda(x.valor_total) + '</td>' +
-          '<td>' + dataBr(x.criado_em) + '</td>' +
-          '<td style="white-space:nowrap">' +
-            (x.token ? '<button class="b" data-ac="link" data-t="' + esc(x.token) + '">Copiar link</button>' : '') +
-            (x.token && x.cliente_telefone ? '<button class="b" data-ac="wpp" data-t="' + esc(x.token) +
-              '" data-tel="' + esc(x.cliente_telefone) + '" data-n="' + esc(x.cliente_nome || '') + '">WhatsApp</button>' : '') +
-            '<button class="b" data-ac="doc" data-id="' + x.id + '">Abrir</button>' +
-            '<span style="display:inline-block;width:14px"></span>' +
-            '<button class="b b-del" data-ac="del" data-id="' + x.id +
-              '" data-n="' + esc(x.cliente_nome || x.titulo || '') + '">Excluir</button>' +
-          '</td></tr>';
+        var ck = (x.lead_id || 0) + '|' + (x.lead_nome || x.cliente_nome || '(sem nome)');
+        if (!porCliente[ck]) porCliente[ck] = [];
+        porCliente[ck].push(x);
       });
-      h += '</tbody></table>';
+      Object.keys(porCliente).sort(function (a, b) {
+        return a.split('|')[1].localeCompare(b.split('|')[1], 'pt-BR');
+      }).forEach(function (ck) {
+        var itens = porCliente[ck];
+        var cliente = ck.split('|')[1];
+        var tel = (itens[0] && itens[0].cliente_telefone) || '';
+        // Fechada por padrão quando há mais de um cliente: a tela abre mostrando
+        // DE QUEM são as cotações, e quem procura uma abre a pasta dela.
+        var aberta = (Object.keys(porCliente).length === 1);
+        h += '<details class="cv-cliente-pasta"' + (aberta ? ' open' : '') + '>' +
+          '<summary>' +
+            '<span class="cv-cli-nome">' + esc(cliente) + '</span>' +
+            (tel ? '<span class="cv-cli-tel">' + esc(tel) + '</span>' : '') +
+            '<span class="cv-cli-n">' + itens.length +
+              (itens.length === 1 ? ' cotação' : ' cotações') + '</span>' +
+          '</summary>' +
+          '<table class="cot"><thead><tr><th>Cotação</th><th>Tipo</th>' +
+            '<th>Planos</th><th>Valor</th><th>Quando</th><th></th></tr></thead><tbody>';
+        itens.forEach(function (x) {
+          var modsTxt = (x.modalidades && x.modalidades.length)
+            ? esc(x.modalidades.join(', '))
+            : '<span class="cv-sem-tipo">tipo não registrado</span>';
+          h += '<tr>' +
+            '<td>' + esc(x.titulo || '—') +
+              (x.cidade ? '<br><span class="cv-sub">' + esc(x.cidade) + '</span>' : '') + '</td>' +
+            '<td>' + modsTxt + '</td>' +
+            '<td>' + (x.planos_cotados || 0) + '</td>' +
+            '<td class="cv-num">' + moeda(x.valor_total) + '</td>' +
+            '<td>' + dataBr(x.criado_em) + '</td>' +
+            '<td class="cv-acoes">' +
+              (x.token ? '<button class="b" data-ac="link" data-t="' + esc(x.token) + '">Copiar link</button>' : '') +
+              (x.token && x.cliente_telefone ? '<button class="b" data-ac="wpp" data-t="' + esc(x.token) +
+                '" data-tel="' + esc(x.cliente_telefone) + '" data-n="' + esc(x.cliente_nome || '') + '">WhatsApp</button>' : '') +
+              '<button class="b" data-ac="doc" data-id="' + x.id + '">Abrir</button>' +
+              '<button class="b b-del" data-ac="del" data-id="' + x.id +
+                '" data-n="' + esc(x.cliente_nome || x.titulo || '') + '">Excluir</button>' +
+            '</td></tr>';
+        });
+        h += '</tbody></table></details>';
+      });
     });
-    
+
     el('corpoSalvasTabela').innerHTML = h;
   }
 
@@ -2606,7 +2683,7 @@
       htmlTopo += '</select></div>';
     }
 
-    el('corpoSalvas').innerHTML = htmlTopo + '<div id="corpoSalvasTabela"></div>';
+    el('corpoSalvas').innerHTML = htmlTopo + '<div id="corpoSalvasTabela" class="cv-salvas-lista"></div>';
 
     if (lista.length > 0) {
       el('filtroCidadeSalvas').addEventListener('change', function(e) {
