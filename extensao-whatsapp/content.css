@@ -551,11 +551,38 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cot-fx b { min-width: 18px; text-align: center; font-size: 13px; color: var(--job-txt);
   font-variant-numeric: tabular-nums; }
 
+.job-cot-fixar { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  margin-top: 7px; background: none; border: none; padding: 0; color: var(--job-txt-fraco);
+  font-size: 11.5px; font-family: inherit; cursor: pointer; }
+.job-cot-fixar .marca { width: 15px; height: 15px; flex: none; border-radius: 4px;
+  border: 1px solid var(--job-borda); }
+.job-cot-fixar.on { color: var(--job-acento); font-weight: 600; }
+.job-cot-fixar.on .marca { background: var(--job-acento); border-color: var(--job-acento); }
+.job-cot-fixar:disabled { opacity: .5; cursor: default; }
+
 .job-cot-ops { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-.job-cot-op { text-align: left; padding: 11px 12px; border-radius: 10px; background: var(--job-bg2);
+.job-cot-op { display: flex; align-items: center; gap: 9px; text-align: left;
+  padding: 9px 11px; border-radius: 10px; background: var(--job-bg2);
   border: 1px solid var(--job-borda); color: var(--job-txt); font-size: 13px; font-weight: 600;
   font-family: inherit; cursor: pointer; transition: .12s; }
 .job-cot-op:hover { border-color: var(--job-acento); }
+.job-cot-op img { width: 30px; height: 22px; flex: none; object-fit: contain;
+  background: #fff; border-radius: 4px; padding: 2px; }
+/* A logo entra na frente da inicial. Some a logo, a inicial reaparece. */
+.job-cot-op img + .job-cot-op-ini { display: none; }
+.job-cot-op-ini { width: 30px; height: 22px; flex: none; border-radius: 4px;
+  background: var(--job-bg3); color: var(--job-txt-fraco); font-size: 12px;
+  display: flex; align-items: center; justify-content: center; }
+.job-cot-op-n { flex: 1; min-width: 0; }
+/* Operadora já cotada nesta conversa. O consultor precisa ver de relance o que
+   já fez e o que falta — é isso que transforma cotar uma por uma em comparar. */
+.job-cot-op.feita { border-color: rgba(31, 216, 164, .45); }
+.job-cot-op-ok { flex: none; font-size: 10.5px; font-weight: 700; letter-spacing: .02em;
+  text-transform: uppercase; color: var(--job-acento); background: rgba(31, 216, 164, .13);
+  border-radius: 5px; padding: 3px 6px; }
+.job-cot-grupo { margin-bottom: 12px; }
+.job-cot-grupo-t { font-size: 11.5px; font-weight: 700; letter-spacing: .03em;
+  text-transform: uppercase; color: var(--job-txt-fraco); margin-bottom: 6px; }
 .job-cot-plano { display: flex; align-items: flex-start; gap: 9px; padding: 10px 11px;
   border-radius: 10px; background: var(--job-bg2); border: 1px solid var(--job-borda);
   margin-bottom: 6px; cursor: pointer; }
