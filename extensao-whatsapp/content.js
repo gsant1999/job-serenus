@@ -3975,13 +3975,51 @@
   function _cotNomePlano(p) {
     return ((p && p.plano) || {}).nome || (p && p.nome) || 'Plano';
   }
-  function _cotDetalhePlano(p) {
+  // COPARTICIPAÇÃO NÃO É SIM OU NÃO.
+  //
+  // O Painel devolve `coparticipacaoTipo` — Parcial ou Completa — e o JOB já
+  // normaliza isso (`_copart_texto`). Eu achatava em "Com coparticipação" e
+  // jogava fora exatamente a informação que decide a venda: parcial cobra só
+  // consulta e exame; completa cobra também internação. Mesmo texto dos dois
+  // lados, pra ninguém ler uma coisa na extensão e outra no documento.
+  function _cotCopart(tb) {
+    if (!(tb || {}).coparticipacao) return 'Sem coparticipação';
+    const t = String((tb || {}).coparticipacaoTipo || '').toLowerCase();
+    if (t.indexOf('parcial') >= 0) return 'Coparticipação parcial';
+    if (['total', 'complet', 'integral'].some((x) => t.indexOf(x) >= 0)) return 'Coparticipação completa';
+    return 'Com coparticipação';
+  }
+  // Atributos como ETIQUETAS, não como frase corrida. O consultor procura um
+  // atributo específico ("tem MEI?", "aceita 2 vidas?") e varrer texto pra
+  // achar é o que faz ele errar o plano na frente do cliente.
+  function _cotEtiquetas(p) {
     const pl = (p && p.plano) || {}, tb = (p && p.tabela) || {};
-    const partes = [pl.acomodacao ? 'Apartamento' : 'Enfermaria',
-                    tb.coparticipacao ? 'Com coparticipação' : 'Sem coparticipação'];
+    const et = [];
+    et.push({ t: pl.acomodacao ? 'Apartamento' : 'Enfermaria', c: '' });
+    const cop = _cotCopart(tb);
+    et.push({ t: cop, c: cop === 'Sem coparticipação' ? 'ok' : 'aviso' });
+    if (tb.mei === true) et.push({ t: 'Aceita MEI', c: 'ok' });
+    const vmin = tb.qtdVidaMin, vmax = tb.qtdVidaMax;
+    if (vmin || vmax) {
+      et.push({ t: (vmin || 1) + (vmax ? ' a ' + vmax : '+') + ' vidas', c: '' });
+    }
     const prod = ((p && p.produto) || {}).nome;
-    if (prod) partes.push(prod);
-    return partes.join(' · ');
+    if (prod) et.push({ t: prod, c: '' });
+    const ent = _texto(p && p.entidade);
+    if (ent) et.push({ t: ent, c: '' });
+    return et;
+  }
+  function _texto(v) {
+    if (!v) return '';
+    if (typeof v === 'string') return v === '$undefined' ? '' : v;
+    return (v && v.nome) || '';
+  }
+  function _cotEtiquetasHTML(p) {
+    return '<span class="job-cot-tags">' + _cotEtiquetas(p).map((e) =>
+      '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' + esc(e.t) + '</span>').join('') + '</span>';
+  }
+  function _cotDetalhePlano(p) {
+    return _cotEtiquetas(p).map((e) => e.t).join(' · ');
   }
 
   function _cotPasso(pedido, ms) {
@@ -4288,7 +4326,7 @@
         ? pls.map((p, i) =>
             '<label class="job-cot-plano"><input type="checkbox" data-i="' + i + '">' +
               '<span><b>' + esc(_cotNomePlano(p)) + '</b>' +
-              '<small>' + esc(_cotDetalhePlano(p)) + '</small></span></label>').join('')
+              _cotEtiquetasHTML(p) + '</span></label>').join('')
         : '<div class="job-cot-vazio"><div class="job-cot-vazio-t">Nenhum plano dessa operadora serve para essas vidas.</div></div>') +
       '<button class="job-cnpj-btn" id="job-cot-precos" disabled>Ver preços</button>' +
       '<button class="job-cot-nova" id="job-cot-volta-ops" style="border:none;cursor:pointer;width:100%;font-family:inherit">Outra operadora</button>' +
@@ -4347,23 +4385,32 @@
     _cotPintarResultado();
   }
 
-  function _cotCartoes(lista) {
-    return lista.map((p) =>
-      '<div class="job-cot-res' + (p.total == null ? ' sem' : '') + '">' +
-        '<div class="job-cot-res-n">' + esc(_cotNomePlano(p)) + '</div>' +
+  // `melhor` é o menor preço do comparativo INTEIRO, não da operadora. O
+  // consultor está comparando entre operadoras — destacar o mais barato de
+  // cada uma seria destacar tudo, e não responder a pergunta que ele tem.
+  function _cotCartoes(lista, melhor) {
+    return lista.map((p) => {
+      const eMelhor = (melhor != null && p.total != null && p.total === melhor);
+      return '<div class="job-cot-res' + (p.total == null ? ' sem' : '') +
+          (eMelhor ? ' melhor' : '') + '">' +
+        '<div class="job-cot-res-n">' + esc(_cotNomePlano(p)) +
+          (eMelhor ? '<span class="job-cot-selo">mais barato</span>' : '') + '</div>' +
         '<div class="job-cot-res-v">' +
           (p.total == null ? 'sem preço' : _cotMoeda(p.total)) +
         '</div>' +
-      '</div>').join('');
+      '</div>';
+    }).join('');
   }
 
   function _cotPintarResultado() {
     // Mostra TUDO o que já foi cotado nesta conversa, não só a última operadora.
     const todos = _cotFeitas.reduce((a, f) => a.concat(f.planos), []);
     const comPreco = todos.filter((p) => p.total != null);
+    const melhor = comPreco.length
+      ? comPreco.reduce((m, p) => (m == null || p.total < m) ? p.total : m, null) : null;
     const grupos = _cotFeitas.map((f) =>
       '<div class="job-cot-grupo"><div class="job-cot-grupo-t">' + esc(f.nome) + '</div>' +
-      _cotCartoes(f.planos) + '</div>').join('');
+      _cotCartoes(f.planos, melhor) + '</div>').join('');
     setCorpoSecao('<div class="job-cot-wrap">' +
       '<div class="job-cnpj-titulo">Comparativo</div>' +
       '<div class="job-cnpj-sub">' + esc(_cot.cidade) + ' · ' + esc(_cotRotulo(_cot.modalidade)) + ' · ' +
@@ -4453,11 +4500,36 @@
     const pos = document.getElementById('job-cot-pos');
     if (!pos) return;
     const doc = _SITE_BASE_URL_EXT + '/cotacao/documento/' + r.id;
+    // O QUE DÁ PRA FAZER DAQUI, E O QUE NÃO DÁ.
+    //
+    // Tudo que viaja como LINK funciona aqui dentro. Copiar imagem e PDF não:
+    // a imagem da cotação é desenhada NO NAVEGADOR quando alguém abre o
+    // documento (o servidor não tem navegador), então ela só existe depois
+    // dessa primeira abertura. Prometer o botão aqui seria prometer o que eu
+    // não posso entregar — o botão do documento diz o que tem lá.
     pos.innerHTML =
       '<button class="job-cot-bt-mandar" id="job-cot-link" style="width:100%;margin-top:8px">' +
         'Mandar o link da cotação na conversa</button>' +
+      '<div class="job-cot-item-acoes">' +
+        '<button class="job-cot-bt-copiar" id="job-cot-copiarlink" style="flex:1">Copiar link</button>' +
+        '<button class="job-cot-bt-copiar" id="job-cot-copiartexto" style="flex:1">Copiar preços</button>' +
+      '</div>' +
       '<a class="job-cot-nova" href="' + esc(doc) + '" target="_blank" rel="noopener">' +
-        'Abrir a apresentação no JOB (e-mail, imagem, destaque)</a>';
+        'Abrir a apresentação — destacar plano, legenda, e-mail, imagem e PDF</a>';
+    const bcl = document.getElementById('job-cot-copiarlink');
+    if (bcl) bcl.addEventListener('click', () => {
+      navigator.clipboard.writeText(r.url || doc).then(() => {
+        bcl.textContent = 'Copiado';
+        setTimeout(() => { bcl.textContent = 'Copiar link'; }, 1500);
+      });
+    });
+    const bct = document.getElementById('job-cot-copiartexto');
+    if (bct) bct.addEventListener('click', () => {
+      navigator.clipboard.writeText(_cotTextoPrecos(lista)).then(() => {
+        bct.textContent = 'Copiado';
+        setTimeout(() => { bct.textContent = 'Copiar preços'; }, 1500);
+      });
+    });
     const bl = document.getElementById('job-cot-link');
     if (bl && r.url) {
       bl.dataset.url = r.url;
@@ -4468,12 +4540,20 @@
     }
   }
 
-  function _cotMandarTexto(btn, lista) {
-    const linhas = lista.map((p) =>
-      _cotNomePlano(p) + ' — ' + _cotMoeda(p.total) + '/mês');
-    const txt = _cot.operadoraAtual.nome + ' · ' + _cot.cidade + ' · ' +
-      _cot.totalVidas + (_cot.totalVidas === 1 ? ' vida' : ' vidas') + '\n\n' + linhas.join('\n');
-    btn.dataset.url = txt;   // _cotMandar manda o conteúdo de dataset.url
+  // Um texto só, usado pelo "mandar" e pelo "copiar" — duas versões do mesmo
+  // resumo divergiriam no primeiro ajuste.
+  function _cotTextoPrecos() {
+    const cab = _cot.cidade + ' · ' + _cotRotulo(_cot.modalidade) + ' · ' +
+      _cot.totalVidas + (_cot.totalVidas === 1 ? ' vida' : ' vidas');
+    const blocos = _cotFeitas.map((f) => {
+      const linhas = f.planos.filter((p) => p.total != null)
+        .map((p) => '• ' + _cotNomePlano(p) + ' — ' + _cotMoeda(p.total) + '/mês');
+      return linhas.length ? f.nome + '\n' + linhas.join('\n') : '';
+    }).filter(Boolean);
+    return cab + '\n\n' + blocos.join('\n\n');
+  }
+  function _cotMandarTexto(btn) {
+    btn.dataset.url = _cotTextoPrecos();   // _cotMandar manda o conteúdo de dataset.url
     _cotMandar(btn);
   }
 

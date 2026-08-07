@@ -509,99 +509,198 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cot-nova:hover { background: var(--job-bg3-hover); }
 
 /* ── Cotar dentro da conversa ─────────────────────────────────────── */
-.job-cot-rot { display: block; font-size: 11.5px; font-weight: 600; color: var(--job-txt-fraco);
-  margin: 12px 0 5px; }
+/*
+   O gradiente e o mesmo do botao Cotar do site (teal -> azul -> roxo). A cor
+   da marca aparece UMA vez por tela, na acao principal; o resto e superficie
+   e hierarquia. Espalhar gradiente em tudo faria a tela brilhar e nao dizer
+   nada — o que precisa saltar aqui e o preco.
+*/
+.job-cot-wrap { display: flex; flex-direction: column; }
+.job-cot-wrap .job-cnpj-titulo { letter-spacing: -.01em; }
+
+.job-cot-rot { display: block; font-size: 11px; font-weight: 700; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--job-txt-fraco); margin: 14px 0 6px; }
 .job-cot-dica { font-size: 11.5px; color: var(--job-txt-fraco); line-height: 1.5; margin-top: 6px; }
 .job-cot-dica.ok { color: var(--job-acento); font-weight: 600; }
+
 .job-cot-campo-sug { position: relative; }
 .job-cot-sug { display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
-  margin-top: 4px; max-height: 190px; overflow: auto; background: var(--job-bg3);
-  border: 1px solid var(--job-borda); border-radius: 10px; }
+  margin-top: 5px; max-height: 210px; overflow: auto; background: var(--job-bg2);
+  border: 1px solid var(--job-borda); border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(0,0,0,.45); }
 .job-cot-sug.ver { display: block; }
 .job-cot-sug button { display: block; width: 100%; text-align: left; background: none;
-  border: none; padding: 9px 11px; font-size: 12.5px; color: var(--job-txt);
-  font-family: inherit; cursor: pointer; }
-.job-cot-sug button:hover { background: var(--job-bg3-hover); }
-.job-cot-seg { display: flex; gap: 5px; }
-.job-cot-seg button { flex: 1; padding: 9px 4px; border-radius: 9px; background: var(--job-bg2);
+  border: none; padding: 10px 12px; font-size: 12.5px; color: var(--job-txt);
+  font-family: inherit; cursor: pointer; transition: background .12s, color .12s; }
+.job-cot-sug button:hover { background: var(--job-bg3); color: var(--job-acento); }
+.job-cot-sug-vazio { padding: 11px 12px; font-size: 12px; color: var(--job-txt-fraco); line-height: 1.5; }
+/* Cidade escolhida NA LISTA fica marcada: digitada a mao o Painel devolve 500. */
+.job-cot-campo-sug input.ok { border-color: rgba(31,216,164,.55);
+  box-shadow: 0 0 0 3px rgba(31,216,164,.10); }
+
+.job-cot-fixar { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  margin-top: 8px; background: none; border: none; padding: 0; color: var(--job-txt-fraco);
+  font-size: 11.5px; font-family: inherit; cursor: pointer; transition: color .12s; }
+.job-cot-fixar:hover:not(:disabled) { color: var(--job-txt); }
+.job-cot-fixar .marca { width: 15px; height: 15px; flex: none; border-radius: 5px;
+  border: 1px solid var(--job-borda); transition: .14s; }
+.job-cot-fixar.on { color: var(--job-acento); font-weight: 600; }
+.job-cot-fixar.on .marca { background: var(--job-acento); border-color: var(--job-acento);
+  box-shadow: 0 0 0 3px rgba(31,216,164,.14); }
+.job-cot-fixar:disabled { opacity: .45; cursor: default; }
+
+.job-cot-seg { display: flex; gap: 6px; }
+.job-cot-seg button { flex: 1; padding: 10px 4px; border-radius: 10px; background: var(--job-bg2);
   border: 1px solid var(--job-borda); color: var(--job-txt-fraco); font-size: 12.5px;
-  font-weight: 600; font-family: inherit; cursor: pointer; transition: .12s; }
-.job-cot-seg button.on { background: var(--job-acento); border-color: var(--job-acento);
-  color: var(--job-acento-txt); }
-.job-cot-sug-vazio { padding: 10px 11px; font-size: 12px; color: var(--job-txt-fraco); line-height: 1.5; }
-/* Cidade escolhida NA LISTA fica marcada: digitada a mao o Painel devolve 500,
-   entao o consultor precisa ver a diferenca entre "escrevi" e "escolhi". */
-.job-cot-campo-sug input.ok { border-color: var(--job-acento); }
-.job-cot-trocar { display: block; margin-top: 7px; background: none; border: none; padding: 0;
+  font-weight: 700; font-family: inherit; cursor: pointer; transition: .14s; }
+.job-cot-seg button:hover { color: var(--job-txt); border-color: var(--job-bg3-hover); }
+.job-cot-seg button.on { background: linear-gradient(135deg, #1fd8a4 0%, #3b82f6 100%);
+  border-color: transparent; color: #06131a;
+  box-shadow: 0 4px 14px rgba(31,216,164,.22); }
+
+.job-cot-trocar { display: block; margin-top: 8px; background: none; border: none; padding: 0;
   color: var(--job-acento); font-size: 11.5px; font-weight: 600; font-family: inherit;
-  cursor: pointer; text-decoration: underline; }
-.job-cot-faixas { display: none; margin-top: 8px; border: 1px solid var(--job-borda);
-  border-radius: 10px; overflow: hidden; }
+  cursor: pointer; transition: opacity .12s; }
+.job-cot-trocar:hover { opacity: .75; }
+.job-cot-faixas { display: none; margin-top: 9px; border: 1px solid var(--job-borda);
+  border-radius: 12px; overflow: hidden; }
 .job-cot-faixas.ver { display: block; }
-.job-cot-fx { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
-  background: var(--job-bg2); }
+.job-cot-fx { display: flex; align-items: center; gap: 8px; padding: 7px 11px;
+  background: var(--job-bg2); transition: background .12s; }
 .job-cot-fx + .job-cot-fx { border-top: 1px solid var(--job-borda); }
-.job-cot-fx.tem { background: var(--job-bg3); }
+.job-cot-fx.tem { background: linear-gradient(90deg, rgba(31,216,164,.10), transparent 70%); }
 .job-cot-fx span { flex: 1; font-size: 12px; color: var(--job-txt-fraco); }
 .job-cot-fx.tem span { color: var(--job-txt); font-weight: 600; }
-.job-cot-fx button { width: 24px; height: 24px; flex: none; border-radius: 7px;
+.job-cot-fx button { width: 25px; height: 25px; flex: none; border-radius: 8px;
   background: var(--job-bg); border: 1px solid var(--job-borda); color: var(--job-txt);
-  font-size: 14px; line-height: 1; font-family: inherit; cursor: pointer; }
-.job-cot-fx button:hover { border-color: var(--job-acento); }
+  font-size: 14px; line-height: 1; font-family: inherit; cursor: pointer; transition: .12s; }
+.job-cot-fx button:hover { border-color: var(--job-acento); color: var(--job-acento); }
 .job-cot-fx b { min-width: 18px; text-align: center; font-size: 13px; color: var(--job-txt);
   font-variant-numeric: tabular-nums; }
 
-.job-cot-fixar { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
-  margin-top: 7px; background: none; border: none; padding: 0; color: var(--job-txt-fraco);
-  font-size: 11.5px; font-family: inherit; cursor: pointer; }
-.job-cot-fixar .marca { width: 15px; height: 15px; flex: none; border-radius: 4px;
-  border: 1px solid var(--job-borda); }
-.job-cot-fixar.on { color: var(--job-acento); font-weight: 600; }
-.job-cot-fixar.on .marca { background: var(--job-acento); border-color: var(--job-acento); }
-.job-cot-fixar:disabled { opacity: .5; cursor: default; }
-
-.job-cot-ops { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-.job-cot-op { display: flex; align-items: center; gap: 9px; text-align: left;
-  padding: 9px 11px; border-radius: 10px; background: var(--job-bg2);
+/* ── Operadoras ── */
+.job-cot-ops { display: flex; flex-direction: column; gap: 7px; margin-bottom: 10px; }
+.job-cot-op { position: relative; display: flex; align-items: center; gap: 10px;
+  text-align: left; padding: 10px 12px; border-radius: 12px; background: var(--job-bg2);
   border: 1px solid var(--job-borda); color: var(--job-txt); font-size: 13px; font-weight: 600;
-  font-family: inherit; cursor: pointer; transition: .12s; }
-.job-cot-op:hover { border-color: var(--job-acento); }
-.job-cot-op img { width: 30px; height: 22px; flex: none; object-fit: contain;
-  background: #fff; border-radius: 4px; padding: 2px; }
-/* A logo entra na frente da inicial. Some a logo, a inicial reaparece. */
+  font-family: inherit; cursor: pointer; overflow: hidden;
+  transition: transform .14s, border-color .14s, box-shadow .14s; }
+.job-cot-op:hover { transform: translateY(-1px); border-color: rgba(59,130,246,.45);
+  box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.job-cot-op img { width: 34px; height: 24px; flex: none; object-fit: contain;
+  background: #fff; border-radius: 6px; padding: 3px; }
 .job-cot-op img + .job-cot-op-ini { display: none; }
-.job-cot-op-ini { width: 30px; height: 22px; flex: none; border-radius: 4px;
-  background: var(--job-bg3); color: var(--job-txt-fraco); font-size: 12px;
+.job-cot-op-ini { width: 34px; height: 24px; flex: none; border-radius: 6px;
+  background: linear-gradient(135deg, rgba(31,216,164,.22), rgba(139,92,246,.22));
+  color: var(--job-txt); font-size: 12px; font-weight: 700;
   display: flex; align-items: center; justify-content: center; }
 .job-cot-op-n { flex: 1; min-width: 0; }
-/* Operadora já cotada nesta conversa. O consultor precisa ver de relance o que
-   já fez e o que falta — é isso que transforma cotar uma por uma em comparar. */
-.job-cot-op.feita { border-color: rgba(31, 216, 164, .45); }
-.job-cot-op-ok { flex: none; font-size: 10.5px; font-weight: 700; letter-spacing: .02em;
-  text-transform: uppercase; color: var(--job-acento); background: rgba(31, 216, 164, .13);
-  border-radius: 5px; padding: 3px 6px; }
-.job-cot-grupo { margin-bottom: 12px; }
-.job-cot-grupo-t { font-size: 11.5px; font-weight: 700; letter-spacing: .03em;
-  text-transform: uppercase; color: var(--job-txt-fraco); margin-bottom: 6px; }
-.job-cot-plano { display: flex; align-items: flex-start; gap: 9px; padding: 10px 11px;
-  border-radius: 10px; background: var(--job-bg2); border: 1px solid var(--job-borda);
-  margin-bottom: 6px; cursor: pointer; }
-.job-cot-plano.bloq { opacity: .45; cursor: default; }
-.job-cot-plano input { margin-top: 2px; accent-color: var(--job-acento); }
-.job-cot-plano b { font-size: 12.5px; font-weight: 600; color: var(--job-txt); }
-.job-cot-plano small { display: block; font-size: 11px; color: var(--job-txt-fraco); margin-top: 2px; }
-.job-cot-barra { height: 4px; border-radius: 3px; background: var(--job-bg3); overflow: hidden;
-  margin: 4px 0 10px; }
-.job-cot-barra i { display: block; height: 100%; background: var(--job-acento); transition: width .3s; }
-.job-cot-res { display: flex; align-items: baseline; gap: 8px; padding: 9px 11px; border-radius: 9px;
-  background: var(--job-bg2); border: 1px solid var(--job-borda); margin-bottom: 6px; }
+/* Ja cotada nesta conversa: barra na lateral, do jeito que se le uma lista de
+   pendencias — o consultor ve de relance o que fez e o que falta. */
+.job-cot-op.feita { border-color: rgba(31,216,164,.35);
+  background: linear-gradient(90deg, rgba(31,216,164,.09), var(--job-bg2) 55%); }
+.job-cot-op.feita::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px; background: linear-gradient(180deg, #1fd8a4, #3b82f6); }
+.job-cot-op-ok { flex: none; font-size: 10px; font-weight: 800; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--job-acento); background: rgba(31,216,164,.13);
+  border-radius: 6px; padding: 4px 7px; }
+
+/* ── Planos ── */
+.job-cot-plano { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px;
+  border-radius: 12px; background: var(--job-bg2); border: 1px solid var(--job-borda);
+  margin-bottom: 7px; cursor: pointer; transition: border-color .14s, background .14s; }
+.job-cot-plano:hover { border-color: rgba(59,130,246,.40); }
+.job-cot-plano:has(input:checked) { border-color: rgba(31,216,164,.55);
+  background: linear-gradient(90deg, rgba(31,216,164,.08), var(--job-bg2) 60%); }
+.job-cot-plano.bloq { opacity: .4; cursor: default; }
+.job-cot-plano input { margin-top: 2px; accent-color: #1fd8a4; }
+.job-cot-plano b { font-size: 12.5px; font-weight: 700; color: var(--job-txt); }
+.job-cot-plano small { display: block; font-size: 11px; color: var(--job-txt-fraco); margin-top: 3px; }
+/* Atributos como ETIQUETAS: o consultor procura um atributo especifico
+   ("tem MEI?", "aceita 2 vidas?") e varrer frase corrida e o que faz ele
+   escolher o plano errado na frente do cliente. */
+.job-cot-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.job-cot-tag { font-size: 10px; font-weight: 700; letter-spacing: .01em; padding: 3px 7px;
+  border-radius: 6px; background: var(--job-bg3); color: var(--job-txt-fraco);
+  white-space: nowrap; }
+.job-cot-tag.ok { color: var(--job-acento); background: rgba(31,216,164,.12); }
+.job-cot-tag.aviso { color: var(--job-warn); background: var(--job-warn-bg); }
+
+.job-cot-barra { height: 5px; border-radius: 4px; background: var(--job-bg3); overflow: hidden;
+  margin: 6px 0 12px; }
+.job-cot-barra i { display: block; height: 100%; border-radius: 4px;
+  background: linear-gradient(90deg, #1fd8a4, #3b82f6, #8b5cf6);
+  transition: width .35s cubic-bezier(.4,0,.2,1); }
+
+/* ── Resultado ── */
+.job-cot-grupo { margin-bottom: 14px; }
+.job-cot-grupo-t { display: flex; align-items: center; gap: 9px; font-size: 10.5px;
+  font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--job-txt-fraco); margin-bottom: 7px; }
+.job-cot-grupo-t::after { content: ''; flex: 1; height: 1px; background: var(--job-borda); }
+.job-cot-res { display: flex; align-items: center; gap: 10px; padding: 11px 12px;
+  border-radius: 11px; background: var(--job-bg2); border: 1px solid var(--job-borda);
+  margin-bottom: 7px; transition: border-color .14s; }
 .job-cot-res-n { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--job-txt); }
-.job-cot-res-v { flex: none; font-size: 13px; font-weight: 700; color: var(--job-acento);
-  font-variant-numeric: tabular-nums; }
-/* Sem preço não some e não vira zero: fica visível e apagado, dizendo que
-   aquele plano existe mas o valor não voltou. */
-.job-cot-res.sem { border-style: dashed; }
-.job-cot-res.sem .job-cot-res-v { color: var(--job-txt-fraco); font-weight: 600; font-style: italic; }
+.job-cot-res-v { flex: none; font-size: 14.5px; font-weight: 800; color: var(--job-txt);
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+/* O menor preco do comparativo INTEIRO. E a pergunta que o consultor tem na
+   frente do cliente, entao e a unica coisa da lista que ganha cor de marca. */
+.job-cot-res.melhor { border-color: rgba(31,216,164,.50);
+  background: linear-gradient(100deg, rgba(31,216,164,.12), var(--job-bg2) 62%); }
+.job-cot-res.melhor .job-cot-res-v { color: var(--job-acento); }
+.job-cot-selo { display: inline-block; margin-left: 7px; font-size: 9.5px; font-weight: 800;
+  letter-spacing: .05em; text-transform: uppercase; color: #06131a; padding: 3px 6px;
+  border-radius: 5px; background: linear-gradient(135deg, #1fd8a4, #3b82f6); vertical-align: 1px; }
+/* Sem preco nao some e nao vira zero: fica visivel e apagado. */
+.job-cot-res.sem { border-style: dashed; opacity: .72; }
+.job-cot-res.sem .job-cot-res-v { color: var(--job-txt-fraco); font-weight: 600;
+  font-style: italic; font-size: 12.5px; }
+
+.job-cot-vazio { background: var(--job-bg2); border: 1px dashed var(--job-borda);
+  border-radius: 12px; padding: 18px 14px; text-align: center; margin-bottom: 9px; }
+.job-cot-vazio-t { font-size: 13px; font-weight: 700; color: var(--job-txt); }
+.job-cot-vazio-s { font-size: 12px; color: var(--job-txt-fraco); line-height: 1.55; margin-top: 6px; }
+
+/* ── Acoes ── */
+/* A acao principal usa o gradiente da marca, uma vez por tela. */
+.job-cot-bt-mandar { padding: 11px; border: none; border-radius: 11px;
+  background: linear-gradient(135deg, #1fd8a4 0%, #3b82f6 55%, #8b5cf6 100%);
+  color: #06131a; font-size: 13px; font-weight: 800; font-family: inherit; cursor: pointer;
+  box-shadow: 0 5px 18px rgba(31,216,164,.20);
+  transition: transform .14s, box-shadow .14s, filter .14s; }
+.job-cot-bt-mandar:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05);
+  box-shadow: 0 9px 26px rgba(59,130,246,.28); }
+.job-cot-bt-mandar:active:not(:disabled) { transform: translateY(0); }
+.job-cot-bt-mandar:disabled { opacity: .5; cursor: default; box-shadow: none; }
+.job-cot-bt-copiar { padding: 10px 12px; border-radius: 11px; background: transparent;
+  border: 1px solid var(--job-borda); color: var(--job-txt); font-size: 12.5px;
+  font-weight: 700; font-family: inherit; cursor: pointer; transition: .14s; }
+.job-cot-bt-copiar:hover { border-color: rgba(31,216,164,.55); color: var(--job-acento); }
+.job-cot-item-acoes { display: flex; gap: 7px; margin-top: 10px; }
+.job-cot-item-acoes .job-cot-bt-mandar { flex: 1; }
+.job-cot-nova { display: block; margin-top: 7px; padding: 11px; border-radius: 11px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda); color: var(--job-txt);
+  font-size: 12.5px; font-weight: 700; text-align: center; text-decoration: none;
+  transition: .14s; }
+.job-cot-nova:hover { border-color: rgba(139,92,246,.45); background: var(--job-bg3); }
+
+/* ── Cotacoes ja salvas do cliente ── */
+.job-cot-item { background: var(--job-bg2); border: 1px solid var(--job-borda);
+  border-radius: 12px; padding: 12px; margin-bottom: 8px; transition: border-color .14s; }
+.job-cot-item:hover { border-color: rgba(59,130,246,.35); }
+.job-cot-item-topo { display: flex; align-items: flex-start; gap: 9px; }
+.job-cot-item-t { flex: 1; min-width: 0; font-size: 13px; font-weight: 700;
+  color: var(--job-txt); line-height: 1.35; }
+.job-cot-item-q { flex: none; font-size: 10.5px; font-weight: 700; color: var(--job-txt-fraco);
+  background: var(--job-bg3); border-radius: 6px; padding: 3px 7px; white-space: nowrap; }
+.job-cot-item-s { font-size: 12px; color: var(--job-txt-fraco); margin-top: 6px; }
+.job-cot-sem-link { font-style: italic; }
+
+@media (prefers-reduced-motion: reduce) {
+  .job-cot-op, .job-cot-bt-mandar, .job-cot-barra i { transition: none; }
+  .job-cot-op:hover, .job-cot-bt-mandar:hover:not(:disabled) { transform: none; }
+}
 
 /* ── Consulta de CNPJ ─────────────────────────────────────────────── */
 .job-cnpj-titulo { font-size: 16px; font-weight: 600; color: var(--job-txt); }
