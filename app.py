@@ -29870,14 +29870,21 @@ def calcular_cotacao(conn, idades, plano_ids, recomendacoes=None):
         linhas, total = [], 0.0
         elegivel = True
         
-        v_min = t.get('vidas_min')
-        v_max = t.get('vidas_max')
+        v_min = t['vidas_min']
+        v_max = t['vidas_max']
         vidas_req = len(idades)
-        if v_min is not None and v_max is not None:
-            if vidas_req < v_min or vidas_req > v_max:
-                elegivel = False
+        
+        if v_min is not None and vidas_req < v_min:
+            elegivel = False
+        if v_max is not None and vidas_req > v_max:
+            elegivel = False
                 
         if not elegivel:
+            avisos.append({
+                'plano_id': tid,
+                'codigo': 'fora_da_faixa_de_vidas',
+                'mensagem': f"{t['operadora']} · {t['plano']} vale de {v_min or 1} a {v_max or '∞'} vidas"
+            })
             continue
             
         for fx in FAIXAS_ETARIAS:
