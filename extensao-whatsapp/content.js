@@ -3915,6 +3915,8 @@
   // MODALIDADE É CÓDIGO, NÃO TEXTO. O filtro que vai pro Painel usa 1/2/3, e
   // eu mandei "PF"/"PME"/"Adesão": o Painel recebia um valor que não existe e
   // devolvia lista de outro tipo de contratação. O rótulo fica só na tela.
+  const _COT_ROTULOS = ['0 a 18', '19 a 23', '24 a 28', '29 a 33', '34 a 38',
+                        '39 a 43', '44 a 48', '49 a 53', '54 a 58', '59 ou mais'];
   const _COT_TIPOS = [{ cod: 1, rot: 'PF' }, { cod: 2, rot: 'PME' }, { cod: 3, rot: 'Adesão' }];
   function _cotRotulo(cod) {
     const t = _COT_TIPOS.filter((x) => x.cod === Number(cod))[0];
@@ -4029,8 +4031,21 @@
             (Number(v.modalidade || 1) === t.cod ? ' class="on"' : '') + '>' + t.rot + '</button>').join('') +
         '</div>' +
         '<label class="job-cot-rot">Idades de quem vai usar</label>' +
-        '<input id="job-cot-idades" class="job-cnpj-input" placeholder="5, 50, 55" value="' + esc(v.idades || '') + '">' +
-        '<div class="job-cot-dica" id="job-cot-dica">Separe por vírgula. Uma idade por pessoa.</div>' +
+        '<input id="job-cot-idades" class="job-cnpj-input" placeholder="55 5 50" value="' + esc(v.idades || '') + '">' +
+        '<div class="job-cot-dica" id="job-cot-dica">Uma idade por pessoa, separadas por espaço ou vírgula.</div>' +
+        // Duas formas de dizer a mesma coisa. Quem tem a idade na conversa
+        // digita; quem já pensa em faixa (proposta antiga, planilha da
+        // operadora) conta na faixa direto, sem inventar uma idade que caiba.
+        '<button type="button" class="job-cot-trocar" id="job-cot-modo">contar por faixa etária</button>' +
+        '<div id="job-cot-faixas" class="job-cot-faixas">' +
+          _COT_FAIXAS.map((f, i) =>
+            '<div class="job-cot-fx" data-f="' + f + '">' +
+              '<span>' + _COT_ROTULOS[i] + '</span>' +
+              '<button type="button" data-d="-1">−</button>' +
+              '<b>' + (((v.faixas || {})[f]) || 0) + '</b>' +
+              '<button type="button" data-d="1">+</button>' +
+            '</div>').join('') +
+        '</div>' +
         '<button class="job-cnpj-btn" id="job-cot-buscar">Buscar operadoras</button>' +
         '<button class="job-cot-nova" id="job-cot-cancelar" style="border:none;cursor:pointer;width:100%;font-family:inherit">Voltar às cotações</button>' +
       '</div>');
@@ -4040,20 +4055,55 @@
     const dica = document.getElementById('job-cot-dica');
     const box = document.getElementById('job-cot-sug');
     let relogioCid = null;
+    // Só a cidade ESCOLHIDA NA LISTA serve. Digitada à mão, o Painel devolve
+    // 500 — a string tem que ser a do catálogo deles.
+    let cidadeDoCatalogo = (v.cidade && v.cidadeOk) ? v.cidade : '';
 
     // Conta as vidas enquanto ele digita. Sem isso, "5, 50, 55" e "5 50 55"
     // parecem a mesma coisa e um deles vira uma vida só, descoberto só depois
     // de a cotação inteira sair errada.
+    // Duas formas, UMA fonte de verdade: `vidasAgora()` decide pelo modo aberto.
+    // Somar as duas faria a cotação sair com o dobro de gente sem ninguém ver.
+    const caixaFx = document.getElementById('job-cot-faixas');
+    const btModo = document.getElementById('job-cot-modo');
+    let porFaixa = !!(v.faixas && Object.keys(v.faixas).length);
+    const contFx = Object.assign({}, v.faixas || {});
+
+    function vidasAgora() {
+      if (!porFaixa) return _cotVidasDeTexto(iIda.value);
+      const vidas = _COT_FAIXAS.filter((f) => contFx[f] > 0)
+        .map((f) => ({ faixa: f, quantidade: contFx[f] }));
+      return { vidas: vidas, total: vidas.reduce((n, x) => n + x.quantidade, 0) };
+    }
     const contar = () => {
-      const r = _cotVidasDeTexto(iIda.value);
+      const r = vidasAgora();
       dica.textContent = r.total
         ? r.total + (r.total === 1 ? ' vida' : ' vidas') + ' · ' +
           r.vidas.map((x) => x.quantidade + '× ' + x.faixa.replace('-199', '+')).join(', ')
-        : 'Separe por vírgula. Uma idade por pessoa.';
+        : (porFaixa ? 'Some as pessoas em cada faixa.'
+                    : 'Uma idade por pessoa, separadas por espaço ou vírgula.');
       dica.classList.toggle('ok', r.total > 0);
     };
+    function pintarModo() {
+      caixaFx.classList.toggle('ver', porFaixa);
+      iIda.style.display = porFaixa ? 'none' : '';
+      btModo.textContent = porFaixa ? 'voltar a digitar as idades' : 'contar por faixa etária';
+      caixaFx.querySelectorAll('.job-cot-fx').forEach((d) => {
+        d.querySelector('b').textContent = contFx[d.dataset.f] || 0;
+        d.classList.toggle('tem', (contFx[d.dataset.f] || 0) > 0);
+      });
+      contar();
+    }
+    btModo.addEventListener('click', () => { porFaixa = !porFaixa; pintarModo(); });
+    caixaFx.querySelectorAll('.job-cot-fx button').forEach((b2) => {
+      b2.addEventListener('click', () => {
+        const f = b2.parentElement.dataset.f;
+        contFx[f] = Math.max(0, Math.min(99, (contFx[f] || 0) + Number(b2.dataset.d)));
+        pintarModo();
+      });
+    });
     iIda.addEventListener('input', contar);
-    contar();
+    pintarModo();
 
     document.querySelectorAll('#job-cot-tipo button').forEach((b) => {
       b.addEventListener('click', () => {
@@ -4064,31 +4114,57 @@
 
     iCid.addEventListener('input', () => {
       clearTimeout(relogioCid);
+      cidadeDoCatalogo = '';
+      iCid.classList.remove('ok');
       const termo = iCid.value.trim();
       if (termo.length < 3) { box.className = 'job-cot-sug'; return; }
       relogioCid = setTimeout(async () => {
         let r;
         try { r = await _safeSendMessage({ type: 'cotador_cidades', termo: termo }); }
         catch (e) { r = null; }
-        const lista = (r && r.ok && r.dados && r.dados.cidades) || [];
+        // A LISTA VEM DIRETO EM `dados`. Eu lia `dados.cidades`, que é undefined:
+        // a sugestão nunca aparecia, o consultor digitava a cidade à mão e o
+        // Painel devolvia http_500 em operadoras — porque a string tem que ser
+        // exatamente a do catálogo deles ("Campinas - SP"), não o que a gente
+        // escreve. O erro parecia do Painel e era meu.
+        const lista = (r && r.ok && Array.isArray(r.dados)) ? r.dados : [];
+        if (!lista.length && r && !r.ok) {
+          box.innerHTML = '<div class="job-cot-sug-vazio">' +
+            esc(_cotMotivo(r.motivo)).replace(/<[^>]*>/g, '') + '</div>';
+          box.className = 'job-cot-sug ver';
+          return;
+        }
         if (!lista.length) { box.className = 'job-cot-sug'; return; }
-        box.innerHTML = lista.slice(0, 8).map((c) =>
-          '<button type="button" data-v="' + esc(c.nome || c) + '">' + esc(c.nome || c) + '</button>').join('');
+        box.innerHTML = lista.slice(0, 8).map((c) => {
+          const nome = (c && c.nome) || c;
+          return '<button type="button" data-v="' + esc(nome) + '">' + esc(nome) + '</button>';
+        }).join('');
         box.className = 'job-cot-sug ver';
         box.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
-          iCid.value = b.dataset.v; box.className = 'job-cot-sug';
+          iCid.value = b.dataset.v;
+          cidadeDoCatalogo = b.dataset.v;   // só esta serve pro Painel
+          box.className = 'job-cot-sug';
+          iCid.classList.add('ok');
         }));
       }, 300);
     });
 
     document.getElementById('job-cot-cancelar').addEventListener('click', abrirSecaoCotacao);
     document.getElementById('job-cot-buscar').addEventListener('click', () => {
-      const r = _cotVidasDeTexto(iIda.value);
-      if (!iCid.value.trim()) { dica.textContent = 'Falta a cidade.'; dica.classList.remove('ok'); return; }
+      const r = vidasAgora();
+      if (!cidadeDoCatalogo) {
+        dica.textContent = iCid.value.trim()
+          ? 'Escolha a cidade na lista que aparece — digitada à mão o Painel não reconhece.'
+          : 'Falta a cidade.';
+        dica.classList.remove('ok');
+        iCid.focus();
+        return;
+      }
       if (!r.total) { dica.textContent = 'Falta a idade de quem vai usar o plano.'; dica.classList.remove('ok'); return; }
       const tipo = (document.querySelector('#job-cot-tipo button.on') || {}).dataset;
-      _cot = { cidade: iCid.value.trim(), modalidade: Number((tipo && tipo.v) || 1),
-               idades: iIda.value, vidas: r.vidas, totalVidas: r.total };
+      _cot = { cidade: cidadeDoCatalogo, cidadeOk: true, modalidade: Number((tipo && tipo.v) || 1),
+               idades: iIda.value, faixas: porFaixa ? contFx : null,
+               vidas: r.vidas, totalVidas: r.total };
       _cotBuscarOperadoras();
     });
   }

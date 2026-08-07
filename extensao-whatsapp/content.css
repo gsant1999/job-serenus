@@ -528,6 +528,29 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   font-weight: 600; font-family: inherit; cursor: pointer; transition: .12s; }
 .job-cot-seg button.on { background: var(--job-acento); border-color: var(--job-acento);
   color: var(--job-acento-txt); }
+.job-cot-sug-vazio { padding: 10px 11px; font-size: 12px; color: var(--job-txt-fraco); line-height: 1.5; }
+/* Cidade escolhida NA LISTA fica marcada: digitada a mao o Painel devolve 500,
+   entao o consultor precisa ver a diferenca entre "escrevi" e "escolhi". */
+.job-cot-campo-sug input.ok { border-color: var(--job-acento); }
+.job-cot-trocar { display: block; margin-top: 7px; background: none; border: none; padding: 0;
+  color: var(--job-acento); font-size: 11.5px; font-weight: 600; font-family: inherit;
+  cursor: pointer; text-decoration: underline; }
+.job-cot-faixas { display: none; margin-top: 8px; border: 1px solid var(--job-borda);
+  border-radius: 10px; overflow: hidden; }
+.job-cot-faixas.ver { display: block; }
+.job-cot-fx { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  background: var(--job-bg2); }
+.job-cot-fx + .job-cot-fx { border-top: 1px solid var(--job-borda); }
+.job-cot-fx.tem { background: var(--job-bg3); }
+.job-cot-fx span { flex: 1; font-size: 12px; color: var(--job-txt-fraco); }
+.job-cot-fx.tem span { color: var(--job-txt); font-weight: 600; }
+.job-cot-fx button { width: 24px; height: 24px; flex: none; border-radius: 7px;
+  background: var(--job-bg); border: 1px solid var(--job-borda); color: var(--job-txt);
+  font-size: 14px; line-height: 1; font-family: inherit; cursor: pointer; }
+.job-cot-fx button:hover { border-color: var(--job-acento); }
+.job-cot-fx b { min-width: 18px; text-align: center; font-size: 13px; color: var(--job-txt);
+  font-variant-numeric: tabular-nums; }
+
 .job-cot-ops { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .job-cot-op { text-align: left; padding: 11px 12px; border-radius: 10px; background: var(--job-bg2);
   border: 1px solid var(--job-borda); color: var(--job-txt); font-size: 13px; font-weight: 600;
