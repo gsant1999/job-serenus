@@ -16,6 +16,20 @@
 
 (function () {
   'use strict';
+  // TRAVA DE INJECAO DUPLA.
+  //
+  // Quando a extensao e recarregada, o service worker reinjeta os scripts nas
+  // abas que ja estavam abertas, pra ninguem precisar dar F5 na mao. Sem esta
+  // trava, uma aba que ainda tem o script vivo receberia um segundo — e no
+  // mundo MAIN isso embrulharia o window.fetch duas vezes.
+  //
+  // O flag mora no `window` de CADA MUNDO. No MAIN ele sobrevive a recarga da
+  // extensao (e o script de la continua funcionando, porque nao usa API da
+  // extensao); no ISOLADO ele nasce limpo, que e justamente onde a reinjecao
+  // precisa acontecer.
+  if (window.__JOB_WPP_PONTE) return;
+  window.__JOB_WPP_PONTE = 1;
+
   if (window.__jobWppBridge) return;
   window.__jobWppBridge = true;
 

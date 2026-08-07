@@ -839,3 +839,61 @@ async function _aparar(blob) {
     fr.readAsDataURL(png);
   });
 }
+
+
+// ─── REINJEÇÃO AUTOMÁTICA: fim do "recarregue a aba" ────────────────────────
+//
+// Quando a extensão é atualizada ou recarregada, o Chrome invalida os content
+// scripts que já estavam nas abas abertas. Eles continuam lá, mas sem acesso à
+// extensão: a aba do Painel vira "está aberta, mas precisa de F5", e a do
+// WhatsApp para de responder. Todo dia de trabalho tem várias atualizações, e
+// pedir F5 em cada uma é pedir para o consultor lembrar de algo que a máquina
+// sabe fazer.
+//
+// Aqui a extensão reinjeta sozinha. Cada script tem uma trava (`window.__JOB_*`)
+// que impede injeção dupla — e a trava é o que faz isto ser seguro:
+//
+//   - no mundo MAIN o flag SOBREVIVE à recarga da extensão, então o script de
+//     lá (que não usa API da extensão e continua funcionando) NÃO é reinjetado
+//     e o window.fetch não é embrulhado duas vezes;
+//   - no mundo ISOLADO o flag nasce limpo, e é exatamente ali que a ponte
+//     precisa voltar a existir.
+//
+// Falha em silêncio de propósito: aba em outro endereço, aba descartada pelo
+// Chrome ou permissão negada não devem virar erro na cara de ninguém — o pior
+// caso é o comportamento de antes, que é pedir F5.
+const _REINJETAR = [
+  { host: 'web.whatsapp.com',
+    main: ['wa-js.vendor.js', 'wpp-bridge.js'], isolado: ['content.js'] },
+  { host: 'paineldocorretor.com.br',
+    main: ['cotador-painel.js'], isolado: ['painel-bridge.js'] },
+  { host: 'job-serenus-production.up.railway.app',
+    main: [], isolado: ['site-bridge.js'] },
+];
+
+async function _reinjetarNasAbasAbertas(motivo) {
+  let abas = [];
+  try { abas = await chrome.tabs.query({}); } catch (e) { return; }
+  for (const aba of abas) {
+    if (!aba.id || !aba.url) continue;
+    const alvo = _REINJETAR.filter((x) => aba.url.indexOf(x.host) >= 0)[0];
+    if (!alvo) continue;
+    // A ORDEM IMPORTA: o mundo MAIN primeiro, porque a ponte isolada conversa
+    // com ele por postMessage e precisa achar alguém do outro lado.
+    for (const [arquivos, mundo] of [[alvo.main, 'MAIN'], [alvo.isolado, 'ISOLATED']]) {
+      if (!arquivos.length) continue;
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: aba.id, allFrames: false },
+          files: arquivos,
+          world: mundo,
+        });
+      } catch (e) { /* aba morta, sem permissão, ou já saiu do ar */ }
+    }
+  }
+}
+
+// Atualização da extensão e recarga do service worker são os dois momentos em
+// que as abas ficam órfãs.
+chrome.runtime.onInstalled.addListener((d) => _reinjetarNasAbasAbertas(d && d.reason));
+chrome.runtime.onStartup.addListener(() => _reinjetarNasAbasAbertas('startup'));
