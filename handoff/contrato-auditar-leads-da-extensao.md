@@ -90,6 +90,44 @@ tela: a tela pode estar desatualizada, o servidor não.
 
 ---
 
+## 2b. TRÊS PORTAS pra mesma tela — e um contador
+
+Decisão do Guilherme: a auditoria precisa ser encontrável de três lugares.
+A tela é uma só; o que muda é como se chega nela.
+
+1. **Item próprio no menu lateral**, com o número de leads esperando auditoria
+   ao lado. **Some quando a fila zera** — item de menu que vive marcando zero
+   vira ruído e some da atenção justamente quando volta a ter algo.
+2. **Dentro do CRM**, onde os leads moram.
+3. **Pelo sino**: a notificação "Lead criado pela extensão de WhatsApp" já
+   existe e hoje não leva a lugar nenhum útil. Ela deve apontar pra auditoria
+   **daquele dia**.
+
+Pro contador, o servidor precisa de um número barato — não a lista inteira:
+
+```
+GET /crm/leads-da-extensao/pendentes  ->  {"ok": true, "n": 230}
+```
+
+**"Pendente" precisa de definição, e ela é sua decisão de modelagem:** um lead
+auditado e aprovado não pode continuar contando pra sempre. Sugiro uma coluna
+`auditado_em TIMESTAMP` em `crm_leads` — nula = nunca auditado. Aprovar grava a
+data; "não é lead" bloqueia (e sai da fila por consequência). Sem isso, o
+contador nasce em 230 e nunca desce, e a pessoa aprende a ignorá-lo.
+
+**Então a rota de ação são duas, não uma:**
+
+```
+POST /crm/lead/<int:lid>/nao-e-lead     -> bloqueia (ver abaixo)
+POST /crm/lead/<int:lid>/e-lead         -> só grava auditado_em
+```
+
+`e-lead` não muda nada no lead além da marca de auditoria. **Não mexa em etapa,
+responsável ou status** — quem aprova está dizendo "isto é cliente de verdade",
+não "mude o funil dele".
+
+---
+
 ## 3. O que NÃO fazer
 
 - **Não apague o lead.** Marcar como pessoal é reversível e auditável; `DELETE`
