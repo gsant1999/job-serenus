@@ -1588,6 +1588,13 @@ def init_db():
                 dados TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS cotador_hash (
+                id SERIAL PRIMARY KEY,
+                origem TEXT, papel TEXT, hash TEXT,
+                visto_em TIMESTAMP,
+                usuario_id INTEGER,
+                UNIQUE(origem, papel)
+            )""",
             """CREATE TABLE IF NOT EXISTS material_apoio (
                 id SERIAL PRIMARY KEY,
                 operadora TEXT, tipo TEXT, titulo TEXT NOT NULL, descricao TEXT, conteudo TEXT, arquivo TEXT,
@@ -2543,6 +2550,13 @@ def init_db():
             evento TEXT NOT NULL,
             dados TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS cotador_hash (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            origem TEXT, papel TEXT, hash TEXT,
+            visto_em TIMESTAMP,
+            usuario_id INTEGER,
+            UNIQUE(origem, papel)
         );
         CREATE TABLE IF NOT EXISTS operadora_logo (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21222,6 +21236,75 @@ def api_whatsapp_lead_ficha():
         return _wa_cors(jsonify({"ok": False, "erro": "Falha ao montar a ficha"})), 500
     close_db(conn)
     return _wa_cors(jsonify(payload))
+
+
+@app.route('/api/whatsapp/cotador/hashes', methods=['GET', 'POST', 'OPTIONS'])
+def api_whatsapp_cotador_hashes():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    
+    conn = db()
+    try:
+        import re as _re
+        if request.method == 'GET':
+            origem = (request.args.get('origem') or '').strip()
+            if not origem.startswith('https://') or len(origem) > 120:
+                close_db(conn)
+                return _wa_cors(jsonify({"ok": False}))
+                
+            linhas = conn.execute("SELECT papel, hash FROM cotador_hash WHERE origem=?", (origem,)).fetchall()
+            papeis = {r['papel']: r['hash'] for r in linhas}
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": True, "papeis": papeis}))
+            
+        elif request.method == 'POST':
+            d = request.get_json(silent=True) or {}
+            origem = str(d.get('origem') or '').strip()
+            if not origem.startswith('https://') or len(origem) > 120:
+                close_db(conn)
+                return _wa_cors(jsonify({"ok": False}))
+                
+            papeis_validos = {'criar', 'abrir', 'vidas', 'filtro', 'operadoras', 'planos', 'preco', 'entidade'}
+            
+            mortos = d.get('mortos') or []
+            if isinstance(mortos, list):
+                for m in mortos:
+                    if not isinstance(m, dict):
+                        continue
+                    papel = str(m.get('papel') or '').strip()
+                    h = str(m.get('hash') or '').strip()
+                    if papel in papeis_validos and h:
+                        conn.execute("DELETE FROM cotador_hash WHERE origem=? AND papel=? AND hash=?", (origem, papel, h))
+            
+            papeis = d.get('papeis') or {}
+            if isinstance(papeis, dict):
+                for papel, h in papeis.items():
+                    papel = str(papel).strip()
+                    h = str(h).strip()
+                    if papel not in papeis_validos:
+                        continue
+                    if not _re.match(r'^[A-Za-z0-9_-]{1,200}$', h):
+                        continue
+                        
+                    row = conn.execute("SELECT id FROM cotador_hash WHERE origem=? AND papel=?", (origem, papel)).fetchone()
+                    if row:
+                        conn.execute("UPDATE cotador_hash SET hash=?, visto_em=? WHERE id=?", (h, _agora_sp(), row['id'] if hasattr(row, 'keys') else row[0]))
+                    else:
+                        conn.execute("INSERT INTO cotador_hash (origem, papel, hash, visto_em) VALUES (?,?,?,?)", (origem, papel, h, _agora_sp()))
+                        
+            conn.commit()
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": True}))
+            
+    except Exception as e:
+        if hasattr(conn, 'rollback'):
+            try: conn.rollback()
+            except Exception: pass
+        close_db(conn)
+        app.logger.warning(f"[COTADOR_HASH] erro: {e}")
+        return _wa_cors(jsonify({"ok": False}))
 
 
 @app.route('/api/whatsapp/cotacoes', methods=['GET', 'OPTIONS'])
