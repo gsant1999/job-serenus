@@ -142,3 +142,92 @@ Corrigido em `b119e98`: o aviso lista os gestos que faltam, um a um.
 
 Nada aqui deve ser implementado antes dos dois primeiros itens: os dois são
 medições baratas que podem invalidar o resto.
+
+---
+
+# REVISÃO APÓS VALIDAÇÃO EXTERNA (Gemini) — 07/08/2026
+
+Três correções aceitas, uma correção devolvida. O plano abaixo substitui o de cima.
+
+## Aceito: a indexação por build id era desnecessária e frágil
+
+O ponto que eu não tinha visto: **deploy gradual**. Se a Trindade usa Vercel ou
+*Skew Protection*, duas builds coexistem por horas — o hash certo para um
+servidor é 404 no outro. Indexar por build id não resolve isso e ainda depende
+de descobrir o build id, que no App Router é frágil.
+
+**Arquitetura nova, sem build id:**
+
+1. A extensão pergunta ao JOB: *"qual foi o último hash que funcionou?"*
+2. Usa como **palpite**. Deu 200, ótimo.
+3. Deu 404, descarta o palpite, volta a **observar** o corretor usando o Painel,
+   e avisa o JOB: *"o hash Y morreu, aprendi o Z"*.
+
+**A verdade local sempre vence a nuvem.** Assim, durante um deploy gradual, uma
+máquina não quebra a outra — cada uma converge para o hash do servidor que ela
+está atingindo. É mais simples que a minha proposta e mais robusto.
+
+## Aceito: existe uma terceira saída para a sessão caindo
+
+Ping **preso à presença humana**: só dispara se houver `mousemove`/`keydown`/
+`scroll` na aba do Painel **e** a última requisição real tiver mais de ~15 min.
+Se o consultor sai e larga o PC ligado, a extensão dorme junto e a sessão cai —
+que é o comportamento esperado.
+
+Isso não é o cron cego que eu descartei: o disparo é consequência de alguém
+estar ali. Ressalva honesta: continua sendo uma requisição que o humano não
+pediu. Fica dentro do ruído de uso normal, mas não é zero.
+
+## Aceito: meu teste de sessão concorrente tem falso negativo
+
+Dois navegadores no mesmo PC compartilham o IP da corretora, e o sistema pode
+tolerar 2–3 sessões (PC + celular é uso legítimo). Não cair em meia hora não
+prova nada sobre 8 pessoas em 8 IPs.
+
+Pior: detecção por anomalia costuma ser **assíncrona**. Oito pessoas em redes
+diferentes na mesma conta acionam heurística de *account takeover* e o bloqueio
+vem dias depois, não na primeira hora.
+
+**Consequência prática:** não apostar a decisão nesse teste. Se ele "passar", a
+consolidação ganha um argumento que não tem base.
+
+### Argumento contra que eu não tinha listado
+
+**Caos de tela compartilhada.** É app reativo: notificação do cliente de um
+consultor aparece na tela do outro, e cotação em rascunho vira trabalho
+colaborativo acidental — um sobrescreve o do outro sem perceber.
+
+## Devolvido: a criptografia de bound arguments não nos atinge do mesmo jeito
+
+O alerta é correto em geral: se a Trindade usa `.bind()` com argumentos
+embutidos, o Next.js 14+ os criptografa, e **copiar a requisição de um usuário
+para outro** quebraria ou gravaria no nome errado.
+
+Só que **nós não copiamos requisição.** Em `cotador-painel.js`, o corpo é
+`JSON.stringify(corpo)` — montado por nós, a partir de cidade, modalidade,
+vidas e id da cotação. O que atravessa de um usuário para outro na proposta é
+**só o hash e a árvore de rota**. A identidade continua vindo do cookie de
+sessão do próprio corretor (`credentials: 'include'`).
+
+E há uma prova mais forte, que dispensa medição: **se essas ações exigissem
+argumentos criptografados, o cotador já não funcionaria hoje** — ele nunca
+teve o blob, sempre montou o corpo do zero. Ele funciona. Logo, as ações que
+usamos aceitam argumento simples.
+
+**O que sobra para medir, e é mais estreito:** a `next-router-state-tree` que
+guardamos junto do hash. Hoje trocamos só o UUID da cotação dentro dela. Antes
+de compartilhar entre usuários, confirmar que ela não carrega nada específico
+do corretor. Se carregar, compartilha-se **só o hash** e cada máquina usa a
+própria árvore.
+
+## Ordem revisada
+
+1. **Comparar a `next-router-state-tree` de dois corretores** na aba Network.
+   Decide se compartilha hash+árvore ou só o hash. É a única medição que ainda
+   bloqueia a implementação.
+2. **Implementar o compartilhamento** no modelo "nuvem é palpite, local é
+   verdade".
+3. **Ping preso à presença humana** para a sessão.
+4. **Contas:** decidir pelo risco de negócio — atribuição de comissão, caos de
+   tela compartilhada e parada geral se a conta única for bloqueada. Não pelo
+   teste de login concorrente.
