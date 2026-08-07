@@ -21501,6 +21501,60 @@ def api_whatsapp_cotacao_salvar():
         return _wa_cors(jsonify({"ok": False, "erro": "Não foi possível salvar a cotação."})), 500
 
 
+@app.route('/api/whatsapp/preferencias', methods=['GET', 'POST', 'OPTIONS'])
+def api_whatsapp_preferencias():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+
+    conn = db()
+    try:
+        if request.method == 'GET':
+            try: usuario_id = int(request.args.get('usuario_id') or 0)
+            except Exception: usuario_id = 0
+            if not usuario_id:
+                close_db(conn)
+                return _wa_cors(jsonify({"ok": False}))
+                
+            urow = conn.execute("SELECT id FROM usuarios WHERE id=? AND ativo=1", (usuario_id,)).fetchone()
+            if not urow:
+                close_db(conn)
+                return _wa_cors(jsonify({"ok": False}))
+                
+            cidade = _pref_cotacao(conn, usuario_id, 'cidade')
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": True, "cidade": cidade}))
+            
+        elif request.method == 'POST':
+            d = request.get_json(silent=True) or {}
+            try: usuario_id = int(d.get('usuario_id') or 0)
+            except Exception: usuario_id = 0
+            if not usuario_id:
+                close_db(conn)
+                return _wa_cors(jsonify({"ok": False}))
+                
+            urow = conn.execute("SELECT id FROM usuarios WHERE id=? AND ativo=1", (usuario_id,)).fetchone()
+            if not urow:
+                close_db(conn)
+                return _wa_cors(jsonify({"ok": False}))
+                
+            cidade = str(d.get('cidade') or '').strip()[:120]
+            conn.execute("DELETE FROM cotacao_preferencia WHERE usuario_id=? AND chave=?", (usuario_id, 'cidade'))
+            if cidade:
+                conn.execute("""INSERT INTO cotacao_preferencia (usuario_id, chave, valor, atualizado_em)
+                                VALUES (?,?,?,?)""", (usuario_id, 'cidade', cidade, _agora_sp()))
+            conn.commit()
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": True}))
+            
+    except Exception:
+        if hasattr(conn, 'rollback'):
+            try: conn.rollback()
+            except Exception: pass
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False}))
+
 @app.route('/api/whatsapp/lead/salvar', methods=['POST', 'OPTIONS'])
 def api_whatsapp_lead_salvar():
     """Salva em UMA chamada o que o popup mudou. Aplica na ordem: campos → etiquetas
