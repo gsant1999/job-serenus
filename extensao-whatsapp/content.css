@@ -587,6 +587,74 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   font-variant-numeric: tabular-nums; }
 
 /* ── Operadoras ── */
+/* Passo: feito fica verde e sai da frente; o que falta e o unico aceso. */
+/* Topo de navegacao: voltar, onde estamos, e quanto ja foi cotado. */
+.job-cot-topo { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.job-cot-voltar { width: 30px; height: 30px; flex: none; border-radius: 9px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; transition: .12s; }
+.job-cot-voltar:hover { border-color: var(--job-acento); }
+.job-cot-voltar .seta { width: 7px; height: 7px; border-left: 2px solid var(--job-txt);
+  border-bottom: 2px solid var(--job-txt); transform: rotate(45deg) translate(1px, -1px); }
+.job-cot-migalha { flex: 1; min-width: 0; text-align: left; background: none; border: none;
+  padding: 0; font-family: inherit; font-size: 11.5px; color: var(--job-txt-fraco);
+  cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: color .12s; }
+.job-cot-migalha:hover { color: var(--job-acento); }
+/* Quantos planos ja estao no comparativo. Some quando nao ha nenhum. */
+.job-cot-sacola { flex: none; min-width: 26px; height: 26px; padding: 0 8px; border-radius: 8px;
+  background: rgba(31,216,164,.14); border: 1px solid rgba(31,216,164,.35);
+  color: var(--job-acento); font-family: inherit; font-size: 12px; font-weight: 800;
+  cursor: pointer; transition: .12s; }
+.job-cot-sacola:hover { background: rgba(31,216,164,.24); }
+
+.job-cot-rot.feito i { background: var(--job-acento); color: #06131a; }
+.job-cot-rot.feito { color: var(--job-txt-fraco); }
+.job-cot-rot.agora { color: var(--job-txt); }
+.job-cot-rot.agora i { background: linear-gradient(135deg, #1fd8a4, #3b82f6); color: #06131a;
+  box-shadow: 0 0 0 3px rgba(31,216,164,.16); animation: job-pulso 1.9s ease-in-out infinite; }
+@keyframes job-pulso {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(31,216,164,.16); }
+  50%      { box-shadow: 0 0 0 6px rgba(31,216,164,.05); }
+}
+@media (prefers-reduced-motion: reduce) { .job-cot-rot.agora i { animation: none; } }
+
+/* "i": explica o conceito, nao o campo. title nativo, hover e foco. */
+.job-i { width: 14px; height: 14px; flex: none; border-radius: 50%; cursor: help;
+  background: var(--job-bg3); color: var(--job-txt-fraco); font-size: 9px; font-weight: 800;
+  font-style: normal; letter-spacing: 0; text-transform: none;
+  display: inline-flex; align-items: center; justify-content: center; transition: .12s; }
+.job-i:hover, .job-i:focus { background: var(--job-acento); color: #06131a; outline: none; }
+
+/* Gaveta por operadora, como o Painel faz: fechada e uma linha com o resumo. */
+.job-cot-gaveta { border: 1px solid var(--job-borda); border-radius: 12px;
+  margin-bottom: 8px; overflow: hidden; background: var(--job-bg2); }
+.job-cot-gaveta-t { display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 10px 12px; background: none; border: none; color: var(--job-txt);
+  font-family: inherit; cursor: pointer; text-align: left; transition: background .12s; }
+.job-cot-gaveta-t:hover { background: var(--job-bg3); }
+.job-cot-gaveta-t img { width: 40px; height: 26px; flex: none; object-fit: contain;
+  background: #fff; border-radius: 6px; padding: 3px; }
+.job-cot-gaveta-n { flex: 1; min-width: 0; font-size: 13px; font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-cot-gaveta-r { flex: none; font-size: 11px; color: var(--job-txt-fraco);
+  font-variant-numeric: tabular-nums; }
+.job-cot-gaveta-s { flex: none; width: 8px; height: 8px; border-right: 2px solid var(--job-txt-fraco);
+  border-bottom: 2px solid var(--job-txt-fraco); transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform .18s; }
+.job-cot-gaveta.aberta .job-cot-gaveta-s { transform: rotate(-135deg) translate(-3px, -3px); }
+.job-cot-gaveta-c { display: none; padding: 0 10px 10px; }
+.job-cot-gaveta.aberta .job-cot-gaveta-c { display: block; }
+.job-cot-gaveta-c .job-cot-res:last-child { margin-bottom: 0; }
+
+/* Rodape: acoes que existem mas nao competem com a principal. */
+.job-cot-rodape { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--job-borda); }
+.job-cot-rodape button { background: none; border: none; padding: 0; cursor: pointer;
+  font-family: inherit; font-size: 12px; font-weight: 600; color: var(--job-txt-fraco);
+  transition: color .12s; }
+.job-cot-rodape button:hover { color: var(--job-acento); }
+
 .job-cot-ops { display: flex; flex-direction: column; gap: 7px; margin-bottom: 10px; }
 .job-cot-op { position: relative; display: flex; align-items: center; gap: 10px;
   text-align: left; padding: 10px 12px; border-radius: 12px; background: var(--job-bg2);
@@ -660,14 +728,6 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cot-res-n { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--job-txt); }
 .job-cot-res-v { flex: none; font-size: 14.5px; font-weight: 800; color: var(--job-txt);
   font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
-/* O menor preco do comparativo INTEIRO. E a pergunta que o consultor tem na
-   frente do cliente, entao e a unica coisa da lista que ganha cor de marca. */
-.job-cot-res.melhor { border-color: rgba(31,216,164,.50);
-  background: linear-gradient(100deg, rgba(31,216,164,.12), var(--job-bg2) 62%); }
-.job-cot-res.melhor .job-cot-res-v { color: var(--job-acento); }
-.job-cot-selo { display: inline-block; margin-left: 7px; font-size: 9.5px; font-weight: 800;
-  letter-spacing: .05em; text-transform: uppercase; color: #06131a; padding: 3px 6px;
-  border-radius: 5px; background: linear-gradient(135deg, #1fd8a4, #3b82f6); vertical-align: 1px; }
 /* Sem preco nao some e nao vira zero: fica visivel e apagado. */
 .job-cot-res.sem { border-style: dashed; opacity: .72; }
 .job-cot-res.sem .job-cot-res-v { color: var(--job-txt-fraco); font-weight: 600;

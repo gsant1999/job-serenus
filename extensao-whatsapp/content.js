@@ -4099,20 +4099,26 @@
       '<div class="job-cot-wrap">' +
         '<div class="job-cnpj-titulo">Cotar agora</div>' +
         '<div class="job-cnpj-sub">Preço buscado no Painel do Corretor na hora, pela sua sessão.</div>' +
-        '<label class="job-cot-rot"><i>1</i> Cidade de quem vai usar o plano</label>' +
+        '<label class="job-cot-rot" id="job-cot-p1"><i>1</i> Cidade' +
+          _cotAjuda('A cidade define QUEM ATENDE. Um plano de Campinas não existe em Sorocaba, ' +
+                    'e a lista de operadoras muda inteira.') + '</label>' +
         '<div class="job-cot-campo-sug">' +
           '<input id="job-cot-cidade" class="job-cnpj-input" autocomplete="off" placeholder="Campinas - SP" value="' + esc(v.cidade || _cotCidadePadrao || '') + '">' +
           '<div id="job-cot-sug" class="job-cot-sug"></div>' +
         '</div>' +
         '<button type="button" class="job-cot-fixar" id="job-cot-fixar">' +
           '<span class="marca"></span><span class="txt"></span></button>' +
-        '<label class="job-cot-rot"><i>2</i> Tipo de contratação</label>' +
+        '<label class="job-cot-rot" id="job-cot-p2"><i>2</i> Tipo de contratação' +
+          _cotAjuda('PF é pessoa física. PME precisa de CNPJ. Adesão exige o cliente pertencer ' +
+                    'a uma entidade de classe. O preço e os planos mudam com isso.') + '</label>' +
         '<div class="job-cot-seg" id="job-cot-tipo">' +
           _COT_TIPOS.map((t) =>
             '<button type="button" data-v="' + t.cod + '"' +
             (Number(v.modalidade || 1) === t.cod ? ' class="on"' : '') + '>' + t.rot + '</button>').join('') +
         '</div>' +
-        '<label class="job-cot-rot"><i>3</i> Quantas pessoas em cada faixa etária</label>' +
+        '<label class="job-cot-rot" id="job-cot-p3"><i>3</i> Quem vai usar' +
+          _cotAjuda('O preço é por faixa etária E depende de quantas vidas tem no total: ' +
+                    'a mesma faixa custa menos num contrato de 20 vidas que num de 2.') + '</label>' +
         '<input id="job-cot-idades" class="job-cnpj-input" placeholder="55 5 50" value="' + esc(v.idades || '') + '">' +
         '<div class="job-cot-dica" id="job-cot-dica"></div>' +
         // Duas formas de dizer a mesma coisa. Quem tem a idade na conversa
@@ -4173,6 +4179,19 @@
       const pronto = !!cidadeDoCatalogo && r.total > 0;
       // O BOTÃO DIZ O QUE FALTA, em vez de só ficar apagado. Botão cinza sem
       // motivo faz a pessoa clicar de novo achando que travou.
+      // ESTADO DE CADA PASSO NA TELA. Feito é verde e some da frente; o que
+      // falta é o único aceso. Sem isso, três blocos idênticos e a pessoa não
+      // sabe onde está — ela lê tudo de novo a cada volta.
+      const feito1 = !!cidadeDoCatalogo, feito3 = r.total > 0;
+      const marca = (id, ok, agora) => {
+        const el2 = document.getElementById(id);
+        if (!el2) return;
+        el2.classList.toggle('feito', ok);
+        el2.classList.toggle('agora', !ok && agora);
+      };
+      marca('job-cot-p1', feito1, true);
+      marca('job-cot-p2', feito1, false);
+      marca('job-cot-p3', feito3, feito1);
       btBuscar.disabled = !pronto;
       btBuscar.textContent = !cidadeDoCatalogo ? 'Escolha a cidade'
                            : !r.total ? 'Informe as vidas'
@@ -4243,13 +4262,22 @@
         // exatamente a do catálogo deles ("Campinas - SP"), não o que a gente
         // escreve. O erro parecia do Painel e era meu.
         const lista = (r && r.ok && Array.isArray(r.dados)) ? r.dados : [];
-        if (!lista.length && r && !r.ok) {
+        // LISTA VAZIA SEMPRE DIZ POR QUÊ.
+        //
+        // Eu só mostrava o motivo quando `r` existia e vinha com ok:false. Se a
+        // chamada estourava (sem aba do Painel, extensão recarregada), `r` era
+        // null, a condição não pegava e a lista simplesmente não abria — o
+        // consultor digitava a cidade e não acontecia nada. Silêncio é o pior
+        // erro possível aqui, porque parece que o campo não funciona.
+        if (!lista.length) {
+          const motivo = r ? (r.ok ? '' : r.motivo) : 'extensao_indisponivel';
           box.innerHTML = '<div class="job-cot-sug-vazio">' +
-            esc(_cotMotivo(r.motivo)).replace(/<[^>]*>/g, '') + '</div>';
+            (motivo ? _cotMotivo(motivo).replace(/<[^>]*>/g, '')
+                    : 'Nenhuma cidade com esse nome no Painel. Confira a grafia.') +
+            '</div>';
           box.className = 'job-cot-sug ver';
           return;
         }
-        if (!lista.length) { box.className = 'job-cot-sug'; return; }
         box.innerHTML = lista.slice(0, 8).map((c) => {
           const nome = (c && c.nome) || c;
           return '<button type="button" data-v="' + esc(nome) + '">' + esc(nome) + '</button>';
@@ -4326,6 +4354,45 @@
     return _cotLead;
   }
 
+  // O "i" explica o CONCEITO, não o campo. Quem não sabe o que é adesão não é
+  // ajudado por "escolha o tipo" — é ajudado por "exige entidade de classe".
+  // Usa title nativo: funciona no hover e no foco por teclado, e não inventa
+  // uma camada de tooltip que teria que ser mantida.
+  function _cotAjuda(texto) {
+    return '<span class="job-i" tabindex="0" title="' + esc(texto) + '">i</span>';
+  }
+
+  // TOPO DE NAVEGACAO: seta de voltar + onde estamos + o que ja foi cotado.
+  //
+  // Sem seta, sair de uma operadora exigia achar o botao certo la embaixo, e
+  // trocar de cidade exigia voltar duas telas às cegas. E sem o resumo, o que
+  // ja foi cotado sumia da vista assim que ele entrava na proxima operadora —
+  // ele perdia a conta do que tinha e recomecava.
+  function _cotTopo(aoVoltar) {
+    const n = _cotFeitas.reduce((a, f) => a + f.planos.length, 0);
+    return '<div class="job-cot-topo">' +
+      '<button type="button" class="job-cot-voltar" id="job-cot-seta" title="Voltar">' +
+        '<span class="seta"></span></button>' +
+      '<button type="button" class="job-cot-migalha" id="job-cot-trocar-base" ' +
+        'title="Mudar cidade, tipo ou quem vai usar">' +
+        esc(_cot && _cot.cidade ? _cot.cidade : '') +
+        (_cot && _cot.modalidade ? ' · ' + esc(_cotRotulo(_cot.modalidade)) : '') +
+        (_cot && _cot.totalVidas ? ' · ' + _cot.totalVidas + (_cot.totalVidas === 1 ? ' vida' : ' vidas') : '') +
+      '</button>' +
+      (n ? '<button type="button" class="job-cot-sacola" id="job-cot-ver-comparativo" ' +
+             'title="Ver o comparativo com o que já foi cotado">' + n + '</button>' : '') +
+    '</div>';
+  }
+  // Liga os três botões do topo. `aoVoltar` é o único que muda por tela.
+  function _cotTopoLigar(aoVoltar) {
+    const bv = document.getElementById('job-cot-seta');
+    if (bv) bv.addEventListener('click', aoVoltar);
+    const bt = document.getElementById('job-cot-trocar-base');
+    if (bt) bt.addEventListener('click', abrirSecaoCotarInline);
+    const bc = document.getElementById('job-cot-ver-comparativo');
+    if (bc) bc.addEventListener('click', _cotPintarResultado);
+  }
+
   function _cotBase() {
     return { cidade: _cot.cidade, modalidade: _cot.modalidade, vidas: _cot.vidas,
              titulo: (nomeDoContato() || 'Cliente') + ' · ' + _cot.cidade + ' · ' + _cotRotulo(_cot.modalidade) };
@@ -4370,6 +4437,8 @@
       const tudo = await new Promise((ok) => chrome.storage.local.get(null, (r) => ok(r || {})));
       Object.keys(tudo).forEach((k) => {
         if (k.indexOf('logo_op:') === 0 && typeof tudo[k] === 'string') _cotLogos[k] = tudo[k];
+        // 'xlogo_op:...' guarda QUANDO a busca falhou, pra poder tentar de novo.
+        else if (k.indexOf('xlogo_op:') === 0 && typeof tudo[k] === 'number') _cotLogos[k] = tudo[k];
       });
     } catch (e) {}
   }
@@ -4381,17 +4450,31 @@
     for (let i = 0; i < ops.length; i++) {
       const o = ops[i];
       const chave = _cotChaveLogo(o.nome);
+      if (!o.logotipo) continue;                 // o Painel não tem logo dessa: a inicial é a resposta
       let dado = _cotLogos[chave];
-      if (dado === '') continue;                       // já tentamos e não tem
-      if (!dado && o.logotipo) {
+      // FRACASSO NÃO É PERMANENTE.
+      //
+      // Eu guardava a falha como string vazia e nunca mais tentava. Um soluço
+      // de rede, ou o Painel lento naquele segundo, apagava a logo daquela
+      // operadora para sempre — foi o que aconteceu com a Select. Agora a falha
+      // é guardada COM A DATA e se refaz depois de três dias; o acerto continua
+      // guardado para sempre, que é o que evita rede à toa.
+      if (typeof dado === 'string' && dado) { /* já temos */ }
+      else {
+        const falha = _cotLogos['x' + chave];
+        const recente = falha && (Date.now() - falha) < 3 * 24 * 3600 * 1000;
+        if (recente) continue;
         let r = null;
         try { r = await _safeSendMessage({ type: 'logo_operadora', url: o.logotipo }); }
         catch (e) { r = null; }
         dado = (r && r.ok && r.dataUrl) || '';
-        _cotLogos[chave] = dado;
-        // Guarda inclusive o fracasso (string vazia): sem isso a extensão
-        // tentaria de novo a cada cotação uma logo que não existe.
-        try { chrome.storage.local.set({ [chave]: dado }); } catch (e) {}
+        if (dado) {
+          _cotLogos[chave] = dado;
+          try { chrome.storage.local.set({ [chave]: dado }); } catch (e) {}
+        } else {
+          _cotLogos['x' + chave] = Date.now();
+          try { chrome.storage.local.set({ ['x' + chave]: Date.now() }); } catch (e) {}
+        }
       }
       if (!dado) continue;
       const alvo = document.querySelector('.job-cot-op[data-id="' + String(o.id).replace(/"/g, '') + '"]');
@@ -4406,9 +4489,9 @@
   function _cotPintarOperadoras() {
     const ops = _cot.operadoras || [];
     setCorpoSecao('<div class="job-cot-wrap">' +
+      _cotTopo(abrirSecaoCotarInline) +
       '<div class="job-cnpj-titulo">Operadoras</div>' +
-      '<div class="job-cnpj-sub">Quem atende <b>' + esc(_cot.cidade) + '</b> · ' +
-        esc(_cotRotulo(_cot.modalidade)) + ' · ' + _cot.totalVidas + (_cot.totalVidas === 1 ? ' vida' : ' vidas') + '</div>' +
+      '<div class="job-cnpj-sub">Quem atende essa combinação. Escolha uma.</div>' +
       (ops.length
         ? '<div class="job-cot-ops">' + ops.map((o) => {
             const jaFoi = _cotFeitas.filter((f) => String(f.operadoraId) === String(o.id))[0];
@@ -4435,7 +4518,9 @@
           '<div class="job-cot-vazio-s">Quem atende muda com a idade e o tipo. Confira a cidade e as idades.</div></div>') +
       '<button class="job-cot-nova" id="job-cot-voltar" style="border:none;cursor:pointer;width:100%;font-family:inherit">Mudar dados</button>' +
     '</div>');
-    document.getElementById('job-cot-voltar').addEventListener('click', abrirSecaoCotarInline);
+    _cotTopoLigar(abrirSecaoCotarInline);
+    const bmd = document.getElementById('job-cot-voltar');
+    if (bmd) bmd.addEventListener('click', abrirSecaoCotarInline);
     document.querySelectorAll('.job-cot-op').forEach((b) => b.addEventListener('click', () => {
       const o = ops.filter((x) => String(x.id) === b.dataset.id)[0];
       if (o) _cotBuscarPlanos(o);
@@ -4469,6 +4554,7 @@
 
     const logoTopo = _cotLogos[_cotChaveLogo(_cot.operadoraAtual.nome)];
     setCorpoSecao('<div class="job-cot-wrap">' +
+      _cotTopo(_cotPintarOperadoras) +
       (logoTopo ? '<img class="job-cot-logo-topo" src="' + esc(logoTopo) + '" alt="">' : '') +
       '<div class="job-cnpj-titulo">' + esc(_cot.operadoraAtual.nome) + '</div>' +
       (comuns.length
@@ -4506,6 +4592,7 @@
       bt.disabled = !n;
       bt.textContent = n ? 'Ver preços (' + n + ')' : 'Marque um plano';
     }));
+    _cotTopoLigar(_cotPintarOperadoras);
     document.getElementById('job-cot-volta-ops').addEventListener('click', _cotPintarOperadoras);
     bt.addEventListener('click', () => _cotPrecos(marcados()));
   }
@@ -4546,52 +4633,78 @@
     _cotPintarResultado();
   }
 
-  // `melhor` é o menor preço do comparativo INTEIRO, não da operadora. O
-  // consultor está comparando entre operadoras — destacar o mais barato de
-  // cada uma seria destacar tudo, e não responder a pergunta que ele tem.
-  function _cotCartoes(lista, melhor) {
-    return lista.map((p) => {
-      const eMelhor = (melhor != null && p.total != null && p.total === melhor);
-      return '<div class="job-cot-res' + (p.total == null ? ' sem' : '') +
-          (eMelhor ? ' melhor' : '') + '">' +
-        '<div class="job-cot-res-n">' + esc(_cotNomePlano(p)) +
-          (eMelhor ? '<span class="job-cot-selo">mais barato</span>' : '') + '</div>' +
+  // SEM SELO DE "MAIS BARATO".
+  //
+  // Tinha um, e saiu por decisão do Guilherme: o preço já está do lado, o
+  // consultor sabe ler, e esse texto pode acabar num print ou num texto
+  // copiado pro cliente. Rotular plano de saúde como "o mais barato" é um
+  // enquadramento que ofende — o cliente não está procurando o mais barato,
+  // está procurando o que resolve.
+  function _cotCartoes(lista) {
+    return lista.map((p) =>
+      '<div class="job-cot-res' + (p.total == null ? ' sem' : '') + '">' +
+        '<div class="job-cot-res-n">' + esc(_cotNomePlano(p)) + '</div>' +
         '<div class="job-cot-res-v">' +
           (p.total == null ? 'sem preço' : _cotMoeda(p.total)) +
         '</div>' +
-      '</div>';
-    }).join('');
+      '</div>').join('');
   }
 
   function _cotPintarResultado() {
-    // Mostra TUDO o que já foi cotado nesta conversa, não só a última operadora.
     const todos = _cotFeitas.reduce((a, f) => a.concat(f.planos), []);
     const comPreco = todos.filter((p) => p.total != null);
-    const melhor = comPreco.length
-      ? comPreco.reduce((m, p) => (m == null || p.total < m) ? p.total : m, null) : null;
-    const grupos = _cotFeitas.map((f) =>
-      '<div class="job-cot-grupo"><div class="job-cot-grupo-t">' + esc(f.nome) + '</div>' +
-      _cotCartoes(f.planos, melhor) + '</div>').join('');
+    // GAVETA POR OPERADORA, como o Painel faz.
+    //
+    // Empilhado, cotar três operadoras vira uma lista de vinte linhas e o
+    // consultor rola pra achar. Fechada, cada operadora cabe numa linha com o
+    // resumo que interessa — quantos planos e a partir de quanto. A última
+    // cotada abre sozinha, porque é a que ele acabou de pedir.
+    const grupos = _cotFeitas.map((f, i) => {
+      const cp = f.planos.filter((p) => p.total != null);
+      const menor = cp.length ? cp.reduce((m, p) => Math.min(m, p.total), Infinity) : null;
+      const aberta = (i === _cotFeitas.length - 1);
+      const logo = _cotLogos[_cotChaveLogo(f.nome)];
+      return '<div class="job-cot-gaveta' + (aberta ? ' aberta' : '') + '" data-op="' + esc(f.operadoraId) + '">' +
+        '<button type="button" class="job-cot-gaveta-t">' +
+          (logo ? '<img src="' + esc(logo) + '" alt="">' : '') +
+          '<span class="job-cot-gaveta-n">' + esc(f.nome) + '</span>' +
+          '<span class="job-cot-gaveta-r">' + f.planos.length +
+            (menor != null ? ' · desde ' + _cotMoeda(menor) : '') + '</span>' +
+          '<span class="job-cot-gaveta-s"></span>' +
+        '</button>' +
+        '<div class="job-cot-gaveta-c">' + _cotCartoes(f.planos) + '</div>' +
+      '</div>';
+    }).join('');
+
     setCorpoSecao('<div class="job-cot-wrap">' +
+      _cotTopo(_cotPintarOperadoras) +
+      // Sem subtítulo: a migalha do topo já diz cidade, tipo e vidas, e ainda
+      // é clicável pra mudar. Repetir logo abaixo é eco.
       '<div class="job-cnpj-titulo">Comparativo</div>' +
-      '<div class="job-cnpj-sub">' + esc(_cot.cidade) + ' · ' + esc(_cotRotulo(_cot.modalidade)) + ' · ' +
-        _cot.totalVidas + (_cot.totalVidas === 1 ? ' vida' : ' vidas') +
-        ' · ' + _cotFeitas.length + (_cotFeitas.length === 1 ? ' operadora' : ' operadoras') + '</div>' +
       grupos +
       (comPreco.length
-        // SALVAR VEM PRIMEIRO, e não é detalhe de ordem.
-        //
-        // Salvando, a cotação vira documento no JOB — com e-mail, imagem,
-        // destaque de plano e link próprio — e entra na ficha do lead e nas
-        // Cotações salvas. Mandar o resumo em texto é o atalho de quando não
-        // dá pra salvar; deixá-lo em cima fazia todo mundo escolher o pior.
-        ? '<button class="job-cot-bt-mandar" id="job-cot-salvar" style="width:100%;margin-top:8px">Salvar no JOB</button>' +
+        // UMA ação principal. As outras existem, mas não competem: salvar é o
+        // que transforma isto em cotação de verdade — com link, documento e
+        // registro no lead. O resto é atalho.
+        ? '<button class="job-cot-bt-mandar" id="job-cot-salvar" style="width:100%;margin-top:12px" ' +
+            'title="Cria a cotação no JOB: gera o link do cliente, entra na ficha do lead e em Cotações salvas">' +
+            'Salvar no JOB</button>' +
           '<div class="job-cot-dica" id="job-cot-salvo"></div>' +
           '<div id="job-cot-pos"></div>' +
-          '<button class="job-cot-bt-copiar" id="job-cot-mandar" style="width:100%;margin-top:6px">Mandar preços em texto</button>'
-        : '<div class="job-ia-alerta">Nenhum preço voltou. Isso não quer dizer que não exista — o Painel não respondeu o valor.</div>') +
-      '<button class="job-cot-nova" id="job-cot-mais" style="border:none;cursor:pointer;width:100%;font-family:inherit">Cotar outra operadora</button>' +
+          '<div class="job-cot-rodape">' +
+            '<button type="button" id="job-cot-mandar" title="Manda os preços como texto simples, sem link nem apresentação">' +
+              'Mandar preços em texto</button>' +
+            '<button type="button" id="job-cot-mais" title="Volta à lista de operadoras e soma ao comparativo">' +
+              'Cotar outra operadora</button>' +
+          '</div>'
+        : '<div class="job-ia-alerta">Nenhum preço voltou. Isso não quer dizer que não exista — o Painel não respondeu o valor.</div>' +
+          '<div class="job-cot-rodape"><button type="button" id="job-cot-mais">Cotar outra operadora</button></div>') +
     '</div>');
+
+    document.querySelectorAll('.job-cot-gaveta-t').forEach((b) => b.addEventListener('click', () => {
+      b.parentElement.classList.toggle('aberta');
+    }));
+    _cotTopoLigar(_cotPintarOperadoras);
     document.getElementById('job-cot-mais').addEventListener('click', _cotPintarOperadoras);
     const bm = document.getElementById('job-cot-mandar');
     if (bm) bm.addEventListener('click', () => _cotMandarTexto(bm, comPreco));
@@ -4669,13 +4782,16 @@
     // dessa primeira abertura. Prometer o botão aqui seria prometer o que eu
     // não posso entregar — o botão do documento diz o que tem lá.
     pos.innerHTML =
-      '<button class="job-cot-bt-mandar" id="job-cot-link" style="width:100%;margin-top:8px">' +
-        'Mandar link na conversa</button>' +
+      '<button class="job-cot-bt-mandar" id="job-cot-link" style="width:100%;margin-top:8px" ' +
+        'title="Manda o link da apresentação na conversa aberta">Mandar link</button>' +
       '<div class="job-cot-item-acoes">' +
-        '<button class="job-cot-bt-copiar" id="job-cot-copiarlink" style="flex:1">Copiar link</button>' +
-        '<button class="job-cot-bt-copiar" id="job-cot-copiartexto" style="flex:1">Copiar preços</button>' +
+        '<button class="job-cot-bt-copiar" id="job-cot-copiarlink" style="flex:1" ' +
+          'title="Copia o link do cliente pra área de transferência">Copiar link</button>' +
+        '<button class="job-cot-bt-copiar" id="job-cot-copiartexto" style="flex:1" ' +
+          'title="Copia os preços como texto">Copiar preços</button>' +
       '</div>' +
-      '<a class="job-cot-nova" href="' + esc(doc) + '" target="_blank" rel="noopener">' +
+      '<a class="job-cot-nova" href="' + esc(doc) + '" target="_blank" rel="noopener" ' +
+        'title="Abre a apresentação no JOB: destacar plano, legenda, enviar por e-mail, imagem e PDF">' +
         'Abrir apresentação</a>';
     const bcl = document.getElementById('job-cot-copiarlink');
     if (bcl) bcl.addEventListener('click', () => {
