@@ -4455,20 +4455,41 @@
 
   function _cotPintarPlanos() {
     const pls = _cot.planos || [];
-    // A logo aparece GRANDE aqui: esta tela é de uma operadora só, e o espaço
-    // que na lista era disputado por quinze linhas aqui está sobrando.
+    // O QUE É IGUAL EM TODOS SOBE PRO CABEÇALHO.
+    //
+    // A lista repetia "Aceita MEI · 2 a 2 vidas · Amil Saúde - Interior I" em
+    // TODAS as linhas. Atributo que não varia não distingue plano nenhum: só
+    // empurra pra baixo o que decide (acomodação e coparticipação) e faz sete
+    // planos parecerem o mesmo. Comum em cima, diferente na linha.
+    const porPlano = pls.map((p) => _cotEtiquetas(p));
+    const comuns = pls.length > 1
+      ? porPlano[0].filter((e) => porPlano.every((lista) => lista.some((x) => x.t === e.t)))
+      : [];
+    const eComum = (t) => comuns.some((c) => c.t === t);
+
     const logoTopo = _cotLogos[_cotChaveLogo(_cot.operadoraAtual.nome)];
     setCorpoSecao('<div class="job-cot-wrap">' +
       (logoTopo ? '<img class="job-cot-logo-topo" src="' + esc(logoTopo) + '" alt="">' : '') +
       '<div class="job-cnpj-titulo">' + esc(_cot.operadoraAtual.nome) + '</div>' +
-      '<div class="job-cnpj-sub">Marque até ' + _COT_MAX + ' planos. Cada preço é uma consulta ao Painel.</div>' +
+      (comuns.length
+        ? '<div class="job-cot-tags job-cot-tags-topo">' + comuns.map((e) =>
+            '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' + esc(e.t) + '</span>').join('') +
+          '</div>'
+        : '') +
+      '<div class="job-cnpj-sub">Vale para todos os planos abaixo. Marque até ' + _COT_MAX + '.</div>' +
       (pls.length
-        ? pls.map((p, i) =>
-            '<label class="job-cot-plano"><input type="checkbox" data-i="' + i + '">' +
+        ? pls.map((p, i) => {
+            const proprias = porPlano[i].filter((e) => !eComum(e.t));
+            return '<label class="job-cot-plano"><input type="checkbox" data-i="' + i + '">' +
               '<span><b>' + esc(_cotNomePlano(p)) + '</b>' +
-              _cotEtiquetasHTML(p) + '</span></label>').join('')
-        : '<div class="job-cot-vazio"><div class="job-cot-vazio-t">Nenhum plano dessa operadora serve para essas vidas.</div></div>') +
-      '<button class="job-cnpj-btn" id="job-cot-precos" disabled>Ver preços</button>' +
+              (proprias.length
+                ? '<span class="job-cot-tags">' + proprias.map((e) =>
+                    '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' + esc(e.t) + '</span>').join('') +
+                  '</span>'
+                : '') + '</span></label>';
+          }).join('')
+        : '<div class="job-cot-vazio"><div class="job-cot-vazio-t">Nenhum plano serve para essas vidas.</div></div>') +
+      '<button class="job-cot-bt-mandar" id="job-cot-precos" style="width:100%;margin-top:12px" disabled>Marque um plano</button>' +
       '<button class="job-cot-nova" id="job-cot-volta-ops" style="border:none;cursor:pointer;width:100%;font-family:inherit">Outra operadora</button>' +
     '</div>');
     const bt = document.getElementById('job-cot-precos');
@@ -4483,7 +4504,7 @@
         o.parentElement.classList.toggle('bloq', o.disabled);
       });
       bt.disabled = !n;
-      bt.textContent = n ? 'Ver preços de ' + n + (n === 1 ? ' plano' : ' planos') : 'Ver preços';
+      bt.textContent = n ? 'Ver preços (' + n + ')' : 'Marque um plano';
     }));
     document.getElementById('job-cot-volta-ops').addEventListener('click', _cotPintarOperadoras);
     bt.addEventListener('click', () => _cotPrecos(marcados()));
