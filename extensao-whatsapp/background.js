@@ -318,6 +318,52 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/cotacoes?' + qs, 'GET', null, 15000).then(sendResponse);
     return true;
   }
+  // LOGO DA OPERADORA, buscada AQUI e não na página.
+  //
+  // A página do WhatsApp barra imagem de outro endereço, e o service worker
+  // não tem essa restrição. Ele busca, converte pra data: e devolve — a página
+  // nunca faz o pedido, então não há o que barrar.
+  //
+  // Uma vez por operadora: o content script guarda o resultado e não volta a
+  // pedir. É assim que a memória de logos se enche sozinha, sem varredura.
+  if (msg && msg.type === 'logo_operadora') {
+    (async () => {
+      try {
+        const u = String(msg.url || '');
+        if (!/^https:\/\//.test(u)) { sendResponse({ ok: false }); return; }
+        const ctrl = new AbortController();
+        const relogio = setTimeout(() => ctrl.abort(), 8000);
+        const r = await fetch(u, { signal: ctrl.signal });
+        clearTimeout(relogio);
+        if (!r.ok) { sendResponse({ ok: false }); return; }
+        const b = await r.blob();
+        // Teto de 120 KB: logo é ícone. Acima disso é banner ou página de erro
+        // disfarçada, e encher o armazenamento com isso quebraria o resto.
+        if (!/^image\//.test(b.type) || b.size > 120 * 1024) { sendResponse({ ok: false }); return; }
+        // APARA A MARGEM MORTA antes de guardar.
+        //
+        // Logo de operadora quase sempre vem com folga transparente ou branca em
+        // volta — às vezes metade da imagem. Encaixada num espaço pequeno, essa
+        // folga come o que deveria ser lido e a marca fica minúscula. Aparando,
+        // a mesma caixa passa a mostrar só a marca.
+        //
+        // Feito AQUI porque o service worker tem OffscreenCanvas e a página do
+        // WhatsApp não deixaria desenhar imagem de outro endereço.
+        let dataUrl = null;
+        try { dataUrl = await _aparar(b); } catch (e) { dataUrl = null; }
+        if (!dataUrl) {
+          dataUrl = await new Promise((ok, err) => {
+            const fr = new FileReader();
+            fr.onload = () => ok(fr.result);
+            fr.onerror = err;
+            fr.readAsDataURL(b);
+          });
+        }
+        sendResponse({ ok: true, dataUrl });
+      } catch (e) { sendResponse({ ok: false }); }
+    })();
+    return true;
+  }
   // Salvar no JOB a cotação feita dentro da conversa. Timeout maior que os
   // outros porque grava em dois lugares (histórico vivo + apresentação).
   if (msg && msg.type === 'cotacao_salvar') {
@@ -727,3 +773,54 @@ self.addEventListener('unhandledrejection', (e) => {
     versao: chrome.runtime.getManifest().version,
   }, 8000).catch(() => {});
 });
+
+
+// Recorta a folga em volta da marca: transparente OU quase branca.
+//
+// Devolve null quando não dá pra decidir (formato que o navegador não decodifica,
+// imagem toda clara, recorte que sobrou menor que um selo). Null faz o chamador
+// usar a imagem original — melhor a logo com folga do que logo recortada errada.
+async function _aparar(blob) {
+  const bmp = await createImageBitmap(blob);
+  const L = bmp.width, A = bmp.height;
+  if (!L || !A || L * A > 4000 * 4000) return null;
+  const cv = new OffscreenCanvas(L, A);
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0);
+  const d = ctx.getImageData(0, 0, L, A).data;
+  // "Vazio" = transparente ou perto do branco. O segundo caso existe porque
+  // muita logo vem em JPG, sem canal alfa, com fundo branco.
+  const vazio = (i) => d[i + 3] < 24 || (d[i] > 244 && d[i + 1] > 244 && d[i + 2] > 244);
+  let x0 = L, y0 = A, x1 = -1, y1 = -1;
+  for (let y = 0; y < A; y++) {
+    for (let x = 0; x < L; x++) {
+      if (vazio((y * L + x) * 4)) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  }
+  if (x1 < 0 || y1 < 0) return null;                 // imagem inteira "vazia"
+  const m = 2;                                       // respiro, pra não encostar
+  x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m);
+  x1 = Math.min(L - 1, x1 + m); y1 = Math.min(A - 1, y1 + m);
+  const nl = x1 - x0 + 1, na = y1 - y0 + 1;
+  if (nl < 8 || na < 8) return null;
+  // Recorte que quase não muda nada não vale reencodar: perde qualidade à toa.
+  if (nl > L * 0.94 && na > A * 0.94) return null;
+  // Sobe a resolução até 3x pro ícone não sair borrado em tela retina, com teto
+  // pra não guardar imagem grande de graça.
+  const escala = Math.min(3, Math.max(1, 96 / Math.max(nl, na)));
+  const saida = new OffscreenCanvas(Math.round(nl * escala), Math.round(na * escala));
+  const sctx = saida.getContext('2d');
+  sctx.imageSmoothingQuality = 'high';
+  sctx.drawImage(bmp, x0, y0, nl, na, 0, 0, saida.width, saida.height);
+  const png = await saida.convertToBlob({ type: 'image/png' });
+  return await new Promise((ok, err) => {
+    const fr = new FileReader();
+    fr.onload = () => ok(fr.result);
+    fr.onerror = err;
+    fr.readAsDataURL(png);
+  });
+}

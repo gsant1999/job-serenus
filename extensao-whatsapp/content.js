@@ -3807,11 +3807,10 @@
       // Vazio com saída. Dizer só "nenhuma cotação" deixa o consultor parado
       // com o cliente esperando do outro lado.
       corpo = '<div class="job-cot-vazio">' +
-          '<div class="job-cot-vazio-t">Nenhuma cotação para ' + esc(nome) + '.</div>' +
-          '<div class="job-cot-vazio-s">' +
-            (resp.lead_id ? 'Este cliente já é lead no CRM — dá pra cotar agora.'
-                          : 'Este número ainda não é um lead do CRM. A cotação só sai com o lead ligado.') +
-          '</div>' +
+          '<div class="job-cot-vazio-t">Nenhuma cotação ainda.</div>' +
+          (resp.lead_id ? ''
+            : '<div class="job-cot-vazio-s">Este número não é um lead do CRM. ' +
+              'Sem lead a cotação não é salva.</div>') +
         '</div>';
     } else {
       // O título salvo começa com o nome do cliente ("Beatriz · Campinas - SP ·
@@ -3859,10 +3858,10 @@
         // de lá compara 20 planos de várias operadoras de uma vez, o que não
         // cabe num painel de conversa — mas deixou de ser o caminho principal.
         '<button class="job-cot-bt-mandar" id="job-cot-agora" style="width:100%;margin-top:2px">' +
-          (lista.length ? 'Cotar de novo, aqui mesmo' : 'Cotar agora, sem sair da conversa') +
+          'Cotar' +
         '</button>' +
         '<a class="job-cot-nova" href="' + esc(linkNovo) + '" target="_blank" rel="noopener">' +
-          'Abrir a tela completa no JOB' +
+          'Abrir no JOB' +
         '</a>' +
       '</div>');
     const ba = document.getElementById('job-cot-agora');
@@ -4100,26 +4099,26 @@
       '<div class="job-cot-wrap">' +
         '<div class="job-cnpj-titulo">Cotar agora</div>' +
         '<div class="job-cnpj-sub">Preço buscado no Painel do Corretor na hora, pela sua sessão.</div>' +
-        '<label class="job-cot-rot">Cidade</label>' +
+        '<label class="job-cot-rot"><i>1</i> Cidade de quem vai usar o plano</label>' +
         '<div class="job-cot-campo-sug">' +
           '<input id="job-cot-cidade" class="job-cnpj-input" autocomplete="off" placeholder="Campinas - SP" value="' + esc(v.cidade || _cotCidadePadrao || '') + '">' +
           '<div id="job-cot-sug" class="job-cot-sug"></div>' +
         '</div>' +
         '<button type="button" class="job-cot-fixar" id="job-cot-fixar">' +
           '<span class="marca"></span><span class="txt"></span></button>' +
-        '<label class="job-cot-rot">Tipo</label>' +
+        '<label class="job-cot-rot"><i>2</i> Tipo de contratação</label>' +
         '<div class="job-cot-seg" id="job-cot-tipo">' +
           _COT_TIPOS.map((t) =>
             '<button type="button" data-v="' + t.cod + '"' +
             (Number(v.modalidade || 1) === t.cod ? ' class="on"' : '') + '>' + t.rot + '</button>').join('') +
         '</div>' +
-        '<label class="job-cot-rot">Idades de quem vai usar</label>' +
+        '<label class="job-cot-rot"><i>3</i> Quantas pessoas em cada faixa etária</label>' +
         '<input id="job-cot-idades" class="job-cnpj-input" placeholder="55 5 50" value="' + esc(v.idades || '') + '">' +
-        '<div class="job-cot-dica" id="job-cot-dica">Uma idade por pessoa, separadas por espaço ou vírgula.</div>' +
+        '<div class="job-cot-dica" id="job-cot-dica"></div>' +
         // Duas formas de dizer a mesma coisa. Quem tem a idade na conversa
         // digita; quem já pensa em faixa (proposta antiga, planilha da
         // operadora) conta na faixa direto, sem inventar uma idade que caiba.
-        '<button type="button" class="job-cot-trocar" id="job-cot-modo">contar por faixa etária</button>' +
+        '<button type="button" class="job-cot-trocar" id="job-cot-modo"></button>' +
         '<div id="job-cot-faixas" class="job-cot-faixas">' +
           _COT_FAIXAS.map((f, i) =>
             '<div class="job-cot-fx" data-f="' + f + '">' +
@@ -4129,12 +4128,13 @@
               '<button type="button" data-d="1">+</button>' +
             '</div>').join('') +
         '</div>' +
-        '<button class="job-cnpj-btn" id="job-cot-buscar">Buscar operadoras</button>' +
+        '<button class="job-cot-bt-mandar" id="job-cot-buscar" style="width:100%;margin-top:14px" disabled>' +
+          'Escolha a cidade</button>' +
         // Preencheu aqui, escolhe onde continuar. Antes ele preenchia no painel,
         // abria o JOB e digitava tudo de novo — o mesmo trabalho duas vezes.
-        '<a class="job-cot-nova" id="job-cot-abrirjob" href="#" target="_blank" rel="noopener">' +
-          'Abrir no JOB com estes dados</a>' +
-        '<button class="job-cot-nova" id="job-cot-cancelar" style="border:none;cursor:pointer;width:100%;font-family:inherit">Voltar às cotações</button>' +
+        '<a class="job-cot-nova job-cot-so-pronto" id="job-cot-abrirjob" href="#" target="_blank" rel="noopener">' +
+          'Abrir no JOB</a>' +
+        '<button class="job-cot-nova" id="job-cot-cancelar" style="border:none;cursor:pointer;width:100%;font-family:inherit">Voltar</button>' +
       '</div>');
 
     const iCid = document.getElementById('job-cot-cidade');
@@ -4155,7 +4155,9 @@
     // Somar as duas faria a cotação sair com o dobro de gente sem ninguém ver.
     const caixaFx = document.getElementById('job-cot-faixas');
     const btModo = document.getElementById('job-cot-modo');
-    let porFaixa = !!(v.faixas && Object.keys(v.faixas).length);
+    // FAIXA É O PRINCIPAL. Digitar idade continua existindo pra quem tem a
+    // idade na conversa, mas quem abre a tela vê a forma que a operadora usa.
+    let porFaixa = !(v.idades && v.idades.trim());
     const contFx = Object.assign({}, v.faixas || {});
 
     function vidasAgora() {
@@ -4165,11 +4167,18 @@
       return { vidas: vidas, total: vidas.reduce((n, x) => n + x.quantidade, 0) };
     }
     const linkJob = document.getElementById('job-cot-abrirjob');
+    const btBuscar = document.getElementById('job-cot-buscar');
     function atualizarLink() {
       const r = vidasAgora();
       const pronto = !!cidadeDoCatalogo && r.total > 0;
-      // Sem cidade ou sem vidas o link abriria a tela vazia — que é justamente
-      // o que ele reclamou. Então ele só acende quando leva alguma coisa.
+      // O BOTÃO DIZ O QUE FALTA, em vez de só ficar apagado. Botão cinza sem
+      // motivo faz a pessoa clicar de novo achando que travou.
+      btBuscar.disabled = !pronto;
+      btBuscar.textContent = !cidadeDoCatalogo ? 'Escolha a cidade'
+                           : !r.total ? 'Informe as vidas'
+                           : 'Buscar operadoras';
+      // O link pro JOB só aparece quando leva alguma coisa: abrir a tela vazia
+      // é justamente o que ele reclamou.
       linkJob.classList.toggle('off', !pronto);
       const tipo = (document.querySelector('#job-cot-tipo button.on') || {}).dataset;
       const antes = _cot;
@@ -4192,7 +4201,7 @@
     function pintarModo() {
       caixaFx.classList.toggle('ver', porFaixa);
       iIda.style.display = porFaixa ? 'none' : '';
-      btModo.textContent = porFaixa ? 'voltar a digitar as idades' : 'contar por faixa etária';
+      btModo.textContent = porFaixa ? 'digitar as idades' : 'contar por faixa';
       caixaFx.querySelectorAll('.job-cot-fx').forEach((d) => {
         d.querySelector('b').textContent = contFx[d.dataset.f] || 0;
         d.classList.toggle('tem', (contFx[d.dataset.f] || 0) > 0);
@@ -4268,6 +4277,9 @@
         : (atual ? 'Usar ' + atual + ' como cidade padrão' : 'Escolha a cidade para poder fixá-la');
       btFixar.disabled = !atual;
     }
+    // Resolve o lead em segundo plano e reescreve o link quando chegar.
+    _cotGarantirLead().then(() => { try { atualizarLink(); } catch (e) {} });
+
     btFixar.addEventListener('click', () => {
       if (!cidadeDoCatalogo) return;
       _cotCidadePadrao = (_cotCidadePadrao === cidadeDoCatalogo) ? '' : cidadeDoCatalogo;
@@ -4296,6 +4308,24 @@
     });
   }
 
+  // O LEAD PRECISA ESTAR RESOLVIDO AQUI, não só na aba de cotações.
+  //
+  // `_cotLead` só era preenchido quando o consultor passava pela lista de
+  // cotações. Entrando direto pelo botão "Cotar" da análise, ele ficava nulo e
+  // o link pro JOB saía sem o lead — que foi o que o Guilherme viu.
+  async function _cotGarantirLead() {
+    if (_cotLead && _cotLead.id) return _cotLead;
+    let tel = '';
+    try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+    tel = String(tel || '').replace(/\D/g, '');
+    if (!tel) return null;
+    let r = null;
+    try { r = await _safeSendMessage({ type: 'cotacoes_do_lead', telefone: tel }); } catch (e) { r = null; }
+    if (r && r.ok) _cotLead = { id: r.lead_id || 0, nome: r.lead_nome || '', telefone: tel };
+    else _cotLead = { id: 0, nome: '', telefone: tel };
+    return _cotLead;
+  }
+
   function _cotBase() {
     return { cidade: _cot.cidade, modalidade: _cot.modalidade, vidas: _cot.vidas,
              titulo: (nomeDoContato() || 'Cliente') + ' · ' + _cot.cidade + ' · ' + _cotRotulo(_cot.modalidade) };
@@ -4322,6 +4352,57 @@
     _cotPintarOperadoras();
   }
 
+  // MEMÓRIA DE LOGOS, enchida aos poucos.
+  //
+  // Uma operadora é buscada UMA vez na vida da instalação: o resultado fica em
+  // chrome.storage e nas próximas cotações a logo já está lá, sem rede. Quem
+  // não tiver logo continua com a inicial, que é ícone legítimo e não buraco.
+  const _cotLogos = {};        // memória desta aba, pra não ir ao storage a cada pintura
+  let _cotLogosLidos = false;
+
+  function _cotChaveLogo(nome) {
+    return 'logo_op:' + String(nome || '').trim().toLowerCase().slice(0, 60);
+  }
+  async function _cotCarregarLogos() {
+    if (_cotLogosLidos) return;
+    _cotLogosLidos = true;
+    try {
+      const tudo = await new Promise((ok) => chrome.storage.local.get(null, (r) => ok(r || {})));
+      Object.keys(tudo).forEach((k) => {
+        if (k.indexOf('logo_op:') === 0 && typeof tudo[k] === 'string') _cotLogos[k] = tudo[k];
+      });
+    } catch (e) {}
+  }
+  // Desenha as logos que já estão na memória e busca as que faltam, uma a uma.
+  // Sequencial de propósito: são poucas e não vale abrir quinze conexões pra
+  // desenhar ícone — a tela já está utilizável sem elas.
+  async function _cotPintarLogos(ops) {
+    await _cotCarregarLogos();
+    for (let i = 0; i < ops.length; i++) {
+      const o = ops[i];
+      const chave = _cotChaveLogo(o.nome);
+      let dado = _cotLogos[chave];
+      if (dado === '') continue;                       // já tentamos e não tem
+      if (!dado && o.logotipo) {
+        let r = null;
+        try { r = await _safeSendMessage({ type: 'logo_operadora', url: o.logotipo }); }
+        catch (e) { r = null; }
+        dado = (r && r.ok && r.dataUrl) || '';
+        _cotLogos[chave] = dado;
+        // Guarda inclusive o fracasso (string vazia): sem isso a extensão
+        // tentaria de novo a cada cotação uma logo que não existe.
+        try { chrome.storage.local.set({ [chave]: dado }); } catch (e) {}
+      }
+      if (!dado) continue;
+      const alvo = document.querySelector('.job-cot-op[data-id="' + String(o.id).replace(/"/g, '') + '"]');
+      if (!alvo || alvo.querySelector('img')) continue;
+      const img = document.createElement('img');
+      img.alt = '';
+      img.src = dado;
+      alvo.insertBefore(img, alvo.firstChild);
+    }
+  }
+
   function _cotPintarOperadoras() {
     const ops = _cot.operadoras || [];
     setCorpoSecao('<div class="job-cot-wrap">' +
@@ -4336,11 +4417,14 @@
             // carregar (onerror), e o nome continua respondendo pela linha.
             return '<button type="button" class="job-cot-op' + (jaFoi ? ' feita' : '') +
               '" data-id="' + esc(o.id) + '">' +
-              // A inicial vai SEMPRE, escondida atrás da logo. Se a imagem não
-              // carregar (política de imagem do WhatsApp, logo fora do ar), ela
-              // se remove e a inicial aparece — a linha nunca fica sem ícone,
-              // torta em relação às outras.
-              (o.logotipo ? '<img src="' + esc(o.logotipo) + '" alt="" onerror="this.remove()">' : '') +
+              // A INICIAL É O PADRÃO, a logo entra por cima quando existir.
+              //
+              // Antes eu punha <img src="https://..."> com onerror inline. Duas
+              // coisas erradas: a página do WhatsApp barra imagem de outro
+              // endereço, E bloqueia handler inline — então o fallback nunca
+              // rodava e o que aparecia era o ícone de imagem quebrada em toda
+              // linha. Agora a logo vem do service worker já como data:, e só
+              // é desenhada depois de estar na mão.
               '<span class="job-cot-op-ini">' + esc((o.nome || '?').trim().charAt(0).toUpperCase()) + '</span>' +
               '<span class="job-cot-op-n">' + esc(o.nome) + '</span>' +
               (jaFoi ? '<span class="job-cot-op-ok">' + jaFoi.planos.length +
@@ -4349,13 +4433,14 @@
           }).join('') + '</div>'
         : '<div class="job-cot-vazio"><div class="job-cot-vazio-t">Nenhuma operadora atende essa combinação.</div>' +
           '<div class="job-cot-vazio-s">Quem atende muda com a idade e o tipo. Confira a cidade e as idades.</div></div>') +
-      '<button class="job-cot-nova" id="job-cot-voltar" style="border:none;cursor:pointer;width:100%;font-family:inherit">Mudar cidade, tipo ou idades</button>' +
+      '<button class="job-cot-nova" id="job-cot-voltar" style="border:none;cursor:pointer;width:100%;font-family:inherit">Mudar dados</button>' +
     '</div>');
     document.getElementById('job-cot-voltar').addEventListener('click', abrirSecaoCotarInline);
     document.querySelectorAll('.job-cot-op').forEach((b) => b.addEventListener('click', () => {
       const o = ops.filter((x) => String(x.id) === b.dataset.id)[0];
       if (o) _cotBuscarPlanos(o);
     }));
+    _cotPintarLogos(ops);   // as logos chegam depois; a lista já funciona sem elas
   }
 
   async function _cotBuscarPlanos(op) {
@@ -4370,7 +4455,11 @@
 
   function _cotPintarPlanos() {
     const pls = _cot.planos || [];
+    // A logo aparece GRANDE aqui: esta tela é de uma operadora só, e o espaço
+    // que na lista era disputado por quinze linhas aqui está sobrando.
+    const logoTopo = _cotLogos[_cotChaveLogo(_cot.operadoraAtual.nome)];
     setCorpoSecao('<div class="job-cot-wrap">' +
+      (logoTopo ? '<img class="job-cot-logo-topo" src="' + esc(logoTopo) + '" alt="">' : '') +
       '<div class="job-cnpj-titulo">' + esc(_cot.operadoraAtual.nome) + '</div>' +
       '<div class="job-cnpj-sub">Marque até ' + _COT_MAX + ' planos. Cada preço é uma consulta ao Painel.</div>' +
       (pls.length
@@ -4475,12 +4564,12 @@
         // destaque de plano e link próprio — e entra na ficha do lead e nas
         // Cotações salvas. Mandar o resumo em texto é o atalho de quando não
         // dá pra salvar; deixá-lo em cima fazia todo mundo escolher o pior.
-        ? '<button class="job-cot-bt-mandar" id="job-cot-salvar" style="width:100%;margin-top:8px">Salvar no JOB e gerar o link</button>' +
+        ? '<button class="job-cot-bt-mandar" id="job-cot-salvar" style="width:100%;margin-top:8px">Salvar no JOB</button>' +
           '<div class="job-cot-dica" id="job-cot-salvo"></div>' +
           '<div id="job-cot-pos"></div>' +
-          '<button class="job-cot-bt-copiar" id="job-cot-mandar" style="width:100%;margin-top:6px">Mandar só os preços em texto</button>'
+          '<button class="job-cot-bt-copiar" id="job-cot-mandar" style="width:100%;margin-top:6px">Mandar preços em texto</button>'
         : '<div class="job-ia-alerta">Nenhum preço voltou. Isso não quer dizer que não exista — o Painel não respondeu o valor.</div>') +
-      '<button class="job-cot-nova" id="job-cot-mais" style="border:none;cursor:pointer;width:100%;font-family:inherit">Cotar mais uma operadora</button>' +
+      '<button class="job-cot-nova" id="job-cot-mais" style="border:none;cursor:pointer;width:100%;font-family:inherit">Cotar outra operadora</button>' +
     '</div>');
     document.getElementById('job-cot-mais').addEventListener('click', _cotPintarOperadoras);
     const bm = document.getElementById('job-cot-mandar');
@@ -4541,7 +4630,7 @@
     _cotCache = { chave: '', dados: null };
     btn.textContent = 'Salvo no JOB';
     btn.disabled = true;
-    dizer('Salva na ficha do lead e em Cotações salvas.', true);
+    dizer('Salva no lead e em Cotações salvas.', true);
 
     // O QUE VEM DEPOIS DE SALVAR É O QUE O CLIENTE RECEBE.
     //
@@ -4560,13 +4649,13 @@
     // não posso entregar — o botão do documento diz o que tem lá.
     pos.innerHTML =
       '<button class="job-cot-bt-mandar" id="job-cot-link" style="width:100%;margin-top:8px">' +
-        'Mandar o link da cotação na conversa</button>' +
+        'Mandar link na conversa</button>' +
       '<div class="job-cot-item-acoes">' +
         '<button class="job-cot-bt-copiar" id="job-cot-copiarlink" style="flex:1">Copiar link</button>' +
         '<button class="job-cot-bt-copiar" id="job-cot-copiartexto" style="flex:1">Copiar preços</button>' +
       '</div>' +
       '<a class="job-cot-nova" href="' + esc(doc) + '" target="_blank" rel="noopener">' +
-        'Abrir a apresentação — destacar plano, legenda, e-mail, imagem e PDF</a>';
+        'Abrir apresentação</a>';
     const bcl = document.getElementById('job-cot-copiarlink');
     if (bcl) bcl.addEventListener('click', () => {
       navigator.clipboard.writeText(r.url || doc).then(() => {
@@ -4587,7 +4676,7 @@
       bl.addEventListener('click', () => _cotMandar(bl));
     } else if (bl) {
       bl.disabled = true;
-      bl.textContent = 'Salva, mas sem link público — abra no JOB';
+      bl.textContent = 'Sem link público — abra no JOB';
     }
   }
 

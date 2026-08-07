@@ -518,8 +518,16 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cot-wrap { display: flex; flex-direction: column; }
 .job-cot-wrap .job-cnpj-titulo { letter-spacing: -.01em; }
 
-.job-cot-rot { display: block; font-size: 11px; font-weight: 700; letter-spacing: .05em;
-  text-transform: uppercase; color: var(--job-txt-fraco); margin: 14px 0 6px; }
+/* Passo numerado. A ordem e cidade -> vidas -> cotar, e ela precisa estar na
+   tela, nao so na cabeca de quem escreveu: e o que impede a pessoa de clicar
+   em Cotar antes de dizer onde e pra quem. */
+.job-cot-rot { display: flex; align-items: center; gap: 7px; font-size: 11px;
+  font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--job-txt-fraco); margin: 15px 0 7px; }
+.job-cot-rot i { width: 17px; height: 17px; flex: none; border-radius: 50%;
+  background: var(--job-bg3); color: var(--job-txt); font-size: 10px; font-weight: 800;
+  font-style: normal; letter-spacing: 0;
+  display: flex; align-items: center; justify-content: center; }
 .job-cot-dica { font-size: 11.5px; color: var(--job-txt-fraco); line-height: 1.5; margin-top: 6px; }
 .job-cot-dica.ok { color: var(--job-acento); font-weight: 600; }
 
@@ -558,9 +566,9 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   border-color: transparent; color: #06131a;
   box-shadow: 0 4px 14px rgba(31,216,164,.22); }
 
-.job-cot-trocar { display: block; margin-top: 8px; background: none; border: none; padding: 0;
-  color: var(--job-acento); font-size: 11.5px; font-weight: 600; font-family: inherit;
-  cursor: pointer; transition: opacity .12s; }
+.job-cot-trocar { display: block; width: 100%; text-align: left; margin-top: 8px;
+  background: none; border: none; padding: 0; color: var(--job-acento); font-size: 11.5px;
+  font-weight: 600; font-family: inherit; cursor: pointer; transition: opacity .12s; }
 .job-cot-trocar:hover { opacity: .75; }
 .job-cot-faixas { display: none; margin-top: 9px; border: 1px solid var(--job-borda);
   border-radius: 12px; overflow: hidden; }
@@ -587,10 +595,14 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   transition: transform .14s, border-color .14s, box-shadow .14s; }
 .job-cot-op:hover { transform: translateY(-1px); border-color: rgba(59,130,246,.45);
   box-shadow: 0 6px 18px rgba(0,0,0,.35); }
-.job-cot-op img { width: 34px; height: 24px; flex: none; object-fit: contain;
-  background: #fff; border-radius: 6px; padding: 3px; }
+/* Espaco de verdade pra logo. Num quadradinho de 34x24 um wordmark inteiro nao
+   se le — e a logo ja chega aparada, entao a marca ocupa a caixa toda em vez de
+   nadar no meio da folga. Fundo branco porque logo de operadora e desenhada pra
+   fundo claro; no escuro, metade some. */
+.job-cot-op img { width: 52px; height: 34px; flex: none; object-fit: contain;
+  background: #fff; border-radius: 7px; padding: 4px; }
 .job-cot-op img + .job-cot-op-ini { display: none; }
-.job-cot-op-ini { width: 34px; height: 24px; flex: none; border-radius: 6px;
+.job-cot-op-ini { width: 52px; height: 34px; flex: none; border-radius: 7px;
   background: linear-gradient(135deg, rgba(31,216,164,.22), rgba(139,92,246,.22));
   color: var(--job-txt); font-size: 12px; font-weight: 700;
   display: flex; align-items: center; justify-content: center; }
@@ -633,6 +645,10 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   transition: width .35s cubic-bezier(.4,0,.2,1); }
 
 /* ── Resultado ── */
+.job-cot-logo-topo { display: block; height: 42px; max-width: 60%; object-fit: contain;
+  object-position: left center; background: #fff; border-radius: 9px;
+  padding: 6px 10px; margin-bottom: 10px; }
+
 .job-cot-grupo { margin-bottom: 14px; }
 .job-cot-grupo-t { display: flex; align-items: center; gap: 9px; font-size: 10.5px;
   font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
@@ -686,7 +702,9 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cot-nova:hover { border-color: rgba(139,92,246,.45); background: var(--job-bg3); }
 /* Link que ainda nao leva nada fica apagado e sem clique: abrir a tela vazia
    e exatamente o que ele reclamou. */
-.job-cot-nova.off { opacity: .4; pointer-events: none; }
+/* Link que ainda nao leva nada nao fica cinza: some. Botao apagado na tela
+   e convite pra clicar e achar que travou. */
+.job-cot-nova.off { display: none; }
 
 /* ── Cotacoes ja salvas do cliente ── */
 .job-cot-item { background: var(--job-bg2); border: 1px solid var(--job-borda);
