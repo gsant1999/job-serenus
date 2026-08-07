@@ -27124,6 +27124,7 @@ def cotacao_novo():
 
     f_ops = [x.strip() for x in request.args.getlist('op') if x.strip()]
     prefill = {
+        'cidade': (request.args.get('cidade') or '').strip(),
         'idades': (request.args.get('idades') or '').strip(),
         'modalidade': (request.args.get('modalidade') or '').strip(),
         'acomodacao': (request.args.get('acomodacao') or '').strip(),
