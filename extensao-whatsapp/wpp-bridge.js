@@ -27,6 +27,10 @@
   // extensao (e o script de la continua funcionando, porque nao usa API da
   // extensao); no ISOLADO ele nasce limpo, que e justamente onde a reinjecao
   // precisa acontecer.
+  // Conta quantas vezes esta ponte foi injetada nesta página. Serve de
+  // termômetro: mais de 1 significa que a página acumulou cópias e precisa de
+  // F5 — foi o que deixou o envio lento quando eu reinjetava o MAIN world.
+  window.__JOB_WPP_COPIAS = (window.__JOB_WPP_COPIAS || 0) + 1;
   if (window.__JOB_WPP_PONTE) return;
   window.__JOB_WPP_PONTE = 1;
 

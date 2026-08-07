@@ -1399,3 +1399,8 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
                   border:1px solid rgba(255,255,255,.08); border-radius:7px;
                   padding:8px 10px; margin-top:8px; line-height:1.55; }
 .job-fila-acoes { display:flex; gap:12px; margin-top:9px; flex-wrap:wrap; }
+
+/* Tempos das idas ao JOB, no diagnostico. */
+.job-dev-sub { font-size: 11px; color: var(--job-txt-fraco); margin: 14px 0 6px;
+  text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+.job-dev-linha i { font-style: normal; opacity: .55; }

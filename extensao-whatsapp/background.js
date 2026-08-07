@@ -47,7 +47,36 @@ function _faxinaPartes() {
 // extras cobrem o soluço; queda longa cai na mensagem explicativa do fim.
 const _RETRY_ESPERAS = [800, 2500];
 
+// CRONÔMETRO DAS CHAMADAS — pra "está lento" virar número.
+//
+// Guarda as últimas 60 idas ao JOB por rota, com quanto cada uma demorou. É o
+// que permite responder "lento onde?": se o envio demora 4s e a rota respondeu
+// em 300ms, o gargalo está na página (biblioteca duplicada, aba pesada), não
+// no servidor. Sem isso a conversa vira palpite dos dois lados.
+//
+// Só na memória do service worker: some quando ele dorme, e é pra ser assim —
+// isto é diagnóstico do momento, não histórico.
+const _TEMPOS = [];
+function _anotarTempo(caminho, ms, ok) {
+  _TEMPOS.push({ caminho, ms: Math.round(ms), ok: !!ok, quando: Date.now() });
+  if (_TEMPOS.length > 60) _TEMPOS.shift();
+}
+function _resumoTempos() {
+  const porRota = {};
+  _TEMPOS.forEach((t) => {
+    (porRota[t.caminho] = porRota[t.caminho] || []).push(t.ms);
+  });
+  // Mediana e o pior caso. Média esconde justamente a chamada que travou —
+  // dez de 200ms e uma de 9s dão média de 1s, que não descreve nem uma nem outra.
+  return Object.keys(porRota).map((c) => {
+    const v = porRota[c].slice().sort((a, b) => a - b);
+    return { rota: c, n: v.length, mediana: v[Math.floor(v.length / 2)], pior: v[v.length - 1] };
+  }).sort((a, b) => b.pior - a.pior);
+}
+
 async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId, opts) {
+  const _t0 = Date.now();
+  const _anota = (ok) => { try { _anotarTempo(caminho.split('?')[0], Date.now() - _t0, ok); } catch (e) {} };
   const { jobUrl, extKey } = await config();
   if (!extKey) {
     return { ok: false, erro: 'Configure a chave da extensão no popup (clique no ícone do JOB).' };
@@ -82,14 +111,17 @@ async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId, opts) {
       if (!resp.ok) {
         // Erro HTTP É uma resposta do servidor (chave errada, 404, 500) —
         // repetir não muda nada, então devolve na hora.
+        _anota(false);
         return { ok: false, erro: (dados && dados.erro) || ('HTTP ' + resp.status), status: resp.status };
       }
+      _anota(true);
       return dados || { ok: true };
     } catch (e) {
       // Timeout/cancelamento não é soluço de rede: não repete.
       if (e.name === 'AbortError') {
         clearTimeout(timer);
         if (reqId) _emAndamento.delete(reqId);
+        _anota(false);
         return { ok: false, erro: (registro && registro.cancelado)
           ? 'Análise cancelada.'
           : 'O JOB demorou mais que ' + Math.round(limite / 1000) + 's pra responder — tente de novo.' };
@@ -103,6 +135,7 @@ async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId, opts) {
       await new Promise((r) => setTimeout(r, _RETRY_ESPERAS[t]));
     }
   }
+  _anota(false);
   return { ok: false, erro: 'O JOB não respondeu. Se o sistema acabou de ser atualizado, isso passa em cerca de 1 minuto — tente de novo.' };
 }
 
@@ -499,6 +532,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Prazo curto e falha silenciosa de propósito: isto é conveniência. Se o JOB
   // estiver fora do ar, a extensão aprende sozinha como sempre aprendeu — não
   // pode virar dependência pra cotar.
+  if (msg && msg.type === 'tempos') {
+    sendResponse({ ok: true, rotas: _resumoTempos(), amostras: _TEMPOS.length });
+    return;
+  }
   if (msg && msg.type === 'cotador_nuvem_ler') {
     chamarJob('/api/whatsapp/cotador/hashes?origem=' + encodeURIComponent(msg.origem || ''),
               'GET', null, 6000).then((r) => sendResponse(r || { ok: false }))
@@ -862,13 +899,22 @@ async function _aparar(blob) {
 // Falha em silêncio de propósito: aba em outro endereço, aba descartada pelo
 // Chrome ou permissão negada não devem virar erro na cara de ninguém — o pior
 // caso é o comportamento de antes, que é pedir F5.
+// SÓ O MUNDO ISOLADO É REINJETADO. Foi um erro meu mandar o MAIN junto.
+//
+// Os scripts do mundo MAIN são JavaScript da página: eles NÃO usam API da
+// extensão e por isso SOBREVIVEM à recarga dela. Reinjetá-los não conserta
+// nada e, no caso do WhatsApp, faz estrago: `wa-js.vendor.js` tem 492 KB e
+// não tem trava própria (é biblioteca de terceiro). Cada recarga da extensão
+// empilhava OUTRA cópia inteira dela na página, remendando as entranhas do
+// WhatsApp de novo por cima. Cinco recargas, cinco cópias — e mandar mensagem
+// ficou lento, que foi exatamente o que o Guilherme sentiu.
+//
+// Quem morre na recarga é a ponte do mundo ISOLADO, e é só ela que precisa
+// voltar. Ela tem trava com prova de vida, então reinjetar é seguro.
 const _REINJETAR = [
-  { host: 'web.whatsapp.com',
-    main: ['wa-js.vendor.js', 'wpp-bridge.js'], isolado: ['content.js'] },
-  { host: 'paineldocorretor.com.br',
-    main: ['cotador-painel.js'], isolado: ['painel-bridge.js'] },
-  { host: 'job-serenus-production.up.railway.app',
-    main: [], isolado: ['site-bridge.js'] },
+  { host: 'web.whatsapp.com',                        isolado: ['content.js'] },
+  { host: 'paineldocorretor.com.br',                 isolado: ['painel-bridge.js'] },
+  { host: 'job-serenus-production.up.railway.app',   isolado: ['site-bridge.js'] },
 ];
 
 async function _reinjetarNasAbasAbertas(motivo) {
@@ -878,18 +924,14 @@ async function _reinjetarNasAbasAbertas(motivo) {
     if (!aba.id || !aba.url) continue;
     const alvo = _REINJETAR.filter((x) => aba.url.indexOf(x.host) >= 0)[0];
     if (!alvo) continue;
-    // A ORDEM IMPORTA: o mundo MAIN primeiro, porque a ponte isolada conversa
-    // com ele por postMessage e precisa achar alguém do outro lado.
-    for (const [arquivos, mundo] of [[alvo.main, 'MAIN'], [alvo.isolado, 'ISOLATED']]) {
-      if (!arquivos.length) continue;
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: aba.id, allFrames: false },
-          files: arquivos,
-          world: mundo,
-        });
-      } catch (e) { /* aba morta, sem permissão, ou já saiu do ar */ }
-    }
+    if (!alvo.isolado || !alvo.isolado.length) continue;
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: aba.id, allFrames: false },
+        files: alvo.isolado,
+        world: 'ISOLATED',
+      });
+    } catch (e) { /* aba morta, sem permissão, ou já saiu do ar */ }
   }
 }
 

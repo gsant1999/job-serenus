@@ -2572,6 +2572,19 @@
   // aconteceu com a transcrição, e me custou três rodadas de adivinhação.
   let _devLigado = false;
 
+  // Quantas cópias da biblioteca do WhatsApp estão na página.
+  //
+  // Existe porque eu mesmo empilhei cópias: a reinjeção automática mandava o
+  // `wa-js.vendor.js` (492 KB) de novo a cada recarga da extensão, e mandar
+  // mensagem foi ficando lento. Corrigido — mas o número fica na tela, porque
+  // sem ele "está lento" volta a ser palpite.
+  //
+  // A página só é limpa de verdade com F5: cópia já injetada não se desfaz.
+  function _copiasWpp() {
+    try { return (window.__JOB_WPP_COPIAS != null) ? window.__JOB_WPP_COPIAS : '?'; }
+    catch (e) { return '?'; }
+  }
+
   async function abrirSecaoDev() {
     setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div>' +
                   '<div class="job-sem-analise-txt">Coletando estado…</div></div>');
@@ -2591,9 +2604,14 @@
         linha('Áudios na conversa', String((ponte && ponte.audios && ponte.audios.length) || 0)) +
         linha('Transcrições em memória', String(TR.cache.size)) +
         linha('Botões injetados', String(document.querySelectorAll('.job-tr-slot').length)) +
+        // Mais de 1 cópia = a página acumulou biblioteca e o envio fica lento.
+        // Marcado como ruim de propósito: é acionável (F5 resolve).
+        linha('Cópias da ponte wa-js', String(_copiasWpp()) + (_copiasWpp() > 1 ? ' — dê F5 nesta aba' : ''),
+              _copiasWpp() > 1) +
         linha('Última etapa', String(d.etapa || '—') + (d.quando ? ' · ' + d.quando : ''),
               d.etapa === 'ponte_fora') +
         (TR.erro.size ? linha('Último erro', Array.from(TR.erro.values()).slice(-1)[0], true) : '') +
+        '<div id="job-dev-tempos"></div>' +
         linha('Varredura (motivo)', VAR.motivo || '—') +
         linha('Varredura', VAR.rodando ? 'rodando agora'
               : (VAR.ultimaRodada ? 'última: ' + new Date(VAR.ultimaRodada).toLocaleTimeString('pt-BR') : 'ainda não rodou')) +
@@ -2630,6 +2648,25 @@
     btn('dev-repintar', 'repintar', async () => {
       trInjetar(); return 'slots=' + document.querySelectorAll('.job-tr-slot').length;
     });
+
+    // TEMPO DAS IDAS AO JOB. Mediana e PIOR caso, nunca média: dez chamadas de
+    // 200ms e uma de 9s dão média de 1s, que não descreve nem uma nem outra —
+    // e é a de 9s que trava o consultor.
+    try {
+      const t = await _safeSendMessage({ type: 'tempos' });
+      const cx = document.getElementById('job-dev-tempos');
+      if (cx && t && t.ok && t.rotas && t.rotas.length) {
+        cx.innerHTML = '<div class="job-dev-sub">Últimas ' + t.amostras +
+          ' chamadas ao JOB (mediana · pior)</div>' +
+          t.rotas.slice(0, 8).map((r) =>
+            '<div class="job-dev-linha' + (r.pior > 4000 ? ' ruim' : '') + '">' +
+            '<span>' + esc(r.rota.replace('/api/whatsapp/', '')) + ' <i>×' + r.n + '</i></span>' +
+            '<b>' + r.mediana + 'ms · ' + r.pior + 'ms</b></div>').join('');
+      } else if (cx) {
+        cx.innerHTML = '<div class="job-dev-sub">Nenhuma chamada ao JOB ainda nesta sessão.</div>';
+      }
+    } catch (e) { /* diagnóstico não pode derrubar o diagnóstico */ }
+
   }
 
   // ═══════════════ GATE ÚNICO PRA QUEM MEXE NA WA-JS ═══════════════
