@@ -12,3 +12,12 @@ docs/*
 knowledge/*
 !knowledge/.gitkeep
 .previa/
+
+# Projeto de video ads (Seedance/Veo): scripts + 700 MB de midia e node_modules.
+# Fica local — nunca vai pro git. Os scripts fazem chdir pra propria pasta,
+# entao continuam funcionando de dentro de video-ads/.
+video-ads/
+
+# Retratos velhos do app e scripts de teste descartaveis. Nao apagados de
+# proposito: "app (1).py" e uma copia de 20/06 e so o git tem o historico dela.
+_arquivo/
