@@ -2902,7 +2902,7 @@
             '<button type="button" id="job-desmarcar">desfazer</button></div>'
           : '<button class="job-nao-lead" id="job-nao-lead" ' +
             'title="Marca esta conversa como pessoal: o JOB nunca lê nem cria lead dela.">' +
-            'Não é lead — nunca ler esta conversa</button>') +
+            'Não é lead — parar de ler esta conversa</button>') +
         '<div class="job-sinc-dica" id="job-ficha-aviso"></div>' +
       '</div>');
     const b = document.getElementById('job-ficha-criar');
@@ -3220,7 +3220,7 @@
             ? '<div class="job-nao-lead marcada">Marcada como pessoal<button type="button" id="job-desmarcar">desfazer</button></div>'
             : '<button class="job-nao-lead" id="job-nao-lead" ' +
               'title="Marca esta conversa como pessoal: o JOB para de ler e nunca mais cria lead dela.">' +
-              'Não é lead</button>') +
+              'Não é lead — parar de ler esta conversa</button>') +
           // ABRIR NO JOB SOBE PRO RODAPE. Ele existia, mas como link discreto
           // DEPOIS do bloco 'Nome do contato' — que e longo — entao vivia fora
           // da vista: pra achar era preciso rolar ate o fim de uma coluna
