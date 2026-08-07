@@ -129,7 +129,9 @@ def classificar(caminho):
             break
     mod = mod or 'Indefinido'
 
-    m = re.search(r'Regiao:\s*([A-Za-z0-9 ]+)', puro)
+    # Com o hifen: "INTERIOR SP - 1" e "- 2" tem preco diferente e nao podem
+    # cair na mesma pasta.
+    m = re.search(r'Regiao:\s*([A-Za-z0-9 -]+)', puro)
     regiao = _limpar(m.group(1)) if m else 'Regiao indefinida'
 
     return op, mod, regiao, linha
