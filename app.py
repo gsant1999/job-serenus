@@ -1464,6 +1464,7 @@ def init_db():
                 coparticipacao TEXT DEFAULT 'Sem', linha TEXT DEFAULT '', tipo_cnpj TEXT DEFAULT '',
                 abrangencia TEXT DEFAULT '',
                 vigencia TEXT DEFAULT '', ativo INTEGER DEFAULT 1,
+                vidas_min INTEGER, vidas_max INTEGER, mei INTEGER DEFAULT 0,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
             """CREATE TABLE IF NOT EXISTS cotacao_preco (
@@ -2448,6 +2449,7 @@ def init_db():
             coparticipacao TEXT DEFAULT 'Sem', linha TEXT DEFAULT '', tipo_cnpj TEXT DEFAULT '',
             abrangencia TEXT DEFAULT '',
             vigencia TEXT DEFAULT '', ativo INTEGER DEFAULT 1,
+            vidas_min INTEGER, vidas_max INTEGER, mei INTEGER DEFAULT 0,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS cotacao_preco (
@@ -3291,6 +3293,9 @@ def init_db():
         # (rastreabilidade: se o material circular, dá pra saber pra quem foi mandado).
         ("rede_link", "cliente", "TEXT"),
         ("cotacao_salva", "cidade", "TEXT"),
+        ("cotacao_tabela", "vidas_min", "INTEGER"),
+        ("cotacao_tabela", "vidas_max", "INTEGER"),
+        ("cotacao_tabela", "mei", "INTEGER DEFAULT 0"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -21496,6 +21501,60 @@ def api_whatsapp_cotacao_salvar():
         return _wa_cors(jsonify({"ok": False, "erro": "Não foi possível salvar a cotação."})), 500
 
 
+@app.route('/api/whatsapp/preferencias', methods=['GET', 'POST', 'OPTIONS'])
+def api_whatsapp_preferencias():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+
+    conn = db()
+    try:
+        if request.method == 'GET':
+            try: usuario_id = int(request.args.get('usuario_id') or 0)
+            except Exception: usuario_id = 0
+            if not usuario_id:
+                close_db(conn)
+                return _wa_cors(jsonify({"ok": False}))
+                
+            urow = conn.execute("SELECT id FROM usuarios WHERE id=? AND ativo=1", (usuario_id,)).fetchone()
+            if not urow:
+                close_db(conn)
+                return _wa_cors(jsonify({"ok": False}))
+                
+            cidade = _pref_cotacao(conn, usuario_id, 'cidade')
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": True, "cidade": cidade}))
+            
+        elif request.method == 'POST':
+            d = request.get_json(silent=True) or {}
+            try: usuario_id = int(d.get('usuario_id') or 0)
+            except Exception: usuario_id = 0
+            if not usuario_id:
+                close_db(conn)
+                return _wa_cors(jsonify({"ok": False}))
+                
+            urow = conn.execute("SELECT id FROM usuarios WHERE id=? AND ativo=1", (usuario_id,)).fetchone()
+            if not urow:
+                close_db(conn)
+                return _wa_cors(jsonify({"ok": False}))
+                
+            cidade = str(d.get('cidade') or '').strip()[:120]
+            conn.execute("DELETE FROM cotacao_preferencia WHERE usuario_id=? AND chave=?", (usuario_id, 'cidade'))
+            if cidade:
+                conn.execute("""INSERT INTO cotacao_preferencia (usuario_id, chave, valor, atualizado_em)
+                                VALUES (?,?,?,?)""", (usuario_id, 'cidade', cidade, _agora_sp()))
+            conn.commit()
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": True}))
+            
+    except Exception:
+        if hasattr(conn, 'rollback'):
+            try: conn.rollback()
+            except Exception: pass
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False}))
+
 @app.route('/api/whatsapp/lead/salvar', methods=['POST', 'OPTIONS'])
 def api_whatsapp_lead_salvar():
     """Salva em UMA chamada o que o popup mudou. Aplica na ordem: campos → etiquetas
@@ -26913,24 +26972,35 @@ def _aprender_do_vivo(conn, cidade, modalidade, planos):
                 if m:
                     entidade = re.sub(r'\s*\([^)]*\)\s*', ' ', m.group(2)).strip()[:120]
 
+            vidas_min = tb.get('qtdVidaMin')
+            try: vidas_min = int(vidas_min) if vidas_min is not None else None
+            except Exception: vidas_min = None
+
+            vidas_max = tb.get('qtdVidaMax')
+            try: vidas_max = int(vidas_max) if vidas_max is not None else None
+            except Exception: vidas_max = None
+            
+            mei = 1 if tb.get('mei') else 0
+
             ex = conn.execute(
                 """SELECT id FROM cotacao_tabela WHERE operadora=? AND plano=? AND modalidade=?
                      AND acomodacao=? AND coparticipacao=? AND COALESCE(cidade,'')=?
-                     AND COALESCE(entidade,'')=?""",
-                (operadora, plano, nome_modal, acomodacao, copart, cidade or '', entidade)).fetchone()
+                     AND COALESCE(entidade,'')=? AND COALESCE(vidas_min, 0)=? AND COALESCE(vidas_max, 0)=? AND COALESCE(mei, 0)=?""",
+                (operadora, plano, nome_modal, acomodacao, copart, cidade or '', entidade,
+                 vidas_min or 0, vidas_max or 0, mei)).fetchone()
 
             if ex:
                 tid = ex['id']
-                conn.execute("UPDATE cotacao_tabela SET ativo=1, atualizado_em=?, linha=? WHERE id=?",
-                             (agora, linha, tid))
+                conn.execute("UPDATE cotacao_tabela SET ativo=1, atualizado_em=?, linha=?, vidas_min=?, vidas_max=?, mei=? WHERE id=?",
+                             (agora, linha, vidas_min, vidas_max, mei, tid))
             else:
                 conn.execute(
                     """INSERT INTO cotacao_tabela
                          (operadora, plano, modalidade, acomodacao, coparticipacao,
-                          cidade, entidade, linha, ativo, atualizado_em)
-                       VALUES (?,?,?,?,?,?,?,?,1,?)""",
+                          cidade, entidade, linha, ativo, atualizado_em, vidas_min, vidas_max, mei)
+                       VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?)""",
                     (operadora, plano, nome_modal, acomodacao, copart,
-                     cidade or '', entidade, linha, agora))
+                     cidade or '', entidade, linha, agora, vidas_min, vidas_max, mei))
                 tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                        else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
 
@@ -27108,6 +27178,7 @@ def cotacao_novo():
 
     f_ops = [x.strip() for x in request.args.getlist('op') if x.strip()]
     prefill = {
+        'cidade': (request.args.get('cidade') or '').strip(),
         'idades': (request.args.get('idades') or '').strip(),
         'modalidade': (request.args.get('modalidade') or '').strip(),
         'acomodacao': (request.args.get('acomodacao') or '').strip(),
@@ -27588,15 +27659,20 @@ def cotacao_bloco_salvas():
         user_id = session.get('user_id')
         q = (request.args.get('q') or '').strip()
 
-        base = "SELECT * FROM cotacao_salva WHERE 1=1"
+        base = """
+            SELECT cs.*, l.nome AS lead_nome 
+            FROM cotacao_salva cs
+            LEFT JOIN crm_leads l ON cs.lead_id = l.id
+            WHERE 1=1
+        """
         params = []
         if not eh_admin:
-            base += " AND corretor_id=?"; params.append(user_id)
+            base += " AND cs.corretor_id=?"; params.append(user_id)
         if q:
-            base += " AND (LOWER(cliente_nome) LIKE ? OR LOWER(titulo) LIKE ? OR cliente_telefone LIKE ?)"
+            base += " AND (LOWER(cs.cliente_nome) LIKE ? OR LOWER(cs.titulo) LIKE ? OR cs.cliente_telefone LIKE ?)"
             like = f"%{q.lower()}%"
             params.extend([like, like, f"%{q}%"])
-        base += " ORDER BY id DESC"
+        base += " ORDER BY cs.id DESC"
 
         rows = conn.execute(base, params).fetchall()
         cots = []
@@ -27617,6 +27693,8 @@ def cotacao_bloco_salvas():
                 "token": d.get('token') or '',
                 "criado_em": str(d.get('criado_em') or ''),
                 "planos_cotados": planos_cotados,
+                "lead_id": d.get('lead_id') or 0,
+                "lead_nome": d.get('lead_nome') or '',
                 # A coluna chama-se `total` (ver CREATE TABLE de cotacao_salva).
                 # Estava lendo d.get('valor_total'), que não existe: devolvia
                 # None, o `or 0` transformava em 0.0, e a aba Salvas mostrava
@@ -29791,6 +29869,24 @@ def calcular_cotacao(conn, idades, plano_ids, recomendacoes=None):
         pmap = precos_map.get(tid, {})
         linhas, total = [], 0.0
         elegivel = True
+        
+        v_min = t['vidas_min']
+        v_max = t['vidas_max']
+        vidas_req = len(idades)
+        
+        if v_min is not None and vidas_req < v_min:
+            elegivel = False
+        if v_max is not None and vidas_req > v_max:
+            elegivel = False
+                
+        if not elegivel:
+            avisos.append({
+                'plano_id': tid,
+                'codigo': 'fora_da_faixa_de_vidas',
+                'mensagem': f"{t['operadora']} · {t['plano']} vale de {v_min or 1} a {v_max or '∞'} vidas"
+            })
+            continue
+            
         for fx in FAIXAS_ETARIAS:
             qtd = cont.get(fx, 0)
             if qtd <= 0:
