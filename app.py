@@ -11188,7 +11188,7 @@ def _meta_fbc(fbclid, quando):
     if not dt:
         dt = datetime.now(TZ_SP)
     if dt.tzinfo is None:
-        dt = TZ_SP.localize(dt)
+        dt = pytz.utc.localize(dt).astimezone(TZ_SP)
     return f"fb.1.{int(dt.timestamp() * 1000)}.{fbclid}"
 
 
@@ -21288,7 +21288,7 @@ def api_whatsapp_cotacoes():
                 dt_criacao = _parse_dt_seguro(r['criado_em'])
                 if dt_criacao:
                     if dt_criacao.tzinfo is None:
-                        dt_criacao = TZ_SP.localize(dt_criacao)
+                        dt_criacao = pytz.utc.localize(dt_criacao).astimezone(TZ_SP)
                     dias = (agora_date - dt_criacao.date()).days
                     criado_str = dt_criacao.isoformat()
                 else:
@@ -25662,7 +25662,7 @@ def _saude_card(avancou_em, sla_dias=None, fallback=None):
     if not dt:
         return {'nivel': 'no_prazo', 'classe': '', 'texto': '', 'dias': 0, 'horas': 0, 'idade_txt': '', 'desde_ts': None}
     if dt.tzinfo is None:
-        dt = TZ_SP.localize(dt)
+        dt = pytz.utc.localize(dt).astimezone(TZ_SP)
     segs = (datetime.now(TZ_SP) - dt).total_seconds()
     dias = int(segs / 86400)
     # Instante da mudanca em epoch: e o que o navegador usa pra fazer o
@@ -27150,7 +27150,7 @@ def api_cotacao_entidade():
             dt_at = _parse_dt_seguro(r['atualizado_em'])
             if dt_at:
                 if dt_at.tzinfo is None:
-                    dt_at = TZ_SP.localize(dt_at)
+                    dt_at = pytz.utc.localize(dt_at).astimezone(TZ_SP)
                 dias = (datetime.now(TZ_SP) - dt_at).days
 
         close_db(conn)
@@ -27269,7 +27269,7 @@ def cotacao_bloco_entidades():
                 dt_at = _parse_dt_seguro(r['atualizado_em'])
                 if dt_at:
                     if dt_at.tzinfo is None:
-                        dt_at = TZ_SP.localize(dt_at)
+                        dt_at = pytz.utc.localize(dt_at).astimezone(TZ_SP)
                     dias = (agora_dt - dt_at).days
                     
             entidades.append({
@@ -27878,7 +27878,7 @@ def _catalogo_alvo_vencido(conn):
         if not d:
             return dict(r)
         if d.tzinfo is None:
-            d = TZ_SP.localize(d)
+            d = pytz.utc.localize(d).astimezone(TZ_SP)
         if (agora - d).days >= int(r['intervalo_dias'] or 30):
             return dict(r)
     return None
@@ -29065,7 +29065,7 @@ def api_cotacao_status_tabelas():
 
             if dt_at:
                 if dt_at.tzinfo is None:
-                    dt_at = TZ_SP.localize(dt_at)
+                    dt_at = pytz.utc.localize(dt_at).astimezone(TZ_SP)
                 if ult_sinc is None or dt_at > ult_sinc:
                     ult_sinc = dt_at
                 dias = (agora_dt - dt_at).days
@@ -29219,7 +29219,7 @@ RE_LINK_PRAZOS = {'24h': timedelta(hours=24), '7d': timedelta(days=7), '30d': ti
 def _rede_link_fmt(dt):
     """dd/mm/aaaa às HH:MM, em horário de SP."""
     if dt.tzinfo is None:
-        dt = TZ_SP.localize(dt)
+        dt = pytz.utc.localize(dt).astimezone(TZ_SP)
     return dt.strftime('%d/%m/%Y às %H:%M')
 
 
@@ -30000,7 +30000,7 @@ def cotacao_publica(token):
             notificar_abertura = True
         else:
             if ult_dt.tzinfo is None:
-                ult_dt = TZ_SP.localize(ult_dt)
+                ult_dt = pytz.utc.localize(ult_dt).astimezone(TZ_SP)
             if (datetime.now(TZ_SP) - ult_dt).total_seconds() > 300:
                 notificar_abertura = True
     except Exception:
@@ -30436,12 +30436,9 @@ def _tempo_relativo(quando):
         if not dt:
             return ''
         if dt.tzinfo is None:
-            dt = TZ_SP.localize(dt)
+            dt = pytz.utc.localize(dt).astimezone(TZ_SP)
         delta = datetime.now(TZ_SP) - dt
         seg = int(delta.total_seconds())
-        # Registro "no futuro" = linha antiga gravada em UTC → corrige -3h
-        if seg < -300:
-            seg += 3 * 3600
         if seg < 60: return 'agora'
         if seg < 3600: return f'há {seg // 60} min'
         if seg < 86400: return f'há {seg // 3600} h'
@@ -34164,7 +34161,7 @@ def _importar_leads_automatico():
                 dt_lead = _parse_dt_seguro(data_lead_str) if data_lead_str else None
                 if dt_lead is not None:
                     if dt_lead.tzinfo is None:
-                        dt_lead = TZ_SP.localize(dt_lead)
+                        dt_lead = pytz.utc.localize(dt_lead).astimezone(TZ_SP)
                     if (datetime.now(TZ_SP) - dt_lead).days > 30:
                         ignorados += 1
                         continue
@@ -36393,7 +36390,7 @@ def _status_esfriando(atualizado_em):
     if not dt:
         return {'classe': '', 'texto': ''}
     if dt.tzinfo is None:
-        dt = TZ_SP.localize(dt)
+        dt = pytz.utc.localize(dt).astimezone(TZ_SP)
     dias = int((datetime.now(TZ_SP) - dt).total_seconds() / 86400)
     if dias >= 5:
         return {'classe': 'card-frio', 'texto': f'Frio há {dias}d'}
