@@ -21366,7 +21366,8 @@ def api_whatsapp_cotacao_salvar():
             vid = _cotacao_viva_gravar(conn, d, usuario_id, 'whatsapp')
         except ValueError as e:
             close_db(conn)
-            return _wa_cors(jsonify({"ok": False, "erro": str(e)})), 400
+            erro_val = e.args[0] if e.args else "dados_invalidos"
+            return _wa_cors(jsonify({"ok": False, "erro": erro_val})), 400
 
         # 2. Gera a apresentação final
         planos, total_geral, cont_faixa = _viva_para_apresentacao(d)
