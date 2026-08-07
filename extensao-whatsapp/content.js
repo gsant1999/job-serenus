@@ -4725,10 +4725,32 @@
     if (!lista.length) { dizer('Não há preço para salvar.'); return; }
     const { usuarioId } = await _safeStorageGet(['usuarioId']);
     if (!usuarioId) { dizer('Escolha seu usuário no popup da extensão primeiro.'); return; }
-    // A trava do lead é do servidor, mas dizer aqui poupa uma ida e explica o
-    // que fazer — o consultor está no meio de um atendimento.
+    // BECO SEM SAÍDA VIRA BOTÃO.
+    //
+    // Antes isto dizia "cadastre o lead" e não dava como. O consultor estava no
+    // meio de um atendimento, com o comparativo pronto na tela, e a única saída
+    // era abrir o JOB noutra aba — exatamente o que este painel existe pra
+    // evitar. Agora o cadastro acontece aqui, com o nome e o telefone da
+    // conversa, e o salvamento segue na sequência.
     if (!_cotLead || !_cotLead.id) {
-      dizer('Este número ainda não é um lead do CRM. Cadastre o lead para salvar a cotação.');
+      if (aviso) {
+        aviso.innerHTML = '';
+        const b1 = document.createElement('button');
+        b1.className = 'job-cot-bt-copiar';
+        b1.style.cssText = 'width:100%;margin-top:8px';
+        b1.textContent = 'Cadastrar ' + (_cotLead && _cotLead.nome || nomeDoContato() || 'este contato') + ' no CRM';
+        b1.title = 'Cria o lead com o nome e o telefone desta conversa e salva a cotação em seguida';
+        b1.addEventListener('click', async () => {
+          b1.disabled = true; b1.textContent = 'Cadastrando…';
+          const novo = await _cotCriarLead(usuarioId);
+          if (!novo) { b1.disabled = false; b1.textContent = 'Não consegui cadastrar — tentar de novo'; return; }
+          b1.remove();
+          _cotSalvarNoJob(btn, lista);           // segue de onde parou
+        });
+        aviso.appendChild(b1);
+        aviso.insertAdjacentHTML('afterbegin',
+          '<div>Este número ainda não é um lead do CRM. Sem lead a cotação não é salva.</div>');
+      }
       return;
     }
     btn.disabled = true;
@@ -4791,8 +4813,23 @@
           'title="Copia os preços como texto">Copiar preços</button>' +
       '</div>' +
       '<a class="job-cot-nova" href="' + esc(doc) + '" target="_blank" rel="noopener" ' +
-        'title="Abre a apresentação no JOB: destacar plano, legenda, enviar por e-mail, imagem e PDF">' +
-        'Abrir apresentação</a>';
+        'title="Abre a apresentação no JOB: copiar imagem, PDF, destacar plano, legenda e envio por e-mail">' +
+        'Abrir apresentação (imagem, PDF, destaque)</a>' +
+      '<div class="job-cot-rodape">' +
+        '<button type="button" id="job-cot-denovo" title="Mantém cidade, tipo e vidas e volta pras operadoras">' +
+          'Cotar de novo para este cliente</button>' +
+        '<button type="button" id="job-cot-anteriores" title="Todas as cotações já feitas para este cliente">' +
+          'Cotações anteriores</button>' +
+      '</div>';
+    const bdn = document.getElementById('job-cot-denovo');
+    if (bdn) bdn.addEventListener('click', () => {
+      // Mesma pergunta, comparativo limpo: ele quer montar outra proposta pro
+      // mesmo cliente, não somar na que acabou de salvar.
+      _cotFeitas = [];
+      _cotPintarOperadoras();
+    });
+    const ban = document.getElementById('job-cot-anteriores');
+    if (ban) ban.addEventListener('click', abrirSecaoCotacao);
     const bcl = document.getElementById('job-cot-copiarlink');
     if (bcl) bcl.addEventListener('click', () => {
       navigator.clipboard.writeText(r.url || doc).then(() => {
@@ -4829,6 +4866,29 @@
     }).filter(Boolean);
     return cab + '\n\n' + blocos.join('\n\n');
   }
+  // Cria o lead com o que a conversa já oferece. O servidor deduplica por
+  // telefone, então clicar duas vezes devolve o mesmo lead em vez de criar dois.
+  async function _cotCriarLead(usuarioId) {
+    let nome = nomeDoContato();
+    let chatId = '';
+    try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
+    let telefone = await garantirTelefone(nome, chatId);
+    nome = nomeMaisConfiavel(nome) || nome;
+    if (!telefone) telefone = (_cotLead && _cotLead.telefone) || '';
+    if (!telefone) return null;
+    let r = null;
+    try {
+      r = await _safeSendMessage({ type: 'lead_criar', nome: nome || telefone,
+                                   telefone: telefone, origem: 'WhatsApp (cotação)',
+                                   usuario_id: usuarioId });
+    } catch (e) { r = null; }
+    const id = r && r.ok && (r.lead_id || (r.lead && r.lead.id) || r.id);
+    if (!id) return null;
+    _cotLead = { id: id, nome: nome || '', telefone: telefone };
+    _cotCache = { chave: '', dados: null };   // a lista de cotações mudou
+    return _cotLead;
+  }
+
   function _cotMandarTexto(btn) {
     btn.dataset.url = _cotTextoPrecos();   // _cotMandar manda o conteúdo de dataset.url
     _cotMandar(btn);

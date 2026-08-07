@@ -633,6 +633,10 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   padding: 10px 12px; background: none; border: none; color: var(--job-txt);
   font-family: inherit; cursor: pointer; text-align: left; transition: background .12s; }
 .job-cot-gaveta-t:hover { background: var(--job-bg3); }
+/* O contorno padrao do navegador saia amarelo por cima da gaveta. Foco
+   continua visivel — mas na cor da casa, e so pra quem navega por teclado. */
+.job-cot-gaveta-t:focus { outline: none; }
+.job-cot-gaveta-t:focus-visible { outline: 2px solid var(--job-acento); outline-offset: -2px; }
 .job-cot-gaveta-t img { width: 40px; height: 26px; flex: none; object-fit: contain;
   background: #fff; border-radius: 6px; padding: 3px; }
 .job-cot-gaveta-n { flex: 1; min-width: 0; font-size: 13px; font-weight: 700;
