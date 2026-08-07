@@ -1464,6 +1464,7 @@ def init_db():
                 coparticipacao TEXT DEFAULT 'Sem', linha TEXT DEFAULT '', tipo_cnpj TEXT DEFAULT '',
                 abrangencia TEXT DEFAULT '',
                 vigencia TEXT DEFAULT '', ativo INTEGER DEFAULT 1,
+                vidas_min INTEGER, vidas_max INTEGER, mei INTEGER DEFAULT 0,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
             """CREATE TABLE IF NOT EXISTS cotacao_preco (
@@ -2448,6 +2449,7 @@ def init_db():
             coparticipacao TEXT DEFAULT 'Sem', linha TEXT DEFAULT '', tipo_cnpj TEXT DEFAULT '',
             abrangencia TEXT DEFAULT '',
             vigencia TEXT DEFAULT '', ativo INTEGER DEFAULT 1,
+            vidas_min INTEGER, vidas_max INTEGER, mei INTEGER DEFAULT 0,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS cotacao_preco (
@@ -3291,6 +3293,9 @@ def init_db():
         # (rastreabilidade: se o material circular, dá pra saber pra quem foi mandado).
         ("rede_link", "cliente", "TEXT"),
         ("cotacao_salva", "cidade", "TEXT"),
+        ("cotacao_tabela", "vidas_min", "INTEGER"),
+        ("cotacao_tabela", "vidas_max", "INTEGER"),
+        ("cotacao_tabela", "mei", "INTEGER DEFAULT 0"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -26913,24 +26918,35 @@ def _aprender_do_vivo(conn, cidade, modalidade, planos):
                 if m:
                     entidade = re.sub(r'\s*\([^)]*\)\s*', ' ', m.group(2)).strip()[:120]
 
+            vidas_min = tb.get('qtdVidaMin')
+            try: vidas_min = int(vidas_min) if vidas_min is not None else None
+            except Exception: vidas_min = None
+
+            vidas_max = tb.get('qtdVidaMax')
+            try: vidas_max = int(vidas_max) if vidas_max is not None else None
+            except Exception: vidas_max = None
+            
+            mei = 1 if tb.get('mei') else 0
+
             ex = conn.execute(
                 """SELECT id FROM cotacao_tabela WHERE operadora=? AND plano=? AND modalidade=?
                      AND acomodacao=? AND coparticipacao=? AND COALESCE(cidade,'')=?
-                     AND COALESCE(entidade,'')=?""",
-                (operadora, plano, nome_modal, acomodacao, copart, cidade or '', entidade)).fetchone()
+                     AND COALESCE(entidade,'')=? AND COALESCE(vidas_min, 0)=? AND COALESCE(vidas_max, 0)=? AND COALESCE(mei, 0)=?""",
+                (operadora, plano, nome_modal, acomodacao, copart, cidade or '', entidade,
+                 vidas_min or 0, vidas_max or 0, mei)).fetchone()
 
             if ex:
                 tid = ex['id']
-                conn.execute("UPDATE cotacao_tabela SET ativo=1, atualizado_em=?, linha=? WHERE id=?",
-                             (agora, linha, tid))
+                conn.execute("UPDATE cotacao_tabela SET ativo=1, atualizado_em=?, linha=?, vidas_min=?, vidas_max=?, mei=? WHERE id=?",
+                             (agora, linha, vidas_min, vidas_max, mei, tid))
             else:
                 conn.execute(
                     """INSERT INTO cotacao_tabela
                          (operadora, plano, modalidade, acomodacao, coparticipacao,
-                          cidade, entidade, linha, ativo, atualizado_em)
-                       VALUES (?,?,?,?,?,?,?,?,1,?)""",
+                          cidade, entidade, linha, ativo, atualizado_em, vidas_min, vidas_max, mei)
+                       VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?)""",
                     (operadora, plano, nome_modal, acomodacao, copart,
-                     cidade or '', entidade, linha, agora))
+                     cidade or '', entidade, linha, agora, vidas_min, vidas_max, mei))
                 tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                        else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
 
@@ -29791,6 +29807,17 @@ def calcular_cotacao(conn, idades, plano_ids, recomendacoes=None):
         pmap = precos_map.get(tid, {})
         linhas, total = [], 0.0
         elegivel = True
+        
+        v_min = t.get('vidas_min')
+        v_max = t.get('vidas_max')
+        vidas_req = len(idades)
+        if v_min is not None and v_max is not None:
+            if vidas_req < v_min or vidas_req > v_max:
+                elegivel = False
+                
+        if not elegivel:
+            continue
+            
         for fx in FAIXAS_ETARIAS:
             qtd = cont.get(fx, 0)
             if qtd <= 0:
