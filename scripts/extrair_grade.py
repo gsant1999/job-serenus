@@ -201,15 +201,31 @@ def _grades_da_pagina(pagina):
     return saida
 
 
-def _cabecalho(linhas, ate, ancoras, limite=6):
+def _cabecalho(linhas, ate, ancoras, passo, limite=10):
+    # Dez linhas, nao seis: o cabecalho da Affix empilha nome, segmentacao,
+    # coparticipacao, acomodacao e codigo ANS antes da primeira faixa, e com
+    # seis o nome do plano ficava de fora — sobrava "MAIS", que nao casa com
+    # nada. Subir mais e seguro porque a parada acontece no primeiro preco.
     """Palavras acima da grade, por coluna, e o texto comum a todas."""
     porcoluna = [[] for _ in ancoras]
     comum = []
     # Para de subir ao esbarrar num preco: acima desta grade pode estar OUTRA,
     # e puxar as linhas dela batizaria o Vera Ouro com o preco do Vera Prata
     # no nome ("R$ 913,50 VERA OURO" foi o que apareceu no teste).
+    # Alem do preco, um SALTO VERTICAL tambem encerra o cabecalho. No manual
+    # da Vera Cruz existe outra tabela logo acima, sem preco nenhum (produtos
+    # x acomodacao) — so o espaco em branco separa as duas, e sem esta regra o
+    # nome do plano saia com "VERA CRUZ HOSPITAL" grudado na frente.
+    #
+    # O tamanho do salto e RELATIVO ao passo das linhas da propria grade. Um
+    # limite fixo em pontos serve pra um PDF e nao serve pro seguinte: com 25
+    # pontos a tabela da Allcare perdia o cabecalho inteiro (as linhas dela sao
+    # mais espacadas) e todos os planos dela sumiam sem erro nenhum.
+    salto = max(20.0, passo * 1.9)
     i = ate - 1
-    while i > 0 and ate - i < limite and not _juntar_reais(linhas[i - 1][1]):
+    while (i > 0 and ate - i < limite
+           and not _juntar_reais(linhas[i - 1][1])
+           and linhas[i][0] - linhas[i - 1][0] <= salto):
         i -= 1
     for top, ws in linhas[i:ate]:
         for w in ws:
@@ -246,13 +262,21 @@ def _campos(coluna, comum, pagina_txt):
     return nome, acom, ans
 
 
+def _passo(linhas, inicio, precos):
+    """Distancia tipica entre duas linhas de faixa desta grade."""
+    tops = [t for t, _ in linhas[inicio:inicio + len(precos) * 3]]
+    gaps = sorted(b - a for a, b in zip(tops, tops[1:]) if b > a)
+    return gaps[len(gaps) // 2] if gaps else 18.0
+
+
 def ler_pdf(caminho):
     saida = []
     with pdfplumber.open(caminho) as pdf:
         for npag, pagina in enumerate(pdf.pages, 1):
             txt = pagina.extract_text() or ''
             for ancoras, precos, inicio, linhas in _grades_da_pagina(pagina):
-                colunas, comum = _cabecalho(linhas, inicio, ancoras)
+                passo = _passo(linhas, inicio, precos)
+                colunas, comum = _cabecalho(linhas, inicio, ancoras, passo)
                 for j, coluna in enumerate(colunas):
                     nome, acom, ans = _campos(coluna, comum, txt)
                     if not nome:
