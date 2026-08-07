@@ -1462,7 +1462,7 @@ def init_db():
                 operadora TEXT NOT NULL, plano TEXT NOT NULL,
                 modalidade TEXT DEFAULT 'PME', acomodacao TEXT DEFAULT 'Enfermaria',
                 coparticipacao TEXT DEFAULT 'Sem', linha TEXT DEFAULT '', tipo_cnpj TEXT DEFAULT '',
-                abrangencia TEXT DEFAULT '',
+                abrangencia TEXT DEFAULT '', administradora TEXT DEFAULT '',
                 vigencia TEXT DEFAULT '', ativo INTEGER DEFAULT 1,
                 vidas_min INTEGER, vidas_max INTEGER, mei INTEGER DEFAULT 0,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -2448,7 +2448,7 @@ def init_db():
             operadora TEXT NOT NULL, plano TEXT NOT NULL,
             modalidade TEXT DEFAULT 'PME', acomodacao TEXT DEFAULT 'Enfermaria',
             coparticipacao TEXT DEFAULT 'Sem', linha TEXT DEFAULT '', tipo_cnpj TEXT DEFAULT '',
-            abrangencia TEXT DEFAULT '',
+            abrangencia TEXT DEFAULT '', administradora TEXT DEFAULT '',
             vigencia TEXT DEFAULT '', ativo INTEGER DEFAULT 1,
             vidas_min INTEGER, vidas_max INTEGER, mei INTEGER DEFAULT 0,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -2675,6 +2675,7 @@ def init_db():
     add_col('cotacao_salva', 'cidade', 'TEXT')
     add_col('cotacao_salva', 'modalidades', 'TEXT')
     add_col('crm_leads', 'auditado_em', 'TIMESTAMP')
+    add_col('cotacao_tabela', 'administradora', 'TEXT')
     
     # Config do parceiro Affinity — específico do Serenus (e-mails/contato deles).
     # Não vai pra instância de cliente (SEED_DADOS_SERENUS=0).
@@ -26956,7 +26957,10 @@ def _aprender_do_vivo(conn, cidade, modalidade, planos):
             tb = p.get('tabela') or {}
             acomodacao = 'Apartamento' if (p.get('plano') or {}).get('acomodacao') else 'Enfermaria'
             copart = _copart_texto(tb)
-            linha = str(tb.get('nome') or '').strip()[:160]
+            
+            abrangencia = _texto_painel(p.get('produto'))[:120]
+            linha = _texto_painel(p.get('tabela'))[:160]
+            administradora = _texto_painel(p.get('administradora'))[:120]
 
             # Na Adesão a "linha" do Painel é "Administradora - Entidade"
             # ("Affix - ANSP"). Em PME/PF é o nome comercial da linha
@@ -26995,22 +26999,23 @@ def _aprender_do_vivo(conn, cidade, modalidade, planos):
             ex = conn.execute(
                 """SELECT id FROM cotacao_tabela WHERE operadora=? AND plano=? AND modalidade=?
                      AND acomodacao=? AND coparticipacao=? AND COALESCE(cidade,'')=?
-                     AND COALESCE(entidade,'')=? AND COALESCE(vidas_min, 0)=? AND COALESCE(vidas_max, 0)=? AND COALESCE(mei, 0)=?""",
+                     AND COALESCE(entidade,'')=? AND COALESCE(vidas_min, 0)=? AND COALESCE(vidas_max, 0)=? AND COALESCE(mei, 0)=?
+                     AND COALESCE(abrangencia,'')=? AND COALESCE(linha,'')=? AND COALESCE(administradora,'')=?""",
                 (operadora, plano, nome_modal, acomodacao, copart, cidade or '', entidade,
-                 vidas_min or 0, vidas_max or 0, mei)).fetchone()
+                 vidas_min or 0, vidas_max or 0, mei, abrangencia, linha, administradora)).fetchone()
 
             if ex:
                 tid = ex['id']
-                conn.execute("UPDATE cotacao_tabela SET ativo=1, atualizado_em=?, linha=?, vidas_min=?, vidas_max=?, mei=? WHERE id=?",
-                             (agora, linha, vidas_min, vidas_max, mei, tid))
+                conn.execute("UPDATE cotacao_tabela SET ativo=1, atualizado_em=?, vidas_min=?, vidas_max=?, mei=? WHERE id=?",
+                             (agora, vidas_min, vidas_max, mei, tid))
             else:
                 conn.execute(
                     """INSERT INTO cotacao_tabela
                          (operadora, plano, modalidade, acomodacao, coparticipacao,
-                          cidade, entidade, linha, ativo, atualizado_em, vidas_min, vidas_max, mei)
-                       VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?)""",
+                          cidade, entidade, linha, abrangencia, administradora, ativo, atualizado_em, vidas_min, vidas_max, mei)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)""",
                     (operadora, plano, nome_modal, acomodacao, copart,
-                     cidade or '', entidade, linha, agora, vidas_min, vidas_max, mei))
+                     cidade or '', entidade, linha, abrangencia, administradora, agora, vidas_min, vidas_max, mei))
                 tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
                        else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
 
@@ -27025,8 +27030,11 @@ def _aprender_do_vivo(conn, cidade, modalidade, planos):
                 if valor <= 0:
                     continue
                 achou = conn.execute(
-                    "SELECT id FROM cotacao_preco WHERE tabela_id=? AND faixa=?", (tid, fx)).fetchone()
+                    "SELECT id, preco FROM cotacao_preco WHERE tabela_id=? AND faixa=?", (tid, fx)).fetchone()
                 if achou:
+                    preco_antigo = float(achou['preco'])
+                    if abs(preco_antigo - valor) > 0.01:
+                        app.logger.warning(f"[COTACAO] preço trocado: {operadora}/{plano} faixa {fx} R${preco_antigo} -> R${valor}")
                     conn.execute("UPDATE cotacao_preco SET preco=? WHERE id=?", (valor, achou['id']))
                 else:
                     conn.execute("INSERT INTO cotacao_preco (tabela_id, faixa, preco) VALUES (?,?,?)",
