@@ -21320,6 +21320,95 @@ def api_whatsapp_cotacoes():
         return _wa_cors(jsonify({"ok": False, "erro": "Não foi possível carregar as cotações."})), 500
 
 
+@app.route('/api/whatsapp/cotacao/salvar', methods=['POST', 'OPTIONS'])
+def api_whatsapp_cotacao_salvar():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+
+    d = request.get_json(silent=True) or {}
+    conn = db()
+
+    try:
+        try:
+            usuario_id = int(d.get('usuario_id') or 0)
+        except Exception:
+            usuario_id = 0
+
+        if not usuario_id:
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": False, "erro": "usuario_invalido"})), 400
+
+        urow = conn.execute("SELECT id, nome, email FROM usuarios WHERE id=? AND ativo=1", (usuario_id,)).fetchone()
+        if not urow:
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": False, "erro": "usuario_invalido"})), 400
+
+        try:
+            lead_id = int(d.get('lead_id') or 0)
+        except Exception:
+            lead_id = 0
+
+        if not lead_id:
+            tel = _normalizar_telefone(d.get('telefone', ''))
+            achado = _buscar_lead_por_telefone(conn, tel) if tel else None
+            if achado:
+                lead_id = achado['id']
+            else:
+                close_db(conn)
+                return _wa_cors(jsonify({"ok": False, "erro": "sem_lead"})), 400
+
+        d['lead_id'] = lead_id
+
+        # 1. Grava histórico "vivo"
+        try:
+            vid = _cotacao_viva_gravar(conn, d, usuario_id, 'whatsapp')
+        except ValueError as e:
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": False, "erro": str(e)})), 400
+
+        # 2. Gera a apresentação final
+        planos, total_geral, cont_faixa = _viva_para_apresentacao(d)
+
+        token = secrets.token_urlsafe(9)
+        conn.execute("""INSERT INTO cotacao_salva
+            (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email,
+             corretor_telefone, cliente_nome, cliente_email, cliente_telefone, titulo,
+             vidas_json, planos_json, total, tabela_ids_json)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (token, 'horizontal', lead_id, usuario_id,
+             urow['nome'] or '', urow['email'] or '', '',
+             str(d.get('cliente_nome') or '').strip(),
+             str(d.get('cliente_email') or '').strip(),
+             str(d.get('cliente_telefone') or '').strip(),
+             str(d.get('titulo') or 'Cotação').strip(),
+             json.dumps(cont_faixa), json.dumps(planos, ensure_ascii=False),
+             total_geral, '[]'))
+             
+        cid = _last_insert_id(conn.cursor() if hasattr(conn, 'cursor') else conn)
+        if not cid:
+            cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+                   
+        try:
+            registrar_cotacao_no_lead(conn, lead_id, cid, planos, total_geral, [], str(d.get('titulo') or '').strip())
+        except Exception:
+            pass
+
+        conn.commit()
+        close_db(conn)
+
+        url = f"{_SITE_BASE_URL.rstrip('/')}/c/{token}"
+        return _wa_cors(jsonify({"ok": True, "id": cid, "token": token, "url": url}))
+
+    except Exception as e:
+        conn.rollback()
+        close_db(conn)
+        app.logger.error(f"[WA/COTACAO_SALVAR] {e}")
+        return _wa_cors(jsonify({"ok": False, "erro": "Não foi possível salvar a cotação."})), 500
+
+
 @app.route('/api/whatsapp/lead/salvar', methods=['POST', 'OPTIONS'])
 def api_whatsapp_lead_salvar():
     """Salva em UMA chamada o que o popup mudou. Aplica na ordem: campos → etiquetas
@@ -26929,7 +27018,6 @@ def cotacao_novo():
     operadoras_cards = [{'nome': op, 'logo': _logo_operadora_url(conn, op)} for op in operadoras]
     modalidades = _modalidades_conhecidas(conn)
     cidade_preferida = _pref_cotacao(conn, session.get('user_id'), 'cidade')
-    close_db(conn)
 
     f_ops = [x.strip() for x in request.args.getlist('op') if x.strip()]
     prefill = {
@@ -26945,7 +27033,51 @@ def cotacao_novo():
         'cliente_nome': (request.args.get('cliente_nome') or '').strip(),
         'cliente_telefone': (request.args.get('cliente_telefone') or '').strip(),
         'cliente_email': (request.args.get('cliente_email') or '').strip(),
+        'planos': '[]',
     }
+
+    try:
+        cid_reabrir = int(request.args.get('de') or 0)
+    except Exception:
+        cid_reabrir = 0
+
+    if cid_reabrir:
+        c = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid_reabrir,)).fetchone()
+        if c and (session.get('perfil') == 'admin' or c['corretor_id'] == session.get('user_id')):
+            if c['lead_id']:
+                r = conn.execute("SELECT id, nome, telefone FROM crm_leads WHERE id=?", (c['lead_id'],)).fetchone()
+                if r:
+                    lead = {'id': r['id'], 'nome': r['nome'], 'telefone': r['telefone']}
+            prefill['cliente_nome'] = c['cliente_nome'] or ''
+            prefill['cliente_telefone'] = c['cliente_telefone'] or ''
+            prefill['cliente_email'] = c['cliente_email'] or ''
+            try:
+                planos = json.loads(c['planos_json'] or '[]')
+                prefill['planos'] = json.dumps(planos, ensure_ascii=False)
+                if planos and isinstance(planos, list) and len(planos) > 0:
+                    prefill['cidade'] = planos[0].get('cidade') or ''
+                    prefill['modalidade'] = str(planos[0].get('modalidade') or '')
+            except Exception:
+                pass
+            
+            _REP = {'00-18': 5, '19-23': 20, '24-28': 25, '29-33': 30, '34-38': 35,
+                    '39-43': 40, '44-48': 45, '49-53': 50, '54-58': 55, '59+': 60}
+            try:
+                vidas = json.loads(c['vidas_json'] or '{}')
+                idades_list = []
+                for fx, qtd in vidas.items():
+                    rep = _REP.get(fx)
+                    if rep and qtd:
+                        idades_list += [str(rep)] * int(qtd)
+                if idades_list:
+                    prefill['idades'] = ', '.join(idades_list)
+            except Exception:
+                pass
+        else:
+            flash("Cotação não encontrada ou você não tem permissão para abri-la.", "warning")
+
+    close_db(conn)
+
     for i in range(10):
         prefill[f'fx_{i}'] = (request.args.get(f'fx_{i}') or '').strip()
 
@@ -29790,106 +29922,21 @@ def cotacao_documento(cid):
 @app.route('/cotacao/<int:cid>/reabrir')
 @login_required
 def cotacao_reabrir(cid):
-    """Reabre a cotação no construtor pré-preenchida. Ao salvar, SEMPRE cria uma cotação
-    nova com link próprio (ver comentário em /cotacao/salvar) — esta cotação original
-    não é alterada."""
+    """Redireciona para /cotacao/novo pré-preenchida com a cotação antiga.
+    Ao salvar, SEMPRE cria uma cotação nova com link próprio."""
     conn = db()
     c = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
     if not c:
-        close_db(conn); abort(404)
+        close_db(conn)
+        flash("Cotação não encontrada.", "warning")
+        return redirect(url_for('cotacao_novo'))
     if session.get('perfil') != 'admin' and c['corretor_id'] != session.get('user_id'):
-        close_db(conn); abort(403)
-
-    # Reconstrói idades a partir de vidas_json (faixa→qtd) usando idades representativas
-    _REP = {'00-18': 5, '19-23': 20, '24-28': 25, '29-33': 30, '34-38': 35,
-            '39-43': 40, '44-48': 45, '49-53': 50, '54-58': 55, '59+': 60}
-    try:
-        vidas = json.loads(c['vidas_json'] or '{}')
-    except Exception:
-        vidas = {}
-    idades_list = []
-    for fx, qtd in vidas.items():
-        rep = _REP.get(fx)
-        if rep and qtd:
-            idades_list += [str(rep)] * int(qtd)
-    idades_txt = ', '.join(idades_list)
-
-    # Tabelas previamente selecionadas
-    try:
-        tabela_ids = json.loads(c['tabela_ids_json'] or '[]')
-    except Exception:
-        tabela_ids = []
-    # Fallback: tenta casar por operadora+plano+modalidade+acomodacao+copart
-    if not tabela_ids:
-        try:
-            planos = json.loads(c['planos_json'] or '[]')
-        except Exception:
-            planos = []
-        for p in planos:
-            row = conn.execute(
-                "SELECT id FROM cotacao_tabela WHERE operadora=? AND plano=? AND modalidade=? AND acomodacao=? AND coparticipacao=?",
-                (p.get('operadora'), p.get('plano'), p.get('modalidade'), p.get('acomodacao'), p.get('coparticipacao'))
-            ).fetchone()
-            if row:
-                tabela_ids.append(row['id'])
-
-    # Operadoras para os cards
-    operadoras = [r['operadora'] for r in conn.execute(
-        "SELECT DISTINCT operadora FROM cotacao_tabela WHERE ativo=1 ORDER BY operadora").fetchall()]
-    operadoras_cards = [{'nome': op, 'logo': _logo_operadora_url(conn, op)} for op in operadoras]
-
-    # Monta resultados com os planos já selecionados (baseado nas tabelas pré-selecionadas)
-    cont_faixa = {}
-    for s in idades_list:
-        fx = _faixa_da_idade(int(s))
-        if fx:
-            cont_faixa[fx] = cont_faixa.get(fx, 0) + 1
-
-    resultados = []
-    if cont_faixa:
-        tabelas = conn.execute("SELECT * FROM cotacao_tabela WHERE ativo=1").fetchall()
-        for t in tabelas:
-            td = dict(t)
-            precos = conn.execute("SELECT faixa, preco FROM cotacao_preco WHERE tabela_id=?", (td['id'],)).fetchall()
-            pmap = {p['faixa']: float(p['preco'] or 0) for p in precos}
-            total = 0.0; faltam = False; detalhe = []
-            for fx, qtd in cont_faixa.items():
-                preco = pmap.get(fx, 0)
-                if preco <= 0: faltam = True
-                total += preco * qtd
-                detalhe.append({'faixa': fx, 'qtd': qtd, 'preco_unit': preco, 'subtotal': preco * qtd})
-            resultados.append({
-                'tabela_id': td['id'], 'operadora': td['operadora'], 'plano': td['plano'],
-                'modalidade': td['modalidade'], 'acomodacao': td['acomodacao'],
-                'coparticipacao': td['coparticipacao'], 'abrangencia': td.get('abrangencia'),
-                'linha': td.get('linha') or '', 'tipo_cnpj': td.get('tipo_cnpj') or '',
-                'vigencia': td.get('vigencia'), 'total': round(total, 2),
-                'incompleta': faltam, 'detalhe': sorted(detalhe, key=lambda x: x['faixa']),
-            })
-        resultados.sort(key=lambda x: (_norm_txt(x['operadora']), x['total']))  # operadora A-Z, depois menor preco
-        completas = [r for r in resultados if not r['incompleta']]
-        if completas:
-            min(completas, key=lambda x: x['total'])['melhor'] = True
-
+        close_db(conn)
+        flash("Você não tem permissão para abrir esta cotação.", "danger")
+        return redirect(url_for('cotacao_novo'))
+        
     close_db(conn)
-    cd = dict(c)
-    prefill = {
-        'lead_id': str(cd.get('lead_id') or ''),
-        'nome': cd.get('cliente_nome') or '',
-        'telefone': cd.get('cliente_telefone') or '',
-        'email': cd.get('cliente_email') or '',
-    }
-    return render_template('cotacao.html',
-        operadoras=operadoras, operadoras_cards=operadoras_cards,
-        resultados=resultados, idades_txt=idades_txt, total_vidas=len(idades_list),
-        modalidades=COTACAO_MODALIDADES, acomodacoes=COTACAO_ACOMODACOES,
-        coparts=COTACAO_COPART, faixas=FAIXAS_ETARIAS,
-        tipos_cnpj=['MEI', 'ME', 'LTDA', 'Demais portes', 'Todos os portes'],
-        eh_admin=(session.get('perfil') == 'admin'), prefill=prefill,
-        filtros={'modalidade': '', 'acomodacao': '', 'coparticipacao': '', 'ops': [], 'mei': ''},
-        editar_id=cid, presel_tabelas=tabela_ids,
-        editar_titulo=cd.get('titulo') or '', editar_orientacao=cd.get('orientacao') or 'horizontal',
-        editar_corretor_telefone=cd.get('corretor_telefone') or '')
+    return redirect(url_for('cotacao_novo', de=cid))
 
 
 def _build_cot(conn, c):
