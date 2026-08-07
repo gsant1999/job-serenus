@@ -21291,7 +21291,7 @@ def api_whatsapp_cotacoes():
                 dt_criacao = _parse_dt_seguro(r['criado_em'])
                 if dt_criacao:
                     if dt_criacao.tzinfo is None:
-                        dt_criacao = TZ_SP.localize(dt_criacao)
+                        dt_criacao = pytz.utc.localize(dt_criacao).astimezone(TZ_SP)
                     dias = (agora_date - dt_criacao.date()).days
                     criado_str = dt_criacao.isoformat()
                 else:
@@ -27062,7 +27062,7 @@ def cotacao_novo():
                     prefill['modalidade'] = str(planos[0].get('modalidade') or '')
             except Exception:
                 pass
-            prefill['cidade'] = c.get('cidade') or ''
+            prefill['cidade'] = dict(c).get('cidade') or ''
             
             _REP = {'00-18': 5, '19-23': 20, '24-28': 25, '29-33': 30, '34-38': 35,
                     '39-43': 40, '44-48': 45, '49-53': 50, '54-58': 55, '59+': 60}
