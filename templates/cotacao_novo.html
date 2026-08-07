@@ -873,6 +873,25 @@
         PASSO_HUMANO[qualPasso] + ' <span style="color:var(--cinza-2)">(só isso — o que venceu foi ' +
         'o atalho de <code>' + esc(qualPasso) + '</code>)</span>');
     }
+    // Falta ensinar: diga QUAIS gestos faltam, não "faça uma cotação".
+    //
+    // Sete papéis, e cada um corresponde a um gesto. Quem já fez a cotação
+    // inteira e continua travado normalmente parou antes de UM deles — quase
+    // sempre o preço, que só é observado quando o valor aparece mesmo na tela.
+    // Sem esta lista, a pessoa refaz tudo do zero achando que errou, e erra de
+    // novo no mesmo ponto. Foi exatamente o que aconteceu com o Guilherme.
+    if (motivo === 'precisa_aprender' && extra && extra.faltando && extra.faltando.length) {
+      var passos = extra.faltando.map(function (p) {
+        return '<li>' + (PASSO_HUMANO[p] || ('Passo <code>' + esc(p) + '</code>.')) + '</li>';
+      }).join('');
+      html = '<b>Falta a extensão ver ' + extra.faltando.length +
+        (extra.faltando.length === 1 ? ' passo' : ' passos') + ' no Painel.</b> ' +
+        'Ela aprende olhando você usar — não precisa salvar nem terminar nada lá.' +
+        '<ol>' + passos + '</ol>' +
+        '<p style="margin:8px 0 0;font-size:11.5px;color:var(--cinza-2)">' +
+        'Faça na <b>aba do Painel</b> e volte aqui. Se você já fez a cotação inteira e ' +
+        'este aviso continua, o passo acima é o que ainda não aconteceu na tela deles.</p>';
+    }
     if (motivo === 'painel_fechado' && extra && extra.abasExaminadas != null) {
       html += '<p style="margin:8px 0 0;font-size:11.5px;color:var(--cinza-2)">A extensão olhou ' +
         extra.abasExaminadas + ' aba(s) e nenhuma era do Painel.</p>';
@@ -2278,7 +2297,12 @@
     var r = await pedir('cotador_estado', {}, 8000);
     if (!r.ok) { pronto = false; tratarFalha(r.motivo, r); atualizarBotao(); return; }
     if (r.faltando && r.faltando.length) {
-      pronto = false; tratarFalha('precisa_aprender'); atualizarBotao(); return;
+      // PASSA O `r`. A extensão diz QUAIS papéis faltam e existe um mapa que
+      // traduz cada um no gesto correspondente no Painel — e a tela jogava
+      // essa informação fora, mostrando "faça uma cotação na mão" mesmo quando
+      // faltava um passo só. Quem já fez a cotação e continua travado não tem
+      // como adivinhar onde parou, e refaz tudo achando que fez errado.
+      pronto = false; tratarFalha('precisa_aprender', r); atualizarBotao(); return;
     }
     pronto = true;
     mostrarSinal('on', 'Painel conectado', '');
