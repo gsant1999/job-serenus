@@ -2299,6 +2299,16 @@
     if (!el('cliNome').value) el('cliNome').value = LEAD_NOME || P.cliente_nome || '';
     if (!el('cliTel').value) el('cliTel').value = LEAD_TEL || P.cliente_telefone || '';
 
+    // Cidade de quem reabre uma cotação ("Nova versão"). Sem isto, o servidor
+    // manda a cidade certa e a tela ignora — o consultor recupera cliente,
+    // idades e tipo, e mesmo assim tem que redigitar a cidade. E sem cidade
+    // esta tela não cota, então o campo esquecido trava tudo o que vem depois.
+    // Preenche buraco, não corrige ninguém: cidade já digitada permanece.
+    if (P.cidade && !el('cidade').value) {
+      el('cidade').value = P.cidade;
+      cidadeEscolhida = P.cidade;
+    }
+
     if (P.modalidade && TIPOS.indexOf(nomeCompleto(P.modalidade)) >= 0) {
       tipoEscolhido = nomeCompleto(P.modalidade);
     }
