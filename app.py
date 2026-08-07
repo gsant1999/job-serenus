@@ -18350,10 +18350,45 @@ Serenus pelo contato abaixo.</p>
     return Response(html, mimetype='text/html')
 
 
-_EXTENSAO_ARQUIVOS = ['manifest.json', 'background.js', 'content.js', 'content.css', 'wpp-bridge.js',
-                      'site-bridge.js', 'painel-bridge.js', 'cotador-painel.js',
-                      'wa-js.vendor.js', 'popup.html', 'popup.js', 'icon16.png', 'icon48.png',
-                      'icon128.png', 'logo_arcos.png']
+def _extensao_lista_arquivos():
+    """O que entra no zip, LIDO DO MANIFEST — não escrito à mão.
+
+    Esta lista era fixa e ficou velha três vezes: primeiro quando a extensão
+    ganhou site-bridge/painel-bridge/cotador-painel, e agora com a pasta
+    `logos/`, que fez a página de instalação recusar o pacote inteiro. O aviso
+    ficou registrado no próprio código ("lista escrita à mão vira mentira
+    silenciosa") e mesmo assim se repetiu — porque manter duas verdades em
+    lugares diferentes não é questão de atenção, é questão de tempo.
+
+    Agora o manifest é a única fonte: quem declarar um arquivo lá o recebe no
+    zip, sem ninguém lembrar de nada. `popup.js` entra à parte porque é
+    carregado pelo HTML do popup, não pelo manifest — o manifest não tem como
+    saber dele.
+    """
+    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extensao-whatsapp')
+    nomes = {'manifest.json', 'popup.js'}
+    try:
+        d = json.load(open(os.path.join(base, 'manifest.json')))
+    except Exception:
+        return sorted(nomes)
+    for cs in d.get('content_scripts', []):
+        nomes.update(cs.get('js', []))
+        nomes.update(cs.get('css', []))
+    for r in d.get('web_accessible_resources', []):
+        nomes.update(r.get('resources', []))
+    sw = (d.get('background') or {}).get('service_worker')
+    if sw:
+        nomes.add(sw)
+    pop = (d.get('action') or {}).get('default_popup')
+    if pop:
+        nomes.add(pop)
+    nomes.update((d.get('icons') or {}).values())
+    return sorted(n for n in nomes if os.path.exists(os.path.join(base, n)))
+
+
+# Mantido como NOME por compatibilidade com quem já lê a constante; o valor
+# agora vem do manifest.
+_EXTENSAO_ARQUIVOS = _extensao_lista_arquivos()
 
 
 def _extensao_arquivos_faltando():
@@ -18382,8 +18417,12 @@ def _extensao_arquivos_faltando():
         exigidos.add(pop)
     exigidos.update((d.get('icons') or {}).values())
     # Falta = o manifest pede, e o zip nao leva (ou o arquivo nem existe no disco).
+    # Recalcula em vez de usar a constante congelada no import: em dev o arquivo
+    # muda com o servidor de pé, e comparar com uma foto velha esconde o erro
+    # justamente quando ele acabou de ser criado.
+    atuais = _extensao_lista_arquivos()
     return sorted(n for n in exigidos
-                  if n not in _EXTENSAO_ARQUIVOS or not os.path.exists(os.path.join(base, n)))
+                  if n not in atuais or not os.path.exists(os.path.join(base, n)))
 
 
 def _extensao_versao():
@@ -18408,7 +18447,7 @@ def extensao_manifesto_instalacao():
     return jsonify({"ok": True, "versao": _extensao_versao(), "arquivos": _EXTENSAO_ARQUIVOS})
 
 
-@app.route('/extensao/arquivo/<nome>')
+@app.route('/extensao/arquivo/<path:nome>')
 @login_required
 def extensao_arquivo(nome):
     """Um arquivo cru da extensão, pra instalação automática escrever direto
@@ -18416,8 +18455,19 @@ def extensao_arquivo(nome):
 
     SÓ os nomes da lista curada. Nada de path livre: reusar `nome` num
     os.path.join sem essa checagem seria abrir a pasta inteira do servidor
-    pra quem soubesse o caminho (../../app.py etc.)."""
-    if nome not in _EXTENSAO_ARQUIVOS:
+    pra quem soubesse o caminho (../../app.py etc.).
+
+    `<path:nome>` — e não `<nome>` — porque a extensão passou a ter subpasta
+    (`logos/select.png`). Sem isso o Flask nem chegava aqui: dava 404 na rota,
+    e a instalação automática dizia "pacote incompleto" sem explicar por quê.
+
+    A barra NÃO afrouxa a segurança: a checagem continua sendo pertencer à
+    lista derivada do manifest, que é um conjunto fechado de nomes exatos.
+    '../../app.py' não está nela — a lista é a tranca, o padrão da rota é só o
+    que deixa a chave entrar na fechadura."""
+    # Recalcula: a constante é uma foto do import, e em dev o manifest muda com
+    # o servidor de pé.
+    if nome not in _extensao_lista_arquivos():
         abort(404)
     base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extensao-whatsapp')
     caminho = os.path.join(base, nome)
