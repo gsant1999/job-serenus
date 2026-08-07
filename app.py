@@ -18605,10 +18605,23 @@ async function instalarAutomatico(){
     for (const nome of m.arquivos){
       const li = linha('Copiando ' + nome + '…');
       try {
-        const resp = await fetch('/extensao/arquivo/' + encodeURIComponent(nome));
+        // Codifica CADA PEDAÇO, não o caminho inteiro: encodeURIComponent
+        // transforma a barra em %2F e o servidor deixa de reconhecer a rota.
+        const partes = nome.split('/');
+        const resp = await fetch('/extensao/arquivo/' + partes.map(encodeURIComponent).join('/'));
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const bytes = await resp.blob();
-        const handle = await raiz.getFileHandle(nome, { create: true });
+        // SUBPASTA PRECISA SER CRIADA ANTES.
+        //
+        // getFileHandle('logos/select.png') não funciona: o navegador recusa
+        // nome com barra ("Name is not allowed"). A pasta tem que ser aberta
+        // nível a nível, e só o último pedaço é arquivo. Foi o que quebrou a
+        // instalação quando a extensão ganhou a pasta de logos.
+        let dir = raiz;
+        for (let i = 0; i < partes.length - 1; i++) {
+          dir = await dir.getDirectoryHandle(partes[i], { create: true });
+        }
+        const handle = await dir.getFileHandle(partes[partes.length - 1], { create: true });
         const writable = await handle.createWritable();
         await writable.write(bytes);
         await writable.close();
