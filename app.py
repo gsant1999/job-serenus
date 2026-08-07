@@ -1892,6 +1892,7 @@ def init_db():
             observacoes TEXT,
             dados_extras TEXT,
             perdido_motivo TEXT,
+            auditado_em TIMESTAMP,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -2673,6 +2674,7 @@ def init_db():
     # Novas colunas (agosto 2026):
     add_col('cotacao_salva', 'cidade', 'TEXT')
     add_col('cotacao_salva', 'modalidades', 'TEXT')
+    add_col('crm_leads', 'auditado_em', 'TIMESTAMP')
     
     # Config do parceiro Affinity — específico do Serenus (e-mails/contato deles).
     # Não vai pra instância de cliente (SEED_DADOS_SERENUS=0).
@@ -20351,13 +20353,31 @@ def api_whatsapp_canario():
     return _wa_cors(jsonify({"ok": True, "gravadas": len(checagens), "quebrou": quebrou_agora}))
 
 
+def _ignorar_conversa_wa(conn, chat_id, tel_norm, desmarcar, nome, motivo, quem):
+    if desmarcar:
+        conn.execute("DELETE FROM wa_conversa_ignorada WHERE chat_id=? OR (telefone_norm IS NOT NULL "
+                     "AND telefone_norm <> '' AND telefone_norm=?)",
+                     (chat_id or '__nada__', tel_norm or '__nada__'))
+    else:
+        chave = chat_id or ('tel:' + tel_norm)
+        if DB_MODE == 'postgres':
+            conn.execute("""INSERT INTO wa_conversa_ignorada
+                (chat_id, telefone_norm, nome, motivo, criado_por, criado_em)
+                VALUES (?,?,?,?,?,?) ON CONFLICT (chat_id) DO UPDATE SET
+                telefone_norm=excluded.telefone_norm, nome=excluded.nome""",
+                (chave, tel_norm or None, str(nome or '')[:120],
+                 str(motivo or '')[:200], quem, _agora_sp()))
+        else:
+            conn.execute("""INSERT OR REPLACE INTO wa_conversa_ignorada
+                (chat_id, telefone_norm, nome, motivo, criado_por, criado_em)
+                VALUES (?,?,?,?,?,?)""",
+                (chave, tel_norm or None, str(nome or '')[:120],
+                 str(motivo or '')[:200], quem, _agora_sp()))
+
+
 @app.route('/api/whatsapp/ignorar', methods=['POST', 'OPTIONS'])
 def api_whatsapp_ignorar():
-    """Marca (ou desmarca) uma conversa como "não é lead".
-
-    A partir daqui a extensão não lê nem cria card pra ela. Guarda o chat_id E o
-    telefone: o mesmo contato aparece ora como @lid, ora como número, e marcar
-    num formato só deixaria a porta aberta no outro."""
+    """Marca (ou desmarca) uma conversa como "não é lead"."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
     if not _wa_auth_ok():
@@ -20370,32 +20390,14 @@ def api_whatsapp_ignorar():
     desmarcar = bool(d.get('desmarcar'))
     conn = db()
     try:
-        if desmarcar:
-            conn.execute("DELETE FROM wa_conversa_ignorada WHERE chat_id=? OR (telefone_norm IS NOT NULL "
-                         "AND telefone_norm <> '' AND telefone_norm=?)",
-                         (chat_id or '__nada__', tel_norm or '__nada__'))
-        else:
-            chave = chat_id or ('tel:' + tel_norm)
-            quem = ''
-            try:
-                u = conn.execute("SELECT nome FROM usuarios WHERE id=?",
-                                 (int(d.get('usuario_id') or 0),)).fetchone()
-                quem = (u['nome'] if u else '') or ''
-            except Exception:
-                pass
-            if DB_MODE == 'postgres':
-                conn.execute("""INSERT INTO wa_conversa_ignorada
-                    (chat_id, telefone_norm, nome, motivo, criado_por, criado_em)
-                    VALUES (?,?,?,?,?,?) ON CONFLICT (chat_id) DO UPDATE SET
-                    telefone_norm=excluded.telefone_norm, nome=excluded.nome""",
-                    (chave, tel_norm or None, str(d.get('nome') or '')[:120],
-                     str(d.get('motivo') or '')[:200], quem, _agora_sp()))
-            else:
-                conn.execute("""INSERT OR REPLACE INTO wa_conversa_ignorada
-                    (chat_id, telefone_norm, nome, motivo, criado_por, criado_em)
-                    VALUES (?,?,?,?,?,?)""",
-                    (chave, tel_norm or None, str(d.get('nome') or '')[:120],
-                     str(d.get('motivo') or '')[:200], quem, _agora_sp()))
+        quem = ''
+        try:
+            u = conn.execute("SELECT nome FROM usuarios WHERE id=?",
+                             (int(d.get('usuario_id') or 0),)).fetchone()
+            quem = (u['nome'] if u else '') or ''
+        except Exception:
+            pass
+        _ignorar_conversa_wa(conn, chat_id, tel_norm, desmarcar, d.get('nome'), d.get('motivo'), quem)
         conn.commit()
     except Exception as e:
         try: conn.rollback()
@@ -37837,6 +37839,130 @@ def _backfill_vinculo_proposta_lead():
 _backfill_vinculo_proposta_lead()
 _backfill_notas_lead()
 
+
+
+@app.route('/crm/leads-da-extensao')
+@login_required
+def crm_leads_da_extensao():
+    conn = db()
+    de = request.args.get('de')
+    ate = request.args.get('ate')
+    consultor = request.args.get('consultor')
+
+    if not de or not ate:
+        dt_ate = datetime.now()
+        dt_de = dt_ate - timedelta(days=30)
+        de = dt_de.strftime('%Y-%m-%d')
+        ate = dt_ate.strftime('%Y-%m-%d')
+
+    query_leads = """
+        SELECT l.id, l.nome, l.telefone, l.criado_em, l.etapa,
+               l.responsavel_id AS consultor_id, u.nome AS consultor_nome
+        FROM crm_leads l
+        LEFT JOIN usuarios u ON l.responsavel_id = u.id
+        WHERE l.origem = 'WhatsApp (extensão)'
+          AND l.criado_em >= ? AND l.criado_em <= ?
+    """
+    params_leads = [f"{de} 00:00:00", f"{ate} 23:59:59"]
+
+    if consultor:
+        query_leads += " AND l.responsavel_id = ?"
+        params_leads.append(int(consultor))
+
+    query_leads += " ORDER BY l.criado_em DESC LIMIT 500"
+
+    leads_raw = conn.execute(query_leads, params_leads).fetchall()
+    leads = []
+    
+    for r in leads_raw:
+        lid = r['id']
+        n_prop = conn.execute("SELECT COUNT(*) c FROM propostas WHERE lead_id=? AND COALESCE(status,'') <> 'Excluída'", (lid,)).fetchone()['c']
+        tem_proposta = n_prop > 0
+        
+        tel_norm = _normalizar_telefone(str(r['telefone'] or ''))
+        ult_msg_em = None
+        if tel_norm:
+            e = conn.execute("SELECT ultima_msg_em FROM wa_conversa_estado WHERE telefone_norm=?", (tel_norm,)).fetchone()
+            if e and e['ultima_msg_em']:
+                ult_msg_em = datetime.fromtimestamp(e['ultima_msg_em'], tz=timezone(timedelta(hours=-3)))
+
+        leads.append({
+            "id": lid,
+            "nome": r['nome'],
+            "telefone": r['telefone'],
+            "criado_em": _dt_iso(r['criado_em']),
+            "consultor_id": r['consultor_id'],
+            "consultor_nome": r['consultor_nome'],
+            "etapa": r['etapa'],
+            "tem_proposta": tem_proposta,
+            "ultima_mensagem": ult_msg_em.isoformat() if ult_msg_em else None
+        })
+
+    consultores_raw = conn.execute("""
+        SELECT DISTINCT u.id, u.nome
+        FROM crm_leads l
+        JOIN usuarios u ON l.responsavel_id = u.id
+        WHERE l.origem = 'WhatsApp (extensão)'
+    """).fetchall()
+    
+    consultores = [{"id": c['id'], "nome": c['nome']} for c in consultores_raw if c['id']]
+
+    return jsonify({"ok": True, "leads": leads, "consultores": consultores})
+
+
+@app.route('/crm/leads-da-extensao/pendentes')
+@login_required
+def crm_leads_da_extensao_pendentes():
+    conn = db()
+    n = conn.execute("SELECT COUNT(*) c FROM crm_leads WHERE origem='WhatsApp (extensão)' AND auditado_em IS NULL").fetchone()['c']
+    return jsonify({"ok": True, "n": n})
+
+
+@app.route('/crm/lead/<int:lid>/nao-e-lead', methods=['POST'])
+@login_required
+def crm_lead_nao_e_lead(lid):
+    conn = db()
+    lead = conn.execute("SELECT telefone FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        return jsonify({"ok": False, "erro": "lead_nao_encontrado"}), 404
+
+    n_prop = conn.execute("SELECT COUNT(*) c FROM propostas WHERE lead_id=? AND COALESCE(status,'') <> 'Excluída'", (lid,)).fetchone()['c']
+    if n_prop > 0:
+        return jsonify({"ok": False, "erro": "lead_com_proposta"}), 400
+
+    tel_norm = _normalizar_telefone(str(lead['telefone'] or ''))
+    agora = _agora_sp()
+    
+    try:
+        conn.execute("UPDATE crm_leads SET auditado_em=? WHERE id=?", (agora, lid))
+        _ignorar_conversa_wa(conn, '', tel_norm, False, '', 'Auditado via CRM', g.user.get('nome') if hasattr(g, 'user') and g.user else '')
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except: pass
+        app.logger.error(f"Erro ao auditar não é lead: {e}")
+        return jsonify({"ok": False, "erro": "erro_interno"}), 500
+
+    return jsonify({"ok": True})
+
+
+@app.route('/crm/lead/<int:lid>/e-lead', methods=['POST'])
+@login_required
+def crm_lead_e_lead(lid):
+    conn = db()
+    lead = conn.execute("SELECT id FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        return jsonify({"ok": False, "erro": "lead_nao_encontrado"}), 404
+    
+    try:
+        conn.execute("UPDATE crm_leads SET auditado_em=? WHERE id=?", (_agora_sp(), lid))
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except: pass
+        return jsonify({"ok": False, "erro": "erro_interno"}), 500
+
+    return jsonify({"ok": True})
 
 
 if __name__ == '__main__':
