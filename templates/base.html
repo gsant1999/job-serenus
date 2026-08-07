@@ -499,6 +499,8 @@
     .m-3 { grid-template-columns:repeat(2,1fr); }
     .charts-grid { grid-template-columns:1fr; }
   }
+  .nav-auditar .nav-n { margin-left:auto; min-width:20px; padding:1px 7px; border-radius:20px;
+    background:#f43f5e; color:#fff; font-size:11px; font-weight:800; text-align:center; }
 </style>
 {% block head %}{% endblock %}
 </head>
@@ -584,6 +586,16 @@
     <a href="/crm" class="nav-link {% if '/crm' in request.path and '/crm/frios' not in request.path and '/crm/fluxos' not in request.path and '/crm/funis' not in request.path and '/crm/modelos' not in request.path %}active{% endif %}" onclick="closeSidebar()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="23" y1="21" x2="23" y2="19"/><line x1="20" y1="16" x2="20" y2="21"/><line x1="17" y1="18" x2="17" y2="21"/></svg>
       CRM
+    </a>
+    {# AUDITAR LEADS: item que SÓ EXISTE quando há fila.
+       O menu já tem 25 itens; mais um permanente custaria atenção de todo
+       mundo pra servir a uma tarefa que some quando a fila zera. Então ele
+       nasce escondido e o JavaScript o acende com o número. #}
+    <a href="/crm#auditar" id="navAuditar" class="nav-link nav-auditar" hidden
+       onclick="closeSidebar()" title="Leads que a extensão criou sozinha e ninguém conferiu ainda">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      Auditar leads
+      <span class="nav-n" id="navAuditarN" hidden></span>
     </a>
     {% endif %}
     {% if pode_modulo('crm_frios') %}

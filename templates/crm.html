@@ -523,6 +523,9 @@
       Novo lead
     </button>
     <button class="btn-outline btn-sm" onclick="location.href='/crm/agenda'">Agenda</button>
+    <button class="btn-outline btn-sm" id="btAuditar" hidden
+            title="Leads que a extensão criou sozinha e ninguém conferiu"
+            onclick="location.hash='#auditar'">Auditar leads <b id="btAuditarN"></b></button>
     {% if eh_admin %}
     <button class="btn-outline btn-sm" onclick="location.href='/crm/painel'">Painel</button>
 
@@ -1410,6 +1413,76 @@
       <button class="btn-primary" onclick="criarLead()">Criar Lead</button>
     </div>
   </div>
+</div>
+
+
+{# ── AUDITORIA DOS LEADS DA EXTENSÃO ──────────────────────────────────────
+   Vive DENTRO do CRM, aberta por #auditar. Não é tela separada de propósito:
+   auditar lead é trabalho de CRM, e o menu do JOB já tem 25 itens — mais um
+   custaria atenção de todo mundo pra servir a uma tarefa que some quando a
+   fila zera.
+
+   As três portas do Guilherme chegam aqui: o item do menu lateral (com o
+   contador), o botão no cabeçalho do CRM, e o sino. Todas apontam pra
+   /crm#auditar — nenhuma precisou de rota nova. #}
+
+<style>
+/* ── Auditoria dos leads da extensão ─────────────────────────────────── */
+.aud-tela { max-width: 900px; }
+.aud-topo { display:flex; align-items:flex-start; justify-content:space-between;
+  gap:16px; margin-bottom:18px; }
+.aud-topo h2 { margin:0 0 3px; font-size:20px; }
+.aud-topo .sub { color:var(--cinza-2); font-size:13px; }
+.aud-filtros { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px;
+  padding:14px; border:1px solid var(--borda); border-radius:12px; margin-bottom:18px; }
+.aud-filtros label { display:flex; flex-direction:column; gap:5px; font-size:11.5px;
+  font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--cinza-2); }
+.aud-filtros input, .aud-filtros select { padding:8px 10px; border-radius:9px;
+  border:1px solid var(--borda); background:var(--panel); color:var(--texto);
+  font-size:13px; font-family:inherit; }
+.aud-grupo { display:flex; align-items:center; gap:9px; margin:20px 0 8px;
+  font-size:13px; font-weight:800; letter-spacing:.03em; text-transform:uppercase;
+  color:var(--cinza-2); }
+.aud-grupo span { font-size:11px; background:var(--panel-2); border-radius:6px; padding:2px 8px; }
+.aud-item { display:flex; align-items:center; gap:14px; padding:12px 14px;
+  border:1px solid var(--borda); border-radius:11px; margin-bottom:7px;
+  background:var(--panel); transition:opacity .2s, border-color .15s; }
+.aud-item:hover { border-color:var(--azul); }
+/* Decidido some da frente sem sumir da tela: some por completo e a pessoa
+   perde a noção de quanto já fez nesta sessão. */
+.aud-item.aud-feito { opacity:.45; }
+.aud-n { flex:1; min-width:0; }
+.aud-n b { display:block; font-size:14px; }
+.aud-n small { color:var(--cinza-2); font-size:11.5px; }
+.aud-acoes { display:flex; align-items:center; gap:8px; flex:none; }
+.aud-travado { font-size:11.5px; color:var(--cinza-2); font-style:italic; cursor:help; }
+.aud-ok { font-size:12px; font-weight:700; color:var(--verde); }
+.aud-espera { font-size:12px; color:var(--cinza-2); }
+.aud-erro-inline { font-size:12px; color:var(--laranja); max-width:230px; text-align:right; }
+.aud-vazio, .aud-erro { padding:26px 16px; text-align:center; border:1px dashed var(--borda);
+  border-radius:12px; color:var(--cinza-2); font-size:13.5px; }
+.aud-erro { border-color:rgba(251,146,60,.45); color:var(--laranja); }
+#btAuditar b { font-weight:800; }
+</style>
+<div id="auditarLeads" class="aud-tela" hidden>
+  <div class="aud-topo">
+    <div>
+      <h2>Leads que a extensão criou</h2>
+      <div class="sub" id="audSub">Carregando…</div>
+    </div>
+    <button class="btn-outline btn-sm" onclick="fecharAuditoria()">Voltar ao CRM</button>
+  </div>
+
+  <div class="aud-filtros">
+    <label>De <input type="date" id="audDe"></label>
+    <label>Até <input type="date" id="audAte"></label>
+    <label>Consultor
+      <select id="audConsultor"><option value="">Todos</option></select>
+    </label>
+    <button class="btn-outline btn-sm" onclick="carregarAuditoria()">Aplicar</button>
+  </div>
+
+  <div id="audLista"></div>
 </div>
 
 {% endblock %}
@@ -2832,4 +2905,229 @@ document.addEventListener('click', (e) => {
   box.addEventListener('change', ver);
 })();
 </script>
+
+<script>
+/* ── Auditoria dos leads da extensão ──────────────────────────────────────
+   Regra que atravessa tudo aqui: NADA é decidido por palpite da tela.
+   Quem já tem proposta não pode ser marcado como "não é lead" — a tela
+   desabilita, mas quem recusa de verdade é o servidor (HTTP 400). Se a tela
+   estiver desatualizada, ela erra; o servidor não. */
+(function () {
+  var audDados = null;
+
+  function abrirAuditoria() {
+    var t = document.getElementById('auditarLeads');
+    if (!t) return;
+    t.hidden = false;
+    // Esconde o resto do CRM: são duas tarefas diferentes, e misturar as duas
+    // faz a pessoa auditar no meio do funil e perder o fio das duas.
+    //
+    // Esconde pelos IRMÃOS, não por nome de classe. Eu tinha listado
+    // '.crm-corpo, .kanban' — que não existem — e o painel abria EMBAIXO do
+    // quadro, fora da vista: parecia que o botão não funcionava. Pelos irmãos,
+    // continua valendo no dia em que o CRM trocar de classe.
+    var pai = t.parentElement;
+    if (pai) {
+      Array.prototype.forEach.call(pai.children, function (e) {
+        if (e === t) return;
+        if (e.tagName === 'STYLE' || e.tagName === 'SCRIPT') return;
+        if (e.id && e.id.indexOf('modal') === 0) return;   // modais já nascem fechados
+        // display:none, NÃO o atributo `hidden`.
+        //
+        // `hidden` é só um padrão do navegador (`display:none`) e QUALQUER regra
+        // de CSS o vence. `.topbar` tem `display:flex` no CSS desta tela: eu
+        // marcava hidden e ela continuava na frente, exatamente como se o botão
+        // não funcionasse.
+        e.dataset.audOculto = e.style.display || 'auto';
+        e.style.display = 'none';
+      });
+    }
+    if (!audDados) carregarAuditoria();
+  }
+  function fecharAuditoria() {
+    var t = document.getElementById('auditarLeads');
+    if (t) t.hidden = true;
+    document.querySelectorAll('[data-aud-oculto]').forEach(function (e) {
+      // Devolve o que estava lá antes, não um valor chutado: elemento que tinha
+      // display próprio no atributo style perderia o dele.
+      e.style.display = (e.dataset.audOculto === 'auto') ? '' : e.dataset.audOculto;
+      delete e.dataset.audOculto;
+    });
+    if (location.hash === '#auditar') history.replaceState(null, '', '/crm');
+  }
+  window.fecharAuditoria = fecharAuditoria;
+
+  function esc(x) {
+    return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+  function quando(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d)) return '';
+    return d.toLocaleDateString('pt-BR') + ' ' +
+           d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  async function carregarAuditoria() {
+    var lista = document.getElementById('audLista');
+    var sub = document.getElementById('audSub');
+    lista.innerHTML = '<div class="aud-vazio">Carregando…</div>';
+    var q = [];
+    var de = (document.getElementById('audDe') || {}).value;
+    var ate = (document.getElementById('audAte') || {}).value;
+    var cons = (document.getElementById('audConsultor') || {}).value;
+    if (de) q.push('de=' + de);
+    if (ate) q.push('ate=' + ate);
+    if (cons) q.push('consultor=' + encodeURIComponent(cons));
+    var d;
+    try {
+      d = await fetch('/crm/leads-da-extensao' + (q.length ? '?' + q.join('&') : ''))
+            .then(function (r) { return r.json(); });
+    } catch (e) { d = null; }
+    /* Falha NÃO vira lista vazia. Vazia afirma "não há nada pra auditar";
+       falha afirma "não consegui saber". A primeira, dita errada, faz alguém
+       parar de auditar achando que acabou. */
+    if (!d || !d.ok) {
+      lista.innerHTML = '<div class="aud-erro">Não consegui carregar os leads agora. ' +
+        'Isso não quer dizer que não existam.<br><button class="btn-outline btn-sm" ' +
+        'onclick="carregarAuditoria()" style="margin-top:8px">Tentar de novo</button></div>';
+      sub.textContent = '';
+      return;
+    }
+    audDados = d;
+    var sel = document.getElementById('audConsultor');
+    if (sel && sel.options.length <= 1 && (d.consultores || []).length) {
+      (d.consultores || []).forEach(function (c) {
+        var o = document.createElement('option');
+        o.value = c.id; o.textContent = c.nome;
+        sel.appendChild(o);
+      });
+      if (cons) sel.value = cons;
+    }
+    pintarAuditoria();
+  }
+  window.carregarAuditoria = carregarAuditoria;
+
+  function pintarAuditoria() {
+    var leads = (audDados && audDados.leads) || [];
+    var lista = document.getElementById('audLista');
+    var sub = document.getElementById('audSub');
+    sub.textContent = leads.length
+      ? leads.length + (leads.length === 1 ? ' lead esperando' : ' leads esperando') +
+        ' — diga quais são clientes de verdade'
+      : 'Nada esperando auditoria.';
+    if (!leads.length) {
+      lista.innerHTML = '<div class="aud-vazio">Nenhum lead da extensão neste período. ' +
+        'Se você acabou de auditar, é isso mesmo.</div>';
+      return;
+    }
+    /* Agrupado por consultor: quem audita costuma olhar por pessoa ("o que a
+       Beatriz trouxe hoje"), e o nome do consultor é o que dá contexto pra
+       julgar se aquele número é cliente. */
+    var grupos = {};
+    leads.forEach(function (l) {
+      var k = (l.consultor_id || 0) + '|' + (l.consultor_nome || 'Sem consultor');
+      (grupos[k] = grupos[k] || []).push(l);
+    });
+    var h = '';
+    Object.keys(grupos).sort().forEach(function (k) {
+      h += '<div class="aud-grupo">' + esc(k.split('|')[1]) +
+           '<span>' + grupos[k].length + '</span></div>';
+      grupos[k].forEach(function (l) {
+        var trava = !!l.tem_proposta;
+        h += '<div class="aud-item" data-id="' + l.id + '">' +
+          '<div class="aud-n"><b>' + esc(l.nome || '(sem nome)') + '</b>' +
+            '<small>' + esc(l.telefone || '') +
+            (l.criado_em ? ' · ' + esc(quando(l.criado_em)) : '') +
+            (l.etapa ? ' · ' + esc(l.etapa) : '') + '</small></div>' +
+          '<div class="aud-acoes">' +
+            '<button class="btn-outline btn-sm aud-sim" data-id="' + l.id + '">É lead</button>' +
+            (trava
+              /* Proposta em andamento não é candidato a "não é lead": marcar
+                 apagaria negociação real. O motivo aparece, senão o botão
+                 desabilitado vira mistério. */
+              ? '<span class="aud-travado" title="Este lead já tem proposta — não dá pra marcar como pessoal">' +
+                'tem proposta</span>'
+              : '<button class="btn-outline btn-sm aud-nao" data-id="' + l.id + '">Não é lead</button>') +
+          '</div></div>';
+      });
+    });
+    lista.innerHTML = h;
+    lista.querySelectorAll('.aud-sim').forEach(function (b) {
+      b.addEventListener('click', function () { decidir(b, 'e-lead'); });
+    });
+    lista.querySelectorAll('.aud-nao').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var it = b.closest('.aud-item');
+        var nome = it ? (it.querySelector('b') || {}).textContent : 'este contato';
+        if (!confirm('Marcar "' + nome + '" como NÃO É LEAD?\n\n' +
+                     'O JOB para de ler essa conversa e nunca mais cria lead dela.\n' +
+                     'Serve pra amigo, família, fornecedor — quem não é cliente.')) return;
+        decidir(b, 'nao-e-lead');
+      });
+    });
+  }
+
+  async function decidir(botao, acao) {
+    var id = botao.dataset.id;
+    var item = botao.closest('.aud-item');
+    var acoes = item ? item.querySelector('.aud-acoes') : null;
+    if (acoes) acoes.innerHTML = '<span class="aud-espera">salvando…</span>';
+    var r;
+    try {
+      r = await fetch('/crm/lead/' + id + '/' + acao, { method: 'POST' })
+            .then(function (x) { return x.json(); });
+    } catch (e) { r = null; }
+    if (!r || !r.ok) {
+      /* O motivo do servidor aparece. "Não consegui" não diz se o lead ganhou
+         uma proposta enquanto a tela estava aberta ou se o JOB caiu — e as
+         duas se resolvem de formas diferentes. */
+      var m = (r && r.erro) === 'lead_com_proposta'
+        ? 'Este lead já tem proposta — não dá pra marcar como pessoal.'
+        : 'Não consegui salvar agora.';
+      if (acoes) acoes.innerHTML = '<span class="aud-erro-inline">' + esc(m) + '</span>';
+      return;
+    }
+    if (item) {
+      item.classList.add('aud-feito');
+      if (acoes) acoes.innerHTML = '<span class="aud-ok">' +
+        (acao === 'e-lead' ? 'confirmado' : 'bloqueado') + '</span>';
+    }
+    atualizarContadorAuditoria();
+  }
+
+  /* O contador do menu. Some quando zera: item de menu marcando zero vira
+     ruído e some da atenção justamente quando volta a ter algo. */
+  async function atualizarContadorAuditoria() {
+    var alvo = document.getElementById('navAuditarN');
+    if (!alvo) return;
+    try {
+      var d = await fetch('/crm/leads-da-extensao/pendentes').then(function (r) { return r.json(); });
+      var n = (d && d.ok) ? (d.n || 0) : 0;
+      alvo.textContent = n;
+      alvo.hidden = !n;
+      var link = document.getElementById('navAuditar');
+      if (link) link.hidden = !n;
+      var bt = document.getElementById('btAuditar');
+      var btn = document.getElementById('btAuditarN');
+      if (bt) bt.hidden = !n;
+      if (btn) btn.textContent = n ? '(' + n + ')' : '';
+    } catch (e) { /* sem contador, o item some — melhor que mostrar número errado */ }
+  }
+  window.atualizarContadorAuditoria = atualizarContadorAuditoria;
+
+  function verHash() {
+    if (location.hash === '#auditar') abrirAuditoria();
+  }
+  window.addEventListener('hashchange', verHash);
+  document.addEventListener('DOMContentLoaded', function () {
+    verHash();
+    atualizarContadorAuditoria();
+  });
+  if (document.readyState !== 'loading') { verHash(); atualizarContadorAuditoria(); }
+})();
+</script>
+
 {% endblock %}

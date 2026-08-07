@@ -23053,8 +23053,17 @@ def api_whatsapp_analisar():
         # transação aberta na mesma base.
         _notificar(responsavel_lead_criado, 'lead',
                    'Lead criado pela extensão de WhatsApp',
-                   f'{nome or telefone} entrou no CRM automaticamente a partir de uma conversa analisada.',
-                   f'/crm?lead={lead_id}')
+                   f'{nome or telefone} entrou no CRM automaticamente a partir de uma conversa analisada. '
+                   f'Confira se é cliente mesmo.',
+                   # LEVA PRA AUDITORIA, não pro lead solto.
+                   #
+                   # Apontava pra /crm?lead=<id>, que abre aquele lead — útil pra
+                   # trabalhar, inútil pra conferir. Quem clica nesta notificação
+                   # está sendo avisado de que ALGUÉM ENTROU SOZINHO no CRM, e a
+                   # pergunta é "isto é cliente?". Essa pergunta se responde na
+                   # lista, olhando os do dia de uma vez — foi assim que 230
+                   # leads entraram sem ninguém conferir um.
+                   '/crm#auditar')
 
     return _wa_cors(jsonify({
         "ok": True,
