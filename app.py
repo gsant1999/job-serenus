@@ -32368,6 +32368,25 @@ def crm_lead_campos_salvar(lid):
     return jsonify({"ok": True, "campos_val": vals, "cnpj": puxou_cnpj, "mudou": mudou})
 
 
+def _dt_iso(v):
+    """Timestamp do banco -> ISO com o fuso de São Paulo.
+
+    NÃO converte de UTC: `crm_leads.criado_em` é gravado por `_agora_sp()`, ou
+    seja, JÁ está em São Paulo. Converter aqui atrasaria três horas — é o mesmo
+    erro que apareceu no `dias` das cotações, onde um horário UTC foi carimbado
+    como SP e cotação da noite virava "amanhã".
+
+    A regra que vale: quem gravou decide. `_agora_sp()` -> só carimba o fuso;
+    `DEFAULT CURRENT_TIMESTAMP` -> aí sim é UTC e precisa de astimezone.
+    """
+    dt = _parse_dt_seguro(v)
+    if not dt:
+        return ''
+    if dt.tzinfo is None:
+        dt = TZ_SP.localize(dt)
+    return dt.isoformat()
+
+
 def _data_para_iso(v):
     """dd/mm/aaaa ou yyyy-mm-dd -> yyyy-mm-dd. Vazio se não reconhecer: meia-data
     num campo de data é pior que campo em branco."""
