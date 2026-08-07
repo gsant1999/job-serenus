@@ -19,6 +19,14 @@ contrário do que o resto do JOB faz.
 
 ---
 
+> **CORRIGIDO EM 07/08/2026 — o formato de `planos` abaixo estava ERRADO.**
+> Eu descrevi um plano achatado (`{"nome": ..., "operadora": "Amil"}`). O
+> servidor lê `p['plano']['nome']`, `p['operadora']['nome']` e `f['unitario']`,
+> porque é o formato que vem do Painel e que o resto do sistema já usa. Mandar
+> achatado quebra com `'str' object has no attribute 'get'`.
+> O formato certo está em `handoff/contrato-dias-negativo-e-cidade-reabrir.md`
+> e já é o que a extensão manda desde a 3.36.0.
+
 ## A rota
 
 ```

@@ -1,0 +1,454 @@
+{
+  "type": "object",
+  "properties": {
+    "resumo": {
+      "type": "string",
+      "description": "2-3 frases: como está a conversa e o momento do lead."
+    },
+    "fase_funil": {
+      "type": "string",
+      "enum": [
+        "NOVO_LEAD",
+        "QUALIFICANDO",
+        "PROPOSTA_ENVIADA",
+        "NEGOCIANDO",
+        "FECHADO",
+        "INATIVO",
+        "PERDIDO"
+      ]
+    },
+    "relevancia_comercial": {
+      "type": "string",
+      "enum": [
+        "alta",
+        "media",
+        "baixa",
+        "nenhuma"
+      ],
+      "description": "A conversa É uma negociação real de plano de saúde com cliente?"
+    },
+    "leitura_imagens": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "O que você leu em cada imagem anexada (ex: 'Cotação Amil: Bronze DP R$627, Vera Prata R$606...'). Vazio se não houver imagem."
+    },
+    "leitura_documentos": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "O que você leu em cada PDF anexado (ex: 'Proposta Vera Cruz PME: Enfermaria R$489, Apartamento R$612, carência 180 dias...'). Vazio se não houver PDF."
+    },
+    "dados_extraidos_anexos": {
+      "type": "object",
+      "description": "Dados CONCRETOS confirmados nas IMAGENS ou PDFs anexados (cotação, carteirinha, documento) — não no texto da conversa, que o motor de regras já cobre sozinho. Deixe vazio ('' ou []) o que não conseguir confirmar num anexo.",
+      "properties": {
+        "idades": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "Idades EXATAS dos beneficiários vistas num anexo. Vazio se o anexo só mostrar faixa etária (use faixas_etarias nesse caso)."
+        },
+        "faixas_etarias": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Faixas etárias vistas numa tabela/cotação quando NÃO dá pra saber a idade exata (ex: ['00-18','29-33','39-43']) — uma entrada por faixa com pelo menos 1 vida cotada nela. Vazio se as idades exatas já foram preenchidas em 'idades' ou se não houver cotação por faixa."
+        },
+        "vidas": {
+          "type": "string",
+          "description": "Quantidade de vidas/beneficiários visível num anexo, em texto (ex: '2'). Vazio se não visível."
+        },
+        "tipo_contratacao": {
+          "type": "string",
+          "enum": [
+            "",
+            "PF",
+            "ADESAO",
+            "PJ"
+          ],
+          "description": "Tipo de contratação visível na cotação (PF=pessoa física/individual, ADESAO=associação/sindicato, PJ=empresarial/PME/CNPJ). Vazio se não identificável no anexo."
+        },
+        "cidade": {
+          "type": "string",
+          "description": "Cidade visível num anexo. Vazio se não visível."
+        },
+        "cnpj": {
+          "type": "string",
+          "description": "CNPJ visível num anexo, só dígitos. Vazio se não visível."
+        },
+        "operadora_interesse": {
+          "type": "string",
+          "description": "Operadora da cotação/documento anexado. Vazio se não visível."
+        },
+        "plano_preferido": {
+          "type": "string",
+          "description": "Nome comercial do plano que o CLIENTE demonstrou preferir de verdade (não o último apresentado/anexado por padrão). Vazio se não houver sinal claro de preferência do cliente."
+        },
+        "valor_cotacao": {
+          "type": "string",
+          "description": "Valor em R$ da cotação/proposta — visto numa imagem/PDF de cotação OU dito claramente pelo consultor no texto como o valor de uma proposta pro cliente. Só o número (ex: '627,00' ou '627.00'), sem 'R$'. Se houver mais de um plano/valor no anexo, use o do plano_preferido do cliente; sem preferência clara, use o mais barato. Vazio se não houver valor claro."
+        }
+      },
+      "required": [
+        "idades",
+        "faixas_etarias",
+        "vidas",
+        "tipo_contratacao",
+        "cidade",
+        "cnpj",
+        "operadora_interesse",
+        "plano_preferido",
+        "valor_cotacao"
+      ],
+      "additionalProperties": false
+    },
+    "dados_da_conversa": {
+      "type": "object",
+      "description": "Qualificação extraída do TEXTO e dos ÁUDIOS TRANSCRITOS da conversa (não dos anexos). É este bloco que preenche a ficha do lead no CRM. Preencha tudo o que a conversa disser de qualquer forma — o motor de regras só pega frase padronizada, você pega o resto. Use '' / [] só pro que realmente não foi dito.",
+      "properties": {
+        "tem_plano_hoje": {
+          "type": "string",
+          "enum": [
+            "",
+            "sim",
+            "nao",
+            "cancelou_recente"
+          ],
+          "description": "O cliente tem plano de saúde ATIVO hoje? 'cancelou_recente' se perdeu/cancelou há pouco tempo."
+        },
+        "operadora_atual": {
+          "type": "string",
+          "description": "Operadora do plano que ele tem HOJE. Vazio se não tem plano ou não disse."
+        },
+        "valor_pago_hoje": {
+          "type": "string",
+          "description": "Quanto ele paga HOJE no plano atual, só o número (ex: '580,00'). Vale valor aproximado dito por extenso ('quase seiscentos' -> '600,00'). NUNCA o preço da nossa cotação. Vazio se não disse."
+        },
+        "mes_reajuste": {
+          "type": "string",
+          "description": "Mês de aniversário/reajuste do plano ATUAL dele, nome do mês em português (ex: 'maio'). Vazio se não disse."
+        },
+        "hospital_preferencia": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Hospitais que o CLIENTE fez questão de ter na rede. Só o que ele pediu — não todo hospital citado pelo consultor. [] se não pediu nenhum."
+        },
+        "condicoes_saude": {
+          "type": "string",
+          "description": "O que foi dito sobre saúde de qualquer pessoa que vai entrar no plano, curto e em português simples (ex: 'mãe faz hemodiálise; titular hipertenso'). 'nada declarado' se ele afirmou que são todos saudáveis. Vazio se o assunto não apareceu."
+        },
+        "composicao_familiar": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "Cônjuge",
+              "Filhos",
+              "Pais",
+              "Sócio"
+            ]
+          },
+          "description": "Quem entra no plano além do titular, pelo que a conversa disse. [] se é só ele ou se não deu pra saber."
+        },
+        "tipo_plano": {
+          "type": "string",
+          "enum": [
+            "",
+            "Individual",
+            "Familiar",
+            "Empresarial",
+            "Adesão"
+          ],
+          "description": "Individual = só o titular; Familiar = titular + dependentes; Empresarial = via CNPJ/PME; Adesão = por entidade de classe/sindicato."
+        },
+        "tipo_contratacao": {
+          "type": "string",
+          "enum": [
+            "",
+            "CNPJ",
+            "MEI",
+            "PF",
+            "Adesão"
+          ],
+          "description": "Como vai ser contratado. 'MEI' quando ele disse ser MEI — muda a regra de carência de CNPJ novo."
+        },
+        "cnpj": {
+          "type": "string",
+          "description": "CNPJ dito na conversa, só dígitos. Vale mesmo se veio quebrado em várias mensagens ou ditado num áudio. Vazio se não foi dito."
+        },
+        "cidade": {
+          "type": "string",
+          "description": "Cidade onde o cliente mora / onde vai usar o plano. Vazio se não foi dito."
+        },
+        "idades": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "Idade de cada pessoa que entra no plano, dita na conversa. Não confunda com tempo ('faz 5 anos que tenho o plano'). [] se não foi dito."
+        },
+        "vidas": {
+          "type": "string",
+          "description": "Quantas pessoas entram no plano, em número (ex: '4'). Conte gente descrita sem número ('eu, minha esposa e as duas crianças' = 4). Vazio se não deu pra saber."
+        },
+        "data_nascimento_titular": {
+          "type": "string",
+          "description": "Data de nascimento do titular dita na conversa, DD/MM/AAAA. Vazio se não foi dita."
+        },
+        "operadora_interesse": {
+          "type": "string",
+          "description": "Operadora que ele quer / que está sendo cotada pra ele. Vazio se não definiu."
+        },
+        "urgencia": {
+          "type": "string",
+          "enum": [
+            "",
+            "ate_30_dias",
+            "31_60_dias",
+            "sem_pressa"
+          ],
+          "description": "Prazo que o CLIENTE demonstrou pra contratar."
+        },
+        "quem_decide": {
+          "type": "string",
+          "description": "Quem bate o martelo, se a conversa disser (ex: 'ele mesmo', 'esposa decide junto', 'sócio precisa aprovar'). Vazio se não deu pra saber."
+        },
+        "confianca": {
+          "type": "string",
+          "enum": [
+            "alta",
+            "media",
+            "baixa"
+          ],
+          "description": "Quão sólido está o que você preencheu neste bloco: 'alta' = dito com todas as letras; 'media' = deduzido do contexto imediato; 'baixa' = conversa confusa/curta demais."
+        }
+      },
+      "required": [
+        "tem_plano_hoje",
+        "operadora_atual",
+        "valor_pago_hoje",
+        "mes_reajuste",
+        "hospital_preferencia",
+        "condicoes_saude",
+        "composicao_familiar",
+        "tipo_plano",
+        "tipo_contratacao",
+        "cnpj",
+        "cidade",
+        "idades",
+        "vidas",
+        "data_nascimento_titular",
+        "operadora_interesse",
+        "urgencia",
+        "quem_decide",
+        "confianca"
+      ],
+      "additionalProperties": false
+    },
+    "o_que_falta": {
+      "type": "array",
+      "description": "Dados de qualificação que continuam faltando E que fazem falta pra avançar ESTA venda. Vira a próxima pergunta do consultor. [] se não falta nada relevante.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "dado": {
+            "type": "string",
+            "description": "Nome curto do que falta (ex: 'CNPJ', 'Idades dos dependentes', 'Valor pago hoje')."
+          },
+          "pergunta": {
+            "type": "string",
+            "description": "A pergunta pronta pro consultor mandar no WhatsApp, no tom dele, curta."
+          }
+        },
+        "required": [
+          "dado",
+          "pergunta"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "documentos_pessoas": {
+      "type": "array",
+      "description": "Uma entrada por PESSOA cujos documentos (RG, CNH, comprovante de residência, CNS) aparecem nos anexos da conversa. Vazio [] se não houver documento pessoal. Extraia SÓ o que está escrito no documento; use '' pro que não estiver. Não invente.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "nome": {
+            "type": "string",
+            "description": "Nome completo."
+          },
+          "cpf": {
+            "type": "string",
+            "description": "CPF (com pontuação como no documento)."
+          },
+          "rg": {
+            "type": "string",
+            "description": "RG."
+          },
+          "nascimento": {
+            "type": "string",
+            "description": "Data de nascimento no formato DD/MM/AAAA."
+          },
+          "emissao": {
+            "type": "string",
+            "description": "Data de emissão do RG (DD/MM/AAAA)."
+          },
+          "natural": {
+            "type": "string",
+            "description": "Naturalidade no formato CIDADE - UF."
+          },
+          "pai": {
+            "type": "string",
+            "description": "Nome do pai."
+          },
+          "mae": {
+            "type": "string",
+            "description": "Nome da mãe."
+          },
+          "cns": {
+            "type": "string",
+            "description": "Número do CNES/CNS (cartão do SUS), se houver."
+          },
+          "email": {
+            "type": "string",
+            "description": "E-mail, se aparecer."
+          },
+          "telefone": {
+            "type": "string",
+            "description": "Telefone, se aparecer."
+          },
+          "endereco_rua": {
+            "type": "string",
+            "description": "Nome da rua/logradouro."
+          },
+          "endereco_numero": {
+            "type": "string",
+            "description": "Número e complemento."
+          },
+          "endereco_bairro": {
+            "type": "string",
+            "description": "Bairro."
+          },
+          "endereco_cidade": {
+            "type": "string",
+            "description": "Cidade do endereço."
+          },
+          "endereco_cep": {
+            "type": "string",
+            "description": "CEP no formato 00000-000."
+          }
+        },
+        "required": [
+          "nome",
+          "cpf",
+          "rg",
+          "nascimento",
+          "emissao",
+          "natural",
+          "pai",
+          "mae",
+          "cns",
+          "email",
+          "telefone",
+          "endereco_rua",
+          "endereco_numero",
+          "endereco_bairro",
+          "endereco_cidade",
+          "endereco_cep"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "dados_empresa": {
+      "type": "object",
+      "description": "Dados da empresa / plano atual / casamento de vigência, quando aparecem nos anexos ou são ditos claramente no texto (comum no fechamento de PME). Deixe '' o que não houver.",
+      "properties": {
+        "razao_social": {
+          "type": "string",
+          "description": "Razão social da empresa."
+        },
+        "cnpj": {
+          "type": "string",
+          "description": "CNPJ da empresa."
+        },
+        "plano_atual": {
+          "type": "string",
+          "description": "Plano/produto atual do cliente, se mencionado."
+        },
+        "operadora_atual": {
+          "type": "string",
+          "description": "Operadora atual, se mencionada."
+        },
+        "casamento_vigencia": {
+          "type": "string",
+          "description": "Data de casamento vista numa certidão de casamento anexada, OU a data de aniversário/vigência do plano atual usada pro casamento de vigência (DD/MM/AAAA)."
+        }
+      },
+      "required": [
+        "razao_social",
+        "cnpj",
+        "plano_atual",
+        "operadora_atual",
+        "casamento_vigencia"
+      ],
+      "additionalProperties": false
+    },
+    "proximas_acoes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "prioridade": {
+            "type": "string",
+            "enum": [
+              "alta",
+              "media",
+              "baixa"
+            ]
+          },
+          "titulo": {
+            "type": "string"
+          },
+          "detalhe": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "prioridade",
+          "titulo",
+          "detalhe"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "sinais_atencao": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Alertas/riscos (ex: cliente sumiu, objeção não resolvida, pediu para parar)."
+    }
+  },
+  "required": [
+    "resumo",
+    "fase_funil",
+    "relevancia_comercial",
+    "leitura_imagens",
+    "leitura_documentos",
+    "dados_extraidos_anexos",
+    "dados_da_conversa",
+    "o_que_falta",
+    "documentos_pessoas",
+    "dados_empresa",
+    "proximas_acoes",
+    "sinais_atencao"
+  ],
+  "additionalProperties": false
+}
