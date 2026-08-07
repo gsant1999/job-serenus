@@ -55,6 +55,15 @@ https://job-serenus-production.up.railway.app/extensao/privacidade
 **Justificativa das permissões** (a loja pergunta uma a uma):
 - `storage`: guardar as configurações do consultor no navegador.
 - `notifications`: avisar quando uma análise termina.
+- `tabs`: achar a aba do WhatsApp e a do Painel do Corretor já abertas, pra
+  abrir a conversa certa em vez de uma aba nova.
+- `scripting` (**novo na 3.50.0** — a loja vai perguntar): quando a extensão é
+  atualizada, o Chrome desliga o script das abas que já estavam abertas e o
+  painel para de responder até a pessoa dar F5. Com `scripting` a extensão se
+  reinstala nessas abas sozinha. Só nas páginas já declaradas em
+  `host_permissions` — não injeta em site nenhum além desses.
+- Acesso ao `paineldocorretor.com.br`: buscar o preço do plano na sessão do
+  próprio corretor, para o comparativo que ele monta pro cliente.
 - Acesso a `web.whatsapp.com`: é onde o painel é exibido e a conversa é lida.
 - Acesso ao sistema JOB (`job-serenus-production.up.railway.app`): enviar a
   análise e buscar os modelos de mensagem.
@@ -65,6 +74,16 @@ dados são usados só pra funcionalidade do app, **não são vendidos** e **não
 usados pra publicidade**.
 
 ---
+
+## Antes de subir, confira UMA coisa
+
+A loja **recusa versão igual ou menor que a publicada**. Veja no painel de
+desenvolvedor qual está no ar e confirme que o `manifest.json` do pacote é
+maior. Se precisar subir, mude só o número da versão e gere o zip de novo — não
+edite o zip na mão.
+
+O pacote pronto fica em `dist/`, com a versão no nome
+(`job-serenus-extensao-<versão>.zip`) e uma cópia sem versão pra facilitar.
 
 ## Depois de publicada — como a equipe instala
 Manda o link da loja pra cada consultora. Ela clica em "Usar no Chrome" /
