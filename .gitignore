@@ -21,3 +21,8 @@ video-ads/
 # Retratos velhos do app e scripts de teste descartaveis. Nao apagados de
 # proposito: "app (1).py" e uma copia de 20/06 e so o git tem o historico dela.
 _arquivo/
+
+# Tabelas de preco em PDF das operadoras (centenas de MB, e sao
+# material comercial da operadora). Ficam locais; o que vai pro banco
+# e o dado extraido, nao o arquivo.
+tabelas-operadoras/
