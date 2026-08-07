@@ -27659,15 +27659,20 @@ def cotacao_bloco_salvas():
         user_id = session.get('user_id')
         q = (request.args.get('q') or '').strip()
 
-        base = "SELECT * FROM cotacao_salva WHERE 1=1"
+        base = """
+            SELECT cs.*, l.nome AS lead_nome 
+            FROM cotacao_salva cs
+            LEFT JOIN crm_leads l ON cs.lead_id = l.id
+            WHERE 1=1
+        """
         params = []
         if not eh_admin:
-            base += " AND corretor_id=?"; params.append(user_id)
+            base += " AND cs.corretor_id=?"; params.append(user_id)
         if q:
-            base += " AND (LOWER(cliente_nome) LIKE ? OR LOWER(titulo) LIKE ? OR cliente_telefone LIKE ?)"
+            base += " AND (LOWER(cs.cliente_nome) LIKE ? OR LOWER(cs.titulo) LIKE ? OR cs.cliente_telefone LIKE ?)"
             like = f"%{q.lower()}%"
             params.extend([like, like, f"%{q}%"])
-        base += " ORDER BY id DESC"
+        base += " ORDER BY cs.id DESC"
 
         rows = conn.execute(base, params).fetchall()
         cots = []
@@ -27688,6 +27693,8 @@ def cotacao_bloco_salvas():
                 "token": d.get('token') or '',
                 "criado_em": str(d.get('criado_em') or ''),
                 "planos_cotados": planos_cotados,
+                "lead_id": d.get('lead_id') or 0,
+                "lead_nome": d.get('lead_nome') or '',
                 # A coluna chama-se `total` (ver CREATE TABLE de cotacao_salva).
                 # Estava lendo d.get('valor_total'), que não existe: devolvia
                 # None, o `or 0` transformava em 0.0, e a aba Salvas mostrava
