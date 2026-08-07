@@ -3955,17 +3955,33 @@
   let _cot = null;      // estado do fluxo aberto agora
   // Cidade padrão, como na tela do JOB: quem atende a mesma praça o dia inteiro
   // não deve redigitar a cidade a cada cliente.
+  // A cópia local existe pra tela abrir preenchida SEM esperar rede. O servidor
+  // é a verdade, e chega logo depois — se divergirem, vence o servidor, porque
+  // é ele que o site também lê.
   let _cotCidadePadrao = '';
   try {
     chrome.storage.local.get(['cot_cidade_padrao'], (r) => {
       _cotCidadePadrao = (r && r.cot_cidade_padrao) || '';
     });
   } catch (e) {}
+  async function _cotPrefServidor() {
+    try {
+      const { usuarioId } = await _safeStorageGet(['usuarioId']);
+      if (!usuarioId) return;
+      const r = await _safeSendMessage({ type: 'pref_ler', usuario_id: usuarioId });
+      const c = r && r.ok && r.cidade;
+      if (c && c !== _cotCidadePadrao) {
+        _cotCidadePadrao = c;
+        try { chrome.storage.local.set({ cot_cidade_padrao: c }); } catch (e) {}
+      }
+    } catch (e) { /* sem servidor, vale a cópia local — como antes */ }
+  }
   // O que já foi cotado NESTA conversa, acumulado por operadora. Sem isto, cotar
   // a segunda operadora apagava a primeira da tela e o consultor perdia a
   // comparação — que é o motivo de existir um multicálculo.
   let _cotFeitas = [];
   let _cotLead = null;  // lead da conversa, resolvido pelo servidor
+  let _cotErroLead = '';
 
   function _cotRespira(min, max) {
     const faixa = max - min;
@@ -4307,11 +4323,27 @@
     }
     // Resolve o lead em segundo plano e reescreve o link quando chegar.
     _cotGarantirLead().then(() => { try { atualizarLink(); } catch (e) {} });
+    // E confere a cidade padrão no servidor: se ele mudou noutra máquina, a
+    // tela se corrige sozinha em vez de manter a cópia velha desta aqui.
+    _cotPrefServidor().then(() => {
+      if (!iCid.value && _cotCidadePadrao) {
+        iCid.value = _cotCidadePadrao;
+        cidadeDoCatalogo = _cotCidadePadrao;
+        iCid.classList.add('ok');
+        try { pintarFixar(); atualizarLink(); } catch (e) {}
+      }
+    });
 
     btFixar.addEventListener('click', () => {
       if (!cidadeDoCatalogo) return;
       _cotCidadePadrao = (_cotCidadePadrao === cidadeDoCatalogo) ? '' : cidadeDoCatalogo;
       try { chrome.storage.local.set({ cot_cidade_padrao: _cotCidadePadrao }); } catch (e) {}
+      // Grava no JOB também: é a mesma preferência que a tela do site lê, e
+      // guardar só aqui era o motivo de ela sumir ao trocar de máquina.
+      _safeStorageGet(['usuarioId']).then(({ usuarioId }) => {
+        if (usuarioId) _safeSendMessage({ type: 'pref_gravar', usuario_id: usuarioId,
+                                          cidade: _cotCidadePadrao }).catch(() => {});
+      }).catch(() => {});
       pintarFixar();
     });
     pintarFixar();
@@ -4743,7 +4775,18 @@
         b1.addEventListener('click', async () => {
           b1.disabled = true; b1.textContent = 'Cadastrando…';
           const novo = await _cotCriarLead(usuarioId);
-          if (!novo) { b1.disabled = false; b1.textContent = 'Não consegui cadastrar — tentar de novo'; return; }
+          if (!novo) {
+            b1.disabled = false;
+            // O MOTIVO DO SERVIDOR APARECE. "Não consegui cadastrar" não diz se
+            // faltou nome, se o telefone da conversa não tem DDD, ou se o JOB
+            // caiu — e as três se resolvem de formas diferentes.
+            b1.textContent = 'Tentar de novo';
+            const m = document.createElement('div');
+            m.className = 'job-cot-dica';
+            m.textContent = _cotErroLead || 'Não consegui cadastrar agora.';
+            b1.insertAdjacentElement('afterend', m);
+            return;
+          }
           b1.remove();
           _cotSalvarNoJob(btn, lista);           // segue de onde parou
         });
@@ -4878,12 +4921,19 @@
     if (!telefone) return null;
     let r = null;
     try {
+      // 'manual' NÃO é enfeite: o servidor só aceita origem de uma lista fechada
+      // (_WA_ORIGENS_LEAD) e recusa qualquer outra com "Selecione como o lead
+      // chegou". Eu tinha inventado 'WhatsApp (cotação)' — o cadastro falharia
+      // em 100% das vezes, com uma mensagem que não diz o porquê. Quem chegou
+      // pela conversa e não veio de campanha é 'manual', que é a verdade: quem
+      // cadastrou foi o consultor.
       r = await _safeSendMessage({ type: 'lead_criar', nome: nome || telefone,
-                                   telefone: telefone, origem: 'WhatsApp (cotação)',
+                                   telefone: telefone, origem: 'manual',
                                    usuario_id: usuarioId });
     } catch (e) { r = null; }
-    const id = r && r.ok && (r.lead_id || (r.lead && r.lead.id) || r.id);
-    if (!id) return null;
+    const id = r && r.ok && r.lead_id;
+    if (!id) { _cotErroLead = (r && r.erro) || 'O JOB não respondeu.'; return null; }
+    _cotErroLead = '';
     _cotLead = { id: id, nome: nome || '', telefone: telefone };
     _cotCache = { chave: '', dados: null };   // a lista de cotações mudou
     return _cotLead;

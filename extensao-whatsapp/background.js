@@ -318,6 +318,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/cotacoes?' + qs, 'GET', null, 15000).then(sendResponse);
     return true;
   }
+  // Cidade padrão do consultor, a MESMA do site. Ela morava só na máquina:
+  // trocou de computador, perdeu — e a do site e a da extensão podiam divergir
+  // sem ninguém entender por quê.
+  if (msg && msg.type === 'pref_ler') {
+    chamarJob('/api/whatsapp/preferencias?usuario_id=' + encodeURIComponent(msg.usuario_id || ''),
+              'GET', null, 6000).then((r) => sendResponse(r || { ok: false }))
+                                .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg && msg.type === 'pref_gravar') {
+    chamarJob('/api/whatsapp/preferencias', 'POST',
+              { usuario_id: msg.usuario_id, cidade: msg.cidade || '' },
+              8000, null, { repetivel: true }).then(() => {}).catch(() => {});
+    return;   // mão única: ninguém espera resposta pra continuar cotando
+  }
   // LOGO DA OPERADORA, buscada AQUI e não na página.
   //
   // A página do WhatsApp barra imagem de outro endereço, e o service worker
