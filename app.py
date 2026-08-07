@@ -1573,6 +1573,7 @@ def init_db():
                 corretor_id INTEGER, corretor_nome TEXT, corretor_email TEXT, corretor_telefone TEXT,
                 cliente_nome TEXT, cliente_email TEXT, cliente_telefone TEXT,
                 titulo TEXT, vidas_json TEXT, planos_json TEXT, total REAL DEFAULT 0,
+                cidade TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
             """CREATE TABLE IF NOT EXISTS operadora_logo (
@@ -2527,6 +2528,7 @@ def init_db():
             corretor_id INTEGER, corretor_nome TEXT, corretor_email TEXT, corretor_telefone TEXT,
             cliente_nome TEXT, cliente_email TEXT, cliente_telefone TEXT,
             titulo TEXT, vidas_json TEXT, planos_json TEXT, total REAL DEFAULT 0,
+            cidade TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS cotacao_vera_cruz_salva (
@@ -3274,6 +3276,7 @@ def init_db():
         # Nome do cliente pra quem o link foi gerado — carimbado no PDF/marca d'água
         # (rastreabilidade: se o material circular, dá pra saber pra quem foi mandado).
         ("rede_link", "cliente", "TEXT"),
+        ("cotacao_salva", "cidade", "TEXT"),
     ]
 
     for tabela, coluna, tipo in migracoes:
@@ -21376,8 +21379,8 @@ def api_whatsapp_cotacao_salvar():
         conn.execute("""INSERT INTO cotacao_salva
             (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email,
              corretor_telefone, cliente_nome, cliente_email, cliente_telefone, titulo,
-             vidas_json, planos_json, total, tabela_ids_json)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             vidas_json, planos_json, total, tabela_ids_json, cidade)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (token, 'horizontal', lead_id, usuario_id,
              urow['nome'] or '', urow['email'] or '', '',
              str(d.get('cliente_nome') or '').strip(),
@@ -21385,7 +21388,7 @@ def api_whatsapp_cotacao_salvar():
              str(d.get('cliente_telefone') or '').strip(),
              str(d.get('titulo') or 'Cotação').strip(),
              json.dumps(cont_faixa), json.dumps(planos, ensure_ascii=False),
-             total_geral, '[]'))
+             total_geral, '[]', str(d.get('cidade') or '').strip()))
              
         cid = _last_insert_id(conn.cursor() if hasattr(conn, 'cursor') else conn)
         if not cid:
@@ -27056,10 +27059,10 @@ def cotacao_novo():
                 planos = json.loads(c['planos_json'] or '[]')
                 prefill['planos'] = json.dumps(planos, ensure_ascii=False)
                 if planos and isinstance(planos, list) and len(planos) > 0:
-                    prefill['cidade'] = planos[0].get('cidade') or ''
                     prefill['modalidade'] = str(planos[0].get('modalidade') or '')
             except Exception:
                 pass
+            prefill['cidade'] = c.get('cidade') or ''
             
             _REP = {'00-18': 5, '19-23': 20, '24-28': 25, '29-33': 30, '34-38': 35,
                     '39-43': 40, '44-48': 45, '49-53': 50, '54-58': 55, '59+': 60}
@@ -27773,15 +27776,15 @@ def cotacao_viva_salvar():
         conn.execute("""INSERT INTO cotacao_salva
             (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email,
              corretor_telefone, cliente_nome, cliente_email, cliente_telefone, titulo,
-             vidas_json, planos_json, total, tabela_ids_json)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             vidas_json, planos_json, total, tabela_ids_json, cidade)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (token, 'horizontal', lead_id, session.get('user_id'),
              (urow['nome'] if urow else '') or session.get('nome') or '',
              (urow['email'] if urow else '') or '', '',
              str(d.get('cliente_nome') or '').strip(), cliente_email, cliente_tel,
              str(d.get('titulo') or 'Cotação').strip(),
              json.dumps(cont_faixa), json.dumps(planos, ensure_ascii=False),
-             total_geral, '[]'))
+             total_geral, '[]', str(d.get('cidade') or '').strip()))
         cid = _last_insert_id(conn.cursor() if hasattr(conn, 'cursor') else conn)
         if not cid:
             cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
