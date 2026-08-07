@@ -3762,14 +3762,45 @@
     _cotPintar(resp, tel);
   }
 
+  // O LINK PRO JOB LEVA O QUE JÁ SE SABE.
+  //
+  // Abria /cotacao/novo praticamente em branco: o consultor preenchia cidade,
+  // tipo e idades AQUI, clicava em "abrir no JOB" e digitava tudo de novo lá.
+  // Agora vai o lead (a tela abre já ligada, e sem lead a cotação não sai), o
+  // nome e o telefone do cliente — que servem de rede quando o lead não casa —
+  // e o que ele já respondeu no painel.
+  //
+  // `cidade` vai junto, mas a rota ainda não lê esse parâmetro: enquanto ela
+  // não ler, a tela cai na cidade padrão do consultor. Está no contrato.
+  function _cotLinkJob(resp) {
+    const q = [];
+    const põe = (k, v) => { if (v) q.push(k + '=' + encodeURIComponent(v)); };
+    const L = resp || _cotLead || {};
+    põe('lead', L.lead_id || L.id);
+    põe('cliente_nome', L.lead_nome || L.nome || nomeDoContato());
+    põe('cliente_telefone', L.telefone || telefoneDoContato());
+    if (_cot) {
+      põe('cidade', _cot.cidade);
+      põe('modalidade', _cotRotulo(_cot.modalidade));
+      // Vidas: por faixa quando ele contou por faixa, por idade quando digitou.
+      // Mandar as duas deixaria a tela do JOB escolher, e ela soma o que achar
+      // primeiro — cotação com o dobro de gente.
+      if (_cot.faixas) {
+        _COT_FAIXAS.forEach((f, i) => { põe('fx_' + i, _cot.faixas[f]); });
+      } else {
+        põe('idades', _cot.idades);
+      }
+    }
+    return _SITE_BASE_URL_EXT + '/cotacao/novo' + (q.length ? '?' + q.join('&') : '');
+  }
+
   function _cotPintar(resp, tel) {
     // Guarda o lead da conversa: salvar a cotação exige vínculo, e é aqui
     // que ele já veio resolvido pelo servidor.
     _cotLead = { id: resp.lead_id || 0, nome: resp.lead_nome || '', telefone: tel || '' };
     const lista = resp.cotacoes || [];
     const nome = resp.lead_nome || nomeDoContato() || 'este cliente';
-    const linkNovo = _SITE_BASE_URL_EXT + '/cotacao/novo' +
-      (resp.lead_id ? '?lead=' + encodeURIComponent(resp.lead_id) : '');
+    const linkNovo = _cotLinkJob(resp);
 
     let corpo;
     if (!lista.length) {
@@ -4099,6 +4130,10 @@
             '</div>').join('') +
         '</div>' +
         '<button class="job-cnpj-btn" id="job-cot-buscar">Buscar operadoras</button>' +
+        // Preencheu aqui, escolhe onde continuar. Antes ele preenchia no painel,
+        // abria o JOB e digitava tudo de novo — o mesmo trabalho duas vezes.
+        '<a class="job-cot-nova" id="job-cot-abrirjob" href="#" target="_blank" rel="noopener">' +
+          'Abrir no JOB com estes dados</a>' +
         '<button class="job-cot-nova" id="job-cot-cancelar" style="border:none;cursor:pointer;width:100%;font-family:inherit">Voltar às cotações</button>' +
       '</div>');
 
@@ -4129,6 +4164,21 @@
         .map((f) => ({ faixa: f, quantidade: contFx[f] }));
       return { vidas: vidas, total: vidas.reduce((n, x) => n + x.quantidade, 0) };
     }
+    const linkJob = document.getElementById('job-cot-abrirjob');
+    function atualizarLink() {
+      const r = vidasAgora();
+      const pronto = !!cidadeDoCatalogo && r.total > 0;
+      // Sem cidade ou sem vidas o link abriria a tela vazia — que é justamente
+      // o que ele reclamou. Então ele só acende quando leva alguma coisa.
+      linkJob.classList.toggle('off', !pronto);
+      const tipo = (document.querySelector('#job-cot-tipo button.on') || {}).dataset;
+      const antes = _cot;
+      _cot = { cidade: cidadeDoCatalogo, modalidade: Number((tipo && tipo.v) || 1),
+               idades: iIda.value, faixas: porFaixa ? contFx : null,
+               vidas: r.vidas, totalVidas: r.total };
+      linkJob.href = _cotLinkJob(null);
+      _cot = antes;
+    }
     const contar = () => {
       const r = vidasAgora();
       dica.textContent = r.total
@@ -4137,6 +4187,7 @@
         : (porFaixa ? 'Some as pessoas em cada faixa.'
                     : 'Uma idade por pessoa, separadas por espaço ou vírgula.');
       dica.classList.toggle('ok', r.total > 0);
+      atualizarLink();
     };
     function pintarModo() {
       caixaFx.classList.toggle('ver', porFaixa);
