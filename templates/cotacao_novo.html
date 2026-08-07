@@ -2486,37 +2486,142 @@
   }
 
   /* ── Cotações salvas ───────────────────────────────────────────────────── */
-  function verSalvas(d) {
+  var salvasFiltroCidade = '';
+  var salvasFiltroModalidade = '';
+  var salvasDados = null;
+
+  function renderizarTabelaSalvas() {
+    if (!salvasDados) return;
+    var d = salvasDados;
     var lista = d.cotacoes || [];
-    var c = el('contSalvas');
-    if (c && d.total) { c.textContent = d.total; c.style.display = ''; }
+    
+    var filtrada = lista.filter(function(x) {
+      if (salvasFiltroCidade && (x.cidade || '') !== salvasFiltroCidade) return false;
+      if (salvasFiltroModalidade) {
+        var mods = x.modalidades || [];
+        if (salvasFiltroModalidade === 'NÃO REGISTRADO') {
+          if (mods.length > 0) return false;
+        } else {
+          if (mods.indexOf(salvasFiltroModalidade) < 0) return false;
+        }
+      }
+      return true;
+    });
+
     if (!lista.length) {
-      el('corpoSalvas').innerHTML = '<div class="cv-vazio">Nenhuma cotação salva ainda. ' +
+      el('corpoSalvasTabela').innerHTML = '<div class="cv-vazio">Nenhuma cotação salva ainda. ' +
         'As que você montar na aba Cotar aparecem aqui.</div>';
       return;
     }
-    var h = '<table class="cot"><thead><tr><th>Cliente</th><th>Cotação</th>' +
-            '<th>Planos</th><th>Valor</th><th>Quando</th><th></th></tr></thead><tbody>';
-    lista.forEach(function (x) {
-      h += '<tr>' +
-        '<td><b>' + esc(x.cliente_nome || '(sem nome)') + '</b>' +
-          (x.cliente_telefone ? '<br><span style="color:var(--cinza-2);font-size:11px">' +
-            esc(x.cliente_telefone) + '</span>' : '') + '</td>' +
-        '<td>' + esc(x.titulo || '—') + '</td>' +
-        '<td>' + (x.planos_cotados || 0) + '</td>' +
-        '<td>' + moeda(x.valor_total) + '</td>' +
-        '<td>' + dataBr(x.criado_em) + '</td>' +
-        '<td style="white-space:nowrap">' +
-          (x.token ? '<button class="b" data-ac="link" data-t="' + esc(x.token) + '">Copiar link</button>' : '') +
-          (x.token && x.cliente_telefone ? '<button class="b" data-ac="wpp" data-t="' + esc(x.token) +
-            '" data-tel="' + esc(x.cliente_telefone) + '" data-n="' + esc(x.cliente_nome || '') + '">WhatsApp</button>' : '') +
-          '<button class="b" data-ac="doc" data-id="' + x.id + '">Abrir</button>' +
-          '<span style="display:inline-block;width:14px"></span>' +
-          '<button class="b b-del" data-ac="del" data-id="' + x.id +
-            '" data-n="' + esc(x.cliente_nome || x.titulo || '') + '">Excluir</button>' +
-        '</td></tr>';
+
+    if (!filtrada.length) {
+      el('corpoSalvasTabela').innerHTML = '<div class="cv-vazio">Nenhuma cotação encontrada para os filtros atuais.</div>';
+      return;
+    }
+
+    var grupos = {};
+    if (d.eh_admin) {
+      filtrada.forEach(function(x) {
+        var k = (x.corretor_id || 0) + '|' + (x.corretor_nome || 'Sem Consultor');
+        if (!grupos[k]) grupos[k] = [];
+        grupos[k].push(x);
+      });
+    } else {
+      grupos['meus|Minhas Cotações'] = filtrada;
+    }
+
+    var h = '';
+    Object.keys(grupos).forEach(function(k) {
+      var nome = k.split('|')[1];
+      if (d.eh_admin) {
+        h += '<h3 style="margin: 20px 0 10px 0; border-bottom: 1px solid var(--borda); padding-bottom: 5px; color: var(--cinza-1);">' +
+             '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:text-bottom;margin-right:5px">' +
+             '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>' + 
+             esc(nome) + '</h3>';
+      }
+      h += '<table class="cot"><thead><tr><th>Cliente</th><th>Cotação</th>' +
+              '<th>Modalidades</th><th>Planos</th><th>Valor</th><th>Quando</th><th></th></tr></thead><tbody>';
+      grupos[k].forEach(function (x) {
+        var modsTxt = (x.modalidades && x.modalidades.length) 
+                        ? esc(x.modalidades.join(', ')) 
+                        : '<span style="color:var(--cinza-2);font-style:italic">tipo não registrado</span>';
+        h += '<tr>' +
+          '<td><b>' + esc(x.cliente_nome || '(sem nome)') + '</b>' +
+            (x.cliente_telefone ? '<br><span style="color:var(--cinza-2);font-size:11px">' +
+              esc(x.cliente_telefone) + '</span>' : '') + '</td>' +
+          '<td>' + esc(x.titulo || '—') + '</td>' +
+          '<td>' + modsTxt + '</td>' +
+          '<td>' + (x.planos_cotados || 0) + '</td>' +
+          '<td>' + moeda(x.valor_total) + '</td>' +
+          '<td>' + dataBr(x.criado_em) + '</td>' +
+          '<td style="white-space:nowrap">' +
+            (x.token ? '<button class="b" data-ac="link" data-t="' + esc(x.token) + '">Copiar link</button>' : '') +
+            (x.token && x.cliente_telefone ? '<button class="b" data-ac="wpp" data-t="' + esc(x.token) +
+              '" data-tel="' + esc(x.cliente_telefone) + '" data-n="' + esc(x.cliente_nome || '') + '">WhatsApp</button>' : '') +
+            '<button class="b" data-ac="doc" data-id="' + x.id + '">Abrir</button>' +
+            '<span style="display:inline-block;width:14px"></span>' +
+            '<button class="b b-del" data-ac="del" data-id="' + x.id +
+              '" data-n="' + esc(x.cliente_nome || x.titulo || '') + '">Excluir</button>' +
+          '</td></tr>';
+      });
+      h += '</tbody></table>';
     });
-    el('corpoSalvas').innerHTML = h + '</tbody></table>';
+    
+    el('corpoSalvasTabela').innerHTML = h;
+  }
+
+  function verSalvas(d) {
+    salvasDados = d;
+    var lista = d.cotacoes || [];
+    var c = el('contSalvas');
+    if (c && d.total) { c.textContent = d.total; c.style.display = ''; }
+    
+    var cidadesMap = {};
+    var modsMap = {};
+    lista.forEach(function(x) {
+      if (x.cidade) cidadesMap[x.cidade] = true;
+      if (x.modalidades && x.modalidades.length) {
+        x.modalidades.forEach(function(m) { modsMap[m] = true; });
+      }
+    });
+    var cidades = Object.keys(cidadesMap).sort();
+    var modalidades = Object.keys(modsMap).sort();
+
+    var htmlTopo = '';
+    if (lista.length > 0) {
+      htmlTopo += '<div style="margin-bottom: 15px; display:flex; gap:10px; align-items:center;">' +
+                  '<strong style="color:var(--cinza-1)">Filtros:</strong>' +
+                  '<select id="filtroCidadeSalvas" class="inp" style="max-width:200px">' +
+                    '<option value="">Todas as Cidades</option>';
+      cidades.forEach(function(cid) { 
+        htmlTopo += '<option value="'+esc(cid)+'"' + (salvasFiltroCidade === cid ? ' selected' : '') + '>'+esc(cid)+'</option>'; 
+      });
+      htmlTopo += '</select>' +
+                  '<select id="filtroModSalvas" class="inp" style="max-width:200px">' +
+                    '<option value="">Todas as Modalidades</option>' +
+                    '<option value="NÃO REGISTRADO"' + (salvasFiltroModalidade === 'NÃO REGISTRADO' ? ' selected' : '') + '>Tipo Não Registrado</option>';
+      modalidades.forEach(function(m) { 
+        htmlTopo += '<option value="'+esc(m)+'"' + (salvasFiltroModalidade === m ? ' selected' : '') + '>'+esc(m)+'</option>'; 
+      });
+      htmlTopo += '</select></div>';
+    }
+
+    el('corpoSalvas').innerHTML = htmlTopo + '<div id="corpoSalvasTabela"></div>';
+
+    if (lista.length > 0) {
+      el('filtroCidadeSalvas').addEventListener('change', function(e) {
+        salvasFiltroCidade = e.target.value;
+        renderizarTabelaSalvas();
+      });
+      el('filtroModSalvas').addEventListener('change', function(e) {
+        salvasFiltroModalidade = e.target.value;
+        renderizarTabelaSalvas();
+      });
+      renderizarTabelaSalvas();
+    } else {
+      el('corpoSalvasTabela').innerHTML = '<div class="cv-vazio">Nenhuma cotação salva ainda. ' +
+        'As que você montar na aba Cotar aparecem aqui.</div>';
+    }
   }
 
   // Busca com respiro: não dispara a cada tecla.

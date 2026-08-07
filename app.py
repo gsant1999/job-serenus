@@ -1574,7 +1574,7 @@ def init_db():
                 corretor_id INTEGER, corretor_nome TEXT, corretor_email TEXT, corretor_telefone TEXT,
                 cliente_nome TEXT, cliente_email TEXT, cliente_telefone TEXT,
                 titulo TEXT, vidas_json TEXT, planos_json TEXT, total REAL DEFAULT 0,
-                cidade TEXT,
+                cidade TEXT, modalidades TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
             """CREATE TABLE IF NOT EXISTS operadora_logo (
@@ -2537,7 +2537,7 @@ def init_db():
             corretor_id INTEGER, corretor_nome TEXT, corretor_email TEXT, corretor_telefone TEXT,
             cliente_nome TEXT, cliente_email TEXT, cliente_telefone TEXT,
             titulo TEXT, vidas_json TEXT, planos_json TEXT, total REAL DEFAULT 0,
-            cidade TEXT,
+            cidade TEXT, modalidades TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS cotacao_vera_cruz_salva (
@@ -2669,6 +2669,10 @@ def init_db():
     
     # Colunas que ja estao nas tabelas acima, então não precisa add_col
     # (tudo já tá no CREATE TABLE IF NOT EXISTS)
+    
+    # Novas colunas (agosto 2026):
+    add_col('cotacao_salva', 'cidade', 'TEXT')
+    add_col('cotacao_salva', 'modalidades', 'TEXT')
     
     # Config do parceiro Affinity — específico do Serenus (e-mails/contato deles).
     # Não vai pra instância de cliente (SEED_DADOS_SERENUS=0).
@@ -3293,6 +3297,7 @@ def init_db():
         # (rastreabilidade: se o material circular, dá pra saber pra quem foi mandado).
         ("rede_link", "cliente", "TEXT"),
         ("cotacao_salva", "cidade", "TEXT"),
+        ("cotacao_salva", "modalidades", "TEXT"),
         ("cotacao_tabela", "vidas_min", "INTEGER"),
         ("cotacao_tabela", "vidas_max", "INTEGER"),
         ("cotacao_tabela", "mei", "INTEGER DEFAULT 0"),
@@ -21464,11 +21469,14 @@ def api_whatsapp_cotacao_salvar():
         planos, total_geral, cont_faixa = _viva_para_apresentacao(d)
 
         token = secrets.token_urlsafe(9)
+        mods = sorted(list(set(p.get('modalidade') for p in planos if p.get('modalidade'))))
+        modalidades_json = json.dumps(mods, ensure_ascii=False) if mods else '[]'
+        
         conn.execute("""INSERT INTO cotacao_salva
             (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email,
              corretor_telefone, cliente_nome, cliente_email, cliente_telefone, titulo,
-             vidas_json, planos_json, total, tabela_ids_json, cidade)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             vidas_json, planos_json, total, tabela_ids_json, cidade, modalidades)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (token, 'horizontal', lead_id, usuario_id,
              urow['nome'] or '', urow['email'] or '', '',
              str(d.get('cliente_nome') or '').strip(),
@@ -21476,7 +21484,7 @@ def api_whatsapp_cotacao_salvar():
              str(d.get('cliente_telefone') or '').strip(),
              str(d.get('titulo') or 'Cotação').strip(),
              json.dumps(cont_faixa), json.dumps(planos, ensure_ascii=False),
-             total_geral, '[]', str(d.get('cidade') or '').strip()))
+             total_geral, '[]', str(d.get('cidade') or '').strip(), modalidades_json))
              
         cid = _last_insert_id(conn.cursor() if hasattr(conn, 'cursor') else conn)
         if not cid:
@@ -27684,6 +27692,13 @@ def cotacao_bloco_salvas():
                 planos_cotados = len(pj)
             except Exception:
                 pass
+                
+            try:
+                mods_raw = d.get('modalidades')
+                modalidades = json.loads(mods_raw) if mods_raw else []
+            except Exception:
+                modalidades = []
+
             cots.append({
                 "id": d['id'],
                 "titulo": d.get('titulo') or '',
@@ -27696,12 +27711,16 @@ def cotacao_bloco_salvas():
                 "lead_id": d.get('lead_id') or 0,
                 "lead_nome": d.get('lead_nome') or '',
                 # A coluna chama-se `total` (ver CREATE TABLE de cotacao_salva).
-                # Estava lendo d.get('valor_total'), que não existe: devolvia
-                # None, o `or 0` transformava em 0.0, e a aba Salvas mostrava
-                # R$ 0,00 nas 40 cotações — R$ 84.015,41 apresentados como zero.
-                # Zero medido e zero por engano são indistinguíveis na tela; o
-                # nome da chave de saída fica, o de leitura é que estava errado.
-                "valor_total": float(d.get('total') or 0)
+                # Ler d.get('valor_total') devolve None, o `or 0` vira 0.0, e a
+                # aba Salvas mostra R$ 0,00 — foi o commit 004b4ad, R$ 84.015,41
+                # apresentados como zero. Zero medido e zero por engano são
+                # indistinguíveis na tela. O nome da chave de SAÍDA é
+                # valor_total; o de LEITURA é total.
+                "valor_total": float(d.get('total') or 0),
+                "corretor_id": d.get('corretor_id') or 0,
+                "corretor_nome": d.get('corretor_nome') or '',
+                "cidade": d.get('cidade') or '',
+                "modalidades": modalidades
             })
 
         total = conn.execute(
@@ -27934,18 +27953,21 @@ def cotacao_viva_salvar():
                         (session.get('user_id'),)).fetchone()
     token = secrets.token_urlsafe(9)
     try:
+        mods = sorted(list(set(p.get('modalidade') for p in planos if p.get('modalidade'))))
+        modalidades_json = json.dumps(mods, ensure_ascii=False) if mods else '[]'
+
         conn.execute("""INSERT INTO cotacao_salva
             (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email,
              corretor_telefone, cliente_nome, cliente_email, cliente_telefone, titulo,
-             vidas_json, planos_json, total, tabela_ids_json, cidade)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             vidas_json, planos_json, total, tabela_ids_json, cidade, modalidades)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (token, 'horizontal', lead_id, session.get('user_id'),
              (urow['nome'] if urow else '') or session.get('nome') or '',
              (urow['email'] if urow else '') or '', '',
              str(d.get('cliente_nome') or '').strip(), cliente_email, cliente_tel,
              str(d.get('titulo') or 'Cotação').strip(),
              json.dumps(cont_faixa), json.dumps(planos, ensure_ascii=False),
-             total_geral, '[]', str(d.get('cidade') or '').strip()))
+             total_geral, '[]', str(d.get('cidade') or '').strip(), modalidades_json))
         cid = _last_insert_id(conn.cursor() if hasattr(conn, 'cursor') else conn)
         if not cid:
             cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
@@ -30033,15 +30055,18 @@ def cotacao_salvar():
     # Edição (reabrir) sempre gera uma cotação NOVA, com link próprio — nunca sobrescreve
     # a cotação original, que continua acessível com o link já enviado ao cliente.
     # Ambas ficam agrupadas pelo mesmo lead_id na ficha do CRM.
+    mods = sorted(list(set(p.get('modalidade') for p in planos if p.get('modalidade'))))
+    modalidades_json = json.dumps(mods, ensure_ascii=False) if mods else '[]'
+
     conn.execute("""INSERT INTO cotacao_salva
         (token, orientacao, lead_id, corretor_id, corretor_nome, corretor_email, corretor_telefone,
-         cliente_nome, cliente_email, cliente_telefone, titulo, vidas_json, planos_json, total, tabela_ids_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+         cliente_nome, cliente_email, cliente_telefone, titulo, vidas_json, planos_json, total, tabela_ids_json, modalidades)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (token, orientacao, lead_id, session.get('user_id'), corretor_nome, corretor_email,
          (d.get('corretor_telefone') or '').strip(),
          (d.get('cliente_nome') or '').strip(), (d.get('cliente_email') or '').strip(),
          (d.get('cliente_telefone') or '').strip(), (d.get('titulo') or 'Cotação').strip(),
-         json.dumps(cont_faixa), json.dumps(planos), round(total_geral, 2), tabela_ids_json))
+         json.dumps(cont_faixa), json.dumps(planos), round(total_geral, 2), tabela_ids_json, modalidades_json))
     cid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
            else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
     registrar_cotacao_no_lead(conn, lead_id, cid, planos, total_geral, idades,
