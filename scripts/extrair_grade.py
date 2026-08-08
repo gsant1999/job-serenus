@@ -70,6 +70,10 @@ FAIXAS = ['00-18', '19-23', '24-28', '29-33', '34-38',
 # "59 anos ou +", "59 anos >", "59+". Todas viram o mesmo rotulo interno,
 # senao a mesma faixa nasceria com tres nomes no banco e nenhuma cotacao
 # encontraria as tres.
+# Minimo de faixas pra uma grade valer. Tres e o que a MedSenior tem (49+).
+# Menos que isso comeca a aceitar tabela de outra natureza com numero do lado.
+MIN_FAIXAS = 3
+
 _INICIO = {0: '00-18', 19: '19-23', 24: '24-28', 29: '29-33', 34: '34-38',
            39: '39-43', 44: '44-48', 49: '49-53', 54: '54-58', 59: '59+'}
 
@@ -185,14 +189,26 @@ def _grades_da_pagina(pagina):
                 achadas.append(corrente)
             corrente = []
             continue
-        esperada = FAIXAS[len(corrente)] if len(corrente) < len(FAIXAS) else None
-        if rotulo != esperada:
-            if len(corrente) == len(FAIXAS):
+        # NEM TODA OPERADORA VENDE PRAS DEZ FAIXAS.
+        #
+        # A MedSenior so vende a partir de 49 anos: a tabela dela tem TRES
+        # faixas (49-53, 54-58, 59+). Exigir as dez rejeitava o arquivo inteiro
+        # e devolvia zero tabela, sem dizer por que.
+        #
+        # O que continua sendo exigido: as faixas vem NA ORDEM da lista
+        # canonica, sem pular, e sao pelo menos MIN_FAIXAS. Isso ja separa
+        # preco de plano de qualquer outra tabela da pagina — as de
+        # coparticipacao tem rotulo de procedimento, nao de idade, e nao
+        # chegam nem na primeira.
+        prox = FAIXAS.index(corrente[-1][1]) + 1 if corrente else None
+        esperada = FAIXAS[prox] if (prox is not None and prox < len(FAIXAS)) else None
+        if corrente and rotulo != esperada:
+            if len(corrente) >= MIN_FAIXAS:
                 achadas.append(corrente)
-            corrente = [(i, rotulo, valores)] if rotulo == FAIXAS[0] else []
+            corrente = [(i, rotulo, valores)]
             continue
         corrente.append((i, rotulo, valores))
-    if len(corrente) == len(FAIXAS):
+    if len(corrente) >= MIN_FAIXAS:
         achadas.append(corrente)
 
     saida = []
