@@ -22504,10 +22504,9 @@ def api_ia_sugerir_planos():
         matriz_str = "\\n".join([f"Nível {c['nivel_id']}: {c['operadora']} - {c['nome_plano']}" for c in concorrentes])
         
         prompt = f"""Você é um corretor de planos de saúde sênior. 
-Abaixo está o contexto de um lead e a matriz de concorrência dos planos de saúde (onde planos no mesmo Nível são concorrentes diretos equivalentes, Níveis maiores são superiores (mais caros) e Níveis menores são inferiores/downgrades).
+Abaixo está o contexto de um lead anonimizado e a matriz de concorrência dos planos de saúde (onde planos no mesmo Nível são concorrentes diretos equivalentes, Níveis maiores são superiores e Níveis menores são inferiores/downgrades).
 
 Lead:
-- Nome: {lead['nome']}
 - Plano Atual: {lead.get('qual_plano_atual') or 'Não informado'}
 - Idades: {lead.get('qual_idade') or 'Não informado'}
 - Cidade: {lead.get('qual_cidade') or 'Não informado'}
@@ -22532,31 +22531,52 @@ Responda EXCLUSIVAMENTE em formato JSON com o seguinte schema, sem markdown:
 }}
 """
 
-        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
-        if not api_key:
-            return _wa_cors(jsonify({"ok": False, "erro": "Chave Anthropic não configurada"})), 500
-            
-        try:
-            import anthropic
-        except Exception as e:
-            return _wa_cors(jsonify({"ok": False, "erro": "Pacote anthropic não instalado"})), 500
-            
-        client = anthropic.Anthropic(api_key=api_key)
-        msg = client.messages.create(
-            model="claude-3-5-sonnet-20240620",
-            max_tokens=1000,
-            system="Você retorna apenas JSON válido, sem tags markdown, no formato especificado.",
-            messages=[{"role": "user", "content": prompt}]
-        )
+        gemini_key = os.environ.get('GEMINI_API_KEY', '').strip()
         
-        import json
-        texto_limpo = msg.content[0].text.strip()
-        if texto_limpo.startswith('```json'):
-            texto_limpo = texto_limpo[7:-3].strip()
-        elif texto_limpo.startswith('```'):
-            texto_limpo = texto_limpo[3:-3].strip()
+        resultado = None
+        
+        if gemini_key:
+            import requests
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"response_mime_type": "application/json"}
+            }
+            res = requests.post(url, json=payload, timeout=15)
+            res.raise_for_status()
+            data = res.json()
+            texto_limpo = data['candidates'][0]['content']['parts'][0]['text'].strip()
             
-        resultado = json.loads(texto_limpo)
+            import json
+            resultado = json.loads(texto_limpo)
+            
+        else:
+            api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+            if not api_key:
+                return _wa_cors(jsonify({"ok": False, "erro": "Nenhuma chave de IA configurada (Gemini ou Anthropic)"})), 500
+                
+            try:
+                import anthropic
+            except Exception as e:
+                return _wa_cors(jsonify({"ok": False, "erro": "Pacote anthropic não instalado"})), 500
+                
+            client = anthropic.Anthropic(api_key=api_key)
+            msg = client.messages.create(
+                model="claude-3-5-sonnet-20240620",
+                max_tokens=1000,
+                system="Você retorna apenas JSON válido, sem tags markdown, no formato especificado.",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            import json
+            texto_limpo = msg.content[0].text.strip()
+            if texto_limpo.startswith('```json'):
+                texto_limpo = texto_limpo[7:-3].strip()
+            elif texto_limpo.startswith('```'):
+                texto_limpo = texto_limpo[3:-3].strip()
+                
+            resultado = json.loads(texto_limpo)
+            
         return _wa_cors(jsonify({"ok": True, "resultado": resultado}))
         
     except Exception as e:
