@@ -1,0 +1,26 @@
+{
+  "versao": "1.0",
+  "descricao": "Base de memória viva da IA. Quando um consultor corrigir um dado (feedback loop), a correção deve ser adicionada aqui para ensinar a IA a não repetir o erro no futuro.",
+  "aprendizados": [
+    {
+      "contexto_original": "Cliente enviou foto de cachorro e disse 'quero incluir meu pug no plano'.",
+      "extracao_antiga": {
+        "vidas": "2"
+      },
+      "correcao_consultor": {
+        "vidas": "1"
+      },
+      "regra_aprendida": "Pets (cães, gatos) NÃO entram na contagem de vidas de planos de saúde humanos. Ignorar animais de estimação na composição familiar."
+    },
+    {
+      "contexto_original": "Cliente falou 'estou fugindo da Unimed Campinas'.",
+      "extracao_antiga": {
+        "operadora_interesse": "Unimed Campinas"
+      },
+      "correcao_consultor": {
+        "operadora_interesse": ""
+      },
+      "regra_aprendida": "Se o verbo for 'fugindo', 'saindo', 'não quero', o cliente NÃO tem interesse nessa operadora. Isso deve ir para objeções, não para interesse."
+    }
+  ]
+}
