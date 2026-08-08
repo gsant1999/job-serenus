@@ -1478,3 +1478,26 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 }
 .job-cot-subgaveta .job-cot-gaveta-q { margin-left: auto; }
 .job-cot-gaveta .job-cot-plano { border-radius: 0; border-left: none; border-right: none; }
+
+/* A coparticipação também é gaveta, e também nasce fechada. */
+details.job-cot-subgaveta { border-top: 1px solid #f2ede4; }
+details.job-cot-subgaveta > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #7a7160;
+}
+details.job-cot-subgaveta > summary::-webkit-details-marker { display: none; }
+details.job-cot-subgaveta > summary::before {
+  content: '▸';
+  font-size: 9px;
+  color: #b0a795;
+  transition: transform .15s;
+}
+details.job-cot-subgaveta[open] > summary::before { transform: rotate(90deg); }
+details.job-cot-subgaveta > summary .job-cot-gaveta-q { margin-left: auto; }

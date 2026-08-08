@@ -4827,17 +4827,22 @@
             let html = '';
             grupos.forEach((porCopart, produto) => {
               const qtd = Array.from(porCopart.values()).reduce((n, a) => n + a.length, 0);
-              html += '<details class="job-cot-gaveta" open>' +
+              // FECHADAS. Aberto, o consultor rola uma lista longa procurando
+              // o que quer; fechado, ele lê os títulos e abre um. Quem sabe o
+              // que procura chega mais rápido — e é sempre o caso aqui.
+              html += '<details class="job-cot-gaveta">' +
                 '<summary><span class="job-cot-gaveta-n">' + esc(produto) + '</span>' +
                 '<span class="job-cot-gaveta-q">' + qtd + '</span></summary>';
               porCopart.forEach((idxs, copart) => {
                 // Subdivide só quando há mais de uma coparticipação; senão o
                 // rótulo repetiria o que a etiqueta da linha já diz.
                 if (porCopart.size > 1) {
-                  html += '<div class="job-cot-subgaveta">' + esc(copart) +
-                          '<span class="job-cot-gaveta-q">' + idxs.length + '</span></div>';
+                  html += '<details class="job-cot-subgaveta"><summary>' + esc(copart) +
+                          '<span class="job-cot-gaveta-q">' + idxs.length + '</span></summary>' +
+                          idxs.map(linha).join('') + '</details>';
+                } else {
+                  html += idxs.map(linha).join('');
                 }
-                html += idxs.map(linha).join('');
               });
               html += '</details>';
             });
