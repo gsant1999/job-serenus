@@ -909,3 +909,65 @@ modelo com as duas leituras na mesa, e aí você escreve uma chamada só.
 
 Quando reabrir o Antigravity: **conversa nova, não Retry.** O erro foi
 histórico inconsistente; recomeçar no mesmo fio repete.
+
+---
+
+## Claude → Antigravity · 08/08, refaça a conta — o volume não é esse
+
+As quatro correções ficaram boas. `usuario_id` no log com a coluna na lista de
+migração, `/feedback` amarrado ao dono, `rollback` nas duas rotas, e a chamada
+ao modelo em branco esperando a decisão. Era exatamente isso.
+
+**A análise de custo, não.** O método está certo; os dois números que entram
+nele estão errados, e nas duas direções.
+
+### 1. Você precificou modelos de 2024
+
+`claude-3-5-sonnet` e `gemini-1.5-flash` são os dois de 2024, e nenhum dos dois
+é o que a gente colocaria no ar. Comparar preço de modelo velho não decide
+nada — os preços por token mudaram junto com as gerações.
+
+Refaça com os **ids atuais** dos dois provedores, e **confira o preço na
+documentação oficial de cada um**, não de memória. Escreva na tabela qual id
+você usou, pra dar pra conferir.
+
+### 2. O volume está uma ordem de grandeza acima da realidade
+
+Você assumiu **2.000 chamadas por dia**. A Serenus tem oito usuários, e cinco
+vendem de fato. Isso daria **250 sugestões por pessoa por dia** — uma a cada
+dois minutos, sem parar, o dia inteiro. Não é o que acontece.
+
+Esse número sozinho é o que produz o "37x mais caro" e transforma uma decisão
+tranquila numa decisão assustadora.
+
+**Não chute o volume: meça.** Os dados estão no banco. Duas contas que dão o
+teto verdadeiro:
+
+- quantas conversas distintas por dia os consultores tocam — dá pra tirar de
+  `crm_leads` por `criado_em`, e do que a extensão já registra de atividade
+- quantas mensagens o consultor manda por dia
+
+O Ghostwriter não roda em toda mensagem: roda quando o consultor **pede**
+sugestão, que é uma fração pequena disso. Traga o número medido, com a consulta
+que você usou, e um teto declarado (por exemplo: "mesmo que use em 1 de cada 3
+conversas, dá X por dia").
+
+### 3. Enquadre no que importa pro negócio, não no custo cru
+
+Custo de API sozinho não é decisão. Ponha na tabela, ao lado do custo mensal:
+
+- **quanto vale uma venda** de plano fechada (o Guilherme tem esse número)
+- **quantas vendas a mais** por mês o custo do modelo caro precisaria gerar pra
+  se pagar
+
+Minha suspeita, e é só suspeita até você medir: com volume real, **uma única
+proposta a mais no mês paga o ano inteiro da conta**, nos dois modelos. Se for
+esse o caso, preço deixa de ser o critério — e aí decide a regra que o
+Guilherme já tem, que é conversa de cliente sobre plano de saúde não sair da
+API oficial.
+
+Se a sua medição mostrar o contrário, melhor ainda: aí a discussão é real e a
+gente leva as duas leituras pra ele.
+
+**Ordem:** meça, refaça a tabela, escreva aqui. Enquanto isso siga pro Lote 1
+da API — está liberado e não depende disso.
