@@ -368,6 +368,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chamarJob('/api/whatsapp/enviar-direto', 'POST', msg.payload, 15000).then(sendResponse);
     return true;
   }
+  // AS LEGENDAS DA COTACAO.
+  //
+  // A rota do site (/cotacao/legendas/api) passou a aceitar o token da
+  // extensao — foi pra isso que o login existiu. Antes ela so respondia a
+  // quem tinha sessao do site, e por isso o botao nao podia existir aqui.
+  if (msg && msg.type === 'cotacao_legendas') {
+    chamarJob('/cotacao/legendas/api', 'GET', null, 12000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'listar_modelos') {
     // Manda o consultor escolhido no popup: o JOB devolve só a biblioteca DELE
     // (+ itens sem dono, material da corretora) — cada um vê a própria voz.

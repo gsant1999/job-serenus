@@ -5522,6 +5522,15 @@
         '<button class="job-cot-bt-copiar" id="job-cot-copiartexto" style="flex:1" ' +
           'title="Copia os preços como texto">Copiar preços</button>' +
       '</div>' +
+      // LEGENDA — o texto que acompanha a cotação no WhatsApp.
+      //
+      // Só existe aqui porque a rota do site passou a aceitar o token da
+      // extensão. Era exatamente o caso que o login veio resolver.
+      '<div class="job-cot-item-acoes">' +
+        '<button class="job-cot-bt-copiar" id="job-cot-legenda" style="flex:1" ' +
+          'title="Escolhe uma legenda cadastrada no JOB e manda na conversa">Legenda</button>' +
+      '</div>' +
+      '<div id="job-cot-legendas"></div>' +
       '<a class="job-cot-nova" href="' + esc(doc) + '" target="_blank" rel="noopener" ' +
         'title="Abre a apresentação no JOB: copiar imagem, PDF, destacar plano, legenda e envio por e-mail">' +
         'Abrir apresentação (imagem, PDF, destaque)</a>' +
@@ -5549,6 +5558,44 @@
     });
     const ban = document.getElementById('job-cot-anteriores');
     if (ban) ban.addEventListener('click', abrirSecaoCotacao);
+    const bleg = document.getElementById('job-cot-legenda');
+    if (bleg) bleg.addEventListener('click', async () => {
+      const caixa = document.getElementById('job-cot-legendas');
+      if (!caixa) return;
+      if (caixa.innerHTML) { caixa.innerHTML = ''; return; }   // segundo clique fecha
+      caixa.innerHTML = '<div class="job-cot-dica">Buscando as legendas…</div>';
+      let r = null;
+      try { r = await _safeSendMessage({ type: 'cotacao_legendas' }); } catch (e) { r = null; }
+      // A rota devolve a LISTA crua (array), não um {ok:...} — é a mesma que o
+      // documento do site consome. Aceito os dois formatos pra não quebrar se
+      // um dia mudar.
+      const lista = Array.isArray(r) ? r : ((r && r.legendas) || []);
+      if (!lista.length) {
+        caixa.innerHTML = '<div class="job-cot-dica">' +
+          (r && r.erro ? esc(r.erro)
+                       : 'Nenhuma legenda cadastrada. Crie em Cotações → Legendas, no JOB.') +
+          '</div>';
+        return;
+      }
+      caixa.innerHTML = lista.map((m, i) =>
+        '<button type="button" class="job-cot-leg" data-i="' + i + '">' +
+          '<b>' + esc(m.nome || 'Legenda') + '</b>' +
+          '<span>' + esc(String(m.corpo || '').slice(0, 90)) + '</span>' +
+        '</button>').join('');
+      caixa.querySelectorAll('.job-cot-leg').forEach((b) => b.addEventListener('click', async () => {
+        const m = lista[+b.dataset.i];
+        const txt = String(m.corpo || '');
+        try {
+          await navigator.clipboard.writeText(txt);
+          b.querySelector('b').textContent = 'Copiada — cole na conversa';
+        } catch (e) {
+          // Sem permissão de área de transferência, mostra o texto pra copiar
+          // na mão em vez de falhar calado.
+          caixa.innerHTML = '<textarea class="job-cot-leg-txt" readonly>' + esc(txt) + '</textarea>';
+        }
+      }));
+    });
+
     const bcl = document.getElementById('job-cot-copiarlink');
     if (bcl) bcl.addEventListener('click', () => {
       navigator.clipboard.writeText(r.url || doc).then(() => {
