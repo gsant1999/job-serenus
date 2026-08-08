@@ -373,6 +373,38 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // A rota do site (/cotacao/legendas/api) passou a aceitar o token da
   // extensao — foi pra isso que o login existiu. Antes ela so respondia a
   // quem tinha sessao do site, e por isso o botao nao podia existir aqui.
+  // A IMAGEM DA COTACAO, como data: URL.
+  //
+  // A imagem e desenhada NO NAVEGADOR quando alguem abre o documento — o
+  // servidor nao tem navegador. Entao ela so existe depois da primeira
+  // abertura, e o 404 com url_documento e resposta legitima, nao erro: a
+  // barra sabe abrir o documento e tentar de novo.
+  if (msg && msg.type === 'cotacao_imagem') {
+    (async () => {
+      const { jobUrl, extKey } = await config();
+      const { extToken } = await chrome.storage.local.get(['extToken']);
+      try {
+        const resp = await fetch(jobUrl + '/api/v1/cotacao/' + msg.id + '/imagem', {
+          headers: Object.assign({},
+            extToken ? { 'Authorization': 'Bearer ' + extToken }
+                     : (extKey ? { 'X-Extension-Key': extKey } : {})),
+        });
+        if (resp.status === 404) {
+          sendResponse({ ok: false, erro: 'imagem_ausente' });
+          return;
+        }
+        if (!resp.ok) { sendResponse({ ok: false, erro: 'HTTP ' + resp.status }); return; }
+        const blob = await resp.blob();
+        const leitor = new FileReader();
+        leitor.onloadend = () => sendResponse({ ok: true, dataUrl: leitor.result });
+        leitor.onerror = () => sendResponse({ ok: false, erro: 'falha_ao_ler' });
+        leitor.readAsDataURL(blob);
+      } catch (e) {
+        sendResponse({ ok: false, erro: 'Não consegui buscar a imagem agora.' });
+      }
+    })();
+    return true;
+  }
   if (msg && msg.type === 'cotacao_legendas') {
     chamarJob('/cotacao/legendas/api', 'GET', null, 12000).then(sendResponse);
     return true;

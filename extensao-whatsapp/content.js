@@ -5506,6 +5506,7 @@
     const pos = document.getElementById('job-cot-pos');
     if (!pos) return;
     const doc = _SITE_BASE_URL_EXT + '/cotacao/documento/' + r.id;
+    const r_id = r.id;
     // O QUE DÁ PRA FAZER DAQUI, E O QUE NÃO DÁ.
     //
     // Tudo que viaja como LINK funciona aqui dentro. Copiar imagem e PDF não:
@@ -5529,6 +5530,10 @@
       '<div class="job-cot-item-acoes">' +
         '<button class="job-cot-bt-copiar" id="job-cot-legenda" style="flex:1" ' +
           'title="Escolhe uma legenda cadastrada no JOB e manda na conversa">Legenda</button>' +
+        '<button class="job-cot-bt-copiar" id="job-cot-imagem" style="flex:1" ' +
+          'title="Copia a imagem da cotação pra colar na conversa">Copiar imagem</button>' +
+        '<button class="job-cot-bt-copiar" id="job-cot-baixar" style="flex:1" ' +
+          'title="Baixa a imagem da cotação">Baixar</button>' +
       '</div>' +
       '<div id="job-cot-legendas"></div>' +
       '<a class="job-cot-nova" href="' + esc(doc) + '" target="_blank" rel="noopener" ' +
@@ -5558,6 +5563,52 @@
     });
     const ban = document.getElementById('job-cot-anteriores');
     if (ban) ban.addEventListener('click', abrirSecaoCotacao);
+    // IMAGEM: buscar, e se ainda nao existir, abrir o documento pra gerar.
+    //
+    // A imagem so nasce quando o documento e aberto uma vez. Em vez de dizer
+    // "nao tem imagem" (que o consultor nao sabe resolver), a barra abre o
+    // documento e pede pra tentar de novo — que e exatamente o que faltava.
+    async function _cotPegarImagem(btn, aoTer) {
+      const antes = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Buscando…';
+      let r = null;
+      try { r = await _safeSendMessage({ type: 'cotacao_imagem', id: r_id }); }
+      catch (e) { r = null; }
+      btn.disabled = false;
+      if (r && r.ok && r.dataUrl) { btn.textContent = antes; aoTer(r.dataUrl); return; }
+      if (r && r.erro === 'imagem_ausente') {
+        btn.textContent = 'Gerando…';
+        window.open(doc, '_blank', 'noopener');
+        setTimeout(() => { btn.textContent = 'Tentar de novo'; btn.disabled = false; }, 2500);
+        return;
+      }
+      btn.textContent = 'Falhou — tentar de novo';
+      setTimeout(() => { btn.textContent = antes; }, 2600);
+    }
+
+    const bimg = document.getElementById('job-cot-imagem');
+    if (bimg) bimg.addEventListener('click', () => _cotPegarImagem(bimg, async (dataUrl) => {
+      try {
+        const blob = await (await fetch(dataUrl)).blob();
+        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+        bimg.textContent = 'Copiada — cole na conversa';
+        setTimeout(() => { bimg.textContent = 'Copiar imagem'; }, 2600);
+      } catch (e) {
+        bimg.textContent = 'Não deu pra copiar — use Baixar';
+        setTimeout(() => { bimg.textContent = 'Copiar imagem'; }, 3000);
+      }
+    }));
+
+    const bbx = document.getElementById('job-cot-baixar');
+    if (bbx) bbx.addEventListener('click', () => _cotPegarImagem(bbx, (dataUrl) => {
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = 'cotacao-' + r_id + '.png';
+      document.body.appendChild(a); a.click(); a.remove();
+      bbx.textContent = 'Baixada';
+      setTimeout(() => { bbx.textContent = 'Baixar'; }, 2200);
+    }));
+
     const bleg = document.getElementById('job-cot-legenda');
     if (bleg) bleg.addEventListener('click', async () => {
       const caixa = document.getElementById('job-cot-legendas');
