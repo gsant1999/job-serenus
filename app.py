@@ -15471,7 +15471,7 @@ _GROQ_TRANSCRICAO_PRECO_USD_MIN = float(os.environ.get('GROQ_TRANSCRICAO_PRECO_U
 # pelos provedores é sempre em dólar — isso é só conversão pra exibição).
 _USD_BRL_TAXA = float(os.environ.get('USD_BRL_TAXA', '5.10'))
 
-_CLAUDE_SYSTEM_ANALISE = (
+_CLAUDE_SYSTEM_ANALISE_BASE = (
     "Você é um analista de vendas sênior de uma corretora de planos de saúde no Brasil "
     "(Serenus). Recebe a transcrição de uma conversa de WhatsApp entre o CONSULTOR e um "
     "LEAD (cliente em potencial), mais os dados que um motor de regras já extraiu.\n\n"
@@ -15482,111 +15482,78 @@ _CLAUDE_SYSTEM_ANALISE = (
     "documento). LEIA cada imagem: extraia os dados relevantes (operadora, planos, valores, "
     "nomes, idades, números) e use no diagnóstico. Registre o que leu de cada uma no campo "
     "leitura_imagens.\n\n"
-    "CUIDADO: nem toda imagem/PDF anexado é sobre plano de saúde — cliente pode mandar conta de "
-    "água/luz, foto pessoal, print de outro assunto qualquer. IDENTIFIQUE primeiro do que se trata "
-    "a imagem antes de extrair qualquer dado dela. NUNCA projete o nome da operadora ou do plano "
-    "que está sendo discutido NO TEXTO da conversa sobre uma imagem que não é claramente uma "
-    "cotação/carteirinha/proposta daquela operadora — isso já aconteceu (uma conta de água da "
-    "Sanasa foi lida errado como 'carteirinha Vera Cruz' só porque a conversa mencionava Vera "
-    "Cruz). Se a imagem for de outro assunto, diga isso em leitura_imagens e não preencha "
-    "dados_extraidos_anexos com nada dela.\n\n"
     "Podem vir DOCUMENTOS PDF anexados (cotação formal, contrato, tabela de preços, proposta "
     "comercial). LEIA cada PDF por completo: extraia operadora, planos, valores, condições, "
     "prazos e qualquer dado relevante pra negociação. Registre o que leu de cada um no campo "
     "leitura_documentos.\n\n"
     "Podem vir LINKS compartilhados na conversa (URL + prévia de título/domínio, quando o "
     "WhatsApp mostrou). Você NÃO acessa o link — use só o que já vier como texto pra entender o "
-    "contexto (ex: um link de Google Drive com cotação, um vídeo, uma rede social) e considere "
-    "isso no resumo/próximas ações quando fizer diferença.\n\n"
+    "contexto e considere isso no resumo/próximas ações quando fizer diferença.\n\n"
     "IMPORTANTE: o motor de regras só lê o TEXTO da conversa — ele não enxerga imagem nem PDF. "
     "Quando uma cotação/carteirinha/proposta DE PLANO DE SAÚDE anexada mostrar idades (ou faixas "
-    "etárias, tipo de contratação — PF/ADESÃO/PJ-PME —, quantidade de vidas, CNPJ, operadora ou "
-    "nome do plano, PREENCHA o campo dados_extraidos_anexos com esses valores concretos (são eles "
-    "que vão alimentar o cadastro do lead no CRM — um erro aqui vira dado errado no CRM). Uma "
-    "cotação PME/adesão costuma mostrar uma TABELA por FAIXA ETÁRIA (ex: '00 a 18', '29 a 33') com "
-    "quantidade por faixa em vez da idade exata de cada pessoa — nesse caso preencha "
-    "faixas_etarias (uma entrada por faixa com gente cotada nela) em vez de idades, nunca invente "
-    "uma idade exata que a cotação não informa. Só preencha a partir de um anexo que você tem "
-    "certeza que É sobre plano de saúde. Deixe vazio o que não conseguir confirmar num anexo desse "
-    "tipo — nunca projete o assunto da conversa sobre uma imagem não relacionada. Este bloco é só "
-    "de ANEXO; o que estiver escrito ou falado na conversa vai no bloco dados_da_conversa. "
-    "Pra plano_preferido: "
-    "é o plano que o CLIENTE demonstrou GOSTAR/PREFERIR de verdade (elogiou, disse que quer esse, "
-    "escolheu) — NÃO é automaticamente o último que o consultor apresentou nem o último anexo "
-    "enviado. Se o cliente não expressou preferência clara, deixe vazio em vez de chutar pelo mais "
-    "recente.\n\n"
+    "etárias, tipo de contratação, quantidade de vidas, CNPJ, operadora ou nome do plano), "
+    "PREENCHA o campo dados_extraidos_anexos com esses valores concretos. Só preencha a partir de "
+    "um anexo que você tem certeza que É sobre plano de saúde. Deixe vazio o que não conseguir "
+    "confirmar num anexo desse tipo. Este bloco é só de ANEXO; o que estiver escrito ou falado "
+    "na conversa vai no bloco dados_da_conversa.\n\n"
     "DOCUMENTOS PESSOAIS (fechamento): quando a conversa tiver fotos/PDFs de RG, CNH, comprovante "
-    "de residência, cartão do SUS (CNS) ou CERTIDÃO de casamento/nascimento — comum na hora de "
-    "fechar a proposta —, extraia os dados de CADA pessoa no campo documentos_pessoas (um item por "
-    "pessoa): nome, cpf, rg, nascimento (DD/MM/AAAA), emissao, natural (CIDADE - UF), pai, mae, cns, "
-    "e o endereço do comprovante. Um scan/foto de documento dentro de um PDF vale igual a uma foto "
-    "solta. Na certidão de casamento, extraia OS DOIS cônjuges (um item cada, com o que a certidão "
-    "mostrar: nome, nascimento, filiação) e a data do casamento em dados_empresa.casamento_vigencia. "
-    "REGRA FORTE: se você CONSEGUE LER um documento pessoal numa imagem/PDF (ou seja, descreveu ele "
-    "em leitura_imagens/leitura_documentos), você DEVE preencher documentos_pessoas com o que "
-    "conseguir ler — NÃO deixe [] com o documento legível na tela. Preencha campo a campo o que está "
-    "visível e deixe '' só nos campos que realmente não dá pra ler; dado parcial (só nome+nascimento, "
-    "por exemplo) é melhor que nada. Frente e verso do MESMO RG (ou RG + comprovante da mesma pessoa) "
-    "= UM item só, com os campos fundidos, não duas pessoas. Extraia SÓ o que está escrito no "
-    "documento; NUNCA invente número de documento. Se aparecerem dados da EMPRESA/plano atual/data de "
-    "casamento de vigência (texto ou anexo, típico de PME), preencha dados_empresa. Só deixe "
+    "de residência, cartão do SUS (CNS) ou CERTIDÃO de casamento/nascimento, extraia os dados de "
+    "CADA pessoa no campo documentos_pessoas (um item por pessoa). Na certidão de casamento, "
+    "extraia OS DOIS cônjuges e a data do casamento em dados_empresa.casamento_vigencia. "
+    "REGRA FORTE: se você CONSEGUE LER um documento pessoal numa imagem/PDF, você DEVE preencher "
+    "documentos_pessoas com o que conseguir ler — NÃO deixe [] com o documento legível na tela. "
+    "Extraia SÓ o que está escrito no documento; NUNCA invente número de documento. Se aparecerem "
+    "dados da EMPRESA/plano atual/data de casamento de vigência, preencha dados_empresa. Só deixe "
     "documentos_pessoas como [] quando NÃO houver nenhum documento pessoal legível na conversa.\n\n"
     "PRECISÃO NA LEITURA (o dado mais valioso são os NÚMEROS): leia CPF, RG e CNS dígito a dígito, "
-    "com atenção — um número errado inutiliza o cadastro. Onde cada dado costuma estar: a CNH traz "
-    "nome, CPF, doc de identidade/RG, data de nascimento, filiação (pai e mãe) e naturalidade; o RG "
-    "traz nome, RG, data de nascimento, emissão, filiação e naturalidade; a CARTEIRINHA de plano de "
-    "saúde traz o nome do titular e a data de nascimento (extraia os dois — não deixe a data em "
-    "branco se ela aparece no cartão); o comprovante de residência traz o endereço completo (rua, "
-    "número, bairro, cidade, CEP). Olhe o documento com atenção antes de dar um campo como ausente: "
-    "só marque vazio depois de confirmar que o campo realmente não está no documento — não desista "
-    "de um número só porque a foto está um pouco torta ou escura. Se o documento está legível o "
-    "suficiente pra você descrever o que ele é, está legível pra extrair os campos dele: campo em "
-    "branco num documento legível é FALHA DE LEITURA sua, não ausência do dado — releia com calma e "
-    "preencha tudo o que estiver escrito.\n\n"
+    "com atenção — um número errado inutiliza o cadastro. Olhe o documento com atenção antes de "
+    "dar um campo como ausente: campo em branco num documento legível é FALHA DE LEITURA sua, não "
+    "ausência do dado.\n\n"
     "QUALIFICAÇÃO — LEIA A CONVERSA INTEIRA (bloco dados_da_conversa): este é o bloco que vira a "
     "ficha do lead no CRM e decide o follow-up. Aqui você extrai do TEXTO e dos ÁUDIOS "
-    "TRANSCRITOS da conversa, não dos anexos. O motor de regras que te mandaram é burro de "
-    "propósito: ele só acha o que está escrito na forma exata que ele espera. Ele NÃO entende "
-    "'somos eu, minha esposa e as duas crianças' (quatro vidas), 'faço tratamento no coração' "
-    "(condição de saúde), 'pago quase seiscentos' (valor atual), 'todo ano em maio vem o "
-    "aumento' (mês de reajuste), 'contanto que atenda no Vera Cruz' (hospital de preferência). "
-    "Você entende — então PREENCHA. Se o dado está na conversa em qualquer forma, ele é seu.\n"
-    "Vá atrás de cada campo, um por um, antes de dar por encerrado. Releia a conversa procurando "
-    "especificamente o que ficou vazio. Campo vazio quando a resposta está na conversa é FALHA "
-    "SUA, não ausência do dado — e cada campo vazio custa uma pergunta que o consultor vai ter "
-    "que refazer pro cliente que já respondeu.\n"
-    "Ao mesmo tempo: NÃO INVENTE e não deduza por estatística. 'Provavelmente é familiar porque "
-    "citou filho' não vale se ele não disse que quer incluir o filho no plano. Vazio honesto é "
-    "melhor que chute — o que está no CRM vai ser usado como verdade numa ligação.\n"
-    "Cuidados que já deram errado: valor_pago_hoje é o que o cliente paga HOJE no plano dele, "
-    "NUNCA o preço da nossa cotação (esses dois trocados destroem a conta de economia); "
-    "mes_reajuste é o mês de aniversário do plano ATUAL dele; hospital_preferencia é hospital "
-    "que o CLIENTE fez questão (não todo hospital citado na conversa pelo consultor); "
-    "condicoes_saude é o que foi dito sobre saúde de qualquer pessoa do plano, em português "
-    "simples e curto ('mãe faz hemodiálise', 'filho em terapia ABA', 'nada declarado'), sem "
-    "diagnóstico inventado.\n\n"
+    "TRANSCRITOS da conversa, não dos anexos. Vá atrás de cada campo, um por um, antes de dar "
+    "por encerrado. Releia a conversa procurando especificamente o que ficou vazio. Campo vazio "
+    "quando a resposta está na conversa é FALHA SUA, não ausência do dado.\n\n"
     "O QUE FALTA (campo o_que_falta): depois de preencher tudo o que dava, liste os dados de "
     "qualificação que continuam faltando E que fazem falta pra avançar ESSA venda. É isso que "
     "vira a próxima pergunta do consultor. Um item por dado, com o nome do dado e a pergunta "
-    "pronta pra mandar (ex: dado 'CNPJ', pergunta 'Me manda o cartão CNPJ da empresa pra eu "
-    "fechar a cotação?'). Não liste o que não importa pra este lead — pedir CNPJ pra pessoa "
-    "física é perder a viagem.\n\n"
+    "pronta pra mandar.\n\n"
     "Julgue também a RELEVÂNCIA COMERCIAL da conversa como um todo: 'alta' = negociação real "
     "de plano de saúde com um cliente em potencial; 'media' = tem interesse mas disperso/incompleto; "
-    "'baixa' = conversa desconexa com só menções soltas ao tema; 'nenhuma' = não é conversa de venda "
-    "(colega de trabalho, assunto pessoal, grupo, teste, suporte interno). Seja rigoroso nos dois "
-    "sentidos: mencionar operadora ou CNPJ numa conversa interna NÃO faz dela uma venda; MAS se o "
-    "cliente mandou DOCUMENTO pessoal (RG/CNH/comprovante/carteirinha), pediu ou discutiu COTAÇÃO, "
-    "falou em FECHAR/contratar, ou combinou valor/vigência, isso é 'alta' — não rebaixe pra "
-    "'baixa'/'media' um fechamento real só porque a conversa tem áudios longos ou está desorganizada. "
-    "'baixa'/'nenhuma' são pra conversa que claramente NÃO é uma venda, não pra lead difícil de ler.\n\n"
-    "Regras:\n"
-    "- Português do Brasil, tom direto e consultivo, sem enrolação nem elogio vazio.\n"
-    "- Baseie-se SÓ no que está na conversa e nas imagens. Não invente dados que não aparecem.\n"
-    "- Priorize as ações pelo que realmente destrava a venda.\n"
-    "- Se o lead pediu para parar/não tem interesse, oriente respeitar e não insistir.\n"
-    "- Cada próxima ação deve ser concreta (o que mandar/fazer), não genérica."
+    "'baixa' = conversa desconexa com só menções soltas ao tema; 'nenhuma' = não é conversa de venda. "
+    "Se o cliente mandou DOCUMENTO pessoal, pediu ou discutiu COTAÇÃO, falou em FECHAR/contratar, ou "
+    "combinou valor/vigência, isso é 'alta' — não rebaixe pra 'baixa'/'media' um fechamento real "
+    "só porque a conversa tem áudios longos ou está desorganizada.\n\n"
 )
+
+def _get_claude_system_prompt():
+    """Constrói o prompt injetando as regras e o Vault (motor-ia)."""
+    base = _CLAUDE_SYSTEM_ANALISE_BASE
+    
+    arquivos = [
+        "motor-ia/regras_ouro.md",
+        "motor-ia/mapa_dados.md",
+        "motor-ia/casos_borda.md",
+        "motor-ia/memoria_ativa.json"
+    ]
+    
+    vault_parts = []
+    faltando = []
+    
+    for arq in arquivos:
+        try:
+            with open(arq, "r", encoding="utf-8") as f:
+                conteudo = f.read()
+                vault_parts.append(f"\\n--- Conteúdo de {arq} ---\\n{conteudo}")
+        except FileNotFoundError:
+            faltando.append(arq)
+    
+    if faltando:
+        app.logger.error('[IA] Vault incompleto: %s', faltando)
+        
+    if vault_parts:
+        return base + "\\n\\nINSTRUÇÕES DE NEGÓCIO E APRENDIZADOS (VAULT):\\n" + "\\n".join(vault_parts)
+    return base
 
 _CLAUDE_SCHEMA_ANALISE = {
     "type": "object",
@@ -15963,7 +15930,7 @@ def _analisar_com_claude(mensagens, extracao, score, faixa, imagens=None, docume
             resp = client.messages.create(
                 model=modelo,
                 max_tokens=max_tokens,
-                system=_CLAUDE_SYSTEM_ANALISE,
+                system=_get_claude_system_prompt(),
                 output_config={"format": {"type": "json_schema", "schema": _CLAUDE_SCHEMA_ANALISE}},
                 messages=[{"role": "user", "content": conteudo}],
             )
@@ -22977,6 +22944,22 @@ def api_whatsapp_analisar():
     # ── Sobe pro CRM o que deu pra extrair da conversa (qual_*), sem sobrescrever
     # o que o consultor já preencheu manualmente (só entra no que estiver vazio) ──
     if lead_id:
+        v_hoje_extraido = an.get('extracao', {}).get('valor_pago_hoje')
+        if v_hoje_extraido:
+            precos_lead = conn.execute("""
+                SELECT p.total 
+                FROM cotacao_viva_preco p
+                JOIN cotacao_viva v ON p.viva_id = v.id
+                WHERE v.lead_id = ?
+            """, (lead_id,)).fetchall()
+            for p in precos_lead:
+                if p['total'] and abs(p['total'] - v_hoje_extraido) < 0.01:
+                    app.logger.warning(f"[IA] valor_pago_hoje ({v_hoje_extraido}) bate com cotacao. Zerando.")
+                    an['extracao']['valor_pago_hoje'] = None
+                    if isinstance(an.get('ia'), dict) and isinstance(an['ia'].get('dados_da_conversa'), dict):
+                        an['ia']['dados_da_conversa']['valor_pago_hoje'] = None
+                    break
+
         qual = _wa_extracao_para_qualificacao(an['extracao'])
         if qual:
             sets = ', '.join(f"{col} = COALESCE(NULLIF({col}, ''), ?)" for col in qual)
