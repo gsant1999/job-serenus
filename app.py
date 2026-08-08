@@ -28856,7 +28856,9 @@ def cotacao_tabela_importar_json():
     recusadas = 0
     precos_trocados = []
 
-    conn = get_db()
+    # db(), nao get_db(): get_db nao existe neste app e a rota estourava
+    # NameError em toda chamada — 500 antes de gravar qualquer linha.
+    conn = db()
     for t in tabelas:
         vidas_min = t.get('vidas_min')
         vidas_max = t.get('vidas_max')
@@ -28951,6 +28953,7 @@ def cotacao_tabela_importar_json():
         except Exception: pass
     else:
         conn.commit()
+    close_db(conn)
 
     return jsonify({
         "ok": True,
