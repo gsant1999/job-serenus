@@ -151,22 +151,37 @@
   .u-inativo td { opacity:.55; transition:opacity .15s ease; }
   .u-inativo:hover td { opacity:1; }
 
-  /* CENTRALIZADA E ESTREITA, só esta janela.
-     A gaveta de baixo, largura cheia, é o padrão do site e continua valendo
-     nas outras telas — mas aqui o conteúdo são duas linhas por aparelho, e
-     uma faixa branca de ponta a ponta pra isso fica vazia no meio.
-     A largura acompanha o conteúdo; no celular volta a ser gaveta, porque
-     ali tela cheia é o certo. */
-  #modal-aparelhos { align-items: center; padding: 24px; }
-  #modal-aparelhos .modal {
-    max-width: 520px;
-    border-radius: 16px;
-    padding: 26px 28px 22px;
-    box-shadow: 0 24px 60px rgba(0,0,0,.45);
+  /* ── JANELAS CENTRALIZADAS, DO TAMANHO DO CONTEÚDO ──
+     A gaveta de baixo em largura cheia é o padrão do site e continua valendo
+     nas outras telas. Aqui não serve: nenhuma destas três tem conteúdo que
+     encha uma faixa de ponta a ponta — sobra vazio no meio e a janela fica
+     maior que o assunto dela.
+     No celular volta a ser gaveta, porque ali tela cheia é o certo. */
+  #modal-aparelhos, #modal-novo, #modal-editar { align-items:center; padding:24px; }
+  #modal-aparelhos .modal, #modal-novo .modal, #modal-editar .modal {
+    border-radius:16px;
+    padding:26px 28px 24px;
+    box-shadow:0 24px 60px rgba(0,0,0,.45);
   }
-  @media (max-width: 640px) {
-    #modal-aparelhos { align-items: flex-end; padding: 0; }
-    #modal-aparelhos .modal { max-width: none; border-radius: 20px 20px 0 0; }
+  /* Aparelhos é uma lista curta; os formulários têm duas colunas e precisam
+     de mais respiro sem virar uma faixa. */
+  #modal-aparelhos .modal { max-width:520px; }
+  #modal-novo .modal, #modal-editar .modal { max-width:680px; }
+
+  /* O botão principal ocupava a largura inteira e o Cancelar ficava espremido
+     na ponta: dois pesos errados. Agora o par fica junto, à direita, com o
+     Cancelar antes — sair é o caminho de saída, não o destaque. */
+  #modal-novo .modal-botoes, #modal-editar .modal-botoes {
+    display:flex; gap:10px; justify-content:flex-end;
+    margin-top:20px; padding-top:18px; border-top:1px solid var(--borda);
+  }
+
+  @media (max-width: 720px) {
+    #modal-aparelhos, #modal-novo, #modal-editar { align-items:flex-end; padding:0; }
+    #modal-aparelhos .modal, #modal-novo .modal, #modal-editar .modal {
+      max-width:none; border-radius:20px 20px 0 0;
+    }
+    #modal-novo .modal-botoes, #modal-editar .modal-botoes { flex-direction:column-reverse; }
   }
 </style>
 
@@ -308,9 +323,9 @@
           </select>
         </div>
       </div>
-      <div style="display:flex; gap:10px;">
-        <button type="submit" class="btn" style="flex:1;">Gerar link de cadastro</button>
+      <div class="modal-botoes">
         <button type="button" class="btn-outline" onclick="fechar('modal-novo')">Cancelar</button>
+        <button type="submit" class="btn">Gerar link de cadastro</button>
       </div>
     </form>
   </div>
@@ -424,9 +439,9 @@
         <div class="sub" style="font-size:11px; margin-top:4px;">"Acesso padrão" = os módulos comuns de consultor. Desmarque pra escolher item a item — inclusive liberar um módulo <b>gerencial</b> (Modelos, Funis, Operadoras...) pra este consultor.</div>
       </div>
 
-      <div style="display:flex; gap:10px;">
-        <button type="submit" class="btn" style="flex:1;">Salvar alterações</button>
+      <div class="modal-botoes">
         <button type="button" class="btn-outline" onclick="fechar('modal-editar')">Cancelar</button>
+        <button type="submit" class="btn">Salvar alterações</button>
       </div>
     </form>
 
