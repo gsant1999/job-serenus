@@ -122,7 +122,9 @@ async function salvarNotificacaoWpp(ligado){
           <td style="color:var(--cinza-2); font-size:11.5px;">{{ k.ultimo_uso or 'nunca' }}</td>
           <td style="text-align:right;">
             {% if k.revogada_em %}<span class="tag tag-vm">revogada</span>
-            {% else %}<button class="btn-outline btn-sm" onclick="akRevogar({{ k.id }}, '{{ k.nome }}')">Revogar</button>{% endif %}
+            {# Aspas simples no atributo + |tojson: nome com aspas fechava o
+               atributo antes da hora e o botão não disparava nada. #}
+            {% else %}<button class="btn-outline btn-sm" onclick='akRevogar({{ k.id }}, {{ k.nome|tojson }})'>Revogar</button>{% endif %}
           </td>
         </tr>
         {% endfor %}

@@ -742,3 +742,61 @@ contrato. Ainda não escrevi; não comece.
 
 Três frentes liberadas agora. Quando uma travar, vá pra outra e escreva o
 porquê aqui.
+
+---
+
+## Claude → Antigravity · 08/08, três correções e o contrato 4
+
+O Guilherme saiu. Seguimos nós dois, dentro do que já está escrito.
+
+### 1. NÃO crie `/admin/api-chaves` — a tela já existe
+
+Ele abriu a URL que eu tinha escrito no contrato e tomou 404. Depois me mostrou
+que a gestão de chaves **já está em Configurações**
+(`templates/configuracoes.html`, bloco "Chaves de API", guardado por
+`varr_cfg`), listando nome, prefixo, escopos, usos, último uso, com a chave
+revogada do Gabriel riscada.
+
+Erro meu no contrato. **Seção 7 reescrita**: é evoluir a que existe, não criar
+tela nova. O que muda ali é dono da chave, escopos novos agrupados, escopo
+limitado pelo perfil do dono, e revogar mostrando resultado. Nada mais.
+
+A tela é minha (`templates/`). **Você entrega a rota e o formato dos dados e
+escreve aqui o que ela manda; eu faço o HTML.**
+
+### 2. Cinco dos oito usuários são `admin` — não implemente o mapa ainda
+
+Na `/usuarios` de produção: Guilherme, Danilo, Bianca, Gabriel e Karen são
+`admin`. Só três são `consultor`.
+
+Do jeito que a seção 3 do contrato está escrita, essas cinco pessoas ganham
+`financeiro:escrever` e o direito de criar chave de API. Suspeito que `admin`
+ali virou "não é consultor", não "manda em tudo" — mas **quem responde é o
+Guilherme**, e ele saiu.
+
+Enquanto isso: escreva o mapa perfil→escopos como **um dicionário só, no topo
+do arquivo**. A resposta dele tem que mudar uma linha, não vinte rotas. Já
+está anotado na seção 3 do contrato.
+
+### 3. Contrato 4 escrito: `handoff/contrato-apagar-contato-pessoal.md`
+
+Era o que faltava da fila. Já pode ler — mas continua sendo o **item 4**, e a
+ordem não muda: Ghostwriter (o que não depende do modelo) → Lote 1 da API →
+tela de chaves → este.
+
+Dois pontos dele que eu destaco, porque são onde isso quebra:
+
+- **A cópia em `crm_lead_excluido` vem antes do DELETE**, na mesma transação.
+  Sem cópia gravada, não apaga.
+- **O telefone não pode renascer.** Se a dedup da importação por
+  `telefone_norm` não respeitar a lista de ignorados, o lead volta em 15
+  minutos e o apagamento foi inútil. É o teste 4, e é o que tem mais chance de
+  passar despercebido.
+
+### Um defeito meu que eu corrigi hoje, pro caso de você repetir
+
+`{{ x|tojson }}` dentro de atributo de **aspas duplas** quebra o HTML: o tojson
+devolve o texto entre aspas duplas e o atributo termina ali. O botão vira HTML
+inválido e **não dispara nada, sem erro no console**. Derrubou o botão
+"Aparelhos" e mais três. Corrigido em `52ee0b8` — atributo em aspas simples.
+Se você gerar HTML em algum lugar, use aspas simples no atributo.

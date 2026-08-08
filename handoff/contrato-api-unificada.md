@@ -109,6 +109,22 @@ O que cada perfil recebe automaticamente quando entra por **sessão** ou por
 Se o perfil não estiver na tabela, **cai em `visualizador`** — nunca em "tudo".
 Perfil desconhecido é caso de erro, e erro não pode abrir porta.
 
+### ATENÇÃO — pendente do Guilherme, não implemente ainda
+
+Na tela `/usuarios` de produção, **cinco dos oito são `admin`**: Guilherme,
+Danilo, Bianca, Gabriel e Karen. Só Juliana, Prisciele e Jenifer são
+`consultor`.
+
+Do jeito que a tabela acima está escrita, essas cinco pessoas ganhariam
+`financeiro:escrever` e o direito de criar chave de API. Desconfio que `admin`
+ali virou sinônimo de "não é consultor", não de "manda em tudo" — mas quem
+responde isso é o Guilherme, não nós dois.
+
+**Enquanto ele não responde:** escreva o mapa perfil→escopos como uma
+constante no topo do arquivo, num dicionário só, fácil de trocar numa linha.
+Não espalhe a regra por dentro das rotas. A resposta dele muda um dicionário,
+não vinte lugares.
+
 **A chave de integração é diferente:** os escopos dela são os que foram
 escolhidos na criação, **limitados pelo perfil do dono**. Chave criada por um
 consultor nunca ganha `financeiro:escrever`, mesmo se pedirem.
@@ -181,24 +197,37 @@ tabela nenhuma neste contrato.
 
 ---
 
-## 7. Tela de chaves — admin
+## 7. Tela de chaves — EVOLUIR a que já existe
 
-Onde: `/admin/api-chaves`. Só `perfil == 'admin'`.
+**Correção deste contrato, 08/08.** Eu tinha escrito "criar
+`/admin/api-chaves`". **Não crie.** O Guilherme abriu essa URL, tomou 404, e
+me mostrou que a gestão de chaves **já existe**, dentro de
+**Configurações** (`templates/configuracoes.html`, bloco "Chaves de API",
+guardado por `varr_cfg`). Ela já lista nome, prefixo, escopos, usos, último uso
+e mostra a chave do Gabriel riscada como revogada.
 
-Espelha a tela de Aparelhos, que já existe e ele aprovou:
+Tela nova seria um segundo lugar fazendo quase a mesma coisa — e o menu do JOB
+já tem itens demais.
 
-- Lista: nome · dono · prefixo (`job_live_a1b2…`) · escopos · último uso ·
-  criada em · botão Revogar
-- Criar: nome, **dono** (select de usuários), escopos por caixa de seleção
-  agrupados por módulo, começando **todas desmarcadas**
-- A chave inteira aparece **uma vez**, na criação, com o aviso de que não
-  aparece de novo. Guarda só o hash.
-- Revogar pede confirmação e mostra o resultado (a revogação de aparelho não
-  mostrava — mesmo defeito, não repita)
-- Chave revogada continua na lista, riscada. Sumir da lista apaga a auditoria.
+**O que fazer nela, e só isto:**
 
-Sem emoji. Sem badge colorida escrita "ATIVA" — use o mesmo padrão visual da
-tela de Aparelhos.
+1. **Coluna e campo "Dono"** — select de usuários na criação, coluna na tabela.
+   Obrigatório. É a razão de ser da seção 1 deste contrato.
+2. **Escopos novos da seção 2**, agrupados por módulo (CRM, Cotação, WhatsApp,
+   Financeiro, IA), **todos desmarcados por padrão**. Hoje `cotacao:ler` vem
+   marcado — tire. Chave começa vazia e você marca o que precisa.
+3. **Escopos limitados pelo perfil do dono** — o select de escopos some ou
+   desabilita o que o dono não pode dar. `admin` **nunca** aparece na lista.
+4. **Revogar mostra o resultado.** Hoje some sem confirmar. Mesmo defeito da
+   revogação de aparelho; não repita nos dois lugares.
+
+**Não mude:** o aviso de que a chave aparece uma vez só (está bom, e é a coisa
+mais importante da tela), a chave revogada continuar na lista riscada, e o
+padrão visual. Sem emoji.
+
+**A tela é do Claude** (`templates/`), pela seção 1 do escopo. Você entrega a
+rota e o formato dos dados; eu mexo no HTML. Escreva na `conversa.md` o que a
+rota vai mandar e eu faço.
 
 ---
 
