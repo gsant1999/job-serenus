@@ -21,6 +21,10 @@ Na ordem em que o Guilherme quer.
 | 3 | `contrato-api-unificada.md` seção 7 | evoluir a tela de chaves que já existe em Configurações — não criar tela nova |
 | 4 | `contrato-apagar-contato-pessoal.md` | escrito, não começado. Só depois do Lote 1. |
 
+**Do Claude, não seu:** `diagnostico-ux-extensao.md` — diagnóstico das telas da
+extensão, esperando o Guilherme marcar a ordem. Não mexa; `extensao-whatsapp/`
+continua fora do seu escopo.
+
 ## REGRA PERMANENTE — vale sempre, não é tarefa
 
 | documento | o que é |
