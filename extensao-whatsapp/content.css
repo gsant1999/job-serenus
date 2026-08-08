@@ -1501,3 +1501,26 @@ details.job-cot-subgaveta > summary::before {
 }
 details.job-cot-subgaveta[open] > summary::before { transform: rotate(90deg); }
 details.job-cot-subgaveta > summary .job-cot-gaveta-q { margin-left: auto; }
+
+/* CONTATO MARCADO COMO PESSOAL — a barra inteira fecha.
+   Não é um aviso discreto: se a ferramenta continua utilizável, a marca não
+   quer dizer nada. O desfazer fica no JOB, de propósito. */
+.job-bloqueado {
+  margin: 24px 16px;
+  padding: 20px 18px;
+  border: 1px solid #f3c9d2;
+  border-left: 4px solid #c0304a;
+  border-radius: 12px;
+  background: #fdf2f4;
+}
+.job-bloqueado-t {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #a3243b;
+  margin-bottom: 8px;
+}
+.job-bloqueado-s {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #6b5157;
+}
