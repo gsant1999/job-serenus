@@ -15,6 +15,45 @@
 
 (function () {
   'use strict';
+
+  // ── A PONTE DA PÁGINA É INJETADA POR AQUI, NÃO PELO MANIFEST ──────────────
+  //
+  // Pelo manifest, o mundo MAIN só é injetado quando a página carrega. Se a
+  // ponte não subir, a barra abre e nada funciona, e a única saída é F5 — foi
+  // exatamente o que aconteceu e custou horas.
+  //
+  // Injetando daqui, a gente injeta DE NOVO quando perceber que faltou. O
+  // injetor decide o que carregar (a wa-js só se ela não estiver lá) e em que
+  // ordem.
+  let _ponteConfirmada = false;
+  let _tentativasPonte = 0;
+
+  function _injetarPonteNaPagina() {
+    try {
+      const s = document.createElement('script');
+      s.src = chrome.runtime.getURL('injetor.js');
+      s.dataset.wajs = chrome.runtime.getURL('wa-js.vendor.js');
+      s.dataset.ponte = chrome.runtime.getURL('wpp-bridge.js');
+      s.onload = () => s.remove();
+      (document.head || document.documentElement).appendChild(s);
+    } catch (e) { /* extensão recarregada no meio: a próxima rodada tenta */ }
+  }
+
+  window.addEventListener('message', (ev) => {
+    if (ev.source !== window) return;
+    const d = ev.data;
+    if (!d || d.source !== 'JOB_INJETOR') return;
+    if (d.tipo === 'pronto' && d.temPonte) _ponteConfirmada = true;
+  });
+
+  // Vigia barato: a cada 5s, enquanto a ponte não confirmar, tenta de novo.
+  // Para depois de 12 tentativas (1 minuto) pra não ficar batendo pra sempre
+  // numa aba onde o WhatsApp nem terminou de abrir.
+  _injetarPonteNaPagina();
+  const _vigia = setInterval(() => {
+    if (_ponteConfirmada || ++_tentativasPonte > 12) { clearInterval(_vigia); return; }
+    _injetarPonteNaPagina();
+  }, 5000);
   // TRAVA DE INJECAO DUPLA.
   //
   // Quando a extensao e recarregada, o service worker reinjeta os scripts nas
