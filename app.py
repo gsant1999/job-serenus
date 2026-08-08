@@ -811,6 +811,15 @@ def init_db():
                 usuario_id INTEGER NOT NULL,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
+            """CREATE TABLE IF NOT EXISTS ia_caca_docs (
+                id SERIAL PRIMARY KEY,
+                palavras_chave TEXT NOT NULL,
+                nome_documento TEXT NOT NULL,
+                icone TEXT DEFAULT '📄',
+                url_arquivo TEXT,
+                ativo INTEGER DEFAULT 1,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS score_heartbeat (
                 id SERIAL PRIMARY KEY,
                 usuario_id INTEGER NOT NULL,
@@ -1935,6 +1944,15 @@ def init_db():
         CREATE TABLE IF NOT EXISTS login_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             usuario_id INTEGER NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS ia_caca_docs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            palavras_chave TEXT NOT NULL,
+            nome_documento TEXT NOT NULL,
+            icone TEXT DEFAULT '📄',
+            url_arquivo TEXT,
+            ativo INTEGER DEFAULT 1,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS score_heartbeat (
@@ -22582,6 +22600,72 @@ Responda EXCLUSIVAMENTE em formato JSON com o seguinte schema, sem markdown:
     except Exception as e:
         app.logger.error(f"[IA Copiloto] Erro ao sugerir planos: {e}")
         return _wa_cors(jsonify({"ok": False, "erro": str(e)})), 500
+
+# --- ROTAS DO CAÇA-DOCUMENTOS (IA) ---
+
+@app.route('/api/ia/caca-docs/regras', methods=['GET', 'OPTIONS'])
+def api_ia_caca_docs_regras():
+    """Retorna o dicionário ativo de regras de documentos para a Extensão do WhatsApp"""
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    
+    conn = get_db()
+    regras = conn.execute("SELECT palavras_chave, nome_documento, icone FROM ia_caca_docs WHERE ativo=1").fetchall()
+    close_db(conn)
+    
+    dict_regras = []
+    for r in regras:
+        palavras = [p.strip().lower() for p in r['palavras_chave'].split(',') if p.strip()]
+        if palavras:
+            dict_regras.append({
+                "palavras": palavras,
+                "nome": r['nome_documento'],
+                "icone": r['icone']
+            })
+            
+    return _wa_cors(jsonify({"ok": True, "regras": dict_regras}))
+
+@app.route('/admin/ia/caca-docs', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def admin_caca_docs():
+    """Painel de gerenciamento do dicionário de palavras-chave para envio de materiais"""
+    conn = get_db()
+    if request.method == 'POST':
+        regra_id = request.form.get('id')
+        palavras = request.form.get('palavras_chave', '')
+        nome = request.form.get('nome_documento', '')
+        icone = request.form.get('icone', '📄')
+        
+        if palavras and nome:
+            if regra_id:
+                conn.execute("UPDATE ia_caca_docs SET palavras_chave=?, nome_documento=?, icone=? WHERE id=?", 
+                             (palavras, nome, icone, regra_id))
+            else:
+                conn.execute("INSERT INTO ia_caca_docs (palavras_chave, nome_documento, icone) VALUES (?, ?, ?)",
+                             (palavras, nome, icone))
+            conn.commit()
+            flash('Regra do Caça-Documentos salva com sucesso.', 'success')
+        else:
+            flash('Preencha as palavras-chave e o nome do documento.', 'error')
+        return redirect('/admin/ia/caca-docs')
+        
+    regras = conn.execute("SELECT * FROM ia_caca_docs ORDER BY id DESC").fetchall()
+    close_db(conn)
+    return render_template('admin_caca_docs.html', regras=regras)
+
+@app.route('/admin/ia/caca-docs/excluir', methods=['POST'])
+@login_required
+@admin_required
+def admin_caca_docs_excluir():
+    regra_id = request.form.get('id')
+    if regra_id:
+        conn = get_db()
+        conn.execute("DELETE FROM ia_caca_docs WHERE id=?", (regra_id,))
+        conn.commit()
+        close_db(conn)
+        flash('Regra excluída com sucesso.', 'success')
+    return redirect('/admin/ia/caca-docs')
 
 
 @app.route('/api/whatsapp/analisar', methods=['POST', 'OPTIONS'])
