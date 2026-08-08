@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-phone-vibrate text-primary"></i> Sessões da Extensão WhatsApp</h2>
+        <a href="{{ url_for('crm') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Voltar
+        </a>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Usuário</th>
+                            <th>Apelido do Dispositivo</th>
+                            <th>Criado em</th>
+                            <th>Último uso</th>
+                            <th>Status</th>
+                            <th class="text-end">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in sessoes %}
+                        <tr class="{% if s.revogado_em %}table-secondary text-muted{% endif %}">
+                            <td class="fw-bold">{{ s.nome }}</td>
+                            <td>{{ s.apelido or 'Extensão' }}</td>
+                            <td>{{ s.criado_em[:16].replace('T', ' ') if s.criado_em else '-' }}</td>
+                            <td>{{ s.ultimo_uso[:16].replace('T', ' ') if s.ultimo_uso else '-' }}</td>
+                            <td>
+                                {% if s.revogado_em %}
+                                    <span class="badge bg-danger">Revogado em {{ s.revogado_em|truncate(10, True, '') }}</span>
+                                {% else %}
+                                    <span class="badge bg-success">Ativo</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if not s.revogado_em %}
+                                <form method="POST" action="{{ url_for('admin_extensao_sessoes_revogar', uid=s.usuario_id, sid=s.id) }}" class="d-inline">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Tem certeza que deseja revogar o acesso deste dispositivo? A extensão será desconectada imediatamente.')">
+                                        <i class="bi bi-x-circle"></i> Revogar
+                                    </button>
+                                </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center text-muted py-4">Nenhuma sessão encontrada.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
