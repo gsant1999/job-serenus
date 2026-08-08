@@ -137,12 +137,12 @@
     document.getElementById('ap-titulo').textContent = 'Aparelhos de ' + nome;
     document.getElementById('ap-lista').innerHTML =
       '<div style="color:var(--cinza); font-size:13px;">Carregando…</div>';
-    document.getElementById('modal-aparelhos').classList.add('ver');
+    document.getElementById('modal-aparelhos').classList.add('open');
     carregar();
   };
 
   window.fecharAparelhos = function () {
-    document.getElementById('modal-aparelhos').classList.remove('ver');
+    document.getElementById('modal-aparelhos').classList.remove('open');
   };
 
   function carregar() {
