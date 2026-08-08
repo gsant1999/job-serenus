@@ -22607,8 +22607,7 @@ def api_ia_caca_docs_regras():
     """Retorna o dicionário ativo de regras de documentos para a Extensão do WhatsApp"""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    
-    conn = get_db()
+    conn = db()
     regras = conn.execute("SELECT palavras_chave, nome_documento, icone FROM ia_caca_docs WHERE ativo=1").fetchall()
     close_db(conn)
     
@@ -22629,7 +22628,7 @@ def api_ia_caca_docs_regras():
 @admin_required
 def admin_caca_docs():
     """Painel de gerenciamento do dicionário de palavras-chave para envio de materiais"""
-    conn = get_db()
+    conn = db()
     if request.method == 'POST':
         regra_id = request.form.get('id')
         palavras = request.form.get('palavras_chave', '')
@@ -22659,7 +22658,7 @@ def admin_caca_docs():
 def admin_caca_docs_excluir():
     regra_id = request.form.get('id')
     if regra_id:
-        conn = get_db()
+        conn = db()
         conn.execute("DELETE FROM ia_caca_docs WHERE id=?", (regra_id,))
         conn.commit()
         close_db(conn)
