@@ -3306,6 +3306,10 @@ def init_db():
         ("cotacao_tabela", "vidas_min", "INTEGER"),
         ("cotacao_tabela", "vidas_max", "INTEGER"),
         ("cotacao_tabela", "mei", "INTEGER DEFAULT 0"),
+        # administradora entrou no CREATE TABLE do contrato das dimensoes mas
+        # ficou de fora daqui — banco novo tinha a coluna, PRODUCAO nao. A rota
+        # de importacao estourava UndefinedColumn em toda chamada.
+        ("cotacao_tabela", "administradora", "TEXT DEFAULT ''"),
         ("cotacao_tabela", "codigo", "TEXT DEFAULT ''"),
         ("cotacao_tabela", "fonte", "TEXT DEFAULT 'painel'"),
         ("cotacao_tabela", "vigencia_pdf", "TEXT DEFAULT ''"),
