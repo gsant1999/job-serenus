@@ -14,18 +14,18 @@
   <form class="add-row" method="POST" action="/admin/ia/caca-docs">
     <div class="campo"><label>Palavras-Chave (separadas por vírgula)</label><input name="palavras_chave" placeholder="Ex: reembolso, nota fiscal, recibo" required></div>
     <div class="campo"><label>Documento (Nome na tela)</label><input name="nome_documento" placeholder="Ex: PDF Reembolso Amil" required></div>
-    <div class="campo"><label>Ícone</label><input name="icone" placeholder="📄" value="📄"></div>
+    <div class="campo"><label>Tipo (Ex: PDF, Áudio)</label><input name="icone" placeholder="PDF" value="PDF"></div>
     <button class="btn" type="submit">Adicionar Regra</button>
   </form>
   <div class="card">
     <div class="card-header"><h3>Regras Ativas</h3><span class="tag tag-info">{{ regras|length }}</span></div>
     <table class="tbl">
-      <thead><tr><th>Palavras-Chave</th><th>Ícone</th><th>Documento Sugerido</th><th>Ação</th></tr></thead>
+      <thead><tr><th>Palavras-Chave</th><th>Tipo</th><th>Documento Sugerido</th><th>Ação</th></tr></thead>
       <tbody>
         {% for r in regras %}
         <tr>
           <td><strong>{{ r.palavras_chave }}</strong></td>
-          <td style="font-size: 18px;">{{ r.icone }}</td>
+          <td style="font-size: 14px; font-weight: bold; color: var(--rosa);">{{ r.icone }}</td>
           <td>{{ r.nome_documento }}</td>
           <td>
             <form action="/admin/ia/caca-docs/excluir" method="POST" style="display:inline;" onsubmit="return confirm('Excluir esta regra?');">

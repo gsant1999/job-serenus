@@ -22634,7 +22634,7 @@ def admin_caca_docs():
         regra_id = request.form.get('id')
         palavras = request.form.get('palavras_chave', '')
         nome = request.form.get('nome_documento', '')
-        icone = request.form.get('icone', '📄')
+        icone = request.form.get('icone', 'PDF')
         
         if palavras and nome:
             if regra_id:

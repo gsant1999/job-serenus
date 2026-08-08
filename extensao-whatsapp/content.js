@@ -7892,7 +7892,7 @@
     }
 
     overlay.innerHTML = `
-      <div style="font-size: 20px;">${regra.icone}</div>
+      <div style="font-size: 11px; font-weight: bold; background: #f1f5f9; color: #64748b; padding: 4px 8px; border-radius: 4px; border: 1px solid #e2e8f0; text-transform: uppercase;">${regra.icone}</div>
       <div style="flex:1;">
         <div style="font-size:11px; text-transform:uppercase; font-weight:700; color:#6d28d9; margin-bottom:2px;">Sugestão Rápida</div>
         <div style="font-size:13px; font-weight:500;">Enviar <b>${regra.nome}</b>?</div>
