@@ -1662,8 +1662,14 @@
         '<div class="job-cfg-bloco">' +
           '<div class="job-cfg-bloco-t">' + _cfgTile(_ICO_LINK, '#3b82f6') + 'Conexão</div>' +
           '<div class="job-cfg-cartao">' +
+            // O ENDERECO PADRAO APARECE PREENCHIDO.
+            //
+            // Vazio, a pessoa acha que falta configurar e nao entra. Na verdade
+            // o service worker ja cai no padrao quando o campo esta vazio — o
+            // que faltava era MOSTRAR isso.
             '<div class="job-cfg-campo"><label>Endereço do JOB</label>' +
-              '<input id="job-cfg-url" type="text" value="' + esc(g.jobUrl || '') + '"></div>' +
+              '<input id="job-cfg-url" type="text" value="' +
+                esc(g.jobUrl || _SITE_BASE_URL_EXT || '') + '"></div>' +
             '<button type="button" class="job-cfg-bt" id="job-cfg-testar">Testar conexão</button>' +
           '</div>' +
         '</div>' +
