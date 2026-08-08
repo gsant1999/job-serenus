@@ -1399,17 +1399,18 @@
     //
     // Quando a rota subir, esta mesma linha passa a exigir o login sozinha,
     // sem versão nova da extensão. O portão liga no dia em que faz sentido.
-    // TRAVA DE LIBERACAO — decisao do Guilherme em 08/08.
+    // PORTAO LIBERADO em 08/08, por decisao do Guilherme.
     //
-    // O servidor ja sabe fazer login, entao a deteccao automatica ligaria o
-    // portao pros oito consultores em ate 10 minutos, no meio do expediente.
-    // Ele quer testar o ciclo inteiro sozinho primeiro e escolher a hora de
-    // soltar pros outros.
+    // Com `true`, a extensao pergunta ao servidor se ele sabe fazer login. Se
+    // souber (e sabe: /api/whatsapp/login esta no ar), quem nao tem token ve o
+    // portao e precisa entrar — a chave antiga deixa de bastar.
     //
-    // Enquanto isto for `false`, o portao so aparece pra quem nao tem
-    // credencial NENHUMA (instalou e nao configurou) — ninguem e barrado por
-    // falta de login. Trocar pra `true` (e publicar a versao) libera pra todos.
-    const PORTAO_EXIGE_LOGIN = false;
+    // A saida continua existindo: o link discreto no portao desliga a extensao
+    // naquela maquina. Ninguem fica sem o WhatsApp de trabalho por causa da
+    // nossa extensao.
+    //
+    // Pra reverter: voltar pra `false` e publicar. Leva um minuto.
+    const PORTAO_EXIGE_LOGIN = true;
 
     let servidorTemLogin = false;
     if (PORTAO_EXIGE_LOGIN) {
