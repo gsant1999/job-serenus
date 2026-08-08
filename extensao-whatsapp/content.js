@@ -4655,8 +4655,42 @@
     }
   }
 
+
+  // ── MÍNIMO DE VIDAS PARA CONTRATAR (PME) ────────────────────────────────
+  //
+  // NÃO CONFUNDIR com a faixa da tabela de preço. "Esta tabela vale de 5 a 29
+  // vidas" não quer dizer que a operadora só vende a partir de 5 — quer dizer
+  // que, para menos, o preço vem de OUTRA tabela, que a gente pode nem ter
+  // visto ainda. Foi essa confusão que quase me fez bloquear venda de verdade:
+  // no catálogo, a Amil aparece só com a faixa 5-29, e os PDFs dela têm 2 e
+  // 3-4 vidas.
+  //
+  // Então o mínimo de CONTRATAÇÃO vem daqui — regra comercial, dita pelo
+  // Guilherme — e as faixas continuam servindo só pra escolher a tabela certa.
+  //
+  // Um dia isto deve virar cadastro no JOB. Enquanto for lista, mora num lugar
+  // só e é este.
+  const _COT_MIN_VIDAS_PADRAO = 2;
+  const _COT_MIN_VIDAS = [
+    { casa: /meds[eê]nior|med s[eê]nior/i,      min: 1 },
+    { casa: /hapvida|notre ?dame/i,             min: 1 },
+    { casa: /benefic[eê]ncia/i,                 min: 1 },
+    { casa: /sulam[eé]rica|sul am[eé]rica/i,    min: 3 },
+    { casa: /bradesco/i,                        min: 3 },
+    { casa: /porto seguro/i,                    min: 3 },
+  ];
+
+  function _cotMinVidas(nomeOperadora) {
+    const n = String(nomeOperadora || '');
+    for (const r of _COT_MIN_VIDAS) if (r.casa.test(n)) return r.min;
+    return _COT_MIN_VIDAS_PADRAO;
+  }
+
   function _cotPintarOperadoras() {
     const ops = _cot.operadoras || [];
+    // PME é o único com mínimo de vidas; PF e adesão são por pessoa.
+    const ehPME = String(_cot.modalidade) === '2';
+    const totalVidas = _cot.totalVidas || 0;
     setCorpoSecao('<div class="job-cot-wrap">' +
       _cotTopo(abrirSecaoCotarInline) +
       '<div class="job-cnpj-titulo">Operadoras</div>' +
@@ -4667,8 +4701,15 @@
             // A logo é da tela deles e pode ser barrada pela política de imagem
             // do WhatsApp Web. Por isso ela é ENFEITE: some sozinha se não
             // carregar (onerror), e o nome continua respondendo pela linha.
+            // Operadora que não aceita essa quantidade de vidas aparece
+            // APAGADA e dizendo o porquê, em vez de deixar cotar e a proposta
+            // ser recusada depois de assinada.
+            const minV = ehPME ? _cotMinVidas(o.nome) : 1;
+            const bloqueada = ehPME && totalVidas > 0 && totalVidas < minV;
             return '<button type="button" class="job-cot-op' + (jaFoi ? ' feita' : '') +
-              '" data-id="' + esc(o.id) + '">' +
+              (bloqueada ? ' bloqueada" disabled title="' +
+                 esc(o.nome + ' exige no mínimo ' + minV + ' vidas no PME') + '"' : '"') +
+              ' data-id="' + esc(o.id) + '">' +
               // A INICIAL É O PADRÃO, a logo entra por cima quando existir.
               //
               // Antes eu punha <img src="https://..."> com onerror inline. Duas
@@ -4679,6 +4720,7 @@
               // é desenhada depois de estar na mão.
               '<span class="job-cot-op-ini">' + esc((o.nome || '?').trim().charAt(0).toUpperCase()) + '</span>' +
               '<span class="job-cot-op-n">' + esc(o.nome) + '</span>' +
+              (bloqueada ? '<span class="job-cot-op-min">mín. ' + minV + ' vidas</span>' : '') +
               (jaFoi ? '<span class="job-cot-op-ok">' + jaFoi.planos.length +
                        (jaFoi.planos.length === 1 ? ' plano' : ' planos') + '</span>' : '') +
             '</button>';
