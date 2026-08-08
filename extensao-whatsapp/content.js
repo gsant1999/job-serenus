@@ -5151,6 +5151,15 @@
       '<a class="job-cot-nova" href="' + esc(doc) + '" target="_blank" rel="noopener" ' +
         'title="Abre a apresentação no JOB: copiar imagem, PDF, destacar plano, legenda e envio por e-mail">' +
         'Abrir apresentação (imagem, PDF, destaque)</a>' +
+      // NOVA COTAÇÃO É LINK NOVO, e a frase precisa deixar isso claro: o
+      // cliente que já recebeu o link antigo continua vendo o antigo. Quem
+      // quer CORRIGIR um valor sem trocar o link usa "Corrigir valor" lá
+      // dentro do documento — são coisas diferentes e confundi-las manda dois
+      // preços diferentes pro mesmo cliente.
+      '<a class="job-cot-nova" href="' + esc(_SITE_BASE_URL_EXT + '/cotacao/' + r.id + '/reabrir') + '" ' +
+        'target="_blank" rel="noopener" ' +
+        'title="Cria uma cotação nova, com link próprio. Esta aqui não muda — quem já recebeu o link continua vendo ela.">' +
+        'Nova cotação (link novo)</a>' +
       '<div class="job-cot-rodape">' +
         '<button type="button" id="job-cot-denovo" title="Mantém cidade, tipo e vidas e volta pras operadoras">' +
           'Cotar de novo para este cliente</button>' +

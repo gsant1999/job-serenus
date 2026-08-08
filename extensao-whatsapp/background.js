@@ -107,10 +107,16 @@ async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId, opts) {
     try {
       const resp = await fetch(jobUrl + caminho, {
         method: metodo,
+        // TOKEN MANDA A CHAVE EMBORA.
+        //
+        // Se as duas viajassem juntas, o servidor registraria "chave antiga
+        // usada" em toda chamada de todo mundo — e era esse log que ia dizer
+        // quando dá pra desligar a chave. Mandando só uma, o log passa a
+        // significar exatamente uma coisa: ALGUÉM AINDA NÃO ENTROU.
         headers: Object.assign(
           { 'Content-Type': 'application/json' },
-          extKey ? { 'X-Extension-Key': extKey } : {},
-          extToken ? { 'Authorization': 'Bearer ' + extToken } : {}
+          extToken ? { 'Authorization': 'Bearer ' + extToken }
+                   : (extKey ? { 'X-Extension-Key': extKey } : {})
         ),
         body: corpo ? JSON.stringify(corpo) : undefined,
         signal: controller.signal
