@@ -38,7 +38,26 @@ import re
 import sys
 import unicodedata
 
+import subprocess
+
 import pdfplumber
+
+
+def _texto_pdftotext(caminho, pagina):
+    """Texto da pagina pelo pdftotext.
+
+    O pdfplumber nao devolve celula GIRADA: na tabela da Allcare o rotulo
+    "Com coparticipacao Total" fica na vertical, na coluna da esquerda, e
+    sumia — a tabela nascia sem coparticipacao e a rota recusava. O pdftotext
+    entrega essa celula.
+    """
+    try:
+        r = subprocess.run(['pdftotext', '-f', str(pagina), '-l', str(pagina),
+                            '-layout', caminho, '-'],
+                           capture_output=True, text=True, timeout=30)
+        return r.stdout or ''
+    except Exception:
+        return ''
 
 FAIXAS = ['00-18', '19-23', '24-28', '29-33', '34-38',
           '39-43', '44-48', '49-53', '54-58', '59+']
@@ -273,11 +292,91 @@ def _passo(linhas, inicio, precos):
     return gaps[len(gaps) // 2] if gaps else 18.0
 
 
+def _contexto(texto, herdado):
+    """Dimensoes que valem pra pagina: modalidade, copart, administradora...
+
+    Sao herdadas: o cabecalho que declara "ADESAO" ou "Affix" aparece uma vez,
+    na capa, e as paginas de preco seguintes nao repetem. Zerar a cada pagina
+    faria a tabela nascer sem modalidade — e a rota de importacao recusa, com
+    razao, tabela sem dimensao. Foi o que aconteceu na primeira tentativa: as
+    10 tabelas da Vera Cruz foram todas recusadas.
+    """
+    c = dict(herdado)
+    t = _sem_acento(texto).lower()
+
+    if 'por adesao' in t or 'adesao' in t:
+        c['modalidade'] = 'Adesao'
+    elif 'pessoa fisica' in t or 'individual' in t:
+        c['modalidade'] = 'Individual'
+    elif ' pme' in t or ' pj' in t:
+        c['modalidade'] = 'PME'
+
+    for chave, nome in [('affix', 'Affix'), ('allcare', 'Allcare'),
+                        ('2care', 'Allcare'), ('corpe', 'Corpe')]:
+        if chave in t:
+            c['administradora'] = nome
+            break
+
+    # A string vai como o PDF escreve. Traduzir "com coparticipacao" pro
+    # vocabulario do Painel ("Completa"/"Parcial") e adivinhacao, e adivinhar
+    # aqui guarda preco certo na coparticipacao errada.
+    if 'sem coparticipacao' in t:
+        c['coparticipacao'] = 'Sem'
+    elif 'coparticipacao parcial' in t or 'copart parcial' in t:
+        c['coparticipacao'] = 'Parcial'
+    elif 'coparticipacao total' in t:
+        c['coparticipacao'] = 'Total'
+    elif 'com coparticipacao' in t or 'participativos' in t:
+        c['coparticipacao'] = 'Com coparticipacao'
+
+    m = re.search(r'grupo de munic[a-z]*\s*\n?\s*([a-z ]{3,30})', t)
+    if m:
+        c['abrangencia'] = _sem_acento(m.group(1)).strip().title()
+
+    # QUANTAS VIDAS: adesao e individual nao tem faixa de vidas — o preco e por
+    # pessoa. Mas a tabela do JOB exige a faixa preenchida (linha sem faixa foi
+    # o defeito que a gente consertou), entao vai 1 a 999, que quer dizer
+    # "serve pra qualquer quantidade". Deixar nulo faria a rota recusar; chutar
+    # "2 a 29" seria inventar uma regra que a operadora nao tem.
+    m = re.search(r'(\d+)\s*a\s*(\d+)\s*vidas', t)
+    if m:
+        c['vidas_min'], c['vidas_max'] = int(m.group(1)), int(m.group(2))
+    elif c.get('vidas_min') is None and c.get('modalidade'):
+        # Nenhuma faixa declarada = o preco nao varia por quantidade de vidas.
+        # Vale pra adesao e individual (preco por pessoa) e tambem pra PME de
+        # operadora que publica uma tabela so, como a Vera Cruz.
+        c['vidas_min'], c['vidas_max'] = 1, 999
+    return c
+
+
+def _do_caminho(caminho):
+    """Modalidade e administradora deduzidas da PASTA.
+
+    A tabela da Allcare nao escreve "adesao" em lugar nenhum do PDF — quem
+    sabe que ela e de adesao e o organizador, que ja classificou o arquivo
+    lendo o conteudo. Usar a pasta aqui e reaproveitar essa decisao, nao
+    chutar; e ela so entra quando o PDF nao disser nada.
+    """
+    partes = [_sem_acento(x).lower() for x in caminho.split(os.sep)]
+    fora = {}
+    for p in partes:
+        if p in ('adesao', 'pme', 'individual'):
+            fora['modalidade'] = {'adesao': 'Adesao', 'pme': 'PME',
+                                  'individual': 'Individual'}[p]
+        if p in ('affix', 'allcare', 'corpe'):
+            fora['administradora'] = p.title()
+    return fora
+
+
 def ler_pdf(caminho):
     saida = []
+    ctx = {'modalidade': '', 'administradora': '', 'coparticipacao': '',
+           'abrangencia': '', 'vidas_min': None, 'vidas_max': None}
+    ctx.update(_do_caminho(caminho))
     with pdfplumber.open(caminho) as pdf:
         for npag, pagina in enumerate(pdf.pages, 1):
             txt = pagina.extract_text() or ''
+            ctx = _contexto(txt + '\n' + _texto_pdftotext(caminho, npag), ctx)
             for ancoras, precos, inicio, linhas in _grades_da_pagina(pagina):
                 passo = _passo(linhas, inicio, precos)
                 colunas, comum = _cabecalho(linhas, inicio, ancoras, passo)
@@ -285,11 +384,14 @@ def ler_pdf(caminho):
                     nome, acom, ans = _campos(coluna, comum, txt)
                     if not nome:
                         continue
-                    saida.append({
+                    linha = dict(ctx)
+                    linha.update({
                         'arquivo': os.path.basename(caminho), 'pagina': npag,
                         'plano': nome, 'acomodacao': acom, 'ans': ans,
+                        'codigo': ans,
                         'faixas': {fx: col[j] for fx, col in precos.items()},
                     })
+                    saida.append(linha)
     return saida
 
 
