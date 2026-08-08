@@ -10,7 +10,8 @@
       "correcao_consultor": {
         "vidas": "1"
       },
-      "regra_aprendida": "Pets (cães, gatos) NÃO entram na contagem de vidas de planos de saúde humanos. Ignorar animais de estimação na composição familiar."
+      "regra_aprendida": "Pets (cães, gatos) NÃO entram na contagem de vidas de planos de saúde humanos. Ignorar animais de estimação na composição familiar.",
+      "data": "2026-08-07"
     },
     {
       "contexto_original": "Cliente falou 'estou fugindo da Unimed Campinas'.",
@@ -20,7 +21,8 @@
       "correcao_consultor": {
         "operadora_interesse": ""
       },
-      "regra_aprendida": "Se o verbo for 'fugindo', 'saindo', 'não quero', o cliente NÃO tem interesse nessa operadora. Isso deve ir para objeções, não para interesse."
+      "regra_aprendida": "Se o verbo for 'fugindo', 'saindo', 'não quero', o cliente NÃO tem interesse nessa operadora. Isso deve ir para objeções, não para interesse.",
+      "data": "2026-08-07"
     }
   ]
 }
