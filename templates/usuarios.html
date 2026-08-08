@@ -74,6 +74,8 @@
           </td>
           <td style="white-space:nowrap;">
             <button class="btn-ghost" onclick='editar({{ u|tojson }})'>Editar</button>
+            <button class="btn-ghost" onclick="abrirAparelhos({{ u.id }}, {{ u.nome|tojson }})"
+              title="WhatsApps conectados à extensão por esta pessoa">Aparelhos</button>
             {% if not u.senha_hash and u.id %}<a href="/usuario/regenerar-link/{{ u.id }}" class="btn-ghost" style="color:var(--info);">Novo link</a>{% endif %}
           </td>
         </tr>
@@ -83,6 +85,123 @@
   </div>
 
 </div>
+
+
+<!-- APARELHOS CONECTADOS ────────────────────────────────────────────────────
+     Mora aqui, e não numa tela própria, porque a pergunta que traz alguém até
+     esta lista é sobre UMA PESSOA: "o consultor saiu", "trocamos o computador
+     dele". Nos dois casos você abre Usuários — e o menu já tem itens demais
+     pra ganhar mais um.
+
+     O ÚLTIMO USO é a coluna que torna a lista utilizável. Sem ela ninguém tem
+     coragem de desconectar nada, porque cinco linhas iguais não dizem qual é a
+     máquina velha e qual é a que a pessoa está usando agora. -->
+<div class="modal-overlay" id="modal-aparelhos">
+  <div class="modal">
+    <h3 id="ap-titulo">Aparelhos conectados</h3>
+    <p style="font-size:12.5px; color:var(--cinza); margin-bottom:16px;">
+      Cada WhatsApp aberto com a extensão é um aparelho. A mesma pessoa pode ter
+      vários — desconectar um não mexe nos outros.
+    </p>
+    <div id="ap-lista"></div>
+    <div class="modal-acoes" style="margin-top:18px;">
+      <button type="button" class="btn-ghost" onclick="fecharAparelhos()">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var apUsuario = null;
+
+  function quando(iso) {
+    if (!iso) return 'nunca usado';
+    var d = new Date(iso);
+    if (isNaN(d)) return iso;
+    var min = Math.round((Date.now() - d.getTime()) / 60000);
+    if (min < 2) return 'agora';
+    if (min < 60) return 'há ' + min + ' min';
+    if (min < 60 * 24) return 'há ' + Math.round(min / 60) + 'h';
+    var dias = Math.round(min / 1440);
+    return 'há ' + dias + (dias === 1 ? ' dia' : ' dias');
+  }
+
+  function esc(t) {
+    return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  window.abrirAparelhos = function (id, nome) {
+    apUsuario = id;
+    document.getElementById('ap-titulo').textContent = 'Aparelhos de ' + nome;
+    document.getElementById('ap-lista').innerHTML =
+      '<div style="color:var(--cinza); font-size:13px;">Carregando…</div>';
+    document.getElementById('modal-aparelhos').classList.add('ver');
+    carregar();
+  };
+
+  window.fecharAparelhos = function () {
+    document.getElementById('modal-aparelhos').classList.remove('ver');
+  };
+
+  function carregar() {
+    fetch('/admin/extensao/sessoes?usuario_id=' + apUsuario)
+      .then(function (r) {
+        // A rota ainda pode não existir (está sendo feita). Dizer isso é
+        // melhor que mostrar "erro" e deixar a pessoa achando que quebrou.
+        if (r.status === 404) return { ok: false, indisponivel: true };
+        return r.json();
+      })
+      .then(pintar)
+      .catch(function () { pintar({ ok: false }); });
+  }
+
+  function pintar(d) {
+    var c = document.getElementById('ap-lista');
+    if (d && d.indisponivel) {
+      c.innerHTML = '<div style="color:var(--cinza); font-size:13px;">' +
+        'O login por aparelho ainda não está ligado neste servidor.</div>';
+      return;
+    }
+    if (!d || !d.ok) {
+      c.innerHTML = '<div style="color:var(--cinza); font-size:13px;">' +
+        'Não consegui carregar agora.</div>';
+      return;
+    }
+    var ativos = (d.sessoes || []).filter(function (s) { return !s.revogado_em; });
+    if (!ativos.length) {
+      c.innerHTML = '<div style="color:var(--cinza); font-size:13px;">' +
+        'Nenhum aparelho conectado. Esta pessoa ainda não entrou pelo popup da extensão.</div>';
+      return;
+    }
+    c.innerHTML = ativos.map(function (s) {
+      return '<div style="display:flex; align-items:center; gap:12px; padding:11px 12px;' +
+        ' border:1px solid var(--borda); border-radius:10px; margin-bottom:8px;">' +
+        '<div style="flex:1 1 auto; min-width:0;">' +
+          '<div style="font-weight:600;">' + esc(s.apelido || 'Aparelho sem nome') + '</div>' +
+          '<div style="font-size:11.5px; color:var(--cinza); margin-top:2px;">' +
+            'último uso ' + quando(s.ultimo_uso) + '</div>' +
+        '</div>' +
+        '<button type="button" class="btn-ghost" style="color:var(--vermelho);"' +
+          ' onclick="desconectar(' + s.id + ', ' + JSON.stringify(esc(s.apelido || 'este aparelho')) + ')">' +
+          'Desconectar</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  window.desconectar = function (id, apelido) {
+    // Desconectar derruba alguém que pode estar no meio de um atendimento.
+    // A confirmação diz O QUE acontece, não só "tem certeza?".
+    if (!confirm('Desconectar "' + apelido + '"?\n\nA extensão para de funcionar naquele computador ' +
+                 'até a pessoa entrar de novo. Os outros aparelhos dela continuam funcionando.')) return;
+    fetch('/admin/extensao/sessoes/' + id + '/revogar', { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function () { carregar(); })
+      .catch(function () { carregar(); });
+  };
+})();
+</script>
 
 <!-- MODAL NOVO -->
 <div class="modal-overlay" id="modal-novo">
