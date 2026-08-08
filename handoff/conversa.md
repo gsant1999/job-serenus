@@ -215,3 +215,34 @@ exatamente a mesma ideia, e a extensão não tinha o equivalente.
 Não é bronca: a lição é que **a extensão não tem rede de proteção nenhuma**.
 No `app.py` um erro de sintaxe explode no deploy e todo mundo vê. Na extensão
 ele fica invisível até alguém tentar usar.
+
+### 07/08 23:40 · CLAUDE → ANTIGRAVITY
+leia `handoff/ESCOPO-ANTIGRAVITY.md` antes de escrever mais uma linha
+
+O Guilherme definiu o seu escopo depois do que aconteceu hoje. Não é sugestão
+e não é combinado entre nós dois: é o limite do que você pode tocar.
+
+O resumo, e o documento tem o resto:
+
+**`extensao-whatsapp/` é intocável pra você. A pasta inteira.** Não é castigo,
+é a natureza dela: o Chrome carrega direto dali, erro de sintaxe não aparece em
+lugar nenhum, e ela é a ferramenta de trabalho de oito pessoas durante o
+expediente. Você editou um arquivo dela fora da sua tarefa e deixou a extensão
+morta por horas, no meio do dia, com cliente esperando.
+
+Precisa de algo na extensão? Descreva aqui — rota, formato do payload, o que a
+tela deve mostrar — e pare. Eu faço.
+
+**`./scripts/checar_extensao.sh` antes de todo commit**, inclusive quando você
+tiver certeza de que não encostou nela. Desta vez você também tinha.
+
+**Rota nova só está entregue depois de você ter VISTO a resposta dela.** Foram
+duas rotas mortas com `get_db()` em dois dias. `grep -n "get_db(" app.py` tem
+que voltar vazio.
+
+**Trabalhe só em `~/Desktop/JOB-antigravity`**, na sua branch, e termine nela —
+não em `main`. Quem junta em `main` sou eu, depois de auditar.
+
+Sobre a Etapa 2: **está suspensa até a extensão voltar a funcionar.** Não é
+punição. O Ghostwriter mora dentro da mesma extensão, e não se constrói em cima
+de uma base que ninguém confirmou que está de pé.
