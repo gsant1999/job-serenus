@@ -240,6 +240,39 @@ def _grades_da_pagina(pagina):
     return saida
 
 
+def _planos_por_faixa(linhas, ini, fim, ancoras):
+    """Nome de plano que aparece UMA vez e vale pra mais de uma coluna.
+
+    Na Santa Tereza o "PLUS" fica centralizado sobre duas colunas (quarto
+    coletivo e privativo). Nenhuma das duas o pega pelo centro, e as duas
+    ficavam com "QUARTO COLETIVO" e "Quarto privativo" como nome de plano.
+
+    Aqui cada nome reconhecido vale da posição dele PRA DIREITA, até o próximo
+    nome — que é como o olho lê um banner sobre colunas.
+    """
+    achados = []
+    for top, ws in linhas[ini:fim]:
+        for w in ws:
+            nome = _plano_conhecido(w['text'])
+            if nome:
+                achados.append((w['x0'], nome))
+    if not achados:
+        return [''] * len(ancoras)
+    # MAIS PRÓXIMO, não "o último à esquerda". O "PLUS" da Santa Tereza fica
+    # CENTRALIZADO sobre as duas colunas dele, então ele nasce à direita da
+    # quarta — pela regra da esquerda, a quarta herdava o "REGIONAL" da coluna
+    # anterior, que é preço de outro plano com nome errado.
+    fora = []
+    for a in ancoras:
+        melhor, dist = '', 1e9
+        for x, nome in achados:
+            d = abs(x - a)
+            if d < dist:
+                melhor, dist = nome, d
+        fora.append(melhor)
+    return fora
+
+
 def _cabecalho(linhas, ate, ancoras, passo, limite=10):
     # Dez linhas, nao seis: o cabecalho da Affix empilha nome, segmentacao,
     # coparticipacao, acomodacao e codigo ANS antes da primeira faixa, e com
@@ -274,11 +307,52 @@ def _cabecalho(linhas, ate, ancoras, passo, limite=10):
             ' '.join(comum))
 
 
+
+# ── VOCABULÁRIO DE PLANOS, POR OPERADORA ─────────────────────────────────────
+#
+# Nestes PDFs o nome do plano vive num banner que atravessa as colunas, e
+# raspar o cabeçalho trazia junto pedaços de titulo: "TABELA CPS Atendimento em
+# Ca", "EM À 29 VIDAS DIRIGIDO AMERI". Preço saía certo e nome saía impossível
+# de casar com nada.
+#
+# Então em vez de adivinhar o nome, a gente RECONHECE num vocabulário que o
+# Guilherme ditou. É o oposto de chutar: o nome só sai se for um plano que a
+# operadora realmente vende.
+#
+# Coluna cujo cabeçalho não bater com nada da lista fica com o texto cru — e
+# aparece no resumo como sujeira, que é o sinal de que falta plano aqui.
+PLANOS_CONHECIDOS = [
+    # Santa Tereza — Global, Regional, Plus e Dirigido Americana, cada um com
+    # coparticipação parcial e completa.
+    (r'dirigido\s*americana', 'Dirigido Americana'),
+    (r'\bglobal\b',           'Global'),
+    (r'\bregional\b',         'Regional'),
+    (r'\bplus\b',             'Plus'),
+    # MedSênior — CPS é a linha de Campinas; Black e Infinite são as de cima.
+    # No PME os nomes ganham "Corporate".
+    (r'\binfinite\b',         'Infinite'),
+    (r'\bblack\s*\d?\b',     'Black'),
+    (r'\bcps\b',              'CPS'),
+]
+
+
+def _plano_conhecido(texto, modalidade=''):
+    """Acha o nome do plano dentro do cabeçalho bagunçado, ou devolve ''."""
+    t = _sem_acento(texto).lower()
+    for padrao, nome in PLANOS_CONHECIDOS:
+        if re.search(padrao, t):
+            # No PME a MedSenior chama de Corporate. O sufixo vem da
+            # modalidade, nao do texto — o PDF nem sempre escreve.
+            if nome in ('CPS', 'Black', 'Infinite') and modalidade == 'PME':
+                return nome + ' Corporate'
+            return nome
+    return ''
+
 _ACOM = [('apartamento', 'Apartamento'), ('enfermaria', 'Enfermaria'),
          ('individual', 'Apartamento'), ('coletiv', 'Enfermaria')]
 
 
-def _campos(coluna, comum, pagina_txt):
+def _campos(coluna, comum, pagina_txt, modalidade=''):
     """Separa nome do plano, acomodacao e codigo ANS do cabecalho da coluna."""
     txt = coluna + ' ' + comum
     puro = _sem_acento(txt).lower()
@@ -291,6 +365,12 @@ def _campos(coluna, comum, pagina_txt):
 
     m = re.search(r'\b(\d{3}[./]\d{3}[./]\d{2}-\d)\b', txt)
     ans = m.group(1) if m else ''
+
+    # O vocabulário primeiro. Só se ele não reconhecer nada é que sobra a
+    # limpeza por remoção de rótulo, que é o método frágil.
+    conhecido = _plano_conhecido(coluna, modalidade)
+    if conhecido:
+        return conhecido, acom, ans
 
     nome = coluna
     for lixo in [ans, 'Enfermaria', 'Apartamento', 'Grupo de municípios',
@@ -396,8 +476,14 @@ def ler_pdf(caminho):
             for ancoras, precos, inicio, linhas in _grades_da_pagina(pagina):
                 passo = _passo(linhas, inicio, precos)
                 colunas, comum = _cabecalho(linhas, inicio, ancoras, passo)
+                # O banner de plano pode ficar acima do bloco que o _cabecalho
+                # recorta, e cobrir mais de uma coluna. Esta varredura olha um
+                # pedaço maior e resolve por posição.
+                banner = _planos_por_faixa(linhas, max(0, inicio - 12), inicio, ancoras)
                 for j, coluna in enumerate(colunas):
-                    nome, acom, ans = _campos(coluna, comum, txt)
+                    nome, acom, ans = _campos(coluna, comum, txt, ctx.get('modalidade') or '')
+                    if banner[j] and not _plano_conhecido(coluna):
+                        nome = banner[j]
                     if not nome:
                         continue
                     linha = dict(ctx)
