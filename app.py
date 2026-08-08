@@ -815,9 +815,17 @@ def init_db():
                 id SERIAL PRIMARY KEY,
                 palavras_chave TEXT NOT NULL,
                 nome_documento TEXT NOT NULL,
-                icone TEXT DEFAULT '📄',
+                icone TEXT DEFAULT 'PDF',
                 url_arquivo TEXT,
                 ativo INTEGER DEFAULT 1,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS ia_ghostwriter_logs (
+                id SERIAL PRIMARY KEY,
+                contexto TEXT,
+                resposta_gerada TEXT,
+                copiado BOOLEAN DEFAULT FALSE,
+                feedback TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
             """CREATE TABLE IF NOT EXISTS score_heartbeat (
@@ -989,6 +997,15 @@ def init_db():
                 descricao TEXT NOT NULL,
                 custo_usd REAL,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS extensao_sessao (
+                id SERIAL PRIMARY KEY,
+                usuario_id INTEGER NOT NULL,
+                token_hash TEXT NOT NULL UNIQUE,
+                apelido TEXT DEFAULT '',
+                criado_em TIMESTAMP,
+                ultimo_uso TIMESTAMP,
+                revogado_em TIMESTAMP
             )""",
             """CREATE TABLE IF NOT EXISTS whatsapp_extensao_fila (
                 id SERIAL PRIMARY KEY,
@@ -1956,6 +1973,14 @@ def init_db():
             ativo INTEGER DEFAULT 1,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS ia_ghostwriter_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            contexto TEXT,
+            resposta_gerada TEXT,
+            copiado BOOLEAN DEFAULT FALSE,
+            feedback TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE IF NOT EXISTS score_heartbeat (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             usuario_id INTEGER NOT NULL,
@@ -2105,6 +2130,15 @@ def init_db():
             descricao TEXT NOT NULL,
             custo_usd REAL,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS extensao_sessao (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            apelido TEXT DEFAULT '',
+            criado_em TIMESTAMP,
+            ultimo_uso TIMESTAMP,
+            revogado_em TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS whatsapp_extensao_fila (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2697,7 +2731,8 @@ def init_db():
             try:
                 conn.cursor().execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
                 conn.commit()
-            except: pass
+            except:
+                conn.rollback()
         else:
             try: conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
             except sqlite3.OperationalError: pass
@@ -3789,6 +3824,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email)",
         "CREATE INDEX IF NOT EXISTS idx_parcelas_competencia ON parcelas(competencia)",
         "CREATE INDEX IF NOT EXISTS idx_wpp_fila_pendente ON whatsapp_extensao_fila(responsavel_id, status)",
+        "CREATE INDEX IF NOT EXISTS ix_extensao_sessao_hash ON extensao_sessao(token_hash)",
     ]
     for idx in indices:
         try:
@@ -4642,6 +4678,81 @@ def error_json(mensagem, codigo=None, status=400):
     }), status
 
 
+def login_ou_extensao(f):
+    @wraps(f)
+    def w(*a, **kw):
+        # 1. Site
+        if 'user_id' in session:
+            g.usuario_id = session['user_id']
+            g.auth_via = 'sessao'
+            # Para popular g.usuario de forma consistente, fazemos a query.
+            conn = db()
+            g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
+            close_db(conn)
+            if not g.usuario or not g.usuario['ativo']:
+                return jsonify({"ok": False, "erro": "Acesso negado (inativo)"}), 403
+            return f(*a, **kw)
+            
+        # 2. Token da Extensão (Novo)
+        auth = request.headers.get('Authorization')
+        if auth and auth.startswith('Bearer '):
+            token_raw = auth.split(' ', 1)[1].strip()
+            partes = token_raw.split('.')
+            if len(partes) == 2 and partes[0].isdigit():
+                sess_id = int(partes[0])
+                secreto = partes[1]
+                conn = db()
+                sessao = conn.execute("SELECT usuario_id, token_hash, revogado_em FROM extensao_sessao WHERE id=?", (sess_id,)).fetchone()
+                if sessao and not sessao['revogado_em']:
+                    import hmac, hashlib
+                    esperado = hashlib.sha256(secreto.encode()).hexdigest()
+                    ok = hmac.compare_digest(esperado, sessao['token_hash'])
+                    if ok:
+                        g.usuario_id = sessao['usuario_id']
+                        g.auth_via = 'token'
+                        g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
+                        conn.execute("UPDATE extensao_sessao SET ultimo_uso=? WHERE id=?", (_agora_sp(), sess_id))
+                        conn.commit()
+                        close_db(conn)
+                        if not g.usuario or not g.usuario['ativo']:
+                            # IMPORTANTE: precisamos de CORS se a chamada vier da extensão (como é o caso de imagem/legenda agora abertas)
+                            # E _wa_cors deve embrulhar a resposta.
+                            resp = jsonify({"ok": False, "erro": "Usuário inativo"})
+                            resp.headers['Access-Control-Allow-Origin'] = '*'
+                            return resp, 403
+                        return f(*a, **kw)
+                close_db(conn)
+                
+        # 3. Chave Antiga (Transição)
+        # IMPORTANTE: _wa_auth_ok() acessa `request`, que é global na thread no Flask.
+        if request.headers.get('X-Extension-Key') and _wa_auth_ok():
+            app.logger.info('[EXT] chave antiga usada em %s', request.path)
+            g.auth_via = 'chave'
+            uid = None
+            try:
+                j = request.get_json(silent=True) or {}
+                uid = j.get('usuario_id')
+            except Exception:
+                pass
+            if not uid:
+                uid = request.args.get('usuario_id')
+                
+            if uid and str(uid).isdigit():
+                g.usuario_id = int(uid)
+                conn = db()
+                g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
+                close_db(conn)
+            else:
+                g.usuario_id = None
+                g.usuario = None
+                
+            return f(*a, **kw)
+            
+        resp = jsonify({"ok": False, "erro": "Acesso negado"})
+        resp.headers['Access-Control-Allow-Origin'] = '*'
+        return resp, 403
+    return w
+
 def login_required(f):
     @wraps(f)
     def w(*a, **kw):
@@ -5025,7 +5136,31 @@ def gerar_url_r2(chave_arquivo, expiracao_segundos=86400):
     # Fallback local
     return f"/download/{os.path.basename(chave_arquivo)}"
 
+@app.route('/admin/extensao/sessoes')
+@login_required
+@admin_required
+def admin_extensao_sessoes():
+    """Painel para gerenciar e revogar as sessões ativas da extensão."""
+    conn = db()
+    sessoes = conn.execute("""
+        SELECT s.id, s.usuario_id, s.criado_em, s.ultimo_uso, s.revogado_em, s.apelido, u.nome
+        FROM extensao_sessao s
+        JOIN usuarios u ON s.usuario_id = u.id
+        ORDER BY s.revogado_em ASC, s.ultimo_uso DESC
+    """).fetchall()
+    close_db(conn)
+    return render_template('admin_extensao_sessoes.html', sessoes=sessoes)
 
+@app.route('/admin/extensao/sessoes/<int:uid>/<int:sid>/revogar', methods=['POST'])
+@login_required
+@admin_required
+def admin_extensao_sessoes_revogar(uid, sid):
+    conn = db()
+    conn.execute("UPDATE extensao_sessao SET revogado_em=? WHERE id=? AND usuario_id=? AND revogado_em IS NULL", (_agora_sp(), sid, uid))
+    conn.commit()
+    close_db(conn)
+    flash('Sessão revogada com sucesso.', 'success')
+    return redirect(url_for('admin_extensao_sessoes'))
 @app.route('/admin/asaas/teste')
 @login_required
 @admin_required
@@ -17723,8 +17858,28 @@ def _wa_analisar_conversa(mensagens, nome_contato='', imagens=None, documentos=N
 
 def _wa_auth_ok():
     """Confere a chave da extensão (header X-Extension-Key vs env WHATSAPP_EXT_KEY).
-    Se a env não estiver setada, recusa tudo (fail-closed) — nunca deixa o
-    endpoint aberto sem chave."""
+    Também valida o novo Bearer Token para que as rotas antigas continuem
+    funcionando para quem já fez o login na extensão."""
+    auth = request.headers.get('Authorization')
+    if auth and auth.startswith('Bearer '):
+        token_raw = auth.split(' ', 1)[1].strip()
+        partes = token_raw.split('.')
+        if len(partes) == 2 and partes[0].isdigit():
+            sess_id = int(partes[0])
+            secreto = partes[1]
+            conn = db()
+            sessao = conn.execute("SELECT token_hash, revogado_em FROM extensao_sessao WHERE id=?", (sess_id,)).fetchone()
+            if sessao and not sessao['revogado_em']:
+                import hmac, hashlib
+                esperado = hashlib.sha256(secreto.encode()).hexdigest()
+                ok = hmac.compare_digest(esperado, sessao['token_hash'])
+                if ok:
+                    conn.execute("UPDATE extensao_sessao SET ultimo_uso=? WHERE id=?", (_agora_sp(), sess_id))
+                    conn.commit()
+                    close_db(conn)
+                    return True
+            close_db(conn)
+
     esperada = os.environ.get('WHATSAPP_EXT_KEY', '').strip()
     recebida = request.headers.get('X-Extension-Key', '').strip()
     return bool(esperada) and recebida == esperada
@@ -17735,9 +17890,99 @@ def _wa_cors(resp):
     worker (host_permissions), mas deixamos CORS pronto caso um dia chame de
     outro contexto. Sem credenciais, só a chave no header."""
     resp.headers['Access-Control-Allow-Origin'] = '*'
-    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Extension-Key'
+    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Extension-Key, Authorization'
     resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
     return resp
+
+_WA_LOGIN_ATTEMPTS = {}  # { (ip, email): [timestamp, ...] }
+
+@app.route('/api/whatsapp/login', methods=['POST', 'OPTIONS'])
+def api_whatsapp_login():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    
+    j = request.get_json(silent=True) or {}
+    email = j.get('email', '').strip().lower()
+    senha = j.get('senha', '')
+    apelido = j.get('apelido', 'Extensão').strip()
+    
+    if not email or not senha:
+        return _wa_cors(jsonify({"ok": False, "erro": "Preencha e-mail e senha."})), 400
+        
+    ip = request.remote_addr
+    import time
+    agora = time.time()
+    
+    # Limpa tentativas antigas (1 hora = 3600 seg)
+    k = (ip, email)
+    if k in _WA_LOGIN_ATTEMPTS:
+        _WA_LOGIN_ATTEMPTS[k] = [t for t in _WA_LOGIN_ATTEMPTS[k] if agora - t < 3600]
+        if len(_WA_LOGIN_ATTEMPTS[k]) > 10:  # máx 10 tentativas por hora
+            app.logger.warning(f"[EXT AUTH] Rate limit atingido para {email} via {ip}")
+            return _wa_cors(jsonify({"ok": False, "erro": "Muitas tentativas. Tente novamente mais tarde."})), 429
+            
+    conn = db()
+    u = conn.execute("SELECT * FROM usuarios WHERE email=? AND ativo=1", (email,)).fetchone()
+    ok_senha = False
+    
+    if u:
+        ok_senha, _ = verifica_senha(senha, u['senha_hash'])
+        
+    if not ok_senha:
+        _WA_LOGIN_ATTEMPTS.setdefault(k, []).append(agora)
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "E-mail ou senha incorretos."})), 401
+        
+    # Senha correta: limpa as tentativas falhas para esse IP+email
+    _WA_LOGIN_ATTEMPTS.pop(k, None)
+    
+    # Gera o token
+    import os, hashlib
+    token_secreto = os.urandom(32).hex()
+    t_hash = hashlib.sha256(token_secreto.encode()).hexdigest()
+    
+    cur = conn.execute("""
+        INSERT INTO extensao_sessao (usuario_id, token_hash, apelido, criado_em, ultimo_uso)
+        VALUES (?, ?, ?, ?, ?)
+    """, (u['id'], t_hash, apelido, _agora_sp(), _agora_sp()))
+    
+    sess_id = _last_insert_id(cur)
+    conn.commit()
+    
+    if not sess_id:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Falha ao criar sessão no banco de dados"})), 500
+    
+    close_db(conn)
+    
+    token_completo = f"{sess_id}.{token_secreto}"
+    return _wa_cors(jsonify({
+        "ok": True,
+        "token": token_completo,
+        "usuario_id": u['id'],
+        "nome": u['nome']
+    }))
+
+@app.route('/api/whatsapp/logout', methods=['POST', 'OPTIONS'])
+@login_ou_extensao
+def api_whatsapp_logout():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if getattr(g, 'auth_via', None) != 'token':
+        return _wa_cors(jsonify({"ok": False, "erro": "Sessão inválida ou logado por chave"})), 403
+
+    auth = request.headers.get('Authorization')
+    if auth and auth.startswith('Bearer '):
+        token_raw = auth.split(' ', 1)[1].strip()
+        partes = token_raw.split('.')
+        if len(partes) == 2 and partes[0].isdigit():
+            sess_id = int(partes[0])
+            conn = db()
+            conn.execute("UPDATE extensao_sessao SET revogado_em=? WHERE id=? AND usuario_id=? AND revogado_em IS NULL", (_agora_sp(), sess_id, g.usuario_id))
+            conn.commit()
+            close_db(conn)
+            
+    return _wa_cors(jsonify({"ok": True}))
 
 
 @app.route('/api/whatsapp/ping', methods=['GET', 'OPTIONS'])
@@ -19359,6 +19604,16 @@ def api_v1_cotacao_salvas():
 
 
 @app.route('/api/v1/cotacao/<int:cid>/imagem', methods=['GET', 'OPTIONS'])
+# ESTA ROTA CONTINUA SENDO DA API PUBLICA, com chave.
+#
+# Ela chegou a ser trocada por @login_ou_extensao, o que TIRARIA o acesso de
+# quem usa chave de API: existe uma cadastrada e em uso ('GABRIEL TESTE',
+# escopo cotacao:ler, 4 usos). Trocar uma porta pela outra fecha a de quem ja
+# estava entrando.
+#
+# Quando a extensao precisar da imagem, o caminho e uma rota PROPRIA em
+# /api/whatsapp/ com _wa_auth_ok() — porta nova, sem fechar a antiga. Esta
+# pendente e nao bloqueia nada hoje (a extensao ainda nao tem esse botao).
 @api_requer_chave('cotacao:ler')
 def api_v1_cotacao_imagem(cid):
     """PNG da cotação. A imagem é renderizada no NAVEGADOR (html2canvas) e
@@ -22674,6 +22929,104 @@ def admin_caca_docs_excluir():
         flash('Regra excluída com sucesso.', 'success')
     return redirect('/admin/ia/caca-docs')
 
+
+@app.route('/api/ia/ghostwriter/gerar', methods=['POST', 'OPTIONS'])
+def api_ia_ghostwriter_gerar():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+
+    d = request.json or {}
+    contexto = d.get('contexto', '')
+    if not contexto:
+        return _wa_cors(jsonify({"ok": False, "erro": "Contexto vazio"})), 400
+
+    tom_de_voz = "Responda de forma direta e comercial."
+    tom_path = os.path.join(app.root_path, 'motor-ia', 'tom_de_voz.md')
+    if os.path.exists(tom_path):
+        with open(tom_path, 'r', encoding='utf-8') as f:
+            tom_de_voz = f.read()
+
+    prompt = f"""Você é um ghostwriter comercial (consultor de vendas). 
+Abaixo está o histórico recente de uma conversa no WhatsApp.
+Seu objetivo é gerar a próxima resposta ideal do consultor para o lead anonimizado.
+
+Regras de Tom de Voz:
+{tom_de_voz}
+
+Histórico da Conversa:
+{contexto}
+
+Escreva APENAS o texto da mensagem que o consultor deve enviar, sem aspas, sem markdown, sem explicações extras.
+"""
+
+    gemini_key = os.environ.get('GEMINI_API_KEY', '').strip()
+    resultado = "Desculpe, a IA está indisponível no momento."
+    
+    if gemini_key:
+        try:
+            import requests
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.7}
+            }
+            res = requests.post(url, json=payload, timeout=15)
+            res.raise_for_status()
+            data = res.json()
+            resultado = data['candidates'][0]['content']['parts'][0]['text'].strip()
+        except Exception as e:
+            return _wa_cors(jsonify({"ok": False, "erro": f"Erro na IA Gemini: {str(e)}"})), 500
+    else:
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+        if not api_key:
+            return _wa_cors(jsonify({"ok": False, "erro": "Nenhuma chave de IA configurada"})), 500
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            msg = client.messages.create(
+                model="claude-3-5-sonnet-20240620",
+                max_tokens=500,
+                system="Você é um assistente que retorna APENAS o texto puro da mensagem, sem tags, aspas ou explicações.",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            resultado = msg.content[0].text.strip()
+        except Exception as e:
+            return _wa_cors(jsonify({"ok": False, "erro": f"Erro na IA Anthropic: {str(e)}"})), 500
+
+    conn = db()
+    cur = conn.execute("INSERT INTO ia_ghostwriter_logs (contexto, resposta_gerada, copiado) VALUES (?, ?, False) RETURNING id", (contexto, resultado))
+    log_id = cur.fetchone()['id']
+    conn.commit()
+    close_db(conn)
+    
+    return _wa_cors(jsonify({"ok": True, "resposta": resultado, "log_id": log_id}))
+
+
+@app.route('/api/ia/ghostwriter/feedback', methods=['POST', 'OPTIONS'])
+def api_ia_ghostwriter_feedback():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+
+    d = request.json or {}
+    log_id = d.get('log_id')
+    acao = d.get('acao')
+    
+    if not log_id or not acao:
+        return _wa_cors(jsonify({"ok": False, "erro": "Dados inválidos"})), 400
+
+    conn = db()
+    if acao == 'copiado':
+        conn.execute("UPDATE ia_ghostwriter_logs SET copiado=True WHERE id=?", (log_id,))
+    elif acao in ('ajudou', 'nao_ajudou'):
+        conn.execute("UPDATE ia_ghostwriter_logs SET feedback=? WHERE id=?", (acao, log_id))
+    
+    conn.commit()
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
 
 @app.route('/api/whatsapp/analisar', methods=['POST', 'OPTIONS'])
 def api_whatsapp_analisar():
@@ -27838,6 +28191,8 @@ def cotacao_bloco_planos():
                 "cidade": t.get('cidade') or '',
                 "abrangencia": t.get('abrangencia') or '',
                 "vigencia": t.get('vigencia') or '',
+                "vidas_min": t.get('vidas_min') or 0,
+                "vidas_max": t.get('vidas_max') or 0,
                 "precos_ok": precos_ok,
                 "dias_atualizado": dias,
                 "frescor": frescor,
@@ -28082,6 +28437,8 @@ def cotacao_bloco_tabelas():
                 "cidade": t.get('cidade') or '',
                 "abrangencia": t.get('abrangencia') or '',
                 "vigencia": t.get('vigencia') or '',
+                "vidas_min": t.get('vidas_min') or 0,
+                "vidas_max": t.get('vidas_max') or 0,
                 "precos_ok": t.get('precos_ok') or 0,
                 "dias_atualizado": t['dias_atualizado'],
                 "frescor": t['frescor']
@@ -30363,7 +30720,8 @@ def calcular_cotacao(conn, idades, plano_ids, recomendacoes=None):
             'entidade': t['entidade'] if 'entidade' in t.keys() else '',
             'modalidade': t['modalidade'], 'acomodacao': t['acomodacao'],
             'coparticipacao': t['coparticipacao'], 'abrangencia': t['abrangencia'],
-            'vigencia': t['vigencia'], 'linhas': linhas, 'total': round(total, 2),
+            'vigencia': t['vigencia'], 'vidas_min': t['vidas_min'] or 0, 'vidas_max': t['vidas_max'] or 0,
+            'linhas': linhas, 'total': round(total, 2),
             'elegivel': elegivel,
             'recomendacao': rec_map.get((recomendacoes.get(tid) or '').strip(), ''),
         })
@@ -30870,7 +31228,7 @@ def cotacao_legendas_excluir(mid):
 
 
 @app.route('/cotacao/legendas/api')
-@login_required
+@login_ou_extensao
 def cotacao_legendas_api():
     """Retorna lista de modelos de legenda em JSON para uso no documento."""
     conn = db()
