@@ -1379,6 +1379,35 @@
     }
   }, true);
 
+
+  // ── PORTEIRO: EXTENSÃO LIGADA E SEM CREDENCIAL ───────────────────────────
+  //
+  // Instalou, não configurou, e nada funciona sem dizer por quê — a pessoa
+  // clica em tudo e conclui que a extensão está quebrada. Agora ela diz.
+  //
+  // A REGRA É "SEM CREDENCIAL NENHUMA", não "sem login". Hoje os oito
+  // consultores usam a chave compartilhada e o login ainda nem existe no
+  // servidor: barrar por falta de login travaria todo mundo agora. Quem tem a
+  // chave passa; quem não tem nada vê a porta.
+  async function _semCredencial() {
+    const g = await _safeStorageGet(['extToken', 'extKey']);
+    return !g.extToken && !String(g.extKey || '').trim();
+  }
+
+  function _telaSemLogin() {
+    setCorpoSecao(
+      '<div class="job-porta">' +
+        '<div class="job-porta-logo">' + logoJobHTML() + '</div>' +
+        '<div class="job-porta-t">Entre para usar o JOB</div>' +
+        '<div class="job-porta-s">A extensão está instalada e ligada, mas ainda não sabe quem é você. ' +
+          'Sem isso ela não lê conversa, não cria lead e não envia nada — de propósito.</div>' +
+        '<button type="button" class="job-porta-bt" id="job-porta-entrar">Entrar agora</button>' +
+        '<div class="job-porta-p">Use o mesmo e-mail e senha do site do JOB.</div>' +
+      '</div>');
+    const b = document.getElementById('job-porta-entrar');
+    if (b) b.addEventListener('click', () => abrirSecao('config'));
+  }
+
   // ── CONTATO MARCADO COMO PESSOAL: A EXTENSÃO INTEIRA FECHA ───────────────
   //
   // Marcar como pessoal antes só fazia o JOB parar de LER a conversa. O resto
@@ -1441,6 +1470,13 @@
   const _ICO_PESSOA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
   const _ICO_LINK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
   const _ICO_PINCEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2a10 10 0 0 0 0 20 2 2 0 0 0 2-2v-1a2 2 0 0 1 2-2h1a4 4 0 0 0 4-4 10 10 0 0 0-9-11z"/></svg>';
+
+  // O popup manda abrir a configuração aqui — é onde ela mora.
+  try {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg && msg.type === 'abrir_config') abrirSecao('config');
+    });
+  } catch (e) { /* sem extensão viva, nada a fazer */ }
 
   async function abrirSecaoConfig() {
     const g = await _safeStorageGet(['jobUrl', 'extToken', 'extUsuario', 'extApelido',
@@ -1605,6 +1641,9 @@
     // A configuração escapa da guarda: ela não é sobre o contato, e travar
     // o acesso a ela numa conversa marcada deixaria a pessoa sem como entrar
     // ou desligar a extensão.
+    // O porteiro vem antes de tudo, menos da própria configuração — que é
+    // justamente onde a pessoa resolve.
+    if (secao !== 'config' && await _semCredencial()) { _telaSemLogin(); return; }
     if (secao !== 'config' && await _contatoBloqueado()) { _telaBloqueada(); return; }
 
     if (secao === 'analise') sincronizarPainelComConversa();
