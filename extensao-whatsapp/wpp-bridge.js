@@ -1221,8 +1221,13 @@
           if (!msg || !msg.id || msg.id.fromMe) return;   // só o que ENTROU (do contato)
           const chatId = (msg.id.remote && msg.id.remote._serialized)
             || (msg.from && msg.from._serialized) || '';
-          if (chatId) window.postMessage({ source: 'JOB_EXT_EVT', tipo: 'inbound', chatId }, '*');
-        } catch (e) { /* nunca derruba a wa-js */ }
+          if (chatId) {
+            window.postMessage({ source: 'JOB_EXT_EVT', tipo: 'inbound', chatId }, '*');
+            // Envia o texto da mensagem para o Caça-Documentos
+            if (msg.body && typeof msg.body === 'string') {
+                window.postMessage({ source: 'JOB_EXT_EVT', tipo: 'inbound_texto', chatId, texto: msg.body }, '*');
+            }
+          }
       });
       _jobInboundLigado = true;
     } catch (e) { /* tenta de novo no timer */ }

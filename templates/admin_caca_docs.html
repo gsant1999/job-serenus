@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block title %}Dicionário Caça-Documentos (IA){% endblock %}
+{% block head %}
+<style>
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{text-align:left;font-size:10.5px;color:var(--cinza-2);text-transform:uppercase;letter-spacing:.4px;padding:10px 12px;border-bottom:1px solid var(--borda-2)}
+.tbl td{padding:11px 12px;border-bottom:1px solid var(--borda);font-size:13px}
+.add-row{display:grid;grid-template-columns:1.5fr 1fr 70px auto;gap:10px;align-items:end;margin-bottom:16px;padding:16px;background:var(--panel-2);border:1px solid var(--borda);border-radius:12px}
+</style>
+{% endblock %}
+{% block content %}
+<div class="topbar"><div><h1>Caça-Documentos (IA)</h1><div class="sub">Dicionário de gatilhos para sugestão automática de PDFs/Áudios na Extensão do WhatsApp</div></div></div>
+<div class="page" style="max-width:980px;">
+  <form class="add-row" method="POST" action="/admin/ia/caca-docs">
+    <div class="campo"><label>Palavras-Chave (separadas por vírgula)</label><input name="palavras_chave" placeholder="Ex: reembolso, nota fiscal, recibo" required></div>
+    <div class="campo"><label>Documento (Nome na tela)</label><input name="nome_documento" placeholder="Ex: PDF Reembolso Amil" required></div>
+    <div class="campo"><label>Tipo (Ex: PDF, Áudio)</label><input name="icone" placeholder="PDF" value="PDF"></div>
+    <button class="btn" type="submit">Adicionar Regra</button>
+  </form>
+  <div class="card">
+    <div class="card-header"><h3>Regras Ativas</h3><span class="tag tag-info">{{ regras|length }}</span></div>
+    <table class="tbl">
+      <thead><tr><th>Palavras-Chave</th><th>Tipo</th><th>Documento Sugerido</th><th>Ação</th></tr></thead>
+      <tbody>
+        {% for r in regras %}
+        <tr>
+          <td><strong>{{ r.palavras_chave }}</strong></td>
+          <td style="font-size: 14px; font-weight: bold; color: var(--rosa);">{{ r.icone }}</td>
+          <td>{{ r.nome_documento }}</td>
+          <td>
+            <form action="/admin/ia/caca-docs/excluir" method="POST" style="display:inline;" onsubmit="return confirm('Excluir esta regra?');">
+              <input type="hidden" name="id" value="{{ r.id }}">
+              <button class="btn-ghost" style="color:var(--rosa);" type="submit" title="Excluir">×</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}<tr><td colspan="4" style="color:var(--cinza-2);">Nenhuma regra cadastrada. Adicione acima.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -7801,7 +7801,14 @@
   window.addEventListener('message', async (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
-    if (!d || d.source !== 'JOB_EXT_EVT' || d.tipo !== 'inbound' || !d.chatId) return;
+    if (!d || d.source !== 'JOB_EXT_EVT' || !d.chatId) return;
+
+    if (d.tipo === 'inbound_texto' && d.texto) {
+      analisarCacaDocumentos(d.chatId, d.texto);
+      return;
+    }
+
+    if (d.tipo !== 'inbound') return;
     const alvo = _campWatch.get(d.chatId);
     if (!alvo) return;
     // Confirma pela leitura antes de reportar: só se a última é do contato E a gente
@@ -7816,6 +7823,90 @@
       await chrome.runtime.sendMessage({ type: 'campanha_resposta', telefone: alvo.telefone, usuario_id: usuarioId });
     } catch (e) { /* próxima varredura reconcilia */ }
   });
+
+  let DICIONARIO_CACA_DOCS = [];
+
+  async function carregarDicionarioCacaDocs() {
+    try {
+      const r = await fetch(_SITE_BASE_URL_EXT + '/api/ia/caca-docs/regras', { cache: 'no-store' });
+      const j = await r.json();
+      if (j && j.ok && j.regras) DICIONARIO_CACA_DOCS = j.regras;
+    } catch(e) {
+      console.warn('Erro ao carregar regras do caça-documentos', e);
+    }
+  }
+  
+  setTimeout(carregarDicionarioCacaDocs, 5000);
+
+  function analisarCacaDocumentos(chatId, texto) {
+    if (!texto) return;
+    const txt = texto.toLowerCase();
+    
+    // Procura a primeira regra que bate
+    for (const regra of DICIONARIO_CACA_DOCS) {
+      const match = regra.palavras.find(p => txt.includes(p));
+      if (match) {
+        mostrarOverlayCacaDocs(regra);
+        break; // Só mostra um por vez pra não poluir
+      }
+    }
+  }
+
+  let _overlayCacaDocsTimer = null;
+  function mostrarOverlayCacaDocs(regra) {
+    let overlay = document.getElementById('job-caca-docs');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'job-caca-docs';
+      overlay.style.cssText = `
+        position: fixed;
+        bottom: 80px;
+        right: 20px;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        border-radius: 8px;
+        padding: 12px 16px;
+        z-index: 999999;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-family: system-ui, sans-serif;
+        color: #1e293b;
+        animation: jobFadeInUp 0.3s ease;
+      `;
+      // Adiciona keyframe se não existir
+      if (!document.getElementById('job-caca-docs-style')) {
+        const st = document.createElement('style');
+        st.id = 'job-caca-docs-style';
+        st.innerHTML = `
+          @keyframes jobFadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+          .job-caca-btn { background: #6d28d9; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
+          .job-caca-btn:hover { background: #5b21b6; }
+          .job-caca-x { background: transparent; border: none; font-size: 16px; color: #94a3b8; cursor: pointer; padding: 0 4px; }
+          .job-caca-x:hover { color: #ef4444; }
+        `;
+        document.head.appendChild(st);
+      }
+      document.body.appendChild(overlay);
+    }
+
+    overlay.innerHTML = `
+      <div style="font-size: 11px; font-weight: bold; background: #f1f5f9; color: #64748b; padding: 4px 8px; border-radius: 4px; border: 1px solid #e2e8f0; text-transform: uppercase;">${regra.icone}</div>
+      <div style="flex:1;">
+        <div style="font-size:11px; text-transform:uppercase; font-weight:700; color:#6d28d9; margin-bottom:2px;">Sugestão Rápida</div>
+        <div style="font-size:13px; font-weight:500;">Enviar <b>${regra.nome}</b>?</div>
+      </div>
+      <button class="job-caca-btn" onclick="alert('Funcionalidade de enviar será acoplada ao repositório de PDFs! (simulação)'); this.parentElement.remove();">Enviar</button>
+      <button class="job-caca-x" onclick="this.parentElement.remove()" title="Isso não ajuda">×</button>
+    `;
+
+    // Some depois de 15 segundos se não clicar
+    if (_overlayCacaDocsTimer) clearTimeout(_overlayCacaDocsTimer);
+    _overlayCacaDocsTimer = setTimeout(() => {
+      if (overlay && overlay.parentElement) overlay.remove();
+    }, 15000);
+  }
 
   function pedirChecarInbound(chatId) {
     return new Promise((resolve) => {
