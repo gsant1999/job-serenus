@@ -4749,6 +4749,38 @@
     _cotPintarPlanos();
   }
 
+
+  // ── AS GAVETAS DA LISTA DE PLANOS ────────────────────────────────────────
+  //
+  // Uma operadora devolve vinte e poucos planos que, na lista corrida, parecem
+  // vinte repetições do mesmo nome. O que separa um do outro são coisas que o
+  // consultor conhece de cor — produto, coparticipação, acomodação, MEI — e é
+  // por elas que a lista tem que estar dividida.
+  //
+  // Duas gavetas, não cinco: PRODUTO por fora (é o que muda rede e preço) e
+  // COPARTICIPAÇÃO por dentro (é a primeira pergunta que o cliente faz). O
+  // resto continua como etiqueta na linha, porque virar gaveta deixaria cada
+  // uma com um plano só — e gaveta de um item é ruído, não organização.
+  function _cotGrupoDe(p) {
+    const tb = (p && p.tabela) || {};
+    return {
+      produto: _texto((p && p.produto)) || 'Sem produto definido',
+      copart: _cotCopart(tb),
+    };
+  }
+
+  function _cotAgrupar(pls) {
+    const porProduto = new Map();
+    pls.forEach((p, i) => {
+      const g = _cotGrupoDe(p);
+      if (!porProduto.has(g.produto)) porProduto.set(g.produto, new Map());
+      const dentro = porProduto.get(g.produto);
+      if (!dentro.has(g.copart)) dentro.set(g.copart, []);
+      dentro.get(g.copart).push(i);
+    });
+    return porProduto;
+  }
+
   function _cotPintarPlanos() {
     const pls = _cot.planos || [];
     // O QUE É IGUAL EM TODOS SOBE PRO CABEÇALHO.
@@ -4775,16 +4807,42 @@
         : '') +
       '<div class="job-cnpj-sub">Vale para todos os planos abaixo. Marque até ' + _COT_MAX + '.</div>' +
       (pls.length
-        ? pls.map((p, i) => {
-            const proprias = porPlano[i].filter((e) => !eComum(e.t));
-            return '<label class="job-cot-plano"><input type="checkbox" data-i="' + i + '">' +
-              '<span><b>' + esc(_cotNomePlano(p)) + '</b>' +
-              (proprias.length
-                ? '<span class="job-cot-tags">' + proprias.map((e) =>
-                    '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' + esc(e.t) + '</span>').join('') +
-                  '</span>'
-                : '') + '</span></label>';
-          }).join('')
+        ? (function () {
+            const linha = (i) => {
+              const proprias = porPlano[i].filter((e) => !eComum(e.t));
+              return '<label class="job-cot-plano"><input type="checkbox" data-i="' + i + '">' +
+                '<span><b>' + esc(_cotNomePlano(pls[i])) + '</b>' +
+                (proprias.length
+                  ? '<span class="job-cot-tags">' + proprias.map((e) =>
+                      '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' + esc(e.t) + '</span>').join('') +
+                    '</span>'
+                  : '') + '</span></label>';
+            };
+            const grupos = _cotAgrupar(pls);
+            // Um produto só? Não faz gaveta: a gaveta única só esconde o que
+            // já estava visível e cobra um clique por nada.
+            if (grupos.size <= 1 && pls.length <= 6) {
+              return pls.map((p, i) => linha(i)).join('');
+            }
+            let html = '';
+            grupos.forEach((porCopart, produto) => {
+              const qtd = Array.from(porCopart.values()).reduce((n, a) => n + a.length, 0);
+              html += '<details class="job-cot-gaveta" open>' +
+                '<summary><span class="job-cot-gaveta-n">' + esc(produto) + '</span>' +
+                '<span class="job-cot-gaveta-q">' + qtd + '</span></summary>';
+              porCopart.forEach((idxs, copart) => {
+                // Subdivide só quando há mais de uma coparticipação; senão o
+                // rótulo repetiria o que a etiqueta da linha já diz.
+                if (porCopart.size > 1) {
+                  html += '<div class="job-cot-subgaveta">' + esc(copart) +
+                          '<span class="job-cot-gaveta-q">' + idxs.length + '</span></div>';
+                }
+                html += idxs.map(linha).join('');
+              });
+              html += '</details>';
+            });
+            return html;
+          })()
         : '<div class="job-cot-vazio"><div class="job-cot-vazio-t">Nenhum plano serve para essas vidas.</div></div>') +
       '<button class="job-cot-bt-mandar" id="job-cot-precos" style="width:100%;margin-top:12px" disabled>Marque um plano</button>' +
       '<button class="job-cot-nova" id="job-cot-volta-ops" style="border:none;cursor:pointer;width:100%;font-family:inherit">Outra operadora</button>' +
