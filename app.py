@@ -27074,15 +27074,17 @@ def _aprender_do_vivo(conn, cidade, modalidade, planos):
             mei = 1 if tb.get('mei') else 0
 
             ex = conn.execute(
-                """SELECT id FROM cotacao_tabela WHERE operadora=? AND plano=? AND modalidade=?
+                """SELECT id, fonte FROM cotacao_tabela WHERE operadora=? AND plano=? AND modalidade=?
                      AND acomodacao=? AND coparticipacao=? AND COALESCE(cidade,'')=?
                      AND COALESCE(entidade,'')=? AND COALESCE(vidas_min, 0)=? AND COALESCE(vidas_max, 0)=? AND COALESCE(mei, 0)=?
                      AND COALESCE(abrangencia,'')=? AND COALESCE(linha,'')=? AND COALESCE(administradora,'')=?""",
                 (operadora, plano, nome_modal, acomodacao, copart, cidade or '', entidade,
                  vidas_min or 0, vidas_max or 0, mei, abrangencia, linha, administradora)).fetchone()
 
+            tabela_fonte = 'painel'
             if ex:
                 tid = ex['id']
+                tabela_fonte = ex['fonte']
                 conn.execute("UPDATE cotacao_tabela SET ativo=1, atualizado_em=?, vidas_min=?, vidas_max=?, mei=? WHERE id=?",
                              (agora, vidas_min, vidas_max, mei, tid))
             else:
@@ -27111,7 +27113,10 @@ def _aprender_do_vivo(conn, cidade, modalidade, planos):
                 if achou:
                     preco_antigo = float(achou['preco'])
                     if abs(preco_antigo - valor) > 0.01:
-                        app.logger.warning(f"[COTACAO] preço trocado: {operadora}/{plano} faixa {fx} R${preco_antigo} -> R${valor}")
+                        if tabela_fonte == 'pdf':
+                            app.logger.warning(f"[COTACAO] DIVERGÊNCIA: Painel divergiu do PDF oficial: {operadora}/{plano} faixa {fx} PDF R${preco_antigo} -> Painel R${valor}")
+                        else:
+                            app.logger.warning(f"[COTACAO] preço trocado: {operadora}/{plano} faixa {fx} R${preco_antigo} -> R${valor}")
                     conn.execute("UPDATE cotacao_preco SET preco=? WHERE id=?", (valor, achou['id']))
                 else:
                     conn.execute("INSERT INTO cotacao_preco (tabela_id, faixa, preco) VALUES (?,?,?)",
@@ -28826,6 +28831,134 @@ def cotacao_modelo_csv():
     conteudo = '﻿' + ';'.join(cab) + '\r\n' + ';'.join(exemplo) + '\r\n'
     return Response(conteudo, mimetype='text/csv',
                     headers={'Content-Disposition': 'attachment; filename=modelo_tabelas_cotacao.csv'})
+
+
+@app.route('/cotacao/tabela/importar', methods=['POST'])
+@login_required
+@admin_required
+def cotacao_tabela_importar_json():
+    """
+    Importa um lote de tabelas de preço vindo do extrator de PDF da operadora.
+    O formato do payload é definido no contrato: handoff/contrato-importar-tabela-de-pdf.md
+    """
+    payload = request.get_json(silent=True) or {}
+    operadora = str(payload.get('operadora') or '').strip()[:120]
+    fonte = str(payload.get('fonte') or 'pdf').strip()[:20]
+    vigencia_pdf = str(payload.get('vigencia_pdf') or '').strip()[:40]
+    tabelas = payload.get('tabelas') or []
+
+    if not operadora or not tabelas:
+        return jsonify({"ok": False, "erro": "Payload inválido: falta operadora ou tabelas"}), 400
+
+    agora = _agora_sp()
+    criadas = 0
+    atualizadas = 0
+    recusadas = 0
+    precos_trocados = []
+
+    conn = get_db()
+    for t in tabelas:
+        vidas_min = t.get('vidas_min')
+        vidas_max = t.get('vidas_max')
+        copart = str(t.get('coparticipacao') or '').strip()
+
+        # Regra 2: Recuse a tabela sem vidas_min/vidas_max ou sem coparticipacao
+        if vidas_min is None or vidas_max is None or not copart:
+            recusadas += 1
+            continue
+
+        try: vidas_min = int(vidas_min)
+        except Exception: vidas_min = 0
+        try: vidas_max = int(vidas_max)
+        except Exception: vidas_max = 0
+
+        plano = str(t.get('plano') or '').strip()[:160]
+        codigo = str(t.get('codigo') or '').strip()[:60]
+        modalidade = str(t.get('modalidade') or 'PME').strip()[:40]
+        acomodacao = str(t.get('acomodacao') or 'Enfermaria').strip()[:40]
+        linha = str(t.get('linha') or '').strip()[:160]
+        abrangencia = str(t.get('abrangencia') or '').strip()[:120]
+        administradora = str(t.get('administradora') or '').strip()[:120]
+        cidade = str(t.get('cidade') or '').strip()[:120]
+        mei = 1 if t.get('mei') else 0
+
+        # Verifica se já existe a chave exata
+        ex = conn.execute(
+            """SELECT id FROM cotacao_tabela 
+               WHERE operadora=? AND plano=? AND modalidade=?
+                 AND acomodacao=? AND coparticipacao=? AND COALESCE(cidade,'')=?
+                 AND COALESCE(linha,'')=? AND COALESCE(abrangencia,'')=? AND COALESCE(administradora,'')=?
+                 AND COALESCE(vidas_min, 0)=? AND COALESCE(vidas_max, 0)=? AND COALESCE(mei, 0)=?
+                 AND COALESCE(entidade,'')=''""",
+            (operadora, plano, modalidade, acomodacao, copart, cidade, 
+             linha, abrangencia, administradora, vidas_min, vidas_max, mei)
+        ).fetchone()
+
+        if ex:
+            tid = ex['id']
+            conn.execute(
+                """UPDATE cotacao_tabela 
+                   SET ativo=1, atualizado_em=?, codigo=?, fonte=?, vigencia_pdf=? 
+                   WHERE id=?""",
+                (agora, codigo, fonte, vigencia_pdf, tid)
+            )
+            atualizadas += 1
+        else:
+            conn.execute(
+                """INSERT INTO cotacao_tabela
+                     (operadora, plano, modalidade, acomodacao, coparticipacao,
+                      cidade, entidade, linha, abrangencia, administradora, 
+                      ativo, atualizado_em, vidas_min, vidas_max, mei, 
+                      codigo, fonte, vigencia_pdf)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,?)""",
+                (operadora, plano, modalidade, acomodacao, copart,
+                 cidade, '', linha, abrangencia, administradora,
+                 agora, vidas_min, vidas_max, mei, codigo, fonte, vigencia_pdf)
+            )
+            tid = (conn.execute("SELECT lastval() AS id").fetchone()['id'] if DB_MODE == 'postgres'
+                   else conn.execute("SELECT last_insert_rowid() id").fetchone()['id'])
+            criadas += 1
+
+        faixas = t.get('faixas') or {}
+        for fx, val in faixas.items():
+            fx = str(fx).strip()
+            if fx not in FAIXAS_ETARIAS:
+                continue
+            try:
+                valor = float(val)
+            except (TypeError, ValueError):
+                continue
+            if valor <= 0:
+                continue
+            
+            achou = conn.execute("SELECT id, preco FROM cotacao_preco WHERE tabela_id=? AND faixa=?", (tid, fx)).fetchone()
+            if achou:
+                preco_antigo = float(achou['preco'])
+                if abs(preco_antigo - valor) > 0.01:
+                    precos_trocados.append({
+                        "plano": plano,
+                        "faixa": fx,
+                        "de": preco_antigo,
+                        "para": valor
+                    })
+                    app.logger.info(f"[COTACAO] Importação PDF - Preço trocado: {operadora}/{plano} faixa {fx} R${preco_antigo} -> R${valor}")
+                conn.execute("UPDATE cotacao_preco SET preco=? WHERE id=?", (valor, achou['id']))
+            else:
+                conn.execute("INSERT INTO cotacao_preco (tabela_id, faixa, preco) VALUES (?,?,?)", (tid, fx, valor))
+
+    if DB_MODE == 'postgres':
+        try: conn.commit()
+        except Exception: pass
+    else:
+        conn.commit()
+
+    return jsonify({
+        "ok": True,
+        "criadas": criadas,
+        "atualizadas": atualizadas,
+        "recusadas": recusadas,
+        "precos_trocados": precos_trocados
+    })
 
 
 @app.route('/cotacao/tabelas/importar', methods=['GET', 'POST'])
