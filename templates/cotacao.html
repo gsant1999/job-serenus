@@ -94,9 +94,16 @@
     <div class="sub">Multicálculo de planos por faixa etária</div>
   </div>
   <div style="display:flex; gap:8px;">
-    <button class="btn-outline btn-sm" onclick="location.href='/cotacao/salvas'">Cotações salvas</button>
-    {% if eh_admin %}<button class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas'">Gerenciar tabelas</button>
-    <button class="btn-outline btn-sm" onclick="location.href='/cotacao/legendas'">Modelos de legenda</button>{% endif %}
+    {% if prefill and prefill.lead_id %}
+    <button type="button" class="btn-outline btn-sm" style="color:#6d28d9;border-color:#6d28d9;background:#f3e8ff;" onclick="abrirCopilotoCotacao('{{ prefill.lead_id }}')">
+      🪄 Copiloto: Sugerir Planos
+    </button>
+    {% endif %}
+    <button type="button" class="btn-outline btn-sm" onclick="location.href='/cotacao/salvas'">Cotações salvas</button>
+    {% if eh_admin %}
+    <button type="button" class="btn-outline btn-sm" onclick="location.href='/cotacao/tabelas'">Gerenciar tabelas</button>
+    <button type="button" class="btn-outline btn-sm" onclick="location.href='/cotacao/legendas'">Modelos de legenda</button>
+    {% endif %}
   </div>
 </div>
 
@@ -231,6 +238,19 @@
     O comparativo sai por operadora, e você escolhe quais planos entram na proposta do cliente.</span>
   </div>
 {% endif %}
+
+<!-- Modal do Copiloto -->
+<div id="modal-copiloto" class="modal-overlay" style="display:none;">
+  <div class="modal">
+    <div class="modal-cabecalho">
+      <div class="tit" style="color:#6d28d9;">🪄 Copiloto de Cotação</div>
+      <button class="fechar" onclick="this.closest('.modal-overlay').style.display='none'">×</button>
+    </div>
+    <div class="modal-corpo" id="copiloto-corpo" style="min-height:200px;">
+      <div class="msg-centro">Analisando o histórico do lead e a matriz de concorrência...</div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}<script>
@@ -240,4 +260,38 @@
   const ver = () => marcarFiltrosAtivos(box);
   ver(); box.addEventListener('input', ver); box.addEventListener('change', ver);
 })();
+
+async function abrirCopilotoCotacao(lead_id) {
+  const modal = document.getElementById('modal-copiloto');
+  const corpo = document.getElementById('copiloto-corpo');
+  modal.style.display = 'flex';
+  corpo.innerHTML = '<div class="msg-centro" style="padding:40px 0;"><span class="loader-inline"></span><br><br>Cruzando tabela de concorrência com a dor do cliente...</div>';
+  
+  try {
+    const res = await fetch('/api/ia/sugerir-planos?lead_id=' + lead_id);
+    const j = await res.json();
+    if(!j.ok) throw new Error(j.erro || "Erro desconhecido da IA");
+    
+    let html = '<p style="margin-top:0;">Baseado no que o cliente paga/tem e nas tabelas concorrentes (Hapvida, Amil, Porto, etc):</p>';
+    
+    html += '<div style="display:flex; flex-direction:column; gap:12px;">';
+    j.resultado.sugestoes.forEach(sug => {
+      html += `<div style="border:1px solid #e2e8f0; border-radius:6px; padding:12px;">
+        <strong style="display:block; font-size:15px;">${sug.operadora} - ${sug.plano}</strong>
+        <span style="color:var(--c-texto-secundario); font-size:14px; margin-top:4px; display:block;">${sug.motivo}</span>
+      </div>`;
+    });
+    html += '</div>';
+    
+    if(j.resultado.pitch_vendas) {
+      html += `<div style="margin-top:20px; background:#f8fafc; padding:12px; border-radius:6px; border-left:4px solid #6d28d9;">
+        <div style="font-size:12px; font-weight:600; color:#6d28d9; text-transform:uppercase; margin-bottom:8px;">💡 Draft pro WhatsApp</div>
+        <div style="font-size:14px; white-space:pre-wrap;">${j.resultado.pitch_vendas}</div>
+      </div>`;
+    }
+    corpo.innerHTML = html;
+  } catch(e) {
+    corpo.innerHTML = `<div class="msg-erro" style="margin:20px;">Falha ao chamar o copiloto: ${e.message}</div>`;
+  }
+}
 </script>{% endblock %}

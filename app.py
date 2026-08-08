@@ -1457,6 +1457,13 @@ def init_db():
                 atualizado_em TEXT,
                 PRIMARY KEY (lead_id, campo_id)
             )""",
+            """CREATE TABLE IF NOT EXISTS produtos_concorrencia (
+                id SERIAL PRIMARY KEY,
+                nivel_id INTEGER,
+                operadora TEXT NOT NULL,
+                nome_plano TEXT NOT NULL,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
             """CREATE TABLE IF NOT EXISTS cotacao_tabela (
                 id SERIAL PRIMARY KEY,
                 operadora TEXT NOT NULL, plano TEXT NOT NULL,
@@ -2442,6 +2449,13 @@ def init_db():
             evento_id TEXT UNIQUE,
             evento TEXT,
             processado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS produtos_concorrencia (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nivel_id INTEGER,
+            operadora TEXT NOT NULL,
+            nome_plano TEXT NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS cotacao_tabela (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22457,6 +22471,97 @@ def _wa_extracao_para_campos(ex):
     if notas:
         c['qualificacao_notas'] = ' · '.join(notas)
     return {k: v for k, v in c.items() if str(v or '').strip()}
+
+
+@app.route('/api/ia/sugerir-planos', methods=['GET', 'OPTIONS'])
+def api_ia_sugerir_planos():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    
+    if 'user_id' not in session:
+        return _wa_cors(jsonify({"ok": False, "erro": "Não autorizado"})), 401
+
+    lead_id = request.args.get('lead_id')
+    if not lead_id:
+        return _wa_cors(jsonify({"ok": False, "erro": "lead_id não informado"})), 400
+        
+    try:
+        conn = db()
+        lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lead_id,)).fetchone()
+        if not lead:
+            close_db(conn)
+            return _wa_cors(jsonify({"ok": False, "erro": "Lead não encontrado"})), 404
+            
+        # Puxar campos customizados (ex: valor_pago_hoje)
+        campos = conn.execute("SELECT campo_id, valor FROM campos_custom WHERE lead_id=?", (lead_id,)).fetchall()
+        campos_dict = {c['campo_id']: c['valor'] for c in campos}
+        valor_pago = campos_dict.get('valor_pago_hoje', 'Não informado')
+            
+        concorrentes = conn.execute("SELECT nivel_id, operadora, nome_plano FROM produtos_concorrencia ORDER BY nivel_id, operadora").fetchall()
+        close_db(conn)
+        
+        # Build prompt
+        matriz_str = "\\n".join([f"Nível {c['nivel_id']}: {c['operadora']} - {c['nome_plano']}" for c in concorrentes])
+        
+        prompt = f"""Você é um corretor de planos de saúde sênior. 
+Abaixo está o contexto de um lead e a matriz de concorrência dos planos de saúde (onde planos no mesmo Nível são concorrentes diretos equivalentes, Níveis maiores são superiores (mais caros) e Níveis menores são inferiores/downgrades).
+
+Lead:
+- Nome: {lead['nome']}
+- Plano Atual: {lead.get('qual_plano_atual') or 'Não informado'}
+- Idades: {lead.get('qual_idade') or 'Não informado'}
+- Cidade: {lead.get('qual_cidade') or 'Não informado'}
+- Valor Pago Hoje: {valor_pago}
+- Observações da qualificação: {lead.get('observacoes') or 'Nenhuma'}
+- Operadora de interesse: {lead.get('qual_operadora_interesse') or 'Não informado'}
+
+Matriz de Concorrência:
+{matriz_str}
+
+Com base nesses dados, sugira 2 ou 3 planos específicos presentes na Matriz que façam mais sentido para ele (um downgrade se ele achou caro, ou equivalentes diretos). 
+Responda EXCLUSIVAMENTE em formato JSON com o seguinte schema, sem markdown:
+{{
+  "sugestoes": [
+    {{
+      "operadora": "nome da operadora",
+      "plano": "nome do plano sugerido",
+      "motivo": "Por que você sugeriu este plano para ele (um argumento comercial curto)"
+    }}
+  ],
+  "pitch_vendas": "Um rascunho de mensagem curta para o WhatsApp oferecendo essas opções."
+}}
+"""
+
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+        if not api_key:
+            return _wa_cors(jsonify({"ok": False, "erro": "Chave Anthropic não configurada"})), 500
+            
+        try:
+            import anthropic
+        except Exception as e:
+            return _wa_cors(jsonify({"ok": False, "erro": "Pacote anthropic não instalado"})), 500
+            
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model="claude-3-5-sonnet-20240620",
+            max_tokens=1000,
+            system="Você retorna apenas JSON válido, sem tags markdown, no formato especificado.",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        import json
+        texto_limpo = msg.content[0].text.strip()
+        if texto_limpo.startswith('```json'):
+            texto_limpo = texto_limpo[7:-3].strip()
+        elif texto_limpo.startswith('```'):
+            texto_limpo = texto_limpo[3:-3].strip()
+            
+        resultado = json.loads(texto_limpo)
+        return _wa_cors(jsonify({"ok": True, "resultado": resultado}))
+        
+    except Exception as e:
+        app.logger.error(f"[IA Copiloto] Erro ao sugerir planos: {e}")
+        return _wa_cors(jsonify({"ok": False, "erro": str(e)})), 500
 
 
 @app.route('/api/whatsapp/analisar', methods=['POST', 'OPTIONS'])
