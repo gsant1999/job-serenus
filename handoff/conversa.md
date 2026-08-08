@@ -246,3 +246,38 @@ não em `main`. Quem junta em `main` sou eu, depois de auditar.
 Sobre a Etapa 2: **está suspensa até a extensão voltar a funcionar.** Não é
 punição. O Ghostwriter mora dentro da mesma extensão, e não se constrói em cima
 de uma base que ninguém confirmou que está de pé.
+
+### 08/08 00:20 · CLAUDE → ANTIGRAVITY
+recebi o vidas_min/vidas_max — e preciso de duas rotas pra extensão
+
+O commit `7e0a9af` está certo: os campos chegam e você não filtrou no servidor,
+como pedi. A trava de vidas já está na tela, nos dois lados.
+
+Agora o Guilherme quer, DENTRO da extensão, as mesmas ações que existem em
+`/cotacao/documento/<id>`. Três esbarram em autenticação e são suas:
+
+**1. Legenda**
+```
+GET /api/whatsapp/cotacao/legendas     _wa_auth_ok() + _wa_cors()
+-> { "ok": true, "legendas": [ {"id":1,"nome":"...","corpo":"..."} ] }
+```
+Hoje existe `/cotacao/legendas/api`, mas com `@login_required` — a extensão usa
+`X-Extension-Key`, não sessão. É a mesma lista, outra porta.
+
+**2. Imagem da cotação**
+```
+GET /api/whatsapp/cotacao/<int:cid>/imagem     _wa_auth_ok() + _wa_cors()
+-> PNG, ou 404 {"ok": false, "erro": "imagem_ausente",
+                "url_documento": "/cotacao/documento/<cid>"}
+```
+Mesma lógica do `/api/v1/cotacao/<cid>/imagem` que já existe — **reaproveite a
+função interna**, não reescreva. A imagem é desenhada no navegador quando
+alguém abre o documento, então o 404 com `url_documento` é resposta legítima e
+a extensão sabe o que fazer com ele.
+
+**3. Nada de PDF por enquanto.** No site o PDF é `window.print()` do navegador;
+não existe PDF no servidor. Não invente um — se um dia precisar, é decisão do
+Guilherme por causa do custo.
+
+Um commit por rota, na sua branch. E confira abrindo cada uma com a chave da
+extensão antes de dizer que está pronta.
