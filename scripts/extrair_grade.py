@@ -418,12 +418,27 @@ def _contexto(texto, herdado):
     # aqui guarda preco certo na coparticipacao errada.
     if 'sem coparticipacao' in t:
         c['coparticipacao'] = 'Sem'
-    elif 'coparticipacao parcial' in t or 'copart parcial' in t:
-        c['coparticipacao'] = 'Parcial'
     elif 'coparticipacao total' in t:
         c['coparticipacao'] = 'Total'
+    # A Santa Tereza nao escreve "coparticipacao parcial": escreve
+    # "COPARTICIPACAO POR EVENTO   PARCIAL", com o rotulo longe da palavra.
+    # Sem isto a pagina inteira saia sem coparticipacao — e a rota de
+    # importacao recusa, com razao, tabela sem essa dimensao.
+    elif re.search(r'coparticipacao[^\n]{0,60}parcial', t) or 'copart parcial' in t:
+        c['coparticipacao'] = 'Parcial'
     elif 'com coparticipacao' in t or 'participativos' in t:
         c['coparticipacao'] = 'Com coparticipacao'
+
+    # PROMOCIONAL x ATUAL SAO TABELAS DIFERENTES DO MESMO PLANO.
+    #
+    # A Santa Tereza publica as duas no mesmo PDF: "Tabela promocional PME" e
+    # "Tabela atual PME 2025", com precos diferentes pro mesmo Global/Enfermaria.
+    # Sem separar, a segunda sobrescreve a primeira — o defeito de sempre, e o
+    # mais caro deles, porque promocional tem prazo e a atual nao.
+    if re.search(r'tabela\s+promocional', t):
+        c['linha'] = 'Promocional'
+    elif re.search(r'tabela\s+atual', t):
+        c['linha'] = 'Atual'
 
     m = re.search(r'grupo de munic[a-z]*\s*\n?\s*([a-z ]{3,30})', t)
     if m:
@@ -467,7 +482,7 @@ def _do_caminho(caminho):
 def ler_pdf(caminho):
     saida = []
     ctx = {'modalidade': '', 'administradora': '', 'coparticipacao': '',
-           'abrangencia': '', 'vidas_min': None, 'vidas_max': None}
+           'abrangencia': '', 'vidas_min': None, 'vidas_max': None, 'linha': ''}
     ctx.update(_do_caminho(caminho))
     with pdfplumber.open(caminho) as pdf:
         for npag, pagina in enumerate(pdf.pages, 1):

@@ -75,7 +75,8 @@
     border:1px solid var(--laranja); background:rgba(251,146,60,.1); }
   .cv-falha b { color:var(--texto); }
   .cv-falha a { color:var(--azul); }
-  .cv-vazio { padding:34px 4px; text-align:center; color:var(--cinza-2); font-size:13px; }
+  /* .cv-vazio tinha DUAS definicoes; a de baixo vencia e esta era codigo
+     morto. Ficou a que a tela realmente mostra. */
 
   .cv-painel-topo { display:flex; align-items:flex-start; justify-content:space-between;
     gap:16px; flex-wrap:wrap; margin:0 0 16px; }
@@ -224,24 +225,73 @@
   .cv-pasta-i { display:flex; color:var(--cinza-2); }
   .cv-pasta-n { margin-left:auto; font-size:11.5px; font-weight:600; color:var(--cinza-2);
     background:var(--panel-2); border-radius:6px; padding:2px 8px; }
-  .cv-cliente-pasta { border:1px solid var(--borda-2); border-radius:11px;
-    margin-bottom:8px; overflow:hidden; background:var(--panel); }
-  .cv-cliente-pasta > summary { display:flex; align-items:center; gap:10px; cursor:pointer;
-    padding:11px 13px; list-style:none; font-size:13.5px; }
+  /* PASTA DO CLIENTE ──────────────────────────────────────────────────────
+     Antes: `.cv-cli-nome` estava definido DUAS vezes no arquivo, aqui e no
+     cartão do Cliente lá em cima. A de baixo vencia e matava o `flex:1` e o
+     corte com reticências da outra — nome comprido empurrava o telefone e a
+     contagem pra fora da linha. Agora as regras daqui são ESCOPADAS na pasta,
+     e as duas convivem sem uma apagar a outra.
+     Havia também uma regra vazia `.cv-cliente-pasta { }` — resto de edição. */
+  .cv-cliente-pasta { border:1px solid var(--borda-2); border-radius:12px;
+    margin-bottom:10px; overflow:hidden; background:var(--panel);
+    transition:border-color .15s, box-shadow .15s; }
+  .cv-cliente-pasta:hover { border-color:var(--borda); }
+  .cv-cliente-pasta[open] { box-shadow:0 1px 3px rgba(0,0,0,.10); }
+  .cv-cliente-pasta > summary { display:flex; align-items:center; gap:11px;
+    cursor:pointer; padding:13px 15px; list-style:none; }
   .cv-cliente-pasta > summary::-webkit-details-marker { display:none; }
   .cv-cliente-pasta > summary::before { content:''; width:7px; height:7px; flex:none;
     border-right:2px solid var(--cinza-2); border-bottom:2px solid var(--cinza-2);
     transform:rotate(-45deg); transition:transform .16s; }
   .cv-cliente-pasta[open] > summary::before { transform:rotate(45deg); }
   .cv-cliente-pasta > summary:hover { background:var(--panel-2); }
-  .cv-cli-nome { font-weight:700; color:var(--texto); }
-  .cv-cli-tel { font-size:11.5px; color:var(--cinza-2); }
-  .cv-cli-n { margin-left:auto; font-size:11.5px; color:var(--cinza-2); }
-  /* A tabela estourava a largura e o "Quando" saia da tela. Rolagem propria
-     na tabela, nunca na pagina. */
-  .cv-cliente-pasta table.cot { margin:0; }
-  .cv-cliente-pasta { }
-  .cv-cliente-pasta > table, .cv-cliente-pasta table.cot { width:100%; }
+  /* A inicial dá âncora visual: numa lista de vinte pastas, o olho acha
+     "Maria" pela letra antes de ler o nome inteiro. */
+  .cv-cli-av { width:32px; height:32px; border-radius:10px; flex:none;
+    display:flex; align-items:center; justify-content:center;
+    font-size:12.5px; font-weight:700; color:var(--verde);
+    background:rgba(34,197,94,.13); }
+  .cv-cliente-pasta .cv-cli-txt { flex:1 1 auto; min-width:0; }
+  .cv-cliente-pasta .cv-cli-nome { display:block; font-size:13.5px; font-weight:650;
+    color:var(--texto); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cv-cliente-pasta .cv-cli-tel { display:block; font-size:11.5px; color:var(--cinza-2);
+    margin-top:2px; font-variant-numeric:tabular-nums; }
+  .cv-cliente-pasta .cv-cli-n { flex:none; font-size:11px; font-weight:650;
+    color:var(--cinza-2); background:var(--panel-2); border:1px solid var(--borda-2);
+    border-radius:999px; padding:3px 9px; white-space:nowrap; }
+
+  /* CADA COTAÇÃO É UMA LINHA, NÃO UMA CÉLULA DE TABELA.
+     A tabela de seis colunas espremia título, tipo, planos, valor, data e
+     quatro botões na largura de um cartão — tudo do mesmo tamanho, nada com
+     hierarquia, e o "Quando" saindo da tela. Aqui o que decide (cliente,
+     valor) tem peso, e o resto é apoio. */
+  .cv-cot-linha { display:flex; align-items:center; gap:12px;
+    padding:11px 15px; border-top:1px solid var(--borda-2); }
+  .cv-cot-linha:hover { background:var(--panel-2); }
+  .cv-cot-info { flex:1 1 auto; min-width:0; }
+  .cv-cot-tit { font-size:12.5px; font-weight:600; color:var(--texto);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cv-cot-meta { font-size:11px; color:var(--cinza-2); margin-top:3px;
+    display:flex; gap:7px; flex-wrap:wrap; align-items:center; }
+  .cv-cot-meta b { font-weight:600; color:var(--cinza-2); }
+  .cv-cot-valor { flex:none; font-size:13.5px; font-weight:700; color:var(--texto);
+    font-variant-numeric:tabular-nums; text-align:right; }
+  .cv-cot-valor small { display:block; font-size:10.5px; font-weight:500;
+    color:var(--cinza-2); margin-top:2px; }
+  /* Os botões só aparecem na linha sob o cursor. Quatro botões repetidos em
+     vinte linhas viram uma parede cinza e escondem o que importa. No toque
+     (sem cursor) eles ficam sempre visíveis, senão a ação some no celular. */
+  .cv-cot-acoes { flex:none; display:flex; gap:5px; opacity:0; transition:opacity .13s; }
+  .cv-cot-linha:hover .cv-cot-acoes,
+  .cv-cot-linha:focus-within .cv-cot-acoes { opacity:1; }
+  @media (hover:none) { .cv-cot-acoes { opacity:1; } }
+  .cv-cot-acoes .b { font-size:11px; padding:5px 9px; }
+  .cv-sem-tipo-p { color:var(--aviso); }
+  @media (max-width:640px) {
+    .cv-cot-linha { flex-wrap:wrap; }
+    .cv-cot-valor { text-align:left; }
+    .cv-cot-acoes { opacity:1; width:100%; }
+  }
   .cv-sub { font-size:11px; color:var(--cinza-2); }
   .cv-sem-tipo { color:var(--cinza-2); font-style:italic; }
   .cv-num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
@@ -2656,36 +2706,45 @@
         // quem procura uma abre a pasta dela. Antes a pasta única nascia
         // aberta; a regra virou uma só porque comportamento que muda conforme
         // a quantidade faz a pessoa reaprender a tela a cada visita.
+        var ini = (cliente || '?').trim().charAt(0).toUpperCase();
         h += '<details class="cv-cliente-pasta">' +
           '<summary>' +
-            '<span class="cv-cli-nome">' + esc(cliente) + '</span>' +
-            (tel ? '<span class="cv-cli-tel">' + esc(tel) + '</span>' : '') +
+            '<span class="cv-cli-av">' + esc(ini) + '</span>' +
+            '<span class="cv-cli-txt">' +
+              '<span class="cv-cli-nome">' + esc(cliente) + '</span>' +
+              (tel ? '<span class="cv-cli-tel">' + esc(tel) + '</span>' : '') +
+            '</span>' +
             '<span class="cv-cli-n">' + itens.length +
               (itens.length === 1 ? ' cotação' : ' cotações') + '</span>' +
-          '</summary>' +
-          '<table class="cot"><thead><tr><th>Cotação</th><th>Tipo</th>' +
-            '<th>Planos</th><th>Valor</th><th>Quando</th><th></th></tr></thead><tbody>';
+          '</summary>';
         itens.forEach(function (x) {
-          var modsTxt = (x.modalidades && x.modalidades.length)
-            ? esc(x.modalidades.join(', '))
-            : '<span class="cv-sem-tipo">tipo não registrado</span>';
-          h += '<tr>' +
-            '<td>' + esc(x.titulo || '—') +
-              (x.cidade ? '<br><span class="cv-sub">' + esc(x.cidade) + '</span>' : '') + '</td>' +
-            '<td>' + modsTxt + '</td>' +
-            '<td>' + (x.planos_cotados || 0) + '</td>' +
-            '<td class="cv-num">' + moeda(x.valor_total) + '</td>' +
-            '<td>' + dataBr(x.criado_em) + '</td>' +
-            '<td class="cv-acoes">' +
-              (x.token ? '<button class="b" data-ac="link" data-t="' + esc(x.token) + '">Copiar link</button>' : '') +
+          // O TIPO SÓ APARECE QUANDO FALTA. Quando está registrado, ele repete
+          // o que o título já diz; quando falta, é a única pista de que aquela
+          // cotação vai sair sem tipo — e aí precisa gritar.
+          var meta = [];
+          if (x.cidade) meta.push(esc(x.cidade));
+          meta.push('<b>' + (x.planos_cotados || 0) + '</b> plano' +
+                    ((x.planos_cotados || 0) === 1 ? '' : 's'));
+          if (x.modalidades && x.modalidades.length) meta.push(esc(x.modalidades.join(', ')));
+          else meta.push('<span class="cv-sem-tipo-p">sem tipo registrado</span>');
+          h += '<div class="cv-cot-linha">' +
+            '<div class="cv-cot-info">' +
+              '<div class="cv-cot-tit">' + esc(x.titulo || '—') + '</div>' +
+              '<div class="cv-cot-meta">' + meta.join('<span>·</span>') + '</div>' +
+            '</div>' +
+            '<div class="cv-cot-valor">' + moeda(x.valor_total) +
+              '<small>' + dataBr(x.criado_em) + '</small></div>' +
+            '<div class="cv-cot-acoes">' +
+              (x.token ? '<button class="b" data-ac="link" data-t="' + esc(x.token) + '">Link</button>' : '') +
               (x.token && x.cliente_telefone ? '<button class="b" data-ac="wpp" data-t="' + esc(x.token) +
                 '" data-tel="' + esc(x.cliente_telefone) + '" data-n="' + esc(x.cliente_nome || '') + '">WhatsApp</button>' : '') +
               '<button class="b" data-ac="doc" data-id="' + x.id + '">Abrir</button>' +
               '<button class="b b-del" data-ac="del" data-id="' + x.id +
                 '" data-n="' + esc(x.cliente_nome || x.titulo || '') + '">Excluir</button>' +
-            '</td></tr>';
+            '</div>' +
+          '</div>';
         });
-        h += '</tbody></table></details>';
+        h += '</details>';
       });
     });
 
