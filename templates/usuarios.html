@@ -74,7 +74,10 @@
           </td>
           <td style="white-space:nowrap;">
             <button class="btn-ghost" onclick='editar({{ u|tojson }})'>Editar</button>
-            <button class="btn-ghost" onclick="abrirAparelhos({{ u.id }}, {{ u.nome|tojson }})"
+            <!-- Aspas SIMPLES no onclick: |tojson devolve o nome entre aspas
+                 duplas, e num atributo de aspas duplas o valor termina ali.
+                 O botão vira HTML quebrado e não dispara nada, sem erro. -->
+            <button class="btn-ghost" onclick='abrirAparelhos({{ u.id }}, {{ u.nome|tojson }})'
               title="WhatsApps conectados à extensão por esta pessoa">Aparelhos</button>
             {% if not u.senha_hash and u.id %}<a href="/usuario/regenerar-link/{{ u.id }}" class="btn-ghost" style="color:var(--info);">Novo link</a>{% endif %}
           </td>

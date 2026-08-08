@@ -59,7 +59,10 @@
     <div class="leg-nome">{{ m.nome }}</div>
     <pre class="leg-corpo">{{ m.corpo }}</pre>
     <div class="leg-acoes">
-      <button class="b" onclick="editarModelo({{ m.id }}, '{{ m.nome|replace("'","\\'")|replace('"','\\"') }}', {{ m.corpo|tojson }})">Editar</button>
+      <!-- Atributo em aspas SIMPLES e os dois textos por |tojson: ele escapa
+           a aspa simples (') e assim nada aqui fecha o atributo. A legenda
+           quase sempre tem aspas duplas no corpo — era o que quebrava o botão. -->
+      <button class="b" onclick='editarModelo({{ m.id }}, {{ m.nome|tojson }}, {{ m.corpo|tojson }})'>Editar</button>
       <button class="b b-del" onclick="excluir({{ m.id }}, '{{ m.nome|replace("'","\\'") }}')">Excluir</button>
     </div>
   </div>

@@ -61,7 +61,7 @@
           </div>
         </div>
         <button class="btn-ghost" onclick='editar({{ c.id }}, {{ c.label|tojson }}, {{ c.tipo|tojson }}, {{ (c.opcoes or "[]")|tojson }}, {{ (c.placeholder or "")|tojson }}, {{ (c.ajuda or "")|tojson }}, {{ c.obrigatorio }}, {{ c.ativo }})'>Editar</button>
-        <button class="btn-ghost" style="color:var(--rosa);" onclick="excluir({{ c.id }}, {{ c.label|tojson }})">Excluir</button>
+        <button class="btn-ghost" style="color:var(--rosa);" onclick='excluir({{ c.id }}, {{ c.label|tojson }})'>Excluir</button>
       </div>
       {% endfor %}
     </div>
