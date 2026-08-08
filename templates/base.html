@@ -49,7 +49,9 @@
   --texto:#1a1d2e; --cinza:#5a6278; --cinza-2:#667085;
     --card-bg:#FFFFFF; --input-bg:#f8f9fb;
     --verde:#17a882; --verde-2:#13906d; --verde-soft:rgba(23,168,130,.1);
-    --rosa:#e0265e; --info:#2563eb;
+    /* --erro também vinha só do tema escuro (#f43f5e): sobre branco dá 3,3:1,
+       abaixo do mínimo, e é a cor que 24 telas usam pra dizer "cuidado". */
+    --rosa:#e0265e; --info:#2563eb; --erro:#be123c;
     /* AMARELO NAO EXISTE NO TEMA CLARO. Amarelo e a cor mais luminosa que
        existe: sobre branco ele nunca vai ter contraste, e toda tentativa de
        salvar (escurecer ate virar mostarda, contornar a letra) sai pior que o
@@ -76,7 +78,19 @@
   [data-theme="light"] h1, [data-theme="light"] h2, [data-theme="light"] h3 { color:var(--texto); }
   /* (o estado do botao secundario no claro esta definido junto com o escuro,
      mais abaixo — aqui so ficava brigando por especificidade) */
-  [data-theme="light"] .tag { background:rgba(0,0,0,.06); }
+  /* AS TAGS PRECISAM DE COR PRÓPRIA NO CLARO.
+     As cores das variantes foram calibradas pro fundo escuro — são claras de
+     propósito (#fde047, #7baefb, #fb8497). Sobre branco elas somem: o
+     "consultor" amarelo dava contraste 1,4:1, praticamente invisível.
+     Aqui cada variante ganha texto ESCURO sobre a mesma tinta suave, e o
+     amarelo vira laranja queimado pelo motivo já explicado lá em cima. */
+  [data-theme="light"] .tag { background:rgba(16,24,40,.07); color:var(--cinza); }
+  [data-theme="light"] .tag-verde { background:rgba(23,168,130,.12); color:#0f7a5c; }
+  [data-theme="light"] .tag-info  { background:rgba(37,99,235,.11); color:#1d4ed8; }
+  [data-theme="light"] .tag-rosa  { background:rgba(224,38,94,.11); color:#be123c; }
+  [data-theme="light"] .tag-am    { background:rgba(194,65,12,.11); color:#9a3412; }
+  [data-theme="light"] .tag-off   { background:rgba(225,29,72,.10); color:#be123c; }
+  [data-theme="light"] .tag-cinza { background:rgba(16,24,40,.07); color:var(--cinza); }
   [data-theme="light"] .col-count { background:rgba(0,0,0,.08); }
   [data-theme="light"] .hamburger span { background:var(--texto); }
   [data-theme="light"] ::-webkit-scrollbar-thumb { background:#c3c8d4; }

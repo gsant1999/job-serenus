@@ -45,19 +45,26 @@
       <thead><tr><th>Nome</th><th>E-mail</th><th>CPF</th><th>Perfil</th><th class="hide-admin">Regime</th><th>Status</th><th>Ação</th></tr></thead>
       <tbody>
         {% for u in usuarios %}
-        <tr>
+        {# Linha de inativo é fundo, não conteúdo: quem abre esta tela está
+           atrás de quem trabalha aqui hoje. #}
+        <tr class="{{ 'u-inativo' if u.senha_hash and not u.ativo }}">
           <td style="display:flex; align-items:center; gap:10px;">
             {% if u.foto %}<img src="/anexos/{{ u.foto }}" alt="" style="width:36px; height:36px; border-radius:50%; object-fit:cover; border:1px solid var(--borda);">
             {% else %}<div style="width:36px; height:36px; border-radius:50%; background:var(--panel-3); display:flex; align-items:center; justify-content:center; font-size:13px; color:var(--cinza);">{{ u.nome[0]|upper }}</div>{% endif %}
             <strong>{{ u.nome }}</strong>
           </td>
           <td>{{ u.email }}</td>
-          <td style="font-size:12px; color:var(--cinza);">{{ u.cpf or '—' }}</td>
+          <td class="u-cpf">{{ u.cpf or '—' }}</td>
+          {# PERFIL É CLASSIFICAÇÃO, STATUS É ALARME — e só um dos dois pode
+             ter cor. Antes "admin" e "Ativo" eram a mesma pílula verde, lado
+             a lado: dois avisos idênticos competindo, e o olho não achava
+             nenhum. O perfil vira etiqueta de contorno, neutra; a cor fica
+             com o status, que é o que faz alguém agir. #}
           <td>
             {% if u.perfil == 'gestor_vendedor' %}
-              <span class="tag" style="background:rgba(139,92,246,.18); color:#a78bfa;">gestor vendedor</span>
+              <span class="u-perfil u-perfil-gv">gestor vendedor</span>
             {% else %}
-              <span class="tag {{ 'tag-verde' if u.perfil=='admin' else 'tag-info' if u.perfil=='supervisor' else 'tag-am' }}">{{ u.perfil }}</span>
+              <span class="u-perfil">{{ u.perfil }}</span>
             {% endif %}
           </td>
           <td class="hide-admin" style="font-size:11.5px; color:var(--cinza);">
@@ -72,14 +79,14 @@
             {% elif u.ativo %}<span class="tag tag-verde">Ativo</span>
             {% else %}<span class="tag tag-off">Inativo</span>{% endif %}
           </td>
-          <td style="white-space:nowrap;">
-            <button class="btn-ghost" onclick='editar({{ u|tojson }})'>Editar</button>
+          <td style="white-space:nowrap; text-align:right;">
+            <button class="u-acao" onclick='editar({{ u|tojson }})'>Editar</button>
             <!-- Aspas SIMPLES no onclick: |tojson devolve o nome entre aspas
                  duplas, e num atributo de aspas duplas o valor termina ali.
                  O botão vira HTML quebrado e não dispara nada, sem erro. -->
-            <button class="btn-ghost" onclick='abrirAparelhos({{ u.id }}, {{ u.nome|tojson }})'
+            <button class="u-acao" onclick='abrirAparelhos({{ u.id }}, {{ u.nome|tojson }})'
               title="WhatsApps conectados à extensão por esta pessoa">Aparelhos</button>
-            {% if not u.senha_hash and u.id %}<a href="/usuario/regenerar-link/{{ u.id }}" class="btn-ghost" style="color:var(--info);">Novo link</a>{% endif %}
+            {% if not u.senha_hash and u.id %}<a href="/usuario/regenerar-link/{{ u.id }}" class="u-acao u-acao-forte">Novo link</a>{% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -114,6 +121,36 @@
 </div>
 
 <style>
+  /* ── PERFIL: etiqueta de contorno, sem cor de alarme ──
+     Contorno em vez de tinta cheia porque perfil se lê quando você procura,
+     não quando você passa o olho. A cor da tela fica reservada ao status. */
+  .u-perfil { display:inline-block; padding:2px 9px; border-radius:999px;
+    border:1px solid var(--borda-2); font-size:11px; font-weight:600;
+    color:var(--cinza); letter-spacing:.2px; }
+  .u-perfil-gv { border-color:rgba(139,92,246,.45); color:#8b5cf6; }
+
+  /* CPF numa linha só: quebrado em duas ele vira um bloco de texto no meio
+     da tabela e desalinha a altura de todas as linhas vizinhas. */
+  .u-cpf { font-size:12px; color:var(--cinza); white-space:nowrap;
+    font-variant-numeric:tabular-nums; }
+
+  /* ── AÇÕES: pareciam texto cinza, agora parecem clicáveis ──
+     Fantasma até o hover, pra não competir com o nome da pessoa, mas com
+     borda e fundo aparecendo no toque — o que responde tem que parecer que
+     responde. */
+  .u-acao { display:inline-block; background:transparent; border:1px solid transparent;
+    border-radius:7px; padding:5px 11px; font-size:12.5px; font-weight:500;
+    color:var(--cinza); cursor:pointer; text-decoration:none; font-family:inherit;
+    transition:background .15s ease, color .15s ease, border-color .15s ease; }
+  .u-acao:hover { background:var(--panel-2); border-color:var(--borda-2); color:var(--texto); }
+  .u-acao:focus-visible { outline:2px solid var(--info); outline-offset:1px; }
+  .u-acao-forte { color:var(--info); font-weight:600; }
+
+  /* Inativo recua, mas volta inteiro quando o cursor chega — some da varredura
+     sem sumir da tela. */
+  .u-inativo td { opacity:.55; transition:opacity .15s ease; }
+  .u-inativo:hover td { opacity:1; }
+
   /* CENTRALIZADA E ESTREITA, só esta janela.
      A gaveta de baixo, largura cheia, é o padrão do site e continua valendo
      nas outras telas — mas aqui o conteúdo são duas linhas por aparelho, e
@@ -206,7 +243,10 @@
           '<div style="font-size:11.5px; color:var(--cinza); margin-top:2px;">' +
             'último uso ' + quando(s.ultimo_uso) + '</div>' +
         '</div>' +
-        '<button type="button" class="btn-ghost" style="color:var(--vermelho);"' +
+        // --vermelho NÃO EXISTE neste projeto: a variável inválida caía no
+        // cinza herdado e o botão de desconectar não parecia perigoso. A cor
+        // de risco aqui é --erro, e ela tem versão nos dois temas.
+        '<button type="button" class="u-acao" style="color:var(--erro); font-weight:600;"' +
           ' onclick="desconectar(' + s.id + ', ' + JSON.stringify(esc(s.apelido || 'este aparelho')) + ')">' +
           'Desconectar</button>' +
       '</div>';
