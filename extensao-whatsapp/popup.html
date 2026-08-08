@@ -14,6 +14,18 @@
     button { width: 100%; margin-top: 14px; background: #2563eb; color: #fff; border: none;
       border-radius: 8px; padding: 10px; font-size: 13px; font-weight: 700; cursor: pointer; }
     button.sec { background: #2c3247; margin-top: 8px; }
+    button.sair { background: transparent; border: 1px solid #2c3247; color: #8c93a8;
+      font-weight: 600; margin-top: 8px; }
+    .cartao { background: #12151f; border: 1px solid #2c3247; border-radius: 10px;
+      padding: 12px; margin-bottom: 4px; }
+    .quem { font-size: 13.5px; font-weight: 700; color: #e7e9f0; }
+    .quem-sub { font-size: 11px; color: #8c93a8; margin-top: 3px; }
+    details.antigo { margin-top: 16px; border-top: 1px solid #2c3247; padding-top: 10px; }
+    details.antigo > summary { font-size: 11px; color: #6b7185; cursor: pointer;
+      list-style: none; }
+    details.antigo > summary::-webkit-details-marker { display: none; }
+    details.antigo > summary::before { content: '▸ '; }
+    details.antigo[open] > summary::before { content: '▾ '; }
     #status { font-size: 12px; margin-top: 12px; min-height: 16px; }
     .ok { color: #1fd8a4; } .err { color: #f43f5e; } .info { color: #8c93a8; }
     .nota { font-size: 10.5px; color: #6b7185; line-height: 1.5; margin-top: 12px;
@@ -27,15 +39,32 @@
   <label for="jobUrl">URL do JOB</label>
   <input id="jobUrl" type="text" placeholder="https://job-serenus-production.up.railway.app">
 
-  <label for="extKey">Chave da extensão</label>
-  <input id="extKey" type="password" placeholder="cole a chave (env WHATSAPP_EXT_KEY)">
+  <!-- ENTRADA. A senha é usada uma vez e não fica guardada: o que sobra na
+       máquina é o token deste aparelho. -->
+  <div id="blocoLogin">
+    <label for="loginEmail">Seu e-mail do JOB</label>
+    <input id="loginEmail" type="email" autocomplete="username" placeholder="voce@serenus.com.br">
 
-  <label for="usuarioId">Quem está usando (consultor)</label>
-  <select id="usuarioId">
-    <option value="">Selecione…</option>
-  </select>
-  <div id="usuarioIdAviso" class="err" style="font-size:10.5px; margin-top:5px; display:none;">
-    Sem isso selecionado, a biblioteca de modelos/funis mostra tudo misturado — não só o que é seu.
+    <label for="loginSenha">Sua senha</label>
+    <input id="loginSenha" type="password" autocomplete="current-password" placeholder="a mesma do site">
+
+    <label for="loginApelido">Nome deste aparelho</label>
+    <input id="loginApelido" type="text" placeholder="ex: notebook da Bia, WhatsApp 2">
+    <div class="nota" style="border-top:none; padding-top:6px; margin-top:6px;">
+      Você pode entrar em mais de um computador com o mesmo usuário — um por
+      WhatsApp. O nome serve pra saber qual é qual na hora de desconectar.
+    </div>
+
+    <button id="entrar">Entrar</button>
+  </div>
+
+  <div id="blocoQuem" style="display:none;">
+    <label>Conectado como</label>
+    <div class="cartao">
+      <div class="quem" id="quemNome">—</div>
+      <div class="quem-sub" id="quemAparelho"></div>
+    </div>
+    <button id="sair" class="sair">Sair deste aparelho</button>
   </div>
 
   <label for="railSide">Lado do painel no WhatsApp Web</label>
@@ -61,8 +90,26 @@
   <button id="testar" class="sec">Testar conexão</button>
   <div id="status" class="info"></div>
 
+  <details class="antigo" id="blocoAntigo">
+    <summary>Acesso antigo (chave compartilhada) — sai em breve</summary>
+    <label for="extKey">Chave da extensão</label>
+    <input id="extKey" type="password" placeholder="cole a chave (env WHATSAPP_EXT_KEY)">
+
+    <label for="usuarioId">Quem está usando (consultor)</label>
+    <select id="usuarioId">
+      <option value="">Selecione…</option>
+    </select>
+    <div id="usuarioIdAviso" class="err" style="font-size:10.5px; margin-top:5px; display:none;">
+      Sem isso selecionado, a biblioteca de modelos/funis mostra tudo misturado — não só o que é seu.
+    </div>
+    <div class="nota" style="border-top:none; padding-top:8px;">
+      Esta chave é a mesma em todas as máquinas, então ela diz "sou a extensão"
+      e não diz quem é você. Entrando com e-mail e senha acima, o JOB passa a
+      saber — e este bloco pode sumir.
+    </div>
+  </details>
+
   <div class="nota">
-    A chave é a mesma configurada no Railway (variável <b>WHATSAPP_EXT_KEY</b>).
     Os leads criados pela análise vão pro consultor DONO do WhatsApp aberto
     (o JOB reconhece pelo telefone cadastrado em Usuários). O consultor
     selecionado aqui é usado quando o número não está cadastrado (ou é o

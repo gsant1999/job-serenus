@@ -78,8 +78,16 @@ async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId, opts) {
   const _t0 = Date.now();
   const _anota = (ok) => { try { _anotarTempo(caminho.split('?')[0], Date.now() - _t0, ok); } catch (e) {} };
   const { jobUrl, extKey } = await config();
-  if (!extKey) {
-    return { ok: false, erro: 'Configure a chave da extensão no popup (clique no ícone do JOB).' };
+  const { extToken } = await chrome.storage.local.get(['extToken']);
+  // DUAS FORMAS DE ENTRAR, ENQUANTO A TROCA ACONTECE.
+  //
+  // O token é do consultor que fez login — ele diz QUEM é. A chave é a antiga,
+  // igual nas oito máquinas, e só diz "sou a extensão". Enquanto nem todos
+  // tiverem entrado, as duas valem; quem tem token manda as duas e o servidor
+  // usa a melhor. Exigir só o token hoje travaria oito pessoas no meio do
+  // expediente.
+  if (!extKey && !extToken) {
+    return { ok: false, erro: 'Entre com seu e-mail e senha no popup da extensão (clique no ícone do JOB).' };
   }
   // Sem isso, se o servidor travasse (não desse erro, só não respondesse), o
   // painel ficava preso em "Calculando o score…" pra sempre, sem forma de
@@ -99,10 +107,11 @@ async function chamarJob(caminho, metodo, corpo, timeoutMs, reqId, opts) {
     try {
       const resp = await fetch(jobUrl + caminho, {
         method: metodo,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Extension-Key': extKey
-        },
+        headers: Object.assign(
+          { 'Content-Type': 'application/json' },
+          extKey ? { 'X-Extension-Key': extKey } : {},
+          extToken ? { 'Authorization': 'Bearer ' + extToken } : {}
+        ),
         body: corpo ? JSON.stringify(corpo) : undefined,
         signal: controller.signal
       });
@@ -244,6 +253,58 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     _partesAnalise.delete(msg.reqId); // libera a memória do SW antes do fetch
     const { _ts, ...payload } = acc;
     chamarJob('/api/whatsapp/analisar', 'POST', payload, 300000, msg.reqId).then(sendResponse);
+    return true;
+  }
+  // LOGIN E SAÍDA.
+  //
+  // A senha atravessa uma vez e não é guardada em lugar nenhum — o que fica na
+  // máquina é o token. Guardar a senha seria pior que a chave compartilhada de
+  // hoje: seriam oito senhas de verdade em chrome.storage.
+  if (msg && msg.type === 'login') {
+    (async () => {
+      const { jobUrl } = await config();
+      try {
+        const resp = await fetch(jobUrl + '/api/whatsapp/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(msg.payload || {}),
+        });
+        let d = null;
+        try { d = await resp.json(); } catch (e) { d = null; }
+        if (resp.status === 404) {
+          sendResponse({ ok: false, erro: 'O JOB ainda não tem a tela de login da extensão. ' +
+                                          'Continue com a chave por enquanto.' });
+          return;
+        }
+        if (!resp.ok || !d || !d.ok) {
+          sendResponse({ ok: false, erro: (d && d.erro) || ('HTTP ' + resp.status) });
+          return;
+        }
+        await chrome.storage.local.set({
+          extToken: d.token,
+          extUsuario: d.usuario || null,
+          extApelido: (msg.payload && msg.payload.apelido) || '',
+          // O consultor passa a vir de quem entrou, não de um campo escolhido
+          // à mão. Manter os dois em pé discordando seria pior que qualquer um
+          // dos dois sozinho.
+          usuarioId: (d.usuario && d.usuario.id) || '',
+        });
+        sendResponse({ ok: true, usuario: d.usuario || null });
+      } catch (e) {
+        sendResponse({ ok: false, erro: 'Não consegui falar com o JOB agora.' });
+      }
+    })();
+    return true;
+  }
+  if (msg && msg.type === 'logout') {
+    (async () => {
+      // Avisa o servidor pra revogar, mas NÃO depende disso pra limpar aqui:
+      // se o JOB estiver fora do ar, sair da máquina tem que funcionar mesmo
+      // assim — senão a pessoa fica presa numa sessão que ela quer encerrar.
+      try { await chamarJob('/api/whatsapp/logout', 'POST', {}, 8000); } catch (e) {}
+      await chrome.storage.local.remove(['extToken', 'extUsuario', 'extApelido']);
+      sendResponse({ ok: true });
+    })();
     return true;
   }
   if (msg && msg.type === 'enviar_direto') {

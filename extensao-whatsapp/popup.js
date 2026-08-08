@@ -12,9 +12,59 @@ function status(txt, cls) {
   s.className = cls || 'info';
 }
 
+function pintarQuem(usuario, apelido) {
+  const entrou = !!(usuario && usuario.nome);
+  $('blocoLogin').style.display = entrou ? 'none' : '';
+  $('blocoQuem').style.display = entrou ? '' : 'none';
+  if (entrou) {
+    $('quemNome').textContent = usuario.nome;
+    $('quemAparelho').textContent = apelido ? 'neste aparelho: ' + apelido : 'este aparelho';
+    // Quem entrou não precisa mais escolher consultor à mão, nem ver a chave.
+    // Deixar os dois abertos convidaria a mexer no que já está resolvido.
+    const antigo = $('blocoAntigo');
+    if (antigo) antigo.open = false;
+  }
+}
+
+async function entrar() {
+  const email = ($('loginEmail').value || '').trim();
+  const senha = $('loginSenha').value || '';
+  const apelido = ($('loginApelido').value || '').trim();
+  if (!email || !senha) { status('Preencha e-mail e senha.', 'err'); return; }
+  // A URL precisa estar salva ANTES: o login vai pra ela.
+  await salvar();
+  status('Entrando…', 'info');
+  const r = await chrome.runtime.sendMessage({ type: 'login', payload: { email, senha, apelido } });
+  if (!r || !r.ok) {
+    // O MOTIVO DO SERVIDOR APARECE. "Não deu" faz a pessoa tentar a mesma
+    // senha três vezes; "senha incorreta" e "usuário inativo" se resolvem de
+    // formas diferentes.
+    status(r && r.erro === 'credenciais_invalidas' ? 'E-mail ou senha incorretos.'
+         : r && r.erro === 'usuario_inativo' ? 'Este usuário está inativo no JOB.'
+         : (r && r.erro) || 'Não consegui entrar agora.', 'err');
+    return;
+  }
+  // A senha some da tela junto com o sucesso — ela não é guardada em lugar
+  // nenhum, e deixá-la no campo só aumenta a chance de alguém ver.
+  $('loginSenha').value = '';
+  pintarQuem(r.usuario, apelido);
+  status('Conectado como ' + ((r.usuario && r.usuario.nome) || 'você') + '.', 'ok');
+}
+
+async function sair() {
+  if (!confirm('Sair deste aparelho? Você precisa entrar de novo pra usar a extensão aqui.')) return;
+  status('Saindo…', 'info');
+  await chrome.runtime.sendMessage({ type: 'logout' });
+  pintarQuem(null, '');
+  status('Saiu deste aparelho.', 'info');
+}
+
 async function carregar() {
-  const { jobUrl, extKey, usuarioId, railSide, tema, extensaoAtiva } =
-    await chrome.storage.local.get(['jobUrl', 'extKey', 'usuarioId', 'railSide', 'tema', 'extensaoAtiva']);
+  const { jobUrl, extKey, usuarioId, railSide, tema, extensaoAtiva, extUsuario, extApelido } =
+    await chrome.storage.local.get(['jobUrl', 'extKey', 'usuarioId', 'railSide', 'tema',
+                                    'extensaoAtiva', 'extUsuario', 'extApelido']);
+  pintarQuem(extUsuario, extApelido);
+  if (extApelido) $('loginApelido').value = extApelido;
   $('jobUrl').value = jobUrl || JOB_URL_PADRAO;
   $('extKey').value = extKey || '';
   // Direita é o padrão (mesma regra do content.js). O que importa é o JOB
@@ -67,6 +117,11 @@ async function testar() {
   }
 }
 
+$('entrar').addEventListener('click', entrar);
+$('sair').addEventListener('click', sair);
+// Enter no campo da senha entra — quem digita senha espera isso, e sem ele a
+// pessoa aperta Enter, nada acontece, e ela acha que travou.
+$('loginSenha').addEventListener('keydown', (e) => { if (e.key === 'Enter') entrar(); });
 $('salvar').addEventListener('click', salvar);
 $('testar').addEventListener('click', testar);
 // Sem isso, escolher o consultor na lista (já populada por "Testar conexão")
