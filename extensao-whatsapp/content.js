@@ -1375,7 +1375,51 @@
     }
   }, true);
 
-  function abrirSecao(secao) {
+  // ── CONTATO MARCADO COMO PESSOAL: A EXTENSÃO INTEIRA FECHA ───────────────
+  //
+  // Marcar como pessoal antes só fazia o JOB parar de LER a conversa. O resto
+  // continuava aberto: dava pra analisar, cotar, mandar funil e salvar nota
+  // pra alguém que já tinha sido declarado "não é cliente". Ou seja, a marca
+  // dizia uma coisa e a ferramenta permitia outra.
+  //
+  // Agora fecha tudo. E o desfazer NÃO fica aqui: quem marcou por engano
+  // resolve no JOB, na tela de auditoria. Botão de desfazer ao lado do de
+  // marcar transforma uma decisão em dois cliques reversíveis, e aí ela deixa
+  // de ser decisão.
+  let _bloqCache = { chave: '', bloqueado: false };
+
+  async function _contatoBloqueado() {
+    let tel = '';
+    try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+    let chat = '';
+    try { const c = await _pedirPonte('obter_chat_id', {}, 6000); chat = (c && c.chat_id) || ''; }
+    catch (e) { chat = ''; }
+    const chave = (chat || '') + '|' + (tel || '');
+    if (!chat && !tel) return false;          // sem conversa não há o que bloquear
+    if (_bloqCache.chave === chave) return _bloqCache.bloqueado;
+    let resp = null;
+    try { resp = await _safeSendMessage({ type: 'ficha_lead', chat_id: chat, telefone: tel }); }
+    catch (e) { resp = null; }
+    // Falhou a consulta? NÃO bloqueia. Errar pro lado de bloquear deixaria o
+    // consultor sem ferramenta por causa de um soluço de rede, e ele não teria
+    // como saber que foi isso.
+    if (!resp || !resp.ok) return false;
+    _bloqCache = { chave: chave, bloqueado: !!resp.ignorada };
+    return _bloqCache.bloqueado;
+  }
+
+  function _telaBloqueada() {
+    setCorpoSecao(
+      '<div class="job-bloqueado">' +
+        '<div class="job-bloqueado-t">Contato marcado como pessoal</div>' +
+        '<div class="job-bloqueado-s">Alguém declarou que este número não é cliente. ' +
+          'Por isso o JOB não lê esta conversa, não cria lead, não cota e não envia nada por aqui.</div>' +
+        '<div class="job-bloqueado-s" style="margin-top:10px">Se foi engano, desfaça no JOB, ' +
+          'em <b>CRM → Auditar leads</b>. Aqui não dá — de propósito.</div>' +
+      '</div>');
+  }
+
+  async function abrirSecao(secao) {
     _secaoAtiva = secao;
     document.querySelectorAll('.job-trilho-item').forEach((i) =>
       i.classList.toggle('job-trilho-item-ativo', i.dataset.secao === secao));
@@ -1395,6 +1439,10 @@
     }
     p.classList.toggle('job-painel-doc-esquerda', _railSide === 'esquerda');
     aplicarClassesHtml();
+    // A GUARDA VEM ANTES DE QUALQUER SEÇÃO. Uma por uma seria uma porta
+    // esquecida a cada seção nova — e seção nova aparece toda semana.
+    if (await _contatoBloqueado()) { _telaBloqueada(); return; }
+
     if (secao === 'analise') sincronizarPainelComConversa();
     else if (secao === 'mensagens') abrirSecaoMensagens();
     else if (secao === 'funis') abrirSecaoFunis();
@@ -3246,7 +3294,7 @@
       try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
       const r = await _safeSendMessage({ type: 'ignorar_conversa', chat_id: _chatAberto,
                                          telefone: tel, desmarcar: true }).catch(() => null);
-      if (r && r.ok) { _fichaIgnorada = false; abrirSecaoFicha(); }
+      if (r && r.ok) { _fichaIgnorada = false; _bloqCache = { chave: '', bloqueado: false }; abrirSecaoFicha(); }
       else { d.disabled = false; d.textContent = 'desfazer'; }
     });
     const b = document.getElementById('job-nao-lead');
@@ -3267,6 +3315,9 @@
           chat_id: _chatAberto, telefone: tel, nome: nome }).catch(() => null);
         if (r && r.ok) {
           b.textContent = 'Marcada como pessoal';
+          // Vale na hora: sem isto o cache antigo deixaria a barra aberta
+          // até a conversa trocar.
+          _bloqCache = { chave: '', bloqueado: false };
           dizer('Pronto: esta conversa não vira mais lead.');
         } else {
           b.disabled = false; b.textContent = r0;
