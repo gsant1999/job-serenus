@@ -12,18 +12,38 @@ function status(txt, cls) {
   s.className = cls || 'info';
 }
 
+// O popup agora leva pro painel em vez de tentar ser a tela. Abre uma aba do
+// WhatsApp (ou usa a que já estiver aberta) e pede pro painel abrir em
+// Configurações — que é onde a tela de verdade mora.
+async function abrirPainel() {
+  try {
+    const abas = await chrome.tabs.query({ url: 'https://web.whatsapp.com/*' });
+    if (abas && abas.length) {
+      await chrome.tabs.update(abas[0].id, { active: true });
+      await chrome.windows.update(abas[0].windowId, { focused: true });
+      try { await chrome.tabs.sendMessage(abas[0].id, { type: 'abrir_config' }); } catch (e) {}
+      window.close();
+      return;
+    }
+    await chrome.tabs.create({ url: 'https://web.whatsapp.com/' });
+    window.close();
+  } catch (e) {
+    status('Abra o WhatsApp Web e clique na engrenagem do painel.', 'err');
+  }
+}
+
 function pintarQuem(usuario, apelido) {
   const entrou = !!(usuario && usuario.nome);
-  $('blocoLogin').style.display = entrou ? 'none' : '';
-  $('blocoQuem').style.display = entrou ? '' : 'none';
+  $('sair').style.display = entrou ? '' : 'none';
+  $('quemNome').className = 'quem-n' + (entrou ? '' : ' fora');
   if (entrou) {
     $('quemNome').textContent = usuario.nome;
     $('quemIni').textContent = (usuario.nome || '?').trim().charAt(0).toUpperCase();
     $('quemAparelho').textContent = apelido || 'este computador';
-    // Quem entrou não precisa mais escolher consultor à mão, nem ver a chave.
-    // Deixar os dois abertos convidaria a mexer no que já está resolvido.
-    const antigo = $('blocoAntigo');
-    if (antigo) antigo.open = false;
+  } else {
+    $('quemNome').textContent = 'Não conectado';
+    $('quemIni').textContent = '?';
+    $('quemAparelho').textContent = 'Entre pelo painel no WhatsApp';
   }
 }
 
@@ -66,6 +86,10 @@ async function carregar() {
                                     'extensaoAtiva', 'extUsuario', 'extApelido']);
   pintarQuem(extUsuario, extApelido);
   if (extApelido) $('loginApelido').value = extApelido;
+  try {
+    const v = (chrome.runtime.getManifest() || {}).version;
+    if (v) $('topoVersao').textContent = 'Extensão do WhatsApp · v' + v;
+  } catch (e) {}
   $('jobUrl').value = jobUrl || JOB_URL_PADRAO;
   $('extKey').value = extKey || '';
   // Direita é o padrão (mesma regra do content.js). O que importa é o JOB
@@ -118,6 +142,7 @@ async function testar() {
   }
 }
 
+$('abrirPainel').addEventListener('click', abrirPainel);
 $('entrar').addEventListener('click', entrar);
 $('sair').addEventListener('click', sair);
 // Enter no campo da senha entra — quem digita senha espera isso, e sem ele a
