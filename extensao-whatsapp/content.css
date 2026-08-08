@@ -1524,3 +1524,122 @@ details.job-cot-subgaveta > summary .job-cot-gaveta-q { margin-left: auto; }
   line-height: 1.55;
   color: #6b5157;
 }
+
+/* ═══ CONFIGURAÇÃO DENTRO DO WHATSAPP ═══════════════════════════════════════
+   O popup do Chrome é uma caixinha e por isso parecia desleixado. Aqui há
+   largura pra hierarquia: marca em cima, blocos com ícone colorido, cartões
+   com sombra, e transição no que responde ao toque. */
+.job-cfg { padding: 4px 2px 20px; }
+
+.job-cfg-hero {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 15px; margin-bottom: 18px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(59,108,246,.10), rgba(168,85,247,.10));
+  border: 1px solid rgba(59,108,246,.16);
+}
+.job-cfg-hero-logo { flex: none; transform: scale(1.15); transform-origin: left center; }
+.job-cfg-hero-txt { flex: 1 1 auto; min-width: 0; }
+.job-cfg-hero-n { font-size: 15px; font-weight: 750; color: #2f2a22; letter-spacing: -.2px; }
+.job-cfg-hero-s { font-size: 11.5px; color: #857c6c; margin-top: 2px; }
+.job-cfg-versao {
+  flex: none; font-size: 10.5px; font-weight: 700; color: #6b6355;
+  background: rgba(255,255,255,.65); border: 1px solid #e6e2d9;
+  border-radius: 999px; padding: 3px 9px;
+}
+
+.job-cfg-bloco { margin-bottom: 16px; }
+.job-cfg-bloco-t {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 11px; font-weight: 750; text-transform: uppercase;
+  letter-spacing: .5px; color: #857c6c; margin: 0 2px 9px;
+}
+/* Ladrilho colorido por bloco: dá ritmo à página e deixa o olho voltar
+   direto ao bloco certo na segunda visita. */
+.job-cfg-tile {
+  width: 26px; height: 26px; border-radius: 8px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--tile) 14%, transparent);
+  color: var(--tile);
+}
+.job-cfg-tile svg { width: 14px; height: 14px; }
+
+.job-cfg-cartao {
+  background: #fff; border: 1px solid #e6e2d9; border-radius: 14px;
+  padding: 15px; box-shadow: 0 1px 2px rgba(60,50,30,.05);
+}
+
+.job-cfg-campo { margin-bottom: 12px; }
+.job-cfg-campo:last-of-type { margin-bottom: 14px; }
+.job-cfg-campo label {
+  display: block; font-size: 11px; font-weight: 650; color: #857c6c;
+  margin-bottom: 5px;
+}
+.job-cfg-campo input, .job-cfg-campo select {
+  width: 100%; box-sizing: border-box;
+  background: #faf8f4; border: 1px solid #e6e2d9; border-radius: 10px;
+  padding: 10px 11px; font-size: 13px; color: #2f2a22;
+  font-family: inherit; transition: border-color .14s, box-shadow .14s;
+}
+.job-cfg-campo input:focus, .job-cfg-campo select:focus {
+  outline: none; border-color: #3b82f6; background: #fff;
+  box-shadow: 0 0 0 3px rgba(59,130,246,.14);
+}
+
+.job-cfg-bt {
+  width: 100%; border: 1px solid #e6e2d9; background: #faf8f4; color: #4a4437;
+  border-radius: 10px; padding: 10px; font-size: 13px; font-weight: 650;
+  cursor: pointer; font-family: inherit;
+  transition: transform .12s, box-shadow .12s, filter .12s;
+}
+.job-cfg-bt:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(60,50,30,.10); }
+.job-cfg-bt:active { transform: translateY(0); }
+.job-cfg-bt:disabled { opacity: .6; cursor: default; transform: none; box-shadow: none; }
+.job-cfg-bt-primario {
+  background: linear-gradient(135deg, #3b82f6, #6d5cf0);
+  border-color: transparent; color: #fff; font-weight: 700;
+}
+.job-cfg-bt-primario:hover { filter: brightness(1.06); }
+.job-cfg-bt-sair { color: #c0304a; border-color: #f3c9d2; background: #fdf2f4; }
+
+.job-cfg-quem { display: flex; align-items: center; gap: 13px; margin-bottom: 14px; }
+.job-cfg-av {
+  width: 46px; height: 46px; border-radius: 15px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 750; color: #1a9c72;
+  background: linear-gradient(135deg, rgba(33,197,143,.20), rgba(33,197,143,.08));
+}
+.job-cfg-quem-txt { flex: 1 1 auto; min-width: 0; }
+.job-cfg-quem-n { font-size: 15px; font-weight: 700; color: #2f2a22; }
+.job-cfg-quem-s { font-size: 11.5px; color: #857c6c; margin-top: 1px; }
+.job-cfg-selo {
+  display: inline-flex; align-items: center; gap: 5px; margin-top: 6px;
+  font-size: 10.5px; font-weight: 700; color: #1a9c72;
+  background: rgba(33,197,143,.12); border-radius: 999px; padding: 3px 9px;
+}
+.job-cfg-selo::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%; background: #21c58f;
+  box-shadow: 0 0 0 3px rgba(33,197,143,.22);
+}
+
+.job-cfg-dica { font-size: 11.5px; line-height: 1.55; color: #857c6c; margin-top: 10px; }
+.job-cfg-msg { font-size: 12px; margin-top: 10px; min-height: 14px; }
+.job-cfg-msg.ok { color: #1a9c72; }
+.job-cfg-msg.err { color: #c0304a; }
+
+/* Chave liga/desliga de verdade, não um quadradinho: o estado fica legível de
+   longe e o gesto é o mesmo do celular. */
+.job-cfg-chave { display: flex; align-items: center; gap: 10px; cursor: pointer; margin-top: 4px; }
+.job-cfg-chave input { position: absolute; opacity: 0; width: 0; height: 0; }
+.job-cfg-chave-bola {
+  width: 38px; height: 22px; border-radius: 999px; flex: none;
+  background: #dcd6c9; position: relative; transition: background .18s;
+}
+.job-cfg-chave-bola::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 16px; height: 16px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgba(0,0,0,.2); transition: transform .18s;
+}
+.job-cfg-chave input:checked + .job-cfg-chave-bola { background: #21c58f; }
+.job-cfg-chave input:checked + .job-cfg-chave-bola::after { transform: translateX(16px); }
+.job-cfg-chave-txt { font-size: 13px; font-weight: 600; color: #2f2a22; }

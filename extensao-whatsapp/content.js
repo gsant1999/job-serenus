@@ -1219,8 +1219,12 @@
     });
     document.body.appendChild(trilho);
     document.getElementById('job-trilho-config-btn').addEventListener('click', (e) => {
+      // A engrenagem abre a SEÇÃO, não mais o balãozinho. O balão cabia três
+      // linhas e a configuração cresceu — entrar no sistema não cabe num
+      // popover de 200px.
       e.stopPropagation();
-      toggleConfigPopover();
+      if (_secaoAtiva === 'config') fecharSecao();
+      else abrirSecao('config');
     });
     aplicarClassesHtml();
     atualizarSeloVersao();
@@ -1419,6 +1423,163 @@
       '</div>');
   }
 
+
+  // ═══════════════ CONFIGURAÇÃO — dentro do WhatsApp, não no popup ═════════
+  //
+  // O popup do Chrome é uma caixinha: em 380px tudo vira lista vertical de
+  // rótulo+campo, sem hierarquia, e parece desleixado por mais capricho que se
+  // ponha. A WaSpeed não usa popup — a tela de perfil deles é um painel dentro
+  // da página, com largura inteira, cartões com título e ícone em cada linha.
+  // É o espaço que permite a hierarquia, não o estilo.
+  //
+  // Então a configuração passa a morar aqui, no mesmo painel onde já vivem
+  // Análise, Funis e CRM. O popup fica com o mínimo.
+  function _cfgTile(svg, cor) {
+    return '<span class="job-cfg-tile" style="--tile:' + cor + '">' + svg + '</span>';
+  }
+
+  const _ICO_PESSOA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+  const _ICO_LINK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
+  const _ICO_PINCEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2a10 10 0 0 0 0 20 2 2 0 0 0 2-2v-1a2 2 0 0 1 2-2h1a4 4 0 0 0 4-4 10 10 0 0 0-9-11z"/></svg>';
+
+  async function abrirSecaoConfig() {
+    const g = await _safeStorageGet(['jobUrl', 'extToken', 'extUsuario', 'extApelido',
+                                     'railSide', 'tema', 'extensaoAtiva']);
+    const u = g.extUsuario || null;
+    const entrou = !!(u && u.nome);
+    let versao = '';
+    try { versao = (chrome.runtime.getManifest() || {}).version || ''; } catch (e) {}
+
+    setCorpoSecao(
+      '<div class="job-cfg">' +
+        // O logo do JOB no alto, grande. Era a primeira coisa que faltava:
+        // uma tela de configuração sem marca parece formulário de ninguém.
+        '<div class="job-cfg-hero">' +
+          '<div class="job-cfg-hero-logo">' + logoJobHTML() + '</div>' +
+          '<div class="job-cfg-hero-txt">' +
+            '<div class="job-cfg-hero-n">JOB Serenus</div>' +
+            '<div class="job-cfg-hero-s">Análise de conversa, cotação e biblioteca</div>' +
+          '</div>' +
+          (versao ? '<span class="job-cfg-versao">v' + esc(versao) + '</span>' : '') +
+        '</div>' +
+
+        '<div class="job-cfg-bloco">' +
+          '<div class="job-cfg-bloco-t">' + _cfgTile(_ICO_PESSOA, '#21c58f') + 'Sua conta</div>' +
+          '<div class="job-cfg-cartao">' +
+            (entrou
+              ? '<div class="job-cfg-quem">' +
+                  '<span class="job-cfg-av">' + esc((u.nome || '?').trim().charAt(0).toUpperCase()) + '</span>' +
+                  '<div class="job-cfg-quem-txt">' +
+                    '<div class="job-cfg-quem-n">' + esc(u.nome) + '</div>' +
+                    '<div class="job-cfg-quem-s">' + esc(g.extApelido || 'este computador') + '</div>' +
+                    '<span class="job-cfg-selo">conectado</span>' +
+                  '</div>' +
+                '</div>' +
+                '<button type="button" class="job-cfg-bt job-cfg-bt-sair" id="job-cfg-sair">Sair deste computador</button>'
+              : '<div class="job-cfg-campo"><label>Seu e-mail do JOB</label>' +
+                  '<input id="job-cfg-email" type="email" placeholder="voce@serenus.com.br"></div>' +
+                '<div class="job-cfg-campo"><label>Sua senha</label>' +
+                  '<input id="job-cfg-senha" type="password" placeholder="a mesma do site"></div>' +
+                '<div class="job-cfg-campo"><label>Nome deste computador</label>' +
+                  '<input id="job-cfg-apelido" type="text" placeholder="notebook da Bia, WhatsApp 2…"></div>' +
+                '<button type="button" class="job-cfg-bt job-cfg-bt-primario" id="job-cfg-entrar">Entrar</button>' +
+                '<div class="job-cfg-dica">Você pode entrar em mais de um computador com o mesmo ' +
+                  'usuário — um por WhatsApp. O nome serve pra saber qual desconectar depois.</div>') +
+            '<div class="job-cfg-msg" id="job-cfg-msg"></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="job-cfg-bloco">' +
+          '<div class="job-cfg-bloco-t">' + _cfgTile(_ICO_LINK, '#3b82f6') + 'Conexão</div>' +
+          '<div class="job-cfg-cartao">' +
+            '<div class="job-cfg-campo"><label>Endereço do JOB</label>' +
+              '<input id="job-cfg-url" type="text" value="' + esc(g.jobUrl || '') + '"></div>' +
+            '<button type="button" class="job-cfg-bt" id="job-cfg-testar">Testar conexão</button>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="job-cfg-bloco">' +
+          '<div class="job-cfg-bloco-t">' + _cfgTile(_ICO_PINCEL, '#a855f7') + 'Aparência</div>' +
+          '<div class="job-cfg-cartao">' +
+            '<div class="job-cfg-campo"><label>Lado do painel</label>' +
+              '<select id="job-cfg-lado">' +
+                '<option value="direita"' + (g.railSide !== 'esquerda' ? ' selected' : '') + '>Direita</option>' +
+                '<option value="esquerda"' + (g.railSide === 'esquerda' ? ' selected' : '') + '>Esquerda</option>' +
+              '</select></div>' +
+            '<div class="job-cfg-campo"><label>Cor do painel</label>' +
+              '<select id="job-cfg-tema">' +
+                '<option value="escuro"' + (g.tema !== 'claro' ? ' selected' : '') + '>Escuro</option>' +
+                '<option value="claro"' + (g.tema === 'claro' ? ' selected' : '') + '>Claro</option>' +
+              '</select></div>' +
+            '<div class="job-cfg-dica" style="margin-top:2px">Deixe no lado oposto ao trilho de outra ' +
+              'extensão. Duas no mesmo lado se sobrepõem.</div>' +
+            '<label class="job-cfg-chave">' +
+              '<input type="checkbox" id="job-cfg-ativa"' + (g.extensaoAtiva !== false ? ' checked' : '') + '>' +
+              '<span class="job-cfg-chave-bola"></span>' +
+              '<span class="job-cfg-chave-txt">Extensão ligada neste computador</span>' +
+            '</label>' +
+          '</div>' +
+        '</div>' +
+      '</div>');
+
+    const msg = (t, cls) => {
+      const m = document.getElementById('job-cfg-msg');
+      if (m) { m.textContent = t; m.className = 'job-cfg-msg ' + (cls || ''); }
+    };
+    const salvarCfg = () => {
+      const url = (document.getElementById('job-cfg-url') || {}).value;
+      _safeStorageSet({
+        jobUrl: (url || '').trim().replace(/\/+$/, ''),
+        railSide: (document.getElementById('job-cfg-lado') || {}).value === 'esquerda' ? 'esquerda' : 'direita',
+        tema: (document.getElementById('job-cfg-tema') || {}).value === 'claro' ? 'claro' : 'escuro',
+        extensaoAtiva: !!(document.getElementById('job-cfg-ativa') || {}).checked,
+      });
+    };
+    ['job-cfg-url', 'job-cfg-lado', 'job-cfg-tema', 'job-cfg-ativa'].forEach((id) => {
+      const e = document.getElementById(id);
+      if (e) e.addEventListener('change', salvarCfg);
+    });
+
+    const bt = document.getElementById('job-cfg-testar');
+    if (bt) bt.addEventListener('click', async () => {
+      salvarCfg();
+      bt.disabled = true; bt.textContent = 'Testando…';
+      let r = null;
+      try { r = await _safeSendMessage({ type: 'ping' }); } catch (e) { r = null; }
+      bt.disabled = false; bt.textContent = 'Testar conexão';
+      msg(r && r.ok ? 'Conectado ao JOB.' : ((r && r.erro) || 'Não consegui falar com o JOB.'),
+          r && r.ok ? 'ok' : 'err');
+    });
+
+    const be = document.getElementById('job-cfg-entrar');
+    if (be) be.addEventListener('click', async () => {
+      const email = (document.getElementById('job-cfg-email').value || '').trim();
+      const senha = document.getElementById('job-cfg-senha').value || '';
+      const apelido = (document.getElementById('job-cfg-apelido').value || '').trim();
+      if (!email || !senha) { msg('Preencha e-mail e senha.', 'err'); return; }
+      salvarCfg();
+      be.disabled = true; be.textContent = 'Entrando…';
+      let r = null;
+      try { r = await _safeSendMessage({ type: 'login', payload: { email, senha, apelido } }); }
+      catch (e) { r = null; }
+      be.disabled = false; be.textContent = 'Entrar';
+      if (!r || !r.ok) {
+        msg(r && r.erro === 'credenciais_invalidas' ? 'E-mail ou senha incorretos.'
+          : r && r.erro === 'usuario_inativo' ? 'Este usuário está inativo no JOB.'
+          : (r && r.erro) || 'Não consegui entrar agora.', 'err');
+        return;
+      }
+      abrirSecaoConfig();     // redesenha já mostrando quem entrou
+    });
+
+    const bs = document.getElementById('job-cfg-sair');
+    if (bs) bs.addEventListener('click', async () => {
+      bs.disabled = true; bs.textContent = 'Saindo…';
+      try { await _safeSendMessage({ type: 'logout' }); } catch (e) {}
+      abrirSecaoConfig();
+    });
+  }
+
   async function abrirSecao(secao) {
     _secaoAtiva = secao;
     document.querySelectorAll('.job-trilho-item').forEach((i) =>
@@ -1441,7 +1602,10 @@
     aplicarClassesHtml();
     // A GUARDA VEM ANTES DE QUALQUER SEÇÃO. Uma por uma seria uma porta
     // esquecida a cada seção nova — e seção nova aparece toda semana.
-    if (await _contatoBloqueado()) { _telaBloqueada(); return; }
+    // A configuração escapa da guarda: ela não é sobre o contato, e travar
+    // o acesso a ela numa conversa marcada deixaria a pessoa sem como entrar
+    // ou desligar a extensão.
+    if (secao !== 'config' && await _contatoBloqueado()) { _telaBloqueada(); return; }
 
     if (secao === 'analise') sincronizarPainelComConversa();
     else if (secao === 'mensagens') abrirSecaoMensagens();
@@ -1454,6 +1618,7 @@
     else if (secao === 'fila') abrirSecaoFila();
     else if (secao === 'ficha') abrirSecaoFicha();
     else if (secao === 'dev') abrirSecaoDev();
+    else if (secao === 'config') abrirSecaoConfig();
   }
 
   // ═══════════════ Transcrição dentro da bolha do áudio ═══════════════
