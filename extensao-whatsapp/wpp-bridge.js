@@ -1225,9 +1225,11 @@
             window.postMessage({ source: 'JOB_EXT_EVT', tipo: 'inbound', chatId }, '*');
             // Envia o texto da mensagem para o Caça-Documentos
             if (msg.body && typeof msg.body === 'string') {
-                window.postMessage({ source: 'JOB_EXT_EVT', tipo: 'inbound_texto', chatId, texto: msg.body }, '*');
+              window.postMessage({ source: 'JOB_EXT_EVT', tipo: 'inbound_texto',
+                                   chatId, texto: msg.body }, '*');
             }
           }
+        } catch (e) { /* nunca derruba a wa-js */ }
       });
       _jobInboundLigado = true;
     } catch (e) { /* tenta de novo no timer */ }
