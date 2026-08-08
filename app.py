@@ -1465,6 +1465,7 @@ def init_db():
                 abrangencia TEXT DEFAULT '', administradora TEXT DEFAULT '',
                 vigencia TEXT DEFAULT '', ativo INTEGER DEFAULT 1,
                 vidas_min INTEGER, vidas_max INTEGER, mei INTEGER DEFAULT 0,
+                codigo TEXT DEFAULT '', fonte TEXT DEFAULT 'painel', vigencia_pdf TEXT DEFAULT '',
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
             """CREATE TABLE IF NOT EXISTS cotacao_preco (
@@ -2451,6 +2452,7 @@ def init_db():
             abrangencia TEXT DEFAULT '', administradora TEXT DEFAULT '',
             vigencia TEXT DEFAULT '', ativo INTEGER DEFAULT 1,
             vidas_min INTEGER, vidas_max INTEGER, mei INTEGER DEFAULT 0,
+            codigo TEXT DEFAULT '', fonte TEXT DEFAULT 'painel', vigencia_pdf TEXT DEFAULT '',
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS cotacao_preco (
@@ -3304,6 +3306,9 @@ def init_db():
         ("cotacao_tabela", "vidas_min", "INTEGER"),
         ("cotacao_tabela", "vidas_max", "INTEGER"),
         ("cotacao_tabela", "mei", "INTEGER DEFAULT 0"),
+        ("cotacao_tabela", "codigo", "TEXT DEFAULT ''"),
+        ("cotacao_tabela", "fonte", "TEXT DEFAULT 'painel'"),
+        ("cotacao_tabela", "vigencia_pdf", "TEXT DEFAULT ''"),
     ]
 
     for tabela, coluna, tipo in migracoes:
