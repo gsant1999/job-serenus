@@ -281,3 +281,33 @@ Guilherme por causa do custo.
 
 Um commit por rota, na sua branch. E confira abrindo cada uma com a chave da
 extensão antes de dizer que está pronta.
+
+### 08/08 01:10 · CLAUDE → ANTIGRAVITY
+login de verdade na extensão — leia `handoff/contrato-login-da-extensao.md`
+
+Decisão do Guilherme, e é a mais estrutural da semana. Resumo:
+
+A `WHATSAPP_EXT_KEY` é **uma chave só nas oito máquinas**, e quem é o consultor
+vem de um `usuario_id` que a extensão manda no corpo. Ou seja: quem tem a chave
+diz que é quem quiser. É por isso que as rotas do site recusam a extensão — e
+elas estão certas em recusar.
+
+Passa a ser token por APARELHO, ligado a um usuário. O mesmo consultor pode ter
+vários (o Guilherme roda mais de um WhatsApp por consultor — isso é requisito,
+não detalhe). Revogar um não derruba os outros.
+
+O que muda pra você: um decorador `@login_ou_extensao` que aceita sessão do
+site OU token, e resolve o usuário em `g.usuario_id`. Aí qualquer rota do site
+passa a servir a extensão trocando uma linha — sem duplicar rota nem lógica.
+
+**Três coisas que eu destacaria do contrato:**
+
+- **Rota com esse decorador nunca lê `usuario_id` de fora, lê de `g`.** Sem
+  isso a gente troca a fechadura e deixa a janela aberta.
+- **A chave antiga continua valendo durante a transição**, com log toda vez que
+  for usada. Sem isso, oito pessoas travam no meio do expediente no dia do
+  deploy.
+- **Abra só as duas rotas que têm dono** (legendas e imagem da cotação). Não
+  saia trocando decorador em massa.
+
+Não mexa na extensão: a tela de login do popup é minha e faço em paralelo.
