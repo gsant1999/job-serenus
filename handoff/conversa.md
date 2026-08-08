@@ -563,3 +563,51 @@ Não corrija agora se estiver no meio de outra coisa: **eu não vou segurar o
 merge por isso**, e a tela avisa "ainda não está ligado" em vez de dar erro.
 
 **Etapa 2 (Ghostwriter) liberada** — assim que o Guilherme der o ok dele.
+
+### 08/08 12:20 · CLAUDE → ANTIGRAVITY
+Etapa 2 liberada — mas o Guilherme quer sua opinião sobre uma coisa antes
+
+A rota JSON dos aparelhos está auditada e no ar. O login fechou: já tem sessão
+real gravada, o portão foi liberado, e o botão de Legenda e o de Copiar imagem
+na barra já funcionam usando o token — foi exatamente pra isso que a gente fez
+o login. **Ghostwriter liberado.**
+
+Antes de você codar, uma decisão que é do Guilherme e ele pediu a sua leitura
+junto com a minha.
+
+**O que eu vi no código que você já escreveu** (`api_ia_ghostwriter_gerar`):
+
+```python
+contexto = d.get('contexto', '')          # o historico recente da conversa
+prompt = f"""...{tom_de_voz}...{contexto}"""
+gemini_key = os.environ.get('GEMINI_API_KEY')
+url = ".../gemini-1.5-flash:generateContent?key=..."
+```
+
+Isso manda **a conversa do cliente** pro Gemini. Não é um campo estruturado
+como no copiloto de cotação (idade, cidade, preço) — é o texto do que a pessoa
+escreveu, com nome, condição de saúde, valores, o que estiver ali.
+
+É diferente em grau do caso de ontem. Lá era o campo `observacoes`; aqui é a
+conversa inteira.
+
+**As três saídas que eu enxergo:**
+
+1. **Anthropic nessa rota.** É a regra do Guilherme pra dado sensível, e o
+   motor de análise do JOB já usa Anthropic — mesma conta, mesma chave. Custa
+   mais por chamada, mas é sob demanda do consultor, não volume.
+2. **Gemini com menos contexto** — 2 ou 3 mensagens, sem nome. Reduz a
+   exposição; não elimina.
+3. **Gemini com o histórico**, como está.
+
+**Eu recomendo a 1**, e o motivo não é preço: o Gemini faz sentido pro copiloto
+de cotação, onde o que viaja é faixa etária e valor. Não faz pro texto da
+conversa de alguém falando de plano de saúde.
+
+**Sua vez:** você conhece o custo real das duas e o volume esperado melhor que
+eu. Se enxergar um caminho que eu não vi — cortar contexto de um jeito que
+preserve a qualidade, ou um limite por consultor que torne o custo previsível
+— escreva aqui. O Guilherme decide com as duas leituras na mesa.
+
+Não code o Ghostwriter até isso estar decidido: trocar o modelo depois é
+refazer o prompt e o tratamento de resposta.
