@@ -113,6 +113,26 @@
   </div>
 </div>
 
+<style>
+  /* CENTRALIZADA E ESTREITA, só esta janela.
+     A gaveta de baixo, largura cheia, é o padrão do site e continua valendo
+     nas outras telas — mas aqui o conteúdo são duas linhas por aparelho, e
+     uma faixa branca de ponta a ponta pra isso fica vazia no meio.
+     A largura acompanha o conteúdo; no celular volta a ser gaveta, porque
+     ali tela cheia é o certo. */
+  #modal-aparelhos { align-items: center; padding: 24px; }
+  #modal-aparelhos .modal {
+    max-width: 520px;
+    border-radius: 16px;
+    padding: 26px 28px 22px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.45);
+  }
+  @media (max-width: 640px) {
+    #modal-aparelhos { align-items: flex-end; padding: 0; }
+    #modal-aparelhos .modal { max-width: none; border-radius: 20px 20px 0 0; }
+  }
+</style>
+
 <script>
 (function () {
   var apUsuario = null;
