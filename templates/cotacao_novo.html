@@ -2652,10 +2652,11 @@
         var itens = porCliente[ck];
         var cliente = ck.split('|')[1];
         var tel = (itens[0] && itens[0].cliente_telefone) || '';
-        // Fechada por padrão quando há mais de um cliente: a tela abre mostrando
-        // DE QUEM são as cotações, e quem procura uma abre a pasta dela.
-        var aberta = (Object.keys(porCliente).length === 1);
-        h += '<details class="cv-cliente-pasta"' + (aberta ? ' open' : '') + '>' +
+        // SEMPRE fechada. A tela abre mostrando DE QUEM são as cotações, e
+        // quem procura uma abre a pasta dela. Antes a pasta única nascia
+        // aberta; a regra virou uma só porque comportamento que muda conforme
+        // a quantidade faz a pessoa reaprender a tela a cada visita.
+        h += '<details class="cv-cliente-pasta">' +
           '<summary>' +
             '<span class="cv-cli-nome">' + esc(cliente) + '</span>' +
             (tel ? '<span class="cv-cli-tel">' + esc(tel) + '</span>' : '') +
