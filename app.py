@@ -22529,7 +22529,6 @@ Lead:
 - Idades: {lead.get('qual_idade') or 'Não informado'}
 - Cidade: {lead.get('qual_cidade') or 'Não informado'}
 - Valor Pago Hoje: {valor_pago}
-- Observações da qualificação: {lead.get('observacoes') or 'Nenhuma'}
 - Operadora de interesse: {lead.get('qual_operadora_interesse') or 'Não informado'}
 
 Matriz de Concorrência:

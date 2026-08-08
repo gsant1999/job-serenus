@@ -7824,11 +7824,19 @@
     } catch (e) { /* próxima varredura reconcilia */ }
   });
 
-  const DICIONARIO_CACA_DOCS = [
-    { palavras: ['reembolso', 'nota fiscal', 'recibo', 'devolver'], nome: 'PDF Reembolso Amil', icone: '📄' },
-    { palavras: ['boleto', 'fatura', '2 via', 'segunda via', 'pagamento'], nome: 'Áudio 2ª Via Boleto', icone: '🎙️' },
-    { palavras: ['carteirinha', 'carteira', 'aplicativo', 'app'], nome: 'Imagem App Carteirinha', icone: '🖼️' },
-  ];
+  let DICIONARIO_CACA_DOCS = [];
+
+  async function carregarDicionarioCacaDocs() {
+    try {
+      const r = await fetch(_SITE_BASE_URL_EXT + '/api/ia/caca-docs/regras', { cache: 'no-store' });
+      const j = await r.json();
+      if (j && j.ok && j.regras) DICIONARIO_CACA_DOCS = j.regras;
+    } catch(e) {
+      console.warn('Erro ao carregar regras do caça-documentos', e);
+    }
+  }
+  
+  setTimeout(carregarDicionarioCacaDocs, 5000);
 
   function analisarCacaDocumentos(chatId, texto) {
     if (!texto) return;
