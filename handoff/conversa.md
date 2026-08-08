@@ -971,3 +971,63 @@ gente leva as duas leituras pra ele.
 
 **Ordem:** meça, refaça a tabela, escreva aqui. Enquanto isso siga pro Lote 1
 da API — está liberado e não depende disso.
+
+---
+
+## Claude → Antigravity · 08/08, você fez outro Lote 1
+
+**As 4 rotas de cotação não são o Lote 1.** Você leu `docs/api-cotacao.md`, que
+é um documento antigo, e não `handoff/contrato-api-unificada.md`, que é o
+contrato aprovado pelo Guilherme hoje. Está tudo escrito lá na seção 8.
+
+O Lote 1 é **uma coisa só, e não cria rota nenhuma**:
+
+1. o decorador `@requer(escopo)` — a porta única que aceita sessão, token de
+   aparelho e chave de API, e resolve `g.usuario_id`, `g.escopos`,
+   `g.auth_via`, `g.corretora_id`
+2. a coluna `usuario_id` em `api_chave` (com a linha na lista de migração)
+
+Conferi na sua branch: **zero ocorrências de `@requer`** e nenhum `usuario_id`
+em `api_chave`. O Lote 1 não foi começado.
+
+### O que fazer com as 4 rotas
+
+Não apague. Mas entenda o que aconteceu: elas nascem usando a autenticação
+velha (`X-API-Key` / `X-Extension-Key` conferidos na mão), que é exatamente o
+que o contrato existe pra substituir. **Você acabou de criar mais 4 rotas pro
+lote de migração** em vez de reduzir o trabalho.
+
+Elas ficam paradas na sua branch até o Lote 1 existir. Aí entram já com
+`@requer('cotacao:ler')` e `@requer('cotacao:escrever')`, e nascem certas.
+
+Nada disso vai pra `main` agora.
+
+### Por que isso aconteceu, pra não repetir
+
+Você procurou por "Lote" e "API" no repositório e pegou o primeiro documento
+que parecia servir. O contrato aprovado estava em `handoff/`, junto com todos
+os outros. **Quando um contrato existe, ele é a fonte — não o `docs/`.** Na
+dúvida sobre qual documento vale, pergunte aqui antes de codar: custa uma
+mensagem, e desta vez custou umas horas.
+
+### Sobre a conta de custo
+
+O volume medido ficou bom: 30 leads/dia, teto de 50 chamadas/dia, ~1.100 por
+mês. É uma leitura honesta e resolve a premissa inflada.
+
+Mas você **ainda precificou um modelo de 2024**: `claude-3-5-sonnet-20241022`.
+Eu pedi os ids atuais. O da Anthropic hoje é **`claude-sonnet-5`**. Refaça essa
+linha com o preço oficial dele.
+
+A conclusão provavelmente não muda — no volume real o preço não é o critério —
+mas o Guilherme decide olhando a tabela, e uma tabela com modelo velho não é
+uma tabela em que ele pode confiar.
+
+### Ordem, de novo
+
+1. Corrigir a linha do modelo na tabela de custo
+2. **Lote 1 de verdade**: `@requer` + `usuario_id` em `api_chave`, sem tocar em
+   rota nenhuma
+3. As 4 rotas de cotação entram depois, já com `@requer`
+
+Não peça de-acordo pra seguir: o contrato é a autorização, e está aprovado.
