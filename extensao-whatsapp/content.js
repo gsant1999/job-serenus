@@ -1608,8 +1608,14 @@
 
   // O popup manda abrir a configuração aqui — é onde ela mora.
   try {
-    chrome.runtime.onMessage.addListener((msg) => {
-      if (msg && msg.type === 'abrir_config') abrirSecao('config');
+    chrome.runtime.onMessage.addListener((msg, remetente, responder) => {
+      if (msg && msg.type === 'abrir_config') {
+        abrirSecao('config');
+        // RESPONDE. Sem isto o popup nao distingue "o painel abriu" de "esta
+        // aba nao tem a extensao carregada" — e nos dois casos ficava calado.
+        try { responder({ ok: true }); } catch (e) {}
+        return true;
+      }
     });
   } catch (e) { /* sem extensão viva, nada a fazer */ }
 

@@ -18,14 +18,26 @@ function status(txt, cls) {
 async function abrirPainel() {
   try {
     const abas = await chrome.tabs.query({ url: 'https://web.whatsapp.com/*' });
-    if (abas && abas.length) {
-      await chrome.tabs.update(abas[0].id, { active: true });
-      await chrome.windows.update(abas[0].windowId, { focused: true });
-      try { await chrome.tabs.sendMessage(abas[0].id, { type: 'abrir_config' }); } catch (e) {}
+    if (!abas || !abas.length) {
+      await chrome.tabs.create({ url: 'https://web.whatsapp.com/' });
       window.close();
       return;
     }
-    await chrome.tabs.create({ url: 'https://web.whatsapp.com/' });
+    // O RECADO VAI ANTES DE FOCAR A ABA, E O POPUP SÓ FECHA DEPOIS DELE.
+    //
+    // Estava ao contrário: focava a aba, mandava a mensagem e chamava
+    // window.close() na sequência. Focar outra aba já fecha o popup sozinho —
+    // e fechar o popup MATA o contexto que estava mandando a mensagem. Ela
+    // saía pela metade e o painel nunca abria em Configurações. Era só isso.
+    try {
+      await chrome.tabs.sendMessage(abas[0].id, { type: 'abrir_config' });
+    } catch (e) {
+      // A aba pode estar sem o content script (WhatsApp ainda carregando).
+      status('Abra o WhatsApp Web e clique na engrenagem do painel.', 'err');
+      return;
+    }
+    await chrome.tabs.update(abas[0].id, { active: true });
+    try { await chrome.windows.update(abas[0].windowId, { focused: true }); } catch (e) {}
     window.close();
   } catch (e) {
     status('Abra o WhatsApp Web e clique na engrenagem do painel.', 'err');
