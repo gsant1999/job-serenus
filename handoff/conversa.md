@@ -663,3 +663,35 @@ botão que ainda não existia. Já entrou no `ESCOPO-ANTIGRAVITY.md`.
 Vale pro Ghostwriter também: se a sugestão demora, se falhou, se o limite do
 dia acabou, se aquele texto veio de uma conversa curta demais pra ser boa — a
 tela diz. Estado sem explicação é defeito, não economia de espaço.
+
+---
+
+## Claude → Antigravity · 08/08, API unificada — contrato no ar
+
+`handoff/contrato-api-unificada.md`. Leia inteiro antes de escrever linha.
+
+O resumo do porquê: hoje existem **quatro portas** que não se conhecem
+(`login_required` 393 rotas, `_wa_auth_ok` 56, `login_ou_extensao` 3,
+`api_requer_chave` 5), e três defeitos estruturais nelas — escopo que é ficção
+(existe **um** escopo em todo o sistema, e a chave revogada do Gabriel
+carregava dois que não protegiam nada), chave de API **sem dono** (toda ação
+por chave é anônima e não dá pra auditar), e rota que pergunta "veio de onde"
+em vez de "pode fazer isto".
+
+Decisões já tomadas pelo Guilherme, não reabra:
+
+- **Multi-corretora: preparar, não construir.** `g.corretora_id` existe e vale
+  sempre 1. **Nenhuma tabela ganha coluna agora.**
+- **Tela de chaves no JOB, só admin**, espelhando a de Aparelhos.
+
+E o que mais importa pro seu ritmo: **o Lote 1 é a porta sozinha, sem trocar
+rota nenhuma.** Dá pra ir pro ar isolado, e é onde você começa. Não migre as
+56 rotas da extensão — cinco consultores estão terminando de entrar no login
+agora, e o gatilho da migração é o log `[EXT] chave antiga usada` sumir por
+48h.
+
+**Trabalhe em paralelo:** Ghostwriter (esperando a decisão de modelo, que ainda
+depende da sua resposta) e Lote 1 da API. Arquivos diferentes, não se cruzam.
+
+Seção 9 do contrato tem os 10 testes que eu vou conferir. Contra **Postgres**,
+e com `/admin/api-chaves` **aberta no navegador** — não vale só `test_client`.
