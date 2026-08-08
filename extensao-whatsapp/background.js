@@ -302,6 +302,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   }
+  // O SERVIDOR JÁ SABE FAZER LOGIN?
+  //
+  // É o que decide se o portão pode exigir login. Hoje a rota nem existe em
+  // produção (404): exigir login agora travaria os oito consultores no meio do
+  // expediente. Quando ela subir, o portão passa a exigir sozinho, sem eu
+  // precisar publicar versão nova da extensão.
+  //
+  // A resposta fica guardada por 10 minutos: é uma pergunta por aba, não por
+  // clique, e um servidor que acabou de subir aparece em minutos.
+  if (msg && msg.type === 'servidor_tem_login') {
+    (async () => {
+      const agora = Date.now();
+      const c = await chrome.storage.local.get(['loginServidorOk', 'loginServidorEm']);
+      if (c.loginServidorEm && agora - c.loginServidorEm < 600000) {
+        sendResponse({ ok: true, tem: !!c.loginServidorOk });
+        return;
+      }
+      const { jobUrl } = await config();
+      let tem = false;
+      try {
+        // Corpo vazio de propósito: se a rota existir ela responde 400 (falta
+        // e-mail), e 400 é prova de que existe. Só o 404 diz que não existe.
+        const r = await fetch(jobUrl + '/api/whatsapp/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        tem = r.status !== 404;
+      } catch (e) {
+        // Sem rede não dá pra afirmar que o servidor NÃO tem login. Na dúvida,
+        // não trava ninguém: mantém a última resposta conhecida.
+        tem = !!c.loginServidorOk;
+        sendResponse({ ok: true, tem: tem });
+        return;
+      }
+      await chrome.storage.local.set({ loginServidorOk: tem, loginServidorEm: agora });
+      sendResponse({ ok: true, tem: tem });
+    })();
+    return true;
+  }
   if (msg && msg.type === 'logout') {
     (async () => {
       // Avisa o servidor pra revogar, mas NÃO depende disso pra limpar aqui:
