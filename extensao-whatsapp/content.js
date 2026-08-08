@@ -5388,6 +5388,12 @@
         ? '<button class="job-cot-bt-mandar" id="job-cot-salvar" style="width:100%;margin-top:12px" ' +
             'title="Cria a cotação no JOB: gera o link do cliente, entra na ficha do lead e em Cotações salvas">' +
             'Salvar no JOB</button>' +
+          // O ÓBVIO PRECISA SER DITO. Quem só quer ver preço não é obrigado a
+          // salvar — e quem quer mandar pro cliente precisa saber que link,
+          // imagem, legenda e apresentação só nascem depois de salvar. Sem
+          // esta linha, a pessoa fica procurando botão que ainda não existe.
+          '<div class="job-cot-dica">Consultar não salva nada. Salve para liberar ' +
+            'o link do cliente, a imagem, a legenda e a apresentação.</div>' +
           '<div class="job-cot-dica" id="job-cot-salvo"></div>' +
           '<div id="job-cot-pos"></div>' +
           '<div class="job-cot-rodape">' +

@@ -172,7 +172,27 @@ BORDA, não de lógica.** O nome do helper deste projeto (`db()` e não
 Postgres. O código dentro da função costuma estar certo. Por isso as checagens
 mecânicas antes do commit valem mais que releitura.
 
-## 9. Se estiver em dúvida
+## 9. O ÓBVIO SEMPRE TEM QUE SER DITO
+
+Regra do Guilherme, 08/08/2026.
+
+Se a tela tem uma condição — um botão que só existe depois de um passo, um
+campo que só aparece pra certo perfil, um limite, uma espera — **a tela diz
+isso, com todas as letras, antes de a pessoa esbarrar.**
+
+O caso que criou a regra: na cotação da extensão, os botões de link, imagem,
+legenda e apresentação só nascem depois de "Salvar no JOB". Isso está certo —
+sem cotação salva não existe link pra mandar. Mas a tela não avisava, e ele
+passou tempo procurando botão que não existia ainda. O comportamento estava
+certo; a comunicação estava faltando.
+
+"Está claro pra quem construiu" não conta. **Quem construiu nunca é o usuário.**
+
+Vale em tudo que você entrega: rota que recusa, campo obrigatório, migração que
+demora, limite por dia, resultado vazio. Estado sem explicação é defeito.
+Mensagem de erro diz o que houve **e o que fazer** — não só que houve.
+
+## 10. Se estiver em dúvida
 
 Escreva na `conversa.md` e espere. Um dia parado custa menos que uma hora de
 extensão quebrada no meio do expediente — e essa conta já foi paga hoje.
