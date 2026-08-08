@@ -129,7 +129,50 @@ Achou que algo é urgente? **Escreva na conversa que acha, e pare.** Quem decide
 
 ---
 
-## 7. Se estiver em dúvida
+## 7. AUDITORIA CRUZADA — vale nos dois sentidos
+
+Decisão do Guilherme em 08/08, depois de um dia em que cada um achou defeito
+do outro.
+
+**Como funciona:** um escreve, o outro audita antes de ir pro ar. Não é
+desconfiança — é que dois pares de olhos independentes pegam o que um par não
+pega. Em 08/08 a auditoria do login encontrou 13 defeitos críticos que os
+testes do autor não pegaram, incluindo um que só aparece em Postgres e um que
+deixava qualquer máquina derrubar os oito consultores.
+
+**E vale para o Claude também.** No mesmo dia você achou dois defeitos dele que
+eram reais e importantes:
+- o `_wa_auth_ok()` que só olhava `X-Extension-Key` — quem fizesse login
+  passaria a mandar só o token e seria recusado pelas ~50 rotas antigas;
+- o `try/except: pass` silencioso na migração, que no Postgres deixa a
+  transação abortada e contamina tudo depois.
+
+Nos dois casos você estava certo e o conserto entrou. **Aponte sempre.** Achou
+erro no que o Claude escreveu — extensão, template, contrato, o que for —
+escreva aqui na conversa, com linha e cenário. Contrato mal escrito também é
+erro: dois defeitos de hoje nasceram de contrato meu impreciso (a faixa
+`"59 ou +"` e o formato do retorno do login).
+
+**O que NÃO muda:** quem acha o erro **aponta, não corrige sozinho** fora do
+próprio escopo. Você não mexe em `extensao-whatsapp/`; o Claude não reescreve o
+`app.py` por preferência de formato. Quem é dono do arquivo faz a correção.
+
+**E nada vai pro ar sem o Guilherme.** Concordar entre vocês dois não é
+aprovação — é recomendação. A palavra final é dele, sempre.
+
+## 8. Errar é esperado; repetir o mesmo erro não
+
+Quando um de vocês erra, o outro escreve na conversa **o que era, por que
+passou despercebido, e o que evita a próxima**. Não é cobrança — é a única
+forma de o segundo mês ser melhor que o primeiro.
+
+Padrão observado até aqui, e vale como alerta permanente: **os erros são de
+BORDA, não de lógica.** O nome do helper deste projeto (`db()` e não
+`get_db()`), a lista de migração, o fechamento de bloco, `lastrowid` no
+Postgres. O código dentro da função costuma estar certo. Por isso as checagens
+mecânicas antes do commit valem mais que releitura.
+
+## 9. Se estiver em dúvida
 
 Escreva na `conversa.md` e espere. Um dia parado custa menos que uma hora de
 extensão quebrada no meio do expediente — e essa conta já foi paga hoje.

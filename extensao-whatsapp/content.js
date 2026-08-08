@@ -1399,11 +1399,25 @@
     //
     // Quando a rota subir, esta mesma linha passa a exigir o login sozinha,
     // sem versão nova da extensão. O portão liga no dia em que faz sentido.
+    // TRAVA DE LIBERACAO — decisao do Guilherme em 08/08.
+    //
+    // O servidor ja sabe fazer login, entao a deteccao automatica ligaria o
+    // portao pros oito consultores em ate 10 minutos, no meio do expediente.
+    // Ele quer testar o ciclo inteiro sozinho primeiro e escolher a hora de
+    // soltar pros outros.
+    //
+    // Enquanto isto for `false`, o portao so aparece pra quem nao tem
+    // credencial NENHUMA (instalou e nao configurou) — ninguem e barrado por
+    // falta de login. Trocar pra `true` (e publicar a versao) libera pra todos.
+    const PORTAO_EXIGE_LOGIN = false;
+
     let servidorTemLogin = false;
-    try {
-      const r = await _safeSendMessage({ type: 'servidor_tem_login' });
-      servidorTemLogin = !!(r && r.tem);
-    } catch (e) { servidorTemLogin = false; }
+    if (PORTAO_EXIGE_LOGIN) {
+      try {
+        const r = await _safeSendMessage({ type: 'servidor_tem_login' });
+        servidorTemLogin = !!(r && r.tem);
+      } catch (e) { servidorTemLogin = false; }
+    }
 
     if (servidorTemLogin) return true;             // dá pra entrar: então entre
     return !String(g.extKey || '').trim();         // ainda não dá: a chave serve

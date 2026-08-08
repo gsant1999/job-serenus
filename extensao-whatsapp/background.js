@@ -286,16 +286,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: false, erro: (d && d.erro) || ('HTTP ' + resp.status) });
           return;
         }
+        // O SERVIDOR MANDA PLANO, EU GUARDO ANINHADO.
+        //
+        // Meu contrato pediu {"usuario": {id, nome}}; ele entregou
+        // {"usuario_id", "nome"} — mesma informação, formato diferente. A
+        // extensão é minha, então quem se adapta sou eu: mandar refazer o
+        // `app.py` por preferência de formato é custo sem ganho. Aceito os
+        // dois, pra não quebrar se um dia mudar.
+        const usu = d.usuario
+          || (d.usuario_id ? { id: d.usuario_id, nome: d.nome || '' } : null);
         await chrome.storage.local.set({
           extToken: d.token,
-          extUsuario: d.usuario || null,
+          extUsuario: usu,
           extApelido: (msg.payload && msg.payload.apelido) || '',
           // O consultor passa a vir de quem entrou, não de um campo escolhido
           // à mão. Manter os dois em pé discordando seria pior que qualquer um
           // dos dois sozinho.
-          usuarioId: (d.usuario && d.usuario.id) || '',
+          usuarioId: (usu && usu.id) || '',
         });
-        sendResponse({ ok: true, usuario: d.usuario || null });
+        sendResponse({ ok: true, usuario: usu });
       } catch (e) {
         sendResponse({ ok: false, erro: 'Não consegui falar com o JOB agora.' });
       }
