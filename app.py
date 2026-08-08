@@ -19639,17 +19639,17 @@ def api_v1_cotacao_salvas():
 
 
 @app.route('/api/v1/cotacao/<int:cid>/imagem', methods=['GET', 'OPTIONS'])
-# ESTA ROTA CONTINUA SENDO DA API PUBLICA, com chave.
+# ABERTA PRA EXTENSAO em 08/08, por decisao do Guilherme.
 #
-# Ela chegou a ser trocada por @login_ou_extensao, o que TIRARIA o acesso de
-# quem usa chave de API: existe uma cadastrada e em uso ('GABRIEL TESTE',
-# escopo cotacao:ler, 4 usos). Trocar uma porta pela outra fecha a de quem ja
-# estava entrando.
+# Ela era so da API publica, com chave. Trocar a fechadura teria fechado a
+# porta da unica chave em uso ('GABRIEL TESTE', 4 usos) — por isso ficou
+# pendente ontem. Hoje ele revogou essa chave e vai emitir uma nova, entao
+# nao ha mais consumidor externo a proteger.
 #
-# Quando a extensao precisar da imagem, o caminho e uma rota PROPRIA em
-# /api/whatsapp/ com _wa_auth_ok() — porta nova, sem fechar a antiga. Esta
-# pendente e nao bloqueia nada hoje (a extensao ainda nao tem esse botao).
-@api_requer_chave('cotacao:ler')
+# A chave nova que ele criar precisa cobrir cotacao + extensao + CRM num
+# lugar so. Enquanto isso nao existe, quem alcanca isto e a sessao do site ou
+# o token do consultor.
+@login_ou_extensao
 def api_v1_cotacao_imagem(cid):
     """PNG da cotação. A imagem é renderizada no NAVEGADOR (html2canvas) e
     persistida quando alguém abre o documento — o servidor não tem navegador."""
