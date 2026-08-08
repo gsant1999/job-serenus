@@ -18,7 +18,8 @@ function pintarQuem(usuario, apelido) {
   $('blocoQuem').style.display = entrou ? '' : 'none';
   if (entrou) {
     $('quemNome').textContent = usuario.nome;
-    $('quemAparelho').textContent = apelido ? 'neste aparelho: ' + apelido : 'este aparelho';
+    $('quemIni').textContent = (usuario.nome || '?').trim().charAt(0).toUpperCase();
+    $('quemAparelho').textContent = apelido || 'este computador';
     // Quem entrou não precisa mais escolher consultor à mão, nem ver a chave.
     // Deixar os dois abertos convidaria a mexer no que já está resolvido.
     const antigo = $('blocoAntigo');
@@ -122,7 +123,11 @@ $('sair').addEventListener('click', sair);
 // Enter no campo da senha entra — quem digita senha espera isso, e sem ele a
 // pessoa aperta Enter, nada acontece, e ela acha que travou.
 $('loginSenha').addEventListener('keydown', (e) => { if (e.key === 'Enter') entrar(); });
-$('salvar').addEventListener('click', salvar);
+// SEM BOTÃO SALVAR. Cada campo salva ao sair dele — botão de salvar num
+// painel de configuração é uma armadilha: a pessoa muda, fecha, e a mudança
+// se perde sem aviso. Ele continua no HTML (escondido) porque `testar()` o usa.
+$('jobUrl').addEventListener('change', salvar);
+$('extKey').addEventListener('change', salvar);
 $('testar').addEventListener('click', testar);
 // Sem isso, escolher o consultor na lista (já populada por "Testar conexão")
 // só era salvo se o usuário clicasse "Salvar" de novo depois — fácil de

@@ -3,121 +3,257 @@
 <head>
   <meta charset="UTF-8">
   <style>
-    body { width: 300px; margin: 0; padding: 16px; background: #1a1d2e; color: #e7e9f0;
-      font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
-    h1 { font-size: 14px; margin: 0 0 2px; }
-    .sub { font-size: 11px; color: #8c93a8; margin: 0 0 14px; }
-    label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .4px; color: #8c93a8; margin: 12px 0 5px; }
-    input, select { width: 100%; box-sizing: border-box; background: #12151f; border: 1px solid #2c3247;
-      border-radius: 8px; padding: 9px 10px; font-size: 12.5px; color: #e7e9f0; }
-    button { width: 100%; margin-top: 14px; background: #2563eb; color: #fff; border: none;
-      border-radius: 8px; padding: 10px; font-size: 13px; font-weight: 700; cursor: pointer; }
-    button.sec { background: #2c3247; margin-top: 8px; }
-    button.sair { background: transparent; border: 1px solid #2c3247; color: #8c93a8;
-      font-weight: 600; margin-top: 8px; }
-    .cartao { background: #12151f; border: 1px solid #2c3247; border-radius: 10px;
-      padding: 12px; margin-bottom: 4px; }
-    .quem { font-size: 13.5px; font-weight: 700; color: #e7e9f0; }
-    .quem-sub { font-size: 11px; color: #8c93a8; margin-top: 3px; }
-    details.antigo { margin-top: 16px; border-top: 1px solid #2c3247; padding-top: 10px; }
-    details.antigo > summary { font-size: 11px; color: #6b7185; cursor: pointer;
-      list-style: none; }
+    /* ── POPUP DO JOB ─────────────────────────────────────────────────────
+       A versão anterior era uma pilha de rótulo+campo, tudo do mesmo peso,
+       em 300px. Não havia hierarquia: entrar no sistema tinha a mesma
+       importância visual que escolher o lado do painel.
+
+       Aqui há três níveis: QUEM VOCÊ É (o cartão do topo), CONEXÃO (o que
+       raramente muda) e APARÊNCIA (o que é gosto). Cada um num cartão, com
+       título — o olho encontra sem ler tudo.
+
+       380px porque o popup do Chrome aceita até 800: os 300 de antes eram
+       herança, não escolha, e é o que espremia tudo. */
+    :root {
+      --fundo:   #14172a;
+      --cartao:  #1b1f36;
+      --linha:   #2a3050;
+      --texto:   #eaecf5;
+      --fraco:   #8b93ad;
+      --azul:    #3b6cf6;
+      --verde:   #21c58f;
+      --vermelho:#f2547a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      width: 380px; margin: 0; padding: 0 0 16px;
+      background: var(--fundo); color: var(--texto);
+      font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      font-size: 13px; line-height: 1.45;
+    }
+
+    .topo {
+      display: flex; align-items: center; gap: 11px;
+      padding: 16px 18px 14px;
+      border-bottom: 1px solid var(--linha);
+      position: sticky; top: 0; background: var(--fundo); z-index: 2;
+    }
+    .marca {
+      width: 34px; height: 34px; border-radius: 11px; flex: none;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #3b6cf6, #7c4dff);
+      font-size: 11px; font-weight: 800; letter-spacing: .3px; color: #fff;
+    }
+    .topo h1 { font-size: 14.5px; margin: 0; font-weight: 700; }
+    .topo p  { font-size: 11.5px; margin: 1px 0 0; color: var(--fraco); }
+
+    .bloco { padding: 14px 18px 0; }
+    .bloco-t {
+      font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .55px; color: var(--fraco); margin: 0 0 9px;
+    }
+    .cartao {
+      background: var(--cartao); border: 1px solid var(--linha);
+      border-radius: 13px; padding: 14px;
+    }
+
+    /* Campo com rótulo por cima, dentro do próprio campo: ocupa metade da
+       altura de rótulo separado e mantém o rótulo visível depois de digitar
+       (placeholder some, e aí ninguém lembra o que era aquele campo). */
+    .campo { margin-bottom: 10px; }
+    .campo:last-child { margin-bottom: 0; }
+    .campo label {
+      display: block; font-size: 10.5px; font-weight: 600;
+      color: var(--fraco); margin-bottom: 5px; letter-spacing: .2px;
+    }
+    input, select {
+      width: 100%; background: #101324; border: 1px solid var(--linha);
+      border-radius: 9px; padding: 10px 11px; font-size: 13px;
+      color: var(--texto); font-family: inherit;
+    }
+    input:focus, select:focus {
+      outline: none; border-color: var(--azul);
+      box-shadow: 0 0 0 3px rgba(59,108,246,.18);
+    }
+    input::placeholder { color: #566083; }
+
+    button {
+      width: 100%; border: none; border-radius: 10px; padding: 11px;
+      font-size: 13.5px; font-weight: 700; cursor: pointer;
+      font-family: inherit; transition: filter .12s;
+    }
+    button:hover { filter: brightness(1.08); }
+    .bt-azul { background: var(--azul); color: #fff; margin-top: 4px; }
+    .bt-fraco {
+      background: transparent; border: 1px solid var(--linha);
+      color: var(--fraco); font-weight: 600; font-size: 12.5px; padding: 9px;
+    }
+    .bt-sair { color: var(--vermelho); border-color: rgba(242,84,122,.3); }
+
+    .dica {
+      font-size: 11px; color: var(--fraco); line-height: 1.5; margin: 9px 2px 0;
+    }
+
+    /* QUEM ESTÁ CONECTADO — o cartão que responde "sou eu mesmo?" antes de
+       qualquer outra coisa. Verde porque é estado bom e resolvido. */
+    .quem { display: flex; align-items: center; gap: 12px; }
+    .quem-av {
+      width: 42px; height: 42px; border-radius: 13px; flex: none;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(33,197,143,.14); color: var(--verde);
+      font-size: 16px; font-weight: 700;
+    }
+    .quem-n { font-size: 14.5px; font-weight: 700; }
+    .quem-s { font-size: 11.5px; color: var(--fraco); margin-top: 2px; }
+    .selo {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 10.5px; font-weight: 700; color: var(--verde);
+      background: rgba(33,197,143,.12); border-radius: 999px;
+      padding: 3px 9px; margin-top: 6px;
+    }
+    .selo::before {
+      content: ''; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--verde);
+    }
+
+    .linha-chk {
+      display: flex; align-items: center; gap: 10px; cursor: pointer;
+    }
+    .linha-chk input { width: auto; flex: none; }
+    .linha-chk span { font-size: 13px; font-weight: 600; }
+
+    #status { font-size: 12px; padding: 10px 18px 0; min-height: 14px; }
+    .ok { color: var(--verde); } .err { color: var(--vermelho); } .info { color: var(--fraco); }
+
+    details.antigo { margin: 14px 18px 0; }
+    details.antigo > summary {
+      font-size: 11px; color: #5b6486; cursor: pointer;
+      list-style: none; padding: 8px 0;
+    }
     details.antigo > summary::-webkit-details-marker { display: none; }
     details.antigo > summary::before { content: '▸ '; }
     details.antigo[open] > summary::before { content: '▾ '; }
-    #status { font-size: 12px; margin-top: 12px; min-height: 16px; }
-    .ok { color: #1fd8a4; } .err { color: #f43f5e; } .info { color: #8c93a8; }
-    .nota { font-size: 10.5px; color: #6b7185; line-height: 1.5; margin-top: 12px;
-      border-top: 1px solid #2c3247; padding-top: 10px; }
+
+    .rodape {
+      font-size: 10.5px; color: #4e5675; text-align: center;
+      padding: 14px 18px 0; line-height: 1.6;
+    }
   </style>
 </head>
 <body>
-  <h1>JOB</h1>
-  <p class="sub">Análise de conversa do WhatsApp + mensagens da biblioteca de modelos</p>
 
-  <label for="jobUrl">URL do JOB</label>
-  <input id="jobUrl" type="text" placeholder="https://job-serenus-production.up.railway.app">
+  <div class="topo">
+    <span class="marca">JOB</span>
+    <div>
+      <h1>JOB Serenus</h1>
+      <p>Análise de conversa e biblioteca de mensagens</p>
+    </div>
+  </div>
 
-  <!-- ENTRADA. A senha é usada uma vez e não fica guardada: o que sobra na
+  <!-- ENTRAR. A senha é usada uma vez e não fica guardada: o que sobra na
        máquina é o token deste aparelho. -->
-  <div id="blocoLogin">
-    <label for="loginEmail">Seu e-mail do JOB</label>
-    <input id="loginEmail" type="email" autocomplete="username" placeholder="voce@serenus.com.br">
-
-    <label for="loginSenha">Sua senha</label>
-    <input id="loginSenha" type="password" autocomplete="current-password" placeholder="a mesma do site">
-
-    <label for="loginApelido">Nome deste aparelho</label>
-    <input id="loginApelido" type="text" placeholder="ex: notebook da Bia, WhatsApp 2">
-    <div class="nota" style="border-top:none; padding-top:6px; margin-top:6px;">
-      Você pode entrar em mais de um computador com o mesmo usuário — um por
-      WhatsApp. O nome serve pra saber qual é qual na hora de desconectar.
-    </div>
-
-    <button id="entrar">Entrar</button>
-  </div>
-
-  <div id="blocoQuem" style="display:none;">
-    <label>Conectado como</label>
+  <div class="bloco" id="blocoLogin">
+    <p class="bloco-t">Entrar no JOB</p>
     <div class="cartao">
-      <div class="quem" id="quemNome">—</div>
-      <div class="quem-sub" id="quemAparelho"></div>
+      <div class="campo">
+        <label for="loginEmail">Seu e-mail</label>
+        <input id="loginEmail" type="email" autocomplete="username" placeholder="voce@serenus.com.br">
+      </div>
+      <div class="campo">
+        <label for="loginSenha">Sua senha</label>
+        <input id="loginSenha" type="password" autocomplete="current-password" placeholder="a mesma do site">
+      </div>
+      <div class="campo">
+        <label for="loginApelido">Nome deste computador</label>
+        <input id="loginApelido" type="text" placeholder="notebook da Bia, WhatsApp 2…">
+      </div>
+      <button id="entrar" class="bt-azul">Entrar</button>
     </div>
-    <button id="sair" class="sair">Sair deste aparelho</button>
+    <p class="dica">Você pode entrar em mais de um computador com o mesmo
+      usuário — um por WhatsApp. O nome serve pra saber qual desconectar depois.</p>
   </div>
 
-  <label for="railSide">Lado do painel no WhatsApp Web</label>
-  <select id="railSide">
-    <option value="direita">Direita</option>
-    <option value="esquerda">Esquerda</option>
-  </select>
-  <div class="nota">Deixe no lado OPOSTO ao trilho de outra extensão (WaSpeed etc). Duas no mesmo lado se sobrepõem.</div>
+  <div class="bloco" id="blocoQuem" style="display:none;">
+    <p class="bloco-t">Conectado</p>
+    <div class="cartao">
+      <div class="quem">
+        <span class="quem-av" id="quemIni">?</span>
+        <div style="flex:1 1 auto; min-width:0;">
+          <div class="quem-n" id="quemNome">—</div>
+          <div class="quem-s" id="quemAparelho"></div>
+          <span class="selo">extensão ligada a este usuário</span>
+        </div>
+      </div>
+      <button id="sair" class="bt-fraco bt-sair" style="margin-top:14px;">Sair deste computador</button>
+    </div>
+  </div>
 
-  <label for="tema">Aparência do painel</label>
-  <select id="tema">
-    <option value="escuro">Escuro (padrão)</option>
-    <option value="claro">Claro</option>
-  </select>
+  <div class="bloco">
+    <p class="bloco-t">Conexão</p>
+    <div class="cartao">
+      <div class="campo">
+        <label for="jobUrl">Endereço do JOB</label>
+        <input id="jobUrl" type="text" placeholder="https://job-serenus-production.up.railway.app">
+      </div>
+      <button id="testar" class="bt-fraco">Testar conexão</button>
+    </div>
+  </div>
 
-  <label style="display:flex; align-items:center; gap:8px; text-transform:none; font-weight:600; color:#e7e9f0; cursor:pointer;">
-    <input type="checkbox" id="extensaoAtiva" checked style="width:auto;">
-    Extensão ligada neste computador
-  </label>
-  <div class="nota" style="margin-top:6px; border-top:none; padding-top:0;">Desmarque pra desligar tudo (painel, ícone, análise) no WhatsApp Web — precisa recarregar a aba do WhatsApp depois de mudar.</div>
+  <div class="bloco">
+    <p class="bloco-t">Aparência</p>
+    <div class="cartao">
+      <div class="campo">
+        <label for="railSide">Lado do painel no WhatsApp Web</label>
+        <select id="railSide">
+          <option value="direita">Direita</option>
+          <option value="esquerda">Esquerda</option>
+        </select>
+      </div>
+      <div class="campo">
+        <label for="tema">Cor do painel</label>
+        <select id="tema">
+          <option value="escuro">Escuro</option>
+          <option value="claro">Claro</option>
+        </select>
+      </div>
+      <p class="dica" style="margin:0 0 12px;">Deixe no lado oposto ao trilho de
+        outra extensão (WaSpeed etc). Duas no mesmo lado se sobrepõem.</p>
+      <label class="linha-chk">
+        <input type="checkbox" id="extensaoAtiva" checked>
+        <span>Extensão ligada neste computador</span>
+      </label>
+    </div>
+  </div>
 
-  <button id="salvar">Salvar</button>
-  <button id="testar" class="sec">Testar conexão</button>
   <div id="status" class="info"></div>
 
   <details class="antigo" id="blocoAntigo">
     <summary>Acesso antigo (chave compartilhada) — sai em breve</summary>
-    <label for="extKey">Chave da extensão</label>
-    <input id="extKey" type="password" placeholder="cole a chave (env WHATSAPP_EXT_KEY)">
-
-    <label for="usuarioId">Quem está usando (consultor)</label>
-    <select id="usuarioId">
-      <option value="">Selecione…</option>
-    </select>
-    <div id="usuarioIdAviso" class="err" style="font-size:10.5px; margin-top:5px; display:none;">
-      Sem isso selecionado, a biblioteca de modelos/funis mostra tudo misturado — não só o que é seu.
-    </div>
-    <div class="nota" style="border-top:none; padding-top:8px;">
-      Esta chave é a mesma em todas as máquinas, então ela diz "sou a extensão"
-      e não diz quem é você. Entrando com e-mail e senha acima, o JOB passa a
-      saber — e este bloco pode sumir.
+    <div class="cartao" style="margin-top:8px;">
+      <div class="campo">
+        <label for="extKey">Chave da extensão</label>
+        <input id="extKey" type="password" placeholder="cole a chave (WHATSAPP_EXT_KEY)">
+      </div>
+      <div class="campo">
+        <label for="usuarioId">Quem está usando</label>
+        <select id="usuarioId"><option value="">Selecione…</option></select>
+      </div>
+      <div id="usuarioIdAviso" class="err" style="font-size:10.5px; display:none;">
+        Sem isso, a biblioteca mostra tudo misturado — não só o que é seu.
+      </div>
+      <p class="dica" style="margin-bottom:0;">Esta chave é a mesma em todas as
+        máquinas: ela diz "sou a extensão" e não diz quem é você. Entrando com
+        e-mail e senha acima, o JOB passa a saber — e este bloco pode sumir.</p>
     </div>
   </details>
 
-  <div class="nota">
-    Os leads criados pela análise vão pro consultor DONO do WhatsApp aberto
-    (o JOB reconhece pelo telefone cadastrado em Usuários). O consultor
-    selecionado aqui é usado quando o número não está cadastrado (ou é o
-    número compartilhado da equipe) e é quem a extensão consulta pra saber se
-    tem mensagem pendente pra mandar. O envio só acontece pra mensagens que o
-    próprio consultor colocou na fila pelo CRM — a extensão nunca decide
-    sozinha o que ou quando mandar.
-  </div>
+  <button id="salvar" style="display:none;"></button>
+
+  <p class="rodape">
+    Os leads criados pela análise vão pro consultor dono do WhatsApp aberto.
+    O envio só acontece pra mensagens que o próprio consultor colocou na fila
+    pelo CRM — a extensão nunca decide sozinha o que ou quando mandar.
+  </p>
 
   <script src="popup.js"></script>
 </body>
