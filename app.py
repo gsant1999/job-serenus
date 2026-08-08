@@ -815,9 +815,17 @@ def init_db():
                 id SERIAL PRIMARY KEY,
                 palavras_chave TEXT NOT NULL,
                 nome_documento TEXT NOT NULL,
-                icone TEXT DEFAULT '📄',
+                icone TEXT DEFAULT 'PDF',
                 url_arquivo TEXT,
                 ativo INTEGER DEFAULT 1,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS ia_ghostwriter_logs (
+                id SERIAL PRIMARY KEY,
+                contexto TEXT,
+                resposta_gerada TEXT,
+                copiado BOOLEAN DEFAULT FALSE,
+                feedback TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
             """CREATE TABLE IF NOT EXISTS score_heartbeat (
@@ -1953,6 +1961,14 @@ def init_db():
             icone TEXT DEFAULT '📄',
             url_arquivo TEXT,
             ativo INTEGER DEFAULT 1,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS ia_ghostwriter_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            contexto TEXT,
+            resposta_gerada TEXT,
+            copiado BOOLEAN DEFAULT FALSE,
+            feedback TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS score_heartbeat (
@@ -22666,6 +22682,104 @@ def admin_caca_docs_excluir():
     return redirect('/admin/ia/caca-docs')
 
 
+@app.route('/api/ia/ghostwriter/gerar', methods=['POST', 'OPTIONS'])
+def api_ia_ghostwriter_gerar():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+
+    d = request.json or {}
+    contexto = d.get('contexto', '')
+    if not contexto:
+        return _wa_cors(jsonify({"ok": False, "erro": "Contexto vazio"})), 400
+
+    tom_de_voz = "Responda de forma direta e comercial."
+    tom_path = os.path.join(app.root_path, 'motor-ia', 'tom_de_voz.md')
+    if os.path.exists(tom_path):
+        with open(tom_path, 'r', encoding='utf-8') as f:
+            tom_de_voz = f.read()
+
+    prompt = f"""Você é um ghostwriter comercial (consultor de vendas). 
+Abaixo está o histórico recente de uma conversa no WhatsApp.
+Seu objetivo é gerar a próxima resposta ideal do consultor para o lead anonimizado.
+
+Regras de Tom de Voz:
+{tom_de_voz}
+
+Histórico da Conversa:
+{contexto}
+
+Escreva APENAS o texto da mensagem que o consultor deve enviar, sem aspas, sem markdown, sem explicações extras.
+"""
+
+    gemini_key = os.environ.get('GEMINI_API_KEY', '').strip()
+    resultado = "Desculpe, a IA está indisponível no momento."
+    
+    if gemini_key:
+        try:
+            import requests
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.7}
+            }
+            res = requests.post(url, json=payload, timeout=15)
+            res.raise_for_status()
+            data = res.json()
+            resultado = data['candidates'][0]['content']['parts'][0]['text'].strip()
+        except Exception as e:
+            return _wa_cors(jsonify({"ok": False, "erro": f"Erro na IA Gemini: {str(e)}"})), 500
+    else:
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+        if not api_key:
+            return _wa_cors(jsonify({"ok": False, "erro": "Nenhuma chave de IA configurada"})), 500
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            msg = client.messages.create(
+                model="claude-3-5-sonnet-20240620",
+                max_tokens=500,
+                system="Você é um assistente que retorna APENAS o texto puro da mensagem, sem tags, aspas ou explicações.",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            resultado = msg.content[0].text.strip()
+        except Exception as e:
+            return _wa_cors(jsonify({"ok": False, "erro": f"Erro na IA Anthropic: {str(e)}"})), 500
+
+    conn = db()
+    cur = conn.execute("INSERT INTO ia_ghostwriter_logs (contexto, resposta_gerada, copiado) VALUES (?, ?, False) RETURNING id", (contexto, resultado))
+    log_id = cur.fetchone()['id']
+    conn.commit()
+    close_db(conn)
+    
+    return _wa_cors(jsonify({"ok": True, "resposta": resultado, "log_id": log_id}))
+
+
+@app.route('/api/ia/ghostwriter/feedback', methods=['POST', 'OPTIONS'])
+def api_ia_ghostwriter_feedback():
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+
+    d = request.json or {}
+    log_id = d.get('log_id')
+    acao = d.get('acao')
+    
+    if not log_id or not acao:
+        return _wa_cors(jsonify({"ok": False, "erro": "Dados inválidos"})), 400
+
+    conn = db()
+    if acao == 'copiado':
+        conn.execute("UPDATE ia_ghostwriter_logs SET copiado=True WHERE id=?", (log_id,))
+    elif acao in ('ajudou', 'nao_ajudou'):
+        conn.execute("UPDATE ia_ghostwriter_logs SET feedback=? WHERE id=?", (acao, log_id))
+    
+    conn.commit()
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
+
 @app.route('/api/whatsapp/analisar', methods=['POST', 'OPTIONS'])
 def api_whatsapp_analisar():
     """Recebe a conversa raspada pela extensão e devolve score + sugestões.
@@ -27824,6 +27938,8 @@ def cotacao_bloco_planos():
                 "cidade": t.get('cidade') or '',
                 "abrangencia": t.get('abrangencia') or '',
                 "vigencia": t.get('vigencia') or '',
+                "vidas_min": t.get('vidas_min') or 0,
+                "vidas_max": t.get('vidas_max') or 0,
                 "precos_ok": precos_ok,
                 "dias_atualizado": dias,
                 "frescor": frescor,
@@ -28068,6 +28184,8 @@ def cotacao_bloco_tabelas():
                 "cidade": t.get('cidade') or '',
                 "abrangencia": t.get('abrangencia') or '',
                 "vigencia": t.get('vigencia') or '',
+                "vidas_min": t.get('vidas_min') or 0,
+                "vidas_max": t.get('vidas_max') or 0,
                 "precos_ok": t.get('precos_ok') or 0,
                 "dias_atualizado": t['dias_atualizado'],
                 "frescor": t['frescor']
@@ -30218,7 +30336,8 @@ def calcular_cotacao(conn, idades, plano_ids, recomendacoes=None):
             'entidade': t['entidade'] if 'entidade' in t.keys() else '',
             'modalidade': t['modalidade'], 'acomodacao': t['acomodacao'],
             'coparticipacao': t['coparticipacao'], 'abrangencia': t['abrangencia'],
-            'vigencia': t['vigencia'], 'linhas': linhas, 'total': round(total, 2),
+            'vigencia': t['vigencia'], 'vidas_min': t['vidas_min'] or 0, 'vidas_max': t['vidas_max'] or 0,
+            'linhas': linhas, 'total': round(total, 2),
             'elegivel': elegivel,
             'recomendacao': rec_map.get((recomendacoes.get(tid) or '').strip(), ''),
         })
