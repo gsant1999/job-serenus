@@ -917,7 +917,12 @@ const _REINJETAR = [
   { host: 'web.whatsapp.com',
     isolado: ['content.js'],
     main: ['wa-js.vendor.js', 'wpp-bridge.js'],
-    prova: () => !!(window.WPP || window.__JOB_WPP_PONTE) },
+    // A prova pergunta pela PONTE, nao pela wa-js. Perguntar por window.WPP
+    // era perguntar pela dependencia: numa aba onde a wa-js subiu e o
+    // wpp-bridge nao, a prova dava "esta tudo la" e eu pulava justamente a
+    // reinjecao que faltava. A extensao ficava com a biblioteca e sem quem
+    // fala com ela — e a tela dizia "nao consegui identificar o telefone".
+    prova: () => !!window.__JOB_WPP_PONTE },
   { host: 'paineldocorretor.com.br',
     isolado: ['painel-bridge.js'],
     main: ['cotador-painel.js'],
