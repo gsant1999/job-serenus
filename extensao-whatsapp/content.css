@@ -1404,3 +1404,77 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-dev-sub { font-size: 11px; color: var(--job-txt-fraco); margin: 14px 0 6px;
   text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
 .job-dev-linha i { font-style: normal; opacity: .55; }
+
+/* Operadora que não aceita a quantidade de vidas informada. Apagada e com o
+   motivo do lado — em vez de sumir da lista (o consultor procuraria por ela e
+   acharia que a extensão está quebrada) ou de deixar clicar e a proposta ser
+   recusada depois de assinada. */
+.job-cot-op.bloqueada {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.job-cot-op.bloqueada:hover { background: inherit; }
+.job-cot-op-min {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fef3c7;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+/* GAVETAS DA LISTA DE PLANOS — produto por fora, coparticipação por dentro.
+   Vinte planos em lista corrida parecem vinte repetições do mesmo nome; o que
+   separa um do outro é o produto (rede e preço) e a coparticipação (a primeira
+   pergunta do cliente). Abertas por padrão: fechar por padrão esconderia plano
+   que o consultor precisa ver e faria ele achar que a operadora tem menos
+   opção do que tem. */
+.job-cot-gaveta {
+  border: 1px solid #e6e2d9;
+  border-radius: 10px;
+  margin: 8px 0;
+  background: #fff;
+  overflow: hidden;
+}
+.job-cot-gaveta > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+  list-style: none;
+  background: #faf8f4;
+  border-bottom: 1px solid #efeae0;
+  font-size: 12.5px;
+}
+.job-cot-gaveta > summary::-webkit-details-marker { display: none; }
+.job-cot-gaveta > summary::before {
+  content: '▸';
+  font-size: 10px;
+  color: #9b9384;
+  transition: transform .15s;
+}
+.job-cot-gaveta[open] > summary::before { transform: rotate(90deg); }
+.job-cot-gaveta-n { font-weight: 700; color: #2f2a22; flex: 1 1 auto; }
+.job-cot-gaveta-q {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b6355;
+  background: #efeae0;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.job-cot-subgaveta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #7a7160;
+  letter-spacing: .02em;
+}
+.job-cot-subgaveta .job-cot-gaveta-q { margin-left: auto; }
+.job-cot-gaveta .job-cot-plano { border-radius: 0; border-left: none; border-right: none; }

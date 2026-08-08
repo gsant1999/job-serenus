@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JOB — Análise de WhatsApp",
-  "version": "3.53.0",
+  "version": "3.56.0",
   "description": "Painel dentro do WhatsApp Web: analisa o lead, calcula o Score e envia mensagens da biblioteca de modelos.",
   "permissions": [
     "notifications",
@@ -31,32 +31,32 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "logo_arcos.png",
-        "wa-js.vendor.js",
         "content.css",
-        "logos/vera-cruz.png",
+        "injetor.js",
+        "logo_arcos.png",
         "logos/salusmed.png",
         "logos/samp.png",
         "logos/santa-tereza.png",
-        "logos/select.png"
+        "logos/select.png",
+        "logos/vera-cruz.png",
+        "wa-js.vendor.js",
+        "wpp-bridge.js"
       ],
       "matches": [
         "https://web.whatsapp.com/*"
       ]
+    },
+    {
+      "resources": [
+        "cotador-painel.js"
+      ],
+      "matches": [
+        "https://paineldocorretor.com.br/*",
+        "https://*.paineldocorretor.com.br/*"
+      ]
     }
   ],
   "content_scripts": [
-    {
-      "matches": [
-        "https://web.whatsapp.com/*"
-      ],
-      "js": [
-        "wa-js.vendor.js",
-        "wpp-bridge.js"
-      ],
-      "run_at": "document_idle",
-      "world": "MAIN"
-    },
     {
       "matches": [
         "https://web.whatsapp.com/*"
@@ -77,17 +77,6 @@
         "site-bridge.js"
       ],
       "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://paineldocorretor.com.br/*",
-        "https://*.paineldocorretor.com.br/*"
-      ],
-      "js": [
-        "cotador-painel.js"
-      ],
-      "run_at": "document_start",
-      "world": "MAIN"
     },
     {
       "matches": [

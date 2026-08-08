@@ -370,6 +370,10 @@
   .cv-plano { border:1px solid var(--borda); border-radius:12px; background:var(--panel);
     margin-bottom:9px; overflow:hidden; }
   .cv-plano.melhor { border-color:var(--verde); }
+  /* Operadora que exige mais vidas do que foi informado. */
+  .cv-grade .bloqueada { opacity:.4; cursor:not-allowed; }
+  .cv-grade .bloqueada:hover { border-color:var(--borda); box-shadow:none; }
+  .cv-min-vidas { color:#b45309 !important; font-weight:700; }
   .cv-linha { display:grid; grid-template-columns:64px 1fr auto auto; gap:14px; align-items:center;
     padding:13px 16px; cursor:pointer; }
   @media (max-width:700px) { .cv-linha { grid-template-columns:44px 1fr auto; } .cv-linha .marcas { display:none; } }
@@ -1240,6 +1244,32 @@
     atualizarBotao();
   }
 
+  // ── MÍNIMO DE VIDAS PARA CONTRATAR (PME) ────────────────────────────────
+  //
+  // NÃO é a faixa da tabela de preço. "Esta tabela vale de 5 a 29 vidas" não
+  // quer dizer que a operadora só vende a partir de 5 — quer dizer que, para
+  // menos, o preço vem de OUTRA tabela, que a gente pode nem ter coletado. No
+  // catálogo a Amil aparece só com a faixa 5-29, e os PDFs dela têm 2 e 3-4:
+  // bloquear por ali recusaria venda de verdade.
+  //
+  // Então o mínimo de CONTRATAÇÃO é regra comercial e mora aqui. Um dia vira
+  // cadastro; enquanto for lista, fica num lugar só.
+  var MIN_VIDAS_PADRAO = 2;
+  var MIN_VIDAS = [
+    { casa: /meds[eê]nior|med s[eê]nior/i,   min: 1 },
+    { casa: /hapvida|notre ?dame/i,          min: 1 },
+    { casa: /benefic[eê]ncia/i,              min: 1 },
+    { casa: /sulam[eé]rica|sul am[eé]rica/i, min: 3 },
+    { casa: /bradesco/i,                     min: 3 },
+    { casa: /porto seguro/i,                 min: 3 }
+  ];
+  function minVidasDe(nome) {
+    for (var i = 0; i < MIN_VIDAS.length; i++) {
+      if (MIN_VIDAS[i].casa.test(String(nome || ''))) return MIN_VIDAS[i].min;
+    }
+    return MIN_VIDAS_PADRAO;
+  }
+
   function chavePlano(pl) { return pl.key; }
   function marcado(pl) {
     return selecionados.some(function (x) { return chavePlano(x) === chavePlano(pl); });
@@ -1720,23 +1750,37 @@
         c.innerHTML = '<div class="cv-ops-vazio">Nenhuma operadora atende essa cidade neste tipo.</div>';
         return;
       }
+      // PME é o único com mínimo de vidas; PF e adesão são por pessoa.
+      var ehPME = String(modalidadeAtiva()) === '2';
+      var vidasAgora = totalVidas();
       operadoras.forEach(function (o) {
         var quantos = selecionados.filter(function (x) { return (x.operadora || {}).id === o.id; }).length;
-        c.appendChild(cartao(
+        // Operadora que não aceita essa quantidade fica APAGADA e diz o
+        // porquê, em vez de deixar escolher e a proposta ser recusada depois
+        // de assinada. Sumir da lista seria pior: o consultor procuraria a
+        // SulAmérica, não acharia, e acharia que a tela está quebrada.
+        var minV = ehPME ? minVidasDe(o.nome) : 1;
+        var bloqueada = ehPME && vidasAgora > 0 && vidasAgora < minV;
+        var cart = cartao(
           // Só o logo, grande. O nome embaixo era repetição: a marca já diz
           // quem é, e mais rápido do que se lê. Fica no title pra quem passar
           // o cursor e pra leitor de tela.
           (o.logotipo ? '<span class="logo"><img src="' + esc(o.logotipo) + '" alt="' + esc(o.nome) + '"></span>'
                       : '<b>' + esc(o.nome) + '</b>') +
-          (quantos ? '<small>' + quantos + ' marcado(s)</small>' : ''),
+          (bloqueada ? '<small class="cv-min-vidas">mín. ' + minV + ' vidas</small>'
+                     : (quantos ? '<small>' + quantos + ' marcado(s)</small>' : '')),
           async function () {
+            if (bloqueada) return;
             opAtual = o;
             var pls = await garantirPlanos(o.id);
             if (!pls) { c.innerHTML = '<div class="cv-ops-vazio">Não deu pra abrir agora.</div>'; return; }
             // Só entra no nível de entidade se houver entidade. Em PF e PME
             // não há, e um nível com um item só é um clique cobrado à toa.
             voltarPara(entidadesDe(pls).length ? 'entidades' : 'produtos');
-          }, quantos > 0, o.nome));
+          }, quantos > 0,
+          bloqueada ? (o.nome + ' exige no mínimo ' + minV + ' vidas no PME') : o.nome);
+        if (bloqueada) cart.classList.add('bloqueada');
+        c.appendChild(cart);
       });
       return;
     }

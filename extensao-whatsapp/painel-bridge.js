@@ -31,6 +31,21 @@
   // enfeite silencioso.
   if (window.__JOB_PAINEL_PONTE && window.__JOB_PAINEL_PONTE_VIVO()) return;
   window.__JOB_PAINEL_PONTE = 1;
+
+  // O COTADOR DA PÁGINA É INJETADO DAQUI, NÃO PELO MANIFEST.
+  //
+  // Mesma razão do WhatsApp: pelo manifest ele só entra no carregamento. Se
+  // faltar, a cotação simplesmente não acontece e ninguém sabe por quê.
+  // `cotador-painel.js` tem trava própria (__JOB_COTADOR), então injetar de
+  // novo é barato e não duplica nada.
+  (function _injetarCotador() {
+    try {
+      const s = document.createElement('script');
+      s.src = chrome.runtime.getURL('cotador-painel.js');
+      s.onload = () => s.remove();
+      (document.head || document.documentElement).appendChild(s);
+    } catch (e) { /* extensão recarregada no meio */ }
+  })();
   window.__JOB_PAINEL_PONTE_VIVO = function () {
     try { return !!(chrome && chrome.runtime && chrome.runtime.id); }
     catch (e) { return false; }

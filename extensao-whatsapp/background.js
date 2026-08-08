@@ -899,36 +899,20 @@ async function _aparar(blob) {
 // Falha em silêncio de propósito: aba em outro endereço, aba descartada pelo
 // Chrome ou permissão negada não devem virar erro na cara de ninguém — o pior
 // caso é o comportamento de antes, que é pedir F5.
-// SÓ O MUNDO ISOLADO É REINJETADO. Foi um erro meu mandar o MAIN junto.
+// SÓ O MUNDO ISOLADO É REINJETADO DAQUI.
 //
-// Os scripts do mundo MAIN são JavaScript da página: eles NÃO usam API da
-// extensão e por isso SOBREVIVEM à recarga dela. Reinjetá-los não conserta
-// nada e, no caso do WhatsApp, faz estrago: `wa-js.vendor.js` tem 492 KB e
-// não tem trava própria (é biblioteca de terceiro). Cada recarga da extensão
-// empilhava OUTRA cópia inteira dela na página, remendando as entranhas do
-// WhatsApp de novo por cima. Cinco recargas, cinco cópias — e mandar mensagem
-// ficou lento, que foi exatamente o que o Guilherme sentiu.
+// O mundo MAIN (wa-js, wpp-bridge, cotador-painel) agora é injetado pela
+// própria página — content.js chama injetor.js, painel-bridge.js chama
+// cotador-painel.js. A vantagem é que a página percebe quando faltou e injeta
+// de novo sozinha, sem F5. Daqui, do service worker, só dava pra injetar em
+// dois momentos (instalação e boot) e eu errei as duas vezes que tentei.
 //
-// Quem morre na recarga é a ponte do mundo ISOLADO, e é só ela que precisa
-// voltar. Ela tem trava com prova de vida, então reinjetar é seguro.
-// `prova` é o que responde "o mundo MAIN já está de pé nesta aba?". Ela roda
-// DENTRO da página; se voltar falso, os arquivos de `main` são injetados.
+// Aqui fica o que morre de verdade na recarga da extensão: a ponte do mundo
+// ISOLADO, que perde a ligação com o chrome.* e tem trava com prova de vida.
 const _REINJETAR = [
-  { host: 'web.whatsapp.com',
-    isolado: ['content.js'],
-    main: ['wa-js.vendor.js', 'wpp-bridge.js'],
-    // A prova pergunta pela PONTE, nao pela wa-js. Perguntar por window.WPP
-    // era perguntar pela dependencia: numa aba onde a wa-js subiu e o
-    // wpp-bridge nao, a prova dava "esta tudo la" e eu pulava justamente a
-    // reinjecao que faltava. A extensao ficava com a biblioteca e sem quem
-    // fala com ela — e a tela dizia "nao consegui identificar o telefone".
-    prova: () => !!window.__JOB_WPP_PONTE },
-  { host: 'paineldocorretor.com.br',
-    isolado: ['painel-bridge.js'],
-    main: ['cotador-painel.js'],
-    prova: () => !!window.__JOB_COTADOR },
-  { host: 'job-serenus-production.up.railway.app',
-    isolado: ['site-bridge.js'], main: [], prova: () => true },
+  { host: 'web.whatsapp.com',                        isolado: ['content.js'] },
+  { host: 'paineldocorretor.com.br',                 isolado: ['painel-bridge.js'] },
+  { host: 'job-serenus-production.up.railway.app',   isolado: ['site-bridge.js'] },
 ];
 
 async function _reinjetarNasAbasAbertas(motivo) {
@@ -938,33 +922,6 @@ async function _reinjetarNasAbasAbertas(motivo) {
     if (!aba.id || !aba.url) continue;
     const alvo = _REINJETAR.filter((x) => aba.url.indexOf(x.host) >= 0)[0];
     if (!alvo) continue;
-    // O MUNDO MAIN VOLTA SÓ SE NÃO ESTIVER LÁ.
-    //
-    // Reinjetar sempre empilhava outra cópia da wa-js (492 KB, sem trava
-    // própria) e deixava o envio lento. Mas NÃO reinjetar nunca deixou órfã a
-    // aba que nunca recebeu o MAIN — a que já estava aberta quando a extensão
-    // instalou ou atualizou. Nela o painel abre e nada funciona: sem a wa-js
-    // ninguém sabe qual conversa está aberta, e a tela diz "Abra uma conversa
-    // primeiro" com a conversa aberta na frente.
-    //
-    // A prova roda na própria página e desempata: nada duplicado, nada faltando.
-    try {
-      if (alvo.main && alvo.main.length) {
-        const r = await chrome.scripting.executeScript({
-          target: { tabId: aba.id, allFrames: false },
-          func: alvo.prova,
-          world: 'MAIN',
-        });
-        if (!(r && r[0] && r[0].result)) {
-          await chrome.scripting.executeScript({
-            target: { tabId: aba.id, allFrames: false },
-            files: alvo.main,
-            world: 'MAIN',
-          });
-        }
-      }
-    } catch (e) { /* aba sem permissão: a ponte isolada ainda vale a tentativa */ }
-
     if (!alvo.isolado || !alvo.isolado.length) continue;
     try {
       await chrome.scripting.executeScript({

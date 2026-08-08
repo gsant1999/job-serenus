@@ -15,6 +15,45 @@
 
 (function () {
   'use strict';
+
+  // ── A PONTE DA PÁGINA É INJETADA POR AQUI, NÃO PELO MANIFEST ──────────────
+  //
+  // Pelo manifest, o mundo MAIN só é injetado quando a página carrega. Se a
+  // ponte não subir, a barra abre e nada funciona, e a única saída é F5 — foi
+  // exatamente o que aconteceu e custou horas.
+  //
+  // Injetando daqui, a gente injeta DE NOVO quando perceber que faltou. O
+  // injetor decide o que carregar (a wa-js só se ela não estiver lá) e em que
+  // ordem.
+  let _ponteConfirmada = false;
+  let _tentativasPonte = 0;
+
+  function _injetarPonteNaPagina() {
+    try {
+      const s = document.createElement('script');
+      s.src = chrome.runtime.getURL('injetor.js');
+      s.dataset.wajs = chrome.runtime.getURL('wa-js.vendor.js');
+      s.dataset.ponte = chrome.runtime.getURL('wpp-bridge.js');
+      s.onload = () => s.remove();
+      (document.head || document.documentElement).appendChild(s);
+    } catch (e) { /* extensão recarregada no meio: a próxima rodada tenta */ }
+  }
+
+  window.addEventListener('message', (ev) => {
+    if (ev.source !== window) return;
+    const d = ev.data;
+    if (!d || d.source !== 'JOB_INJETOR') return;
+    if (d.tipo === 'pronto' && d.temPonte) _ponteConfirmada = true;
+  });
+
+  // Vigia barato: a cada 5s, enquanto a ponte não confirmar, tenta de novo.
+  // Para depois de 12 tentativas (1 minuto) pra não ficar batendo pra sempre
+  // numa aba onde o WhatsApp nem terminou de abrir.
+  _injetarPonteNaPagina();
+  const _vigia = setInterval(() => {
+    if (_ponteConfirmada || ++_tentativasPonte > 12) { clearInterval(_vigia); return; }
+    _injetarPonteNaPagina();
+  }, 5000);
   // TRAVA DE INJECAO DUPLA.
   //
   // Quando a extensao e recarregada, o service worker reinjeta os scripts nas
@@ -4616,8 +4655,42 @@
     }
   }
 
+
+  // ── MÍNIMO DE VIDAS PARA CONTRATAR (PME) ────────────────────────────────
+  //
+  // NÃO CONFUNDIR com a faixa da tabela de preço. "Esta tabela vale de 5 a 29
+  // vidas" não quer dizer que a operadora só vende a partir de 5 — quer dizer
+  // que, para menos, o preço vem de OUTRA tabela, que a gente pode nem ter
+  // visto ainda. Foi essa confusão que quase me fez bloquear venda de verdade:
+  // no catálogo, a Amil aparece só com a faixa 5-29, e os PDFs dela têm 2 e
+  // 3-4 vidas.
+  //
+  // Então o mínimo de CONTRATAÇÃO vem daqui — regra comercial, dita pelo
+  // Guilherme — e as faixas continuam servindo só pra escolher a tabela certa.
+  //
+  // Um dia isto deve virar cadastro no JOB. Enquanto for lista, mora num lugar
+  // só e é este.
+  const _COT_MIN_VIDAS_PADRAO = 2;
+  const _COT_MIN_VIDAS = [
+    { casa: /meds[eê]nior|med s[eê]nior/i,      min: 1 },
+    { casa: /hapvida|notre ?dame/i,             min: 1 },
+    { casa: /benefic[eê]ncia/i,                 min: 1 },
+    { casa: /sulam[eé]rica|sul am[eé]rica/i,    min: 3 },
+    { casa: /bradesco/i,                        min: 3 },
+    { casa: /porto seguro/i,                    min: 3 },
+  ];
+
+  function _cotMinVidas(nomeOperadora) {
+    const n = String(nomeOperadora || '');
+    for (const r of _COT_MIN_VIDAS) if (r.casa.test(n)) return r.min;
+    return _COT_MIN_VIDAS_PADRAO;
+  }
+
   function _cotPintarOperadoras() {
     const ops = _cot.operadoras || [];
+    // PME é o único com mínimo de vidas; PF e adesão são por pessoa.
+    const ehPME = String(_cot.modalidade) === '2';
+    const totalVidas = _cot.totalVidas || 0;
     setCorpoSecao('<div class="job-cot-wrap">' +
       _cotTopo(abrirSecaoCotarInline) +
       '<div class="job-cnpj-titulo">Operadoras</div>' +
@@ -4628,8 +4701,15 @@
             // A logo é da tela deles e pode ser barrada pela política de imagem
             // do WhatsApp Web. Por isso ela é ENFEITE: some sozinha se não
             // carregar (onerror), e o nome continua respondendo pela linha.
+            // Operadora que não aceita essa quantidade de vidas aparece
+            // APAGADA e dizendo o porquê, em vez de deixar cotar e a proposta
+            // ser recusada depois de assinada.
+            const minV = ehPME ? _cotMinVidas(o.nome) : 1;
+            const bloqueada = ehPME && totalVidas > 0 && totalVidas < minV;
             return '<button type="button" class="job-cot-op' + (jaFoi ? ' feita' : '') +
-              '" data-id="' + esc(o.id) + '">' +
+              (bloqueada ? ' bloqueada" disabled title="' +
+                 esc(o.nome + ' exige no mínimo ' + minV + ' vidas no PME') + '"' : '"') +
+              ' data-id="' + esc(o.id) + '">' +
               // A INICIAL É O PADRÃO, a logo entra por cima quando existir.
               //
               // Antes eu punha <img src="https://..."> com onerror inline. Duas
@@ -4640,6 +4720,7 @@
               // é desenhada depois de estar na mão.
               '<span class="job-cot-op-ini">' + esc((o.nome || '?').trim().charAt(0).toUpperCase()) + '</span>' +
               '<span class="job-cot-op-n">' + esc(o.nome) + '</span>' +
+              (bloqueada ? '<span class="job-cot-op-min">mín. ' + minV + ' vidas</span>' : '') +
               (jaFoi ? '<span class="job-cot-op-ok">' + jaFoi.planos.length +
                        (jaFoi.planos.length === 1 ? ' plano' : ' planos') + '</span>' : '') +
             '</button>';
@@ -4668,6 +4749,38 @@
     _cotPintarPlanos();
   }
 
+
+  // ── AS GAVETAS DA LISTA DE PLANOS ────────────────────────────────────────
+  //
+  // Uma operadora devolve vinte e poucos planos que, na lista corrida, parecem
+  // vinte repetições do mesmo nome. O que separa um do outro são coisas que o
+  // consultor conhece de cor — produto, coparticipação, acomodação, MEI — e é
+  // por elas que a lista tem que estar dividida.
+  //
+  // Duas gavetas, não cinco: PRODUTO por fora (é o que muda rede e preço) e
+  // COPARTICIPAÇÃO por dentro (é a primeira pergunta que o cliente faz). O
+  // resto continua como etiqueta na linha, porque virar gaveta deixaria cada
+  // uma com um plano só — e gaveta de um item é ruído, não organização.
+  function _cotGrupoDe(p) {
+    const tb = (p && p.tabela) || {};
+    return {
+      produto: _texto((p && p.produto)) || 'Sem produto definido',
+      copart: _cotCopart(tb),
+    };
+  }
+
+  function _cotAgrupar(pls) {
+    const porProduto = new Map();
+    pls.forEach((p, i) => {
+      const g = _cotGrupoDe(p);
+      if (!porProduto.has(g.produto)) porProduto.set(g.produto, new Map());
+      const dentro = porProduto.get(g.produto);
+      if (!dentro.has(g.copart)) dentro.set(g.copart, []);
+      dentro.get(g.copart).push(i);
+    });
+    return porProduto;
+  }
+
   function _cotPintarPlanos() {
     const pls = _cot.planos || [];
     // O QUE É IGUAL EM TODOS SOBE PRO CABEÇALHO.
@@ -4694,16 +4807,42 @@
         : '') +
       '<div class="job-cnpj-sub">Vale para todos os planos abaixo. Marque até ' + _COT_MAX + '.</div>' +
       (pls.length
-        ? pls.map((p, i) => {
-            const proprias = porPlano[i].filter((e) => !eComum(e.t));
-            return '<label class="job-cot-plano"><input type="checkbox" data-i="' + i + '">' +
-              '<span><b>' + esc(_cotNomePlano(p)) + '</b>' +
-              (proprias.length
-                ? '<span class="job-cot-tags">' + proprias.map((e) =>
-                    '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' + esc(e.t) + '</span>').join('') +
-                  '</span>'
-                : '') + '</span></label>';
-          }).join('')
+        ? (function () {
+            const linha = (i) => {
+              const proprias = porPlano[i].filter((e) => !eComum(e.t));
+              return '<label class="job-cot-plano"><input type="checkbox" data-i="' + i + '">' +
+                '<span><b>' + esc(_cotNomePlano(pls[i])) + '</b>' +
+                (proprias.length
+                  ? '<span class="job-cot-tags">' + proprias.map((e) =>
+                      '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' + esc(e.t) + '</span>').join('') +
+                    '</span>'
+                  : '') + '</span></label>';
+            };
+            const grupos = _cotAgrupar(pls);
+            // Um produto só? Não faz gaveta: a gaveta única só esconde o que
+            // já estava visível e cobra um clique por nada.
+            if (grupos.size <= 1 && pls.length <= 6) {
+              return pls.map((p, i) => linha(i)).join('');
+            }
+            let html = '';
+            grupos.forEach((porCopart, produto) => {
+              const qtd = Array.from(porCopart.values()).reduce((n, a) => n + a.length, 0);
+              html += '<details class="job-cot-gaveta" open>' +
+                '<summary><span class="job-cot-gaveta-n">' + esc(produto) + '</span>' +
+                '<span class="job-cot-gaveta-q">' + qtd + '</span></summary>';
+              porCopart.forEach((idxs, copart) => {
+                // Subdivide só quando há mais de uma coparticipação; senão o
+                // rótulo repetiria o que a etiqueta da linha já diz.
+                if (porCopart.size > 1) {
+                  html += '<div class="job-cot-subgaveta">' + esc(copart) +
+                          '<span class="job-cot-gaveta-q">' + idxs.length + '</span></div>';
+                }
+                html += idxs.map(linha).join('');
+              });
+              html += '</details>';
+            });
+            return html;
+          })()
         : '<div class="job-cot-vazio"><div class="job-cot-vazio-t">Nenhum plano serve para essas vidas.</div></div>') +
       '<button class="job-cot-bt-mandar" id="job-cot-precos" style="width:100%;margin-top:12px" disabled>Marque um plano</button>' +
       '<button class="job-cot-nova" id="job-cot-volta-ops" style="border:none;cursor:pointer;width:100%;font-family:inherit">Outra operadora</button>' +
