@@ -1428,20 +1428,78 @@
     if (document.getElementById('job-portao')) return;
     const d = document.createElement('div');
     d.id = 'job-portao';
+    // O LOGIN INTEIRO NO MEIO DA TELA.
+    //
+    // Antes o portão só dizia "entre" e mandava pro painel lateral — dois
+    // passos pra uma coisa só, e o segundo numa coluna estreita. Estando no
+    // meio, com o WhatsApp embaçado atrás, a tela toda pede uma coisa e é
+    // óbvio o que fazer.
     d.innerHTML =
       '<div class="job-portao-cartao">' +
+        '<div class="job-portao-brilho"></div>' +
         '<div class="job-portao-logo">' + logoJobHTML() + '</div>' +
         '<div class="job-portao-t">Entre no JOB para continuar</div>' +
-        '<div class="job-portao-s">A extensão do JOB está ligada neste computador e ' +
-          'precisa saber quem é você antes de trabalhar na sua conversa.</div>' +
+        '<div class="job-portao-s">A extensão está ligada neste computador e precisa ' +
+          'saber quem é você antes de trabalhar na sua conversa.</div>' +
+        '<div class="job-portao-campo">' +
+          '<label for="job-po-email">Seu e-mail do JOB</label>' +
+          '<input id="job-po-email" type="email" autocomplete="username" ' +
+            'placeholder="voce@serenuscorretora.com.br">' +
+        '</div>' +
+        '<div class="job-portao-campo">' +
+          '<label for="job-po-senha">Sua senha</label>' +
+          '<input id="job-po-senha" type="password" autocomplete="current-password" ' +
+            'placeholder="a mesma do site">' +
+        '</div>' +
+        '<div class="job-portao-campo">' +
+          '<label for="job-po-apelido">Nome deste computador</label>' +
+          '<input id="job-po-apelido" type="text" placeholder="notebook da Bia, WhatsApp 2…">' +
+        '</div>' +
         '<button type="button" class="job-portao-bt" id="job-portao-entrar">Entrar</button>' +
+        '<div class="job-portao-msg" id="job-portao-msg"></div>' +
+        '<div class="job-portao-p">Você pode entrar em mais de um computador com o mesmo ' +
+          'usuário — um por WhatsApp.</div>' +
         '<button type="button" class="job-portao-off" id="job-portao-off">' +
           'Não quero usar o JOB neste computador</button>' +
       '</div>';
     document.body.appendChild(d);
     document.documentElement.classList.add('job-com-portao');
+
+    const msg = (t, cls) => {
+      const m = document.getElementById('job-portao-msg');
+      if (m) { m.textContent = t; m.className = 'job-portao-msg ' + (cls || ''); }
+    };
     const be = document.getElementById('job-portao-entrar');
-    if (be) be.addEventListener('click', () => { _fecharPortao(); abrirSecao('config'); });
+    const entrar = async () => {
+      const email = (document.getElementById('job-po-email').value || '').trim();
+      const senha = document.getElementById('job-po-senha').value || '';
+      const apelido = (document.getElementById('job-po-apelido').value || '').trim();
+      if (!email || !senha) { msg('Preencha e-mail e senha.', 'err'); return; }
+      be.disabled = true; be.textContent = 'Entrando…';
+      let r = null;
+      try { r = await _safeSendMessage({ type: 'login', payload: { email, senha, apelido } }); }
+      catch (e) { r = null; }
+      be.disabled = false; be.textContent = 'Entrar';
+      if (!r || !r.ok) {
+        // O MOTIVO APARECE. "Não deu" faz a pessoa tentar a mesma senha três
+        // vezes; "senha incorreta" e "usuário inativo" se resolvem de formas
+        // diferentes.
+        msg(r && r.erro === 'credenciais_invalidas' ? 'E-mail ou senha incorretos.'
+          : r && r.erro === 'usuario_inativo' ? 'Este usuário está inativo no JOB.'
+          : (r && r.erro) || 'Não consegui entrar agora.', 'err');
+        return;
+      }
+      document.getElementById('job-po-senha').value = '';
+      msg('Tudo certo, ' + ((r.usuario && r.usuario.nome) || '') + '.', 'ok');
+      setTimeout(_fecharPortao, 600);
+    };
+    if (be) be.addEventListener('click', entrar);
+    // Enter na senha entra — quem digita senha espera isso.
+    const isen = document.getElementById('job-po-senha');
+    if (isen) isen.addEventListener('keydown', (e) => { if (e.key === 'Enter') entrar(); });
+    const iem = document.getElementById('job-po-email');
+    if (iem) setTimeout(() => { try { iem.focus(); } catch (e) {} }, 120);
+
     const bo = document.getElementById('job-portao-off');
     if (bo) bo.addEventListener('click', () => {
       if (!confirm('Desligar a extensão do JOB neste computador?\n\n' +

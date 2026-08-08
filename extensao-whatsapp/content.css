@@ -1660,57 +1660,111 @@ details.job-cot-subgaveta > summary .job-cot-gaveta-q { margin-left: auto; }
 .job-porta-bt:hover { transform: translateY(-1px); filter: brightness(1.06); }
 .job-porta-p { font-size: 11.5px; color: #9b9384; margin-top: 12px; }
 
-/* ═══ PORTÃO: extensão ligada e sem credencial ══════════════════════════════
-   Cobre o WhatsApp inteiro, embaçado. Aviso dentro do painel não força nada —
-   a pessoa fecha o painel e segue usando com a extensão cega. Aqui a decisão
-   fica na frente.
+/* ═══ PORTÃO: entrar no JOB ════════════════════════════════════════════════
+   O login inteiro no meio da tela, com o WhatsApp embaçado atrás. Aviso dentro
+   do painel não forçava nada — a pessoa fechava o painel e seguia usando com a
+   extensão cega.
 
-   O blur vai no OVERLAY, não no <body>: embaçar o body quebra o
-   position:fixed dos filhos (o WhatsApp usa muito) e o layout desmonta. */
+   TUDO em variável de tema: o portão nasce certo no claro e no escuro, em vez
+   de ser um remendo de cor por cima do outro. O blur vai no OVERLAY, nunca no
+   <body> — embaçar o body quebra o position:fixed dos filhos, que o WhatsApp
+   usa muito, e o layout desmonta. */
 #job-portao {
   position: fixed; inset: 0; z-index: 2147483646;
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
-  background: rgba(11, 20, 26, .55);
-  backdrop-filter: blur(9px) saturate(.9);
-  -webkit-backdrop-filter: blur(9px) saturate(.9);
+  background: rgba(8, 12, 16, .55);
+  backdrop-filter: blur(10px) saturate(.9);
+  -webkit-backdrop-filter: blur(10px) saturate(.9);
   animation: jobPortaoEntra .22s ease-out;
 }
 @keyframes jobPortaoEntra { from { opacity: 0; } to { opacity: 1; } }
 
 .job-portao-cartao {
-  width: 100%; max-width: 380px;
-  background: #fbf9f5;
-  border: 1px solid #e6e2d9;
-  border-radius: 20px;
-  padding: 32px 28px 26px;
+  position: relative; overflow: hidden;
+  width: 100%; max-width: 390px;
+  background: var(--job-bg1);
+  border: 1px solid var(--job-borda);
+  border-radius: 22px;
+  padding: 34px 30px 24px;
   text-align: center;
-  box-shadow: 0 24px 60px rgba(0,0,0,.35);
-  animation: jobPortaoSobe .26s cubic-bezier(.2,.8,.3,1);
+  box-shadow: 0 28px 70px rgba(0,0,0,.45);
+  animation: jobPortaoSobe .3s cubic-bezier(.2,.85,.3,1);
 }
-@keyframes jobPortaoSobe { from { transform: translateY(14px); } to { transform: none; } }
+@keyframes jobPortaoSobe {
+  from { transform: translateY(16px) scale(.98); }
+  to   { transform: none; }
+}
+/* Um brilho que atravessa o topo do cartão, uma vez. Dá vida sem virar
+   enfeite piscando — roda na entrada e para. */
+.job-portao-brilho {
+  position: absolute; top: 0; left: -60%; right: -60%; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--job-acento), transparent);
+  animation: jobBrilho 1.5s ease-out .25s both;
+}
+@keyframes jobBrilho { from { transform: translateX(-60%); opacity: 0; }
+                       40% { opacity: 1; } to { transform: translateX(60%); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .job-portao-cartao, #job-portao, .job-portao-brilho { animation: none; }
+}
 
 .job-portao-logo { display: flex; justify-content: center; margin-bottom: 18px; transform: scale(1.5); }
 .job-portao-t {
-  font-size: 18px; font-weight: 750; color: #2f2a22;
-  letter-spacing: -.3px; margin-bottom: 10px;
+  font-size: 18px; font-weight: 750; color: var(--job-txt);
+  letter-spacing: -.3px; margin-bottom: 9px;
 }
-.job-portao-s { font-size: 13px; line-height: 1.6; color: #7a7160; margin-bottom: 22px; }
+.job-portao-s {
+  font-size: 12.5px; line-height: 1.6; color: var(--job-txt-fraco);
+  margin-bottom: 22px;
+}
+
+.job-portao-campo { text-align: left; margin-bottom: 12px; }
+.job-portao-campo label {
+  display: block; font-size: 11px; font-weight: 650;
+  color: var(--job-txt-fraco); margin-bottom: 5px;
+}
+.job-portao-campo input {
+  width: 100%; box-sizing: border-box;
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  border-radius: 11px; padding: 11px 12px;
+  font-size: 13.5px; color: var(--job-txt); font-family: inherit;
+  transition: border-color .14s, box-shadow .14s, background .14s;
+}
+.job-portao-campo input::placeholder { color: var(--job-txt-fraco); opacity: .65; }
+.job-portao-campo input:focus {
+  outline: none; border-color: var(--job-acento); background: var(--job-bg1);
+  box-shadow: 0 0 0 3px var(--job-sucesso-bg);
+}
+
 .job-portao-bt {
-  width: 100%; border: none; border-radius: 12px; padding: 13px;
-  background: linear-gradient(135deg, #3b82f6, #6d5cf0); color: #fff;
-  font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit;
-  box-shadow: 0 6px 18px rgba(59,130,246,.32);
+  width: 100%; margin-top: 6px; border: none; border-radius: 12px; padding: 13px;
+  background: var(--job-acento); color: var(--job-acento-txt);
+  font-size: 14px; font-weight: 750; cursor: pointer; font-family: inherit;
+  box-shadow: 0 6px 18px var(--job-sucesso-bg);
   transition: transform .12s, box-shadow .12s, filter .12s;
 }
-.job-portao-bt:hover { transform: translateY(-1px); filter: brightness(1.06);
-  box-shadow: 0 9px 24px rgba(59,130,246,.38); }
-.job-portao-bt:active { transform: translateY(0); }
+.job-portao-bt:hover:not(:disabled) {
+  transform: translateY(-1px); filter: brightness(1.06);
+  box-shadow: 0 10px 26px var(--job-sucesso-bd);
+}
+.job-portao-bt:active:not(:disabled) { transform: translateY(0); }
+.job-portao-bt:disabled { opacity: .65; cursor: default; }
+
+.job-portao-msg { font-size: 12px; margin-top: 11px; min-height: 15px; }
+.job-portao-msg.ok  { color: var(--job-sucesso); }
+.job-portao-msg.err { color: var(--job-danger); }
+
+.job-portao-p {
+  font-size: 11.5px; line-height: 1.55; color: var(--job-txt-fraco);
+  margin-top: 6px; opacity: .85;
+}
 /* A saída existe e é discreta: ninguém pode ficar sem o WhatsApp de trabalho
    por causa da NOSSA extensão. */
 .job-portao-off {
-  width: 100%; margin-top: 12px; background: none; border: none;
-  color: #9b9384; font-size: 11.5px; cursor: pointer; font-family: inherit;
-  text-decoration: underline; text-underline-offset: 3px; padding: 6px;
+  width: 100%; margin-top: 14px; padding: 8px;
+  background: none; border: none; color: var(--job-txt-fraco);
+  font-size: 11.5px; cursor: pointer; font-family: inherit;
+  text-decoration: underline; text-underline-offset: 3px; opacity: .75;
+  transition: opacity .14s;
 }
-.job-portao-off:hover { color: #6b6355; }
+.job-portao-off:hover { opacity: 1; }

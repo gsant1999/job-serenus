@@ -146,7 +146,7 @@
   };
 
   function carregar() {
-    fetch('/admin/extensao/sessoes?usuario_id=' + apUsuario)
+    fetch('/api/admin/extensao/sessoes?usuario_id=' + apUsuario)
       .then(function (r) {
         // A rota ainda pode não existir (está sendo feita). Dizer isso é
         // melhor que mostrar "erro" e deixar a pessoa achando que quebrou.
@@ -195,7 +195,10 @@
     // A confirmação diz O QUE acontece, não só "tem certeza?".
     if (!confirm('Desconectar "' + apelido + '"?\n\nA extensão para de funcionar naquele computador ' +
                  'até a pessoa entrar de novo. Os outros aparelhos dela continuam funcionando.')) return;
-    fetch('/admin/extensao/sessoes/' + id + '/revogar', { method: 'POST' })
+    // O endereco leva o DONO junto (uid/sid). E o desenho do Antigravity e e
+    // melhor que o meu: amarra a sessao ao usuario na propria URL, entao nao
+    // da pra revogar a sessao de outra pessoa nem por engano de digitacao.
+    fetch('/admin/extensao/sessoes/' + apUsuario + '/' + id + '/revogar', { method: 'POST' })
       .then(function (r) { return r.json(); })
       .then(function () { carregar(); })
       .catch(function () { carregar(); });
