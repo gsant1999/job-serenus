@@ -33,7 +33,11 @@ import unicodedata
 import pdfplumber
 
 FAIXAS = ['00-18', '19-23', '24-28', '29-33', '34-38',
-          '39-43', '44-48', '49-53', '54-58', '59 ou +']
+          '39-43', '44-48', '49-53', '54-58', '59+']
+# O rotulo da ultima faixa e '59+', igual ao FAIXAS_ETARIAS do app.py. O PDF
+# escreve "59 ou +" e era assim que saia daqui — a rota de importacao descarta
+# faixa fora da lista dela, entao 1.076 precos (o mais caro de cada tabela)
+# sumiriam calados e a tabela pareceria completa.
 
 # O rotulo da ultima faixa quebra em duas linhas de um jeito que o extrator
 # de palavras devolve como "59" e "ou +" separados; e as outras as vezes vem

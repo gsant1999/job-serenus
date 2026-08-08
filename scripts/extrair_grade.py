@@ -41,14 +41,18 @@ import unicodedata
 import pdfplumber
 
 FAIXAS = ['00-18', '19-23', '24-28', '29-33', '34-38',
-          '39-43', '44-48', '49-53', '54-58', '59 ou +']
+          '39-43', '44-48', '49-53', '54-58', '59+']
+# O rotulo da ultima faixa e '59+', igual ao FAIXAS_ETARIAS do app.py. O PDF
+# escreve "59 ou +" e era assim que saia daqui — a rota de importacao descarta
+# faixa fora da lista dela, entao 1.076 precos (o mais caro de cada tabela)
+# sumiriam calados e a tabela pareceria completa.
 
 # Cada operadora escreve a faixa de um jeito: "0 a 18 anos", "0-18",
 # "59 anos ou +", "59 anos >", "59+". Todas viram o mesmo rotulo interno,
 # senao a mesma faixa nasceria com tres nomes no banco e nenhuma cotacao
 # encontraria as tres.
 _INICIO = {0: '00-18', 19: '19-23', 24: '24-28', 29: '29-33', 34: '34-38',
-           39: '39-43', 44: '44-48', 49: '49-53', 54: '54-58', 59: '59 ou +'}
+           39: '39-43', 44: '44-48', 49: '49-53', 54: '54-58', 59: '59+'}
 
 
 def _sem_acento(s):
@@ -64,7 +68,7 @@ def _faixa(texto):
     if m:
         return _INICIO.get(int(m.group(1)))
     if re.match(r'^59\s*(\+|>|ou|e)?', t):
-        return '59 ou +'
+        return '59+'
     return None
 
 
