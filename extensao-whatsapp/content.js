@@ -1394,19 +1394,66 @@
     return !g.extToken && !String(g.extKey || '').trim();
   }
 
-  function _telaSemLogin() {
-    setCorpoSecao(
-      '<div class="job-porta">' +
-        '<div class="job-porta-logo">' + logoJobHTML() + '</div>' +
-        '<div class="job-porta-t">Entre para usar o JOB</div>' +
-        '<div class="job-porta-s">A extensão está instalada e ligada, mas ainda não sabe quem é você. ' +
-          'Sem isso ela não lê conversa, não cria lead e não envia nada — de propósito.</div>' +
-        '<button type="button" class="job-porta-bt" id="job-porta-entrar">Entrar agora</button>' +
-        '<div class="job-porta-p">Use o mesmo e-mail e senha do site do JOB.</div>' +
-      '</div>');
-    const b = document.getElementById('job-porta-entrar');
-    if (b) b.addEventListener('click', () => abrirSecao('config'));
+  // O PORTÃO. Cobre o WhatsApp inteiro, embaçado, e só sai com login.
+  //
+  // Aviso dentro do painel não força nada: a pessoa fecha o painel e continua
+  // usando o WhatsApp com a extensão instalada e cega. O portão põe a decisão
+  // na frente — é o que a WaSpeed faz, e é o que o Guilherme pediu.
+  //
+  // TEM SAÍDA, e ela não é opcional: quem não tem credencial nenhuma ficaria
+  // sem o WhatsApp de trabalho por causa da NOSSA extensão. O link discreto
+  // desliga a extensão nesta máquina e devolve a tela.
+  function _fecharPortao() {
+    const p = document.getElementById('job-portao');
+    if (p) p.remove();
+    document.documentElement.classList.remove('job-com-portao');
   }
+
+  function _abrirPortao() {
+    if (document.getElementById('job-portao')) return;
+    const d = document.createElement('div');
+    d.id = 'job-portao';
+    d.innerHTML =
+      '<div class="job-portao-cartao">' +
+        '<div class="job-portao-logo">' + logoJobHTML() + '</div>' +
+        '<div class="job-portao-t">Entre no JOB para continuar</div>' +
+        '<div class="job-portao-s">A extensão do JOB está ligada neste computador e ' +
+          'precisa saber quem é você antes de trabalhar na sua conversa.</div>' +
+        '<button type="button" class="job-portao-bt" id="job-portao-entrar">Entrar</button>' +
+        '<button type="button" class="job-portao-off" id="job-portao-off">' +
+          'Não quero usar o JOB neste computador</button>' +
+      '</div>';
+    document.body.appendChild(d);
+    document.documentElement.classList.add('job-com-portao');
+    const be = document.getElementById('job-portao-entrar');
+    if (be) be.addEventListener('click', () => { _fecharPortao(); abrirSecao('config'); });
+    const bo = document.getElementById('job-portao-off');
+    if (bo) bo.addEventListener('click', () => {
+      if (!confirm('Desligar a extensão do JOB neste computador?\n\n' +
+                   'O painel some do WhatsApp Web. Pra voltar, ligue de novo no ' +
+                   'ícone do JOB na barra do Chrome.')) return;
+      _safeStorageSet({ extensaoAtiva: false });
+      _fecharPortao();
+      location.reload();
+    });
+  }
+
+  async function _conferirPortao() {
+    try {
+      const g = await _safeStorageGet(['extensaoAtiva']);
+      if (g.extensaoAtiva === false) { _fecharPortao(); return; }
+      if (await _semCredencial()) _abrirPortao();
+      else _fecharPortao();
+    } catch (e) { _fecharPortao(); }
+  }
+
+  // Reconfere quando a credencial muda (login feito noutra aba, por exemplo).
+  try {
+    chrome.storage.onChanged.addListener((mud) => {
+      if (mud.extToken || mud.extKey || mud.extensaoAtiva) _conferirPortao();
+    });
+  } catch (e) { /* sem storage, o portão só é avaliado na carga */ }
+
 
   // ── CONTATO MARCADO COMO PESSOAL: A EXTENSÃO INTEIRA FECHA ───────────────
   //
@@ -1643,7 +1690,7 @@
     // ou desligar a extensão.
     // O porteiro vem antes de tudo, menos da própria configuração — que é
     // justamente onde a pessoa resolve.
-    if (secao !== 'config' && await _semCredencial()) { _telaSemLogin(); return; }
+    if (secao !== 'config' && await _semCredencial()) { _abrirPortao(); return; }
     if (secao !== 'config' && await _contatoBloqueado()) { _telaBloqueada(); return; }
 
     if (secao === 'analise') sincronizarPainelComConversa();
@@ -7945,6 +7992,9 @@
   }).catch(() => {});
   carregarPreferenciaLado().then(() => {
     criarTrilho();
+    // O portão é avaliado assim que a barra existe. Sem credencial nenhuma, o
+    // WhatsApp fica embaçado até a pessoa entrar (ou desligar a extensão).
+    _conferirPortao();
     const obs = new MutationObserver(() => {
       if (!document.getElementById('job-trilho')) criarTrilho();
     });
