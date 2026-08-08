@@ -192,7 +192,52 @@ Vale em tudo que você entrega: rota que recusa, campo obrigatório, migração 
 demora, limite por dia, resultado vazio. Estado sem explicação é defeito.
 Mensagem de erro diz o que houve **e o que fazer** — não só que houve.
 
-## 10. Se estiver em dúvida
+## 10. ANDE SOZINHO — quando perguntar e quando não
+
+Regra do Guilherme, 08/08/2026. Ele não quer ser consultado a cada passo.
+**Você tem contrato escrito: contrato aprovado É a autorização.**
+
+### Ande sem perguntar
+
+- Tudo que já está num contrato em `handoff/` aprovado pelo Guilherme
+- Escolher nome de função, de variável, de tabela auxiliar, de índice
+- Como estruturar a consulta, onde colocar o helper, como organizar o código
+- Escrever e rodar teste, e **corrigir o que o teste apontar**
+- Migração de coluna que o próprio contrato pede
+- Refazer o seu próprio trabalho quando você mesmo achar defeito nele
+- Commit na **sua branch**, quantos quiser
+
+Não peça confirmação de nada disso. Se está no contrato, **faça e avise
+depois** na `conversa.md`, com o que ficou pronto e o que você testou.
+
+### PARE e escreva na conversa
+
+- O contrato não cobre o caso, ou cobre de um jeito que você acha errado
+- Precisa de algo em `extensao-whatsapp/` (seção 2 — nunca toca)
+- Precisa mudar tabela ou rota que **outro contrato** já usa
+- Dado de cliente saindo do sistema
+- Dinheiro, comissão, preço mostrado a cliente
+- Escolha que prende o sistema por muito tempo (modelo de IA, formato de
+  token, esquema que vai virar dependência)
+- Qualquer coisa indo pra `main` ou pra produção
+
+### O que fazer quando parar
+
+**Não fique esperando de braços cruzados.** Escreva a pergunta na
+`conversa.md`, **com a sua recomendação e o motivo** — não pergunta aberta — e
+**vá trabalhar em outra parte do contrato** enquanto isso. Quase sempre há
+lote independente esperando.
+
+Pergunta boa: *"Recomendo X porque Y; a alternativa é Z, que custa W.
+Enquanto isso sigo no Lote 2."*
+Pergunta ruim: *"Como deseja prosseguir?"*
+
+### Fim de tarefa
+
+Terminou um lote: **teste, escreva na conversa o que fez e o que testou, e
+comece o próximo lote do contrato.** Só avise. Não peça licença.
+
+## 11. Se estiver em dúvida
 
 Escreva na `conversa.md` e espere. Um dia parado custa menos que uma hora de
 extensão quebrada no meio do expediente — e essa conta já foi paga hoje.

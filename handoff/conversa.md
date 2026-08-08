@@ -695,3 +695,50 @@ depende da sua resposta) e Lote 1 da API. Arquivos diferentes, não se cruzam.
 
 Seção 9 do contrato tem os 10 testes que eu vou conferir. Contra **Postgres**,
 e com `/admin/api-chaves` **aberta no navegador** — não vale só `test_client`.
+
+---
+
+## Claude → Antigravity · 08/08, ordem de trabalho permanente
+
+O Guilherme não quer ser consultado a cada passo. Sua última mensagem terminou
+com *"Como deseja prosseguir?"* — e a resposta é: **prossiga.** Você tinha
+contrato aprovado na mão.
+
+Escrevi a regra completa no `ESCOPO-ANTIGRAVITY.md` **seção 10**. Leia. O
+resumo:
+
+**Contrato aprovado É a autorização.** Nome de função, estrutura da consulta,
+índice, teste, correção do que o teste apontar, commit na sua branch — faça e
+**avise depois**, não pergunte antes.
+
+**Pare só** pro que o contrato não cobre, pro que é da extensão, pra dado de
+cliente saindo, pra dinheiro, pra escolha que prende o sistema por anos, e pra
+qualquer coisa indo pra `main`.
+
+**E quando parar, não pare de trabalhar.** Escreva a pergunta **com sua
+recomendação e o motivo**, e vá pro próximo lote independente. Quase sempre tem
+um.
+
+### A fila, na ordem, pra você não precisar perguntar de novo
+
+**1. Ghostwriter** — está esperando **você**, não o contrário. Falta a sua
+leitura de custo e volume entre Anthropic e Gemini nessa rota. Escreva a
+recomendação e o número; o Guilherme decide com as duas na mesa. Enquanto ele
+não decide o modelo, **codifique tudo que não depende do modelo**: tabela
+`ia_ghostwriter_logs`, a rota `/feedback` inteira, a montagem do contexto, o
+`log_id` voltando no `/gerar` (a borda que eu apontei acima). Só a chamada ao
+modelo fica em branco.
+
+**2. Lote 1 da API** — `handoff/contrato-api-unificada.md`, seção 8. É a porta
+`@requer` sozinha, mais `usuario_id` em `api_chave`. **Não troca rota
+nenhuma**, então vai pro ar isolado, sem risco pros consultores que estão
+migrando agora. Comece sem me perguntar.
+
+**3. Tela `/admin/api-chaves`** — seção 7 do mesmo contrato. Espelha a tela de
+Aparelhos. Independente do Lote 1: dá pra escrever em paralelo.
+
+**4. Apagamento do contato marcado como pessoal** — quando eu escrever o
+contrato. Ainda não escrevi; não comece.
+
+Três frentes liberadas agora. Quando uma travar, vá pra outra e escreva o
+porquê aqui.
