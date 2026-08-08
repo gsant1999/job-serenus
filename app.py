@@ -5146,10 +5146,45 @@ def admin_extensao_sessoes():
         SELECT s.id, s.usuario_id, s.criado_em, s.ultimo_uso, s.revogado_em, s.apelido, u.nome
         FROM extensao_sessao s
         JOIN usuarios u ON s.usuario_id = u.id
-        ORDER BY s.revogado_em ASC, s.ultimo_uso DESC
+        ORDER BY (s.revogado_em IS NULL) DESC, s.ultimo_uso DESC
     """).fetchall()
     close_db(conn)
     return render_template('admin_extensao_sessoes.html', sessoes=sessoes)
+
+@app.route('/api/admin/extensao/sessoes')
+@login_required
+@admin_required
+def api_admin_extensao_sessoes():
+    """Retorna JSON das sessões para consumo nas telas do painel (ex: Usuários)."""
+    usuario_id = request.args.get('usuario_id')
+    conn = db()
+    
+    q = """
+        SELECT s.id, s.usuario_id, s.criado_em, s.ultimo_uso, s.revogado_em, s.apelido, u.nome
+        FROM extensao_sessao s
+        JOIN usuarios u ON s.usuario_id = u.id
+    """
+    
+    if usuario_id:
+        q += " WHERE s.usuario_id = ?"
+        q += " ORDER BY (s.revogado_em IS NULL) DESC, s.ultimo_uso DESC"
+        sessoes = conn.execute(q, (usuario_id,)).fetchall()
+    else:
+        q += " ORDER BY (s.revogado_em IS NULL) DESC, s.ultimo_uso DESC"
+        sessoes = conn.execute(q).fetchall()
+        
+    close_db(conn)
+    
+    return jsonify({
+        "ok": True,
+        "sessoes": [{
+            "id": s["id"],
+            "apelido": s["apelido"],
+            "criado_em": _dt_iso(s["criado_em"]) if s["criado_em"] else None,
+            "ultimo_uso": _dt_iso(s["ultimo_uso"]) if s["ultimo_uso"] else None,
+            "revogado_em": _dt_iso(s["revogado_em"]) if s["revogado_em"] else None
+        } for s in sessoes]
+    })
 
 @app.route('/admin/extensao/sessoes/<int:uid>/<int:sid>/revogar', methods=['POST'])
 @login_required
