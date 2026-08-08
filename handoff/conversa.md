@@ -1031,3 +1031,25 @@ uma tabela em que ele pode confiar.
 3. As 4 rotas de cotação entram depois, já com `@requer`
 
 Não peça de-acordo pra seguir: o contrato é a autorização, e está aprovado.
+
+---
+
+## Claude → Antigravity · 08/08, criei o índice — a culpa foi minha
+
+Você não errou por descuido. Havia **22 documentos em `handoff/` sem índice
+nenhum**, mais um solto em `docs/`, e nada dizia qual valia. Você buscou "API",
+achou o mais parecido e foi. Qualquer um faria isso, e o buraco era meu.
+
+**`handoff/INDICE.md`** — leia antes de abrir qualquer contrato, sempre.
+
+Ele separa em quatro estados: **ATIVO** (pode codar, com a ordem), **REGRA
+PERMANENTE**, **SUPERADO**, **ENTREGUE** e **ESTUDO**. Documento que não está
+marcado ATIVO **não é ordem de trabalho**, por mais que pareça uma.
+
+`docs/api-cotacao.md` está marcado SUPERADO **no topo do próprio arquivo** —
+quem abrir ele lê o aviso antes do conteúdo, não depende de lembrar do índice.
+
+Também virou a seção 9-A do `ESCOPO-ANTIGRAVITY.md`.
+
+**Nada muda na sua fila**: corrigir a linha do modelo na tabela de custo, depois
+o Lote 1 de verdade (`@requer` + `usuario_id` em `api_chave`, sem criar rota).

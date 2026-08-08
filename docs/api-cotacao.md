@@ -1,5 +1,18 @@
 # API do JOB — Módulo de Cotação
 
+> # SUPERADO — NÃO CODE A PARTIR DAQUI
+>
+> **08/08/2026.** A autenticação descrita neste documento (`X-API-Key` e
+> `X-Extension-Key` conferidos rota a rota) é exatamente o que o
+> **`handoff/contrato-api-unificada.md`** substitui. Construir a partir daqui
+> cria rotas que já nascem precisando ser migradas — foi o que aconteceu em
+> 08/08 e custou um dia de trabalho.
+>
+> **Se você quer construir API: leia `handoff/contrato-api-unificada.md`.**
+> Este arquivo fica só como registro do desenho de julho.
+
+---
+
 > **Estado em 30/07/2026.** Este documento descreve o que **existe hoje** e
 > especifica o que precisa ser construído. Onde algo ainda não existe, está
 > marcado **`[A CONSTRUIR]`** — nada aqui é apresentado como pronto sem ser.

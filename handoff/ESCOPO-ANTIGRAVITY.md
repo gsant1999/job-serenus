@@ -192,6 +192,19 @@ Vale em tudo que você entrega: rota que recusa, campo obrigatório, migração 
 demora, limite por dia, resultado vazio. Estado sem explicação é defeito.
 Mensagem de erro diz o que houve **e o que fazer** — não só que houve.
 
+## 9-A. O ÍNDICE É A FONTE — `handoff/INDICE.md`
+
+Antes de abrir qualquer contrato, abra o `INDICE.md`. Documento que não estiver
+marcado **ATIVO** ali **não é ordem de trabalho**, por mais que pareça.
+
+Em 08/08 você procurou "Lote" e "API" no repositório, achou `docs/api-cotacao.md`
+— documento de julho, com a autenticação velha — e construiu 4 rotas a partir
+dele. O contrato aprovado estava em `handoff/`, no meio de outros 22 arquivos
+sem índice. A culpa foi da falta de índice, não sua. Agora existe.
+
+Achou um documento que parece encaixar e não está no índice? **Pergunte na
+`conversa.md` antes de codar.**
+
 ## 10. ANDE SOZINHO — quando perguntar e quando não
 
 Regra do Guilherme, 08/08/2026. Ele não quer ser consultado a cada passo.
