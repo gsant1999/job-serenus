@@ -1697,6 +1697,28 @@
             '</label>' +
           '</div>' +
         '</div>' +
+
+        // O ACESSO ANTIGO PRECISA CONTINUAR ALCANÇÁVEL AQUI.
+        //
+        // Eu movi a chave compartilhada pro popup e não trouxe pro painel novo.
+        // Resultado: quem entrasse no portão não tinha como voltar a usar a
+        // chave por dentro da extensão — caminho de ida sem volta, justamente
+        // no dia em que o portão passou a exigir login.
+        //
+        // Fica recolhido e com o motivo escrito: ela diz "sou a extensão" e não
+        // diz quem é você. É rede de segurança, não a porta principal.
+        '<details class="job-cfg-antigo">' +
+          '<summary>Acesso antigo (chave compartilhada)</summary>' +
+          '<div class="job-cfg-cartao" style="margin-top:8px">' +
+            '<div class="job-cfg-campo"><label>Chave da extensão</label>' +
+              '<input id="job-cfg-chave" type="password" ' +
+                'value="' + esc(g.extKey || '') + '" placeholder="cole a chave"></div>' +
+            '<div class="job-cfg-dica" style="margin-top:0">Esta chave é a mesma em ' +
+              'todas as máquinas: ela diz "sou a extensão" e não diz quem é você. ' +
+              'Entrando com e-mail e senha acima, o JOB passa a saber — e este ' +
+              'bloco pode sumir.</div>' +
+          '</div>' +
+        '</details>' +
       '</div>');
 
     const msg = (t, cls) => {
@@ -1710,9 +1732,10 @@
         railSide: (document.getElementById('job-cfg-lado') || {}).value === 'esquerda' ? 'esquerda' : 'direita',
         tema: (document.getElementById('job-cfg-tema') || {}).value === 'claro' ? 'claro' : 'escuro',
         extensaoAtiva: !!(document.getElementById('job-cfg-ativa') || {}).checked,
+        extKey: ((document.getElementById('job-cfg-chave') || {}).value || '').trim(),
       });
     };
-    ['job-cfg-url', 'job-cfg-lado', 'job-cfg-tema', 'job-cfg-ativa'].forEach((id) => {
+    ['job-cfg-url', 'job-cfg-lado', 'job-cfg-tema', 'job-cfg-ativa', 'job-cfg-chave'].forEach((id) => {
       const e = document.getElementById(id);
       if (e) e.addEventListener('change', salvarCfg);
     });
