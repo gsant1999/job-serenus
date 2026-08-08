@@ -1391,7 +1391,22 @@
   // chave passa; quem não tem nada vê a porta.
   async function _semCredencial() {
     const g = await _safeStorageGet(['extToken', 'extKey']);
-    return !g.extToken && !String(g.extKey || '').trim();
+    if (g.extToken) return false;                  // entrou: está resolvido
+
+    // SEM TOKEN. A chave antiga ainda vale ENQUANTO o servidor não souber
+    // fazer login — hoje a rota nem existe em produção (404), e exigir login
+    // agora travaria os oito consultores no meio do expediente.
+    //
+    // Quando a rota subir, esta mesma linha passa a exigir o login sozinha,
+    // sem versão nova da extensão. O portão liga no dia em que faz sentido.
+    let servidorTemLogin = false;
+    try {
+      const r = await _safeSendMessage({ type: 'servidor_tem_login' });
+      servidorTemLogin = !!(r && r.tem);
+    } catch (e) { servidorTemLogin = false; }
+
+    if (servidorTemLogin) return true;             // dá pra entrar: então entre
+    return !String(g.extKey || '').trim();         // ainda não dá: a chave serve
   }
 
   // O PORTÃO. Cobre o WhatsApp inteiro, embaçado, e só sai com login.
