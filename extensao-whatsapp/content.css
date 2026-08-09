@@ -2841,3 +2841,52 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
   border-color: var(--job-acento); color: var(--job-txt);
 }
 .job-nao-lead:active, .job-ficha-abrir:active { transform: scale(.97); }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   COTAR AGORA — a parede de dez faixas
+
+   A tela abre com as dez faixas etárias em zero, todas com o mesmo peso: dez
+   linhas idênticas onde o olho não tem onde pousar. Quem já marcou três não
+   acha as três de relance, e conta de novo.
+
+   A linha com gente ACENDE (borda de acento na quina, número em destaque) e
+   as vazias recuam. É a mesma ideia do atraso na fila: cor em tudo para de
+   significar alguma coisa.
+   ══════════════════════════════════════════════════════════════════════════ */
+.job-cot-fx { border-left: 3px solid transparent; padding-left: 9px; }
+.job-cot-fx.tem {
+  border-left-color: var(--job-acento);
+  background: color-mix(in srgb, var(--job-acento) 9%, transparent);
+}
+.job-cot-fx span { font-family: var(--job-ui); letter-spacing: var(--job-tk-sm); }
+.job-cot-fx b { font-family: var(--job-ui); font-weight: 700; min-width: 22px; }
+.job-cot-fx.tem b { color: var(--job-acento); }
+/* O "−" apagado some do caminho sem sumir do lugar: a linha não pode dançar
+   quando o número passa de 0 pra 1. */
+.job-cot-fx button:disabled { opacity: .3; cursor: default; border-color: var(--job-borda); }
+.job-cot-fx button:disabled:hover { border-color: var(--job-borda); color: var(--job-txt); }
+.job-cot-fx button:not(:disabled):active { transform: scale(.88); }
+.job-cot-fx button { transition: border-color var(--job-t-rapido) ease, color var(--job-t-rapido) ease,
+                                 transform var(--job-t-toque) ease-out; }
+
+/* O TOTAL, no fim da lista. Sem ele o consultor soma dez linhas de cabeça
+   antes de clicar em buscar — e é o número que muda o preço. */
+.job-cot-fx-total {
+  padding: 9px 12px; font-family: var(--job-ui); font-size: 12px; font-weight: 650;
+  letter-spacing: var(--job-tk-sm); color: var(--job-txt-fraco);
+  border-top: 1px solid var(--job-borda);
+  background: color-mix(in srgb, var(--job-txt) 4%, transparent);
+}
+.job-cot-fx-total.tem { color: var(--job-txt); }
+
+/* "Voltar" era um bloco preenchido de largura cheia, do mesmo tamanho do
+   botão que busca preço. Sair não disputa com continuar. */
+.job-cot-voltar {
+  background: transparent; border: none; box-shadow: none;
+  color: var(--job-txt-fraco); font-weight: 600; font-size: 12.5px;
+  width: 100%; padding: 10px; margin-top: 6px; cursor: pointer;
+  font-family: var(--job-ui);
+}
+.job-cot-voltar:hover { background: color-mix(in srgb, var(--job-txt) 6%, transparent); color: var(--job-txt); }
+@media (prefers-reduced-motion: reduce) { .job-cot-fx button:not(:disabled):active { transform: none; } }

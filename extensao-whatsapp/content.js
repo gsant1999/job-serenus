@@ -4840,9 +4840,11 @@
   function abrirSecaoCotarInline() {
     const v = _cot || {};
     setCorpoSecao(
+      // Cabeçalho igual ao das outras dez telas — e grudado no topo, que aqui
+      // importa mais que em qualquer lugar: a tela tem dez faixas etárias e é
+      // a única em que o consultor rola bastante sem saber onde está.
+      _secHead('Cotar agora', 'Preço buscado no Painel do Corretor na hora, pela sua sessão.') +
       '<div class="job-cot-wrap">' +
-        '<div class="job-sec-t">Cotar agora</div>' +
-        '<div class="job-sec-sub">Preço buscado no Painel do Corretor na hora, pela sua sessão.</div>' +
         '<label class="job-cot-rot" id="job-cot-p1"><i>1</i> Cidade' +
           _cotAjuda('A cidade define QUEM ATENDE. Um plano de Campinas não existe em Sorocaba, ' +
                     'e a lista de operadoras muda inteira.') + '</label>' +
@@ -4881,14 +4883,25 @@
         // digita; quem já pensa em faixa (proposta antiga, planilha da
         // operadora) conta na faixa direto, sem inventar uma idade que caiba.
         '<button type="button" class="job-cot-trocar" id="job-cot-modo"></button>' +
+        // DEZ LINHAS IGUAIS COM ZERO NÃO SÃO UMA LISTA, SÃO UMA PAREDE.
+        // A tela abre com as dez faixas em 0 e todas com o mesmo peso — o olho
+        // não tem onde pousar e o consultor conta nos dedos onde parou. Agora
+        // a linha com gente ACENDE e as vazias recuam; o "−" some quando não
+        // há o que tirar, porque botão que não faz nada é ruído; e o total
+        // fica fixo no rodapé da lista, que é a resposta que ele confere antes
+        // de buscar preço.
         '<div id="job-cot-faixas" class="job-cot-faixas">' +
-          _COT_FAIXAS.map((f, i) =>
-            '<div class="job-cot-fx" data-f="' + f + '">' +
+          _COT_FAIXAS.map((f, i) => {
+            const n = ((v.faixas || {})[f]) || 0;
+            return '<div class="job-cot-fx' + (n ? ' tem' : '') + '" data-f="' + f + '">' +
               '<span>' + _COT_ROTULOS[i] + '</span>' +
-              '<button type="button" data-d="-1">−</button>' +
-              '<b>' + (((v.faixas || {})[f]) || 0) + '</b>' +
-              '<button type="button" data-d="1">+</button>' +
-            '</div>').join('') +
+              '<button type="button" data-d="-1" aria-label="Tirar uma vida de ' + _COT_ROTULOS[i] + '"' +
+                (n ? '' : ' disabled') + '>−</button>' +
+              '<b>' + n + '</b>' +
+              '<button type="button" data-d="1" aria-label="Somar uma vida em ' + _COT_ROTULOS[i] + '">+</button>' +
+            '</div>';
+          }).join('') +
+          '<div class="job-cot-fx-total" id="job-cot-fx-total"></div>' +
         '</div>' +
         '<button class="job-cot-bt-mandar" id="job-cot-buscar" style="width:100%;margin-top:14px" disabled>' +
           'Escolha a cidade</button>' +
@@ -4896,7 +4909,7 @@
         // abria o JOB e digitava tudo de novo — o mesmo trabalho duas vezes.
         '<a class="job-cot-nova job-cot-so-pronto" id="job-cot-abrirjob" href="#" target="_blank" rel="noopener">' +
           'Abrir no JOB</a>' +
-        '<button class="job-cot-nova" id="job-cot-cancelar" style="border:none;cursor:pointer;width:100%;font-family:inherit">Voltar</button>' +
+        '<button class="job-cot-nova job-cot-voltar" id="job-cot-cancelar" type="button">Voltar</button>' +
       '</div>');
 
     const iCid = document.getElementById('job-cot-cidade');
@@ -4977,10 +4990,25 @@
       caixaFx.classList.toggle('ver', porFaixa);
       iIda.style.display = porFaixa ? 'none' : '';
       btModo.textContent = porFaixa ? 'digitar as idades' : 'contar por faixa';
+      let soma = 0;
       caixaFx.querySelectorAll('.job-cot-fx').forEach((d) => {
-        d.querySelector('b').textContent = contFx[d.dataset.f] || 0;
-        d.classList.toggle('tem', (contFx[d.dataset.f] || 0) > 0);
+        const n = contFx[d.dataset.f] || 0;
+        soma += n;
+        d.querySelector('b').textContent = n;
+        d.classList.toggle('tem', n > 0);
+        // O "−" fica desligado quando não há o que tirar: botão que não faz
+        // nada é ruído, e em dez linhas o ruído multiplica por dez.
+        const menos = d.querySelector('button[data-d="-1"]');
+        if (menos) menos.disabled = n === 0;
       });
+      // O total mora no fim da lista, que é onde o olho chega depois de contar
+      // — e é o número que ele confere antes de buscar preço.
+      const tot = document.getElementById('job-cot-fx-total');
+      if (tot) {
+        tot.textContent = soma ? (soma + (soma === 1 ? ' vida no total' : ' vidas no total'))
+                               : 'Nenhuma vida marcada ainda';
+        tot.classList.toggle('tem', soma > 0);
+      }
       contar();
     }
     btModo.addEventListener('click', () => { porFaixa = !porFaixa; pintarModo(); });
