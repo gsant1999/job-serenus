@@ -2935,9 +2935,22 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 /* O nome montado é o RESULTADO da escolha acima: ele precisa de espaço e de
    fonte que deixe conferir caractere a caractere. Estava num input estreito
    cortando no meio da palavra. */
-#job-nomec-val {
+/* O NOME INTEIRO VISÍVEL. Era um input de uma linha e o nome — que passa de
+   40 caracteres com etapa, origem e operadora ligadas — sumia no meio da
+   palavra. Textarea quebra linha, mostra tudo e continua editável. */
+.job-nomec-val {
+  display: block; width: 100%; box-sizing: border-box;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 12.5px; letter-spacing: 0; padding: 10px 11px;
+  font-size: 12.5px; letter-spacing: 0; line-height: 1.45;
+  padding: 10px 11px; resize: none; overflow: hidden;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  background: var(--job-bg2); color: var(--job-txt);
+  border: 1px solid var(--job-borda); border-radius: 10px; outline: none;
+  transition: border-color var(--job-t-rapido) ease, box-shadow var(--job-t-rapido) ease;
+}
+.job-nomec-val:focus {
+  border-color: var(--job-acento);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--job-acento) 18%, transparent);
 }
 .job-nomec-sub {
   font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
@@ -2984,16 +2997,7 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
    confirmação e precisa caber em tela pequena. */
 .job-folha-nome .job-folha-caixa { max-width: 460px; max-height: 88vh; overflow-y: auto; }
 .job-folha-nome .job-nomec-chips { margin: 4px 0 10px; }
-.job-folha-nome #job-folha-nome {
-  width: 100%; box-sizing: border-box; margin-bottom: 14px;
-  background: var(--job-bg2); border: 1px solid var(--job-borda); border-radius: 10px;
-  padding: 11px 12px; color: var(--job-txt);
-  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; outline: none;
-  transition: border-color var(--job-t-rapido) ease, box-shadow var(--job-t-rapido) ease;
-}
-.job-folha-nome #job-folha-nome:focus {
-  border-color: var(--job-acento); box-shadow: 0 0 0 3px color-mix(in srgb, var(--job-acento) 18%, transparent);
-}
+.job-folha-nome #job-folha-nome { margin-bottom: 14px; font-size: 13px; }
 
 
 /* ══════════════════════════════════════════════════════════════════════════

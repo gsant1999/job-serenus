@@ -3847,9 +3847,12 @@
             '</button>';
         }).join('') +
       '</div>' +
-      // O campo é editável de propósito: o padrão monta, a pessoa corrige.
-      '<input type="text" class="job-campo" id="job-nomec-val" ' +
-        'aria-label="Nome que vai pra agenda" placeholder="Nome do contato">' +
+      // O NOME INTEIRO TEM QUE CABER. Era um input de uma linha: com etapa,
+      // origem e operadora ligadas o nome passa de 40 caracteres e sumia no
+      // meio da palavra — e é justamente ele que a pessoa veio conferir.
+      // Textarea que cresce mostra tudo, e continua editável.
+      '<textarea class="job-campo job-nomec-val" id="job-nomec-val" rows="2" ' +
+        'aria-label="Nome que vai pra agenda" placeholder="Nome do contato"></textarea>' +
       // UMA ação principal, e ela FAZ a coisa — não prepara pra você fazer.
       '<button type="button" class="job-cnpj-btn" id="job-nomec-salvar">Salvar na agenda</button>' +
       '<div class="job-nomec-btns">' +
@@ -3860,11 +3863,21 @@
     '</div>';
   }
 
+  // O campo cresce com o texto: nome de 60 caracteres não pode depender de a
+  // pessoa arrastar a barra de rolagem pra conferir o fim.
+  function _autoAltura(el) {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+  }
+
   function _ligarNomeContato() {
     const inp = document.getElementById('job-nomec-val');
     if (!inp) return;
+    inp.addEventListener('input', () => _autoAltura(inp));
     const dica = (t) => { const e = document.getElementById('job-nomec-dica'); if (e) e.textContent = t; };
     inp.value = _montarNomeContato();
+    _autoAltura(inp);
     document.querySelectorAll('.job-nomec-chip').forEach((c) => {
       c.addEventListener('click', () => {
         const k = c.dataset.parte;
@@ -3877,6 +3890,7 @@
         _partesLigadas[k] = !_partesLigadas[k];
         c.classList.toggle('on', _partesLigadas[k]);
         inp.value = _montarNomeContato();
+        _autoAltura(inp);
         // Guarda a escolha: um padrao que muda a cada lead nao e padrao.
         try { chrome.storage.local.set({ jobNomeContatoPartes: _partesLigadas }); } catch (e) {}
       });
@@ -7849,8 +7863,8 @@
           '<div class="job-folha-d">Confira o nome antes de gravar. Ele fica assim no seu WhatsApp e no celular.</div>' +
           '<div class="job-nomec-sub">Toque pra somar ao nome</div>' +
           '<div class="job-nomec-chips">' + chips + '</div>' +
-          '<input type="text" id="job-folha-nome" class="job-campo" ' +
-            'aria-label="Nome que vai pra agenda" value="' + esc(nomeInicial || '') + '">' +
+          '<textarea id="job-folha-nome" class="job-campo job-nomec-val" rows="2" ' +
+            'aria-label="Nome que vai pra agenda">' + esc(nomeInicial || '') + '</textarea>' +
           '<button class="job-folha-ok" id="job-folha-ok">Salvar na agenda</button>' +
           '<button class="job-folha-nao" id="job-folha-nao">Cancelar</button>' +
         '</div>';
@@ -7887,11 +7901,13 @@
           c.classList.toggle('on', _partesLigadas[k]);
           try { chrome.storage.local.set({ jobNomeContatoPartes: _partesLigadas }); } catch (e) {}
           const novo = _montarNomeContato();
-          if ((inp.value || '').trim() === String(ultimoMontado).trim()) inp.value = novo;
+          if ((inp.value || '').trim() === String(ultimoMontado).trim()) { inp.value = novo; _autoAltura(inp); }
           ultimoMontado = novo;
         });
       });
       // O foco vai pro CAMPO, não no cancelar: aqui a pessoa veio pra escrever.
+      _autoAltura(inp);
+      inp.addEventListener('input', () => _autoAltura(inp));
       setTimeout(() => { if (inp) { inp.focus(); inp.select(); } }, 60);
     });
   }
