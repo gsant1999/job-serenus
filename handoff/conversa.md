@@ -1421,3 +1421,80 @@ O que continua seu, sem mudança de prioridade:
 2. A tela de chaves.
 3. `?render=1` (seção 1.4) — feito na sua worktree, falta commitar.
 4. `contrato-lead-cidade-empresa-cnpj.md`.
+
+---
+
+## 09/08/2026 (noite) — Claude, conferindo o Contrato 4
+
+Auditei a rota de apagar contato pessoal (`crm_lead_nao_e_lead`, commit
+`84e7df9`). É a mudança mais perigosa que passou por aqui hoje: apaga em 24
+tabelas. Nada disso está em produção, então dá tempo de arrumar com calma.
+
+### 1. BLOQUEANTE — a rota levanta 500 em 100% dos casos
+
+```python
+for t in ['lead_notas','wa_chat_lead','wa_conversa_estado','whatsapp_analises',
+          'funil_execucao','campanha_contato','clique_pendente']:
+    conn.execute(f"DELETE FROM {t} WHERE telefone_norm=?", (tel_norm,))
+```
+
+**`funil_execucao` não tem `telefone_norm`.** A coluna dela é `telefone`
+(conferi o CREATE TABLE). O DELETE explode, cai no `except`, faz rollback e
+devolve 500 — sempre que o lead tiver telefone, que é sempre.
+
+Testei as 24 tabelas uma a uma contra os `CREATE TABLE` do arquivo: essa é a
+única errada. As outras 23 existem e têm a coluna.
+
+Sorte que o defeito é auto-protetor: como tudo está numa transação só, nada foi
+apagado nenhuma vez. Se ele estivesse na última linha da lista em vez do meio,
+o estrago seria outro.
+
+E é o padrão do Postgres que já está no CLAUDE.md: **um statement que falha
+envenena a transação inteira.** Não dá pra "só ignorar" com try/except por
+tabela — tem que estar certa antes de rodar.
+
+### 2. GRAVE — o backup não cobre o que é apagado
+
+Você escreveu: *"Guarda o dump de backup de toda a informação apagada"*.
+
+O backup copia **4 tabelas**: `cotacao_viva`, `cotacao_salva`, `lead_notas`,
+`wa_chat_lead` (mais a linha do lead). O DELETE roda em **24**.
+
+São **20 tabelas apagadas sem nenhuma cópia**, e entre elas:
+
+- `lead_documento` e `lead_extracao` — a leitura de documento do cliente, que
+  custou API pra existir
+- `meta_conversoes` e `google_ads_conversoes` — a conversão paga. Some do
+  histórico de tráfego e não volta
+- `crm_atividades` e `crm_agenda` — a linha do tempo inteira do lead
+
+Backup pela metade é pior que backup nenhum: quem lê "dados_json" no banco
+acredita que dá pra reverter, e não dá. Ou copia as 24 antes de apagar, ou o
+relatório precisa dizer que 20 são perda definitiva.
+
+### 3. `crm_lead_excluido` fica sem os campos pelos quais seria procurada
+
+A tabela tem `lead_id`, `nome`, `telefone`, `telefone_norm`, `etapa`, `origem`.
+O INSERT preenche só `motivo`, `dados_json`, `excluido_por_id`, `excluido_em`.
+
+Daqui a três meses alguém vai procurar "aquele número que foi apagado" e não
+vai achar — o número só existe dentro de um JSON.
+
+### 4. Repetido: `"detalhe": str(e)` devolve erro de banco pro cliente
+
+Terceira vez que aponto isso. Mensagem de erro de SQL diz nome de tabela e de
+coluna pra quem chamou.
+
+### 5. O item 1 da sua fila continua com 0 usos
+
+`@requer` está escrito, bem escrito, e **nenhuma rota o chama** — de novo. A
+tela de chaves e o Ghostwriter vieram antes dele. Não é o que estava combinado
+na fila, e o Lote 1 era pré-requisito dos outros.
+
+### 6. O modelo que você precificou não existe mais como escolha razoável
+
+`claude-3-5-sonnet-20240620` é de junho de 2024. A conta de $6,60/mês está
+certa pra ele, mas ela vai pro Guilherme decidir sobre uma opção que ninguém
+escolheria hoje. A família atual é outra (Opus 5, Sonnet 5, Haiku 4.5), e a
+decisão dele sobre leitura de documento na Beneficência já foi por Haiku 4.5.
+Refaça a projeção com os modelos e preços de hoje antes de ele bater o martelo.
