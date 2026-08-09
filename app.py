@@ -4992,8 +4992,14 @@ BRAND = {
     # O default aponta pro wordmark que ja esta versionado em static/brand/ —
     # entao funciona sem ninguem configurar nada, e a instancia de outra
     # corretora sobrescreve pela env.
+    # A versao de 640px, nao a de 3831. Ela viaja como data URL ate a extensao,
+    # que a desenha num bloco de ~150px — mandar 3831x984 (96KB) e pagar
+    # decodificacao de imagem gigante pra exibir miniatura, e isso aparecia
+    # como "a imagem demora pra ser gerada". 640px ainda sobra pro PDF.
     'logo_cliente':  os.environ.get('BRAND_LOGO_CLIENTE_URL')
-                     or '/static/brand/serenus-logo-black.png',
+                     or '/static/brand/serenus-logo-black-640.png',
+    # A grande continua disponivel pra impressao e material de alta resolucao.
+    'logo_cliente_hd': '/static/brand/serenus-logo-black.png',
 }
 
 

@@ -7095,15 +7095,21 @@
               par('WhatsApp', _cotLead && _cotLead.telefone) +
             '</div>' +
           '</div>' +
-          (mc.logo || mc.nome_curto
-            ? '<div style="flex:none;text-align:right">' +
-                (mc.logo ? '<img src="' + esc(mc.logo) + '" alt="" ' +
-                           'style="max-height:44px;max-width:150px;object-fit:contain">' : '') +
-                '<div style="font-size:15px;font-weight:800;color:#0b141a">' +
-                  esc(mc.nome_curto || '') + '</div>' +
-                '<div style="font-size:11px;color:#8696a0">Corretora</div>' +
-              '</div>'
-            : '') +
+          // A LOGO JA DIZ O NOME. O wordmark da Serenus tem "Serenus" e
+          // "CORRETORA" desenhados dentro dele, e eu imprimia os dois de novo
+          // embaixo — saiu "Serenus Corretora" duas vezes na imagem que vai
+          // pro cliente. O texto agora so aparece quando NAO ha logo, que e o
+          // caso de uma corretora que ainda nao subiu a dela.
+          (mc.logo
+            ? '<div style="flex:none"><img src="' + esc(mc.logo) + '" alt="" ' +
+                'style="height:40px;width:auto;display:block"></div>'
+            : (mc.nome_curto
+                ? '<div style="flex:none;text-align:right">' +
+                    '<div style="font-size:15px;font-weight:800;color:#0b141a">' +
+                      esc(mc.nome_curto) + '</div>' +
+                    '<div style="font-size:11px;color:#8696a0">Corretora</div>' +
+                  '</div>'
+                : '')) +
         '</div>' +
         '<table style="' + S.tb + '"><thead>' +
         // A LOGO DA OPERADORA EM CIMA DE CADA COLUNA, como o site faz — a
@@ -7111,9 +7117,17 @@
         '<tr><td style="' + S.rl + '"></td>' +
           lista.map((p) => {
             const lg = _cotLogos[_cotChaveLogo(opDe(p))];
+            // SEM `object-fit` AQUI. O html2canvas 1.4.1 nao implementa essa
+            // propriedade: ele desenha a imagem esticada ate a caixa e o que
+            // sobra e cortado. Foi assim que a logo da Unimed virou um borrao
+            // verde na imagem, enquanto na lista de operadoras (que e HTML de
+            // verdade, nao rasterizado) aparecia perfeita.
+            //
+            // Limitando so a ALTURA e deixando a largura automatica, a
+            // proporcao vem da propria imagem e nao ha o que interpretar.
             return '<td style="padding:6px 10px;text-align:center">' +
               (lg ? '<img src="' + esc(lg) + '" alt="" ' +
-                    'style="max-height:34px;max-width:120px;object-fit:contain">' : '') + '</td>';
+                    'style="height:30px;width:auto;display:inline-block">' : '') + '</td>';
           }).join('') + '</tr>' +
         '<tr><th style="' + S.rl + '"></th>' +
           lista.map((p) => '<th style="' + S.th + '">' + esc(_cotNomePlano(p)) +
@@ -7144,8 +7158,10 @@
       '</div>';
     }
 
+    let _msDesenho = 0;
     async function _cotDesenharPNG(lista) {
       if (typeof html2canvas !== 'function') return null;
+      const td = Date.now();
       await _cotContexto();          // logo, corretor e e-mail vem do JOB
       await _cotCarregarLogos();     // as logos das operadoras, ja em data URL
       const cx = document.createElement('div');
@@ -7155,9 +7171,14 @@
       cx.innerHTML = _cotDocHTML(lista);
       document.body.appendChild(cx);
       try {
+        // ESCALA 1.6, NAO 2. A imagem sai com 1568px de largura, que e mais do
+        // que o WhatsApp mostra em qualquer tela — e rasterizar em 2x custava
+        // 56% mais pixels por nada. Ele reclamou que demora pra gerar.
         const canvas = await html2canvas(cx.firstElementChild,
-                                         { scale: 2, backgroundColor: '#ffffff', logging: false });
-        return canvas.toDataURL('image/png');
+                                         { scale: 1.6, backgroundColor: '#ffffff', logging: false });
+        const url = canvas.toDataURL('image/png');
+        _msDesenho = Date.now() - td;
+        return url;
       } catch (e) { return null; }
       finally { cx.remove(); }
     }
@@ -7174,7 +7195,10 @@
       cx.innerHTML =
         '<div class="job-cot-prev">' +
           '<img src="' + esc(dataUrl) + '" alt="Imagem da cotação">' +
-          '<div class="job-cot-prev-leg">É isto que o cliente recebe.</div>' +
+          '<div class="job-cot-prev-leg">É isto que o cliente recebe.' +
+            (_msDesenho ? ' <span style="opacity:.65">Desenhada em ' +
+              (_msDesenho / 1000).toFixed(1).replace('.', ',') + 's.</span>' : '') +
+          '</div>' +
           '<div class="job-cot-item-acoes">' +
             '<button type="button" class="job-cot-bt-mandar" id="job-cot-prev-mandar" style="flex:2">' +
               'Mandar na conversa</button>' +
