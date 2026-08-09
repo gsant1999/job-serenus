@@ -2917,85 +2917,196 @@
   function _barraConvInjetar() {
     const main = document.querySelector('#main');
     if (!main) return;
-    // O rodapé é onde vive a caixa de digitar. Se ele ainda não existe (a
-    // conversa está carregando), sai quieto: o tique de 1,5s tenta de novo.
     const pe = main.querySelector('footer');
     if (!pe || pe.querySelector('.job-barra-conv')) return;
-    // Limpa a versão antiga do cabeçalho, pra quem já tinha a extensão aberta
-    // quando a atualização chegou não ficar com as duas.
-    const velha = main.querySelector('header .job-barra-conv');
-    if (velha) velha.remove();
+    // Limpa versões antigas (cabeçalho, fileira de bolas) pra quem estava com
+    // a extensão aberta durante a atualização não ficar com as duas.
+    main.querySelectorAll('header .job-barra-conv').forEach((e) => e.remove());
+
     const box = document.createElement('div');
     box.className = 'job-barra-conv job-barra-conv-pe';
-    // NASCE VAZIA. Antes os três apareciam sempre, e botão que está sempre ali
-    // convida clique à toa — inclusive o de transcrever, que custa dinheiro e
-    // trava a conversa por minutos. Cada um é acrescentado pela função abaixo
-    // só quando a conjuntura dele existe.
+    // UM BOTÃO SÓ, e o nome de cada ação aparece quando ele abre.
+    //
+    // A fileira de bolas resolvia o espaço mas criava outro problema: ícone
+    // sozinho não diz o que faz, e ele precisou perguntar. Três ícones mudos
+    // ao lado do campo de digitar são três perguntas.
+    //
+    // Em repouso é um botão discreto com a marca do JOB. Aberto, cada ação tem
+    // ícone, NOME e uma linha dizendo o que acontece — inclusive o custo, no
+    // caso da transcrição, que é onde a pessoa decide se vale.
     box.innerHTML =
-      // COPIAR é o único que aparece sempre: não custa nada, não escreve em
-      // lugar nenhum e é reversível por natureza (é a área de transferência).
-      '<button type="button" class="job-bc-btn job-bc-bola" data-ac="copiar" ' +
-        'title="Copiar a conversa inteira: texto e áudio transcrito, na ordem, com hora e quem falou">' +
-        _ICO_COPIAR + '<span>Copiar conversa</span></button>';
-    // No começo do rodapé: antes do "+" e do campo, que é a ordem de leitura
-    // da esquerda pra direita e não empurra o botão de enviar.
+      '<button type="button" class="job-bc-menu-bt" id="job-bc-menu-bt" ' +
+        'aria-haspopup="menu" aria-expanded="false" title="Ações do JOB nesta conversa">' +
+        logoJobHTML() + '</button>';
     pe.insertBefore(box, pe.firstChild);
-    // Em segundo plano: a barra aparece na hora com o Copiar, e os outros dois
-    // entram quando a checagem volta. Esperar pra desenhar faria o rodapé pular.
-    _barraConvContexto(box);
 
-    const btn = (ac) => box.querySelector('[data-ac="' + ac + '"]');
-    // Guarda o rótulo de repouso de cada um: é ele que diz quando a bola
-    // voltou ao normal.
-    box.querySelectorAll('.job-bc-bola').forEach((b) => {
-      const e = b.querySelector('span');
-      b.dataset.rot = e ? (e.textContent || '') : '';
-    });
-    const rotulo = _bcRotulo;
-
-    // ── SALVAR CONTATO, do cabeçalho ──────────────────────────────────
-    // Um clique: monta o nome com as regras do CRM (as mesmas do painel) e
-    // grava. Se o lead ainda não foi carregado nesta conversa, carrega antes —
-    // salvar com o nome cru do WhatsApp desperdiçaria justamente o padrão que
-    // faz o contato ser achável na busca depois.
-    const bsv = btn('salvarcontato');
-    if (bsv) _barraConvLigarSalvar(bsv);
-
-    const bc = btn('copiar');
-    bc.addEventListener('click', async (ev) => {
+    const bt = box.querySelector('#job-bc-menu-bt');
+    bt.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      if (bc.disabled) return;
-      bc.disabled = true;
-      const r0 = 'Copiar conversa';
-      try {
-        const r = await conversaEmTexto();
-        if (!r.total) { rotulo(bc, 'Conversa vazia'); return; }
-        await navigator.clipboard.writeText(r.texto);
-        // Diz o buraco em vez de esconder: copiar "com sucesso" sem avisar que 6
-        // audios faltaram faz colar um registro furado sem saber.
-        rotulo(bc, r.semTranscricao ? (r.total + ' copiadas · ' + r.semTranscricao + ' áudio(s) sem transcrição')
-                                    : (r.total + ' copiadas'));
-      } catch (e) {
-        rotulo(bc, 'Não deu');
-      } finally {
-        setTimeout(() => { rotulo(bc, r0); bc.disabled = false; }, 3200);
-      }
+      if (box.querySelector('.job-bc-menu')) { _bcMenuFechar(box); return; }
+      _bcMenuAbrir(box, bt);
     });
   }
 
-  const _ICO_DOC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
-    'stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
-    '<polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
-  const _ICO_MAIS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
-  const _ICO_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
-  const _ICO_ABRIR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M10 14 21 3M18 13v8H3V6h8"/></svg>';
+  function _bcMenuFechar(box) {
+    const m = box.querySelector('.job-bc-menu');
+    if (!m) return;
+    m.classList.remove('on');
+    const bt = box.querySelector('#job-bc-menu-bt');
+    if (bt) bt.setAttribute('aria-expanded', 'false');
+    setTimeout(() => { if (m.isConnected) m.remove(); }, 200);
+    if (box._bcFora) document.removeEventListener('click', box._bcFora, true);
+    if (box._bcEsc) document.removeEventListener('keydown', box._bcEsc, true);
+  }
 
-  // ── COPIAR A CONVERSA INTEIRA ───────────────────────────────────────────
-  // Texto e audio transcrito no MESMO fio, na ordem do WhatsApp, com hora e quem
-  // falou. E o que faltava pra conversa sair daqui e virar registro em qualquer
-  // lugar — e-mail pra operadora, ficha do lead, analise fora da ferramenta.
-  // Audio sem transcricao entra marcado, nao sumido: a conversa tem que
-  // continuar fazendo sentido, e quem le precisa saber que ali falta um pedaco.
+  // O menu é MONTADO A CADA ABERTURA, não uma vez e escondido. Assim o que
+  // aparece é o estado de agora: quantos áudios faltam, se o contato já foi
+  // salvo. Menu montado uma vez mente na segunda conversa.
+  async function _bcMenuAbrir(box, bt) {
+    const m = document.createElement('div');
+    m.className = 'job-bc-menu';
+    m.setAttribute('role', 'menu');
+    m.innerHTML = '<div class="job-bc-menu-carregando">Vendo o que dá pra fazer aqui…</div>';
+    box.appendChild(m);
+    requestAnimationFrame(() => m.classList.add('on'));
+    bt.setAttribute('aria-expanded', 'true');
+
+    box._bcFora = (e) => { if (!box.contains(e.target)) _bcMenuFechar(box); };
+    box._bcEsc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); _bcMenuFechar(box); } };
+    document.addEventListener('click', box._bcFora, true);
+    document.addEventListener('keydown', box._bcEsc, true);
+
+    const itens = [];
+
+    let faltam = 0;
+    try {
+      const r = await _pedirPonte('listar_audios', {}, 12000);
+      const lista = (r && r.audios) || [];
+      // Só os que ainda NÃO têm texto: oferecer transcrever o que já foi pago
+      // é gastar de novo pelo mesmo resultado.
+      faltam = lista.filter((a) => !TR.cache.has(a.id) || !TR.cache.get(a.id)).length;
+    } catch (e) { faltam = 0; }
+    if (faltam > 0) {
+      itens.push({ ac: 'transcrever', ico: _ICO_TRANSCREVER,
+        rot: 'Transcrever ' + faltam + (faltam === 1 ? ' áudio' : ' áudios'),
+        dica: 'Demora e consome crédito de transcrição.' });
+    }
+
+    itens.push({ ac: 'copiar', ico: _ICO_COPIAR, rot: 'Copiar conversa',
+      dica: 'Texto e áudio transcrito, na ordem, com hora e quem falou.' });
+
+    // Contato salvo tem nome; não salvo aparece como número. Se já tem nome, o
+    // botão não teria trabalho a fazer.
+    const nomeChat = (nomeDoContato() || '').trim();
+    const soDigitos = nomeChat.replace(/[^0-9]/g, '');
+    const naoSalvo = nomeChat && soDigitos.length >= 10 &&
+      soDigitos.length >= nomeChat.replace(/\s/g, '').length - 4;
+    if (naoSalvo) {
+      itens.push({ ac: 'salvarcontato', ico: _ICO_SALVAR_CONTATO, rot: 'Salvar contato',
+        dica: 'Você confere e edita o nome antes de gravar.', destaque: true });
+    } else {
+      itens.push({ ac: 'salvarcontato', ico: _ICO_SALVAR_CONTATO, rot: 'Corrigir o nome salvo',
+        dica: 'Regrava este contato com o nome no padrão do JOB.' });
+    }
+
+    if (!m.isConnected) return;
+    m.innerHTML = itens.map((i) =>
+      '<button type="button" class="job-bc-item' + (i.destaque ? ' destaque' : '') + '" ' +
+        'role="menuitem" data-ac="' + i.ac + '">' +
+        '<span class="job-bc-item-ico">' + i.ico + '</span>' +
+        '<span class="job-bc-item-txt">' +
+          '<span class="rot">' + esc(i.rot) + '</span>' +
+          '<span class="dica">' + esc(i.dica) + '</span>' +
+        '</span></button>').join('');
+
+    const acao = (n) => m.querySelector('[data-ac="' + n + '"]');
+    const rot = (b, txt) => { const e = b.querySelector('.rot'); if (e) e.textContent = txt; };
+
+    const bTr = acao('transcrever');
+    if (bTr) bTr.addEventListener('click', async () => {
+      if (bTr.disabled) return;
+      bTr.disabled = true;
+      try {
+        const pr = await transcreverTudo((x) => {
+          rot(bTr, x.rodando ? ('Transcrevendo ' + x.feitos + '/' + x.total) : 'Transcrevendo…');
+        });
+        rot(bTr, pr.erros ? (pr.erros + ' falhou(ram)') : ('Pronto: ' + pr.total));
+      } catch (e) { rot(bTr, 'Não consegui transcrever'); }
+      setTimeout(() => _bcMenuFechar(box), 2200);
+    });
+
+    const bCp = acao('copiar');
+    if (bCp) bCp.addEventListener('click', async () => {
+      if (bCp.disabled) return;
+      bCp.disabled = true;
+      try {
+        const r = await conversaEmTexto();
+        if (!r.total) rot(bCp, 'Conversa vazia');
+        else {
+          await navigator.clipboard.writeText(r.texto);
+          rot(bCp, r.semTranscricao
+            ? (r.total + ' copiadas · ' + r.semTranscricao + ' sem transcrição')
+            : ('Copiado: ' + r.total + ' mensagens'));
+        }
+      } catch (e) { rot(bCp, 'Não consegui copiar'); }
+      setTimeout(() => _bcMenuFechar(box), 1800);
+    });
+
+    const bSv = acao('salvarcontato');
+    if (bSv) bSv.addEventListener('click', async () => {
+      if (bSv.disabled) return;
+      bSv.disabled = true;
+      try {
+        let chat = '';
+        try { const c = await _pedirPonte('obter_chat_id', {}, 8000); chat = (c && c.chat_id) || ''; }
+        catch (e) { chat = ''; }
+        if (!chat) { rot(bSv, 'Abra a conversa'); bSv.disabled = false; return; }
+        if (!_ficha || !_ficha.lead) {
+          try {
+            let tel = '';
+            try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e2) { tel = telefoneDoContato(); }
+            if (tel) await _carregarFichaSilenciosa({ telefone: tel });
+          } catch (e) { /* segue com o nome da tela */ }
+        }
+        const sugerido = (_ficha && _ficha.lead ? _montarNomeContato() : nomeChat).trim();
+        // Fecha o menu ANTES da folha: dois painéis abertos ao mesmo tempo
+        // deixam a pessoa sem saber qual está no comando.
+        _bcMenuFechar(box);
+        const nome = await _folhaSalvarContato(sugerido);
+        if (!nome) return;
+        const partes = nome.split(/\s+/);
+        const primeiro = partes.shift() || nome;
+        const sobrenome = partes.join(' ');
+        let r = null;
+        try { r = await _pedirPonte('salvar_contato', { chatId: chat, nome: primeiro, sobrenome }, 15000); }
+        catch (e) { _falhaTecnica('salvar contato (menu)', e); }
+        _dizerNoRodape(r && r.ok
+          ? 'Contato salvo. Chega no celular na próxima sincronização.'
+          : ((r && r.erro) === 'sem_suporte'
+              ? 'Este WhatsApp Web não permite salvar por aqui.'
+              : 'Não consegui salvar agora. Tente de novo.'));
+        if (r && r.erro) _falhaTecnica('salvar contato (menu): ' + r.erro, null);
+      } catch (e) { _falhaTecnica('salvar contato (menu)', e); }
+    });
+  }
+
+  // Aviso curto junto do campo de digitar. A folha já fechou quando a resposta
+  // chega, e sem isto ninguém fica sabendo se gravou.
+  function _dizerNoRodape(txt) {
+    try {
+      const box = document.querySelector('.job-barra-conv-pe');
+      if (!box) return;
+      const velho = box.querySelector('.job-bc-aviso');
+      if (velho) velho.remove();
+      const d = document.createElement('div');
+      d.className = 'job-bc-aviso';
+      d.textContent = txt;
+      box.appendChild(d);
+      requestAnimationFrame(() => d.classList.add('on'));
+      setTimeout(() => { d.classList.remove('on'); setTimeout(() => d.remove(), 220); }, 3400);
+    } catch (e) { /* aviso nunca pode derrubar nada */ }
+  }
+
   async function conversaEmTexto() {
     const conv = await _pedirPonte('ler_conversa_completa', { limite: 800 }, 25000);
     const msgs = (conv && conv.mensagens) || [];
