@@ -5105,6 +5105,74 @@
   // calma; aqui ele está com o cliente digitando do outro lado. Cada preço é
   // uma ida ao Painel com pausa humana no meio — 6 é o que cabe numa conversa.
   const _COT_MAX = 6;
+
+  // ── A COMPOSICAO DA COTACAO, ANTES DE COTAR ───────────────────────────────
+  //
+  // Pedido do Guilherme: "ao selecionar um produto antes de cotar, deve ficar
+  // claro o que selecionei, porque se eu for cotar outra coisa eu preciso ter
+  // a referencia da composicao da cotacao, antes mesmo de cotar."
+  //
+  // Ate agora a marcacao morria na tela da operadora: ir pra proxima limpava
+  // tudo, e a unica memoria era o comparativo — que so existe DEPOIS de cotar.
+  // Ele montava uma proposta de tres operadoras sem nunca ver a proposta
+  // inteira antes de pedir preco.
+  //
+  // A sacola atravessa operadoras e as duas fontes. O teto de 6 passou a ser
+  // dela, nao da tela: seis planos e o que cabe num comparativo que o cliente
+  // le, venham de onde vierem.
+  let _cotSacola = [];
+
+  // Identidade de um plano marcado. Nome sozinho nao serve: "Ouro" existe em
+  // enfermaria e apartamento, com e sem coparticipacao, e sao planos
+  // diferentes com precos diferentes.
+  function _cotChaveDe(p, operadoraId) {
+    const pl = (p && p.plano) || {}, tb = (p && p.tabela) || {};
+    return [operadoraId, _cotNomePlano(p), pl.acomodacaoTxt || (pl.acomodacao ? 'A' : 'E'),
+            _cotCopart(tb), _texto(p && p.produto)].join('|');
+  }
+  function _cotNaSacola(chave) {
+    return _cotSacola.some((x) => x.chave === chave);
+  }
+  function _cotSacolaTirar(chave) {
+    _cotSacola = _cotSacola.filter((x) => x.chave !== chave);
+  }
+
+  // O bloco que ele le. Aparece nas duas telas onde a pergunta "o que eu ja
+  // tenho?" acontece: na lista de planos e na de operadoras.
+  function _cotSacolaHTML() {
+    if (!_cotSacola.length) return '';
+    // Agrupa por operadora porque e assim que ele pensa a proposta — tres
+    // chips soltos nao dizem que dois sao da mesma operadora.
+    const porOp = new Map();
+    _cotSacola.forEach((x) => {
+      if (!porOp.has(x.operadoraNome)) porOp.set(x.operadoraNome, []);
+      porOp.get(x.operadoraNome).push(x);
+    });
+    let linhas = '';
+    porOp.forEach((itens, op) => {
+      linhas += '<div class="job-cot-comp-op">' +
+        '<span class="job-cot-comp-opn">' + esc(op) + '</span>' +
+        itens.map((x) => '<span class="job-cot-comp-chip">' + esc(x.nome) +
+          '<button type="button" class="job-cot-comp-x" data-chave="' + esc(x.chave) + '" ' +
+          'title="Tirar ' + esc(x.nome) + ' da cotação">×</button></span>').join('') +
+      '</div>';
+    });
+    return '<div class="job-cot-comp">' +
+      '<div class="job-cot-comp-t">Nesta cotação' +
+        '<span class="job-cot-comp-n">' + _cotSacola.length + ' de ' + _COT_MAX + '</span></div>' +
+      linhas +
+      (_cotSacola.length >= _COT_MAX
+        ? '<div class="job-cot-comp-s">Cheio. Tire um pra marcar outro.</div>'
+        : '<div class="job-cot-comp-s">Some de todas as operadoras. Sai tudo no mesmo comparativo.</div>') +
+    '</div>';
+  }
+
+  // Liga os "x". `aoMudar` repinta a tela de onde o clique veio.
+  function _cotSacolaLigar(aoMudar) {
+    document.querySelectorAll('.job-cot-comp-x').forEach((b) =>
+      b.addEventListener('click', () => { _cotSacolaTirar(b.dataset.chave); aoMudar(); }));
+  }
+
   // MODALIDADE É CÓDIGO, NÃO TEXTO. O filtro que vai pro Painel usa 1/2/3, e
   // eu mandei "PF"/"PME"/"Adesão": o Painel recebia um valor que não existe e
   // devolvia lista de outro tipo de contratação. O rótulo fica só na tela.
@@ -5624,6 +5692,11 @@
       }
       if (!r.total) { dica.textContent = 'Falta a idade de quem vai usar o plano.'; dica.classList.remove('ok'); return; }
       const tipo = (document.querySelector('#job-cot-tipo button.on') || {}).dataset;
+      // A SACOLA MORRE AQUI, DE PROPOSITO. Cidade, tipo e vidas sao a base do
+      // preco: um plano marcado pra Campinas com 2 vidas nao e o mesmo plano
+      // em Sorocaba com 4. Carregar a marcacao adiante seria montar uma
+      // proposta que nao existe.
+      _cotSacola = [];
       _cot = { cidade: cidadeDoCatalogo, cidadeOk: true, modalidade: Number((tipo && tipo.v) || 1),
                idades: iIda.value, faixas: porFaixa ? contFx : null,
                vidas: r.vidas, totalVidas: r.total };
@@ -5882,6 +5955,7 @@
         ops.length ? '<span class="job-sec-cont">' + ops.length + '</span>' : '') +
       '<div class="job-cot-wrap">' +
       '<div class="job-sec-sub">Escolha uma de cada vez — cada uma que você cotar soma no mesmo comparativo.</div>' +
+      '<div id="job-cot-comp">' + _cotSacolaHTML() + '</div>' +
       '<div class="job-cot-fonte-t" style="margin-bottom:8px">Pelo Painel do Corretor</div>' +
       (ops.length
         ? '<div class="job-cot-ops">' + ops.map((o) => {
@@ -5941,6 +6015,7 @@
         if (cx) { cx.innerHTML = _cotBlocoOpsJob(); ligarJob(); }
       });
     } else { ligarJob(); }
+    _cotSacolaLigar(_cotPintarOperadoras);
     _cotTopoLigar(abrirSecaoCotarInline);
     const bmd = document.getElementById('job-cot-voltar');
     if (bmd) bmd.addEventListener('click', abrirSecaoCotarInline);
@@ -6045,7 +6120,7 @@
   // Preco das tabelas do JOB: UMA chamada com todos os planos marcados, contra
   // as idades cruas. E por isso que 59 anos funciona aqui sem faixa — o motor
   // do JOB faz a conta da faixa sozinho, do mesmo jeito que o site faz.
-  async function _cotPrecosJob(alvo) {
+  async function _cotPrecosJob(alvo, emLote) {
     _cotEsperando('Calculando ' + alvo.length + (alvo.length === 1 ? ' plano…' : ' planos…'),
                   '', _cotPintarPlanos, 'Planos');
     const g = _cotGer;
@@ -6081,7 +6156,7 @@
     _cotFeitas = _cotFeitas.filter((f) => String(f.operadoraId) !== String(_cot.operadoraAtual.id));
     _cotFeitas.push({ operadoraId: _cot.operadoraAtual.id,
                       nome: _cot.operadoraAtual.nome, planos: feitos });
-    _cotPintarResultado();
+    if (!emLote) _cotPintarResultado();
   }
 
   async function _cotBuscarPlanos(op) {
@@ -6195,12 +6270,17 @@
             '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' + esc(e.t) + '</span>').join('') +
           '</div>'
         : '') +
-      '<div class="job-sec-sub">Vale para todos os planos abaixo. Marque até ' + _COT_MAX + '.</div>' +
+      '<div class="job-sec-sub">Vale para todos os planos abaixo.</div>' +
+      '<div id="job-cot-comp">' + _cotSacolaHTML() + '</div>' +
       (pls.length
         ? (function () {
             const linha = (i) => {
               const proprias = porPlano[i].filter((e) => !eComum(e.t));
-              return '<label class="job-cot-plano"><input type="checkbox" data-i="' + i + '">' +
+              const ch = _cotChaveDe(pls[i], _cot.operadoraAtual.id);
+              // A marcacao sobrevive a troca de operadora: quem ja esta na
+              // sacola volta marcado quando ele volta pra ca.
+              return '<label class="job-cot-plano"><input type="checkbox" data-i="' + i + '"' +
+                ' data-chave="' + esc(ch) + '"' + (_cotNaSacola(ch) ? ' checked' : '') + '>' +
                 '<span><b>' + esc(_cotNomePlano(pls[i])) + '</b>' +
                 (proprias.length
                   ? '<span class="job-cot-tags">' + proprias.map((e) =>
@@ -6219,23 +6299,62 @@
       '<button class="job-cot-nova" id="job-cot-volta-ops" style="border:none;cursor:pointer;width:100%;font-family:inherit">Outra operadora</button>' +
     '</div>');
     const bt = document.getElementById('job-cot-precos');
-    const marcados = () => Array.prototype.slice.call(
-      document.querySelectorAll('.job-cot-plano input:checked')).map((c) => pls[+c.dataset.i]);
-    document.querySelectorAll('.job-cot-plano input').forEach((c) => c.addEventListener('change', () => {
-      const n = marcados().length;
-      // Trava o teto marcando os outros como indisponíveis em vez de deixar
-      // marcar e reclamar depois — o consultor não perde o clique.
+    // O teto e da SACOLA, nao da tela: seis planos e o que cabe num
+    // comparativo que o cliente le, venham de uma operadora ou de quatro.
+    const atualizar = () => {
+      const n = _cotSacola.length;
       document.querySelectorAll('.job-cot-plano input').forEach((o) => {
         o.disabled = (n >= _COT_MAX && !o.checked);
         o.parentElement.classList.toggle('bloq', o.disabled);
       });
       bt.disabled = !n;
       bt.textContent = n ? 'Ver preços (' + n + ')' : 'Marque um plano';
+      const cx = document.getElementById('job-cot-comp');
+      if (cx) { cx.innerHTML = _cotSacolaHTML(); _cotSacolaLigar(_cotPintarPlanos); }
+    };
+    document.querySelectorAll('.job-cot-plano input').forEach((c) => c.addEventListener('change', () => {
+      const p = pls[+c.dataset.i], ch = c.dataset.chave;
+      if (c.checked) {
+        if (!_cotNaSacola(ch)) {
+          _cotSacola.push({ chave: ch, nome: _cotNomePlano(p), plano: p,
+                            operadoraId: _cot.operadoraAtual.id,
+                            operadoraNome: _cot.operadoraAtual.nome,
+                            fonte: _cot.operadoraAtual.fonte || 'painel' });
+        }
+      } else { _cotSacolaTirar(ch); }
+      atualizar();
     }));
+    atualizar();
     _cotTopoLigar(_cotPintarOperadoras);
     document.getElementById('job-cot-volta-ops').addEventListener('click', _cotPintarOperadoras);
-    bt.addEventListener('click', () => ((_cot.operadoraAtual || {}).fonte === 'job'
-      ? _cotPrecosJob(marcados()) : _cotPrecos(marcados())));
+    bt.addEventListener('click', () => _cotPrecosSacola());
+  }
+
+  // COTA A SACOLA INTEIRA, uma operadora de cada vez.
+  //
+  // Antes o botao cotava so o que estava marcado NA TELA — montar tres
+  // operadoras exigia cotar, voltar, cotar de novo, e ele so via a proposta
+  // completa no fim. Agora ele monta tudo e manda uma vez.
+  //
+  // Cada fonte tem o seu jeito: o Painel e sequencial por imposicao dele (a
+  // resposta nao diz de qual plano e), as tabelas do JOB sao uma chamada so.
+  async function _cotPrecosSacola() {
+    const grupos = [];
+    _cotSacola.forEach((x) => {
+      let g = grupos.filter((y) => y.id === x.operadoraId)[0];
+      if (!g) { g = { id: x.operadoraId, nome: x.operadoraNome, fonte: x.fonte, planos: [] };
+                grupos.push(g); }
+      g.planos.push(x.plano);
+    });
+    for (let i = 0; i < grupos.length; i++) {
+      const g = grupos[i];
+      _cot.operadoraAtual = { id: g.id, nome: g.nome, fonte: g.fonte };
+      const g0 = _cotGer;
+      if (g.fonte === 'job') await _cotPrecosJob(g.planos, grupos.length > 1);
+      else await _cotPrecos(g.planos, grupos.length > 1);
+      if (g0 !== _cotGer) return;      // ele saiu no meio
+    }
+    _cotPintarResultado();
   }
 
   // Preço é sequencial por imposição do Painel: a resposta traz os cenários
@@ -6243,7 +6362,9 @@
   // é o plano que se acabou de pedir. Ordem sorteada porque duas cotações da
   // mesma cidade produziriam a mesma sequência de chamadas, e sequência
   // repetida é padrão.
-  async function _cotPrecos(alvo) {
+  // `emLote`: veio da sacola com mais de uma operadora. Ai quem pinta o
+  // comparativo e o laco, no fim — senao a tela pisca uma vez por operadora.
+  async function _cotPrecos(alvo, emLote) {
     const fila = _cotEmbaralhar(alvo);
     const feitos = [];
     // Sair no meio da busca PARA a busca. Sem a guarda, a seta so trocava a
@@ -6278,7 +6399,7 @@
     _cotFeitas = _cotFeitas.filter((f) => String(f.operadoraId) !== String(_cot.operadoraAtual.id));
     _cotFeitas.push({ operadoraId: _cot.operadoraAtual.id,
                       nome: _cot.operadoraAtual.nome, planos: feitos });
-    _cotPintarResultado();
+    if (!emLote) _cotPintarResultado();
   }
 
   // SEM SELO DE "MAIS BARATO".
