@@ -124,85 +124,120 @@ html.job-push-esquerda #job-trilho {
 }
 .job-logo-txt {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  font-family: 'NunitoJOB', -apple-system, "Segoe UI", sans-serif; font-size: 9px; font-weight: 700; color: var(--job-txt); letter-spacing: .3px; z-index: 1;
+  font-family: 'NunitoJOB', -apple-system, "Segoe UI", sans-serif;
+  font-size: 9.5px; font-weight: 800; color: var(--job-txt); letter-spacing: .04em; z-index: 1;
 }
 @keyframes jobLogoSpin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .job-logo-arcos { animation: none; } }
 
-/* Item: pílula arredondada com folga nas laterais, não faixa de ponta a
-   ponta. A faixa cheia empurra o realce até a quina do trilho e briga com a
-   borda; a pílula flutua dentro dele, que é o que faz o realce parecer um
-   objeto e não um recorte do fundo. */
+/* ══════════════════════════════════════════════════════════════════════
+   O TRILHO — tipografia, cor, profundidade e movimento
+
+   Régua: a fonte do sistema já traz o ajuste ótico que uma fonte de marca a
+   9px não tem; texto pequeno pede tracking POSITIVO (o oposto do título);
+   peso carrega hierarquia sem ocupar espaço; e o realce é um objeto com
+   profundidade, não um retângulo pintado.
+   ══════════════════════════════════════════════════════════════════════ */
+
 .job-trilho-item {
-  position: relative;
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  width: calc(100% - 12px); padding: 9px 4px; border-radius: 12px;
-  background: transparent; border: none;
-  color: var(--job-txt-fraco); cursor: pointer; font-family: inherit;
-  transition: color .16s ease, background .16s ease, transform .09s ease-out;
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  width: calc(100% - 12px); padding: 10px 4px 9px; border-radius: 13px;
+  background: transparent; border: none; cursor: pointer;
+  /* FONTE DO SISTEMA, não a da marca. A NunitoJOB é ótima em título; a 10px,
+     no meio do WhatsApp, ela só perde nitidez. A do sistema vem com tabela de
+     tracking e ajuste ótico por tamanho — de graça, e é o que a Apple manda
+     usar antes de qualquer fonte própria. A marca continua no logo, que é
+     onde ela é lida como marca. */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  /* Cor derivada do texto do tema, não um cinza fixo: o #9aa1b5 antigo era
+     azulado e sujava tanto o tema escuro quanto o claro. */
+  color: color-mix(in srgb, var(--job-txt) 62%, transparent);
+  transition: color .2s ease, background .2s ease, transform .1s ease-out;
 }
-.job-trilho-item:hover { color: var(--job-txt); background: color-mix(in srgb, var(--job-txt) 7%, transparent); }
-.job-trilho-item-ativo { color: var(--job-txt); background: color-mix(in srgb, var(--job-txt) 11%, transparent); }
-/* Resposta no APERTO. O trilho é o que mais se clica na extensão e era a
-   única coisa que não dava sinal nenhum antes de a seção abrir. */
-.job-trilho-item:active { transform: scale(.94); }
-/* ANEL DE FOCO SÓ PRA TECLADO, e por sombra e não por outline: o
-   `outline: 2px` com offset negativo desenhava um retângulo verde duro por
-   dentro do item — era o quadrado que aparecia em volta do item clicado.
-   Sombra acompanha o arredondamento da pílula e não sobrepõe o conteúdo. */
+.job-trilho-item:hover {
+  color: color-mix(in srgb, var(--job-txt) 88%, transparent);
+  background: color-mix(in srgb, var(--job-txt) 6%, transparent);
+}
+.job-trilho-item-ativo { color: var(--job-txt); background: transparent; }
+
+/* ÍCONE — traço mais fino que o padrão 2px: a 21px, traço grosso vira borrão
+   e some o desenho. E ele SOBE 1px quando é o ativo, junto com um leve
+   aumento: o item selecionado não muda só de cor, ele se aproxima. */
+.job-trilho-item-icone { line-height: 0; transition: transform .22s cubic-bezier(.22,1,.36,1); }
+.job-trilho-item-icone svg { width: 21px; height: 21px; stroke-width: 1.7; }
+.job-trilho-item-ativo .job-trilho-item-icone { transform: translateY(-1px) scale(1.06); }
+.job-trilho-item-ativo .job-trilho-item-icone svg { stroke-width: 2; }
+
+/* RÓTULO — 10px com tracking POSITIVO. Texto pequeno lê mais junto do que é;
+   afastar as letras é o que o torna legível. É o inverso do que se faz num
+   título, e por isso um letter-spacing único no projeto estaria errado aqui
+   ou lá. O peso muda com o estado: presença sem ocupar mais espaço. */
+.job-trilho-item-label {
+  font-size: 10px; font-weight: 500; text-align: center;
+  line-height: 1.1; letter-spacing: .022em;
+  transition: font-weight .2s ease;
+}
+.job-trilho-item-ativo .job-trilho-item-label { font-weight: 640; }
+
+/* Aperto: o dedo desce, a coisa responde. */
+.job-trilho-item:active { transform: scale(.93); }
 .job-trilho-item:focus { outline: none; }
 .job-trilho-item:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--job-acento) 70%, transparent);
 }
 
-/* ══ INDICADOR ATIVO QUE DESLIZA ═══════════════════════════════════════
-   Cada item tinha o seu próprio ::before: ao trocar de seção, a barra sumia
-   de um lugar e reaparecia em outro. Sem caminho entre os dois, o olho não
-   liga uma coisa à outra — descobre o resultado, não acompanha a mudança.
-   Agora existe UMA barra, no trilho, que anda até o item. Ela nasce onde o
-   item está (o JS mede e escreve --y/--h), então trocar de seção no meio da
-   animação apenas muda o destino: o movimento nunca recomeça do zero. */
-/* NÃO reponha `#job-trilho { position: relative }` aqui: esta regra vem DEPOIS
-   do `position: fixed` lá em cima, com a mesma especificidade, e ganhava — o
-   trilho caía no fluxo da página e ia parar no meio do WhatsApp, empurrando a
-   lista de conversas. `fixed` já é contexto de posicionamento pros filhos
-   absolutos; não precisava de nada. */
+/* ══ A SELEÇÃO DESLIZA ═════════════════════════════════════════════════
+   Uma pílula só, do trilho inteiro, que anda até o item ativo. O JS mede o
+   item e escreve --y/--h; a transição mora aqui. Como o alvo é sempre uma
+   posição ABSOLUTA (e não um "de-para"), clicar noutra seção no meio do
+   movimento apenas troca o destino: a pílula continua de onde estiver, sem
+   recomeçar e sem pulo.
+
+   Ela tem PROFUNDIDADE em vez de ser um retângulo pintado: uma linha de luz
+   na quina de cima, como material iluminado por cima, e uma sombra curta
+   embaixo. É o que separa "objeto pousado" de "cor de fundo diferente". */
 .job-trilho-marca {
-  position: absolute; left: 6px; right: 6px; border-radius: 12px;
-  top: 0; height: var(--h, 0px);
-  transform: translateY(var(--y, 0px));
-  background: color-mix(in srgb, var(--job-txt) 11%, transparent);
-  opacity: 0; pointer-events: none; z-index: 0;
-  /* Curva com um respingo de ultrapassagem: o gesto foi um clique, então o
-     movimento pode carregar um pouco de impulso. Nada de bounce longo. */
-  transition: transform .34s cubic-bezier(.22,1.02,.36,1), height .34s cubic-bezier(.22,1.02,.36,1), opacity .16s ease;
+  position: absolute; left: 6px; right: 6px; top: 0;
+  height: var(--h, 0px); transform: translateY(var(--y, 0px));
+  border-radius: 13px; z-index: 0; opacity: 0; pointer-events: none;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--job-txt) 13%, transparent) 0%,
+      color-mix(in srgb, var(--job-txt) 8%, transparent) 100%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--job-txt) 13%, transparent),
+    0 2px 8px rgba(0,0,0,.16);
+  /* Curva com um respingo de ultrapassagem no fim: o gesto foi um clique, e
+     um pouco de impulso faz o movimento parecer físico. Nada de balanço
+     longo — isso é menu, não gaveta arrastada. */
+  transition:
+    transform .36s cubic-bezier(.2,.98,.3,1),
+    height .36s cubic-bezier(.2,.98,.3,1),
+    opacity .18s ease;
 }
 .job-trilho-marca.on { opacity: 1; }
-/* O traço da marca vive DENTRO da pílula, encostado na quina do trilho: é o
-   que diz "esta é a seção", enquanto o preenchimento diz "é aqui que você
-   está". Antes ele era o único sinal, e ficava solto na borda. */
+
+/* O traço de acento vive na quina do trilho, colado na pílula: ele diz QUAL
+   seção; o preenchimento diz que é ali que você está. Duas informações, um
+   elemento. */
 .job-trilho-marca::before {
-  content: ""; position: absolute; left: -6px; top: 9px; bottom: 9px; width: 3px;
+  content: ""; position: absolute; left: -6px; top: 22%; bottom: 22%; width: 3px;
   border-radius: 0 3px 3px 0;
-  background: linear-gradient(160deg,var(--job-acento) 0%,#3b82f6 55%,#8b5cf6 100%);
+  background: linear-gradient(180deg, var(--job-acento) 0%, #3b82f6 100%);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--job-acento) 45%, transparent);
 }
 html.job-push-esquerda .job-trilho-marca::before {
   left: auto; right: -6px; border-radius: 3px 0 0 3px;
 }
-/* O item ativo perde o fundo próprio: quem desenha o realce agora é a marca,
-   que desliza. Manter os dois faria a cor aparecer no destino ANTES de a
-   pílula chegar — o pulo que a animação existe pra eliminar. */
-.job-trilho-item-ativo { background: transparent; }
-.job-trilho-item { z-index: 1; }
+
 @media (prefers-reduced-motion: reduce) {
-  .job-trilho-marca { transition: opacity .16s ease; }
-  .job-trilho-item { transition: color .12s, background .12s; }
+  .job-trilho-marca { transition: opacity .18s ease; }
+  .job-trilho-item, .job-trilho-item-icone { transition: color .2s ease, background .2s ease; }
   .job-trilho-item:active { transform: none; }
+  .job-trilho-item-ativo .job-trilho-item-icone { transform: none; }
 }
-.job-trilho-item-icone { line-height: 0; }
-.job-trilho-item-icone svg { width: 20px; height: 20px; }
-.job-trilho-item-label { font-size: 9.5px; font-weight: 500; text-align: center; line-height: 1.15; letter-spacing: .2px; }
 /* ══ AS MARCAS DO TRILHO ═══════════════════════════════════════════════
    Duas linguagens, de propósito, e não três como estava (o badge de análise
    e o da fila eram desenhos diferentes, em tamanhos e cores diferentes, e
@@ -217,8 +252,11 @@ html.job-push-esquerda .job-trilho-marca::before {
    nada destaca. */
 .job-trilho-item-badge, .job-fila-badge {
   position: absolute; top: 2px; right: 4px;
-  background: #f43f5e; color: #fff;
-  font-size: 9px; font-weight: 700; letter-spacing: .01em;
+  /* Cor semântica do tema, não um rosa fixo: o #f43f5e era calibrado pro
+     fundo escuro e ficava estridente sobre a superfície clara. */
+  background: var(--job-danger); color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 9px; font-weight: 700; letter-spacing: .015em;
   min-width: 16px; height: 16px; border-radius: 999px;
   display: flex; align-items: center; justify-content: center; padding: 0 4px;
   font-variant-numeric: tabular-nums;
@@ -255,9 +293,11 @@ html.job-push-esquerda .job-trilho-marca::before {
    do menu. Vira texto fraco — e só ganha corpo quando HÁ atualização, que é
    quando ela deixa de ser rodapé e vira aviso. */
 .job-trilho-versao-num {
-  display: inline-block; background: transparent; color: var(--job-txt-fraco);
+  display: inline-block; background: transparent;
+  color: color-mix(in srgb, var(--job-txt) 45%, transparent);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   font-size: 9px; font-weight: 500; font-variant-numeric: tabular-nums;
-  padding: 2px 6px; border-radius: 999px; letter-spacing: .2px; border: none; opacity: .6;
+  padding: 2px 6px; border-radius: 999px; letter-spacing: .03em; border: none;
 }
 .job-trilho-versao.tem-nova .job-trilho-versao-num {
   background: var(--job-acento); color: var(--job-acento-txt); opacity: 1; font-weight: 700; padding: 3px 9px;
@@ -1629,7 +1669,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 /* Forma e posição vêm da regra unificada lá em cima; aqui fica só o que é
    específico da fila. O azul-claro próprio saiu: era uma terceira cor
    dizendo a mesma coisa que o acento já dizia. */
-.job-fila-badge.atraso { background:#f43f7c; color:#fff; }
+.job-fila-badge.atraso { background: var(--job-danger); color:#fff; }
 .job-fila-badge[hidden] { display:none; }
 .job-fila-cab { font-size:11.5px; color:#8696a0; padding:2px 0 10px; }
 .job-fila-atraso { color:#f7a8c0; }
