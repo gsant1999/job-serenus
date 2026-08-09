@@ -13,19 +13,24 @@
   --job-bg2: #1b1b27;
   --job-bg3: #26262f;
   --job-bg3-hover: #2a2a38;
-  --job-txt: #eef0f6;
-  --job-txt-fraco: #9aa1b5;
+  --job-txt: #f2f4fa;
+  /* SEM CINZA. O #9aa1b5 era um cinza azulado neutro — a cor de quem não
+     escolheu cor. O texto secundário agora carrega a MESMA matiz do acento,
+     só dessaturado: continua sendo "a voz baixa", mas é a voz baixa DESTA
+     marca, e não um cinza de sistema. */
+  --job-txt-fraco: #93b3ab;
+  --job-txt-fraco2: #7d9a93;
   --job-acento: #1fd8a4;
   --job-acento-txt: #0a0a10;
   --job-borda: #26262f;
   /* ── Cores SEMÂNTICAS (estado), separadas do acento de marca. No tema
      escuro são claras/dessaturadas (legíveis sobre fundo escuro). Cada uma
      tem texto + fundo (tint) + borda. ── */
-  --job-warn: #fbbf24;      --job-warn-bg: rgba(250,204,21,.10);  --job-warn-bd: rgba(250,204,21,.24);
-  --job-info: #7eb1ff;      --job-info-bg: rgba(59,130,246,.10);  --job-info-bd: rgba(59,130,246,.28);
-  --job-danger: #fb7185;    --job-danger-bg: rgba(244,63,94,.10); --job-danger-bd: rgba(244,63,94,.30);
-  --job-roxo: #a78bfa;      --job-roxo-bg: rgba(139,92,246,.14);  --job-roxo-bd: rgba(139,92,246,.28);
-  --job-sucesso: #3fe0b6;   --job-sucesso-bg: rgba(31,216,164,.12); --job-sucesso-bd: rgba(31,216,164,.30);
+  --job-warn: #ffb020;      --job-warn-bg: rgba(255,176,32,.13);  --job-warn-bd: rgba(255,176,32,.30);
+  --job-info: #5ea6ff;      --job-info-bg: rgba(94,166,255,.13);  --job-info-bd: rgba(94,166,255,.32);
+  --job-danger: #ff5c78;    --job-danger-bg: rgba(255,92,120,.13); --job-danger-bd: rgba(255,92,120,.34);
+  --job-roxo: #b28cff;      --job-roxo-bg: rgba(178,140,255,.15);  --job-roxo-bd: rgba(178,140,255,.32);
+  --job-sucesso: #2fe6b4;   --job-sucesso-bg: rgba(47,230,180,.14); --job-sucesso-bd: rgba(47,230,180,.34);
 }
 /* Tema claro (opcional, escolhido no popup da extensão) — mesma estrutura,
    superfícies claras, mesmo verde de destaque. Some, se o consultor preferir
@@ -38,8 +43,10 @@ body[data-job-tema="claro"] {
   --job-bg2: #efece2;
   --job-bg3: #e2ded1;
   --job-bg3-hover: #d5d0c0;
-  --job-txt: #262319;
-  --job-txt-fraco: #756f5e;
+  --job-txt: #1c1a13;
+  /* Mesma regra no claro: matiz do acento, escurecida até passar em contraste. */
+  --job-txt-fraco: #4a6b60;
+  --job-txt-fraco2: #5d7d72;
   --job-acento: #0f9d76;
   --job-acento-txt: #ffffff;
   --job-borda: #e2ded1;
@@ -52,6 +59,59 @@ body[data-job-tema="claro"] {
   /* sucesso como TEXTO precisa ser mais escuro que o acento (que é fundo de botão) */
   --job-sucesso: #0a6f54;   --job-sucesso-bg: rgba(15,157,118,.12); --job-sucesso-bd: rgba(15,157,118,.32);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SISTEMA — tipografia, movimento e material
+
+   Três coisas que estavam sendo decididas de novo em cada tela, com valores
+   diferentes toda vez. Aqui viram token: quem escreve tela nova não escolhe,
+   usa. É o que faz onze telas parecerem o mesmo produto.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root, body[data-job-tema="claro"] {
+  /* ── FONTE ──
+     A do sistema pra tudo que é interface: ela traz ajuste ótico e tabela de
+     tracking por tamanho, que fonte de marca não tem. A NunitoJOB fica pro
+     logo e pros títulos grandes, que é onde ela é lida como marca. */
+  --job-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", sans-serif;
+  --job-marca: 'NunitoJOB', -apple-system, "Segoe UI", sans-serif;
+
+  /* ── TRACKING POR TAMANHO ──
+     Nunca um valor só. Texto grande lê mais solto do que é e pede aperto;
+     texto pequeno lê mais junto e pede folga. Um `letter-spacing` único no
+     projeto está necessariamente errado num dos dois extremos. */
+  --job-tk-xl: -.021em;   /* 20px+  título de tela */
+  --job-tk-lg: -.014em;   /* 16px   título de seção */
+  --job-tk-md: -.006em;   /* 14px   corpo forte */
+  --job-tk-sm: 0;         /* 12-13px corpo */
+  --job-tk-xs: .022em;    /* 10-11px rótulo, etiqueta, contador */
+
+  /* ── MOVIMENTO ──
+     Duas curvas, e só. `saida` é o padrão de tudo que responde ao toque:
+     rápido no começo, assentando no fim. `mola` tem um respingo de
+     ultrapassagem e só entra onde houve impulso — algo que foi arrastado,
+     jogado ou escolhido. Fora disso, ultrapassagem é enfeite. */
+  --job-mv-saida: cubic-bezier(.22,1,.36,1);
+  --job-mv-mola:  cubic-bezier(.2,.98,.3,1);
+  --job-t-toque: .1s;     /* resposta ao aperto — tem que ser imperceptível */
+  --job-t-rapido: .18s;   /* cor, opacidade */
+  --job-t-medio: .28s;    /* posição, tamanho */
+  --job-t-longo: .36s;    /* algo grande atravessando a tela */
+
+  /* ── MATERIAL ──
+     Superfície flutuante é vidro: deixa passar o que está atrás em vez de
+     tapar. O peso do desfoque diz o tamanho — quanto maior a superfície,
+     mais grosso o vidro. */
+  --job-vidro-leve: blur(14px) saturate(150%);
+  --job-vidro: blur(22px) saturate(160%);
+  --job-vidro-forte: blur(34px) saturate(170%);
+
+  /* ── ELEVAÇÃO ──
+     Sombra difusa, nunca borda dura: borda recorta, sombra levanta. */
+  --job-elev-1: 0 1px 2px rgba(0,0,0,.14);
+  --job-elev-2: 0 2px 8px rgba(0,0,0,.18);
+  --job-elev-3: 0 10px 30px rgba(0,0,0,.26);
+}
+
 
 /* JOB Serenus · estilos do trilho + painel docado injetados no WhatsApp Web.
    Prefixo job- em tudo e IDs únicos pra não colidir com o WhatsApp.
@@ -102,7 +162,7 @@ html.job-push-esquerda.job-overlay-painel { margin-left: calc(var(--job-viz, 0px
   border-left: 1px solid color-mix(in srgb, var(--job-txt) 10%, transparent);
   box-shadow: -1px 0 0 rgba(255,255,255,.05) inset, -14px 0 34px rgba(0,0,0,.22);
   padding-top: 16px; gap: 2px;
-  font-family: 'NunitoJOB', -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-family: var(--job-ui);
 }
 html.job-push-esquerda #job-trilho {
   right: auto; left: var(--job-viz, 0px);
@@ -347,19 +407,45 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-trilho-config-atualizar:hover { background: var(--job-bg3-hover); }
 .job-trilho-config-nota { font-size: 10px; color: var(--job-txt-fraco); line-height: 1.4; margin-top: 5px; min-height: 0; }
 .job-trilho-config-desligar { width: 100%; margin-top: 10px; background: rgba(244,63,94,.1);
-  color: #fb7185; border: 1px solid rgba(244,63,94,.3); border-radius: 8px; padding: 8px;
+  color: var(--job-danger); border: 1px solid rgba(244,63,94,.3); border-radius: 8px; padding: 8px;
   font-size: 11.5px; font-weight: 500; cursor: pointer; }
 .job-trilho-config-desligar:hover { background: rgba(244,63,94,.18); }
 
+/* O PAINEL ENTRA COMO MATERIAL, NÃO COMO SLIDE.
+   Ele aparecia inteiro, de uma vez. Agora chega: desliza o último pedaço,
+   o desfoque endurece e a escala assenta — os três juntos, que é o que faz
+   ler como superfície de vidro chegando, e não como div trocando de left.
+   E ele SAI PELO MESMO LADO por onde entrou: caminho simétrico. */
 #job-painel-doc {
   position: fixed; top: 0; right: calc(var(--job-viz, 0px) + 72px); bottom: 0; width: 400px;
   max-width: calc(100vw - var(--job-viz, 0px) - 72px);
   z-index: 2147483000;
   display: flex; flex-direction: column;
-  background: var(--job-bg1); color: var(--job-txt);
-  border-left: 1px solid var(--job-bg3);
-  box-shadow: -18px 0 40px rgba(0,0,0,.35);
-  font-family: 'NunitoJOB', -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  background: color-mix(in srgb, var(--job-bg1) 88%, transparent);
+  -webkit-backdrop-filter: var(--job-vidro-forte);
+  backdrop-filter: var(--job-vidro-forte);
+  color: var(--job-txt);
+  border-left: 1px solid color-mix(in srgb, var(--job-txt) 9%, transparent);
+  box-shadow: var(--job-elev-3), -1px 0 0 rgba(255,255,255,.05) inset;
+  font-family: var(--job-ui);
+  animation: jobPainelEntra var(--job-t-medio) var(--job-mv-saida);
+  transform-origin: right center;
+}
+@keyframes jobPainelEntra {
+  from { opacity: 0; transform: translateX(14px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+#job-painel-doc.job-painel-doc-esquerda { transform-origin: left center; animation-name: jobPainelEntraEsq; }
+@keyframes jobPainelEntraEsq {
+  from { opacity: 0; transform: translateX(-14px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #job-painel-doc, #job-painel-doc.job-painel-doc-esquerda { animation: jobPainelFade var(--job-t-rapido) ease; }
+  @keyframes jobPainelFade { from { opacity: 0; } to { opacity: 1; } }
+}
+@media (prefers-reduced-transparency: reduce) {
+  #job-painel-doc { background: var(--job-bg1); backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
 #job-painel-doc.job-painel-doc-esquerda { right: auto; left: calc(var(--job-viz, 0px) + 72px); border-left: none; border-right: 1px solid var(--job-bg3); box-shadow: 18px 0 40px rgba(0,0,0,.35); }
 
@@ -371,27 +457,42 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-painel-doc-logo .job-logo { width: 28px; height: 28px; margin-bottom: 0; }
 .job-painel-doc-titulo { font-size: 14px; font-weight: 500; letter-spacing: .3px; color: var(--job-txt-fraco); }
 .job-painel-doc-titulo b { color: var(--job-txt); font-weight: 500; }
+/* Alvo de 28px em vez de um "x" solto de 20: o botão mais clicado do painel
+   era o de área menor. E responde ao aperto, como o resto. */
 .job-painel-doc-fechar {
-  background: transparent; border: none; color: var(--job-txt-fraco); font-size: 20px;
-  line-height: 1; cursor: pointer; padding: 0 4px;
+  background: transparent; border: none; color: var(--job-txt-fraco);
+  font-size: 19px; line-height: 0; cursor: pointer;
+  width: 28px; height: 28px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  transition: color var(--job-t-rapido) ease, background var(--job-t-rapido) ease, transform var(--job-t-toque) ease-out;
 }
-.job-painel-doc-fechar:hover { color: var(--job-txt); }
+.job-painel-doc-fechar:hover { color: var(--job-txt); background: color-mix(in srgb, var(--job-txt) 8%, transparent); }
+.job-painel-doc-fechar:active { transform: scale(.9); }
+.job-painel-doc-fechar:focus { outline: none; }
+.job-painel-doc-fechar:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--job-acento) 70%, transparent); }
+@media (prefers-reduced-motion: reduce) { .job-painel-doc-fechar:active { transform: none; } }
 .job-painel-doc-corpo { padding: 12px; overflow-y: auto; flex: 1; }
 
 .job-cancelar {
   display: block; margin: 14px auto 0; padding: 8px 18px;
-  background: transparent; color: #fb7185; border: 1px solid rgba(251, 113, 133, .4);
-  border-radius: 999px; font-size: 12px; font-weight: 500; cursor: pointer;
+  background: transparent; color: var(--job-danger);
+  border: 1px solid var(--job-danger-bd);
+  border-radius: 999px; font-family: var(--job-ui); font-size: 12px; font-weight: 550;
+  letter-spacing: var(--job-tk-sm); cursor: pointer;
+  transition: background var(--job-t-rapido) ease, transform var(--job-t-toque) ease-out;
 }
-.job-cancelar:hover { background: rgba(251, 113, 133, .1); }
+.job-cancelar:hover { background: var(--job-danger-bg); }
+.job-cancelar:active { transform: scale(.97); }
+@media (prefers-reduced-motion: reduce) { .job-cancelar:active { transform: none; } }
 
 .job-sem-analise { text-align: center; padding: 18px 10px; }
 /* Título do estado vazio/falha: peso e tamanho carregam a hierarquia, e o
    tracking fecha um pouco porque texto maior lê mais solto do que é. */
-.job-sem-analise-t { font-size: 14px; font-weight: 650; color: var(--job-txt);
-  letter-spacing: -.01em; line-height: 1.25; margin-bottom: 5px; }
-.job-sem-analise-txt { font-size: 12.5px; color: var(--job-txt-fraco); margin-bottom: 14px;
-  line-height: 1.5; max-width: 30ch; margin-left: auto; margin-right: auto; }
+.job-sem-analise-t { font-family: var(--job-ui); font-size: 14.5px; font-weight: 680;
+  color: var(--job-txt); letter-spacing: var(--job-tk-md); line-height: 1.25; margin-bottom: 5px; }
+.job-sem-analise-txt { font-family: var(--job-ui); font-size: 12.5px; color: var(--job-txt-fraco);
+  margin-bottom: 14px; line-height: 1.55; letter-spacing: var(--job-tk-sm);
+  max-width: 32ch; margin-left: auto; margin-right: auto; }
 
 /* ── ESTADO VAZIO ──
    Ele é a tela que a pessoa mais vê no primeiro dia, então tem que explicar
@@ -411,7 +512,8 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
    pela mesma razão do aviso: a severidade se lê antes da frase. */
 .job-erro-bloco { text-align: left; border-left: 3px solid #f43f5e; border-radius: 4px 10px 10px 4px;
   padding: 12px 14px; }
-.job-erro-t { font-size: 13px; font-weight: 650; letter-spacing: -.01em; margin-bottom: 4px; }
+.job-erro-t { font-family: var(--job-ui); font-size: 13.5px; font-weight: 680;
+  letter-spacing: var(--job-tk-md); margin-bottom: 4px; }
 .job-erro-d { font-size: 12px; line-height: 1.5; opacity: .9; margin-bottom: 12px; }
 .job-erro-bloco .job-analisar-btn { width: 100%; }
 .job-analisar-btn {
@@ -477,7 +579,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-salvar-modelo:hover:not(:disabled) { background: #17b88a; }
 .job-salvar-modelo:disabled { opacity: .6; cursor: default; }
 .job-modelo-excluir {
-  background: transparent; color: #fb7185; border: 1px solid rgba(251, 113, 133, .35);
+  background: transparent; color: var(--job-danger); border: 1px solid rgba(251, 113, 133, .35);
   border-radius: 8px; padding: 6px 10px; font-size: 14px; font-weight: 500; cursor: pointer; flex: 0 0 auto;
 }
 .job-modelo-excluir:hover { background: rgba(251, 113, 133, .12); }
@@ -537,7 +639,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .5px;
   color: var(--job-txt-fraco); margin: 14px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--job-bg3);
 }
-.job-modelo-grupo span { color: #646b80; font-weight: 500; }
+.job-modelo-grupo span { color: var(--job-txt-fraco2); font-weight: 500; }
 /* Pasta = consultor (gestor). Recolhível via <details>. */
 .job-pasta { margin: 10px 0; border: 1px solid var(--job-bg3); border-radius: 10px; overflow: hidden; background: var(--job-bg1); }
 .job-pasta-nome {
@@ -565,18 +667,18 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 /* Tipo = áudio/texto/PDF/imagem (dentro da pasta) */
 .job-modelo-tipo {
   font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: .5px;
-  color: #7c8398; margin: 10px 0 6px; padding-left: 2px;
+  color: var(--job-txt-fraco); margin: 10px 0 6px; padding-left: 2px;
 }
-.job-modelo-tipo span { color: #545b6e; font-weight: 500; }
+.job-modelo-tipo span { color: var(--job-txt-fraco2); font-weight: 500; }
 .job-modelo-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .job-tipo-ico { margin-right: 2px; }
 /* A estrela agora é desenho, não caractere: o contorno vale "não favorito" e
    o preenchimento vale "favorito" — o mesmo elemento diz as duas coisas, sem
    depender só da cor (quem não distingue amarelo de cinza continua vendo). */
-.job-modelo-fav { background: none; border: none; color: #646b80; cursor: pointer;
+.job-modelo-fav { background: none; border: none; color: var(--job-txt-fraco2); cursor: pointer;
   line-height: 0; padding: 2px; border-radius: 6px; flex: 0 0 auto;
   transition: color .15s ease, transform .1s ease-out; }
-.job-modelo-fav:hover { color: #9aa2b8; }
+.job-modelo-fav:hover { color: var(--job-txt-fraco); }
 .job-modelo-fav.ativo { color: #f5c518; }
 .job-modelo-fav.ativo svg { fill: currentColor; }
 /* Resposta no APERTO, não na soltura: o dedo tem que sentir na hora. */
@@ -593,9 +695,12 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 
 /* ── Seção Mensagens: cartões de modelo ── */
 .job-modelo-card {
-  background: var(--job-bg2); border: 1px solid var(--job-bg3); border-radius: 10px;
-  padding: 10px 11px; margin-bottom: 7px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda); border-radius: 12px;
+  padding: 11px 12px; margin-bottom: 8px;
+  transition: border-color var(--job-t-rapido) ease, box-shadow var(--job-t-rapido) ease;
 }
+.job-modelo-card:hover { border-color: color-mix(in srgb, var(--job-acento) 40%, transparent);
+  box-shadow: var(--job-elev-1); }
 .job-modelo-nome { font-size: 12.5px; font-weight: 500; color: var(--job-txt); }
 .job-modelo-preview {
   font-size: 11.5px; color: var(--job-txt-fraco); line-height: 1.45; margin: 4px 0;
@@ -608,7 +713,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 }
 .job-modelo-enviar { background: var(--job-acento); color: #fff; }
 .job-modelo-enviar:hover:not(:disabled) { background: #17b88a; }
-.job-modelo-enviar:disabled { background: var(--job-bg3); color: #646b80; cursor: default; font-size: 10.5px; }
+.job-modelo-enviar:disabled { background: var(--job-bg3); color: var(--job-txt-fraco2); cursor: default; font-size: 10.5px; }
 .job-modelo-copiar { background: var(--job-bg3); color: var(--job-txt); }
 .job-modelo-copiar:hover { background: var(--job-bg3-hover); }
 
@@ -1052,18 +1157,19 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-sec-head-row .job-sec-t { flex: 1 1 auto; min-width: 0; }
 /* Contador vive no cabeçalho: mesmo elemento diz onde você está e quanto tem. */
 .job-sec-cont {
-  flex: 0 0 auto; font-size: 11px; font-weight: 650; line-height: 1;
-  padding: 4px 8px; border-radius: 999px; letter-spacing: .01em;
+  flex: 0 0 auto; font-family: var(--job-ui); font-size: 11px; font-weight: 700; line-height: 1;
+  padding: 4px 8px; border-radius: 999px; letter-spacing: var(--job-tk-xs);
+  font-variant-numeric: tabular-nums;
   /* Tinta derivada do próprio acento: --job-acento-bg não existe, e o roxo que
      estava de reserva brigava com o verde da marca nos dois temas. */
   color: var(--job-acento); background: color-mix(in srgb, var(--job-acento) 15%, transparent);
 }
 /* Tracking negativo porque texto grande lê mais solto do que é; o corpo fica
    perto de zero. Nunca um valor só pros dois tamanhos. */
-.job-sec-t { font-size: 16px; font-weight: 650; color: var(--job-txt);
-  letter-spacing: -.015em; line-height: 1.2; }
-.job-sec-sub { font-size: 12px; color: var(--job-txt-fraco); line-height: 1.5;
-  letter-spacing: 0; margin: 4px 0 16px; max-width: 42ch; }
+.job-sec-t { font-family: var(--job-ui); font-size: 16.5px; font-weight: 680; color: var(--job-txt);
+  letter-spacing: var(--job-tk-lg); line-height: 1.18; }
+.job-sec-sub { font-family: var(--job-ui); font-size: 12px; color: var(--job-txt-fraco);
+  line-height: 1.5; letter-spacing: var(--job-tk-sm); margin: 4px 0 16px; max-width: 42ch; }
 /* Dentro do cabeçalho o subtítulo não empurra o conteúdo: a margem é do bloco. */
 .job-sec-head .job-sec-sub { margin: 3px 0 0; }
 
@@ -1127,13 +1233,13 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-bc-btn {
   display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
   background: transparent; border: 1px solid rgba(255,255,255,.13);
-  color: #8696a0; border-radius: 16px; padding: 4px 11px;
+  color: var(--job-txt-fraco); border-radius: 16px; padding: 4px 11px;
   font-size: 11.5px; font-weight: 600; font-family: inherit;
   cursor: pointer; white-space: nowrap; transition: .15s;
 }
 .job-bc-btn span { overflow: hidden; text-overflow: ellipsis; }
 .job-bc-btn svg { width: 13px; height: 13px; flex: 0 0 auto; }
-.job-bc-btn:hover { color: #e9edef; border-color: #00a884; background: rgba(0,168,132,.12); }
+.job-bc-btn:hover { color: var(--job-txt); border-color: #00a884; background: rgba(0,168,132,.12); }
 .job-bc-btn:disabled { opacity: .75; cursor: default; }
 @media (max-width: 1100px) { .job-bc-btn span { display: none; } .job-bc-btn { padding: 4px 8px; } }
 /* Nome padronizado do contato. Fica na ficha, abaixo do salvar: é ação de
@@ -1144,11 +1250,11 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-doc-lido { font-size: 11.5px; line-height: 1.5; }
 .job-doc-tipo { display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: .4px;
                 text-transform: uppercase; padding: 1px 6px; border-radius: 4px;
-                background: rgba(0,168,132,.2); color: #7ae3c3; margin-right: 6px; }
-.job-doc-pessoa { color: #e9edef; font-weight: 600; }
+                background: rgba(0,168,132,.2); color: var(--job-sucesso); margin-right: 6px; }
+.job-doc-pessoa { color: var(--job-txt); font-weight: 600; }
 .job-doc-duvida { display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: .4px;
                   text-transform: uppercase; padding: 1px 6px; border-radius: 4px; margin-left: 6px;
-                  background: rgba(250,204,21,.18); color: #fbbf24; }
+                  background: rgba(250,204,21,.18); color: var(--job-warn); }
 /* MESMA regra do áudio (.job-tr-slot): o bloco é a última linha da bolha,
    separado por um filete. Nada de largura própria, fundo próprio ou alinhamento
    próprio — quem posiciona é a bolha, que já está no lado certo.
@@ -1177,7 +1283,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-doc-slot.job-doc-solto.job-tr-dir { margin-left: auto; }
 .job-doc-slot.job-doc-solto.job-tr-esq { margin-right: auto; }
 .job-doc-sel { background: rgba(0,0,0,.2); border: 1px solid rgba(255,255,255,.14);
-               color: #e9edef; border-radius: 5px; padding: 1px 5px; font-size: 10px;
+               color: var(--job-txt); border-radius: 5px; padding: 1px 5px; font-size: 10px;
                font-family: inherit; margin: 0 5px 4px 0; max-width: 100%; }
 .job-doc-sel[hidden] { display: none; }
 /* Juntar: BOTÃO, do mesmo tamanho do de ler. Era uma caixinha de 12px dentro de
@@ -1188,33 +1294,33 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-doc-junta { margin-left: 12px; padding: 4px 9px; border-radius: 6px;
                  border: 1px solid rgba(255,255,255,.13); min-height: 24px; }
 .job-doc-junta:hover { border-color: rgba(83,189,235,.5); }
-.job-doc-junta.marcado { color: #7ae3c3; border-color: rgba(122,227,195,.55);
+.job-doc-junta.marcado { color: var(--job-sucesso); border-color: rgba(122,227,195,.55);
                          background: rgba(0,168,132,.14); }
-.job-doc-junta.marcado:hover { color: #7ae3c3; border-color: rgba(122,227,195,.8); }
+.job-doc-junta.marcado:hover { color: var(--job-sucesso); border-color: rgba(122,227,195,.8); }
 /* Erro do lote na barra: vermelho discreto, mas visível. */
-.job-bc-btn.job-bc-erro { color: #f0a3a3; }
+.job-bc-btn.job-bc-erro { color: var(--job-danger); }
 .job-bc-btn[disabled] { opacity: .65; cursor: default; }
 /* O caminho de volta: onde o dado foi parar e como refazer. */
 .job-doc-acoes { display: flex; gap: 14px; align-items: center; margin-top: 5px; flex-wrap: wrap; }
 .job-doc-link { display: inline-flex; align-items: center; gap: 4px;
                 background: none; border: none; padding: 0; font-family: inherit;
-                color: #8696a0; font-size: 10.5px; cursor: pointer; text-decoration: none; }
+                color: var(--job-txt-fraco); font-size: 10.5px; cursor: pointer; text-decoration: none; }
 .job-doc-link svg { width: 11px; height: 11px; }
-.job-doc-link:hover { color: #53bdeb; text-decoration: underline; }
+.job-doc-link:hover { color: var(--job-info); text-decoration: underline; }
 /* Sem lead vinculado o bloco não funciona — isso tem que gritar, não sussurrar. */
-.job-doc-alerta { color: #fbbf24; }
+.job-doc-alerta { color: var(--job-warn); }
 /* A etapa e o relógio: o consultor precisa ver que a coisa está andando. */
 .job-doc-etapa { font-variant-numeric: tabular-nums; }
 /* Dica do papel que comprova o vínculo — informa sem travar. */
-.job-doc-dica { color: #7ae3c3; font-size: 10px; margin-top: 2px; }
+.job-doc-dica { color: var(--job-sucesso); font-size: 10px; margin-top: 2px; }
 .job-doc-dica:empty { display: none; }
 /* O nome final e o produto: e ele que faz a pasta servir na operadora. */
 .job-doc-nome { font-family: ui-monospace, Menlo, monospace; font-size: 10px;
-                color: #7ae3c3; margin-top: 3px; word-break: break-all; }
-.job-doc-campos { color: #8696a0; font-size: 10.5px; margin-top: 3px; }
+                color: var(--job-sucesso); margin-top: 3px; word-break: break-all; }
+.job-doc-campos { color: var(--job-txt-fraco); font-size: 10.5px; margin-top: 3px; }
 /* A observação da IA é útil mas não é o assunto: duas linhas, o resto no hover.
    Antes ocupava mais espaço que o próprio documento. */
-.job-doc-obs { color: #d98b8b; font-size: 10px; margin-top: 3px; line-height: 1.4;
+.job-doc-obs { color: var(--job-danger); font-size: 10px; margin-top: 3px; line-height: 1.4;
                display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
                overflow: hidden; }
 
@@ -1242,7 +1348,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   letter-spacing: .4px; padding: 1px 7px; border-radius: 5px;
   background: rgba(34,197,94,.16); color: #4ade80;
 }
-.job-ficha-cron.morno  { background: rgba(245,158,11,.16); color: #fbbf24; }
+.job-ficha-cron.morno  { background: rgba(245,158,11,.16); color: var(--job-warn); }
 .job-ficha-cron.parado { background: rgba(239,68,68,.16); color: #f87171; }
 .job-sinc { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--job-bg2); }
 .job-sinc-dica { margin-top: 8px; font-size: 10.5px; line-height: 1.5; color: var(--job-txt-fraco); opacity: .8; }
@@ -1342,17 +1448,20 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-audio-quem { display: block; font-size: 10px; font-weight: 500; color: var(--job-acento); margin-bottom: 2px; }
 .job-resumo { font-size: 12px; line-height: 1.6; color: var(--job-txt-fraco); white-space: normal;
   background: var(--job-bg2); border: 1px solid var(--job-bg3); border-radius: 10px; padding: 10px 12px; }
-.job-rodape { font-size: 10.5px; color: #646b80; margin-top: 14px; text-align: center; }
-.job-erro { background: rgba(244, 63, 94, .12); color: #f43f5e; border: 1px solid rgba(244, 63, 94, .3);
+.job-rodape { font-size: 10.5px; color: var(--job-txt-fraco2); margin-top: 14px; text-align: center; }
+.job-erro { background: rgba(244, 63, 94, .12); color: var(--job-danger); border: 1px solid rgba(244, 63, 94, .3);
   border-radius: 10px; padding: 12px; font-size: 13px; }
 .job-vazio { font-size: 12px; color: var(--job-txt-fraco); }
 
 /* ── Seção Funis: sequências de disparo (padrão ZapVoice, cores do JOB) ── */
 .job-funis-gerenciar { display: block; text-align: center; margin: 14px 0 4px; font-size: 11.5px;
-  color: #3b82f6; text-decoration: none; }
-.job-funis-gerenciar:hover { color: #60a5fa; text-decoration: underline; }
-.job-funil-card { background: var(--job-bg2); border: 1px solid var(--job-bg3); border-radius: 12px;
-  padding: 12px; margin-bottom: 10px; }
+  color: var(--job-info); text-decoration: none; }
+.job-funis-gerenciar:hover { color: var(--job-info); text-decoration: underline; }
+.job-funil-card { background: var(--job-bg2); border: 1px solid var(--job-borda); border-radius: 12px;
+  padding: 12px; margin-bottom: 10px;
+  transition: border-color var(--job-t-rapido) ease, box-shadow var(--job-t-rapido) ease; }
+.job-funil-card:hover { border-color: color-mix(in srgb, var(--job-acento) 40%, transparent);
+  box-shadow: var(--job-elev-1); }
 .job-funil-topo { display: flex; align-items: center; gap: 9px; }
 .job-funil-ico { width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px;
   background: rgba(31, 216, 164, .12); color: var(--job-acento);
@@ -1362,7 +1471,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-funil-star { color: #f5c518; display: inline-flex; vertical-align: -1px; }
 .job-funil-star svg { fill: currentColor; }
 .job-funil-meta { font-size: 10.5px; color: var(--job-txt-fraco); margin-top: 2px; font-variant-numeric: tabular-nums; }
-.job-funil-expandir { background: none; border: none; color: #646b80; border-radius: 7px;
+.job-funil-expandir { background: none; border: none; color: var(--job-txt-fraco2); border-radius: 7px;
   width: 26px; height: 26px; cursor: pointer; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center; }
 .job-funil-expandir:hover { background: var(--job-bg3); color: var(--job-txt); }
@@ -1394,11 +1503,11 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-fpasso-preview { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--job-bg3); }
 .job-fpasso-preview.fechado { display: none; }
 .job-fpasso-preview .job-modelo-preview { margin: 0 0 4px; max-height: none; }
-.job-fpasso.t-texto     .job-fpasso-ico { color: #7eb1ff; }
+.job-fpasso.t-texto     .job-fpasso-ico { color: var(--job-info); }
 .job-fpasso.t-audio     .job-fpasso-ico { color: #b3a0f8; }
-.job-fpasso.t-imagem    .job-fpasso-ico { color: #3fe0b6; }
-.job-fpasso.t-video     .job-fpasso-ico { color: #fbbf24; }
-.job-fpasso.t-documento .job-fpasso-ico { color: #fb7185; }
+.job-fpasso.t-imagem    .job-fpasso-ico { color: var(--job-sucesso); }
+.job-fpasso.t-video     .job-fpasso-ico { color: var(--job-warn); }
+.job-fpasso.t-documento .job-fpasso-ico { color: var(--job-danger); }
 
 .job-funil-disparar { width: 100%; margin-top: 10px; background: var(--job-acento);
   color: var(--job-acento-txt); border: none; border-radius: 10px; padding: 10px; font-size: 12.5px; font-weight: 600; cursor: pointer;
@@ -1410,9 +1519,9 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 
 /* Ícones SVG inline (kit _svgIco) — alinhamento com o texto ao lado. */
 .job-tico { display: inline-flex; vertical-align: -2px; margin-right: 2px; }
-.job-tico.tico-texto { color: #7eb1ff; }
+.job-tico.tico-texto { color: var(--job-info); }
 .job-tico.tico-audio { color: #b3a0f8; }
-.job-tico.tico-imagem { color: #3fe0b6; }
+.job-tico.tico-imagem { color: var(--job-sucesso); }
 .job-fchip svg, .job-mini-btn svg, .job-midia-chip svg, .job-preview-midia-rot svg,
 .job-audio-quem svg, .job-img-lida svg { vertical-align: -2px; }
 
@@ -1434,10 +1543,10 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-fb-linha-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .job-fb-linha-top b { font-size: 12px; color: var(--job-txt); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-fb-linha-top span { font-size: 10.5px; color: var(--job-txt-fraco); flex-shrink: 0; }
-.job-fb-linha-sub { font-size: 10.5px; color: #646b80; margin-top: 2px; font-variant-numeric: tabular-nums; }
-.job-fb-rodando .job-fb-linha-sub { color: #3b82f6; }
+.job-fb-linha-sub { font-size: 10.5px; color: var(--job-txt-fraco2); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.job-fb-rodando .job-fb-linha-sub { color: var(--job-info); }
 .job-fb-concluido .job-fb-linha-sub { color: var(--job-acento); }
-.job-fb-cancelado .job-fb-linha-sub, .job-fb-linha.job-fb-erro .job-fb-linha-sub { color: #f43f5e; }
+.job-fb-cancelado .job-fb-linha-sub, .job-fb-linha.job-fb-erro .job-fb-linha-sub { color: var(--job-danger); }
 .job-fb-cancelar, .job-fb-fechar { margin-top: 6px; background: var(--job-bg3); color: var(--job-txt); border: none;
   border-radius: 6px; padding: 4px 10px; font-size: 10.5px; font-weight: 500; cursor: pointer; }
 .job-fb-cancelar:hover, .job-fb-fechar:hover { background: var(--job-bg3-hover); }
@@ -1487,10 +1596,14 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 
 /* Inbox de leads novos (atendimento imediato) */
 .job-inbox-lista { display: flex; flex-direction: column; gap: 9px; }
-.job-inbox-card { background: var(--job-bg2); border: 1px solid var(--job-bg3); border-left: 3px solid var(--job-acento);
-  border-radius: 10px; padding: 11px 12px; }
+.job-inbox-card { background: var(--job-bg2); border: 1px solid var(--job-borda);
+  border-left: 3px solid var(--job-acento);
+  border-radius: 4px 12px 12px 4px; padding: 11px 12px;
+  transition: border-color var(--job-t-rapido) ease, box-shadow var(--job-t-rapido) ease; }
+.job-inbox-card:hover { box-shadow: var(--job-elev-1); }
 .job-inbox-top { display: flex; align-items: center; gap: 8px; }
-.job-inbox-nome { font-size: 13.5px; font-weight: 500; color: var(--job-txt); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-inbox-nome { font-family: var(--job-ui); font-size: 13.5px; font-weight: 620; color: var(--job-txt);
+  letter-spacing: var(--job-tk-md); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-inbox-pago { font-size: 9.5px; font-weight: 500; letter-spacing: .4px; color: #fff;
   background: linear-gradient(135deg,#f59e0b,#ef4444); padding: 2px 7px; border-radius: 10px; }
 .job-inbox-tempo { font-size: 11.5px; font-weight: 500; white-space: nowrap; }
@@ -1512,7 +1625,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
                    text-transform:uppercase; letter-spacing:.3px; }
 .job-ficha-saude { font-size:10px; font-weight:700; padding:3px 8px; border-radius:9px; }
 .job-saude-atencao { background:rgba(250,204,21,.18); color:#eab308; }
-.job-saude-atrasado { background:rgba(244,63,94,.18); color:#f43f5e; }
+.job-saude-atrasado { background:rgba(244,63,94,.18); color:var(--job-danger); }
 .job-ficha-resp { font-size:10px; padding:3px 8px; border-radius:9px;
                   background:var(--job-bg3); color:var(--job-txt-fraco); }
 /* Trava aparece no topo: é o que impede o lead de andar, então é a primeira
@@ -1556,7 +1669,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-ficha-grupo-tit { font-size:9.5px; font-weight:700; text-transform:uppercase;
                        letter-spacing:.45px; color:var(--job-txt-fraco); }
 .job-fg-saida { border-color:rgba(244,63,94,.28); background:rgba(244,63,94,.05); }
-.job-fg-saida .job-ficha-grupo-tit { color:#fb7185; }
+.job-fg-saida .job-ficha-grupo-tit { color:var(--job-danger); }
 .job-fg-automatico { background:rgba(34,211,238,.05); border-color:rgba(34,211,238,.2); }
 .job-fg-pb { border-color:rgba(99,102,241,.3); background:rgba(99,102,241,.05); }
 .job-ficha-rascunho { font-size:10.5px; line-height:1.4; color:#eab308;
@@ -1577,7 +1690,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-ficha-rodape { display:flex; flex-direction:column; gap:5px; }
 .job-ficha-aviso { font-size:11px; line-height:1.4; color:var(--job-txt-fraco); }
 .job-ficha-aviso.ok { color:#4ade80; }
-.job-ficha-aviso.erro { color:#f43f5e; }
+.job-ficha-aviso.erro { color:var(--job-danger); }
 .job-ficha-link { font-size:11px; color:var(--job-txt-fraco); text-decoration:none; text-align:center; }
 .job-ficha-link:hover { color:var(--job-acento); text-decoration:underline; }
 
@@ -1596,18 +1709,18 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-tr-btn {
   display: inline-flex; align-items: center; gap: 5px;
   background: transparent; border: none; padding: 1px 0;
-  color: #8696a0; font-size: 11.5px; font-weight: 600; cursor: pointer;
+  color: var(--job-txt-fraco); font-size: 11.5px; font-weight: 600; cursor: pointer;
   font-family: inherit; transition: color .15s; line-height: 1.5;
 }
 .job-tr-btn svg { width: 13px; height: 13px; }
-.job-tr-btn:hover { color: #53bdeb; }
+.job-tr-btn:hover { color: var(--job-info); }
 .job-tr-btn.mini { font-size: 10.5px; text-decoration: underline; }
-.job-tr-carregando { font-size: 11.5px; font-style: italic; color: #8696a0; }
-.job-tr-btn.falhou { color: #d98b8b; }
-.job-tr-btn.falhou:hover { color: #f0a3a3; }
+.job-tr-carregando { font-size: 11.5px; font-style: italic; color: var(--job-txt-fraco); }
+.job-tr-btn.falhou { color: var(--job-danger); }
+.job-tr-btn.falhou:hover { color: var(--job-danger); }
 /* Motivo em voz baixa, numa linha propria: informa sem competir com o botao. */
 .job-tr-motivo {
-  display: block; font-size: 10px; color: #8696a0; opacity: .75;
+  display: block; font-size: 10px; color: var(--job-txt-fraco); opacity: .75;
   margin-top: 2px; word-break: break-word;
 }
 /* O texto nao ganha caixa propria: ele E a bolha agora. So o rotulo separa. */
@@ -1618,9 +1731,9 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 }
 .job-tr-tag {
   display: block; font-size: 9px; font-weight: 700; letter-spacing: .6px;
-  text-transform: uppercase; color: #53bdeb; margin-bottom: 3px; opacity: .85;
+  text-transform: uppercase; color: var(--job-info); margin-bottom: 3px; opacity: .85;
 }
-.job-tr-dir .job-tr-tag { color: #7ae3c3; }
+.job-tr-dir .job-tr-tag { color: var(--job-sucesso); }
 .job-tr-copiar {
   position: absolute; top: 0; right: 0; background: transparent; border: none;
   color: currentColor; opacity: .4; cursor: pointer; padding: 2px;
@@ -1635,7 +1748,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
                  padding:6px 0; border-bottom:1px solid var(--job-borda); font-size:12px; }
 .job-dev-linha span { color:var(--job-txt-fraco); }
 .job-dev-linha b { color:var(--job-txt); text-align:right; word-break:break-all; font-size:11.5px; }
-.job-dev-linha.ruim b { color:#f43f5e; }
+.job-dev-linha.ruim b { color:var(--job-danger); }
 .job-dev-btns { display:flex; flex-direction:column; gap:6px; margin-top:12px; }
 .job-dev-saida { margin-top:10px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
                  font-size:11px; color:var(--job-txt-fraco); background:var(--job-bg3);
@@ -1652,18 +1765,18 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-perda { margin: 8px 0 4px; padding: 10px 12px; border-radius: 9px;
              background: rgba(244,63,124,.07); border: 1px solid rgba(244,63,124,.28); }
 .job-perda[hidden] { display: none; }
-.job-perda-tit { font-size: 11.5px; font-weight: 700; color: #f7a8c0; margin-bottom: 7px;
+.job-perda-tit { font-size: 11.5px; font-weight: 700; color: var(--job-danger); margin-bottom: 7px;
                  display: flex; align-items: center; gap: 5px; }
-.job-perda-sel { width: 100%; background: rgba(0,0,0,.25); color: #e9edef;
+.job-perda-sel { width: 100%; background: rgba(0,0,0,.25); color: var(--job-txt);
                  border: 1px solid rgba(255,255,255,.14); border-radius: 6px;
                  padding: 6px 8px; font-size: 11.5px; font-family: inherit; }
-.job-perda-expl { font-size: 11px; color: #7ae3c3; margin-top: 7px; line-height: 1.5; }
+.job-perda-expl { font-size: 11px; color: var(--job-sucesso); margin-top: 7px; line-height: 1.5; }
 .job-perda-expl:empty { display: none; }
 /* O "i" da extensão: mesmo papel do "i" do site. */
 .job-i { display: inline-flex; align-items: center; justify-content: center;
          width: 13px; height: 13px; border-radius: 50%; font-size: 9px; font-style: normal;
-         font-weight: 700; background: rgba(255,255,255,.12); color: #8696a0; cursor: help; }
-.job-i:hover { background: rgba(83,189,235,.25); color: #53bdeb; }
+         font-weight: 700; background: rgba(255,255,255,.12); color: var(--job-txt-fraco); cursor: help; }
+.job-i:hover { background: rgba(83,189,235,.25); color: var(--job-info); }
 
 /* ── A fila de hoje no trilho ── */
 /* Forma e posição vêm da regra unificada lá em cima; aqui fica só o que é
@@ -1671,19 +1784,28 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
    dizendo a mesma coisa que o acento já dizia. */
 .job-fila-badge.atraso { background: var(--job-danger); color:#fff; }
 .job-fila-badge[hidden] { display:none; }
-.job-fila-cab { font-size:11.5px; color:#8696a0; padding:2px 0 10px; }
-.job-fila-atraso { color:#f7a8c0; }
-.job-fila-item { background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08);
-                 border-radius:9px; padding:11px 12px; margin-bottom:9px; }
+.job-fila-cab { font-size:11.5px; color:var(--job-txt-fraco); padding:2px 0 10px; }
+.job-fila-atraso { color:var(--job-danger); }
+/* Cores fixas aqui não sobreviviam ao tema claro: branco a 3% sobre off-white
+   é invisível, e o #e9edef do título vira texto branco em fundo branco. Tudo
+   passa pelos tokens. */
+.job-fila-item { background: var(--job-bg2); border: 1px solid var(--job-borda);
+                 border-radius: 12px; padding: 11px 12px; margin-bottom: 9px;
+                 transition: border-color var(--job-t-rapido) ease, transform var(--job-t-toque) ease-out,
+                             box-shadow var(--job-t-rapido) ease; }
+.job-fila-item:hover { border-color: color-mix(in srgb, var(--job-acento) 40%, transparent);
+                       box-shadow: var(--job-elev-1); }
 /* Atrasado ganha um trilho, nao um fundo: com a fila cheia, cor em tudo para
    de significar atraso. */
-.job-fila-item.atrasada { border-left:3px solid #f43f7c; }
-.job-fila-tit { font-size:12.5px; font-weight:700; color:#e9edef; }
-.job-fila-lead { font-size:11.5px; color:#8696a0; margin-top:2px; }
-.job-fila-tag { color:#f7a8c0; margin-left:6px; font-size:10px; }
-.job-fila-motivo { font-size:11px; color:#8696a0; margin-top:6px; line-height:1.5; }
+.job-fila-item.atrasada { border-left: 3px solid var(--job-danger); }
+.job-fila-tit { font-family: var(--job-ui); font-size: 13px; font-weight: 640;
+                color: var(--job-txt); letter-spacing: var(--job-tk-md); }
+.job-fila-lead { font-family: var(--job-ui); font-size: 11.5px; color: var(--job-txt-fraco); margin-top: 2px; }
+.job-fila-tag { color: var(--job-danger); margin-left: 6px; font-size: 10px;
+                font-weight: 700; letter-spacing: var(--job-tk-xs); }
+.job-fila-motivo { font-size:11px; color:var(--job-txt-fraco); margin-top:6px; line-height:1.5; }
 /* A frase e o que se copia: parece mensagem, nao legenda. */
-.job-fila-frase { font-size:11.5px; color:#e9edef; background:rgba(0,0,0,.24);
+.job-fila-frase { font-size:11.5px; color:var(--job-txt); background:rgba(0,0,0,.24);
                   border:1px solid rgba(255,255,255,.08); border-radius:7px;
                   padding:8px 10px; margin-top:8px; line-height:1.55; }
 .job-fila-acoes { display:flex; gap:12px; margin-top:9px; flex-wrap:wrap; }
@@ -1720,7 +1842,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
    que o consultor precisa ver e faria ele achar que a operadora tem menos
    opção do que tem. */
 .job-cot-gaveta {
-  border: 1px solid #e6e2d9;
+  border: 1px solid var(--job-borda);
   border-radius: 10px;
   margin: 8px 0;
   background: #fff;
@@ -1733,7 +1855,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   padding: 9px 12px;
   cursor: pointer;
   list-style: none;
-  background: #faf8f4;
+  background: var(--job-bg2);
   border-bottom: 1px solid #efeae0;
   font-size: 12.5px;
 }
@@ -1745,7 +1867,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   transition: transform .15s;
 }
 .job-cot-gaveta[open] > summary::before { transform: rotate(90deg); }
-.job-cot-gaveta-n { font-weight: 700; color: #2f2a22; flex: 1 1 auto; }
+.job-cot-gaveta-n { font-weight: 700; color: var(--job-txt); flex: 1 1 auto; }
 .job-cot-gaveta-q {
   font-size: 11px;
   font-weight: 700;
@@ -1828,11 +1950,11 @@ details.job-cot-subgaveta > summary .job-cot-gaveta-q { margin-left: auto; }
 }
 .job-cfg-hero-logo { flex: none; transform: scale(1.15); transform-origin: left center; }
 .job-cfg-hero-txt { flex: 1 1 auto; min-width: 0; }
-.job-cfg-hero-n { font-size: 15px; font-weight: 750; color: #2f2a22; letter-spacing: -.2px; }
-.job-cfg-hero-s { font-size: 11.5px; color: #857c6c; margin-top: 2px; }
+.job-cfg-hero-n { font-size: 15px; font-weight: 750; color: var(--job-txt); letter-spacing: -.2px; }
+.job-cfg-hero-s { font-size: 11.5px; color: var(--job-txt-fraco); margin-top: 2px; }
 .job-cfg-versao {
   flex: none; font-size: 10.5px; font-weight: 700; color: #6b6355;
-  background: rgba(255,255,255,.65); border: 1px solid #e6e2d9;
+  background: color-mix(in srgb, var(--job-bg1) 65%, transparent); border: 1px solid var(--job-borda);
   border-radius: 999px; padding: 3px 9px;
 }
 
@@ -1840,7 +1962,7 @@ details.job-cot-subgaveta > summary .job-cot-gaveta-q { margin-left: auto; }
 .job-cfg-bloco-t {
   display: flex; align-items: center; gap: 9px;
   font-size: 11px; font-weight: 750; text-transform: uppercase;
-  letter-spacing: .5px; color: #857c6c; margin: 0 2px 9px;
+  letter-spacing: .5px; color: var(--job-txt-fraco); margin: 0 2px 9px;
 }
 /* Ladrilho colorido por bloco: dá ritmo à página e deixa o olho voltar
    direto ao bloco certo na segunda visita. */
@@ -1853,29 +1975,29 @@ details.job-cot-subgaveta > summary .job-cot-gaveta-q { margin-left: auto; }
 .job-cfg-tile svg { width: 14px; height: 14px; }
 
 .job-cfg-cartao {
-  background: #fff; border: 1px solid #e6e2d9; border-radius: 14px;
+  background: var(--job-bg1); border: 1px solid var(--job-borda); border-radius: 14px;
   padding: 15px; box-shadow: 0 1px 2px rgba(60,50,30,.05);
 }
 
 .job-cfg-campo { margin-bottom: 12px; }
 .job-cfg-campo:last-of-type { margin-bottom: 14px; }
 .job-cfg-campo label {
-  display: block; font-size: 11px; font-weight: 650; color: #857c6c;
+  display: block; font-size: 11px; font-weight: 650; color: var(--job-txt-fraco);
   margin-bottom: 5px;
 }
 .job-cfg-campo input, .job-cfg-campo select {
   width: 100%; box-sizing: border-box;
-  background: #faf8f4; border: 1px solid #e6e2d9; border-radius: 10px;
-  padding: 10px 11px; font-size: 13px; color: #2f2a22;
+  background: var(--job-bg2); border: 1px solid var(--job-borda); border-radius: 10px;
+  padding: 10px 11px; font-size: 13px; color: var(--job-txt);
   font-family: inherit; transition: border-color .14s, box-shadow .14s;
 }
 .job-cfg-campo input:focus, .job-cfg-campo select:focus {
-  outline: none; border-color: #3b82f6; background: #fff;
+  outline: none; border-color: var(--job-info); background: var(--job-bg1);
   box-shadow: 0 0 0 3px rgba(59,130,246,.14);
 }
 
 .job-cfg-bt {
-  width: 100%; border: 1px solid #e6e2d9; background: #faf8f4; color: #4a4437;
+  width: 100%; border: 1px solid var(--job-borda); background: var(--job-bg2); color: #4a4437;
   border-radius: 10px; padding: 10px; font-size: 13px; font-weight: 650;
   cursor: pointer; font-family: inherit;
   transition: transform .12s, box-shadow .12s, filter .12s;
@@ -1898,8 +2020,8 @@ details.job-cot-subgaveta > summary .job-cot-gaveta-q { margin-left: auto; }
   background: linear-gradient(135deg, rgba(33,197,143,.20), rgba(33,197,143,.08));
 }
 .job-cfg-quem-txt { flex: 1 1 auto; min-width: 0; }
-.job-cfg-quem-n { font-size: 15px; font-weight: 700; color: #2f2a22; }
-.job-cfg-quem-s { font-size: 11.5px; color: #857c6c; margin-top: 1px; }
+.job-cfg-quem-n { font-size: 15px; font-weight: 700; color: var(--job-txt); }
+.job-cfg-quem-s { font-size: 11.5px; color: var(--job-txt-fraco); margin-top: 1px; }
 .job-cfg-selo {
   display: inline-flex; align-items: center; gap: 5px; margin-top: 6px;
   font-size: 10.5px; font-weight: 700; color: #1a9c72;
@@ -1910,7 +2032,7 @@ details.job-cot-subgaveta > summary .job-cot-gaveta-q { margin-left: auto; }
   box-shadow: 0 0 0 3px rgba(33,197,143,.22);
 }
 
-.job-cfg-dica { font-size: 11.5px; line-height: 1.55; color: #857c6c; margin-top: 10px; }
+.job-cfg-dica { font-size: 11.5px; line-height: 1.55; color: var(--job-txt-fraco); margin-top: 10px; }
 .job-cfg-msg { font-size: 12px; margin-top: 10px; min-height: 14px; }
 .job-cfg-msg.ok { color: #1a9c72; }
 .job-cfg-msg.err { color: #c0304a; }
@@ -1930,15 +2052,15 @@ details.job-cot-subgaveta > summary .job-cot-gaveta-q { margin-left: auto; }
 }
 .job-cfg-chave input:checked + .job-cfg-chave-bola { background: #21c58f; }
 .job-cfg-chave input:checked + .job-cfg-chave-bola::after { transform: translateX(16px); }
-.job-cfg-chave-txt { font-size: 13px; font-weight: 600; color: #2f2a22; }
+.job-cfg-chave-txt { font-size: 13px; font-weight: 600; color: var(--job-txt); }
 
 /* PORTA: extensão ligada e sem credencial nenhuma.
    Não é erro — é um passo que falta. Por isso tem a marca, um caminho e o
    motivo, em vez de um aviso vermelho de falha. */
 .job-porta { padding: 40px 22px; text-align: center; }
 .job-porta-logo { display: flex; justify-content: center; margin-bottom: 16px; transform: scale(1.3); }
-.job-porta-t { font-size: 16px; font-weight: 750; color: #2f2a22; margin-bottom: 9px; }
-.job-porta-s { font-size: 12.5px; line-height: 1.6; color: #857c6c; margin-bottom: 20px; }
+.job-porta-t { font-size: 16px; font-weight: 750; color: var(--job-txt); margin-bottom: 9px; }
+.job-porta-s { font-size: 12.5px; line-height: 1.6; color: var(--job-txt-fraco); margin-bottom: 20px; }
 .job-porta-bt {
   width: 100%; border: none; border-radius: 11px; padding: 12px;
   background: linear-gradient(135deg, #3b82f6, #6d5cf0); color: #fff;
