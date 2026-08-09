@@ -9904,6 +9904,40 @@
     if (r.followup) blocosCompleta.push('', 'FOLLOW-UP SUGERIDO', String(r.followup).trim());
     if (r.ia && r.ia.resumo) blocosCompleta.push('', 'LEITURA DA IA', String(r.ia.resumo).trim());
     const analiseCompletaTexto = blocosCompleta.join('\n');
+    // ── A CAPA DA ANALISE ────────────────────────────────────────────────
+    //
+    // A tela tem tudo: score, criterios, dados do lead, documentos, acoes,
+    // follow-up, leitura da IA. O problema e que so tem ISSO — pra saber do
+    // que se trata era preciso rolar a tela inteira e montar o quadro de
+    // cabeca. No meio de um atendimento, com o cliente esperando, ninguem faz.
+    //
+    // Tres linhas, com o que ja veio na resposta: o que ele quer, em que pe
+    // esta, e o que fazer agora. Linha sem dado nao aparece — capa com buraco
+    // e pior que capa nenhuma.
+    const primeira = (r.sugestoes || [])[0];
+    const querPartes = [
+      tipoRot,
+      ex.vidas ? ex.vidas + (String(ex.vidas) === '1' ? ' vida' : ' vidas') : '',
+      ex.cidade,
+      ex.operadora_interesse || ex.plano_preferido,
+    ].filter(Boolean);
+    const estaPartes = [
+      r.fase_funil,
+      (r.cap && r.cap.motivo) ? r.cap.motivo : '',
+      ex.urgencia ? 'urgência: ' + ex.urgencia : '',
+    ].filter(Boolean);
+    const capaL = (rot, val) => val
+      ? '<div class="job-capa-l"><span class="k">' + rot + '</span>' +
+        '<span class="v">' + esc(val) + '</span></div>' : '';
+    const capa = (querPartes.length || estaPartes.length || primeira)
+      ? '<div class="job-capa">' +
+          capaL('Quer', querPartes.join(' · ')) +
+          capaL('Está em', estaPartes.join(' · ')) +
+          capaL('Fazer agora', primeira
+            ? (primeira.titulo || '') + (primeira.detalhe ? ' — ' + primeira.detalhe : '')
+            : '') +
+        '</div>'
+      : '';
     const pen = (r.penalidades || []).map((p) => '<span class="job-chip job-chip-pen">' +
       esc(p.regra) + ' ' + p.pontos + '</span>').join('');
     // Por que o score parou nesse teto — antes o backend calculava e mandava
@@ -9947,6 +9981,7 @@
           (r.categorias_totais || 28) + ' critérios</div></div>' +
       '</div>' +
       '<div class="job-barra"><div class="job-barra-fill ' + fx + '" style="width:' + Math.round((r.score || 0) / 10) + '%;"></div></div>' +
+      capa +
       '<div class="job-chips">' + chips + pen + '</div>' +
       capBox +
       avisoFalhas +

@@ -3756,3 +3756,18 @@ body[data-job-tema="claro"] .job-cot-prev-txt { color-scheme: light; }
 .job-delta.sobe { background: var(--job-sobre-acento); color: var(--job-acento); }
 .job-delta.desce { background: var(--job-sobre-danger); color: #ff8f8f; }
 .job-delta.igual { background: var(--job-vidro); color: var(--job-txt-fraco); }
+
+
+/* ── A CAPA DA ANALISE ─────────────────────────────────────────────────────
+   O que ele quer, em que pe esta, e o que fazer agora — antes do detalhe.
+   Sem isso era preciso rolar a tela inteira e montar o quadro de cabeca, no
+   meio de um atendimento. */
+.job-capa { margin: 10px 0 12px; padding: 11px 12px; border-radius: 12px;
+  background: var(--job-vidro-leve); border: 1px solid var(--job-borda); }
+.job-capa-l { display: flex; gap: 10px; align-items: baseline; padding: 4px 0; }
+.job-capa-l + .job-capa-l { border-top: 1px solid var(--job-borda); }
+.job-capa-l .k { flex: none; width: 78px; font-family: var(--job-ui); font-size: 10px;
+  font-weight: 700; letter-spacing: var(--job-tk-xs); text-transform: uppercase;
+  color: var(--job-txt-fraco); }
+.job-capa-l .v { flex: 1; min-width: 0; font-family: var(--job-ui); font-size: 12.5px;
+  line-height: 1.45; color: var(--job-txt); }
