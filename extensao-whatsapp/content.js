@@ -2738,85 +2738,49 @@
   // rótulos escritos ali competiriam com o texto que a pessoa está redigindo.
   // O de salvar contato mantém o texto, porque é o único que ele quis
   // destacar — e é o único que grava.
-  function _barraConvInjetar() {
-    const main = document.querySelector('#main');
-    if (!main) return;
-    // O rodapé é onde vive a caixa de digitar. Se ele ainda não existe (a
-    // conversa está carregando), sai quieto: o tique de 1,5s tenta de novo.
-    const pe = main.querySelector('footer');
-    if (!pe || pe.querySelector('.job-barra-conv')) return;
-    // Limpa a versão antiga do cabeçalho, pra quem já tinha a extensão aberta
-    // quando a atualização chegou não ficar com as duas.
-    const velha = main.querySelector('header .job-barra-conv');
-    if (velha) velha.remove();
-    const box = document.createElement('div');
-    box.className = 'job-barra-conv job-barra-conv-pe';
-    box.innerHTML =
-      '<button type="button" class="job-bc-btn job-bc-bola" data-ac="transcrever" title="Transcrever todos os áudios desta conversa">' +
-        _ICO_TRANSCREVER + '<span>Transcrever tudo</span></button>' +
-      '<button type="button" class="job-bc-btn job-bc-bola" data-ac="copiar" title="Copiar a conversa inteira: texto e áudio transcrito, na ordem, com hora e quem falou">' +
-        _ICO_COPIAR + '<span>Copiar conversa</span></button>' +
-      // SALVAR CONTATO MORA AQUI, ao lado do nome da pessoa.
-      //
-      // A ação é sobre ESTE contato, e o lugar onde o consultor está olhando
-      // quando pensa nela é o cabeçalho da conversa — não uma aba do painel a
-      // dois cliques de distância. É a mesma regra do botão dentro da bolha:
-      // a ação mora onde está o objeto dela.
-      //
-      // Ele se destaca dos outros dois de propósito: transcrever e copiar são
-      // leitura, salvar contato é a única aqui que MUDA alguma coisa.
-      '<button type="button" class="job-bc-btn job-bc-salvar" data-ac="salvarcontato" ' +
-        'title="Salva este contato no seu WhatsApp, com o nome no padrão do JOB. Sincroniza pro celular.">' +
-        _ICO_SALVAR_CONTATO + '<span>Salvar contato</span></button>';
-    // No começo do rodapé: antes do "+" e do campo, que é a ordem de leitura
-    // da esquerda pra direita e não empurra o botão de enviar.
-    pe.insertBefore(box, pe.firstChild);
+  // Enquanto trabalha, a bola precisa mostrar número ("3/12") — e número não
+  // cabe num círculo de 34px. Ela vira pílula enquanto o texto é diferente do
+  // rótulo de repouso, e volta a ser bola quando termina.
+  function _bcRotulo(b, txt) {
+    const e = b.querySelector('span');
+    if (e) e.textContent = txt;
+    if (b.classList.contains('job-bc-bola')) {
+      const base = b.dataset.rot || '';
+      b.classList.toggle('job-bc-ocupada', !!base && txt !== base);
+    }
+  }
 
-    const btn = (ac) => box.querySelector('[data-ac="' + ac + '"]');
-    // Guarda o rótulo de repouso de cada um: é ele que diz quando a bola
-    // voltou ao normal.
-    box.querySelectorAll('.job-bc-bola').forEach((b) => {
-      const e = b.querySelector('span');
-      b.dataset.rot = e ? (e.textContent || '') : '';
-    });
-    // Enquanto trabalha, a bola precisa mostrar número ("3/12") — e número não
-    // cabe num círculo de 34px. Ela vira pílula enquanto o texto é diferente
-    // do rótulo de repouso, e volta a ser bola quando termina.
-    const rotulo = (b, t) => {
-      const e = b.querySelector('span');
-      if (e) e.textContent = t;
-      if (b.classList.contains('job-bc-bola')) {
-        const base = b.dataset.rot || '';
-        b.classList.toggle('job-bc-ocupada', !!base && t !== base);
-      }
-    };
-
-    const bt = btn('transcrever');
+  // TRANSCREVER, com trava de repetição.
+  //
+  // Ele custa dinheiro e prende a conversa. Duplo clique, ou clicar de novo
+  // logo depois de terminar, refaria o trabalho pelo mesmo resultado. Por isso
+  // o botão desaparece quando termina: se não sobrou áudio sem texto, ele não
+  // tem mais o que fazer nesta conversa — e botão sem trabalho é justamente o
+  // que convida o clique à toa.
+  function _barraConvLigarTranscrever(box, bt) {
+    const r0 = bt.dataset.rot || 'Transcrever';
     bt.addEventListener('click', async (ev) => {
       ev.stopPropagation();
       if (bt.disabled) return;
       bt.disabled = true;
-      const r0 = 'Transcrever tudo';
       try {
         const p = await transcreverTudo((x) => {
-          rotulo(bt, x.rodando ? (x.feitos + '/' + x.total) : r0);
+          _bcRotulo(bt, x.rodando ? (x.feitos + '/' + x.total) : r0);
         });
-        rotulo(bt, p.total === 0 ? 'Sem áudio'
+        _bcRotulo(bt, p.total === 0 ? 'Sem áudio'
           : (p.erros ? p.erros + ' falhou(ram)' : 'Pronto: ' + p.total));
+        // Some depois de mostrar o resultado: não há mais áudio pra transcrever.
+        setTimeout(() => { if (bt.isConnected) bt.remove(); }, 2600);
       } catch (e) {
-        rotulo(bt, 'Falhou');
-      } finally {
-        setTimeout(() => { rotulo(bt, r0); bt.disabled = false; }, 2600);
+        _bcRotulo(bt, 'Falhou');
+        setTimeout(() => { _bcRotulo(bt, r0); bt.disabled = false; }, 2600);
       }
     });
+  }
 
-    // ── SALVAR CONTATO, do cabeçalho ──────────────────────────────────
-    // Um clique: monta o nome com as regras do CRM (as mesmas do painel) e
-    // grava. Se o lead ainda não foi carregado nesta conversa, carrega antes —
-    // salvar com o nome cru do WhatsApp desperdiçaria justamente o padrão que
-    // faz o contato ser achável na busca depois.
-    const bsv = btn('salvarcontato');
-    if (bsv) bsv.addEventListener('click', async (ev) => {
+  function _barraConvLigarSalvar(bsv) {
+    const rotulo = _bcRotulo;
+    bsv.addEventListener('click', async (ev) => {
       ev.stopPropagation();
       if (bsv.disabled) return;
       bsv.disabled = true;
@@ -2847,7 +2811,14 @@
         let r = null;
         try { r = await _pedirPonte('salvar_contato', { chatId: chat, nome: primeiro, sobrenome }, 15000); }
         catch (e) { _falhaTecnica('salvar contato (cabeçalho)', e); }
-        if (r && r.ok) { rotulo(bsv, 'Salvo'); bsv.classList.add('ok'); return; }
+        if (r && r.ok) {
+          rotulo(bsv, 'Salvo'); bsv.classList.add('ok');
+          // SOME depois de confirmar: o contato agora tem nome, e o botão
+          // deixou de ter trabalho. Deixar ele aceso é convidar o segundo
+          // clique que grava de novo o que já está gravado.
+          setTimeout(() => { if (bsv.isConnected) bsv.remove(); }, 2400);
+          return;
+        }
         // Diz QUAL problema. 'sem_suporte' manda pro caminho que funciona.
         rotulo(bsv, (r && r.erro) === 'sem_suporte' ? 'Não dá aqui' : 'Falhou');
         if (r && r.erro) _falhaTecnica('salvar contato (cabeçalho): ' + r.erro, null);
@@ -2855,6 +2826,116 @@
         setTimeout(() => { rotulo(bsv, r0); bsv.classList.remove('ok'); bsv.disabled = false; }, 2800);
       }
     });
+  }
+
+  // ══ QUEM APARECE, E QUANDO ════════════════════════════════════════════
+  //
+  // Botão que está sempre ali convida clique à toa — e dois destes têm custo
+  // real: transcrever gasta API e prende a conversa por minutos; salvar
+  // contato escreve na agenda. Então cada um só entra quando a situação dele
+  // existe:
+  //
+  //   TRANSCREVER   só se houver áudio AINDA NÃO transcrito, e o rótulo diz
+  //                 quantos — que é o que faz a pessoa pensar antes de clicar.
+  //   SALVAR        só se o contato AINDA NÃO está salvo. Contato salvo tem
+  //                 nome; não salvo aparece como número. Se já tem nome, o
+  //                 botão não tem trabalho a fazer.
+  //   COPIAR        sempre: não custa nada e não escreve em lugar nenhum.
+  //
+  // Tudo em segundo plano: a barra aparece na hora com o Copiar, e os outros
+  // dois entram quando a checagem volta. Esperar pra desenhar deixaria o
+  // rodapé pulando.
+  async function _barraConvContexto(box) {
+    if (!box || !box.isConnected) return;
+
+    // ── Salvar contato: o nome da conversa é um telefone? ──
+    try {
+      const nome = (nomeDoContato() || '').trim();
+      const soDigitos = nome.replace(/[^0-9]/g, '');
+      const pareceTelefone = nome && soDigitos.length >= 10 && soDigitos.length >= nome.replace(/\s/g, '').length - 4;
+      if (pareceTelefone && !box.querySelector('[data-ac="salvarcontato"]')) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'job-bc-btn job-bc-salvar';
+        b.dataset.ac = 'salvarcontato';
+        b.title = 'Este número não está salvo. Grava no seu WhatsApp com o nome no padrão do JOB, e sincroniza pro celular.';
+        b.innerHTML = _ICO_SALVAR_CONTATO + '<span>Salvar contato</span>';
+        box.appendChild(b);
+        b.dataset.rot = 'Salvar contato';
+        _barraConvLigarSalvar(b);
+      }
+    } catch (e) { /* checagem é ganho, não requisito */ }
+
+    // ── Transcrever: existe áudio sem transcrição? ──
+    try {
+      const r = await _pedirPonte('listar_audios', {}, 12000);
+      const lista = (r && r.audios) || [];
+      // Só os que ainda NÃO temos texto. Oferecer transcrever o que já está
+      // transcrito é gastar de novo pelo mesmo resultado.
+      const faltam = lista.filter((a) => !TR.cache.has(a.id) || !TR.cache.get(a.id)).length;
+      if (faltam > 0 && box.isConnected && !box.querySelector('[data-ac="transcrever"]')) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'job-bc-btn job-bc-bola';
+        b.dataset.ac = 'transcrever';
+        // O NÚMERO NO RÓTULO É O FREIO. "Transcrever 12 áudios" faz pensar;
+        // "Transcrever tudo" não diz o tamanho do que se está pedindo.
+        b.title = 'Transcrever ' + faltam + (faltam === 1 ? ' áudio' : ' áudios') +
+          ' desta conversa. Demora e consome crédito de transcrição.';
+        b.innerHTML = _ICO_TRANSCREVER + '<span>Transcrever ' + faltam + '</span>';
+        box.insertBefore(b, box.firstChild);
+        b.dataset.rot = 'Transcrever ' + faltam;
+        _barraConvLigarTranscrever(box, b);
+      }
+    } catch (e) { /* sem áudio detectável: o botão simplesmente não aparece */ }
+  }
+
+  function _barraConvInjetar() {
+    const main = document.querySelector('#main');
+    if (!main) return;
+    // O rodapé é onde vive a caixa de digitar. Se ele ainda não existe (a
+    // conversa está carregando), sai quieto: o tique de 1,5s tenta de novo.
+    const pe = main.querySelector('footer');
+    if (!pe || pe.querySelector('.job-barra-conv')) return;
+    // Limpa a versão antiga do cabeçalho, pra quem já tinha a extensão aberta
+    // quando a atualização chegou não ficar com as duas.
+    const velha = main.querySelector('header .job-barra-conv');
+    if (velha) velha.remove();
+    const box = document.createElement('div');
+    box.className = 'job-barra-conv job-barra-conv-pe';
+    // NASCE VAZIA. Antes os três apareciam sempre, e botão que está sempre ali
+    // convida clique à toa — inclusive o de transcrever, que custa dinheiro e
+    // trava a conversa por minutos. Cada um é acrescentado pela função abaixo
+    // só quando a conjuntura dele existe.
+    box.innerHTML =
+      // COPIAR é o único que aparece sempre: não custa nada, não escreve em
+      // lugar nenhum e é reversível por natureza (é a área de transferência).
+      '<button type="button" class="job-bc-btn job-bc-bola" data-ac="copiar" ' +
+        'title="Copiar a conversa inteira: texto e áudio transcrito, na ordem, com hora e quem falou">' +
+        _ICO_COPIAR + '<span>Copiar conversa</span></button>';
+    // No começo do rodapé: antes do "+" e do campo, que é a ordem de leitura
+    // da esquerda pra direita e não empurra o botão de enviar.
+    pe.insertBefore(box, pe.firstChild);
+    // Em segundo plano: a barra aparece na hora com o Copiar, e os outros dois
+    // entram quando a checagem volta. Esperar pra desenhar faria o rodapé pular.
+    _barraConvContexto(box);
+
+    const btn = (ac) => box.querySelector('[data-ac="' + ac + '"]');
+    // Guarda o rótulo de repouso de cada um: é ele que diz quando a bola
+    // voltou ao normal.
+    box.querySelectorAll('.job-bc-bola').forEach((b) => {
+      const e = b.querySelector('span');
+      b.dataset.rot = e ? (e.textContent || '') : '';
+    });
+    const rotulo = _bcRotulo;
+
+    // ── SALVAR CONTATO, do cabeçalho ──────────────────────────────────
+    // Um clique: monta o nome com as regras do CRM (as mesmas do painel) e
+    // grava. Se o lead ainda não foi carregado nesta conversa, carrega antes —
+    // salvar com o nome cru do WhatsApp desperdiçaria justamente o padrão que
+    // faz o contato ser achável na busca depois.
+    const bsv = btn('salvarcontato');
+    if (bsv) _barraConvLigarSalvar(bsv);
 
     const bc = btn('copiar');
     bc.addEventListener('click', async (ev) => {
