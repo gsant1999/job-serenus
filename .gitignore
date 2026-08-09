@@ -27,8 +27,15 @@ _arquivo/
 # e o dado extraido, nao o arquivo.
 tabelas-operadoras/
 
-# O workflow do CI mora no GitHub, criado pela interface: o token da maquina nao
-# tem escopo `workflow`, e qualquer push que inclua este arquivo e recusado
-# INTEIRO — travando trabalho que nao tem nada a ver com ele. O arquivo fica
-# aqui so pra consulta; quem vale e o do GitHub.
+# ATENCAO AO MEXER AQUI.
+#
+# .github/workflows/ci.yml JA ESTA RASTREADO (entrou pela interface do GitHub,
+# commit 0a2540f). Regra de ignore nao vale pra arquivo rastreado, entao ele
+# segue versionado normalmente — mas ALTERAR esse arquivo daqui faz o push ser
+# recusado INTEIRO, porque o token desta maquina nao tem escopo `workflow`.
+# Hoje isso travou dois envios que nao tinham nada a ver com CI.
+#
+# O ignore fica como guarda: impede que um arquivo NOVO em .github/ entre sem
+# querer num commit e trave tudo de novo. Precisando de outro workflow, crie
+# pela interface do GitHub.
 .github/
