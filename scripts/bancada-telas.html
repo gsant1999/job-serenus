@@ -1,0 +1,152 @@
+<!doctype html>
+<!--
+  BANCADA DAS TELAS DA EXTENSÃO — ferramenta de desenvolvimento, não vai pro pacote.
+
+  Existe porque em 09/08/2026 eu mandei SEIS versões de redesenho (3.79 a 3.84)
+  sem olhar um pixel renderizado: validei tudo com contagem de grep e cálculo de
+  contraste. O Guilherme virou o meu loop de renderização e testou seis vezes o
+  que eu deveria ter visto antes.
+
+  Ela desenha o trilho e o painel com o content.css DE VERDADE, nos dois temas
+  lado a lado, sobre um fundo que imita a conversa do WhatsApp — que é o que
+  permite ver o vidro funcionando.
+
+  Como rodar:
+      python3 -m http.server 8899 --directory scripts
+      abrir http://localhost:8899/bancada-telas.html
+
+  REGRA: nenhuma mudança de visual na extensão sai sem passar por aqui primeiro.
+-->
+<meta charset="utf-8">
+<title>Bancada — telas da extensão JOB</title>
+<link rel="stylesheet" href="../extensao-whatsapp/content.css">
+<style>
+  /* Só da bancada. Nada aqui vai pra extensão. */
+  html,body{margin:0;background:#0b141a;font-family:system-ui,sans-serif}
+  .par{display:flex;gap:0;min-height:100vh}
+  .lado{flex:1;position:relative;overflow:hidden}
+  .lado.escuro{background:#0b141a}          /* fundo do WhatsApp escuro */
+  .lado.claro{background:#efeae2}           /* fundo do WhatsApp claro */
+  .rot{position:absolute;top:6px;left:10px;z-index:9;font:600 11px system-ui;
+       letter-spacing:.06em;text-transform:uppercase;opacity:.5;color:#fff}
+  .lado.claro .rot{color:#111}
+  /* Falsa conversa atrás, pra ver o vidro funcionando de verdade */
+  .fundo{position:absolute;inset:0;padding:28px 14px;display:flex;flex-direction:column;gap:9px}
+  .bolha{max-width:62%;padding:8px 11px;border-radius:9px;font:13px/1.4 system-ui}
+  .escuro .bolha{background:#202c33;color:#e9edef}
+  .escuro .bolha.eu{background:#005c4b;align-self:flex-end}
+  .claro .bolha{background:#fff;color:#111b21}
+  .claro .bolha.eu{background:#d9fdd3;align-self:flex-end}
+  /* palco: trilho + painel posicionados como na extensão */
+  .palco{position:absolute;inset:0}
+  .palco #job-trilho{position:absolute}
+  .palco #job-painel-doc{position:absolute;animation:none}
+</style>
+
+<div class="par">
+  <div class="lado escuro" id="L-escuro"><span class="rot">escuro</span></div>
+  <div class="lado claro"  id="L-claro"><span class="rot">claro</span></div>
+</div>
+
+<script>
+const TRILHO = ['Análise','Mensagens','Funis','Leads','CNPJ','Cotações','Notas','Hoje','CRM'];
+const ICO = {
+ 'Análise':'<path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 15.5v-3"/><path d="M12.5 15.5v-7"/><path d="M17 15.5v-5"/>',
+ 'Mensagens':'<path d="M20.5 12.2c0 4-3.8 7.2-8.5 7.2-1 0-2-.15-2.9-.42L4 20.5l1.7-4.1A6.9 6.9 0 0 1 3.5 12.2C3.5 8.2 7.3 5 12 5s8.5 3.2 8.5 7.2Z"/>',
+ 'Funis':'<path d="M3.5 5h17l-6.4 7.6v5.6L9.9 21v-8.4L3.5 5Z"/>',
+ 'Leads':'<path d="M3.5 13.5h4l1.6 2.6h5.8l1.6-2.6h4"/><path d="M6.6 4.8h10.8a2 2 0 0 1 1.83 1.2l2.27 5.1v6.4a2 2 0 0 1-2 2H4.5a2 2 0 0 1-2-2v-6.4l2.27-5.1a2 2 0 0 1 1.83-1.2Z"/>',
+ 'CNPJ':'<path d="M3 20.5h18"/><path d="M5.5 20.5V6.4L13 3.5v17"/><path d="M18.5 20.5v-9.3L13 9.1"/>',
+ 'Cotações':'<rect x="4.2" y="2.6" width="15.6" height="18.8" rx="2.4"/><path d="M8 7.6h8M8 11.4h8M8 15.2h4.6"/>',
+ 'Notas':'<path d="M14.2 2.8H6.8a2 2 0 0 0-2 2v14.4a2 2 0 0 0 2 2h10.4a2 2 0 0 0 2-2V7.8l-5-5Z"/><path d="M14.2 2.8v5h5"/><path d="M8.6 13h6.8M8.6 16.4h4.6"/>',
+ 'Hoje':'<rect x="3.4" y="4.6" width="17.2" height="16.4" rx="2.6"/><path d="M3.4 9.4h17.2"/><path d="M8.2 2.8v3.4M15.8 2.8v3.4"/><path d="M8.6 14.6l2.1 2.1 4.4-4.4"/>',
+ 'CRM':'<circle cx="10.5" cy="8" r="3.6"/><path d="M4 20.2a6.5 6.5 0 0 1 13 0"/><path d="M19.5 6.6v5.2M16.9 9.2h5.2"/>',
+};
+const svg = d => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'+d+'</svg>';
+
+function trilho(ativo){
+  return '<div id="job-trilho">'
+    + '<div class="job-logo"><div class="job-logo-txt">JOB</div></div>'
+    + TRILHO.map(n=>{
+        const on = n===ativo ? ' job-trilho-item-ativo':'';
+        const badge = n==='Leads' ? '<span class="job-trilho-item-badge">5</span>'
+                    : n==='Hoje' ? '<span class="job-fila-badge atraso">3</span>' : '';
+        const ponto = (n==='Cotações'||n==='CRM') ? '<span class="job-trilho-ponto"></span>':'';
+        return '<button class="job-trilho-item'+on+'">'
+          + '<span class="job-trilho-item-icone">'+svg(ICO[n])+'</span>'
+          + '<span class="job-trilho-item-label">'+n+'</span>'+badge+ponto+'</button>';
+      }).join('')
+    + '<div class="job-trilho-rodape"></div>'
+    + '<div class="job-trilho-versao"><span class="job-trilho-versao-num">v3.84.0</span></div>'
+    + '<div class="job-trilho-marca on"></div>'
+    + '</div>';
+}
+
+function painel(){
+  return '<div id="job-painel-doc">'
+   + '<div class="job-painel-doc-header"><span class="job-painel-doc-logo">'
+   +   '<span class="job-logo" style="width:28px;height:28px;margin:0"><span class="job-logo-txt">JOB</span></span>'
+   +   '<span class="job-painel-doc-titulo">JOB</span></span>'
+   +   '<button class="job-painel-doc-fechar">×</button></div>'
+   + '<div class="job-painel-doc-corpo">'
+   +   '<div class="job-sec-head"><div class="job-sec-head-row">'
+   +     '<div class="job-sec-t">Hoje</div><span class="job-sec-cont">3</span></div>'
+   +     '<div class="job-sec-sub">O que o JOB diz pra atacar agora, com o motivo de cada um.</div></div>'
+   +   '<div class="job-fila-cab"><b class="job-fila-atraso">1 atrasada(s)</b> · 2 para hoje</div>'
+   +   '<div class="job-fila-item atrasada"><div class="job-fila-tit">Retomar cotação parada</div>'
+   +     '<div class="job-fila-lead">Adriana Cosso Scartozzoni<span class="job-fila-tag">2 dias</span></div></div>'
+   +   '<div class="job-fila-item"><div class="job-fila-tit">Lead novo sem contato</div>'
+   +     '<div class="job-fila-lead">Mauricio Fiorotto</div></div>'
+   +   '<div class="job-ia-alerta">Score limitado a 400: conversa parada há mais de 10 dias.</div>'
+   +   '<div class="job-modelo-card"><div class="job-modelo-nome">Abertura PME</div>'
+   +     '<div class="job-modelo-preview">Oi! Vi que você tem interesse em plano empresarial…</div>'
+   +     '<div class="job-modelo-acoes"><button class="job-modelo-enviar">Enviar</button>'
+   +     '<button class="job-modelo-copiar">Copiar</button></div></div>'
+   +   '<div class="job-sem-analise job-vazio-bloco"><div class="job-sem-analise-t">Você está em dia</div>'
+   +     '<div class="job-sem-analise-txt">Nada atrasado e nada marcado pra hoje. Quando entrar lead novo, aparece aqui sozinho.</div>'
+   +     '<button class="job-analisar-btn job-vazio-btn">Ver leads</button></div>'
+   +   '<div class="job-erro job-erro-bloco"><div class="job-erro-t">Não consegui carregar os funis</div>'
+   +     '<div class="job-erro-d">Pode ser a conexão ou o JOB fora do ar por um instante.</div>'
+   +     '<button class="job-analisar-btn">Tentar de novo</button></div>'
+   +   '<div class="job-sem-analise"><div class="job-carregando"></div>'
+   +     '<div class="job-sem-analise-txt">Montando sua fila…</div></div>'
+   + '</div></div>';
+}
+
+const CONV = [['Boa tarde, tudo bem?',0],['Tudo! Me manda os valores?',1],['Claro, dois minutos',0],['Obrigado 🙏',1],['Vou te mandar o comparativo agora',0]];
+for (const tema of ['escuro','claro']) {
+  const lado = document.getElementById('L-'+tema);
+  const fundo = document.createElement('div'); fundo.className='fundo';
+  fundo.innerHTML = CONV.map(([t,eu])=>'<div class="bolha'+(eu?' eu':'')+'">'+t+'</div>').join('');
+  lado.appendChild(fundo);
+  const palco = document.createElement('div'); palco.className='palco';
+  palco.setAttribute('data-job-tema', tema);   // o CSS usa body[data-job-tema] — ver nota abaixo
+  palco.innerHTML = trilho('Hoje') + painel();
+  lado.appendChild(palco);
+}
+// O tema claro no CSS real é body[data-job-tema="claro"]. Na bancada eu preciso
+// dos DOIS lado a lado, então copio as variáveis do bloco claro para o palco claro.
+// A pílula é MEDIDA do item ativo, igual ao produto: posição chutada aqui
+// esconderia justamente o defeito que a bancada existe pra pegar.
+requestAnimationFrame(() => document.querySelectorAll('.palco').forEach((p) => {
+  const tr = p.querySelector('#job-trilho'), m = p.querySelector('.job-trilho-marca');
+  const at = p.querySelector('.job-trilho-item-ativo');
+  if (!tr || !m || !at) return;
+  const rt = tr.getBoundingClientRect(), ri = at.getBoundingClientRect();
+  m.style.setProperty('--y', Math.round(ri.top - rt.top) + 'px');
+  m.style.setProperty('--h', Math.round(ri.height) + 'px');
+}));
+
+(function(){
+  const alvo = document.querySelector('.lado.claro .palco');
+  const claro = {
+    '--job-bg0':'#efece4','--job-bg1':'#f4f1e8','--job-bg1b':'#f2efe7','--job-bg2':'#fdfcf9',
+    '--job-bg3':'#e2ded1','--job-bg3-hover':'#d5d0c0','--job-txt':'#1c1a13',
+    '--job-txt-fraco':'#6b6553','--job-txt-fraco2':'#837c68','--job-acento':'#0f9d76',
+    '--job-acento-txt':'#ffffff','--job-borda':'#e2ded1',
+    '--job-warn':'#9a5b00','--job-warn-bg':'rgba(255,176,32,.13)','--job-warn-bd':'rgba(190,120,10,.32)',
+    '--job-info':'#1d4ed8','--job-danger':'#be123c','--job-danger-bg':'rgba(225,29,72,.10)',
+    '--job-danger-bd':'rgba(225,29,72,.30)','--job-roxo':'#6d28d9','--job-sucesso':'#0a6f54',
+  };
+  for (const [k,v] of Object.entries(claro)) alvo.style.setProperty(k,v);
+})();
+</script>

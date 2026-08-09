@@ -215,6 +215,36 @@ suposição seria mandar a pessoa procurar o que talvez não esteja lá.
 
 ---
 
+## COMO ESTA PASSADA FOI FEITA ERRADO — 09/08/2026
+
+Da 3.79 à 3.84 eu mandei **seis versões de redesenho sem olhar um pixel
+renderizado.** Validei cada uma com contagem de `grep` e cálculo de contraste,
+e publiquei direto no navegador do Guilherme. Ele testou seis vezes o que eu
+deveria ter visto antes — e na sexta a resposta foi *"testei e odiei"*.
+
+O que a auditoria mediu depois:
+
+| | fundo | meu texto (3.84) | distância |
+|---|---|---|---|
+| escuro | matiz 240 | matiz 165 | **75°** |
+| claro | matiz 45 (creme quente) | matiz 160 (verde frio) | **115°** |
+
+E o valor do tema claro que eu apaguei por "ser cinza" (`#756f5e`) tinha matiz
+**44**, colada no fundo de matiz 45: era um neutro **quente e escolhido**.
+
+Além disso a 3.84 quebrou a regra 2 do `CLAUDE.md` — um commit só mudou 82
+cores, a fonte inteira, nove ícones, o movimento e o material, 848 linhas. Ele
+não tinha como dizer qual parte odiou.
+
+**A correção de processo:** `scripts/bancada-telas.html` desenha o trilho e o
+painel com o `content.css` de verdade, nos dois temas lado a lado, sobre um
+fundo que imita a conversa do WhatsApp. **Nenhuma mudança de visual sai sem
+passar por ela primeiro.**
+
+```bash
+python3 -m http.server 8899 --directory scripts
+```
+
 ## Como eu meço se funcionou
 
 Regra sua, de "medir antes de opinar": não adianta eu dizer que ficou melhor.

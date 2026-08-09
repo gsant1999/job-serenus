@@ -18,8 +18,11 @@
      escolheu cor. O texto secundário agora carrega a MESMA matiz do acento,
      só dessaturado: continua sendo "a voz baixa", mas é a voz baixa DESTA
      marca, e não um cinza de sistema. */
-  --job-txt-fraco: #93b3ab;
-  --job-txt-fraco2: #7d9a93;
+  /* Harmoniza com o fundo (matiz 240) e desvia LEVE na direção do acento —
+     não atravessa a roda pro verde, que foi o erro da 3.84: verde sobre
+     violeta são 75° de briga. Mais claro que o cinza antigo, pra ter vida. */
+  --job-txt-fraco: #a4aec4;
+  --job-txt-fraco2: #8b95ab;
   --job-acento: #1fd8a4;
   --job-acento-txt: #0a0a10;
   --job-borda: #26262f;
@@ -38,21 +41,27 @@
 body[data-job-tema="claro"] {
   /* Off-white morno, não branco-papel estéril — pedido do Guilherme, 18/07. */
   --job-bg0: #efece4;
-  --job-bg1: #f7f5ef;
+  --job-bg1: #f4f1e8;
   --job-bg1b: #f2efe7;
-  --job-bg2: #efece2;
+  /* O cartão era #efece2 contra um painel #f7f5ef: 3% de diferença, e na tela
+     ele simplesmente não existia. Cartão agora é quase branco e SOBE do fundo
+     — separação por luz, que é como superfície empilhada se lê. */
+  --job-bg2: #fdfcf9;
   --job-bg3: #e2ded1;
   --job-bg3-hover: #d5d0c0;
   --job-txt: #1c1a13;
   /* Mesma regra no claro: matiz do acento, escurecida até passar em contraste. */
-  --job-txt-fraco: #4a6b60;
-  --job-txt-fraco2: #5d7d72;
+  /* O fundo do tema claro é creme QUENTE (matiz 45), a pedido dele em 18/07.
+     Texto verde frio ali eram 115° de dissonância — o defeito mais visível da
+     3.84. Volta a ser quente, com um toque de verde-oliva pra não ser cinza. */
+  --job-txt-fraco: #6b6553;
+  --job-txt-fraco2: #837c68;
   --job-acento: #0f9d76;
   --job-acento-txt: #ffffff;
   --job-borda: #e2ded1;
   /* Semânticas no tema CLARO: versões ESCURAS e saturadas (o amarelo/roxo
      claros do tema escuro somem sobre o off-white). Contraste AA garantido. */
-  --job-warn: #8a5a00;      --job-warn-bg: rgba(202,138,4,.16);   --job-warn-bd: rgba(160,110,0,.34);
+  --job-warn: #9a5b00;      --job-warn-bg: rgba(255,176,32,.13);  --job-warn-bd: rgba(190,120,10,.32);
   --job-info: #1d4ed8;      --job-info-bg: rgba(37,99,235,.10);   --job-info-bd: rgba(37,99,235,.30);
   --job-danger: #be123c;    --job-danger-bg: rgba(225,29,72,.10); --job-danger-bd: rgba(225,29,72,.30);
   --job-roxo: #6d28d9;      --job-roxo-bg: rgba(124,58,237,.10);  --job-roxo-bd: rgba(124,58,237,.28);
@@ -516,13 +525,20 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   letter-spacing: var(--job-tk-md); margin-bottom: 4px; }
 .job-erro-d { font-size: 12px; line-height: 1.5; opacity: .9; margin-bottom: 12px; }
 .job-erro-bloco .job-analisar-btn { width: 100%; }
+/* UM PRIMÁRIO SÓ.
+   Este botão era azul (#3b82f6) enquanto o "Enviar" da mesma tela era verde
+   (o acento). Dois primários brigando = nenhum, e o pior caso aparecia dentro
+   do cartão de erro: botão azul dentro de bloco vermelho.
+   Agora ele usa o acento da marca, como todo botão que é a ação principal. */
 .job-analisar-btn {
-  background: #3b82f6; color: #fff; border: none; border-radius: 999px;
-  padding: 10px 22px; font-size: 13px; font-weight: 500; cursor: pointer;
-  font-family: inherit; line-height: 1.2;
-  transition: background .15s ease, transform .1s ease-out;
+  background: var(--job-acento); color: var(--job-acento-txt); border: none; border-radius: 999px;
+  padding: 10px 22px; font-family: var(--job-ui); font-size: 13px; font-weight: 640;
+  letter-spacing: var(--job-tk-sm); cursor: pointer; line-height: 1.2;
+  box-shadow: var(--job-elev-1);
+  transition: filter var(--job-t-rapido) ease, transform var(--job-t-toque) ease-out,
+              box-shadow var(--job-t-rapido) ease;
 }
-.job-analisar-btn:hover { background: #5a97f8; }
+.job-analisar-btn:hover { filter: brightness(1.08); box-shadow: var(--job-elev-2); }
 /* Resposta no aperto: o feedback chega quando o dedo desce, não quando sobe. */
 .job-analisar-btn:active { transform: scale(.97); }
 .job-analisar-btn:focus-visible { outline: 2px solid var(--job-acento); outline-offset: 2px; }
@@ -1449,8 +1465,13 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-resumo { font-size: 12px; line-height: 1.6; color: var(--job-txt-fraco); white-space: normal;
   background: var(--job-bg2); border: 1px solid var(--job-bg3); border-radius: 10px; padding: 10px 12px; }
 .job-rodape { font-size: 10.5px; color: var(--job-txt-fraco2); margin-top: 14px; text-align: center; }
-.job-erro { background: rgba(244, 63, 94, .12); color: var(--job-danger); border: 1px solid rgba(244, 63, 94, .3);
-  border-radius: 10px; padding: 12px; font-size: 13px; }
+/* Erro é INFORMAÇÃO, não alarme de incêndio. Era um bloco vermelho inteiro,
+   fundo e texto, ocupando a tela. Agora o texto é o texto normal (que se lê),
+   a tinta é leve e quem carrega a severidade é a faixa da borda. */
+.job-erro { background: var(--job-danger-bg); color: var(--job-txt);
+  border: 1px solid var(--job-danger-bd);
+  border-radius: 10px; padding: 12px; font-family: var(--job-ui); font-size: 13px; }
+.job-erro-t { color: var(--job-danger); }
 .job-vazio { font-size: 12px; color: var(--job-txt-fraco); }
 
 /* ── Seção Funis: sequências de disparo (padrão ZapVoice, cores do JOB) ── */
