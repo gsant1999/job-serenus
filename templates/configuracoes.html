@@ -167,14 +167,7 @@ async function salvarNotificacaoWpp(ligado){
 </style>
 <script>
 const _PERFIL_ESCOPOS = {{ perfil_escopos|tojson }};
-const _MODULOS = {
-  'CRM': ['crm:ler', 'crm:escrever'],
-  'Cotação': ['cotacao:ler', 'cotacao:escrever'],
-  'WhatsApp': ['whatsapp:ler', 'whatsapp:enviar'],
-  'Financeiro': ['financeiro:ler', 'financeiro:escrever'],
-  'Propostas': ['propostas:ler', 'propostas:escrever'],
-  'IA': ['ia:usar']
-};
+const _MODULOS = {{ api_escopos|tojson }};
 
 function akAtualizaEscopos() {
   const select = document.getElementById('ak-dono');

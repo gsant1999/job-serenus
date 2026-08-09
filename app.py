@@ -5371,7 +5371,7 @@ def requer(escopo):
 
                 return _wa_cors(r[0]), r[1]
                 
-            if reg.get('usuario_id'):
+            if dict(reg).get('usuario_id'):
                 g.usuario_id = reg['usuario_id']
             else:
                 app.logger.warning(f"[API] chave sem dono id={reg['id']}")
