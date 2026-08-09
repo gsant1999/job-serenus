@@ -6535,26 +6535,129 @@
     //
     // Guarda de imagem ja buscada: os tres botoes (copiar, baixar, mandar)
     // pedem a mesma imagem. Sem isto, cada um abriria a sua aba.
+    // A imagem e desenhada aqui, entao "buscar" virou "desenhar". Guarda o
+    // resultado porque os tres botoes pedem a mesma coisa.
     let _imgCache = null;
     async function _cotPegarImagem(btn, aoTer) {
       if (_imgCache) { aoTer(_imgCache); return; }
       const antes = btn.textContent;
-      btn.disabled = true; btn.textContent = 'Buscando…';
-      let r = null;
-      try { r = await _safeSendMessage({ type: 'cotacao_imagem', id: r_id }); }
-      catch (e) { r = null; }
-      if (r && r.erro === 'imagem_ausente') {
-        // O OBVIO DITO: ele precisa saber por que demora, senao acha travado.
-        btn.textContent = 'Montando a imagem…';
-        try { r = await _safeSendMessage({ type: 'cotacao_imagem_gerar', id: r_id }); }
-        catch (e) { r = null; }
-      }
-      btn.disabled = false;
-      btn.textContent = antes;
-      if (r && r.ok && r.dataUrl) { _imgCache = r.dataUrl; aoTer(r.dataUrl); return; }
-      btn.textContent = (r && r.erro === 'demorou_demais')
-        ? 'Demorou — tentar de novo' : 'Falhou — tentar de novo';
+      btn.disabled = true; btn.textContent = 'Desenhando…';
+      const dataUrl = await _cotDesenharPNG(lista);
+      btn.disabled = false; btn.textContent = antes;
+      if (dataUrl) { _imgCache = dataUrl; aoTer(dataUrl); return; }
+      btn.textContent = 'Não consegui desenhar';
       setTimeout(() => { btn.textContent = antes; }, 3200);
+    }
+
+    // ── A COTACAO DESENHADA AQUI DENTRO ──────────────────────────────────
+    //
+    // Duas tentativas minhas de "provocar" o desenho abrindo o documento no
+    // navegador — aba fixada e janela minimizada — tiraram o consultor do
+    // WhatsApp. A segunda o Chrome abriu por cima de tudo. Nao ha terceira
+    // tentativa por esse caminho: a extensao passa a DESENHAR a cotacao ela
+    // mesma e virar PNG ali, com html2canvas embarcado.
+    //
+    // Sem servidor, sem aba, sem janela, e instantaneo.
+    //
+    // Desenha num bloco de 980px fora da tela porque o painel tem 380 e a
+    // cotacao e uma tabela de colunas — espremer aqui daria uma imagem que o
+    // cliente nao le. O preview e o PNG de verdade, reduzido: o que ele ve e
+    // exatamente o que sai.
+    function _cotDocHTML(lista) {
+      const S = {
+        cx: 'width:980px;padding:38px 40px;background:#fff;color:#111b21;' +
+            'font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;box-sizing:border-box',
+        h1: 'margin:0 0 18px;font-size:27px;font-weight:800;letter-spacing:-.01em;color:#0b141a',
+        meta: 'font-size:13px;line-height:1.85;color:#54656f',
+        ml: 'display:inline-block;width:74px;color:#8696a0',
+        tb: 'width:100%;border-collapse:collapse;margin-top:26px;font-size:14px',
+        th: 'padding:12px 10px;border-bottom:2px solid #e9edef;text-align:center;' +
+            'font-size:15px;font-weight:800;color:#0b141a',
+        thop: 'display:block;margin-top:2px;font-size:11.5px;font-weight:500;color:#8696a0',
+        rl: 'padding:11px 10px;border-bottom:1px solid #f0f2f5;color:#54656f;white-space:nowrap',
+        rv: 'padding:11px 10px;border-bottom:1px solid #f0f2f5;text-align:center;color:#111b21',
+        tl: 'padding:15px 10px;font-size:15px;font-weight:800;color:#0b141a',
+        tv: 'padding:15px 10px;text-align:center;font-size:19px;font-weight:800;color:#0b141a',
+        qt: 'margin-left:6px;color:#1fa97f;font-weight:700',
+        rod: 'margin-top:26px;padding-top:16px;border-top:1px solid #f0f2f5;' +
+             'font-size:11px;line-height:1.6;color:#8696a0',
+      };
+      // As faixas vem com nomes diferentes das duas fontes. Ler so um nome
+      // deixaria metade da tabela vazia — e tabela de preco vazia na mao do
+      // cliente e pior que nao mandar.
+      const linhasDe = (p) => (p.faixas || []).map((f) => ({
+        rot: f.label || f.faixa || '',
+        qtd: f.qtd != null ? f.qtd : (f.quantidade != null ? f.quantidade : 1),
+        val: f.unitario != null ? f.unitario : (f.preco != null ? f.preco : f.valor),
+      })).filter((f) => f.rot);
+      // A ordem das faixas e a mesma em todos: uma linha por faixa que apareca
+      // em qualquer plano, na ordem em que apareceu.
+      const faixas = [];
+      lista.forEach((p) => linhasDe(p).forEach((f) => {
+        if (!faixas.some((x) => x.rot === f.rot)) faixas.push({ rot: f.rot, qtd: f.qtd });
+      }));
+      const valor = (p, rot) => {
+        const f = linhasDe(p).filter((x) => x.rot === rot)[0];
+        return f && f.val != null ? _cotMoeda(f.val) : '—';
+      };
+      const cliente = (_cotLead && _cotLead.nome) || nomeDoContato() || 'Cliente';
+      const hoje = new Date();
+      const dd = (n) => (n < 10 ? '0' : '') + n;
+      const quando = dd(hoje.getDate()) + '/' + dd(hoje.getMonth() + 1) + '/' + hoje.getFullYear() +
+                     ' ' + dd(hoje.getHours()) + ':' + dd(hoje.getMinutes());
+      return '<div style="' + S.cx + '">' +
+        '<div style="' + S.h1 + '">' + esc(cliente.toUpperCase()) + ' · ' +
+          esc(String(_cot.cidade || '').toUpperCase()) + ' · ' +
+          esc(_cotRotulo(_cot.modalidade).toUpperCase()) + '</div>' +
+        '<div style="' + S.meta + '">' +
+          '<div><span style="' + S.ml + '">Cotação</span>' + esc(quando) + '</div>' +
+          '<div><span style="' + S.ml + '">Cliente</span>' + esc(cliente) + '</div>' +
+        '</div>' +
+        '<table style="' + S.tb + '"><thead><tr><th style="' + S.rl + '"></th>' +
+          lista.map((p) => '<th style="' + S.th + '">' + esc(_cotNomePlano(p)) +
+            '<span style="' + S.thop + '">' + esc(_texto(p.operadora) ||
+              (_cotFeitas.filter((f) => f.planos.indexOf(p) >= 0)[0] || {}).nome || '') +
+            '</span></th>').join('') +
+        '</tr></thead><tbody>' +
+        ['Modalidade', 'Acomodação', 'Coparticipação'].map((rot, k) =>
+          '<tr><td style="' + S.rl + '">' + rot + '</td>' +
+          lista.map((p) => {
+            const pl = p.plano || {}, tb = p.tabela || {};
+            const v = k === 0 ? _cotRotulo(_cot.modalidade)
+                    : k === 1 ? (pl.acomodacaoTxt || (pl.acomodacao ? 'Apartamento' : 'Enfermaria'))
+                    : _cotCopart(tb);
+            return '<td style="' + S.rv + '">' + esc(v) + '</td>';
+          }).join('') + '</tr>').join('') +
+        faixas.map((f) =>
+          '<tr><td style="' + S.rl + '">' + esc(f.rot) +
+            '<span style="' + S.qt + '">' + f.qtd + 'x</span></td>' +
+          lista.map((p) => '<td style="' + S.rv + '">' + valor(p, f.rot) + '</td>').join('') +
+          '</tr>').join('') +
+        '<tr><td style="' + S.tl + '">Total</td>' +
+          lista.map((p) => '<td style="' + S.tv + '">' +
+            (p.total == null ? '—' : _cotMoeda(p.total)) + '</td>').join('') +
+        '</tr></tbody></table>' +
+        '<div style="' + S.rod + '"><b>Informativo Referencial:</b> valores e demais condições ' +
+          'são determinados pelas seguradoras e podem ser alterados a qualquer momento. ' +
+          'Reservamo-nos o direito de corrigir eventuais erros, não vinculando esta oferta à ' +
+          'prestação do serviço, que se dará apenas no ato da assinatura do contrato.</div>' +
+      '</div>';
+    }
+
+    async function _cotDesenharPNG(lista) {
+      if (typeof html2canvas !== 'function') return null;
+      const cx = document.createElement('div');
+      // Fora da tela, nao escondido: display:none e visibility:hidden fazem o
+      // html2canvas medir tudo como zero e devolver imagem em branco.
+      cx.style.cssText = 'position:fixed;left:-99999px;top:0;z-index:-1;background:#fff';
+      cx.innerHTML = _cotDocHTML(lista);
+      document.body.appendChild(cx);
+      try {
+        const canvas = await html2canvas(cx.firstElementChild,
+                                         { scale: 2, backgroundColor: '#ffffff', logging: false });
+        return canvas.toDataURL('image/png');
+      } catch (e) { return null; }
+      finally { cx.remove(); }
     }
 
     // PREVIEW: ele ve o que o cliente vai receber ANTES de mandar.

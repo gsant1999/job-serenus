@@ -383,57 +383,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     buscarImagem(msg.id).then(sendResponse);
     return true;
   }
-  // GERAR A IMAGEM SEM TIRAR O CONSULTOR DA CONVERSA.
+  // NENHUMA JANELA, NENHUMA ABA. NUNCA MAIS.
   //
-  // A imagem da cotacao e desenhada NO NAVEGADOR quando alguem abre o
-  // documento — o servidor nao tem navegador. Ate agora o jeito de provocar
-  // isso era window.open() no content script: o WhatsApp sumia da frente, ele
-  // caia numa aba do JOB no meio do atendimento e ainda tinha que voltar
-  // sozinho e clicar de novo. O Guilherme reclamou exatamente disso.
+  // Isto abria o documento no navegador so pra provocar o desenho da imagem —
+  // primeiro numa aba fixada (aparecia na barra dele), depois numa janela
+  // minimizada que o Chrome resolveu abrir POR CIMA DE TUDO. Duas tentativas,
+  // duas vezes tirando o consultor do WhatsApp no meio do atendimento.
   //
-  // Aba INATIVA faz o mesmo trabalho sem roubar o foco: o documento carrega,
-  // desenha e manda a imagem pro servidor; a gente fica perguntando pela
-  // imagem ate ela existir e fecha a aba. Iframe seria mais discreto, mas
-  // depende de o JOB permitir enquadramento — aba inativa nao depende de nada.
+  // Agora a extensao desenha a cotacao sozinha, dentro do painel, e transforma
+  // esse desenho em PNG ali mesmo (html2canvas embarcado). Nao depende do
+  // servidor, nao abre nada e e instantaneo. Esta mensagem some do content.js;
+  // fica aqui so respondendo pra quem tiver a versao velha carregada.
   if (msg && msg.type === 'cotacao_imagem_gerar') {
-    (async () => {
-      const { jobUrl } = await config();
-      // JANELA MINIMIZADA, NAO ABA.
-      //
-      // Primeira tentativa foi aba inativa e fixada: nao rouba o foco, mas
-      // APARECE na barra de abas do WhatsApp dele — e ele viu. Janela propria
-      // minimizada nao entra na barra de abas nenhuma e fecha sozinha.
-      //
-      // O certo seria um iframe invisivel, e nao da: /cotacao/documento exige
-      // sessao (iframe de outro site nao leva o cookie) e /c/<token> conta
-      // abertura e notifica "o cliente abriu a cotacao" — dado falso na cara
-      // do consultor e no CRM. Pedi um `?render=1` no contrato pra fechar isso.
-      let jan = null;
-      try {
-        jan = await chrome.windows.create({
-          url: jobUrl + '/cotacao/documento/' + msg.id,
-          type: 'popup', focused: false, state: 'minimized' });
-      } catch (e) { sendResponse({ ok: false, erro: 'nao_consegui_abrir' }); return; }
-      // PERGUNTA CEDO E DEPOIS ESPACA.
-      //
-      // Era um passo fixo de 2s: a imagem quase sempre ficava pronta em menos
-      // de um segundo e mesmo assim ele esperava dois. Agora a primeira
-      // pergunta e em 400ms e o intervalo so cresce se ela demorar mesmo —
-      // caso de cotacao com muitos planos. Teto continua perto de 24s, que e
-      // o tempo em que desistir seria dizer "falhou" pra imagem que ia nascer.
-      const ESPERAS = [400, 400, 500, 600, 800, 1000, 1400, 1800, 2200, 2600,
-                       3000, 3000, 3000, 3000];
-      let achou = null;
-      for (let i = 0; i < ESPERAS.length; i++) {
-        await new Promise((r) => setTimeout(r, ESPERAS[i]));
-        const r = await buscarImagem(msg.id);
-        if (r.ok) { achou = r; break; }
-      }
-      try { if (jan && jan.id) await chrome.windows.remove(jan.id); } catch (e) {}
-      sendResponse(achou || { ok: false, erro: 'demorou_demais' });
-    })();
+    sendResponse({ ok: false, erro: 'gerado_no_painel' });
     return true;
   }
+
   // AS TABELAS DO PROPRIO JOB COMO SEGUNDA FONTE DE COTACAO.
   //
   // A cotacao da extensao so falava com o Painel do Corretor. MedSenior,
