@@ -2978,3 +2978,73 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
    porque é o caminho de volta, e o título é onde você chegou. */
 .job-sec-head-cot .job-cot-topo { margin-bottom: 8px; }
 .job-sec-head-cot .job-sec-sub { margin: 3px 0 0; }
+
+
+/* A folha de salvar contato tem campo dentro, então é mais alta que a de
+   confirmação e precisa caber em tela pequena. */
+.job-folha-nome .job-folha-caixa { max-width: 460px; max-height: 88vh; overflow-y: auto; }
+.job-folha-nome .job-nomec-chips { margin: 4px 0 10px; }
+.job-folha-nome #job-folha-nome {
+  width: 100%; box-sizing: border-box; margin-bottom: 14px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda); border-radius: 10px;
+  padding: 11px 12px; color: var(--job-txt);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; outline: none;
+  transition: border-color var(--job-t-rapido) ease, box-shadow var(--job-t-rapido) ease;
+}
+.job-folha-nome #job-folha-nome:focus {
+  border-color: var(--job-acento); box-shadow: 0 0 0 3px color-mix(in srgb, var(--job-acento) 18%, transparent);
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   O QUE O JOB JÁ SABE — resumo do lead na tela de Análise
+
+   A tela abria com um título e um botão, como se o JOB não soubesse nada da
+   pessoa. Sabe: etapa, origem, responsável, e-mail, empresa, há quanto tempo
+   está parado e tudo que já foi respondido na qualificação. Esconder isso até
+   alguém clicar em "analisar" faz o consultor abrir o site pra ver o que já
+   estava aqui.
+   ══════════════════════════════════════════════════════════════════════════ */
+.job-resumo {
+  border: 1px solid var(--job-borda); border-radius: 14px;
+  background: var(--job-bg2); padding: 13px 14px; margin-bottom: 14px;
+  font-family: var(--job-ui);
+}
+.job-resumo-cab { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.job-resumo-nome {
+  flex: 1; min-width: 0; font-size: 14.5px; font-weight: 680; color: var(--job-txt);
+  letter-spacing: var(--job-tk-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.job-resumo-etapa {
+  flex: none; font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+  letter-spacing: var(--job-tk-xs); white-space: nowrap;
+}
+.job-resumo-saude { font-size: 11.5px; font-weight: 600; margin-bottom: 10px; }
+
+/* Rótulo e valor em COLUNAS, não em frase corrida: a coluna é o que deixa
+   passar o olho por seis campos sem ler nenhum inteiro. */
+.job-resumo-grade { display: flex; flex-direction: column; }
+.job-resumo-l {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 6px 0; border-top: 1px solid color-mix(in srgb, var(--job-txt) 7%, transparent);
+}
+.job-resumo-l:first-child { border-top: none; padding-top: 0; }
+.job-resumo-l .k {
+  flex: 0 0 34%; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--job-txt-fraco2); line-height: 1.35;
+}
+.job-resumo-l .v {
+  flex: 1; min-width: 0; font-size: 12.5px; color: var(--job-txt); line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.job-resumo-ir {
+  width: 100%; margin-top: 12px; padding: 8px; border-radius: 999px;
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco); font-family: inherit; font-size: 12px; font-weight: 600;
+  letter-spacing: var(--job-tk-sm); cursor: pointer;
+  transition: background var(--job-t-rapido) ease, border-color var(--job-t-rapido) ease, color var(--job-t-rapido) ease;
+}
+.job-resumo-ir:hover {
+  background: color-mix(in srgb, var(--job-acento) 10%, transparent);
+  border-color: color-mix(in srgb, var(--job-acento) 55%, transparent); color: var(--job-txt);
+}

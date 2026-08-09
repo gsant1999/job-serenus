@@ -2800,8 +2800,12 @@
             if (tel) await _carregarFicha({ telefone: tel });
           } catch (e) { /* segue com o nome da tela */ }
         }
-        const nome = (_ficha && _ficha.lead ? _montarNomeContato() : (nomeDoContato() || '')).trim();
-        if (!nome) { rotulo(bsv, 'Sem nome'); return; }
+        const sugerido = (_ficha && _ficha.lead ? _montarNomeContato() : (nomeDoContato() || '')).trim();
+        // A ÚLTIMA PALAVRA É DE QUEM CONHECE O CLIENTE. O padrão monta, a
+        // folha mostra, a pessoa corrige se quiser — sem sair da conversa e
+        // sem um segundo botão.
+        const nome = await _folhaSalvarContato(sugerido);
+        if (!nome) { rotulo(bsv, r0); return; }
         const partes = nome.split(/\s+/);
         const primeiro = partes.shift() || nome;
         const sobrenome = partes.join(' ');
@@ -3541,6 +3545,21 @@
     }
     _fichaTel = tel;
     await _carregarFicha({ telefone: tel });
+  }
+
+  // Busca a ficha SEM desenhar nada. O `_carregarFicha` pinta a tela do CRM —
+  // chamar ele de outra seção jogaria a ficha por cima da tela onde a pessoa
+  // está. Aqui só enche `_ficha`, pra quem quiser desenhar um resumo.
+  async function _carregarFichaSilenciosa(alvo) {
+    let resp;
+    try { resp = await _safeSendMessage(Object.assign({ type: 'ficha_lead', chat_id: _chatAberto }, alvo)); }
+    catch (e) { resp = null; }
+    if (!resp || !resp.ok) return false;
+    _ficha = resp;
+    _fichaIgnorada = !!resp.ignorada;
+    if (alvo && alvo.telefone) _fichaTel = alvo.telefone;
+    _trilhoPontosDoCache();
+    return true;
   }
 
   async function _carregarFicha(alvo) {
@@ -6558,6 +6577,10 @@
     if (cancelBtn) cancelBtn.addEventListener('click', () => cancelarAnalise(cancelBtn.dataset.reqid));
     const analisarBtn = document.getElementById('job-analisar-btn');
     if (analisarBtn) analisarBtn.addEventListener('click', rodarAnalise);
+    // O resumo do lead aparece em várias telas; o botão dele é ligado aqui,
+    // junto com os outros, pra não existir um caminho que desenha e esquece.
+    const irFicha = document.getElementById('job-resumo-ficha');
+    if (irFicha) irFicha.addEventListener('click', () => abrirSecao('ficha'));
   }
 
   // ═══════════════ Múltiplas análises em paralelo (estado + pílula) ═══════════════
@@ -6605,11 +6628,69 @@
 
   var _ANALISE_SUB = 'O JOB lê a conversa e devolve o resumo, o interesse e o que fazer a seguir.';
 
+  // ══ O QUE O JOB JÁ SABE ═══════════════════════════════════════════════
+  //
+  // A tela de Análise abria vazia — um título e um botão — como se o JOB não
+  // soubesse nada daquela pessoa. Mas ele sabe: etapa, origem, responsável,
+  // cidade, empresa, e-mail, há quanto tempo está parado, e tudo que já foi
+  // respondido na qualificação. Esconder isso até alguém clicar em "analisar"
+  // faz o consultor abrir o site pra ver o que já estava aqui.
+  //
+  // O score NÃO entra aqui de propósito: ele nasce da análise da conversa
+  // (tabela wa_analise), não do cadastro. Mostrar um score antes de ler a
+  // conversa seria inventar número — e número inventado numa tela de decisão
+  // é pior que número nenhum. Ele aparece assim que a leitura roda.
+  function _resumoDoLead() {
+    const f = _ficha, l = (f && f.lead) || null;
+    if (!f || !f.existe || !l) return '';
+
+    const linha = (rot, val, cls) => val
+      ? '<div class="job-resumo-l' + (cls ? ' ' + cls : '') + '">' +
+          '<span class="k">' + esc(rot) + '</span>' +
+          '<span class="v">' + esc(val) + '</span></div>'
+      : '';
+
+    const etapa = (f.etapas || []).find((e) => e.id === l.etapa);
+    // Só os campos de qualificação RESPONDIDOS: listar os vazios transformaria
+    // o resumo numa lista de buracos, e o buraco tem lugar próprio (a aba de
+    // qualificação, que já diz o que falta pra avançar).
+    const respondidos = (f.campos_def || [])
+      .map((c) => ({ nome: c.nome, v: (f.campos_val || {})[c.chave] }))
+      .filter((x) => x.v !== null && x.v !== undefined && String(x.v).trim() !== '')
+      .slice(0, 8);
+
+    return '<div class="job-resumo">' +
+      '<div class="job-resumo-cab">' +
+        '<div class="job-resumo-nome">' + esc(l.nome || _fichaTel || 'Sem nome') + '</div>' +
+        (etapa
+          ? '<span class="job-resumo-etapa" style="background:' + esc((etapa.cor || '#64748b')) + '22;color:' +
+            esc(etapa.cor || '#94a3b8') + '">' + esc(etapa.nome) + '</span>'
+          : '') +
+      '</div>' +
+      (f.saude && f.saude.texto
+        ? '<div class="job-resumo-saude job-saude-' + esc(f.saude.nivel || '') + '">' +
+          esc(f.saude.texto) + '</div>' : '') +
+      '<div class="job-resumo-grade">' +
+        linha('Telefone', l.telefone) +
+        linha('E-mail', l.email) +
+        linha('Empresa', l.empresa) +
+        linha('Origem', l.origem) +
+        linha('Responsável', f.responsavel_nome) +
+        linha('Sub-status', l.sub_status) +
+        respondidos.map((x) => linha(x.nome, String(x.v))).join('') +
+      '</div>' +
+      // A saída pra ficha completa mora aqui: quem lê o resumo e quer mudar
+      // alguma coisa não devia ter que caçar a aba.
+      '<button type="button" class="job-resumo-ir" id="job-resumo-ficha">Abrir a ficha do lead</button>' +
+      '</div>';
+  }
+
   function telaSemAnalise() {
     return _secHead('Análise', _ANALISE_SUB) +
+      _resumoDoLead() +
       '<div class="job-sem-analise">' +
       '<div class="job-sem-analise-t">Ainda sem análise</div>' +
-      '<div class="job-sem-analise-txt">Nada foi lido desta conversa até agora. A leitura demora alguns segundos e fica salva.</div>' +
+      '<div class="job-sem-analise-txt">O JOB ainda não leu esta conversa. A leitura devolve o resumo, o interesse e o Score do Lead — demora alguns segundos e fica salva.</div>' +
       '<button class="job-analisar-btn" id="job-analisar-btn">Analisar este lead</button>' +
       '</div>';
   }
@@ -6691,8 +6772,34 @@
   // de conversa — nunca deixa a análise do cliente anterior "grudada" na tela
   // do cliente novo. Só mexe se a seção estiver de fato aberta agora.
   let _syncToken = 0; // marca a sincronização atual (pro watchdog do spinner)
+  // A ficha do lead alimenta o resumo da Análise. Ela só era buscada quando o
+  // consultor abria a aba CRM — então a tela mais usada da extensão abria sem
+  // saber nada de quem estava do outro lado. Buscar aqui é UMA chamada, com
+  // cache por conversa, e ela redesenha a tela quando chega.
+  // Telefone já consultado nesta conversa. Sem isto, um contato SEM lead
+  // (resposta ok, `lead` nulo) faria a busca disparar de novo a cada
+  // sincronização — a cada 1,5s, pra sempre, contra o servidor.
+  var _resumoBuscado = '';
+
+  async function _garantirFichaParaResumo() {
+    try {
+      if (_ficha && _ficha.lead && _fichaTel) return;
+      let tel = '';
+      try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+      if (!tel || _resumoBuscado === tel) return;
+      _resumoBuscado = tel;
+      const veio = await _carregarFichaSilenciosa({ telefone: tel });
+      // Redesenha só se a pessoa AINDA está na Análise: a busca demora, e
+      // pintar por cima de uma tela que ela já trocou é o pior tipo de bug.
+      if (veio && _secaoAtiva === 'analise') sincronizarPainelComConversa();
+    } catch (e) { _falhaTecnica('resumo do lead', e); }
+  }
+
   async function sincronizarPainelComConversa() {
     if (_secaoAtiva !== 'analise') return;
+    // Puxa a ficha em segundo plano: não bloqueia nada e redesenha quando
+    // chega. Sem await de propósito — a análise não pode esperar o CRM.
+    _garantirFichaParaResumo();
     const chaveAtual = chaveConversa(telefoneDoContato(), nomeDoContato());
     // Identidade ESTÁVEL da conversa aberta pro guard "trocou de conversa?".
     // NÃO usar telefoneDoContato() aqui: o número raspado do DOM flipa (aparece
@@ -7578,6 +7685,91 @@
       // O foco começa no CANCELAR, não no confirmar: quem aperta espaço sem
       // ler não pode apagar nada por acidente.
       setTimeout(() => { const n = el.querySelector('#job-folha-nao'); if (n) n.focus(); }, 40);
+    });
+  }
+
+  // ══ FOLHA DE SALVAR CONTATO ═══════════════════════════════════════════
+  //
+  // O botão do cabeçalho salvava direto, com o nome que as regras do CRM
+  // montaram. Funciona, mas tira a última palavra de quem conhece o cliente —
+  // e nome de contato é coisa que se corrige olhando.
+  //
+  // Em vez de um segundo botão ou de mandar pra aba do CRM, o próprio botão
+  // abre uma folha flutuante com o nome já pronto e editável, e os pedaços
+  // que o compõem à mão. Mesma linguagem do portão de login: superfície de
+  // vidro por cima do WhatsApp, fundo recuando atrás.
+  //
+  // Devolve Promise<string|null> — o nome final, ou null se cancelou.
+  function _folhaSalvarContato(nomeInicial) {
+    return new Promise((resolve) => {
+      const velha = document.getElementById('job-folha');
+      if (velha) velha.remove();
+
+      const chips = _PARTES_NOME.map((pp) => {
+        const val = _pedacoDaFicha(pp.id);
+        const on = _partesLigadas[pp.id] && val;
+        return '<button type="button" class="job-nomec-chip' + (on ? ' on' : '') +
+          (val ? '' : ' vazio') + '" data-parte="' + pp.id + '"' + (val ? '' : ' disabled') + '>' +
+          '<span class="cat">' + pp.rot + '</span>' +
+          '<span class="val' + (val ? '' : ' vazio') + '">' + (val ? esc(val) : '—') + '</span>' +
+          '</button>';
+      }).join('');
+
+      const el = document.createElement('div');
+      el.id = 'job-folha';
+      el.className = 'job-folha solta job-folha-nome';
+      el.innerHTML =
+        '<div class="job-folha-fundo"></div>' +
+        '<div class="job-folha-caixa" role="dialog" aria-modal="true">' +
+          '<div class="job-folha-puxador"></div>' +
+          '<div class="job-folha-t">Salvar contato</div>' +
+          '<div class="job-folha-d">Confira o nome antes de gravar. Ele fica assim no seu WhatsApp e no celular.</div>' +
+          '<div class="job-nomec-sub">Toque pra somar ao nome</div>' +
+          '<div class="job-nomec-chips">' + chips + '</div>' +
+          '<input type="text" id="job-folha-nome" class="job-campo" ' +
+            'aria-label="Nome que vai pra agenda" value="' + esc(nomeInicial || '') + '">' +
+          '<button class="job-folha-ok" id="job-folha-ok">Salvar na agenda</button>' +
+          '<button class="job-folha-nao" id="job-folha-nao">Cancelar</button>' +
+        '</div>';
+      document.body.appendChild(el);
+      requestAnimationFrame(() => el.classList.add('on'));
+
+      const inp = el.querySelector('#job-folha-nome');
+      let respondido = false;
+      const fechar = (v) => {
+        if (respondido) return; respondido = true;
+        el.classList.remove('on');
+        document.removeEventListener('keydown', naTecla, true);
+        setTimeout(() => el.remove(), 260);
+        resolve(v);
+      };
+      function naTecla(e) {
+        if (e.key === 'Escape') { e.stopPropagation(); fechar(null); }
+        else if (e.key === 'Enter' && document.activeElement === inp) {
+          e.stopPropagation(); fechar((inp.value || '').trim() || null);
+        }
+      }
+      document.addEventListener('keydown', naTecla, true);
+      el.querySelector('.job-folha-fundo').addEventListener('click', () => fechar(null));
+      el.querySelector('#job-folha-nao').addEventListener('click', () => fechar(null));
+      el.querySelector('#job-folha-ok').addEventListener('click', () => fechar((inp.value || '').trim() || null));
+      // Ligar/desligar um pedaço reescreve o nome NA HORA: é o que faz o chip
+      // deixar de ser aposta. E respeita quem já editou à mão — só reescreve
+      // se o campo ainda estiver com o texto que o padrão montou.
+      let ultimoMontado = nomeInicial || '';
+      el.querySelectorAll('.job-nomec-chip:not(.vazio)').forEach((c) => {
+        c.addEventListener('click', () => {
+          const k = c.dataset.parte;
+          _partesLigadas[k] = !_partesLigadas[k];
+          c.classList.toggle('on', _partesLigadas[k]);
+          try { chrome.storage.local.set({ jobNomeContatoPartes: _partesLigadas }); } catch (e) {}
+          const novo = _montarNomeContato();
+          if ((inp.value || '').trim() === String(ultimoMontado).trim()) inp.value = novo;
+          ultimoMontado = novo;
+        });
+      });
+      // O foco vai pro CAMPO, não no cancelar: aqui a pessoa veio pra escrever.
+      setTimeout(() => { if (inp) { inp.focus(); inp.select(); } }, 60);
     });
   }
 
@@ -8944,8 +9136,10 @@
     const chaveAgora = nomeDoContato() || chaveConversa(telefoneDoContato(), nomeDoContato());
     if (chaveAgora === _ultimaChaveVista) return;
     _ultimaChaveVista = chaveAgora;
-    // A conversa mudou: os pontos do contato anterior não valem mais.
+    // A conversa mudou: os pontos do contato anterior não valem mais, e o
+    // resumo pode ser buscado de novo pro contato novo.
     _trilhoPontosLimpar();
+    _resumoBuscado = '';
     sincronizarPainelComConversa();
   }, 1500));
 
