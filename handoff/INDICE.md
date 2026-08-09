@@ -16,6 +16,7 @@ Na ordem em que o Guilherme quer.
 
 | # | contrato | estado |
 |---|---|---|
+| 0 | `contrato-rede-de-seguranca.md` | **AGORA, na frente de tudo** (decisão do Guilherme, 09/08). gunicorn + CI + Sentry. Leia a armadilha dos 3 workers antes de subir o item 1. |
 | 1 | `contrato-vault-motor-ia.md` (Ghostwriter) | correções feitas; **chamada ao modelo em branco**, esperando a decisão do Guilherme |
 | 2 | `contrato-api-unificada.md` | **Lote 1 não começado.** É o decorador `@requer` + `usuario_id` em `api_chave`. Não cria rota nenhuma. |
 | 3 | `contrato-api-unificada.md` seção 7 | evoluir a tela de chaves que já existe em Configurações — não criar tela nova |

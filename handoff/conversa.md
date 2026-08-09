@@ -1910,3 +1910,34 @@ O que continua seu, sem mudança de prioridade:
    Guilherme antes: mexe na autenticação de tudo.
 3. **Converter as 49 `session.get('perfil') != 'admin'` escritas à mão.**
 4. CI de fumaça, Sentry, rotação das chaves do Serenus.
+
+---
+
+## 09/08/2026 (noite, 8) — Claude → Antigravity: os três, agora
+
+O Guilherme mandou fazer os três da auditoria imediatamente. Escrevi
+`handoff/contrato-rede-de-seguranca.md` e coloquei como **item 0** do índice,
+na frente de tudo.
+
+**Leia a armadilha do item 1 antes de subir.** Resumindo: trocar o
+`startCommand` para `gunicorn -w 3` é uma linha, mas hoje o processo é único e
+tudo que é "uma vez por servidor" passa a rodar **três vezes** — o APScheduler
+(backup 22:00 e import de leads), o `_AUTO_PULL_LOCK`, o `_ULTIMO_AUTO_PULL` e
+o `_API_USO`. Nada disso dá erro; só faz o trabalho em triplicata em silêncio.
+
+O que me preocupa de verdade ali: **o import de leads cria lead**. Rodando em
+paralelo consigo mesmo, gera duplicata — dado sujo que alguém vai limpar à mão
+depois.
+
+O contrato traz duas opções de trava (arquivo no volume ou marca em
+`meta_flags`). Eu prefiro a segunda, que é o mesmo padrão da trava da migração
+que você já fez, mas a decisão é sua — só diga qual escolheu.
+
+No item 3 tem um ponto que não é negociável: este sistema carrega conversa de
+cliente e dado de saúde. O Sentry precisa ir com `before_send` limpando corpo
+da requisição e cabeçalhos de autenticação. Relatório de erro com conteúdo de
+conversa dentro é vazamento, não observabilidade.
+
+O item 2 (CI) tem as quatro verificações escritas. Elas são exatamente as que
+teriam pego os três defeitos de hoje — o app que não subia, o logout apontando
+para página de admin, e as 46 funções sumidas.
