@@ -5314,6 +5314,26 @@
     return tratado || (_cotLead && _cotLead.nome) || nomeDoContato() || 'Cliente';
   }
 
+  // CONTEXTO DO DOCUMENTO — corretor, marca e empresa do lead.
+  //
+  // A extensao sabia so o id e o nome de quem entrou, entao o desenho saia sem
+  // logo, sem o e-mail do consultor e com o nome do contato no lugar do nome
+  // do cliente. Buscado uma vez e guardado: nao muda durante o expediente.
+  let _cotCtx = null;
+  async function _cotContexto() {
+    if (_cotCtx) return _cotCtx;
+    const { usuarioId } = await _safeStorageGet(['usuarioId']);
+    let r = null;
+    try {
+      r = await _safeSendMessage({ type: 'cotacao_contexto', usuarioId: usuarioId || '',
+                                   leadId: (_cotLead && _cotLead.id) || '' });
+    } catch (e) { r = null; }
+    // Guarda ate a resposta ruim: sem isto, cada repintura tentaria de novo
+    // e a tela ficaria pedindo o mesmo dado a cada clique.
+    _cotCtx = (r && r.ok) ? r : { ok: false, corretor: {}, lead: {}, marca: {} };
+    return _cotCtx;
+  }
+
   function _cotNomePlano(p) {
     return ((p && p.plano) || {}).nome || (p && p.nome) || 'Plano';
   }
@@ -5574,6 +5594,14 @@
         ? 'Vai sair assim: ' + _cotNomeCliente(bruto, pme, iMei && iMei.checked)
         : 'Em branco, sai o nome do contato do WhatsApp — que costuma ser anotação sua.';
     };
+    // A RAZAO SOCIAL VEM DO CADASTRO quando o lead ja tem. Ele so digita
+    // quando o CRM ainda nao sabe — e o que digitar aqui nao apaga nada la.
+    if (iCli && !iCli.value) {
+      _cotContexto().then((ctx) => {
+        const emp = ((ctx || {}).lead || {}).empresa || '';
+        if (emp && iCli && !iCli.value) { iCli.value = emp; verCliente(); }
+      });
+    }
     if (iCli) iCli.addEventListener('input', verCliente);
     if (iMei) iMei.addEventListener('change', verCliente);
     verCliente();
@@ -6837,20 +6865,50 @@
       const dd = (n) => (n < 10 ? '0' : '') + n;
       const quando = dd(hoje.getDate()) + '/' + dd(hoje.getMonth() + 1) + '/' + hoje.getFullYear() +
                      ' ' + dd(hoje.getHours()) + ':' + dd(hoje.getMinutes());
+      // MESMO CABECALHO DO DOCUMENTO DO SITE, campo por campo: titulo,
+      // Cotacao/Corretor/E-mail/Telefone/Cliente a esquerda, marca a direita.
+      // Ele conferiu o meu contra o do site e faltavam justamente estes.
+      const ctx = _cotCtx || {};
+      const co = ctx.corretor || {}, mc = ctx.marca || {};
+      const par = (k, v) => v ? '<div><span style="' + S.ml + '">' + k + '</span>' + esc(v) + '</div>' : '';
+      const opDe = (p) => _texto(p.operadora) ||
+        (_cotFeitas.filter((f) => f.planos.indexOf(p) >= 0)[0] || {}).nome || '';
       return '<div style="' + S.cx + '">' +
-        '<div style="' + S.h1 + '">' + esc(cliente.toUpperCase()) + ' · ' +
-          esc(String(_cot.cidade || '').toUpperCase()) + ' · ' +
-          esc(_cotRotulo(_cot.modalidade).toUpperCase()) + '</div>' +
-        '<div style="' + S.meta + '">' +
-          '<div><span style="' + S.ml + '">Cotação</span>' + esc(quando) + '</div>' +
-          '<div><span style="' + S.ml + '">Cliente</span>' + esc(cliente) + '</div>' +
+        '<div style="display:flex;align-items:flex-start;gap:24px">' +
+          '<div style="flex:1;min-width:0">' +
+            '<div style="' + S.h1 + '">' + esc(cliente) + ' · ' +
+              esc(String(_cot.cidade || '')) + ' · ' +
+              esc(_cotRotulo(_cot.modalidade)) + '</div>' +
+            '<div style="' + S.meta + '">' +
+              par('Cotação', quando) + par('Corretor', co.nome) + par('E-mail', co.email) +
+              par('Telefone', co.telefone) + par('Cliente', cliente) +
+              par('WhatsApp', _cotLead && _cotLead.telefone) +
+            '</div>' +
+          '</div>' +
+          (mc.logo || mc.nome_curto
+            ? '<div style="flex:none;text-align:right">' +
+                (mc.logo ? '<img src="' + esc(mc.logo) + '" alt="" ' +
+                           'style="max-height:44px;max-width:150px;object-fit:contain">' : '') +
+                '<div style="font-size:15px;font-weight:800;color:#0b141a">' +
+                  esc(mc.nome_curto || '') + '</div>' +
+                '<div style="font-size:11px;color:#8696a0">Corretora</div>' +
+              '</div>'
+            : '') +
         '</div>' +
-        '<table style="' + S.tb + '"><thead><tr><th style="' + S.rl + '"></th>' +
+        '<table style="' + S.tb + '"><thead>' +
+        // A LOGO DA OPERADORA EM CIMA DE CADA COLUNA, como o site faz — a
+        // extensao ja tem todas em data URL de outra tela.
+        '<tr><td style="' + S.rl + '"></td>' +
+          lista.map((p) => {
+            const lg = _cotLogos[_cotChaveLogo(opDe(p))];
+            return '<td style="padding:6px 10px;text-align:center">' +
+              (lg ? '<img src="' + esc(lg) + '" alt="" ' +
+                    'style="max-height:34px;max-width:120px;object-fit:contain">' : '') + '</td>';
+          }).join('') + '</tr>' +
+        '<tr><th style="' + S.rl + '"></th>' +
           lista.map((p) => '<th style="' + S.th + '">' + esc(_cotNomePlano(p)) +
-            '<span style="' + S.thop + '">' + esc(_texto(p.operadora) ||
-              (_cotFeitas.filter((f) => f.planos.indexOf(p) >= 0)[0] || {}).nome || '') +
-            '</span></th>').join('') +
-        '</tr></thead><tbody>' +
+            '<span style="' + S.thop + '">' + esc(opDe(p)) + '</span></th>').join('') +
+        '</tr></thead><tbody>'+
         ['Modalidade', 'Acomodação', 'Coparticipação'].map((rot, k) =>
           '<tr><td style="' + S.rl + '">' + rot + '</td>' +
           lista.map((p) => {
@@ -6878,6 +6936,8 @@
 
     async function _cotDesenharPNG(lista) {
       if (typeof html2canvas !== 'function') return null;
+      await _cotContexto();          // logo, corretor e e-mail vem do JOB
+      await _cotCarregarLogos();     // as logos das operadoras, ja em data URL
       const cx = document.createElement('div');
       // Fora da tela, nao escondido: display:none e visibility:hidden fazem o
       // html2canvas medir tudo como zero e devolver imagem em branco.

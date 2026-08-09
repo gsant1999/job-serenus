@@ -425,6 +425,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               { repetivel: true }).then(sendResponse);
     return true;
   }
+  // Cabecalho do documento: corretor, marca (com o logo ja em data URL) e os
+  // dados de empresa do lead. Uma chamada, porque sao tres perguntas que so
+  // aparecem juntas.
+  if (msg && msg.type === 'cotacao_contexto') {
+    const q = new URLSearchParams();
+    if (msg.usuarioId) q.set('usuario_id', msg.usuarioId);
+    if (msg.leadId) q.set('lead_id', msg.leadId);
+    chamarJob('/api/whatsapp/extensao/cotacao/contexto?' + q.toString(),
+              'GET', null, 15000).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'cotacao_legendas') {
     chamarJob('/cotacao/legendas/api', 'GET', null, 12000).then(sendResponse);
     return true;
