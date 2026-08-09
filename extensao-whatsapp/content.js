@@ -3616,22 +3616,43 @@
             'END:VCARD'].filter(Boolean).join('\r\n');
   }
 
+  // ══ SALVAR O CONTATO NO CELULAR ═══════════════════════════════════════
+  //
+  // Antes eram DOIS botões principais lado a lado — "Copiar nome" e "Baixar
+  // contato (.vcf)" — sem hierarquia, e o caminho que eles ofereciam não
+  // levava a lugar nenhum: o .vcf caía na pasta de downloads do COMPUTADOR, e
+  // a dica mandava o consultor se virar com AirDrop, e-mail ou Drive pra levar
+  // até o telefone. Ninguém faz isso no meio de um atendimento.
+  //
+  // O caminho que funciona é o do WhatsApp mesmo: o cartão vai pra SUA
+  // própria conversa ("mensagem para si mesmo"). Ele chega no celular na
+  // hora, e lá basta tocar e "Adicionar aos contatos" — um passo, sem app,
+  // sem autorizar conta de Google nem de Apple.
+  //
+  // A escrita direta na agenda do Google/Apple não é possível daqui: exige o
+  // consultor autorizar a conta dele, e isso é um projeto, não um botão. Não
+  // vou prometer o que não entrego.
   function _blocoNomeContato() {
     return '<div class="job-nomec">' +
-      '<div class="job-nomec-tit">Nome do contato' +
+      '<div class="job-nomec-tit">Salvar contato' +
         '<span class="job-nomec-i" title="Monta o nome no mesmo padrão sempre, pra você achar o contato pela busca do WhatsApp e entender a lista de relance. Nada é salvo sozinho: você edita e escolhe o que fazer.">i</span>' +
       '</div>' +
+      '<div class="job-nomec-sub">O que entra no nome</div>' +
       '<div class="job-nomec-chips">' +
         _PARTES_NOME.map((p) => '<button type="button" class="job-nomec-chip' +
           (_partesLigadas[p.id] ? ' on' : '') + '" data-parte="' + p.id + '">' + p.rot + '</button>').join('') +
       '</div>' +
-      '<input type="text" class="job-campo" id="job-nomec-val">' +
+      // O campo é editável de propósito: o padrão monta, a pessoa corrige.
+      '<input type="text" class="job-campo" id="job-nomec-val" ' +
+        'aria-label="Nome que vai pra agenda" placeholder="Nome do contato">' +
+      // UMA ação principal. As outras duas existem, mas não competem.
+      '<button type="button" class="job-cnpj-btn" id="job-nomec-eu">Mandar pro meu WhatsApp</button>' +
       '<div class="job-nomec-btns">' +
-        '<button type="button" class="job-cnpj-btn" id="job-nomec-copiar">Copiar nome</button>' +
-        '<button type="button" class="job-cnpj-btn" id="job-nomec-vcf">Baixar contato (.vcf)</button>' +
+        '<button type="button" class="job-copy" id="job-nomec-copiar">Copiar nome</button>' +
+        '<button type="button" class="job-copy" id="job-nomec-vcf">Baixar .vcf</button>' +
       '</div>' +
-      '<div class="job-nomec-dica" id="job-nomec-dica">Copie e cole em "Novo contato" do WhatsApp. ' +
-        'O .vcf abre direto na agenda do celular — é o que leva o contato pro telefone.</div>' +
+      '<div class="job-nomec-dica" id="job-nomec-dica">O cartão chega na sua própria conversa. ' +
+        'No celular, toque nele e escolha "Adicionar aos contatos".</div>' +
     '</div>';
   }
 
@@ -3714,10 +3735,21 @@
     const curto = atual ? (atual.split('@')[0].slice(0, 18) + (atual.split('@')[0].length > 18 ? '…' : '')) : '';
     const eLid = atual.indexOf('@lid') > 0;
     if (jaTem) {
-      return '<div class="job-vinc ok">' +
+      // ERA UMA FAIXA MORTA. O identificador é a informação mais importante
+      // desta tela — é ele que amarra a conversa ao lead — e estava impresso
+      // como um número solto de 15 dígitos, sem hierarquia e sem servir pra
+      // nada. Agora a linha inteira é o atalho pro lead no CRM do JOB: quem
+      // olha o vínculo é justamente quem quer abrir a ficha completa.
+      const lid = (l && l.id) ? (_SITE_BASE_URL_EXT + '/crm?lead=' + l.id) : '';
+      const dentro =
         '<span class="job-vinc-tag ' + (eLid ? 'lid' : 'num') + '">' + (eLid ? '@lid' : 'nº') + '</span>' +
-        '<code>' + esc(curto) + '</code>' +
-        '<span class="job-vinc-txt">conversa vinculada a este lead</span></div>';
+        '<span class="job-vinc-id">' + esc(curto) + '</span>' +
+        '<span class="job-vinc-txt">vinculada' + (l && l.nome ? ' a ' + esc(l.nome) : ' a este lead') + '</span>' +
+        (lid ? '<span class="job-vinc-seta">' + _svgIco('chevron', 13) + '</span>' : '');
+      return lid
+        ? '<a class="job-vinc ok clicavel" href="' + esc(lid) + '" target="_blank" rel="noopener" ' +
+          'title="Abrir este lead no CRM do JOB">' + dentro + '</a>'
+        : '<div class="job-vinc ok">' + dentro + '</div>';
     }
     if (!atual) {
       return '<div class="job-vinc"><span class="job-vinc-txt">Não consegui identificar a conversa aberta.</span></div>';
@@ -3841,7 +3873,11 @@
         '</div>' +
         '<div class="job-ficha-corpo">' + corpo + '</div>' +
         '<div class="job-ficha-rodape">' +
-          '<button class="job-cnpj-btn" id="job-ficha-salvar">Salvar no JOB</button>' +
+          // SALVAR NASCE DESLIGADO. Ele ficava aceso o tempo todo, convidando a
+          // gravar uma ficha em que nada mudou — escrita à toa no banco e uma
+          // ação que não faz nada, que é o pior tipo de botão. Só acende
+          // quando existe alteração; o texto diz o estado em vez de mandar.
+          '<button class="job-cnpj-btn" id="job-ficha-salvar" disabled>Nada para salvar</button>' +
           // NAO E LEAD. O consultor fala com amigo, familia e fornecedor no
           // mesmo WhatsApp, e cada analise virava um card no CRM. O botao mora
           // ao lado do Salvar porque e a mesma decisao, invertida: "isto entra"
@@ -3849,9 +3885,14 @@
           // que estar onde a pessoa ja esta olhando quando percebe o engano.
           (_fichaIgnorada
             ? '<div class="job-nao-lead marcada">Marcada como pessoal<button type="button" id="job-desmarcar">desfazer</button></div>'
+            // O rótulo tinha uma frase inteira dentro, e o botão ocupava a
+            // largura toda por causa dela — parecia a ação principal do
+            // rodapé, sendo a mais rara. Duas palavras bastam: a folha de
+            // confirmação já explica o que acontece, e explicar duas vezes
+            // não deixa mais claro, deixa mais pesado.
             : '<button class="job-nao-lead" id="job-nao-lead" ' +
               'title="Marca esta conversa como pessoal: o JOB para de ler e nunca mais cria lead dela.">' +
-              'Não é lead — parar de ler esta conversa</button>') +
+              'Não é lead</button>') +
           // ABRIR NO JOB SOBE PRO RODAPE. Ele existia, mas como link discreto
           // DEPOIS do bloco 'Nome do contato' — que e longo — entao vivia fora
           // da vista: pra achar era preciso rolar ate o fim de uma coluna
@@ -3900,9 +3941,14 @@
       // consultor decide o que fazer com o lead: saber HA QUANTO TEMPO ele esta
       // parado no mesmo passo muda a decisao, e antes esse tempo so existia no
       // site. Sem sub-status escolhido nao ha o que cronometrar.
+      // O RELÓGIO NÃO PODE DEPENDER DO SUB-STATUS. Ele só aparecia com um
+      // sub-status escolhido — e é exatamente no lead SEM sub-status que
+      // saber há quanto tempo ele está parado importa mais. O CRM do site
+      // mostra sempre; aqui passa a mostrar também, dizendo o que conta.
       '<div class="job-ficha-campo"><label>Sub-status <span class="job-ficha-dica">o que falta pra avançar</span>' +
-        ((l.sub_status && f.saude && f.saude.desde_ts)
-          ? '<span class="job-ficha-cron" id="job-cron-ss" data-desde="' + f.saude.desde_ts + '">' +
+        ((f.saude && f.saude.desde_ts)
+          ? '<span class="job-ficha-cron" id="job-cron-ss" data-desde="' + f.saude.desde_ts + '" ' +
+            'title="Tempo parado ' + (l.sub_status ? 'neste sub-status' : 'nesta etapa') + '">' +
             esc(f.saude.idade_txt || '') + '</span>' : '') +
         '</label>' +
         '<select data-ficha="sub_status">' +
@@ -4039,10 +4085,23 @@
         _renderFicha(b.dataset.aba);
       });
     });
+    // SUJO LIGA O SALVAR. Uma função só, chamada de qualquer campo, pra não
+    // existir um caminho que altera a ficha e esquece de acender o botão.
+    const _marcarSujo = () => {
+      _fichaSujo = true;
+      const s = document.getElementById('job-ficha-salvar');
+      if (s && s.disabled) { s.disabled = false; s.textContent = 'Salvar no JOB'; }
+    };
     document.querySelectorAll('.job-ficha [data-ficha], .job-ficha [data-campo], .job-ficha [data-etq]').forEach((el) => {
-      el.addEventListener('input', () => { _fichaSujo = true; });
-      el.addEventListener('change', () => { _fichaSujo = true; });
+      el.addEventListener('input', _marcarSujo);
+      el.addEventListener('change', _marcarSujo);
     });
+    // A ficha pode nascer suja: quem troca de aba com alteração pendente volta
+    // e o botão tem que continuar aceso.
+    if (_fichaSujo) {
+      const s0 = document.getElementById('job-ficha-salvar');
+      if (s0) { s0.disabled = false; s0.textContent = 'Salvar no JOB'; }
+    }
     // Etiqueta pinta na hora — feedback imediato, salvamento vem no Salvar
     document.querySelectorAll('.job-ficha [data-etq]').forEach((chk) => {
       chk.addEventListener('change', () => {

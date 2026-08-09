@@ -2644,3 +2644,92 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 }
 #job-painel-doc input::placeholder,
 #job-painel-doc textarea::placeholder { color: var(--job-txt-fraco2); opacity: 1; }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FICHA DO CRM — rodapé e vínculo
+
+   Três coisas erradas de uma vez: o identificador da conversa (a informação
+   que amarra tudo) era uma faixa morta com um número de 15 dígitos solto; o
+   "Não é lead" tinha uma frase inteira dentro e ocupava a largura toda,
+   parecendo a ação principal sendo a mais rara; e o "Abrir no JOB" tinha o
+   mesmo peso do Salvar.
+
+   Peso de botão tem que corresponder à frequência de uso. Salvar é o que se
+   faz sempre; abrir no site é atalho; "não é lead" acontece uma vez por mês.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* O VÍNCULO VIRA ATALHO. Linha inteira clicável, com a seta dizendo que leva
+   a algum lugar — e o identificador em fonte tabular, que é o que torna um
+   número de 15 dígitos conferível de relance. */
+.job-vinc.clicavel {
+  text-decoration: none; cursor: pointer;
+  transition: border-color var(--job-t-rapido) ease, background var(--job-t-rapido) ease,
+              transform var(--job-t-toque) ease-out;
+}
+.job-vinc.clicavel:hover {
+  border-color: var(--job-acento);
+  background: color-mix(in srgb, var(--job-acento) 9%, transparent);
+}
+.job-vinc.clicavel:active { transform: scale(.99); }
+.job-vinc.clicavel:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); outline: none; }
+.job-vinc-id {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums; font-size: 11px;
+  color: var(--job-txt); letter-spacing: .02em;
+}
+.job-vinc-txt { color: var(--job-txt-fraco); }
+.job-vinc-seta { margin-left: auto; line-height: 0; color: var(--job-txt-fraco); transform: rotate(-90deg); }
+.job-vinc.clicavel:hover .job-vinc-seta { color: var(--job-acento); }
+
+/* "NÃO É LEAD" — ação rara, tamanho de ação rara. Deixa de ser bloco de
+   largura cheia com fundo vermelho e vira um botão discreto. A cor de perigo
+   fica reservada pro momento em que ela decide algo: a folha de confirmação. */
+.job-nao-lead {
+  width: auto; margin-top: 0; padding: 8px 12px;
+  font-size: 12px; font-weight: 600; letter-spacing: var(--job-tk-sm);
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco); border-radius: 999px;
+}
+.job-nao-lead:hover {
+  background: var(--job-danger-bg); border-color: var(--job-danger-bd); color: var(--job-danger);
+}
+/* O ⊘ era um caractere de fonte na interface — mesma regra dos outros. */
+.job-nao-lead::before { content: none; }
+
+/* "ABRIR NO JOB" — atalho, não ação principal. Mesma linha do "Não é lead",
+   os dois dividindo o espaço que sobra abaixo do Salvar. */
+.job-ficha-abrir {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: auto; flex: 1 1 auto; margin-top: 0; padding: 8px 12px;
+  border-radius: 999px; font-size: 12px; font-weight: 600;
+  letter-spacing: var(--job-tk-sm);
+  border: 1px solid var(--job-borda); color: var(--job-txt-fraco); background: transparent;
+}
+.job-ficha-abrir:hover {
+  background: color-mix(in srgb, var(--job-acento) 10%, transparent);
+  border-color: color-mix(in srgb, var(--job-acento) 55%, transparent);
+  color: var(--job-txt);
+}
+/* Os dois secundários lado a lado, embaixo do Salvar. */
+.job-ficha-rodape { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+.job-ficha-rodape > .job-cnpj-btn { flex: 1 1 100%; margin-top: 0; }
+.job-ficha-rodape > .job-ficha-aviso { flex: 1 1 100%; }
+.job-ficha-rodape .job-nao-lead { flex: 1 1 auto; }
+
+
+/* A etiqueta @lid tinha cor de texto fixa (#d8b4fe), calibrada pro fundo
+   escuro: sobre a tinta clara do tema claro ela sumia — virava um retângulo
+   roxo vazio, que foi exatamente o que apareceu no print. Cor semântica do
+   tema resolve nos dois. */
+.job-vinc-tag { font-size: 9px; font-weight: 800; letter-spacing: .04em;
+  padding: 2px 6px; border-radius: 5px; font-family: var(--job-ui); }
+.job-vinc-tag.lid { background: var(--job-roxo-bg); color: var(--job-roxo); }
+.job-vinc-tag.num { background: var(--job-sucesso-bg); color: var(--job-sucesso); }
+
+/* Os dois secundários DIVIDEM a linha em vez de empilhar. Com flex-basis
+   automática eles herdavam a largura do conteúdo mais o `width:100%` antigo e
+   quebravam pra baixo, virando três blocos de largura cheia — de novo sem
+   hierarquia nenhuma. */
+.job-ficha-rodape .job-nao-lead,
+.job-ficha-rodape .job-ficha-abrir { flex: 1 1 0; min-width: 0; width: auto; }
