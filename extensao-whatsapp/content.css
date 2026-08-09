@@ -176,9 +176,19 @@ html.job-push-esquerda.job-overlay-painel { margin-left: calc(var(--job-viz, 0px
   position: fixed; top: 0; right: var(--job-viz, 0px); bottom: 0; width: 72px;
   z-index: 2147483000;
   display: flex; flex-direction: column; align-items: center;
-  background: color-mix(in srgb, var(--job-bg1) 72%, transparent);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
-  backdrop-filter: blur(22px) saturate(160%);
+  /* O TRILHO TEM COR PRÓPRIA, E NÃO É CINZA.
+     Ele era o fundo do tema a 72%: bege puxado pra cinza no claro, chumbo no
+     escuro. Agora a superfície leva uma lavagem do acento — continua discreta,
+     porque é moldura e não conteúdo, mas é uma superfície VERDE clara em vez
+     de uma superfície sem cor.
+     E isso conserta de tabela o item inativo: com a superfície tingida, um
+     texto da mesma família concorda com ela. Foi o que faltou em 3.84, quando
+     eu tentei texto verde sobre o creme quente do PAINEL — ali eram 115° de
+     briga; aqui é a mesma matiz. */
+  background: color-mix(in srgb,
+    color-mix(in srgb, var(--job-bg1) 74%, var(--job-acento)) 84%, transparent);
+  -webkit-backdrop-filter: var(--job-vidro);
+  backdrop-filter: var(--job-vidro);
   border-left: 1px solid color-mix(in srgb, var(--job-txt) 10%, transparent);
   box-shadow: -1px 0 0 rgba(255,255,255,.05) inset, -14px 0 34px rgba(0,0,0,.22);
   padding-top: 16px; gap: 2px;
@@ -192,7 +202,8 @@ html.job-push-esquerda #job-trilho {
 /* Quem pede menos transparência recebe a superfície fechada — legibilidade
    antes do efeito. */
 @media (prefers-reduced-transparency: reduce) {
-  #job-trilho { background: var(--job-bg1); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  #job-trilho { background: color-mix(in srgb, var(--job-bg1) 74%, var(--job-acento));
+    backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
 
 /* Logo JOB: o arquivo REAL dos arcos do sistema (logo_arcos.png) girando,
@@ -230,14 +241,15 @@ html.job-push-esquerda #job-trilho {
      usar antes de qualquer fonte própria. A marca continua no logo, que é
      onde ela é lida como marca. */
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  /* Cor derivada do texto do tema, não um cinza fixo: o #9aa1b5 antigo era
-     azulado e sujava tanto o tema escuro quanto o claro. */
-  color: color-mix(in srgb, var(--job-txt) 62%, transparent);
+  /* NÃO é o texto do tema com transparência: preto a 62% é cinza, e branco a
+     62% também — era literalmente isso que ele estava vendo. O inativo é um
+     neutro DA FAMÍLIA DO ACENTO, a mesma matiz da superfície acima. */
+  color: color-mix(in srgb, var(--job-acento) 55%, var(--job-txt));
   transition: color .2s ease, background .2s ease, transform .1s ease-out;
 }
 .job-trilho-item:hover {
-  color: color-mix(in srgb, var(--job-txt) 88%, transparent);
-  background: color-mix(in srgb, var(--job-txt) 6%, transparent);
+  color: color-mix(in srgb, var(--job-acento) 18%, var(--job-txt));
+  background: color-mix(in srgb, var(--job-acento) 12%, transparent);
 }
 .job-trilho-item-ativo { color: var(--job-txt); background: transparent; }
 
@@ -284,10 +296,10 @@ html.job-push-esquerda #job-trilho {
   border-radius: 13px; z-index: 0; opacity: 0; pointer-events: none;
   background:
     linear-gradient(180deg,
-      color-mix(in srgb, var(--job-txt) 13%, transparent) 0%,
-      color-mix(in srgb, var(--job-txt) 8%, transparent) 100%);
+      color-mix(in srgb, var(--job-acento) 22%, transparent) 0%,
+      color-mix(in srgb, var(--job-acento) 13%, transparent) 100%);
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--job-txt) 13%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--job-acento) 26%, transparent),
     0 2px 8px rgba(0,0,0,.16);
   /* Curva com um respingo de ultrapassagem no fim: o gesto foi um clique, e
      um pouco de impulso faz o movimento parecer físico. Nada de balanço
