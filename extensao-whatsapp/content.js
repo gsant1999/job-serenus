@@ -1084,7 +1084,13 @@
 
   // Redimensionar e o momento em que a medida REALMENTE muda — reavalia na
   // hora, em vez de o usuario esperar ate 12s pelo trilho se ajeitar.
-  window.addEventListener('resize', () => { try { aplicarOffsetVizinhos(); } catch (e) {} });
+  window.addEventListener('resize', () => {
+    try { aplicarOffsetVizinhos(); } catch (e) {}
+    // A barra do trilho é medida em pixels: se o trilho muda de altura (janela
+    // redimensionada, item Dev entrando ou saindo), a medida velha aponta pro
+    // lugar errado.
+    try { _trilhoMarcaSincronizar(); } catch (e) {}
+  });
 
   const JOB_PUSH_MIN_WIDTH = 1360; // trilho+painel+folga mínima pro WhatsApp não espremer
   function aplicarClassesHtml() {
@@ -1188,10 +1194,12 @@
       '<button class="job-trilho-item" data-secao="cotacao" title="Cotações deste cliente: ver, copiar o link e mandar na conversa">' +
         '<span class="job-trilho-item-icone">' + _ICO_COTACAO + '</span>' +
         '<span class="job-trilho-item-label">Cotações</span>' +
+        '<span class="job-trilho-ponto" data-ponto="cotacao" hidden></span>' +
       '</button>' +
       '<button class="job-trilho-item" data-secao="notas" title="Notas do lead">' +
         '<span class="job-trilho-item-icone">' + _ICO_NOTA + '</span>' +
         '<span class="job-trilho-item-label">Notas</span>' +
+        '<span class="job-trilho-ponto" data-ponto="notas" hidden></span>' +
       '</button>' +
       (_devLigado ? '<button class="job-trilho-item" data-secao="dev" title="Modo desenvolvedor: estado de tudo e disparo manual">' +
         '<span class="job-trilho-item-icone">&lt;/&gt;</span>' +
@@ -1204,12 +1212,22 @@
       '<button class="job-trilho-item" data-secao="ficha" title="Ficha do lead: etapa, sub-status, etiquetas, qualificação e atividade">' +
         '<span class="job-trilho-item-icone">' + _ICO_CRM + '</span>' +
         '<span class="job-trilho-item-label">CRM</span>' +
+        '<span class="job-trilho-ponto" data-ponto="ficha" hidden></span>' +
       '</button>' +
       '<div class="job-trilho-rodape">' +
         '<button class="job-trilho-mini" id="job-trilho-config-btn" title="Configurações (tema, desligar)">' + _ICO_CONFIG + '</button>' +
       '</div>' +
-      '<div class="job-trilho-versao" id="job-trilho-versao" title="Versão instalada"></div>';
+      '<div class="job-trilho-versao" id="job-trilho-versao" title="Versão instalada"></div>' +
+      // UMA barra pro trilho inteiro, que anda até o item ativo (ver o CSS).
+      '<div class="job-trilho-marca" id="job-trilho-marca"></div>';
     trilho.querySelectorAll('.job-trilho-item').forEach((item) => {
+      // A barra sai na hora do CLIQUE, não quando a seção termina de carregar.
+      // Esperar a resposta do servidor pra mover o indicador é o que fazia o
+      // trilho parecer travado em conexão lenta: a pessoa clicava e nada
+      // acontecia por meio segundo.
+      item.addEventListener('pointerdown', () => {
+        if (item.dataset.secao && _secaoAtiva !== item.dataset.secao) _trilhoMarcaPara(item);
+      });
       item.addEventListener('click', () => {
         if (item.dataset.acao === 'crm') { _abrirLeadNoCrm(item); return; }  // legado: nenhum botão usa mais
         const secao = item.dataset.secao;
@@ -1218,6 +1236,11 @@
       });
     });
     document.body.appendChild(trilho);
+    // O trilho pode ganhar/perder o item Dev depois de montado; a barra precisa
+    // remedir quando isso acontecer.
+    try {
+      new ResizeObserver(() => { try { _trilhoMarcaSincronizar(); } catch (e) {} }).observe(trilho);
+    } catch (e) { /* navegador sem ResizeObserver: o resize da janela cobre */ }
     document.getElementById('job-trilho-config-btn').addEventListener('click', (e) => {
       // A engrenagem abre a SEÇÃO, não mais o balãozinho. O balão cabia três
       // linhas e a configuração cresceu — entrar no sistema não cabe num
@@ -1354,7 +1377,65 @@
     const p = document.getElementById('job-painel-doc');
     if (p) p.remove();
     document.querySelectorAll('.job-trilho-item').forEach((i) => i.classList.remove('job-trilho-item-ativo'));
+    _trilhoMarcaPara(null);
     aplicarClassesHtml();
+  }
+
+  // ══ A BARRA DO TRILHO ═════════════════════════════════════════════════
+  //
+  // Ela mede o item e escreve a posição/altura em variáveis CSS; a transição
+  // mora no CSS. Como o alvo é sempre uma posição absoluta (e não um
+  // "de-para"), clicar noutra seção no meio do movimento só muda o destino —
+  // a barra continua de onde estiver, sem recomeçar do zero e sem pulo.
+  function _trilhoMarcaPara(item) {
+    const m = document.getElementById('job-trilho-marca');
+    const trilho = document.getElementById('job-trilho');
+    if (!m || !trilho) return;
+    if (!item) { m.classList.remove('on'); return; }
+    const rt = trilho.getBoundingClientRect();
+    const ri = item.getBoundingClientRect();
+    // 8px de folga em cima e embaixo: a barra marca o item, não o encosta.
+    m.style.setProperty('--y', Math.round(ri.top - rt.top + trilho.scrollTop + 8) + 'px');
+    m.style.setProperty('--h', Math.max(0, Math.round(ri.height - 16)) + 'px');
+    m.classList.add('on');
+  }
+
+  function _trilhoMarcaSincronizar() {
+    const ativo = document.querySelector('.job-trilho-item-ativo');
+    _trilhoMarcaPara(ativo || null);
+  }
+
+  // ══ PONTOS POR CONTATO ════════════════════════════════════════════════
+  //
+  // O ponto diz "esta seção tem coisa DESTE contato" — não é pendência, por
+  // isso é ponto e não número. Só acende com dado que a extensão realmente
+  // tem: nada de piscar por suposição.
+  //
+  // LIMITE HONESTO DE HOJE: os caches de cotação e de ficha só se enchem
+  // depois que a pessoa abre a seção uma vez naquela conversa. Então o ponto
+  // aparece a partir da primeira visita e ao salvar uma cotação, não antes.
+  // Pra ele acender já na abertura da conversa falta UMA chamada que devolva
+  // o resumo do contato de uma vez — está pedida no contrato do trilho.
+  function _trilhoPonto(secao, ligado) {
+    const p = document.querySelector('.job-trilho-ponto[data-ponto="' + secao + '"]');
+    if (p) p.hidden = !ligado;
+  }
+
+  // Trocou de conversa: apaga tudo. Ponto de conversa anterior é pior que
+  // ponto nenhum — manda a pessoa procurar o que não está lá.
+  function _trilhoPontosLimpar() {
+    document.querySelectorAll('.job-trilho-ponto').forEach((p) => { p.hidden = true; });
+  }
+
+  function _trilhoPontosDoCache() {
+    try {
+      const cot = _cotCache && _cotCache.dados;
+      if (cot) _trilhoPonto('cotacao', !!(cot.cotacoes && cot.cotacoes.length));
+      if (_ficha && _ficha.existe) _trilhoPonto('ficha', true);
+      // O ponto de NOTAS não sai daqui: `_ficha` não traz as notas (elas vêm
+      // de `notas_listar`, chamada à parte). Ele é aceso lá, quando a lista
+      // chega de verdade — acender por suposição é pior que não acender.
+    } catch (e) { /* marca do trilho nunca pode derrubar a extensão */ }
   }
 
   // ESC fecha o painel da extensão (igual os modais do site do JOB). Só age
@@ -1790,6 +1871,7 @@
     _secaoAtiva = secao;
     document.querySelectorAll('.job-trilho-item').forEach((i) =>
       i.classList.toggle('job-trilho-item-ativo', i.dataset.secao === secao));
+    _trilhoMarcaSincronizar();
     let p = document.getElementById('job-painel-doc');
     if (!p) {
       p = document.createElement('div');
@@ -3406,6 +3488,7 @@
     const idNovo = (resp.lead && resp.lead.id) || null;
     if (_fichaPend.leadId !== idNovo) _fichaPend = _fichaPendVazio(idNovo);
     _fichaIgnorada = !!resp.ignorada;
+    _trilhoPontosDoCache();
     if (!resp.existe) { _renderFichaSemLead(); return; }
     _renderFicha('dados');
   }
@@ -4293,7 +4376,7 @@
     if (!resp) {
       try { resp = await _safeSendMessage({ type: 'cotacoes_do_lead', telefone: tel }); }
       catch (e) { resp = null; }
-      if (resp && resp.ok) _cotCache = { chave: tel, dados: resp };
+      if (resp && resp.ok) { _cotCache = { chave: tel, dados: resp }; _trilhoPontosDoCache(); }
     }
     // Falha NÃO é lista vazia. Lista vazia afirma "nunca cotamos pra este
     // cliente"; falha afirma "não consegui saber". A primeira, dita errada,
@@ -8020,11 +8103,15 @@
     let resp;
     try { resp = await _safeSendMessage({ type: 'notas_listar', telefone: tel }); } catch (e) { resp = null; }
     if (!resp || !resp.ok) {
-      setCorpoSecao('<div class="job-erro">Não consegui carregar as notas agora. <button class="job-copy" id="job-notas-retry" style="width:auto;display:inline;padding:4px 10px;margin-left:6px;">Tentar de novo</button></div>');
+      setCorpoSecao(_secHead('Notas', (nome || tel || 'Este lead')) + _telaFalha(
+        'Não consegui carregar as notas',
+        'Pode ser a conexão ou o JOB fora do ar por um instante. As notas continuam salvas.',
+        'job-notas-retry', 'Tentar de novo'));
       const rt = document.getElementById('job-notas-retry');
       if (rt) rt.addEventListener('click', () => _carregarNotasSecao(tel, nome));
       return;
     }
+    _trilhoPonto('notas', !!(resp.notas && resp.notas.length));
     _renderSecaoNotas(tel, nome, resp.notas || []);
   }
 
@@ -8532,6 +8619,8 @@
     const chaveAgora = nomeDoContato() || chaveConversa(telefoneDoContato(), nomeDoContato());
     if (chaveAgora === _ultimaChaveVista) return;
     _ultimaChaveVista = chaveAgora;
+    // A conversa mudou: os pontos do contato anterior não valem mais.
+    _trilhoPontosLimpar();
     sincronizarPainelComConversa();
   }, 1500));
 

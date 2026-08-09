@@ -129,7 +129,7 @@ não sabe se está tudo em dia ou se algo não carregou.
 Estado vazio é a tela que a pessoa mais vê no primeiro dia. Ele **explica**, e
 oferece a saída.
 
-### E4. O trilho não diz o que está em dia
+### E4. O trilho não diz o que está em dia — FEITO na 3.81.0 (parcial, ver nota)
 
 Nove itens, e só três podem mostrar contador (Análise, Leads, Hoje). Os outros
 seis são ícone e nome, sempre iguais, com ou sem coisa pra fazer.
@@ -186,8 +186,20 @@ pela mesma função.
 
 **4. Análise e Hoje** — as duas telas mais usadas, tratadas a fundo.
 
-**5. E4** — o trilho como painel de estado. **Proposta separada**, porque muda
-comportamento e você vai querer opinar antes.
+**5. ~~E4~~ — FEITO na 3.81.0**, com uma parte pendente de servidor.
+
+O que entrou: barra ativa única que **desliza** entre os itens (antes cada item
+tinha a sua e ela sumia de um lugar pra aparecer noutro, sem caminho entre os
+dois); marcas unificadas em duas linguagens — **número** = tem gente esperando
+você, **ponto** = esta seção tem conteúdo deste contato; resposta no aperto ao
+clicar; e nada de marca em Mensagens, Funis e CNPJ, que são bibliotecas.
+
+**O que falta, e é do servidor:** os pontos só acendem depois que a pessoa
+abre a seção uma vez naquela conversa, porque é aí que o cache se enche. Pra
+acenderem já ao abrir a conversa falta **uma chamada só** que devolva o resumo
+do contato — se tem cotação, se tem nota, se tem ficha. Pedido escrito na
+`conversa.md`. Enquanto não existe, o ponto fica apagado: acender por
+suposição seria mandar a pessoa procurar o que talvez não esteja lá.
 
 **6. O resto**, tela a tela, conforme você for validando.
 

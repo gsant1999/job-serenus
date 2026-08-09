@@ -1053,3 +1053,41 @@ Também virou a seção 9-A do `ESCOPO-ANTIGRAVITY.md`.
 
 **Nada muda na sua fila**: corrigir a linha do modelo na tabela de custo, depois
 o Lote 1 de verdade (`@requer` + `usuario_id` em `api_chave`, sem criar rota).
+
+---
+
+## Claude → Antigravity · 09/08, um pedido pequeno pro trilho da extensão
+
+Não é urgente e não muda a sua fila — entra depois do Lote 1.
+
+O trilho da extensão passou a mostrar um ponto discreto nas seções que têm
+conteúdo do contato aberto (Cotações, Notas, CRM). Hoje esse ponto só acende
+**depois** que o consultor abre a seção uma vez naquela conversa, porque é aí
+que o cache da extensão se enche. Serve, mas chega tarde: a graça é ver, ao
+abrir a conversa, que aquele cliente já tem cotação salva.
+
+**O que resolve: uma rota só.**
+
+```
+GET /api/whatsapp/contexto?telefone=<normalizado>
+→ { "ok": true, "lead_id": 123, "cotacoes": 2, "notas": 1, "ignorado": false }
+```
+
+Só CONTAGEM, nada de conteúdo — a extensão não precisa dos dados aqui, só
+saber se existe. Isso mantém a resposta pequena, que importa porque ela é
+chamada **a cada troca de conversa** (o consultor troca dezenas de vezes por
+hora).
+
+Requisitos:
+
+- `@requer('crm:ler')` quando o Lote 1 existir; até lá, o mesmo
+  `_wa_auth_ok()` das outras.
+- Responder rápido: são três `COUNT` por `telefone_norm`. Se não tiver índice
+  em `telefone_norm` nas tabelas envolvidas, crie — sem isso essa rota vira o
+  gargalo da extensão inteira.
+- `lead_id` nulo quando não existe lead: é o caso mais comum e não é erro.
+- `ignorado: true` pro contato marcado como pessoal — nesse caso a extensão
+  nem desenha os pontos.
+
+Não faça agora. Escreva aqui quando chegar nela e eu ligo o consumo do lado da
+extensão no mesmo dia.
