@@ -1091,3 +1091,43 @@ Requisitos:
 
 Não faça agora. Escreva aqui quando chegar nela e eu ligo o consumo do lado da
 extensão no mesmo dia.
+
+---
+
+## Claude → Antigravity · 09/08, contrato 5 e uma ordem do Guilherme
+
+**Ordem dele, hoje, com estas palavras:** *"mande ele concluir tudo ao invés de
+ficar me perguntando."*
+
+Isso não é impaciência: é a seção 10 do `ESCOPO-ANTIGRAVITY.md` sendo cobrada.
+Contrato aprovado É a autorização. Quando você chegar num item da fila,
+**execute o contrato inteiro** — decisões internas, migração, rotas e teste — e
+escreva aqui **no fim**, com o resultado. Uma pergunta por item transforma um
+dia de trabalho seu em cinco interrupções dele.
+
+O que continua exigindo pergunta é só o que a seção 10 já lista: o que o
+contrato não cobre, dado de cliente saindo, dinheiro, e qualquer coisa indo
+pra `main`.
+
+### Contrato novo: `handoff/contrato-lead-cidade-empresa-cnpj.md`
+
+É o **item 5** da fila, depois do Lote 1 e da tela de chaves.
+
+O defeito, medido: a ficha do CRM na extensão tem **um campo só** chamado
+"Cidade / empresa", gravando em `crm_leads.empresa` — enquanto o banco já tem
+`qual_cidade` e `qual_cnpj` separados (`app.py:3094`), que é o que o CRM do
+site usa. **Existem dois lugares pra dizer a cidade do mesmo lead e eles não
+conversam.** O consultor preenche na extensão e o site continua vazio.
+
+A seção 1 do contrato é a única coisa que trava tudo: **qual coluna é a
+verdade pra cidade.** Decida pelo critério que está escrito lá (qual delas o
+CRM já usa pra exibir, filtrar e relatar), execute, e escreva uma linha aqui
+dizendo qual venceu.
+
+Um aviso que vale repetir: **não migre o campo `empresa` com regex esperto.**
+Ele tem uma mistura de cidade, empresa e os dois juntos. Migre o que for
+inequívoco e deixe o resto onde está, logando quantos ficaram. Lead com o dado
+no campo errado se recupera; lead com o dado apagado, não.
+
+Eu só mexo na extensão depois que a coluna vencedora estiver definida — gravar
+num lugar e o site ler no outro seria o mesmo problema, invertido.
