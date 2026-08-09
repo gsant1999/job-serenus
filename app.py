@@ -957,6 +957,7 @@ def init_db():
                 prefixo TEXT NOT NULL,
                 hash TEXT UNIQUE NOT NULL,
                 escopos TEXT DEFAULT 'cotacao:ler',
+                usuario_id INTEGER,
                 criado_por INTEGER,
                 criado_em TEXT,
                 ultimo_uso TEXT,
@@ -2093,7 +2094,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS api_chave (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT NOT NULL, prefixo TEXT NOT NULL, hash TEXT UNIQUE NOT NULL,
-            escopos TEXT DEFAULT 'cotacao:ler', criado_por INTEGER, criado_em TEXT,
+            escopos TEXT DEFAULT 'cotacao:ler', usuario_id INTEGER, criado_por INTEGER, criado_em TEXT,
             ultimo_uso TEXT, usos INTEGER DEFAULT 0,
             revogada_em TEXT, revogada_por INTEGER
         );
@@ -2745,6 +2746,18 @@ def init_db():
     add_col('cotacao_salva', 'modalidades', 'TEXT')
     add_col('crm_leads', 'auditado_em', 'TIMESTAMP')
     add_col('cotacao_tabela', 'administradora', 'TEXT')
+    add_col('api_chave', 'usuario_id', 'INTEGER')
+    add_col('crm_leads', 'qual_cidade', 'TEXT')
+    add_col('crm_leads', 'qual_cnpj', 'TEXT')
+    
+    try:
+        conn.execute("UPDATE crm_leads SET qual_cidade = empresa WHERE qual_cidade IS NULL AND empresa IS NOT NULL AND empresa != ''")
+        conn.execute("UPDATE crm_leads SET empresa = NULL WHERE qual_cidade = empresa OR qual_cidade IS NOT NULL")
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except: pass
+        app.logger.warning(f"[MIGRACAO] Erro atualizando qual_cidade: {e}")
     
     # Config do parceiro Affinity — específico do Serenus (e-mails/contato deles).
     # Não vai pra instância de cliente (SEED_DADOS_SERENUS=0).
@@ -19557,7 +19570,41 @@ def _etiquetas_do_momento(p, lead):
 # ═══════════════ API PÚBLICA: CHAVES ═══════════════════════════════════════════
 # Padrão de mercado: chave mostrada UMA vez; banco guarda só o SHA-256; prefixo em
 # claro só pra identificar; escopos separam leitura de escrita; revogação imediata.
-_API_ESCOPOS = ['cotacao:ler', 'cotacao:escrever', 'crm:ler']
+PERFIL_ESCOPOS = {
+    'admin': [
+        'crm:ler', 'crm:escrever',
+        'cotacao:ler', 'cotacao:escrever',
+        'whatsapp:ler', 'whatsapp:enviar',
+        'financeiro:ler', 'financeiro:escrever',
+        'propostas:ler', 'propostas:escrever',
+        'ia:usar', 'admin'
+    ],
+    'gestor': [
+        'crm:ler', 'crm:escrever',
+        'cotacao:ler', 'cotacao:escrever',
+        'whatsapp:ler', 'whatsapp:enviar',
+        'financeiro:ler', 'financeiro:escrever',
+        'propostas:ler', 'propostas:escrever',
+        'ia:usar'
+    ],
+    'consultor': [
+        'crm:ler', 'crm:escrever',
+        'cotacao:ler', 'cotacao:escrever',
+        'whatsapp:ler', 'whatsapp:enviar',
+        'propostas:ler', 'propostas:escrever',
+        'ia:usar'
+    ],
+    'financeiro': [
+        'crm:ler',
+        'financeiro:ler', 'financeiro:escrever',
+        'propostas:ler'
+    ],
+    'visualizador': [
+        'crm:ler', 'cotacao:ler', 'whatsapp:ler', 'financeiro:ler', 'propostas:ler'
+    ]
+}
+
+_API_ESCOPOS = PERFIL_ESCOPOS['admin']
 _API_PREFIXO = 'job_live_'
 # Teto por chave/minuto: /calcular roda no MESMO processo que serve o CRM — sem
 # teto, um consumidor em laço derruba o sistema pra todo mundo.
@@ -19574,6 +19621,114 @@ def _api_erro(codigo, msg, http=400, extra=None):
     if extra:
         corpo.update(extra)
     return jsonify(corpo), http
+
+
+def requer(escopo):
+    """Porta unificada: aceita sessão do site, token de aparelho ou chave de API."""
+    def deco(f):
+        @wraps(f)
+        def w(*a, **kw):
+            import hmac
+            if request.method == 'OPTIONS':
+                return _wa_cors(Response(status=204))
+            
+            # 1. Sessão do site
+            if 'user_id' in session:
+                g.usuario_id = session['user_id']
+                g.auth_via = 'sessao'
+                g.corretora_id = 1
+                conn = db()
+                g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
+                close_db(conn)
+                if not g.usuario or not g.usuario['ativo']:
+                    return _wa_cors(_api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)[0])
+                perfil = g.usuario['perfil'] or 'visualizador'
+                if perfil not in PERFIL_ESCOPOS: perfil = 'visualizador'
+                meus_escopos = PERFIL_ESCOPOS[perfil]
+                if escopo not in meus_escopos:
+                    return _wa_cors(_api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})[0])
+                return f(*a, **kw)
+                
+            auth = (request.headers.get('Authorization') or '').strip()
+            
+            # 2. Token de aparelho (extensão)
+            if auth.startswith('Bearer '):
+                token_raw = auth[7:].strip()
+                partes = token_raw.split('.')
+                if len(partes) == 2 and partes[0].isdigit():
+                    sess_id = int(partes[0])
+                    secreto = partes[1]
+                    conn = db()
+                    sessao_db = conn.execute("SELECT usuario_id, token_hash, revogado_em FROM extensao_sessao WHERE id=?", (sess_id,)).fetchone()
+                    if sessao_db and not sessao_db['revogado_em']:
+                        esperado = hashlib.sha256(secreto.encode()).hexdigest()
+                        if hmac.compare_digest(esperado, sessao_db['token_hash']):
+                            g.usuario_id = sessao_db['usuario_id']
+                            g.auth_via = 'token'
+                            g.corretora_id = 1
+                            g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
+                            close_db(conn)
+                            if not g.usuario or not g.usuario['ativo']:
+                                return _wa_cors(_api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)[0])
+                            perfil = g.usuario['perfil'] or 'visualizador'
+                            if perfil not in PERFIL_ESCOPOS: perfil = 'visualizador'
+                            meus_escopos = PERFIL_ESCOPOS[perfil]
+                            if escopo not in meus_escopos:
+                                return _wa_cors(_api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})[0])
+                            return f(*a, **kw)
+                    close_db(conn)
+            
+            # 3. Chave de API
+            bruta = auth[7:].strip() if auth.lower().startswith('bearer ') \
+                else (request.headers.get('X-API-Key') or '').strip()
+            if not bruta:
+                r = _api_erro('nao_autenticado', 'Nenhuma credencial válida encontrada', 401)
+                r[0].headers['WWW-Authenticate'] = 'Bearer realm="JOB API"'
+                return _wa_cors(r[0])
+                
+            conn = db()
+            reg = conn.execute("SELECT * FROM api_chave WHERE hash=?", (_api_hash(bruta),)).fetchone()
+            if not reg or reg['revogada_em']:
+                close_db(conn)
+                return _wa_cors(_api_erro('chave_invalida', 'Chave inválida ou revogada', 401)[0])
+                
+            if reg.get('usuario_id'):
+                g.usuario_id = reg['usuario_id']
+            else:
+                app.logger.warning(f"[API] chave sem dono id={reg['id']}")
+                g.usuario_id = 1
+                
+            g.auth_via = 'chave'
+            g.corretora_id = 1
+            
+            escopos = (reg['escopos'] or '').split(',')
+            if escopo not in escopos:
+                close_db(conn)
+                return _wa_cors(_api_erro('sem_permissao', f"Esta chave não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": escopos})[0])
+                
+            jan = int(time.time() // 60)
+            marca = (reg['id'], jan)
+            _API_USO[marca] = _API_USO.get(marca, 0) + 1
+            if _API_USO[marca] > _API_LIMITE_MIN:
+                close_db(conn)
+                r = _api_erro('limite_excedido', f'Máximo de {_API_LIMITE_MIN} chamadas por minuto', 429)
+                r[0].headers['Retry-After'] = '60'
+                return _wa_cors(r[0])
+                
+            if len(_API_USO) > 5000:
+                for k in [k for k in _API_USO if k[1] < jan - 2]:
+                    _API_USO.pop(k, None)
+            try:
+                conn.execute("UPDATE api_chave SET ultimo_uso=?, usos=COALESCE(usos,0)+1 WHERE id=?",
+                             (_agora_sp(), reg['id']))
+                conn.commit()
+            except Exception:
+                try: conn.rollback()
+                except Exception: pass
+            close_db(conn)
+            return f(*a, **kw)
+        return w
+    return deco
 
 
 def api_requer_chave(escopo):
@@ -19641,12 +19796,28 @@ def configuracoes_api_chaves():
         nome = (d.get('nome') or '').strip()
         if not nome:
             close_db(conn); return jsonify({"ok": False, "erro": "Dê um nome pra chave"}), 400
-        esc = ','.join([e for e in (d.get('escopos') or []) if e in _API_ESCOPOS]) or 'cotacao:ler'
+        usuario_id = int(d.get('usuario_id') or 0)
+        if not usuario_id:
+            close_db(conn); return jsonify({"ok": False, "erro": "Selecione o dono da chave"}), 400
+        
+        dono = conn.execute("SELECT * FROM usuarios WHERE id=?", (usuario_id,)).fetchone()
+        if not dono or not dono['ativo']:
+            close_db(conn); return jsonify({"ok": False, "erro": "Usuário dono inválido ou inativo"}), 400
+            
+        perfil = dono['perfil'] or 'visualizador'
+        if perfil not in PERFIL_ESCOPOS: perfil = 'visualizador'
+        escopos_permitidos = PERFIL_ESCOPOS[perfil]
+        
+        escopos = [e for e in (d.get('escopos') or []) if e in escopos_permitidos and e != 'admin']
+        if not escopos:
+            close_db(conn); return jsonify({"ok": False, "erro": "Selecione pelo menos um escopo válido para o perfil do dono"}), 400
+            
+        esc = ','.join(escopos)
         chave = _API_PREFIXO + secrets.token_urlsafe(32).replace('-', '').replace('_', '')[:40]
-        conn.execute("""INSERT INTO api_chave (nome, prefixo, hash, escopos, criado_por, criado_em)
-                        VALUES (?,?,?,?,?,?)""",
+        conn.execute("""INSERT INTO api_chave (nome, prefixo, hash, escopos, usuario_id, criado_por, criado_em)
+                        VALUES (?,?,?,?,?,?,?)""",
                      (nome[:80], chave[:len(_API_PREFIXO) + 6], _api_hash(chave), esc,
-                      session['user_id'], _agora_sp()))
+                      usuario_id, session['user_id'], _agora_sp()))
         conn.commit()
         reg = conn.execute("SELECT id FROM api_chave WHERE hash=?", (_api_hash(chave),)).fetchone()
         close_db(conn)
@@ -19703,6 +19874,19 @@ def api_v1_cotacao_planos():
         v = (request.args.get(campo) or '').strip()
         if v:
             q += f" AND LOWER({campo})=LOWER(?)"; p.append(v)
+            
+    # Filtro de múltiplas operadoras (por ID da tabela operadoras)
+    op_str = (request.args.get('operadoras') or '').strip()
+    if op_str:
+        op_ids = []
+        for x in op_str.split(','):
+            try: op_ids.append(int(x.strip()))
+            except: pass
+        if op_ids:
+            marc = ','.join(['?'] * len(op_ids))
+            q += f" AND operadora IN (SELECT operadora FROM operadoras WHERE id IN ({marc}))"
+            p.extend(op_ids)
+            
     if (request.args.get('ativo') or '1') != 'todos':
         q += " AND ativo=?"; p.append(1 if (request.args.get('ativo') or '1') == '1' else 0)
     lim = min(500, max(1, request.args.get('limite', type=int) or 200))
@@ -21812,6 +21996,7 @@ def api_whatsapp_lead_ficha():
             # tem que explicar.
             "motivos_perda": _motivos_perda_lista(conn),
             "motivos_ajuda": MOTIVO_PERDA_AJUDA,
+            "cidades": _municipios(),
         }
     except Exception as e:
         close_db(conn)
@@ -21819,6 +22004,30 @@ def api_whatsapp_lead_ficha():
         return _wa_cors(jsonify({"ok": False, "erro": "Falha ao montar a ficha"})), 500
     close_db(conn)
     return _wa_cors(jsonify(payload))
+
+
+@app.route('/api/whatsapp/lead/<int:lid>/cnpj', methods=['POST', 'OPTIONS'])
+def api_whatsapp_lead_cnpj(lid):
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+    d = request.get_json(silent=True) or {}
+    cnpj = (d.get('cnpj') or '').strip()
+    if len(cnpj) > 50:
+        return _wa_cors(jsonify({"ok": False, "erro": "CNPJ muito longo"})), 400
+    conn = db()
+    try:
+        conn.execute("UPDATE crm_leads SET qual_cnpj=?, atualizado_em=? WHERE id=?", (cnpj, _agora_sp(), lid))
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except: pass
+        close_db(conn)
+        app.logger.error(f"[WA/CNPJ] {e}")
+        return _wa_cors(jsonify({"ok": False, "erro": "Falha ao salvar CNPJ"})), 500
+    close_db(conn)
+    return _wa_cors(jsonify({"ok": True}))
 
 
 @app.route('/api/whatsapp/cotador/hashes', methods=['GET', 'POST', 'OPTIONS'])
@@ -22185,7 +22394,7 @@ def api_whatsapp_lead_salvar():
     mudancas, avisos = [], []
     try:
         # 1) Dados básicos
-        campos_simples = {'nome': 80, 'email': 120, 'empresa': 120, 'observacoes': 4000}
+        campos_simples = {'nome': 80, 'email': 120, 'empresa': 120, 'observacoes': 4000, 'qual_cidade': 120}
         sets, vals = [], []
         for k, lim in campos_simples.items():
             if k in d:
@@ -27087,6 +27296,8 @@ def crm_lead_editar(lid):
     telefone   = d.get('telefone', lead['telefone'])
     email      = d.get('email', lead['email'])
     empresa    = d.get('empresa', lead['empresa'])
+    qual_cidade= d.get('qual_cidade', lead['qual_cidade'])
+    qual_cnpj  = d.get('qual_cnpj', lead['qual_cnpj'])
     observacoes= d.get('observacoes', lead['observacoes'])
     valor      = float(d.get('valor_estimado') or 0) or None
     origem     = d.get('origem', lead['origem'])
@@ -27135,17 +27346,19 @@ def crm_lead_editar(lid):
             changes.append(f'Sub-status limpo (mudou de etapa)')
         conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, telefone_norm=?, email=?, empresa=?,
                         valor_estimado=?, observacoes=?, origem=?, sub_status=?,
-                        responsavel_id=?, etapa=?, atualizado_em=?, avancou_em=?
+                        responsavel_id=?, etapa=?, atualizado_em=?, avancou_em=?,
+                        qual_cidade=?, qual_cnpj=?
                         WHERE id=?""",
             (nome, telefone, tel_norm, email, empresa, valor, observacoes, origem, sub_status,
-             responsavel_id, etapa, _agora_sp(), _agora_sp(), lid))
+             responsavel_id, etapa, _agora_sp(), _agora_sp(), qual_cidade, qual_cnpj, lid))
     else:
         conn.execute("""UPDATE crm_leads SET nome=?, telefone=?, telefone_norm=?, email=?, empresa=?,
                         valor_estimado=?, observacoes=?, origem=?, sub_status=?,
-                        responsavel_id=?, etapa=?, atualizado_em=?
+                        responsavel_id=?, etapa=?, atualizado_em=?,
+                        qual_cidade=?, qual_cnpj=?
                         WHERE id=?""",
             (nome, telefone, tel_norm, email, empresa, valor, observacoes, origem, sub_status,
-             responsavel_id, etapa, _agora_sp(), lid))
+             responsavel_id, etapa, _agora_sp(), qual_cidade, qual_cnpj, lid))
 
     if changes:
         conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?,?,?,?)",
@@ -31301,28 +31514,29 @@ def cotacao_publica(token):
     # Rastreia abertura: conta + registra no pipeline do lead no CRM
     # Guarda: notifica o corretor no máximo 1x a cada 5 min por cotação (evita spam de refresh)
     notificar_abertura = False
-    try:
-        ult = cd.get('ultima_abertura')
-        ult_dt = _parse_dt_seguro(ult) if ult else None
-        if not ult_dt:
-            notificar_abertura = True
-        else:
-            if ult_dt.tzinfo is None:
-                ult_dt = TZ_SP.localize(ult_dt)
-            if (datetime.now(TZ_SP) - ult_dt).total_seconds() > 300:
+    if request.args.get('render') != '1':
+        try:
+            ult = cd.get('ultima_abertura')
+            ult_dt = _parse_dt_seguro(ult) if ult else None
+            if not ult_dt:
                 notificar_abertura = True
-    except Exception:
-        notificar_abertura = True
-    try:
-        conn.execute("UPDATE cotacao_salva SET aberturas=COALESCE(aberturas,0)+1, ultima_abertura=? WHERE id=?",
-                     (datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S'), cd['id']))
-        if cd.get('lead_id'):
-            conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?, ?, ?, ?)",
-                         (cd['lead_id'], 'Sistema', 'abertura',
-                          'Cliente ABRIU a cotação "' + (cd.get('titulo') or 'Cotação') + '" pelo link'))
-        conn.commit()
-    except Exception:
-        pass
+            else:
+                if ult_dt.tzinfo is None:
+                    ult_dt = TZ_SP.localize(ult_dt)
+                if (datetime.now(TZ_SP) - ult_dt).total_seconds() > 300:
+                    notificar_abertura = True
+        except Exception:
+            notificar_abertura = True
+        try:
+            conn.execute("UPDATE cotacao_salva SET aberturas=COALESCE(aberturas,0)+1, ultima_abertura=? WHERE id=?",
+                         (datetime.now(TZ_SP).strftime('%Y-%m-%d %H:%M:%S'), cd['id']))
+            if cd.get('lead_id'):
+                conn.execute("INSERT INTO crm_atividades (lead_id, usuario_nome, tipo, descricao) VALUES (?, ?, ?, ?)",
+                             (cd['lead_id'], 'Sistema', 'abertura',
+                              'Cliente ABRIU a cotação "' + (cd.get('titulo') or 'Cotação') + '" pelo link'))
+            conn.commit()
+        except Exception:
+            pass
     cot = _build_cot(conn, c)
     close_db(conn)
     if notificar_abertura:
@@ -35263,9 +35477,12 @@ def configuracoes():
         conn2 = db()
         try:
             api_chaves = [dict(r) for r in conn2.execute(
-                """SELECT id, nome, prefixo, escopos, criado_em, ultimo_uso,
-                          COALESCE(usos,0) usos, revogada_em
-                   FROM api_chave ORDER BY revogada_em IS NULL DESC, id DESC""").fetchall()]
+                """SELECT c.id, c.nome, c.prefixo, c.escopos, c.criado_em, c.ultimo_uso,
+                          COALESCE(c.usos,0) usos, c.revogada_em, c.usuario_id,
+                          u.nome dono_nome
+                   FROM api_chave c
+                   LEFT JOIN usuarios u ON c.usuario_id = u.id
+                   ORDER BY c.revogada_em IS NULL DESC, c.id DESC""").fetchall()]
         except Exception as e:
             try: conn2.rollback()
             except Exception: pass
@@ -35280,13 +35497,16 @@ def configuracoes():
         varr_consultores = [dict(r) for r in conn2.execute(
             """SELECT id, nome, COALESCE(varredura_ativa,0) varredura_ativa
                FROM usuarios WHERE ativo=1 ORDER BY nome""").fetchall()]
+        api_usuarios = [dict(r) for r in conn2.execute(
+            """SELECT id, nome, perfil FROM usuarios WHERE ativo=1 ORDER BY nome"""
+        ).fetchall()]
         close_db(conn2)
     return render_template('configuracoes.html', som_atual=som_atual, sons=SONS_NOTIFICACAO,
                            desempenho=desempenho, canario=canario,
                            varr_cfg=varr_cfg, varr_consultores=varr_consultores,
                            api_chaves=api_chaves, api_escopos=_API_ESCOPOS,
+                           api_usuarios=api_usuarios, perfil_escopos=PERFIL_ESCOPOS,
                            notificar_wpp_leads=notificar_wpp_leads)
-
 
 @app.route('/configuracoes/som', methods=['POST'])
 @login_required

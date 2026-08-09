@@ -96,26 +96,34 @@ async function salvarNotificacaoWpp(ligado){
   </div>
 
   <div style="padding:6px 16px 16px;">
-    <div class="ak-nova">
-      <input type="text" id="ak-nome" placeholder="Para que é esta chave? (ex: Site de cotação)">
-      <div class="ak-escopos">
-        {% for e in api_escopos %}
-        <label><input type="checkbox" value="{{ e }}" {% if e == 'cotacao:ler' %}checked{% endif %}> {{ e }}</label>
-        {% endfor %}
+    <div class="ak-nova" style="align-items: flex-start; flex-direction: column;">
+      <div style="display: flex; gap: 10px; width: 100%;">
+        <input type="text" id="ak-nome" placeholder="Para que é esta chave? (ex: Site de cotação)">
+        <select id="ak-dono" style="background:var(--panel-2); border:1px solid var(--borda); border-radius:8px; padding:8px 12px; color:var(--texto); font-size:13px;" onchange="akAtualizaEscopos()">
+          <option value="">Selecione o dono da chave...</option>
+          {% for u in api_usuarios %}
+          <option value="{{ u.id }}" data-perfil="{{ u.perfil or 'visualizador' }}">{{ u.nome }} ({{ u.perfil or 'Visualizador' }})</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-sm" onclick="akCriar(this)">Gerar chave</button>
       </div>
-      <button class="btn btn-sm" onclick="akCriar(this)">Gerar chave</button>
+      <div class="ak-escopos" id="ak-escopos-container" style="display: flex; flex-wrap: wrap; gap: 15px; margin-top: 10px; padding: 10px; border: 1px dashed var(--borda); border-radius: 8px; width: 100%;">
+        <!-- Populado por JS -->
+        <span style="color:var(--cinza-2); font-size: 13px;">Selecione um dono para ver os escopos permitidos.</span>
+      </div>
     </div>
     <div id="ak-resultado"></div>
 
     <table style="width:100%; margin-top:14px; font-size:13px;">
       <thead><tr>
-        <th style="text-align:left;">Nome</th><th style="text-align:left;">Identificação</th>
+        <th style="text-align:left;">Nome</th><th style="text-align:left;">Dono</th><th style="text-align:left;">Identificação</th>
         <th style="text-align:left;">Escopos</th><th>Usos</th><th style="text-align:left;">Último uso</th><th></th>
       </tr></thead>
       <tbody>
         {% for k in api_chaves %}
         <tr {% if k.revogada_em %}style="opacity:.45;"{% endif %}>
           <td>{{ k.nome }}</td>
+          <td>{{ k.dono_nome or '(Sem dono)' }}</td>
           <td><code style="font-size:11.5px;">{{ k.prefixo }}…</code></td>
           <td style="color:var(--cinza-2); font-size:11.5px;">{{ k.escopos }}</td>
           <td class="td-mono" style="text-align:center;">{{ k.usos }}</td>
@@ -158,13 +166,53 @@ async function salvarNotificacaoWpp(ligado){
   .cfg-perf-item span { display:block; font-size:10px; color:var(--cinza); margin-top:3px; }
 </style>
 <script>
+const _PERFIL_ESCOPOS = {{ perfil_escopos|tojson }};
+const _MODULOS = {
+  'CRM': ['crm:ler', 'crm:escrever'],
+  'Cotação': ['cotacao:ler', 'cotacao:escrever'],
+  'WhatsApp': ['whatsapp:ler', 'whatsapp:enviar'],
+  'Financeiro': ['financeiro:ler', 'financeiro:escrever'],
+  'Propostas': ['propostas:ler', 'propostas:escrever'],
+  'IA': ['ia:usar']
+};
+
+function akAtualizaEscopos() {
+  const select = document.getElementById('ak-dono');
+  const container = document.getElementById('ak-escopos-container');
+  if (!select.value) {
+    container.innerHTML = '<span style="color:var(--cinza-2); font-size: 13px;">Selecione um dono para ver os escopos permitidos.</span>';
+    return;
+  }
+  const perfil = select.options[select.selectedIndex].getAttribute('data-perfil');
+  const permitidos = _PERFIL_ESCOPOS[perfil] || _PERFIL_ESCOPOS['visualizador'];
+  
+  let html = '';
+  for (const [mod, escopos_mod] of Object.entries(_MODULOS)) {
+    const validos = escopos_mod.filter(e => permitidos.includes(e));
+    if (validos.length > 0) {
+      html += '<div style="display:flex; flex-direction:column; gap:4px; min-width: 120px;">';
+      html += '<strong style="font-size:12px; color:var(--cinza); text-transform:uppercase;">' + mod + '</strong>';
+      validos.forEach(e => {
+        html += '<label style="font-size:13px;"><input type="checkbox" value="' + e + '"> ' + e.split(':')[1] + '</label>';
+      });
+      html += '</div>';
+    }
+  }
+  container.innerHTML = html || '<span style="color:var(--cinza-2); font-size: 13px;">Este usuário não possui permissões para delegar.</span>';
+}
+
 async function akCriar(b){
   const nome=document.getElementById('ak-nome').value.trim();
+  const usuario_id=document.getElementById('ak-dono').value;
   if(!nome){ alert('Dê um nome pra chave — é como você vai saber qual revogar depois.'); return; }
-  const escopos=Array.from(document.querySelectorAll('.ak-escopos input:checked')).map(i=>i.value);
+  if(!usuario_id){ alert('Selecione o dono da chave.'); return; }
+  
+  const escopos=Array.from(document.querySelectorAll('#ak-escopos-container input:checked')).map(i=>i.value);
+  if(escopos.length === 0){ alert('Selecione pelo menos um escopo.'); return; }
+  
   b.disabled=true; const t=b.textContent; b.textContent='Gerando…';
   const r=await fetch('/configuracoes/api-chaves',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({acao:'criar',nome,escopos})});
+    body:JSON.stringify({acao:'criar',nome,usuario_id,escopos})});
   const d=await r.json(); b.disabled=false; b.textContent=t;
   if(!d.ok){ alert(d.erro||'Erro'); return; }
   document.getElementById('ak-resultado').innerHTML =
@@ -175,7 +223,10 @@ async function akRevogar(id, nome){
   if(!confirm('Revogar a chave "' + nome + '"? Quem estiver usando ela para de funcionar na hora.')) return;
   const r=await fetch('/configuracoes/api-chaves',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({acao:'revogar',id})});
-  if((await r.json()).ok) location.reload();
+  if((await r.json()).ok) {
+    alert('Chave revogada com sucesso.');
+    location.reload();
+  }
 }
 </script>
 {% endif %}
