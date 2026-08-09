@@ -3604,17 +3604,6 @@
     return (pre ? pre + ' | ' : '') + nome + (dentro.length ? ' (' + dentro.join(' · ') + ')' : '');
   }
 
-  function _vcfDoContato(nome, tel) {
-    const so = String(tel || '').replace(/\D/g, '');
-    const e164 = so ? '+' + (so.startsWith('55') ? so : '55' + so) : '';
-    // vCard 3.0: e o formato que iPhone e Android abrem sem app nenhum. FN e o
-    // que aparece na agenda; N vai igual pra nao virar "sem sobrenome" no iOS.
-    return ['BEGIN:VCARD', 'VERSION:3.0',
-            'N:;' + nome + ';;;', 'FN:' + nome,
-            (e164 ? 'TEL;TYPE=CELL:' + e164 : ''),
-            'NOTE:Cadastrado pelo JOB Serenus',
-            'END:VCARD'].filter(Boolean).join('\r\n');
-  }
 
   // ══ SALVAR O CONTATO NO CELULAR ═══════════════════════════════════════
   //
@@ -3624,14 +3613,15 @@
   // a dica mandava o consultor se virar com AirDrop, e-mail ou Drive pra levar
   // até o telefone. Ninguém faz isso no meio de um atendimento.
   //
-  // O caminho que funciona é o do WhatsApp mesmo: o cartão vai pra SUA
-  // própria conversa ("mensagem para si mesmo"). Ele chega no celular na
-  // hora, e lá basta tocar e "Adicionar aos contatos" — um passo, sem app,
-  // sem autorizar conta de Google nem de Apple.
+  // Agora o botão FAZ a coisa: usa a mesma ação do "Adicionar contato" do
+  // WhatsApp Web, com sincronização pra agenda ligada. Grava na conta e o
+  // WhatsApp leva pro aparelho — sem arquivo, e sem pedir autorização de
+  // conta Google ou Apple, que exigiria o consultor autorizar acesso à agenda
+  // dele e é um projeto inteiro, não um botão.
   //
-  // A escrita direta na agenda do Google/Apple não é possível daqui: exige o
-  // consultor autorizar a conta dele, e isso é um projeto, não um botão. Não
-  // vou prometer o que não entrego.
+  // Sobrou UM secundário: copiar o nome. Ele é a saída pra quando a versão do
+  // WhatsApp Web não tiver a função — aí o consultor cola no "Novo contato"
+  // do próprio WhatsApp.
   function _blocoNomeContato() {
     return '<div class="job-nomec">' +
       '<div class="job-nomec-tit">Salvar contato' +
@@ -3645,14 +3635,13 @@
       // O campo é editável de propósito: o padrão monta, a pessoa corrige.
       '<input type="text" class="job-campo" id="job-nomec-val" ' +
         'aria-label="Nome que vai pra agenda" placeholder="Nome do contato">' +
-      // UMA ação principal. As outras duas existem, mas não competem.
-      '<button type="button" class="job-cnpj-btn" id="job-nomec-eu">Mandar pro meu WhatsApp</button>' +
+      // UMA ação principal, e ela FAZ a coisa — não prepara pra você fazer.
+      '<button type="button" class="job-cnpj-btn" id="job-nomec-salvar">Salvar na agenda</button>' +
       '<div class="job-nomec-btns">' +
         '<button type="button" class="job-copy" id="job-nomec-copiar">Copiar nome</button>' +
-        '<button type="button" class="job-copy" id="job-nomec-vcf">Baixar .vcf</button>' +
       '</div>' +
-      '<div class="job-nomec-dica" id="job-nomec-dica">O cartão chega na sua própria conversa. ' +
-        'No celular, toque nele e escolha "Adicionar aos contatos".</div>' +
+      '<div class="job-nomec-dica" id="job-nomec-dica">Grava no seu WhatsApp e ele sincroniza ' +
+        'pro celular — sem baixar arquivo nenhum.</div>' +
     '</div>';
   }
 
@@ -3686,19 +3675,42 @@
         setTimeout(() => { bc.textContent = 'Copiar nome'; }, 1800);
       } catch (e) { dica('Não consegui copiar — selecione e copie à mão.'); }
     });
-    const bv = document.getElementById('job-nomec-vcf');
-    if (bv) bv.addEventListener('click', () => {
+    // SALVAR DE VERDADE, não preparar pra você salvar.
+    //
+    // Usa a mesma ação do "Adicionar contato" do WhatsApp Web, com
+    // sincronização pra agenda ligada: grava na conta e o WhatsApp leva pro
+    // aparelho. Sem arquivo, sem AirDrop, sem autorizar Google nem Apple.
+    const bs = document.getElementById('job-nomec-salvar');
+    if (bs) bs.addEventListener('click', async () => {
       const nome = inp.value.trim();
-      if (!nome) { dica('Escreva um nome antes.'); return; }
-      const tel = ((_ficha && _ficha.lead && _ficha.lead.telefone) || _fichaTel || '');
-      const blob = new Blob([_vcfDoContato(nome, tel)], { type: 'text/vcard;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = nome.replace(/[\\/:*?"<>|]/g, '-').slice(0, 60) + '.vcf';
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
-      dica('Baixado. Abra o arquivo no celular (AirDrop, e-mail ou Drive) pra salvar na agenda.');
+      if (!nome) { dica('Escreva um nome antes.'); inp.focus(); return; }
+      // O contato é o da CONVERSA ABERTA — é dela que sai o id que o WhatsApp
+      // entende. Sem conversa aberta não há o que salvar.
+      const alvo = _chatAberto || '';
+      if (!alvo) { dica('Abra a conversa deste lead antes de salvar.'); return; }
+      bs.disabled = true; const r0 = bs.textContent; bs.textContent = 'Salvando…';
+      // Primeira palavra vira nome, o resto sobrenome: é assim que a agenda
+      // do celular ordena, e nome inteiro num campo só vira lista desordenada.
+      const partes = nome.split(/\s+/);
+      const primeiro = partes.shift() || nome;
+      const sobrenome = partes.join(' ');
+      let r = null;
+      try { r = await _pedirPonte('salvar_contato', { chatId: alvo, nome: primeiro, sobrenome }, 15000); }
+      catch (e) { _falhaTecnica('salvar contato', e); }
+      if (r && r.ok) {
+        bs.textContent = 'Salvo na agenda';
+        dica('Pronto. Já está no seu WhatsApp e chega no celular na próxima sincronização.');
+        setTimeout(() => { bs.textContent = r0; bs.disabled = false; }, 2600);
+        return;
+      }
+      bs.textContent = r0; bs.disabled = false;
+      // Erro que diz o que fazer. 'sem_suporte' é o caso real de um WhatsApp
+      // Web mais velho que a função — e aí o consultor precisa saber que o
+      // caminho existe, só não por aqui.
+      dica((r && r.erro) === 'sem_suporte'
+        ? 'Este WhatsApp Web não permite salvar por aqui. Use "Copiar nome" e adicione pelo próprio WhatsApp.'
+        : 'Não consegui salvar agora. Tente de novo; se insistir, use "Copiar nome".');
+      if (r && r.erro) _falhaTecnica('salvar contato: ' + r.erro, null);
     });
   }
 

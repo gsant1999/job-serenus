@@ -1160,6 +1160,42 @@
     }
   }
 
+  // ── SALVAR CONTATO NA AGENDA ──────────────────────────────────────────
+  //
+  // O consultor quer o lead salvo no telefone dele. O caminho que existia era
+  // baixar um .vcf na pasta de downloads do COMPUTADOR e se virar pra levar
+  // até o celular — ninguém faz isso no meio de um atendimento.
+  //
+  // A wa-js expõe `contact.save`, que é a MESMA ação do "Adicionar contato" do
+  // WhatsApp Web. Com `syncToAddressbook` ele grava na conta e o WhatsApp
+  // sincroniza pro aparelho — que é como o contato chega na agenda do celular
+  // sem pedir autorização de Google nem de Apple.
+  //
+  // A assinatura mudou entre versões da wa-js: umas recebem
+  // (wid, nome, {lastName, syncToAddressbook}), outras
+  // (wid, nome, sobrenome, {syncToAddressbook}). Tento a primeira e caio na
+  // segunda — adivinhar UMA e errar é o botão que não faz nada.
+  async function salvarContato(chatId, nome, sobrenome) {
+    if (!window.WPP || !window.WPP.contact || typeof window.WPP.contact.save !== 'function') {
+      return { ok: false, erro: 'sem_suporte' };
+    }
+    if (!chatId || !nome) return { ok: false, erro: 'parametros_invalidos' };
+    const primeiro = String(nome).trim();
+    const ultimo = String(sobrenome || '').trim();
+    const opts = { lastName: ultimo, surname: ultimo, syncToAddressbook: true };
+    try {
+      await window.WPP.contact.save(chatId, primeiro, opts);
+      return { ok: true, forma: 'objeto' };
+    } catch (e1) {
+      try {
+        await window.WPP.contact.save(chatId, primeiro, ultimo, { syncToAddressbook: true });
+        return { ok: true, forma: 'posicional' };
+      } catch (e2) {
+        return { ok: false, erro: String((e2 && e2.message) || e2).slice(0, 200) };
+      }
+    }
+  }
+
   // ── ENVIO DE MÍDIA (item A): recebe a mídia já em dataURL (o background
   //    baixou do JOB — a página não pode por causa do CSP do WhatsApp) e manda
   //    pela wa-js. Áudio vai como NOTA DE VOZ (isPtt) — igual "gravado na hora"
@@ -1306,6 +1342,7 @@
       else if (d.tipo === 'abrir_chat') resp = await abrirChat(d.chatId, d.telefone, d.texto);
       else if (d.tipo === 'enviar_texto') resp = await enviarTexto(d.chatId, d.texto);
       else if (d.tipo === 'enviar_midia') resp = await enviarMidia(d.chatId, d.midiaTipo, d.dataUrl, d.legenda, d.nomeArquivo);
+      else if (d.tipo === 'salvar_contato') resp = await salvarContato(d.chatId, d.nome, d.sobrenome);
       else if (d.tipo === 'apagar_conversa') resp = await apagarConversa(d.chatId);
       else if (d.tipo === 'checar_inbound') resp = await checarInbound(d.chatId);
       else return;
