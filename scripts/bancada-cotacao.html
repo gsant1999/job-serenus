@@ -62,7 +62,17 @@ const html='<div id="job-painel-doc" style="position:static"><div class="job-pai
  '<button class="job-cot-migalha">Campinas - SP · PME · 2 vidas</button>'+
  '<button class="job-cot-sacola">6</button></div>'+
  '<div class="job-sec-head-row"><div class="job-sec-t">Amil</div></div></div>'+
- '<div class="job-cot-wrap"><div class="job-sec-sub">Vale para todos os planos abaixo. Marque até 6.</div>'+
+ '<div class="job-cot-wrap"><div class="job-sec-sub">Vale para todos os planos abaixo.</div>'+
+ '<div class="job-cot-comp"><div class="job-cot-comp-t">Nesta cotação'+
+ '<span class="job-cot-comp-n">4 de 6</span></div>'+
+ '<div class="job-cot-comp-op"><span class="job-cot-comp-opn">Amil</span>'+
+ '<span class="job-cot-comp-chip">Bronze SP Mais<button class="job-cot-comp-x">×</button></span>'+
+ '<span class="job-cot-comp-chip">Ouro<button class="job-cot-comp-x">×</button></span></div>'+
+ '<div class="job-cot-comp-op"><span class="job-cot-comp-opn">MedSênior</span>'+
+ '<span class="job-cot-comp-chip">Prata Campinas 2<button class="job-cot-comp-x">×</button></span></div>'+
+ '<div class="job-cot-comp-op"><span class="job-cot-comp-opn">Bradesco</span>'+
+ '<span class="job-cot-comp-chip">Nacional Flex<button class="job-cot-comp-x">×</button></span></div>'+
+ '<div class="job-cot-comp-s">Some de todas as operadoras. Sai tudo no mesmo comparativo.</div></div>'+
  _cotArvoreHTML(_cotArvore(P,P.map((p,i)=>i),0),linha,0)+
  '<button class="job-cot-bt-mandar" style="width:100%;margin-top:12px">Ver preços (1)</button></div></div></div>';
 // Segunda tela: as duas fontes de operadora lado a lado.
@@ -87,5 +97,21 @@ const ops='<div id="job-painel-doc" style="position:static;margin-top:18px"><div
  op('Santa Tereza','<span class="job-cot-op-min">6 tabelas</span>')+'</div></div>'+
  '<button class="job-cot-nova" style="border:none;width:100%">Mudar dados</button>'+
  '</div></div></div>';
-A.innerHTML=html+ops;B.innerHTML=html+ops;
+// Terceira tela: Cotacoes — acao em cima, historico embaixo.
+const card=(t,s)=>'<div class="job-cot-item"><div class="job-cot-item-topo">'+
+ '<div class="job-cot-item-t">'+t+'</div><span class="job-cot-item-q">hoje</span></div>'+
+ '<div class="job-cot-item-s">'+s+'</div><div class="job-cot-item-acoes">'+
+ '<button class="job-cot-bt-copiar forte">Mandar na conversa</button>'+
+ '<button class="job-cot-bt-copiar">Copiar link</button></div></div>';
+const cots='<div id="job-painel-doc" style="position:static;margin-top:18px"><div class="job-painel-doc-corpo">'+
+ '<div class="job-sec-head"><div class="job-sec-head-row"><div class="job-sec-t">Cotações</div>'+
+ '<span class="job-sec-cont">2</span></div><div class="job-sec-sub">Lead | Milena</div></div>'+
+ '<div class="job-cot-wrap">'+
+ '<button class="job-cot-bt-mandar job-cot-agora">Cotar agora</button>'+
+ '<div class="job-cot-agora-s">Preço buscado na hora. O comparativo sai aqui mesmo, com imagem pronta pra mandar.</div>'+
+ '<div class="job-cot-hist-t">Já cotadas para Lead | Milena<span class="job-cot-hist-n">2</span></div>'+
+ card('Campinas - SP · PME','4 planos · R$ 3.509,89')+card('Campinas - SP · PME','2 planos · R$ 699,38')+
+ '<a class="job-cot-nova job-cot-nova-atalho">Comparar operadoras no JOB</a>'+
+ '</div></div></div>';
+A.innerHTML=html+ops+cots;B.innerHTML=html+ops+cots;
 </script>

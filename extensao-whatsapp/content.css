@@ -3629,3 +3629,22 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
   line-height: 1.45; color: var(--job-txt-fraco); }
 
 
+/* ── COTACOES: a acao em cima, o historico embaixo ─────────────────────────
+   "Cotar agora" e o unico verde cheio da tela. Maior que um botao comum
+   porque e o motivo de nove em cada dez aberturas desta aba. */
+.job-cot-agora { width: 100%; margin-top: 4px; padding: 15px 16px; font-size: 15px;
+  letter-spacing: var(--job-tk-md); box-shadow: var(--job-elev-2); }
+.job-cot-agora-s { margin: 7px 2px 20px; font-family: var(--job-ui); font-size: 11px;
+  line-height: 1.5; color: var(--job-txt-fraco); }
+.job-cot-hist-t { display: flex; align-items: center; gap: 8px; margin: 0 2px 9px;
+  font-family: var(--job-ui); font-size: 10.5px; font-weight: 700;
+  letter-spacing: var(--job-tk-xs); text-transform: uppercase; color: var(--job-txt-fraco); }
+.job-cot-hist-n { margin-left: auto; padding: 1px 7px; border-radius: 999px;
+  background: var(--job-vidro); border: 1px solid var(--job-borda);
+  text-transform: none; font-variant-numeric: tabular-nums; }
+/* A acao principal de um cartao do historico: mais peso que "Copiar link",
+   menos que o verde cheio de cima. */
+.job-cot-bt-copiar.forte { font-weight: 700; color: var(--job-acento);
+  border-color: color-mix(in srgb, var(--job-acento) 45%, transparent);
+  background: var(--job-sobre-acento); }
+.job-cot-bt-copiar.forte:hover { border-color: var(--job-acento); }

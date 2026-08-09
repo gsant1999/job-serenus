@@ -4995,7 +4995,12 @@
             (partes.length ? '<div class="job-cot-item-s">' + esc(partes.join(' · ')) + '</div>' : '') +
             (c.url
               ? '<div class="job-cot-item-acoes">' +
-                  '<button class="job-cot-bt-mandar" data-url="' + esc(c.url) + '">Mandar na conversa</button>' +
+                  // AS DUAS SAO SECUNDARIAS DE PROPOSITO. Cada cartao do
+                  // historico tinha um botao verde cheio igual ao "Cotar
+                  // agora" — tres verdes iguais na mesma tela, e o unico que
+                  // ele quase sempre quer some no meio. Verde cheio agora so
+                  // existe uma vez aqui.
+                  '<button class="job-cot-bt-copiar forte" data-url="' + esc(c.url) + '">Mandar na conversa</button>' +
                   '<button class="job-cot-bt-copiar" data-url="' + esc(c.url) + '">Copiar link</button>' +
                 '</div>'
               // Sem token não existe link público. Dizer o motivo evita o
@@ -5011,17 +5016,29 @@
       // corrido no subtítulo e agora tem lugar próprio.
       _secHead('Cotações', nome, lista.length || '') +
       '<div class="job-cot-wrap">' +
-        corpo +
-        // Cotar acontece AQUI. O link pro JOB continua existindo porque a tela
-        // de lá compara 20 planos de várias operadoras de uma vez, o que não
-        // cabe num painel de conversa — mas deixou de ser o caminho principal.
-        // "Cotar" sozinho não diz o que acontece: o botão nomeia a
-        // consequência, não o verbo. E o "Abrir no JOB" desce de bloco cheio
-        // pra atalho — cotar acontece AQUI; ir pro site é a exceção pra quando
-        // se quer comparar vinte planos, o que não cabe num painel de conversa.
-        '<button class="job-cot-bt-mandar" id="job-cot-agora" style="width:100%;margin-top:10px">' +
+        // A ACAO EM CIMA, O HISTORICO EMBAIXO.
+        //
+        // Estava ao contrario: primeiro a pilha de cotacoes velhas, e o "Cotar
+        // agora" so aparecia depois de rolar tudo. Nove em cada dez vezes que
+        // ele abre esta aba e pra cotar de novo, nao pra reler o que ja fez —
+        // e o historico crescendo empurrava o botao pra fora da tela.
+        //
+        // E ele e o UNICO verde cheio da tela agora. Antes cada cartao do
+        // historico tinha um igual, entao "em evidencia" nao queria dizer
+        // nada.
+        '<button class="job-cot-bt-mandar job-cot-agora" id="job-cot-agora">' +
           'Cotar agora' +
         '</button>' +
+        '<div class="job-cot-agora-s">Preço buscado na hora. O comparativo sai aqui mesmo, ' +
+          'com imagem pronta pra mandar.</div>' +
+        (lista.length
+          ? '<div class="job-cot-hist-t">Já cotadas para ' + esc(nome) +
+              '<span class="job-cot-hist-n">' + lista.length + '</span></div>'
+          : '') +
+        corpo +
+        // O link pro JOB continua existindo porque a tela de la compara vinte
+        // planos de uma vez, o que nao cabe num painel de conversa — mas e a
+        // excecao, e por isso e um atalho no rodape.
         '<a class="job-cot-nova job-cot-nova-atalho" href="' + esc(linkNovo) + '" ' +
           'target="_blank" rel="noopener" title="Abre a tela de cotação do site, com o lead já ligado">' +
           'Comparar operadoras no JOB' +
