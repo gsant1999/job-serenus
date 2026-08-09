@@ -5749,7 +5749,7 @@
     const box = document.getElementById('job-cnpj-resultado');
     if (!box) return;
     if (String(dig || '').length !== 14) {
-      box.innerHTML = '<div class="job-ia-alerta">⚠ Digite os 14 números do CNPJ.</div>';
+      box.innerHTML = '<div class="job-ia-alerta">Digite os 14 números do CNPJ.</div>';
       return;
     }
     box.innerHTML = '<div class="job-sem-analise"><div class="job-carregando"></div><div class="job-sem-analise-txt">Consultando na Receita…</div></div>';
@@ -5757,7 +5757,7 @@
     try { resp = await _safeSendMessage({ type: 'consultar_cnpj', cnpj: dig }); }
     catch (e) { resp = null; }
     if (!resp || !resp.ok || !resp.cnpj) {
-      box.innerHTML = '<div class="job-ia-alerta">⚠ ' + esc((resp && resp.erro) || 'Não consegui consultar esse CNPJ agora.') + '</div>';
+      box.innerHTML = '<div class="job-ia-alerta">' + esc((resp && resp.erro) || 'Não consegui consultar esse CNPJ agora.') + '</div>';
       return;
     }
     box.innerHTML = _renderCnpjCard(resp.cnpj);
@@ -6247,8 +6247,28 @@
       '</div>';
   }
 
+  // A falha da análise tem tela própria, com o botão de tentar de novo DENTRO
+  // dela — o mesmo id de sempre, pra continuar ligado no handler existente.
+  // `erro` só entra se for uma frase que o consultor entenda; mensagem técnica
+  // fica no console, nunca aqui.
+  function telaFalhaAnalise(erro, cancelado) {
+    const legivel = String(erro || '');
+    const tecnico = /[{}<>]|Error|error|fetch|undefined|null|TypeError/.test(legivel);
+    return '<div class="job-sem-analise">' +
+      '<div class="job-sem-analise-t">' +
+        (cancelado ? 'Análise cancelada' : 'Não consegui analisar esta conversa') + '</div>' +
+      '<div class="job-sem-analise-txt">' +
+        (cancelado
+          ? 'Nada foi salvo. Você pode rodar de novo quando quiser.'
+          : (legivel && !tecnico ? esc(legivel)
+             : 'Pode ser a conexão ou uma conversa curta demais pra analisar. Tente de novo.')) +
+      '</div>' +
+      '<button class="job-analisar-btn" id="job-analisar-btn">Tentar de novo</button>' +
+      '</div>';
+  }
+
   function telaBuscandoUltima() {
-    return '<div class="job-carregando"><div class="job-spin"></div><div>Verificando análise salva…</div></div>';
+    return _telaCarregando('Verificando análise salva…');
   }
 
   function fmtDataHora(s) {
@@ -6342,9 +6362,13 @@
           '<button class="job-analisar-btn" id="job-analisar-btn" style="margin-top:10px;">Analisar de novo</button>');
         ligarBotaoCopiar();
       } else if (doConversaAtual.status === 'erro') {
-        setCorpoSecao('<div class="job-erro">' + esc(doConversaAtual.erro || 'Falha ao analisar') + '</div>' + telaSemAnalise());
+        // UMA MENSAGEM, NÃO DUAS. Antes saía o erro E, logo abaixo, o
+        // "Nenhuma análise ainda pra esta conversa" — duas frases que se
+        // contradizem: uma diz que tentou e falhou, a outra que nunca houve
+        // tentativa. Quem lê não sabe se está quebrado ou vazio.
+        setCorpoSecao(telaFalhaAnalise(doConversaAtual.erro));
       } else if (doConversaAtual.status === 'cancelado') {
-        setCorpoSecao('<div class="job-erro">Análise cancelada.</div>' + telaSemAnalise());
+        setCorpoSecao(telaFalhaAnalise('', true));
       }
       return;
     }
@@ -6560,8 +6584,14 @@
     // Ouvir/ver antes de enviar — carrega via background (CSP do WhatsApp bloqueia
     // src externo direto), só quando fica visível.
     const midia = m.midia_url ? midiaLazyHtml(m.midia_tipo, m.midia_url) : '';
+    // O ★ era um caractere de fonte: mudava de desenho conforme o sistema e
+    // não é o mesmo traço do chip de Favoritos logo ali em cima. _svgIco já
+    // tem a estrela — usar o mesmo desenho nos dois lugares é o mínimo pra
+    // parecer o mesmo produto.
     const estrela = '<button class="job-modelo-fav ' + (m.favorito ? 'ativo' : '') +
-      '" data-modelo-id="' + m.id + '" title="Favoritar">★</button>';
+      '" data-modelo-id="' + m.id + '" title="' +
+      (m.favorito ? 'Tirar dos favoritos' : 'Marcar como favorito') + '">' +
+      _svgIco('estrela', 13) + '</button>';
     return '<div class="job-modelo-card">' +
       '<div class="job-modelo-topo">' +
         '<div class="job-modelo-nome"><span class="job-tipo-ico">' + tipoIcone(m) + '</span> ' + esc(m.nome) + '</div>' +
@@ -6779,7 +6809,7 @@
       };
       _gravInicio = Date.now();
       _gravador.start();
-      if (btn) btn.textContent = '■ Parar';
+      if (btn) btn.textContent = 'Parar gravação';
       _gravTimer = setInterval(() => {
         if (st) st.textContent = 'Gravando… ' + fmtDuracao(Math.round((Date.now() - _gravInicio) / 1000));
       }, 500);
@@ -7035,7 +7065,10 @@
     try {
       resp = await chrome.runtime.sendMessage({ type: 'listar_funis' });
     } catch (e) {
-      return { ok: false, erro: 'Recarregue a aba do WhatsApp Web (a extensão foi atualizada): ' + (e && e.message || e) };
+      // Sem a exceção colada no fim: a frase já diz o que fazer, e o texto
+      // técnico só assustava quem ia ler.
+      _falhaTecnica('funis: ponte com o background', e);
+      return { ok: false, erro: 'Recarregue a aba do WhatsApp Web — a extensão foi atualizada.' };
     }
     if (!resp || !resp.ok) return { ok: false, erro: (resp && resp.erro) || 'Não consegui falar com o JOB.' };
     const funis = resp.funis || [];
@@ -7058,24 +7091,62 @@
     return 'após ' + r + 's';
   }
 
+  // FALHA SE APRESENTA COM UMA SAÍDA, NÃO COM A EXCEÇÃO.
+  //
+  // Aqui saía o texto cru do erro na tela do consultor. Não ajudava ninguém
+  // (quem lê não sabe o que fazer com "Failed to fetch") e entregava pista de
+  // stack pra quem não devia ver. O detalhe técnico vai pro console — é lá
+  // que ele serve — e a tela diz o que houve e qual é o próximo passo.
+  function _telaFalha(titulo, saida, idBotao, rotuloBotao) {
+    return '<div class="job-erro job-erro-bloco">' +
+      '<div class="job-erro-t">' + esc(titulo) + '</div>' +
+      '<div class="job-erro-d">' + esc(saida) + '</div>' +
+      (idBotao ? '<button class="job-analisar-btn" id="' + idBotao + '">' + esc(rotuloBotao) + '</button>' : '') +
+      '</div>';
+  }
+
+  function _falhaTecnica(onde, e) {
+    try { console.warn('[JOB] ' + onde, e); } catch (_) {}
+  }
+
+  // UM jeito de dizer "carregando", em vez dos três que existiam. O texto vem
+  // por parâmetro porque dizer O QUE está carregando é o que faz a espera
+  // parecer curta.
+  function _telaCarregando(texto) {
+    return '<div class="job-sem-analise"><div class="job-carregando"></div>' +
+      '<div class="job-sem-analise-txt">' + esc(texto || 'Carregando…') + '</div></div>';
+  }
+
   async function abrirSecaoFunis() {
-    setCorpoSecaoMensagens('<div class="job-carregando"><div class="job-spin"></div><div>Carregando funis…</div></div>');
+    setCorpoSecaoMensagens(_telaCarregando('Carregando funis…'));
     let res;
     try {
       res = await buscarFunis(false);
     } catch (e) {
-      res = { ok: false, erro: String(e && e.message || e) };
+      _falhaTecnica('funis: busca', e);
+      res = { ok: false };
     }
     if (_secaoAtiva !== 'funis') return;
     if (!res || !res.ok) {
-      setCorpoSecaoMensagens('<div class="job-erro">Não consegui carregar os funis.<br><span style="font-size:11px;opacity:.8">' + esc((res && res.erro) || '') + '</span></div>');
+      setCorpoSecaoMensagens(_telaFalha(
+        'Não consegui carregar os funis',
+        'Pode ser a conexão ou o JOB fora do ar por um instante. Tente de novo; se insistir, avise o suporte.',
+        'job-funis-retry', 'Tentar de novo'));
+      const b = document.getElementById('job-funis-retry');
+      if (b) b.addEventListener('click', abrirSecaoFunis);
       return;
     }
     try {
       setCorpoSecaoMensagens(renderFunis(res.funis));
       ligarAcoesFunis();
     } catch (e) {
-      setCorpoSecaoMensagens('<div class="job-erro">Erro ao montar a lista de funis:<br><span style="font-size:11px;opacity:.8">' + esc(String(e && e.message || e)) + '</span></div>');
+      _falhaTecnica('funis: montagem da lista', e);
+      setCorpoSecaoMensagens(_telaFalha(
+        'Não consegui montar a lista de funis',
+        'Os funis vieram, mas algo na lista não pôde ser desenhado. Monte e edite pelo site enquanto isto não é corrigido.',
+        'job-funis-retry', 'Tentar de novo'));
+      const b = document.getElementById('job-funis-retry');
+      if (b) b.addEventListener('click', abrirSecaoFunis);
     }
   }
 
@@ -7305,7 +7376,12 @@
         } else {
           envio = await pedirEnviarTexto(job.chatId, passo.texto);
         }
-      } catch (e) { envio = { ok: false, erro: String(e && e.message || e) }; }
+      } catch (e) {
+        // A bolha do funil mostra este texto passo a passo: tem que ser uma
+        // frase, não um objeto de exceção.
+        _falhaTecnica('funil: envio do passo', e);
+        envio = { ok: false, erro: 'não consegui enviar este passo' };
+      }
       job.enviando = -1;
       if (envio && envio.ok) { job.enviados++; job.passoAtual = i + 1; }
       renderBubble();
@@ -7464,11 +7540,11 @@
       if (r.lead_criado) {
         donoLinha = r.consultor_nome
           ? '<div class="job-lead-dono ok">Atribuído a <b>' + esc(r.consultor_nome) + '</b>.</div>'
-          : '<div class="job-ia-alerta">⚠ Lead criado SEM responsável — selecione seu usuário no popup da extensão (e cadastre seu telefone em Usuários no JOB).</div>';
+          : '<div class="job-ia-alerta">Lead criado SEM responsável — selecione seu usuário no popup da extensão (e cadastre seu telefone em Usuários no JOB).</div>';
       } else if (ehMeu === true) {
         donoLinha = '<div class="job-lead-dono ok">Este lead já está no seu cadastro.</div>';
       } else if (r.lead_responsavel_nome && ehMeu === false) {
-        donoLinha = '<div class="job-ia-alerta">⚠ Este lead está com OUTRO consultor no JOB: <b>' + esc(r.lead_responsavel_nome) + '</b>.</div>';
+        donoLinha = '<div class="job-ia-alerta">Este lead está com OUTRO consultor no JOB: <b>' + esc(r.lead_responsavel_nome) + '</b>.</div>';
       } else if (r.lead_responsavel_nome) {
         donoLinha = '<div class="job-lead-dono neutro">Responsável no JOB: <b>' + esc(r.lead_responsavel_nome) + '</b>.</div>';
       } else {
@@ -7476,7 +7552,7 @@
       }
     }
     const avisoConsultor = r.aviso_consultor
-      ? '<div class="job-ia-alerta">⚠ ' + esc(r.aviso_consultor) + '</div>'
+      ? '<div class="job-ia-alerta">' + esc(r.aviso_consultor) + '</div>'
       : '';
     const leadBox = (r.lead
       ? '<a class="job-lead-ok" href="' + esc(r.lead.url) + '" target="_blank">' +
@@ -7529,7 +7605,7 @@
     // o motivo, mas o painel nunca mostrava (consultor via um score baixo sem
     // saber o porquê, ex: "conversa parada há mais de 10 dias").
     const capBox = (r.cap && r.cap.motivo)
-      ? '<div class="job-ia-alerta">🔒 Score limitado a ' + r.cap.valor + ': ' + esc(r.cap.motivo) + '</div>'
+      ? '<div class="job-ia-alerta">Score limitado a ' + r.cap.valor + ': ' + esc(r.cap.motivo) + '</div>'
       : '';
     // Falha real de IA/transcrição (chave configurada, mas essa chamada não
     // deu certo) — diferente de "não configurado", que fica silencioso.
@@ -7541,12 +7617,12 @@
     if (r.imagens_cortadas) avisos.push(r.imagens_cortadas + ' de ' + (r.imagens_encontrados || '?') + ' imagens ficaram de fora (limite de 20 por análise).');
     if (r.documentos_falha) avisos.push(r.documentos_falha + ' de ' + (r.documentos_encontrados || '?') + ' PDF(s) não entraram (limite ou falha de download) — Analisar de novo pra tentar incluir.');
     const avisoFalhas = avisos.length
-      ? avisos.map((a) => '<div class="job-ia-alerta">⚠ ' + esc(a) + '</div>').join('')
+      ? avisos.map((a) => '<div class="job-ia-alerta">' + esc(a) + '</div>').join('')
       : '';
     // PDFs do consultor com +5 páginas que nem baixamos (otimização) — aviso
     // próprio, com botão pra ler mesmo assim se o Guilherme quiser.
     const avisoPulados = (Array.isArray(r._pulados) && r._pulados.length)
-      ? '<div class="job-ia-alerta">⚠ ' + esc(r._pulados.length + ' PDF(s) que o consultor enviou não foram lidos por terem mais de 5 páginas (material de apoio costuma não mudar a análise): ' +
+      ? '<div class="job-ia-alerta">' + esc(r._pulados.length + ' PDF(s) que o consultor enviou não foram lidos por terem mais de 5 páginas (material de apoio costuma não mudar a análise): ' +
           r._pulados.map((p) => p.nome + ' (' + p.paginas + ' pág)').join(', ')) +
           '<div style="margin-top:7px;"><button class="job-copy" id="job-avaliar-pdfs" style="font-size:12px;padding:4px 10px;">Avaliar esses PDFs mesmo assim</button></div></div>'
       : '';
@@ -7649,7 +7725,7 @@
     }).join('');
     const alertas = (ia.sinais_atencao || []).length
       ? '<div class="job-ia-alertas">' + ia.sinais_atencao.map((a) =>
-          '<div class="job-ia-alerta">⚠ ' + esc(a) + '</div>').join('') + '</div>'
+          '<div class="job-ia-alerta">' + esc(a) + '</div>').join('') + '</div>'
       : '';
     const imgsLidas = (ia.leitura_imagens || []).filter(Boolean);
     const blocoImgs = imgsLidas.length
@@ -7955,7 +8031,7 @@
     const nome = (document.getElementById('job-nl-nome') || {}).value || '';
     const origem = (document.getElementById('job-nl-origem') || {}).value || '';
     const obs = (document.getElementById('job-nl-obs') || {}).value || '';
-    const aviso = (txt) => { if (msg) msg.innerHTML = '<div class="job-ia-alerta">⚠ ' + esc(txt) + '</div>'; };
+    const aviso = (txt) => { if (msg) msg.innerHTML = '<div class="job-ia-alerta">' + esc(txt) + '</div>'; };
     if (!nome.trim()) { aviso('Informe o nome do lead.'); return; }
     if (!origem) { aviso('Selecione como o lead chegou.'); return; }
     if (msg) msg.innerHTML = '';

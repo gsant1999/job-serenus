@@ -222,7 +222,22 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cancelar:hover { background: rgba(251, 113, 133, .1); }
 
 .job-sem-analise { text-align: center; padding: 18px 10px; }
-.job-sem-analise-txt { font-size: 12.5px; color: var(--job-txt-fraco); margin-bottom: 14px; }
+/* Título do estado vazio/falha: peso e tamanho carregam a hierarquia, e o
+   tracking fecha um pouco porque texto maior lê mais solto do que é. */
+.job-sem-analise-t { font-size: 14px; font-weight: 650; color: var(--job-txt);
+  letter-spacing: -.01em; line-height: 1.25; margin-bottom: 5px; }
+.job-sem-analise-txt { font-size: 12.5px; color: var(--job-txt-fraco); margin-bottom: 14px;
+  line-height: 1.5; max-width: 30ch; margin-left: auto; margin-right: auto; }
+
+/* ── FALHA COM SAÍDA ──
+   O bloco de erro deixa de ser uma faixa vermelha com texto de exceção e vira
+   um cartão que explica e oferece o próximo passo. Faixa na borda esquerda
+   pela mesma razão do aviso: a severidade se lê antes da frase. */
+.job-erro-bloco { text-align: left; border-left: 3px solid #f43f5e; border-radius: 4px 10px 10px 4px;
+  padding: 12px 14px; }
+.job-erro-t { font-size: 13px; font-weight: 650; letter-spacing: -.01em; margin-bottom: 4px; }
+.job-erro-d { font-size: 12px; line-height: 1.5; opacity: .9; margin-bottom: 12px; }
+.job-erro-bloco .job-analisar-btn { width: 100%; }
 .job-analisar-btn {
   background: #3b82f6; color: #fff; border: none; border-radius: 999px;
   padding: 10px 22px; font-size: 13px; font-weight: 500; cursor: pointer;
@@ -370,8 +385,22 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-modelo-tipo span { color: #545b6e; font-weight: 500; }
 .job-modelo-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .job-tipo-ico { margin-right: 2px; }
-.job-modelo-fav { background: none; border: none; color: #646b80; font-size: 16px; cursor: pointer; line-height: 1; padding: 0 2px; flex: 0 0 auto; }
+/* A estrela agora é desenho, não caractere: o contorno vale "não favorito" e
+   o preenchimento vale "favorito" — o mesmo elemento diz as duas coisas, sem
+   depender só da cor (quem não distingue amarelo de cinza continua vendo). */
+.job-modelo-fav { background: none; border: none; color: #646b80; cursor: pointer;
+  line-height: 0; padding: 2px; border-radius: 6px; flex: 0 0 auto;
+  transition: color .15s ease, transform .1s ease-out; }
+.job-modelo-fav:hover { color: #9aa2b8; }
 .job-modelo-fav.ativo { color: #f5c518; }
+.job-modelo-fav.ativo svg { fill: currentColor; }
+/* Resposta no APERTO, não na soltura: o dedo tem que sentir na hora. */
+.job-modelo-fav:active { transform: scale(.88); }
+.job-modelo-fav:focus-visible { outline: 2px solid var(--job-acento); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) {
+  .job-modelo-fav { transition: color .15s ease; }
+  .job-modelo-fav:active { transform: none; }
+}
 .job-modelo-audio { width: 100%; height: 34px; margin: 8px 0 2px; }
 .job-modelo-img { max-width: 100%; max-height: 130px; border-radius: 8px; margin: 8px 0 2px; }
 .job-midia-lazy { margin: 8px 0 2px; padding: 12px; border-radius: 8px; background: var(--job-bg2);
@@ -1044,8 +1073,14 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-ia-badge { font-size: 9px; font-weight: 500; letter-spacing: .4px; padding: 2px 7px;
   border-radius: 20px; background: var(--job-roxo-bg); color: var(--job-roxo); margin-left: 6px; vertical-align: middle; }
 .job-ia-alertas { margin: 8px 0 4px; }
+/* O AVISO DIZ "ATENÇÃO" PELA FORMA, NÃO POR UM DESENHO.
+   Tinha um ⚠ colado em cada texto — símbolo em interface é regra 1 do
+   projeto, e o glifo ainda mudava de desenho conforme o sistema. A faixa
+   grossa na borda esquerda faz o mesmo trabalho: o olho pega a severidade
+   antes de ler a frase, e some do texto o caractere que não é texto. */
 .job-ia-alerta { font-size: 11.5px; line-height: 1.5; color: var(--job-warn); background: var(--job-warn-bg);
-  border: 1px solid var(--job-warn-bd); border-radius: 8px; padding: 6px 10px; margin-bottom: 5px; }
+  border: 1px solid var(--job-warn-bd); border-left: 3px solid var(--job-warn);
+  border-radius: 4px 8px 8px 4px; padding: 6px 10px; margin-bottom: 5px; }
 .job-img-lida { font-size: 11.5px; line-height: 1.55; color: var(--job-txt-fraco); background: var(--job-roxo-bg);
   border: 1px solid var(--job-roxo-bd); border-radius: 8px; padding: 7px 10px; margin-bottom: 5px; }
 .job-audio-item { font-size: 11.5px; line-height: 1.55; color: var(--job-txt-fraco); background: rgba(37, 211, 102, .07);

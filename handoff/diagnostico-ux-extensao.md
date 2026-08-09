@@ -30,7 +30,9 @@ em fluxo nenhum — são padrão, não redesenho.
 
 ---
 
-## GRAVES — arrumar independente de estética
+## GRAVES — FEITOS na 3.78.0 (08/08)
+
+Os três abaixo estão corrigidos. O texto fica como registro do que era.
 
 ### G1. Erro de programador chegando ao consultor
 
@@ -168,7 +170,7 @@ o que eu proponho é levar as outras dez até ela.
 
 ## A ordem que eu recomendo
 
-**1. G1, G2, G3** — os graves. Rápidos, e um deles é regra sua sendo violada.
+**1. ~~G1, G2, G3~~ — FEITOS na 3.78.0.**
 
 **2. E1 e E2** — cabeçalho único e carregamento único. **É o maior ganho de
 sensação por hora de trabalho do documento inteiro**, porque muda as onze telas
