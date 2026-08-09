@@ -18127,7 +18127,7 @@ def api_whatsapp_login():
     }))
 
 @app.route('/api/whatsapp/logout', methods=['POST', 'OPTIONS'])
-@login_ou_extensao
+@requer('whatsapp:ler')
 def api_whatsapp_logout():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
@@ -19675,6 +19675,37 @@ def requer(escopo):
                             return f(*a, **kw)
                     close_db(conn)
             
+            # 2.5 Chave Antiga (Transição)
+            if request.headers.get('X-Extension-Key') and _wa_auth_ok():
+                app.logger.info('[EXT] chave antiga usada em %s', request.path)
+                g.auth_via = 'chave'
+                uid = None
+                try:
+                    j = request.get_json(silent=True) or {}
+                    uid = j.get('usuario_id')
+                except Exception:
+                    pass
+                if not uid:
+                    uid = request.args.get('usuario_id')
+                    
+                if uid and str(uid).isdigit():
+                    g.usuario_id = int(uid)
+                    conn = db()
+                    g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
+                    close_db(conn)
+                else:
+                    g.usuario_id = None
+                    g.usuario = None
+                    
+                if g.usuario_id and getattr(g, 'usuario', None):
+                    perfil = g.usuario['perfil'] or 'visualizador'
+                    if perfil not in PERFIL_ESCOPOS: perfil = 'visualizador'
+                    meus_escopos = PERFIL_ESCOPOS[perfil]
+                    if escopo not in meus_escopos:
+                        return _wa_cors(_api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})[0])
+                
+                return f(*a, **kw)
+
             # 3. Chave de API
             bruta = auth[7:].strip() if auth.lower().startswith('bearer ') \
                 else (request.headers.get('X-API-Key') or '').strip()
@@ -19980,7 +20011,7 @@ def _cotacao_completa(conn, c):
 
 
 @app.route('/api/v1/cotacao/<int:cid>', methods=['GET', 'OPTIONS'])
-@api_requer_chave('cotacao:ler')
+@requer('cotacao:ler')
 def api_v1_cotacao_ler(cid):
     conn = db()
     c = conn.execute("SELECT * FROM cotacao_salva WHERE id=?", (cid,)).fetchone()
@@ -19992,7 +20023,7 @@ def api_v1_cotacao_ler(cid):
 
 
 @app.route('/api/v1/cotacao/salvas', methods=['GET', 'OPTIONS'])
-@api_requer_chave('cotacao:ler')
+@requer('cotacao:ler')
 def api_v1_cotacao_salvas():
     """O mesmo histórico da tela /cotacao/salvas, extraível por inteiro."""
     conn = db()
@@ -20024,7 +20055,7 @@ def api_v1_cotacao_salvas():
 # A chave nova que ele criar precisa cobrir cotacao + extensao + CRM num
 # lugar so. Enquanto isso nao existe, quem alcanca isto e a sessao do site ou
 # o token do consultor.
-@login_ou_extensao
+@requer('cotacao:ler')
 def api_v1_cotacao_imagem(cid):
     """PNG da cotação. A imagem é renderizada no NAVEGADOR (html2canvas) e
     persistida quando alguém abre o documento — o servidor não tem navegador."""
@@ -23499,7 +23530,7 @@ def admin_caca_docs_excluir():
 
 
 @app.route('/api/ia/ghostwriter/gerar', methods=['POST', 'OPTIONS'])
-@login_ou_extensao
+@requer('ia:usar')
 def api_ia_ghostwriter_gerar():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
@@ -23554,7 +23585,7 @@ Escreva APENAS o texto da mensagem que o consultor deve enviar, sem aspas, sem m
 
 
 @app.route('/api/ia/ghostwriter/feedback', methods=['POST', 'OPTIONS'])
-@login_ou_extensao
+@requer('ia:usar')
 def api_ia_ghostwriter_feedback():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
@@ -31799,7 +31830,7 @@ def cotacao_legendas_excluir(mid):
 
 
 @app.route('/cotacao/legendas/api')
-@login_ou_extensao
+@requer('cotacao:ler')
 def cotacao_legendas_api():
     """Retorna lista de modelos de legenda em JSON para uso no documento."""
     conn = db()
@@ -39301,51 +39332,66 @@ def crm_lead_nao_e_lead(lid):
 
     tel_norm = _normalizar_telefone(str(lead['telefone'] or ''))
     
+    # 2. Apagar tabelas que ligam por lead_id
+    t_lead = [
+        'cotacao_viva', 'cotacao_salva', 'crm_atividades', 'crm_agenda', 
+        'whatsapp_extensao_fila', 'crm_lead_etiquetas', 'crm_lead_campos',
+        'lead_documento', 'lead_extracao', 'wa_aprendizado_leads', 
+        'crm_sms_log', 'crm_email_log', 'varredura_item', 
+        'meta_conversoes', 'google_ads_conversoes', 'fluxo_inscricoes',
+        'contatos_frios'
+    ]
+    
+    # 3. Apagar tabelas que ligam por telefone_norm
+    t_tel = [
+        'lead_notas', 'wa_chat_lead', 'wa_conversa_estado', 
+        'whatsapp_analises', 'campanha_contato', 'clique_pendente'
+    ]
+    
     # 1. Copiar dados antes de apagar (para crm_lead_excluido)
     backup = {"lead": dict(lead)}
-    backup["cotacao_viva"] = [dict(r) for r in conn.execute("SELECT * FROM cotacao_viva WHERE lead_id=?", (lid,))]
-    backup["cotacao_salva"] = [dict(r) for r in conn.execute("SELECT * FROM cotacao_salva WHERE lead_id=?", (lid,))]
+    for t in t_lead:
+        backup[t] = [dict(r) for r in conn.execute(f"SELECT * FROM {t} WHERE lead_id=?", (lid,))]
+    
     if tel_norm:
-        backup["lead_notas"] = [dict(r) for r in conn.execute("SELECT * FROM lead_notas WHERE telefone_norm=?", (tel_norm,))]
-        backup["wa_chat_lead"] = [dict(r) for r in conn.execute("SELECT * FROM wa_chat_lead WHERE telefone_norm=?", (tel_norm,))]
+        for t in t_tel:
+            backup[t] = [dict(r) for r in conn.execute(f"SELECT * FROM {t} WHERE telefone_norm=?", (tel_norm,))]
     else:
-        backup["lead_notas"] = []
-        backup["wa_chat_lead"] = []
+        for t in t_tel:
+            backup[t] = []
+            
+    if lead['telefone']:
+        backup['funil_execucao'] = [dict(r) for r in conn.execute("SELECT * FROM funil_execucao WHERE telefone=?", (lead['telefone'],))]
+    else:
+        backup['funil_execucao'] = []
         
     apagados = {}
     
     try:
         import json
-        conn.execute("INSERT INTO crm_lead_excluido (motivo, dados_json, excluido_por_id, excluido_em) VALUES (?, ?, ?, ?)",
-                     ("marcado como pessoal", json.dumps(backup, default=str), g.usuario_id if hasattr(g, 'usuario_id') else None, _agora_sp()))
+        conn.execute("""INSERT INTO crm_lead_excluido 
+            (lead_id, nome, telefone, telefone_norm, etapa, origem, motivo, dados_json, excluido_por_id, excluido_em) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (lid, lead['nome'], lead['telefone'], tel_norm, lead['etapa'], lead['origem'],
+             "marcado como pessoal", json.dumps(backup, default=str), 
+             g.usuario_id if hasattr(g, 'usuario_id') else None, _agora_sp()))
                      
-        # 2. Apagar tabelas que ligam por lead_id
-        t_lead = [
-            'cotacao_viva', 'cotacao_salva', 'crm_atividades', 'crm_agenda', 
-            'whatsapp_extensao_fila', 'crm_lead_etiquetas', 'crm_lead_campos',
-            'lead_documento', 'lead_extracao', 'wa_aprendizado_leads', 
-            'crm_sms_log', 'crm_email_log', 'varredura_item', 
-            'meta_conversoes', 'google_ads_conversoes', 'fluxo_inscricoes',
-            'contatos_frios'
-        ]
-        
         for t in t_lead:
             cur = conn.execute(f"DELETE FROM {t} WHERE lead_id=?", (lid,))
             if cur.rowcount > 0:
                 apagados[t] = cur.rowcount
                 
-        # 3. Apagar tabelas que ligam por telefone_norm
         # NOTA: Não apagar de wa_conversa_ignorada para não voltar a importar
         if tel_norm:
-            t_tel = [
-                'lead_notas', 'wa_chat_lead', 'wa_conversa_estado', 
-                'whatsapp_analises', 'funil_execucao', 'campanha_contato',
-                'clique_pendente'
-            ]
             for t in t_tel:
                 cur = conn.execute(f"DELETE FROM {t} WHERE telefone_norm=?", (tel_norm,))
                 if cur.rowcount > 0:
                     apagados[t] = cur.rowcount
+                    
+        if lead['telefone']:
+            cur = conn.execute("DELETE FROM funil_execucao WHERE telefone=?", (lead['telefone'],))
+            if cur.rowcount > 0:
+                apagados['funil_execucao'] = cur.rowcount
                     
         # 4. Apagar o próprio lead
         cur = conn.execute("DELETE FROM crm_leads WHERE id=?", (lid,))
@@ -39361,7 +39407,7 @@ def crm_lead_nao_e_lead(lid):
         except: pass
         app.logger.error(f"Erro ao apagar lead pessoal: {e}")
         close_db(conn)
-        return jsonify({"ok": False, "erro": "erro_interno", "detalhe": str(e)}), 500
+        return jsonify({"ok": False, "erro": "erro_interno"}), 500
         
     close_db(conn)
     return jsonify({"ok": True, "apagados": apagados})
