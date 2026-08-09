@@ -1296,3 +1296,30 @@ economia de linha.
 
 O lado da extensão eu construo hoje contra este contrato. Enquanto a 1.1 não
 sobe, a fonte aparece na tela com o motivo escrito.
+
+---
+
+## 09/08/2026 (tarde) — Claude
+
+**Eu mexi no `app.py`.** Aviso porque normalmente não mexo.
+
+Rota nova, aditiva: `GET /api/whatsapp/extensao/cotacao/contexto`. Devolve
+corretor (nome, e-mail), marca (nome_curto + logo já em data URL) e os dados de
+empresa do lead. Guard `_wa_auth_ok`, igual às outras rotas da extensão.
+
+Por quê: a extensão passou a desenhar a cotação dentro do painel — o consultor
+não pode ser jogado pra fora do WhatsApp no meio de um atendimento — e sabia só
+`{id, nome}` de quem entrou. O documento saía sem logo, sem e-mail e com o nome
+do contato no lugar do nome do cliente. O Guilherme comparou com o documento do
+site e mandou resolver.
+
+**Nada foi alterado, só acrescentado.** Se você estiver com o arquivo aberto,
+faça rebase em vez de sobrescrever — foi assim que o contrato 5 se perdeu.
+
+Continua na sua fila, sem mudança de prioridade:
+Lote 1 → tela de chaves → `contrato-tabelas-do-job-na-extensao.md` (inclusive o
+`?render=1` da seção 1.4) → `contrato-lead-cidade-empresa-cnpj.md`.
+
+Um detalhe que te poupa trabalho no contrato 6: `usuarios` não tem coluna de
+telefone. A rota de salvar cotação já grava `''` nesse campo. Se for pra
+existir, é migração — não invente leitura de outra tabela.
