@@ -822,10 +822,12 @@ def init_db():
             )""",
             """CREATE TABLE IF NOT EXISTS ia_ghostwriter_logs (
                 id SERIAL PRIMARY KEY,
+                usuario_id INTEGER,
                 contexto TEXT,
                 resposta_gerada TEXT,
                 copiado BOOLEAN DEFAULT FALSE,
                 feedback TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""",
             """CREATE TABLE IF NOT EXISTS score_heartbeat (
@@ -1976,10 +1978,12 @@ def init_db():
         );
         CREATE TABLE IF NOT EXISTS ia_ghostwriter_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER,
             contexto TEXT,
             resposta_gerada TEXT,
             copiado BOOLEAN DEFAULT FALSE,
             feedback TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS score_heartbeat (
@@ -2747,6 +2751,8 @@ def init_db():
     add_col('crm_leads', 'auditado_em', 'TIMESTAMP')
     add_col('cotacao_tabela', 'administradora', 'TEXT')
     add_col('api_chave', 'usuario_id', 'INTEGER')
+    add_col('ia_ghostwriter_logs', 'usuario_id', 'INTEGER')
+    add_col('ia_ghostwriter_logs', 'criado_em', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
     add_col('crm_leads', 'qual_cidade', 'TEXT')
     add_col('crm_leads', 'qual_cnpj', 'TEXT')
     add_col('crm_leads', 'empresa_antes_migracao', 'TEXT')
@@ -23493,12 +23499,10 @@ def admin_caca_docs_excluir():
 
 
 @app.route('/api/ia/ghostwriter/gerar', methods=['POST', 'OPTIONS'])
+@login_ou_extensao
 def api_ia_ghostwriter_gerar():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
-
     d = request.json or {}
     contexto = d.get('contexto', '')
     if not contexto:
@@ -23523,55 +23527,37 @@ Histórico da Conversa:
 Escreva APENAS o texto da mensagem que o consultor deve enviar, sem aspas, sem markdown, sem explicações extras.
 """
 
-    gemini_key = os.environ.get('GEMINI_API_KEY', '').strip()
-    resultado = "Desculpe, a IA está indisponível no momento."
-    
-    if gemini_key:
-        try:
-            import requests
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.7}
-            }
-            res = requests.post(url, json=payload, timeout=15)
-            res.raise_for_status()
-            data = res.json()
-            resultado = data['candidates'][0]['content']['parts'][0]['text'].strip()
-        except Exception as e:
-            return _wa_cors(jsonify({"ok": False, "erro": f"Erro na IA Gemini: {str(e)}"})), 500
-    else:
-        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
-        if not api_key:
-            return _wa_cors(jsonify({"ok": False, "erro": "Nenhuma chave de IA configurada"})), 500
-        try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
-            msg = client.messages.create(
-                model="claude-3-5-sonnet-20240620",
-                max_tokens=500,
-                system="Você é um assistente que retorna APENAS o texto puro da mensagem, sem tags, aspas ou explicações.",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            resultado = msg.content[0].text.strip()
-        except Exception as e:
-            return _wa_cors(jsonify({"ok": False, "erro": f"Erro na IA Anthropic: {str(e)}"})), 500
+    # A chamada de API foi intencionalmente deixada em branco
+    # até que a decisão entre Gemini e Anthropic seja concluída.
+    resultado = "O Guilherme ainda não decidiu qual modelo de IA será usado. Volte mais tarde!"
 
     conn = db()
-    cur = conn.execute("INSERT INTO ia_ghostwriter_logs (contexto, resposta_gerada, copiado) VALUES (?, ?, False) RETURNING id", (contexto, resultado))
-    log_id = cur.fetchone()['id']
-    conn.commit()
+    try:
+        cur = conn.execute(
+            "INSERT INTO ia_ghostwriter_logs (usuario_id, contexto, resposta_gerada, copiado, criado_em) VALUES (?, ?, ?, False, ?)", 
+            (g.usuario_id, contexto, resultado, _agora_sp())
+        )
+        if DB_MODE == 'postgres':
+            log_id = _last_insert_id(cur)
+        else:
+            log_id = cur.lastrowid
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except: pass
+        close_db(conn)
+        app.logger.error(f"[GHOSTWRITER] Erro banco: {e}")
+        return _wa_cors(jsonify({"ok": False, "erro": "Falha ao gravar log"})), 500
     close_db(conn)
     
     return _wa_cors(jsonify({"ok": True, "resposta": resultado, "log_id": log_id}))
 
 
 @app.route('/api/ia/ghostwriter/feedback', methods=['POST', 'OPTIONS'])
+@login_ou_extensao
 def api_ia_ghostwriter_feedback():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
 
     d = request.json or {}
     log_id = d.get('log_id')
@@ -23581,12 +23567,18 @@ def api_ia_ghostwriter_feedback():
         return _wa_cors(jsonify({"ok": False, "erro": "Dados inválidos"})), 400
 
     conn = db()
-    if acao == 'copiado':
-        conn.execute("UPDATE ia_ghostwriter_logs SET copiado=True WHERE id=?", (log_id,))
-    elif acao in ('ajudou', 'nao_ajudou'):
-        conn.execute("UPDATE ia_ghostwriter_logs SET feedback=? WHERE id=?", (acao, log_id))
-    
-    conn.commit()
+    try:
+        if acao == 'copiado':
+            conn.execute("UPDATE ia_ghostwriter_logs SET copiado=? WHERE id=? AND usuario_id=?", (True, log_id, g.usuario_id))
+        elif acao in ('ajudou', 'nao_ajudou'):
+            conn.execute("UPDATE ia_ghostwriter_logs SET feedback=? WHERE id=? AND usuario_id=?", (acao, log_id, g.usuario_id))
+        conn.commit()
+    except Exception as e:
+        try: conn.rollback()
+        except: pass
+        app.logger.error(f"[GHOSTWRITER] Erro no feedback: {e}")
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Falha ao gravar feedback"})), 500
     close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
 
