@@ -39291,7 +39291,7 @@ def crm_leads_da_extensao_pendentes():
 @login_required
 def crm_lead_nao_e_lead(lid):
     conn = db()
-    lead = conn.execute("SELECT telefone FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    lead = conn.execute("SELECT * FROM crm_leads WHERE id=?", (lid,)).fetchone()
     if not lead:
         return jsonify({"ok": False, "erro": "lead_nao_encontrado"}), 404
 
@@ -39300,19 +39300,71 @@ def crm_lead_nao_e_lead(lid):
         return jsonify({"ok": False, "erro": "lead_com_proposta"}), 400
 
     tel_norm = _normalizar_telefone(str(lead['telefone'] or ''))
-    agora = _agora_sp()
+    
+    # 1. Copiar dados antes de apagar (para crm_lead_excluido)
+    backup = {"lead": dict(lead)}
+    backup["cotacao_viva"] = [dict(r) for r in conn.execute("SELECT * FROM cotacao_viva WHERE lead_id=?", (lid,))]
+    backup["cotacao_salva"] = [dict(r) for r in conn.execute("SELECT * FROM cotacao_salva WHERE lead_id=?", (lid,))]
+    if tel_norm:
+        backup["lead_notas"] = [dict(r) for r in conn.execute("SELECT * FROM lead_notas WHERE telefone_norm=?", (tel_norm,))]
+        backup["wa_chat_lead"] = [dict(r) for r in conn.execute("SELECT * FROM wa_chat_lead WHERE telefone_norm=?", (tel_norm,))]
+    else:
+        backup["lead_notas"] = []
+        backup["wa_chat_lead"] = []
+        
+    apagados = {}
     
     try:
-        conn.execute("UPDATE crm_leads SET auditado_em=? WHERE id=?", (agora, lid))
-        _ignorar_conversa_wa(conn, '', tel_norm, False, '', 'Auditado via CRM', g.user.get('nome') if hasattr(g, 'user') and g.user else '')
+        import json
+        conn.execute("INSERT INTO crm_lead_excluido (motivo, dados_json, excluido_por_id, excluido_em) VALUES (?, ?, ?, ?)",
+                     ("marcado como pessoal", json.dumps(backup, default=str), g.usuario_id if hasattr(g, 'usuario_id') else None, _agora_sp()))
+                     
+        # 2. Apagar tabelas que ligam por lead_id
+        t_lead = [
+            'cotacao_viva', 'cotacao_salva', 'crm_atividades', 'crm_agenda', 
+            'whatsapp_extensao_fila', 'crm_lead_etiquetas', 'crm_lead_campos',
+            'lead_documento', 'lead_extracao', 'wa_aprendizado_leads', 
+            'crm_sms_log', 'crm_email_log', 'varredura_item', 
+            'meta_conversoes', 'google_ads_conversoes', 'fluxo_inscricoes',
+            'contatos_frios'
+        ]
+        
+        for t in t_lead:
+            cur = conn.execute(f"DELETE FROM {t} WHERE lead_id=?", (lid,))
+            if cur.rowcount > 0:
+                apagados[t] = cur.rowcount
+                
+        # 3. Apagar tabelas que ligam por telefone_norm
+        # NOTA: Não apagar de wa_conversa_ignorada para não voltar a importar
+        if tel_norm:
+            t_tel = [
+                'lead_notas', 'wa_chat_lead', 'wa_conversa_estado', 
+                'whatsapp_analises', 'funil_execucao', 'campanha_contato',
+                'clique_pendente'
+            ]
+            for t in t_tel:
+                cur = conn.execute(f"DELETE FROM {t} WHERE telefone_norm=?", (tel_norm,))
+                if cur.rowcount > 0:
+                    apagados[t] = cur.rowcount
+                    
+        # 4. Apagar o próprio lead
+        cur = conn.execute("DELETE FROM crm_leads WHERE id=?", (lid,))
+        if cur.rowcount > 0:
+            apagados['crm_leads'] = cur.rowcount
+            
+        # 5. Adicionar na lista de ignorados para não voltar
+        _ignorar_conversa_wa(conn, '', tel_norm, False, str(lead['nome']), 'Auditado via CRM', g.usuario['nome'] if hasattr(g, 'usuario') and g.usuario else '')
+        
         conn.commit()
     except Exception as e:
         try: conn.rollback()
         except: pass
-        app.logger.error(f"Erro ao auditar não é lead: {e}")
-        return jsonify({"ok": False, "erro": "erro_interno"}), 500
-
-    return jsonify({"ok": True})
+        app.logger.error(f"Erro ao apagar lead pessoal: {e}")
+        close_db(conn)
+        return jsonify({"ok": False, "erro": "erro_interno", "detalhe": str(e)}), 500
+        
+    close_db(conn)
+    return jsonify({"ok": True, "apagados": apagados})
 
 
 @app.route('/crm/lead/<int:lid>/e-lead', methods=['POST'])
