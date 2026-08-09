@@ -2103,7 +2103,7 @@ details.job-cot-subgaveta > summary .job-cot-gaveta-q { margin-left: auto; }
 }
 
 .job-cfg-bt {
-  width: 100%; border: 1px solid var(--job-borda); background: var(--job-bg2); color: #4a4437;
+  width: 100%; border: 1px solid var(--job-borda); background: transparent; color: var(--job-txt);
   border-radius: 10px; padding: 10px; font-size: 13px; font-weight: 650;
   cursor: pointer; font-family: inherit;
   transition: transform .12s, box-shadow .12s, filter .12s;
@@ -2411,6 +2411,7 @@ details.job-cfg-antigo > summary:hover { opacity: 1; }
 .job-inbox-atender,
 .job-portao-bt,
 .job-cfg-bt-primario,
+.job-vinc-btn,
 .job-analisar-btn {
   font-family: var(--job-ui);
   font-weight: 640;
@@ -2434,7 +2435,7 @@ details.job-cfg-antigo > summary:hover { opacity: 1; }
 .job-modelo-enviar:hover:not(:disabled),
 .job-inbox-atender:hover:not(:disabled),
 .job-portao-bt:hover:not(:disabled),
-.job-cfg-bt-primario:hover:not(:disabled),
+.job-cfg-bt-primario:hover:not(:disabled), .job-vinc-btn:hover:not(:disabled),
 .job-analisar-btn:hover:not(:disabled) {
   filter: brightness(1.08); box-shadow: var(--job-elev-2);
 }
@@ -2444,20 +2445,20 @@ details.job-cfg-antigo > summary:hover { opacity: 1; }
 .job-modelo-enviar:active:not(:disabled),
 .job-inbox-atender:active:not(:disabled),
 .job-portao-bt:active:not(:disabled),
-.job-cfg-bt-primario:active:not(:disabled),
+.job-cfg-bt-primario:active:not(:disabled), .job-vinc-btn:active:not(:disabled),
 .job-analisar-btn:active:not(:disabled) { transform: scale(.975); box-shadow: none; }
 
 .job-cnpj-btn:focus, .job-cot-bt-mandar:focus, .job-modelo-enviar:focus,
-.job-inbox-atender:focus, .job-portao-bt:focus, .job-cfg-bt-primario:focus,
+.job-inbox-atender:focus, .job-portao-bt:focus, .job-cfg-bt-primario:focus, .job-vinc-btn:focus,
 .job-analisar-btn:focus { outline: none; }
 .job-cnpj-btn:focus-visible, .job-cot-bt-mandar:focus-visible, .job-modelo-enviar:focus-visible,
-.job-inbox-atender:focus-visible, .job-portao-bt:focus-visible, .job-cfg-bt-primario:focus-visible,
+.job-inbox-atender:focus-visible, .job-portao-bt:focus-visible, .job-cfg-bt-primario:focus-visible, .job-vinc-btn:focus-visible,
 .job-analisar-btn:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
 
 /* DESABILITADO diz "ainda não", não "quebrado": perde a cor e a sombra, mas
    mantém a forma e o texto legível. Opacidade sozinha some com o rótulo. */
 .job-cnpj-btn:disabled, .job-cot-bt-mandar:disabled, .job-modelo-enviar:disabled,
-.job-inbox-atender:disabled, .job-portao-bt:disabled, .job-cfg-bt-primario:disabled,
+.job-inbox-atender:disabled, .job-portao-bt:disabled, .job-cfg-bt-primario:disabled, .job-vinc-btn:disabled,
 .job-analisar-btn:disabled {
   background: color-mix(in srgb, var(--job-txt) 12%, transparent);
   color: var(--job-txt-fraco);
@@ -2465,6 +2466,64 @@ details.job-cfg-antigo > summary:hover { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .job-cnpj-btn:active, .job-cot-bt-mandar:active, .job-modelo-enviar:active,
-  .job-inbox-atender:active, .job-portao-bt:active, .job-cfg-bt-primario:active,
+  .job-inbox-atender:active, .job-portao-bt:active, .job-cfg-bt-primario:active, .job-vinc-btn:active,
   .job-analisar-btn:active { transform: none; }
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   BOTÃO SECUNDÁRIO — contorno, nunca preenchido
+
+   Havia dois tratamentos: uns preenchidos com o cinza de superfície, outros
+   contornados. Preenchido é o problema — um bloco de cor ao lado do botão
+   principal parece uma segunda ação de mesmo peso, e aí não existe ação
+   principal. Contorno diz "a outra opção" sem disputar.
+
+   É a mesma decisão da folha de confirmação, onde o Cancelar fica quieto.
+   ══════════════════════════════════════════════════════════════════════════ */
+.job-copy,
+.job-cot-bt-copiar,
+.job-modelo-copiar,
+.job-mini-btn,
+.job-cfg-bt {
+  font-family: var(--job-ui);
+  font-weight: 600;
+  letter-spacing: var(--job-tk-sm);
+  background: transparent;
+  color: var(--job-txt);
+  border: 1px solid var(--job-borda);
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background var(--job-t-rapido) ease,
+              border-color var(--job-t-rapido) ease,
+              transform var(--job-t-toque) ease-out;
+}
+.job-copy:hover:not(:disabled),
+.job-cot-bt-copiar:hover:not(:disabled),
+.job-modelo-copiar:hover:not(:disabled),
+.job-mini-btn:hover:not(:disabled),
+.job-cfg-bt:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--job-acento) 10%, transparent);
+  border-color: color-mix(in srgb, var(--job-acento) 55%, transparent);
+}
+.job-copy:active:not(:disabled),
+.job-cot-bt-copiar:active:not(:disabled),
+.job-modelo-copiar:active:not(:disabled),
+.job-mini-btn:active:not(:disabled),
+.job-cfg-bt:active:not(:disabled) { transform: scale(.975); }
+
+.job-copy:focus, .job-cot-bt-copiar:focus, .job-modelo-copiar:focus,
+.job-mini-btn:focus, .job-cfg-bt:focus { outline: none; }
+.job-copy:focus-visible, .job-cot-bt-copiar:focus-visible, .job-modelo-copiar:focus-visible,
+.job-mini-btn:focus-visible, .job-cfg-bt:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
+
+.job-copy:disabled, .job-cot-bt-copiar:disabled, .job-modelo-copiar:disabled,
+.job-mini-btn:disabled, .job-cfg-bt:disabled {
+  color: var(--job-txt-fraco); border-color: var(--job-borda);
+  background: transparent; cursor: default; transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .job-copy:active, .job-cot-bt-copiar:active, .job-modelo-copiar:active,
+  .job-mini-btn:active, .job-cfg-bt:active { transform: none; }
 }
