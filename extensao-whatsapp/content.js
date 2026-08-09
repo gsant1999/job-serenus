@@ -3775,6 +3775,17 @@
         lead_id: meta.lead_id || null,
         // De ONDE veio esta leitura, pra o custo ter procedencia no painel.
         origem: meta.origem || 'varredura',
+        // E DE ONDE VEIO A DECISAO DE LER — que e outra coisa.
+        //
+        // O servidor usa isto pra decidir se cria lead no CRM. Analise que o
+        // consultor pediu significa que ele ja decidiu que aquilo e lead;
+        // varredura nao significa nada disso — ela le TODA conversa que teve
+        // mensagem, e era por isso que fornecedor, contador e o tecnico do
+        // ar-condicionado viravam lead e enchiam a tela de auditoria.
+        //
+        // Sem este campo a regra nova nao surte efeito nenhum: o padrao do
+        // servidor e 'manual', pra extensao antiga nao mudar de comportamento.
+        origem_analise: 'varredura',
         lote_id: meta.lote_id || null,
         usuario_id: usuarioId || null,
         mensagens: conv.mensagens || [],
@@ -10604,6 +10615,8 @@
       // então dispara UM fetch com tudo montado. Sem pacote gigante, sem perder
       // mídia. O reqId amarra os lotes e permite cancelar.
       const _baseAnalise = {
+        // Ele CLICOU em analisar: ja decidiu que e lead. O servidor cria no CRM.
+        origem_analise: 'manual',
         telefone, nome, mensagens, links,
         usuario_id: usuarioId || null, whatsapp_consultor: meuNumero || null,
         documentos_encontrados: documentosEncontrados,
