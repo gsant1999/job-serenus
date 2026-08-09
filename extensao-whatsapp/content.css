@@ -3719,3 +3719,23 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 .job-cot-porque { display: block; margin-top: 3px; font-family: var(--job-ui);
   font-size: 10.5px; font-weight: 700; letter-spacing: var(--job-tk-xs);
   color: var(--job-txt-fraco); }
+
+
+/* ── LEGENDA DA IMAGEM DA COTACAO ──────────────────────────────────────────
+   O texto viaja NA imagem, nao como um segundo balao. Fica entre o preview e
+   os botoes porque e ali que ele decide: viu a imagem, escreve o que ela
+   precisa, manda. */
+.job-cot-prev-leg-cx { padding: 0 10px 10px; }
+.job-cot-prev-leg-t { display: flex; align-items: center; gap: 6px; margin-bottom: 5px;
+  font-family: var(--job-ui); font-size: 10.5px; font-weight: 700;
+  letter-spacing: var(--job-tk-xs); text-transform: uppercase; color: var(--job-txt-fraco); }
+.job-cot-prev-txt { width: 100%; box-sizing: border-box; margin-bottom: 7px;
+  padding: 9px 11px; border-radius: 10px; resize: vertical; min-height: 44px;
+  background: var(--job-bg2); border: 1px solid var(--job-borda); color: var(--job-txt);
+  font-family: var(--job-ui); font-size: 12.5px; line-height: 1.45; color-scheme: dark; }
+.job-cot-prev-txt::placeholder { color: var(--job-txt-fraco); }
+.job-cot-prev-txt:focus { outline: none; border-color: var(--job-acento); }
+body[data-job-tema="claro"] .job-cot-prev-txt { color-scheme: light; }
+/* A saida pro texto muito personalizado: colar e escrever no proprio WhatsApp. */
+.job-cot-prev-dica { padding: 0 10px 11px; font-family: var(--job-ui); font-size: 10.5px;
+  line-height: 1.45; color: var(--job-txt-fraco); }

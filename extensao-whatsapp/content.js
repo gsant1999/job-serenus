@@ -7276,6 +7276,27 @@
             (_msDesenho ? ' <span style="opacity:.65">Desenhada em ' +
               (_msDesenho / 1000).toFixed(1).replace('.', ',') + 's.</span>' : '') +
           '</div>' +
+          // A LEGENDA PERTENCE A IMAGEM.
+          //
+          // "Mandar na conversa" mandava a imagem pelada. Ele disse que quase
+          // sempre quer um texto junto: as vezes o padrao da corretora, as
+          // vezes um bem personalizado. Mandar primeiro e escrever depois
+          // chega ao cliente como duas mensagens soltas, e a primeira e uma
+          // imagem sem contexto.
+          //
+          // Agora o texto viaja NA imagem (a ponte ja aceitava legenda e a
+          // gente nao usava). O campo comeca vazio: quem nao quer legenda so
+          // manda, como antes.
+          '<div class="job-cot-prev-leg-cx">' +
+            '<div class="job-cot-prev-leg-t">Legenda' +
+              _cotAjuda('Vai junto com a imagem, na mesma mensagem — não como um ' +
+                        'segundo balão. Em branco, a imagem sai sozinha.') + '</div>' +
+            '<textarea id="job-cot-prev-txt" class="job-cot-prev-txt" rows="2" ' +
+              'placeholder="Escreva a legenda, ou escolha uma pronta"></textarea>' +
+            '<button type="button" class="job-cot-bt-copiar" id="job-cot-prev-prontas" ' +
+              'style="width:100%">Usar uma legenda pronta</button>' +
+            '<div id="job-cot-prev-lista"></div>' +
+          '</div>' +
           '<div class="job-cot-item-acoes">' +
             '<button type="button" class="job-cot-bt-mandar" id="job-cot-prev-mandar" style="flex:2">' +
               'Mandar na conversa</button>' +
@@ -7284,8 +7305,53 @@
             '<button type="button" class="job-cot-bt-copiar" id="job-cot-prev-baixar" style="flex:1">' +
               'Baixar</button>' +
           '</div>' +
+          // O CAMINHO DO TEXTO MUITO PERSONALIZADO. Digitar um texto longo num
+          // campo de painel e pior do que colar a imagem e escrever no proprio
+          // WhatsApp, com emoji, correcao e o teclado que ele ja usa.
+          '<div class="job-cot-prev-dica">Texto muito personalizado? <b>Copiar</b> ' +
+            'cola a imagem na conversa e você escreve ali mesmo.</div>' +
         '</div>';
       cx.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+      const txt = document.getElementById('job-cot-prev-txt');
+      const legenda = () => (txt && txt.value || '').trim();
+      // O BOTAO DIZ O QUE VAI ACONTECER: com texto no campo, ele para de
+      // dizer so "mandar" e passa a dizer que a legenda vai junto.
+      const rotularMandar = () => {
+        if (!bmd || bmd.disabled) return;
+        bmd.textContent = legenda() ? 'Mandar com legenda' : 'Mandar na conversa';
+      };
+      if (txt) txt.addEventListener('input', rotularMandar);
+
+      // As legendas prontas vem do JOB (Cotações → Legendas). Elas PREENCHEM o
+      // campo em vez de mandar direto: quase toda legenda pronta leva um ajuste
+      // — o primeiro nome, o dia da visita — e travar isso obrigaria a escolher
+      // entre "pronta" e "minha".
+      const bpr = document.getElementById('job-cot-prev-prontas');
+      const lst = document.getElementById('job-cot-prev-lista');
+      if (bpr) bpr.addEventListener('click', async () => {
+        if (lst.innerHTML) { lst.innerHTML = ''; return; }      // segundo clique fecha
+        lst.innerHTML = '<div class="job-cot-dica">Buscando as legendas…</div>';
+        let r = null;
+        try { r = await _safeSendMessage({ type: 'cotacao_legendas' }); } catch (e) { r = null; }
+        const legs = Array.isArray(r) ? r : ((r && r.legendas) || []);
+        if (!legs.length) {
+          lst.innerHTML = '<div class="job-cot-dica">' +
+            esc((r && r.erro) || 'Nenhuma legenda cadastrada. Crie em Cotações → Legendas, no JOB.') +
+            '</div>';
+          return;
+        }
+        lst.innerHTML = legs.map((m, i) =>
+          '<button type="button" class="job-cot-leg" data-i="' + i + '">' +
+            '<b>' + esc(m.nome || 'Legenda') + '</b>' +
+            '<span>' + esc(String(m.texto || '').slice(0, 90)) + '</span></button>').join('');
+        lst.querySelectorAll('.job-cot-leg').forEach((b) => b.addEventListener('click', () => {
+          const m = legs[+b.dataset.i] || {};
+          if (txt) { txt.value = m.texto || ''; txt.focus(); }
+          lst.innerHTML = '';
+          rotularMandar();
+        }));
+      });
 
       const bmd = document.getElementById('job-cot-prev-mandar');
       bmd.addEventListener('click', async () => {
@@ -7295,14 +7361,14 @@
         if (!chatId) {
           bmd.disabled = false;
           bmd.textContent = 'Abra a conversa e tente de novo';
-          setTimeout(() => { bmd.textContent = 'Mandar na conversa'; }, 3200);
+          setTimeout(rotularMandar, 3200);
           return;
         }
-        const env = await pedirEnviarMidia(chatId, 'imagem', dataUrl, '',
-                                           'cotacao-' + r_id + '.png');
+        const env = await pedirEnviarMidia(chatId, 'imagem', dataUrl, legenda(),
+                                           'cotacao-' + r_id + '.jpg');
         bmd.disabled = false;
         bmd.textContent = (env && env.ok) ? 'Mandada' : 'Não saiu — tente de novo';
-        setTimeout(() => { bmd.textContent = 'Mandar na conversa'; }, 3000);
+        setTimeout(rotularMandar, 3000);
       });
       document.getElementById('job-cot-prev-copiar').addEventListener('click', async (e) => {
         const b = e.currentTarget;
@@ -7315,7 +7381,7 @@
       });
       document.getElementById('job-cot-prev-baixar').addEventListener('click', (e) => {
         const a = document.createElement('a');
-        a.href = dataUrl; a.download = 'cotacao-' + r_id + '.png';
+        a.href = dataUrl; a.download = 'cotacao-' + r_id + '.jpg';
         document.body.appendChild(a); a.click(); a.remove();
         e.currentTarget.textContent = 'Baixada';
         setTimeout(() => { e.currentTarget.textContent = 'Baixar'; }, 2200);
