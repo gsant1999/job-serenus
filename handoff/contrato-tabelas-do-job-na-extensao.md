@@ -75,6 +75,31 @@ pra recusar plano fora da faixa. Sem eles a extensão deixa marcar um plano de
 5 a 29 vidas numa cotação de 2, e o consultor só descobre no cálculo. Inclua
 os dois.
 
+### 1.4 `?render=1` no link público — 3 linhas, e some uma janela da cara dele
+
+Nada a ver com tabelas; entrou aqui porque é o mesmo arquivo e a mesma sessão.
+
+A imagem da cotação é desenhada pelo NAVEGADOR (html2canvas em
+`cotacao_documento.html`) e só nasce quando alguém abre a página. Pra
+provocar isso sem tirar o consultor do WhatsApp, a extensão precisa carregar
+essa página **invisível**, num iframe.
+
+Os dois caminhos de hoje não servem:
+
+- `/cotacao/documento/<id>` é `@login_required` — iframe de outro site não
+  leva o cookie de sessão.
+- `/c/<token>` é público **e conta abertura**: incrementa `aberturas`, grava
+  `Cliente ABRIU a cotação` em `crm_atividades` e dispara o sino
+  *"Cotação visualizada"*. Usar isso pra render encheria o CRM de abertura que
+  nunca houve — e é dado que o consultor usa pra decidir quem cobrar.
+
+**O que eu preciso:** `GET /c/<token>?render=1` renderiza a página igual e
+**pula o bloco de rastreio inteiro** — `UPDATE aberturas`, a atividade no CRM
+e o `_notificar`. Nada mais muda.
+
+Enquanto isso não existe, a extensão abre uma janela minimizada e fecha
+sozinha. Funciona, mas pisca na barra dele.
+
 ## 2. O que eu faço na extensão (já construído contra este contrato)
 
 Uma segunda fonte na tela de operadoras, chamada **Tabelas do JOB**, com as

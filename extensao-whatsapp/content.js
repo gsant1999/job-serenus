@@ -5881,7 +5881,8 @@
       _cotCabecalho(_cotTopo(abrirSecaoCotarInline, 'Cotar agora'), 'Operadoras',
         ops.length ? '<span class="job-sec-cont">' + ops.length + '</span>' : '') +
       '<div class="job-cot-wrap">' +
-      '<div class="job-sec-sub">Quem atende essa combinação. Escolha uma — dá pra somar quantas quiser.</div>' +
+      '<div class="job-sec-sub">Escolha uma de cada vez — cada uma que você cotar soma no mesmo comparativo.</div>' +
+      '<div class="job-cot-fonte-t" style="margin-bottom:8px">Pelo Painel do Corretor</div>' +
       (ops.length
         ? '<div class="job-cot-ops">' + ops.map((o) => {
             const jaFoi = _cotFeitas.filter((f) => String(f.operadoraId) === String(o.id))[0];
@@ -5920,9 +5921,10 @@
       // PDF da Hapvida. O comparativo e o mesmo pras duas, entao dá pra
       // misturar — que era exatamente o que nao dava.
       '<div class="job-cot-fonte">' +
-        '<div class="job-cot-fonte-t">Tabelas do JOB</div>' +
-        '<div class="job-cot-fonte-s">Importadas de PDF. Preço calculado pelo JOB, ' +
-          'não pelo Painel — entram no mesmo comparativo.</div>' +
+        '<div class="job-cot-fonte-t">Operadoras fora do Painel</div>' +
+        '<div class="job-cot-fonte-s">MedSênior, Beneficência Vital, Santa Tereza e outras ' +
+          'que o Painel não cota. Marque planos aqui e eles entram no ' +
+          '<b>mesmo comparativo</b> das de cima.</div>' +
         '<div id="job-cot-ops-job">' + _cotBlocoOpsJob() + '</div>' +
       '</div>' +
       '<button class="job-cot-nova" id="job-cot-voltar" style="border:none;cursor:pointer;width:100%;font-family:inherit">Mudar dados</button>' +
@@ -6486,13 +6488,19 @@
           'title="Escolhe uma legenda cadastrada no JOB e manda na conversa">Legenda</button>' +
         '<button class="job-cot-bt-copiar" id="job-cot-imagem" style="flex:1" ' +
           'title="Mostra a imagem aqui antes de mandar, com copiar, baixar e enviar">' +
-          'Ver imagem</button>' +
+          'Ver imagem da cotação</button>' +
       '</div>' +
       '<div id="job-cot-preview"></div>' +
       '<div id="job-cot-legendas"></div>' +
-      '<a class="job-cot-nova" href="' + esc(doc) + '" target="_blank" rel="noopener" ' +
-        'title="Abre a apresentação no JOB: copiar imagem, PDF, destacar plano, legenda e envio por e-mail">' +
-        'Abrir apresentação (imagem, PDF, destaque)</a>' +
+      // O LINK PRA APRESENTACAO SAIU.
+      //
+      // Ele existia porque a imagem so nascia la. Agora ela nasce sozinha e
+      // aparece aqui — e o link virou a unica coisa nesta tela que ainda
+      // tirava o consultor do WhatsApp. Foi nele que o Guilherme clicou
+      // achando que era o "Ver imagem". O que so existe la (PDF e destaque de
+      // plano) continua a um clique em "Nova cotacao"/pelo JOB, mas nao no
+      // caminho de quem so quer mandar a cotacao pro cliente.
+      ''+
       // NOVA COTAÇÃO É LINK NOVO, e a frase precisa deixar isso claro: o
       // cliente que já recebeu o link antigo continua vendo o antigo. Quem
       // quer CORRIGIR um valor sem trocar o link usa "Corrigir valor" lá
@@ -6610,6 +6618,28 @@
 
     const bimg = document.getElementById('job-cot-imagem');
     if (bimg) bimg.addEventListener('click', () => _cotPegarImagem(bimg, _cotPreview));
+
+    // A IMAGEM COMECA SOZINHA, NA HORA DE SALVAR.
+    //
+    // Antes ela so nascia quando ele clicava — e ai ficava lendo "Montando a
+    // imagem..." parado, no meio do atendimento. O trabalho e o mesmo; o que
+    // mudou e QUANDO ele acontece. Salvou, ja comeca; quando ele rolar ate
+    // aqui, a imagem em geral ja esta desenhada.
+    //
+    // Sem botao piscando: enquanto vem, aparece so o lugar dela reservado.
+    // Se falhar, nao ha alarme nenhum — o botao "Ver imagem" continua ali e
+    // tenta de novo. Erro de coisa que ele nao pediu nao merece susto.
+    if (bimg) {
+      const cx = document.getElementById('job-cot-preview');
+      if (cx) cx.innerHTML = '<div class="job-cot-prev-vazio">Preparando a imagem da cotação…</div>';
+      _cotPegarImagem({ set textContent(v) {}, get textContent() { return ''; }, disabled: false },
+                      (dataUrl) => _cotPreview(dataUrl))
+        .catch(() => {})
+        .finally(() => {
+          const c2 = document.getElementById('job-cot-preview');
+          if (c2 && c2.querySelector('.job-cot-prev-vazio')) c2.innerHTML = '';
+        });
+    }
 
     const bleg = document.getElementById('job-cot-legenda');
     if (bleg) bleg.addEventListener('click', async () => {
