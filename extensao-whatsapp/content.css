@@ -2002,6 +2002,23 @@ details.job-cot-subgaveta > summary::before {
 details.job-cot-subgaveta[open] > summary::before { transform: rotate(90deg); }
 details.job-cot-subgaveta > summary .job-cot-gaveta-q { margin-left: auto; }
 
+/* O <details> ficava com o `display:flex` da regra de cima, que e do rotulo
+   simples e nao do elemento. Fechado ninguem via; aberto, os planos iam
+   parar AO LADO do titulo em vez de embaixo. */
+details.job-cot-subgaveta { display: block; }
+
+/* PROFUNDIDADE SE LE PELO RECUO, nao por mais uma borda.
+   Sao ate tres niveis (MEI > coparticipacao > produto) num painel de 380px:
+   tres cartoes encaixados viram escada de bordas. Cada nivel entra 10px e o
+   titulo do nivel mais fundo fica menor e mais claro que o de cima. */
+details.job-cot-subgaveta details.job-cot-subgaveta > summary { padding-left: 22px; }
+details.job-cot-subgaveta details.job-cot-subgaveta { border-top-color: #f7f3ec; }
+details.job-cot-subgaveta details.job-cot-subgaveta .job-cot-plano { padding-left: 22px; }
+
+/* O nivel de MEI e o unico que muda o que a empresa PODE contratar — os
+   outros dois mudam o que ela escolhe. Por isso ele e o unico com peso. */
+details.job-cot-nivel-mei > summary { color: #5c5445; font-weight: 700; }
+
 /* CONTATO MARCADO COMO PESSOAL — a barra inteira fecha.
    Não é um aviso discreto: se a ferramenta continua utilizável, a marca não
    quer dizer nada. O desfazer fica no JOB, de propósito. */

@@ -5941,24 +5941,67 @@
   // COPARTICIPAÇÃO por dentro (é a primeira pergunta que o cliente faz). O
   // resto continua como etiqueta na linha, porque virar gaveta deixaria cada
   // uma com um plano só — e gaveta de um item é ruído, não organização.
-  function _cotGrupoDe(p) {
-    const tb = (p && p.tabela) || {};
-    return {
-      produto: _texto((p && p.produto)) || 'Sem produto definido',
-      copart: _cotCopart(tb),
-    };
+  // ORDEM DAS GAVETAS — decidida pelo Guilherme, e ela nao muda:
+  //
+  //     OPERADORA  >  MEI / nao MEI  >  coparticipacao  >  PRODUTO
+  //
+  // E a ordem em que ele elimina opcao na frente do cliente. MEI vem primeiro
+  // porque nao se negocia: ou a tabela aceita ou nao aceita, e isso corta
+  // metade da lista antes de qualquer conversa. Depois vem a coparticipacao,
+  // que o cliente pergunta sozinho. So entao o produto, que e onde se compara
+  // rede e preco. A tela estava ao contrario — produto por fora, sem nivel de
+  // MEI nenhum — e ele reclamou disso mais de uma vez.
+  const _COT_NIVEIS = [
+    { chave: 'mei',     de: (tb) => (tb.mei === true ? 'Aceita MEI' : 'Não aceita MEI') },
+    { chave: 'copart',  de: (tb, p) => _cotCopart(tb) },
+    { chave: 'produto', de: (tb, p) => _texto(p && p.produto) || 'Sem produto definido' },
+  ];
+
+  // Arvore de grupos na ordem acima. Cada no e { rotulo, filhos: Map, itens: [] }.
+  //
+  // NIVEL COM UM VALOR SO NAO VIRA GAVETA. Gaveta de item unico cobra um
+  // clique e nao separa nada — some, e o valor dela sobe pro cabecalho como
+  // etiqueta comum, que e onde ele ja aparece.
+  function _cotArvore(pls, idxs, nivel) {
+    if (nivel >= _COT_NIVEIS.length) return { folha: true, itens: idxs };
+    const n = _COT_NIVEIS[nivel];
+    const m = new Map();
+    idxs.forEach((i) => {
+      const p = pls[i];
+      const r = n.de((p && p.tabela) || {}, p);
+      if (!m.has(r)) m.set(r, []);
+      m.get(r).push(i);
+    });
+    if (m.size <= 1) return _cotArvore(pls, idxs, nivel + 1);   // nivel mudo: pula
+    const filhos = new Map();
+    m.forEach((sub, rotulo) => filhos.set(rotulo, _cotArvore(pls, sub, nivel + 1)));
+    return { folha: false, chave: n.chave, filhos: filhos };
   }
 
-  function _cotAgrupar(pls) {
-    const porProduto = new Map();
-    pls.forEach((p, i) => {
-      const g = _cotGrupoDe(p);
-      if (!porProduto.has(g.produto)) porProduto.set(g.produto, new Map());
-      const dentro = porProduto.get(g.produto);
-      if (!dentro.has(g.copart)) dentro.set(g.copart, []);
-      dentro.get(g.copart).push(i);
+  function _cotContar(no) {
+    if (no.folha) return no.itens.length;
+    let n = 0; no.filhos.forEach((f) => { n += _cotContar(f); });
+    return n;
+  }
+
+  // Desenha a arvore. `prof` so muda a casca visual: a de fora e o cartao, as
+  // de dentro sao linhas recuadas — tres cartoes encaixados num painel de 380
+  // pixels viram uma escada de bordas e o consultor perde o fio.
+  function _cotArvoreHTML(no, linha, prof) {
+    if (no.folha) return no.itens.map(linha).join('');
+    let html = '';
+    no.filhos.forEach((filho, rotulo) => {
+      const cls = prof === 0 ? 'job-cot-gaveta' : 'job-cot-subgaveta';
+      // FECHADAS. Aberto, o consultor rola uma lista longa procurando o que
+      // quer; fechado, ele le os titulos e abre um. Quem sabe o que procura
+      // chega mais rapido — e e sempre o caso aqui.
+      html += '<details class="' + cls + ' job-cot-nivel-' + esc(no.chave) + '">' +
+        '<summary><span class="job-cot-gaveta-n">' + esc(rotulo) + '</span>' +
+        '<span class="job-cot-gaveta-q">' + _cotContar(filho) + '</span></summary>' +
+        _cotArvoreHTML(filho, linha, prof + 1) +
+      '</details>';
     });
-    return porProduto;
+    return html;
   }
 
   function _cotPintarPlanos() {
@@ -5998,35 +6041,10 @@
                     '</span>'
                   : '') + '</span></label>';
             };
-            const grupos = _cotAgrupar(pls);
-            // Um produto só? Não faz gaveta: a gaveta única só esconde o que
-            // já estava visível e cobra um clique por nada.
-            if (grupos.size <= 1 && pls.length <= 6) {
-              return pls.map((p, i) => linha(i)).join('');
-            }
-            let html = '';
-            grupos.forEach((porCopart, produto) => {
-              const qtd = Array.from(porCopart.values()).reduce((n, a) => n + a.length, 0);
-              // FECHADAS. Aberto, o consultor rola uma lista longa procurando
-              // o que quer; fechado, ele lê os títulos e abre um. Quem sabe o
-              // que procura chega mais rápido — e é sempre o caso aqui.
-              html += '<details class="job-cot-gaveta">' +
-                '<summary><span class="job-cot-gaveta-n">' + esc(produto) + '</span>' +
-                '<span class="job-cot-gaveta-q">' + qtd + '</span></summary>';
-              porCopart.forEach((idxs, copart) => {
-                // Subdivide só quando há mais de uma coparticipação; senão o
-                // rótulo repetiria o que a etiqueta da linha já diz.
-                if (porCopart.size > 1) {
-                  html += '<details class="job-cot-subgaveta"><summary>' + esc(copart) +
-                          '<span class="job-cot-gaveta-q">' + idxs.length + '</span></summary>' +
-                          idxs.map(linha).join('') + '</details>';
-                } else {
-                  html += idxs.map(linha).join('');
-                }
-              });
-              html += '</details>';
-            });
-            return html;
+            const arvore = _cotArvore(pls, pls.map((p, i) => i), 0);
+            // Poucos planos e nenhum nivel que separe: lista corrida mesmo.
+            if (arvore.folha && pls.length <= 6) return pls.map((p, i) => linha(i)).join('');
+            return _cotArvoreHTML(arvore, linha, 0);
           })()
         : '<div class="job-cot-vazio"><div class="job-cot-vazio-t">Nenhum plano serve para essas vidas</div>' +
           '<div class="job-cot-vazio-s">Cada operadora tem um mínimo de vidas e faixas próprias. Tente outra operadora ou revise a quantidade.</div></div>') +
