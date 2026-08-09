@@ -2943,35 +2943,62 @@
     const bt = box.querySelector('#job-bc-menu-bt');
     bt.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      if (box.querySelector('.job-bc-menu')) { _bcMenuFechar(box); return; }
+      if (box._bcMenu && box._bcMenu.isConnected) { _bcMenuFechar(box); return; }
       _bcMenuAbrir(box, bt);
     });
   }
 
   function _bcMenuFechar(box) {
-    const m = box.querySelector('.job-bc-menu');
-    if (!m) return;
+    // Ele mora no body agora, então não dá pra procurar dentro do box.
+    const m = box._bcMenu;
+    if (!m || !m.isConnected) { box._bcMenu = null; return; }
     m.classList.remove('on');
     const bt = box.querySelector('#job-bc-menu-bt');
     if (bt) bt.setAttribute('aria-expanded', 'false');
     setTimeout(() => { if (m.isConnected) m.remove(); }, 200);
+    box._bcMenu = null;
     if (box._bcFora) document.removeEventListener('click', box._bcFora, true);
     if (box._bcEsc) document.removeEventListener('keydown', box._bcEsc, true);
+    if (box._bcPos) { window.removeEventListener('resize', box._bcPos); box._bcPos = null; }
   }
 
   // O menu é MONTADO A CADA ABERTURA, não uma vez e escondido. Assim o que
   // aparece é o estado de agora: quantos áudios faltam, se o contato já foi
   // salvo. Menu montado uma vez mente na segunda conversa.
   async function _bcMenuAbrir(box, bt) {
+    // O MENU VAI PRO BODY, NÃO PRA DENTRO DO RODAPÉ.
+    //
+    // Dentro do rodapé ele simplesmente não aparecia: o WhatsApp recorta o que
+    // passa das bordas daquele bloco, e o menu abre PRA CIMA — ou seja, todo
+    // ele cai fora do recorte. Ficava aberto no DOM e invisível na tela.
+    //
+    // No body, com posição fixa calculada a partir do botão, ele escapa de
+    // qualquer recorte de qualquer versão do WhatsApp. O preço é recalcular a
+    // posição quando a janela muda de tamanho — barato, e feito abaixo.
     const m = document.createElement('div');
     m.className = 'job-bc-menu';
     m.setAttribute('role', 'menu');
     m.innerHTML = '<div class="job-bc-menu-carregando">Vendo o que dá pra fazer aqui…</div>';
-    box.appendChild(m);
+    document.body.appendChild(m);
+    box._bcMenu = m;
+
+    const posicionar = () => {
+      if (!m.isConnected || !bt.isConnected) return;
+      const r = bt.getBoundingClientRect();
+      m.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 348)) + 'px';
+      m.style.bottom = Math.max(8, window.innerHeight - r.top + 8) + 'px';
+    };
+    posicionar();
+    box._bcPos = posicionar;
+    window.addEventListener('resize', posicionar);
     requestAnimationFrame(() => m.classList.add('on'));
     bt.setAttribute('aria-expanded', 'true');
 
-    box._bcFora = (e) => { if (!box.contains(e.target)) _bcMenuFechar(box); };
+    box._bcFora = (e) => {
+      if (box.contains(e.target)) return;
+      if (box._bcMenu && box._bcMenu.contains(e.target)) return;  // clique DENTRO do menu
+      _bcMenuFechar(box);
+    };
     box._bcEsc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); _bcMenuFechar(box); } };
     document.addEventListener('click', box._bcFora, true);
     document.addEventListener('keydown', box._bcEsc, true);
