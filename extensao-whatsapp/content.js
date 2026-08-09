@@ -6319,10 +6319,10 @@
         '<button class="job-cot-bt-copiar" id="job-cot-legenda" style="flex:1" ' +
           'title="Escolhe uma legenda cadastrada no JOB e manda na conversa">Legenda</button>' +
         '<button class="job-cot-bt-copiar" id="job-cot-imagem" style="flex:1" ' +
-          'title="Copia a imagem da cotação pra colar na conversa">Copiar imagem</button>' +
-        '<button class="job-cot-bt-copiar" id="job-cot-baixar" style="flex:1" ' +
-          'title="Baixa a imagem da cotação">Baixar</button>' +
+          'title="Mostra a imagem aqui antes de mandar, com copiar, baixar e enviar">' +
+          'Ver imagem</button>' +
       '</div>' +
+      '<div id="job-cot-preview"></div>' +
       '<div id="job-cot-legendas"></div>' +
       '<a class="job-cot-nova" href="' + esc(doc) + '" target="_blank" rel="noopener" ' +
         'title="Abre a apresentação no JOB: copiar imagem, PDF, destacar plano, legenda e envio por e-mail">' +
@@ -6351,51 +6351,99 @@
     });
     const ban = document.getElementById('job-cot-anteriores');
     if (ban) ban.addEventListener('click', abrirSecaoCotacao);
-    // IMAGEM: buscar, e se ainda nao existir, abrir o documento pra gerar.
+    // A IMAGEM NAO TIRA MAIS O CONSULTOR DA CONVERSA.
     //
-    // A imagem so nasce quando o documento e aberto uma vez. Em vez de dizer
-    // "nao tem imagem" (que o consultor nao sabe resolver), a barra abre o
-    // documento e pede pra tentar de novo — que e exatamente o que faltava.
+    // Ela e desenhada NO NAVEGADOR quando alguem abre o documento — o servidor
+    // nao tem navegador. O jeito antigo de provocar isso era window.open(): o
+    // WhatsApp sumia da frente, ele caia numa aba do JOB no meio do
+    // atendimento e ainda tinha que voltar e clicar de novo. Agora quem abre e
+    // o background, numa aba INATIVA que ele nao ve, e que se fecha sozinha.
+    //
+    // Guarda de imagem ja buscada: os tres botoes (copiar, baixar, mandar)
+    // pedem a mesma imagem. Sem isto, cada um abriria a sua aba.
+    let _imgCache = null;
     async function _cotPegarImagem(btn, aoTer) {
+      if (_imgCache) { aoTer(_imgCache); return; }
       const antes = btn.textContent;
       btn.disabled = true; btn.textContent = 'Buscando…';
       let r = null;
       try { r = await _safeSendMessage({ type: 'cotacao_imagem', id: r_id }); }
       catch (e) { r = null; }
-      btn.disabled = false;
-      if (r && r.ok && r.dataUrl) { btn.textContent = antes; aoTer(r.dataUrl); return; }
       if (r && r.erro === 'imagem_ausente') {
-        btn.textContent = 'Gerando…';
-        window.open(doc, '_blank', 'noopener');
-        setTimeout(() => { btn.textContent = 'Tentar de novo'; btn.disabled = false; }, 2500);
-        return;
+        // O OBVIO DITO: ele precisa saber por que demora, senao acha travado.
+        btn.textContent = 'Montando a imagem…';
+        try { r = await _safeSendMessage({ type: 'cotacao_imagem_gerar', id: r_id }); }
+        catch (e) { r = null; }
       }
-      btn.textContent = 'Falhou — tentar de novo';
-      setTimeout(() => { btn.textContent = antes; }, 2600);
+      btn.disabled = false;
+      btn.textContent = antes;
+      if (r && r.ok && r.dataUrl) { _imgCache = r.dataUrl; aoTer(r.dataUrl); return; }
+      btn.textContent = (r && r.erro === 'demorou_demais')
+        ? 'Demorou — tentar de novo' : 'Falhou — tentar de novo';
+      setTimeout(() => { btn.textContent = antes; }, 3200);
+    }
+
+    // PREVIEW: ele ve o que o cliente vai receber ANTES de mandar.
+    //
+    // Pedido do Guilherme. Ate agora "Copiar imagem" copiava uma imagem que
+    // ele nunca tinha visto — e uma cotacao com o plano errado em destaque so
+    // aparecia depois, na conversa do cliente. As tres acoes moram debaixo do
+    // preview porque so fazem sentido depois de ele olhar.
+    function _cotPreview(dataUrl) {
+      const cx = document.getElementById('job-cot-preview');
+      if (!cx) return;
+      cx.innerHTML =
+        '<div class="job-cot-prev">' +
+          '<img src="' + esc(dataUrl) + '" alt="Imagem da cotação">' +
+          '<div class="job-cot-prev-leg">É isto que o cliente recebe.</div>' +
+          '<div class="job-cot-item-acoes">' +
+            '<button type="button" class="job-cot-bt-mandar" id="job-cot-prev-mandar" style="flex:2">' +
+              'Mandar na conversa</button>' +
+            '<button type="button" class="job-cot-bt-copiar" id="job-cot-prev-copiar" style="flex:1">' +
+              'Copiar</button>' +
+            '<button type="button" class="job-cot-bt-copiar" id="job-cot-prev-baixar" style="flex:1">' +
+              'Baixar</button>' +
+          '</div>' +
+        '</div>';
+      cx.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+      const bmd = document.getElementById('job-cot-prev-mandar');
+      bmd.addEventListener('click', async () => {
+        bmd.disabled = true; bmd.textContent = 'Mandando…';
+        let chatId = '';
+        try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
+        if (!chatId) {
+          bmd.disabled = false;
+          bmd.textContent = 'Abra a conversa e tente de novo';
+          setTimeout(() => { bmd.textContent = 'Mandar na conversa'; }, 3200);
+          return;
+        }
+        const env = await pedirEnviarMidia(chatId, 'imagem', dataUrl, '',
+                                           'cotacao-' + r_id + '.png');
+        bmd.disabled = false;
+        bmd.textContent = (env && env.ok) ? 'Mandada' : 'Não saiu — tente de novo';
+        setTimeout(() => { bmd.textContent = 'Mandar na conversa'; }, 3000);
+      });
+      document.getElementById('job-cot-prev-copiar').addEventListener('click', async (e) => {
+        const b = e.currentTarget;
+        try {
+          const blob = await (await fetch(dataUrl)).blob();
+          await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+          b.textContent = 'Copiada';
+        } catch (err) { b.textContent = 'Use Baixar'; }
+        setTimeout(() => { b.textContent = 'Copiar'; }, 2600);
+      });
+      document.getElementById('job-cot-prev-baixar').addEventListener('click', (e) => {
+        const a = document.createElement('a');
+        a.href = dataUrl; a.download = 'cotacao-' + r_id + '.png';
+        document.body.appendChild(a); a.click(); a.remove();
+        e.currentTarget.textContent = 'Baixada';
+        setTimeout(() => { e.currentTarget.textContent = 'Baixar'; }, 2200);
+      });
     }
 
     const bimg = document.getElementById('job-cot-imagem');
-    if (bimg) bimg.addEventListener('click', () => _cotPegarImagem(bimg, async (dataUrl) => {
-      try {
-        const blob = await (await fetch(dataUrl)).blob();
-        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-        bimg.textContent = 'Copiada — cole na conversa';
-        setTimeout(() => { bimg.textContent = 'Copiar imagem'; }, 2600);
-      } catch (e) {
-        bimg.textContent = 'Não deu pra copiar — use Baixar';
-        setTimeout(() => { bimg.textContent = 'Copiar imagem'; }, 3000);
-      }
-    }));
-
-    const bbx = document.getElementById('job-cot-baixar');
-    if (bbx) bbx.addEventListener('click', () => _cotPegarImagem(bbx, (dataUrl) => {
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = 'cotacao-' + r_id + '.png';
-      document.body.appendChild(a); a.click(); a.remove();
-      bbx.textContent = 'Baixada';
-      setTimeout(() => { bbx.textContent = 'Baixar'; }, 2200);
-    }));
+    if (bimg) bimg.addEventListener('click', () => _cotPegarImagem(bimg, _cotPreview));
 
     const bleg = document.getElementById('job-cot-legenda');
     if (bleg) bleg.addEventListener('click', async () => {

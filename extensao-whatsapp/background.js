@@ -380,28 +380,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // abertura, e o 404 com url_documento e resposta legitima, nao erro: a
   // barra sabe abrir o documento e tentar de novo.
   if (msg && msg.type === 'cotacao_imagem') {
+    buscarImagem(msg.id).then(sendResponse);
+    return true;
+  }
+  // GERAR A IMAGEM SEM TIRAR O CONSULTOR DA CONVERSA.
+  //
+  // A imagem da cotacao e desenhada NO NAVEGADOR quando alguem abre o
+  // documento — o servidor nao tem navegador. Ate agora o jeito de provocar
+  // isso era window.open() no content script: o WhatsApp sumia da frente, ele
+  // caia numa aba do JOB no meio do atendimento e ainda tinha que voltar
+  // sozinho e clicar de novo. O Guilherme reclamou exatamente disso.
+  //
+  // Aba INATIVA faz o mesmo trabalho sem roubar o foco: o documento carrega,
+  // desenha e manda a imagem pro servidor; a gente fica perguntando pela
+  // imagem ate ela existir e fecha a aba. Iframe seria mais discreto, mas
+  // depende de o JOB permitir enquadramento — aba inativa nao depende de nada.
+  if (msg && msg.type === 'cotacao_imagem_gerar') {
     (async () => {
-      const { jobUrl, extKey } = await config();
-      const { extToken } = await chrome.storage.local.get(['extToken']);
+      const { jobUrl } = await config();
+      let aba = null;
       try {
-        const resp = await fetch(jobUrl + '/api/v1/cotacao/' + msg.id + '/imagem', {
-          headers: Object.assign({},
-            extToken ? { 'Authorization': 'Bearer ' + extToken }
-                     : (extKey ? { 'X-Extension-Key': extKey } : {})),
-        });
-        if (resp.status === 404) {
-          sendResponse({ ok: false, erro: 'imagem_ausente' });
-          return;
-        }
-        if (!resp.ok) { sendResponse({ ok: false, erro: 'HTTP ' + resp.status }); return; }
-        const blob = await resp.blob();
-        const leitor = new FileReader();
-        leitor.onloadend = () => sendResponse({ ok: true, dataUrl: leitor.result });
-        leitor.onerror = () => sendResponse({ ok: false, erro: 'falha_ao_ler' });
-        leitor.readAsDataURL(blob);
-      } catch (e) {
-        sendResponse({ ok: false, erro: 'Não consegui buscar a imagem agora.' });
+        aba = await chrome.tabs.create({
+          url: jobUrl + '/cotacao/documento/' + msg.id, active: false, pinned: true });
+      } catch (e) { sendResponse({ ok: false, erro: 'nao_consegui_abrir' }); return; }
+      // Ate 24s. Uma cotacao com muitos planos demora mais pra desenhar, e
+      // desistir cedo devolveria "falhou" pra uma imagem que ia nascer.
+      let achou = null;
+      for (let i = 0; i < 12; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const r = await buscarImagem(msg.id);
+        if (r.ok) { achou = r; break; }
       }
+      try { if (aba && aba.id) await chrome.tabs.remove(aba.id); } catch (e) {}
+      sendResponse(achou || { ok: false, erro: 'demorou_demais' });
     })();
     return true;
   }
@@ -1121,3 +1132,30 @@ async function _reinjetarNasAbasAbertas(motivo) {
 // que as abas ficam órfãs.
 chrome.runtime.onInstalled.addListener((d) => _reinjetarNasAbasAbertas(d && d.reason));
 chrome.runtime.onStartup.addListener(() => _reinjetarNasAbasAbertas('startup'));
+
+
+// Busca a imagem ja pronta da cotacao. 404 aqui nao e erro: quer dizer que
+// ninguem abriu o documento ainda e ela nao foi desenhada — quem chama
+// resolve isso mandando `cotacao_imagem_gerar`.
+async function buscarImagem(id) {
+  const { jobUrl, extKey } = await config();
+  const { extToken } = await chrome.storage.local.get(['extToken']);
+  try {
+    const resp = await fetch(jobUrl + '/api/v1/cotacao/' + id + '/imagem', {
+      headers: Object.assign({},
+        extToken ? { 'Authorization': 'Bearer ' + extToken }
+                 : (extKey ? { 'X-Extension-Key': extKey } : {})),
+    });
+    if (resp.status === 404) return { ok: false, erro: 'imagem_ausente' };
+    if (!resp.ok) return { ok: false, erro: 'HTTP ' + resp.status };
+    const blob = await resp.blob();
+    return await new Promise((r) => {
+      const l = new FileReader();
+      l.onloadend = () => r({ ok: true, dataUrl: l.result });
+      l.onerror = () => r({ ok: false, erro: 'falha_ao_ler' });
+      l.readAsDataURL(blob);
+    });
+  } catch (e) {
+    return { ok: false, erro: 'Não consegui buscar a imagem agora.' };
+  }
+}

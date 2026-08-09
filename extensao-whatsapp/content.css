@@ -3568,3 +3568,16 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 @media (prefers-reduced-motion: reduce) {
   .job-cot-seg button:active, .job-cot-op:active { transform: none; }
 }
+
+
+/* ── PREVIEW DA IMAGEM DA COTACAO ──────────────────────────────────────────
+   Ele ve o que o cliente recebe antes de mandar. Fundo xadrez claro por baixo
+   porque a imagem pode ter transparencia — sobre o creme do painel, uma borda
+   branca sumiria e ele acharia que a imagem esta cortada. */
+.job-cot-prev { margin-top: 10px; border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--job-borda); background:
+    repeating-conic-gradient(#00000008 0% 25%, transparent 0% 50%) 0 0 / 14px 14px; }
+.job-cot-prev img { display: block; width: 100%; height: auto; }
+.job-cot-prev-leg { padding: 7px 10px 2px; font-family: var(--job-ui);
+  font-size: 11px; letter-spacing: var(--job-tk-xs); color: var(--job-txt-fraco); }
+.job-cot-prev .job-cot-item-acoes { padding: 8px 10px 10px; }
