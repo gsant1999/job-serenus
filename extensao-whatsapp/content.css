@@ -176,17 +176,20 @@ html.job-push-esquerda.job-overlay-painel { margin-left: calc(var(--job-viz, 0px
   position: fixed; top: 0; right: var(--job-viz, 0px); bottom: 0; width: 72px;
   z-index: 2147483000;
   display: flex; flex-direction: column; align-items: center;
-  /* O TRILHO TEM COR PRÓPRIA, E NÃO É CINZA.
-     Ele era o fundo do tema a 72%: bege puxado pra cinza no claro, chumbo no
-     escuro. Agora a superfície leva uma lavagem do acento — continua discreta,
-     porque é moldura e não conteúdo, mas é uma superfície VERDE clara em vez
-     de uma superfície sem cor.
-     E isso conserta de tabela o item inativo: com a superfície tingida, um
-     texto da mesma família concorda com ela. Foi o que faltou em 3.84, quando
-     eu tentei texto verde sobre o creme quente do PAINEL — ali eram 115° de
-     briga; aqui é a mesma matiz. */
-  background: color-mix(in srgb,
-    color-mix(in srgb, var(--job-bg1) 74%, var(--job-acento)) 84%, transparent);
+  /* O TRILHO É ESCURO NOS DOIS TEMAS — igual à barra lateral do site.
+     Ele já foi cinza (fundo do tema a 72%) e já foi verde claro. Nenhum dos
+     dois funcionava: no claro virava uma faixa lavada que sumia contra o
+     WhatsApp, e o item inativo em cima dela nunca tinha contraste de sobra.
+     O site do JOB resolve isso há tempos — no tema claro a barra lateral
+     dele é escura (#1a1d2e), com o conteúdo claro ao lado. Mesma mobília,
+     mesma resposta: é o MENU, não o conteúdo, e menu escuro segura ícone e
+     rótulo com folga em qualquer fundo.
+     A tinta é escura com viés do verde da marca, pra não ser um chumbo
+     genérico. As variáveis de texto do trilho são fixas aqui embaixo,
+     porque a superfície não segue mais o tema. */
+  background: color-mix(in srgb, #14251f 86%, transparent);
+  --job-trilho-txt: #eaf2ee;
+  --job-trilho-fraco: #8fb3a6;
   -webkit-backdrop-filter: var(--job-vidro);
   backdrop-filter: var(--job-vidro);
   border-left: 1px solid color-mix(in srgb, var(--job-txt) 10%, transparent);
@@ -202,8 +205,7 @@ html.job-push-esquerda #job-trilho {
 /* Quem pede menos transparência recebe a superfície fechada — legibilidade
    antes do efeito. */
 @media (prefers-reduced-transparency: reduce) {
-  #job-trilho { background: color-mix(in srgb, var(--job-bg1) 74%, var(--job-acento));
-    backdrop-filter: none; -webkit-backdrop-filter: none; }
+  #job-trilho { background: #14251f; backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
 
 /* Logo JOB: o arquivo REAL dos arcos do sistema (logo_arcos.png) girando,
@@ -216,7 +218,7 @@ html.job-push-esquerda #job-trilho {
 .job-logo-txt {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-family: 'NunitoJOB', -apple-system, "Segoe UI", sans-serif;
-  font-size: 9.5px; font-weight: 800; color: var(--job-txt); letter-spacing: .04em; z-index: 1;
+  font-size: 9.5px; font-weight: 800; color: var(--job-trilho-txt); letter-spacing: .04em; z-index: 1;
 }
 @keyframes jobLogoSpin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .job-logo-arcos { animation: none; } }
@@ -241,17 +243,17 @@ html.job-push-esquerda #job-trilho {
      usar antes de qualquer fonte própria. A marca continua no logo, que é
      onde ela é lida como marca. */
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  /* NÃO é o texto do tema com transparência: preto a 62% é cinza, e branco a
-     62% também — era literalmente isso que ele estava vendo. O inativo é um
-     neutro DA FAMÍLIA DO ACENTO, a mesma matiz da superfície acima. */
-  color: color-mix(in srgb, var(--job-acento) 55%, var(--job-txt));
+  /* Cores do TRILHO, não do tema: a superfície é escura sempre, então o
+     texto tem que ser claro sempre — senão no tema claro voltaria a ser
+     preto sobre verde-escuro. */
+  color: var(--job-trilho-fraco);
   transition: color .2s ease, background .2s ease, transform .1s ease-out;
 }
 .job-trilho-item:hover {
-  color: color-mix(in srgb, var(--job-acento) 18%, var(--job-txt));
-  background: color-mix(in srgb, var(--job-acento) 12%, transparent);
+  color: var(--job-trilho-txt);
+  background: color-mix(in srgb, var(--job-trilho-txt) 8%, transparent);
 }
-.job-trilho-item-ativo { color: var(--job-txt); background: transparent; }
+.job-trilho-item-ativo { color: var(--job-trilho-txt); background: transparent; }
 
 /* ÍCONE — traço mais fino que o padrão 2px: a 21px, traço grosso vira borrão
    e some o desenho. E ele SOBE 1px quando é o ativo, junto com um leve
@@ -296,11 +298,11 @@ html.job-push-esquerda #job-trilho {
   border-radius: 13px; z-index: 0; opacity: 0; pointer-events: none;
   background:
     linear-gradient(180deg,
-      color-mix(in srgb, var(--job-acento) 22%, transparent) 0%,
-      color-mix(in srgb, var(--job-acento) 13%, transparent) 100%);
+      color-mix(in srgb, var(--job-trilho-txt) 16%, transparent) 0%,
+      color-mix(in srgb, var(--job-trilho-txt) 9%, transparent) 100%);
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--job-acento) 26%, transparent),
-    0 2px 8px rgba(0,0,0,.16);
+    inset 0 1px 0 color-mix(in srgb, var(--job-trilho-txt) 18%, transparent),
+    0 2px 8px rgba(0,0,0,.22);
   /* Curva com um respingo de ultrapassagem no fim: o gesto foi um clique, e
      um pouco de impulso faz o movimento parecer físico. Nada de balanço
      longo — isso é menu, não gaveta arrastada. */
@@ -354,7 +356,7 @@ html.job-push-esquerda .job-trilho-marca::before {
   font-variant-numeric: tabular-nums;
   /* O anel era da cor do trilho antigo, que era opaco. Sobre vidro, uma cor
      chapada aparece como um halo. Sombra difusa separa sem desenhar borda. */
-  box-shadow: 0 1px 3px rgba(0,0,0,.35);
+  box-shadow: 0 1px 3px rgba(0,0,0,.45);
 }
 /* Informativo (existe, mas não está atrasado) usa o acento da marca; o rosa
    fica reservado pro que passou da hora. */
@@ -386,8 +388,8 @@ html.job-push-esquerda .job-trilho-marca::before {
    quando ela deixa de ser rodapé e vira aviso. */
 .job-trilho-versao-num {
   display: inline-block; background: transparent;
-  color: color-mix(in srgb, var(--job-txt) 45%, transparent);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color: color-mix(in srgb, var(--job-trilho-txt) 48%, transparent);
+  font-family: var(--job-ui);
   font-size: 9px; font-weight: 500; font-variant-numeric: tabular-nums;
   padding: 2px 6px; border-radius: 999px; letter-spacing: .03em; border: none;
 }
@@ -411,7 +413,8 @@ html.job-push-esquerda .job-trilho-marca::before {
   background: transparent; border: none; border-radius: 8px; color: var(--job-txt-fraco);
   cursor: pointer; transition: color .12s, background .12s;
 }
-.job-trilho-mini:hover { background: color-mix(in srgb, var(--job-txt) 7%, transparent); color: var(--job-txt); }
+.job-trilho-mini { color: var(--job-trilho-fraco); }
+.job-trilho-mini:hover { background: color-mix(in srgb, var(--job-trilho-txt) 8%, transparent); color: var(--job-trilho-txt); }
 .job-trilho-mini:active { transform: scale(.92); }
 .job-trilho-mini:focus { outline: none; }
 .job-trilho-mini:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
@@ -2583,3 +2586,61 @@ details.job-cfg-antigo > summary:hover { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   .job-fchip:active, .job-nomec-chip:active { transform: none; }
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CAMPOS NATIVOS — select e input pretos no tema claro
+
+   O <select> aparecia como uma barra PRETA com o texto quase invisível, e a
+   lista abria escura por cima de uma tela clara. Não era CSS nosso: o
+   WhatsApp declara `color-scheme: dark` na raiz, e widget nativo herda isso
+   do documento, não do elemento — o navegador pinta o controle e o menu com
+   as cores escuras do sistema, passando por cima do nosso fundo.
+
+   Duas correções, e as duas são necessárias:
+
+   1. Declarar o `color-scheme` nas NOSSAS superfícies. É o que faz o menu
+      suspenso (desenhado pelo sistema operacional, fora do nosso alcance)
+      abrir na cor certa.
+   2. Tirar a aparência nativa do select e desenhar a seta. Sem isso, o
+      controle fechado continua com a moldura do sistema em cima da nossa.
+   ══════════════════════════════════════════════════════════════════════════ */
+#job-painel-doc, #job-trilho, .job-folha { color-scheme: dark; }
+body[data-job-tema="claro"] #job-painel-doc,
+body[data-job-tema="claro"] #job-trilho,
+body[data-job-tema="claro"] .job-folha { color-scheme: light; }
+
+#job-painel-doc select,
+.job-folha select {
+  -webkit-appearance: none; appearance: none;
+  background-color: var(--job-bg2);
+  color: var(--job-txt);
+  font-family: var(--job-ui);
+  /* Seta desenhada, no lugar da do sistema. Espaço à direita pra ela caber
+     sem encostar no texto da opção mais longa. */
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 15px) center, calc(100% - 10px) center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 30px;
+  cursor: pointer;
+}
+#job-painel-doc select:disabled, .job-folha select:disabled {
+  color: var(--job-txt-fraco); cursor: default; background-image: none;
+}
+/* As opções são desenhadas pelo sistema: só dá pra pedir a cor, e é o
+   color-scheme acima que faz isso valer. */
+#job-painel-doc option, .job-folha option { background: var(--job-bg1); color: var(--job-txt); }
+
+/* Campo de texto: o mesmo tratamento, pra não ficar um controle desenhado
+   ao lado de um controle nativo. */
+#job-painel-doc input[type="text"],
+#job-painel-doc input[type="email"],
+#job-painel-doc input[type="search"],
+#job-painel-doc textarea {
+  background-color: var(--job-bg2); color: var(--job-txt);
+  font-family: var(--job-ui);
+}
+#job-painel-doc input::placeholder,
+#job-painel-doc textarea::placeholder { color: var(--job-txt-fraco2); opacity: 1; }
