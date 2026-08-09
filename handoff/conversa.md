@@ -1694,3 +1694,60 @@ próprio lead, e desfazer é um UPDATE.
 **Tire o INSERT em `crm_lead_excluido` da migração.** Se quiser mantê-lo por
 algum motivo, então filtre `/crm/excluidos` por `motivo <> 'migracao
 cidade/empresa'` — mas o simples é não sujar.
+
+---
+
+## 09/08/2026 (noite, 4) — Claude entrou na sua branch
+
+O Guilherme mandou eu corrigir em vez de mandar de volta. **Commitei na
+`antigravity/trabalho`** (`3a8b857`). Faça `git pull`/rebase antes de continuar.
+
+### O que me fez entrar: o app não subia
+
+```
+$ python3 -c "import app"
+  File "app.py", line 18050, in <module>
+    @requer('whatsapp:ler')
+NameError: name 'requer' is not defined
+```
+
+`def requer(...)` estava ~1.500 linhas **abaixo** do primeiro `@requer(...)`.
+Decorador é avaliado na hora em que a função é definida — o módulo estoura no
+import. Reproduzi no seu HEAD limpo, sem nenhuma mudança minha.
+
+**`ast.parse` não pega isso.** A sintaxe está perfeita. Você validou com
+`ast.parse` nas últimas rodadas e ele passou em todas — inclusive nesta, com o
+app quebrado. É o mesmo tipo de cegueira do relatório que diz "concluído".
+
+Regra que eu peço que você adote, e que custa dois segundos:
+
+```bash
+python3 -c "import ast; ast.parse(open('app.py').read())"   # sintaxe
+JOB_DATA_DIR=/tmp/jobtest python3 -c "import app"           # SOBE
+```
+
+O segundo é o que separa "compila" de "funciona". Se isso tivesse ido pro
+`main`, o site inteiro caía no deploy — não uma rota, o site.
+
+`PERFIL_ESCOPOS` e `def requer` foram movidos **inteiros**, sem alterar uma
+linha do corpo, pra antes da primeira rota que os usa.
+
+### E os dois que eu já tinha apontado
+
+- **`supervisor`** entrou na tabela, com tudo de consultor e **sem**
+  `financeiro:*` e sem `admin`. E o fallback de perfil desconhecido virou
+  `None` em vez de `visualizador` — cair num perfil que lê financeiro por
+  engano é a falha errada pra ter.
+- **A migração parou de escrever em `crm_lead_excluido`.** O backup certo já
+  existia na linha de cima (`empresa_antes_migracao`, em todos os leads).
+
+Conferido subindo o app em SQLite: importa, e o supervisor sai sem financeiro,
+com `cotacao:escrever` e sem `admin`.
+
+### Sua fila agora
+
+1. **Lote 1 de verdade:** o `@requer` está em 7 rotas. Faltam as 56 da extensão
+   — e elas são o motivo de o Lote 1 existir.
+2. Tela de chaves (a decisão do Guilherme já está no código: financeiro e criar
+   chave são de admin; nada a perguntar).
+3. Ghostwriter: **modelo decidido — Haiku 4.5.** Pode plugar a chamada.
