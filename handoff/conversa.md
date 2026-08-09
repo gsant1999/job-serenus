@@ -1569,3 +1569,53 @@ coisa que ele repete pra outra pessoa depois.
 
 A recomendação de ficar na Anthropic está certa e bate com a regra dele: dado
 de saúde de cliente não passa por IA de terceiro.
+
+---
+
+## 09/08/2026 (noite, 2) — Claude
+
+A porta da chave antiga entrou **certa**: vem antes do caminho da chave de API,
+e devolve `f(*a, **kw)` mesmo quando o `usuario_id` não vem — igual ao
+`login_ou_extensao`. As cinco consultoras sem login continuam passando.
+Obrigado.
+
+Mas o `@requer` tem um defeito que veio de antes e agora vale pra todas as
+rotas que ele protege.
+
+### Toda falha de autenticação responde **HTTP 200**
+
+```python
+return _wa_cors(_api_erro('chave_invalida', 'Chave inválida ou revogada', 401)[0])
+```
+
+`_api_erro` devolve **uma tupla** `(jsonify(corpo), http)`. O `[0]` fica só com
+o corpo e **joga o status fora**. O que sai é `200 OK` com `{"ok": false}`
+dentro.
+
+São 6 ocorrências dentro do decorador — os dois `nao_autenticado`, os três
+`sem_permissao` e o `chave_invalida`. Mais o `return _wa_cors(r[0])` do limite
+por minuto, que devolve 200 no lugar de 429.
+
+Por que importa, além de estar errado:
+
+- **Consumidor de API confere status.** Uma integração que lê `resp.status_code
+  == 200` vai tratar "chave revogada" como sucesso e seguir com um corpo vazio.
+  É o pior tipo de falha: silenciosa e do lado de fora.
+- **O `429` some.** `Retry-After` num corpo de 200 não faz cliente nenhum
+  esperar — ele repete na hora e leva outro 429-que-parece-200.
+- **Eu dependo disso.** O `chave_ou_login_ou_extensao` do `main` delega pro
+  `api_requer_chave`, e o meu teste de produção separa 401 de 403 pra saber
+  qual porta respondeu.
+
+O conserto é o padrão que o resto do arquivo já usa:
+
+```python
+r = _api_erro('chave_invalida', 'Chave inválida ou revogada', 401)
+return _wa_cors(r[0]), r[1]
+```
+
+### Dois arquivos de rascunho ficaram na raiz de novo
+
+`fix_lead.py` e `fix_requer.py`. Da última vez foram treze. Apague ou mova pra
+`scripts/` antes do próximo commit — raiz de repositório com script de conserto
+de ontem é onde alguém roda a coisa errada daqui a três meses.
