@@ -3300,3 +3300,92 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 }
 .job-cot-tag.ok { border-color: color-mix(in srgb, var(--job-sucesso) 45%, transparent); color: var(--job-sucesso); }
 .job-cot-tag.aviso { border-color: var(--job-warn-bd); color: var(--job-warn); }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MENSAGENS, FUNIS E NOTAS — as três que nunca passaram pela régua
+
+   Elas herdaram cabeçalho, botões e chips das varreduras, mas o layout delas
+   nunca foi olhado. O que estava errado nas três, e é o mesmo defeito:
+   **rótulo de seção com peso de rótulo de campo**, campo de texto sem folga,
+   e cartão sem hierarquia entre o nome e o conteúdo.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Rótulo de seção ──
+   Era peso 500 num tamanho de 11px: apagado demais pra separar blocos, e ao
+   mesmo tempo em caixa alta, que pede peso. Caixa alta com peso fraco lê como
+   erro de composição. */
+.job-sec {
+  font-family: var(--job-ui); font-size: 10px; font-weight: 750;
+  text-transform: uppercase; letter-spacing: .08em;
+  color: var(--job-txt-fraco2); margin: 18px 0 8px;
+}
+
+/* ── Campos de texto ──
+   Fundo igual ao do painel fazia o campo desaparecer dentro do cartão: não
+   dava pra ver onde clicar. Agora ele afunda em relação à superfície, que é
+   como campo se anuncia. */
+.job-inp {
+  background: color-mix(in srgb, var(--job-bg0) 60%, var(--job-bg2));
+  border: 1px solid var(--job-borda); border-radius: 10px;
+  padding: 10px 12px; font-size: 12.5px; font-family: var(--job-ui);
+  letter-spacing: var(--job-tk-sm);
+  transition: border-color var(--job-t-rapido) ease, box-shadow var(--job-t-rapido) ease;
+}
+.job-inp::placeholder { color: var(--job-txt-fraco2); opacity: 1; }
+.job-inp:focus {
+  border-color: var(--job-acento);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--job-acento) 16%, transparent);
+}
+.job-inp-txt { min-height: 76px; line-height: 1.5; }
+
+/* O bloco de criar modelo é um FORMULÁRIO dentro de uma lista: ele precisa se
+   separar do que vem depois, senão o primeiro modelo salvo parece parte dele. */
+.job-novo-modelo {
+  background: var(--job-bg2); border: 1px solid var(--job-borda); border-radius: 14px;
+  padding: 13px; margin: 0 0 18px;
+}
+
+/* ── MENSAGENS: o cartão do modelo ──
+   O nome tinha peso 500 e a prévia 11,5px logo abaixo: os dois no mesmo tom,
+   e o olho não sabia qual era o título. Nome ganha peso; a prévia recua e
+   ganha entrelinha, porque ela é texto de leitura, não etiqueta. */
+.job-modelo-nome {
+  font-family: var(--job-ui); font-size: 13px; font-weight: 650;
+  color: var(--job-txt); letter-spacing: var(--job-tk-md); line-height: 1.3;
+}
+.job-modelo-preview {
+  font-family: var(--job-ui); font-size: 12px; line-height: 1.5;
+  color: var(--job-txt-fraco); margin: 5px 0 2px; max-height: 54px;
+}
+.job-modelo-acoes { gap: 7px; margin-top: 9px; }
+
+/* ── FUNIS: o cartão ──
+   O ladrilho do ícone some quando não há ícone, e aí o título dança de lugar
+   entre um cartão e outro. Tamanho fixo resolve. */
+.job-funil-ico { width: 32px; height: 32px; border-radius: 10px; flex: 0 0 auto; }
+.job-funil-topo { gap: 10px; }
+.job-funil-card { padding: 12px 13px; }
+
+/* ── NOTAS ──
+   Cada nota era um bloco cinza igual ao anterior, coladas: cinco notas viravam
+   um parágrafo só. Ganham respiro e uma faixa que marca o começo de cada uma. */
+.job-nota-item {
+  background: var(--job-bg2); border: 1px solid var(--job-borda);
+  border-left: 3px solid color-mix(in srgb, var(--job-acento) 55%, transparent);
+  border-radius: 4px 12px 12px 4px; padding: 10px 12px; margin-bottom: 8px;
+  font-family: var(--job-ui); font-size: 12.5px; line-height: 1.55;
+}
+.job-notas-lista { margin: 2px 0 12px; }
+.job-nota-input {
+  min-height: 72px; line-height: 1.5; border-radius: 10px; padding: 10px 12px;
+  font-family: var(--job-ui); font-size: 12.5px;
+  background: color-mix(in srgb, var(--job-bg0) 60%, var(--job-bg2));
+  border: 1px solid var(--job-borda); color: var(--job-txt); width: 100%;
+  box-sizing: border-box; outline: none; resize: vertical;
+  transition: border-color var(--job-t-rapido) ease, box-shadow var(--job-t-rapido) ease;
+}
+.job-nota-input:focus {
+  border-color: var(--job-acento);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--job-acento) 16%, transparent);
+}
