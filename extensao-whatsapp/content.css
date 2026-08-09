@@ -1728,13 +1728,48 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
                   border:1px solid var(--job-borda); border-radius:7px; padding:7px 9px;
                   user-select:text; word-break:break-word; }
 .job-ficha-lido.vazio { color:var(--job-txt-fraco); font-style:italic; }
-.job-ficha-etqs { display:flex; flex-wrap:wrap; gap:5px; }
-.job-ficha-etq { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600;
-                 padding:4px 9px; border-radius:11px; cursor:pointer; user-select:none;
-                 background:var(--job-bg2); border:1px solid var(--job-borda);
-                 color:var(--job-txt-fraco); }
-.job-ficha-etq.on { color:#0b1220; border-color:transparent; }
-.job-ficha-etq input { margin:0; cursor:pointer; }
+/* ══ ETIQUETAS — o chip É o estado ═══════════════════════════════════════
+   Tinha uma caixa quadrada do sistema dentro de cada chip: dois controles pra
+   uma decisão só, e o quadrado do navegador não obedece a nenhuma cor nossa.
+   Agora a caixa some da vista (continua no HTML, pro teclado e pro leitor de
+   tela) e quem diz "marcada" é o próprio chip: contorno quando não, cheio
+   quando sim, com um tique desenhado.
+
+   O tique importa: a cor da etiqueta sozinha não serve pra quem não distingue
+   cor, e num quadro com etiqueta vermelha e verde a diferença some. */
+.job-ficha-etqs { display:flex; flex-wrap:wrap; gap:6px; }
+.job-ficha-etq {
+  display:inline-flex; align-items:center; gap:6px;
+  font-family: var(--job-ui); font-size:11.5px; font-weight:600;
+  letter-spacing: var(--job-tk-xs); white-space:nowrap;
+  padding:6px 11px 6px 9px; border-radius:999px; cursor:pointer; user-select:none;
+  background:transparent; border:1px solid var(--job-borda);
+  color:var(--job-txt-fraco);
+  transition: background var(--job-t-rapido) ease, color var(--job-t-rapido) ease,
+              border-color var(--job-t-rapido) ease, transform var(--job-t-toque) ease-out;
+}
+.job-ficha-etq:hover { border-color: color-mix(in srgb, var(--job-acento) 45%, transparent);
+                       color: var(--job-txt); }
+.job-ficha-etq:active { transform: scale(.96); }
+/* O tique: dois lados de um quadrado, girados. Sem caractere, sem imagem. */
+.job-ficha-etq::before {
+  content:""; flex:0 0 auto; width:11px; height:11px; border-radius:50%;
+  border:1.5px solid currentColor; opacity:.45;
+  transition: opacity var(--job-t-rapido) ease, border-radius var(--job-t-rapido) ease;
+}
+.job-ficha-etq.on { color:#0b1220; border-color:transparent; font-weight:700; }
+.job-ficha-etq.on::before {
+  width:10px; height:6px; border-radius:0; opacity:1;
+  border:1.8px solid currentColor; border-top:none; border-right:none;
+  transform: rotate(-45deg) translate(1px,-2px);
+}
+/* A caixa nativa sai da vista mas continua clicável e acessível pelo teclado. */
+.job-ficha-etq input {
+  position:absolute; width:1px; height:1px; margin:-1px; padding:0;
+  overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;
+}
+.job-ficha-etq:focus-within { box-shadow: 0 0 0 2px var(--job-anel); }
+@media (prefers-reduced-motion: reduce) { .job-ficha-etq:active { transform:none; } }
 .job-ficha-grupo { border:1px solid var(--job-borda); border-radius:9px; padding:10px;
                    display:flex; flex-direction:column; gap:9px; }
 .job-ficha-grupo-tit { font-size:9.5px; font-weight:700; text-transform:uppercase;
