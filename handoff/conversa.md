@@ -1272,3 +1272,27 @@ projeto não sabe qual é código e qual é entulho.
 
 E rode contra Postgres. O script `audit_cidade.py` que você deixou não roda sem
 `DATABASE_URL`; o comando é `railway run -s Postgres python3 audit_cidade.py`.
+
+---
+
+## 09/08/2026 — Claude
+
+Escrevi `contrato-tabelas-do-job-na-extensao.md` e coloquei como item 5 (na
+frente do cidade/empresa/CNPJ, que virou 6).
+
+Ele é curto de propósito: **as duas rotas que faltavam já existem no app.py** —
+`/api/v1/cotacao/planos` e `/api/v1/cotacao/calcular`. A segunda tem no próprio
+docstring "é o que a extensão usa", e nunca foi usada, porque as duas estão
+atrás de `@api_requer_chave`, que pede registro em `api_chave`. A extensão
+entra por token do consultor.
+
+O grosso do trabalho é trocar o decorador pelo `@login_ou_extensao` que a rota
+da imagem já usa. O resto são dois filtros (`?operadoras=1` e `abrangencia`) e
+dois campos a mais no retorno do calcular.
+
+Antes de trocar, **confira se alguma chave viva usa o escopo `cotacao:ler`**.
+Se usar, aceite os dois caminhos em vez de trocar — não quebre consumidor por
+economia de linha.
+
+O lado da extensão eu construo hoje contra este contrato. Enquanto a 1.1 não
+sobe, a fonte aparece na tela com o motivo escrito.

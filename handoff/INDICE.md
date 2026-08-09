@@ -20,7 +20,8 @@ Na ordem em que o Guilherme quer.
 | 2 | `contrato-api-unificada.md` | **Lote 1 não começado.** É o decorador `@requer` + `usuario_id` em `api_chave`. Não cria rota nenhuma. |
 | 3 | `contrato-api-unificada.md` seção 7 | evoluir a tela de chaves que já existe em Configurações — não criar tela nova |
 | 4 | `contrato-apagar-contato-pessoal.md` | escrito, não começado. Só depois do Lote 1. |
-| 5 | `contrato-lead-cidade-empresa-cnpj.md` | escrito, não começado. Começa por uma decisão sua (seção 1). |
+| 5 | `contrato-tabelas-do-job-na-extensao.md` | escrito 09/08. **Troca de decorador em duas rotas que já existem** + dois filtros. O lado da extensão já está pronto esperando. |
+| 6 | `contrato-lead-cidade-empresa-cnpj.md` | escrito, não começado. Começa por uma decisão sua (seção 1). |
 
 **Do Claude, não seu:** `diagnostico-ux-extensao.md` — diagnóstico das telas da
 extensão, esperando o Guilherme marcar a ordem. Não mexa; `extensao-whatsapp/`
