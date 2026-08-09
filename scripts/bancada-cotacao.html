@@ -119,5 +119,24 @@ const cots='<div id="job-painel-doc" style="position:static;margin-top:18px"><di
  card('Campinas - SP · PME','4 planos · R$ 3.509,89')+card('Campinas - SP · PME','2 planos · R$ 699,38')+
  '<a class="job-cot-nova job-cot-nova-atalho">Comparar operadoras no JOB</a>'+
  '</div></div></div>';
-A.innerHTML=html+ops+cots;B.innerHTML=html+ops+cots;
+// Quarta tela: o passo 4 com o CNPJ resolvido.
+const p4='<div id="job-painel-doc" style="position:static;margin-top:18px"><div class="job-painel-doc-corpo">'+
+ '<div class="job-cot-wrap">'+
+ '<label class="job-cot-rot"><i>4</i> Quem vai na cotação<button class="job-i">i</button></label>'+
+ '<div class="job-cot-cnpj-linha"><input class="job-cnpj-input" value="12.345.678/0001-90">'+
+ '<button class="job-cnpj-btn">Buscar</button></div>'+
+ '<div class="job-cot-cnpj-cartao"><div class="job-cot-cnpj-nome">MAURICIO FIOROTTO SERVICOS LTDA</div>'+
+ '<div class="job-cot-tags"><span class="job-cot-tag ok">ATIVA</span>'+
+ '<span class="job-cot-tag ok">MEI</span><span class="job-cot-tag">Amparo - SP</span></div>'+
+ '<div class="job-cot-cnpj-cnae">Atividades de consultoria em gestão empresarial</div>'+
+ '<button class="job-cot-bt-copiar" style="width:100%;margin-top:8px">Cotar para Amparo - SP</button></div>'+
+ '<input class="job-cnpj-input" value="MAURICIO FIOROTTO SERVICOS LTDA">'+
+ '<label class="job-cot-check"><input type="checkbox" checked><span>É MEI</span></label>'+
+ '<div class="job-cot-dica">O cliente vai ler: MAURICIO FIOROTTO SERVICOS LTDA - MEI</div>'+
+ '<label class="job-cot-plano bloq" title="x"><input type="checkbox" disabled>'+
+ '<span><b>Bronze SP Mais</b><span class="job-cot-tags"><span class="job-cot-tag">Apartamento</span></span>'+
+ '<span class="job-cot-porque">Não aceita MEI</span></span></label>'+
+ '<button class="job-cot-bt-mandar" style="width:100%;margin-top:14px">Buscar operadoras</button>'+
+ '</div></div></div>';
+A.innerHTML=html+ops+cots+p4;B.innerHTML=html+ops+cots+p4;
 </script>

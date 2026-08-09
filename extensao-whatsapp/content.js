@@ -5570,10 +5570,28 @@
         // PASSO PROPRIO. Estava enfiado dentro do "Quem vai usar", que e sobre
         // vidas e idades — dois assuntos no mesmo numero, e ele leu como
         // pergunta solta ("o que seria?"). Aqui e um passo, com numero.
-        '<label class="job-cot-rot" id="job-cot-p4" style="margin-top:18px"><i>4</i> Nome na cotação' +
-          _cotAjuda('É este nome que o CLIENTE lê no documento e na imagem. ' +
-                    'Empresarial: a razão social. Pessoa física: o nome completo. ' +
-                    'O nome do contato do WhatsApp é anotação sua e não sai daqui.') + '</label>' +
+        // PASSO 4 — QUEM VAI NA COTACAO, PELO CNPJ.
+        //
+        // A primeira versao disto era um campo de texto pedindo a razao social
+        // na mao. O Guilherme cortou: o CNPJ e que sabe a razao social, se a
+        // empresa e MEI e em que cidade ela fica — e a extensao ja consulta
+        // CNPJ noutra aba, com a mesma rota.
+        //
+        // O CNPJ e OPCIONAL de proposito: cotar pessoa fisica pra quem tem CNPJ
+        // e caso comum, e obrigar o numero pra seguir travaria a metade dos
+        // atendimentos. Sem ele, o nome vai na mao como antes.
+        '<label class="job-cot-rot" id="job-cot-p4" style="margin-top:18px"><i>4</i> Quem vai na cotação' +
+          _cotAjuda('É o nome que o CLIENTE lê no documento e na imagem — não o nome do ' +
+                    'contato daqui do WhatsApp, que é anotação sua. No empresarial, o CNPJ ' +
+                    'preenche razão social, MEI e cidade de uma vez.') + '</label>' +
+        '<div id="job-cot-cnpj-bloco" style="display:none">' +
+          '<div class="job-cot-cnpj-linha">' +
+            '<input id="job-cot-cnpj" class="job-cnpj-input" autocomplete="off" ' +
+              'inputmode="numeric" placeholder="CNPJ da empresa (opcional)">' +
+            '<button type="button" class="job-cnpj-btn" id="job-cot-cnpj-btn">Buscar</button>' +
+          '</div>' +
+          '<div id="job-cot-cnpj-res"></div>' +
+        '</div>' +
         '<input id="job-cot-cliente" class="job-cnpj-input" autocomplete="off" placeholder="" value="">' +
         '<label class="job-cot-check" id="job-cot-mei-l" style="display:none">' +
           '<input type="checkbox" id="job-cot-mei"><span>É MEI</span></label>' +
@@ -5599,6 +5617,8 @@
       const bt = document.querySelector('#job-cot-tipo button.on');
       const pme = String((bt && bt.dataset.v) || (_cot && _cot.modalidade) || '') === '2';
       if (lMei) lMei.style.display = pme ? '' : 'none';
+      const bl = document.getElementById('job-cot-cnpj-bloco');
+      if (bl) bl.style.display = pme ? '' : 'none';
       // O PLACEHOLDER DIZ O QUE DIGITAR. "Razão social da empresa, ou nome
       // completo da pessoa" obrigava a escolher metade da frase; agora ele
       // acompanha o tipo que ja foi escolhido no passo 2.
@@ -5624,6 +5644,84 @@
     if (iCli) iCli.addEventListener('input', verCliente);
     if (iMei) iMei.addEventListener('change', verCliente);
     verCliente();
+
+    // ── O CNPJ PREENCHE O RESTO ──────────────────────────────────────────
+    //
+    // Razao social, MEI e cidade saem os tres da mesma consulta. Digitar os
+    // tres a mao, com o cliente esperando, e onde nasce a divergencia entre o
+    // que esta na cotacao e o que esta no contrato.
+    //
+    // Nada e sobrescrito calado: a cidade so troca se ele mandar, porque a
+    // sede da empresa nem sempre e onde o plano vai valer (matriz em Sao Paulo,
+    // funcionarios em Campinas — cota-se Campinas).
+    const iCnpj = document.getElementById('job-cot-cnpj');
+    const bCnpj = document.getElementById('job-cot-cnpj-btn');
+    const rCnpj = document.getElementById('job-cot-cnpj-res');
+    if (iCnpj) {
+      iCnpj.addEventListener('input', () => {
+        const d = iCnpj.value.replace(/\D/g, '').slice(0, 14);
+        iCnpj.value = d.replace(/^(\d{2})(\d)/, '$1.$2')
+                       .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+                       .replace(/\.(\d{3})(\d)/, '.$1/$2')
+                       .replace(/(\d{4})(\d)/, '$1-$2');
+      });
+      iCnpj.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); if (bCnpj) bCnpj.click(); }
+      });
+    }
+    if (bCnpj) bCnpj.addEventListener('click', async () => {
+      const dig = (iCnpj.value || '').replace(/\D/g, '');
+      if (dig.length !== 14) {
+        rCnpj.innerHTML = '<div class="job-cot-dica">Faltam dígitos — o CNPJ tem 14.</div>';
+        return;
+      }
+      const antes = bCnpj.textContent;
+      bCnpj.disabled = true; bCnpj.textContent = 'Buscando…';
+      let r = null;
+      try { r = await _safeSendMessage({ type: 'consultar_cnpj', cnpj: dig }); }
+      catch (e) { r = null; }
+      bCnpj.disabled = false; bCnpj.textContent = antes;
+      const c = (r && r.ok && r.cnpj) || null;
+      if (!c) {
+        rCnpj.innerHTML = '<div class="job-cot-dica">' +
+          esc((r && r.erro) || 'Não consegui consultar agora. Dá pra digitar o nome à mão abaixo.') +
+          '</div>';
+        return;
+      }
+      _cot = _cot || {};
+      _cot.cnpj = dig;
+      _cot.cnpjDados = c;
+      if (iCli) iCli.value = c.nome || '';
+      if (iMei) iMei.checked = !!c.eh_mei;
+      verCliente();
+      // SITUACAO CADASTRAL APARECE. Operadora recusa proposta de empresa
+      // baixada ou suspensa, e descobrir isso depois da assinatura e o pior
+      // momento possivel.
+      const selo = (txt, cls) => '<span class="job-cot-tag' + (cls ? ' ' + cls : '') + '">' + esc(txt) + '</span>';
+      rCnpj.innerHTML =
+        '<div class="job-cot-cnpj-cartao' + (c.ativa ? '' : ' alerta') + '">' +
+          '<div class="job-cot-cnpj-nome">' + esc(c.nome || 'Empresa') + '</div>' +
+          '<div class="job-cot-tags">' +
+            selo(c.situacao || 'situação desconhecida', c.ativa ? 'ok' : 'aviso') +
+            (c.eh_mei ? selo('MEI', 'ok') : '') +
+            (c.municipio ? selo(c.municipio, '') : '') +
+          '</div>' +
+          (c.cnae ? '<div class="job-cot-cnpj-cnae">' + esc(c.cnae) + '</div>' : '') +
+          (!c.ativa
+            ? '<div class="job-cot-dica">Empresa não está ativa na Receita. ' +
+              'Operadora recusa proposta assim — confirme antes de cotar.</div>' : '') +
+          (c.municipio && cidadeDoCatalogo && c.municipio !== cidadeDoCatalogo
+            ? '<button type="button" class="job-cot-bt-copiar" id="job-cot-usar-cidade" ' +
+              'style="width:100%;margin-top:8px">Cotar para ' + esc(c.municipio) + '</button>'
+            : '') +
+        '</div>';
+      const bc = document.getElementById('job-cot-usar-cidade');
+      if (bc) bc.addEventListener('click', () => {
+        iCid.value = c.municipio;
+        iCid.dispatchEvent(new Event('input', { bubbles: true }));
+        bc.textContent = 'Cidade trocada — confirme na lista';
+      });
+    });
     const dica = document.getElementById('job-cot-dica');
     const box = document.getElementById('job-cot-sug');
     let relogioCid = null;
@@ -5684,6 +5782,8 @@
                idades: iIda.value, faixas: porFaixa ? contFx : null,
                clienteNome: (iCli && iCli.value || '').trim(),
                clienteMei: !!(iMei && iMei.checked),
+               cnpj: (iCnpj && iCnpj.value || '').replace(/\D/g, ''),
+               cnpjDados: (_cot && _cot.cnpjDados) || null,
                vidas: r.vidas, totalVidas: r.total };
       linkJob.href = _cotLinkJob(null);
       _cot = antes;
@@ -5854,6 +5954,8 @@
                idades: iIda.value, faixas: porFaixa ? contFx : null,
                clienteNome: (iCli && iCli.value || '').trim(),
                clienteMei: !!(iMei && iMei.checked),
+               cnpj: (iCnpj && iCnpj.value || '').replace(/\D/g, ''),
+               cnpjDados: (_cot && _cot.cnpjDados) || null,
                vidas: r.vidas, totalVidas: r.total };
       _cotBuscarOperadoras();
     });
@@ -6476,16 +6578,28 @@
             const linha = (i) => {
               const proprias = porPlano[i].filter((e) => !eComum(e.t));
               const ch = _cotChaveDe(pls[i], _cot.operadoraAtual.id);
+              // SABENDO QUE E MEI, o que nao aceita MEI nao pode ser marcado.
+              //
+              // Pedido dele: "caso seja empresarial mesmo, liberar apenas as
+              // opcoes que condiz com o CNPJ". Bloqueado e nao escondido: some
+              // da tela ele procuraria o plano e acharia que a extensao perdeu;
+              // bloqueado com o motivo escrito, ele entende em um segundo.
+              const naoServeMei = !!(_cot.clienteMei && ((pls[i].tabela || {}).mei !== true));
               // A marcacao sobrevive a troca de operadora: quem ja esta na
               // sacola volta marcado quando ele volta pra ca.
-              return '<label class="job-cot-plano"><input type="checkbox" data-i="' + i + '"' +
-                ' data-chave="' + esc(ch) + '"' + (_cotNaSacola(ch) ? ' checked' : '') + '>' +
+              return '<label class="job-cot-plano' + (naoServeMei ? ' bloq' : '') + '"' +
+                (naoServeMei ? ' title="Esta tabela não aceita MEI"' : '') + '>' +
+                '<input type="checkbox" data-i="' + i + '"' +
+                ' data-chave="' + esc(ch) + '"' + (naoServeMei ? ' disabled' : '') +
+                (_cotNaSacola(ch) && !naoServeMei ? ' checked' : '') + '>' +
                 '<span><b>' + esc(_cotNomePlano(pls[i])) + '</b>' +
                 (proprias.length
                   ? '<span class="job-cot-tags">' + proprias.map((e) =>
                       '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' + esc(e.t) + '</span>').join('') +
                     '</span>'
-                  : '') + '</span></label>';
+                  : '') +
+                (naoServeMei ? '<span class="job-cot-porque">Não aceita MEI</span>' : '') +
+                '</span></label>';
             };
             const arvore = _cotArvore(pls, pls.map((p, i) => i), 0);
             // Poucos planos e nenhum nivel que separe: lista corrida mesmo.
@@ -6503,6 +6617,9 @@
     const atualizar = () => {
       const n = _cotSacola.length;
       document.querySelectorAll('.job-cot-plano input').forEach((o) => {
+        // `.bloq` posto na pintura (MEI) manda mais que o teto: reabilitar
+        // aqui devolveria o clique num plano que a empresa nao pode contratar.
+        if (o.parentElement.hasAttribute('title')) return;
         o.disabled = (n >= _COT_MAX && !o.checked);
         o.parentElement.classList.toggle('bloq', o.disabled);
       });

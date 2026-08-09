@@ -3698,3 +3698,26 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 /* Cotar de dentro do bloco de composicao. Largura cheia porque e a ultima
    coisa do bloco e nao divide a linha com nada. */
 .job-cot-comp-ir { width: 100%; margin-top: 10px; padding: 10px 12px; }
+
+
+/* ── CNPJ dentro da cotacao ────────────────────────────────────────────────
+   O numero preenche razao social, MEI e cidade de uma vez. E opcional: cotar
+   pessoa fisica pra quem tem CNPJ e caso comum, e obrigar o numero pra seguir
+   travaria metade dos atendimentos. */
+.job-cot-cnpj-linha { display: flex; gap: 8px; align-items: stretch; }
+.job-cot-cnpj-linha .job-cnpj-input { flex: 1; min-width: 0; }
+.job-cot-cnpj-linha .job-cnpj-btn { flex: none; width: auto; padding: 0 14px; margin: 0; }
+.job-cot-cnpj-cartao { margin: 9px 0 12px; padding: 11px 12px; border-radius: 12px;
+  background: var(--job-sobre-acento);
+  border: 1px solid color-mix(in srgb, var(--job-acento) 34%, transparent); }
+.job-cot-cnpj-cartao.alerta { background: var(--job-sobre-warn);
+  border-color: color-mix(in srgb, var(--job-aviso, #e8b339) 45%, transparent); }
+.job-cot-cnpj-nome { font-family: var(--job-ui); font-size: 13px; font-weight: 700;
+  color: var(--job-txt); margin-bottom: 6px; }
+.job-cot-cnpj-cnae { margin-top: 6px; font-family: var(--job-ui); font-size: 10.5px;
+  line-height: 1.45; color: var(--job-txt-fraco); }
+/* O motivo do bloqueio na propria linha do plano — sem ele, o plano apagado
+   parece defeito da extensao. */
+.job-cot-porque { display: block; margin-top: 3px; font-family: var(--job-ui);
+  font-size: 10.5px; font-weight: 700; letter-spacing: var(--job-tk-xs);
+  color: var(--job-txt-fraco); }
