@@ -112,7 +112,7 @@ diferente, e é metade da sensação de desleixo.
 
 **Conserto:** um estado de carregamento só, com o texto vindo por parâmetro.
 
-### E3. Os estados vazios não têm voz
+### E3. Os estados vazios não têm voz — FEITO na 3.80.0
 
 | tela | texto atual |
 |---|---|
@@ -181,7 +181,8 @@ o que eu proponho é levar as outras dez até ela.
 **2. ~~E1 e E2~~ — FEITOS na 3.79.0.** 23 cabeçalhos e 13 carregamentos, todos
 pela mesma função.
 
-**3. E3** — os estados vazios, escritos um por um.
+**3. ~~E3~~ — FEITO na 3.80.0.** Dois tipos separados: "nunca houve"
+(explica pra que serve o lugar) e "o filtro não achou" (oferece limpar).
 
 **4. Análise e Hoje** — as duas telas mais usadas, tratadas a fundo.
 

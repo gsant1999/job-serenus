@@ -3866,7 +3866,7 @@
           return _fichaCampoPers(c, v);
         }).join('') + '</div>';
     });
-    return html || '<div class="job-notas-vazio">Nenhum campo cadastrado.</div>';
+    return html || '<div class="job-notas-vazio">Nenhum campo extra configurado para este funil. Quem configura é o admin, em Campos, no site.</div>';
   }
 
   function _fichaCampoPers(c, v) {
@@ -4356,7 +4356,8 @@
       // Vazio com saída. Dizer só "nenhuma cotação" deixa o consultor parado
       // com o cliente esperando do outro lado.
       corpo = '<div class="job-cot-vazio">' +
-          '<div class="job-cot-vazio-t">Nenhuma cotação ainda.</div>' +
+          '<div class="job-cot-vazio-t">Nenhuma cotação para este cliente</div>' +
+          '<div class="job-cot-vazio-s">Cotações salvas aqui viram um link com apresentação, imagem e PDF pra mandar na conversa.</div>' +
           (resp.lead_id ? ''
             : '<div class="job-cot-vazio-s">Este número não é um lead do CRM. ' +
               'Sem lead a cotação não é salva.</div>') +
@@ -5296,7 +5297,8 @@
             });
             return html;
           })()
-        : '<div class="job-cot-vazio"><div class="job-cot-vazio-t">Nenhum plano serve para essas vidas.</div></div>') +
+        : '<div class="job-cot-vazio"><div class="job-cot-vazio-t">Nenhum plano serve para essas vidas</div>' +
+          '<div class="job-cot-vazio-s">Cada operadora tem um mínimo de vidas e faixas próprias. Tente outra operadora ou revise a quantidade.</div></div>') +
       '<button class="job-cot-bt-mandar" id="job-cot-precos" style="width:100%;margin-top:12px" disabled>Marque um plano</button>' +
       '<button class="job-cot-nova" id="job-cot-volta-ops" style="border:none;cursor:pointer;width:100%;font-family:inherit">Outra operadora</button>' +
     '</div>');
@@ -6704,9 +6706,10 @@
   function renderListaModelos(modelos) {
     const filtrados = modelos.filter(modeloPassaFiltro);
     if (!filtrados.length) {
-      return _waBusca || _waFiltro !== 'todos'
-        ? '<div class="job-vazio">Nenhum modelo bate com esse filtro.</div>'
-        : '<div class="job-vazio">Nenhum modelo salvo ainda. Crie o primeiro acima.</div>';
+      return (_waBusca || _waFiltro !== 'todos')
+        ? _vazioFiltro('mensagem', 'job-limpar-f-modelo')
+        : _vazio('Nenhuma mensagem salva',
+            'Aqui ficam suas frases, áudios e imagens prontos — os que você repete todo dia. Salve o primeiro no formulário acima e ele fica a um clique na conversa.');
     }
     // Modelo do desenho do Guilherme: PASTA = consultor, DENTRO agrupado por TIPO
     // (áudio/texto/PDF/imagem). Gestor vê a pasta de cada consultor (recolhível);
@@ -6757,7 +6760,21 @@
     if (!c) return;
     c.innerHTML = renderListaModelos(_modelosCache ? _modelosCache.modelos : []);
     ligarAcoesItens();
+    _ligarLimparFiltroModelo();
     _observarMidias(c);
+  }
+
+  function _ligarLimparFiltroModelo() {
+    const b = document.getElementById('job-limpar-f-modelo');
+    if (!b) return;
+    b.addEventListener('click', () => {
+      _waBusca = ''; _waFiltro = 'todos';
+      const inp = document.getElementById('job-busca-modelo');
+      if (inp) inp.value = '';
+      document.querySelectorAll('.job-fchip[data-f]').forEach((c) =>
+        c.classList.toggle('on', c.dataset.f === 'todos'));
+      rerenderListaModelos();
+    });
   }
 
   // Ações dos itens da lista (separadas do formulário, pra re-render de
@@ -6784,6 +6801,7 @@
   }
 
   function ligarAcoesModelos() {
+    _ligarLimparFiltroModelo();
     const g = document.getElementById('job-gravar-btn');
     if (g) g.addEventListener('click', toggleGravacao);
     const a = document.getElementById('job-anexar-btn');
@@ -7165,6 +7183,30 @@
       '</div>';
   }
 
+  // ESTADO VAZIO — dois tipos, e eles não são a mesma coisa.
+  //
+  // "Nunca houve" é a tela do primeiro dia: ela precisa dizer pra que serve o
+  // lugar e como começar. "O filtro não achou" é um beco: existe conteúdo, e o
+  // que a pessoa quer é voltar. Tratar os dois igual — que era o caso — deixa
+  // o novato sem instrução e o veterano sem saída.
+  //
+  // `acao` é HTML de botão/link opcional. Sem ação, o estado vazio só informa,
+  // e informar sem oferecer saída é metade do trabalho.
+  function _vazio(titulo, texto, acao) {
+    return '<div class="job-sem-analise job-vazio-bloco">' +
+      '<div class="job-sem-analise-t">' + esc(titulo) + '</div>' +
+      '<div class="job-sem-analise-txt">' + esc(texto) + '</div>' +
+      (acao || '') +
+      '</div>';
+  }
+
+  // Beco de filtro: o texto diz o que foi filtrado e o botão desfaz.
+  function _vazioFiltro(oQue, idBotao) {
+    return _vazio('Nada bate com esse filtro',
+      'Você tem ' + oQue + ' cadastrado, só não neste recorte.',
+      '<button class="job-analisar-btn job-vazio-btn" id="' + idBotao + '">Limpar filtro</button>');
+  }
+
   // UM jeito de dizer "carregando", em vez dos três que existiam. O texto vem
   // por parâmetro porque dizer O QUE está carregando é o que faz a espera
   // parecer curta.
@@ -7235,10 +7277,13 @@
 
   function listaFunisHTML(funis) {
     if (!funis.length) {
-      return '<div class="job-vazio">Nenhum funil ainda.<br>Monte o primeiro em <b>Funis WhatsApp</b> no site do JOB.</div>';
+      return _vazio('Nenhum funil montado',
+        'Um funil dispara vários passos em sequência — texto, áudio, imagem — com o intervalo que você definir. Monte o primeiro no site e ele aparece aqui.',
+        '<a class="job-analisar-btn job-vazio-btn" href="' + esc(_SITE_BASE_URL_EXT) +
+        '/crm/funis" target="_blank" rel="noopener">Montar funil no JOB</a>');
     }
     const vis = funis.filter(funilPassaFiltro);
-    if (!vis.length) return '<div class="job-vazio">Nenhum funil bate com esse filtro.</div>';
+    if (!vis.length) return _vazioFiltro('funil', 'job-limpar-f-funil');
     // Gestor: pasta por consultor (recolhível), igual aos modelos. Funil é uma
     // sequência multi-tipo, então não tem sub-nível de tipo — só a pasta.
     if (!_gestorModo) return vis.map(cardFunil).join('');
@@ -7301,7 +7346,7 @@
         '</div>' +
         '<button class="job-funil-expandir" title="Mostrar/ocultar passos">' + _svgIco('chevron', 14) + '</button>' +
       '</div>' +
-      '<div class="job-funil-passos">' + (listaPassos || '<div class="job-vazio" style="padding:8px 0 2px">Funil sem passos.</div>') + '</div>' +
+      '<div class="job-funil-passos">' + (listaPassos || '<div class="job-vazio" style="padding:8px 0 2px">Este funil está vazio: nenhum passo pra disparar. Edite no site pra adicionar.</div>') + '</div>' +
       '<button class="job-funil-disparar" data-funil-id="' + f.id + '"' + (passos.length ? '' : ' disabled') + '>' +
         _ICO_ENVIAR + ' Disparar funil</button>' +
     '</div>';
@@ -7314,7 +7359,23 @@
     if (!c) return;
     c.innerHTML = listaFunisHTML(_funisCache ? _funisCache.funis : []);
     ligarAcoesListaFunis();
+    _ligarLimparFiltroFunil();
     _observarMidias(c);
+  }
+
+  // O botão do estado vazio precisa ser religado a cada redesenho da lista —
+  // oferecer uma saída que não abre é pior que não oferecer nenhuma.
+  function _ligarLimparFiltroFunil() {
+    const b = document.getElementById('job-limpar-f-funil');
+    if (!b) return;
+    b.addEventListener('click', () => {
+      _fnBusca = ''; _fnSoFav = false;
+      const inp = document.getElementById('job-busca-funil');
+      if (inp) inp.value = '';
+      document.querySelectorAll('.job-fchip[data-fn-fav]').forEach((c) =>
+        c.classList.toggle('on', c.dataset.fnFav === '0'));
+      rerenderFunisLista();
+    });
   }
 
   // Ações da LISTA (rebindadas a cada filtro/busca) separadas dos controles
@@ -7360,6 +7421,7 @@
       });
     });
     ligarAcoesListaFunis();
+    _ligarLimparFiltroFunil();
   }
 
   function _uid() {
@@ -7718,7 +7780,9 @@
       (dados ? '<div class="job-sec">Dados do lead</div><div class="job-dados">' + dados + '</div>' +
         '<button class="job-copy" id="job-dados-copy" data-texto="' + esc(dadosTexto) + '">Copiar dados do lead</button>' : '') +
       '<div class="job-sec">Próximas ações</div>' +
-      (sugs || '<div class="job-vazio">Sem sugestões.</div>') +
+      // "Sem sugestões." não dizia se era bom sinal ou defeito.
+      (sugs || _vazio('Nada a corrigir aqui',
+        'A leitura não encontrou nenhuma ação pendente nesta conversa. Isso é bom sinal — não é falha.')) +
       '<div class="job-sec">Follow-up sugerido</div>' +
       '<div class="job-resumo" id="job-followup">' + esc(r.followup || '') + '</div>' +
       '<button class="job-copy" id="job-copy-btn">Copiar follow-up</button>' +
@@ -7813,7 +7877,11 @@
           '<b>' + esc(f.dado || '') + '</b><span>' + esc(f.pergunta) + '</span></div>').join('')
       : '';
     return (
-      '<div class="job-sec">Leitura da IA <span class="job-ia-badge">Claude</span></div>' +
+      // SEM O NOME DO FORNECEDOR. Dizia "Claude" aqui: pista de stack numa
+      // tela que um dia chega perto de cliente ou de outra corretora, e que
+      // fica errada no dia em que o motor mudar. Quem lê quer saber que a
+      // leitura é automática — não de quem é o motor.
+      '<div class="job-sec">Leitura automática da conversa</div>' +
       '<div class="job-resumo">' + esc(ia.resumo || '') + '</div>' +
       blocoImgs +
       blocoDocs +

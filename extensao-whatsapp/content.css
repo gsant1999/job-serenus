@@ -229,6 +229,18 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-sem-analise-txt { font-size: 12.5px; color: var(--job-txt-fraco); margin-bottom: 14px;
   line-height: 1.5; max-width: 30ch; margin-left: auto; margin-right: auto; }
 
+/* ── ESTADO VAZIO ──
+   Ele é a tela que a pessoa mais vê no primeiro dia, então tem que explicar
+   pra que serve o lugar — não só constatar que está vazio. Fica contido num
+   cartão discreto em vez de solto no painel: sem moldura, texto centralizado
+   no meio do nada lê como erro, e não como "ainda não começou". */
+.job-vazio-bloco {
+  border: 1px dashed var(--job-bg3); border-radius: 12px;
+  padding: 20px 16px; margin: 4px 0 2px;
+  background: color-mix(in srgb, var(--job-bg2) 60%, transparent);
+}
+.job-vazio-btn { margin-top: 4px; display: inline-block; text-decoration: none; }
+
 /* ── FALHA COM SAÍDA ──
    O bloco de erro deixa de ser uma faixa vermelha com texto de exceção e vira
    um cartão que explica e oferece o próximo passo. Faixa na borda esquerda
@@ -241,8 +253,17 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-analisar-btn {
   background: #3b82f6; color: #fff; border: none; border-radius: 999px;
   padding: 10px 22px; font-size: 13px; font-weight: 500; cursor: pointer;
+  font-family: inherit; line-height: 1.2;
+  transition: background .15s ease, transform .1s ease-out;
 }
 .job-analisar-btn:hover { background: #5a97f8; }
+/* Resposta no aperto: o feedback chega quando o dedo desce, não quando sobe. */
+.job-analisar-btn:active { transform: scale(.97); }
+.job-analisar-btn:focus-visible { outline: 2px solid var(--job-acento); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .job-analisar-btn { transition: background .15s ease; }
+  .job-analisar-btn:active { transform: none; }
+}
 
 /* ── Última análise salva (retrato vindo do JOB — a extensão não guarda
    resultado entre sessões, só na memória da aba) ── */
