@@ -5250,7 +5250,8 @@
   // Cada motivo vira uma frase que diz O QUE FAZER. "precisa_aprender" sozinho
   // manda o consultor abrir um chamado; a instrução resolve em um minuto.
   const _COT_EXPLICA = {
-    painel_fechado: 'Abra o <b>Painel do Corretor</b> numa aba e deixe logado. O JOB busca o preço pela sua sessão lá.',
+    painel_fechado: 'O JOB busca o preço pela <b>sua sessão</b> no Painel do Corretor — e ela precisa estar aberta. ' +
+      'Enquanto a aba fica aberta, o JOB segura a sessão viva sozinho.',
     painel_precisa_recarregar: 'A aba do Painel do Corretor está aberta, mas precisa de <b>F5</b> depois da atualização da extensão.',
     precisa_aprender: 'Vá na aba do <b>Painel do Corretor</b> e faça uma cotação na mão até <b>ver o preço na tela</b>. ' +
       'A extensão aprende vendo você usar, e destrava sozinha — não precisa terminar nem salvar a cotação lá.',
@@ -5284,6 +5285,11 @@
       '</div></div>';
   }
 
+  // Motivos em que o consultor precisa do Painel na tela. Pra eles a tela
+  // oferece o botão que ABRE a aba, em vez de mandar procurar.
+  const _COT_PRECISA_PAINEL = ['painel_fechado', 'precisa_aprender', 'hash_expirado',
+                               'painel_precisa_recarregar', 'sem_resposta_a_tempo'];
+
   function _cotErro(motivo, aoVoltar) {
     setCorpoSecao(_secHead('Cotar agora', 'Preço buscado no Painel do Corretor na hora, pela sua sessão.') +
       '<div class="job-cot-wrap">' +
@@ -5292,9 +5298,26 @@
         '<div class="job-sem-analise-txt" style="max-width:none;margin-left:0;margin-right:0">' +
           _cotMotivo(motivo) + '</div>' +
       '</div>' +
+      (_COT_PRECISA_PAINEL.some((x) => String(motivo || '').indexOf(x) === 0)
+        // UM CLIQUE, não uma instrução. Mandar "vá na aba do Painel" obriga o
+        // consultor a saber o endereço, abrir e achar — no meio do
+        // atendimento, com o cliente esperando.
+        ? '<button class="job-cnpj-btn" id="job-cot-abrir-painel" type="button">Abrir o Painel do Corretor</button>'
+        : '') +
       '<button class="job-cot-nova job-cot-voltar" id="job-cot-volta" type="button">Voltar</button></div>');
     const b = document.getElementById('job-cot-volta');
     if (b) b.addEventListener('click', aoVoltar || abrirSecaoCotacao);
+    const bp = document.getElementById('job-cot-abrir-painel');
+    if (bp) bp.addEventListener('click', async () => {
+      bp.disabled = true; const r0 = bp.textContent; bp.textContent = 'Abrindo…';
+      const r = await _safeSendMessage({ type: 'painel_abrir' }).catch(() => null);
+      // Diz o que aconteceu: focar uma aba que já existia e abrir uma nova são
+      // coisas diferentes, e o consultor precisa saber em qual ele está.
+      bp.textContent = (r && r.ok)
+        ? (r.tinha ? 'Painel em foco — volte aqui depois' : 'Painel aberto — faça o login')
+        : r0;
+      setTimeout(() => { bp.textContent = r0; bp.disabled = false; }, 3200);
+    });
   }
 
   function abrirSecaoCotarInline() {

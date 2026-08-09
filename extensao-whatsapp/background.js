@@ -843,6 +843,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       180000).then(sendResponse);
     return true;
   }
+  // ── ABRIR / FOCAR A ABA DO PAINEL ─────────────────────────────────────
+  //
+  // A mensagem de erro mandava o consultor "ir na aba do Painel". Se ela não
+  // existe, ele tem que saber o endereço, abrir e logar — no meio de um
+  // atendimento, com o cliente esperando. Um clique resolve: se a aba existe,
+  // foca; se não, abre.
+  if (msg && msg.type === 'painel_abrir') {
+    chrome.tabs.query({ url: 'https://*.paineldocorretor.com.br/*' }, (abas) => {
+      const viva = (abas || [])[0];
+      if (viva) {
+        chrome.tabs.update(viva.id, { active: true });
+        chrome.windows.update(viva.windowId, { focused: true }, () => { void chrome.runtime.lastError; });
+        sendResponse({ ok: true, tinha: true });
+        return;
+      }
+      chrome.tabs.create({ url: 'https://paineldocorretor.com.br/', active: true },
+        () => sendResponse({ ok: true, tinha: false }));
+    });
+    return true;
+  }
+  // A aba do Painel avisa que está viva. Guardado com hora, pra a extensão
+  // saber a diferença entre "nunca abriu" e "abriu e fechou".
+  if (msg && msg.type === 'painel_vivo') {
+    chrome.storage.local.set({ painelVivoEm: Date.now() });
+    return false;
+  }
+
   if (msg && msg.type === 'vincular_chats') {
     chamarJob('/api/whatsapp/chats/vincular', 'POST', { conversas: msg.conversas || [] }, 45000).then(sendResponse);
     return true;

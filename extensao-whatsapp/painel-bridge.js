@@ -221,6 +221,57 @@
     cotador_passo: ['passo', 30000],   // uma acao so: nunca deveria demorar tanto
   };
 
+  // ══ MANTER A SESSÃO VIVA ══════════════════════════════════════════════
+  //
+  // A dor diária: a sessão do Painel expira por inatividade e o consultor tem
+  // que logar de novo no meio do atendimento. O sistema deles usa expiração
+  // deslizante — cada requisição empurra o prazo pra frente.
+  //
+  // Então, enquanto a aba do Painel estiver ABERTA, este toque leve renova o
+  // prazo. Não é login automático nem credencial guardada: é a mesma coisa que
+  // acontece quando alguém deixa a aba aberta e clica de vez em quando. Sai do
+  // navegador dele, com a sessão dele, do IP dele.
+  //
+  // Quatro cuidados, e cada um tem motivo:
+  //   • Só com a aba aberta. Sem aba, não há o que renovar — e forjar sessão
+  //     sem navegador é exatamente o rastro que não pode existir.
+  //   • Intervalo longo (7 min) e com variação aleatória. Batida de relógio
+  //     perfeita é a assinatura mais óbvia de robô que existe.
+  //   • Pausa quando a aba está escondida há muito tempo: computador fechado
+  //     não fica batendo no servidor deles.
+  //   • HEAD na raiz do próprio site. É o menor pedido possível e não lê nem
+  //     escreve dado nenhum.
+  const _KEEPALIVE_BASE = 7 * 60 * 1000;
+  let _ultimoToque = Date.now();
+
+  function _agendarToque() {
+    // ±90s de variação: sem isso são 8 requisições por hora no mesmo segundo.
+    const atraso = _KEEPALIVE_BASE + Math.floor((Math.random() - 0.5) * 180000);
+    setTimeout(async () => {
+      try {
+        // Aba escondida há mais de 2h: a pessoa não está trabalhando aqui.
+        const parado = Date.now() - _ultimoToque > 2 * 60 * 60 * 1000;
+        if (!document.hidden || !parado) {
+          await fetch(location.origin + '/', { method: 'HEAD', credentials: 'include', cache: 'no-store' });
+          _ultimoToque = Date.now();
+        }
+      } catch (e) { /* rede caiu: o próximo toque tenta */ }
+      _agendarToque();
+    }, atraso);
+  }
+  // Qualquer atividade real da pessoa também conta como toque — aí o nosso
+  // nem precisa acontecer.
+  ['click', 'keydown', 'visibilitychange'].forEach((ev) =>
+    document.addEventListener(ev, () => { if (!document.hidden) _ultimoToque = Date.now(); }, true));
+  _agendarToque();
+
+  // Diz ao JOB que esta aba existe. É o que permite a extensão parar de dizer
+  // "abra o Painel" quando ele já está aberto.
+  try {
+    chrome.runtime.sendMessage({ type: 'painel_vivo', origem: location.origin },
+      () => { void chrome.runtime.lastError; });
+  } catch (e) { /* sem background: segue */ }
+
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || !ACEITOS[msg.type]) return;
     const [tipo, limite] = ACEITOS[msg.type];
