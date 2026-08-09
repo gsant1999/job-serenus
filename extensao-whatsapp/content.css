@@ -3190,3 +3190,37 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 /* O logo dentro do botão: um pouco maior e sempre nítido. */
 .job-bc-menu-bt .job-logo { width: 24px; height: 24px; }
 .job-bc-menu-bt .job-logo-txt { font-size: 8px; }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   O LOGO NO RODAPÉ SEGUE O TEMA DO WHATSAPP, NÃO O NOSSO
+
+   O botão do menu vive DENTRO do rodapé do WhatsApp — quem manda no fundo
+   atrás dele é o tema DELES, não o da extensão. O "JOB" usava a cor do nosso
+   trilho (clara, porque o trilho é escuro sempre), e no WhatsApp claro isso
+   virava texto branco sobre fundo claro: sumia.
+
+   O WhatsApp Web marca o tema escuro com `class="dark"` no <html>. Uso os
+   dois sinais — a classe deles e a preferência do sistema — porque a classe
+   pode mudar de nome num redesenho e a preferência não some.
+
+   Só vale pro logo DENTRO do rodapé. No trilho e no painel, que são
+   superfícies nossas, ele continua seguindo o nosso tema.
+   ══════════════════════════════════════════════════════════════════════════ */
+.job-bc-menu-bt .job-logo-txt { color: #10231d; }
+html.dark .job-bc-menu-bt .job-logo-txt,
+html[data-theme="dark"] .job-bc-menu-bt .job-logo-txt { color: #f2f7f5; }
+@media (prefers-color-scheme: dark) {
+  .job-bc-menu-bt .job-logo-txt { color: #f2f7f5; }
+}
+/* E se o WhatsApp estiver CLARO com o sistema em escuro, a classe deles ganha
+   — ela é o estado real da tela, e a preferência é só um palpite. */
+html:not(.dark):not([data-theme="dark"]) .job-bc-menu-bt .job-logo-txt { color: #10231d; }
+
+/* O anel do botão também: sobre fundo claro ele precisa fechar mais o tom pra
+   não virar um borrão verde-claro sobre branco. */
+html:not(.dark):not([data-theme="dark"]) .job-bc-menu-bt {
+  background: color-mix(in srgb, #0f9d76 16%, transparent);
+  border-color: color-mix(in srgb, #0f9d76 70%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, #0f9d76 12%, transparent), 0 2px 8px rgba(0,0,0,.14);
+}
