@@ -4830,8 +4830,20 @@
           '<input id="job-cot-cidade" class="job-cnpj-input" autocomplete="off" placeholder="Campinas - SP" value="' + esc(v.cidade || _cotCidadePadrao || '') + '">' +
           '<div id="job-cot-sug" class="job-cot-sug"></div>' +
         '</div>' +
-        '<button type="button" class="job-cot-fixar" id="job-cot-fixar">' +
-          '<span class="marca"></span><span class="txt"></span></button>' +
+        // PREFERÊNCIA, NÃO CAMPO DE FORMULÁRIO. Era um quadrado que só mudava
+        // de cor — quem não distingue verde de cinza não via estado nenhum —
+        // e o rótulo trocava de frase entre os dois estados: uma hora ordem
+        // ("Usar X como padrão"), outra hora constatação ("Esta é a sua
+        // cidade padrão"). Rótulo que muda de natureza obriga a reler.
+        // Agora: interruptor carrega o estado, rótulo fica parado, e a linha
+        // de baixo diz a consequência com o nome da cidade.
+        '<button type="button" class="job-cot-fixar" id="job-cot-fixar" role="switch" aria-checked="false">' +
+          '<span class="job-sw"><span class="job-sw-bola"></span></span>' +
+          '<span class="job-cot-fixar-txt">' +
+            '<span class="rot">Usar como cidade padrão</span>' +
+            '<span class="txt"></span>' +
+          '</span>' +
+        '</button>' +
         '<label class="job-cot-rot" id="job-cot-p2"><i>2</i> Tipo de contratação' +
           _cotAjuda('PF é pessoa física. PME precisa de CNPJ. Adesão exige o cliente pertencer ' +
                     'a uma entidade de classe. O preço e os planos mudam com isso.') + '</label>' +
@@ -5024,9 +5036,12 @@
       const atual = cidadeDoCatalogo || '';
       const fixa = !!atual && atual === _cotCidadePadrao;
       btFixar.classList.toggle('on', fixa);
+      btFixar.setAttribute('aria-checked', fixa ? 'true' : 'false');
+      // O rótulo não muda; a linha de apoio diz o que essa escolha faz, com
+      // o nome da cidade — que é a informação que a pessoa quer conferir.
       btFixar.querySelector('.txt').textContent = fixa
-        ? 'Esta é a sua cidade padrão — já vem preenchida'
-        : (atual ? 'Usar ' + atual + ' como cidade padrão' : 'Escolha a cidade para poder fixá-la');
+        ? atual + ' já vem preenchida nas próximas cotações'
+        : (atual ? 'Começa toda cotação em ' + atual : 'Escolha a cidade primeiro');
       btFixar.disabled = !atual;
     }
     // Resolve o lead em segundo plano e reescreve o link quando chegar.

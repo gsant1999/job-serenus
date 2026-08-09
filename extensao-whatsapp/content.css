@@ -253,7 +253,15 @@ html.job-push-esquerda #job-trilho {
   color: var(--job-trilho-txt);
   background: color-mix(in srgb, var(--job-trilho-txt) 8%, transparent);
 }
-.job-trilho-item-ativo { color: var(--job-trilho-txt); background: transparent; }
+/* Sobre a pílula colorida o texto é branco puro, não o cinza-claro do trilho:
+   o contraste tem que subir junto com a saturação do fundo. */
+.job-trilho-item-ativo { color: #ffffff; background: transparent; }
+.job-trilho-item-ativo .job-trilho-item-label { font-weight: 700; }
+/* As marcas ganham anel escuro quando estão em cima da pílula, pra não
+   sumirem contra o degradê. */
+.job-trilho-item-ativo .job-trilho-item-badge,
+.job-trilho-item-ativo .job-fila-badge,
+.job-trilho-item-ativo .job-trilho-ponto { box-shadow: 0 0 0 2px rgba(0,0,0,.32); }
 
 /* ÍCONE — traço mais fino que o padrão 2px: a 21px, traço grosso vira borrão
    e some o desenho. E ele SOBE 1px quando é o ativo, junto com um leve
@@ -296,13 +304,20 @@ html.job-push-esquerda #job-trilho {
   position: absolute; left: 6px; right: 6px; top: 0;
   height: var(--h, 0px); transform: translateY(var(--y, 0px));
   border-radius: 13px; z-index: 0; opacity: 0; pointer-events: none;
-  background:
-    linear-gradient(180deg,
-      color-mix(in srgb, var(--job-trilho-txt) 16%, transparent) 0%,
-      color-mix(in srgb, var(--job-trilho-txt) 9%, transparent) 100%);
+  /* O ATIVO TEM COR PRÓPRIA, NÃO UMA LAVAGEM DO TRILHO.
+     Era o texto do trilho a 16% — ou seja, a mesma família da superfície, só
+     um pouco mais clara. Num trilho escuro isso vira "um degrau de cinza": dá
+     pra ver, mas não SALTA, e o item selecionado é a única coisa ali que
+     precisa saltar.
+     Agora ele usa o degradê da marca — o mesmo do botão principal do site —
+     que é a única cor que não existe em nenhum outro lugar do trilho. E como
+     o trilho é escuro nos dois temas, essa pílula é idêntica no claro e no
+     escuro: um elemento a menos pra dar errado. */
+  background: linear-gradient(145deg, var(--job-acento) 0%, #2f7df0 55%, #7c5cf5 100%);
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--job-trilho-txt) 18%, transparent),
-    0 2px 8px rgba(0,0,0,.22);
+    inset 0 1px 0 rgba(255,255,255,.22),
+    0 3px 12px rgba(0,0,0,.34),
+    0 0 0 1px rgba(255,255,255,.07);
   /* Curva com um respingo de ultrapassagem no fim: o gesto foi um clique, e
      um pouco de impulso faz o movimento parecer físico. Nada de balanço
      longo — isso é menu, não gaveta arrastada. */
@@ -316,12 +331,10 @@ html.job-push-esquerda #job-trilho {
 /* O traço de acento vive na quina do trilho, colado na pílula: ele diz QUAL
    seção; o preenchimento diz que é ali que você está. Duas informações, um
    elemento. */
-.job-trilho-marca::before {
-  content: ""; position: absolute; left: -6px; top: 22%; bottom: 22%; width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: linear-gradient(180deg, var(--job-acento) 0%, #3b82f6 100%);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--job-acento) 45%, transparent);
-}
+/* O traço na quina sai: ele existia pra dar cor a uma pílula que não tinha
+   nenhuma. Com a pílula colorida, ele vira uma segunda marca dizendo a mesma
+   coisa — e duas marcas pro mesmo estado é ruído, não reforço. */
+.job-trilho-marca::before { content: none; }
 html.job-push-esquerda .job-trilho-marca::before {
   left: auto; right: -6px; border-radius: 3px 0 0 3px;
 }
@@ -2733,3 +2746,52 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
    hierarquia nenhuma. */
 .job-ficha-rodape .job-nao-lead,
 .job-ficha-rodape .job-ficha-abrir { flex: 1 1 0; min-width: 0; width: auto; }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   INTERRUPTOR — para preferência que fica ligada
+
+   Era um quadrado de 15px que enchia de verde. Três problemas: a cor sozinha
+   carregava o estado (quem não distingue verde de cinza não via nada), a
+   forma não dizia que era um liga-desliga, e um quadrado preenchido é a
+   linguagem de "item selecionado numa lista", não de "opção ativa".
+
+   Interruptor resolve os três: a POSIÇÃO da bola diz o estado antes da cor,
+   a forma se reconhece de longe, e ele já é o gesto que todo mundo conhece
+   de ajuste de sistema.
+   ══════════════════════════════════════════════════════════════════════════ */
+.job-sw {
+  flex: none; position: relative; width: 34px; height: 20px; border-radius: 999px;
+  background: color-mix(in srgb, var(--job-txt) 18%, transparent);
+  border: 1px solid var(--job-borda);
+  transition: background var(--job-t-rapido) ease, border-color var(--job-t-rapido) ease;
+}
+.job-sw-bola {
+  position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--job-bg1); box-shadow: var(--job-elev-1);
+  /* Ele DESLIZA. Um interruptor que troca de lugar sem caminho não parece um
+     interruptor — parece a tela redesenhando. */
+  transition: transform var(--job-t-medio) var(--job-mv-mola), background var(--job-t-rapido) ease;
+}
+.job-cot-fixar.on .job-sw { background: var(--job-acento); border-color: var(--job-acento); }
+.job-cot-fixar.on .job-sw-bola { transform: translateX(14px); background: #fff; }
+
+.job-cot-fixar {
+  align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px;
+  border-radius: 12px; border: 1px solid var(--job-borda);
+  background: color-mix(in srgb, var(--job-txt) 3%, transparent);
+  font-family: var(--job-ui);
+  transition: border-color var(--job-t-rapido) ease, background var(--job-t-rapido) ease;
+}
+.job-cot-fixar:hover:not(:disabled) { border-color: color-mix(in srgb, var(--job-acento) 45%, transparent); }
+.job-cot-fixar.on { border-color: color-mix(in srgb, var(--job-acento) 45%, transparent);
+  background: color-mix(in srgb, var(--job-acento) 8%, transparent); }
+.job-cot-fixar-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; text-align: left; }
+.job-cot-fixar .rot { font-size: 12.5px; font-weight: 620; color: var(--job-txt);
+  letter-spacing: var(--job-tk-md); }
+.job-cot-fixar .txt { font-size: 11px; color: var(--job-txt-fraco); line-height: 1.35; }
+.job-cot-fixar.on .rot { color: var(--job-txt); }
+.job-cot-fixar:focus { outline: none; }
+.job-cot-fixar:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
+.job-cot-fixar:disabled { opacity: .5; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .job-sw-bola { transition: background var(--job-t-rapido) ease; } }
