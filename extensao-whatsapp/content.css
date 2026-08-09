@@ -2389,3 +2389,82 @@ details.job-cfg-antigo > summary:hover { opacity: 1; }
   .job-folha-caixa { background: var(--job-bg1); backdrop-filter: none; -webkit-backdrop-filter: none; }
   .job-folha-fundo { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(0,0,0,.55); }
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   BOTÃO PRINCIPAL — uma aparência, sete lugares
+
+   Existiam SETE classes fazendo "botão principal", cada uma escrita numa
+   semana diferente: raios de 7, 8, 10 e 12px; corpo de 11,5 a 14px; peso de
+   500 a 750; e uma delas com um degradê azul-roxo que ainda era o primário
+   antigo, brigando com o acento verde do resto.
+
+   Isto não muda o LAYOUT de nenhuma (largura, flex e margem continuam com
+   quem já tinha): normaliza só o que faz elas parecerem a mesma coisa —
+   família, peso, raio, cor, e como respondem ao toque.
+
+   Vem depois das definições originais de propósito: mesma especificidade,
+   última regra ganha. ══════════════════════════════════════════════════ */
+.job-cnpj-btn,
+.job-cot-bt-mandar,
+.job-modelo-enviar,
+.job-inbox-atender,
+.job-portao-bt,
+.job-cfg-bt-primario,
+.job-analisar-btn {
+  font-family: var(--job-ui);
+  font-weight: 640;
+  letter-spacing: var(--job-tk-sm);
+  border: none;
+  border-radius: 10px;
+  background: var(--job-acento);
+  color: var(--job-sobre-acento);
+  cursor: pointer;
+  box-shadow: var(--job-elev-1);
+  transition: filter var(--job-t-rapido) ease,
+              box-shadow var(--job-t-rapido) ease,
+              transform var(--job-t-toque) ease-out;
+}
+/* O de pílula continua pílula: ele vive centralizado num estado vazio, onde
+   forma arredondada lê como convite e retângulo lê como formulário. */
+.job-analisar-btn { border-radius: 999px; }
+
+.job-cnpj-btn:hover:not(:disabled),
+.job-cot-bt-mandar:hover:not(:disabled),
+.job-modelo-enviar:hover:not(:disabled),
+.job-inbox-atender:hover:not(:disabled),
+.job-portao-bt:hover:not(:disabled),
+.job-cfg-bt-primario:hover:not(:disabled),
+.job-analisar-btn:hover:not(:disabled) {
+  filter: brightness(1.08); box-shadow: var(--job-elev-2);
+}
+/* Resposta no APERTO — o dedo desce, a coisa cede. */
+.job-cnpj-btn:active:not(:disabled),
+.job-cot-bt-mandar:active:not(:disabled),
+.job-modelo-enviar:active:not(:disabled),
+.job-inbox-atender:active:not(:disabled),
+.job-portao-bt:active:not(:disabled),
+.job-cfg-bt-primario:active:not(:disabled),
+.job-analisar-btn:active:not(:disabled) { transform: scale(.975); box-shadow: none; }
+
+.job-cnpj-btn:focus, .job-cot-bt-mandar:focus, .job-modelo-enviar:focus,
+.job-inbox-atender:focus, .job-portao-bt:focus, .job-cfg-bt-primario:focus,
+.job-analisar-btn:focus { outline: none; }
+.job-cnpj-btn:focus-visible, .job-cot-bt-mandar:focus-visible, .job-modelo-enviar:focus-visible,
+.job-inbox-atender:focus-visible, .job-portao-bt:focus-visible, .job-cfg-bt-primario:focus-visible,
+.job-analisar-btn:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
+
+/* DESABILITADO diz "ainda não", não "quebrado": perde a cor e a sombra, mas
+   mantém a forma e o texto legível. Opacidade sozinha some com o rótulo. */
+.job-cnpj-btn:disabled, .job-cot-bt-mandar:disabled, .job-modelo-enviar:disabled,
+.job-inbox-atender:disabled, .job-portao-bt:disabled, .job-cfg-bt-primario:disabled,
+.job-analisar-btn:disabled {
+  background: color-mix(in srgb, var(--job-txt) 12%, transparent);
+  color: var(--job-txt-fraco);
+  box-shadow: none; cursor: default; filter: none; transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .job-cnpj-btn:active, .job-cot-bt-mandar:active, .job-modelo-enviar:active,
+  .job-inbox-atender:active, .job-portao-bt:active, .job-cfg-bt-primario:active,
+  .job-analisar-btn:active { transform: none; }
+}
