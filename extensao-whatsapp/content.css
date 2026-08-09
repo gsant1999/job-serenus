@@ -2972,3 +2972,9 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 .job-bc-salvar:focus { outline: none; }
 .job-bc-salvar:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
 @media (prefers-reduced-motion: reduce) { .job-bc-salvar:active { transform: none; } }
+
+
+/* A migalha da cotação dentro do cabeçalho grudado: ela vem ANTES do título,
+   porque é o caminho de volta, e o título é onde você chegou. */
+.job-sec-head-cot .job-cot-topo { margin-bottom: 8px; }
+.job-sec-head-cot .job-sec-sub { margin: 3px 0 0; }

@@ -3214,9 +3214,8 @@
       '<div class="job-dev-linha' + (ruim ? ' ruim' : '') + '"><span>' + esc(rot) +
       '</span><b>' + esc(val) + '</b></div>';
     setCorpoSecao(
+      _secHead('Diagnóstico', 'Estado real de cada peça, agora.') +
       '<div class="job-dev">' +
-        '<div class="job-sec-t">Diagnóstico</div>' +
-        '<div class="job-sec-sub">Estado real de cada peça, agora.</div>' +
         linha('Versão da extensão', (chrome.runtime.getManifest() || {}).version || '?') +
         linha('Ponte wa-js', temWpp ? 'respondendo' : 'FORA (' + ((ponte && ponte.erro) || 'sem resposta') + ')', !temWpp) +
         linha('Conversa aberta', (ponte && ponte.chat_id) ? ponte.chat_id : 'nenhuma', !(ponte && ponte.chat_id)) +
@@ -3548,8 +3547,10 @@
     let resp;
     try { resp = await _safeSendMessage(Object.assign({ type: 'ficha_lead', chat_id: _chatAberto }, alvo)); } catch (e) { resp = null; }
     if (!resp || !resp.ok) {
-      setCorpoSecao('<div class="job-erro">Não consegui abrir a ficha agora. ' +
-        '<button class="job-copy" id="job-ficha-retry" style="width:auto;display:inline;padding:4px 10px;margin-left:6px;">Tentar de novo</button></div>');
+      setCorpoSecao(_secHead('CRM', 'Ficha do lead: etapa, etiquetas, qualificação e atividade.') +
+        _telaFalha('Não consegui abrir a ficha',
+          'Pode ser a conexão ou o JOB fora do ar por um instante. Os dados do lead continuam salvos.',
+          'job-ficha-retry', 'Tentar de novo'));
       const rt = document.getElementById('job-ficha-retry');
       if (rt) rt.addEventListener('click', () => _carregarFicha(alvo));
       return;
@@ -4908,10 +4909,35 @@
     if (s.indexOf('hash_expirado') === 0) return _COT_EXPLICA.hash_expirado;
     return _COT_EXPLICA[s] || 'Não consegui falar com o Painel do Corretor agora. Motivo: ' + esc(s || 'desconhecido');
   }
+  // NÃO É AVISO SOLTO, É TELA. Ela abria com um ladrilho amarelo e um "Voltar"
+  // verde de largura cheia: sem cabeçalho, sem dizer onde a pessoa está, e com
+  // a saída pintada como se fosse a ação principal. O consultor chegava aqui
+  // depois de pedir preço e via uma faixa de aviso órfã.
+  // A MIGALHA DA COTAÇÃO É O CABEÇALHO DELA.
+  //
+  // Nas telas de operadora e comparativo o "onde estou" não é um título: é a
+  // migalha ("Campinas - SP · PME · 2 vidas"), que ainda por cima é clicável
+  // pra corrigir. Ela responde melhor que um título — mas rolava pra fora da
+  // tela justamente nas duas telas mais longas da extensão, e aí o consultor
+  // perdia de vista pra qual cidade e quantas vidas eram aqueles preços.
+  // Aqui ela ganha a mesma casca grudada das outras dez.
+  function _cotCabecalho(topoHtml, titulo, extra) {
+    return '<div class="job-sec-head job-sec-head-cot">' + topoHtml +
+      '<div class="job-sec-head-row">' +
+        '<div class="job-sec-t">' + titulo + '</div>' +
+        (extra || '') +
+      '</div></div>';
+  }
+
   function _cotErro(motivo, aoVoltar) {
-    setCorpoSecao('<div class="job-cot-wrap">' +
-      '<div class="job-ia-alerta">' + _cotMotivo(motivo) + '</div>' +
-      '<button class="job-cnpj-btn" id="job-cot-volta">Voltar</button></div>');
+    setCorpoSecao(_secHead('Cotar agora', 'Preço buscado no Painel do Corretor na hora, pela sua sessão.') +
+      '<div class="job-cot-wrap">' +
+      '<div class="job-sem-analise job-vazio-bloco" style="text-align:left">' +
+        '<div class="job-sem-analise-t">Não consegui buscar o preço</div>' +
+        '<div class="job-sem-analise-txt" style="max-width:none;margin-left:0;margin-right:0">' +
+          _cotMotivo(motivo) + '</div>' +
+      '</div>' +
+      '<button class="job-cot-nova job-cot-voltar" id="job-cot-volta" type="button">Voltar</button></div>');
     const b = document.getElementById('job-cot-volta');
     if (b) b.addEventListener('click', aoVoltar || abrirSecaoCotacao);
   }
@@ -5440,9 +5466,10 @@
     // PME é o único com mínimo de vidas; PF e adesão são por pessoa.
     const ehPME = String(_cot.modalidade) === '2';
     const totalVidas = _cot.totalVidas || 0;
-    setCorpoSecao('<div class="job-cot-wrap">' +
-      _cotTopo(abrirSecaoCotarInline) +
-      '<div class="job-sec-t">Operadoras</div>' +
+    setCorpoSecao(
+      _cotCabecalho(_cotTopo(abrirSecaoCotarInline), 'Operadoras',
+        ops.length ? '<span class="job-sec-cont">' + ops.length + '</span>' : '') +
+      '<div class="job-cot-wrap">' +
       '<div class="job-sec-sub">Quem atende essa combinação. Escolha uma.</div>' +
       (ops.length
         ? '<div class="job-cot-ops">' + ops.map((o) => {
@@ -5545,10 +5572,10 @@
     const eComum = (t) => comuns.some((c) => c.t === t);
 
     const logoTopo = _cotLogos[_cotChaveLogo(_cot.operadoraAtual.nome)];
-    setCorpoSecao('<div class="job-cot-wrap">' +
-      _cotTopo(_cotPintarOperadoras) +
+    setCorpoSecao(
+      _cotCabecalho(_cotTopo(_cotPintarOperadoras), esc(_cot.operadoraAtual.nome)) +
+      '<div class="job-cot-wrap">' +
       (logoTopo ? '<img class="job-cot-logo-topo" src="' + esc(logoTopo) + '" alt="">' : '') +
-      '<div class="job-sec-t">' + esc(_cot.operadoraAtual.nome) + '</div>' +
       (comuns.length
         ? '<div class="job-cot-tags job-cot-tags-topo">' + comuns.map((e) =>
             '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' + esc(e.t) + '</span>').join('') +
@@ -5630,9 +5657,9 @@
     const fila = _cotEmbaralhar(alvo);
     const feitos = [];
     for (let i = 0; i < fila.length; i++) {
-      setCorpoSecao('<div class="job-cot-wrap">' +
-        '<div class="job-sec-t">Buscando preços</div>' +
-        '<div class="job-sec-sub">' + (i + 1) + ' de ' + fila.length + ' · ' + esc(_cot.operadoraAtual.nome) + '</div>' +
+      setCorpoSecao(_secHead('Buscando preços',
+        esc(_cot.operadoraAtual.nome), (i + 1) + '/' + fila.length) +
+        '<div class="job-cot-wrap">' +
         '<div class="job-cot-barra"><i style="width:' + Math.round((i / fila.length) * 100) + '%"></i></div>' +
         (feitos.length ? _cotCartoes(feitos) : '') +
         '<div class="job-cot-dica">Um plano por vez, com pausa entre eles — é assim que o Painel é usado à mão.</div>' +
@@ -5700,11 +5727,12 @@
       '</div>';
     }).join('');
 
-    setCorpoSecao('<div class="job-cot-wrap">' +
-      _cotTopo(_cotPintarOperadoras) +
-      // Sem subtítulo: a migalha do topo já diz cidade, tipo e vidas, e ainda
-      // é clicável pra mudar. Repetir logo abaixo é eco.
-      '<div class="job-sec-t">Comparativo</div>' +
+    // Sem subtítulo: a migalha do topo já diz cidade, tipo e vidas, e ainda
+    // é clicável pra mudar. Repetir logo abaixo é eco.
+    setCorpoSecao(
+      _cotCabecalho(_cotTopo(_cotPintarOperadoras), 'Comparativo',
+        comPreco.length ? '<span class="job-sec-cont">' + comPreco.length + '</span>' : '') +
+      '<div class="job-cot-wrap">' +
       grupos +
       (comPreco.length
         // UMA ação principal. As outras existem, mas não competem: salvar é o
@@ -6801,8 +6829,11 @@
     return modelos;
   }
 
+  // Com cabeçalho: a espera não pode tirar da tela a única coisa que diz onde
+  // a pessoa está. Era a última tela da extensão que ainda fazia isso.
   function telaMensagensCarregando() {
-    return _telaCarregando('Carregando suas mensagens…');
+    return _secHead('Mensagens', 'Suas frases, áudios e imagens prontos — mande na conversa sem digitar de novo.') +
+      _telaCarregando('Carregando suas mensagens…');
   }
 
   function renderFormularioNovo() {
@@ -8381,7 +8412,9 @@
     try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
     const nome = nomeDoContato();
     if (!tel) {
-      setCorpoSecao('<div class="job-erro">Abra uma conversa primeiro pra ver as notas do lead.</div>');
+      setCorpoSecao(_secHead('Notas', 'Ficam salvas no JOB; qualquer consultor que abrir esta conversa vê.') +
+        _vazio('Nenhuma conversa aberta',
+          'As notas são de quem está na tela. Abra a conversa do cliente e volte aqui.'));
       return;
     }
     await _carregarNotasSecao(tel, nome);
@@ -8494,7 +8527,9 @@
     let tel = '';
     try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
     if (!tel) {
-      setCorpoSecao('<div class="job-erro">Abra uma conversa primeiro pra cadastrar o lead.</div>');
+      setCorpoSecao(_secHead('CRM', 'Cadastre o lead pra ele entrar no funil e ser medido por canal.') +
+        _vazio('Nenhuma conversa aberta',
+          'O cadastro sai da conversa aberta — é dela que vêm o nome e o telefone. Abra e volte aqui.'));
       return;
     }
     // Nome do cabeçalho só serve se NÃO for o próprio número (contato não salvo).
@@ -8554,8 +8589,8 @@
     }
     const url = _SITE_BASE_URL_EXT + '/crm?lead=' + resp.lead_id;
     setCorpoSecao(
+      _secHead(resp.ja_existia ? 'Esse lead já existia' : 'Lead cadastrado', '') +
       '<div class="job-novolead">' +
-        '<div class="job-sec-t">' + (resp.ja_existia ? 'Esse lead já existia' : 'Lead cadastrado') + '</div>' +
         '<div class="job-sec-sub">' + (resp.ja_existia
           ? 'Já havia um lead com esse telefone no JOB — abrimos o existente em vez de duplicar.'
           : 'Entrou no funil em "Lead Novo", atribuído a você.') + '</div>' +
@@ -8596,7 +8631,8 @@
         _analises.delete(reqId);
         atualizarPilula();
         abrirSecao('analise');
-        setCorpoSecao('<div class="job-erro">Abra uma conversa primeiro.</div>');
+        setCorpoSecao(_vazio('Nenhuma conversa aberta',
+          'Esta tela trabalha sobre a conversa que está na tela. Abra uma e volte aqui.'));
         return;
       }
       abrirSecao('analise');
@@ -8723,7 +8759,8 @@
       if (!mensagens.length && !imagens.length && !audios.length && !documentos.length && !links.length) {
         _analises.delete(reqId);
         atualizarPilula();
-        setCorpoSecao('<div class="job-erro">Não achei mensagens, imagens, áudios, documentos nem links nesta conversa.</div>');
+        setCorpoSecao(_vazio('Conversa sem conteúdo',
+          'Não achei mensagem, imagem, áudio, documento nem link aqui. Se a conversa é longa, role um pouco pra cima pra o WhatsApp carregar o histórico e tente de novo.'));
         return;
       }
 
