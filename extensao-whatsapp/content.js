@@ -766,7 +766,31 @@
   let _ultimoNomeWpp = '';
   function nomeMaisConfiavel(nomeDom) { return _ultimoNomeWpp || nomeDom || ''; }
 
+  // ══ CACHE DO TELEFONE RESOLVIDO ═══════════════════════════════════════
+  //
+  // Resolver o telefone de uma conversa @lid é a chamada mais lenta da
+  // extensão: ela pergunta ao servidor do WhatsApp e às vezes leva segundos.
+  // E era refeita TODA vez que a Análise abria, mesmo na mesma conversa —
+  // abrir, fechar e abrir de novo pagava o preço três vezes.
+  //
+  // A chave é o NOME do cabeçalho, que é estável; o número raspado do DOM
+  // oscila e seria chave ruim. Trocou de conversa, o cache não serve mais.
+  var _telCache = { chave: '', tel: '', ts: 0 };
+  var _TEL_CACHE_MS = 5 * 60 * 1000;
+
   function pedirTelefoneWpp() {
+    const chave = nomeDoContato() || '';
+    if (chave && _telCache.chave === chave && _telCache.tel &&
+        (Date.now() - _telCache.ts) < _TEL_CACHE_MS) {
+      return Promise.resolve(_telCache.tel);
+    }
+    return _pedirTelefoneWppReal().then((tel) => {
+      if (chave && tel) _telCache = { chave: chave, tel: tel, ts: Date.now() };
+      return tel;
+    });
+  }
+
+  function _pedirTelefoneWppReal() {
     return new Promise((resolve) => {
       const reqId = 't' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
       let pronto = false;
@@ -6788,13 +6812,36 @@
       : '';
 
     const etapa = (f.etapas || []).find((e) => e.id === l.etapa);
-    // Só os campos de qualificação RESPONDIDOS: listar os vazios transformaria
-    // o resumo numa lista de buracos, e o buraco tem lugar próprio (a aba de
-    // qualificação, que já diz o que falta pra avançar).
+    // O VALOR VEM DENTRO DE UM OBJETO.
+    //
+    // `campos_val[chave]` é {valor, fonte, valor_ia, revisado_em} — eu lia o
+    // objeto inteiro e o String() devolvia "[object Object]" em TODOS eles:
+    // campanha, criativo, tipo de plano, CNPJ, página que converteu. Os dados
+    // das campanhas estavam ali o tempo todo; ninguém conseguia ler.
+    //
+    // `valor_ia` entra quando não há valor humano: é o que a leitura extraiu e
+    // ainda não foi confirmado — melhor mostrar marcado do que esconder.
+    const valorDoCampo = (o) => {
+      if (o === null || o === undefined) return '';
+      if (typeof o !== 'object') return String(o);
+      const v = (o.valor !== null && o.valor !== undefined) ? String(o.valor) : '';
+      if (v.trim()) return v;
+      const ia = (o.valor_ia !== null && o.valor_ia !== undefined) ? String(o.valor_ia) : '';
+      return ia.trim() ? ia + ' (a confirmar)' : '';
+    };
+
+    // Chaves que já apareceram acima como campo do lead. Sem isto "Origem"
+    // saía duas vezes — uma do cadastro, outra da qualificação — e ficava a
+    // dúvida sobre qual vale.
+    const jaMostrado = new Set(['origem', 'email', 'e_mail', 'telefone', 'empresa', 'nome']);
+
+    // Só os RESPONDIDOS: listar os vazios transformaria o resumo numa lista de
+    // buracos, e o buraco tem lugar próprio (a aba de qualificação).
     const respondidos = (f.campos_def || [])
-      .map((c) => ({ nome: c.nome, v: (f.campos_val || {})[c.chave] }))
-      .filter((x) => x.v !== null && x.v !== undefined && String(x.v).trim() !== '')
-      .slice(0, 8);
+      .filter((c) => !jaMostrado.has(String(c.chave || '').toLowerCase()))
+      .map((c) => ({ nome: c.nome, v: valorDoCampo((f.campos_val || {})[c.chave]) }))
+      .filter((x) => x.v && x.v.trim() !== '')
+      .slice(0, 10);
 
     return '<div class="job-resumo">' +
       '<div class="job-resumo-cab">' +
@@ -6814,7 +6861,7 @@
         linha('Origem', l.origem) +
         linha('Responsável', f.responsavel_nome) +
         linha('Sub-status', l.sub_status) +
-        respondidos.map((x) => linha(x.nome, String(x.v))).join('') +
+        respondidos.map((x) => linha(x.nome, x.v)).join('') +
       '</div>' +
       // A saída pra ficha completa mora aqui: quem lê o resumo e quer mudar
       // alguma coisa não devia ter que caçar a aba.
@@ -6909,6 +6956,12 @@
   // de conversa — nunca deixa a análise do cliente anterior "grudada" na tela
   // do cliente novo. Só mexe se a seção estiver de fato aberta agora.
   let _syncToken = 0; // marca a sincronização atual (pro watchdog do spinner)
+  // ══ CACHE DO ESTADO, por conversa ═══════════════════════════════════════
+  // Reabrir a Análise na mesma conversa pagava outra ida ao servidor pra
+  // receber o mesmo retrato. Trinta segundos cobrem o vai-e-volta entre as
+  // abas sem esconder análise recém-rodada — e rodar análise limpa o cache.
+  var _estadoCache = { chave: '', dados: null, ts: 0 };
+  var _ESTADO_CACHE_MS = 30 * 1000;
   // A ficha do lead alimenta o resumo da Análise. Ela só era buscada quando o
   // consultor abria a aba CRM — então a tela mais usada da extensão abria sem
   // saber nada de quem estava do outro lado. Buscar aqui é UMA chamada, com
@@ -7005,7 +7058,13 @@
     if (trocouDeConversa()) return;
     if (!telefone) { setCorpoSecao(telaSemAnalise()); return; }
     let resp = null;
-    try { resp = await chrome.runtime.sendMessage({ type: 'estado', telefone }); } catch (e) { /* segue sem retrato */ }
+    if (_estadoCache.chave === telefone && _estadoCache.dados &&
+        (Date.now() - _estadoCache.ts) < _ESTADO_CACHE_MS) {
+      resp = _estadoCache.dados;
+    } else {
+      try { resp = await chrome.runtime.sendMessage({ type: 'estado', telefone }); } catch (e) { /* segue sem retrato */ }
+      if (resp && resp.ok) _estadoCache = { chave: telefone, dados: resp, ts: Date.now() };
+    }
     if (trocouDeConversa()) return;
     const ultima = resp && resp.ok && resp.existe && resp.ultima_analise;
     setCorpoSecao(ultima ? telaUltimaAnaliseSalvaRica(ultima, resp.total_mensagens, telefone) : telaSemAnalise());
@@ -8930,6 +8989,9 @@
   }
 
   async function rodarAnalise(forcarPdfGrandes) {
+    // A análise nova torna o retrato velho na hora: sem isto, o consultor
+    // analisaria e continuaria vendo "ainda sem análise" por até 30s.
+    _estadoCache = { chave: '', dados: null, ts: 0 };
     const reqId = novoReqId();
     // Chave provisória com o telefone SÍNCRONO do DOM (telefoneDoContato) —
     // tem que bater com o que sincronizarPainelComConversa calcula na mesma
