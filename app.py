@@ -5413,8 +5413,6 @@ def requer(escopo):
 
 
 
-@app.route('/api/whatsapp/logout', methods=['POST', 'OPTIONS'])
-@app.route('/api/whatsapp/logout', methods=['POST', 'OPTIONS'])
 @app.route('/admin/extensao/sessoes')
 @login_required
 @admin_required
@@ -18346,6 +18344,16 @@ def api_whatsapp_login():
 #
 # Movido por inteiro pelo Claude em 09/08/2026, sem alterar uma linha do corpo.
 
+# A ROTA DESTA FUNCAO TINHA SIDO ARRANCADA.
+#
+# Um script de recorte por linha levou junto o `@app.route` e o `@requer` daqui
+# e colou os dois em cima de `admin_extensao_sessoes`, 13 mil linhas acima.
+# Resultado, conferido no url_map do Flask: `POST /api/whatsapp/logout`
+# executava a pagina de admin (que e @admin_required, entao o consultor levava
+# 403), e esta funcao ficava sem rota nenhuma — o "Sair da conta" da extensao
+# nao funcionava pra ninguem.
+@app.route('/api/whatsapp/logout', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:ler')
 def api_whatsapp_logout():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
@@ -23621,7 +23629,14 @@ Escreva APENAS o texto da mensagem que o consultor deve enviar, sem aspas, sem m
     try:
         client = anthropic.Anthropic(api_key=api_key, timeout=45.0, max_retries=1)
         resp = client.messages.create(
-            model="claude-3-5-haiku-20241022",
+            # O Guilherme decidiu HAIKU 4.5 em 09/08. Estava
+            # `claude-3-5-haiku-20241022`, que e Haiku 3.5 (outubro de 2024) —
+            # modelo diferente, geracao anterior, e o preco de US$1/US$5 que
+            # embasou a decisao e o do 4.5, nao o dele.
+            #
+            # Usa a mesma constante que o resto do arquivo ja usa pra leitura
+            # de documento, entao trocar de modelo e mexer numa env, num lugar.
+            model=_CLAUDE_MODEL,
             max_tokens=800,
             system="Você retorna apenas texto limpo, sem markdown e sem aspas, contendo diretamente a mensagem que o consultor vai enviar.",
             messages=[{"role": "user", "content": prompt}]
