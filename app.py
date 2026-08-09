@@ -22056,27 +22056,45 @@ def api_whatsapp_lead_cnpj(lid):
         return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.get_json(silent=True) or {}
     cnpj = (d.get('cnpj') or '').strip()
+    empresa_nova = (d.get('empresa') or '').strip()
+    
     if len(cnpj) > 50:
         return _wa_cors(jsonify({"ok": False, "erro": "CNPJ muito longo"})), 400
     conn = db()
-    lead = conn.execute("SELECT qual_cnpj FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    lead = conn.execute("SELECT qual_cnpj, empresa FROM crm_leads WHERE id=?", (lid,)).fetchone()
     if not lead:
         close_db(conn)
         return _wa_cors(jsonify({"ok": False, "erro": "Lead não encontrado"})), 404
         
-    if lead['qual_cnpj'] and not d.get('sobrescrever'):
+    if lead['qual_cnpj'] and cnpj and not d.get('sobrescrever'):
         close_db(conn)
         return _wa_cors(jsonify({"ok": False, "erro": "cnpj_existente", "existente": lead['qual_cnpj']})), 409
 
+    if lead['empresa'] and empresa_nova and not d.get('sobrescrever') and lead['empresa'].strip() != empresa_nova:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "empresa_existente", "existente": lead['empresa']})), 409
+
     try:
-        conn.execute("UPDATE crm_leads SET qual_cnpj=?, atualizado_em=? WHERE id=?", (cnpj, _agora_sp(), lid))
-        conn.commit()
+        sets = []
+        vals = []
+        if cnpj:
+            sets.append("qual_cnpj=?")
+            vals.append(cnpj)
+        if empresa_nova:
+            sets.append("empresa=?")
+            vals.append(empresa_nova)
+            
+        if sets:
+            sets.append("atualizado_em=?")
+            vals.extend([_agora_sp(), lid])
+            conn.execute(f"UPDATE crm_leads SET {', '.join(sets)} WHERE id=?", vals)
+            conn.commit()
     except Exception as e:
         try: conn.rollback()
         except: pass
         close_db(conn)
         app.logger.error(f"[WA/CNPJ] {e}")
-        return _wa_cors(jsonify({"ok": False, "erro": "Falha ao salvar CNPJ"})), 500
+        return _wa_cors(jsonify({"ok": False, "erro": "Falha ao salvar CNPJ/Empresa"})), 500
     close_db(conn)
     return _wa_cors(jsonify({"ok": True}))
 
@@ -23469,20 +23487,34 @@ def admin_migrar_cidade_empresa():
         
     conn = db()
     try:
-        # Trava: se já migrou, retorna.
-        conn.execute("INSERT INTO meta_flags (chave) VALUES ('migrou_cidade_empresa')")
+        # Trava: se já migrou, retorna. (CRÍTICO 3)
+        conn.execute("INSERT INTO meta_flags (k) VALUES ('migrou_cidade_empresa')")
         
         # Copia empresa para empresa_antes_migracao para não perder nada
         conn.execute("UPDATE crm_leads SET empresa_antes_migracao = empresa WHERE empresa IS NOT NULL")
         
         municipios = [m['nome'].lower() for m in _municipios()]
-        leads = conn.execute("SELECT id, empresa FROM crm_leads WHERE qual_cidade IS NULL AND empresa IS NOT NULL AND empresa != ''").fetchall()
+        # Precisamos de todos os dados para o backup no crm_lead_excluido
+        leads = conn.execute("SELECT * FROM crm_leads WHERE qual_cidade IS NULL AND empresa IS NOT NULL AND empresa != ''").fetchall()
         
         migrados = 0
         mantidos = 0
+        
+        import json
+        usuario_id = getattr(g, 'usuario_id', session.get('user_id'))
+        
         for l in leads:
             emp = l['empresa'].strip()
             if emp.lower() in municipios:
+                # CRÍTICO 1: Backup para não perder a informação original antes de apagar
+                backup = {"lead": dict(l)}
+                conn.execute("""INSERT INTO crm_lead_excluido 
+                    (lead_id, nome, telefone, telefone_norm, etapa, origem, motivo, dados_json, excluido_por_id, excluido_em) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (l['id'], l['nome'], l['telefone'], l['telefone_norm'], l['etapa'], l['origem'],
+                     "migracao cidade/empresa", json.dumps(backup, default=str), 
+                     usuario_id, _agora_sp()))
+                     
                 conn.execute("UPDATE crm_leads SET qual_cidade = ?, empresa = NULL WHERE id = ?", (emp, l['id']))
                 migrados += 1
             else:
@@ -23496,7 +23528,7 @@ def admin_migrar_cidade_empresa():
         if 'UNIQUE' in str(e).upper() or 'duplicate key' in str(e).lower():
             return jsonify({"ok": False, "erro": "Migração já foi executada"}), 400
         app.logger.error(f"[MIGRACAO] Erro: {e}")
-        return jsonify({"ok": False, "erro": "Erro na migração"}), 500
+        return jsonify({"ok": False, "erro": "erro_interno"}), 500
     finally:
         close_db(conn)
 
