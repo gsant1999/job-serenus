@@ -2812,3 +2812,32 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
   border-color: color-mix(in srgb, var(--job-acento) 55%, transparent);
   color: var(--job-txt);
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   BOTÃO SECUNDÁRIO PRECISA PARECER BOTÃO PARADO
+
+   "Não é lead" e "Ver no CRM" ficavam com fundo transparente e uma borda
+   fininha: em repouso liam como texto, e só viravam botão quando o mouse
+   passava por cima. Num painel estreito, cheio de rótulo e valor, isso deixa
+   a pessoa em dúvida sobre o que é clicável — e quem está no celular ou no
+   teclado nunca tem o hover pra descobrir.
+
+   Ganham superfície própria e borda visível em repouso. Continuam abaixo do
+   principal na hierarquia (que é cheio de cor); a diferença agora é de peso,
+   não de "existe ou não existe".
+   ══════════════════════════════════════════════════════════════════════════ */
+.job-nao-lead, .job-ficha-abrir {
+  background: color-mix(in srgb, var(--job-txt) 6%, transparent);
+  border-color: color-mix(in srgb, var(--job-txt) 16%, transparent);
+  color: var(--job-txt);
+  box-shadow: var(--job-elev-1);
+}
+.job-nao-lead:hover {
+  background: var(--job-danger-bg); border-color: var(--job-danger); color: var(--job-danger);
+}
+.job-ficha-abrir:hover {
+  background: color-mix(in srgb, var(--job-acento) 14%, transparent);
+  border-color: var(--job-acento); color: var(--job-txt);
+}
+.job-nao-lead:active, .job-ficha-abrir:active { transform: scale(.97); }

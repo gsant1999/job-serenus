@@ -3752,7 +3752,11 @@
       // como um número solto de 15 dígitos, sem hierarquia e sem servir pra
       // nada. Agora a linha inteira é o atalho pro lead no CRM do JOB: quem
       // olha o vínculo é justamente quem quer abrir a ficha completa.
-      const lid = (l && l.id) ? (_SITE_BASE_URL_EXT + '/crm?lead=' + l.id) : '';
+      // DESTINOS DIFERENTES, DE PROPÓSITO. O vínculo leva à FICHA do lead
+      // (/lead/<id>), que é a página com tudo dele; o "Abrir no JOB" do rodapé
+      // leva ao QUADRO do CRM. Mandar os dois pro mesmo lugar era ter dois
+      // botões fazendo a mesma coisa em telas diferentes.
+      const lid = (l && l.id) ? (_SITE_BASE_URL_EXT + '/lead/' + l.id) : '';
       const dentro =
         '<span class="job-vinc-tag ' + (eLid ? 'lid' : 'num') + '">' + (eLid ? '@lid' : 'nº') + '</span>' +
         '<span class="job-vinc-id">' + esc(curto) + '</span>' +
@@ -3760,7 +3764,7 @@
         (lid ? '<span class="job-vinc-seta">' + _svgIco('chevron', 13) + '</span>' : '');
       return lid
         ? '<a class="job-vinc ok clicavel" href="' + esc(lid) + '" target="_blank" rel="noopener" ' +
-          'title="Abrir este lead no CRM do JOB">' + dentro + '</a>'
+          'title="Abrir a ficha completa deste lead no JOB">' + dentro + '</a>'
         : '<div class="job-vinc ok">' + dentro + '</div>';
     }
     if (!atual) {
@@ -3910,7 +3914,7 @@
           // da vista: pra achar era preciso rolar ate o fim de uma coluna
           // estreita. Aqui fica junto do Salvar, que e onde a mao ja esta.
           '<a class="job-ficha-abrir" id="job-ficha-abrir-crm" href="#" target="_blank" rel="noopener">' +
-            'Abrir no JOB</a>' +
+            'Ver no CRM</a>' +
           '<span class="job-ficha-aviso" id="job-ficha-aviso"></span>' +
         '</div>' +
         (aba === 'dados' ? _blocoNomeContato() : '') +
