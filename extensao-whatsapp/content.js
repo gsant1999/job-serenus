@@ -8238,9 +8238,65 @@
   // Se o registro for antigo (sem sugestoes_json) ou vier vazio, cai de volta
   // na tela rasa (telaUltimaAnaliseSalva) em vez de mostrar um painel rico
   // cheio de seções vazias.
+  // ── COMPARACAO COM A ANALISE ANTERIOR ────────────────────────────────────
+  //
+  // Pedido dele, e ele tem razao: "nao fala se teve analises anteriores e se
+  // houve melhora ou piora". Um score de 640 sozinho nao diz nada — 640 depois
+  // de 720 e um lead esfriando, e 640 depois de 480 e um lead esquentando. Sao
+  // conversas opostas com o mesmo numero na tela.
+  //
+  // O retrato anterior fica guardado por telefone no armazenamento local: ele
+  // ja veio do servidor quando a tela abriu, entao comparar nao custa chamada
+  // nenhuma. Guardo score, data e quantas mensagens tinham sido lidas.
+  const _CHAVE_ANT = 'jobAnaliseAnterior';
+  // Retrato anterior ja lido, pra tela desenhar sem virar assincrona.
+  let _antParaTela = null;
+  async function _analiseAnteriorLer(tel) {
+    if (!tel) return null;
+    try {
+      const g = await _safeStorageGet([_CHAVE_ANT]);
+      return ((g && g[_CHAVE_ANT]) || {})[String(tel).replace(/\D/g, '')] || null;
+    } catch (e) { return null; }
+  }
+  async function _analiseAnteriorGravar(tel, r, totalMsgs) {
+    const d = String(tel || '').replace(/\D/g, '');
+    if (!d || !r || r.score == null) return;
+    try {
+      const g = await _safeStorageGet([_CHAVE_ANT]);
+      const mapa = (g && g[_CHAVE_ANT]) || {};
+      mapa[d] = { score: r.score, quando: new Date().toISOString(), msgs: totalMsgs || 0 };
+      // Teto: uma aba aberta o dia inteiro passa por muitas conversas, e isto
+      // e armazenamento local — 300 contatos e memoria de sobra pra comparar.
+      const chaves = Object.keys(mapa);
+      if (chaves.length > 300) chaves.slice(0, chaves.length - 300).forEach((k) => delete mapa[k]);
+      await new Promise((ok) => chrome.storage.local.set({ [_CHAVE_ANT]: mapa }, ok));
+    } catch (e) {}
+  }
+  // A faixa que abre o resultado: de quando e esta leitura, o que mudou desde a
+  // anterior, e quantas mensagens novas entraram nela.
+  function _faixaComparacao(ant, r, totalMsgs, quando) {
+    const partes = [];
+    partes.push(quando ? 'Lida em ' + esc(fmtDataHora(quando)) : 'Lida agora');
+    if (totalMsgs) partes.push(totalMsgs + ' mensagens');
+    let delta = '';
+    if (ant && ant.score != null && r && r.score != null) {
+      const d = r.score - ant.score;
+      const novas = totalMsgs && ant.msgs ? Math.max(0, totalMsgs - ant.msgs) : 0;
+      partes.push('anterior ' + ant.score + ' em ' + esc(fmtDataHora(ant.quando)));
+      if (novas) partes.push(novas + ' mensagem(ns) nova(s) desde então');
+      delta = '<span class="job-delta ' + (d > 0 ? 'sobe' : d < 0 ? 'desce' : 'igual') + '">' +
+        (d > 0 ? '+' : '') + d + '</span>';
+    } else {
+      partes.push('primeira leitura desta conversa');
+    }
+    return '<div class="job-comparacao">' + delta +
+      '<span class="job-comparacao-txt">' + partes.join(' · ') + '</span></div>';
+  }
+
   function telaUltimaAnaliseSalvaRica(ua, totalMsgs, telefone) {
     if (!ua.extracao && !ua.ia && !(ua.sugestoes || []).length) return telaUltimaAnaliseSalva(ua, totalMsgs);
-    return '<div class="job-ultima-analise-tag">Última análise salva · ' + esc(fmtDataHora(ua.criado_em)) + '</div>' +
+    return '<div class="job-ultima-analise-tag">Última análise salva</div>' +
+      _faixaComparacao(_antParaTela, ua, totalMsgs, ua.criado_em) +
       renderResultado(ua, ua.lead ? ua.lead.nome : '', telefone, totalMsgs) +
       '<button class="job-analisar-btn" id="job-analisar-btn" style="margin-top:10px;">Analisar de novo</button>';
   }
@@ -8296,6 +8352,8 @@
 
   async function sincronizarPainelComConversa() {
     if (_secaoAtiva !== 'analise') return;
+    // Ele chegou na aba: o aviso de "tem coisa nova aqui" cumpriu o papel.
+    try { _trilhoPonto('analise', false); } catch (e) {}
     // Puxa a ficha em segundo plano: não bloqueia nada e redesenha quando
     // chega. Sem await de propósito — a análise não pode esperar o CRM.
     _garantirFichaParaResumo();
@@ -8332,7 +8390,10 @@
         // O botão "Analisar de novo" tem que aparecer TAMBÉM aqui (resultado da
         // sessão atual, em memória) — antes só vinha na análise buscada do
         // servidor, então quem acabou de analisar ficava sem como reanalisar.
-        setCorpoSecao(renderResultado(doConversaAtual.resultado, doConversaAtual.nome, doConversaAtual.telefone, doConversaAtual.totalMsgs) +
+        setCorpoSecao(
+          _faixaComparacao(doConversaAtual._anterior, doConversaAtual.resultado,
+                           doConversaAtual.totalMsgs, doConversaAtual.terminadoEm) +
+          renderResultado(doConversaAtual.resultado, doConversaAtual.nome, doConversaAtual.telefone, doConversaAtual.totalMsgs) +
           '<button class="job-analisar-btn" id="job-analisar-btn" style="margin-top:10px;">Analisar de novo</button>');
         ligarBotaoCopiar();
       } else if (doConversaAtual.status === 'erro') {
@@ -8376,6 +8437,9 @@
     }
     if (trocouDeConversa()) return;
     const ultima = resp && resp.ok && resp.existe && resp.ultima_analise;
+    // O retrato anterior vem do armazenamento local — sem chamada nenhuma.
+    _antParaTela = await _analiseAnteriorLer(telefone);
+    if (trocouDeConversa()) return;
     setCorpoSecao(ultima ? telaUltimaAnaliseSalvaRica(ultima, resp.total_mensagens, telefone) : telaSemAnalise());
     if (ultima) ligarBotaoCopiar();
   }
@@ -8405,6 +8469,23 @@
       ? 'Score ' + (a.resultado && a.resultado.score != null ? a.resultado.score : '—') + '/1000'
       : (a.erro || 'Erro desconhecido');
     try { chrome.runtime.sendMessage({ type: 'notificar', titulo, mensagem: msg }); } catch (e) { /* ignore */ }
+    // O AVISO NAO PODE DEPENDER DA NOTIFICACAO DO CHROME.
+    //
+    // Ele disse: "as vezes termina a analise e nao avisa nada". Notificacao do
+    // sistema pode estar desligada, silenciada ou perdida atras de outra
+    // janela — e ai a analise termina em silencio absoluto. O ponto no trilho
+    // e nosso, aparece dentro do WhatsApp, e some quando ele abre a aba.
+    try { _trilhoPonto('analise', true); } catch (e) {}
+    // Se ele estiver OLHANDO outra aba do painel, uma faixa diz o que ficou
+    // pronto e leva pra la em um clique.
+    try {
+      if (_secaoAtiva && _secaoAtiva !== 'analise') {
+        _dizerNoRodape(a.status === 'ok'
+          ? 'Análise de ' + (a.nome || 'lead') + ' pronta · score ' +
+            ((a.resultado && a.resultado.score != null) ? a.resultado.score : '—')
+          : 'A análise de ' + (a.nome || 'lead') + ' falhou');
+      }
+    } catch (e) {}
   }
 
   // ═══════════════ Seção Mensagens: biblioteca de modelos ═══════════════
@@ -10508,6 +10589,11 @@
         // o painel usa pra mostrar o aviso + botão "avaliar mesmo assim".
         if (!forcarPdfGrandes && pdfsPulados.length) resp._pulados = pdfsPulados;
         entrada.resultado = resp;
+        entrada.terminadoEm = new Date().toISOString();
+        // Lê o retrato ANTERIOR antes de gravar o novo por cima — é ele que
+        // permite dizer "subiu 85 desde a leitura de terça".
+        entrada._anterior = await _analiseAnteriorLer(entrada.telefone || telefone);
+        await _analiseAnteriorGravar(entrada.telefone || telefone, resp, entrada.totalMsgs);
       }
       atualizarPilula();
       notificarConclusao(entrada);

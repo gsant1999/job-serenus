@@ -3739,3 +3739,20 @@ body[data-job-tema="claro"] .job-cot-prev-txt { color-scheme: light; }
 /* A saida pro texto muito personalizado: colar e escrever no proprio WhatsApp. */
 .job-cot-prev-dica { padding: 0 10px 11px; font-family: var(--job-ui); font-size: 10.5px;
   line-height: 1.45; color: var(--job-txt-fraco); }
+
+
+/* ── COMPARACAO COM A ANALISE ANTERIOR ─────────────────────────────────────
+   Um score sozinho nao diz nada: 640 depois de 720 e um lead esfriando, e 640
+   depois de 480 e um lead esquentando. Sao conversas opostas com o mesmo
+   numero na tela. */
+.job-comparacao { display: flex; align-items: center; gap: 9px; margin-bottom: 10px;
+  padding: 8px 11px; border-radius: 10px;
+  background: var(--job-vidro-leve); border: 1px solid var(--job-borda); }
+.job-comparacao-txt { font-family: var(--job-ui); font-size: 10.5px; line-height: 1.45;
+  color: var(--job-txt-fraco); }
+.job-delta { flex: none; padding: 2px 8px; border-radius: 999px;
+  font-family: var(--job-ui); font-size: 12px; font-weight: 800;
+  font-variant-numeric: tabular-nums; }
+.job-delta.sobe { background: var(--job-sobre-acento); color: var(--job-acento); }
+.job-delta.desce { background: var(--job-sobre-danger); color: #ff8f8f; }
+.job-delta.igual { background: var(--job-vidro); color: var(--job-txt-fraco); }
