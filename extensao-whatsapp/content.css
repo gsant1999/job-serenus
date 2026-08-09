@@ -2527,3 +2527,59 @@ details.job-cfg-antigo > summary:hover { opacity: 1; }
   .job-copy:active, .job-cot-bt-copiar:active, .job-modelo-copiar:active,
   .job-mini-btn:active, .job-cfg-bt:active { transform: none; }
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CHIPS — quatro classes, três formas, dois significados
+
+   `.job-chip` é ETIQUETA (só informa, não clica). `.job-fchip` e
+   `.job-nomec-chip` são FILTRO (clicam e ligam/desligam). Estavam com raios
+   diferentes (8, 20 e 999px), pesos diferentes e fundos diferentes — e o de
+   filtro, quando desligado, tinha fundo preenchido, o que faz um filtro
+   inativo parecer ativo.
+
+   Aqui os dois papéis ficam claros: etiqueta é discreta e sem reação ao
+   mouse; filtro é contornado quando desligado e cheio quando ligado, e
+   responde ao toque. Quem não clica não deve parecer que clica.
+   ══════════════════════════════════════════════════════════════════════════ */
+.job-chip, .job-fchip, .job-nomec-chip {
+  font-family: var(--job-ui);
+  border-radius: 999px;
+  letter-spacing: var(--job-tk-xs);
+  white-space: nowrap;
+}
+/* ETIQUETA — informa e cala a boca. */
+.job-chip {
+  font-size: 10.5px; font-weight: 600; padding: 3px 9px;
+  border: 1px solid var(--job-borda);
+  background: color-mix(in srgb, var(--job-txt) 5%, transparent);
+  color: var(--job-txt-fraco);
+}
+/* FILTRO — contorno quando desligado, cheio quando ligado. */
+.job-fchip, .job-nomec-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 600; padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco);
+  cursor: pointer;
+  transition: background var(--job-t-rapido) ease, color var(--job-t-rapido) ease,
+              border-color var(--job-t-rapido) ease, transform var(--job-t-toque) ease-out;
+}
+.job-fchip:hover, .job-nomec-chip:hover {
+  color: var(--job-txt);
+  border-color: color-mix(in srgb, var(--job-acento) 50%, transparent);
+}
+.job-fchip:active, .job-nomec-chip:active { transform: scale(.95); }
+.job-fchip.on, .job-nomec-chip.on {
+  background: var(--job-acento); border-color: var(--job-acento);
+  color: var(--job-sobre-acento); font-weight: 700;
+}
+.job-fchip:focus, .job-nomec-chip:focus { outline: none; }
+.job-fchip:focus-visible, .job-nomec-chip:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
+/* O ícone dentro do chip acompanha o texto, e não fica com traço mais grosso
+   que o do resto da extensão. */
+.job-fchip svg { stroke-width: 1.9; }
+@media (prefers-reduced-motion: reduce) {
+  .job-fchip:active, .job-nomec-chip:active { transform: none; }
+}
