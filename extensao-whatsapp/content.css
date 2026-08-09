@@ -3193,34 +3193,110 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 
 
 /* ══════════════════════════════════════════════════════════════════════════
-   O LOGO NO RODAPÉ SEGUE O TEMA DO WHATSAPP, NÃO O NOSSO
+   O LOGO DO RODAPÉ SEGUE O TEMA DO WHATSAPP — MEDIDO, NÃO ADIVINHADO
 
-   O botão do menu vive DENTRO do rodapé do WhatsApp — quem manda no fundo
-   atrás dele é o tema DELES, não o da extensão. O "JOB" usava a cor do nosso
-   trilho (clara, porque o trilho é escuro sempre), e no WhatsApp claro isso
-   virava texto branco sobre fundo claro: sumia.
+   O botão vive dentro do rodapé DELES, então quem manda no fundo atrás dele é
+   o tema do WhatsApp. O "JOB" usava a cor do nosso trilho (clara, porque o
+   trilho é escuro sempre) e no WhatsApp claro sumia.
 
-   O WhatsApp Web marca o tema escuro com `class="dark"` no <html>. Uso os
-   dois sinais — a classe deles e a preferência do sistema — porque a classe
-   pode mudar de nome num redesenho e a preferência não some.
+   A primeira tentativa lia a classe `dark` do <html> e o prefers-color-scheme.
+   Os dois são palpite: a classe pode mudar de nome num redesenho deles, e a
+   preferência do sistema não diz nada quando a pessoa escolheu tema claro no
+   WhatsApp com o computador no escuro.
 
-   Só vale pro logo DENTRO do rodapé. No trilho e no painel, que são
-   superfícies nossas, ele continua seguindo o nosso tema.
+   Agora o JS MEDE a cor de fundo real do rodapé e põe `job-bc-claro` ou
+   `job-bc-escuro` aqui. Funciona com qualquer marcação, hoje e depois de
+   qualquer redesenho — a pergunta que ele faz é a mesma que o olho faz.
    ══════════════════════════════════════════════════════════════════════════ */
-.job-bc-menu-bt .job-logo-txt { color: #10231d; }
-html.dark .job-bc-menu-bt .job-logo-txt,
-html[data-theme="dark"] .job-bc-menu-bt .job-logo-txt { color: #f2f7f5; }
-@media (prefers-color-scheme: dark) {
-  .job-bc-menu-bt .job-logo-txt { color: #f2f7f5; }
-}
-/* E se o WhatsApp estiver CLARO com o sistema em escuro, a classe deles ganha
-   — ela é o estado real da tela, e a preferência é só um palpite. */
-html:not(.dark):not([data-theme="dark"]) .job-bc-menu-bt .job-logo-txt { color: #10231d; }
+.job-bc-escuro .job-bc-menu-bt .job-logo-txt { color: #f2f7f5; }
+.job-bc-claro  .job-bc-menu-bt .job-logo-txt { color: #10231d; }
 
-/* O anel do botão também: sobre fundo claro ele precisa fechar mais o tom pra
-   não virar um borrão verde-claro sobre branco. */
-html:not(.dark):not([data-theme="dark"]) .job-bc-menu-bt {
-  background: color-mix(in srgb, #0f9d76 16%, transparent);
-  border-color: color-mix(in srgb, #0f9d76 70%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, #0f9d76 12%, transparent), 0 2px 8px rgba(0,0,0,.14);
+/* No fundo claro o anel fecha o tom, senão vira um borrão verde-claro sobre
+   branco; no escuro ele abre, senão some. */
+.job-bc-claro .job-bc-menu-bt {
+  background: color-mix(in srgb, #0f9d76 15%, transparent);
+  border-color: color-mix(in srgb, #0f9d76 72%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, #0f9d76 11%, transparent), 0 2px 8px rgba(0,0,0,.14);
 }
+.job-bc-claro .job-bc-menu-bt:hover {
+  background: color-mix(in srgb, #0f9d76 26%, transparent); border-color: #0f9d76;
+}
+.job-bc-claro .job-bc-menu-bt[aria-expanded="true"] { background: #0f9d76; border-color: #0f9d76; }
+.job-bc-claro .job-bc-menu-bt[aria-expanded="true"] .job-logo-txt { color: #ffffff; }
+.job-bc-escuro .job-bc-menu-bt[aria-expanded="true"] .job-logo-txt { color: #06231b; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   COMPARATIVO — a tela existe pra COMPARAR PREÇO
+
+   O que ela era: uma pilha de linhas iguais, nome à esquerda e valor à
+   direita, todas com o mesmo peso. Com sete planos de três operadoras o olho
+   não tem onde pousar, e a pergunta que trouxe o consultor aqui — "qual é o
+   mais barato que serve?" — só se responde lendo linha por linha.
+
+   O que preservei, porque já estava certo e é como o Painel do Corretor e a
+   tela de cotação do JOB fazem: gaveta por operadora com logo e resumo, as
+   etiquetas comuns extraídas pro topo do grupo, e "sem preço" visível em vez
+   de escondido ou virando zero.
+
+   O que mudou: o PREÇO vira a âncora da linha, e o menor de todos se anuncia.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* O valor ganha corpo e alinhamento tabular: números que não alinham na
+   coluna não se comparam de relance, e comparar é o trabalho aqui. */
+.job-cot-res {
+  gap: 12px; padding: 12px 13px; border-radius: 12px;
+  border-left: 3px solid transparent;
+  transition: border-color var(--job-t-rapido) ease, background var(--job-t-rapido) ease;
+}
+.job-cot-res-n {
+  font-family: var(--job-ui); font-size: 13px; font-weight: 620;
+  letter-spacing: var(--job-tk-md); line-height: 1.3;
+}
+.job-cot-res-v {
+  font-family: var(--job-ui); font-size: 16px; font-weight: 750;
+  letter-spacing: -.02em; font-variant-numeric: tabular-nums;
+}
+
+/* O MENOR PREÇO SE ANUNCIA. É a primeira coisa que o consultor procura, e era
+   a única que a tela não dizia. Faixa no acento e uma etiqueta curta — não um
+   fundo cheio, que faria os outros parecerem descartados. */
+.job-cot-res.melhor {
+  border-left-color: var(--job-acento);
+  background: color-mix(in srgb, var(--job-acento) 8%, var(--job-bg2));
+}
+.job-cot-res.melhor .job-cot-res-v { color: var(--job-acento); }
+.job-cot-res.melhor .job-cot-res-n::after {
+  content: "menor preço";
+  display: inline-block; margin-left: 8px; vertical-align: middle;
+  font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 999px;
+  background: var(--job-acento); color: var(--job-sobre-acento);
+}
+
+/* Sem preço não some e não vira zero — mas também não pode parecer erro:
+   plano sem preço no Painel é comum e o consultor precisa saber que existe. */
+.job-cot-res.sem { opacity: .62; border-left-color: transparent; }
+.job-cot-res.sem .job-cot-res-v { font-size: 12.5px; letter-spacing: 0; }
+
+/* GAVETA: o resumo fechado é o que faz três operadoras caberem numa tela. */
+.job-cot-gaveta-n {
+  font-family: var(--job-ui); font-weight: 680; letter-spacing: var(--job-tk-md);
+  font-size: 13.5px; color: var(--job-txt);
+}
+.job-cot-gaveta-r {
+  font-family: var(--job-ui); font-size: 11.5px; color: var(--job-txt-fraco);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.job-cot-gaveta-t { padding: 11px 12px; }
+.job-cot-gaveta-c { padding: 0 10px 10px; }
+
+/* As etiquetas comuns do grupo ficam mais discretas que as do plano: elas
+   descrevem o CONJUNTO, e repetir peso faria concorrer com o preço. */
+.job-cot-tags-topo { margin: 2px 0 10px; }
+.job-cot-tag {
+  font-family: var(--job-ui); font-size: 10.5px; font-weight: 600;
+  letter-spacing: var(--job-tk-xs); padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--job-borda); background: transparent; color: var(--job-txt-fraco);
+}
+.job-cot-tag.ok { border-color: color-mix(in srgb, var(--job-sucesso) 45%, transparent); color: var(--job-sucesso); }
+.job-cot-tag.aviso { border-color: var(--job-warn-bd); color: var(--job-warn); }

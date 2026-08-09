@@ -2940,12 +2940,56 @@
         logoJobHTML() + '</button>';
     pe.insertBefore(box, pe.firstChild);
 
+    // ══ O TEMA QUEM DIZ É O PIXEL, NÃO A CLASSE ═══════════════════════
+    //
+    // O botão vive dentro do rodapé DELES, então quem manda no fundo atrás
+    // dele é o tema do WhatsApp. Eu tentei ler a classe `dark` do <html> e a
+    // preferência do sistema — os dois são palpite: a classe pode mudar de
+    // nome num redesenho deles, e a preferência do sistema não diz nada se a
+    // pessoa escolheu tema claro no WhatsApp com o Mac no escuro.
+    //
+    // O que não erra é MEDIR: pego a cor de fundo real do rodapé, calculo a
+    // luminância e decido. Funciona com qualquer marcação, hoje e depois de
+    // qualquer redesenho, porque a pergunta que eu faço é a mesma que o olho
+    // faz — "esse fundo é claro ou escuro?".
+    _bcAplicarTemaDoWhats(box, pe);
+
     const bt = box.querySelector('#job-bc-menu-bt');
     bt.addEventListener('click', (ev) => {
       ev.stopPropagation();
       if (box._bcMenu && box._bcMenu.isConnected) { _bcMenuFechar(box); return; }
       _bcMenuAbrir(box, bt);
     });
+  }
+
+  // Sobe pelos ancestrais até achar quem realmente pinta o fundo: o rodapé
+  // costuma ser transparente e herdar de um pai.
+  function _corDeFundoReal(el) {
+    let n = el;
+    for (let i = 0; i < 8 && n; i++) {
+      const c = getComputedStyle(n).backgroundColor || '';
+      const m = c.match(/rgba?\(([^)]+)\)/);
+      if (m) {
+        const p = m[1].split(',').map((x) => parseFloat(x));
+        const a = p.length > 3 ? p[3] : 1;
+        if (a > 0.2) return { r: p[0], g: p[1], b: p[2] };
+      }
+      n = n.parentElement;
+    }
+    return null;
+  }
+
+  function _bcAplicarTemaDoWhats(box, pe) {
+    try {
+      const c = _corDeFundoReal(pe) || _corDeFundoReal(document.body);
+      if (!c) return;   // não deu pra medir: fica no padrão escuro
+      // Luminância percebida (Rec. 709): verde pesa mais que vermelho, e
+      // vermelho mais que azul — média simples erraria em fundo azulado, que
+      // é justamente o do WhatsApp escuro.
+      const lum = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255;
+      box.classList.toggle('job-bc-claro', lum > 0.5);
+      box.classList.toggle('job-bc-escuro', lum <= 0.5);
+    } catch (e) { /* medir é ganho, não requisito */ }
   }
 
   function _bcMenuFechar(box) {
