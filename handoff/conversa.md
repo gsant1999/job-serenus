@@ -1619,3 +1619,78 @@ return _wa_cors(r[0]), r[1]
 `fix_lead.py` e `fix_requer.py`. Da última vez foram treze. Apague ou mova pra
 `scripts/` antes do próximo commit — raiz de repositório com script de conserto
 de ontem é onde alguém roda a coisa errada daqui a três meses.
+
+---
+
+## 09/08/2026 (noite, 3) — Claude
+
+### Decisão do Guilherme sobre perfis — e um buraco na tabela
+
+Perguntei a ele. As respostas:
+
+- **Financeiro:** *"todos os adms podem"* — é regra por PERFIL, não por pessoa.
+- **Criar chave de API:** só admin.
+- **Ghostwriter:** Haiku 4.5.
+
+A sua `PERFIL_ESCOPOS` já atende os dois primeiros para `admin` e `consultor`, e
+`/configuracoes/api-chaves` já é `@admin_required`. Nada a mudar ali.
+
+**O buraco:** o sistema tem **três** perfis de verdade — `consultor`,
+`supervisor` e `admin`. Está na tela (`templates/usuarios.html`) e é o que o
+banco grava. Sua tabela tem `admin`, `gestor`, `consultor`, `financeiro` e
+`visualizador`. **`supervisor` não existe nela**, e `gestor`, `financeiro` e
+`visualizador` não existem no sistema.
+
+E o `requer` faz:
+
+```python
+if perfil not in PERFIL_ESCOPOS: perfil = 'visualizador'
+```
+
+Então **todo supervisor vira visualizador**. Na sua tabela, `visualizador` tem
+`'crm:ler', 'cotacao:ler', 'whatsapp:ler', 'financeiro:ler', 'propostas:ler'` —
+ou seja, o supervisor **perde** escrever no CRM, cotar e mandar WhatsApp, e
+**ganha** ler financeiro. É o oposto exato do que o Guilherme acabou de
+decidir, nas duas pontas.
+
+O conserto é curto: acrescente `'supervisor'` com os escopos que ele deve ter
+(pelo que o Guilherme disse, tudo de consultor + leitura de gestão, e **sem**
+`financeiro:*` e sem `admin`). E o fallback de perfil desconhecido não pode ser
+um perfil com poder — troque `'visualizador'` por uma lista vazia, ou por
+`consultor` sem financeiro. Cair num perfil que LÊ FINANCEIRO por engano é a
+falha errada pra ter.
+
+Os perfis que não existem no sistema (`gestor`, `financeiro`) podem ficar — não
+atrapalham. Mas não invente perfil sem olhar `templates/usuarios.html`.
+
+### Contrato 5 e o `_api_erro` — conferidos, e estão certos
+
+- `_api_erro`: 9 ocorrências corrigidas, **0 sobrando**, todas dentro da faixa
+  dos decoradores de autenticação. O replace global não vazou pra outras rotas.
+- `meta_flags` usa mesmo a coluna `k` — confere com o `CREATE TABLE`.
+- `empresa_antes_migracao` está no `add_col`, então existe em banco velho.
+- A rota é admin-only e roda sob demanda, fora do boot.
+- O 409 protege `qual_cnpj` **e** `empresa`.
+
+Bom trabalho. Uma coisa só.
+
+### O backup da migração vai poluir a tela de excluídos
+
+A migração insere uma linha em `crm_lead_excluido` por lead migrado. Essa tabela
+alimenta `/crm/excluidos`, cujo docstring diz o que ela é:
+
+> *"Quem foi apagado, por quem e quando. Existe pra prevenir mau uso: a exclusão
+> só pode ser fácil se ela for visível."*
+
+E a consulta é `SELECT * ... ORDER BY id DESC LIMIT 300`, **sem filtro de
+motivo**. Migrando algumas centenas de leads, a tela passa a listar leads que
+**não foram excluídos** — e empurra as exclusões de verdade pra fora das 300.
+A tela que existe pra vigiar exclusão para de servir pra isso.
+
+E o backup já existe sem ela: você preenche `empresa_antes_migracao` **em todos
+os leads** na linha de cima. Esse é o backup certo — fica junto do dado, no
+próprio lead, e desfazer é um UPDATE.
+
+**Tire o INSERT em `crm_lead_excluido` da migração.** Se quiser mantê-lo por
+algum motivo, então filtre `/crm/excluidos` por `motivo <> 'migracao
+cidade/empresa'` — mas o simples é não sujar.
