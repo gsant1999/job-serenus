@@ -109,7 +109,17 @@ function painel(){
    +     '<button class="job-analisar-btn">Tentar de novo</button></div>'
    +   '<div class="job-sem-analise"><div class="job-carregando"></div>'
    +     '<div class="job-sem-analise-txt">Montando sua fila…</div></div>'
-   + '</div></div>';
+   + '</div>'
+   // A folha de confirmação, aberta, pra dar pra olhar sem clicar em nada.
+   + '<div class="job-folha perigo on"><div class="job-folha-fundo"></div>'
+   +   '<div class="job-folha-caixa"><div class="job-folha-puxador"></div>'
+   +     '<div class="job-folha-t">Marcar Mauricio Fiorotto como não é lead?</div>'
+   +     '<div class="job-folha-d">O JOB para de ler esta conversa e nunca mais cria lead dela. '
+   +       'Serve pra amigo, família, fornecedor — quem não é cliente.\n\nDá pra desfazer no JOB, em Leads excluídos.</div>'
+   +     '<button class="job-folha-ok">Marcar como pessoal</button>'
+   +     '<button class="job-folha-nao">Cancelar</button>'
+   +   '</div></div>'
+   + '</div>';
 }
 
 const CONV = [['Boa tarde, tudo bem?',0],['Tudo! Me manda os valores?',1],['Claro, dois minutos',0],['Obrigado 🙏',1],['Vou te mandar o comparativo agora',0]];

@@ -1344,7 +1344,10 @@
       }
     });
     document.getElementById('job-trilho-desligar-btn').addEventListener('click', async () => {
-      if (!confirm('Desligar a extensão JOB nesta aba do WhatsApp? Pra ligar de novo, use o popup da extensão (ícone JOB na barra do Chrome) e dê F5.')) return;
+      if (!await _confirmar({
+        titulo: 'Desligar o JOB nesta aba?',
+        texto: 'O painel some deste WhatsApp Web. Pra ligar de novo, use o ícone do JOB na barra do Chrome e dê F5.',
+        ok: 'Desligar', perigo: true })) return;
       _safeStorageSet({ extensaoAtiva: false });
       const t = document.getElementById('job-trilho'); if (t) t.remove();
       const p = document.getElementById('job-painel-doc'); if (p) p.remove();
@@ -1609,10 +1612,11 @@
     if (iem) setTimeout(() => { try { iem.focus(); } catch (e) {} }, 120);
 
     const bo = document.getElementById('job-portao-off');
-    if (bo) bo.addEventListener('click', () => {
-      if (!confirm('Desligar a extensão do JOB neste computador?\n\n' +
-                   'O painel some do WhatsApp Web. Pra voltar, ligue de novo no ' +
-                   'ícone do JOB na barra do Chrome.')) return;
+    if (bo) bo.addEventListener('click', async () => {
+      if (!await _confirmar({
+        titulo: 'Desligar o JOB neste computador?',
+        texto: 'O painel some do WhatsApp Web. Pra voltar, ligue de novo no ícone do JOB na barra do Chrome.',
+        ok: 'Desligar', perigo: true })) return;
       _safeStorageSet({ extensaoAtiva: false });
       _fecharPortao();
       location.reload();
@@ -3774,10 +3778,12 @@
     if (!b) return;
     b.addEventListener('click', async () => {
       const nome = nomeDoContato() || 'esta conversa';
-      if (!confirm('Marcar "' + nome + '" como NÃO É LEAD?\n\n'
-                 + 'O JOB para de ler esta conversa e nunca mais cria lead dela.\n'
-                 + 'Serve pra amigo, família, fornecedor — quem não é cliente.\n\n'
-                 + 'Dá pra desfazer no JOB, em Leads excluídos.')) return;
+      if (!await _confirmar({
+        titulo: 'Marcar ' + nome + ' como não é lead?',
+        texto: 'O JOB para de ler esta conversa e nunca mais cria lead dela. '
+             + 'Serve pra amigo, família, fornecedor — quem não é cliente.\n\n'
+             + 'Dá pra desfazer no JOB, em Leads excluídos.',
+        ok: 'Marcar como pessoal', perigo: true })) return;
       b.disabled = true; const r0 = b.textContent; b.textContent = 'Marcando…';
       const aviso = document.getElementById('job-ficha-aviso');
       const dizer = (t) => { if (aviso) aviso.textContent = t; };
@@ -7041,7 +7047,10 @@
   }
 
   async function excluirModelo(id) {
-    if (!confirm('Excluir este modelo?')) return;
+    if (!await _confirmar({
+      titulo: 'Excluir este modelo?',
+      texto: 'Ele sai da sua biblioteca em todos os aparelhos. Não dá pra desfazer.',
+      ok: 'Excluir', perigo: true })) return;
     const resp = await chrome.runtime.sendMessage({ type: 'excluir_modelo', id });
     if (!resp || !resp.ok) { alert((resp && resp.erro) || 'Erro ao excluir'); return; }
     await buscarModelos(true);
@@ -7274,6 +7283,70 @@
       '</div>' +
       (sub ? '<div class="job-sec-sub">' + esc(sub) + '</div>' : '') +
       '</div>';
+  }
+
+  // ══ FOLHA DE CONFIRMAÇÃO ══════════════════════════════════════════════
+  //
+  // O `confirm()` do navegador abria uma caixa escrita "web.whatsapp.com diz"
+  // — o WhatsApp assinando uma pergunta do JOB. Fora de feio, é errado: quem
+  // está perguntando é a extensão, e a caixa nativa não deixa separar a ação
+  // destrutiva do cancelar, nem dizer em cor o que vai acontecer.
+  //
+  // A folha sobe de baixo do painel, com o fundo recuando atrás dela. Sobe
+  // porque foi de lá que veio: fechar desce pelo mesmo caminho — entrada e
+  // saída simétricas. Quem clica fora, ou aperta ESC, cancela: a saída barata
+  // é sempre a segura.
+  //
+  // Devolve Promise<boolean>, então quem chama troca `confirm(...)` por
+  // `await _confirmar({...})` e nada mais muda.
+  function _confirmar({ titulo, texto, ok, perigo }) {
+    return new Promise((resolve) => {
+      // Dentro do painel ela é filha dele (absoluta, cobre só o painel). No
+      // portão o painel não existe: cai no body e precisa de posição fixa,
+      // senão ela se ancora no topo do documento e some da tela.
+      const painel = document.getElementById('job-painel-doc');
+      const raiz = painel || document.body;
+      const velha = document.getElementById('job-folha');
+      if (velha) velha.remove();
+
+      const el = document.createElement('div');
+      el.id = 'job-folha';
+      el.className = 'job-folha' + (perigo ? ' perigo' : '') + (painel ? '' : ' solta');
+      el.innerHTML =
+        '<div class="job-folha-fundo"></div>' +
+        '<div class="job-folha-caixa" role="dialog" aria-modal="true">' +
+          '<div class="job-folha-puxador"></div>' +
+          '<div class="job-folha-t">' + esc(titulo) + '</div>' +
+          '<div class="job-folha-d">' + esc(texto || '') + '</div>' +
+          '<button class="job-folha-ok" id="job-folha-ok">' + esc(ok || 'Confirmar') + '</button>' +
+          '<button class="job-folha-nao" id="job-folha-nao">Cancelar</button>' +
+        '</div>';
+      raiz.appendChild(el);
+      // Um quadro depois, pra transição sair do estado fechado em vez de
+      // nascer já aberta — sem isso não há movimento nenhum.
+      requestAnimationFrame(() => el.classList.add('on'));
+
+      let respondido = false;
+      const fechar = (v) => {
+        if (respondido) return; respondido = true;
+        el.classList.remove('on');
+        document.removeEventListener('keydown', naTecla, true);
+        // Espera a saída terminar; se o navegador não animar, o tempo cobre.
+        setTimeout(() => el.remove(), 260);
+        resolve(v);
+      };
+      function naTecla(e) {
+        if (e.key === 'Escape') { e.stopPropagation(); fechar(false); }
+        else if (e.key === 'Enter') { e.stopPropagation(); fechar(true); }
+      }
+      document.addEventListener('keydown', naTecla, true);
+      el.querySelector('.job-folha-fundo').addEventListener('click', () => fechar(false));
+      el.querySelector('#job-folha-nao').addEventListener('click', () => fechar(false));
+      el.querySelector('#job-folha-ok').addEventListener('click', () => fechar(true));
+      // O foco começa no CANCELAR, não no confirmar: quem aperta espaço sem
+      // ler não pode apagar nada por acidente.
+      setTimeout(() => { const n = el.querySelector('#job-folha-nao'); if (n) n.focus(); }, 40);
+    });
   }
 
   // ESTADO VAZIO — dois tipos, e eles não são a mesma coisa.
@@ -7539,7 +7612,11 @@
     try { chatId = await pedirChatId(); } catch (e) { chatId = ''; }
     if (!chatId) { alert('Abra a conversa do cliente antes de disparar o funil.'); return; }
     const nome = nomeDoContato() || 'este contato';
-    if (!confirm('Disparar o funil "' + funil.nome + '" (' + funil.passos.length + ' passo(s)) para ' + nome + '?')) return;
+    if (!await _confirmar({
+      titulo: 'Disparar "' + funil.nome + '"?',
+      texto: funil.passos.length + ' passo(s) vão sair na conversa de ' + nome
+           + ', um de cada vez, com o intervalo do funil.',
+      ok: 'Disparar agora' })) return;
     let telefone = await garantirTelefone(nome, chatId);
 
     const job = {
@@ -9091,7 +9168,10 @@
 
   async function limparSemResposta() {
     if (!_campExcluir.length) return;
-    if (!confirm('Apagar ' + _campExcluir.length + ' conversa(s) sem resposta do seu WhatsApp? Isso não tem desfazer.')) return;
+    if (!await _confirmar({
+      titulo: 'Apagar ' + _campExcluir.length + ' conversa(s)?',
+      texto: 'São as conversas sem resposta. Elas saem do seu WhatsApp e isso não tem desfazer.',
+      ok: 'Apagar', perigo: true })) return;
     const { usuarioId } = await _safeStorageGet(['usuarioId']);
     const btn = document.getElementById('job-limpar-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Apagando...'; }

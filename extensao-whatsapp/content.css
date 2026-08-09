@@ -2283,3 +2283,74 @@ details.job-cfg-antigo > summary:hover { opacity: 1; }
   border-radius: 10px; padding: 9px; font-size: 12px; color: var(--job-txt);
   font-family: inherit; resize: vertical;
 }
+
+
+/* ══ FOLHA DE CONFIRMAÇÃO ═══════════════════════════════════════════════
+   Substitui o alerta nativo, que aparecia assinado como "web.whatsapp.com
+   diz" — o WhatsApp assinando uma pergunta do JOB.
+
+   Ela sobe de baixo e o fundo RECUA atrás dela: escurece e afasta um pouco.
+   Isso é o que diz "pausei o que você estava fazendo" sem esconder o
+   contexto. É tarefa modal, então tem véu; painel paralelo não teria.
+   Fechar desce pelo mesmo caminho — quem entra por baixo sai por baixo. */
+.job-folha { position: absolute; inset: 0; z-index: 40; display: flex; align-items: flex-end;
+  font-family: var(--job-ui); }
+/* Solta no body (portão, antes de o painel existir): tem que ser fixa, senão
+   se ancora no topo do documento e some da tela. E precisa passar por cima do
+   trilho, que já usa um z-index altíssimo. */
+.job-folha.solta { position: fixed; z-index: 2147483600; }
+.job-folha.solta .job-folha-caixa { max-width: 420px; margin: 0 auto; border-radius: 20px; margin-bottom: 18px; }
+.job-folha.solta { align-items: center; padding: 20px; }
+.job-folha-fundo {
+  position: absolute; inset: 0; background: rgba(0,0,0,.42);
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+  opacity: 0; transition: opacity var(--job-t-medio) var(--job-mv-saida);
+}
+.job-folha.on .job-folha-fundo { opacity: 1; }
+.job-folha-caixa {
+  position: relative; width: 100%; box-sizing: border-box;
+  padding: 10px 16px 16px; border-radius: 20px 20px 0 0;
+  background: color-mix(in srgb, var(--job-bg1) 92%, transparent);
+  -webkit-backdrop-filter: var(--job-vidro-forte); backdrop-filter: var(--job-vidro-forte);
+  box-shadow: var(--job-elev-3), inset 0 1px 0 color-mix(in srgb, var(--job-txt) 12%, transparent);
+  /* Sobe com um respingo de ultrapassagem: veio de um gesto, pode ter
+     impulso. É a curva de gaveta, não a de menu. */
+  transform: translateY(102%);
+  transition: transform var(--job-t-longo) var(--job-mv-mola);
+}
+.job-folha.on .job-folha-caixa { transform: none; }
+/* O puxador não é enfeite: diz que isto é uma folha, e que folha se fecha. */
+.job-folha-puxador {
+  width: 36px; height: 4px; border-radius: 999px; margin: 0 auto 12px;
+  background: color-mix(in srgb, var(--job-txt) 22%, transparent);
+}
+.job-folha-t { font-size: 15.5px; font-weight: 680; color: var(--job-txt);
+  letter-spacing: var(--job-tk-lg); line-height: 1.25; }
+.job-folha-d { font-size: 12.5px; line-height: 1.55; color: var(--job-txt-fraco);
+  margin: 6px 0 16px; white-space: pre-line; }
+.job-folha-ok, .job-folha-nao {
+  display: block; width: 100%; border: none; border-radius: 12px;
+  padding: 12px; font-family: inherit; font-size: 13.5px; font-weight: 640;
+  letter-spacing: var(--job-tk-sm); cursor: pointer;
+  transition: filter var(--job-t-rapido) ease, transform var(--job-t-toque) ease-out;
+}
+.job-folha-ok { background: var(--job-acento); color: var(--job-sobre-acento); }
+/* Ação destrutiva se ANUNCIA na cor. E fica separada do cancelar por um
+   respiro maior que o normal, pra não pegar o dedo errado. */
+.job-folha.perigo .job-folha-ok { background: var(--job-danger); color: var(--job-sobre-danger); }
+.job-folha-nao { background: transparent; color: var(--job-txt-fraco); margin-top: 8px; }
+.job-folha-nao:hover { background: color-mix(in srgb, var(--job-txt) 7%, transparent); color: var(--job-txt); }
+.job-folha-ok:hover { filter: brightness(1.08); }
+.job-folha-ok:active, .job-folha-nao:active { transform: scale(.98); }
+.job-folha-ok:focus, .job-folha-nao:focus { outline: none; }
+.job-folha-ok:focus-visible, .job-folha-nao:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
+
+@media (prefers-reduced-motion: reduce) {
+  .job-folha-caixa { transition: opacity var(--job-t-rapido) ease; transform: none; opacity: 0; }
+  .job-folha.on .job-folha-caixa { opacity: 1; }
+  .job-folha-ok:active, .job-folha-nao:active { transform: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .job-folha-caixa { background: var(--job-bg1); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .job-folha-fundo { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(0,0,0,.55); }
+}
