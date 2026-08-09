@@ -1984,7 +1984,6 @@ def init_db():
             copiado BOOLEAN DEFAULT FALSE,
             feedback TEXT,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS score_heartbeat (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -5202,6 +5201,220 @@ def gerar_url_r2(chave_arquivo, expiracao_segundos=86400):
     # Fallback local
     return f"/download/{os.path.basename(chave_arquivo)}"
 
+PERFIL_ESCOPOS = {
+    'admin': [
+        'crm:ler', 'crm:escrever',
+        'cotacao:ler', 'cotacao:escrever',
+        'whatsapp:ler', 'whatsapp:enviar',
+        'financeiro:ler', 'financeiro:escrever',
+        'propostas:ler', 'propostas:escrever',
+        'ia:usar', 'admin'
+    ],
+    'gestor': [
+        'crm:ler', 'crm:escrever',
+        'cotacao:ler', 'cotacao:escrever',
+        'whatsapp:ler', 'whatsapp:enviar',
+        'financeiro:ler', 'financeiro:escrever',
+        'propostas:ler', 'propostas:escrever',
+        'ia:usar'
+    ],
+    'consultor': [
+        'crm:ler', 'crm:escrever',
+        'cotacao:ler', 'cotacao:escrever',
+        'whatsapp:ler', 'whatsapp:enviar',
+        'propostas:ler', 'propostas:escrever',
+        'ia:usar'
+    ],
+    # SUPERVISOR EXISTE E FALTAVA AQUI.
+    #
+    # Os perfis reais do sistema sao tres — consultor, supervisor e admin
+    # (templates/usuarios.html, e e o que o banco grava). Esta tabela nasceu com
+    # admin/gestor/consultor/financeiro/visualizador: dois que nao existem, e um
+    # que existe ficou de fora.
+    #
+    # Como o `requer` rebaixa perfil desconhecido, TODO supervisor virava
+    # visualizador: perdia escrever no CRM, cotar e mandar WhatsApp, e ganhava
+    # ler financeiro. O oposto exato do que o Guilherme decidiu em 09/08
+    # ("financeiro e coisa de admin"), nas duas pontas.
+    'supervisor': [
+        'crm:ler', 'crm:escrever',
+        'cotacao:ler', 'cotacao:escrever',
+        'whatsapp:ler', 'whatsapp:enviar',
+        'propostas:ler', 'propostas:escrever',
+        'ia:usar'
+    ],
+    'financeiro': [
+        'crm:ler',
+        'financeiro:ler', 'financeiro:escrever',
+        'propostas:ler'
+    ],
+    'visualizador': [
+        'crm:ler', 'cotacao:ler', 'whatsapp:ler', 'financeiro:ler', 'propostas:ler'
+    ]
+}
+
+def requer(escopo):
+    """Porta unificada: aceita sessão do site, token de aparelho ou chave de API."""
+    def deco(f):
+        @wraps(f)
+        def w(*a, **kw):
+            import hmac
+            if request.method == 'OPTIONS':
+                return _wa_cors(Response(status=204))
+            
+            # 1. Sessão do site
+            if 'user_id' in session:
+                g.usuario_id = session['user_id']
+                g.auth_via = 'sessao'
+                g.corretora_id = 1
+                conn = db()
+                g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
+                close_db(conn)
+                if not g.usuario or not g.usuario['ativo']:
+                    r = _api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)
+
+                    return _wa_cors(r[0]), r[1]
+                perfil = g.usuario['perfil'] or 'visualizador'
+                # Perfil desconhecido nao herda poder: cair em 'visualizador' dava
+                # `financeiro:ler` de brinde a quem o sistema nao sabe classificar.
+                if perfil not in PERFIL_ESCOPOS: perfil = None
+                meus_escopos = PERFIL_ESCOPOS.get(perfil) or []
+                if escopo not in meus_escopos:
+                    r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
+
+                    return _wa_cors(r[0]), r[1]
+                return f(*a, **kw)
+                
+            auth = (request.headers.get('Authorization') or '').strip()
+            
+            # 2. Token de aparelho (extensão)
+            if auth.startswith('Bearer '):
+                token_raw = auth[7:].strip()
+                partes = token_raw.split('.')
+                if len(partes) == 2 and partes[0].isdigit():
+                    sess_id = int(partes[0])
+                    secreto = partes[1]
+                    conn = db()
+                    sessao_db = conn.execute("SELECT usuario_id, token_hash, revogado_em FROM extensao_sessao WHERE id=?", (sess_id,)).fetchone()
+                    if sessao_db and not sessao_db['revogado_em']:
+                        esperado = hashlib.sha256(secreto.encode()).hexdigest()
+                        if hmac.compare_digest(esperado, sessao_db['token_hash']):
+                            g.usuario_id = sessao_db['usuario_id']
+                            g.auth_via = 'token'
+                            g.corretora_id = 1
+                            g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
+                            close_db(conn)
+                            if not g.usuario or not g.usuario['ativo']:
+                                r = _api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)
+
+                                return _wa_cors(r[0]), r[1]
+                            perfil = g.usuario['perfil'] or 'visualizador'
+                            # Perfil desconhecido nao herda poder: cair em 'visualizador' dava
+                            # `financeiro:ler` de brinde a quem o sistema nao sabe classificar.
+                            if perfil not in PERFIL_ESCOPOS: perfil = None
+                            meus_escopos = PERFIL_ESCOPOS.get(perfil) or []
+                            if escopo not in meus_escopos:
+                                r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
+
+                                return _wa_cors(r[0]), r[1]
+                            return f(*a, **kw)
+                    close_db(conn)
+            
+            # 2.5 Chave Antiga (Transição)
+            if request.headers.get('X-Extension-Key') and _wa_auth_ok():
+                app.logger.info('[EXT] chave antiga usada em %s', request.path)
+                g.auth_via = 'chave'
+                uid = None
+                try:
+                    j = request.get_json(silent=True) or {}
+                    uid = j.get('usuario_id')
+                except Exception:
+                    pass
+                if not uid:
+                    uid = request.args.get('usuario_id')
+                    
+                if uid and str(uid).isdigit():
+                    g.usuario_id = int(uid)
+                    conn = db()
+                    g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
+                    close_db(conn)
+                else:
+                    g.usuario_id = None
+                    g.usuario = None
+                    
+                if g.usuario_id and getattr(g, 'usuario', None):
+                    perfil = g.usuario['perfil'] or 'visualizador'
+                    # Perfil desconhecido nao herda poder: cair em 'visualizador' dava
+                    # `financeiro:ler` de brinde a quem o sistema nao sabe classificar.
+                    if perfil not in PERFIL_ESCOPOS: perfil = None
+                    meus_escopos = PERFIL_ESCOPOS.get(perfil) or []
+                    if escopo not in meus_escopos:
+                        r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
+
+                        return _wa_cors(r[0]), r[1]
+                
+                return f(*a, **kw)
+
+            # 3. Chave de API
+            bruta = auth[7:].strip() if auth.lower().startswith('bearer ') \
+                else (request.headers.get('X-API-Key') or '').strip()
+            if not bruta:
+                r = _api_erro('nao_autenticado', 'Nenhuma credencial válida encontrada', 401)
+                r[0].headers['WWW-Authenticate'] = 'Bearer realm="JOB API"'
+                return _wa_cors(r[0]), r[1]
+                
+            conn = db()
+            reg = conn.execute("SELECT * FROM api_chave WHERE hash=?", (_api_hash(bruta),)).fetchone()
+            if not reg or reg['revogada_em']:
+                close_db(conn)
+                r = _api_erro('chave_invalida', 'Chave inválida ou revogada', 401)
+
+                return _wa_cors(r[0]), r[1]
+                
+            if reg.get('usuario_id'):
+                g.usuario_id = reg['usuario_id']
+            else:
+                app.logger.warning(f"[API] chave sem dono id={reg['id']}")
+                g.usuario_id = 1
+                
+            g.auth_via = 'chave'
+            g.corretora_id = 1
+            
+            escopos = (reg['escopos'] or '').split(',')
+            if escopo not in escopos:
+                close_db(conn)
+                r = _api_erro('sem_permissao', f"Esta chave não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": escopos})
+
+                return _wa_cors(r[0]), r[1]
+                
+            jan = int(time.time() // 60)
+            marca = (reg['id'], jan)
+            _API_USO[marca] = _API_USO.get(marca, 0) + 1
+            if _API_USO[marca] > _API_LIMITE_MIN:
+                close_db(conn)
+                r = _api_erro('limite_excedido', f'Máximo de {_API_LIMITE_MIN} chamadas por minuto', 429)
+                r[0].headers['Retry-After'] = '60'
+                return _wa_cors(r[0]), r[1]
+                
+            if len(_API_USO) > 5000:
+                for k in [k for k in _API_USO if k[1] < jan - 2]:
+                    _API_USO.pop(k, None)
+            try:
+                conn.execute("UPDATE api_chave SET ultimo_uso=?, usos=COALESCE(usos,0)+1 WHERE id=?",
+                             (_agora_sp(), reg['id']))
+                conn.commit()
+            except Exception:
+                try: conn.rollback()
+                except Exception: pass
+            close_db(conn)
+            return f(*a, **kw)
+        return w
+    return deco
+
+
+
+@app.route('/api/whatsapp/logout', methods=['POST', 'OPTIONS'])
+@app.route('/api/whatsapp/logout', methods=['POST', 'OPTIONS'])
 @app.route('/admin/extensao/sessoes')
 @login_required
 @admin_required
@@ -8151,6 +8364,7 @@ def crm_agenda_adiar(aid):
 
 
 @app.route('/api/whatsapp/fila', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
 def api_whatsapp_fila():
     """A fila de hoje DENTRO do WhatsApp. Mesma consulta do dashboard e da
     agenda — os tres tem que dizer o mesmo numero, senao ninguem confia em
@@ -8158,8 +8372,6 @@ def api_whatsapp_fila():
     acontece, nao numa tela que ele teria que lembrar de abrir."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     try:
         uid = int(request.args.get('usuario_id') or 0)
     except (TypeError, ValueError):
@@ -8180,12 +8392,11 @@ def api_whatsapp_fila():
 
 
 @app.route('/api/whatsapp/fila/acao', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_fila_acao():
     """Concluir ou adiar sem sair do WhatsApp."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.get_json(silent=True) or {}
     try:
         aid = int(d.get('tarefa_id') or 0)
@@ -9694,6 +9905,7 @@ def campanha_editar_conteudo(cid):
 
 
 @app.route('/api/whatsapp/campanha/resposta', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_campanha_resposta():
     """A extensão avisa quando um número de campanha RESPONDEU. Marca o contato
     como 'respondeu' (fica quente, libera o disparo do contexto). Chave da extensão.
@@ -9701,8 +9913,6 @@ def api_whatsapp_campanha_resposta():
     campanha de outro consultor que por acaso tenha o mesmo número."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
     d = request.json or {}
     tel = _normalizar_telefone(str(d.get('telefone') or ''))
     if not tel:
@@ -9733,14 +9943,13 @@ def api_whatsapp_campanha_resposta():
 
 
 @app.route('/api/whatsapp/campanha/aguardando', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
 def api_whatsapp_campanha_aguardando():
     """A extensão pergunta, pro consultor, quais números de campanha estão
     AGUARDANDO resposta (pra vigiar a chegada) e quais já viraram SEM RESPOSTA
     (pra oferecer apagar a conversa). Só leitura, escopado por consultor."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
     uid = request.args.get('usuario_id', type=int)
     if not uid:
         return _wa_cors(jsonify({"ok": True, "aguardando": [], "excluir": []}))
@@ -9784,14 +9993,13 @@ def api_whatsapp_campanha_aguardando():
 
 
 @app.route('/api/whatsapp/campanha/excluir-conversa', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_campanha_excluir():
     """A extensão avisa que o consultor apagou a conversa de um não-respondente.
     Registra excluido_em (auditoria) e tira da lista de vigília. Ação irreversível
     no WhatsApp — quem apaga é o consultor no aparelho dele; aqui só registramos."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
     d = request.json or {}
     uid = d.get('usuario_id')
     cid = d.get('contato_id')
@@ -18060,6 +18268,7 @@ def _wa_cors(resp):
 _WA_LOGIN_ATTEMPTS = {}  # { (ip, email): [timestamp, ...] }
 
 @app.route('/api/whatsapp/login', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_login():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
@@ -18137,220 +18346,6 @@ def api_whatsapp_login():
 #
 # Movido por inteiro pelo Claude em 09/08/2026, sem alterar uma linha do corpo.
 
-PERFIL_ESCOPOS = {
-    'admin': [
-        'crm:ler', 'crm:escrever',
-        'cotacao:ler', 'cotacao:escrever',
-        'whatsapp:ler', 'whatsapp:enviar',
-        'financeiro:ler', 'financeiro:escrever',
-        'propostas:ler', 'propostas:escrever',
-        'ia:usar', 'admin'
-    ],
-    'gestor': [
-        'crm:ler', 'crm:escrever',
-        'cotacao:ler', 'cotacao:escrever',
-        'whatsapp:ler', 'whatsapp:enviar',
-        'financeiro:ler', 'financeiro:escrever',
-        'propostas:ler', 'propostas:escrever',
-        'ia:usar'
-    ],
-    'consultor': [
-        'crm:ler', 'crm:escrever',
-        'cotacao:ler', 'cotacao:escrever',
-        'whatsapp:ler', 'whatsapp:enviar',
-        'propostas:ler', 'propostas:escrever',
-        'ia:usar'
-    ],
-    # SUPERVISOR EXISTE E FALTAVA AQUI.
-    #
-    # Os perfis reais do sistema sao tres — consultor, supervisor e admin
-    # (templates/usuarios.html, e e o que o banco grava). Esta tabela nasceu com
-    # admin/gestor/consultor/financeiro/visualizador: dois que nao existem, e um
-    # que existe ficou de fora.
-    #
-    # Como o `requer` rebaixa perfil desconhecido, TODO supervisor virava
-    # visualizador: perdia escrever no CRM, cotar e mandar WhatsApp, e ganhava
-    # ler financeiro. O oposto exato do que o Guilherme decidiu em 09/08
-    # ("financeiro e coisa de admin"), nas duas pontas.
-    'supervisor': [
-        'crm:ler', 'crm:escrever',
-        'cotacao:ler', 'cotacao:escrever',
-        'whatsapp:ler', 'whatsapp:enviar',
-        'propostas:ler', 'propostas:escrever',
-        'ia:usar'
-    ],
-    'financeiro': [
-        'crm:ler',
-        'financeiro:ler', 'financeiro:escrever',
-        'propostas:ler'
-    ],
-    'visualizador': [
-        'crm:ler', 'cotacao:ler', 'whatsapp:ler', 'financeiro:ler', 'propostas:ler'
-    ]
-}
-
-def requer(escopo):
-    """Porta unificada: aceita sessão do site, token de aparelho ou chave de API."""
-    def deco(f):
-        @wraps(f)
-        def w(*a, **kw):
-            import hmac
-            if request.method == 'OPTIONS':
-                return _wa_cors(Response(status=204))
-            
-            # 1. Sessão do site
-            if 'user_id' in session:
-                g.usuario_id = session['user_id']
-                g.auth_via = 'sessao'
-                g.corretora_id = 1
-                conn = db()
-                g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
-                close_db(conn)
-                if not g.usuario or not g.usuario['ativo']:
-                    r = _api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)
-
-                    return _wa_cors(r[0]), r[1]
-                perfil = g.usuario['perfil'] or 'visualizador'
-                # Perfil desconhecido nao herda poder: cair em 'visualizador' dava
-                # `financeiro:ler` de brinde a quem o sistema nao sabe classificar.
-                if perfil not in PERFIL_ESCOPOS: perfil = None
-                meus_escopos = PERFIL_ESCOPOS.get(perfil) or []
-                if escopo not in meus_escopos:
-                    r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
-
-                    return _wa_cors(r[0]), r[1]
-                return f(*a, **kw)
-                
-            auth = (request.headers.get('Authorization') or '').strip()
-            
-            # 2. Token de aparelho (extensão)
-            if auth.startswith('Bearer '):
-                token_raw = auth[7:].strip()
-                partes = token_raw.split('.')
-                if len(partes) == 2 and partes[0].isdigit():
-                    sess_id = int(partes[0])
-                    secreto = partes[1]
-                    conn = db()
-                    sessao_db = conn.execute("SELECT usuario_id, token_hash, revogado_em FROM extensao_sessao WHERE id=?", (sess_id,)).fetchone()
-                    if sessao_db and not sessao_db['revogado_em']:
-                        esperado = hashlib.sha256(secreto.encode()).hexdigest()
-                        if hmac.compare_digest(esperado, sessao_db['token_hash']):
-                            g.usuario_id = sessao_db['usuario_id']
-                            g.auth_via = 'token'
-                            g.corretora_id = 1
-                            g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
-                            close_db(conn)
-                            if not g.usuario or not g.usuario['ativo']:
-                                r = _api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)
-
-                                return _wa_cors(r[0]), r[1]
-                            perfil = g.usuario['perfil'] or 'visualizador'
-                            # Perfil desconhecido nao herda poder: cair em 'visualizador' dava
-                            # `financeiro:ler` de brinde a quem o sistema nao sabe classificar.
-                            if perfil not in PERFIL_ESCOPOS: perfil = None
-                            meus_escopos = PERFIL_ESCOPOS.get(perfil) or []
-                            if escopo not in meus_escopos:
-                                r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
-
-                                return _wa_cors(r[0]), r[1]
-                            return f(*a, **kw)
-                    close_db(conn)
-            
-            # 2.5 Chave Antiga (Transição)
-            if request.headers.get('X-Extension-Key') and _wa_auth_ok():
-                app.logger.info('[EXT] chave antiga usada em %s', request.path)
-                g.auth_via = 'chave'
-                uid = None
-                try:
-                    j = request.get_json(silent=True) or {}
-                    uid = j.get('usuario_id')
-                except Exception:
-                    pass
-                if not uid:
-                    uid = request.args.get('usuario_id')
-                    
-                if uid and str(uid).isdigit():
-                    g.usuario_id = int(uid)
-                    conn = db()
-                    g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
-                    close_db(conn)
-                else:
-                    g.usuario_id = None
-                    g.usuario = None
-                    
-                if g.usuario_id and getattr(g, 'usuario', None):
-                    perfil = g.usuario['perfil'] or 'visualizador'
-                    # Perfil desconhecido nao herda poder: cair em 'visualizador' dava
-                    # `financeiro:ler` de brinde a quem o sistema nao sabe classificar.
-                    if perfil not in PERFIL_ESCOPOS: perfil = None
-                    meus_escopos = PERFIL_ESCOPOS.get(perfil) or []
-                    if escopo not in meus_escopos:
-                        r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
-
-                        return _wa_cors(r[0]), r[1]
-                
-                return f(*a, **kw)
-
-            # 3. Chave de API
-            bruta = auth[7:].strip() if auth.lower().startswith('bearer ') \
-                else (request.headers.get('X-API-Key') or '').strip()
-            if not bruta:
-                r = _api_erro('nao_autenticado', 'Nenhuma credencial válida encontrada', 401)
-                r[0].headers['WWW-Authenticate'] = 'Bearer realm="JOB API"'
-                return _wa_cors(r[0]), r[1]
-                
-            conn = db()
-            reg = conn.execute("SELECT * FROM api_chave WHERE hash=?", (_api_hash(bruta),)).fetchone()
-            if not reg or reg['revogada_em']:
-                close_db(conn)
-                r = _api_erro('chave_invalida', 'Chave inválida ou revogada', 401)
-
-                return _wa_cors(r[0]), r[1]
-                
-            if reg.get('usuario_id'):
-                g.usuario_id = reg['usuario_id']
-            else:
-                app.logger.warning(f"[API] chave sem dono id={reg['id']}")
-                g.usuario_id = 1
-                
-            g.auth_via = 'chave'
-            g.corretora_id = 1
-            
-            escopos = (reg['escopos'] or '').split(',')
-            if escopo not in escopos:
-                close_db(conn)
-                r = _api_erro('sem_permissao', f"Esta chave não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": escopos})
-
-                return _wa_cors(r[0]), r[1]
-                
-            jan = int(time.time() // 60)
-            marca = (reg['id'], jan)
-            _API_USO[marca] = _API_USO.get(marca, 0) + 1
-            if _API_USO[marca] > _API_LIMITE_MIN:
-                close_db(conn)
-                r = _api_erro('limite_excedido', f'Máximo de {_API_LIMITE_MIN} chamadas por minuto', 429)
-                r[0].headers['Retry-After'] = '60'
-                return _wa_cors(r[0]), r[1]
-                
-            if len(_API_USO) > 5000:
-                for k in [k for k in _API_USO if k[1] < jan - 2]:
-                    _API_USO.pop(k, None)
-            try:
-                conn.execute("UPDATE api_chave SET ultimo_uso=?, usos=COALESCE(usos,0)+1 WHERE id=?",
-                             (_agora_sp(), reg['id']))
-                conn.commit()
-            except Exception:
-                try: conn.rollback()
-                except Exception: pass
-            close_db(conn)
-            return f(*a, **kw)
-        return w
-    return deco
-
-
-
-@app.route('/api/whatsapp/logout', methods=['POST', 'OPTIONS'])
-@requer('whatsapp:ler')
 def api_whatsapp_logout():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
@@ -18372,12 +18367,11 @@ def api_whatsapp_logout():
 
 
 @app.route('/api/whatsapp/ping', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
 def api_whatsapp_ping():
     """A extensão chama isso pra validar URL + chave na tela de configuração."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     return _wa_cors(jsonify({"ok": True, "sistema": "JOB Serenus", "versao_api": 1}))
 
 
@@ -18476,14 +18470,13 @@ def _consultar_cnpj(dig):
 
 
 @app.route('/api/whatsapp/cnpj/<cnpj>', methods=['GET', 'OPTIONS'])
+@requer('crm:ler')
 def api_whatsapp_cnpj(cnpj):
     """Consulta de CNPJ pra extensão: devolve os dados cadastrais da Receita
     (via BrasilAPI) já normalizados, incluindo se a empresa é MEI. Sem CAPTCHA,
     sem gov.br — o certificado CCMEI em si o consultor abre manualmente."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     dig = re.sub(r'\D', '', cnpj or '')
     if len(dig) != 14:
         return _wa_cors(jsonify({"ok": False, "erro": "CNPJ precisa ter 14 dígitos"})), 400
@@ -18512,11 +18505,10 @@ def api_cnpj(cnpj):
 # (aba "Anotações"), mas aqui a nota mora no NOSSO banco, atrelada ao número,
 # então segue o lead independente de quem abre a conversa.
 @app.route('/api/whatsapp/notas', methods=['GET', 'POST', 'OPTIONS'])
+@requer('crm:escrever')
 def api_whatsapp_notas():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     conn = db()
     if request.method == 'GET':
         tel = _normalizar_telefone(request.args.get('telefone', ''))
@@ -18593,11 +18585,10 @@ def api_whatsapp_notas():
 
 
 @app.route('/api/whatsapp/notas/excluir', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
 def api_whatsapp_notas_excluir():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False})), 401
     d = request.get_json(silent=True) or {}
     try:
         nid = int(d.get('id'))
@@ -18610,6 +18601,7 @@ def api_whatsapp_notas_excluir():
 
 
 @app.route('/api/whatsapp/versao', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
 def api_whatsapp_versao():
     """Diz qual é a versão mais nova da extensão (a que está no deploy). A própria
     extensão compara com a sua (chrome.runtime.getManifest().version) e, se estiver
@@ -18624,14 +18616,13 @@ def api_whatsapp_versao():
 
 
 @app.route('/api/whatsapp/erro', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_erro():
     """A extensão reporta um erro JS (window.onerror/unhandledrejection) que
     aconteceu no navegador do consultor — sem isso, um bug só chegava até nós
     se o consultor reclamasse. Best-effort: nunca deve travar a extensão."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False})), 401
     d = request.get_json(silent=True) or {}
     mensagem = (d.get('mensagem') or '')[:2000]
     if not mensagem:
@@ -18711,6 +18702,7 @@ def _config_remota_atual(conn):
 
 
 @app.route('/api/whatsapp/config-remota', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
 def api_whatsapp_config_remota():
     """Seletores DOM + flags de comportamento atuais — a extensão consulta a
     cada ~15min e usa esses valores em vez dos fixos no código. Público (sem
@@ -18795,13 +18787,12 @@ def _cmp_versao(a, b):
 
 
 @app.route('/api/whatsapp/presenca', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_presenca():
     """A extensão bate ponto (a cada ~1min): informa versão, número do WhatsApp
     logado e se a wa-js está pronta. Alimenta o painel de aptidão do disparo."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False}))
     d = request.json or {}
     try:
         uid = int(d.get('usuario_id'))
@@ -18825,6 +18816,7 @@ def api_whatsapp_presenca():
 
 
 @app.route('/api/whatsapp/inbox', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
 def api_whatsapp_inbox():
     """Últimos 5 leads que CHEGARAM na coluna 'Lead Novo' (Kanban) deste consultor
     e ainda não foram atendidos — pra caixa de entrada na barra da extensão. É uma
@@ -18832,8 +18824,6 @@ def api_whatsapp_inbox():
     dela, o mais parado esperando fica no topo. Só leitura, chave da extensão."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
     uid = request.args.get('usuario_id', type=int)
     if not uid:
         return _wa_cors(jsonify({"ok": True, "leads": []}))
@@ -18855,6 +18845,7 @@ def api_whatsapp_inbox():
 
 
 @app.route('/api/whatsapp/inbox/atender', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_inbox_atender():
     """'Atender agora' de verdade: dispara o funil de atendimento do consultor
     pro lead (com {nome} do CRM e {saudacao} pela hora certa) — não só marca
@@ -18862,8 +18853,6 @@ def api_whatsapp_inbox_atender():
     consultor) mas avisa que precisa configurar."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
     d = request.json or {}
     lead_id = d.get('lead_id')
     try:
@@ -19322,6 +19311,7 @@ async function instalarAutomatico(){
 
 
 @app.route('/api/whatsapp/estado', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
 def api_whatsapp_estado():
     """A extensão consulta ANTES de raspar a conversa: se já existe uma análise
     anterior pra esse telefone, devolve a hora da última mensagem conhecida
@@ -19334,8 +19324,6 @@ def api_whatsapp_estado():
     (sugestoes_json) já estava salvo no banco desde sempre, só não voltava."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     tel_norm = _normalizar_telefone(str(request.args.get('telefone') or ''))
     if not tel_norm:
         return _wa_cors(jsonify({"ok": True, "existe": False}))
@@ -19488,6 +19476,7 @@ def crm_lead_whatsapp_extensao_status(lid):
 
 
 @app.route('/api/whatsapp/fila/proximo', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
 def api_whatsapp_fila_proximo():
     """A extensão consulta isso periodicamente perguntando se tem algo pra
     mandar. Claim atômico (mesmo padrão de _processar_fluxos_pendentes) pra
@@ -19496,8 +19485,6 @@ def api_whatsapp_fila_proximo():
     pro mesmo responsavel_id antes de _WA_FILA_GATE_SEGUNDOS do último envio."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     usuario_id = request.args.get('usuario_id', type=int)
     if not usuario_id:
         return _wa_cors(jsonify({"ok": True, "item": None}))
@@ -19561,14 +19548,13 @@ def api_whatsapp_fila_proximo():
 
 
 @app.route('/api/whatsapp/fila/<int:fid>/confirmar', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_fila_confirmar(fid):
     """A extensão chama depois de tentar mandar (sucesso ou falha). Sucesso
     grava em crm_atividades igual o botão de 1 clique já faz. Falha reenfileira
     até 3 tentativas, depois marca 'falhou' de vez (não fica tentando pra sempre)."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.json or {}
     conn = db()
     item = conn.execute("SELECT * FROM whatsapp_extensao_fila WHERE id=?", (fid,)).fetchone()
@@ -19608,6 +19594,7 @@ def api_whatsapp_fila_confirmar(fid):
 
 
 @app.route('/api/whatsapp/chat-lead', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
 def api_whatsapp_chat_lead():
     """A extensão pergunta ANTES de mostrar o popup manual: 'esse chat_id já tem
     telefone/nome conhecido?'. Memória fica NO SERVIDOR (não no navegador de um
@@ -19615,8 +19602,6 @@ def api_whatsapp_chat_lead():
     conversa, ninguém mais precisa digitar de novo, mesmo trocando de PC."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
     chat_id = (request.args.get('chat_id') or '').strip()[:100]
     if not chat_id:
         return _wa_cors(jsonify({"ok": True, "achou": False}))
@@ -19630,6 +19615,7 @@ def api_whatsapp_chat_lead():
 
 
 @app.route('/api/whatsapp/lead-por-telefone', methods=['GET', 'OPTIONS'])
+@requer('crm:ler')
 def api_whatsapp_lead_por_telefone():
     """Acha o lead do CRM pelo telefone da conversa aberta — pro botão 'Abrir
     lead no CRM' do trilho da extensão (achar automático, sem precisar rodar
@@ -19637,8 +19623,6 @@ def api_whatsapp_lead_por_telefone():
     _buscar_lead_por_telefone (fonte única de verdade pro dedup)."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
     tel = _normalizar_telefone(request.args.get('telefone', ''))
     if not tel:
         return _wa_cors(jsonify({"ok": True, "achou": False}))
@@ -19672,6 +19656,7 @@ _WA_ORIGENS_LEAD = ['Indicação', 'Google', 'Facebook', 'Instagram', 'MEDSENIOR
 
 
 @app.route('/api/whatsapp/lead/criar', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
 def api_whatsapp_lead_criar():
     """Cadastra no CRM o lead da conversa aberta, quando o botão CRM da extensão
     não achou ninguém pelo telefone. Opcional (o consultor decide), mas com
@@ -19682,8 +19667,6 @@ def api_whatsapp_lead_criar():
     existente em vez de criar duplicata."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave inválida"})), 401
     d = request.get_json(silent=True) or {}
     nome = (d.get('nome') or '').strip()[:200]
     origem = (d.get('origem') or '').strip()
@@ -19791,7 +19774,14 @@ def _etiquetas_do_momento(p, lead):
 # Padrão de mercado: chave mostrada UMA vez; banco guarda só o SHA-256; prefixo em
 # claro só pra identificar; escopos separam leitura de escrita; revogação imediata.
 
-_API_ESCOPOS = PERFIL_ESCOPOS['admin']
+_API_ESCOPOS = {
+    'CRM': ['crm:ler', 'crm:escrever'],
+    'Cotação': ['cotacao:ler', 'cotacao:escrever'],
+    'WhatsApp': ['whatsapp:ler', 'whatsapp:enviar'],
+    'Propostas': ['propostas:ler', 'propostas:escrever'],
+    'Financeiro': ['financeiro:ler', 'financeiro:escrever'],
+    'IA': ['ia:usar']
+}
 _API_PREFIXO = 'job_live_'
 # Teto por chave/minuto: /calcular roda no MESMO processo que serve o CRM — sem
 # teto, um consumidor em laço derruba o sistema pra todo mundo.
@@ -20623,6 +20613,7 @@ def _wa_desempenho(conn):
 
 
 @app.route('/api/whatsapp/metrica', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_metrica():
     """A extensao reporta quanto tempo cada coisa levou.
 
@@ -20635,8 +20626,6 @@ def api_whatsapp_metrica():
     atrapalhar a extensao. Sem payload de conversa, sem dado de cliente."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     itens = (request.get_json(silent=True) or {}).get('metricas') or []
     if not isinstance(itens, list):
         return _wa_cors(jsonify({"ok": False, "erro": "formato"})), 400
@@ -20667,6 +20656,7 @@ def api_whatsapp_metrica():
 
 
 @app.route('/api/whatsapp/documentos/tipo', methods=['POST', 'OPTIONS'])
+@requer('ia:usar')
 def api_whatsapp_documento_tipo():
     """O consultor CONFIRMA ou corrige o tipo do documento.
 
@@ -20675,8 +20665,6 @@ def api_whatsapp_documento_tipo():
     baixada servir pra subir na operadora sem abrir um por um."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.get_json(silent=True) or {}
     tipo = (d.get('tipo') or '').strip()
     if tipo not in _DOC_TIPOS:
@@ -20903,6 +20891,7 @@ def lead_documento_baixar(lid, did):
 
 
 @app.route('/api/whatsapp/documentos/ler', methods=['POST', 'OPTIONS'])
+@requer('ia:usar')
 def api_whatsapp_documentos_ler():
     """A extensao manda os documentos da conversa; o JOB le e preenche o lead.
 
@@ -20911,8 +20900,6 @@ def api_whatsapp_documentos_ler():
     pagar duas vezes pelo mesmo RG que o cliente reenviou."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.get_json(silent=True) or {}
     arquivos = d.get('arquivos') or []
     if not isinstance(arquivos, list) or not arquivos:
@@ -21131,6 +21118,7 @@ def _canario_estado(conn):
 
 
 @app.route('/api/whatsapp/canario', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_canario():
     """A extensao conta o que ainda funciona nela. Ninguem pergunta, ela avisa.
 
@@ -21139,8 +21127,6 @@ def api_whatsapp_canario():
     um motivo de o WhatsApp ficar lento."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.get_json(silent=True) or {}
     checagens = d.get('checagens') or []
     if not isinstance(checagens, list):
@@ -21212,12 +21198,11 @@ def _ignorar_conversa_wa(conn, chat_id, tel_norm, desmarcar, nome, motivo, quem)
 
 
 @app.route('/api/whatsapp/ignorar', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
 def api_whatsapp_ignorar():
     """Marca (ou desmarca) uma conversa como "não é lead"."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.get_json(silent=True) or {}
     chat_id = str(d.get('chat_id') or '').strip()[:120]
     tel_norm = _normalizar_telefone(str(d.get('telefone') or ''))
@@ -21246,6 +21231,7 @@ def api_whatsapp_ignorar():
 
 
 @app.route('/api/whatsapp/chats/vincular', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_chats_vincular():
     """Amarra @lid -> lead em MASSA, a partir da lista inteira de conversas.
 
@@ -21259,8 +21245,6 @@ def api_whatsapp_chats_vincular():
     conversa. Rodar duas vezes nao muda nada."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.get_json(silent=True) or {}
     convs = d.get('conversas') or []
     if not isinstance(convs, list):
@@ -21394,6 +21378,7 @@ def crm_varredura_criar():
 
 
 @app.route('/api/whatsapp/varredura/proximo', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
 def api_whatsapp_varredura_proximo():
     """UM item por vez. É o que mantém a máquina do consultor livre.
 
@@ -21403,8 +21388,6 @@ def api_whatsapp_varredura_proximo():
     quem decide o compasso é o servidor, não a paciência de quem está na tela."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     try:
         uid = int(request.args.get('consultor_id') or 0) or None
     except (TypeError, ValueError):
@@ -21511,6 +21494,7 @@ def api_whatsapp_varredura_proximo():
 
 
 @app.route('/api/whatsapp/varredura/item', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_varredura_item():
     """O resultado de UM item — inclusive o erro, com o motivo por escrito.
 
@@ -21519,8 +21503,6 @@ def api_whatsapp_varredura_item():
     quebrada."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.get_json(silent=True) or {}
     try:
         item_id = int(d.get('item_id') or 0)
@@ -21737,11 +21719,10 @@ def crm_varredura_reenfileirar_resolvidos(lote_id):
 
 
 @app.route('/api/whatsapp/conversas/pendentes', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_conversas_pendentes():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     convs = (request.get_json(silent=True) or {}).get('conversas') or []
     if not isinstance(convs, list):
         return _wa_cors(jsonify({"ok": False, "erro": "Formato inválido"})), 400
@@ -21891,12 +21872,11 @@ def _gasto_transcricao_mes(conn):
 
 
 @app.route('/api/whatsapp/transcricoes', methods=['POST', 'OPTIONS'])
+@requer('ia:usar')
 def api_whatsapp_transcricoes():
     """O que já está transcrito, pelos ids das mensagens. Resposta imediata."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     ids = (request.get_json(silent=True) or {}).get('ids') or []
     ids = [str(i) for i in ids if i][:400]
     if not ids:
@@ -21933,13 +21913,12 @@ def api_whatsapp_transcricoes():
 
 
 @app.route('/api/whatsapp/transcrever', methods=['POST', 'OPTIONS'])
+@requer('ia:usar')
 def api_whatsapp_transcrever():
     """Transcreve os áudios que ainda não têm cache. A extensão manda em lotes
     pequenos, do mais recente pro mais antigo — o que interessa aparece primeiro."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     audios = (request.get_json(silent=True) or {}).get('audios') or []
     if not isinstance(audios, list) or not audios:
         return _wa_cors(jsonify({"ok": False, "erro": "Nenhum áudio recebido"})), 400
@@ -21992,11 +21971,10 @@ def api_whatsapp_transcrever():
 # série (lead, etapas, sub-status, campos, etiquetas, atividades) dariam um painel
 # que monta aos pedaços na frente dele, e aí ninguém usa.
 @app.route('/api/whatsapp/lead/ficha', methods=['GET', 'OPTIONS'])
+@requer('crm:ler')
 def api_whatsapp_lead_ficha():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     tel = _normalizar_telefone(request.args.get('telefone', ''))
     lid = request.args.get('lead_id', type=int)
     chat_id = (request.args.get('chat_id') or '').strip()[:120]
@@ -22088,11 +22066,10 @@ def api_whatsapp_lead_ficha():
 
 
 @app.route('/api/whatsapp/lead/<int:lid>/cnpj', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
 def api_whatsapp_lead_cnpj(lid):
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.get_json(silent=True) or {}
     cnpj = (d.get('cnpj') or '').strip()
     empresa_nova = (d.get('empresa') or '').strip()
@@ -22139,11 +22116,10 @@ def api_whatsapp_lead_cnpj(lid):
 
 
 @app.route('/api/whatsapp/cotador/hashes', methods=['GET', 'POST', 'OPTIONS'])
+@requer('cotacao:escrever')
 def api_whatsapp_cotador_hashes():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     
     conn = db()
     try:
@@ -22208,11 +22184,10 @@ def api_whatsapp_cotador_hashes():
 
 
 @app.route('/api/whatsapp/cotacoes', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
 def api_whatsapp_cotacoes():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
 
     tel = _normalizar_telefone(request.args.get('telefone', ''))
     lid = request.args.get('lead_id', type=int)
@@ -22307,11 +22282,10 @@ def api_whatsapp_cotacoes():
 
 
 @app.route('/api/whatsapp/cotacao/salvar', methods=['POST', 'OPTIONS'])
+@requer('cotacao:escrever')
 def api_whatsapp_cotacao_salvar():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
 
     d = request.get_json(silent=True) or {}
     conn = db()
@@ -22400,11 +22374,10 @@ def api_whatsapp_cotacao_salvar():
 
 
 @app.route('/api/whatsapp/preferencias', methods=['GET', 'POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_preferencias():
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
 
     conn = db()
     try:
@@ -22454,6 +22427,7 @@ def api_whatsapp_preferencias():
         return _wa_cors(jsonify({"ok": False}))
 
 @app.route('/api/whatsapp/lead/salvar', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
 def api_whatsapp_lead_salvar():
     """Salva em UMA chamada o que o popup mudou. Aplica na ordem: campos → etiquetas
     → sub-status → etapa. A etapa é a ÚLTIMA de propósito: ela é a única que pode
@@ -22461,8 +22435,6 @@ def api_whatsapp_lead_salvar():
     o que digitou quando a mudança de etapa é barrada."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.get_json(silent=True) or {}
     try:
         lid = int(d.get('lead_id') or 0)
@@ -22656,6 +22628,7 @@ def api_whatsapp_lead_salvar():
 
 
 @app.route('/api/whatsapp/enviar-direto', methods=['POST', 'OPTIONS'])
+@requer('whatsapp:enviar')
 def api_whatsapp_enviar_direto():
     """Enfileira uma mensagem direto da conversa aberta no WhatsApp Web — pedido
     explícito do Guilherme pra extensão funcionar inteira ali, sem precisar
@@ -22667,8 +22640,6 @@ def api_whatsapp_enviar_direto():
     então tem que bater com o que /fila/proximo vai filtrar depois."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.json or {}
     telefone = str(d.get('telefone') or '').strip()
     nome = str(d.get('nome') or '').strip()[:200]
@@ -22822,6 +22793,7 @@ def api_whatsapp_enviar_direto():
 
 
 @app.route('/api/whatsapp/extensao/cotacao/contexto', methods=['GET', 'OPTIONS'])
+@requer('cotacao:ler')
 def api_whatsapp_extensao_cotacao_contexto():
     """Tudo que o CABEÇALHO do documento de cotação precisa, numa chamada.
 
@@ -22840,8 +22812,6 @@ def api_whatsapp_extensao_cotacao_contexto():
     """
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
 
     uid = request.args.get('usuario_id', type=int)
     lid = request.args.get('lead_id', type=int)
@@ -22892,6 +22862,7 @@ def api_whatsapp_extensao_cotacao_contexto():
 
 
 @app.route('/api/whatsapp/extensao/modelos', methods=['GET', 'OPTIONS'])
+@requer('crm:ler')
 def api_whatsapp_extensao_modelos():
     """Lista os modelos de mensagem de WhatsApp ativos pra extensão mostrar na
     seção Mensagens do painel. Monta a URL de mídia pronta pra extensão não
@@ -22910,8 +22881,6 @@ def api_whatsapp_extensao_modelos():
     (item futuro)."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     try:
         uid = int(request.args.get('usuario_id') or 0)
     except (TypeError, ValueError):
@@ -22952,6 +22921,7 @@ def api_whatsapp_extensao_modelos():
 
 
 @app.route('/api/whatsapp/extensao/modelos/novo', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
 def api_whatsapp_extensao_modelo_novo():
     """Cria um modelo de mensagem de WhatsApp DIRETO da extensão (texto sempre;
     mídia opcional — áudio gravado na hora, áudio pronto ou imagem). Autenticado
@@ -22960,8 +22930,6 @@ def api_whatsapp_extensao_modelo_novo():
     criado_por = usuario_id escolhido no popup (pra saber quem cadastrou)."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     nome = (request.form.get('nome') or '').strip()
     texto = (request.form.get('texto') or '').strip()
     if not nome or not texto:
@@ -23009,12 +22977,11 @@ def api_whatsapp_extensao_modelo_novo():
 
 
 @app.route('/api/whatsapp/extensao/modelos/<int:mid>/favorito', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
 def api_whatsapp_extensao_modelo_favorito(mid):
     """Marca/desmarca favorito (fixa no topo da biblioteca). Só tipo='whatsapp'."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     conn = db()
     m = conn.execute("SELECT favorito FROM modelos_conteudo WHERE id=? AND tipo='whatsapp'", (mid,)).fetchone()
     if not m:
@@ -23026,13 +22993,12 @@ def api_whatsapp_extensao_modelo_favorito(mid):
 
 
 @app.route('/api/whatsapp/extensao/modelos/<int:mid>/excluir', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
 def api_whatsapp_extensao_modelo_excluir(mid):
     """Exclui um modelo de WhatsApp pela extensão. Só mexe em tipo='whatsapp'
     (não deixa a extensão apagar modelo de email/sms por engano/abuso)."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     conn = db()
     m = conn.execute("SELECT id FROM modelos_conteudo WHERE id=? AND tipo='whatsapp'", (mid,)).fetchone()
     if not m:
@@ -23043,6 +23009,7 @@ def api_whatsapp_extensao_modelo_excluir(mid):
 
 
 @app.route('/api/whatsapp/extensao/funis', methods=['GET', 'OPTIONS'])
+@requer('crm:ler')
 def api_whatsapp_extensao_funis():
     """Lista os funis (sequências de disparo) ativos, cada um com seus passos já
     resolvidos (texto/mídia + delay) — a extensão precisa de tudo pronto pra
@@ -23051,8 +23018,6 @@ def api_whatsapp_extensao_funis():
     na conversa que está na tela — nunca em massa/automático."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     # Mesmo filtro por consultor dos modelos: ?usuario_id=N → funis da pasta
     # DELA (dono_consultor_id=N) + funis de pasta compartilhada/sem pasta
     # (NULL = da corretora). Organização, não segurança — ver comentário em
@@ -23113,14 +23078,13 @@ def api_whatsapp_extensao_funis():
 
 
 @app.route('/api/whatsapp/extensao/funis/<int:fid>/disparado', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
 def api_whatsapp_extensao_funil_disparado(fid):
     """A extensão avisa que terminou de tocar um funil numa conversa — só pra
     contabilizar (vezes_disparado) e registrar no lead, se casou pelo telefone.
     O envio em si aconteceu client-side pela wa-js; aqui é só o registro."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     d = request.get_json(silent=True) or {}
     conn = db()
     f = conn.execute("SELECT nome FROM whatsapp_funis WHERE id=?", (fid,)).fetchone()
@@ -23152,6 +23116,7 @@ def api_whatsapp_extensao_funil_disparado(fid):
 
 
 @app.route('/api/whatsapp/funil/progresso', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
 def api_whatsapp_funil_progresso():
     """A extensão reporta CADA passo de cada funil manual rodando (disparado
     direto de uma conversa) — alimenta o painel 'Acompanhamento de funis' no
@@ -23160,8 +23125,6 @@ def api_whatsapp_funil_progresso():
     lead/conversa — cada disparo na extensão gera seu próprio job_uid)."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False}))
     d = request.json or {}
     try:
         uid = int(d.get('usuario_id'))
@@ -23236,14 +23199,13 @@ def funis_acompanhamento():
 
 
 @app.route('/api/whatsapp/usuarios', methods=['GET', 'OPTIONS'])
+@requer('whatsapp:ler')
 def api_whatsapp_usuarios():
     """Lista os usuários ativos (id + nome) pra extensão popular o seletor de
     'quem está usando a extensão' — usado pra atribuir o responsável do lead
     quando ele é criado automaticamente."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
     conn = db()
     usuarios = conn.execute(
         "SELECT id, nome FROM usuarios WHERE ativo=1 ORDER BY nome").fetchall()
@@ -23647,9 +23609,27 @@ Histórico da Conversa:
 Escreva APENAS o texto da mensagem que o consultor deve enviar, sem aspas, sem markdown, sem explicações extras.
 """
 
-    # A chamada de API foi intencionalmente deixada em branco
-    # até que a decisão entre Gemini e Anthropic seja concluída.
-    resultado = "O Guilherme ainda não decidiu qual modelo de IA será usado. Volte mais tarde!"
+    api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    if not api_key:
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da Anthropic não configurada. Avise o suporte."})), 500
+        
+    try:
+        import anthropic
+    except Exception as e:
+        return _wa_cors(jsonify({"ok": False, "erro": "Pacote anthropic não instalado no servidor."})), 500
+        
+    try:
+        client = anthropic.Anthropic(api_key=api_key, timeout=45.0, max_retries=1)
+        resp = client.messages.create(
+            model="claude-3-5-haiku-20241022",
+            max_tokens=800,
+            system="Você retorna apenas texto limpo, sem markdown e sem aspas, contendo diretamente a mensagem que o consultor vai enviar.",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        resultado = (resp.content[0].text or '').strip()
+    except Exception as e:
+        app.logger.error(f"[GHOSTWRITER] Erro LLM: {e}")
+        return _wa_cors(jsonify({"ok": False, "erro": "Falha de comunicação com a IA. Tente novamente."})), 500
 
     conn = db()
     try:
@@ -23703,6 +23683,7 @@ def api_ia_ghostwriter_feedback():
     return _wa_cors(jsonify({"ok": True}))
 
 @app.route('/api/whatsapp/analisar', methods=['POST', 'OPTIONS'])
+@requer('ia:usar')
 def api_whatsapp_analisar():
     """Recebe a conversa raspada pela extensão e devolve score + sugestões.
     Payload: {telefone, nome, mensagens:[{de:'lead'|'consultor', texto, hora}]}.
@@ -23710,8 +23691,6 @@ def api_whatsapp_analisar():
     achou o lead, registra uma atividade no CRM com o score."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
 
     t_inicio = time.monotonic()
     d = request.json or {}
@@ -29443,12 +29422,11 @@ def cotacao_catalogo_alvos():
 
 
 @app.route('/api/whatsapp/catalogo/proximo', methods=['GET', 'OPTIONS'])
+@requer('crm:ler')
 def api_whatsapp_catalogo_proximo():
     """A extensão pergunta: tem alguma cidade vencida pra varrer agora?"""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({'ok': False, 'erro': 'Chave da extensão inválida'})), 401
     conn = db()
     alvo = _catalogo_alvo_vencido(conn)
     return _wa_cors(jsonify({'ok': True, 'alvo': alvo,
@@ -29456,12 +29434,11 @@ def api_whatsapp_catalogo_proximo():
 
 
 @app.route('/api/whatsapp/catalogo/gravar', methods=['POST', 'OPTIONS'])
+@requer('crm:escrever')
 def api_whatsapp_catalogo_gravar():
     """A extensão devolve o resultado de uma varredura e o alvo é datado."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({'ok': False, 'erro': 'Chave da extensão inválida'})), 401
     d = request.get_json(silent=True) or {}
     conn = db()
     erro = str(d.get('erro') or '')[:200]
@@ -29490,6 +29467,7 @@ def api_whatsapp_catalogo_gravar():
 
 
 @app.route('/api/whatsapp/cotacao', methods=['POST', 'OPTIONS'])
+@requer('cotacao:escrever')
 def api_whatsapp_cotacao():
     """A extensão manda pro JOB a cotação que ela acabou de fazer no Painel.
 
@@ -29497,8 +29475,6 @@ def api_whatsapp_cotacao():
     (chave), não uma sessão de navegador."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({'ok': False, 'erro': 'Chave da extensão inválida'})), 401
     d = request.get_json(silent=True) or {}
     conn = db()
     try:
@@ -29516,6 +29492,7 @@ def api_whatsapp_cotacao():
 
 
 @app.route('/api/whatsapp/cotacao/modalidade', methods=['POST', 'OPTIONS'])
+@requer('cotacao:escrever')
 def api_whatsapp_cotacao_modalidade():
     """A extensão descobriu sozinha como um código se chama.
 
@@ -29525,8 +29502,6 @@ def api_whatsapp_cotacao_modalidade():
     Painel é obrigação nossa, não pergunta pra quem está atendendo cliente."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({'ok': False, 'erro': 'Chave da extensão inválida'})), 401
     d = request.get_json(silent=True) or {}
     try:
         codigo = int(d.get('codigo'))
@@ -29548,12 +29523,11 @@ def api_whatsapp_cotacao_modalidade():
 
 
 @app.route('/api/whatsapp/cotacao/modalidades', methods=['GET', 'OPTIONS'])
+@requer('cotacao:ler')
 def api_whatsapp_cotacao_modalidades():
     """Nomes já batizados, pra extensão mostrar o mesmo rótulo que o site."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    if not _wa_auth_ok():
-        return _wa_cors(jsonify({'ok': False, 'erro': 'Chave da extensão inválida'})), 401
     conn = db()
     return _wa_cors(jsonify({'ok': True, 'modalidades': _modalidades_conhecidas(conn),
                              'faixas': [_FAIXA_JOB_PARA_PAINEL.get(f, f) for f in FAIXAS_ETARIAS]}))
