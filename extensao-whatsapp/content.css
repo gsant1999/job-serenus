@@ -3048,3 +3048,60 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
   background: color-mix(in srgb, var(--job-acento) 10%, transparent);
   border-color: color-mix(in srgb, var(--job-acento) 55%, transparent); color: var(--job-txt);
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   A BARRA DESCE PRO RODAPÉ — bolas ao lado da caixa de digitar
+
+   No cabeçalho ela disputava com o nome do contato, os botões de chamada e a
+   busca do WhatsApp; em janela estreita empurrava o nome pra fora. Aqui ela
+   fica onde a mão já está.
+
+   REGRA QUE MANDA: não pode tapar nada da conversa. Por isso ela vive DENTRO
+   do rodapé, como mais um item da linha — não flutuando por cima. O rodapé
+   cresce alguns pixels; nenhuma mensagem fica escondida atrás dela.
+   ══════════════════════════════════════════════════════════════════════════ */
+.job-barra-conv-pe {
+  display: flex; align-items: center; gap: 6px;
+  flex: 0 0 auto; padding: 0 6px 0 4px;
+  align-self: flex-end; margin-bottom: 9px;
+}
+/* BOLA: o rótulo sai da tela e vive no title. Três rótulos escritos aqui
+   competiriam com o texto que a pessoa está redigindo. */
+.job-bc-bola {
+  width: 34px; height: 34px; padding: 0; border-radius: 50%;
+  justify-content: center; flex: 0 0 auto;
+  background: color-mix(in srgb, var(--job-txt) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--job-txt) 14%, transparent);
+  color: var(--job-txt-fraco);
+  transition: background var(--job-t-rapido) ease, color var(--job-t-rapido) ease,
+              transform var(--job-t-toque) ease-out;
+}
+.job-bc-bola span { display: none; }
+.job-bc-bola svg { width: 16px; height: 16px; }
+.job-bc-bola:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--job-acento) 16%, transparent);
+  border-color: color-mix(in srgb, var(--job-acento) 50%, transparent);
+  color: var(--job-txt);
+}
+.job-bc-bola:active:not(:disabled) { transform: scale(.9); }
+.job-bc-bola:disabled { opacity: .5; cursor: default; }
+/* Enquanto trabalha, a bola mostra o texto curto que o handler escreve
+   ("3/12", "Pronto: 12") — aí ela vira pílula, porque número precisa caber. */
+.job-bc-bola.job-bc-ocupada { width: auto; border-radius: 999px; padding: 0 12px; }
+.job-bc-bola.job-bc-ocupada span { display: inline; font-size: 11px; }
+
+/* Salvar contato mantém o texto: é o único que grava, e é o que ele quis
+   destacar. Continua preenchido com o acento. */
+.job-barra-conv-pe .job-bc-salvar {
+  width: auto; height: 34px; border-radius: 999px; padding: 0 14px;
+}
+.job-barra-conv-pe .job-bc-salvar span { display: inline; }
+.job-barra-conv-pe .job-bc-salvar svg { width: 15px; height: 15px; }
+
+@media (prefers-reduced-motion: reduce) { .job-bc-bola:active { transform: none; } }
+/* Janela estreita: some o texto do salvar também, pra não empurrar o campo. */
+@media (max-width: 900px) {
+  .job-barra-conv-pe .job-bc-salvar { width: 34px; padding: 0; border-radius: 50%; }
+  .job-barra-conv-pe .job-bc-salvar span { display: none; }
+}

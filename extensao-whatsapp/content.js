@@ -2727,17 +2727,34 @@
   //
   // So acrescenta filho no fim do cabecalho, nunca mexe em no existente, e e
   // idempotente (marca .job-barra-conv).
+  // A BARRA DESCE DO CABEÇALHO PRA JUNTO DA CAIXA DE DIGITAR.
+  //
+  // No cabeçalho ela disputava espaço com o nome do contato, com os botões de
+  // chamada e com a busca do WhatsApp — e em janela estreita empurrava o nome
+  // pra fora. Junto do campo de digitar ela fica onde a mão já está, e vira o
+  // que é: três atalhos, não uma segunda barra de navegação.
+  //
+  // Vira BOLA COM ÍCONE: o rótulo sai da tela e vive no `title`, porque três
+  // rótulos escritos ali competiriam com o texto que a pessoa está redigindo.
+  // O de salvar contato mantém o texto, porque é o único que ele quis
+  // destacar — e é o único que grava.
   function _barraConvInjetar() {
     const main = document.querySelector('#main');
     if (!main) return;
-    const cab = main.querySelector('header');
-    if (!cab || cab.querySelector('.job-barra-conv')) return;
+    // O rodapé é onde vive a caixa de digitar. Se ele ainda não existe (a
+    // conversa está carregando), sai quieto: o tique de 1,5s tenta de novo.
+    const pe = main.querySelector('footer');
+    if (!pe || pe.querySelector('.job-barra-conv')) return;
+    // Limpa a versão antiga do cabeçalho, pra quem já tinha a extensão aberta
+    // quando a atualização chegou não ficar com as duas.
+    const velha = main.querySelector('header .job-barra-conv');
+    if (velha) velha.remove();
     const box = document.createElement('div');
-    box.className = 'job-barra-conv';
+    box.className = 'job-barra-conv job-barra-conv-pe';
     box.innerHTML =
-      '<button type="button" class="job-bc-btn" data-ac="transcrever" title="Transcrever todos os áudios desta conversa">' +
+      '<button type="button" class="job-bc-btn job-bc-bola" data-ac="transcrever" title="Transcrever todos os áudios desta conversa">' +
         _ICO_TRANSCREVER + '<span>Transcrever tudo</span></button>' +
-      '<button type="button" class="job-bc-btn" data-ac="copiar" title="Copiar a conversa inteira: texto e áudio transcrito, na ordem, com hora e quem falou">' +
+      '<button type="button" class="job-bc-btn job-bc-bola" data-ac="copiar" title="Copiar a conversa inteira: texto e áudio transcrito, na ordem, com hora e quem falou">' +
         _ICO_COPIAR + '<span>Copiar conversa</span></button>' +
       // SALVAR CONTATO MORA AQUI, ao lado do nome da pessoa.
       //
@@ -2751,10 +2768,28 @@
       '<button type="button" class="job-bc-btn job-bc-salvar" data-ac="salvarcontato" ' +
         'title="Salva este contato no seu WhatsApp, com o nome no padrão do JOB. Sincroniza pro celular.">' +
         _ICO_SALVAR_CONTATO + '<span>Salvar contato</span></button>';
-    cab.appendChild(box);
+    // No começo do rodapé: antes do "+" e do campo, que é a ordem de leitura
+    // da esquerda pra direita e não empurra o botão de enviar.
+    pe.insertBefore(box, pe.firstChild);
 
     const btn = (ac) => box.querySelector('[data-ac="' + ac + '"]');
-    const rotulo = (b, t) => { const e = b.querySelector('span'); if (e) e.textContent = t; };
+    // Guarda o rótulo de repouso de cada um: é ele que diz quando a bola
+    // voltou ao normal.
+    box.querySelectorAll('.job-bc-bola').forEach((b) => {
+      const e = b.querySelector('span');
+      b.dataset.rot = e ? (e.textContent || '') : '';
+    });
+    // Enquanto trabalha, a bola precisa mostrar número ("3/12") — e número não
+    // cabe num círculo de 34px. Ela vira pílula enquanto o texto é diferente
+    // do rótulo de repouso, e volta a ser bola quando termina.
+    const rotulo = (b, t) => {
+      const e = b.querySelector('span');
+      if (e) e.textContent = t;
+      if (b.classList.contains('job-bc-bola')) {
+        const base = b.dataset.rot || '';
+        b.classList.toggle('job-bc-ocupada', !!base && t !== base);
+      }
+    };
 
     const bt = btn('transcrever');
     bt.addEventListener('click', async (ev) => {
@@ -6441,7 +6476,14 @@
       return _secHead('Leads', _INBOX_SUB) +
         '<div class="job-sem-analise">' +
           '<div class="job-sem-analise-t">Nenhum lead esperando</div>' +
-          '<div class="job-sem-analise-txt">Está tudo atendido. Quando cair um lead pra você, ele aparece aqui na hora.</div>' +
+          // "Está tudo atendido" logo acima de "267 sem lead no CRM" fazia
+          // parecer contradição. São contas diferentes: esta lista conta os
+          // leads QUE CAÍRAM PRA VOCÊ e ainda não foram atendidos; aquele
+          // número conta conversas que não viraram lead nenhum. Dizer o que
+          // se conta resolve, e é mais honesto que "tudo atendido".
+          '<div class="job-sem-analise-txt">Nenhum lead novo aguardando o seu primeiro contato. ' +
+            'Isto conta só os que caíram pra você — conversa sem lead no CRM é outra coisa, ' +
+            'e aparece no número abaixo.</div>' +
         '</div>' + _blocoSincLid();
     }
     var html = _secHead('Leads', _INBOX_SUB, _inboxCache.length) + '<div class="job-inbox-lista">';
