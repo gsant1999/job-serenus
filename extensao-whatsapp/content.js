@@ -1243,6 +1243,14 @@
     try {
       new ResizeObserver(() => { try { _trilhoMarcaSincronizar(); } catch (e) {} }).observe(trilho);
     } catch (e) { /* navegador sem ResizeObserver: o resize da janela cobre */ }
+    // A fonte da marca carrega depois do primeiro desenho e muda a altura dos
+    // itens: quem mediu antes fica com a pílula em cima do item errado. A
+    // bancada pegou isso; aqui é barato garantir.
+    try {
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => { try { _trilhoMarcaSincronizar(); } catch (e) {} });
+      }
+    } catch (e) { /* sem Font Loading API: o ResizeObserver cobre */ }
     document.getElementById('job-trilho-config-btn').addEventListener('click', (e) => {
       // A engrenagem abre a SEÇÃO, não mais o balãozinho. O balão cabia três
       // linhas e a configuração cresceu — entrar no sistema não cabe num

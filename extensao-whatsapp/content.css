@@ -110,6 +110,17 @@ body[data-job-tema="claro"] {
      Superfície flutuante é vidro: deixa passar o que está atrás em vez de
      tapar. O peso do desfoque diz o tamanho — quanto maior a superfície,
      mais grosso o vidro. */
+  /* ── PAPÉIS DE COR ──
+     A base de dados de design confirma o que faltava aqui: toda cor de
+     superfície precisa do par "texto que vai por cima". Sem isso, botão novo
+     com fundo colorido herda a cor do texto do tema e às vezes some.
+     `ring` é a cor do foco de teclado, uma só no projeto inteiro. */
+  --job-sobre-acento: var(--job-acento-txt);
+  --job-sobre-danger: #ffffff;
+  --job-sobre-warn: #241503;
+  --job-sobre-info: #ffffff;
+  --job-anel: color-mix(in srgb, var(--job-acento) 70%, transparent);
+
   --job-vidro-leve: blur(14px) saturate(150%);
   --job-vidro: blur(22px) saturate(160%);
   --job-vidro-forte: blur(34px) saturate(170%);
@@ -254,7 +265,7 @@ html.job-push-esquerda #job-trilho {
 .job-trilho-item:focus { outline: none; }
 .job-trilho-item:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--job-acento) 70%, transparent);
+  box-shadow: 0 0 0 2px var(--job-anel);
 }
 
 /* ══ A SELEÇÃO DESLIZA ═════════════════════════════════════════════════
@@ -391,7 +402,7 @@ html.job-push-esquerda .job-trilho-marca::before {
 .job-trilho-mini:hover { background: color-mix(in srgb, var(--job-txt) 7%, transparent); color: var(--job-txt); }
 .job-trilho-mini:active { transform: scale(.92); }
 .job-trilho-mini:focus { outline: none; }
-.job-trilho-mini:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--job-acento) 70%, transparent); }
+.job-trilho-mini:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
 .job-trilho-mini { transition: color .16s ease, background .16s ease, transform .09s ease-out; }
 @media (prefers-reduced-motion: reduce) { .job-trilho-mini:active { transform: none; } }
 .job-trilho-mini svg { width: 16px; height: 16px; }
@@ -478,7 +489,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-painel-doc-fechar:hover { color: var(--job-txt); background: color-mix(in srgb, var(--job-txt) 8%, transparent); }
 .job-painel-doc-fechar:active { transform: scale(.9); }
 .job-painel-doc-fechar:focus { outline: none; }
-.job-painel-doc-fechar:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--job-acento) 70%, transparent); }
+.job-painel-doc-fechar:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
 @media (prefers-reduced-motion: reduce) { .job-painel-doc-fechar:active { transform: none; } }
 .job-painel-doc-corpo { padding: 12px; overflow-y: auto; flex: 1; }
 
@@ -1144,6 +1155,33 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 @media (prefers-reduced-motion: reduce) {
   .job-cot-op, .job-cot-bt-mandar, .job-cot-barra i { transition: none; }
   .job-cot-op:hover, .job-cot-bt-mandar:hover:not(:disabled) { transform: none; }
+}
+
+/* ══ VIBRÂNCIA SOBRE VIDRO ═════════════════════════════════════════════
+   O painel e o trilho viraram superfícies translúcidas, e texto calibrado
+   pra fundo opaco não sobrevive nelas: o desfoque do que está atrás come as
+   hastes finas e a leitura fica "suja" mesmo com contraste nominal em dia.
+   A correção é a da própria régua: um pouco mais de peso, um pouco mais de
+   contraste e um respiro no tracking — só no texto secundário, que é o que
+   sofre. Título e corpo já têm peso suficiente.
+   E a COR fica na camada sólida: nada de tinta no texto que flutua. */
+#job-painel-doc .job-sec-sub,
+#job-painel-doc .job-sem-analise-txt,
+#job-painel-doc .job-fila-lead,
+#job-painel-doc .job-modelo-preview {
+  font-weight: 450;
+  letter-spacing: .004em;
+  color: color-mix(in srgb, var(--job-txt-fraco) 88%, var(--job-txt));
+}
+@media (prefers-reduced-transparency: reduce) {
+  /* Sem vidro, o texto volta ao peso normal: o reforço existia por causa do
+     desfoque, e sem ele vira só texto grosso à toa. */
+  #job-painel-doc .job-sec-sub,
+  #job-painel-doc .job-sem-analise-txt,
+  #job-painel-doc .job-fila-lead,
+  #job-painel-doc .job-modelo-preview {
+    font-weight: 400; letter-spacing: var(--job-tk-sm); color: var(--job-txt-fraco);
+  }
 }
 
 /* ══ CABEÇALHO DE SEÇÃO — o mesmo nas onze telas ═══════════════════════

@@ -127,14 +127,20 @@ for (const tema of ['escuro','claro']) {
 // dos DOIS lado a lado, então copio as variáveis do bloco claro para o palco claro.
 // A pílula é MEDIDA do item ativo, igual ao produto: posição chutada aqui
 // esconderia justamente o defeito que a bancada existe pra pegar.
-requestAnimationFrame(() => document.querySelectorAll('.palco').forEach((p) => {
+// MEDIR DEPOIS DO LAYOUT ASSENTAR. Com requestAnimationFrame a medida saía
+// antes de a fonte carregar: os itens mudavam de altura em seguida e a pílula
+// ficava três posições acima. Mesma armadilha vale no produto.
+const _medir = () => document.querySelectorAll('.palco').forEach((p) => {
   const tr = p.querySelector('#job-trilho'), m = p.querySelector('.job-trilho-marca');
   const at = p.querySelector('.job-trilho-item-ativo');
   if (!tr || !m || !at) return;
   const rt = tr.getBoundingClientRect(), ri = at.getBoundingClientRect();
   m.style.setProperty('--y', Math.round(ri.top - rt.top) + 'px');
   m.style.setProperty('--h', Math.round(ri.height) + 'px');
-}));
+});
+window.addEventListener('load', _medir);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(_medir);
+setTimeout(_medir, 300);
 
 (function(){
   const alvo = document.querySelector('.lado.claro .palco');
