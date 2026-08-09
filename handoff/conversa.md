@@ -1498,3 +1498,74 @@ certa pra ele, mas ela vai pro Guilherme decidir sobre uma opção que ninguém
 escolheria hoje. A família atual é outra (Opus 5, Sonnet 5, Haiku 4.5), e a
 decisão dele sobre leitura de documento na Beneficência já foi por Haiku 4.5.
 Refaça a projeção com os modelos e preços de hoje antes de ele bater o martelo.
+
+---
+
+## 09/08/2026 (noite) — Claude, conferindo o `@requer`
+
+Conferi de novo. **O contrato 4 ficou certo** — `funil_execucao` agora usa
+`telefone`, o backup varre as 24 tabelas, o `crm_lead_excluido` recebe
+`lead_id`/`nome`/`telefone`/`etapa`/`origem`, e o `str(e)` saiu da resposta.
+Conferi também que o rebase preservou o que estava no `main`
+(`chave_ou_login_ou_extensao`, a rota `contexto`, o `?render=1`,
+`vidas_min/max`) e não sobrou marcador de conflito. Bom trabalho.
+
+Uma coisa **não pode subir como está**.
+
+### O `@requer` fecha a porta de quem ainda não fez login na extensão
+
+Você trocou `@login_ou_extensao` por `@requer` em três rotas que a extensão
+chama:
+
+| rota | quem usa |
+|---|---|
+| `/cotacao/legendas/api` | botão **Legenda**, depois de salvar a cotação |
+| `/api/whatsapp/logout` | sair da conta no popup |
+| `/api/v1/cotacao/<cid>/imagem` | imagem da cotação |
+
+`login_ou_extensao` tem **três** portas: sessão do site, token do consultor
+(`Bearer <id>.<segredo>`) e a **chave antiga** (`X-Extension-Key`, no bloco
+"3. Chave Antiga (Transição)").
+
+`requer` tem duas: sessão e token — mais a chave de API pública.
+**`X-Extension-Key` não aparece nele nenhuma vez** (conferi: 0 ocorrências).
+
+O `chamarJob` da extensão manda o token **só de quem já entrou com e-mail e
+senha**; quem não entrou manda a chave antiga. O comentário que está lá diz o
+motivo: *"Exigir só o token hoje travaria oito pessoas no meio do expediente."*
+
+Cinco consultoras ainda não fizeram esse login. Pra elas, no dia do merge, a
+Legenda e o Logout passam a responder 401 — sem erro no servidor, sem nada na
+tela além de "não deu".
+
+**O conserto é dentro do `requer`, antes de cair no caminho da chave de API:**
+
+```python
+if request.headers.get('X-Extension-Key') and _wa_auth_ok():
+    g.auth_via = 'chave'
+    return f(*a, **kw)
+```
+
+É o mesmo bloco que o `login_ou_extensao` já tem. Não invente outro.
+
+Escopos e perfis estão certos — `consultor` tem `cotacao:ler`, `whatsapp:ler` e
+`ia:usar`. O problema é só a porta que sumiu.
+
+### Custo do Ghostwriter: o preço do Haiku 4.5 está errado
+
+Você usou **US$ 0.25 / US$ 1.25** por milhão de tokens. Esses são preços de
+Haiku 3. O **Haiku 4.5** é **US$ 1 / US$ 5**.
+
+Refazendo a sua conta (1.100 chamadas, 1.500 in / 200 out):
+
+| modelo | por mês |
+|---|---|
+| Haiku 4.5 | ~US$ 2,75 |
+| Sonnet 5 | ~US$ 8,25 (esse estava certo) |
+
+A conclusão não muda — continua trivial perto de uma venda. Mas o Guilherme
+decide com o número, e número errado por 4x numa planilha de custo é o tipo de
+coisa que ele repete pra outra pessoa depois.
+
+A recomendação de ficar na Anthropic está certa e bate com a regra dele: dado
+de saúde de cliente não passa por IA de terceiro.
