@@ -965,9 +965,25 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 /* Topo de navegacao: voltar, onde estamos, e quanto ja foi cotado. */
 .job-cot-topo { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 
-.job-cot-voltar:hover { border-color: var(--job-acento); }
-.job-cot-voltar .seta { width: 7px; height: 7px; border-left: 2px solid var(--job-txt);
-  border-bottom: 2px solid var(--job-txt); transform: rotate(45deg) translate(1px, -1px); }
+/* A SETA E O BOTAO "VOLTAR" SAO DUAS COISAS.
+   Eu fundi as classes duplicadas desta folha e as duas caiam no mesmo nome:
+   ganhou `width:100%; border:none`, e a seta virou um chevron solto no meio
+   da tela, empurrando a migalha. Agora a seta e .job-cot-seta e leva o NOME
+   DO DESTINO junto — "< Operadoras" diz pra onde volta; "<" sozinho nao. */
+.job-cot-seta { flex: none; display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px 0 8px; border-radius: 9px; cursor: pointer;
+  background: var(--job-vidro-leve); border: 1px solid var(--job-borda);
+  font-family: var(--job-ui); font-size: 12px; font-weight: 600;
+  letter-spacing: var(--job-tk-xs); color: var(--job-txt-fraco);
+  max-width: 52%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  transition: color var(--job-t-toque) var(--job-mv-saida),
+              border-color var(--job-t-toque) var(--job-mv-saida),
+              background var(--job-t-toque) var(--job-mv-saida); }
+.job-cot-seta:hover { color: var(--job-txt); border-color: var(--job-acento); }
+.job-cot-seta:active { transform: scale(.97); }
+.job-cot-seta .seta { flex: none; width: 7px; height: 7px;
+  border-left: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translate(1px, -1px); }
 .job-cot-migalha { flex: 1; min-width: 0; text-align: left; background: none; border: none;
   padding: 0; font-family: inherit; font-size: 11.5px; color: var(--job-txt-fraco);
   cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

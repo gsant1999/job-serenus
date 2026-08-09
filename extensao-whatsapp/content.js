@@ -5654,11 +5654,17 @@
   // trocar de cidade exigia voltar duas telas às cegas. E sem o resumo, o que
   // ja foi cotado sumia da vista assim que ele entrava na proxima operadora —
   // ele perdia a conta do que tinha e recomecava.
-  function _cotTopo(aoVoltar) {
+  // A SETA DIZ PRA ONDE VOLTA.
+  //
+  // Era um chevron sozinho. Chevron sozinho obriga a lembrar de onde se veio —
+  // e nesta aba se vem de quatro telas diferentes. `rotulo` é o nome da tela
+  // de destino, escrito ao lado da seta.
+  function _cotTopo(aoVoltar, rotulo) {
     const n = _cotFeitas.reduce((a, f) => a + f.planos.length, 0);
     return '<div class="job-cot-topo">' +
-      '<button type="button" class="job-cot-voltar" id="job-cot-seta" title="Voltar">' +
-        '<span class="seta"></span></button>' +
+      '<button type="button" class="job-cot-seta" id="job-cot-seta" ' +
+        'title="Voltar para ' + esc(rotulo || 'a tela anterior') + '">' +
+        '<span class="seta"></span>' + esc(rotulo || 'Voltar') + '</button>' +
       '<button type="button" class="job-cot-migalha" id="job-cot-trocar-base" ' +
         'title="Mudar cidade, tipo ou quem vai usar">' +
         esc(_cot && _cot.cidade ? _cot.cidade : '') +
@@ -5683,21 +5689,39 @@
     return { cidade: _cot.cidade, modalidade: _cot.modalidade, vidas: _cot.vidas,
              titulo: (nomeDoContato() || 'Cliente') + ' · ' + _cot.cidade + ' · ' + _cotRotulo(_cot.modalidade) };
   }
-  function _cotEsperando(txt, sub) {
-    setCorpoSecao(_telaCarregando(txt, sub));
+  // TELA DE ESPERA COM SAIDA.
+  //
+  // Buscar operadora ou preco no Painel leva segundos e as vezes nao volta.
+  // Sem botao aqui, o consultor ficava presto numa tela sem nada clicavel no
+  // meio do atendimento — a unica saida era fechar o painel inteiro.
+  //
+  // `_cotGer` e o que faz o botao valer: sair incrementa a geracao, e a
+  // resposta que chegar depois ve que a geracao mudou e nao pinta por cima da
+  // tela onde ele ja esta. Botao que so navega, sem isso, seria pior que
+  // botao nenhum: a tela voltaria sozinha alguns segundos depois.
+  function _cotEsperando(txt, sub, aoVoltar, rotulo) {
+    setCorpoSecao(
+      (aoVoltar ? _cotTopo(aoVoltar, rotulo) : '') + _telaCarregando(txt, sub));
+    if (aoVoltar) _cotTopoLigar(() => { _cotGer++; aoVoltar(); });
   }
+  // Geracao da navegacao. Sobe a cada saida; resposta de geracao velha e
+  // descartada em vez de repintar.
+  let _cotGer = 0;
 
   async function _cotBuscarOperadoras() {
-    _cotEsperando('Vendo quem atende ' + _cot.cidade + '…');
+    _cotEsperando('Vendo quem atende ' + _cot.cidade + '…', '', abrirSecaoCotarInline, 'Cotar agora');
     const b = _cotBase();
     // reaproveitar: a pergunta "quem atende essa cidade?" não merece uma cotação
     // nova no sistema deles. Dezenas de cotações vazias com o nome do consultor
     // num dia de trabalho é rastro do tipo que fica.
+    const g = _cotGer;
     const rc = await _cotPasso(Object.assign({ acao: 'criar', reaproveitar: true }, b));
+    if (g !== _cotGer) return;
     if (!rc.ok) { _cotErro(rc.motivo, abrirSecaoCotarInline); return; }
     _cot.cotacaoId = rc.dados.cotacaoId;
     await _cotRespira(400, 1100);
     const r = await _cotPasso(Object.assign({ acao: 'operadoras', cotacaoId: _cot.cotacaoId }, b));
+    if (g !== _cotGer) return;
     if (!r.ok) { _cotErro(r.motivo, abrirSecaoCotarInline); return; }
     _cot.operadoras = (r.dados && r.dados.operadoras) || [];
     _cotPintarOperadoras();
@@ -5845,7 +5869,7 @@
     const ehPME = String(_cot.modalidade) === '2';
     const totalVidas = _cot.totalVidas || 0;
     setCorpoSecao(
-      _cotCabecalho(_cotTopo(abrirSecaoCotarInline), 'Operadoras',
+      _cotCabecalho(_cotTopo(abrirSecaoCotarInline, 'Cotar agora'), 'Operadoras',
         ops.length ? '<span class="job-sec-cont">' + ops.length + '</span>' : '') +
       '<div class="job-cot-wrap">' +
       '<div class="job-sec-sub">Quem atende essa combinação. Escolha uma.</div>' +
@@ -5894,9 +5918,11 @@
   }
 
   async function _cotBuscarPlanos(op) {
-    _cotEsperando('Vendo os planos da ' + op.nome + '…');
+    _cotEsperando('Vendo os planos da ' + op.nome + '…', '', _cotPintarOperadoras, 'Operadoras');
+    const g = _cotGer;
     const r = await _cotPasso(Object.assign({ acao: 'planos', cotacaoId: _cot.cotacaoId,
                                              operadoraId: op.id }, _cotBase()));
+    if (g !== _cotGer) return;            // ele saiu; nao pinta por cima
     if (!r.ok) { _cotErro(r.motivo, _cotPintarOperadoras); return; }
     _cot.operadoraAtual = op;
     _cot.planos = (r.dados && r.dados.planos) || [];
@@ -5951,7 +5977,7 @@
 
     const logoTopo = _cotLogos[_cotChaveLogo(_cot.operadoraAtual.nome)];
     setCorpoSecao(
-      _cotCabecalho(_cotTopo(_cotPintarOperadoras), esc(_cot.operadoraAtual.nome)) +
+      _cotCabecalho(_cotTopo(_cotPintarOperadoras, 'Operadoras'), esc(_cot.operadoraAtual.nome)) +
       '<div class="job-cot-wrap">' +
       (logoTopo ? '<img class="job-cot-logo-topo" src="' + esc(logoTopo) + '" alt="">' : '') +
       (comuns.length
@@ -6034,23 +6060,30 @@
   async function _cotPrecos(alvo) {
     const fila = _cotEmbaralhar(alvo);
     const feitos = [];
+    // Sair no meio da busca PARA a busca. Sem a guarda, a seta so trocava a
+    // tela e o laco seguia batendo no Painel por tras — rastro de maquina
+    // pedindo preco de uma cotacao que ninguem esta mais olhando.
+    const g = _cotGer;
     for (let i = 0; i < fila.length; i++) {
-      setCorpoSecao(_secHead('Buscando preços',
+      setCorpoSecao(_cotTopo(_cotPintarPlanos, 'Planos') +
+        _secHead('Buscando preços',
         esc(_cot.operadoraAtual.nome), (i + 1) + '/' + fila.length) +
         '<div class="job-cot-wrap">' +
         '<div class="job-cot-barra"><i style="width:' + Math.round((i / fila.length) * 100) + '%"></i></div>' +
         (feitos.length ? _cotCartoes(feitos) : '') +
         '<div class="job-cot-dica">Um plano por vez, com pausa entre eles — é assim que o Painel é usado à mão.</div>' +
       '</div>');
+      _cotTopoLigar(() => { _cotGer++; _cotPintarPlanos(); });
       const r = await _cotPasso(Object.assign({ acao: 'preco', cotacaoId: _cot.cotacaoId,
                                                plano: fila[i] }, _cotBase()));
+      if (g !== _cotGer) return;
       const cartao = (r.ok && r.dados && r.dados.cartao) || null;
       // Sem valor NÃO inventa e não some: entra marcado como não cotado. Preço
       // errado numa proposta é pior que preço faltando.
       feitos.push(Object.assign({}, fila[i], cartao
         ? { total: cartao.total, faixas: cartao.faixas, conferido: cartao.conferido }
         : { total: null, motivo: r.motivo || 'sem_valor_na_resposta' }));
-      if (i + 1 < fila.length) await _cotRespira(240, 780);
+      if (i + 1 < fila.length) { await _cotRespira(240, 780); if (g !== _cotGer) return; }
     }
     feitos.sort((a, b) => (a.total == null) - (b.total == null) || (a.total - b.total));
     _cot.resultado = feitos;
@@ -6108,7 +6141,7 @@
     // Sem subtítulo: a migalha do topo já diz cidade, tipo e vidas, e ainda
     // é clicável pra mudar. Repetir logo abaixo é eco.
     setCorpoSecao(
-      _cotCabecalho(_cotTopo(_cotPintarOperadoras), 'Comparativo',
+      _cotCabecalho(_cotTopo(_cotPintarOperadoras, 'Operadoras'), 'Comparativo',
         comPreco.length ? '<span class="job-sec-cont">' + comPreco.length + '</span>' : '') +
       '<div class="job-cot-wrap">' +
       grupos +
