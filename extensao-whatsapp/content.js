@@ -1394,9 +1394,11 @@
     if (!item) { m.classList.remove('on'); return; }
     const rt = trilho.getBoundingClientRect();
     const ri = item.getBoundingClientRect();
-    // 8px de folga em cima e embaixo: a barra marca o item, não o encosta.
-    m.style.setProperty('--y', Math.round(ri.top - rt.top + trilho.scrollTop + 8) + 'px');
-    m.style.setProperty('--h', Math.max(0, Math.round(ri.height - 16)) + 'px');
+    // A marca AGORA É a pílula do item: mesma posição e mesma altura, sem
+    // folga. O recuo lateral é do CSS (left/right 6px), pra não depender de
+    // medida aqui.
+    m.style.setProperty('--y', Math.round(ri.top - rt.top + trilho.scrollTop) + 'px');
+    m.style.setProperty('--h', Math.max(0, Math.round(ri.height)) + 'px');
     m.classList.add('on');
   }
 

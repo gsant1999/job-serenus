@@ -79,15 +79,41 @@ html.job-push-esquerda.job-push-painel { margin-left: calc(var(--job-viz, 0px) +
 html.job-overlay-painel:not(.job-push-esquerda) { margin-right: calc(var(--job-viz, 0px) + 72px) !important; }
 html.job-push-esquerda.job-overlay-painel { margin-left: calc(var(--job-viz, 0px) + 72px) !important; }
 
+/* ══ O TRILHO É MATERIAL, NÃO UMA LAJE ═════════════════════════════════
+   Era um retângulo opaco de cor própria colado em cima do WhatsApp — e com o
+   tema claro ligado virava uma placa branca no meio de uma tela escura, que
+   é exatamente o que não pode acontecer: uma superfície flutuante tem que
+   PERTENCER ao que está atrás dela, não brigar.
+
+   Agora é vidro: tinta semitransparente por cima do que existe, com desfoque
+   e um pouco de saturação pra cor de trás vazar. Ele continua sendo o mesmo
+   trilho nos dois temas, mas deixa de ser um bloco estranho na tela.
+
+   A borda de luz no topo da lateral é a mesma ideia do material da Apple: a
+   quina do vidro pega a luz e é isso que faz o olho ler "camada", em vez de
+   "recorte". */
 #job-trilho {
   position: fixed; top: 0; right: var(--job-viz, 0px); bottom: 0; width: 72px;
   z-index: 2147483000;
   display: flex; flex-direction: column; align-items: center;
-  background: var(--job-bg1); border-left: 1px solid var(--job-bg3);
-  padding-top: 16px; gap: 4px;
+  background: color-mix(in srgb, var(--job-bg1) 72%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  backdrop-filter: blur(22px) saturate(160%);
+  border-left: 1px solid color-mix(in srgb, var(--job-txt) 10%, transparent);
+  box-shadow: -1px 0 0 rgba(255,255,255,.05) inset, -14px 0 34px rgba(0,0,0,.22);
+  padding-top: 16px; gap: 2px;
   font-family: 'NunitoJOB', -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
-html.job-push-esquerda #job-trilho { right: auto; left: var(--job-viz, 0px); border-left: none; border-right: 1px solid var(--job-bg3); }
+html.job-push-esquerda #job-trilho {
+  right: auto; left: var(--job-viz, 0px);
+  border-left: none; border-right: 1px solid color-mix(in srgb, var(--job-txt) 10%, transparent);
+  box-shadow: 1px 0 0 rgba(255,255,255,.05) inset, 14px 0 34px rgba(0,0,0,.22);
+}
+/* Quem pede menos transparência recebe a superfície fechada — legibilidade
+   antes do efeito. */
+@media (prefers-reduced-transparency: reduce) {
+  #job-trilho { background: var(--job-bg1); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
 
 /* Logo JOB: o arquivo REAL dos arcos do sistema (logo_arcos.png) girando,
    "JOB" parado no meio — idêntico à sidebar do site (spinSlow). */
@@ -103,19 +129,32 @@ html.job-push-esquerda #job-trilho { right: auto; left: var(--job-viz, 0px); bor
 @keyframes jobLogoSpin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .job-logo-arcos { animation: none; } }
 
+/* Item: pílula arredondada com folga nas laterais, não faixa de ponta a
+   ponta. A faixa cheia empurra o realce até a quina do trilho e briga com a
+   borda; a pílula flutua dentro dele, que é o que faz o realce parecer um
+   objeto e não um recorte do fundo. */
 .job-trilho-item {
   position: relative;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
-  width: 100%; padding: 11px 4px; background: transparent; border: none;
-  color: var(--job-txt-fraco); cursor: pointer; font-family: inherit; transition: color .12s, background .12s;
+  width: calc(100% - 12px); padding: 9px 4px; border-radius: 12px;
+  background: transparent; border: none;
+  color: var(--job-txt-fraco); cursor: pointer; font-family: inherit;
+  transition: color .16s ease, background .16s ease, transform .09s ease-out;
 }
-.job-trilho-item:hover { color: var(--job-txt); background: rgba(255,255,255,.04); }
-.job-trilho-item-ativo { color: var(--job-txt); background: rgba(120,120,140,.1); }
+.job-trilho-item:hover { color: var(--job-txt); background: color-mix(in srgb, var(--job-txt) 7%, transparent); }
+.job-trilho-item-ativo { color: var(--job-txt); background: color-mix(in srgb, var(--job-txt) 11%, transparent); }
 /* Resposta no APERTO. O trilho é o que mais se clica na extensão e era a
    única coisa que não dava sinal nenhum antes de a seção abrir. */
 .job-trilho-item:active { transform: scale(.94); }
-.job-trilho-item { transition: color .12s, background .12s, transform .09s ease-out; }
-.job-trilho-item:focus-visible { outline: 2px solid var(--job-acento); outline-offset: -3px; }
+/* ANEL DE FOCO SÓ PRA TECLADO, e por sombra e não por outline: o
+   `outline: 2px` com offset negativo desenhava um retângulo verde duro por
+   dentro do item — era o quadrado que aparecia em volta do item clicado.
+   Sombra acompanha o arredondamento da pílula e não sobrepõe o conteúdo. */
+.job-trilho-item:focus { outline: none; }
+.job-trilho-item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--job-acento) 70%, transparent);
+}
 
 /* ══ INDICADOR ATIVO QUE DESLIZA ═══════════════════════════════════════
    Cada item tinha o seu próprio ::before: ao trocar de seção, a barra sumia
@@ -124,19 +163,38 @@ html.job-push-esquerda #job-trilho { right: auto; left: var(--job-viz, 0px); bor
    Agora existe UMA barra, no trilho, que anda até o item. Ela nasce onde o
    item está (o JS mede e escreve --y/--h), então trocar de seção no meio da
    animação apenas muda o destino: o movimento nunca recomeça do zero. */
-#job-trilho { position: relative; }
+/* NÃO reponha `#job-trilho { position: relative }` aqui: esta regra vem DEPOIS
+   do `position: fixed` lá em cima, com a mesma especificidade, e ganhava — o
+   trilho caía no fluxo da página e ia parar no meio do WhatsApp, empurrando a
+   lista de conversas. `fixed` já é contexto de posicionamento pros filhos
+   absolutos; não precisava de nada. */
 .job-trilho-marca {
-  position: absolute; left: 0; width: 3px; border-radius: 0 3px 3px 0;
+  position: absolute; left: 6px; right: 6px; border-radius: 12px;
   top: 0; height: var(--h, 0px);
   transform: translateY(var(--y, 0px));
-  background: linear-gradient(135deg,var(--job-acento) 0%,#3b82f6 50%,#8b5cf6 100%);
-  opacity: 0; pointer-events: none;
+  background: color-mix(in srgb, var(--job-txt) 11%, transparent);
+  opacity: 0; pointer-events: none; z-index: 0;
   /* Curva com um respingo de ultrapassagem: o gesto foi um clique, então o
      movimento pode carregar um pouco de impulso. Nada de bounce longo. */
   transition: transform .34s cubic-bezier(.22,1.02,.36,1), height .34s cubic-bezier(.22,1.02,.36,1), opacity .16s ease;
 }
 .job-trilho-marca.on { opacity: 1; }
-html.job-push-esquerda .job-trilho-marca { left: auto; right: 0; border-radius: 3px 0 0 3px; }
+/* O traço da marca vive DENTRO da pílula, encostado na quina do trilho: é o
+   que diz "esta é a seção", enquanto o preenchimento diz "é aqui que você
+   está". Antes ele era o único sinal, e ficava solto na borda. */
+.job-trilho-marca::before {
+  content: ""; position: absolute; left: -6px; top: 9px; bottom: 9px; width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(160deg,var(--job-acento) 0%,#3b82f6 55%,#8b5cf6 100%);
+}
+html.job-push-esquerda .job-trilho-marca::before {
+  left: auto; right: -6px; border-radius: 3px 0 0 3px;
+}
+/* O item ativo perde o fundo próprio: quem desenha o realce agora é a marca,
+   que desliza. Manter os dois faria a cor aparecer no destino ANTES de a
+   pílula chegar — o pulo que a animação existe pra eliminar. */
+.job-trilho-item-ativo { background: transparent; }
+.job-trilho-item { z-index: 1; }
 @media (prefers-reduced-motion: reduce) {
   .job-trilho-marca { transition: opacity .16s ease; }
   .job-trilho-item { transition: color .12s, background .12s; }
@@ -158,13 +216,15 @@ html.job-push-esquerda .job-trilho-marca { left: auto; right: 0; border-radius: 
    a ignorar marca — e aí a que importa some junto. Quando tudo destaca,
    nada destaca. */
 .job-trilho-item-badge, .job-fila-badge {
-  position: absolute; top: 4px; right: 9px;
+  position: absolute; top: 2px; right: 4px;
   background: #f43f5e; color: #fff;
   font-size: 9px; font-weight: 700; letter-spacing: .01em;
   min-width: 16px; height: 16px; border-radius: 999px;
   display: flex; align-items: center; justify-content: center; padding: 0 4px;
   font-variant-numeric: tabular-nums;
-  box-shadow: 0 0 0 2px var(--job-bg1);
+  /* O anel era da cor do trilho antigo, que era opaco. Sobre vidro, uma cor
+     chapada aparece como um halo. Sombra difusa separa sem desenhar borda. */
+  box-shadow: 0 1px 3px rgba(0,0,0,.35);
 }
 /* Informativo (existe, mas não está atrasado) usa o acento da marca; o rosa
    fica reservado pro que passou da hora. */
@@ -172,10 +232,10 @@ html.job-push-esquerda .job-trilho-marca { left: auto; right: 0; border-radius: 
   background: var(--job-acento); color: #06231b;
 }
 .job-trilho-ponto {
-  position: absolute; top: 8px; right: 12px;
+  position: absolute; top: 7px; right: 8px;
   width: 6px; height: 6px; border-radius: 50%;
-  background: var(--job-acento); opacity: .9;
-  box-shadow: 0 0 0 2px var(--job-bg1);
+  background: var(--job-acento); opacity: .95;
+  box-shadow: 0 1px 3px rgba(0,0,0,.35);
 }
 .job-trilho-ponto[hidden] { display: none; }
 /* display:flex acima ganha do [hidden] do navegador (mesma especificidade,
@@ -190,19 +250,25 @@ html.job-push-esquerda .job-trilho-marca { left: auto; right: 0; border-radius: 
   position: relative; margin-top: 4px; margin-bottom: 8px; text-align: center;
   cursor: default;
 }
+/* A versão não é uma etiqueta a ser lida: é um dado que se consulta quando
+   dá problema. Como pílula com moldura ela pesava mais que os próprios itens
+   do menu. Vira texto fraco — e só ganha corpo quando HÁ atualização, que é
+   quando ela deixa de ser rodapé e vira aviso. */
 .job-trilho-versao-num {
-  display: inline-block; background: var(--job-bg2); color: var(--job-txt-fraco);
-  font-size: 9.5px; font-weight: 600; font-variant-numeric: tabular-nums;
-  padding: 3px 9px; border-radius: 999px; letter-spacing: .2px; border: 1px solid var(--job-bg3);
+  display: inline-block; background: transparent; color: var(--job-txt-fraco);
+  font-size: 9px; font-weight: 500; font-variant-numeric: tabular-nums;
+  padding: 2px 6px; border-radius: 999px; letter-spacing: .2px; border: none; opacity: .6;
 }
-.job-trilho-versao.tem-nova .job-trilho-versao-num { background: var(--job-acento); color: var(--job-acento-txt); }
+.job-trilho-versao.tem-nova .job-trilho-versao-num {
+  background: var(--job-acento); color: var(--job-acento-txt); opacity: 1; font-weight: 700; padding: 3px 9px;
+}
 .job-trilho-versao-nova {
   display: block; margin-top: 3px; color: var(--job-acento); font-weight: 600; font-size: 8.5px;
 }
 /* Bolinha vermelha de "tem atualização" — some quando já tá na mais nova. */
 .job-trilho-versao.tem-nova::before {
   content: ""; position: absolute; top: -2px; right: 16px; width: 7px; height: 7px;
-  border-radius: 50%; background: #f43f5e; box-shadow: 0 0 0 2px var(--job-bg1);
+  border-radius: 50%; background: #f43f5e; box-shadow: 0 1px 3px rgba(0,0,0,.35);
 }
 
 /* ── Botões de rodapé do trilho: config (tema) e desligar — ficam ACIMA do
@@ -213,7 +279,12 @@ html.job-push-esquerda .job-trilho-marca { left: auto; right: 0; border-radius: 
   background: transparent; border: none; border-radius: 8px; color: var(--job-txt-fraco);
   cursor: pointer; transition: color .12s, background .12s;
 }
-.job-trilho-mini:hover { background: rgba(255,255,255,.04); color: var(--job-txt); }
+.job-trilho-mini:hover { background: color-mix(in srgb, var(--job-txt) 7%, transparent); color: var(--job-txt); }
+.job-trilho-mini:active { transform: scale(.92); }
+.job-trilho-mini:focus { outline: none; }
+.job-trilho-mini:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--job-acento) 70%, transparent); }
+.job-trilho-mini { transition: color .16s ease, background .16s ease, transform .09s ease-out; }
+@media (prefers-reduced-motion: reduce) { .job-trilho-mini:active { transform: none; } }
 .job-trilho-mini svg { width: 16px; height: 16px; }
 
 /* Popover de configuração (tema + desligar), ancorado no trilho. */
