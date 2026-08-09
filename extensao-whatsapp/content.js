@@ -6864,13 +6864,18 @@
     btn.disabled = true;
     const antes = btn.textContent;
     btn.textContent = 'Salvando…';
-    // O DESENHO COMECA AGORA, EM PARALELO COM O SALVAMENTO.
+    // NADA DE DESENHAR AGORA — E O ERRO QUE EU ACABEI DE COMETER.
     //
-    // Eram duas esperas em fila: salvar, e so entao desenhar a imagem. Nenhuma
-    // das duas precisa da outra — o desenho usa os precos que ja estao na mao,
-    // e o id da cotacao so entra no nome do arquivo. Em fila, o consultor
-    // esperava a soma; em paralelo, espera a maior das duas.
-    const pImagem = _cotDesenharPNG(lista).catch(() => null);
+    // Eu tinha posto o desenho da imagem pra correr "em paralelo" com o
+    // salvamento. Nao existe paralelo aqui: o html2canvas rasteriza uma tabela
+    // de 980px em escala 2 NA THREAD PRINCIPAL. Enquanto ele trabalha, a
+    // pagina inteira congela — inclusive o retorno do POST, que fica na fila
+    // esperando a thread. O "Salvando..." ficava parado por causa do desenho,
+    // nao do servidor. Ele reclamou de lentidao duas vezes; a segunda fui eu.
+    //
+    // Rede e CPU so paralelizam de verdade em threads diferentes. Aqui a conta
+    // certa e: primeiro o salvamento, que e espera de rede e nao custa CPU
+    // nenhuma; o desenho depois, quando a tela ja respondeu.
     const t0 = Date.now();
     let r;
     try {
@@ -7001,9 +7006,7 @@
       if (_imgCache) { aoTer(_imgCache); return; }
       const antes = btn.textContent;
       btn.disabled = true; btn.textContent = 'Desenhando…';
-      // Pega o desenho que ja comecou junto do salvamento. So desenha de novo
-      // se aquele tiver falhado.
-      const dataUrl = (await pImagem) || (await _cotDesenharPNG(lista));
+      const dataUrl = await _cotDesenharPNG(lista);
       btn.disabled = false; btn.textContent = antes;
       if (dataUrl) { _imgCache = dataUrl; aoTer(dataUrl); return; }
       btn.textContent = 'Não consegui desenhar';
@@ -7228,13 +7231,21 @@
     if (bimg) {
       const cx = document.getElementById('job-cot-preview');
       if (cx) cx.innerHTML = '<div class="job-cot-prev-vazio">Preparando a imagem da cotação…</div>';
-      _cotPegarImagem({ set textContent(v) {}, get textContent() { return ''; }, disabled: false },
-                      (dataUrl) => _cotPreview(dataUrl))
-        .catch(() => {})
-        .finally(() => {
-          const c2 = document.getElementById('job-cot-preview');
-          if (c2 && c2.querySelector('.job-cot-prev-vazio')) c2.innerHTML = '';
-        });
+      // DEPOIS QUE A TELA RESPONDEU, e so quando o navegador estiver ocioso.
+      //
+      // O desenho e caro e trava a thread. Rodando aqui, ele acontece enquanto
+      // o consultor le o resultado — e se ele clicar em "Ver imagem" antes, o
+      // botao desenha na hora e este agendamento so encontra o cache.
+      const desenhar = () =>
+        _cotPegarImagem({ set textContent(v) {}, get textContent() { return ''; }, disabled: false },
+                        (dataUrl) => _cotPreview(dataUrl))
+          .catch(() => {})
+          .finally(() => {
+            const c2 = document.getElementById('job-cot-preview');
+            if (c2 && c2.querySelector('.job-cot-prev-vazio')) c2.innerHTML = '';
+          });
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(desenhar, { timeout: 3000 });
+      else setTimeout(desenhar, 400);
     }
 
     const bleg = document.getElementById('job-cot-legenda');
