@@ -1133,14 +1133,14 @@
       '<span class="job-logo-txt">JOB</span></div>';
   }
 
-  const _ICO_ANALISE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 15.5v-3"/><path d="M12.5 15.5v-7"/><path d="M17 15.5v-5"/></svg>';
-  const _ICO_MENSAGENS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12.2c0 4-3.8 7.2-8.5 7.2-1 0-2-.15-2.9-.42L4 20.5l1.7-4.1A6.9 6.9 0 0 1 3.5 12.2C3.5 8.2 7.3 5 12 5s8.5 3.2 8.5 7.2Z"/></svg>';
-  const _ICO_FUNIS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5h17l-6.4 7.6v5.6L9.9 21v-8.4L3.5 5Z"/></svg>';
-  const _ICO_INBOX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 13.5h4l1.6 2.6h5.8l1.6-2.6h4"/><path d="M6.6 4.8h10.8a2 2 0 0 1 1.83 1.2l2.27 5.1v6.4a2 2 0 0 1-2 2H4.5a2 2 0 0 1-2-2v-6.4l2.27-5.1a2 2 0 0 1 1.83-1.2Z"/></svg>';
-  const _ICO_CNPJ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20.5h18"/><path d="M5.5 20.5V6.4L13 3.5v17"/><path d="M18.5 20.5v-9.3L13 9.1"/><path d="M8.8 8.6v.01M8.8 11.6v.01M8.8 14.6v.01"/></svg>';
-  const _ICO_NOTA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.2 2.8H6.8a2 2 0 0 0-2 2v14.4a2 2 0 0 0 2 2h10.4a2 2 0 0 0 2-2V7.8l-5-5Z"/><path d="M14.2 2.8v5h5"/><path d="M8.6 13h6.8M8.6 16.4h4.6"/></svg>';
-  const _ICO_COTACAO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4.2" y="2.6" width="15.6" height="18.8" rx="2.4"/><path d="M8 7.6h8M8 11.4h8M8 15.2h4.6"/></svg>';
-  const _ICO_CRM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="8" r="3.6"/><path d="M4 20.2a6.5 6.5 0 0 1 13 0"/><path d="M19.5 6.6v5.2M16.9 9.2h5.2"/></svg>';
+  const _ICO_ANALISE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 20.2h15"/><path d="M4.5 20.2V4.2"/><rect x="8" y="13.4" width="3.1" height="6.8" rx="1.2"/><rect x="13.2" y="8.6" width="3.1" height="11.6" rx="1.2"/><rect x="18.4" y="11" width="3.1" height="9.2" rx="1.2"/></svg>';
+  const _ICO_MENSAGENS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.4 11.8c0 3.9-3.76 7.05-8.4 7.05-.95 0-1.87-.13-2.72-.38L4.6 20.2l1.42-3.9A6.83 6.83 0 0 1 3.6 11.8C3.6 7.9 7.36 4.75 12 4.75s8.4 3.15 8.4 7.05Z"/><path d="M8.7 11.7h.02M11.99 11.7h.02M15.28 11.7h.02"/></svg>';
+  const _ICO_FUNIS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 4.9h17.2a.6.6 0 0 1 .46.99l-6.2 7.36v5.4a.6.6 0 0 1-.33.54l-3.4 1.7a.6.6 0 0 1-.87-.54v-7.1L3.14 5.89a.6.6 0 0 1 .46-.99Z"/></svg>';
+  const _ICO_INBOX = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6.6 4.8h10.8a2 2 0 0 1 1.83 1.2l2.27 5.1v6.1a2 2 0 0 1-2 2H4.5a2 2 0 0 1-2-2v-6.1l2.27-5.1a2 2 0 0 1 1.83-1.2Z"/><path d="M2.5 12.6h4.4l1.5 2.5h7.2l1.5-2.5h4.4"/></svg>';
+  const _ICO_CNPJ = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.8 20.6h18.4"/><path d="M5.4 20.6V5.9a1 1 0 0 1 .66-.94l6.2-2.2a1 1 0 0 1 1.34.94v16.9"/><path d="M13.6 9.6l4.36 1.55a1 1 0 0 1 .64.94v8.51"/><path d="M8.6 8.3v.02M8.6 11.6v.02M8.6 14.9v.02"/></svg>';
+  const _ICO_NOTA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19.4 12.6v6.2a2 2 0 0 1-2 2H6.1a2 2 0 0 1-2-2V6.9a2 2 0 0 1 2-2h6.1"/><path d="M17.5 3.3a1.9 1.9 0 0 1 2.7 2.7l-7.6 7.6-3.4.7.7-3.4 7.6-7.6Z"/></svg>';
+  const _ICO_COTACAO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12.9 2.9H19a2 2 0 0 1 2 2v6.1a2 2 0 0 1-.59 1.42l-8 8a2 2 0 0 1-2.83 0l-6.1-6.1a2 2 0 0 1 0-2.83l8-8A2 2 0 0 1 12.9 2.9Z"/><path d="M16.6 7.4v.02"/></svg>';
+  const _ICO_CRM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.2" cy="7.9" r="3.7"/><path d="M3.6 20.4a6.6 6.6 0 0 1 13.2 0"/><path d="M19.6 6.4v5.4M16.9 9.1h5.4"/></svg>';
   const _ICO_COPIAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 
   // Kit de ícones SVG (traço, herda a cor via currentColor) — o Guilherme NÃO
@@ -4093,7 +4093,7 @@
   // A tarefa aparece ONDE O TRABALHO ACONTECE. A /crm/agenda com 0 futuras ja
   // provou que tela separada nao e aberta. Mesma consulta do dashboard e da
   // agenda: os tres dizem o mesmo numero.
-  const _ICO_FILA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="4.6" width="17.2" height="16.4" rx="2.6"/><path d="M3.4 9.4h17.2"/><path d="M8.2 2.8v3.4M15.8 2.8v3.4"/><path d="M8.6 14.6l2.1 2.1 4.4-4.4"/></svg>';
+  const _ICO_FILA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.3" y="4.9" width="17.4" height="16.1" rx="2.8"/><path d="M3.3 9.7h17.4"/><path d="M8.1 2.9v3.6M15.9 2.9v3.6"/><path d="M8.9 14.9l2.2 2.2 4.1-4.4"/></svg>';
 
   let _fila = [];
 
