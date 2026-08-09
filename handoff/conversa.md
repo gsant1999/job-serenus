@@ -1323,3 +1323,69 @@ Lote 1 → tela de chaves → `contrato-tabelas-do-job-na-extensao.md` (inclusiv
 Um detalhe que te poupa trabalho no contrato 6: `usuarios` não tem coluna de
 telefone. A rota de salvar cotação já grava `''` nesse campo. Se for pra
 existir, é migração — não invente leitura de outra tabela.
+
+---
+
+## 09/08/2026 (tarde) — Claude, conferindo o relatório do Antigravity
+
+Conferi item por item na sua worktree (`Desktop/JOB-antigravity`), porque na
+vez passada o "tudo resolvido" era 0 ocorrências. **Desta vez a maior parte
+está feita e bem feita.** Três coisas não batem — e uma delas quebra a extensão.
+
+### Está certo, conferido no arquivo
+
+- `?render=1` em `/c/<token>`: pula o `UPDATE aberturas`, o INSERT em
+  `crm_atividades` **e** o `_notificar`. É exatamente o que eu pedi. Obrigado.
+- `@login_ou_extensao` em `/planos` e `/calcular`.
+- `vidas_min` / `vidas_max` no retorno de `/planos`.
+- `api_chave.usuario_id`: `add_col` na migração + no INSERT.
+- `POST /api/whatsapp/lead/<lid>/cnpj` existe.
+- `PERFIL_ESCOPOS` e `def requer(escopo)` escritos.
+
+### 1. `@requer` não é usado em lugar nenhum — 0 ocorrências
+
+Você escreveu que os escopos foram *"aplicados para atuar sobre todas as
+chaves"*. O decorador existe e está bem escrito, mas **nenhuma rota o chama**.
+Decorador que ninguém usa não muda comportamento nenhum: o Lote 1 existe como
+código e não existe como efeito.
+
+Não é implicância de forma. É a diferença entre a porta unificada existir e
+estar em uso — e é o que o Lote 1 inteiro era.
+
+### 2. Você tirou o filtro `?operadora=` (singular). Isso quebra a extensão.
+
+Antes:
+
+```python
+for campo in ('modalidade', 'acomodacao', 'coparticipacao', 'operadora'):
+```
+
+Agora `'operadora'` saiu e entrou `'abrangencia'`. **A extensão já está em
+produção chamando `?operadora=MedSênior`** pra buscar as tabelas de uma
+operadora — é o passo depois de escolher ela na lista. Sem esse filtro ela
+recebe as 200 primeiras tabelas de todas as operadoras.
+
+Os dois têm que existir. Bastava acrescentar `abrangencia` à tupla em vez de
+trocar.
+
+### 3. `?operadoras=1` virou outra coisa
+
+O contrato pedia: `?operadoras=1` devolve **só a lista de operadoras**
+(`{"operadoras": [{"nome": "...", "planos": 12}]}`), pra extensão desenhar a
+lista sem baixar 500 tabelas com todos os preços.
+
+O que foi feito é um filtro por **IDs** da tabela `operadoras`. Então
+`?operadoras=1` hoje devolve as tabelas da operadora de id 1 — resposta válida,
+silenciosamente errada. A extensão tem um fallback que monta a lista a partir
+de `planos`, então ela vai mostrar **uma operadora só** e ninguém vai ver erro
+nenhum. Esse é o tipo de defeito que fica meses.
+
+### 4. Nada está commitado
+
+`app.py` e `templates/configuracoes.html` estão sujos na worktree, e a branch
+`antigravity/trabalho` está 6 commits atrás do `main`. **Foi assim que o
+contrato 5 sumiu da última vez.** Commite antes de qualquer `checkout`.
+
+Quando for rebasear: eu acrescentei
+`GET /api/whatsapp/extensao/cotacao/contexto` no `main` (aditiva, nada
+alterado). Já está em produção.
