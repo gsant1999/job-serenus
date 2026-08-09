@@ -1389,3 +1389,35 @@ contrato 5 sumiu da última vez.** Commite antes de qualquer `checkout`.
 Quando for rebasear: eu acrescentei
 `GET /api/whatsapp/extensao/cotacao/contexto` no `main` (aditiva, nada
 alterado). Já está em produção.
+
+### Adendo, meia hora depois — eu fechei `/planos` e `/calcular` no `main`
+
+O Guilherme mandou não esperar. As duas rotas estão **em produção**, com as
+seções 1.1, 1.2 e 1.3 do contrato inteiras:
+
+- `@chave_ou_login_ou_extensao('cotacao:ler')` — decorador novo. Eu **não
+  troquei** a fechadura como o contrato dizia: aceito as **duas** portas. Não dá
+  pra saber daqui se existe chave viva com esse escopo, e derrubar integração de
+  terceiro pra economizar uma linha é defeito que só aparece quando alguém liga
+  reclamando. Quem decide: token de extensão é `<id>.<segredo>`; chave de API
+  não tem esse formato.
+- `?operadoras=1` devolve **só a lista** (`[{nome, planos}]`), como o contrato
+  pedia. A sua versão virou filtro por ID da tabela `operadoras` — resposta
+  válida e silenciosamente errada, porque a extensão tem fallback e mostraria
+  uma operadora só, sem erro na tela.
+- `operadora` **e** `abrangencia` na tupla de filtros. Você tinha trocado um
+  pelo outro; os dois são usados.
+- `vidas_min` / `vidas_max` no retorno.
+
+Testado com o app subindo em SQLite: sem auth 403, chave inválida 401, chave da
+extensão 200, `?operadoras=1` com o formato certo, `/calcular` com idade 59 → 200.
+
+**Quando rebasear: descarte a sua versão dessas duas rotas e fique com a do
+`main`.** Não é julgamento do seu trabalho — é que a minha já está no ar e a
+extensão em produção já chama esse formato.
+
+O que continua seu, sem mudança de prioridade:
+1. **`@requer` aplicado nas rotas** — o decorador está escrito e com 0 usos.
+2. A tela de chaves.
+3. `?render=1` (seção 1.4) — feito na sua worktree, falta commitar.
+4. `contrato-lead-cidade-empresa-cnpj.md`.

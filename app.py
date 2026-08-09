@@ -4678,6 +4678,44 @@ def error_json(mensagem, codigo=None, status=400):
     }), status
 
 
+def chave_ou_login_ou_extensao(escopo):
+    """As duas portas na mesma rota: chave de API pública OU sessão/extensão.
+
+    `/api/v1/cotacao/planos` e `/calcular` eram só de chave de API. A extensão
+    entra por token do consultor e levava 401 — o consultor não conseguia cotar
+    MedSênior, Beneficência Vital nem Santa Tereza, que só existem no JOB.
+
+    TROCAR o decorador teria aberto pra extensão e FECHADO pra quem já usa
+    chave. Não dá pra saber daqui se existe chave viva com esse escopo, e
+    derrubar integração de terceiro pra economizar uma linha é o tipo de coisa
+    que só aparece quando alguém liga reclamando.
+
+    Como se decide qual porta: token de extensão é `<id>.<segredo>`, começa com
+    dígitos e ponto. Chave de API não tem esse formato. Sem `Authorization`
+    nem `X-API-Key`, cai no caminho de sessão/extensão, que é quem sabe
+    responder 401 com a mensagem certa.
+    """
+    def deco(f):
+        por_chave = api_requer_chave(escopo)(f)
+        por_login = login_ou_extensao(f)
+
+        @wraps(f)
+        def w(*a, **kw):
+            if request.method == 'OPTIONS':
+                return por_login(*a, **kw)
+            bruta = ''
+            auth = (request.headers.get('Authorization') or '').strip()
+            if auth.lower().startswith('bearer '):
+                bruta = auth[7:].strip()
+            if (request.headers.get('X-API-Key') or '').strip():
+                return por_chave(*a, **kw)
+            if bruta and not re.match(r'^\d+\.', bruta):
+                return por_chave(*a, **kw)
+            return por_login(*a, **kw)
+        return w
+    return deco
+
+
 def login_ou_extensao(f):
     @wraps(f)
     def w(*a, **kw):
@@ -19517,11 +19555,37 @@ def configuracoes_api_chaves():
 
 # ═══════════════ API v1 — COTAÇÃO ═════════════════════════════════════════════
 @app.route('/api/v1/cotacao/planos', methods=['GET', 'OPTIONS'])
-@api_requer_chave('cotacao:ler')
+@chave_ou_login_ou_extensao('cotacao:ler')
 def api_v1_cotacao_planos():
+    """Tabelas importadas no JOB (MedSênior, Beneficência Vital, Santa Tereza,
+    as grades de PDF da Hapvida) — as operadoras que o Painel do Corretor não
+    cota. É a segunda fonte da cotação da extensão.
+
+    Antes exigia chave de API pública (`api_requer_chave`), e a extensão entra
+    por token do consultor: respondia 401 e o consultor não conseguia cotar
+    nada disso. Passa a aceitar sessão do site OU extensão, como a rota da
+    imagem já fazia.
+
+    Filtros: `operadora`, `abrangencia`, `modalidade`, `acomodacao`,
+    `coparticipacao`. `abrangencia` é o que separa MedSênior Campinas 1 de
+    Campinas 2 — sem ele as duas viram uma lista só.
+    """
     conn = db()
+    # `?operadoras=1` devolve SÓ a lista de operadoras, sem preço nenhum.
+    # A extensão precisa dela pra desenhar a tela de escolha, e baixar 500
+    # tabelas com dez faixas cada pra ler o nome de doze operadoras é o tipo
+    # de chamada que fica lenta em campo e ninguém liga com o defeito.
+    if (request.args.get('operadoras') or '').strip() in ('1', 'true', 'sim'):
+        linhas = conn.execute(
+            "SELECT operadora, COUNT(*) AS n FROM cotacao_tabela "
+            "WHERE ativo=1 AND operadora IS NOT NULL AND operadora<>'' "
+            "GROUP BY operadora ORDER BY operadora").fetchall()
+        close_db(conn)
+        return jsonify({'ok': True, 'operadoras': [
+            {'nome': r['operadora'], 'planos': int(r['n'] or 0)} for r in linhas]})
+
     q, p = "SELECT * FROM cotacao_tabela WHERE 1=1", []
-    for campo in ('modalidade', 'acomodacao', 'coparticipacao', 'operadora'):
+    for campo in ('modalidade', 'acomodacao', 'coparticipacao', 'operadora', 'abrangencia'):
         v = (request.args.get(campo) or '').strip()
         if v:
             q += f" AND LOWER({campo})=LOWER(?)"; p.append(v)
@@ -19537,16 +19601,27 @@ def api_v1_cotacao_planos():
                               f"WHERE tabela_id IN ({marc})", ids).fetchall():
             precos.setdefault(r['tabela_id'], {})[r['faixa']] = round(float(r['preco'] or 0), 2)
     close_db(conn)
+    # `vidas_min`/`vidas_max` iam faltando: `calcular_cotacao` usa os dois pra
+    # recusar plano fora da faixa, então sem eles a tela deixa marcar um plano
+    # de 5 a 29 vidas numa cotação de 2 e o consultor só descobre no cálculo.
+    def _n(t, c):
+        try:
+            return int(t[c]) if t[c] is not None else 0
+        except (KeyError, IndexError, TypeError, ValueError):
+            return 0
     return jsonify({'ok': True, 'faixas': FAIXAS_ETARIAS, 'total': len(linhas),
                     'planos': [{'id': t['id'], 'operadora': t['operadora'], 'plano': t['plano'],
                                 'modalidade': t['modalidade'], 'acomodacao': t['acomodacao'],
                                 'coparticipacao': t['coparticipacao'], 'abrangencia': t['abrangencia'],
                                 'vigencia': t['vigencia'], 'ativo': bool(t['ativo']),
+                                'vidas_min': _n(t, 'vidas_min'), 'vidas_max': _n(t, 'vidas_max'),
                                 'faixas': precos.get(t['id'], {})} for t in linhas]})
 
 
 @app.route('/api/v1/cotacao/calcular', methods=['POST', 'OPTIONS'])
-@api_requer_chave('cotacao:ler')
+# Mesma porta da rota de cima: chave de API pública OU sessão/extensão.
+# Calcular não cria nada — é leitura com conta.
+@chave_ou_login_ou_extensao('cotacao:ler')
 def api_v1_cotacao_calcular():
     """Calcula sem salvar. É o que a extensão usa pra mostrar preço na conversa
     sem sujar o banco com cotação de rascunho."""
