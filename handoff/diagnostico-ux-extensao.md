@@ -74,7 +74,13 @@ consultor não sabe se deu errado ou se não tem nada.
 
 ---
 
-## ESTRUTURAIS — é aqui que mora o "parece desleixado"
+## ESTRUTURAIS — E1 e E2 FEITOS na 3.79.0 (08/08)
+
+Dois defeitos reais apareceram fazendo: a tela **Hoje** escrevia num elemento
+que não existe (`job-painel-corpo`, referência única no arquivo) e abria em
+branco sempre; e `.job-carregando` era usado como roda mas o CSS dele era de
+bloco de texto — em vinte telas a espera era um espaço em branco sem roda
+nenhuma. Os dois estão corrigidos.
 
 ### E1. Metade das telas tem cabeçalho, metade não
 
@@ -172,9 +178,8 @@ o que eu proponho é levar as outras dez até ela.
 
 **1. ~~G1, G2, G3~~ — FEITOS na 3.78.0.**
 
-**2. E1 e E2** — cabeçalho único e carregamento único. **É o maior ganho de
-sensação por hora de trabalho do documento inteiro**, porque muda as onze telas
-de uma vez sem tocar em fluxo nenhum.
+**2. ~~E1 e E2~~ — FEITOS na 3.79.0.** 23 cabeçalhos e 13 carregamentos, todos
+pela mesma função.
 
 **3. E3** — os estados vazios, escritos um por um.
 

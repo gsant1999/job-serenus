@@ -3047,8 +3047,7 @@
   }
 
   async function abrirSecaoDev() {
-    setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div>' +
-                  '<div class="job-sem-analise-txt">Coletando estado…</div></div>');
+    setCorpoSecao(_telaCarregando('Coletando estado…'));
     const ponte = await _pedirPonte('listar_audios', {}, 12000);
     const temWpp = !(ponte && ponte.erro === 'wpp_ausente');
     const d = TR.diag || {};
@@ -3057,8 +3056,8 @@
       '</span><b>' + esc(val) + '</b></div>';
     setCorpoSecao(
       '<div class="job-dev">' +
-        '<div class="job-cnpj-titulo">Diagnóstico</div>' +
-        '<div class="job-cnpj-sub">Estado real de cada peça, agora.</div>' +
+        '<div class="job-sec-t">Diagnóstico</div>' +
+        '<div class="job-sec-sub">Estado real de cada peça, agora.</div>' +
         linha('Versão da extensão', (chrome.runtime.getManifest() || {}).version || '?') +
         linha('Ponte wa-js', temWpp ? 'respondendo' : 'FORA (' + ((ponte && ponte.erro) || 'sem resposta') + ')', !temWpp) +
         linha('Conversa aberta', (ponte && ponte.chat_id) ? ponte.chat_id : 'nenhuma', !(ponte && ponte.chat_id)) +
@@ -3371,11 +3370,15 @@
   let _fichaSujo = false;   // tem alteração não salva?
 
   async function abrirSecaoFicha() {
-    setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div><div class="job-sem-analise-txt">Abrindo a ficha do lead…</div></div>');
+    setCorpoSecao(_telaCarregando('Abrindo a ficha do lead…'));
     let tel = '';
     try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
     if (!tel) {
-      setCorpoSecao('<div class="job-erro">Abra uma conversa primeiro pra ver a ficha do lead.</div>');
+      setCorpoSecao(_secHead('CRM', 'Ficha do lead: etapa, etiquetas, qualificação e atividade.') +
+        '<div class="job-sem-analise">' +
+          '<div class="job-sem-analise-t">Nenhuma conversa aberta</div>' +
+          '<div class="job-sem-analise-txt">A ficha é de quem está na tela. Abra a conversa do cliente e volte aqui.</div>' +
+        '</div>');
       return;
     }
     _fichaTel = tel;
@@ -3409,9 +3412,10 @@
 
   function _renderFichaSemLead() {
     setCorpoSecao(
+      _secHead('CRM', 'Ficha do lead: etapa, etiquetas, qualificação e atividade.') +
       '<div class="job-ficha">' +
-        '<div class="job-cnpj-titulo">Sem lead no JOB</div>' +
-        '<div class="job-cnpj-sub">Esse número não está no CRM. Cadastre pra ter etapa, etiquetas e qualificação aqui dentro.</div>' +
+        '<div class="job-sem-analise-t" style="text-align:left">Este número não está no CRM</div>' +
+        '<div class="job-sec-sub">Cadastre pra ter etapa, etiquetas e qualificação aqui dentro — ou marque como pessoal, se não for cliente.</div>' +
         '<button class="job-cnpj-btn" id="job-ficha-criar">Cadastrar este lead</button>' +
         // AQUI É ONDE ELE MAIS FAZ FALTA, e era exatamente onde faltava: eu
         // tinha posto o "Não é lead" só no rodapé da FICHA, que só existe
@@ -3715,9 +3719,11 @@
     else corpo = _fichaAbaAtividade(f);
 
     setCorpoSecao(
+      // O nome saiu do topo porque agora vive no cabeçalho da seção: aparecia
+      // duas vezes, uma embaixo da outra, quando os dois passaram a existir.
+      _secHead('CRM', (l.nome || _fichaTel || 'Ficha do lead')) +
       '<div class="job-ficha">' +
         '<div class="job-ficha-topo">' +
-          '<div class="job-ficha-nome">' + esc(l.nome || _fichaTel) + '</div>' +
           '<div class="job-ficha-linha">' +
             '<span class="job-ficha-etapa" style="background:' + esc((etapaAtual && etapaAtual.cor) || '#64748b') + '22;color:' +
               esc((etapaAtual && etapaAtual.cor) || '#94a3b8') + ';">' + esc((etapaAtual && etapaAtual.nome) || l.etapa || '—') + '</span>' +
@@ -3992,29 +3998,49 @@
 
   let _fila = [];
 
+  // A TELA "HOJE" ESCREVIA NUM ELEMENTO QUE NÃO EXISTE.
+  //
+  // Ela buscava `job-painel-corpo` — id que aparecia uma única vez no arquivo
+  // inteiro, sobra de um painel que deixou de existir. `p` vinha null, a
+  // função saía na segunda linha e a seção abria em branco, sempre, sem erro
+  // nenhum no console. O corpo do painel é `job-painel-doc-corpo`, que é o que
+  // o setCorpoSecao já usa nas outras dez telas.
+  const _FILA_SUB = 'O que o JOB diz pra atacar agora, com o motivo de cada um.';
+
   async function abrirSecaoFila() {
-    const p = document.getElementById('job-painel-corpo');
-    if (!p) return;
-    p.innerHTML = '<div class="job-vazio">carregando sua fila…</div>';
+    setCorpoSecao(_secHead('Hoje', _FILA_SUB) + _telaCarregando('Montando sua fila…'));
     const r = await _safeSendMessage({ type: 'fila_hoje' }).catch(() => null);
+    if (_secaoAtiva !== 'fila') return;
     if (!r || !r.ok) {
-      p.innerHTML = '<div class="job-vazio">Não consegui carregar a fila agora.</div>';
+      setCorpoSecao(_secHead('Hoje', _FILA_SUB) + _telaFalha(
+        'Não consegui montar a fila',
+        'Pode ser a conexão ou o JOB fora do ar por um instante. Tente de novo.',
+        'job-fila-retry', 'Tentar de novo'));
+      const b = document.getElementById('job-fila-retry');
+      if (b) b.addEventListener('click', abrirSecaoFila);
       return;
     }
     _fila = r.fila || [];
     _filaBadge(r.resumo || {});
     if (!_fila.length) {
-      p.innerHTML = '<div class="job-vazio"><b>Nada na fila de hoje.</b><br>' +
-        'Quando entrar lead novo ou uma cotação ficar parada, aparece aqui.</div>';
+      // ESTADO VAZIO QUE DIZ SE É BOM OU RUIM. "Nada na fila de hoje" sozinho
+      // deixava a dúvida: está tudo em dia ou não carregou?
+      setCorpoSecao(_secHead('Hoje', _FILA_SUB) +
+        '<div class="job-sem-analise">' +
+          '<div class="job-sem-analise-t">Você está em dia</div>' +
+          '<div class="job-sem-analise-txt">Nada atrasado e nada marcado pra hoje. ' +
+            'Quando entrar lead novo ou uma cotação ficar parada, aparece aqui sozinho.</div>' +
+        '</div>');
       return;
     }
     const res = r.resumo || {};
-    p.innerHTML =
+    setCorpoSecao(
+      _secHead('Hoje', _FILA_SUB, _fila.length) +
       '<div class="job-fila-cab">' +
         (res.atrasadas ? '<b class="job-fila-atraso">' + res.atrasadas + ' atrasada(s)</b> · ' : '') +
         (res.hoje || 0) + ' para hoje</div>' +
-      _fila.map((t) => _filaItem(t)).join('');
-    p.querySelectorAll('[data-fila]').forEach((b) => {
+      _fila.map((t) => _filaItem(t)).join(''));
+    document.querySelectorAll('#job-painel-doc-corpo [data-fila]').forEach((b) => {
       b.addEventListener('click', () => _filaAcao(b.dataset.fila, parseInt(b.dataset.id, 10), b));
     });
   }
@@ -4250,8 +4276,7 @@
 
   async function abrirSecaoCotacao() {
     if (_cotDireto) { _cotDireto = false; abrirSecaoCotarInline(); return; }
-    setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div>' +
-                  '<div class="job-sem-analise-txt">Procurando as cotações deste cliente…</div></div>');
+    setCorpoSecao(_telaCarregando('Procurando as cotações deste cliente…'));
     let tel = '';
     try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
     tel = String(tel || '').replace(/\D/g, '');
@@ -4373,8 +4398,8 @@
 
     setCorpoSecao(
       '<div class="job-cot-wrap">' +
-        '<div class="job-cnpj-titulo">Cotações</div>' +
-        '<div class="job-cnpj-sub">' + esc(nome) +
+        '<div class="job-sec-t">Cotações</div>' +
+        '<div class="job-sec-sub">' + esc(nome) +
           (lista.length ? ' · ' + lista.length + (lista.length === 1 ? ' cotação' : ' cotações') : '') +
         '</div>' +
         corpo +
@@ -4637,8 +4662,8 @@
     const v = _cot || {};
     setCorpoSecao(
       '<div class="job-cot-wrap">' +
-        '<div class="job-cnpj-titulo">Cotar agora</div>' +
-        '<div class="job-cnpj-sub">Preço buscado no Painel do Corretor na hora, pela sua sessão.</div>' +
+        '<div class="job-sec-t">Cotar agora</div>' +
+        '<div class="job-sec-sub">Preço buscado no Painel do Corretor na hora, pela sua sessão.</div>' +
         '<label class="job-cot-rot" id="job-cot-p1"><i>1</i> Cidade' +
           _cotAjuda('A cidade define QUEM ATENDE. Um plano de Campinas não existe em Sorocaba, ' +
                     'e a lista de operadoras muda inteira.') + '</label>' +
@@ -4954,9 +4979,7 @@
              titulo: (nomeDoContato() || 'Cliente') + ' · ' + _cot.cidade + ' · ' + _cotRotulo(_cot.modalidade) };
   }
   function _cotEsperando(txt, sub) {
-    setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div>' +
-      '<div class="job-sem-analise-txt">' + esc(txt) + '</div>' +
-      (sub ? '<div class="job-cot-dica" style="text-align:center">' + esc(sub) + '</div>' : '') + '</div>');
+    setCorpoSecao(_telaCarregando(txt, sub));
   }
 
   async function _cotBuscarOperadoras() {
@@ -5118,8 +5141,8 @@
     const totalVidas = _cot.totalVidas || 0;
     setCorpoSecao('<div class="job-cot-wrap">' +
       _cotTopo(abrirSecaoCotarInline) +
-      '<div class="job-cnpj-titulo">Operadoras</div>' +
-      '<div class="job-cnpj-sub">Quem atende essa combinação. Escolha uma.</div>' +
+      '<div class="job-sec-t">Operadoras</div>' +
+      '<div class="job-sec-sub">Quem atende essa combinação. Escolha uma.</div>' +
       (ops.length
         ? '<div class="job-cot-ops">' + ops.map((o) => {
             const jaFoi = _cotFeitas.filter((f) => String(f.operadoraId) === String(o.id))[0];
@@ -5224,13 +5247,13 @@
     setCorpoSecao('<div class="job-cot-wrap">' +
       _cotTopo(_cotPintarOperadoras) +
       (logoTopo ? '<img class="job-cot-logo-topo" src="' + esc(logoTopo) + '" alt="">' : '') +
-      '<div class="job-cnpj-titulo">' + esc(_cot.operadoraAtual.nome) + '</div>' +
+      '<div class="job-sec-t">' + esc(_cot.operadoraAtual.nome) + '</div>' +
       (comuns.length
         ? '<div class="job-cot-tags job-cot-tags-topo">' + comuns.map((e) =>
             '<span class="job-cot-tag' + (e.c ? ' ' + e.c : '') + '">' + esc(e.t) + '</span>').join('') +
           '</div>'
         : '') +
-      '<div class="job-cnpj-sub">Vale para todos os planos abaixo. Marque até ' + _COT_MAX + '.</div>' +
+      '<div class="job-sec-sub">Vale para todos os planos abaixo. Marque até ' + _COT_MAX + '.</div>' +
       (pls.length
         ? (function () {
             const linha = (i) => {
@@ -5306,8 +5329,8 @@
     const feitos = [];
     for (let i = 0; i < fila.length; i++) {
       setCorpoSecao('<div class="job-cot-wrap">' +
-        '<div class="job-cnpj-titulo">Buscando preços</div>' +
-        '<div class="job-cnpj-sub">' + (i + 1) + ' de ' + fila.length + ' · ' + esc(_cot.operadoraAtual.nome) + '</div>' +
+        '<div class="job-sec-t">Buscando preços</div>' +
+        '<div class="job-sec-sub">' + (i + 1) + ' de ' + fila.length + ' · ' + esc(_cot.operadoraAtual.nome) + '</div>' +
         '<div class="job-cot-barra"><i style="width:' + Math.round((i / fila.length) * 100) + '%"></i></div>' +
         (feitos.length ? _cotCartoes(feitos) : '') +
         '<div class="job-cot-dica">Um plano por vez, com pausa entre eles — é assim que o Painel é usado à mão.</div>' +
@@ -5379,7 +5402,7 @@
       _cotTopo(_cotPintarOperadoras) +
       // Sem subtítulo: a migalha do topo já diz cidade, tipo e vidas, e ainda
       // é clicável pra mudar. Repetir logo abaixo é eco.
-      '<div class="job-cnpj-titulo">Comparativo</div>' +
+      '<div class="job-sec-t">Comparativo</div>' +
       grupos +
       (comPreco.length
         // UMA ação principal. As outras existem, mas não competem: salvar é o
@@ -5727,9 +5750,8 @@
   function abrirSecaoCnpj() {
     const pre = _cnpjNaConversa();
     setCorpoSecao(
+      _secHead('CNPJ', 'Dados da Receita: razão social, abertura, situação, sócios e se é MEI. Sem CAPTCHA, sem gov.br.') +
       '<div class="job-cnpj-wrap">' +
-        '<div class="job-cnpj-titulo">Consultar CNPJ</div>' +
-        '<div class="job-cnpj-sub">Dados da Receita (razão social, abertura, situação, sócios, natureza jurídica) e se é MEI — sem CAPTCHA, sem gov.br.</div>' +
         '<input id="job-cnpj-input" class="job-cnpj-input" inputmode="numeric" placeholder="00.000.000/0000-00" value="' + esc(_fmtCnpj(pre)) + '" />' +
         '<button class="job-cnpj-btn" id="job-cnpj-btn">Consultar</button>' +
         '<div id="job-cnpj-resultado"></div>' +
@@ -5752,7 +5774,7 @@
       box.innerHTML = '<div class="job-ia-alerta">Digite os 14 números do CNPJ.</div>';
       return;
     }
-    box.innerHTML = '<div class="job-sem-analise"><div class="job-carregando"></div><div class="job-sem-analise-txt">Consultando na Receita…</div></div>';
+    box.innerHTML = _telaCarregando('Consultando na Receita…');
     let resp;
     try { resp = await _safeSendMessage({ type: 'consultar_cnpj', cnpj: dig }); }
     catch (e) { resp = null; }
@@ -5823,8 +5845,8 @@
       socios ? 'Quadro societário: ' + socios : '',
     ].filter(Boolean).join('\n');
     return '<div class="job-cnpj-card">' +
-      '<div class="job-cnpj-titulo-row">' +
-        '<div class="job-cnpj-titulo-txt">' +
+      '<div class="job-sec-t-row">' +
+        '<div class="job-sec-t-txt">' +
           '<div class="job-cnpj-nome">' + esc(c.nome || '—') + '</div>' +
           (c.fantasia ? '<div class="job-cnpj-fant">' + esc(c.fantasia) + '</div>' : '') +
         '</div>' +
@@ -6063,11 +6085,17 @@
     });
   }
 
+  var _INBOX_SUB = 'Leads que caíram pra você e ainda não foram atendidos — o mais antigo primeiro.';
+
   function renderInbox() {
     if (!_inboxCache.length) {
-      return '<div class="job-sem-analise"><div class="job-sem-analise-txt">Nenhum lead novo esperando. Quando cair um lead pra você, ele aparece aqui na hora.</div></div>' + _blocoSincLid();
+      return _secHead('Leads', _INBOX_SUB) +
+        '<div class="job-sem-analise">' +
+          '<div class="job-sem-analise-t">Nenhum lead esperando</div>' +
+          '<div class="job-sem-analise-txt">Está tudo atendido. Quando cair um lead pra você, ele aparece aqui na hora.</div>' +
+        '</div>' + _blocoSincLid();
     }
-    var html = '<div class="job-inbox-lista">';
+    var html = _secHead('Leads', _INBOX_SUB, _inboxCache.length) + '<div class="job-inbox-lista">';
     _inboxCache.forEach(function (l) {
       var seg = _segDesde(l.criado_em);
       var cor = _inboxCor(seg);
@@ -6146,7 +6174,7 @@
   }
 
   async function abrirSecaoInbox() {
-    setCorpoSecaoInbox('<div class="job-sem-analise"><div class="job-sem-analise-txt">Carregando leads…</div></div>');
+    setCorpoSecaoInbox(_secHead('Leads', _INBOX_SUB) + _telaCarregando('Buscando seus leads…'));
     await buscarInbox();
     if (_secaoAtiva !== 'inbox') return;
     setCorpoSecaoInbox(renderInbox());
@@ -6235,14 +6263,23 @@
       .join('\n');
   }
 
+  // A análise usa a MESMA casca de carregamento das outras telas; o que ela tem
+  // a mais é o #job-status (o texto muda durante a corrida) e o botão de
+  // cancelar. Antes era um terceiro desenho de spinner só pra ela.
   function telaCarregando(reqId, texto) {
-    return '<div class="job-carregando"><div class="job-spin"></div><div id="job-status">' + esc(texto) + '</div></div>' +
+    return _secHead('Análise', _ANALISE_SUB) +
+      '<div class="job-sem-analise"><div class="job-carregando"></div>' +
+      '<div class="job-sem-analise-txt" id="job-status">' + esc(texto) + '</div></div>' +
       '<button class="job-cancelar" id="job-cancelar-btn" data-reqid="' + esc(reqId) + '">Cancelar análise</button>';
   }
 
+  var _ANALISE_SUB = 'O JOB lê a conversa e devolve o resumo, o interesse e o que fazer a seguir.';
+
   function telaSemAnalise() {
-    return '<div class="job-sem-analise">' +
-      '<div class="job-sem-analise-txt">Nenhuma análise ainda pra esta conversa.</div>' +
+    return _secHead('Análise', _ANALISE_SUB) +
+      '<div class="job-sem-analise">' +
+      '<div class="job-sem-analise-t">Ainda sem análise</div>' +
+      '<div class="job-sem-analise-txt">Nada foi lido desta conversa até agora. A leitura demora alguns segundos e fica salva.</div>' +
       '<button class="job-analisar-btn" id="job-analisar-btn">Analisar este lead</button>' +
       '</div>';
   }
@@ -6254,7 +6291,8 @@
   function telaFalhaAnalise(erro, cancelado) {
     const legivel = String(erro || '');
     const tecnico = /[{}<>]|Error|error|fetch|undefined|null|TypeError/.test(legivel);
-    return '<div class="job-sem-analise">' +
+    return _secHead('Análise', _ANALISE_SUB) +
+      '<div class="job-sem-analise">' +
       '<div class="job-sem-analise-t">' +
         (cancelado ? 'Análise cancelada' : 'Não consegui analisar esta conversa') + '</div>' +
       '<div class="job-sem-analise-txt">' +
@@ -6462,7 +6500,7 @@
   }
 
   function telaMensagensCarregando() {
-    return '<div class="job-carregando"><div class="job-spin"></div><div>Carregando modelos…</div></div>';
+    return _telaCarregando('Carregando suas mensagens…');
   }
 
   function renderFormularioNovo() {
@@ -6703,7 +6741,9 @@
       }[f];
       return '<button class="job-fchip ' + (_waFiltro === f ? 'on' : '') + '" data-f="' + f + '">' + rot + '</button>';
     }).join('');
-    return renderFormularioNovo() +
+    const _qtd = (modelos && modelos.length) || 0;
+    return _secHead('Mensagens', 'Suas frases, áudios e imagens prontos — mande na conversa aberta sem digitar de novo.', _qtd || '') +
+      renderFormularioNovo() +
       '<div class="job-biblioteca-controles">' +
         '<input class="job-inp" id="job-busca-modelo" placeholder="Buscar modelo…" value="' + esc(_waBusca) + '">' +
         '<div class="job-fchips">' + chips + '</div>' +
@@ -7109,16 +7149,34 @@
     try { console.warn('[JOB] ' + onde, e); } catch (_) {}
   }
 
+  // CABEÇALHO DE SEÇÃO — um só, nas onze telas.
+  //
+  // `titulo` diz onde você está; `sub` diz pra que a tela serve, numa linha.
+  // `contador` é opcional e mora aqui de propósito: o mesmo bloco responde
+  // "onde estou" e "quanto tem", em vez de espalhar o número pela tela.
+  function _secHead(titulo, sub, contador) {
+    return '<div class="job-sec-head">' +
+      '<div class="job-sec-head-row">' +
+        '<div class="job-sec-t">' + esc(titulo) + '</div>' +
+        (contador != null && contador !== ''
+          ? '<span class="job-sec-cont">' + esc(String(contador)) + '</span>' : '') +
+      '</div>' +
+      (sub ? '<div class="job-sec-sub">' + esc(sub) + '</div>' : '') +
+      '</div>';
+  }
+
   // UM jeito de dizer "carregando", em vez dos três que existiam. O texto vem
   // por parâmetro porque dizer O QUE está carregando é o que faz a espera
   // parecer curta.
-  function _telaCarregando(texto) {
+  function _telaCarregando(texto, dica) {
     return '<div class="job-sem-analise"><div class="job-carregando"></div>' +
-      '<div class="job-sem-analise-txt">' + esc(texto || 'Carregando…') + '</div></div>';
+      '<div class="job-sem-analise-txt">' + esc(texto || 'Carregando…') + '</div>' +
+      (dica ? '<div class="job-cot-dica" style="text-align:center">' + esc(dica) + '</div>' : '') +
+      '</div>';
   }
 
   async function abrirSecaoFunis() {
-    setCorpoSecaoMensagens(_telaCarregando('Carregando funis…'));
+    setCorpoSecaoMensagens(_secHead('Funis', _FUNIS_SUB) + _telaCarregando('Carregando seus funis…'));
     let res;
     try {
       res = await buscarFunis(false);
@@ -7128,7 +7186,7 @@
     }
     if (_secaoAtiva !== 'funis') return;
     if (!res || !res.ok) {
-      setCorpoSecaoMensagens(_telaFalha(
+      setCorpoSecaoMensagens(_secHead('Funis', _FUNIS_SUB) + _telaFalha(
         'Não consegui carregar os funis',
         'Pode ser a conexão ou o JOB fora do ar por um instante. Tente de novo; se insistir, avise o suporte.',
         'job-funis-retry', 'Tentar de novo'));
@@ -7141,7 +7199,7 @@
       ligarAcoesFunis();
     } catch (e) {
       _falhaTecnica('funis: montagem da lista', e);
-      setCorpoSecaoMensagens(_telaFalha(
+      setCorpoSecaoMensagens(_secHead('Funis', _FUNIS_SUB) + _telaFalha(
         'Não consegui montar a lista de funis',
         'Os funis vieram, mas algo na lista não pôde ser desenhado. Monte e edite pelo site enquanto isto não é corrigido.',
         'job-funis-retry', 'Tentar de novo'));
@@ -7160,8 +7218,11 @@
       || (f.categoria || '').toLowerCase().indexOf(_fnBusca) >= 0;
   }
 
+  var _FUNIS_SUB = 'Sequências prontas: cada passo sai na hora certa, na conversa que está aberta.';
+
   function renderFunis(funis) {
-    return '<div class="job-biblioteca-controles">' +
+    return _secHead('Funis', _FUNIS_SUB, (funis && funis.length) || '') +
+      '<div class="job-biblioteca-controles">' +
         '<input class="job-inp" id="job-busca-funil" placeholder="Buscar funil…" value="' + esc(_fnBusca) + '">' +
         '<div class="job-fchips">' +
           '<button class="job-fchip ' + (_fnSoFav ? '' : 'on') + '" data-fn-fav="0">Todos</button>' +
@@ -7631,6 +7692,9 @@
     if (r.audios_do_cache) partesRodape.push(r.audios_do_cache + ' áudio(s) reaproveitados do cache');
     partesRodape.push('somente leitura');
     return (
+            // _secHead já escapa: passar esc() aqui escaparia duas vezes e o nome
+      // com acento sairia como entidade na tela.
+      _secHead('Análise', (nome || telefone || 'Esta conversa'), totalMsgs ? totalMsgs + ' msgs' : '') +
       '<div class="job-score-wrap">' +
         '<div class="job-score-num ' + fx + '">' + (r.score != null ? r.score : '—') + '</div>' +
         '<div class="job-score-meta"><div class="job-score-faixa ' + fx + '">' +
@@ -7873,7 +7937,7 @@
   }
 
   async function abrirSecaoNotas() {
-    setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div><div class="job-sem-analise-txt">Abrindo notas…</div></div>');
+    setCorpoSecao(_telaCarregando('Abrindo notas…'));
     let tel = '';
     try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
     const nome = nomeDoContato();
@@ -7906,9 +7970,8 @@
           '</div>').join('')
       : '<div class="job-notas-vazio" style="padding:6px 2px;">Ainda sem notas deste lead. Escreva a primeira abaixo.</div>';
     setCorpoSecao(
+      _secHead('Notas', (nome || tel || 'Este lead') + ' — fica salvo no JOB; qualquer consultor que abrir esta conversa vê.') +
       '<div class="job-notas-secao">' +
-        '<div class="job-cnpj-titulo">Notas do lead</div>' +
-        '<div class="job-cnpj-sub">' + esc(nome || tel) + ' — fica salvo no JOB, qualquer consultor que abrir essa conversa vê.</div>' +
         '<div class="job-notas-lista">' + lista + '</div>' +
         '<textarea id="job-nota-input" class="job-nota-input" rows="3" placeholder="Escrever uma nota deste lead…"></textarea>' +
         '<button class="job-cnpj-btn" id="job-nota-salvar">Salvar nota</button>' +
@@ -7984,7 +8047,7 @@
   const _ORIGEM_ROTULO = { 'MEDSENIOR': 'MedSênior', 'manual': 'Manual / prospecção' };
 
   async function abrirSecaoNovoLead() {
-    setCorpoSecao('<div class="job-sem-analise"><div class="job-carregando"></div><div class="job-sem-analise-txt">Lendo a conversa…</div></div>');
+    setCorpoSecao(_telaCarregando('Lendo a conversa…'));
     let tel = '';
     try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
     if (!tel) {
@@ -7995,9 +8058,8 @@
     const nomeBruto = (nomeDoContato() || '').trim();
     const nomeSugerido = /^[+\d\s()\-]+$/.test(nomeBruto) ? '' : nomeBruto;
     setCorpoSecao(
+      _secHead('CRM', 'Este número ainda não está no JOB. Cadastre pra ele entrar no funil e ser medido por canal.') +
       '<div class="job-novolead">' +
-        '<div class="job-cnpj-titulo">Cadastrar lead no CRM</div>' +
-        '<div class="job-cnpj-sub">Este número ainda não está no JOB. Cadastre com os dados completos pra ele entrar no funil e ser medido por canal.</div>' +
         '<label class="job-nl-lbl">Nome <span class="job-nl-req">obrigatório</span></label>' +
         '<input id="job-nl-nome" class="job-cnpj-input" placeholder="Nome do lead" value="' + esc(nomeSugerido) + '" />' +
         '<label class="job-nl-lbl">Telefone <span class="job-nl-ok">da conversa</span></label>' +
@@ -8050,8 +8112,8 @@
     const url = _SITE_BASE_URL_EXT + '/crm?lead=' + resp.lead_id;
     setCorpoSecao(
       '<div class="job-novolead">' +
-        '<div class="job-cnpj-titulo">' + (resp.ja_existia ? 'Esse lead já existia' : 'Lead cadastrado') + '</div>' +
-        '<div class="job-cnpj-sub">' + (resp.ja_existia
+        '<div class="job-sec-t">' + (resp.ja_existia ? 'Esse lead já existia' : 'Lead cadastrado') + '</div>' +
+        '<div class="job-sec-sub">' + (resp.ja_existia
           ? 'Já havia um lead com esse telefone no JOB — abrimos o existente em vez de duplicar.'
           : 'Entrou no funil em "Lead Novo", atribuído a você.') + '</div>' +
         '<a class="job-cnpj-link" href="' + esc(url) + '" target="_blank" rel="noopener" style="display:flex;margin-top:12px;">Abrir no CRM</a>' +
