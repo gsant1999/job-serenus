@@ -2795,3 +2795,20 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 .job-cot-fixar:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
 .job-cot-fixar:disabled { opacity: .5; cursor: default; }
 @media (prefers-reduced-motion: reduce) { .job-sw-bola { transition: background var(--job-t-rapido) ease; } }
+
+
+/* O "Abrir no JOB" da lista de cotações era um bloco preenchido do mesmo
+   tamanho do "Cotar agora": dois blocos empilhados, sem dizer qual é o
+   caminho normal. Vira atalho — texto com contorno leve, peso de link. */
+.job-cot-nova-atalho {
+  background: transparent; border: 1px solid var(--job-borda);
+  color: var(--job-txt-fraco); font-size: 12px; font-weight: 600;
+  border-radius: 999px; padding: 9px 12px; margin-top: 8px;
+  font-family: var(--job-ui); letter-spacing: var(--job-tk-sm);
+  transition: background var(--job-t-rapido) ease, border-color var(--job-t-rapido) ease, color var(--job-t-rapido) ease;
+}
+.job-cot-nova-atalho:hover {
+  background: color-mix(in srgb, var(--job-acento) 10%, transparent);
+  border-color: color-mix(in srgb, var(--job-acento) 55%, transparent);
+  color: var(--job-txt);
+}

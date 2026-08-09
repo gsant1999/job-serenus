@@ -4451,9 +4451,11 @@
     try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
     tel = String(tel || '').replace(/\D/g, '');
     if (!tel) {
-      setCorpoSecao('<div class="job-cot-wrap"><div class="job-ia-alerta">' +
-        'Não consegui identificar o telefone desta conversa. Abra a conversa do cliente e tente de novo.' +
-        '</div></div>');
+      // Isto não é AVISO, é estado da tela: usar o ladrilho amarelo aqui fazia
+      // parecer que algo deu errado, quando só falta abrir uma conversa.
+      setCorpoSecao(_secHead('Cotações', _COT_SUB) + _vazio(
+        'Nenhuma conversa aberta',
+        'As cotações são de quem está na tela. Abra a conversa do cliente e volte aqui.'));
       return;
     }
     // O cache é por telefone e só dura enquanto o painel está aberto: o
@@ -4469,11 +4471,10 @@
     // cliente"; falha afirma "não consegui saber". A primeira, dita errada,
     // vira um consultor dizendo ao cliente que nunca cotou — quando cotou.
     if (!resp || !resp.ok) {
-      setCorpoSecao('<div class="job-cot-wrap">' +
-        '<div class="job-ia-alerta">' + esc((resp && resp.erro) ||
-          'Não consegui carregar as cotações agora. Isso não quer dizer que não existam.') + '</div>' +
-        '<button class="job-cnpj-btn" id="job-cot-retry">Tentar de novo</button>' +
-      '</div>');
+      setCorpoSecao(_secHead('Cotações', _COT_SUB) + _telaFalha(
+        'Não consegui carregar as cotações',
+        'Isso não quer dizer que não existam — só que não consegui perguntar agora.',
+        'job-cot-retry', 'Tentar de novo'));
       const br = document.getElementById('job-cot-retry');
       if (br) br.addEventListener('click', () => { _cotCache = { chave: '', dados: null }; abrirSecaoCotacao(); });
       return;
@@ -4513,6 +4514,8 @@
     return _SITE_BASE_URL_EXT + '/cotacao/novo' + (q.length ? '?' + q.join('&') : '');
   }
 
+  var _COT_SUB = 'Cotações deste cliente: mandar o link, copiar e cotar de novo.';
+
   function _cotPintar(resp, tel) {
     // Guarda o lead da conversa: salvar a cotação exige vínculo, e é aqui
     // que ele já veio resolvido pelo servidor.
@@ -4525,13 +4528,9 @@
     if (!lista.length) {
       // Vazio com saída. Dizer só "nenhuma cotação" deixa o consultor parado
       // com o cliente esperando do outro lado.
-      corpo = '<div class="job-cot-vazio">' +
-          '<div class="job-cot-vazio-t">Nenhuma cotação para este cliente</div>' +
-          '<div class="job-cot-vazio-s">Cotações salvas aqui viram um link com apresentação, imagem e PDF pra mandar na conversa.</div>' +
-          (resp.lead_id ? ''
-            : '<div class="job-cot-vazio-s">Este número não é um lead do CRM. ' +
-              'Sem lead a cotação não é salva.</div>') +
-        '</div>';
+      corpo = _vazio('Nenhuma cotação para este cliente',
+        'Cotação salva aqui vira um link com apresentação, imagem e PDF pra mandar na conversa.'
+        + (resp.lead_id ? '' : ' Este número ainda não é um lead do CRM, e sem lead a cotação não é salva.'));
     } else {
       // O título salvo começa com o nome do cliente ("Beatriz · Campinas - SP ·
       // Adesão"), mas o nome já está no cabeçalho e é o mesmo em todos os
@@ -4568,20 +4567,25 @@
     }
 
     setCorpoSecao(
+      // O cabeçalho vira o mesmo das outras dez telas: título fixo, subtítulo
+      // dizendo DE QUEM são as cotações, e o total no contador — que era texto
+      // corrido no subtítulo e agora tem lugar próprio.
+      _secHead('Cotações', nome, lista.length || '') +
       '<div class="job-cot-wrap">' +
-        '<div class="job-sec-t">Cotações</div>' +
-        '<div class="job-sec-sub">' + esc(nome) +
-          (lista.length ? ' · ' + lista.length + (lista.length === 1 ? ' cotação' : ' cotações') : '') +
-        '</div>' +
         corpo +
         // Cotar acontece AQUI. O link pro JOB continua existindo porque a tela
         // de lá compara 20 planos de várias operadoras de uma vez, o que não
         // cabe num painel de conversa — mas deixou de ser o caminho principal.
-        '<button class="job-cot-bt-mandar" id="job-cot-agora" style="width:100%;margin-top:2px">' +
-          'Cotar' +
+        // "Cotar" sozinho não diz o que acontece: o botão nomeia a
+        // consequência, não o verbo. E o "Abrir no JOB" desce de bloco cheio
+        // pra atalho — cotar acontece AQUI; ir pro site é a exceção pra quando
+        // se quer comparar vinte planos, o que não cabe num painel de conversa.
+        '<button class="job-cot-bt-mandar" id="job-cot-agora" style="width:100%;margin-top:10px">' +
+          'Cotar agora' +
         '</button>' +
-        '<a class="job-cot-nova" href="' + esc(linkNovo) + '" target="_blank" rel="noopener">' +
-          'Abrir no JOB' +
+        '<a class="job-cot-nova job-cot-nova-atalho" href="' + esc(linkNovo) + '" ' +
+          'target="_blank" rel="noopener" title="Abre a tela de cotação do site, com o lead já ligado">' +
+          'Comparar operadoras no JOB' +
         '</a>' +
       '</div>');
     const ba = document.getElementById('job-cot-agora');
