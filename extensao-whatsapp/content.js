@@ -5592,9 +5592,16 @@
           '</div>' +
           '<div id="job-cot-cnpj-res"></div>' +
         '</div>' +
+        // SEM CAIXINHA DE "E MEI".
+        //
+        // Tinha uma, e o Guilherme cortou: a consulta do CNPJ ja responde isso
+        // (`opcao_pelo_mei`). Perguntar de novo e pedir ao consultor um dado
+        // que o sistema tem — e abrir espaco pra ele marcar errado e o "- MEI"
+        // sair na cotacao de uma empresa que nao e.
+        //
+        // Sem CNPJ consultado, a extensao nao sabe e nao inventa: o nome sai
+        // limpo, sem sufixo.
         '<input id="job-cot-cliente" class="job-cnpj-input" autocomplete="off" placeholder="" value="">' +
-        '<label class="job-cot-check" id="job-cot-mei-l" style="display:none">' +
-          '<input type="checkbox" id="job-cot-mei"><span>É MEI</span></label>' +
         '<div class="job-cot-dica" id="job-cot-cliente-ex"></div>' +
         '<button class="job-cot-bt-mandar" id="job-cot-buscar" style="width:100%;margin-top:14px" disabled>' +
           'Escolha a cidade</button>' +
@@ -5608,15 +5615,14 @@
     const iCid = document.getElementById('job-cot-cidade');
     const iIda = document.getElementById('job-cot-idades');
     const iCli = document.getElementById('job-cot-cliente');
-    const iMei = document.getElementById('job-cot-mei');
-    const lMei = document.getElementById('job-cot-mei-l');
     const exCli = document.getElementById('job-cot-cliente-ex');
+    // MEI vem da consulta do CNPJ, nunca de campo na tela.
+    let meiDoCnpj = false;
     // O EXEMPLO MOSTRA O RESULTADO, nao explica a regra. Ele digita e ve na
     // hora como o nome vai sair no documento do cliente.
     const verCliente = () => {
       const bt = document.querySelector('#job-cot-tipo button.on');
       const pme = String((bt && bt.dataset.v) || (_cot && _cot.modalidade) || '') === '2';
-      if (lMei) lMei.style.display = pme ? '' : 'none';
       const bl = document.getElementById('job-cot-cnpj-bloco');
       if (bl) bl.style.display = pme ? '' : 'none';
       // O PLACEHOLDER DIZ O QUE DIGITAR. "Razão social da empresa, ou nome
@@ -5628,7 +5634,7 @@
       const bruto = (iCli && iCli.value || '').trim();
       const contato = (_cotLead && _cotLead.nome) || nomeDoContato() || 'o contato';
       exCli.textContent = bruto
-        ? 'O cliente vai ler: ' + _cotNomeCliente(bruto, pme, iMei && iMei.checked)
+        ? 'O cliente vai ler: ' + _cotNomeCliente(bruto, pme, meiDoCnpj)
         : 'Em branco, o cliente lê "' + contato + '" — que é o nome do contato aqui do WhatsApp.';
     };
     // PREENCHIMENTO AUTOMATICO DESLIGADO, DE PROPOSITO.
@@ -5642,7 +5648,6 @@
     //
     // Religar quando a migracao separar cidade de empresa.
     if (iCli) iCli.addEventListener('input', verCliente);
-    if (iMei) iMei.addEventListener('change', verCliente);
     verCliente();
 
     // ── O CNPJ PREENCHE O RESTO ──────────────────────────────────────────
@@ -5692,7 +5697,7 @@
       _cot.cnpj = dig;
       _cot.cnpjDados = c;
       if (iCli) iCli.value = c.nome || '';
-      if (iMei) iMei.checked = !!c.eh_mei;
+      meiDoCnpj = !!c.eh_mei;
       verCliente();
       // SITUACAO CADASTRAL APARECE. Operadora recusa proposta de empresa
       // baixada ou suspensa, e descobrir isso depois da assinatura e o pior
@@ -5781,7 +5786,7 @@
       _cot = { cidade: cidadeDoCatalogo, modalidade: Number((tipo && tipo.v) || 1),
                idades: iIda.value, faixas: porFaixa ? contFx : null,
                clienteNome: (iCli && iCli.value || '').trim(),
-               clienteMei: !!(iMei && iMei.checked),
+               clienteMei: meiDoCnpj,
                cnpj: (iCnpj && iCnpj.value || '').replace(/\D/g, ''),
                cnpjDados: (_cot && _cot.cnpjDados) || null,
                vidas: r.vidas, totalVidas: r.total };
@@ -5953,7 +5958,7 @@
       _cot = { cidade: cidadeDoCatalogo, cidadeOk: true, modalidade: Number((tipo && tipo.v) || 1),
                idades: iIda.value, faixas: porFaixa ? contFx : null,
                clienteNome: (iCli && iCli.value || '').trim(),
-               clienteMei: !!(iMei && iMei.checked),
+               clienteMei: meiDoCnpj,
                cnpj: (iCnpj && iCnpj.value || '').replace(/\D/g, ''),
                cnpjDados: (_cot && _cot.cnpjDados) || null,
                vidas: r.vidas, totalVidas: r.total };
