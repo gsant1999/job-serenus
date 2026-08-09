@@ -5162,7 +5162,10 @@
   // apartamento. Ele leu como marcacao duplicada e reclamou com razao: o que
   // separa os dois estava escondido justamente no bloco que existe pra dizer
   // o que ele escolheu.
-  function _cotSacolaHTML() {
+  // `comBotao`: so na tela de OPERADORAS. Na de planos o rodape ja tem o
+  // "Ver precos" com a mesma contagem, e dois botoes dizendo a mesma coisa na
+  // mesma tela fazem o consultor parar pra decidir qual e o certo.
+  function _cotSacolaHTML(comBotao) {
     if (!_cotSacola.length) return '';
     const porOp = new Map();
     _cotSacola.forEach((x) => {
@@ -5207,6 +5210,19 @@
           ? 'Cabem mais ' + falta + '. Pode somar de outras operadoras — sai tudo no mesmo comparativo.'
           : 'Cheio. Tire um pra marcar outro.') +
       '</div>' +
+      // COTAR DAQUI, sem ter que entrar numa operadora de novo.
+      //
+      // Na tela de operadoras nao havia botao nenhum de cotar: o que ja estava
+      // marcado so podia ser cotado voltando pra dentro de uma operadora e
+      // rolando ate o fim da lista. Aqui ele fecha a conta de onde esta.
+      //
+      // Fica em contorno, nao cheio: na tela de planos o botao do rodape
+      // continua sendo o fim natural da lista, e dois verdes cheios brigando
+      // e o defeito que eu acabei de tirar da tela de Cotacoes.
+      (comBotao
+        ? '<button type="button" class="job-cot-bt-copiar forte job-cot-comp-ir" ' +
+            'id="job-cot-comp-precos">Ver preços destes ' + _cotSacola.length + '</button>'
+        : '') +
     '</div>';
   }
 
@@ -5214,6 +5230,8 @@
   function _cotSacolaLigar(aoMudar) {
     document.querySelectorAll('.job-cot-comp-x').forEach((b) =>
       b.addEventListener('click', () => { _cotSacolaTirar(b.dataset.chave); aoMudar(); }));
+    const bp = document.getElementById('job-cot-comp-precos');
+    if (bp) bp.addEventListener('click', () => _cotPrecosSacola());
   }
 
   // MODALIDADE É CÓDIGO, NÃO TEXTO. O filtro que vai pro Painel usa 1/2/3, e
@@ -6091,7 +6109,7 @@
         ops.length ? '<span class="job-sec-cont">' + ops.length + '</span>' : '') +
       '<div class="job-cot-wrap">' +
       '<div class="job-sec-sub">Escolha uma de cada vez — cada uma que você cotar soma no mesmo comparativo.</div>' +
-      '<div id="job-cot-comp">' + _cotSacolaHTML() + '</div>' +
+      '<div id="job-cot-comp">' + _cotSacolaHTML(true) + '</div>' +
       '<div class="job-cot-fonte-t" style="margin-bottom:8px">Pelo Painel do Corretor</div>' +
       (ops.length
         ? '<div class="job-cot-ops">' + ops.map((o) => {
