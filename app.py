@@ -4982,6 +4982,18 @@ BRAND = {
     # Logo (imagem dos arcos girando no menu/login). Cliente aponta a dele por
     # env; default = o do Serenus.
     'logo':          os.environ.get('BRAND_LOGO_URL') or '/static/logo_arcos.png',
+    # LOGO DO SISTEMA E LOGO DA CORRETORA SAO COISAS DIFERENTES.
+    #
+    # O de cima e o icone do JOB — identidade do sistema interno, e e o certo
+    # no menu e no login. Ja entreguei material de cliente com ele e o
+    # Guilherme respondeu "esse e errado": quem assina a cotacao, o PDF e a
+    # apresentacao e a CORRETORA, nao o ERP dela.
+    #
+    # O default aponta pro wordmark que ja esta versionado em static/brand/ —
+    # entao funciona sem ninguem configurar nada, e a instancia de outra
+    # corretora sobrescreve pela env.
+    'logo_cliente':  os.environ.get('BRAND_LOGO_CLIENTE_URL')
+                     or '/static/brand/serenus-logo-black.png',
 }
 
 
@@ -22415,7 +22427,9 @@ def api_whatsapp_extensao_cotacao_contexto():
     logo_data = ''
     try:
         import base64 as _b64c
-        alvo = BRAND.get('logo') or ''
+        # O de CLIENTE: a imagem que a extensao desenha vai pro WhatsApp do
+        # cliente, entao quem assina ali e a corretora.
+        alvo = BRAND.get('logo_cliente') or BRAND.get('logo') or ''
         if alvo.startswith('/static/'):
             caminho = os.path.join(app.root_path, alvo.lstrip('/'))
             if os.path.exists(caminho) and os.path.getsize(caminho) < 2_000_000:
@@ -22434,7 +22448,7 @@ def api_whatsapp_extensao_cotacao_contexto():
         'marca': {'nome_curto': BRAND.get('nome_curto') or '',
                   'nome': BRAND.get('nome') or '',
                   'logo': logo_data,
-                  'logo_url': BRAND.get('logo') or ''},
+                  'logo_url': BRAND.get('logo_cliente') or BRAND.get('logo') or ''},
     }))
 
 

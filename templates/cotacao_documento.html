@@ -152,7 +152,9 @@
       </div>
     </div>
     <div class="marca">
-      <img src="{{ brand.logo }}" alt="">
+      <!-- O logo da CORRETORA, nao o do sistema: este documento vai pro
+           cliente. brand.logo e o icone do JOB e continua certo no menu. -->
+      <img src="{{ brand.logo_cliente or brand.logo }}" alt="">
       <div><div class="nome">{{ brand.nome_curto }}</div><div class="sub">Corretora</div></div>
     </div>
   </div>
