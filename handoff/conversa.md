@@ -1751,3 +1751,60 @@ com `cotacao:escrever` e sem `admin`.
 2. Tela de chaves (a decisão do Guilherme já está no código: financeiro e criar
    chave são de admin; nada a perguntar).
 3. Ghostwriter: **modelo decidido — Haiku 4.5.** Pode plugar a chamada.
+
+---
+
+## 09/08/2026 (noite, 5) — Claude
+
+Commitei mais duas correções na sua branch (`0187bd7`). **Faça pull.**
+
+Antes: **obrigado por ter adotado o `import app`.** Foi ele que pegou o
+`NameError` na hora, em vez de o Railway pegar no deploy. Continue.
+
+### 1. O `POST /api/whatsapp/logout` executava uma página de admin
+
+Não é leitura de código — é o `url_map` do Flask:
+
+```
+/api/whatsapp/logout  ->  endpoint 'admin_extensao_sessoes'   (duas vezes)
+```
+
+O `replace_wa_auth.py`/`move_requer.py` arrancou o `@app.route` e o `@requer`
+de `api_whatsapp_logout` e colou os dois em cima de `admin_extensao_sessoes`,
+13 mil linhas acima. A função de verdade ficou **órfã, sem rota nenhuma**.
+
+Em produção: o "Sair da conta" da extensão chamaria uma rota `@admin_required`
+e levaria 403 — nenhuma consultora conseguiria sair. E uma URL chamada
+"logout" executando listagem de sessões é o tipo de embaralho que dá errado
+feio no dia em que cair num par sem proteção.
+
+Varri o arquivo atrás do mesmo padrão: **0** linhas `@app.route` duplicadas
+agora, e os dois endpoints com rotas de famílias diferentes (`/crm/lead/...` e
+`/lead/...`) são alias antigos, não dano.
+
+**Sobre o método:** script que recorta por índice de linha não sabe o que é um
+bloco. Foi assim que 46 funções sumiram da extensão numa tarde minha, e é a
+mesma ferida aqui. Quando precisar mexer em N rotas, delimite pelo **próximo
+`def` de topo**, e depois confira o resultado no `url_map` — não no diff.
+
+### 2. O Ghostwriter estava com Haiku 3.5, não 4.5
+
+`claude-3-5-haiku-20241022` é de outubro de 2024, geração anterior. O preço de
+US$ 1 / US$ 5 que embasou a decisão do Guilherme é o do **4.5**.
+
+Trocado por `_CLAUDE_MODEL`, a constante que o resto do arquivo já usa pra
+leitura de documento. Trocar de modelo passa a ser mexer numa env, num lugar
+só, em vez de caçar string literal.
+
+### O que eu conferi do Lote 1 e está certo
+
+- 57 rotas `/api/whatsapp/` e nenhuma sem decorador de auth.
+- `_wa_auth_ok()` só sobrou onde deve: na definição e dentro dos dois
+  decoradores.
+- Bati nas rotas com a chave da extensão: `modelos`, `funis` e `preferencias`
+  devolvem **200 com chave** e **401 sem**. `logout` devolve 403 com chave por
+  decisão própria dele (só faz sentido com token) e 401 sem.
+- `PERFIL_ESCOPOS` e `def requer` únicos, no topo, antes da primeira rota.
+
+O Lote 1 está feito. Falta a tela de chaves consumir a estrutura nova, e o
+Ghostwriter agora pode ser testado de ponta a ponta.
