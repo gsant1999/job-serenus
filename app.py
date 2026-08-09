@@ -2749,16 +2749,7 @@ def init_db():
     add_col('api_chave', 'usuario_id', 'INTEGER')
     add_col('crm_leads', 'qual_cidade', 'TEXT')
     add_col('crm_leads', 'qual_cnpj', 'TEXT')
-    
-    try:
-        conn.execute("UPDATE crm_leads SET qual_cidade = empresa WHERE qual_cidade IS NULL AND empresa IS NOT NULL AND empresa != ''")
-        conn.execute("UPDATE crm_leads SET empresa = NULL WHERE qual_cidade = empresa OR qual_cidade IS NOT NULL")
-        conn.commit()
-    except Exception as e:
-        try: conn.rollback()
-        except: pass
-        app.logger.warning(f"[MIGRACAO] Erro atualizando qual_cidade: {e}")
-    
+    add_col('crm_leads', 'empresa_antes_migracao', 'TEXT')
     # Config do parceiro Affinity — específico do Serenus (e-mails/contato deles).
     # Não vai pra instância de cliente (SEED_DADOS_SERENUS=0).
     if SEED_DADOS_SERENUS:
@@ -22017,6 +22008,15 @@ def api_whatsapp_lead_cnpj(lid):
     if len(cnpj) > 50:
         return _wa_cors(jsonify({"ok": False, "erro": "CNPJ muito longo"})), 400
     conn = db()
+    lead = conn.execute("SELECT qual_cnpj FROM crm_leads WHERE id=?", (lid,)).fetchone()
+    if not lead:
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "Lead não encontrado"})), 404
+        
+    if lead['qual_cnpj'] and not d.get('sobrescrever'):
+        close_db(conn)
+        return _wa_cors(jsonify({"ok": False, "erro": "cnpj_existente", "existente": lead['qual_cnpj']})), 409
+
     try:
         conn.execute("UPDATE crm_leads SET qual_cnpj=?, atualizado_em=? WHERE id=?", (cnpj, _agora_sp(), lid))
         conn.commit()
@@ -23409,6 +23409,45 @@ def api_ia_caca_docs_regras():
             })
             
     return _wa_cors(jsonify({"ok": True, "regras": dict_regras}))
+
+@app.route('/admin/migrar-cidade-empresa', methods=['POST'])
+@login_required
+def admin_migrar_cidade_empresa():
+    if session.get('perfil') != 'admin':
+        return jsonify({"ok": False, "erro": "Sem permissão"}), 403
+        
+    conn = db()
+    try:
+        # Trava: se já migrou, retorna.
+        conn.execute("INSERT INTO meta_flags (chave) VALUES ('migrou_cidade_empresa')")
+        
+        # Copia empresa para empresa_antes_migracao para não perder nada
+        conn.execute("UPDATE crm_leads SET empresa_antes_migracao = empresa WHERE empresa IS NOT NULL")
+        
+        municipios = [m['nome'].lower() for m in _municipios()]
+        leads = conn.execute("SELECT id, empresa FROM crm_leads WHERE qual_cidade IS NULL AND empresa IS NOT NULL AND empresa != ''").fetchall()
+        
+        migrados = 0
+        mantidos = 0
+        for l in leads:
+            emp = l['empresa'].strip()
+            if emp.lower() in municipios:
+                conn.execute("UPDATE crm_leads SET qual_cidade = ?, empresa = NULL WHERE id = ?", (emp, l['id']))
+                migrados += 1
+            else:
+                mantidos += 1
+                
+        conn.commit()
+        return jsonify({"ok": True, "migrados": migrados, "mantidos_como_empresa": mantidos})
+    except Exception as e:
+        try: conn.rollback()
+        except: pass
+        if 'UNIQUE' in str(e).upper() or 'duplicate key' in str(e).lower():
+            return jsonify({"ok": False, "erro": "Migração já foi executada"}), 400
+        app.logger.error(f"[MIGRACAO] Erro: {e}")
+        return jsonify({"ok": False, "erro": "Erro na migração"}), 500
+    finally:
+        close_db(conn)
 
 @app.route('/admin/ia/caca-docs', methods=['GET', 'POST'])
 @login_required
