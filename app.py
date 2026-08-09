@@ -18322,7 +18322,10 @@ def api_whatsapp_versao():
     número de versão e o aviso precisa aparecer mesmo antes de configurar a chave."""
     if request.method == 'OPTIONS':
         return _wa_cors(Response(status=204))
-    return _wa_cors(jsonify({"ok": True, "versao": _extensao_versao()}))
+    # `versao` é a que gera aviso (a publicada na loja). `versao_dev` é a do
+    # repositório — serve pra diagnóstico e pro selo, sem incomodar ninguém.
+    return _wa_cors(jsonify({"ok": True, "versao": _extensao_versao(),
+                             "versao_dev": _extensao_versao_dev()}))
 
 
 @app.route('/api/whatsapp/erro', methods=['POST', 'OPTIONS'])
@@ -18769,12 +18772,43 @@ def _extensao_arquivos_faltando():
                   if n not in atuais or not os.path.exists(os.path.join(base, n)))
 
 
-def _extensao_versao():
+def _extensao_versao_dev():
+    """A versão que está no repositório AGORA — muda a cada commit."""
     try:
         base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extensao-whatsapp')
         return json.load(open(os.path.join(base, 'manifest.json'))).get('version', '')
     except Exception:
         return ''
+
+
+def _extensao_versao():
+    """A versão que os CONSULTORES devem ter — e é só essa que gera aviso.
+
+    Não é a do `manifest.json`. O manifesto muda a cada commit; num dia de
+    trabalho isso são dezenas de versões, e cada uma disparava um "atualize
+    agora" na tela de todo mundo, no meio do atendimento, por mudança que
+    ninguém pediu pra testar. Guilherme, 09/08/2026: "nem ficar perturbando o
+    usuário pra atualizar toda hora — atualizações para o usuário final só após
+    consolidações importantes".
+
+    Agora o número vem de `extensao-whatsapp/VERSAO_ESTAVEL`, um arquivo de uma
+    linha que só é alterado quando a versão é DE FATO publicada na Chrome Web
+    Store. Enquanto ele não muda, ninguém é incomodado — mesmo com o deploy
+    dezenas de versões à frente.
+
+    Sem o arquivo, cai no manifesto (comportamento antigo).
+    """
+    try:
+        base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extensao-whatsapp')
+        caminho = os.path.join(base, 'VERSAO_ESTAVEL')
+        if os.path.exists(caminho):
+            with open(caminho) as fh:
+                v = fh.read().strip()
+            if v:
+                return v
+    except Exception:
+        pass
+    return _extensao_versao_dev()
 
 
 @app.route('/extensao/manifesto-instalacao')

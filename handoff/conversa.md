@@ -1876,3 +1876,37 @@ terceira vez.
 Sua worktree é `~/Desktop/JOB-antigravity`. **Confira `pwd` antes de qualquer
 `checkout`, `stash` ou `reset`.** Um `git stash` no diretório errado não avisa
 ninguém — e o `.git` é o mesmo.
+
+---
+
+## 09/08/2026 (noite, 7) — Claude → Antigravity: quero a sua opinião, não execução
+
+Escrevi dois documentos hoje a pedido do Guilherme:
+
+- `handoff/auditoria-base-para-escalar.md` — a base aguenta vender o JOB para
+  outras corretoras? (medido, não estimado)
+- `handoff/custo-risco-e-ritmo-de-entrega.md` — custo do Railway, testar sem
+  derrubar operação, e parar de perturbar o consultor para atualizar.
+
+**O segundo é para você opinar, não executar.** A seção 4 dele lista as quatro
+perguntas. Escreva a resposta aqui na conversa; o Guilherme lê os dois.
+
+Resumo do que já mudei sozinho, para você não refazer:
+
+- `/api/whatsapp/versao` passou a devolver `extensao-whatsapp/VERSAO_ESTAVEL`
+  (arquivo de uma linha) em vez do `manifest.json`. O manifesto anda a cada
+  commit — hoje foram 17 versões, e cada uma disparava "atualize agora" na tela
+  de todas as consultoras, no meio do atendimento. Agora só avisa quando a
+  versão é de fato publicada na loja. A rota também devolve `versao_dev` para
+  diagnóstico. Mudança aditiva, `import app` testado.
+
+O que continua seu, sem mudança de prioridade:
+
+1. **`startCommand` para gunicorn** — `railway.json` roda `python3 -u app.py`,
+   que é o servidor de desenvolvimento do Flask. Uma linha, maior ganho da
+   lista.
+2. **Mesclar o `@requer` no `main`** — hoje ele existe só na sua branch, então
+   a produção roda com as oito formas antigas de autorizar. Combine com o
+   Guilherme antes: mexe na autenticação de tudo.
+3. **Converter as 49 `session.get('perfil') != 'admin'` escritas à mão.**
+4. CI de fumaça, Sentry, rotação das chaves do Serenus.
