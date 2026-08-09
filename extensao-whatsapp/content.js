@@ -6134,6 +6134,12 @@
   // "Plano de Saúde Vera Cruz" e o arquivo se chama só "vera-cruz". Casar por
   // igualdade exata quebraria no dia em que eles mudarem o nome comercial.
   const _COT_LOGOS_PROPRIAS = [
+    // Amhe Med e Fenix Medical entraram em 09/08 pelo mesmo motivo das outras:
+    // o Painel nao devolve logo delas e a linha ficava so com a inicial, o que
+    // o Guilherme leu como imagem quebrada. Baixadas dos sites oficiais
+    // (amhemed.com.br e fenix.med.br), PNG com transparencia.
+    { chave: 'amhe',         arq: 'logos/amhemed.png' },
+    { chave: 'fenix',        arq: 'logos/fenix-medical.png' },
     { chave: 'vera cruz',    arq: 'logos/vera-cruz.png' },
     { chave: 'salusmed',     arq: 'logos/salusmed.png' },
     { chave: 'samp',         arq: 'logos/samp.png' },
