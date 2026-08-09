@@ -2738,7 +2738,19 @@
       '<button type="button" class="job-bc-btn" data-ac="transcrever" title="Transcrever todos os áudios desta conversa">' +
         _ICO_TRANSCREVER + '<span>Transcrever tudo</span></button>' +
       '<button type="button" class="job-bc-btn" data-ac="copiar" title="Copiar a conversa inteira: texto e áudio transcrito, na ordem, com hora e quem falou">' +
-        _ICO_COPIAR + '<span>Copiar conversa</span></button>';
+        _ICO_COPIAR + '<span>Copiar conversa</span></button>' +
+      // SALVAR CONTATO MORA AQUI, ao lado do nome da pessoa.
+      //
+      // A ação é sobre ESTE contato, e o lugar onde o consultor está olhando
+      // quando pensa nela é o cabeçalho da conversa — não uma aba do painel a
+      // dois cliques de distância. É a mesma regra do botão dentro da bolha:
+      // a ação mora onde está o objeto dela.
+      //
+      // Ele se destaca dos outros dois de propósito: transcrever e copiar são
+      // leitura, salvar contato é a única aqui que MUDA alguma coisa.
+      '<button type="button" class="job-bc-btn job-bc-salvar" data-ac="salvarcontato" ' +
+        'title="Salva este contato no seu WhatsApp, com o nome no padrão do JOB. Sincroniza pro celular.">' +
+        _ICO_SALVAR_CONTATO + '<span>Salvar contato</span></button>';
     cab.appendChild(box);
 
     const btn = (ac) => box.querySelector('[data-ac="' + ac + '"]');
@@ -2760,6 +2772,48 @@
         rotulo(bt, 'Falhou');
       } finally {
         setTimeout(() => { rotulo(bt, r0); bt.disabled = false; }, 2600);
+      }
+    });
+
+    // ── SALVAR CONTATO, do cabeçalho ──────────────────────────────────
+    // Um clique: monta o nome com as regras do CRM (as mesmas do painel) e
+    // grava. Se o lead ainda não foi carregado nesta conversa, carrega antes —
+    // salvar com o nome cru do WhatsApp desperdiçaria justamente o padrão que
+    // faz o contato ser achável na busca depois.
+    const bsv = btn('salvarcontato');
+    if (bsv) bsv.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      if (bsv.disabled) return;
+      bsv.disabled = true;
+      const r0 = 'Salvar contato';
+      try {
+        let chat = '';
+        try { const c = await _pedirPonte('obter_chat_id', {}, 8000); chat = (c && c.chat_id) || ''; }
+        catch (e) { chat = ''; }
+        if (!chat) { rotulo(bsv, 'Abra a conversa'); return; }
+        // A ficha traz etapa, origem, operadora e consultor — que é o que o
+        // nome padrão usa. Sem ela, cai no nome que está na tela.
+        if (!_ficha || !_ficha.lead) {
+          try {
+            let tel = '';
+            try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e2) { tel = telefoneDoContato(); }
+            if (tel) await _carregarFicha({ telefone: tel });
+          } catch (e) { /* segue com o nome da tela */ }
+        }
+        const nome = (_ficha && _ficha.lead ? _montarNomeContato() : (nomeDoContato() || '')).trim();
+        if (!nome) { rotulo(bsv, 'Sem nome'); return; }
+        const partes = nome.split(/\s+/);
+        const primeiro = partes.shift() || nome;
+        const sobrenome = partes.join(' ');
+        let r = null;
+        try { r = await _pedirPonte('salvar_contato', { chatId: chat, nome: primeiro, sobrenome }, 15000); }
+        catch (e) { _falhaTecnica('salvar contato (cabeçalho)', e); }
+        if (r && r.ok) { rotulo(bsv, 'Salvo'); bsv.classList.add('ok'); return; }
+        // Diz QUAL problema. 'sem_suporte' manda pro caminho que funciona.
+        rotulo(bsv, (r && r.erro) === 'sem_suporte' ? 'Não dá aqui' : 'Falhou');
+        if (r && r.erro) _falhaTecnica('salvar contato (cabeçalho): ' + r.erro, null);
+      } finally {
+        setTimeout(() => { rotulo(bsv, r0); bsv.classList.remove('ok'); bsv.disabled = false; }, 2800);
       }
     });
 
@@ -2909,6 +2963,13 @@
     }
     return TRTUDO;
   }
+
+  // Pessoa com um "+": a mesma figura do CRM no trilho, que é onde o consultor
+  // já aprendeu que "gente entrando no sistema" tem essa cara.
+  const _ICO_SALVAR_CONTATO = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+    'stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' +
+    '<circle cx="9.6" cy="7.6" r="3.5"/><path d="M3.4 20a6.2 6.2 0 0 1 12.4 0"/>' +
+    '<path d="M19.4 6.6v5.4M16.7 9.3h5.4"/></svg>';
 
   const _ICO_TRANSCREVER = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ' +
     'stroke-width="2" stroke-linecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>' +
@@ -3627,10 +3688,28 @@
       '<div class="job-nomec-tit">Salvar contato' +
         '<span class="job-nomec-i" title="Monta o nome no mesmo padrão sempre, pra você achar o contato pela busca do WhatsApp e entender a lista de relance. Nada é salvo sozinho: você edita e escolhe o que fazer.">i</span>' +
       '</div>' +
-      '<div class="job-nomec-sub">O que entra no nome</div>' +
+      // O CHIP MOSTRA O VALOR, NÃO A CATEGORIA.
+      //
+      // Eles diziam só "Origem", "Operadora", "Cidade" — o consultor via cinco
+      // pílulas com nome de categoria e não tinha como saber o que cada uma
+      // acrescenta ao nome. A pergunta que ele fez foi literalmente "qual é a
+      // função desses botões?", e a resposta certa não é um texto de ajuda: é
+      // o chip dizer "Origem · RH" e ele ver o RH aparecer no nome ao ligar.
+      //
+      // Sem valor no lead, o chip fica desligado e diz o que falta — em vez de
+      // ser um botão que liga e não muda nada, que parece defeito.
+      '<div class="job-nomec-sub">Toque pra somar ao nome</div>' +
       '<div class="job-nomec-chips">' +
-        _PARTES_NOME.map((p) => '<button type="button" class="job-nomec-chip' +
-          (_partesLigadas[p.id] ? ' on' : '') + '" data-parte="' + p.id + '">' + p.rot + '</button>').join('') +
+        _PARTES_NOME.map((p) => {
+          const val = _pedacoDaFicha(p.id);
+          const on = _partesLigadas[p.id] && val;
+          return '<button type="button" class="job-nomec-chip' + (on ? ' on' : '') +
+            (val ? '' : ' vazio') + '" data-parte="' + p.id + '"' + (val ? '' : ' disabled') +
+            ' title="' + (val ? p.rot + ': ' + esc(val) : 'Este lead não tem ' + p.rot.toLowerCase() + ' preenchido no CRM') + '">' +
+            '<span class="cat">' + p.rot + '</span>' +
+            (val ? '<span class="val">' + esc(val) + '</span>' : '<span class="val vazio">—</span>') +
+            '</button>';
+        }).join('') +
       '</div>' +
       // O campo é editável de propósito: o padrão monta, a pessoa corrige.
       '<input type="text" class="job-campo" id="job-nomec-val" ' +

@@ -2890,3 +2890,85 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 }
 .job-cot-voltar:hover { background: color-mix(in srgb, var(--job-txt) 6%, transparent); color: var(--job-txt); }
 @media (prefers-reduced-motion: reduce) { .job-cot-fx button:not(:disabled):active { transform: none; } }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PEDAÇOS DO NOME — o chip diz o VALOR, não a categoria
+
+   Eram cinco pílulas escritas "Etapa", "Origem", "Operadora", "Cidade",
+   "Consultor". O consultor perguntou, com todas as letras, qual era a função
+   daqueles botões — e a resposta certa não é um texto de ajuda: é o chip
+   mostrar o que ele acrescenta.
+
+   Agora cada um traz categoria em cima (pequena, apagada) e o VALOR embaixo
+   (o que realmente entra no nome). Ligar deixa de ser aposta.
+   ══════════════════════════════════════════════════════════════════════════ */
+.job-nomec-chips { gap: 6px; }
+.job-nomec-chip {
+  display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  padding: 5px 11px; border-radius: 12px; text-align: left;
+  border: 1px solid var(--job-borda); background: color-mix(in srgb, var(--job-txt) 4%, transparent);
+  font-family: var(--job-ui); max-width: 100%;
+}
+.job-nomec-chip .cat {
+  font-size: 8.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--job-txt-fraco2); line-height: 1.1;
+}
+.job-nomec-chip .val {
+  font-size: 12px; font-weight: 650; color: var(--job-txt); line-height: 1.2;
+  max-width: 15ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.job-nomec-chip.on {
+  background: var(--job-acento); border-color: var(--job-acento);
+}
+.job-nomec-chip.on .cat { color: color-mix(in srgb, var(--job-sobre-acento) 72%, transparent); }
+.job-nomec-chip.on .val { color: var(--job-sobre-acento); }
+/* Sem valor no lead o chip não liga — e diz isso pela forma, não só por ficar
+   pálido: tracejado é a linguagem de "espaço a preencher". */
+.job-nomec-chip.vazio {
+  border-style: dashed; background: transparent; cursor: default;
+}
+.job-nomec-chip.vazio .val { color: var(--job-txt-fraco2); font-weight: 500; }
+.job-nomec-chip.vazio:hover { border-color: var(--job-borda); }
+.job-nomec-chip:not(.vazio):active { transform: scale(.96); }
+
+/* O nome montado é o RESULTADO da escolha acima: ele precisa de espaço e de
+   fonte que deixe conferir caractere a caractere. Estava num input estreito
+   cortando no meio da palavra. */
+#job-nomec-val {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12.5px; letter-spacing: 0; padding: 10px 11px;
+}
+.job-nomec-sub {
+  font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--job-txt-fraco2); margin: 2px 0 6px; font-family: var(--job-ui);
+}
+@media (prefers-reduced-motion: reduce) { .job-nomec-chip:not(.vazio):active { transform: none; } }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SALVAR CONTATO NO CABEÇALHO DA CONVERSA
+
+   Os três botões da barra não são iguais: transcrever e copiar são LEITURA —
+   podem ser discretos, porque não mudam nada. Salvar contato é o único que
+   grava, e é o que ele quis destacar.
+
+   Ele leva o acento cheio; os outros dois continuam contornados. Não é
+   enfeite: a diferença de peso diz "este aqui faz alguma coisa acontecer".
+   ══════════════════════════════════════════════════════════════════════════ */
+.job-bc-salvar {
+  background: var(--job-acento);
+  border-color: var(--job-acento);
+  color: var(--job-sobre-acento);
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0,0,0,.28);
+}
+.job-bc-salvar:hover:not(:disabled) { filter: brightness(1.08); }
+.job-bc-salvar:active:not(:disabled) { transform: scale(.96); }
+.job-bc-salvar:disabled { opacity: .75; cursor: default; }
+/* Depois de salvar ele confirma pela cor, não só pelo texto: o rótulo muda
+   por 2,8s e o consultor pode não estar olhando na hora exata. */
+.job-bc-salvar.ok { background: var(--job-sucesso); border-color: var(--job-sucesso); color: #04231a; }
+.job-bc-salvar:focus { outline: none; }
+.job-bc-salvar:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
+@media (prefers-reduced-motion: reduce) { .job-bc-salvar:active { transform: none; } }
