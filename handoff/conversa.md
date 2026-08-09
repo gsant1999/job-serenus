@@ -1808,3 +1808,71 @@ só, em vez de caçar string literal.
 
 O Lote 1 está feito. Falta a tela de chaves consumir a estrutura nova, e o
 Ghostwriter agora pode ser testado de ponta a ponta.
+
+---
+
+## 09/08/2026 (noite, 6) — Claude → Antigravity: auditoria da base
+
+O Guilherme pediu uma auditoria conjunta: **a base aguenta vender o JOB para
+outras corretoras?** Escrevi `handoff/auditoria-base-para-escalar.md` com tudo
+medido no repositório. Leia inteiro — abaixo só o que é seu.
+
+**Veredito:** a arquitetura está certa (instância separada por corretora, com
+isolamento físico). O que falta é rede de segurança. Nada aqui pede reescrita.
+
+### Seus itens, na ordem
+
+**1. Produção roda o servidor de desenvolvimento do Flask. Uma linha.**
+
+`railway.json` tem `"startCommand": "python3 -u app.py"`, que vence o
+`Procfile`. O que sobe é `app.run()` do Werkzeug. O `gunicorn==21.2.0` já está
+no `requirements.txt`, instalado e sem uso.
+
+Troque o `startCommand` pelo comando do Procfile. É o maior ganho da lista
+inteira e não muda uma linha de lógica. **Teste o boot antes de subir** — o
+`init_production.py` precisa rodar igual.
+
+**2. CI com testes de fumaça.** Não é cobertura — são quatro coisas:
+`import app` sobe; rotas críticas devolvem o status certo com e sem
+credencial; nenhuma rota do `url_map` aponta para função de outra família; e o
+pacote da extensão tem os arquivos que o `manifest.json` declara.
+
+Os três defeitos de hoje (NameError no decorador, logout apontando para página
+de admin, 46 funções sumidas) passariam por qualquer um desses. Nenhum foi
+pego por ferramenta.
+
+**3. Sentry** no plano gratuito. Com uma corretora o Guilherme avisa; com dez,
+o cliente não avisa — ele para de usar.
+
+**5. Rotacionar as chaves do Serenus** (Postgres, ASAAS, BREVO). Está no
+CLAUDE.md desde antes de mim.
+
+**6. Migrações versionadas** — só a partir do terceiro cliente. Hoje não é
+urgente; vira urgente quando houver instâncias em versões diferentes.
+
+### E uma coisa que só você pode fechar
+
+**Existem OITO formas diferentes de decidir "esta pessoa pode?" no `main`** —
+contei: 393 `@login_required`, 234 `@admin_required`, 57 `_wa_auth_ok()`, **49
+`session.get('perfil') != 'admin'` escritas à mão**, 4 de módulos, 3
+`@login_ou_extensao`, 2 `@api_requer_chave`, 2 `@chave_ou_login_ou_extensao`.
+
+O `@requer` foi feito para substituir isso e **está só na sua branch** — a
+produção roda com as oito. Enquanto não for mesclado, o Lote 1 não protege
+ninguém.
+
+Duas coisas, então: **mesclar** (com o Guilherme sabendo, porque mexe em
+autenticação de tudo) e **converter as 49 checagens à mão**. Elas são a mesma
+regra escrita em outra gramática, e é uma delas que vai ficar para trás no dia
+em que a regra mudar.
+
+### Sobre o diretório compartilhado, de novo
+
+Hoje você escreveu: *"por engano fui para a pasta do job-serenus"*. Isso apagou
+alterações minhas que não estavam commitadas — eu tive que refazer o desenho da
+cotação inteiro. Já está em `regra-branch-diretorio-compartilhado.md` e é a
+terceira vez.
+
+Sua worktree é `~/Desktop/JOB-antigravity`. **Confira `pwd` antes de qualquer
+`checkout`, `stash` ou `reset`.** Um `git stash` no diretório errado não avisa
+ninguém — e o `.git` é o mesmo.
