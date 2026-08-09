@@ -875,35 +875,15 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 /* Cada cotação é um cartão fechado, não uma linha de lista: o consultor está
    com o cliente esperando e precisa achar a certa de relance — o "hoje" e o
    valor têm que saltar antes do título. */
-.job-cot-wrap { display: flex; flex-direction: column; }
-.job-cot-item { background: var(--job-bg2); border: 1px solid var(--job-borda);
-  border-radius: 11px; padding: 11px 12px; margin-bottom: 8px; }
-.job-cot-item-topo { display: flex; align-items: flex-start; gap: 8px; }
-.job-cot-item-t { flex: 1; min-width: 0; font-size: 13px; font-weight: 600;
-  color: var(--job-txt); line-height: 1.35; }
-.job-cot-item-q { flex: none; font-size: 11px; font-weight: 600; color: var(--job-txt-fraco);
-  background: var(--job-bg3); border-radius: 6px; padding: 3px 7px; white-space: nowrap; }
-.job-cot-item-s { font-size: 12px; color: var(--job-txt-fraco); margin-top: 5px; }
-.job-cot-sem-link { font-style: italic; }
-.job-cot-item-acoes { display: flex; gap: 6px; margin-top: 9px; }
+
 /* "Mandar na conversa" é a ação real — é o motivo de a tela existir. Copiar é
    a saída pra quem quer escrever junto, então fica em contorno. */
-.job-cot-bt-mandar { flex: 1; padding: 8px; border: none; border-radius: 8px;
-  background: var(--job-acento); color: var(--job-acento-txt); font-size: 12.5px;
-  font-weight: 600; font-family: inherit; cursor: pointer; transition: filter .12s; }
+
 .job-cot-bt-mandar:hover { filter: brightness(1.06); }
 .job-cot-bt-mandar:disabled { opacity: .6; cursor: default; }
-.job-cot-bt-copiar { flex: none; padding: 8px 11px; border-radius: 8px;
-  background: transparent; border: 1px solid var(--job-borda); color: var(--job-txt);
-  font-size: 12.5px; font-weight: 600; font-family: inherit; cursor: pointer; transition: .12s; }
+
 .job-cot-bt-copiar:hover { border-color: var(--job-acento); }
-.job-cot-vazio { background: var(--job-bg2); border: 1px dashed var(--job-borda);
-  border-radius: 11px; padding: 16px 13px; text-align: center; margin-bottom: 8px; }
-.job-cot-vazio-t { font-size: 13px; font-weight: 600; color: var(--job-txt); }
-.job-cot-vazio-s { font-size: 12px; color: var(--job-txt-fraco); line-height: 1.5; margin-top: 5px; }
-.job-cot-nova { display: block; margin-top: 2px; padding: 10px; border-radius: 10px;
-  background: var(--job-bg3); color: var(--job-txt); font-size: 12.5px; font-weight: 600;
-  text-align: center; text-decoration: none; transition: background .12s; }
+
 .job-cot-nova:hover { background: var(--job-bg3-hover); }
 
 /* ── Cotar dentro da conversa ─────────────────────────────────────── */
@@ -944,9 +924,6 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cot-campo-sug input.ok { border-color: rgba(31,216,164,.55);
   box-shadow: 0 0 0 3px rgba(31,216,164,.10); }
 
-.job-cot-fixar { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
-  margin-top: 8px; background: none; border: none; padding: 0; color: var(--job-txt-fraco);
-  font-size: 11.5px; font-family: inherit; cursor: pointer; transition: color .12s; }
 .job-cot-fixar:hover:not(:disabled) { color: var(--job-txt); }
 .job-cot-fixar .marca { width: 15px; height: 15px; flex: none; border-radius: 5px;
   border: 1px solid var(--job-borda); transition: .14s; }
@@ -971,8 +948,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cot-faixas { display: none; margin-top: 9px; border: 1px solid var(--job-borda);
   border-radius: 12px; overflow: hidden; }
 .job-cot-faixas.ver { display: block; }
-.job-cot-fx { display: flex; align-items: center; gap: 8px; padding: 7px 11px;
-  background: var(--job-bg2); transition: background .12s; }
+
 .job-cot-fx + .job-cot-fx { border-top: 1px solid var(--job-borda); }
 .job-cot-fx.tem { background: linear-gradient(90deg, rgba(31,216,164,.10), transparent 70%); }
 .job-cot-fx span { flex: 1; font-size: 12px; color: var(--job-txt-fraco); }
@@ -988,9 +964,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 /* Passo: feito fica verde e sai da frente; o que falta e o unico aceso. */
 /* Topo de navegacao: voltar, onde estamos, e quanto ja foi cotado. */
 .job-cot-topo { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.job-cot-voltar { width: 30px; height: 30px; flex: none; border-radius: 9px;
-  background: var(--job-bg2); border: 1px solid var(--job-borda); cursor: pointer;
-  display: flex; align-items: center; justify-content: center; transition: .12s; }
+
 .job-cot-voltar:hover { border-color: var(--job-acento); }
 .job-cot-voltar .seta { width: 7px; height: 7px; border-left: 2px solid var(--job-txt);
   border-bottom: 2px solid var(--job-txt); transform: rotate(45deg) translate(1px, -1px); }
@@ -1025,8 +999,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-i:hover, .job-i:focus { background: var(--job-acento); color: #06131a; outline: none; }
 
 /* Gaveta por operadora, como o Painel faz: fechada e uma linha com o resumo. */
-.job-cot-gaveta { border: 1px solid var(--job-borda); border-radius: 12px;
-  margin-bottom: 8px; overflow: hidden; background: var(--job-bg2); }
+
 .job-cot-gaveta-t { display: flex; align-items: center; gap: 9px; width: 100%;
   padding: 10px 12px; background: none; border: none; color: var(--job-txt);
   font-family: inherit; cursor: pointer; text-align: left; transition: background .12s; }
@@ -1037,8 +1010,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cot-gaveta-t:focus-visible { outline: 2px solid var(--job-acento); outline-offset: -2px; }
 .job-cot-gaveta-t img { width: 40px; height: 26px; flex: none; object-fit: contain;
   background: #fff; border-radius: 6px; padding: 3px; }
-.job-cot-gaveta-n { flex: 1; min-width: 0; font-size: 13px; font-weight: 700;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .job-cot-gaveta-r { flex: none; font-size: 11px; color: var(--job-txt-fraco);
   font-variant-numeric: tabular-nums; }
 .job-cot-gaveta-s { flex: none; width: 8px; height: 8px; border-right: 2px solid var(--job-txt-fraco);
@@ -1134,33 +1106,22 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cot-res.sem { border-style: dashed; opacity: .72; }
 .job-cot-res.sem .job-cot-res-v { color: var(--job-txt-fraco); font-weight: 600;
   font-style: italic; font-size: 12.5px; }
-
-.job-cot-vazio { background: var(--job-bg2); border: 1px dashed var(--job-borda);
-  border-radius: 12px; padding: 18px 14px; text-align: center; margin-bottom: 9px; }
+.job-cot-vazio { background: var(--job-bg2); border: 1px dashed var(--job-borda); border-radius: 12px; padding: 18px 14px; text-align: center; margin-bottom: 9px; }
 .job-cot-vazio-t { font-size: 13px; font-weight: 700; color: var(--job-txt); }
 .job-cot-vazio-s { font-size: 12px; color: var(--job-txt-fraco); line-height: 1.55; margin-top: 6px; }
 
 /* ── Acoes ── */
 /* A acao principal usa o gradiente da marca, uma vez por tela. */
-.job-cot-bt-mandar { padding: 11px; border: none; border-radius: 11px;
-  background: linear-gradient(135deg, #1fd8a4 0%, #3b82f6 55%, #8b5cf6 100%);
-  color: #06131a; font-size: 13px; font-weight: 800; font-family: inherit; cursor: pointer;
-  box-shadow: 0 5px 18px rgba(31,216,164,.20);
-  transition: transform .14s, box-shadow .14s, filter .14s; }
+.job-cot-bt-mandar { flex: 1; padding: 11px; border: none; border-radius: 11px; background: var(--job-acento); color: var(--job-sobre-acento); font-size: 13px; font-weight: 800; font-family: inherit; cursor: pointer; transition: transform .14s, box-shadow .14s, filter .14s; box-shadow: 0 5px 18px rgba(31,216,164,.20); }
 .job-cot-bt-mandar:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.05);
   box-shadow: 0 9px 26px rgba(59,130,246,.28); }
 .job-cot-bt-mandar:active:not(:disabled) { transform: translateY(0); }
 .job-cot-bt-mandar:disabled { opacity: .5; cursor: default; box-shadow: none; }
-.job-cot-bt-copiar { padding: 10px 12px; border-radius: 11px; background: transparent;
-  border: 1px solid var(--job-borda); color: var(--job-txt); font-size: 12.5px;
-  font-weight: 700; font-family: inherit; cursor: pointer; transition: .14s; }
+.job-cot-bt-copiar { flex: none; padding: 10px 12px; border-radius: 11px; background: transparent; border: 1px solid var(--job-borda); color: var(--job-txt); font-size: 12.5px; font-weight: 700; font-family: inherit; cursor: pointer; transition: .14s; }
 .job-cot-bt-copiar:hover { border-color: rgba(31,216,164,.55); color: var(--job-acento); }
 .job-cot-item-acoes { display: flex; gap: 7px; margin-top: 10px; }
 .job-cot-item-acoes .job-cot-bt-mandar { flex: 1; }
-.job-cot-nova { display: block; margin-top: 7px; padding: 11px; border-radius: 11px;
-  background: var(--job-bg2); border: 1px solid var(--job-borda); color: var(--job-txt);
-  font-size: 12.5px; font-weight: 700; text-align: center; text-decoration: none;
-  transition: .14s; }
+.job-cot-nova { display: block; margin-top: 7px; padding: 11px; border-radius: 11px; background: var(--job-bg2); color: var(--job-txt); font-size: 12.5px; font-weight: 700; text-align: center; text-decoration: none; transition: .14s; border: 1px solid var(--job-borda); }
 .job-cot-nova:hover { border-color: rgba(139,92,246,.45); background: var(--job-bg3); }
 /* Link que ainda nao leva nada fica apagado e sem clique: abrir a tela vazia
    e exatamente o que ele reclamou. */
@@ -1169,14 +1130,11 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 .job-cot-nova.off { display: none; }
 
 /* ── Cotacoes ja salvas do cliente ── */
-.job-cot-item { background: var(--job-bg2); border: 1px solid var(--job-borda);
-  border-radius: 12px; padding: 12px; margin-bottom: 8px; transition: border-color .14s; }
+.job-cot-item { background: var(--job-bg2); border: 1px solid var(--job-borda); border-radius: 12px; padding: 12px; margin-bottom: 8px; transition: border-color .14s; }
 .job-cot-item:hover { border-color: rgba(59,130,246,.35); }
 .job-cot-item-topo { display: flex; align-items: flex-start; gap: 9px; }
-.job-cot-item-t { flex: 1; min-width: 0; font-size: 13px; font-weight: 700;
-  color: var(--job-txt); line-height: 1.35; }
-.job-cot-item-q { flex: none; font-size: 10.5px; font-weight: 700; color: var(--job-txt-fraco);
-  background: var(--job-bg3); border-radius: 6px; padding: 3px 7px; white-space: nowrap; }
+.job-cot-item-t { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; color: var(--job-txt); line-height: 1.35; }
+.job-cot-item-q { flex: none; font-size: 10.5px; font-weight: 700; color: var(--job-txt-fraco); background: var(--job-bg3); border-radius: 6px; padding: 3px 7px; white-space: nowrap; }
 .job-cot-item-s { font-size: 12px; color: var(--job-txt-fraco); margin-top: 6px; }
 .job-cot-sem-link { font-style: italic; }
 
@@ -1963,13 +1921,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
    pergunta do cliente). Abertas por padrão: fechar por padrão esconderia plano
    que o consultor precisa ver e faria ele achar que a operadora tem menos
    opção do que tem. */
-.job-cot-gaveta {
-  border: 1px solid var(--job-borda);
-  border-radius: 10px;
-  margin: 8px 0;
-  background: #fff;
-  overflow: hidden;
-}
+.job-cot-gaveta { border: 1px solid var(--job-borda); border-radius: 12px; overflow: hidden; background: var(--job-bg2); margin: 8px 0; }
 .job-cot-gaveta > summary {
   display: flex;
   align-items: center;
@@ -1989,7 +1941,7 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
   transition: transform .15s;
 }
 .job-cot-gaveta[open] > summary::before { transform: rotate(90deg); }
-.job-cot-gaveta-n { font-weight: 700; color: var(--job-txt); flex: 1 1 auto; }
+.job-cot-gaveta-n { flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--job-txt); }
 .job-cot-gaveta-q {
   font-size: 11px;
   font-weight: 700;
@@ -2775,14 +2727,7 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 }
 .job-cot-fixar.on .job-sw { background: var(--job-acento); border-color: var(--job-acento); }
 .job-cot-fixar.on .job-sw-bola { transform: translateX(14px); background: #fff; }
-
-.job-cot-fixar {
-  align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px;
-  border-radius: 12px; border: 1px solid var(--job-borda);
-  background: color-mix(in srgb, var(--job-txt) 3%, transparent);
-  font-family: var(--job-ui);
-  transition: border-color var(--job-t-rapido) ease, background var(--job-t-rapido) ease;
-}
+.job-cot-fixar { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; margin-top: 10px; background: color-mix(in srgb, var(--job-txt) 3%, transparent); border: 1px solid var(--job-borda); padding: 10px 12px; color: var(--job-txt-fraco); font-size: 11.5px; font-family: var(--job-ui); cursor: pointer; transition: border-color var(--job-t-rapido) ease, background var(--job-t-rapido) ease; border-radius: 12px; }
 .job-cot-fixar:hover:not(:disabled) { border-color: color-mix(in srgb, var(--job-acento) 45%, transparent); }
 .job-cot-fixar.on { border-color: color-mix(in srgb, var(--job-acento) 45%, transparent);
   background: color-mix(in srgb, var(--job-acento) 8%, transparent); }
@@ -2854,7 +2799,7 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
    as vazias recuam. É a mesma ideia do atraso na fila: cor em tudo para de
    significar alguma coisa.
    ══════════════════════════════════════════════════════════════════════════ */
-.job-cot-fx { border-left: 3px solid transparent; padding-left: 9px; }
+.job-cot-fx { display: flex; align-items: center; gap: 8px; padding: 7px 11px; background: var(--job-bg2); transition: background .12s; border-left: 3px solid transparent; padding-left: 9px; }
 .job-cot-fx.tem {
   border-left-color: var(--job-acento);
   background: color-mix(in srgb, var(--job-acento) 9%, transparent);
@@ -2882,12 +2827,7 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 
 /* "Voltar" era um bloco preenchido de largura cheia, do mesmo tamanho do
    botão que busca preço. Sair não disputa com continuar. */
-.job-cot-voltar {
-  background: transparent; border: none; box-shadow: none;
-  color: var(--job-txt-fraco); font-weight: 600; font-size: 12.5px;
-  width: 100%; padding: 10px; margin-top: 6px; cursor: pointer;
-  font-family: var(--job-ui);
-}
+.job-cot-voltar { width: 100%; height: 30px; flex: none; border-radius: 9px; background: transparent; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: .12s; box-shadow: none; color: var(--job-txt-fraco); font-weight: 600; font-size: 12.5px; padding: 10px; margin-top: 6px; font-family: var(--job-ui); }
 .job-cot-voltar:hover { background: color-mix(in srgb, var(--job-txt) 6%, transparent); color: var(--job-txt); }
 @media (prefers-reduced-motion: reduce) { .job-cot-fx button:not(:disabled):active { transform: none; } }
 
