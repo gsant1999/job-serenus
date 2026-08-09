@@ -23718,9 +23718,21 @@ def api_whatsapp_analisar():
     lead_criado = False
     responsavel_lead_criado = None
 
+    origem_analise = d.get('origem_analise', 'manual')
+    ext = an.get('extracao') or {}
+    
+    # Avalia se a análise merece virar lead (Contrato parar-de-criar-lead-lixo)
+    tem_intencao = any([
+        ext.get('vidas'), ext.get('idades'), ext.get('operadora_interesse'),
+        ext.get('plano_preferido'), ext.get('urgencia'), ext.get('cnpj')
+    ])
+    score_piso = score is not None and score >= 200
+    gatilho_manual = origem_analise == 'manual'
+    merece_lead = tem_intencao or score_piso or gatilho_manual
+
     # ── Não achou lead: cria automaticamente (pedido explícito — a análise não
     # pode ficar só "solta" no painel da extensão, tem que virar lead no CRM) ──
-    if not lead_id and (tel_norm or nome):
+    if not lead_id and (tel_norm or nome) and merece_lead:
         conn.execute("""INSERT INTO crm_leads
             (nome, telefone, telefone_norm, origem, etapa, responsavel_id, observacoes, criado_em)
             VALUES (?,?,?,?,?,?,?,?)""",

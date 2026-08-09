@@ -110,15 +110,31 @@ só estrutura.
 
 Não é urgente hoje. Vira urgente no terceiro cliente.
 
-### 5. Uma versão ruim da extensão atinge todos os clientes ao mesmo tempo
+### 5. Cada consultora fica numa versão diferente, por semanas
 
-A extensão é um artefato único na Chrome Web Store, publicado à mão a cada
-versão. Não há canal de teste nem liberação gradual. Hoje, quando eu erro, o
-Guilherme percebe em minutos porque está testando. Com dez corretoras, o erro
-chega em todas antes de alguém abrir o WhatsApp.
+**Correção do que eu tinha escrito aqui.** Eu havia registrado que a extensão é
+distribuída pela Chrome Web Store, e o Guilherme corrigiu: **a distribuição é
+por link** (a página de instalação do próprio JOB). Isso inverte o risco.
 
-A Chrome Web Store tem canal de teste e liberação percentual de graça. É
-configuração, não código.
+Não existe "uma versão ruim atinge todo mundo de uma vez" — o Chrome nunca
+atualiza sozinho uma extensão instalada por link. O risco é o oposto, e é
+maior: **ninguém atualiza**. Cada consultora fica na versão que instalou, por
+semanas, e o servidor precisa continuar atendendo todas elas ao mesmo tempo.
+
+O que isso exige, e que hoje não está escrito em lugar nenhum:
+
+- **Rota nunca some nem muda de forma.** Campo novo na resposta é seguro;
+  renomear ou remover derruba quem está atrás.
+- **Comportamento novo entra por bandeira que a versão velha não manda**, com o
+  padrão sendo o comportamento antigo. É o que o
+  `contrato-parar-de-criar-lead-lixo.md` faz com `origem_analise`.
+- **Quando uma versão realmente não puder mais ser atendida**, a extensão tem
+  que dizer isso com essas palavras e oferecer o link — em vez de falhar em
+  silêncio. Já existe um piso (`_EXT_VERSAO_MIN_DISPARO`) para o disparo;
+  falta o resto.
+
+O `VERSAO_ESTAVEL` que entrou hoje resolve a outra ponta: o aviso de atualizar
+só aparece quando a versão é de fato liberada, não a cada commit.
 
 ### 6. Dois agentes, um `.git`
 

@@ -1941,3 +1941,23 @@ conversa dentro é vazamento, não observabilidade.
 O item 2 (CI) tem as quatro verificações escritas. Elas são exatamente as que
 teriam pego os três defeitos de hoje — o app que não subia, o logout apontando
 para página de admin, e as 46 funções sumidas.
+
+---
+
+## 09/08/2026 (noite, 9) — Antigravity (movido da raiz pelo Claude)
+
+> Este texto foi escrito em `conversa.md` na RAIZ do repositório, dentro do
+> diretório do Claude. O lugar é `handoff/conversa.md`. Movido na íntegra:
+
+# Resumo das Implementações
+
+Conforme solicitado nos contratos:
+
+1. **Gunicorn e Jobs Agendados (Trava):**
+   Optei pela **abordagem da trava no banco de dados (DB Lock)** para resolver a concorrência dos agendamentos no Gunicorn com `-w 3`. Implementei a função `_adquirir_trava_job(nome, duracao_minutos)` para garantir que, mesmo com 3 workers rodando o APScheduler, apenas um consiga executar o job naquele ciclo, evitando repetições (ex: 3 envios de mensagens ou backups simultâneos). A tabela `scheduler_locks` foi criada para suportar isso e o limite da API (`_API_USO`) foi documentado como sendo por worker.
+
+2. **Resultados do CI na primeira execução:**
+   O CI pegou inconsistências de roteamento e prefixos. Por exemplo, a rota `/api/whatsapp/logout` estava apontando para o endpoint `admin_extensao_sessoes` em vez de um prefixo `api_whatsapp_`. Além disso, exigiu testes de fallback na inicialização e o comportamento sem autenticação (status 401) vs com autenticação para as rotas críticas.
+
+3. **Filtro de Lead Lixo (WhatsApp):**
+   A trava foi implementada com sucesso na rota de análise. Conversas inúteis na varredura não geram mais leads fantasma. As análises ficam registradas em `whatsapp_analises` com `lead_id = NULL`, mantendo as funções da tela (como "Cadastrar") operacionais. O lead só é criado se o `score` for alto (>= 200), se a extração contiver dados de intenção ou se o consultor clicar em "Analisar".
