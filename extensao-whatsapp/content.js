@@ -5541,25 +5541,7 @@
           _cotAjuda('O preço é por faixa etária E depende de quantas vidas tem no total: ' +
                     'a mesma faixa custa menos num contrato de 20 vidas que num de 2.') + '</label>' +
         '<input id="job-cot-idades" class="job-cnpj-input" placeholder="55 5 50" value="' + esc(v.idades || '') + '">' +
-        // QUEM APARECE NA COTACAO NAO E QUEM APARECE NO WHATSAPP.
-        //
-        // O documento vinha com o nome do CONTATO — "Lead | Milena", "Cliente
-        // Campinas 2", o que o consultor escreveu na agenda dele pra se achar.
-        // Isso e anotacao interna indo parar na mao do cliente.
-        //
-        // Aqui ele escreve o nome que o cliente le. Empresarial: a razao
-        // social (com "- MEI" atras quando for MEI, e nada quando nao for).
-        // Pessoa fisica: o nome completo do beneficiario, com "(PF)".
-        '<label class="job-cot-rot" style="margin-top:14px">Quem aparece na cotação' +
-          _cotAjuda('É este nome que o CLIENTE lê no documento e na imagem. ' +
-                    'O nome do contato do WhatsApp é anotação sua e não sai daqui.') + '</label>' +
-        '<input id="job-cot-cliente" class="job-cnpj-input" autocomplete="off" ' +
-          'placeholder="Razão social da empresa, ou nome completo da pessoa" ' +
-          'value="' + esc(v.clienteNome || '') + '">' +
-        '<label class="job-cot-check" id="job-cot-mei-l" style="display:none">' +
-          '<input type="checkbox" id="job-cot-mei"' + (v.clienteMei ? ' checked' : '') + '>' +
-          '<span>É MEI</span></label>' +
-        '<div class="job-cot-dica" id="job-cot-cliente-ex"></div>' +
+
         '<div class="job-cot-dica" id="job-cot-dica"></div>' +
         // Duas formas de dizer a mesma coisa. Quem tem a idade na conversa
         // digita; quem já pensa em faixa (proposta antiga, planilha da
@@ -5585,6 +5567,17 @@
           }).join('') +
           '<div class="job-cot-fx-total" id="job-cot-fx-total"></div>' +
         '</div>' +
+        // PASSO PROPRIO. Estava enfiado dentro do "Quem vai usar", que e sobre
+        // vidas e idades — dois assuntos no mesmo numero, e ele leu como
+        // pergunta solta ("o que seria?"). Aqui e um passo, com numero.
+        '<label class="job-cot-rot" id="job-cot-p4" style="margin-top:18px"><i>4</i> Nome na cotação' +
+          _cotAjuda('É este nome que o CLIENTE lê no documento e na imagem. ' +
+                    'Empresarial: a razão social. Pessoa física: o nome completo. ' +
+                    'O nome do contato do WhatsApp é anotação sua e não sai daqui.') + '</label>' +
+        '<input id="job-cot-cliente" class="job-cnpj-input" autocomplete="off" placeholder="" value="">' +
+        '<label class="job-cot-check" id="job-cot-mei-l" style="display:none">' +
+          '<input type="checkbox" id="job-cot-mei"><span>É MEI</span></label>' +
+        '<div class="job-cot-dica" id="job-cot-cliente-ex"></div>' +
         '<button class="job-cot-bt-mandar" id="job-cot-buscar" style="width:100%;margin-top:14px" disabled>' +
           'Escolha a cidade</button>' +
         // Preencheu aqui, escolhe onde continuar. Antes ele preenchia no painel,
@@ -5606,20 +5599,28 @@
       const bt = document.querySelector('#job-cot-tipo button.on');
       const pme = String((bt && bt.dataset.v) || (_cot && _cot.modalidade) || '') === '2';
       if (lMei) lMei.style.display = pme ? '' : 'none';
+      // O PLACEHOLDER DIZ O QUE DIGITAR. "Razão social da empresa, ou nome
+      // completo da pessoa" obrigava a escolher metade da frase; agora ele
+      // acompanha o tipo que ja foi escolhido no passo 2.
+      if (iCli) iCli.placeholder = pme ? 'Razão social da empresa'
+                                       : 'Nome completo do beneficiário';
       if (!exCli) return;
       const bruto = (iCli && iCli.value || '').trim();
+      const contato = (_cotLead && _cotLead.nome) || nomeDoContato() || 'o contato';
       exCli.textContent = bruto
-        ? 'Vai sair assim: ' + _cotNomeCliente(bruto, pme, iMei && iMei.checked)
-        : 'Em branco, sai o nome do contato do WhatsApp — que costuma ser anotação sua.';
+        ? 'O cliente vai ler: ' + _cotNomeCliente(bruto, pme, iMei && iMei.checked)
+        : 'Em branco, o cliente lê "' + contato + '" — que é o nome do contato aqui do WhatsApp.';
     };
-    // A RAZAO SOCIAL VEM DO CADASTRO quando o lead ja tem. Ele so digita
-    // quando o CRM ainda nao sabe — e o que digitar aqui nao apaga nada la.
-    if (iCli && !iCli.value) {
-      _cotContexto().then((ctx) => {
-        const emp = ((ctx || {}).lead || {}).empresa || '';
-        if (emp && iCli && !iCli.value) { iCli.value = emp; verCliente(); }
-      });
-    }
+    // PREENCHIMENTO AUTOMATICO DESLIGADO, DE PROPOSITO.
+    //
+    // Eu puxava a razao social de `crm_leads.empresa`. Na primeira tela real
+    // ela veio "Amparo" — que e CIDADE. A coluna esta misturada: uns leads tem
+    // cidade ali, outros empresa. E o defeito que o contrato 6 existe pra
+    // separar (`contrato-lead-cidade-empresa-cnpj.md`), e ate ele rodar
+    // sugerir dali e oferecer lixo com cara de dado bom — pior que campo
+    // vazio, porque o consultor confia e manda pro cliente.
+    //
+    // Religar quando a migracao separar cidade de empresa.
     if (iCli) iCli.addEventListener('input', verCliente);
     if (iMei) iMei.addEventListener('change', verCliente);
     verCliente();
@@ -5881,8 +5882,52 @@
   // Usa title nativo: funciona no hover e no foco por teclado, e não inventa
   // uma camada de tooltip que teria que ser mantida.
   function _cotAjuda(texto) {
-    return '<span class="job-i" tabindex="0" title="' + esc(texto) + '">i</span>';
+    return '<button type="button" class="job-i" aria-label="O que é isso?" ' +
+           'data-ajuda="' + esc(texto) + '">i</button>';
   }
+
+  // O BALAO DO "i" — clique, nao hover.
+  //
+  // Era `title` nativo e o Guilherme reclamou que nao funciona. Tooltip nativo
+  // exige o ponteiro parado por mais de um segundo em cima de um alvo de 14px,
+  // coisa que ninguem faz no meio de um atendimento — e dentro do WhatsApp Web
+  // ele as vezes nem sai.
+  //
+  // Um listener so, no documento, por delegacao: os "i" nascem e morrem a cada
+  // repintura de tela, e ligar um por um significaria esquecer os proximos.
+  let _iBalao = null, _iDono = null;
+  function _iFechar() {
+    if (_iBalao) { _iBalao.remove(); _iBalao = null; }
+    if (_iDono) { _iDono.classList.remove('on'); _iDono = null; }
+  }
+  function _iAbrir(el) {
+    _iFechar();
+    const b = document.createElement('div');
+    b.className = 'job-i-balao';
+    b.textContent = el.dataset.ajuda || '';
+    document.body.appendChild(b);
+    const r = el.getBoundingClientRect(), c = b.getBoundingClientRect();
+    // Cabe embaixo? Fica embaixo. Senao sobe. E nunca passa da borda: o painel
+    // vive encostado na direita da tela.
+    const esq = Math.max(8, Math.min(window.innerWidth - c.width - 8, r.left + r.width / 2 - c.width / 2));
+    const abaixo = r.bottom + 8 + c.height < window.innerHeight;
+    b.style.left = esq + 'px';
+    b.style.top = (abaixo ? r.bottom + 8 : r.top - c.height - 8) + 'px';
+    el.classList.add('on');
+    _iBalao = b; _iDono = el;
+  }
+  document.addEventListener('click', (ev) => {
+    const alvo = ev.target && ev.target.closest && ev.target.closest('.job-i');
+    if (alvo) {
+      ev.preventDefault(); ev.stopPropagation();
+      if (_iDono === alvo) { _iFechar(); return; }   // segundo clique fecha
+      _iAbrir(alvo);
+      return;
+    }
+    if (_iBalao) _iFechar();
+  }, true);
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') _iFechar(); }, true);
+  window.addEventListener('scroll', _iFechar, true);
 
   // TOPO DE NAVEGACAO: seta de voltar + onde estamos + o que ja foi cotado.
   //

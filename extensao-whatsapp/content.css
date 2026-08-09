@@ -1007,12 +1007,33 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
 }
 @media (prefers-reduced-motion: reduce) { .job-cot-rot.agora i { animation: none; } }
 
-/* "i": explica o conceito, nao o campo. title nativo, hover e foco. */
-.job-i { width: 14px; height: 14px; flex: none; border-radius: 50%; cursor: help;
-  background: var(--job-bg3); color: var(--job-txt-fraco); font-size: 9px; font-weight: 800;
-  font-style: normal; letter-spacing: 0; text-transform: none;
-  display: inline-flex; align-items: center; justify-content: center; transition: .12s; }
-.job-i:hover, .job-i:focus { background: var(--job-acento); color: #06131a; outline: none; }
+/* O "i": explica o CONCEITO, nao o campo.
+   Era `title` nativo e nao aparecia — o Guilherme reclamou que "as informacoes
+   de i nao funcionam". Tooltip nativo depende de hover parado por mais de um
+   segundo, coisa que ninguem faz no meio de um atendimento, e dentro do
+   WhatsApp Web ele nem sempre sai. Agora e clique, e o balao e nosso.
+   Havia TAMBEM duas regras .job-i concorrentes nesta folha (a segunda ficava
+   1000 linhas abaixo e ganhava). Fundidas aqui. */
+.job-i { width: 15px; height: 15px; flex: none; border-radius: 50%; cursor: pointer;
+  background: var(--job-bg3); color: var(--job-txt-fraco); font-size: 9.5px; font-weight: 800;
+  font-style: normal; letter-spacing: 0; text-transform: none; border: none; padding: 0;
+  font-family: var(--job-ui); vertical-align: middle;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background var(--job-t-toque) var(--job-mv-saida),
+              color var(--job-t-toque) var(--job-mv-saida); }
+.job-i:hover, .job-i:focus, .job-i.on { background: var(--job-acento); color: #06131a; outline: none; }
+.job-i:active { transform: scale(.9); }
+
+/* O balao mora no <body>, com posicao fixa calculada do retangulo do "i" —
+   mesma licao do menu do rodape: dentro do painel ele seria cortado pelo
+   overflow do container. */
+.job-i-balao { position: fixed; z-index: 2147483500; max-width: 260px;
+  padding: 10px 12px; border-radius: 11px; background: var(--job-bg2);
+  border: 1px solid var(--job-borda); box-shadow: var(--job-elev-3);
+  font-family: var(--job-ui); font-size: 12px; line-height: 1.5; color: var(--job-txt);
+  animation: job-i-entra var(--job-t-rapido) var(--job-mv-saida); }
+@keyframes job-i-entra { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .job-i-balao { animation: none; } }
 
 /* Gaveta por operadora, como o Painel faz: fechada e uma linha com o resumo. */
 
@@ -1868,11 +1889,8 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
                  padding: 6px 8px; font-size: 11.5px; font-family: inherit; }
 .job-perda-expl { font-size: 11px; color: var(--job-sucesso); margin-top: 7px; line-height: 1.5; }
 .job-perda-expl:empty { display: none; }
-/* O "i" da extensão: mesmo papel do "i" do site. */
-.job-i { display: inline-flex; align-items: center; justify-content: center;
-         width: 13px; height: 13px; border-radius: 50%; font-size: 9px; font-style: normal;
-         font-weight: 700; background: rgba(255,255,255,.12); color: var(--job-txt-fraco); cursor: help; }
-.job-i:hover { background: rgba(83,189,235,.25); color: var(--job-info); }
+/* A segunda regra .job-i vivia aqui e vencia a de cima por vir depois, com a
+   mesma especificidade. As duas foram fundidas na de cima, junto do balao. */
 
 /* ── A fila de hoje no trilho ── */
 /* Forma e posição vêm da regra unificada lá em cima; aqui fica só o que é
