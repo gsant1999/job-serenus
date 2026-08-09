@@ -6468,6 +6468,8 @@
     _cotFeitas = _cotFeitas.filter((f) => String(f.operadoraId) !== String(_cot.operadoraAtual.id));
     _cotFeitas.push({ operadoraId: _cot.operadoraAtual.id,
                       nome: _cot.operadoraAtual.nome, planos: feitos });
+    // ADIANTA A REDE E A DECODIFICACAO, antes de ele clicar em "Ver imagem".
+    _cotPreAquecer();
     if (!emLote) _cotPintarResultado();
   }
 
@@ -6726,6 +6728,8 @@
     _cotFeitas = _cotFeitas.filter((f) => String(f.operadoraId) !== String(_cot.operadoraAtual.id));
     _cotFeitas.push({ operadoraId: _cot.operadoraAtual.id,
                       nome: _cot.operadoraAtual.nome, planos: feitos });
+    // ADIANTA A REDE E A DECODIFICACAO, antes de ele clicar em "Ver imagem".
+    _cotPreAquecer();
     if (!emLote) _cotPintarResultado();
   }
 
@@ -6815,6 +6819,249 @@
     if (bs) bs.addEventListener('click', () => _cotSalvarNoJob(bs, comPreco));
   }
 
+  // ── A COTACAO DESENHADA NO CANVAS, A MAO ───────────────────────────────
+  //
+  // A primeira versao montava um HTML de 980px fora da tela e passava no
+  // html2canvas. Funcionava, e era lento de um jeito que nao dava pra
+  // otimizar: o html2canvas clona o DOM inteiro, le estilo computado de cada
+  // no, resolve fonte e imagem e rasteriza — tudo na thread principal. O
+  // Chrome chegou a mostrar "Pagina sem resposta" por cima do WhatsApp dele.
+  //
+  // Baixar escala e encolher a logo ajudou pouco, porque o custo nao esta nos
+  // pixels: esta em interpretar CSS. A saida foi parar de interpretar. Aqui a
+  // cotacao e desenhada com a API 2D — texto, linha e imagem. Sao ~15 chamadas
+  // de fillText por plano; nao ha o que ficar lento.
+  //
+  // O preco disso e que o layout vive em codigo, nao em CSS. Vale: e um
+  // documento so, de forma fixa, e ja estava em estilo inline de todo jeito.
+  const _CV = {
+    W: 1000, PAD: 44, ESC: 2,
+    COR_T: '#0b141a', COR_S: '#54656f', COR_F: '#8696a0',
+    LINHA: '#eceff1', VERDE: '#1fa97f',
+    UI: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
+  };
+  let _msDesenho = 0;
+  function _cvFonte(peso, px) { return peso + ' ' + px + 'px ' + _CV.UI; }
+  // Corta com reticencias em vez de deixar vazar por cima da coluna vizinha.
+  function _cvCortar(ctx, txt, max) {
+    let s = String(txt == null ? '' : txt);
+    if (ctx.measureText(s).width <= max) return s;
+    while (s.length > 1 && ctx.measureText(s + '…').width > max) s = s.slice(0, -1);
+    return s + '…';
+  }
+  function _cvLinhas(ctx, txt, max) {
+    const fora = []; let linha = '';
+    String(txt || '').split(/\s+/).forEach((pal) => {
+      const t2 = linha ? linha + ' ' + pal : pal;
+      if (ctx.measureText(t2).width > max && linha) { fora.push(linha); linha = pal; }
+      else linha = t2;
+    });
+    if (linha) fora.push(linha);
+    return fora;
+  }
+  // Decodificar imagem custa, e as logos nao mudam entre um desenho e outro.
+  // Sem este cache, cotar de novo pro mesmo cliente pagava tudo de novo.
+  const _cvCache = new Map();
+  function _cvImagem(src) {
+    if (!src) return Promise.resolve(null);
+    if (_cvCache.has(src)) return Promise.resolve(_cvCache.get(src));
+    return new Promise((ok) => {
+      const im = new Image();
+      im.onload = () => { _cvCache.set(src, im); ok(im); };
+      im.onerror = () => { _cvCache.set(src, null); ok(null); };   // falha nao derruba a imagem
+      im.src = src;
+    });
+  }
+
+  async function _cotDesenharPNG(lista) {
+    const td = Date.now();
+    await _cotContexto();
+    await _cotCarregarLogos();
+    const medidor = document.createElement('canvas').getContext('2d');
+    if (!medidor) return null;
+
+    const ctxx = _cotCtx || {}, co = ctxx.corretor || {}, mc = ctxx.marca || {};
+    const cliente = _cotClienteAtual();
+    const hoje = new Date(), dd = (n) => (n < 10 ? '0' : '') + n;
+    const quando = dd(hoje.getDate()) + '/' + dd(hoje.getMonth() + 1) + '/' + hoje.getFullYear() +
+                   ' ' + dd(hoje.getHours()) + ':' + dd(hoje.getMinutes());
+    const meta = [['Cotação', quando], ['Corretor', co.nome], ['E-mail', co.email],
+                  ['Telefone', co.telefone], ['Cliente', cliente],
+                  ['WhatsApp', _cotLead && _cotLead.telefone]].filter((x) => x[1]);
+
+    const opDe = (p) => _texto(p.operadora) ||
+      (_cotFeitas.filter((f) => f.planos.indexOf(p) >= 0)[0] || {}).nome || '';
+    // As faixas vem com nomes diferentes das duas fontes. Ler so um nome
+    // deixaria metade da tabela vazia na mao do cliente.
+    const linhasDe = (p) => (p.faixas || []).map((f) => ({
+      rot: f.label || f.faixa || '',
+      qtd: f.qtd != null ? f.qtd : (f.quantidade != null ? f.quantidade : 1),
+      val: f.unitario != null ? f.unitario : (f.preco != null ? f.preco : f.valor),
+    })).filter((f) => f.rot);
+    const faixas = [];
+    lista.forEach((p) => linhasDe(p).forEach((f) => {
+      if (!faixas.some((x) => x.rot === f.rot)) faixas.push({ rot: f.rot, qtd: f.qtd });
+    }));
+    const valor = (p, rot) => {
+      const f = linhasDe(p).filter((x) => x.rot === rot)[0];
+      return f && f.val != null ? _cotMoeda(f.val) : '—';
+    };
+
+    const imgMarca = await _cvImagem(mc.logo || '');
+    const imgsOp = await Promise.all(
+      lista.map((p) => _cvImagem(_cotLogos[_cotChaveLogo(opDe(p))] || '')));
+
+    const RODAPE = 'Informativo Referencial: valores e demais condições são determinados pelas ' +
+      'seguradoras e podem ser alterados a qualquer momento. Reservamo-nos o direito de corrigir ' +
+      'eventuais erros, não vinculando esta oferta à prestação do serviço, que se dará apenas no ' +
+      'ato da assinatura do contrato.';
+    medidor.font = _cvFonte('400', 11);
+    const rodapeLinhas = _cvLinhas(medidor, RODAPE, _CV.W - _CV.PAD * 2);
+
+    const hCab = 26 + meta.length * 21 + 26;
+    const hLogos = imgsOp.some(Boolean) ? 44 : 0;
+    const hNomes = 52, hLinha = 38, hTotal = 56;
+    const H = _CV.PAD + 22 + hCab + hLogos + hNomes + (3 + faixas.length) * hLinha +
+              hTotal + 28 + rodapeLinhas.length * 17 + _CV.PAD;
+
+    const cv = document.createElement('canvas');
+    cv.width = _CV.W * _CV.ESC;
+    cv.height = Math.round(H) * _CV.ESC;
+    const ctx = cv.getContext('2d');
+    ctx.scale(_CV.ESC, _CV.ESC);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, _CV.W, H);
+
+    let y = _CV.PAD + 22;
+    const larguraMarca = imgMarca ? Math.min(230, imgMarca.width * (40 / imgMarca.height)) : 0;
+    ctx.textAlign = 'left'; ctx.fillStyle = _CV.COR_T; ctx.font = _cvFonte('800', 27);
+    const titulo = cliente + ' · ' + (_cot.cidade || '') + ' · ' + _cotRotulo(_cot.modalidade);
+    ctx.fillText(_cvCortar(ctx, titulo, _CV.W - _CV.PAD * 2 - larguraMarca - 24), _CV.PAD, y);
+    // A LOGO JA DIZ O NOME: o wordmark tem "Serenus" e "CORRETORA" desenhados
+    // dentro dele, e escrever de novo embaixo saia repetido na imagem.
+    if (imgMarca) {
+      const h = 40, w = imgMarca.width * (h / imgMarca.height);
+      ctx.drawImage(imgMarca, _CV.W - _CV.PAD - w, _CV.PAD - 8, w, h);
+    } else if (mc.nome_curto) {
+      ctx.textAlign = 'right';
+      ctx.font = _cvFonte('800', 15);
+      ctx.fillText(mc.nome_curto, _CV.W - _CV.PAD, _CV.PAD + 6);
+      ctx.font = _cvFonte('400', 11); ctx.fillStyle = _CV.COR_F;
+      ctx.fillText('Corretora', _CV.W - _CV.PAD, _CV.PAD + 22);
+      ctx.textAlign = 'left';
+    }
+    y += 26;
+    meta.forEach((par) => {
+      ctx.font = _cvFonte('400', 12); ctx.fillStyle = _CV.COR_F;
+      ctx.fillText(par[0], _CV.PAD, y);
+      ctx.font = _cvFonte('500', 13); ctx.fillStyle = _CV.COR_S;
+      ctx.fillText(_cvCortar(ctx, par[1], 520), _CV.PAD + 84, y);
+      y += 21;
+    });
+    y += 26;
+
+    const x0 = _CV.PAD, larguraRot = 210;
+    const larguraCol = (_CV.W - _CV.PAD * 2 - larguraRot) / lista.length;
+    const centro = (i) => x0 + larguraRot + larguraCol * i + larguraCol / 2;
+
+    if (hLogos) {
+      imgsOp.forEach((im, i) => {
+        if (!im) return;
+        let h = 28, w = im.width * (h / im.height);
+        if (w > larguraCol - 20) { w = larguraCol - 20; h = im.height * (w / im.width); }
+        ctx.drawImage(im, centro(i) - w / 2, y - 4, w, h);
+      });
+      y += hLogos;
+    }
+    ctx.textAlign = 'center';
+    lista.forEach((p, i) => {
+      ctx.font = _cvFonte('700', 16); ctx.fillStyle = _CV.COR_T;
+      ctx.fillText(_cvCortar(ctx, _cotNomePlano(p), larguraCol - 12), centro(i), y + 14);
+      ctx.font = _cvFonte('400', 11.5); ctx.fillStyle = _CV.COR_F;
+      ctx.fillText(_cvCortar(ctx, opDe(p), larguraCol - 12), centro(i), y + 30);
+    });
+    y += hNomes;
+
+    const risco = (yy) => {
+      ctx.strokeStyle = _CV.LINHA; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x0, yy + 0.5); ctx.lineTo(_CV.W - _CV.PAD, yy + 0.5); ctx.stroke();
+    };
+    risco(y - 12);
+
+    const linha = (rot, valores, extra) => {
+      ctx.textAlign = 'left';
+      ctx.font = _cvFonte('400', 13.5); ctx.fillStyle = _CV.COR_S;
+      ctx.fillText(rot, x0, y + 14);
+      if (extra) {
+        const w = ctx.measureText(rot).width;
+        ctx.font = _cvFonte('700', 12); ctx.fillStyle = _CV.VERDE;
+        ctx.fillText(extra, x0 + w + 7, y + 14);
+      }
+      ctx.textAlign = 'center';
+      ctx.font = _cvFonte('400', 13.5); ctx.fillStyle = _CV.COR_T;
+      valores.forEach((v, i) => ctx.fillText(_cvCortar(ctx, v, larguraCol - 12), centro(i), y + 14));
+      y += hLinha;
+      risco(y - 12);
+    };
+
+    linha('Modalidade', lista.map(() => _cotRotulo(_cot.modalidade)));
+    linha('Acomodação', lista.map((p) => {
+      const pl = p.plano || {};
+      return pl.acomodacaoTxt || (pl.acomodacao ? 'Apartamento' : 'Enfermaria');
+    }));
+    linha('Coparticipação', lista.map((p) => _cotCopart(p.tabela || {})));
+    faixas.forEach((f) => linha(f.rot, lista.map((p) => valor(p, f.rot)), f.qtd + 'x'));
+
+    ctx.textAlign = 'left';
+    ctx.font = _cvFonte('800', 15); ctx.fillStyle = _CV.COR_T;
+    ctx.fillText('Total', x0, y + 20);
+    ctx.textAlign = 'center';
+    ctx.font = _cvFonte('800', 19);
+    lista.forEach((p, i) =>
+      ctx.fillText(p.total == null ? '—' : _cotMoeda(p.total), centro(i), y + 22));
+    y += hTotal;
+
+    risco(y - 14);
+    ctx.textAlign = 'left';
+    ctx.font = _cvFonte('400', 11); ctx.fillStyle = _CV.COR_F;
+    rodapeLinhas.forEach((l) => { ctx.fillText(l, x0, y + 10); y += 17; });
+
+    // JPEG, E POR toBlob.
+    //
+    // `toDataURL('image/png')` era metade do tempo total: codificar PNG de
+    // 2000px sem perda e caro e trava a thread enquanto codifica. E o PNG nao
+    // sobrevive de todo jeito — o WhatsApp recomprime toda imagem em JPEG
+    // antes de mandar, entao o trabalho extra ia pro lixo. `toBlob` entrega a
+    // codificacao pro navegador de forma assincrona, fora do caminho critico.
+    const url = await new Promise((ok) => {
+      try {
+        cv.toBlob((b) => {
+          if (!b) { ok(null); return; }
+          const l = new FileReader();
+          l.onloadend = () => ok(l.result);
+          l.onerror = () => ok(null);
+          l.readAsDataURL(b);
+        }, 'image/jpeg', 0.92);
+      } catch (e) { ok(null); }
+    });
+    _msDesenho = Date.now() - td;
+    return url;
+  }
+
+  // Pre-aquece o desenho: decodifica a logo da corretora e as das operadoras
+  // ANTES de ele clicar. A primeira decodificacao custa mais de um segundo e a
+  // segunda quase nada; rodando aqui, quando o comparativo aparece, ele nunca
+  // paga a primeira.
+  async function _cotPreAquecer() {
+    try {
+      const ctx = await _cotContexto();
+      await _cotCarregarLogos();
+      const alvos = [((ctx || {}).marca || {}).logo];
+      _cotFeitas.forEach((f) => alvos.push(_cotLogos[_cotChaveLogo(f.nome)]));
+      await Promise.all(alvos.filter(Boolean).map(_cvImagem));
+    } catch (e) {}
+  }
+
   // Salva no JOB o que acabou de ser cotado: vira registro, ganha link público
   // e conta na produção. Sem isso a cotação mais rápida do sistema seria a
   // única que não existe em lugar nenhum.
@@ -6870,18 +7117,12 @@
     btn.disabled = true;
     const antes = btn.textContent;
     btn.textContent = 'Salvando…';
-    // NADA DE DESENHAR AGORA — E O ERRO QUE EU ACABEI DE COMETER.
+    // NADA DE DESENHAR AGORA.
     //
-    // Eu tinha posto o desenho da imagem pra correr "em paralelo" com o
-    // salvamento. Nao existe paralelo aqui: o html2canvas rasteriza uma tabela
-    // de 980px em escala 2 NA THREAD PRINCIPAL. Enquanto ele trabalha, a
-    // pagina inteira congela — inclusive o retorno do POST, que fica na fila
-    // esperando a thread. O "Salvando..." ficava parado por causa do desenho,
-    // nao do servidor. Ele reclamou de lentidao duas vezes; a segunda fui eu.
-    //
-    // Rede e CPU so paralelizam de verdade em threads diferentes. Aqui a conta
-    // certa e: primeiro o salvamento, que e espera de rede e nao custa CPU
-    // nenhuma; o desenho depois, quando a tela ja respondeu.
+    // Ja tentei "paralelizar" o desenho com o salvamento e nao existe paralelo
+    // aqui: rede espera, mas rasterizar ocupa a thread. O salvar foi de 0,4s
+    // pra 25s. Primeiro o salvamento, que e espera pura; o desenho depois,
+    // quando a tela ja respondeu.
     const t0 = Date.now();
     let r;
     try {
@@ -7017,170 +7258,6 @@
       if (dataUrl) { _imgCache = dataUrl; aoTer(dataUrl); return; }
       btn.textContent = 'Não consegui desenhar';
       setTimeout(() => { btn.textContent = antes; }, 3200);
-    }
-
-    // ── A COTACAO DESENHADA AQUI DENTRO ──────────────────────────────────
-    //
-    // Duas tentativas minhas de "provocar" o desenho abrindo o documento no
-    // navegador — aba fixada e janela minimizada — tiraram o consultor do
-    // WhatsApp. A segunda o Chrome abriu por cima de tudo. Nao ha terceira
-    // tentativa por esse caminho: a extensao passa a DESENHAR a cotacao ela
-    // mesma e virar PNG ali, com html2canvas embarcado.
-    //
-    // Sem servidor, sem aba, sem janela, e instantaneo.
-    //
-    // Desenha num bloco de 980px fora da tela porque o painel tem 380 e a
-    // cotacao e uma tabela de colunas — espremer aqui daria uma imagem que o
-    // cliente nao le. O preview e o PNG de verdade, reduzido: o que ele ve e
-    // exatamente o que sai.
-    function _cotDocHTML(lista) {
-      const S = {
-        cx: 'width:980px;padding:38px 40px;background:#fff;color:#111b21;' +
-            'font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;box-sizing:border-box',
-        h1: 'margin:0 0 18px;font-size:27px;font-weight:800;letter-spacing:-.01em;color:#0b141a',
-        meta: 'font-size:13px;line-height:1.85;color:#54656f',
-        ml: 'display:inline-block;width:74px;color:#8696a0',
-        tb: 'width:100%;border-collapse:collapse;margin-top:26px;font-size:14px',
-        th: 'padding:12px 10px;border-bottom:2px solid #e9edef;text-align:center;' +
-            'font-size:15px;font-weight:800;color:#0b141a',
-        thop: 'display:block;margin-top:2px;font-size:11.5px;font-weight:500;color:#8696a0',
-        rl: 'padding:11px 10px;border-bottom:1px solid #f0f2f5;color:#54656f;white-space:nowrap',
-        rv: 'padding:11px 10px;border-bottom:1px solid #f0f2f5;text-align:center;color:#111b21',
-        tl: 'padding:15px 10px;font-size:15px;font-weight:800;color:#0b141a',
-        tv: 'padding:15px 10px;text-align:center;font-size:19px;font-weight:800;color:#0b141a',
-        qt: 'margin-left:6px;color:#1fa97f;font-weight:700',
-        rod: 'margin-top:26px;padding-top:16px;border-top:1px solid #f0f2f5;' +
-             'font-size:11px;line-height:1.6;color:#8696a0',
-      };
-      // As faixas vem com nomes diferentes das duas fontes. Ler so um nome
-      // deixaria metade da tabela vazia — e tabela de preco vazia na mao do
-      // cliente e pior que nao mandar.
-      const linhasDe = (p) => (p.faixas || []).map((f) => ({
-        rot: f.label || f.faixa || '',
-        qtd: f.qtd != null ? f.qtd : (f.quantidade != null ? f.quantidade : 1),
-        val: f.unitario != null ? f.unitario : (f.preco != null ? f.preco : f.valor),
-      })).filter((f) => f.rot);
-      // A ordem das faixas e a mesma em todos: uma linha por faixa que apareca
-      // em qualquer plano, na ordem em que apareceu.
-      const faixas = [];
-      lista.forEach((p) => linhasDe(p).forEach((f) => {
-        if (!faixas.some((x) => x.rot === f.rot)) faixas.push({ rot: f.rot, qtd: f.qtd });
-      }));
-      const valor = (p, rot) => {
-        const f = linhasDe(p).filter((x) => x.rot === rot)[0];
-        return f && f.val != null ? _cotMoeda(f.val) : '—';
-      };
-      const cliente = _cotClienteAtual();
-      const hoje = new Date();
-      const dd = (n) => (n < 10 ? '0' : '') + n;
-      const quando = dd(hoje.getDate()) + '/' + dd(hoje.getMonth() + 1) + '/' + hoje.getFullYear() +
-                     ' ' + dd(hoje.getHours()) + ':' + dd(hoje.getMinutes());
-      // MESMO CABECALHO DO DOCUMENTO DO SITE, campo por campo: titulo,
-      // Cotacao/Corretor/E-mail/Telefone/Cliente a esquerda, marca a direita.
-      // Ele conferiu o meu contra o do site e faltavam justamente estes.
-      const ctx = _cotCtx || {};
-      const co = ctx.corretor || {}, mc = ctx.marca || {};
-      const par = (k, v) => v ? '<div><span style="' + S.ml + '">' + k + '</span>' + esc(v) + '</div>' : '';
-      const opDe = (p) => _texto(p.operadora) ||
-        (_cotFeitas.filter((f) => f.planos.indexOf(p) >= 0)[0] || {}).nome || '';
-      return '<div style="' + S.cx + '">' +
-        '<div style="display:flex;align-items:flex-start;gap:24px">' +
-          '<div style="flex:1;min-width:0">' +
-            '<div style="' + S.h1 + '">' + esc(cliente) + ' · ' +
-              esc(String(_cot.cidade || '')) + ' · ' +
-              esc(_cotRotulo(_cot.modalidade)) + '</div>' +
-            '<div style="' + S.meta + '">' +
-              par('Cotação', quando) + par('Corretor', co.nome) + par('E-mail', co.email) +
-              par('Telefone', co.telefone) + par('Cliente', cliente) +
-              par('WhatsApp', _cotLead && _cotLead.telefone) +
-            '</div>' +
-          '</div>' +
-          // A LOGO JA DIZ O NOME. O wordmark da Serenus tem "Serenus" e
-          // "CORRETORA" desenhados dentro dele, e eu imprimia os dois de novo
-          // embaixo — saiu "Serenus Corretora" duas vezes na imagem que vai
-          // pro cliente. O texto agora so aparece quando NAO ha logo, que e o
-          // caso de uma corretora que ainda nao subiu a dela.
-          (mc.logo
-            ? '<div style="flex:none"><img src="' + esc(mc.logo) + '" alt="" ' +
-                'style="height:40px;width:auto;display:block"></div>'
-            : (mc.nome_curto
-                ? '<div style="flex:none;text-align:right">' +
-                    '<div style="font-size:15px;font-weight:800;color:#0b141a">' +
-                      esc(mc.nome_curto) + '</div>' +
-                    '<div style="font-size:11px;color:#8696a0">Corretora</div>' +
-                  '</div>'
-                : '')) +
-        '</div>' +
-        '<table style="' + S.tb + '"><thead>' +
-        // A LOGO DA OPERADORA EM CIMA DE CADA COLUNA, como o site faz — a
-        // extensao ja tem todas em data URL de outra tela.
-        '<tr><td style="' + S.rl + '"></td>' +
-          lista.map((p) => {
-            const lg = _cotLogos[_cotChaveLogo(opDe(p))];
-            // SEM `object-fit` AQUI. O html2canvas 1.4.1 nao implementa essa
-            // propriedade: ele desenha a imagem esticada ate a caixa e o que
-            // sobra e cortado. Foi assim que a logo da Unimed virou um borrao
-            // verde na imagem, enquanto na lista de operadoras (que e HTML de
-            // verdade, nao rasterizado) aparecia perfeita.
-            //
-            // Limitando so a ALTURA e deixando a largura automatica, a
-            // proporcao vem da propria imagem e nao ha o que interpretar.
-            return '<td style="padding:6px 10px;text-align:center">' +
-              (lg ? '<img src="' + esc(lg) + '" alt="" ' +
-                    'style="height:30px;width:auto;display:inline-block">' : '') + '</td>';
-          }).join('') + '</tr>' +
-        '<tr><th style="' + S.rl + '"></th>' +
-          lista.map((p) => '<th style="' + S.th + '">' + esc(_cotNomePlano(p)) +
-            '<span style="' + S.thop + '">' + esc(opDe(p)) + '</span></th>').join('') +
-        '</tr></thead><tbody>'+
-        ['Modalidade', 'Acomodação', 'Coparticipação'].map((rot, k) =>
-          '<tr><td style="' + S.rl + '">' + rot + '</td>' +
-          lista.map((p) => {
-            const pl = p.plano || {}, tb = p.tabela || {};
-            const v = k === 0 ? _cotRotulo(_cot.modalidade)
-                    : k === 1 ? (pl.acomodacaoTxt || (pl.acomodacao ? 'Apartamento' : 'Enfermaria'))
-                    : _cotCopart(tb);
-            return '<td style="' + S.rv + '">' + esc(v) + '</td>';
-          }).join('') + '</tr>').join('') +
-        faixas.map((f) =>
-          '<tr><td style="' + S.rl + '">' + esc(f.rot) +
-            '<span style="' + S.qt + '">' + f.qtd + 'x</span></td>' +
-          lista.map((p) => '<td style="' + S.rv + '">' + valor(p, f.rot) + '</td>').join('') +
-          '</tr>').join('') +
-        '<tr><td style="' + S.tl + '">Total</td>' +
-          lista.map((p) => '<td style="' + S.tv + '">' +
-            (p.total == null ? '—' : _cotMoeda(p.total)) + '</td>').join('') +
-        '</tr></tbody></table>' +
-        '<div style="' + S.rod + '"><b>Informativo Referencial:</b> valores e demais condições ' +
-          'são determinados pelas seguradoras e podem ser alterados a qualquer momento. ' +
-          'Reservamo-nos o direito de corrigir eventuais erros, não vinculando esta oferta à ' +
-          'prestação do serviço, que se dará apenas no ato da assinatura do contrato.</div>' +
-      '</div>';
-    }
-
-    let _msDesenho = 0;
-    async function _cotDesenharPNG(lista) {
-      if (typeof html2canvas !== 'function') return null;
-      const td = Date.now();
-      await _cotContexto();          // logo, corretor e e-mail vem do JOB
-      await _cotCarregarLogos();     // as logos das operadoras, ja em data URL
-      const cx = document.createElement('div');
-      // Fora da tela, nao escondido: display:none e visibility:hidden fazem o
-      // html2canvas medir tudo como zero e devolver imagem em branco.
-      cx.style.cssText = 'position:fixed;left:-99999px;top:0;z-index:-1;background:#fff';
-      cx.innerHTML = _cotDocHTML(lista);
-      document.body.appendChild(cx);
-      try {
-        // ESCALA 1.6, NAO 2. A imagem sai com 1568px de largura, que e mais do
-        // que o WhatsApp mostra em qualquer tela — e rasterizar em 2x custava
-        // 56% mais pixels por nada. Ele reclamou que demora pra gerar.
-        const canvas = await html2canvas(cx.firstElementChild,
-                                         { scale: 1.6, backgroundColor: '#ffffff', logging: false });
-        const url = canvas.toDataURL('image/png');
-        _msDesenho = Date.now() - td;
-        return url;
-      } catch (e) { return null; }
-      finally { cx.remove(); }
     }
 
     // PREVIEW: ele ve o que o cliente vai receber ANTES de mandar.
