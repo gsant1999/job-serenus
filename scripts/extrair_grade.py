@@ -240,6 +240,190 @@ def _grades_da_pagina(pagina):
     return saida
 
 
+# Rótulos que a operadora usa pra dizer "o nome do plano é este".
+_ROTULO_PRODUTO = re.compile(r'^\s*(produto|plano|planos)\s*$', re.I)
+# Linhas que vêm logo depois e NÃO são nome: elas ajudam a saber onde a linha
+# do produto termina.
+_ROTULO_OUTROS = re.compile(r'^\s*(segmenta|acomoda|registro|c[oó]d|coparticipa|abrang|vigência|vigencia)', re.I)
+
+
+# O que NUNCA é nome de produto, mesmo aparecendo na linha certa.
+_NAO_E_NOME = re.compile(
+    r'^(amb[+\w]*|hosp\w*|obst\w*|enferm\w*|apart\w*|coletiv\w*|privativ\w*|'
+    r'\d{3}\.\d{3}/\d{2}-\d|\d{4,6}|r\$|com|sem|total|parcial|'
+    r'segmenta\w*|acomoda\w*|registro|c[oó]d\w*|produto|plano)$', re.I)
+
+
+def _nome_de_produto(txt):
+    """Diz se o texto pode ser nome de plano.
+
+    Três coisas se disfarçam de nome na linha do produto e nenhuma é:
+
+    • O BANNER com letras espaçadas — "C O M C O P A R T I C I". Ele atravessa
+      as colunas e cai no balde de qualquer uma. Reconhecido pela razão entre
+      letras e palavras: nome de plano tem palavras de 3+ letras.
+    • A SEGMENTAÇÃO e a ACOMODAÇÃO — "AMB+HOSP+OBST", "ENFERM", "APART".
+      Elas têm campo próprio no resultado; repetir no nome é ruído.
+    • CÓDIGO e REGISTRO ANS — números soltos, que também têm campo próprio.
+    """
+    t = txt.strip()
+    if not t:
+        return False
+    partes = t.split()
+    # Letras soltas separadas por espaço: média de caracteres por palavra < 1,6.
+    if len(t.replace(' ', '')) / max(1, len(partes)) < 1.6:
+        return False
+    # Todas as palavras sendo rótulo estrutural: não é nome.
+    if all(_NAO_E_NOME.match(x) for x in partes):
+        return False
+    # Sobrou só pontuação ou número solto.
+    if not re.search(r'[A-Za-zÀ-ÿ]{2}', t):
+        return False
+    return True
+
+
+def _limpar_nome(txt):
+    """Tira do nome o que tem campo próprio, quando o rótulo não foi achado.
+
+    Rede de segurança: mesmo sem a linha PRODUTO, o nome não pode carregar a
+    segmentação ("AMB+HOSP+OBST"), a acomodação ("ENFERM", "APART"), o código
+    interno ou o banner com letras espaçadas ("C O M C O P A R T I C I") —
+    tudo isso já sai em coluna própria, e repetido no nome vira lixo que
+    impede o casamento com o catálogo.
+    """
+    if not txt:
+        return ''
+    # O banner é uma sequência de LETRAS SOLTAS. Some qualquer corrida de três
+    # ou mais tokens de um caractere.
+    palavras = txt.split()
+    fora, corrida = [], []
+    for w in palavras:
+        if len(w) == 1 and w.isalpha():
+            corrida.append(w)
+            continue
+        if len(corrida) >= 3:
+            corrida = []
+        elif corrida:
+            fora.extend(corrida); corrida = []
+        fora.append(w)
+    if len(corrida) < 3:
+        fora.extend(corrida)
+    # Sai o que tem campo próprio, mais o que é claramente texto de capa:
+    # data de vigência, faixa de vidas, valor em reais.
+    # CONSERVADOR DE PROPÓSITO. Eu tentei tirar data, faixa de vidas e valor
+    # daqui também — e a regra comeu o "900" de "PREMIUM 900 (CARE)", que é
+    # nome. Limpar demais estraga nome bom; limpar de menos deixa lixo que
+    # aparece no resumo e pede o rótulo. O segundo erro se conserta olhando;
+    # o primeiro passa despercebido.
+    #
+    # Aqui sai só o que tem coluna própria no resultado: segmentação,
+    # acomodação, registro ANS e código interno.
+    limpo = [w for w in fora if not _NAO_E_NOME.match(w)]
+    saida = ' '.join(limpo).strip(' -–—·|')
+    # Número solto de 3 ou 4 dígitos É nome de plano na Hapvida — 500, 600,
+    # 900, 1000. Rejeitar isso devolvia o cabeçalho sujo inteiro pra uma linha
+    # cujo nome real era só "500".
+    if re.fullmatch(r'\d{3,4}(\.\d+)?', saida):
+        return saida
+    if not re.search(r'[A-Za-zÀ-ÿ]{2}', saida):
+        return ''
+    return saida
+
+
+def _produto_rotulado(linhas, ini, ancoras, passo=0):
+    """Nome do plano lido da linha PRODUTO, quando ela existe.
+
+    O PDF da Hapvida tem a tabela ROTULADA: uma linha "PRODUTO" com o nome de
+    cada plano, outra "SEGMENTAÇÃO", outra "ACOMODAÇÃO", outra "CÓD. INTERNO".
+    A operadora está dizendo o nome — e a gente estava raspando o cabeçalho
+    inteiro e recebendo o banner "COM COPARTICIPAÇÃO PARCIAL" com as letras
+    espaçadas ("C O M C O P A R T I C I") grudado no nome.
+
+    Ler o rótulo é melhor que reconhecer vocabulário por dois motivos: sai o
+    nome EXATO que a operadora vende (SMART UP, SMART PRIME, NOSSO MÉDICO
+    CAMPINAS), e funciona pra plano que ninguém cadastrou ainda — vocabulário
+    só acerta o que já foi ditado.
+
+    Devolve [] quando a página não tem linha rotulada; aí o vocabulário assume.
+    """
+    # Procura pra cima a partir do início da grade: o cabeçalho fica logo
+    # acima dos preços, e olhar a página inteira pegaria a tabela anterior.
+    # Sobe até achar o rótulo — ou até bater na TABELA ANTERIOR. O limite não é
+    # um número de linhas (que erra quando o cabeçalho tem muitas), é a
+    # fronteira real: linha com preço pertence à tabela de cima, e o PRODUTO
+    # dela não é o desta.
+    alvo = None
+    for i in range(ini - 1, max(-1, ini - 30), -1):
+        ws = linhas[i][1]
+        if not ws:
+            continue
+        if _ROTULO_PRODUTO.match(ws[0]['text']):
+            alvo = ws[1:]
+            break
+        # Linha de preço: é a tabela anterior. Para aqui.
+        if sum(1 for w in ws if re.search(r'\d{1,3},\d{2}$', w['text'])) >= 2:
+            break
+    if not alvo:
+        return []
+
+    # AS COLUNAS JÁ EXISTEM — não invente distância.
+    #
+    # A primeira versão agrupava por um vão fixo de 26pt e fundia nomes
+    # vizinhos: "PREMIUM 900 (CARE) PREMIUM 900 INFINITY 1000.11" saía como um
+    # nome só. Qualquer número fixo erra, porque o espaçamento muda de PDF pra
+    # PDF e de página pra página.
+    #
+    # As âncoras das colunas de preço são a geometria real da tabela. Cada
+    # palavra vai pra âncora mais próxima; palavras da mesma âncora formam um
+    # nome. Assim o agrupamento acompanha a tabela em vez de adivinhá-la.
+    # PRIMEIRO junta as palavras de um mesmo nome, DEPOIS distribui.
+    #
+    # Distribuir palavra a palavra quebrava nomes de duas palavras: cada
+    # coluna de preço tem âncora própria, e "SMART UP" caía metade numa e
+    # metade na outra. Virou "SMART" e "UP".
+    #
+    # O corte entre um nome e o seguinte é medido, não chutado: o passo entre
+    # colunas é a largura real de uma coluna nesta página, e um vão maior que
+    # 40% dela é fronteira. Dentro de um nome as palavras quase se encostam.
+    limite = max(14.0, (passo or 0) * 0.40)
+    grupos, atual = [], []
+    for w in alvo:
+        if atual and (w['x0'] - atual[-1]['x1']) > limite:
+            grupos.append(atual); atual = []
+        atual.append(w)
+    if atual:
+        grupos.append(atual)
+
+    nomes = []
+    for g in grupos:
+        txt = ' '.join(x['text'] for x in g).strip()
+        if not _nome_de_produto(txt):
+            continue
+        nomes.append(((g[0]['x0'] + g[-1]['x1']) / 2.0, txt))
+
+    if not nomes:
+        return []
+
+    # CADA COLUNA PEGA O NOME MAIS PRÓXIMO, e o mesmo nome pode servir a duas.
+    #
+    # A versão anterior guardava um nome por âncora e DESCARTAVA o segundo
+    # quando dois caíam na mesma — e a coluna que perdeu o nome voltava pro
+    # cabeçalho cru, com "AMB+HOSP+OBST ENFERM 41279" grudado.
+    #
+    # Um plano ocupa duas colunas quando tem enfermaria e apartamento, e o nome
+    # vem escrito uma vez só, centralizado sobre as duas. É assim que a Hapvida
+    # monta, e "mais próximo" resolve os dois casos sem descartar nada.
+    fora = []
+    for a in ancoras:
+        melhor, dist = '', 1e9
+        for x, nome in nomes:
+            d = abs(x - a)
+            if d < dist:
+                melhor, dist = nome, d
+        fora.append(melhor)
+    return fora
+
+
 def _planos_por_faixa(linhas, ini, fim, ancoras):
     """Nome de plano que aparece UMA vez e vale pra mais de uma coluna.
 
@@ -495,10 +679,23 @@ def ler_pdf(caminho):
                 # recorta, e cobrir mais de uma coluna. Esta varredura olha um
                 # pedaço maior e resolve por posição.
                 banner = _planos_por_faixa(linhas, max(0, inicio - 12), inicio, ancoras)
+                # ROTULADO GANHA DE TUDO. Quando a operadora escreve "PRODUTO:
+                # SMART UP", esse é o nome — não o que a gente reconheceu num
+                # vocabulário nem o que sobrou do cabeçalho raspado.
+                rotulado = _produto_rotulado(linhas, inicio, ancoras, passo)
                 for j, coluna in enumerate(colunas):
                     nome, acom, ans = _campos(coluna, comum, txt, ctx.get('modalidade') or '')
                     if banner[j] and not _plano_conhecido(coluna):
                         nome = banner[j]
+                    if rotulado and rotulado[j]:
+                        nome = rotulado[j]
+                    else:
+                        # Sem rótulo achado: pelo menos tira do nome o que já
+                        # tem coluna própria. Nome com código e segmentação
+                        # dentro não casa com catálogo nenhum.
+                        limpo = _limpar_nome(nome)
+                        if limpo:
+                            nome = limpo
                     if not nome:
                         continue
                     linha = dict(ctx)
