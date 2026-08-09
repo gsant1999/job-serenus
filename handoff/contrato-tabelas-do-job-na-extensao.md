@@ -63,11 +63,17 @@ A extensão precisa montar a lista sem baixar tudo:
   `coparticipacao` e `operadora`; **`abrangencia` ficou de fora**, e é
   justamente a coluna que separa **MedSênior Campinas 1 de Campinas 2**.
 
-### 1.3 `/calcular` devolve de qual tabela veio
+### 1.3 `/planos` devolve `vidas_min` e `vidas_max`
 
-Hoje o resultado não diz a `abrangencia` nem a `vigencia` de cada plano. No
-comparativo misturado, duas linhas "MedSênior Prata" sem isso são
-indistinguíveis. Inclua os dois campos em cada item de `resultados`.
+Fui conferir e retiro o que ia pedir aqui: `/calcular` **já** devolve
+`abrangencia` e `vigencia` em cada item de `resultados` (`calcular_cotacao`,
+final da função). Não mexa nisso.
+
+O que falta mesmo é em `/planos`: ele monta o JSON à mão e deixa de fora
+`vidas_min` e `vidas_max`, que existem na tabela e que `calcular_cotacao` usa
+pra recusar plano fora da faixa. Sem eles a extensão deixa marcar um plano de
+5 a 29 vidas numa cotação de 2, e o consultor só descobre no cálculo. Inclua
+os dois.
 
 ## 2. O que eu faço na extensão (já construído contra este contrato)
 
@@ -88,7 +94,7 @@ não some e não mente.
 2. `?operadoras=1` → lista curta, sem preço
 3. `?operadora=MedSênior&abrangencia=Campinas 2` → só as tabelas dessa
 4. `POST /calcular` com `{"idades":[59],"planos":[<id>]}` → preço da faixa 59+
-5. Cada item de `resultados` traz `abrangencia` e `vigencia`
+5. Cada item de `/planos` traz `vidas_min` e `vidas_max`
 6. Chave de API antiga (se alguma viva usar `cotacao:ler`) continua passando
 
 Rota que você não viu responder não foi testada.

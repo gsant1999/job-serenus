@@ -3581,3 +3581,15 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 .job-cot-prev-leg { padding: 7px 10px 2px; font-family: var(--job-ui);
   font-size: 11px; letter-spacing: var(--job-tk-xs); color: var(--job-txt-fraco); }
 .job-cot-prev .job-cot-item-acoes { padding: 8px 10px 10px; }
+
+
+/* ── SEGUNDA FONTE DE COTACAO: as tabelas importadas no JOB ────────────────
+   Precisa parecer OUTRA COISA sem parecer menos importante: o preco de um
+   vem ao vivo do Painel, o do outro sai do calculo do JOB, e o consultor tem
+   que saber qual esta olhando quando o comparativo mistura os dois. */
+.job-cot-fonte { margin-top: 16px; padding-top: 14px;
+  border-top: 1px dashed var(--job-borda); }
+.job-cot-fonte-t { font-family: var(--job-ui); font-size: 12px; font-weight: 700;
+  letter-spacing: var(--job-tk-sm); color: var(--job-txt); }
+.job-cot-fonte-s { margin: 2px 0 10px; font-family: var(--job-ui); font-size: 11px;
+  line-height: 1.45; color: var(--job-txt-fraco); }

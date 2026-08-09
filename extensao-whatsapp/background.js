@@ -416,6 +416,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   }
+  // AS TABELAS DO PROPRIO JOB COMO SEGUNDA FONTE DE COTACAO.
+  //
+  // A cotacao da extensao so falava com o Painel do Corretor. MedSenior,
+  // Beneficencia Vital, Santa Tereza e as grades de PDF da Hapvida nao estao
+  // la — estao aqui, em cotacao_tabela, importadas de PDF. Por isso o
+  // Guilherme nao conseguia cotar 59 anos na Beneficencia nem misturar
+  // operadoras: nao era limitacao de tela, era fonte desligada.
+  //
+  // As rotas ja existiam (contrato-tabelas-do-job-na-extensao.md). Enquanto o
+  // decorador delas nao aceitar o token do consultor, isto responde 401 e a
+  // tela diz o motivo em vez de sumir.
+  if (msg && msg.type === 'cotacao_tabelas') {
+    const q = new URLSearchParams();
+    if (msg.somenteOperadoras) q.set('operadoras', '1');
+    if (msg.operadora) q.set('operadora', msg.operadora);
+    if (msg.modalidade) q.set('modalidade', msg.modalidade);
+    chamarJob('/api/v1/cotacao/planos?' + q.toString(), 'GET', null, 20000).then(sendResponse);
+    return true;
+  }
+  if (msg && msg.type === 'cotacao_tabelas_calcular') {
+    // POST que nao cria nada — so calcula. Por isso pode repetir.
+    chamarJob('/api/v1/cotacao/calcular', 'POST',
+              { idades: msg.idades, planos: msg.planos }, 25000, null,
+              { repetivel: true }).then(sendResponse);
+    return true;
+  }
   if (msg && msg.type === 'cotacao_legendas') {
     chamarJob('/cotacao/legendas/api', 'GET', null, 12000).then(sendResponse);
     return true;

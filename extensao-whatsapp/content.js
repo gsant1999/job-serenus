@@ -5204,7 +5204,10 @@
   function _cotEtiquetas(p) {
     const pl = (p && p.plano) || {}, tb = (p && p.tabela) || {};
     const et = [];
-    et.push({ t: pl.acomodacao ? 'Apartamento' : 'Enfermaria', c: '' });
+    // O Painel manda booleano; a tabela do JOB manda texto ('Apartamento',
+    // 'Enfermaria', 'Ambulatorial'...). Traduzir o texto pro booleano faria
+    // 'Ambulatorial' virar 'Enfermaria' na tela — mentira em etiqueta.
+    et.push({ t: pl.acomodacaoTxt || (pl.acomodacao ? 'Apartamento' : 'Enfermaria'), c: '' });
     const cop = _cotCopart(tb);
     et.push({ t: cop, c: cop === 'Sem coparticipação' ? 'ok' : 'aviso' });
     if (tb.mei === true) et.push({ t: 'Aceita MEI', c: 'ok' });
@@ -5258,6 +5261,12 @@
     hash_expirado: 'O Painel do Corretor publicou uma versão nova e um atalho venceu. ' +
       'Faça uma cotação na mão lá até <b>ver o preço</b> — a extensão reaprende sozinha.',
     sem_resposta_a_tempo: 'O Painel demorou demais pra responder. Confira se a aba dele está aberta e tente de novo.',
+    // As tabelas do JOB nao passam pelo Painel — o erro delas e outro, e a
+    // saida tambem. Cair na frase do Painel mandaria ele abrir a aba errada.
+    tabelas_do_job: 'Não consegui ler as tabelas do JOB agora. ' +
+      'Se acabou de instalar a extensão, entre com e-mail e senha no popup (ícone do JOB).',
+    sem_idades_para_calcular: 'As tabelas do JOB cobram por <b>idade</b>, não por faixa. ' +
+      'Volte em "Cotar agora" e digite as idades (ex.: <b>59</b>) em vez de contar por faixa.',
     extensao_indisponivel: 'A extensão não respondeu. Recarregue a página do WhatsApp (F5).'
   };
   function _cotMotivo(m) {
@@ -5872,7 +5881,7 @@
       _cotCabecalho(_cotTopo(abrirSecaoCotarInline, 'Cotar agora'), 'Operadoras',
         ops.length ? '<span class="job-sec-cont">' + ops.length + '</span>' : '') +
       '<div class="job-cot-wrap">' +
-      '<div class="job-sec-sub">Quem atende essa combinação. Escolha uma.</div>' +
+      '<div class="job-sec-sub">Quem atende essa combinação. Escolha uma — dá pra somar quantas quiser.</div>' +
       (ops.length
         ? '<div class="job-cot-ops">' + ops.map((o) => {
             const jaFoi = _cotFeitas.filter((f) => String(f.operadoraId) === String(o.id))[0];
@@ -5905,8 +5914,31 @@
           }).join('') + '</div>'
         : '<div class="job-cot-vazio"><div class="job-cot-vazio-t">Nenhuma operadora atende essa combinação.</div>' +
           '<div class="job-cot-vazio-s">Quem atende muda com a idade e o tipo. Confira a cidade e as idades.</div></div>') +
+      // DUAS FONTES, UMA TELA. Em cima o que vem do Painel do Corretor (preco
+      // ao vivo, na sessao dele); embaixo as tabelas importadas no JOB, que e
+      // onde vivem MedSenior, Beneficencia Vital, Santa Tereza e as grades de
+      // PDF da Hapvida. O comparativo e o mesmo pras duas, entao dá pra
+      // misturar — que era exatamente o que nao dava.
+      '<div class="job-cot-fonte">' +
+        '<div class="job-cot-fonte-t">Tabelas do JOB</div>' +
+        '<div class="job-cot-fonte-s">Importadas de PDF. Preço calculado pelo JOB, ' +
+          'não pelo Painel — entram no mesmo comparativo.</div>' +
+        '<div id="job-cot-ops-job">' + _cotBlocoOpsJob() + '</div>' +
+      '</div>' +
       '<button class="job-cot-nova" id="job-cot-voltar" style="border:none;cursor:pointer;width:100%;font-family:inherit">Mudar dados</button>' +
     '</div>');
+    // A lista do JOB chega depois e repinta so o pedaco dela — a lista do
+    // Painel, que ja esta na mao, nao pisca.
+    const ligarJob = () => {
+      document.querySelectorAll('#job-cot-ops-job .job-cot-op').forEach((b) =>
+        b.addEventListener('click', () => _cotBuscarPlanosJob(b.dataset.job)));
+    };
+    if (_cotOpsJob === null) {
+      _cotCarregarOpsJob().then(() => {
+        const cx = document.getElementById('job-cot-ops-job');
+        if (cx) { cx.innerHTML = _cotBlocoOpsJob(); ligarJob(); }
+      });
+    } else { ligarJob(); }
     _cotTopoLigar(abrirSecaoCotarInline);
     const bmd = document.getElementById('job-cot-voltar');
     if (bmd) bmd.addEventListener('click', abrirSecaoCotarInline);
@@ -5915,6 +5947,139 @@
       if (o) _cotBuscarPlanos(o);
     }));
     _cotPintarLogos(ops);   // as logos chegam depois; a lista já funciona sem elas
+  }
+
+  // ── SEGUNDA FONTE: AS TABELAS DO PROPRIO JOB ─────────────────────────────
+  //
+  // A cotacao so falava com o Painel do Corretor. MedSenior, Beneficencia
+  // Vital, Santa Tereza e as grades de PDF da Hapvida nao estao la — estao no
+  // JOB, importadas de PDF. Por isso nao dava pra cotar 59 anos na
+  // Beneficencia nem misturar operadoras: nao era limitacao de tela, era fonte
+  // desligada.
+  //
+  // As duas fontes caem no MESMO _cotFeitas, entao o comparativo mistura e o
+  // "Salvar no JOB" salva tudo junto.
+  let _cotOpsJob = null;        // null = ainda nao buscou; [] = buscou e nao ha
+  let _cotOpsJobErro = '';
+
+  // Traduz uma tabela do JOB pro formato que o resto da tela ja entende.
+  // Sem MEI de proposito: a tabela do JOB nao tem essa coluna, e o nivel de
+  // gaveta correspondente se apaga sozinho quando so ha um valor.
+  function _cotDoJob(x) {
+    const cop = String(x.coparticipacao || '').trim();
+    const semCop = !cop || /^(sem|nao|não|0|-)$/i.test(cop);
+    return {
+      _job: true,
+      _planoId: x.id != null ? x.id : x.plano_id,
+      plano: { nome: x.plano || 'Plano', acomodacaoTxt: (x.acomodacao || '').trim() },
+      // A abrangencia e o que separa MedSenior Campinas 1 de Campinas 2 — e
+      // por isso ela ocupa o lugar do produto na arvore de gavetas.
+      produto: { nome: (x.abrangencia || '').trim() },
+      tabela: { coparticipacao: !semCop, coparticipacaoTipo: cop,
+                qtdVidaMin: x.vidas_min || 0, qtdVidaMax: x.vidas_max || 0 },
+      operadora: { nome: x.operadora || '' },
+      vigencia: x.vigencia || '',
+    };
+  }
+
+  async function _cotCarregarOpsJob() {
+    let r = null;
+    try { r = await _safeSendMessage({ type: 'cotacao_tabelas', somenteOperadoras: true }); }
+    catch (e) { r = null; }
+    if (r && r.ok && Array.isArray(r.operadoras)) { _cotOpsJob = r.operadoras; return; }
+    // Sem o filtro `?operadoras=1` no servidor ainda: monta a lista a partir
+    // da resposta cheia. Funciona, so gasta mais — e some quando o filtro
+    // existir.
+    if (r && r.ok && Array.isArray(r.planos)) {
+      const m = new Map();
+      r.planos.forEach((x) => m.set(x.operadora, (m.get(x.operadora) || 0) + 1));
+      _cotOpsJob = Array.from(m, ([nome, planos]) => ({ nome: nome, planos: planos }))
+        .filter((o) => o.nome).sort((a, b) => a.nome.localeCompare(b.nome));
+      return;
+    }
+    _cotOpsJob = [];
+    // O MOTIVO APARECE NA TELA. "Nao carregou" manda o consultor abrir chamado;
+    // "entre no popup" ele resolve em dez segundos.
+    _cotOpsJobErro = (r && r.erro) || 'Não consegui falar com o JOB agora.';
+  }
+
+  function _cotBlocoOpsJob() {
+    if (_cotOpsJob === null) {
+      return '<div class="job-cot-dica">Vendo as tabelas do JOB…</div>';
+    }
+    if (!_cotOpsJob.length) {
+      return '<div class="job-cot-dica">' + esc(_cotOpsJobErro ||
+        'Nenhuma tabela importada no JOB ainda. Importe em Cotações → Tabelas.') + '</div>';
+    }
+    return '<div class="job-cot-ops">' + _cotOpsJob.map((o) => {
+      const jaFoi = _cotFeitas.filter((f) => String(f.operadoraId) === 'job:' + o.nome)[0];
+      return '<button type="button" class="job-cot-op' + (jaFoi ? ' feita' : '') +
+        '" data-job="' + esc(o.nome) + '">' +
+        '<span class="job-cot-op-ini">' + esc((o.nome || '?').trim().charAt(0).toUpperCase()) + '</span>' +
+        '<span class="job-cot-op-n">' + esc(o.nome) + '</span>' +
+        (jaFoi ? '<span class="job-cot-op-ok">' + jaFoi.planos.length +
+                 (jaFoi.planos.length === 1 ? ' plano' : ' planos') + '</span>'
+               : '<span class="job-cot-op-min">' + o.planos + ' tabelas</span>') +
+      '</button>';
+    }).join('') + '</div>';
+  }
+
+  async function _cotBuscarPlanosJob(nome) {
+    _cotEsperando('Vendo as tabelas de ' + nome + '…', '', _cotPintarOperadoras, 'Operadoras');
+    const g = _cotGer;
+    let r = null;
+    try {
+      r = await _safeSendMessage({ type: 'cotacao_tabelas', operadora: nome,
+                                   modalidade: _cotRotulo(_cot.modalidade) });
+    } catch (e) { r = null; }
+    if (g !== _cotGer) return;
+    const lista = (r && r.ok && Array.isArray(r.planos)) ? r.planos : null;
+    if (!lista) { _cotErro((r && r.erro) || 'tabelas_do_job', _cotPintarOperadoras); return; }
+    _cot.operadoraAtual = { id: 'job:' + nome, nome: nome, fonte: 'job' };
+    _cot.planos = lista.map(_cotDoJob);
+    _cotPintarPlanos();
+  }
+
+  // Preco das tabelas do JOB: UMA chamada com todos os planos marcados, contra
+  // as idades cruas. E por isso que 59 anos funciona aqui sem faixa — o motor
+  // do JOB faz a conta da faixa sozinho, do mesmo jeito que o site faz.
+  async function _cotPrecosJob(alvo) {
+    _cotEsperando('Calculando ' + alvo.length + (alvo.length === 1 ? ' plano…' : ' planos…'),
+                  '', _cotPintarPlanos, 'Planos');
+    const g = _cotGer;
+    const idades = String(_cot.idades || '').split(/[^0-9]+/)
+      .map((s) => parseInt(s, 10)).filter((n) => !isNaN(n) && n >= 0 && n <= 120);
+    if (!idades.length) { _cotErro('sem_idades_para_calcular', _cotPintarPlanos); return; }
+    let r = null;
+    try {
+      r = await _safeSendMessage({ type: 'cotacao_tabelas_calcular', idades: idades,
+                                   planos: alvo.map((p) => p._planoId) });
+    } catch (e) { r = null; }
+    if (g !== _cotGer) return;
+    if (!r || !r.ok) { _cotErro((r && r.erro) || 'tabelas_do_job', _cotPintarPlanos); return; }
+    const porId = {};
+    (r.resultados || []).forEach((x) => { porId[String(x.plano_id)] = x; });
+    // AVISO DO MOTOR VIRA MOTIVO NA LINHA. Plano fora da faixa de vidas ou com
+    // preco faltando em uma faixa some do calculo — sem isto ele sumiria da
+    // tela sem explicacao, e o consultor acharia que a extensao engoliu.
+    const motivo = {};
+    (r.avisos || []).forEach((a) => { motivo[String(a.plano_id)] = a.mensagem || a.codigo; });
+    const feitos = alvo.map((p) => {
+      const x = porId[String(p._planoId)];
+      return Object.assign({}, p, (x && x.elegivel)
+        // `unitario` e o nome que o servidor le ao salvar (ele escreve
+        // f['unitario']); o motor do JOB chama de `preco`. Sem esta linha a
+        // cotacao salva sai com as faixas zeradas no documento do cliente.
+        ? { total: x.total, conferido: true,
+            faixas: (x.linhas || []).map((l) => Object.assign({ unitario: l.preco }, l)) }
+        : { total: null, motivo: motivo[String(p._planoId)] || 'sem_valor_na_resposta' });
+    });
+    feitos.sort((a, b) => (a.total == null) - (b.total == null) || (a.total - b.total));
+    _cot.resultado = feitos;
+    _cotFeitas = _cotFeitas.filter((f) => String(f.operadoraId) !== String(_cot.operadoraAtual.id));
+    _cotFeitas.push({ operadoraId: _cot.operadoraAtual.id,
+                      nome: _cot.operadoraAtual.nome, planos: feitos });
+    _cotPintarResultado();
   }
 
   async function _cotBuscarPlanos(op) {
@@ -6067,7 +6232,8 @@
     }));
     _cotTopoLigar(_cotPintarOperadoras);
     document.getElementById('job-cot-volta-ops').addEventListener('click', _cotPintarOperadoras);
-    bt.addEventListener('click', () => _cotPrecos(marcados()));
+    bt.addEventListener('click', () => ((_cot.operadoraAtual || {}).fonte === 'job'
+      ? _cotPrecosJob(marcados()) : _cotPrecos(marcados())));
   }
 
   // Preço é sequencial por imposição do Painel: a resposta traz os cenários
