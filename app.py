@@ -19638,12 +19638,16 @@ def requer(escopo):
                 g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
                 close_db(conn)
                 if not g.usuario or not g.usuario['ativo']:
-                    return _wa_cors(_api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)[0])
+                    r = _api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)
+
+                    return _wa_cors(r[0]), r[1]
                 perfil = g.usuario['perfil'] or 'visualizador'
                 if perfil not in PERFIL_ESCOPOS: perfil = 'visualizador'
                 meus_escopos = PERFIL_ESCOPOS[perfil]
                 if escopo not in meus_escopos:
-                    return _wa_cors(_api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})[0])
+                    r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
+
+                    return _wa_cors(r[0]), r[1]
                 return f(*a, **kw)
                 
             auth = (request.headers.get('Authorization') or '').strip()
@@ -19666,12 +19670,16 @@ def requer(escopo):
                             g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
                             close_db(conn)
                             if not g.usuario or not g.usuario['ativo']:
-                                return _wa_cors(_api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)[0])
+                                r = _api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)
+
+                                return _wa_cors(r[0]), r[1]
                             perfil = g.usuario['perfil'] or 'visualizador'
                             if perfil not in PERFIL_ESCOPOS: perfil = 'visualizador'
                             meus_escopos = PERFIL_ESCOPOS[perfil]
                             if escopo not in meus_escopos:
-                                return _wa_cors(_api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})[0])
+                                r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
+
+                                return _wa_cors(r[0]), r[1]
                             return f(*a, **kw)
                     close_db(conn)
             
@@ -19702,7 +19710,9 @@ def requer(escopo):
                     if perfil not in PERFIL_ESCOPOS: perfil = 'visualizador'
                     meus_escopos = PERFIL_ESCOPOS[perfil]
                     if escopo not in meus_escopos:
-                        return _wa_cors(_api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})[0])
+                        r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
+
+                        return _wa_cors(r[0]), r[1]
                 
                 return f(*a, **kw)
 
@@ -19712,13 +19722,15 @@ def requer(escopo):
             if not bruta:
                 r = _api_erro('nao_autenticado', 'Nenhuma credencial válida encontrada', 401)
                 r[0].headers['WWW-Authenticate'] = 'Bearer realm="JOB API"'
-                return _wa_cors(r[0])
+                return _wa_cors(r[0]), r[1]
                 
             conn = db()
             reg = conn.execute("SELECT * FROM api_chave WHERE hash=?", (_api_hash(bruta),)).fetchone()
             if not reg or reg['revogada_em']:
                 close_db(conn)
-                return _wa_cors(_api_erro('chave_invalida', 'Chave inválida ou revogada', 401)[0])
+                r = _api_erro('chave_invalida', 'Chave inválida ou revogada', 401)
+
+                return _wa_cors(r[0]), r[1]
                 
             if reg.get('usuario_id'):
                 g.usuario_id = reg['usuario_id']
@@ -19732,7 +19744,9 @@ def requer(escopo):
             escopos = (reg['escopos'] or '').split(',')
             if escopo not in escopos:
                 close_db(conn)
-                return _wa_cors(_api_erro('sem_permissao', f"Esta chave não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": escopos})[0])
+                r = _api_erro('sem_permissao', f"Esta chave não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": escopos})
+
+                return _wa_cors(r[0]), r[1]
                 
             jan = int(time.time() // 60)
             marca = (reg['id'], jan)
@@ -19741,7 +19755,7 @@ def requer(escopo):
                 close_db(conn)
                 r = _api_erro('limite_excedido', f'Máximo de {_API_LIMITE_MIN} chamadas por minuto', 429)
                 r[0].headers['Retry-After'] = '60'
-                return _wa_cors(r[0])
+                return _wa_cors(r[0]), r[1]
                 
             if len(_API_USO) > 5000:
                 for k in [k for k in _API_USO if k[1] < jan - 2]:
