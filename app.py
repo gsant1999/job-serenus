@@ -18126,6 +18126,229 @@ def api_whatsapp_login():
         "nome": u['nome']
     }))
 
+# ── A PORTA UNIFICADA ───────────────────────────────────────────────────────
+#
+# ISTO PRECISA VIR ANTES DA PRIMEIRA ROTA QUE USA @requer, e nao depois.
+#
+# Estava definido ~1.500 linhas ABAIXO do primeiro `@requer(...)`. Decorador e
+# avaliado na hora em que a funcao e definida, entao o modulo estourava com
+# `NameError: name 'requer' is not defined` — o app nao subia. `ast.parse` nao
+# pega isso: a sintaxe esta perfeita. So o import pega.
+#
+# Movido por inteiro pelo Claude em 09/08/2026, sem alterar uma linha do corpo.
+
+PERFIL_ESCOPOS = {
+    'admin': [
+        'crm:ler', 'crm:escrever',
+        'cotacao:ler', 'cotacao:escrever',
+        'whatsapp:ler', 'whatsapp:enviar',
+        'financeiro:ler', 'financeiro:escrever',
+        'propostas:ler', 'propostas:escrever',
+        'ia:usar', 'admin'
+    ],
+    'gestor': [
+        'crm:ler', 'crm:escrever',
+        'cotacao:ler', 'cotacao:escrever',
+        'whatsapp:ler', 'whatsapp:enviar',
+        'financeiro:ler', 'financeiro:escrever',
+        'propostas:ler', 'propostas:escrever',
+        'ia:usar'
+    ],
+    'consultor': [
+        'crm:ler', 'crm:escrever',
+        'cotacao:ler', 'cotacao:escrever',
+        'whatsapp:ler', 'whatsapp:enviar',
+        'propostas:ler', 'propostas:escrever',
+        'ia:usar'
+    ],
+    # SUPERVISOR EXISTE E FALTAVA AQUI.
+    #
+    # Os perfis reais do sistema sao tres — consultor, supervisor e admin
+    # (templates/usuarios.html, e e o que o banco grava). Esta tabela nasceu com
+    # admin/gestor/consultor/financeiro/visualizador: dois que nao existem, e um
+    # que existe ficou de fora.
+    #
+    # Como o `requer` rebaixa perfil desconhecido, TODO supervisor virava
+    # visualizador: perdia escrever no CRM, cotar e mandar WhatsApp, e ganhava
+    # ler financeiro. O oposto exato do que o Guilherme decidiu em 09/08
+    # ("financeiro e coisa de admin"), nas duas pontas.
+    'supervisor': [
+        'crm:ler', 'crm:escrever',
+        'cotacao:ler', 'cotacao:escrever',
+        'whatsapp:ler', 'whatsapp:enviar',
+        'propostas:ler', 'propostas:escrever',
+        'ia:usar'
+    ],
+    'financeiro': [
+        'crm:ler',
+        'financeiro:ler', 'financeiro:escrever',
+        'propostas:ler'
+    ],
+    'visualizador': [
+        'crm:ler', 'cotacao:ler', 'whatsapp:ler', 'financeiro:ler', 'propostas:ler'
+    ]
+}
+
+def requer(escopo):
+    """Porta unificada: aceita sessão do site, token de aparelho ou chave de API."""
+    def deco(f):
+        @wraps(f)
+        def w(*a, **kw):
+            import hmac
+            if request.method == 'OPTIONS':
+                return _wa_cors(Response(status=204))
+            
+            # 1. Sessão do site
+            if 'user_id' in session:
+                g.usuario_id = session['user_id']
+                g.auth_via = 'sessao'
+                g.corretora_id = 1
+                conn = db()
+                g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
+                close_db(conn)
+                if not g.usuario or not g.usuario['ativo']:
+                    r = _api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)
+
+                    return _wa_cors(r[0]), r[1]
+                perfil = g.usuario['perfil'] or 'visualizador'
+                # Perfil desconhecido nao herda poder: cair em 'visualizador' dava
+                # `financeiro:ler` de brinde a quem o sistema nao sabe classificar.
+                if perfil not in PERFIL_ESCOPOS: perfil = None
+                meus_escopos = PERFIL_ESCOPOS.get(perfil) or []
+                if escopo not in meus_escopos:
+                    r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
+
+                    return _wa_cors(r[0]), r[1]
+                return f(*a, **kw)
+                
+            auth = (request.headers.get('Authorization') or '').strip()
+            
+            # 2. Token de aparelho (extensão)
+            if auth.startswith('Bearer '):
+                token_raw = auth[7:].strip()
+                partes = token_raw.split('.')
+                if len(partes) == 2 and partes[0].isdigit():
+                    sess_id = int(partes[0])
+                    secreto = partes[1]
+                    conn = db()
+                    sessao_db = conn.execute("SELECT usuario_id, token_hash, revogado_em FROM extensao_sessao WHERE id=?", (sess_id,)).fetchone()
+                    if sessao_db and not sessao_db['revogado_em']:
+                        esperado = hashlib.sha256(secreto.encode()).hexdigest()
+                        if hmac.compare_digest(esperado, sessao_db['token_hash']):
+                            g.usuario_id = sessao_db['usuario_id']
+                            g.auth_via = 'token'
+                            g.corretora_id = 1
+                            g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
+                            close_db(conn)
+                            if not g.usuario or not g.usuario['ativo']:
+                                r = _api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)
+
+                                return _wa_cors(r[0]), r[1]
+                            perfil = g.usuario['perfil'] or 'visualizador'
+                            # Perfil desconhecido nao herda poder: cair em 'visualizador' dava
+                            # `financeiro:ler` de brinde a quem o sistema nao sabe classificar.
+                            if perfil not in PERFIL_ESCOPOS: perfil = None
+                            meus_escopos = PERFIL_ESCOPOS.get(perfil) or []
+                            if escopo not in meus_escopos:
+                                r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
+
+                                return _wa_cors(r[0]), r[1]
+                            return f(*a, **kw)
+                    close_db(conn)
+            
+            # 2.5 Chave Antiga (Transição)
+            if request.headers.get('X-Extension-Key') and _wa_auth_ok():
+                app.logger.info('[EXT] chave antiga usada em %s', request.path)
+                g.auth_via = 'chave'
+                uid = None
+                try:
+                    j = request.get_json(silent=True) or {}
+                    uid = j.get('usuario_id')
+                except Exception:
+                    pass
+                if not uid:
+                    uid = request.args.get('usuario_id')
+                    
+                if uid and str(uid).isdigit():
+                    g.usuario_id = int(uid)
+                    conn = db()
+                    g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
+                    close_db(conn)
+                else:
+                    g.usuario_id = None
+                    g.usuario = None
+                    
+                if g.usuario_id and getattr(g, 'usuario', None):
+                    perfil = g.usuario['perfil'] or 'visualizador'
+                    # Perfil desconhecido nao herda poder: cair em 'visualizador' dava
+                    # `financeiro:ler` de brinde a quem o sistema nao sabe classificar.
+                    if perfil not in PERFIL_ESCOPOS: perfil = None
+                    meus_escopos = PERFIL_ESCOPOS.get(perfil) or []
+                    if escopo not in meus_escopos:
+                        r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
+
+                        return _wa_cors(r[0]), r[1]
+                
+                return f(*a, **kw)
+
+            # 3. Chave de API
+            bruta = auth[7:].strip() if auth.lower().startswith('bearer ') \
+                else (request.headers.get('X-API-Key') or '').strip()
+            if not bruta:
+                r = _api_erro('nao_autenticado', 'Nenhuma credencial válida encontrada', 401)
+                r[0].headers['WWW-Authenticate'] = 'Bearer realm="JOB API"'
+                return _wa_cors(r[0]), r[1]
+                
+            conn = db()
+            reg = conn.execute("SELECT * FROM api_chave WHERE hash=?", (_api_hash(bruta),)).fetchone()
+            if not reg or reg['revogada_em']:
+                close_db(conn)
+                r = _api_erro('chave_invalida', 'Chave inválida ou revogada', 401)
+
+                return _wa_cors(r[0]), r[1]
+                
+            if reg.get('usuario_id'):
+                g.usuario_id = reg['usuario_id']
+            else:
+                app.logger.warning(f"[API] chave sem dono id={reg['id']}")
+                g.usuario_id = 1
+                
+            g.auth_via = 'chave'
+            g.corretora_id = 1
+            
+            escopos = (reg['escopos'] or '').split(',')
+            if escopo not in escopos:
+                close_db(conn)
+                r = _api_erro('sem_permissao', f"Esta chave não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": escopos})
+
+                return _wa_cors(r[0]), r[1]
+                
+            jan = int(time.time() // 60)
+            marca = (reg['id'], jan)
+            _API_USO[marca] = _API_USO.get(marca, 0) + 1
+            if _API_USO[marca] > _API_LIMITE_MIN:
+                close_db(conn)
+                r = _api_erro('limite_excedido', f'Máximo de {_API_LIMITE_MIN} chamadas por minuto', 429)
+                r[0].headers['Retry-After'] = '60'
+                return _wa_cors(r[0]), r[1]
+                
+            if len(_API_USO) > 5000:
+                for k in [k for k in _API_USO if k[1] < jan - 2]:
+                    _API_USO.pop(k, None)
+            try:
+                conn.execute("UPDATE api_chave SET ultimo_uso=?, usos=COALESCE(usos,0)+1 WHERE id=?",
+                             (_agora_sp(), reg['id']))
+                conn.commit()
+            except Exception:
+                try: conn.rollback()
+                except Exception: pass
+            close_db(conn)
+            return f(*a, **kw)
+        return w
+    return deco
+
+
+
 @app.route('/api/whatsapp/logout', methods=['POST', 'OPTIONS'])
 @requer('whatsapp:ler')
 def api_whatsapp_logout():
@@ -19567,39 +19790,6 @@ def _etiquetas_do_momento(p, lead):
 # ═══════════════ API PÚBLICA: CHAVES ═══════════════════════════════════════════
 # Padrão de mercado: chave mostrada UMA vez; banco guarda só o SHA-256; prefixo em
 # claro só pra identificar; escopos separam leitura de escrita; revogação imediata.
-PERFIL_ESCOPOS = {
-    'admin': [
-        'crm:ler', 'crm:escrever',
-        'cotacao:ler', 'cotacao:escrever',
-        'whatsapp:ler', 'whatsapp:enviar',
-        'financeiro:ler', 'financeiro:escrever',
-        'propostas:ler', 'propostas:escrever',
-        'ia:usar', 'admin'
-    ],
-    'gestor': [
-        'crm:ler', 'crm:escrever',
-        'cotacao:ler', 'cotacao:escrever',
-        'whatsapp:ler', 'whatsapp:enviar',
-        'financeiro:ler', 'financeiro:escrever',
-        'propostas:ler', 'propostas:escrever',
-        'ia:usar'
-    ],
-    'consultor': [
-        'crm:ler', 'crm:escrever',
-        'cotacao:ler', 'cotacao:escrever',
-        'whatsapp:ler', 'whatsapp:enviar',
-        'propostas:ler', 'propostas:escrever',
-        'ia:usar'
-    ],
-    'financeiro': [
-        'crm:ler',
-        'financeiro:ler', 'financeiro:escrever',
-        'propostas:ler'
-    ],
-    'visualizador': [
-        'crm:ler', 'cotacao:ler', 'whatsapp:ler', 'financeiro:ler', 'propostas:ler'
-    ]
-}
 
 _API_ESCOPOS = PERFIL_ESCOPOS['admin']
 _API_PREFIXO = 'job_live_'
@@ -19618,159 +19808,6 @@ def _api_erro(codigo, msg, http=400, extra=None):
     if extra:
         corpo.update(extra)
     return jsonify(corpo), http
-
-
-def requer(escopo):
-    """Porta unificada: aceita sessão do site, token de aparelho ou chave de API."""
-    def deco(f):
-        @wraps(f)
-        def w(*a, **kw):
-            import hmac
-            if request.method == 'OPTIONS':
-                return _wa_cors(Response(status=204))
-            
-            # 1. Sessão do site
-            if 'user_id' in session:
-                g.usuario_id = session['user_id']
-                g.auth_via = 'sessao'
-                g.corretora_id = 1
-                conn = db()
-                g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
-                close_db(conn)
-                if not g.usuario or not g.usuario['ativo']:
-                    r = _api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)
-
-                    return _wa_cors(r[0]), r[1]
-                perfil = g.usuario['perfil'] or 'visualizador'
-                if perfil not in PERFIL_ESCOPOS: perfil = 'visualizador'
-                meus_escopos = PERFIL_ESCOPOS[perfil]
-                if escopo not in meus_escopos:
-                    r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
-
-                    return _wa_cors(r[0]), r[1]
-                return f(*a, **kw)
-                
-            auth = (request.headers.get('Authorization') or '').strip()
-            
-            # 2. Token de aparelho (extensão)
-            if auth.startswith('Bearer '):
-                token_raw = auth[7:].strip()
-                partes = token_raw.split('.')
-                if len(partes) == 2 and partes[0].isdigit():
-                    sess_id = int(partes[0])
-                    secreto = partes[1]
-                    conn = db()
-                    sessao_db = conn.execute("SELECT usuario_id, token_hash, revogado_em FROM extensao_sessao WHERE id=?", (sess_id,)).fetchone()
-                    if sessao_db and not sessao_db['revogado_em']:
-                        esperado = hashlib.sha256(secreto.encode()).hexdigest()
-                        if hmac.compare_digest(esperado, sessao_db['token_hash']):
-                            g.usuario_id = sessao_db['usuario_id']
-                            g.auth_via = 'token'
-                            g.corretora_id = 1
-                            g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
-                            close_db(conn)
-                            if not g.usuario or not g.usuario['ativo']:
-                                r = _api_erro('nao_autenticado', 'Acesso negado (inativo)', 401)
-
-                                return _wa_cors(r[0]), r[1]
-                            perfil = g.usuario['perfil'] or 'visualizador'
-                            if perfil not in PERFIL_ESCOPOS: perfil = 'visualizador'
-                            meus_escopos = PERFIL_ESCOPOS[perfil]
-                            if escopo not in meus_escopos:
-                                r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
-
-                                return _wa_cors(r[0]), r[1]
-                            return f(*a, **kw)
-                    close_db(conn)
-            
-            # 2.5 Chave Antiga (Transição)
-            if request.headers.get('X-Extension-Key') and _wa_auth_ok():
-                app.logger.info('[EXT] chave antiga usada em %s', request.path)
-                g.auth_via = 'chave'
-                uid = None
-                try:
-                    j = request.get_json(silent=True) or {}
-                    uid = j.get('usuario_id')
-                except Exception:
-                    pass
-                if not uid:
-                    uid = request.args.get('usuario_id')
-                    
-                if uid and str(uid).isdigit():
-                    g.usuario_id = int(uid)
-                    conn = db()
-                    g.usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (g.usuario_id,)).fetchone()
-                    close_db(conn)
-                else:
-                    g.usuario_id = None
-                    g.usuario = None
-                    
-                if g.usuario_id and getattr(g, 'usuario', None):
-                    perfil = g.usuario['perfil'] or 'visualizador'
-                    if perfil not in PERFIL_ESCOPOS: perfil = 'visualizador'
-                    meus_escopos = PERFIL_ESCOPOS[perfil]
-                    if escopo not in meus_escopos:
-                        r = _api_erro('sem_permissao', f"Seu perfil não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": meus_escopos})
-
-                        return _wa_cors(r[0]), r[1]
-                
-                return f(*a, **kw)
-
-            # 3. Chave de API
-            bruta = auth[7:].strip() if auth.lower().startswith('bearer ') \
-                else (request.headers.get('X-API-Key') or '').strip()
-            if not bruta:
-                r = _api_erro('nao_autenticado', 'Nenhuma credencial válida encontrada', 401)
-                r[0].headers['WWW-Authenticate'] = 'Bearer realm="JOB API"'
-                return _wa_cors(r[0]), r[1]
-                
-            conn = db()
-            reg = conn.execute("SELECT * FROM api_chave WHERE hash=?", (_api_hash(bruta),)).fetchone()
-            if not reg or reg['revogada_em']:
-                close_db(conn)
-                r = _api_erro('chave_invalida', 'Chave inválida ou revogada', 401)
-
-                return _wa_cors(r[0]), r[1]
-                
-            if reg.get('usuario_id'):
-                g.usuario_id = reg['usuario_id']
-            else:
-                app.logger.warning(f"[API] chave sem dono id={reg['id']}")
-                g.usuario_id = 1
-                
-            g.auth_via = 'chave'
-            g.corretora_id = 1
-            
-            escopos = (reg['escopos'] or '').split(',')
-            if escopo not in escopos:
-                close_db(conn)
-                r = _api_erro('sem_permissao', f"Esta chave não tem o escopo '{escopo}'", 403, {"escopo_exigido": escopo, "escopos_que_voce_tem": escopos})
-
-                return _wa_cors(r[0]), r[1]
-                
-            jan = int(time.time() // 60)
-            marca = (reg['id'], jan)
-            _API_USO[marca] = _API_USO.get(marca, 0) + 1
-            if _API_USO[marca] > _API_LIMITE_MIN:
-                close_db(conn)
-                r = _api_erro('limite_excedido', f'Máximo de {_API_LIMITE_MIN} chamadas por minuto', 429)
-                r[0].headers['Retry-After'] = '60'
-                return _wa_cors(r[0]), r[1]
-                
-            if len(_API_USO) > 5000:
-                for k in [k for k in _API_USO if k[1] < jan - 2]:
-                    _API_USO.pop(k, None)
-            try:
-                conn.execute("UPDATE api_chave SET ultimo_uso=?, usos=COALESCE(usos,0)+1 WHERE id=?",
-                             (_agora_sp(), reg['id']))
-                conn.commit()
-            except Exception:
-                try: conn.rollback()
-                except Exception: pass
-            close_db(conn)
-            return f(*a, **kw)
-        return w
-    return deco
 
 
 def api_requer_chave(escopo):
@@ -19847,7 +19884,9 @@ def configuracoes_api_chaves():
             close_db(conn); return jsonify({"ok": False, "erro": "Usuário dono inválido ou inativo"}), 400
             
         perfil = dono['perfil'] or 'visualizador'
-        if perfil not in PERFIL_ESCOPOS: perfil = 'visualizador'
+        # Perfil desconhecido nao herda poder: cair em 'visualizador' dava
+        # `financeiro:ler` de brinde a quem o sistema nao sabe classificar.
+        if perfil not in PERFIL_ESCOPOS: perfil = None
         escopos_permitidos = PERFIL_ESCOPOS[perfil]
         
         escopos = [e for e in (d.get('escopos') or []) if e in escopos_permitidos and e != 'admin']
@@ -23494,7 +23533,7 @@ def admin_migrar_cidade_empresa():
         conn.execute("UPDATE crm_leads SET empresa_antes_migracao = empresa WHERE empresa IS NOT NULL")
         
         municipios = [m['nome'].lower() for m in _municipios()]
-        # Precisamos de todos os dados para o backup no crm_lead_excluido
+        # SELECT * porque o loop le nome/telefone/etapa do lead nas mensagens
         leads = conn.execute("SELECT * FROM crm_leads WHERE qual_cidade IS NULL AND empresa IS NOT NULL AND empresa != ''").fetchall()
         
         migrados = 0
@@ -23506,15 +23545,19 @@ def admin_migrar_cidade_empresa():
         for l in leads:
             emp = l['empresa'].strip()
             if emp.lower() in municipios:
-                # CRÍTICO 1: Backup para não perder a informação original antes de apagar
-                backup = {"lead": dict(l)}
-                conn.execute("""INSERT INTO crm_lead_excluido 
-                    (lead_id, nome, telefone, telefone_norm, etapa, origem, motivo, dados_json, excluido_por_id, excluido_em) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (l['id'], l['nome'], l['telefone'], l['telefone_norm'], l['etapa'], l['origem'],
-                     "migracao cidade/empresa", json.dumps(backup, default=str), 
-                     usuario_id, _agora_sp()))
-                     
+                # O BACKUP JA EXISTE, E NAO E AQUI.
+                #
+                # Havia um INSERT em `crm_lead_excluido` por lead migrado. Essa
+                # tabela alimenta /crm/excluidos, que existe (docstring dela)
+                # "pra prevenir mau uso: a exclusao so pode ser facil se ela for
+                # visivel" — e a consulta e LIMIT 300 sem filtro de motivo.
+                # Algumas centenas de leads migrados enchiam a tela de gente que
+                # NAO foi excluida e empurravam as exclusoes de verdade pra fora.
+                # A tela que vigia exclusao parava de servir pra isso.
+                #
+                # O backup certo ja e feito na linha de cima, em
+                # `empresa_antes_migracao`, e pra TODOS os leads: fica junto do
+                # dado, no proprio lead, e desfazer e um UPDATE.
                 conn.execute("UPDATE crm_leads SET qual_cidade = ?, empresa = NULL WHERE id = ?", (emp, l['id']))
                 migrados += 1
             else:
