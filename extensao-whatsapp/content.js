@@ -2738,1655 +2738,207 @@
   // rótulos escritos ali competiriam com o texto que a pessoa está redigindo.
   // O de salvar contato mantém o texto, porque é o único que ele quis
   // destacar — e é o único que grava.
-  // Enquanto trabalha, a bola precisa mostrar número ("3/12") — e número não
-  // cabe num círculo de 34px. Ela vira pílula enquanto o texto é diferente do
-  // rótulo de repouso, e volta a ser bola quando termina.
-  function _bcRotulo(b, txt) {
-    const e = b.querySelector('span');
-    if (e) e.textContent = txt;
-    if (b.classList.contains('job-bc-bola')) {
-      const base = b.dataset.rot || '';
-      b.classList.toggle('job-bc-ocupada', !!base && txt !== base);
-    }
-  }
+  // As funções da fileira de bolas (_bcRotulo, _barraConvLigarTranscrever,
+  // _barraConvLigarSalvar, _barraConvContexto) saíram daqui: o menu monta e
+  // liga cada item na abertura, então não existe mais botão nascendo depois
+  // pra alguém ter que religar. Código que só existia pra resolver a ordem em
+  // que os botões apareciam deixou de ter motivo.
 
-  // TRANSCREVER, com trava de repetição.
-  //
-  // Ele custa dinheiro e prende a conversa. Duplo clique, ou clicar de novo
-  // logo depois de terminar, refaria o trabalho pelo mesmo resultado. Por isso
-  // o botão desaparece quando termina: se não sobrou áudio sem texto, ele não
-  // tem mais o que fazer nesta conversa — e botão sem trabalho é justamente o
-  // que convida o clique à toa.
-  function _barraConvLigarTranscrever(box, bt) {
-    const r0 = bt.dataset.rot || 'Transcrever';
-    bt.addEventListener('click', async (ev) => {
+  function _barraConvInjetar() {
+    const main = document.querySelector('#main');
+    if (!main) return;
+    const pe = main.querySelector('footer');
+    if (!pe || pe.querySelector('.job-barra-conv')) return;
+    // Limpa versões antigas (cabeçalho e a fileira de bolas) pra quem estava
+    // com a extensão aberta durante a atualização não ficar com as duas.
+    main.querySelectorAll('header .job-barra-conv').forEach((e) => e.remove());
+
+    const box = document.createElement('div');
+    box.className = 'job-barra-conv job-barra-conv-pe';
+    // UM BOTÃO SÓ, e o nome de cada ação aparece quando ele abre.
+    //
+    // A fileira de bolas resolvia o espaço mas criava outro problema: ícone
+    // sozinho não diz o que faz, e ele precisou perguntar. Três ícones mudos
+    // ao lado do campo de digitar são três perguntas.
+    //
+    // O menu resolve os dois de uma vez: em repouso é um botão discreto com a
+    // marca do JOB — reconhecível e sem competir com a conversa; aberto, cada
+    // ação tem ícone, NOME e uma linha dizendo o que acontece.
+    box.innerHTML =
+      '<button type="button" class="job-bc-menu-bt" id="job-bc-menu-bt" ' +
+        'aria-haspopup="menu" aria-expanded="false" title="Ações do JOB nesta conversa">' +
+        logoJobHTML() + '</button>';
+    pe.insertBefore(box, pe.firstChild);
+
+    const bt = box.querySelector('#job-bc-menu-bt');
+    bt.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      if (bt.disabled) return;
-      bt.disabled = true;
-      try {
-        const p = await transcreverTudo((x) => {
-          _bcRotulo(bt, x.rodando ? (x.feitos + '/' + x.total) : r0);
-        });
-        _bcRotulo(bt, p.total === 0 ? 'Sem áudio'
-          : (p.erros ? p.erros + ' falhou(ram)' : 'Pronto: ' + p.total));
-        // Some depois de mostrar o resultado: não há mais áudio pra transcrever.
-        setTimeout(() => { if (bt.isConnected) bt.remove(); }, 2600);
-      } catch (e) {
-        _bcRotulo(bt, 'Falhou');
-        setTimeout(() => { _bcRotulo(bt, r0); bt.disabled = false; }, 2600);
-      }
+      const aberto = box.querySelector('.job-bc-menu');
+      if (aberto) { _bcMenuFechar(box); return; }
+      _bcMenuAbrir(box, bt);
     });
   }
 
-  function _barraConvLigarSalvar(bsv) {
-    const rotulo = _bcRotulo;
-    bsv.addEventListener('click', async (ev) => {
-      ev.stopPropagation();
-      if (bsv.disabled) return;
-      bsv.disabled = true;
-      const r0 = 'Salvar contato';
+  function _bcMenuFechar(box) {
+    const m = box.querySelector('.job-bc-menu');
+    if (!m) return;
+    m.classList.remove('on');
+    const bt = box.querySelector('#job-bc-menu-bt');
+    if (bt) bt.setAttribute('aria-expanded', 'false');
+    setTimeout(() => { if (m.isConnected) m.remove(); }, 200);
+    document.removeEventListener('click', box._bcFora, true);
+    document.removeEventListener('keydown', box._bcEsc, true);
+  }
+
+  // O menu é MONTADO A CADA ABERTURA, não uma vez e escondido. Assim o que
+  // aparece é sempre o estado de agora: quantos áudios faltam, se o contato já
+  // foi salvo. Menu montado uma vez mente na segunda conversa.
+  async function _bcMenuAbrir(box, bt) {
+    const m = document.createElement('div');
+    m.className = 'job-bc-menu';
+    m.setAttribute('role', 'menu');
+    m.innerHTML = '<div class="job-bc-menu-carregando">Vendo o que dá pra fazer aqui…</div>';
+    box.appendChild(m);
+    requestAnimationFrame(() => m.classList.add('on'));
+    bt.setAttribute('aria-expanded', 'true');
+
+    box._bcFora = (e) => { if (!box.contains(e.target)) _bcMenuFechar(box); };
+    box._bcEsc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); _bcMenuFechar(box); } };
+    document.addEventListener('click', box._bcFora, true);
+    document.addEventListener('keydown', box._bcEsc, true);
+
+    const itens = [];
+
+    // ── Transcrever: só o que ainda não tem texto ──
+    let faltam = 0;
+    try {
+      const r = await _pedirPonte('listar_audios', {}, 12000);
+      const lista = (r && r.audios) || [];
+      faltam = lista.filter((a) => !TR.cache.has(a.id) || !TR.cache.get(a.id)).length;
+    } catch (e) { faltam = 0; }
+    if (faltam > 0) {
+      itens.push({
+        ac: 'transcrever', ico: _ICO_TRANSCREVER,
+        rot: 'Transcrever ' + faltam + (faltam === 1 ? ' áudio' : ' áudios'),
+        // O número e o aviso de custo ficam no item, não escondidos num title:
+        // é aqui que a pessoa decide se vale.
+        dica: 'Demora e consome crédito de transcrição.',
+      });
+    }
+
+    itens.push({
+      ac: 'copiar', ico: _ICO_COPIAR, rot: 'Copiar conversa',
+      dica: 'Texto e áudio transcrito, na ordem, com hora e quem falou.',
+    });
+
+    // ── Salvar contato: só se ainda não está salvo ──
+    const nomeChat = (nomeDoContato() || '').trim();
+    const soDigitos = nomeChat.replace(/[^0-9]/g, '');
+    const naoSalvo = nomeChat && soDigitos.length >= 10 &&
+      soDigitos.length >= nomeChat.replace(/\s/g, '').length - 4;
+    if (naoSalvo) {
+      itens.push({
+        ac: 'salvarcontato', ico: _ICO_SALVAR_CONTATO, rot: 'Salvar contato',
+        dica: 'Você confere e edita o nome antes de gravar.', destaque: true,
+      });
+    }
+
+    if (!m.isConnected) return;
+    m.innerHTML = itens.map((i) =>
+      '<button type="button" class="job-bc-item' + (i.destaque ? ' destaque' : '') + '" ' +
+        'role="menuitem" data-ac="' + i.ac + '">' +
+        '<span class="job-bc-item-ico">' + i.ico + '</span>' +
+        '<span class="job-bc-item-txt">' +
+          '<span class="rot">' + esc(i.rot) + '</span>' +
+          '<span class="dica">' + esc(i.dica) + '</span>' +
+        '</span></button>').join('');
+
+    const acao = (nome) => m.querySelector('[data-ac="' + nome + '"]');
+    const rotulo = (b, txt) => { const e = b.querySelector('.rot'); if (e) e.textContent = txt; };
+
+    const bTr = acao('transcrever');
+    if (bTr) bTr.addEventListener('click', async () => {
+      if (bTr.disabled) return;
+      bTr.disabled = true;
+      try {
+        const p = await transcreverTudo((x) => {
+          rotulo(bTr, x.rodando ? ('Transcrevendo ' + x.feitos + '/' + x.total) : 'Transcrever');
+        });
+        rotulo(bTr, p.erros ? (p.erros + ' falhou(ram)') : ('Pronto: ' + p.total));
+      } catch (e) { rotulo(bTr, 'Não consegui transcrever'); }
+      setTimeout(() => _bcMenuFechar(box), 2200);
+    });
+
+    const bCp = acao('copiar');
+    if (bCp) bCp.addEventListener('click', async () => {
+      if (bCp.disabled) return;
+      bCp.disabled = true;
+      try {
+        const r = await conversaEmTexto();
+        if (!r.total) { rotulo(bCp, 'Conversa vazia'); }
+        else {
+          await navigator.clipboard.writeText(r.texto);
+          rotulo(bCp, r.semTranscricao
+            ? (r.total + ' copiadas · ' + r.semTranscricao + ' sem transcrição')
+            : ('Copiado: ' + r.total + ' mensagens'));
+        }
+      } catch (e) { rotulo(bCp, 'Não consegui copiar'); }
+      setTimeout(() => _bcMenuFechar(box), 1800);
+    });
+
+    const bSv = acao('salvarcontato');
+    if (bSv) bSv.addEventListener('click', async () => {
+      if (bSv.disabled) return;
+      bSv.disabled = true;
       try {
         let chat = '';
         try { const c = await _pedirPonte('obter_chat_id', {}, 8000); chat = (c && c.chat_id) || ''; }
         catch (e) { chat = ''; }
-        if (!chat) { rotulo(bsv, 'Abra a conversa'); return; }
-        // A ficha traz etapa, origem, operadora e consultor — que é o que o
-        // nome padrão usa. Sem ela, cai no nome que está na tela.
+        if (!chat) { rotulo(bSv, 'Abra a conversa'); bSv.disabled = false; return; }
         if (!_ficha || !_ficha.lead) {
           try {
             let tel = '';
             try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e2) { tel = telefoneDoContato(); }
-            if (tel) await _carregarFicha({ telefone: tel });
+            if (tel) await _carregarFichaSilenciosa({ telefone: tel });
           } catch (e) { /* segue com o nome da tela */ }
         }
-        const sugerido = (_ficha && _ficha.lead ? _montarNomeContato() : (nomeDoContato() || '')).trim();
-        // A ÚLTIMA PALAVRA É DE QUEM CONHECE O CLIENTE. O padrão monta, a
-        // folha mostra, a pessoa corrige se quiser — sem sair da conversa e
-        // sem um segundo botão.
+        const sugerido = (_ficha && _ficha.lead ? _montarNomeContato() : nomeChat).trim();
+        // Fecha o menu ANTES da folha: dois painéis abertos ao mesmo tempo
+        // deixam a pessoa sem saber qual está no comando.
+        _bcMenuFechar(box);
         const nome = await _folhaSalvarContato(sugerido);
-        if (!nome) { rotulo(bsv, r0); return; }
+        if (!nome) return;
         const partes = nome.split(/\s+/);
         const primeiro = partes.shift() || nome;
         const sobrenome = partes.join(' ');
         let r = null;
         try { r = await _pedirPonte('salvar_contato', { chatId: chat, nome: primeiro, sobrenome }, 15000); }
-        catch (e) { _falhaTecnica('salvar contato (cabeçalho)', e); }
-        if (r && r.ok) {
-          rotulo(bsv, 'Salvo'); bsv.classList.add('ok');
-          // SOME depois de confirmar: o contato agora tem nome, e o botão
-          // deixou de ter trabalho. Deixar ele aceso é convidar o segundo
-          // clique que grava de novo o que já está gravado.
-          setTimeout(() => { if (bsv.isConnected) bsv.remove(); }, 2400);
-          return;
-        }
-        // Diz QUAL problema. 'sem_suporte' manda pro caminho que funciona.
-        rotulo(bsv, (r && r.erro) === 'sem_suporte' ? 'Não dá aqui' : 'Falhou');
-        if (r && r.erro) _falhaTecnica('salvar contato (cabeçalho): ' + r.erro, null);
-      } finally {
-        setTimeout(() => { rotulo(bsv, r0); bsv.classList.remove('ok'); bsv.disabled = false; }, 2800);
-      }
+        catch (e) { _falhaTecnica('salvar contato (menu)', e); }
+        _dizerNoRodape(r && r.ok
+          ? 'Contato salvo. Chega no celular na próxima sincronização.'
+          : ((r && r.erro) === 'sem_suporte'
+              ? 'Este WhatsApp Web não permite salvar por aqui.'
+              : 'Não consegui salvar agora. Tente de novo.'));
+        if (r && r.erro) _falhaTecnica('salvar contato (menu): ' + r.erro, null);
+      } catch (e) { _falhaTecnica('salvar contato (menu)', e); }
     });
   }
 
-  // ══ QUEM APARECE, E QUANDO ════════════════════════════════════════════
-  //
-  // Botão que está sempre ali convida clique à toa — e dois destes têm custo
-  // real: transcrever gasta API e prende a conversa por minutos; salvar
-  // contato escreve na agenda. Então cada um só entra quando a situação dele
-  // existe:
-  //
-  //   TRANSCREVER   só se houver áudio AINDA NÃO transcrito, e o rótulo diz
-  //                 quantos — que é o que faz a pessoa pensar antes de clicar.
-  //   SALVAR        só se o contato AINDA NÃO está salvo. Contato salvo tem
-  //                 nome; não salvo aparece como número. Se já tem nome, o
-  //                 botão não tem trabalho a fazer.
-  //   COPIAR        sempre: não custa nada e não escreve em lugar nenhum.
-  //
-  // Tudo em segundo plano: a barra aparece na hora com o Copiar, e os outros
-  // dois entram quando a checagem volta. Esperar pra desenhar deixaria o
-  // rodapé pulando.
-  async function _barraConvContexto(box) {
-    if (!box || !box.isConnected) return;
-
-    // ── Salvar contato: o nome da conversa é um telefone? ──
+  // Aviso curto junto do campo de digitar. A folha já fechou quando a resposta
+  // chega, e sem isto o consultor não fica sabendo se gravou.
+  function _dizerNoRodape(txt) {
     try {
-      const nome = (nomeDoContato() || '').trim();
-      const soDigitos = nome.replace(/[^0-9]/g, '');
-      const pareceTelefone = nome && soDigitos.length >= 10 && soDigitos.length >= nome.replace(/\s/g, '').length - 4;
-      if (pareceTelefone && !box.querySelector('[data-ac="salvarcontato"]')) {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'job-bc-btn job-bc-salvar';
-        b.dataset.ac = 'salvarcontato';
-        b.title = 'Este número não está salvo. Grava no seu WhatsApp com o nome no padrão do JOB, e sincroniza pro celular.';
-        b.innerHTML = _ICO_SALVAR_CONTATO + '<span>Salvar contato</span>';
-        box.appendChild(b);
-        b.dataset.rot = 'Salvar contato';
-        _barraConvLigarSalvar(b);
-      }
-    } catch (e) { /* checagem é ganho, não requisito */ }
-
-    // ── Transcrever: existe áudio sem transcrição? ──
-    try {
-      const r = await _pedirPonte('listar_audios', {}, 12000);
-      const lista = (r && r.audios) || [];
-      // Só os que ainda NÃO temos texto. Oferecer transcrever o que já está
-      // transcrito é gastar de novo pelo mesmo resultado.
-      const faltam = lista.filter((a) => !TR.cache.has(a.id) || !TR.cache.get(a.id)).length;
-      if (faltam > 0 && box.isConnected && !box.querySelector('[data-ac="transcrever"]')) {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'job-bc-btn job-bc-bola';
-        b.dataset.ac = 'transcrever';
-        // O NÚMERO NO RÓTULO É O FREIO. "Transcrever 12 áudios" faz pensar;
-        // "Transcrever tudo" não diz o tamanho do que se está pedindo.
-        b.title = 'Transcrever ' + faltam + (faltam === 1 ? ' áudio' : ' áudios') +
-          ' desta conversa. Demora e consome crédito de transcrição.';
-        b.innerHTML = _ICO_TRANSCREVER + '<span>Transcrever ' + faltam + '</span>';
-        box.insertBefore(b, box.firstChild);
-        b.dataset.rot = 'Transcrever ' + faltam;
-        _barraConvLigarTranscrever(box, b);
-      }
-    } catch (e) { /* sem áudio detectável: o botão simplesmente não aparece */ }
-  }
-
-  function _barraConvInjetar() {
-    const main = document.querySelector('#main');
-    if (!main) return;
-    // O rodapé é onde vive a caixa de digitar. Se ele ainda não existe (a
-    // conversa está carregando), sai quieto: o tique de 1,5s tenta de novo.
-    const pe = main.querySelector('footer');
-    if (!pe || pe.querySelector('.job-barra-conv')) return;
-    // Limpa a versão antiga do cabeçalho, pra quem já tinha a extensão aberta
-    // quando a atualização chegou não ficar com as duas.
-    const velha = main.querySelector('header .job-barra-conv');
-    if (velha) velha.remove();
-    const box = document.createElement('div');
-    box.className = 'job-barra-conv job-barra-conv-pe';
-    // NASCE VAZIA. Antes os três apareciam sempre, e botão que está sempre ali
-    // convida clique à toa — inclusive o de transcrever, que custa dinheiro e
-    // trava a conversa por minutos. Cada um é acrescentado pela função abaixo
-    // só quando a conjuntura dele existe.
-    box.innerHTML =
-      // COPIAR é o único que aparece sempre: não custa nada, não escreve em
-      // lugar nenhum e é reversível por natureza (é a área de transferência).
-      '<button type="button" class="job-bc-btn job-bc-bola" data-ac="copiar" ' +
-        'title="Copiar a conversa inteira: texto e áudio transcrito, na ordem, com hora e quem falou">' +
-        _ICO_COPIAR + '<span>Copiar conversa</span></button>';
-    // No começo do rodapé: antes do "+" e do campo, que é a ordem de leitura
-    // da esquerda pra direita e não empurra o botão de enviar.
-    pe.insertBefore(box, pe.firstChild);
-    // Em segundo plano: a barra aparece na hora com o Copiar, e os outros dois
-    // entram quando a checagem volta. Esperar pra desenhar faria o rodapé pular.
-    _barraConvContexto(box);
-
-    const btn = (ac) => box.querySelector('[data-ac="' + ac + '"]');
-    // Guarda o rótulo de repouso de cada um: é ele que diz quando a bola
-    // voltou ao normal.
-    box.querySelectorAll('.job-bc-bola').forEach((b) => {
-      const e = b.querySelector('span');
-      b.dataset.rot = e ? (e.textContent || '') : '';
-    });
-    const rotulo = _bcRotulo;
-
-    // ── SALVAR CONTATO, do cabeçalho ──────────────────────────────────
-    // Um clique: monta o nome com as regras do CRM (as mesmas do painel) e
-    // grava. Se o lead ainda não foi carregado nesta conversa, carrega antes —
-    // salvar com o nome cru do WhatsApp desperdiçaria justamente o padrão que
-    // faz o contato ser achável na busca depois.
-    const bsv = btn('salvarcontato');
-    if (bsv) _barraConvLigarSalvar(bsv);
-
-    const bc = btn('copiar');
-    bc.addEventListener('click', async (ev) => {
-      ev.stopPropagation();
-      if (bc.disabled) return;
-      bc.disabled = true;
-      const r0 = 'Copiar conversa';
-      try {
-        const r = await conversaEmTexto();
-        if (!r.total) { rotulo(bc, 'Conversa vazia'); return; }
-        await navigator.clipboard.writeText(r.texto);
-        // Diz o buraco em vez de esconder: copiar "com sucesso" sem avisar que 6
-        // audios faltaram faz colar um registro furado sem saber.
-        rotulo(bc, r.semTranscricao ? (r.total + ' copiadas · ' + r.semTranscricao + ' áudio(s) sem transcrição')
-                                    : (r.total + ' copiadas'));
-      } catch (e) {
-        rotulo(bc, 'Não deu');
-      } finally {
-        setTimeout(() => { rotulo(bc, r0); bc.disabled = false; }, 3200);
-      }
-    });
-  }
-
-  const _ICO_DOC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
-    'stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>' +
-    '<polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
-  const _ICO_MAIS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
-  const _ICO_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
-  const _ICO_ABRIR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M10 14 21 3M18 13v8H3V6h8"/></svg>';
-
-  // ── COPIAR A CONVERSA INTEIRA ───────────────────────────────────────────
-  // Texto e audio transcrito no MESMO fio, na ordem do WhatsApp, com hora e quem
-  // falou. E o que faltava pra conversa sair daqui e virar registro em qualquer
-  // lugar — e-mail pra operadora, ficha do lead, analise fora da ferramenta.
-  // Audio sem transcricao entra marcado, nao sumido: a conversa tem que
-  // continuar fazendo sentido, e quem le precisa saber que ali falta um pedaco.
-  async function conversaEmTexto() {
-    const conv = await _pedirPonte('ler_conversa_completa', { limite: 800 }, 25000);
-    const msgs = (conv && conv.mensagens) || [];
-    if (!msgs.length) return { texto: '', total: 0, semTranscricao: 0 };
-    // Transcricoes: as desta sessao mais as que o JOB ja guardou (nao paga de novo).
-    const ids = msgs.filter((m) => m.tipo === 'ptt' || m.tipo === 'audio').map((m) => m.msg_id);
-    const doServidor = {};
-    if (ids.length) {
-      const r = await _safeSendMessage({ type: 'transcricoes_cache', ids }).catch(() => null);
-      if (r && r.ok) Object.assign(doServidor, r.transcricoes || {});
-    }
-    const quem = (m) => (m.de === 'consultor' ? 'Você' : (conv.titulo || m.nome || 'Cliente'));
-    const linhas = [];
-    let semTranscricao = 0;
-    for (const m of msgs) {
-      let corpo = m.texto;
-      if (m.tipo === 'ptt' || m.tipo === 'audio') {
-        const t = TR.cache.get(m.msg_id) || doServidor[m.msg_id] || '';
-        if (t) corpo = '[áudio] ' + t;
-        else { corpo = '[áudio não transcrito]'; semTranscricao++; }
-      } else if (!corpo && m.rotulo) {
-        corpo = '[' + m.rotulo + ']';
-      }
-      if (!corpo) continue;
-      linhas.push('[' + m.hora + '] ' + quem(m) + ': ' + corpo);
-    }
-    const cab = (conv.titulo ? conv.titulo + ' — ' : '') +
-                'conversa do WhatsApp · ' + linhas.length + ' mensagem(ns)' +
-                ' · copiado em ' + new Date().toLocaleString('pt-BR');
-    return { texto: cab + '\n\n' + linhas.join('\n'), total: linhas.length, semTranscricao };
-  }
-
-  // ── TRANSCREVER TUDO ────────────────────────────────────────────────────
-  // Um a um, de proposito. Disparar dez downloads e dez chamadas de IA de uma vez
-  // trava o WhatsApp e pode estourar o teto de custo sem o consultor ver. O que
-  // ja esta em cache nao e refeito — o segundo clique custa zero.
-  const TRTUDO = { rodando: false, feitos: 0, total: 0, erros: 0, pulados: 0 };
-
-  // Cede o processador. requestAnimationFrame espera o proximo quadro pintar —
-  // e a garantia de que a interface andou; o setTimeout e o piso pra aba em
-  // segundo plano, onde rAF nao dispara.
-  function _respirar() {
-    return new Promise((r) => {
-      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(r, 0));
-      else setTimeout(r, 16);
-    });
-  }
-  function _quandoVisivel() {
-    return new Promise((r) => {
-      if (!document.hidden) return r();
-      const f = () => { if (!document.hidden) { document.removeEventListener('visibilitychange', f); r(); } };
-      document.addEventListener('visibilitychange', f);
-    });
-  }
-
-  async function transcreverTudo(aoAndar) {
-    if (TRTUDO.rodando) return TRTUDO;
-    const conv = await _pedirPonte('ler_conversa_completa', { limite: 800 }, 25000);
-    const ids = (conv && conv.audios) || [];
-    Object.assign(TRTUDO, { rodando: true, feitos: 0, total: ids.length, erros: 0, pulados: 0 });
-    if (aoAndar) aoAndar(TRTUDO);
-    try {
-      // Pergunta de uma vez o que ja existe: barato, e evita pagar de novo.
-      const jaTem = {};
-      if (ids.length) {
-        const r = await _safeSendMessage({ type: 'transcricoes_cache', ids }).catch(() => null);
-        if (r && r.ok) Object.assign(jaTem, r.transcricoes || {});
-      }
-      // Os que ja tem texto saem PRIMEIRO e de uma vez: e so pintar, nao ha
-      // rede nem decodificacao envolvida. Isso faz a maioria dos audios
-      // aparecer instantaneamente e deixa a fila cara so com o que falta.
-      const faltam = [];
-      for (const id of ids) {
-        const pronto = TR.cache.get(id) || jaTem[id];
-        if (pronto) {
-          TR.cache.set(id, pronto);
-          // "Transcrever tudo" numa conversa longa insere em rajada — sem teto
-          // aqui, uma única rodada já estoura sozinha o limite.
-          _capMap(TR.cache, _TETO_TR, (_v, k) => TR.ocupado.has(k));
-          trAtualizarSlot(id);
-          TRTUDO.pulados++; TRTUDO.feitos++;
-        } else {
-          faltam.push(id);
-        }
-      }
-      if (aoAndar) aoAndar(TRTUDO);
-
-      for (const id of faltam) {
-        // DEVOLVE A MAO PRO NAVEGADOR entre um audio e outro.
-        //
-        // Era aqui que travava: baixar e decodificar audio em base64 e trabalho
-        // pesado, e um `for` com await encadeado nunca solta o event loop tempo
-        // suficiente — o WhatsApp fica sem processar rolagem, clique e render
-        // enquanto a fila anda. Duas pausas curtas custam quase nada no total e
-        // devolvem a interface pra quem esta usando.
-        await _respirar();
-        await trTranscrever(id);
-        if (TR.erro.has(id)) TRTUDO.erros++;
-        TRTUDO.feitos++;
-        if (aoAndar) aoAndar(TRTUDO);
-        await _respirar();
-        // Aba escondida: para de trabalhar e volta quando ela aparecer. Sem
-        // isso a fila continua consumindo CPU numa aba que ninguem esta vendo.
-        if (document.hidden) await _quandoVisivel();
-      }
-    } finally {
-      TRTUDO.rodando = false;
-      if (aoAndar) aoAndar(TRTUDO);
-    }
-    return TRTUDO;
-  }
-
-  // Pessoa com um "+": a mesma figura do CRM no trilho, que é onde o consultor
-  // já aprendeu que "gente entrando no sistema" tem essa cara.
-  const _ICO_SALVAR_CONTATO = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
-    'stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' +
-    '<circle cx="9.6" cy="7.6" r="3.5"/><path d="M3.4 20a6.2 6.2 0 0 1 12.4 0"/>' +
-    '<path d="M19.4 6.6v5.4M16.7 9.3h5.4"/></svg>';
-
-  const _ICO_TRANSCREVER = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ' +
-    'stroke-width="2" stroke-linecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>' +
-    '<path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>';
-  // _ICO_COPIAR já existe no arquivo — reusado aqui.
-
-  // Injeção: observa SÓ a lista de mensagens, com folga. Sem reposicionamento em
-  // rolagem, sem varredura, sem chamada de rede — a injeção é só criar um botão
-  // nas bolhas novas. Foi o reposicionamento por coordenada que pesou antes.
-  let _trTimer = null;
-  let _trPend = [];
-  function trAgendarInjecao(raizes) {
-    if (raizes && raizes.length) _trPend.push(...raizes);
-    if (_trTimer) return;
-    _trTimer = setTimeout(() => {
-      _trTimer = null;
-      const lote = _trPend; _trPend = [];
-      try { trInjetar(lote); } catch (e) {}
-    }, 400);
-  }
-
-
-  // ── CANARIO ──────────────────────────────────────────────────────────────
-  // A extensao vive dentro do WhatsApp, que muda sem avisar. Quando muda, o
-  // sintoma chega distorcido ("o JOB parou", "o WhatsApp travou") e dias
-  // depois. Isto pergunta a cada peca se ela ainda funciona e manda pro JOB.
-  //
-  // As sondas de TELA medem o que quebrou de verdade em 01/08: de todas as
-  // bolhas de arquivo visiveis, quantas ficaram sem o bloco. E o teste do
-  // sintoma, nao do seletor — se o WhatsApp trocar o nome do icone, isto acusa
-  // do mesmo jeito que se ele trocar a arvore.
-  async function _canarioTela() {
-    const main = document.querySelector('#main');
-    if (!main) return [];                     // nenhuma conversa aberta: nao avalia
-    // MEDIR DEPOIS DE INJETAR, nao no meio.
-    //
-    // Ele contava as bolhas no instante em que rodava — inclusive as que
-    // acabaram de entrar na tela pela rolagem e que o injetor ainda nao tinha
-    // visitado. Dava '4 de 5' e '12 de 14' e acusava quebra num bloco que
-    // funciona: media a corrida, nao a capacidade. Forca uma passada e da um
-    // tempo pro DOM assentar antes de contar.
-    try { trInjetar(); } catch (e) { /* injetar nao pode derrubar o canario */ }
-    await new Promise((r) => setTimeout(r, 350));
-    const out = [];
-    const linhas = main.querySelectorAll('[data-id]');
-    out.push({ cap: 'dom_linhas', ok: linhas.length > 0, ms: 0,
-               detalhe: linhas.length + ' linhas na tela' });
-    if (!linhas.length) return out;
-    let arq = 0, arqOk = 0, aud = 0, audOk = 0;
-    for (const row of linhas) {
-      try {
-        if (_trLinhaEhAudio(row)) {
-          aud++;
-          if (row.querySelector('.job-tr-slot')) audOk++;
-        } else if (_docLinhaEhArquivo(row)) {
-          arq++;
-          if (row.querySelector('.job-doc-slot')) arqOk++;
-        }
-      } catch (e) { /* uma linha estranha nao derruba a rodada */ }
-    }
-    // Zero bolhas daquele tipo na tela nao e falha — e ausencia de amostra.
-    if (arq) out.push({ cap: 'dom_arquivo', ok: arqOk === arq, ms: 0,
-                        detalhe: arqOk + ' de ' + arq + ' bolhas de arquivo com o bloco' });
-    if (aud) out.push({ cap: 'dom_audio', ok: audOk === aud, ms: 0,
-                        detalhe: audOk + ' de ' + aud + ' bolhas de audio com o bloco' });
-    return out;
-  }
-
-  async function canarioRodar(motivo) {
-    let daPonte = [], semConversa = false;
-    try {
-      const r = await _pedirPonte('canario', {}, 20000);
-      daPonte = (r && r.checagens) || [];
-      semConversa = !!(r && r.semConversa);
-    } catch (e) {
-      // A ponte nao responder JA E a noticia: significa que o mundo do
-      // WhatsApp nao esta alcancavel a partir daqui.
-      daPonte = [{ cap: 'wa_js', ok: false, ms: 0,
-                   detalhe: 'a ponte nao respondeu: ' + String((e && e.message) || e).slice(0, 120) }];
-    }
-    const checagens = daPonte.concat(await _canarioTela());
-    if (!checagens.length) return null;
-    try {
-      await _safeSendMessage({ type: 'canario', versao: _versaoExt(), checagens: checagens });
-    } catch (e) { /* sem rede agora; a proxima rodada conta */ }
-    const ruins = checagens.filter((c) => !c.ok);
-    if (ruins.length) console.warn('[JOB canario] ' + motivo + ' — quebrado:',
-      ruins.map((c) => c.cap + ' (' + (c.detalhe || '') + ')').join(' | '));
-    checagens.semConversa = semConversa;
-    return checagens;
-  }
-
-  function _versaoExt() {
-    try { return (chrome.runtime.getManifest() || {}).version || ''; } catch (e) { return ''; }
-  }
-
-  // Rodar na hora, do console, quando eu precisar diagnosticar junto com ele:
-  //   window.__jobCanario().then(console.table)
-  try { window.__jobCanario = () => canarioRodar('pedido na mao'); } catch (e) {}
-
-  function canarioIniciar() {
-    // 40 s depois de carregar: o WhatsApp precisa ter subido o store, e a
-    // primeira meia dezena de segundos ja e disputada demais.
-    setTimeout(() => { canarioRodar('na abertura'); }, 40000);
-    // De 6 em 6 horas. Nao e monitoramento de segundo a segundo — e detectar
-    // uma atualizacao do WhatsApp no mesmo dia, em vez de na semana seguinte.
-    setInterval(() => { canarioRodar('rodada periodica'); }, 6 * 60 * 60 * 1000);
-  }
-
-  function trIniciar() {
-    setTimeout(() => {
-      trInjetar();
-      const main = document.querySelector('#main') || document.body;
-      // Passa adiante SO os nos adicionados — e a informacao que o proprio
-      // observer ja entrega de graca e que eu estava jogando fora.
-      // NAO ESCUTAR A SI MESMA. Era isto que travava o WhatsApp.
-      //
-      // A extensao escreve no DOM (cria o bloco, troca o innerHTML do botao,
-      // pinta a etapa da leitura a cada segundo). Cada escrita dessas e uma
-      // mutacao DENTRO do #main — que este mesmo observer via, e que agendava
-      // outra passada, que escrevia de novo. Laco fechado: com uma conversa
-      // aberta a extensao ficava varrendo a tela pra sempre, sozinha, medindo
-      // geometria linha por linha. Nao era lentidao de uma funcao: era trabalho
-      // que nunca terminava.
-      //
-      // O truque e um closest SO, com os dois seletores juntos. Se o que vier
-      // primeiro subindo for um bloco NOSSO, a mutacao foi nossa e nao
-      // interessa. Se for a linha do WhatsApp, ai sim ha o que fazer. Um
-      // closest a mais por registro custaria caro justamente nos momentos de
-      // rolagem, que e quando ha milhares deles.
-      const _MEU = '.job-doc-slot, .job-tr-slot, .job-barra-conv, .job-painel, .job-modal';
-      const obs = new MutationObserver((regs) => {
-        // Set, nao array: rolar a conversa gera milhares de registros que
-        // apontam pra mesma meia duzia de linhas. Sem isto, a mesma linha era
-        // varrida centenas de vezes na mesma passada.
-        const novos = new Set();
-        // O NO ADICIONADO NAO BASTA. Quando o WhatsApp re-renderiza o interior de
-        // uma bolha que ja existe, ele apaga o meu bloco junto (ele nao conhece
-        // esse filho) e adiciona os filhos dele de volta. A linha em si nunca e
-        // re-adicionada, e os nos adicionados nao tem data-id nem contem um —
-        // entao a varredura nao visitava aquela linha e o botao sumia de vez.
-        // Era exatamente o que acontecia ao rolar a conversa: o botao ia embora
-        // e nao voltava, mesmo com o arquivo ainda marcado la em cima.
-        // Subir ate a linha resolve os dois casos: linha nova e linha redesenhada.
-        for (const r of regs) {
-          const t = r.target;
-          // O WhatsApp APAGOU um bloco nosso. Acontece toda vez que ele
-          // redesenha o interior de uma bolha: ele nao conhece aquele filho e
-          // leva junto. Aqui a linha precisa perder a marca de "ja esta
-          // pronta", senao o botao some ao rolar a conversa e nao volta — que
-          // era o bug antigo, e o pulo de linha pronta o traria de volta.
-          if (r.removedNodes && r.removedNodes.length) {
-            for (const n of r.removedNodes) {
-              if (n.nodeType !== 1 || !n.classList) continue;
-              if (!n.classList.contains('job-doc-slot') && !n.classList.contains('job-tr-slot')) continue;
-              const linha = t && t.closest ? t.closest('[data-id]') : null;
-              if (linha) { linha._jobPronta = null; novos.add(linha); }
-            }
-          }
-          if (t && t.nodeType === 1 && t.closest) {
-            const alvo = t.closest('[data-id], ' + _MEU);
-            // Achou um bloco nosso antes da linha: escrita nossa, ignora.
-            if (alvo && alvo.hasAttribute('data-id')) novos.add(alvo);
-          }
-          if (!r.addedNodes || !r.addedNodes.length) continue;
-          for (const n of r.addedNodes) {
-            if (n.nodeType !== 1) continue;
-            if (n.classList && (n.classList.contains('job-doc-slot') ||
-                                n.classList.contains('job-tr-slot'))) continue;
-            const pai = n.closest ? n.closest('[data-id], ' + _MEU) : null;
-            if (pai && pai.hasAttribute('data-id')) novos.add(pai);
-            else if (!pai && n.querySelector && n.querySelector('[data-id]')) novos.add(n);
-          }
-        }
-        TR.perf.regs += regs.length;
-        if (novos.size) trAgendarInjecao([...novos]);
-      });
-      obs.observe(main, { childList: true, subtree: true });
-      // Troca de conversa troca o #main inteiro: reobserva sem drama.
-      // Ronda so pra reatar o observer quando a CONVERSA troca (#main e
-      // recriado). Nao varre mais a conversa inteira a cada 4s: se nada mudou,
-      // nao ha o que injetar, e o observer avisa quando muda.
-      setInterval(() => {
-        const m = document.querySelector('#main');
-        if (m && !m._jobTrObservado) {
-          m._jobTrObservado = true;
-          obs.observe(m, { childList: true, subtree: true });
-          trInjetar();               // varredura cheia UMA vez, na troca de conversa
-        }
-      }, 4000);
-      try { canarioIniciar(); } catch (e) { /* canario nao pode derrubar a extensao */ }
-    }, 6000);
-  }
-
-  function trDiagnosticoHtml() {
-    const d = TR.diag || {};
-    const p = TR.perf;
-    // Quanto a extensao custou desde que a aba abriu.
-    //
-    // "A extensao ta lenta" e indistinguivel de "o WhatsApp ta lento" sem
-    // numero. Media e enganosa aqui — uma passada de 400ms trava a digitacao
-    // e some numa media de centenas de passadas —, entao mostra a PIOR
-    // tambem. E "linhas puladas" e a medida direta do conserto: quanto maior
-    // a proporcao, menos geometria esta sendo remedida a toa.
-    const total = p.linhas || 1;
-    const perf = '<div class="job-tr-diag"><b>Custo:</b> ' +
-      p.passadas + ' passada(s) · ' + Math.round(p.ms) + 'ms no total · pior ' +
-      Math.round(p.pior) + 'ms · ' + p.regs + ' mutações vistas · ' +
-      Math.round(p.puladas / total * 100) + '% das linhas puladas</div>';
-    return '<div class="job-tr-diag"><b>Transcrição:</b> sob demanda · ' +
-      document.querySelectorAll('.job-tr-slot').length + ' botão(ões) na tela · ' +
-      TR.cache.size + ' em memória · ' + TR.erro.size + ' com erro' +
-      (d.quando ? ' <span class="job-tr-diag-h">' + esc(d.quando) + '</span>' : '') + '</div>' + perf;
-  }
-
-  // ═══════════════ Modo desenvolvedor ═══════════════
-  // Tudo na mão: o que está de pé, o que falhou e por quê, com botão pra disparar
-  // cada coisa na hora em vez de esperar o relógio. Existe porque um recurso que
-  // falha calado é indistinguível de um recurso que não existe — foi o que
-  // aconteceu com a transcrição, e me custou três rodadas de adivinhação.
-  let _devLigado = false;
-
-  // Quantas cópias da biblioteca do WhatsApp estão na página.
-  //
-  // Existe porque eu mesmo empilhei cópias: a reinjeção automática mandava o
-  // `wa-js.vendor.js` (492 KB) de novo a cada recarga da extensão, e mandar
-  // mensagem foi ficando lento. Corrigido — mas o número fica na tela, porque
-  // sem ele "está lento" volta a ser palpite.
-  //
-  // A página só é limpa de verdade com F5: cópia já injetada não se desfaz.
-  function _copiasWpp() {
-    try { return (window.__JOB_WPP_COPIAS != null) ? window.__JOB_WPP_COPIAS : '?'; }
-    catch (e) { return '?'; }
-  }
-
-  async function abrirSecaoDev() {
-    setCorpoSecao(_telaCarregando('Coletando estado…'));
-    const ponte = await _pedirPonte('listar_audios', {}, 12000);
-    const temWpp = !(ponte && ponte.erro === 'wpp_ausente');
-    const d = TR.diag || {};
-    const linha = (rot, val, ruim) =>
-      '<div class="job-dev-linha' + (ruim ? ' ruim' : '') + '"><span>' + esc(rot) +
-      '</span><b>' + esc(val) + '</b></div>';
-    setCorpoSecao(
-      _secHead('Diagnóstico', 'Estado real de cada peça, agora.') +
-      '<div class="job-dev">' +
-        linha('Versão da extensão', (chrome.runtime.getManifest() || {}).version || '?') +
-        linha('Ponte wa-js', temWpp ? 'respondendo' : 'FORA (' + ((ponte && ponte.erro) || 'sem resposta') + ')', !temWpp) +
-        linha('Conversa aberta', (ponte && ponte.chat_id) ? ponte.chat_id : 'nenhuma', !(ponte && ponte.chat_id)) +
-        linha('Áudios na conversa', String((ponte && ponte.audios && ponte.audios.length) || 0)) +
-        linha('Transcrições em memória', String(TR.cache.size)) +
-        linha('Botões injetados', String(document.querySelectorAll('.job-tr-slot').length)) +
-        // Mais de 1 cópia = a página acumulou biblioteca e o envio fica lento.
-        // Marcado como ruim de propósito: é acionável (F5 resolve).
-        linha('Cópias da ponte wa-js', String(_copiasWpp()) + (_copiasWpp() > 1 ? ' — dê F5 nesta aba' : ''),
-              _copiasWpp() > 1) +
-        linha('Última etapa', String(d.etapa || '—') + (d.quando ? ' · ' + d.quando : ''),
-              d.etapa === 'ponte_fora') +
-        (TR.erro.size ? linha('Último erro', Array.from(TR.erro.values()).slice(-1)[0], true) : '') +
-        '<div id="job-dev-tempos"></div>' +
-        linha('Varredura (motivo)', VAR.motivo || '—') +
-        linha('Varredura', VAR.rodando ? 'rodando agora'
-              : (VAR.ultimaRodada ? 'última: ' + new Date(VAR.ultimaRodada).toLocaleTimeString('pt-BR') : 'ainda não rodou')) +
-        linha('Varredura (placar)', VAR.placar.analisadas + ' analisadas · ' +
-              VAR.placar.puladas + ' puladas · ' + VAR.placar.erros + ' erros') +
-        '<div class="job-dev-btns">' +
-          '<button class="job-cnpj-btn" id="dev-transcrever">Transcrever esta conversa agora</button>' +
-          '<button class="job-cnpj-btn" id="dev-varrer">Rodar a varredura agora</button>' +
-          '<button class="job-cnpj-btn" id="dev-repintar">Repintar etiquetas</button>' +
-        '</div>' +
-        '<div class="job-dev-saida" id="dev-saida"></div>' +
-      '</div>');
-
-    const saida = (t) => { const e = document.getElementById('dev-saida'); if (e) e.textContent = t; };
-    const btn = (id, rot, fn) => {
-      const b = document.getElementById(id);
-      if (!b) return;
-      b.addEventListener('click', async () => {
-        b.disabled = true; const t0 = b.textContent; b.textContent = 'Rodando…';
-        try { saida(await fn() || 'ok'); } catch (e) { saida('ERRO: ' + (e && e.message || e)); }
-        b.disabled = false; b.textContent = t0;
-        abrirSecaoDev();
-      });
-    };
-    btn('dev-transcrever', 'transcrever', async () => {
-      trInjetar();
-      return 'botões na tela=' + document.querySelectorAll('.job-tr-slot').length +
-             ' · em memória=' + TR.cache.size;
-    });
-    btn('dev-varrer', 'varrer', async () => {
-      const p = await varreduraRodar(true);
-      return 'analisadas=' + p.analisadas + ' · puladas=' + p.puladas + ' · erros=' + p.erros;
-    });
-    btn('dev-repintar', 'repintar', async () => {
-      trInjetar(); return 'slots=' + document.querySelectorAll('.job-tr-slot').length;
-    });
-
-    // TEMPO DAS IDAS AO JOB. Mediana e PIOR caso, nunca média: dez chamadas de
-    // 200ms e uma de 9s dão média de 1s, que não descreve nem uma nem outra —
-    // e é a de 9s que trava o consultor.
-    try {
-      const t = await _safeSendMessage({ type: 'tempos' });
-      const cx = document.getElementById('job-dev-tempos');
-      if (cx && t && t.ok && t.rotas && t.rotas.length) {
-        cx.innerHTML = '<div class="job-dev-sub">Últimas ' + t.amostras +
-          ' chamadas ao JOB (mediana · pior)</div>' +
-          t.rotas.slice(0, 8).map((r) =>
-            '<div class="job-dev-linha' + (r.pior > 4000 ? ' ruim' : '') + '">' +
-            '<span>' + esc(r.rota.replace('/api/whatsapp/', '')) + ' <i>×' + r.n + '</i></span>' +
-            '<b>' + r.mediana + 'ms · ' + r.pior + 'ms</b></div>').join('');
-      } else if (cx) {
-        cx.innerHTML = '<div class="job-dev-sub">Nenhuma chamada ao JOB ainda nesta sessão.</div>';
-      }
-    } catch (e) { /* diagnóstico não pode derrubar o diagnóstico */ }
-
-  }
-
-  // ═══════════════ GATE ÚNICO PRA QUEM MEXE NA WA-JS ═══════════════
-  //
-  // Existem TRÊS rotinas de fundo que tocam o WhatsApp por conta própria:
-  // mandar da fila de envio (checarFilaDeEnvio), a varredura diária automática
-  // (varreduraRodar) e a varredura em fila do painel do CRM (filaVarreduraTick).
-  // Cada uma sozinha já tenta ser leve — uma conversa por vez, com pausa. O
-  // problema é que elas não sabiam UMA DA OUTRA: nada impedia a varredura
-  // automática de disparar no meio de uma varredura em fila, ou o envio de
-  // acontecer junto com as duas. Três rotinas mexendo no WhatsApp Web AO MESMO
-  // TEMPO, na MESMA aba — que já é pesada sozinha —, é o tipo de carga que
-  // trava a aba ou derruba a conexão. Isso é diferente de mandar mensagem
-  // rápido demais (que o servidor já regula em _WA_FILA_GATE_*): aqui o
-  // problema é volume de trabalho simultâneo, não velocidade de envio.
-  //
-  // Por isso este gate: quem quiser tocar a wa-js tenta pegar; se outra rotina
-  // já está com ele, desiste dessa vez e tenta de novo daqui a pouco — nunca
-  // duas ao mesmo tempo.
-  const _JOB_GATE = { ocupado: false, por: '' };
-  function _jobGateTentar(quem) {
-    if (_JOB_GATE.ocupado) return false;
-    _JOB_GATE.ocupado = true;
-    _JOB_GATE.por = quem;
-    return true;
-  }
-  function _jobGateSoltar() {
-    _JOB_GATE.ocupado = false;
-    _JOB_GATE.por = '';
-  }
-
-  // ═══════════════ Varredura diária das conversas ═══════════════
-  // Roda sozinha, em segundo plano, e é deliberadamente LENTA: uma conversa por
-  // vez com pausa entre elas. O gargalo não é o servidor, é a máquina do
-  // consultor (baixar e descriptografar áudio) — e ele está trabalhando nela.
-  const VAR = {
-    ligada: true,
-    rodando: false,
-    ultimaRodada: 0,
-    INTERVALO_MS: 30 * 60 * 1000,   // de meia em meia hora
-    PAUSA_ENTRE_MS: 8000,           // respiro entre conversas
-    MAX_POR_RODADA: 12,             // teto por rodada, pra nunca virar mutirão
-    HORAS: 24,
-    motivo: '',
-    placar: { analisadas: 0, puladas: 0, erros: 0 },
-  };
-
-  // Config vem do SERVIDOR (/configuracoes). Nasce desligada: um mecanismo que
-  // gasta dinheiro e usa a máquina do consultor não pode ligar sozinho porque
-  // alguém instalou a extensão.
-  async function varreduraConfig() {
-    try {
-      const { usuarioId } = await _safeStorageGet(['usuarioId']);
-      const r = await fetch(_SITE_BASE_URL_EXT + '/api/whatsapp/config-remota' +
-                            (usuarioId ? '?usuario_id=' + encodeURIComponent(usuarioId) : ''),
-                            { cache: 'no-store' });
-      const d = await r.json();
-      return (d && d.varredura) || null;
-    } catch (e) { return null; }
-  }
-
-  async function varreduraRodar(manual) {
-    if (VAR.rodando) return VAR.placar;
-    const cfg = await varreduraConfig();
-    if (!cfg) { VAR.motivo = 'sem_config'; return VAR.placar; }
-    VAR.motivo = cfg.motivo || '';
-    if (!manual && !cfg.pode_rodar) return VAR.placar;
-    // O painel manda os números: intervalo, teto e janela deixam de estar
-    // cravados no código, onde ninguém conseguia mexer.
-    VAR.INTERVALO_MS = Math.max(5, cfg.intervalo_min || 30) * 60000;
-    VAR.MAX_POR_RODADA = Math.max(1, cfg.max_rodada || 12);
-    VAR.HORAS = Math.max(1, cfg.horas || 24);
-    if (!manual && !cfg.rodar_agora && Date.now() - VAR.ultimaRodada < VAR.INTERVALO_MS) return VAR.placar;
-    // Não marca ultimaRodada antes de conseguir o gate: se outra rotina está
-    // usando o WhatsApp agora, esta tentativa não conta como "rodou" — o
-    // próximo tick (em minutos, não em INTERVALO_MS inteiro) tenta de novo.
-    if (!_jobGateTentar('varredura_auto')) return VAR.placar;
-    VAR.rodando = true;
-    VAR.ultimaRodada = Date.now();
-    try {
-      const lista = await _pedirPonte('listar_conversas_dia', { horas: VAR.HORAS }, 40000);
-      const conversas = (lista && lista.conversas) || [];
-      if (!conversas.length) return VAR.placar;
-
-      // 1) PERGUNTA ANTES DE SUBIR: o servidor é quem sabe o que já foi
-      //    analisado. Conversa sem novidade nunca sai daqui.
-      const decisao = await _safeSendMessage({ type: 'conversas_pendentes', conversas }).catch(() => null);
-      if (!decisao || !decisao.ok) return VAR.placar;
-      VAR.placar.puladas += (decisao.pular || []).length;
-      const fila = (decisao.analisar || []).slice(0, VAR.MAX_POR_RODADA);
-      const porId = {};
-      conversas.forEach((c) => { porId[c.chat_id] = c; });
-
-      for (const alvo of fila) {
-        if (!VAR.ligada && !manual) break;
-        try {
-          await varreduraUmaConversa(alvo, porId[alvo.chat_id] || {});
-          VAR.placar.analisadas += 1;
-        } catch (e) {
-          VAR.placar.erros += 1;
-        }
-        await new Promise((r) => setTimeout(r, VAR.PAUSA_ENTRE_MS));
-      }
-    } finally {
-      VAR.rodando = false;
-      _jobGateSoltar();
-    }
-    return VAR.placar;
-  }
-
-  async function varreduraUmaConversa(alvo, meta) {
-    // O TETO MUDA COM A MARCA D'ÁGUA. Pedir a conversa por chatId faz a wa-js
-    // CARREGAR aquele tanto de mensagens na memória do WhatsApp Web — e ela
-    // não devolve depois; é assim que o cliente deles funciona (confirmado
-    // lendo _mensagensDoChat: conversa fechada só mantém em memória o que já
-    // carregou). Com marca d'água (leitura de novo, o caso comum numa fila
-    // grande) 120 é folga de sobra pro que chegou de novo; sem ela (primeira
-    // vez que este chat é lido) mantém 400, porque aí é a única chance de
-    // pegar o histórico. Não é micro-otimização: é o que evita que ler uma
-    // fila de 70+ leads acumule o histórico inteiro de todos eles na aba.
-    const teto = alvo.desde_msg_id ? 120 : 400;
-    const conv = await _pedirPonte('ler_conversa_de',
-      { chatId: alvo.chat_id, desdeMsgId: alvo.desde_msg_id, limite: teto }, 60000);
-    if (!conv || conv.erro) throw new Error(conv && conv.erro || 'falha_leitura');
-    const audios = conv.audios || [];
-
-    // 2) Áudio já transcrito NÃO é baixado nem enviado: manda só o id, e o
-    //    servidor usa o cache. É o que faz a varredura custar quase nada depois
-    //    que a transcrição inline já passou pela conversa.
-    let cacheados = {};
-    if (audios.length) {
-      const r = await _safeSendMessage({ type: 'transcricoes_cache',
-        ids: audios.map((a) => a.msg_id) }).catch(() => null);
-      if (r && r.ok) cacheados = r.transcricoes || {};
-    }
-    const semCache = audios.filter((a) => !(a.msg_id in cacheados)).map((a) => a.msg_id);
-    const baixados = {};
-    if (semCache.length) {
-      // Lotes pequenos: baixar 30 áudios de uma vez é o que trava a máquina.
-      for (let i = 0; i < semCache.length; i += 3) {
-        const r = await _pedirPonte('baixar_audios_ids', { ids: semCache.slice(i, i + 3) }, 90000);
-        ((r && r.audios) || []).forEach((a) => { baixados[a.msg_id] = a; });
-        await new Promise((res) => setTimeout(res, 1200));
-      }
-    }
-    const payloadAudios = audios.map((a) => {
-      const b = baixados[a.msg_id];
-      return b ? { msg_id: a.msg_id, de: a.de, hora: a.hora, base64: b.base64, mime: b.mime }
-               : { msg_id: a.msg_id, de: a.de, hora: a.hora };   // servidor usa o cache
-    });
-
-    // 3) MODO ECONÔMICO: sem imagem e sem PDF. É onde o custo mora, e o que
-    //    preenche o CRM sai da conversa falada.
-    const { usuarioId } = await _safeStorageGet(['usuarioId']);
-    const resp = await _safeSendMessage({
-      type: 'analisar_varredura',
-      payload: {
-        economico: true,
-        chat_id: alvo.chat_id,
-        telefone: meta.telefone || '',
-        nome: meta.nome || '',
-        lead_id: meta.lead_id || null,
-        // De ONDE veio esta leitura, pra o custo ter procedencia no painel.
-        origem: meta.origem || 'varredura',
-        lote_id: meta.lote_id || null,
-        usuario_id: usuarioId || null,
-        mensagens: conv.mensagens || [],
-        audios: payloadAudios,
-        ultima_msg_id: conv.ultima_msg_id || meta.ultima_msg_id || '',
-        ultima_msg_em: meta.ultima_msg_em || 0,
-      },
-    });
-    if (!resp || !resp.ok) throw new Error((resp && resp.erro) || 'falha_analise');
-    return resp;
-  }
-
-  // ── O @lid se liga sozinho, uma vez por dia ──────────────────────────────
-  //
-  // Isto era só um botão, e botão depende de alguém lembrar. O resultado
-  // aparecia no CRM como "@lid falta vincular" na maioria dos cards — dos 70
-  // leads de julho de uma consultora, UM tinha conversa ligada. E sem o
-  // vínculo, nada mais funciona direito: o card não mostra a conversa, a
-  // varredura por leads não alcança ninguém, e a mesma pessoa vira dois leads
-  // porque o sistema não reconhece que já a conhece.
-  //
-  // Não usa IA e não cria nem altera lead: lista as conversas e pergunta ao
-  // servidor de quem é cada uma. O custo é uma listagem local e alguns POSTs.
-  // Por isso pode rodar sozinho — o que era caro (analisar) continua sendo
-  // decisão de quem manda, na tela de varredura.
-  const _SINC_CADA_MS = 24 * 60 * 60 * 1000;
-
-  async function _sincLidAuto() {
-    try {
-      const { usuarioId } = await _safeStorageGet(['usuarioId']);
-      // Sem consultor escolhido no popup não dá pra saber de quem é o WhatsApp
-      // — e ligar conversa ao lead errado é pior que não ligar.
-      if (!usuarioId) return;
-      const chave = 'job_sinc_lid_em';
-      const guardado = await _safeStorageGet([chave]);
-      const ultimo = Number(guardado[chave] || 0);
-      if (Date.now() - ultimo < _SINC_CADA_MS) return;
-
-      const r = await _pedirPonte('listar_todas_conversas', { teto: 2000 }, 60000);
-      const convs = (r && r.conversas) || [];
-      if (!convs.length) return;
-      let ligados = 0;
-      for (let i = 0; i < convs.length; i += 200) {
-        const resp = await _safeSendMessage({ type: 'vincular_chats',
-                                              conversas: convs.slice(i, i + 200) }).catch(() => null);
-        if (resp && resp.ok) ligados += resp.ligados || 0;
-        // Respiro entre lotes: são POSTs grandes, e não há pressa nenhuma aqui.
-        await new Promise((x) => setTimeout(x, 1500));
-      }
-      // Marca DEPOIS de terminar: se cair no meio, tenta de novo na próxima
-      // abertura em vez de esperar 24h com o trabalho pela metade.
-      try { await chrome.storage.local.set({ [chave]: Date.now() }); } catch (e) {}
-      if (ligados) console.log('[JOB] @lid: ' + ligados + ' conversa(s) ligadas ao lead.');
-    } catch (e) { /* silencioso de proposito: e manutencao, nao tarefa do consultor */ }
-  }
-
-  function varreduraIniciar() {
-    // 4 minutos pra primeira checagem e 5 em 5 depois. A checagem em si é um GET
-    // de config; se estiver desligada (o padrão), o custo é isso e mais nada.
-    setTimeout(() => { varreduraRodar(false); }, 240000);
-    setInterval(() => { varreduraRodar(false); }, 5 * 60 * 1000);
-    // O vínculo roda ANTES da varredura (90s), porque a varredura por leads
-    // depende dele. E fora do horário comercial também: ligar identidade não
-    // incomoda ninguém e não gasta IA.
-    setTimeout(() => { _sincLidAuto(); }, 90000);
-    setInterval(() => { _sincLidAuto(); }, 6 * 60 * 60 * 1000);
-  }
-
-  // ═══════════════ Ficha do lead (CRM dentro do WhatsApp) ═══════════════
-  // O painel inteiro do CRM na mesma aba: etapa, sub-status, etiquetas, campos
-  // personalizados, qualificação e atividade. Mora no #job-painel-doc, que é
-  // filho do document.body — NUNCA do #main. Inserir nó estranho na árvore React
-  // do WhatsApp corrompe a reconciliação e quebra o ENVIO DE MENSAGEM (já
-  // aconteceu em produção com a barra de notas).
-  let _ficha = null;        // último payload do servidor
-  let _fichaTel = '';
-  let _fichaSujo = false;   // tem alteração não salva?
-
-  async function abrirSecaoFicha() {
-    setCorpoSecao(_telaCarregando('Abrindo a ficha do lead…'));
-    let tel = '';
-    try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
-    if (!tel) {
-      setCorpoSecao(_secHead('CRM', 'Ficha do lead: etapa, etiquetas, qualificação e atividade.') +
-        '<div class="job-sem-analise">' +
-          '<div class="job-sem-analise-t">Nenhuma conversa aberta</div>' +
-          '<div class="job-sem-analise-txt">A ficha é de quem está na tela. Abra a conversa do cliente e volte aqui.</div>' +
-        '</div>');
-      return;
-    }
-    _fichaTel = tel;
-    await _carregarFicha({ telefone: tel });
-  }
-
-  // Busca a ficha SEM desenhar nada. O `_carregarFicha` pinta a tela do CRM —
-  // chamar ele de outra seção jogaria a ficha por cima da tela onde a pessoa
-  // está. Aqui só enche `_ficha`, pra quem quiser desenhar um resumo.
-  async function _carregarFichaSilenciosa(alvo) {
-    let resp;
-    try { resp = await _safeSendMessage(Object.assign({ type: 'ficha_lead', chat_id: _chatAberto }, alvo)); }
-    catch (e) { resp = null; }
-    if (!resp || !resp.ok) return false;
-    _ficha = resp;
-    _fichaIgnorada = !!resp.ignorada;
-    if (alvo && alvo.telefone) _fichaTel = alvo.telefone;
-    _trilhoPontosDoCache();
-    return true;
-  }
-
-  async function _carregarFicha(alvo) {
-    let resp;
-    try { resp = await _safeSendMessage(Object.assign({ type: 'ficha_lead', chat_id: _chatAberto }, alvo)); } catch (e) { resp = null; }
-    if (!resp || !resp.ok) {
-      setCorpoSecao(_secHead('CRM', 'Ficha do lead: etapa, etiquetas, qualificação e atividade.') +
-        _telaFalha('Não consegui abrir a ficha',
-          'Pode ser a conexão ou o JOB fora do ar por um instante. Os dados do lead continuam salvos.',
-          'job-ficha-retry', 'Tentar de novo'));
-      const rt = document.getElementById('job-ficha-retry');
-      if (rt) rt.addEventListener('click', () => _carregarFicha(alvo));
-      return;
-    }
-    _ficha = resp;
-    // Qual conversa esta aberta agora. E o que permite oferecer o botao de
-    // vincular exatamente quando falta — e nao oferecer quando ja esta feito.
-    try {
-      const c = await _pedirPonte('obter_chat_id', {}, 8000);
-      _chatAberto = (c && c.chat_id) || '';
-    } catch (e) { _chatAberto = ''; }
-    _fichaSujo = false;
-    const idNovo = (resp.lead && resp.lead.id) || null;
-    if (_fichaPend.leadId !== idNovo) _fichaPend = _fichaPendVazio(idNovo);
-    _fichaIgnorada = !!resp.ignorada;
-    _trilhoPontosDoCache();
-    if (!resp.existe) { _renderFichaSemLead(); return; }
-    _renderFicha('dados');
-  }
-
-  function _renderFichaSemLead() {
-    setCorpoSecao(
-      _secHead('CRM', 'Ficha do lead: etapa, etiquetas, qualificação e atividade.') +
-      '<div class="job-ficha">' +
-        '<div class="job-sem-analise-t" style="text-align:left">Este número não está no CRM</div>' +
-        '<div class="job-sec-sub">Cadastre pra ter etapa, etiquetas e qualificação aqui dentro — ou marque como pessoal, se não for cliente.</div>' +
-        '<button class="job-cnpj-btn" id="job-ficha-criar">Cadastrar este lead</button>' +
-        // AQUI É ONDE ELE MAIS FAZ FALTA, e era exatamente onde faltava: eu
-        // tinha posto o "Não é lead" só no rodapé da FICHA, que só existe
-        // quando já há lead. Na conversa que NÃO é lead — o caso do amigo, do
-        // fornecedor, do colega — a tela era só "Cadastrar", como se a única
-        // resposta possível fosse sim. As duas respostas moram juntas agora.
-        (_fichaIgnorada
-          ? '<div class="job-nao-lead marcada">Marcada como pessoal — o JOB não lê esta conversa.' +
-            '<button type="button" id="job-desmarcar">desfazer</button></div>'
-          : '<button class="job-nao-lead" id="job-nao-lead" ' +
-            'title="Marca esta conversa como pessoal: o JOB nunca lê nem cria lead dela.">' +
-            'Não é lead — parar de ler esta conversa</button>') +
-        '<div class="job-sinc-dica" id="job-ficha-aviso"></div>' +
-      '</div>');
-    const b = document.getElementById('job-ficha-criar');
-    if (b) b.addEventListener('click', () => abrirSecaoNovoLead());
-    _ligarNaoLead({});
-  }
-
-  // Abas em vez de rolagem longa: o consultor está no meio de uma conversa, e o
-  // que ele precisa (mudar etapa, marcar etiqueta) tem que caber sem rolar.
-  const _FICHA_ABAS = [
-    { id: 'dados', rot: 'Lead' },
-    { id: 'qualif', rot: 'Qualificação' },
-    { id: 'ativid', rot: 'Atividade' },
-  ];
-
-  // ── NOME PADRONIZADO DO CONTATO ─────────────────────────────────────────
-  //
-  // O Guilherme ja nomeia assim na mao ("LEAD | Jenifer (MEU PROPRIO VERA CRUZ)",
-  // "Sandra - Mae Da MARIANE (CLIENTE AMIL)") — o padrao existe, so nao e
-  // consistente, porque depende de ele lembrar da forma naquele dia. O ganho
-  // nao e escrever o nome: e escrever SEMPRE IGUAL, pra busca do WhatsApp achar
-  // e pra bater o olho na lista e saber o que aquilo e.
-  //
-  // Nada automatico, por decisao dele: a agenda do telefone e pessoal e nao pode
-  // ser reescrita pelas costas de ninguem. A extensao PROPOE, ele edita, e so
-  // acontece o que ele clicar.
-  const _PARTES_NOME = [
-    { id: 'etapa',     rot: 'Etapa' },
-    { id: 'origem',    rot: 'Origem' },
-    { id: 'operadora', rot: 'Operadora' },
-    { id: 'cidade',    rot: 'Cidade' },
-    { id: 'consultor', rot: 'Consultor' },
-  ];
-  let _partesLigadas = { etapa: true, origem: true, operadora: false, cidade: false, consultor: false };
-
-  function _pedacoDaFicha(id) {
-    const f = _ficha, l = (f && f.lead) || {};
-    if (id === 'etapa') {
-      const e = ((f.etapas || []).find((x) => x.id === l.etapa)) || {};
-      // Rotulo curto e estavel. O que interessa na lista do WhatsApp e o
-      // ESTADO (e lead? ja e cliente?), nao o nome exato da coluna do funil.
-      if (e.tipo === 'ganho') return 'CLIENTE';
-      if (e.tipo === 'perdido') return '';
-      return 'LEAD';
-    }
-    if (id === 'origem') {
-      const o = (l.origem || '').toString();
-      if (/facebook|meta|instagram/i.test(o)) return 'META';
-      if (/google/i.test(o)) return 'GOOGLE';
-      if (/indica/i.test(o)) return 'INDICACAO';
-      if (/medsenior/i.test(o)) return 'MEDSENIOR';
-      return '';
-    }
-    if (id === 'operadora') {
-      const c = (f.campos_val || {});
-      const v = (c.operadora_cotada && c.operadora_cotada.valor) || (c.plano_atual && c.plano_atual.valor) || '';
-      return (v || '').split(',')[0].trim().toUpperCase();
-    }
-    if (id === 'cidade') return (l.cidade || '').trim();
-    if (id === 'consultor') return (_ficha.responsavel_nome || '').split(' ')[0] || '';
-    return '';
-  }
-
-  function _montarNomeContato() {
-    const l = (_ficha && _ficha.lead) || {};
-    const nome = (l.nome || nomeDoContato() || '').trim();
-    const pre = _partesLigadas.etapa ? _pedacoDaFicha('etapa') : '';
-    const dentro = ['origem', 'operadora', 'cidade', 'consultor']
-      .filter((k) => _partesLigadas[k])
-      .map((k) => _pedacoDaFicha(k))
-      .filter(Boolean);
-    // "LEAD | Gabriela Silveira (META · VERA CRUZ)" — prefixo primeiro porque e
-    // o que agrupa na lista ordenada por nome; o contexto vai entre parenteses,
-    // que e onde o olho ignora quando nao precisa dele.
-    return (pre ? pre + ' | ' : '') + nome + (dentro.length ? ' (' + dentro.join(' · ') + ')' : '');
-  }
-
-
-  // ══ SALVAR O CONTATO NO CELULAR ═══════════════════════════════════════
-  //
-  // Antes eram DOIS botões principais lado a lado — "Copiar nome" e "Baixar
-  // contato (.vcf)" — sem hierarquia, e o caminho que eles ofereciam não
-  // levava a lugar nenhum: o .vcf caía na pasta de downloads do COMPUTADOR, e
-  // a dica mandava o consultor se virar com AirDrop, e-mail ou Drive pra levar
-  // até o telefone. Ninguém faz isso no meio de um atendimento.
-  //
-  // Agora o botão FAZ a coisa: usa a mesma ação do "Adicionar contato" do
-  // WhatsApp Web, com sincronização pra agenda ligada. Grava na conta e o
-  // WhatsApp leva pro aparelho — sem arquivo, e sem pedir autorização de
-  // conta Google ou Apple, que exigiria o consultor autorizar acesso à agenda
-  // dele e é um projeto inteiro, não um botão.
-  //
-  // Sobrou UM secundário: copiar o nome. Ele é a saída pra quando a versão do
-  // WhatsApp Web não tiver a função — aí o consultor cola no "Novo contato"
-  // do próprio WhatsApp.
-  function _blocoNomeContato() {
-    return '<div class="job-nomec">' +
-      '<div class="job-nomec-tit">Salvar contato' +
-        '<span class="job-nomec-i" title="Monta o nome no mesmo padrão sempre, pra você achar o contato pela busca do WhatsApp e entender a lista de relance. Nada é salvo sozinho: você edita e escolhe o que fazer.">i</span>' +
-      '</div>' +
-      // O CHIP MOSTRA O VALOR, NÃO A CATEGORIA.
-      //
-      // Eles diziam só "Origem", "Operadora", "Cidade" — o consultor via cinco
-      // pílulas com nome de categoria e não tinha como saber o que cada uma
-      // acrescenta ao nome. A pergunta que ele fez foi literalmente "qual é a
-      // função desses botões?", e a resposta certa não é um texto de ajuda: é
-      // o chip dizer "Origem · RH" e ele ver o RH aparecer no nome ao ligar.
-      //
-      // Sem valor no lead, o chip fica desligado e diz o que falta — em vez de
-      // ser um botão que liga e não muda nada, que parece defeito.
-      '<div class="job-nomec-sub">Toque pra somar ao nome</div>' +
-      '<div class="job-nomec-chips">' +
-        _PARTES_NOME.map((p) => {
-          const val = _pedacoDaFicha(p.id);
-          const on = _partesLigadas[p.id] && val;
-          return '<button type="button" class="job-nomec-chip' + (on ? ' on' : '') +
-            (val ? '' : ' vazio') + '" data-parte="' + p.id + '"' + (val ? '' : ' disabled') +
-            ' title="' + (val ? p.rot + ': ' + esc(val) : 'Este lead não tem ' + p.rot.toLowerCase() + ' preenchido no CRM') + '">' +
-            '<span class="cat">' + p.rot + '</span>' +
-            (val ? '<span class="val">' + esc(val) + '</span>' : '<span class="val vazio">—</span>') +
-            '</button>';
-        }).join('') +
-      '</div>' +
-      // O NOME INTEIRO TEM QUE CABER. Era um input de uma linha: com etapa,
-      // origem e operadora ligadas o nome passa de 40 caracteres e sumia no
-      // meio da palavra — e é justamente ele que a pessoa veio conferir.
-      // Textarea que cresce mostra tudo, e continua editável.
-      '<textarea class="job-campo job-nomec-val" id="job-nomec-val" rows="2" ' +
-        'aria-label="Nome que vai pra agenda" placeholder="Nome do contato"></textarea>' +
-      // UMA ação principal, e ela FAZ a coisa — não prepara pra você fazer.
-      '<button type="button" class="job-cnpj-btn" id="job-nomec-salvar">Salvar na agenda</button>' +
-      '<div class="job-nomec-btns">' +
-        '<button type="button" class="job-copy" id="job-nomec-copiar">Copiar nome</button>' +
-      '</div>' +
-      '<div class="job-nomec-dica" id="job-nomec-dica">Grava no seu WhatsApp e ele sincroniza ' +
-        'pro celular — sem baixar arquivo nenhum.</div>' +
-    '</div>';
-  }
-
-  // O campo cresce com o texto: nome de 60 caracteres não pode depender de a
-  // pessoa arrastar a barra de rolagem pra conferir o fim.
-  function _autoAltura(el) {
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
-  }
-
-  function _ligarNomeContato() {
-    const inp = document.getElementById('job-nomec-val');
-    if (!inp) return;
-    inp.addEventListener('input', () => _autoAltura(inp));
-    const dica = (t) => { const e = document.getElementById('job-nomec-dica'); if (e) e.textContent = t; };
-    inp.value = _montarNomeContato();
-    _autoAltura(inp);
-    document.querySelectorAll('.job-nomec-chip').forEach((c) => {
-      c.addEventListener('click', () => {
-        const k = c.dataset.parte;
-        // Chip sem conteudo naquele lead nao pode "ligar" e nao fazer nada —
-        // isso parece defeito. Diz o que falta em vez de ficar mudo.
-        if (!_partesLigadas[k] && !_pedacoDaFicha(k)) {
-          dica('Este lead não tem ' + (c.textContent || '').toLowerCase() + ' preenchido no CRM.');
-          return;
-        }
-        _partesLigadas[k] = !_partesLigadas[k];
-        c.classList.toggle('on', _partesLigadas[k]);
-        inp.value = _montarNomeContato();
-        _autoAltura(inp);
-        // Guarda a escolha: um padrao que muda a cada lead nao e padrao.
-        try { chrome.storage.local.set({ jobNomeContatoPartes: _partesLigadas }); } catch (e) {}
-      });
-    });
-    const bc = document.getElementById('job-nomec-copiar');
-    if (bc) bc.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(inp.value.trim());
-        bc.textContent = 'Copiado';
-        dica('Agora abra "Novo contato" no WhatsApp e cole no campo Nome.');
-        setTimeout(() => { bc.textContent = 'Copiar nome'; }, 1800);
-      } catch (e) { dica('Não consegui copiar — selecione e copie à mão.'); }
-    });
-    // SALVAR DE VERDADE, não preparar pra você salvar.
-    //
-    // Usa a mesma ação do "Adicionar contato" do WhatsApp Web, com
-    // sincronização pra agenda ligada: grava na conta e o WhatsApp leva pro
-    // aparelho. Sem arquivo, sem AirDrop, sem autorizar Google nem Apple.
-    const bs = document.getElementById('job-nomec-salvar');
-    if (bs) bs.addEventListener('click', async () => {
-      const nome = inp.value.trim();
-      if (!nome) { dica('Escreva um nome antes.'); inp.focus(); return; }
-      // O contato é o da CONVERSA ABERTA — é dela que sai o id que o WhatsApp
-      // entende. Sem conversa aberta não há o que salvar.
-      const alvo = _chatAberto || '';
-      if (!alvo) { dica('Abra a conversa deste lead antes de salvar.'); return; }
-      bs.disabled = true; const r0 = bs.textContent; bs.textContent = 'Salvando…';
-      // Primeira palavra vira nome, o resto sobrenome: é assim que a agenda
-      // do celular ordena, e nome inteiro num campo só vira lista desordenada.
-      const partes = nome.split(/\s+/);
-      const primeiro = partes.shift() || nome;
-      const sobrenome = partes.join(' ');
-      let r = null;
-      try { r = await _pedirPonte('salvar_contato', { chatId: alvo, nome: primeiro, sobrenome }, 15000); }
-      catch (e) { _falhaTecnica('salvar contato', e); }
-      if (r && r.ok) {
-        bs.textContent = 'Salvo na agenda';
-        dica('Pronto. Já está no seu WhatsApp e chega no celular na próxima sincronização.');
-        setTimeout(() => { bs.textContent = r0; bs.disabled = false; }, 2600);
-        return;
-      }
-      bs.textContent = r0; bs.disabled = false;
-      // Erro que diz o que fazer. 'sem_suporte' é o caso real de um WhatsApp
-      // Web mais velho que a função — e aí o consultor precisa saber que o
-      // caminho existe, só não por aqui.
-      dica((r && r.erro) === 'sem_suporte'
-        ? 'Este WhatsApp Web não permite salvar por aqui. Use "Copiar nome" e adicione pelo próprio WhatsApp.'
-        : 'Não consegui salvar agora. Tente de novo; se insistir, use "Copiar nome".');
-      if (r && r.erro) _falhaTecnica('salvar contato: ' + r.erro, null);
-    });
-  }
-
-  // Mesmo relogio do card do CRM, no mesmo formato — pra os dois lugares
-  // contarem a mesma coisa do mesmo jeito.
-  function _cronFichaTexto(segs) {
-    const d = Math.floor(segs / 86400), h = Math.floor(segs / 3600) % 24;
-    const m = Math.floor(segs / 60) % 60, s2 = Math.floor(segs) % 60;
-    const dd = (n) => String(n).padStart(2, '0');
-    if (d > 0) return d + 'd ' + dd(h) + ':' + dd(m);
-    if (h > 0) return h + ':' + dd(m) + ':' + dd(s2);
-    return dd(m) + ':' + dd(s2);
-  }
-  function _tickCronFicha() {
-    const el = document.getElementById('job-cron-ss');
-    if (!el || !el.dataset.desde) return;
-    const segs = Math.max(0, Date.now() / 1000 - parseInt(el.dataset.desde, 10));
-    el.textContent = _cronFichaTexto(segs);
-    el.classList.remove('morno', 'parado');
-    if (segs >= 432000) el.classList.add('parado');
-    else if (segs >= 86400) el.classList.add('morno');
-  }
-  _registrarLoop(setInterval(_tickCronFicha, 1000));
-
-  let _chatAberto = '';
-  // Se a conversa aberta ja foi marcada como pessoal. Vem do servidor com a
-  // ficha — o botao precisa dizer 'ja esta marcada', nao se oferecer de novo.
-  let _fichaIgnorada = false;
-
-  function _blocoVinculoChat(f, l) {
-    const chats = (f && f.wa_chats) || [];
-    const atual = _chatAberto || '';
-    const jaTem = atual && chats.indexOf(atual) >= 0;
-    const curto = atual ? (atual.split('@')[0].slice(0, 18) + (atual.split('@')[0].length > 18 ? '…' : '')) : '';
-    const eLid = atual.indexOf('@lid') > 0;
-    if (jaTem) {
-      // ERA UMA FAIXA MORTA. O identificador é a informação mais importante
-      // desta tela — é ele que amarra a conversa ao lead — e estava impresso
-      // como um número solto de 15 dígitos, sem hierarquia e sem servir pra
-      // nada. Agora a linha inteira é o atalho pro lead no CRM do JOB: quem
-      // olha o vínculo é justamente quem quer abrir a ficha completa.
-      // DESTINOS DIFERENTES, DE PROPÓSITO. O vínculo leva à FICHA do lead
-      // (/lead/<id>), que é a página com tudo dele; o "Abrir no JOB" do rodapé
-      // leva ao QUADRO do CRM. Mandar os dois pro mesmo lugar era ter dois
-      // botões fazendo a mesma coisa em telas diferentes.
-      const lid = (l && l.id) ? (_SITE_BASE_URL_EXT + '/lead/' + l.id) : '';
-      const dentro =
-        '<span class="job-vinc-tag ' + (eLid ? 'lid' : 'num') + '">' + (eLid ? '@lid' : 'nº') + '</span>' +
-        '<span class="job-vinc-id">' + esc(curto) + '</span>' +
-        '<span class="job-vinc-txt">vinculada' + (l && l.nome ? ' a ' + esc(l.nome) : ' a este lead') + '</span>' +
-        (lid ? '<span class="job-vinc-seta">' + _svgIco('chevron', 13) + '</span>' : '');
-      return lid
-        ? '<a class="job-vinc ok clicavel" href="' + esc(lid) + '" target="_blank" rel="noopener" ' +
-          'title="Abrir a ficha completa deste lead no JOB">' + dentro + '</a>'
-        : '<div class="job-vinc ok">' + dentro + '</div>';
-    }
-    if (!atual) {
-      return '<div class="job-vinc"><span class="job-vinc-txt">Não consegui identificar a conversa aberta.</span></div>';
-    }
-    return '<div class="job-vinc falta">' +
-      '<span class="job-vinc-tag ' + (eLid ? 'lid' : 'num') + '">' + (eLid ? '@lid' : 'nº') + '</span>' +
-      '<code>' + esc(curto) + '</code>' +
-      '<button type="button" class="job-vinc-btn" id="job-vincular">Vincular esta conversa a este lead</button>' +
-      '<div class="job-vinc-dica" id="job-vinc-dica">O @lid vive dentro do WhatsApp — só dá pra capturar com a conversa aberta. ' +
-      'Depois disso o lead passa a mostrar o @lid no CRM e a conversa entra nas análises.</div></div>';
-  }
-
-  async function _ligarVinculoChat(l) {
-    const b = document.getElementById('job-vincular');
-    if (!b) return;
-    const dica = (t) => { const e = document.getElementById('job-vinc-dica'); if (e) e.textContent = t; };
-    b.addEventListener('click', async () => {
-      b.disabled = true; const r0 = b.textContent; b.textContent = 'Vinculando…';
-      try {
-        let tel = '';
-        try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
-        const r = await _safeSendMessage({ type: 'vincular_chats', conversas: [
-          { chat_id: _chatAberto, telefone: tel, nome: nomeDoContato(), lead_id: l.id }] }).catch(() => null);
-        if (r && r.ok && r.ligados) {
-          b.remove();
-          dica('Pronto: esta conversa agora é deste lead. O @lid já aparece no CRM.');
-        } else {
-          b.disabled = false; b.textContent = r0;
-          dica('Não deu pra vincular. Recarregue a aba do WhatsApp e tente de novo.');
-        }
-      } catch (e) {
-        b.disabled = false; b.textContent = r0;
-        dica('Falhou: ' + ((e && e.message) || e));
-      }
-    });
-  }
-
-  // MARCAR A CONVERSA COMO PESSOAL.
-  //
-  // Pede confirmacao porque o efeito e silencioso e duradouro: a partir daqui o
-  // JOB nao le mais esta conversa nem cria card dela. Uma pessoa que marcar sem
-  // querer o proprio lead ia passar dias sem entender por que ele "sumiu" — a
-  // frase do confirm diz exatamente isso, e onde desfazer.
-  function _ligarNaoLead(l) {
-    // DESFAZER TEM QUE EXISTIR. Marcar errado e facil (o cliente que manda do
-    // numero pessoal), e sem volta o consultor perde o lead sem entender.
-    const d = document.getElementById('job-desmarcar');
-    if (d) d.addEventListener('click', async () => {
-      d.disabled = true; d.textContent = 'desfazendo…';
-      let tel = '';
-      try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
-      const r = await _safeSendMessage({ type: 'ignorar_conversa', chat_id: _chatAberto,
-                                         telefone: tel, desmarcar: true }).catch(() => null);
-      if (r && r.ok) { _fichaIgnorada = false; _bloqCache = { chave: '', bloqueado: false }; abrirSecaoFicha(); }
-      else { d.disabled = false; d.textContent = 'desfazer'; }
-    });
-    const b = document.getElementById('job-nao-lead');
-    if (!b) return;
-    b.addEventListener('click', async () => {
-      const nome = nomeDoContato() || 'esta conversa';
-      if (!await _confirmar({
-        titulo: 'Marcar ' + nome + ' como não é lead?',
-        texto: 'O JOB para de ler esta conversa e nunca mais cria lead dela. '
-             + 'Serve pra amigo, família, fornecedor — quem não é cliente.\n\n'
-             + 'Dá pra desfazer no JOB, em Leads excluídos.',
-        ok: 'Marcar como pessoal', perigo: true })) return;
-      b.disabled = true; const r0 = b.textContent; b.textContent = 'Marcando…';
-      const aviso = document.getElementById('job-ficha-aviso');
-      const dizer = (t) => { if (aviso) aviso.textContent = t; };
-      try {
-        let tel = '';
-        try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
-        const r = await _safeSendMessage({ type: 'ignorar_conversa',
-          chat_id: _chatAberto, telefone: tel, nome: nome }).catch(() => null);
-        if (r && r.ok) {
-          b.textContent = 'Marcada como pessoal';
-          // Vale na hora: sem isto o cache antigo deixaria a barra aberta
-          // até a conversa trocar.
-          _bloqCache = { chave: '', bloqueado: false };
-          dizer('Pronto: esta conversa não vira mais lead.');
-        } else {
-          b.disabled = false; b.textContent = r0;
-          dizer('Não deu pra marcar' + ((r && r.erro) ? ': ' + r.erro : '') + '.');
-        }
-      } catch (e) {
-        b.disabled = false; b.textContent = r0;
-        dizer('Falhou: ' + ((e && e.message) || e));
-      }
-    });
-  }
-
-  function _renderFicha(aba) {
-    const f = _ficha, l = f.lead || {};
-    const etapaAtual = (f.etapas || []).find((e) => e.id === l.etapa);
-    const falta = f.campos_faltando || [];
-    const saude = f.saude || {};
-    let corpo = '';
-    if (aba === 'dados') corpo = _fichaAbaDados(f, l);
-    else if (aba === 'qualif') corpo = _fichaAbaQualif(f);
-    else corpo = _fichaAbaAtividade(f);
-
-    setCorpoSecao(
-      // O nome saiu do topo porque agora vive no cabeçalho da seção: aparecia
-      // duas vezes, uma embaixo da outra, quando os dois passaram a existir.
-      _secHead('CRM', (l.nome || _fichaTel || 'Ficha do lead')) +
-      '<div class="job-ficha">' +
-        '<div class="job-ficha-topo">' +
-          '<div class="job-ficha-linha">' +
-            '<span class="job-ficha-etapa" style="background:' + esc((etapaAtual && etapaAtual.cor) || '#64748b') + '22;color:' +
-              esc((etapaAtual && etapaAtual.cor) || '#94a3b8') + ';">' + esc((etapaAtual && etapaAtual.nome) || l.etapa || '—') + '</span>' +
-            (saude.texto ? '<span class="job-ficha-saude job-saude-' + esc(saude.nivel || '') + '">' + esc(saude.texto) + '</span>' : '') +
-            (f.responsavel_nome ? '<span class="job-ficha-resp">' + esc(f.responsavel_nome) + '</span>' : '') +
-          '</div>' +
-        '</div>' +
-        (falta.length
-          ? '<div class="job-ficha-trava">Pra este card sair da etapa: <b>' +
-            falta.map((x) => esc(x.nome)).join(', ') + '</b></div>' : '') +
-        '<div class="job-ficha-abas">' +
-          _FICHA_ABAS.map((t) => '<button class="job-ficha-aba' + (t.id === aba ? ' on' : '') +
-            '" data-aba="' + t.id + '">' + t.rot + '</button>').join('') +
-        '</div>' +
-        '<div class="job-ficha-corpo">' + corpo + '</div>' +
-        '<div class="job-ficha-rodape">' +
-          // SALVAR NASCE DESLIGADO. Ele ficava aceso o tempo todo, convidando a
-          // gravar uma ficha em que nada mudou — escrita à toa no banco e uma
-          // ação que não faz nada, que é o pior tipo de botão. Só acende
-          // quando existe alteração; o texto diz o estado em vez de mandar.
-          '<button class="job-cnpj-btn" id="job-ficha-salvar" disabled>Nada para salvar</button>' +
-          // NAO E LEAD. O consultor fala com amigo, familia e fornecedor no
-          // mesmo WhatsApp, e cada analise virava um card no CRM. O botao mora
-          // ao lado do Salvar porque e a mesma decisao, invertida: "isto entra"
-          // ou "isto nunca entra". Discreto de proposito — e acao rara, mas tem
-          // que estar onde a pessoa ja esta olhando quando percebe o engano.
-          (_fichaIgnorada
-            ? '<div class="job-nao-lead marcada">Marcada como pessoal<button type="button" id="job-desmarcar">desfazer</button></div>'
-            // O rótulo tinha uma frase inteira dentro, e o botão ocupava a
-            // largura toda por causa dela — parecia a ação principal do
-            // rodapé, sendo a mais rara. Duas palavras bastam: a folha de
-            // confirmação já explica o que acontece, e explicar duas vezes
-            // não deixa mais claro, deixa mais pesado.
-            : '<button class="job-nao-lead" id="job-nao-lead" ' +
-              'title="Marca esta conversa como pessoal: o JOB para de ler e nunca mais cria lead dela.">' +
-              'Não é lead</button>') +
-          // ABRIR NO JOB SOBE PRO RODAPE. Ele existia, mas como link discreto
-          // DEPOIS do bloco 'Nome do contato' — que e longo — entao vivia fora
-          // da vista: pra achar era preciso rolar ate o fim de uma coluna
-          // estreita. Aqui fica junto do Salvar, que e onde a mao ja esta.
-          '<a class="job-ficha-abrir" id="job-ficha-abrir-crm" href="#" target="_blank" rel="noopener">' +
-            'Ver no CRM</a>' +
-          '<span class="job-ficha-aviso" id="job-ficha-aviso"></span>' +
-        '</div>' +
-        (aba === 'dados' ? _blocoNomeContato() : '') +
-      '</div>');
-    _ligarEventosFicha(aba);
-    if (aba === 'dados') { _ligarNomeContato(); _ligarVinculoChat(_ficha.lead || {}); }
-    _ligarNaoLead(_ficha.lead || {});
-  }
-
-  // Valor a exibir: o que o consultor digitou tem prioridade sobre o que veio do
-  // servidor. Sem isso, ir na aba Atividade e voltar apagava tudo que ele escreveu,
-  // porque _renderFicha remontava o HTML sempre a partir de _ficha.
-  function _pend(escopo, chave, doServidor) {
-    const p = _fichaPend[escopo];
-    return (p && Object.prototype.hasOwnProperty.call(p, chave)) ? p[chave] : doServidor;
-  }
-
-  function _fichaAbaDados(f, l) {
-    const marcadasPend = _fichaPend.etiquetas;
-    const etqs = new Set(marcadasPend || f.etiquetas_marcadas || []);
-    return '' +
-      _campoTxt('nome', 'Nome', _pend('base', 'nome', l.nome || '')) +
-      _campoTxt('empresa', 'Cidade / empresa', _pend('base', 'empresa', l.empresa || '')) +
-      _campoTxt('email', 'E-mail', _pend('base', 'email', l.email || '')) +
-      _campoTxt('valor_estimado', 'Valor estimado', _pend('base', 'valor_estimado',
-        l.valor_estimado != null ? String(l.valor_estimado).replace('.', ',') : '')) +
-      // Agrupado por quadro: a lista vem com as etapas de TODOS os funis, e sem
-      // dizer de qual era cada uma o consultor tirava o lead do kanban comercial
-      // achando que só estava mudando de etapa (o quadro do lead vem da etapa).
-      // VINCULO DA CONVERSA. O @lid nao e gerado pelo JOB: ele existe dentro do
-      // WhatsApp e so pode ser capturado com a conversa aberta. Aqui o consultor
-      // faz isso num clique — ele sabe melhor que qualquer heuristica que ESTA
-      // conversa e deste lead, e em conversa @lid o telefone as vezes nem existe
-      // pra casar sozinho.
-      _blocoVinculoChat(f, l) +
-      '<div class="job-ficha-campo"><label>Etapa</label>' +
-        '<select data-ficha="etapa">' + _fichaOpcoesEtapa(f, l) + '</select></div>' +
-        _perdaHtml() +
-      // CRONOMETRO junto do sub-status, igual ao card do CRM. Aqui e onde o
-      // consultor decide o que fazer com o lead: saber HA QUANTO TEMPO ele esta
-      // parado no mesmo passo muda a decisao, e antes esse tempo so existia no
-      // site. Sem sub-status escolhido nao ha o que cronometrar.
-      // O RELÓGIO NÃO PODE DEPENDER DO SUB-STATUS. Ele só aparecia com um
-      // sub-status escolhido — e é exatamente no lead SEM sub-status que
-      // saber há quanto tempo ele está parado importa mais. O CRM do site
-      // mostra sempre; aqui passa a mostrar também, dizendo o que conta.
-      '<div class="job-ficha-campo"><label>Sub-status <span class="job-ficha-dica">o que falta pra avançar</span>' +
-        ((f.saude && f.saude.desde_ts)
-          ? '<span class="job-ficha-cron" id="job-cron-ss" data-desde="' + f.saude.desde_ts + '" ' +
-            'title="Tempo parado ' + (l.sub_status ? 'neste sub-status' : 'nesta etapa') + '">' +
-            esc(f.saude.idade_txt || '') + '</span>' : '') +
-        '</label>' +
-        '<select data-ficha="sub_status">' +
-          '<option value="">Sem sub-status</option>' +
-          (f.sub_status_etapa || []).map((o) => '<option value="' + esc(o) + '"' +
-            (o === (_fichaPend.sub_status !== null ? _fichaPend.sub_status : (l.sub_status || '')) ? ' selected' : '') +
-            '>' + esc(o) + '</option>').join('') +
-          ((l.sub_status && (f.sub_status_etapa || []).indexOf(l.sub_status) === -1)
-            ? '<option value="' + esc(l.sub_status) + '" selected>' + esc(l.sub_status) + ' (de outra etapa)</option>' : '') +
-        '</select></div>' +
-      '<div class="job-ficha-campo"><label>Etiquetas <span class="job-ficha-dica">por que está parado</span></label>' +
-        '<div class="job-ficha-etqs">' +
-          (f.etiquetas_todas || []).map((e) => {
-            const on = etqs.has(e.id);
-            return '<label class="job-ficha-etq' + (on ? ' on' : '') + '"' + (on ? ' style="background:' + esc(e.cor) + '"' : '') +
-              '><input type="checkbox" data-etq="' + e.id + '" data-cor="' + esc(e.cor) + '"' + (on ? ' checked' : '') + '>' +
-              esc(e.nome) + '</label>';
-          }).join('') +
-        '</div></div>';
-  }
-
-  function _fichaOpcoesEtapa(f, l) {
-    const sel = _fichaPend.etapa || l.etapa;
-    const opt = (e) => '<option value="' + esc(e.id) + '"' +
-      (e.id === sel ? ' selected' : '') + '>' + esc(e.nome) + '</option>';
-    const quadros = f.quadros || [];
-    if (quadros.length < 2) return (f.etapas || []).map(opt).join('');
-    let html = '';
-    quadros.forEach((q) => {
-      const doQuadro = (f.etapas || []).filter((e) => (e.quadro || 'comercial') === q.slug);
-      if (doQuadro.length) {
-        html += '<optgroup label="' + esc(q.nome) + '">' + doQuadro.map(opt).join('') + '</optgroup>';
-      }
-    });
-    // Etapa que não pertence a quadro nenhum não pode sumir do select, senão o
-    // lead seria movido sozinho ao salvar.
-    const soltas = (f.etapas || []).filter((e) =>
-      !quadros.some((q) => q.slug === (e.quadro || 'comercial')));
-    if (soltas.length) html += '<optgroup label="Sem quadro">' + soltas.map(opt).join('') + '</optgroup>';
-    return html;
-  }
-
-  function _fichaAbaQualif(f) {
-    const def = f.campos_def || [], val = f.campos_val || {};
-    // Ordem dos blocos igual à do CRM: o que trava a etapa primeiro, porque é o
-    // que impede o lead de andar. Automático é leitura — quem escreve é o import.
-    const ordem = [
-      { m: 'saida', rot: 'Obrigatório pra sair da etapa' },
-      { m: 'conversa', rot: 'Ao longo da conversa' },
-      { m: 'automatico', rot: 'Chega preenchido' },
-      { m: 'proposta', rot: 'Na proposta' },
-    ];
-    let html = '';
-    ordem.forEach((g) => {
-      const doGrupo = def.filter((c) => c.momento === g.m);
-      if (!doGrupo.length) return;
-      html += '<div class="job-ficha-grupo job-fg-' + g.m + '"><div class="job-ficha-grupo-tit">' + g.rot + '</div>' +
-        doGrupo.map((c) => {
-          const doServidor = (val[c.chave] || {}).valor || '';
-          let v = _pend('campos', c.chave, doServidor);
-          if (Array.isArray(v)) v = v.join(', ');
-          return _fichaCampoPers(c, v);
-        }).join('') + '</div>';
-    });
-    return html || '<div class="job-notas-vazio">Nenhum campo extra configurado para este funil. Quem configura é o admin, em Campos, no site.</div>';
-  }
-
-  function _fichaCampoPers(c, v) {
-    const dica = c.dica ? '<span class="job-ficha-dica">' + esc(c.dica) + '</span>' : '';
-    let ctrl;
-    if (c.momento === 'automatico' || c.fonte === 'utm') {
-      ctrl = '<div class="job-ficha-lido' + (v ? '' : ' vazio') + '">' + (v ? esc(v) : '— ainda não chegou') + '</div>';
-    } else if (c.tipo === 'select') {
-      ctrl = '<select data-campo="' + esc(c.chave) + '"><option value="">—</option>' +
-        (c.opcoes || []).map((o) => '<option value="' + esc(o) + '"' + (o === v ? ' selected' : '') + '>' + esc(o) + '</option>').join('') +
-        ((v && (c.opcoes || []).indexOf(v) === -1) ? '<option value="' + esc(v) + '" selected>' + esc(v) + ' (fora da lista)</option>' : '') +
-        '</select>';
-    } else if (c.tipo === 'multiselect') {
-      const marc = String(v).split(',').map((x) => x.trim()).filter(Boolean);
-      ctrl = '<div class="job-ficha-etqs" data-campo="' + esc(c.chave) + '" data-multi="1">' +
-        (c.opcoes || []).map((o) => '<label class="job-ficha-etq"><input type="checkbox" value="' + esc(o) + '"' +
-          (marc.indexOf(o) > -1 ? ' checked' : '') + '>' + esc(o) + '</label>').join('') + '</div>';
-    } else if (c.tipo === 'booleano') {
-      ctrl = '<select data-campo="' + esc(c.chave) + '"><option value="">—</option>' +
-        '<option value="Sim"' + (v === 'Sim' ? ' selected' : '') + '>Sim</option>' +
-        '<option value="Não"' + (v === 'Não' ? ' selected' : '') + '>Não</option></select>';
-    } else if (c.tipo === 'texto_longo') {
-      ctrl = '<textarea rows="2" data-campo="' + esc(c.chave) + '">' + esc(v) + '</textarea>';
-    } else {
-      const t = c.tipo === 'data' ? 'date' : (c.tipo === 'mes' ? 'month' : (c.tipo === 'numero' ? 'number' : 'text'));
-      ctrl = '<input type="' + t + '" data-campo="' + esc(c.chave) + '" value="' + esc(v) + '">';
-    }
-    return '<div class="job-ficha-campo"><label>' + esc(c.nome) + dica + '</label>' + ctrl + '</div>';
-  }
-
-  function _fichaAbaAtividade(f) {
-    const ats = f.atividades || [];
-    const pb = f.playbook;
-    let html = '<div class="job-ficha-campo"><label>Registrar atividade</label>' +
-      '<textarea rows="3" id="job-ficha-ativ" placeholder="O que aconteceu nesta conversa…">' +
-      esc(_fichaPend.atividade || '') + '</textarea></div>';
-    if (pb) {
-      html += '<div class="job-ficha-grupo job-fg-pb"><div class="job-ficha-grupo-tit">Sugestão de mensagem · ' + esc(pb.titulo || '') + '</div>' +
-        (pb.rascunho ? '<div class="job-ficha-rascunho">Rascunho: revise antes de mandar.</div>' : '') +
-        (pb.passos || []).map((p, i) =>
-          '<div class="job-ficha-passo">' +
-            '<div class="job-ficha-passo-top">' + esc(p.titulo || ('Passo ' + (i + 1))) +
-              (p.quando ? '<span class="job-ficha-quando">' + esc(p.quando) + '</span>' : '') + '</div>' +
-            '<div class="job-ficha-msg" id="job-pb-' + i + '">' + esc(p.msg || '') + '</div>' +
-            '<button class="job-ficha-usar" data-pb="' + i + '">Copiar mensagem</button>' +
-          '</div>').join('') +
-        '</div>';
-    }
-    html += '<div class="job-ficha-grupo"><div class="job-ficha-grupo-tit">Histórico</div>' +
-      (ats.length
-        ? ats.map((a) => '<div class="job-nota-item"><div class="job-nota-txt">' + esc(a.descricao || '') + '</div>' +
-            '<div class="job-nota-meta">' + esc([a.usuario_nome, a.tipo, _tempoBrCurto(a.criado_em)].filter(Boolean).join(' · ')) + '</div></div>').join('')
-        : '<div class="job-notas-vazio">Sem atividade registrada ainda.</div>') +
-      '</div>';
-    return html;
-  }
-
-  function _campoTxt(chave, rot, v) {
-    return '<div class="job-ficha-campo"><label>' + esc(rot) + '</label>' +
-      '<input type="text" data-ficha="' + chave + '" value="' + esc(v) + '"></div>';
-  }
-
-  function _ligarEventosFicha(aba) {
-    document.querySelectorAll('.job-ficha-aba').forEach((b) => {
-      b.addEventListener('click', () => {
-        // Guarda o que foi digitado antes de trocar de aba: re-renderizar sem
-        // isso jogaria fora a digitação, que é a pior coisa que um painel faz.
-        _absorverFicha();
-        _renderFicha(b.dataset.aba);
-      });
-    });
-    // SUJO LIGA O SALVAR. Uma função só, chamada de qualquer campo, pra não
-    // existir um caminho que altera a ficha e esquece de acender o botão.
-    const _marcarSujo = () => {
-      _fichaSujo = true;
-      const s = document.getElementById('job-ficha-salvar');
-      if (s && s.disabled) { s.disabled = false; s.textContent = 'Salvar no JOB'; }
-    };
-    document.querySelectorAll('.job-ficha [data-ficha], .job-ficha [data-campo], .job-ficha [data-etq]').forEach((el) => {
-      el.addEventListener('input', _marcarSujo);
-      el.addEventListener('change', _marcarSujo);
-    });
-    // A ficha pode nascer suja: quem troca de aba com alteração pendente volta
-    // e o botão tem que continuar aceso.
-    if (_fichaSujo) {
-      const s0 = document.getElementById('job-ficha-salvar');
-      if (s0) { s0.disabled = false; s0.textContent = 'Salvar no JOB'; }
-    }
-    // Etiqueta pinta na hora — feedback imediato, salvamento vem no Salvar
-    document.querySelectorAll('.job-ficha [data-etq]').forEach((chk) => {
-      chk.addEventListener('change', () => {
-        const lab = chk.closest('.job-ficha-etq');
-        if (!lab) return;
-        lab.classList.toggle('on', chk.checked);
-        lab.style.background = chk.checked ? (chk.dataset.cor || '') : '';
-      });
-    });
-    // Trocar a etapa muda a lista de sub-status, então avisa em vez de mentir
-    const selEtapa = document.querySelector('.job-ficha [data-ficha="etapa"]');
-    if (selEtapa) {
-      selEtapa.addEventListener('change', () => {
-        const av = document.getElementById('job-ficha-aviso');
-        if (av) av.textContent = selEtapa.value !== (_ficha.lead || {}).etapa
-          ? 'Mudança de etapa limpa o sub-status.' : '';
-        _perdaMostrar(selEtapa.value);
-      });
-      _perdaMostrar(selEtapa.value);
-    }
-    const salvar = document.getElementById('job-ficha-salvar');
-    if (salvar) salvar.addEventListener('click', () => _salvarFicha(aba));
-    const link = document.getElementById('job-ficha-abrir-crm');
-    if (link && _ficha && _ficha.lead) {
-      link.href = _SITE_BASE_URL_EXT + '/crm?lead=' + _ficha.lead.id;
-      link.target = '_blank';
-      link.rel = 'noopener';
-    }
-    // Copia em vez de escrever na caixa: mexer no DOM de composição do WhatsApp
-    // é justamente o tipo de intervenção que já quebrou o envio de mensagem.
-    document.querySelectorAll('.job-ficha-usar').forEach((b) => {
-      b.addEventListener('click', () => {
-        const el = document.getElementById('job-pb-' + b.dataset.pb);
-        if (!el) return;
-        navigator.clipboard.writeText(el.textContent || '').then(() => {
-          b.textContent = 'Copiado';
-          setTimeout(() => { b.textContent = 'Copiar mensagem'; }, 1500);
-        }).catch(() => { b.textContent = 'Falha ao copiar'; });
-      });
-    });
+      const box = document.querySelector('.job-barra-conv-pe');
+      if (!box) return;
+      const velho = box.querySelector('.job-bc-aviso');
+      if (velho) velho.remove();
+      const d = document.createElement('div');
+      d.className = 'job-bc-aviso';
+      d.textContent = txt;
+      box.appendChild(d);
+      requestAnimationFrame(() => d.classList.add('on'));
+      setTimeout(() => { d.classList.remove('on'); setTimeout(() => d.remove(), 220); }, 3400);
+    } catch (e) { /* aviso nunca pode derrubar nada */ }
   }
 
   // ── MOTIVO DA PERDA, DENTRO DO WHATSAPP ─────────────────────────────────

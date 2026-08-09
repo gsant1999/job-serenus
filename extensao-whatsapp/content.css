@@ -3109,3 +3109,109 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
   .job-barra-conv-pe .job-bc-salvar { width: 34px; padding: 0; border-radius: 50%; }
   .job-barra-conv-pe .job-bc-salvar span { display: none; }
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MENU DA CONVERSA — um botão, e o nome de cada ação quando ele abre
+
+   A fileira de bolas resolvia o espaço mas criava outro problema: ícone
+   sozinho não diz o que faz, e ele precisou perguntar. Três ícones mudos ao
+   lado do campo de digitar são três perguntas.
+
+   Em repouso é um botão discreto com a marca do JOB — reconhecível e sem
+   competir com a conversa. Aberto, cada ação tem ícone, NOME e uma linha
+   dizendo o que acontece (inclusive o custo, no caso da transcrição).
+   ══════════════════════════════════════════════════════════════════════════ */
+.job-bc-menu-bt {
+  width: 36px; height: 36px; flex: 0 0 auto; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; cursor: pointer;
+  background: color-mix(in srgb, var(--job-txt) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--job-txt) 14%, transparent);
+  transition: background var(--job-t-rapido) ease, border-color var(--job-t-rapido) ease,
+              transform var(--job-t-toque) ease-out;
+}
+.job-bc-menu-bt .job-logo { width: 22px; height: 22px; margin: 0; }
+.job-bc-menu-bt:hover {
+  background: color-mix(in srgb, var(--job-acento) 16%, transparent);
+  border-color: color-mix(in srgb, var(--job-acento) 50%, transparent);
+}
+.job-bc-menu-bt:active { transform: scale(.92); }
+.job-bc-menu-bt:focus { outline: none; }
+.job-bc-menu-bt:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
+.job-bc-menu-bt[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--job-acento) 20%, transparent);
+  border-color: var(--job-acento);
+}
+
+/* O menu SOBE do botão — ele vive embaixo, então abre pra cima. Ancorado na
+   origem: a superfície cresce de onde foi chamada, não do centro da tela. */
+.job-bc-menu {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30;
+  min-width: 268px; max-width: 340px; padding: 6px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--job-bg1) 92%, transparent);
+  -webkit-backdrop-filter: var(--job-vidro-forte); backdrop-filter: var(--job-vidro-forte);
+  border: 1px solid color-mix(in srgb, var(--job-txt) 10%, transparent);
+  box-shadow: var(--job-elev-3), inset 0 1px 0 color-mix(in srgb, var(--job-txt) 10%, transparent);
+  font-family: var(--job-ui);
+  opacity: 0; transform: translateY(6px) scale(.97); transform-origin: bottom left;
+  transition: opacity var(--job-t-rapido) ease, transform var(--job-t-medio) var(--job-mv-saida);
+}
+.job-bc-menu.on { opacity: 1; transform: none; }
+.job-bc-menu-carregando {
+  padding: 14px 12px; font-size: 12px; color: var(--job-txt-fraco); text-align: center;
+}
+
+.job-bc-item {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%;
+  padding: 10px 11px; border-radius: 11px; border: none; background: transparent;
+  cursor: pointer; text-align: left; font-family: inherit;
+  transition: background var(--job-t-rapido) ease, transform var(--job-t-toque) ease-out;
+}
+.job-bc-item:hover { background: color-mix(in srgb, var(--job-txt) 8%, transparent); }
+.job-bc-item:active { transform: scale(.985); }
+.job-bc-item:disabled { opacity: .6; cursor: default; }
+.job-bc-item:focus { outline: none; }
+.job-bc-item:focus-visible { box-shadow: 0 0 0 2px var(--job-anel); }
+.job-bc-item-ico {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 9px; line-height: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--job-acento) 14%, transparent);
+  color: var(--job-acento);
+}
+.job-bc-item-ico svg { width: 15px; height: 15px; }
+.job-bc-item-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.job-bc-item .rot {
+  font-size: 13px; font-weight: 640; color: var(--job-txt); letter-spacing: var(--job-tk-md);
+}
+.job-bc-item .dica {
+  font-size: 11px; color: var(--job-txt-fraco); line-height: 1.4;
+}
+/* Destaque pro que GRAVA: o ladrilho enche de cor. Os de leitura ficam com a
+   tinta leve. */
+.job-bc-item.destaque .job-bc-item-ico { background: var(--job-acento); color: var(--job-sobre-acento); }
+
+/* Aviso curto depois de uma ação, junto do campo. A folha já fechou quando a
+   resposta chega, e sem isto ninguém fica sabendo se gravou. */
+.job-bc-aviso {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 29;
+  max-width: 320px; padding: 8px 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--job-bg1) 94%, transparent);
+  -webkit-backdrop-filter: var(--job-vidro); backdrop-filter: var(--job-vidro);
+  border: 1px solid color-mix(in srgb, var(--job-acento) 40%, transparent);
+  box-shadow: var(--job-elev-2);
+  font-family: var(--job-ui); font-size: 12px; color: var(--job-txt); line-height: 1.4;
+  opacity: 0; transform: translateY(6px);
+  transition: opacity var(--job-t-rapido) ease, transform var(--job-t-medio) var(--job-mv-saida);
+}
+.job-bc-aviso.on { opacity: 1; transform: none; }
+
+.job-barra-conv-pe { position: relative; }
+@media (prefers-reduced-motion: reduce) {
+  .job-bc-menu, .job-bc-aviso { transition: opacity var(--job-t-rapido) ease; transform: none !important; }
+  .job-bc-menu-bt:active, .job-bc-item:active { transform: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .job-bc-menu, .job-bc-aviso { background: var(--job-bg1); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
