@@ -3600,34 +3600,53 @@ body[data-job-tema="claro"] .job-folha { color-scheme: light; }
 
 /* ── A COMPOSICAO DA COTACAO, ANTES DE COTAR ───────────────────────────────
    Ele monta uma proposta de tres operadoras e precisa LER a proposta inteira
-   antes de pedir preco. Fica acima da lista porque e referencia, nao acao —
-   ele consulta enquanto marca, nao clica nela pra seguir. */
+   antes de pedir preco. E o unico bloco desta tela que nao e lista nem botao,
+   entao ganha fundo com a cor da marca — sem isso ele se perdia no meio das
+   gavetas, que e exatamente o que ele reclamou. */
 .job-cot-comp:empty { display: none; }
-.job-cot-comp { margin: 10px 0 12px; padding: 10px 11px; border-radius: 12px;
-  background: var(--job-vidro-leve); border: 1px solid var(--job-borda); }
+.job-cot-comp { margin: 12px 0 14px; padding: 12px 13px 11px; border-radius: 14px;
+  background: var(--job-sobre-acento);
+  border: 1px solid color-mix(in srgb, var(--job-acento) 34%, transparent);
+  box-shadow: var(--job-elev-1); }
 .job-cot-comp-t { display: flex; align-items: center; gap: 8px;
-  font-family: var(--job-ui); font-size: 11px; font-weight: 700;
+  font-family: var(--job-ui); font-size: 10.5px; font-weight: 800;
+  letter-spacing: var(--job-tk-xs); text-transform: uppercase; color: var(--job-txt); }
+.job-cot-comp-c { margin-left: auto; padding: 2px 8px; border-radius: 999px;
+  background: var(--job-acento); color: #06131a; font-weight: 800;
+  text-transform: none; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+
+/* Um grupo por operadora. O nome dela e rotulo, nao titulo: quem decide a
+   linha e o plano. */
+.job-cot-comp-gr { margin-top: 11px; }
+.job-cot-comp-opn { display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
+  font-family: var(--job-ui); font-size: 10px; font-weight: 700;
   letter-spacing: var(--job-tk-xs); text-transform: uppercase;
   color: var(--job-txt-fraco); }
-.job-cot-comp-n { margin-left: auto; padding: 1px 7px; border-radius: 999px;
-  background: rgba(31,216,164,.14); border: 1px solid rgba(31,216,164,.35);
-  color: var(--job-acento); font-weight: 800; text-transform: none;
-  font-variant-numeric: tabular-nums; }
-.job-cot-comp-op { margin-top: 8px; }
-.job-cot-comp-opn { display: block; margin-bottom: 4px; font-family: var(--job-ui);
-  font-size: 11px; font-weight: 700; color: var(--job-txt); }
-.job-cot-comp-chip { display: inline-flex; align-items: center; gap: 4px;
-  margin: 0 4px 4px 0; padding: 3px 4px 3px 9px; border-radius: 999px;
-  background: var(--job-vidro); border: 1px solid var(--job-borda);
-  font-family: var(--job-ui); font-size: 11.5px; color: var(--job-txt); }
-.job-cot-comp-x { width: 17px; height: 17px; flex: none; border: none; border-radius: 50%;
-  background: transparent; color: var(--job-txt-fraco); font: 700 14px/1 var(--job-ui);
-  cursor: pointer; transition: background var(--job-t-toque) var(--job-mv-saida),
-                               color var(--job-t-toque) var(--job-mv-saida); }
-.job-cot-comp-x:hover { background: var(--job-sobre-danger); color: #fff; }
-.job-cot-comp-s { margin-top: 8px; font-family: var(--job-ui); font-size: 10.5px;
-  line-height: 1.45; color: var(--job-txt-fraco); }
+.job-cot-comp-opq { padding: 0 5px; border-radius: 999px; background: var(--job-vidro);
+  border: 1px solid var(--job-borda); color: var(--job-txt-fraco);
+  font-size: 9.5px; font-variant-numeric: tabular-nums; }
 
+/* LINHA, NAO CHIP: em chip so cabia o nome, e dois planos com o mesmo nome
+   (enfermaria e apartamento) liam como marcacao repetida. */
+.job-cot-comp-l { display: flex; align-items: baseline; gap: 8px; padding: 5px 0;
+  border-top: 1px solid color-mix(in srgb, var(--job-acento) 14%, transparent); }
+.job-cot-comp-gr .job-cot-comp-l:first-of-type { border-top: none; }
+.job-cot-comp-n { flex: none; font-family: var(--job-ui); font-size: 12.5px;
+  font-weight: 700; color: var(--job-txt); }
+.job-cot-comp-d { flex: 1; min-width: 0; font-family: var(--job-ui); font-size: 10.5px;
+  color: var(--job-txt-fraco); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.job-cot-comp-x { flex: none; margin-left: auto; width: 20px; height: 20px; border: none;
+  border-radius: 6px; background: transparent; color: var(--job-txt-fraco);
+  font: 600 15px/1 var(--job-ui); cursor: pointer;
+  transition: background var(--job-t-toque) var(--job-mv-saida),
+              color var(--job-t-toque) var(--job-mv-saida); }
+.job-cot-comp-x:hover { background: var(--job-sobre-danger); color: #fff; }
+.job-cot-comp-x:active { transform: scale(.9); }
+.job-cot-comp-s { margin-top: 10px; padding-top: 9px;
+  border-top: 1px solid color-mix(in srgb, var(--job-acento) 14%, transparent);
+  font-family: var(--job-ui); font-size: 10.5px; line-height: 1.45;
+  color: var(--job-txt-fraco); }
 
 /* ── COTACOES: a acao em cima, o historico embaixo ─────────────────────────
    "Cotar agora" e o unico verde cheio da tela. Maior que um botao comum

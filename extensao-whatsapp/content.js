@@ -5156,10 +5156,14 @@
 
   // O bloco que ele le. Aparece nas duas telas onde a pergunta "o que eu ja
   // tenho?" acontece: na lista de planos e na de operadoras.
+  //
+  // LINHA, NAO CHIP. Em chip so cabe o nome — e a primeira versao mostrou
+  // "Bronze SP Mais" duas vezes seguidas, que e o mesmo nome em enfermaria e
+  // apartamento. Ele leu como marcacao duplicada e reclamou com razao: o que
+  // separa os dois estava escondido justamente no bloco que existe pra dizer
+  // o que ele escolheu.
   function _cotSacolaHTML() {
     if (!_cotSacola.length) return '';
-    // Agrupa por operadora porque e assim que ele pensa a proposta — tres
-    // chips soltos nao dizem que dois sao da mesma operadora.
     const porOp = new Map();
     _cotSacola.forEach((x) => {
       if (!porOp.has(x.operadoraNome)) porOp.set(x.operadoraNome, []);
@@ -5167,20 +5171,42 @@
     });
     let linhas = '';
     porOp.forEach((itens, op) => {
-      linhas += '<div class="job-cot-comp-op">' +
-        '<span class="job-cot-comp-opn">' + esc(op) + '</span>' +
-        itens.map((x) => '<span class="job-cot-comp-chip">' + esc(x.nome) +
-          '<button type="button" class="job-cot-comp-x" data-chave="' + esc(x.chave) + '" ' +
-          'title="Tirar ' + esc(x.nome) + ' da cotação">×</button></span>').join('') +
+      // So o que DIFERE dentro da operadora. Repetir "Coparticipacao parcial"
+      // em quatro linhas iguais nao separa nada e rouba a largura de quem
+      // separa. Com um item so, mostra a acomodacao — que e o que o cliente
+      // pergunta primeiro.
+      const ets = itens.map((x) => _cotEtiquetas(x.plano).map((e) => e.t));
+      const varia = itens.length > 1
+        ? (ets[0] || []).filter((v) => !ets.every((l) => l.indexOf(v) >= 0))
+        : [];
+      linhas += '<div class="job-cot-comp-gr">' +
+        '<div class="job-cot-comp-opn">' + esc(op) +
+          '<span class="job-cot-comp-opq">' + itens.length + '</span></div>' +
+        itens.map((x, k) => {
+          const proprias = itens.length > 1
+            ? (ets[k] || []).filter((v) => varia.indexOf(v) >= 0)
+            : (ets[k] || []).slice(0, 1);
+          return '<div class="job-cot-comp-l">' +
+            '<span class="job-cot-comp-n">' + esc(x.nome) + '</span>' +
+            (proprias.length
+              ? '<span class="job-cot-comp-d">' + esc(proprias.join(' · ')) + '</span>' : '') +
+            '<button type="button" class="job-cot-comp-x" data-chave="' + esc(x.chave) + '" ' +
+              'aria-label="Tirar ' + esc(x.nome) + ' da cotação" ' +
+              'title="Tirar da cotação">×</button>' +
+          '</div>';
+        }).join('') +
       '</div>';
     });
+    const falta = _COT_MAX - _cotSacola.length;
     return '<div class="job-cot-comp">' +
       '<div class="job-cot-comp-t">Nesta cotação' +
-        '<span class="job-cot-comp-n">' + _cotSacola.length + ' de ' + _COT_MAX + '</span></div>' +
+        '<span class="job-cot-comp-c">' + _cotSacola.length + ' de ' + _COT_MAX + '</span></div>' +
       linhas +
-      (_cotSacola.length >= _COT_MAX
-        ? '<div class="job-cot-comp-s">Cheio. Tire um pra marcar outro.</div>'
-        : '<div class="job-cot-comp-s">Some de todas as operadoras. Sai tudo no mesmo comparativo.</div>') +
+      '<div class="job-cot-comp-s">' +
+        (falta > 0
+          ? 'Cabem mais ' + falta + '. Pode somar de outras operadoras — sai tudo no mesmo comparativo.'
+          : 'Cheio. Tire um pra marcar outro.') +
+      '</div>' +
     '</div>';
   }
 
