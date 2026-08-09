@@ -22295,6 +22295,74 @@ def api_whatsapp_enviar_direto():
                              "dono_diferente": bool(dono_diferente_id)}))
 
 
+@app.route('/api/whatsapp/extensao/cotacao/contexto', methods=['GET', 'OPTIONS'])
+def api_whatsapp_extensao_cotacao_contexto():
+    """Tudo que o CABEÇALHO do documento de cotação precisa, numa chamada.
+
+    A extensão desenha a cotação dentro do painel (o consultor não pode ser
+    jogado pra fora do WhatsApp no meio de um atendimento). Só que ela sabia
+    apenas o id e o nome de quem entrou — então o desenho saía sem o logo da
+    corretora, sem o e-mail do consultor e com o nome do CONTATO no lugar do
+    nome do cliente. Guilherme, 09/08/2026: "se vire e puxe do JOB site esses
+    dados e imagem".
+
+    Escrita pelo Claude, que normalmente não mexe neste arquivo. É aditiva de
+    propósito: rota nova, nada alterado — pra não colidir com o Antigravity.
+
+    O logo vai como data URL porque a página do WhatsApp barra imagem de outro
+    endereço (a mesma razão pela qual as logos das operadoras já vêm assim).
+    """
+    if request.method == 'OPTIONS':
+        return _wa_cors(Response(status=204))
+    if not _wa_auth_ok():
+        return _wa_cors(jsonify({"ok": False, "erro": "Chave da extensão inválida"})), 401
+
+    uid = request.args.get('usuario_id', type=int)
+    lid = request.args.get('lead_id', type=int)
+    conn = db()
+    corretor = {'nome': '', 'email': '', 'telefone': ''}
+    if uid:
+        u = conn.execute("SELECT nome, email FROM usuarios WHERE id=?", (uid,)).fetchone()
+        if u:
+            # `usuarios` não tem telefone — a rota de salvar já grava '' nesse
+            # campo. Vai vazio e a extensão simplesmente não desenha a linha,
+            # em vez de inventar um número.
+            corretor = {'nome': u['nome'] or '', 'email': u['email'] or '', 'telefone': ''}
+    lead = {}
+    if lid:
+        r = conn.execute("SELECT nome, empresa, qual_cnpj, telefone FROM crm_leads WHERE id=?",
+                         (lid,)).fetchone()
+        if r:
+            lead = {'nome': r['nome'] or '', 'empresa': r['empresa'] or '',
+                    'cnpj': r['qual_cnpj'] or '', 'telefone': r['telefone'] or ''}
+    close_db(conn)
+
+    logo_data = ''
+    try:
+        import base64 as _b64c
+        alvo = BRAND.get('logo') or ''
+        if alvo.startswith('/static/'):
+            caminho = os.path.join(app.root_path, alvo.lstrip('/'))
+            if os.path.exists(caminho) and os.path.getsize(caminho) < 2_000_000:
+                ext = os.path.splitext(caminho)[1].lower().lstrip('.') or 'png'
+                with open(caminho, 'rb') as fh:
+                    logo_data = 'data:image/%s;base64,%s' % (
+                        'svg+xml' if ext == 'svg' else ext,
+                        _b64c.b64encode(fh.read()).decode('ascii'))
+    except Exception as e:
+        app.logger.warning('[EXT_CONTEXTO] logo: %s', e)
+
+    return _wa_cors(jsonify({
+        'ok': True,
+        'corretor': corretor,
+        'lead': lead,
+        'marca': {'nome_curto': BRAND.get('nome_curto') or '',
+                  'nome': BRAND.get('nome') or '',
+                  'logo': logo_data,
+                  'logo_url': BRAND.get('logo') or ''},
+    }))
+
+
 @app.route('/api/whatsapp/extensao/modelos', methods=['GET', 'OPTIONS'])
 def api_whatsapp_extensao_modelos():
     """Lista os modelos de mensagem de WhatsApp ativos pra extensão mostrar na
