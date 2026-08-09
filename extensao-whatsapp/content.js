@@ -6742,6 +6742,14 @@
     btn.disabled = true;
     const antes = btn.textContent;
     btn.textContent = 'Salvando…';
+    // O DESENHO COMECA AGORA, EM PARALELO COM O SALVAMENTO.
+    //
+    // Eram duas esperas em fila: salvar, e so entao desenhar a imagem. Nenhuma
+    // das duas precisa da outra — o desenho usa os precos que ja estao na mao,
+    // e o id da cotacao so entra no nome do arquivo. Em fila, o consultor
+    // esperava a soma; em paralelo, espera a maior das duas.
+    const pImagem = _cotDesenharPNG(lista).catch(() => null);
+    const t0 = Date.now();
     let r;
     try {
       r = await _safeSendMessage({ type: 'cotacao_salvar', payload: {
@@ -6761,6 +6769,7 @@
         planos: lista.map((p) => Object.assign({}, p, { _tipo: _cotRotulo(_cot.modalidade) }))
       } });
     } catch (e) { r = null; }
+    const msSalvar = Date.now() - t0;
     btn.disabled = false;
     btn.textContent = antes;
     if (!r || !r.ok) {
@@ -6775,7 +6784,12 @@
     _cotCache = { chave: '', dados: null };
     btn.textContent = 'Salvo no JOB';
     btn.disabled = true;
-    dizer('Salva no lead e em Cotações salvas.', true);
+    // O NUMERO APARECE. Ele disse "muito lento o salvar" e eu nao tinha como
+    // saber se era 1s ou 12s — a rota e so INSERT e a ida e volta medida na
+    // producao e de meio segundo. Com o tempo na tela, da pra separar "o JOB
+    // esta devagar" de "a impressao e de lento".
+    dizer('Salva no lead e em Cotações salvas · ' +
+          (msSalvar / 1000).toFixed(1).replace('.', ',') + 's', true);
 
     // O QUE VEM DEPOIS DE SALVAR É O QUE O CLIENTE RECEBE.
     //
@@ -6865,7 +6879,9 @@
       if (_imgCache) { aoTer(_imgCache); return; }
       const antes = btn.textContent;
       btn.disabled = true; btn.textContent = 'Desenhando…';
-      const dataUrl = await _cotDesenharPNG(lista);
+      // Pega o desenho que ja comecou junto do salvamento. So desenha de novo
+      // se aquele tiver falhado.
+      const dataUrl = (await pImagem) || (await _cotDesenharPNG(lista));
       btn.disabled = false; btn.textContent = antes;
       if (dataUrl) { _imgCache = dataUrl; aoTer(dataUrl); return; }
       btn.textContent = 'Não consegui desenhar';
