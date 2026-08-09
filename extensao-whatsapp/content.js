@@ -5292,6 +5292,28 @@
   // O plano vem do Painel como OBJETO: nome, acomodação e coparticipação moram
   // em p.plano e p.tabela, não na raiz. Eu lia p.nome e a lista inteira saía
   // com "Plano" em toda linha — o consultor escolheria no escuro.
+  // A REGRA DO NOME QUE O CLIENTE LE — ditada por ele, palavra por palavra:
+  //
+  //   empresarial  ->  RAZAO SOCIAL          (e "RAZAO SOCIAL - MEI" se for MEI)
+  //   pessoa fisica ->  NOME COMPLETO (PF)
+  //
+  // Sem nada digitado, cai no nome do contato — que e o comportamento velho, e
+  // e por isso que o campo diz isso em voz alta em vez de deixar acontecer.
+  function _cotNomeCliente(bruto, ehPME, ehMEI) {
+    const s = String(bruto || '').trim().replace(/\s+/g, ' ');
+    if (!s) return '';
+    if (ehPME) return ehMEI ? s + ' - MEI' : s;
+    return s + ' (PF)';
+  }
+
+  // O nome de agora, ja com a regra aplicada. Em branco cai no contato —
+  // que e o comportamento velho, dito em voz alta no formulario.
+  function _cotClienteAtual() {
+    const c = _cot || {};
+    const tratado = _cotNomeCliente(c.clienteNome, String(c.modalidade) === '2', c.clienteMei);
+    return tratado || (_cotLead && _cotLead.nome) || nomeDoContato() || 'Cliente';
+  }
+
   function _cotNomePlano(p) {
     return ((p && p.plano) || {}).nome || (p && p.nome) || 'Plano';
   }
@@ -5481,6 +5503,25 @@
           _cotAjuda('O preço é por faixa etária E depende de quantas vidas tem no total: ' +
                     'a mesma faixa custa menos num contrato de 20 vidas que num de 2.') + '</label>' +
         '<input id="job-cot-idades" class="job-cnpj-input" placeholder="55 5 50" value="' + esc(v.idades || '') + '">' +
+        // QUEM APARECE NA COTACAO NAO E QUEM APARECE NO WHATSAPP.
+        //
+        // O documento vinha com o nome do CONTATO — "Lead | Milena", "Cliente
+        // Campinas 2", o que o consultor escreveu na agenda dele pra se achar.
+        // Isso e anotacao interna indo parar na mao do cliente.
+        //
+        // Aqui ele escreve o nome que o cliente le. Empresarial: a razao
+        // social (com "- MEI" atras quando for MEI, e nada quando nao for).
+        // Pessoa fisica: o nome completo do beneficiario, com "(PF)".
+        '<label class="job-cot-rot" style="margin-top:14px">Quem aparece na cotação' +
+          _cotAjuda('É este nome que o CLIENTE lê no documento e na imagem. ' +
+                    'O nome do contato do WhatsApp é anotação sua e não sai daqui.') + '</label>' +
+        '<input id="job-cot-cliente" class="job-cnpj-input" autocomplete="off" ' +
+          'placeholder="Razão social da empresa, ou nome completo da pessoa" ' +
+          'value="' + esc(v.clienteNome || '') + '">' +
+        '<label class="job-cot-check" id="job-cot-mei-l" style="display:none">' +
+          '<input type="checkbox" id="job-cot-mei"' + (v.clienteMei ? ' checked' : '') + '>' +
+          '<span>É MEI</span></label>' +
+        '<div class="job-cot-dica" id="job-cot-cliente-ex"></div>' +
         '<div class="job-cot-dica" id="job-cot-dica"></div>' +
         // Duas formas de dizer a mesma coisa. Quem tem a idade na conversa
         // digita; quem já pensa em faixa (proposta antiga, planilha da
@@ -5517,6 +5558,25 @@
 
     const iCid = document.getElementById('job-cot-cidade');
     const iIda = document.getElementById('job-cot-idades');
+    const iCli = document.getElementById('job-cot-cliente');
+    const iMei = document.getElementById('job-cot-mei');
+    const lMei = document.getElementById('job-cot-mei-l');
+    const exCli = document.getElementById('job-cot-cliente-ex');
+    // O EXEMPLO MOSTRA O RESULTADO, nao explica a regra. Ele digita e ve na
+    // hora como o nome vai sair no documento do cliente.
+    const verCliente = () => {
+      const bt = document.querySelector('#job-cot-tipo button.on');
+      const pme = String((bt && bt.dataset.v) || (_cot && _cot.modalidade) || '') === '2';
+      if (lMei) lMei.style.display = pme ? '' : 'none';
+      if (!exCli) return;
+      const bruto = (iCli && iCli.value || '').trim();
+      exCli.textContent = bruto
+        ? 'Vai sair assim: ' + _cotNomeCliente(bruto, pme, iMei && iMei.checked)
+        : 'Em branco, sai o nome do contato do WhatsApp — que costuma ser anotação sua.';
+    };
+    if (iCli) iCli.addEventListener('input', verCliente);
+    if (iMei) iMei.addEventListener('change', verCliente);
+    verCliente();
     const dica = document.getElementById('job-cot-dica');
     const box = document.getElementById('job-cot-sug');
     let relogioCid = null;
@@ -5575,6 +5635,8 @@
       const antes = _cot;
       _cot = { cidade: cidadeDoCatalogo, modalidade: Number((tipo && tipo.v) || 1),
                idades: iIda.value, faixas: porFaixa ? contFx : null,
+               clienteNome: (iCli && iCli.value || '').trim(),
+               clienteMei: !!(iMei && iMei.checked),
                vidas: r.vidas, totalVidas: r.total };
       linkJob.href = _cotLinkJob(null);
       _cot = antes;
@@ -5628,6 +5690,7 @@
     document.querySelectorAll('#job-cot-tipo button').forEach((b) => {
       b.addEventListener('click', () => {
         document.querySelectorAll('#job-cot-tipo button').forEach((o) => o.classList.remove('on'));
+        setTimeout(verCliente, 0);   // "É MEI" só existe no empresarial
         b.classList.add('on');
       });
     });
@@ -5742,6 +5805,8 @@
       _cotSacola = [];
       _cot = { cidade: cidadeDoCatalogo, cidadeOk: true, modalidade: Number((tipo && tipo.v) || 1),
                idades: iIda.value, faixas: porFaixa ? contFx : null,
+               clienteNome: (iCli && iCli.value || '').trim(),
+               clienteMei: !!(iMei && iMei.checked),
                vidas: r.vidas, totalVidas: r.total };
       _cotBuscarOperadoras();
     });
@@ -6592,9 +6657,12 @@
         usuario_id: usuarioId,
         lead_id: _cotLead.id,
         telefone: _cotLead.telefone || '',
-        cliente_nome: _cotLead.nome || nomeDoContato() || '',
+        // O NOME QUE O CLIENTE LE, nao o do contato. "Lead | Milena" e
+        // anotacao do consultor pra se achar na agenda — e ia parar no
+        // documento e na imagem que o cliente recebe.
+        cliente_nome: _cotClienteAtual(),
         cliente_telefone: _cotLead.telefone || '',
-        titulo: (_cotLead.nome || nomeDoContato() || 'Cliente') + ' · ' + _cot.cidade +
+        titulo: _cotClienteAtual() + ' · ' + _cot.cidade +
                 ' · ' + _cotRotulo(_cot.modalidade),
         cidade: _cot.cidade,
         modalidade: _cot.modalidade,
@@ -6764,7 +6832,7 @@
         const f = linhasDe(p).filter((x) => x.rot === rot)[0];
         return f && f.val != null ? _cotMoeda(f.val) : '—';
       };
-      const cliente = (_cotLead && _cotLead.nome) || nomeDoContato() || 'Cliente';
+      const cliente = _cotClienteAtual();
       const hoje = new Date();
       const dd = (n) => (n < 10 ? '0' : '') + n;
       const quando = dd(hoje.getDate()) + '/' + dd(hoje.getMonth() + 1) + '/' + hoje.getFullYear() +
