@@ -3771,3 +3771,12 @@ body[data-job-tema="claro"] .job-cot-prev-txt { color-scheme: light; }
   color: var(--job-txt-fraco); }
 .job-capa-l .v { flex: 1; min-width: 0; font-family: var(--job-ui); font-size: 12.5px;
   line-height: 1.45; color: var(--job-txt); }
+
+/* O botao que leva pra pagina de instalacao. A extensao e distribuida por
+   LINK, nao pela loja: sem este caminho o aviso dizia "atualize" e nao dizia
+   como, e a pessoa ficava com a versao velha achando que tinha atualizado. */
+.job-aviso-versao-bt { display: block; margin-top: 10px; padding: 9px 12px;
+  border-radius: 10px; text-align: center; text-decoration: none;
+  background: var(--job-acento); color: #06131a;
+  font-family: var(--job-ui); font-size: 12.5px; font-weight: 700; }
+.job-aviso-versao-bt:hover { filter: brightness(1.06); }

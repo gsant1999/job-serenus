@@ -10726,12 +10726,26 @@
         '<button class="job-aviso-versao-x" title="Depois">×</button>' +
       '</div>' +
       '<div class="job-aviso-versao-corpo">' +
-        'Saiu a versão <b>' + nova + '</b> (você está na ' + minha + '). Para atualizar agora:' +
-        '<ol>' +
-          '<li>Feche <b>todas</b> as abas do WhatsApp Web.</li>' +
-          '<li>Abra o WhatsApp Web de novo.</li>' +
-        '</ol>' +
-        '<div class="job-aviso-versao-nota">O Chrome atualiza sozinho em algumas horas — esses passos só apressam.</div>' +
+        // A INSTRUCAO ANTIGA ERA MENTIRA NESTE MODELO DE DISTRIBUICAO.
+        //
+        // Ela mandava fechar as abas do WhatsApp e dizia que o Chrome atualiza
+        // sozinho em algumas horas. As duas coisas sao verdade pra extensao
+        // instalada pela loja; a JOB e distribuida por LINK. O Chrome nunca
+        // atualiza sozinho, e fechar aba nao muda nada — a pessoa fazia os dois
+        // passos, via a versao velha de novo, e concluia que o aviso estava
+        // quebrado.
+        'Saiu a versão <b>' + nova + '</b> e você está na <b>' + minha + '</b>.' +
+        // A SUA VERSAO CONTINUA FUNCIONANDO.
+        //
+        // Com melhoria saindo toda hora e sem loja pra empurrar, cada consultora
+        // fica numa versao diferente por semanas. O aviso nao pode soar como
+        // "voce esta obsoleto" — quando alguma coisa de fato parar de funcionar
+        // numa versao, o aviso tera outras palavras.
+        '<div class="job-aviso-versao-nota">' +
+          'A sua versão <b>continua funcionando</b> — atualizar é ganho, não obrigação.' +
+        '</div>' +
+        '<a class="job-aviso-versao-bt" href="' + esc(_SITE_BASE_URL_EXT + '/extensao') + '" ' +
+          'target="_blank" rel="noopener">Atualizar agora (leva um minuto)</a>' +
       '</div>';
     document.body.appendChild(box);
     box.querySelector('.job-aviso-versao-x').addEventListener('click', () => box.remove());
