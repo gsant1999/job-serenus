@@ -8114,6 +8114,18 @@
     // saía duas vezes — uma do cadastro, outra da qualificação — e ficava a
     // dúvida sobre qual vale.
     const jaMostrado = new Set(['origem', 'email', 'e_mail', 'telefone', 'empresa', 'nome']);
+    // ...E TAMBEM PELO RÓTULO. A lista acima compara a CHAVE do campo, e o
+    // print dele mostrava "ORIGEM: Indicação" duas vezes seguidas: são dois
+    // campos de chaves diferentes ('origem' e o de qualificação) com o mesmo
+    // nome na tela. Repetir o mesmo rótulo com o mesmo valor não informa nada
+    // e faz duvidar de qual dos dois vale.
+    const rotulosVistos = new Set(['origem', 'telefone', 'e-mail', 'email', 'empresa', 'nome']);
+    const rotuloNovo = (nome) => {
+      const k = String(nome || '').trim().toLowerCase();
+      if (!k || rotulosVistos.has(k)) return false;
+      rotulosVistos.add(k);
+      return true;
+    };
 
     // Só os RESPONDIDOS: listar os vazios transformaria o resumo numa lista de
     // buracos, e o buraco tem lugar próprio (a aba de qualificação).
@@ -8121,6 +8133,7 @@
       .filter((c) => !jaMostrado.has(String(c.chave || '').toLowerCase()))
       .map((c) => ({ nome: c.nome, v: valorDoCampo((f.campos_val || {})[c.chave]) }))
       .filter((x) => x.v && x.v.trim() !== '')
+      .filter((x) => rotuloNovo(x.nome))
       .slice(0, 10);
 
     return '<div class="job-resumo">' +
@@ -8251,11 +8264,27 @@
   // sincronização — a cada 1,5s, pra sempre, contra o servidor.
   var _resumoBuscado = '';
 
+  // Só os dígitos: `pedirTelefoneWpp` devolve "5519981142436" e o DOM às vezes
+  // devolve "(19) 98114-2436". Comparar as duas formas cruas diria que são
+  // contatos diferentes e a ficha seria rebuscada a cada sincronização.
+  function _soDigitos(v) { return String(v || '').replace(/\D/g, ''); }
+
   async function _garantirFichaParaResumo() {
     try {
-      if (_ficha && _ficha.lead && _fichaTel) return;
       let tel = '';
       try { tel = (await pedirTelefoneWpp()) || telefoneDoContato(); } catch (e) { tel = telefoneDoContato(); }
+      // A FICHA TEM QUE SER DESTE CONTATO.
+      //
+      // O teste era só "já tenho uma ficha?" — sem perguntar de QUEM. Abrindo
+      // a conversa da Sandra depois da do Mauricio, a ficha do Mauricio ainda
+      // estava na memória, a função saía aqui e a aba Análise mostrava o nome,
+      // o telefone e a cidade do Mauricio em cima da conversa da Sandra. Foi
+      // exatamente o que o Guilherme viu na tela.
+      //
+      // Dado de outro cliente na tela é o pior defeito possível neste painel:
+      // não parece erro, parece informação.
+      if (_ficha && _ficha.lead && _fichaTel &&
+          _soDigitos(_fichaTel) === _soDigitos(tel) && _soDigitos(tel)) return;
       if (!tel || _resumoBuscado === tel) return;
       _resumoBuscado = tel;
       const veio = await _carregarFichaSilenciosa({ telefone: tel });
@@ -10621,6 +10650,11 @@
     // resumo pode ser buscado de novo pro contato novo.
     _trilhoPontosLimpar();
     _resumoBuscado = '';
+    // A FICHA DO CONTATO ANTERIOR MORRE AQUI, e não quando a próxima chegar.
+    // Entre a troca de conversa e a resposta do servidor passam ~1s; nesse
+    // intervalo a tela mostrava os dados de quem ficou pra trás, com cara de
+    // certo. Melhor a tela vazia por um segundo do que o cliente errado.
+    _ficha = null; _fichaTel = ''; _fichaIgnorada = false;
     sincronizarPainelComConversa();
   }, 1500));
 
