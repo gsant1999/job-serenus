@@ -326,6 +326,17 @@ function copiarLink() {
 // rasterizou aquele SVG pra mostrar na tela, entao desenhar a imagem num
 // canvas devolve o bitmap correto. Depois da captura, tudo volta ao que era —
 // a pagina continua com o SVG, que e mais nitido em zoom.
+// Um canvas todo transparente significa que o desenho nao aconteceu.
+// Amostra em grade: varrer pixel a pixel numa imagem 3x custa caro e nao
+// responde nada a mais.
+function _telaEmBranco(ctx, w, h) {
+  try {
+    var d = ctx.getImageData(0, 0, w, h).data;
+    var passo = Math.max(4, Math.floor(d.length / 4 / 2000) * 4);
+    for (var i = 3; i < d.length; i += passo) { if (d[i] > 8) return false; }
+    return true;
+  } catch (e) { return false; }   // sem leitura, assume que desenhou
+}
 async function _achatarLogos(raiz) {
   var voltar = [];
   var imgs = Array.prototype.slice.call(raiz.querySelectorAll('img'));
@@ -340,7 +351,37 @@ async function _achatarLogos(raiz) {
       var h = Math.max(1, Math.round((r.height || im.height || 40) * 3));
       var cv = document.createElement('canvas');
       cv.width = w; cv.height = h;
-      cv.getContext('2d').drawImage(im, 0, 0, w, h);
+      var ctx = cv.getContext('2d');
+      try { ctx.drawImage(im, 0, 0, w, h); } catch (e0) {}
+      // SVG SEM TAMANHO INTRINSECO NAO DESENHA — e nao reclama.
+      //
+      // `drawImage` de um <img> apontando pra .svg so funciona quando o
+      // arquivo declara width/height. Sem isso o Chrome devolve canvas EM
+      // BRANCO, sem erro nenhum, e a gente trocaria o logo por um retangulo
+      // vazio — pior que a mancha.
+      //
+      // Entao a tela e conferida: se saiu em branco, o SVG e buscado como
+      // texto, ganha width/height escritos e e desenhado de novo a partir de
+      // um blob. Se ainda assim nao vier, deixa o original e o logo aparece
+      // torto — o que nao pode e sumir.
+      if (_telaEmBranco(ctx, w, h)) {
+        try {
+          var txt = await fetch(im.src, { credentials: 'same-origin' }).then(function (rr) { return rr.text(); });
+          if (/<svg/i.test(txt)) {
+            txt = txt.replace(/<svg\b([^>]*)>/i, function (_, at) {
+              at = at.replace(/\s(width|height)\s*=\s*"[^"]*"/gi, '');
+              return '<svg' + at + ' width="' + w + '" height="' + h + '">';
+            });
+            var url = URL.createObjectURL(new Blob([txt], { type: 'image/svg+xml' }));
+            var im2 = new Image();
+            await new Promise(function (ok, nao) { im2.onload = ok; im2.onerror = nao; im2.src = url; });
+            ctx.clearRect(0, 0, w, h);
+            ctx.drawImage(im2, 0, 0, w, h);
+            URL.revokeObjectURL(url);
+          }
+        } catch (e1) { /* segue com o que tiver */ }
+      }
+      if (_telaEmBranco(ctx, w, h)) continue;     // nao troca por nada
       var png = cv.toDataURL('image/png');
       if (png && png.length > 64) {
         voltar.push([im, im.src, im.style.width, im.style.height]);
