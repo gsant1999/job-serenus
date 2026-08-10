@@ -33,18 +33,54 @@ import sys
 MES = (sys.argv[1] if len(sys.argv) > 1 else '').strip()
 
 
+def _do_url(u):
+    """Quebra postgresql://user:senha@host:porta/base — só o pg8000 precisa."""
+    from urllib.parse import urlparse, unquote
+    x = urlparse(u)
+    return {'user': unquote(x.username or ''), 'password': unquote(x.password or ''),
+            'host': x.hostname or '', 'port': x.port or 5432,
+            'database': (x.path or '/').lstrip('/')}
+
+
 def conectar():
     """Devolve (conexão, marcador, nome do banco). Sem tocar no app."""
     url = (os.environ.get('DATABASE_URL') or '').strip()
     if url:
+        # DRIVER: tenta os tres que existem no mundo Python, em ordem.
+        #
+        # No console do Railway o `python` pode nao ser o mesmo interpretador
+        # que roda a aplicacao — e ai o psycopg2 "nao existe" mesmo estando no
+        # requirements. Em vez de morrer com uma frase que nao ajuda, o script
+        # diz QUAL python esta rodando e o que fazer.
+        conectar_pg = None
         try:
             import psycopg2
+            conectar_pg = psycopg2.connect
         except ImportError:
-            print('ERRO: DATABASE_URL existe mas o psycopg2 não está instalado aqui.')
+            try:
+                import psycopg          # psycopg 3
+                conectar_pg = psycopg.connect
+            except ImportError:
+                try:
+                    import pg8000.dbapi as pg8000
+                    conectar_pg = lambda u: pg8000.connect(**_do_url(u))
+                except ImportError:
+                    conectar_pg = None
+        if conectar_pg is None:
+            print('ERRO: DATABASE_URL existe, mas nenhum driver de Postgres neste interpretador.')
+            print('      Interpretador: %s' % sys.executable)
+            print('      Versão: %s' % sys.version.split()[0])
+            print('')
+            print('      O app usa psycopg2 e ele ESTÁ no requirements.txt — então')
+            print('      provavelmente este `python` não é o que roda a aplicação.')
+            print('      Tente, nesta ordem:')
+            print('        python3 scripts/auditoria_financeiro.py')
+            print('        /usr/local/bin/python scripts/auditoria_financeiro.py')
+            print('        python -m pip show psycopg2-binary')
             sys.exit(2)
         if url.startswith('postgres://'):
             url = url.replace('postgres://', 'postgresql://', 1)
-        return psycopg2.connect(url), '%s', 'PostgreSQL (produção)'
+        return conectar_pg(url), '%s', 'PostgreSQL (produção)'
     import sqlite3
     caminho = os.path.join(os.environ.get('JOB_DATA_DIR', '/tmp'), 'job.db')
     if not os.path.exists(caminho):
