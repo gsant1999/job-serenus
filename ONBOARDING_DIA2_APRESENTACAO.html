@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dia 2 — Aline | Serenus</title>
+<style>
+  :root{
+    --bg:#faf9f6; --ink:#14171d; --mut:#6b7280; --line:#e2e0da;
+    --green:#0f9d76; --indigo:#3d55d6; --amber:#c2740a; --red:#c0392b; --violet:#7c3aed;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;background:#0c0d10;overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  #stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  #deck{width:1280px;height:720px;position:relative;transform-origin:center center;
+    background:var(--bg);color:var(--ink);border-radius:6px;overflow:hidden;
+    box-shadow:0 30px 90px rgba(0,0,0,.55)}
+  .s{position:absolute;inset:0;padding:66px 76px;opacity:0;pointer-events:none;
+    display:flex;flex-direction:column;justify-content:center}
+  .s.on{opacity:1;pointer-events:auto}
+  .tag{font-size:14px;font-weight:700;letter-spacing:2.4px;text-transform:uppercase;
+    color:var(--green);margin-bottom:20px}
+  h1{font-size:74px;line-height:1.02;letter-spacing:-2.6px;font-weight:800}
+  h2{font-size:50px;line-height:1.1;letter-spacing:-1.6px;font-weight:750;margin-bottom:26px}
+  h2 em{font-style:normal;color:var(--green)}
+  .lead{font-size:27px;line-height:1.45;color:#3a4049;max-width:1010px;font-weight:400}
+  .lead b{font-weight:700;color:var(--ink)}
+  .big{font-size:44px;line-height:1.25;letter-spacing:-1.1px;font-weight:700;max-width:1050px}
+  .sub{font-size:22px;color:var(--mut);margin-top:24px;line-height:1.5;max-width:960px}
+  .sub b{color:var(--ink)}
+
+  .grid{display:grid;gap:16px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .card{background:#fff;border:1px solid var(--line);border-radius:11px;padding:22px 24px}
+  .card h3{font-size:23px;letter-spacing:-.5px;margin-bottom:8px;font-weight:700}
+  .card p{font-size:17.5px;line-height:1.5;color:#565d68}
+  .card .role{font-size:12.5px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;
+    color:var(--indigo);margin-bottom:6px}
+
+  .rows{display:flex;flex-direction:column;gap:9px}
+  .row{display:grid;grid-template-columns:300px 1fr;gap:22px;align-items:center;
+    background:#fff;border:1px solid var(--line);border-left:5px solid var(--green);
+    border-radius:9px;padding:13px 20px}
+  .row .k{font-size:21px;font-weight:700;letter-spacing:-.4px}
+  .row .v{font-size:18.5px;color:#565d68;line-height:1.4}
+
+  .ex{background:#fff;border:1px solid var(--line);border-left:5px solid var(--indigo);
+    border-radius:10px;padding:20px 26px;margin-top:24px}
+  .ex .l{font-size:13px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;
+    color:var(--indigo);margin-bottom:8px}
+  .ex p{font-size:22px;line-height:1.5;color:#3a4049}
+  .ex p b{color:var(--ink)}
+
+  .warn{background:#fff7ed;border:1px solid #f3d9b0;border-left:5px solid var(--amber);
+    border-radius:10px;padding:20px 26px;margin-top:22px}
+  .warn p{font-size:21px;line-height:1.5;color:#7a4a06}
+
+  table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;
+    border:1px solid var(--line)}
+  th{background:#f2f1ec;font-size:15px;letter-spacing:1.2px;text-transform:uppercase;
+    color:var(--mut);text-align:left;padding:13px 22px;font-weight:700}
+  td{padding:14px 22px;font-size:20.5px;border-top:1px solid var(--line)}
+  td.n{font-weight:700;color:var(--green);text-align:right;white-space:nowrap}
+
+  .qs{display:flex;flex-direction:column;gap:10px}
+  .q{display:grid;grid-template-columns:52px 1fr;align-items:center;gap:18px;
+    background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 20px}
+  .q .num{width:38px;height:38px;border-radius:50%;background:var(--green);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700}
+  .q .t{font-size:22px;font-weight:600;letter-spacing:-.3px}
+  .q .t span{font-weight:400;color:var(--mut);font-size:19px}
+
+  .quote{font-size:44px;line-height:1.25;letter-spacing:-1.2px;font-weight:700;
+    border-left:7px solid var(--amber);padding-left:32px;max-width:1020px}
+  .quote small{display:block;font-size:22px;font-weight:400;color:var(--mut);
+    margin-top:22px;letter-spacing:0}
+
+  .fill{background:#fff;border:2px dashed #c9c6bd;border-radius:11px;padding:22px 24px}
+  .fill h3{font-size:22px;font-weight:700;margin-bottom:10px}
+  .fill p{font-size:17px;color:#8b9099;line-height:1.7}
+
+  .cover{background:var(--ink);color:#fff}
+  .cover h1{font-size:92px;letter-spacing:-3.4px}
+  .cover .tag{color:#5fe3b6}
+  .cover .lead{color:#a8b0bd}
+  .sec{background:var(--ink);color:#fff}
+  .sec h1{font-size:76px;letter-spacing:-2.8px}
+  .sec .tag{color:#5fe3b6}
+  .sec .lead{color:#a8b0bd;margin-top:24px}
+  .final{background:var(--green);color:#04241b}
+  .final h1{font-size:80px;letter-spacing:-3px}
+  .final .lead{color:#0a3d2f;margin-top:26px}
+
+  #bar{position:absolute;left:0;bottom:0;height:5px;background:var(--green);transition:width .28s ease}
+  #num{position:absolute;right:26px;bottom:20px;font-size:14px;color:#9aa0ab;letter-spacing:1px}
+  #foot{position:absolute;left:32px;bottom:18px;font-size:13.5px;color:#b3b8c2;letter-spacing:1.5px;
+    text-transform:uppercase;font-weight:600}
+  .cover #foot,.cover #num,.sec #foot{color:#5a6472}
+  #hint{position:fixed;bottom:14px;left:0;right:0;text-align:center;color:#4a4f59;font-size:12.5px;
+    letter-spacing:1.4px;text-transform:uppercase;transition:opacity .5s ease;pointer-events:none}
+  #hint.off{opacity:0}
+
+  @page{size:1280px 720px;margin:0}
+  @media print{
+    html,body{height:auto;overflow:visible;background:#fff;
+      -webkit-print-color-adjust:exact;print-color-adjust:exact}
+    #stage{position:static;display:block}
+    #deck{width:1280px;height:auto;transform:none!important;box-shadow:none;border-radius:0}
+    .s{position:relative;inset:auto;width:1280px;height:720px;opacity:1!important;
+      pointer-events:auto;break-after:page;page-break-after:always;break-inside:avoid}
+    .s:last-of-type{break-after:auto;page-break-after:auto}
+    #hint,#bar,#num,#foot{display:none}
+  }
+</style>
+</head>
+<body>
+<div id="stage"><div id="deck">
+
+  <section class="s on cover">
+    <div class="tag">Serenus · Dia 2</div>
+    <h1>Agora os<br>porquês.</h1>
+    <p class="lead" style="margin-top:30px">Terça-feira, 11 de agosto. Ontem você viu o que a gente faz. Hoje você entende como o produto funciona por dentro.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Primeira hora · Bianca</div>
+    <h2>Antes de começar: o que ficou de ontem</h2>
+    <div class="qs">
+      <div class="q"><div class="num">1</div><div class="t">Conta com suas palavras o que a Serenus faz</div></div>
+      <div class="q"><div class="num">2</div><div class="t">Qual o caminho que um cliente percorre, do começo ao fim?</div></div>
+      <div class="q"><div class="num">3</div><div class="t">O que te pareceu mais difícil de fazer?</div></div>
+      <div class="q" style="border-color:var(--amber);background:#fffaf0"><div class="num" style="background:var(--amber)">4</div><div class="t">Teve alguma hora em que você se perdeu <span>e não quis perguntar?</span></div></div>
+      <div class="q"><div class="num">5</div><div class="t">O que a Juliana faz que você ainda não conseguiria fazer?</div></div>
+      <div class="q"><div class="num">6</div><div class="t">O que você faria diferente do que viu?</div></div>
+    </div>
+  </section>
+
+  <section class="s sec">
+    <div class="tag">Bloco 1</div>
+    <h1>Como o produto<br>funciona</h1>
+    <p class="lead">Oito conceitos. Nenhum a mais. Todos com exemplo de gente de verdade.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Conceito 1</div>
+    <h2>Os três jeitos de contratar</h2>
+    <div class="grid g3">
+      <div class="card"><div class="role">PF</div><h3>Pessoa física</h3><p>Uma pessoa ou família contrata direto. Mais simples de vender, costuma ser o mais caro.</p></div>
+      <div class="card"><div class="role">PME</div><h3>Empresa</h3><p>Pelo CNPJ, em geral a partir de 2 vidas. Costuma sair bem mais barato — por isso a pergunta "você tem empresa?" vale ouro.</p></div>
+      <div class="card"><div class="role">Adesão</div><h3>Entidade de classe</h3><p>Por profissão ou sindicato. Exige comprovar o vínculo.</p></div>
+    </div>
+    <div class="ex"><div class="l">Na conversa</div>
+      <p>O mesmo casal, mesma idade, mesma cidade, pode ter <b>três preços muito diferentes</b> conforme o caminho. Por isso a qualificação vem antes da cotação — sempre.</p></div>
+  </section>
+
+  <section class="s">
+    <div class="tag">Conceito 2</div>
+    <h2>Titular, dependente e vidas</h2>
+    <div class="rows">
+      <div class="row"><div class="k">Titular</div><div class="v">Quem contrata o plano e responde por ele</div></div>
+      <div class="row"><div class="k">Dependente</div><div class="v">Quem entra junto: cônjuge, filhos. Cada operadora tem sua regra de quem aceita</div></div>
+      <div class="row"><div class="k">Vidas</div><div class="v">Quantas pessoas no total. Muda o preço e às vezes muda até o tipo de contrato possível</div></div>
+    </div>
+    <p class="sub">Pergunta que ela precisa fazer sempre, e cedo: <b>"quem vai usar o plano, e qual a idade de cada um?"</b> Sem isso não existe cotação.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Conceito 3</div>
+    <h2>Carência</h2>
+    <p class="lead">É o tempo entre entrar no plano e poder usar cada coisa. Não é maldade da operadora: é o que impede a pessoa de contratar só quando adoece.</p>
+    <div class="ex"><div class="l">Exemplo</div>
+      <p>Entrou hoje e amanhã quebra o braço: <b>urgência é coberta em 24 horas</b>. Entrou hoje e quer fazer uma cirurgia marcada: <b>espera até 180 dias</b>.</p></div>
+    <div class="warn"><p><b>É aqui que a consultora mais erra.</b> Prometer "já pode usar" sem confirmar é o erro que vira reclamação e cancelamento.</p></div>
+  </section>
+
+  <section class="s">
+    <div class="tag">Conceito 3</div>
+    <h2>Os tetos que a ANS define</h2>
+    <table>
+      <tr><th>Situação</th><th style="text-align:right">Espera máxima</th></tr>
+      <tr><td>Urgência e emergência</td><td class="n">24 horas</td></tr>
+      <tr><td>Geral — consultas, exames, internação</td><td class="n">180 dias</td></tr>
+      <tr><td>Parto</td><td class="n">300 dias</td></tr>
+      <tr><td>Doença que a pessoa já tinha ao entrar</td><td class="n">24 meses</td></tr>
+    </table>
+    <p class="sub">A operadora pode oferecer menos — e às vezes oferece, em campanha ou com aproveitamento de plano anterior. <b>Nunca mais que isso.</b></p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Conceito 4</div>
+    <h2>CPT — doença preexistente</h2>
+    <p class="lead">Quando a pessoa <b>já tem uma doença ao entrar</b>, a operadora pode limitar por até 24 meses o que for de alta complexidade ligado àquela doença: cirurgias, leitos de alta tecnologia, procedimentos caros.</p>
+    <div class="ex"><div class="l">Exemplo</div>
+      <p>Cliente com diabetes: consulta e exame de rotina seguem normais depois da carência comum. O que pode ficar limitado por 24 meses é uma <b>cirurgia de alta complexidade ligada à diabetes</b>.</p></div>
+    <div class="warn"><p>A pessoa <b>tem que declarar</b>. Omitir é fraude e pode custar o contrato dela lá na frente — quando ela mais precisa. Nunca oriente ninguém a esconder.</p></div>
+  </section>
+
+  <section class="s">
+    <div class="tag">Conceito 5</div>
+    <h2>Coparticipação</h2>
+    <p class="lead">Paga <b>menos por mês</b> e paga <b>um pouco a cada uso</b>: uma parte da consulta, do exame.</p>
+    <div class="grid g2" style="margin-top:26px">
+      <div class="card"><h3>Serve bem para</h3><p>Quem usa pouco, quer o plano como proteção e quer caber no orçamento</p></div>
+      <div class="card"><h3>Serve mal para</h3><p>Quem vai ao médico direto, tem filho pequeno ou trata algo continuado</p></div>
+    </div>
+    <p class="sub">A pergunta que decide: <b>"quantas vezes você foi ao médico no último ano?"</b></p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Conceito 6</div>
+    <h2>Acomodação</h2>
+    <div class="grid g2">
+      <div class="card"><h3>Enfermaria</h3><p>Quarto dividido na internação. Mais barato</p></div>
+      <div class="card"><h3>Apartamento</h3><p>Quarto individual, acompanhante. Mais caro</p></div>
+    </div>
+    <p class="sub">Muda o preço de forma relevante e é uma das primeiras alavancas quando o cliente <b>acha caro</b> — antes de trocar o plano inteiro, veja se dá para ajustar aqui.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Conceito 7</div>
+    <h2>Rede credenciada</h2>
+    <p class="lead">Quais hospitais, laboratórios e médicos atendem aquele plano. Para muita gente, <b>é a única coisa que importa de verdade</b>.</p>
+    <div class="ex"><div class="l">Pergunta obrigatória em toda conversa</div>
+      <p><b>"Tem algum hospital ou médico que você faz questão de manter?"</b></p></div>
+    <p class="sub">Se a pessoa citar um hospital, isso vira o filtro da cotação. Vender um plano que não atende no hospital que ela queria é venda que volta como cancelamento.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Conceito 8</div>
+    <h2>Abrangência e reajuste</h2>
+    <div class="rows">
+      <div class="row"><div class="k">Abrangência</div><div class="v">Onde o plano funciona: município, grupo de cidades, estado ou país</div></div>
+      <div class="row"><div class="k">Reajuste anual</div><div class="v">Aumento uma vez por ano. Nos planos individuais é regulado pela ANS</div></div>
+      <div class="row"><div class="k">Faixa etária</div><div class="v">Além do anual, o preço sobe quando a pessoa muda de faixa de idade — a última mudança é aos 59 anos</div></div>
+    </div>
+    <p class="sub">Cliente que viaja ou tem filho em outra cidade pergunta abrangência. Cliente mais velho pergunta reajuste. <b>Não fuja da pergunta</b> — responda com o que você confirmou.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Fecho do bloco</div>
+    <p class="quote">Toda vez que você não tiver certeza, a frase continua a mesma.
+      <small>"Vou confirmar essa informação para você e já te retorno."</small></p>
+    <p class="sub" style="font-size:24px;margin-top:30px">Nenhum desses oito conceitos vale mais que essa frase. Errar carência ou rede é o tipo de erro que a pessoa descobre no pior dia da vida dela.</p>
+  </section>
+
+  <section class="s sec">
+    <div class="tag">Bloco 2</div>
+    <h1>Os produtos que<br>você vai vender</h1>
+    <p class="lead">Só os primeiros. O resto você aprende quando aparecer no atendimento.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Produto 1</div>
+    <h2 style="margin-bottom:18px">[ preencher ]</h2>
+    <div class="grid g2">
+      <div class="fill"><h3>Para quem serve</h3><p>perfil, idade, região, tipo de contratação</p></div>
+      <div class="fill"><h3>O diferencial</h3><p>o que ele tem que os outros não têm</p></div>
+      <div class="fill"><h3>A limitação</h3><p>o que ele não cobre bem — dito antes que o cliente descubra</p></div>
+      <div class="fill"><h3>Quando NÃO indicar</h3><p>o caso em que esse plano vira problema</p></div>
+    </div>
+  </section>
+
+  <section class="s">
+    <div class="tag">Produto 2</div>
+    <h2 style="margin-bottom:18px">[ preencher ]</h2>
+    <div class="grid g2">
+      <div class="fill"><h3>Para quem serve</h3><p>perfil, idade, região, tipo de contratação</p></div>
+      <div class="fill"><h3>O diferencial</h3><p>o que ele tem que os outros não têm</p></div>
+      <div class="fill"><h3>A limitação</h3><p>o que ele não cobre bem — dito antes que o cliente descubra</p></div>
+      <div class="fill"><h3>Quando NÃO indicar</h3><p>o caso em que esse plano vira problema</p></div>
+    </div>
+  </section>
+
+  <section class="s">
+    <div class="tag">Produto 3</div>
+    <h2 style="margin-bottom:18px">[ preencher ]</h2>
+    <div class="grid g2">
+      <div class="fill"><h3>Para quem serve</h3><p>perfil, idade, região, tipo de contratação</p></div>
+      <div class="fill"><h3>O diferencial</h3><p>o que ele tem que os outros não têm</p></div>
+      <div class="fill"><h3>A limitação</h3><p>o que ele não cobre bem — dito antes que o cliente descubra</p></div>
+      <div class="fill"><h3>Quando NÃO indicar</h3><p>o caso em que esse plano vira problema</p></div>
+    </div>
+  </section>
+
+  <section class="s sec">
+    <div class="tag">Bloco 3</div>
+    <h1>A conversa</h1>
+    <p class="lead">Como abrir, o que perguntar e em que ordem.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Abertura</div>
+    <h2>Os primeiros 30 segundos</h2>
+    <p class="lead">Ela pediu contato — então não comece se desculpando por existir. Comece <b>situando</b>: quem é você, de onde veio o contato, e uma pergunta aberta.</p>
+    <div class="ex"><div class="l">Estrutura</div>
+      <p>Nome + Serenus + de onde veio o contato + <b>"me conta: o plano é para você ou para mais alguém da família?"</b></p></div>
+    <p class="sub">Pergunta aberta no fim. Se você abrir com "posso te mandar uma cotação?", a resposta vai ser sim — e você vai cotar no escuro.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Qualificação</div>
+    <h2 style="margin-bottom:18px">As perguntas, nesta ordem</h2>
+    <div class="qs">
+      <div class="q"><div class="num">1</div><div class="t">Quem vai usar? <span>titular, cônjuge, filhos</span></div></div>
+      <div class="q"><div class="num">2</div><div class="t">Idade de cada um <span>é o que faz o preço</span></div></div>
+      <div class="q"><div class="num">3</div><div class="t">Cidade <span>define a rede disponível</span></div></div>
+      <div class="q"><div class="num">4</div><div class="t">Tem CNPJ? <span>abre a porta do PME</span></div></div>
+      <div class="q"><div class="num">5</div><div class="t">Tem plano hoje? <span>pode aproveitar carência</span></div></div>
+      <div class="q"><div class="num">6</div><div class="t">Algum hospital ou médico que faz questão? <span>vira o filtro</span></div></div>
+      <div class="q"><div class="num">7</div><div class="t">Alguém em tratamento ou com doença? <span>CPT e declaração</span></div></div>
+      <div class="q"><div class="num">8</div><div class="t">O que te fez procurar plano agora? <span>é o motivo real da compra</span></div></div>
+    </div>
+  </section>
+
+  <section class="s">
+    <div class="tag">A pergunta que mais vale</div>
+    <p class="big">"O que te fez procurar<br>um plano agora?"</p>
+    <p class="sub" style="font-size:25px">A resposta dela é o que você vai usar no fechamento e em cada follow-up. Anote a <b>frase dela</b>, com as palavras dela, no registro do atendimento.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Cotação</div>
+    <h2>Não mande preço solto</h2>
+    <div class="grid g2">
+      <div class="card" style="border-color:#e6b8b8;background:#fdf5f5"><h3>Errado</h3><p style="font-size:20px">"Plano X — R$ 620."</p></div>
+      <div class="card" style="border-color:var(--green);background:#eefaf5"><h3>Certo</h3><p style="font-size:20px">"Pelo que você me contou — vocês dois, sua cidade e o hospital que você quer manter — essa é a opção que faz mais sentido, e é por isso."</p></div>
+    </div>
+    <p class="sub">Preço sozinho só pode ser comparado com outro preço. <b>Preço com motivo</b> vira recomendação — e recomendação é o que ela contrata.</p>
+  </section>
+
+  <section class="s">
+    <div class="tag">Prática</div>
+    <h2>Simulação</h2>
+    <p class="lead">A Bianca faz de cliente. Você conduz do começo ao fim: abertura, as oito perguntas, e o que você recomendaria.</p>
+    <p class="sub" style="font-size:24px">Não precisa acertar preço nem plano. O que se avalia é: <b>você fez as perguntas certas, na ordem certa, e escutou a resposta?</b></p>
+    <div class="warn"><p>Depois trocamos: você vira cliente e a Bianca vende. Prestar atenção no que ela pergunta que você não perguntou.</p></div>
+  </section>
+
+  <section class="s final">
+    <div class="tag" style="color:#04241b">Amanhã</div>
+    <h1>Lead real.<br>Na sua mão.</h1>
+    <p class="lead">Você não precisa saber tudo. Precisa saber perguntar, registrar e dizer "vou confirmar e já te retorno".</p>
+  </section>
+
+  <div id="foot">Serenus · Dia 2</div>
+  <div id="num"></div>
+  <div id="bar"></div>
+</div></div>
+<div id="hint">setas ou clique para navegar · F para tela cheia</div>
+
+<script>
+  const slides=[...document.querySelectorAll('.s')];
+  const bar=document.getElementById('bar'), num=document.getElementById('num');
+  const hint=document.getElementById('hint');
+  const hideHint=()=>hint.classList.add('off');
+  setTimeout(hideHint,7000);
+  let i=0;
+  function render(){
+    slides.forEach((s,k)=>s.classList.toggle('on',k===i));
+    bar.style.width=((i+1)/slides.length*100)+'%';
+    num.textContent=(i+1)+' / '+slides.length;
+  }
+  function go(d){ hideHint(); i=Math.min(slides.length-1,Math.max(0,i+d)); render(); }
+  document.addEventListener('keydown',e=>{
+    if(['ArrowRight','ArrowDown',' ','PageDown','Enter'].includes(e.key)){e.preventDefault();go(1)}
+    else if(['ArrowLeft','ArrowUp','PageUp','Backspace'].includes(e.key)){e.preventDefault();go(-1)}
+    else if(e.key==='Home'){i=0;render()}
+    else if(e.key==='End'){i=slides.length-1;render()}
+    else if(e.key==='f'||e.key==='F'){document.documentElement.requestFullscreen?.()}
+  });
+  document.getElementById('stage').addEventListener('click',e=>go(e.clientX<innerWidth*0.25?-1:1));
+  function fit(){
+    const p=0.94, s=Math.min(innerWidth*p/1280, innerHeight*p/720);
+    document.getElementById('deck').style.transform='scale('+s+')';
+  }
+  addEventListener('resize',fit); fit(); render();
+</script>
+</body>
+</html>

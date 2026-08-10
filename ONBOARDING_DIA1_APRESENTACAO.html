@@ -102,6 +102,20 @@
   #hint{position:fixed;bottom:14px;left:0;right:0;text-align:center;color:#4a4f59;font-size:12.5px;
     letter-spacing:1.4px;text-transform:uppercase;transition:opacity .5s ease;pointer-events:none}
   #hint.off{opacity:0}
+
+  /* Versao de impressao: um slide por pagina, A4 deitado.
+     Marcar "Imprimir plano de fundo" (Chrome: Mais definicoes) para sair com cor. */
+  @page{size:1280px 720px;margin:0}
+  @media print{
+    html,body{height:auto;overflow:visible;background:#fff;
+      -webkit-print-color-adjust:exact;print-color-adjust:exact}
+    #stage{position:static;display:block}
+    #deck{width:1280px;height:auto;transform:none!important;box-shadow:none;border-radius:0}
+    .s{position:relative;inset:auto;width:1280px;height:720px;opacity:1!important;
+      pointer-events:auto;break-after:page;page-break-after:always;break-inside:avoid}
+    .s:last-of-type{break-after:auto;page-break-after:auto}
+    #hint,#bar,#num,#foot{display:none}
+  }
 </style>
 </head>
 <body>
