@@ -2159,3 +2159,28 @@ rota. Se você estiver com `financeiro()` aberto, puxe antes de continuar.
 Testado: `import app` sobe, `scripts/ci_servidor.py` passa, e as cinco
 combinações de filtro respondem 200 — inclusive `personalizado` sem data
 nenhuma, que é o instante entre escolher a opção e digitar.
+
+
+## Insights de UX sobre o Módulo Financeiro — 10/08/2026
+
+Baseado na régua de UX do projeto (`ux-job`), identifiquei pontos principais no `financeiro.html` que violam as regras inegociáveis:
+
+1. **Configuração dividindo espaço com operação (Aba "Meios de Pagamento")**
+   *Regra 4: "Configuração mora no painel, não no popup"* e separar contextos.
+   A aba de "Meios de pagamento" (e seu modal de edição) é estritamente cadastro/configuração. Ela não devia concorrer na mesma tela com DRE e fluxo de caixa. O cadastro de cartões deveria ter uma tela própria, deixando o financeiro focado apenas na operação do dia a dia.
+
+2. **Ações destrutivas grudadas na edição (Tabelas de Custos/Aportes)**
+   *Regra UX: "Ação destrutiva fica longe da confirmação — separada visual e fisicamente."*
+   O botão de excluir um lançamento (`×` rosa) fica grudado no botão de "Editar" na mesma célula (`<td>`). Um simples erro de mira (especialmente no mobile da extensão) apaga um lançamento acidentalmente. A exclusão devia estar isolada, de preferência dentro da tela de edição (em tela cheia, nunca modal).
+
+3. **Botão destrutivo vago (`×`)**
+   *Regra: "Botão diz a consequência."*
+   O `×` sozinho é ambíguo: pode ser "fechar linha", "limpar campo" ou "excluir permanentemente do banco". 
+
+4. **Edições densas feitas em Popups**
+   *Regra 4: "Configuração mora no painel, não no popup.".*
+   Atualmente, os formulários densos de "Editar Custo" e "Editar Meio de Pagamento" sobem num overlay (`modal-editar-custo`). Isso dá ar de sistema improvisado. A edição de um custo deveria ocorrer em uma página própria com respiro, focada só naquela tarefa.
+
+5. **Sobrecarga Cognitiva no Adicionar Custo**
+   *Regra: "Antes de organizar, remova / Revele progressivamente."*
+   O formulário `.add-row` do painel de custos expõe 10 campos de uma só vez, disputando atenção logo no topo. O ideal seria pedir apenas o indispensável na interface rápida, ou mover a criação complexa de lançamentos para uma rota isolada.
