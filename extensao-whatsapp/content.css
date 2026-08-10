@@ -1405,7 +1405,17 @@ html.job-push-esquerda .job-trilho-config { left: calc(var(--job-viz, 0px) + 80p
    calcula pela midia, isso empurra a foto e joga a hora pra fora.
    Ninguem via botao nenhum e a bolha ficava torta: os dois sintomas, uma
    causa. Vazio some; quando tiver o que mostrar, aparece. */
-.job-doc-slot:empty, .job-tr-slot:empty { display: none; }
+.job-doc-slot:empty, .job-tr-slot:empty {
+  height: 0; margin: 0; padding: 0; border-top: none; overflow: hidden;
+}
+/* NAO E `display:none`, e foi por isso que o botao continuou sumido.
+   O injetor pergunta pra TELA se o bloco existe (`getClientRects().length`)
+   antes de decidir se acerta a bolha ou joga o botao solto na linha. Com
+   `display:none` o bloco recem-criado — que nasce vazio — nao tinha retangulo
+   nenhum, a pergunta respondia "nao existe", e ele era movido pra fora da
+   bolha e some. Zerando altura em vez de esconder, o bloco continua medivel:
+   nao ocupa espaco na bolha de imagem (que era o problema) e continua
+   existindo pra quem mede. */
 /* Nada aqui dentro pode esticar: select herda a largura do pai e virava uma
    barra atravessando a conversa inteira. */
 .job-doc-slot select, .job-doc-slot button { width: auto; max-width: 100%; }

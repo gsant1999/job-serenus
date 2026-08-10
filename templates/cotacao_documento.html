@@ -59,7 +59,13 @@
      layout automatico ela vira o piso daquela coluna, sobra pouco pras colunas
      de plano, e elas encolhem ate caber o texto. A tabela continua ocupando a
      folha; so o retangulo do destaque encolhe, que era o pedido. */
-  table.doc td.lbl { width:720px; }
+  /* O BLOCO INTEIRO CENTRALIZADO, como era antes. Com a coluna de rotulo
+     comendo 720px, as colunas de plano iam parar na borda direita da folha.
+     Rotulo com largura suficiente pra ler, tabela `auto` e centralizada: o
+     comparativo volta pro meio e o retangulo continua cabendo o texto. */
+  table.doc { width:auto; margin-left:auto; margin-right:auto; max-width:100%; }
+  table.doc td.lbl { width:300px; }
+  table.doc td.val, table.doc td.op-name { min-width:172px; }
   table.doc td.lbl { color:#3a3a44; text-align:left; }
   table.doc td.val { text-align:center; color:#2b2b33; font-variant-numeric:tabular-nums; }
 
