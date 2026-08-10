@@ -3101,9 +3101,34 @@
         const pr = await transcreverTudo((x) => {
           rot(bTr, x.rodando ? ('Transcrevendo ' + x.feitos + '/' + x.total) : 'Transcrevendo…');
         });
-        rot(bTr, pr.erros ? (pr.erros + ' falhou(ram)') : ('Pronto: ' + pr.total));
-      } catch (e) { rot(bTr, 'Não consegui transcrever'); }
-      setTimeout(() => _bcMenuFechar(box), 2200);
+        if (!pr.erros) {
+          rot(bTr, 'Pronto: ' + pr.total);
+          setTimeout(() => _bcMenuFechar(box), 2200);
+          return;
+        }
+        // FALHA COM MOTIVO E COM SAÍDA.
+        //
+        // Antes dizia só "1 falhou(ram)" e fechava o menu. O consultor ficava
+        // sabendo que faltou um áudio, sem saber qual, por quê, nem como
+        // resolver — e a conversa segue com um buraco na leitura.
+        const quantos = pr.erros;
+        const sos = pr.falhados.slice();
+        const sub = bTr.querySelector('.dica');
+        rot(bTr, quantos + ' não transcreveu — tentar de novo');
+        if (sub) sub.textContent = pr.motivo || 'Toque para repetir só os que falharam.';
+        bTr.disabled = false;
+        bTr.addEventListener('click', async function repetir(ev) {
+          ev.stopPropagation();
+          bTr.removeEventListener('click', repetir);
+          bTr.disabled = true;
+          const p2 = await transcreverTudo((x) => {
+            rot(bTr, 'Tentando ' + x.feitos + '/' + x.total);
+          }, sos);
+          rot(bTr, p2.erros ? (p2.erros + ' continuam sem transcrever') : 'Pronto');
+          if (sub && p2.erros) sub.textContent = p2.motivo || '';
+          setTimeout(() => _bcMenuFechar(box), 2600);
+        }, { once: false });
+      } catch (e) { rot(bTr, 'Não consegui transcrever'); setTimeout(() => _bcMenuFechar(box), 2200); }
     });
 
     const bCp = acao('copiar');
@@ -3214,7 +3239,8 @@
   // Um a um, de proposito. Disparar dez downloads e dez chamadas de IA de uma vez
   // trava o WhatsApp e pode estourar o teto de custo sem o consultor ver. O que
   // ja esta em cache nao e refeito — o segundo clique custa zero.
-  const TRTUDO = { rodando: false, feitos: 0, total: 0, erros: 0, pulados: 0 };
+  const TRTUDO = { rodando: false, feitos: 0, total: 0, erros: 0, pulados: 0,
+                   falhados: [], motivo: '' };
 
   // Cede o processador. requestAnimationFrame espera o proximo quadro pintar —
   // e a garantia de que a interface andou; o setTimeout e o piso pra aba em
@@ -3233,11 +3259,20 @@
     });
   }
 
-  async function transcreverTudo(aoAndar) {
+  // `sos` (opcional): repetir SÓ estes ids, em vez de varrer a conversa toda.
+  // É o que transforma "1 falhou(ram)" — que não diz qual nem o quê — em algo
+  // que o consultor consegue resolver com um clique.
+  async function transcreverTudo(aoAndar, sos) {
     if (TRTUDO.rodando) return TRTUDO;
-    const conv = await _pedirPonte('ler_conversa_completa', { limite: 800 }, 25000);
-    const ids = (conv && conv.audios) || [];
-    Object.assign(TRTUDO, { rodando: true, feitos: 0, total: ids.length, erros: 0, pulados: 0 });
+    let ids;
+    if (Array.isArray(sos) && sos.length) {
+      ids = sos.slice();
+    } else {
+      const conv = await _pedirPonte('ler_conversa_completa', { limite: 800 }, 25000);
+      ids = (conv && conv.audios) || [];
+    }
+    Object.assign(TRTUDO, { rodando: true, feitos: 0, total: ids.length, erros: 0,
+                            pulados: 0, falhados: [], motivo: '' });
     if (aoAndar) aoAndar(TRTUDO);
     try {
       // Pergunta de uma vez o que ja existe: barato, e evita pagar de novo.
@@ -3275,7 +3310,14 @@
         // devolvem a interface pra quem esta usando.
         await _respirar();
         await trTranscrever(id);
-        if (TR.erro.has(id)) TRTUDO.erros++;
+        if (TR.erro.has(id)) {
+          TRTUDO.erros++;
+          TRTUDO.falhados.push(id);
+          // O MOTIVO DO PRIMEIRO. "1 falhou" manda o consultor abrir chamado;
+          // "não consegui baixar o áudio" ele resolve rolando a conversa até a
+          // mídia carregar e clicando de novo.
+          if (!TRTUDO.motivo) TRTUDO.motivo = TR.erro.get(id) || '';
+        }
         TRTUDO.feitos++;
         if (aoAndar) aoAndar(TRTUDO);
         await _respirar();
@@ -10578,10 +10620,47 @@
       // mais importa. Antes o teto era 12 e cortava 22 em silêncio. Agora a
       // transcrição roda em paralelo e é cacheada por msg_id no servidor, e o
       // Groq é baratíssimo, então subir o teto não pesa em custo nem em tempo.
+      // ÁUDIO JÁ TRANSCRITO NÃO É BAIXADO NEM ENVIADO.
+      //
+      // Aqui era `pedirAudios(60)`: sessenta áudios baixados em base64 DE UMA
+      // VEZ, todos vivos na memória da aba ao mesmo tempo, depois copiados
+      // inteiros pro service worker, depois serializados num único POST. Três
+      // cópias do mesmo material antes de sair da máquina — e base64 ocupa 33%
+      // a mais que o arquivo. Numa conversa de 107 áudios isso explica sozinho
+      // o pico de gigabytes que apareceu no painel do Railway.
+      //
+      // E o pior: era desperdício puro. O servidor guarda cada transcrição por
+      // msg_id (`whatsapp_transcricoes_cache`), e a varredura JÁ usava isso —
+      // manda só o id e o servidor pega do cache. A análise pedida à mão nunca
+      // aprendeu o truque e rebaixava tudo do zero, toda vez.
+      //
+      // Agora: lista os ids (barato, sem mídia), pergunta quais já têm texto, e
+      // baixa SÓ o que falta, em lotes de 3. Depois de "Transcrever tudo" numa
+      // conversa, a análise passa a mandar zero base64.
       try {
-        const ra = await pedirAudios(60);
-        audios = ra.audios || [];
-        audiosEncontrados = ra.encontrados || audios.length;
+        const lista = await _pedirPonte('listar_audios', {}, 15000);
+        const todos = ((lista && lista.audios) || []).slice(0, 60);
+        audiosEncontrados = (lista && lista.encontrados) || todos.length;
+        let cacheados = {};
+        if (todos.length) {
+          const rc = await _safeSendMessage({ type: 'transcricoes_cache',
+            ids: todos.map((a) => a.msg_id) }).catch(() => null);
+          if (rc && rc.ok) cacheados = rc.transcricoes || {};
+        }
+        const faltam = todos.filter((a) => !(a.msg_id in cacheados)).map((a) => a.msg_id);
+        const baixados = {};
+        for (let i = 0; i < faltam.length; i += 3) {
+          status('Baixando áudio ' + Math.min(i + 3, faltam.length) + ' de ' + faltam.length + '…');
+          const rb = await _pedirPonte('baixar_audios_ids', { ids: faltam.slice(i, i + 3) }, 90000);
+          ((rb && rb.audios) || []).forEach((a) => { baixados[a.msg_id] = a; });
+          // Devolve a mão pro navegador entre lotes — sem isso a aba trava.
+          await new Promise((res) => setTimeout(res, 400));
+        }
+        audios = todos.map((a) => {
+          const b = baixados[a.msg_id];
+          return b ? { msg_id: a.msg_id, de: a.de, hora: a.hora, base64: b.base64, mime: b.mime }
+                   : { msg_id: a.msg_id, de: a.de, hora: a.hora };  // servidor usa o cache
+        });
       } catch (e) { audios = []; }
 
       status('Baixando documentos PDF…');
