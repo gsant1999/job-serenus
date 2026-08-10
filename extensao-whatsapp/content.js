@@ -3775,6 +3775,17 @@
         lead_id: meta.lead_id || null,
         // De ONDE veio esta leitura, pra o custo ter procedencia no painel.
         origem: meta.origem || 'varredura',
+        // E DE ONDE VEIO A DECISAO DE LER — que e outra coisa.
+        //
+        // O servidor usa isto pra decidir se cria lead no CRM. Analise que o
+        // consultor pediu significa que ele ja decidiu que aquilo e lead;
+        // varredura nao significa nada disso — ela le TODA conversa que teve
+        // mensagem, e era por isso que fornecedor, contador e o tecnico do
+        // ar-condicionado viravam lead e enchiam a tela de auditoria.
+        //
+        // Sem este campo a regra nova nao surte efeito nenhum: o padrao do
+        // servidor e 'manual', pra extensao antiga nao mudar de comportamento.
+        origem_analise: 'varredura',
         lote_id: meta.lote_id || null,
         usuario_id: usuarioId || null,
         mensagens: conv.mensagens || [],
@@ -8085,10 +8096,14 @@
     const f = _ficha, l = (f && f.lead) || null;
     if (!f || !f.existe || !l) return '';
 
-    const linha = (rot, val, cls) => val
+    // `proc` e a marca de procedencia (ja vem como HTML pronto). Os campos do
+    // cadastro (telefone, e-mail, empresa) nao levam marca: eles nasceram do
+    // cadastro e marcar todos seria ruido — a marca existe pra distinguir o que
+    // NAO e obvio.
+    const linha = (rot, val, cls, proc) => val
       ? '<div class="job-resumo-l' + (cls ? ' ' + cls : '') + '">' +
           '<span class="k">' + esc(rot) + '</span>' +
-          '<span class="v">' + esc(val) + '</span></div>'
+          '<span class="v">' + esc(val) + (proc || '') + '</span></div>'
       : '';
 
     const etapa = (f.etapas || []).find((e) => e.id === l.etapa);
@@ -8107,7 +8122,42 @@
       const v = (o.valor !== null && o.valor !== undefined) ? String(o.valor) : '';
       if (v.trim()) return v;
       const ia = (o.valor_ia !== null && o.valor_ia !== undefined) ? String(o.valor_ia) : '';
-      return ia.trim() ? ia + ' (a confirmar)' : '';
+      return ia.trim() ? ia : '';
+    };
+
+    // ── DE ONDE VEIO ESTE DADO ────────────────────────────────────────────
+    //
+    // Pedido dele: "os dados extraidos nao citam a origem. 'Operadora cotada:
+    // Vera Cruz' nao diz se veio do cadastro, da campanha, ou de uma frase que
+    // a IA leu numa mensagem. Sem isso nao da pra conferir — so pra acreditar."
+    //
+    // A procedencia SEMPRE esteve gravada (`crm_lead_campos.fonte`) e viajava
+    // ate aqui na ficha. A tela mostrava so o valor. Isto e exibir o que ja
+    // existe, nao inventar dado novo.
+    //
+    // Os nomes sao os que o consultor usa, nao os do banco: 'api_cnpj' nao diz
+    // nada pra ele; 'Receita Federal' diz tudo — inclusive que aquilo nao se
+    // discute com o cliente.
+    const _FONTES = {
+      consultor:  { rot: 'digitado',        cls: 'humano' },
+      ia:         { rot: 'lido da conversa', cls: 'ia' },
+      api_cnpj:   { rot: 'Receita Federal',  cls: 'oficial' },
+      automatico: { rot: 'da campanha',      cls: 'campanha' },
+      cotacao:    { rot: 'da cotação',       cls: 'sistema' },
+      mutirao:    { rot: 'do mutirão',       cls: 'humano' },
+    };
+    const procedencia = (o) => {
+      if (!o || typeof o !== 'object') return '';
+      const temHumano = String(o.valor || '').trim() !== '';
+      // Valor que a IA extraiu e ninguem confirmou. E o caso que mais precisa
+      // de marca: e palpite de leitura, nao dado conferido.
+      if (!temHumano) return '<span class="job-proc ia">lido da conversa · a confirmar</span>';
+      const f = String(o.fonte || '');
+      // 'extensao:12' — o que importa e que foi gente, na extensao.
+      const base = f.indexOf('extensao:') === 0 ? { rot: 'pela extensão', cls: 'humano' } : _FONTES[f];
+      if (!base) return '';
+      const quando = o.revisado_em ? ' · ' + _tempoBrCurto(o.revisado_em) : '';
+      return '<span class="job-proc ' + base.cls + '">' + esc(base.rot + quando) + '</span>';
     };
 
     // Chaves que já apareceram acima como campo do lead. Sem isto "Origem"
@@ -8131,7 +8181,8 @@
     // buracos, e o buraco tem lugar próprio (a aba de qualificação).
     const respondidos = (f.campos_def || [])
       .filter((c) => !jaMostrado.has(String(c.chave || '').toLowerCase()))
-      .map((c) => ({ nome: c.nome, v: valorDoCampo((f.campos_val || {})[c.chave]) }))
+      .map((c) => ({ nome: c.nome, v: valorDoCampo((f.campos_val || {})[c.chave]),
+                     p: procedencia((f.campos_val || {})[c.chave]) }))
       .filter((x) => x.v && x.v.trim() !== '')
       .filter((x) => rotuloNovo(x.nome))
       .slice(0, 10);
@@ -8154,7 +8205,7 @@
         linha('Origem', l.origem) +
         linha('Responsável', f.responsavel_nome) +
         linha('Sub-status', l.sub_status) +
-        respondidos.map((x) => linha(x.nome, x.v)).join('') +
+        respondidos.map((x) => linha(x.nome, x.v, '', x.p)).join('') +
       '</div>' +
       // A saída pra ficha completa mora aqui: quem lê o resumo e quer mudar
       // alguma coisa não devia ter que caçar a aba.
@@ -10604,6 +10655,8 @@
       // então dispara UM fetch com tudo montado. Sem pacote gigante, sem perder
       // mídia. O reqId amarra os lotes e permite cancelar.
       const _baseAnalise = {
+        // Ele CLICOU em analisar: ja decidiu que e lead. O servidor cria no CRM.
+        origem_analise: 'manual',
         telefone, nome, mensagens, links,
         usuario_id: usuarioId || null, whatsapp_consultor: meuNumero || null,
         documentos_encontrados: documentosEncontrados,

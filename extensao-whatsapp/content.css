@@ -3780,3 +3780,23 @@ body[data-job-tema="claro"] .job-cot-prev-txt { color-scheme: light; }
   background: var(--job-acento); color: #06131a;
   font-family: var(--job-ui); font-size: 12.5px; font-weight: 700; }
 .job-aviso-versao-bt:hover { filter: brightness(1.06); }
+
+
+/* ── PROCEDENCIA DO DADO ───────────────────────────────────────────────────
+   De onde veio cada campo: digitado, lido da conversa, da campanha, da
+   Receita. A informacao SEMPRE esteve gravada em crm_lead_campos.fonte e
+   viajava ate a extensao; a tela mostrava so o valor, e sem isso nao dava pra
+   conferir — so pra acreditar.
+
+   Fica em bloco proprio embaixo do valor, nao ao lado: ao lado ela competiria
+   com o dado, e quem le procura o dado. */
+.job-proc { display: block; margin-top: 2px; font-family: var(--job-ui);
+  font-size: 9.5px; font-weight: 700; letter-spacing: var(--job-tk-xs);
+  text-transform: uppercase; opacity: .8; }
+/* Cor so onde ela muda a leitura. Dado digitado por gente e o esperado: fica
+   neutro. Leitura de IA nao confirmada e o unico que pede cautela. */
+.job-proc.humano   { color: var(--job-txt-fraco); }
+.job-proc.sistema  { color: var(--job-txt-fraco); }
+.job-proc.oficial  { color: var(--job-acento); }
+.job-proc.campanha { color: var(--job-info, #53bdeb); }
+.job-proc.ia       { color: var(--job-aviso, #e8b339); }
