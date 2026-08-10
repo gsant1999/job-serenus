@@ -13755,10 +13755,14 @@ def financeiro():
         lancamento_focus = None
     conn = db()
     # Comissões a receber (futuras) agrupadas por competência
-    futuras = conn.execute("""SELECT competencia,
-            COALESCE(SUM(valor),0) consultor, COALESCE(SUM(valor_corretora),0) corretora, COUNT(*) qtd
-        FROM parcelas WHERE status NOT IN ('Pago ao corretor') AND competencia IS NOT NULL
-        GROUP BY competencia ORDER BY competencia""").fetchall()
+    futuras = conn.execute("""SELECT p.competencia,
+            COALESCE(SUM(p.valor),0) consultor, COALESCE(SUM(p.valor_corretora),0) corretora, COUNT(*) qtd
+        FROM parcelas p
+        JOIN propostas pr ON pr.id = p.proposta_id
+        WHERE p.status NOT IN ('Pago ao corretor', 'Cancelada / Estornada') AND p.competencia IS NOT NULL
+          AND COALESCE(pr.estornada, 0) = 0
+          AND COALESCE(pr.status, '') <> 'Excluída'
+        GROUP BY p.competencia ORDER BY p.competencia""").fetchall()
     # Lançamentos do mês (custos vêm com o meio de pagamento vinculado, se
     # houver, pra mostrar "Nubank •••• 4521" em vez de só "Cartão crédito").
     # ── Filtros do PRD (Fase 1). Combináveis entre si; vazio = sem filtro. ──
@@ -13809,10 +13813,16 @@ def financeiro():
     meios_pagamento = [dict(m) for m in conn.execute(
         "SELECT * FROM meios_pagamento ORDER BY ativo DESC, tipo, nome").fetchall()]
     # Totais do mês
-    receber_mes = conn.execute("""SELECT COALESCE(SUM(valor_corretora),0) v FROM parcelas
-        WHERE competencia=? AND status NOT IN ('Pago ao corretor')""", (mes,)).fetchone()['v']
-    pagar_consultor = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM parcelas
-        WHERE competencia=? AND status NOT IN ('Pago ao corretor')""", (mes,)).fetchone()['v']
+    receber_mes = conn.execute("""SELECT COALESCE(SUM(p.valor_corretora),0) v FROM parcelas p
+        JOIN propostas pr ON pr.id = p.proposta_id
+        WHERE p.competencia=? AND p.status NOT IN ('Pago ao corretor', 'Cancelada / Estornada')
+          AND COALESCE(pr.estornada, 0) = 0
+          AND COALESCE(pr.status, '') <> 'Excluída'""", (mes,)).fetchone()['v']
+    pagar_consultor = conn.execute("""SELECT COALESCE(SUM(p.valor),0) v FROM parcelas p
+        JOIN propostas pr ON pr.id = p.proposta_id
+        WHERE p.competencia=? AND p.status NOT IN ('Pago ao corretor', 'Cancelada / Estornada')
+          AND COALESCE(pr.estornada, 0) = 0
+          AND COALESCE(pr.status, '') <> 'Excluída'""", (mes,)).fetchone()['v']
     total_custos_puro = sum(c['valor'] for c in custos)
     total_fixos = sum(f['valor'] for f in fixos)
     total_custos = total_custos_puro + total_fixos
@@ -13827,11 +13837,18 @@ def financeiro():
     # descontado por cima — dupla subtração da parte do consultor. Agora:
     # receita = comissão TOTAL da operadora (consultor + corretora), repasse =
     # parte do consultor (pago + a pagar), margem = parte líquida da corretora.
-    tot_mes = conn.execute("""SELECT COALESCE(SUM(valor),0) consultor,
-            COALESCE(SUM(valor_corretora),0) corretora FROM parcelas
-        WHERE competencia=?""", (mes,)).fetchone()
-    repasse_pago = conn.execute("""SELECT COALESCE(SUM(valor),0) v FROM parcelas
-        WHERE competencia=? AND status='Pago ao corretor'""", (mes,)).fetchone()['v']
+    tot_mes = conn.execute("""SELECT COALESCE(SUM(p.valor),0) consultor,
+            COALESCE(SUM(p.valor_corretora),0) corretora FROM parcelas p
+        JOIN propostas pr ON pr.id = p.proposta_id
+        WHERE p.competencia=?
+          AND p.status <> 'Cancelada / Estornada'
+          AND COALESCE(pr.estornada, 0) = 0
+          AND COALESCE(pr.status, '') <> 'Excluída'""", (mes,)).fetchone()
+    repasse_pago = conn.execute("""SELECT COALESCE(SUM(p.valor),0) v FROM parcelas p
+        JOIN propostas pr ON pr.id = p.proposta_id
+        WHERE p.competencia=? AND p.status='Pago ao corretor'
+          AND COALESCE(pr.estornada, 0) = 0
+          AND COALESCE(pr.status, '') <> 'Excluída'""", (mes,)).fetchone()['v']
     dre = {
         'receita_bruta': (tot_mes['consultor'] or 0) + (tot_mes['corretora'] or 0),
         'repasse_consultores': tot_mes['consultor'] or 0,      # (-) repasses (pago + a pagar)
