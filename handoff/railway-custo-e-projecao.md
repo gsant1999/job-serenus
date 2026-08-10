@@ -9,6 +9,65 @@
 
 ---
 
+## 0. MEDIDO — 09/08/2026, ciclo 17/jul a 17/ago
+
+**Os números chegaram. O que segue é fatura, não modelo.**
+
+| | |
+|---|---|
+| **Total do ciclo** | **US$ 4,93** — dentro dos US$ 5 inclusos no plano Hobby |
+| Projeto `elegant-warmth` (o JOB) | US$ 4,52 |
+| ├ Postgres | US$ 2,51 — RAM 2,16 · CPU 0,21 · Egress 0,06 · Volume 0,09 |
+| └ Aplicação | US$ 2,00 — RAM 1,59 · Egress 0,25 · CPU 0,05 · Volume 0,11 |
+| Projeto `lucid-stillness` | US$ 0,40 (**não sei o que é — perguntar ao Guilherme**) |
+| Banco | **47 MB**. Maior tabela: `whatsapp_analises`, 11 MB |
+| Volume | ~1,0 GB usados de 10 GB provisionados |
+| CPU da aplicação | praticamente zero o mês inteiro |
+| Memória da aplicação | oscila entre ~0,3 e ~2 GB, com **picos de 4 a 5 GB** |
+
+### O que isso responde, de uma vez
+
+**O Railway custa US$ 5 por mês. Não existe problema de custo a resolver.**
+
+### Três coisas que eu tinha escrito e estavam erradas
+
+**1. A projeção estava 3,6× alta.** Eu estimei ~US$ 18 por corretora. O real é
+**~US$ 4,5**. A projeção correta:
+
+| corretoras | por mês |
+|---|---|
+| 1 (hoje) | ~US$ 5 |
+| 5 | ~US$ 25 |
+| 10 | ~US$ 50 |
+| 20 | ~US$ 100 |
+
+Vinte corretoras custariam menos que uma assinatura de software de escritório.
+**Infraestrutura não é, e não vai ser, o problema deste negócio.**
+
+**2. O volume de 10 GB não é dinheiro parado.** Eu disse que reduzir seria
+"economia direta". É **US$ 0,20 por mês** somando os dois serviços — vinte
+centavos. Mexer nisso é perder tempo.
+
+**3. O banco não tem problema de retenção.** Eu suspeitei que
+`whatsapp_analises` estivesse inchando. Ela é a maior mesmo — e tem **11 MB**.
+O banco inteiro tem 47 MB. Não há o que limpar.
+
+### O que os números REVELARAM, e é a única coisa que importa aqui
+
+**Custo neste sistema é memória.** RAM é US$ 3,75 dos US$ 4,93; CPU é US$ 0,26.
+E a memória da aplicação **oscila de 0,3 GB a 2 GB, com picos de 4 a 5 GB**.
+
+Para um Flask que passa o mês com CPU perto de zero, isso é muito. Ou existe
+vazamento, ou algum caminho carrega coisa demais de uma vez — e há candidatos
+óbvios: a análise aceita PDF em base64 de até 20 MB, imagem de 7,5 MB e 60
+áudios por chamada. Tudo isso vive na memória do processo ao mesmo tempo.
+
+**Isso muda a recomendação do gunicorn.** Ver a seção 3.
+
+---
+
+## 0.1. O que era modelo, e ficou como referência
+
 ## 0. O que é conta e o que é modelo
 
 | | |
@@ -81,7 +140,7 @@ consultoras na mesma corretora custam praticamente o mesmo que duas.
 
 ---
 
-## 3. Uma correção na minha recomendação do gunicorn
+## 3. A recomendação do gunicorn, revisada DUAS vezes
 
 Eu disse que trocar para `gunicorn -w 3` seria "usar melhor a máquina que você
 já paga". **Metade disso está errado e eu preciso corrigir.**
@@ -99,6 +158,29 @@ custa venda. Mas o número honesto é:
 
 **Minha recomendação corrigida: comece com `-w 2`,** olhe a memória por uma
 semana, e só suba para 3 se houver motivo medido. Vou avisar o Antigravity.
+
+### E depois de ver os números medidos, revisada de novo
+
+O gráfico mostra a aplicação **oscilando entre 0,3 e 2 GB, com picos de 4 a
+5 GB**, e CPU praticamente zero.
+
+Isso inverte a conta. Com um processo só, um pico de 5 GB já é o limite do que
+a máquina aguenta. **Com dois workers, dois picos simultâneos podem derrubar o
+serviço por falta de memória** — e aí o remédio teria causado a doença.
+
+**Ordem correta agora:**
+
+1. **Descobrir de onde vêm os picos**, antes de multiplicar processos. O
+   suspeito tem nome: a rota de análise aceita PDF de até 20 MB em base64,
+   imagem de 7,5 MB e 60 áudios na mesma chamada — tudo em memória ao mesmo
+   tempo, e base64 ocupa ~33% a mais que o arquivo.
+2. **Se for pico de requisição** (e não vazamento), gunicorn com
+   `--max-requests 200 --max-requests-jitter 50` recicla o worker de tempos em
+   tempos e devolve a memória. Isso vale mais que aumentar worker.
+3. **Só então `-w 2`**, com a memória sob observação.
+
+O item 1 é diagnóstico, não conserto — e é o que decide os outros dois. Sem ele,
+mexer no número de workers é chute com o serviço no ar.
 
 ---
 
